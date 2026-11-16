@@ -15,7 +15,7 @@ python3 tools/release.py upload /tmp/q2-release
 python3 tools/release.py upload /tmp/q2-release --publish
 ```
 
-Packaging also rebuilds the user guide from `docs/manual/guide.html` (needs Chromium and `pdftotext`), and upload attaches it to every release, since the README links `releases/latest/download/Q2-Pod-User-Guide.pdf`.
+Packaging also rebuilds the user guide from `docs/manual/guide.html` (needs Chromium and `pdftotext`), and upload attaches it to every release, since the README links `releases/latest/download/Q2-Muse-User-Guide.pdf`.
 
 Packaging requires a fresh output directory, builds the update twice, runs the shared MIPS
 suite and asset checks on the first build, and compares the two builds' update.tar bytes. The checks

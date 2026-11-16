@@ -2457,8 +2457,9 @@ def test_setting_keys_name_each_option_in_config(fw):
     key_of = fw.fn('option_key', C.c_char_p, C.c_void_p, C.c_int)
     T = fw.fn('theme', C.c_void_p)()
     own = list(host.tools_theme.theme_keys(host.tools_theme.builtins()))
-    assert [key_of(T, s) for s in range(1, 8)] == [b'HOME', b'BATTERY', b'SHORTCUT', b'LIGHT', b'KEEPLIT', b'CLICKER', b'TIMETITLE']
-    assert [key_of(T, 8 + k).decode() for k in range(len(own))] == own
+    assert [key_of(T, s) for s in range(1, 9)] == [b'HOME', b'BATTERY', b'SHORTCUT', b'LIGHT', b'KEEPLIT', b'CLICKER', b'TIMETITLE',
+                                                   b'REDUCEMOTION']
+    assert [key_of(T, 9 + k).decode() for k in range(len(own))] == own
     assert key_of(T, 0) == b'OLED_ACCENT'  # the theme's own accent key
 
 

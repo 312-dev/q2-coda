@@ -5,7 +5,10 @@ Run: python3 test/playback.py BUILD_DIRECTORY
 import pathlib
 from unicorn import UC_HOOK_MEM_READ, UC_HOOK_CODE
 # Load only fixture definitions; the full UI suite remains independently runnable.
-source = pathlib.Path(__file__).with_name('patch.py').read_text()
+import sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from suite_source import source as suite  # noqa: E402
+source = suite()  # test/patch.py's suite, joined
 exec(compile(source[:source.index('checks=0')], 'test/patch.py', 'exec'))
 exec(compile(source[source.index('class QueueMachine'):source.index('sel=lambda m:')], 'test/patch.py', 'exec'))
 ps = payload_syms

@@ -48,17 +48,7 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
-/* feedback.c confirm: the confirmation card (docs/oled-design.md#confirmation-card), a card over
- * the dimmed page that asked. title names the object ("Forget %s?": the one %s is name); body is at
- * most two lines
- * ('\n' between); code a large line ("482 913"); rows the answers top down, the safe one first.
- * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red after a gap, opens on
- * row 0), CONFIRM_CONSEQUENTIAL (opens on row 0), CONFIRM_NEUTRAL (opens on the last row, Return
- * answers row 0), CONFIRM_INFO (one row). back: the row Return answers, -1 for row 0. toggle: a
- * switch row's label above the answers, toggle_on its start. timeout_ms: the card answers
- * timeout_row by itself after this long, the seconds left shown on that row and a bar emptying
- * along the card's foot. answer runs once, after the card has closed, with the chosen row and the
- * switch's state. */
+
 /* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons
  * and the confirmation card: shown while the last navigation input was the wheel (a turn, or
  * Centre after one), hidden after a tap, and so on arrival by whichever opened the screen.
@@ -100,6 +90,17 @@ int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int 
 #define KV_GAP 16
 #define KV_VALUE_MIN 96
 int kv_fit(int span, int label_w, int value_w, int *box);
+/* feedback.c confirm: the confirmation card (docs/oled-design.md#confirmation-card), a card over
+ * the dimmed page that asked. title names the object ("Forget %s?": the one %s is name); body is at
+ * most two lines
+ * ('\n' between); code a large line ("482 913"); rows the answers top down, the safe one first.
+ * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red after a gap, opens on
+ * row 0), CONFIRM_CONSEQUENTIAL (opens on row 0), CONFIRM_NEUTRAL (opens on the last row, Return
+ * answers row 0), CONFIRM_INFO (one row). back: the row Return answers, -1 for row 0. toggle: a
+ * switch row's label above the answers, toggle_on its start. timeout_ms: the card answers
+ * timeout_row by itself after this long, the seconds left shown on that row and a bar emptying
+ * along the card's foot. answer runs once, after the card has closed, with the chosen row and the
+ * switch's state. */
 enum { CONFIRM_NEUTRAL, CONFIRM_DESTRUCTIVE, CONFIRM_CONSEQUENTIAL, CONFIRM_INFO };
 typedef struct {
     const char *title, *name, *body, *code;
@@ -114,4 +115,59 @@ typedef struct {
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
 void confirm_close(void);        /* closes the card without an answer */
 int confirm_up(void);            /* a card is up */
+/* Motion (docs/oled-design.md#motion): every animation's duration, curve and timer go through
+ * here, so one switch, Reduce Motion (Settings > Display, IPOD REDUCEMOTION), turns them down.
+ * A motion has a kind: MO_SPATIAL moves, scales or bounces something (a slide, a spring, a lean)
+ * and under Reduce Motion happens at once, or as a MO_FADE_MS cross-fade where it has a fade form
+ * (motion_fade_ms, motion_row); MO_DECOR is a loop that says nothing new (the charging sweep, Up
+ * Next's level bars) and stands still; MO_FEEDBACK follows a finger or reports a value or progress
+ * (swipe back, the volume bar's ease, the marquee, spinners) and always runs.
+ * motion_ms: a duration as this kind runs it now (0: at once, or still). motion_fade_ms: a spatial
+ * motion's fade form, ms as it is or MO_FADE_MS under the flag. motion_row: the theme's motion row
+ * (theme.h motion_t), its reduced form under the flag (a window's slide a fade, a swap or in-place
+ * slide immediate, wheel steps as they are). motion_ease: t (0..1000) along AWTK's easing_type_t
+ * ease (EASE_*: linear, quadratic and cubic in and out; any other cubic out), 0..1000.
+ * An anim_t is one run: anim_start stamps it (its duration through motion_ms), anim_at reads its
+ * eased progress 0..1000 (1000 once done, or at once), anim_running whether it still moves. While
+ * any runs, one shared timer repaints the top window every MO_FRAME_MS and removes itself
+ * MO_FRAME_MS after the last one ends (motion_frames), so a painter needs no timer of its own. */
+enum { MO_SPATIAL, MO_DECOR, MO_FEEDBACK };
+#define MO_FADE_MS 150
+#define MO_OUT_FADE_MS 120
+#define MO_FRAME_MS 16
+int motion_reduced(void);
+int motion_ms(int ms, int kind);
+int motion_fade_ms(int ms);
+const motion_t *motion_row(int kind);
+int motion_ease(int t, int ease);
+typedef struct {
+    unsigned at;        /* time_now_ms at the start; 0 never started */
+    unsigned short ms;  /* as motion_ms gave it */
+    unsigned char ease; /* motion_ease's */
+} anim_t;
+void anim_start(anim_t *a, int ms, int ease, int kind);
+int anim_at(const anim_t *a);
+int anim_running(const anim_t *a);
+void motion_frames(unsigned ms); /* the shared timer repaints for ms more at least */
+/* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
+ * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
+ * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn
+ * mid-run starts there). ovm_level: 0 gone .. 1000 in, eased. ovm_alpha: alpha (a scrim's or a
+ * surface's full one) at that level. ovm_shift: px at gone .. 0 in, the rise or fall's offset.
+ * ovm_scale: thousandths, from at gone .. 1000 in. ovm_running: still moving; ovm_shown: in, or
+ * still leaving. Under Reduce Motion an enter takes MO_FADE_MS and an exit MO_OUT_FADE_MS
+ * whatever ms asks, ovm_shift is 0 and ovm_scale 1000: a fade only. */
+typedef struct {
+    anim_t a;
+    short from;        /* the level at the run's start */
+    unsigned char out; /* 1 leaving */
+} ovm_t;
+void ovm_enter(ovm_t *o, int ms, int ease);
+void ovm_exit(ovm_t *o, int ms, int ease);
+int ovm_level(const ovm_t *o);
+int ovm_alpha(const ovm_t *o, int alpha);
+int ovm_shift(const ovm_t *o, int px);
+int ovm_scale(const ovm_t *o, int from);
+int ovm_running(const ovm_t *o);
+int ovm_shown(const ovm_t *o);
 #endif

@@ -1371,7 +1371,7 @@ static int grey_of(void *w, int depth) {
 }
 /* The text colour of w, painted now, as the theme gave it: in a greyed row, CAT_GREY, or on the
  * selection that row's own ink at CAT_DIM, so it keeps its contrast with the bar or card
- * (docs/server-library.md#greyed-rows). Kept for the row's mark. */
+ * (docs/server-library.md#grayed-rows). Kept for the row's mark. */
 int catalogue_greyed(void *w, unsigned *color) {
     int i = cat.noff ? grey_of(w, 64) : -1;
     if (i < 0 || cat.grey_mark[i] != MK_OFFLINE) return 0;
@@ -1484,7 +1484,7 @@ static void cat_scan(void) {
         if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
             !strcmp(id, "q2pod"))
             continue;
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        addon_q2app(id, path, sizeof path);
         if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
         cat_app_t *a = &cat.app[n++];
         memset(a, 0, sizeof *a);
@@ -1672,7 +1672,7 @@ int catalogue_signed(char *id, char *name, unsigned size) {
         tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
         if (access(path, 0)) continue;
         tk_snprintf(id, 16, "%s", cat.app[i].id);
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", cat.app[i].id);
+        addon_q2app(cat.app[i].id, path, sizeof path);
         state_read(path, raw, sizeof raw);
         field(raw, "name", name, size);
         if (!*name) tk_snprintf(name, size, "%s", cat.app[i].id);
@@ -2029,7 +2029,7 @@ done:
     if (db) sqlite3_close(db);
 }
 
-/* ---- Ratings (docs/server-library.md#ratings-and-favourites) ---- */
+/* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */
 
 /* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing
  * from its offline copy is its server row (catalogue_song_key): the row's key and sid. */

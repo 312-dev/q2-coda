@@ -70,7 +70,7 @@ def test_gradient_holds_the_first_stops_colour_before_it():
 
 
 def test_every_literal_corner_radius_is_in_the_table():
-    source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('*.c')))
+    source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('**/*.c')))
     def literal(names, text=source):
         return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', text)}
     assert literal('round_row', 'round_row(canvas, &track, 3, i, rest);') == {3}  # the pattern still reads a call
@@ -290,7 +290,7 @@ def test_every_empty_states_glyph_is_drawn_and_every_drawn_one_is_named():
     """The glyphs the payload's empty states name (each empty_t's first string, feedback.c empty_state) are
     EMPTY_GLYPHS' keys, no more and no fewer: a page naming one the build never drew paints no glyph."""
     named = set()
-    for c in (pathlib.Path(__file__).parents[2]/'patch').glob('*.c'):
+    for c in (pathlib.Path(__file__).parents[2]/'patch').glob('**/*.c'):
         src = c.read_text()
         for m in re.finditer(r'empty_t\b[^;(]*?=\s*\{|\(empty_t\)\s*\{', src):
             named |= set(re.findall(r'\{\s*"([a-z][a-z-]*)"', src[m.start():src.index(';', m.end())]))

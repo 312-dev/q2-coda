@@ -65,7 +65,8 @@ static unsigned cable_key(void) {
 /* The plug-in screen (S1, docs/oled-design.md#plug-in-screen, from mock_charge_anim.py's V1): with
  * the screen off at the plug-in, it lights for S1_MS with a big battery, its fill to the level and
  * a sweep up the last S1_SWEEP percent to it on a S1_LOOP_MS loop, the level beside a green
- * lightning, and "Charging" (or "Charged"); then the screen goes off again. Black in both halves:
+ * lightning, and "Charging" (or "Charged"); then the screen goes off again. The sweep is MO_DECOR
+ * (ui_kit.h): under Reduce Motion the fill stands at the level. Black in both halves:
  * it is a lit dark screen, not a page. In screen pixels: */
 #define S1_MS 3000
 #define S1_FRAME_MS 50
@@ -142,7 +143,7 @@ static void s1_on(void) {
     void *wm = window_manager();
     unsigned key = cable_key();
     s1.level = (int)BATT_KEY_LEVEL(key);
-    s1.still = (key & BATT_KEY_PLUGGED) || s1.level >= 100;
+    s1.still = (key & BATT_KEY_PLUGGED) || s1.level >= 100 || !motion_ms(S1_LOOP_MS, MO_DECOR);
     s1.top = window_manager_get_top_window(wm);
     s1.at = (unsigned)time_now_ms();
     s1.shown = 1;

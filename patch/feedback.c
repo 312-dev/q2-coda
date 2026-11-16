@@ -25,6 +25,29 @@ static int top_named(void *w, const char *name) {
 /* The next toast's glyph, a theme image's name, while toast_icon's toast is up. */
 static char pill_glyph[48] __attribute__((section(".scratch")));
 
+/* The toast's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: it rises
+ * TOAST_RISE px and fades in over TOAST_IN_MS, cubic out (the dialog's opacity, its line moved
+ * with the pill); when its dialog goes, the pill stays painted over the page under it
+ * (feedback_toast_leave), sinking TOAST_SINK px and fading over TOAST_OUT_MS, cubic in. */
+#define TOAST_IN_MS 200
+#define TOAST_OUT_MS 150
+#define TOAST_RISE 10
+#define TOAST_SINK 4
+static struct {
+    ovm_t mo;
+    void *w;           /* the toast's dialog while it is up */
+    unsigned text[64]; /* its line, kept for the way out */
+    unsigned n;
+    int px;
+    const char *face;
+    char glyph[48];
+} tm __attribute__((section(".scratch")));
+static int toast_gone(void *w, void *event) {
+    (void)event;
+    if (tm.w == w) tm.w = (void *)0, ovm_exit(&tm.mo, TOAST_OUT_MS, EASE_CUBIC_IN);
+    return 0;
+}
+
 int feedback_toast(void *top) { return top_named(top, "msginfo_dialog"); }
 
 /* A toast with a glyph before its words (docs/oled-design.md#dialogs-and-toasts): glyph a theme image's
@@ -75,11 +98,16 @@ void *feedback_top(void) {
  */
 void feedback_toast_paint(void *w, void *canvas) {
     if (!feedback_toast(w) || !P(canvas, CANVAS_LCD)) return;
-    if (!widget_get_prop_int(w, "_pill", 0)) {
+    int first = !widget_get_prop_int(w, "_pill", 0);
+    if (first) {
         widget_set_prop_int(w, "_pill", 1);
         widget_set_prop_int(w, "style:normal:bg_color", 0);
         widget_set_prop_int(w, "style:normal:border_color", 0);
+        widget_on(w, EVT_DESTROY, toast_gone, w);
+        tm.w = w;
+        ovm_enter(&tm.mo, TOAST_IN_MS, EASE_CUBIC_OUT);
     }
+    widget_set_opacity(w, (unsigned)ovm_alpha(&tm.mo, 255)); /* from the next frame */
     void *line = (void *)0;
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *c = widget_get_child(w, i);
@@ -92,6 +120,9 @@ void feedback_toast_paint(void *w, void *canvas) {
             line = c;
     }
     if (!line) return;
+    /* its first frame is the one painted before the opacity above applies: nothing shows */
+    widget_set_visible(line, !first, 0);
+    if (first) return;
     const unsigned *s = widget_get_text(line);
     int px = PILL_PX, n = (int)wide_len(s);
     const char *face = theme_face(s, n, &px);
@@ -99,8 +130,12 @@ void feedback_toast_paint(void *w, void *canvas) {
     int glyph = pill_glyph[0] ? PILL_GLYPH + PILL_GLYPH_GAP : 0;
     int pw = (int)(canvas_measure_text(canvas, s, n) + 0.5f) + 2 * PILL_PAD + glyph;
     if (pw > PILL_MAX) pw = PILL_MAX;
-    rect_t pill = { (375 - pw) / 2, PILL_Y, pw, PILL_H };
-    if (I(line, W_Y) != PILL_Y || I(line, W_W) != pw - glyph) {
+    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_RISE), pw, PILL_H };
+    for (tm.n = 0; tm.n < (unsigned)n && tm.n < sizeof tm.text / sizeof *tm.text; ++tm.n)
+        tm.text[tm.n] = s[tm.n];
+    tm.px = px, tm.face = face;
+    tk_snprintf(tm.glyph, sizeof tm.glyph, "%s", glyph ? pill_glyph : "");
+    if (I(line, W_Y) != pill.y || I(line, W_W) != pw - glyph) {
         widget_move_resize(line, pill.x + glyph, pill.y, pill.w - glyph, pill.h);
         widget_set_prop_int(line, "line_wrap", 0);
         widget_set_prop_str(line, "style:normal:font_name", face ? face : "default");
@@ -111,7 +146,30 @@ void feedback_toast_paint(void *w, void *canvas) {
     }
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     fill_box(canvas, &pill, RGBA(flip_if(ipod_light(), PILL_RGB)), PILL_R);
-    if (glyph) paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, PILL_Y + (PILL_H - PILL_GLYPH) / 2);
+    if (glyph)
+        paint_art(w, canvas, pill_glyph, pill.x + PILL_PAD, pill.y + (PILL_H - PILL_GLYPH) / 2);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* ringnav_paint, after stock painted w: the toast on its way out, once its dialog has gone, over
+ * the top window (the page it was over): its pill and line as feedback_toast_paint last drew them,
+ * sinking and fading. */
+void feedback_toast_leave(void *w, void *canvas) {
+    void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (tm.w || !ovm_shown(&tm.mo) || !lcd || w != window_manager_get_top_window(window_manager()))
+        return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), a = (unsigned)ovm_alpha(&tm.mo, 255);
+    int glyph = tm.glyph[0] ? PILL_GLYPH + PILL_GLYPH_GAP : 0, px = tm.px;
+    canvas_set_font(canvas, tm.face, (unsigned)px);
+    int pw = (int)(canvas_measure_text(canvas, tm.text, tm.n) + 0.5f) + 2 * PILL_PAD + glyph;
+    if (pw > PILL_MAX) pw = PILL_MAX;
+    rect_t pill = { (375 - pw) / 2, PILL_Y + ovm_shift(&tm.mo, TOAST_SINK) - I(w, W_Y), pw,
+                    PILL_H };
+    fill_box(canvas, &pill, a << 24 | (RGBA(flip_if(ipod_light(), PILL_RGB)) & 0xffffffu), PILL_R);
+    unsigned raw = ui_ink_raw(1);
+    ui_line_w(canvas, tm.text, tm.n, pill.x + glyph, pill.w - glyph, pill.y + PILL_H / 2, 1,
+              tm.face ? tm.face : "default", px, a << 24 | (ipod_light() ? 0 : 0xffffffu));
+    ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -205,13 +263,16 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
  * to show: the page's glyph in outline (tools/art.py EMPTY_GLYPHS, ES_GLYPH px, Text Secondary), a
  * title ES_GLYPH_GAP under it in Inter Medium 20, a hint in 15 px Text Secondary and, when the page
  * has one, its button (ui_kit.c ui_cta_paint) CTA_GAP_ABOVE under it; the whole stack centred
- * between free_top (or the status row's foot) and the screen's. A view over the page holds it
- * (ES_NAME, its words and top in its props, painted by empty_state_paint; insensitive, so rows
- * above it keep their taps). The button is a one-row list (ES_ROW_NAME) the wheel and Centre reach
- * as any, its row the button's band, its own words hidden: the capsule and its label are painted
- * with the stack, ringed by the focus rule (docs/oled-design.md#focus-ring), and the list's
- * selection bar is not drawn (empty_button). A page drawn by its own painter (Search's sheet)
- * paints the stack itself (empty_paint, at empty_top).
+ * between free_top (or the status row's foot) and the screen's. Under rows the page keeps above it
+ * (a free_top past the set's bar: Car Remote's switch, Playlists' On-The-Go) it is the compact
+ * form, the title and hint (and button) with no glyph, as the glyph is for a page that is empty
+ * whole. A view over the page holds it (ES_NAME, its words and top in its props, painted by
+ * empty_state_paint; insensitive, so rows above it keep their taps). The button is a one-row list
+ * (ES_ROW_NAME) the wheel and Centre reach as any, its row the button's band, its own words hidden:
+ * the capsule and its label are painted with the stack, ringed by the focus rule
+ * (docs/oled-design.md#focus-ring), and the list's selection bar is not drawn (empty_button). A
+ * page drawn by its own painter (Search's sheet) paints the stack itself (empty_paint, at
+ * empty_top).
  */
 #define ES_NAME "_empty_state"
 #define ES_ROW_NAME "_empty_row"
@@ -224,15 +285,22 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define CTA_GAP_ABOVE 20
 #define ES_TITLE_PX TYPE(20) /* Inter Medium 20, AWTK's size */
 #define ES_HINT_PX TYPE(15)  /* Inter 15 */
-#define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_TITLE_H + ES_HINT_H)
+#define ES_WORDS (ES_TITLE_H + ES_HINT_H)
+#define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_WORDS)
+/* Whether the empty state under free_top is the compact form: rows above it on the page. */
+int empty_compact(int free_top) { return free_top > geom_val(V_BAR) && free_top > ES_TOP; }
+/* The stack's height down to its button's gap: the glyph's part only in the full form. */
+static int es_text(int compact) { return compact ? ES_WORDS : ES_TEXT; }
 /* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
 int empty_top(int free_top, int free_end, int row) {
-    int stack = ES_TEXT + (row ? CTA_GAP_ABOVE + CTA_H : 0),
+    int stack = es_text(empty_compact(free_top)) + (row ? CTA_GAP_ABOVE + CTA_H : 0),
         from = free_top > ES_TOP ? free_top : ES_TOP;
     return from + (free_end - from - stack) / 2;
 }
 /* The button's screen y, for a page whose own widget is the button (Songs' Scan Music Now). */
-int empty_row_y(int free_top) { return empty_top(free_top, ES_END, 1) + ES_TEXT + CTA_GAP_ABOVE; }
+int empty_row_y(int free_top) {
+    return empty_top(free_top, ES_END, 1) + es_text(empty_compact(free_top)) + CTA_GAP_ABOVE;
+}
 /* The empty state in page, made once and written again on each call: e 0 hides it (0). An e with a
  * row but no on_row keeps the button's place in the stack for the caller's own (empty_row_y). The
  * row list is made with the view; a later call shows or hides it but keeps its words and click. */
@@ -244,13 +312,14 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
         if (row) widget_set_visible(row, 0, 0);
         return 0;
     }
-    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0);
+    int y = screen_y(page), top = empty_top(free_top, ES_END, e->row != 0),
+        compact = empty_compact(free_top);
     if (!art) {
         art = widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
         widget_set_name(art, ES_NAME);
         widget_set_sensitive(art, 0);
     }
-    widget_set_prop_str(art, "_es_glyph", e->glyph ? e->glyph : "");
+    widget_set_prop_str(art, "_es_glyph", e->glyph && !compact ? e->glyph : ""); /* "": compact */
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
     widget_set_prop_str(art, "_es_row", e->row && on_row ? e->row : "");
@@ -260,7 +329,8 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
     if (row)
         widget_set_visible(row, e->row && on_row, 0);
     else if (e->row && on_row) {
-        void *view = rows_view(page, top + ES_TEXT + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
+        void *view =
+            rows_view(page, top + es_text(compact) + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
         widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
         widget_set_prop_int(P(view, W_PARENT), "style:normal:bg_color",
                             0);                  /* the capsule under it */
@@ -279,14 +349,16 @@ int empty_button(void *list) {
     void *p = list ? P(list, W_PARENT) : (void *)0;
     return p && !tk_strcmp(widget_get_prop_str(p, "name", ""), ES_ROW_NAME);
 }
-/* The stack painted in w at top (a y in w); its button, when e->row, selected or not. */
+/* The stack painted in w at top (a y in w); its button, when e->row, selected or not. No glyph
+ * (0 or ""): the compact form, the title at top. */
 void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
-    int light = ipod_light();
+    int light = ipod_light(), glyph = e->glyph && *e->glyph;
     char art[48];
-    tk_snprintf(art, sizeof art, "empty_%s_%c", e->glyph ? e->glyph : "", light ? 'l' : 'd');
-    paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
-    int ty = top + ES_GLYPH + ES_GLYPH_GAP;
-    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
+    tk_snprintf(art, sizeof art, "empty_%s_%c", glyph ? e->glyph : "", light ? 'l' : 'd');
+    if (glyph) paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
+    int ty = top + (glyph ? ES_GLYPH + ES_GLYPH_GAP : 0);
+    /* Text Primary: white, which ui_ink turns black on Light Mode's paper */
+    ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, 0xffffff, 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
     ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
             ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
@@ -304,7 +376,8 @@ void empty_state_paint(void *w, void *canvas) {
     if (list && widget_get_visible(row)) {
         /* selected: the wheel's list is the button's, on its one row */
         int sel = g_menu.w == list && widget_get_prop_int(list, SEL, -1) == 0 ? 0 : -1;
-        ui_cta_paint(canvas, &label, 1, top + ES_TEXT + CTA_GAP_ABOVE, sel, pointer_down() && !sel);
+        ui_cta_paint(canvas, &label, 1, top + es_text(!*e.glyph) + CTA_GAP_ABOVE, sel,
+                     pointer_down() && !sel);
     }
 }
 /* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name
@@ -441,7 +514,7 @@ void feedback_songs(void *top, void *row) {
     int cls = scan ? 0 : I(g_class_type, 0); /* stock's panel stands for the whole library */
     empty_t e =
         cls == 0xf00a
-            ? (empty_t){ "heart", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
+            ? (empty_t){ "heart-slash", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
         : cls == 0xf007 ? (empty_t){ "clock-counter-clockwise", "Nothing Played Yet",
                                      "Songs you play show up here", 0 }
         : cls == 0xf008
@@ -605,6 +678,13 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_SCRIM 0x80000000u /* the inset modal's dim */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
 #define CARD_COUNT_PX TYPE(15)
+/* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
+ * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity); an
+ * answer fades it out over CARD_OUT_MS, linear, before the dialog closes and the answer runs.
+ * ponytail: the approved 1.06 to 1 scale on the way in is not drawn; the rows are stock list items
+ * the canvas cannot scale, so it would need the card painted once into a snapshot first. */
+#define CARD_IN_MS 200
+#define CARD_OUT_MS 120
 
 static struct {
     void *dialog, *view, *cell[2], *check; /* a dressed stock confirm's answers and its switch */
@@ -614,6 +694,7 @@ static struct {
     const char *rows[2];
     int lines, toggle_on, top, rows_y, h, chosen;
     unsigned timer, answer_timer, until;
+    ovm_t mo; /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
@@ -655,11 +736,13 @@ static int card_answer(const void *unused) {
     if (c.answer) c.answer(c.ctx, row, on);
     return 0;
 }
-/* Answers row once, from the next pass: the dialog closes before the caller's answer runs. */
+/* Answers row once, once the card has faded out (at once for stock's, which closes itself): the
+ * dialog closes before the caller's answer runs. */
 static void card_choose(int row) {
     if (!cf.dialog || cf.answer_timer) return;
     cf.chosen = row;
-    cf.answer_timer = timer_add(card_answer, (void *)0, 0);
+    if (!cf.stock) ovm_exit(&cf.mo, CARD_OUT_MS, EASE_LINEAR);
+    cf.answer_timer = timer_add(card_answer, (void *)0, cf.stock ? 0 : cf.mo.a.ms);
 }
 static int card_back_row(void) { return cf.c.back >= 0 ? cf.c.back : 0; }
 
@@ -753,6 +836,8 @@ int confirm(const confirm_t *c) {
         widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
     }
     cf.dialog = dialog, cf.view = view;
+    widget_set_opacity(dialog, 0); /* confirm_paint fades it in */
+    ovm_enter(&cf.mo, CARD_IN_MS, EASE_CUBIC_OUT);
     int first = c->kind == CONFIRM_NEUTRAL ? c->n_rows - 1 : 0;
     st.touch_mode = 0;
     ringnav_select(view, first + !!c->toggle, card_items());
@@ -886,7 +971,8 @@ void confirm_bar_dim(void *w, void *canvas) {
     void *bar = *(void *const *)system_bar, *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!cf.dialog || w != bar || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(canvas, CARD_SCRIM);
+    stock_canvas_set_fill_color(
+        canvas, cf.stock ? CARD_SCRIM : (unsigned)ovm_alpha(&cf.mo, CARD_SCRIM >> 24) << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -898,6 +984,7 @@ void confirm_paint(void *w, void *canvas) {
     if (!cf.dialog || w != cf.dialog || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
+    if (!cf.stock) widget_set_opacity(w, (unsigned)ovm_alpha(&cf.mo, 255)); /* the next frame's */
     stock_canvas_set_fill_color(canvas, CARD_SCRIM);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     rect_t card = { CARD_X, top, CARD_W, cf.h };

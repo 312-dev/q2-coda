@@ -1251,7 +1251,7 @@ def test_patch_names_tokens_and_type_sizes_rather_than_restating_them():
     values = {v for d, l in theme.TOKENS.values() for v in (d, l) if v is not None} - {0, 0xffffff}
     hex_ = '|'.join(f'{v:06x}' for v in values)
     bad = []
-    for p in sorted((theme.ROOT/'patch').glob('*')):
+    for p in sorted((theme.ROOT/'patch').glob('**/*')):
         if p.suffix not in ('.c', '.h', '.inc') or p.name in OWN_PALETTE:
             continue
         for n, line in enumerate(p.read_text().splitlines(), 1):

@@ -1,10 +1,10 @@
 # Boot
 
-The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Pod's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the SD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
+The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and on Q2 Muse's default builds in Dark Mode a short animation played over it ([Boot animation](#boot-animation)). A JPEG on the SD card replaces both without a firmware update; a build can also change the built-in one ([Custom boot logo](#custom-boot-logo)).
 
 | What       | Where                                                                                                                                                          |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Image      | `/mnt/data/boot-logo.jpg` when present, else under Light Mode `logo-light.jpg`, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs)          |
+| Image      | `/mnt/data/boot-logo.jpg` when present, else `/release/assets/default/raw/images/xx/logo.jpg` (320x375 JPEGs), in Light Mode too                                    |
 | Drawn by   | `/usr/bin/display_logo` (libjpeg, writes `/dev/fb0`)                                                                                                           |
 | Animation  | `/release/assets/default/raw/images/xx/logo.q2a`, played by `/usr/bin/q2splash` (`patch/splash.c`) over `logo-black.jpg`, in place of the built-in dark splash |
 | Started by | `/etc/init.d/S11logo_display_shell`, as soon as `/dev/fb0` exists                                                                                              |
@@ -14,23 +14,23 @@ The Q2 splash shown on the screen at power-on is a JPEG inside the rootfs, and o
 BusyBox `init` runs `/etc/init.d/rcS`, which starts the `S??*` scripts in order:
 
 1. `S10mdev`, `S10mount_ubifs`: devices and the data partition.
-2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash ([Light Mode](#light-mode)), or plays the animation where the built-in dark splash would show ([Boot animation](#boot-animation)).
+2. `S11logo_display_shell`: in the background, polls every 20 ms for `/dev/fb0`, then runs `display_logo` on `/mnt/data/boot-logo.jpg` if it exists, else on the built-in splash (in Light Mode too: [Light Mode](#light-mode)), or plays the animation where the built-in dark splash would show ([Boot animation](#boot-animation)).
 3. `S11module_driver_default`: `/module_driver/driver_default_init_script.sh` loads the drivers, among them `soc_fb.sh` (the framebuffer, so `/dev/fb0` appears and the splash is drawn) and the LCD panel.
 4. `S20urandom`, `S40network`.
 5. `S90play`: starts `dbus-daemon`, then the player: `/release/bin/demo`, or Rockbox first when the card has it ([Rockbox](#rockbox)).
 
-demo's `platform_init` starts `checkappprocess.sh &`, the watchdog: it checks with `pgrep` that `/release/bin/demo` runs and reboots if not. Stock checks every 2 s; Q2 Pod every 10 s ([internals.md](internals.md#battery)).
+demo's `platform_init` starts `checkappprocess.sh &`, the watchdog: it checks with `pgrep` that `/release/bin/demo` runs and reboots if not. Stock checks every 2 s; Q2 Muse every 10 s ([internals.md](internals.md#battery)).
 
 ## Framebuffer
 
 `/dev/fb0` is 320x375 (portrait), 32 bpp, red at bit 16 (BGRA in memory), with two pages: `module_driver/soc_fb.sh` loads `soc_fb.ko` with `layer0_frames=2` and `is_rotated=0`, and the driver makes `yres_virtual` = `yres` x frames. Landscape content is stored turned 90° clockwise, as the stock splash is.
 
 - `display_logo` opens the framebuffer through `libhardware2` (`fb_open`, `fb_enable`), refuses a depth under 18 bpp, writes each pixel as `0xff000000 | R << 16 | G << 8 | B` and pans to page 0 (`fb_pan_display(fd, info, 0)`). It does not scale.
-- demo's AWTK flush thread draws one page while the other is shown and swaps them with `FBIOPAN_DISPLAY`, then `FBIO_WAITFORVSYNC`. Q2 Pod's video player shares the same two pages ([internals.md](internals.md#videos)).
+- demo's AWTK flush thread draws one page while the other is shown and swaps them with `FBIOPAN_DISPLAY`, then `FBIO_WAITFORVSYNC`. Q2 Muse's video player shares the same two pages ([internals.md](internals.md#videos)).
 
 ## Rockbox
 
-Q2 Pod can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the SD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Q2 Pod for that session instead, and Rockbox's **Boot stock OS** returns to Q2 Pod the same way. A final **System settings → Power → Boot to: Rockbox / Q2 Pod** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Centre toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Q2 Pod.
+Q2 Muse can share the device with [Rockbox](https://github.com/DiamondBond/q2-rockbox/tree/shanlingq2), which runs from the SD card. Rockbox is the initial power-on default when installed: **holding Play/Pause while powering on** starts Q2 Muse for that session instead, and Rockbox's **Boot stock OS** returns to Q2 Muse the same way. A final **System settings → Power → Boot to: Rockbox / Q2 Muse** row appears while `/mnt/mmc/.rockbox/rockbox` is a regular file. Tap or Center toggles the next power-on choice. The choice is saved in `/mnt/data/boot-target` as `rockbox` or `q2pod`, through a synced temporary file and rename. A failed save reports an error and keeps the displayed choice. Missing or invalid preferences default to Rockbox, and missing Rockbox always falls back to Q2 Muse.
 
 | What       | Where                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------ |
@@ -38,7 +38,7 @@ Q2 Pod can share the device with [Rockbox](https://github.com/DiamondBond/q2-roc
 | Rockbox    | `/mnt/mmc/.rockbox/rockbox`, run from that folder, its output in `rockbox.log` there       |
 | Started by | `S90play`, in place of `/release/bin/demo &`                                               |
 
-When the saved choice is Rockbox and Play/Pause is not held, `S90play` waits up to 3 s for the card (`/tmp/mmc_add`); the card's driver polls for it, so it can't tell an empty slot from a card still being read. If the card has Rockbox, it runs Rockbox and appends `exit N` to `rockbox.log`; any exit, including 0x51 (81) from **Boot stock OS**, falls through to demo, which starts with its usual name so the watchdog finds it. Install Rockbox by unzipping its `rockbox.zip` to the card's root. A Rockbox that hangs keeps Q2 Pod away: hold Play/Pause at the next power-on, or remove `/.rockbox/rockbox` with a card reader.
+When the saved choice is Rockbox and Play/Pause is not held, `S90play` waits up to 3 s for the card (`/tmp/mmc_add`); the card's driver polls for it, so it can't tell an empty slot from a card still being read. If the card has Rockbox, it runs Rockbox and appends `exit N` to `rockbox.log`; any exit, including 0x51 (81) from **Boot stock OS**, falls through to demo, which starts with its usual name so the watchdog finds it. Install Rockbox by unzipping its `rockbox.zip` to the card's root. A Rockbox that hangs keeps Q2 Muse away: hold Play/Pause at the next power-on, or remove `/.rockbox/rockbox` with a card reader.
 
 Wi-Fi is off while Rockbox runs: Rockbox can't use it, and the radio costs battery. Rockbox only starts through `rockbox()` in the hook, so at power-on and from Home alike it first runs `WIFI_OFF`, `killall -9 wifi_connect.sh udhcpc wpa_supplicant; ifconfig wlan0 down`, which ends where stock's Wi-Fi off does (`networkStop`, `0x5c2058`). `wifi_connect.sh` is there because demo may have just started it. From Home, `S90play` first waits 300 ms: demo is gone, so nothing new can start, and a shell it forked just before dying has time to become a process `WIFI_OFF` kills. A second pass 2 s later catches a slower one, called off if Rockbox has already left, since demo is then starting Wi-Fi again. At a power-on nothing waits, as Wi-Fi has not started and wlan0 is down, so it changes nothing. Stock's `ifconfig wlan0 0.0.0.0` is left out, as BusyBox brings a down interface up to set an address; demo clears the address when it starts.
 
@@ -46,7 +46,7 @@ Nothing is saved for the way back. `wifi_switch` writes `WIFI` to `/mnt/data/con
 
 ### Rockbox from Home
 
-iPod's Home has a **Rockbox** row between Folder and Streaming, shown only while the Rockbox binary is a regular file ([ipod.md](ipod.md#home)). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice. It is the way to Rockbox with Bluetooth: shut Rockbox down (Q2 Pod starts), connect the headphones in Q2 Pod, then pick **Rockbox** on Home, and Rockbox plays through them.
+iPod's Home has a **Rockbox** row between Folder and Streaming, shown only while the Rockbox binary is a regular file ([ipod.md](ipod.md#home)). Activation checks the file again in case the card was removed after the row appeared. This handover always launches Rockbox regardless of the saved boot choice. It is the way to Rockbox with Bluetooth: shut Rockbox down (Q2 Muse starts), connect the headphones in Q2 Muse, then pick **Rockbox** on Home, and Rockbox plays through them.
 
 demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA, so it hands over to `S90play` (`rockbox_open`, `patch/navigation.c`):
 
@@ -58,11 +58,11 @@ demo cannot start Rockbox itself, as Rockbox takes the screen, the keys and ALSA
 
 demo runs with its stderr appended to `/tmp/q2-demo.err`, in RAM. Stock starts `rtk_hciattach`, `wifi_connect.sh`, `wpa_supplicant` and `udhcpc` from demo with `system()`, so they inherit the descriptor, and the reasons they give for failing (`rtk_hciattach`'s sync and firmware errors, for one) land there instead of on the serial console nobody reads. A loop in the hook empties the file once a minute if it has grown past 512 KB (`O_APPEND` keeps demo writing at its end, as the dev log's does); the crash log takes its last 60 lines as `== stderr`, and an empty section means it said nothing. stdout stays on the console as stock's: a file would block-buffer it, and how much of it there is has not been measured. `--dev` builds take both to `/tmp/q2-demo.log` instead ([remote.md](remote.md#log)).
 
-Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and `bluealsa` with `system("... &")`, so none is demo's child and the headphones stay connected. Wi-Fi goes off ([Rockbox](#rockbox)), but `8733bs` stays loaded: it also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). Rockbox opens bluez-alsa's `bluealsa` PCM (the most recently connected device, through `plug` for its rate and format) whenever it opens, and the DAC otherwise ([q2-rockbox](https://github.com/DiamondBond/q2-rockbox), `shanlingq2_codec.c`). bluealsa is Q2 Pod's, so AirPods keep its 48 kHz AAC fix ([internals.md](internals.md#bluetooth-aac)). When Rockbox exits, demo starts afresh and sets Bluetooth up again. Rockbox's volume is pcm-alsa's software mixer alone, so before the hand-over `rockbox_open` sets the headset's AVRCP absolute volume to the Maximum volume limit (`btctl_transport_set_volume`); left at the Q2's volume it would cap Rockbox's. demo syncs the headset back to the Q2's volume once it starts again.
+Bluetooth survives the hand-over: demo starts `rtk_hciattach`, `bluetoothd` and `bluealsa` with `system("... &")`, so none is demo's child and the headphones stay connected. Wi-Fi goes off ([Rockbox](#rockbox)), but `8733bs` stays loaded: it also holds Bluetooth's power line (`gpio_bt_dis_n`, `module_driver/rtl8733bs.sh`). Rockbox opens bluez-alsa's `bluealsa` PCM (the most recently connected device, through `plug` for its rate and format) whenever it opens, and the DAC otherwise ([q2-rockbox](https://github.com/DiamondBond/q2-rockbox), `shanlingq2_codec.c`). bluealsa is Q2 Muse's, so AirPods keep its 48 kHz AAC fix ([internals.md](internals.md#bluetooth-aac)). When Rockbox exits, demo starts afresh and sets Bluetooth up again. Rockbox's volume is pcm-alsa's software mixer alone, so before the hand-over `rockbox_open` sets the headset's AVRCP absolute volume to the Maximum volume limit (`btctl_transport_set_volume`); left at the Q2's volume it would cap Rockbox's. demo syncs the headset back to the Q2's volume once it starts again.
 
 ## Boot animation
 
-A build with the default logo ships a boot animation, about 7 seconds at 30 frames a second: a bullet train leaves the Guangzhou skyline under Shanling's wordmark, crosses the screen, and arrives as a Chicago L train under 312.dev, where its doors open. It plays where the built-in dark splash would show. A card logo, Light Mode's splash and a build with a custom `--logo` show their still image as before.
+A build with the default logo ships a boot animation, about 7 seconds at 30 frames a second: a bullet train leaves the Guangzhou skyline under Shanling's wordmark, crosses the screen, and arrives as a Chicago L train under 312.dev, where its doors open. It plays where the built-in splash would show, in Light Mode as in Dark Mode. A card logo and a build with a custom `--logo` show their still image as before.
 
 | What        | Where                                                                                                    |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
@@ -75,7 +75,7 @@ The splash hook (`LOGO_HOOK`) first runs `display_logo` on the black JPEG, which
 
 It always plays to its last frame, and never holds the boot back: the hook runs in the background and nothing waits for it, so demo loads alongside it, and if demo is ready first it keeps its screen to itself until the animation has ended. While it plays, `q2splash` holds a write lock on `/tmp/q2splash.run`. When demo makes its screen's lcd (`lcd_linux_fb_create`, hooked by `patch/splash_hold.c`) and finds that lock held, it swaps the lcd's swap and flush, which are both stock's copy of a frame to the hidden page and its pan to that page ([Framebuffer](#framebuffer)), for a function that does neither: demo starts, opens Home and draws as it always does, but nothing reaches the screen. Each pass of its UI loop tests the lock, and once it is free (`q2splash` drew its last frame and exited) gives stock's back and has the whole screen drawn again, so demo's current frame appears whole on the next pass. Keys pressed meanwhile act on the hidden screen. A `q2splash` that is still playing 10 s after demo made its lcd (`SPLASH_HOLD_MS`; the animation is 7.4 s and starts first) is stopped: demo removes `/tmp/q2splash.run`, which `q2splash` checks before each frame, and shows its frame once the lock has gone, or 0.5 s later regardless. Without the marker (a card logo, Light Mode, a custom `--logo`) or with its lock free (a `q2splash` killed for Rockbox leaves the file) demo does not wait at all, and if `q2splash` can't take the lock it does not play, so the still logo shows. Rockbox does not pan, so `S90play` kills `q2splash` before it starts Rockbox. ponytail: neither the boot's length nor the hand-over to demo has been measured on a Q2; frames are drawn on the page being shown, so a frame can tear, where drawing the hidden page and panning would cost a second copy of every change.
 
-The file is the frames as the framebuffer stores them (320x375, turned 90° clockwise) in 16 grey levels, each as the pixels that changed since the frame before (the format is in `tools/splash.py`'s docstring). `q2splash` maps the 16 levels onto the splash's off-white (#F2F2F0). 221 frames are 514 KB in the file and about 230 KB in the rootfs, whose LZO compression is weaker than the file's own would need.
+The file is the frames as the framebuffer stores them (320x375, turned 90° clockwise) in 16 gray levels, each as the pixels that changed since the frame before (the format is in `tools/splash.py`'s docstring). `q2splash` maps the 16 levels onto the splash's off-white (#F2F2F0). 221 frames are 514 KB in the file and about 230 KB in the rootfs, whose LZO compression is weaker than the file's own would need.
 
 To change the animation, edit `assets/boot-anim/anim.html` (opened in a browser it plays in a loop), then render and pack it:
 
@@ -92,13 +92,13 @@ python3 tools/splash.py /tmp/q2-frames assets/boot-anim.q2a
 
 ### From the card
 
-Put your logo on the SD card as `/Q2Pod/boot/boot-logo.jpg`. While Q2 Pod is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Q2 Pod once first.
+Put your logo on the SD card as `/Q2Muse/boot/boot-logo.jpg`. While Q2 Muse is running, it checks the file on each card mount (including startup and leaving USB storage mode) and copies it to `/mnt/data/boot-logo.jpg`, through a synced temporary file and rename; the splash is drawn before the card is read, so the new logo shows from the next power-on after synchronization. Booting directly into Rockbox does not import a new card logo; start Q2 Muse once first.
 
-- **Size: 320x375, stored turned 90° clockwise as the stock splash is, or upright at 375x320**, which Q2 Pod turns itself with the Q2's own `ffmpeg`.
+- **Size: 320x375, stored turned 90° clockwise as the stock splash is, or upright at 375x320**, which Q2 Muse turns itself with the Q2's own `ffmpeg`.
 - **Format: 8-bit, three-component baseline JPEG, at most 512 KB** ([Making a logo that works](#making-a-logo-that-works)).
 - A file that doesn't qualify shows "Boot logo must be a 320x375 JPEG", and one that can't be saved "Could not save boot logo"; either way the current logo stays. `logo_poll` clears the failure before its toast: the toast's dialog runs the UI loop, which polls again, so a failure still set would toast inside each toast until the watchdog restarted the Q2, at every boot.
 - A refused file is reported once, not at each power-on or mount. A changed file, or a good logo or none in between, is reported again. To see it again, remove the file for one mount or save it again.
-- Removing the file from the card deletes `/mnt/data/boot-logo.jpg` at the next mount while Q2 Pod is running; the following power-on shows the built-in splash.
+- Removing the file from the card deletes `/mnt/data/boot-logo.jpg` at the next mount while Q2 Muse is running; the following power-on shows the built-in splash.
 
 ### In a build
 
@@ -112,21 +112,16 @@ Flash `/tmp/q2-logo/update.tar` the normal way: copy it to the root of the SD ca
 
 ### Light Mode
 
-The default logo also ships `assets/boot-logo-light.jpg`, the same logo inverted (dark lettering on white), as `release/assets/default/raw/images/xx/logo-light.jpg`. While `/mnt/data/config.ini` has `LIGHT=1`, or `LIGHT=2` and the saved time zone's clock says 07:00 to 18:59 ([Light Mode](ipod.md#light-mode)), the splash hook shows it instead of the built-in one, so a power-on after turning Light Mode on or off matches it. A card logo still wins, and a build with a custom `--logo` ships no light twin and shows its logo in both modes. Light Mode's splash is a still: the [boot animation](#boot-animation) is light on black and plays in Dark Mode only. The boot shell has no `TZ` (only the player sets it, [Clock](internals.md#clock)) and the RTC holds UTC, so for `LIGHT=2` the hook sets `TZ` from `SYSSET TIMEZONE`, the same index and names as the player (`TIMEZONES` in `tools/build.py`); a missing or unknown index reads as the player's does, index 22, Shanghai (`config_init`). ponytail: the hour is only as right as the RTC, so a clock that was never set can pick the other logo, until it is set. To regenerate it from the default:
-
-```sh
-magick assets/boot-logo.jpg -negate -colorspace sRGB -type TrueColor -strip -interlace none \
-  -sampling-factor 4:4:4 -quality 92 assets/boot-logo-light.jpg
-```
+The boot is dark in either mode: under Light Mode (`LIGHT=1`, or `LIGHT=2` by the clock, [Light Mode](ipod.md#light-mode)) the splash hook plays the same [boot animation](#boot-animation), or shows the same built-in logo, as in Dark Mode. Light Mode starts with demo's first page. A card logo still wins in either mode.
 
 ## Making a logo that works
 
 - **Orientation: rotate upright artwork 90° clockwise before fitting it.** The stock JPEG is stored sideways because of the framebuffer orientation. The supplied logo therefore reads sideways in the stored JPEG and appears upright on the device. The card also takes an upright 375x320 JPEG and turns it for you.
-- **Canvas: exactly 320x375 pixels, black.** `display_logo` does not scale the image. Fit the rotated artwork within both dimensions, preserve its aspect ratio, and centre it horizontally and vertically without cropping. The build rejects any other size, and the card any other than 320x375 or upright 375x320.
+- **Canvas: exactly 320x375 pixels, black.** `display_logo` does not scale the image. Fit the rotated artwork within both dimensions, preserve its aspect ratio, and center it horizontally and vertically without cropping. The build rejects any other size, and the card any other than 320x375 or upright 375x320.
 - **Format: 8-bit, three-component baseline JPEG (RGB/YCbCr).** No PNG, alpha, grayscale or CMYK. The stock renderer assumes three decoded bytes per pixel; the builder rejects incompatible frame headers.
 - **Keep it small.** On the card, at most 512 KB. In a build, JPEG data barely compresses and the repacked rootfs must stay within `ROOTFS_ROOM` (`tools/build.py`, 72 MiB: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)), so a built-in logo up to the card's 512 KB fits; if the build fails with `Repacked rootfs is N bytes, M over the 75,497,472 mtd2 holds`, re-save at lower quality or put the logo on the card instead.
 
-The default is an outlined URW Gothic Book wordmark on black, in warm off-white (#F2F2F0), about 140x72 pixels. The Q keeps its sweeping tail, while the 2 is widened for a balanced base. Below it, widely spaced POD in muted warm grey (#BDBDB8) has a tiny centre button inside the O, a subtle reference to the Q2's click wheel. The group is centred at about 47% of the screen height, because perfect centring looks low. There are no gradients or glows. All lettering is converted to paths, so no fonts are required to render it. Its upright source is `assets/boot-logo.svg` (375x320). To reproduce the firmware JPEG with librsvg and ImageMagick:
+The default is an outlined URW Gothic Book wordmark on black, in warm off-white (#F2F2F0), about 140x72 pixels. The Q keeps its sweeping tail, while the 2 is widened for a balanced base. Below it, MUSE in muted warm gray (#BDBDB8), URW Gothic Book outlined at POD's old cap height (10.35 px) and tracked 8 px (the user's pick of four, 2026-11-16: `design/wordmark/wordmark-1-continuity.svg`). The group is centered at about 46% of the screen height, because perfect centering looks low. There are no gradients or glows. All lettering is converted to paths, so no fonts are required to render it. Its upright source is `assets/boot-logo.svg` (375x320). To reproduce the firmware JPEG with librsvg and ImageMagick:
 
 ```sh
 rsvg-convert -w 1500 -h 1280 assets/boot-logo.svg | \

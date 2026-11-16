@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, block, in_fork, libc
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, in_fork, libc
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -1020,6 +1020,45 @@ def test_another_dialog_s_labels_stay(fw, world):
     assert world.at(prompt) == (30, 60, 315, 40)
 
 
+def test_a_toast_rises_and_fades_in_then_sinks_and_fades_out_over_the_page(fw, world):
+    """docs/oled-design.md#overlay-motion: the pill comes up 10 px and fades in over 200 ms cubic out (the dialog's
+    opacity, its line moved with the pill), nothing on its first frame; once its dialog goes, the page under paints it
+    sinking 4 px and fading over 150 ms cubic in, then nothing."""
+    theme(fw)
+    now = [10000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    page = world.window('settings_page')
+    win = world.window('msginfo_dialog', 'dialog')
+    line = world.add(win, 'line', 'label', box=(30, 60, 315, 40), text='Saved')
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
+    paint_bg(fw, win, Canvas(fw))
+    assert not world[line].visible and opacity() == 0
+    now[0] += 100  # 875 of the way in
+    paint_bg(fw, win, Canvas(fw))
+    assert world[line].visible and world.at(line)[1] == 236 + 1 and opacity() == 223
+    now[0] += 100
+    canvas = Canvas(fw)
+    paint_bg(fw, win, canvas)
+    assert world.at(line)[1] == 236 and opacity() == 255 and canvas.rounded[0][0][1] == 236
+    gone, = [(fn, ctx) for w, evt, fn, ctx in world.handlers if w == win and evt == O['EVT_DESTROY']]
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(gone[0])(gone[1], None)
+    world.top = page
+    leave = fw.fn('feedback_toast_leave', None, C.c_void_p, C.c_void_p)
+    now[0] += 75  # half way out, cubic in: 1/8 gone
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    (box, ink, _), = canvas.rounded
+    assert box[1] == 236 and ink >> 24 == 223 and [t[0] for t in canvas.texts] == ['Saved']
+    now[0] += 50  # 125 of 150 ms: 577 gone, 2 px down
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded[0][0][1] == 236 + 2 and canvas.rounded[0][1] >> 24 == 107
+    now[0] += 25
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded == [] and canvas.texts == []
+
+
 # Quick Settings.
 
 def test_named_in_a_nul_separated_list(fw):
@@ -1204,7 +1243,7 @@ def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw
 
 
 @pytest.mark.parametrize('cls, words', [
-    (0xf00a, ('heart', 'No Favorites', 'Hold Play/Pause on a song to add it')),
+    (0xf00a, ('heart-slash', 'No Favorites', 'Hold Play/Pause on a song to add it')),
     (0xf007, ('clock-counter-clockwise', 'Nothing Played Yet', 'Songs you play show up here')),
     (0xf008, ('chart-bar', 'No Plays Yet', 'Your most played songs show up here')),
     (0xf009, ('sparkle', 'No Songs Added Yet', 'New music on the card shows up here')),
@@ -1312,7 +1351,7 @@ def test_the_window_going_drops_its_title_s_source(fw, world, st):
 def test_home_s_own_list_is_q2_pod(fw, world, st):
     label = bar_title(fw, world, st)
     sync(fw, world.window('home_page'))
-    assert world[label].text == 'Q2 Pod'
+    assert world[label].text == 'Q2 Muse'
     win, _ = navbar_page(world)
     sync(fw, win)
     assert world[label].text == 'Albums'
@@ -1337,7 +1376,7 @@ def action_view(world, n):
 
 def nav_define(name):
     """A number navigation.c #defines (clang-format may break the line after its name)."""
-    found = re.search(rf'^#define {name}[\s\\]*(\d+)', (host.ROOT/'patch/navigation.c').read_text(), re.M)
+    found = re.search(rf'^#define {name}[\s\\]*(\d+)', NAVIGATION_SOURCE, re.M)
     assert found, name
     return int(found[1])
 
@@ -1435,7 +1474,7 @@ def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):
 
 def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_battery(fw, world, st):
     """Home's own list is like any page for the play state: the bar's paint shows it by the battery, as over a
-    page, and repaints the bar after it; 'Q2 Pod' stays shown."""
+    page, and repaints the bar after it; 'Q2 Muse' stays shown."""
     theme(fw)
     bar = system_bar(fw, world)
     title = world.add(bar, 'label_title', 'hscroll_label', box=(142, 0, 91, 26))
@@ -1452,13 +1491,13 @@ def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_batter
 
     home = world.window('home_page')
     on_home = shown()
-    assert on_home[:2] == ('Q2 Pod', 1) and on_home[2]
+    assert on_home[:2] == ('Q2 Muse', 1) and on_home[2]
     assert st('bar_timer', C.c_uint).value  # mid-paint: the bar again after this frame
     navbar_page(world)
     assert shown() == ('Albums', 1, on_home[2])  # over a page: the same image in the same img_state
     world.top = home
     status[0] = 0  # stopped
-    assert shown() == ('Q2 Pod', 1, 0)
+    assert shown() == ('Q2 Muse', 1, 0)
 
 
 def inside(r, box):
@@ -1999,6 +2038,96 @@ def test_a_scan_window_lower_down_keeps_its_stack_s_place_on_the_screen(fw, worl
 # USB mode's page: the computer's eject.
 
 USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
+
+
+CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
+
+
+def control_center(fw, world, focus=0, adjust=0, ring=True):
+    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
+    brightness at half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock
+    at 0) or the page just pulled down. The canvas."""
+    theme(fw)
+    fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    win, _, _ = quick_window(world)
+    world[win].props.update(_cc_focus=focus, _cc_adjust=adjust, **({'_cc_seen': 1} if ring else {}))
+    canvas = Canvas(fw)
+    paint_bg(fw, win, canvas)
+    return canvas
+
+
+def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
+    """The connectivity block and Now Playing's from y 38, the toggles' circles (Wi-Fi lit), the sliders under them,
+    the five tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
+    canvas = control_center(fw, world)
+    accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
+    boxes = [(r, c) for r, c, _ in canvas.rounded]
+    assert ((20, 38, 138, 124), block) in boxes and ((166, 38, 189, 124), block) in boxes
+    assert ((35, 46, 40, 40), accent) in boxes and ((103, 46, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
+    assert ((32, 43, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
+    assert ((32, 216, 44, 44), accent) in boxes  # Lock, on
+    assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
+    words = [t for t, *_ in canvas.texts]
+    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi'):
+        assert label in words, label
+
+
+def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
+    rings = lambda canvas: [r for r, c, _ in canvas.rounded if r == (17, 167, 169, 44)]
+    assert rings(control_center(fw, world, focus=CC_BRIGHT, adjust=1)) and \
+        [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
+
+
+def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(fw, world):
+    """No wheel input yet: no ring anywhere. On the Now Playing block the ring goes round the whole block."""
+    boxes = lambda canvas: [r for r, c, _ in canvas.rounded if c == rgba(0xffffff)]
+    assert boxes(control_center(fw, world, ring=False)) == []
+    assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
+    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
+
+
+def landed(fw, world, t, **keys):
+    """Control Center painted t ms after it came to rest open: each rounded box with the canvas's y offset then."""
+    now = [100000 + t]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    theme(fw, **keys)
+    win, _, _ = quick_window(world)
+    world[win].props.update(_cc_landed=100001)
+    canvas = Canvas(fw)
+    drawn = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, bg, color, radius, *_: drawn.append(
+        (rect(r), C.c_uint.from_address(color).value, struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0])))
+    paint_bg(fw, win, canvas)
+    assert struct.unpack_from('<i', canvas.raw, O['CANVAS_Y'])[0] == 0  # given back
+    return drawn
+
+
+@pytest.mark.parametrize('t, dy', [(0, 0), (50, 8), (140, 0), (190, -2), (279, 0), (280, 0), (5000, 0)])
+def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, t, dy):
+    """The landing's spring (cc_springs): every block, slider and tile drawn dy lower (the canvas's offset)."""
+    drawn = landed(fw, world, t)
+    blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
+    assert blocks and {y for _, _, y in drawn} == {dy}
+
+
+@pytest.mark.parametrize('t', [50, 190])
+def test_under_reduce_motion_control_center_lands_still(fw, world, t):
+    """A spring is MO_SPATIAL (ui_kit.h): with IPOD REDUCEMOTION on the blocks are at rest from the landing."""
+    drawn = landed(fw, world, t, REDUCEMOTION='1')
+    assert drawn and {y for _, _, y in drawn} == {0}
+
+
+def test_the_sliders_fill_to_their_eased_levels(fw, world):
+    """Control Center's sliders draw their bars' eased levels (levels.c), as Now Playing's volume bar does: the volume
+    at 100 eased to 50, the brightness at 50 eased to 25."""
+    fw.var('g_volume', C.c_ubyte).value = 100
+    struct.pack_into('<iiI', fw.var('vol_bar', C.c_char * 12), 0, 50 << 8, 1, 0)
+    struct.pack_into('<iiI', fw.var('bright_bar', C.c_char * 12), 0, 25 << 8, 1, 0)
+    canvas = control_center(fw, world)
+    fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
+    assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
 
 
 def usb_page(fw, world, st, mode=0):

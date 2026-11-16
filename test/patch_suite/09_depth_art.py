@@ -853,7 +853,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
 # theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
@@ -1128,9 +1128,9 @@ def row_text(r):  # a row's label; a value row (OLED's settings.values text) rea
     return f'{t}: {v[0]}' if v else t
 m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
-assert len(kids)==7 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode']  # no Lock Screen; Enlarged Album Art last
+assert len(kids)==8 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode','Reduce Motion']  # no Lock Screen; Enlarged Album Art, then Reduce Motion last
 keep_lit=kids[2]
-assert m.icons_set==['system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off']  # Smart Awake on: its default
+assert m.icons_set==['system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off','system_display','switch_off']  # Smart Awake on: its default; Reduce Motion off
 f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
 # Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Fast Navigation, Position Bar, then

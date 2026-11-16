@@ -590,7 +590,7 @@ for path in ('/mnt/mmc/Music/a.flac','/mnt/mmc/.qobuz','/mnt/mmc/.Bad_Id/a.flac'
 assert not m.systems and m.top!=m.page; passed()
 
 # Sleep timers (q2-podcasts' Sleep Timer, addon.c sleep_read and sleep_check): an app's .sleep holds
-# "until <time>" or "end"; Q2 Pod keeps the timer and pauses whatever plays when it is due, or as the
+# "until <time>" or "end"; Q2 Muse keeps the timer and pauses whatever plays when it is due, or as the
 # local track ends, then removes the file (the app's sign it is done). The app removing it cancels;
 # playback stopping lets "end" go without pausing.
 class PodMachine(AppMachine):
@@ -1117,7 +1117,7 @@ windows(m,'updatemusic_page'); m.files[LIB]=bytearray(b'17\nscan\n'); m.poll(); 
 windows(m); m.poll(); assert len(m.opened)==n+1; m.word(O['SCAN_DONE'],1); m.poll(); assert m.files[DONE]==b'17 ok\n'; passed()
 # One check (library_safe) holds the scan and the import alike: a dialog (a toast's or a confirm's own loop polls
 # too, and no request starts inside it), a page listing the library (stock's, whose lists the import reloads, and
-# Q2 Pod's own, whose records the scan's database rebuild leaves stale), or something playing from any source
+# Q2 Muse's own, whose records the scan's database rebuild leaves stale), or something playing from any source
 # other than the local player: the radio, AirPlay, the Bluetooth receiver.
 radio=[0]; rs=payload_syms['radio_status']
 m.u.hook_add(UC_HOOK_CODE,lambda u,a,s,x: radio[0] and m.returns(2),begin=rs,end=rs)
@@ -1306,7 +1306,7 @@ windows(m,*SAFE); m.files[LIB]=bytearray(f'700\nimport {EXP}/Mix.m3u\n'.encode()
 # Version, so the added row is checked against the real stock widgets, geometry and styles. A page of another
 # count of rows (V1.32's seven) is left as stock built it. Stock's thanks, V1.36's eighth child, is dropped.
 m=ShuffleMachine(); m.handlers[int(manifest['patch_symbols']['stock_about_trampoline'],16)]='stock_about'
-m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
+m.mock('strcpy@GLIBC_2.0','widget_set_tr_text','strstr@GLIBC_2.0')  # strstr: About's value words (settings_pages.c)
 def tree(w):
     n=m.nodes[w]
     return (n['type'],[m.get(w+O[k]) for k in ('W_X','W_Y','W_W','W_H')],n.get('style'),

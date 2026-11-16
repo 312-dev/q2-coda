@@ -26,7 +26,7 @@ static void setting_text(int i) {
         return;
     }
     static const char *const toggles[] = { "Smart Awake", 0 /* 6: the Clicker's, no row */,
-                                           "Time in Title" };
+                                           "Time in Title", "Reduce Motion" };
     if (i >= SETTING_KEEPLIT) {
         list_toggle(st.setting_label[i], toggles[i - SETTING_KEEPLIT], *setting_values[i]);
         return;
@@ -298,17 +298,19 @@ static void setting_row(void *view, int i) {
     static const char *const icons[] = { "system_display",      "playset_covermode",
                                          "system_powermanager", "playset_covermode",
                                          "system_display",      "system_display",
-                                         "system_keytone",      "system_display" };
+                                         "system_keytone",      "system_display",
+                                         "system_display" };
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
     if (i == SETTING_KEEPLIT) caption_row(st.setting_label[i], smart_awake_caption);
+    if (i == SETTING_REDUCEMOTION) caption_row(st.setting_label[i], reduce_motion_caption);
 }
 
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item
  * holding a 335x70 s_btn_listitem button with a 52px icon, a 24px label at x 72 and list_into).
  * Its fourth, Show Navigation Bar, goes: the themes own the bar and each list's box, so stock's
- * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Pod has no
+ * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Muse has no
  * lock screen (docs/internals.md#screen-off-and-wake). Smart Awake and Night Shift (the brightness
  * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
  * Appearance and Coverflow, each opening stock's page again (display_open) with its stock rows
@@ -339,6 +341,7 @@ int ringnav_display(void *win, void *ctx) {
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
         pod_rows(win, "scroll_view_display", POD_COVERMODE, 1, cf_icons); /* Now Playing's art */
+        setting_row(view, SETTING_REDUCEMOTION); /* last (docs/oled-design.md#motion) */
         return result;
     }
     widget_destroy_children(view);
@@ -390,7 +393,7 @@ void home_sets_bind(void *win) {
 #define BOOT_TARGET "/mnt/data/boot-target"
 static int boot_rockbox __attribute__((section(".scratch")));
 static void boot_text(void *label) {
-    widget_set_text_utf8(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Q2 Pod");
+    widget_set_text_utf8(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Q2 Muse");
 }
 static int boot_click(void *label, void *event) {
     if (!rockbox_available()) {
@@ -451,7 +454,7 @@ int ringnav_systemset(void *win, void *ctx) {
         static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };
         for (unsigned i = 0; i < sizeof hidden; ++i)
             widget_set_visible(widget_get_child(view, hidden[i]), 0, 0);
-        /* Language: Q2 Pod's pages and labels are English only, so stock's other languages read
+        /* Language: Q2 Muse's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
         widget_set_visible(widget_get_child(view, 0), 0, 0);
         void *nav = widget_lookup(win, "view_navbar", 1),

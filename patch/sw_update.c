@@ -249,10 +249,10 @@ void sw_update_name(char *out, unsigned n, const char *tag) {
 /* This build's version: "1.8.2 Dev", "1.8.2 beta 2", "1.8.2". */
 static void sw_version(char *out, unsigned n) {
     char v[sizeof Q2POD_VERSION];
-    const char *pod = strstr(Q2POD_VERSION, " Pod");
+    const char *pod = strstr(Q2POD_VERSION, " Muse");
     tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
     if (pod) v[pod - Q2POD_VERSION] = 0; /* "1.8.2", then " Dev" or the beta's " beta 2" */
-    tk_snprintf(out, n, "%s%s", v, Q2POD_DEV ? " Dev" : pod ? pod + 4 : "");
+    tk_snprintf(out, n, "%s%s", v, Q2POD_DEV ? " Dev" : pod ? pod + sizeof " Muse" - 1 : "");
 }
 /* This build as You're Up to Date says it: "1.8.2 Dev (V0JYi)", "1.8.2 beta 2 (V1822)", "1.8.2
  * (V1820)". */

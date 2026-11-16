@@ -757,7 +757,7 @@ void search_strip_overlay(void *w, void *canvas) {
 }
 
 /* ringnav_paint: the results and the strip, on the sheet. Colours are the theme's tokens
- * (docs/oled-design.md#colour), drawn as stated in each half. */
+ * (docs/oled-design.md#color), drawn as stated in each half. */
 void search_strip_paint(void *w, void *canvas) {
     if (!ss.page || w != ss.sheet || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
@@ -779,7 +779,7 @@ void search_strip_paint(void *w, void *canvas) {
         const char *title = kind == SS_ARTIST  ? P(r, REC_ARTIST)
                             : kind == SS_ALBUM ? P(r, REC_ALBUM)
                                                : track_name(name, sizeof name, r);
-        /* a row that can't play now (docs/server-library.md#greyed-rows): a server song offline,
+        /* a row that can't play now (docs/server-library.md#grayed-rows): a server song offline,
          * an artist or album none of whose songs can play; its text CAT_GREY, on the bar the
          * bar's white at 70%, and the offline mark at its right, the text ending clear of it */
         int grey = kind == SS_ARTIST  ? catalogue_artist_unavailable(r)
@@ -822,9 +822,11 @@ void search_strip_paint(void *w, void *canvas) {
                 ss.pick ? "Songs by title or artist" : "Artists, albums and songs", secondary,
                 tertiary);
     if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
+        int y = I(ss.page, W_Y), free = y + ss_list_y(); /* empty_top's are screen ys */
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
-        int y = I(ss.page, W_Y); /* empty_top's are screen ys */
-        empty_paint(ss.sheet, canvas, &none, empty_top(y + ss_list_y(), y + SS_STRIP_Y, 0) - y);
+        empty_t e = none;
+        if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
+        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + SS_STRIP_Y, 0) - y);
     }
     /* the strip: a #1C1C1E pill, the text in a black box with its cursor, the letters in
      * equal cells about the lit one, white on the accent while the strip has the wheel */

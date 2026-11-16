@@ -638,7 +638,7 @@ static void *fetch_worker(void *unused) {
         curl_easy_setopt(c, 52, 1L);                /* FOLLOWLOCATION */
         curl_easy_setopt(c, 78, 10L);               /* CONNECTTIMEOUT */
         curl_easy_setopt(c, 13, 30L);               /* TIMEOUT */
-        curl_easy_setopt(c, 10018, "Q2Pod");        /* USERAGENT, as the directory asks */
+        curl_easy_setopt(c, 10018, "Q2Muse");        /* USERAGENT, as the directory asks */
         curl_easy_setopt(c, 10065, RADIO_CA);       /* CAINFO */
         curl_easy_setopt(c, 64, 1L);                /* SSL_VERIFYPEER */
         curl_easy_setopt(c, 81, 2L);                /* SSL_VERIFYHOST */
