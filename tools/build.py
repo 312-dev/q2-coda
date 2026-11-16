@@ -1652,7 +1652,7 @@ FUNCTIONS = {
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
- # The PEQ curve (peq_ui.c) and the visualizer (visualizer.c): AWTK's software nanovg, float_t float, color_t by value
+ # The PEQ curve (peq_ui.c) among others: AWTK's software nanovg, float_t float, color_t by value
  'canvas_get_vgcanvas': ('void *', 'void *'),
  'vgcanvas_save': ('int', 'void *'), 'vgcanvas_restore': ('int', 'void *'),
  'vgcanvas_translate': ('int', 'void *, float, float'),

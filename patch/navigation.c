@@ -225,9 +225,7 @@ extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
 extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
 extern const char *radio_hold(void *top);
-extern void visualizer_paint(void *w, void *canvas), visualizer_attach(void *win);
-extern int visualizer_full(void); /* OLED's full-screen Field draws the modes itself */
-extern int visualizer_live(void), games_live(void);
+extern int games_live(void);
 extern unsigned char now_cover(void *r, const char **file);
 extern unsigned now_cover_written(const char *file);
 extern int scrobble_append(const char *line, unsigned n);
@@ -1554,7 +1552,7 @@ static unsigned article(const char *s) {
 }
 
 /* Text centred in r in the default font at px, in color; text color and alignment are restored,
- * the font is not (stock sets it before its own text). Shared with peq_ui.c and visualizer.c. */
+ * the font is not (stock sets it before its own text). Shared with peq_ui.c. */
 static void draw_in_face(void *canvas, const char *face, const unsigned *s, unsigned n,
                          const void *r, unsigned px, unsigned color) {
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
@@ -2347,7 +2345,6 @@ int ringnav_paint(void *w, void *canvas) {
     peq_paint(w, canvas);
     battery_paint(w, canvas);
     album_local_paint(w, canvas);
-    if (NP_VISUALIZER) visualizer_paint(w, canvas);
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     add_songs_paint(w, canvas);
@@ -2385,8 +2382,7 @@ int ringnav_paint(void *w, void *canvas) {
     usb_ui_paint(w, canvas);
     bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
-    if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
-        np_modes(w, canvas); /* else the page's own */
+    if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
@@ -3989,7 +3985,7 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics or visualizer page,
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page,
  * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
  * wheel does; paused, it times out as usual. */
 static void keep_lit_poll(void) {
@@ -4468,7 +4464,6 @@ int ringnav_playing(void *win, void *ctx) {
     } else
         st.held_sec = 0;
     np_sync(win);
-    if (NP_VISUALIZER) visualizer_attach(win); /* off: Now Playing has no visualizer page */
     return result;
 }
 
@@ -4774,8 +4769,8 @@ void *ringnav_ui_load(const char *name, void *parent) {
 /* bigcover_page_init: stock's full-screen art (a hold on Now Playing's art opens it, np_taps.c, as
  * does Enlarged Album Art's countdown; any tap closes it)
  * shows the song name BC_MS, then bc_fade fades it out. Stock's own timer writes the next song's
- * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info,
- * visualizer) there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
+ * name; ringnav_sleep shows it again when the track changes. Off the art page (lyrics, info)
+ * there is no art to enlarge, so ringnav_sleep holds the countdown full there (#57).
  * Closing it after the open flashed it every 10 s (#153). */
 int ringnav_bigcover(void *win, void *ctx) {
     int result = stock_bigcover_trampoline(win, ctx);
@@ -4898,7 +4893,7 @@ static int pressed_pill(void *w, void *canvas) {
         return 1;
     }
     void *b = touch_target(w);
-    /* childless: not a row but a page, such as Now Playing's visualizer; a tile draws its own */
+    /* childless: not a row but a page; a tile draws its own */
     if (!pressed_row(b) || tile_in(b, w) || !widget_count_children(w) ||
         I(w, W_W) <= 2 * SEL_INSET + I(w, W_H)) {
         if (w == st.press_row) {
@@ -9201,14 +9196,12 @@ static int now_playing(void) {
     return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page");
 }
 
-/* Now Playing's visualizer repainting or its lyrics gliding: its 40 ms timer and the glide's steps
- * would run late on an idle pass. Its progress and the lyrics' follow tick every 250 ms and keep
- * up. A game's 33 ms frame timer too, and the engine's, due every pass (engine.c): Vortex's raw
- * wheel posts no input to stamp, nor does an engine game's or a card game's, whose travel goes
- * once a pass. */
+/* Now Playing's lyrics gliding: the glide's steps would run late on an idle pass. Its progress
+ * and the lyrics' follow tick every 250 ms and keep up. A game's 33 ms frame timer too, and the
+ * engine's, due every pass (engine.c): Vortex's raw wheel posts no input to stamp, nor does an
+ * engine game's or a card game's, whose travel goes once a pass. */
 static int np_animating(void) {
-    return games_live() || addon_game_on() ||
-           (now_playing() && ((NP_VISUALIZER && visualizer_live()) || st.lyric_glide));
+    return games_live() || addon_game_on() || (now_playing() && st.lyric_glide);
 }
 
 /* Keep stock VOLUME for wired/USB and boot; Bluetooth saves its own level. Smart Wi-Fi's own

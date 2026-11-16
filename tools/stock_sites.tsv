@@ -505,7 +505,6 @@ hciplayer	0x438028	0x4	ao_alsa_uninit	the only call to snd_pcm_drain; patch/peq_
 hciplayer	0x4380dc	0x4	ao_alsa_audio_resume	the only call to snd_pcm_pause; patch/peq_player.c dac_resume, tools/peq.py DAC_RELEASE
 hciplayer	0x438104	0x4	ao_alsa_audio_resume	`lw $4, 0x2514($3)` (1st of 2 such); patch/peq_player.c dac_resume
 hciplayer	0x438238	0x4	ao_alsa_audio_resume	the only call to ioctl; patch/peq_player.c dac_resume
-hciplayer	0x4382ec	0x4	ao_alsa_init	`lui $2, 0x7` (4th of 51 such), before 1st of 3 calls to memset, after "device"; patch/offsets.inc NP_VISUALIZER
 hciplayer	0x4382fc	0x4	ao_alsa_init	`sw $2, 0x17c($fp)`, the delay slot of 1st of 3 calls to memset, after "device"; tools/peq.py USB_BUFFER
 hciplayer	0x438580	0x4	ao_alsa_init	`beq $3, $17, +564 words`, after "default"; patch/peq_player.c PREV_FORMAT
 hciplayer	0x4385bc	0x4	ao_alsa_init	`beq $2, $3, +5 words` (2nd of 10 such), before the only call to snd_pcm_drain, after "default"; patch/peq_player.c NEXT_FLAG

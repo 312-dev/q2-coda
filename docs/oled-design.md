@@ -471,9 +471,7 @@ has no place for keeps a place of its own:
   More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
   Accent Blue while the song is a favourite.
 - **The page dots** are hidden: the state row's on dots sit where they were. The lyrics are the
-  swipe's other page, ending 5 px above the bar. The visualizer (Field), the design's third page, is off for the
-  battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, which leaves its code out of the payload;
-  at 1 it is the last page again, over the whole screen. Now Playing shows no place in the
+  swipe's other page, ending 5 px above the bar. Now Playing shows no place in the
   queue ("1 of 10").
 - **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
   opens them as a page titled About, an [info grid](#track-details), and Return goes back to ⋯.

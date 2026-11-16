@@ -62,8 +62,9 @@ void eq_toggle(void) {
     eq_commit(&s);
 }
 
-/* EQ off but its filter in the chain, for the visualizer's tap (visualizer.c): the switch's Off, so a
- * mode saved on while the stock flag is clear stays silent; nothing if that cannot be saved. */
+/* EQ off but its filter in the chain, for a fade, Mono Audio or AirPlay's tap (crossfade.c
+ * peq_chain): the switch's Off, so a mode saved on while the stock flag is clear stays silent;
+ * nothing if that cannot be saved. */
 void peq_attach(void) {
     eq_state s;
     eq_load(&s);
@@ -1008,11 +1009,10 @@ static int render_rows(const void *unused) {
     return 7; /* RET_REMOVE */
 }
 
-/* 0xRRGGBB and an alpha to a color_t, whose bytes are r, g, b, a. Shared with visualizer.c. */
+/* 0xRRGGBB and an alpha to a color_t, whose bytes are r, g, b, a. */
 unsigned rgba(unsigned c, unsigned a) { return a << 24 | (c & 255) << 16 | (c & 0xff00) | c >> 16; }
 
-/* UTF-8 s centred in x, y, w, h (draw_centred); a stray continuation byte is drawn as itself.
- * Shared with visualizer.c. */
+/* UTF-8 s centred in x, y, w, h (draw_centred); a stray continuation byte is drawn as itself. */
 void caption(void *canvas, const char *s, int x, int y, int w, int h, unsigned px, unsigned color) {
     unsigned wide[32], n = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p && n < 32; ++n) {

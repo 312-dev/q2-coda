@@ -185,7 +185,7 @@ LIBC = {
     'fcntl': ('int', 'int, int, ...'), 'ioctl': ('int', 'int, unsigned, ...'),
     'usleep': ('int', 'unsigned'),
     'sendto': ('int', 'int, const void *, unsigned, int, const void *, unsigned'),
-    # The visualizer's PCM tap (peq_player.c writes, visualizer.c reads) and its analysis
+    # Files the filter maps (peq_player.c: Mono Audio, Swap, crossfade, AirPlay's tap), the clock and the fade's curve
     'open': ('int', 'const char *, int, ...'), 'ftruncate': ('int', 'int, long'),
     'mmap': ('void *', 'void *, unsigned, int, int, int, long'),
     'mmap64': ('void *', 'void *, unsigned, int, int, int, long long'),
@@ -195,12 +195,12 @@ LIBC = {
 }
 
 # The payload's C beside navigation.c (build.py compile_payload), in link order; test/fw builds the same set.
-UI_SOURCES = ['peq.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'visualizer.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c',
+UI_SOURCES = ['peq.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c',
               'release_sig.c', 'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
 # The UI_SOURCES tools/format.sh leaves alone: upstream's files written before the formatter was adopted, kept
 # as upstream writes them so merges of them stay clean, and the vendored monocypher, never reformatted. A new
 # file is formatted unless it is added here.
-UNFORMATTED = ['peq.c', 'peq_ui.c', 'coverflow.c', 'library_scope.c', 'scrobble.c', 'games.c', 'visualizer.c',
+UNFORMATTED = ['peq.c', 'peq_ui.c', 'coverflow.c', 'library_scope.c', 'scrobble.c', 'games.c',
                'playback.c', 'spotify.c', 'addon.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c',
                'nightshift.c', 'headset.c', 'chapters.c', 'lyrics.c', 'airplay.c',
                'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']

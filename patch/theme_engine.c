@@ -71,7 +71,7 @@ unsigned ui_ink_raw(unsigned raw) {
     return old;
 }
 
-/* The 0xRRGGBB j/n of the way from one color to another, per channel. Shared with visualizer.c. */
+/* The 0xRRGGBB j/n of the way from one color to another, per channel. */
 unsigned mix(unsigned from, unsigned to, int j, int n) {
     unsigned c = 0;
     for (int s = 0; s < 24; s += 8)

@@ -186,7 +186,7 @@ Entries 7 to 17 are costs the code marks itself.
 ### 18. Every painted widget passes through about 25 painters
 
 - **Where:** `patch/navigation.c:2723-2772` (`ringnav_paint`, the hook on `widget_on_paint_border`).
-- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `keylock_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `paint_scrollbar`, `addon_paint`, `artist_local_paint`, `np_about_paint`, `peq_paint`, `battery_paint`, `album_local_paint`, `visualizer_paint` (`NP_VISUALIZER` on), `games_paint`, `search_strip_paint`, `paint_chevrons`, `paint_offline`, `paint_radio`, `paint_into`, `paint_letter`, `az_paint`, `paint_cover`, `paint_scrubber`, `marquee_fade`, `np_modes` and `coverflow_home_clip` for every widget stock paints, and a few more behind a cheap test of their own widget (`sel_frame_paint`, `rate_hearts_paint`, `stream_mark_paint`, `lyrics_paint`, `slider_page_paint`); each decides for itself whether the widget is its own.
+- **Evidence:** the function calls `night_paint`, `coverflow_paint`, `keylock_paint`, `edit_paint`, `photos_paint`, `books_paint`, `spot_paint`, `paint_scrollbar`, `addon_paint`, `artist_local_paint`, `np_about_paint`, `peq_paint`, `battery_paint`, `album_local_paint`, `games_paint`, `search_strip_paint`, `paint_chevrons`, `paint_offline`, `paint_radio`, `paint_into`, `paint_letter`, `az_paint`, `paint_cover`, `paint_scrubber`, `marquee_fade`, `np_modes` and `coverflow_home_clip` for every widget stock paints, and a few more behind a cheap test of their own widget (`sel_frame_paint`, `rate_hearts_paint`, `stream_mark_paint`, `lyrics_paint`, `slider_page_paint`); each decides for itself whether the widget is its own.
 - **Measured:** payload instructions of one `ringnav_paint` call, counted with a `UC_HOOK_BLOCK` hook over `BASE` to `SCRATCH` in a scratch copy of `test/patch.py` (the real MIPS payload under Unicorn; stock's paint and the mocks count nothing), on a `--dev` build of `oled-theme` at `c056e7b4`, under two themes since retired (Minimal and Classic). The page is `folder_page` with eight rows from stock's own row constructor (`0x4b39f4`), laid out, after one whole paint. Every row's label and images, and the window, are owned by no painter:
 
   |                    | row label | row image | window |
@@ -274,7 +274,7 @@ Entries 7 to 17 are costs the code marks itself.
 
 ### 32. C mutation testing reaches 7 files
 
-- **Where:** [building.md](building.md#c)'s table: `library_scope.c`, `chapters.c`, `mp3_gapless.c`, `photos.c`, `headset.c`, `radio.c`, `visualizer.c`. `navigation.c`, `playback.c`, `coverflow.c` and the `peq*` files are listed there as still to do.
+- **Where:** [building.md](building.md#c)'s table: `library_scope.c`, `chapters.c`, `mp3_gapless.c`, `photos.c`, `headset.c`, `radio.c`. `navigation.c`, `playback.c`, `coverflow.c` and the `peq*` files are listed there as still to do.
 - **Effort:** L.
 - **Decision:** deferred: L effort of test infrastructure with no defect behind it.
 
