@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.
+  - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.

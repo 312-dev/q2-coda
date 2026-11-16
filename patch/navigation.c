@@ -2170,9 +2170,11 @@ static void paint_selection(void *w, void *canvas) {
         int in = tile ? 0 : T->sel_inset, radius = tile ? 0 : pill_radius(g_menu.at[i], r.h, in);
         if (radius > T->sel_radius) radius = T->sel_radius;
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
+        int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip);
         if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* toward the next tick */
         gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         if (!tile) tilt_gleam(canvas, &bar, radius);
+        if (leaning) canvas_set_clip_rect(canvas, surface_clip); /* the rows' own clip again */
         if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);
     } else if (theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
         /* a picture tile (Speed's buttons) is its own lit state: no card behind it */
