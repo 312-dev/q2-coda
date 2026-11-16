@@ -154,8 +154,14 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
     sw += [f'btmode_{n}' for n in art.BT_MODES]  # bt_recv.c's mode page glyph
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'down', *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
+                                          *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
+    # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
+    btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
+    btspin = [f'btspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SPIN_SPOKES)]
+    bttoast = {**{f'bttoast_{n}': c for n, (_, c) in art.BT_TOASTS.items()},
+               **{f'bttoast_{n}_off': 0xababab for n in art.BT_TOASTS if n != 'low'}}
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
@@ -169,7 +175,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
-                                              *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)))}
+                                              *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
+                                              *btdev, *btspin, *bttoast)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -198,6 +205,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
                           *((n, art.USB_MODE_PX, 0xffffff) for n in sw),
+                          *((n, art.ROW_ICON_PX, c) for n, c in btdev.items()), *((n, art.USB_TOAST_PX, c) for n, c in bttoast.items()),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage

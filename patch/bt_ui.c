@@ -37,7 +37,7 @@
 #define BT_SPIN_GAP 8         /* between "Other Devices" and its spinner */
 #define BT_SPIN_MS 100        /* a spoke a frame */
 #define BT_POLL_MS 500        /* the scan's and the class file's checks, the link's */
-#define BT_CLASS_WAIT_MS 3000 /* a connect toast waits this long at most for the device's Class */
+#define BT_CLASS_WAIT_MS 6000 /* a connect toast waits this long at most for the device's Class */
 #define BT_STATE_W 130      /* a paired row's state ("Not Connected"), right-aligned in this much */
 #define BT_NOTE_H 52        /* the switch-off line, two lines of 13 px */
 #define BT_NOTE_PX TYPE(13) /* the caption's size */
@@ -56,8 +56,9 @@ static struct {
     void *head_spin; /* Other Devices' spinner mark */
     void *line;      /* the connected row's second line */
     unsigned poll_at, spin_at, class_hash, class_seen;
-    int frame, scans; /* the spinner's frame; scans started for this view */
-    char link[24];    /* the device connected at the last look, "" none */
+    int frame, scans;   /* the spinner's frame; scans started for this view */
+    char link[24];      /* the device connected at the last look, "" none */
+    char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
     int link_pending; /* its connect toast not yet shown */
     int low;          /* the battery's steps toasted this connection: 1 at 20%, 2 at 10% */
@@ -658,9 +659,9 @@ static int linked(char *mac) {
 
 /* A toast for mac: "<name> <what>", the kind's glyph (bttoast_<kind>, _off for a drop). */
 static void link_toast(const char *mac, const char *what, int off) {
-    const char *name = bt_dev_name(bt_dev_find(mac)), *kind = bt_kind(bt.link_cls);
+    const char *kind = bt_kind(bt.link_cls);
     char s[96], glyph[40];
-    tk_snprintf(s, sizeof s, "%s %s", name && *name ? name : "Bluetooth", what);
+    tk_snprintf(s, sizeof s, "%s %s", *bt.link_name ? bt.link_name : "Bluetooth", what);
     tk_snprintf(glyph, sizeof glyph, "bttoast_%s%s", kind, off ? "_off" : "");
     toast_icon(theme_art(glyph), s);
 }
@@ -682,11 +683,15 @@ static void link_poll(unsigned now) {
     }
     if (strcmp(mac, bt.link)) { /* a new connection */
         tk_snprintf(bt.link, sizeof bt.link, "%s", mac);
-        bt.link_at = now, bt.link_pending = 1, bt.low = 0, bt.link_cls = 0;
+        bt.link_at = now, bt.link_pending = 1, bt.low = 0, bt.link_cls = 0, bt.link_name[0] = 0;
     }
     unsigned cls = bt_headset_class();
     if (cls) bt.link_cls = cls;
-    if (bt.link_pending && (bt.link_cls || now - bt.link_at >= BT_CLASS_WAIT_MS)) {
+    const char *name = bt_dev_name(bt_dev_find(mac));
+    if (!name || !*name) name = bt_headset_name();
+    if (*name) tk_snprintf(bt.link_name, sizeof bt.link_name, "%s", name);
+    if (bt.link_pending &&
+        ((bt.link_cls && *bt.link_name) || now - bt.link_at >= BT_CLASS_WAIT_MS)) {
         bt.link_pending = 0;
         int car = !tk_strcmp(bt_kind(bt.link_cls), "car");
         link_toast(mac, car && ringnav_bt_resume() ? "connected · resuming" : "connected", 0);

@@ -14,12 +14,12 @@
  *
  * demo has no D-Bus client of its own, so a shell loop asks: started once per connection (the
  * first call that finds a connected headset in stock's link list and no loop for it), it reads the
- * device's Class once, then Percentage and the rate every BATT_POLL_S seconds while the device
- * stays Connected, writing "MAC PCT RATE CLASS" (each empty for none) whole to BATT_FILE, and
- * empties the file when it ends. A call reads that file at most every BATT_READ_MS and takes it
- * only for the headset connected now; a loop that ended while stock still lists the headset as
- * connected (BlueZ answered once with the link going) is started again, at most every
- * BATT_RESTART_MS. */
+ * device's Class and Alias once, then Percentage and the rate every BATT_POLL_S seconds while the
+ * device stays Connected, writing "MAC PCT RATE CLASS NAME" (each empty for none; NAME, BlueZ's
+ * Alias, to the line's end) whole to BATT_FILE, and empties the file when it ends. A call reads
+ * that file at most every BATT_READ_MS and takes it only for the headset connected now; a loop that
+ * ended while stock still lists the headset as connected (BlueZ answered once with the link going)
+ * is started again, at most every BATT_RESTART_MS. */
 #include "navigation.h"
 
 #define BATT_FILE "/tmp/q2-btbatt"
@@ -34,6 +34,7 @@ static struct {
     unsigned started_at; /* the loop started (time_now_ms) */
     int level;           /* ... what it said for mac, -1 none */
     unsigned rate, cls;  /* ... the stream's Hz and the Class, 0 none */
+    char name[64];       /* ... and BlueZ's Alias for it, "" none */
 } bb __attribute__((section(".scratch")));
 
 /* The connected (status 3) device in stock's link list into mac[24]; 0 for none. */
@@ -61,6 +62,8 @@ static void batt_start(const char *mac) {
         "(g='dbus-send --system --print-reply --dest=org.bluez /org/bluez/hci0/%s "
         "org.freedesktop.DBus.Properties.Get'; f=" BATT_FILE "; "
         "c=$($g string:org.bluez.Device1 string:Class 2>/dev/null | sed -n 's/.*uint32 //p'); "
+        "a=$($g string:org.bluez.Device1 string:Alias 2>/dev/null | "
+        "sed -n 's/.*string \"\\(.*\\)\"$/\\1/p'); "
         "while $g string:org.bluez.Device1 string:Connected 2>/dev/null | grep -q 'boolean true'; "
         "do "
         "p=$($g string:org.bluez.Battery1 string:Percentage 2>/dev/null | sed -n 's/.*byte //p'); "
@@ -68,7 +71,7 @@ static void batt_start(const char *mac) {
         "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n '/object path "
         "\"\\/org\\/bluealsa\\/hci0\\/%s\\/a2dpsrc/,/object path \"\\/org\\/bluealsa/"
         "{/\"Sampling\"/{n;s/.*uint32 //p;}}' | head -n 1); "
-        "echo \"%s $p $r $c\" > $f.new && mv -f $f.new $f; sleep %d; done; : > $f) "
+        "echo \"%s $p $r $c $a\" > $f.new && mv -f $f.new $f; sleep %d; done; : > $f) "
         ">/dev/null 2>&1 &",
         dev, dev, mac, BATT_POLL_S);
     system(cmd);
@@ -96,7 +99,7 @@ int bt_headset_battery(void) {
     }
     if (bb.read_at && now - bb.read_at < BATT_READ_MS) return bb.level;
     bb.read_at = now ? now : 1;
-    bb.level = -1, bb.rate = bb.cls = 0;
+    bb.level = -1, bb.rate = bb.cls = 0, bb.name[0] = 0;
     if (!state_read(BATT_FILE, raw, sizeof raw)) {
         if (now - bb.started_at >= BATT_RESTART_MS) bb.started_at = now, batt_start(mac);
         return -1;
@@ -109,6 +112,9 @@ int bt_headset_battery(void) {
     bb.level = none || level > 100 ? -1 : (int)level;
     bb.rate = batt_field(&p, 384000);
     bb.cls = batt_field(&p, 0xffffff);
+    unsigned n_name = 0;
+    while (p[n_name] && p[n_name] != '\n' && n_name < sizeof bb.name - 1) ++n_name;
+    tk_snprintf(bb.name, sizeof bb.name, "%.*s", (int)n_name, p);
     if (bb.rate > 384000) bb.rate = 0;
     if (bb.cls > 0xffffff) bb.cls = 0;
     return bb.level;
@@ -118,6 +124,10 @@ int bt_headset_battery(void) {
 unsigned bt_headset_rate(void) {
     bt_headset_battery();
     return bb.mac[0] ? bb.rate : 0;
+}
+const char *bt_headset_name(void) {
+    bt_headset_battery();
+    return bb.mac[0] ? bb.name : "";
 }
 unsigned bt_headset_class(void) {
     bt_headset_battery();

@@ -299,11 +299,12 @@ class Links(Page):
     """The page's machinery with stock's link list and the battery loop's file ("MAC PCT RATE CLASS")."""
     def __init__(self, fw, devices=DEVICES, resume=b'0'):
         super().__init__(fw, devices, RESUME=resume)
+        self.alias = ''
 
     def link(self, mac=None, level=None, cls=None):
         self.links = [(mac, 3)] if mac else []
         lv = '' if level is None else level
-        self.files.files[BATT_FILE] = f'{mac} {lv} 48000 {cls or ""}\n'.encode() if mac else b''
+        self.files.files[BATT_FILE] = f'{mac} {lv} 48000 {cls or ""} {self.alias}\n'.encode() if mac else b''
         self.now += 5000  # the loop's file read again
         self.poll()
 
@@ -330,6 +331,8 @@ def test_the_connect_toast_waits_a_moment_for_the_class(fw):
     p = Links(fw)
     p.links = [(CAR, 3)]
     p.poll()
+    assert p.ui.toasts == []
+    p.poll(3000)
     assert p.ui.toasts == []
     p.poll(3000)
     assert p.ui.toasts == ['BMW 6R81 connected']
@@ -439,3 +442,12 @@ def test_quality_s_choices_show_their_bit_rates(fw):
     fw.mock('time_now_ms', lambda *_: 0)
     fw.fn('bt_ui_poll', None)()
     assert has(auto)  # back while Quality is in sight
+
+
+def test_a_device_the_list_has_not_read_is_named_by_blue_z(fw):
+    """Away from the Bluetooth page stock's list may be empty: the battery loop's Alias names it, and its drop."""
+    p = Links(fw, devices=())
+    p.alias = 'Pixel Buds'
+    p.link(HEAD, 80, HEADPHONES)
+    p.link()
+    assert p.ui.toasts == ['Pixel Buds connected', 'Pixel Buds disconnected']

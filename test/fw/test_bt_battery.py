@@ -86,6 +86,7 @@ def test_the_loop_under_sh(fw, tmp_path):
         f'[ "$4" = /org/bluez/hci0/dev_AA_BB_CC_DD_EE_0F ] || exit 1\n'
         'case "$7" in\n'
         '  string:Class) echo "   variant       uint32 2360324";;\n'
+        '  string:Alias) echo \'   variant       string "Gray\'"\'"\'s \\"Buds\\""\';;\n'
         f'  string:Connected) n=$(cat {count} 2>/dev/null || echo 0); echo $((n+1)) > {count}\n'
         f'    [ $n -lt 2 ] && echo "   variant       boolean true" || echo "   variant       boolean false";;\n'
         '  string:Percentage) echo "method return time=1 sender=:1.2"; echo "   variant       byte 80";;\n'
@@ -102,15 +103,17 @@ def test_the_loop_under_sh(fw, tmp_path):
         f.chmod(0o755)
     command = b.commands[0].replace(FILE, str(out)).replace(') >/dev/null 2>&1 &', ') >/dev/null 2>&1')
     subprocess.run(['sh', '-c', command], check=True, env={**os.environ, 'PATH': f'{bin_}:{os.environ["PATH"]}'})
-    assert (tmp_path / 'seen').read_text() == f'{MAC} 80 96000 2360324\n' and out.read_text() == ''
+    assert (tmp_path / 'seen').read_text() == f'{MAC} 80 96000 2360324 Gray\'s \\"Buds\\"\n' and out.read_text() == ''
     assert pathlib.Path(count).read_text().strip() == '3'
 
 
-@pytest.mark.parametrize('text, level, rate, cls', [(f'{MAC} 80 96000 2360324\n', 80, 96000, 2360324),
-                                                    (f'{MAC}  48000 2098208\n', -1, 48000, 2098208),
-                                                    (f'{MAC} 5  \n', 5, 0, 0), (f'{MAC} 5 999999999 \n', 5, 0, 0)])
-def test_the_rate_and_class_ride_with_the_level(fw, text, level, rate, cls):
+@pytest.mark.parametrize('text, level, rate, cls, name', [
+    (f'{MAC} 80 96000 2360324 WH-1000XM5\n', 80, 96000, 2360324, b'WH-1000XM5'),
+    (f'{MAC}  48000 2098208 BMW 6R81\n', -1, 48000, 2098208, b'BMW 6R81'),
+    (f'{MAC} 5   \n', 5, 0, 0, b''), (f'{MAC} 5 999999999  \n', 5, 0, 0, b'')])
+def test_the_rate_class_and_name_ride_with_the_level(fw, text, level, rate, cls, name):
     b = Bt(fw)
     b.level()
     assert b.say(text) == level
     assert fw.fn('bt_headset_rate', C.c_uint)() == rate and fw.fn('bt_headset_class', C.c_uint)() == cls
+    assert fw.fn('bt_headset_name', C.c_char_p)() == name

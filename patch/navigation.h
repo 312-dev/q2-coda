@@ -978,6 +978,7 @@ int usb_ui_key(void *top, unsigned key);
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
 unsigned bt_headset_rate(void), bt_headset_class(void);
+const char *bt_headset_name(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);

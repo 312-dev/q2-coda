@@ -139,7 +139,7 @@ def test_rename_sets_blue_z_s_alias_and_the_list_s_name(fw):
     done = fw.fn('bt_detail__renamed', C.c_char_p, C.c_char_p)
     assert done(b'   ') == b"Name can't be empty" and done(b"it's") == b"Can't use that name"
     assert done(b' My Cans ') is None
-    alias = [c for c in d.commands if 'string:Alias' in c]
+    alias = [c for c in d.commands if 'Properties.Set string:org.bluez.Device1 string:Alias' in c]
     assert len(alias) == 1 and '/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01 ' in alias[0] and "'variant:string:My Cans'" in alias[0]
     assert fw.fn('bt_dev_name', C.c_char_p, C.c_int)(0) == b'My Cans' and 'Renamed' in d.ui.toasts
     assert 'Q2 → My Cans' in d.ui.shown(d.page)
