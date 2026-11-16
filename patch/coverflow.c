@@ -4693,7 +4693,7 @@ int coverflow_home(void *win, void *ctx) {
     /* The fitted cover reaches under the list; taps there must still find the rows. */
     if (art) widget_set_sensitive(art, 0);
     void *list = widget_lookup(win, "list_view_home", 1);
-    home.list = list; /* a new Home window's own, so still the asset's width */
+    home.list = list;                   /* a new Home window's own, so still the asset's width */
     lr_home_tag(coverflow_home_view()); /* its rows' letters, for the user's order */
     home.sets = widget_lookup(win, "list_view_homeset", 1);
     if (home.sets) widget_set_sensitive(home.sets, 0);
