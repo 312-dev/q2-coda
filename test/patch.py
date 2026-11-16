@@ -15255,7 +15255,8 @@ for i in range(8):  # stock's seven rows and its thanks, the eighth child
     if i<2: assert m.call(address=0x4c0de4,args=(row,i,0,0),gap=0)==0
 rows=list(m.nodes[view]['children'])
 assert m.call(address=HOOKS['systemset_about_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and m.calls[0][:3]==('stock_about',m.top,5)
-kids=m.nodes[view]['children']; assert kids[:2]==rows[:2] and kids[3:]==rows[2:7]
+kids=m.nodes[view]['children'][1 if manifest['dev'] else 0:]  # a --dev build's Save Diagnostics row heads it (diagnostics.c)
+assert kids[:2]==rows[:2] and kids[3:]==rows[2:7]
 fw=m.nodes[m.nodes[rows[1]]['children'][0]]['children'][1]; assert m.nodes[fw]['text']=='V1.36'
 item=kids[2]; button=m.nodes[item]['children'][0]; title,value=m.nodes[button]['children']
 # Stock's row, title and value widgets alike.
