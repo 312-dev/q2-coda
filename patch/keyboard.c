@@ -8,7 +8,13 @@
  * the keyboard, or the box with it.
  *
  * The keys keep stock's layout and labels; only their fill is ours: stock's is cleared once per
- * keyboard (kb_style), and kb_wheel_bg paints in its place under the label stock still draws. */
+ * keyboard (kb_style), and kb_wheel_bg paints in its place under the label stock still draws.
+ *
+ * Under a list.entry.ipod theme no box keeps it (the user's, 2026-11-17: the letter strip, option
+ * P1, for the Wi-Fi password and every other text box): a keyboard seen for the first time is
+ * hidden and the letter strip opens over it for the same edit (kb_strip_due, search_strip.c
+ * search_strip_box), titled as the page the box is on. The rest of this file is what it was for a
+ * keyboard the strip could not take. */
 #include "navigation.h"
 
 #define KB_KEY_RGB 0x1c1c1e
@@ -16,9 +22,10 @@
 #define KB_KEYS 40 /* a page's keys and its candidates, at most */
 
 static struct {
-    void *kb;  /* the keyboard last seen, restyled (kb_style) */
-    void *lit; /* the key the wheel is on, 0 until the wheel turns on this keyboard */
-    int at;    /* ... its place among kb_keys' */
+    void *kb;       /* the keyboard last seen, restyled (kb_style) */
+    void *lit;      /* the key the wheel is on, 0 until the wheel turns on this keyboard */
+    int at;         /* ... its place among kb_keys' */
+    unsigned timer; /* kb_strip_due's */
 } kw __attribute__((section(".scratch")));
 
 static void *kb_window(void) {
@@ -63,9 +70,22 @@ static void kb_clear(void *w) {
     widget_set_prop_int(w, "_kb_clear", 1);
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) kb_clear(widget_get_child(w, i));
 }
+/* The keyboard first seen, from the next loop pass: its edit to the letter strip, the keyboard
+ * hidden under it (the input method keeps it, so the box's OK still reaches the edit). */
+static int kb_strip_due(const void *unused) {
+    void *kb = kb_window(), *im = input_method(), *edit = im ? P(im, IM_WIDGET) : (void *)0;
+    char title[64] = "";
+    kw.timer = 0;
+    if (!kb || !edit || !widget_get_visible(kb)) return 0;
+    if (st.bar_title) widget_get_text_utf8(st.bar_title, title, sizeof title);
+    if (search_strip_box(edit, title)) widget_set_visible(kb, 0, 0);
+    return 0;
+}
+
 static void kb_style(void *kb) {
     if (kb == kw.kb) return;
     kw.kb = kb;
+    rearm(&kw.timer, kb_strip_due, 0);
     kw.lit = (void *)0;
     kw.at = 0;
     kb_clear(kb);

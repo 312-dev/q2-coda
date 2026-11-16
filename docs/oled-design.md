@@ -742,15 +742,25 @@ It has two forms, in the same place, width and corners:
   save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
   cursor, as on Search's text.
 
-On both, the wheel walks the letters and Centre types the lit one. A Return press erases the character
+- **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
+  box stock's keyboard served; the user's P1 from `mock_strip_password.py`, 2026-11-17): field off, a set
+  chip at the pill's left (a `#2C2C2E` pill to x 96, its name in Inter Medium 16 white: abc, ABC, 123 or
+  #+=), the run after it, its lit key at x 192; Play/Pause steps to the next set, each ending in the space
+  and delete. The status row names the page the box is on, and the text shows as a name's does, "Press
+  Next when done" under it; a box holding a number opens on 123. A password reads "Password" (15 px Text
+  Tertiary, y 84) over dots (y 128), the character just typed shown for a second, all of it in plain text
+  while Play/Pause is held, and "Hold Play/Pause to show · Next at the end to join" (13 px, y 176). Next
+  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts.
+
+On every form, the wheel walks the letters and Centre types the lit one. A Return press erases the character
 before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
 the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centred on y 160 and sized
 to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
 fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
 "Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
 happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
-draw it the same way (`feedback.c` `overlay_scrim`). The Wi-Fi password, an EQ preset's name and stock's other text boxes keep the [keyboard](ipod.md#keyboard)
-until the password's form is chosen.
+draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen is hidden under the strip
+(`patch/keyboard.c` `kb_strip_due`).
 
 ### Icons
 
@@ -866,7 +876,7 @@ pattern.
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centred, no title                                                        |
 | Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
 | New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
-| Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
+| Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
 

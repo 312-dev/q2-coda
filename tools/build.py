@@ -1535,6 +1535,7 @@ FUNCTIONS = {
  'widget_set_focused': ('int', 'void *, int'),
  'input_method': ('void *', 'void'),
  'input_method_request': ('int', 'void *, void *'),
+ 'input_method_dispatch_action': ('int', 'void *'),  # a text box's OK, as its keyboard's Enter (search_strip.c)
  'widget_animator_pause': ('int', 'void *'),
  'widget_animator_destroy': ('int', 'void *'),
  'easing_get': ('void *', 'int'),  # Coverflow's glides set a reused animator's easing

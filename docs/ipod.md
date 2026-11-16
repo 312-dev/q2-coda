@@ -1101,13 +1101,16 @@ painted it white, which drew the box at rest.
   ("Renamed"), and the page closes; an empty name ("Name can't be empty") or one taken ("A playlist has that name")
   says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
   on Search.
-- <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (the Wi-Fi password, an EQ preset's name)
-  keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
-  the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,
-  the word candidates first while there are any: the first turn lights the first key in the accent, the next ones
-  move along, stopping at either end. Centre presses the lit key as a tap does, so a letter key typed twice in quick
-  succession gives its second letter, as on a phone, and the page keys (ABC, 123, sym) change the page with the light
-  kept in its place. Return is the box's own: it closes the keyboard, or the box with it.
+- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
+  time one opens, `patch/keyboard.c` (`kb_strip_due`) hides it and opens the letter strip for the input method's edit
+  (`search_strip_box`, [oled-design](oled-design.md#text-entry)), field off, with its set chip (abc, ABC, 123, #+=,
+  stepped by Play/Pause) and the box's text prefilled; a password shows as dots ("Password" over them, the character
+  just typed for a second, all of it while Play/Pause is held). Next at the text's end closes the strip, writes the
+  text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
+  acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches. A held Return closes the strip
+  and the keyboard (an edit of ours emptied first, as the keyboard's Return did), leaving the box. Under another theme
+  the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Centre pressing the lit
+  one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
   length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
   an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the

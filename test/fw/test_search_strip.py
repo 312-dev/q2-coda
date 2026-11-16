@@ -26,7 +26,9 @@ OLED = b'3'
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
                 *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick create'.split()),
-                *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 49),
+                ('box', C.c_void_p), ('secret', C.c_int), ('set', C.c_int), ('typed_at', C.c_uint), ('show_timer', C.c_uint),
+                ('shown', C.c_ubyte), ('play_held', C.c_ubyte),
+                *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 65),
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
                 ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte)]
 
@@ -733,3 +735,58 @@ def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
     s = renaming(fw, ui, b'Road')
     painted(fw, s)
     assert (b'inter-medium', 27) in fonts
+
+
+# A stock text box (keyboard.c kb_strip_due) on the strip (the user's P1, mock_strip_password.py): its set chip, Play/Pause
+# stepping abc, ABC, 123, #+=; Next at the text's end the box's own OK.
+LOWER, UPPER, DIGITS, SYMBOLS = 0, 1, 2, 3
+
+
+def boxed(fw, ui, text=b'', kind='password'):
+    """A text box's edit, the input method's, opened on the strip."""
+    Config(fw)
+    edit = ui.new('edit', 0, 0, 0, 200, 40)
+    ui.props[(edit, 'input_type')] = kind
+    ui.text[edit] = text.decode()
+    im = C.create_string_buffer(0x40)
+    C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
+    fw.mock('input_method', lambda *_: C.addressof(im))
+    s = Strip.__new__(Strip)
+    s.fw, s.ui, s.stock, s.im, s.edit = fw, ui, [], im, edit
+    assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_char_p)(edit, b'Home Wi-Fi') == 1
+    s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+    return s
+
+
+def test_a_password_box_types_its_sets_and_next_at_the_end_is_its_ok(fw, ui):
+    fw.mock('time_now_ms', lambda *_: 50000)  # the last character typed, a moment ago
+    s = boxed(fw, ui)
+    assert s.ss.secret == 1 and s.ss.set == LOWER and 'Home Wi-Fi' in ui.text.values()
+    s.key(KEY_NEXT, KEY_CENTER)  # b
+    s.key(KEY_PLAY)  # ABC
+    s.key(KEY_CENTER)  # the set's first: A
+    s.key(KEY_PLAY, KEY_PLAY, KEY_CENTER)  # #+=: !
+    s.key(KEY_PLAY, KEY_NEXT, KEY_CENTER)  # round to abc: b
+    assert s.ss.text == b'bA!b' and s.ss.set == LOWER
+    texts = [t for t, *_ in painted(fw, s).texts]
+    assert 'Password' in texts and 'abc' in texts and '•••b' in texts  # the last typed shows
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)
+    assert not fw.calls('input_method_dispatch_action')  # Next before the end moves the cursor
+    s.key(KEY_FWD_BTN)
+    assert ui.backs == 1 and ui.text[s.edit] == 'bA!b'
+    assert [a[0] for _, a in fw.calls('input_method_dispatch_action')] == [C.addressof(s.im)]
+
+
+def test_a_number_box_opens_on_digits_and_a_text_one_keeps_its_text(fw, ui):
+    assert boxed(fw, ui, b'1000', 'text').ss.set == DIGITS
+
+
+def test_return_held_on_a_box_closes_it_and_its_keyboard(fw, ui):
+    s = boxed(fw, ui, b'abc', 'text')
+    s.now = [100000]
+    fw.mock('time_now_ms', lambda *_: s.now[0])
+    fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)(ui.top(), KEY_RETURN)
+    s.now[0] += HOLD_MS
+    ui.fire('search_strip__ss_hold_tick')
+    assert ui.backs == 1 and not fw.calls('input_method_dispatch_action')
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the keyboard closed with it
