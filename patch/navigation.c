@@ -9618,7 +9618,8 @@ int ringnav_input(void *wm, void *e) {
         st.touch_type = (int)type;
         st.touch_x = I(e, EVENT_X);
         st.touch_y = I(e, EVENT_Y);
-        charge_touch(type, st.touch_x, st.touch_y); /* a tap on the status battery (charging.c) */
+        /* a tap on the status battery (charging.c), upright: the panel's raw axes are portrait */
+        charge_touch(type, st.touch_y, 319 - st.touch_x);
     }
     if ((type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG) &&
         (key == KEY_PREV || key == KEY_NEXT || key == KEY_CENTER) && usb_prompt()) {

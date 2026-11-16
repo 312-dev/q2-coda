@@ -51,7 +51,8 @@ static const char *charge_words(unsigned key, char *out, int size) {
     return ipod_light() ? "chargetoast_battery_l" : "chargetoast_battery_d";
 }
 
-/* A tap on the status row's battery (docs/oled-design.md#status-row): a target TAP_W x TAP_H
+/* A tap on the status row's battery (docs/oled-design.md#status-row), x and y upright (the UI's,
+ * as widget_to_local takes them): a target TAP_W x TAP_H
  * round the body's centre, so at least 40 px round it, whose lift within TAP_SLOP of its press
  * toasts the battery's state. The touch goes on to stock as before, so a pull from the row still
  * opens Control Center. */

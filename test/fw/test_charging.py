@@ -205,3 +205,20 @@ def test_a_plug_in_chirps_in_what_plays(fw, st, ui, clicker, tone, there, status
     fw.fn('charge_plugged', None)()
     assert player.clicks() == ([b'{mcl-click\\charge}'] if sent else [])
     assert not fw.calls('fw_pthread_create')  # no buzzer
+
+
+def test_ringnav_input_turns_the_panels_portrait_touch_upright(fw, st, ui):
+    """The panel reports portrait axes (x 0-319 across the short side): upright x is its y, upright y 319 less its x,
+    so a tap on the battery at upright (12, 15) arrives as (304, 12)."""
+    # widget_to_local's stub leaves the point as it is, so upright is the slot's own pixels here
+    tap = Tap(fw, st, ui)
+    fw.mock('stock_input_trampoline', lambda *_: 0)
+    send = fw.fn('ringnav_input', C.c_int, C.c_void_p, C.c_void_p)
+    for kind in (TOUCH_DOWN, TOUCH_UP):
+        e = C.create_string_buffer(0x40)
+        struct.pack_into('<i', e, O['EVENT_TYPE'], kind)
+        struct.pack_into('<i', e, O['EVENT_X'], 319 - 15)
+        struct.pack_into('<i', e, O['EVENT_Y'], 12)
+        send(ui.wm, e)
+    tap.poll()
+    assert tap.toasts == ['Battery 62%']
