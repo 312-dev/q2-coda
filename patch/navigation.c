@@ -1683,8 +1683,8 @@ static void paint_chevrons(void *w, void *canvas) {
     int home = home_menu(win);
     /* a picker's tap adds and closes: no `>` */
     if (g_navbar_status || !kind(w) || !P(canvas, CANVAS_LCD) || !drill(w) ||
-        (home && (!theme()->chevron_home || kind(w) == 3)) || !load_rows(&g_menu, w) ||
-        !clip_surface(canvas, &g_menu, &old))
+        (home && (!theme()->chevron_home || kind(w) == 3)) || lr_edit_list(w) ||
+        !load_rows(&g_menu, w) || !clip_surface(canvas, &g_menu, &old))
         return;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
@@ -2395,7 +2395,7 @@ int ringnav_paint(void *w, void *canvas) {
     az_paint(w, canvas);
     pl_tile_paint(w, canvas);
     pv_paint(w, canvas);
-    lr_edit_paint(w, canvas); /* OLED's Edit Library over the Library page (library_edit.c) */
+    lr_edit_paint(w, canvas); /* OLED's Edit Library or Edit Home over its page (library_edit.c) */
     upnext_paint(w, canvas);  /* Up Next's rows (upnext.c) */
     paint_cover(w, canvas);
     paint_scrubber(w, canvas);
@@ -4949,7 +4949,7 @@ static const char *bar_title_of(void *win, void **label) {
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, own_order's class) */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page"))
-        return lr_editing(win) ? "Edit Library" : "Library";
+        return lr_editing(win) ? lr_edit_title() : "Library";
     if (album_local_on(win)) return ""; /* the design's album page: its header names it */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
@@ -5103,6 +5103,7 @@ void bar_title_sync(void *win) {
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
     /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
     const char *t = !home_menu(win)                                 ? (const char *)0
+                    : lr_editing(win)                               ? lr_edit_title()
                     : geom_val(V_STATUS_Y) && !coverflow_home_sub() ? ""
                                                                     : coverflow_home_title();
     if (t)
@@ -5282,6 +5283,8 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
     style_color(color, style, name, fallback);
     if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color")) {
         catalogue_greyed(st.paint_w, color);
+        if (lr_edit_dim(st.paint_w)) /* a row hidden in Edit Library or Edit Home */
+            *color = (*color & 0xff000000u) | (scheme()->muted & 0xffffff);
         if (np_tap_lit(st.paint_w)) /* Now Playing's artist or album held (np_taps.c) */
             *color = (*color & 0xff000000u) | (RGBA(np_tap_ink()) & 0xffffff);
     }
@@ -6151,7 +6154,7 @@ static void hide_outline(void) {
 int ringnav_touch(void *ctx, void *event) {
     /* a finger on the A-Z index: its moves are az_index.c's (az_event), the rows' bar stays */
     if (az_held(event)) return stock_touch_trampoline(ctx, event);
-    /* a finger dragging a Library row: its moves are library_edit.c's (lr_event) */
+    /* a finger dragging a Library or Home row: its moves are library_edit.c's (lr_event) */
     if (lr_edit_dragging()) return stock_touch_trampoline(ctx, event);
     /* settle_timer while paused on the scrubbed track: a paused seek still waiting for Play. */
     int hold =
@@ -6179,7 +6182,7 @@ int ringnav_touch(void *ctx, void *event) {
         st.touch_mode = 0;
         return result;
     }
-    /* a press on a Library row (OLED): its hold, in Edit Library its grip (library_edit.c) */
+    /* a press on a Library or Home row (OLED): its hold, in the editor its grip (library_edit.c) */
     if (!result && event && I(event, EVENT_TYPE) == EVT_POINTER_DOWN && lr_edit_touch(event))
         return result;
     /* Pointer-down must not recall/rebind the row that native touch is about to hit. */
@@ -6296,7 +6299,7 @@ int ringnav_dispatch(void *target, void *event) {
         pull_cancel();
     }
     if (target && event && I(event, EVENT_TYPE) == EVT_CLICK) {
-        if (lr_edit_click(target)) return STOP; /* Edit Library: a tap selects, opens nothing */
+        if (lr_edit_click(target)) return STOP; /* the editor: a tap selects, opens nothing */
         hide_outline();
         cancel_center(); /* A native activation supersedes confirmation, even without touch. */
         drop_spin();
@@ -6839,7 +6842,7 @@ static char *play_key(void) {
 }
 
 /* Any Play/Pause release ends the latch; only the held press itself is swallowed. */
-static int hold_released(void) {
+int play_hold_released(void) {
     char *k = play_key();
     int held = k && st.qm_press && *(unsigned long long *)(k + INPUT_KEY_TIME) == st.qm_press;
     st.qm_press = 0;
@@ -8850,8 +8853,9 @@ static int home_cf_hold(void *top) {
  * toasts), on a card app's row its hold op (addon_hold: a Deezer list downloaded whole), in Quick
  * Settings (not OLED's) the wheel's brightness/volume switch, on View Queue's shuffle list
  * Play Next (un_hold), on a Library artist's page under OLED nothing (artist_local_on: its rows
- * are no showlist records), the release latched as the queue menu's. A held Previous or Next that
- * scans (seek_held) stops first. */
+ * are no showlist records), in Edit Library or Edit Home nothing (its tap shows or hides a row),
+ * the release latched as the queue menu's. A held Previous or Next that scans (seek_held) stops
+ * first. */
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
     if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
@@ -8859,7 +8863,8 @@ int ringnav_keylong(void *ctx, void *event) {
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
     int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || un_hold(top) ||
-                home_cf_hold(top) || artist_local_on(top) || playlist_page_hold(top);
+                home_cf_hold(top) || artist_local_on(top) || playlist_page_hold(top) ||
+                lr_editing(top); /* Edit Library and Edit Home: Play/Pause's tap alone */
     if (!taken && qm_hold()) return STOP;
     if (taken) {
         char *key = play_key();
@@ -9724,7 +9729,7 @@ int ringnav_keydown(void *ctx, void *event) {
      * chord_gate's centre_at, which ringnav_input set before this */
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
-    lr_edit_keydown(key); /* Centre held on the Library: Edit Library (library_edit.c) */
+    lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
     un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
@@ -10029,7 +10034,7 @@ int ringnav(void *ctx, void *event) {
     if (usable() && rate_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
-    /* Edit Library's keys, and the release of the Centre hold that entered or left it */
+    /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
@@ -10077,7 +10082,7 @@ int ringnav(void *ctx, void *event) {
     if (usb_ui_key(window_manager_get_top_window(window_manager()), key)) return STOP; /* USB's Stop */
     if (search_key(key)) return STOP;
     int result = usb_prompt() ? 0 : stock_keyup_trampoline(ctx, event);
-    if (key == KEY_PLAY && hold_released()) return STOP;
+    if (key == KEY_PLAY && play_hold_released()) return STOP;
     /* Media controls follow the active source, including when local Now Playing is visible. */
     if (!result && (media_focused() || media_owner() != 1) &&
         (key == KEY_PLAY || key == KEY_FWD_BTN || key == KEY_BACK_BTN)) {

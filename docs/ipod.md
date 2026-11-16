@@ -101,15 +101,18 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
+The seven rows, by default in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
 Folders, Cover Flow, Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;
 `coverflow_home_layout` restacks the hidden row last). Coming or going it keeps
-the selection on the same row and the same rows in view (`home_np_keep`); on Now Playing as it
-goes, the selection moves to Library. Carousel keeps its Now Playing card. **Folders** is stock's
-Folder card under its plural name. **Search** opens the Library's search (`library_search_open`: the
+the selection on the same row and the same rows in view (`home_keep`); on Now Playing as it
+goes, the selection moves to the row after it. Carousel keeps its Now Playing card. **Folders** is stock's
+Folder card under its plural name, shown only while the SD card has folders to list (`home_folders`, the empty
+Folders page's test) until the user shows or hides it. **Edit Home** (Center held on the list, or a finger held on a
+row; [oled-design](oled-design.md#edit-library), [internals](internals.md#library-order)) puts the rows in the
+user's order and shows or hides each, Settings always shown. **Search** opens the Library's search (`library_search_open`: the
 letter strip under `list.entry.ipod`, OLED's, stock's search without it). Shuffle Songs and the
 Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
 (`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) is only

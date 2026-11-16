@@ -1,6 +1,9 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Home (OLED): **Edit Home**. Hold Center on Home (or hold a row with your finger) to put Home's rows in your own order, as Edit Library does, and to choose which show: each row has a circle on its left, filled for a row that shows and empty for one that is hidden. Press Play/Pause, or tap the circle, to show or hide the highlighted row; hidden rows are left off Home when you finish. Settings always stays.
+  - Library (OLED): Edit Library has the same circles, so rows the Library hides by default (Shuffle, Hi-Res, Long Songs, Upload Scrobbles) can be shown again, and any other row hidden. The hint reads "Drag ≡ to move · Play/Pause shows or hides".
+  - Home: **Folders** shows only once the SD card has folders to list, and appears by itself the first time there are some. Show or hide it in Edit Home and your choice stays, folders or not.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.

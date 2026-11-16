@@ -3488,8 +3488,8 @@ static struct {
     unsigned strip_timer;
     int stripping, strip_need[2], strip_done[2];
     /* np: Now Playing's row shows (np_loaded); np_stop: when play was first seen stopped, | 1, 0
-     * while something is loaded; np_timer: np_due's */
-    int np;
+     * while something is loaded; np_timer: np_due's; folders: Folders' rule at the last layout */
+    int np, folders;
     unsigned np_stop, np_timer;
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
@@ -3499,6 +3499,10 @@ extern void library_rows(void *list), stream_rows(void *list);
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split);
 extern int library_search_open(void *ctx, void *event);
+/* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
+extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
+    lr_edit_labels(void *view, int on);
+extern int lr_home_editing(void), home_folders(void);
 extern int library_count(const char *sql), msg_counting(void);
 extern const char *ipod_home_shortcut(void);
 /* Split's menu width; the art fills the rest. */
@@ -4423,6 +4427,15 @@ void *coverflow_home_view(void) {
                                                          : (void *)0;
 }
 
+/* Home's main list's view when top is Home showing it (not a list its rows open, not Carousel):
+ * what Edit Home edits (library_edit.c), else 0. */
+void *coverflow_home_edit_view(void *top) {
+    return top && top == home.win && !home_open() && ipod_home() != 2 &&
+                   widget_get_visible(home.list)
+               ? coverflow_home_view()
+               : (void *)0;
+}
+
 /* Split under a home_lists_full theme (OLED's): the lists Home's rows open take the whole width,
  * as a page does, and the art is the main menu's alone. Without it, an iPod's submenu: the list
  * in the main menu's place beside the art. */
@@ -4468,7 +4481,7 @@ static void home_show(void *w, int on) {
  * moment between two tracks keeps it. Once stopped with the row shown, np_due looks again when
  * that time is up, as nothing may paint then. */
 #define NP_GONE_MS 3000
-void coverflow_home_np(void), coverflow_home_layout(void), home_np_keep(int d);
+void coverflow_home_np(void), coverflow_home_layout(void);
 static int np_due(const void *unused) {
     home.np_timer = 0;
     coverflow_home_np();
@@ -4484,29 +4497,31 @@ static int np_loaded(void) {
         home.np_timer = timer_add(np_due, (void *)0, (unsigned)left);
     return home.np && left > 0;
 }
-/* Every bar paint (navigation.c bar_sync): Home laid out again once the row is to come or go. */
+/* Every bar paint (navigation.c bar_sync): Home laid out again once Now Playing's row is to come
+ * or go, or, with Home on top, Folders' rule changes (home.c home_folders). */
 void coverflow_home_np(void) {
-    if (home.list && np_loaded() != home.np) coverflow_home_layout();
+    if (!home.list) return;
+    int top = window_manager_get_top_window(window_manager()) == home.win;
+    if (np_loaded() != home.np || (top && home_folders() != home.folders)) coverflow_home_layout();
 }
 /* Stored HOME=0/1/2 is Split/Full/Carousel in every theme: Split halves the screen, the art in the
  * right panel; Full hides the art and widens the list, its rows to the theme's home_full_row;
  * Carousel hides the art and shows stock's cards (tools/ipod.py ipod_home) in the
- * lists' place, and leaving it, the main list. Hidden rows (Now Playing with nothing loaded, the
- * Shortcut) are restacked last because the native layout includes hidden rows, and made
- * insensitive, as hidden rows keep their taps. Carousel keeps its Now Playing card, as stock's. */
+ * lists' place, and leaving it, the main list. The main list's rows go in the user's order and
+ * show as the user set them (library_edit.c lr_home_apply: Now Playing only with something loaded,
+ * Folders by default only while the card has folders); hidden rows are restacked last because the
+ * native layout includes hidden rows, and made insensitive, as hidden rows keep their taps. Edit
+ * Home lays Split out as Full (theme_engine.c ipod_home). Carousel keeps its Now Playing card, as
+ * stock's. */
 void coverflow_home_layout(void) {
     int mode = ipod_home(), full = mode == 1, carousel = mode == 2;
     const theme_t *T = theme();
     /* The art goes back to the panel; Split's next paint resumes the pan. */
     stop_timer(&home.drift);
     if (!home.list) return;
-    void *playing = widget_lookup(home.list, "btn_playing", 1);
     int np = np_loaded();
-    if (playing) {
-        if (np != widget_get_visible(playing)) home_np_keep(np ? 1 : -1);
-        widget_restack(playing, np ? 0 : widget_count_children(P(playing, W_PARENT)) - 1);
-        home_show(playing, np);
-    }
+    home.folders = home_folders();
+    lr_home_apply(coverflow_home_view(), np); /* the user's order and rows, Now Playing's with np */
     home.np = np;
     /* ponytail: the Shortcut is the carousel's card alone (Home's list has none); the card stays
      * when its target is gone (Shortcut: Rockbox, no Rockbox on the card; its tap says so), as the
@@ -4519,6 +4534,7 @@ void coverflow_home_layout(void) {
     int split = split_geom(SPLIT_ROW), outer = full ? 375 : split,
         inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
+    lr_edit_labels(coverflow_home_view(), lr_home_editing()); /* Edit Home's words, past circles */
     home_overflow(home.list, client_h());
     if (home.sets)
         home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
@@ -4670,6 +4686,7 @@ int coverflow_home(void *win, void *ctx) {
     if (art) widget_set_sensitive(art, 0);
     void *list = widget_lookup(win, "list_view_home", 1);
     home.list = list; /* a new Home window's own, so still the asset's width */
+    lr_home_tag(coverflow_home_view()); /* its rows' letters, for the user's order */
     home.sets = widget_lookup(win, "list_view_homeset", 1);
     if (home.sets) widget_set_sensitive(home.sets, 0);
     home.lib = widget_lookup(win, "list_view_homelib", 1);

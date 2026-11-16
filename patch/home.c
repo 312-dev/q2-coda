@@ -74,28 +74,28 @@ int ringnav_localmusic(void *win, void *ctx) {
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
     if (library_search())
         lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
-    /* Shuffle, Hi-Res, Long Songs and Upload Scrobbles are hidden (the menu review's, 2026-11-15),
-     * each kept in its place, as My Fav is, for Edit Library's merge */
+    /* Shuffle, Hi-Res, Long Songs and Upload Scrobbles are hidden until the user shows them in Edit
+     * Library (the menu review's, 2026-11-15); My Fav and Frequent are never shown (lr_retire) */
     void *shuffle = library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1);
     lr_put(rows, 'h', shuffle);
-    widget_set_visible(shuffle, 0, 0);
+    lr_auto_hide(shuffle);
     /* stock's rows: each one's letter, then its index */
     static const char stocks[] = { 'a', L_ARTISTS,   'l', L_ALBUMS, 's', L_SONGS,   'g', L_GENRES,
                                    'p', L_PLAYLISTS, 'n', L_ADDED,  'c', L_RECENT,  'i', L_HIRES,
                                    'u', L_UPDATE,    'f', L_FAV,    'q', L_FREQUENT };
     for (unsigned i = 0; i < sizeof stocks; i += 2)
         lr_put(rows, stocks[i], stock[(int)stocks[i + 1]]);
-    widget_set_visible(stock[L_HIRES], 0, 0);
+    lr_auto_hide(stock[L_HIRES]);
     /* Years: browsing by a tag, as Genre */
     lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Years", 1));
-    /* My Fav is Ratings' Loved, its row kept hidden */
+    /* My Fav is Ratings' Loved, its row kept hidden in its place */
     lr_put(rows, 'r', library_row(view, "local_fav", ratings_menu, 0, "Ratings", 1));
-    widget_set_visible(stock[L_FAV], 0, 0);
+    lr_retire(stock[L_FAV]);
     lr_put(rows, 'm', library_row(view, "local_frequentplay", most_played, 0, "Most Played", 1));
-    widget_set_visible(stock[L_FREQUENT], 0, 0); /* Most Played is its list, from every listen */
+    lr_retire(stock[L_FREQUENT]); /* Most Played is its list, from every listen */
     void *longs = library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1);
     lr_put(rows, 'L', longs);
-    widget_set_visible(longs, 0, 0);
+    lr_auto_hide(longs);
     /* Podcasts, Audiobooks, Photos, Books and Videos, each only with its folder; then iPod's Games.
      */
     static const char *const icons[] = { "local_podcasts", "local_audiobooks", "local_photos",
@@ -109,7 +109,7 @@ int ringnav_localmusic(void *win, void *ctx) {
     if (scrobble_ready()) {
         void *up = library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0);
         lr_put(rows, 'U', up);
-        widget_set_visible(up, 0, 0);
+        lr_auto_hide(up);
     }
     lr_apply(rows);
     library_look(view);
@@ -355,21 +355,47 @@ void home_overflow(void *list, int bottom) {
     scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
 }
 
-/* coverflow.c coverflow_home_layout, as Now Playing's row comes (d 1) or goes (-1) at the main
- * list's top, before the list is laid out again: the same row stays selected, so load sees no
- * change of count (which would start the selection over), and the rows in view stay, but for the
- * selected one's coming in sight as the row comes above it. On Now Playing as it goes, the row
- * after it, the Library. */
-void home_np_keep(int d) {
+/* library_edit.c lr_home_apply, as one of Home's rows comes (d 1) or goes (-1) at shown place k
+ * of its main list (Now Playing's as play starts or stops, Folders' as the card gets folders, any
+ * of them in and out of Edit Home), before the list is laid out again: the same row stays selected,
+ * so load sees no change of count (which would start the selection over), and the rows in view
+ * stay, but for the selected one's coming in sight as a row comes above it. On the selected row as
+ * it goes, the row after it. */
+void home_keep(int d, int k) {
     void *view = coverflow_home_view();
     int rest = home_rest(view, (int *)0);
     if (!rest) return;
     int sel = widget_get_prop_int(view, SEL, -1), count = widget_get_prop_int(view, COUNT, -1);
     if (count >= 0) prop(view, COUNT, count + d);
-    if (sel > 0 || (sel == 0 && d > 0)) prop(view, SEL, sel += d);
+    if (sel > k || (sel == k && d > 0)) prop(view, SEL, sel += d);
     int row = I(widget_get_child(view, 0), W_H), y = I(view, SCROLL_Y);
-    if (y > 0 || (d > 0 && (sel + 1) * row > rest)) y += d * row;
+    if (k * row < y || (d > 0 && (sel + 1) * row > y + rest)) y += d * row;
     scroll_view_set_offset(view, I(view, SCROLL_X), y < 0 ? 0 : y);
+}
+
+/* Home's Folders row's own rule (library_edit.c lr_home_apply): 1 while the SD card has folders to
+ * list, the test Folders' empty page makes (feedback.c feedback_folder): stock's listing of the
+ * card's root (toolsLoadDirectory, which leaves out what stock hides) holds a row. It is read again
+ * only when the card comes or goes or its root changes (its mtime), never while a library scan
+ * fills the listing's deque, and only with Home on top, so no Folders page holds that listing.
+ * ponytail: a stat of the card's root a bar paint on Home; Folder Root's folder is not what is
+ * listed (the card's root is), so a Folder Root holding nothing still shows Folders. */
+#define HOME_CARD "/mnt/mmc"
+static struct {
+    unsigned key; /* the root's identity at the last listing, 0: none yet */
+    unsigned char folders;
+} hf __attribute__((section(".scratch")));
+int home_folders(void) {
+    unsigned s[36] = { 0 }, key = 1;
+    if (!access("/tmp/mmc_add", 0) && !__xstat(3, HOME_CARD, s))
+        key = hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&s[0], 4),
+                         (const unsigned char *)&s[16], 8) |
+              2;
+    if (key != hf.key && !library_scanning()) {
+        hf.key = key;
+        hf.folders = key != 1 && toolsLoadDirectory(HOME_CARD) > 0;
+    }
+    return hf.folders;
 }
 
 /* smoothstep of num/den, clamped to 0..1, in 256ths. */

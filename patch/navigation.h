@@ -507,6 +507,12 @@ void battery_slim(void *canvas, int x, int y, int bw, int bh, unsigned key);
 /* list_marks.c: an on/off setting's switch, ending on canvas column right, centred on y
  * (settings.values.switch) */
 void switch_mark(void *canvas, int right, int y, int on, int selected);
+/* list_marks.c: the row editors' marks (docs/oled-design.md#edit-library): a grip centered on cx,
+ * cy scaled by pct, a lifted row's raised card, and a row's check circle in state CIRCLE_* */
+enum { CIRCLE_ON, CIRCLE_OFF, CIRCLE_LOCKED };
+void grip_mark(void *canvas, int cx, int cy, unsigned rgb, int pct);
+void lift_card_paint(void *canvas, const rect_t *card);
+void check_circle(void *w, void *canvas, int cx, int cy, int state, int selected);
 
 /* song_rows.c: SONGS_INLINE's rows. Song Artist's and Song Length's values (theme_engine.c
  * song_artist, song_length), a list's kind (song_list) and where an artist stands (song_fit). */
@@ -862,17 +868,27 @@ int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_rig
     az_bar_in(void *w);
 int az_initial(const char *s), az_target(const int *first, int letter), az_letter_at(int y),
     az_column(signed char *out);
-/* library_edit.c: the Library's row order and OLED's Edit Library
- * (docs/oled-design.md#edit-library) */
-#define LR_ROWS 32 /* the Library's rows at most, shown or hidden: lr_default's letters */
-extern const char lr_default[];
-int lr_at(int c), lr_resolve(const char *saved, char *out);
+/* library_edit.c: the Library's and Home's row order and visibility, and OLED's Edit Library and
+ * Edit Home (docs/oled-design.md#edit-library) */
+#define LR_ROWS 32 /* a list's rows at most, shown or hidden: lr_default's letters */
+extern const char lr_default[], lr_home[];
+int lr_at(int c), lr_resolve(const char *saved, char *out),
+    lr_resolve_in(const char *def, const char *saved, char *out, char *vis),
+    lr_shows(int mark, int rule);
 void lr_merge(char *full, const char *shown), lr_put(void **rows, int c, void *row),
-    lr_apply(void **rows);
+    lr_apply(void **rows), lr_auto_hide(void *row), lr_retire(void *row);
+void lr_home_tag(void *view), lr_home_apply(void *view, int np), lr_edit_labels(void *view, int on);
 void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
-    lr_editing(void *page);
+    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void);
+const char *lr_edit_title(void);
+/* home.c: Home's Folders rule and its list's rows coming and going; coverflow.c: Home's list */
+int home_folders(void);
+void home_keep(int d, int k);
+void *coverflow_home_edit_view(void *top);
+void coverflow_home_layout(void);
+int play_hold_released(void); /* navigation.c: Play/Pause's release ends a hold that fired */
 /* navigation.c */
 void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */

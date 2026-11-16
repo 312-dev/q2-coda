@@ -216,6 +216,8 @@ VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, 
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 SORT = 'M0 0H16V2H0ZM0 5H11V7H0ZM0 10H6V12H0Z'
 SORT_BOX = (0, 0, 16, 12)  # Songs' Sort (navigation.c action_row), white as stock's glyphs: Light Mode flips it to the ink
+CIRCLE_CHECK_PX = 11  # the row editors' check circle's glyphs (list_marks.c CIRCLE_CHECK_PX, CIRCLE_LOCK_PX)
+CIRCLE_LOCK_PX = 10
 CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
 # The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
 CONFIRM_GLYPH_PX = 56
@@ -479,6 +481,10 @@ def images(t):
                 for k, c in {**inks, 'w': 0xffffff}.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(on).items()}
+    # the row editors' check circles (list_marks.c check_circle): a bold check, white on the accent's disc and the
+    # accent's on the selection's white one, and the locked row's padlock in Text Secondary per half
+    out |= {f'{prefix}_circle_check_{k}': phosphor('check-bold', CIRCLE_CHECK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    out |= {f'{prefix}_circle_lock_{k}': phosphor('lock-simple-fill', CIRCLE_LOCK_PX, c) for k, c in FOLDER_INKS.items() if k != 'w'}
     # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
     out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
     # feedback.c's confirmation after a shuffle, a Ratings row's hearts and Streaming's service marks
