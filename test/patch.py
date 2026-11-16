@@ -8068,8 +8068,8 @@ def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's def
     m.before=m.bar(); m.calls.clear()
     m.call(address=payload_syms['playlists_new'],args=(0,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
     return m
-m=pl_new(); strips=[n for n in m.nodes.values() if n.get('name')=='searchstrip_page']
-assert m.shut==1 and not m.dialogs and len(strips)==1 and m.navbar()==0,(m.dialogs,len(strips)); passed()
+m=pl_new(); opened=[c for c in m.calls if c[0]=='window_create']  # page_open's, the strip's page
+assert m.shut==1 and not m.dialogs and len(opened)==1 and m.navbar()==0,(m.dialogs,opened); passed()
 m=pl_new(covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
