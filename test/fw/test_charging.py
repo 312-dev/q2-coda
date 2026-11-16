@@ -159,11 +159,12 @@ def test_a_key_ends_it_lit_and_goes_no_further_than_its_release(fw, st, ui):
     plug = Plug(fw, st, ui)
     plug.poll()
     gate = fw.fn('charge_gate', C.c_int, C.c_void_p)
+    keep = []
     def event(kind, key=0):
         raw = C.create_string_buffer(0x80)
         struct.pack_into('<i', raw, O['EVENT_TYPE'], kind)
         struct.pack_into('<i', raw, O['EVENT_KEY'], key)
-        plug.keep = raw
+        keep.append(raw)
         return gate(C.addressof(raw))
     assert [event(O['EVT_KEY_DOWN'], O['KEY_CENTER']), event(O['EVT_KEY_UP'], O['KEY_CENTER'])] == [1, 1]
     assert event(O['EVT_KEY_DOWN'], O['KEY_CENTER']) == 0  # the next press is the page's
