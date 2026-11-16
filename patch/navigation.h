@@ -477,6 +477,8 @@ void synclink_default(void);
  * settings row's caption, shown under it while it is selected (paint_selection) */
 int about_list(void *list);
 void about_rows(void *view);
+void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
+int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);

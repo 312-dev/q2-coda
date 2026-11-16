@@ -2,7 +2,8 @@
  * (docs/oled-design.md Screens: About): stock's rows, each a key and its value, stay where set_row
  * maps them but take no selection, wheel or tap (disabled, so ringnav's collect passes them), the
  * key in Text Primary and the value in the theme's value grey, in the disable state too, each value
- * as wide as its key leaves it (about_rows); from ipod_list_layout, after set_row. */
+ * as wide as its key leaves it (about_rows); from ipod_list_layout, after set_row. A --dev build's
+ * Save Diagnostics row (diagnostics.c) stays a row the wheel selects. */
 #include "navigation.h"
 
 #define ABOUT_INK_STATES 4 /* text_ink's normal, pressed, over and disable */
@@ -37,6 +38,7 @@ void about_rows(void *view) {
         void *item = widget_get_child(view, i),
              *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0,
              *key = (void *)0, *val = (void *)0;
+        if (diag_row(item)) continue; /* --dev builds' Save Diagnostics: a row to select */
         widget_set_enable(item, 0);
         for (unsigned j = 0, k = b ? widget_count_children(b) : 0; j < k && !val; ++j) {
             void *c = widget_get_child(b, j);

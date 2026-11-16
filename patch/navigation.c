@@ -8082,7 +8082,7 @@ int ringnav_start_player(void) {
  * scrolling with ellipses. FW. Version (row 1) reads demo's version literal, which carries the
  * updater tag (tools/build.py TAG), so it shows the stock firmware's again; a CFW. Version row in
  * the same widgets follows it. Its button has no name, so stock's row click (atoi of the name,
- * 0x4c12f8) ignores it. */
+ * 0x4c12f8) ignores it. A --dev build adds Save Diagnostics last (diagnostics.c). */
 static void about_label(void *button, int x, int w, const char *style, const char *text) {
     void *label = hscroll_label_create(button, x, 0, w, 70);
     widget_use_style(label, style);
@@ -8103,6 +8103,7 @@ int ringnav_about(void *win, void *ctx) {
         about_label(button, 10, 166, "s_scrlabel_white24l", "CFW. Version");
         about_label(button, 176, 149, "s_scrlabel_white20r", Q2POD_VERSION);
         widget_restack(P(button, W_PARENT), 2);
+        diag_about_row(view);
     }
     return result;
 }
