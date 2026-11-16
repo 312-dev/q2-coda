@@ -4002,252 +4002,24 @@ def cpm_centre(m):  # Centre on the selected row, the row's click running as sto
     m.confirm(); m.advance(0,clear=False); m.stack_rows(); m.paint(m.view)
 NEW,EDIT='New Playlist…','Select Playlists…'
 LISTS=['List 0','List 1','List 2']
-
-# The list: stock's rows two lines high (page.rows detail_height), its tile row and toolbar hidden; New Playlist and Edit
-# Playlists head it, as tall as the playlists' rows (pl_pitch: one pitch a list); the bar says Playlists; none of select
-# mode's rows show. Each playlist's art leads (the set's art, 40 px, at list.art x), its text from list.art text_x.
-PL_ROW,PL_ART_PX=OLED_T['page_detail'],OLED_G.art; PL_X=OLED_T['art_text_x']-2; PL_W=289-(PL_X-OLED_T['page_x'])  # pl_fit
-m=RowPlaylistMachine(); kids=m.rebuild()
-assert m.rows()==[NEW,EDIT]+LISTS and m.bar()=='Playlists'
-assert m.nodes[kids[0]]['visible']==0 and m.nodes[m.nav]['visible']==0
-assert [m.row_text(r) for r in kids[1:4]]==['Select All',NEW,EDIT]
-for row,text in zip(kids[4:7],LISTS):
-    button=m.nodes[row]['children'][0]; info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
-    title,second=m.nodes[info]['children']
-    assert m.get(row+O['W_H'])==PL_ROW==52 and m.get(button+O['W_H'])==52 and m.get(button+O['W_W'])==375
-    assert m.nodes[row]['name']==('' if text==LISTS[-1] else '_page_tall')
-    art=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='_pl_art')
-    assert m.nodes[art]['visible'] and tuple(m.get(art+O[k]) for k in ('W_X','W_Y','W_W','W_H'))==(OLED_T['art_x'],(52-PL_ART_PX)//2,PL_ART_PX,PL_ART_PX)
-    # A label draws nothing in a box shorter than its font: page.rows' boxes hold the 24 and 18 px faces.
-    assert m.nodes[second]['text']=='3 Songs' and m.get(title+O['W_H'])==OLED_T['page_cap_h']==24 and m.get(second+O['W_H'])==OLED_T['page_det_h']==20
-    assert m.get(title+O['W_Y'])==OLED_T['page_cap_y'] and m.get(second+O['W_Y'])==OLED_T['page_det_y'] and m.get(info+O['W_X'])==PL_X and m.get(info+O['W_W'])==PL_W
-    more=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_more'))
-    assert m.nodes[more]['visible']==1 and m.get(more+O['W_X'])==321 and m.nodes[more]['image']=='unselect'
-action=[r for r in kids if m.row_text(r)==NEW][0]
-assert m.get(action+O['W_H'])==PL_ROW and m.get(m.nodes[m.nodes[action]['children'][0]]['children'][0]+O['W_H'])==PL_ROW>=24
-# ... the separators: every shown row but the list's last.
-assert [m.nodes[r]['name'] for r in kids if m.nodes[r]['visible']]==['_page_tall']*4+['']; passed()
-
-# New Playlist and Select Playlists head the list; the page opens on its first playlist below them, as stock's and the
-# iPod's lists of playlists alone do. The wheel reaches them, and Centre reaches stock's own handlers.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); assert m.selected(m.view)==2 and m.rows()[2]=='List 0'
-cpm_wheel(m,O['KEY_NEXT'],2); assert m.selected(m.view)==4
-cpm_wheel(m,O['KEY_PREV'],3); assert m.selected(m.view)==1 and not m.dialogs
-cpm_wheel(m,O['KEY_PREV']); assert m.selected(m.view)==0
-cpm_centre(m); assert m.dialogs==['dialog/addplaylist_dialog'] and m.navbar()==0
-cpm_wheel(m,O['KEY_NEXT']); cpm_centre(m); assert m.navbar()==1 and m.dialogs==['dialog/addplaylist_dialog']; passed()
-# ... an empty list opens on New Playlist.
-m=RowPlaylistMachine(0); m.rebuild(); m.paint(m.view); assert m.selected(m.view)==0; passed()
-
-# Select Playlists is stock's select mode with its toolbar hidden: Select All first, Import and Done last, the bar's own
-# word; the selection goes on the first playlist. Return leaves the mode, not the page, and stock's rows come back.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); cpm_wheel(m,O['KEY_PREV']); cpm_centre(m)
-assert m.navbar()==1 and m.marks==[0,0,0] and m.nodes[m.nav]['visible']==0
-assert m.rows()==['Select All']+LISTS+['Import Playlists','Done'] and m.bar()=='Select Playlists' and m.selected(m.view)==1
-button=m.row_button('List 0'); choice=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_choice'))
-info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
-assert m.nodes[choice]['visible']==1 and m.get(choice+O['W_X'])==333 and m.get(info+O['W_X'])==PL_X and m.get(info+O['W_W'])==309-(PL_X-OLED_T['page_x'])
-f,ctx=m.handler(m.top,O['EVT_KEY_UP']); assert f!=0x4f2394
-ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RETURN'])
-assert m.call(address=f,args=(ctx,ev,0,0),gap=0,clear=False)==11; m.advance(0,clear=False)
-assert m.navbar()==0 and m.top in m.stack and m.rows()==[NEW,EDIT]+LISTS and m.bar()=='Playlists' and m.selected(m.view)==2
-# ... and out of it, Return is stock's: the page closes.
-assert m.call(address=f,args=(ctx,ev,0,0),gap=0,clear=False)==11 and any(c[0]=='q:window_close' or c[0]=='window_close' for c in m.calls); passed()
-
-# Marks name their count: Export and Delete appear once one is marked, the selection stays on its row as they do.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); m.tap(m.row_button(EDIT)); m.stack_rows(); m.paint(m.view)
-cpm_wheel(m,O['KEY_NEXT']); assert m.selected(m.view)==2
-cpm_centre(m); assert m.marks==[0,1,0] and m.bar()=='1 Selected' and m.selected(m.view)==2
-assert m.rows()==['Select All']+LISTS+['Import Playlists','Export 1 Playlist','Delete 1 Playlist…','Done']
-m.tap(m.row_button('List 0')); assert m.marks==[1,1,0] and m.bar()=='2 Selected' and m.rows()[-3:-1]==['Export 2 Playlists','Delete 2 Playlists…']
-# ... and a mark taken back takes its rows with it: none marked, no Export or Delete (the count ran before the mark).
-m.tap(m.row_button('List 0')); m.tap(m.row_button('List 1')); assert m.marks==[0,0,0] and m.bar()=='Select Playlists'
-assert m.rows()[-2:]==['Import Playlists','Done']
-m.tap(m.row_button('List 1')); m.tap(m.row_button('List 0')); assert m.marks==[1,1,0] and m.bar()=='2 Selected'
-m.tap(m.row_button('Select All')); assert m.marks==[1,1,1] and m.bar()=='3 Selected' and m.rows()[-2]=='Delete 3 Playlists…'
-# ... and then reads Deselect All, which clears them: stock's toggle on g_allselect_flag.
-assert m.rows()[0]=='Deselect All' and m.u.mem_read(O['G_ALLSELECT_FLAG'],1)==b'\1'
-m.tap(m.row_button('Deselect All')); assert m.marks==[0,0,0] and m.bar()=='Select Playlists' and m.rows()[-2:]==['Import Playlists','Done']
-assert m.rows()[0]=='Select All'
-# ... every row marked by hand sets the flag too, so it reads Deselect All and clears them.
-for name in LISTS: m.tap(m.row_button(name))
-assert m.marks==[1,1,1] and m.rows()[0]=='Deselect All'
-m.tap(m.row_button('Deselect All')); assert m.marks==[0,0,0] and m.rows()[0]=='Select All'; passed()
-
-# Export in select mode reaches stock's handler, marked: exportPlayList's first argument 0 and the marks kept.
-m=RowPlaylistMachine(); m.rebuild(); m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('List 1'))
-m.tap(m.row_button('Export 1 Playlist'))
-assert m.confirms and m.exports==[(0,[0,1,0])] and not m.deletes
-# A dialog's close is stock's mode's end: its foreground handler rebuilds, and the rows follow.
-m.answer=0; assert m.call(address=m.REBUILD_DONE,args=(m.top,0,0,0),gap=0,clear=False)==0; m.stack_rows()
-assert m.navbar()==0 and m.rows()==[NEW,EDIT]+LISTS and m.bar()=='Playlists'
-# ... and Export all goes through Select All.
-m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('Select All')); m.answer=10; m.tap(m.row_button('Export 3 Playlists'))
-assert m.exports[-1]==(0,[1,1,1]); passed()
-
-# Delete takes stock's confirm, once: Cancel deletes nothing, and OK deletes the marked. A row scrolled past or a selection
-# moved can't reach it: each row clicks its own action, and a turn of the wheel cancels a pending Centre.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); m.tap(m.row_button(EDIT)); m.stack_rows(); m.paint(m.view)
-m.tap(m.row_button('List 2')); m.stack_rows(); m.paint(m.view)
-assert m.rows()[-2]=='Delete 1 Playlist…'
-cpm_wheel(m,O['KEY_NEXT'],5); assert m.selected(m.view)==6   # Delete's row
-m.call(O['KEY_CENTER']); m.call(O['KEY_PREV'],gap=10); m.advance(O['DOUBLE_CLICK_MS'],clear=False); m.advance(0,clear=False); m.paint(m.view)
-assert not m.confirms and not m.deletes and m.selected(m.view)==5  # Export's row, never fired
-cpm_wheel(m,O['KEY_PREV'],3); assert m.selected(m.view)==2
-cpm_centre(m); assert m.marks==[0,1,1] and not m.confirms and not m.deletes  # the row's mark, nothing more
-m.answer=0; m.tap(m.row_button('Delete 2 Playlists…')); assert len(m.confirms)==1 and not m.deletes
-m.answer=10; m.tap(m.row_button('Delete 2 Playlists…')); assert len(m.confirms)==2 and m.deletes==[[0,1,1]]; passed()
-
-# Import is inside Select Playlists, and on an empty list a row of its own beside New Playlist, over OLED's note
-# (feedback_empty): No playlists and its hint 24 px lower, in NOTE_H boxes that hold their 19 and 18 px, centred between
-# the rows shown (the bar, then two at the set's pitch) and NOTE_END, 282.
-m=RowPlaylistMachine(0); kids=m.rebuild()
-assert m.rows()==[NEW,'Import Playlists'] and m.nodes[m.row_button(NEW)]['visible']
-note,hint=(next(k for k in m.nodes[m.top]['children'] if m.nodes[k]['name']==n) for n in ('_empty','_empty_hint'))
-y=(OLED_G.bar+2*OLED_G.pitch+282)//2-24//2
-assert m.nodes[note]['text']=='No playlists' and m.nodes[note]['visible']==1 and m.get(note+O['W_H'])==24>=19 and m.get(note+O['W_Y'])==y
-assert m.nodes[hint]['text']=='Hold Play/Pause on a song to add it' and m.nodes[hint]['visible']==1 and m.get(hint+O['W_Y'])==y+24
-m.tap(m.row_button('Import Playlists')); assert m.confirms and any(c[0]=='importPlayList' for c in m.calls)
-m.lists('Made'); m.rebuild(); assert m.rows()==[NEW,EDIT,'Made'] and m.nodes[note]['visible']==0
-m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('Import Playlists')); assert any(c[0]=='importPlayList' for c in m.calls); passed()
-
-# The picker: no toolbar, the list's rows without dots, New Playlist first (no Edit), opening on the first playlist,
-# and a tap where dots would be picks, never More.
-m=RowPlaylistMachine(3,1); kids=m.rebuild(); m.paint(m.view)
-assert m.rows()==[NEW]+LISTS and m.bar()=='Playlists' and m.selected(m.view)==1
-assert [m.nodes[r]['name'] for r in kids]==['_page_tall']*3+['']
-button=m.row_button('List 1'); more=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_more'))
-assert m.nodes[more]['visible']==0
-f,ctx=m.handler(button,O['EVT_CLICK']); assert f!=m.STOCK_PICK
-m.tap(m.row_button(NEW)); assert m.dialogs==['dialog/addplaylist_dialog']
-ev=m.alloc(0x30); m.word(ev,O['EVT_CLICK']); m.word(ev+O['EVENT_X'],300)
-m.mock('tk_thread_create','tk_thread_start','widget_set_enable')
-m.call(address=f,args=(ctx,ev,0,0),gap=0,clear=False); assert not m.mores and any(c[0]=='tk_thread_create' for c in m.calls); passed()
-
-# A playlist row's click runs pl_pick alone, which counts the marks after stock's: every dress is on stock's fresh rows,
-# PLAYLIST_PICK their one.
-m=RowPlaylistMachine(); m.rebuild(); m.rebuild()
-for t in LISTS: assert [f for e,f,c in m.nodes[m.row_button(t)]['handlers'] if e==O['EVT_CLICK']]==[payload_syms['pl_pick']]
-passed()
-# A row's More: in the normal list a tap on the dots is stock's, and the hold finds the row by them; a row of ours has no
-# menu, so its hold is left to stock (ringnav_keylong: no queue menu, nothing taken).
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view)
-ev=m.alloc(0x30); m.word(ev,O['EVT_CLICK']); m.word(ev+O['EVENT_X'],300)
-m.nested(0x4b4840,m.row_button('List 2'),ev,0,0); assert m.mores==[2]
-m.press(100); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog' and m.labels()[-1]=='More\u2026'
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); cpm_wheel(m,O['KEY_PREV'],2)
-assert m.selected(m.view)==0
-m.press(200); before=m.top; assert m.hold()==0 and m.top==before; passed()
-
-# Dots and tick: the theme's own, in the row's coordinates (paint_radio): the dots grey, none on the band, 18 px across,
-# centred in the row; the tick the theme's check, centred on the mark's right end, the accent's off the band.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); assert m.selected(m.view)==2
-for t,dots in (('List 0',[]),('List 1',[(16,24,4,4),(23,24,4,4),(30,24,4,4)])):
-    more=next(k for k in m.nodes[m.row_button(t)]['children'] if m.nodes[k]['name'].startswith('img_more'))
-    m.call(address=HOOKS['widget_on_paint_background'][0],args=(more,m.canvas,0,0),gap=0)
-    m.rounded=[]; m.call(address=HOOKS['widget_on_paint_border'][0],args=(more,m.canvas,0,0),gap=0,clear=False)
-    assert [r['rect'] for r in m.rounded]==dots, t
-passed()
-m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('List 1'))
-choice=next(k for k in m.nodes[m.row_button('List 1')]['children'] if m.nodes[k]['name'].startswith('img_choice'))
-assert m.nodes[choice]['image']=='select' and m.marks==[0,1,0]
-m.image_loads=[]; m.call(address=HOOKS['widget_on_paint_border'][0],args=(choice,m.canvas,0,0),gap=0)
-assert m.image_loads==['oled_check_a'] and [i[:2] for i in m.icons]==[(26-50//2,52//2)]; passed()
-
-# The list's rows have their dots, so no `>` (paint_chevrons: stock's More hit test owns the trailing area); a tap left of
-# the dots' column at the edge (x from 333) opens the playlist, the dots are More; in select mode any tap marks. The
-# picker's rows, without dots, draw the theme's `>` on the set's right column (chevron_icon), white on the selection.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); assert not m.icons
-for x in (330,300):
-    m.calls.clear(); m.tap(m.row_button('List 2'),x); assert not m.mores and any(c[0]=='navigator_to_with_context' for c in m.calls), x
-m.tap(m.row_button('List 2'),340); assert m.mores==[2]
-# ... the band's row draws no dots: a tap there opens to the edge, its More is the hold's
-assert m.selected(m.view)==2; m.calls.clear(); m.tap(m.row_button('List 0'),340)
-assert m.mores==[2] and any(c[0]=='navigator_to_with_context' for c in m.calls)
-m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('List 2'),330); assert m.mores==[2] and m.marks==[0,0,1]
-m=RowPlaylistMachine(3,1); m.rebuild(); m.icons=[]; m.image_loads=[]; m.paint(m.view); assert m.selected(m.view)==1
-assert [i[:2] for i in m.icons]==[(375-OLED_G.right_x-5,52*i+26) for i in (1,2,3)] and m.image_loads==['oled_chevron_w','oled_chevron_d','oled_chevron_d']; passed()
-
-# A page destroyed in select mode (held Return to Home) clears stock's flag; one destroyed outside it leaves the flag alone.
-m=RowPlaylistMachine(); m.rebuild()
-gone=[(f,ctx) for t,f,ctx in m.nodes[m.top]['handlers'] if t==O['EVT_DESTROY']]; assert len(gone)==1; f,ctx=gone[0]
-m.byte(syms['g_navbar_status'],1); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False); assert m.navbar()==1
-m.byte(syms['g_navbar_status'],0); m.tap(m.row_button(EDIT)); m.stack_rows(); assert m.navbar()==1
-m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False); assert m.navbar()==0; passed()
-
-# Return in select mode: the latest click of a pass wins (Done over a Delete just tapped), and without Done's target it is stock's.
-m=RowPlaylistMachine(); m.rebuild(); m.tap(m.row_button(EDIT)); m.stack_rows(); m.tap(m.row_button('List 1'))
-ev=m.alloc(0x30); m.word(ev,O['EVT_CLICK']); m.on_click(m.row_button('Delete 1 Playlist…'),ev)
-f,ctx=m.handler(m.top,O['EVT_KEY_UP']); key=m.alloc(0x40); m.word(key,O['EVT_KEY_UP']); m.word(key+O['EVENT_KEY'],O['KEY_RETURN'])
-assert m.call(address=f,args=(ctx,key,0,0),gap=0,clear=False)==11; m.advance(0,clear=False)
-assert not m.confirms and not m.deletes and m.navbar()==0 and m.rows()==[NEW,EDIT]+LISTS
-m.tap(m.row_button(EDIT)); m.stack_rows()
-for w,v in m.nodes.items():  # stock's Done gone from every widget it was bound to
-    if (O['EVT_CLICK'],0x4b45ec) in [h[:2] for h in v.get('handlers',())]: m.word(m.get(m.get(w+O['W_EMITTER']))+12,0)
-assert m.call(address=f,args=(ctx,key,0,0),gap=0,clear=False)==11 and any(c[0] in ('q:window_close','window_close') for c in m.calls); passed()
-
-# Stock's relayout of a playlist row (its own layouter, compact_row_layout) keeps pl_fit's places.
-m=RowPlaylistMachine(); m.rebuild(); button=m.row_button('List 1')
-info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info'); title,second=m.nodes[info]['children']
-more=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_more'))
-assert m.get(m.get(button+O['W_CHILDREN_LAYOUT'])+O['CHILDREN_LAYOUT_VTABLE'])!=O['DEFAULT_LAYOUT_VTABLE']
-native_row_layout(m,button)
-assert (m.get(info+O['W_X']),m.get(info+O['W_W']),m.get(more+O['W_X']),m.get(more+O['W_W']))==(PL_X,PL_W,321,50)
-assert m.get(title+O['W_Y'])==OLED_T['page_cap_y'] and m.get(second+O['W_Y'])==OLED_T['page_det_y']; passed()
-
-# Each playlist row's art (playlist_art.c), under a set with row art (OLED's): stock's image takes the playlist's
-# small art by name once its file is made, stock's placeholder till then. The songs are read once a rebuild; a build
-# finished asks again for its playlist's rows alone (an ask can queue a failed one anew); the page closed stops the
-# builds and the rows hear no more.
 PL_ART=lambda cd: f'file:///mnt/mmc/.coverflow/pl_{cd}_0000abcd_s.jpg'
 def pl_art_lists(m,n):  # List i at cd_num 10+i, as RowPlaylistMachine.lists
     records=[m.song(f'List {i}') for i in range(n)]
     for i,r in enumerate(records): m.word(r+O['REC_TITLE'],m.string(f'List {i}')); m.word(r+O['REC_DISC'],10+i)
     m.word(syms['p_deque_playlist'],m.deque(records))
 def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m.nodes[k]['type']=='image' and not (m.nodes[k].get('name') or '').startswith('img_'))
-def pl_ready(m,cd): m.call(address=m.get(payload_syms['playlist_art_ready']),args=(cd,0,0,0),gap=0,clear=False)
-m=RowPlaylistMachine(); m.art={11:PL_ART(11)}; m.rebuild()
-buttons=[m.row_button(name) for name in LISTS]
-assert [m.nodes[pl_art_of(m,b)]['image'] for b in buttons]==['playlist_default',PL_ART(11),'playlist_default']
-assert m.refreshes==1 and m.asks==[(10,'List 0',1),(11,'List 1',1),(12,'List 2',1)]
-m.asks=[]; m.art[12]=PL_ART(12); pl_ready(m,12)
-assert m.asks==[(12,'List 2',1)] and m.nodes[pl_art_of(m,buttons[2])]['image']==PL_ART(12) and m.refreshes==1
-m.asks=[]; pl_ready(m,99); assert not m.asks  # a playlist no longer listed
-# ... a playlist emptied, or left with albums without art: its re-ask finds none, and its row shows the placeholder, not
-# the old 2x2.
-del m.art[12]; pl_ready(m,12); assert m.nodes[pl_art_of(m,buttons[2])]['image']=='playlist_default'
-m.art[12]=PL_ART(12); pl_ready(m,12); assert m.nodes[pl_art_of(m,buttons[2])]['image']==PL_ART(12)
-# ... the image cache dropped (Light Mode, Accent: image_manager_unload_all): the rows hold names, not bitmaps, so
-# stock's image paint loads each again by name; a rebuild names them again.
-assert not [c for c in m.calls if c[0] in ('widget_load_image','image_manager_unload_all','image_manager_unload_bitmap_by_name')]
-m.rebuild(); assert [m.nodes[pl_art_of(m,m.row_button(name))]['image'] for name in LISTS]==['playlist_default',PL_ART(11),PL_ART(12)]
-f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
-assert m.stops==1; m.asks=[]; pl_ready(m,12); assert not m.asks; passed()
-# ... Import, which writes every song it reads, stops the builds before stock's import runs; its rebuild asks again.
-m=RowPlaylistMachine(); m.rebuild(); m.tap(m.row_button(EDIT)); m.stack_rows(); stops=m.stops
-m.tap(m.row_button('Import Playlists')); assert m.stops==stops+1 and any(c[0]=='importPlayList' for c in m.calls); passed()
+
+# A playlist row's click runs pl_pick alone, which counts the marks after stock's: every dress is on stock's fresh rows,
+# PLAYLIST_PICK their one.
+m=RowPlaylistMachine(); m.rebuild(); m.rebuild()
+for t in LISTS: assert [f for e,f,c in m.nodes[m.row_button(t)]['handlers'] if e==O['EVT_CLICK']]==[payload_syms['pl_pick']]
+passed()
 # Before theme_boot writes a set (SET0: stock's toolbar page, no row art) the rows are stock's: its placeholder, nothing
 # asked, read or stopped; and the Add to Playlist picker shares the page and stays as it is.
 for mode in (0,1,2):
     m=PlaylistMachine(0,mode); pl_art_lists(m,3); m.art={11:PL_ART(11)}; kids=m.rebuild()
     assert [m.nodes[pl_art_of(m,m.nodes[r]['children'][0])]['image'] for r in kids[-3:]]==['playlist_default']*3
     assert not m.asks and not m.refreshes and not [h for h in m.nodes[m.top].get('handlers',()) if h[0]==O['EVT_DESTROY']]; passed()
-# OLED's row art: a playlist's row is an album row, its art at list.art x and the set's art size, centred in the row,
-# the text from list.art text_x to the dots' column; the dots, and select mode's marks, where they were.
-m=RowPlaylistMachine(); m.art={11:PL_ART(11)}; m.rebuild()
-assert m.rows()==[NEW,EDIT]+LISTS and m.asks==[(10,'List 0',1),(11,'List 1',1),(12,'List 2',1)]
-for name,image in zip(LISTS,('playlist_default',PL_ART(11),'playlist_default')):
-    button=m.row_button(name); art=pl_art_of(m,button); info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
-    more=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_more'))
-    assert m.nodes[art]['visible'] and m.nodes[art]['image']==image and [m.get(art+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[OLED_T['art_x'],(PL_ROW-PL_ART_PX)//2,PL_ART_PX,PL_ART_PX]
-    assert (m.get(info+O['W_X']),m.get(info+O['W_W']),m.get(more+O['W_X']),m.nodes[more]['visible'])==(PL_X,PL_W,321,1)
-m.art[12]=PL_ART(12); pl_ready(m,12); assert m.nodes[pl_art_of(m,m.row_button('List 2'))]['image']==PL_ART(12)
-native_row_layout(m,m.row_button('List 1')); info=next(k for k in m.nodes[m.row_button('List 1')]['children'] if m.nodes[k]['name']=='view_info')
-assert (m.get(info+O['W_X']),m.get(info+O['W_W']))==(PL_X,PL_W)
-m.tap(m.row_button(EDIT)); m.stack_rows(); button=m.row_button('List 0'); art=pl_art_of(m,button)
-choice=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name'].startswith('img_choice'))
-info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
-assert m.nodes[art]['visible'] and m.get(art+O['W_X'])==OLED_T['art_x'] and m.get(choice+O['W_X'])==333 and (m.get(info+O['W_X']),m.get(info+O['W_W']))==(PL_X,309-(PL_X-OLED_T['page_x'])); passed()
 # ... the picker keeps its text rows: their art hidden, the text from page.rows text_x, and none built for them.
 m=RowPlaylistMachine(3,1); m.art={11:PL_ART(11)}; m.rebuild()
 for name in LISTS:
@@ -4312,25 +4084,11 @@ for base in (PlaylistMachine,RowPlaylistMachine):
     m.on_click=lambda w,e,f=m.on_click: (xs.append(m.get(e+O['EVENT_X'])),f and f(w,e))
     m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False)  # List 0, now the third row
     assert [m.nodes[c]['name'] for c in m.clicks]==['2'] and xs==[0],(base,m.clicks); passed()
-# ... stock's own row click, run from under the covers, opens the playlist as a tap on the page itself does.
-opens=lambda m: [(c[0],m.text(c[1])) for c in m.calls if c[0]=='navigator_to_with_context']
-picked=lambda m: m.get(syms['g_local_classinfo_save']+4)  # the cd_num of the playlist stock opens
-m=pl_cf(RowPlaylistMachine,count=3,on='0'); m.rebuild(); pl_under(m); m.top=m.stack[-2]; m.stack.pop()
-m.calls.clear(); m.tap(m.row_button('List 0')); tapped=opens(m)
-assert tapped==[('navigator_to_with_context','localmusic/allmusic_page')] and picked(m)==10,(tapped,picked(m))
-m=pl_cf(RowPlaylistMachine,count=3,on='0'); m.rebuild(); page=pl_under(m); m.calls.clear()
-m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False); m.advance(0,clear=False)
-assert opens(m)==tapped and picked(m)==10 and m.top==m.stack[-1] and m.nodes[m.top]['name']=='coverflow_page',(opens(m),tapped); passed()
-# ... with stock's add mode left at 1 (a song's Add to Playlist picker over the covers) or 2 (Now Playing's, left with
-# Return), still the open: the page's own mode, 0, goes back before stock's click reads it, which would add instead.
-for left in (1,2):
-    m=pl_cf(RowPlaylistMachine,count=3,on='0'); m.rebuild(); page=pl_under(m); m.calls.clear(); m.word(m.mode,left)
-    m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False); m.advance(0,clear=False)
-    assert opens(m)==tapped and picked(m)==10 and m.get(m.mode)==0,(left,opens(m),picked(m)); passed()
 # ... stock finds the row by the playlist's place in the live list, in name order, and the page's rows are the list as it
 # was built: one past them (a playlist added since sorts in, a song's Add to Playlist → New under the covers, and pushes
 # the last ones past) has no row there, and the covers close, for the page to build its rows again as it comes to the
 # front. Appended last, the new one is that one.
+opens=lambda m: [(c[0],m.text(c[1])) for c in m.calls if c[0]=='navigator_to_with_context']
 class PlShut(RowPlaylistMachine):
     shut=0
     def hook(self,u,address,size,unused):
@@ -4341,32 +4099,6 @@ made=m.song('Made',4); m.word(made+O['REC_TITLE'],m.string('Made')); m.word(made
 m.word(syms['p_deque_playlist'],m.deque(m.items(m.get(syms['p_deque_playlist']))+[made]))
 m.call(address=payload_syms['playlist_open'],args=(page,13,0,0),gap=0,clear=False); m.advance(0,clear=False)
 assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
-# ... sorted in first, the new one opens from the first row, and the last of the old ones, now past the rows, closes them.
-m=pl_cf(PlShut,count=3,on='0'); m.rebuild(); page=m.top; m.top=m.node('window','coverflow_page'); m.stack.append(m.top)
-made=m.song('Made',4); m.word(made+O['REC_TITLE'],m.string('Made')); m.word(made+O['REC_DISC'],13)
-m.word(syms['p_deque_playlist'],m.deque([made]+m.items(m.get(syms['p_deque_playlist']))))
-m.calls.clear(); m.call(address=payload_syms['playlist_open'],args=(page,13,0,0),gap=0,clear=False); m.advance(0,clear=False)
-assert m.shut==0 and opens(m)==tapped and picked(m)==13,(m.shut,opens(m),picked(m))
-m.calls.clear(); m.call(address=payload_syms['playlist_open'],args=(page,12,0,0),gap=0,clear=False); m.advance(0,clear=False)
-assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
-
-# Back from an opened playlist keeps its row: opening one writes the browsing state the other lists' memory hashes.
-for cls in (PlaylistMachine,RowPlaylistMachine):
-    m=cls(3,0); kids=m.rebuild(); m.paint(m.view)
-    for _ in range(2): m.call(O['KEY_NEXT'])
-    m.paint(m.view); row=m.selected(m.view); assert row==2+2*(cls is RowPlaylistMachine)
-    m.u.mem_write(syms['g_local_classinfo_save']+4,b'\x07\0\0\0'); m.word(syms['g_class_type'],0xff13)
-    kids=m.rebuild(); m.paint(m.view); assert m.selected(m.view)==row; passed()
-
-# OLED's rows: a recreated page comes back on the remembered playlist by its name, New and Edit above it and a playlist
-# added before it shifting it down; the picker keeps its own.
-m=RowPlaylistMachine(); m.rebuild(); m.paint(m.view); cpm_wheel(m,O['KEY_NEXT']); assert m.rows()[m.selected(m.view)]=='List 1'
-m.lists('Added',*LISTS)
-page=m.node('window','playlist_page',[m.node('scroll_view','scroll_view')]); m.word(m.nodes[page]['children'][0]+O['W_PARENT'],page)
-m.nav=m.node('view','view_navbar',visible=0); m.nodes[page]['children'].insert(0,m.nav)
-m.stack[-1]=m.top=page; m.view=m.nodes[page]['children'][-1]; m.rebuild(); m.paint(m.view)
-assert m.rows()==[NEW,EDIT,'Added']+LISTS and m.rows()[m.selected(m.view)]=='List 1'; passed()
-
 # Short press toggles once; a hold opens one menu titled by its row, its release is swallowed and
 # the next short press toggles again. A repeated long event of the same press opens nothing.
 m=QueueMachine(); page=m.top
@@ -8211,12 +7943,12 @@ m=CoverflowMachine(); m.open(); m.press(100)
 assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_KEY_LONG'],gap=0)==11
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
-# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): the list's own menu (playlist_hold), New Playlist and,
-# under a set without stock's toolbars (OLED's, toolbar="0", which the first system_bar load writes), Select
-# Playlists… last (a toolbar's page edits from its toolbar). The playlist is found in the live list by its cd_num, as New, Rename and Delete
-# read that list again under the covers after they copied it: More… opens the More page at its index there, and a
-# playlist gone from it holds nothing.
-PL_COVER_MENU=['Play Next','Add to Queue','Shuffle','More…','New Playlist','Select Playlists…']
+# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the inset modal, which the first
+# system_bar load writes) the playlist's own menu, Play, Shuffle, Rename and Delete; before it, the list's menu
+# (playlist_hold) with More… and New Playlist (stock's toolbar page edits from its toolbar). The playlist is found in the
+# live list by its cd_num, as New, Rename and Delete read that list again under the covers after they copied it: More…
+# opens the More page at its index there, and a playlist gone from it holds nothing.
+PL_COVER_MENU=['Play','Shuffle','Rename','Delete']
 class PlaylistCoverMachine(CoverflowMachine):
     def __init__(self):
         super().__init__()
@@ -8244,7 +7976,8 @@ def geom_boot(m):  # the first system_bar load (ringnav_ui_load's theme_boot) wr
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
 m=PlaylistCoverMachine(); geom_boot(m)
 m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.release()==0
-assert m.labels()==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',m.labels(); passed()
+rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
+assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # read again, reordered
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',2); passed()
@@ -8262,13 +7995,12 @@ def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in orde
     if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
     for t,f,ctx in list(m.nodes[w].get('handlers',())):
         if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-for row,edit in ((4,0),(5,1)):  # New Playlist, Select Playlists…
-    m=ClosingCoverMachine(); geom_boot(m)
-    m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
-    m.pick(row); m.advance(0,clear=False); m.advance(0,clear=False)
-    assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
-    destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
-    assert m.edits==[edit] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
+m=ClosingCoverMachine()  # New Playlist, before the set is written
+m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
+m.pick(4); m.advance(0,clear=False); m.advance(0,clear=False)
+assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
+destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
+assert m.edits==[0] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[1:]))  # List 0 deleted under the covers
 m.press(100); assert m.hold()!=11 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 # More's Rename or Delete over the covers: as the covers come back to the front the playlists are read again
@@ -8292,8 +8024,7 @@ m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
 m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
 # New Playlist and Select Playlists… (playlists.c playlists_edit): the covers close (coverflow_playlists_close) and New
-# runs as the page's own: its row's target (OLED's set has no toolbar), stock's dialog. Select Playlists… is stock's
-# select mode, Import in it. With no covers up, nothing.
+# runs as the page's own: its row's target (OLED's set has no toolbar), stock's dialog. With no covers up, nothing.
 def pl_edit(edit,covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
     class M(PlaylistPageMachine):
         def hook(self,u,address,size,unused):
@@ -8307,8 +8038,6 @@ def pl_edit(edit,covers=True):  # the Playlists page booted (PlaylistPageMachine
     m.call(address=payload_syms['playlists_edit'],args=(edit,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
     return m
 m=pl_edit(0); assert m.shut==1 and m.top==m.page and m.dialogs==['dialog/addplaylist_dialog'] and m.navbar()==0; passed()
-m=pl_edit(1); assert m.shut==1 and m.top==m.page and m.navbar()==1 and not m.dialogs
-assert m.rows()==['Select All']+LISTS+['Import Playlists','Done'] and m.bar()=='Select Playlists'; passed()
 for edit in (0,1):
     m=pl_edit(edit,covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
@@ -16645,7 +16374,8 @@ def stock_keyups():
     assert keyups(True,0x53da5c)==back and keyups(False,0x53da5c)=={**back,centre:('power_keyup_detect power_keyup_pending_custom stop','')}
 stock_keyups(); passed()
 # SyncLink (#113): Eddict Player's keys, which stock posts with main_loop_post_key_event, reach
-# stock's lock filters dark with the Buttons lock off; the same keys from the buttons stay locked.
+# stock's lock filters dark with the Buttons lock off; the same keys from the buttons stay locked: the lock card
+# (keylock.c keylock_gate) takes their press and release before stock's filters see them.
 post=HOOKS['main_loop_post_key_event'][0]
 class LockMachine(Machine):
     def hook(self,u,address,size,_):
@@ -16660,8 +16390,8 @@ def lock_seen(key,kind,posted=None,gap=0):
     return l.locks
 for key in (O['KEY_PLAY'],O['KEY_BACK_BTN'],O['KEY_FWD_BTN']):
     assert lock_seen(key,DOWN,key)==[0] and lock_seen(key,UP,key)==[0]
-    assert lock_seen(key,DOWN,gap=1000)==[1] and lock_seen(key,UP,gap=1000)==[1]
-assert lock_seen(O['KEY_FWD_BTN'],DOWN,O['KEY_PLAY'])==[1] and lock_seen(O['KEY_PLAY'],DOWN)==[0]  # by key
+    assert lock_seen(key,DOWN,gap=1000)==[] and lock_seen(key,UP,gap=1000)==[]
+assert lock_seen(O['KEY_FWD_BTN'],DOWN,O['KEY_PLAY'])==[] and lock_seen(O['KEY_PLAY'],DOWN)==[0]  # by key
 assert lock_seen(O['KEY_PLAY'],UP,O['KEY_PLAY'],gap=1)==[1]  # and by its stamp
 assert l.u.mem_read(syms['g_keylock_flag'],1)==b'\1'; passed()
 # Play/Pause and Return hold after KEY_HOLD_MS (HOLD_KEYS), every other key at stock's time.
