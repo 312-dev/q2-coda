@@ -2289,8 +2289,8 @@ def test_centre_on_the_lock_tile_turns_buttons_lock_on_and_off(fw, keys):
     top, _ = cc_window(fw, ui)
     top.ints[b'_cc_focus'] = CC_LOCK
     flag, mode = fw.var('g_keylock_flag', C.c_ubyte), fw.var('g_keylock_mode', C.c_ubyte)
-    flag.value, mode.value = 0, 2  # off, its mode last Buttons only
-    assert keys(KEY_CENTER) == STOP and (flag.value, mode.value) == (1, 2)
+    flag.value, mode.value = 0, 3  # off, an earlier version's Everything last
+    assert keys(KEY_CENTER) == STOP and (flag.value, mode.value) == (1, 2)  # On: the buttons
     assert keys(KEY_CENTER) == STOP and flag.value == 0
 
 

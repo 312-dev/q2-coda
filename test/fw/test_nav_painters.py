@@ -1976,16 +1976,16 @@ def test_the_librarys_rows_take_its_constructors_live_words(fw):
 
 
 # Buttons lock and Quick Settings.
-def test_buttons_lock_lists_its_four_choices_and_a_pick_moves_the_check(fw):
+def test_buttons_lock_lists_off_and_on_and_a_pick_moves_the_check(fw):
     ui, win, view, settings, _ = settings_page(fw, 'keylock_page', 'scroll_view_keylock')
     old = ui.add('list_item', view)
     assert fw.fn('ringnav_keylock_rows', C.c_int, C.c_void_p)(win.addr) == 0
     names = [ui.text(label_of(r)) for r in view.children]
-    assert old not in view.children and len(set(names)) == 4 and all(names)  # four choices, named apart
+    assert old not in view.children and names == ['Off', 'On']
     checks = lambda: [r.children[0].children[0].props['image'] for r in view.children]
-    assert checks() == ['select', 'unselect', 'unselect', 'unselect']
-    click(ui, view.children[2])
-    assert checks() == ['unselect', 'unselect', 'select', 'unselect']
+    assert checks() == ['select', 'unselect']
+    click(ui, view.children[1])
+    assert checks() == ['unselect', 'select']
     assert (g(fw, 'g_keylock_flag'), g(fw, 'g_keylock_mode')) == (1, 2)  # stock's: 2 the buttons
     assert settings.written == [('LOCKMODE', 2), ('LOCKFLAG', 1)]
 
@@ -2084,15 +2084,14 @@ def test_a_tap_on_the_lock_steps_through_its_choices(fw, st):
     quick = Quick(fw, st)
     first = quick.ui.text(quick.win.child('label_lock'))
     names, images, locks = [], [], []
-    for _ in range(4):
+    for _ in range(2):
         fw.fn('ringnav_quick_lock', C.c_int, C.c_void_p, C.c_void_p)(quick.win.addr, None)
         names.append(quick.ui.text(quick.win.child('label_lock')))
         images.append(quick.icons['img_lock'].props['image'])
         locks.append((g(fw, 'g_keylock_flag'), g(fw, 'g_keylock_mode')))
-    # stock's modes: 3 both, 2 the buttons, 1 the wheel's volume; then off
-    assert locks == [(1, 3), (1, 2), (1, 1), (0, 3)]
-    assert len(set(names)) == 4 and names[-1] == first  # each choice named, round to where it began
-    assert len(set(images[:3])) == 1 and images[3] != images[0]  # one image locked, another not
+    assert locks == [(1, 2), (0, 2)]  # On (stock's mode 2, the buttons), then Off
+    assert names == ['On', 'Off'] and names[-1] == first  # each choice named, round to where it began
+    assert images[0] != images[1]  # one image locked, another not
 
 
 def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st):

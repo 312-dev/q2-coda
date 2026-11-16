@@ -2679,26 +2679,20 @@ int csv_toggle(char *list, unsigned size, const char *item) {
     return 1;
 }
 
-/* Stock modes, only with the screen off: 1 locks wheel volume, 2 the buttons, 3 both.
+/* Buttons Lock, Off or On: On is stock's LOCKMODE 2, which with the screen off locks Return,
+ * Play/Pause and the skip keys. The dark wheel sets nothing (volume.c vol_wm_keyup), so stock's
+ * wheel modes (1, 3) lock nothing more; keylock.c keylock_boot makes an earlier one of these two.
  * KEY_LOCKOUT is the separate, temporary debounce after a button press. */
-static const char *const lock_names[] = { "Off", "Everything", "Buttons only", "Volume only" };
-static int lock_choice(void) {
-    if (g_keylock_flag && (g_keylock_mode < 1 || g_keylock_mode > 3)) {
-        g_keylock_mode = 3; /* an unknown mode locks Everything */
-        write_int_config(3, "SYSSET", "LOCKMODE");
-    }
-    return g_keylock_flag ? 4 - g_keylock_mode : 0;
-}
+static const char *const lock_names[] = { "Off", "On" };
+static int lock_choice(void) { return g_keylock_flag != 0; }
 static void lock_set(int choice) {
-    g_keylock_mode = choice ? 4 - choice : 3;
+    g_keylock_mode = 2;
     g_keylock_flag = choice != 0;
     write_int_config(g_keylock_mode, "SYSSET", "LOCKMODE");
     write_int_config(g_keylock_flag, "SYSSET", "LOCKFLAG");
 }
-/* Control Center's Lock tile (control_center.c): Buttons Lock on, as its mode was last, or off. */
-void keylock_toggle(void) {
-    lock_set(g_keylock_flag ? 0 : g_keylock_mode >= 1 && g_keylock_mode <= 3 ? 4 - g_keylock_mode : 1);
-}
+/* Control Center's Lock tile (control_center.c): Buttons Lock on or off. */
+void keylock_toggle(void) { lock_set(!g_keylock_flag); }
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
     void *win = window_manager_get_top_window(window_manager());
@@ -2715,7 +2709,7 @@ int ringnav_keylock_rows(void *win) {
     if (!view) return 0;
     widget_destroy_children(view);
     int choice = lock_choice();
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 2; ++i) {
         void *label =
             list_row(view, i == choice ? "select" : "unselect", lock_pick, (void *)(long)i);
         widget_set_text_utf8(label, lock_names[i]);
@@ -2728,7 +2722,7 @@ static void quick_lock_text(void *win) {
                          g_keylock_flag ? "drop_keylockopen" : "drop_keylock");
 }
 int ringnav_quick_lock(void *win, void *event) {
-    lock_set((lock_choice() + 1) % 4);
+    lock_set(!lock_choice());
     quick_lock_text(win);
     widget_invalidate_force(win, (void *)0); /* OLED's row paints the value: its label is hidden */
     return 0;
