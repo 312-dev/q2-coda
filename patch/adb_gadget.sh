@@ -5,7 +5,7 @@
 #   bind    put q2adb on the controller, once adbd has written its descriptors, unless parked
 #   park    take it off and unmount configfs: stock's storage_config.sh and uac_device_config.sh
 #           refuse to start while configfs is mounted, and need the controller
-#   unpark  after stock's stop, which unmounts configfs: bind again
+#   unpark  after stock's stop, which unmounts configfs: bind again, in the background
 # The wrapped storage_config.sh and uac_device_config.sh call park and unpark around stock's copies.
 # One lock serializes them, and the parked flag keeps a late bind (adbd's restart loop) off stock's gadget.
 CFS=${Q2ADB_CONFIGFS:-/sys/kernel/config}
@@ -75,7 +75,7 @@ park)
     ;;
 unpark)
     (lock; rm -f "$PARKED")
-    bind
+    bind &  # demo runs stock's stop on its UI thread: the wait for adbd is not demo's
     ;;
 *)
     echo "usage: q2adb-gadget setup|bind|park|unpark" >&2
