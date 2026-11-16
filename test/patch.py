@@ -9696,8 +9696,15 @@ def framed(c,t):  # the panel at phase t, as home_render filters it: across each
     u,v=c['u0']*256+at(c['rx'],X,t),c['v0']*256+at(c['ry'],Y,t); ts,px=c['ts'],c['px']
     wx,wy=bspline(u&255),bspline(v&255); i=(v>>8)*ts+(u>>8)  # texel -1, -1 from u, v
     rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+293*ts,ts)]
-    out=[tap4(*k,wy) for y in range(290) for k in zip(*rows[y:y+4])]
+    out=[vig(tap4(*k,wy),VIG(y)) for y in range(290) for k in zip(*rows[y:y+4])]
     return struct.pack(f'<{len(out)}I',*out)
+# Split's vignette (coverflow.c vig_k, vig): the frame's rows darkened at its top and bottom edges, in 256ths, by the
+# tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 30.
+VIG_T={n:[int(v) for v in re.search(rf'{n}\[VIG_\w+\] = {{([^}}]*)}}',(ROOT/'patch/coverflow.c').read_text()).group(1).split(',')]
+       for n in ('vig_top','vig_bot')}
+def VIG(y):
+    y+=320-290; return VIG_T['vig_top'][max(y,0)] if y<len(VIG_T['vig_top']) else VIG_T['vig_bot'][319-y] if y>=320-len(VIG_T['vig_bot']) else 256
+def vig(c,k): return c if k>=256 else c&0xff000000|((c&0xff00ff)*k>>8&0xff00ff)|((c&0xff00)*k>>8&0xff00)
 def drawn():
     n=len(m.draws); m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0)
     assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,290) and m.draws[-1][4]&1,m.draws[n:]
