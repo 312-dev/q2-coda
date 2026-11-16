@@ -309,7 +309,11 @@ void *empty_list(void *page, void *body, const char *name, const empty_t *e,
     void *view = page_list(page, body, 0, name, 0, 48);
     widget_set_visible(widget_get_child(body, 0), 0, 0);
     empty_state(body, 0, e, on_row);
-    bar_title_sync(page); /* after: Cover Flow's title follows its empty state (coverflow_bar_title) */
+    /* after: Cover Flow's title follows its empty state (coverflow_bar_title). The bar looks for
+     * the page's title once (bar_title_sync, st.title_win); one already titled while its covers
+     * loaded would keep that, so it looks again. */
+    title_gone(0, 0);
+    bar_title_sync(page);
     return view;
 }
 /* No card in the slot (stock's mount marks it with /tmp/mmc_add): the Library's empty pages say

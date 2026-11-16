@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Cover Flow (OLED): with no albums to show, the status row names the page, **Cover Flow**, as the design has it; it showed only the clock.
   - Display (OLED): a question whose wrong answer costs nothing (Scan Music?, Import Playlists?, Export Playlists?, Reconnect Bluetooth?) opens on its verb, so Center twice does it; the rest still open on Cancel.
   - Up Next (OLED): while a row is lifted, the queue's grips stand where Edit Library's do, 4 px further right, with square ends.
   - Display (OLED): Car Remote's Forget, Tidal's Clear All Downloads and Spotify's Remove Downloads and Sign Out, a playlist's Remove from Playlist, the EQ's Delete and Replace of a preset, SD Card Update's Install, Streaming's Erase Spotify Data and (development builds) Allow USB Debugging ask on the confirmation card over their page instead of a page of their own.
