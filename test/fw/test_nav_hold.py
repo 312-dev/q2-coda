@@ -1091,7 +1091,7 @@ def test_no_playlists_is_the_empty_state_under_the_rows_left(rows_page, ui, fw, 
     props = ui.nodes[art].props
     assert (props['_es_glyph'], props['_es_title'], props['_es_hint']) == ('playlist', 'No Playlists', 'Make one with New Playlist')
     free = 58 + 44 * len(p.shown())  # the status row's foot (V_BAR) and the rows shown, 44 px each
-    assert free + 120 <= 320 and props['_es_top'] == free + (320 - free - 120) // 2
+    assert free + 118 <= 320 and props['_es_top'] == free + (320 - free - 118) // 2  # the 118 px stack, no button
     fw.var('fw_ctx_p_deque_playlist', C.c_uint).value = p.deques.new([recs(name='Gym', title='Gym', disc=1, id_=1)])
     fw.fn('playlists__pl_rows', None, C.c_void_p)(p.win)  # the rows again, as a rebuild or a click has them
     assert not ui.nodes[art].visible

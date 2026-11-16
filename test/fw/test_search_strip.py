@@ -587,18 +587,18 @@ def test_a_server_song_that_cannot_play_is_greyed_with_the_offline_mark(fw, ui, 
 
 
 def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song):
-    """docs/oled-design.md#empty-and-offline: typed text that matches nothing paints the empty state, its stacked
-    tiles, "No Matches" and "Try fewer letters", centred between the status row (the page at screen y 58) and the
-    strip (196 on the sheet): its 120 px stack from sheet y 38."""
+    """docs/oled-design.md#empty-and-offline: typed text that matches nothing paints the empty state, its outline
+    glyph, "No Matches" and "Try fewer letters", centred between the status row (the page at screen y 58) and the
+    strip (196 on the sheet): its 118 px stack from sheet y 39, no tiles."""
     s = Strip(fw, ui, library(song))
     struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page under the status row
     s.type('zz')
     c = painted(fw, s)
-    top = (196 - 120) // 2
-    assert ((187 - 29, top, 58, 58), 9) in [(b, r) for b, _, r in c.boxes]  # the front tile, 9 px corners
-    assert ((187 + 30 - 24, top + 5, 48, 48), 9) in [(b, r) for b, _, r in c.boxes]  # one behind it
+    top = (196 - 118) // 2
+    assert not [b for b, _, r in c.boxes if r == 9]  # the tiles are gone
     words = [t for t, *_ in c.texts]
     assert 'No Matches' in words and 'Try fewer letters' in words and 'No results' not in words
+    assert fw.fn('empty_top', C.c_int, C.c_int, C.c_int, C.c_int)(58, 58 + 196, 0) - 58 == top
 
 
 class Renames:

@@ -240,8 +240,9 @@ def ui(fw):
 
 
 def empty_state(ui, page):
-    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its row's caption or None), else
-    None. Its view is insensitive, so the rows beside it keep their taps."""
+    """The empty state shown in page (feedback.c empty_state): (glyph, title, hint, its button's label or None), else
+    None. Its view is insensitive, so the rows beside it keep their taps; the button's row is blank, its label the
+    painter's."""
     art = ui.lookup(page, '_empty_state', 1)
     if not art or art in ui.hidden:
         return None
@@ -250,7 +251,8 @@ def empty_state(ui, page):
     caption = None
     if row and row not in ui.hidden:
         (item,) = ui.kids[ui.kids[row][0]]
-        caption = next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create')
+        assert next(ui.text[k] for k in ui.subtree(item) if ui.kind[k] == 'hscroll_label_create') == ''
+        caption = ui.props[(art, '_es_row')]
     return tuple(ui.props[(art, f'_es_{k}')] for k in ('glyph', 'title', 'hint')) + (caption,)
 
 
@@ -3135,11 +3137,11 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
     (page,) = ui.windows
     assert ui.name[page] == 'empty_page' and 'Streaming' not in ui.shown(page)  # the status row names it
     assert empty_state(ui, page) == ('cloud-slash', 'Not Connected', 'Turn on Wi-Fi to stream', 'Turn on Wi-Fi')
-    # the stack with its row (176 px) centred under the status row: the row 144 px under the stack's top
+    # the stack with its button (176 px) centred under the status row: the button 138 px under the stack's top
     top = 40 + (280 - 176) // 2
     assert ui.props[(ui.lookup(page, '_empty_state', 1), '_es_top')] == top
     row = ui.lookup(page, '_empty_row', 1)
-    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 144 and ui.kind[row] == 'list_view_create'
+    assert struct.unpack_from('<4i', ui.blocks[row], 0)[1] == top + 138 and ui.kind[row] == 'list_view_create'
     assert ui.props[(ui.kids[row][0], '_ringnav_index')] == 0  # its one row already selected
     assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # pressed again: the one page
     ui.handler(ui.kids[ui.kids[row][0]][0], EVT_CLICK)()  # the row: list view, scroll view, item

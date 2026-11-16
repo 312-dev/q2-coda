@@ -1160,15 +1160,16 @@ def shown_empty(world, win):
     return tuple(world[art].props[f'_es_{k}'] for k in ('glyph', 'title', 'hint'))
 
 
-# The empty state's stack with its row (58 + 18 + 24 + 20 + 24 + 32) centred under the status row (y 40): its row's y.
-EMPTY_ROW_Y = 40 + (280 - 176) // 2 + 120 + 24
+# The empty state's stack with its button (60 + 14 + 24 + 20 + 20 + 38) centred under the status row (y 40): the button's
+# y.
+EMPTY_ROW_Y = 40 + (280 - 176) // 2 + 118 + 20
 
 
 def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw, world, st):
     """Songs over an empty library (stock's panel "view" on show): the panel's picture and line hide, its btn_upmusic
-    becomes the empty state's one selected row, Scan Music Now, under "No Songs" and how to fill the card. The bar
-    under the row is the selection's (feedback_scan_bar). Songs back, the empty state goes and the Shuffle row
-    returns."""
+    becomes the empty state's button, Scan Music Now, under "No Songs" and how to fill the card: its band across the
+    screen with no fill or words of its own, the capsule and its label painted under it (feedback_scan_bar). Songs
+    back, the empty state goes and the Shuffle row returns."""
     theme(fw)
     deques = Deques(fw)
     showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
@@ -1183,14 +1184,16 @@ def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw
     songs = fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)
     songs(win, row)
     assert not world[row].visible and not world[picture].visible and not world[line].visible
-    assert world[btn].visible and world.at(view)[1] == EMPTY_ROW_Y and tuple(world.at(btn)) == (0, 0, 375, 32)
-    assert world[btn].text == 'Scan Music Now' and world[btn].props['style:normal:text_align_h'] == 'left'
+    assert world[btn].visible and world.at(view)[1] == EMPTY_ROW_Y and tuple(world.at(btn)) == (0, 0, 375, 38)
+    assert world[btn].text == ''
     assert all(world[btn].props[f'style:{s}:bg_color'] == 0 for s in ('normal', 'pressed', 'over', 'focused'))
     assert shown_empty(world, win) == ('music-notes', 'No Songs', 'Copy music to the SD card')
-    assert world[world.find(win, '_empty_state')].props['_es_top'] == EMPTY_ROW_Y - 144  # the stack's top
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == EMPTY_ROW_Y - 138  # the stack's top
     canvas = Canvas(fw)
     fw.fn("feedback_scan_bar", None, C.c_void_p, C.c_void_p)(btn, canvas.p)
-    assert len(canvas.rounded) == 1 and st('sel_accent', C.c_void_p).value == btn
+    (box, _, radius), = canvas.rounded  # the capsule, centred, at least 140 px, its label on it
+    assert radius == 19 and (box[1], box[3]) == (0, 38) and box[2] >= 140 and box[0] * 2 + box[2] in (374, 375)
+    assert 'Scan Music Now' in [t[0] for t in canvas.texts]
     writes = len(fw.calls('widget_set_prop_str'))
     songs(win, row)
     assert len(fw.calls('widget_set_prop_str')) == writes  # unchanged: not written
@@ -1215,7 +1218,7 @@ def test_an_empty_song_list_shows_its_class_s_empty_state(fw, world, cls, words)
     row = world.add(win, 'view_navbar_allplay', box=(0, 0, 375, 32))
     fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)(win, row)
     assert not world[row].visible and shown_empty(world, win) == words
-    assert world[world.find(win, '_empty_state')].props['_es_top'] == 40 + (280 - 120) // 2  # no row: centred alone
+    assert world[world.find(win, '_empty_state')].props['_es_top'] == 40 + (280 - 118) // 2  # no button: centred alone
 
 
 def test_an_empty_library_with_no_card_in_says_so_and_drops_the_scan_row(fw, world):

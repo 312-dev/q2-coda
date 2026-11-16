@@ -2105,6 +2105,11 @@ static void paint_selection(void *w, void *canvas) {
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
+    if (empty_button(w)) { /* an empty state's button rings itself (feedback.c), no bar */
+        st.sel_w = w;
+        st.sel_row = i;
+        return;
+    }
     if (pair_holds(w)) { /* ... or on an artist's or album's pair (artist_page.c) */
         /* the row a fast spin passed through keeps no marquee: its timer finds no row */
         marq_stop();

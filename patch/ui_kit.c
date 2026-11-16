@@ -99,3 +99,49 @@ int kv_fit(int span, int label_w, int value_w, int *box) {
 }
 
 int ui_focus_shown(void) { return !st.touch_mode; }
+
+/* The empty states' buttons (docs/oled-design.md#buttons). */
+int ui_text_w(void *canvas, const char *s, int medium, int px) {
+    unsigned buf[96], n = ui_wide(s, buf, sizeof buf / sizeof *buf);
+    if (!n) return 0;
+    const char *face = theme_face(buf, (int)n, &px);
+    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    return ui_measure_w(canvas, face, px, buf, n);
+}
+int ui_cta_w(void *canvas, const char *const *labels, int n) {
+    int w = 0;
+    for (int i = 0; i < n; ++i) {
+        int t = ui_text_w(canvas, labels[i], 1, CTA_PX) + 2 * (n > 1 ? CTA_PAIR_PAD : CTA_PAD);
+        if (t > w) w = t;
+    }
+    int least = n > 1 ? CTA_PAIR_MIN : CTA_MIN, most = n > 1 ? (CTA_BOX - CTA_GAP) / 2 : CTA_BOX;
+    return w < least ? least : w > most ? most : w;
+}
+int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w) {
+    *w = ui_cta_w(canvas, labels, n);
+    return 375 / 2 - (n * *w + (n - 1) * CTA_GAP) / 2 + i * (*w + CTA_GAP);
+}
+void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed) {
+    int light = ipod_light(), ring = ui_focus_shown();
+    for (int i = 0; i < n; ++i) {
+        rect_t r = { 0, y, 0, CTA_H };
+        r.x = ui_cta_x(canvas, labels, n, i, &r.w);
+        int lit = i == sel, down = lit && pressed;
+        unsigned fill = i ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? 0x3a3a3c : 0x2c2c2e))
+                        : down ? CTA_ACCENT_DOWN
+                               : (scheme()->tones[0] & 0xffffffu);
+        if (lit && ring) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */
+            int o = CTA_RING_OFF + 2;
+            rect_t a = { r.x - o, r.y - o, r.w + 2 * o, r.h + 2 * o },
+                   b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
+            unsigned ink = RGBA(tok(TOK_PRIMARY));
+            round_ring(canvas, &a, a.h / 2, ink);
+            round_ring(canvas, &b, b.h / 2, ink);
+        }
+        unsigned raw = ui_ink_raw(1); /* final in both halves */
+        fill_box(canvas, &r, RGBA(fill), CTA_H / 2);
+        ui_ink_raw(raw);
+        ui_text(canvas, labels[i], 1, CTA_PX, i ? tok(TOK_PRIMARY) : 0xffffff, 1, r.x + r.w / 2,
+                r.y + r.h / 2, r.w - 2 * CTA_INSET, 1);
+    }
+}

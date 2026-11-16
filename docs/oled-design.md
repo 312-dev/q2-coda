@@ -640,19 +640,25 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
 
 ### Empty and offline
 
-**The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show
-(`mock_placeholders.py`, approved 2026-11-16): three stacked tiles, a 58 px one in front (`#2C2C2E`, its edge
-`#48484C`) and two 48 px ones 30 px either side behind it at about a quarter's strength, 9 px corners, with the
-page's 28 px Phosphor glyph (fill, white at 92 %; `tools/art.py` `EMPTY_GLYPHS`) on the front one; 18 px under them
-the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px Text Secondary; and at most one
-action row, 24 px lower, already selected. The whole stack, with or without its row, is centred between the status
-row's foot (or the end of any rows the page keeps above it) and the screen's. No app names. No fake rows, and no
-Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its name for the status row; a
-Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming service with no link open
-a page of their own holding only the empty state (`empty_open`). With no SD card in, the Library's pages say so
-(`empty_card`).
+**The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show (the
+user's outline style, 2026-11-16, `empty-states-all/mock_empty_all_v2.py`, as Apple's ContentUnavailableView): the
+page's Phosphor glyph in outline (regular weight, 60 px, Text Secondary; `tools/art.py` `EMPTY_GLYPHS`) with no tile
+or disc behind it; 14 px under it the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
+Text Secondary; and at most its [buttons](#buttons), 20 px lower. The whole stack, with or without buttons, is
+centred between the status row's foot (or the end of any rows the page keeps above it) and the screen's. No app
+names. No fake rows, and no Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its
+name for the status row; a Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming
+service with no link open a page of their own holding only the empty state (`empty_open`). With no SD card in, the
+Library's pages say so (`empty_card`).
 
-| Screen | Glyph | Title | Hint | Row |
+<a id="buttons"></a>**Buttons** (`mock_empty_cta.py`, the user's, 2026-11-16; `patch/ui_kit.c` `ui_cta_paint`): one
+is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 24 px each side, at least 140 px; a
+pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
+grey (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
+ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; grey `#3A3A3C`,
+`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar.
+
+| Screen | Glyph | Title | Hint | Button |
 | --- | --- | --- | --- | --- |
 | Songs, an empty library | `music-notes` | No Songs | Copy music to the SD card | **Scan Music Now** (stock's button, `scan_row`) |
 | Artists | `microphone-stage` | No Artists | Copy music to the SD card | |

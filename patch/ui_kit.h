@@ -65,6 +65,27 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
  * navigation.c's st.touch_mode is the one record of it: a touch sets it, the wheel clears it.
  * Centre with no ring still answers the screen's default. */
 int ui_focus_shown(void);
+/* The empty states' buttons (docs/oled-design.md#buttons): one, a filled Accent Blue capsule
+ * CTA_H tall sized to its label (CTA_PAD each side, at least CTA_MIN), or a pair of equal capsules
+ * CTA_GAP apart, the second grey with its label in Text Primary, together within CTA_BOX; centred
+ * on the screen, their top at y. sel: the selected one (-1 none), ringed 2 px in Text Primary
+ * CTA_RING_OFF out while ui_focus_shown; pressed darkens its fill a step. ui_cta_x: button i's
+ * left, its width in *w. ui_text_w: UTF-8 s's width as ui_text draws it. */
+#define CTA_H 38
+#define CTA_PX TYPE(17) /* Inter Medium 17 */
+#define CTA_PAD 24
+#define CTA_MIN 140
+#define CTA_PAIR_PAD 20
+#define CTA_PAIR_MIN 120
+#define CTA_GAP 10
+#define CTA_BOX (375 - 48)
+#define CTA_INSET 14 /* a label's least room inside its capsule */
+#define CTA_RING_OFF 3
+#define CTA_ACCENT_DOWN 0x1a4dad
+int ui_text_w(void *canvas, const char *s, int medium, int px);
+int ui_cta_w(void *canvas, const char *const *labels, int n);
+int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
+void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house

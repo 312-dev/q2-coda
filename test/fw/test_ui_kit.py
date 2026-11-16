@@ -88,3 +88,35 @@ def test_a_switch_slides_its_knob_over_200_ms_easing_out_and_a_flip_mid_slide_tu
     assert knob(355, 100, 0) == 985
     now[0] += 200
     assert knob(355, 100, 0) == 0 and knob(355, 140, 1) == 1000  # done; the other switch never moved
+
+
+@pytest.mark.parametrize('labels, widths', [(['Go'], [140]), (['Turn on Wi-Fi now'], [17 * 7 + 48]), (['W' * 60], [327]),
+                                            (['Turn on Wi-Fi', 'Try Again'], [131, 131]),
+                                            (['W' * 30, 'Go'], [158, 158])])
+def test_the_buttons_are_one_capsule_sized_to_its_label_or_an_equal_pair_centred_in_the_box(fw, st, labels, widths):
+    """docs/oled-design.md#buttons: one sized to its label with 24 px each side, at least 140, at most the 327 px box;
+    a pair equal, sized to the longer with 20 px each side, at least 120, 10 px apart, the two within the box."""
+    from test_nav_painters import Canvas
+    c = Canvas(fw, char_w=7)
+    words = [C.c_char_p(s.encode()) for s in labels]
+    arr = (C.c_char_p * len(words))(*words)
+    w = C.c_int()
+    xs = [fw.fn('ui_cta_x', C.c_int, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_void_p)(
+        c.addr, C.addressof(arr), len(labels), i, C.addressof(w)) for i in range(len(labels))]
+    assert [w.value] * len(labels) == widths
+    total = sum(widths) + 10 * (len(widths) - 1)
+    assert xs[0] == 187 - total // 2 and (len(xs) == 1 or xs[1] == xs[0] + widths[0] + 10)
+
+
+@pytest.mark.parametrize('touch_mode, ringed', [(0, True), (1, False)])
+def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mode, ringed):
+    """The ring (2 px, Text Primary, 3 px out) shows on the selected button while the wheel was the last input; after
+    a tap the button is drawn alone, and Centre still presses it."""
+    from test_nav_painters import Canvas
+    st('touch_mode').value = touch_mode
+    c = Canvas(fw, char_w=7)
+    arr = (C.c_char_p * 1)(b'Scan Music Now')
+    fw.fn('ui_cta_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(
+        c.addr, C.addressof(arr), 1, 100, 0, 0)
+    beside = [r for r in c.rects if r[1] < 100 or r[1] >= 138]  # the ring's rows, above and below the capsule
+    assert bool(beside) == ringed

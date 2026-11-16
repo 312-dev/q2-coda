@@ -202,43 +202,40 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 }
 
 /* The empty state (docs/oled-design.md#empty-and-offline), the one form for every page with nothing
- * to show: three stacked tiles (ES_TILE in front, two ES_SIDE ones ES_SIDE_DX either side behind
- * it, faint) with the page's glyph (tools/art.py EMPTY_GLYPHS, ES_GLYPH px) on the front one, a
- * title in Inter Medium 20, a hint in 15 px Text Secondary and, when the page has one, one action
- * row 24 px under it, already selected; the whole stack centred between free_top (or the status
- * row's foot) and the screen's. A view over the page holds it (ES_NAME, its words and top in its
- * props, painted by empty_state_paint; insensitive, so rows above it keep their taps), and the row
- * is a one-row list (ES_ROW_NAME) the wheel and Centre reach as any. A page drawn by its own
- * painter (Search's sheet) paints the stack itself (empty_paint, at empty_top).
+ * to show: the page's glyph in outline (tools/art.py EMPTY_GLYPHS, ES_GLYPH px, Text Secondary), a
+ * title ES_GLYPH_GAP under it in Inter Medium 20, a hint in 15 px Text Secondary and, when the page
+ * has one, its button (ui_kit.c ui_cta_paint) CTA_GAP_ABOVE under it; the whole stack centred
+ * between free_top (or the status row's foot) and the screen's. A view over the page holds it
+ * (ES_NAME, its words and top in its props, painted by empty_state_paint; insensitive, so rows
+ * above it keep their taps). The button is a one-row list (ES_ROW_NAME) the wheel and Centre reach
+ * as any, its row the button's band, its own words hidden: the capsule and its label are painted
+ * with the stack, ringed by the focus rule (docs/oled-design.md#focus-ring), and the list's
+ * selection bar is not drawn (empty_button). A page drawn by its own painter (Search's sheet)
+ * paints the stack itself (empty_paint, at empty_top).
  */
 #define ES_NAME "_empty_state"
 #define ES_ROW_NAME "_empty_row"
 #define ES_TOP 40 /* the status row's foot, as the design measures it */
 #define ES_END 320
-#define ES_TILE 58
-#define ES_SIDE 48
-#define ES_SIDE_DX 30
-#define ES_TILE_R 9
-#define ES_GLYPH 28
-#define ES_TITLE_GAP 18 /* the tiles to the title's band */
+#define ES_GLYPH 60
+#define ES_GLYPH_GAP 14 /* the glyph's foot to the title's band */
 #define ES_TITLE_H 24
 #define ES_HINT_H 20
-#define ES_ROW_GAP 24
-#define ES_ROW_H 32
+#define CTA_GAP_ABOVE 20
 #define ES_TITLE_PX TYPE(20) /* Inter Medium 20, AWTK's size */
 #define ES_HINT_PX TYPE(15)  /* Inter 15 */
-#define ES_TEXT (ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H)
+#define ES_TEXT (ES_GLYPH + ES_GLYPH_GAP + ES_TITLE_H + ES_HINT_H)
 /* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
 int empty_top(int free_top, int free_end, int row) {
-    int stack = ES_TEXT + (row ? ES_ROW_GAP + ES_ROW_H : 0),
+    int stack = ES_TEXT + (row ? CTA_GAP_ABOVE + CTA_H : 0),
         from = free_top > ES_TOP ? free_top : ES_TOP;
     return from + (free_end - from - stack) / 2;
 }
-/* The action row's screen y, for a page whose own widget is the row (Songs' Scan Music Now). */
-int empty_row_y(int free_top) { return empty_top(free_top, ES_END, 1) + ES_TEXT + ES_ROW_GAP; }
+/* The button's screen y, for a page whose own widget is the button (Songs' Scan Music Now). */
+int empty_row_y(int free_top) { return empty_top(free_top, ES_END, 1) + ES_TEXT + CTA_GAP_ABOVE; }
 /* The empty state in page, made once and written again on each call: e 0 hides it (0). An e with a
- * row but no on_row keeps the row's place in the stack for the caller's own (empty_row_y). The row
- * list is made with the view; a later call shows or hides it but keeps its words and click. */
+ * row but no on_row keeps the button's place in the stack for the caller's own (empty_row_y). The
+ * row list is made with the view; a later call shows or hides it but keeps its words and click. */
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event)) {
     if (!page) return 0;
     void *art = widget_lookup(page, ES_NAME, 0), *row = widget_lookup(page, ES_ROW_NAME, 0);
@@ -256,16 +253,19 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
     widget_set_prop_str(art, "_es_glyph", e->glyph ? e->glyph : "");
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
+    widget_set_prop_str(art, "_es_row", e->row && on_row ? e->row : "");
     widget_set_prop_int(art, "_es_top", top);
     widget_set_visible(art, 1, 0);
     widget_invalidate_force(art, 0);
     if (row)
         widget_set_visible(row, e->row && on_row, 0);
     else if (e->row && on_row) {
-        void *view = rows_view(page, top + ES_TEXT + ES_ROW_GAP - y, 375, ES_ROW_H, 1, page_h(48));
+        void *view = rows_view(page, top + ES_TEXT + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
         widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
-        page_row_detail(view, 0, e->row, 0, on_row);
-        ringnav_select(view, 0, 1); /* already selected, as the design has it */
+        widget_set_prop_int(P(view, W_PARENT), "style:normal:bg_color",
+                            0);                  /* the capsule under it */
+        page_row_detail(view, 0, "", 0, on_row); /* its words are the capsule's (_es_row) */
+        ringnav_select(view, 0, 1);              /* already selected, as the design has it */
     }
     return 1;
 }
@@ -274,22 +274,18 @@ int empty_shown(void *page) {
     void *art = page ? widget_lookup(page, ES_NAME, 1) : (void *)0;
     return art && widget_get_visible(art);
 }
-/* The stack painted in w at top (a y in w). */
+/* Whether list is an empty state's button, which paints its own selection (no bar). */
+int empty_button(void *list) {
+    void *p = list ? P(list, W_PARENT) : (void *)0;
+    return p && !tk_strcmp(widget_get_prop_str(p, "name", ""), ES_ROW_NAME);
+}
+/* The stack painted in w at top (a y in w); its button, when e->row, selected or not. */
 void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     int light = ipod_light();
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    static const signed char dx[] = { -ES_SIDE_DX, ES_SIDE_DX, 0 };
-    for (int k = 0; k < 3; ++k) { /* the two behind at about a quarter's strength */
-        int s = k < 2 ? ES_SIDE : ES_TILE;
-        rect_t r = { 375 / 2 + dx[k] - s / 2, top + ES_TILE / 2 - s / 2, s, s };
-        fill_box(canvas, &r, RGBA(k < 2 ? flip_if(light, 0x0a0a0b) : tok(TOK_RAISED_2)), ES_TILE_R);
-        round_ring(canvas, &r, ES_TILE_R, RGBA(flip_if(light, k < 2 ? 0x111112 : 0x48484c)));
-    }
-    stock_canvas_set_fill_color(canvas, fill);
     char art[48];
-    tk_snprintf(art, sizeof art, "empty_%s", e->glyph ? e->glyph : "");
-    paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top + ES_TILE / 2 - ES_GLYPH / 2);
-    int ty = top + ES_TILE + ES_TITLE_GAP;
+    tk_snprintf(art, sizeof art, "empty_%s_%c", e->glyph ? e->glyph : "", light ? 'l' : 'd');
+    paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top);
+    int ty = top + ES_GLYPH + ES_GLYPH_GAP;
     ui_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
     ui_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
@@ -300,7 +296,16 @@ void empty_state_paint(void *w, void *canvas) {
         return;
     empty_t e = { widget_get_prop_str(w, "_es_glyph", ""), widget_get_prop_str(w, "_es_title", ""),
                   widget_get_prop_str(w, "_es_hint", ""), 0 };
-    empty_paint(w, canvas, &e, widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w));
+    int top = widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w);
+    empty_paint(w, canvas, &e, top);
+    const char *label = widget_get_prop_str(w, "_es_row", "");
+    void *row = *label ? widget_lookup(P(w, W_PARENT), ES_ROW_NAME, 0) : (void *)0,
+         *list = row && widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
+    if (list && widget_get_visible(row)) {
+        /* selected: the wheel's list is the button's, on its one row */
+        int sel = g_menu.w == list && widget_get_prop_int(list, SEL, -1) == 0 ? 0 : -1;
+        ui_cta_paint(canvas, &label, 1, top + ES_TEXT + CTA_GAP_ABOVE, sel, pointer_down() && !sel);
+    }
 }
 /* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name
  * hidden on its first line for the status row (navigation.c page_caption). Its list view. */
@@ -381,10 +386,10 @@ static void *scan_button(void *top) {
     return btn && widget_get_visible(view) ? btn : (void *)0;
 }
 
-/* Stock's panel as the empty state's one selected row (at screen y), Scan Music Now: the button
- * itself at the text column with no fill of its own (feedback_scan_bar paints the selection's bar
- * under it); the picture and the line go, as the empty state says it. */
-#define SCAN_ROW_H 32
+/* Stock's panel as the empty state's button (at screen y), Scan Music Now: the button itself, the
+ * capsule's band across the screen with no fill or words of its own (feedback_scan_bar paints the
+ * capsule and its label); the picture and the line go, as the empty state says it. */
+static const char *const scan_words[] = { "Scan Music Now" };
 static void scan_row(void *btn, int y) {
     static const char *const fills[] = { "style:normal:bg_color", "style:pressed:bg_color",
                                          "style:over:bg_color", "style:focused:bg_color" };
@@ -395,23 +400,23 @@ static void scan_row(void *btn, int y) {
     }
     widget_move_resize(view, I(view, W_X), y - screen_y(P(view, W_PARENT)), I(view, W_W),
                        I(view, W_H));
-    widget_move_resize(btn, 0, 0, I(view, W_W), SCAN_ROW_H);
+    widget_move_resize(btn, 0, 0, I(view, W_W), CTA_H);
     for (unsigned i = 0; i < sizeof fills / sizeof *fills; ++i) widget_set_prop_int(btn, fills[i], 0);
     widget_set_prop_int(btn, "style:normal:border_color", 0);
-    widget_set_prop_str(btn, "style:normal:text_align_h", "left");
-    widget_set_prop_int(btn, "style:normal:margin_left", geom_val(V_TEXT_X) + 2); /* a label's 2 px margin */
-    widget_set_text_utf8(btn, "Scan Music Now");
-    theme_font(btn, ROLE_TITLE, FONT_ROW);
+    widget_set_text_utf8(btn, "");
     widget_set_prop_int(btn, "_scan_row", 1);
 }
 
-/* The Scan Music Now row's bar: the selection's, as feedback_switch_bar's, under its words. */
+/* The Scan Music Now button: the capsule under the button's band, selected while the wheel's
+ * selection is on it. */
 void feedback_scan_bar(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD) || !widget_get_prop_int(w, "_scan_row", 0) ||
         tk_strcmp(widget_get_prop_str(w, "name", ""), "btn_upmusic"))
         return;
-    sel_bar_flat(canvas, 0, 0, I(w, W_W), I(w, W_H));
-    st.sel_accent = w;
+    int x = I(canvas, CANVAS_X);
+    I(canvas, CANVAS_X) = 0; /* ui_cta_paint centres on the screen */
+    ui_cta_paint(canvas, scan_words, 1, 0, 0, pointer_down()); /* its one stop: selected */
+    I(canvas, CANVAS_X) = x;
 }
 
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row

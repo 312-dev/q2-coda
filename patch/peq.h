@@ -304,6 +304,7 @@ typedef struct {
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);
 int empty_shown(void *page);
+int empty_button(void *list);
 void *empty_list(void *page, void *body, const char *name, const empty_t *e,
                  int (*on_row)(void *ctx, void *event));
 void *empty_open(const char *window, const char *name, const empty_t *e,
