@@ -210,11 +210,12 @@ All lists share one grid.
   track with an Accent Blue knob, off a 1.5 px white outline round the white knob. No "On"/"Off"
   text beside it. A setting with two or three named choices (Gain's High and Low, Charge Limit's
   Off and 80%) is a key/value row that Centre cycles; the value is never part of the label.
-- **Captioned row** (Smart Wi-Fi's; approved as S3 on 2026-11-15, `mock_radio.py` `caption_rows('reveal')`):
+- **Captioned row** (Smart Wi-Fi's and the other rows `pod_caption` names; approved as S3 on 2026-11-15, `mock_radio.py` `caption_rows('reveal')`):
   the caption shows only under the selected row. That row grows over 150 ms, its title and switch where
   they were, to hold the caption under them inside the bar: Inter 13 px in `#D6E2FA`, 17 px lines from the
   title's column, wrapped at words to the right column, 5 px under the last; every other captioned row is one
   row high. The list scrolls by whole rows to keep the grown row's foot in sight (`patch/settings_pages.c`).
+  Every caption but Smart Wi-Fi's is one line there, under 327 px of Inter 13 (the bar's 343 less its 8 px insets).
 - **Disabled row** (Set Time Manually while the time is set automatically): label, value and
   chevron in Text Tertiary, and the wheel passes over it.
 - **Picker:** the current choice carries Phosphor's `check` (bold, 12 px) on the right column, Accent

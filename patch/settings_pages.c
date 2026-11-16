@@ -60,8 +60,9 @@ void about_rows(void *view) {
  * alone), so the title and switch stay where they were and the item's own height, which the
  * settings list stacks by and the bar spans (navigation.c paint_selection), makes the room. The
  * caption is wrapped at words to the bar's text column, at most CAP_LINES lines, measured at its
- * first paint. One page's captions at a time: a row from another view clears the table. */
-#define CAP_MAX 4
+ * first paint. One page's captions at a time, CAP_MAX of them (caption_row drops any more): a row
+ * from another view clears the table. */
+#define CAP_MAX 8
 #define CAP_LINES 3
 #define CAP_TOP 32    /* the row's own height, title and switch */
 #define CAP_PX 16     /* Inter 13 px, AWTK's size (13 x 1.21) */
@@ -91,9 +92,10 @@ static int cap_gone(void *view, void *event) {
     memset(&cap, 0, sizeof cap);
     return 0;
 }
-/* The row a list_row label stands in (its button's list_item) gets text as its caption. */
+/* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
+ * none. */
 void caption_row(void *label, const unsigned *text) {
-    void *item = label ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
+    void *item = label && text ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
          *view = item ? P(item, W_PARENT) : (void *)0;
     if (!view) return;
     if (view != cap.view) {
@@ -107,6 +109,39 @@ void caption_row(void *label, const unsigned *text) {
             return;
         }
 }
+#define STR_(x) #x
+#define STR(x) STR_(x)
+#define W(s) ((const unsigned *)L##s)
+/* pod_rows' captions by POD_* (0: none), each one line at CAP_PX on OLED's settings bar, each from
+ * what the code does: In-Vehicle Mode, stock's boot resume and its shutdown when the cable goes
+ * (docs/internals.md#boot-resume-ipod); Standby Limit's alarm (system.c ringnav_standby); Charge
+ * Limit's (system.c charge_poll); Wake's (navigation.c wake_gate); Hold Return's
+ * (compact_now_playing); Fast Navigation's year letters and their hold (coverflow.c lettered,
+ * coverflow_thumb.c coverflow_wheel_poll); Scan Song Durations' (durations.c durations_scanned);
+ * the Position Bar (coverflow_position.c); Enlarged Album Art's countdown (offsets.inc BC_IDLE);
+ * On-The-Go's rows (playlists.c pl_dress, navigation.c qm_open). Volume Guard has none. */
+const unsigned *pod_caption(int i) {
+    static const unsigned *const text[POD_COUNT] = {
+        [POD_CARMODE] = W("Plays at power-on, shuts down when unplugged"),
+        [POD_STANDBY] = W("Shuts down a Q2 left in Standby this long"),
+        [POD_CHARGE] =
+            W("Stops charging at " STR(CHARGE_STOP) "%, starts again at " STR(CHARGE_RESUME) "%"),
+        [POD_WAKE] = W("Center presses it takes to wake the screen"),
+        [POD_HOLD_HOME] = W("What holding Return opens: Now Playing or Home"),
+        [POD_BIG_LIB] = W("Year sort spins by year too; letters stay till you lift"),
+        [POD_SCAN_DURATIONS] = W("Measures song lengths after each library update"),
+        [POD_CF_POSITION] = W("Shows your place in the covers while you browse"),
+        [POD_COVERMODE] = W("Shows the art full screen after 10s on Now Playing"),
+        [POD_OTG] = W("Shows On-The-Go in Playlists and hold menus"),
+    };
+    return i >= 0 && i < POD_COUNT ? text[i] : (const unsigned *)0;
+}
+/* Smart Awake's (navigation.c keep_lit_poll) and stock's Folder skip's (playback.c ringnav_next's
+ * rollover): rows that are not pod_rows'. */
+const unsigned *const smart_awake_caption =
+    W("Keeps the screen on for lyrics and art while playing");
+const unsigned *const folder_skip_caption = W("Plays on into the next folder when one ends");
+
 /* Captioned row i's grown height, its caption measured. */
 static int cap_full(int i) { return CAP_TOP + cap.lines[i] * CAP_LINE + CAP_FOOT; }
 /* The heights for the change's progress, the list laid out again, and the grown row kept in view,
