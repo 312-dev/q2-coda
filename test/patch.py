@@ -3559,8 +3559,8 @@ class QueueMachine(Machine):
     def mcl(self,k): return signed(self.get(O[k]))
     def dialog(self):
         self.view=self.node('scroll_view','scroll_view',[self.node('list_item') for _ in range(5)])
-        self.title=self.node('hscroll_label','scrlabel_title'); self.back=self.node('image','img_return')
-        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.back]),
+        self.title=self.node('hscroll_label','scrlabel_title'); self.dlg_return=self.node('image','img_return')  # not back: a Machine's back() is Return
+        return self.node('dialog','sortselect_dialog',[self.node('view','view_navbar',[self.title,self.dlg_return]),
                                                        self.node('list_view','list_view',[self.view])])
     def bootvol(self):  # stock's Boot volume page, which crossfade.c re-dresses
         self.slider=self.node('slider','slider_bootvol'); self.vol=self.node('label','label_vol')
@@ -4126,7 +4126,7 @@ assert m.shut==1 and not opens(m),(m.shut,opens(m)); passed()
 m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
-assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.back,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
+assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
 assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0
@@ -7862,7 +7862,7 @@ covers=m.nodes[m.slide]['children']; assert len(covers)==3
 assert all(m.nodes[c]['image'].startswith('file:///mnt/mmc/.coverflow/') for c in covers)
 assert 'Album 0' in m.texts(); passed()
 m.press(3); assert m.hold()==11 and m.nodes[m.title]['text']=='Album 0'
-f,ctx=m.handler(m.back,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
+f,ctx=m.handler(m.dlg_return,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.top==page and m.release()==0; passed()
 # Covers step like Home: fast ticks retarget one animator, never stock next/previous, whose
 # scroll_to orphans the running animator.
@@ -8165,7 +8165,7 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def hearts(self): return [self.nodes[h]['image'] for h in self.nodes[self.panel()]['children'][1:]]
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
-        rows=self.labels(); f,ctx=self.handler(self.back,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
+        rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
     def rate(self,want):  # Rate album, wheel down to 0 then up to want, Centre
         toasts=len(self.toasts)
@@ -13686,7 +13686,11 @@ assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t an
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
 # Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
-def card(m,answer,row): m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+def card(m,answer,row):
+    if m.nodes[m.top].get('name')=='sortselect_dialog':  # the card closes first, as on the unit: the page is on top again
+        if m.top in m.stack: m.stack.remove(m.top)
+        m.top=m.page
+    m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
 m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
 t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR
@@ -13802,7 +13806,7 @@ np=m.top; info,msg=m.nodes[np]['children']; requests=len(m.requests)
 m.advance(15250)
 assert texts(msg)==["Playback didn't start",'Go back and try again'] and len(m.requests)==requests
 m.state('playing',track='late'); m.poll(); m.advance(250); assert m.nodes[info]['visible']
-m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); m.row(1); m.answer(*OK,[])
+m.destroy(np); m.top=m.page; m.back(); m.row(8); m.answer(*ME); m.row(1); card(m,'signout_answer',1); m.answer(*OK,[])  # Sign Out's card
 m.call(address=payload_syms['spot_np'],args=(0,0,0,0),gap=0,count=5_000_000)
 info,msg=m.nodes[m.top]['children']; assert texts(msg)==['Open Spotify on your phone','and choose Q2']
 passed()
@@ -13892,7 +13896,8 @@ m.back(); m.back(); m.row(3); assert m.labels()[0]=='Storage Management'
 m.row(1); m.answer(*OK,[track('spotify:track:a','A')]); m.row(0); m.row(1)
 assert m.asked()==('remove','tracks','spotify:track:a')
 m.answer('ok','Remove 0 playlists, 1 tracks? 2 playlists may become incomplete','',[])
-assert 'Track removal can make playlists incomplete' in m.labels(); m.row(1); passed()
+assert b'Remove 0 playlists, 1 tracks? 2 playlists may become incomplete\nPlaylists can be left incomplete.\0' in bytes(m.u.mem_read(payload_syms['br'],0x2000))  # the card's body (spotify.c br.remove_note)
+card(m,'remove_answer',1); assert m.asked()==('remove','tracks','spotify:track:a','confirm'); passed()
 # caps answered after Downloads opened (asked again once the base was idle, a request having cancelled
 # it): the open level is laid out again, so its rows and what a press opens agree.
 HUB=('collections','collection','playcollection','downloadliked','jobs','job','remove','download')

@@ -2,7 +2,7 @@
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
  * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate and queue
- * commands and the pairing code in.
+ * commands, the pairing code and the connected phones in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
@@ -613,6 +613,24 @@ static void peers_poll(void) {
     crypto_wipe(peers, sizeof peers);
 }
 
+/* The paired phones connected now, for Settings > Car Remote's rows (coda_rc_shim.c cr_page_show): the
+ * peer id of each authenticated session in /tmp/coda-rc.online, 8 bytes each, written when the set
+ * changes. Ids are not secret (every Hello carries one in the clear). */
+static void online_poll(void) {
+    static uint8_t was[(MAX_TCP + 1) * CRC_PEER_ID];
+    static int was_n = -1;
+    uint8_t ids[(MAX_TCP + 1) * CRC_PEER_ID];
+    int n = 0;
+    for (int i = 0; i <= MAX_TCP; ++i) {
+        conn *c = i < MAX_TCP ? &tcp[i] : &ble;
+        if (c->used && c->s.state == S_AUTHED) memcpy(ids + CRC_PEER_ID * n++, c->s.peer, CRC_PEER_ID);
+    }
+    if (n == was_n && !memcmp(ids, was, n * CRC_PEER_ID)) return;
+    if (crc_write_file("/tmp/coda-rc.online", ids, n * CRC_PEER_ID, 0644)) return; /* tried again next pass */
+    memcpy(was, ids, n * CRC_PEER_ID);
+    was_n = n;
+}
+
 static int already_running(void) {
     char b[16];
     int n = read_file("/tmp/coda-rc.pid", b, sizeof b - 1);
@@ -670,6 +688,7 @@ int main(int argc, char **argv) {
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
         np_poll();
         ack_poll();
+        online_poll();
         uint32_t now = crc_now_ms();
         if (now - last_tick >= 1000) {
             last_tick = now;
@@ -687,6 +706,7 @@ int main(int argc, char **argv) {
     if (ble.used) conn_close(&ble);
     ble_stop();
     unlink_at("/tmp/coda-rc.pair");
+    unlink_at("/tmp/coda-rc.online");
     unlink_at("/tmp/coda-rc.pid");
     return 0;
 }
