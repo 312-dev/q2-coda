@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Lists: every list stops at its first and last rows, Home, Settings, the Library, card apps and pickers alike. Turning on past an end no longer jumps round to the other end after a pause or bounces the highlight; it leans against the end until you stop turning, and a drag stops at the end instead of stretching and springing back.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - SyncLink, Shanling's phone remote, is gone from Settings and stays off.

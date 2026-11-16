@@ -183,6 +183,9 @@ All lists share one grid.
   is unchanged: past it the bar steps a row and the next tug starts from the leftover turn. Let go short of
   it and the bar springs back over 220 ms. The mock-up's 1 degree tilt is under a pixel on a 32 px row and is
   not drawn. A touch drag scrolls the list with the bar hidden, as touch always does, so it does not tilt.
+- **A list's end is its end** (approved on 2026-11-16): the wheel stops on the first and last rows, never wrapping
+  to the other end and never bouncing. Turning on past an end, the bar's tug holds full against it, the
+  selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
   The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
   black band and down into the fade.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
@@ -766,7 +769,7 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 
 - Page push and pop: 220 ms horizontal slide, `cubic_out`.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
-- Nothing pulses, glows or bounces.
+- Nothing pulses, glows or bounces, a list's end included.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
