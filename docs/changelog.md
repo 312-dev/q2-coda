@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
+  - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
   - Light Mode: an empty page's title (No Playlists, No Genres, No Matches) showed white on white; it is black now.
   - Display (OLED): an empty Favorites list shows a crossed-out heart.
