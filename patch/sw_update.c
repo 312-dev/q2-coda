@@ -270,10 +270,9 @@ static int sw_tick(const void *unused) {
     sw.timer = 0;
     int state = sw.state;
     if (state == SW_CANCELLED || !sw.page) return 7;
-    if (state == SW_OK) {
-        sw_confirm_open();
-        sw_close(&sw.page);
-    } else
+    if (state == SW_OK)
+        sw_confirm_open(); /* the check's page goes once it is on top: sw_update_paint */
+    else
         sw_result(state);
     return 7; /* RET_REMOVE */
 }
@@ -340,41 +339,60 @@ void sw_update_paint(void *w, void *canvas) {
     char s[64], spin[24];
     st.raw_ink = 1;
     if (w == sw.page) {
-        mode_page_t m = { SW_RED, "swmode_bad", 0, "Update Can't Be Used",
-                          "The file is damaged or not for the Q2" };
+        mode_page_t m = { SW_RED,
+                          "swmode_bad",
+                          0,
+                          "Update Can't Be Used",
+                          "The file is damaged or not for the Q2",
+                          (const char *)0 };
         switch (sw.result) {
         case SW_CHECKING:
             tk_snprintf(spin, sizeof spin, "swspin_%c_%d", light ? 'l' : 'd', sw.frame);
-            m = (mode_page_t){ MODE_BARE, spin, SW_SPIN_PX, "Checking for an Update…",
-                               "Looking on the SD card" };
+            m = (mode_page_t){ MODE_BARE,
+                               spin,
+                               SW_SPIN_PX,
+                               "Checking for an Update…",
+                               "Looking on the SD card",
+                               (const char *)0 };
             break;
         case SW_LATEST:
             sw_installed(s, sizeof s);
-            m = (mode_page_t){ MODE_GREEN, "swmode_latest", 0, "You're Up to Date", s };
+            m = (mode_page_t){ MODE_GREEN, "swmode_latest", 0, "You're Up to Date",
+                               s,          (const char *)0 };
             break;
         case SW_NONE:
-            m = (mode_page_t){ SW_GREY, "swmode_none", 0, "No Update Found",
-                               "Put update.tar on the SD card" };
+            m = (mode_page_t){ SW_GREY,
+                               "swmode_none",
+                               0,
+                               "No Update Found",
+                               "Put update.tar on the SD card",
+                               (const char *)0 };
             break;
         case SW_NOCARD:
-            m = (mode_page_t){ SW_GREY, "swmode_none", 0, "No SD Card",
-                               "Insert the card with update.tar" };
+            m = (mode_page_t){
+                SW_GREY,        "swmode_none", 0, "No SD Card", "Insert the card with update.tar",
+                (const char *)0
+            };
             break;
         case SW_LOW:
             tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, sw.level);
-            m = (mode_page_t){ SW_ORANGE, "swmode_low", 0, "Charge to Update", s };
+            m = (mode_page_t){ SW_ORANGE, "swmode_low", 0, "Charge to Update", s, (const char *)0 };
             break;
         case SW_FULL:
-            m = (mode_page_t){ SW_ORANGE, "swmode_bad", 0, "Not Enough Space",
-                               "Free 100 MB on the SD card" };
+            m = (mode_page_t){
+                SW_ORANGE,      "swmode_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
+                (const char *)0
+            };
         }
         mode_page_paint(w, canvas, dy, &m);
     } else if (w == sw.confirm && sw.view) {
         void *wm = window_manager(), *list = P(sw.view, W_PARENT);
         if (!sw.ready && window_manager_get_top_window(wm) == w &&
             !window_manager_is_animating(wm)) {
-            /* opened from a timer: the wheel's list once it is on top (usb_ui.c usb_ready) */
+            /* opened from a timer: the wheel's list once it is on top (usb_ui.c usb_ready), and the
+             * check's page under it closed only then, not while its slide in runs */
             sw.ready = 1;
+            sw_close(&sw.page);
             ringnav_select(sw.view, widget_get_prop_int(sw.view, "_ringnav_index", 0), 2);
         }
         int rows = I(list, W_Y), foot = rows + I(list, W_H) + SW_FOOT_DY;
@@ -395,7 +413,7 @@ void sw_update_paint(void *w, void *canvas) {
         int top =
             mode_page_paint(w, canvas, dy,
                             &(mode_page_t){ accent, "swmode_restart", 0, "Restarting to Install",
-                                            "Don't turn off the Q2" });
+                                            "Don't turn off the Q2", (const char *)0 });
         rect_t track = { 375 / 2 - SW_BAR_W / 2, top + SW_BAR_Y, SW_BAR_W, SW_BAR_H }, part = track;
         part.w = sw_unpacked(SW_BAR_W);
         fill_box(canvas, &track, RGBA(light ? 0xd1d1d6 : 0x333333), SW_BAR_H / 2);

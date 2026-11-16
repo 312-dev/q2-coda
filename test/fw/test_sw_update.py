@@ -179,7 +179,8 @@ def test_the_checks_answer(fw, state, confirm):
     sw.state = state
     assert tick(None) == 7 and not sw.timer and len(fw.calls('fw_pthread_join')) == 1
     assert pages() == ['swupdate_page'] + ['swconfirm_page'] * confirm
-    assert (sw.page is None) == confirm and sw.result == (SW_CHECKING if confirm else state)
+    # the check's page stays under Install Update? until that is on top and settled (sw_update_paint)
+    assert sw.page and sw.result == (SW_CHECKING if confirm else state) and bool(sw.confirm) == confirm
 
 
 def test_leaving_while_it_checks_cancels(fw):

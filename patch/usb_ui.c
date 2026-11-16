@@ -362,7 +362,7 @@ void usb_ui_paint(void *w, void *canvas) {
         usb_mode_hide(w); /* stock's face for the mode shows the DAC's switches again */
         if (u.ejected && !dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ MODE_GREEN, "usbmode_ejected", 0, "OK to Disconnect", "Safe to unplug now" });
+                            &(mode_page_t){ MODE_GREEN, "usbmode_ejected", 0, "OK to Disconnect", "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
                             &(mode_page_t){ accent, "usbmode_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
