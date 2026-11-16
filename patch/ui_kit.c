@@ -123,7 +123,7 @@ int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w) {
 }
 /* One capsule at r: primary the accent, else the grey; ringed while ui_focus_shown when lit; down
  * a step darker. */
-static void cta_capsule(void *canvas, const rect_t *r, const char *label, int primary, int lit,
+static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary, int lit,
                         int down) {
     int light = ipod_light();
     unsigned fill = !primary ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? 0x3a3a3c : 0x2c2c2e))
