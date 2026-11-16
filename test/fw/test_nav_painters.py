@@ -1350,7 +1350,7 @@ class Confirm:
 
 
 @pytest.mark.parametrize('prompt, title, verb', [('Restart?', 'Restart?', 'Restart'), ('Shut Down?', 'Shut Down?', 'Shut Down'),
-                                                  ('Line Out sets max volume,continue?', 'Use Line Out?', 'Use Line Out'),
+                                                  ('Line Out sets max volume, continue?', 'Use Line Out?', 'Use Line Out'),
                                                   ('Delete Record?', 'Forget This Network?', 'Forget')])
 def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, title, verb):
     """Stock's confirm pop-up as the confirmation card (feedback.c feedback_confirm_dress): the card at x 42, 291 wide,

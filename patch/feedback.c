@@ -790,7 +790,7 @@ static const struct {
     { "Unpair?", "Unpair This Device?", "Unpair", 0 },
     { "Delete Record?", "Forget This Network?", "Forget", 0 },
     { "Disconnect Now?", "Disconnect?", "Disconnect", 0 },
-    { "Line Out sets max volume,continue?", "Use Line Out?", "Use Line Out",
+    { "Line Out sets max volume, continue?", "Use Line Out?", "Use Line Out",
       "Line Out sets the volume to its maximum." },
     { "Export Playlist?", "Export Playlists?", "Export", 0 },
 };
