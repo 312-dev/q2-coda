@@ -53,6 +53,14 @@ SOURCES = {
                '926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e'),
     'libpng': ('1.2.59', 'https://download.sourceforge.net/libpng/libpng-1.2.59.tar.xz',
                'b4635f15b8adccc8ad0934eea485ef59cc4cae24d0f0300a9a941e51974ffcc7'),
+    # bluetoothd (docs/bluetoothd.md): BlueZ 5.66, stock's version, with Shanling's libbtctl hooks put back and Q2
+    # Pod's AVRCP additions; compiled against GLib's and D-Bus's headers for the versions the rootfs carries
+    'bluez': ('5.66', 'https://www.kernel.org/pub/linux/bluetooth/bluez-5.66.tar.xz',
+              '39fea64b590c9492984a0c27a89fc203e1cdc74866086efb8f4698677ab2b574'),
+    'glib': ('2.74.4', 'https://download.gnome.org/sources/glib/2.74/glib-2.74.4.tar.xz',
+             '0e82da5ea129b4444227c7e4a9e598f7288d1994bf63f129c44b90cfd2432172'),
+    'dbus': ('1.12.28', 'https://dbus.freedesktop.org/releases/dbus/dbus-1.12.28.tar.gz',
+             '9da1e3f2b73f75eec0a9e4509d64be43909d1f2853fe809528a0a53984d76420'),
     # --dev builds' adbd (docs/adb.md), not a replacement: Debian's android-tools source, as Buildroot fetches it
     'adbd': ('4.2.2+git20130218', 'https://launchpad.net/ubuntu/+archive/primary/+files/android-tools_4.2.2+git20130218.orig.tar.xz',
              '9bfba987e1351b12aa983787b9ae4424ab752e9e646d8e93771538dc1e5d932f'),
@@ -485,6 +493,91 @@ def build_adbd(src, stage, env, log):
     shutil.copy(src/'debian/copyright', stage/'copyright')
 
 
+# BlueZ links stock's GLib 2.74.4, D-Bus 1.12 and Shanling's libbtctl.so, which no source here builds: it is
+# compiled against GLib's and D-Bus's own headers (glibconfig.h as GLib's meson writes it for this target,
+# tools/bluez/glibconfig.h; dbus-arch-deps.h filled in below) and linked against stubs that carry each
+# library's soname and the symbols bluetoothd uses (tools/bluez/stubs.tsv: library, name, kind, size, read
+# from the stock rootfs), so the binary names the same libraries stock's does. check_abi then resolves its
+# imports against the real ones, data objects' sizes included.
+BLUEZ_DIR = pathlib.Path(__file__).resolve().parent/'bluez'
+GLIBCONFIG = (BLUEZ_DIR/'glibconfig.h').read_text()
+STUBS = (BLUEZ_DIR/'stubs.tsv').read_text()
+# Stock's plugins are hostname, wiimote, autopair, policy, a2dp, avrcp, scanparam, deviceinfo and battery
+# (docs/third-party.md); no HID, HoG, network, LE audio, OBEX, mesh or tools
+BLUEZ_OPTIONS = ['--sysconfdir=/etc', '--localstatedir=/var', '--libexecdir=/usr/libexec', '--with-dbusconfdir=/etc',
+                 '--with-dbussystembusdir=/usr/share/dbus-1/system-services',
+                 '--with-dbussessionbusdir=/usr/share/dbus-1/services', '--disable-network', '--disable-hid',
+                 '--disable-hog', '--disable-bap', '--disable-mcp', '--disable-vcp', '--disable-tools',
+                 '--disable-monitor', '--disable-udev', '--disable-cups', '--disable-obex', '--disable-client',
+                 '--disable-systemd', '--disable-manpages', '--disable-datafiles', '--disable-mesh']
+
+
+def stub_library(env, lib, out):
+    """A shared library named lib (its soname) under out defining what STUBS lists for it: each function an
+    empty one, each data object as many bytes as stock's; for linking only, never installed."""
+    out.mkdir(parents=True, exist_ok=True)
+    c = out/f'{lib}.stub.c'
+    lines = []
+    for row in STUBS.splitlines():
+        owner, name, kind, size = row.split('\t')
+        if owner == lib:
+            lines.append(f'void {name}(void) {{}}' if kind == 'FUNC' else f'char {name}[{size}];')
+    c.write_text('\n'.join(lines) + '\n')
+    run(*env.cc.split(), '-shared', '-fPIC', f'-Wl,-soname,{lib}', '-o', out/lib, c)
+    base = lib.split('.so')[0] + '.so'
+    if base != lib:
+        (out/base).symlink_to(lib)
+
+
+def build_glib(src, stage, env, log):
+    # headers only, and a stub to link against (stub_library)
+    inc = stage/'usr/include/glib-2.0'
+    for d in ('glib', 'glib/deprecated', 'gobject'):
+        (inc/d).mkdir(parents=True, exist_ok=True)
+        for h in (src/d).glob('*.h'):
+            shutil.copy(h, inc/d/h.name)
+    shutil.move(inc/'glib/glib.h', inc/'glib.h')
+    shutil.move(inc/'glib/glib-object.h', inc/'glib-object.h')
+    (stage/'usr/lib/glib-2.0/include').mkdir(parents=True)
+    (stage/'usr/lib/glib-2.0/include/glibconfig.h').write_text(GLIBCONFIG)
+    stub_library(env, 'libglib-2.0.so.0', stage/'usr/lib')
+    pc = stage/'usr/lib/pkgconfig'
+    pc.mkdir()
+    (pc/'glib-2.0.pc').write_text(f'prefix={stage}/usr\nName: GLib\nDescription: stock\'s GLib\nVersion: 2.74.4\n'
+                                  'Libs: -L${prefix}/lib -lglib-2.0\n'
+                                  'Cflags: -I${prefix}/include/glib-2.0 -I${prefix}/lib/glib-2.0/include\n')
+
+
+def build_dbus(src, stage, env, log):
+    # headers only, and a stub to link against (stub_library)
+    inc = stage/'usr/include/dbus-1.0/dbus'
+    inc.mkdir(parents=True)
+    for h in (src/'dbus').glob('dbus*.h'):
+        shutil.copy(h, inc/h.name)
+    arch = (src/'dbus/dbus-arch-deps.h.in').read_text()
+    for k, v in {'DBUS_HAVE_INT64': '#define DBUS_HAVE_INT64 1', 'DBUS_INT64_TYPE': 'long long',
+                 'DBUS_INT64_CONSTANT': '(val##LL)', 'DBUS_UINT64_CONSTANT': '(val##ULL)', 'DBUS_INT32_TYPE': 'int',
+                 'DBUS_INT16_TYPE': 'short', 'DBUS_MAJOR_VERSION': '1', 'DBUS_MINOR_VERSION': '12',
+                 'DBUS_MICRO_VERSION': '28', 'DBUS_VERSION': '1.12.28'}.items():
+        arch = arch.replace(f'@{k}@', v)
+    (stage/'usr/lib/dbus-1.0/include/dbus').mkdir(parents=True)
+    (stage/'usr/lib/dbus-1.0/include/dbus/dbus-arch-deps.h').write_text(arch)
+    stub_library(env, 'libdbus-1.so.3', stage/'usr/lib')
+    pc = stage/'usr/lib/pkgconfig'
+    pc.mkdir()
+    (pc/'dbus-1.pc').write_text(f'prefix={stage}/usr\nName: dbus\nDescription: stock\'s D-Bus\nVersion: 1.12.28\n'
+                                'Libs: -L${prefix}/lib -ldbus-1\n'
+                                'Cflags: -I${prefix}/include/dbus-1.0 -I${prefix}/lib/dbus-1.0/include\n')
+
+
+def build_bluez(src, stage, env, log):
+    run('./configure', f'--host={env.host}', '--prefix=/usr', *BLUEZ_OPTIONS, cwd=src, env=env.vars, log=log)
+    run('make', f'-j{JOBS}', cwd=src, env=env.vars, log=log)  # BUILT_SOURCES (lib/bluetooth) first
+    (stage/'usr/bin').mkdir(parents=True)
+    shutil.copy(src/'src/bluetoothd', stage/'usr/bin/bluetoothd')
+    shutil.copy(src/'COPYING', stage/'COPYING')
+
+
 RECIPES = {'openssl': (build_openssl, []),
            'zlib': (build_zlib, []),
            'mbedtls': (build_mbedtls, []), 'curl': (build_curl, ['mbedtls', 'zlib']),
@@ -493,7 +586,8 @@ RECIPES = {'openssl': (build_openssl, []),
            'busybox': (build_busybox, []),
            'libnl': (build_libnl, []), 'wpa_supplicant': (build_wpa_supplicant, ['openssl', 'libnl']),
            'ffmpeg': (build_ffmpeg, ['openssl', 'zlib']),
-           'adbd': (build_adbd, [])}
+           'adbd': (build_adbd, []),
+           'glib': (build_glib, []), 'dbus': (build_dbus, []), 'bluez': (build_bluez, ['glib', 'dbus'])}
 
 
 # Each top-level function's and class's text as this module was imported (inspect.getsource rereads
