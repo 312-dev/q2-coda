@@ -539,7 +539,7 @@ int ringnav_about(void *win, void *ctx) {
         const char *pod = strstr(Q2POD_VERSION, " Muse");
         tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
         if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
-            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + 4);
+            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + sizeof " Muse" - 1);
         about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
         about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);
