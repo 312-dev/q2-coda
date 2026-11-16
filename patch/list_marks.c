@@ -132,7 +132,7 @@ unsigned wheel_sb_alpha(void *list) {
 }
 
 /* A rounded rectangle's path on vg. */
-static void round_path(void *vg, float x, float y, float w, float h, float r) {
+void round_path(void *vg, float x, float y, float w, float h, float r) {
     vgcanvas_begin_path(vg);
     vgcanvas_move_to(vg, x + r, y);
     vgcanvas_line_to(vg, x + w - r, y);

@@ -2349,6 +2349,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
+    charge_paint(w, canvas); /* the plug-in screen (charging.c) */
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -9601,6 +9602,7 @@ int ringnav_input(void *wm, void *e) {
     if (e && tick_gate(e)) return 0;
     if (e && (chord_gate(e) || wake_gate(e))) return 0;
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
+    if (e && charge_gate(e)) return 0; /* the plug-in screen (charging.c) */
     if (e && coverflow_wait_input(e)) return 0; /* Cover Flow opening: Return gives it up */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;

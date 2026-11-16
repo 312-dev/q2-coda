@@ -8,7 +8,8 @@
  *   (a reader with no medium), only to learn whether a computer answers. One that configures it
  *   within USB_PROBE_MS gets the chooser, "Use USB For": Charge Only, Transfer Files, USB Audio and,
  *   in a --dev build, USB Debugging, and Always Do This. Nothing answering is a charger: the probe
- *   stops and usb_charger_in tells the charging toasts (batch 3's, a weak stub here).
+ *   stops and usb_charger_in (charging.c) toasts the charge. A cable in at all tells charging.c
+ *   (charge_plugged), whose plug-in screen lights a dark Q2.
  * - Transfer Files and USB Audio hand back to stock: the probe stops, g_usbmode is set for this
  *   cable (the tile's choice again once it is out, unless Always Do This saved it) and
  *   g_usblink_status 0 lets stock's next pass start its gadget and open usbmode_page, which is
@@ -84,9 +85,6 @@ static struct {
     void *auth, *auth_view, *auth_switch;
     char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX], fp[32];
 } u __attribute__((section(".scratch")));
-
-/* batch 3's charging toasts: a cable in that no computer answered. */
-__attribute__((weak)) void usb_charger_in(void) {}
 
 static int usb_host(void) {
     char s[16] = { 0 };
@@ -398,6 +396,7 @@ void usb_ui_paint(void *w, void *canvas) {
 /* Before stock's pass: a cable in or out, and the probe's answer. */
 void usb_ui_status(void) {
     int det = g_usbdet_value == 1;
+    if (det && !u.det) charge_plugged(); /* charging.c: a dark Q2 lights for it */
     if (det && !u.det && g_usblink_status == 0) {
         u.choice = USB_ASK, u.chosen = 0;
         int pick = usb_remembered();

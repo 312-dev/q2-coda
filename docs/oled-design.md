@@ -123,7 +123,7 @@ Rules:
   space: 15 min, 30 seconds.
 - **The card is the SD card:** "SD Card" in row names and titles (SD Card Update, SD Card Test),
   "SD card" in a sentence ("Copy music to the SD card"). Never TF or microSD, stock's words.
-- **Size steps are 15, 16, 18, 20, 22** (56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
+- **Size steps are 15, 16, 18, 20, 22** (30 for the [plug-in screen](#plug-in-screen)'s level, 56 for the confirmation's glyph, 17 for the [tabs](#tabs)' labels, 13 for [Edit Library](#edit-library)'s hint). Nothing else.
 - **Row pitch is about 1.6 times the row size** (32 px for 20 px type), as the concept's is
   about twice its cap height.
 - **Sizes are the em.** AWTK sizes a face by its line (ascent less descent), which for Inter is
@@ -772,7 +772,25 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
 - **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
   white; the eject's a bold check on Positive green), the title, a line in Text Secondary and a Stop pill.
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
-  USB Audio Ready (white).
+  USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
+  says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
+  Charger too weak (warning, orange).
+
+### Plug-in screen
+
+A cable in while the screen is off lights it for 3 s and then turns it off again (S1, V1 from
+`design/mockups/mock_charge_anim.py`, approved 2026-11-15; `patch/charging.c`); with the screen on there is no
+screen, only the toast and the status row. Black in both halves, over the whole screen:
+
+- **Battery**: a 170 x 76 body round (187.5, 132), 16 px corners, a 3 px `#3A3A3C` outline; a 7 x 28 nub 5 px past
+  it with 4 px corners; the fill 8 px inside with 9 px corners, `#34C759`, to the level. Nothing over it.
+- **Sweep**: on a 2 s loop the fill's last 14 % grows up to the level (1.3 s, ease out), holds to 1.7 s and fades
+  out by 2 s. Full, or held at Charge Limit, the fill stands still.
+- **Level**: "62%" in Inter Medium 30 px, white, its centre 12 px right of the screen's on y 212, and Phosphor's
+  `lightning` (fill, 26 px, `#34C759`) 3 px left of it. No outlined bolt.
+- **Word**: "Charging" ("Charged" at 100 %) in Inter Regular 16 px, Text Secondary, centred on y 244.
+- A key or a touch ends it and leaves the screen on, doing nothing else; a page opening over it (a computer's
+  chooser) ends it the same way.
 
 ### Motion
 
