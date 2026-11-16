@@ -1128,6 +1128,23 @@ the status row "Software Update" over mode pages as USB's:
   wheel is on that line.
 
 ### Gestures
+### Battery History
+
+<a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16, `patch/battery.c`) is a graph
+over the whole page, under the status row titled "Battery History":
+
+- **Readout**, centred at y 70 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
+  (the status bar's 12- or 24-hour form; "+1:23 · 51%" with the clock never set).
+- **Graph**, 100% at y 99 to 0% at y 199 (a pixel a percent): faint lines at 100% and 50%, the axis at 0%, their
+  labels right-aligned in 15 px Text Tertiary; the level as steps in the accent's light tone over a faint fill; the
+  reading's 1 px hairline in Text Secondary from 100% to 0% and a 10 px white dot on its level.
+- **Export Log**, the shared grey [button](#buttons) centred at y 237. The wheel always moves the reading (clockwise to
+  the newer) and Centre always exports, so the button is the page's only action and no frame draws the focus ring.
+- **Results** are the house toasts in the button's place ("Saved to battery-log.txt", "The card is in use over USB",
+  "Storage unavailable", "The card is full", "Couldn't save"): the button gives way while one shows.
+- ponytail: the button has no pressed frame under Centre (the export runs on the key's press); a press frame needs
+  the key's down and up told apart in `battery_key`.
+
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
   drags right takes the page with it, the status row staying; what it uncovers is black. Let go

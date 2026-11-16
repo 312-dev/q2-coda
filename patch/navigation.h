@@ -737,6 +737,7 @@ void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
 int battery_history(void *ctx, void *event);
 void battery_paint(void *w, void *canvas);
+int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre exports */
 
 /* system.c */
 void power_poll(void);

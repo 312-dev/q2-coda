@@ -10073,6 +10073,7 @@ int ringnav(void *ctx, void *event) {
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))
         return STOP; /* EQ's Simple tab, or its tabs: the wheel moves or adjusts, Centre acts */
+    if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (edit_key(top, key)) {
         drop_input();
         return STOP;
