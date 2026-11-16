@@ -10464,11 +10464,6 @@ assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop',
 m,names=rockbox(False)
 assert not {'fopen','player_stop','system'} & set(names)
 assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['dialog/msginfo_dialog']; passed()
-# ipod_home_rockbox follows the card.
-m=Machine(); m.rockbox_mode=0; m.config['SHORTCUT']='0'
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==0
-m.rockbox_mode=0o100755
-assert m.call(address=payload_syms['ipod_home_rockbox'],args=(0,0,0,0),gap=0)==1; passed()
 # The wheel walks onto the new rows and Centre clicks them, as any fixed settings list.
 m,view,_=display({},sub=0)
 m.paint(view)
@@ -10829,7 +10824,7 @@ passed()
 # runs the migration too; here nothing boots, so no preset is applied and Home reads as stored, Split).
 for stored in (None,'0','1','2','3','9'):
     m,view,kids=appearance({} if stored is None else {'THEME':stored})
-    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Shortcut: Rockbox','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
+    assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],stored
 passed()
 # Songs' action bar on OLED's set (its action_row; navigation.c action_row): what stock builds in it (it does again on a
 # refresh) takes the plain row's shape: the label reads Shuffle after the theme's glyph (list.shuffle, SHUFFLE_LABEL_DX
