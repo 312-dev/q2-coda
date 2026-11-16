@@ -78,6 +78,22 @@ def test_a_networks_signal_moves_to_the_right_column(fw, st, geometry, stand_in)
     assert name.box[0] + name.box[2] <= sig.box[0]
 
 
+def test_a_networks_long_name_waits_for_the_selection_on_every_row(fw, st, geometry, stand_in):
+    """Stock's rows' labels carry neither focus flag under the wheel's mode, so a long name scrolled once on every row as
+    the page opened and never again, not even selected (user, 2026-11-16, on hardware and in the emulator). Each name,
+    the connected row's with its trash too, is only_focus: at rest on its ellipsis, the house marquee
+    (navigation.c marq_moved) scrolls it on the selected row."""
+    lst, rows = wifi_list(fw, st, geometry, stand_in, searching=0)
+    conn = lst.row(('image', (10, 9, O['SET_STOCK_ICON'], 52), '', b'wifi_sig4'),
+                   ('hscroll_label', (72, 0, 200, STOCK_BODY), 'label'),
+                   ('label', (72, 40, 200, 20), 'state'), ('image', (276, 0, 50, STOCK_BODY), 'forget', b'navbar_delete'))
+    conn.children[0].children[2].props['tr_text'] = b'msg_connected'
+    lst()
+    names = [rows['net'].children[0].children[1], conn.children[0].children[1]]
+    focus = {a[0] for _, a in fw.calls('hscroll_label_set_only_focus') if a[1] == 1}
+    assert all(n.addr in focus for n in names)
+
+
 def test_the_connected_networks_trash_ends_on_the_right_column_with_its_glyphs_left_of_it(fw, st, geometry, stand_in):
     """Stock's Forget image (navbar_delete) on the connected row keeps its tap but no art, centred on the right
     column's last 20 px slot; the signal's box takes that slot too, for wifi_mark to draw the trash there and the
