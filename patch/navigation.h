@@ -529,7 +529,7 @@ void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
-void marquee_fade(void *w, void *canvas);
+void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
 int np_marq_owns(void *w);
 void np_marq_kick(void *w), np_marq_reset(void);

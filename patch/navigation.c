@@ -1891,26 +1891,30 @@ static void paint_cover(void *w, void *canvas) {
 
 /* The selected row's long title scrolls, as an iPod's does, MARQUEE_PASSES times as soon as the
  * selection settles, through stock's scroller with every label's holds and pace
- * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on
- * focus alone (only_focus; no row is focused): stock's timer stops such a label on its first tick
- * unless it is focused (0x5fb7ac), so only_focus is off while this one runs. It loops, so each pass
- * ends on its lull (ringnav_hscroll_lull), which counts it and stops it after the last, or once the
- * row isn't the selected one on a lit, usable screen: a dark screen or a covered page costs at most
- * the rest of one pass. A row is its widget and its id, as a table's pool can hold the selection in
- * one widget (paint_selection; a paint would drop hscroll_label_stop's invalidate, so marq_moved
- * stops it from a timer). */
+ * (ringnav_hscroll_start); every other row keeps its ellipsis. Only a title stock would scroll on a
+ * focus no row has under ringnav (only_focus, or only_parent_focus: set_hscroll_label_attribute's,
+ * stock's Wi-Fi networks): stock's timer stops such a label on its first tick unless it or its
+ * parent is focused (0x5fb7ac, 0x5fb7f0), so both flags are off while this one runs and back after.
+ * It loops, so each pass ends on its lull (ringnav_hscroll_lull), which counts it and stops it
+ * after the last, or once the row isn't the selected one on a lit, usable screen: a dark screen or
+ * a covered page costs at most the rest of one pass. A row is its widget and its id, as a table's
+ * pool can hold the selection in one widget (paint_selection; a paint would drop
+ * hscroll_label_stop's invalidate, so marq_moved stops it from a timer). */
 static int marq_gone(void *ctx, void *event) {
     (void)ctx, (void)event;
     st.marq_label = (void *)0;
     return 0;
 }
+/* The marquee's label's focus flags as it found them: only_focus, only_parent_focus. */
+static unsigned char marq_focus[2] __attribute__((section(".scratch")));
 static void marq_stop(void) {
     void *label = st.marq_label;
     if (!label) return;
     st.marq_label = (void *)0;
     widget_off_by_func(label, EVT_DESTROY, marq_gone, (void *)0);
     hscroll_label_stop(label);
-    hscroll_label_set_only_focus(label, 1);
+    hscroll_label_set_only_focus(label, marq_focus[0]);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = marq_focus[1];
 }
 /* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
 static int scroller_over(void *label) { return I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W); }
@@ -1956,10 +1960,17 @@ static int marq_moved(const void *info) {
     }
     void *label = row_scroller(row, 2, 1) ?: row_scroller(row, 2, 0);
     int over = label ? scroller_over(label) : 0;
-    if (over <= 0 || !B(label, HSCROLL_ONLY_FOCUS)) return 0; /* until it moves */
+    /* a label with neither flag scrolls by itself; one waiting on a focus no row has under ringnav
+     * (only_focus, or set_hscroll_label_attribute's only_parent_focus: stock's Wi-Fi networks and
+     * settings rows) scrolls here, its flags off while it runs */
+    if (over <= 0 || (!B(label, HSCROLL_ONLY_FOCUS) && !B(label, HSCROLL_ONLY_PARENT_FOCUS)))
+        return 0; /* until it moves */
     B(label, HSCROLL_LOOP) = 1;
     st.marq_label = label;
+    marq_focus[0] = B(label, HSCROLL_ONLY_FOCUS),
+    marq_focus[1] = B(label, HSCROLL_ONLY_PARENT_FOCUS);
     widget_on(label, EVT_DESTROY, marq_gone, (void *)0);
+    B(label, HSCROLL_ONLY_PARENT_FOCUS) = 0;
     hscroll_label_set_only_focus(label, 0);
     hscroll_label_start(label);
     return 0;
@@ -5190,6 +5201,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
     empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */
+    marquee_fade_under(w, canvas); /* last: what stands behind a scrolling label's ends */
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {

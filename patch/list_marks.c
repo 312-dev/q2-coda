@@ -68,45 +68,102 @@ void chevron_muted(void *w, void *canvas, int right, int y) {
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }
 
-/* A scrolling text's ends (list.marquee.fade, docs/oled-design.md#motion): over an hscroll_label
- * whose text is wider than its column, once stock has painted it, MARQUEE_FADE_PX columns at the
- * right end while the text goes on past it, and at the left while it is scrolled off its start,
- * each from clear at the inside to the colour behind it at the end: the selection's on the
- * selected row's marquee (marq_label) and on any text that scrolls inside the selected row (a page
- * whose labels scroll on their own focus), else the page's paper. A label at rest on stock's
- * ellipsis (stopped, ellipses set) keeps it, so only a scrolling text pays: a fill a column at each
- * end it fades. The column is the one stock clips the text to: inside the label's margin_left and
- * margin_right (2 px unless its style says, as a folder row's says past its icon). */
+/* A scrolling text's ends (list.marquee.fade, docs/oled-design.md#motion): an hscroll_label whose
+ * text is wider than its column fades the text itself over MARQUEE_FADE_PX columns at the right
+ * end while the text goes on past it, and at the left while it is scrolled off its start, from
+ * whole at the inside to gone at the end, onto whatever is behind it (the selection's bar, its red
+ * on a destructive answer, the page, art). Before stock paints the label (marquee_fade_under, from
+ * its background's paint) the end columns are copied out of the canvas's buffer, which holds what
+ * is behind the text; after it (marquee_fade) each column is blended back toward that copy by how
+ * near the end it stands: out = behind + (painted - behind) * i / MARQUEE_FADE_PX, which is the
+ * text's own coverage times the ramp over the real background. A label at rest on stock's ellipsis
+ * (stopped, ellipses set) keeps it. The column is the one stock clips the text to: inside the
+ * label's margin_left and margin_right (2 px unless its style says), and only where the frame's
+ * clip lets it paint; a canvas whose buffer is not 32-bit draws the text clipped, unfaded. */
 #define MARQUEE_FADE_PX 12
-/* Whether w is on the selection's bar: inside the selected row (st.sel_accent), within a row's
- * depth. */
-static int on_bar(void *w) {
-    for (int d = 0; st.sel_accent && w && d < 4; ++d, w = P(w, W_PARENT))
-        if (w == st.sel_accent) return 1;
-    return 0;
+#define MARQUEE_FADE_ROWS 64 /* a label's rows the copy holds; a taller label fades its first */
+static struct {
+    void *label;
+    int x[2], y, h; /* each end's first column (-1 none) and the rows, in the buffer */
+    unsigned px[2][MARQUEE_FADE_ROWS][MARQUEE_FADE_PX];
+} mf __attribute__((section(".scratch")));
+
+/* The canvas's 32-bit buffer and its pitch in pixels, else 0. */
+static unsigned *fade_fb(void *canvas, int *pitch, int *fw, int *fh) {
+    void *lcd = P(canvas, CANVAS_LCD);
+    unsigned *fb = lcd ? P(lcd, LCD_OFFLINE_FB) : (unsigned *)0;
+    if (!fb || I(lcd, LCD_FORMAT) != LCD_BGRA8888) return (unsigned *)0;
+    *pitch = I(lcd, LCD_LINE_LENGTH) / 4, *fw = I(lcd, LCD_W), *fh = I(lcd, LCD_H);
+    return *pitch >= *fw ? fb : (unsigned *)0;
 }
-void marquee_fade(void *w, void *canvas) {
-    void *lcd = w && canvas ? P(canvas, CANVAS_LCD) : (void *)0;
-    if (!lcd || tk_strcmp(widget_get_type(w), "hscroll_label")) return;
+
+/* Which ends of w fade this frame, its column's ends in *x0, *x1 (w's coordinates); 0 none. */
+static int fade_ends(void *w, int *x0, int *x1) {
+    if (tk_strcmp(widget_get_type(w), "hscroll_label")) return 0;
     int loop = np_marq_owns(w); /* Now Playing's lines: their copy follows, so the right fades on */
-    if (loop) np_marq_kick(w);
     void *style = P(w, W_ASTYLE);
-    int x0 = style_get_int(style, "margin_left", 2),
-        x1 = I(w, W_W) - style_get_int(style, "margin_right", 2), h = I(w, W_H),
-        off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (x1 - x0);
-    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return;
-    unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR),
-             behind =
-                 (w == st.marq_label || on_bar(w) ? RGBA(scheme()->tones[0]) : ui_ink(RGBA(0))) &
-                 0xffffffu;
-    int left = off > 0, right = loop || off < over;
-    for (int i = 0; i < MARQUEE_FADE_PX && (left || right); ++i) {
-        unsigned a = 255u * (unsigned)(MARQUEE_FADE_PX - i) / MARQUEE_FADE_PX;
-        stock_canvas_set_fill_color(canvas, behind | a << 24);
-        if (left) canvas_fill_rect(canvas, x0 + i, 0, 1, h);
-        if (right) canvas_fill_rect(canvas, x1 - 1 - i, 0, 1, h);
+    *x0 = style_get_int(style, "margin_left", 2),
+    *x1 = I(w, W_W) - style_get_int(style, "margin_right", 2);
+    int off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (*x1 - *x0);
+    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return 0;
+    return (off > 0) | (loop || off < over) << 1;
+}
+
+/* Before stock paints w's text: what stands behind its fading ends, out of the buffer. */
+void marquee_fade_under(void *w, void *canvas) {
+    int x0, x1, pitch, fw, fh, ends;
+    mf.label = (void *)0;
+    if (!w || !canvas || !theme()->marquee_fade || !(ends = fade_ends(w, &x0, &x1))) return;
+    unsigned *fb = fade_fb(canvas, &pitch, &fw, &fh);
+    if (!fb) return;
+    int clip[4];
+    canvas_get_clip_rect(canvas, clip);
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h = I(w, W_H);
+    if (h > MARQUEE_FADE_ROWS) h = MARQUEE_FADE_ROWS;
+    mf.y = oy, mf.h = h;
+    for (int e = 0; e < 2; ++e) {
+        int x = ox + (e ? x1 - MARQUEE_FADE_PX : x0);
+        mf.x[e] = ends >> e & 1 && x >= clip[0] && x + MARQUEE_FADE_PX <= clip[0] + clip[2] &&
+                          x >= 0 && x + MARQUEE_FADE_PX <= fw
+                      ? x
+                      : -1;
     }
-    stock_canvas_set_fill_color(canvas, saved);
+    for (int r = 0; r < h; ++r) {
+        int y = oy + r;
+        if (y < 0 || y >= fh || y < clip[1] || y >= clip[1] + clip[3]) continue;
+        for (int e = 0; e < 2; ++e)
+            if (mf.x[e] >= 0) memcpy(mf.px[e][r], fb + y * pitch + mf.x[e], sizeof mf.px[e][r]);
+    }
+    mf.label = w;
+}
+
+/* After stock painted w (ringnav_paint): its ends blended back toward what was behind them. */
+void marquee_fade(void *w, void *canvas) {
+    if (w && np_marq_owns(w)) np_marq_kick(w);
+    if (!w || !canvas || w != mf.label) return;
+    mf.label = (void *)0;
+    int pitch, fw, fh, clip[4];
+    unsigned *fb = fade_fb(canvas, &pitch, &fw, &fh);
+    if (!fb) return;
+    canvas_get_clip_rect(canvas, clip);
+    for (int r = 0; r < mf.h; ++r) {
+        int y = mf.y + r;
+        if (y < 0 || y >= fh || y < clip[1] || y >= clip[1] + clip[3]) continue;
+        for (int e = 0; e < 2; ++e) {
+            if (mf.x[e] < 0) continue;
+            unsigned *row = fb + y * pitch + mf.x[e];
+            for (int i = 0; i < MARQUEE_FADE_PX; ++i) {
+                /* the text's weight: 0 at the end column, nearly whole at the inside */
+                unsigned k = (unsigned)(e ? MARQUEE_FADE_PX - 1 - i : i), was = mf.px[e][r][i],
+                         now = row[i], out = 0;
+                for (int c = 0; c < 32; c += 8) {
+                    int b = (int)(was >> c & 255), t = (int)(now >> c & 255);
+                    out |= (unsigned)(b + (t - b) * (int)k / MARQUEE_FADE_PX) << c;
+                }
+                row[i] = out;
+            }
+        }
+    }
 }
 
 /* The indicator's column on the top window, repainted as it fades. */

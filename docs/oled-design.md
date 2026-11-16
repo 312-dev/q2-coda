@@ -1037,13 +1037,15 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now
   Playing's title, artist and album) is clipped to its own column, inside the glass and before any
   value or chevron on its row. A 12 px fade covers its right end while the text goes on past it,
-  and its left end while it is scrolled away from its start, so it rests crisp; each goes from
-  clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
-  text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+  and its left end while it is scrolled away from its start, so it rests crisp; over it the text
+  itself fades out, whole at the inside to gone at the end, onto whatever is behind it (the Canvas,
+  the selection's blue, a destructive answer's red, a cover), never a band of a guessed colour. A
+  truncated text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
 - **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
   row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
   so any value too long for its row reads in full when its row is selected (`navigation.c`
-  `marq_moved`); every other row's keeps its ellipsis.
+  `marq_moved`); every other row's keeps its ellipsis. That holds for stock's rows too, whose labels
+  wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
   same time), and land back at rest together, each followed by its own copy 40 px behind, so
