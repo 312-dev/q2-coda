@@ -3813,10 +3813,10 @@ def test_the_page_keeps_its_marker_while_open(fw):
 
 def test_the_page_names_its_app_in_the_status_row(fw):
     q = Qr(fw, qr_state())
-    title, page = fw.fn('addon_qr_title', C.c_char_p, C.c_void_p), fw.fn('addon_qr_page', C.c_int, C.c_void_p)
-    assert title(q.qp.page) == b'Title' and title(q.qp.page + 1) is None and page(q.qp.page) == 1 and page(0) == 0
+    title = fw.fn('addon_qr_title', C.c_char_p, C.c_void_p)
+    assert title(q.qp.page) == b'Title' and title(q.qp.page + 1) is None
     fw.fn('addon__qr_closed', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert title(99) is None and page(99) == 0
+    assert title(99) is None
 
 
 def qr_rects(fw, q):

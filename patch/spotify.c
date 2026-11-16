@@ -514,6 +514,10 @@ static int leave(const void *unused) {
     return 0;
 }
 
+/* win is the Now Playing page with a track on it, whose wheel is the volume (volume.c
+ * vol_wm_keyup); its notes (Spotify missing, loading, a phone to pick it) have none. */
+int spot_np_track(void *win) { return ui.page && win == ui.page && widget_get_visible(ui.info); }
+
 /* Return: a scrub seeks first, as on Now Playing; then back to the browser. */
 static int keyup(void *ctx, void *event) {
     if (I(event, EVENT_KEY) != KEY_RETURN) return 0;

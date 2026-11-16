@@ -45,9 +45,26 @@ static unsigned key_bit(unsigned key) {
                                                 : 0;
 }
 
+/* Buttons Lock is Off or On (navigation.c lock_set saves On as SYSSET LOCKMODE 2): the dark wheel
+ * sets nothing (volume.c vol_wm_keyup), so stock's modes that lock it, 1 (Volume only) and 3
+ * (Everything), lock nothing more. One saved by an earlier version is made one of the two once at
+ * boot, before or after config_init reads it (playback.c ringnav_bootmode): 1, whose buttons were
+ * free, is Off; any other is On. */
+void keylock_boot(void) {
+    if (!config_value("SYSSET", "LOCKFLAG", 2, 0)) return;
+    int mode = config_value("SYSSET", "LOCKMODE", 4, 3);
+    if (mode == 1) {
+        g_keylock_flag = 0;
+        write_int_config(0, "SYSSET", "LOCKFLAG");
+    } else if (mode != 2) {
+        g_keylock_mode = 2;
+        write_int_config(2, "SYSSET", "LOCKMODE");
+    }
+}
+
 /* What stock's dark filter drops (on_wm_keyup_before_fun, 0x4f2660) for SYSSET
  * LOCKMODE: 1 the wheel, 2 Return, Play/Pause and the previous and next buttons, 3 both; any other
- * mode is 3, as navigation.c lock_choice saves it. */
+ * mode is 3. keylock_boot leaves only 2. */
 static int locked(unsigned key) {
     if (!g_keylock_flag) return 0;
     int mode = g_keylock_mode, wheel = key == KEY_PREV || key == KEY_NEXT;

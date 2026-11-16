@@ -460,13 +460,14 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
 
 - **Progress:** 6 px, round ends, Track and Accent Blue. Used for playback, scans and
   downloads.
-- **Slider page** (Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
+- **Slider page** (Volume, Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
   Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
   first row, selected; the value in Inter Medium 22 centred on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the centre; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
-  Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+  Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons. Centre
+  turns the switch on or off where there is one, else goes back; Return goes back.
   Night Shift's first row is a key/value row, its value Off, On or Auto, which Centre cycles (three
   named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
   Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,

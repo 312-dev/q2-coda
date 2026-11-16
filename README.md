@@ -81,7 +81,7 @@
   </tr>
   <tr valign="top">
     <td><b>Battery and buttons</b></td>
-    <td>An optional 80% charge limit, a Standby limit that powers off a Q2 left asleep, Smart Wi-Fi, and a player that sleeps while paused. Wake by double press and Volume Guard.</td>
+    <td>An optional 80% charge limit, a Standby limit that powers off a Q2 left asleep, Smart Wi-Fi, and a player that sleeps while paused. Wake by double press.</td>
   </tr>
   <tr valign="top">
     <td><b>Stock fixes</b></td>

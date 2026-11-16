@@ -43,10 +43,36 @@ int vol_next(unsigned key) {
 int vol_keyup(void *dialog, void *e) {
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
     if (key == KEY_NEXT || key == KEY_PREV) {
+        /* A dialog left open past the screen-off: its tick goes on to vol_wm_keyup, which drops it
+         * dark, as stock's own dialog leaves it (tools/build.py VOL_DARK) */
+        if (!g_backlight_status) return 0;
         int to = vol_next(key);
         if (to != g_volume) g_volume = (unsigned char)(to + (key == KEY_NEXT ? -1 : 1));
     }
     return stock_vol_keyup_trampoline(dialog, e);
+}
+
+/* The windows whose wheel is the volume: playback screens. Stock's Now Playing (TIDAL's songs and
+ * the card apps' play there too), the AirPlay and DLNA receiver, Internet Radio's Now Playing and
+ * Spotify's while it shows a track (spot_np_track). Videos (videos.c video_key), Control Center's
+ * slider and Playback's Volume row (crossfade.c) set it themselves. */
+static const char *const vol_pages[] = { "playing_page", "airplay_page", "radionp_page" };
+/* on_wm_keyup_fun (HOOKS): the key-up no page took. Stock opens its volume dialog on any wheel tick
+ * there, lit or dark; here only on a lit playback screen (vol_pages, under a toast), so a list's
+ * end, a page with nothing to scroll (TIDAL's "Not connected", Spotify's note) or a QR code take
+ * the tick as nothing and Return still goes back (docs/internals.md#wheel-volume). A dropped tick
+ * returns before stock clears its power-key flags, which the next Centre release clears. Every
+ * other key, and the Centre releases the payload replays, are stock's. */
+int vol_wm_keyup(void *ctx, void *e) {
+    unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
+    if (key == KEY_NEXT || key == KEY_PREV) {
+        void *page = g_backlight_status ? page_in_use() : (void *)0;
+        const char *name = page ? widget_get_prop_str(page, "name", "") : "";
+        unsigned i = 0;
+        while (i < sizeof vol_pages / sizeof *vol_pages && tk_strcmp(name, vol_pages[i])) ++i;
+        if (i == sizeof vol_pages / sizeof *vol_pages && !(page && spot_np_track(page))) return 0;
+    }
+    return stock_wm_keyup_trampoline(ctx, e);
 }
 
 /* The bar's level towards level (in steps) while vol_easing: a first-order follow with time

@@ -2672,7 +2672,7 @@ int addon_hold(void *w) {
  * The status row names the app (addon_qr_title). While the page is open /tmp/q2-<id>.qrpage exists,
  * so the app knows the page was left by its going ("signin" in ADDON_CAPS), not by guessing from
  * the pauses in its page's refreshes, which the screen turning off makes too. The wheel does
- * nothing here (addon_qr_page): there is nothing to move, and its volume would hide the code. */
+ * nothing here, as on every page that is not a playback screen (volume.c vol_wm_keyup). */
 #define QR_HEX 640
 #define QR_PLATE                                                                                   \
     166 /* the code's white plate: a 29-module code's 5 px modules, 2 quiet each side */
@@ -2799,9 +2799,6 @@ static void qr_open(const char *state, const char *title) {
 /* The status row's title on the QR page: the app's name (navigation.c bar_title_of); 0 elsewhere.
  */
 const char *addon_qr_title(void *win) { return qp.page && win == qp.page ? qp.name : 0; }
-
-/* Whether win is the QR page, where the wheel does nothing (navigation.c ringnav_input). */
-int addon_qr_page(void *win) { return qp.page && win == qp.page; }
 
 static void plate(void *canvas, int x, int y, int w, int h, unsigned color, unsigned radius) {
     int r[4] = { x, y, w, h };

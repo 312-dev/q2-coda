@@ -387,8 +387,9 @@ def test_pod_settings_read_their_keys_once(fw):
     assert fw.fn('ringnav_artist_view', C.c_int)() == 2 and fw.fn('ringnav_big_library', C.c_int)() == 1
     assert fw.fn('ringnav_playlist_coverflow', C.c_int)() == 1
     assert fw.fn('ringnav_year_old', C.c_int)() == 1 and fw.fn('ringnav_artist_az', C.c_int)() == 0
-    assert fw.var('wheel_guard', C.c_int).value == 1
-    count = len(fw.calls('toolsReadConfig'))
+    keys = [C.string_at(c[1][2]) for c in fw.calls('toolsReadConfig')]
+    assert b'VOLGUARD' not in keys  # Volume Guard's key, left by an older version, is never read
+    count = len(keys)
     fw.fn('ringnav_year_old', C.c_int)()
     assert len(fw.calls('toolsReadConfig')) == count
 
@@ -474,24 +475,30 @@ def test_rockbox_is_a_file_on_the_card(fw, fn, path, result, mode, available):
     assert fw.fn(fn, C.c_int)() == available
 
 
-@pytest.mark.parametrize('flag, mode, choice', [(0, 1, 0), (1, 3, 1), (1, 2, 2), (1, 1, 3)])
-def test_lock_choice_names_stocks_modes(fw, flag, mode, choice):
-    fw.var('g_keylock_flag', C.c_ubyte).value, fw.var('g_keylock_mode', C.c_ubyte).value = flag, mode
+@pytest.mark.parametrize('flag, choice', [(0, 0), (1, 1)])
+def test_lock_choice_is_off_or_on(fw, flag, choice):
+    fw.var('g_keylock_flag', C.c_ubyte).value = flag
     assert fw.fn('navigation__lock_choice', C.c_int)() == choice and not fw.calls('write_int_config')
 
 
-@pytest.mark.parametrize('mode', [0, 4, 200])
-def test_an_unknown_lock_mode_locks_everything(fw, mode):
-    fw.var('g_keylock_flag', C.c_ubyte).value, fw.var('g_keylock_mode', C.c_ubyte).value = 1, mode
-    assert fw.fn('navigation__lock_choice', C.c_int)() == 1
-    assert fw.var('g_keylock_mode', C.c_ubyte).value == 3 and len(fw.calls('write_int_config')) == 1
-
-
-@pytest.mark.parametrize('choice', range(4))
-def test_a_lock_choice_comes_back(fw, choice):
+@pytest.mark.parametrize('choice', range(2))
+def test_a_lock_choice_comes_back_and_on_locks_the_buttons(fw, choice):
     fw.fn('navigation__lock_set', None, C.c_int)(choice)
-    assert fw.fn('navigation__lock_choice', C.c_int)() == choice
-    assert [c[1][0] for c in fw.calls('write_int_config')] == [fw.var('g_keylock_mode', C.c_ubyte).value, int(choice > 0)]
+    assert fw.fn('navigation__lock_choice', C.c_int)() == choice and fw.var('g_keylock_mode', C.c_ubyte).value == 2
+    assert [c[1][0] for c in fw.calls('write_int_config')] == [2, choice]
+
+
+@pytest.mark.parametrize('flag, mode, want', [(b'0', b'1', (0, 9, [])), (b'1', b'2', (1, 9, [])),
+                                              (b'1', b'1', (0, 9, [(0, b'LOCKFLAG')])),
+                                              (b'1', b'3', (1, 2, [(2, b'LOCKMODE')])),
+                                              (b'1', b'7', (1, 2, [(2, b'LOCKMODE')]))])
+def test_an_earlier_lock_mode_is_made_off_or_on_at_boot(fw, flag, mode, want):
+    """keylock_boot: Volume only (1), whose buttons were free, is Off; Everything (3) or an unknown mode is On (2)."""
+    Config(fw, LOCKFLAG=flag, LOCKMODE=mode)
+    fw.var('g_keylock_flag', C.c_ubyte).value, fw.var('g_keylock_mode', C.c_ubyte).value = int(flag), 9
+    fw.fn('keylock_boot', None)()
+    written = [(c[1][0], C.string_at(c[1][2])) for c in fw.calls('write_int_config')]
+    assert (fw.var('g_keylock_flag', C.c_ubyte).value, fw.var('g_keylock_mode', C.c_ubyte).value, written) == want
 
 
 @pytest.mark.parametrize('saved, volume, top, want', [

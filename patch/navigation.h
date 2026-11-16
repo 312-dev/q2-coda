@@ -30,7 +30,6 @@ enum {
     POD_ARTISTS,
     POD_RESUME,
     POD_ARTIST_AZ,
-    POD_VOL_GUARD,
     POD_HOLD_HOME,
     POD_STANDBY,
     POD_BT_LINK,
@@ -338,11 +337,12 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),
     stock_keylong_trampoline(void *, void *), stock_paint_bg_trampoline(void *, void *),
-    stock_vol_keyup_trampoline(void *, void *), stock_showface_trampoline(void *),
-    stock_playing_trampoline(void *, void *), stock_display_trampoline(void *, void *),
-    stock_bigcover_trampoline(void *, void *), stock_localmusic_trampoline(void *, void *),
-    stock_keydown_trampoline(void *, void *), stock_btvol_trampoline(int, int),
-    stock_sleep_trampoline(void *), stock_color_trampoline(void *, void *, const char *, unsigned),
+    stock_vol_keyup_trampoline(void *, void *), stock_wm_keyup_trampoline(void *, void *),
+    stock_showface_trampoline(void *), stock_playing_trampoline(void *, void *),
+    stock_display_trampoline(void *, void *), stock_bigcover_trampoline(void *, void *),
+    stock_localmusic_trampoline(void *, void *), stock_keydown_trampoline(void *, void *),
+    stock_btvol_trampoline(int, int), stock_sleep_trampoline(void *),
+    stock_color_trampoline(void *, void *, const char *, unsigned),
     stock_image_trampoline(void *, const char *, void *), stock_about_trampoline(void *, void *),
     stock_folder_trampoline(void *, void *), stock_folder_back_trampoline(void *, void *),
     stock_folder_top_trampoline(void), stock_folder_click_trampoline(void *, void *),
@@ -666,11 +666,14 @@ int upload_scrobbles(void *ctx, void *event);
 /* volume.c */
 void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
+/* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
+int vol_wm_keyup(void *ctx, void *e);
 
 /* smart_wifi.c */
 void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */
 int smart_config(const char *section, const char *key);
 void smart_poll(void);
+void *page_in_use(void); /* the top window past toasts and the volume dialog */
 
 /* wifi_transfer.c */
 int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on);

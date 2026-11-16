@@ -8,6 +8,11 @@
   - Status bar (OLED): tap the battery to see its state in a toast: **Charging · 62%**, **Fully charged**, **Charge Limit Reached (80%)**, **Battery 62%** or, under 20%, **Low battery · 12%**.
   - Charging (OLED): plugging in with the screen off lights it for three seconds with a big battery filling up to its level, then it goes dark again. With the screen on, a toast says **Charging · 62%** instead. Charge Limit says **Charged to 80%** when it stops charging.
   - Charging: with the new player playing a song and **Clicker** on Headphones or Both, plugging in plays a short tick-and-chirp in your headphones, mixed into the music.
+  - Volume: the wheel changes the volume only on a playing page: Now Playing (TIDAL's and card apps' songs too), Spotify's, Internet Radio's and AirPlay's, and videos. Anywhere else it never opens the volume; on a page with nothing to scroll (TIDAL's **Not connected**, a card app's QR code, Now Playing's About) it does nothing and Return goes straight back. With the screen off the wheel does nothing.
+  - Settings: **Playback → Volume**, just before Max Volume, sets the volume from any page: turn the wheel or drag the slider, up to Max Volume.
+  - Settings: on **Playback → Default Volume**, Center turns Default Volume on or off, as on Crossfade's page; it went back a page instead. Return goes back.
+  - Controls: **Buttons Lock** is **Off** or **On**: On locks Return, Play/Pause, Next and Previous with the screen off. Everything and Buttons only become On, and Volume only Off, as the wheel no longer changes the volume with the screen off.
+  - Controls: **Volume Guard** is gone. With the screen off the wheel no longer changes the volume, so there is nothing left for it to guard.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.

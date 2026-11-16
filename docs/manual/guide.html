@@ -245,7 +245,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
       <tr><td>Play or pause</td><td>Press Play/Pause, on any page.</td></tr>
       <tr><td>Skip</td><td>Next: next track. Previous: the start of the track, or the track before within its first 3 seconds (so twice goes back one).</td></tr>
       <tr><td>Fast-forward, rewind</td><td>Hold Next or Previous. You hear the song as it goes, faster the longer you hold; let go to play on from there.</td></tr>
-      <tr><td>Volume</td><td>Turn the wheel outside menus.</td></tr>
+      <tr><td>Volume</td><td>Turn the wheel on Now Playing (or Spotify’s, Internet Radio’s or AirPlay’s playing page, or a video), or use <b>Settings → Playback → Volume</b>.</td></tr>
     </tbody>
   </table>
   <p class="task">The Center button does different things on each screen:</p>
@@ -297,7 +297,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <thead><tr><th>To</th><th>Do this</th></tr></thead>
     <tbody>
       <tr><td>Scroll through a list</td><td>Turn the wheel: one row per tick. Spin faster to speed up.</td></tr>
-      <tr><td>Change the volume</td><td>Turn the wheel outside menus.</td></tr>
+      <tr><td>Change the volume</td><td>Turn the wheel on a playing page (Now Playing, Spotify, Internet Radio, AirPlay, a video), with the screen on. Elsewhere the wheel only moves through lists, and does nothing on a page without one. Control Center’s Volume slider and <b>Settings → Playback → Volume</b> set it from anywhere.</td></tr>
       <tr><td>Adjust a slider</td><td>Turn the wheel while the slider is open.</td></tr>
       <tr><td>Open the highlighted item</td><td>Press the Center button.</td></tr>
       <tr><td>Turn the screen off</td><td>Double-press the Center button on any page (videos excepted). With the screen off, a quick double press only wakes it.</td></tr>
@@ -755,7 +755,7 @@ AUTO=1</pre>
     <tbody>
       <tr><td>Play/Pause</td><td>Pauses or plays Spotify, on any page and with the screen off</td></tr>
       <tr><td>Next / Previous</td><td>Next or previous track</td></tr>
-      <tr><td>Wheel</td><td>Volume, as everywhere: the Q2’s volume is Spotify’s</td></tr>
+      <tr><td>Wheel</td><td>Volume, as on Now Playing: the Q2’s volume is Spotify’s</td></tr>
       <tr><td>Center</td><td>As on Now Playing: press once to turn the screen off; double-press, turn the wheel 5s a tick, then double-press again or wait 3s to jump</td></tr>
     </tbody>
   </table>
@@ -782,7 +782,7 @@ AUTO=1</pre>
       <tr><td>Hold Play/Pause</td><td>On a station or its Now Playing page, saves it to Favorites, or removes it when it’s already there; on Now Playing, tapping the heart does the same</td></tr>
       <tr><td>Play/Pause</td><td>Stops the station or starts it again, on any page and with the screen off</td></tr>
       <tr><td>Next / Previous</td><td>The next or previous station in the list you played it from</td></tr>
-      <tr><td>Wheel</td><td>Volume, as everywhere</td></tr>
+      <tr><td>Wheel</td><td>Volume, as on Now Playing</td></tr>
       <tr><td>Return</td><td>Goes back a level</td></tr>
     </tbody>
   </table>
@@ -911,12 +911,11 @@ http://stream.radioparadise.com/mp3-128</pre>
       <tr><td>Wheel Sensitivity</td><td>10–200% in 10% steps, 50% by default (a seventh of a turn per tick). Higher needs less turning per step: 100% half as much, 200% a quarter. Lower needs more: 20% a third of a turn, 10% most of a turn. Turn the wheel or drag the slider; Center goes back. If the wheel keeps moving after you lift, press Return twice quickly.</td></tr>
       <tr><td>Hold Return</td><td>Recent (default): a hold opens Now Playing and another goes back where you were. Home: a hold goes Home from any page; on Home it still opens Now Playing.</td></tr>
       <tr><td>Clicker</td><td>Where the click is heard as you move along a list or press a button. <b>Speaker</b>: the Q2’s own speaker, quiet while headphones, Bluetooth or a USB DAC are connected. <b>Headphones</b>: mixed into the music, at its volume (with the new player, still in testing; otherwise, and while nothing plays, the speaker as Speaker). <b>Both</b> (default): the speaker whatever is connected, and the click in the music too. <b>Off</b>: no click.</td></tr>
-      <tr><td>Buttons Lock</td><td>Locks the controls while the screen is off: <b>Everything</b> locks the wheel’s volume and the playback buttons; <b>Buttons only</b> locks the playback buttons and leaves the volume; <b>Volume only</b> locks the volume and leaves skip and Play/Pause. The lock tile in quick settings cycles through the same choices, Off included. Under <b>Theme: OLED</b> a padlock in the top row shows the lock is on, and a locked button pressed with the screen off lights the screen for a moment with <b>Buttons Locked</b>; press Center then to turn the screen on and use the buttons.</td></tr>
-      <tr><td>Wake</td><td>Press Center once with the screen off (the default, <b>Wake: Single Press</b>); the screen comes back on the page you left. Play/Pause and the volume wheel work with the screen off without waking it. To keep pocket bumps from waking the screen, choose <b>Wake: Double Press</b> (<a href="#settings-controls">Controls</a>): then a single press stays dark and two presses wake it.</td></tr>
-      <tr><td>Volume Guard</td><td><b>On:</b> with the screen off, the wheel ignores the first two thirds of a turn in one direction, so a brush in a pocket or hand doesn’t change the volume. Keep turning and the volume moves as usual, back and forth and across several strokes, until the wheel rests for a second and a half; then the next change needs the same again. Turning back or lifting your finger before then starts it again. The screen-on wheel is unchanged. Off by default.</td></tr>
+      <tr><td>Buttons Lock</td><td><b>On</b> locks Return, Play/Pause, Next and Previous while the screen is off; <b>Off</b> (default) leaves them working. The wheel does nothing with the screen off either way. The lock tile in quick settings and Control Center turns it on and off. Under <b>Theme: OLED</b> a padlock in the top row shows the lock is on, and a locked button pressed with the screen off lights the screen for a moment with <b>Buttons Locked</b>; press Center then to turn the screen on and use the buttons.</td></tr>
+      <tr><td>Wake</td><td>Press Center once with the screen off (the default, <b>Wake: Single Press</b>); the screen comes back on the page you left. Play/Pause works with the screen off without waking it; the wheel does nothing there. To keep pocket bumps from waking the screen, choose <b>Wake: Double Press</b> (<a href="#settings-controls">Controls</a>): then a single press stays dark and two presses wake it.</td></tr>
     </tbody>
   </table>
-  <p>With the screen off, Return does nothing, and a key that resumes from Standby (Play/Pause, the volume) leaves it dark.</p>
+  <p>With the screen off, Return does nothing, and a key that resumes from Standby (Play/Pause, the wheel) leaves it dark.</p>
 
   <h2 id="power">Power and battery</h2>
   <p>Three timers decide when the Q2 goes dark, sleeps or turns off. Each counts from your last press.</p>
@@ -952,6 +951,7 @@ http://stream.radioparadise.com/mp3-128</pre>
     <thead><tr><th>Setting</th><th>What it does</th></tr></thead>
     <tbody>
       <tr><td>Gapless</td><td>Keep on for continuous playback between tracks. Encoder delay and trailing padding are removed automatically from MP3 with any encoder’s gapless tag or iTunes info, AAC in M4A, Opus and Vorbis; intentional silence stays. Other files keep stock playback.</td></tr>
+      <tr><td>Volume</td><td>The volume, as the wheel sets it on Now Playing: turn the wheel or drag the slider, up to <b>Max Volume</b>; Center goes back.</td></tr>
       <tr><td>Crossfade</td><td>Fades one song into the next, 1–15s (5 by default): turn the wheel or drag the slider, all the way down for Off; Center switches it on or off. Only between different albums, so albums stay gapless; needs stock’s <b>Gapless</b> on. Off by default.</td></tr>
       <tr><td>Headphones Required</td><td>Stock’s setting. On: nothing starts playing until headphones, Bluetooth or a USB DAC is connected. Off by default.</td></tr>
       <tr><td>EQ</td><td>Simple tone controls and the parametric EQ (see Chapter 4).</td></tr>
@@ -1148,7 +1148,7 @@ http://stream.radioparadise.com/mp3-128</pre>
     <li><b>Bluetooth headphones drop out.</b> Set the quality to <b>LDAC Connection (auto)</b>, which adapts to the link. HQ is the most likely to break up (<a href="#bt">Bluetooth headphones</a>).</li>
     <li><b>Spotify won’t pair or download.</b> The phone and the Q2 must be on the same Wi-Fi, and the Spotify app’s device list must show Q2. New tracks need Wi-Fi; downloaded songs play without it. Browsing needs q2-librespot v1.3 or later, and <b>Download Playlist</b> needs v1.6 (<a href="#spinstall">Installing and pairing Spotify</a>). <b>Playback didn’t start</b> means no track arrived within 15 seconds: go back and try again.</li>
     <li><b>The screen turns off when you choose a row.</b> Two quick Center presses turn the screen off, on every page and over the keyboard. Choosing rows quickly, press once and wait a moment.</li>
-    <li><b>Pocket controls wake the screen or change the volume.</b> Choose <b>Wake: Double Press</b>, turn on <b>Volume Guard</b>, or set <b>Buttons Lock</b> (<a href="#settings-controls">Controls</a>).</li>
+    <li><b>Pocket controls wake the screen or press buttons.</b> Choose <b>Wake: Double Press</b> or set <b>Buttons Lock</b> (<a href="#settings-controls">Controls</a>).</li>
     <li><b>Update or startup problems.</b> Check that <code>update.tar</code> is in the card’s root (not inside a folder), and leave the card in until the Q2 restarts. Rockbox doesn’t start unless the card is exFAT or FAT32 with the <code>.rockbox</code> folder in its root. If Rockbox freezes or a theme leaves the screen unreadable, hold Play/Pause for 15 seconds to force a restart. If Rockbox is stuck, hold Play/Pause while turning the Q2 on (<a href="#rockbox">Using Rockbox alongside Q2 Pod</a>). If the Q2 won’t start at all, follow <a href="#restore">Restoring stock firmware</a>.</li>
   </ul>
 

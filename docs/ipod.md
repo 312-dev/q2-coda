@@ -378,9 +378,9 @@ review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth op
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
 (`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
+page under its new name. No list has headings. Play Mode, EQ, Gapless and Crossfade come first; the volume's rows (Volume, Max Volume, Default Volume) after ReplayGain; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
-that cycle between named choices retain their value labels. Crossfade, Resume Songs, Wheel
+that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
 
 Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settings, whose own rows open Wi-Fi's and Bluetooth's pages; SyncLink stays off ([internals](internals.md#synclink)).
@@ -445,7 +445,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas. Crossfade, Wheel Sensitivity and Resume Songs reuse Default Volume's
+with their original touch areas. Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
@@ -895,7 +895,7 @@ selection.
 | `tidal_sortmode_dialog`       | three sort rows, `btn_cancel`                   |
 
 `sortselect_dialog` and the search result dialogs already navigate their lists. Left out, so the
-wheel stays on the volume (the keyboard's keys take it instead, [The keyboard](#keyboard)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
+wheel does nothing there (the keyboard's keys take it instead, [The keyboard](#keyboard); [Wheel volume](internals.md#wheel-volume)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
 `kbwifipass`, `renameplaylist`, `searchbox`, `tidal_searchbox` and Baidu's `edit_dialog`), the Update
 Local Music progress (`updatemusic_dialog`, whose only button cancels a scan that can run for
 minutes), the pull-down quick settings (`statusbar_dialog`, whose rows the wheel walks, handing it to the brightness slider on Centre: see
@@ -948,7 +948,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   playlists of a music server that a card app such as the Subsonic app lists join the Library,
   greyed while they can't play ([Server library](internals.md#server-library)).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
-  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; "Wake: Single Press"; and "Volume Guard".
+  (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap

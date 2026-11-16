@@ -220,7 +220,7 @@ extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
 extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);
 extern void xfade_row(void *label), wheel_row(void *label), resume_row(void *label),
-    mono_row(void *label), swap_row(void *label), night_row(void *label);
+    mono_row(void *label), swap_row(void *label), night_row(void *label), volume_row(void *label);
 extern int mono_click(void *ctx, void *event), swap_click(void *ctx, void *event);
 extern int xfade_open(void *ctx, void *event), xfade_key(void *top, unsigned key), resume_min(void);
 extern int eq_key(void *top, unsigned key), eq_tabs_hold(void *view); /* peq_ui.c */
@@ -2690,26 +2690,20 @@ int csv_toggle(char *list, unsigned size, const char *item) {
     return 1;
 }
 
-/* Stock modes, only with the screen off: 1 locks wheel volume, 2 the buttons, 3 both.
+/* Buttons Lock, Off or On: On is stock's LOCKMODE 2, which with the screen off locks Return,
+ * Play/Pause and the skip keys. The dark wheel sets nothing (volume.c vol_wm_keyup), so stock's
+ * wheel modes (1, 3) lock nothing more; keylock.c keylock_boot makes an earlier one of these two.
  * KEY_LOCKOUT is the separate, temporary debounce after a button press. */
-static const char *const lock_names[] = { "Off", "Everything", "Buttons only", "Volume only" };
-static int lock_choice(void) {
-    if (g_keylock_flag && (g_keylock_mode < 1 || g_keylock_mode > 3)) {
-        g_keylock_mode = 3; /* an unknown mode locks Everything */
-        write_int_config(3, "SYSSET", "LOCKMODE");
-    }
-    return g_keylock_flag ? 4 - g_keylock_mode : 0;
-}
+static const char *const lock_names[] = { "Off", "On" };
+static int lock_choice(void) { return g_keylock_flag != 0; }
 static void lock_set(int choice) {
-    g_keylock_mode = choice ? 4 - choice : 3;
+    g_keylock_mode = 2;
     g_keylock_flag = choice != 0;
     write_int_config(g_keylock_mode, "SYSSET", "LOCKMODE");
     write_int_config(g_keylock_flag, "SYSSET", "LOCKFLAG");
 }
-/* Control Center's Lock tile (control_center.c): Buttons Lock on, as its mode was last, or off. */
-void keylock_toggle(void) {
-    lock_set(g_keylock_flag ? 0 : g_keylock_mode >= 1 && g_keylock_mode <= 3 ? 4 - g_keylock_mode : 1);
-}
+/* Control Center's Lock tile (control_center.c): Buttons Lock on or off. */
+void keylock_toggle(void) { lock_set(!g_keylock_flag); }
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
     void *win = window_manager_get_top_window(window_manager());
@@ -2726,7 +2720,7 @@ int ringnav_keylock_rows(void *win) {
     if (!view) return 0;
     widget_destroy_children(view);
     int choice = lock_choice();
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 2; ++i) {
         void *label =
             list_row(view, i == choice ? "select" : "unselect", lock_pick, (void *)(long)i);
         widget_set_text_utf8(label, lock_names[i]);
@@ -2739,7 +2733,7 @@ static void quick_lock_text(void *win) {
                          g_keylock_flag ? "drop_keylockopen" : "drop_keylock");
 }
 int ringnav_quick_lock(void *win, void *event) {
-    lock_set((lock_choice() + 1) % 4);
+    lock_set(!lock_choice());
     quick_lock_text(win);
     widget_invalidate_force(win, (void *)0); /* OLED's row paints the value: its label is hidden */
     return 0;
@@ -2812,8 +2806,7 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * is stock's own PLAYSET ARTISTTYPE (artist_type, the artist page's switch;
  * docs/internals.md#album-artists), and Bluetooth's Resume on connect (RESUME, so a missing key
  * holds playback; docs/internals.md#resume-on-connect), and Playback's Artist album order
- * (ARTISTAZ), and Power's Volume guard (VOLGUARD, playback.c's wheel_guard;
- * docs/internals.md#volume-guard), and Display's Hold Return (HOLDRETURN, compact_now_playing;
+ * (ARTISTAZ), and Display's Hold Return (HOLDRETURN, compact_now_playing;
  * docs/ipod.md#hold-return), and Power's Standby limit (STANDBYLIMIT, ringnav_standby;
  * docs/internals.md#standby-limit), and Bluetooth's Control Device Volume (BTVOLLINK,
  * bt_audio_ready; docs/internals.md#headset-controls-and-volume), and Power's Smart Wi-Fi
@@ -2835,7 +2828,6 @@ static int *const pod_values[] = { &st.charge_limit,
                                    0,
                                    &st.resume,
                                    &st.artist_az,
-                                   &wheel_guard,
                                    &st.hold_home,
                                    &st.standby_limit,
                                    &bt_vol_link,
@@ -2861,7 +2853,6 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         0,
                                         "RESUME",
                                         "ARTISTAZ",
-                                        "VOLGUARD",
                                         "HOLDRETURN",
                                         "STANDBYLIMIT",
                                         "BTVOLLINK",
@@ -2966,7 +2957,6 @@ static void pod_text(int i) {
         { "Artists: Artist", "Artists: Album Artist" },
         { "Resume on Connect: Off", "Resume on Connect: On" },
         { "Artist Album Order: Year", "Artist Album Order: A–Z" },
-        { "Volume Guard: Off", "Volume Guard: On" },
         { "Hold Return: Recent", "Hold Return: Home" },
         { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
           "Standby Limit: " STR(STANDBY_LIMIT_2) "h",
@@ -3008,7 +2998,6 @@ static void pod_text(int i) {
     const char *toggle = i == POD_CHARGE && theme()->set_switch ? 0
                          : i == POD_CHARGE         ? "Charge Limit (" STR(CHARGE_STOP) "%)"
                          : i == POD_RESUME         ? "Resume on Connect"
-                         : i == POD_VOL_GUARD      ? "Volume Guard"
                          : i == POD_BT_LINK        ? "Control Device Volume"
                          : i == POD_CARMODE        ? "In-Vehicle Mode"
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
@@ -3151,16 +3140,17 @@ static const unsigned char playset_order[] = {
     8 /* Headphones required */,
     0 /* Gain */,
     9 /* ReplayGain */,
-    16 /* Max Volume */,
-    17 /* Default Vol */,
+    16 /* Volume */,
+    17 /* Max Volume */,
+    18 /* Default Vol */,
     10 /* Balance */,
     13 /* Mono Audio */,
     14 /* Swap L/R */,
-    18 /* Enlarged art */,
+    19 /* Enlarged art */,
     1 /* Filters */,
     4 /* DSD Output */,
     5 /* USB Audio */,
-    19 /* On-The-Go */,
+    20 /* On-The-Go */,
     15 /* Library & Folders */,
 };
 /* Library & Folders: stock's Folder skip (0), then ours as built. */
@@ -3254,8 +3244,9 @@ static int to_page(void *ctx, void *event) {
  * library rows: stock's Folder skip (12) kept, its others dropped. The main page drops it instead,
  * and stock's Volume and Album Display (11): that page's four rows are here as they were, Max
  * Volume, Default Volume and Enlarged Album Art on Playback and Folder Album Cover on Library &
- * Folders, opening stock's pages and flipping stock's switches (pod_click). Each page builds only
- * its own rows, so a row's kept label is its page's. */
+ * Folders, opening stock's pages and flipping stock's switches (pod_click). Playback's Volume row,
+ * before Max Volume, opens the slider page on the volume (crossfade.c xfade_open 4). Each page
+ * builds only its own rows, so a row's kept label is its page's. */
 static int playset_sub __attribute__((section(".scratch")));
 static int library_open(void *ctx, void *event) {
     playset_sub = 1;
@@ -3296,6 +3287,7 @@ int ringnav_audioset(void *win, void *ctx) {
     swap_row(list_row(view, "playset_balance", swap_click, 0));
     widget_set_text_utf8(list_row_into(view, "playset_folderjump", library_open, 0),
                          "Library & Folders");
+    volume_row(list_row_into(view, "playset_maxvol", xfade_open, (void *)4)); /* crossfade.c */
     widget_set_tr_text(
         list_row_into(view, "playset_maxvol", to_page, (void *)"playset/maxvol_page"),
         "playset_maxvol");
@@ -6063,7 +6055,6 @@ int ringnav_display(void *win, void *ctx) {
     pod_rows(win, "scroll_view_display", POD_KEYTONE, 1, tone_icon); /* the Clicker */
     widget_set_tr_text(list_row_into(view, "system_keylock", keylock_open, 0), "system_keylock");
     pod_rows(win, "scroll_view_display", POD_WAKE, 1, lock_icon);
-    pod_rows(win, "scroll_view_display", POD_VOL_GUARD, 1, lock_icon);
     return result;
 }
 
@@ -9416,7 +9407,6 @@ int ringnav_sleep(void *loop) {
             sleep_ms(quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS);
     } else if (st.dark) {
         dark_quiet = 0;
-        wheel_guard_reset();
         if (st.dark & 2) st.woke_at = (unsigned)time_now_ms();
         st.dark = 0;
         if (st.clock_timer) clock_show(); /* a time set while dark */
@@ -9438,8 +9428,8 @@ int ringnav_sleep(void *loop) {
  * paint stall the loop about that long, so a blind second press is dispatched only after. A blind
  * double press only wakes, without clicking the selected row or turning the screen off again.
  * Repeated downs share their press's fate, including a dropped press's release. A passing hold
- * keeps stock's downstream long-press power-off. Other keys pass: the wheel and media work
- * dark. Returns 1 to drop the event. */
+ * keeps stock's downstream long-press power-off. Other keys pass: the media keys work dark, and
+ * the wheel's ticks set nothing there (volume.c vol_wm_keyup). Returns 1 to drop the event. */
 static void woke(unsigned now) { /* a passing dark press: not Standby's resume key */
     *(volatile unsigned char *)BOOT_KEY_GUARD = 0;
     st.woke_at = now;
@@ -9782,7 +9772,9 @@ int ringnav_keydown(void *ctx, void *event) {
 }
 
 /* Stock's setting editors, which have no list. Brightness, maximum and startup volume and balance
- * step with the wheel through their own +/- (limits and saving stay stock's), and Centre goes back.
+ * step with the wheel through their own +/- (limits and saving stay stock's), and Centre goes back;
+ * on a page with a switch (Default Volume's img_bootswitch, its row selected) Centre turns it on or
+ * off instead, as a tap on the row does, and Return goes back.
  * Quick Settings' brightness slider has no +/-: its value is set, firing stock's change callback.
  * Set date and time and the sleep timer edit one text_selector field at a time, outlined by
  * edit_paint: the wheel turns it, Centre moves to the next field and, after the last, to OK, which
@@ -9843,7 +9835,13 @@ static int edit_single(const void *info) {
     if (hidden && !widget_get_visible(hidden)) /* the switch's off: only its row is showing */
         switch_click(0, 0);
     else if (!n) {
-        if (slider_page(top)) navigator_back();
+        void *sw = slider_page(top) ? widget_lookup(top, "img_bootswitch", 1) : (void *)0;
+        char click[0x30];
+        if (sw && widget_get_visible(sw)) {
+            stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
+            widget_invalidate_force(top, (void *)0); /* the hidden switch's change repaints no row */
+        } else if (slider_page(top))
+            navigator_back();
     } else if (f < n)
         field_set(top, f + 1);
     else {
@@ -10128,8 +10126,9 @@ int ringnav(void *ctx, void *event) {
      * dispatched before then went past it to on_wm_keyup_fun, which opened one more dialog over
      * it; a dark pass takes several ticks, so a dark turn left a stack, each dialog closing 3 s
      * after the last and showing the volume it opened at (#303). The tick steps the volume here,
-     * and the dialog's slider with it. */
-    void *vol = key == KEY_PREV || key == KEY_NEXT ? vol_top() : (void *)0;
+     * and the dialog's slider with it; dark, it goes on to on_wm_keyup_fun's hook, which drops it
+     * (volume.c vol_wm_keyup). */
+    void *vol = (key == KEY_PREV || key == KEY_NEXT) && g_backlight_status ? vol_top() : (void *)0;
     if (vol && P(window_manager(), W_KEY_TARGET) != vol) {
         vol_step(key);
         void *slider = widget_lookup(vol, "slider_vol", 1);
@@ -10234,14 +10233,8 @@ int ringnav(void *ctx, void *event) {
         return np_key(st.np_win, key);
     /* A keyboard (T9's, every text box's) on top takes Centre as a listed page does: a single press
      * does nothing, a double turns the screen off; stock turned it off on each one (#365). Its
-     * wheel stays stock's volume. */
+     * wheel goes on to on_wm_keyup_fun, whose hook drops it (volume.c vol_wm_keyup). */
     int kb = key == KEY_CENTER && top && !tk_strcmp(widget_get_type(top), "keyboard");
-    /* A card app's QR page has nothing for the wheel, and stock's volume over it would hide the
-     * code (addon.c) */
-    if ((key == KEY_NEXT || key == KEY_PREV) && addon_qr_page(top)) {
-        drop_input();
-        return STOP;
-    }
     if (!allowed_top(top) && !usb_prompt()) {
         drop_input();
         if (!kb) return result;

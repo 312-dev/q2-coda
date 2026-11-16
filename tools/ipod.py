@@ -457,7 +457,7 @@ def patch_style(data, audit):
 # systembar_showface (0x5417d0) finds every widget by name, recursively from the bar,
 # and each second re-shows the volume, EQ, BT, synclink and Wi-Fi widgets and resets their text and
 # images, but never their geometry. So widgets iPod hides move off-screen instead of going invisible.
-# The volume number stays hidden: stock already opens dialog/volume_dialog on every wheel change.
+# The volume number stays hidden: the volume dialog shows it on each wheel change (volume.c vol_wm_keyup's pages).
 STATUS_BAR = 'system_bar.bin'
 STATUS_LEFT = ['img_state', 'label_eq']
 STATUS_RIGHT = ['img_bt', 'img_wifi', 'label_battery', 'view_battery', 'img_battery']
