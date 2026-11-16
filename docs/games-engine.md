@@ -120,7 +120,7 @@ Return never reaches a game. A game that sets neither flag gets ticks and runs i
 | `eng_disc`              | a disc with a smoothed edge, its center and radius in 16.16: it moves by sixteenths of a pixel |
 | `eng_round`             | a box with round corners, smoothed                                                             |
 | `eng_mask`              | an 8-bit mask in one color: a sprite's shape or a glyph of the game's own                     |
-| `eng_text`              | ASCII in the theme's face through stock's canvas (left, centerd or right); returns its width   |
+| `eng_text`              | ASCII in the theme's face through stock's canvas (left, centered or right); returns its width   |
 | `eng_inset(y)`          | not a drawing: the columns the glass's 80 px corners hide at each end of the sheet's row `y`   |
 
 A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's snapshot of another layout) is left as stock drew it.

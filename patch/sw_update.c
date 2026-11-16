@@ -194,7 +194,7 @@ void sw_installed(char *out, unsigned n) {
     if (pod) v[pod - Q2POD_VERSION] = 0; /* "1.8.2", then " Dev" or the beta's " beta 2" */
     tk_snprintf(out, n, "%s%s (" Q2POD_FW_TAG ") is installed", v,
                 Q2POD_DEV ? " Dev"
-                : pod     ? pod + 4
+                : pod     ? pod + sizeof " Muse" - 1
                           : "");
 }
 

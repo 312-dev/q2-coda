@@ -29,7 +29,7 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 | ------------- | ---------------------------- | --------------------------------------------------------------------------------------- |
 | Panel         | 375x320, upright             | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
 | Glass corners | 80 px radius (`GLASS_R`)     | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners)       |
-| Status row    | glyphs centerd on y 23       | No band and no rule: the bar is 58 px of the page's black; ends 62 px in from each side |
+| Status row    | glyphs centered on y 23       | No band and no rule: the bar is 58 px of the page's black; ends 62 px in from each side |
 | Content area  | 375x262 from y 58            | Seven 32 px rows, y 58 to 282                                                           |
 | Panel type    | LCD (`lcd_h0209s`), not OLED | Black is a color here, not "off": keep large areas black anyway, it is the look        |
 
@@ -44,10 +44,10 @@ track along the glass. The status row's height and ends are the user's from `moc
 The concept puts the clock in the top-left corner and the battery in the top-right. On the Q2
 those spots are under the glass. So:
 
-- The status row sits up in the glass's top curve, centerd on y 23, where the glass hides 32 px at
+- The status row sits up in the glass's top curve, centered on y 23, where the glass hides 32 px at
   its glyphs' top edge (y 16), so its ends draw in to follow the curve: the title's text starts
   62 px in (`STATUS_ROW_INSET`) and the battery ends 62 px from the right edge, the clock beside
-  its glyphs (or centerd, on a page with no title). The list's own columns (24 and 28) stay
+  its glyphs (or centered, on a page with no title). The list's own columns (24 and 28) stay
   below it.
 - No text or control may start inside `corner_x(y, h)` for its row. In the middle of the
   screen, from y 80 to y 240, the inset is 0.
@@ -174,7 +174,7 @@ All lists share one grid.
   row of its own, so the list keeps its place.
 - The clock, in the same face, size and color, right-aligned 6 px left of the leftmost glyph
   (the battery's body when it is alone). Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
-  artist) have no title, and there the clock is centerd across the row (x 187.5) instead, unless centerd it would
+  artist) have no title, and there the clock is centered across the row (x 187.5) instead, unless centered it would
   reach the glyphs; Home in
   Split keeps it at the right, over the art, inked white or black as one glyph with the other glyphs
   and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
@@ -195,7 +195,7 @@ All lists share one grid.
   - **Headset battery**, 5 px left: a connected Bluetooth headset's level, Phosphor `bluetooth` (bold) then the
     level and "%" in the battery's percentage type, Text Primary.
   - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
-- The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centerd on the
+- The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centered on the
   row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
 - Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
   the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
@@ -242,7 +242,7 @@ All lists share one grid.
 
 - 32 px pitch, title at the text inset, a chevron on the right column when the row opens
   another page, nothing at the right when it acts in place (a song).
-- **Chevron:** Phosphor `caret-right`, bold, 15 px, centerd 5 px left of the right column:
+- **Chevron:** Phosphor `caret-right`, bold, 15 px, centered 5 px left of the right column:
   Chevron gray, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
   restart or a library change) keeps the selection and turns its chevron into an activity
@@ -285,7 +285,7 @@ All lists share one grid.
 Wear OS's position indicator, on the Q2's straight right edge:
 
 - A 4 px track with round ends at x 366 (5 px from the glass, 7 px clear of the selection bar),
-  a fixed 72 px long, centerd on the list's middle (y 134 to 206). Track `#3A3A3A`, thumb
+  a fixed 72 px long, centered on the list's middle (y 134 to 206). Track `#3A3A3A`, thumb
   `#E5E5E5` inside it, the thumb's position and length the visible rows over the total.
 - Hidden at rest: it shows while the wheel turns and fades out a second after the last tick
   (the last 200 ms of it). It stays hidden while the [A-Z index](#a-z-index) shows.
@@ -303,7 +303,7 @@ settings have none.
   degrees a second or more, the speed at which Rockbox's list acceleration first moves two rows a
   click, as the volume's does). It fades out a second after the finger lifts or the last fast
   tick (the last 200 ms of it).
-- **The column:** centerd 13 px from the right edge (x 362), from y 80 to y 240, the straight
+- **The column:** centered 13 px from the right edge (x 362), from y 80 to y 240, the straight
   part of the glass. Letters `#`, A to Z in Inter Medium 13 px, white (black in Light Mode), never
   the accent. 27 letters do not fit 11 px slots in 160 px, so the column folds as iOS's does:
   seven letters spaced evenly, a dot between each two (`# • D • I • M • Q • V • Z`).
@@ -366,7 +366,7 @@ Home's list.
 An iOS segmented control (`slider_page.c` `segments_paint`), on EQ's Simple and Advanced (`eq_tabs_paint`) and
 Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's only tabs:
 
-- A `#1C1C1E` track rounded 9 px: on EQ from x 20 to 355, 34 px tall, centerd in the 48 px tab bar; on Search
+- A `#1C1C1E` track rounded 9 px: on EQ from x 20 to 355, 34 px tall, centered in the 48 px tab bar; on Search
   from x 16 to 359, 30 px tall, in the results' first 32 px row.
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
   elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
@@ -375,7 +375,7 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
   opening as the wheel reaches it, left to right going down; a turn down past the last tab, or Center, goes into the
   open tab's rows, and a turn up past the first stays (EQ) or goes up to what is above (Search's strip). Previous
   and Next open the tab before and after, round (`peq_ui.c` `eq_key`, `search_strip.c` `search_strip_key`).
-- Labels in Inter Medium 17 px, centerd in their segments: the open one white (Text Primary on Light
+- Labels in Inter Medium 17 px, centered in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
   own control.
 
@@ -419,14 +419,14 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   length on the right column when known; a file the library doesn't know shows its file name
   without the extension, a leading track number ("01. ") or the "Artist - " every such name in the
   folder starts with. A folder has Phosphor `folder` (regular, 20 px, Text Secondary, white on the
-  selection) centerd on x 34, its name at x 52 and the chevron on the right column; the card's root
+  selection) centered on x 34, its name at x 52 and the chevron on the right column; the card's root
   too.
 - Which list is which comes from its page: Songs' page (`allmusic_page`, which also holds a genre's songs
   and the other lists stock opens there) is mixed, the artist page's songs (OLED draws that page as the [artist page](#artist-page)) are an artist's, the album page is an
   album, Folder view (`folder_page`) a folder, and an album's tracks opened from Cover Flow are an album too (their
   status row names the album, with no row of its own above the tracks). Lists Q2 Muse draws itself (Most Played,
   Long Songs, Ratings) keep their own rows.
-- Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centerd on x 34 in Text
+- Streaming's rows are one line, 32 px, each service's mark (20 px, monochrome, no disc) centered on x 34 in Text
   Secondary, white on the selection, its name from x 52: Phosphor's `spotify-logo`, `app-window` (a card app without
   its own icon), `radio`, `airplay` and `sliders-horizontal` (Configuration), TIDAL's own four diamonds, drawn in
   `tools/art.py` (Phosphor has none), TIDAL and Tidal Downloads sharing it, and for the Subsonic card app (id
@@ -436,7 +436,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - **Where a song lives** (with Library: Local + Server): a song row's right column says where the song is, as the
   user approved from `mock_radio.py`'s storage sheet on 2026-11-15: nothing for the user's own file, Phosphor
   `arrow-circle-down` for one a card app downloaded (its `q2app`'s `downloads=` folder, q2-subsonic's `Subsonic/`),
-  `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centerd where the
+  `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centered where the
   offline mark goes. A server song that can't play now keeps the grayed row and `cloud-slash`
   ([server-library.md](server-library.md#grayed-rows)). The length and the title end 12 px short of a mark, as they
   do of the offline mark.
@@ -446,7 +446,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 ### Now Playing
 
 The most-seen screen. Art left, words right, time across the bottom; the status row shows the
-clock, centerd.
+clock, centered.
 
 | Element        | Position (x, y) and size       | Notes                                                                                      |
 | -------------- | ------------------------------ | ------------------------------------------------------------------------------------------ |
@@ -455,9 +455,9 @@ clock, centerd.
 | Artist         | 192, top 96                    | Inter Regular 18 px, Text Secondary                                                        |
 | Album          | 192, top 120                   | Inter Regular 18 px, Text Secondary, up to two lines                                       |
 | Progress bar   | 24 to 347, y 228, 6 px         | Track `#333333`, fill Accent Blue, round ends                                              |
-| Elapsed        | left on 24, centerd on y 250   | 16 px, Text Primary, tabular                                                               |
-| Remaining      | right on 347, centerd on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
-| State row      | centerd on y 286, x 53 to 322  | Shuffle, radio, repeat, Up Next: Phosphor bold 22 px, even gaps (below)                    |
+| Elapsed        | left on 24, centered on y 250   | 16 px, Text Primary, tabular                                                               |
+| Remaining      | right on 347, centered on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
+| State row      | centered on y 286, x 53 to 322  | Shuffle, radio, repeat, Up Next: Phosphor bold 22 px, even gaps (below)                    |
 
 No page title, no background art blur, no reflection.
 
@@ -499,7 +499,7 @@ has no place for keeps a place of its own:
   control turns on. The radio's pill is its own press.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
-  `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centerd at x 32
+  `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
   and 339 on its center line, and no number; the times' row stays blank meanwhile. The scrub is
   a 14 px white knob on the fill's end. The A-B markers follow the bar
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
@@ -538,11 +538,11 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   downloads.
 - **Slider page** (Volume, Max Volume, Default Volume, Channel Balance, Brightness, Crossfade, Resume Songs,
   Night Shift, Wheel Sensitivity): the status row names it; a feature with a switch has it as the
-  first row, selected; the value in Inter Medium 22 centerd on y 150; a 6 px track from the text
+  first row, selected; the value in Inter Medium 22 centered on y 150; a 6 px track from the text
   column to the right column with its top at y 186, Track behind and Accent Blue filled to a 14 px
   white knob (Channel Balance fills from the center; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
-  Tertiary centerd on y 214, at the two columns. The wheel moves it; there are no +/- buttons. Center
+  Tertiary centered on y 214, at the two columns. The wheel moves it; there are no +/- buttons. Center
   turns the switch on or off where there is one, else goes back; Return goes back.
   Night Shift's first row is a key/value row, its value Off, On or Auto, which Center cycles (three
   named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
@@ -555,20 +555,20 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   switch (Enabled), Presets and Reset are rows; while an Advanced preset plays, its name is
   Presets' value, as a settings row's, and the switch keeps its title.
 - **Storage bar** (Settings > Storage, approved from `mock_radio.py`'s storage sheet on 2026-11-15): "33.9 GB of 60
-  GB used" in 15 px Text Secondary centerd on y 62 at the text column, then a 10 px bar with round ends from the
+  GB used" in 15 px Text Secondary centered on y 62 at the text column, then a 10 px bar with round ends from the
   text column to the right column, its top at y 76: the track `#2C2C2E`, then from the left Your Music in white,
   Downloads in Accent Blue and Stream Cache in `#6E6E73`, square where they meet with 1 px of track between them.
   The rows from y 100 are its legend: a 10 px dot in the segment's color on the text column (Free's in the track's),
   the label at x 44 and the size as the row's value, Downloads and Stream Cache with a chevron. Two footers follow.
 - **Footer:** a grouped list's caption under its last row, as iOS's: 13 px Text Tertiary (`#858585`) on the text
-  column, its first line centerd 10 px below the rows, the next 16 px lower. Storage and Downloads use them.
+  column, its first line centered 10 px below the rows, the next 16 px lower. Storage and Downloads use them.
 
 ### Confirmation
 
 Shown for a moment after a mode change (Shuffle, Repeat).
 
-- Centerd glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centerd on y 140;
-  label Inter Medium 22 px centerd on y 200; count in Text Tertiary 15 px centerd on y 228.
+- Centered glyph (Phosphor `shuffle` or `repeat`, bold), 56 px, Accent Blue, centered on y 140;
+  label Inter Medium 22 px centered on y 200; count in Text Tertiary 15 px centered on y 228.
   Nothing else on screen but the status row, which names Now Playing.
 - Dismisses itself after 1.2 s or on any input, which it takes.
 - Built for shuffles (`patch/feedback.c` `feedback_shuffled`): the Library's Shuffle Songs, Albums and
@@ -596,7 +596,7 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   verbs are Reset Settings, Reset Database and Reset All, red. Ratings (`ringnav-ratings`) and the card's music
   survive all three.
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
-  as wide as its text and 16 px each side, centerd on y 252 (y 236 to 268), above the bottom
+  as wide as its text and 16 px each side, centered on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
   with its status row and its selection; it lasts 1.5 s (stock's own toasts their own time).
   Words in sentence case ("Playing Last", "Name can't be empty").
@@ -619,12 +619,12 @@ A question answered in place: a card over the page that asked, the page dimmed b
 as its callers move onto it.
 
 - **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
-  wide at x 42 with 16 px corners, its stack centerd on y 168 and kept inside y 44 to 302.
-- **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centerd, naming
+  wide at x 42 with 16 px corners, its stack centered on y 168 and kept inside y 44 to 302.
+- **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centered, naming
   the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
   15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
-  column) and the answers, 32 px rows of Inter Regular 20 centerd, stacked; 8 px of padding.
+  column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
 - **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
   (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
   answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb.
@@ -661,10 +661,10 @@ user's outline style, 2026-11-16, `empty-states-all/mock_empty_all_v2.py`, as Ap
 page's Phosphor glyph in outline (regular weight, 60 px, Text Secondary; `tools/art.py` `EMPTY_GLYPHS`) with no tile
 or disc behind it; 14 px under it the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
 Text Secondary; and at most its [buttons](#buttons), 20 px lower. The whole stack, with or without buttons, is
-centerd between the status row's foot (or the end of any rows the page keeps above it) and the screen's. The glyph
+centered between the status row's foot (or the end of any rows the page keeps above it) and the screen's. The glyph
 shows only when the empty state is the whole page (the user's rule, 2026-11-16): under anything the page keeps above
 it (Car Remote's switch, Playlists' On-The-Go, Search's tabs) it is the **compact** form, the title, hint and any
-button with no glyph, centerd in the room left (`empty_compact`: a top past the set's bar). No app
+button with no glyph, centered in the room left (`empty_compact`: a top past the set's bar). No app
 names. No fake rows, and no Shuffle row or Add to Sync over nothing. A page that is a list (`empty_list`) keeps its
 name for the status row; a Library list stock would open black (Albums, Artists, Composers, Genres) and a streaming
 service with no link open a page of their own holding only the empty state (`empty_open`). With no SD card in, the
@@ -708,7 +708,7 @@ Not in this form, by design: Now Playing is reachable only while something is lo
 the Wi-Fi page always holds its switch, Search Again and Add Network rows; the EQ's Presets page always holds its
 four action rows (no presets is a toast); and Upload Scrobbles with nothing to send is a toast after the press.
 
-The older note (`feedback_empty`): one line of 16 px Text Secondary centerd in the free area below a page's rows,
+The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
 explains use it: the App Store's "No apps listed" under its Check for Updates row, On-The-Go's how-to under its
 rows, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
@@ -751,14 +751,14 @@ Artists list), approved from `mock_album_artist.py` (option 2, header with monog
 `mock_artist_explore.py` (layout B) on 2026-11-15. Built by `patch/artist_page.c` (the header,
 the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where).
 
-- **Status row:** no title, the clock centerd.
+- **Status row:** no title, the clock centered.
 - **Header** from y 52: a 64 px `#2C2C2E` disc at the text column with the name's first letter in
   Inter Medium 22, white; beside it from x 102 the name in Inter Medium 20 (ellipsis), the counts
   ("4 albums · 3 singles · 62 songs" as the app sends them, else "4 albums" counted from its album
   rows) in Inter Regular 15 Text Secondary, and the genre in Inter Regular 13 Text Tertiary, a line
   left out when unknown. The disc's top stands over the status row's bottom 6 px.
 - **Action pair** at y 128: Shuffle and Radio side by side, each a `#1C1C1E` panel 28 px high with
-  8 px corners, its Phosphor symbol (16 px) and label (Inter Medium 17) centerd together in the
+  8 px corners, its Phosphor symbol (16 px) and label (Inter Medium 17) centered together in the
   accent. The lit one fills with the accent, its content white. The page opens on Shuffle; the
   wheel steps Shuffle, Radio, then the rows, and back.
 - **Drill-down rows** from y 168, 32 px, scrolling, the rows past y 282 fading as every list's: Top Songs,
@@ -808,18 +808,18 @@ on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details sto
 - **Status row** titled About.
 - **Header** from y 46: the cover, 56 px with 6 px corners, at the text column (a `#2C2C2E`
   placeholder without one); beside it from x 92 the title in Inter Medium 20, white, the artist
-  in Inter Regular 15 Text Secondary and the length in Inter Regular 13 Text Tertiary, centerd on
+  in Inter Regular 15 Text Secondary and the length in Inter Regular 13 Text Tertiary, centered on
   y 56, 77 and 95, each ending in an ellipsis when long. The cover's top stands over the status
   row's bottom 12 px.
 - **Quality line** at y 112: a badge, 20 px high with 6 px corners and a 1 px Text Secondary
-  outline, Phosphor `waveform-bold` (12 px, Text Primary) centerd 11 px in and its label in Inter
+  outline, Phosphor `waveform-bold` (12 px, Text Primary) centered 11 px in and its label in Inter
   Medium 13 from 21 px in, 30 px wider than the label; then, 10 px on, the spec in Inter Regular 13
   Text Tertiary. **Lossless** for FLAC, ALAC, WAV, AIFF, APE and WavPack up to 16-bit and up to
   48 kHz, **Hi-Res Lossless** above either, spec "FLAC · 16-bit / 44.1 kHz"; **DSD** for a DSF or
   DFF file, spec its rate as a multiple of 44.1 kHz ("DSD64", from the bit rate); a lossy file has
   no badge, its spec alone at the text column, "MP3 · 320 kbps".
 - **Grid** from y 138, 44 px a row, two cells a row at x 24 and 192: the name in Inter Regular 13
-  Text Tertiary centerd 8 px down, the value in Inter Regular 17 white 26 px down, ellipsized at
+  Text Tertiary centered 8 px down, the value in Inter Regular 17 white 26 px down, ellipsized at
   150 px. Album, Year, Genre, Bit Rate ("1,001 kbps"), Size ("38.3 MB", one decimal), then
   Location on a row of its own across to the right column: "SD Card · Music/Disclosure" (the
   song's folder) for a card file, "Server · Downloaded" for a server song the card keeps (synced
@@ -839,7 +839,7 @@ Search's albums or an artist page's Albums: the Library's (stock's album pages, 
 from `mock_album_artist.py` (option 2, header with cover) on 2026-11-15. It shares the artist page's
 header and pair (`patch/artist_page.c`).
 
-- **Status row:** no title, the clock centerd.
+- **Status row:** no title, the clock centered.
 - **Header** from y 52: the album's cover, 64 px square with 6 px corners, at the text column (the
   server library's cover for a server album, else Cover Flow's cached one, else a `#2C2C2E`
   placeholder); its top stands over the status row's bottom 6 px, as the artist's disc does. Beside it
@@ -929,8 +929,8 @@ It has two forms, in the same place, width and corners:
   cursor, the letters from x 148; the results above the strip, and with nothing typed the
   [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs";
   with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer letters".
-- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centerd,
-  and the name written large in the middle of the screen, Inter Medium 22 white centerd on y 140 with a
+- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centered,
+  and the name written large in the middle of the screen, Inter Medium 22 white centered on y 140 with a
   steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to
   save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
   cursor, as on Search's text.
@@ -947,7 +947,7 @@ It has two forms, in the same place, width and corners:
 
 On every form, the wheel walks the letters and Center types the lit one. A Return press erases the character
 before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
-the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centerd on y 160 and sized
+the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized
 to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
 fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
 "Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
@@ -974,11 +974,11 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
   Home's art, Cover Flow): a `#2C2C2E` tile, its corners rounded and clear (24 px of its 290, so no
   dark corner shows on a selected row), with Phosphor's `music-notes-simple` (regular) in Text
-  Tertiary, a third of its width, centerd (`assets/icons/default_album_home.png`, drawn from the
+  Tertiary, a third of its width, centered (`assets/icons/default_album_home.png`, drawn from the
   vendored SVG; `tools/build.py` sizes it into stock's `ART_PLACEHOLDERS`), in place of stock's
   `#787878` disc (the user's, from audit2 I1).
 - **Optical sizes** (the user's, 2026-11-16, `mock_wifi_trash.py`): a size is the glyph's box, and the glyph inside it
-  is scaled about its ink's center until its ink's longer side is a set length, centerd in the box, so a wide glyph
+  is scaled about its ink's center until its ink's longer side is a set length, centered in the box, so a wide glyph
   (Wi-Fi's signal) and a tall one (the lock, the trash) read as one size. The 20 px symbols (rows', Streaming's marks,
   Now Playing's heart and More) have 15.5 px of ink (`tools/art.py` `ROW_INK`, `glyph_png`). Wi-Fi's row glyphs end
   on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`).
@@ -988,7 +988,7 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 ### Control Center
 
 The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `design/mockups/mock_cc3.py`
-`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centerd:
+`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centered:
 
 - **Blocks** from y 38, `#1C1C1E` with 22 px corners: connectivity, 138 x 124 from x 20; Now Playing, 8 px
   right of it to x 355.
@@ -1049,7 +1049,7 @@ screen, only the toast and the status row. Black in both halves, over the whole 
   out by 2 s. Full, or held at Charge Limit, the fill stands still.
 - **Level**: "62%" in Inter Medium 30 px, white, its center 12 px right of the screen's on y 212, and Phosphor's
   `lightning` (fill, 26 px, `#34C759`) 3 px left of it. No outlined bolt.
-- **Word**: "Charging" ("Charged" at 100 %) in Inter Regular 16 px, Text Secondary, centerd on y 244.
+- **Word**: "Charging" ("Charged" at 100 %) in Inter Regular 16 px, Text Secondary, centered on y 244.
 - A key or a touch ends it and leaves the screen on, doing nothing else; a page opening over it (a computer's
   chooser) ends it the same way.
 
@@ -1147,7 +1147,7 @@ pattern.
 
 | Q2 Muse screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centerd. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled the top row's first 14 px too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centered. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled the top row's first 14 px too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's clock, play state and battery over it at the right, each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
@@ -1169,7 +1169,7 @@ pattern.
 | About                               | [Label/value rows](#labelvalue-rows) | Model, Firmware (V1.36), the product's version under its name, Capacity and Available with their unit ("779.72 GB"), Wi-Fi Address, IP Address ("Not connected" with no network); the wheel walks the rows and nothing opens; values in Text Secondary |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
-| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centerd on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
+| Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
@@ -1178,12 +1178,12 @@ pattern.
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
-| Quick Settings                      | [Control Center](#control-center) | The status row's clock centerd, no title                                                        |
+| Quick Settings                      | [Control Center](#control-center) | The status row's clock centered, no title                                                        |
 | Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
 | New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
-| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centerd under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centerd between the status row and the bottom; the wheel does nothing |
+| A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centered under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |
 
 The concept's Apple Music, Apple TV and CD sync pages have no Q2 Muse equivalent and are out of scope; its storage
 page became Settings > Storage. Spotify's pages follow the list patterns.
@@ -1212,7 +1212,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
   in from the sides, its glyph slots left of the battery (`patch/status_row.c`: `status_slots_left`,
-  `status_slots_paint`, `status_slot_at`) and its clock beside them, or centerd where there is no title; lists that scroll a
+  `status_slots_paint`, `status_slot_at`) and its clock beside them, or centered where there is no title; lists that scroll a
   whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`list_fit`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`chevron_icon`, `patch/list_marks.c`) and the status row's glyphs (`STATUS_GLYPHS`); the slim battery
