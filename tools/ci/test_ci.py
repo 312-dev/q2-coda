@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
 import emu_pool  # noqa: E402
+import gate  # noqa: E402
 import merge_batch  # noqa: E402
 import patch_shards  # noqa: E402
 
@@ -270,3 +271,48 @@ def test_ready_list_last_line_for_a_branch_wins(tmp_path):
     assert merge_batch.read_ready(ready) == [('feat/a', '222'), ('feat/b', None)]
     assert merge_batch.take_ready(ready, tmp_path/'taken') == [('feat/a', '222'), ('feat/b', None)]
     assert ready.read_text() == '' and 'feat/b' in (tmp_path/'taken').read_text()
+
+
+def fake_suite(name, seconds, rc=0, needs_build=False):
+    return gate.Suite(name, [sys.executable, '-c', f'import time, sys; time.sleep({seconds}); sys.exit({rc})'],
+                      needs_build=needs_build)
+
+
+def test_gate_holds_a_suite_that_would_leave_too_little_memory(tmp_path):
+    a, b = fake_suite('a', 0.3), fake_suite('b', 0.1)
+    a.mem = b.mem = 1.5
+    events = []
+    results = gate.run({'a': a, 'b': b}, [], tmp_path, sys.executable, build='B', log=events.append, mem=lambda: 6.0,
+                       poll=0.02)
+    starts = [e for e in events if e.startswith(('start', 'ok'))]
+    # 6 GB less a's 1.5 leaves 4.5, and b's 1.5 more would go under the 4 GB floor: b waits for a
+    assert [e.split()[1].rstrip(':') for e in starts] == ['a', 'a', 'b', 'b']
+    assert results['a']['rc'] == 0 and results['b']['rc'] == 0
+
+
+def test_gate_runs_suites_together_when_memory_allows(tmp_path):
+    a, b = fake_suite('a', 0.3), fake_suite('b', 0.3)
+    events = []
+    gate.run({'a': a, 'b': b}, [], tmp_path, sys.executable, build='B', log=events.append, mem=lambda: 12.0, poll=0.02)
+    assert [e.split()[0] for e in events[:2]] == ['start', 'start']
+
+
+def test_gate_skips_what_needs_a_failed_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, 'ROOT', tmp_path)
+    (tmp_path/'tools/ci').mkdir(parents=True)
+    (tmp_path/'tools/ci/rebuild.py').write_text('import sys; sys.exit(3)\n')
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'none')
+    suites = {'p': fake_suite('p', 0, needs_build=True), 'u': fake_suite('u', 0, rc=1)}
+    results = gate.run(suites, [], tmp_path/'logs', sys.executable, log=lambda m: None, mem=lambda: 12.0, poll=0.02)
+    assert results['build']['rc'] == 3 and results['p']['rc'] == 'no build' and results['u']['rc'] == 1
+    assert 'FAILED: build, u, p' in gate.table(results, 1) or 'FAILED: build, p, u' in gate.table(results, 1)
+
+
+def test_gate_plan_that_runs_everything_is_the_whole_gate(tmp_path):
+    every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
+    assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.FULL)
+    docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
+    assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
+    # --only a name the plan lacks runs that suite whole
+    only = gate.suites_for(docs, ['fw-asan', 'unit'], 'py', tmp_path)
+    assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'

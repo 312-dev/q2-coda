@@ -7,16 +7,17 @@
     python3 tools/ci/merge_batch.py --dry-run --onto release/p31 feat/a   # the same from any worktree
     python3 tools/ci/merge_batch.py --mark-ready              # in a feature worktree: queue this branch
 
-Run it with the test venv's python in a clean worktree of the integration branch (release/p31's is
-~/repos/q2-pod-wt/release). It never touches that worktree's files until the end; the work happens in
+Run it with ~/repos/q2-pod/.venv/bin/python (gate.py's suites need pytest-xdist, coverage and mypy) in a
+clean worktree of the integration branch (release/p31's is ~/repos/q2-pod-wt/release). It never touches that worktree's files until the end; the work happens in
 worktrees of its own, ~/.cache/q2-merge-train/wt/<integration>-L<level>, one per bisection level, kept
 between runs, each with its one reused build (tools/ci/rebuild.py, ~/.cache/q2-builds/<that name>-dev).
 
 1. Every branch is merged (`git merge --no-ff`, rerere as in merge_train.py) onto the integration tip in
    the level-0 worktree, as the branch train/batch-<time>. A branch that conflicts (rerere cannot resolve
    it) or is already in the tip is skipped and reported; the rest go on.
-2. One build, then one test run: what tools/ci/affected.py says the batch's whole diff needs, each suite
-   in its own process at the same time (patch_shards.py, fw.py and the others, under q2-heavy).
+2. One build, then one test run: what tools/ci/affected.py says the batch's whole diff needs, through
+   tools/ci/gate.py (every suite at once as memory allows, under q2-heavy); a plan that runs everything
+   is the whole release gate.
 3. Green: the integration branch is fast-forwarded to the batch's tip (merge commits only; no branch is
    rebased) and the landed branches are listed.
 4. Red: the batch is split in halves and only the failing suites run on each, on top of what has passed
@@ -31,7 +32,6 @@ when every branch landed, 1 when any was left out, 2 when nothing could land (th
 docs/building.md#merge-batch.
 """
 import argparse
-import concurrent.futures
 import contextlib
 import dataclasses
 import fcntl
@@ -181,7 +181,7 @@ class Real:
     def __init__(self, target, tip, logs, dev=True, log=print):
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
-        self.batch_plan = None  # the first plan made, the whole batch's: what the tip alone is checked with
+        self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
 
     def wt(self, level):
         path = CACHE/'wt'/f'{self.target.replace("/", "_")}-L{level}'
@@ -223,59 +223,29 @@ class Real:
         return json.loads(p.stdout)
 
     def test(self, level, head, suites, tag):
+        """head's tests through the worktree's tools/ci/gate.py: the plan affected.py makes for head against the
+        tip (the whole gate when that plan is everything), cut to suites when given."""
         wt = self.wt(level)
         if git('rev-parse', 'HEAD', cwd=wt).stdout.strip() != head:
             git('checkout', '-q', '--detach', '-f', head, cwd=wt)
             git('clean', '-q', '-ffdx', cwd=wt)
-        if head == self.tip:
-            # the tip's own diff is empty: run the batch's plan on it, as far as the tip has those files
-            # (the joined suite's line numbers are the batch's, so test/patch.py runs whole)
-            plan = dict(self.batch_plan, patch='all' if self.batch_plan['patch'] else [])
-            for k in ('unit', 'fw'):
-                if plan[k] != 'all':
-                    plan[k] = [f for f in plan[k] if (wt/'test'/k/f).exists()]
-            plan['other'] = [o for o in plan['other'] if (wt/o).exists()]
-        else:
-            plan = self.plan(wt)
-            if self.batch_plan is None:
-                self.batch_plan = plan
-        if suites is not None:
-            plan = restrict(plan, suites)
         name = re.sub(r'[^\w.-]+', '_', tag)[:80]
-        needs_build = plan['patch'] or 'build' in (suites or []) or any(o.startswith('test/') for o in plan['other'])
-        results, build = {}, ''
+        out = self.logs/name
+        out.mkdir(parents=True, exist_ok=True)
+        (out/'plan.json').write_text(json.dumps(self.plan(wt)))
+        cmd = [sys.executable, str(wt/'tools/ci/gate.py'), '--plan-json', str(out/'plan.json'), '--logs', str(out),
+               '--results', str(out/'results.json'), *(['--only', ','.join(suites)] if suites else []),
+               '--', *self.build_args]
         t = time.perf_counter()
-        if needs_build:
-            blog = self.logs/f'{name}.build.log'
-            with open(blog, 'w') as f:
-                p = subprocess.run([sys.executable, str(wt/'tools/ci/rebuild.py'), *(['--dev'] if self.dev else [])],
-                                   cwd=wt, stdout=subprocess.PIPE, stderr=f, text=True)
-            build = p.stdout.strip().splitlines()[-1] if p.returncode == 0 and p.stdout.strip() else ''
-            self.log(f'  build: {"ok" if build else "FAILED"} ({time.perf_counter() - t:.0f} s) {build or blog}')
-            if not build:
-                return {'build': Suite(False, str(blog), failures(blog.read_text(), wt))}
-            results['build'] = Suite(True, str(blog))
-        # each suite its own process, all at once: q2-heavy admits the heavy ones as memory allows
-        jobs = {}
-        for s in suites_of(plan):
-            one = restrict(plan, [s])
-            jobs[s] = (one, self.logs/f'{name}.{s.replace("/", "_")}.log')
-        t = time.perf_counter()
-
-        def run(item):
-            s, (one, slog) = item
-            with open(slog, 'w') as f:
-                p = subprocess.run([sys.executable, str(wt/'tools/ci/affected.py'), '--plan-json', '-',
-                                    '--run', build], input=json.dumps(one), cwd=wt, stdout=f,
-                                   stderr=subprocess.STDOUT, text=True)
-            ok = p.returncode == 0
-            return s, Suite(ok, str(slog), [] if ok else failures(slog.read_text(), wt))
-        with concurrent.futures.ThreadPoolExecutor(max(1, len(jobs))) as ex:
-            for s, res in ex.map(run, jobs.items()):
-                results[s] = res
-        if jobs:
-            self.log(f'  tests: {len(jobs)} suites at once ({time.perf_counter() - t:.0f} s)')
-        return results
+        with open(out/'gate.log', 'w') as f:
+            subprocess.run(cmd, cwd=wt, stdout=f, stderr=subprocess.STDOUT)
+        try:
+            results = json.loads((out/'results.json').read_text())
+        except (OSError, ValueError):
+            return {'gate': Suite(False, str(out/'gate.log'), failures((out/'gate.log').read_text(), wt))}
+        self.log(f'  gate: {time.perf_counter() - t:.0f} s, table in {out/"summary.txt"}')
+        return {s: Suite(r['rc'] == 0, r['log'], [] if r['rc'] == 0 else failures(pathlib.Path(r['log']).read_text(), wt))
+                for s, r in results.items()}
 
 
 # --- the ready list ---
@@ -379,8 +349,9 @@ def main():
     if args.dry_run:
         items = [(b, None) for b in args.branches] + queued
     else:
-        if subprocess.run([sys.executable, '-c', 'import pytest, unicorn'], capture_output=True).returncode:
-            raise SystemExit(f'{sys.executable} lacks pytest or unicorn: run the batch with the test venv\'s python')
+        if subprocess.run([sys.executable, '-c', 'import pytest, unicorn, xdist, coverage, mypy'], capture_output=True).returncode:
+            raise SystemExit(f'{sys.executable} lacks pytest, unicorn, pytest-xdist, coverage or mypy: run the batch '
+                             'with ~/repos/q2-pod/.venv/bin/python')
         if git('status', '--porcelain', '--untracked-files=no').stdout.strip():
             raise SystemExit(f'{ROOT} has uncommitted changes: the batch needs a clean worktree of the integration branch')
         logs.mkdir(parents=True, exist_ok=True)

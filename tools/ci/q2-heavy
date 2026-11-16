@@ -1,6 +1,6 @@
 #!/bin/bash
 # q2-heavy CMD...: run a memory-heavy q2-pod job (test/fw, test/patch.py, a patch_shards.py shard, a
-# build) in one of Q2_HEAVY_SLOTS slots (default 4), so parallel agents share the machine without running
+# build) in one of Q2_HEAVY_SLOTS slots (default 10), so parallel agents share the machine without running
 # it out of memory or disk. Installed as ~/.local/bin/q2-heavy from tools/ci/q2-heavy; see
 # docs/building.md#fast-test-runs.
 #
@@ -17,7 +17,7 @@
 # in its own systemd scope with MemoryMax=Q2_HEAVY_MEM (3G; 8G under ASan), so a runaway is killed alone,
 # and with tools/ci/nodump.c preloaded, so a crash writes no core dump.
 # A q2-heavy inside a q2-heavy job runs its command at once (it already holds a slot).
-slots=${Q2_HEAVY_SLOTS:-4}
+slots=${Q2_HEAVY_SLOTS:-10}
 # An ASan job (libasan in LD_PRELOAD) gets 8G: test/fw under ASan in one process peaks at 7.4 GB (measured).
 case "$LD_PRELOAD" in *libasan*) mem=${Q2_HEAVY_MEM:-8G} ;; *) mem=${Q2_HEAVY_MEM:-3G} ;; esac
 reserve=${Q2_HEAVY_RESERVE_GB:-5}
