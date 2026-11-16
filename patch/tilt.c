@@ -7,7 +7,8 @@
  * steps a row and the next tug starts from the leftover travel. Let go short of it and the bar
  * springs back over TILT_SPRING_MS. The mock-up's tilt of 1 degree is under a pixel on a 32 px
  * row, so it is not drawn. Only the bar's own box is painted again (tilt.box): tilt_poll, from
- * each UI loop pass, invalidates it in its window while the bar moves and that window is on top.
+ * each UI loop pass, invalidates it in its window while the bar moves and that window is on top,
+ * and tilt_clip lets the bar paint all of that box, past its list's edges.
  * ponytail: a touch drag scrolls the list with the bar hidden, as every list does under touch
  * (navigation.c hide_outline), so only the wheel tilts it; a drag that stepped rows would be what
  * lifts that. */
@@ -56,6 +57,21 @@ void tilt_poll(void) {
     widget_invalidate_force(tilt.win, &tilt.box);
 }
 
+/* While the bar leans, before it paints: the canvas's clip (saved in old) widened up and down to
+ * the lean's box (tilt.box, which tilt_poll repaints), into the black under the status row's
+ * glyphs, so the lift, growth and shadow of a list's first or last row are not cut at the list's
+ * edge. 0, the clip untouched, when nothing leans. */
+int tilt_clip(void *canvas, int *old) {
+    if (!tilt.p || !tilt.win) return 0;
+    canvas_get_clip_rect(canvas, old);
+    int wy = I(tilt.win, W_Y), top = wy + tilt.box.y, foot = top + tilt.box.h;
+    if (top < 0) top = 0;
+    int y0 = old[1] < top ? old[1] : top, y1 = old[1] + old[3] > foot ? old[1] + old[3] : foot;
+    int clip[4] = { old[0], y0, old[2], y1 - y0 };
+    canvas_set_clip_rect(canvas, clip);
+    return 1;
+}
+
 /* a's ease, 1 - (1 - a)^2, both in 256ths */
 static int ease(int a) { return 256 - (256 - a) * (256 - a) / 256; }
 
@@ -74,6 +90,10 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
         gh = bar->h * TILT_GROW * e / 256000;
     bar->x -= gw / 2, bar->w += gw;
     bar->y += dir * TILT_LIFT * e / 256 - gh / 2, bar->h += gh;
+    /* never past its window's top, where the status row's window covers it: the first row's bar
+     * grows down there instead of being cut (tilt_clip widens the clip for the rest) */
+    int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window, on screen */
+    if (oy + bar->y < wy) bar->y = wy - oy;
     for (int i = TILT_SHADOW; i > 0; --i) { /* outermost first, each fainter */
         rect_t s = { bar->x - i, bar->y + i * 2 * e / 256, bar->w + 2 * i, bar->h + i };
         unsigned alpha = (unsigned)(TILT_SHADOW_A * e / 256 / (i + 1));
