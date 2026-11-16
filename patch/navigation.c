@@ -10269,8 +10269,9 @@ int ringnav(void *ctx, void *event) {
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);
         if (next == 0 || next == g_menu.rows - 1) drop_wheel();
-        if (next == id) { /* the list's end is its end: no wrap, no bump; the tug's lean
-                             (tilt.c) is the end's only feedback */
+        if (next == id) { /* a list ends at its ends: no wrap; the bar leans against the end
+                             (tilt.c) */
+            tilt_end(w, dir);
             stop_scroll(&g_menu);
             widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */
             return STOP;
