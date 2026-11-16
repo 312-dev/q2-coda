@@ -540,7 +540,7 @@ def test_adbd_tree_applies_debians_patches_mincrypt_and_the_q2_patch(tmp_path, c
                      (['patch', '-p1', '-i', 'q2-adbd.patch'], src, None, log)]
 
 
-def test_adbd_is_one_static_program(tmp_path, env, calls, monkeypatch):
+def test_adbd_is_one_program_against_glibc(tmp_path, env, calls, monkeypatch):
     src, stage, log = tmp_path/'src', tmp_path/'stage', tmp_path/'log'
     def tree(s, l):
         (s/'core/libmincrypt').mkdir(parents=True)
@@ -556,8 +556,8 @@ def test_adbd_is_one_static_program(tmp_path, env, calls, monkeypatch):
                               *thirdparty.ADBD_DEFINES, f'-I{src}/core/adbd', f'-I{src}/core/include', '-c',
                               src/'core/adbd/adb.c', '-o', src/'adbd-adb.o']
     assert compiles[-1][0][-3:] == [src/'core/libmincrypt/sha.c', '-o', src/'libmincrypt-sha.o']
-    assert link[0][:len(env.cc.split()) + 4] == [*env.cc.split(), '-static', '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd']
-    assert link[0][-1] == '-lpthread' and len(link[0]) == len(env.cc.split()) + 4 + n + 1
+    assert link[0][:len(env.cc.split()) + 3] == [*env.cc.split(), '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd']
+    assert link[0][-1] == '-lpthread' and len(link[0]) == len(env.cc.split()) + 3 + n + 1
     assert (stage/'mincrypt.NOTICE').read_text() == 'bsd' and (stage/'copyright').read_text() == 'apache'
 
 

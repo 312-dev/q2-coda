@@ -484,14 +484,15 @@ def validate_assets(directory):
         assert remote[36:40] == helper[36:40]
         expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
         assert b'q2-wheel.log' in demo
-        # adbd (docs/adb.md): a static ELF with the stock binaries' ABI flags, its gadget script, stock's USB scripts
-        # wrapped and kept beside the wrappers
+        # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
+        # scripts wrapped and kept beside the wrappers
         adbd = read('rootfs.squashfs', ADBD)
         assert sha(adbd) == manifest['adbd']['sha256'] and len(adbd) == manifest['adbd']['bytes'] and adbd[:4] == b'\x7fELF'
-        phoff, = struct.unpack_from('<I', adbd, 28)
-        phentsize, phnum = struct.unpack_from('<HH', adbd, 42)
-        static = all(struct.unpack_from('<I', adbd, phoff + i * phentsize)[0] != 3 for i in range(phnum))  # no PT_INTERP
-        assert adbd[36:40] == helper[36:40] and static
+        (directory/'adbd-check').write_bytes(adbd)
+        dynamic = subprocess.run(['readelf', '-dl', str(directory/'adbd-check')], capture_output=True, text=True, check=True).stdout
+        (directory/'adbd-check').unlink()
+        assert adbd[36:40] == helper[36:40] and '[Requesting program interpreter: /lib/ld-linux-mipsn8.so.1]' in dynamic
+        assert sorted(re.findall(r'\(NEEDED\)\s+Shared library: \[(.+)\]', dynamic)) == ['libc.so.6', 'libpthread.so.0']
         assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)

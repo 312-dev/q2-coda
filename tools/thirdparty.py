@@ -468,8 +468,9 @@ def adbd_tree(src, log):
 
 
 def build_adbd(src, stage, env, log):
-    # One static program, -Os and its unused sections dropped, against the toolchain's glibc: nothing in the
-    # rootfs to load, nothing in it that adbd could break.
+    # -Os, unused sections dropped, linked against the toolchain's glibc 2.28, which is the rootfs's own build
+    # (libc.so.6 and libpthread.so.0 alone): about 64 KB. Static, the same program is 617 KB, which the rootfs
+    # has no room for.
     adbd_tree(src, log)
     objs = []
     for d, names in ADBD_SOURCES.items():
@@ -479,7 +480,7 @@ def build_adbd(src, stage, env, log):
                 *ADBD_DEFINES, f'-I{src}/core/adbd', f'-I{src}/core/include', '-c', src/'core'/d/f'{n}.c', '-o', objs[-1],
                 cwd=src, log=log)
     (stage/'usr/bin').mkdir(parents=True)
-    run(*env.cc.split(), '-static', '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd', *objs, '-lpthread', cwd=src, log=log)
+    run(*env.cc.split(), '-Wl,--gc-sections', '-o', stage/'usr/bin/adbd', *objs, '-lpthread', cwd=src, log=log)
     shutil.copy(src/'core/libmincrypt/NOTICE', stage/'mincrypt.NOTICE')
     shutil.copy(src/'debian/copyright', stage/'copyright')
 

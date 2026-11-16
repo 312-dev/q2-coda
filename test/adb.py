@@ -191,7 +191,7 @@ class Adbd:
         self.p = subprocess.Popen(['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc',
                                    '--tmpfs', '/mnt', *mmc, '--bind', str(data), '/mnt/data', '--dir', '/dev/usb-ffs',
                                    '--bind', str(self.ffs), '/dev/usb-ffs/adb', '--bind', str(work/'tmp'), '/tmp',
-                                   '--die-with-parent', qemu, str(adbd)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   '--die-with-parent', *qemu, str(adbd)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         end = time.monotonic() + 20
         while (self.ffs/'ep0').stat().st_size == 0 and time.monotonic() < end and self.p.poll() is None:
             time.sleep(.05)
@@ -464,22 +464,26 @@ def main(argv):
         i = args.index('--qemu'); qemu = args[i + 1]; del args[i:i + 2]
     gadget_checks()
     wrapper_checks()
-    if args:
+    if args:  # BUILD's adbd, with BUILD's libraries
         build = pathlib.Path(args[0])
+        image = build/'rootfs.squashfs'
         adbd = build/'adbd'
-        out = subprocess.run(['unsquashfs', '-cat', str(build/'rootfs.squashfs'), 'usr/bin/adbd'], capture_output=True, check=True).stdout
-        adbd.write_bytes(out)
-    else:
+        adbd.write_bytes(subprocess.run(['unsquashfs', '-cat', str(image), 'usr/bin/adbd'], capture_output=True, check=True).stdout)
+        libs = pathlib.Path.home()/'.cache/q2-adb-test'/hashlib.sha256(image.read_bytes()).hexdigest()[:16]
+        if not (libs/'lib').is_dir():
+            shutil.rmtree(libs, ignore_errors=True)
+            subprocess.run(['unsquashfs', '-q', '-no-xattrs', '-d', str(libs), str(image), 'lib'], check=True, capture_output=True)
+    else:  # the cached one, with the toolchain's glibc (the rootfs's own build)
         import thirdparty
         adbd = thirdparty.build('adbd')/'usr/bin/adbd'
+        libs = thirdparty.toolchain().parent/'sysroot/mipsel-r2-hard-nan2008'
     if not qemu:
         print('no qemu-mipsel: adbd not run')
         failures.append('qemu-mipsel')
     else:
-        adbd_checks(qemu, adbd)
+        adbd_checks([qemu, '-L', str(libs)], adbd)
     print(f'{len(failures)} failed' if failures else 'all passed')
     return 1 if failures else 0
-
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
