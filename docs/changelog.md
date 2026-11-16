@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: Q2 Muse Remote can browse and play your Favorites (hearted songs) and Recently Added (the 100 newest songs) from the Q2 Muse.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Centre cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".

@@ -151,3 +151,53 @@ def test_a_server_album_lists_its_songs_in_track_order(lib, tmp_path):
     q2 = Q2(lib, tmp_path, server=SERVER)
     album, = [i for i in q2.browse('albums')['items'] if i['title'] == 'Third']
     assert titles(q2.browse(album['id'])) == ['Echo', 'Foxtrot']
+
+
+def test_the_library_offers_favorites_and_recently_added_after_folders(q2):
+    lib = q2.browse('library')
+    assert [i['id'] for i in lib['items']][-3:] == ['dir:', 'favorites', 'recent'] and lib['total'] == 9
+    favorites, recent = lib['items'][-2:]
+    assert (favorites['title'], favorites['icon'], favorites['browsable']) == ('Favorites', 8, True)
+    assert (recent['title'], recent['icon'], recent['browsable']) == ('Recently Added', 9, True)
+
+
+def test_favorites_lists_the_hearted_songs_in_the_tracks_orders(q2):
+    fav = q2.browse('favorites')
+    assert fav['title'] == 'Favorites' and fav['total'] == 2 and titles(fav) == ['Bravo', 'Charlie']
+    assert [i['id'] for i in fav['items']] == ['song:t2', 'song:t3'] and all(i['playable'] for i in fav['items'])
+    assert fav['sorts'] == ['title', 'artist', 'album', 'added'] and fav['actions'] == [1, 2]  # Play, Shuffle
+    assert titles(q2.browse('favorites', sort='added')) == ['Charlie', 'Bravo']  # newest first
+    assert q2.play('favorites') == ['2', '3']
+
+
+def test_favorites_with_none_hearted_is_an_empty_list(lib, tmp_path):
+    q2 = Q2(lib, tmp_path, favs=())
+    assert q2.browse('favorites')['total'] == 0 and q2.play('favorites') == 'NOT_FOUND'
+
+
+def test_recently_added_is_the_newest_songs_newest_first(q2):
+    recent = q2.browse('recent')
+    assert recent['title'] == 'Recently Added' and titles(recent) == ['Delta', 'Charlie', 'Bravo', 'Alpha']
+    assert recent['sorts'] == [] and recent['actions'] == [1, 2]
+    assert q2.play('recent') == ['4', '3', '2', '1']
+
+
+def test_recently_added_stops_at_its_cap_with_no_letters(lib, tmp_path):
+    many = [(i, f'c/{i}.flac', f'Song {i:03}', 'Cat', 'Big', i) for i in range(1, 151)]
+    q2 = Q2(lib, tmp_path, songs=many, favs=())
+    recent = q2.browse('recent', limit=100)
+    assert recent['total'] == 100 and len(recent['items']) == 100  # RECENT_CAP, and no buckets past SPLIT (120)
+    assert recent['items'][0]['title'] == 'Song 150' and recent['items'][-1]['title'] == 'Song 051'
+    assert len(q2.play('recent')) == 100
+
+
+def test_the_proto_names_the_lists_bits_and_icons_as_the_c_does():
+    proto = (ROOT / 'remote/coda-rc.proto').read_text()
+    header, c = (PATCH / 'coda_rc.h').read_text(), (PATCH / 'coda_rc_lib.c').read_text()
+    for name, value in (('CAP_FAVORITES', 2048), ('CAP_RECENT', 4096)):
+        assert f'  {name} = {value};' in proto and re.search(rf'#define {name} {value}u', header)
+    for name, value in (('ICON_FAVORITES', 8), ('ICON_RECENT', 9)):
+        assert f'  {name} = {value};' in proto and re.search(rf'#define {name}_ {value}\b', c)
+    daemon = (PATCH / 'coda_rc.c').read_text()
+    caps = daemon[daemon.index('uint32_t crc_caps(void)'):]
+    assert 'CAP_FAVORITES' in caps[:400] and 'CAP_RECENT' in caps[:400]  # always served: the library alone

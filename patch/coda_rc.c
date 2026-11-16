@@ -247,7 +247,7 @@ int crc_shim_alive(void) {
 }
 
 uint32_t crc_caps(void) {
-    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS |
+    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
            (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }

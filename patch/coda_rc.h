@@ -46,6 +46,8 @@ enum {
 #define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
 #define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
+#define CAP_FAVORITES 2048u /* the library's favorites node */
+#define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;

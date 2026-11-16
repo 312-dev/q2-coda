@@ -123,7 +123,7 @@ Labels are ASCII with no terminator; `||` is concatenation. `tools/coda_rc_crypt
 - `Hello.proto_version` is the highest version the client speaks; `HelloResp.proto_version` is the one the session uses, and `min_version` the oldest the device still speaks. A client older than `min_version` gets `Error{VERSION}` and the session closes. This is version 1.
 - Within a version, change is additive: new frame types, new fields, new enum values. Readers skip unknown fields and treat unknown enum values as their zero value. An unknown frame type gets `Error{UNSUPPORTED}` and the session goes on.
 - `HelloResp.caps` says what this Q2 serves (`Capability` in the proto): a Q2 without the play shim, or whose demo is not answering it, leaves `CAP_PLAY` clear, and the app greys out Play rather than failing.
-- Commands added within version 1 come with a capability bit, so a phone and a Q2 of different ages still work together: `SetMode` (`CAP_MODES`), `Rate` with `NowPlaying.hearts` and `rateable` (`CAP_RATE`), `PlayQueueItem` (`CAP_QUEUE_JUMP`), and `Play.resume` with the playlists' `ACTION_RESUME` (`CAP_RESUME`). An older Q2 leaves the bits clear and answers the frames `UNSUPPORTED`; the app then hides the car's Shuffle, Repeat and heart buttons, leaves the queue untappable and shows no Resume row, as before. An older app never sends them and ignores the new fields. All four need demo's shim, as Play does: they are clear when it is not answering. See [Modes, rating, the queue and Resume](#modes-rating-the-queue-and-resume).
+- Commands and lists added within version 1 come with a capability bit, so a phone and a Q2 of different ages still work together: `SetMode` (`CAP_MODES`), `Rate` with `NowPlaying.hearts` and `rateable` (`CAP_RATE`), `PlayQueueItem` (`CAP_QUEUE_JUMP`), and `Play.resume` with the playlists' `ACTION_RESUME` (`CAP_RESUME`). An older Q2 leaves the bits clear and answers the frames `UNSUPPORTED`; the app then hides the car's Shuffle, Repeat and heart buttons, leaves the queue untappable and shows no Resume row, as before. An older app never sends them and ignores the new fields. All four need demo's shim, as Play does: they are clear when it is not answering. See [Modes, rating, the queue and Resume](#modes-rating-the-queue-and-resume).
 - A change that cannot be additive (a new frame layout, a new key schedule) is a new `proto_version`. The labels carry the version (`"coda-rc pake v1"`), so a v2 key schedule never collides with v1.
 
 ## Modes, rating, the queue and Resume
@@ -136,6 +136,15 @@ Each goes to demo's shim as one line in `/tmp/coda-rc.cmd`, as Transport does, a
 - **Play with `resume`** carries on a list where it was left. The daemon remembers, for each list a phone played (not shuffled), the song it was on, in `/mnt/data/coda-rc/places` (the 16 most recent lists). If the Q2's queue is still that list's, Resume is Play; otherwise the list starts again from that song, and the Q2's Resume Songs takes a long song back to its place. A list never played from a phone starts at its first song. The app offers it as the playlists' Resume row (`ACTION_RESUME`), as Symfonium does.
 
 There is no song radio to start: the Q2's Internet Radio plays stations, not songs like the one playing.
+
+## Favorites and Recently Added
+
+The Library level lists two more nodes after Folders, each a flat list of songs that Play and Shuffle take whole:
+
+- **Favorites** (`favorites`, `CAP_FAVORITES`, `ICON_FAVORITES`): the hearted songs, stock's My Fav (five hearts, [Ratings](internals.md#ratings)), in the tracks' orders (Title first, then Artist, Album and Recently added), lettered past 120 as Tracks is. It can be empty.
+- **Recently Added** (`recent`, `CAP_RECENT`, `ICON_RECENT`): the 100 songs added to the library last, newest first, in that one order and never lettered.
+
+A Q2 without the bits answers either id `NOT_FOUND` and does not list it, so the app shows its Favorites tab only when `CAP_FAVORITES` is set. ponytail: Most Played is not served. Its counts are demo's (`/mnt/data/ringnav-plays`, keyed by `listen_key`, a hash of each path, `patch/navigation.c`); serving it means the daemon reading that record and hashing each song's path the same way.
 
 ## Errors
 

@@ -19,6 +19,7 @@
 #define SERVER_ID 0x40000000 /* catalogue.c: server song ids start here */
 #define PLACES "/mnt/data/coda-rc/places" /* "rid key" a line, the most recent first */
 #define PLACES_MAX 16
+#define RECENT_CAP 100    /* Recently Added: the newest songs, at most this many */
 
 /* ---- small helpers ---- */
 
@@ -334,6 +335,8 @@ static const sort_t IN_ALBUM_SORTS[] = {{"track", "Track order"}, {"title", "Tit
 static const sort_t PL_SORTS[] = {{"order", "Playlist order"}, {"title", "Title"}, {"artist", "Artist"},
                                   {"album", "Album"}, {0, 0}};
 static const sort_t PLS_SORTS[] = {{"order", "Q2 order"}, {"name", "Name"}, {0, 0}};
+static const sort_t FAV_SORTS[] = {{"title", "Title"}, {"artist", "Artist"}, {"album", "Album"},
+                                   {"added", "Recently added"}, {0, 0}};
 
 /* a song's row outside an album: no number (Item.number is the track number in an album) */
 #define TRACK_ITEM "'song:'||sid c0, title c1, artist c2, ak c3, 0 c4, 0 c5, secs c6, 0 c7, 0 c8"
@@ -347,6 +350,8 @@ static const sort_t PLS_SORTS[] = {{"order", "Q2 order"}, {"name", "Name"}, {0, 
 #define ICON_GENRES_ 5
 #define ICON_YEARS_ 6
 #define ICON_FOLDERS_ 7
+#define ICON_FAVORITES_ 8
+#define ICON_RECENT_ 9
 
 /* A list: rows of `src` (item columns then bk, the bucket key, or null) in `order`, with its bucket filter. */
 typedef struct {
@@ -421,6 +426,22 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0") " from s2 where %s", bk, where);
+    } else if (!strcmp(kind, "favorites")) {
+        /* the hearted songs: stock's My Fav (five hearts, docs/internals.md#ratings), by path */
+        l->sorts = FAV_SORTS;
+        l->actions = 3;
+        l->sort = pick(l->sorts, sort)->key;
+        l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
+        snprintf(l->title, sizeof l->title, "Favorites");
+        snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0")
+                 " from s2 where url in (select fileurl from main.myfav)", bk);
+    } else if (!strcmp(kind, "recent")) {
+        /* the RECENT_CAP songs added last, newest first; one order, so no letters */
+        l->actions = 3;
+        l->order = "-added, nt";
+        snprintf(l->title, sizeof l->title, "Recently Added");
+        snprintf(l->src, sizeof l->src, "select * from (select " TRACK_ITEM TAIL("null", "0")
+                 " from s2 order by added desc, nt limit %d)", RECENT_CAP);
     } else if (!strcmp(kind, "album")) {
         l->sorts = IN_ALBUM_SORTS;
         l->sort = pick(l->sorts, sort)->key;
@@ -563,9 +584,11 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
             {"tracks", "Tracks", 0, 0, 0, ICON_TRACKS_, 1, 0, 0, 0}, {"playlists", "Playlists", 0, 0, 0, ICON_PLAYLISTS_, 1, 0, 0, 0},
             {"artists", "All artists", 0, 0, 0, ICON_ARTISTS_, 1, 0, 0, 0}, {"albums", "Albums", 0, 0, 0, ICON_ALBUMS_, 1, 0, 0, 0},
             {"genres", "Genres", 0, 0, 0, ICON_GENRES_, 1, 0, 0, 0}, {"years", "Years", 0, 0, 0, ICON_YEARS_, 1, 0, 0, 0},
-            {"dir:", "Folders", 0, 0, 0, ICON_FOLDERS_, 1, 0, 0, 0}};
+            {"dir:", "Folders", 0, 0, 0, ICON_FOLDERS_, 1, 0, 0, 0},
+            {"favorites", "Favorites", 0, 0, 0, ICON_FAVORITES_, 1, 0, 0, 0},
+            {"recent", "Recently Added", 0, 0, 0, ICON_RECENT_, 1, 0, 0, 0}};
         static const item_t top = {"library", "Library", 0, 0, 0, 0, 1, 0, 0, 0};
-        int root_ = node[0] == 'r', total = root_ ? 1 : 7;
+        int root_ = node[0] == 'r', total = root_ ? 1 : (int)(sizeof lib / sizeof *lib);
         pb_str(&w, 2, root_ ? "Q2" : "Library");
         pb_varint(&w, 3, total);
         pb_varint(&w, 4, offset);
