@@ -612,15 +612,22 @@ static int card_destructive(int row) {
     return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
 }
 
-/* The card's height and top, and where its switch row and answers start (screen y). */
+/* The card's height and top, and where its switch row and answers start (screen y). A glyph
+ * that would take the card past CARD_TOP to CARD_FOOT goes (a guest's pairing: two body lines,
+ * the code and three answers), so the card shows whole. */
 static void card_body(const char *s);
 static void card_layout(void) {
-    int h = CARD_PAD_TOP + CARD_TITLE_H + (cf.c.glyph ? CARD_GLYPH + CARD_GLYPH_GAP : 0);
-    if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
-    if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
-    int rows = h + CARD_ROWS_GAP;
-    h = rows + card_items() * CARD_ROW + (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) +
-        CARD_PAD_FOOT;
+    int h = 0, rows = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        h = CARD_PAD_TOP + CARD_TITLE_H + (cf.c.glyph ? CARD_GLYPH + CARD_GLYPH_GAP : 0);
+        if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
+        if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
+        rows = h + CARD_ROWS_GAP;
+        h = rows + card_items() * CARD_ROW +
+            (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) + CARD_PAD_FOOT;
+        if (h <= CARD_FOOT - CARD_TOP || !cf.c.glyph) break;
+        cf.c.glyph = (const char *)0;
+    }
     int top = CARD_CY - h / 2;
     if (top + h > CARD_FOOT) top = CARD_FOOT - h;
     if (top < CARD_TOP) top = CARD_TOP;

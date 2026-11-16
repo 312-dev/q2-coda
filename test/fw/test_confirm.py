@@ -174,3 +174,19 @@ def test_the_pairing_ends_with_the_phone_named(fw, ui, st):
     fw.fn('pair_done', None, C.c_int)(1)
     fw.fn('pair_done', None, C.c_int)(0)
     assert ui.toasts[-2:] == ['Paired with Pixel 10 Pro', 'Pairing failed']
+
+
+def test_a_guests_pairing_drops_the_glyph_rather_than_run_past_the_screen(fw, ui, st):
+    """A guest's pairing (two body lines, the code, three answers) is 282 px with the glyph, past the 258 px between
+    the status row and the glass's foot (y 44 to 302): the glyph goes, so the card (248 px) shows whole."""
+    theme(fw)
+    card = Card(fw, ui)
+    rows = (C.c_char_p * 3)(b'Allow Once', b'Always Allow', b'Decline')
+    card.rows = rows
+    fw.fn('pair_prompt', C.c_void_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int, C.c_int, C.c_int,
+          C.c_int, ANSWER, C.c_void_p)(b"Alex's Pixel", b'482913', b"Wants to play music.\nCheck it's on Alex's phone.",
+                                       rows, 3, 2, 30000, 2, card.answer, None)
+    canvas = card.paint()
+    h = 18 + 24 + 4 + 2 * 19 + 6 + 40 + 14 + 3 * 32 + 8
+    (box,) = [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291]
+    assert box[3] == h and 44 <= box[1] and box[1] + box[3] <= 302

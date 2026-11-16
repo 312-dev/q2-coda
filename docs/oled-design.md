@@ -623,7 +623,8 @@ A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or 
 (`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
 
 - The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
-  as it names itself, scrolling when long; never cut short in the status row.
+  as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
+  glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
 - What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
   music. Check it's on Alex's phone."
 - The code large, Inter Medium 30, as two groups of three ("242 610").
