@@ -259,6 +259,17 @@ TILE_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
+# Control Center's glyphs (control_center.c cc_glyph, from mock_cc3.py): fill, white on its toggles, tiles and transport
+# (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
+CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
+            'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
+            'sun': ('sun-fill', 18, 0x1c1c1e), 'speaker': ('speaker-high-fill', 18, 0x1c1c1e),
+            'lock': ('lock-simple-fill', 22, 0xffffff), 'timer': ('timer-fill', 22, 0xffffff),
+            'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
+            'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
+            'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
+            'play': ('play-fill', 30, 0xffffff)}
+
 # A card app's sign-in steps on its QR page (addon.c qr_paint, the state file's step): fill, white on the step's solid
 # circle (the done check bold), at the mode page's glyph size.
 SIGNIN_PX = 44
@@ -320,14 +331,6 @@ def png(w, h, rgba):
         return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data))
     rows = b''.join(b'\0' + rgba[y * 4 * w:(y + 1) * 4 * w] for y in range(h))
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b'')
-
-
-# Quick Settings' buttons that are on, by stock's image name (QS_LIT, stock.h): navigation.c quick_state reads a
-# switch row's state from it.
-QS_ON = ('wifiopen', 'btopen', 'keylockopen', 'highgain', 'lo', 'usbaudio', 'usbdac')
-def qs_lit():
-    """QS_LIT: the names whose button is on, NUL-separated, for navigation.c."""
-    return ''.join(f'drop_{n}\\0' for n in QS_ON)
 
 
 # A coverage table per radius of the round boxes the painter draws a row at a time (navigation.c paint_round_rows): their
@@ -489,6 +492,7 @@ def images(t):
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_signin_{n}': phosphor(g, SIGNIN_PX, 0xffffff) for n, g in SIGNIN_STEPS.items()}
+    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in USB_MODES.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}

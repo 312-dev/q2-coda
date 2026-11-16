@@ -21,15 +21,6 @@ def pixels(data):
     return w, h, lambda x, y: tuple(raw[y * (4 * w + 1) + 1 + 4 * x + i] for i in range(4))
 
 
-# Stock's quick settings images, every drop_ name its demo sets (strings demo | grep '^drop_').
-QS_LIT = {'wifiopen', 'btopen', 'keylockopen', 'highgain', 'lo', 'usbaudio', 'usbdac'}
-QS_NAMES = ('wifi', 'wifiopen', 'bt', 'btopen', 'keylock', 'keylockopen', 'lowgain', 'lowgaindisable', 'highgain', 'highgaindisable', 'lo', 'po', 'sa', 'usbstorage', 'usbaudio', 'usbdac', 'playset', 'sysset')
-
-
-def test_quick_settings_lit_names_are_the_on_buttons():
-    assert art.qs_lit() == ''.join(f'drop_{n}\\0' for n in art.QS_ON) and set(art.QS_ON) == QS_LIT and QS_LIT <= set(QS_NAMES)
-
-
 def test_sort_is_three_white_bars():
     w, h, at = pixels(art.images(theme.builtins()[0])['sort_bars'])
     assert (w, h) == (16, 12)

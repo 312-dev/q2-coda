@@ -2110,9 +2110,8 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     check(len(themes) == 1, f'{len(themes)} built-in themes: the payload has one (theme_engine.c theme())')
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c theme()
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
-    from art import corner_table, qs_lit
+    from art import corner_table
     header.append(f'#define ROUND_COVER {corner_table()}')  # navigation.c paint_round_rows
-    header.append(f'#define QS_LIT "{qs_lit()}"')  # navigation.c quick_state: the buttons that are on
     return '\n'.join(header)+'\n'
 
 def signing_key(path, dev):

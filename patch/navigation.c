@@ -5173,7 +5173,6 @@ int bar_title_fits(void *label) {
  * Home's art is also checked when Home is painted under another window. */
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
-    quick_fill(w);
     confirm_prompt(w, canvas);
     feedback_toast_paint(w, canvas); /* the toast's pill */
     album_tile(w);
@@ -9815,34 +9814,6 @@ static int edit_single(const void *info) {
     return 0;
 }
 
-/* OLED's Quick Settings (quick_rows): the wheel walks the rows, past a disabled one, stopping at
- * the ends. */
-static void quick_walk(void *win, int dir) {
-    unsigned text[24];
-    int on, r = widget_get_prop_int(win, QS_ROW_AT, 0), next = r + dir;
-    while (next > 0 && next < QS_ROWS && quick_state(win, next, text, &on)) next += dir;
-    if (next < 0 || next >= QS_ROWS || next == r) return;
-    widget_set_prop_int(win, QS_ROW_AT, next);
-    widget_invalidate_force(win, (void *)0);
-}
-/* Centre on Brightness takes the wheel to its slider and back; on another row it clicks the row's
- * button, as a tap does: a switch flips, a value steps to its next. Return while adjusting goes
- * back to the rows. 0 leaves the key to close the page. */
-static int quick_rows_key(void *win, unsigned key) {
-    int r = widget_get_prop_int(win, QS_ROW_AT, 0), adjust = widget_get_prop_int(win, QS_ADJUST, 0),
-        on;
-    unsigned text[24];
-    if (key == KEY_RETURN && !adjust) return 0;
-    if (key == KEY_RETURN || !r) {
-        widget_set_prop_int(win, QS_ADJUST, !adjust);
-    } else if (!quick_state(win, r, text, &on)) {
-        void *icon = widget_lookup(win, qs_row_icons[r], 1);
-        unsigned click[12];
-        if (icon) stock_dispatch_trampoline(icon, pointer_event_init(click, EVT_CLICK, icon, 0, 0));
-    }
-    widget_invalidate_force(win, (void *)0);
-    return 1;
-}
 static int edit_key(void *top, unsigned key) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     int quick = top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog");
@@ -10058,8 +10029,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
     if (usable() && kb_wheel_key(key)) return STOP;
-    /* Return or Centre closes quick settings, as its swipe up does (dialog_quit), but on OLED's
-     * rows (quick_rows_key) Centre acts on the row and Return leaves Brightness's slider first;
+    /* Return or Centre closes quick settings, as its swipe up does (dialog_quit), but on Control
+     * Center (control_center.c cc_key) Centre acts on the stop and Return leaves a slider first;
      * stock leaves Return to its Home button and Centre to turning the screen off. A held Return's
      * release goes to the stock filter, which consumes its latch (the hold closed it itself,
      * compact_now_playing). */

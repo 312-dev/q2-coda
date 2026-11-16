@@ -1111,7 +1111,6 @@ const char *const h_zones[] = TIMEZONE_NAMES;
 const char *const h_cities[] = TIMEZONE_CITIES;
 const int h_order[] = TIMEZONE_ORDER;
 const char h_icons[] = SETTINGS_ICON_NAMES;
-const char h_lit[] = QS_LIT;
 const unsigned char *const h_context[] = {{{', '.join(build.CONTEXT_DATA)}}};
 const unsigned char *const h_round[] = ROUND_COVER;
 const unsigned short h_medium[] = INTER_MEDIUM_RANGES;
@@ -1120,7 +1119,7 @@ const unsigned char h_fallback[FONT_N] = FONT_FALLBACK, h_pct[FONT_N] = FONT_FAL
 const unsigned short h_ranges[] = FONT_RANGES, h_at[FONT_N + 1] = FONT_RANGE_AT;
 const int h_inter[] = {{FONT_INTER, FONT_INTER_MEDIUM}};
 const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cities / sizeof *h_cities,
-    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_lit, sizeof h_round / sizeof *h_round, sizeof h_medium / sizeof *h_medium}};
+    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_round / sizeof *h_round, sizeof h_medium / sizeof *h_medium}};
 ''')
     subprocess.run(['clang', '-shared', '-fPIC', '-std=c11', '-Wall', '-Wextra', '-Werror', str(tmp_path/'h.c'), '-o', str(tmp_path/'h.so')],
                    check=True)
@@ -1128,7 +1127,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
 
     def array(kind, name, n):
         return list((kind * n).in_dll(lib, name))
-    zones, cities, order, icons, lit, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 7)
+    zones, cities, order, icons, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 6)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
         build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Pod', build.VERSION, build.REPO, f'Q2Pod/{build.VERSION} (https://github.com/{build.REPO})']
@@ -1141,11 +1140,10 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     order = array(ctypes.c_int, 'h_order', order)
     rows = [(build.timezone_offset(build.TIMEZONES[i][0]), build.TIMEZONES[i][0]) for i in order]
     assert sorted(order) == list(range(len(build.TIMEZONES))) and rows == sorted(rows)
-    # named_in's lists: NUL-separated names, an empty one last
-    icons, lit = ((ctypes.c_char * n).in_dll(lib, name).raw for n, name in ((icons, 'h_icons'), (lit, 'h_lit')))
+    # named_in's list: NUL-separated names, an empty one last
+    icons = (ctypes.c_char * icons).in_dll(lib, 'h_icons').raw
     assert icons.endswith(b'\0\0') and all(n.endswith('.png') for n in ipod.SETTINGS_ICONS)
     assert sorted(icons[:-2].split(b'\0')) == sorted(n.removesuffix('.png').encode() for n in ipod.SETTINGS_ICONS)
-    assert lit.endswith(b'\0\0') and lit[:-2].split(b'\0') == [f'drop_{n}'.encode() for n in art.QS_ON]
     assert array(ctypes.c_void_p, 'h_context', len(build.CONTEXT_DATA)) == [0x700000 + 16 * i for i in range(len(build.CONTEXT_DATA))]
     # by radius: r rows of r pixels for each corner, NULL between
     assert rounds == max(art.CORNERS) + 1
