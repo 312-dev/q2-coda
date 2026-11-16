@@ -1935,7 +1935,7 @@ def test_oled_draws_the_menu_as_the_inset_modal(fw, ui, st, recs, mcl):
 
 
 def test_oled_menu_on_songs_has_no_sorting_row(fw, ui, st, recs, mcl):
-    """Songs (0xf001), whose action row holds stock's Sort: its order is Settings > Library > Sorting's, so the menu
+    """Songs (0xf001), whose action row holds stock's Sort: its order is Playback > Library > Sorting's, so the menu
     starts with its actions and opens on Play Next."""
     use_set(st, 'oled')
     hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])

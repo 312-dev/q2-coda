@@ -101,10 +101,10 @@ def test_ipod_home():
     assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', None, 'Folders', 'Cover Flow', 'Search', 'Settings']
     assert [r[3][1][2]['name'] for r in rows][2:6] == ['img_stream', 'img_folder', 'img_cover_flow', 'img_home_search']
     sets = root[3][2][3][0][3]
-    assert [r[2]['name'] for r in sets] == ['btn_set_wifi', 'btn_set_bt', 'btn_sysset', 'btn_playset', 'btn_set_library',
-                                            'btn_set_car', 'btn_set_display', 'btn_set_controls', 'btn_set_power']
-    assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Library', 'Car Remote',
-                                                  'Display', 'Controls', 'Battery']
+    assert [r[2]['name'] for r in sets] == ['btn_set_wifi', 'btn_set_bt', 'btn_sysset', 'btn_playset', 'btn_set_car',
+                                            'btn_set_display', 'btn_set_controls', 'btn_set_power']
+    assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Car Remote', 'Display',
+                                                  'Controls', 'Battery']
     carousel = root[3][3]
     assert [c[2]['name'] for c in carousel[3]] == ['btn_playing', 'btn_localmusic', 'btn_coverflow', 'btn_folder', 'btn_rockbox',
                                                    'btn_stream', 'btn_playset', 'btn_sysset']

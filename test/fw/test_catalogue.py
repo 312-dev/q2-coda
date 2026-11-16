@@ -1375,6 +1375,6 @@ def test_a_needslib_row_needs_streaming_songs_and_asks_to_turn_it_on(rig, source
     asks = Asks(rig.fw, answer)
     assert rig.fw.fn('library_needs', C.c_int)() == on
     assert asks.seen == ([] if source else [('Show streaming songs?', 'Show in Library needs Streaming Songs on\n'
-                                             '(Settings > Library > Streaming Songs).')])
+                                             '(Settings > Playback > Library).')])
     assert source_writes(rig.fw) == ([1] if on and not source else [])
     assert rig.files.files[LIBRARY] == (b'server\n' if on else b'local\n')

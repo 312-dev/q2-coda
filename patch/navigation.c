@@ -2824,8 +2824,8 @@ int ringnav_quick_settings(void *win, void *ctx) {
  */
 /* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
-/* Settings > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add to
- * On-The-Go; on unless the key says 0. */
+/* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
+ * to On-The-Go; on unless the key says 0. */
 static int otg_on __attribute__((section(".scratch")));
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -3144,28 +3144,15 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
     for (unsigned i = 0; i < n; i++) widget_restack(rows[order[i]], i);
 }
 
-/* Everyday listening, what plays next, the Sleep Timer, level, channels, then specialist output
- * controls. Stock's rows 0-10 (ringnav_audioset drops its Volume and Album Display and Folder
- * skip), then ours as built. */
+/* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
+ * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
+ * and Album Display and Folder skip), then ours as built. */
 static const unsigned char playset_order[] = {
-    3 /* Play Mode */,
-    2 /* EQ */,
-    7 /* Gapless */,
-    11 /* Crossfade */,
-    6 /* Memory play */,
-    12 /* Resume Songs */,
-    8 /* Headphones required */,
-    15 /* Sleep Timer */,
-    16 /* Max Volume */,
-    17 /* Default Vol */,
-    0 /* Gain */,
-    9 /* ReplayGain */,
-    10 /* Balance */,
-    13 /* Mono Audio */,
-    14 /* Swap L/R */,
-    1 /* Filters */,
-    4 /* DSD Output */,
-    5 /* USB Audio */,
+    2 /* EQ */,           18 /* Library */,    3 /* Play Mode */,     7 /* Gapless */,
+    11 /* Crossfade */,   6 /* Memory play */, 12 /* Resume Songs */, 8 /* Headphones required */,
+    15 /* Sleep Timer */, 16 /* Max Volume */, 17 /* Default Vol */,  0 /* Gain */,
+    9 /* ReplayGain */,   10 /* Balance */,    13 /* Mono Audio */,   14 /* Swap L/R */,
+    1 /* Filters */,      4 /* DSD Output */,  5 /* USB Audio */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -3242,7 +3229,7 @@ static int root_click(void *ctx, void *event) {
     root_text(name);
     return 0;
 }
-/* Settings > Library > Folders' Folder Root row (library_settings.c) */
+/* Playback > Library > Folders' Folder Root row (library_settings.c) */
 void *folder_root_row(void *view) {
     char name[256];
     root_read(name);
@@ -3258,7 +3245,7 @@ static int to_page(void *ctx, void *event) {
     navigator_to((const char *)ctx);
     return 0;
 }
-/* Settings > Library and its pages (library_settings.c) open stock's Playback page again (as
+/* Playback > Library and its pages (library_settings.c) open stock's Playback page again (as
  * Display's sub-pages do), playset_sub naming the page while its init runs, with the page's rows
  * instead of stock's: Folders keeps stock's Folder skip (12), the others none. Playback itself
  * drops stock's Volume and Album Display (11) and Folder skip; Album Display's rows are elsewhere,
@@ -3302,6 +3289,8 @@ int ringnav_audioset(void *win, void *ctx) {
     widget_set_tr_text(
         list_row_into(view, "playset_bootvol", to_page, (void *)"playset/bootvol_page"),
         "playset_bootvol");
+    widget_set_text_utf8(
+        list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);
     return result;
 }
@@ -5046,7 +5035,7 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
-    /* the inset modal's set orders Songs from Settings > Library > Sorting (library_settings.c):
+    /* the inset modal's set orders Songs from Playback > Library > Sorting (library_settings.c):
      * the bars stay, hidden */
     if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
@@ -6044,25 +6033,21 @@ int ringnav_display(void *win, void *ctx) {
 }
 
 /* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
- * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Library (library_settings.c), Car
- * Remote, Display, Controls and Battery, which General (stock's System page, ringnav_systemset)
- * held. Here, as display_open is. */
+ * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
+ * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
 static int set_open(void *ctx, void *event) {
     int i = (int)(long)ctx;
-    if (i == 2) return library_open((void *)LIB_LIBRARY, event);
-    if (i == 3) return carremote_open(0, event);
-    if (i == 5) return display_open((void *)DISPLAY_CONTROLS, event);
-    static const char *const pages[] = {
-        "systemset/wifi_page",        "systemset/bluetooth_page", 0, 0, "systemset/display_page", 0,
-        "systemset/powermanager_page"
-    };
+    if (i == 2) return carremote_open(0, event);
+    if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
+    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
+                                         "systemset/display_page", 0,
+                                         "systemset/powermanager_page" };
     navigator_to(pages[i]);
     return 0;
 }
 void home_sets_bind(void *win) {
-    static const char *const names[] = { "img_set_wifi", "img_set_bt",      "img_set_library",
-                                         "img_set_car",  "img_set_display", "img_set_controls",
-                                         "img_set_power" };
+    static const char *const names[] = { "img_set_wifi",    "img_set_bt",       "img_set_car",
+                                         "img_set_display", "img_set_controls", "img_set_power" };
     for (unsigned i = 0; i < sizeof names / sizeof *names; ++i)
         widget_on(widget_lookup(win, names[i], 1), EVT_CLICK, set_open, (void *)(long)i);
 }

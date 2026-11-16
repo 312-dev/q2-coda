@@ -1,4 +1,4 @@
-/* Settings > Library (docs/ipod.md#settings): what the Library holds and how it is ordered and
+/* Playback > Library (docs/ipod.md#settings): what the Library holds and how it is ordered and
  * shown, on one page with three of its own, each stock's Playback page opened again
  * (navigation.c library_open, ringnav_audioset):
  *   Library    On-The-Go, Streaming Songs, Sorting >, Artists, Artist View, Playlists >,
@@ -160,9 +160,8 @@ int library_source_toggle(void) {
 int library_needs(void) {
     pod_settings();
     if (catalogue_source == 1) return 1;
-    if (!library_ask(
-            "Show streaming songs?", "Turn On",
-            "Show in Library needs Streaming Songs on\n(Settings > Library > Streaming Songs)."))
+    if (!library_ask("Show streaming songs?", "Turn On",
+                     "Show in Library needs Streaming Songs on\n(Settings > Playback > Library)."))
         return 0;
     library_source_set(1);
     return 1;

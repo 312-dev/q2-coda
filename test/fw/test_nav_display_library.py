@@ -456,7 +456,7 @@ class Prompts:
 
 def test_cover_flow_page_holds_only_what_changes_cover_flow(fw):
     """Sort (a picker's row, with a chevron), Fast Navigation and Position Bar, then Refresh Cover Flow after a gap;
-    the Library's own settings are on Settings > Library."""
+    the Library's own settings are on Playback > Library."""
     ui = Ui(fw)
     page = display(fw, ui)
     ui.click(button_of(page.view(), 'Cover Flow'))
@@ -473,7 +473,7 @@ def test_cover_flow_page_holds_only_what_changes_cover_flow(fw):
 
 class Pages(Display):
     """Display, and stock's Playback page as stock opens it: navigator_to builds the window and its thirteen stock rows
-    (stock_audioset_trampoline) and runs ringnav_audioset, as playset_playset_page_init does, Settings > Library's
+    (stock_audioset_trampoline) and runs ringnav_audioset, as playset_playset_page_init does, Playback > Library's
     pages opening the same way over it; and stock's Buttons Lock page, whose rows ringnav_keylock_rows builds, for the
     pickers."""
     def __init__(self, fw, ui):
@@ -516,17 +516,18 @@ class Pages(Display):
 
 
 def library(fw, ui, **config):
-    """Settings' Library row on Home: Settings > Library."""
+    """Settings > Playback, then its Library row: Playback > Library."""
     Config(fw, **config)
     page = Pages(fw, ui)
-    fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(2, None)
+    page.open('playset/playset_page')
+    ui.click(button_of(page.view(), 'Library'))
     return page
 
 
-def test_settings_library_row_opens_the_library_page(fw):
+def test_playback_s_library_row_opens_the_library_page(fw):
     ui = Ui(fw)
     page = library(fw, ui)
-    assert page.opened == ['playset/playset_page'] and page.title() == 'Library'
+    assert page.opened == ['playset/playset_page'] * 2 and page.title() == 'Library'
     assert page.texts() == ['On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
                             'Playlists', 'Folders', 'Scan Song Durations']  # stock's rows gone
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in page.view().children]
@@ -608,9 +609,9 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page = Pages(fw, ui)
     page.open('playset/playset_page')
     texts = page.texts()
-    assert texts == ['stock_3', 'stock_2', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min', 'stock_8',
-                     'Sleep Timer', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9', 'stock_10',
-                     'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min',
+                     'stock_8', 'Sleep Timer', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9', 'stock_10',
+                     'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']  # EQ (stock_2), then the Library
     ui.click(button_of(page.view(), 'Sleep Timer'))
     assert page.opened[-1] == 'systemset/sleepshutdown_page'
 
@@ -659,7 +660,7 @@ def test_controls_opens_display_as_its_own_page(fw, keytone):
     Config(fw)
     Settings(fw, ui, keytone)
     page = Display(fw, ui)
-    fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(5, None)  # Settings' Controls row on Home
+    fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)  # Settings' Controls row on Home
     assert page.title() == 'Controls'
     found = titles(page.view())
     assert found[:3] == ['Wheel Sensitivity', 'Hold Return', 'Clicker']

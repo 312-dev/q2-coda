@@ -348,13 +348,13 @@ def home_card(menu, at, row, text):
 # clicks and translates label_* by name, and only img_left/img_right reach the slide_menu. Each row's transparent image covers the row, on top of its label, so it takes the
 # tap and is the row's click target for the wheel. The payload binds Cover Flow, Search and Settings, which slides
 # list_view_homeset, hidden until then, into the list's place: Wi-Fi, Bluetooth, General (stock's System setting
-# row), Playback (stock's Playback setting row), Library, Car Remote, Display, Controls and Battery, the seven that
-# are not stock's bound by the payload (navigation.c home_sets_bind). Search's name is none stock's visitor knows (stock's search
+# row), Playback (stock's Playback setting row), Car Remote, Display, Controls and Battery, the six that are not
+# stock's bound by the payload (navigation.c home_sets_bind). Search's name is none stock's visitor knows (stock's search
 # pages have an img_search).
 HOME_ROWS = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
-HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_library', 'set_car', 'set_display', 'set_controls', 'set_power']
+HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_car', 'set_display', 'set_controls', 'set_power']
 HOME_LITERAL = {'coverflow': 'Cover Flow', 'home_search': 'Search', 'settings': 'Settings', 'set_wifi': 'Wi-Fi',
-                'set_bt': 'Bluetooth', 'set_library': 'Library', 'set_car': 'Car Remote', 'set_display': 'Display', 'set_controls': 'Controls',
+                'set_bt': 'Bluetooth', 'set_car': 'Car Remote', 'set_display': 'Display', 'set_controls': 'Controls',
                 'set_power': 'Battery'}
 # Stock's visitor translates label_localmusic, label_folder, label_playset and label_sysset by name; renamed, they
 # keep these literals.

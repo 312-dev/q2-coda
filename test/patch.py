@@ -16086,7 +16086,7 @@ for v,on in (('1',1),('2',0),('0',0)):
     bm,*_=settings_page('display','scroll_view_display',{'BIGLIBRARY':v},stock_rows=3,sub=2)
     assert big(bm)==on,v
 passed()
-# The independent duration switch, Settings > Library's last row, is off, persists on/off, and cancels on off.
+# The independent duration switch, Playback > Library's last row, is off, persists on/off, and cancels on off.
 dm,drows,dtexts,dicons,dclick=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
 assert dtexts()[-1]=='Scan Song Durations'
 assert dclick(len(drows)-1)==[(1,'Q2POD','SCANDURATIONS')]
@@ -16455,16 +16455,17 @@ assert m.get(payload_syms['wheel_guard'])==1; passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
 # Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, on
-# Display and on Library > Folders, and Folder skip, Library > Folders'), then ours; the Sleep Timer and stock's Max
-# Volume and Default Volume pages open from their rows.
+# Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; the
+# Sleep Timer, stock's Max Volume and Default Volume pages and the Library open from their rows.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==7 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_bootvol']
-assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','playset_maxvol','playset_bootvol']
-assert len(m.nodes[m.settings_view]['children'])==18 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
-assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[3,2,7,13,6,14,8,17,18,19,0,9,10,15,16,1,4,5]
+assert len(rows)==8 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_bootvol','playset_folderjump']
+assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','playset_maxvol','playset_bootvol','Library']
+assert len(m.nodes[m.settings_view]['children'])==19 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,20,3,7,13,6,14,8,17,18,19,0,9,10,15,16,1,4,5]  # EQ, Library first
 assert [click(4),m.opened[-1],click(5),m.opened[-1],click(6),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None),[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
+assert click(7)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
 passed()
-# Settings > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
+# Playback > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
 # its page the same way (playset_sub naming it while its init runs).
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
 assert texts()==['On-The-Go','Streaming Songs','Sorting','Artists: Artist','Artist View: Cover Flow','Playlists','Folders','Scan Song Durations']

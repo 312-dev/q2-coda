@@ -819,7 +819,7 @@ int artist_songs(void *unused);  /* navigation.c: the artist page's songs query 
 void *plays_ranked(void *songs); /* library_lists.c */
 int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
             int w, int align);
-/* song_sort.c: Songs' order, Settings > Library > Sorting's Songs */
+/* song_sort.c: Songs' order, Playback > Library > Sorting's Songs */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);
 int song_down(void);
@@ -872,7 +872,7 @@ void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
     lr_editing(void *page);
-/* library_settings.c: Settings > Library and its pages (docs/ipod.md#settings) */
+/* library_settings.c: Playback > Library and its pages (docs/ipod.md#settings) */
 enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */

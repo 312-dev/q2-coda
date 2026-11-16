@@ -1,4 +1,4 @@
-/* Songs' order, Settings > Library > Sorting's Songs picker (library_settings.c): Title, Artist,
+/* Songs' order, Playback > Library > Sorting's Songs picker (library_settings.c): Title, Artist,
  * Album or Recently Added, each either way. Stock orders Songs by g_sort_flag (SYSSET SORTSELECT, 0
  * its alphabetical title order, 1 and 2 file name and format, 3 and 4 time added newest and oldest
  * first), which getAllMusic's query takes. Recently Added is the flag's 3 or 4; on the title order
