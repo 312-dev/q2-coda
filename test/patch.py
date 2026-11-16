@@ -10186,7 +10186,7 @@ assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('sys
 cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position,cf_library=m.nodes[cfv]['children']
 assert m.icons_set==['playset_covermode']*3+['system_update']+['playset_covermode','switch_off']*3+['playset_covermode'],m.icons_set
 assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch, as Playlist View; LIBRARYSOURCE unset: the card's own songs
-ctl=display_page(m,3); wheel,hold,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
+ctl=display_page(m,3); wheel,hold,tone,lock,wake=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
 kids=m.nodes[view]['children']; light,shortcut,song_artist,song_length,np_time=kids[0],kids[3],kids[5],kids[6],kids[7]
