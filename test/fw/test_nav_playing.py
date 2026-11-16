@@ -2026,15 +2026,15 @@ def test_a_theme_without_a_set_option_boots_its_own(fw, st):
 def test_a_unit_on_a_retired_theme_takes_oleds_preset_once(fw, st, code, stored, migrates):
     baked(code, GEOM)
     keys = {} if stored is None else {'THEME': stored}
-    Config(fw, LIGHT=1, HOME=0, **keys)  # Light Mode on and Home in Split: OLED's preset is dark and Full (theme.xml)
+    Config(fw, LIGHT=1, HOME=1, **keys)  # Light Mode on and Home Full: OLED's preset is dark and Split (theme.xml)
     st.settings_read = 0
     fw.fn('accent', C.c_int)()
     boot(fw)
     writes = [(C.string_at(a[2]).decode(), C.c_int(a[0]).value) for _, a in fw.calls('write_int_config')]
     assert (('THEME', THEME_OLED) in writes) == migrates and writes.count(('THEME', THEME_OLED)) == migrates
-    dark, full = (host.tools_theme.SETTINGS[k][1].index(v) for k, v in (('light', 'off'), ('home', 'full')))
-    assert (writes.count(('LIGHT', dark)), writes.count(('HOME', full))) == (migrates, migrates)  # the preset, once
-    assert (st.light, st.home) == ((dark, full) if migrates else (1, 0))
+    dark, split = (host.tools_theme.SETTINGS[k][1].index(v) for k, v in (('light', 'off'), ('home', 'split')))
+    assert (writes.count(('LIGHT', dark)), writes.count(('HOME', split))) == (migrates, migrates)  # the preset, once
+    assert (st.light, st.home) == ((dark, split) if migrates else (1, 1))
 
 
 # A-B markers on a bar laid out off the immediates' place (ringnav_ab_x): the same share of it.

@@ -475,14 +475,19 @@ WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
 # Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
+# Smart Awake (IPOD KEEPLIT) starts on, as a missing key reads (theme_engine.c settings_read); stock's file has no [IPOD],
+# and ends with no newline (docs/internals.md#config-ini), so the section starts on a line of its own.
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
 DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
+DEFAULT_IPOD = b'[IPOD]\nKEEPLIT=1\n'
 def default_config(config):
     for key in DEFAULT_CONFIG_OFF:
         check(config.count(b'\n%s=1\n' % key) == 1, 'Unexpected default config.ini')
         config = config.replace(b'\n%s=1\n' % key, b'\n%s=0\n' % key)
-    check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config, 'Unexpected default config.ini')
-    return config.replace(b'[SYSSET]\n', b'[SYSSET]\n' + DEFAULT_LANGUAGE)
+    check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config and b'[IPOD]' not in config,
+          'Unexpected default config.ini')
+    config = config.replace(b'[SYSSET]\n', b'[SYSSET]\n' + DEFAULT_LANGUAGE)
+    return config + (b'' if config.endswith(b'\n') else b'\n') + DEFAULT_IPOD
 # toolsSetRtcTime's command, with its padding; -u keeps the RTC in UTC. See docs/internals.md#clock.
 RTC_WRITE = (b'hwclock -w\0\0', b'hwclock -wu\0')
 # networktime_adjust_thd's time servers (0x7836bc, after time.apple.com, before time.windows.com): stock's

@@ -441,14 +441,14 @@ def client(q2):
 @in_fork
 def test_a_unit_left_on_another_theme_boots_oleds_set_and_preset_once(fw, library, tmp_path):
     """theme_boot's migration: THEME 1 (Classic, an older build's) takes OLED's preset and THEME 3, then boots."""
-    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1', IPOD_LIGHT='1', IPOD_HOME='0'))
+    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1', IPOD_LIGHT='1', IPOD_HOME='1'))
     names, values, sites = boot(q2)
     assert written(q2, names.index('oled'))  # OLED's own set, not SET0
     assert q2.flash.get('IPOD', 'THEME') == '3'
-    # OLED's preset (its theme.xml): Light Mode off, Home Full
-    assert q2.flash.get('IPOD', 'LIGHT') == '0' and q2.flash.get('IPOD', 'HOME') == '1'
+    # OLED's preset (its theme.xml): Light Mode off, Home Split
+    assert q2.flash.get('IPOD', 'LIGHT') == '0' and q2.flash.get('IPOD', 'HOME') == '0'
     appearance(q2)
-    assert q2.screen.row('Light Mode') == 'Light Mode: Off' and q2.screen.row('Home') == 'Home: Full'
+    assert q2.screen.row('Light Mode') == 'Light Mode: Off' and q2.screen.row('Home') == 'Home: Split'
     q2.screen.click('Light Mode')
     assert q2.flash.get('IPOD', 'LIGHT') == '1'
     q2.power_on()

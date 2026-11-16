@@ -433,6 +433,15 @@ def test_a_switch_from_smart_awake_on_redraws_only_its_toggle(fw):
     assert writes(fw) == [('KEEPLIT', int(was == 'Off'))] and repaints(fw) == before
 
 
+@pytest.mark.parametrize('stored, shown', [(None, 'On'), (b'0', 'Off'), (b'1', 'On')])
+def test_smart_awake_is_on_unless_chosen_off(fw, stored, shown):
+    """IPOD KEEPLIT missing reads on, as a reset's config.ini (tools/build.py DEFAULT_IPOD) writes it."""
+    ui = Ui(fw)
+    page = display(fw, ui, **({} if stored is None else {'KEEPLIT': stored}))
+    assert row_of(button_of(page.view(), 'Smart Awake').labels()[0])[1] == shown
+    assert fw.fn('ringnav_smart_awake', C.c_int)() == (shown == 'On')
+
+
 def test_accent_repaints_and_drops_the_cached_images(fw):
     ui = Ui(fw)
     page = appearance(fw, ui)
@@ -670,6 +679,36 @@ def test_controls_opens_display_as_its_own_page(fw, keytone):
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
     ui.click(button_of(page.view(), 'system_keylock'))
     assert opened == ['systemset/keylock_page']
+
+
+def captions(fw, view):
+    """view's captioned rows (settings_pages.c's table, CAP_MAX of them, for one view at a time): each row's title
+    and its caption."""
+    table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
+    text = {table[1 + k]: C.wstring_at(table[9 + k]) for k in range(8) if table[1 + k]} if table[0] == view.addr else {}
+    return {title: text[item.addr] for title, item in zip(titles(view), view.children) if item.addr in text}
+
+
+def test_display_s_rows_carry_their_captions(fw):
+    ui = Ui(fw)
+    page = display(fw, ui)
+    assert captions(fw, page.view()) == {'Smart Awake': 'Keeps the screen on for lyrics and art while playing'}
+    ui.click(button_of(page.view(), 'Cover Flow'))
+    assert captions(fw, page.view()) == {
+        'Fast Navigation': 'Year sort spins by year too; letters stay till you lift',
+        'Scan Song Durations': 'Measures song lengths after each library update',
+        'Position Bar': 'Shows your place in the covers while you browse'}
+
+
+def test_controls_rows_carry_their_captions_and_volume_guard_none(fw):
+    ui = Ui(fw)
+    Config(fw)
+    Settings(fw, ui)
+    page = Display(fw, ui)
+    fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)
+    assert 'Volume Guard' in titles(page.view())
+    assert captions(fw, page.view()) == {'Hold Return': 'What holding Return opens: Now Playing or Home',
+                                         'Wake': 'Center presses it takes to wake the screen'}
 
 
 # Power's Boot to row: /mnt/data/boot-target, which the boot script reads with $(cat ...).
@@ -3185,3 +3224,14 @@ def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, to
     else:
         (lv,) = lists
         assert lv.box[1] == top + 58 + 18 + 24 + 20 + 24 - 58 and lv.labels()[0].text == 'Scan Music Now'
+
+
+def test_power_s_rows_carry_their_captions(fw):
+    ui = Ui(fw)
+    page = Power(fw, ui, {})
+    # In-Vehicle Mode's title is stock's translation key (system_carmode), which this harness shows as it is
+    assert captions(fw, page.view) == {
+        'Standby Limit': 'Shuts down a Q2 left in Standby this long',
+        'Charge Limit': 'Stops charging at 80%, starts again at 75%',
+        'Smart Wi-Fi': 'Turns Wi-Fi off after 5 minutes when nothing needs it. AirPlay and Car Remote keep it on.',
+        'system_carmode': 'Plays at power-on, shuts down when unplugged'}

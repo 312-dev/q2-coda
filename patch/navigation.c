@@ -3025,6 +3025,7 @@ void pod_rows(void *win, const char *view_name, int first, int n, const char *co
         st.pod_label[first + i] = (first + i == POD_CF_SORT ? list_row_into : list_row)(
             view, icons[i], pod_click, (void *)(long)(first + i));
         pod_text(first + i);
+        caption_row(st.pod_label[first + i], pod_caption(first + i)); /* settings_pages.c */
     }
 }
 
@@ -3209,6 +3210,11 @@ int ringnav_audioset(void *win, void *ctx) {
             widget_destroy(widget_get_child(view, (unsigned)i));
     if (sub) {
         static const char *const titles[] = { 0, "Library", "Sorting", "Playlists", "Folders" };
+        if (sub == LIB_FOLDERS) { /* Folder skip's caption: its button's first child stands in for
+                                   * list_row's label */
+            void *skip = widget_get_child(view, 0), *button = skip ? widget_get_child(skip, 0) : 0;
+            caption_row(button ? widget_get_child(button, 0) : (void *)0, folder_skip_caption);
+        }
         void *nav = widget_lookup(win, "view_navbar", 1),
              *title = nav ? widget_get_child(nav, 0) : (void *)0;
         if (title) widget_set_text_utf8(title, titles[sub]);
@@ -5941,6 +5947,7 @@ static void setting_row(void *view, int i) {
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
+    if (i == SETTING_KEEPLIT) caption_row(st.setting_label[i], smart_awake_caption);
 }
 
 /* systemset_display_page_init: stock builds its four rows (0x4c6b94: a s_listitem_black list_item

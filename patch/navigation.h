@@ -479,10 +479,13 @@ void wifi_mark(void *w, void *canvas, int level, int selected);
 void synclink_default(void);
 
 /* settings_pages.c: a set_switch theme's About page as an inert table, from ipod_list_layout; a
- * settings row's caption, shown under it while it is selected (paint_selection) */
+ * settings row's caption, shown under it while it is selected (paint_selection), and the rows'
+ * texts */
 int about_list(void *list);
 void about_rows(void *view);
 void caption_row(void *label, const unsigned *text);
+const unsigned *pod_caption(int i);
+extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and

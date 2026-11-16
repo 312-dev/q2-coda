@@ -1931,6 +1931,37 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     assert len(again.children) == 20  # the next open is the main page again
 
 
+def caption_texts(fw, view):
+    """view's captioned rows (settings_pages.c's table) and their captions."""
+    table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
+    text = {table[1 + k]: C.wstring_at(table[9 + k]) for k in range(8) if table[1 + k]} if table[0] == view.addr else {}
+    return {item: text[item.addr] for item in view.children if item.addr in text}
+
+
+def test_playback_s_and_library_s_rows_carry_their_captions(fw):
+    ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
+    playset(fw, ui, view)
+    audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
+    audioset(win.addr, None)
+    assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, view).items()} == {
+        'Enlarged Album Art': 'Shows the art full screen after 10s on Now Playing',
+        'On-The-Go': 'Shows On-The-Go in Playlists and hold menus'}
+    page = ui.window('playset_page')  # Library & Folders: stock's page again, its Folder skip kept
+    ui.add('view', page, (0, 0, 375, 26), 'view_navbar')
+    sub = ui.add('scroll_view', page, (0, 26, 375, 294), 'scroll_view_playset')
+
+    def build(*_):  # stock's rows, each button holding its icon and label as stock's do
+        for i in range(13):
+            button = ui.add('button', ui.add('list_item', sub, (0, 0, 375, 70), f's{i}'), (20, 0, 335, 70)).clickable()
+            ui.add('image', button, (10, 9, 52, 52))
+        return 0
+    fw.mock('stock_audioset_trampoline', build)
+    fw.mock('navigator_to', lambda *_: audioset(page.addr, None))
+    click(ui, row(ui, view, 'Library & Folders'))
+    assert [(r.name, t) for r, t in caption_texts(fw, sub).items()] == [
+        ('s12', 'Plays on into the next folder when one ends')]
+
+
 def test_artists_toggles_stocks_artist_type(fw):
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     fw.var('fw_ctx_artist_type', C.c_int).value = 1

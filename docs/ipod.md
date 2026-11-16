@@ -951,11 +951,11 @@ Display page again (`display_open`, `display_sub` naming the sub-page while its 
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
 - Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Off"
-  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Full" and "Battery: Icon" (Icon or
+  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Split" and "Battery: Icon" (Icon or
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
-- Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
+- Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, on unless chosen, and a reset's `config.ini` says 1;
   `keep_lit_poll`): with Now Playing lit in front on its lyrics page (or the visualizer's, when built in), or its
   full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
   `reset_poweroptions_timer(1, 1, 1)` once a second, so the screen stays on there (with Enlarged Album
@@ -1019,7 +1019,7 @@ there is no picker ([internals.md](internals.md#themes)).
 left on another (`THEME` 0 Minimal, 1 Classic, 2 Modern, or no key, which read as Minimal) takes OLED's
 preset once, at its first boot on this build, as choosing OLED did, and keeps 3 from then on (`theme_boot`,
 `theme_preset` in `patch/navigation.c`): Light Mode Off unless it was on Auto, Blue (`OLED_ACCENT` 9), Home
-Full, Song Artist Inline, Song Length Albums and Track Time Remaining; the battery and the Shortcut are kept
+Split, Song Artist Inline, Song Length Albums and Track Time Remaining; the battery and the Shortcut are kept
 (a Battery value OLED does not offer, Icon + Percent or Percent Inside, reads as Icon), and only values
 that change are saved. The retired themes' own keys stay in `config.ini`, unread ([Display
 settings](#display-settings)).
@@ -1058,7 +1058,7 @@ painted it white, which drew the box at rest.
 - **Now Playing.** On the grid as the mock-up shows ([Now Playing](#now-playing)).
 - **Icons.** Phosphor's (MIT, [oled-design.md](oled-design.md#icons)): the caret on each row that opens a page,
   the play state, and Now Playing's shuffle, repeat, heart and More.
-- **Home.** Full by default. In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
+- **Home.** Split by default (OLED's preset, and a missing `IPOD HOME`, 0). In Split the menu's rows are 204 px wide, so the selection bar ends at x 188 and the
   chevrons stand at 176, and the playing album's art fills the rest from x 196 and the top edge to the right and
   bottom edges, panning slowly, the glass rounding its corners; the status row's play state and battery stand over
   it, each pixel white or black by contrast with the art beneath (`split_row`, `split_art`, `split_art_up`,

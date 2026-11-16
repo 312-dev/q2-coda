@@ -376,7 +376,7 @@ def test_emit(tmp_path):
     assert ('static const option_t oled_opts[] = {\n'
             '    { .setting = SETTING_LIGHT, .def = -1, .preset = 0, .keep = 2, .values = 0x0 },\n'
             '    { .setting = SETTING_ACCENT, .def = 9, .preset = 9, .keep = -1, .values = 0x200 },\n'
-            '    { .setting = SETTING_HOME, .def = -1, .preset = 1, .keep = -1, .values = 0x0 },\n'
+            '    { .setting = SETTING_HOME, .def = -1, .preset = 0, .keep = -1, .values = 0x0 },\n'
             '    { .setting = SETTING_BATTERY, .def = 0, .preset = -1, .keep = -1, .values = 0x3 },\n') in text
     assert 'const theme_t themes[THEME_N] = {\n    {\n        .sel_radius = 8,\n        .sel_inset = 16,\n' in text
 
