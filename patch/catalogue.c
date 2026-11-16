@@ -17,7 +17,8 @@
  * (cat_ix: by the path's 64-bit FNV-1a, each server row's or linked card file's sid, seconds and
  * offline copy), which the swap takes.
  *
- * On the UI thread: availability (an offline copy, or online: Wi-Fi up and the app's server=up),
+ * On the UI thread: availability (an offline copy, or online: Wi-Fi up, or Smart Wi-Fi bringing it
+ * back for a press, and the app's server=up),
  * catalogue.avail's changes to it, greyed rows, the play hand-off (catplay, its app started when
  * it isn't running: addon.c addon_wake), the offline queue, and the ratings channel (ratings.out,
  * ratings.in). */
@@ -115,8 +116,9 @@ static struct {
     unsigned ngrey;
     int fitted; /* a greyed row's labels were narrowed (catalogue_fit) since the Q2 started */
     /* a catplay sent: its app, when, and the list to play offline if no answer comes; cp_wake:
-     * when its app was started for it, the catplay not written until the app listens */
-    int cp_app;
+     * when its app was started for it, the catplay not written until the app listens; cp_link:
+     * Smart Wi-Fi's link awaited first (smart_wifi_wait), the app not started until it is up */
+    int cp_app, cp_link;
     unsigned cp_at, cp_seq, cp_wake;
     void *cp_list;
     int cp_start;
@@ -1630,7 +1632,8 @@ void catalogue_poll(void) {
         if (!cat.running && !(cat_seq(cat.app[i].id, seq) && strcmp(seq, cat.app[i].seq)))
             ratings_in(i);
     }
-    cat.online = up && networkGetConnectStatus() > 0;
+    /* Smart Wi-Fi's radio off or coming back counts: a press brings the link (catalogue_load) */
+    cat.online = up && (networkGetConnectStatus() > 0 || smart_wifi_back());
     catplay_poll();
     if (cat.running || library_scanning() || !card_mounted()) return;
     for (int i = 0; i < cat.napps; ++i) {
@@ -1843,15 +1846,16 @@ int catalogue_load(void *q, int *at, void **own) {
         if (catalogue_path(p)) slot = cat_app_of(p);
     }
     if (catalogue_on() && cat_online() && slot >= 0 && !cat.app[slot].down) {
-        /* its app started first when it isn't running (after a boot, or its idle exit) */
-        int woke = addon_wake(cat.app[slot].id);
+        /* Smart Wi-Fi's link first (woken now); then, or with the link up, its app started when it
+         * isn't running (after a boot, or its idle exit) */
+        int link = !smart_wifi_wait(), woke = link ? addon_wake(cat.app[slot].id) : 0;
         if (cat.cp_list) deque_destroy(cat.cp_list);
         cat.cp_list = _create_deque("stSongInfo");
         deque_init(cat.cp_list);
         deque_assign(cat.cp_list, q);
-        cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = cat.cp_wake = 0;
+        cat.cp_start = *at, cat.cp_app = slot, cat.cp_at = cat.cp_wake = 0, cat.cp_link = !link;
         if (woke == 1) cat.cp_wake = time_now_ms() | 1; /* written once it listens */
-        if (cat.cp_wake || catplay_send()) {
+        if (cat.cp_link || cat.cp_wake || catplay_send()) {
             np_press(q, *at);
             return 2;
         }
@@ -1886,12 +1890,22 @@ static void catplay_offline(void) {
         toast("Not available offline");
     }
 }
-/* An app started for a catplay: the catplay written once it listens, the list played offline if
- * it doesn't within CATPLAY_START_MS. A catplay unanswered for CATPLAY_WAIT_MS: its list played
- * offline. One answered: done, the app's .play plays through addon.c's stream_poll. */
+/* A catplay waiting for Smart Wi-Fi's link: once it is up, its app started (or, running, the
+ * catplay written); no link SMART_CONNECT_MS on (smart_wifi_wait gives up), the list played
+ * offline. An app started for a catplay: the catplay written once it listens, the list played
+ * offline if it doesn't within CATPLAY_START_MS. A catplay unanswered for CATPLAY_WAIT_MS: its list
+ * played offline. One answered: done, the app's .play plays through addon.c's stream_poll. */
 static void catplay_poll(void) {
     int slot = cat.cp_app;
-    if (cat.cp_wake && slot < cat.napps && addon_ready(cat.app[slot].id)) {
+    if (cat.cp_link && !smart_wifi_wait()) {
+        cat.cp_link = 0;
+        int woke =
+            networkGetConnectStatus() > 0 && slot < cat.napps ? addon_wake(cat.app[slot].id) : -1;
+        if (woke == 1)
+            cat.cp_wake = time_now_ms() | 1;
+        else if (woke || !catplay_send())
+            catplay_offline();
+    } else if (cat.cp_wake && slot < cat.napps && addon_ready(cat.app[slot].id)) {
         cat.cp_wake = 0;
         if (!catplay_send()) catplay_offline();
     } else if (cat.cp_wake && time_now_ms() - cat.cp_wake >= CATPLAY_START_MS) {
@@ -1903,7 +1917,8 @@ static void catplay_poll(void) {
         cat.cp_at = 0;
         catplay_offline();
     }
-    if (!cat.cp_at && !cat.cp_wake && cat.cp_list) deque_destroy(cat.cp_list), cat.cp_list = 0;
+    if (!cat.cp_at && !cat.cp_wake && !cat.cp_link && cat.cp_list)
+        deque_destroy(cat.cp_list), cat.cp_list = 0;
 }
 
 /* ---- Server playlists changed on the Q2 (docs/server-library.md#playlists-from-the-q2) ---- */

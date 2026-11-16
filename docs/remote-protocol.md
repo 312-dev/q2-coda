@@ -63,7 +63,7 @@ Implemented with BlueZ's D-Bus API (`org.bluez.GattManager1`, `org.bluez.LEAdver
 
 ### TCP (fallback, and the emulator)
 
-TCP port 7720, the frame stream as is. For the emulator, and for a car whose hotspot the Q2 and phone share, the research's fallback when LE cannot run beside A2DP. It is not advertised (no mDNS, no multicast responder); the client is given the address. The daemon accepts at most 4 TCP sessions at once and drops one that has not sent `Hello` within 10 seconds or `Auth` within 150 seconds.
+TCP port 7720, the frame stream as is. For the emulator, and for a car whose hotspot the Q2 and phone share, the research's fallback when LE cannot run beside A2DP. It is not advertised (no mDNS, no multicast responder); the client is given the address. The daemon accepts at most 4 TCP sessions at once and drops one that has not sent `Hello` within 10 seconds or `Auth` within 150 seconds. With Smart Wi-Fi on, Car Remote on keeps the Q2's Wi-Fi on, as AirPlay does ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)), so the phone finds the Q2 on the network whenever the car starts.
 
 Being on the same network grants nothing: TCP sessions authenticate and seal exactly as BLE ones do, and a passive listener sees frame sizes and types only.
 

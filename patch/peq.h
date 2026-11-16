@@ -667,9 +667,10 @@ unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's f
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
-/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
- * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
-int smart_wifi_wait(void), smart_wifi_off(void);
+/* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; off or coming
+ * back; an action held for that link (fn(ctx, 0) once it is up, if page, or any page when 0,
+ * is still in use) */
+int smart_wifi_wait(void), smart_wifi_off(void), smart_wifi_back(void);
 int smart_hold(int (*fn)(void *, void *), void *ctx, const char *page);
 int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connect to Wi-Fi first" */
 /* the work smart_wifi.c keeps the radio on for: spotify.c's, scrobble.c's, tidal.c's, addon.c's,
