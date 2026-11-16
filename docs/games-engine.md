@@ -94,7 +94,7 @@ struct eng_game {
 };
 ```
 
-A game is one such record, listed in `eng_games[]` (`patch/engine.c`) before `eng_demo`. `eng_count` is what Games lists; the demo is counted only in a `--dev` build with `[Q2POD] ENGINEDEMO=1` in `config.ini`.
+A game is one such record, listed in `eng_games[]` (`patch/engine.c`) before `eng_demo`. `eng_count` is what Games lists; the demo is counted only in a `--dev` build with `[Q2POD] ENGINEDEMO=1` in `config.ini`, and a release build leaves it out of `eng_games[]` (`#if Q2POD_DEV`), so none of `engine_demo.c` is linked.
 
 ### Input
 

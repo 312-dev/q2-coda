@@ -19,12 +19,17 @@ static struct eng {
     long long state[];             /* the game's, aligned for anything */
 } *en __attribute__((section(".scratch")));
 
-/* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, and
- * only with [Q2POD] ENGINEDEMO=1 in config.ini. */
-static const struct eng_game *const eng_games[] = { &eng_bricks, &eng_demo };
+/* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, last,
+ * and only with [Q2POD] ENGINEDEMO=1 in config.ini; a release build links none of it. */
+static const struct eng_game *const eng_games[] = {
+    &eng_bricks,
+#if Q2POD_DEV
+    &eng_demo,
+#endif
+};
 int eng_count(void) {
     int n = (int)(sizeof eng_games / sizeof *eng_games);
-    return Q2POD_DEV && config_value("Q2POD", "ENGINEDEMO", 2, 0) ? n : n - 1;
+    return Q2POD_DEV && !config_value("Q2POD", "ENGINEDEMO", 2, 0) ? n - 1 : n;
 }
 const struct eng_game *eng_game(int k) { return eng_games[k]; }
 

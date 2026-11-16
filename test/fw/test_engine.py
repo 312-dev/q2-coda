@@ -423,7 +423,14 @@ def test_the_demo_is_listed_only_where_a_dev_build_asks(fw):
     assert e['eng_count']() == 1 and p.s.engines == 1 and p.s.rows == 5  # test/fw builds as a release does: Bricks alone
 
 
-def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw):
+@pytest.mark.parametrize('asked,count', [(b'1', 2), (b'0', 1)])
+def test_a_dev_build_lists_the_demo_last_when_asked(fw_dev, asked, count):
+    fw_dev.mock('toolsReadConfig', lambda path, sec, key, out, d, *_: C.memmove(out, asked + b'\0', 2) and 0)
+    assert api(fw_dev)['eng_count']() == count
+
+
+def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     assert p.s.screen == DEMO and p.e['eng_live']() and fw.var('wheel_raw', C.c_int).value == 1
@@ -443,7 +450,8 @@ def test_the_demo_ball_moves_a_step_a_frame_and_bounces(fw):
     assert abs(d.vx) <= 4 * 65536
 
 
-def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw):
+def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     fw.var('wheel_travel', C.c_int).value = -10
@@ -474,7 +482,8 @@ def test_the_demo_paddle_follows_the_wheel_the_keys_and_a_finger(fw):
     p.key(CENTER)
 
 
-def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw):
+def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     d = p.d
     kinds = []
@@ -502,7 +511,8 @@ def test_the_demo_serves_again_after_a_miss_and_saves_a_best_at_a_pause(fw):
     q.close()
 
 
-def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_quit(fw):
+def test_the_demo_pauses_under_games_popup_and_leaves_by_its_menu_or_its_own_quit(fw_dev):  # a release build links no demo
+    fw = fw_dev
     p = demo(fw)
     canvas = Canvas(fw)
     buf = screen(canvas, origin=(0, 30))
