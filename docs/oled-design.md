@@ -457,6 +457,8 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
+- Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
+  scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
   Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
   with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in

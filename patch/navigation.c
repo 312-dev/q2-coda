@@ -5371,6 +5371,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     paint_modal_rows(w, canvas);
     feedback_confirm_switch(w, canvas);
     feedback_switch_bar(w, canvas);
+    feedback_scan_bar(w, canvas);
     paint_separators(w, canvas);
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);

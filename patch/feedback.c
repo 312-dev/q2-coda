@@ -310,17 +310,70 @@ int feedback_offline(const char *title) {
     return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in System > Wireless");
 }
 
+/* Songs over an empty library: stock's own panel (allmusic_page's "view": a picture, a line and a
+ * Scan Music Now pill) when it shows, else 0. Its button, btn_upmusic, is what Centre presses
+ * (navigation.c) and a tap clicks. */
+static void *scan_button(void *top) {
+    void *view = widget_lookup(top, "view", 0);
+    void *btn = view ? widget_lookup(view, "btn_upmusic", 0) : (void *)0;
+    return btn && widget_get_visible(view) ? btn : (void *)0;
+}
+
+/* Stock's panel as one selected row where the Shuffle row stands (at row's y), Scan Music Now,
+ * the button itself at the text column with no fill of its own (feedback_scan_bar paints the
+ * selection's bar under it); the picture and the line go, as the note says it. */
+#define SCAN_ROW_H 32
+static void scan_row(void *btn, void *row) {
+    static const char *const fills[] = { "style:normal:bg_color", "style:pressed:bg_color",
+                                         "style:over:bg_color", "style:focused:bg_color" };
+    void *view = P(btn, W_PARENT);
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *c = widget_get_child(view, i);
+        if (c != btn) widget_set_visible(c, 0, 0);
+    }
+    widget_move_resize(view, I(view, W_X), I(row, W_Y), I(view, W_W), I(view, W_H));
+    widget_move_resize(btn, 0, 0, I(view, W_W), SCAN_ROW_H);
+    for (unsigned i = 0; i < sizeof fills / sizeof *fills; ++i) widget_set_prop_int(btn, fills[i], 0);
+    widget_set_prop_int(btn, "style:normal:border_color", 0);
+    widget_set_prop_str(btn, "style:normal:text_align_h", "left");
+    widget_set_prop_int(btn, "style:normal:margin_left", geom_val(V_TEXT_X) + 2); /* a label's 2 px margin */
+    widget_set_text_utf8(btn, "Scan Music Now");
+    theme_font(btn, ROLE_TITLE, FONT_ROW);
+    widget_set_prop_int(btn, "_scan_row", 1);
+}
+
+/* The Scan Music Now row's bar: the selection's, as feedback_switch_bar's, under its words. */
+void feedback_scan_bar(void *w, void *canvas) {
+    if (!w || !P(canvas, CANVAS_LCD) || !widget_get_prop_int(w, "_scan_row", 0) ||
+        tk_strcmp(widget_get_prop_str(w, "name", ""), "btn_upmusic"))
+        return;
+    const theme_t *T = theme();
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    rect_t bar = { T->sel_inset, 0, I(w, W_W) - 2 * T->sel_inset, I(w, W_H) };
+    fill_box(canvas, &bar, RGBA(scheme()->tones[0]), (unsigned)T->sel_radius);
+    stock_canvas_set_fill_color(canvas, fill);
+    st.sel_accent = w;
+}
+
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
  * would stand over nothing, so it hides and the page says what is missing, by the list's class
  * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently
- * Added (0xf009). Runs on the bar's paint; writes only when the list's emptiness changes. */
+ * Added (0xf009). Over an empty library stock shows its own panel instead of the list: that
+ * becomes the Scan Music Now row (scan_row), with "No songs" and how to fill the card under it.
+ * Runs on the bar's paint; writes only when the list's emptiness, or the panel's, changes. */
 void feedback_songs(void *top, void *row) {
     if (!theme()->shuffle_row || !row || window_of(row) != top) return;
     void *list = P(p_deque_showlist, 0);
-    int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_songs", 0);
+    void *scan = list && !deque_size(list) ? scan_button(top) : (void *)0;
+    int empty = (list && !deque_size(list)) + !!scan, was = widget_get_prop_int(top, "_empty_songs", 0);
     if (empty == was) return;
     widget_set_prop_int(top, "_empty_songs", empty);
     widget_set_visible(row, !empty, 0);
+    if (scan) {
+        scan_row(scan, row);
+        feedback_empty(top, feedback_below(scan), "No songs", "Copy music to the SD card");
+        return;
+    }
     int cls = I(g_class_type, 0);
     const char *message = cls == 0xf00a   ? "No favorites"
                           : cls == 0xf007 ? "No recent songs"

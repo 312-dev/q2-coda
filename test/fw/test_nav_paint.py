@@ -1150,6 +1150,42 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     assert world[label].text == title
 
 
+def test_an_empty_library_s_songs_page_is_one_scan_music_now_row_and_a_note(fw, world, st):
+    """Songs over an empty library (stock's panel "view" on show): the panel's picture and line hide, its
+    btn_upmusic becomes the one selected row, Scan Music Now, where the Shuffle row stood, and the note says what is
+    missing and how to fill the card. The bar under the row is the selection's (feedback_scan_bar). Songs back, the
+    note goes and the Shuffle row returns."""
+    theme(fw)
+    deques = Deques(fw)
+    showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
+    win = world.window('allmusic_page')
+    row = world.add(win, 'view_navbar_allplay', box=(0, 0, 375, 32))
+    view = world.add(win, 'view', box=(0, 32, 375, 190))
+    picture = world.add(view, 'image', 'image', box=(69, 0, 236, 96))
+    line = world.add(view, 'label_scanfolder', 'label', box=(0, 96, 375, 20), text='Currently no songs')
+    btn = world.add(view, 'btn_upmusic', 'button', box=(44, 136, 287, 40), text='Scan Music Now')
+    level = deques.new()
+    showlist.value = level
+    songs = fw.fn('feedback_songs', None, C.c_void_p, C.c_void_p)
+    songs(win, row)
+    assert not world[row].visible and not world[picture].visible and not world[line].visible
+    assert world[btn].visible and world.at(view)[1] == 0 and tuple(world.at(btn)) == (0, 0, 375, 32)
+    assert world[btn].text == 'Scan Music Now' and world[btn].props['style:normal:text_align_h'] == 'left'
+    assert all(world[btn].props[f'style:{s}:bg_color'] == 0 for s in ('normal', 'pressed', 'over', 'focused'))
+    note, hint = world.find(win, '_empty'), world.find(win, '_empty_hint')
+    assert world[note].text == 'No songs' and world[hint].text == 'Copy music to the SD card'
+    canvas = Canvas(fw)
+    fw.fn("feedback_scan_bar", None, C.c_void_p, C.c_void_p)(btn, canvas.p)
+    assert len(canvas.rounded) == 1 and st('sel_accent', C.c_void_p).value == btn
+    writes = len(fw.calls('widget_set_text_utf8'))
+    songs(win, row)
+    assert len(fw.calls('widget_set_text_utf8')) == writes  # unchanged: not written
+    world[view].visible = 0
+    deques[level].append(1)
+    songs(win, row)
+    assert world[row].visible and not world[note].visible
+
+
 @pytest.mark.parametrize('layer, text, title', [(1, 'SD', 'Folders'), (2, 'SD', 'Folders'), (2, 'SD:/', 'Folders'),
                                                  (3, 'Music', 'Music'), (3, 'SD:/Music', 'Music'),
                                                  (4, 'SD:/Music/Aurora Field/', 'Aurora Field'), (3, 'SD:', 'Folders')])
