@@ -164,19 +164,16 @@ def test_pairing_asks_on_the_pairing_card_and_cancel_tells_the_daemon(fw, ui, mc
 def test_pairing_shows_a_new_code_that_came_between_two_polls(fw, ui, mcl, recs):
     """The daemon ended one code and showed another inside one poll: the card must not keep the old one."""
     q2 = Q2(fw, ui, recs)
-    shown = []
-
-    def prompt(phone, code, *_):
-        shown.append(C.string_at(code).decode())
-        return ui.new('window_create', 0, 0, 0, 375, 320)
-    fw.mock('pair_prompt', prompt)
+    card_route(fw, ui)
     q2.files[PAIR] = b'242610\nPixel 10 Pro\n'
     q2.tick()
     old = ui.top()
     q2.files[PAIR] = b'852219\nPixel 10 Pro\n'
     q2.tick()
     q2.tick()
-    assert old not in ui.windows and ui.top() != old and shown == ['242610', '852219']
+    new = ui.top()
+    assert old not in ui.windows and new != old and ui.name[new] == 'sortselect_dialog'
+    assert ui.went.count('dialog/sortselect_dialog') == 2  # a second card, for the new code
     assert PAIR_CANCEL not in q2.files  # the daemon's own change: nothing cancelled
 
 
