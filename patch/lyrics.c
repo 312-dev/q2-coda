@@ -359,6 +359,9 @@ int lyrics_on(void *lrc) {
 #define LYRIC_OLED_PX 27 /* the design's 22, AWTK's size (docs/oled-design.md#type) */
 #define LYRIC_OLED_X 24
 #define LYRIC_OLED_REST 0xababab
+/* A one-row line's height on the page: the step a wheel tick takes (navigation.c), so it lands on
+ * the next row's top as the snap does */
+int lyrics_row_h(void) { return LY_PITCH(LYRIC_OLED_PX) + LYRIC_GAP; }
 /* The face of a line, the playing one's when on; wraps measure with it on. */
 static const char *ly_face(int on) { return on ? "inter-medium" : "inter"; }
 static int ly_cjk(unsigned c) {

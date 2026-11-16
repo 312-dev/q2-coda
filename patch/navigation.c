@@ -4020,7 +4020,8 @@ static void lyric_snap(void *lrc) {
  * them as the wheel does; stock's scroll animation stops as it lands, so only the finger moves
  * them, and a swipe that brings the page in holds nothing. A swipe to another page and back keeps
  * the hold; leaving Now Playing drops it (np_gone). Another song starts at the top, its hold
- * gone. The lyrics page's rows are its lines, a tick's worth a line. */
+ * gone. The lyrics page's rows are its lines, a tick's worth a one-row line's height
+ * (lyrics_row_h), so a tick lands on a row top. */
 #define LYRIC_ROW_PX 20
 
 /* Now Playing's lyrics are the lyrics page's (lyrics.c): the rows full width after a blank
@@ -4177,7 +4178,7 @@ static void lyric_poll(void) {
         int y = I(lrc, SCROLL_Y),
             from = st.lyric_glide || (st.lyric_to + 8) >> 4 == y ? st.lyric_to : y * 16;
         /* x rises anticlockwise: back up the lyrics */
-        int row = lyrics_on(lrc) ? LYRIC_SLOT : LYRIC_ROW_PX;
+        int row = lyrics_on(lrc) ? lyrics_row_h() : LYRIC_ROW_PX;
         lyric_glide(lrc, from - travel * row * 16 * wheel_pct() / (WHEEL_TICK_UNITS * 50));
         st.lyric_spun = 1;
     }

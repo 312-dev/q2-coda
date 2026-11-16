@@ -575,6 +575,7 @@ typedef struct {
  * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
+    lyrics_row_h(void),
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas), lyrics_gone(void);
 unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column  */
