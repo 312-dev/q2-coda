@@ -336,7 +336,7 @@ for case,setup,kept in CASES:
     assert (not m.switch())==kept and (kept or m.flag()==0),case
 passed()
 # The payload's own users hold it on while they run: librespot, a station, a card app, an upload,
-# Network Update's download or an Apps job, Download Album Lyrics, a Tidal download and Car Remote on.
+# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote on.
 class SmartBusy(SmartMachine):
     def __init__(self,name,busy):
         super().__init__(); self.busy=busy; self.handlers[payload_syms[name]]='b:'+name  # every address is hooked here
@@ -517,7 +517,7 @@ m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
 # The same for the other presses that start a job: Network Update's download, an Apps install and
-# Download Album Lyrics each start once, not cancelled by the held press ("Canceling…").
+# Get Album Lyrics each start once, not cancelled by the held press ("Canceling…").
 m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
 m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
 view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])

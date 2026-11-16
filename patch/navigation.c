@@ -215,7 +215,7 @@ extern void coverflow_paint(void *w, void *canvas), video_poll(void);
 extern int video_on(void), video_click(const char *path);
 extern void games_paint(void *w, void *canvas);
 extern void spot_poll(void), spot_paint(void *w, void *canvas), *spot_art(void);
-extern void up_next(int (*keyup)(void *, void *));
+extern void up_next(void);
 extern int un_hold(void *top), un_key(void *top, unsigned key, int owned);
 extern void un_keydown(unsigned key), upnext_paint(void *w, void *canvas);
 extern void radio_poll(void);

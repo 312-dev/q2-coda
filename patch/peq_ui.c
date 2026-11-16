@@ -640,7 +640,7 @@ static int action(void *ctx, void *event) {
     }
     else if (id == PER_OUTPUT) ringnav_eq_output_toggle();
     else if (id == ENABLE) b->enabled = !b->enabled;
-    /* The Type picker: the inset modal's under a modal set (docs/oled-design.md#menus), else a
+    /* The Type picker: the menu sheet's under a modal set (docs/oled-design.md#menus), else a
      * screen of the types; either opens on the band's own. Under the modal the band's list is
      * left as it is, no render, so a pick or Return finds it on the Type row. */
     else if (id == TYPE) {

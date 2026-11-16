@@ -338,14 +338,18 @@ static void paint_offline(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-/* An open inset modal's rows' symbols and values (menu_modal.c), over its selection bar. */
+/* An open menu sheet's rows' symbols and values (menu_modal.c), over its selection bar. */
 static void paint_modal_rows(void *w, void *canvas) {
-    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w)) return;
+    rect_t old;
+    if (!modal_rows_of(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
+        !clip_surface(canvas, &g_menu, &old)) /* a row half out of the rows' box: its part in it */
+        return;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (r.y + r.h > 0 && r.y < I(w, W_H))
             modal_row_paint(w, canvas, g_menu.at[i], r, st.sel_w == w && i == st.sel_row);
     }
+    canvas_set_clip_rect(canvas, &old);
 }
 
 /* Writes v (under 1000) in decimal to s; returns the digits written. */
@@ -660,13 +664,13 @@ static void paint_selection(void *w, void *canvas) {
     void *top = window_manager_get_top_window(window_manager());
     int i, shown = !st.touch_mode;
     void *own = window_of(w);
-    int under = own && own != top && modal_win(top); /* the row an inset modal acts on */
+    int under = own && own != top && modal_win(top); /* the row a menu sheet acts on */
     if (own && own != top && (slides(top) || feedback_toast(top) || under)) {
         /* The page under a sliding one, painted into the animator's snapshot, or under OLED's
          * toast, which leaves the page in sight: draw the row it holds. Loading, recall and
          * settling read the top page's state, so none of it runs. A pending untouch is a Return by
          * button, which shows the row of the page behind. Home's carousel shows its selected card,
-         * as below. Under an inset modal the row shows, dimmed with the page: it names what the
+         * as below. Under a menu sheet the row shows, dimmed with the page: it names what the
          * menu acts on. */
         if (!usable() || !load_rows(&g_menu, w) || g_menu.kind == 3) return;
         i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
@@ -711,7 +715,7 @@ static void paint_selection(void *w, void *canvas) {
     if (!clip_surface(canvas, &g_menu, &old)) return;
     /* A list row gets the full surface width; a grid tile keeps its own rect. */
     int tile = 2 * r.w < I(g_menu.w, W_W);
-    /* an inset modal's rows keep the panel's, the confirmation card's the card's */
+    /* a menu sheet's rows keep their own box, the confirmation card's the card's */
     if (!tile && !modal_rows_of(g_menu.w) && !confirm_surface(g_menu.w)) {
         r.x = 0;
         r.w = I(g_menu.w, W_W);
@@ -735,7 +739,10 @@ static void paint_selection(void *w, void *canvas) {
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
         int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip);
         if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* toward the next tick */
-        gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+        if (modal_is_red(g_menu.at[i])) /* a menu's destructive row (menu_modal.c modal_red) */
+            fill_box(canvas, &bar, RGBA(MODAL_RED), (unsigned)radius);
+        else
+            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
         if (!tile) tilt_gleam(canvas, &bar, radius);
         if (leaning) canvas_set_clip_rect(canvas, surface_clip); /* the rows' own clip again */
         if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);
@@ -757,7 +764,7 @@ static void paint_selection(void *w, void *canvas) {
         st.marq_id = g_menu.id[i];
         rearm(&st.marq_timer, marq_moved, 0);
     }
-    /* a pop-up button's tile: framed white on any accent. An inset modal's row is no tile
+    /* a pop-up button's tile: framed white on any accent. A menu sheet's row is no tile
      * (menu_modal.c), nor is the confirmation card's answer (feedback.c). */
     if (g_menu.kind == 4 && r.w < I(g_menu.w, W_W) && !modal_rows_of(g_menu.w) &&
         !confirm_surface(g_menu.w))
@@ -893,9 +900,8 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     if (!a || !lcd || max <= 0) return;
     value = value < 0 ? 0 : value > max ? max : value;
     while (max >> 22) max >>= 1, value >>= 1;
-    int at = track * value / max, len = track * h / max, right = modal_sb_right(list, T->sb_w);
+    int at = track * value / max, len = track * h / max, right = T->sb_right;
     if (len > track - at) len = track - at;
-    if (right < 0) right = T->sb_right; /* an inset modal's: in its panel */
     rect_t t = { I(list, W_W) - right - T->sb_w, T->sb_top - y0, T->sb_w, track },
            thumb = { t.x, t.y + at, t.w, len };
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), L = ipod_light();
@@ -976,6 +982,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == st.np_win && !(NP_VISUALIZER && visualizer_full()))
         np_modes(w, canvas); /* else the page's own */
     coverflow_home_clip(w, canvas, 0);
+    modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
     st.paint_w = w ? P(w, W_PARENT) : (void *)0;
@@ -989,7 +996,8 @@ int ringnav_paint(void *w, void *canvas) {
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
  * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
- * has its own (home_fades, home_pad), an inset modal's rows end in its panel. */
+ * has its own (home_fades, home_pad), a menu sheet's rows fade into its material (menu_modal.c
+ * modal_after). */
 #define LIST_PAD "_list_pad"
 #define LIST_PADDED "_list_padded"
 #define LIST_TOP "_list_top"

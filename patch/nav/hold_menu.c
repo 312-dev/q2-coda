@@ -98,6 +98,12 @@ static void qm_rated(void *r, int hearts) {
 static int qm_run(const void *unused) {
     st.qm_timer = 0;
     if (!st.qm_dialog) return 0;
+    /* a menu sheet's Group by, two choices, flips in place (audit2 L3) */
+    if (st.qm_action == QA_GROUP && modal_set()) {
+        if (!playback_set(2, !playback_option(2))) toast("Queue unchanged");
+        qm_values(st.qm_dialog);
+        return 0;
+    }
     if (st.qm_action == QA_NEW_PLAYLIST) widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due, 0);
     qm_close();
     void *r = qm_record();
@@ -143,7 +149,7 @@ static int qm_run(const void *unused) {
         if (cls == 0xf00a)
             g_delete_flag = 1; /* My Fav reloads, as Now Playing's heart (0x53cafc) */
     } else if (r && a == QA_PLAYLIST && modal_set() && st.qm_kind != QM_PLAYING) {
-        playlist_pick_open(r); /* the inset modal's picker (playlists.c) */
+        playlist_pick_open(r); /* the menu sheet's picker (playlists.c) */
     } else if (r && a == QA_PLAY) {
         void *add = qm_collect(r);
         if (add && deque_size(add)) { /* as its own list plays: Delete takes from the playlist */
@@ -255,7 +261,31 @@ static const char *qm_choice_name(int kind, int i) {
     return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
 }
 
-#define MODAL_PITCH 32 /* the inset modal's rows (menu_modal.c) */
+/* The same as a menu sheet's setting row shows it, its value alone (audit2 L3): "Songs", "All". */
+static const char *qm_value_name(int kind, int i) {
+    static const char *const shuffle[2][5] = {
+        { "Off", "Songs", "In Album", "Albums", "Albums & Songs" },
+        { "Off", "Songs", "In Folder", "Folders", "Folders & Songs" }
+    };
+    static const char *const repeat[2][6] = {
+        { "Stop After Song", "Stop After Album", "Off", "Song", "Album", "All" },
+        { "Stop After Song", "Stop After Folder", "Off", "Song", "Folder", "All" }
+    };
+    int folder = playback_option(2);
+    return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : qm_choice_name(2, i);
+}
+/* A sheet's setting rows' values again, Group by's flip having renamed them (qm_run). */
+static void qm_values(void *dialog) {
+    for (int kind = 0; kind < 3; ++kind) {
+        char name[16];
+        tk_snprintf(name, sizeof name, "_qm_set%d", kind);
+        void *row = widget_lookup(dialog, name, 1);
+        if (row) widget_set_prop_str(row, "_mm_value", qm_value_name(kind, playback_option(kind)));
+    }
+    widget_invalidate_force(dialog, (void *)0);
+}
+
+#define MODAL_PITCH 32 /* the menu sheet's rows (menu_modal.c) */
 
 static int qm_open(const void *unused) {
     st.qm_timer = 0;
@@ -281,7 +311,9 @@ static int qm_open(const void *unused) {
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
         int kind = st.qm_choice - 1, count = qm_choices(kind), current = playback_option(kind);
-        qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
+        const char *setting = kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by";
+        qm_title(dialog, setting);
+        if (modal_set()) modal_head(setting, now_tag(r, REC_TITLE), r);
         widget_destroy_children(view);
         int modal = modal_set(), row = modal ? MODAL_PITCH : QM_ROW,
             w = modal ? modal_row_w() : 375;
@@ -329,7 +361,7 @@ static int qm_open(const void *unused) {
     if (group_first && st.rate_win) acts[n++] = QA_RATE;
     int at, off; /* a spoken CUE book's saved place, from any of its tracks */
     if (st.qm_kind == QM_SONG && book_place(qm_list(), r, &at, &off)) acts[n++] = QA_RESUME;
-    /* the inset modal's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
+    /* the menu sheet's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
      * On-The-Go (while it is on), Add to Playlist…, Favorite, then the Go to rows; its playlist:
      * Play, Shuffle, Rename and, after a gap, Delete */
     int inset = modal_set(), list = inset && st.qm_kind == QM_PLAYLIST,
@@ -397,7 +429,7 @@ static int qm_open(const void *unused) {
                                         "Rename",
                                         "Delete",
                                         "Remove" };
-    /* the inset modal's symbols (tools/art.py MENU_ICONS), by row */
+    /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row */
     static const char *const icons[] = { "arrow-bend-down-right",
                                          "queue",
                                          "shuffle",
@@ -424,7 +456,7 @@ static int qm_open(const void *unused) {
                                          "trash",
                                          "trash" };
     char rated[32];
-    /* stock sortselect row styles; the inset modal's rows */
+    /* stock sortselect row styles; the menu sheet's rows */
     int modal = modal_set(), pitch = modal ? MODAL_PITCH : QM_ROW,
         width = modal ? modal_row_w() : 375;
     for (int i = 0; i < n; ++i) {
@@ -446,7 +478,7 @@ static int qm_open(const void *unused) {
                                  ? (playback_option(2) ? "Group by: Folder" : "Group by: Album")
                              : acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
                              : acts[i] == QA_PREV_GROUP && playback_option(2) ? "Previous Folder"
-                             /* the inset modal's set writes US English (OLED's) */
+                             /* the menu sheet's set writes US English (OLED's) */
                              : acts[i] == QA_FAV && own      ? "Favorite"
                              : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
                              : acts[i] == QA_FAV && modal    ? "Add to Favorites"
@@ -457,16 +489,33 @@ static int qm_open(const void *unused) {
             widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
         if (modal) {
             int kind = acts[i] - QA_ADV_SHUFFLE;
-            const char *value = setting ? qm_choice_name(kind, playback_option(kind)) : 0;
+            const char *value = setting ? qm_value_name(kind, playback_option(kind)) : 0;
             if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE)
                 modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
+            if (acts[i] == QA_DELETE || acts[i] == QA_REMOVE) modal_red(item);
+            if (setting) {
+                char name[16];
+                tk_snprintf(name, sizeof name, "_qm_set%d", kind);
+                widget_set_name(item, name);
+            }
         }
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }
     widget_set_prop_int(view, "virtual_h", n * pitch);
-    if (modal) modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    if (modal) { /* the sheet's header: the item, what it is, its cover */
+        char sub[96] = "";
+        const char *artist = song || aid ? now_tag(r, REC_ARTIST) : 0;
+        if (song && st.qm_kind != QM_PLAYING && artist && *artist && album && *album)
+            tk_snprintf(sub, sizeof sub, "%s \xc2\xb7 %s", artist, album);
+        else if (artist)
+            tk_snprintf(sub, sizeof sub, "%s", artist);
+        else if (st.qm_kind == QM_PLAYLIST)
+            tk_snprintf(sub, sizeof sub, "Playlist");
+        modal_head(title ? title : "", sub, song || aid ? r : (void *)0);
+        modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
+    }
     st.qm_dialog = dialog;
     if (modal) ringnav_select(view, 0, n); /* the first action */
     return 0;

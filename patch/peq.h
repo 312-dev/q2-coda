@@ -317,7 +317,7 @@ void *page_row_detail_into(void *view, int index, const char *caption, const cha
                            int (*click)(void *, void *));
 void page_row_into(void *view, int index, const char *caption, int (*click)(void *, void *));
 void row_into(void *item, int h);
-/* artist_page.c: an artist's page under the inset modal's set (docs/oled-design.md#artist-page) */
+/* artist_page.c: an artist's page under the menu sheet's set (docs/oled-design.md#artist-page) */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta);
 void *hero_now(void);
 void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
@@ -714,7 +714,7 @@ const char *shelf_busy(void);           /* netupdate.c: the app folder a job rep
 const char *shelf_moving(void);         /* netupdate.c: the app folder deleted or moved into */
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
 void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
-void album_lyrics_stop(void); /* onlinematch.c: Download Album Lyrics before USB storage */
+void album_lyrics_stop(void); /* onlinematch.c: Get Album Lyrics before USB storage */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };
 void sig_hex(const unsigned char *in, unsigned n, char *out);

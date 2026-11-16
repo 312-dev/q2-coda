@@ -470,7 +470,7 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
-    /* the inset modal's set orders Songs from Playback > Library > Sorting (library_settings.c):
+    /* the menu sheet's set orders Songs from Playback > Library > Sorting (library_settings.c):
      * the bars stay, hidden */
     if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
@@ -524,7 +524,7 @@ void bar_title_sync(void *win) {
     /* a page under the top window that writes its caption would flip the bar with each paint */
     if (feedback_toast(win)) win = feedback_under(win); /* OLED's toast leaves the page in sight */
     if (!st.bar_title || !win || win != feedback_top()) return;
-    /* an inset modal has no title: the bar names the page under it, which a dialog over the
+    /* a menu sheet has no title: the bar names the page under it, which a dialog over the
      * modal may have written over (Delete Playlist's confirm, feedback_confirm) */
     if (modal_win(win) && !(win = feedback_under(win))) return;
     static const unsigned none = 0;

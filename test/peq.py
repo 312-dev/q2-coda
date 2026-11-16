@@ -3298,7 +3298,7 @@ LJ_DONE, LJ_OFFLINE, LJ_CARD, LJ_CANCELLED = range(4)
 
 
 def album_check(tmp):
-    """Download Album Lyrics (onlinematch.c): the .lrc beside a song, each track of an incomplete
+    """Get Album Lyrics (onlinematch.c): the .lrc beside a song, each track of an incomplete
     album on its own (gone, already with a .lrc, not found), LRCLIB's busy replies asked again, the
     retry once LRCLIB has answered, offline, busy and card-full ends, a cancel, no .part left behind,
     and the summary toast."""

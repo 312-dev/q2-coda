@@ -128,7 +128,7 @@ HOOKS = {
     'mclIsUtf8WithoutBOM': (0x5bbc4c, 'ringnav_lrc_utf8', None),
     # Now Playing's lyrics match (patch/onlinematch.c): LRCLIB alone, in place of stock's Kugou search
     'kugou_obtainlyric': (0x51b3f4, 'ringnav_lyric_search', None),
-    # its ⋯ page: Download Album Lyrics under stock's Download Cover & Lyrics (onlinematch.c)
+    # its ⋯ page: Get Album Lyrics under stock's Download Cover & Lyrics (onlinematch.c)
     'playermore_page_init': (0x539f60, 'ringnav_playermore', 'playermore'),
     # The sleep timer's switch as a row, under a set that hides its toolbar (navigation.c)
     'systemset_sleepshutdown_page_init': (0x4d1224, 'ringnav_sleeptimer', 'sleeptimer'),
