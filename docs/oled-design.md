@@ -1033,6 +1033,23 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
 
+### Streaming Configuration
+
+<a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
+`patch/stream_config.c`) is two levels of [list rows](#list-row): values on the right, a caption only under the
+selected row.
+
+- **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
+  its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
+  the caption "Its cache, downloads and place in Streaming" (Spotify: "Its cache, sign-in and place in Streaming");
+  a "Show in Streaming" header; then one switch per service that has only a switch (the card apps, Internet Radio,
+  AirPlay).
+- **TIDAL:** Show in Streaming, Show Downloads (Tidal Downloads' row on Streaming), and Cache, "2 GB", captioned
+  "Space kept for songs played from TIDAL"; Centre steps through 512 MB, 1, 2, 4 and 8 GB in place.
+- **Spotify:** Show in Streaming, Cache ("Space kept for songs played from Spotify") and Erase Spotify Data ("Signs
+  out of Spotify and clears its cache"), which asks on the [confirmation card](#confirmation-card).
+- Headers are 32 px rows of 15 px Text Tertiary, so the list scrolls in whole rows.
+
 ### Update Library
 
 <a id="update-library"></a>The library scan (Update Local Music, Scan Music Now, a folder's scan; approved as 27 v4 on

@@ -14083,23 +14083,24 @@ def streaming():
     return [m.nodes[kids[0]]['visible']]+[m.nodes[m.nodes[m.nodes[r]['children'][0]]['children'][1]]['text'] for r in kids[1:] if m.nodes[r]['visible']]
 assert streaming()==[1,'Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
 m.click(rows['Configuration']); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-SVC=['TIDAL','Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay']
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming',*SVC]
+SVC=['Deezer','Soulseek','Internet Radio','AirPlay']  # the lone switches: TIDAL's, Spotify's and Tidal Downloads' are on their pages
+assert m.labels()[:10]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming',*SVC]
 cap=m.rows()[4]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
 def ticks(): return [switch(m,i)=='switch_on' for i in range(5,len(m.rows()))]  # Shanling's switches
-assert ticks()==[True]*7
-m.row(7); assert m.config['STREAMHIDE']=='deezer' and ticks()==[True,True,False,True,True,True,True]
+assert ticks()==[True]*4
+m.row(5); assert m.config['STREAMHIDE']=='deezer' and ticks()==[False,True,True,True]
 assert streaming()==[1,'Spotify','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL'
+conf=m.page; m.row(7); m.row(2); sub=m.page=m.top; m.row(0); m.page=conf  # TIDAL's on its page
+assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL' and m.labels().count('Hidden')==1  # its row on Configuration
 assert streaming()==[0,'Spotify','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(7); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[False,True,True,True,True,False,True]
+m.row(5); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[True,True,False,True]
 assert streaming()==[0,'Spotify','Deezer','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='' and ticks()==[True]*7; passed()
+m.row(7); m.page=sub; m.row(0); m.page=conf; assert m.config['STREAMHIDE']=='' and ticks()==[True]*4; passed()
 # Saved: the next Streaming leaves them out, an app by its id whatever its place by name.
 m=AppMachine(); card_app(m,'deezer','name=Deezer\n'); m.config['STREAMHIDE']='soulseek,AIRPLAY,SPOTIFY'
 rows=stream_rows(m); view=m.find('scroll_view',m.top)
 assert streaming()==[1,'Deezer','Tidal Downloads','Internet Radio','Configuration']
-m.click(rows['Configuration']); m.page=m.top; assert ticks()==[True,False,True,False,True,True,False]; passed()
+m.click(rows['Configuration']); m.page=m.top; assert ticks()==[True,False,True,False] and m.labels().count('Hidden')==1; passed()
 # Soulseek: q2-soulseek from the card's .soulseek folder.
 SBIN,SBROWSE,SSTATE,SPID='/mnt/mmc/.soulseek/q2-soulseek','/tmp/q2-soulseek.browse.sock','/tmp/q2-soulseek.state','/tmp/q2-soulseek'
 class SlskMachine(AppMachine): pass
@@ -15227,7 +15228,7 @@ m.open_pages.discard('updatemusic_dialog'); m.poll(); assert m.files[DONE]==b'50
 # Now Playing, and System and Playback settings' own pages, all together here. Any other holds the request until it
 # closes: a page this list doesn't know (a new one's), the App Store, the Library menu, an app's
 # songs and Up Next among them.
-SAFE=['home_page','stream_page','streamconf_page','addon_page','qrcode_page','playing_page','sysset_page','display_page',
+SAFE=['home_page','stream_page','streamconf_page','streamsvc_page','addon_page','qrcode_page','playing_page','sysset_page','display_page',
       'backlight_page','lighttime_page','keylock_page','language_page','datetime_page','autotime_page','manualtime_page',
       'standby_page','powermanager_page','sleepshutdown_page','about_page','bluetooth_page',
       'btquality_page','btadjustvol_page','wifi_page','wifiset_page','netservice_page','playset_page','audiosetting_page',
@@ -17711,26 +17712,30 @@ m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][
 conf=m.nodes[m.nodes[view]['children'][5]]['children'][0]; icon,label=m.nodes[conf]['children'][:2]
 assert m.nodes[icon]['image']=='stream_config' and m.nodes[label]['text']=='Configuration'
 m.click(conf); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming','TIDAL','Spotify','Tidal Downloads','Internet Radio','AirPlay']
-m.row(0); assert m.files[TCAP]==b'4096M' and m.labels()[1]=='Tidal Cache: 4 GB' and endpoint(m,'stream_cache',0)==3
-m.row(0); m.row(0); assert m.files[TCAP]==b'512M' and m.labels()[1]=='Tidal Cache: 512 MB'
-m.row(1); assert m.files[SCAP]==b'4096M' and m.labels()[2]=='Spotify Cache: 4 GB' and endpoint(m,'stream_cache',1)==3
+assert m.labels()[:8]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming','Internet Radio','AirPlay']
+conf=m.page; m.row(2); m.page=m.top; assert m.nodes[m.page]['name']=='streamsvc_page'  # TIDAL's page
+assert m.labels()==['TIDAL','Show in Streaming','Show Downloads','Cache','2 GB']
+m.row(2); assert m.files[TCAP]==b'4096M' and m.labels()[-1]=='4 GB' and endpoint(m,'stream_cache',0)==3
+m.row(2); m.row(2); assert m.files[TCAP]==b'512M' and m.labels()[-1]=='512 MB'
+f,ctx=m.handler(m.page,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
+m.page=conf; m.row(3); m.page=m.top  # Spotify's page
+m.row(1); assert m.files[SCAP]==b'4096M' and '4 GB' in m.labels() and endpoint(m,'stream_cache',1)==3
 m.files[SCAP]=bytearray(b'9G'); assert endpoint(m,'stream_cache',1)==2  # not a choice: 2 GB
 m.word(O['MCL_TYPE'],5); m.play=2; m.waited=m.forked
-m.row(3); m.top=m.node('window','home_page')
+m.page=conf; m.row(0); m.top=m.node('window','home_page')
 assert 'killall -9 librespot aplay' in m.systems[-1] and 'player_stop' in [c[0] for c in m.calls]
 assert [m.text(c[2]+8) for c in m.calls if c[0]=='navigator_to_with_context']==['Streaming stopped']
 assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(O['KEY_PLAY'])!=11; m.close(); passed()
-# Erase Spotify Data, under Spotify Cache, asks on the confirmation card (feedback.c confirm; its answer,
-# navigation.c sc_erase_answer, run as feedback.c would once the card has closed). Erase erases Spotify's login and
-# cache (and .cache-size, so Spotify Cache reads 2 GB again) on the App Store's thread, Spotify stopped first; a press
+# Erase Spotify Data, under Cache on Spotify's page, asks on the confirmation card (feedback.c confirm; its answer,
+# stream_config.c sc_erase_answer, run as feedback.c would once the card has closed). Erase erases Spotify's login and
+# cache (and .cache-size, so Spotify's Cache reads 2 GB again) on the App Store's thread, Spotify stopped first; a press
 # while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
-    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top
+    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(3); m.page=m.top  # Spotify's page
 def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
-assert m.labels()[2:5]==['Spotify Cache: 4 GB','Erase Spotify Data','Stop Streaming Services']
+assert m.labels()==['Spotify','Show in Streaming','Cache','Erase Spotify Data','4 GB']
 m.row(2); assert m.labels()[3]=='Erase Spotify Data' and not m.threads  # asked, nothing erased yet
 erase_answer(m,0); assert not m.threads  # Cancel
 erase_answer(m,1); assert m.labels()[3]=='Erasing…' and len(m.threads)==1 and KILL in m.systems[-1]
@@ -17738,7 +17743,7 @@ m.row(2); assert m.toasts[-1][3]=='Wait for the one in progress' and len(m.threa
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=50_000_000)==0
 assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.spotify/spot.log /mnt/mmc/.spotify/aplay.log /mnt/mmc/.spotify/load.log' in m.systems; del m.files[SCAP]; m.advance(500,clear=False)
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
-assert m.labels()[2:4]==['Spotify Cache: 2 GB','Erase Spotify Data']; passed()
+assert m.labels()[2:]==['Cache','Erase Spotify Data','2 GB']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
 # entry; the two streaming Now Playing pages, a card app's QR code page and Now Playing's About (np_about.c, its
 # Return its own), none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its

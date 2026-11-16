@@ -171,7 +171,7 @@ static const char *library_missing(char *why, unsigned size) {
  * the user's own Update Local Music, and a page this list doesn't know. */
 static int library_safe(void) {
     static const char *const safe[] = {
-        "home_page",         "stream_page",        "streamconf_page",   "addon_page",
+        "home_page",         "stream_page",        "streamconf_page",   "streamsvc_page",    "addon_page",
         "qrcode_page",       "playing_page",       "sysset_page",       "display_page",
         "backlight_page",    "lighttime_page",     "keylock_page",      "language_page",
         "datetime_page",     "autotime_page",      "manualtime_page",   "standby_page",

@@ -118,13 +118,17 @@ typedef struct {
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
-    void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
+    /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
+     * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, the provider page's Cache
+     * and Erase Spotify Data labels; each 0 while its page is closed */
+    void *sc_page, *sc_sub, *sc_prov[2], *sc_cache, *sc_erase;
+    int sc_of;
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
 #define SVC_HIDE 260 /* STREAMHIDE, "key,key" */
 #define SVC_PROP "ringnav_svc"
-    void *sc_check[SVC_MAX]; /* the Configuration page's switch labels, by service */
+    void *sc_check[SVC_MAX]; /* the Configuration pages' switch labels, by service, while shown */
     int svc_n;               /* the card apps Streaming listed at its last build */
     /* Ratings (ratings.c keeps the rest): Now Playing's window and the window the picker is up on
      * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
@@ -486,6 +490,7 @@ void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
+void caption_item(void *item, const unsigned *text); /* caption_row for a list_item itself */
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption;
 void caption_sel(void *view, void *item);

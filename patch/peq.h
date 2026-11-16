@@ -539,7 +539,7 @@ extern unsigned id3_parses;          /* tags.c: the player's fresh parses (ringn
 int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
 void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts;    /* playback.c ringnav_next: tracks that ended by themselves */
-int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
+int stream_cache(int spotify); /* stream_config.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);
 void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, unsigned px,
                   unsigned color);
@@ -729,7 +729,7 @@ int shelf_open(void *ctx, void *event); /* netupdate.c: System settings' Apps pa
 const char *shelf_busy(void);           /* netupdate.c: the app folder a job replaces */
 const char *shelf_moving(void);         /* netupdate.c: the app folder deleted or moved into */
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
-void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
+void stream_erased(void);               /* stream_config.c: Configuration follows a finished erase */
 void album_lyrics_stop(void); /* onlinematch.c: Download Album Lyrics before USB storage */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };

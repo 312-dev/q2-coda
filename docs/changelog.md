@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streaming > Configuration (OLED): TIDAL and Spotify are rows that open their own page, each reading Shown or Hidden: TIDAL's holds its Show in Streaming and Show Downloads switches and its Cache, Spotify's its switch, Cache and Erase Spotify Data. The Cache rows read their size on the right, and the selected row says what it does underneath. Internet Radio, AirPlay and card apps keep one switch each under Show in Streaming.
   - Update Library (OLED): the scan's page looks like the empty pages: a spinner, then a ring with the percent once the Q2 Muse knows how many songs to expect, the count in large type ("312 of 704 songs") with the folder being scanned under it, and one **Stop** button. When it ends it says how: **Library Updated** with the songs and how many are new, **Scan Stopped**, or **Not Enough Space** when the library's storage is full.
   - Settings > General: one **Software Update** row replaces SD Card Update and Network Update. It looks online and on the SD card at once and offers what it finds, the online update first (with **Install from SD Card instead** when the card has one too); with Wi-Fi off it checks the card and offers to turn Wi-Fi on, and an online check that fails never hides the card's update.
   - Spinning the wheel fast through the Wi-Fi network list (or Bluetooth's devices, the queue, Internet Radio and other lists not in A to Z order) no longer flashes a big letter in the middle of the screen; the letter and the A-Z index show only on the Library's alphabetical lists.
