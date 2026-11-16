@@ -731,8 +731,21 @@ def test_oled_home_rows_are_32():
     rows = named(n['list_view_home'])  # the carousel's cards take the same names
     assert [rows['btn_' + r][1] for r in ipod.HOME_ROWS] == [[0, 32 * i, 375, 32] for i in range(7)]
     assert named(n['list_view_home'])['scroll_view_home'][1] == [0, 0, 375, 7 * 32]  # all seven at rest
-    assert n['list_view_homeset'][1] == [0, ipod.HOME_TOP, 375, 7 * 32]  # nine rows: two scroll and n['list_view_homeset'][2]['item_height'] == '32'
+    foot = 320 - OLED_SET.bar - ipod.HOME_TOP  # Settings' list runs on to the window's foot: its eighth row peeks
+    assert n['list_view_homeset'][1] == [0, ipod.HOME_TOP, 375, foot] and n['list_view_homeset'][2]['item_height'] == '32'
     root = home(); ipod.ipod_home(root); assert named(root)['list_view_home'][2]['item_height'] == '39'
+
+
+def test_no_oled_home_list_ends_on_whole_rows_above_the_list_end():
+    # The main list's box is its seven rows, which home_overflow runs on to the foot at run time; every other Home list
+    # (Settings', Library's, Streaming's) is built reaching the window's foot, so a row past list_end peeks through the
+    # fade (navigation.c list_fade) instead of being cut off at a whole row (a list cut there gets no fade at all).
+    g = dataclasses.replace(OLED_SET, home_lib=1)
+    root = home(); ipod.ipod_home(root, g=g); n = named(root)
+    lists = [k for k in n if k.startswith('list_view_home') and k != 'list_view_home']
+    assert lists == ['list_view_homeset', 'list_view_homelib', 'list_view_homestream']
+    for k in lists:
+        assert ipod.HOME_TOP + n[k][1][3] >= 320 - g.bar, k  # Library's and Streaming's are window-high, from HOME_TOP
 
 
 def test_status_bar_takes_the_bar_height():
