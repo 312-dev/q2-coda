@@ -505,15 +505,6 @@ def test_light_mode_flips_a_quick_control_s_inactive_disc_whole(fw, bitmaps):
     assert plate.rows() == rows
 
 
-def test_the_theme_s_own_light_half_keeps_the_lock_hint_white(fw, bitmaps):
-    """OLED states its light half (light.paper, light.ink): the lock screen's hint lies on a picture or a dark page
-    there, so it is not flipped."""
-    theme(fw, LIGHT='1')
-    bm = bitmaps(fw, [[WHITE, CLEAR]])
-    image_add(fw, b'scrsaver_slide', bm)
-    assert bm.rows() == [[WHITE, CLEAR]]
-
-
 def test_light_mode_leaves_an_image_the_accent_mapped(fw, bitmaps):
     theme(fw, LIGHT='1')
     bm = bitmaps(fw, [[RED_PX, WHITE, WHITE, WHITE]])

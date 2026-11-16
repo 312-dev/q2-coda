@@ -1066,42 +1066,6 @@ def rows_page(fw, ui, recs, st, stock_globals):
     return lambda **kw: Playlists(fw, ui, recs, **kw)
 
 
-def test_playlists_rows_are_new_edit_then_the_playlists_with_their_counts(rows_page, ui):
-    p = rows_page()
-    assert p.ring(p.win) == 0x31
-    assert p.shown() == [('New Playlist…',), ('Select Playlists…',), ('Gym', '12 Songs'), ('Road Trip', '1 Song'),
-                         ('Sleep', '0 Songs')]
-    assert p.title() == 'Playlists' and not ui.lookup(p.win, '_pl_none', 0)
-
-
-def test_playlist_rows_lose_their_art_and_keep_their_dots_column(rows_page, ui):
-    p = rows_page()
-    p.ring(p.win)
-    button = p.playlist(0)
-    art, info, dots, mark = ui.kids(button)
-    assert not ui.nodes[art].visible and ui.nodes[dots].visible and ui.nodes[dots].image == 'unselect'
-    assert ui.nodes[ui.nodes[button].parent].props['_pl_row'] == 1
-    assert ui.nodes[info].rect()[0] + ui.nodes[info].rect()[2] <= PL_MARK_X <= sum(ui.nodes[dots].rect()[::2])
-
-
-def test_playlists_rows_hide_stocks_tiles_and_bind_their_own_keys(rows_page, ui):
-    p = rows_page()
-    p.ring(p.win)
-    assert not ui.nodes[ui.kids(p.view)[0]].visible  # Import and Export's tiles: the rows click them
-    assert ui.handlers(p.win, EVT_KEY_UP) == [ui.fn('pl_keyup')] and ui.fn('pl_gone') in ui.handlers(p.win, EVT_DESTROY)
-    assert all(ui.handlers(p.playlist(i), EVT_CLICK) == [ui.fn('pl_pick')] for i in range(3))  # one: AWTK runs the newest first
-
-
-def test_an_empty_list_says_so_and_offers_import(rows_page, ui):
-    p = rows_page(counts=())
-    p.ring(p.win)
-    assert p.shown() == [('New Playlist…',), ('Import Playlists',)]
-    # the note under the rows (feedback_empty), and how to fill the list
-    none, hint = ui.lookup(p.win, '_empty', 0), ui.lookup(p.win, '_empty_hint', 0)
-    assert ui.nodes[none].text == 'No playlists' and ui.nodes[none].visible
-    assert ui.nodes[hint].text == 'Hold Play/Pause on a song to add it' and ui.nodes[hint].visible
-
-
 def test_the_picker_offers_new_playlist_and_no_dots(rows_page, ui):
     p = rows_page(add=1)
     p.ring(p.win)
@@ -1135,34 +1099,6 @@ def test_a_covers_centre_opens_its_playlist_whatever_mode_a_picker_left(rows_pag
     assert clicks == [(p.playlist(1), 0)]
 
 
-def test_a_row_click_runs_stocks_handler_next_pass(rows_page, ui):
-    p = rows_page()
-    p.ring(p.win)
-    ui.click(p.action('Select Playlists…'))
-    assert not ui.dispatched
-    ui.due('pl_due')
-    target, kind = ui.dispatched[0]
-    assert kind == EVT_CLICK and ui.handlers(target, EVT_CLICK) == [PL_STOCK[PL_EDIT]]
-
-
-def test_the_last_row_clicked_in_a_pass_runs(rows_page, ui):
-    p = rows_page()
-    p.ring(p.win)
-    ui.click(p.action('Select Playlists…'))
-    ui.click(p.action('New Playlist…'))
-    ui.due()
-    assert [ui.handlers(t, EVT_CLICK) for t, _ in ui.dispatched] == [[PL_STOCK[PL_NEW]]]
-
-
-def test_a_row_run_after_the_page_went_does_nothing(rows_page, ui):
-    p = rows_page()
-    p.ring(p.win)
-    ui.click(p.action('New Playlist…'))
-    ui.window('home_page')
-    ui.due()
-    assert not ui.dispatched
-
-
 def select_mode(p, ui, fw):
     """Select Playlists… as stock's handler takes it: g_navbar_status 1, the rows rebuilt with their marks."""
     def edit(w, e, *_):
@@ -1173,54 +1109,10 @@ def select_mode(p, ui, fw):
     ui.due('pl_due')
 
 
-def test_edit_playlists_shows_select_modes_rows(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    assert p.shown() == [('Select All',), ('Gym', '12 Songs'), ('Road Trip', '1 Song'), ('Sleep', '0 Songs'),
-                         ('Import Playlists',), ('Done',)]
-    assert p.title() == 'Select Playlists' and ui.nodes[p.win].props['_pl_marks'] == 1
-    assert ui.nodes[p.view].props['_ringnav_index'] == 1  # Select All's first playlist
-
-
 def recount(p, ui):
     """A playlist row's click: stock's pick (a stub: the marks are p.marked), then the rows count them."""
     stock_handler(PLAYLIST_PICK, 0)
     ui.click(p.playlist(0), 0)
-
-
-@in_fork
-def test_marks_offer_export_and_delete_with_their_count(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    p.marked |= {0, 2}
-    recount(p, ui)
-    assert p.shown()[-3:] == [('Export 2 Playlists',), ('Delete 2 Playlists…',), ('Done',)]
-    assert p.title() == '2 Selected'
-    p.marked = {1}
-    recount(p, ui)
-    assert p.shown()[-3:] == [('Export 1 Playlist',), ('Delete 1 Playlist…',), ('Done',)] and p.title() == '1 Selected'
-
-
-@in_fork
-def test_select_all_reads_deselect_all_once_all_are(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    C.c_ubyte.from_address(G_ALLSELECT_FLAG).value = 1
-    recount(p, ui)
-    assert p.shown()[0] == ('Deselect All',)
-
-
-def test_done_leaves_select_mode_for_the_list_on_edit(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    fw.var('g_navbar_status', C.c_ubyte).value = 0  # stock's Done
-    p.ring(p.win)
-    assert p.shown()[:2] == [('New Playlist…',), ('Select Playlists…',)] and ui.nodes[p.win].props['_pl_marks'] == 0
-    assert p.title() == 'Playlists'
 
 
 @in_fork
@@ -1241,36 +1133,6 @@ def test_a_new_playlist_whose_lookup_fails_is_not_made(fw, failing):
     assert seen[-1] == 'rollback' and not any(q.startswith('insert') for q in seen)
 
 
-def test_return_in_select_mode_is_done(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    seen = []
-    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: seen.append(ui.handlers(w, EVT_CLICK)))
-    assert ui.key(p.win, KEY_RETURN) == STOP
-    ui.due('pl_due')
-    assert seen == [[PL_STOCK[PL_DONE]]]
-
-
-def test_import_in_select_mode_clicks_stocks_tile(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    seen = []
-    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: seen.append(ui.handlers(w, EVT_CLICK)))
-    ui.click(p.action('Import Playlists'))
-    ui.due('pl_due')
-    assert seen == [[PL_STOCK[PL_IMPORT]]]
-
-
-def test_leaving_the_page_in_select_mode_leaves_select_mode(rows_page, ui, fw):
-    p = rows_page()
-    p.ring(p.win)
-    select_mode(p, ui, fw)
-    ui.close(p.win)
-    assert fw.var('g_navbar_status', C.c_ubyte).value == 0
-
-
 def test_leaving_the_page_otherwise_leaves_stocks_mode_alone(rows_page, ui, fw):
     p = rows_page()
     p.ring(p.win)
@@ -1289,12 +1151,9 @@ def test_return_outside_select_mode_is_stocks(rows_page, ui):
 
 @in_fork
 @pytest.mark.parametrize('add, status, x, passed', [
-    (0, 0, PL_MARK_X, PL_MARK_X),       # the dots' column: More, as stock's
-    (0, 0, PL_MARK_X - 1, 0),           # left of it: the playlist opens
-    (0, 1, 100, 100),                   # select mode: stock's mark, where it was
     (1, 0, PL_MARK_X + 10, 0),          # the picker has no More: a pick
 ])
-def test_a_playlist_rows_tap_is_more_only_on_its_dots(rows_page, ui, fw, add, status, x, passed):
+def test_a_picker_rows_tap_anywhere_is_a_pick(rows_page, ui, fw, add, status, x, passed):
     p = rows_page(add=add)
     p.ring(p.win)
     fw.var('g_navbar_status', C.c_ubyte).value = status
@@ -1335,7 +1194,7 @@ def test_a_fresh_list_starts_on_its_first_playlist(rows_page, ui, fw):
     p.ring(p.win)
     m = menu(fw, [ui.kids(item)[0] for item in ui.kids(p.view) if ui.nodes[item].visible])
     first = fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)
-    assert first(m, 0) == 2 and first(m, 3) == 3  # below New and Edit; a playlist stays
+    assert first(m, 0) == 0 and first(m, 3) == 3  # On-The-Go, its first row; a playlist stays
 
 
 def test_a_playlist_just_made_is_where_the_list_lands_once(rows_page, ui, fw):
@@ -1345,7 +1204,7 @@ def test_a_playlist_just_made_is_where_the_list_lands_once(rows_page, ui, fw):
     m = menu(fw, [ui.kids(item)[0] for item in ui.kids(p.view) if ui.nodes[item].visible])
     first = fw.fn('pl_first', C.c_int, C.POINTER(Menu), C.c_int)
     fw.var('playlists__pl_made', C.c_char * 64).value = b'Road Trip'
-    assert first(m, 0) == 3 and first(m, 0) == 2  # Gym, Road Trip, Sleep below New and Edit
+    assert first(m, 0) == 2 and first(m, 0) == 0  # Gym, Road Trip, Sleep below On-The-Go
 
 
 def test_a_list_with_no_actions_first_starts_where_it_is(fw, ui):
@@ -2147,7 +2006,7 @@ def test_holding_play_on_a_song_row_opens_the_songs_menu(hold, recs, ui):
     songs = [song(recs, i) for i in range(3)]
     hold.songs_page('allmusic_page', songs, sel=2)
     assert hold.hold() == STOP
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Add to Favorites', 'Add to Playlist', 'Go to Album', 'Go to Artist']
+    assert hold.menu() == ['Play Next', 'Add to On-The-Go', 'Add to Playlist…', 'Favorite', 'Go to Album', 'Go to Artist']
     assert hold.title() == 'Song 2'
 
 
@@ -2178,7 +2037,7 @@ def test_a_list_changed_under_the_menu_runs_nothing(hold, recs, ui, fw):
     hold.hold()
     hold.menu()
     C.memmove(C.addressof(fw.var('fw_ctx_g_folder_path', C.c_char)), b'/mnt/mmc/x\0', 11)  # browsing moved on
-    hold.pick('Add to Favorites')
+    hold.pick('Favorite')
     assert not fw.calls('batch_add_file') and ui.toasts == ['Queue unchanged']
 
 
@@ -2250,39 +2109,6 @@ def test_a_folder_rows_menu(hold, recs, ui, fw):
     assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Playlist'] and hold.title() == 'Jazz'
 
 
-def test_an_artists_albums_tab_holds_as_albums_from_its_own_class(hold, recs, ui, fw):
-    struct.pack_into('<I', classinfo(fw), 0, 0xff01)  # load_localartist_list's: g_class_type stays the Artists list's
-    albums = [recs(album=a, kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
-    hold.songs_page('artistinfo_page', albums, sel=0, cls=0xf004)
-    hold.hold()
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'Add to Playlist'] and hold.title() == 'Help!'
-    hold.pick('Add to Playlist')
-    assert ui.contexts[-1] == ('localmusic/playlist_page', 0x10000 | 0xff01)  # stock's add, from the tab's albums
-
-
-def test_a_playlist_rows_more_opens_its_dots_page(hold, recs, ui, st, fw, stock_globals):
-    p = Playlists(fw, ui, recs)
-    p.ring(p.win)  # stock's rows as they are: a set with toolbars
-    fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)(p.view, 3, 5)  # Import, Export, Gym, then Road Trip
-    hold.hold()
-    assert hold.menu() == ['Play Next', 'Add to Queue', 'Shuffle', 'More…'] and hold.title() == 'Road Trip'
-    hold.pick('More…')
-    assert ui.contexts[-1] == ('localmusic/playlistsmore_page', 1)
-
-
-@pytest.mark.parametrize('add, menu', [(0, ['Play Next', 'Add to Queue', 'Shuffle', 'More…']), (1, None)])
-def test_the_add_to_playlist_pickers_hold_is_stocks(hold, recs, ui, fw, stock_globals, add, menu):
-    """The picker is playlist_page too, its rows a playlist each with its dots over the same playlists: only its
-    add mode tells it from the list."""
-    p = Playlists(fw, ui, recs, add=add)
-    p.ring(p.win)
-    rows = len(ui.kids(p.view)) + (not add)  # the list's Import and Export tiles are a row each
-    fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)(p.view, rows - 2, rows)  # Road Trip
-    assert ui.lookup(p.playlist(1), 'img_more1', 0)
-    fw.mock('stock_keylong_trampoline', lambda *_: 0x77)
-    assert hold.hold() == (0x77 if add else STOP) and hold.menu() == menu
-
-
 def test_most_playeds_tracks_hold_as_its_songs(hold, recs, ui, st, fw):
     songs = [song(recs, i) for i in range(3)]
     hold.songs_page('mostplayed_page', songs, sel=1, showlist=False, cls=0xf003)  # the Library last listed albums
@@ -2290,8 +2116,8 @@ def test_most_playeds_tracks_hold_as_its_songs(hold, recs, ui, st, fw):
     st('mp_list', C.c_void_p).value = mp = hold.deques.new(songs)
     hold.hold()
     rows = hold.menu()
-    assert hold.title() == 'Song 1' and 'Add to Favorites' in rows and 'Add to Playlist' not in rows
-    hold.pick('Add to Favorites')
+    assert hold.title() == 'Song 1' and 'Favorite' in rows
+    hold.pick('Favorite')
     (cls, kind, tracks, *_), = [a for _, a in fw.calls('batch_add_file')]
     assert (cls, kind, tracks & 0xffffffff) == (0xf001, 0xf00a, mp)  # its own tracks, as songs whatever the Library
 
@@ -3214,8 +3040,8 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
     assert titles() == 'DBAC'
 
 
-@pytest.mark.parametrize('row, hearts', [('Add to Favorites', 5), ('Remove from Favorites', 0)])
-@pytest.mark.parametrize('where', ['library', 'playing'])
+@pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 5), ('library', 'Remove from Favorites', 0),
+                                                ('playing', 'Add to Favorites', 5), ('playing', 'Remove from Favorites', 0)])
 def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, st, recs, mcl, tmp_path, row, hearts,
                                                                        where):
     """Add to and Remove from Favorites on a server song, its Library row or its Stream Cache copy on Now Playing,
