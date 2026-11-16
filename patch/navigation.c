@@ -2098,7 +2098,7 @@ unsigned wide_len(const unsigned *s) {
 }
 
 /* Load and settle the painted surface's selection, then draw it behind the rows: the accent's bar,
- * a grid tile's card, a dot on Home's tiles. */
+ * a grid tile's card, a dot on Home's tiles; nothing behind a picture tile. */
 static void paint_selection(void *w, void *canvas) {
     if (kind(w)) st.sel_w = st.sel_accent = (void *)0;
     if (!w || !canvas || !kind(w)) return;
@@ -2173,6 +2173,8 @@ static void paint_selection(void *w, void *canvas) {
         if (radius > T->sel_radius) radius = T->sel_radius;
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
         gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+    } else if (theme()->set_switch && !tk_strcmp(widget_get_type(g_menu.at[i]), "image")) {
+        /* a picture tile (Speed's buttons) is its own lit state: no card behind it */
     } else if (home) {
         rect_t dot = { HOME_DOT_X, r.y + (r.h - HOME_DOT) / 2, HOME_DOT, HOME_DOT };
         fill_box(canvas, &dot, 0xffffffff, HOME_DOT / 2);
