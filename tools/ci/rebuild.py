@@ -10,8 +10,10 @@ What it adds to tools/build.py, which it runs:
   builds' disk, not dozens. The path printed is the build's own directory, never the link;
 - nothing at all when cur was built from the same sources (source_sha256) and options: a test of an
   unchanged tree reuses it;
-- ccache in front of clang and cc (/usr/lib/ccache, base_dir $HOME, hash_dir off, so worktrees share
-  objects), and Q2_BUILD_CACHE for tools/build.py's font work (`memo`);
+- ccache in front of clang and cc (/usr/lib/ccache, base_dir $HOME, hash_dir off; the build runs in one
+  fixed directory and is renamed after, as the include path is hashed). A --dev build's number is in
+  stock.h, which most sources include, so ccache pays off on a release build, not a --dev one;
+- Q2_BUILD_CACHE for tools/build.py's font work (`memo`), which pays off on every build;
 - the stock files every build writes unchanged (stock.squashfs, stock-demo, libc-2.28.so) hardlinked to
   one copy in ~/.cache/q2-builds/stock/, and root.pseudo, the build's 108 MB scratch, dropped.
 
@@ -89,9 +91,11 @@ def main():
         print(cur)
         return 0
     place.mkdir(parents=True, exist_ok=True)
-    for stale in place.glob('b*'):  # a build this tool started and did not finish
-        if not (stale/'rebuild.json').exists():
-            shutil.rmtree(stale)
+    # Built in one fixed place, then renamed: ccache hashes the include path (-I OUT), so a new directory
+    # each time would miss every object.
+    building = place/'building'
+    if building.exists():
+        shutil.rmtree(building)  # a build this tool started and did not finish
     env = dict(os.environ)
     ccache = pathlib.Path('/usr/lib/ccache')
     if ccache.is_dir() and shutil.which('ccache'):
@@ -100,12 +104,13 @@ def main():
         env.setdefault('CCACHE_NOHASHDIR', '1')
     env.setdefault('Q2_BUILD_CACHE', str(BUILDS/'memo'))
     t = time.perf_counter()
-    cmd = [args.python, str(ROOT/'tools/build.py'), str(ZIP), '--out', str(new), *options]
+    cmd = [args.python, str(ROOT/'tools/build.py'), str(ZIP), '--out', str(building), *options]
     p = subprocess.run(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if p.returncode:
         sys.stderr.write(p.stdout)
         print(f'build failed (exit {p.returncode}); {cur if cur.exists() else "no build"} left as it was', file=sys.stderr)
         return p.returncode
+    building.rename(new)
     saved = dedupe(new)
     (new/'rebuild.json').write_text(json.dumps({'source_sha256': source, 'options': options}))
     tmp = place/'cur.new'
