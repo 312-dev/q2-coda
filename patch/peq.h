@@ -462,6 +462,9 @@ int addon_goes(const char *path);      /* addon.c: Go to on path opens a page */
 int addon_scrobbles(const char *path); /* addon.c: not when path's app says scrobble=0 */
 int addon_more(void); /* addon.c: Now Playing's ⋯ opens the playing queue's app's page */
 int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
+/* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
+int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
+int addon_radio_answer(unsigned seq);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);

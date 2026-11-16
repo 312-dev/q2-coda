@@ -935,6 +935,9 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void);
+/* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
+int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
+void song_radio_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */

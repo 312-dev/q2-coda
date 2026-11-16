@@ -471,6 +471,7 @@ int ringnav_sleep(void *loop) {
     radio_poll();
     addon_poll();
     coda_rc_poll();
+    song_radio_poll();
     airplay_poll();
     playback_poll();
     resume_poll();

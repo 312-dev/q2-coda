@@ -37,7 +37,7 @@ LIBRARY = 0xf001  # stock's library class, which a local queue plays under
 class App(C.Structure):
     _fields_ = [('id', C.c_char * 16), ('name', C.c_char * 32), ('tips', C.c_char * 32), ('bin', C.c_char * 48), ('run', C.c_char * 48),
                 ('pid', C.c_char * 32), ('state', C.c_char * 40), ('browse', C.c_char * 48), ('icon', C.c_char * 56), ('more', C.c_char * 48),
-                *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'sync', 'sync_pm')),
+                *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio', 'sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
 
 
@@ -5501,3 +5501,27 @@ def test_an_empty_artist_is_the_empty_note_without_its_sync_row(fw, nav_st, extr
         assert b'Add to Sync' not in said
     else:
         assert p.drawn > 0 and b'Add to Sync' in said
+
+
+def test_a_server_songs_radio_is_asked_of_its_app(fw):
+    """Song radio (song_radio.c, docs/internals.md#radio): a song in an app's folder whose q2app says radio=1 is the
+    app's to radio, asked in /tmp/q2-<id>.radio once its socket is there; its state file's radioack answers."""
+    p = Page(fw, b'name=Foo\nradio=1\n', opens=False)
+    start = fw.fn('addon_radio_start', C.c_int, C.c_void_p, C.c_uint)
+    answer = fw.fn('addon_radio_answer', C.c_int, C.c_uint)
+    path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
+    assert start(block(fw, path), 7) == 1
+    assert b'/tmp/q2-foo.radio' not in p.world.files  # no socket yet: the app reads a request at its start as answered
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    assert answer(7) == -1
+    assert p.world.files[b'/tmp/q2-foo.radio'] == b'7 start ' + path + b'\n'
+    p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nradioack=7 1\n'
+    assert answer(7) == 1 and answer(8) == -1
+
+
+def test_an_app_without_radio_is_not_asked(fw):
+    p = Page(fw, b'name=Foo\n', opens=False)
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
+    assert fw.fn('addon_radio_start', C.c_int, C.c_void_p, C.c_uint)(block(fw, path), 7) == 0
+    assert b'/tmp/q2-foo.radio' not in p.world.files
