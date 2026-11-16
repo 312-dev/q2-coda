@@ -1,12 +1,13 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
- * Wi-Fi, a card app's sync, a Bluetooth headset's battery and Buttons Lock's padlock. Each slot
- * that shows takes its box and the gap before the one on its right; the clock sits beside the
- * leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title gives way. The
- * battery is stock's view_battery, laid out by the bar's right group and painted by navigation.c
- * paint_battery; every other slot is painted here, from the bar's background (ringnav_paint_bg), so
- * Home in Split inks them by contrast with the rest (coverflow.c home_ink): slots keep INK_GAP
- * columns of ground between them, and the animated ones repaint only their own box. */
+ * Wi-Fi, a card app's sync, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's
+ * padlock. Each slot that shows takes its box and the gap before the one on its right; the clock
+ * sits beside the leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title
+ * gives way. The battery is stock's view_battery, laid out by the bar's right group and painted by
+ * navigation.c paint_battery; every other slot is painted here, from the bar's background
+ * (ringnav_paint_bg), so Home in Split inks them by contrast with the rest (coverflow.c home_ink):
+ * slots keep INK_GAP columns of ground between them, and the animated ones repaint only their own
+ * box. */
 #include "navigation.h"
 
 #define SR_FRAME_MS 125 /* the level bars and the sync arrows: 8 frames a second */
@@ -21,8 +22,11 @@
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
 #define SR_RING_R 7.0f /* its centre line's radius */
 #define SR_RING_LINE 1.6f
-#define SR_DOWN 8   /* the arrow inside it */
-#define SR_BT_GAP 2 /* the Bluetooth glyph's box, then the headset's percentage */
+#define SR_DOWN 8       /* the arrow inside it */
+#define SR_BT_GAP 2     /* the headphones glyph's box, then the headset's battery */
+#define SR_HS_BATT_W 15 /* the headset's battery: a 15x8 body (list_marks.c battery_slim) */
+#define SR_HS_BATT_H 8
+#define SR_HS_NUB 2 /* ... and its nub's columns past it */
 #define SR_TAP_W 44 /* a slot's tap target round its centre, as the battery's */
 #define SR_TAP_H 40
 #define SR_TAP_SLOP 12
@@ -63,24 +67,31 @@ static int wifi_level(void) {
  * shows the full glyph. A DNS lookup or an HTTP check from a worker would lift it. */
 static int wifi_offline(void) { return networkGetConnectStatus() <= 0; }
 
-/* The percentage's width at BATT_PX, as navigation.c measures the battery's (st.pct_digit, sign),
- * estimated before the battery's first paint measured them. */
-static int pct_w(int level) {
-    int digit = st.pct_digit ? st.pct_digit : 10, sign = st.pct_sign ? st.pct_sign : 14;
-    return (level >= 100 ? 3 : level >= 10 ? 2 : 1) * digit + sign;
-}
-
 static int play_shown(void) {
     int s = bar_status();
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
 static int wifi_shown(void) { return wifi_level() ? SR_GLYPH : 0; }
 static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
-/* The headset's slot at level (bt_headset_battery's): its width, 0 for none */
-static int headset_w(int level) {
-    return level >= 0 ? SR_GLYPH + SR_BT_GAP + pct_w(level > 100 ? 100 : level) : 0;
+/* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
+ * link list's last item is the device it links (status 3 connected, as its rows read it); a link
+ * thread running (bt_connectstatus 1) is a device connecting. */
+enum { BT_SLOT_NONE, BT_SLOT_CONNECTING, BT_SLOT_RUNE, BT_SLOT_HEADSET, BT_SLOT_CAR };
+static int bt_slot(void) {
+    char item[32] = "";
+    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
+    if (n > 0) getBtLinkItem(n - 1, &status, item);
+    if (status != 3)
+        return n > 0 && I(bt_connectstatus, 0) == 1 ? BT_SLOT_CONNECTING : BT_SLOT_NONE;
+    if (!tk_strcmp(bt_kind(bt_headset_class()), "car")) return BT_SLOT_CAR;
+    return bt_headset_battery() >= 0 ? BT_SLOT_HEADSET : BT_SLOT_RUNE;
 }
-static int headset_shown(void) { return headset_w(bt_headset_battery()); }
+static int headset_shown(void) {
+    int slot = bt_slot();
+    return slot == BT_SLOT_NONE      ? 0
+           : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
+                                     : SR_GLYPH;
+}
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 
 /* The level bars (Up Next's, upnext.c un_level): playing, Text Primary, moving a frame a tick;
@@ -154,22 +165,28 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
 }
 
-/* The headset: the Bluetooth glyph, then its level and "%" in the battery's percentage type, Text
- * Primary, on one line. */
-static void headset_draw(void *bar, void *canvas, int x, int cy, int level) {
-    int px = BATT_PX;
-    unsigned s[5], n = put_num(s, (unsigned)(level > 100 ? 100 : level));
-    s[n++] = '%';
-    glyph(bar, canvas, "status_bt", x, SR_GLYPH, cy, SR_GLYPH);
-    void *lcd = P(canvas, CANVAS_LCD);
-    unsigned text = lcd ? (unsigned)I(lcd, LCD_TEXT_COLOR) : 0;
-    canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
-    canvas_set_text_color(canvas, RGBA(ipod_light() ? 0 : 0xffffff));
-    canvas_draw_text(canvas, s, n, x + SR_GLYPH + SR_BT_GAP, cy - px / 2);
-    if (lcd) stock_canvas_set_text_color(canvas, text);
-}
+/* The Bluetooth slot: nothing while off or idle; the rune dim while a device connects and in Text
+ * Primary once one is connected; a headset that reports its level, the headphones glyph and a 15x8
+ * battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
 static void headset_paint(void *bar, void *canvas, int x, int cy) {
-    headset_draw(bar, canvas, x, cy, bt_headset_battery());
+    switch (bt_slot()) {
+    case BT_SLOT_CONNECTING:
+        glyph(bar, canvas, "status_btdim", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_RUNE:
+        glyph(bar, canvas, "status_bt", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_CAR:
+        glyph(bar, canvas, "status_car", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_HEADSET: {
+        int level = bt_headset_battery();
+        glyph(bar, canvas, "status_headphones", x, SR_GLYPH, cy, SR_GLYPH);
+        battery_slim(bar, canvas, x + SR_GLYPH + SR_BT_GAP, cy - SR_HS_BATT_H / 2, SR_HS_BATT_W,
+                     SR_HS_BATT_H, (unsigned)(level > 100 ? 100 : level) << 4);
+        break;
+    }
+    }
 }
 
 /* Buttons Lock's padlock (keylock.c), the theme's keylock art in Text Primary. */
@@ -308,8 +325,9 @@ static int sr_tick(const void *info) {
 
 /* bar_state_sync, each bar paint and each second: the frames' timer started while lit and
  * something moves; 1 when what the slots show changed (which slots, the play state, Wi-Fi's level
- * or its internet, the sync's kind and its ring to the 50th, the headset's level, the lock), so the
- * bar repaints whole after the frame and the clock moves beside the new leftmost slot. */
+ * or its internet, the sync's kind and its ring to the 50th, the Bluetooth slot's kind and the
+ * headset's level, the lock), so the bar repaints whole after the frame and the clock moves beside
+ * the new leftmost slot. */
 int status_row_sync(void) {
     if (!geom_val(V_STATUS_Y)) return 0;
     if (!sr.timer && g_backlight_status && moving())
@@ -322,7 +340,7 @@ int status_row_sync(void) {
                               : head > 100 ? 100
                                            : head)
                        << 14 |
-                   (unsigned)!!g_keylock_flag << 21 | 1u << 22;
+                   (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;
