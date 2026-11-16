@@ -980,6 +980,15 @@ def test_a_page_the_card_no_longer_fills_is_its_last(fw):
     assert p.props[(p.ui.view, 'offset')] == 0 and p.props[(p.ui.view, '_ringnav_index')] == 0
 
 
+def eq_carded(fw):
+    """Whether the confirmation card asked (it opens stock's sortselect_dialog)."""
+    return any(C.string_at(a[0]) == b'dialog/sortselect_dialog' for _, a in fw.calls('navigator_to'))
+
+
+def eq_answer(fw, row):
+    fw.fn('peq_ui__eq_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
 def test_saving_offers_ten_slots_and_asks_before_replacing(fw):
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
     p.click('Presets')
@@ -987,10 +996,9 @@ def test_saving_offers_ten_slots_and_asks_before_replacing(fw):
     assert p.captions() == [f'Save as Manual {k:02}' for k in range(1, 11)] and p.title() == 'Presets'
     p.click('Save as Manual 03')
     assert f'{FOLDER}/Manual 03.txt' in p.card.files and p.said == ['Preset saved; active EQ unchanged'] and p.title() == 'Presets'
-    p.click('Save as Manual 03')
-    assert p.captions() == ['Replace existing preset? Confirm', 'Cancel replacement'] and p.ui.screen == CONFIRM
-    assert p.props[(p.ui.view, '_ringnav_index')] == 1  # opens on Cancel: a Centre on arrival replaces nothing
-    p.click('Cancel replacement')
+    p.click('Save as Manual 03')  # the card asks over the slots (feedback.c confirm), CONFIRM the state
+    assert p.ui.screen == CONFIRM and eq_carded(fw) and p.captions()[2] == 'Save as Manual 03'
+    eq_answer(fw, 0)  # Cancel
     assert p.ui.screen == SAVES
 
 
@@ -1007,13 +1015,10 @@ def test_deleting_asks_then_deletes(fw):
     p = page(fw, files={f'{FOLDER}/a.txt': b'x'}).advanced()
     p.click('Presets')
     p.click('Delete a preset')
-    p.click('a.txt')
-    assert p.captions() == ['Delete a.txt? Confirm', 'Cancel']
-    assert p.props[(p.ui.view, '_ringnav_index')] == 1  # opens on Cancel: a Centre on arrival deletes nothing
-    rh = fw.fn('page_h', C.c_int, C.c_int)(48)
-    shrunk = [h for (w, k), h in p.props.items() if k == 'resized' and w in p.alive]
-    assert shrunk == [2 * rh, 2 * rh]  # the list and its view end at the last row: no white below
-    p.click('Delete a.txt? Confirm')
+    p.click('a.txt')  # the card asks over the presets, Cancel first (feedback.c confirm)
+    assert p.ui.screen == CONFIRM and eq_carded(fw) and 'a.txt' in p.captions()
+    eq_answer(fw, 1)  # Delete
+    p.settle()
     assert f'{FOLDER}/a.txt' not in p.card.files and p.said == ['Deleted a.txt; active EQ unchanged']
     assert p.title() == 'No presets found'  # the list's own state, which its render puts in the title (list_files)
     p.ret()
@@ -1026,7 +1031,8 @@ def test_a_failed_delete_says_so(fw):
     p.click('Delete a preset')
     p.click('a.txt')
     fw.mock('fw_unlink', lambda *_: -1)
-    p.click('Delete a.txt? Confirm')
+    eq_answer(fw, 1)
+    p.settle()
     assert p.said == ['Delete failed; preset kept'] and p.title() == 'Presets'
 
 
