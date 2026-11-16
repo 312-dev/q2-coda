@@ -381,7 +381,7 @@ static void standby_poll(void) {
  * upright by stock ffmpeg; anything but a 320x375 baseline JPEG is refused and LOGO_DST kept. No
  * card file, no LOGO_DST: the stock logo again. The thread keeps ffmpeg and flash off the UI; the
  * poll toasts its failure. */
-#define LOGO_SRC "/mnt/mmc/Q2Pod/boot/boot-logo.jpg"
+#define LOGO_SRC "/mnt/mmc/Q2Muse/boot/boot-logo.jpg"
 #define LOGO_DST "/mnt/data/boot-logo.jpg"
 #define LOGO_ROT "/tmp/boot-logo.jpg"
 #define LOGO_MAX (512 * 1024)

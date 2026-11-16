@@ -588,7 +588,7 @@ close (`0x4a1d30`, on `EVT_WINDOW_CLOSE`) makes it: Now Playing had no Quick Set
 had gone back to the one left open and closed it (#303). Inferred from the handlers; the emulator
 mocks the window manager.
 
-Over a prompt (`confirminfo_dialog` in front: Shut Down?, and Q2 Pod's own) the hold cancels it
+Over a prompt (`confirminfo_dialog` in front: Shut Down?, and Q2 Muse's own) the hold cancels it
 with `dialog_quit(top, 4)`, the prompt's own Return (`0x499bdc`). `usable` is true there, so the
 hold used to open Now Playing under the prompt's modal loop, and the prompt came back over it: a
 second Shut Down? (#303). That it was the same prompt back, not a new one, is inferred from a
@@ -954,7 +954,7 @@ builds three rows with `0x4c6b94`: a `list_item_create(view, 0, 0, 0, 0)` in `s_
 `s_btn_listitem` with a click handler, and in it a 52-pixel icon at x 10, a
 `s_scrlabel_white24l` `hscroll_label` at (72, 0, 210, 70) and `list_into` at x 282. The rows
 show no value; each opens a sub-page (iPod's [settings rows](#settings) then lay them out 68
-pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Pod has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
+pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Muse has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
 (`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow, and last the **Enlarged Album Art** switch (stock's `PLAYSET COVERMODE`, Now Playing's art). System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
@@ -986,7 +986,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
 changes it in place.
-The build also appends **Boot to: Rockbox / Q2 Pod** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
+The build also appends **Boot to: Rockbox / Q2 Muse** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
 General ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
 the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, drawn as the confirmation card
 ("Restart?" or "Shut Down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
@@ -1083,7 +1083,7 @@ painted it white, which drew the box at rest.
   none; an album shows each track's number in a 14 px column before the title (from x 50) and its length on the
   right column, once Scan Song Durations has measured it. **Song Artist**: Inline (the default), Selected Row (the
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
-  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Pod builds
+  Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` pill low in the glass,

@@ -1,4 +1,4 @@
-// coda-rc: Q2 Pod's own remote-control protocol, version 1.
+// coda-rc: Q2 Muse's own remote-control protocol, version 1.
 //
 // The wire format, transports, pairing and error handling are in docs/remote-protocol.md; this file is
 // the message set. Every frame's payload is one of these messages in protobuf's binary encoding, chosen by

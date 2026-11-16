@@ -57,7 +57,7 @@ The Q2 is the GATT peripheral, the phone the central. One primary service with t
 - The device's notifications start once the client enables them on `event` (its CCCD); the client should do that before writing `Hello`.
 - One session per connection; disconnecting ends it. The device serves one BLE connection at a time.
 - The characteristics require an encrypted link (`encrypt-write`, `encrypt-notify` in BlueZ terms), so the phone bonds with the Q2 (LE Secure Connections, Just Works) before the first write. That bond only keeps strangers' radios from talking to the GATT server cheaply; it is not what authenticates the phone, because Just Works has no user check. The app-level pairing below is.
-- Advertising carries the service UUID and the local name `Q2 Pod`. It runs only while Car Remote is on.
+- Advertising carries the service UUID and the local name `Q2 Muse`. It runs only while Car Remote is on.
 
 Implemented with BlueZ's D-Bus API (`org.bluez.GattManager1`, `org.bluez.LEAdvertisingManager1`) in `patch/coda_rc_ble.c`. The emulator has no Bluetooth, so this transport is proven only on a real Q2: see [Testing on a Q2](#testing-on-a-q2).
 

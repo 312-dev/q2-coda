@@ -1,6 +1,6 @@
 # The stock player
 
-What `hciplayer` is, how `demo` drives it, and everything it does besides decoding, written down so a new player ([player-plan.md](player-plan.md)) can stand in for it. Every address is stock V1.36's. Facts come from three places, named with each: the binaries (`usr/bin/hciplayer`, SHA-256 `f02ccc45…`, stripped; `release/bin/demo`, which has symbols), traffic captured from the real programs under qemu ([Capturing](#capturing)), and [internals.md](internals.md), which already covers each fault Q2 Pod patches. Where the emulator cannot settle something, [Open questions](#open-questions) says what measurement on a Q2 would.
+What `hciplayer` is, how `demo` drives it, and everything it does besides decoding, written down so a new player ([player-plan.md](player-plan.md)) can stand in for it. Every address is stock V1.36's. Facts come from three places, named with each: the binaries (`usr/bin/hciplayer`, SHA-256 `f02ccc45…`, stripped; `release/bin/demo`, which has symbols), traffic captured from the real programs under qemu ([Capturing](#capturing)), and [internals.md](internals.md), which already covers each fault Q2 Muse patches. Where the emulator cannot settle something, [Open questions](#open-questions) says what measurement on a Q2 would.
 
 ## What it is
 
@@ -51,7 +51,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-replaygain` | mode | `0xb11e48`, taken at the next file (`0xb11e40` = 2). | none |
 | `mcl-seteq` | ten floats and a flag, `\|` between | The ten band gains (`0xb11e0c` on) and on (1), "preset changed" (2) or off (0) (`0x42cb08`). Stock refuses it above 48 kHz. | none |
 | `mcl-playspeed` | 0 to 3 | Stored (`0xb11e00`, `0x42c7c4`) and read only where a file's audio chain is built (`0x42e7c8`, in `reinit_audio_chain`): 1, 2 and 3 play at 1.25, 1.5 and 2 times (floats at `0x88c910`, `0x88c90c`, `0x88c908`) through MPlayer's `scaletempo`, pitch kept (a filter control `0x40003500`, MPlayer's `AF_CONTROL_PLAYBACK_SPEED` set), and only for a file of 48 kHz or less, as demo's Speed page says; 0 and anything above 48 kHz play at 1. | none |
-| `mcl-scan` | hundredths, below 0 backward | Not stock's: Q2 Pod's hold-to-scan ([Scan](#scan)), which only q2player takes. | none |
+| `mcl-scan` | hundredths, below 0 backward | Not stock's: Q2 Muse's hold-to-scan ([Scan](#scan)), which only q2player takes. | none |
 | `mcl-setexplayinfo` | 0, 1, 2 | Which meter the play loop fills: none, level, spectrum (`0xb11db0`). | none |
 | `mcl-mqadecodemode` | integer | Stored and read by nothing. | none |
 | `player-status` | `request` | | `{player-status\playing}` when `flag` is 2, else `{player-status\ready}` |
@@ -60,7 +60,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-getuvmeter` | `null` | | `{mcl-getuvmeter\L\|R}` |
 | `mcl-getspectrum` | `null` | | `{mcl-getspectrum\` twelve integers `}` |
 | `mcl-pcmstate` | `null` | | `{mcl-pcmstate\N}`, `0xb11c24` or 0 when it is negative: the MQA decoder's state, 1 to 3, which the UI shows as its MQA mark (the M1 Plus's `mclGetMQAState`, in [shanling-m1plus-navidrome](https://github.com/shivaluma/shanling-m1plus-navidrome)'s `docs/research/native-integration-evidence.md`). Always 0 on V1.36, where the decoder is never made |
-| `mcl-click` | `wheel`, `button`, `beep`, `charge` | Not stock's: q2player's, sent by Q2 Pod's payload for the Clicker (`patch/clicker.c`, [internals: Key Tone](internals.md#key-tone)), and `charge` at a cable in ([internals: Charging](internals.md#charging)), while a song plays. q2player mixes the sound into what is about to be heard ([player-plan: Clicker](player-plan.md#the-clicker)); stock's hciplayer, and Q2 Pod's, ignore it as any name they do not know (captured) | none |
+| `mcl-click` | `wheel`, `button`, `beep`, `charge` | Not stock's: q2player's, sent by Q2 Muse's payload for the Clicker (`patch/clicker.c`, [internals: Key Tone](internals.md#key-tone)), and `charge` at a cable in ([internals: Charging](internals.md#charging)), while a song plays. q2player mixes the sound into what is about to be heard ([player-plan: Clicker](player-plan.md#the-clicker)); stock's hciplayer, and Q2 Muse's, ignore it as any name they do not know (captured) | none |
 
 The song fields, from demo's sender `0x5bf504` and hciplayer's parser:
 
@@ -119,9 +119,9 @@ From stock under qemu ([Capturing](#capturing)); times in seconds, polls every 2
 - **Stop:** `{player-stopstatus\exit}` 60-160 ms after `mcl-stop`. With nothing loaded, no answer.
 - **A missing file, a file of noise:** `{player-status\error}` about 55 ms after `set-songurl`, with `/tmp/notfile` and `/tmp/notsupport` made.
 - **Pause:** `player-status` goes on answering `playing`; the position stands still. A seek while paused shows in the position only after `mcl-play`.
-- **A seek:** the position follows 0.2 to 1.5 s later. A FLAC seek can end the song: to 15 s of a 20 s file it did, half a second later (`stock-transport.txt`, `stock-gapless-flac.txt`), and to 16 s of the same file it did not (`stock-end.txt`); Q2 Pod's player plays on in all three.
+- **A seek:** the position follows 0.2 to 1.5 s later. A FLAC seek can end the song: to 15 s of a 20 s file it did, half a second later (`stock-transport.txt`, `stock-gapless-flac.txt`), and to 16 s of the same file it did not (`stock-end.txt`); Q2 Muse's player plays on in all three.
 
-The transcripts are in `test/player/fixtures/` (`stock-*.txt` from stock's binary, `pod-*.txt` from Q2 Pod's patched one), and `test/player/run.py` holds the new player to them.
+The transcripts are in `test/player/fixtures/` (`stock-*.txt` from stock's binary, `pod-*.txt` from Q2 Muse's patched one), and `test/player/run.py` holds the new player to them.
 
 ## Output
 
@@ -133,7 +133,7 @@ ao_alsa's init (`0x438248`) picks the device from the output way and the hardwar
 | 1, Bluetooth | `plug:bluealsa` | bluealsa takes one client; the transport's rate (48 kHz for SBC and AAC, 96 kHz S32 for LDAC) is not the file's, so MPlayer adds `lavcresample` ([internals: Bluetooth resampler](internals.md#bluetooth-resampler)) |
 | 2, a USB DAC | `hw:1,0` on a Q2 (hardware type 17; captured) | a 100 ms buffer in stock; software volume when `mcl-softvolflag` is 1 |
 
-Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). Software parameters (`0x438d64`-`0x438dc4`, the same on every way; the emulator's log of alsa-lib 1.1.6's calls agrees: 22,050 frames in periods of 1,378 at 44.1 kHz, boundary 1,445,068,800): `snd_pcm_sw_params_current`, then `start_threshold` a period (`get_period_size`'s answer), `stop_threshold` and `silence_size` the boundary (`get_boundary`'s), and nothing else, so `avail_min` stays a period and `silence_threshold` 0, ALSA's defaults. A PCM that runs dry is therefore never stopped: the hardware plays the silence ALSA keeps ahead of `hw_ptr` and the stream stays `RUNNING`, where ALSA's defaults (start at the first frame, stop at a buffer of underrun) stop it and the next write's `EPIPE` restarts it. What is written after such an underrun lands behind `hw_ptr` and is lost until `appl_ptr` catches up; Q2 Pod's player moves past it ([internals: Bluetooth resampler](internals.md#bluetooth-resampler), `ao_write`), and so does q2player (`player/output.c`, `sink`), by `snd_pcm_forward` to a period past `hw_ptr`, on every way but Bluetooth, whose plugin stops at its own underrun. The format is the decoder's (captured, the shim's log of `snd_pcm_hw_params_set_format`): `S16_LE` for 16-bit FLAC and for MP3, `S32_LE` for 24-bit FLAC, and `FLOAT_LE` for AAC and Vorbis, whose decoders put out float; `default`'s `plug` turns that into what the DAC takes. Where the device refuses a format the init tries others (`0x439060`-`0x439110`, "Format %s is not supported by hardware, trying default"). The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
+Parameters: interleaved read/write access, the file's rate (`set_rate_near`), its channels, a 500 ms buffer (`0x4382fc`) in 16 periods (`0x438264`). Software parameters (`0x438d64`-`0x438dc4`, the same on every way; the emulator's log of alsa-lib 1.1.6's calls agrees: 22,050 frames in periods of 1,378 at 44.1 kHz, boundary 1,445,068,800): `snd_pcm_sw_params_current`, then `start_threshold` a period (`get_period_size`'s answer), `stop_threshold` and `silence_size` the boundary (`get_boundary`'s), and nothing else, so `avail_min` stays a period and `silence_threshold` 0, ALSA's defaults. A PCM that runs dry is therefore never stopped: the hardware plays the silence ALSA keeps ahead of `hw_ptr` and the stream stays `RUNNING`, where ALSA's defaults (start at the first frame, stop at a buffer of underrun) stop it and the next write's `EPIPE` restarts it. What is written after such an underrun lands behind `hw_ptr` and is lost until `appl_ptr` catches up; Q2 Muse's player moves past it ([internals: Bluetooth resampler](internals.md#bluetooth-resampler), `ao_write`), and so does q2player (`player/output.c`, `sink`), by `snd_pcm_forward` to a period past `hw_ptr`, on every way but Bluetooth, whose plugin stops at its own underrun. The format is the decoder's (captured, the shim's log of `snd_pcm_hw_params_set_format`): `S16_LE` for 16-bit FLAC and for MP3, `S32_LE` for 24-bit FLAC, and `FLOAT_LE` for AAC and Vorbis, whose decoders put out float; `default`'s `plug` turns that into what the DAC takes. Where the device refuses a format the init tries others (`0x439060`-`0x439110`, "Format %s is not supported by hardware, trying default"). The player keeps the PCM open across a preloaded change when rate, channels and format are what it last asked for (`0xafb164`-`0xafb16c`), and otherwise closes and reopens. Pause is `snd_pcm_pause`, a seek is `snd_pcm_drop` and `snd_pcm_prepare`.
 
 `/dev/shanling_dac` is opened by the player too: `0xc0044d1b` sets PCM or DSD mode per track, `0xc0044d1f` is `user_mute` in `codec_cs43131.ko` (the mute line follows 90-100 ms after an unmute), and init also sends `0xc0044d0a`. Mutes surround every pause, seek, start and reopen ([internals: Wired start](internals.md#wired-start), [Unpause](internals.md#unpause)). The order, from the shim's log of stock's player (each argument is a pointer to an `int`):
 
@@ -143,7 +143,7 @@ Parameters: interleaved read/write access, the file's rate (`set_rate_near`), it
 - **Seek:** mute, the 150 ms wait, `snd_pcm_drop`, `snd_pcm_prepare`, unmute. Paused, the seek mutes and drops, and the resume unmutes.
 - **Stop:** mute, close. **A natural end with nothing after it:** drain, close, no mute.
 
-Q2 Pod's player adds the wait for the line after an unmute on a press, a seek and a resume, and its resume drops, prepares and rewrites what the ring held ([internals: Unpause](internals.md#unpause)); the shim shows its resume as drop, prepare, unmute.
+Q2 Muse's player adds the wait for the line after an unmute on a press, a seek and a resume, and its resume drops, prepares and rewrites what the ring held ([internals: Unpause](internals.md#unpause)); the shim shows its resume as drop, prepare, unmute.
 
 **DSD** (`.dsf`, `.dff`, SACD `.iso`): mode 0 converts to PCM (MPD's `pcm_dsd`), mode 1 packs DoP (`pcm_dsd_to_dop`: 24-bit PCM frames at the DSD rate over 16 carrying the bits and the `0x05`/`0xFA` markers), mode 2 writes native DSD. `ET3 not force dsd native` (`0x888abc`) and the hardware type gate which modes a given output takes. DSD skips every filter but the volume. At each file (`0x4210d4`-`0x421a24`) the mode in use is `mcl-dsdmode`'s, then 0 on Bluetooth, and on a Q2 (type 17) 1 on the DAC whatever was asked; other types put 2 on the DAC. Captured, a DSD64 and a DSD128 DSF and a DSD64 DFF in each case:
 
@@ -163,9 +163,9 @@ DoP's frames are the second DSD byte heard, the first, then the marker (0x05 fir
 
 **ReplayGain** (`mcl-replaygain`): the vendor changed FFmpeg's `ff_replaygain_export` (`0x538c84`) to leave the track and album gains and peaks in a global (`0xafd790`), and a filter set up at the next file (`0x4282c0`) applies them. Mode 1 takes the track's gain, or the album's when the file has no track gain; mode 2 the album's; 0 removes the filter, and any other value changes nothing. The gain (in 1/100000 dB) becomes a factor `min(10^(gain/20), 1/peak)`, a peak of 0 (none given) counting as 1, so without a peak a gain only cuts; a gain of exactly 100000 (+1 dB) is skipped, stock's compare against that constant. The filter is MPlayer's volume filter under the name `replaygain`, which multiplies in float and clips at full scale. MP3 goes through MPlayer's own demuxer and a vendor ID3v2 walker that misses most tags ([internals: MP3 ReplayGain](internals.md#mp3-replaygain)).
 
-**EQ** (`mcl-seteq`): MPlayer's ten-band `af_equalizer`, refused above 48 kHz. Q2 Pod replaces it ([below](#what-q2-pod-patches)).
+**EQ** (`mcl-seteq`): MPlayer's ten-band `af_equalizer`, refused above 48 kHz. Q2 Muse replaces it ([below](#what-q2-muse-patches)).
 
-**Meters.** With `mcl-setexplayinfo` 1 ao_alsa's play (`0x43ac54`) measures each write before `snd_pcm_writei` (`0x43a778`): the peak of the first 480 bytes' samples (240 at 16 bits, 160 at 24, 120 at 32 or float), even samples for the left and odd for the right, as whole dB of full scale truncated toward 0 (`20 * log10(peak / full)`, full 32767, 8388607, 2147483647 or 1.0), -60 for a channel at 0, a write under 481 bytes, another format or DSD. The two go to `0xb11dac` and `0xb11da8`, which nothing else writes, so a level stands until the next measured write. With 2 it runs an FFT into twelve spectrum bands (`0x43962c`). Both read 0 before anything is measured. Only demo's VU and spectrum pages ask (`mclGetUVmeter`, `mclGetSpectrum` and `mclSetExPlayInfoMode` are reached from `spectrum_page_init`, `vu_page_init` and their pages' timers alone), and Q2 Pod leaves those pages out ([internals: Stock options held](internals.md#stock-options-held)).
+**Meters.** With `mcl-setexplayinfo` 1 ao_alsa's play (`0x43ac54`) measures each write before `snd_pcm_writei` (`0x43a778`): the peak of the first 480 bytes' samples (240 at 16 bits, 160 at 24, 120 at 32 or float), even samples for the left and odd for the right, as whole dB of full scale truncated toward 0 (`20 * log10(peak / full)`, full 32767, 8388607, 2147483647 or 1.0), -60 for a channel at 0, a write under 481 bytes, another format or DSD. The two go to `0xb11dac` and `0xb11da8`, which nothing else writes, so a level stands until the next measured write. With 2 it runs an FFT into twelve spectrum bands (`0x43962c`). Both read 0 before anything is measured. Only demo's VU and spectrum pages ask (`mclGetUVmeter`, `mclGetSpectrum` and `mclSetExPlayInfoMode` are reached from `spectrum_page_init`, `vu_page_init` and their pages' timers alone), and Q2 Muse leaves those pages out ([internals: Stock options held](internals.md#stock-options-held)).
 
 ## Sources
 
@@ -175,25 +175,25 @@ MPlayer's stream layer opens whatever `URL` names: a path, `http://` and, throug
 | --- | --- | --- |
 | Local files, CUE, M3U | paths; demo expands a CUE or M3U into entries | `mclLoadPlayList` |
 | DLNA renderer and the phone's push | `http://` URLs; for queue types `0xf0`-`0xf3` (`mcl+0x78`) `mclStartPlayer` takes the URL from a callback | `player_dlna_stop`, `dmr_mainscheduling`, `0x5c01c8`-`0x5c03c4` |
-| Tidal | `mcl_tidalStartPlayer` (`0x5bf948`); Q2 Pod's cache plays files it downloaded | [internals: Tidal cache](internals.md#tidal-cache) |
+| Tidal | `mcl_tidalStartPlayer` (`0x5bf948`); Q2 Muse's cache plays files it downloaded | [internals: Tidal cache](internals.md#tidal-cache) |
 | Baidu, QQ Music | `mcl_baiduStartPlayer` (`0x5bfac4`), URLs with `qm_songid` | below |
-| Internet Radio (Q2 Pod) | not the player: `q2video -r` runs `/usr/bin/ffmpeg` and writes the PCM itself | [internals: Internet Radio](internals.md#internet-radio) |
+| Internet Radio (Q2 Muse) | not the player: `q2video -r` runs `/usr/bin/ffmpeg` and writes the PCM itself | [internals: Internet Radio](internals.md#internet-radio) |
 | AirPlay | not the player: `shairport -o alsa` | demo `0x78ac38` |
-| Spotify (Q2 Pod) | not the player: librespot through stock `aplay` to `plughw:0,0` | [librespot.md](librespot.md) |
+| Spotify (Q2 Muse) | not the player: librespot through stock `aplay` to `plughw:0,0` | [librespot.md](librespot.md) |
 
 The last three share the PCM with the player, so demo stops the player before they open it.
 
 ### Streams
 
-Captured from stock's and Q2 Pod's hciplayer under qemu against `test/player/httpd.py` (fixtures `stock-http*`, `pod-http*`, `-https-*`; the two agree but where named):
+Captured from stock's and Q2 Muse's hciplayer under qemu against `test/player/httpd.py` (fixtures `stock-http*`, `pod-http*`, `-https-*`; the two agree but where named):
 
-- **The cache** is MPlayer's (`cache2.c`): `C` KB, and with `C` -1 (a preload, some queues) MPlayer's own size for an HTTP stream, 3072 KB (`Cache size set to 3072 KBytes` in its log). It fills on a thread of its own, keeps up to half of itself behind the read position, and the song waits until `P` percent is in or the stream has ended (`waiting for buffer fill...`). `get_cache_buffer` answers MPlayer's `cache_fill_status` (`0xb47aa0`, through `0x42c448`): what is held ahead of the read position as a percent of the cache, 0 while nothing is loaded or until the first fill is done, and as it last was once the stream has all come (19 for a 289 KB FLAC in a 1024 KB cache; 9 from stock and 0 from Q2 Pod's for the same FLAC in 3072 KB, by when the thread last ran). demo only asks whether it is above 0 (`mclGetCacheBuffer`'s one caller, `playerqueue_page_init` `0x53d1d4`).
+- **The cache** is MPlayer's (`cache2.c`): `C` KB, and with `C` -1 (a preload, some queues) MPlayer's own size for an HTTP stream, 3072 KB (`Cache size set to 3072 KBytes` in its log). It fills on a thread of its own, keeps up to half of itself behind the read position, and the song waits until `P` percent is in or the stream has ended (`waiting for buffer fill...`). `get_cache_buffer` answers MPlayer's `cache_fill_status` (`0xb47aa0`, through `0x42c448`): what is held ahead of the read position as a percent of the cache, 0 while nothing is loaded or until the first fill is done, and as it last was once the stream has all come (19 for a 289 KB FLAC in a 1024 KB cache; 9 from stock and 0 from Q2 Muse's for the same FLAC in 3072 KB, by when the thread last ran). demo only asks whether it is above 0 (`mclGetCacheBuffer`'s one caller, `playerqueue_page_init` `0x53d1d4`).
 - **A slow server.** A WAV from a server at 150,000 B/s (it plays at 176,400) started 10 s after its command, one at 400,000 B/s with 4096 KB at 50% after 9 s: MPlayer's demuxer looks at the file's end and back before it plays, each look a new connection (three in the log), which the test server serves from the start of its rate. With the slow one it then played half a second in four.
 - **A stall, a drop, a short stream.** The server stopping for 8 s at 1 MB: stock waited it out before it began (its demuxer's look at the end waited on the stalled connection) and played the whole file. The first connection closed at 1 MB: it asked again from there and played the whole file. Every connection ending at 1 MB of 3.5: it played what came and then `{player-status\exit}`, as at a natural end.
-- **Errors.** A 404 and, from Q2 Pod's, a certificate its check refuses: `{player-status\error}` about 30-60 ms after the command, with `/tmp/notfile`.
+- **Errors.** A 404 and, from Q2 Muse's, a certificate its check refuses: `{player-status\error}` about 30-60 ms after the command, with `/tmp/notfile`.
 - **A redirect** (302) is followed. **A server without ranges** plays; a seek inside what the cache holds is served from it.
-- **A FLAC stream's seek near its end ends it**, half a second later, from both players (to 15 s of 20, to 12 s of 20): the fault Q2 Pod's player fixes for files ([internals](internals.md#a-flac-seek-near-the-end)) is still there for a stream.
-- **HTTPS**: stock plays a certificate for another name and a self-signed one; Q2 Pod's (the chain checked against `/etc/ssl/certs/ca-certificates.crt`, [internals: Stock HTTPS](internals.md#stock-https)) refuses the self-signed one and plays the other.
+- **A FLAC stream's seek near its end ends it**, half a second later, from both players (to 15 s of 20, to 12 s of 20): the fault Q2 Muse's player fixes for files ([internals](internals.md#a-flac-seek-near-the-end)) is still there for a stream.
+- **HTTPS**: stock plays a certificate for another name and a self-signed one; Q2 Muse's (the chain checked against `/etc/ssl/certs/ca-certificates.crt`, [internals: Stock HTTPS](internals.md#stock-https)) refuses the self-signed one and plays the other.
 
 ### QQ Music
 
@@ -231,7 +231,7 @@ By demo's extension list (`0x782904` on, and the scan's table): `.mp3 .mp2 .flac
 | DSF, DFF, SACD ISO | vendor demuxers (`0x47b6fc`, `0x47a684`, `0x478990`) | `DSF`, `DSD`, `ISO` |
 | MQA | plays as the PCM it carries | by its container |
 
-What each reports and how the PCM is opened for it, captured from stock's and Q2 Pod's hciplayer (the two agree on every row) playing one file of each (`fixtures/pod-formats-all.txt`, `stock-formats-all.txt`; the files are `test/player/music.py`'s, 6 s at 44.1 kHz stereo unless named):
+What each reports and how the PCM is opened for it, captured from stock's and Q2 Muse's hciplayer (the two agree on every row) playing one file of each (`fixtures/pod-formats-all.txt`, `stock-formats-all.txt`; the files are `test/player/music.py`'s, 6 s at 44.1 kHz stereo unless named):
 
 | File | `CODEC` | `BITS` | `BITRATE` | ALSA format |
 | --- | --- | --- | --- | --- |
@@ -245,19 +245,19 @@ What each reports and how the PCM is opened for it, captured from stock's and Q2
 | AC-3 | `AC2` | 32 | the stream's | `FLOAT_LE` |
 | DTS from FFmpeg's own encoder | none: `{player-status\error}` | | | |
 
-A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position starts about 3 s on, at the ASF preroll. An MP3 with 3 MB of junk after its frames (`tail.mp3`) reports `LENGTH` 20 from its Xing count and a `BITRATE` of 1,311,656, its whole size over that length; Q2 Pod's player plays its 20 s and stops. APE, TAK, WMA Lossless and WMA Pro were not captured: nothing on the capturing machine encodes them.
+A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position starts about 3 s on, at the ASF preroll. An MP3 with 3 MB of junk after its frames (`tail.mp3`) reports `LENGTH` 20 from its Xing count and a `BITRATE` of 1,311,656, its whole size over that length; Q2 Muse's player plays its 20 s and stops. APE, TAK, WMA Lossless and WMA Pro were not captured: nothing on the capturing machine encodes them.
 
 ## What it writes
 
-`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. Q2 Pod's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`, and the visualizer's shared tap.
+`/tmp/ampsco.ini` (the unit record, at start), `/tmp/notfile` and `/tmp/notsupport` (through `system("touch …")`), and nothing else: no configuration, no state. Q2 Muse's patches add reads of `/mnt/data/peq-active` and `/tmp/q2xfade`, and the visualizer's shared tap.
 
-## What Q2 Pod patches
+## What Q2 Muse patches
 
 `tools/peq.py`'s `patch_player` is the whole list: each row is a checked word or slot in hciplayer pointed at `patch/peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c` or `flac_*.c`, mapped at `0xe20000`. A new player has no such faults to patch, but must do what each fix made true.
 
 | Patch (`tools/peq.py`) | What it makes true | Detail |
 | --- | --- | --- |
-| `EQ_OPEN_SLOT`, `EQ_RATE_GATES` | The EQ filter is Q2 Pod's: up to 30 biquad bands with per-channel scope, preamp (fixed or Auto per rate), balance, 20 ms ramps between presets, the 3EQ's three bands on the same engine, state read from `/mnt/data/peq-active` (`Q2PEQ03`), at every rate; filter memory carried across a gapless change | [Parametric EQ](internals.md#parametric-eq), [3EQ](internals.md#3eq) |
+| `EQ_OPEN_SLOT`, `EQ_RATE_GATES` | The EQ filter is Q2 Muse's: up to 30 biquad bands with per-channel scope, preamp (fixed or Auto per rate), balance, 20 ms ramps between presets, the 3EQ's three bands on the same engine, state read from `/mnt/data/peq-active` (`Q2PEQ03`), at every rate; filter memory carried across a gapless change | [Parametric EQ](internals.md#parametric-eq), [3EQ](internals.md#3eq) |
 | the same filter | Crossfade: the tail of a song held and mixed under the next at equal power, length from `/tmp/q2xfade`; Mono Audio; the visualizer's PCM tap | [Crossfade](internals.md#crossfade), [Mono Audio](internals.md#mono-audio) |
 | `MP3_ALLOC`, `MP3_FILTER`, `MP3_CLOSE`, `MP3_READ`, `MP3_FILL`, `SEEK_SLOT`, `VBR_SCAN` | MP3: LAME/Info and iTunSMPB delay and padding cut, the last frame decoded, tail tags not decoded as audio, no whole-file walk at open, seeks by the Xing table | [MP3 gapless playback](internals.md#mp3-gapless-playback), [Large MP3s](internals.md#large-mp3s) |
 | `LAVF_PRIV`, `MOV_EDITS` | AAC in M4A, Opus and Vorbis: priming and padding cut from the timestamps libavformat gives | [Lossy gapless playback](internals.md#lossy-gapless-playback) |

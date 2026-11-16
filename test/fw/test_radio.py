@@ -1156,7 +1156,7 @@ def test_top_stations_fetches_by_votes_over_verified_tls(fw):
     assert fx(fw).running == 1 and 'Loading…' in note(p)
     fetched(fw, p, curl)
     assert curl.opts[10002] == f'{API}/m3u/stations/topvote/100?hidebroken=true'
-    assert (curl.opts[10065], curl.opts[64], curl.opts[81], curl.opts[10018]) == ('/etc/scrobble-ca.pem', 1, 2, 'Q2Pod')
+    assert (curl.opts[10065], curl.opts[64], curl.opts[81], curl.opts[10018]) == ('/etc/scrobble-ca.pem', 1, 2, 'Q2Muse')
     assert (curl.opts[78], curl.opts[13], curl.opts[52], curl.opts[99]) == (10, 30, 1, 1)
     assert ui(fw).list.stations() == [('Zed', 'http://z.example/'), ('Abe', 'http://a.example/')]  # vote order
     assert ui(fw).level == STATIONS and ui(fw).caption == b'Top Stations' and fx(fw).running == 0

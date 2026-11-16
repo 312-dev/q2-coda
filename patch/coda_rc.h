@@ -1,4 +1,4 @@
-/* coda-rc, Q2 Pod's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
+/* coda-rc, Q2 Muse's own remote-control protocol (docs/remote-protocol.md, remote/coda-rc.proto).
  * The daemon is patch/coda_rc*.c, built as /usr/bin/coda-rc by tools/build.py (CODA_RC_SOURCES); it is not
  * part of demo's payload. coda_rc_core.c is the transport-agnostic part: frames, the protobuf subset, pairing,
  * authentication and sealing. coda_rc.c owns the transports and the data, coda_rc_ble.c the BLE GATT one.

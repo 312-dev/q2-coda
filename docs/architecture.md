@@ -4,7 +4,7 @@ How the pieces fit: what a build makes, where the payload lives in stock's `demo
 
 ## What is patched
 
-Q2 Pod ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
+Q2 Muse ships no program of Shanling's and no source of theirs. `tools/build.py` takes the stock V1.36 ZIP, checks its SHA-256 (`ZIP_SHA` in `tools/build.py`, compared in `build()`), changes these files inside its `rootfs.squashfs` and packs `update.tar` again. The kernel (`xImage`) is byte-identical.
 
 | File on the Q2                                | Change                                                                  | Where                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |

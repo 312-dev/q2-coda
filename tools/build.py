@@ -231,9 +231,9 @@ HELPER, HELPER_LIKE = 'usr/bin/q2video', 'usr/bin/display_logo'
 HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.so.2.0.0']
 # Rockbox dual boot (docs/boot.md#rockbox): S90play starts Rockbox whenever the card has it, as an
 # iPod with Rockbox does. Play/Pause held at power-on (patch/boot.c reads the key) or Rockbox's
-# exit 0x51 (Boot stock OS) starts Q2 Pod for that session only. boot-target selects the next
+# exit 0x51 (Boot stock OS) starts Q2 Muse for that session only. boot-target selects the next
 # power-on default (missing or invalid retains Rockbox). ponytail: the card's mount is awaited (up to 3 s without a card)
-# unless Q2 Pod was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
+# unless Q2 Muse was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
 # with the launcher contract in its tools/shanlingq2/README; demo starts when it exits, or when the
 # card has none. demo keeps its argv[0], which checkappprocess.sh pgreps for. iPod's Home Rockbox row
 # (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills demo: Rockbox runs again, its
@@ -283,9 +283,9 @@ ROCKBOX_FLAG = '/tmp/q2pod-rockbox'
 # again, catches a shell that took longer. ponytail: 300 ms and 2 s are guesses; a shell slower than 2 s still escapes.
 WIFI_OFF = 'killall -9 wifi_connect.sh udhcpc wpa_supplicant 2>/dev/null; ifconfig wlan0 down 2>/dev/null'
 DEFAULT_CONFIG = 'release/assets/default/raw/config.ini'  # stock's reset copies it (DEFAULT_CONFIG_OFF below)
-DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Pod's defaults replaced the config before it (BOOT_HOOK)
+DEFAULTS_MARK = '/mnt/data/q2-defaults'  # written once Q2 Muse's defaults replaced the config before it (BOOT_HOOK)
 BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
-        # Q2 Pod's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
+        # Q2 Muse's defaults over every config.ini from before the q2-defaults mark, once, before demo reads it: a stock
         # Shanling config, or an earlier build's, holds stock's values (Enlarged Album Art on); later updates keep
         # the user's settings. Saved Wi-Fi, Bluetooth pairings and the library are other files (docs/internals.md#first-boot)
         d={DEFAULTS_MARK}
@@ -306,7 +306,7 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             rm -f $m
         }}
         rm -f /mnt/data/q2-cf-trace /mnt/data/q2-stall
-        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Pod has no Baidu row to use it from
+        # Baidu Netdisk's sign-in, which stock sends over plain HTTP: Q2 Muse has no Baidu row to use it from
         rm -f /mnt/data/baidu_token.conf
         [ -f $c ] && (
             i=0
@@ -471,7 +471,7 @@ THTTPD_CONF = 'etc/thttpd.conf'
 THTTPD_USER = (b'\nuser=root\n', b'\nuser=www-data\n')
 WWW_DATA = b'\nwww-data:x:33:33:'  # stock's /etc/passwd line: cgi_root.c WWW_UID
 Q2CGI = 'usr/bin/q2cgi'
-CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Pod's own
+CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Muse's own
 CGI_MODE = (b'775', b'4755')  # stock's mode for a CGI, then set-uid root and no group write
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
@@ -521,10 +521,10 @@ BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x0000282
 # platform_init's crash watchdog forks pgrep every 2 s; 10 s is still quick to reboot a dead UI.
 WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
-# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Pod runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
-# missing, and the first boot and every reset opened stock's language guide, where Q2 Pod's wheel and Centre are off.
-# Q2 Pod is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
+# missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
+# Q2 Muse is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 # Smart Awake (IPOD KEEPLIT) starts on, as a missing key reads (theme_engine.c settings_read); stock's file has no [IPOD],
 # and ends with no newline (docs/internals.md#config-ini), so the section starts on a line of its own.
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
@@ -589,7 +589,7 @@ KEY_ABORTED = (0x6b35fc, 0x10400011, 0x10000011)
 # so the resuming key acts as it does dark (Play plays, centre wakes).
 STANDBY_WAKE = (0x5024b4, 0x0411ff26, 0x24020001)
 # config_init reads SYSSET NAVHIDE and WHEELMODE, V1.36's Show Navigation Bar and Wheel Function, into g_navhide_flag and
-# g_wheelmode. Q2 Pod's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
+# g_wheelmode. Q2 Muse's themes own the bar and every list's box, and its wheel is built on stock's Volume Mode (1): NAVHIDE's
 # sb stores $zero (the bar shown) and WHEELMODE's movz $v0, $zero, $v1 becomes li $v0, 1, whatever the keys hold. Neither
 # key is written, and stock's two rows are not offered (navigation.c ringnav_display, ringnav_systemset).
 NAV_SHOWN = (0x504b5c, 0xa0620000, 0xa0600000)
@@ -672,7 +672,7 @@ HSCROLL_ONCE = (0x5fb870, 0x1440002f, 0x1000002f)
 # ringnav_ellipsis_text, which narrows the box so the cut before stock's "..." never ends on a space.
 HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
-# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Pod's labels hold
+# its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Muse's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
 # distance stays at its default, -1, with which hscroll_label's range, timer and paint are V1.34's.
 HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
@@ -683,7 +683,7 @@ HSCROLL_GAP = (0x4f1f4c, 0x0320f809, 0)
 ALBUM_LABELS = (0x4a6cb8, 0x4a6f9c, 0x4a71e4, 0x4a742c)
 # V1.36 puts the focus back on the row that had it once the album page or Playlists has loaded its rows again, for
 # Menu Mode: widget_set_focused, which scrolls the list to that row, on a row it judges in view by stock's 78 px
-# pitch. Q2 Pod's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
+# pitch. Q2 Muse's selection is ringnav's and its rows are a theme's pitch, so neither page finds a focused row: the
 # album page's beqz past the look is taken always, and Playlists' bnez to it never.
 FOCUS_RESTORE = ((0x4a8ee4, 0x1040000c, 0x1000000c), (0x4b5948, 0x14400061, 0))
 # The page refresh's bal to the lyric row builder (0x53b67c, which ends at offset 0) becomes jal
@@ -834,7 +834,7 @@ def tidal_https(data):
         data = data.replace(old, new)
     return data
 # Mozilla's CA bundle as curl publishes it, whole, for stock's HTTPS (above) and the player's (tools/peq.py TLS_OPTIONS),
-# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Pod's own code needs.
+# whose hosts no list of ours could cover; /etc/scrobble-ca.pem stays the few roots Q2 Muse's own code needs.
 STOCK_CA = 'etc/ssl/certs/ca-certificates.crt'
 STOCK_CA_SHA = '796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe'  # https://curl.se/ca/cacert-2026-10-20.pem
 # The same function's other command, no lyrics chosen: rm -rf "/mnt/mmc/.downpic/<name>" for the same system().
@@ -906,7 +906,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
 # picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
-# it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Pod's pages read are allowed too.
+# it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Muse's pages read are allowed too.
 MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; one that exists is no
 // error, and a folder that really couldn't be made shows as its files' upload errors.
 var _made = {};
@@ -1341,8 +1341,8 @@ class Face:
 FACES = {
     'regular': Face('default'),
     # Inter 4.1 (OFL), Regular and Medium, with tabular figures: OLED's
-    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
-    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Pod OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
+    'inter': Face('inter', 'Inter-Regular.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98, tabular='.tf'),
+    'inter-medium': Face('inter-medium', 'Inter-Medium.ttf', 'Q2 Muse OLED', ('Inter-OFL.txt',), fallback='regular', fallback_pct=98,
                          tabular='.tf'),
 }
 # OFL 2 asks each copy to hold its licence, and the subsets' name tables don't: these ship beside the fonts
@@ -2034,7 +2034,7 @@ STOCK_EQ = ['release/assets/default/raw/ui/playset/preseteq_page.bin'] + [
     ['eq_bg', 'eq_off', 'eq_sidebg', 'eqbox'] + [f'eq_{p}{s}' for p in
     ('blues', 'classical', 'custon', 'dance', 'jazz', 'metal', 'pop', 'rock', 'scene') for s in ('', '_select')]]
 # Stock V1.36's Album Wall, spectrum and VU pages, and the images only they and the buttons that open them show.
-# Q2 Pod offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
+# Q2 Muse offers none: tools/ipod.py takes their Home card and their two Now Playing buttons out of the assets, and
 # only those widgets' click handlers name the pages (on_home_coverflow_onclick, and Now Playing's two in
 # tools/stock_map.tsv, playing_page_vu_on_click and playing_page_spectrum_on_click), so nothing can load them.
 STOCK_PAGES = [f'release/assets/default/raw/ui/{n}_page.bin' for n in ('coverflow', 'spectrum', 'vu')] + [
@@ -2267,7 +2267,7 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
-PRODUCT_NAME = 'Q2 Pod'  # the product's name on screen (About); one place to rename it
+PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
@@ -2289,14 +2289,14 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     header += [f'#define {name} 0x{address:x}u' for name, (_, address) in NAME_COMPARATORS.items()]  # name_order.c
     # About: the stock firmware's version on its own row, and this build's on a row named for the
     # product (PRODUCT_NAME, the one place the name the screens show is spelled).
-    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
+    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Muse{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                # sw_update.c: the updater's identity (firmware_v20.info's version), which an equal update.tar's repeats
                f'#define Q2POD_FW_TAG "{dev_tag(dev) if dev else TAG}"',
                f'#define Q2POD_REPO "{repo}"',  # netupdate.c: the repo whose latest release it fetches
                '#define Q2POD_SIGN_KEY {' + ','.join(f'0x{b:02x}' for b in key or signing_key(None, False)) + '}',  # release_sig.c
-               f'#define Q2POD_UA "Q2Pod/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
+               f'#define Q2POD_UA "Q2Muse/{VERSION} (https://github.com/{REPO})"']  # onlinematch.c, as MusicBrainz asks: the project's contact, not --update-repo's
     check(len(themes) == 1, f'{len(themes)} built-in themes: the payload has one (theme_engine.c theme())')
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c theme()
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
@@ -2584,7 +2584,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *TABLE_DRAG_CALL, jal(ps['ringnav_table_drag']), 'a drag stops at a table\'s ends')
     for word in FOLDER_NAME:
         patch_word(patched, *word, 'folder names are literal text')
-    # The GOT loads Q2 Pod writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
+    # The GOT loads Q2 Muse writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and
     # V1.36 moved two of the three to other functions' slots. Each slot holds its function, or the build stops.
     for load, name in ((FOLDER_NAME[1][2], 'tk_strncpy'), (CLOSE_LOAD, 'navigator_close'), (DUMMY_LOAD, 'dummy_destroy')):
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP + ((load & 0xffff) ^ 0x8000) - 0x8000))[0] == syms[name],

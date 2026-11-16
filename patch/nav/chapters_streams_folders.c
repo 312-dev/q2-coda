@@ -536,7 +536,7 @@ int ringnav_about(void *win, void *ctx) {
                              STOCK_VERSION);
         void *button = list_button(view);
         char v[sizeof Q2POD_VERSION];
-        const char *pod = strstr(Q2POD_VERSION, " Pod");
+        const char *pod = strstr(Q2POD_VERSION, " Muse");
         tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
         if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
             tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + 4);
