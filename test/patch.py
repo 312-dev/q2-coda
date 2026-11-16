@@ -99,7 +99,7 @@ TRACE_ARGS={'canvas_get_clip_rect':'_','canvas_set_clip_rect':'_r','canvas_set_g
     **{'vg:vgcanvas_'+n:c for n,c in (('save','_'),('restore','_'),('begin_path','_'),('close_path','_'),('fill','_'),
        ('stroke','_'),('translate','_ff'),('move_to','_ff'),('line_to','_ff'),('arc','_fffffi'),('set_fill_color','_x'),
        ('set_stroke_color','_x'),('set_fill_linear_gradient','_ffffxx'),('set_line_width','_f'),('set_line_cap','_s'))},
-    'widget_set_prop_int':'nsi','widget_set_prop_str':'nss','widget_move_resize':'niiii','widget_resize':'nii',
+    'widget_set_prop_int':'nsi','widget_set_prop_str':'nss','widget_move_resize':'niiii','widget_move':'nii','widget_resize':'nii',
     'widget_set_opacity':'ni','widget_use_style':'ns','widget_set_text_utf8':'ns','widget_set_tr_text':'ns',
     'widget_set_visible':'nii','widget_set_sensitive':'ni','widget_factory_create_widget':'_sniiii',
     **dict.fromkeys(('image_create','list_item_create','button_create','hscroll_label_create','label_create'),'niiii'),
@@ -476,6 +476,7 @@ class Machine:
         elif name=='bitmap_get_line_length': ret=self.get(a+8)
         elif name=='bitmap_lock_buffer_for_write': ret=self.get(a+0x14)  # a test bitmap keeps its pixels' address there
         elif name=='image_manager': ret=0x1000500
+        elif name=='widget_move': self.word(a+O['W_X'],b); self.word(a+O['W_Y'],c); ret=0
         elif name in ('widget_move_resize_ex','widget_move_resize'):
             for off,value in zip(('W_X','W_Y','W_W','W_H'),(b,c,d,self.get(u.reg_read(UC_MIPS_REG_SP)+16))):
                 self.word(a+O[off],value)
@@ -3383,6 +3384,28 @@ for fail in ('EVT_WINDOW_BACKGROUND','EVT_POINTER_UP_BEFORE'):
     m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],y=120);m.emit(page,O['EVT_POINTER_UP_BEFORE'],y=120)
     assert len([c for c in m.calls if c[0]=='stock_radio_search'])==1
     passed()
+
+# Swipe back (swipe_back.c) on MIPS: a press at the left edge of a page over another, a drag right that moves the
+# page window with the finger once past the claim, and a lift past 40% that slides it on and gives stock's input a
+# Return press and release. A move's and a glide step's payload instructions are each frame's share of the budget.
+m=PullMachine(); sb_n=[0]; h=m.u.hook_add(UC_HOOK_BLOCK,lambda u,a,size,x: sb_n.__setitem__(0,sb_n[0]+size//4),begin=BASE,end=SCRATCH-1)  # before any code runs
+under=m.node('window','home_page'); w,es=m.page_list(5,name='albums_page'); page=m.top
+m.nodes[m.wm]=dict(type='window_manager',name='',children=[under,page],visible=1,enable=1)
+m.word(page+O['W_W'],375); m.handlers[payload_syms['stock_input_trampoline']]='stock_input'
+m.start_pull(page,w,x=5,y=150)
+def sb_inputs(): return [c for c in m.calls if c[0]=='stock_input']
+sb_moves=[]
+for x,want in ((12,0),(20,11),(60,11),(200,11)):
+    m.now+=16; sb_n[0]=0; assert m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],x=x,y=150)==want; sb_moves.append(sb_n[0])
+assert signed(m.get(page+O['W_X']))==195 and [c[0] for c in m.calls].count('widget_move')==3
+m.now+=16; assert m.emit(page,O['EVT_POINTER_UP_BEFORE'],x=200,y=150)==11 and not sb_inputs()
+sb_steps=[]
+while not sb_inputs() and len(sb_steps)<40:
+    m.now+=8; sb_n[0]=0; m.call(address=payload_syms['swipe_back_poll'],args=(0,0,0,0),gap=0,clear=False); sb_steps.append(sb_n[0])
+m.u.hook_del(h)
+assert len(sb_inputs())==2 and signed(m.get(page+O['W_X']))==0  # Return's press and release; the page back in its place
+sb_move,sb_step=max(sb_moves[1:]),max(sb_steps[:-1]); assert sb_move<600_000 and sb_step<600_000; passed()
+print(f'Swipe back on MIPS: {sb_move} instructions a move at most (the page moved with the finger), {sb_step} a glide step (payload only; stock\'s repaint of the moved window is its own)')
 
 # Local Songs' virtual table keeps its rows and top offset across a search.
 m=PullMachine();w,rows,es=m.table_page(name='localmusic_page');page=m.top

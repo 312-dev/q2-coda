@@ -34,6 +34,7 @@
   - Control Center (OLED): pulled down, the page settles with a small bounce as it lands.
   - Control Center (OLED): tap what's playing (anywhere but its buttons), or press Center on it, to open Now Playing; the wheel stops on it between the round buttons and the sliders.
   - Control Center (OLED): hold a round button or a tile (or hold Center on it) to open its settings, such as Wi-Fi's network list or the Sleep Timer; a tap still turns it on or off.
+  - Touch: swipe right from the screen's left edge to go back, as on an iPhone. The page follows your finger; let go past about 40% of the way, or flick, and it goes back as Return does, otherwise it settles back. Mid-screen swipes still do what they did (Now Playing's pages, Cover Flow, sliders), and a drag up or down from the edge still scrolls.
   - Controls: Clicker set to **Headphones** no longer clicks the Q2's own buzzer. The click is heard only in your headphones, mixed into what plays; while nothing plays there is no click.
   - Playlists: removed the unused code behind a playlist cover's hidden **Select Playlists…** hold row; nothing you can see changes.
   - Photos is gone: the Library has no **Photos** row, viewer or thumbnail grid. Home's Split slideshow of album covers is unchanged, a Library order you set yourself is kept without the row, and a `.photos` folder left on the card can be deleted.

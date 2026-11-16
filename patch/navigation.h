@@ -502,6 +502,9 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 int tilt_clip(void *canvas, int *old);
 void tilt_end(void *w, int dir);
+/* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
+void swipe_back_down(void *event, int allowed);
+void swipe_back_poll(void);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas);
@@ -924,7 +927,7 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
-int tsv_split(char *line, char **f, int max); /* catalogue.c */
+int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
  * a list this long or shorter has none; a touch this near the list's right edge is the index's;
