@@ -894,7 +894,7 @@ class GoMachine(RootMachine):
         super().hook(u,address,size,unused)
         if folder: self.win=self.top; self.nested(HOOKS['folder_page_init'][0],self.win,0)  # stock's init is synchronous
     def menu(self): self.press(5); assert self.hold()==11; got=self.nodes[self.title]['text'],self.labels(); self.release(); return got
-    def go(self): self.calls=[]; self.pick(len(SONG_MENU)); self.advance(0)  # Go to Folder, from the open menu
+    def go(self): self.calls=[]; self.pick('Go to Folder'); self.advance(0)  # from the open menu
 GO=[*SONG_MENU,'Go to Folder']
 DEEP='/mnt/mmc/Music/100% %s%n/Ünï cødé'
 for otg in (0,1):
@@ -923,7 +923,7 @@ assert m.opened[-1][0]=='folder_page' and m.u.mem_read(syms['g_folder_layer'],1)
 assert m.open()==('/mnt/mmc',2); passed()
 # Now Playing: the playing song's row sits after Go to Artist, before the play modes.
 m=playing_menu(); m.dirs.add('/mnt/mmc/Music'); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_PATH'],m.string('/mnt/mmc/Music/B'))
-m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+['Go to Folder','Shuffle','Repeat','Group by']
+m.press(6000); assert m.hold()==11 and m.labels()==NP_SONG[:2]+['View Queue']+NP_SONG[2:]+['Go to Folder','Shuffle','Repeat','Group by']
 passed()
 
 # thumb (coverflow.c), Cover Flow's, the playlists' and Spotify's: the card's files by path and stock's

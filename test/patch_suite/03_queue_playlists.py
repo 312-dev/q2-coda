@@ -118,7 +118,12 @@ class QueueMachine(Machine):
         self.u.mem_write(self.status+O['INPUT_KEYS'],bytes(O['INPUT_KEY_SIZE']))
         return sum(c[0]=='playpause_quick_click' for c in self.calls)
     def handler(self,w,kind): return next((f,ctx) for t,f,ctx in self.nodes[w]['handlers'] if t==kind)
+    def at(self,label):  # a menu row's place among the view's children, by its words
+        kids=self.nodes[self.view]['children']
+        return next(i for i,c in enumerate(kids) if self.nodes[c]['children'] and self.nodes[self.nodes[c]['children'][0]]['text']==label)
     def pick(self,row):
+        """Click a menu row, by its index among the view's children or by its label."""
+        if isinstance(row,str): row=self.at(row)
         f,ctx=self.handler(self.nodes[self.view]['children'][row],O['EVT_CLICK'])
         assert self.call(address=f,args=(ctx,self.event,0,0),gap=0)==0
     def run(self,row,steps=0):
@@ -224,7 +229,10 @@ for selected,name,navbar,played in ((1,'clip.mp4',0,True),(1,'clip.mp4',1,True),
     assert played==(not any(o[0]=='playing_page' for o in m.opened)),(name,navbar)
 passed()
 
-SONG_MENU=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
+# A Library song's menu sheet (hold_menu.c's own song; On-The-Go is on in these machines), and the
+# song rows Now Playing's own menu keeps around its View Queue and settings.
+SONG_MENU=['Play Next','Play Last','Add to On-The-Go','Add to Playlist…','Favorite','Go to Album','Go to Artist']
+NP_SONG=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
 # Now Playing targets the queue even when the last browsed list has unrelated rows.
 def playing_menu(**kw):
     m=QueueMachine(page='playing_page',pos=1,**kw)
@@ -232,7 +240,7 @@ def playing_menu(**kw):
 for state in (3,2):  # paused and playing both expose the same actions
     m=playing_menu(); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,state)
     m.press(5000); assert m.release()==1
-    m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+["Shuffle","Repeat","Group by"]
+    m.press(6000); assert m.hold()==11 and m.labels()==NP_SONG[:2]+['View Queue']+NP_SONG[2:]+["Shuffle","Repeat","Group by"]
     assert m.nodes[m.title]['text']=='B' and m.release()==0
     m.press(7000); assert m.release()==1 and m.get(0xa50084)==state; passed()
 # A tagged song's menu is titled by its tag, not its file name.
@@ -240,7 +248,7 @@ m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_TITL
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Bee'; passed()
 # A song in a hidden folder isn't in the Library: no Go to rows, unless its app's q2app has goto=1 (addon_goes).
 m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_PATH'],m.string('/mnt/mmc/.podcasts/Show/B.mp3'))
-m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:4]+["Shuffle","Repeat","Group by"]; passed()
+m.press(6000); assert m.hold()==11 and m.labels()==NP_SONG[:2]+['View Queue']+NP_SONG[2:4]+["Shuffle","Repeat","Group by"]; passed()
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
@@ -673,34 +681,39 @@ def menu(m,setup=None):
     m.press(5); assert m.hold()==11; t=m.nodes[m.title]['text']; got=m.labels(); m.release(); return t,got
 GROUP=['Play Next','Play Last','Shuffle','Add to Playlist']
 for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
-        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:2],'Remove from Favorites',*SONG_MENU[3:]])),
-        ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:4])),
-        ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
-        ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
+        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:4],'Remove from Favorites',*SONG_MENU[5:]])),
+        ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:5])),
+        ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
+        ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
         ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Add to Favorites','Rate Album',GROUP[3],'Go to Artist'])),
         ({'cls':0xff01,'page':'album_page'},None,('Album',GROUP)),
         # An artist's tabs set classinfo +0, not g_class_type: Albums first, then Songs after an album.
         ({'cls':0xff07,'page':'artistinfo_page'},lambda m:m.word(syms['g_local_classinfo_save'],0xff01),('Album',GROUP)),
-        ({'cls':0xff01,'page':'artistinfo_page'},lambda m:(m.word(syms['g_local_classinfo_save'],0xff07),m.open_pages.add('artistinfo_page')),('Row 0',SONG_MENU[:5])),
+        ({'cls':0xff01,'page':'artistinfo_page'},lambda m:(m.word(syms['g_local_classinfo_save'],0xff07),m.open_pages.add('artistinfo_page')),('Row 0',SONG_MENU[:6])),
         ({'cls':0xf004,'page':'localclass_page'},None,('Artist',GROUP)),
         ({'cls':0xf006,'page':'localclass_page'},lambda m:m.word(m.row(0)+0x1c,m.string('Pop')),('Pop',GROUP)),
         ({'page':'folder_page','cls':1},lambda m:m.word(m.row(0)+O['REC_TYPE'],4),('Row 0',GROUP))):
     assert menu(QueueMachine(**kw),setup)==want, (kw,want); passed()
 # Favourites: Add runs batch-select's Add to My Fav for the row alone, which tags a folder file;
 # Remove deletes it, and on My Fav itself flags the list to reload as Now Playing's heart does.
-m=QueueMachine(); assert m.run(2,steps=3)=='Added to Favorites' and m.names()==['A','B','C']
+m=QueueMachine(); assert m.run('Favorite',steps=3)=='Added to Favorites' and m.names()==['A','B','C']
 assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',3),('batch_add_file',0xf001)]
 assert [c[2:] for c in m.calls if c[0]=='batch_add_file']==[(0xf00a,m.get(syms['p_deque_showlist']))]; passed()
 for cls,flag in ((0xf001,0),(0xf00a,1)):
-    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run(2)=='Removed from Favorites'
+    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run('Remove from Favorites')=='Removed from Favorites'
     assert [c[1] for c in m.calls if c[0]=='deleteMusicFromFav']==[m.row(0)] and m.u.mem_read(syms['g_delete_flag'],1)[0]==flag
     passed()
-# Add to playlist opens the stock playlist page in its add mode (context: 1 << 16 | class) with the
-# row selected, as the batch Add to playlist does; the page adds the row's songs itself.
-for kw,row in (({},3),({'cls':0xf003,'page':'album_page'},5)):
-    m=QueueMachine(**kw); assert m.run(row,steps=1) is None
-    assert m.opened[-1]==('localmusic/playlist_page',0x10000|m.get(syms['g_class_type']))
-    assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',1)] and m.names()==['A','B','C']; passed()
+# Add to Playlist, a song's or an album's, opens the menu sheet's playlist picker (playlists.c
+# playlist_pick_open) for the held row, not stock's playlist page; the queue is left alone.
+class PickMachine(QueueMachine):
+    def __init__(self,**kw):
+        super().__init__(**kw); self.handlers[payload_syms['playlist_pick_open']]='pick:'; self.picked=[]
+    def hook(self,u,address,size,unused):
+        if self.handlers.get(address,'')!='pick:': return super().hook(u,address,size,unused)
+        self.picked.append(self.text(self.get(u.reg_read(REGS[0])+O['REC_NAME']))); return self.returns(0)
+for kw,row in (({},'Add to Playlist…'),({'cls':0xf003,'page':'album_page'},'Add to Playlist')):
+    m=PickMachine(**kw); assert m.run(row,steps=1) is None and m.picked==['Row 1']
+    assert not any(o[0]=='localmusic/playlist_page' for o in m.opened) and m.names()==['A','B','C']; passed()
 # Shuffle plays the collection's songs from a random one with shuffle saved, as Shuffle Songs.
 # Then the payload's Shuffle Songs takes the queue over (test/playback.py), so Up Next has an order.
 m=QueueMachine(cls=0xf004,page='localclass_page'); m.handlers[payload_syms['playback_shuffle']]='stock_playback_shuffle'  # a payload call: no t9
@@ -725,10 +738,10 @@ m=KeepsMachine(cls=0xf004,page='localclass_page'); m.found=m.found[:1]; assert m
 # Go to album fills the album query as Now Playing's Album info and opens playerjumpinfo_page; Go to
 # artist opens artistinfo_page with {class, record}. Closing either puts the browsing state back.
 info=syms['g_local_classinfo_save']
-for row,want in ((4,'playerjumpinfo_page'),(5,'localmusic/artistinfo_page')):
+for row,want in (('Go to Album','playerjumpinfo_page'),('Go to Artist','localmusic/artistinfo_page')):
     m=QueueMachine(); m.config['ARTISTCF']='0'; m.u.mem_write(info,bytes(range(256))*3+bytes(144)); before=bytes(m.u.mem_read(info,912))
     page=m.top; assert m.run(row,steps=2) is None and m.opened[-1][0]==want and m.top!=page
-    if row==4:
+    if row=='Go to Album':
         assert m.get(info)==0xff10 and m.u.mem_read(info+9,1)==b'\0' and m.text(info+0xd)=='Album' and m.text(info+0x10d)=='Artist'
     else: assert m.opened[-1][1:]==(0xf001,m.row(2))
     f,ctx=m.handler(m.top,O['EVT_WINDOW_CLOSE']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)

@@ -135,11 +135,11 @@ for btime,mask,error,expect in ((1700000000,0x800,0,1700000000),(1700000000,0x7f
     assert m.call(address=payload_syms['ringnav_file_created'],args=(path,0,0,0),gap=0)==expect
     assert seen==[(4366,0xffffff9c,'/m/a.flac',0,0x800)] and [c[1] for c in m.calls if c[0]=='stock_created']==([] if expect else [path]); passed()
 # Library Artists rows hide the head picture (CLASS_ICON); Composers and Genres, sharing the rebound
-# rows, show theirs again through stock's setter.
+# rows, hide theirs too under OLED's one-line rows (text_art 0), and stock's setter never runs.
 from build import CLASS_ICON
 assert struct.unpack_from('<I',demo,fileoff(demo,CLASS_ICON))[0]==jal(payload_syms['ringnav_class_icon'])
 m=Machine(); m.mock('class_icon'); icon=m.node('image','img_icon'); row=m.node('view','',[icon])
-for cls,shown in ((0xf004,0),(0xf006,1),(0xf005,1),(0xf004,0)):
+for cls,shown in ((0xf004,0),(0xf006,0),(0xf005,0),(0xf004,0)):  # no icon on a one-line row
     m.word(syms['g_class_type'],cls); m.calls=[]
     m.call(address=payload_syms['ringnav_class_icon'],args=(row,3,0,0),gap=0)
     assert m.nodes[icon]['visible']==shown and [c[1:3] for c in m.calls if c[0]=='class_icon']==([(row,3)] if shown else [])
