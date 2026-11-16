@@ -122,6 +122,15 @@ static const char *const verbs[] = {
 };
 #define CONFIRM_ROW 32
 #define CONFIRM_Y 58 /* the list's top (oled-design.md Spacing) */
+/* The footer (feedback_confirm_foot): 13 px Text Tertiary lines 8 px under the rows, each line's
+ * own label, at the rows' text column */
+#define FOOT_GAP 8
+#define FOOT_LINE 17
+#define FOOT_PX 16 /* Inter 13 px, AWTK's size (13 x 1.21) */
+
+/* The next confirm's footer, its lines split at '\n': why it asks, where the setting lives. */
+static const char *confirm_foot __attribute__((section(".scratch")));
+void feedback_confirm_foot(const char *foot) { confirm_foot = foot; }
 
 static int confirm_on(void *w) { return top_named(w, "confirminfo_dialog"); }
 
@@ -179,6 +188,28 @@ int feedback_confirm_dress(void *w) {
         widget_set_sensitive(label, 0);
     }
     if (note) feedback_empty(w, CONFIRM_Y + 2 * CONFIRM_ROW, note, (const char *)0);
+    /* the footer under the answers (Streaming Songs' asks, library_settings.c) */
+    int k = 0;
+    for (const char *line = confirm_foot; line && *line; ++k) {
+        char words[96];
+        unsigned n = 0;
+        while (line[n] && line[n] != '\n') ++n;
+        tk_snprintf(words, sizeof words, "%.*s", (int)n, line);
+        int px = FOOT_PX;
+        void *label = text(w, geom_val(V_TEXT_X) - 2,
+                           CONFIRM_Y + (2 + !!check) * CONFIRM_ROW + FOOT_GAP + k * FOOT_LINE,
+                           375 - 2 * geom_val(V_TEXT_X), FOOT_LINE);
+        widget_set_name(label, "_foot");
+        widget_set_text_utf8(label, words);
+        widget_set_prop_int(label, "loop", 0);
+        const char *face = theme_face(widget_get_text(label), -1, &px);
+        widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
+        widget_set_prop_int(label, "style:normal:font_size", px);
+        widget_set_prop_str(label, "style:normal:text_align_h", "left");
+        text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+        widget_set_sensitive(label, 0);
+        line += n + (line[n] == '\n');
+    }
     if (st.bar_title) {
         widget_set_text_utf8(st.bar_title, title);
         theme_font(st.bar_title, ROLE_BAR, FONT_ROW);
@@ -291,6 +322,73 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
     widget_set_text_utf8(line, message ? message : "");
     widget_set_text_utf8(sub, hint ? hint : "");
     return feedback_note(line, sub, free);
+}
+
+/* The empty state (docs/oled-design.md#empty-and-offline), one form for every page with nothing to
+ * show: three stacked tiles (ES_TILE in front, two ES_SIDE ones ES_SIDE_DX either side behind it,
+ * faint) with the page's glyph (tools/art.py EMPTY_GLYPHS, ES_GLYPH px) on the front one, a title
+ * in Inter Medium 20, a hint in 15 px Text Secondary and, when the page has one, one action row 24
+ * px under it, already selected; the whole stack centred between free_top (or the status row's
+ * foot) and the screen's. A view over the page holds it (ES_NAME, its words and top in its props,
+ * painted by empty_state_paint), and the row is a one-row list the wheel and Centre reach as any.
+ */
+#define ES_NAME "_empty_state"
+#define ES_TOP 40 /* the status row's foot, as the design measures it */
+#define ES_TILE 58
+#define ES_SIDE 48
+#define ES_SIDE_DX 30
+#define ES_TILE_R 9
+#define ES_GLYPH 28
+#define ES_TITLE_GAP 18 /* the tiles to the title's band */
+#define ES_TITLE_H 24
+#define ES_HINT_H 20
+#define ES_ROW_GAP 24
+#define ES_ROW_H 32
+#define ES_TITLE_PX 24 /* Inter Medium 20, AWTK's size */
+#define ES_HINT_PX 18  /* Inter 15 */
+static int es_top(int free_top, int row) {
+    int stack = ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H + (row ? ES_ROW_GAP + ES_ROW_H : 0),
+        from = free_top > ES_TOP ? free_top : ES_TOP;
+    return from + (320 - from - stack) / 2;
+}
+int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event)) {
+    if (!page || !e) return 0;
+    int y = screen_y(page), top = es_top(free_top, e->row != 0);
+    void *art =
+        widget_factory_create_widget(widget_factory(), "view", page, 0, 0, 375, I(page, W_H));
+    widget_set_name(art, ES_NAME);
+    widget_set_prop_str(art, "_es_glyph", e->glyph ? e->glyph : "");
+    widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
+    widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
+    widget_set_prop_int(art, "_es_top", top);
+    if (e->row) {
+        int ry = top + ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H + ES_ROW_GAP;
+        page_row_detail(rows_view(page, ry - y, 375, ES_ROW_H, 1, page_h(48)), 0, e->row, 0,
+                        on_row);
+    }
+    return 1;
+}
+void empty_state_paint(void *w, void *canvas) {
+    if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_prop_str(w, "name", ""), ES_NAME))
+        return;
+    int top = widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w), light = ipod_light();
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    static const signed char dx[] = { -ES_SIDE_DX, ES_SIDE_DX, 0 };
+    for (int k = 0; k < 3; ++k) { /* the two behind at about a quarter's strength */
+        int s = k < 2 ? ES_SIDE : ES_TILE;
+        rect_t r = { 375 / 2 + dx[k] - s / 2, top + ES_TILE / 2 - s / 2, s, s };
+        fill_box(canvas, &r, RGBA(flip_if(light, k < 2 ? 0x0a0a0b : 0x2c2c2e)), ES_TILE_R);
+        round_ring(canvas, &r, ES_TILE_R, RGBA(flip_if(light, k < 2 ? 0x111112 : 0x48484c)));
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+    char art[48];
+    tk_snprintf(art, sizeof art, "empty_%s", widget_get_prop_str(w, "_es_glyph", ""));
+    paint_art(w, canvas, theme_art(art), 375 / 2 - ES_GLYPH / 2, top + ES_TILE / 2 - ES_GLYPH / 2);
+    int ty = top + ES_TILE + ES_TITLE_GAP;
+    ar_text(canvas, widget_get_prop_str(w, "_es_title", ""), 1, ES_TITLE_PX,
+            flip_if(light, 0xffffff), 0, 375 / 2, ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
+    ar_text(canvas, widget_get_prop_str(w, "_es_hint", ""), 0, ES_HINT_PX,
+            light ? 0x5c5c5c : 0xababab, 0, 375 / 2, ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
 }
 
 /* Sleep Timer's page with its switch off shows only the switch's row (navigation.c

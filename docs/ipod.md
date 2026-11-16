@@ -378,10 +378,40 @@ review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth op
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
 (`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. Play Mode, EQ, Gapless and Crossfade come first; the volume's rows (Volume, Max Volume, Default Volume) after ReplayGain; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
+
+Playback's **Library** (`patch/library_settings.c`) holds what the Library contains and how it is ordered and shown.
+Its pages are stock's Playback page opened again (`library_open`, `playset_sub` naming the page while its init runs), stock's
+rows dropped, each page's own built; each keeps its own place in position memory (`SUB_PAGE`):
+
+- Library: an **On-The-Go** switch first (`Q2POD OTG`, on by default: Playlists' On-The-Go row and the hold menu's
+  Add to On-The-Go), then a **Streaming Songs** switch (`Q2POD LIBRARYSOURCE`, off by default; caption "Streaming songs join your
+  Library"): on, the songs and playlists of a music server that a card app such as the Subsonic app lists join the
+  Library, greyed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
+  streaming songs?" (Cancel, Turn Off, a footer saying Show in Library pauses), while a card app has a catalogue on
+  the card; then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
+  Flow" (`Q2POD ARTISTCF`, the default; Grid and List; Cover Flow ends with an All albums card, see
+  [internals.md](internals.md#artist-albums-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
+  (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
+- Sorting: **Songs**, a picker of Title, Artist, Album and Recently Added (`song_sort.c`), the current one's direction
+  as an arrow, Centre on it again flipping it and another taking its natural one (A to Z, the newest first); "Artist's
+  Albums: Year" or "A–Z" (`Q2POD ARTISTAZ`); "Years: Newest First" or "Oldest First" (`Q2POD YEAROLD`).
+- Playlists: "Playlist View: List" (`Q2POD PLAYLISTCF`, List (default) or Cover Flow; [Playlists as
+  covers](#cover-flow)), then Import Playlists and Export Playlists after a 12 px gap.
+- Folders: Folder Root (`Q2POD FOLDERROOT`, cycling the card's top folders), stock's Folder Skip and Folder Album
+  Cover.
+
+The pickers (Songs here, Display > Cover Flow's Sort) are stock's Buttons Lock page opened again (`picker_open`), its
+rows built by `picker_rows` from `ringnav_keylock_rows`; a pick stays on the page, as Buttons Lock's does. Library is depth 3 below Home
+(Settings, Playback, Library); its Sorting, Playlists and Folders pages are depth 4, and the Songs picker depth 5.
+From Home with Now Playing selected, counting detents and Center presses straight down (Settings is 6 detents and
+Center, Playback, its fourth row, 3 and Center, Library, Playback's second, 1 and Center: 13 to open it), a row's own
+press included: On-The-Go 14, Streaming Songs 15, Artists 17, Artist View 18, Scan Song Durations 21; the Songs picker
+17, Artist's Albums 18, Years 19; Playlist View 20; Folder Root 21. Elsewhere: Sleep Timer's page 20, Enlarged Album
+Art 20, Cover Flow's Sort picker 20.
 
 Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settings, whose own rows open Wi-Fi's and Bluetooth's pages; SyncLink stays off ([internals](internals.md#synclink)).
 
@@ -916,7 +946,7 @@ builds three rows with `0x4c6b94`: a `list_item_create(view, 0, 0, 0, 0)` in `s_
 `s_scrlabel_white24l` `hscroll_label` at (72, 0, 210, 70) and `list_into` at x 282. The rows
 show no value; each opens a sub-page (iPod's [settings rows](#settings) then lay them out 68
 pixels high). The build destroys stock's Lock Screen and Show Navigation Bar rows (Q2 Pod has no lock screen: [Screen off and wake](internals.md#screen-off-and-wake)), then adds a "Smart Awake" switch and Night Shift, and, the same way with stock's `list_into` chevron, **Appearance**
-(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow. System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
+(`system_display`) and **Cover Flow** (Play settings' cover mode icon, `playset_covermode`), in that order: Brightness, Screen Off Time, Smart Awake, Night Shift, Appearance, Cover Flow, and last the **Enlarged Album Art** switch (stock's `PLAYSET COVERMODE`, Now Playing's art). System settings' **Controls** row (Play settings' folder jump icon, `playset_folderjump`) is the third sub-page. Each opens stock's
 Display page again (`display_open`, `display_sub` naming the sub-page while its init runs), which
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
@@ -934,19 +964,13 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   or not, with no idle quit ([Card games](internals.md#card-apps)). Enlarged Album Art never opens off the art page (#57): while Now Playing's slide view is on
   another page, or ⋯'s About is over it (`np_about_page`), each `ringnav_sleep` pass holds stock's countdown (`BC_IDLE`) at its full 10 s.
   Before, the window opened and closed a pass later, flashing over the lyrics every 10 s (#153).
-- Cover Flow: "Artist View: Cover Flow" (`Q2POD ARTISTCF`, the default; Grid and List, same icon;
-  Cover Flow ends with an All albums card, see
-  [internals.md](internals.md#artist-albums-in-coverflow)), "Playlist View: List"
-  (`Q2POD PLAYLISTCF`, List (default) or Cover Flow; [Playlists as covers](#cover-flow)), "Cover Flow
-  Sort: Album", "Refresh Cover Flow" (`system_update`; it empties `.coverflow/`, the playlists' art
-  with the albums', which builds again), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
-  `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies
-  they read, a "Scan Song Durations" switch (`Q2POD SCANDURATIONS`, off; `playset_covermode`;
-  durations.c), a "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`;
-  coverflow_position.c), and "Library: Local Only" or "Library: Local + Server" (`Q2POD
-  LIBRARYSOURCE`, Local Only by default; `playset_covermode`): with Local + Server, the songs and
-  playlists of a music server that a card app such as the Subsonic app lists join the Library,
-  greyed while they can't play ([Server library](internals.md#server-library)).
+- Cover Flow, what changes Cover Flow alone: "Sort: Album", a picker of Album, Artist, Year, Recently Added, Most
+  Played and Random (`coverflow_sort_set`), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
+  `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies they read, a
+  "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`; coverflow_position.c), then after a 12 px gap
+  "Refresh Cover Flow" (`system_update`; it empties `.coverflow/`, the playlists' art with the albums', which builds
+  again). The Library's own settings (Artist View, Playlist View, Scan Song Durations, Streaming Songs) are on
+  [Settings > Playback > Library](#settings).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
 

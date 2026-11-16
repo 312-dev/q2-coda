@@ -1,6 +1,6 @@
-/* Songs' order, the inset modal's Sort picker (docs/oled-design.md#menus): Title, Artist, Album or
- * Recently Added, each either way. Stock orders Songs by g_sort_flag (SYSSET SORTSELECT, 0 its
- * alphabetical title order, 1 and 2 file name and format, 3 and 4 time added newest and oldest
+/* Songs' order, Playback > Library > Sorting's Songs picker (library_settings.c): Title, Artist,
+ * Album or Recently Added, each either way. Stock orders Songs by g_sort_flag (SYSSET SORTSELECT, 0
+ * its alphabetical title order, 1 and 2 file name and format, 3 and 4 time added newest and oldest
  * first), which getAllMusic's query takes. Recently Added is the flag's 3 or 4; on the title order
  * (0) this keeps Title, Artist or Album as [IPOD] SONGSORT (SORT_*) and its direction as SONGDOWN
  * (1: descending) and, under a modal set, orders the loaded list (song_order): Artist and Album
@@ -45,8 +45,7 @@ void song_sort_set(int sort, int down) {
 }
 
 /* After a change, Songs reloads when it is on top again (g_sort_changeflag, as after stock's
- * picker). The hold menu commits as it closes for good: a reload while it is open would change the
- * row it acts on. 1 when there was a change. */
+ * picker). 1 when there was a change. */
 int song_sort_commit(void) {
     int due = so.due;
     if (due) g_sort_changeflag = 1;

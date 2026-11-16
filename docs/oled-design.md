@@ -342,8 +342,8 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   Play All (a song already plays the rest of its list in order): Phosphor `shuffle` (regular, 20
   px) on the text column and "Shuffle" 28 px after it, both Accent Blue, white on the selection.
   The wheel reaches it from the first song; Centre shuffles the list, and Return from Now Playing
-  lands on it again. Sort has no place on the row: it is the hold menu's Sorting row
-  ([Menus](#menus)). An album's page has Play and Shuffle above its tracks instead
+  lands on it again. Sort has no place on the row: Songs' order is Settings > Playback > Library > Sorting's
+  Songs ([ipod: Settings](ipod.md#settings)). An album's page has Play and Shuffle above its tracks instead
   ([Album page](#album-page)).
 - **Folder view** reads as an album: the same 32 px rows. A song file is a track, its number in the
   album's column, the title from the library's tags (found by the file's path) at x 50 and its
@@ -511,6 +511,10 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   A confirm whose answer leaves things alone says which under its rows, as iOS's reset alert does,
   in the [empty note](#empty-and-offline)'s form: Reset Settings Only asks "Reset settings?" over
   "Music, playlists and ratings are kept".
+- A confirm may end with a **footer**: why it asks and where the setting lives, in 13 px Text
+  Tertiary lines 17 px apart, 8 px under the last row, at the rows' text column, never selected
+  (`feedback_confirm_foot`). Streaming Songs' two asks have one: "Show streaming songs?" (Cancel, Turn
+  On) and "Hide streaming songs?" (Cancel, Turn Off).
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
@@ -540,6 +544,15 @@ Shown for a moment after a mode change (Shuffle, Repeat).
 - A card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row and its sync
   toggle, `patch/addon.c` `empty_view`) is that note too, the info row's subtitle the hint ("Empty Artist
   has no albums on the server"), with no Add to Sync over nothing and no selectable info row (audit2 F1).
+- **The empty state** (`patch/feedback.c` `empty_state`, the one form every empty page is moving onto): three
+  stacked tiles, a 58 px one in front (`#2C2C2E`, its edge `#48484C`) and two 48 px ones 30 px either side behind it
+  at about a quarter's strength, 9 px corners, with the page's 28 px Phosphor glyph (fill, white at 92 %) on the
+  front one; 18 px under them the title in Title Case, Inter Medium 20, Text Primary; under it the hint in 15 px
+  Text Secondary; and at most one action row, 24 px lower, already selected. The whole stack is centred between the
+  status row's foot (or the end of any rows above it) and the screen's. No app names. Cover Flow uses it
+  (`patch/cf_empty.c`, glyph `cards`): "No Albums Yet", "Music on the card isn't scanned", **Scan Music Now** when
+  the card's music isn't scanned; "No Albums", "Streaming albums can show here", **Turn on Streaming** (while
+  Streaming Songs is off) with a signed-in streaming app; else "No Albums", "Copy music to the SD card".
 - Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
   scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
@@ -559,16 +572,16 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - **Rows:** Inter Regular 20 at the panel's 16 px inset; an action's Phosphor symbol (regular,
   19 px) at the right in Text Secondary, white on the selection. The selection is the list's bar, 8
   px in from the panel with 8 px ends.
-- **A setting** (Sorting, Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
+- **A setting** (Speed, Shuffle, Repeat, Group by) has its symbol before the label, the
   label 26 px further in, and its value alone at the right in Text Secondary; Centre opens a picker
   in the same panel, the current choice with the accent's check before its label.
 - **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
   to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
-- **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
-  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule. A panel whose
-  rows are more than six has no gaps, so it scrolls, and ends, on whole rows (the user's, from
-  audit2 E1: a gap cut the end of Now Playing's More); its settings tell themselves apart by the
-  symbol before the label.
+- **Gaps:** a destructive row (Delete Song) comes last, 12 px below the actions, and asks before it
+  acts. Space, never a rule. A panel whose rows are more than six has no gaps, so it scrolls, and
+  ends, on whole rows (the user's, from audit2 E1: a gap cut the end of Now Playing's More); its
+  settings tell themselves apart by the symbol before the label. A list's hold menu has no Sorting
+  row: sort orders are Settings > Library > Sorting's.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 
@@ -703,7 +716,7 @@ page, On-The-Go) and `patch/add_songs.c`.
   `#2C2C2E` tile with Phosphor's `playlist` (fill, 20 px, Text Tertiary); On-The-Go's tile holds
   `sneaker-move` (fill). On the selection the tile is the accent with an 18 % white veil and its
   glyph white. No dividers. No New Playlist, Select Playlists or Import and Export rows: a playlist
-  is made from a song's hold menu, and Import and Export are Settings > Playback > Library & Folders
+  is made from a song's hold menu, and Import and Export are Settings > Playback > Library > Playlists
   rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
   which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
@@ -713,7 +726,7 @@ page, On-The-Go) and `patch/add_songs.c`.
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
   a hold offers **Remove from Playlist** alone. The songs are in the playlist's own order.
-- **On-The-Go** (Playback > On-The-Go, on by default; off hides its row and Add to On-The-Go):
+- **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
   playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note

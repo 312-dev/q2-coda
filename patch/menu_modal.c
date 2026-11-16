@@ -16,11 +16,10 @@
 #define MODAL_R 16
 #define MODAL_ROW 32
 #define MODAL_ROWS 6
-#define MODAL_GAP 12    /* between Sorting and the actions, and before a destructive row */
+#define MODAL_GAP 12    /* before a destructive row */
 #define MODAL_TEXT 16   /* a row's text and symbols from the panel's sides */
 #define MODAL_LEAD 26   /* a setting's or a choice's label after its leading symbol */
 #define MODAL_ICON 19   /* tools/art.py MENU_ICON_PX */
-#define MODAL_CARET 4   /* a value's room before its direction caret */
 #define MODAL_SWITCH 34 /* list_marks.c switch_mark's width */
 #define MODAL_FILL 0x1c1c1e
 #define MODAL_DIM 0x80000000u    /* black at 50% */
@@ -32,7 +31,6 @@
 #define MM_ICON "_mm_icon"
 #define MM_VALUE "_mm_value"
 #define MM_HOW "_mm_how"
-#define MM_DIR "_mm_dir"
 
 /* The open modals, the top one last: a picker over More keeps More's (hidden) under it. */
 #define MODAL_MAX 2
@@ -223,19 +221,14 @@ static void icon_at(void *w, void *canvas, const char *stem, const char *ink, in
     paint_art(w, canvas, theme_art(name), r->x + x, r->y + (r->h - MODAL_ICON) / 2);
 }
 
-/* A row's direction (DIR_*): a caret on the right column, after any value. */
-void modal_dir(void *row, int dir) { widget_set_prop_int(row, MM_DIR, dir); }
-
 /* One row of an open modal (navigation.c paint_modal_rows): its symbol and value, white on the
- * selection, Text Secondary off it; a choice's check before its label in the accent; a direction's
- * caret at the right, the value before it. */
+ * selection, Text Secondary off it; a choice's check before its label in the accent. */
 void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
     const char *icon = widget_get_prop_str(row, MM_ICON, ""),
                *value = widget_get_prop_str(row, MM_VALUE, "");
     if (!icon) icon = "";
     if (!value) value = "";
     int how = widget_get_prop_int(row, MM_HOW, MM_ACTION), light = ipod_light();
-    int dir = widget_get_prop_int(row, MM_DIR, DIR_NONE);
     int right = modal_row_w() - text_x(), lead = text_x(), raw = st.raw_ink;
     if (how == MM_SWITCH) { /* by stock's own switch image, hidden on the row */
         for (unsigned i = 0, n = widget_count_children(row); i < n; ++i) {
@@ -246,17 +239,13 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
         }
         return;
     }
-    if (!*icon && !*value && !dir) return;
+    if (!*icon && !*value) return;
     const char *ink = selected ? "w" : light ? "l" : "d";
     unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR);
     if (*icon && how != MM_ACTION)
         icon_at(w, canvas, icon, how == MM_CHOICE && !selected ? "a" : ink, lead, &r);
     else if (*icon && !*value)
         icon_at(w, canvas, icon, ink, right - MODAL_ICON, &r);
-    if (dir) {
-        icon_at(w, canvas, dir == DIR_UP ? "caret-up" : "caret-down", ink, right - MODAL_ICON, &r);
-        right -= MODAL_ICON + MODAL_CARET;
-    }
     if (*value) {
         st.raw_ink = 1;
         /* clear of its label's text: a long value gives way */

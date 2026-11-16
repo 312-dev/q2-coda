@@ -86,7 +86,8 @@ def api(fw):
            'coverflow_jump': (i, ptr, i, i, ptr), 'coverflow__bound': (i, i, i, i), 'coverflow__unbound': (i, i, i),
            'coverflow__release': (None, i), 'coverflow__touch': (i, ptr, ptr), 'stride_of': (i, ptr),
            'coverflow__stamp': (u, ptr), 'coverflow__lift': (None, i, u), 'coverflow__sort_saved': (i,),
-           'coverflow_sort_name': (C.c_char_p,), 'coverflow_sort_step': (None,), 'coverflow__sort_next': (i, i),
+           'coverflow_sort_name': (C.c_char_p,), 'coverflow_sort_set': (None, i),
+           'coverflow_sort_now': (i,), 'coverflow_sort_count': (i,), 'coverflow_sort_at': (C.c_char_p, i), 'coverflow__sort_next': (i, i),
            'blob_io': (i, C.c_char_p, C.c_char_p, ptr, u, i), 'file_size': (C.c_long, C.c_char_p),
            'coverflow__ff_run': (i, C.c_char_p, C.c_char_p, i, i, ptr), 'coverflow__build_art': (None, ptr),
            'coverflow__worker': (ptr, ptr), 'art_strike': (None, C.c_char_p), 'coverflow_clean_end': (None,),
@@ -2299,14 +2300,18 @@ def test_sort_file_hostile_sweep(fw):
         assert g.sort_saved() == (want if want in (0, 1, 2, 3, 4, 6) else 0)
 
 
-def test_sort_step_walks_the_library_s_six_orders_and_wraps(fw):
+def test_sort_picker_offers_the_library_s_six_orders_and_saves_a_pick(fw):
     g = api(fw)
-    card = Card(fw, {SORT_FILE: int_bytes(0)})
+    card = Card(fw, {SORT_FILE: int_bytes(SORT_YEAR)})
+    assert g.coverflow_sort_count() == 6 and g.coverflow_sort_now() == 2
+    assert [g.coverflow_sort_at(k) for k in range(6)] == [b'Album', b'Artist', b'Year', b'Recently Added',
+                                                          b'Most Played', b'Random']
     seen = []
-    for _ in range(6):
-        g.coverflow_sort_step()
+    for k in range(6):
+        g.coverflow_sort_set(k)
         seen.append(int.from_bytes(card.files[SORT_FILE], 'little'))
-    assert seen == [SORT_ARTIST, SORT_YEAR, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_ALBUM]
+        assert g.coverflow_sort_now() == k
+    assert seen == [SORT_ALBUM, SORT_ARTIST, SORT_YEAR, SORT_ADDED, SORT_PLAYED, SORT_RANDOM]
     assert cf(fw).resort == 1
 
 

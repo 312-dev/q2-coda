@@ -349,7 +349,7 @@ def home_card(menu, at, row, text):
 # tap and is the row's click target for the wheel. The payload binds Cover Flow, Search and Settings, which slides
 # list_view_homeset, hidden until then, into the list's place: Wi-Fi, Bluetooth, General (stock's System setting
 # row), Playback (stock's Playback setting row), Car Remote, Display, Controls and Battery, the six that are not
-# stock's bound by the payload (coverflow.c home_sets). Search's name is none stock's visitor knows (stock's search
+# stock's bound by the payload (navigation.c home_sets_bind). Search's name is none stock's visitor knows (stock's search
 # pages have an img_search).
 HOME_ROWS = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
 HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_car', 'set_display', 'set_controls', 'set_power']

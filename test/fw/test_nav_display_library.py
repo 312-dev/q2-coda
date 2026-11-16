@@ -302,12 +302,15 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
     ui = Ui(fw)
     page = display(fw, ui)
     view = page.view()
-    # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow; its third, Lock Screen, and
-    # its fourth, Show Navigation Bar, are not offered
-    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow']
-    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake changes in place
+    # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow, then Enlarged Album Art
+    # (stock's switch, by its translation key); its third, Lock Screen, and its fourth, Show Navigation Bar, are not
+    # offered
+    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow',
+                            'playset_covermode']
+    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake and Enlarged Album Art change
+    # in place
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in view.children if not item.name]
-    assert into == [False, True, True, True]
+    assert into == [False, True, True, True, False]
 
 
 def titles(view):
@@ -451,14 +454,166 @@ class Prompts:
         return self.answer
 
 
-def test_cover_flow_page_holds_artist_view_playlists_sort_refresh_and_large_library_mode(fw):
+def test_cover_flow_page_holds_only_what_changes_cover_flow(fw):
+    """Sort (a picker's row, with a chevron), Fast Navigation and Position Bar, then Refresh Cover Flow after a gap;
+    the Library's own settings are on Playback > Library."""
     ui = Ui(fw)
     page = display(fw, ui)
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert page.title() == 'Cover Flow'
-    found = titles(page.view())
-    assert len(found) == 8 and found[:2] == ['Artist View', 'Playlist View'] and found[2].startswith('Cover Flow ')
-    assert found[3:] == ['Refresh Cover Flow', 'Fast Navigation', 'Scan Song Durations', 'Position Bar', 'Library']
+    view = page.view()
+    assert [item.kind for item in view.children] == ['list_item'] * 3 + ['label', 'list_item']
+    assert [item.labels()[0].text for item in view.children if item.kind == 'list_item'] == [
+        'Sort: Album', 'Fast Navigation', 'Position Bar', 'Refresh Cover Flow']
+    assert view.children[3].box[3] == 12  # the gap
+    into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children)
+            for item in view.children if item.kind == 'list_item']
+    assert into == [True, False, False, False]
+
+
+class Pages(Display):
+    """Display, and stock's Playback page as stock opens it: navigator_to builds the window and its thirteen stock rows
+    (stock_audioset_trampoline) and runs ringnav_audioset, as playset_playset_page_init does, Playback > Library's
+    pages opening the same way over it; and stock's Buttons Lock page, whose rows ringnav_keylock_rows builds, for the
+    pickers."""
+    def __init__(self, fw, ui):
+        super().__init__(fw, ui)
+        self.audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
+        self.keylock = fw.fn('ringnav_keylock_rows', C.c_int, C.c_void_p)
+        fw.mock('stock_audioset_trampoline', lambda win, *_: self.stock_rows(win))
+        self.opened = []
+
+    def stock_rows(self, win):
+        view = self.ui.at[win].find('scroll_view_playset')
+        for i in range(13):
+            self.ui.add('list_item', view).name = f'stock_{i}'
+        return 0
+
+    def page(self, name, view_name, build):
+        win = self.ui.window(name)
+        nav = self.ui.add('view', win, name='view_navbar')
+        self.ui.add('label', nav, name='title')
+        self.ui.add('scroll_view', win, (0, 30, 375, 290), view_name)
+        build(win.addr)
+        self.pages.append(win)
+        return 0
+
+    def open(self, name):
+        self.opened.append(name)
+        if name == 'playset/playset_page':
+            return self.page('playset_page', 'scroll_view_playset', lambda w: self.audioset(w, None))
+        if name == 'systemset/keylock_page':
+            return self.page('keylock_page', 'scroll_view_keylock', self.keylock)
+        return super().open(name)
+
+    def view(self):
+        return next(c for c in self.pages[-1].children if c.name.startswith('scroll_view_'))
+
+    def texts(self):
+        """Each row's label as written ("Title: value"), a gap None."""
+        return [item.labels()[0].text if item.kind == 'list_item' and item.labels() else item.name or None
+                for item in self.view().children]
+
+
+def library(fw, ui, **config):
+    """Settings > Playback, then its Library row: Playback > Library."""
+    Config(fw, **config)
+    page = Pages(fw, ui)
+    page.open('playset/playset_page')
+    ui.click(button_of(page.view(), 'Library'))
+    return page
+
+
+def test_playback_s_library_row_opens_the_library_page(fw):
+    ui = Ui(fw)
+    page = library(fw, ui)
+    assert page.opened == ['playset/playset_page'] * 2 and page.title() == 'Library'
+    assert page.texts() == ['On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Artist', 'Artist View: Cover Flow',
+                            'Playlists', 'Folders', 'Scan Song Durations']  # stock's rows gone
+    into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in page.view().children]
+    assert into == [False, False, True, False, False, True, True, False]
+
+
+@pytest.mark.parametrize('row, title, texts', [
+    ('Sorting', 'Sorting', ['Songs: Title \u2191', "Artist's Albums: Year", 'Years: Newest First']),
+    ('Playlists', 'Playlists', ['Playlist View: List', None, 'Import Playlists', 'Export Playlists']),
+    ('Folders', 'Folders', ['Folder Root: Card', 'stock_12', 'playset_foldercover']),  # stock's Folder Skip kept
+])
+def test_library_s_pages_hold_their_rows(fw, row, title, texts):
+    ui = Ui(fw)
+    page = library(fw, ui)
+    ui.click(button_of(page.view(), row))
+    assert page.title() == title and page.texts() == texts
+
+
+def test_songs_picker_flips_the_current_order_and_takes_another_s_natural_direction(fw):
+    """Sorting's Songs opens its picker (stock's Buttons Lock page, its rows ours): the current order checked with its
+    direction; it again flips the direction, another takes its own (A to Z, the newest first), saved, the picker staying
+    and Sorting's row following."""
+    ui = Ui(fw)
+    page = library(fw, ui)
+    ui.click(button_of(page.view(), 'Sorting'))
+    sorting = page.view()
+    ui.click(button_of(sorting, 'Songs'))
+    assert page.opened[-1] == 'systemset/keylock_page' and page.title() == 'Songs'
+
+    def marks():
+        return [(item.labels()[0].text, item.children[0].children[0].props['image']) for item in page.view().children]
+    assert marks() == [('Title \u2191', b'select'), ('Artist', b'unselect'), ('Album', b'unselect'),
+                       ('Recently Added', b'unselect')]
+    before = len(writes(fw))
+    ui.click(page.view().children[0].children[0])
+    assert marks()[0] == ('Title \u2193', b'select') and ('SONGDOWN', 1) in writes(fw)[before:]
+    ui.click(page.view().children[3].children[0])
+    assert marks() == [('Title', b'unselect'), ('Artist', b'unselect'), ('Album', b'unselect'),
+                       ('Recently Added \u2193', b'select')]  # the newest first
+    assert ('SORTSELECT', 3) in writes(fw) and sorting.children[0].labels()[0].text == 'Songs: Recently Added \u2193'
+    assert fw.var('g_sort_changeflag', C.c_ubyte).value == 1  # Songs reloads when it is on top again
+
+
+def test_cover_flow_sort_opens_its_picker_and_a_pick_is_its_value(fw):
+    ui = Ui(fw)
+    page = Pages(fw, ui)
+    Config(fw)
+    Files(fw, {})
+    page.open('systemset/display_page')
+    ui.click(button_of(page.view(), 'Cover Flow'))
+    cover_flow = page.view()
+    ui.click(button_of(cover_flow, 'Sort'))
+    assert page.title() == 'Sort'
+    assert [item.labels()[0].text for item in page.view().children] == [
+        'Album', 'Artist', 'Year', 'Recently Added', 'Most Played', 'Random']
+    ui.click(page.view().children[2].children[0])
+    assert [item.children[0].children[0].props['image'] for item in page.view().children] == [b'unselect'] * 2 + [
+        b'select'] + [b'unselect'] * 3
+    assert cover_flow.children[0].labels()[0].text == 'Sort: Year'
+
+
+def test_buttons_lock_keeps_its_own_rows_after_a_picker_closed(fw):
+    ui = Ui(fw)
+    page = library(fw, ui)
+    ui.click(button_of(page.view(), 'Sorting'))
+    ui.click(button_of(page.view(), 'Songs'))
+    picker = ui.wm.children[-1]
+    for w, evt, fn, ctx in list(ui.handlers):  # the picker's page closing
+        if w == picker.addr and evt == O['EVT_DESTROY']:
+            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
+    page.open('systemset/keylock_page')
+    assert [item.labels()[0].text for item in page.view().children] == ['Off', 'Everything', 'Buttons only',
+                                                                         'Volume only']
+
+
+def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
+    ui = Ui(fw)
+    Config(fw)
+    page = Pages(fw, ui)
+    page.open('playset/playset_page')
+    texts = page.texts()
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min',
+                     'stock_8', 'Sleep Timer', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9', 'stock_10',
+                     'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']  # EQ (stock_2), then the Library
+    ui.click(button_of(page.view(), 'Sleep Timer'))
+    assert page.opened[-1] == 'systemset/sleepshutdown_page'
 
 
 class Settings:
@@ -573,9 +728,9 @@ def test_boot_to_flips_and_saves_through_a_temporary_file(fw):
     page = Power(fw, ui, {})
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Q2 Pod' and page.files.files == {BOOT: b'q2pod'}
+    assert label.text == 'Boot to: Q2 Pod' and page.files.files.get(BOOT) == b'q2pod'
     ui.click(label.parent)
-    assert label.text == 'Boot to: Rockbox' and page.files.files == {BOOT: b'rockbox'}
+    assert label.text == 'Boot to: Rockbox' and page.files.files.get(BOOT) == b'rockbox'
     assert {C.string_at(a[0]).decode() for _, a in fw.calls('fw_fopen')} >= {BOOT + '.tmp'}
 
 
@@ -596,7 +751,7 @@ def test_boot_to_after_rockbox_left_the_card(fw):
     page.card['card'] = False
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Rockbox' and page.files.files == {}
+    assert label.text == 'Boot to: Rockbox' and BOOT not in page.files.files
     assert [p[3] for p in page.prompts.seen] == ['Rockbox is not on the card']
 
 
@@ -3004,4 +3159,29 @@ def test_appearance_keeps_its_own_place_not_displays(fw):
         scope = C.c_uint()
         now(C.byref(scope))
         scopes.append(scope.value)
-    assert sub.props.get('_display_sub') == 1 and scopes[0] != scopes[1]
+    assert sub.props.get('_sub_page') == 0x10 + 1 and scopes[0] != scopes[1]
+
+
+# The empty state (feedback.c empty_state): one view over the page holding the page's glyph, title and hint for its
+# painter, and at most one action row, the whole stack centred from the status row's foot (y 40) or free_top down.
+@pytest.mark.parametrize('row, free, top', [(None, 0, 40 + (280 - 120) // 2), ('Scan Music Now', 0, 40 + (280 - 176) // 2),
+                                            ('Scan Music Now', 90, 90 + (230 - 176) // 2)])
+def test_the_empty_state_centres_its_stack_and_its_one_row(fw, st, row, free, top):
+    ui = Ui(fw)
+    fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_: ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
+    use_set(st, 'oled')
+    win = ui.window('coverflow_page')
+    body = ui.add('view', win, (0, 58, 375, 262), 'body')
+    keep = [C.create_string_buffer(s) for s in (b'cards', b'No Albums Yet', b"Music on the card isn't scanned",
+                                                row.encode() if row else b'')]
+    e = (C.c_char_p * 4)(*[C.addressof(k) for k in keep[:3]], C.addressof(keep[3]) if row else None)
+    clicked = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda *_: 0)
+    assert fw.fn('empty_state', C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(body.addr, free, C.addressof(e), C.cast(clicked, C.c_void_p)) == 1
+    art = body.find('_empty_state')
+    assert art and art.props['_es_glyph'] == b'cards' and art.props['_es_title'] == b'No Albums Yet' and art.props['_es_top'] == top
+    lists = [c for c in body.children if c.kind == 'list_view']
+    if not row:
+        assert lists == []
+    else:
+        (lv,) = lists
+        assert lv.box[1] == top + 58 + 18 + 24 + 20 + 24 - 58 and lv.labels()[0].text == 'Scan Music Now'

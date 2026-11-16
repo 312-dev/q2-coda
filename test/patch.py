@@ -5794,7 +5794,7 @@ for only_focus,want,stepped in ((1,7,False),(0,None,True)):
 # The rows this polish renamed or added fit stock's ellipsis: the settings text's 275 px less its 4 px of margins.
 from fontTools.ttLib import TTFont
 font=TTFont(B/'default.ttf'); advance=lambda s: sum(font['hmtx'][font.getBestCmap()[ord(c)]][0] for c in s)*24/font['head'].unitsPerEm
-assert all(advance(s)<=271 for s in ('Artist View: Cover Flow','Refresh Cover Flow','Cover Flow Sort: Album','Time in Title')); passed()
+assert all(advance(s)<=271 for s in ('Artist View: Cover Flow','Refresh Cover Flow','Sort: Recently Added',"Artist's Albums: Year",'Years: Newest First','Time in Title')); passed()
 # Every scrolling label's holds and pace (ringnav_hscroll_start, ringnav_hscroll_lull) through stock's
 # own hscroll_label code, run from the image: start, its delay, tick (0x5fb744), step, lull and stop.
 # A label shows its offset while it runs; stopped, stock paints its start with the ellipsis ('rest').
@@ -8581,14 +8581,13 @@ for want,saved in (('Sort: Artist',1),('Sort: Year',6),('Sort: Most Played',3),(
 passed()
 m.close(); m.stack.remove(m.page); m.top=m.stack[-1]; m.open(); assert len(m.nodes[m.slide]['children'])==3
 assert shown(m,2)=='Album 2'; passed()
-# Display settings' Cover Flow Sort (navigation.c's pod rows): each press saves the next of Album, Artist,
-# Year, Recently Added, Most Played and Random, round again, which Coverflow takes at its next open; the
-# next album hold follows the reordered deque.
+# Display > Cover Flow's Sort picker (library_settings.c): a pick of Album, Artist, Year, Recently Added, Most Played
+# or Random is saved, which Coverflow takes at its next open; the next album hold follows the reordered deque.
 m=AlbumRateMachine(); m.word(m.albums[2]+O['REC_ARTIST'],m.string('Aardvark'))
 sort_name=lambda: m.text(m.call(address=payload_syms['coverflow_sort_name'],args=(0,0,0,0),gap=0)&0xffffffff)
 assert sort_name()=='Sort: Album'
-for want in ('Sort: Artist','Sort: Year','Sort: Recently Added','Sort: Most Played','Sort: Random','Sort: Album','Sort: Artist'):
-    m.call(address=payload_syms['coverflow_sort_step'],args=(0,0,0,0),gap=0); assert sort_name()==want
+for i,want in ((1,'Sort: Artist'),(2,'Sort: Year'),(3,'Sort: Recently Added'),(4,'Sort: Most Played'),(5,'Sort: Random'),(0,'Sort: Album'),(1,'Sort: Artist')):
+    m.call(address=payload_syms['coverflow_sort_set'],args=(i,0,0,0),gap=0); assert sort_name()==want
 assert [v for k,v in m.files.items() if k.endswith('ringnav-coversort')]==[struct.pack('<i',1)]  # SORT_ARTIST
 m.open(); m.slide=m.find('slide_menu'); m.word(m.slide+O['SLIDE_INDEX'],0); m.press(101); assert m.hold()==11
 assert m.nodes[m.title]['text']=='Album 2'; m.release(); m.pick(1); m.advance(0)
@@ -10178,16 +10177,16 @@ def row_text(r):  # a row's label; a value row (OLED's settings.values text) rea
     return f'{t}: {v[0]}' if v else t
 m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
-assert len(kids)==6 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow']  # no Lock Screen
+assert len(kids)==7 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow','playset_covermode']  # no Lock Screen; Enlarged Album Art last
 keep_lit=kids[2]
-assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
+assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into','playset_covermode','switch_off']
 f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
-# Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Song Durations, Cover
-# Flow Position, Library (Local Only or Local + Server); Controls, System's row: the wheel, the buttons and what they do.
-cfv=display_page(m,2); cf,cf_pl,cf_sort,cf_refresh,cf_big,cf_durations,cf_position,cf_library=m.nodes[cfv]['children']
-assert m.icons_set==['playset_covermode']*3+['system_update']+['playset_covermode','switch_off']*3+['playset_covermode'],m.icons_set
-assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch, as Playlist View; LIBRARYSOURCE unset: the card's own songs
+# Cover Flow: what changes Cover Flow alone, Sort (its picker's row, a chevron), Fast Navigation, Position Bar, then
+# Refresh Cover Flow after a 12 px gap; Controls, System's row: the wheel, the buttons and what they do.
+cfv=display_page(m,2); cf_sort,cf_big,cf_position,cf_gap,cf_refresh=m.nodes[cfv]['children']
+assert m.icons_set==['playset_covermode','list_into']+['playset_covermode','switch_off']*2+['system_update'],m.icons_set
+assert m.nodes[cf_gap]['type']=='label' and m.get(cf_gap+O['W_H'])==12
 ctl=display_page(m,3); wheel,hold,tone,lock,wake=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
@@ -10330,25 +10329,11 @@ assert 'oled_check_a' in [rm.text(c[2]) for c in rm.calls if c[0]=='widget_load_
 rm.icons=[]; rm.nodes[rimg]['image']='unselect'; rm.paint(rimg); assert not rm.bands and not rm.icons
 assert image({},'select')==image({},'unselect')==[bytes(8)+b'\xee'*4]*2; passed()
 m=settings_m
-# Artist albums (Q2POD ARTISTCF), the other layout choice, after Home; no key is Coverflow.
-cf_label=m.nodes[m.nodes[cf]['children'][0]]['children'][1]; assert m.nodes[cf_label]['text']=='Artist View: Cover Flow'
-f,ctx=m.handler(m.nodes[cf]['children'][0],O['EVT_CLICK']); m.calls=[]
-assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.nodes[cf_label]['text']=='Artist View: List'
-assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(2,'Q2POD','ARTISTCF')]
-m.call(address=f,args=(ctx,m.event,0,0),gap=0); assert m.nodes[cf_label]['text']=='Artist View: Grid'
-m.call(address=f,args=(ctx,m.event,0,0),gap=0); assert m.nodes[cf_label]['text']=='Artist View: Cover Flow'; passed()
-# Playlist View (Q2POD PLAYLISTCF), a value row beside Artist View: List, then Cover Flow; no key is List.
-pl_label=m.nodes[m.nodes[cf_pl]['children'][0]]['children'][1]; assert m.nodes[pl_label]['text']=='Playlist View: List'
-f,ctx=m.handler(m.nodes[cf_pl]['children'][0],O['EVT_CLICK']); m.calls=[]
-assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.nodes[pl_label]['text']=='Playlist View: Cover Flow'
-assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(1,'Q2POD','PLAYLISTCF')]
-m.call(address=f,args=(ctx,m.event,0,0),gap=0); assert m.nodes[pl_label]['text']=='Playlist View: List'
-assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config'][-1]==(0,'Q2POD','PLAYLISTCF'); passed()
-# Cover Flow Sort and Refresh Cover Flow (coverflow.c), the library Coverflow's Sort and Refresh cards
-# before: no saved order is Album; Refresh empties the art cache for the next open, and stock's Library covers
-# with AWTK's cached bitmaps, with a toast.
+# Cover Flow's Sort and Refresh Cover Flow (coverflow.c), the library Coverflow's Sort and Refresh cards before: no
+# saved order is Album; Refresh empties the art cache for the next open, and stock's Library covers with AWTK's cached
+# bitmaps, with a toast.
 sort_label,refresh_label=(m.nodes[m.nodes[r]['children'][0]]['children'][1] for r in (cf_sort,cf_refresh))
-assert m.nodes[sort_label]['text']=='Cover Flow Sort: Album' and m.nodes[refresh_label]['text']=='Refresh Cover Flow'
+assert m.nodes[sort_label]['text']=='Sort: Album' and m.nodes[refresh_label]['text']=='Refresh Cover Flow'
 f,ctx=m.handler(m.nodes[cf_refresh]['children'][0],O['EVT_CLICK']); m.mock('opendir@GLIBC_2.0'); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.toasts[-1][3]=='Cover Flow rebuilds artwork next time'
 assert [m.text(c[1]) for c in m.calls if c[0]=='opendir@GLIBC_2.0']==['/mnt/mmc/.coverflow','/mnt/mmc/.sldp']
@@ -15789,7 +15774,7 @@ for radio,page in (('wifiswitch','systemset/wifi_page'),('btswitch','systemset/b
 def settings_page(hook,view_name,config={},stock_rows=2,bt=1,boot=False,cls=QueueMachine,sub=0):
     m=cls(); m.config.update(config); m.restack=True
     if hook=='display': m.word(payload_syms['display_sub'],sub)  # 3: Controls
-    if hook=='audioset': m.word(payload_syms['playset_sub'],sub)  # 1: Library & Folders
+    if hook=='audioset': m.word(payload_syms['playset_sub'],sub)  # 1 to 4: Library, Sorting, Playlists, Folders
     if boot:
         m.handlers[payload_syms['peq_boot']]='stock_peq_boot'  # FP64 storage checked by test/peq.py
         m.call(address=payload_syms['ringnav_bootmode'],args=(3,0,0,0),gap=0)  # config_init's play mode
@@ -15836,23 +15821,24 @@ passed()
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3,sub=3)
 assert texts()==['Wheel Sensitivity: 50%','Hold Return: Recent','Clicker: Off','system_keylock','Wake: Single Press']
 assert icons==['system_display','playset_folderjump','system_keytone','system_keylock','system_keylock']; passed()
-# Fast Navigation (Display, Cover Flow's page, fourth from the end, before Scan Song Durations, Position Bar and Library): off by default; the row saves BIGLIBRARY, and Cover
-# Flow reads it at once (ringnav_big_library: letters, years and half copies); a stored value other than 1 is off.
+# Fast Navigation (Display, Cover Flow's page, after Sort, before Position Bar and Refresh Cover Flow): off by default;
+# the row saves BIGLIBRARY, and Cover Flow reads it at once (ringnav_big_library: letters, years and half copies); a
+# stored value other than 1 is off.
 bm,brows,btexts,bicons,bclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert btexts()[-4]=='Fast Navigation' and bicons[-4]=='playset_covermode' and btexts()[-1]=='Library: Local Only',(btexts(),bicons)
+assert btexts()==['Sort: Album','Fast Navigation','Position Bar','Refresh Cover Flow'] and bicons[1]=='playset_covermode',(btexts(),bicons)
 big=lambda bm: bm.call(address=payload_syms['ringnav_big_library'],args=(0,0,0,0),gap=0)
-k=len(brows)-4
+k=1
 assert big(bm)==0 and bclick(k)==[(1,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==1
 assert bclick(k)==[(0,'Q2POD','BIGLIBRARY')] and btexts()[k]=='Fast Navigation' and big(bm)==0; passed()
 for v,on in (('1',1),('2',0),('0',0)):
     bm,*_=settings_page('display','scroll_view_display',{'BIGLIBRARY':v},stock_rows=3,sub=2)
     assert big(bm)==on,v
 passed()
-# The independent duration switch is off, persists on/off, and cancels on off.
-dm,drows,dtexts,dicons,dclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
-assert dtexts()[-3]=='Scan Song Durations'
-assert dclick(len(drows)-3)==[(1,'Q2POD','SCANDURATIONS')]
-assert dclick(len(drows)-3)==[(0,'Q2POD','SCANDURATIONS')]; passed()
+# The independent duration switch, Playback > Library's last row, is off, persists on/off, and cancels on off.
+dm,drows,dtexts,dicons,dclick=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
+assert dtexts()[-1]=='Scan Song Durations'
+assert dclick(len(drows)-1)==[(1,'Q2POD','SCANDURATIONS')]
+assert dclick(len(drows)-1)==[(0,'Q2POD','SCANDURATIONS')]; passed()
 # The browsing-position indicator is optional, off by default, and persists independently.
 pm,prows,ptexts,picons,pclick=settings_page('display','scroll_view_display',stock_rows=3,sub=2)
 assert ptexts()[-2]=='Position Bar'
@@ -16233,31 +16219,58 @@ m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1',
 assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's key in 1.8.2 and before: no row
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
 assert texts()[0]=='Standby Limit: Off'; passed()  # out of range: Off
-# Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, and
-# Folder skip, Library & Folders'), then ours; Volume (its slider page, below), stock's Max Volume and Default Volume
-# pages open from their rows, and Enlarged Album Art flips stock's own byte and key.
+# Playback: stock V1.36's thirteen rows less its last two (Volume and Album Display, whose page's rows are here, on
+# Display and on Library > Folders, and Folder skip, Library > Folders'), then ours, EQ and the Library first; the
+# Sleep Timer, Volume (its slider page, below), stock's Max Volume and Default Volume pages and the Library open from
+# their rows.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13)
-assert len(rows)==10 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','playset_folderjump','playset_maxvol','playset_maxvol','playset_bootvol','playset_covermode','playset_folderjump']
-assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Library & Folders','Volume: 0','playset_maxvol','playset_bootvol','playset_covermode','On-The-Go']
-assert len(m.nodes[m.settings_view]['children'])==21 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
-assert [click(6),m.opened[-1],click(7),m.opened[-1]]==[[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
-m.byte(syms['g_bigcovermode'],0); assert click(8)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[8])=='switch_on'
-assert click(8)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0' and switch_image(m,rows[8])=='switch_off'
-assert click(9)==[(0,'Q2POD','OTG')] and click(9)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
-# Library & Folders: its row opens stock's page again as the sub-page, stock's Folder skip kept, ours built.
-assert click(4)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
+assert len(rows)==9 and icons==['playset_gapless','playset_memplay','playset_balance','playset_balance','system_powermanager','playset_maxvol','playset_maxvol','playset_bootvol','playset_folderjump']
+assert texts()==['Crossfade: Off','Resume Songs: 30 min','Mono Audio','Swap L/R','Sleep Timer','Volume: 0','playset_maxvol','playset_bootvol','Library']
+assert len(m.nodes[m.settings_view]['children'])==20 and not set(m.entries[11:])&set(m.nodes[m.settings_view]['children'])
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[2,21,3,7,13,6,14,8,17,18,19,20,0,9,10,15,16,1,4,5]  # EQ, Library first
+assert [click(4),m.opened[-1],click(6),m.opened[-1],click(7),m.opened[-1]]==[[],('systemset/sleepshutdown_page',None),[],('playset/maxvol_page',None),[],('playset/bootvol_page',None)]
+assert click(8)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
+passed()
+# Playback > Library (library_settings.c): stock's Playback page again, its rows gone, ours built; a chevron row opens
+# its page the same way (playset_sub naming it while its init runs).
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=1)
-assert len(rows)==7 and icons==['playset_covermode','playset_folderjump','playset_covermode','playset_folderjump','playset_foldercover','playset_folderjump','playset_folderjump']
-assert texts()==['Year Order: Newest First','Artists: Artist','Artist Album Order: Year','Folder Root: Card','playset_foldercover','Import Playlists','Export Playlists']
-assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[14,15,13,16,12,17,18,19]
-m.byte(syms['g_foldercover_flag'],0); assert click(4)==[(1,'PLAYSET','FOLDERCOVER')] and m.u.mem_read(syms['g_foldercover_flag'],1)==b'\1' and switch_image(m,rows[4])=='switch_on'
-assert click(4)==[(0,'PLAYSET','FOLDERCOVER')] and switch_image(m,rows[4])=='switch_off'
-assert click(2)==[(1,'Q2POD','ARTISTAZ')] and texts()[2]=='Artist Album Order: A–Z'
-assert click(2)==[(0,'Q2POD','ARTISTAZ')] and texts()[2]=='Artist Album Order: Year'
-assert click(0)==[(1,'Q2POD','YEAROLD')] and texts()[0]=='Year Order: Oldest First'
-assert click(0)==[(0,'Q2POD','YEAROLD')] and texts()[0]=='Year Order: Newest First'
-assert click(1)==[(1,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==1 and texts()[1]=='Artists: Album Artist'
-assert click(1)==[(0,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==0; passed()
+assert texts()==['On-The-Go','Streaming Songs','Sorting','Artists: Artist','Artist View: Cover Flow','Playlists','Folders','Scan Song Durations']
+assert icons==['playset_folderjump']*8 and m.nodes[m.settings_view]['children']==rows
+assert click(0)==[(0,'Q2POD','OTG')] and click(0)==[(1,'Q2POD','OTG')]  # On-The-Go, on unless chosen
+for i in (2,5,6):
+    assert click(i)==[] and m.opened[-1]==('playset/playset_page',None) and m.get(payload_syms['playset_sub'])==0
+assert click(3)==[(1,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==1 and texts()[3]=='Artists: Album Artist'
+assert click(3)==[(0,'PLAYSET','ARTISTTYPE')] and m.get(syms['artist_type'])==0
+# Artist View (Q2POD ARTISTCF), Cover Flow unless chosen: List, Grid, then Cover Flow again
+assert [click(4) for _ in range(3)]==[[(2,'Q2POD','ARTISTCF')],[(0,'Q2POD','ARTISTCF')],[(1,'Q2POD','ARTISTCF')]] and texts()[4]=='Artist View: Cover Flow'
+# Streaming Songs (LIBRARYSOURCE, off unless chosen): on at once; off at once too with no app's catalogue on the card
+assert switch_image(m,rows[1])=='switch_off' and click(1)==[(1,'Q2POD','LIBRARYSOURCE')] and switch_image(m,rows[1])=='switch_on'
+assert click(1)==[(0,'Q2POD','LIBRARYSOURCE')] and switch_image(m,rows[1])=='switch_off'; passed()
+# Library > Sorting: Songs (its picker's row), Artist's Albums (ARTISTAZ) and Years (YEAROLD)
+m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=2)
+assert texts()==['Songs: Title \u2191',"Artist's Albums: Year",'Years: Newest First']
+assert click(1)==[(1,'Q2POD','ARTISTAZ')] and texts()[1]=="Artist's Albums: A–Z"
+assert click(1)==[(0,'Q2POD','ARTISTAZ')] and texts()[1]=="Artist's Albums: Year"
+assert click(2)==[(1,'Q2POD','YEAROLD')] and texts()[2]=='Years: Oldest First'
+assert click(2)==[(0,'Q2POD','YEAROLD')] and texts()[2]=='Years: Newest First'
+assert click(0)==[] and m.opened[-1]==('systemset/keylock_page',None); passed()
+# Library > Playlists: Playlist View (PLAYLISTCF, List unless chosen), a gap, then Import and Export Playlists
+m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=3)
+assert texts()==['Playlist View: List','Import Playlists','Export Playlists']
+kids=m.nodes[m.settings_view]['children']; assert len(kids)==4 and m.nodes[kids[1]]['type']=='label' and m.get(kids[1]+O['W_H'])==12
+assert click(0)==[(1,'Q2POD','PLAYLISTCF')] and texts()[0]=='Playlist View: Cover Flow'
+assert click(0)==[(0,'Q2POD','PLAYLISTCF')] and texts()[0]=='Playlist View: List'; passed()
+# Library > Folders: Folder Root, stock's Folder skip kept, Folder Album Cover (stock's own byte and key)
+m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,sub=4)
+assert texts()==['Folder Root: Card','playset_foldercover'] and icons==['playset_folderjump']*2
+assert [(m.entries+rows).index(c) for c in m.nodes[m.settings_view]['children']]==[13,12,14]
+m.byte(syms['g_foldercover_flag'],0); assert click(1)==[(1,'PLAYSET','FOLDERCOVER')] and m.u.mem_read(syms['g_foldercover_flag'],1)==b'\1' and switch_image(m,rows[1])=='switch_on'
+assert click(1)==[(0,'PLAYSET','FOLDERCOVER')] and switch_image(m,rows[1])=='switch_off'; passed()
+# Display: Enlarged Album Art last, flipping stock's own byte and key
+m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=4)
+assert texts()[-1]=='playset_covermode'
+m.byte(syms['g_bigcovermode'],0); assert click(len(rows)-1)==[(1,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\1' and switch_image(m,rows[-1])=='switch_on'
+assert click(len(rows)-1)==[(0,'PLAYSET','COVERMODE')] and m.u.mem_read(syms['g_bigcovermode'],1)==b'\0'; passed()
 # Artists is Album Artist until a choice is saved (read_artistype_value); a saved Artist stays.
 for config,want in (({},1),({'ARTISTTYPE':'0'},0),({'ARTISTTYPE':'1'},1)):
     a=Machine(); a.config.update(config); a.word(syms['artist_type'],7)
@@ -16494,12 +16507,12 @@ assert texts()[3]=='Swap L/R'; passed()
 # FOLDERROOT each time. Not offered: files, dot-folders, names with an edge space or over 200 bytes (a
 # config.ini line can't keep them). A saved folder gone moves on to the next name after it.
 card=[('Zeta',4),('.Trash',4),('Música ñ',4),('alpha',4),('notes.txt',8),(' Edge',4),('B'*200,4),('C'*201,4),('Unknown',0)]
-m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',{'FOLDERROOT':'Deleted'},stock_rows=13,sub=1,cls=lambda:RootMachine(card=card))
-assert texts()[3]=='Folder Root: Deleted'
+m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',{'FOLDERROOT':'Deleted'},stock_rows=13,sub=4,cls=lambda:RootMachine(card=card))
+assert texts()[0]=='Folder Root: Deleted'
 saved=[]
 for _ in range(6):
-    assert click(3)==[] and [(m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='toolsWriteConfig']==[('Q2POD','FOLDERROOT')]
-    saved.append((m.config['FOLDERROOT'],texts()[3]))
+    assert click(0)==[] and [(m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='toolsWriteConfig']==[('Q2POD','FOLDERROOT')]
+    saved.append((m.config['FOLDERROOT'],texts()[0]))
 assert [v for v,_ in saved]==['Música ñ','Unknown','Zeta','','alpha','B'*200]
 assert [t for _,t in saved]==['Folder Root: '+(v or 'Card') for v,_ in saved]; passed()
 # Crossfade (crossfade.c): the row shows the saved length while on; an unreadable one is the default.

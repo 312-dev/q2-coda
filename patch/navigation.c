@@ -260,6 +260,8 @@ menu_t g_menu __attribute__((section(".scratch")));
  * one of the audited local row lists that carry over at the ends. The index is remembered
  * instead of the name pointer: AWTK owns and frees the window's name string. */
 enum { CTX_DYNAMIC, CTX_FIXED, CTX_FOLDER, CTX_LOCAL };
+/* a stock page opened again as a sub-page of its own: which, on its window (context_now) */
+#define SUB_PAGE "_sub_page"
 enum { RING = 1, DRILL = 2, BUTTONS = 4, CHOICE = 8 };
 typedef struct {
     const char *name;
@@ -803,8 +805,6 @@ static row_id_t row_id(void *w) {
     return id;
 }
 
-#define DISPLAY_SUB "_display_sub" /* a Display sub-page's DISPLAY_* (ringnav_display) */
-
 /* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
  * load_localclass_list/load_album_detaillist use the class, saved query and artist/album modes.
  * Hash the bounded query object, including its flags, rather than a title or a freed pointer. */
@@ -837,8 +837,9 @@ static int context_now(unsigned *scope) {
         }
         *scope = hash_bytes(h, album_modetype, 4);
     } else if (contexts[ctx].kind == CTX_FIXED) {
-        /* Display's sub-pages (ringnav_display) are its page opened again: each its own list */
-        *scope = 1 + (unsigned)widget_get_prop_int(top, DISPLAY_SUB, 0);
+        /* a stock page opened again as a sub-page of its own (Display's, Library's) keeps its own
+         */
+        *scope = 1 + (unsigned)widget_get_prop_int(top, SUB_PAGE, 0);
     } else if (!tk_strcmp(name, "coverflow_page")) {
         *scope = coverflow_scope(top);
         if (!*scope) return -1;
@@ -2509,7 +2510,7 @@ void *list_row(void *view, const char *icon, int (*click)(void *, void *), void 
 }
 
 /* A settings row that opens a page, its label clear of the chevron. */
-static void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx) {
+void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx) {
     return list_row_core(view, icon, click, ctx, 202, 1);
 }
 
@@ -2716,6 +2717,7 @@ static int lock_pick(void *ctx, void *event) {
     return 0;
 }
 int ringnav_keylock_rows(void *win) {
+    if (picker_rows(win)) return 0; /* a settings picker over the same page (library_settings.c) */
     void *view = win ? widget_lookup(win, "scroll_view_keylock", 1) : 0;
     if (!view) return 0;
     widget_destroy_children(view);
@@ -2816,8 +2818,8 @@ int ringnav_quick_settings(void *win, void *ctx) {
  */
 /* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
-/* Playback's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add to
- * On-The-Go; on unless the key says 0. */
+/* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
+ * to On-The-Go; on unless the key says 0. */
 static int otg_on __attribute__((section(".scratch")));
 #define STR_(x) #x
 #define STR(x) STR_(x)
@@ -2953,14 +2955,13 @@ static void pod_text(int i) {
         { "Charge Limit: Off", "Charge Limit: " STR(CHARGE_STOP) "%" },
         { "Wake: Single Press", "Wake: Double Press" },
         { "Artist View: Grid", "Artist View: Cover Flow", "Artist View: List" },
-        { "Year Order: Newest First", "Year Order: Oldest First" },
+        { "Years: Newest First", "Years: Oldest First" },
         { "Artists: Artist", "Artists: Album Artist" },
         { "Resume on Connect: Off", "Resume on Connect: On" },
-        { "Artist Album Order: Year", "Artist Album Order: A–Z" },
+        { "Artist's Albums: Year", "Artist's Albums: A–Z" },
         { "Hold Return: Recent", "Hold Return: Home" },
         { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
-          "Standby Limit: " STR(STANDBY_LIMIT_2) "h",
-          "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
+          "Standby Limit: " STR(STANDBY_LIMIT_2) "h", "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
         { 0 }, /* Control Device Volume: a switch */
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
@@ -2974,7 +2975,7 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
-        { "Library: Local Only", "Library: Local + Server" },
+        { 0 }, /* Streaming Songs: a switch */
         { 0 }, /* On-The-Go: a switch */
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
@@ -2982,10 +2983,8 @@ static void pod_text(int i) {
         widget_set_text_utf8(st.pod_label[i], clicker_text());
         return;
     }
-    if (i == POD_CF_SORT) {
-        char sort[48];
-        tk_snprintf(sort, sizeof sort, "Cover Flow %s", coverflow_sort_name());
-        row_value_text(st.pod_label[i], sort); /* key/value on a set with a right column */
+    if (i == POD_CF_SORT) { /* key/value on a set with a right column */
+        row_value_text(st.pod_label[i], coverflow_sort_name());
         return;
     }
     int v = i == POD_ARTISTS       ? I(artist_type, 0) == 1
@@ -3007,6 +3006,7 @@ static void pod_text(int i) {
                          : i == POD_SCAN_DURATIONS ? "Scan Song Durations"
                          : i == POD_CF_POSITION    ? "Position Bar"
                          : i == POD_OTG            ? "On-The-Go"
+                         : i == POD_LIBRARY_SOURCE ? "Streaming Songs"
                                                    : 0;
     if (toggle)
         list_toggle(st.pod_label[i], toggle, v);
@@ -3017,18 +3017,24 @@ static void pod_text(int i) {
     if (i == POD_COVERMODE) widget_set_tr_text(st.pod_label[i], "playset_covermode");
     if (i == POD_FOLDERCOVER) widget_set_tr_text(st.pod_label[i], "playset_foldercover");
 }
+void pod_text_again(int i) {
+    if (st.pod_label[i]) pod_text(i);
+}
 /* Centre or tap toggles and saves. Charge limit takes effect on the next UI loop pass
  * (power_poll), Smart Wi-Fi within SMART_POLL_MS; Artists on the next load of an artist list, as
  * the artist page's switch does; Fast Navigation's letters at the next spin, its half copies at
- * Cover Flow's next idle pass; Standby limit at the next Standby; Coverflow Sort and Refresh
- * Coverflow at Coverflow's next open (coverflow.c), Refresh with a toast, as it changes nothing in
- * view. */
+ * Cover Flow's next idle pass; Standby limit at the next Standby; Refresh Cover Flow at Cover
+ * Flow's next open (coverflow.c), with a toast, as it changes nothing in view. Cover Flow's Sort
+ * opens its picker, and Streaming Songs may ask first (library_settings.c). */
 static int pod_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
     pod_settings();
-    if (i == POD_CF_SORT)
-        coverflow_sort_step();
-    else if (i == POD_CF_REFRESH) {
+    if (i == POD_CF_SORT) {
+        cf_sort_open(); /* its pick writes the row */
+        return 0;
+    } else if (i == POD_LIBRARY_SOURCE) {
+        if (!library_source_toggle()) return 0;
+    } else if (i == POD_CF_REFRESH) {
         coverflow_refresh_art();
         toast("Cover Flow rebuilds artwork next time");
     } else if (i == POD_ARTISTS) {
@@ -3053,7 +3059,6 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
-        if (i == POD_LIBRARY_SOURCE) catalogue_changed();
         st.charge_at = 0;
         /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -3067,7 +3072,8 @@ void pod_rows(void *win, const char *view_name, int first, int n, const char *co
     void *view = win ? widget_lookup(win, view_name, 1) : (void *)0;
     pod_settings();
     for (int i = 0; view && i < n; ++i) {
-        st.pod_label[first + i] = list_row(view, icons[i], pod_click, (void *)(long)(first + i));
+        st.pod_label[first + i] = (first + i == POD_CF_SORT ? list_row_into : list_row)(
+            view, icons[i], pod_click, (void *)(long)(first + i));
         pod_text(first + i);
     }
 }
@@ -3089,7 +3095,7 @@ int ringnav_powermanager(void *win, void *ctx) {
     if (view)
         caption_row(st.pod_label[POD_SMART_WIFI],
                     (const unsigned *)L"Turns Wi-Fi off after 5 minutes when nothing needs it. "
-                                       L"AirPlay and Car Remote keep it on.");
+                                      L"AirPlay and Car Remote keep it on.");
     pod_rows(win, "scroll_view_powermanager", POD_CARMODE, 1, icons + 2);
     if (view) /* battery.c's page */
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
@@ -3127,37 +3133,15 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
     for (unsigned i = 0; i < n; i++) widget_restack(rows[order[i]], i);
 }
 
-/* Everyday listening, what plays next, level, channels, then specialist output controls; the ring
- * puts Library & Folders one detent from the top. Stock's rows 0-10 (ringnav_audioset drops its
- * Volume and Album Display and Folder skip), then ours as built. */
+/* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
+ * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
+ * and Album Display and Folder skip), then ours as built. */
 static const unsigned char playset_order[] = {
-    3 /* Play Mode */,
-    2 /* EQ */,
-    7 /* Gapless */,
-    11 /* Crossfade */,
-    6 /* Memory play */,
-    12 /* Resume Songs */,
-    8 /* Headphones required */,
-    0 /* Gain */,
-    9 /* ReplayGain */,
-    16 /* Volume */,
-    17 /* Max Volume */,
-    18 /* Default Vol */,
-    10 /* Balance */,
-    13 /* Mono Audio */,
-    14 /* Swap L/R */,
-    19 /* Enlarged art */,
-    1 /* Filters */,
-    4 /* DSD Output */,
-    5 /* USB Audio */,
-    20 /* On-The-Go */,
-    15 /* Library & Folders */,
-};
-/* Library & Folders: stock's Folder skip (0), then ours as built. */
-static const unsigned char library_order[] = {
-    2 /* Artists */,          3 /* Artist album order */, 1 /* Year order */,
-    4 /* Folder Root */,      0 /* Folder skip */,        5 /* Folder art */,
-    6 /* Import Playlists */, 7 /* Export Playlists */,
+    2 /* EQ */,           19 /* Library */,     3 /* Play Mode */,     7 /* Gapless */,
+    11 /* Crossfade */,   6 /* Memory play */,  12 /* Resume Songs */, 8 /* Headphones required */,
+    15 /* Sleep Timer */, 16 /* Volume */,      17 /* Max Volume */,   18 /* Default Vol */,
+    0 /* Gain */,         9 /* ReplayGain */,   10 /* Balance */,      13 /* Mono Audio */,
+    14 /* Swap L/R */,    1 /* Filters */,      4 /* DSD Output */,    5 /* USB Audio */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -3234,59 +3218,62 @@ static int root_click(void *ctx, void *event) {
     root_text(name);
     return 0;
 }
+/* Playback > Library > Folders' Folder Root row (library_settings.c) */
+void *folder_root_row(void *view) {
+    char name[256];
+    root_read(name);
+    st.root_label = list_row(view, "playset_folderjump", root_click, 0);
+    root_text(name);
+    return st.root_label;
+}
+/* a 12 px space between rows, which the wheel passes (an empty label, as power_rows' gap) */
+void settings_gap(void *view) { widget_set_text_utf8(label_create(view, 0, 0, 0, 12), ""); }
 
 /* A row that opens the stock page ctx names, as stock's own rows do. */
 static int to_page(void *ctx, void *event) {
     navigator_to((const char *)ctx);
     return 0;
 }
-/* Playback's Library & Folders opens stock's page again (as Display's sub-pages do) with only the
- * library rows: stock's Folder skip (12) kept, its others dropped. The main page drops it instead,
- * and stock's Volume and Album Display (11): that page's four rows are here as they were, Max
- * Volume, Default Volume and Enlarged Album Art on Playback and Folder Album Cover on Library &
- * Folders, opening stock's pages and flipping stock's switches (pod_click). Playback's Volume row,
- * before Max Volume, opens the slider page on the volume (crossfade.c xfade_open 4). Each page
+/* Playback > Library and its pages (library_settings.c) open stock's Playback page again (as
+ * Display's sub-pages do), playset_sub naming the page while its init runs, with the page's rows
+ * instead of stock's: Folders keeps stock's Folder skip (12), the others none. Playback itself
+ * drops stock's Volume and Album Display (11) and Folder skip; Album Display's rows are elsewhere,
+ * Max Volume and Default Volume here, Enlarged Album Art on Display and Folder Album Cover on
+ * Library > Folders, opening stock's pages and flipping stock's switches (pod_click). Playback's
+ * Volume row, before Max Volume, opens the slider page on the volume (crossfade.c xfade_open 4).
+ * Each page
  * builds only its own rows, so a row's kept label is its page's. */
 static int playset_sub __attribute__((section(".scratch")));
-static int library_open(void *ctx, void *event) {
-    playset_sub = 1;
+int library_open(void *ctx, void *event) {
+    playset_sub = (int)(long)ctx;
     navigator_to("playset/playset_page");
     playset_sub = 0;
     return 0;
 }
 int ringnav_audioset(void *win, void *ctx) {
-    static const char *const icons[] = { "playset_covermode", "playset_folderjump" },
-                             *const cover_icons[] = { "playset_covermode", "playset_foldercover" };
     int sub = playset_sub, result = stock_audioset_trampoline(win, ctx);
     void *view = win ? widget_lookup(win, "scroll_view_playset", 1) : (void *)0;
     if (!view) return result;
     for (int i = (int)widget_count_children(view); i-- > 0;)
-        if (sub ? i != 12 : i >= 11) widget_destroy(widget_get_child(view, (unsigned)i));
+        if (sub ? sub != LIB_FOLDERS || i != 12 : i >= 11)
+            widget_destroy(widget_get_child(view, (unsigned)i));
     if (sub) {
+        static const char *const titles[] = { 0, "Library", "Sorting", "Playlists", "Folders" };
         void *nav = widget_lookup(win, "view_navbar", 1),
              *title = nav ? widget_get_child(nav, 0) : (void *)0;
-        if (title) widget_set_text_utf8(title, "Library & Folders");
-        pod_rows(win, "scroll_view_playset", POD_YEAR_OLD, 2, icons);
-        pod_rows(win, "scroll_view_playset", POD_ARTIST_AZ, 1, icons);
-        char name[256];
-        root_read(name);
-        st.root_label = list_row(view, "playset_folderjump", root_click, 0);
-        root_text(name);
-        pod_rows(win, "scroll_view_playset", POD_FOLDERCOVER, 1, cover_icons + 1);
-        /* playlists.c: the Playlists page's own rows under the other themes */
-        widget_set_text_utf8(list_row(view, "playset_folderjump", playlists_transfer, 0),
-                             "Import Playlists");
-        widget_set_text_utf8(list_row(view, "playset_folderjump", playlists_transfer, (void *)1),
-                             "Export Playlists");
-        reorder(view, library_order, sizeof library_order);
+        if (title) widget_set_text_utf8(title, titles[sub]);
+        widget_set_prop_int(win, SUB_PAGE, sub);
+        library_page(win, view, sub);
         return result;
     }
     xfade_row(list_row_into(view, "playset_gapless", xfade_open, (void *)0));  /* crossfade.c */
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
-    widget_set_text_utf8(list_row_into(view, "playset_folderjump", library_open, 0),
-                         "Library & Folders");
+    /* stock's timer page, which Control Center's tile opens too (ringnav_sleeptimer) */
+    widget_set_text_utf8(
+        list_row_into(view, "system_powermanager", to_page, (void *)"systemset/sleepshutdown_page"),
+        "Sleep Timer");
     volume_row(list_row_into(view, "playset_maxvol", xfade_open, (void *)4)); /* crossfade.c */
     widget_set_tr_text(
         list_row_into(view, "playset_maxvol", to_page, (void *)"playset/maxvol_page"),
@@ -3294,8 +3281,8 @@ int ringnav_audioset(void *win, void *ctx) {
     widget_set_tr_text(
         list_row_into(view, "playset_bootvol", to_page, (void *)"playset/bootvol_page"),
         "playset_bootvol");
-    pod_rows(win, "scroll_view_playset", POD_COVERMODE, 1, cover_icons);
-    pod_rows(win, "scroll_view_playset", POD_OTG, 1, icons + 1);
+    widget_set_text_utf8(
+        list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);
     return result;
 }
@@ -5061,8 +5048,8 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
-    /* the inset modal's hold menu holds Sort as its Sorting row (qm_sorts): the bars stay, hidden,
-     * for its click */
+    /* the inset modal's set orders Songs from Playback > Library > Sorting (library_settings.c):
+     * the bars stay, hidden */
     if (modal_set()) widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
     image_base_set_image(sort, "sort_bars");
@@ -5221,6 +5208,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     feedback_confirm_switch(w, canvas);
     feedback_switch_bar(w, canvas);
     feedback_scan_bar(w, canvas);
+    empty_state_paint(w, canvas); /* a page's empty state (feedback.c) */
     coverflow_home_clip(w, canvas, 1);
     if (w && w == st.bar_slot) paint_battery(w, canvas);
     if (w && w == st.action_view && P(canvas, CANVAS_LCD) && theme()->shuffle_row) {
@@ -6028,20 +6016,19 @@ int ringnav_display(void *win, void *ctx) {
         for (int i = DISPLAY_APPEARANCE; i <= DISPLAY_COVERFLOW; ++i)
             widget_set_text_utf8(list_row_into(view, sub_icons[i], display_open, (void *)(long)i),
                                  titles[i]);
+        pod_rows(win, "scroll_view_display", POD_COVERMODE, 1, cf_icons); /* Now Playing's art */
         return result;
     }
     widget_destroy_children(view);
-    widget_set_prop_int(win, DISPLAY_SUB, sub); /* its own place in position memory (context_now) */
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
     if (title) widget_set_text_utf8(title, titles[sub]);
-    if (sub == DISPLAY_COVERFLOW) {
-        pod_rows(win, "scroll_view_display", POD_ARTIST_CF, 1, cf_icons);
-        pod_rows(win, "scroll_view_display", POD_PL_CF, 1, cf_icons);
-        pod_rows(win, "scroll_view_display", POD_CF_SORT, 2, cf_icons + 1);
+    widget_set_prop_int(win, SUB_PAGE, 0x10 + sub); /* apart from Library's pages */
+    if (sub == DISPLAY_COVERFLOW) { /* what changes Cover Flow alone; the Library's are Library's */
+        pod_rows(win, "scroll_view_display", POD_CF_SORT, 1, cf_icons);
         pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
-        pod_rows(win, "scroll_view_display", POD_SCAN_DURATIONS, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
-        pod_rows(win, "scroll_view_display", POD_LIBRARY_SOURCE, 1, cf_icons + 3);
+        settings_gap(view);
+        pod_rows(win, "scroll_view_display", POD_CF_REFRESH, 1, cf_icons + 2);
         return result;
     }
     if (sub == DISPLAY_APPEARANCE) {
@@ -6841,7 +6828,6 @@ enum {
     QA_CHAPTERS,
     QA_MORE,
     QA_NEW_PLAYLIST,
-    QA_SORT, /* the inset modal's Sorting row (menu_modal.c) */
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the inset modal's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
@@ -6950,27 +6936,15 @@ static void qm_close(void) {
 }
 
 /* Return and the title bar arrow dismiss without the stock sort-change flag. */
-#define QM_SORT_CHOICE 4 /* st.qm_choice: the Sort picker, after Shuffle, Repeat and Group by */
-/* the menu reopened from the Sort picker: on its Sorting row */
-static int qm_on_sort __attribute__((section(".scratch")));
 static int qm_open(const void *unused);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
-    /* the Sort picker goes back to its menu, from the next pass, as a hold opens it; else the
-     * menu is gone for good, and Songs reloads in a new order as the close puts it on top */
-    int back = st.qm_choice == QM_SORT_CHOICE && !st.qm_timer;
-    if (!back) song_sort_commit();
     qm_close();
-    if (back) {
-        st.qm_choice = 0, qm_on_sort = 1;
-        st.qm_timer = timer_add(qm_open, (void *)0, 0);
-    }
     return STOP;
 }
 
 static int qm_gone(void *dialog, void *event) {
     if (st.qm_dialog == dialog) st.qm_dialog = (void *)0;
-    if (!st.qm_dialog && !st.qm_timer) song_sort_commit(); /* closed some other way */
     return 0;
 }
 
@@ -8246,14 +8220,7 @@ static int qm_run(const void *unused) {
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
     unsigned aid = r ? qm_album_id(r) : 0; /* an album's own Favourites and Rate */
-    if (r && a >= 100 && st.qm_choice == QM_SORT_CHOICE) {
-        /* the current order flips and the picker stays; another takes its natural direction
-         * (titles, artists and albums A to Z, the newest first) and the menu comes back */
-        int i = a - 100, again = i == song_sort();
-        song_sort_set(i, again ? !song_down() : i == SORT_ADDED);
-        if (!again) st.qm_choice = 0, qm_on_sort = 1;
-        qm_open(0);
-    } else if (r && a >= 100) {
+    if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
     } else if (r && a == QA_CHAPTERS) {
@@ -8262,9 +8229,6 @@ static int qm_run(const void *unused) {
         np_queue(0);
     } else if (a == QA_MORE && st.qm_kind == QM_PLAYLIST) {
         if (r) navigator_to_with_context("localmusic/playlistsmore_page", (void *)(long)st.qm_idx);
-    } else if (r && a == QA_SORT) {
-        st.qm_choice = QM_SORT_CHOICE;
-        qm_open(0);
     } else if (a == QA_NEW_PLAYLIST) {
         /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
@@ -8365,17 +8329,6 @@ static int qm_run(const void *unused) {
             toast(a == QA_NEXT ? "Playing Next" : "Playing Last");
         if (add) deque_destroy(add);
     }
-    /* closed for good after a new order: Songs, already on top again, reloads in it now, as its
-     * coming back to the top does after stock's Sort picker (the action needed the old list) */
-    void *top = window_manager_get_top_window(window_manager());
-    if (!st.qm_dialog && !st.qm_timer && song_sort_commit() && top &&
-        !tk_strcmp(widget_get_prop_str(top, "name", ""), "allmusic_page")) {
-        char front[0x30] = { 0 };
-        I(front, EVENT_TYPE) = EVT_WINDOW_FOREGROUND;
-        I(front, 4) = sizeof front;
-        P(front, EVENT_TARGET) = top;
-        stock_dispatch_trampoline(top, front);
-    }
     return 0;
 }
 
@@ -8417,20 +8370,7 @@ static const char *qm_choice_name(int kind, int i) {
     return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
 }
 
-/* The inset modal's Sorting row (menu_modal.c): on a list whose Songs action row has stock's Sort
- * (Songs' own list, class 0xf001), its order as Sort's picker names it, and its direction. */
-#define MODAL_PITCH 32
-static int qm_sorts(void *page) {
-    void *row = st.action_view;
-    /* the page, or the page under the picker closing as the menu comes back */
-    return modal_set() && row && (window_of(row) == page || modal_win(page)) &&
-           widget_count_children(row) > 2 && I(g_class_type, 0) == 0xf001;
-}
-static const char *const qm_sort_names[SORT_N] = { "Title", "Artist", "Album", "Recently Added" };
-static const char *qm_sort_name(int *dir) {
-    *dir = song_down() ? DIR_DOWN : DIR_UP;
-    return qm_sort_names[song_sort()];
-}
+#define MODAL_PITCH 32 /* the inset modal's rows (menu_modal.c) */
 
 static int qm_open(const void *unused) {
     st.qm_timer = 0;
@@ -8455,9 +8395,7 @@ static int qm_open(const void *unused) {
     widget_on(back, EVT_CLICK, qm_back, dialog);
     widget_on(dialog, EVT_DESTROY, qm_gone, dialog);
     if (st.qm_choice) {
-        int kind = st.qm_choice - 1, sorting = st.qm_choice == QM_SORT_CHOICE,
-            count = sorting ? SORT_N : qm_choices(kind),
-            current = sorting ? song_sort() : playback_option(kind);
+        int kind = st.qm_choice - 1, count = qm_choices(kind), current = playback_option(kind);
         qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
         widget_destroy_children(view);
         int modal = modal_set(), row = modal ? MODAL_PITCH : QM_ROW,
@@ -8467,12 +8405,10 @@ static int qm_open(const void *unused) {
             widget_use_style(item, "s_listitem_black");
             void *label = hscroll_label_create(item, 30, 0, 310, row);
             widget_use_style(label, "s_scrlabel_white24l");
-            widget_set_text_utf8(label, sorting ? qm_sort_names[i] : qm_choice_name(kind, i));
+            widget_set_text_utf8(label, qm_choice_name(kind, i));
             if (modal)
                 modal_row(item, label, i == current ? "check" : (const char *)0, (const char *)0,
                           MM_CHOICE);
-            /* the current order's direction, which Centre on it flips */
-            if (sorting && i == current) modal_dir(item, song_down() ? DIR_DOWN : DIR_UP);
             if (i == current && !modal)
                 image_base_set_image(image_create(item, w - 35, 0, 24, row), "select");
             widget_on(item, EVT_CLICK, qm_pick, (void *)(long)(100 + i));
@@ -8569,7 +8505,6 @@ static int qm_open(const void *unused) {
                                         "Chapters",
                                         "More…",
                                         "New Playlist",
-                                        "Sorting",
                                         "Add to On-The-Go",
                                         "Play",
                                         "Rename",
@@ -8595,20 +8530,14 @@ static int qm_open(const void *unused) {
                                          "bookmark-simple",
                                          "dots-three",
                                          "plus",
-                                         "funnel-simple",
                                          "sneaker-move",
                                          "play",
                                          "pencil-simple",
                                          "trash" };
     char rated[32];
-    /* stock sortselect row styles; the inset modal's rows, a Sorting row first and a gap after it
-     * where the list sorts */
-    int modal = modal_set(), sorts = qm_sorts(page), pitch = modal ? MODAL_PITCH : QM_ROW,
+    /* stock sortselect row styles; the inset modal's rows */
+    int modal = modal_set(), pitch = modal ? MODAL_PITCH : QM_ROW,
         width = modal ? modal_row_w() : 375;
-    if (sorts) {
-        memmove(acts + 1, acts, n++);
-        acts[0] = QA_SORT;
-    }
     for (int i = 0; i < n; ++i) {
         void *item = list_item_create(view, 0, i * pitch, width, pitch);
         widget_use_style(item, "s_listitem_black");
@@ -8621,8 +8550,7 @@ static int qm_open(const void *unused) {
             tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
         }
         /* a setting's value stands on its own on the modal's right column */
-        int setting =
-            modal && (acts[i] == QA_SORT || (acts[i] >= QA_ADV_SHUFFLE && acts[i] <= QA_GROUP));
+        int setting = modal && acts[i] >= QA_ADV_SHUFFLE && acts[i] <= QA_GROUP;
         widget_set_text_utf8(label,
                              acts[i] == QA_RATE ? rated
                              : acts[i] == QA_GROUP && !modal
@@ -8636,24 +8564,18 @@ static int qm_open(const void *unused) {
                              : acts[i] == QA_UNFAV && modal  ? "Remove from Favorites"
                                                              : rows[acts[i] - 1]);
         if (modal) {
-            int dir = DIR_NONE, kind = acts[i] - QA_ADV_SHUFFLE;
-            const char *value = !setting             ? (const char *)0
-                                : acts[i] == QA_SORT ? qm_sort_name(&dir)
-                                                     : qm_choice_name(kind, playback_option(kind));
+            int kind = acts[i] - QA_ADV_SHUFFLE;
+            const char *value = setting ? qm_choice_name(kind, playback_option(kind)) : 0;
             if (acts[i] == QA_DELETE) modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
-            modal_dir(item, dir);
-            if (acts[i] == QA_SORT) modal_gap(view);
         }
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }
     widget_set_prop_int(view, "virtual_h", n * pitch);
     if (modal) modal_frame(dialog, widget_lookup(dialog, "list_view", 1));
     st.qm_dialog = dialog;
-    /* the first action, Sorting a tick up; Sorting itself, back from its picker */
-    if (modal) ringnav_select(view, qm_on_sort ? 0 : sorts, n);
-    qm_on_sort = 0;
+    if (modal) ringnav_select(view, 0, n); /* the first action */
     return 0;
 }
 

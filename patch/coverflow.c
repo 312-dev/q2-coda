@@ -1286,8 +1286,9 @@ void *page_title(void *body, const char *caption, int n) {
     return title;
 }
 
-/* A list view in parent from y, w wide and at most h high, for n item_h rows; its scroll view. */
-static void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
+/* A list view in parent from y, w wide and at most h high, for n item_h rows; its scroll view.
+ * Shared with feedback.c's empty_state. */
+void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
     int rows = n * item_h < h ? n * item_h : h;
     void *lv = list_view_create(parent, 0, y, w, rows);
     widget_set_prop_int(lv, "item_height", item_h);
@@ -2686,6 +2687,23 @@ static void cf_cold(unsigned t0) {
  * later opens resume). The albums are queried again only after the library changed (or Refresh
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
 static void load_albums(unsigned t0);
+static void load(void);
+/* The library's empty page waits for it: a scan, an import of a server's albums or Streaming Songs
+ * turned on (each moves library_gen) loads the covers again. The timer is the page's (empty_page),
+ * so it goes with it; one at a time. */
+static unsigned empty_gen __attribute__((section(".scratch")));
+static void *empty_page __attribute__((section(".scratch")));
+static int empty_poll(const void *info) {
+    if (cf.page != empty_page) return 7; /* RET_REMOVE: another page's */
+    if (library_scanning() || empty_gen == library_gen) return 8; /* RET_REPEAT */
+    empty_page = 0;
+    load(); /* may build the empty page again, which arms another */
+    return 7;
+}
+static void empty_wait(void) {
+    empty_gen = library_gen;
+    if (empty_page != cf.page) empty_page = cf.page, widget_add_timer(cf.page, empty_poll, 1000);
+}
 static void load(void) {
     unsigned t0 = time_now_ms();
     cf_traced = 0;
@@ -2774,7 +2792,10 @@ static void load_albums(unsigned t0) {
     if (n <= 0) {
         drop_albums();      /* only a real list is kept */
         cf.screen = COVERS; /* Return goes Home */
-        list("Update Local Music first", 0);
+        if (cf.scoped || !cf_empty(cf.page, cf.body)) /* the house's empty page (cf_empty.c) */
+            list("Update Local Music first", 0);
+        else
+            empty_wait();
         return;
     }
     unsigned count = deque_size(cf.albums);
@@ -3056,14 +3077,19 @@ static int sort_saved(void) {
     return SORT_ALBUM;
 }
 
-/* Display settings' Coverflow Sort: its label ("Sort: Album"), and a press's next order, saved,
- * which Coverflow takes at its next open (load). */
+/* Display > Cover Flow's Sort: its label ("Sort: Album"), and its picker's choices, all_sorts in
+ * order, each its name past "Sort: "; a pick is saved, and Coverflow takes it at its next open
+ * (load). */
 const char *coverflow_sort_name(void) { return sort_names[sort_saved()]; }
-void coverflow_sort_step(void) {
-    int sort = sort_saved();
-    unsigned i = 0;
+int coverflow_sort_count(void) { return (int)sizeof all_sorts; }
+const char *coverflow_sort_at(int i) { return sort_names[all_sorts[i]] + 6; }
+int coverflow_sort_now(void) {
+    int sort = sort_saved(), i = 0;
     while (all_sorts[i] != sort) ++i;
-    sort = all_sorts[(i + 1) % sizeof all_sorts];
+    return i;
+}
+void coverflow_sort_set(int i) {
+    int sort = all_sorts[i];
     BLOB_IO(SORT_FILE, sort, 1);
     cf.resort = 1;
 }
