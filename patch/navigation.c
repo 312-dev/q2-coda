@@ -6085,9 +6085,15 @@ int ringnav_systemset(void *win, void *ctx) {
                                                 { "system_reset", "systemset/reset_page" },
                                                 { "system_about", "systemset/about_page" } };
         widget_set_text_utf8(list_row_into(view, "system_update", shelf_open, 0), "App Store");
-        for (unsigned i = 0; i < 4; ++i)
-            widget_set_tr_text(list_row_into(view, moved[i][0], to_page, (void *)moved[i][1]),
-                               moved[i][0]);
+        for (unsigned i = 0; i < 4; ++i) {
+            /* Software Update (sw_update.c) checks online and the card from one row */
+            void *row = list_row_into(view, moved[i][0], i == 1 ? sw_update_open : to_page,
+                                      (void *)moved[i][1]);
+            if (i == 1)
+                widget_set_text_utf8(row, "Software Update");
+            else
+                widget_set_tr_text(row, moved[i][0]);
+        }
         /* Storage (storage.c): the card's use and a card app's Downloads */
         widget_set_text_utf8(list_row_into(view, "playset_folderjump", storage_open, 0), "Storage");
         static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };
@@ -10195,6 +10201,7 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
     if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
+    if (sw_update_key(top, key)) return STOP; /* Software Update's button and the line under it */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))
