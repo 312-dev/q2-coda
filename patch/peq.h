@@ -525,6 +525,9 @@ const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
 void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
 int catalogue_kept(void); /* a catalogue app's catalogue.tsv is on the card */
+int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
+/* cf_empty.c: Cover Flow's page with no albums, by what is missing; 0 under a theme without it */
+int cf_empty(void *page, void *body);
 /* library_settings.c: Streaming Songs' state for card apps (/tmp/q2-addon.library), and a needslib
  * row's check, which asks to turn it on: 1 when it is on */
 void library_source_file(void);

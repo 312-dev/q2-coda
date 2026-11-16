@@ -513,6 +513,13 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
+- Cover Flow with no albums draws three faint album squares (64 px in `#3A3A3C`, two 54 px behind it in
+  `#101011`, 8 px corners) with a 30 px Phosphor glyph (fill, white at 90 %) centred on y 92, a title in Inter
+  Medium 20 on y 150 and a hint in 15 px Text Secondary on y 174, and, where one action fixes the cause, that
+  row selected at y 206: music on the card not scanned ("No Albums Yet", "Music on the card isn't scanned",
+  **Scan Music Now**), a signed-in streaming app with Streaming Songs off ("No Albums Here Yet", "Your Subsonic
+  albums can show here", **Show Streaming Songs**, cloud glyph), or nothing anywhere ("No Albums", "Copy music to
+  the SD card", no row).
 - Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
   scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App

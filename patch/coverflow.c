@@ -2678,6 +2678,23 @@ static void cf_cold(unsigned t0) {
  * later opens resume). The albums are queried again only after the library changed (or Refresh
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
 static void load_albums(unsigned t0);
+static void load(void);
+/* The library's empty page waits for it: a scan, an import of a server's albums or Streaming Songs
+ * turned on (each moves library_gen) loads the covers again. The timer is the page's (empty_page),
+ * so it goes with it; one at a time. */
+static unsigned empty_gen __attribute__((section(".scratch")));
+static void *empty_page __attribute__((section(".scratch")));
+static int empty_poll(const void *info) {
+    if (cf.page != empty_page) return 7; /* RET_REMOVE: another page's */
+    if (library_scanning() || empty_gen == library_gen) return 8; /* RET_REPEAT */
+    empty_page = 0;
+    load(); /* may build the empty page again, which arms another */
+    return 7;
+}
+static void empty_wait(void) {
+    empty_gen = library_gen;
+    if (empty_page != cf.page) empty_page = cf.page, widget_add_timer(cf.page, empty_poll, 1000);
+}
 static void load(void) {
     unsigned t0 = time_now_ms();
     cf_traced = 0;
@@ -2766,7 +2783,10 @@ static void load_albums(unsigned t0) {
     if (n <= 0) {
         drop_albums();      /* only a real list is kept */
         cf.screen = COVERS; /* Return goes Home */
-        list("Update Local Music first", 0);
+        if (cf.scoped || !cf_empty(cf.page, cf.body)) /* the house's empty page (cf_empty.c) */
+            list("Update Local Music first", 0);
+        else
+            empty_wait();
         return;
     }
     unsigned count = deque_size(cf.albums);

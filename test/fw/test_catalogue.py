@@ -1378,3 +1378,57 @@ def test_a_needslib_row_needs_streaming_songs_and_asks_to_turn_it_on(rig, source
                                              '(Settings > Playback > Library).')])
     assert source_writes(rig.fw) == ([1] if on and not source else [])
     assert rig.files.files[LIBRARY] == (b'server\n' if on else b'local\n')
+
+
+# Cover Flow's empty page (cf_empty.c) and autostart: a catalogue app is signed in while its card folder holds its
+# credentials file, looked for and never opened (its state file is in /tmp, gone at boot).
+@pytest.mark.parametrize('creds, name', [(True, b'Subsonic'), (False, None)])
+def test_a_catalogue_app_is_signed_in_while_its_credentials_file_is_on_the_card(rig, creds, name):
+    if creds:
+        rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    opened = []
+    rig.fw.mock('fw_fopen', lambda path, mode, *_: opened.append(C.string_at(path)) or rig.files.fopen(path, mode))
+    out, title = C.create_string_buffer(16), C.create_string_buffer(32)
+    assert rig.fw.fn('catalogue_signed', C.c_int, C.c_char_p, C.c_char_p, C.c_uint)(out, title, 32) == bool(creds)
+    if creds:
+        assert out.value == APP.encode() and title.value == name
+    assert not [p for p in opened if p.endswith(b'credentials')]  # never read
+
+
+def test_an_app_without_catalogue_1_is_never_signed_in(rig):
+    rig.files.files[f'/mnt/mmc/.{APP}/q2app'] = b'name=Subsonic\n'
+    rig.files.files[f'/mnt/mmc/.{APP}/credentials'] = b'{}'
+    out, title = C.create_string_buffer(16), C.create_string_buffer(32)
+    assert rig.fw.fn('catalogue_signed', C.c_int, C.c_char_p, C.c_char_p, C.c_uint)(out, title, 32) == 0
+
+
+@pytest.mark.parametrize('tree, music', [
+    ({'/mnt/mmc': [('Music', 4)], '/mnt/mmc/Music': [('A', 4)], '/mnt/mmc/Music/A': [('01 Song.FLAC', 8)]}, True),
+    ({'/mnt/mmc': [('.subsonic', 4), ('notes.txt', 8)], '/mnt/mmc/.subsonic': [('song.mp3', 8)]}, False),  # a dot-folder
+    ({'/mnt/mmc': [('Music', 4)], '/mnt/mmc/Music': [('cover.jpg', 8), ('playlist.m3u', 8)]}, False),
+    ({'/mnt/mmc': [('song.opus', 0)]}, True),  # d_type unknown: by its name
+])
+def test_cover_flow_s_empty_page_looks_for_music_on_the_card(rig, tree, music):
+    dirs, opened = {}, []
+
+    def opendir(path, *_):
+        p = C.string_at(path).decode()
+        opened.append(p)
+        if p not in tree:
+            return 0
+        dirs[len(dirs) + 0x100] = list(tree[p])
+        return len(dirs) - 1 + 0x100
+
+    def readdir(d, *_):
+        if not dirs.get(d):
+            return 0
+        name, kind = dirs[d].pop(0)
+        ent = C.create_string_buffer(268)
+        C.memmove(C.addressof(ent) + 11, name.encode(), len(name))
+        ent[10] = kind
+        rig.keep.append(ent)
+        return C.addressof(ent)
+    rig.fw.mock('fw_opendir', opendir)
+    rig.fw.mock('fw_readdir', readdir)
+    assert rig.fw.fn('cf_empty__card_has_music', C.c_int)() == music
+    assert not [p for p in opened if '/.' in p]

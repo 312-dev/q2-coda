@@ -135,6 +135,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
     usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')), *(f'usbmode_{n}' for n in art.USB_MODES),
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
+    usb += [f'cfempty_{n}' for n in art.CF_EMPTY]  # cf_empty.c's page glyphs
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's

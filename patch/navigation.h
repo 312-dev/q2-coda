@@ -877,6 +877,7 @@ enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
 void cf_sort_open(void);
+void cf_empty_paint(void *w, void *canvas); /* cf_empty.c */
 int library_source_toggle(void);
 /* navigation.c */
 int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */

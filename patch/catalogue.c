@@ -1639,6 +1639,26 @@ int catalogue_kept(void) {
     return 0;
 }
 
+/* A catalogue app signed in to its server: its id (16 bytes) and its q2app's name (size bytes, the
+ * id without one), 1; 0 with none. Signed in is its card folder holding its credentials file, which
+ * is looked for and never opened: an app's status file is in /tmp and gone at boot, and signing out
+ * deletes the file (q2-subsonic). The apps looked for again unless a job is reading them. */
+int catalogue_signed(char *id, char *name, unsigned size) {
+    if (!cat.running) cat_scan();
+    char path[64], raw[512];
+    for (int i = 0; i < cat.napps; ++i) {
+        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
+        if (access(path, 0)) continue;
+        tk_snprintf(id, 16, "%s", cat.app[i].id);
+        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", cat.app[i].id);
+        state_read(path, raw, sizeof raw);
+        field(raw, "name", name, size);
+        if (!*name) tk_snprintf(name, size, "%s", cat.app[i].id);
+        return 1;
+    }
+    return 0;
+}
+
 /* The setting, turned on or off: the union starts or stops, lists query again. */
 void catalogue_changed(void) {
     if (!catalogue_on()) cat_detach();
