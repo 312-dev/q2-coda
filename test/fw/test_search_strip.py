@@ -723,3 +723,13 @@ def test_return_held_shows_its_card_and_leaves_and_a_press_erases(fw, ui, song, 
         s.key(KEY_RETURN)  # the release
     assert (s.ss.text == b'a') == erased and (s.ss.text == b'ab') == (not erased)
     assert ui.backs == int(closed) and not s.ss.held and not s.ss.hold_at
+
+
+def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
+    """Field off (New Playlist, Rename): the name in Inter Medium 22 (AWTK's 27), as the mock-up draws it."""
+    Config(fw)
+    fonts = []
+    fw.mock('canvas_set_font', lambda c, face, px, *_: fonts.append((C.string_at(face), px & 0xffffffff)))
+    s = renaming(fw, ui, b'Road')
+    painted(fw, s)
+    assert (b'inter-medium', 27) in fonts

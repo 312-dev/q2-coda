@@ -550,7 +550,8 @@ static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
              cur = (unsigned)ss.cur;
     int px = SS_PX_NAME;
     const char *face = theme_face(wide, (int)n, &px);
-    if (!face || face == faces[theme()->font[ROLE_TITLE]]) face = faces[FONT_INTER_MEDIUM];
+    if (!face || !tk_strcmp(face, faces[theme()->font[ROLE_TITLE]]))
+        face = faces[FONT_INTER_MEDIUM];
     canvas_set_font(canvas, face, (unsigned)px);
 #define SS_W(a, b)                                                                                 \
     ((b) > (a) ? (int)(canvas_measure_text(canvas, wide + (a), (b) - (a)) + 0.5f) : 0)
