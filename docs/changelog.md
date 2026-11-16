@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: **Guest Play** lets a friend's phone play through the Q2 to your car or headphones. You approve each new guest (Allow Once, Always Allow or Decline, declined by itself after 30 s), one guest plays at a time, Trusted Guests play without asking, and your own music stops while they play and comes back when they leave. The car shows the guest's song and its buttons control the guest's phone.
   - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
   - Line Out's warning reads "Line Out sets max volume, continue?" (a missing space).
   - Pages of text you scroll (OLED): when the last line sits just under the fade at the bottom, turning the wheel now scrolls it into view, as a drag does, instead of showing the scroll bar and staying put.
