@@ -766,7 +766,7 @@ band=(0,270,375,30+265+16-270); lo=(24,270+(30-bh)//2,327,bh); bar=(lo[0]+O['VOL
 m.nodes[m.wm]={'children':[win,dlg]}; m.top=dlg; paint(dlg)
 assert [m.nodes[w]['visible'] for w in (sv,lv,slider,elapsed)]==[0,0,1,1]
 assert [signed(m.get(sv+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==list(band)
-assert m.nodes[slider]['bar_size']==bh and m.nodes[slider]['style:pressed:round_radius']==bh//2
+assert m.nodes[slider]['bar_size']==bh and m.nodes[slider]['style:pressed:round_radius']==max(bh//2,4)  # stock's slider rounds from 4
 assert [b[:5] for b in m.bands]==[(*band,color_t(0))],m.bands
 assert [(r['rect'],r['radius'],r['color']) for r in m.rounded]==[(bar,bh//2,color_t(OLED['np_track_rgb'])),((*bar[:2],bar[2]*40//100,bh),bh//2,color_t(0xffffff))],m.rounded
 cy=lo[1]+bh//2-O['VOL_SPK_PX']//2

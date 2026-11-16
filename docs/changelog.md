@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Car Remote: **Settings → Car Remote** is redesigned. Each phone's row says whether it's **Connected over Wi-Fi** or **over Bluetooth**, or when it was last seen; before, its second line was cut off and showed nothing. **Pair a Phone** says how to pair and shows the Q2 Muse's address. Each phone has its own page with when it paired and last connected, **Rename** and **Forget Phone**, and a new pairing is announced by the phone's name ("Pixel 10 Pro paired").
   - Car Remote: Q2 Muse Remote can browse and play your Favorites (hearted songs) and Recently Added (the 100 newest songs) from the Q2 Muse.
+  - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
@@ -14,6 +15,7 @@
   - Display (OLED): toasts rise and fade in, then sink and fade out, instead of popping; the confirmation card fades in and out over the page.
   - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
   - Car Remote: a song streaming from a card app showed its temporary file's name as the title in Android Auto, with no artist, no cover and 0:00; it shows the song's title, artist, album, length and cover.
+  - Car Remote: a song streaming from a card app showed its temporary file's name as the title in Android Auto, with no artist, no cover and 0:00; it shows the song's title, artist, album, length and cover, and the car can heart it.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.
   - Now Playing: the Shuffle and Repeat outline from the Center cycle hides after a tap, as every focus ring does.
   - Car Remote's empty state names the phone app: "Open Q2 Muse Remote on your phone".

@@ -261,7 +261,10 @@ void paint_scrubber(void *w, void *canvas) {
 }
 
 /* The theme's progress bar over the asset's square 4px line: its np_bar (playing.scrubber.height),
- * ends round, and stock's play-state glyph at the theme's playing.state.opacity. */
+ * ends round, and stock's play-state glyph at the theme's playing.state.opacity. Stock's slider
+ * rounds its track and fill only from a round_radius of 4 (under that its paint, 0x62dd14, takes a
+ * plain rectangle), so a bar under 8 px asks for 4, which the canvas brings down to half its
+ * height: OLED's 6 px bar came out square-ended at 3. */
 void np_theme(void) {
     static const char *const radius[] = { "style:normal:round_radius", "style:pressed:round_radius",
                                           "style:over:round_radius", "style:disable:round_radius",
@@ -270,7 +273,7 @@ void np_theme(void) {
     const theme_t *T = theme();
     int h = T->np_bar;
     for (unsigned i = 0; st.np_slider && i < sizeof radius / sizeof *radius; ++i)
-        widget_set_prop_int(st.np_slider, radius[i], h / 2);
+        widget_set_prop_int(st.np_slider, radius[i], h / 2 < 4 ? 4 : h / 2);
     if (st.np_slider) widget_set_prop_int(st.np_slider, "bar_size", h);
     /* The track: the asset's is TRACK_COLOR. A theme's own (playing.scrubber.track) is written,
      * and TRACK_COLOR written back after one, so a theme on the asset's colour writes nothing. */
