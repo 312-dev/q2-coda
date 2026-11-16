@@ -711,7 +711,8 @@ static int avrcp_main(void) {
     while (!quit && lfd >= 0) {
         struct pollfd fds[AVRCP_CLIENTS + 1] = {{lfd, POLLIN, 0}};
         for (int i = 0; i < AVRCP_CLIENTS; ++i) fds[i + 1] = (struct pollfd){cl[i].fd, POLLIN, 0};
-        if (poll(fds, AVRCP_CLIENTS + 1, POLL_MS) < 0 && errno != EINTR) break;
+        /* asleep until a request, but for a command the shim has yet to ack */
+        if (poll(fds, AVRCP_CLIENTS + 1, pend.s ? POLL_MS : -1) < 0 && errno != EINTR) break;
         if (fds[0].revents & POLLIN) {
             int fd = accept(lfd, 0, 0), placed = 0;
             for (int i = 0; fd >= 0 && i < AVRCP_CLIENTS && !placed; ++i)

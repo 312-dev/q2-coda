@@ -165,6 +165,11 @@ class Bluetoothd:
         digits = len(text) - len(text.lstrip(b'-0123456789'))
         return int(text[:digits] or b'0', base or 10)
 
+    def _sprintf(self, out, fmt, *args):  # "%d", as the attributes' numbers use; any other format writes ""
+        text = str(struct.unpack('<i', struct.pack('<I', args[0]))[0]).encode() if self.cstr(fmt) == b'%d' else b''
+        self.u.mem_write(out, text + b'\0')
+        return len(text)
+
     def _memcmp(self, a, c, n, *_):
         x, y = bytes(self.u.mem_read(a, n)), bytes(self.u.mem_read(c, n))
         return 0 if x == y else (1 if x > y else -1)
@@ -175,7 +180,7 @@ class Bluetoothd:
         def hook(u, at, size, _):
             sp = u.reg_read(UC_MIPS_REG_29)
             args = [u.reg_read(r) for r in (UC_MIPS_REG_4, UC_MIPS_REG_5, UC_MIPS_REG_6, UC_MIPS_REG_7)]
-            args += [self.read(sp + 16), self.read(sp + 20)]  # o32's fifth and sixth, in the caller's frame
+            args += [self.read(sp + 16 + 4 * i) for i in range(3)]  # o32's fifth on, in the caller's frame
             self.calls.append((name, args))
             u.reg_write(UC_MIPS_REG_2, (fn(*args) or 0) & 0xffffffff)
             u.reg_write(UC_MIPS_REG_PC, u.reg_read(UC_MIPS_REG_31))

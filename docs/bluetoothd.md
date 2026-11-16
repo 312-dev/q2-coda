@@ -134,6 +134,61 @@ and `org.bluez` and loads stock's plugins. `test/bluez_port.py` runs the hooks a
 (`test/bluez_emu.py`: the binary at a load address of its own, its GOT and relocations as ld.so leaves them, imports
 answered in Python): GetPlayStatus and RegisterNotification from `g_play_status`, `avrcp_hciplayer_event`'s CHANGED on
 `g_hci_session` and its clearing at a disconnection, `avrcp_init` setting `g_avrcp_event_fun`, the codec order for
-each priority, the phone's track and START or SUSPEND to demo, and SyncLink's DISCOVER rejection. It is not installed:
+each priority, the phone's track and START or SUSPEND to demo, SyncLink's DISCOVER rejection, and the additions below:
+GetElementAttributes from `g_track_meta`, the browsing PDUs and PlayItem handed to coda-rc (and upstream's player list
+when it does not answer), SetAddressedPlayer for the Q2's player, and `shanling_browse`'s frames. It is not installed:
 stock's bluetoothd stays the shipped one until the rebuild is proven on a Q2.
+
+## The rebuild's additions
+
+- The control channel's GetElementAttributes answers from `g_track_meta` under `g_notify_mutex`
+  (`shanling_get_element_attributes`), as `tools/bt_meta.c` makes stock's binary do
+  ([internals](internals.md#track-metadata)). The browsing channel's PDU `0x20`, which stock answers from the
+  same record, is not carried over: it is no PDU AVRCP defines, and GetItemAttributes on Now Playing answers
+  the queue's songs instead.
+- SetAddressedPlayer with player 1 is accepted while no BlueZ player is registered (the Q2 registers none):
+  the player GetFolderItems lists, below.
+
+## Browsing
+
+A car or headset browses the library and plays from it as a phone's Car Remote does
+([remote-protocol](remote-protocol.md)): the same lists, orders, letter buckets and, with Local + Server on,
+server songs. The rebuilt bluetoothd hands SetBrowsedPlayer, GetFolderItems, ChangePath, GetItemAttributes,
+GetTotalNumberOfItems and Search (the browsing channel) and PlayItem (the control channel) to `coda-rc --avrcp`
+(`patch/coda_rc_avrcp.c`), a second instance of the car remote daemon that serves nothing else, over the UNIX
+socket `/tmp/coda-rc.avrcp` (mode 0600). bluetoothd starts it (`g_spawn_async`) at the first request it cannot
+deliver, then at most every 10 seconds, and waits at most 2 seconds for an answer, blocking its main loop
+meanwhile; with no answer GetFolderItems and GetTotalNumberOfItems fall back to upstream's (the registered
+players: none) and the others answer INTERNAL_ERROR.
+
+A frame is `{u16 length, request}` both ways, big-endian. A request is `{pdu, tag u32, room u16, the PDU's
+parameters}`: the tag is the session (the car) whose path the daemon keeps, and room the most the reply may
+take, the browsing channel's MTU after the AVCTP and browsing headers; the reply is `{pdu, its parameters}`.
+`{0xff, tag}` asks nothing back: the session closed, its path is dropped.
+
+- One player, id 1, named Q2, its play status from Now Playing (`/tmp/coda-rc.now`), advertising browsing,
+  searching, Now Playing and GetTotalNumberOfItems, and no AddToNowPlaying.
+- The player is database unaware: the UID counter is always 0 and an item's UID is its place in the listing
+  it came from, plus one. A folder is its coda-rc node (Browse); the daemon keeps a car's path as the ids it
+  walked into, up to 12 deep, for 4 cars at a time (the least recently heard from is dropped).
+- The root is coda-rc's Library: Tracks, Playlists, All artists, Albums, Genres, Years, Folders. A folder's
+  type is what it lists (an album Titles, an artist Albums, Albums Albums); it is playable when Play takes
+  it as a list of songs (an album, artist, genre, playlist, year, Tracks or a Tracks bucket).
+- A song is a media element with its title, artist, album and length (read from the library: a Browse row's
+  subtitle is the artist in one list and the length in another), as many as the room holds; an item that
+  does not fit is left for the next request, and a room too small for one is INTERNAL_ERROR.
+- Search keeps the car's query; the Search scope lists Tracks, then Albums, then Artists, 50 of each at most.
+  Now Playing is the queue (`/tmp/coda-rc.queue`).
+- PlayItem plays a song from its place in its folder (its album, playlist or bucket), a playable folder from
+  its start, a search's song alone, a Now Playing song by its place (`jump`), each through demo's shim
+  (`patch/coda_rc_shim.c`), which serves the daemon's files while `/tmp/coda-rc-avrcp.pid` exists, Car Remote
+  on or off. Demo not answering is MEDIA_IN_USE.
+
+Each request opens the library and makes coda-rc's views again, twice for a listing with songs (their
+tags); `ponytail:` one open per request would halve that, measured on a Q2 first. Covers (AVRCP 1.6's
+image handles and the BIP responder) are not done yet.
+
+Tests: `test/unit/test_coda_rc_avrcp.py` (each PDU against a library in stock's schema, on this machine),
+`test/coda_rc_avrcp.py BUILD` (the MIPS daemon from a build under `qemu-mipsel`: its socket, frames and a walk
+into an album), and `test/bluez_port.py` (bluetoothd's side).
 

@@ -72,7 +72,7 @@ def test_register_notification(b):
 def test_hciplayer_event(b):
     """libbtctl's g_avrcp_event_fun: a CHANGED response on g_hci_session's registration, once."""
     sent = []
-    b.answer('avctp_send_vendordep', lambda conn, transaction, code, subunit, operands, n:
+    b.answer('avctp_send_vendordep', lambda conn, transaction, code, subunit, operands, n, *_:
              sent.append((conn, transaction, code, subunit, bytes(b.u.mem_read(operands, n)))) or 0)
     s = session(b, supported=6, registered=1 << 1)
     b.u.mem_write(s + AVRCP_TRANSACTIONS + 1, b'\x07')
@@ -206,10 +206,141 @@ def test_disconnect_clears_session(b):
     check('a disconnection clears g_hci_session', b.read(b.sym['g_hci_session']) == 0)
 
 
+def control_pdu(pdu_id, params):
+    """an AVRCP vendor-dependent PDU: company id, PDU id, packet type, length, parameters, and room after"""
+    return b'\x00\x19\x58' + bytes([pdu_id, 0]) + struct.pack('>H', len(params)) + params + bytes(600)
+
+
+def element_attributes(b, asked=()):
+    p = b.alloc(control_pdu(0x20, bytes(8) + bytes([len(asked)]) + b''.join(struct.pack('>I', a) for a in asked)))
+    ctype = b.call('shanling_get_element_attributes', 0, p, 0)
+    n = struct.unpack('>H', b.u.mem_read(p + 5, 2))[0]
+    return ctype, bytes(b.u.mem_read(p + 7, n))
+
+
+def attrs_of(params):
+    out, at = {}, 1
+    for _ in range(params[0]):
+        aid, cs, n = struct.unpack_from('>IHH', params, at)
+        out[aid] = params[at + 8:at + 8 + n].decode(errors='replace')  # a cut character reads as U+FFFD
+        at += 8 + n
+    return out
+
+
+def test_element_attributes(b):
+    """The control channel's GetElementAttributes from g_track_meta (tools/bt_meta.c's, in C)"""
+    meta = b.alloc(struct.pack('<3i4I', 3, 12, 245000, *(b.alloc(t + b'\0') for t in
+                                                          (b'Lovely Day', b'Bill Withers', b'Menagerie', b'Soul'))))
+    b.word(b.objects['g_track_meta'], meta)
+    ctype, params = element_attributes(b)
+    check('GetElementAttributes answers the playing track, all seven', ctype == CTYPE_STABLE and attrs_of(params) == {
+        1: 'Lovely Day', 2: 'Bill Withers', 3: 'Menagerie', 4: '3', 5: '12', 6: 'Soul', 7: '245000'}, attrs_of(params))
+    check('... under g_notify_mutex', [c[1][0] for c in b.calls if c[0].startswith('pthread_mutex')] ==
+          [b.objects['g_notify_mutex']] * 2)
+    ctype, params = element_attributes(b, (7, 1, 7, 99))
+    check('... only those asked, once each, in order', list(attrs_of(params).items()) == [(7, '245000'), (1, 'Lovely Day')])
+    long = b'\xc3\xa9' * 300
+    b.word(meta + 12, b.alloc(long + b'\0'))
+    ctype, params = element_attributes(b, (1,))
+    title = attrs_of(params)[1]
+    check('... a title past one packet cut at a character', 7 + len(params) <= 509 and set(title) == {'\xe9'}, len(params))
+    b.word(b.objects['g_track_meta'], 0)
+    ctype, params = element_attributes(b)
+    check('no track: a title of one space', attrs_of(params) == {1: ' '}, params.hex())
+    p = b.alloc(control_pdu(0x20, bytes(8)))
+    check('a request short of its count is rejected', b.call('shanling_get_element_attributes', 0, p, 0) == CTYPE_REJECTED)
+
+
+def browsing_session(b, room=1027):
+    """an avrcp session whose browsing channel takes room bytes after AVCTP's header"""
+    b.answer('avctp_browsing_room', lambda *_: room)
+    return b.alloc(bytes(0x60))
+
+
+def test_browsing_goes_to_coda_rc(b):
+    asked = []
+    def browse(tag, pdu, params, n, room, out, cap):
+        asked.append((tag, pdu, bytes(b.u.mem_read(params, n)), room, cap))
+        b.u.mem_write(out, b'\x04\x00\x00\x00\x00\x00\x07')
+        return 7
+    b.answer('shanling_browse', browse)
+    s = browsing_session(b)
+    req = bytes([1]) + struct.pack('>II', 0, 9) + b'\0'
+    p = b.alloc(bytes([0x71]) + struct.pack('>H', len(req)) + req + bytes(1100))
+    b.call('shanling_browsing', s, p, 0)
+    check('GetFolderItems goes to coda-rc with the car\'s tag, its parameters and the room after the header',
+          asked == [(s, 0x71, req, 1024, 1024)], asked)
+    check('... and coda-rc\'s reply is the answer', bytes(b.u.mem_read(p, 10)) == b'\x71\x00\x07\x04' + bytes(5) + b'\x07')
+    for pdu_id in (0x70, 0x72, 0x73, 0x75, 0x80):
+        asked.clear()
+        p = b.alloc(bytes([pdu_id, 0, 1, 1]) + bytes(1100))
+        b.call('handle_browsing_pdu', 0, 3, p, 4, s)
+        check(f'browsing PDU {pdu_id:#x} goes to coda-rc', [a[1] for a in asked] == [pdu_id], asked)
+
+
+def test_browsing_without_coda_rc(b):
+    b.answer('shanling_browse', lambda *_: -1)
+    s = browsing_session(b)
+    b.word(s, b.alloc(bytes(0x20)))  # a server with no players
+    b.word(s + AVRCP_TARGET, b.alloc(bytes(0x20)))  # and a target with none
+    p = b.alloc(bytes([0x72, 0, 11]) + bytes(11) + bytes(1100))
+    b.call('shanling_browsing', s, p, 0)
+    check('no coda-rc: ChangePath is an internal error', bytes(b.u.mem_read(p, 4)) == b'\x72\x00\x01\x03')
+    req = bytes([0]) + struct.pack('>II', 0, 9) + b'\0'
+    p = b.alloc(bytes([0x71]) + struct.pack('>H', len(req)) + req + bytes(1100))
+    b.call('shanling_browsing', s, p, 0)
+    check('... and GetFolderItems is upstream\'s player list: none, out of bounds', bytes(b.u.mem_read(p, 4)) == b'\x71\x00\x01\x0b',
+          bytes(b.u.mem_read(p, 8)).hex())
+
+
+def test_play_item(b):
+    for status, want in ((4, 0x09), (0x0d, CTYPE_REJECTED)):
+        b.answer('shanling_browse', lambda tag, pdu, params, n, room, out, cap, st=status:
+                 (b.byte(out, st), 1)[1] if pdu == 0x74 and n == 11 else -1)
+        p = b.alloc(control_pdu(0x74, bytes([1]) + struct.pack('>QH', 3, 0)))
+        ctype = b.call('shanling_play_item', 0x77, p, 0)
+        check(f'PlayItem: coda-rc\'s status {status:#x} answered {"ACCEPTED" if want == 9 else "REJECTED"}',
+              ctype == want and bytes(b.u.mem_read(p + 5, 3)) == bytes([0, 1, status]), (ctype, bytes(b.u.mem_read(p, 8)).hex()))
+
+
+def test_set_addressed_player(b):
+    s = b.alloc(bytes(0x60))
+    b.word(s, b.alloc(bytes(0x20)))  # a server with no registered players
+    p = b.alloc(control_pdu(0x60, struct.pack('>H', 1)))
+    ctype = b.call('avrcp_handle_set_addressed_player', s, p, 0)
+    check('SetAddressedPlayer 1 with no players: the Q2\'s, accepted', ctype == 0x09 and b.u.mem_read(p + 7, 1) == b'\x04', ctype)
+    p = b.alloc(control_pdu(0x60, struct.pack('>H', 2)))
+    check('... another refused', b.call('avrcp_handle_set_addressed_player', s, p, 0) == CTYPE_REJECTED)
+
+
+def test_browse_socket(b):
+    """shanling_browse's framing over coda-rc's socket, and a reply for another PDU dropped"""
+    sent, replies = [], []
+    b.answers['socket'] = lambda *_: 5
+    b.answers['connect'] = lambda *_: 0
+    b.answers['send'] = lambda fd, buf, n, *_: sent.append(bytes(b.u.mem_read(buf, n))) or n
+    def read(fd, buf, n, *_):
+        chunk = replies[0][:n]
+        replies[0] = replies[0][n:]
+        b.u.mem_write(buf, chunk)
+        return len(chunk)
+    b.answers['read'] = read
+    out = b.alloc(bytes(64))
+    replies.append(b'\x00\x03\x75\x04\x01')
+    n = b.call('shanling_browse', 0x11223344, 0x75, b.alloc(b'\x01'), 1, 500, out, 64)
+    check('a request framed {length, pdu, tag, room, parameters}', sent == [b'\x00\x08\x75\x11\x22\x33\x44\x01\xf4\x01'], sent)
+    check('... the reply\'s parameters returned', n == 2 and bytes(b.u.mem_read(out, 2)) == b'\x04\x01', n)
+    replies[0] = b'\x00\x02\x71\x04'
+    n = b.call('shanling_browse', 1, 0x75, b.alloc(b'\x01'), 1, 500, out, 64)
+    check('... another PDU\'s reply is no answer', n == 0xffffffff, n)
+
+
 def main():
     path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else thirdparty.build('bluez') / 'usr/bin/bluetoothd'
     for test in (test_play_status, test_register_notification, test_hciplayer_event, test_init_sets_the_event_function, test_codec_priority,
-                 test_receiver_track, test_receiver_stream, test_synclink_discover, test_disconnect_clears_session):
+                 test_receiver_track, test_receiver_stream, test_synclink_discover, test_disconnect_clears_session,
+                 test_element_attributes, test_browsing_goes_to_coda_rc, test_browsing_without_coda_rc, test_play_item,
+                 test_set_addressed_player, test_browse_socket):
         test(Bluetoothd(path))
     if FAILED:
         sys.exit(f'{len(FAILED)} failed')

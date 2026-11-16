@@ -40,12 +40,11 @@ def lib(tmp_path_factory):
     return L
 
 
-@pytest.fixture
-def q2(lib, tmp_path):
-    """A Q2's card library: the two albums, then FILLER songs of one more"""
-    (tmp_path / 'mnt/data').mkdir(parents=True)
-    (tmp_path / 'tmp').mkdir()
-    db = sqlite3.connect(tmp_path / 'mnt/data/database.db')
+def library(root):
+    """A Q2's card library under root, in stock's schema: the two albums, then FILLER songs of one more"""
+    (root / 'mnt/data').mkdir(parents=True)
+    (root / 'tmp').mkdir()
+    db = sqlite3.connect(root / 'mnt/data/database.db')
     cols = ('filename, fileurl, album, songer, style, name, composer, albumsonger, year, track, cd_num, time, '
             'time_end, time_create, Initial, bitdepth, samprate')
     db.execute(f'create table songtable(id integer primary key autoincrement, {cols})')
@@ -58,7 +57,11 @@ def q2(lib, tmp_path):
                    (f, f'/mnt/mmc/{artist}/{album}/{f}', album, artist, 'Soul', title, '', artist, year, track, 1))
     db.commit()
     db.close()
-    ctypes.create_string_buffer
+
+
+@pytest.fixture
+def q2(lib, tmp_path):
+    library(tmp_path)
     (ctypes.c_char * 512).in_dll(lib, 'root').value = str(tmp_path).encode()
     for name in ('qgen', 'qpos', 'play_state'):
         ctypes.c_int.in_dll(lib, name).value = 0
