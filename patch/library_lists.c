@@ -640,8 +640,9 @@ static void ls_show(void) {
     if (n) qsort(v, n, sizeof *v, by_length);
     for (unsigned i = 0; i < n; i++) _deque_push_back(list, deque_at(songs, v[i].key));
     st.rt_list = list;
-    void *view =
-        page_list_or(st.rt_page, st.rt_page, "Long Songs", "No songs over 10 minutes", (int)n, 64);
+    void *view = page_list_or(st.rt_page, st.rt_page, "Long Songs", "No long songs", (int)n, 64);
+    /* the note's hint says what would list here (docs/oled-design.md#empty-and-offline) */
+    if (!n) feedback_empty(st.rt_page, 0, "No long songs", "Songs over 10 min show up here");
     char name[512], detail[300], t[16];
     for (unsigned i = 0; i < n; i++) {
         void *r = deque_at(list, i);
