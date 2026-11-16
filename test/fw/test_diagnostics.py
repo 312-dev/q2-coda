@@ -93,7 +93,7 @@ def test_the_file_holds_the_device_s_state_and_nothing_personal(fw_dev, tmp_path
     assert [p.name for p in (root/'mmc').iterdir()] == [pathlib.Path(FILE).name]
     text = (root/'mmc'/pathlib.Path(FILE).name).read_text()
     heads = [line for line in text.splitlines() if line.startswith('== ')]
-    assert heads == ['== version', '== date', '== uptime', '== udc', '== gadgets', '== mounts', '== ps', '== dmesg',
+    assert heads == ['== version', '== date', '== uptime', '== udc', '== gadgets', '== mounts', '== battery (CW2015, used; AXP2101, unused)', '== ps', '== dmesg',
                      '== q2-demo.err', '== q2-demo.log (demo and q2player)']
     assert f'{root}/udc/13500000.otg/state: configured' in text and 'UDC=13500000.otg' in text
     assert 'mass_storage.msg' in text and 'lun.0/file: /dev/mmcblk0p1' in text and 'q2player: started' in text
