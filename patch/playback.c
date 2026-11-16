@@ -709,6 +709,8 @@ static int follow_queue(void) {
     s.active = rebuild(1);
     return 0;
 }
+/* Whether the extended play (the hold menu's shuffles and repeats) runs: playback_option's values play only then */
+int playback_active(void) { return s.active; }
 int playback_option(int kind) {
     return kind == 0 ? (s.active ? s.shuffle : 0) : kind == 1 ? (s.active ? s.repeat : 2) : s.folder;
 }

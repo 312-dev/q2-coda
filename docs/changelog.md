@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
   - Q2 Pod is now Q2 Muse: the name on every screen, page and guide. Settings, the card's files and paired devices carry over as they are.
   - Subsonic comes built in: it is in Streaming without installing it. A newer Subsonic from the App Store still takes over.
   - Car Remote: with Library on Local + Server and a card app's server songs imported, Q2 Muse Remote's lists (and Android Auto's) showed nothing; they list both libraries again.

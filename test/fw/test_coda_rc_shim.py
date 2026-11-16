@@ -299,11 +299,13 @@ def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
 
 
 def test_mode_sets_shuffle_and_repeat_as_the_hold_menu(fw, ui, mcl, recs):
-    """SetMode's "mode <shuffle> <repeat>": the hold menu's playback_set, the nearest Q2 mode, -1 left alone."""
+    """SetMode's "mode <shuffle> <repeat>" while the hold menu's extended play runs: its playback_set, the nearest Q2
+    mode, -1 left alone (outside it, Now Playing's own pair: test_modes_follow_now_playings_buttons_both_ways)."""
     q2 = Q2(fw, ui, recs)
     q2.queue()
     q2.tick()
     option = fw.fn('playback_option', C.c_int, C.c_int)
+    fw.fn('playback_set', C.c_int, C.c_int, C.c_int)(1, 5)  # Repeat All from the hold menu: extended play runs
     q2.files[CMD] = b'20 mode 1 2\n'
     q2.tick()
     assert q2.files.pop(ACK) == b'20 0\n'
@@ -367,3 +369,32 @@ def test_jump_plays_a_queue_entry_if_it_is_still_that_song(fw, ui, mcl, recs):
     q2.files[CMD] = b'43 jump 1 11\n'
     q2.tick()
     assert q2.files.pop(ACK) == b'43 1\n' and len(fw.calls('player_start_queue')) == 1
+
+
+def test_modes_follow_now_playings_buttons_both_ways(fw, ui, mcl, recs):
+    """Shuffle and repeat set on the Q2 Muse's Now Playing (np_bar.c: stock's MCL_MODE and [IPOD] NPSHUFONE/NPREPOFF)
+    never reached the car, and the car's SetMode never moved Now Playing's buttons (2026-11-16 14:38): the shim read
+    and set only playback.c's extended modes, which play only while the hold menu's shuffle is on. Outside it,
+    both go through Now Playing's own pair."""
+    modes = []
+    fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
+    mcl.mode = 0
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    q2.tick()
+    assert (q2.now()['shuffle'], q2.now()['repeat']) == ('0', '0')
+    set_np = fw.fn('np_mode_set', None, C.c_int, C.c_int)
+    set_np(1, 1)  # Now Playing: shuffle on, repeat All (NP_REPEAT_ALL)
+    q2.tick()
+    assert (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '2')
+    set_np(0, 2)  # repeat One (NP_REPEAT_ONE), shuffle off
+    q2.tick()
+    assert (q2.now()['shuffle'], q2.now()['repeat']) == ('0', '1') and mcl.mode == 1
+    q2.files[CMD] = b'30 mode 1 0\n'  # the car: shuffle on, repeat Off
+    q2.tick()
+    assert q2.files.pop(ACK) == b'30 0\n' and mcl.mode == 2  # stock's Shuffle: Now Playing's shuffle lit
+    assert (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '0')
+    q2.files[CMD] = b'31 mode -1 2\n'  # repeat All, shuffle kept
+    q2.tick()
+    assert q2.files.pop(ACK) == b'31 0\n' and (q2.now()['shuffle'], q2.now()['repeat']) == ('1', '2')
+    assert fw.fn('playback_option', C.c_int, C.c_int)(0) == 0  # the hold menu's shuffle not started
