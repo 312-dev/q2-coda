@@ -516,6 +516,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
+- A card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row and its sync
+  toggle, `patch/addon.c` `empty_view`) is that note too, the info row's subtitle the hint ("Empty Artist
+  has no albums on the server"), with no Add to Sync over nothing and no selectable info row (audit2 F1).
 - Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
   scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App

@@ -7,6 +7,7 @@
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.
   - Books is gone: the Library has no **Books** row and the Q2 no longer reads `.txt` and `.epub` books. Audiobooks are unchanged, a Library order you set yourself is kept without the row, and a `.books` folder left on the card can be deleted. Wi-Fi transfer's upload no longer lists EPUB.
+  - Card apps (OLED): an artist with no albums, such as an empty one in the Subsonic app, says **No albums** with the app's explanation under it, instead of a highlighted "No albums" row under an **Add to Sync** that had nothing to sync.
   - Now Playing and the album lists (OLED): a song with no cover shows a dark tile with a music note, the same everywhere, instead of stock's grey disc.
   - Library (OLED): **Videos** lists its videos as ordinary rows, their names at the left like every other list, not set in as album tracks.
   - Streaming (OLED): in **Configuration**, the services' switches sit under a **Show in Streaming** heading, which says what they do, and the list scrolls a whole row at a time to its end.

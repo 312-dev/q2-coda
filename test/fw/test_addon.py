@@ -5356,3 +5356,20 @@ def test_the_hold_menu_holds_the_albums_sync_rows(fw, nav_st):
     assert list(held[:3]) == [0, 1, 2]
     fw.fn('addon__artist_pick', None, C.c_int)(1)
     assert p.pg.next == 0 and p.pg.arg == 1  # G_ROW, Remove from Sync's row
+
+
+@pytest.mark.parametrize('extra, empty', [((), True), (((b'list', b'album', b'Settle', b'2013', b'album:al1', b''),), False)])
+def test_an_empty_artist_is_the_empty_note_without_its_sync_row(fw, nav_st, extra, empty):
+    """audit2 F1: a reply of nothing but its info row and the sync toggle (an empty Subsonic artist) shows no rows: its
+    info row as the house empty note, its subtitle the hint, and no Add to Sync over nothing. With anything else in it,
+    the reply is drawn as before."""
+    p = oled_page(fw, nav_st)
+    said = []
+    fw.mock('widget_set_text_utf8', lambda w, s, *_: said.append(C.string_at(s)))
+    p.answer(rows=[(b'action', b'toggle', b'Add to Sync', b'', b'artist:ar9', b''),
+                   (b'info', b'', b'No albums', b'Empty Artist has no albums on the server', b'', b''), *extra])
+    if empty:
+        assert p.drawn == 0 and b'No albums' in said and b'Empty Artist has no albums on the server' in said
+        assert b'Add to Sync' not in said
+    else:
+        assert p.drawn > 0 and b'Add to Sync' in said
