@@ -54,7 +54,7 @@ int vol_keyup(void *dialog, void *e) {
 
 /* The windows whose wheel is the volume: playback screens. Stock's Now Playing (TIDAL's songs and
  * the card apps' play there too), the AirPlay and DLNA receiver, Internet Radio's Now Playing and
- * Spotify's while it shows a track (spot_np_track). Videos (books.c video_key), Control Center's
+ * Spotify's while it shows a track (spot_np_track). Videos (videos.c video_key), Control Center's
  * slider and Playback's Volume row (crossfade.c) set it themselves. */
 static const char *const vol_pages[] = { "playing_page", "airplay_page", "radionp_page" };
 /* on_wm_keyup_fun (HOOKS): the key-up no page took. Stock opens its volume dialog on any wheel tick
