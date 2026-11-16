@@ -932,10 +932,10 @@ void usb_ui_paint(void *w, void *canvas);
 const char *usb_ui_title(const char *name);
 int usb_ui_key(void *top, unsigned key);
 /* A mode page (docs/oled-design.md#usb): the solid circle's radius, its glyph's size (tools/art.py
- * USB_MODE_PX), Positive green, and the ring that draws no circle (a spinner in its place). */
+ * USB_MODE_PX), Positive green (RGB_POSITIVE), and the ring that draws no circle (a spinner in its
+ * place). */
 #define MODE_R 46
 #define MODE_GLYPH 44
-#define MODE_GREEN 0x34c759
 #define MODE_BARE 0x1000000u
 typedef struct {
     unsigned ring;     /* 0xRRGGBB, or MODE_BARE */

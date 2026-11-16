@@ -161,7 +161,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
     tiles = {f'pltile_{n}_{k}': c for n in ('playlist', 'otg') for k, c in (('d', 0x858585), ('l', 0x6e6e6e), ('w', 0xffffff))}
     acts = {f'plact_{n}_{k}': c for n in ('shuffle', 'add', 'save', 'clear', 'search') for k, c in (('a', blue), ('w', 0xffffff))}
-    pmarks = {f'plmark_{n}_{k}': c for n, d, l in (('in', 0xababab, 0x5c5c5c), ('add', 0x4fb477, 0x4fb477), ('out', 0xff6b5e, 0xff6b5e))
+    pmarks = {f'plmark_{n}_{k}': c for n, d, l in (('in', 0xababab, 0x5c5c5c), ('add', 0x34c759, 0x34c759), ('out', 0xff6b5e, 0xff6b5e))
               for k, c in (('d', d), ('l', l), ('w', 0xffffff))}
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',

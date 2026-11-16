@@ -13,10 +13,10 @@ static int top_named(void *w, const char *name) {
  * row stay in sight round it. */
 #define PILL_Y 236
 #define PILL_H 32
-#define PILL_PX 19
+#define PILL_PX TYPE(16)
 #define PILL_PAD 16
 #define PILL_R 12
-#define PILL_RGB 0x1c1c1e
+#define PILL_RGB RGB_RAISED
 #define PILL_MAX 327 /* the text column to the right column */
 
 #define PILL_GLYPH 15 /* an icon toast's glyph (tools/art.py USB_TOAST_PX), PILL_GLYPH_GAP before its words */
@@ -126,7 +126,7 @@ static const char *const verbs[] = {
  * own label, at the rows' text column */
 #define FOOT_GAP 8
 #define FOOT_LINE 17
-#define FOOT_PX 16 /* Inter 13 px, AWTK's size (13 x 1.21) */
+#define FOOT_PX TYPE(13) /* Inter 13 px, AWTK's size (13 x 1.21) */
 
 /* The next confirm's footer, its lines split at '\n': why it asks, where the setting lives. */
 static const char *confirm_foot __attribute__((section(".scratch")));
@@ -206,7 +206,7 @@ int feedback_confirm_dress(void *w) {
         widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
         widget_set_prop_int(label, "style:normal:font_size", px);
         widget_set_prop_str(label, "style:normal:text_align_h", "left");
-        text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+        text_ink(label, RGBA(tok(TOK_TERTIARY)), INK_LABEL);
         widget_set_sensitive(label, 0);
         line += n + (line[n] == '\n');
     }
@@ -239,7 +239,7 @@ void feedback_confirm_switch(void *w, void *canvas) {
         fill_box(canvas, &track,
                  lit  ? white
                  : on ? accent
-                      : RGBA(flip_if(ipod_light(), 0x333333)),
+                      : RGBA(flip_if(ipod_light(), RGB_TRACK)),
                  SWITCH_H / 2);
     fill_box(canvas, &knob, lit && on ? accent : white, KNOB / 2);
     stock_canvas_set_fill_color(canvas, fill);
@@ -299,11 +299,7 @@ int feedback_note(void *line, void *hint, int free) {
         widget_set_prop_str(both[k], "style:normal:font_name", face ? face : "default");
         widget_set_prop_int(both[k], "style:normal:font_size", px);
         widget_set_prop_str(both[k], "style:normal:text_align_h", "center");
-        text_ink(both[k],
-                 RGBA(k       ? (light ? 0x6e6e6e : 0x858585)
-                      : light ? 0x5c5c5c
-                              : 0xababab),
-                 INK_LABEL);
+        text_ink(both[k], RGBA(k ? (tok(TOK_TERTIARY)) : tok(TOK_SECONDARY)), INK_LABEL);
     }
     return 1;
 }
@@ -348,8 +344,8 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 #define ES_HINT_H 20
 #define ES_ROW_GAP 24
 #define ES_ROW_H 32
-#define ES_TITLE_PX 24 /* Inter Medium 20, AWTK's size */
-#define ES_HINT_PX 18  /* Inter 15 */
+#define ES_TITLE_PX TYPE(20) /* Inter Medium 20, AWTK's size */
+#define ES_HINT_PX TYPE(15)  /* Inter 15 */
 #define ES_TEXT (ES_TILE + ES_TITLE_GAP + ES_TITLE_H + ES_HINT_H)
 /* The stack's top, centred between free_top (the status row's foot at least) and free_end. */
 int empty_top(int free_top, int free_end, int row) {
@@ -405,7 +401,7 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     for (int k = 0; k < 3; ++k) { /* the two behind at about a quarter's strength */
         int s = k < 2 ? ES_SIDE : ES_TILE;
         rect_t r = { 375 / 2 + dx[k] - s / 2, top + ES_TILE / 2 - s / 2, s, s };
-        fill_box(canvas, &r, RGBA(flip_if(light, k < 2 ? 0x0a0a0b : 0x2c2c2e)), ES_TILE_R);
+        fill_box(canvas, &r, RGBA(k < 2 ? flip_if(light, 0x0a0a0b) : tok(TOK_RAISED_2)), ES_TILE_R);
         round_ring(canvas, &r, ES_TILE_R, RGBA(flip_if(light, k < 2 ? 0x111112 : 0x48484c)));
     }
     stock_canvas_set_fill_color(canvas, fill);
@@ -415,7 +411,7 @@ void empty_paint(void *w, void *canvas, const empty_t *e, int top) {
     int ty = top + ES_TILE + ES_TITLE_GAP;
     ar_text(canvas, e->title ? e->title : "", 1, ES_TITLE_PX, flip_if(light, 0xffffff), 0, 375 / 2,
             ty + ES_TITLE_H / 2 - 1, 375 - 48, 1);
-    ar_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, light ? 0x5c5c5c : 0xababab, 0, 375 / 2,
+    ar_text(canvas, e->hint ? e->hint : "", 0, ES_HINT_PX, tok(TOK_SECONDARY), 0, 375 / 2,
             ty + ES_TITLE_H + ES_HINT_H / 2, 375 - 48, 1);
 }
 void empty_state_paint(void *w, void *canvas) {
@@ -647,13 +643,13 @@ void feedback_shuffled(const char *what, int songs) {
                                CONF_GLYPH, CONF_GLYPH);
     image_base_set_image(glyph, theme_art("confirm_shuffle"));
     int light = ipod_light();
-    conf_line(page, 200, 32, what, ROLE_NP, 0, light ? 0x000000 : 0xffffff);
+    conf_line(page, 200, 32, what, ROLE_NP, 0, tok(TOK_PRIMARY));
     char count[24];
     int k = songs / 1000;
     if (k)
         tk_snprintf(count, sizeof count, "%d,%03d song%s", k, songs % 1000, "s");
     else
         tk_snprintf(count, sizeof count, "%d song%s", songs, songs == 1 ? "" : "s");
-    conf_line(page, 228, 24, count, -1, 18, light ? 0x6e6e6e : 0x858585);
+    conf_line(page, 228, 24, count, -1, 18, tok(TOK_TERTIARY));
     conf.timer = timer_add(conf_due, (void *)0, CONF_MS);
 }

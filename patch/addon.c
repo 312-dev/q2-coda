@@ -2738,11 +2738,8 @@ int addon_hold(void *w) {
 #define QR_PLATE_Y 4  /* its top, on the page: under the status row */
 #define QR_SCAN_Y 192 /* the note's centre, then the address line's */
 #define QR_ADDR_Y 216
-#define QR_SCAN_PX 20     /* Inter Medium 17 */
-#define QR_ADDR_PX 17     /* Inter Regular 14 */
-#define QR_TER 0x858585   /* Text Tertiary */
-#define QR_SEC_D 0xababab /* Text Secondary, dark and light halves */
-#define QR_SEC_L 0x5c5c5c
+#define QR_SCAN_PX TYPE(17) /* Inter Medium 17 */
+#define QR_ADDR_PX TYPE(15) /* Inter Regular 15 */
 #define QR_DONE_MS 1500 /* Signed In shows this long before the app's page */
 /* A step's mode page, in screen y: the stack (circle, title, line) centred as one between the
  * status row's foot (MODE_TOP) and the screen's bottom */
@@ -2751,11 +2748,9 @@ int addon_hold(void *w) {
 #define MODE_R 46
 #define MODE_GLYPH 44 /* tools/art.py SIGNIN_PX */
 #define MODE_TITLE_Y 120
-#define MODE_TITLE_PX 26 /* Inter Medium 22 */
+#define MODE_TITLE_PX TYPE(22) /* Inter Medium 22 */
 #define MODE_LINE_Y 148
-#define MODE_LINE_PX 18 /* Inter Regular 15 */
-#define MODE_GREEN 0x34c759
-#define MODE_RED 0xff453a
+#define MODE_LINE_PX TYPE(15) /* Inter Regular 15 */
 static struct {
     void *page, *view;
     unsigned timer, leave, done, seen; /* seen: the state file as last read, hashed */
@@ -2879,9 +2874,8 @@ static void qr_text(void *canvas, const char *s, int y, const char *face, unsign
 /* The page as qr_refresh read it, on qp.view (the page's coordinates). */
 static void qr_paint(void *w, void *canvas) {
     int light = ipod_light();
-    unsigned ink = light ? 0xff000000u : 0xffffffffu,
-             sec = 0xff000000u | (light ? QR_SEC_L : QR_SEC_D),
-             ter = 0xff000000u | (light ? QR_SEC_L : QR_TER);
+    unsigned ink = light ? 0xff000000u : 0xffffffffu, sec = 0xff000000u | tok(TOK_SECONDARY),
+             ter = 0xff000000u | tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {
         int side = QR_PLATE, x0 = (375 - side) / 2, y0 = QR_PLATE_Y;
         int n = qp.size, m = side / (n + 4), o = (side - m * n) / 2, digits = (n + 3) / 4;
@@ -2912,8 +2906,8 @@ static void qr_paint(void *w, void *canvas) {
         return;
     }
     const char *s = qp.step;
-    unsigned ring = !strcmp(s, "done")                          ? MODE_GREEN
-                    : !strcmp(s, "fail") || !strcmp(s, "error") ? MODE_RED
+    unsigned ring = !strcmp(s, "done")                          ? RGB_POSITIVE
+                    : !strcmp(s, "fail") || !strcmp(s, "error") ? RGB_NEGATIVE
                                                                 : scheme()->tones[0] & 0xffffffu;
     const char *glyph = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
                                 !strcmp(s, "fail") || !strcmp(s, "error")

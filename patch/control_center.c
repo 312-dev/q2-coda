@@ -43,7 +43,7 @@ extern int xfade_open(void *ctx, void *event);              /* crossfade.c */
 #define CC_GAP 8
 #define CC_CIRCLE_R 20
 #define CC_ICON 22
-#define CC_LABEL_PX 13 /* Inter Medium 11 px, AWTK's size */
+#define CC_LABEL_PX TYPE(13) /* Inter Medium 13 px */
 #define CC_ART 52
 #define CC_ART_R 9
 #define CC_SLIDER_Y (CC_Y0 + CC_BLOCK_H + CC_GAP)
@@ -53,10 +53,9 @@ extern int xfade_open(void *ctx, void *event);              /* crossfade.c */
 #define CC_TILE_Y (CC_SLIDER_Y + CC_SLIDER_H + 30)
 #define CC_GRAB_Y 304
 #define CC_RING 3 /* the focus ring's outer edge past the control, 2 px wide */
-#define CC_BLOCK 0x1c1c1e
-#define CC_OFF 0x3a3a3c
+#define CC_BLOCK RGB_RAISED
+#define CC_OFF RGB_OFF
 #define CC_LIGHT 0xe5e5ea
-#define CC_SECONDARY 0xababab
 #define CC_GRAB 0x5a5a5e
 #define CC_FOCUS "_cc_focus"   /* the window's stop the wheel is on */
 #define CC_ADJUST "_cc_adjust" /* 1 while a slider has the wheel */
@@ -270,7 +269,7 @@ void cc_paint(void *win, void *canvas) {
         cc_shape(canvas, r, i <= CC_CAR ? CC_CIRCLE_R : CC_TILE_R, lit ? accent : CC_OFF, ring,
                  i <= CC_CAR ? CC_BLOCK : 0);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, CC_ICON);
-        ar_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : CC_SECONDARY, 0,
+        ar_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY, 0,
                 r.x + r.w / 2, r.y + r.h + 9, 120, 1);
     }
     /* Now Playing: the cover, the title and artist, and the transport */
@@ -294,7 +293,7 @@ void cc_paint(void *win, void *canvas) {
     ar_text(canvas, rec ? now_tag(rec, REC_TITLE) : "Not Playing", 1, 19, 0xffffff, 0, tx,
             CC_Y0 + 28, tw, 2);
     if (rec)
-        ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, CC_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
+        ar_text(canvas, now_tag(rec, REC_ARTIST), 0, 16, RGB_SECONDARY, 0, tx, CC_Y0 + 48, tw, 2);
     for (int i = CC_PREV; i <= CC_NEXT; ++i) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);

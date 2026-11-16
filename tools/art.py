@@ -10,7 +10,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 from build import ROOT, check, need
 from ipod import inc
-from theme import CHOICES
+from theme import CHOICES, token
 
 SUB = 8  # sub-rows per pixel; columns are exact within a sub-row
 
@@ -235,12 +235,21 @@ def status_turn(name, px, ink, rgb, turn):
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
 
 
+
+
+def inks(name, *keys):
+    """A colour token's (tools/theme.py TOKENS) inks by suffix: d its dark half, l its light half, w white on the
+    selection, td and tl the halves again under a t prefix."""
+    ink = {'d': token(name), 'l': token(name, True), 'w': 0xffffff}
+    return {k: ink[k[-1]] for k in keys}
+
+
 # A theme's own glyphs (docs/oled-design.md Icons), in final colours per half: _d on black, _l on paper, _w on the
 # selection. The list's caret-right (list_marks.c chevron_icon) and the status row's play state.
 CARET_PX = 15
 STATE_PX = 13
-CHEVRON_INKS = {'d': 0x999999, 'l': 0x8a8a8a, 'w': 0xffffff}
-CHEVRON_MUTED_INKS = {'td': 0x858585, 'tl': 0x6e6e6e}  # a disabled row's (list_intodown, list_marks.c chevron_muted): Text Tertiary per half
+CHEVRON_INKS = inks('chevron', 'd', 'l', 'w')
+CHEVRON_MUTED_INKS = inks('tertiary', 'td', 'tl')  # a disabled row's (list_intodown, list_marks.c chevron_muted): Text Tertiary per half
 # The activity spinner in the selected row's chevron place while Cover Flow opens (coverflow.c coverflow_spinner,
 # list_marks.c spinner_icon): iOS's eight spokes, white on the selection, frame f's head at f eighths of a turn
 # clockwise from 12 o'clock, each spoke behind it SPIN_FADE dimmer.
@@ -248,7 +257,7 @@ SPIN_SPOKES = 8
 SPIN_R = (3.4, 6.4)  # a spoke's ends' distances from the centre, round capped
 SPIN_STROKE = 1.9
 SPIN_FADE = 0.1
-STATE_INKS = {'d': 0xffffff, 'l': 0x000000}
+STATE_INKS = inks('primary', 'd', 'l')
 # The status row's glyphs by role (status_row.c, docs/oled-design.md#status-row): name -> (Phosphor stem, box px,
 # optical ink, 0 for none), each in Text Primary per half (STATE_INKS). The play state and the padlock are 13 px boxes
 # drawn as they were (their ink 10.6 and 11 px); the rest are STATUS_PX boxes at STATUS_INK, the padlock's ink, so
@@ -261,13 +270,13 @@ STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STA
                  'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
                  'status_down': ('arrow-down-bold', 8, 0)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
-STATUS_SECONDARY = {'d': 0xababab, 'l': 0x5c5c5c}
+STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8
 KEYLOCK_CARD_PX = 56  # Buttons Lock's card's padlock (keylock.c CARD_GLYPH)
 # Now Playing's shuffle and repeat (playing.modes.icons, np_bar.c np_modes): bold, MODE_PX, off in Text Secondary per
 # half, on in the theme's own accent's top tone in both; repeat-once is repeat's on glyph for Repeat One.
 MODE_PX = 22
-MODE_INKS = {'d': 0xababab, 'l': 0x5c5c5c}
+MODE_INKS = inks('secondary', 'd', 'l')
 MODE_DIM_INKS = {'d': 0x444446, 'l': 0xc5c5c5}  # shuffle and repeat while a radio plays: the app picks the order
 MODE_PILL_PX = 18  # the antenna in the radio's pill
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
@@ -275,7 +284,7 @@ MODE_PILL_PX = 18  # the antenna in the radio's pill
 ROW_ICON_PX = 20
 ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
-FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
+FOLDER_INKS = inks('secondary', 'd', 'l', 'w')  # Text Secondary in each half, white on the bar
 SORT = 'M0 0H16V2H0ZM0 5H11V7H0ZM0 10H6V12H0Z'
 SORT_BOX = (0, 0, 16, 12)  # Songs' Sort (navigation.c action_row), white as stock's glyphs: Light Mode flips it to the ink
 CIRCLE_CHECK_PX = 11  # the row editors' check circle's glyphs (list_marks.c CIRCLE_CHECK_PX, CIRCLE_LOCK_PX)
@@ -304,7 +313,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
 BUMP_PX = 16  # Up Next's bump arrow (upnext.c)
-BUMP_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
+BUMP_INKS = inks('tertiary', 'd', 'l', 'w')
 PAIR_ICONS = ('shuffle', 'radio', 'play')
 # Where a song lives (catalogue.c catalogue_row_mark, a song row's right column): the cloud for a server song that
 # streams, the arrow for one a card app downloaded, regular, in Text Tertiary (each half's) and white on the bar; and
@@ -312,14 +321,14 @@ PAIR_ICONS = ('shuffle', 'radio', 'play')
 # the circling arrows for one the app keeps on its own in Text Secondary (each half's), both white on the bar
 MARK_PX = 18
 MARKS = {'cloud': 'cloud', 'down': 'arrow-circle-down'}
-MARK_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
+MARK_INKS = BUMP_INKS
 QUALITY_PX = 12  # Now Playing's About, its quality badge's glyph (np_about.c AB_GLYPH): Text Primary per half
 # Playlists (playlists.c pl_tile_paint, playlist_pages.c): a playlist's and On-The-Go's 36 px tile glyph in Text
 # Tertiary per half, white on the selection; the pages' action rows' glyphs in the accent, white on the selection; a
 # song's mark against the playlist in Add Songs (already in, added now, taken out now: Text Secondary, green, red)
 TILE_PX = 20
 TILE_GLYPHS = {'playlist': 'playlist-fill', 'otg': 'sneaker-move-fill'}
-TILE_INKS = {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}
+TILE_INKS = BUMP_INKS
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
@@ -327,7 +336,7 @@ PL_MARK_PX = 20
 # (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
 CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
             'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
-            'sun': ('sun-fill', 18, 0x1c1c1e), 'speaker': ('speaker-high-fill', 18, 0x1c1c1e),
+            'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
             'lock': ('lock-simple-fill', 22, 0xffffff), 'timer': ('timer-fill', 22, 0xffffff),
             'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
             'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
@@ -368,7 +377,7 @@ EMPTY_GLYPHS = {g: f'{g}-fill' for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'heart', 'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
     'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory-fill'}
-USB_TOASTS = {'unplugged': ('plug-fill', 0xababab), 'ejected': ('check-circle-fill', 0x34c759), 'audio': ('speaker-hifi-fill', 0xffffff)}
+USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
 # fill weight at BATT_GLYPH_PX in Text Primary, with a BATT_GLYPH_GAP px gap in the Canvas cut round it (iOS's way of
 # keeping it off the charge's fill; over the body's empty black it is not seen), per half. The image is BATT_GLYPH_BOX,
@@ -381,12 +390,12 @@ BATT_GLYPHS = {'bolt': 'lightning-fill', 'warn': 'warning-fill'}
 BATT_GLYPH_INKS = {'d': (0xffffff, 0x000000), 'l': (0x000000, 0xffffff)}  # (glyph, gap) per half
 # Charging's toasts (charging.c): their 15 px glyph beside the words, fill, each in its colour; the battery's own in
 # Text Primary per half.
-CHARGE_TOASTS = {'charging': ('lightning-fill', 0x34c759), 'weak': ('warning-fill', 0xff9f0a),
-                 'full': ('battery-full-fill', 0x34c759), 'low': ('battery-warning-fill', 0xff453a)}
-CHARGE_TOAST_BATTERY = {'d': 0xffffff, 'l': 0x000000}
+CHARGE_TOASTS = {'charging': ('lightning-fill', token('positive')), 'weak': ('warning-fill', token('warning')),
+                 'full': ('battery-full-fill', token('positive')), 'low': ('battery-warning-fill', token('negative'))}
+CHARGE_TOAST_BATTERY = STATE_INKS
 # The plug-in screen's bolt beside its percentage (charging.c S1_BOLT), fill, Positive green
 CHARGE_BOLT_PX = 26
-PL_MARKS = {'in': ('check-circle-fill', {'d': 0xababab, 'l': 0x5c5c5c}), 'add': ('plus-circle-fill', {'d': 0x4fb477, 'l': 0x4fb477}),
+PL_MARKS = {'in': ('check-circle-fill', inks('secondary', 'd', 'l')), 'add': ('plus-circle-fill', inks('positive', 'd', 'l')),
             'out': ('minus-circle-fill', {'d': 0xff6b5e, 'l': 0xff6b5e})}
 
 
@@ -636,7 +645,7 @@ def images(t):
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
-    out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, 0x34c759)
+    out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swmode_{n}': phosphor(g, USB_MODE_PX, 0xffffff) for n, g in SW_MODES.items()}
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}

@@ -3562,7 +3562,7 @@ static void clock_place(void *bar, void *top) {
     if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
-        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(0xababab));
+        ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
     }
     if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
     const unsigned *text = widget_get_text(clock);
@@ -7873,7 +7873,7 @@ int stream_config(void *ctx, void *event) {
     widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
     widget_set_prop_int(label, "style:normal:font_size", px);
     widget_set_prop_str(label, "style:normal:text_align_h", "left");
-    text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
+    text_ink(label, RGBA(tok(TOK_TERTIARY)), INK_LABEL);
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {

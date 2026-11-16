@@ -26,18 +26,18 @@
 #define AZ_BOTTOM 240
 #define AZ_SLOT 11 /* a letter's height: past AZ_SLOTS of them the column folds */
 #define AZ_SLOTS ((AZ_BOTTOM - AZ_TOP) / AZ_SLOT)
-#define AZ_PX 13 /* Inter Medium 11 px: AWTK sizes a face by its line, 1.21 em for Inter */
+#define AZ_PX TYPE(13) /* Inter Medium 13 px */
 #define AZ_DOT 8 /* the lit letter's white disc's radius */
 /* the bubble: AZ_BUB_W x AZ_BUB_H, AZ_BUB_R corners, ending AZ_BUB_GAP left of the column's centre,
- * its pointer AZ_PTR_W long and 2 * AZ_PTR_H tall towards it; its letter Inter Medium 30 px */
+ * its pointer AZ_PTR_W long and 2 * AZ_PTR_H tall towards it; its letter Inter Medium 22 px */
 #define AZ_BUB_W 52
 #define AZ_BUB_H 48
 #define AZ_BUB_R 12
 #define AZ_BUB_GAP 18
 #define AZ_PTR_W 7
 #define AZ_PTR_H 6
-#define AZ_BUB_PX 36
-#define AZ_BUB_RGB 0x2c2c2e
+#define AZ_BUB_PX TYPE(22)
+#define AZ_BUB_RGB RGB_RAISED_2
 /* while it shows: the right column AZ_RIGHT_IN px in (W - 32 from W - 28), the bar's end AZ_BAR_IN
  */
 #define AZ_RIGHT_IN 4
@@ -305,7 +305,7 @@ void az_paint(void *w, void *canvas) {
     int oy = I(canvas, CANVAS_Y); /* the canvas's origin on screen */
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int light = ipod_light(), x = 375 - AZ_X - I(canvas, CANVAS_X);
-    unsigned ink = light ? 0x000000 : 0xffffff, paper = light ? 0xffffff : 0x000000;
+    unsigned ink = tok(TOK_PRIMARY), paper = light ? 0xffffff : 0x000000;
     signed char col[AZ_LETTERS];
     int n = az_column(col);
     for (int i = 0; i < n; ++i) {

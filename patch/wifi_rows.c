@@ -15,7 +15,7 @@
 
 #define WIFI_GAP 12       /* the section's space above its label (docs/oled-design.md Spacing) */
 #define WIFI_HEAD 32      /* ... and the label's line */
-#define WIFI_HEAD_PX 18   /* 15 px, AWTK's size (oled-design.md Type: Section header) */
+#define WIFI_HEAD_PX TYPE(15) /* 15 px, AWTK's size (oled-design.md Type: Section header) */
 #define WIFI_GLYPH 20     /* a row symbol (Phosphor regular, tools/art.py) */
 #define WIFI_GLYPH_GAP 8  /* between the right column's glyphs */
 #define WIFI_INK_STATES 4 /* text_ink's normal, pressed, over and disable */

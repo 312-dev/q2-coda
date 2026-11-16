@@ -172,7 +172,7 @@ void round_path(void *vg, float x, float y, float w, float h, float r) {
 #define BATT_SLIM_NUB_W 1.5f
 #define BATT_SLIM_NUB_H 4.4f
 #define BATT_SLIM_NUB_R 0.8f
-#define BATT_SLIM_DIM 0x6e6e6e
+#define BATT_SLIM_DIM RGB_TERTIARY_L
 #define BATT_GLYPH_X 4.5f /* tools/art.py BATT_GLYPH_BOX (9 x 10) and the glyph's centre in it */
 #define BATT_GLYPH_Y 5.0f
 /* The charge fill's share of the body, in percent, for battery_now's key: the level, on the cable
@@ -195,7 +195,7 @@ static const char *battery_glyph(unsigned key) {
 void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key) {
     void *vg = canvas_get_vgcanvas(canvas);
     if (!vg) return;
-    unsigned pct = battery_fill(key), level = battery_tone(key, ipod_light() ? 0x000000 : 0xffffff);
+    unsigned pct = battery_fill(key), level = battery_tone(key, tok(TOK_PRIMARY));
     float fx = (float)x + BATT_SLIM_IN, fy = (float)y + BATT_SLIM_IN,
           fw = ((float)bw - 2 * BATT_SLIM_IN) * (float)pct / 100, fh = (float)bh - 2 * BATT_SLIM_IN;
     unsigned raw = st.raw_ink;
@@ -234,16 +234,14 @@ void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned 
 #define SWITCH_KNOB 16.0f
 #define SWITCH_KNOB_IN 2.0f
 #define SWITCH_RING 1.5f
-#define SWITCH_TRACK_DARK 0x333333
-#define SWITCH_TRACK_LIGHT 0xd9d9d9
 void switch_mark(void *canvas, int right, int y, int on, int selected) {
     void *vg = canvas ? canvas_get_vgcanvas(canvas) : (void *)0;
     if (!vg) return;
     unsigned accent = scheme()->tones[0] & 0xffffffu,
              track = selected       ? 0xffffff
                      : on           ? accent
-                     : ipod_light() ? SWITCH_TRACK_LIGHT
-                                    : SWITCH_TRACK_DARK,
+                     : ipod_light() ? RGB_TRACK_L
+                                    : RGB_TRACK,
              knob = selected && on ? accent : 0xffffff;
     float x = (float)right - SWITCH_W, top = (float)y - SWITCH_H / 2,
           kx = on ? x + SWITCH_W - SWITCH_KNOB_IN - SWITCH_KNOB : x + SWITCH_KNOB_IN;
@@ -284,7 +282,7 @@ void grip_mark(void *canvas, int cx, int cy, unsigned rgb, int pct) {
 
 /* A lifted row's raised card (docs/oled-design.md#edit-library): card, CARD_RGB with LIFT_R
  * corners, a 1 px CARD_RING ring and a soft black shadow 6 px down, each half's. */
-#define CARD_RGB 0x2c2c2e
+#define CARD_RGB RGB_RAISED_2
 #define CARD_RING 0x141414
 #define LIFT_R 9
 void lift_card_paint(void *canvas, const rect_t *card) {
@@ -308,19 +306,18 @@ void lift_card_paint(void *canvas, const rect_t *card) {
  * selection (selected) the disc is white and its check the accent's, the ring white. */
 #define CIRCLE_D 16.0f
 #define CIRCLE_RING 1.5f
-#define CIRCLE_LOCK_RGB 0x3a3a3c
+#define CIRCLE_LOCK_RGB RGB_OFF
 #define CIRCLE_CHECK_PX 11 /* the art's glyphs' boxes */
 #define CIRCLE_LOCK_PX 10
 void check_circle(void *w, void *canvas, int cx, int cy, int state, int selected) {
     void *vg = canvas ? canvas_get_vgcanvas(canvas) : (void *)0;
     if (!vg) return;
     int light = ipod_light();
-    unsigned accent = scheme()->tones[0] & 0xffffffu, fill = state == CIRCLE_LOCKED
-                                                                 ? flip_if(light, CIRCLE_LOCK_RGB)
-                                                             : selected           ? 0xffffff
-                                                             : state == CIRCLE_ON ? accent
-                                                             : light              ? 0x6e6e6e
-                                                                                  : 0x858585;
+    unsigned accent = scheme()->tones[0] & 0xffffffu,
+             fill = state == CIRCLE_LOCKED ? flip_if(light, CIRCLE_LOCK_RGB)
+                    : selected             ? 0xffffff
+                    : state == CIRCLE_ON   ? accent
+                                           : tok(TOK_TERTIARY);
     float x = (float)cx - CIRCLE_D / 2, y = (float)cy - CIRCLE_D / 2;
     unsigned raw = st.raw_ink;
     st.raw_ink = 1; /* final: Light Mode's flip leaves them */

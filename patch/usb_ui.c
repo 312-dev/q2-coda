@@ -44,8 +44,8 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_ICON 19
 #define USB_TEXT_X 58
 #define USB_CAP_Y 37 /* the caption's centre in its row */
-#define USB_CAP_PX 17 /* Inter Regular 14 */
-#define USB_CAP_RGB 0xdce6fa
+#define USB_CAP_PX TYPE(15) /* Inter Regular 15 */
+#define USB_CAP_RGB RGB_CAPTION_ON_ACCENT
 
 /* A mode page (U2-U6): the stack, circle, title, line and the optional Stop pill, centred as one
  * between the status row's foot (MODE_TOP) and the screen's bottom. */
@@ -53,14 +53,14 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define MODE_STACK 158
 #define MODE_STACK_PILL 204
 #define MODE_TITLE_Y 120
-#define MODE_TITLE_PX 26 /* Inter Medium 22 */
+#define MODE_TITLE_PX TYPE(22) /* Inter Medium 22 */
 #define MODE_LINE_Y 148
-#define MODE_LINE_PX 18 /* Inter Regular 15 */
+#define MODE_LINE_PX TYPE(15) /* Inter Regular 15 */
 #define MODE_PILL_Y 172
 #define MODE_PILL_H 32
 #define MODE_PILL_PAD 22
-#define MODE_PILL_PX 20 /* Inter Medium 17 */
-#define MODE_PILL_RGB 0x2c2c2e
+#define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
+#define MODE_PILL_RGB RGB_RAISED_2
 #define MODE_TEXT_LINE 32
 
 /* The ADB prompt (U5) under its title: the key's lines, then Cancel, Allow, the switch and the note. */
@@ -68,7 +68,7 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define AUTH_KEYS "/mnt/data/adb_keys"
 #define AUTH_KEY_MAX 1024
 #define AUTH_HEAD 52 /* "This computer's key:" and the fingerprint above the rows */
-#define AUTH_NOTE_PX 17 /* Inter Regular 14, Text Tertiary */
+#define AUTH_NOTE_PX TYPE(13) /* Inter Regular 13, Text Tertiary */
 
 static struct {
     int view_ready, auth_ready;
@@ -328,14 +328,15 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
     if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
     paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
     usb_text(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
-             light ? 0x000000 : 0xffffff);
-    usb_text(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX, light ? 0x5c5c5c : 0xababab);
+             tok(TOK_PRIMARY));
+    usb_text(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
+             tok(TOK_SECONDARY));
     if (pill) {
         int pw = usb_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
         rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
-        fill_box(canvas, &r, RGBA(light ? 0xd1d1d6 : MODE_PILL_RGB), MODE_PILL_H / 2);
+        fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
         usb_text(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
-                 light ? 0x000000 : 0xffffff);
+                 tok(TOK_PRIMARY));
     }
     return top;
 }
@@ -364,7 +365,8 @@ void usb_ui_paint(void *w, void *canvas) {
         usb_mode_hide(w); /* stock's face for the mode shows the DAC's switches again */
         if (u.ejected && !dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ MODE_GREEN, "usbmode_ejected", 0, "OK to Disconnect", "Safe to unplug now", (const char *)0 });
+                            &(mode_page_t){ RGB_POSITIVE, "usbmode_ejected", 0, "OK to Disconnect",
+                                            "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
                             &(mode_page_t){ accent, "usbmode_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
@@ -519,11 +521,12 @@ static void usb_auth_paint(void *w, void *canvas) {
     void *list = u.auth_view ? P(u.auth_view, W_PARENT) : (void *)0;
     int top = list ? I(list, W_Y) - AUTH_HEAD : 58 - dy;
     usb_text(canvas, "This computer's key:", x, 375 - 2 * x, top + 12, 2, "inter", MODE_LINE_PX,
-             light ? 0x5c5c5c : 0xababab);
-    usb_text(canvas, u.fp, x, 375 - 2 * x, top + 34, 2, "inter-medium", MODE_PILL_PX, light ? 0x000000 : 0xffffff);
+             tok(TOK_SECONDARY));
+    usb_text(canvas, u.fp, x, 375 - 2 * x, top + 34, 2, "inter-medium", MODE_PILL_PX,
+             tok(TOK_PRIMARY));
     if (list)
-        usb_text(canvas, "Gives full control of the Q2.", x, 375 - 2 * x, I(list, W_Y) + I(list, W_H) + 20, 2,
-                 "inter", AUTH_NOTE_PX, light ? 0x6e6e6e : 0x858585);
+        usb_text(canvas, "Gives full control of the Q2.", x, 375 - 2 * x,
+                 I(list, W_Y) + I(list, W_H) + 20, 2, "inter", AUTH_NOTE_PX, tok(TOK_TERTIARY));
 }
 
 /* adbd's UI socket, connected once a second until it is there, and its questions. */

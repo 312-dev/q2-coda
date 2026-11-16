@@ -36,21 +36,15 @@
 #define UN_PILL_H 22 /* Clear: a pill ending UN_PILL_END from the screen's right, as the bar */
 #define UN_PILL_END 16
 #define UN_PILL_PAD 10
-#define UN_PILL_REST 0x2c2c2e
+#define UN_PILL_REST RGB_RAISED_2
 #define UN_PILL_INK 0x7fa6f5
-#define UN_THIRD 0x858585  /* Text Tertiary */
-#define UN_SECOND 0xababab /* Text Secondary */
 #define UN_BARS_MS 125     /* the level bars, about 8 frames a second */
 #define UN_POLL_MS 1000
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */
-#define UN_LIFT_RGB 0x2c2c2e
-#define UN_LIFT_ART 0x3a3a3c /* a placeholder cover on the lifted card */
-#define UN_BUMP_ZONE 64      /* a tap this near the screen's right edge is on a row's arrow */
-#define PX_17 21             /* AWTK's sizes of the design's 17, 14 and 13 px */
-#define PX_14 17
-#define PX_13 16
-#define PX_LIFT 22 /* the lifted row's title, Inter Medium, the design's 18 */
+#define UN_LIFT_RGB RGB_RAISED_2
+#define UN_LIFT_ART RGB_OFF /* a placeholder cover on the lifted card */
+#define UN_BUMP_ZONE 64     /* a tap this near the screen's right edge is on a row's arrow */
 
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern unsigned album_key(void *r);
@@ -199,7 +193,7 @@ static void un_fill(int sel) {
         if (canvas) {
             unsigned buf[8];
             unsigned m = ar_wide("Clear", buf, 8);
-            canvas_set_font(canvas, "inter-medium", PX_14);
+            canvas_set_font(canvas, "inter-medium", TYPE(15));
             w = (int)(canvas_measure_text(canvas, buf, m) + 0.5f);
         }
         w = (w ? w : 38) + 2 * UN_PILL_PAD;
@@ -430,14 +424,14 @@ void upnext_paint(void *w, void *canvas) {
         rect_t r = { 0, 0, I(w, W_W), h };
         fill_box(canvas, &r, RGBA(black), 0); /* the corners: the page's, not the row's own paint */
         fill_box(canvas, &r, RGBA(on ? accent : UN_PILL_REST), UN_PILL_H / 2);
-        ar_text(canvas, "Clear", 1, PX_14, on ? 0xffffff : UN_PILL_INK, 1, I(w, W_W) - UN_PILL_PAD,
-                h / 2, I(w, W_W), 3);
+        ar_text(canvas, "Clear", 1, TYPE(15), on ? 0xffffff : UN_PILL_INK, 1,
+                I(w, W_W) - UN_PILL_PAD, h / 2, I(w, W_W), 3);
     } else if (w == un.head) {
-        ar_text(canvas, "Playing Next", 1, PX_13, UN_SECOND, 0, x, h / 2, 250, 2);
+        ar_text(canvas, "Playing Next", 1, TYPE(13), RGB_SECONDARY, 0, x, h / 2, 250, 2);
     } else if (widget_get_prop_int(w, "_un_from", 0)) {
         char from[160];
         tk_snprintf(from, sizeof from, un.source[0] ? "From %s" : "Next in Queue", un.source);
-        ar_text(canvas, from, 1, PX_13, UN_SECOND, 0, x, 2 + (h - 2) / 2, end - x, 2);
+        ar_text(canvas, from, 1, TYPE(13), RGB_SECONDARY, 0, x, 2 + (h - 2) / 2, end - x, 2);
     } else {
         int stop = widget_get_prop_int(w, "_un_stop", -2), k = w == un.now ? -1 : un_place(stop),
             on = w != un.now && un_lit(w), lifted = un.lifted && k == un.lifted - 1;
@@ -456,14 +450,14 @@ void upnext_paint(void *w, void *canvas) {
         if (!title || !*title) title = track_name(name, sizeof name, r);
         int queued = k >= 0 && (unsigned)k < un.npn, right = un.lifted && queued ? 30 : 0;
         if (!right && queued && k > 0) right = 30; /* the arrow's room */
-        int tw = ar_text(canvas, title, lifted, lifted ? PX_LIFT : PX_17, 0xffffff, on, tx,
+        int tw = ar_text(canvas, title, lifted, lifted ? TYPE(18) : TYPE(17), 0xffffff, on, tx,
                          UN_TITLE_Y, end - right - tx, 2);
         if (artist && *artist)
-            ar_text(canvas, artist, 0, PX_13, on || lifted ? 0xffffff : UN_THIRD, on, tx,
+            ar_text(canvas, artist, 0, TYPE(13), on || lifted ? 0xffffff : RGB_TERTIARY, on, tx,
                     UN_ARTIST_Y, end - right - tx, 2);
         if (w == un.now) un_level(canvas, tx + tw + 7, UN_TITLE_Y + 6, accent);
         if (un.lifted && queued)
-            un_grip(canvas, h / 2, lifted || on ? 0xffffff : UN_THIRD);
+            un_grip(canvas, h / 2, lifted || on ? 0xffffff : RGB_TERTIARY);
         else if (queued && k > 0) {
             unsigned bitmap[64]; /* bitmap_t: the bump arrow */
             const char *ink = on ? "bump_w" : ipod_light() ? "bump_l" : "bump_d";

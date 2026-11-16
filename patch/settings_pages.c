@@ -86,11 +86,11 @@ void about_rows(void *view) {
 #define CAP_MAX 8
 #define CAP_LINES 3
 #define CAP_TOP 32    /* the row's own height, title and switch */
-#define CAP_PX 16     /* Inter 13 px, AWTK's size (13 x 1.21) */
+#define CAP_PX TYPE(13) /* Inter 13 px, AWTK's size (13 x 1.21) */
 #define CAP_LINE 17   /* a line's pitch */
 #define CAP_FOOT 5    /* under the last line, inside the bar */
 #define CAP_INSET 8   /* the caption's left, past the bar's start: the title's column */
-#define CAP_INK 0xd6e2fa /* white, a little quieter than the title, on the accent */
+#define CAP_INK RGB_CAPTION_ON_ACCENT /* white, a little quieter than the title, on the accent */
 #define CAP_MS 150
 #define CAP_STEP_MS 16
 static struct {

@@ -88,8 +88,9 @@ static inline int ink_vgcanvas_set_fill_linear_gradient(void *vg, float sx, floa
 #define vgcanvas_set_fill_linear_gradient ink_vgcanvas_set_fill_linear_gradient
 #endif
 #endif
-#include "theme.h"
 #include "peq_types.h"
+#include "theme.h"
+#include "ui_kit.h"
 
 #define PEQ_CHANNELS 8
 #define PEQ_FILE_LIMIT 16384

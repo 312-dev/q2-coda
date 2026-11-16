@@ -94,7 +94,7 @@ static unsigned cable_key(void) {
 #define S1_H 76.0f
 #define S1_R 16.0f
 #define S1_LINE 3.0f
-#define S1_BODY_RGB 0x3a3a3c
+#define S1_BODY_RGB RGB_OFF
 #define S1_IN 8.0f /* the fill S1_IN inside the body, S1_FILL_R corners */
 #define S1_FILL_R 9.0f
 #define S1_NUB_GAP                                                                                 \
@@ -102,7 +102,6 @@ static unsigned cable_key(void) {
 #define S1_NUB_W 7.0f
 #define S1_NUB_H 28.0f
 #define S1_NUB_R 4.0f
-#define S1_GREEN 0x34c759
 #define S1_PCT_Y                                                                                   \
     212 /* the level's line, Inter Medium 30 (36 in AWTK's sizes), S1_PCT_DX right of */
 #define S1_PCT_PX 36 /* centre, the bolt (tools/art.py CHARGE_BOLT_PX) S1_BOLT_GAP left of it */
@@ -110,8 +109,8 @@ static unsigned cable_key(void) {
 #define S1_BOLT 26
 #define S1_BOLT_GAP 3
 #define S1_WORD_Y 244 /* "Charging", Inter Regular 16 (19), Text Secondary */
-#define S1_WORD_PX 19
-#define S1_WORD_RGB 0xababab
+#define S1_WORD_PX TYPE(16)
+#define S1_WORD_RGB RGB_SECONDARY
 #define S1_LINE_H 40
 
 static struct {
@@ -221,9 +220,9 @@ void charge_paint(void *w, void *canvas) {
     if (!s1.still) {
         unsigned alpha, t = ((unsigned)time_now_ms() - s1.at) % S1_LOOP_MS;
         int reach = s1_sweep(base, s1.level, t, &alpha);
-        s1_fill(vg, fx, fy, (float)reach, fh, (RGBA(S1_GREEN) & 0xffffffu) | alpha << 24);
+        s1_fill(vg, fx, fy, (float)reach, fh, (RGBA(RGB_POSITIVE) & 0xffffffu) | alpha << 24);
     }
-    s1_fill(vg, fx, fy, (float)base * 10, fh, RGBA(S1_GREEN));
+    s1_fill(vg, fx, fy, (float)base * 10, fh, RGBA(RGB_POSITIVE));
     vgcanvas_restore(vg);
     st.raw_ink = raw;
     /* the level, the bolt S1_BOLT_GAP left of it, and the word under them */

@@ -53,17 +53,14 @@ enum { QUIT_NOFILE = 9, QUIT_LATEST = 13, QUIT_BAD = 18 };
 #define SW_FOOT_DY                                                                                 \
     20 /* the footer's first line under the rows, Inter Regular 13, the next 18 lower */
 #define SW_FOOT_LINE 18
-#define SW_NAME_PX 20
-#define SW_SIZE_PX 17
-#define SW_FOOT_PX 16
+#define SW_NAME_PX TYPE(17)
+#define SW_SIZE_PX TYPE(15)
+#define SW_FOOT_PX TYPE(13)
 /* The restart's bar (U3): under the stack's line, 180 x 6 with round ends */
 #define SW_BAR_Y 172
 #define SW_BAR_W 180
 #define SW_BAR_H 6
-#define SW_STATUS_PX 18 /* the status row's title, Inter Medium 15 */
-#define SW_ORANGE 0xff9f0a
-#define SW_RED 0xff453a
-#define SW_GREY 0x3a3a3c
+#define SW_STATUS_PX TYPE(15) /* the status row's title, Inter Medium 15 */
 
 static struct {
     unsigned long thread;
@@ -370,12 +367,12 @@ void sw_update_paint(void *w, void *canvas) {
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;
     int light = ipod_light(), dy = I(w, W_Y), x = geom_val(V_TEXT_X), tw = 375 - 2 * x;
-    unsigned accent = scheme()->tones[0] & 0xffffffu, ink = light ? 0x000000 : 0xffffff,
-             tertiary = light ? 0x6e6e6e : 0x858585;
+    unsigned accent = scheme()->tones[0] & 0xffffffu, ink = tok(TOK_PRIMARY),
+             tertiary = tok(TOK_TERTIARY);
     char s[64], spin[24];
     st.raw_ink = 1;
     if (w == swu.page) {
-        mode_page_t m = { SW_RED,
+        mode_page_t m = { RGB_NEGATIVE,
                           "swmode_bad",
                           0,
                           "Update Can't Be Used",
@@ -393,11 +390,11 @@ void sw_update_paint(void *w, void *canvas) {
             break;
         case SW_LATEST:
             sw_installed(s, sizeof s);
-            m = (mode_page_t){ MODE_GREEN, "swmode_latest", 0, "You're Up to Date",
-                               s,          (const char *)0 };
+            m = (mode_page_t){ RGB_POSITIVE,   "swmode_latest", 0, "You're Up to Date", s,
+                               (const char *)0 };
             break;
         case SW_NONE:
-            m = (mode_page_t){ SW_GREY,
+            m = (mode_page_t){ RGB_OFF,
                                "swmode_none",
                                0,
                                "No Update Found",
@@ -406,17 +403,19 @@ void sw_update_paint(void *w, void *canvas) {
             break;
         case SW_NOCARD:
             m = (mode_page_t){
-                SW_GREY,        "swmode_none", 0, "No SD Card", "Insert the card with update.tar",
+                RGB_OFF,        "swmode_none", 0, "No SD Card", "Insert the card with update.tar",
                 (const char *)0
             };
             break;
         case SW_LOW:
             tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, swu.level);
-            m = (mode_page_t){ SW_ORANGE, "swmode_low", 0, "Charge to Update", s, (const char *)0 };
+            m = (mode_page_t){
+                RGB_WARNING, "swmode_low", 0, "Charge to Update", s, (const char *)0
+            };
             break;
         case SW_FULL:
             m = (mode_page_t){
-                SW_ORANGE,      "swmode_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
+                RGB_WARNING,    "swmode_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
                 (const char *)0
             };
         }
@@ -437,15 +436,15 @@ void sw_update_paint(void *w, void *canvas) {
                 foot + SW_FOOT_LINE, tw, 2);
     } else {
         /* stock's dialog covers the status row: its title drawn in its place and face */
-        ar_text(canvas, "Software Update", 1, SW_STATUS_PX, light ? 0x5c5c5c : 0xababab, 1,
-                STATUS_ROW_INSET, geom_val(V_STATUS_Y) - dy, 240, 2);
+        ar_text(canvas, "Software Update", 1, SW_STATUS_PX, tok(TOK_SECONDARY), 1, STATUS_ROW_INSET,
+                geom_val(V_STATUS_Y) - dy, 240, 2);
         int top =
             mode_page_paint(w, canvas, dy,
                             &(mode_page_t){ accent, "swmode_restart", 0, "Restarting to Install",
                                             "Don't turn off the Q2", (const char *)0 });
         rect_t track = { 375 / 2 - SW_BAR_W / 2, top + SW_BAR_Y, SW_BAR_W, SW_BAR_H }, part = track;
         part.w = sw_unpacked(SW_BAR_W);
-        fill_box(canvas, &track, RGBA(light ? 0xd1d1d6 : 0x333333), SW_BAR_H / 2);
+        fill_box(canvas, &track, RGBA(tok(TOK_TRACK)), SW_BAR_H / 2);
         if (part.w >= SW_BAR_H) fill_box(canvas, &part, RGBA(accent), SW_BAR_H / 2);
     }
     st.raw_ink = raw;

@@ -39,19 +39,9 @@
 #define AR_THUMB_R 4
 #define TRACK_NUM_X 38      /* a track's number, right-aligned to this on screen */
 #define TRACK_TITLE_X 50    /* and its title's first column */
-#define AR_FILL 0x1c1c1e    /* a pair's panel at rest */
-#define AR_MONO 0x2c2c2e    /* the monogram's disc, and a cover's placeholder */
-#define AR_MONO_ON 0x3a3a3c /* an artist row's disc on the selection */
-#define AR_SECOND 0xababab  /* Text Secondary */
-#define AR_THIRD 0x858585   /* Text Tertiary */
-/* AWTK's sizes for the design's px (Inter's line is 1.21 em: assets/themes/oled/theme.xml) */
-#define PX_30 36
-#define PX_20 24
-#define PX_18 22
-#define PX_17 21
-#define PX_15 18
-#define PX_14 17
-#define PX_13 16
+#define AR_FILL RGB_RAISED  /* a pair's panel at rest */
+#define AR_MONO RGB_RAISED_2 /* the monogram's disc, and a cover's placeholder */
+#define AR_MONO_ON RGB_OFF   /* an artist row's disc on the selection */
 
 #define AR_NAME "_ar_name" /* the header's strings, kept on it */
 #define AR_SUB "_ar_sub"
@@ -213,7 +203,7 @@ static void hero_art(void *canvas, void *head, int dy) {
     rect_t r = { geom_val(V_TEXT_X), dy, HERO_MONO, HERO_MONO };
     const char *cover = widget_get_prop_str(head, AR_COVER, "");
     if (!widget_get_prop_int(head, AR_SQUARE, 0)) {
-        mono(canvas, widget_get_prop_str(head, AR_NAME, ""), r.x, dy, HERO_MONO, PX_30, AR_MONO);
+        mono(canvas, widget_get_prop_str(head, AR_NAME, ""), r.x, dy, HERO_MONO, TYPE(22), AR_MONO);
     } else if (!cover || !*cover || widget_load_image(head, cover, bitmap) || !bitmap[0] ||
                !bitmap[1]) {
         ar_box(canvas, &r, HERO_ART_R, flip_if(ipod_light(), AR_MONO));
@@ -352,14 +342,14 @@ static void pair_paint(void *p, void *canvas) {
     const char *label = widget_get_prop_str(p, AR_LEFT, "");
     char art[24];
     unsigned buf[32], n = ar_wide(label, buf, 32);
-    int px = PX_17;
+    int px = TYPE(17);
     const char *face = theme_face(buf, (int)n, &px);
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
     int tw = n ? ar_measure(canvas, face, px, buf, n) : 0, x = (r.w - tw - PAIR_LABEL_DX) / 2;
     tk_snprintf(art, sizeof art, "pair_%s_%s", widget_get_prop_str(p, AR_ICON, ""), on ? "w" : "a");
     paint_art(p, canvas, theme_art(art), x, r.y + (PAIR_H - PAIR_ICON) / 2);
-    ar_text(canvas, label, 1, PX_17, on ? 0xffffff : accent, 1, x + PAIR_LABEL_DX, r.y + PAIR_H / 2,
-            r.w, 2);
+    ar_text(canvas, label, 1, TYPE(17), on ? 0xffffff : accent, 1, x + PAIR_LABEL_DX,
+            r.y + PAIR_H / 2, r.w, 2);
 }
 
 /* The header: the monogram or cover (its top above the window is artist_cap's) and the three
@@ -368,12 +358,12 @@ static void hero_paint(void *head, void *canvas) {
     int bar = geom_val(V_BAR), right = 375 - geom_val(V_RIGHT_X), w = right - HERO_TEXT;
     const char *meta = widget_get_prop_str(head, AR_META, "");
     hero_art(canvas, head, HERO_Y - bar);
-    ar_text(canvas, widget_get_prop_str(head, AR_NAME, ""), 1, PX_20, 0xffffff, 0, HERO_TEXT,
+    ar_text(canvas, widget_get_prop_str(head, AR_NAME, ""), 1, TYPE(20), 0xffffff, 0, HERO_TEXT,
             HERO_NAME_Y - bar, w, 2);
-    ar_text(canvas, widget_get_prop_str(head, AR_SUB, ""), 0, PX_15, AR_SECOND, 0, HERO_TEXT,
+    ar_text(canvas, widget_get_prop_str(head, AR_SUB, ""), 0, TYPE(15), RGB_SECONDARY, 0, HERO_TEXT,
             HERO_SUB_Y - bar, w, 2);
     if (meta && *meta)
-        ar_text(canvas, meta, 0, PX_13, AR_THIRD, 0, HERO_TEXT, HERO_META_Y - bar, w, 2);
+        ar_text(canvas, meta, 0, TYPE(13), RGB_TERTIARY, 0, HERO_TEXT, HERO_META_Y - bar, w, 2);
     if (!ar.cap) ar.cap = timer_add(cap_due, (void *)0, 0) | 1;
 }
 
@@ -415,7 +405,7 @@ void *cover_row(void *view, int index, int h, int thumb, int px, const char *tit
     widget_set_prop_int(label, "loop", 0);
     hscroll_label_set_only_focus(label, 1);
     hscroll_label_set_ellipses(label, 1);
-    widget_set_prop_int(item, AR_PX, px ? px : PX_20);
+    widget_set_prop_int(item, AR_PX, px ? px : TYPE(20));
     widget_set_prop_str(item, AR_TITLE, title);
     widget_set_prop_str(item, AR_RIGHT, right ? right : "");
     widget_set_prop_int(item, AR_THUMB, thumb);
@@ -451,7 +441,7 @@ static void cover_paint(void *item, void *canvas) {
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     const char *after = widget_get_prop_str(item, AR_AFTER, "");
     if (widget_get_prop_int(item, AR_DISC, 0)) {
-        mono(canvas, widget_get_prop_str(item, AR_TITLE, ""), r.x, r.y, thumb, PX_15,
+        mono(canvas, widget_get_prop_str(item, AR_TITLE, ""), r.x, r.y, thumb, TYPE(15),
              on ? AR_MONO_ON : AR_MONO);
     } else if (!cover || !*cover) {
         ar_box(canvas, &r, AR_THUMB_R, flip_if(ipod_light(), AR_MONO));
@@ -460,19 +450,20 @@ static void cover_paint(void *item, void *canvas) {
     }
     stock_canvas_set_fill_color(canvas, fill);
     if (right && *right)
-        ar_text(canvas, right, 0, PX_15, on ? 0xffffff : AR_THIRD, 0, 375 - geom_val(V_RIGHT_X),
-                h / 2, 60, 3);
+        ar_text(canvas, right, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0,
+                375 - geom_val(V_RIGHT_X), h / 2, 60, 3);
     if (after && *after) { /* the title's ink and two spaces, then what is left of its column */
         char title[160];
         unsigned buf[96], n;
         int x = r.x + thumb + 10, w = 375 - geom_val(V_RIGHT_X) - (right && *right ? 50 : 0) - x,
-            px = widget_get_prop_int(item, AR_PX, PX_20);
+            px = widget_get_prop_int(item, AR_PX, TYPE(20));
         tk_snprintf(title, sizeof title, "%s  ", widget_get_prop_str(item, AR_TITLE, ""));
         n = ar_wide(title, buf, sizeof buf / sizeof *buf);
         const char *face = theme_face(buf, (int)n, &px);
         int tw = n ? ar_measure(canvas, face, px, buf, n) : 0;
         if (tw < w - 30)
-            ar_text(canvas, after, 0, PX_14, on ? 0xffffff : AR_THIRD, 0, x + tw, h / 2, w - tw, 2);
+            ar_text(canvas, after, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0, x + tw, h / 2,
+                    w - tw, 2);
     }
 }
 
@@ -514,16 +505,17 @@ void artist_paint(void *w, void *canvas) {
     const char *num = widget_get_prop_str(w, AR_NUM, (const char *)0);
     if (num) { /* a track: its number, and its length on the right column */
         const char *len = widget_get_prop_str(w, AR_RIGHT, "");
-        unsigned ink = ar_lit(w) ? 0xffffff : AR_THIRD;
-        if (*num) ar_text(canvas, num, 0, PX_15, ink, 0, TRACK_NUM_X, I(w, W_H) / 2, 40, 3);
+        unsigned ink = ar_lit(w) ? 0xffffff : RGB_TERTIARY;
+        if (*num) ar_text(canvas, num, 0, TYPE(15), ink, 0, TRACK_NUM_X, I(w, W_H) / 2, 40, 3);
         if (len && *len)
-            ar_text(canvas, len, 0, PX_15, ink, 0, 375 - geom_val(V_RIGHT_X), I(w, W_H) / 2, 60, 3);
+            ar_text(canvas, len, 0, TYPE(15), ink, 0, 375 - geom_val(V_RIGHT_X), I(w, W_H) / 2, 60,
+                    3);
         return;
     }
     const char *count = widget_get_prop_str(w, AR_COUNT, (const char *)0);
     if (count && *count) {
-        ar_text(canvas, count, 0, PX_15, ar_lit(w) ? 0xffffff : AR_THIRD, 0, 375 - AR_COUNT_DX,
-                I(w, W_H) / 2, 60, 3);
+        ar_text(canvas, count, 0, TYPE(15), ar_lit(w) ? 0xffffff : RGB_TERTIARY, 0,
+                375 - AR_COUNT_DX, I(w, W_H) / 2, 60, 3);
         return;
     }
     if (widget_get_prop_int(w, AR_THUMB, 0)) cover_paint(w, canvas);

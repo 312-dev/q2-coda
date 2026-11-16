@@ -21,10 +21,8 @@
 #define MODAL_LEAD 26   /* a setting's or a choice's label after its leading symbol */
 #define MODAL_ICON 19   /* tools/art.py MENU_ICON_PX */
 #define MODAL_SWITCH 34 /* list_marks.c switch_mark's width */
-#define MODAL_FILL 0x1c1c1e
-#define MODAL_DIM 0x80000000u    /* black at 50% */
-#define MODAL_SECONDARY 0xababab /* Text Secondary; the light half's below */
-#define MODAL_SECONDARY_L 0x5c5c5c
+#define MODAL_FILL RGB_RAISED
+#define MODAL_DIM 0x80000000u /* black at 50% */
 
 /* A row's props: its symbol's art stem (tools/art.py menu_<stem>_<ink>), its value, and how they
  * stand (MM_*). */
@@ -260,8 +258,8 @@ void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected) {
         }
         value_text(canvas, value, right, room, &r,
                    selected ? 0xffffff
-                   : light  ? MODAL_SECONDARY_L
-                            : MODAL_SECONDARY);
+                   : light  ? RGB_SECONDARY_L
+                            : RGB_SECONDARY);
         st.raw_ink = raw;
     }
     stock_canvas_set_text_color(canvas, text);

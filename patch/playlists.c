@@ -857,7 +857,7 @@ void pl_tile_paint(void *w, void *canvas) {
                     (a & 0xff) + (0xff - (a & 0xff)) * 18 / 100;
     unsigned raw = ui_ink_raw(1);
     rect_t r = { 0, 0, PL_OLED_ART, PL_OLED_ART };
-    fill_box(canvas, &r, RGBA(on ? veil : flip_if(light, 0x2c2c2e)), 4);
+    fill_box(canvas, &r, RGBA(on ? veil : tok(TOK_RAISED_2)), 4);
     char art[32];
     tk_snprintf(art, sizeof art, "pltile_%s_%s", kind == 2 ? "otg" : "playlist",
                 on      ? "w"

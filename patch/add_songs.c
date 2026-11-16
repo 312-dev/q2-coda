@@ -28,8 +28,8 @@ extern char *art_path(char *out, unsigned key, const char *suffix);
 #define AS_END 224 /* the list's height: down to y 282 on screen */
 #define AS_LEVELS 4
 #define AS_MAX_KEYS 4096 /* the songs whose marks are kept; past it a song shows none */
-#define AS_PX 24         /* a row's title: the design's 20 px, AWTK's size */
-#define AS_PX_15 18
+#define AS_PX TYPE(20)   /* a row's title: the design's 20 px, AWTK's size */
+#define AS_PX_15 TYPE(15)
 
 enum { AS_CHOOSE, AS_PLAYED, AS_ADDED, AS_ARTISTS, AS_ALBUMS, AS_SONGS, AS_ARTIST, AS_ALBUM };
 static const char *const as_names[] = { "",        "Recently Played", "Recently Added",
@@ -318,10 +318,7 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
     unsigned ink = on      ? 0xffffff
                    : light ? 0
                            : 0xffffff,
-             muted = on      ? 0xffffff
-                     : light ? 0x6e6e6e
-                             : 0x858585,
-             accent = scheme()->tones[0] & 0xffffff;
+             muted = on ? 0xffffff : tok(TOK_TERTIARY), accent = scheme()->tones[0] & 0xffffff;
     char text[256], right[48] = "", url[520], art[32];
     const char *title = text, *icon = 0;
     int chev = 0, mark = 0, num = 0;
@@ -350,7 +347,7 @@ static void as_row(void *canvas, as_level *l, int i, int y, int h, int on) {
             rect_t src = { 0, 0, (int)bitmap[0], (int)bitmap[1] };
             canvas_draw_image(canvas, bitmap, &src, &box);
         } else
-            fill_box(canvas, &box, RGBA(flip_if(light, 0x2c2c2e)), 4);
+            fill_box(canvas, &box, RGBA(tok(TOK_RAISED_2)), 4);
         tx = x + AS_COVER + 8;
     } else if ((r = as_record(l, i))) {
         if (l->kind == AS_ARTISTS) {
