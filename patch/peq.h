@@ -693,7 +693,6 @@ unsigned playlist_index(int cd_num);
 void playlists_edit(int edit);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
-#define SHORTCUT_SHUFFLE 5     /* IPOD SHORTCUT's Shuffle Songs: it plays in place */
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */

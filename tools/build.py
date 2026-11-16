@@ -785,7 +785,7 @@ NET_TYPE_READS = ((0x5c1d6c, 0x8c4300d4), (0x5c1d70, 0x24020002), (0x5c2078, 0x8
 # the row that opens it; and toasts in sentence case.
 LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_playlistfull', 'Playlist Is Full', 'Could not create playlist'),
-    ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Power'),
+    ('player_playlist', 'Playlists', 'Queue'), ('system_powermanager', 'Idle', 'Battery'),
     ('powerm_deep_off', 'standby/shutdown', 'Standby'),
     ('local_songer', 'Artist', 'Artists'), ('local_album', 'Album', 'Albums'),
     ('local_allsongs', 'All Songs', 'Songs'), ('local_playlist', 'Playlist', 'Playlists'),
@@ -795,7 +795,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('playset_memplay', 'Memory playback', 'Memory Playback'),
     ('playset_noplay', 'Headphones required for playback', 'Headphones Required'),
     ('replaygain_track', 'Audio', 'Song'),
-    ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'System'),
+    ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'General'),
     ('system_wifiset', 'Wireless Setting', 'Wireless'), ('system_display', 'Display setting', 'Display'),
     ('system_netservice', 'Network Service', 'Network'), ('system_time', 'Date and time', 'Date & Time'),
     ('netservice_wifitrans', 'Wi-Fi file transfer', 'Wi-Fi File Transfer'),
@@ -815,9 +815,10 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_addfavsuccess', 'Added To Fav', 'Added to Favorites'), ('msg_favsuccess', 'Added To Fav', 'Added to Favorites'),
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
-    # Screen Off Time's and Standby's minute choices: "min" takes a space, as "s" does not, which stock's
-    # 15s and 30s already have (docs/oled-design.md Type)
-    *((f'{page}_{n}min', f'{n}min', f'{n} min') for page, choices in (
+    # Screen Off Time's and Standby's choices spelled out, as iOS's Auto-Lock words them (the menu review's,
+    # 2026-11-15): "30 seconds", "1 minute"
+    *((f'lighttime_{n}s', f'{n}s', f'{n} seconds') for n in (15, 30)),
+    *((f'{page}_{n}min', f'{n}min', f'{n} minute' + 's' * (n > 1)) for page, choices in (
         ('lighttime', (1, 2, 5, 30)), ('standbyoff', (1, 3, 5, 10))) for n in choices)))
 
 # Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,

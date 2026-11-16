@@ -1686,16 +1686,12 @@ static void paint_chevrons(void *w, void *canvas) {
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (2 * r.w < I(w, W_W) || !drill(g_menu.at[i])) continue;
-        /* Home's Shuffle Songs acts rather than opening a list: no chevron */
-        if (home && !tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_shuffle_songs"))
-            continue;
-        /* the theme's own, on the right column; none on the Shortcut row as Shuffle */
+        /* the theme's own, on the right column */
         int sel = st.sel_w == w && i == st.sel_row,
             spin = home && sel && cover_flow_row(g_menu.at[i]) ? coverflow_spinner() : 0;
         if (spin)
             spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, spin);
-        else if (!home || shortcut() != SHORTCUT_SHUFFLE ||
-                 tk_strcmp(widget_get_prop_str(g_menu.at[i], "name", ""), "img_rockbox"))
+        else
             chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, sel);
     }
     canvas_set_clip_rect(canvas, &old);
@@ -3153,7 +3149,6 @@ int ringnav_powermanager(void *win, void *ctx) {
         widget_set_text_utf8(list_row_into(view, "system_powermanager", battery_history, 0),
                              "Battery History");
     boot_row(view);
-    power_rows(view); /* Restart and Shut Down, last */
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
@@ -3217,29 +3212,28 @@ static const unsigned char library_order[] = {
     4 /* Folder Root */,      0 /* Folder skip */,        5 /* Folder art */,
     6 /* Import Playlists */, 7 /* Export Playlists */,
 };
-/* Connections, personalisation and daily controls, then device maintenance; About stays last.
- * Stock's Wheel Function, In-Vehicle, General and System stay hidden, its page left whole: the
- * wheel is Q2 Pod's (tools/build.py WHEEL_MODE), Power and Controls have In-Vehicle's, Key tone's
- * and Buttons lock's rows (pod_click, keylock_open), and the rows stock moved to System are here,
- * as they were (ringnav_systemset). */
+/* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
+ * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
+ * its page left whole: Settings on Home has Wi-Fi, Bluetooth, Display and Battery's rows itself
+ * (home_sets_bind), the wheel is Q2 Pod's (tools/build.py WHEEL_MODE), Battery and Controls have
+ * In-Vehicle's, Key tone's and Buttons lock's rows (pod_click, keylock_open), and the rows stock
+ * moved to System are here, as they were (ringnav_systemset). */
 static const unsigned char sysset_order[] = {
-    1 /* Wireless */,
-    2 /* Network */,
-    15 /* Car Remote */,
-    3 /* Display */,
-    10 /* Controls */,
-    4 /* Power */,
-    11 /* Date and time */,
-    0 /* Language, hidden */,
+    13 /* About */,
+    11 /* Update */,
+    14 /* Storage */,
+    10 /* Date and time */,
     9 /* App Store */,
-    16 /* Storage */,
-    12 /* Update */,
-    13 /* Reset */,
+    2 /* Network */,
+    12 /* Reset */,
+    0 /* Language, hidden */,
+    1 /* Wireless, hidden */,
+    3 /* Display, hidden */,
+    4 /* Power, hidden */,
     5 /* Wheel Function, hidden */,
     6 /* In-Vehicle, hidden */,
     7 /* General, hidden */,
     8 /* System, hidden */,
-    14 /* About */,
 };
 
 /* Folder Root (Q2POD FOLDERROOT): the card's top-level folder Home's Folder opens in, "" the card
@@ -5844,18 +5838,13 @@ static void setting_text(int i) {
         row_label(st.setting_label[0], text);
         return;
     }
-    if (i == SETTING_SHORTCUT || i >= SETTING_OWN) {
-        if (i == SETTING_SHORTCUT)
-            tk_snprintf(text, sizeof text, "Shortcut: %s",
-                        shortcut() == SHORTCUT_NONE ? "None" : ipod_home_shortcut());
-        else {
-            const theme_key_t *K = &theme_keys[i - SETTING_OWN];
-            if (theme()->set_text) { /* the label and the value's name, unsplit */
-                list_value(st.setting_label[i], K->label, K->names[st.own[i - SETTING_OWN]]);
-                return;
-            }
-            tk_snprintf(text, sizeof text, "%s: %s", K->label, K->names[st.own[i - SETTING_OWN]]);
+    if (i >= SETTING_OWN) {
+        const theme_key_t *K = &theme_keys[i - SETTING_OWN];
+        if (theme()->set_text) { /* the label and the value's name, unsplit */
+            list_value(st.setting_label[i], K->label, K->names[st.own[i - SETTING_OWN]]);
+            return;
         }
+        tk_snprintf(text, sizeof text, "%s: %s", K->label, K->names[st.own[i - SETTING_OWN]]);
         row_label(st.setting_label[i], text);
         return;
     }
@@ -5911,21 +5900,10 @@ static int setting_click(void *ctx, void *event) {
     const theme_t *T = theme();
     int *value = option_slot(T, i), was = *value;
     const char *key = option_key(T, i);
-    /* Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts,
-     * Audiobooks, Groovebox (skipped unless the card has it; Rockbox is always offered), None */
-    static const int shortcut_next[] = {
-        3, 2, 6, 5, 7, 4, 8, 1, 9, SHORTCUT_GROOVEBOX, SHORTCUT_NONE, 0
-    };
-    _Static_assert(sizeof shortcut_next / sizeof *shortcut_next == SETTING_N_SHORTCUT,
-                   "one per shortcut");
     /* Graphite, ..., Plum, Green, then Ivory (a theme's mask skips what it does not offer) */
     static const int accent_next[] = { 1, 2, 3, 4, 5, 6, 8, 0, MINIMAL_ACCENT };
     _Static_assert(sizeof accent_next / sizeof *accent_next == ACCENT_N, "one per ACCENTS row");
-    if (i == SETTING_SHORTCUT) {
-        *value = shortcut_next[shortcut()];
-        if (*value == SHORTCUT_GROOVEBOX && !groovebox_available())
-            *value = shortcut_next[SHORTCUT_GROOVEBOX];
-    } else if (i) {
+    if (i) {
         const option_t *o = option_of(T, i);
         unsigned mask = o && o->values ? o->values : ~0u;
         do
@@ -5954,7 +5932,7 @@ static int setting_click(void *ctx, void *event) {
     }
     if (i == SETTING_BATTERY)
         widget_invalidate_force(*(void *const *)system_bar, (void *)0); /* bar_sync applies it */
-    else if (i == SETTING_HOME || i == SETTING_SHORTCUT)
+    else if (i == SETTING_HOME)
         coverflow_home_layout();
     else if (i == SETTING_ACCENT || i == SETTING_LIGHT) { /* the switches from Smart Awake on and
                                                            * the theme's own options only need
@@ -6212,6 +6190,26 @@ int ringnav_display(void *win, void *ctx) {
     return result;
 }
 
+/* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
+ * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
+ * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
+static int set_open(void *ctx, void *event) {
+    int i = (int)(long)ctx;
+    if (i == 2) return carremote_open(0, event);
+    if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
+    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
+                                         "systemset/display_page", 0,
+                                         "systemset/powermanager_page" };
+    navigator_to(pages[i]);
+    return 0;
+}
+void home_sets_bind(void *win) {
+    static const char *const names[] = { "img_set_wifi",    "img_set_bt",       "img_set_car",
+                                         "img_set_display", "img_set_controls", "img_set_power" };
+    for (unsigned i = 0; i < sizeof names / sizeof *names; ++i)
+        widget_on(widget_lookup(win, names[i], 1), EVT_CLICK, set_open, (void *)(long)i);
+}
+
 #define BOOT_TARGET "/mnt/data/boot-target"
 static int boot_rockbox __attribute__((section(".scratch")));
 static void boot_text(void *label) {
@@ -6262,23 +6260,23 @@ int ringnav_systemset(void *win, void *ctx) {
                                                 { "system_reset", "systemset/reset_page" },
                                                 { "system_about", "systemset/about_page" } };
         widget_set_text_utf8(list_row_into(view, "system_update", shelf_open, 0), "App Store");
-        widget_set_text_utf8(
-            list_row_into(view, "playset_folderjump", display_open, (void *)DISPLAY_CONTROLS),
-            "Controls");
         for (unsigned i = 0; i < 4; ++i)
             widget_set_tr_text(list_row_into(view, moved[i][0], to_page, (void *)moved[i][1]),
                                moved[i][0]);
-        /* Car Remote (coda_rc_shim.c): its page, whose switch starts the coda-rc daemon */
-        widget_set_text_utf8(list_row_into(view, "system_carmode", carremote_open, 0),
-                             "Car Remote");
         /* Storage (storage.c): the card's use and a card app's Downloads */
         widget_set_text_utf8(list_row_into(view, "playset_folderjump", storage_open, 0), "Storage");
-        for (unsigned i = 5; i <= 8; ++i) widget_set_visible(widget_get_child(view, i), 0, 0);
+        static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };
+        for (unsigned i = 0; i < sizeof hidden; ++i)
+            widget_set_visible(widget_get_child(view, hidden[i]), 0, 0);
         /* Language: Q2 Pod's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
         widget_set_visible(widget_get_child(view, 0), 0, 0);
+        void *nav = widget_lookup(win, "view_navbar", 1),
+             *title = nav ? widget_get_child(nav, 0) : (void *)0;
+        if (title) widget_set_text_utf8(title, "General");
     }
     reorder(view, sysset_order, sizeof sysset_order);
+    power_rows(view); /* Restart and Shut Down, last */
     return result;
 }
 
@@ -8674,12 +8672,9 @@ static int qm_open(const void *unused) {
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
-    /* the list's own rows, which its covers hide: Select Playlists… is a toolbar-less page's select
-     * mode; a toolbar's page edits from its toolbar */
-    if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) {
-        acts[n++] = QA_NEW_PLAYLIST;
-        if (!geom_val(V_TOOLBAR)) acts[n++] = QA_EDIT_PLAYLISTS;
-    }
+    /* the list's own New Playlist, which its covers hide; Select Playlists… is hidden (the menu
+     * review's, 2026-11-15) */
+    if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
     static const char *const rows[] = { "Play Next",
                                         "Add to Queue",
                                         "Shuffle",

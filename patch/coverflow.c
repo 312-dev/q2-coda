@@ -3508,13 +3508,13 @@ static struct {
     int np;
     unsigned np_stop, np_timer;
 } home __attribute__((section(".scratch")));
-extern int ipod_home(void), ipod_home_rockbox(void), home_shortcut_open(void *, void *),
-    library_search(void);
+extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
+extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
-extern void home_overflow(void *list, int bottom), home_in_place(void *list), home_pad(void *view),
+extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split);
-extern int shuffle_songs(void *ctx, void *event), library_search_open(void *ctx, void *event);
+extern int library_search_open(void *ctx, void *event);
 extern int library_count(const char *sql), msg_counting(void);
 extern const char *ipod_home_shortcut(void);
 /* Split's menu width; the art fills the rest. */
@@ -4495,26 +4495,18 @@ void coverflow_home_layout(void) {
         home_show(playing, np);
     }
     home.np = np;
-    void *rockbox = widget_lookup(home.win, "btn_rockbox", 1);
-    if (rockbox) {
-        int shown = ipod_home_rockbox();
-        /* after Folder, else last */
-        int last = widget_count_children(P(rockbox, W_PARENT)) - 1;
-        widget_restack(rockbox, shown ? 3 + (!playing || np) : last);
-        home_show(rockbox, shown); /* hidden, it would still take Streaming's taps */
-        widget_set_text_utf8(widget_lookup(home.win, "label_rockbox", 1), ipod_home_shortcut());
-        /* ponytail: the Shortcut card stays when the row hides (Shortcut: Rockbox, no Rockbox on
-         * the card; its tap says so), as the slide_menu lays out hidden cards too; removing it
-         * would mean re-adding it once the card has Rockbox */
-        if (home.carousel[0])
-            widget_set_text_utf8(widget_lookup(home.carousel[0], "label_rockbox", 1),
-                                 ipod_home_shortcut());
-    }
+    /* ponytail: the Shortcut is the carousel's card alone (Home's list has none); the card stays
+     * when its target is gone (Shortcut: Rockbox, no Rockbox on the card; its tap says so), as the
+     * slide_menu lays out hidden cards too; removing it would mean re-adding it once the card has
+     * Rockbox */
+    ipod_shortcut_seen();
+    if (home.carousel[0])
+        widget_set_text_utf8(widget_lookup(home.carousel[0], "label_rockbox", 1),
+                             ipod_home_shortcut());
     int split = split_geom(SPLIT_ROW), outer = full ? 375 : split,
         inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
     home_overflow(home.list, client_h());
-    home_in_place(home.list);
     if (home.sets)
         home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
                    T->home_label_end[full || sub_full()], 0);
@@ -4654,10 +4646,9 @@ const char *coverflow_home_title(void) {
 int coverflow_home(void *win, void *ctx) {
     int result = stock_home_trampoline(win, ctx);
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
-    widget_on(widget_lookup(win, "img_rockbox", 1), EVT_CLICK, home_shortcut_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
-    widget_on(widget_lookup(win, "img_shuffle_songs", 1), EVT_CLICK, shuffle_songs, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);
     home.art = art;

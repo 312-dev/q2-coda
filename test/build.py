@@ -303,7 +303,7 @@ def validate_assets(directory):
     import functools, json, re, struct, subprocess
     from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, LOGO_LIGHT, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
-                      QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
+                      QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
                       patch_asset, patch_code, patch_style, style_props, SLIDE, SET0,
@@ -870,25 +870,24 @@ def validate_assets(directory):
         if short == HOME_PAGE:  # seven rows with the stock names, beside the art; bytes equal patch_asset above
             art, (lv, lg, _, [sv]), (sl, sg, sp, [ss]), *carousel = root[3]
             assert lv == 'list_view' and sv[0] == 'scroll_view' and art[2]['name'] == 'img_homeart'
-            # The Settings list: stock's Playback and System setting rows (stock binds them; their
+            # The Settings list: eight rows, stock's Playback and System setting rows among them (stock binds them; their
             # labels are literal), hidden in the list's place until Home's Settings row slides it in.
             assert sl == 'list_view' and sp['name'] == 'list_view_homeset' and sp['visible'] == 'false'
-            assert sg == [0, HOME_TOP, HOME_LIST_W, 2*HOME_ROW] and [r[2]['name'] for r in ss[3]] == ['btn_playset', 'btn_sysset']
-            assert [r[3][1][2]['name'] for r in ss[3]] == ['img_playset', 'img_sysset'] and [r[3][0][2]['text'] for r in ss[3]] == ['Playback', 'System']
+            assert sg == [0, HOME_TOP, HOME_LIST_W, 7*HOME_ROW] and [r[2]['name'] for r in ss[3]] == ['btn_'+n for n in HOME_SETS]
+            assert [r[3][1][2]['name'] for r in ss[3]][2:4] == ['img_sysset', 'img_playset'] and [r[3][0][2]['text'] for r in ss[3]][2:4] == ['General', 'Playback']
             # The art fills the right panel below the status bar; the payload fits and crops it.
             assert art[0] == 'image' and art[1] == [0, 0, 375, BOTTOM] and art[2]['draw_type'] == 'fill' and HOME_LIST_W == 375
             assert all(v == '#00000000' for k,v in root[3][1][2].items() if k.startswith('style:'))
-            assert [r[2]['name'] for r in sv[3]] == ['btn_'+n for n in HOME_ROWS] and HOME_ROWS[2] == 'coverflow'
+            assert [r[2]['name'] for r in sv[3]] == ['btn_'+n for n in HOME_ROWS] and HOME_ROWS[4] == 'coverflow'
             for name, (_, _, _, (label, image)) in zip(HOME_ROWS, sv[3]):
                 ours = HOME_OURS.get(name, name)  # stock V1.36 binds img_coverflow and translates label_coverflow: ours are named apart
-                assert label[2]['name'] == ('label_library' if name == 'localmusic' else 'label_'+ours)
+                assert label[2]['name'] == {'localmusic': 'label_library', 'folder': 'label_folders'}.get(name, 'label_'+ours)
                 assert image[2] == {'name': 'img_'+ours, 'clickable': 'true'}
                 # Labels end before the chevron's glyph; longer ones scroll (only_focus) or end in an ellipsis.
                 assert label[1][0] + label[1][2] == image[1][2] - HOME_LABEL_END and label[1][2] >= 100
                 assert label[2]['only_focus'] == 'true' and label[2]['ellipses'] == 'true'
-            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', 'Cover Flow', None, 'Rockbox', 'Shuffle Songs',
-                                                                None, 'Search', 'Settings']
-            # Nine rows, seven in the box at rest (HOME_REST): the payload scrolls the rest (home.c home_overflow).
+            assert [r[3][0][2].get('text') for r in sv[3]] == [None, 'Library', None, 'Folders', 'Cover Flow', 'Search', 'Settings']
+            # Seven rows, all in the box at rest (HOME_REST): the payload would scroll any more (home.c home_overflow).
             assert lg == [0, HOME_TOP, HOME_LIST_W, 7*HOME_ROW] and HOME_TOP + 7*HOME_ROW <= BOTTOM - HOME_TOP
             # Home: Carousel's: stock's carousel and arrows after the lists, hidden and taking no taps
             # until chosen (coverflow_home_layout); its cards stock's in their places, Library's label

@@ -2222,11 +2222,13 @@ def boot(fw, st):
 def test_the_library_s_rows_in_their_order(fw, ui, st):
     boot(fw, st)
     win, view = library(fw, ui)
-    # Search first, as OLED's set has no Library icons (lib_art 0: library_search); My Fav and Frequent hidden,
-    # kept in the page for stock's index: Ratings and Most Played list theirs
-    assert page_rows(ui, view) == [(c, c not in ('My Fav', 'Frequent')) for c in ['Search',
-        'Shuffle', 'Artist', 'Album', 'All Songs', 'Genre', 'Era', 'Playlist', 'Ratings', 'My Fav', 'Recently Added', 'Recent',
-        'Most Played', 'Frequent', 'Hi-Res', 'Long Songs', 'Games', 'Update Local Music']]
+    # the menu review's order (2026-11-15), Search there as OLED's set has no Library icons (lib_art 0: library_search);
+    # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs; Shuffle,
+    # Hi-Res and Long Songs hidden too, in their places
+    hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs')
+    assert page_rows(ui, view) == [(c, c not in hidden) for c in ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album',
+        'Search', 'Genre', 'Years', 'Ratings', 'My Fav', 'Recently Added', 'Recent', 'Most Played', 'Frequent', 'Hi-Res',
+        'Long Songs', 'Games', 'Update Local Music']]
 
 
 def test_the_library_adds_the_card_s_media_folders_and_upload(fw, ui):
@@ -2245,7 +2247,7 @@ def test_the_library_s_added_rows_have_no_name_for_stock_s_click(fw, ui):
               if w == ui.kids[item][0] and e == EVT_CLICK}
     assert clicks['Shuffle'] == ui.fn('shuffle_menu') and clicks['Most Played'] == ui.fn('most_played')
     assert clicks['Ratings'] == ui.fn('ratings_menu') and clicks['Long Songs'] == ui.fn('long_songs')
-    assert clicks['Era'] == ui.fn('era_menu')
+    assert clicks['Years'] == ui.fn('era_menu')
 
 
 def test_a_library_that_is_not_stock_s_is_left(fw, ui):
@@ -2257,7 +2259,7 @@ def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
     boot(fw, st)
     assert fw.fn('library_search', C.c_int)() == 1  # OLED's set has no Library icons (lib_art 0)
     win, view = library(fw, ui)
-    assert page_rows(ui, view)[:2] == [('Search', True), ('Shuffle', True)]
+    assert ('Search', True) in page_rows(ui, view) and ('Shuffle', False) in page_rows(ui, view)
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']
     icons = [w for w in images if ui.image[w] != 'list_into']
     assert icons and all(w in ui.hidden for w in icons)
@@ -2276,7 +2278,7 @@ def test_home_s_library_list_is_the_library_s_rows(fw, ui, st):
     win, view = stock_page(ui, 'scroll_view_localmusic', *[(c, None, str(i)) for i, c in enumerate(LIBRARY_STOCK)])
     fw.fn('library_rows', None, C.c_void_p)(win)
     rows = [c for c, _ in page_rows(ui, view)]
-    assert page_rows(ui, view) == page_rows(ui, page) and rows[:3] == ['Search', 'Shuffle', 'Artist']
+    assert page_rows(ui, view) == page_rows(ui, page) and rows[:3] == ['Shuffle', 'All Songs', 'Playlist']
     assert log[0] == win  # its play gif's timer stopped, as the page's background does
     assert [c[1][:2] for c in fw.calls('widget_off_by_ctx')] == [(win, win)]
 
@@ -2406,14 +2408,14 @@ def test_era_lists_each_decade_with_its_albums(fw, ui):
     db = EraDb(fw, decades=[(b'1970', b'1'), (b'1990', b'3'), (b'2000', b'12')])
     call(fw, 'era_menu')
     page = ui.top()
-    assert ui.name[page] == 'era_page' and 'Era' in ui.shown(page)
+    assert ui.name[page] == 'era_page' and 'Years' in ui.shown(page)
     assert ui.rows(page) == [('70s', '1 album'), ('90s', '3 albums'), ('2000s', '12 albums')]
     assert db.asked[-1].startswith('select year/10*10,count(*)')
     call(fw, 'era_menu')
     assert ui.windows == [page]
 
 
-@pytest.mark.parametrize('opens, decades, toast', [(False, [], 'Era unavailable'), (True, [], 'No dated albums yet')])
+@pytest.mark.parametrize('opens, decades, toast', [(False, [], 'Years unavailable'), (True, [], 'No dated albums yet')])
 def test_era_with_nothing_to_list_says_why(fw, ui, opens, decades, toast):
     EraDb(fw, decades=decades, opens=opens)
     call(fw, 'era_menu')
@@ -2456,20 +2458,20 @@ def test_a_decade_closes_and_opens_again(fw, ui):
     assert len(ui.rows(ui.top())) == 5
 
 
-# a decade whose albums query fails says 'Era unavailable', as the decade list does, rather than opening an empty page
+# a decade whose albums query fails says 'Years unavailable', as the decade list does, rather than opening an empty page
 def test_a_failing_decade_query_says_era_unavailable(fw, ui):
     db = EraDb(fw, decades=[(b'1990', b'3')], albums=ERA_ALBUMS)
     call(fw, 'era_menu')
     era, run = ui.top(), db.run
     fw.mock('sqlite3_exec', lambda d, sql, *a: 1 if b'having release_year' in C.string_at(sql) else run(d, sql, *a))
     ui.click(era, 0)
-    assert ui.toasts == ['Era unavailable'] and ui.windows == [era]
+    assert ui.toasts == ['Years unavailable'] and ui.windows == [era]
     fw.mock('sqlite3_exec', run)  # the next try opens it
     ui.click(era, 0)
     assert len(ui.rows(ui.top())) == 5
 
 
-# a failing query behind Play All, Shuffle or an album says 'Era unavailable' too, not that the card or album is gone
+# a failing query behind Play All, Shuffle or an album says 'Years unavailable' too, not that the card or album is gone
 @pytest.mark.parametrize('row', [0, 1, 2])
 def test_a_failing_song_query_says_era_unavailable(fw, ui, row):
     db, page = era_decade(fw, ui)
@@ -2477,16 +2479,16 @@ def test_a_failing_song_query_says_era_unavailable(fw, ui, row):
     fw.mock('sqlite3_exec', lambda d, sql, *a: 1 if b'select distinct s.id' in C.string_at(sql) else run(d, sql, *a))
     fw.mock('getMusicByAlbum', lambda *_: -1)  # stock's count when its query fails (toolsQueryDbTable: no database, or sqlite3_exec fails)
     ui.click(page, row)
-    assert ui.toasts == ['Era unavailable'] and not ui.played
+    assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
-# Shuffle's key query worked but loading the library failed: still 'Era unavailable', not 'Storage unavailable'
+# Shuffle's key query worked but loading the library failed: still 'Years unavailable', not 'Storage unavailable'
 def test_shuffle_with_the_library_failing_says_era_unavailable(fw, ui, mcl):
     fw.mock('getAllMusic', lambda *_: -1)
     db, page = era_decade(fw, ui)
     db.albums = [(b'9',)]
     ui.click(page, 1)
-    assert ui.toasts == ['Era unavailable'] and not ui.played
+    assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
 # an album row whose query returned rows and then failed does not open
@@ -2496,7 +2498,7 @@ def test_an_album_row_with_a_partial_failing_query_says_era_unavailable(fw, ui, 
     load = albums.load
     fw.mock('getMusicByAlbum', lambda name, *_: [load(name), -1][1])
     ui.click(page, 2)
-    assert ui.toasts == ['Era unavailable'] and not ui.played
+    assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
 # Play All skips an album whose query failed and plays the rest; it says so only when every album failed
@@ -2515,7 +2517,7 @@ def test_play_all_with_every_album_failing_says_era_unavailable(fw, ui, song):
     db, page = era_decade(fw, ui)
     fw.mock('getMusicByAlbum', lambda *_: -1)
     ui.click(page, 0)
-    assert ui.toasts == ['Era unavailable'] and not ui.played
+    assert ui.toasts == ['Years unavailable'] and not ui.played
 
 
 class Albums:

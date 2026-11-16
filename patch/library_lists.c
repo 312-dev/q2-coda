@@ -534,7 +534,7 @@ static int era_pick(void *ctx, void *event) {
     if (i < 2) {
         void *all = i ? era_shuffle_songs() : era_songs();
         if (!all) {
-            toast("Era unavailable"); /* as a decade's albums: not a card that's away */
+            toast("Years unavailable"); /* as a decade's albums: not a card that's away */
             return 0;
         }
         if (!deque_size(all) || catalogue_missing(P(deque_at(all, 0), REC_PATH)))
@@ -549,7 +549,7 @@ static int era_pick(void *ctx, void *event) {
     int n = 0;
     void *songs, *r = (unsigned)(i - 2) < era.m ? era_record((unsigned)(i - 2), &songs, &n) : 0;
     if (n < 0) /* partial rows then an error: not an album to open */
-        toast("Era unavailable");
+        toast("Years unavailable");
     else if (!r || !coverflow_goto_album(r))
         toast("Album not found");
     if ((unsigned)(i - 2) < era.m) deque_destroy(songs);
@@ -568,7 +568,7 @@ static int era_open_decade(void *ctx, void *event) {
     era.cap = era.v ? (unsigned)era.count[k] : 0;
     if (!era.v || !era_sql(sql, era_album_row, 0)) { /* as era_menu: not a decade of no albums */
         era_free();
-        toast("Era unavailable");
+        toast("Years unavailable");
         return 0;
     }
     if (!(era.albums = page_open("era_albums_page", era_closed, page_keyup))) {
@@ -594,7 +594,7 @@ int era_menu(void *ctx, void *event) {
                  " year from songtable where " MUSIC_WHERE " and ifnull(album,'')<>''" ALBUM_GROUP
                  ") where year>0 group by 1 order by 1",
                  era_decade_row, 0)) {
-        toast("Era unavailable");
+        toast("Years unavailable");
         return 0;
     }
     if (!era.n) {
@@ -602,7 +602,7 @@ int era_menu(void *ctx, void *event) {
         return 0;
     }
     if (!(era.page = page_open("era_page", era_closed, page_keyup))) return 0;
-    void *view = page_list(era.page, era.page, 0, "Era", era.n, 64);
+    void *view = page_list(era.page, era.page, 0, "Years", era.n, 64);
     page_fit(view);
     char name[16], detail[32];
     for (int i = 0; i < era.n; ++i) {

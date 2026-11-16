@@ -101,21 +101,19 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The nine rows are Now Playing, Library, Cover Flow, Folder, Rockbox, Shuffle Songs, Streaming,
-Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
+The seven rows, in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
+Folders, Cover Flow, Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;
-`coverflow_home_layout` restacks the hidden row last, as the Shortcut's). Coming or going it keeps
+`coverflow_home_layout` restacks the hidden row last). Coming or going it keeps
 the selection on the same row and the same rows in view (`home_np_keep`); on Now Playing as it
-goes, the selection moves to Library. Carousel keeps its Now Playing card. **Shuffle Songs** shuffles the whole library and starts playing, as the Library's
-Shuffle → Shuffle Songs does (`shuffle_songs`), and opens Now Playing. It acts rather than opening a
-list, so it has no chevron (`paint_chevrons`; its label takes the chevron's room,
-`home_in_place`); with no song it says "Update
-Local Music first". **Search** opens the Library's search (`library_search_open`: the
-letter strip under `list.entry.ipod`, OLED's, stock's search without it). Rockbox is visible only when its binary is on the card, unless Display → Appearance's **Shortcut**
-(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`) turns that row into Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id), shown as a row only while `/mnt/mmc/.groovebox/q2-groovebox` is a regular file (`groovebox_available`, cached as `st.home_groovebox`; `bar_sync` relays out Home when that changes, as for Rockbox), and offered by the Centre cycle only then, while Rockbox is always offered; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one; Split's pane shows Folder's icon for them); None (11, `SHORTCUT_NONE`) takes the row off Home's list, as a missing Rockbox does (`ipod_home_rockbox` returns 0), in Split and Full; the list's count changes, so its selection starts over, and it wraps over the rows left; with no key, or a value this build does not know (12 and up, and 11 on a build before 1.8.2, which reads it as no choice and shows the row), it is Rockbox when the card has it, else Favorites. Centre cycles Rockbox, Favorites, Shuffle, Rated Albums, Playlists, Artists, Albums, Games, Podcasts, Audiobooks, Groovebox (when installed), None. Carousel's cards are stock's and have none for Shuffle Songs or Search. Settings opens Playback and
-System; Return restores the menu's previous selection, and a short Return on the main menu selects
+goes, the selection moves to Library. Carousel keeps its Now Playing card. **Folders** is stock's
+Folder card under its plural name. **Search** opens the Library's search (`library_search_open`: the
+letter strip under `list.entry.ipod`, OLED's, stock's search without it). Shuffle Songs and the
+Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
+(`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) is only
+Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. The wheel bumps at either end of both lists and wraps after a pause, as ring lists do ([internals.md](internals.md#wheel-movement)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -126,7 +124,7 @@ The native stock handlers, translation keys, full-row tap targets and submenu an
 Home's rows are the geometry set's `home_row` (OLED's 32), directly below the status row in Full,
 from y 40 in Split, into the status row's empty left, matching Library. The main menu rests on `HOME_REST` (7) rows, as many as every set's window fits, and
 scrolls the others as a list does: scrolled to its end, its last row sits where the seventh's does
-(`patch/home.c` `home_overflow`, `home_rest`; a hidden Shortcut row, restacked last, is not scrolled
+(`patch/home.c` `home_overflow`, `home_rest`; a hidden Now Playing row, restacked last, is not scrolled
 to). The menu runs on to the screen's bottom, and the rows below the seventh show through a fade
 into the black: in Full a straight one from 16 px above the seventh's foot (y 266) to y 316, and
 once the menu has scrolled another over its first row's top 14 px; in Split both follow the glass's
@@ -160,7 +158,7 @@ drops what a paint invalidates when the frame ends, so a 0 ms timer then repaint
 otherwise the new art and its fit would reach only the regions repainted later. `g_playcover_finishflag` remains
 stock-owned. Now Playing and Spotify's page keep their black background behind the art.
 
-**Carousel** replaces the lists and the art with stock's home carousel. It has eight cards: Now Playing, Library, Cover Flow, Folder, the Rockbox shortcut, Streaming, Playback Settings and System Settings. The Rockbox shortcut card is the Shortcut row: it opens what the Shortcut setting chooses, and stays when that row is hidden (no Rockbox, or no Groovebox, on the card), where tapping it shows a message. With Shortcut: None it stays too, and shows and opens what no choice would (Rockbox when the card has it, else Favorites): None applies to Home's list. The cards keep their own colours, as on the stock Home, whatever the accent or Light Mode. The wheel moves through the carousel ([internals.md](internals.md#home-carousel)), Centre opens the card and touch drags and taps as in stock; Return keeps stock's behaviour there. Leaving Carousel for Split or Full shows the main list.
+**Carousel** replaces the lists and the art with stock's home carousel. It has eight cards: Now Playing, Library, Cover Flow, Folder, the Rockbox shortcut, Streaming, Playback Settings and System Settings. The Rockbox shortcut card opens what the saved Shortcut chooses ([Home](#home)), and stays when its target is gone (no Rockbox, or no Groovebox, on the card), where tapping it shows a message. With Shortcut: None, or no key, it shows and opens Rockbox when the card has it, else Favorites. The cards keep their own colours, as on the stock Home, whatever the accent or Light Mode. The wheel moves through the carousel ([internals.md](internals.md#home-carousel)), Centre opens the card and touch drags and taps as in stock; Return keeps stock's behaviour there. Leaving Carousel for Split or Full shows the main list.
 
 The player writes every track's cover to the same `/tmp` file, so before Split loads it `coverflow_home_art` drops AWTK's cached bitmap of that name, as the full-screen art does; otherwise the image manager hands back the last track's cover.
 
@@ -202,7 +200,7 @@ a slideshow of the library's album covers, each drifting and zooming slowly (the
 and cross-fading into the next; on Now Playing, which is there only while something is loaded,
 the playing album's cover. Split does the same (`art_source`), the pane following the highlighted
 row (`coverflow_home_row`): Now Playing's row shows the playing cover, playing or paused, and every
-other row (Library, Cover Flow, Shuffle Songs, Search, Settings and the rest) the slideshow, as the
+other row (Library, Cover Flow, Search, Settings and the rest) the slideshow, as the
 iPod shows the library's art on Music; moving the wheel between Now Playing and another row
 cross-fades from the frame as it stands, so it never cuts, even mid-fade (`frame_hold`). There is
 no Row Preview setting: the pane always follows the row. Each library cover holds `SLIDE_HOLD_MS` (6 s) between `SLIDE_FADE_MS` (1.5 s)
@@ -371,8 +369,12 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 (OLED) every picker opens on its mark when a tap opened it too, as a `CHOICE` picker does. Another list whose `default_item_height` equals the set's
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
 
-System Settings puts Wireless and Network first, then Car Remote, then Display, Controls and Power, then Date & Time and device
-maintenance (App Store, Storage, Update, Reset), with About last; neither list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
+Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
+review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
+page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
+(`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
+page under its new name. No list has headings. Play Mode, EQ, Gapless and Crossfade come first; specialist output controls come next, and Library & Folders last, one reverse detent from the top on Playback's ring. Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
@@ -918,7 +920,7 @@ Display page again (`display_open`, `display_sub` naming the sub-page while its 
 drops the stock rows, takes the sub-page's title and builds only its own rows:
 
 - Appearance: the theme's options in its theme.xml's order (`setting_row`), under OLED "Light Mode: Off"
-  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Full", "Shortcut: Rockbox" and "Battery: Icon" (Icon or
+  ([Light Mode](#light-mode)), "Accent: Blue", "Home: Full" and "Battery: Icon" (Icon or
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
@@ -950,8 +952,8 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Centre or a tap
 changes it in place.
-The build also appends **Boot to: Rockbox / Q2 Pod** to Power when Rockbox is present; see [Boot](boot.md#rockbox).
-Power ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
+The build also appends **Boot to: Rockbox / Q2 Pod** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
+General ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
 the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, as a confirm page
 ("Restart?" or "Shut down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
 Restart reboots (`ringnav_reboot`: the queue saved, then stock's `device_reboot`), with no message first. Shut Down asks stock's own `msg_poweroff` and opens stock's `poweroff_page`, as the power key's Shut Down? and Auto
@@ -1093,7 +1095,7 @@ painted it white, which drew the box at rest.
   length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
   an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the
   wheel's way to it.
-- **Appearance's rows.** Light Mode, Accent, Home, Shortcut, Battery (Icon or Percent), Song Artist, Song Length
+- **Appearance's rows.** Light Mode, Accent, Home, Battery (Icon or Percent), Song Artist, Song Length
   and Track Time.
 
 <a id="oled-type"></a>Inter 4.1 Regular and Medium (`assets/fonts`, SIL OFL 1.1) ship as `fonts/inter.ttf` and

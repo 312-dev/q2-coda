@@ -246,9 +246,8 @@ int np_time_toggle(void) {
 }
 /* Shortcut with no key (or a value this build does not know, such as an old build's reading of a
  * newer one) is Rockbox while the card has it, else Favorites: asked each time, as the card may
- * mount after the first read. SHORTCUT_NONE is read as it is: the picker and Home's row ask for it
- * (ipod_home_rockbox); the carousel's card, which cannot leave, takes the default
- * (shortcut_target). */
+ * mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the carousel's card,
+ * which cannot leave, takes the default (shortcut_target). */
 int shortcut(void) {
     accent();
     return st.shortcut < SETTING_N_SHORTCUT ? st.shortcut : rockbox_available() ? 0 : 3;
@@ -272,15 +271,11 @@ int ipod_battery(void) {
     accent();
     return st.battery;
 }
-/* 1 when Home shows its Shortcut row (coverflow_home_layout): any target but None, Rockbox and
- * Groovebox, and those while the card has them. */
-int ipod_home_rockbox(void) {
+/* The card's Rockbox and Groovebox as the carousel's Shortcut card was last named for
+ * (coverflow_home_layout): the bar's pass lays it out again when either comes or goes. */
+void ipod_shortcut_seen(void) {
     st.home_rockbox = rockbox_available();
     st.home_groovebox = groovebox_available();
-    int s = shortcut();
-    return s == SHORTCUT_NONE        ? 0
-           : s == SHORTCUT_GROOVEBOX ? st.home_groovebox
-                                     : s || st.home_rockbox;
 }
 const char *ipod_home_shortcut(void) {
     static const char *const names[] = { "Rockbox",

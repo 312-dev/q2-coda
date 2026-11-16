@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Menus: Home lists **Now Playing**, **Library**, **Streaming**, **Folders**, **Cover Flow**, **Search** and **Settings**; Shuffle Songs and the Shortcut row are gone from it (Carousel keeps its Shortcut card). **Settings** lists **Wi-Fi**, **Bluetooth**, **General**, **Playback**, **Car Remote**, **Display**, **Controls** and **Battery** (Power's new name); **General** holds About, System Update, Storage, Date & Time, App Store, Network and Reset Settings, then **Restart** and **Shut Down**. The Library's new order is Songs, Playlists, Artists, Albums, Search, Genres, **Years** (Era's new name), Ratings and the rest, with Shuffle, Hi-Res, Long Songs and Upload Scrobbles hidden; a Library order you set yourself is kept. Screen Off Time and Standby spell their times out ("30 seconds", "1 minute"), and a playlist cover's hold menu no longer offers Select Playlists….
   - Everywhere: US spelling on screen and in the manual: **Favorites**, **Center**, **Canceled**, color and gray.
   - Buttons Lock (OLED): the card a locked press shows reads **Press Center to unlock**.
   - Settings: times with a one-letter unit sit against their number: **Crossfade** reads "5s", **Standby Limit** "8h", and an album's length on its page "1h12m"; "min" keeps its space ("Resume Songs: 30 min").

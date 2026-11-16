@@ -180,7 +180,7 @@ All lists share one grid.
 ### List row
 
 - 32 px pitch, title at the text inset, a chevron on the right column when the row opens
-  another page, nothing at the right when it acts in place (Home's Shuffle Songs, a song).
+  another page, nothing at the right when it acts in place (a song).
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centred 5 px left of the right column:
   Chevron grey, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
@@ -699,8 +699,8 @@ pattern.
 
 | Q2 Pod screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Nine rows from y 58, seven at rest: the rows below fade into black from y 266 to 316, and once scrolled the top row's first 14 px fade too; scrolled to the end the last row's foot is at y 282 |
-| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Nine rows, seven at rest (the last's foot at y 264, scrolled to the end too); the rows past them fade into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centred. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled the top row's first 14 px too; scrolled to the end the last row's foot is at y 282 |
+| Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the status row's clock, play state and battery over it at the right, each glyph white or black by contrast. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
 | Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |

@@ -2944,8 +2944,7 @@ def test_home_binds_its_cards_and_lists(fw):
     assert (home.win, home.art, home.list, home.sets, home.lib, home.stream) == (h.win, h.art, h.main, h.sets, h.lib, h.stream)
     assert list(home.carousel) == h.carousel
     assert not any(ui[w].sensitive for w in (h.art, h.sets))  # taps find the shown list's rows
-    want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_rockbox': ('home_shortcut_open', 0),
-            'img_settings': ('coverflow__home_settings', 0), 'img_shuffle_songs': ('shuffle_songs', 0),
+    want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_settings': ('coverflow__home_settings', 0),
             'img_home_search': ('library_search_open', 0)}
     for row, (fn, ctx) in want.items():
         assert ui.handlers(h.rows[row]) == [(address(fw, fn), ctx)], row
@@ -3037,21 +3036,18 @@ def test_home_owns_its_lists_rows(fw):
 
 
 @pytest.mark.parametrize('home', ('0', '1', '2'))
-@pytest.mark.parametrize('shortcut, shown, label', (('0', 0, 'Rockbox'), ('6', 1, 'Games'), ('11', 0, 'Favorites'),
-                                                    ('12', 1, 'Favorites')))
-def test_the_shortcut_row_sits_after_folder_unless_rockbox_is_missing_or_none(fw, home, shortcut, shown, label):
-    # None hides the row in every layout; the carousel's card stays, naming the default as with no choice
+@pytest.mark.parametrize('shortcut, label', (('0', 'Rockbox'), ('6', 'Games'), ('11', 'Favorites'), ('12', 'Favorites')))
+def test_the_carousel_s_shortcut_card_names_its_target_and_the_list_has_no_shortcut(fw, home, shortcut, label):
+    # Home's list has no Shortcut row (the menu review's, 2026-11-15): a row the asset had is left as it was; the
+    # carousel's card names the saved target, None and an unknown value the default
     themed(fw, SHORTCUT=shortcut, HOME=home)
     ui = Ui(fw)
     h = Homes(ui, carousel=True, rockbox=True)
     rockbox = h.rows['img_rockbox']
-    ui.restack(rockbox, 0)
+    before = list(ui[h.view].kids)
     h.open(fw)
-    rows = ui[h.view].kids
-    assert rows.index(rockbox) == (rows.index(h.rows['img_folder']) + 1 if shown else len(rows) - 1)  # else last
-    assert [r for r in rows if r != rockbox] == [h.rows[n] for n in h.ROWS if n != 'img_rockbox']  # the others keep their order
-    assert ui[rockbox].visible == shown and ui[rockbox].sensitive == shown
-    assert ui[ui.named('label_rockbox')].text == label and ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
+    assert [r for r in ui[h.view].kids if r != rockbox] == [r for r in before if r != rockbox]
+    assert ui[ui.lookup(h.carousel[0], 'label_rockbox')].text == label
 
 
 def np_home(fw, status=1, home='0'):
@@ -3900,16 +3896,6 @@ def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
     assert foot.value == 8 * 32
     fw.fn('home_pad', None, C.c_void_p)(view)
     assert content(view) == 8 * 32  # the box is the rest's: the content is the shown rows'
-
-
-def test_shuffle_songs_label_takes_the_chevron_s_room_where_every_row_has_one(fw, library):
-    end = 204 - 28  # OLED's 204 px rows less the right column (theme.xml right_x)
-    ui, home, view = overflow_rig(fw)
-    split_inset_set(fw, library, 2)  # OLED's set: its right column
-    row = ui[view].kids[5]
-    label = ui.make(row, 'hscroll_label', 24, 0, 126, 32, name='label_shuffle_songs')
-    fw.fn('home_in_place', None, C.c_void_p)(home.list)
-    assert rect(label) == (24, 0, end - 24, 32)
 
 
 def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()):

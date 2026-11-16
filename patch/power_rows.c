@@ -1,4 +1,4 @@
-/* Power's last two rows, Restart and Shut Down (docs/ipod.md#settings), after a 12 px gap: each
+/* General's last two rows, Restart and Shut Down (docs/ipod.md#settings), after a 12 px gap: each
  * asks in stock's confirm (confirminfo_dialog, whatever form the theme gives it; OLED's says the
  * verb, feedback.c asks[]), and Cancel or Return leaves the page as it was. Restart takes the
  * theme change's way (navigation.c restart_confirm): ringnav_reboot, which saves the queue and

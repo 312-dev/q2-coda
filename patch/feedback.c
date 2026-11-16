@@ -307,7 +307,7 @@ int feedback_offline(const char *title) {
     offline_page = page;
     page_title(page, title, 1);
     bar_title_sync(page);
-    return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in System > Wireless");
+    return feedback_empty(page, 0, "Not connected", "Turn on Wi-Fi in Settings > Wi-Fi");
 }
 
 /* Songs' page (allmusic_page) over an empty list, under a shuffle_row theme: the Shuffle row
