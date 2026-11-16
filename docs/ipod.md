@@ -925,7 +925,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   Percent; see [Status bar and clock](#status-bar-and-clock)), then its own options, "Song Artist: Inline",
   "Song Length: Albums" and "Track Time: Remaining" ([Theme](#theme)). Under OLED (`set_text`) a row shows its
   value on the right column, apart from its label.
-- Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, off;
+- Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, on unless chosen, and a reset's `config.ini` says 1;
   `keep_lit_poll`): with Now Playing lit in front on its lyrics page (or the visualizer's, when built in), or its
   full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
   `reset_poweroptions_timer(1, 1, 1)` once a second, so the screen stays on there (with Enlarged Album

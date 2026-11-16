@@ -430,6 +430,15 @@ def test_a_switch_from_smart_awake_on_redraws_only_its_toggle(fw):
     assert writes(fw) == [('KEEPLIT', int(was == 'Off'))] and repaints(fw) == before
 
 
+@pytest.mark.parametrize('stored, shown', [(None, 'On'), (b'0', 'Off'), (b'1', 'On')])
+def test_smart_awake_is_on_unless_chosen_off(fw, stored, shown):
+    """IPOD KEEPLIT missing reads on, as a reset's config.ini (tools/build.py DEFAULT_IPOD) writes it."""
+    ui = Ui(fw)
+    page = display(fw, ui, **({} if stored is None else {'KEEPLIT': stored}))
+    assert row_of(button_of(page.view(), 'Smart Awake').labels()[0])[1] == shown
+    assert fw.fn('ringnav_smart_awake', C.c_int)() == (shown == 'On')
+
+
 def test_accent_repaints_and_drops_the_cached_images(fw):
     ui = Ui(fw)
     page = appearance(fw, ui)

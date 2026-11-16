@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings: **Smart Awake** (Display) is on by default, so lyrics, the full-screen art and its About page stay lit while a song plays. A Q2 that never changed it starts with it on; turn it off in Display.
   - Settings: more rows explain themselves when you select them, one line each: **In-Vehicle Mode** ("Plays at power-on, shuts down when unplugged"), **Smart Awake**, **Standby Limit**, **Charge Limit**, **Wake**, **Hold Return**, **Folder Skip**, **Enlarged Album Art**, **On-The-Go**, **Fast Navigation**, **Scan Song Durations** and **Position Bar**.
   - Settings (OLED): the Settings list reached from Home ends like every list: Battery peeks through the fade under Controls instead of hiding until you scroll, and the highlighted row's lean as you turn the wheel is no longer cut off at the top or bottom of a list.
   - Lists (OLED): a list scrolled to its last row keeps the space under it after you open that row and press Return; the last row no longer sits on the screen's bottom edge.

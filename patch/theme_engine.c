@@ -179,7 +179,8 @@ __attribute__((noinline)) static void settings_read(void) {
     st.shortcut = config_value("IPOD", "SHORTCUT", SETTING_N_SHORTCUT,
                                SETTING_N_SHORTCUT); /* no key, see shortcut() */
     st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
-    st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
+    /* Smart Awake on unless chosen (tools/build.py DEFAULT_IPOD writes it so after a reset) */
+    st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 1);
     st.clicker = config_value("IPOD", "CLICKER", 3, 0);      /* Both unless chosen (clicker.c) */
     st.time_title = config_value("IPOD", "TIMETITLE", 2, 1); /* the clock unless chosen */
     /* the theme's own keys, after the payload's, in table order */
