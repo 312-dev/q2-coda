@@ -57,7 +57,7 @@ def check(fw, blob):
     Files(fw, {} if blob is None else {TAR: blob})
     md5(fw)
     r = fw.fn('sw_check_file', C.c_int, C.c_char_p, C.c_char_p)(TAR.encode(), INSTALLED)
-    return r, fw.var('sw_update__sw', Sw)
+    return r, fw.var('sw_update__swu', Sw)
 
 
 def test_an_update_stock_will_take(fw):
@@ -103,7 +103,7 @@ def test_a_short_info_cant_be_used(fw):
 
 
 def test_leaving_the_page_ends_the_check(fw):
-    fw.var('sw_update__sw', Sw).cancel = 1
+    fw.var('sw_update__swu', Sw).cancel = 1
     assert check(fw, update_tar())[0] == SW_CANCELLED
 
 
@@ -140,6 +140,8 @@ def opened(fw):
     for name in ('list_view_create', 'scroll_view_create', 'hscroll_label_create', 'list_item_create'):
         fw.mock(name, widget)
     fw.mock('window_create', lambda *_: made.append(C.create_string_buffer(0x400)) or C.addressof(made[-1]))
+    # each window the window manager has opened (WINDOW_STAGE_OPENED); other props their default
+    fw.mock('widget_get_prop_int', lambda w, name, default, *_: 3 if C.string_at(name) == b'stage' else C.c_int(default).value)
     return lambda: [C.string_at(c[1][1]).decode() for c in fw.calls('widget_set_name')
                     if c[1][0] in {C.addressof(m) for m in made}]
 
@@ -149,7 +151,7 @@ def test_a_failed_stock_check_is_its_page_with_no_thread(fw, code, page):
     pages = opened(fw)
     fw.mock('check_updatefw_exist', lambda *_: code)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     assert pages() == ['swupdate_page'] and sw.result == page
     assert not fw.calls('fw_pthread_create') and not sw.timer
 
@@ -161,7 +163,7 @@ def test_a_found_file_is_checked_on_a_thread_and_one_at_a_time(fw):
     fw.mock('timer_add', lambda *_: 5)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     assert pages() == ['swupdate_page'] and sw.result == SW_CHECKING and sw.state == SW_CHECKING and sw.timer == 5
     assert len(fw.calls('fw_pthread_create')) == 1 and len(fw.calls('check_updatefw_exist')) == 1
 
@@ -173,7 +175,7 @@ def test_the_checks_answer(fw, state, confirm):
     fw.mock('fw_pthread_create', lambda *_: 0)
     fw.mock('timer_add', lambda *_: 5)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     assert tick(None) == 8 and sw.frame == 1  # still checking: the spinner's next frame
     sw.state = state
@@ -195,7 +197,7 @@ def test_install_update_left_before_it_settled_takes_the_check_page_with_it(fw):
     fw.mock('fw_pthread_create', lambda *_: 0)
     fw.mock('timer_add', lambda *_: 5)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     sw.state = SW_OK
     assert tick(None) == 8
@@ -211,7 +213,7 @@ def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
     sliding = [1]
     fw.mock('window_manager_is_animating', lambda *_: sliding[0])
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     sw.state = SW_OK
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     assert tick(None) == 8 and pages() == ['swupdate_page'] and not fw.calls('fw_pthread_join')
@@ -224,7 +226,7 @@ def test_leaving_while_it_checks_cancels(fw):
     fw.mock('check_updatefw_exist', lambda *_: 1)
     fw.mock('fw_pthread_create', lambda *_: 0)
     fw.fn('ringnav_fwupdate_tf', C.c_int)()
-    sw = fw.var('sw_update__sw', Sw)
+    sw = fw.var('sw_update__swu', Sw)
     fw.fn('sw_update__sw_gone', C.c_int, C.c_void_p, C.c_void_p)(sw.page, None)
     assert sw.cancel == 1 and not sw.page
 
@@ -235,7 +237,7 @@ def test_stocks_dialog_answers_as_a_page(fw, quit, page):
     fw.mock('navigator_to', lambda *_: quit)
     assert fw.fn('sw_update__sw_install', C.c_int, C.c_void_p)(None) == 7
     assert C.string_at(fw.calls('navigator_to')[0][1][0]) == b'dialog/checkfw_dialog'
-    assert len(pages()) == (page is not None) and (page is None or fw.var('sw_update__sw', Sw).result == page)
+    assert len(pages()) == (page is not None) and (page is None or fw.var('sw_update__swu', Sw).result == page)
 
 
 def test_install_and_restart_runs_stocks_dialog_after_the_click(fw):
@@ -249,7 +251,7 @@ def test_the_restart_dialog_hides_stocks_label(fw):
     label, win = C.create_string_buffer(0x400), C.create_string_buffer(0x400)
     fw.mock('widget_lookup', lambda w, name, *_: C.addressof(label) if C.string_at(name) == b'scrlabel_checkfw' else 0)
     fw.fn('sw_update_restarting', None, C.c_void_p)(C.addressof(win))
-    assert fw.var('sw_update__sw', Sw).restart == C.addressof(win)
+    assert fw.var('sw_update__swu', Sw).restart == C.addressof(win)
     assert fw.calls('widget_set_visible')[0][1][:2] == (C.addressof(label), 0)
 
 
@@ -257,5 +259,5 @@ def test_the_restart_dialog_hides_stocks_label(fw):
 def test_the_restarts_bar_is_what_stocks_tar_unpacked(fw, have, part):
     Files(fw, {'/mnt/mmc/recovery-update/xImage': b'k' * min(have, 700),
                '/mnt/mmc/recovery-update/rootfs.squashfs': b'r' * max(0, have - 700)} if have else {})
-    fw.var('sw_update__sw', Sw).parts = 2200
+    fw.var('sw_update__swu', Sw).parts = 2200
     assert fw.fn('sw_update__sw_unpacked', C.c_int, C.c_int)(180) == part

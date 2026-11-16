@@ -39,7 +39,7 @@ enum {
     SW_BAD,
     SW_FULL,
     SW_CANCELLED,
-    SW_ASKING /* sw.state: OK taken, Install Update? opened */
+    SW_ASKING /* swu.state: OK taken, Install Update? opened */
 };
 /* stock's answers: check_updatefw_exist's, and checkfw_dialog's dialog_quit codes (fwupdate_tf's
  * own tests) */
@@ -73,7 +73,7 @@ static struct {
     long long parts; /* xImage's and rootfs.squashfs's bytes, what stock's tar unpacks */
     void *page, *confirm, *view, *restart;
     char tag[24]; /* the update's version line */
-} sw __attribute__((section(".scratch")));
+} swu __attribute__((section(".scratch")));
 
 /* ---- the check, on its own thread (sw_check), or from test/fw ---- */
 
@@ -107,7 +107,7 @@ static int sw_md5(void *f, unsigned n, unsigned char *buf, char hex[33]) {
     MD5_Init(ctx);
     for (; n; n -= got) {
         got = (unsigned)fread(buf, 1, n < SW_CHUNK ? n : SW_CHUNK, f);
-        if (!got || sw.cancel) return 0;
+        if (!got || swu.cancel) return 0;
         MD5_Update(ctx, buf, got);
     }
     MD5_Final(md, ctx);
@@ -116,17 +116,17 @@ static int sw_md5(void *f, unsigned n, unsigned char *buf, char hex[33]) {
 }
 
 /* path's tar as update_firmware will take it: SW_OK, SW_LATEST (the version is this build's),
- * SW_NONE (no file), SW_BAD (another device's, damaged, cut short) or SW_CANCELLED. sw.tag,
- * sw.size_kb and sw.parts as read. */
+ * SW_NONE (no file), SW_BAD (another device's, damaged, cut short) or SW_CANCELLED. swu.tag,
+ * swu.size_kb and swu.parts as read. */
 int sw_check_file(const char *path, const char *installed) {
     unsigned char head[512];
     char info[SW_INFO_MAX + 1], line[4][80], *p = info, hex[33];
     int r = SW_BAD, seen = 0, i = 0;
     void *f = fopen(path, "rb");
-    sw.tag[0] = 0, sw.parts = 0, sw.size_kb = 0;
+    swu.tag[0] = 0, swu.parts = 0, swu.size_kb = 0;
     if (!f) return SW_NONE;
     unsigned char *buf = calloc(1, SW_CHUNK);
-    if (!fseek(f, 0, 2)) sw.size_kb = (unsigned)(ftell(f) >> 10);
+    if (!fseek(f, 0, 2)) swu.size_kb = (unsigned)(ftell(f) >> 10);
     fseek(f, 0, 0);
     /* firmware_v20.info, the tar's first member */
     unsigned n = fread(head, 1, 512, f) == 512 ? sw_octal(head + 124, 12) : 0;
@@ -137,7 +137,7 @@ int sw_check_file(const char *path, const char *installed) {
     for (; i < 4 && sw_line(&p, line[i], sizeof *line); ++i) {}
     char *version = i < 4 ? (char *)0 : sw_trim(line[1]);
     if (!version || tk_strcmp(sw_trim(line[0]), "Shanling Q2") || !strrchr(version, 'V')) goto done;
-    tk_snprintf(sw.tag, sizeof sw.tag, "%s", version);
+    tk_snprintf(swu.tag, sizeof swu.tag, "%s", version);
     if (!tk_strcmp(version, installed)) {
         r = SW_LATEST;
         goto done;
@@ -150,21 +150,21 @@ int sw_check_file(const char *path, const char *installed) {
                                                                               : 0;
         if (k) {
             if (!sw_md5(f, n, buf, hex) || strncmp(hex, line[k], 32)) goto done;
-            seen |= 1 << k, sw.parts += n;
+            seen |= 1 << k, swu.parts += n;
             if (fseek(f, (long)(((n + 511) & ~511u) - n), 1)) goto done;
         } else if (fseek(f, (long)((n + 511) & ~511u), 1))
             goto done;
     }
     r = seen == 12 ? SW_OK : SW_BAD;
 done:
-    if (sw.cancel) r = SW_CANCELLED;
+    if (swu.cancel) r = SW_CANCELLED;
     free(buf);
     fclose(f);
     return r;
 }
 
 static void *sw_check(void *unused) {
-    sw.state = sw_check_file(SW_FILE, Q2POD_FW_TAG);
+    swu.state = sw_check_file(SW_FILE, Q2POD_FW_TAG);
     return 0;
 }
 
@@ -220,29 +220,29 @@ static void sw_close(void **page) {
 }
 
 static int sw_gone(void *ctx, void *event) {
-    if (ctx == sw.page) {
-        sw.page = (void *)0;
-        if (sw.state == SW_CHECKING)
-            sw.cancel = 1; /* Return while it checks: the thread ends at its next read */
-    } else if (ctx == sw.confirm)
-        sw.confirm = sw.view = (void *)0;
+    if (ctx == swu.page) {
+        swu.page = (void *)0;
+        if (swu.state == SW_CHECKING)
+            swu.cancel = 1; /* Return while it checks: the thread ends at its next read */
+    } else if (ctx == swu.confirm)
+        swu.confirm = swu.view = (void *)0;
     return 0;
 }
 /* Return or Centre leaves a result; the check is left with Return. */
 static int sw_key(void *ctx, void *event) {
     unsigned key = (unsigned)I(event, EVENT_KEY);
-    if (key != KEY_RETURN && (key != KEY_CENTER || sw.result == SW_CHECKING)) return 0;
-    sw_close(&sw.page);
+    if (key != KEY_RETURN && (key != KEY_CENTER || swu.result == SW_CHECKING)) return 0;
+    sw_close(&swu.page);
     return STOP;
 }
 
 static void sw_result(int result) {
-    sw.result = result;
-    if (!sw.page) {
-        if (!(sw.page = page_open("swupdate_page", sw_gone, sw_key))) return;
+    swu.result = result;
+    if (!swu.page) {
+        if (!(swu.page = page_open("swupdate_page", sw_gone, sw_key))) return;
         awake_screen();
     }
-    widget_invalidate_force(sw.page, (void *)0);
+    widget_invalidate_force(swu.page, (void *)0);
 }
 
 /* After Install and Restart: stock's dialog, which flashes and restarts; its answer when it can't.
@@ -254,14 +254,14 @@ static int sw_install(const void *unused) {
     return 7; /* RET_REMOVE */
 }
 static int sw_click(void *ctx, void *event) {
-    sw_close(&sw.confirm);
+    sw_close(&swu.confirm);
     if (ctx) idle_add(sw_install, (void *)0); /* the dialog's own loop, after this click's */
     return 0;
 }
 static void sw_confirm_open(void) {
-    if (!(sw.confirm = page_open("swconfirm_page", sw_gone, page_keyup))) return;
-    sw.ready = 0;
-    void *view = sw.view = page_list(sw.confirm, sw.confirm, 0, "Install Update?", 2, 32);
+    if (!(swu.confirm = page_open("swconfirm_page", sw_gone, page_keyup))) return;
+    swu.ready = 0;
+    void *view = swu.view = page_list(swu.confirm, swu.confirm, 0, "Install Update?", 2, 32);
     void *list = P(view, W_PARENT);
     widget_move_resize(list, I(list, W_X), I(list, W_Y) + SW_HEAD, I(list, W_W), I(list, W_H));
     page_row_detail(view, 0, "Cancel", 0, sw_click);
@@ -270,83 +270,88 @@ static void sw_confirm_open(void) {
     ringnav_select(view, 0, 2);
 }
 
-/* The check's spinner, and its answer once the thread has one. */
-/* Install Update? once it is on top and settled (it opens from a timer, as usb_ui.c usb_ready's
- * pages): the wheel's list on it, and the check's page under it closed only then, not while its
- * slide in runs. Whether it is. */
+/* Whether page is open and still: the window manager has marked it opened, after its slide in
+ * (navigation.c empty_toast's test), and nothing slides. */
+static int sw_opened(void *page) {
+    return widget_get_prop_int(page, "stage", 0) == WINDOW_STAGE_OPENED &&
+           !window_manager_is_animating(window_manager());
+}
+
+/* Install Update? once it is on top and opened (it opens from a timer, as usb_ui.c usb_ready's
+ * pages): the wheel's list on it, Cancel selected, and the check's page under it closed only then,
+ * not while its slide in runs. Whether it is. */
 static int sw_settle(void) {
-    void *wm = window_manager();
-    if (sw.ready || !sw.confirm) return 1;
-    if (window_manager_get_top_window(wm) != sw.confirm || window_manager_is_animating(wm))
+    if (swu.ready || !swu.confirm) return 1;
+    if (!sw_opened(swu.confirm) || window_manager_get_top_window(window_manager()) != swu.confirm)
         return 0;
-    sw.ready = 1;
-    sw_close(&sw.page);
-    ringnav_select(sw.view, widget_get_prop_int(sw.view, "_ringnav_index", 0), 2);
-    widget_invalidate_force(sw.confirm, (void *)0);
+    swu.ready = 1;
+    sw_close(&swu.page);
+    ringnav_select(swu.view, 0, 2);
+    widget_invalidate_force(swu.confirm, (void *)0);
     return 1;
 }
 
 /* The check's spinner, its answer once the thread has one, then Install Update? settling. */
 static int sw_tick(const void *unused) {
-    if (sw.state == SW_ASKING) {
-        if (sw.confirm && !sw_settle()) return 8; /* RET_REPEAT */
-        sw_close(&sw.page); /* Install Update? left before it settled: the check's page too */
-        sw.timer = 0;
+    if (swu.state == SW_ASKING) {
+        if (swu.confirm && !sw_settle()) return 8; /* RET_REPEAT */
+        sw_close(&swu.page); /* Install Update? left before it settled: the check's page too */
+        swu.timer = 0;
         return 7; /* RET_REMOVE */
     }
-    /* and not while the check's page still slides in: a page opened then is held back by the
-     * window manager until that ends, and took no input once it showed */
-    if (sw.state == SW_CHECKING || (sw.page && window_manager_is_animating(window_manager()))) {
-        sw.frame = (sw.frame + 1) % 12;
-        if (sw.page) widget_invalidate_force(sw.page, (void *)0);
+    /* and not before the check's page has opened: a page opened while it slides in is held back
+     * by the window manager until that ends, and took no input once it showed */
+    if (swu.state == SW_CHECKING || (swu.page && !sw_opened(swu.page))) {
+        swu.frame = (swu.frame + 1) % 12;
+        if (swu.page) widget_invalidate_force(swu.page, (void *)0);
         return 8;
     }
-    pthread_join(sw.thread, 0);
-    int state = sw.state;
-    if (state == SW_OK && sw.page) {
-        sw.state = SW_ASKING;
+    pthread_join(swu.thread, 0);
+    int state = swu.state;
+    if (state == SW_OK && swu.page) {
+        swu.state = SW_ASKING;
         sw_confirm_open();
-        if (!sw.confirm) sw_close(&sw.page);
-        if (sw.confirm && !sw_settle()) return 8;
-    } else if (state != SW_CANCELLED && sw.page)
+        if (!swu.confirm) sw_close(&swu.page);
+        if (swu.confirm && !sw_settle()) return 8;
+    } else if (state != SW_CANCELLED && swu.page)
         sw_result(state);
-    sw.timer = 0;
+    swu.timer = 0;
     return 7;
 }
 
 /* fwupdate_tf: System Update's SD Card Update row, and Network Update's download done. */
 int ringnav_fwupdate_tf(void) {
-    if (sw.timer || sw.page || sw.confirm) return 0; /* one at a time */
-    sw.cancel = 0, sw.frame = 0;
-    sw.level = I(g_power_capacity, 0);
+    if (swu.timer || swu.page || swu.confirm) return 0; /* one at a time */
+    swu.cancel = 0, swu.frame = 0;
+    swu.level = I(g_power_capacity, 0);
     int answer = sw_stock_answer(check_updatefw_exist(SW_CARD, SW_FILE));
     sw_result(answer);
-    if (answer != SW_CHECKING || !sw.page) return 0;
-    sw.state = SW_CHECKING;
-    if (pthread_create(&sw.thread, 0, sw_check, 0)) {
+    if (answer != SW_CHECKING || !swu.page) return 0;
+    swu.state = SW_CHECKING;
+    if (pthread_create(&swu.thread, 0, sw_check, 0)) {
         sw_result(SW_BAD);
         return 0;
     }
-    sw.timer = timer_add(sw_tick, (void *)0, SW_SPIN_MS);
+    swu.timer = timer_add(sw_tick, (void *)0, SW_SPIN_MS);
     return 0;
 }
 
 /* playback.c ringnav_checkfw: stock's dialog, drawn as Restarting to Install; its label stays
  * stock's, unseen. */
 static int sw_restart_gone(void *ctx, void *event) {
-    if (ctx == sw.restart) sw.restart = (void *)0;
+    if (ctx == swu.restart) swu.restart = (void *)0;
     return 0;
 }
 static int sw_restart_tick(const void *info) {
-    if (!sw.restart) return 7;
-    widget_invalidate_force(sw.restart, (void *)0);
+    if (!swu.restart) return 7;
+    widget_invalidate_force(swu.restart, (void *)0);
     return 8;
 }
 void sw_update_restarting(void *win) {
     void *label = win ? widget_lookup(win, "scrlabel_checkfw", 1) : (void *)0;
     if (!label) return;
     widget_set_visible(label, 0, 0);
-    sw.restart = win;
+    swu.restart = win;
     widget_on(win, EVT_DESTROY, sw_restart_gone, win);
     widget_add_timer(win, sw_restart_tick, 250);
 }
@@ -360,14 +365,14 @@ static int sw_unpacked(int w) {
         if (f && !fseek(f, 0, 2)) got += ftell(f);
         if (f) fclose(f);
     }
-    unsigned whole = (unsigned)(sw.parts >> 10); /* in KB: 32-bit math */
-    return !whole ? 0 : got >= sw.parts ? w : (int)((unsigned)(got >> 10) * (unsigned)w / whole);
+    unsigned whole = (unsigned)(swu.parts >> 10); /* in KB: 32-bit math */
+    return !whole ? 0 : got >= swu.parts ? w : (int)((unsigned)(got >> 10) * (unsigned)w / whole);
 }
 
 /* ringnav_paint, after w's children. */
 void sw_update_paint(void *w, void *canvas) {
     void *lcd = w ? P(canvas, CANVAS_LCD) : (void *)0;
-    if (!lcd || (w != sw.page && w != sw.confirm && w != sw.restart)) return;
+    if (!lcd || (w != swu.page && w != swu.confirm && w != swu.restart)) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;
     int light = ipod_light(), dy = I(w, W_Y), x = geom_val(V_TEXT_X), tw = 375 - 2 * x;
@@ -375,16 +380,16 @@ void sw_update_paint(void *w, void *canvas) {
              tertiary = light ? 0x6e6e6e : 0x858585;
     char s[64], spin[24];
     st.raw_ink = 1;
-    if (w == sw.page) {
+    if (w == swu.page) {
         mode_page_t m = { SW_RED,
                           "swmode_bad",
                           0,
                           "Update Can't Be Used",
                           "The file is damaged or not for the Q2",
                           (const char *)0 };
-        switch (sw.result) {
+        switch (swu.result) {
         case SW_CHECKING:
-            tk_snprintf(spin, sizeof spin, "swspin_%c_%d", light ? 'l' : 'd', sw.frame);
+            tk_snprintf(spin, sizeof spin, "swspin_%c_%d", light ? 'l' : 'd', swu.frame);
             m = (mode_page_t){ MODE_BARE,
                                spin,
                                SW_SPIN_PX,
@@ -412,7 +417,7 @@ void sw_update_paint(void *w, void *canvas) {
             };
             break;
         case SW_LOW:
-            tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, sw.level);
+            tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, swu.level);
             m = (mode_page_t){ SW_ORANGE, "swmode_low", 0, "Charge to Update", s, (const char *)0 };
             break;
         case SW_FULL:
@@ -422,13 +427,13 @@ void sw_update_paint(void *w, void *canvas) {
             };
         }
         mode_page_paint(w, canvas, dy, &m);
-    } else if (w == sw.confirm && sw.view) {
-        void *list = P(sw.view, W_PARENT);
+    } else if (w == swu.confirm && swu.view) {
+        void *list = P(swu.view, W_PARENT);
         sw_settle();
         int rows = I(list, W_Y), foot = rows + I(list, W_H) + SW_FOOT_DY;
-        sw_update_name(s, sizeof s, sw.tag);
+        sw_update_name(s, sizeof s, swu.tag);
         ar_text(canvas, s, 1, SW_NAME_PX, ink, 1, x, rows - SW_NAME_DY, tw, 2);
-        unsigned tenths = sw.size_kb * 128 / 12500; /* KB * 1024 / 100,000: tenths of a MB */
+        unsigned tenths = swu.size_kb * 128 / 12500; /* KB * 1024 / 100,000: tenths of a MB */
         tk_snprintf(s, sizeof s, "Installed: %s · %u.%u MB on the SD card", Q2POD_FW_TAG,
                     tenths / 10, tenths % 10);
         ar_text(canvas, s, 0, SW_SIZE_PX, tertiary, 1, x, rows - SW_SIZE_DY, tw, 2);

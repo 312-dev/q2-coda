@@ -18209,7 +18209,7 @@ class SwMachine(CoverflowMachine):
         elif name=='navigator_to': self.opened.append((self.text(a),)); ret=self.quit
         elif name=='idle_add': self.idles.append((a,b)); ret=1
         self.returns(ret,clobber=True)
-    def sw(self,field): return signed(self.get(payload_syms['sw']+{'state':4,'result':12,'frame':24}[field]))
+    def sw(self,field): return signed(self.get(payload_syms['swu']+{'state':4,'result':12,'frame':24}[field]))
     def said(self,w):
         self.letters.clear(); self.image_loads.clear(); self.paint(w,gap=0)
         return [l['text'] for l in self.letters],[i.rsplit('_',1)[-1] if 'swspin' not in i else i.split('swspin_')[1] for i in self.image_loads if 'sw' in i]
@@ -18234,10 +18234,13 @@ m.call(address=syms['fwupdate_tf'],args=(0,0,0,0),gap=0); assert len(m.threads)=
 passed()
 # Its answer: OK opens Install Update? over it and closes it; another, its page.
 for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,'swupdate_page')):
-    m=sw_open(); page=m.top; m.word(payload_syms['sw']+4,state); m.u.mem_write(payload_syms['sw']+0x48,b'V1830\0')
-    m.advance(80); assert m.joins and m.nodes[m.top]['name']==want and not m.timers,(state,m.nodes[m.top]['name'])
-    if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
-    confirm=m.top; assert not m.alive(page)  # Install Update? on top and settled: the check's page closed under it
+    m=sw_open(); page=m.top; m.word(payload_syms['swu']+4,state); m.u.mem_write(payload_syms['swu']+0x40,b'V1830\0')
+    m.advance(80); assert not m.joins and m.nodes[m.top]['name']=='swupdate_page'  # until the window manager has opened it
+    m.nodes[page]['stage']=3; m.advance(80); assert m.joins and m.nodes[m.top]['name']==want,(state,m.nodes[m.top]['name'])
+    if state!=SW_OK: assert m.top==page and m.sw('result')==state and not m.timers; passed(); continue
+    confirm=m.top; assert m.alive(page) and m.timers  # until Install Update? is opened too
+    m.nodes[confirm]['stage']=3; m.advance(80)
+    assert not m.alive(page) and not m.timers  # Install Update? on top and opened: the check's page closed under it
     view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
     rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
