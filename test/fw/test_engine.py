@@ -367,7 +367,9 @@ def test_tables_are_games(fw):
 
 
 def screen(canvas, w=375, h=320, fmt=None, clip=(0, 0, 375, 320), origin=(0, 30)):
-    """Canvas with a screen behind it: stock's lcd_mem, its buffer, the canvas's origin and clip."""
+    """Canvas with a screen behind it: stock's lcd_mem, its buffer, the canvas's origin and clip.
+
+    Hold the returned buffer while the firmware paints: lcd_mem keeps only its address."""
     buf = (C.c_uint * (w * h))()
     for off, v in ((O['LCD_W'], w), (O['LCD_H'], h), (O['LCD_LINE_LENGTH'], 4 * w), (O['LCD_FORMAT'], O['LCD_BGRA8888'] if fmt is None else fmt)):
         C.c_int.from_buffer(canvas.lcd, off).value = v
@@ -387,12 +389,12 @@ def test_paint_hands_draw_the_screens_buffer_clipped_to_this_pass(fw):
     assert r.drawn == (0, 30, 375, 290, 100, 0, 150, 30)
     px = lit(buf, 375, back=0)
     assert set(px) == {(x, y) for x in range(100, 150) for y in range(30, 60)} and set(px.values()) == {0xff102030}
-    screen(canvas, clip=(-10, -10, 1000, 1000))
+    buf = screen(canvas, clip=(-10, -10, 1000, 1000))  # held: eng_paint fills it
     r.e['eng_paint'](canvas.p)
     assert r.drawn == (0, 30, 375, 290, 0, 0, 375, 290)
     r.drawn = None
     for other in (dict(fmt=5), dict(clip=(0, 0, 375, 30)), dict(clip=(400, 0, 10, 10))):
-        screen(canvas, **other)
+        buf = screen(canvas, **other)
         r.e['eng_paint'](canvas.p)
     C.c_int.from_buffer(canvas.lcd, O['LCD_LINE_LENGTH']).value = 4 * 376  # padded rows
     r.e['eng_paint'](canvas.p)
