@@ -138,6 +138,22 @@ def test_pairing_shows_the_code_and_cancel_tells_the_daemon(fw, ui, mcl, recs):
     assert q2.files[PAIR_CANCEL] == b'1\n' and page not in ui.windows
 
 
+def test_pairing_shows_a_new_code_that_came_between_two_polls(fw, ui, mcl, recs):
+    """The daemon ended one code and showed another inside one poll: the Dialog must not keep the old one."""
+    q2 = Q2(fw, ui, recs)
+    q2.files[PAIR] = b'242610\nPixel 10 Pro\n'
+    q2.tick()
+    old = ui.top()
+    assert '242 610' in ui.shown(old)
+    q2.files[PAIR] = b'852219\nPixel 10 Pro\n'
+    q2.tick()
+    q2.tick()
+    page = ui.top()
+    assert old not in ui.windows and ui.name[page] == 'carpair_page'
+    assert '852 219' in ui.shown(page) and '242 610' not in ui.shown(page)
+    assert PAIR_CANCEL not in q2.files  # the daemon's own change: nothing cancelled
+
+
 def test_pairing_closes_when_the_daemon_ends_it_and_toasts(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.files[PAIR] = b'654321\nPhone\n'

@@ -41,6 +41,7 @@ static struct {
     int want; /* a Pause (1) or Play (2) waiting for the player; 0 none */
     unsigned want_seq, want_at;
     void *pair_page, *page; /* the code's Dialog; Settings > Car Remote */
+    char pair_code[8];      /* the code the Dialog shows */
     int forget; /* the phone row Forget asks about, + 1 */
     int toast_what;
     int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
@@ -381,12 +382,17 @@ static void pair_show(const char *code, const char *name) {
 static void cr_pairing(void) {
     char raw[80];
     if (state_read(CR_PAIR, raw, sizeof raw) >= 7) {
-        if (cr.pair_page) return;
         char *code = raw + 1, *name = strstr(code, "\n");
         if (!name || name - code != 6) return;
         *name++ = 0;
+        if (cr.pair_page) {
+            /* a code the daemon ended and replaced between two polls: the old one would be refused */
+            if (strcmp(code, cr.pair_code)) window_close(cr.pair_page);
+            return; /* the next poll shows the new one, once the old Dialog is gone */
+        }
         char *end = strstr(name, "\n");
         if (end) *end = 0;
+        memcpy(cr.pair_code, code, 7);
         pair_show(code, *name ? name : "Phone");
         return;
     }
