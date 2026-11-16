@@ -835,7 +835,11 @@ static void sh_text(int r) {
     else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row,
                                 * the row alone a plain one, the list's pitch (oled-design.md Empty
                                 * and offline: one line in the list's pitch) */
-        if (!shelf_n && sh.row[r]) widget_resize(sh.row[r], 375, page_h(48)); /* full width */
+        if (!shelf_n && sh.row[r]) { /* the list lays its items out at its item_height */
+            void *view = P(sh.row[r], W_PARENT), *lv = view ? P(view, W_PARENT) : (void *)0;
+            if (lv) widget_set_prop_int(lv, "item_height", page_h(48));
+            widget_resize(sh.row[r], 375, page_h(48)); /* full width */
+        }
         int noted = feedback_empty(sh.page, feedback_below(sh.row[r]),
                                    shelf_n ? (const char *)0 : "No apps listed",
                                    "Connect to Wi-Fi, then Check for Updates");
