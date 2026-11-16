@@ -424,14 +424,14 @@ def boot(fw):
 
 
 # An older build's unit (THEME 0 Minimal, 1 Classic, 2 Modern, or no key) boots on OLED with its preset
-# (theme.xml: Full Home, Light Mode off unless Auto) applied once, and THEME 3 written.
+# (theme.xml: Split Home, Light Mode off unless Auto) applied once, and THEME 3 written.
 @pytest.mark.parametrize('theme', [{'THEME': b'0'}, {'THEME': b'1'}, {'THEME': b'2'}, {}])
 def test_a_unit_on_a_retired_theme_takes_oled_s_preset_once(fw, clock, theme):
     config = Config(fw, HOME=b'2', LIGHT=b'1', **theme)
     written = boot(fw)
     assert fw.fn('theme', C.c_void_p)() == C.addressof(fw.var('themes', C.c_char))  # themes[0]: OLED
-    assert written == [('LIGHT', 0), ('HOME', 1), ('THEME', 3)]
-    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (1, 0)
+    assert written == [('LIGHT', 0), ('HOME', 0), ('THEME', 3)]
+    assert (fw.fn('ipod_home', C.c_int)(), fw.fn('ipod_light', C.c_int)()) == (0, 0)
     config.values.update({k.encode(): str(v).encode() for k, v in written})
     assert boot(fw) == []  # the next boot reads THEME 3: no preset again
 
@@ -443,7 +443,7 @@ def test_a_unit_on_oled_keeps_its_choices(fw, clock):
 
 
 def test_the_preset_keeps_light_mode_s_auto(fw, clock):
-    Config(fw, THEME=b'0', HOME=b'1', LIGHT=b'2')
+    Config(fw, THEME=b'0', HOME=b'0', LIGHT=b'2')
     assert boot(fw) == [('THEME', 3)]
 
 

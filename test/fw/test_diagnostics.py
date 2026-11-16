@@ -38,17 +38,19 @@ def test_a_release_build_has_no_save_diagnostics(fw):
     assert about.rows() == [] and about.ui[about.view].kids == [about.stock]
 
 
-def test_a_dev_build_s_about_starts_with_save_diagnostics_which_stays_selectable(fw_dev):
-    """The row, a settings row with its click, first so the page's one selectable row is in sight as it opens, marked
-    so about_rows leaves it enabled while it disables the table."""
+def test_a_dev_build_s_about_starts_with_save_diagnostics_which_keeps_its_click(fw_dev):
+    """The row, a settings row with its click, first so it is in sight as the page opens, marked so about_rows leaves
+    its click alone while it gives each of stock's rows about_click, which does nothing."""
     about = About(fw_dev)
     assert about.rows() == ['Save Diagnostics']
     item, stock = about.ui[about.view].kids
     assert stock == about.stock
-    enabled = []
-    fw_dev.mock('widget_set_enable', lambda w, on, *_: enabled.append((w, on)))
+    stock_button = about.ui.make(stock, 'button')
+    bound = []
+    fw_dev.mock('widget_on', lambda w, evt, fn, ctx, *_: bound.append(w) or 1)
     fw_dev.fn('about_rows', None, C.c_void_p)(about.view)
-    assert (item, 0) not in enabled and (stock, 0) in enabled and fw_dev.fn('diag_row', C.c_int, C.c_void_p)(item) == 1
+    item_button, = about.ui[item].kids
+    assert bound == [stock_button] and item_button not in bound and fw_dev.fn('diag_row', C.c_int, C.c_void_p)(item) == 1
 
 
 @pytest.mark.parametrize('status, toast', [(0, 'Saved to SD card: q2-diagnostics.txt'), (2 << 8, 'No SD card'),

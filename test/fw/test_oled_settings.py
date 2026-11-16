@@ -9,10 +9,11 @@ from test_nav_display_library import (  # noqa: F401 (fixtures)
 
 
 def test_a_set_switch_themes_on_off_row_is_a_switch(fw):
-    """Smart Awake (list_toggle) on OLED, a set_text theme that is also set_switch: the switch image, no On or Off."""
+    """Smart Awake (list_toggle) on OLED, a set_text theme that is also set_switch: the switch image (on, its default),
+    no On or Off."""
     ui = Ui(fw)
     b = button_of(display(fw, ui, THEME=b'%d' % OLED).view(), 'Smart Awake')
-    assert b.find('_setting_value') is None and b.find('_setting_switch').props['image'] == b'switch_off'
+    assert b.find('_setting_value') is None and b.find('_setting_switch').props['image'] == b'switch_on'
 
 
 def test_oled_settings_text_starts_on_the_text_column(fw, st, geometry, stand_in):

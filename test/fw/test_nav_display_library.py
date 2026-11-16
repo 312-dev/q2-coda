@@ -608,8 +608,7 @@ def test_buttons_lock_keeps_its_own_rows_after_a_picker_closed(fw):
         if w == picker.addr and evt == O['EVT_DESTROY']:
             C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
     page.open('systemset/keylock_page')
-    assert [item.labels()[0].text for item in page.view().children] == ['Off', 'Everything', 'Buttons only',
-                                                                         'Volume only']
+    assert [item.labels()[0].text for item in page.view().children] == ['Off', 'On']  # keylock.c's own two
 
 
 def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
@@ -619,7 +618,8 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page.open('playset/playset_page')
     texts = page.texts()
     assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min',
-                     'stock_8', 'Sleep Timer', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9', 'stock_10',
+                     'stock_8', 'Sleep Timer', 'Volume: 0', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9',
+                     'stock_10',
                      'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']  # EQ (stock_2), then the Library
     ui.click(button_of(page.view(), 'Sleep Timer'))
     assert page.opened[-1] == 'systemset/sleepshutdown_page'
@@ -692,21 +692,21 @@ def captions(fw, view):
 def test_display_s_rows_carry_their_captions(fw):
     ui = Ui(fw)
     page = display(fw, ui)
-    assert captions(fw, page.view()) == {'Smart Awake': 'Keeps the screen on for lyrics and art while playing'}
+    assert captions(fw, page.view()) == {'Smart Awake': 'Keeps the screen on for lyrics and art while playing',
+                                         'playset_covermode': 'Shows the art full screen after 10s on Now Playing'}
     ui.click(button_of(page.view(), 'Cover Flow'))
     assert captions(fw, page.view()) == {
         'Fast Navigation': 'Year sort spins by year too; letters stay till you lift',
-        'Scan Song Durations': 'Measures song lengths after each library update',
         'Position Bar': 'Shows your place in the covers while you browse'}
 
 
-def test_controls_rows_carry_their_captions_and_volume_guard_none(fw):
+def test_controls_rows_carry_their_captions(fw):
     ui = Ui(fw)
     Config(fw)
     Settings(fw, ui)
     page = Display(fw, ui)
     fw.fn('navigation__set_open', C.c_int, C.c_void_p, C.c_void_p)(4, None)
-    assert 'Volume Guard' in titles(page.view())
+    assert 'Volume Guard' not in titles(page.view())  # retired: the wheel's volume is playback screens' alone
     assert captions(fw, page.view()) == {'Hold Return': 'What holding Return opens: Now Playing or Home',
                                          'Wake': 'Center presses it takes to wake the screen'}
 
@@ -1383,11 +1383,11 @@ def test_a_click_reaches_stock_and_ends_whatever_was_pending(fw, st):
     page = ui.window('localmusic_page')
     row = ui.add('button', page)
     stock = Stock(fw, ui, answer=5)
-    st('center_timer').value, st('fx_timer').value, st('touch_mode').value = 7, 9, 0
+    st('center_timer').value, st('touch_mode').value = 7, 0
     assert stock.send(row, EVT_CLICK) == 5
     assert stock.seen == [(row.addr, EVT_CLICK, 0, 0)]
-    # the outline hides (a tap is touch), and the pending confirmation and bump go
-    assert st('touch_mode').value == 1 and st('center_timer').value == 0 and st('fx_timer').value == 0
+    # the outline hides (a tap is touch), and the pending confirmation goes
+    assert st('touch_mode').value == 1 and st('center_timer').value == 0
 
 
 def test_a_click_a_pull_claimed_never_reaches_stock(fw):
@@ -1557,10 +1557,10 @@ def test_a_touch_reaches_stock_and_hides_the_outline_once(fw, st):
     ui = Ui(fw)
     page = ui.window('localmusic_page')
     stock = Stock(fw, ui, answer=3)
-    st('center_timer').value, st('fx_timer').value = 7, 9
+    st('center_timer').value = 7
     down = event(O['EVT_POINTER_DOWN'], x=100, y=100)
     assert stock.touch(None, down) == 3 and stock.touched == [(0, O['EVT_POINTER_DOWN'], 100, 100)]
-    assert st('touch_mode').value == 1 and st('center_timer').value == 0 and st('fx_timer').value == 0
+    assert st('touch_mode').value == 1 and st('center_timer').value == 0
     repainted = [a[0] for _, a in fw.calls('widget_invalidate_force')]
     assert repainted == [page.addr]
     stock.touch(None, event(O['EVT_POINTER_MOVE_BEFORE'], x=100, y=120))

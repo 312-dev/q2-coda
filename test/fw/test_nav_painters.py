@@ -1939,26 +1939,34 @@ def caption_texts(fw, view):
 
 
 def test_playback_s_and_library_s_rows_carry_their_captions(fw):
+    """Playback's own rows carry none; Playback > Library's switches do (library_settings.c), and Library > Folders'
+    stock Folder skip has its own (ringnav_audioset)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     audioset = fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)
     audioset(win.addr, None)
-    assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, view).items()} == {
-        'Enlarged Album Art': 'Shows the art full screen after 10s on Now Playing',
-        'On-The-Go': 'Shows On-The-Go in Playlists and hold menus'}
-    page = ui.window('playset_page')  # Library & Folders: stock's page again, its Folder skip kept
-    ui.add('view', page, (0, 0, 375, 26), 'view_navbar')
-    sub = ui.add('scroll_view', page, (0, 26, 375, 294), 'scroll_view_playset')
+    assert caption_texts(fw, view) == {}
 
-    def build(*_):  # stock's rows, each button holding its icon and label as stock's do
-        for i in range(13):
-            button = ui.add('button', ui.add('list_item', sub, (0, 0, 375, 70), f's{i}'), (20, 0, 335, 70)).clickable()
-            ui.add('image', button, (10, 9, 52, 52))
-        return 0
-    fw.mock('stock_audioset_trampoline', build)
-    fw.mock('navigator_to', lambda *_: audioset(page.addr, None))
-    click(ui, row(ui, view, 'Library & Folders'))
-    assert [(r.name, t) for r, t in caption_texts(fw, sub).items()] == [
+    def sub_page(n):  # Library's page n (LIB_*): stock's page again, built afresh
+        page = ui.window('playset_page')
+        ui.add('view', page, (0, 0, 375, 26), 'view_navbar')
+        sub = ui.add('scroll_view', page, (0, 26, 375, 294), 'scroll_view_playset')
+
+        def build(*_):  # stock's rows, each button holding its icon and label as stock's do
+            for i in range(13):
+                button = ui.add('button', ui.add('list_item', sub, (0, 0, 375, 70), f's{i}'), (20, 0, 335, 70)).clickable()
+                ui.add('image', button, (10, 9, 52, 52))
+            return 0
+        fw.mock('stock_audioset_trampoline', build)
+        fw.mock('navigator_to', lambda *_: audioset(page.addr, None))
+        fw.fn('library_open', C.c_int, C.c_void_p, C.c_void_p)(n, None)
+        return sub
+    library = sub_page(1)
+    assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, library).items()} == {
+        'On-The-Go': 'Shows On-The-Go in Playlists and hold menus', 'Streaming Songs': 'Streaming songs join your Library',
+        'Scan Song Durations': 'Measures lengths after each update'}
+    folders = sub_page(4)
+    assert [(r.name, t) for r, t in caption_texts(fw, folders).items()] == [
         ('s12', 'Plays on into the next folder when one ends')]
 
 

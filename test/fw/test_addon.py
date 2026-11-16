@@ -1696,6 +1696,7 @@ def test_the_wheels_travel_reaches_the_game_once_a_pass(fw):
 
 
 def test_a_game_left_idle_two_minutes_is_ended(fw):
+    settings(fw, KEEPLIT=b'0')  # Smart Awake off: it is on by default
     g = CardGame(fw)
     g.start()
     g.poll(119999)
