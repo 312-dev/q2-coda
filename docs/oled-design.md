@@ -451,6 +451,8 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   free area below them, down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower.
   No fake rows, and no Shuffle row over nothing: Favorites, Recent and the other song lists hide
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
+- Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
+  the SD card".
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
   Store's "No apps listed" under its Check for Updates row, one line in the list's pitch). TIDAL
   with no Wi-Fi opens a page of its own titled TIDAL: "Not connected", hint "Turn on Wi-Fi in

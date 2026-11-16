@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Files, block, in_fork, libc
+from conftest import O, Deques, Files, block, in_fork, libc
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -3364,3 +3364,32 @@ def test_over_oleds_now_playing_the_volume_is_its_bar_between_two_speakers(fw, w
     assert canvas.art(f'oled_vol_lo_{ink}') == [(66 + spk - half, cy - half, 20, 10)]
     assert canvas.art(f'oled_vol_hi_{ink}') == [(66 + 243 - spk - half, cy - half, 20, 10)]
     assert canvas.texts == []
+
+
+@pytest.mark.parametrize('number', [MINIMAL, OLED])
+def test_an_empty_folder_level_says_so(fw, world, number):
+    """Folder (folder_page) over a level with nothing in it, an empty card or a folder with no music: stock's page
+    is its table alone, which would leave it blank. It says "No folders" with a hint, written once per change of the level's
+    emptiness, and the words go when the level has rows. Another page gets nothing."""
+    theme(fw, number)
+    deques = Deques(fw)
+    showlist = fw.var('fw_ctx_p_deque_showlist', C.c_uint)
+    folder = fw.fn('feedback_folder', None, C.c_void_p)
+    win = world.window('folder_page')
+    world.add(win, 'tableview_folder', 'table_view')
+    level = deques.new()
+    showlist.value = level
+    folder(win)
+    line, hint = world.find(win, '_empty'), world.find(win, '_empty_hint')
+    assert world[line].text == 'No folders' and world[hint].text == 'Copy music to the SD card'
+    assert world[line].visible and world[hint].visible
+    writes = len(fw.calls('widget_set_text_utf8'))
+    folder(win)
+    assert len(fw.calls('widget_set_text_utf8')) == writes  # unchanged: not written
+    deques[level].append(1)
+    folder(win)
+    assert not world[line].visible and not world[hint].visible
+    other = world.window('allmusic_page')
+    deques[level].clear()
+    folder(other)
+    assert not world.find(other, '_empty')

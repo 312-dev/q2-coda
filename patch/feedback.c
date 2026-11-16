@@ -1,8 +1,8 @@
 /* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts, a theme whose
  * dialog.confirm.painter is "oled"): stock's toast as a pill over the page, and stock's confirm
  * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb;
- * an empty or offline page's note; the confirmation after a shuffle. page_fit, a page_list cut to
- * whole rows above the glass, shares the note's screen arithmetic. */
+ * an empty or offline page's note (Folder's in every theme); the confirmation after a shuffle.
+ * page_fit, a page_list cut to whole rows above the glass, shares the note's screen arithmetic. */
 #include "navigation.h"
 
 int feedback_oled(void) { return theme()->painter[PAINT_CONFIRM] == CONFIRM_OLED; }
@@ -333,6 +333,35 @@ void feedback_songs(void *top, void *row) {
                                           : "No songs";
     feedback_empty(top, CONFIRM_Y, empty ? message : (const char *)0,
                    cls == 0xf00a ? "Hold Play/Pause on a song to add it" : (const char *)0);
+}
+
+/* Folder's page (folder_page) over a level with nothing in it, an empty card or a folder with no
+ * music: stock's page is its table alone, with no message of its own, and would be blank. It
+ * says "No folders" with a hint, as OLED's note (oled-design.md Empty and offline), else as two
+ * centred lines in stock's white label styles. The level is stock's p_deque_showlist, which the
+ * table's rows read (folder_into). Runs on the bar's paint; writes only when the level's emptiness
+ * changes. */
+#define FOLDER_NOTE_Y 120
+void feedback_folder(void *top) {
+    if (!top || tk_strcmp(widget_get_prop_str(top, "name", ""), "folder_page")) return;
+    void *list = P(p_deque_showlist, 0);
+    int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_folder", 0);
+    if (empty == was) return;
+    widget_set_prop_int(top, "_empty_folder", empty);
+    const char *message = empty ? "No folders" : (const char *)0, *hint = "Copy music to the SD card";
+    if (feedback_empty(top, 0, message, hint)) return;
+    void *line = widget_lookup(top, "_empty", 0), *sub = widget_lookup(top, "_empty_hint", 0);
+    if (!line) {
+        line = text(top, 0, FOLDER_NOTE_Y, 375, 30);
+        widget_set_name(line, "_empty");
+        sub = text(top, 0, FOLDER_NOTE_Y + 34, 375, 24);
+        widget_use_style(sub, "s_scrlabel_white16c");
+        widget_set_name(sub, "_empty_hint");
+        widget_set_text_utf8(line, "No folders");
+        widget_set_text_utf8(sub, hint);
+    }
+    widget_set_visible(line, empty, 0);
+    widget_set_visible(sub, empty, 0);
 }
 
 /* The confirmation after a shuffle (docs/oled-design.md#confirmation): over Now Playing, the

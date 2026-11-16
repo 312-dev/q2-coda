@@ -6876,6 +6876,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         clock_place(bar, top);
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
+        feedback_folder(top); /* an empty folder level's note */
         if (np_sync(top) && np_beside()) rearm(&st.np_remain_timer, remain_due, 0); /* mid-paint */
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
