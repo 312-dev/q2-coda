@@ -443,7 +443,7 @@ BT_MAIN = 'etc/bluetooth/main.conf'
 BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
 # The name a phone lists the Q2 as when the user chose none: BlueZ's own Name, which bt_name.c's Alias of "" falls
 # back to (docs/internals.md#bluetooth-name); a chosen one is [Q2POD] BTNAME in config.ini.
-BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2\n')
+BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2 Muse\n')
 # BlueZ 5.66's experimental D-Bus interfaces, off in stock's file: BatteryProviderManager1 among them, through which
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).

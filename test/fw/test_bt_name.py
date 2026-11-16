@@ -1,4 +1,4 @@
-"""bt_name.c: the Q2's Bluetooth name. Q2 by default (main.conf's Name, BlueZ's Alias of ""), a chosen one in
+"""bt_name.c: the Q2's Bluetooth name. Q2 Muse by default (main.conf's Name, BlueZ's Alias of ""), a chosen one in
 config.ini's [Q2POD] BTNAME, set as BlueZ's adapter Alias over D-Bus at each Bluetooth on and at once after a
 rename; Settings > Bluetooth's Name row shows it and opens the letter strip in a text box's form."""
 import ctypes as C
@@ -35,9 +35,10 @@ def name(fw):
     return fw.fn('bt_name', C.c_char_p, C.c_char_p, C.c_uint)(out, 64).decode()
 
 
-@pytest.mark.parametrize('saved, shown', [(None, 'Q2'), (b'', 'Q2'), (b'Car Kit', 'Car Kit'), (b' x', 'Q2'),
-                                          (b'a' * 31, 'Q2'), (b"it's", 'Q2'), (b'a' * 30, 'a' * 30)])
-def test_the_name_is_the_saved_one_or_q2(fw, saved, shown):
+@pytest.mark.parametrize('saved, shown', [(None, 'Q2 Muse'), (b'', 'Q2 Muse'), (b'Car Kit', 'Car Kit'),
+                                          (b' x', 'Q2 Muse'), (b'a' * 31, 'Q2 Muse'), (b"it's", 'Q2 Muse'),
+                                          (b'a' * 30, 'a' * 30), (b'Q2', 'Q2')])
+def test_the_name_is_the_saved_one_or_q2_muse(fw, saved, shown):
     Config(fw, **({} if saved is None else {'BTNAME': saved}))
     assert name(fw) == shown
 
@@ -130,8 +131,8 @@ def test_the_name_row_opens_the_strip_as_a_text_box_on_the_name(fw, ui):
 
 def test_next_at_the_end_saves_applies_and_shows_the_new_name(fw, ui):
     r = Rename(fw, ui)
-    assert r.ss.text == b'Q2'
-    r.erase(2)
+    assert r.ss.text == b'Q2 Muse'
+    r.erase(7)
     r.type('My Q2')
     assert r.ss.text == b'My Q2'
     r.key(KEY_FWD_BTN)
@@ -140,17 +141,17 @@ def test_next_at_the_end_saves_applies_and_shows_the_new_name(fw, ui):
     assert name_row(ui, r.view)[1] == ['Name', 'My Q2']  # the row under the strip says it at once
 
 
-def test_q2_again_is_saved_as_none(fw, ui):
+def test_q2_muse_again_is_saved_as_none(fw, ui):
     r = Rename(fw, ui, BTNAME=b'Old')
     r.erase(3)
-    r.type('Q2')
+    r.type('Q2 Muse')
     r.key(KEY_FWD_BTN)
     assert r.config.values[b'BTNAME'] == b'' and "'variant:string:'" in r.system.commands[0] and ui.backs == 1
 
 
 def test_edge_spaces_go_and_an_empty_name_is_refused(fw, ui):
     r = Rename(fw, ui)
-    r.erase(2)
+    r.erase(7)
     r.type('  ')
     r.key(KEY_FWD_BTN)
     assert ui.toasts[-1] == "Name can't be empty" and not r.config.written and not r.system.commands and not ui.backs
@@ -162,7 +163,7 @@ def test_edge_spaces_go_and_an_empty_name_is_refused(fw, ui):
 def test_the_name_stops_at_30_characters(fw, ui):
     r = Rename(fw, ui)
     r.type('x' * 40)
-    assert r.ss.text == b'Q2' + b'x' * 28
+    assert r.ss.text == b'Q2 Muse' + b'x' * 23
 
 
 def test_a_held_return_leaves_the_name_as_it_was(fw, ui):

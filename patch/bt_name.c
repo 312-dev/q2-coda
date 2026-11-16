@@ -14,7 +14,7 @@
  * it was. */
 #include "navigation.h"
 
-#define BT_NAME_DEFAULT "Q2"
+#define BT_NAME_DEFAULT "Q2 Muse"
 #define BT_NAME_KEY "BTNAME"
 #define BT_NAME_MAX                                                                                \
     30 /* characters; BlueZ takes 248 bytes, the row and the strip about this many */
