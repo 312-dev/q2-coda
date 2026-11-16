@@ -6253,12 +6253,14 @@ for key,want in ((O['KEY_FWD_BTN'],['B','A','C']),(O['KEY_FWD_BTN'],['B','C','A'
     assert m.call(key,gap=0)==11
     m.view=m.find('scroll_view'); assert m.selected(m.view)==want.index('A')+2
 assert m.names()==m.before_queue and not m.playback(); passed()
-# Touch actions and confirmation; cancel and Back leave the entry intact.
+# Touch actions and confirmation (Remove on the confirmation card, its answer feedback.c runs once
+# the card has closed: playlists.c ple_remove_answer); cancel and Back leave the entry intact.
+def ple_answer(m,row): m.call(address=payload_syms['ple_remove_answer'],args=(0,row,0,0),gap=0,clear=False)
 m.choose(3); assert m.showlabels()==['Move Up','Move Down','Remove from Playlist']
-m.choose(2); assert m.showlabels()==['Remove from Playlist','Cancel']; m.choose(1)
+m.choose(2); ple_answer(m,0)
 assert m.order()==['B','A','C']; m.choose(3); m.choose(0); assert m.order()==['A','B','C']
 m.choose(2); m.choose(1); assert m.order()==['B','A','C']
-m.choose(3); m.choose(2); m.choose(0); assert m.order()==['B','C'] and m.selected(m.view)==3
+m.choose(3); m.choose(2); ple_answer(m,1); assert m.order()==['B','C'] and m.selected(m.view)==3
 assert m.order(1)==['Other']; passed()
 # The fixed destination picker stays open; failed writes never report success.
 saved=m.alloc(16); m.word(saved,0x12345678); m.word(syms['p_vector_select_record'],saved)

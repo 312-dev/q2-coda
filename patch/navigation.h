@@ -941,6 +941,8 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
+/* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
+void toast_later(const char *glyph, const char *text), toast_later_poll(void);
 int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):

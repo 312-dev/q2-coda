@@ -34,6 +34,26 @@ void toast_icon(const char *glyph, const char *text) {
     toast(text);
     pill_glyph[0] = 0;
 }
+/* A toast shown by the next UI loop pass (toast_later_poll, from ringnav_sleep's usb_ui_poll),
+ * never inside stock's USB pass or an input's dispatch, whose own loop a toast's would run again:
+ * USB's and charging's. glyph is a theme image's name without the art prefix; the last one asked
+ * for wins. Dropped while the screen is dark. */
+static struct {
+    char glyph[32], text[48];
+} later __attribute__((section(".scratch")));
+void toast_later(const char *glyph, const char *text) {
+    tk_snprintf(later.glyph, sizeof later.glyph, "%s", glyph ? glyph : "");
+    tk_snprintf(later.text, sizeof later.text, "%s", text ? text : "");
+}
+void toast_later_poll(void) {
+    if (!later.text[0]) return;
+    char text[sizeof later.text];
+    tk_snprintf(text, sizeof text, "%s", later.text);
+    later.text[0] = 0;
+    if (g_backlight_status)
+        toast_icon(later.glyph[0] ? theme_art(later.glyph) : (const char *)0, text);
+}
+
 /* The window under OLED's toast: the window manager's last window before it. */
 void *feedback_under(void *toast) {
     void *wm = window_manager(), *under = (void *)0;

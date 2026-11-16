@@ -56,7 +56,6 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 
 static struct {
     int view_ready, auth_ready;
-    const char *toast_glyph, *toast_text;
     int det_known; /* a pass has read the cable: one in at boot is no plug-in */
     int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
     unsigned probe_at;
@@ -77,11 +76,10 @@ static int usb_host(void) {
     return !memcmp(s, "configured", 10);
 }
 
-/* A toast, shown by the next ringnav_sleep poll (usb_ui_poll): never inside stock's USB pass, whose
- * own loop a toast's would run again. */
+/* A toast, shown by the next loop pass (feedback.c toast_later): never inside stock's USB pass,
+ * whose own loop a toast's would run again. */
 static void usb_toast(const char *glyph, const char *text) {
-    if (!g_backlight_status) return;
-    u.toast_glyph = glyph, u.toast_text = text;
+    if (g_backlight_status) toast_later(glyph, text);
 }
 
 /* The choice this cable gets without asking, USB_ASK for none. Transfer Files and USB Audio follow
@@ -514,13 +512,9 @@ static void usb_auth_paint(void *w, void *canvas) {}
 static void auth_poll(void) {}
 #endif
 
-/* ringnav_sleep: a toast usb_ui_status left, charging's, and adbd's questions. */
+/* ringnav_sleep: charging's poll, a toast USB or charging left, and adbd's questions. */
 void usb_ui_poll(void) {
-    if (u.toast_text) {
-        const char *glyph = u.toast_glyph, *text = u.toast_text;
-        u.toast_glyph = u.toast_text = (const char *)0;
-        if (g_backlight_status) toast_icon(theme_art(glyph), text);
-    }
-    charging_poll(); /* charging.c's toasts */
+    charging_poll();    /* charging.c's plug-in screen and weak charger */
+    toast_later_poll(); /* a toast USB or charging left */
     auth_poll();
 }

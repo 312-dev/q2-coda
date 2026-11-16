@@ -43,3 +43,20 @@ def test_show_then_fade_holds_then_fades_over_its_last_200_ms(fw, gone, alpha):
     """ui_kit.c ui_fade_alpha, the scroll indicator's and the A-Z index's: whole for 800 ms, then down to 0 at 1000."""
     fw.mock('time_now_ms', lambda *_: 10000 + gone)
     assert fw.fn('ui_fade_alpha', C.c_uint, C.c_uint)(10000) == alpha
+
+
+@pytest.mark.parametrize('lit', [1, 0])
+def test_a_later_toast_waits_for_the_loop_pass_and_the_last_wins(fw, lit):
+    """feedback.c toast_later (USB's and charging's): nothing shows when asked, the next toast_later_poll shows the last
+    one asked for, once, and a dark screen drops it."""
+    toasts = []
+    fw.mock('navigator_to_with_context', lambda page, info, *_: toasts.append(C.string_at(info + 8).decode()) or 0)
+    fw.var('g_backlight_status', C.c_ubyte).value = lit
+    later = fw.fn('toast_later', None, C.c_char_p, C.c_char_p)
+    later(b'usbtoast_audio', b'USB Audio Ready')
+    later(b'usbtoast_unplugged', b'Unplugged')
+    assert toasts == []
+    poll = fw.fn('toast_later_poll', None)
+    poll()
+    poll()
+    assert toasts == (['Unplugged'] if lit else [])
