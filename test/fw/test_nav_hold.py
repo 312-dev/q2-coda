@@ -1099,16 +1099,6 @@ def test_a_covers_centre_opens_its_playlist_whatever_mode_a_picker_left(rows_pag
     assert clicks == [(p.playlist(1), 0)]
 
 
-def select_mode(p, ui, fw):
-    """Select Playlists… as stock's handler takes it: g_navbar_status 1, the rows rebuilt with their marks."""
-    def edit(w, e, *_):
-        fw.var('g_navbar_status', C.c_ubyte).value = 1
-        p.ring(p.win)
-    fw.mock('stock_dispatch_trampoline', edit)
-    ui.click(p.action('Select Playlists…'))
-    ui.due('pl_due')
-
-
 def recount(p, ui):
     """A playlist row's click: stock's pick (a stub: the marks are p.marked), then the rows count them."""
     stock_handler(PLAYLIST_PICK, 0)
