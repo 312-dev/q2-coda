@@ -81,7 +81,8 @@ static void *window_under(void *wm, void *top) {
 }
 
 /* The layer off px right of its place. widget_move, not widget_move_resize, which lays a list's
- * children out again: Home's lists would lose their fades and scroll (coverflow.c home_overflow). */
+ * children out again: Home's lists would lose their fades and scroll (coverflow.c
+ * home_overflow). */
 static void place(int off) {
     void *w = sb.layer;
     sb.off = off;
