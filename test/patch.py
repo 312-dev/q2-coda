@@ -12961,7 +12961,7 @@ def stream_page(m):
     assert m.nodes[icon]['image']=='list_tidal' and m.nodes[label]['text']=='Tidal Downloads'
     top=m.top; f,ctx=m.handler(tidal,O['EVT_CLICK']); m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
     assert [m.text(c[1]) for c in m.calls if c[0]=='toolsLoadDirectory']==['/mnt/mmc/.tidal']
-    assert m.nodes[m.top]['name']=='tidal_downloads' and 'No downloads yet' in [n.get('text') for n in m.nodes.values()]
+    assert m.nodes[m.top]['name']=='tidal_downloads' and 'No downloads' in [n.get('text') for n in m.nodes.values()]
     f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.top=top
     # AirPlay, last: stock's own receiver, its switch on System settings' Network service page, one press away.
     airplay=m.nodes[m.nodes[view]['children'][4]]['children'][0]; icon,label=m.nodes[airplay]['children'][:2]

@@ -1761,7 +1761,8 @@ def test_a_download_gone_from_the_card_does_not_play(fw, ui, song):
 def test_no_downloads_says_so(fw, ui, song):
     Card(fw, ui, song, {})
     call(fw, 'tidal_downloads')
-    assert 'No downloads yet' in ui.shown(ui.top()) and ui.rows(ui.top()) == []
+    shown = set(ui.shown(ui.top()))  # the house note and its hint: Tidal keeps what it plays (audit2 K1)
+    assert {'No downloads', 'Songs you play from TIDAL are kept here'} <= shown and ui.rows(ui.top()) == []
 
 
 def test_clear_all_asks_first_and_cancel_keeps_them(fw, ui, song):
@@ -1799,7 +1800,7 @@ def test_remove_clears_every_download(fw, ui, song):
     ui.click(page, 2)
     ui.fire('td_show')
     assert list(card.files) == ['/mnt/mmc/.tidal/.cache-size']  # Keeps settings
-    assert 'No downloads yet' in ui.shown(page)
+    assert 'No downloads' in ui.shown(page)
 
 
 def test_one_download_is_a_track(fw, ui, song):

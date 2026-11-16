@@ -277,8 +277,11 @@ static void *songs_rows(const char *dir, const char *title, int tidal, int album
     if (ll.td_list) deque_destroy(ll.td_list);
     ll.td_list = card_songs(dir, album);
     int n = (int)deque_size(ll.td_list);
-    void *view =
-        page_list_or(ll.td_page, ll.td_page, title, "No downloads yet", n + (tidal && n), 48);
+    void *view = page_list_or(ll.td_page, ll.td_page, title,
+                              tidal ? "No downloads" : "No downloads yet", n + (tidal && n), 48);
+    /* Tidal's songs are kept as they play (docs/downloads.md): the note's hint says so */
+    if (tidal && !n)
+        feedback_empty(ll.td_page, 0, "No downloads", "Songs you play from TIDAL are kept here");
     char name[256];
     for (int i = 0; i < n; i++) {
         song_label(P(deque_at(ll.td_list, (unsigned)i), REC_NAME), tidal, name, sizeof name);
