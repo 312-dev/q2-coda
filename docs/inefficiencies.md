@@ -23,7 +23,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 | 11  | Spotify's cover is decoded on the UI thread                                    | runtime   | S      | deferred   |
 | 12  | A stock database write on the UI thread waits for a count                      | runtime   | M      | left as is |
 | 13  | Ratings compare every song with every rated one (resolved)                     | runtime   | S      | resolved   |
-| 14  | An EPUB's spine is quadratic in its items                                      | runtime   | S      | left as is |
+| 14  | An EPUB's spine is quadratic in its items (resolved)                           | runtime   | S      | resolved   |
 | 15  | Tidal's Clear All Downloads unlinks the cache on the UI thread, under a lock   | runtime   | M      | left as is |
 | 16  | A refused cover costs a process each                                           | runtime   | M      | left as is |
 | 17  | A whole-library read holds a second copy of the library                        | runtime   | L      | deferred   |
@@ -161,10 +161,10 @@ Entries 7 to 17 are costs the code marks itself.
 - **State:** the favourites and kept slots are sorted once (`qsort`, by key above the hearts' three bits, then by their place in the old scan), and each song binary-searches its run and reads it in that order, so every song's hearts are the scan's. A search step is 16 instructions: about 180 a song at 1,000 rated, 3,600,000 for 20,000 songs, plus the sort (about 10,000 comparisons of an 11-instruction comparator through libc's `qsort`), under 10 ms in all.
 - **Guard:** the `rate_all` cases in `test/fw/test_nav_library_pages.py` (favourite and kept, a damaged table's repeated keys, slots of 5 to 7 hearts, and 300 songs against a model of the scan).
 
-### 14. An EPUB's spine is quadratic in its items
+### 14. An EPUB's spine is quadratic in its items (resolved)
 
 - **Where:** `patch/books.c:358`.
-- **Decision:** left as is. The OPF is capped at `META_MAX` (1 MB), the scan is in memory on the Books worker and can be cancelled at each itemref, and each itemref then inflates a document, which dwarfs it. An id index, as the comment says, if big books prepare slowly.
+- **State:** Books, the text and EPUB reader, was retired from the firmware with its file: nothing reads an EPUB.
 
 ### 15. Tidal's Clear All Downloads unlinks the cache on the UI thread, under a lock
 
