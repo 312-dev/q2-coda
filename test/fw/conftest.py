@@ -19,10 +19,12 @@ import host  # noqa: E402
 
 ROOT = host.ROOT
 O = {k: int(v, 0) for k, v in re.findall(r'^#define (\w+) +(0x[0-9a-f]+|\d+)\b', (ROOT/'patch/offsets.inc').read_text(), re.M)}
-# navigation.c's source with navigation.h and the units split out of it (each includes navigation.h), for
+# navigation.c's source with navigation.h, the pieces it includes (patch/nav/) and the units split out of it
+# (each includes navigation.h), for
 # tests that read a #define or enum the UI's code shares
 NAVIGATION_UNITS = sorted(p.stem for p in (ROOT/'patch').glob('*.c') if '#include "navigation.h"' in p.read_text())
-NAVIGATION_SOURCE = ''.join((ROOT/'patch'/n).read_text() for n in ['navigation.h', *(f'{u}.c' for u in NAVIGATION_UNITS)])
+NAVIGATION_SOURCE = ''.join([*((ROOT/'patch'/n).read_text() for n in ['navigation.h', *(f'{u}.c' for u in NAVIGATION_UNITS)]),
+                             *(p.read_text() for p in sorted((ROOT/'patch/nav').glob('*.c')))])  # navigation.c's pieces
 
 
 def ui_name(lib, name):

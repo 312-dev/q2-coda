@@ -2,6 +2,7 @@
 class HeadsetMachine(Machine):
     def __init__(self,owner=1):
         super().__init__(); self.owner=owner; self.playing=True; self.session=42; self.actions=[]; self.saved=0
+        self.mock('strstr@GLIBC_2.0')  # guest.c guest_key reads Guest Play's state fields
         self.handlers[syms['mclGetSavePlayStatus']]='hs:saved'
         for name in ('spot_status','radio_status','video_status','spot_session','radio_session','video_session',
                      'spot_set_playing','radio_set_playing','video_set_playing','spot_media','radio_media','video_key'):

@@ -221,7 +221,7 @@ int lib_has_server(void) {
     ".fileurl,'') url, ifnull(album,'') album, ifnull(songer,'') artist, ifnull(nullif(style,''),'[Missing "  \
     "genre]') genre, title(name," src ".filename) title, ifnull(nullif(albumsonger,''),ifnull(songer,'')) "      \
     "aartist, case when cast(year as text) glob '[1-9][0-9][0-9][0-9]*' then cast(substr(year,1,4) as "       \
-    "integer) else 0 end year, ifnull(track,0) track, ifnull(cd_num,0) disc, ifnull(time_create,0) added, "      \
+    "integer) else 0 end year, ifnull(" src ".track,0) track, ifnull(cd_num,0) disc, ifnull(time_create,0) added, " \
     secs " secs, " srv " srv"
 
 static sqlite3 *db;

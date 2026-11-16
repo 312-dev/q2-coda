@@ -1484,7 +1484,7 @@ static void cat_scan(void) {
         if (e->d_name[0] != '.' || !*id || strlen(id) >= sizeof cat.app[0].id ||
             !strcmp(id, "q2pod"))
             continue;
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+        addon_q2app(id, path, sizeof path);
         if (!state_read(path, raw, sizeof raw) || number(raw, "catalogue") != 1) continue;
         cat_app_t *a = &cat.app[n++];
         memset(a, 0, sizeof *a);
@@ -1672,7 +1672,7 @@ int catalogue_signed(char *id, char *name, unsigned size) {
         tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/credentials", cat.app[i].id);
         if (access(path, 0)) continue;
         tk_snprintf(id, 16, "%s", cat.app[i].id);
-        tk_snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", cat.app[i].id);
+        addon_q2app(cat.app[i].id, path, sizeof path);
         state_read(path, raw, sizeof raw);
         field(raw, "name", name, size);
         if (!*name) tk_snprintf(name, size, "%s", cat.app[i].id);
