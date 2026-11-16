@@ -31,7 +31,7 @@ enum {
 };
 
 /* Every Library row, stock's and the added ones: its label takes the list titles' role. In a set
- * without Library icons (Classic) it also drops its icon and starts its label at the set's
+ * without Library icons (lib_art 0, as OLED's) it also drops its icon and starts its label at the set's
  * text inset on screen, its right edge kept. */
 static void library_look(void *view) {
     const theme_t *T = theme();
@@ -56,7 +56,7 @@ static void library_look(void *view) {
     }
 }
 
-/* 1 when the Library leads with Search, in a set without Library icons (Classic): the pull-down's
+/* 1 when the Library leads with Search, in a set without Library icons (lib_art 0): the pull-down's
  * own stock search (0x5350d4, which ignores its arguments) shown, as Home's Split list hides the
  * pull. Home's pane counts Shuffle's row from it (coverflow.c coverflow_home_row). */
 int library_search(void) { return !geom_val(V_LIB_ART); }
@@ -133,34 +133,13 @@ static int shows_image(void *w, const char *name) {
     return 0;
 }
 
-/* Home pane's Streaming and Games captions, and the card's free space in tenths of a GB (0: no card
- * mounted, whose dir shares /mnt's device), read with home_counts, never on a wheel move: the
- * Streaming page's rows with the app scan it makes, less Configuration and those hidden; and the
- * Games page's built-ins and card games. */
-void home_pane_read(int *services, int *games, int *free_tenths) {
-    char hide[SVC_HIDE];
-    unsigned card[36], mnt[36], fs[32];
-    int n = 0, total = (st.svc_n = addon_scan()) + 5;
-    svc_hidden(hide);
-    for (int i = 0; i < total; ++i)
-        if (!svc_find(hide, i)) ++n;
-    *services = n;
-    *games = GAMES_BUILTIN + addon_games_last();
-    /* statfs on MIPS o32: f_bsize word 1, f_bavail word 7 (netupdate.c). In binary GB, as About's
-     * Remaining: 209715 blocks of 512 B to a tenth, so 32 bits hold a 2 TB card's. */
-    *free_tenths = !__xstat(3, "/mnt/mmc", card) && !__xstat(3, "/mnt", mnt) && card[0] != mnt[0] &&
-                           !statfs("/mnt/mmc", fs)
-                       ? (int)(fs[7] * (fs[1] >> 9) / 209715)
-                       : 0;
-}
-
 /* A Streaming row tagged as service i (svc), hidden when STREAMHIDE holds it. */
 static void svc_row(void *row, int i, char *hide) {
     prop(row, SVC_PROP, i + 1);
     if (svc_find(hide, i)) widget_set_visible(row, 0, 0);
 }
 
-/* OLED's Streaming marks (feedback_oled, docs/oled-design.md): a service row's logo on its disc
+/* OLED's Streaming marks (docs/oled-design.md): a service row's logo on its disc
  * gives way to the theme's 20 px monochrome mark (tools/art.py STREAM_MARKS), drawn with the row
  * by stream_mark_paint in Text Secondary, white on the selection, centred on x 34 as Folder view's
  * glyph, the row's words from x 52. A card app with a mark of its own (stream_apps, by its id)
@@ -227,7 +206,7 @@ static void stream_own_icon(void *w, void *button, void *canvas, int x, int y) {
     }
 }
 void stream_mark_paint(void *w, void *canvas) {
-    if (!w || !feedback_oled()) return;
+    if (!w) return;
     int m = widget_get_prop_int(w, SVC_MARK_PROP, 0);
     if (m < 1 || m > SVC_MARK_OWN) return;
     void *button = widget_count_children(w) ? widget_get_child(w, 0) : (void *)0;
@@ -289,7 +268,7 @@ int ringnav_stream(void *win, void *ctx) {
         svc_row(library_row(view, "stream_radio", radio_open, 0, "Internet Radio", 1), i++, hide);
         svc_row(library_row(view, "stream_airplay", airplay_open, 0, "AirPlay", 1), i, hide);
         library_row(view, "stream_config", stream_config, 0, "Configuration", 1);
-        if (feedback_oled()) stream_marks(view);
+        stream_marks(view);
     }
     return result;
 }
@@ -341,13 +320,13 @@ void home_pad(void *view) {
         I(view, VIEW_CONTENT_H) = foot + I(view, W_H) - (rest < I(view, W_H) ? rest : I(view, W_H));
 }
 
-/* coverflow.c coverflow_home_layout, once list (Home's main list) is placed: its box, the rest's
- * rows or, under OLED's pages, to bottom (the window's foot, in its parent), its scroll kept. */
+/* coverflow.c coverflow_home_layout, once list (Home's main list) is placed: its box to bottom (the
+ * window's foot, in its parent), its scroll kept. */
 void home_overflow(void *list, int bottom) {
     void *view = widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     int foot, rest = home_rest(view, &foot), y = view ? I(view, SCROLL_Y) : 0;
     if (!rest) return;
-    int h = oled_pages() ? bottom - I(list, W_Y) : rest;
+    int h = bottom - I(list, W_Y);
     /* both by hand, as coverflow.c home_width sizes them: a resize lays out neither again */
     if (I(list, W_H) != h) widget_move_resize(list, I(list, W_X), I(list, W_Y), I(list, W_W), h);
     if (I(view, W_H) != h) widget_move_resize(view, I(view, W_X), I(view, W_Y), I(view, W_W), h);
@@ -374,11 +353,11 @@ void home_np_keep(int d) {
 }
 
 /* Shuffle Songs acts rather than opening a list, so has no chevron (navigation.c paint_chevrons):
- * under a theme that draws one on every row its label takes the chevron's room, to the right
- * column, and the name fits Split's half. Minimal's capitals close up instead (paint_caps). */
+ * as every other row draws one, its label takes the chevron's room, to the right column, and the
+ * name fits Split's half. */
 void home_in_place(void *list) {
     void *label = widget_lookup(list, "label_shuffle_songs", 1);
-    if (!label || theme()->painter[PAINT_CHEVRON] != CHEV_ICON) return;
+    if (!label) return;
     int w = I(P(label, W_PARENT), W_W) - geom_val(V_RIGHT_X) - I(label, W_X);
     if (w > I(label, W_W))
         widget_move_resize(label, I(label, W_X), I(label, W_Y), w, I(label, W_H));
@@ -423,7 +402,7 @@ static int lip(int x) {
 void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
     void *view = list && widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     int foot, rest = home_rest(view, &foot);
-    if (!rest || !oled_pages() || !P(canvas, CANVAS_LCD)) return;
+    if (!rest || !P(canvas, CANVAS_LCD)) return;
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y); /* its origin on the screen */
     int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest;
     if (!above && !below) return;

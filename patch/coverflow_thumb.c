@@ -106,7 +106,7 @@ static void th_name(void *s, int album, int n) {
                          (int)th_album(album - (int)th_album(th_aim(), (unsigned)n), (unsigned)n));
 }
 
-/* Fast Navigation off, 1.7.6's letters: a letter on, Minimal's jump (coverflow_letter_next): the
+/* Fast Navigation off, 1.7.6's letters: a letter on, the theme's jump (coverflow_letter_next): the
  * spin names the first album of the letter after the last one named, or the previous letter's
  * turning back, round the ends as the covers go, its letter shown over the covers for LETTER_MS.
  * From the last one named, not where the flow has got to: that passes over a letter the flow has
@@ -122,7 +122,7 @@ static void th_name_letter(void *s, int n, unsigned now) {
     coverflow_letter(s, letter, now);
 }
 
-/* A letter on, Minimal's jump (coverflow_letter_next): the next letter's first album, or the
+/* A letter on, the theme's jump (coverflow_letter_next): the next letter's first album, or the
  * previous letter's turning back, its letter held over the row. The first of letters goes on from
  * the entry with the row held as the entry left it (coverflow_hold), every cover on its album, at
  * the entry's speed v, to the first letter whose first album is v slide_ms or more on from the one
@@ -305,7 +305,7 @@ static void th_beat(void *s, int n, int travel, unsigned now, int ms, int since)
 /* usable: navigation.c's; gated: travel is to be dropped (its gates). Answers THUMB_*. */
 int coverflow_wheel_poll(int usable, int gated) {
     void *s = cf.slide, *wm = window_manager();
-    int shown = usable && cfs.thumb && fx.frame && !fl.panel && covers_live() &&
+    int shown = usable && cfs.thumb && fx.frame && covers_live() &&
                 widget_count_children(s) && window_manager_get_top_window(wm) == cf.page &&
                 !window_manager_is_animating(wm);
     int raw = shown && !window_manager_get_pointer_pressed(wm);

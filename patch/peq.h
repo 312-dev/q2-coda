@@ -274,11 +274,6 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
 int feedback_note(void *line, void *hint, int free);
 int feedback_below(void *w); /* the screen y under w */
 void page_fit(void *view);   /* a page_list's rows ending above the glass on a list_fit set */
-/* coverflow.c's flip panel, which navigation.c's hold menu wears under Classic */
-#define PANEL_X 40 /* the panel's first column: Cover Flow's axis less half of it */
-#define BACK_W 294 /* its width and its rows' */
-void coverflow_panel_paint(void *canvas, int x, int y, int head, int h, int over);
-void panel_font(void *label, int px, int bold);
 void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(void *, void *));
 void motion_open(void *page,
                  const char *name); /* navigation.c: page_open's page takes the theme's hint */
@@ -322,7 +317,7 @@ int modal_set(void); /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
-/* navigation.c: Classic's value */
+/* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item);                /* navigation.c: comma lists */
 int csv_toggle(char *list, unsigned size, const char *item);
@@ -520,7 +515,7 @@ int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas),
     lyrics_gone(void);
-unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column (Minimal's own: MINIMAL_FILL) */
+unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column  */
 unsigned rgba(unsigned rgb, unsigned alpha);
 /* const and pure below: each one's result rests on its arguments (and pure's, memory) alone, so
  * clang can keep one call for several (theme_engine.c and navigation.c define these). */
@@ -556,7 +551,6 @@ int video_start(const char *file, int radio); /* books.c */
  * keyboard is up. */
 #define EDIT_NAME "q2_edit"
 void *edit_create(void *item, const char *input_type, int y, int h);
-void t9_box(void *page, void *edit, const char *tips); /* classic_pages.c: a search box and its hint */
 const char *output_device(char *vol);         /* books.c */
 void dac_take(void);                          /* books.c */
 /* navigation.c: the theme's font for role on w, or stock's; canvas text's face, 0: the system
@@ -564,52 +558,23 @@ void dac_take(void);                          /* books.c */
 int theme_font(void *w, int role, int was);
 int face_font(void *w, int face, int px, int was); /* ... a FONT_* face at px (0: the style's) */
 #define FONT_ROW -2 /* was: cache the answer in w's own "_font" prop */
-/* font_weight.c: w keeps the theme's bold intent where its text fell back to stock's face */
-void font_weight_mark(void *w, int bold);
 void marq_restart(void *row); /* navigation.c: its title changed, its marquee re-armed */
 void list_stop_scroll(void *w); /* navigation.c: its scroll animation stopped */
 const char *theme_face(const unsigned *s, int n, int *px); /* *px, unless 0: the px to draw it at */
-void bar_title_sync(void *win); /* navigation.c: Classic's bar title names win */
+void bar_title_sync(void *win); /* navigation.c: the bar's title names win */
 void forget_rows(void *list);   /* navigation.c: a hidden list opens at its top next time */
-/* navigation.c: Classic's Spotify and Internet Radio Now Playing, laid out as the local page, 0
- * under the other themes; Classic's bar on a canvas (its scrub cue with mark), 0 where none. */
-int stream_ipod(void *art, void *const text[4], void *elapsed, void *remain, void *bar,
-                void *heart);
-/* navigation.c: Classic's times and bar fitted to a track sec long (the bar 0: the radio's); 1 when
- * they moved. Not in a paint. */
-int ipod_times(void *elapsed, void *remain, void *bar, int sec);
-int ipod_bar(void *canvas, int x, int y, int bw, int on, int mark);
-/* navigation.c's painters for Classic's info screen (lockscreen.c); colours are final. */
-typedef struct {
-    unsigned rgb;       /* 0xRRGGBB */
-    short r;            /* a disc's radius in tenths of the -50..50 box; 0: pts */
-    unsigned char n;    /* pts */
-    unsigned char hand; /* 1 the hour's angle, 2 the minute's */
-    short pts[5][2];    /* tenths, pointing at 12 */
-} clock_part_t;
-void paint_clock(void *w, void *canvas, int x, int y, int size, const char *art, int h, int m,
-                 const clock_part_t *parts, int n);
-void paint_page(void *w, void *canvas, int y);
+/* navigation.c's painters; colours are final. */
 void paint_art(void *w, void *canvas, const char *name, int x, int y);
-void paint_dark_bar(void *w, void *canvas, const unsigned *title, unsigned key);
-int dark_title_y(void);
-void paint_tray(void *canvas, int x, int y, int w, int h);
-void text_shadow(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
-                 unsigned alpha);
 void final_text(void *canvas, const char *face, const unsigned *s, const void *r, unsigned px,
                 unsigned color);
-unsigned dark_bar_key(const unsigned *t);
-int clock_minutes(void), bar_status(void);
+int bar_status(void);
 void slider_label(void *w, int x, int y, int ww, int h, int px, const char *face);
 void text_ink(void *w, unsigned color, int n); /* a label's final 0xAARRGGBB, in either half */
 /* navigation.c: a feature settings row's "Title: value", on the set's right column where it has one */
 void row_value_text(void *label, const char *text);
-void slider_number(void *label), slider_tray_dirty(void *page),
-    slider_centre_hint(void *page, int night);
+void slider_page_dirty(void *page); /* slider_page.c: its switch row, after the hidden switch changes */
 void switch_row(void *win, void *view); /* the toolbar's, as a row */
 void stock_more_speed(void *win);
-void stock_more_into(void *win);
-void info_poll(void);      /* lockscreen.c: the info screen's timer, with the screen lit */
 int xfade_page(void *top); /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
@@ -636,11 +601,9 @@ int title_gone(void *w, void *event); /* ... and looks for its source again at t
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);   /* theme_engine.c: Light Mode */
 unsigned unflip(unsigned v); /* theme_engine.c: the grey Light Mode's flip turns into v */
-int ipod_square_art(void); /* navigation.c: Classic, and Modern under Square */
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);       /* radio.c */
 void toast(const char *text); /* navigation.c */
-int feedback_oled(void);      /* feedback.c: OLED's toasts and dialogs */
 /* smart_wifi.c: its radio woken, 1 while its link comes up; its radio off; an action
  * held for that link (fn(ctx, 0) once it is up, if page, or any page when 0, is still in use) */
 int smart_wifi_wait(void), smart_wifi_off(void);

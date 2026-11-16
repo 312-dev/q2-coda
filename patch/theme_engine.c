@@ -79,8 +79,7 @@ unsigned mix(unsigned from, unsigned to, int j, int n) {
     return c;
 }
 
-/* The Accent, Home, Battery and Theme settings; each theme keeps its own accent
- * (docs/ipod.md#display-settings). */
+/* The Accent, Home and Battery settings (docs/ipod.md#display-settings). */
 static const unsigned accents[][5] = { ACCENTS };
 _Static_assert(sizeof accents / sizeof *accents == ACCENT_N, "one accent per ACCENTS row");
 const char *const accent_names[] = { "Accent: Graphite",  "Accent: Crimson", "Accent: Tidal",
@@ -111,28 +110,15 @@ int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
 /* A list_fit set's lists end their whole rows by this screen row (OLED's 282), 0: no such set. */
 int list_fit_end(void) { return geom_val(V_LIST_FIT) ? geom_val(V_BAR) + geom_val(V_LIST_END) : 0; }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
- * 2 Carousel), 2 Battery, 3 Theme, 4 Shortcut, 5 Corners, 6 Light Mode, 7 Smart Awake, 8 Centred
- * Now Playing, 9 the Clicker's output (no row of its own: Controls' Key Tone row shows it,
- * clicker.c), 10 Single Press Scrub, 11 Time in Title; 12 on: a theme's own options, SETTING_OWN +
- * k for theme_keys[k]. */
-static const char *const setting_keys[] = { "ACCENT",    "HOME",    "BATTERY",     "THEME",
-                                            "SHORTCUT",  "ROUNDED", "LIGHT",       "KEEPLIT",
-                                            "NPCENTRED", "CLICKER", "SCRUBSINGLE", "TIMETITLE" };
-const int setting_counts[] = { SETTING_N_ACCENT,
-                               SETTING_N_HOME,
-                               SETTING_N_BATTERY,
-                               THEME_N,
-                               SETTING_N_SHORTCUT,
-                               SETTING_N_CORNERS,
-                               SETTING_N_LIGHT,
-                               2,
-                               SETTING_N_NP_LAYOUT,
-                               3,
-                               2,
-                               2 };
-int *const setting_values[] = { &st.accent,     &st.home,    &st.battery,      &st.theme,
-                                &st.shortcut,   &st.rounded, &st.light,        &st.keep_lit,
-                                &st.np_centred, &st.clicker, &st.scrub_single, &st.time_title };
+ * 2 Carousel), 2 Battery, 3 Shortcut, 4 Light Mode, 5 Smart Awake, 6 the Clicker's output (no row
+ * of its own: Controls' Key Tone row shows it, clicker.c), 7 Time in Title; 8 on: the theme's own
+ * options, SETTING_OWN + k for theme_keys[k]. */
+static const char *const setting_keys[] = { "ACCENT", "HOME",    "BATTERY", "SHORTCUT",
+                                            "LIGHT",  "KEEPLIT", "CLICKER", "TIMETITLE" };
+const int setting_counts[] = { SETTING_N_ACCENT,   SETTING_N_HOME, SETTING_N_BATTERY, SETTING_N_SHORTCUT,
+                               SETTING_N_LIGHT,    2,              3,                 2 };
+int *const setting_values[] = { &st.accent, &st.home,     &st.battery, &st.shortcut,
+                                &st.light,  &st.keep_lit, &st.clicker, &st.time_title };
 /* An option's value and config key: the accent's are the theme's own, an own option's st.own[] and
  * theme_keys[], the rest setting_values'. */
 int *option_slot(const theme_t *T, int setting) {
@@ -182,50 +168,36 @@ void light_apply(const int *tm) {
 /* accent()'s first call: the [IPOD] keys. Its own function, so accent()'s every later call (each
  * colour Light Mode flips asks twice: ipod_light(), scheme()) skips this frame. */
 __attribute__((noinline)) static void settings_read(void) {
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 3; ++i)
         *setting_values[i] = config_value("IPOD", setting_keys[i], setting_counts[i], 0);
     st.shortcut = config_value("IPOD", "SHORTCUT", SETTING_N_SHORTCUT,
                                SETTING_N_SHORTCUT); /* no key, see shortcut() */
-    st.minimal_accent =
-        config_value("IPOD", "MINIMAL_ACCENT", ACCENT_N, 0); /* Graphite, its preset */
-    /* a missing key reads the live theme's Corners preset (Minimal's: Round); Square where the
-     * theme states none */
-    const option_t *corners = option_of(&themes[st.theme], SETTING_ROUNDED);
-    st.rounded =
-        config_value("IPOD", "ROUNDED", 2, corners && corners->preset >= 0 ? corners->preset : 0);
     st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
-    st.np_centred = config_value("IPOD", "NPCENTRED", 2, 0);
     st.clicker = config_value("IPOD", "CLICKER", 3, 0); /* Both unless chosen (clicker.c) */
-    /* on unless chosen off: Centre on Now Playing scrubs and a double press turns the screen off,
-     * as on the other pages */
-    st.scrub_single = config_value("IPOD", "SCRUBSINGLE", 2, 1);
     st.time_title = config_value("IPOD", "TIMETITLE", 2, 1); /* the clock unless chosen */
-    /* the themes' own keys, after the thirteen, in table order */
+    /* the theme's own keys, after the payload's, in table order */
     for (int k = 0; k < THEME_KEYS; ++k)
         st.own[k] = config_value("IPOD", theme_keys[k].key, theme_keys[k].n, theme_keys[k].def);
-    /* A stored value outside an option's values reads as its default (Classic's Ivory: Classic
-     * Blue), the key untouched. A payload key is every theme's: only the live theme's reading
-     * counts. */
-    for (int t = 0; t < THEME_N; ++t)
-        for (int k = 0; k < themes[t].n_opts; ++k) {
-            const option_t *o = &themes[t].opts[k];
-            int *v = option_slot(&themes[t], o->setting);
-            if (o->values && o->def >= 0 && !(o->values >> *v & 1) &&
-                (t == st.theme || o->setting == SETTING_ACCENT))
-                *v = o->def;
-        }
+    /* A stored value outside an option's values reads as its default, the key untouched. */
+    for (int k = 0; k < themes->n_opts; ++k) {
+        const option_t *o = &themes->opts[k];
+        int *v = option_slot(themes, o->setting);
+        if (o->values && o->def >= 0 && !(o->values >> *v & 1)) *v = o->def;
+    }
     int buf[11];
     st.light_day = light_day(clock_now(buf));
     st.settings_read = 1;
 }
 int accent(void) {
     if (!st.settings_read) settings_read();
-    return *themes[st.theme].accent_slot;
+    return *themes->accent_slot;
 }
+/* THEME_N is 1: OLED, the one built-in theme, is themes[0]. */
+_Static_assert(THEME_N == 1, "theme() returns the one row");
 const theme_t *theme(void) {
     accent();
-    return &themes[st.theme];
+    return themes;
 }
 /* 1 for scheme v's light half: its mode, else Light Mode (Auto: light_day), which reads 0 where the
  * theme does not declare it (setting()'s rule). The dark row's mode: both carry it. */
@@ -234,30 +206,26 @@ static int light_on(const theme_t *T, int v) {
     return m == SCHEME_LIGHT || (m == SCHEME_DERIVE && !(T->undeclared >> SETTING_LIGHT & 1) &&
                                  (st.light == 2 ? st.light_day : st.light));
 }
-/* The half Light Mode picks; Minimal's and Modern's two halves are one row. */
+/* The half Light Mode picks; a theme stating no final value has one row for both halves. */
 const scheme_t *scheme(void) {
     int v = accent();
-    const theme_t *T = &themes[st.theme];
+    const theme_t *T = themes;
     return &(light_on(T, v) ? T->light : T->schemes)[v];
 }
 /* scheme() for code that runs only in the light half (flip, red_map's light term), so after
  * ipod_light()'s accent(): the light row without a second accent() and light_on() on these
- * per-colour paths (a Classic folder paint sets ~470 colours). */
+ * per-colour paths (a folder paint can set ~470 colours). */
 static const scheme_t *light_row(void) {
-    const theme_t *T = &themes[st.theme];
-    return &T->light[*T->accent_slot];
+    return &themes->light[*themes->accent_slot];
 }
 /* An option the theme does not declare reads 0, its stored key untouched (ponytail: 0 is every
  * hidden option's value today; a theme hiding Home or Battery needs a value per bit). */
 int setting(int i) {
     accent();
-    return themes[st.theme].undeclared >> i & 1 ? 0 : *setting_values[i];
+    return themes->undeclared >> i & 1 ? 0 : *setting_values[i];
 }
 /* A theme's own choice (OWN_*): its stored value while the theme offers it, else 0. */
 static int theme_own(int k) { return option_of(theme(), SETTING_OWN + k) ? st.own[k] : 0; }
-/* Classic's Home in Split (coverflow.c): Library on Home and Row Preview */
-int home_lib_on(void) { return theme_own(OWN_HOMELIB); }
-int row_preview_on(void) { return theme_own(OWN_ROWPREVIEW); }
 /* OLED's song rows (song_rows.c): Song Artist's and Song Length's values, SONG_ARTIST_* and
  * SONG_LENGTH_* (navigation.h) in theme.xml's order */
 int song_artist(void) { return theme_own(OWN_SONGARTIST); }
@@ -272,10 +240,6 @@ int np_time_toggle(void) {
     write_int_config(st.own[OWN_NPTIME], "IPOD", theme_keys[OWN_NPTIME].key);
     return 1;
 }
-const char *const np_pages[] = { "playing_page", "playing_page_stock" }; /* [NP_*] */
-_Static_assert(sizeof np_pages / sizeof *np_pages == NP_N, "one page per NP_* layout");
-/* The Now Playing page: the theme's layout, which Centred Now Playing forces to NP_CENTRED. */
-int np_layout(void) { return setting(SETTING_NPCENTRED) ? NP_CENTRED : theme()->np_layout; }
 /* Shortcut with no key (or a value this build does not know, such as an old build's reading of a
  * newer one) is Rockbox while the card has it, else Favorites: asked each time, as the card may
  * mount after the first read. SHORTCUT_NONE is read as it is: the picker and Home's row ask for it
@@ -298,25 +262,7 @@ int ipod_home(void) {
 }
 int ipod_light(void) {
     int v = accent();
-    return light_on(&themes[st.theme], v);
-}
-/* Status Bar's look: the theme whose fill, battery, play state and icon rows (bar.icons) the bar
- * paints, Status Bar's value in the picker's order, 0 the theme's own. The row is still the booted
- * set's, so a change needs no restart.
- * ponytail: its height, its widgets' places and its title stay the theme's; a look that moves those
- * needs a geometry set per bar and a restart. */
-const theme_t *bar_theme(void) {
-    int v = theme_own(OWN_STATUSBAR);
-    return v ? &themes[theme_rows[v - 1]] : theme();
-}
-/* Its row for its own stored accent, in the half this theme's Light Mode picks. */
-const scheme_t *bar_scheme(void) {
-    const theme_t *B = bar_theme();
-    return &(ipod_light() ? B->light : B->schemes)[*B->accent_slot];
-}
-int bar_geom_val(int v) {
-    const theme_t *B = bar_theme();
-    return B == theme() ? geom_val(v) : geom_vals[theme_geom(B)][v];
+    return light_on(themes, v);
 }
 int ipod_battery(void) {
     accent();
@@ -386,10 +332,7 @@ int home_shortcut_open(void *ctx, void *event) {
 unsigned tone_of(const unsigned *a, int tone) {
     return ipod_light() && neutral(a[0]) ? a[TONE_RED] : a[tone];
 }
-unsigned accent_tone(int tone) {
-    const scheme_t *S = scheme();
-    return tone == TONE_LIGHT && S->flags & SCHEME_CARD ? S->fill : tone_of(S->tones, tone);
-}
+unsigned accent_tone(int tone) { return tone_of(scheme()->tones, tone); }
 
 /* A color_t (bytes r, g, b, a) that is stock red blended with a neutral, t * red + k * white per
  * channel within RED_TOLERANCE, becomes the same blend of one of the preset's tones (TONE_RED for
@@ -431,5 +374,5 @@ unsigned accent_map(unsigned c, int preset, int tone) {
     if (ipod_light())
         return !(c >> 24) || neutral(c) ? ui_ink(c)
                                         : red_map(c, flip(tone_of(a, tone)), 0xffffff, 1);
-    return T->schemes[preset].flags & SCHEME_RAW_RED ? c : red_map(c, a[tone], 0xffffff, 0);
+    return red_map(c, a[tone], 0xffffff, 0);
 }

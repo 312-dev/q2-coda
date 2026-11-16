@@ -1,5 +1,5 @@
 /* Lock screen (docs/internals.md#lock-screen): six built-in wallpapers, drawn by wall_render and
- * shipped as no image files, the Large clock and OLED's screen. wall_render is plain C, so
+ * shipped as no image files, and OLED's screen. wall_render is plain C, so
  * test/patch.py also builds it on the host (PEQ_HOST) to check it and write previews. */
 #include "peq.h"
 
@@ -149,20 +149,14 @@ static const char *const walls[WALLS] = { "q2pod:aurora", "q2pod:sunrise", "q2po
 #define PICTURES P(p_deque_screensaverlist, 0)
 
 static struct {
-    void *img, *full;                      /* the lock window's picture and its wallpaper */
-    /* Classic's info screen (info_screen): its widgets while img is its picture; no picture
-     * (the page shows), Black and Large's clock; its timer and the state it last painted. */
-    void *date, *pct, *card, *title, *artist, *hint;
-    int built_in, info, page, black, large; /* built_in: img is a built-in's, either theme */
-    int oled;                               /* OLED's screen (oled_lock): img is dimmed */
-    unsigned timer, shown;
+    void *img, *full;           /* the lock window's picture and its wallpaper */
+    void *date, *title, *artist; /* OLED's screen's (oled_lock) widgets while img is its picture */
+    int built_in, black;        /* built_in: img is a built-in's; black: the Black one */
+    int oled;                   /* OLED's screen (oled_lock): img is dimmed */
     unsigned full_key;                     /* full's id, width and height, kept between windows */
     void *thumb[WALLS], *small[WALLS];     /* the picker's built-in thumbnails and theirs */
 } lk __attribute__((section(".scratch")));
 
-#define INFO_DATE_PX (theme()->font_px[ROLE_BAR])
-#define INFO_TITLE_PX 27
-#define INFO_ARTIST_PX 21
 static int wall_id(const char *name) {
     for (int i = 0; name && i < WALLS; ++i)
         if (!strcmp(name, walls[i])) return i;
@@ -191,9 +185,8 @@ static void *wall_bitmap(int w, int h, int id) {
  * widget already replaced by a newer one matches nothing here. */
 static int forget(void *ctx, void *event) {
     if (ctx == lk.img) { /* full stays for the next lock window */
-        lk.img = lk.date = lk.pct = lk.card = lk.title = lk.artist = lk.hint = 0;
-        lk.info = lk.oled = 0;
-        stop_timer(&lk.timer);
+        lk.img = lk.date = lk.title = lk.artist = 0;
+        lk.oled = 0;
     }
     for (int i = 0; i < WALLS; ++i)
         if (ctx == lk.thumb[i]) {
@@ -249,37 +242,6 @@ static void big_clock(void *win) {
     widget_set_prop_str(time, "style:normal:text_align_h", "center");
 }
 
-/* Classic's info screen: its hands, white on the dark face, and its pivot. */
-static const clock_part_t info_hands[] = {
-    { 0xffffff, 0, 5, 1, { { -15, 0 }, { -30, -70 }, { 0, -270 }, { 30, -70 }, { 15, 0 } } },
-    { 0xffffff, 0, 5, 2, { { -13, 0 }, { -24, -80 }, { 0, -360 }, { 24, -80 }, { 13, 0 } } },
-    { 0xffffff, 30, 0, 0, { { 0 } } },
-    { 0x0c0f15, 12, 0, 0, { { 0 } } },
-};
-/* What the screen shows that no stock widget repaints: the minute, the battery, the play state. */
-static unsigned info_state(void) {
-    return (unsigned)(clock_minutes() + 1) << 12 |
-           dark_bar_key(lk.pct ? widget_get_text(lk.pct) : 0) << 2 | ((unsigned)bar_status() & 3);
-}
-/* Stock repaints its own labels. A look each second with the screen on, and a repaint only on a
- * change. With it off the timer stops, for the battery, and info_poll starts it again at the first
- * loop pass with it lit, the pass that repaints the whole screen. */
-static int info_tick(const void *info) {
-    (void)info;
-    if (!g_backlight_status) {
-        lk.timer = 0;
-        return 0; /* RET_OK: a timer's end */
-    }
-    unsigned now = lk.img ? info_state() : lk.shown;
-    if (now != lk.shown) widget_invalidate_force(lk.img, 0);
-    lk.shown = now;
-    return 8; /* RET_REPEAT */
-}
-void info_poll(void) {
-    if (!lk.info || lk.timer || !g_backlight_status) return;
-    lk.shown = info_state();
-    rearm(&lk.timer, info_tick, 1000);
-}
 /* A label's face and size for its text, which stock writes after the window loads, in any script.
  * Answers the face (0: the system font) and px. */
 static const char *info_face(void *w, int *px) {
@@ -300,99 +262,6 @@ static void info_label(void *w, int x, int y, int ww, int h, int px, const char 
     slider_label(w, x, y, ww, h, px, face);
     widget_set_prop_str(w, "style:normal:text_align_h", align);
 }
-/* Stock's window, stock's widgets, in screen pixels: over the picture or the page, a dark bar with
- * the date, a tray with the clock, a tray with the song. A digit_clock formats itself each second,
- * so the date's format is all there is to set; both clocks keep stock's format otherwise. */
-static void info_screen(void *win, void *img, int id) {
-    int large = ringnav_lock_clock();
-    void *info = widget_lookup(win, "view_timeinfo", 1),
-         *time = widget_lookup(win, "clock_time", 1), *date = widget_lookup(win, "clock_date", 1),
-         *pct = widget_lookup(win, "label_battery", 1),
-         *batt = widget_lookup(win, "img_battery", 1),
-         *bar = widget_lookup(win, "pgbar_battery", 1),
-         *shade = widget_lookup(win, "view_shade", 1),
-         *card = widget_lookup(win, "view_playinfo", 1),
-         *cover = widget_lookup(win, "img_playcover", 1),
-         *hint = widget_lookup(win, "img_slide", 1);
-    /* Large's clock box holds its font, over the card's top rows: stock's card is above it, and
-     * AWTK looks through the children from the last, so those taps stay the card's */
-    if (info) widget_move_resize(info, 0, 0, 375, large ? 192 : 172);
-    if (shade) widget_set_visible(shade, 0, 0);
-    if (date) {
-        info_label(date, 0, dark_title_y(), 375, 25, INFO_DATE_PX, "classic-light", "center");
-        widget_set_prop_str(date, "format", "MMM D, Y");
-    }
-    if (time) {
-        if (large)
-            info_label(time, 16, 24, 343, 168, 166, "classic-light", "center");
-        else
-            info_label(time, 134, 44, 219, 116, 112, "classic-light", "center");
-    }
-    if (pct) {
-        info_label(pct, 226, 0, 48, 26, 13, "default", "right");
-        widget_set_visible(pct, ipod_battery() != 0, 0);
-    }
-    /* hidden, not emptied: stock's battery timer (0x53ed54) writes its image again */
-    if (batt) widget_set_visible(batt, 0, 0);
-    if (bar) widget_set_visible(bar, 0, 0);
-    if (card) { /* its box holds the tray's ring and the row under it, so a hidden card takes them
-                 */
-        widget_move_resize(card, 15, 185, 345, 87);
-        widget_set_prop_int(card, "style:normal:bg_color", 0);
-    }
-    if (cover) widget_move_resize(cover, 13, 13, 60, 60);
-    void *title = widget_lookup(win, "scrlabel_title", 1),
-         *artist = widget_lookup(win, "scrlabel_artist", 1);
-    info_label(title, 85, 17, 245, 28, INFO_TITLE_PX, "classic-light", "left");
-    info_label(artist, 85, 44, 245, 22, INFO_ARTIST_PX, "classic-light", "left");
-    if (artist) text_ink(artist, 0xc8ffffffu, 1);
-    if (hint) { /* stock's 30 x 16 >>> flat, at 21 x 7, its white at 85% */
-        widget_move_resize(hint, 177, 288, 21, 7);
-        image_set_draw_type(hint, IMAGE_DRAW_FILL);
-        widget_set_opacity(hint, 216);
-    }
-    lk.date = date, lk.pct = pct, lk.card = card, lk.title = title, lk.artist = artist;
-    lk.hint = hint;
-    lk.large = large;
-    lk.black = id == WALLS - 1;
-    lk.page = id < 0 && (!*PICTURE || !tk_strcmp(PICTURE, "screensaver_default"));
-    if (lk.page) image_base_set_image(img, ""); /* the page paints here */
-    lk.img = img;
-    if (id < 0) widget_on(img, EVT_DESTROY, forget, img);
-    lk.info = 1;
-    lk.shown = info_state();
-    rearm(&lk.timer, info_tick, 1000);
-}
-/* The screen's own paint, in img's border hook: under the clocks, the song and the hint. */
-static void info_paint(void *w, void *canvas) {
-    void *lcd = P(canvas, CANVAS_LCD);
-    if (!lcd) return;
-    int px = INFO_TITLE_PX;
-    info_face(lk.title, &px);
-    px = INFO_ARTIST_PX;
-    info_face(lk.artist, &px);
-    px = INFO_DATE_PX;
-    info_face(lk.date, &px);
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    if (lk.page) paint_page(w, canvas, 26);
-    if (lk.black) { /* whichever half: the window's own black flips */
-        stock_canvas_set_fill_color(canvas, RGBA(0));
-        canvas_fill_rect(canvas, 0, 26, 375, 294);
-    }
-    stock_canvas_set_fill_color(canvas, fill);
-    paint_dark_bar(w, canvas, (const unsigned *)0,
-                   dark_bar_key(lk.pct ? widget_get_text(lk.pct) : 0));
-    paint_tray(canvas, 16, 44, 343, lk.large ? 128 : 116);
-    if (lk.card && widget_get_visible(lk.card)) paint_tray(canvas, 16, 186, 343, 84);
-    if (lk.hint && widget_get_visible(lk.hint)) /* its box's 177, 288 less the image's pad */
-        paint_art(w, canvas, "classic_light_hint_shadow", 173, 284);
-    if (!lk.large) {
-        int minutes = clock_minutes();
-        paint_clock(w, canvas, 29, 54, 96, "classic_light_clock_dark", minutes / 60, minutes % 60,
-                    info_hands, minutes < 0 ? 0 : (int)(sizeof info_hands / sizeof *info_hands));
-    }
-}
-
 /* OLED's screen (docs/oled-design.md#screens), stock's widgets in screen pixels, sizes AWTK's (the
  * design's px times 1.21, docs/oled-design.md#type): the time in Inter Medium, the design's 56 px
  * (Clock: Large 96), centred with its digits on y 120; the date under it, 16 px Text Secondary;
@@ -461,7 +330,7 @@ static void oled_lock(void *win, void *img, int id) {
  * closes, whose destroy clears g_lockscreen_pageflag. 1 if it did; elsewhere the hold stays stock's
  * (the Shut Down? prompt). A short press stays stock's screen-off. */
 int lockscreen_hold(void *top) {
-    if (!oled_pages() || !top || !g_lockscreen_pageflag || !g_backlight_status ||
+    if (!top || !g_lockscreen_pageflag || !g_backlight_status ||
         tk_strcmp(widget_get_prop_str(top, "name", ""), "saverscreen_page"))
         return 0;
     int timer = widget_get_prop_int(top, "timer_idex", -1);
@@ -471,12 +340,12 @@ int lockscreen_hold(void *top) {
 }
 
 /* saverscreen_page_init: stock builds the lock window; a built-in picture then paints in place of
- * stock's (lockscreen_paint), and Classic's info screen, OLED's screen or Large lays it out again. */
+ * stock's (lockscreen_paint), and OLED's screen lays it out again (or, with no picture widget, the
+ * Large clock). */
 int lockscreen_init(void *win, void *ctx) {
     int result = stock_saver_trampoline(win, ctx);
     void *img = widget_lookup(win, "img_screensaver", 1);
     int id = wall_id(PICTURE);
-    int info = img && classic_pages();
     lk.built_in = id >= 0;
     if (img && id >= 0) {
         image_base_set_image(img, ""); /* nothing to look up on every paint */
@@ -491,9 +360,7 @@ int lockscreen_init(void *win, void *ctx) {
         }
         widget_on(img, EVT_DESTROY, forget, img);
     }
-    if (info)
-        info_screen(win, img, id);
-    else if (img && oled_pages())
+    if (img)
         oled_lock(win, img, id);
     else if (ringnav_lock_clock())
         big_clock(win);
@@ -569,9 +436,6 @@ void lockscreen_paint(void *w, void *canvas) {
         if (w != lk.img || !lk.oled) widget_on_paint_children(w, canvas);
     }
     /* one test on every other widget's paint (test/patch.py's Cover Flow paint budget) */
-    if (w == lk.img) {
-        if (lk.oled) oled_dim(w, canvas);
-        if (lk.info) info_paint(w, canvas);
-    }
+    if (w == lk.img && lk.oled) oled_dim(w, canvas);
 }
 #endif

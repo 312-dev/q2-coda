@@ -1,11 +1,8 @@
-/* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts, a theme whose
- * dialog.confirm.painter is "oled"): stock's toast as a pill over the page, and stock's confirm
+/* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the page, and stock's confirm
  * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb;
  * an empty or offline page's note; the confirmation after a shuffle. page_fit, a page_list cut to
  * whole rows above the glass, shares the note's screen arithmetic. */
 #include "navigation.h"
-
-int feedback_oled(void) { return theme()->painter[PAINT_CONFIRM] == CONFIRM_OLED; }
 
 static int top_named(void *w, const char *name) {
     return w && P(w, W_PARENT) == window_manager() &&
@@ -23,7 +20,7 @@ static int top_named(void *w, const char *name) {
 #define PILL_RGB 0x1c1c1e
 #define PILL_MAX 327 /* the text column to the right column */
 
-int feedback_toast(void *top) { return feedback_oled() && top_named(top, "msginfo_dialog"); }
+int feedback_toast(void *top) { return top_named(top, "msginfo_dialog"); }
 /* The window under OLED's toast: the window manager's last window before it. */
 void *feedback_under(void *toast) {
     void *wm = window_manager(), *under = (void *)0;
@@ -110,7 +107,7 @@ static const char *const verbs[] = {
 #define CONFIRM_ROW 32
 #define CONFIRM_Y 58 /* the list's top (oled-design.md Spacing) */
 
-static int confirm_on(void *w) { return feedback_oled() && top_named(w, "confirminfo_dialog"); }
+static int confirm_on(void *w) { return top_named(w, "confirminfo_dialog"); }
 
 /* The dialog's first paint, before its background: its prompt into the bar and hidden, the cells
  * moved onto the rows (stock binds them by name), the second one's text the verb. Once: the first
@@ -237,7 +234,7 @@ void page_fit(void *view) {
 /* Two labels of one parent placed and inked as the note, their text left as it is: line centred
  * between free and NOTE_END, hint (if any) 24 px lower. */
 int feedback_note(void *line, void *hint, int free) {
-    if (!feedback_oled() || !line) return 0;
+    if (!line) return 0;
     int py = screen_y(P(line, W_PARENT)), light = ipod_light();
     if (free < py) free = py;
     int mid = (free + NOTE_END) / 2 - NOTE_H / 2 - py;
@@ -258,7 +255,7 @@ int feedback_note(void *line, void *hint, int free) {
     return 1;
 }
 int feedback_empty(void *parent, int free, const char *message, const char *hint) {
-    if (!feedback_oled() || !parent) return 0;
+    if (!parent) return 0;
     void *line = widget_lookup(parent, "_empty", 0), *sub = widget_lookup(parent, "_empty_hint", 0);
     if (!line) {
         line = text(parent, 0, 0, 375, NOTE_H);
@@ -278,7 +275,7 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
  * ringnav_sleeptimer), which Centre turns (edit_single): the selection's bar is on it from the
  * moment the page opens, its words white as a selected row's (st.sel_accent). Under the row. */
 void feedback_switch_bar(void *w, void *canvas) {
-    if (!feedback_oled() || !w || !P(canvas, CANVAS_LCD) ||
+    if (!w || !P(canvas, CANVAS_LCD) ||
         tk_strcmp(widget_get_type(w), "button") || !widget_count_children(w))
         return;
     void *label = widget_get_child(w, 0), *win = window_of(w),
@@ -304,7 +301,6 @@ static int offline_gone(void *page, void *event) {
     return 0;
 }
 int feedback_offline(const char *title) {
-    if (!feedback_oled()) return 0;
     if (offline_page) return 1;
     void *page = page_open("offline_page", offline_gone, page_keyup);
     if (!page) return 0;
@@ -319,7 +315,7 @@ int feedback_offline(const char *title) {
  * (g_class_type): My Fav (0xf00a), Recent (0xf007), Most Played's stock list (0xf008), Recently
  * Added (0xf009). Runs on the bar's paint; writes only when the list's emptiness changes. */
 void feedback_songs(void *top, void *row) {
-    if (!feedback_oled() || !theme()->shuffle_row || !row || window_of(row) != top) return;
+    if (!theme()->shuffle_row || !row || window_of(row) != top) return;
     void *list = P(p_deque_showlist, 0);
     int empty = list && !deque_size(list), was = widget_get_prop_int(top, "_empty_songs", 0);
     if (empty == was) return;
@@ -372,7 +368,7 @@ static void *conf_line(void *page, int cy, int h, const char *s, int role, int p
     return label;
 }
 void feedback_shuffled(const char *what, int songs) {
-    if (!feedback_oled() || conf.page || songs <= 0) return;
+    if (conf.page || songs <= 0) return;
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return;
     conf.page = page;

@@ -142,7 +142,7 @@ static int settled(void) {
 #define CHROME_HOLD_MS 1500
 #define FULL_SX 1.55f /* Field's rings across the screen, from the page's 1.45 and 0.74 */
 #define FULL_SY 1.25f
-static int full(void) { return oled_pages(); } /* declared above */
+static int full(void) { return 1; } /* declared above */
 int visualizer_full(void) { return full() && settled(); }
 /* chrome a step on to now: 1 if it changed */
 static int chrome_step(unsigned now) {
@@ -456,8 +456,7 @@ void visualizer_attach(void *win) {
     vz.win = win;
     vz.slide = slide;
     vz.w = I(slide, W_W) > 0 && I(slide, W_W) <= 375 ? I(slide, W_W) : 375;
-    /* Classic's slide starts higher, its lyrics down it as far (tools/ipod.py NP_IPOD_LIFT): the
-     * page starts where they do, so it stays where the others have it on screen */
+    /* the page starts where the slide's lyrics do */
     void *lrc = widget_lookup(slide, "view_lrc", 1);
     int top = lrc ? I(lrc, W_Y) : 0;
     vz.h = I(slide, W_H) - top < VIS_SLIDE_H ? I(slide, W_H) - top : VIS_SLIDE_H;

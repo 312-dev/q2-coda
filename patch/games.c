@@ -507,7 +507,6 @@ int snake_step(struct snake *s) {
 #define VORTEX_GAIN 100
 #define FRAME_MS 33
 #define SAVE_MS 2000 /* a move's save waits this long; a power-off loses at most this */
-#define CELL 30
 #define OLED_CELL 24 /* Sudoku under OLED: the grid's 216 px in the content area's 224 */
 #define OLED_ROOM 224 /* ... the window's rows above y 282 on screen, under the 58 px status row */
 #define OLED_DIGIT_PX 19 /* the design's 16 px, AWTK's size */
@@ -865,36 +864,26 @@ static void frame_rect(void *canvas, int x, int y, int w, int h, unsigned rgb, u
     box(canvas, x + w - 2, y, 2, h, rgb);
 }
 
-/* A theme with its own pages (classic_pages(), Classic) has its own boards: felt, gloss and an LCD,
- * in final colours (ui_ink_raw). Any other draws them in its accent on the page, flipped by Light
- * Mode as the page is. */
+/* The boards are drawn in the theme's accent on the page, flipped by Light Mode as the page is. */
 
 /* A grey v (0 to 255) that Light Mode's flip (ui_ink) leaves at v: a card is paper-white in either
  * mode, its black suits black. */
 static unsigned unflipped(unsigned v) { return unflip(v) * 0x010101u; }
 
 enum { LEFT, MID, RIGHT };
-/* s (ASCII) in the theme's face at px, h rows from y: from x, centred on it or ending at it. A
- * theme with capitals on Home (Minimal) takes them here too, SUDO_TRACK apart. Returns its width.
- */
+/* s (ASCII) in the theme's face at px, h rows from y: from x, centred on it or ending at it.
+ * Returns its width. */
 static int text_at(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
                    int align) {
     unsigned wide[40], n = 0;
-    int cw[40], w = 0, caps = theme()->caps_home, fpx = (int)px;
-    for (; s[n] && n < 40; ++n)
-        wide[n] = caps && s[n] >= 'a' && s[n] <= 'z' ? (unsigned)s[n] - 32 : (unsigned char)s[n];
+    int w, fpx = (int)px;
+    for (; s[n] && n < 40; ++n) wide[n] = (unsigned char)s[n];
     if (!n) return 0;
-    unsigned step = caps ? 1 : n; /* capitals a letter at a time, to space them */
-    int track = caps ? SUDO_TRACK : 0;
     canvas_set_font(canvas, theme_face(wide, (int)n, &fpx), (unsigned)fpx);
-    for (unsigned k = 0; k < n; k += step)
-        w += cw[k] = (int)(canvas_measure_text(canvas, &wide[k], step) + 0.5f) + track;
-    w -= track;
+    w = (int)(canvas_measure_text(canvas, wide, n) + 0.5f);
     x -= w * align / 2;
-    for (unsigned k = 0; k < n; x += cw[k], k += step) {
-        int r[4] = { x - 1, y, cw[k] - track + 2, h };
-        draw_centred(canvas, &wide[k], step, r, px, color);
-    }
+    int r[4] = { x - 1, y, w + 2, h };
+    draw_centred(canvas, wide, n, r, px, color);
     return w;
 }
 
@@ -916,70 +905,22 @@ static void hud(void *canvas, const char *name, unsigned v, int x, int y, int ri
 #define POP_W 281
 #define POP_ROW 32 /* the title's rows, and a choice's */
 /* The theme's pop-up mid-screen over the dimmed game: a title, then a hint (a) or two choices (a,
- * b), the chosen one drawn as the theme's selection. A theme that paints its dialogs (Classic)
- * gets a panel in its scheme's final colours: the title on the bar's gloss over its line, the
- * choice on the band. Any other gets a dark box, the choice on the accent where the selection is
- * a band (Modern), beside Home's dot where it is a card (Minimal). ponytail: no soft shadow under
- * the panel and no chevron on the band; paint_panel's shadow images are per size. */
-/* its own panel needs the scheme's gloss and band: fewer than two stops are none */
-static int pop_own(const theme_t *T, const scheme_t *S) {
-    return T->painter[PAINT_CONFIRM] == CONFIRM_CLASSIC_LIGHT && S->bar.n > 1 && S->sel.n > 1;
-}
-/* the panel's chosen row, its row i of POP_ROW */
-static unsigned pop_band(const scheme_t *S, int i) {
-    return i == 0 && S->sel_top                ? S->sel_top
-           : i == POP_ROW - 1 && S->sel_edge ? S->sel_edge
-                                             : stops_row(&S->sel, i, POP_ROW);
-}
+ * b), in a dark box, the chosen one on the accent's bar. */
 static void popup(void *canvas, const char *title, const char *a, const char *b, int choice) {
-    const theme_t *T = theme();
-    const scheme_t *S = scheme();
-    int own = pop_own(T, S);
-    int band = T->painter[PAINT_SELECTION] != SEL_CARD;
-    int top = POP_ROW + (own ? 1 : 6), h = b ? top + 2 * POP_ROW + (own ? 0 : 8) : POP_ROW + 44;
+    int top = POP_ROW + 6, h = b ? top + 2 * POP_ROW + 8 : POP_ROW + 44;
     int x = (375 - POP_W) / 2, y = (g->h - h) / 2;
     stock_canvas_set_fill_color(canvas, 0x80000000u); /* black at half, final */
     canvas_fill_rect(canvas, 0, 0, 375, g->h);
-    if (own) {
-        unsigned paper = ipod_light() ? S->paper : 0, ink = ipod_light() ? S->ink : 0xffffff;
-        rect_t r = { x, y, POP_W, h }, out = { x - 1, y - 1, POP_W + 2, h + 2 };
-        stops_t ring = { 2, { 0, 100 }, { S->bar_line, S->bar_line } };
-        int sel = b ? top + choice * POP_ROW : h;
-        ui_ink_raw(1);
-        paint_round_rows(canvas, &out, &ring, LETTER_RADIUS + 1);
-        for (int i = 0; i < h; ++i) {
-            unsigned c = i < POP_ROW    ? stops_row(&S->bar, i, POP_ROW)
-                         : i == POP_ROW ? S->bar_line
-                                        : paper;
-            if (i >= sel && i < sel + POP_ROW) c = pop_band(S, i - sel);
-            round_row(canvas, &r, LETTER_RADIUS, i, 0xff000000u | c);
-        }
-        text_at(canvas, title, 187, y, POP_ROW, 21, rgba(ink, 255), MID);
-        if (!b)
-            text_at(canvas, a, 187, y + POP_ROW + 1, h - POP_ROW - 1, 17,
-                  rgba(flip_if(ipod_light(), S->muted), 255), MID);
-        for (int k = 0; b && k < 2; ++k)
-            text_at(canvas, k ? b : a, x + 16, y + top + k * POP_ROW, POP_ROW, 23,
-                  rgba(k != choice ? ink : S->sel_text ? S->sel_text : 0xffffff, 255), LEFT);
-        ui_ink_raw(0);
-        return;
-    }
-    round_box(canvas, x, y, POP_W, h, band ? 0x1c1c1c : 0, band ? 12 : 6);
-    frame_rect(canvas, x, y, POP_W, h, band ? 0x3a3a3a : 0x4a4a4a, band ? 12 : 6);
+    round_box(canvas, x, y, POP_W, h, 0x1c1c1c, 12);
+    frame_rect(canvas, x, y, POP_W, h, 0x3a3a3a, 12);
     text_at(canvas, title, 187, y + 4, POP_ROW, 20, rgba(0xffffff, 255), MID);
-    if (!b)
-        text_at(canvas, a, 187, y + POP_ROW + 2, 30, band ? 16 : 13,
-              rgba(band ? 0xaaaaaa : SUDO_MUTED, 255), MID);
+    if (!b) text_at(canvas, a, 187, y + POP_ROW + 2, 30, 16, rgba(0xaaaaaa, 255), MID);
     for (int k = 0; b && k < 2; ++k) {
         int ry = y + top + k * POP_ROW, on = k == choice;
-        if (on && band) /* the accent's bar, white on it in either mode */
+        if (on) /* the accent's bar, white on it in either mode */
             round_box(canvas, x + 10, ry + 1, POP_W - 20, POP_ROW - 2, accent_tone(0), 6);
-        if (on && !band)
-            round_box(canvas, x + 76, ry + (POP_ROW - HOME_DOT) / 2, HOME_DOT, HOME_DOT, 0xffffff,
-                      HOME_DOT / 2);
-        text_at(canvas, k ? b : a, band ? 187 : x + 92, ry, POP_ROW, 18,
-              rgba(!on ? band ? 0xaaaaaa : SUDO_MUTED : band ? unflipped(0xff) : 0xffffff, 255),
-              band ? MID : LEFT);
+        text_at(canvas, k ? b : a, 187, ry, POP_ROW, 18,
+                rgba(!on ? 0xaaaaaa : unflipped(0xff), 255), MID);
     }
 }
 
@@ -991,29 +932,10 @@ static unsigned drawn(unsigned rgb) {
 
 /* popup()'s look for a card game's own menus, the value of the Q2_POPUP that addon_game_start hands
  * it: "<style> <box> <frame> <title> <text> <pick> <pick_text>", RRGGBB as drawn in either half.
- * The style is minimal (a dot beside the chosen row, capitals), modern (the chosen row on an accent
- * bar) or classic (the panel: box its paper, frame its line, then its title strip's POP_ROW rows
- * and the chosen row's band). */
+ * The style is modern: the chosen row on an accent bar. */
 void popup_env(char *out, unsigned size) {
-    const theme_t *T = theme();
-    const scheme_t *S = scheme();
-    int own = pop_own(T, S), band = T->painter[PAINT_SELECTION] != SEL_CARD;
-    unsigned paper = ipod_light() ? S->paper : 0, ink = ipod_light() ? S->ink : 0xffffff;
-    /* the band's stops are read only under own: a scheme without them divides by zero */
-    const unsigned *c =
-        own ? (const unsigned[6]){ paper, S->bar_line, ink, ink, pop_band(S, POP_ROW / 2),
-                                   S->sel_text ? S->sel_text : 0xffffff }
-            : (const unsigned[6]){ drawn(band ? 0x1c1c1c : 0),           drawn(band ? 0x3a3a3a : 0x4a4a4a),
-                                   drawn(0xffffff),                      drawn(band ? 0xaaaaaa : SUDO_MUTED),
-                                   drawn(band ? accent_tone(0) : 0xffffff), drawn(band ? unflipped(0xff) : 0xffffff) };
-    int n = tk_snprintf(out, size, "%s %06x %06x %06x %06x %06x %06x",
-                        own    ? "classic"
-                        : band ? "modern"
-                               : "minimal",
-                        c[0], c[1], c[2], c[3], c[4], c[5]);
-    for (int i = 0; own && i < 2 * POP_ROW && n > 0 && (unsigned)n + 8 <= size; ++i)
-        n += tk_snprintf(out + n, size - n, " %06x",
-                         i < POP_ROW ? stops_row(&S->bar, i, POP_ROW) : pop_band(S, i - POP_ROW));
+    tk_snprintf(out, size, "modern %06x %06x %06x %06x %06x %06x", drawn(0x1c1c1c), drawn(0x3a3a3a),
+                drawn(0xffffff), drawn(0xaaaaaa), drawn(accent_tone(0)), drawn(unflipped(0xff)));
 }
 
 /* Vortex's and Snake's: Return's menu, the game over, the pause. */
@@ -1027,47 +949,31 @@ static void paused_popup(void *canvas, int over) {
 }
 
 /* Clues on grey, entries plain in the tone, a conflict red and underlined, the cursor framed, and
- * every cell holding the cursor's digit (the one being picked) dark on the tone. The theme's own
- * board: the cursor's cell is its selection band, framed only while a digit is picked, and the
- * cells holding its digit a pale tint of the band on the paper. */
+ * every cell holding the cursor's digit (the one being picked) dark on the tone. */
 static void sudoku_paint(void *canvas, unsigned tone) {
     const struct sudoku *s = &g->sud;
-    const scheme_t *S = scheme();
-    /* OLED: the grid in the content area, y 58 to 282 on screen (docs/oled-design.md#the-screen) */
-    int oled = oled_pages(), cell = oled ? OLED_CELL : CELL, x0 = (375 - 9 * cell) / 2,
-        y0 = oled ? (OLED_ROOM - 9 * cell) / 2 : (g->h - 9 * cell) / 2;
-    int same = g->picking ? g->pick : s->cell[s->cur] & 15, own = classic_pages() && S->sel.n > 1;
-    unsigned pale = mix(S->sel.rgb[S->sel.n / 2], ipod_light() ? S->paper : 0, 3, 4);
+    /* the grid in the content area, y 58 to 282 on screen (docs/oled-design.md#the-screen) */
+    int cell = OLED_CELL, x0 = (375 - 9 * cell) / 2, y0 = (OLED_ROOM - 9 * cell) / 2;
+    int same = g->picking ? g->pick : s->cell[s->cur] & 15;
     char d[2] = { 0, 0 };
     box(canvas, x0, y0, 9 * cell, 9 * cell, 0x555555);
     for (int i = 0; i < 81; ++i) {
         int x = x0 + i % 9 * cell, y = y0 + i / 9 * cell, v = s->cell[i] & 15;
         int picked = g->picking && i == s->cur, bad = !picked && sud_conflict(s, i);
         if (picked) v = g->pick;
-        int lit = v && v == same;                         /* the picked cell too */
-        int band = own && i == s->cur && !g->picking; /* the cursor's, on the band */
+        int lit = v && v == same; /* the picked cell too */
         box(canvas, x + 1, y + 1, cell - 2, cell - 2,
-            lit && !own         ? tone
+            lit                 ? tone
             : s->cell[i] & CLUE ? 0x333333
                                 : 0);
-        if (band)
-            paint_stops(canvas, x + 1, y + 1, cell - 2, cell - 2, &S->sel);
-        else if (lit && own) { /* final, whatever Light Mode */
-            stock_canvas_set_fill_color(canvas, RGBA(pale));
-            canvas_fill_rect(canvas, x + 1, y + 1, cell - 2, cell - 2);
-        }
         if (!v) continue;
         d[0] = (char)('0' + v);
-        if (band) ui_ink_raw(1);
-        caption(canvas, d, x, y, cell, cell, oled ? OLED_DIGIT_PX : 20,
-                rgba(band                    ? S->sel_text ? S->sel_text : 0xffffff
-                     : bad                   ? 0xff5050
-                     : lit && !own           ? 0
-                     : lit                   ? 0xffffff
-                     : s->cell[i] & CLUE     ? 0xffffff
-                                             : tone,
+        caption(canvas, d, x, y, cell, cell, OLED_DIGIT_PX,
+                rgba(bad                 ? 0xff5050
+                     : lit               ? 0
+                     : s->cell[i] & CLUE ? 0xffffff
+                                         : tone,
                      255));
-        if (band) ui_ink_raw(0);
         if (bad) box(canvas, x + cell * 3 / 10, y + cell - 6, cell - cell * 3 / 5, 2, 0xff5050);
     }
     for (int k = 0; k <= 9; k += 3) {
@@ -1075,8 +981,7 @@ static void sudoku_paint(void *canvas, unsigned tone) {
         box(canvas, x0 - 1, y0 + k * cell - 1, 9 * cell + 2, 2, 0xaaaaaa);
     }
     /* the accent's text tone: Graphite's light tone is the grid's grey */
-    if (!own || g->picking)
-        frame_rect(canvas, x0 + s->cur % 9 * cell, y0 + s->cur / 9 * cell, cell, cell,
+    frame_rect(canvas, x0 + s->cur % 9 * cell, y0 + s->cur / 9 * cell, cell, cell,
                    g->picking ? 0xffffff : accent_tone(3), 0);
     if (g->confirm)
         popup(canvas, "New game?", "Centre: yes   Return: no", 0, 0);
@@ -1099,58 +1004,37 @@ static void dot(void *vg, float x, float y, float r, unsigned color) {
     vgcanvas_fill(vg);
 }
 
-#define STARS 32 /* the theme's own Vortex: its sky's */
 /* The rings shaded from the tone inwards, a broken brick flashing white as it goes, the paddle
- * round-ended, the ball with a fading trail in the tone, and the lives as balls under Best. The
- * theme's own: a night sky, each ring its own colour with a light along its outer edge, the paddle
- * and the ball in a glow. ponytail: the light is a second arc a brick, 96 strokes a frame at
- * most; drop it (VORTEX_SHINE 0) if a Q2 can't hold the frame rate. */
-#define VORTEX_SHINE 1
+ * round-ended, the ball with a fading trail in the tone, and the lives as balls under Best. */
 static void vortex_paint(void *canvas, unsigned tone) {
-    static const unsigned ring[RINGS] = { 0xf0a020, 0x36b24a, 0x2f86f0 };
-    static const stops_t sky = { 3, { 0, 50, 100 }, { 0x050a1c, 0x14244f, 0x050a1c } };
     const struct vortex *v = &g->vx;
     void *vg = canvas_get_vgcanvas(canvas);
     float cx = 187.5f, cy = (float)g->h / 2;
     unsigned age = (unsigned)time_now_ms() - g->pop_at;
-    int own = classic_pages();
-    unsigned ink = rgba(0xffffff, 255), dim = own ? rgba(0xa8b4cc, 255) : SPOT_GREY;
-    if (own) {
-        ui_ink_raw(1);
-        paint_stops(canvas, 0, 0, 375, g->h, &sky);
-        for (unsigned k = 0; k < STARS; ++k)
-            scrub_row(canvas, (0x50u + k % 4 * 0x30) << 24 | 0xffffff, (int)(k * 97 % 375),
-                      (int)(k * 61 % (unsigned)g->h), 1);
-    }
+    unsigned ink = rgba(0xffffff, 255), dim = SPOT_GREY;
     if (vg) {
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
-        arc(vg, cx, cy, R_PAD, 0, 1024, 1, rgba(own ? 0x3a4a78 : 0x333333, 255));
+        arc(vg, cx, cy, R_PAD, 0, 1024, 1, rgba(0x333333, 255));
         for (int k = 0; k < RINGS; ++k)
             for (int j = 0; j < SEGS; ++j)
                 if (v->brick[k] >> j & 1) {
                     int r = R_B + k * BRICK_T + BRICK_T / 2;
-                    unsigned c = own ? ring[k] : mix(tone, 0, k, 4);
-                    arc(vg, cx, cy, r, j * 64 + 2, j * 64 + 62, BRICK_T - 2, rgba(c, 255));
-                    if (own && VORTEX_SHINE)
-                        arc(vg, cx, cy, r + 2, j * 64 + 5, j * 64 + 59, 3,
-                            rgba(mix(c, 0xffffff, 1, 2), 255));
+                    arc(vg, cx, cy, r, j * 64 + 2, j * 64 + 62, BRICK_T - 2,
+                        rgba(mix(tone, 0, k, 4), 255));
                 }
         if (age < POP_MS && !g->paused && v->state != OVER)
             arc(vg, cx, cy, R_B + g->pop_ring * BRICK_T + BRICK_T / 2, g->pop_seg * 64 + 2,
                 g->pop_seg * 64 + 62, BRICK_T - 2, rgba(0xffffff, 255 - 255 * age / POP_MS));
         vgcanvas_set_line_cap(vg, "round");
-        if (own) arc(vg, cx, cy, R_PAD, v->pa - PAD_HALF, v->pa + PAD_HALF, 12, rgba(0x6fb4ff, 70));
         arc(vg, cx, cy, R_PAD, v->pa - PAD_HALF, v->pa + PAD_HALF, 6, rgba(0xffffff, 255));
         for (int k = TRAIL - 1; v->state == PLAY && k >= 0; --k)
             dot(vg, cx + (float)g->trail[k][0] / 65536, cy + (float)g->trail[k][1] / 65536,
-                3.5f - k * 0.5f, rgba(own ? 0x8fc4ff : tone, 160 - 36 * k));
-        if (own)
-            dot(vg, cx + (float)v->x / 65536, cy + (float)v->y / 65536, 8, rgba(0x9fd0ff, 80));
+                3.5f - k * 0.5f, rgba(tone, 160 - 36 * k));
         dot(vg, cx + (float)v->x / 65536, cy + (float)v->y / 65536, 4, rgba(0xffffff, 255));
         for (int k = 0; k < v->lives; ++k)
             dot(vg, 375 - HUD_X - 55 + (k - (v->lives - 1) / 2.0f) * 14, (float)g->h - 18, 4,
-                rgba(own ? 0xc8d4e4 : 0xaaaaaa, 255));
+                rgba(0xaaaaaa, 255));
         vgcanvas_restore(vg);
     }
     hud(canvas, "Score", (unsigned)v->score, HUD_X, 6, 0, ink, dim);
@@ -1170,45 +1054,23 @@ static void vortex_paint(void *canvas, unsigned tone) {
 #define FAN 20     /* a face-up card's label showing under the next */
 #define FAN_DOWN 6
 #define LABEL_PX 20     /* the rank and suit in a whole strip */
-#define SOL_HAND 0xffd23c /* the theme's own table: the cursor's and a held run's frame */
-#define SOL_FELT 0x2b7437 /* its felt, one green */
 
 /* A rounded card: face down in the tone, darker inside a border when nothing covers it, or its rank
  * on the left and suit on the right of the top strip in red or black, its suit large below when
  * nothing covers it. A strip under FAN (a closed-up column's) takes smaller text, whole in what
- * shows. The theme's own (final colours): white with a shadow under an uncovered one, its back
- * blue in a white border, dotted when nothing covers it. */
+ * shows. */
 static void card_paint(void *canvas, int x, int y, int c, int whole, int strip, unsigned tone) {
     static const unsigned short suit[] = { 0x2660, 0x2665, 0x2666, 0x2663 }; /* ♠♥♦♣ */
-    static const stops_t back = { 2, { 0, 100 }, { 0x3f7fe0, 0x1f4fb0 } };
     unsigned text[3], n = 0;
-    int own = classic_pages();
-    if (own && whole) {
-        scrub_row(canvas, 0x50000000u, x + 3, y + CARD_H, CARD_W - 6);
-        scrub_row(canvas, 0x24000000u, x + 5, y + CARD_H + 1, CARD_W - 10);
-    }
-    round_box(canvas, x, y, CARD_W, CARD_H, own ? 0x8d8d8d : 0x777777, 5);
+    round_box(canvas, x, y, CARD_W, CARD_H, 0x777777, 5);
     round_box(canvas, x + 1, y + 1, CARD_W - 2, CARD_H - 2,
-              own        ? 0xffffff
-              : c & UP   ? unflipped(0xf2)
-                         : mix(tone, 0, 1, 2),
-              4);
+              c & UP ? unflipped(0xf2) : mix(tone, 0, 1, 2), 4);
     if (!(c & UP)) {
-        rect_t in = { x + 3, y + 3, CARD_W - 6, CARD_H - 6 };
-        if (!own) {
-            if (whole)
-                round_box(canvas, x + 4, y + 4, CARD_W - 8, CARD_H - 8, mix(tone, 0, 3, 4), 3);
-            return;
-        }
-        for (int i = 0; i < (whole ? in.h : FAN_DOWN); ++i) /* a covered one shows FAN_DOWN rows */
-            round_row(canvas, &in, 3, i, 0xff000000u | stops_row(&back, i, in.h));
-        for (int j = 3; whole && j < in.h - 2; j += 4)
-            for (int i = j & 4 ? 5 : 3; i < in.w - 3; i += 4)
-                scrub_row(canvas, 0x48ffffffu, in.x + i, in.y + j, 2);
+        if (whole) round_box(canvas, x + 4, y + 4, CARD_W - 8, CARD_H - 8, mix(tone, 0, 3, 4), 3);
         return;
     }
     c &= ~UP;
-    unsigned ink = rgba(c / 13 % 3 ? 0xd01818 : own ? 0x101010 : unflipped(0x10), 255);
+    unsigned ink = rgba(c / 13 % 3 ? 0xd01818 : unflipped(0x10), 255);
     if (c % 13 == 9) text[n++] = '1';
     text[n++] = (unsigned char)"A234567890JQK"[c % 13];
     text[n++] = suit[c / 13];
@@ -1222,16 +1084,9 @@ static void card_paint(void *canvas, int x, int y, int c, int whole, int strip, 
 
 /* The top row's piles show their top card, a column all of it, its face-up fan closed up to fit
  * the sheet. The cursor's pile is framed round its top card, white over a held run framed in the
- * tone. The theme's own table is solid green felt, an empty pile a darker well in it, and the frames
- * SOL_HAND. */
+ * tone. */
 static void solitaire_paint(void *canvas, unsigned tone) {
     const struct solitaire *s = &g->sol;
-    int own = classic_pages();
-    if (own) {
-        ui_ink_raw(1);
-        box(canvas, 0, 0, 375, g->h, SOL_FELT);
-        tone = SOL_HAND;
-    }
     for (int p = 0; p < PILES; ++p) {
         int n = s->len[p], i = p >= TABLEAU || !n ? 0 : n - 1, down = 0, fan = FAN;
         int x = SOL_X + col[p] * PITCH, y = p < TABLEAU ? SOL_Y : SOL_Y + CARD_H + 8, first = -1;
@@ -1239,11 +1094,7 @@ static void solitaire_paint(void *canvas, unsigned tone) {
         while (down < n && !(s->card[p][down] & UP)) ++down;
         if (n - down > 1 && down * FAN_DOWN + (n - down - 1) * FAN + CARD_H > room)
             fan = (room - CARD_H - down * FAN_DOWN) / (n - down - 1);
-        if (!n && own) {
-            rect_t well = { x, y, CARD_W, CARD_H };
-            for (int k = 0; k < CARD_H; ++k) round_row(canvas, &well, 5, k, 0x38000000u);
-        } else if (!n)
-            frame_rect(canvas, x, y, CARD_W, CARD_H, 0x333333, 5);
+        if (!n) frame_rect(canvas, x, y, CARD_W, CARD_H, 0x333333, 5);
         for (; i < n; y += s->card[p][i++] & UP ? fan : FAN_DOWN) {
             if (s->card[p][i] & UP && first < 0) first = y;
             card_paint(canvas, x, y, s->card[p][i], i == n - 1, i == n - 1 ? FAN : fan, tone);
@@ -1262,42 +1113,22 @@ static void solitaire_paint(void *canvas, unsigned tone) {
         popup(canvas, "You win!", "Play/Pause: new game", 0, 0);
 }
 
-#define SN_LCD 0xc3cdb4 /* the theme's own Snake: an old LCD's field and its dark dots */
-#define SN_DOT 0x2a3324
 /* The board dark in a grey frame, the body rounded in the tone, the head brighter, the apple round
- * and red, the score and best over it. The theme's own: an LCD in a bezel, the body and a hollow
- * apple square dark dots on its grid of unlit ones. */
+ * and red, the score and best over it. */
 static void snake_paint(void *canvas, unsigned tone) {
     const struct snake *s = &g->sn;
     void *vg = canvas_get_vgcanvas(canvas);
-    int w = SN_N * SN_CELL, own = classic_pages();
+    int w = SN_N * SN_CELL;
     int fx = SN_X + s->food % SN_N * SN_CELL, fy = SN_Y + s->food / SN_N * SN_CELL;
-    if (own) {
-        ui_ink_raw(1);
-        round_box(canvas, SN_X - 6, SN_Y - 6, w + 12, w + 12, 0x8f968a, 8);
-        round_box(canvas, SN_X - 4, SN_Y - 4, w + 8, w + 8, SN_LCD, 6);
-        box(canvas, SN_X, SN_Y, w, w, mix(SN_LCD, SN_DOT, 1, 16)); /* the unlit dots, then gaps */
-        for (int k = 0; k <= SN_N; ++k) {
-            box(canvas, SN_X + k * SN_CELL - 1, SN_Y - 1, 2, w + 2, SN_LCD);
-            box(canvas, SN_X - 1, SN_Y + k * SN_CELL - 1, w + 2, 2, SN_LCD);
-        }
-    } else {
-        round_box(canvas, SN_X - 4, SN_Y - 4, w + 8, w + 8, 0x111111, 8);
-        frame_rect(canvas, SN_X - 4, SN_Y - 4, w + 8, w + 8, 0x333333, 8);
-    }
+    round_box(canvas, SN_X - 4, SN_Y - 4, w + 8, w + 8, 0x111111, 8);
+    frame_rect(canvas, SN_X - 4, SN_Y - 4, w + 8, w + 8, 0x333333, 8);
     for (int i = 0; i < s->len; ++i) {
         int c = s->body[(s->tail + i) % SN_CELLS], head = i == s->len - 1;
         int x = SN_X + c % SN_N * SN_CELL + 1, y = SN_Y + c / SN_N * SN_CELL + 1;
-        if (own)
-            box(canvas, x, y, SN_CELL - 2, SN_CELL - 2, SN_DOT);
-        else
-            round_box(canvas, x, y, SN_CELL - 2, SN_CELL - 2,
-                      head ? mix(tone, 0xffffff, 1, 3) : tone, 3);
+        round_box(canvas, x, y, SN_CELL - 2, SN_CELL - 2, head ? mix(tone, 0xffffff, 1, 3) : tone,
+                  3);
     }
-    if (own && s->state == PLAY) {
-        box(canvas, fx + 1, fy + 1, SN_CELL - 2, SN_CELL - 2, SN_DOT);
-        box(canvas, fx + 3, fy + 3, SN_CELL - 6, SN_CELL - 6, SN_LCD);
-    } else if (vg && s->state == PLAY) {
+    if (vg && s->state == PLAY) {
         vgcanvas_save(vg);
         vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
         dot(vg, (float)fx + SN_CELL / 2.0f, (float)fy + SN_CELL / 2.0f, SN_CELL / 2.0f - 1,

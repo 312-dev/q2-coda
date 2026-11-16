@@ -129,18 +129,6 @@ typedef struct {
                        letters end */
 } cf_depth_t;
 extern cf_depth_t fx;
-/* Classic's flip to the tracks panel (flip_open): its frame, the panel as painted and the turn. */
-typedef struct {
-    void *frame;    /* bitmap_t *, CF_VIEW_W x FLIP_H */
-    unsigned *back; /* BACK_W x BACK_H, the panel as painted */
-    const unsigned *front;
-    void *panel, *sheet, *title, *artist;
-    unsigned timer, t0;
-    int dir;   /* 1 turning to the panel, -1 back, 0 at rest */
-    int drawn; /* the e the frame holds */
-    int light;
-} cf_flip_t;
-extern cf_flip_t fl;
 
 /* The covers held by the thumb (docs/internals.md#coverflow-thumb): one follower per UI pass, in
  * albums from SLIDE_INDEX, its speeds a ms. on: it owns the offset, until it commits. */

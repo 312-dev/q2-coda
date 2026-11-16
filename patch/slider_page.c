@@ -110,7 +110,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
 }
 
 /* The switch row of page, when it is this page: its hidden switch's image change repaints
- * nothing (navigation.c slider_tray_dirty, for crossfade.c's switch). */
+ * nothing (crossfade.c's switch). */
 void slider_page_dirty(void *page) {
     rect_t row = { 0, 0, 375, SP_ROW };
     if (page && page == slider_page_win) widget_invalidate_force(page, &row);

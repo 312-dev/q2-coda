@@ -80,7 +80,7 @@ int az_initial(const char *s) {
 
 /* Which list table w shows, AZ_*, or AZ_NONE: not an indexed one, or too short. */
 static int az_kind(void *w) {
-    if (!w || !oled_pages() || tk_strcmp(widget_get_type(w), "table_client")) return AZ_NONE;
+    if (!w || tk_strcmp(widget_get_type(w), "table_client")) return AZ_NONE;
     void *list = P(p_deque_showlist, 0), *win = window_of(w);
     int rows = I(w, TABLE_ROWS);
     if (rows <= AZ_MIN_ROWS || !list || (int)deque_size(list) != rows || !win) return AZ_NONE;

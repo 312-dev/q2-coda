@@ -114,7 +114,6 @@ static int sb_due(const void *info) {
 
 /* A wheel tick moved list: the indicator shows on it, and its fade starts over. */
 void wheel_sb_arm(void *list) {
-    if (theme()->painter[PAINT_SCROLL] != SB_WHEEL) return;
     sb_at = time_now_ms();
     sb_list = list;
     sb_owner = P(list, W_PARENT); /* read now: only compared later, never followed */

@@ -1,9 +1,10 @@
-<!-- Theme: OLED (IPOD/THEME 3, docs/ipod.md#theme), built to docs/oled-design.md: a black screen, white Inter in
-     sentence case, one blue accent. It extends Minimal, whose layout code it shares, states its own grid as the
-     oled geometry set and draws its own art (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which
-     scales a face so that its ascent less its descent is the size: Inter's line is 1.21 em, so the design's 20 px
-     type is 24 here, its 15 px 18, its 22 px 27. -->
-<theme format="1" id="oled" name="OLED" index="3" order="3" extends="minimal">
+<!-- Theme: OLED (docs/ipod.md#theme), built to docs/oled-design.md: the one built-in theme. A black screen, white
+     Inter in sentence case, one blue accent. It states its own grid as the oled geometry set and draws its own art
+     (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which scales a face so that its ascent less its
+     descent is the size: Inter's line is 1.21 em, so the design's 20 px type is 24 here, its 15 px 18, its 22 px 27.
+     Its numbers that track patch/offsets.inc (Home's Full label end, the scheme colours, Cover Flow's CF_* and the
+     motion) come from there via tools/theme.py ROLE_MACROS. -->
+<theme format="1" id="oled" name="OLED" index="0">
   <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 23 in a 58 px bar drawn black, so
        no band shows; the page's title from x 62, the play state and battery ending 62 px from the right edge, inside
        the glass's top curve (STATUS_ROW_INSET, patch/offsets.inc). Then
@@ -22,9 +23,9 @@
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
             count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
             song_meta_y="8" playlist_pitch="52" set_row="32" set_top="0" set_rows="7"
-            set_icon="0" stream_row="32" bar_px="18" bar_title_w="0" bar_right="0" batt_w="25" batt_h="12"
+            set_icon="0" stream_row="32" bar_px="18" batt_w="25" batt_h="12"
             text_x="24" list_end="224" list_fit="1" status_y="23" right_x="28"
-            action_row="32" home_row="32" home_lib="0" np_ipod="0"
+            action_row="32" home_row="32" home_lib="0"
             stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
@@ -36,7 +37,6 @@
   <colorScheme name="oled-blue" base="cobalt" label="Blue" tones="#2160d8 #2160d8 #2160d8 #2160d8 #2160d8"/>
   <colorSchemes accents="oled-blue"/>
   <colorScheme sel.text="#ffffff" light.sel.text="#ffffff" muted="#858585" light.paper="#ffffff" light.ink="#000000"/>
-  <option key="STATUSBAR" label="Status Bar" default="Theme" preset="Theme"><value label="Theme"/><value themes="picker"/></option>
   <option setting="light" preset="off" keep="auto"/>
   <option setting="accent" key="OLED_ACCENT" default="oled-blue" preset="oled-blue"/>
   <option setting="home" preset="full"/>
@@ -51,26 +51,24 @@
   <!-- The status row's title and clock: Inter Medium 15 (18 here); the slim battery and its play state, the
        theme's own art -->
   <view name="bar">
-    <element name="title" caps="0" font="inter-medium" font_size="18"/>
-    <element name="battery" painter="slim"/>
+    <element name="title" font="inter-medium" font_size="18"/>
   </view>
   <!-- The type roles (oled-design.md Type): rows and values Inter Regular 20 (24), second lines 15 (18), the Now
        Playing title Inter Medium 22 (27), small text 15 (18). The selection is the accent's flat bar, 16 px in
-       from each side with 8 px ends on every row, whatever Corners says. Each row that opens a page has the theme's
-       caret on the right column; a settings row's value is right-aligned there in Text Secondary (#5c5c5c on
-       paper). The scroll indicator: a 4 px track 72 px tall centred on the list (y 134 to 206), 5 px from the
-       edge, with its thumb, while the wheel turns. -->
+       from each side with 8 px ends on every row. Each row that opens a page has the theme's caret on the right
+       column; a settings row's value is right-aligned there in Text Secondary (#5c5c5c on paper). The scroll
+       indicator: a 4 px track 72 px tall centred on the list (y 134 to 206), 5 px from the edge, with its thumb,
+       while the wheel turns. -->
   <view name="list">
-    <element name="selection" painter="bar" inset="16" radius="8" fixed="1"/>
+    <element name="selection" inset="16" radius="8"/>
     <element name="icons" mono="1" badge_muted="1" addon_mono="1"/>
+    <!-- A list left by Return forgets its row: choosing it again opens it at the top, as an iPod's menus and stock's
+         pages do (navigation.c forget_left); Return still lands on the row the parent was left at. -->
+    <element name="reopen" top="1"/>
     <element name="row" font="inter" title_px="24" meta_font="inter" meta_px="18" tall_font="inter" tall_px="24"/>
-    <element name="chevron" painter="icon"/>
     <element name="art" x="24" text_x="72" text_end="319" placeholder="40" radius="4"/>
     <!-- Divider (#222222, the light half's #e5e5e5) under each two-line row, on the text and right columns -->
     <element name="divider" dark.ink="#222222" light.ink="#e5e5e5"/>
-    <!-- Song rows, one line: a mixed list's artist after the title, an album's track numbers and lengths, in 15 px
-         (18 here) in the scheme's muted, Text Tertiary (Light Mode flips it), white on the selection -->
-    <element name="songs" painter="inline"/>
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>
@@ -81,14 +79,14 @@
          as each letter goes in (search_strip.c, docs/ipod.md#search); the keyboard other text boxes open is dark and
          the wheel walks its keys (keyboard.c, docs/ipod.md#keyboard) -->
     <element name="entry" ipod="1"/>
-    <element name="scrollbar" painter="wheel" w="4" right="5" top="134" bottom="206" min="8"
+    <element name="scrollbar" w="4" right="5" top="134" bottom="206" min="8"
              dark.thumb="#e5e5e5" light.thumb="#1a1a1a" dark.track="#3a3a3a" light.track="#c5c5c5"/>
   </view>
   <!-- Settings rows: a value in Text Secondary on the right column; an on/off setting a 34x20 switch there in place of
        "On" or "Off" (oled-design.md List row, list_marks.c switch_mark) -->
   <view name="settings"><element name="rows" top="0"/><element name="values" text="1" switch="1" dark.ink="#ababab" light.ink="#5c5c5c"/></view>
   <view name="home">
-    <element name="rows" top="0" text_x="24" full_row="375" label_end_split="44" font="inter" font_px="24" caps="0"/>
+    <element name="rows" top="0" text_x="24" full_row="375" label_end_split="44" font="inter" font_px="24"/>
     <element name="chevron" visible="1"/>
     <!-- In Split the art is the main menu's alone: Settings, and Library and Streaming where they open in Home's
          window, are full-width pages (audit RULES 1) -->
@@ -98,13 +96,14 @@
        art corners, the title Inter Medium 22 (27 here), the artist and album Inter at the page's 18 (22 here), a 6 px
        bar on the Track grey, shuffle and repeat as the theme's own glyphs (tools/art.py mode_*) -->
   <view name="playing">
-    <element name="art" square="0" radius="6"/>
+    <element name="art" radius="6"/>
     <element name="title" font="inter-medium" font_px="27"/>
     <element name="artist" font="inter"/>
-    <element name="album" caps="0" opacity="255"/>
+    <element name="album" opacity="255"/>
     <element name="info" font="inter" font_size="18" light.value="#010101" dark.value="#FFFFFF"/>
     <element name="scrubber" height="6" scrub_height="6" track="#333333"/>
     <element name="modes" icons="1"/>
+    <element name="state" opacity="0"/>
   </view>
   <!-- page_list's rows (the Library's Shuffle, Most Played, card apps...): the grid's 32 px rows, 52 with a detail,
        at the text inset; the status row names the page, so no title row -->
@@ -112,15 +111,29 @@
        floor): the reflection's top at 0 of its cover's brightness, so it is the page's own colour and none shows,
        and the caption right under the covers, ending above y 282 on screen with the lists, the album in the Song
        title role (22, 27 here) and the artist in the Artist role (18, 22 here) -->
-  <view name="coverflow"><element name="shelf" reflect_top="0"/>
+  <!-- Cover Flow's shelf: where the side covers stand is the iPod preset of #329's Cover Flow Parameter Lab, its
+       units times 0.16 (docs/internals.md#coverflow-depth); the rest takes CF_* (ROLE_MACROS). At speed (arch_at to
+       arch_full albums/s, Fast Navigation off) the covers within arch_span of the middle bend into the lab's arch,
+       forming over arch_in ms and relaxing over arch_out, the covers following the wheel by arch_tau ms.
+       The thumb: the wheel holds the covers (docs/internals.md#coverflow-thumb); these are its numbers, to retune on
+       the wheel. A spin goes by letters, one each jump_ticks of travel (0: never). With Fast Navigation off, after
+       jump_ms at jump_at ticks/s or more, they are named on the moving row, jump_pace apart, until the thumb slows or
+       turns back; on, after big_jump_ms at big_jump_at, a faster spin as a false start costs more, they last until
+       the thumb lifts: the row comes in over enter_albums, slides from letter to letter (slide_ms) and folds out once
+       within fold_near of the letter. -->
+  <view name="coverflow">
+    <element name="shelf" eye="256" tilt="90" x1="128" xs="35" z1="77" zs="0" horizon="64" swing="2"
+             arch_at="8" arch_full="16" arch_span="500" arch_in="100" arch_out="62" arch_tau="56"
+             thumb="1" ticks_turn="36" ticks_album="7" fast_at="23" fast_full="90" top_speed="20" track="30"
+             snap="25" spin="130" far_left="250" detent="80" hold_ms="5000" stop_ms="60" stop_left="60" rate_up="120"
+             rate_down="50" back="50" dead="1" contact_ms="40" aim_snap="30" lead_from="25" lead_full="100" lead_ms="45"
+             row_shift="20" row_from="100" row_full="300" row_shrink="8" row_flat="200" row_out="33" row_edge="160"
+             row_width="40" row_key="72" jump_ms="700" jump_ticks="5" jump_at="32" jump_pace="140"
+             big_jump_at="75" big_jump_ms="240" enter_albums="8" slide_ms="160" fold_near="50" reflect_top="0"/>
     <element name="caption" name_px="27" artist_px="22" text_y="178" artist_y="22"/></view>
   <view name="page">
     <element name="rows" height="32" detail_height="52" text_x="24" title_y="4" title_h="24" detail_y="31" detail_h="20"/>
     <element name="title" height="0"/>
   </view>
-  <view name="pages"><element name="own" painter="oled" art_final="1"/></view>
-  <!-- Toasts and confirms (oled-design.md Dialogs and toasts, patch/feedback.c): a toast is a #1c1c1e pill centred on
-       y 252 over the page, which keeps its status row and selection; a confirm is a dialog page, its question the
-       status row's title, its rows Cancel (selected) and the action's verb -->
-  <view name="dialog"><element name="confirm" painter="oled"/></view>
+  <view name="pages"><element name="own" art_final="1"/></view>
 </theme>

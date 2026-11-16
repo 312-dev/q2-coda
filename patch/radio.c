@@ -158,7 +158,6 @@ static struct {
 static struct {
     void *page, *station, *artist, *song, *info, *elapsed, *heart;
     unsigned timer, leave, seen; /* seen: rd.serial the heart shows */
-    int ipod;                    /* Classic's layout (stream_ipod) */
 } np __attribute__((section(".scratch")));
 
 static void list_free(list_t *l) {
@@ -407,8 +406,6 @@ static void np_refresh(void) {
     memcpy(artist, rd.title, a);
     artist[a] = 0;
     set(np.station, rd.list.n ? name_of(&rd.list, rd.at) : "");
-    if (np.ipod)
-        theme_font(np.station, ROLE_NP, FONT_ROW); /* the local page's title; by its text */
     set(np.artist, artist);
     if (np.seen != rd.serial && rd.list.n) {
         list_t favs = { 0 };
@@ -433,9 +430,6 @@ static void np_refresh(void) {
     t[0] = 0;
     int sec = rd.pid && rd.since ? (int)((unsigned)(now_ms() - rd.since) / 1000) : -1; /* 49 days */
     if (sec >= 0) toolsTimeItoa(t, sec);
-    /* Classic: boxes for "-59:59" until the hour, then the hours': the running time only grows, so
-     * they never shrink while a stream plays; the next one starts on the minutes' again */
-    if (np.ipod) ipod_times(np.elapsed, 0, 0, sec < 3600 ? 600 : sec);
     set(np.elapsed, t);
 }
 
@@ -468,10 +462,7 @@ static int np_heart(void *ctx, void *event) {
 }
 
 /* Spotify's Now Playing layout, the radio's icon for the art, and local Now Playing's heart. The
- * wheel and Centre stay stock's: the volume, and the screen. Under Classic the local page's
- * (stream_ipod), as an album: the build's station cover slanted, the station, artist and song in
- * the title's, artist's and album's rows, the stream in the fourth under them, the running time left of a bar
- * that is always full, the heart. */
+ * wheel and Centre stay stock's: the volume, and the screen. */
 static void np_open(void) {
     if (np.page || !(np.page = page_open("radionp_page", np_closed, np_keyup))) return;
     void *page = np.page;
@@ -496,12 +487,6 @@ static void np_open(void) {
     widget_set_prop_str(np.heart, "clickable", "true");
     widget_on(np.heart, EVT_CLICK, np_heart, 0);
     np.seen = ~rd.serial;
-    void *rows[4] = { np.station, np.artist, np.song, np.info };
-    np.ipod = stream_ipod(art, rows, np.elapsed, 0, 0, np.heart);
-    if (np.ipod) {
-        widget_set_visible(name, 0, 0); /* the title bar names the page */
-        image_base_set_image(art, "classic_light_station");
-    }
     np.timer = timer_add(np_tick, 0, 500);
     np_refresh();
 }
@@ -540,7 +525,7 @@ void radio_search(void) {
     if (ui.view) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     widget_destroy_children(ui.page), ui.view = 0; /* the box alone: the keyboard leaves no room for the rows */
     ui.edit = edit_create(ui.page, "text", 2, 26);
-    t9_box(ui.page, ui.edit, "Search stations");
+    widget_set_prop_str(ui.edit, "tips", "Search stations");
     widget_on(ui.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(ui.edit, EVT_IM_ACTION, searched, 0);
     widget_on(ui.edit, EVT_BLUR, search_left, 0);
