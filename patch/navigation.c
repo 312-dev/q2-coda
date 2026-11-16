@@ -8110,10 +8110,28 @@ int ringnav_start_player(void) {
  * list_item of wrapped text, the eighth child, dropped here: stock builds it and never reads it
  * again), each row a s_listitem_black list_item holding a 335x70 s_btn_listitem button, a 166px
  * s_scrlabel_white24l title at x 10 and a 149px s_scrlabel_white20r value at x 176, both focus-only
- * scrolling with ellipses. FW. Version (row 1) reads demo's version literal, which carries the
- * updater tag (tools/build.py TAG), so it shows the stock firmware's again; a CFW. Version row in
- * the same widgets follows it. Its button has no name, so stock's row click (atoi of the name,
- * 0x4c12f8) ignores it. A --dev build adds Save Diagnostics above them (diagnostics.c). */
+ * scrolling with ellipses. Firmware (row 1, stock's FW. Version, tools/build.py LABELS) reads
+ * demo's version literal, which carries the updater tag (tools/build.py TAG), so it shows the stock
+ * firmware's again; a row named PRODUCT_NAME, this build's version, in the same widgets follows it.
+ * Its button has no name, so stock's row click (atoi of the name, 0x4c12f8) ignores it. A --dev
+ * build adds Save Diagnostics above them (diagnostics.c). */
+/* A row's value in the approved words (audit-2 #31): stock's sizes "779.72G" with their unit,
+ * "779.72 GB", and the IP address of no network, "0.0.0.0", as "Not connected". */
+static void about_words(void *item) {
+    void *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+    void *val = b && widget_count_children(b) > 1 ? widget_get_child(b, 1) : (void *)0;
+    char t[48];
+    if (!val || tk_strcmp(widget_get_type(val), "hscroll_label")) return;
+    *t = 0;
+    widget_get_text_utf8(val, t, sizeof t - 2);
+    unsigned n = strlen(t);
+    if (n > 1 && (t[n - 1] == 'G' || t[n - 1] == 'M') && t[n - 2] >= '0' && t[n - 2] <= '9') {
+        t[n + 1] = 'B', t[n + 2] = 0, t[n] = t[n - 1], t[n - 1] = ' ';
+        widget_set_text_utf8(val, t);
+    } else if (!tk_strcmp(t, "0.0.0.0")) {
+        widget_set_text_utf8(val, "Not connected");
+    }
+}
 static void about_label(void *button, int x, int w, const char *style, const char *text) {
     void *label = hscroll_label_create(button, x, 0, w, 70);
     widget_use_style(label, style);
@@ -8131,9 +8149,16 @@ int ringnav_about(void *win, void *ctx) {
         widget_set_text_utf8(widget_get_child(widget_get_child(widget_get_child(view, 1), 0), 1),
                              STOCK_VERSION);
         void *button = list_button(view);
-        about_label(button, 10, 166, "s_scrlabel_white24l", "CFW. Version");
-        about_label(button, 176, 149, "s_scrlabel_white20r", Q2POD_VERSION);
+        char v[sizeof Q2POD_VERSION];
+        const char *pod = strstr(Q2POD_VERSION, " Pod");
+        tk_snprintf(v, sizeof v, "%s", Q2POD_VERSION);
+        if (pod) /* "1.8.2" then its " dev ..." or " beta 2": the row's name is the product's */
+            tk_snprintf(v + (pod - Q2POD_VERSION), sizeof v - (pod - Q2POD_VERSION), "%s", pod + 4);
+        about_label(button, 10, 166, "s_scrlabel_white24l", PRODUCT_NAME);
+        about_label(button, 176, 149, "s_scrlabel_white20r", v);
         widget_restack(P(button, W_PARENT), 2);
+        for (unsigned i = 0, n = widget_count_children(view); i < n; ++i)
+            about_words(widget_get_child(view, i));
         diag_about_row(view);
     }
     return result;

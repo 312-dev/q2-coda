@@ -14,7 +14,7 @@ REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
-# (1.0.1 was V101I). About shows the stock firmware version and a CFW. Version row with VERSION and
+# (1.0.1 was V101I). About shows the stock firmware version and a PRODUCT_NAME row with VERSION and
 # the edition instead (ringnav_about).
 TAG = 'V' + VERSION.replace('.', '') + str(BETA)
 
@@ -852,7 +852,10 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('reset_initset', 'Reset only settings', 'Reset Settings Only'),
     ('reset_factory', 'Full factory reset', 'Full Factory Reset'),
     ('display_lighttime', 'Screen off time', 'Screen Off Time'),
-    ('about_sn', 'Serial number', 'Serial Number'), ('about_version', 'FW. Version', 'Version'),
+    ('about_sn', 'Serial number', 'Serial Number'), ('about_version', 'FW. Version', 'Firmware'),
+    # About's rows as approved (audit-2 #31, 2026-11-16): sizes with their unit, the MAC by what it is
+    ('about_cardcap', 'Card Capacity', 'Capacity'), ('about_cardremain', 'Remaining', 'Available'),
+    ('about_wifimac', 'Wi-Fi MAC', 'Wi-Fi Address'),
     ('list_baidu', 'Baidu Netdisk(BETA)', 'Baidu Netdisk'), ('msg_poweroff', 'Confirm Shutdown?', 'Shut Down?'),
     ('system_prove', '技术证明', 'Certification'),  # About's regulatory row, Chinese in stock's English
     ('genre', 'Genres', 'Genre'), ('player_era', 'Era', 'Year'), ('batch_addplaylist', 'Add to playlist', 'Add to Playlist'),
@@ -2200,6 +2203,7 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
+PRODUCT_NAME = 'Q2 Pod'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
 def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
@@ -2219,8 +2223,9 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     header.append(f'#define SETTINGS_ICON_NAMES "{names}"')
     header.append(f'#define ROCKBOX_FLAG "{ROCKBOX_FLAG}"')  # Home's Rockbox row, for S90play
     header += [f'#define {name} 0x{address:x}u' for name, (_, address) in NAME_COMPARATORS.items()]  # name_order.c
-    # About: the stock firmware's version on its own row, and this build's on the CFW. Version row.
-    header += [f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
+    # About: the stock firmware's version on its own row, and this build's on a row named for the
+    # product (PRODUCT_NAME, the one place the name the screens show is spelled).
+    header += [f'#define PRODUCT_NAME "{PRODUCT_NAME}"', f'#define STOCK_VERSION "{STOCK_VERSION}"', f'#define Q2POD_VERSION "{VERSION} Pod{f" dev {dev}" if dev else f" beta {BETA}" if BETA else ""}"',
                f'#define Q2POD_TAG "{"" if dev else VERSION}"',  # netupdate.c: the release tag, none when --dev
                f'#define Q2POD_DEV {1 if dev else 0}',  # navigation.c stale_note
                # sw_update.c: the updater's identity (firmware_v20.info's version), which an equal update.tar's repeats

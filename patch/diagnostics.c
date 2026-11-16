@@ -39,8 +39,8 @@ static int diag_save(void *ctx, void *event) {
     return 0;
 }
 
-/* ringnav_about, after stock's rows and CFW. Version: in a --dev build the Save Diagnostics row,
- * above them. */
+/* ringnav_about, after stock's rows and the product's version row: in a --dev build the Save
+ * Diagnostics row, above them. */
 void diag_about_row(void *view) {
     if (!Q2POD_DEV || !view) return;
     void *label = list_row(view, (const char *)0, diag_save, (void *)0);

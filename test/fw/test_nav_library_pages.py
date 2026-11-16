@@ -2334,8 +2334,19 @@ def test_about_shows_stock_s_version_and_the_payload_s_after_it_without_stock_s_
     fw.mock('stock_about_trampoline', lambda *_: 5)
     assert fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None) == 5
     version, beta = host.tools_build.VERSION, host.tools_build.BETA
-    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), ('CFW. Version', f'{version} Pod' + (f' beta {beta}' if beta else '')),
+    name = host.tools_build.PRODUCT_NAME
+    assert about_rows(ui, view) == [ABOUT[0], ('FW. Version', host.tools_build.STOCK_VERSION), (name, version + (f' beta {beta}' if beta else '')),
                                     *ABOUT[2:]]
+
+
+@pytest.mark.parametrize('value, shown', [('779.72G', '779.72 GB'), ('512.5M', '512.5 MB'), ('0.0.0.0', 'Not connected'),
+                                          ('192.168.1.4', '192.168.1.4'), ('Shanling Q2', 'Shanling Q2')])
+def test_about_s_values_take_the_approved_words(fw, ui, value, shown):
+    """audit-2 #31: sizes with their unit, and no network's IP address as words."""
+    win, view = about(ui, [*ABOUT[:2], ('Capacity', value), *ABOUT[3:]])
+    fw.mock('stock_about_trampoline', lambda *_: 5)
+    fw.fn('ringnav_about', C.c_int, C.c_void_p, C.c_void_p)(win, None)
+    assert about_rows(ui, view)[3] == ('Capacity', shown)  # after the product's row
 
 
 def test_an_about_page_that_is_not_stock_s_is_left(fw, ui):
