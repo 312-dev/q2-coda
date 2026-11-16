@@ -197,3 +197,36 @@ def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
     assert t == T['COVER'] and client.one(m, 1) == len(image) and client.one(m, 3) == image[:4096]
     f.unlink()
     assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
+
+
+def test_a_server_playlist_s_art_is_its_server_cover(lib, tmp_path):
+    """A server playlist (cat.serverlists) shows its server's cover, the app's covers/pl-<pid>.jpg (Navidrome's
+    collage), once the app has it; until then, and for a card playlist always, its first song's album's
+    (2026-11-16: every playlist showed its first album's cover in the car)."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    db = sqlite3.connect(tmp_path / 'mnt/data/database.db')
+    db.executemany('insert into playlist values (?,?,?,?)', [
+        (3, 'Mix', None, None), (4, 'Card', None, None),
+        (101, None, '/mnt/mmc/.subsonic/cat/third/s2.flac', 3), (102, None, '/mnt/mmc/a/1.flac', 3),
+        (103, None, '/mnt/mmc/b/3.flac', 4)])
+    db.commit()
+    cat = sqlite3.connect(tmp_path / 'mnt/mmc/.q2pod/catalogue.db')
+    cat.executemany('insert into serverlists values (?,?,?,?)', [('subsonic', 'pl7', 3, 0)])
+    cat.commit()
+    def arts():
+        return {i['title']: i.get('art') for i in q2.browse('playlists')['items']}
+    first = arts()
+    assert first['Mix'] == 'sthird' and first['Card'].startswith('l')  # no cover yet: the first album's
+    collage = b'\xff\xd8' + bytes(range(256)) * 20 + b'\xff\xd9'
+    cover = tmp_path / 'mnt/mmc/.subsonic/covers/pl-pl7.jpg'
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(collage)
+    assert arts() == {'Mix': 'ppl7', 'Card': first['Card']}
+    t, m = q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 0), (3, 4096), (4, 96)])
+    assert t == T['COVER'] and client.one(m, 1) == len(collage) and client.one(m, 3) == collage[:4096]
+    assert client.text(m, 4) == 'image/jpeg'
+    t, m = q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 4096), (3, 4096), (4, 96)])
+    assert client.one(m, 3) == collage[4096:]
+    assert q2.ask(T['GET_COVER'], [(1, 'pnope'), (2, 0), (3, 4096), (4, 96)]) == 'NOT_FOUND'
+    cover.unlink()
+    assert q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 0), (3, 4096), (4, 96)]) == 'NOT_FOUND'

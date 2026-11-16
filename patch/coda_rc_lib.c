@@ -162,6 +162,32 @@ static void f_hkey(sqlite3_context *c, int n, sqlite3_value **v) {
     sqlite3_result_text(c, b, 10, SQLITE_TRANSIENT);
 }
 
+/* A server playlist's cover, its app's /mnt/mmc/.<app>/covers/pl-<pid>.jpg (docs/server-library.md#covers),
+ * under --root in out; its size, or -1 when it is not there or the names could leave the folder. */
+static long file_len(const char *path);
+static long pl_cover(const char *app, const char *pid, char *out, size_t cap) {
+    char rel[300];
+    if (!app || !pid || !*app || !*pid || strchr(app, '/') || strchr(pid, '/') || strlen(app) > 15 ||
+        strlen(pid) > 46)
+        return -1;
+    snprintf(rel, sizeof rel, "/mnt/mmc/.%s/covers/pl-%s.jpg", app, pid);
+    long n = file_len(crc_path(out, cap, rel));
+    return n > 0 ? n : -1;
+}
+
+/* plart(app, pid): a server playlist's art id, "p<pid>", while its app has its cover; else null, and the row's
+ * art is its first song's album's */
+static void f_plart(sqlite3_context *c, int n, sqlite3_value **v) {
+    const char *app = (const char *)sqlite3_value_text(v[0]), *pid = (const char *)sqlite3_value_text(v[1]);
+    char p[512], id[48];
+    if (pl_cover(app, pid, p, sizeof p) < 0) {
+        sqlite3_result_null(c);
+        return;
+    }
+    snprintf(id, sizeof id, "p%s", pid);
+    sqlite3_result_text(c, id, -1, SQLITE_TRANSIENT);
+}
+
 static int alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 /* q2bridge.py prefix_of: up to the key's first n letters, padded to n and uppercased, or "123" */
@@ -274,6 +300,7 @@ int lib_has_server(void) {
     secs " secs, " srv " srv"
 
 static sqlite3 *db;
+static int cat_on; /* the catalogue is attached (Local + Server) */
 static char sql[6144];
 
 static void lib_close(void) {
@@ -295,12 +322,14 @@ static int lib_open(void) {
     for (unsigned i = 0; i < sizeof fns / sizeof *fns; ++i)
         sqlite3_create_function(db, fns[i].name, fns[i].n, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fns[i].f, 0, 0);
     dur_load();
+    sqlite3_create_function(db, "plart", 2, SQLITE_UTF8, 0, f_plart, 0, 0); /* reads the card: not deterministic */
     int server = lib_has_server();
     if (server) {
         char q[300];
         snprintf(sql, sizeof sql, "attach '%s' as cat", crc_path(q, sizeof q, CAT));
         if (strchr(q, '\'') || sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) server = 0;
     }
+    cat_on = server;
     /* no format string: MUSIC_WHERE's LIKE patterns hold '%' */
     snprintf(sql, sizeof sql, "%s%s%s",
              "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
@@ -524,10 +553,14 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sorts = PLS_SORTS;
         l->sort = pick(l->sorts, sort)->key;
         l->order = !strcmp(l->sort, "name") ? "nt, pos" : "pos";
-        snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, (select s2.ak from main.playlist p "
-                 "join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id limit 1) c3, %d c4, "
-                 "1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
-                 " from main.playlist h where h.id <= 100", ICON_PLAYLISTS_);
+        /* a server playlist's art is its server's cover (Navidrome's collage) once its app has it, else, as a
+         * card playlist's, its first song's album's */
+        snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, coalesce(%s(select s2.ak from "
+                 "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id "
+                 "limit 1)) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
+                 " from main.playlist h where h.id <= 100",
+                 cat_on ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
+                 ICON_PLAYLISTS_);
     } else if (!strcmp(kind, "dir")) {
         /* a card folder (q2bridge.py index_folders): its subfolders by name, then its songs by file name.
          * Server songs live in hidden folders, and hidden folders are left out. */
@@ -1152,6 +1185,23 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
     return 0;
 }
 
+/* A server playlist's art id ("p<pid>", f_plart): its app's cover of it, at most 160 px a side as the app
+ * fetches it */
+static int pl_cover_find(const char *pid, cover_t *c) {
+    sqlite3_stmt *st;
+    char app[16] = "";
+    memset(c, 0, sizeof *c);
+    if (!cat_on || sqlite3_prepare_v2(db, "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
+        return 0;
+    sqlite3_bind_text(st, 1, pid, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) snprintf(app, sizeof app, "%s", sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    long n = pl_cover(app, pid, c->path, sizeof c->path);
+    if (n < 0) return 0;
+    c->len = n;
+    return 1;
+}
+
 static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     pbr r = {p, p + n};
     pbf f;
@@ -1167,7 +1217,7 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     if (k < 0 || limit > 4096 || !*art) return crc_error(s, req_id, E_BAD_REQUEST, "GetCover");
     if (lib_open()) return crc_error(s, req_id, E_UNAVAILABLE, "no library");
     cover_t c;
-    int found = cover_find(art, max_px ? (int)max_px : 160, &c);
+    int found = art[0] == 'p' ? pl_cover_find(art + 1, &c) : cover_find(art, max_px ? (int)max_px : 160, &c);
     lib_close();
     if (!found) return crc_error(s, req_id, E_NOT_FOUND, "no cover");
     if (c.len > 16 * 1024 * 1024 || (long)offset > c.len) return crc_error(s, req_id, E_BAD_REQUEST, "offset");

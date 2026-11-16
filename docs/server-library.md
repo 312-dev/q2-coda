@@ -99,7 +99,11 @@ i	<pid>	<sid>	<card path or empty>
   ([oled-design.md](oled-design.md#artist-page)), by the album id in the row's `album:` context.
   Until it is there the placeholder shows; nothing waits for it. A server playlist's cover (its
   `coverArt`, at the same size) is `covers/pl-<pid>.jpg`, which OLED's Playlists rows show
-  ([oled-design.md](oled-design.md#playlists)). The app keeps the folder within its own budget and deletes an album's cover when the album
+  ([oled-design.md](oled-design.md#playlists)), as do Cover Flow's playlist covers (as the playlist's picture when it has
+  none of its own, before the 2x2 of its albums: [internals.md: Playlist art](internals.md#playlist-art)) and the car
+  remote's Playlists rows ([remote-protocol.md](remote-protocol.md#playlist-covers)). The app fetches it again when
+  the server gives the playlist a new `coverArt` id (Navidrome's changes with its songs), keeping each file's id in
+  `covers/.art`. The app keeps the folder within its own budget and deletes an album's cover when the album
   leaves the catalogue ([The app's side](#the-apps-side)).
 
 ### Duplicates

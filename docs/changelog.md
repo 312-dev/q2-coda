@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Playlists from your server (Subsonic with Show in Library) show the server's own cover, such as Navidrome's collage of the playlist's albums, in Cover Flow's Playlists and in the car (Car Remote); before, they showed four of their albums' covers on the Q2 Muse and the first song's album in the car. A playlist with a picture of its own keeps it, and one whose cover isn't fetched yet shows its albums as before.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - The boot logo reads Q2 MUSE, and Light Mode boots with the same dark animation as Dark Mode.
   - Car Remote: Shuffle and Repeat now match between the car and the Q2 Muse. Changing them on the Q2 Muse's Now Playing shows in the car, and changing them in the car lights the Q2 Muse's buttons; before, neither side saw the other's.
