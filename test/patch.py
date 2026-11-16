@@ -11532,20 +11532,15 @@ ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RE
 assert m.call(address=fk,args=(ck,ev,0,0),gap=0)==11 and [c[0] for c in m.calls].count('navigator_back')==1
 m.close(); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top!=page and m.nodes[m.top]['name']=='shuffle_page'; passed()
 def home_settings(full):
-        # Home's Rockbox row shows only while the card has Rockbox: hidden, it moves after Settings, so the
-        # list's layout leaves no gap; it comes back after Folder once the card has it.
-        CONFIG['SHORTCUT']='0'; CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['SHORTCUT']; del CONFIG['HOME']; m.rockbox_mode=0; view,imgs=home_list(m)
+        # Home's rows in HOME_ROWS' order (tools/ipod.py home_list), Now Playing's and Folders' shown here.
+        CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['HOME']; view,imgs=home_list(m)
         assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
-        btn=named(m,m.top,'btn_rockbox'); order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
-        assert order()==['playing','localmusic','coverflow','folder','shuffle_songs','stream','home_search','settings','rockbox'] and not m.nodes[btn]['visible']
-        assert m.nodes[btn]['sensitive']==0  # hidden rows keep their taps: Streaming's would launch Rockbox
-        m.rockbox_mode=0o100755; m.call(address=payload_syms['coverflow_home_layout'],args=(0,0,0,0),gap=0)
-        assert order()==HOME_ROWS and m.nodes[btn]['visible'] and m.nodes[btn]['sensitive']==1; passed()
-        # Its click and Settings' are bound at Home init. Settings slides the Settings list, stock's
+        order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
+        assert order()==HOME_ROWS; passed()
+        # Settings' click is bound at Home init. Settings slides the Settings list, stock's
         # Playback and System setting rows (stock binds them), in from the right as a full-width page
         # (oled/theme.xml home.lists full), the art hidden in Split too; the wheel walks it, and Return slides the list back from the left with
         # its row kept.
-        assert m.handler(named(m,m.top,'img_rockbox'),O['EVT_CLICK'])[0]==payload_syms['home_shortcut_open']
         m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
         lst,sets,art=(named(m,m.top,n) for n in ('list_view_home','list_view_homeset','img_homeart'))
         sview=named(m,m.top,'scroll_view_homeset'); assert not m.nodes[sets]['visible']
