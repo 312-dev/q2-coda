@@ -77,6 +77,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
     char key[STYLE_KEY];
     int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
     void *view = P(s, W_PARENT), *c;
+    bright_bar.easing = 0; /* the page opens on its value */
     slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind,
     sp.value = sp.sw = (void *)0;
     widget_on(win, EVT_DESTROY, sp_gone, win);
@@ -187,8 +188,16 @@ void slider_page_paint(void *w, void *canvas) {
         sp_text(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
                 SP_VALUE_PX, RGBA(0xffffff));
     }
-    /* the track, its fill to the knob's centre, and the knob, final in each half */
+    /* the track, its fill to the knob's centre, and the knob, final in each half; Brightness's at
+     * its eased level (levels.c bright_wheel), as Control Center's slider */
     int part = slider_part(sp.slider, x1 - x0 - SP_KNOB), y = SP_TRACK_Y - top;
+    if (sp.kind == SLIDER_LIGHT) {
+        int lo = widget_get_prop_int(sp.slider, "min", 0),
+            hi = widget_get_prop_int(sp.slider, "max", 100),
+            at = level_shown(&bright_bar, widget_get_prop_int(sp.slider, "value", 0)) - (lo << 8);
+        part = hi > lo ? (x1 - x0 - SP_KNOB) * clamp_step(0, (hi - lo) << 8, at) / ((hi - lo) << 8)
+                       : 0;
+    }
     float kx = (float)(x0 + SP_KNOB / 2 + part);
     if (vg) {
         st.raw_ink = 1;

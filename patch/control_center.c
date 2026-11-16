@@ -15,11 +15,11 @@
  * ring) until Centre or Return gives it back. Return on a stop closes the page. The ring is not
  * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
  * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
- * (cc_ring_on). Volume steps at the wheel's speed and its fill eases, as Now Playing's volume does
- * (levels.c). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver switch
- * and timer have no call this file can make without their page), so their circle and tile are lit
- * only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not the
- * network's name, which only the Wi-Fi page reads. */
+ * (cc_ring_on). The sliders step at the wheel's speed and their fills ease, as Now Playing's volume
+ * does (levels.c). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
+ * switch and timer have no call this file can make without their page), so their circle and tile
+ * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
+ * the network's name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
@@ -148,13 +148,18 @@ static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
 }
 
 /* A slider's level as its fill draws it, 0 to 256: Brightness's stock slider, Volume's g_volume
- * of 100 at its bar's eased level (levels.c). */
+ * of 100, each at its bar's eased level (levels.c). */
 static int cc_level(void *win, int i) {
     if (i == CC_VOLUME) return clamp_step(0, 256, level_shown(&vol_bar, g_volume) / 100);
     void *s = widget_lookup(win, "slider_backlight", 1);
     int min = s ? widget_get_prop_int(s, "min", 0) : 0,
         max = s ? widget_get_prop_int(s, "max", 100) : 100;
-    return s && max > min ? (widget_get_prop_int(s, "value", 0) - min) * 256 / (max - min) : 0;
+    return s && max > min
+               ? clamp_step(
+                     0, 256,
+                     (level_shown(&bright_bar, widget_get_prop_int(s, "value", 0)) - (min << 8)) /
+                         (max - min))
+               : 0;
 }
 
 /* Whether the wheel's ring shows: a wheel tick or key within CC_RING_MS. */
@@ -368,7 +373,7 @@ void cc_open(void *win) {
         } else
             widget_on(button, EVT_CLICK, cc_click, (void *)(long)i);
     }
-    vol_bar.easing = 0; /* the slider opens on its level */
+    vol_bar.easing = bright_bar.easing = 0; /* the sliders open on their levels */
 }
 
 /* The wheel on the page: from stop to stop, ends kept; or a slider's level while it has it,
@@ -383,11 +388,7 @@ void cc_wheel(void *win, int dir) {
             level_follow(win);
         } else {
             void *s = cc_stock(win, CC_BRIGHT);
-            if (!s) return;
-            int value = widget_get_prop_int(s, "value", 0), min = widget_get_prop_int(s, "min", 0),
-                max = widget_get_prop_int(s, "max", 100),
-                next = min + clamp_step(value - min, max - min, dir);
-            if (next != value) widget_set_prop_int(s, "value", next);
+            if (s) bright_wheel(s, dir);
         }
     } else {
         int next = focus + dir;

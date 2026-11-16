@@ -1,8 +1,12 @@
 /* The levels the wheel sets, one way each (docs/internals.md#wheel-volume): a tick's step at the
  * wheel's speed (wheel_level, vol_accel's curve) and the bar's ease after it (level_ease). The
  * volume takes them through vol_next (volume.c), on Now Playing's dialog and Control Center's
- * slider alike. */
+ * slider alike; the brightness through bright_wheel, on Control Center's slider and Settings'
+ * Brightness page alike. */
 #include "navigation.h"
+
+/* The brightness bar's ease (bright_wheel), drawn by Control Center and the Brightness page */
+level_ease_t bright_bar __attribute__((section(".scratch")));
 
 /* value a tick on (dir 1 up, -1 down): vol_accel's steps, scaled so a range of full takes the ticks
  * the volume's 100 takes, at least 1; up to hi (never down to it from above), down to lo. */
@@ -38,12 +42,15 @@ int level_ease(level_ease_t *e, int level) {
 int level_shown(const level_ease_t *e, int level) { return e->easing ? e->shown : level << 8; }
 
 #define LEVEL_TICK "_level_tick" /* 1 while level_tick runs on the window */
-/* Every VOL_POLL_MS while the volume's bar eases on win (Control Center): it towards g_volume, win
- * drawn again while it moved; it ends once it has landed. */
+/* Every VOL_POLL_MS while a bar eases on win (Control Center, the Brightness page): the volume's
+ * bar towards g_volume and the brightness's towards win's slider, win drawn again while either
+ * moved; it ends once both have landed. */
 static int level_tick(const void *info) {
-    void *win = P(info, TIMER_CTX);
-    if (level_ease(&vol_bar, g_volume)) widget_invalidate_force(win, (void *)0);
-    if (vol_bar.easing) return 8; /* RET_REPEAT */
+    void *win = P(info, TIMER_CTX), *s = widget_lookup(win, "slider_backlight", 1);
+    int moved = level_ease(&vol_bar, g_volume);
+    if (s) moved |= level_ease(&bright_bar, widget_get_prop_int(s, "value", 0));
+    if (moved) widget_invalidate_force(win, (void *)0);
+    if (vol_bar.easing || (s && bright_bar.easing)) return 8; /* RET_REPEAT */
     widget_set_prop_int(win, LEVEL_TICK, 0);
     return 7; /* RET_REMOVE */
 }
@@ -52,4 +59,19 @@ void level_follow(void *win) {
     if (!win || widget_get_prop_int(win, LEVEL_TICK, 0)) return;
     widget_set_prop_int(win, LEVEL_TICK, 1);
     widget_add_timer(win, level_tick, VOL_POLL_MS);
+}
+
+/* A wheel tick (dir 1 up, -1 down) on a brightness slider, Control Center's or the Brightness
+ * page's: its value moved by wheel_level's steps over its range, which fires stock's change
+ * callback on either (config_lightness: the backlight set and saved, as a drag's release or the
+ * page's +/- do); the bar eases after it. 1 when it moved. */
+int bright_wheel(void *slider, int dir) {
+    int value = widget_get_prop_int(slider, "value", 0),
+        min = widget_get_prop_int(slider, "min", 0), max = widget_get_prop_int(slider, "max", 100),
+        to = wheel_level(value, min, max, max - min, dir);
+    if (to == value) return 0;
+    level_ease_from(&bright_bar, value);
+    widget_set_prop_int(slider, "value", to);
+    level_follow(window_of(slider));
+    return 1;
 }

@@ -752,8 +752,9 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
   is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
   on the same stop.
-- **Volume and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
-  a tick on a fast spin, `vol_next`), and its fill eases to its level at Now Playing's bar's speed
+- **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
+  a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
+  on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
 
 ### USB

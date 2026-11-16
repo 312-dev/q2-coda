@@ -2085,7 +2085,7 @@ def slider_window(ui, name='backlight_page'):
     return top
 
 
-@pytest.mark.parametrize('name', ['backlight_page', 'maxvol_page', 'bootvol_page', 'balance_page'])
+@pytest.mark.parametrize('name', ['maxvol_page', 'bootvol_page', 'balance_page'])
 def test_the_wheel_steps_a_setting_through_its_own_buttons(fw, keys, name):
     ui = Ui(fw)
     slider_window(ui, name)
@@ -2335,9 +2335,45 @@ def test_control_center_s_volume_steps_as_now_playing_s(fw, keys, speed):
         assert got == want and len(set(b - a for a, b in zip([want[0]] + want, want))) <= 2
 
 
-def full_range_ticks(fw, keys, where, speed, cc_volume):
-    """Wheel ticks from 0 to 100 at a steady speed: Now Playing's volume (vol_next), Control Center's Volume
-    slider."""
+def brightness_page(ui, value):
+    """Settings' Brightness page: stock's slider (0 to 100) and its -/+ buttons."""
+    top = slider_window(ui)
+    return top.add(W(ui, 'slider', 'slider_backlight', value=value, min=0, max=100))
+
+
+@pytest.mark.parametrize('speed', [0, 300, 400, 600])
+def test_control_center_and_the_brightness_page_step_the_brightness_alike(fw, keys, speed):
+    """N ticks at a speed move both brightness sliders alike, by the volume's steps (the range is 100 on each), through
+    the slider's value (stock's change callback saves it), never its -/+ buttons."""
+    fw.var('wheel_speed', C.c_int).value = speed
+    paths = []
+    for page in (0, 1):
+        ui = Ui(fw)
+        if page:
+            slider = brightness_page(ui, 20)
+        else:
+            top, slider = cc_window(fw, ui)
+            slider.ints[b'min'], slider.ints[b'value'] = 0, 20
+            top.ints[b'_cc_focus'] = CC_BRIGHT
+            keys(KEY_CENTER, 600)
+        seen = []
+        for key in [KEY_NEXT] * 4 + [KEY_PREV] * 2:
+            assert keys(key, 10) == STOP
+            seen.append(slider.ints[b'value'])
+        assert not [c for c in ui.clicks if c[0] in (b'img_add', b'img_dec')]
+        paths.append(seen)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 20, 100
+    step, want = fw.fn('vol_next', C.c_int, C.c_uint), []
+    for key in [KEY_NEXT] * 4 + [KEY_PREV] * 2:
+        vol.value = step(key)
+        want.append(vol.value)
+    assert paths[0] == paths[1] == want
+
+
+def full_range_ticks(fw, keys, where, speed, cc_bright, cc_volume):
+    """Wheel ticks from 0 to 100 at a steady speed: Now Playing's volume (vol_next), Control Center's Volume and
+    Brightness sliders, the Brightness page."""
     fw.var('wheel_speed', C.c_int).value = speed
     vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
     vol.value, limit.value = 0, 100
@@ -2346,11 +2382,17 @@ def full_range_ticks(fw, keys, where, speed, cc_volume):
         step = fw.fn('vol_next', C.c_int, C.c_uint)
         level = lambda: vol.value
         tick = lambda: setattr(vol, 'value', step(KEY_NEXT))
+    elif where == 'page':
+        top = slider_window(ui)
+        slider = top.add(W(ui, 'slider', 'slider_backlight', value=0, min=0, max=100))
+        level = lambda: slider.ints[b'value']
+        tick = lambda: keys(KEY_NEXT, 10)
     else:
-        top, _ = cc_window(fw, ui)
-        top.ints[b'_cc_focus'] = cc_volume
+        top, slider = cc_window(fw, ui)
+        slider.ints[b'min'], slider.ints[b'value'] = 0, 0
+        top.ints[b'_cc_focus'] = cc_bright if where == 'cc_bright' else cc_volume
         keys(KEY_CENTER, 600)
-        level = lambda: vol.value
+        level = (lambda: slider.ints[b'value']) if where == 'cc_bright' else (lambda: vol.value)
         tick = lambda: keys(KEY_NEXT, 10)
     n = 0
     while level() < 100 and n < 1000:
@@ -2359,12 +2401,19 @@ def full_range_ticks(fw, keys, where, speed, cc_volume):
     return n
 
 
-@pytest.mark.parametrize('where', ['np', 'cc_volume'])
+@pytest.mark.parametrize('where', ['np', 'cc_volume', 'cc_bright', 'page'])
 @pytest.mark.parametrize('speed, ticks', [(200, 100), (600, 10)])
 def test_every_wheel_level_crosses_its_range_in_the_same_ticks(fw, keys, where, speed, ticks):
     """docs/internals.md#wheel-volume's table: 0 to 100 takes 100 ticks turned slowly and 10 on a steady fast spin,
-    for the volume on Now Playing and Control Center."""
-    assert full_range_ticks(fw, keys, where, speed, CC_VOLUME) == ticks
+    for the volume on Now Playing and Control Center and the brightness on Control Center and its page."""
+    assert full_range_ticks(fw, keys, where, speed, CC_BRIGHT, CC_VOLUME) == ticks
+
+@pytest.mark.parametrize('value, key, want', [(100, KEY_NEXT, 100), (0, KEY_PREV, 0)])
+def test_the_brightness_page_s_wheel_keeps_the_ends(fw, keys, value, key, want):
+    ui = Ui(fw)
+    slider = brightness_page(ui, value)
+    assert keys(key) == STOP and slider.ints[b'value'] == want
+
 
 def time_window(ui, name='manualtime_page', at=(4, 2, 4, 9, 5)):
     """Stock's Set Date and Time page: a slide view of a date page (year from 2022, month, day) and a time

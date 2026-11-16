@@ -1895,14 +1895,15 @@ def test_pulled_down_the_page_shows_no_ring(fw, world):
     assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
 
 
-def test_the_volume_slider_fills_to_its_eased_level(fw, world):
-    """Control Center's Volume slider draws its bar's eased level (levels.c), as Now Playing's volume bar does: the
-    volume at 100 eased to 50."""
+def test_the_sliders_fill_to_their_eased_levels(fw, world):
+    """Control Center's sliders draw their bars' eased levels (levels.c), as Now Playing's volume bar does: the volume
+    at 100 eased to 50, the brightness at 50 eased to 25."""
     fw.var('g_volume', C.c_ubyte).value = 100
     struct.pack_into('<iiI', fw.var('vol_bar', C.c_char * 12), 0, 50 << 8, 1, 0)
+    struct.pack_into('<iiI', fw.var('bright_bar', C.c_char * 12), 0, 25 << 8, 1, 0)
     canvas = control_center(fw, world)
     fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
-    assert (192, 170, 163 * 128 // 256, 38) in fills
+    assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
 
 
 @pytest.mark.parametrize('flag, text, songs, line', [(0, 'Scanned 312', 704, '312'), (1, 'Scanned 800', 704, '800'),

@@ -9847,9 +9847,12 @@ static int edit_key(void *top, unsigned key) {
     if (quick) {
         cc_wheel(top, dir); /* Control Center's stops, or a slider's level (control_center.c) */
     } else if (!n) {
-        void *button = widget_lookup(top, dir > 0 ? "img_add" : "img_dec", 1);
+        void *button = widget_lookup(top, dir > 0 ? "img_add" : "img_dec", 1),
+             *bright = widget_lookup(top, "slider_backlight", 1);
         char click[0x30];
-        if (button && widget_get_prop_bool(button, "enable", 1))
+        if (bright)
+            bright_wheel(bright, dir); /* Control Center's step, at the wheel's speed (levels.c) */
+        else if (button && widget_get_prop_bool(button, "enable", 1))
             stock_dispatch_trampoline(button, pointer_event_init(click, EVT_CLICK, button, 0, 0));
     } else {
         int f = field_at(top);
