@@ -5398,6 +5398,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         clock_place(bar, top);
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
+        feedback_folder(top); /* an empty folder level's note */
         np_sync(top);
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
@@ -10409,6 +10410,16 @@ int ringnav(void *ctx, void *event) {
     if (window_manager_is_animating(wm) || pointer_down()) {
         drop_input();
         return dir && window_manager_is_animating(wm) ? hold_wheel(ctx, event, dir) : STOP;
+    }
+    /* Songs over an empty library: stock hides the list and shows its note over Scan Music Now
+     * (btn_upmusic), which takes no key. With no list under it, Centre would go on to
+     * on_wm_keyup_fun, whose Centre turns the screen off; it presses the button, as a tap does
+     * (docs/internals.md#centre-button). */
+    void *scan = !dir && top ? widget_lookup(top, "btn_upmusic", 1) : (void *)0;
+    if (scan && widget_get_visible(scan) && widget_get_visible(P(scan, W_PARENT))) {
+        unsigned click[12];
+        stock_dispatch_trampoline(scan, pointer_event_init(click, EVT_CLICK, scan, 0, 0));
+        return STOP;
     }
     coverflow_lost_touch();
     if (!dir) coverflow_wheel_land();     /* Centre opens the album the caption names */

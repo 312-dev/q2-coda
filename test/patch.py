@@ -1682,6 +1682,23 @@ for done, key in ((0, 170), (1, 170), (0, O['KEY_CENTER']), (1, O['KEY_CENTER'])
     m = Machine(); m.mock('dialog_quit'); m.top = m.node('dialog', 'updatemusic_dialog'); m.word(O['SCAN_DONE'], done)
     m.call(key, gap=0); assert [c[1:3] for c in m.calls if c[0] == 'dialog_quit'] == ([(m.top, 0)] if done else []), (done, key)
 passed()
+# Songs over an empty library: stock hides the list and shows its note over Scan Music Now (btn_upmusic). Centre presses
+# it, as a tap does, and stops there, short of on_wm_keyup_fun, whose Centre turns the screen off. The wheel leaves it alone,
+# and over a list (the note's view hidden) Centre does not press it.
+def empty_songs(shown):
+    m = Machine(); btn = m.node('button', 'btn_upmusic')
+    view = m.node('view', 'view', [m.node('image', 'image'), m.node('label', 'label_scanfolder'), btn], visible=shown)
+    m.top = m.node('window', 'allmusic_page', [m.node('view', 'view_navbar_allplay'), view, m.node('table_view', 'table_view', visible=1 - shown)])
+    for w in (m.top, view):
+        for c in m.nodes[w]['children']: m.word(c + O['W_PARENT'], w)
+    m.word(m.top + O['W_PARENT'], m.wm); m.nodes[m.wm] = {'children': [m.top]}; m.word(m.wm + O['W_KEY_TARGET'], m.top)
+    return m, btn
+m, btn = empty_songs(1)
+r = m.call(O['KEY_CENTER']); assert r == 11 and [c[1] for c in m.dispatched()] == [btn], (r, m.dispatched())
+assert not [c for c in m.calls if c[0] == 'screen_action']
+m.call(); assert not m.dispatched()
+m, btn = empty_songs(0); m.call(O['KEY_CENTER']); assert btn not in [c[1] for c in m.dispatched()]
+passed()
 # Now Playing opened over Home, which lies right under it: Recent would go Back, Home goes Home.
 m = long_machine(); m.mock('navigator_back'); m.config['HOLDRETURN'] = '1'; m.page('home_page'); home = m.top
 long_return(m); np = m.node('window', 'playing_page')
