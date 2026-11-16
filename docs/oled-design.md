@@ -1062,6 +1062,20 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Centre
   leaves.
 
+### Overlay motion
+
+A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit
+(`ovm_t` in `patch/ui_kit.h`: `ovm_enter`, `ovm_exit`, `ovm_level`, `ovm_alpha`, `ovm_shift`, `ovm_scale`), each
+interruptible: a turn mid-run starts from where it is.
+
+- **Toast:** rises 10 px and fades in over 200 ms `cubic_out`; when it closes it stays painted over the page,
+  sinking 4 px and fading over 150 ms `cubic_in` (`feedback.c` `feedback_toast_leave`).
+- **Confirmation card:** the scrim and the card fade in together over 200 ms `cubic_out`; an answer fades them out
+  over 120 ms, linear, and the answer runs once the card has gone. The approved scale from 1.06 is not drawn yet
+  (a `ponytail:` in `feedback.c`). Stock's own confirm, which closes itself, appears and goes at once.
+- **Menu sheet** (approved, not built): rises 260 ms `cubic_out` with the scrim to 50%, falls 180 ms ease-in.
+- Under Reduce Motion each fades only: 150 ms in, 120 ms out, nothing moved or scaled.
+
 ### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
@@ -1094,7 +1108,7 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
   the radio pill's grow and the switches' knob are at their end at once; the charging sweep stands at the level and Up
-  Next's level bars stand still. Kept: swipe
+  Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.

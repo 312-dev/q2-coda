@@ -187,6 +187,10 @@ class Anim(C.Structure):
     _fields_ = [('at', C.c_uint), ('ms', C.c_ushort), ('ease', C.c_ubyte)]
 
 
+class Ovm(C.Structure):
+    _fields_ = [('a', Anim), ('from_', C.c_short), ('out', C.c_ubyte)]
+
+
 def clock(fw):
     now = [5000]
     fw.mock('time_now_ms', lambda *_: now[0])
@@ -232,6 +236,22 @@ def test_a_switch_flipped_under_reduce_motion_is_there_at_once(fw, on):
     knob = fw.fn('list_marks__sw_knob', C.c_int, C.c_int, C.c_int, C.c_int)
     assert knob(355, 100, 0) == 0
     assert knob(355, 100, 1) == (1000 if on else 0) and timers == ([] if on else [16])
+
+
+@pytest.mark.parametrize('on', [0, 1])
+def test_an_overlay_rises_and_fades_in_then_leaves_from_where_it_is(fw, on):
+    """ovm_*: the toast's 200 ms cubic-out rise of 10 px, then an exit begun mid-way going down from that level; under
+    Reduce Motion it fades only, over MO_FADE_MS in and MO_OUT_FADE_MS out, nothing moved or scaled."""
+    reduce_motion(fw, on)
+    now, _ = clock(fw)
+    o = Ovm()
+    p = C.addressof(o)
+    level = fw.fn('ovm_level', C.c_int, C.c_void_p)
+    shift = fw.fn('ovm_shift', C.c_int, C.c_void_p, C.c_int)
+    scale = fw.fn('ovm_scale', C.c_int, C.c_void_p, C.c_int)
+    alpha = fw.fn('ovm_alpha', C.c_int, C.c_void_p, C.c_int)
+    shown = fw.fn('ovm_shown', C.c_int, C.c_void_p)
+    assert level(p) == 0 and not shown(p)
     fw.fn('ovm_enter', None, C.c_void_p, C.c_int, C.c_int)(p, 200, EASE_CUBIC_OUT)
     assert level(p) == 0 and shift(p, 10) == (0 if on else 10) and scale(p, 1060) == (1000 if on else 1060)
     now[0] += 75 if on else 100

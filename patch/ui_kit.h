@@ -128,6 +128,7 @@ int confirm_up(void);            /* a card is up */
  * MO_FRAME_MS after the last one ends (motion_frames), so a painter needs no timer of its own. */
 enum { MO_SPATIAL, MO_DECOR, MO_FEEDBACK };
 #define MO_FADE_MS 150
+#define MO_OUT_FADE_MS 120
 #define MO_FRAME_MS 16
 int motion_reduced(void);
 int motion_ms(int ms, int kind);
@@ -143,4 +144,25 @@ void anim_start(anim_t *a, int ms, int ease, int kind);
 int anim_at(const anim_t *a);
 int anim_running(const anim_t *a);
 void motion_frames(unsigned ms); /* the shared timer repaints for ms more at least */
+/* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
+ * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
+ * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn
+ * mid-run starts there). ovm_level: 0 gone .. 1000 in, eased. ovm_alpha: alpha (a scrim's or a
+ * surface's full one) at that level. ovm_shift: px at gone .. 0 in, the rise or fall's offset.
+ * ovm_scale: thousandths, from at gone .. 1000 in. ovm_running: still moving; ovm_shown: in, or
+ * still leaving. Under Reduce Motion an enter takes MO_FADE_MS and an exit MO_OUT_FADE_MS
+ * whatever ms asks, ovm_shift is 0 and ovm_scale 1000: a fade only. */
+typedef struct {
+    anim_t a;
+    short from;        /* the level at the run's start */
+    unsigned char out; /* 1 leaving */
+} ovm_t;
+void ovm_enter(ovm_t *o, int ms, int ease);
+void ovm_exit(ovm_t *o, int ms, int ease);
+int ovm_level(const ovm_t *o);
+int ovm_alpha(const ovm_t *o, int alpha);
+int ovm_shift(const ovm_t *o, int px);
+int ovm_scale(const ovm_t *o, int from);
+int ovm_running(const ovm_t *o);
+int ovm_shown(const ovm_t *o);
 #endif

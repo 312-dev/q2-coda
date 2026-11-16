@@ -397,6 +397,7 @@ int feedback_toast(void *top);
 void *feedback_under(void *toast);
 void *feedback_top(void);
 void feedback_toast_paint(void *w, void *canvas);
+void feedback_toast_leave(void *w, void *canvas); /* the toast on its way out */
 int feedback_confirm_dress(void *w);
 void feedback_confirm_foot(const char *foot);
 /* the empty state's painters (feedback.c, docs/oled-design.md#empty-and-offline): its view's, and a

@@ -1020,6 +1020,45 @@ def test_another_dialog_s_labels_stay(fw, world):
     assert world.at(prompt) == (30, 60, 315, 40)
 
 
+def test_a_toast_rises_and_fades_in_then_sinks_and_fades_out_over_the_page(fw, world):
+    """docs/oled-design.md#overlay-motion: the pill comes up 10 px and fades in over 200 ms cubic out (the dialog's
+    opacity, its line moved with the pill), nothing on its first frame; once its dialog goes, the page under paints it
+    sinking 4 px and fading over 150 ms cubic in, then nothing."""
+    theme(fw)
+    now = [10000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    page = world.window('settings_page')
+    win = world.window('msginfo_dialog', 'dialog')
+    line = world.add(win, 'line', 'label', box=(30, 60, 315, 40), text='Saved')
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
+    paint_bg(fw, win, Canvas(fw))
+    assert not world[line].visible and opacity() == 0
+    now[0] += 100  # 875 of the way in
+    paint_bg(fw, win, Canvas(fw))
+    assert world[line].visible and world.at(line)[1] == 236 + 1 and opacity() == 223
+    now[0] += 100
+    canvas = Canvas(fw)
+    paint_bg(fw, win, canvas)
+    assert world.at(line)[1] == 236 and opacity() == 255 and canvas.rounded[0][0][1] == 236
+    gone, = [(fn, ctx) for w, evt, fn, ctx in world.handlers if w == win and evt == O['EVT_DESTROY']]
+    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(gone[0])(gone[1], None)
+    world.top = page
+    leave = fw.fn('feedback_toast_leave', None, C.c_void_p, C.c_void_p)
+    now[0] += 75  # half way out, cubic in: 1/8 gone
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    (box, ink, _), = canvas.rounded
+    assert box[1] == 236 and ink >> 24 == 223 and [t[0] for t in canvas.texts] == ['Saved']
+    now[0] += 50  # 125 of 150 ms: 577 gone, 2 px down
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded[0][0][1] == 236 + 2 and canvas.rounded[0][1] >> 24 == 107
+    now[0] += 25
+    canvas = Canvas(fw)
+    leave(page, canvas.p)
+    assert canvas.rounded == [] and canvas.texts == []
+
+
 # Quick Settings.
 
 def test_named_in_a_nul_separated_list(fw):

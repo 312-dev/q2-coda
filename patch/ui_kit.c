@@ -207,3 +207,27 @@ int anim_at(const anim_t *a) {
 int anim_running(const anim_t *a) {
     return a->at && a->ms && (unsigned)time_now_ms() - a->at < a->ms;
 }
+
+/* An overlay's run: from its level at the start (ovm_level) to 1000 in, or 0 out. Under Reduce
+ * Motion an enter takes MO_FADE_MS and an exit MO_OUT_FADE_MS, and nothing moves or scales. */
+static void ovm_go(ovm_t *o, int ms, int ease, int out) {
+    o->from = (short)ovm_level(o);
+    o->out = (unsigned char)out;
+    anim_start(&o->a, motion_reduced() ? out ? MO_OUT_FADE_MS : MO_FADE_MS : ms, ease, MO_FEEDBACK);
+}
+void ovm_enter(ovm_t *o, int ms, int ease) { ovm_go(o, ms, ease, 0); }
+void ovm_exit(ovm_t *o, int ms, int ease) { ovm_go(o, ms, ease, 1); }
+int ovm_level(const ovm_t *o) {
+    if (!o->a.at) return 0;
+    int p = anim_at(&o->a);
+    return o->out ? o->from - o->from * p / 1000 : o->from + (1000 - o->from) * p / 1000;
+}
+int ovm_alpha(const ovm_t *o, int alpha) { return alpha * ovm_level(o) / 1000; }
+int ovm_shift(const ovm_t *o, int px) {
+    return motion_reduced() ? 0 : px * (1000 - ovm_level(o)) / 1000;
+}
+int ovm_scale(const ovm_t *o, int from) {
+    return motion_reduced() ? 1000 : from + (1000 - from) * ovm_level(o) / 1000;
+}
+int ovm_running(const ovm_t *o) { return anim_running(&o->a); }
+int ovm_shown(const ovm_t *o) { return o->a.at && (!o->out || anim_running(&o->a)); }
