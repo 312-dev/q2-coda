@@ -77,7 +77,7 @@
   </tr>
   <tr valign="top">
     <td><b>Bluetooth and AirPods</b></td>
-    <td>AirPods stem controls, ear detection and two-way volume sync. Resume on Connect, Control Device Volume, and separate volume levels for Bluetooth and wired output. Smoother AAC and click-free gapless changes.</td>
+    <td>AirPods stem controls, ear detection and two-way volume sync. Resume on Connect, Link Volume, and separate volume levels for Bluetooth and wired output. Smoother AAC and click-free gapless changes.</td>
   </tr>
   <tr valign="top">
     <td><b>Battery and buttons</b></td>

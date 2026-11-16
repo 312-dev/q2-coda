@@ -4434,7 +4434,7 @@ assert ov.config=={'VOLUME':'7','OTHER':'8'}; passed()  # other writes keep thei
 class BtVolumeMachine(Machine):
     def __init__(self,link=True):
         super().__init__()
-        if link: self.config['BTVOLLINK']='1'  # Bluetooth's Control Device Volume
+        if link: self.config['BTVOLLINK']='1'  # Bluetooth's Link Volume
         self.absolute=10; self.write_result=0; self.way=1
         self.byte(syms['g_bluetoothflag'],1); self.byte(syms['bt_linkstatus'],1)
         self.word(syms['bt_showcoding'],1); self.byte(syms['g_volume'],20); self.byte(syms['g_maxvolume'],100)
@@ -4465,7 +4465,7 @@ for left,right,want in ((0,0,0),(0,20,25),(20,0,25),(1,1,1),(20,20,25),(40,30,51
     gain=(max(0,left)*100//max(left,right),max(0,right)*100//max(left,right)) if want else (left,right)  # AVRCP 0 isn't silent on every headset: keep stock's mute
     b=BtVolumeMachine(); assert b.volume(left,right)==[gain] and b.writes()==[want]
     assert b.volume(left,right)==[gain] and not b.writes(); passed()
-# Control Device Volume off (the default): the Q2's volume is stock's gain alone, the device's own
+# Link Volume off (the default): the Q2's volume is stock's gain alone, the device's own
 # volume is never read or written, and the poll leaves it be.
 b=BtVolumeMachine(link=False); assert b.volume(20,20)==[(20,20)] and b.volume(40,30)==[(40,30)]
 b.poll(); b.poll(); assert not [c for c in b.calls if c[0].startswith('btctl_')]; passed()
@@ -16726,14 +16726,13 @@ for clock,hooked in (((22,0),True),((6,59),True),((7,0),False),('localtime',Fals
     m,fb,end=tint_machine({'NIGHTSHIFT':'2'},clock=clock); m.call(address=payload_syms['night_paint'],args=(m.canvas,0,0,0),gap=0)
     assert (m.get(m.lcd+0x7c)==payload_syms['night_end'])==hooked,clock
 passed()
-# Bluetooth's list (btmenu_rows, rebuilt on every search) gains Resume on connect and Control Device Volume
-# with Bluetooth on, right after its fourth row, Bluetooth Headset Volume Control, as stock's rows: no icon,
-# 78 high. Both off unless Q2POD RESUME / BTVOLLINK is 1 (docs/internals.md#resume-on-connect,
+# Bluetooth's list (btmenu_rows, rebuilt on every search) gains Resume on connect and Link Volume with Bluetooth
+# on, last in bt_ui.c's Audio group (docs/internals.md#bluetooth-page), as stock's rows: no icon, 78 high. Both off unless Q2POD RESUME / BTVOLLINK is 1 (docs/internals.md#resume-on-connect,
 # #headset-controls-and-volume); off, the Q2's volume is its own gain and the device keeps its own volume.
 # Stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place, the name its value, as high as stock's
 # row (docs/internals.md#bluetooth-name).
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
-assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Control Device Volume','Name']
+assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Link Volume','Name']
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
 assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
@@ -16741,12 +16740,13 @@ rows=rows[:2]
 for k,row in enumerate(rows):
     kids=m.nodes[m.nodes[row]['children'][0]]['children']  # the label and its switch
     assert len(kids)==2 and m.get(kids[0]+O['W_X'])==10 and m.get(row+O['W_H'])==78 and switch_image(m,row)=='switch_off'
-    assert m.nodes[named(m,m.top,'scroll_view_bluetooth')]['children'].index(row)==4+k
+    kids=m.nodes[named(m,m.top,'scroll_view_bluetooth')]['children']
+    assert kids.index(row)==len(kids)-2+k
 assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Control Device Volume','Name']; passed()
+assert texts()==['Resume on Connect','Link Volume','Name']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
@@ -17668,7 +17668,7 @@ print('M4B recognition/resume and headset routing, ear masks, manual cancellatio
 def endpoint(m,name,value=0):
     return m.call(address=payload_syms[name],args=(value,0,0,0),gap=0,clear=False)
 def ready_gain(m,ready,volume):
-    m.way=1; m.config['BTVOLLINK']='1'; m.word(payload_syms['bt_vol_link'],1)  # Control Device Volume on, read or not
+    m.way=1; m.config['BTVOLLINK']='1'; m.word(payload_syms['bt_vol_link'],1)  # Link Volume on, read or not
     for name in ('g_bluetoothflag','bt_linkstatus'): m.byte(syms[name],1)
     m.word(syms['bt_showcoding'],1); m.byte(syms['g_volume'],volume)
     m.word(payload_syms['btvol']+4 if 'btvol' in payload_syms else payload_syms['btvol.1'],ready)  # clang may split scalar fields
