@@ -1787,24 +1787,6 @@ static void draw_letter(void *canvas, const unsigned *c, unsigned n, rect_t *box
     st.raw_ink = raw;
 }
 
-/* A page whose list is in an order of its own, where a row's first letter says nothing of how far
- * a spin has got: an album's songs (disc and track, comparator 0x5063f0), Up Next (play order),
- * Chapters (the file's), Edit Playlist's songs as added (ple_listing; its Add Songs picker is A to
- * Z). In Library's song list the class decides (internals.md, fast-scroll letter): Recent, Frequent
- * and Recently Added (0xf007-0xf009), Songs under Time added (getAllMusic 3 and 4) and a playlist's
- * songs (0xff13) under its Sort's Time added (g_playlistsort_flag not 0, getMusicByPlayList
- * 0x50b6c8) are in their own order. */
-int own_order(const char *page) {
-    if (!tk_strcmp(page, "allmusic_page")) {
-        int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
-        return (cls >= 0xf007 && cls <= 0xf009) || (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
-               (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own()));
-    }
-    return !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page") ||
-           !tk_strcmp(page, "upnext_page") || !tk_strcmp(page, "chapters_page") ||
-           (!tk_strcmp(page, "playlistedit_page") && ple_listing());
-}
-
 /* iPod fast scroll: while the wheel ramp moves more than one row per step, the selected row's
  * first character sits in a dark translucent square over the list until LETTER_MS after the last
  * such step. A virtual table resolves the logical row in its recycled pool; an offscreen or
@@ -1813,12 +1795,8 @@ static void paint_letter(void *w, void *canvas) {
     rect_t old;
     if (!st.letter_timer || w != st.wheel_surface || st.wheel_run <= LIST_FIRST_MS ||
         st.touch_mode || az_on(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
-        (g_menu.ctx >= 0 && contexts[g_menu.ctx].kind == CTX_FIXED) || /* menus: not alphabetical */
-        /* nor Library's categories beside Home's pane */
-        !tk_strcmp(widget_get_prop_str(w, "name", ""), "scroll_view_localmusic") ||
-        /* nor an album's tracks in Cover Flow, which are in album order (disc and track).
-         * A page whose list is in an order of its own never arms it (the wheel handler, own_order).
-         * ponytail: the lists own_order doesn't know keep it (internals.md) */
+        /* Only a name-sorted list arms it (the wheel handler, az_index.c name_sorted); Cover Flow is
+         * one until an album is open, whose tracks are in album order (disc and track). */
         coverflow_tracks(window_of(w)))
         return;
     int i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
@@ -4936,7 +4914,7 @@ static const char *bar_title_of(void *win, void **label) {
     if (tk_str_start_with(name, "playing_page")) return geom_val(V_STATUS_Y) ? "" : "Now Playing";
     /* a status row names the Library and its whole Songs list as Home does, not by stock's "Local
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
-     * own (0xf001: all songs, own_order's class) */
+     * own (0xf001: all songs, az_index.c name_sorted's class) */
     if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page"))
         return lr_editing(win) ? lr_edit_title() : "Library";
     if (album_local_on(win)) return ""; /* the design's album page: its header names it */
@@ -10347,9 +10325,9 @@ int ringnav(void *ctx, void *event) {
             slide_menu_scroll_to_prev(w);
     } else if (g_menu.n) {
         int id = widget_get_prop_int(w, SEL, -1);
-        /* No letter over a list in an order of its own. Tested here, as at paint the top may
-         * already be the page a Return brings back. */
-        if (step > 1 && !own_order(widget_get_prop_str(top, "name", "")))
+        /* The letter only over a name-sorted list (az_index.c name_sorted). Tested here, as at
+         * paint the top may already be the page a Return brings back. */
+        if (step > 1 && name_sorted(widget_get_prop_str(top, "name", "")))
             rearm(&st.letter_timer, letter_expire, LETTER_MS);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);

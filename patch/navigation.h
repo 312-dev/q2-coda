@@ -952,7 +952,6 @@ int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 #define AZ_EDGE_PX 28
 #define AZ_SPIN_DPS 300
 int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
-int own_order(const char *page);    /* a page whose list is not in name order */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
