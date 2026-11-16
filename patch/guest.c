@@ -79,7 +79,7 @@ int guest_active(void) { return gp.active; }
 /* At each Bluetooth on (headset_status_register): the daemon, when Guest Play is on. */
 void guest_bt_on(void) {
     char raw[128];
-    if (strstr((state_read(GUEST_CONFIG, raw, sizeof raw), raw), "\nenabled=1\n")) guest_start();
+    if (state_read(GUEST_CONFIG, raw, sizeof raw) && strstr(raw, "\nenabled=1\n")) guest_start();
 }
 
 /* A receiver's session starting (kind spotify, airplay, dlna; id who, as far as it knows): 1 to
