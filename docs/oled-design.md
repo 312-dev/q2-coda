@@ -684,7 +684,7 @@ ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a 
 | Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
 | Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
 | Playlists | `playlist` | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
-| Favorites | `heart` | No Favorites | Hold Play/Pause on a song to add it | |
+| Favorites | `heart-slash` | No Favorites | Hold Play/Pause on a song to add it | |
 | Recently Played | `clock-counter-clockwise` | Nothing Played Yet | Songs you play show up here | |
 | Most Played (both lists) | `chart-bar` | No Plays Yet | Your most played songs show up here | |
 | Recently Added | `sparkle` | No Songs Added Yet | New music on the card shows up here | |
@@ -957,7 +957,10 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   `tools/art.py` draws the theme's bitmaps from them at build time, in final colours per half.
   A mark Phosphor lacks is drawn for q2-coda in Phosphor's regular style (16 unit strokes, round
   caps and joins, on the 256 unit grid), outlined to filled paths, and kept apart in
-  `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`.
+  `assets/icons/q2coda/` under the repository's licence: the Subsonic card app's `subsonic.svg`, and
+  `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
+  is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
+  round caps 32 units from the slash), traced to filled paths.
 - Weights by role: `fill` for the padlock and a favourite's heart, `bold` for chevrons, the status row's Wi-Fi, sync and Bluetooth, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
   heart and More. Sizes are the design's: 13 px padlock and 14 px status glyphs, 15 px chevron, 20 px row symbols,

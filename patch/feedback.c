@@ -499,7 +499,7 @@ void feedback_songs(void *top, void *row) {
     int cls = scan ? 0 : I(g_class_type, 0); /* stock's panel stands for the whole library */
     empty_t e =
         cls == 0xf00a
-            ? (empty_t){ "heart", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
+            ? (empty_t){ "heart-slash", "No Favorites", "Hold Play/Pause on a song to add it", 0 }
         : cls == 0xf007 ? (empty_t){ "clock-counter-clockwise", "Nothing Played Yet",
                                      "Songs you play show up here", 0 }
         : cls == 0xf008

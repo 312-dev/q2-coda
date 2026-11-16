@@ -1243,7 +1243,7 @@ def test_an_empty_library_s_songs_page_is_the_empty_state_over_scan_music_now(fw
 
 
 @pytest.mark.parametrize('cls, words', [
-    (0xf00a, ('heart', 'No Favorites', 'Hold Play/Pause on a song to add it')),
+    (0xf00a, ('heart-slash', 'No Favorites', 'Hold Play/Pause on a song to add it')),
     (0xf007, ('clock-counter-clockwise', 'Nothing Played Yet', 'Songs you play show up here')),
     (0xf008, ('chart-bar', 'No Plays Yet', 'Your most played songs show up here')),
     (0xf009, ('sparkle', 'No Songs Added Yet', 'New music on the card shows up here')),
