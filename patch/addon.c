@@ -106,6 +106,7 @@ typedef struct {
     char more[48]; /* q2app's more: an op, a space and a title (addon_more) */
     int qr, game, audio, hidden, present, launched, hold, relaunch, restart;
     int nostop; /* q2app's stop=0: no Stop row on its page */
+    int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
 } app_t;
 
@@ -765,6 +766,7 @@ static void sleep_check(void) {
  * auto power-off held while the app asks (hold=1), as Spotify's poll does while it plays; the
  * screen still turns off. An app that stopped by itself (idle, or from the phone) is let go, and
  * one stopped for USB storage starts again once the card is back. */
+static void sync_read(app_t *a, const char *raw);
 static void poll_one(app_t *a) {
     unsigned now = time_now_ms();
     if ((!a->launched && !a->relaunch && !a->restart) || now - a->polled < ADDON_POLL_MS) return;
@@ -785,9 +787,46 @@ static void poll_one(app_t *a) {
     state_read(a->state, raw, sizeof raw);
     a->hold = number(raw, "hold") == 1;
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
+    sync_read(a, raw);
     stream_poll(a);
     sleep_read(a);
-    if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS) a->launched = a->hold = 0;
+    if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS)
+        a->launched = a->hold = a->sync = 0;
+}
+
+/* The status row's sync (status_row.c, docs/internals.md#card-app-sync): what each running app's
+ * state file says, sync=check while it checks its server or its metadata, sync=down DONE TOTAL
+ * while it downloads songs (DONE of TOTAL, in any unit), no key while idle. Read at poll_one's
+ * pace from the read it makes anyway. ponytail: like hold=, read from the file's first QR_RAW - 2
+ * bytes, and an app writes its keys in name order, so a sync= after a sign-in's long qr= reads as
+ * none; sign-in and a sync do not run at once in q2-subsonic. */
+static unsigned long long digits(const char **c) {
+    unsigned long long x = 0;
+    while (**c == ' ') ++*c;
+    for (; **c >= '0' && **c <= '9'; ++*c) x = x * 10 + (unsigned)(**c - '0');
+    return x;
+}
+static void sync_read(app_t *a, const char *raw) {
+    char v[48];
+    field(raw, "sync", v, sizeof v);
+    a->sync = 0;
+    if (!strncmp(v, "check", 5)) a->sync = 1;
+    if (strncmp(v, "down", 4)) return;
+    const char *c = v + 4;
+    unsigned long long done = digits(&c), total = digits(&c);
+    while (total >> 20) done >>= 1, total >>= 1; /* 32-bit sums below: no 64-bit division here */
+    a->sync = 2;
+    a->sync_pm = !total ? 0 : done >= total ? 1000 : (int)((unsigned)done * 1000u / (unsigned)total);
+}
+int addon_sync(int *permille) {
+    int kind = 0;
+    for (int i = 0; i < ap.n; ++i) {
+        app_t *a = &ap.a[i];
+        if (!a->launched || a->sync < kind) continue;
+        if (a->sync > kind && permille) *permille = a->sync_pm;
+        kind = a->sync;
+    }
+    return kind;
 }
 
 /* Card games: Library's Games lists them after its own (games.c); a row runs the game's binary

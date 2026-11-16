@@ -460,6 +460,10 @@ void addon_forget(const char *dir), addon_quit(const char *dir);
 /* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
  * started one reads it yet */
 int addon_wake(const char *id), addon_ready(const char *id);
+/* addon.c: what a running app's state file says it syncs (its sync= key,
+ * docs/internals.md#card-app-sync): 0 nothing, 1 checking, 2 downloading with *permille (unless 0)
+ * how far */
+int addon_sync(int *permille);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it
  */
