@@ -6933,6 +6933,7 @@ static void qm_close(void) {
 
 /* Return and the title bar arrow dismiss without the stock sort-change flag. */
 static int qm_open(const void *unused);
+static void qm_values(void *dialog);
 static int qm_back(void *dialog, void *event) {
     if (I(event, EVENT_TYPE) == EVT_KEY_UP && I(event, EVENT_KEY) != KEY_RETURN) return 0;
     qm_close();
@@ -8223,6 +8224,12 @@ static void qm_rated(void *r, int hearts) {
 static int qm_run(const void *unused) {
     st.qm_timer = 0;
     if (!st.qm_dialog) return 0;
+    /* a menu sheet's Group by, two choices, flips in place (audit2 L3) */
+    if (st.qm_action == QA_GROUP && modal_set()) {
+        if (!playback_set(2, !playback_option(2))) toast("Queue unchanged");
+        qm_values(st.qm_dialog);
+        return 0;
+    }
     if (st.qm_action == QA_NEW_PLAYLIST) widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due, 0);
     qm_close();
     void *r = qm_record();
@@ -8376,6 +8383,30 @@ static const char *qm_choice_name(int kind, int i) {
     static const char *const groups[] = { "Album", "Folder" };
     int folder = playback_option(2);
     return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : groups[i];
+}
+
+/* The same as a menu sheet's setting row shows it, its value alone (audit2 L3): "Songs", "All". */
+static const char *qm_value_name(int kind, int i) {
+    static const char *const shuffle[2][5] = {
+        { "Off", "Songs", "In Album", "Albums", "Albums & Songs" },
+        { "Off", "Songs", "In Folder", "Folders", "Folders & Songs" }
+    };
+    static const char *const repeat[2][6] = {
+        { "Stop After Song", "Stop After Album", "Off", "Song", "Album", "All" },
+        { "Stop After Song", "Stop After Folder", "Off", "Song", "Folder", "All" }
+    };
+    int folder = playback_option(2);
+    return kind == 0 ? shuffle[folder][i] : kind == 1 ? repeat[folder][i] : qm_choice_name(2, i);
+}
+/* A sheet's setting rows' values again, Group by's flip having renamed them (qm_run). */
+static void qm_values(void *dialog) {
+    for (int kind = 0; kind < 3; ++kind) {
+        char name[16];
+        tk_snprintf(name, sizeof name, "_qm_set%d", kind);
+        void *row = widget_lookup(dialog, name, 1);
+        if (row) widget_set_prop_str(row, "_mm_value", qm_value_name(kind, playback_option(kind)));
+    }
+    widget_invalidate_force(dialog, (void *)0);
 }
 
 #define MODAL_PITCH 32 /* the menu sheet's rows (menu_modal.c) */
@@ -8575,11 +8606,16 @@ static int qm_open(const void *unused) {
                                                              : rows[acts[i] - 1]);
         if (modal) {
             int kind = acts[i] - QA_ADV_SHUFFLE;
-            const char *value = setting ? qm_choice_name(kind, playback_option(kind)) : 0;
+            const char *value = setting ? qm_value_name(kind, playback_option(kind)) : 0;
             if (acts[i] == QA_DELETE) modal_gap(view); /* destructive, last after a gap */
             widget_restack(item, widget_count_children(view) - 1);
             modal_row(item, label, icons[acts[i] - 1], value, setting ? MM_SETTING : MM_ACTION);
             if (acts[i] == QA_DELETE) modal_red(item);
+            if (setting) {
+                char name[16];
+                tk_snprintf(name, sizeof name, "_qm_set%d", kind);
+                widget_set_name(item, name);
+            }
         }
         widget_on(item, EVT_CLICK, qm_pick, (void *)(long)acts[i]);
     }

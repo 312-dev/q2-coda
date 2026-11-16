@@ -1903,7 +1903,6 @@ def ticked_rows(ui, view):
 @pytest.mark.parametrize('caption, title, rows, ticked', [
     ('Shuffle', 'Shuffle', SHUFFLE, 'Off'),
     ('Repeat', 'Repeat', REPEAT, 'Play All'),
-    ('Group by', 'Group by', ['Album', 'Folder'], 'Album'),
 ])
 def test_a_play_mode_row_opens_its_choices_on_the_current_one(hold, recs, ui, caption, title, rows, ticked):
     hold.now_playing([song(recs, i) for i in range(3)])
@@ -1912,6 +1911,26 @@ def test_a_play_mode_row_opens_its_choices_on_the_current_one(hold, recs, ui, ca
     hold.pick(caption)
     assert hold.title() == title and ui.rows(hold.view()) == rows
     assert ticked_rows(ui, hold.view()) == [ticked] and ui.nodes[hold.view()].props['_ringnav_index'] == rows.index(ticked)
+
+
+def test_settings_show_their_value_alone_and_group_by_flips_in_place(hold, recs, ui, fw):
+    """The sheet's setting rows say their value without the label's word (audit2 L3): Shuffle Off, Repeat Off (stock's
+    Play All), Group by Album. Group by, two choices, flips on Centre with the sheet left open, and the other rows'
+    values follow it (Shuffle's and Repeat's name the group)."""
+    hold.now_playing([song(recs, i) for i in range(3)])
+    hold.hold()
+    hold.menu()
+    advanced(fw, 1, REPEAT.index('Repeat Album'))
+
+    def values():
+        return {ui.label(r): ui.nodes[r].props.get('_mm_value') for r in ui.items(hold.view())
+                if ui.label(r) in ('Shuffle', 'Repeat', 'Group by')}
+    hold.pick('Group by')
+    assert hold.dialog in ui.stack and fw.fn('playback_option', C.c_int, C.c_int)(2) == 1
+    assert values() == {'Shuffle': 'Off', 'Repeat': 'Folder', 'Group by': 'Folder'}
+    hold.pick('Group by')
+    assert fw.fn('playback_option', C.c_int, C.c_int)(2) == 0
+    assert values() == {'Shuffle': 'Off', 'Repeat': 'Album', 'Group by': 'Album'}
 
 
 def test_a_choice_picked_is_played_and_ticked_next_time(hold, recs, ui, fw):

@@ -658,7 +658,10 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   scrolled, they fade under y 50 for 14 px. The lit row is never faded, and the wheel's last row
   ends on y 282.
 - **A setting** (Speed, Shuffle, Repeat, Group by) has its symbol before the label, the label 26 px
-  further in, and its value alone at the right in Text Secondary; Centre opens a picker in the
+  further in, and its value alone at the right in Text Secondary, without the label's word
+  (audit2 L3): Shuffle Off, Songs, In Album, Albums, Albums & Songs; Repeat Stop After Song, Stop
+  After Album, Off, Song, Album, All (Folder in place of Album when grouped by folder); Group by
+  Album or Folder. Group by, two choices, flips in place on Centre; the others open a picker in the
   sheet, the current choice with the accent's check before its label.
 - **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in a sheet: Unrated, 1 Heart
   to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
