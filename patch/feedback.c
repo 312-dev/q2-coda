@@ -1,7 +1,7 @@
-/* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the page, and stock's confirm
- * pop-up as a dialog page whose status row asks the question over Cancel and the action's verb;
- * an empty or offline page's note; the confirmation after a shuffle. page_fit, a page_list cut to
- * whole rows above the glass, shares the note's screen arithmetic. */
+/* OLED's feedback forms (docs/oled-design.md#dialogs-and-toasts): stock's toast as a pill over the
+ * page, and stock's confirm pop-up as a dialog page whose status row asks the question over Cancel
+ * and the action's verb; an empty or offline page's note; the confirmation after a shuffle.
+ * page_fit, a page_list cut to whole rows above the glass, shares the note's screen arithmetic. */
 #include "navigation.h"
 
 static int top_named(void *w, const char *name) {
@@ -275,8 +275,8 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
  * ringnav_sleeptimer), which Centre turns (edit_single): the selection's bar is on it from the
  * moment the page opens, its words white as a selected row's (st.sel_accent). Under the row. */
 void feedback_switch_bar(void *w, void *canvas) {
-    if (!w || !P(canvas, CANVAS_LCD) ||
-        tk_strcmp(widget_get_type(w), "button") || !widget_count_children(w))
+    if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_type(w), "button") ||
+        !widget_count_children(w))
         return;
     void *label = widget_get_child(w, 0), *win = window_of(w),
          *fields = win ? widget_lookup(win, "view_sleep", 1) : (void *)0;

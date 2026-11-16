@@ -266,18 +266,18 @@ typedef struct {
     /* The Display settings, read from config.ini on first use, and the display page's value labels.
      */
     int settings_read, accent, home, battery, home_rockbox, home_groovebox, shortcut, light,
-        light_day, /* light_day: Auto's answer for now (LIGHT=2) */
-        keep_lit,  /* Smart Awake (#57, keep_lit_poll) */
-        clicker,   /* the Clicker's output (clicker.c), IPOD CLICKER */
-        theme_booted,                        /* theme_boot ran (ringnav_ui_load) */
-        raw_ink,                             /* a final colour's draw: ui_ink leaves it alone */
+        light_day,       /* light_day: Auto's answer for now (LIGHT=2) */
+        keep_lit,        /* Smart Awake (#57, keep_lit_poll) */
+        clicker,         /* the Clicker's output (clicker.c), IPOD CLICKER */
+        theme_booted,    /* theme_boot ran (ringnav_ui_load) */
+        raw_ink,         /* a final colour's draw: ui_ink leaves it alone */
         geom;            /* the geometry set theme_boot wrote; 0, SET0, until then */
     int own[THEME_KEYS]; /* the theme's own keys' values (theme_keys[], tools/theme.py), read after
                             the payload's */
     unsigned keep_lit_at;
     void *sel_accent; /* the row on a coloured selection, for Light Mode's ink */
     int style_depth;  /* nested style hooks (a mutable style's fallback) map nothing */
-    void *setting_label[8 + THEME_KEYS];  /* SETTING_OWN + THEME_KEYS */
+    void *setting_label[8 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
     unsigned tone_key;  /* the wheel key whose press ringnav_keydown silenced, 0 when none */
     unsigned tick_drop; /* tick_gate: the wheel keys whose press it dropped, bits */
     unsigned tick_at;   /* tick_gate: the last tick it passed (ringnav_sleep's dark turn) */
@@ -337,12 +337,11 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),
     stock_keylong_trampoline(void *, void *), stock_paint_bg_trampoline(void *, void *),
-    stock_vol_keyup_trampoline(void *, void *),
-    stock_showface_trampoline(void *), stock_playing_trampoline(void *, void *),
-    stock_display_trampoline(void *, void *), stock_bigcover_trampoline(void *, void *),
-    stock_localmusic_trampoline(void *, void *), stock_keydown_trampoline(void *, void *),
-    stock_btvol_trampoline(int, int), stock_sleep_trampoline(void *),
-    stock_color_trampoline(void *, void *, const char *, unsigned),
+    stock_vol_keyup_trampoline(void *, void *), stock_showface_trampoline(void *),
+    stock_playing_trampoline(void *, void *), stock_display_trampoline(void *, void *),
+    stock_bigcover_trampoline(void *, void *), stock_localmusic_trampoline(void *, void *),
+    stock_keydown_trampoline(void *, void *), stock_btvol_trampoline(int, int),
+    stock_sleep_trampoline(void *), stock_color_trampoline(void *, void *, const char *, unsigned),
     stock_image_trampoline(void *, const char *, void *), stock_about_trampoline(void *, void *),
     stock_folder_trampoline(void *, void *), stock_folder_back_trampoline(void *, void *),
     stock_folder_top_trampoline(void), stock_folder_click_trampoline(void *, void *),
@@ -435,7 +434,6 @@ int pointer_down(void);
 unsigned qm_album_id(void *r);
 char *scrobble_tag(char *o, char *end, const char *s);
 
-
 /* coverflow_position.c */
 int coverflow_position_enabled(void); /* navigation.c: persisted setting */
 void coverflow_position_reset(void);
@@ -455,7 +453,7 @@ int coverflow_spinner(void), coverflow_wait_input(void *e);
  * after its children */
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
-extern void *slider_page_win; /* the page slider_page_paint draws */
+extern void *slider_page_win;       /* the page slider_page_paint draws */
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 
 /* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */

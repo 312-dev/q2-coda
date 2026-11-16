@@ -1,7 +1,7 @@
 #ifndef Q2_THEME_H
 #define Q2_THEME_H
-/* The built-in theme's shape (docs/internals.md#themes); the table is theme_engine.c's themes[], OLED's
- * one row. */
+/* The built-in theme's shape (docs/internals.md#themes); the table is theme_engine.c's themes[],
+ * OLED's one row. */
 
 enum { SCHEME_DERIVE, SCHEME_LIGHT, SCHEME_DARK }; /* scheme_t.mode */
 /* theme_t.font[] index: list title, list second line, bar title, Now Playing title, a two-line
@@ -15,7 +15,7 @@ typedef struct {
     /* 0xRRGGBB; 0: role unused (ponytail: no black role): the grey a mono theme's list icons take
      * (ringnav_image_add), second lines' grey */
     unsigned chevron, muted;
-    unsigned sel_text;  /* text on the selection, 0: the row's own */
+    unsigned sel_text;   /* text on the selection, 0: the row's own */
     unsigned paper, ink; /* this half's, greys 0xRRGGBB: the light half's are the flip's ends
                             (LIGHT_PAPER and LIGHT_INK unless set), the dark half's 0x000000 and
                             0xffffff. A one-array theme's row holds the light half's: only
@@ -120,8 +120,8 @@ typedef struct {
      * column, on neither edge of the selected row (paint_separators), final: [0] dark, [1] light;
      * 0: none */
     unsigned div_ink[2];
-    short art_placeholder;      /* stock's grey tiles (list_folder, list_song) this size, centred, 0:
-                                   as stock */
+    short art_placeholder; /* stock's grey tiles (list_folder, list_song) this size, centred, 0:
+                              as stock */
     unsigned char np_meta_font; /* Now Playing's artist and album: FONT_* at the asset's size, by
                                    its text (np_bar.c np_sync); 0: the style's */
     short home_top, home_full_row, home_text_x, home_label_end[2] /* [0] split, [1] full */,
@@ -150,7 +150,7 @@ typedef struct {
     /* settings.values.switch: an on/off settings row shows a switch (list_marks.c switch_mark), on
      * a set_text theme too, where it would read On or Off */
     unsigned char set_switch;
-    unsigned undeclared;     /* SETTING_* bits of the theme options it does not declare */
+    unsigned undeclared; /* SETTING_* bits of the theme options it does not declare */
     cf_style_t cf;
     /* text entry the iPod's way: Search opens the letter strip (search_strip.c), the keyboard's
      * keys are walked by the wheel (keyboard.c) */
@@ -161,7 +161,7 @@ typedef struct {
         page_det_h;
     const char *art; /* its own images' prefix (tools/art.py, its art attribute's id): "oled_" */
 } theme_t;
-const theme_t *theme(void); /* accent(); return themes; (THEME_N is 1) */
+const theme_t *theme(void);       /* accent(); return themes; (THEME_N is 1) */
 int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
 int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */

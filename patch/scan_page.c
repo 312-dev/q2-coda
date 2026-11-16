@@ -84,7 +84,8 @@ static int msg_sync(void) {
 /* Stock's hidden label repaints nothing, so this does, at the rate stock writes it. */
 static int msg_poll(const void *info) {
     (void)info;
-    if (msg_sync()) widget_invalidate_force(st.msg_win, &(rect_t){ 0, SCAN_TOP, 375, 282 - SCAN_TOP });
+    if (msg_sync())
+        widget_invalidate_force(st.msg_win, &(rect_t){ 0, SCAN_TOP, 375, 282 - SCAN_TOP });
     return 8; /* RET_REPEAT */
 }
 int library_count(const char *sql);

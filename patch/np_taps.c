@@ -132,8 +132,7 @@ int np_tap_lit(void *w) { return w && npt.lit > NPT_ART && w == npt_widget(npt.l
 
 /* The held art, dimmed (navigation.c paint_cover: over the image, under the rounded corners) */
 void np_tap_dim(void *w, void *canvas) {
-    if (!w || npt.lit != NPT_ART || w != st.np_cover || !P(canvas, CANVAS_LCD))
-        return;
+    if (!w || npt.lit != NPT_ART || w != st.np_cover || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     stock_canvas_set_fill_color(canvas, (RGBA(0) & 0xffffffu) | (unsigned)DIM_ALPHA << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));

@@ -165,8 +165,9 @@ static int entry_quad(const entry_t *n, int a, cf_quad_t *r) {
 /* Whether cover a of n shows: on the screen, with the cover CF_SHOW_PAST albums nearer the facing
  * point still having its outer edge there. A cover whose nearer neighbour's outer edge is off the
  * screen is behind nearer covers but for its reflection, which shows through theirs a level or so
- * for three covers more (a barely formed row has covers on the screen far back, all hidden). Not a theme's to tune: it is how far the renderer's reflections let a hidden cover
- * through, measured (test/coverflow.py edge_drawn and enter_frames fail with 3). */
+ * for three covers more (a barely formed row has covers on the screen far back, all hidden). Not a
+ * theme's to tune: it is how far the renderer's reflections let a hidden cover through, measured
+ * (test/coverflow.py edge_drawn and enter_frames fail with 3). */
 #define CF_SHOW_PAST 4
 static int entry_shows(const entry_t *n, int a) {
     cf_quad_t r, o;

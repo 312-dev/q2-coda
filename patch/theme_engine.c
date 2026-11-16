@@ -115,8 +115,14 @@ int list_fit_end(void) { return geom_val(V_LIST_FIT) ? geom_val(V_BAR) + geom_va
  * options, SETTING_OWN + k for theme_keys[k]. */
 static const char *const setting_keys[] = { "ACCENT", "HOME",    "BATTERY", "SHORTCUT",
                                             "LIGHT",  "KEEPLIT", "CLICKER", "TIMETITLE" };
-const int setting_counts[] = { SETTING_N_ACCENT,   SETTING_N_HOME, SETTING_N_BATTERY, SETTING_N_SHORTCUT,
-                               SETTING_N_LIGHT,    2,              3,                 2 };
+const int setting_counts[] = { SETTING_N_ACCENT,
+                               SETTING_N_HOME,
+                               SETTING_N_BATTERY,
+                               SETTING_N_SHORTCUT,
+                               SETTING_N_LIGHT,
+                               2,
+                               3,
+                               2 };
 int *const setting_values[] = { &st.accent, &st.home,     &st.battery, &st.shortcut,
                                 &st.light,  &st.keep_lit, &st.clicker, &st.time_title };
 /* An option's value and config key: the accent's are the theme's own, an own option's st.own[] and
@@ -174,7 +180,7 @@ __attribute__((noinline)) static void settings_read(void) {
                                SETTING_N_SHORTCUT); /* no key, see shortcut() */
     st.light = config_value("IPOD", "LIGHT", 3, 0); /* dark unless chosen; 2 Auto */
     st.keep_lit = config_value("IPOD", "KEEPLIT", 2, 0);
-    st.clicker = config_value("IPOD", "CLICKER", 3, 0); /* Both unless chosen (clicker.c) */
+    st.clicker = config_value("IPOD", "CLICKER", 3, 0);      /* Both unless chosen (clicker.c) */
     st.time_title = config_value("IPOD", "TIMETITLE", 2, 1); /* the clock unless chosen */
     /* the theme's own keys, after the payload's, in table order */
     for (int k = 0; k < THEME_KEYS; ++k)
@@ -215,9 +221,7 @@ const scheme_t *scheme(void) {
 /* scheme() for code that runs only in the light half (flip, red_map's light term), so after
  * ipod_light()'s accent(): the light row without a second accent() and light_on() on these
  * per-colour paths (a folder paint can set ~470 colours). */
-static const scheme_t *light_row(void) {
-    return &themes->light[*themes->accent_slot];
-}
+static const scheme_t *light_row(void) { return &themes->light[*themes->accent_slot]; }
 /* An option the theme does not declare reads 0, its stored key untouched (ponytail: 0 is every
  * hidden option's value today; a theme hiding Home or Battery needs a value per bit). */
 int setting(int i) {

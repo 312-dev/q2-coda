@@ -980,8 +980,7 @@ static int load(menu_t *m, void *w, int recall) {
          * row. */
         void *top = window_manager_get_top_window(window_manager());
         int ctx = top ? context_id(widget_get_prop_str(top, "name", (void *)0)) : -1;
-        int choice =
-            ctx >= 0 && (contexts[ctx].flags & CHOICE) ? checked_row(m) : -1;
+        int choice = ctx >= 0 && (contexts[ctx].flags & CHOICE) ? checked_row(m) : -1;
         int p = choice >= 0 || !recall ? -1 : position(m);
         int id = choice >= 0 ? choice : p < 0 ? -1 : st.pos[p].id - 1;
         unsigned hash = p < 0 ? 0 : st.pos[p].hash;
@@ -1698,8 +1697,7 @@ static void paint_chevrons(void *w, void *canvas) {
  * offline mark. Here, as the rows and their bounds are this file's. */
 static int offline_x(void *w, int i, const rect_t *r);
 static void paint_songs(void *w, void *canvas) {
-    if (!w || !kind(w) || !P(canvas, CANVAS_LCD) || !song_list(w) || !load_rows(&g_menu, w))
-        return;
+    if (!w || !kind(w) || !P(canvas, CANVAS_LCD) || !song_list(w) || !load_rows(&g_menu, w)) return;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
         if (r.y + r.h > 0 && r.y < I(w, W_H))
@@ -2151,8 +2149,8 @@ static void paint_selection(void *w, void *canvas) {
     /* The accent's bar, under the rows' own ink */
     const scheme_t *S = scheme();
     /* Light Mode: ink on a coloured bar stays white (ringnav_style_color) */
-    st.sel_accent = !neutral(S->tones[0]) ? (home ? P(g_menu.at[i], W_PARENT) : g_menu.at[i])
-                                          : (void *)0;
+    st.sel_accent =
+        !neutral(S->tones[0]) ? (home ? P(g_menu.at[i], W_PARENT) : g_menu.at[i]) : (void *)0;
     if (!tile || g_menu.kind == 4) {
         /* a list row's is the theme's sel_inset in from each side, its ends sel_radius at most
          * pill_radius's */
@@ -2323,8 +2321,7 @@ static void paint_into(void *w, void *canvas) {
                : !tk_strcmp(image, "gain_high")                   ? 1
                : !tk_strcmp(image, "gain_low")                    ? 0
                                                                   : -1;
-    int sig =
-        sw < 0 && gain < 0 && theme()->set_switch && image[0] == 'w' ? wifi_sig(image) : 0;
+    int sig = sw < 0 && gain < 0 && theme()->set_switch && image[0] == 'w' ? wifi_sig(image) : 0;
     if (sig) {
         wifi_mark(w, canvas, sig, st.sel_accent && painting_in(st.sel_accent));
         return;
@@ -2338,8 +2335,7 @@ static void paint_into(void *w, void *canvas) {
         chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
                      st.sel_accent && painting_in(st.sel_accent));
     else if (!tk_strcmp(image, "list_intodown"))
-        chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X),
-                      I(w, W_H) / 2);
+        chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2);
 }
 
 /* The theme's scrollbar (theme_t.sb_*), a track and thumb while the wheel turns (list_marks.c):
@@ -3659,7 +3655,7 @@ static void clock_place(void *bar, void *top) {
     static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
     static void *clock;
     static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
-                                         * a read-back of the style's current state */
+                                        * a read-back of the style's current state */
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
     if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
     if (!clock) {
@@ -4320,14 +4316,14 @@ static void np_stage(unsigned stage) {
     if (mode) widget_invalidate_force(mode, (void *)0);
 }
 
-/* Now Playing's Centre, an iPod classic's: each press shows the next control the wheel sets, scrubber, shuffle, repeat, rating, then back to
- * rest, where the wheel is the volume's (Apple's iPod classic guide: scrubber, Genius, shuffle,
- * rating, lyrics). The scrub's own press ends it (scrub_end seeks) and goes on to shuffle; the
- * rating picker's Centre saves and closes it (rate_key; a modal set's picker, ratings.c
- * rate_modal), back at rest. Shuffle and repeat have no picker of their own: the theme's pair
- * rings the one the wheel steps (np_modes); under a theme without the pair the cycle skips them. A
- * press held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
- * instead, as stock's release does. */
+/* Now Playing's Centre, an iPod classic's: each press shows the next control the wheel sets,
+ * scrubber, shuffle, repeat, rating, then back to rest, where the wheel is the volume's (Apple's
+ * iPod classic guide: scrubber, Genius, shuffle, rating, lyrics). The scrub's own press ends it
+ * (scrub_end seeks) and goes on to shuffle; the rating picker's Centre saves and closes it
+ * (rate_key; a modal set's picker, ratings.c rate_modal), back at rest. Shuffle and repeat have no
+ * picker of their own: the theme's pair rings the one the wheel steps (np_modes); under a theme
+ * without the pair the cycle skips them. A press held NP_HOLD_MS or longer, short of stock's long
+ * press (Shut Down), turns the screen off instead, as stock's release does. */
 #define NP_HOLD_MS 400
 static int np_centre(unsigned now) {
     int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;
@@ -4360,9 +4356,7 @@ static int np_centre(unsigned now) {
  * repeat stage a tick steps that control. Neither the volume nor its dialog sees the wheel. */
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
-    if (key == KEY_CENTER) {
-        return np_centre(now);
-    }
+    if (key == KEY_CENTER) { return np_centre(now); }
     if (st.np_stage != NP_STAGE_REST && !st.scrub) {
         np_mode_step(st.np_stage == NP_STAGE_REPEAT, key == KEY_NEXT ? 1 : -1);
         np_stage(st.np_stage); /* its timeout from this tick */
@@ -5061,9 +5055,10 @@ static int press_repaint(const void *info) {
 }
 
 /* A touched list row's grey: the whole row (the Library's button leaves x 0-20, 355-375 and the
- * pitch's last 4 px), square. Drawn as the row's background; the button's own box is skipped (1). The press
- * invalidates the whole surface (ringnav_touch), its release only the button, so the row's edges
- * repaint once after it (press_repaint). A tile's grey is its selection card, inside the tile. */
+ * pitch's last 4 px), square. Drawn as the row's background; the button's own box is skipped (1).
+ * The press invalidates the whole surface (ringnav_touch), its release only the button, so the
+ * row's edges repaint once after it (press_repaint). A tile's grey is its selection card, inside
+ * the tile. */
 static int pressed_pill(void *w, void *canvas) {
     if (!w) return 0;
     if (!is_row(w)) {
@@ -5484,8 +5479,7 @@ static unsigned *style_color(unsigned *color, void *style, const char *name, uns
         if (T->set_switch && (*color & 0xffffff) == 0x777777)
             *color = (*color & 0xff000000u) | S->muted;
         /* stock's secondary text takes the scheme's quieter grey */
-        if (S->muted && (*color & 0xffffff) == 0xaaaaaa)
-            *color = (*color & 0xff000000u) | S->muted;
+        if (S->muted && (*color & 0xffffff) == 0xaaaaaa) *color = (*color & 0xff000000u) | S->muted;
     }
     int a = accent();
     unsigned c = accent_map(*color, a, TONE_LIGHT);
@@ -5517,16 +5511,16 @@ static int settings_icon(const char *name) { return named_in(SETTINGS_ICON_NAMES
 
 /* Decoded theme images are mapped once, before the image manager caches them. Only a plain asset
  * name is the theme's: covers by path or URL (a '/' or ':') never are. An icons.mono theme (OLED)
- * also greys built-in navigation/control icons; category discs keep white glyphs, warning batteries keep their colours.
- * The confirm pop-up's discs (CONFIRM_IMAGE*) take the dark CONFIRM_SURFACE under every accent,
- * Crimson included, so their white glyphs stay legible. The quick settings' active controls
- * (DROPDOWN_IMAGE*, not the brightness suns) take the accent's red tone like everything else red,
- * but their white glyph turns CONFIRM_SURFACE on a tone brighter than GLYPH_LIGHT_MAX (Graphite's
- * silver), so an active disc stands apart from the grey inactive ones and its glyph stays legible.
- * Any other red under white (a switch's knob, a disc's glyph, a BUTTON_IMAGE*'s label) is a surface
- * and takes the light tone, which keeps the white legible; red marks on their own keep the red
- * tone. bitmap_t: w @0, h @4, format @0xe; the 32-bit formats 1-4 hold r, g, b at these byte
- * offsets. */
+ * also greys built-in navigation/control icons; category discs keep white glyphs, warning batteries
+ * keep their colours. The confirm pop-up's discs (CONFIRM_IMAGE*) take the dark CONFIRM_SURFACE
+ * under every accent, Crimson included, so their white glyphs stay legible. The quick settings'
+ * active controls (DROPDOWN_IMAGE*, not the brightness suns) take the accent's red tone like
+ * everything else red, but their white glyph turns CONFIRM_SURFACE on a tone brighter than
+ * GLYPH_LIGHT_MAX (Graphite's silver), so an active disc stands apart from the grey inactive ones
+ * and its glyph stays legible. Any other red under white (a switch's knob, a disc's glyph, a
+ * BUTTON_IMAGE*'s label) is a surface and takes the light tone, which keeps the white legible; red
+ * marks on their own keep the red tone. bitmap_t: w @0, h @4, format @0xe; the 32-bit formats 1-4
+ * hold r, g, b at these byte offsets. */
 /* Clamp straight alpha to the arc coverage: reusing an already rounded bitmap is harmless. */
 static void round_corners(unsigned char *px, int w, int h, int stride, int alpha) {
     /* a theme's list.art.radius is on screen, at the set's art size: the bitmap's own scale */
@@ -5658,7 +5652,8 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
                tk_strcmp(name, "play_defaultcover") && tk_strcmp(name, "playlist_default") &&
                !tk_str_start_with(name, "tidal_shan") && tk_strcmp(name, "tidal_user");
     /* Baidu's is a white square, the only list icon without a disc: cut to one, its edge a pixel
-     * soft. An icons.mono theme greys it inverted below (a grey disc, the logo white), as its neighbours. */
+     * soft. An icons.mono theme greys it inverted below (a grey disc, the logo white), as its
+     * neighbours. */
     int square = s && !*s && !tk_strcmp(name, "list_baidu");
     unsigned char *cut = square && format < 4 ? bitmap_lock_buffer_for_write(bitmap) : (void *)0;
     if (cut) {
@@ -5673,9 +5668,8 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
             }
         bitmap_unlock_buffer(bitmap);
     }
-    unsigned char *px = icon && format < 4 && T->icons_mono
-                            ? bitmap_lock_buffer_for_write(bitmap)
-                            : (void *)0;
+    unsigned char *px =
+        icon && format < 4 && T->icons_mono ? bitmap_lock_buffer_for_write(bitmap) : (void *)0;
     if (px) {
         const unsigned char *o = at[format];
         int disc = 0;
@@ -5820,10 +5814,10 @@ int ringnav_image_add(void *manager, const char *name, void *bitmap) {
                                                      : flip_v(p[o[c]], fp, fi));
         bitmap_unlock_buffer(bitmap);
     }
-    /* A theme's art placeholder size (art.placeholder): stock's grey tiles, as tall as the row (Folder
-     * view's folders and songs; list_song is Album info's row image too), drawn at that size in
-     * its middle, so they have room above and below; a real cover (a file path) keeps the row's
-     * size. */
+    /* A theme's art placeholder size (art.placeholder): stock's grey tiles, as tall as the row
+     * (Folder view's folders and songs; list_song is Album info's row image too), drawn at that
+     * size in its middle, so they have room above and below; a real cover (a file path) keeps the
+     * row's size. */
     static const char *const tiles[] = { "list_folder", "list_song" };
     for (unsigned k = 0;
          T->art_placeholder && s && !*s && format < 4 && k < sizeof tiles / sizeof *tiles; ++k)
@@ -5897,7 +5891,7 @@ static void setting_put(int *value, int v, const char *key) {
     if (*value != v) write_int_config(*value = v, "IPOD", key);
 }
 /* The theme's preset (its theme.xml's: OLED's dark, Blue, Full), as choosing the theme applied it
- * when there were others: theme_boot's once for a unit an older build left on another (THEME_OLD).
+ * when there were others: theme_boot's once for a unit an older build left on another (THEME_OLED).
  * Light Mode's Auto, the battery and the Shortcut are kept. Only a change is saved. */
 static void theme_preset(const theme_t *T) {
     int buf[11];
@@ -6144,10 +6138,10 @@ static int display_open(void *ctx, void *event) {
 }
 
 static void setting_row(void *view, int i) {
-    static const char *const icons[] = { "system_display", "playset_covermode",
+    static const char *const icons[] = { "system_display",      "playset_covermode",
                                          "system_powermanager", "playset_covermode",
-                                         "system_display", "system_display",
-                                         "system_keytone", "system_display" };
+                                         "system_display",      "system_display",
+                                         "system_keytone",      "system_display" };
     const char *icon = i < SETTING_OWN ? icons[i] : "system_display";
     st.setting_label[i] = list_row(view, icon, setting_click, (void *)(long)i);
     setting_text(i);
@@ -6160,10 +6154,10 @@ static void setting_row(void *view, int i) {
  * opening its slider page, crossfade.c) join them, then Appearance and Coverflow, each opening
  * stock's page again (display_open) with its stock rows dropped and its own instead: the theme's
  * options (OLED's: Light Mode, Accent, Home, Shortcut, Battery, Song Artist, Song Length, Track
- * Time); Artist View, Coverflow Sort and Refresh Coverflow. Controls is System settings' row (ringnav_systemset) on the
- * same page: the wheel, the buttons and what the buttons do. The value rows show it in the label
- * and have no chevron, since they change in place. ponytail: stock's page opened over itself; its
- * own rows' state is never touched on a sub-page. */
+ * Time); Artist View, Coverflow Sort and Refresh Coverflow. Controls is System settings' row
+ * (ringnav_systemset) on the same page: the wheel, the buttons and what the buttons do. The value
+ * rows show it in the label and have no chevron, since they change in place. ponytail: stock's page
+ * opened over itself; its own rows' state is never touched on a sub-page. */
 int ringnav_display(void *win, void *ctx) {
     static const char *const titles[] = { 0, "Appearance", "Cover Flow", "Controls" },
                              *const sub_icons[] = { 0, "system_display", "playset_covermode",
@@ -6272,7 +6266,8 @@ int ringnav_systemset(void *win, void *ctx) {
             widget_set_tr_text(list_row_into(view, moved[i][0], to_page, (void *)moved[i][1]),
                                moved[i][0]);
         /* Car Remote (coda_rc_shim.c): its page, whose switch starts the coda-rc daemon */
-        widget_set_text_utf8(list_row_into(view, "system_carmode", carremote_open, 0), "Car Remote");
+        widget_set_text_utf8(list_row_into(view, "system_carmode", carremote_open, 0),
+                             "Car Remote");
         for (unsigned i = 5; i <= 8; ++i) widget_set_visible(widget_get_child(view, i), 0, 0);
         /* Language: Q2 Pod's pages and labels are English only, so stock's other languages read
          * half-blank; hidden until they are translated (docs/internals.md, English). */
@@ -6314,7 +6309,7 @@ int ringnav_touch(void *ctx, void *event) {
             xy[1] < I(st.np_slider, W_H))
             hold = 0;
     }
-    if (!hold) /* swiping pages keeps the paused seek's preview */
+    if (!hold)       /* swiping pages keeps the paused seek's preview */
         np_cancel(); /* before the slider sees the touch, so a drag seeks the stock way */
     hide_outline();
     int result = stock_touch_trampoline(ctx, event);
@@ -6473,10 +6468,10 @@ void ringnav_song_unknown(const char *key, char *text, int size) {
     if (geom(G_TEXT_ART)) getFormatString(key, text, size);
 }
 
-/* Under a set without text-row artwork (text_art 0, as OLED's), a row no taller than the pitch is one
- * line: its leading children (artwork, the playing gif; stock's choice box stays) and the text's
- * second line hide, and the title, at the set's centred y, takes their width. Stock re-showing one
- * relayouts the row, which hides it again. */
+/* Under a set without text-row artwork (text_art 0, as OLED's), a row no taller than the pitch is
+ * one line: its leading children (artwork, the playing gif; stock's choice box stays) and the
+ * text's second line hide, and the title, at the set's centred y, takes their width. Stock
+ * re-showing one relayouts the row, which hides it again. */
 static int one_line(void *row) { return !geom(G_TEXT_ART) && I(row, W_H) <= geom(G_PITCH); }
 /* Under such a set, a taller row whose leading image stock gave no width (text_art 0, as Songs') is
  * two lines of text: the same children hide, its second line stays. */
@@ -6511,7 +6506,8 @@ void row_meta(void *w) {
  * positions every child, skips hidden controls, and owns clone/destruction and text overflow. */
 static int compact_row_layout(void *layout, void *row) {
     void *text = (void *)0, *title = (void *)0;
-    /* A toolbar-less set's playlist rows hold their children in their own places: stock's layout has none */
+    /* A toolbar-less set's playlist rows hold their children in their own places: stock's layout
+     * has none */
     if (widget_get_prop_int(P(row, W_PARENT), PL_ROW, 0)) {
         pl_fit(row);
         return 0;
@@ -8546,7 +8542,8 @@ static int qm_open(const void *unused) {
             current = sorting ? song_sort() : playback_option(kind);
         qm_title(dialog, kind == 0 ? "Shuffle" : kind == 1 ? "Repeat" : "Group by");
         widget_destroy_children(view);
-        int modal = modal_set(), row = modal ? MODAL_PITCH : QM_ROW, w = modal ? modal_row_w() : 375;
+        int modal = modal_set(), row = modal ? MODAL_PITCH : QM_ROW,
+            w = modal ? modal_row_w() : 375;
         for (int i = 0; i < count; ++i) {
             void *item = list_item_create(view, 0, i * row, w, row);
             widget_use_style(item, "s_listitem_black");
@@ -8624,8 +8621,8 @@ static int qm_open(const void *unused) {
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (st.qm_kind == QM_PLAYLIST) acts[n++] = QA_MORE; /* its dots' page */
-    /* the list's own rows, which its covers hide: Select Playlists… is a toolbar-less page's select mode; a
-     * toolbar's page edits from its toolbar */
+    /* the list's own rows, which its covers hide: Select Playlists… is a toolbar-less page's select
+     * mode; a toolbar's page edits from its toolbar */
     if (st.qm_kind == QM_PLAYLIST && coverflow_playlist(page)) {
         acts[n++] = QA_NEW_PLAYLIST;
         if (!geom_val(V_TOOLBAR)) acts[n++] = QA_EDIT_PLAYLISTS;
@@ -9847,9 +9844,7 @@ static int slider_page(void *top) {
 
 static int fields(void *top) {
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
-    return !tk_strcmp(name, "manualtime_page")      ? 5
-           : !tk_strcmp(name, "sleepshutdown_page") ? 2
-                                                    : 0;
+    return !tk_strcmp(name, "manualtime_page") ? 5 : !tk_strcmp(name, "sleepshutdown_page") ? 2 : 0;
 }
 
 static void *field_widget(void *top, int f) {

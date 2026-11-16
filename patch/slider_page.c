@@ -77,7 +77,8 @@ void slider_page_open(void *win, void *s, unsigned kind) {
     char key[STYLE_KEY];
     int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
     void *view = P(s, W_PARENT), *c;
-    slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind, sp.value = sp.sw = (void *)0;
+    slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind,
+    sp.value = sp.sw = (void *)0;
     widget_on(win, EVT_DESTROY, sp_gone, win);
     widget_move_resize(view, 0, view_y, 375, client_h() - view_y);
     /* the slider's box on the track, a knob's height either side for a finger; stock's own bar

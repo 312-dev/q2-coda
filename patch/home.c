@@ -31,8 +31,8 @@ enum {
 };
 
 /* Every Library row, stock's and the added ones: its label takes the list titles' role. In a set
- * without Library icons (lib_art 0, as OLED's) it also drops its icon and starts its label at the set's
- * text inset on screen, its right edge kept. */
+ * without Library icons (lib_art 0, as OLED's) it also drops its icon and starts its label at the
+ * set's text inset on screen, its right edge kept. */
 static void library_look(void *view) {
     const theme_t *T = theme();
     int bare = !geom_val(V_LIB_ART);

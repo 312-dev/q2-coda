@@ -305,9 +305,8 @@ static void th_beat(void *s, int n, int travel, unsigned now, int ms, int since)
 /* usable: navigation.c's; gated: travel is to be dropped (its gates). Answers THUMB_*. */
 int coverflow_wheel_poll(int usable, int gated) {
     void *s = cf.slide, *wm = window_manager();
-    int shown = usable && cfs.thumb && fx.frame && covers_live() &&
-                widget_count_children(s) && window_manager_get_top_window(wm) == cf.page &&
-                !window_manager_is_animating(wm);
+    int shown = usable && cfs.thumb && fx.frame && covers_live() && widget_count_children(s) &&
+                window_manager_get_top_window(wm) == cf.page && !window_manager_is_animating(wm);
     int raw = shown && !window_manager_get_pointer_pressed(wm);
     if (raw != th.raw) {
         __sync_lock_test_and_set(&wheel_travel, 0);

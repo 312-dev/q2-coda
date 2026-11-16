@@ -587,7 +587,8 @@ static const unsigned pl_stock[PL_N] = { 0x4b46a4, 0x4b45a4, 0x4b44d4, 0x4b5e18,
 /* A row's place on the list's two heights: name over second line in the page rows' boxes, which
  * hold their fonts; the dots or a mark at the right edge, centred on the picker's tick's column
  * (x 346), where the selected row's chevron (x 317) shows in their place. The text ends clear of
- * whichever shows. With row art (G_ART) its art leads, in an album row's column, the text after it. */
+ * whichever shows. With row art (G_ART) its art leads, in an album row's column, the text after it.
+ */
 #define PL_MARK_X 333 /* the tick's column, the dots' hit */
 void pl_fit(void *button) {
     const theme_t *T = theme();
@@ -810,8 +811,8 @@ static void pl_rows(void *win) {
     }
     widget_invalidate_force(win, (void *)0);
 }
-/* With nothing remembered (a first open, or a count changed) the toolbar-less Playlists starts on its
- * first playlist, below New and Edit, as stock's and the iPod's lists of playlists alone do; an
+/* With nothing remembered (a first open, or a count changed) the toolbar-less Playlists starts on
+ * its first playlist, below New and Edit, as stock's and the iPod's lists of playlists alone do; an
  * empty list on New. Just after New Playlist made one (pl_made), on that one, as an iPod's list
  * lands on what was added; its rows are p_deque_playlist's records in order. */
 int pl_first(menu_t *m, int cur) {
@@ -1024,9 +1025,9 @@ static void pl_dress(void *win, int first) {
 }
 
 /* After stock rebuilds its rows: the guarded Now Playing picker's rebind, a toolbar-less
- * set's rows, under a set with row art (G_ART) the rows' art, not the Add to Playlist picker's, a list as it was, and
- * Playlist View's covers. Stock's add mode is one global, left by any picker that closes, which it
- * reads as this page comes back: each page keeps the one it opened with. */
+ * set's rows, under a set with row art (G_ART) the rows' art, not the Add to Playlist picker's, a
+ * list as it was, and Playlist View's covers. Stock's add mode is one global, left by any picker
+ * that closes, which it reads as this page comes back: each page keeps the one it opened with. */
 int ringnav_playlist(void *win) {
     int mode = widget_get_prop_int(win, PL_MODE, -1), first = mode < 0;
     if (first)

@@ -87,9 +87,10 @@ static int vol_poll(const void *info) {
  * the times turns black with a white bar over the track and "Volume N"; under a status row's set
  * (OLED's) the bar, inset, is white between two speakers with no text. Over any other window
  * (Quick Settings included) a VOL_PANEL_* rounded panel in the fast-scroll letter's style holds a
- * pill bar and the number alone. slider_vol and label_vol are hidden, and slider_vol is moved onto the area drawn, so
- * stock's partial repaints land on it; vol_poll catches the changes those miss. The bar draws
- * vol_shown, which a wheel tick (vol_next) eases towards the value; the number is the value. */
+ * pill bar and the number alone. slider_vol and label_vol are hidden, and slider_vol is moved onto
+ * the area drawn, so stock's partial repaints land on it; vol_poll catches the changes those miss.
+ * The bar draws vol_shown, which a wheel tick (vol_next) eases towards the value; the number is the
+ * value. */
 void vol_paint(void *top, void *canvas) {
     void *wm = window_manager(), *lcd = P(canvas, CANVAS_LCD);
     if (!lcd || tk_strcmp(widget_get_prop_str(top, "name", ""), "volume_dialog")) return;
