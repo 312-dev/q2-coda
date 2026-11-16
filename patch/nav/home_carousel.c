@@ -1,0 +1,192 @@
+/* Home and Coverflow step their slide_menu with one retargeted animator (home_step): stock
+ * scroll_to (0x606290) starts a new animator per call and orphans the running one, so fast
+ * ticks leave several fighting over the offset and committing the index twice. */
+static int carousel_page(void *top) {
+    const char *name = top ? widget_get_prop_str(top, "name", "") : "";
+    return !tk_strcmp(name, "home_page") || !tk_strcmp(name, "coverflow_page");
+}
+
+static int is_home(void *top, void *w) { return w && kind(w) == 3 && carousel_page(top); }
+
+/* iPod Home's lists (the main menu and its Settings list): Return goes back to the first row. */
+static int home_menu(void *top) {
+    return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "home_page");
+}
+
+/* A list row: a list_item or table_row. */
+static int is_row(void *w) {
+    const char *t = w ? widget_get_type(w) : "";
+    return !tk_strcmp(t, "list_item") || !tk_strcmp(t, "table_row");
+}
+
+/* A widget's own window: the top-level widget it sits in. */
+void *window_of(void *w) {
+    void *wm = window_manager();
+    while (w && P(w, W_PARENT) != wm) w = P(w, W_PARENT);
+    return w;
+}
+
+/* A page that opens and closes with stock's slide (tools/ipod.py SLIDE). Stock paints it and
+ * the page under it into the animator's snapshots while it is the top window and before
+ * window_manager_is_animating is set; nothing else paints the page under it. */
+static int slides(void *win) {
+    /* Now Playing with a hint holds it as close_anim_hint, which this doesn't read. */
+    if (win && win == st.np_win && theme()->motion[MOTION_PLAYING].hint) return 1;
+    const char *hint = win ? widget_get_prop_str(win, "anim_hint", (void *)0) : (void *)0;
+    return hint && *hint;
+}
+
+/* win's anim_hint becomes the theme's for kind, at load or open only. A theme with no hint for kind
+ * reads and writes nothing. Now Playing takes it as close_anim_hint, its open stays immediate. No
+ * kind reaches a dialog: a clear one's snapshot would show black under its animation. */
+static void motion_hint(void *win, int kind) {
+    const char *hint = theme()->motion[kind].hint;
+    if (!hint) return;
+    const char *prop = kind == MOTION_PLAYING ? "close_anim_hint" : "anim_hint";
+    if (tk_strcmp(widget_get_prop_str(win, prop, ""), hint)) widget_set_prop_str(win, prop, hint);
+}
+/* A window as it loads. Themes with no window hints read nothing. */
+static void motion_load(void *root, int np) {
+    const motion_t *M = theme()->motion;
+    if (!M[MOTION_PAGE].hint && !M[MOTION_PLAYING].hint) return;
+    if (np)
+        motion_hint(root, MOTION_PLAYING);
+    else if (slides(root))
+        motion_hint(root, MOTION_PAGE);
+}
+/* page_open's page: Cover Flow's takes the theme's hint, if it has one. */
+void motion_open(void *page, const char *name) {
+    if (!tk_strcmp(name, "coverflow_page")) motion_hint(page, MOTION_COVERFLOW);
+}
+
+/* The animator's destination is the intended icon, even before stock commits its index.
+ * Keep this widget-owned: touch and page recreation cannot leave a dangling animator here. */
+static int slide_index(void *w) {
+    void *a = P(w, SLIDE_ANIMATOR);
+    int n = (int)widget_count_children(w);
+    if (!n) return -1;
+    int id = I(w, SLIDE_INDEX);
+    int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+    if (a && stride > 0) id -= I(a, ANIM_X_TO) / stride;
+    id %= n;
+    return id < 0 ? id + n : id;
+}
+
+static int home_done(void *w, void *event) {
+    slide_menu_on_scroll_done(w, event);
+    /* Stock skips focus restoration when a reversal returns to the original index. */
+    widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+    return 7; /* RET_REMOVE: same one-shot lifetime as stock completion */
+}
+
+static void *surface(void *target, void **other);
+
+static int cf_letter_expire(const void *info) {
+    st.cf_letter_timer = st.cf_letter = 0;
+    void *w = surface(0, 0);
+    if (w && w == st.cf_letter_surface) widget_invalidate_force(w, 0);
+    return 0;
+}
+
+extern float coverflow_follow(float k);
+extern int coverflow_follow_aim(int d, int tau, int elapsed);
+/* w's one animator, the wheel's and Coverflow's touch's, from the live offset to goal in ms with
+ * easing (AWTK's easing_type_t), made on first use; 0 if it cannot be, the move committed at once.
+ */
+int carousel_glide(void *w, int goal, unsigned ms, int easing) {
+    void *a = P(w, SLIDE_ANIMATOR);
+    if (a && !ms) { /* ms 0 is the immediate move, also over a glide still running */
+        widget_animator_pause(a);
+        widget_animator_destroy(a);
+        a = (void *)0;
+    }
+    if (!a) {
+        a = ms ? widget_animator_scroll_create(w, ms, 0, easing == EASE_FOLLOW ? 0 : easing)
+               : (void *)0;
+        if (a && !widget_animator_on(a, EVT_ANIM_END, home_done, w)) {
+            widget_animator_destroy(a);
+            a = (void *)0;
+        }
+        P(w, SLIDE_ANIMATOR) = a;
+        if (!a) {
+            int n = (int)widget_count_children(w),
+                stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+            int id = n && stride > 0 ? (I(w, SLIDE_INDEX) - goal / stride) % n : 0;
+            I(w, SLIDE_OFFSET) = 0;
+            slide_menu_set_value(w, id < 0 ? id + n : id);
+            widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+            return 0;
+        }
+        widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 0);
+    }
+    widget_animator_pause(a);
+    widget_animator_scroll_set_params(a, I(w, SLIDE_OFFSET), 0, goal, 0);
+    if (easing == EASE_FOLLOW) /* ms is its time constant; the distance gives the run's length */
+        ms = (unsigned)coverflow_follow_aim(
+            goal - I(w, SLIDE_OFFSET), (int)ms,
+            P(a, ANIM_EASING) == (void *)coverflow_follow ? I(a, ANIM_ELAPSED) : -1);
+    I(a, ANIM_ELAPSED) = I(a, ANIM_START_TIME) = 0;
+    I(a, ANIM_DURATION) = ms;
+    /* scroll_create's own, so a reused one takes this run's */
+    P(a, ANIM_EASING) = easing == EASE_FOLLOW ? (void *)coverflow_follow : easing_get(easing);
+    widget_animator_start(a);
+    return 1;
+}
+
+/* Cover Flow's big letter over w for LETTER_MS, or none: the wheel's jumps and the thumb's. */
+void coverflow_letter(void *w, unsigned letter, unsigned now) {
+    st.cf_letter = letter;
+    st.cf_letter_at = now;
+    st.cf_letter_surface = w;
+    st.cf_letter_held = 0;
+    if (letter)
+        rearm(&st.cf_letter_timer, cf_letter_expire, LETTER_MS);
+    else
+        stop_timer(&st.cf_letter_timer);
+}
+
+/* The thumb's letter over w with no LETTER_MS: its letters last until it lifts, which clears it
+ * (coverflow_letter(w, 0, now)). */
+void coverflow_letter_hold(void *w, unsigned letter) {
+    coverflow_letter(w, 0, 0);
+    st.cf_letter = letter, st.cf_letter_held = 1;
+}
+
+static void home_step(void *w, int dir, unsigned now, int jump) {
+    int n = (int)widget_count_children(w);
+    int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+    int fast =
+        st.home_surface == w && st.home_dir == dir && now - st.last_home <= HOME_FAST_WINDOW_MS;
+    void *a = P(w, SLIDE_ANIMATOR);
+    int live = I(w, SLIDE_OFFSET);
+    int goal = a ? I(a, ANIM_X_TO) : 0;
+    /* Reversal discards the unfinished destination and heads to the adjacent card
+     * behind the live position. Same-direction ticks extend the intended destination. */
+    if (a && (goal - live) * dir > 0) {
+        goal = (live / stride) * stride;
+        if (dir > 0 ? goal >= live : goal <= live) goal -= dir * stride;
+    } else
+        goal -= dir * stride;
+    unsigned letter = 0;
+    int from = (I(w, SLIDE_INDEX) - goal / stride - dir) % n;
+    if (from < 0) from += n;
+    int steps = jump ? coverflow_jump(w, from, dir, &letter) : 1;
+    goal -= dir * stride * (steps - 1);
+    int to = I(w, SLIDE_INDEX) - goal / stride;
+    if (coverflow_bounded(w) && (to < 0 || to >= n)) {
+        goal += dir * stride * steps;
+        if (a && (goal - live) * dir < 0) return; /* still arriving at the end */
+        I(w, SLIDE_OFFSET) = live = goal - dir * stride / CF_BOUNCE;
+    }
+    coverflow_letter(w, letter, now);
+    const motion_t *glide =
+        &theme()->motion[(coverflow_slide(w) ? MOTION_COVERFLOW_STEP : MOTION_STEP) + fast];
+    if (!carousel_glide(w, goal, glide->ms, glide->easing)) {
+        st.home_surface = (void *)0;
+        return;
+    }
+    st.home_surface = w;
+    st.last_home = now;
+    st.home_dir = dir;
+}
+
