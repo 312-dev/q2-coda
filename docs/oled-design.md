@@ -762,6 +762,11 @@ until the password's form is chosen.
   heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
+- **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
+  Home's art, Cover Flow): a `#2C2C2E` tile with Phosphor's `music-notes-simple` (regular) in Text
+  Tertiary, a third of its width, centred (`assets/icons/default_album_home.png`, drawn from the
+  vendored SVG; `tools/build.py` sizes it into stock's `ART_PLACEHOLDERS`), in place of stock's
+  `#787878` disc (the user's, from audit2 I1).
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
