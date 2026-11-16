@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Files, claim
+from conftest import NAVIGATION_SOURCE, O, Files, claim, ui_name
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_RETURN = (O[k] for k in ('KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_RETURN'))
 KEY_BACK_BTN, KEY_FWD_BTN = O['KEY_BACK_BTN'], O['KEY_FWD_BTN']
@@ -2425,6 +2425,85 @@ def cc_opened(fw, ui):
     fw.fn('cc_open', None, C.c_void_p)(top.p)
     stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
     return top, dict(zip(stops, buttons))
+
+
+HOLDS = [(0, b'systemset/wifi_page'), (1, b'systemset/bluetooth_page'), (2, b'systemset/netservice_page'),
+         (3, None), (CC_LOCK, b'systemset/keylock_page'), (CC_SLEEP, b'systemset/sleepshutdown_page'),
+         (CC_NIGHT, b'playset/bootvol_page'), (CC_EQ, b'playset/equalizer_page'), (CC_SMART, b'systemset/wifi_page')]
+
+
+def opened(fw):
+    """The pages opened: navigator_to's paths, None for a page of the payload's own (Car Remote's, window_create)."""
+    if not hasattr(fw, 'cc_windows'):
+        fw.cc_windows = []
+        fw.mock('window_create', lambda *_: fw.cc_windows.append(None) and 0)
+    return [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] + fw.cc_windows
+
+
+@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[0] > 1])
+def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
+    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle or tile
+    closes Control Center and opens its page; its release does not click it."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    button = buttons[stop]
+    assert button.ints[b'_quick_hold'] == 16 + stop
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(button, O['EVT_POINTER_DOWN'])
+    assert [ms for _, _, ms in ui.timers.values()][-1] == O['QUICK_HOLD_MS']
+    opened(fw)
+    ui.fire(ui_name(fw.lib, 'quick_long'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
+    assert opened(fw) == [page]
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, EVENT_TYPE, EVT_CLICK)
+    assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
+
+
+def test_a_tap_on_a_tile_acts_and_opens_nothing(fw, keys):
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    flag = fw.var('g_keylock_flag', C.c_ubyte)
+    ui.emit(buttons[CC_LOCK], EVT_CLICK)
+    assert flag.value == 1 and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
+
+
+@pytest.mark.parametrize('stop, page', HOLDS)
+def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop, page):
+    """Centre held QUICK_HOLD_MS with the ring on a toggle or tile: Control Center closes, its page opens, and the
+    release does nothing more (no toggle, no click on the page now in front)."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = stop
+    keys.press(KEY_CENTER)
+    keys.press(KEY_CENTER, 50)  # a held key's repeat leaves the hold running
+    hold = ui.due(ui_name(fw.lib, 'cc_hold_due'))
+    assert len(hold) == 1 and ui.timers[hold[0]][2] == O['QUICK_HOLD_MS']
+    opened(fw)
+    ui.fire(ui_name(fw.lib, 'cc_hold_due'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
+    assert opened(fw) == [page]
+    seen = top.ints[b'_cc_seen']
+    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and fw.var('g_keylock_flag', C.c_ubyte).value == 0
+    assert len(fw.calls('dialog_quit')) == 1 and top.ints[b'_cc_seen'] == seen  # the release reached nothing
+
+
+def test_a_short_centre_on_a_tile_acts_and_drops_its_hold(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_LOCK
+    keys.press(KEY_CENTER)
+    assert keys(KEY_CENTER, 200) == STOP and fw.var('g_keylock_flag', C.c_ubyte).value == 1
+    assert not ui.due(ui_name(fw.lib, 'cc_hold_due')) and not fw.calls('navigator_to')
+
+
+@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_LOCK, False)])
+def test_centre_held_on_a_slider_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=100000 if ring else None)
+    top.ints[b'_cc_focus'] = stop
+    keys.press(KEY_CENTER)
+    assert not ui.due(ui_name(fw.lib, 'cc_hold_due'))
 
 
 def test_the_landing_waits_for_rest_then_springs_for_280_ms(fw, keys):

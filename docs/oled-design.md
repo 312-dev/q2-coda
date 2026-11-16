@@ -756,6 +756,11 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
+- **Holds**: a toggle or tile held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes
+  the page and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings >
+  Bluetooth; AirPlay: the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Lock:
+  Buttons Lock; Sleep: Sleep Timer; Night Shift: its slider page (Display's Night Shift row); EQ: the EQ page;
+  Smart Wi-Fi: Settings > Wi-Fi. The sliders have no hold.
 - **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
   8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
   sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.

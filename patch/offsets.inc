@@ -483,6 +483,10 @@ static inline int arc_out(int r, int y) {
  * Now Playing's heart RATE_HOLD_MS opens the picker. */
 #define RATE_SLOTS 4096
 #define RATE_HOLD_MS 500
+/* A Quick Settings or Control Center button held this long, by a finger (navigation.c quick_long)
+ * or Centre (control_center.c cc_keydown), opens its page: the house hold, Edit Library's and Up
+ * Next's (LR_HOLD_MS, UN_HOLD_MS). */
+#define QUICK_HOLD_MS 550
 /* Long Songs (docs/internals.md#long-songs): songs longer than this. */
 #define LONG_SONG_S 600
 /* End bump and wrap, audited row lists only (see ring_list in patch/navigation.c). A detent past an

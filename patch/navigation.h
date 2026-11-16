@@ -483,7 +483,11 @@ void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
  * keys) */
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
-int cc_key(void *win, unsigned key);
+int cc_key(void *win, unsigned key), cc_key_release(unsigned key);
+void cc_keydown(unsigned key), cc_hold(int stop);
+/* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
+#define QUICK_CC 16
+void quick_hold(void *button, int page);
 /* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);

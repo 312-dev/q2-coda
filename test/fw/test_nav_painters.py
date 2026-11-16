@@ -2029,7 +2029,7 @@ class Quick:
         return self.fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(self.icons[name].addr, event)
 
     def hold(self):
-        """The hold timer, run as the timer manager would at RATE_HOLD_MS."""
+        """The hold timer, run as the timer manager would at QUICK_HOLD_MS."""
         fn = [f for f, ms in self.timers if f == self.fn('quick_long')][-1]
         return C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(None)
 
@@ -2049,7 +2049,7 @@ def test_quick_settings_names_the_lock_and_arms_three_holds(fw, st):
 def test_a_held_icon_opens_its_page_and_its_release_doesnt_click(fw, st, name, page):
     quick = Quick(fw, st)
     quick.press(name)
-    assert quick.timers[-1] == (quick.fn('quick_long'), O['RATE_HOLD_MS'])
+    assert quick.timers[-1] == (quick.fn('quick_long'), O['QUICK_HOLD_MS'])
     quick.hold()
     assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] == [page]
     assert [c[1][0] for c in fw.calls('dialog_quit')] == [quick.win.addr]

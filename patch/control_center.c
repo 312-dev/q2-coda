@@ -16,11 +16,12 @@
  * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
  * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
  * (cc_ring_on). The sliders step at the wheel's speed and their fills ease, as Now Playing's volume
- * does (levels.c). Landing open, the blocks overshoot and settle (cc_spring). ponytail: AirPlay and
- * Sleep Timer open their settings pages (stock's receiver switch and timer have no call this file
- * can make without their page), so their circle and tile are lit only by AirPlay's flag and never
- * by a running timer; the Wi-Fi circle reads "Wi-Fi", not the network's name, which only the Wi-Fi
- * page reads. */
+ * does (levels.c). A toggle or tile held QUICK_HOLD_MS, by a finger (navigation.c quick_hold) or by
+ * Centre (cc_keydown), opens its settings page (cc_hold). Landing open, the blocks overshoot and
+ * settle (cc_spring). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
+ * switch and timer have no call this file can make without their page), so their circle and tile
+ * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
+ * the network's name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
@@ -28,6 +29,7 @@ extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 extern void keylock_toggle(void), coda_rc_toggle(void);     /* navigation.c, coda_rc_shim.c */
 extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
+extern int xfade_open(void *ctx, void *event);              /* crossfade.c */
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc3.py draws it at 1x */
 #define CC_X0 20
@@ -313,6 +315,40 @@ static void *cc_stock(void *win, int i) {
                          1);
 }
 
+/* Whether stop i has a settings page, which a hold on it opens (cc_hold): the toggles and tiles. */
+static int cc_paged(int i) { return i <= CC_CAR || (i >= CC_LOCK && i < CC_STOPS); }
+/* Stop i's settings page, opened by a hold on it once the page is closed: by a finger (navigation.c
+ * quick_long) or Centre (cc_hold_due). Smart Wi-Fi's is Wi-Fi's. */
+void cc_hold(int i) {
+    switch (i) {
+    case CC_WIFI:
+    case CC_SMART:
+        navigator_to("systemset/wifi_page");
+        break;
+    case CC_BT:
+        navigator_to("systemset/bluetooth_page");
+        break;
+    case CC_AIRPLAY:
+        navigator_to("systemset/netservice_page");
+        break;
+    case CC_CAR:
+        carremote_open((void *)0, (void *)0);
+        break;
+    case CC_LOCK:
+        navigator_to("systemset/keylock_page");
+        break;
+    case CC_SLEEP:
+        navigator_to("systemset/sleepshutdown_page");
+        break;
+    case CC_NIGHT:
+        xfade_open((void *)3, (void *)0);
+        break;  /* Display's Night Shift row's page */
+    case CC_EQ: /* an open EQ page is already the goal: a second would share peq_ui.c's one state */
+        if (!navigator_window_is_exist("equalizer_page")) navigator_to("playset/equalizer_page");
+        break;
+    }
+}
+
 /* Stop i acted on (a tap or Centre); 1 when the page goes, for a page that opens. */
 static int cc_act(void *win, int i) {
     unsigned click[12];
@@ -394,7 +430,7 @@ void cc_open(void *win) {
         rect_t r = cc_box(i);
         if (!(c = cc_stock(win, i))) continue;
         widget_move_resize(c, r.x, r.y, r.w, r.h);
-        widget_set_opacity(c, 0);
+        widget_set_opacity(c, 0); /* held: their settings pages (navigation.c quick_long) */
     }
     rect_t b = cc_box(CC_BRIGHT);
     if ((c = widget_lookup(win, "view_backlight", 1))) widget_move_resize(c, b.x, b.y, b.w, b.h);
@@ -413,6 +449,7 @@ void cc_open(void *win) {
             widget_on(button, EVT_POINTER_MOVE_BEFORE, cc_drag, button);
         } else
             widget_on(button, EVT_CLICK, cc_click, (void *)(long)i);
+        if (cc_paged(i)) quick_hold(button, QUICK_CC + i);
     }
     vol_bar.easing = bright_bar.easing = 0; /* the sliders open on their levels */
     widget_add_timer(win, cc_land, VOL_POLL_MS);
@@ -438,6 +475,46 @@ void cc_wheel(void *win, int dir) {
         widget_set_prop_int(win, CC_FOCUS, next);
     }
     widget_invalidate_force(win, (void *)0);
+}
+
+/* Centre held QUICK_HOLD_MS (cc_keydown): the page closed and the stop's own opened; the release is
+ * then cc_key_release's. */
+static struct {
+    unsigned hold;
+    unsigned char held;
+} cch __attribute__((section(".scratch")));
+static void *cc_top(void) {
+    void *top = window_manager_get_top_window(window_manager());
+    return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog") ? top
+                                                                                       : (void *)0;
+}
+static int cc_hold_due(const void *unused) {
+    cch.hold = 0;
+    void *win = cc_top();
+    int focus = win ? widget_get_prop_int(win, CC_FOCUS, 0) : -1;
+    if (!win || !cc_paged(focus)) return 0;
+    cch.held = 1;
+    dialog_quit(win, 0);
+    cc_hold(focus);
+    return 0; /* RET_OK: removed */
+}
+/* navigation.c's key-down: Centre pressed with the ring on a toggle or tile starts its hold; its
+ * repeats while held leave it running. */
+void cc_keydown(unsigned key) {
+    void *win = key == KEY_CENTER && !cch.hold && !cch.held ? cc_top() : (void *)0;
+    if (win && cc_ring_on(win) && !widget_get_prop_int(win, CC_ADJUST, 0) &&
+        cc_paged(widget_get_prop_int(win, CC_FOCUS, 0)))
+        cch.hold = timer_add(cc_hold_due, (void *)0, QUICK_HOLD_MS);
+}
+/* navigation.c's key filter, a key's release: 1 for the release of a Centre whose hold opened a
+ * page, which then does nothing more; a shorter one's hold is dropped and its release is cc_key's.
+ */
+int cc_key_release(unsigned key) {
+    if (key != KEY_CENTER) return 0;
+    stop_timer(&cch.hold);
+    if (!cch.held) return 0;
+    cch.held = 0;
+    return 1;
 }
 
 /* Centre and Return on the page: Centre acts on the stop, or gives a slider the wheel and takes it
