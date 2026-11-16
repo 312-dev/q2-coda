@@ -113,10 +113,12 @@ done
 export Q2_HEAVY_JOB=$slot
 [ -s "$nodump" ] && export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$nodump"
 ulimit -c 0
+# The job gets the slot's lock (held while it runs, even if this script dies) but not the start lock: a job
+# holding that would keep every other job from starting until it ended.
 if systemd-run --user --scope -q true 2>/dev/null; then
-    setsid systemd-run --user --scope -q --collect -p MemoryMax="$mem" -p MemorySwapMax=512M -- "$@" &
+    setsid systemd-run --user --scope -q --collect -p MemoryMax="$mem" -p MemorySwapMax=512M -- "$@" {start}>&- &
 else
-    setsid "$@" &
+    setsid "$@" {start}>&- &
 fi
 job=$!
 trap 'kill -TERM -- -$job 2>/dev/null' INT TERM HUP
