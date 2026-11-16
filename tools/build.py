@@ -1084,7 +1084,7 @@ ENGLISH = {
     '播放全部': 'Play All', '导入歌单': 'Import Playlists', '导出歌单': 'Export Playlists', '测试歌单': 'Playlist',
     '共0首': '0 songs',
 }
-ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Centre'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
+ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Center'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
               'dialog/search_dialog.bin': {'专辑': 'Albums', '风格': 'Genres'}}
 
 def english_ui(rel, data):

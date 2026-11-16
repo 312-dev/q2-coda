@@ -3476,7 +3476,7 @@ def album_check(tmp):
     assert note(LJ_DONE, 9, 2, 1) == 'Album lyrics: 9 saved, 2 not found, 1 already had lyrics'
     assert note(LJ_DONE, had=12) == 'Album lyrics: 12 already had lyrics' and note(LJ_DONE) == 'Album lyrics: no songs on the card'
     assert note(LJ_OFFLINE, failed=2) == "Can't reach LRCLIB" and note(LJ_OFFLINE, 1, failed=2) == 'LRCLIB stopped answering: 1 saved, 2 failed'
-    assert note(LJ_CARD, 3) == "Can't write to the card: 3 saved" and note(LJ_CANCELLED) == 'Cancelled'
+    assert note(LJ_CARD, 3) == "Can't write to the card: 3 saved" and note(LJ_CANCELLED) == 'Canceled'
     print('Album lyrics: .lrc paths, incomplete albums, busy retries, offline, card and cancel ends, and summaries passed.')
 
 

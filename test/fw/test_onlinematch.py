@@ -480,7 +480,7 @@ def test_every_note_is_cut_at_any_size_never_past_it(fw):
 
 
 def test_the_rest_of_the_note(fw):
-    assert note(fw, 96, state=LJ_CANCELLED, saved=1, had=2) == 'Cancelled: 1 saved, 2 already had lyrics'
+    assert note(fw, 96, state=LJ_CANCELLED, saved=1, had=2) == 'Canceled: 1 saved, 2 already had lyrics'
     assert note(fw, 96, state=LJ_CARD) == "Can't write to the card"
     assert note(fw, 96, state=LJ_OFFLINE, had=3) == "Can't reach LRCLIB"
     assert note(fw, 96, state=LJ_OFFLINE, none=1, failed=1) == 'LRCLIB stopped answering: 1 not found, 1 failed'
@@ -544,7 +544,7 @@ def test_the_row_says_where_the_job_is(fw):
     show()
     al.job.cancel = 1
     show()
-    assert seen == ['Download Album Lyrics', 'Downloading 2 of 5', 'Downloading 5 of 5', 'Cancelling…']
+    assert seen == ['Download Album Lyrics', 'Downloading 2 of 5', 'Downloading 5 of 5', 'Canceling…']
 
 
 class Net:

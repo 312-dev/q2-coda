@@ -1388,7 +1388,7 @@ def test_an_app_s_streamed_song_without_an_item_has_no_heart(fw, ui, song, mcl):
     C.c_void_p.from_address(heart.track + O['REC_TIDAL_ID']).value = C.addressof(tidal_id)
     mcl.type = 0xf1
     assert ui.handler(heart.heart, EVT_CLICK)() == 0
-    assert not log[0] and ui.toasts == ['This app has no favourites'] and ui.image[heart.heart] == 'play_unfav'
+    assert not log[0] and ui.toasts == ['This app has no favorites'] and ui.image[heart.heart] == 'play_unfav'
     assert '/mnt/mmc/.a/fav.log' not in heart.files.files
 
 
@@ -1401,7 +1401,7 @@ def test_a_streamed_song_s_press_the_card_wont_take_says_so(fw, ui, song, mcl):
     mcl.type = 0xf1
     fw.mock('fw_fopen', lambda *_: 0)
     assert ui.handler(heart.heart, EVT_CLICK)() == 0
-    assert ui.image[heart.heart] == 'play_unfav' and ui.toasts == ['Favourite not saved']
+    assert ui.image[heart.heart] == 'play_unfav' and ui.toasts == ['Favorite not saved']
 
 
 @in_fork
@@ -2876,7 +2876,7 @@ def test_an_album_s_favourite_stops_telling_at_the_first_refusal(fw, ui, song, s
     fw.mock('fw_fopen', lambda path, mode, *_: tried.append(C.string_at(path)) or 0 if C.string_at(path).endswith(b'fav.log')
             else files.fopen(path, mode))
     fw.fn('rate_album_favs', None, C.c_void_p, C.c_int)(song(kind=4, disc=7), 1)
-    assert tried == [b'/mnt/mmc/.jf/fav.log'] and ui.toasts == ['Favourite not sent to the app']
+    assert tried == [b'/mnt/mmc/.jf/fav.log'] and ui.toasts == ['Favorite not sent to the app']
 
 
 def test_a_cover_s_tracks_are_its_album_in_order(fw, ui, song, st):

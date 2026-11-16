@@ -25,7 +25,7 @@ RET_REPEAT = 8
 FETCH_MAX = 256 << 10  # "at most 256 KB" (docs/internals.md)
 FEATURED = ['Radio Paradise', 'SomaFM Groove Salad', 'BBC World Service', 'KEXP', 'FIP', 'NTS 1']
 KEXP = ('KEXP', 'https://kexp-mp3-128.streamguys1.com/kexp128.mp3')
-MENU_ROWS = ['Now Playing', 'Favourites', 'Featured', 'Top Stations', 'By Country', 'By Genre']
+MENU_ROWS = ['Now Playing', 'Favorites', 'Featured', 'Top Stations', 'By Country', 'By Genre']
 SPOT_SOCK = '/tmp/q2-librespot.sock'
 # libcurl's numbering (curl.h: CURLOPTTYPE_LONG 0, _OBJECTPOINT 10000, _FUNCTIONPOINT 20000; CURLINFO_LONG 0x200000)
 CURLOPT_NOPROGRESS, CURLOPT_WRITEFUNCTION = 43, 20011
@@ -393,17 +393,17 @@ def test_favourites_are_favourites_m3u_then_every_other_playlist(fw):
                   f'{RADIO}/a.m3u': m3u(('Two', 'http://2.example/')),
                   f'{RADIO}/.hidden.m3u': m3u(('Hidden', 'http://h.example/')),
                   f'{RADIO}/notes.txt': b'http://x.example/\n', f'{RADIO}/._a.m3u': b'junk'})
-    p.menu('Favourites')
+    p.menu('Favorites')
     first, *rest = ui(fw).list.stations()
     assert first == ('One', 'http://1.example/')  # the rest in the folder's order
     assert sorted(rest) == [('Three', 'http://3.example/'), ('Two', 'http://2.example/')]
-    assert ui(fw).caption == b'Favourites'
+    assert ui(fw).caption == b'Favorites'
 
 
 def test_no_favourites(fw):
     p = page(fw)
-    p.menu('Favourites')
-    assert ui(fw).list.n == 0 and ui(fw).caption == b'No favourites'
+    p.menu('Favorites')
+    assert ui(fw).list.n == 0 and ui(fw).caption == b'No favorites'
 
 
 def test_the_menu_is_internet_radio_s_and_only_now_playing_plays_at_once(fw):
@@ -442,14 +442,14 @@ def test_a_new_list_from_the_menu_opens_on_its_first_row(fw):
     at(p, 4)
     p.key(ui(fw).page)
     p.run('leave')  # the menu, Featured's row 4 kept for it
-    p.menu('Favourites')
+    p.menu('Favorites')
     assert selected(p) == 0
 
 
 def test_a_list_shorter_than_its_kept_row_selects_its_last(fw):
     p = page(fw, {FAVS: m3u(('One', 'http://1.example/'), ('Two', 'http://2.example/'), ('Three', 'http://3.example/'))})
-    p.menu('Favourites')
-    assert hold(fw, p, 2) == 'Removed from Favourites'  # the last row, held
+    p.menu('Favorites')
+    assert hold(fw, p, 2) == 'Removed from Favorites'  # the last row, held
     p.run('go')
     assert ui(fw).list.n == 2 and selected(p) == 1
 
@@ -464,9 +464,9 @@ def test_no_favourites_is_an_empty_page_its_bar_names_favourites(fw):
     p.key(ui(fw).page)
     p.run('leave')
     marks = len(p.w.set)
-    p.menu('Favourites')
+    p.menu('Favorites')
     shown = {p.w.text.get(w) for w in p.w.under(ui(fw).page, 'hscroll_label_create')}
-    assert {'No favourites', 'Favourites'} <= shown
+    assert {'No favorites', 'Favorites'} <= shown
     assert not [key for _, key, _ in p.w.set[marks:] if key.startswith(b'_ringnav')]  # ringnav_select's
 
 
@@ -820,10 +820,10 @@ def hold(fw, p, row):
 def test_held_on_a_station_it_goes_into_favourites_and_out_again(fw):
     p = page(fw, {FAVS: m3u(('One', 'http://1.example/'))})
     p.menu('Featured')
-    assert hold(fw, p, 3) == 'Added to Favourites'
+    assert hold(fw, p, 3) == 'Added to Favorites'
     assert p.card.files[FAVS] == m3u(('One', 'http://1.example/'), ('KEXP', 'https://kexp-mp3-128.streamguys1.com/kexp128.mp3'))
     assert f'{FAVS}.tmp' not in p.card.files and fw.calls('fw_fsync')  # written aside, synced, renamed
-    assert hold(fw, p, 3) == 'Removed from Favourites'
+    assert hold(fw, p, 3) == 'Removed from Favorites'
     assert p.card.files[FAVS] == m3u(('One', 'http://1.example/'))
 
 
@@ -832,8 +832,8 @@ def test_a_full_favourites_file_takes_no_more_but_gives_one_up(fw):
     full = m3u(*[(f'S{i}', f'http://{i}.example/') for i in range(199)], kexp)
     p = page(fw, {FAVS: full})
     p.menu('Featured')
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == full
-    assert hold(fw, p, 3) == 'Removed from Favourites'
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == full
+    assert hold(fw, p, 3) == 'Removed from Favorites'
     assert p.card.files[FAVS] == m3u(*[(f'S{i}', f'http://{i}.example/') for i in range(199)])
 
 
@@ -841,7 +841,7 @@ def test_a_favourites_file_past_200_is_never_rewritten(fw):
     over = m3u(*[(f'S{i}', f'http://{i}.example/') for i in range(201)])
     p = page(fw, {FAVS: over})
     p.menu('Featured')
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == over
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == over
 
 
 def test_a_favourites_file_with_a_nul_is_never_rewritten(fw):
@@ -849,20 +849,20 @@ def test_a_favourites_file_with_a_nul_is_never_rewritten(fw):
     odd = m3u(('One', 'http://1.example/')) + b'\0' + m3u(('Two', 'http://2.example/'))
     p = page(fw, {FAVS: odd})
     p.menu('Featured')
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == odd
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == odd
 
 
 def test_a_failed_rename_is_a_failed_save(fw):
     p = page(fw)
     p.menu('Featured')
     p.card.fail_rename = True
-    assert hold(fw, p, 0) == 'Could not save Favourites' and FAVS not in p.card.files
+    assert hold(fw, p, 0) == 'Could not save Favorites' and FAVS not in p.card.files
 
 
 def test_a_toggle_from_the_favourites_list_rebuilds_it(fw):
     p = page(fw, {FAVS: m3u(('One', 'http://1.example/'), ('Two', 'http://2.example/'))})
-    p.menu('Favourites')
-    assert hold(fw, p, 0) == 'Removed from Favourites'
+    p.menu('Favorites')
+    assert hold(fw, p, 0) == 'Removed from Favorites'
     p.run('go')
     assert ui(fw).list.stations() == [('Two', 'http://2.example/')]
 
@@ -914,7 +914,7 @@ def test_a_toggle_on_another_list_rebuilds_nothing(fw, where):
         p.rows('pick_click')[0]()
         p.run('go')
         fetched(fw, p, curl)
-    assert hold(fw, p, 0) == 'Added to Favourites' and p.live('go') == []
+    assert hold(fw, p, 0) == 'Added to Favorites' and p.live('go') == []
 
 
 def test_favourites_read_m3u_files_as_people_write_them(fw):
@@ -956,7 +956,7 @@ def test_favourites_read_pls_files_by_their_titles(fw):
 
 def favourites(fw, files):
     p = page(fw, files)
-    p.menu('Favourites')
+    p.menu('Favorites')
     return p, ui(fw).list.stations()
 
 
@@ -989,13 +989,13 @@ def test_a_favourites_file_past_200_gives_none_up_either(fw):
     """Taking one out would lose the stations past 200 too."""
     over = m3u(*[(f'S{i}', f'http://{i}.example/') for i in range(201)])
     p, _ = favourites(fw, {FAVS: over})
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == over
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == over
 
 
 def test_a_full_favourites_file_gives_up_its_first(fw):
     full = [(f'S{i}', f'http://{i}.example/') for i in range(200)]
     p, _ = favourites(fw, {FAVS: m3u(*full)})
-    assert hold(fw, p, 0) == 'Removed from Favourites' and p.card.files[FAVS] == m3u(*full[1:])
+    assert hold(fw, p, 0) == 'Removed from Favorites' and p.card.files[FAVS] == m3u(*full[1:])
 
 
 @pytest.mark.parametrize('fault', ['past 256 KB', 'read error', "won't open"])
@@ -1006,7 +1006,7 @@ def test_a_favourites_file_not_read_whole_is_never_rewritten(fw, fault):
     p.card.error = fault == 'read error'
     if fault == "won't open":
         p.card.unreadable.add(FAVS)
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == favs
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == favs
 
 
 @pytest.mark.parametrize('cut', ['in a URL', 'after a URL'])
@@ -1029,7 +1029,7 @@ def test_a_station_too_long_to_save_leaves_favourites_as_they_were(fw):
     curl = Curl(fw, m3u(('Long', 'http://long.example/' + 'x' * 2000)))
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == before
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == before
 
 
 def test_a_favourite_is_saved_whole_or_not_at_all(fw):
@@ -1045,7 +1045,7 @@ def test_a_favourite_is_saved_whole_or_not_at_all(fw):
     saved = []
     for row, station in enumerate(long):
         p.card.files[FAVS] = m3u(one)
-        saved.append(hold(fw, p, row) == 'Added to Favourites')
+        saved.append(hold(fw, p, row) == 'Added to Favorites')
         assert p.card.files[FAVS] == (m3u(one, station) if saved[-1] else m3u(one))
     assert saved == sorted(saved, reverse=True) and saved[0] and not saved[-1]
 
@@ -1068,7 +1068,7 @@ def test_a_save_the_card_fails_leaves_favourites_as_they_were(fw, fault):
     p.card.fail_close = fault == 'close'
     if fault in ('flush', 'sync'):
         fw.mock(f'fw_f{fault}', lambda *_: -1)
-    assert hold(fw, p, 0) == 'Could not save Favourites' and p.card.files[FAVS] == before
+    assert hold(fw, p, 0) == 'Could not save Favorites' and p.card.files[FAVS] == before
     streams = {a[0] for n in ('fw_fflush', 'fw_fileno') for _, a in fw.calls(n)} | {a[3] for _, a in fw.calls('fw_fwrite')}
     assert streams <= p.card.handles  # nothing done to a file it hasn't got
 
@@ -1080,7 +1080,7 @@ def test_favourites_are_favourites_m3u_s_to_the_toggle_and_the_heart(fw):
     p = page(fw, {FAVS: m3u(('One', 'http://1.example/')), f'{RADIO}/other.m3u': m3u(paradise)})
     Player(fw)
     p.menu('Featured')
-    assert hold(fw, p, 3) == 'Added to Favourites'
+    assert hold(fw, p, 3) == 'Added to Favorites'
     assert p.card.files[FAVS] == m3u(('One', 'http://1.example/'), KEXP)
     p.rows('station_click')[0]()  # Radio Paradise, in other.m3u alone
     assert hearts(fw) == ['play_unfav']
@@ -1686,11 +1686,11 @@ def test_search_results_over_favourites_are_no_favourites_list(fw):
     """A toggle on them rebuilds nothing."""
     p = page(fw, {FAVS: m3u(('One', 'http://1.example/'))})
     curl = Curl(fw, m3u(('A', 'http://a.example/')))
-    p.menu('Favourites')
+    p.menu('Favorites')
     search(fw, p, 'a')
     p.run('go')
     fetched(fw, p, curl)
-    assert hold(fw, p, 0) == 'Added to Favourites' and p.live('go') == []
+    assert hold(fw, p, 0) == 'Added to Favorites' and p.live('go') == []
 
 
 def test_a_search_is_percent_encoded_as_rfc_3986_says(fw):
@@ -1780,7 +1780,7 @@ def test_the_heart_is_the_station_in_favourites_and_a_tap_toggles_it(fw):
     play(fw, p, 4)
     assert hearts(fw) == ['play_unfav']
     p.handler(np_(fw).heart, EVT_CLICK)()
-    assert p.toasts == ['Added to Favourites'] and p.card.files[FAVS] == m3u(('FIP', 'http://icecast.radiofrance.fr/fip-midfi.mp3'))
+    assert p.toasts == ['Added to Favorites'] and p.card.files[FAVS] == m3u(('FIP', 'http://icecast.radiofrance.fr/fip-midfi.mp3'))
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     p.run('np_tick')
     p.run('np_tick')  # favourites.m3u read again only when the serial moves
@@ -1825,7 +1825,7 @@ def test_the_session_moves_with_each_start_and_favourites_change(fw):
 def test_held_on_now_playing_toggles_the_station_playing(fw):
     p = page(fw)
     play(fw, p, 5)
-    assert fw.fn('radio_hold', C.c_char_p, C.c_void_p)(np_(fw).page) == b'Added to Favourites'
+    assert fw.fn('radio_hold', C.c_char_p, C.c_void_p)(np_(fw).page) == b'Added to Favorites'
     assert p.card.files[FAVS] == m3u(('NTS 1', 'https://stream-relay-geo.ntslive.net/stream'))
 
 

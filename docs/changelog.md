@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Everywhere: US spelling on screen and in the manual: **Favorites**, **Center**, **Canceled**, color and gray.
   - Buttons Lock (OLED): the card a locked press shows reads **Press Center to unlock**.
   - Settings: times with a one-letter unit sit against their number: **Crossfade** reads "5s", **Standby Limit** "8h", and an album's length on its page "1h12m"; "min" keeps its space ("Resume Songs: 30 min").
   - Library: on Songs with no music on the card, pressing Centre presses **Scan Music Now**, as tapping it does. It used to turn the screen off.

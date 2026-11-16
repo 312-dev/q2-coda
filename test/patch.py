@@ -3739,7 +3739,7 @@ for selected,name,navbar,played in ((1,'clip.mp4',0,True),(1,'clip.mp4',1,True),
     assert played==(not any(o[0]=='playing_page' for o in m.opened)),(name,navbar)
 passed()
 
-SONG_MENU=['Play Next','Add to Queue','Add to Favourites','Add to Playlist','Go to Album','Go to Artist']
+SONG_MENU=['Play Next','Add to Queue','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
 # Now Playing targets the queue even when the last browsed list has unrelated rows.
 def playing_menu(**kw):
     m=QueueMachine(page='playing_page',pos=1,**kw)
@@ -4224,11 +4224,11 @@ def menu(m,setup=None):
     m.press(5); assert m.hold()==11; t=m.nodes[m.title]['text']; got=m.labels(); m.release(); return t,got
 GROUP=['Play Next','Add to Queue','Shuffle','Add to Playlist']
 for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
-        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:2],'Remove from Favourites',*SONG_MENU[3:]])),
+        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:2],'Remove from Favorites',*SONG_MENU[3:]])),
         ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:4])),
         ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
         ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
-        ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Add to Favourites','Rate Album',GROUP[3],'Go to Artist'])),
+        ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Add to Favorites','Rate Album',GROUP[3],'Go to Artist'])),
         ({'cls':0xff01,'page':'album_page'},None,('Album',GROUP)),
         # An artist's tabs set classinfo +0, not g_class_type: Albums first, then Songs after an album.
         ({'cls':0xff07,'page':'artistinfo_page'},lambda m:m.word(syms['g_local_classinfo_save'],0xff01),('Album',GROUP)),
@@ -7647,7 +7647,7 @@ m,label,press=album_lyrics_page()
 m.wifi=-1; press(); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; m.wifi=3
 press(); assert len(m.threads)==1 and m.nodes[label]['text']=='Downloading 1 of 2'
 worker,arg=m.threads[-1]; press(); assert len(m.threads)==1  # a second press: cancelling, no second job
-assert m.nodes[label]['text']=='Cancelling…'; passed()
+assert m.nodes[label]['text']=='Canceling…'; passed()
 m,label,press=album_lyrics_page(); press(); worker,arg=m.threads[-1]
 m.advance(500,clear=False); assert ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls] and m.nodes[label]['text']=='Downloading 1 of 2'
 f,ctx=m.handler(label,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)  # the page closes: the job goes on
@@ -7658,7 +7658,7 @@ assert len(m.toasts)==n+1 and m.toasts[-1][3]=='Album lyrics: 2 already had lyri
 press_count=len(m.threads); m.advance(1000); assert len(m.threads)==press_count and len(m.toasts)==n+1; passed()  # the timer has ended
 m,label,press=album_lyrics_page(); press(); worker,arg=m.threads[-1]; press()  # cancelled before its first song
 assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0 and not m.accessed
-m.advance(500,clear=False); assert m.toasts[-1][3]=='Cancelled' and m.nodes[label]['text']=='Download Album Lyrics'; passed()
+m.advance(500,clear=False); assert m.toasts[-1][3]=='Canceled' and m.nodes[label]['text']=='Download Album Lyrics'; passed()
 m,label,press=album_lyrics_page(); press(); worker,arg=m.threads[-1]; n=len(m.toasts)
 assert m.call(address=payload_syms['album_lyrics_stop'],args=(0,0,0,0),gap=0)==0 and m.joins==[77]  # USB storage: joined first
 m.advance(500,clear=False); assert len(m.toasts)==n and m.nodes[label]['text']=='Download Album Lyrics'; passed()
@@ -7921,7 +7921,7 @@ for found,want in (((('b.mp3','/p/b.mp3',2,1),('a.mp3','/p/a.mp3',1,2),('c.mp3',
     f,ctx=m.handler(m.nodes[view]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert [n.rsplit('.',1)[0] if n.endswith(('.mp3','.flac')) else n for n in m.names(m.plays[-1][1]&0xffffffff)]==want; passed()
 
-COVER_ALBUM=['Play Next','Add to Queue','Shuffle','Add to Favourites','Rate Album']  # a cover's menu, Go to artist aside
+COVER_ALBUM=['Play Next','Add to Queue','Shuffle','Add to Favorites','Rate Album']  # a cover's menu, Go to artist aside
 # Album holds use the live carousel before tracks have ever been opened, and the same ordering.
 for action,want in ((0,['A','early','late','B','C']),(1,['A','B','C','early','late'])):
     m=CoverflowMachine(); m.found=[track(m,'late','/p/z',2,1),track(m,'early','/p/a',1,2)]
@@ -8060,7 +8060,7 @@ for edit in (0,1):
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
 # /mnt/data/ringnav-album-ratings by album_id, the low three bits its hearts, 5 its favourite and its songs My Fav's; songs'
-# ratings and the queue are untouched. Hold Play/Pause on a cover: Add/Remove from Favourites and Rate album, whose picker is Now
+# ratings and the queue are untouched. Hold Play/Pause on a cover: Add/Remove from Favorites and Rate album, whose picker is Now
 # Playing's on Coverflow's page: the wheel moves it, Centre or a heart saves, Return leaves it as it was.
 ALBUM_RATES='/mnt/data/ringnav-album-ratings'
 class FileMocks:
@@ -8156,7 +8156,7 @@ for light in '01':
     assert hold_pick(fm,4) is None and fm.top==fm.page and fm.panel() and fm.nodes[fm.page]['name']=='coverflow_page'
     for k in [O['KEY_NEXT']]*3: assert fm.call(k)==11
     assert fm.call(O['KEY_CENTER'])==11 and fm.panel() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm)  # the existing path: the album's table, no song touched
-    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5]  # Add to Favourites
+    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5]  # Add to Favorites
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1)
     assert hold_pick(fm,0)=='Playing Next' and fm.top==fm.page and fm.query[:1]==('getMusicByAlbum',); passed()  # Play Next finds the cover's album
     fm=light_half(AlbumRateMachine,light,page='album_page',cls=O['CLASS_ALBUMS'],pos=2); fm.page=fm.top
@@ -8167,12 +8167,12 @@ def bare_hold(m,row=None):
     m.t=7001; m.press(m.t); return m.hold(),m.release()
 assert bare_hold(QueueMachine(page='sysset_page'))==(0,1); passed()
 assert bare_hold(QueueMachine(page='folder_page'),0)==(0,1); passed()  # a row no menu holds, as a playlist file in Folder
-# Add, then Remove from Favourites: 5 hearts, then none; the other covers stay unrated.
+# Add, then Remove from Favorites: 5 hearts, then none; the other covers stay unrated.
 def fav_calls(m,name): return [c for c in m.calls if c[0]==name]
 assert m.run(3) is None and m.kept()==[(a1&~7)|5] and [c[2] for c in fav_calls(m,'batch_add_file')]==[0xf00a] and not fav_calls(m,'deleteMusicFromFav')
-assert m.menu()[3:5]==['Remove from Favourites','Rate Album  ♥♥♥♥♥']
+assert m.menu()[3:5]==['Remove from Favorites','Rate Album  ♥♥♥♥♥']
 assert m.run(3) is None and m.kept()==[] and fav_calls(m,'deleteMusicFromFav') and not fav_calls(m,'batch_add_file')
-m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3:5]==['Add to Favourites','Rate Album']
+m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3:5]==['Add to Favorites','Rate Album']
 m.word(m.slide+O['SLIDE_INDEX'],1); passed()
 # The picker over the covers, on the album's hearts; the wheel moves the rating, never the covers.
 assert m.run(4) is None and m.caption()=='Unrated' and m.hearts()==['play_unfav']*5
@@ -8189,7 +8189,7 @@ m.advance(500); assert not m.plays and m.find('scroll_view')==0 and m.nodes[m.ge
 for want in range(6):
     m.rate(want); assert m.kept()==([(a1&~7)|want] if want else [])
     rows=m.menu(); assert rows[4]==('Rate Album  '+'♥'*want+'♡'*(5-want) if want else 'Rate Album')
-    assert rows[3]==('Remove from Favourites' if want==5 else 'Add to Favourites')
+    assert rows[3]==('Remove from Favorites' if want==5 else 'Add to Favorites')
 passed()
 # Five is its favourite by the picker too: its songs in on reaching it, again on saving it again, out on leaving it.
 m.rate(0); m.rate(4); assert not fav_calls(m,'batch_add_file') and not fav_calls(m,'deleteMusicFromFav')
@@ -8215,11 +8215,11 @@ full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
 assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full and m.rate(4)=='Ratings are full'; passed()
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); m.fail_write=True
-assert m.run(3)=='Rating not saved' and m.menu()[3:5]==['Add to Favourites','Rate Album'] and ALBUM_RATES not in m.files; passed()
+assert m.run(3)=='Rating not saved' and m.menu()[3:5]==['Add to Favorites','Rate Album'] and ALBUM_RATES not in m.files; passed()
 # A malformed slot (6 or 7 hearts) reads unrated; a truncated file reads empty.
 for data in (struct.pack('<I',(a1&~7)|7).ljust(4*O['RATE_SLOTS'],b'\0'),b'\x05\0'):
     m=AlbumRateMachine(files={ALBUM_RATES:data}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
-    assert m.menu()[3:5]==['Add to Favourites','Rate Album']; passed()
+    assert m.menu()[3:5]==['Add to Favorites','Rate Album']; passed()
 # An album is album_cmp's: its name and album artist, else its folder (disc folders as one), ASCII case aside but
 # the folder's; the song artist never counts, so a compilation is one album. The Unknown card is one album.
 def rec(album='Album',aa=None,path='/m/A/1.mp3',artist='Artist',rid=1):
@@ -8546,7 +8546,7 @@ m=AlbumRateMachine(files={ALBUM_RATES:data}); menu_page=ratings_albums(m)
 m.page=m.top; m.slide=m.find('slide_menu'); assert m.page!=menu_page and m.nodes[m.page]['name']=='coverflow_page'
 def shown(m,i): m.word(m.slide+O['SLIDE_INDEX'],i); f,ctx=m.handler(m.slide,O['EVT_VALUE_CHANGED']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); return m.texts()[0]
 assert len(m.nodes[m.slide]['children'])==3 and [shown(m,i) for i in range(3)]==['Album 2','Album 0','Sort: Rating']
-shown(m,0); assert m.menu()[3:5]==['Remove from Favourites','Rate Album  ♥♥♥♥♥']  # the cover's menu, as Coverflow's
+shown(m,0); assert m.menu()[3:5]==['Remove from Favorites','Rate Album  ♥♥♥♥♥']  # the cover's menu, as Coverflow's
 f,ctx=m.handler(m.nodes[m.slide]['children'][2],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
 m.slide=m.find('slide_menu'); assert [shown(m,i) for i in range(3)]==['Album 0','Album 2','Sort: Album']
 assert [v for k,v in m.files.items() if k.endswith('ringnav-ratedsort')]==[struct.pack('<i',0)]; passed()
@@ -8576,7 +8576,7 @@ for action,want in ((0,['A','T2','B','C']),(1,['A','B','C','T2'])):
     m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks()
     m.call(); assert m.selected(view)==1
     m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T2' and m.release()==0
-    assert m.labels()==['Play Next','Add to Queue','Add to Favourites','Go to Artist']
+    assert m.labels()==['Play Next','Add to Queue','Add to Favorites','Go to Artist']
     assert m.hold()==0  # a repeated hold while the dialog is open cannot open another
     m.pick(action); m.pick(action); m.advance(0)
     assert m.names()==want and m.top==m.page and m.selected(view)==1 and not m.playback() and not m.plays
@@ -11889,7 +11889,7 @@ assert m.queued==ranked and m.plays==[('playing_page',m.plays[0][1],2,0xf001,2)]
 # A Play/Pause hold on a row opens the song menu, as Coverflow's tracks do, over the ranked list.
 m.handlers[syms['navigator_to']]='q:navigator_to'; view=m.find('scroll_view'); m.paint(view); m.call()
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T7' and m.release()==0
-assert m.labels()==['Play Next','Add to Queue','Add to Favourites','Go to Artist']; passed()
+assert m.labels()==['Play Next','Add to Queue','Add to Favorites','Go to Artist']; passed()
 # Opened again, the kept tracks are ranked again without reading the library; a library change reads it again.
 m.close(); m.found=m.found[:8]; m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=50_000_000)==0 and not called('getAllMusic')
@@ -13429,8 +13429,8 @@ def radio_open(m):
 # the hidden caption holds the page's name, then the note's line and its empty hint.
 m=RadioMachine(); page=radio_open(m)
 assert RDIR in m.tree and RDIR+'/favourites.m3u' not in m.files
-assert m.labels()==['Internet Radio','Favourites','Featured','Top Stations','By Country','By Genre'] and m.nodes[m.find('scroll_view')]['_ringnav_index']==0
-m.row(0); assert m.labels()==['Favourites','No favourites','']; m.back()
+assert m.labels()==['Internet Radio','Favorites','Featured','Top Stations','By Country','By Genre'] and m.nodes[m.find('scroll_view')]['_ringnav_index']==0
+m.row(0); assert m.labels()==['Favorites','No favorites','']; m.back()
 m.row(1); featured=m.labels(); assert len(featured)==7 and featured[:3]==['Featured','Radio Paradise','SomaFM Groove Salad']; m.back()
 # The user's favourites.m3u is never touched by opening the page.
 m.close(); m.files[RDIR+'/favourites.m3u']=bytearray(b'#EXTM3U\n'); radio_open(m); assert RDIR+'/favourites.m3u' in m.files
@@ -13449,12 +13449,12 @@ assert m.opts[10002]=='https://all.api.radio-browser.info/m3u/stations/byname/ja
 assert m.labels()==['jazz fm','Jazz FM']; m.back(); assert m.labels()[0]=='Internet Radio'
 search('café'); m.worker(); assert '/byname/caf%C3%A9?' in m.opts[10002] and m.labels()[0]=='café'; m.back()  # UTF-8, not narrowed wchar
 for text,event in (('','EVT_VALUE_CHANGED'),('','EVT_IM_ACTION'),('abc','EVT_BLUR')):
-    search(text,event); assert m.labels()[:2]==['Internet Radio','Favourites'] and not m.find('edit')
+    search(text,event); assert m.labels()[:2]==['Internet Radio','Favorites'] and not m.find('edit')
 # Return with the keyboard open empties and blurs the box, never destroying it under its keyboard; the blur shuts it.
 assert m.call(address=payload_syms['radio_search'],gap=0,count=5_000_000)==0; edit=m.find('edit'); m.nodes[edit]['text']='jazz'
 m.back(); assert m.nodes[edit]['focused']==0 and m.nodes[edit]['text']==''; f,ctx=m.handler(edit,O['EVT_BLUR'])
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
-assert m.labels()[:2]==['Internet Radio','Favourites'] and not m.find('edit')
+assert m.labels()[:2]==['Internet Radio','Favorites'] and not m.find('edit')
 search('é'*31); m.worker(); assert m.labels()[0]=='é'*31; m.back()  # 62 UTF-8 bytes fit
 m.row(1); assert m.labels()==featured
 for event in ('EVT_VALUE_CHANGED','EVT_IM_ACTION'):
@@ -13471,7 +13471,7 @@ search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert m.labels()==['Internet R
 m=RadioMachine(); rbar=page_bar(m); radio_open(m)
 def rbar_reads():  # the old caption's destroy, which the mock's unlink doesn't fire, and the bar asked again
     m.call(address=payload_syms['title_gone'],args=(0,0,0,0),gap=0); m.call(address=payload_syms['bar_title_sync'],args=(m.top,0,0,0),gap=0); return m.nodes[rbar]['text']
-m.row(0); assert 'No favourites' in m.labels() and rbar_reads()=='Favourites',(m.labels(),rbar_reads())
+m.row(0); assert 'No favorites' in m.labels() and rbar_reads()=='Favorites',(m.labels(),rbar_reads())
 search('zzz'); m.reply=b'#EXTM3U\n'; m.worker(); assert 'No stations' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads())
 m.back(); assert 'zzz' in m.labels() and rbar_reads()=='Internet Radio',(m.labels(),rbar_reads()); m.close(); passed()
 # Favourites: favourites.m3u, then the folder's other .m3u and .pls files (a .pls's TitleN names its FileN).
@@ -13479,7 +13479,7 @@ m=RadioMachine({RDIR+'/favourites.m3u':bytearray(b'#EXTM3U\r\n#EXTINF:-1,One\r\n
                 RDIR+'/x.pls':bytearray(b'[playlist]\nFile1=https://three/c?x=1\nTitle1=Three\nNumberOfEntries=1\n'),
                 RDIR+'/notes.txt':bytearray(b'http://no/')})
 m.tree[RDIR]=[('favourites.m3u',8),('x.pls',8),('notes.txt',8),('._x.pls',8)]; page=radio_open(m)
-m.row(0); assert m.labels()==['Favourites','One','http://two/b','Three']; passed()
+m.row(0); assert m.labels()==['Favorites','One','http://two/b','Three']; passed()
 # A station: local music stops, then q2video -r on the headphone DAC's PCM with the URL as plain
 # argv, Now Playing over the list, and the station kept as the last. The page says it connects.
 m.forked=0; m.row(2)  # the child
@@ -13531,23 +13531,23 @@ m.advance(500); assert m.labels(np)[4]=="Can't play: open: Device or resource bu
 # Holding Play/Pause on Now Playing saves the station playing, and again takes it out.
 m.top=np; m.status=m.alloc(0x200); m.press(77)
 playing=last().encode(); before=bytes(m.files[RDIR+'/favourites.m3u']); assert playing in before  # http://two/b, a favourite
-assert m.hold()==11 and m.toasts[-1][3]=='Removed from Favourites' and playing not in m.files[RDIR+'/favourites.m3u']
-m.press(77); assert m.hold()==11 and m.toasts[-1][3]=='Added to Favourites' and m.files[RDIR+'/favourites.m3u'].endswith(playing+b'\n')
+assert m.hold()==11 and m.toasts[-1][3]=='Removed from Favorites' and playing not in m.files[RDIR+'/favourites.m3u']
+m.press(77); assert m.hold()==11 and m.toasts[-1][3]=='Added to Favorites' and m.files[RDIR+'/favourites.m3u'].endswith(playing+b'\n')
 # Tapping the heart toggles it too, and the heart follows the file.
 heart=next(w for w in m.nodes[np]['children'] if m.nodes[w].get('image') in ('play_fav','play_unfav'))
 m.advance(500); assert m.nodes[heart]['image']=='play_fav'
 f,ctx=m.handler(heart,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-assert m.toasts[-1][3]=='Removed from Favourites' and playing not in m.files[RDIR+'/favourites.m3u']
+assert m.toasts[-1][3]=='Removed from Favorites' and playing not in m.files[RDIR+'/favourites.m3u']
 m.advance(500); assert m.nodes[heart]['image']=='play_unfav'
 m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); m.advance(500)
-assert m.toasts[-1][3]=='Added to Favourites' and m.nodes[heart]['image']=='play_fav'; passed()
+assert m.toasts[-1][3]=='Added to Favorites' and m.nodes[heart]['image']=='play_fav'; passed()
 # Holding Play/Pause on a station takes it out of favourites.m3u, or adds it; the release is
 # swallowed, the list follows, and elsewhere the hold is stock's.
 m.back(np); assert 'navigator_back' in [c[0] for c in m.calls]; m.destroy(np); m.top=page
 rows=m.find('scroll_view'); m.nodes[rows]['_ringnav_index']=0; m.status=m.alloc(0x200); m.press(77)
-assert m.hold()==11 and m.toasts[-1][3]=='Removed from Favourites'
-assert m.files[RDIR+'/favourites.m3u']==b'#EXTM3U\n#EXTINF:-1,http://two/b\nhttp://two/b\n' and m.labels()==['Favourites','http://two/b','Three']
-m.nodes[m.find('scroll_view')]['_ringnav_index']=1; assert m.hold()==11 and m.toasts[-1][3]=='Added to Favourites'
+assert m.hold()==11 and m.toasts[-1][3]=='Removed from Favorites'
+assert m.files[RDIR+'/favourites.m3u']==b'#EXTM3U\n#EXTINF:-1,http://two/b\nhttp://two/b\n' and m.labels()==['Favorites','http://two/b','Three']
+m.nodes[m.find('scroll_view')]['_ringnav_index']=1; assert m.hold()==11 and m.toasts[-1][3]=='Added to Favorites'
 assert m.files[RDIR+'/favourites.m3u'].endswith(b'#EXTINF:-1,Three\nhttps://three/c?x=1\n')
 assert m.call(O['KEY_PLAY'],gap=0)==11 and not m.sent; passed()
 # Editing a capped or partially read list must never discard unseen favourites. Exactly 200
@@ -13560,7 +13560,7 @@ for count, padding, saved in ((200, b'', True), (201, b'', False),
     radio_open(large); large.row(0)
     large.nodes[large.find('scroll_view')]['_ringnav_index'] = 0
     large.status = large.alloc(0x200); large.press(77); assert large.hold() == 11
-    assert large.toasts[-1][3] == ('Removed from Favourites' if saved else 'Could not save Favourites')
+    assert large.toasts[-1][3] == ('Removed from Favorites' if saved else 'Could not save Favorites')
     assert bytes(large.files[RDIR+'/favourites.m3u']) == (b'#EXTM3U\n' + b''.join(
         f'#EXTINF:-1,http://station/{i}\nhttp://station/{i}\n'.encode() for i in range(1, count)) if saved else original)
 passed()
@@ -15560,7 +15560,7 @@ if not manifest['dev']:  # --dev builds have no release tag, so always fetch
 press(); m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
 f,ctx=m.handler(label,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0
-m.advance(500,clear=False); assert m.toasts[-1][3]=='Download cancelled' and m.files[UPDATE]==b'old'
+m.advance(500,clear=False); assert m.toasts[-1][3]=='Download canceled' and m.files[UPDATE]==b'old'
 assert 'fwupdate_tf' not in [c[0] for c in m.calls]; passed()
 
 # Q2 Shelf (netupdate.c, docs/internals.md#q2-shelf): System settings' Apps page, Check for Updates
@@ -15633,8 +15633,8 @@ assert m.toasts[-1][3]=='1 app can be updated'; passed()  # the opening check's 
 assert bytes(m.files[LIST]).startswith(b'serial 1\n') and b'DiamondBond/q2-librespot q2-v9.9 app.zip ' in bytes(m.files[LIST]) and b'signature' not in bytes(m.files[LIST]); passed()
 m.row(0); assert m.toasts[-1][3]=='1 app can be updated' and len(m.threads)==1; passed()  # within SH_RECHECK_MS: no requests
 toasts=len(m.toasts); m.close(); m.now+=9*60*1000; apps_open(m); assert len(m.threads)==1 and m.labels()[8]=='Update' and len(m.toasts)==toasts; passed()  # still fresh: no requests
-m.row(3); assert m.labels()[8]=='Checking…' and len(m.threads)==2 and KILL in m.systems[-1]; m.row(3); assert m.labels()[8]=='Cancelling…'
-shelf_job(m); assert m.toasts[-1][3]=='Download cancelled' and m.labels()[8]=='Update'; passed()
+m.row(3); assert m.labels()[8]=='Checking…' and len(m.threads)==2 and KILL in m.systems[-1]; m.row(3); assert m.labels()[8]=='Canceling…'
+shelf_job(m); assert m.toasts[-1][3]=='Download canceled' and m.labels()[8]=='Update'; passed()
 m.wifi=-1; m.row(3); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and len(m.threads)==2; m.wifi=3; passed()
 m.codes=[429]; m.row(3); shelf_job(m); assert m.toasts[-1][3]=='GitHub is busy, try later'; passed()  # the list's host's rate limit
 good_list=m.listed; m.listed=good_list[:good_list.index(b"signature ")]; m.row(3); shelf_job(m)  # the list unsigned: nothing installs
@@ -15652,7 +15652,7 @@ m.close(); m.rockbox_mode=0; m.dirs.pop('/mnt/mmc/.spotify')
 toasts=len(m.toasts); apps_open(m); shelf_job(m); assert len(m.toasts)==toasts  # the opening check: nothing to update, nothing said
 assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Install','Spotify','Install','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']+NOTE  # not stopped: checked again
 m.row(1); assert m.labels()[4]=='Starts at power-on; Boot to changes that. Press again to install' and len(m.threads)==7
-m.row(1); assert len(m.threads)==8 and m.labels()[4]=='Checking…'; m.row(1); shelf_job(m); assert m.toasts[-1][3]=='Download cancelled'
+m.row(1); assert len(m.threads)==8 and m.labels()[4]=='Checking…'; m.row(1); shelf_job(m); assert m.toasts[-1][3]=='Download canceled'
 m.free=10<<20; m.row(1); m.row(1); shelf_job(m)  # the pinned zip's size and 64 MB left over
 assert m.toasts[-1][3]==f'Needs {(len(ZIP)+(54<<20)+(1<<20)-1)>>20} MB more space' and not [f for f in m.files if '.q2/staging/' in f]; passed()
 m.free=1<<32; m.staged=[('.rockbox/rockbox',b'ELF3.2'),('.rockbox/codecs/flac.codec',b'c'),('.rockbox/fonts/a b.fnt',b'f')]
@@ -17508,7 +17508,7 @@ m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
 # The same for the other presses that start a job: Network Update's download, an Apps install and
-# Download Album Lyrics each start once, not cancelled by the held press ("Cancelling…").
+# Download Album Lyrics each start once, not cancelled by the held press ("Canceling…").
 m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
 m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
 view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])

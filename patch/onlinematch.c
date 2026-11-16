@@ -234,7 +234,7 @@ int album_lyrics(lyr_job *job, const lyr_track *t, int n,
 /* The toast that sums up job, into out. */
 void album_note(char *out, unsigned n, const lyr_job *job) {
     static const char *const head[] = { "Album lyrics", "LRCLIB stopped answering", "Can't write to the card",
-                                        "Cancelled" };
+                                        "Canceled" };
     static const char *const what[] = { "saved", "not found", "already had lyrics", "failed" };
     const int count[] = { job->saved, job->none, job->had, job->failed };
     int answered = job->saved || job->none, any = answered || job->had || job->failed;
@@ -490,7 +490,7 @@ static void al_show(void) {
         return;
     }
     if (al.job.cancel)
-        snprintf(s, sizeof s, "Cancelling…");
+        snprintf(s, sizeof s, "Canceling…");
     else
         snprintf(s, sizeof s, "Downloading %d of %d", al.job.done + (al.job.done < al.job.total), al.job.total);
     widget_set_text_utf8(al.label, s);

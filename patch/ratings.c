@@ -85,7 +85,7 @@ int rate_saved(int k) {
 int fav_told(void *r, int on) {
     catalogue_fav_changed();
     if (!r || addon_fav_path(P(r, REC_PATH), on)) return 1;
-    toast("Favourite not sent to the app");
+    toast("Favorite not sent to the app");
     return 0;
 }
 
@@ -404,9 +404,9 @@ static int rate_fav_click(void *ctx, void *event) {
     }
     int app = app_fav();
     if (app >= 0) image_base_set_image(ra.rate_fav, app ? "tidal_fav_add" : "tidal_fav_rm");
-    if (app == -2) toast("Favourite not saved");
+    if (app == -2) toast("Favorite not saved");
     if (app == -3)
-        toast("This app has no favourites"); /* an app's song without an item: not Tidal's */
+        toast("This app has no favorites"); /* an app's song without an item: not Tidal's */
     if (app != -1) return 0;
     /* A heart filled by a copy's server row (rate_row_heart) is emptied by taking the row out:
      * stock's toggle would put the copy in instead. */
