@@ -15557,38 +15557,38 @@ playing(m,3600-O['RESUME_EDGE_S']); assert not held(m); passed()  # the last sec
 book='/mnt/mmc/Book/book.m4b'
 def chapter(m,r,start,end,path=book):
     m.word(r+O['REC_PATH'],m.string(path)); m.word(r+O['REC_CUE_START'],start); m.word(r+O['REC_CUE_END'],end)
-def place(sec,path=book): return {'/mnt/data/ringnav-resume':struct.pack('<II',fnv(path),sec)+bytes(8*O['RESUME_SLOTS']-8)}
+def resume_at(sec,path=book): return {'/mnt/data/ringnav-resume':struct.pack('<II',fnv(path),sec)+bytes(8*O['RESUME_SLOTS']-8)}
 m=ResumeMachine(); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],600,1200)
 playing(m,0,600,pos=0,n=70); assert m.places()==[(fnv(book),661)] and '/mnt/data/ringnav-plays' not in m.files
 assert not held(m)  # a chapter's restart leaves the book's place alone: nothing to ask
 m=ResumeMachine(m.files); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],600,1200)
 m.poll(0,600,pos=0,n=2); playing(m,1,600,n=3); assert not m.seeks; passed()  # picking a chapter plays it
 for start,end,sec,kept in ((0,600,10,[(fnv(book),700)]),(1200,0,590,[])):  # the book's first or last 30 s
-    m=ResumeMachine(place(700)); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],start,end)
+    m=ResumeMachine(resume_at(700)); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],start,end)
     playing(m,sec-5,600,pos=0,n=6); m.poll(0,pos=1,n=2); assert m.places()==kept; passed()
-m=ResumeMachine(place(700)); rows=m.items(m.get(syms['p_deque_showlist']))
+m=ResumeMachine(resume_at(700)); rows=m.items(m.get(syms['p_deque_showlist']))
 for r,(s0,s1) in zip(rows,((0,600),(600,1200),(1200,0))): chapter(m,r,s0,s1)
 m.run(0); assert m.labels()[0]=='Resume' and m.opened[-1][2:]==(1,0xf001,2) and len(m.opened[-1][1])==20
 q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,600,1200)  # the chapter at 600 starts
 m.poll(0,600,pos=0,n=2); playing(m,1,600,n=2); assert m.seeks==[100]; passed()
-m=ResumeMachine(place(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # chapter 1 paused at 10 s,
+m=ResumeMachine(resume_at(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # chapter 1 paused at 10 s,
 for r,(s0,s1) in zip(rows,((0,600),(600,1200),(1200,0))): chapter(m,r,s0,s1)  # the queue switching late
 q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,0,600); playing(m,0,600,pos=0,n=11); m.poll(10,600,n=3)
 assert m.places()==[(fnv(book),700)]; m.run(0); m.poll(10,600,n=2); assert not m.seeks
 chapter(m,q,600,1200); m.poll(0,600,n=2); playing(m,1,600,n=2); assert m.seeks==[100]; passed()
-m=ResumeMachine(place(700)); q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,2400,3000)  # chapter 5
+m=ResumeMachine(resume_at(700)); q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,2400,3000)  # chapter 5
 playing(m,0,600,pos=0,n=11); m.poll(10,600,n=3); assert m.places()==[(fnv(book),700)]  # paused at 10 s: kept
 playing(m,11,600,n=30); m.poll(40,600,n=3); assert m.places()==[(fnv(book),2440)]; passed()  # past 30 s: moved
-m=ResumeMachine(place(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # the chapter never comes: no seek
+m=ResumeMachine(resume_at(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # the chapter never comes: no seek
 for r,(s0,s1) in zip(rows,((0,600),(600,1200),(1200,0))): chapter(m,r,s0,s1)
 q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,0,600); playing(m,40,600,pos=0,n=3)
 m.run(0); m.poll(43,600,n=9); chapter(m,q,600,1200); m.poll(0,600,n=2); playing(m,1,600,n=2); assert not m.seeks; passed()
-m=ResumeMachine(place(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # Resume onto the chapter playing
+m=ResumeMachine(resume_at(700)); rows=m.items(m.get(syms['p_deque_showlist']))  # Resume onto the chapter playing
 for r,(s0,s1) in zip(rows,((0,600),(600,1200),(1200,0))): chapter(m,r,s0,s1)
 q=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,q,600,1200); playing(m,40,600,pos=0,n=3)
 m.run(0); m.poll(43,600); assert not m.seeks  # still the old position
 m.poll(0,600); playing(m,1,600,n=1); assert m.seeks==[100]; passed()
-m=ResumeMachine(place(700,'/p/album.flac'))
+m=ResumeMachine(resume_at(700,'/p/album.flac'))
 for r,(s0,s1) in zip(m.items(m.get(syms['p_deque_showlist'])),((0,600),(600,0))): chapter(m,r,s0,s1,'/p/album.flac')
 m.run(0); assert 'Resume' not in m.labels()
 m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; chapter(m,r,600,1200,'/p/album.flac')
@@ -18089,7 +18089,7 @@ for touch in (False,True):
 class ChapterResumeMachine(ChapterMachine):
     def __init__(self):
         super().__init__()
-        self.files=place(85,'/mnt/mmc/Book ; $x.M4B'); self.open={}; self.play=(0,225)
+        self.files=resume_at(85,'/mnt/mmc/Book ; $x.M4B'); self.open={}; self.play=(0,225)
         self.seeks=[]; self.opens=self.renames=0; self.epoch=1700000000
         self.handlers[sleep_hook+12]='stock_sleep'
         for name in ('fopen@GLIBC_2.2','fread@GLIBC_2.0','fwrite@GLIBC_2.0','fclose@GLIBC_2.2',
