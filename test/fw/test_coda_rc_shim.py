@@ -58,6 +58,21 @@ def test_off_starts_nothing_and_writes_nothing(fw, ui, mcl, recs):
     assert q2.system == [] and not any(p.startswith('/tmp/coda-rc') for p in q2.files)
 
 
+def test_off_with_bluetoothds_daemon_serves_it_and_starts_nothing(fw, ui, mcl, recs):
+    """coda-rc --avrcp (docs/bluetoothd.md#browsing): a car's PlayItem plays with Car Remote off"""
+    q2 = Q2(fw, ui, recs, on=0)
+    q2.queue(at=2)
+    q2.files['/tmp/coda-rc-avrcp.pid'] = b'77\n'
+    q2.tick()
+    assert q2.now()['id'] == '12' and q2.files[QUEUE].decode().startswith('1 2 4')
+    q2.files[LIST] = b'11\n'
+    q2.files[CMD] = b'1073741825 play 0 0 1\n'
+    q2.tick()
+    ui.fire('cr_play')
+    assert [C.c_int.from_address(r).value for r in ui.played[0][0]] == [11] and q2.files[ACK] == b'1073741825 0\n'
+    assert q2.system == [] and PAIR not in q2.files
+
+
 def test_on_starts_the_daemon_once_and_writes_now_playing(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.queue(at=2)

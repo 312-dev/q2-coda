@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #else
@@ -38,6 +39,7 @@ typedef unsigned socklen_t;
 #define O_CLOEXEC 0x80000
 #define F_GETFL 3
 #define F_SETFL 4
+#define AF_UNIX 1
 #define AF_INET 2
 #define SOCK_STREAM 2 /* MIPS swaps STREAM and DGRAM */
 #define SOL_SOCKET 0xffff
@@ -62,6 +64,7 @@ typedef unsigned socklen_t;
 #define errno (*__errno_location())
 struct in_addr { uint32_t s_addr; };
 struct sockaddr_in { unsigned short sin_family, sin_port; struct in_addr sin_addr; char zero[8]; };
+struct sockaddr_un { unsigned short sun_family; char sun_path[108]; };
 struct pollfd { int fd; short events, revents; };
 struct timespec { long tv_sec, tv_nsec; };
 struct timeval { long tv_sec, tv_usec; };

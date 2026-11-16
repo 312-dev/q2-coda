@@ -120,12 +120,28 @@ int crc_shim_command(crc_session *s, unsigned req_id, const char *verb);
 /* Browse, Search, GetQueue, GetCover and Play (coda_rc_lib.c); qgen and qpos: Now Playing's queue version and
  * place, newer than the queue file's */
 int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos);
+/* AVRCP browsing for the rebuilt bluetoothd (coda_rc_avrcp.c, docs/bluetoothd.md#browsing). coda-rc --avrcp
+ * serves it on CRC_AVRCP_SOCKET; a request is {pdu, tag u32, room u16, parameters}, its reply {pdu, parameters}. */
+#define CRC_AVRCP_SOCKET "/tmp/coda-rc.avrcp"
+#define CRC_AVRCP_PID "/tmp/coda-rc-avrcp.pid" /* the shim serves the --avrcp daemon too while this exists */
+#define CRC_AVRCP_FORGET 0xff                  /* a request: the car with this tag is gone */
+#define CRC_TR_AVRCP 7                         /* lib_request's answers to avrcp_capture (crc_write) */
+size_t avrcp_request(const uint8_t *req, size_t n, uint8_t *rsp, size_t cap); /* the reply's length, 0 none */
+void avrcp_capture(const uint8_t *frame, size_t n);
+void avrcp_forget(uint32_t tag);
+void crc_avrcp_now(int *qgen, int *qpos); /* the platform: Now Playing's queue version and place */
+int crc_avrcp_state(void);                /* and its coda-rc.proto PlayState */
 /* Play.resume's memory (coda_rc_lib.c): a list's Play was taken (ok) or not, its queue now qgen; Now Playing
  * now plays song id in queue qgen */
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
 int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
+typedef struct {
+    char artist[160], album[160];
+    int secs, found;
+} lib_meta;
+int lib_songs_meta(const char *const *ids, int n, lib_meta *out); /* each song id's tags; -1 no library */
 int lib_has_server(void);
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
 int ble_start(void);

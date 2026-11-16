@@ -4,8 +4,9 @@
  * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate and queue
  * commands and the pairing code in.
  *
- * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
- * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
+ * demo starts it when Settings > Car Remote is on and kills it when that goes off. The rebuilt bluetoothd
+ * starts a second, coda-rc --avrcp, which serves AVRCP browsing (coda_rc_avrcp.c) on a UNIX socket and nothing
+ * else. Each runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 #include "monocypher/monocypher.h"
@@ -20,7 +21,7 @@
 enum { TR_TCP, TR_BLE };
 
 static char root[160];
-static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
+static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1, avrcp;
 uint8_t crc_device_id[8];
 
 typedef struct {
@@ -186,6 +187,10 @@ int crc_pair_cancelled(void) {
 
 int crc_write(crc_session *s, const uint8_t *buf, size_t n) {
     if (s->transport == TR_BLE) return ble_write(buf, n);
+    if (s->transport == CRC_TR_AVRCP) {
+        avrcp_capture(buf, n);
+        return 0;
+    }
     conn *c = s->io;
     while (n) {
         ssize_t w = send(c->fd, buf, n, MSG_NOSIGNAL);
@@ -239,6 +244,17 @@ static int np_read(void) {
     np = t;
     np_at = crc_now_ms();
     return 1;
+}
+
+void crc_avrcp_now(int *qgen, int *qpos) {
+    np_read();
+    *qgen = np.qgen;
+    *qpos = np.qpos;
+}
+
+int crc_avrcp_state(void) {
+    np_read();
+    return np.state;
 }
 
 int crc_shim_alive(void) {
@@ -613,9 +629,9 @@ static void peers_poll(void) {
     crypto_wipe(peers, sizeof peers);
 }
 
-static int already_running(void) {
+static int already_running(const char *pidfile) {
     char b[16];
-    int n = read_file("/tmp/coda-rc.pid", b, sizeof b - 1);
+    int n = read_file(pidfile, b, sizeof b - 1);
     if (n <= 0) return 0;
     b[n] = 0;
     int pid = atoi(b);
@@ -630,17 +646,106 @@ static void device_id(void) {
     crc_write_file("/mnt/data/coda-rc/id", crc_device_id, 8, 0600);
 }
 
+/* ---- coda-rc --avrcp: bluetoothd's browsing (coda_rc_avrcp.c) ---- */
+
+#define AVRCP_CLIENTS 2
+
+typedef struct {
+    int fd;
+    size_t n;
+    uint8_t in[2 + 1024];
+} avrcp_client;
+
+static int avrcp_listen(void) {
+    char p[256];
+    struct sockaddr_un a = {.sun_family = AF_UNIX};
+    crc_path(p, sizeof p, CRC_AVRCP_SOCKET);
+    if (strlen(p) >= sizeof a.sun_path) return -1;
+    memcpy(a.sun_path, p, strlen(p) + 1);
+    unlink(p);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    /* root's alone (bluetoothd's): the socket plays music */
+    if (bind(fd, (const void *)&a, sizeof a) || chmod(p, 0600) || listen(fd, 2)) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* the frames a client has sent: {u16 length, request}; each answered {u16 length, reply} in turn */
+static int avrcp_serve(avrcp_client *c) {
+    static uint8_t rsp[2 + 1024];
+    ssize_t r = read(c->fd, c->in + c->n, sizeof c->in - c->n);
+    if (r < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
+    if (r <= 0) return -1;
+    c->n += r;
+    while (c->n >= 2) {
+        size_t len = (size_t)c->in[0] << 8 | c->in[1];
+        if (len > sizeof c->in - 2) return -1;
+        if (c->n < 2 + len) break;
+        size_t out = 0;
+        if (len >= 5 && c->in[2] == CRC_AVRCP_FORGET)
+            avrcp_forget((uint32_t)c->in[3] << 24 | c->in[4] << 16 | c->in[5] << 8 | c->in[6]);
+        else out = avrcp_request(c->in + 2, len, rsp + 2, sizeof rsp - 2);
+        if (out) {
+            rsp[0] = out >> 8;
+            rsp[1] = out;
+            if (write(c->fd, rsp, 2 + out) != (ssize_t)(2 + out)) return -1;
+        }
+        memmove(c->in, c->in + 2 + len, c->n - 2 - len);
+        c->n -= 2 + len;
+    }
+    return 0;
+}
+
+static int avrcp_main(void) {
+    if (already_running(CRC_AVRCP_PID)) return 0;
+    char b[16];
+    crc_write_file(CRC_AVRCP_PID, b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
+    cmd_seq = 0x40000000; /* apart from the Car Remote daemon's, should both write the shim a command */
+    int lfd = avrcp_listen();
+    crc_log("avrcp: %s", lfd >= 0 ? "listening" : "no socket");
+    avrcp_client cl[AVRCP_CLIENTS];
+    for (int i = 0; i < AVRCP_CLIENTS; ++i) cl[i].fd = -1;
+    while (!quit && lfd >= 0) {
+        struct pollfd fds[AVRCP_CLIENTS + 1] = {{lfd, POLLIN, 0}};
+        for (int i = 0; i < AVRCP_CLIENTS; ++i) fds[i + 1] = (struct pollfd){cl[i].fd, POLLIN, 0};
+        if (poll(fds, AVRCP_CLIENTS + 1, POLL_MS) < 0 && errno != EINTR) break;
+        if (fds[0].revents & POLLIN) {
+            int fd = accept(lfd, 0, 0), placed = 0;
+            for (int i = 0; fd >= 0 && i < AVRCP_CLIENTS && !placed; ++i)
+                if (cl[i].fd < 0) cl[i].fd = fd, cl[i].n = 0, placed = 1;
+            if (fd >= 0 && !placed) close(fd);
+        }
+        for (int i = 0; i < AVRCP_CLIENTS; ++i)
+            if (cl[i].fd >= 0 && fds[i + 1].revents && avrcp_serve(&cl[i]) < 0) {
+                close(cl[i].fd);
+                cl[i].fd = -1;
+            }
+        ack_poll();
+    }
+    for (int i = 0; i < AVRCP_CLIENTS; ++i)
+        if (cl[i].fd >= 0) close(cl[i].fd);
+    if (lfd >= 0) close(lfd);
+    unlink_at(CRC_AVRCP_SOCKET);
+    unlink_at(CRC_AVRCP_PID);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
+        else if (!strcmp(argv[i], "--avrcp")) avrcp = 1;
     }
     setpriority(PRIO_PROCESS, 0, 19);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_term);
     signal(SIGHUP, on_term);
-    if (already_running()) return 0;
+    if (avrcp) return avrcp_main();
+    if (already_running("/tmp/coda-rc.pid")) return 0;
     char b[16];
     crc_write_file("/tmp/coda-rc.pid", b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
     device_id();

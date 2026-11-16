@@ -10,6 +10,8 @@
  *   Pause or Play once the player shows it;
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
+ * The same three, Now Playing, the queue and the commands, are served while the rebuilt bluetoothd's coda-rc
+ * --avrcp runs, with Car Remote on or off (docs/bluetoothd.md#browsing).
  * Settings > Car Remote is this file's page too: the switch, the paired phones, Forget.
  * Everything the protocol needs is in the daemon; here only a few words of state. */
 #include "navigation.h"
@@ -19,6 +21,7 @@
 #define CR_SETTLE_MS 3000   /* a Pause or Play the player has not shown by then is refused (under coda_rc.c ACK_MS) */
 #define CR_DAEMON "/usr/bin/coda-rc"
 #define CR_PID "/tmp/coda-rc.pid"
+#define CR_AVRCP_PID "/tmp/coda-rc-avrcp.pid" /* coda_rc.h CRC_AVRCP_PID */
 #define CR_NOW "/tmp/coda-rc.now"
 #define CR_QUEUE "/tmp/coda-rc.queue"
 #define CR_CMD "/tmp/coda-rc.cmd"
@@ -406,7 +409,15 @@ void coda_rc_poll(void) {
     unsigned now = time_now_ms();
     if (cr.at && now - cr.at < CR_POLL_MS) return;
     cr.at = now | !now;
-    if (!coda_rc_enabled()) return;
+    if (!coda_rc_enabled()) {
+        /* the rebuilt bluetoothd's coda-rc --avrcp (docs/bluetoothd.md#browsing): a car's browsing plays
+         * through the same files, Car Remote on or off */
+        if (access(CR_AVRCP_PID, 0)) return;
+        cr_now();
+        cr_settle();
+        cr_command();
+        return;
+    }
     if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
     cr_now();
     cr_settle();

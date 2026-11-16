@@ -968,6 +968,33 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
     return crc_send(s, T_QUEUE_RESP, req_id, out, w.n);
 }
 
+/* ---- a song's tags, for AVRCP's media elements (coda_rc_avrcp.c) ---- */
+
+int lib_songs_meta(const char *const *ids, int n, lib_meta *out) {
+    memset(out, 0, n * sizeof *out);
+    if (lib_open()) return -1;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db, "select artist, album, secs from s2 where sid = ?1", -1, &st, 0) != SQLITE_OK) {
+        lib_close();
+        return -1;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (strncmp(ids[i], "song:", 5)) continue;
+        sqlite3_bind_text(st, 1, ids[i] + 5, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *a = (const char *)sqlite3_column_text(st, 0), *al = (const char *)sqlite3_column_text(st, 1);
+            snprintf(out[i].artist, sizeof out[i].artist, "%s", a ? a : "");
+            snprintf(out[i].album, sizeof out[i].album, "%s", al ? al : "");
+            out[i].secs = sqlite3_column_int(st, 2);
+            out[i].found = 1;
+        }
+        sqlite3_reset(st);
+    }
+    sqlite3_finalize(st);
+    lib_close();
+    return 0;
+}
+
 /* ---- covers ---- */
 
 /* Where an album's picture is: Cover Flow's 160 px cache when it is small enough, a server app's cover,
