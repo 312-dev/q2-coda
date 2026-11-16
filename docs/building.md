@@ -163,7 +163,8 @@ python3 tools/ci/affected.py                       # what this branch's changes 
 python3 tools/ci/affected.py --run "$B"            # and run it
 python3 tools/ci/patch_shards.py "$B"              # all of test/patch.py in parallel shards
 python3 tools/ci/fw.py                             # all of test/fw on xdist workers; --asan for the sanitizers
-python3 tools/ci/merge_train.py feat/a feat/b      # in the integration worktree: merge, test, stop at a failure
+python3 tools/ci/merge_batch.py --mark-ready       # this branch is green: queue it for the next batch
+python3 tools/ci/merge_batch.py --from-ready       # in the integration worktree: merge them all, test once, bisect a failure
 python3 tools/ci/emu_pool.py get "$B"              # borrow a shared emulator (see Emulator pool)
 ```
 
@@ -175,9 +176,22 @@ python3 tools/ci/emu_pool.py get "$B"              # borrow a shared emulator (s
 - **`q2-heavy`** (`tools/ci/q2-heavy`, installed as `~/.local/bin/q2-heavy`): runs a heavy job in one of 4 slots when `MemAvailable` is 5 GB or more, memory and io pressure are low, the Windows drive (`/mnt/c`, where WSL's disk lives) has 25 GB free and the battery allows (on battery: one job under 30%, none under 15%); else it waits and says why. Under 10 GB on `/mnt/c` it refuses (exit 75) and pauses a running job. Each job runs in a systemd scope with `MemoryMax=3G` (8G under ASan; `Q2_HEAVY_MEM` sets it) and with `tools/ci/nodump.c` preloaded, so a crash leaves no core dump: WSL pipes cores to the Windows drive and a pipe ignores `ulimit -c` (0 and 1 alike, measured), and a 33 GB core filled C: on 2026-11-16. Install it by rename, never by copying over it: bash reads a running script as it goes, and a job running it then ends with a wrong exit status (`install -m 755 tools/ci/q2-heavy ~/.local/bin/q2-heavy.new && mv ~/.local/bin/q2-heavy.new ~/.local/bin/q2-heavy`).
 - **Merges:** `.gitattributes` merges `docs/changelog.md` as a union, so two branches' bullets at the top of Unreleased no longer conflict (a bullet both reworded comes out twice: keep one). Tables such as `docs/source-map.md` stay normal merges: their rows are edited as often as added, and a union would keep stale copies. `git rerere` is on in this checkout (`rerere.enabled`, `rerere.autoupdate`), so a conflict resolved once is resolved the same way when it comes back.
 
+### Merge batch
+
+How branches reach the integration branch: in batches, never one at a time. A worker whose branch is done runs its own `affected.py --run "$B"` and, when that is green, queues the branch with `python3 tools/ci/merge_batch.py --mark-ready` in its worktree (refused with uncommitted changes); it never runs the whole suite on its branch, which is the batch's job. `--mark-ready` appends the branch and its commit to `~/.cache/q2-merge-train/ready.txt`, and the batch merges that commit, so the worker can go on committing while a batch runs; later commits go in a later batch, after another `--mark-ready`.
+
+The coordinator runs `python3 tools/ci/merge_batch.py --from-ready` (branches can also be named) with the test venv's python in the integration branch's clean worktree. It takes and empties the ready list (a copy stays in the run's logs) and:
+
+1. merges every branch (`--no-ff`, rerere as below) onto the integration tip, in a worktree of its own (`~/.cache/q2-merge-train/wt/<integration>-L0`, kept between runs); a branch that conflicts, or is in the tip already, is skipped and reported, and the rest go on;
+2. builds once (`rebuild.py`, that worktree's reused build) and runs, once, what `affected.py` says the batch's whole diff needs, each suite in its own process at the same time (`patch_shards.py`, `fw.py`, the `test/*.py` suites, each heavy one under `q2-heavy`);
+3. green: fast-forwards the integration branch to the tested commit (merge commits only; nothing is rebased) and lists what landed;
+4. red: bisects. The branches are split in halves and only the failing suites run on each half, on top of what has passed so far, in one worktree and build per level (`-L1`, `-L2`, ...). A half whose sibling passed is known to fail without a test, down to a single branch, which is always tested: a flaky failure cannot convict the last branch. Each culprit is kept as `train/failed/<branch>` and reported with the suite, its log and the failing tests; the remainder, already a tested commit, runs again in full (what its own diff needs) and lands when that is green. When no half fails on its own, nothing lands and the summary says so.
+
+One culprit in ten costs five or six runs of the failing suites (measured on a fake repository in `test_ci.py`), where the train below would rebuild and test after every merge. `--dry-run` merges in memory (`git merge-tree`) and prints the conflicts and the plan, in a second or so; with `--onto BRANCH` it runs from any worktree. Logs and `summary.txt`: `~/.cache/q2-merge-train/<time>/`. The exit status is 0 when everything landed, 1 when a branch was left out, and 2 when nothing could land, such as when the integration branch moved during the batch (the tested commit is kept as `train/batch-<time>` and its branches go back on the ready list). One batch per integration branch runs at a time. The batch assumes the integration tip passes its own tests: on a red tip every branch would look guilty.
+
 ### Merge train
 
-`python3 tools/ci/merge_train.py BRANCH...`, run with the test venv's python in a clean worktree of the integration branch, merges each branch (`--no-ff`; never a rebase, as other worktrees have them checked out), runs the tests that merge's own changes need, and stops at the first failure: the failed merge is kept as `train/failed/<branch>` and the integration branch goes back to the last merge that passed. A conflict rerere cannot resolve stops it with the files listed and the merge in progress. After the last branch it runs everything once. `--dry-run` prints what each merge would test. Logs: `~/.cache/q2-merge-train/<time>/`.
+The fallback, for one branch whose conflict a person will resolve by hand: `python3 tools/ci/merge_train.py BRANCH...` merges each branch in turn, testing after each, and stops at a conflict with the merge left in progress, where a batch would skip the branch. It is slow for more than one or two branches: a build and a test run per merge, then everything once at the end. A failed merge is kept as `train/failed/<branch>` and the integration branch goes back to the last merge that passed. `--dry-run` prints what each merge would test. Logs: `~/.cache/q2-merge-train/<time>/`.
 
 ### Emulator pool
 

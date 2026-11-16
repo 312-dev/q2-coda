@@ -88,7 +88,7 @@ Many agents share one 16 GB laptop: use the shared tools in [building: Fast test
 - Wrap anything else heavy in `q2-heavy` (memory, disk, power and no-core-dump guards). Never `pytest -n auto`.
 - Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`.
 - UI work: `python3 tools/ci/q2live.py` rebuilds demo and reloads a pooled emulator on every save under `patch/`, back on your page ([building: Live reload](docs/building.md#live-reload)).
-- Integrating: `python3 tools/ci/merge_train.py BRANCH...` in the integration worktree.
+- Integrating is in batches ([building: Merge batch](docs/building.md#merge-batch)). When your branch is done and your own `affected.py --run "$B"` is green, queue it: `python3 tools/ci/merge_batch.py --mark-ready`. Never run the whole suite on a feature branch; the batch does that once for every branch in it. The coordinator integrates with `python3 tools/ci/merge_batch.py --from-ready` in the integration worktree (`merge_train.py`, one branch at a time, only for a conflict resolved by hand).
 
 ## Traps
 
