@@ -56,7 +56,7 @@ A swap is safe when nothing that still holds an address into changed code reache
 | stock code jumping into the payload (hooks and patched calls: `j` or `jal` in stock's text with a payload target) | 227 sites, 176 entry points (`HOOKS` has 111 rows) | in `demo`'s file, so a swap that also writes stock's text from the new `demo` follows them (the spike's `swap` writes the payload only) |
 | payload function entries held in writable memory (AWTK handlers, timers, `pthread_create` arguments, tables built at run time) | 57 words, 30 functions (`library_search_open` 14, `set_open` 6, `clock_due`, `tone_worker`, ...) | dangling: called later at the old address |
 | words pointing into payload `.rodata` from writable memory (widget texts, tables) | 1,094 | read the wrong bytes if `.rodata` moves |
-| threads parked inside payload functions (return addresses near the top of their stacks): the encoder (`wheel_sample`, `ringnav_ts_read`, `ringnav_queue_event`), the sleep hooks of stock threads (`ringnav_dark_usleep`, `ringnav_dark_cover_usleep` twice), `ringnav_baidu_poll`, `ringnav_tidal_poll`, `tone_worker`, `logo_sync` | 8 threads | return into whatever is now at the old address |
+| threads parked inside payload functions (return addresses near the top of their stacks): the encoder (`wheel_sample`, `ringnav_ts_read`, `ringnav_queue_event`), the sleep hooks of stock threads (`ringnav_dark_usleep`, `ringnav_dark_cover_usleep` twice), `ringnav_baidu_poll`, `ringnav_tidal_poll`, `tone_worker` (under `logo_sync`) | 7 threads besides the UI thread | return into whatever is now at the old address |
 
 `.rodata` follows `.text` (`patch/link.ld`), so a change in size moves it unless an object's alignment padding absorbs the change: a 4-byte growth in `ringnav_paint_bg` moved 244 functions, every one after it in `navigation.c`, and nothing past `navigation.o`, whose 16-byte alignment took the slack; `.rodata` did not move.
 
@@ -66,7 +66,19 @@ So **a fixed jump table is needed** for anything other than edits that keep ever
 
 ### The idle point
 
-UI_STACK_PLACEHOLDER
+**The UI thread is at a safe point there.** `hotswap_poll` records its `$sp` (cell 8), and `memswap.py uistack` walks the frames from it, each frame's size and return-address slot read from its prologue. On Home and two pages deep (Settings, then Controls) the chain was the same:
+
+```
+#0 hotswap_poll   (payload, frame 40)
+#1 ringnav_sleep  (payload, frame 1440; stock calls it at the main_loop_sleep_default hook)
+#2 0x69e960       (stock, the main loop)
+#3 0x476268       (stock, main)
+#4 0x2ca061fc     (libc, __libc_start_main)
+```
+
+The only payload frames are the hook's own two, so the swap must leave `hotswap_poll` and `ringnav_sleep` in place and unchanged, or return through a fixed stub (below). A flat scan of the same stack finds payload return addresses higher up (`ringnav_wm_paint`, `bar_status`, `coverflow_home`), but those are stale slots inside stock's frames, not frames. The payload runs no nested main loop (no `dialog_modal`), so the idle point is never inside payload code. A stock page that runs one (a stock modal dialog) was not checked.
+
+**Other threads are not.** Of 27 threads, 7 besides the UI thread run payload code and sit in it while they block (table above). They are not stopped at a known point and cannot be: the swap leaves them alone, so the functions on their stacks must not change. The other 19 had no payload return address anywhere in their stacks in the conservative scan (41 stack regions scanned, 8 with any).
 
 ## 5. End to end
 

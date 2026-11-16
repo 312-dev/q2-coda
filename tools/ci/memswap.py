@@ -239,111 +239,39 @@ def main():
 
 
 def uistack(pid, mem, build):
-    """The UI thread's live stack at the idle hook: every word from the $sp hotswap_poll records (cell 8) to
-    the top of its mapping that is a return address (after a jal, jalr or bal), stock's or the payload's."""
+    """The UI thread's call chain at the idle hook, walked frame by frame from hotswap_poll's $sp (cell 8):
+    each frame's size and return-address slot from its prologue, found by reading back from the pc to the
+    function's `addiu $sp, $sp, -N` (the heuristic of gdb's MIPS unwinder). Prints every caller, stock's or
+    the payload's, out to main."""
     import bisect
     sym = symbols(build)
     funcs = sorted((a, n) for n, a in sym.items() if BASE <= a < SCRATCH)
-    end = text_end(build)
     with Stopped(pid):
         sp = mem.u32(sym['hotswap_cell'] + 32)
-        top = next(int(l.split()[0].split('-')[1], 16) - mem.base for l in open(f'/proc/{pid}/maps')
-                   if int(l.split()[0].split('-')[0], 16) <= sp + mem.base < int(l.split()[0].split('-')[1], 16))
-        data = mem.read(sp, top - sp)
-        text = mem.read(0x400000, 0x526b70)
-        pay = mem.read(BASE, end - BASE)
-    print(f'sp {sp:#x}, stack top {top:#x}: {top - sp} bytes live')
-    for i in range(0, len(data) & ~3, 4):
-        v, = struct.unpack_from('<I', data, i)
-        if v % 4:
-            continue
-        if 0x400008 <= v < 0x400000 + len(text):
-            ins, = struct.unpack_from('<I', text, v - 8 - 0x400000)
-            where = 'stock'
-        elif BASE + 8 <= v < end:
-            ins, = struct.unpack_from('<I', pay, v - 8 - BASE)
-            k = bisect.bisect_right(funcs, (v, '\xff')) - 1
-            where = 'PAYLOAD ' + funcs[k][1]
-        else:
-            continue
-        op = ins >> 26
-        if op == 3 or (op == 0 and ins & 0x3f == 9) or (op == 1 and (ins >> 16) & 0x1f in (0x11, 0x13)):
-            print(f'   [sp+{i:#x}] {v:#x} {where}')
-
-
-def ptrs(pid, mem, build):
-    """Words in writable guest memory (heap, .scratch, stock's data, stacks) equal to a payload function's
-    entry, or pointing into payload .rodata: what moving a function or a literal would leave dangling."""
-    sym = symbols(build)
-    out = subprocess.run(['llvm-nm', '--defined-only', str(pathlib.Path(build)/'patch.elf')], capture_output=True, text=True).stdout
-    funcs = {int(f[0], 16): f[2] for f in (l.split() for l in out.splitlines()) if len(f) == 3 and f[1] in 'Tt'}
-    rel = subprocess.run(['llvm-readelf', '-SW', str(pathlib.Path(build)/'patch.elf')], capture_output=True, text=True).stdout
-    ro = [l.replace('[ ', '[').split() for l in rel.splitlines() if ' .rodata ' in l][0]
-    ro_lo, ro_hi = int(ro[3], 16), int(ro[3], 16) + int(ro[5], 16)
-    fn_hits, ro_hits, where = {}, 0, {}
-    with Stopped(pid):
-        for line in open(f'/proc/{pid}/maps'):
-            f = line.split()
-            lo, hi = (int(x, 16) for x in f[0].split('-'))
-            if not f[1].startswith('rw') or lo - mem.base >= 0x80000000 or (len(f) >= 6 and f[5].startswith('[')):
-                continue
-            try:
-                data = mem.read(lo - mem.base, hi - lo)
-            except OSError:
-                continue
-            for (v,) in struct.iter_unpack('<I', data[:len(data) & ~3]):
-                if v in funcs:
-                    fn_hits[funcs[v]] = fn_hits.get(funcs[v], 0) + 1
-                    where[f[5] if len(f) >= 6 else 'anon'] = where.get(f[5] if len(f) >= 6 else 'anon', 0) + 1
-                elif ro_lo <= v < ro_hi:
-                    ro_hits += 1
-    print(f'{sum(fn_hits.values())} words equal to a payload function entry ({len(fn_hits)} functions); '
-          f'{ro_hits} words pointing into payload .rodata; by mapping {where}')
-    for n, c in sorted(fn_hits.items(), key=lambda x: -x[1])[:40]:
-        print(f'   {c:4d} {n}')
-
-
-def stacks(pid, mem, build):
-    """Every word on a guest thread stack that points into payload text just after a call (jal, jalr, bal):
-    the return addresses a swap could strand. Stacks are guest mappings whose region is a thread stack
-    (the main stack, and pthread stacks: anonymous rw mappings below a guard page). Conservative: dead
-    frames below each thread's sp count too, as the sp is not known without the gdbstub."""
-    sym = symbols(build)
-    funcs = sorted((a, n) for n, a in sym.items() if BASE <= a < SCRATCH)
-    import bisect
-    end = text_end(build)
-    maps = [l.split() for l in open(f'/proc/{pid}/maps')]
-    regions, prev = [], None
-    for f in maps:
-        lo, hi = (int(x, 16) for x in f[0].split('-'))
-        g_lo = lo - mem.base
-        if f[1].startswith('rw') and len(f) == 5 and prev is not None and prev[1].startswith('---') and hi - lo >= 64 << 10 \
-                and g_lo < 0x80000000:
-            regions.append((g_lo, hi - lo))
-        if len(f) >= 6 and f[5] == '[stack]':
-            pass
-        prev = f
-    hits = {}
-    with Stopped(pid):
-        for g, n in regions:
-            try:
-                data = mem.read(g, n)
-            except OSError:
-                continue
-            for i in range(0, n, 4):
-                v, = struct.unpack_from('<I', data, i)
-                if BASE + 8 <= v < end and v % 4 == 0:
-                    ins, = struct.unpack('<I', mem.read(v - 8, 4))
-                    op = ins >> 26
-                    if op == 3 or (op == 0 and ins & 0x3f == 9) or (op == 1 and (ins >> 16) & 0x1f in (0x11, 0x13)):
-                        k = bisect.bisect_right(funcs, (v, '\xff')) - 1
-                        hits.setdefault(g, []).append((g + i, v, funcs[k][1] if k >= 0 else '?'))
-    print(f'{len(regions)} candidate stack regions')
-    for g, hs in hits.items():
-        print(f'region {g:#x}: {len(hs)} payload return addresses')
-        for at, v, name in hs[-12:]:
-            print(f'   [{at:#x}] {v:#x} {name}')
-
+        pc = sym['hotswap_poll'] + 8  # past its prologue, which the walk reads back to
+        for depth in range(64):
+            name = 'stock'
+            if BASE <= pc < SCRATCH:
+                k = bisect.bisect_right(funcs, (pc, '\xff')) - 1
+                name = 'PAYLOAD ' + funcs[k][1]
+            size = ra_off = None
+            a = pc - 4
+            while a > pc - 0x8000:
+                ins = mem.u32(a)
+                if ins >> 16 == 0xafbf and ra_off is None:      # sw $ra, off($sp)
+                    ra_off = ins & 0xffff
+                if ins >> 16 == 0x27bd and ins & 0x8000:        # addiu $sp, $sp, -N
+                    size = 0x10000 - (ins & 0xffff)
+                    break
+                a -= 4
+            print(f'   #{depth} pc {pc:#x} sp {sp:#x} {name}' + (f' (frame {size}, ra at +{ra_off})' if size else ''))
+            if size is None or ra_off is None:
+                print('   (no prologue found: the walk stops)')
+                break
+            pc = mem.u32(sp + ra_off)
+            sp += size
+            if pc < 0x400000:
+                break
 
 if __name__ == '__main__':
     main()
