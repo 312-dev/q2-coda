@@ -15818,10 +15818,10 @@ def switch_image(m,row):
     return m.nodes[images[0]]['image']
 assert all(switch_image(m,rows[i])=='switch_off' for i in (2,3,4))  # Charge Limit, a key/value row on the theme's switches (pod_text)
 assert not [c for c in m.nodes[m.nodes[rows[1]]['children'][0]]['children'] if m.nodes[c].get('name')=='_setting_switch']
-assert len(rows)==9 and icons==['system_powermanager','usb_chargeswitch','usb_chargeswitch','wifiset_wifi','system_carmode','system_powermanager','system_powermanager','system_powermanager','system_powermanager'] and all(m.nodes[r]['style']=='s_listitem_black' for r in rows)
-assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
+assert len(rows)==7 and icons==['system_powermanager','usb_chargeswitch','usb_chargeswitch','wifiset_wifi','system_carmode','system_powermanager','system_powermanager'] and all(m.nodes[r]['style']=='s_listitem_black' for r in rows)
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 assert click(1)==[(1,'Q2POD','CHARGELIMIT')] and texts()[1]==f"Charge Limit: {O['CHARGE_STOP']}%"
-assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']; passed()
+assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']; passed()
 # In-Vehicle Mode, System's stock row before (0x4d34c0): its byte, its key, and the state byte cleared.
 m.byte(syms['g_carmode_state'],1)
 assert click(4)==[(1,'SYSSET','CARMODE')] and m.u.mem_read(syms['g_carmode'],1)==b'\1' and m.u.mem_read(syms['g_carmode_state'],1)==b'\0' and switch_image(m,rows[4])=='switch_on'
@@ -16228,7 +16228,7 @@ for double in ('0','1'):
     assert not press(DOWN,0) and not press(UP,50) and press(DOWN,O['WAKE_MS']) and press(UP,50),double
 passed()
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'CHARGELIMIT':'1','WAKEDOUBLE':'1','VOLGUARD':'1','STANDBYLIMIT':'2'})
-assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down']
+assert texts()==[limits[1],f"Charge Limit: {O['CHARGE_STOP']}%",'USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
 m,rows,texts,*_=settings_page('display','scroll_view_display',{'WAKEDOUBLE':'1','VOLGUARD':'1'},stock_rows=3,sub=3)
 assert texts()[4:]==['Wake: Double Press']; passed()  # VOLGUARD, Volume Guard's key in 1.8.2 and before: no row
 m,rows,texts,*_=settings_page('power','scroll_view_powermanager',{'STANDBYLIMIT':'4'})
@@ -16461,7 +16461,7 @@ assert m.call(address=payload_syms['folders_shared'],args=(m.deque([]),0,0,0),ga
 # Boot reads it too (ringnav_bootmode), so Audio settings shows it before any Library page has opened.
 for config,text in (({},'Artists: Album Artist'),({'ARTISTTYPE':'0'},'Artists: Artist')):
     shown=settings_page('audioset','scroll_view_playset',config,stock_rows=13,boot=True,sub=1)[2]
-    assert shown()[1]==text,config
+    assert shown()[3]==text,config  # Library's fourth row (library_settings.c)
 passed()
 # Mono Audio (crossfade.c mono_click): saved as Q2POD MONO, the row's text following, and the int
 # hciplayer and q2video map (MONO_FILE) set live. No file until it is first turned on.
@@ -16649,13 +16649,13 @@ for config,text in (({},'Off'),({'NIGHTSHIFT':'1'},'3400 K'),({'NIGHTSHIFT':'1',
     assert texts()[1]=='Night Shift: '+text and icons[1]=='display_backlight' and m.nodes[label]['name']=='label_night',config
     assert m.nodes[named(m,m.top,'scroll_view_display')]['children'][3]==rows[1],config  # after Smart Awake
 passed()
-# Its row opens the same page with its switch, Off. The switch turns it on and off and saves it; the
+# Its row opens the same page with its switch, Off, its value the warmth in every mode (3400 K). The switch turns it on and off and saves it; the
 # wheel, +/- and the slider step 100K, warmer to the right, a move turning it on; each change repaints
 # the whole screen at once, a drag's every step too, but a drag saves once, at its release.
 m,rows,texts,icons,click=settings_page('display','scroll_view_display',stock_rows=3)
 m.stack=[m.top]; m.nodes[m.wm]=dict(type='window_manager',name='',children=m.stack,visible=1)
 assert click(1)==[] and m.nodes[m.top]['name']=='bootvol_page' and m.nodes[m.title]['text']=='Night Shift'
-assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='Off'
+assert m.nodes[m.switch]['visible']!=0 and m.nodes[m.vol]['text']=='3400 K'
 N,K=('Q2POD','NIGHTSHIFT'),('Q2POD','NIGHTK')
 def repaints(): return [c[1:3] for c in m.calls if c[0]=='widget_invalidate_force']==[(m.wm,0)]
 assert press(m.switch)==[(1,*N)] and repaints() and m.nodes[m.vol]['text']=='3400 K' and texts()[1]=='Night Shift: 3400 K'
@@ -16667,10 +16667,10 @@ m.nodes[m.slider]['value']=10; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[
 m.nodes[m.slider]['value']=0; assert press(m.slider,O['EVT_VALUE_CHANGING'])==[] and repaints() and texts()[1]=='Night Shift: 5000 K'
 assert press(m.slider,O['EVT_VALUE_CHANGED'])==[(5000,*K)] and turn(O['KEY_PREV'])==[]  # the release saves, once
 # The switch cycles Off, On and Auto; a move in Auto keeps Auto.
-assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='Auto'
+assert texts()[1]=='Night Shift: 5000 K' and press(m.switch)==[(2,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Auto' and m.nodes[m.switch]['image']=='switch_on'
 assert turn()==[(4900,*K)] and texts()[1]=='Night Shift: Auto' and turn(O['KEY_PREV'])==[(5000,*K)]
-assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='Off'
+assert press(m.switch)==[(0,*N)] and repaints() and m.nodes[m.vol]['text']=='5000 K'
 assert texts()[1]=='Night Shift: Off' and m.nodes[m.switch]['image']=='switch_off'
 assert turn(O['KEY_PREV'])==[(1,*N)] and texts()[1]=='Night Shift: 5000 K'  # at an end too
 assert press(m.switch)==[(2,*N)] and press(m.switch)==[(0,*N)]
@@ -16759,7 +16759,7 @@ passed()
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
 assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Control Device Volume','Name']
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
-assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==78 and m.entries[1] not in m.nodes[view]['children']
+assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
 rows=rows[:2]
 for k,row in enumerate(rows):
@@ -17125,7 +17125,7 @@ assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_co
 # The row, after Charge Limit: off by default and saved as SMARTWIFI. Turned off while Smart Wi-Fi has
 # the radio off, the user's Wi-Fi comes back, unsaved, and is left alone.
 m,rows,texts,icons,click=settings_page('power','scroll_view_powermanager',cls=SmartMachine,config={'SMARTWIFI':'0'})
-assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox','Restart','Shut Down'] and icons[3]=='wifiset_wifi'
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox'] and icons[3]=='wifiset_wifi'
 assert switch_image(m,rows[3])=='switch_off' and click(3)==[(1,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_on'
 m.pass_(1); m.pass_(SW_IDLE); assert m.flag()==0
 assert click(3)==[(0,'Q2POD','SMARTWIFI')] and switch_image(m,rows[3])=='switch_off'
@@ -17518,9 +17518,9 @@ def boot_row(value=None,mode=0o100755):
     assert m.calls[0][:3]==('stock_power',m.top,5)
     kids=m.nodes[view]['children']
     if mode!=0o100755:  # no Boot to
-        assert len(kids)==11  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History, then the gap, Restart and Shut Down
+        assert len(kids)==8  # stock's two, then Standby Limit, Charge Limit, USB DAC Charging, Smart Wi-Fi, In-Vehicle and Battery History (Restart and Shut Down are General's)
         return m,None,None
-    assert len(kids)==12  # Boot to before the gap
+    assert len(kids)==9  # Boot to last
     button=m.nodes[kids[8]]['children'][0]
     label=m.nodes[button]['children'][1]
     return m,button,label
@@ -17552,9 +17552,9 @@ m,button,label=boot_row(); view=m.nodes[m.top]['children'][0]; view=m.nodes[view
 m.paint(view)
 for _ in range(8): m.call()  # stock's two, our six, then Boot to
 assert m.confirm()==11 and m.dispatched()[0][1]==button; passed()
-# System settings: stock V1.36's nine rows, its Language (English only for now), Wheel Function, In-Vehicle, General and System hidden, which the wheel
-# skips; Car Remote, App Store, Storage and Controls added, and the four rows stock moved to its System page, opening stock's pages,
-# so the list reads as it did. Boot to is Power's now.
+# General (Settings' System page, ringnav_systemset): About, System Update, Storage, Date & Time, App Store, stock's
+# Network row, Reset Settings, then stock's other eight hidden (the wheel skips them), a 12 px gap, Restart and Shut Down
+# (power_rows.c). The rows stock moved to its System page open stock's pages; Car Remote and Controls are Settings' own.
 for mode in (0o100755,0):
     m=BootMachine({}); m.rockbox_mode=mode; m.restack=True
     m.handlers[int(manifest['patch_symbols']['stock_systemset_trampoline'],16)]='stock_systemset'
@@ -17562,18 +17562,16 @@ for mode in (0o100755,0):
     view=m.node('scroll_view','scroll_view_sysset',entries.copy())
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-    kids=m.nodes[view]['children']; assert len(kids)==17
-    assert [kids.index(e) for e in entries]==[7,0,1,3,5,12,13,14,15]  # Language, hidden, after Date and Time; the hidden four before About
-    assert [m.nodes[e]['visible'] for e in entries]==[0,1,1,1,1,0,0,0,0]
-    car,controls,date,apps,storage,update,reset,about=(m.nodes[kids[i]]['children'][0] for i in (2,4,6,8,9,10,11,16))
-    assert m.nodes[m.nodes[car]['children'][1]]['text']=='Car Remote' and m.handler(car,O['EVT_CLICK'])[0]==payload_syms['carremote_open']
+    kids=m.nodes[view]['children']; assert len(kids)==18
+    assert [kids.index(e) for e in entries]==[7,8,5,9,10,11,12,13,14]  # Network (stock's third) in place, the rest hidden
+    assert [m.nodes[e]['visible'] for e in entries]==[0,0,1,0,0,0,0,0,0]
+    about,update,storage,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,6))
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
-    assert m.nodes[m.nodes[controls]['children'][1]]['text']=='Controls'
-    f,ctx=m.handler(controls,O['EVT_CLICK']); assert f==payload_syms['display_open'] and ctx==3
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
+    assert m.nodes[kids[15]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16:]]==['Restart','Shut Down']
     passed()
 print('Boot settings: conditional row/order, restart, card removal and failed atomic writes passed.')
 
@@ -17724,7 +17722,7 @@ m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][
 conf=m.nodes[m.nodes[view]['children'][5]]['children'][0]; icon,label=m.nodes[conf]['children'][:2]
 assert m.nodes[icon]['image']=='stream_config' and m.nodes[label]['text']=='Configuration'
 m.click(conf); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','TIDAL','Spotify','Tidal Downloads','Internet Radio','AirPlay']
+assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming','TIDAL','Spotify','Tidal Downloads','Internet Radio','AirPlay']
 m.row(0); assert m.files[TCAP]==b'4096M' and m.labels()[1]=='Tidal Cache: 4 GB' and endpoint(m,'stream_cache',0)==3
 m.row(0); m.row(0); assert m.files[TCAP]==b'512M' and m.labels()[1]=='Tidal Cache: 512 MB'
 m.row(1); assert m.files[SCAP]==b'4096M' and m.labels()[2]=='Spotify Cache: 4 GB' and endpoint(m,'stream_cache',1)==3
