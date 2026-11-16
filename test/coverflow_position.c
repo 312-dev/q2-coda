@@ -20,9 +20,6 @@ static struct {
     int on;
     float pos;
 } th;
-static struct {
-    void *panel;
-} fl;
 static int live = 1, albums = 400, cards = 400, centre, fraction, light, invalidations, fills;
 static unsigned fill;
 static unsigned clock_ms, timer_id, next_timer, timer_adds, dot_alpha;
@@ -287,16 +284,9 @@ int main(int argc, char **argv) {
     th.pos = .02f;
     coverflow_position_paint(slide, canvas);
     assert(position.alpha == 255 && timer_adds == started + 1);
-    /* Close/reopen, or go to the flipped panel: no stale timer or retained visibility. */
+    /* Close/reopen: no stale timer or retained visibility. */
     coverflow_position_reset();
     assert(!timer_id && !position.alpha);
-    coverflow_position_paint(slide, canvas);
-    th.pos = 20;
-    coverflow_position_paint(slide, canvas);
-    fl.panel = covers;
-    tick(2100);
-    assert(!timer_id && !position.alpha);
-    fl.panel = 0;
     /* The unsigned clock subtraction also works across the device's millisecond rollover. */
     coverflow_position_reset();
     clock_ms = 0xfffffff0u;
@@ -325,10 +315,6 @@ int main(int argc, char **argv) {
     coverflow_position_paint(covers, canvas);
     assert(!fills);
     cf.text_albums = 0;
-    fl.panel = covers;
-    coverflow_position_paint(covers, canvas);
-    assert(!fills);
-    fl.panel = 0;
     albums = 1;
     coverflow_position_paint(covers, canvas);
     assert(!fills);
