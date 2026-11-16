@@ -4,8 +4,8 @@
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off;
  * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
- *   while Bluetooth is on, Car Remote or not, Now Playing too, for q2-avrcp (patch/q2_avrcp.c), which
- *   it starts;
+ *   while Bluetooth is on, Car Remote or not, Now Playing too, for q2-avrcp (patch/q2_avrcp.c),
+ *   which it starts;
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue; and answers each in /tmp/coda-rc.ack, a
@@ -407,9 +407,9 @@ static void cr_pairing(void) {
     }
 }
 
-/* q2-avrcp (patch/q2_avrcp.c, docs/internals.md#track-metadata): started once Bluetooth is on, again if
- * it died, at most every CR_RESTART_MS; it reads CR_NOW, which cr_now keeps while Bluetooth is on. It
- * stays when Bluetooth goes off, idle until bluetoothd is back. */
+/* q2-avrcp (patch/q2_avrcp.c, docs/internals.md#track-metadata): started once Bluetooth is on,
+ * again if it died, at most every CR_RESTART_MS; it reads CR_NOW, which cr_now keeps while
+ * Bluetooth is on. It stays when Bluetooth goes off, idle until bluetoothd is back. */
 static void cr_avrcp(unsigned now) {
     char raw[24], proc[24];
     if (cr.avrcp_at && now - cr.avrcp_at < CR_RESTART_MS) return;
