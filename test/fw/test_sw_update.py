@@ -10,7 +10,7 @@ import pytest
 import host
 from conftest import O, Files
 
-SW_CHECKING, SW_OK, SW_LATEST, SW_NONE, SW_NOCARD, SW_LOW, SW_BAD, SW_FULL, SW_CANCELLED = range(9)
+SW_CHECKING, SW_OK, SW_LATEST, SW_NONE, SW_NOCARD, SW_LOW, SW_BAD, SW_FULL, SW_CANCELLED, SW_ASKING = range(10)
 TAR = '/mnt/mmc/update.tar'
 INSTALLED = b'V0JYi'
 
@@ -177,10 +177,30 @@ def test_the_checks_answer(fw, state, confirm):
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     assert tick(None) == 8 and sw.frame == 1  # still checking: the spinner's next frame
     sw.state = state
-    assert tick(None) == 7 and not sw.timer and len(fw.calls('fw_pthread_join')) == 1
+    top = [0]
+    fw.mock('window_manager_get_top_window', lambda *_: top[0])
+    assert tick(None) == (8 if confirm else 7) and len(fw.calls('fw_pthread_join')) == 1
     assert pages() == ['swupdate_page'] + ['swconfirm_page'] * confirm
-    # the check's page stays under Install Update? until that is on top and settled (sw_update_paint)
     assert sw.page and sw.result == (SW_CHECKING if confirm else state) and bool(sw.confirm) == confirm
+    if confirm:  # the check's page stays under Install Update? until that is on top and settled
+        assert tick(None) == 8 and sw.page and not sw.ready
+        top[0] = sw.confirm
+        assert tick(None) == 7 and not sw.page and sw.ready and len(fw.calls('fw_pthread_join')) == 1
+    assert not sw.timer
+
+
+def test_install_update_left_before_it_settled_takes_the_check_page_with_it(fw):
+    opened(fw)
+    fw.mock('check_updatefw_exist', lambda *_: 1)
+    fw.mock('fw_pthread_create', lambda *_: 0)
+    fw.mock('timer_add', lambda *_: 5)
+    fw.fn('ringnav_fwupdate_tf', C.c_int)()
+    sw = fw.var('sw_update__sw', Sw)
+    tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
+    sw.state = SW_OK
+    assert tick(None) == 8
+    fw.fn('sw_update__sw_gone', C.c_int, C.c_void_p, C.c_void_p)(sw.confirm, None)
+    assert tick(None) == 7 and not sw.page and not sw.timer and len(fw.calls('fw_pthread_join')) == 1
 
 
 def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
@@ -196,7 +216,7 @@ def test_the_answer_waits_for_the_check_page_to_finish_sliding_in(fw):
     tick = fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
     assert tick(None) == 8 and pages() == ['swupdate_page'] and not fw.calls('fw_pthread_join')
     sliding[0] = 0
-    assert tick(None) == 7 and pages() == ['swupdate_page', 'swconfirm_page']
+    assert tick(None) == 8 and pages() == ['swupdate_page', 'swconfirm_page']  # then settles: test_the_checks_answer
 
 
 def test_leaving_while_it_checks_cancels(fw):

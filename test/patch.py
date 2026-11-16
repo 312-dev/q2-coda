@@ -18237,10 +18237,11 @@ for state,want in ((SW_OK,'swconfirm_page'),(SW_LATEST,'swupdate_page'),(SW_BAD,
     m=sw_open(); page=m.top; m.word(payload_syms['sw']+4,state); m.u.mem_write(payload_syms['sw']+0x48,b'V1830\0')
     m.advance(80); assert m.joins and m.nodes[m.top]['name']==want and not m.timers,(state,m.nodes[m.top]['name'])
     if state!=SW_OK: assert m.top==page and m.sw('result')==state; passed(); continue
-    confirm=m.top; assert m.alive(page)  # until Install Update? is on top and settled: its paint closes it
+    confirm=m.top; assert not m.alive(page)  # Install Update? on top and settled: the check's page closed under it
+    view=m.find('scroll_view',confirm); assert m.selected(view)==0  # Cancel
     rows=[k for k in m.nodes if m.nodes[k]['type']=='list_item' and m.alive(k)]
     assert [m.nodes[m.nodes[r]['children'][0]].get('text') for r in rows]==['Cancel','Install and Restart']
-    texts,_=m.said(confirm); assert not m.alive(page) and m.top==confirm
+    texts,_=m.said(confirm)
     assert texts[:2]==['Q2 Pod 1.8.3 \u00b7 V1830',f'Installed: {manifest["version"]} \u00b7 0.0 MB on the SD card'] and texts[2].startswith('Takes about 2 minutes'),texts
     f,ctx=m.handler(rows[1],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert len(m.idles)==1 and not m.alive(confirm); passed()

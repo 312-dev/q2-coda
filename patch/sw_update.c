@@ -29,7 +29,18 @@
 #define SW_CHUNK (64 << 10)
 #define SW_SPIN_MS 80 /* a frame of the twelve: a turn a second */
 #define SW_SPIN_PX 48 /* tools/art.py SW_SPIN */
-enum { SW_CHECKING, SW_OK, SW_LATEST, SW_NONE, SW_NOCARD, SW_LOW, SW_BAD, SW_FULL, SW_CANCELLED };
+enum {
+    SW_CHECKING,
+    SW_OK,
+    SW_LATEST,
+    SW_NONE,
+    SW_NOCARD,
+    SW_LOW,
+    SW_BAD,
+    SW_FULL,
+    SW_CANCELLED,
+    SW_ASKING /* sw.state: OK taken, Install Update? opened */
+};
 /* stock's answers: check_updatefw_exist's, and checkfw_dialog's dialog_quit codes (fwupdate_tf's
  * own tests) */
 enum { STOCK_FOUND = 1, STOCK_NOCARD = -2, STOCK_NOFILE = -11, STOCK_FULL = -12, STOCK_LOW = -15 };
@@ -260,23 +271,47 @@ static void sw_confirm_open(void) {
 }
 
 /* The check's spinner, and its answer once the thread has one. */
+/* Install Update? once it is on top and settled (it opens from a timer, as usb_ui.c usb_ready's
+ * pages): the wheel's list on it, and the check's page under it closed only then, not while its
+ * slide in runs. Whether it is. */
+static int sw_settle(void) {
+    void *wm = window_manager();
+    if (sw.ready || !sw.confirm) return 1;
+    if (window_manager_get_top_window(wm) != sw.confirm || window_manager_is_animating(wm))
+        return 0;
+    sw.ready = 1;
+    sw_close(&sw.page);
+    ringnav_select(sw.view, widget_get_prop_int(sw.view, "_ringnav_index", 0), 2);
+    widget_invalidate_force(sw.confirm, (void *)0);
+    return 1;
+}
+
+/* The check's spinner, its answer once the thread has one, then Install Update? settling. */
 static int sw_tick(const void *unused) {
+    if (sw.state == SW_ASKING) {
+        if (sw.confirm && !sw_settle()) return 8; /* RET_REPEAT */
+        sw_close(&sw.page); /* Install Update? left before it settled: the check's page too */
+        sw.timer = 0;
+        return 7; /* RET_REMOVE */
+    }
     /* and not while the check's page still slides in: a page opened then is held back by the
      * window manager until that ends, and took no input once it showed */
     if (sw.state == SW_CHECKING || (sw.page && window_manager_is_animating(window_manager()))) {
         sw.frame = (sw.frame + 1) % 12;
         if (sw.page) widget_invalidate_force(sw.page, (void *)0);
-        return 8; /* RET_REPEAT */
+        return 8;
     }
     pthread_join(sw.thread, 0);
-    sw.timer = 0;
     int state = sw.state;
-    if (state == SW_CANCELLED || !sw.page) return 7;
-    if (state == SW_OK)
-        sw_confirm_open(); /* the check's page goes once it is on top: sw_update_paint */
-    else
+    if (state == SW_OK && sw.page) {
+        sw.state = SW_ASKING;
+        sw_confirm_open();
+        if (!sw.confirm) sw_close(&sw.page);
+        if (sw.confirm && !sw_settle()) return 8;
+    } else if (state != SW_CANCELLED && sw.page)
         sw_result(state);
-    return 7; /* RET_REMOVE */
+    sw.timer = 0;
+    return 7;
 }
 
 /* fwupdate_tf: System Update's SD Card Update row, and Network Update's download done. */
@@ -388,15 +423,8 @@ void sw_update_paint(void *w, void *canvas) {
         }
         mode_page_paint(w, canvas, dy, &m);
     } else if (w == sw.confirm && sw.view) {
-        void *wm = window_manager(), *list = P(sw.view, W_PARENT);
-        if (!sw.ready && window_manager_get_top_window(wm) == w &&
-            !window_manager_is_animating(wm)) {
-            /* opened from a timer: the wheel's list once it is on top (usb_ui.c usb_ready), and the
-             * check's page under it closed only then, not while its slide in runs */
-            sw.ready = 1;
-            sw_close(&sw.page);
-            ringnav_select(sw.view, widget_get_prop_int(sw.view, "_ringnav_index", 0), 2);
-        }
+        void *list = P(sw.view, W_PARENT);
+        sw_settle();
         int rows = I(list, W_Y), foot = rows + I(list, W_H) + SW_FOOT_DY;
         sw_update_name(s, sizeof s, sw.tag);
         ar_text(canvas, s, 1, SW_NAME_PX, ink, 1, x, rows - SW_NAME_DY, tw, 2);
