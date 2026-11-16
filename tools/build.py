@@ -1133,6 +1133,29 @@ def english_ui(rel, data):
 FONT = 'release/assets/default/raw/fonts/default.ttf'
 QUOTES = {0x2018: 0x27, 0x2019: 0x27, 0x201c: 0x22, 0x201d: 0x22}
 
+def memo(fn):  # pragma: no mutate block
+    """fn, its results kept on disk in $Q2_BUILD_CACHE, keyed by tools/build.py's text, fontTools' version
+    and the arguments (a path by its file's bytes): a rebuild with the same fonts skips fontTools' 15 s or so.
+    Off unless Q2_BUILD_CACHE names a directory (tools/ci/rebuild.py sets it), so a release's two
+    reproducibility builds still compute everything."""
+    import functools, os, pickle
+    @functools.wraps(fn)
+    def cached(*args, **kwargs):
+        where = os.environ.get('Q2_BUILD_CACHE')
+        if not where: return fn(*args, **kwargs)
+        from fontTools import version as fonttools
+        h = hashlib.sha256(pathlib.Path(__file__).read_bytes() + fn.__name__.encode() + fonttools.encode())
+        for a in [*args, *sorted(kwargs.items())]: h.update(a.read_bytes() if isinstance(a, pathlib.Path) else repr(a).encode())
+        path = pathlib.Path(where)/f'{fn.__name__}-{h.hexdigest()}.pickle'
+        try: return pickle.loads(path.read_bytes())
+        except (OSError, pickle.UnpicklingError, EOFError): pass
+        result = fn(*args, **kwargs)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f'.{os.getpid()}'); tmp.write_bytes(pickle.dumps(result)); tmp.replace(path)
+        return result
+    return cached
+
+@memo
 def font_quotes(data):
     """Only cmap is decompiled; fontTools copies every other table's bytes as they are, and head keeps
     its stock timestamp so the build is reproducible."""
@@ -1177,6 +1200,7 @@ def play_mark(font):
 
 TABULAR = '0123456789:'
 
+@memo
 def subset_font(src, family, ranges_macro, tabular=''):
     """src given a play mark (play_mark), then cut to its Latin, Greek, Cyrillic, punctuation and that
     mark, renamed family (its own name is the font's reserved name under OFL and GUST alike): the font's

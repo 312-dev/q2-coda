@@ -987,9 +987,21 @@ def png_header(data):
 
 
 def imagemagick(*args, data):
-    import shutil, subprocess
-    tool = need(shutil.which('magick') or shutil.which('convert'), 'ImageMagick (magick or convert) is required for the iPod settings icons')
+    import subprocess
+    tool = need(imagemagick_tool(), 'ImageMagick (magick or convert) is required for the iPod settings icons')
     return subprocess.run([tool, *args], input=data, stdout=subprocess.PIPE, check=True).stdout
+
+IMAGEMAGICK_TOOL: dict = {}
+
+def imagemagick_tool():
+    """magick or convert, looked up once per PATH (and per shutil.which, so a test's stand-in looks again): a
+    search that misses magick stats every directory on PATH, under WSL mostly Windows' (/mnt/c, slow); 146
+    searches took 10 s of a 41 s build."""
+    import os, shutil
+    key = (os.environ.get('PATH'), shutil.which)
+    if key not in IMAGEMAGICK_TOOL:
+        IMAGEMAGICK_TOOL[key] = shutil.which('magick') or shutil.which('convert')
+    return IMAGEMAGICK_TOOL[key]
 
 
 # Output PNGs: no metadata, always 8-bit RGBA.
