@@ -95,14 +95,13 @@ def path(d):
     return polys + ([pts] if pts else [])
 
 
-def stroke(polys, width, closed=True):
-    """Polylines' stroke, round joined and capped, as polygons a union fills."""
+def stroke(polys, width):
+    """Open polylines' stroke, round joined and capped, as polygons a union fills."""
     r, out = width / 2, []
     circle = lambda x, y: [(x + r * math.cos(a * math.pi / 8), y + r * math.sin(a * math.pi / 8)) for a in range(16)]
     for poly in polys:
-        if not closed:
-            out.append(circle(*poly[0]))
-        for (x0, y0), (x1, y1) in zip(poly, poly[1:] + (poly[:1] if closed else [])):
+        out.append(circle(*poly[0]))
+        for (x0, y0), (x1, y1) in zip(poly, poly[1:]):
             n = math.hypot(x1 - x0, y1 - y0)
             if n:
                 nx, ny = (y1 - y0) / n * r, (x0 - x1) / n * r
@@ -176,7 +175,7 @@ def spinner(f):
         a = 2 * math.pi * k / SPIN_SPOKES - math.pi / 2
         ends = [(c + r * math.cos(a), c + r * math.sin(a)) for r in SPIN_R]
         alpha = 1 - SPIN_FADE * ((f - k) % SPIN_SPOKES)
-        layers.append((stroke([ends], SPIN_STROKE, closed=False), lambda x, y, alpha=alpha: (0xffffff, alpha)))
+        layers.append((stroke([ends], SPIN_STROKE), lambda x, y, alpha=alpha: (0xffffff, alpha)))
     return png(CARET_PX, CARET_PX, compose((0, 0, CARET_PX, CARET_PX), layers))
 
 
@@ -272,14 +271,10 @@ def laid(w, h, layers):
 
 
 def compose(box, layers):
-    """box's RGBA bytes: layers (polygons, paint(x, y) -> (0xRRGGBB, alpha 0 to 1)[, clip polygons]) source-over,
-    straight alpha."""
+    """box's RGBA bytes: layers (polygons, paint(x, y) -> (0xRRGGBB, alpha 0 to 1)) source-over, straight alpha."""
     x0, y0, w, h = box
-    def layer(polys, paint, *clip):
-        cov = coverage(polys, box)
-        if clip:
-            cov = [a * b for a, b in zip(cov, coverage(clip[0], box))]
-        return cov, lambda x, y: paint(x0 + x, y0 + y)
+    def layer(polys, paint):
+        return coverage(polys, box), lambda x, y: paint(x0 + x, y0 + y)
     return laid(w, h, [layer(*l) for l in layers])
 
 

@@ -1131,28 +1131,18 @@ def play_mark(font):
         for point in points[1:]: pen.lineTo(point)
         pen.closePath()
         return pen
-    if 'CFF ' in font:
-        from fontTools.pens.t2CharStringPen import T2CharStringPen
-        cff = font['CFF '].cff
-        top = cff.topDictIndex[0]
-        pen = drawn(T2CharStringPen(x0 + x1 - top.Private.nominalWidthX, None), points[::-1])
-        top.CharStrings.charStringsIndex.append(pen.getCharString(top.Private, cff.GlobalSubrs))
-        top.CharStrings.charStrings[name] = len(top.CharStrings.charStringsIndex) - 1
-        top.charset.append(name)
-    else:
-        from fontTools.pens.ttGlyphPen import TTGlyphPen
-        font['glyf'][name] = drawn(TTGlyphPen(None), points).glyph()
+    from fontTools.pens.ttGlyphPen import TTGlyphPen  # every face cut is TrueType (glyf)
+    font['glyf'][name] = drawn(TTGlyphPen(None), points).glyph()
     font['hmtx'][name] = (x0 + x1, x0)
     for table in font['cmap'].tables:
         if table.isUnicode(): table.cmap[PLAY_MARK] = name
 
 TABULAR = '0123456789:'
 
-def subset_font(src, family, ranges_macro, notice=None, tabular=''):
+def subset_font(src, family, ranges_macro, tabular=''):
     """src given a play mark (play_mark), then cut to its Latin, Greek, Cyrillic, punctuation and that
     mark, renamed family (its own name is the font's reserved name under OFL and GUST alike): the font's
-    bytes and ranges_macro listing exactly what it keeps. notice, if any, goes in its description (name
-    ID 10). tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
+    bytes and ranges_macro listing exactly what it keeps. tabular, if any, is the suffix of the font's tabular figures' glyph names (Inter's .tf):
     TABULAR's characters map to those glyphs, as font_quotes remaps stock's quotes, so a clock or a
     song's time keeps its width as it counts."""
     from fontTools import subset
@@ -1172,9 +1162,7 @@ def subset_font(src, family, ranges_macro, notice=None, tabular=''):
             if table.isUnicode(): table.cmap.update(figures)
     play_mark(font)
     have.append(PLAY_MARK)
-    options = subset.Options()
-    if notice: options.name_IDs.append(7)  # the trademark notice, as its licence asks
-    sub = subset.Subsetter(options)
+    sub = subset.Subsetter(subset.Options())
     sub.populate(unicodes=have)
     sub.subset(font)
     check(sorted(font.getBestCmap()) == have, f'{label} font subset lost characters')
@@ -1187,15 +1175,6 @@ def subset_font(src, family, ranges_macro, notice=None, tabular=''):
             else:
                 rec.string = str(rec).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', ''))
             check(old.split()[0] not in str(rec), f'{label} font name {rec.nameID} keeps {old.split()[0]}')
-    if notice:
-        font['name'].setName(notice, 10, 3, 1, 0x409)
-    if 'CFF ' in font:  # the outlines' own names (PostScript FontName, FullName, FamilyName)
-        cff = font['CFF '].cff
-        top = cff.topDictIndex[0]
-        cff.fontNames = [n.replace(old, family).replace(old.replace(' ', ''), family.replace(' ', '')) for n in cff.fontNames]
-        for key in ('FullName', 'FamilyName'):
-            setattr(top, key, getattr(top, key).replace(old, family).replace(old.replace(' ', ''), family.replace(' ', '')))
-        check(old.split()[0] not in ''.join(cff.fontNames + [top.FullName, top.FamilyName]), f'{label} font CFF name keeps {old.split()[0]}')
     out = io.BytesIO()
     font.save(out, reorderTables=False)
     runs = []
@@ -1214,7 +1193,6 @@ class Face:
     source: str = ''  # its original in assets/fonts, cut by subset_font; none: stock's own default.ttf, uncut
     family: str = ''  # the subset's name
     notices: tuple = ()  # assets/fonts' licence files, shipped beside it (FONT_NOTICES)
-    notice: str = ''  # its description (name ID 10), where its licence asks a modified font to say so
     fallback: str = ''  # the face (FACES key) a text takes when this one lacks one of its characters
     # the fallback's px, in % of this face's: the two faces' cap heights' ratio (stb sizes a font by its
     # ascent - descent; stock's default.ttf has a cap height of 183 of 299), so a stand-in's capitals
@@ -1247,7 +1225,7 @@ FONT_NOTICES = tuple(dict.fromkeys(n for f in FACES.values() for n in f.notices)
 
 def face_font(face):
     """The face's file and its ranges macro (subset_font)."""
-    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.notice or None, face.tabular)
+    return subset_font(ROOT/'assets/fonts'/face.source, face.family, face.ranges_macro, face.tabular)
 
 def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
