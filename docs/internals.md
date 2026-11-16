@@ -452,7 +452,6 @@ for one of the preset's tones (`ACCENTS`): the red tone for text colors (a prope
 and gradient stop; alpha is kept, and anything else, greys and other hues included,
 is returned as it was. Anti-aliased edges onto black, white or a transparent background are such
 blends, so they follow. No preset's colors are red blends, so mapping twice changes nothing.
-Crimson returns every color unchanged, so its theme is stock.
 
 - `style_get_color(color_t *ret, style, name, default)` returns its color through the hidden
   first argument. The hook runs stock through a trampoline and maps `*ret`, comparing the
@@ -492,7 +491,7 @@ The settings rows' category icons (`settings_icons` in `patch/ipod.json`, which 
 writes to `SETTINGS_ICON_NAMES` in `stock.h`) are never mapped: several use stock red as their
 category colour (Network, DLNA, Wi-Fi, Backlight), like the purple and orange ones.
 `red_map` is the mapping with an explicit tone;
-`accent_map` is it with the preset's tone, and the identity for Crimson.
+`accent_map` is it with the preset's tone.
 
 Changing the accent saves it, sets the progress fill, calls `image_manager_unload_all(image_manager())`
 (`0x658594`) and `widget_invalidate_force` on the window manager. Widgets ask for their style
