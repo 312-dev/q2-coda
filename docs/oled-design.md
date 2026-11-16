@@ -480,13 +480,14 @@ has no place for keeps a place of its own:
   even. Shuffle and repeat are Text Secondary off; on, Accent Blue with a 4 px Accent Blue dot 2 px
   under the glyph (repeat-once's glyph for One). A tap on shuffle turns it on or off, a tap on
   repeat steps Off, All, One, and each keeps the other as it was. Stock's Shuffle never ends, so
-  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while the
-  playing app plays a radio it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
+  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while a
+  radio plays (the playing app's, or the Q2's own) it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
   "Radio" (Inter Medium 16 px, white): turning on, the pill grows from the glyph's width over
   200 ms (ease out) while the gaps shrink, the word fading in over the last 40 %, and back the same
   way off. While radio is on, shuffle and repeat are `#444446` and ignore taps and the Center
-  cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
-  starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
+  cycle, as the radio picks the order. A tap on the antenna starts a radio of the playing song
+  ([internals: Radio](internals.md#radio)) and "Starting Radio…" while its app is asked; a tap on
+  the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
   the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
