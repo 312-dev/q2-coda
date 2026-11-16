@@ -342,9 +342,12 @@ def dry_run(target, tip, items):
     diff = git('diff', '--name-only', tip, head).stdout.split()
     plan = affected.plan_for({p: set() for p in diff})
     level0 = f'{target.replace("/", "_")}-L0'
-    print(f'\nbatch of {len(merged)} onto {target} {tip[:8]}: {len(diff)} files; one build '
-          f'(~/.cache/q2-builds/{level0}-dev) and one run of: {plan.summary()}'
-          f'\non a failure, bisection: at most {2 * max(1, len(merged) - 1)} runs of the failing suites, '
+    d = plan.as_dict()
+    build = d['patch'] or any(o.startswith('test/') for o in d['other'])  # gate.py's test for one
+    print(f'\nbatch of {len(merged)} onto {target} {tip[:8]}: {len(diff)} files; '
+          + (f'one build (~/.cache/q2-builds/{level0}-dev) and ' if build else 'no build; ')
+          + f'one run of: {plan.summary()}'
+          f'\non a failure, bisection: at most {2 * len(merged) - 1} runs of the failing suites (the tip\'s check included), '
           f'then the remainder once more in full')
     return 0
 
@@ -366,7 +369,9 @@ def main():
     if args.onto and not args.dry_run:
         raise SystemExit('--onto is for --dry-run: a real batch lands on the branch of the worktree it runs in')
     target = args.onto or git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
-    tip = git('rev-parse', f'{args.onto or "HEAD"}^{{commit}}').stdout.strip()
+    tip = git('rev-parse', '-q', '--verify', f'{args.onto or "HEAD"}^{{commit}}', check=False).stdout.strip()
+    if not tip:
+        raise SystemExit(f'{args.onto}: no such branch')
     stamp = time.strftime('%Y%m%d-%H%M%S')
     logs = CACHE/stamp
     queued = read_ready(args.ready) if args.from_ready else []

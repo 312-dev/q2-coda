@@ -342,3 +342,10 @@ def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
             return
         time.sleep(0.02)
     raise AssertionError(f'suite s\'s sleep ({pid}) outlived the gate')
+
+
+def test_bisection_never_takes_more_than_the_dry_run_says():
+    for n in (1, 2, 5, 10):
+        fake = FakeBatch(bad={f'b{i}': {'unit'} for i in range(n)})  # every branch bad: the worst case
+        integrate(fake, n)
+        assert len([run for run in fake.runs if run[2] is not None]) <= 2 * n - 1  # merge_batch.dry_run's bound
