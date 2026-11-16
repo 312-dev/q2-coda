@@ -1,0 +1,1709 @@
+adbd for q2-coda --dev builds (docs/adb.md), applied by tools/thirdparty.py's build_adbd to
+android-tools 4.2.2+git20130218 with Debian's patches (3ubuntu41) applied. Licensed as the code it
+changes, Apache-2.0. It carries Buildroot's fixes for building adbd off Ubuntu (package/android-tools
+0002, 0003, 0004, 0006, 0007, 0014 and 0015 at 8a25ff3f: no glib or D-Bus, adb's own base64, cdefs,
+capset and prctl) and then the Q2's changes:
+
+- adb_auth_client.c: RSA key authentication always on. Authorized keys are /mnt/data/adb_keys and, while
+  the card is mounted, /mnt/mmc/adb_keys, read for every connection. An unknown key goes to the UI over
+  the socket /tmp/q2adb-ui as Android's framework gets it ("PK<key>", answered "OK" or anything else);
+  with no UI connected it is refused. RSA_verify is libmincrypt's (fetched beside the source), not
+  OpenSSL's, whose RSA_verify the Debian build linked by mistake. transport.c tells it when a computer
+  it asked about goes.
+- adb.c: USB FunctionFS only (no smartsocket on 5037, no TCP on 5555, no JDWP socket), no privilege
+  drop (a root shell, behind authorization), umask 022, the keys reloaded at each CNXN.
+- usb_linux_client.c: FunctionFS v2 descriptors with Microsoft OS descriptors (compatible ID WINUSB,
+  DeviceInterfaceGUID adb's), so Windows binds WinUSB itself; ep0 kept open for adbd's lifetime, as
+  closing it makes the kernel unbind the gadget; host control requests answered.
+- services.c, sockets.c: shell:, exec: (no pty, for adb exec-out), sync:, reboot: (busybox's) and
+  the tcp:/local: forwards; Android's framebuffer:, jdwp:, log:, remount:, backup:, restore:,
+  recover:, root:, usb:, tcpip: and dev: services removed.
+- file_sync_service.c: utimes for utime.
+
+diff --git a/core/adbd/adb.c b/core/adbd/adb.c
+index d90e6b8..a7add76 100644
+--- a/core/adbd/adb.c
++++ b/core/adbd/adb.c
+@@ -41,7 +41,8 @@
+ #if !ADB_HOST
+ #include "android_filesystem_config.h"
+ #include <linux/capability.h>
+-#include <linux/prctl.h>
++#include <sys/syscall.h>
++#include <sys/prctl.h>
+ #include <sys/mount.h>
+ #else
+ #include "usb_vendors.h"
+@@ -54,7 +55,7 @@ ADB_MUTEX_DEFINE( D_lock );
+ int HOST = 0;
+ int gListenAll = 0;
+ 
+-static int auth_enabled = 0;
++static int auth_enabled = 1;
+ 
+ #if !ADB_HOST
+ static const char *adb_device_banner = "device";
+@@ -536,6 +537,7 @@ void handle_packet(apacket *p, atransport *t)
+             handle_online(t);
+             if(!HOST) send_connect(t);
+         } else {
++            adb_auth_reload_keys();  /* Q2: the card's file as it is now */
+             send_auth_request(t);
+         }
+         break;
+@@ -1163,49 +1165,12 @@ void build_local_name(char* target_str, size_t target_size, int server_port)
+   snprintf(target_str, target_size, "tcp:%d", server_port);
+ }
+ 
+-#if !ADB_HOST
+-static int should_drop_privileges() {
+-    return 1;
+-#ifndef ALLOW_ADBD_ROOT
+-    return 1;
+-#else /* ALLOW_ADBD_ROOT */
+-    int secure = 0;
+-    char value[PROPERTY_VALUE_MAX];
+-
+-    return 0;
+-   /* run adbd in secure mode if ro.secure is set and
+-    ** we are not in the emulator
+-    */
+-//    property_get("ro.kernel.qemu", value, "");
+-    if (strcmp(value, "1") != 0) {
+-//        property_get("ro.secure", value, "1");
+-        if (strcmp(value, "1") == 0) {
+-            // don't run as root if ro.secure is set...
+-            secure = 1;
+-
+-            // ... except we allow running as root in userdebug builds if the
+-            // service.adb.root property has been set by the "adb root" command
+-//            property_get("ro.debuggable", value, "");
+-            if (strcmp(value, "1") == 0) {
+-//                property_get("service.adb.root", value, "");
+-                if (strcmp(value, "1") == 0) {
+-                    secure = 0;
+-                }
+-            }
+-        }
+-    }
+-    return secure;
+-#endif /* ALLOW_ADBD_ROOT */
+-}
+-#endif /* !ADB_HOST */
+ 
+ int adb_main(int is_daemon, int server_port)
+ {
+ #if !ADB_HOST
+-    int port;
+-    char value[PROPERTY_VALUE_MAX];
+-
+-    umask(000);
++    /* Q2: Android's 000 would leave what the shell and adb push create writable by everyone. */
++    umask(022);
+ #endif
+ 
+     atexit(adb_cleanup);
+@@ -1231,108 +1196,12 @@ int adb_main(int is_daemon, int server_port)
+         exit(1);
+     }
+ #else
+-    //property_get("ro.adb.secure", value, "0");
+-    auth_enabled = 0;//!strcmp(value, "1");
+-    if (auth_enabled)
+-        adb_auth_init();
+-
+-    // Our external storage path may be different than apps, since
+-    // we aren't able to bind mount after dropping root.
+-    const char* adb_external_storage = getenv("ADB_EXTERNAL_STORAGE");
+-    if (NULL != adb_external_storage) {
+-        setenv("EXTERNAL_STORAGE", adb_external_storage, 1);
+-    } else {
+-        D("Warning: ADB_EXTERNAL_STORAGE is not set.  Leaving EXTERNAL_STORAGE"
+-          " unchanged.\n");
+-    }
+-
+-    /* don't listen on a port (default 5037) if running in secure mode */
+-    /* don't run as root if we are running in secure mode */
+-    if (should_drop_privileges()) {
+-        struct __user_cap_header_struct header;
+-        struct __user_cap_data_struct cap[2];
+-        struct passwd *pw = getpwuid(AID_SHELL);
+-        struct spwd *spwd;
+-
+-        if (prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0) {
+-            exit(1);
+-        }
+-
+-        // initialize all default groups for the AID_SHELL user 
+-        initgroups(pw->pw_name, pw->pw_gid);
+-
+-        // get the shadow password
+-        spwd = getspnam(pw->pw_name);
+-
+-        // check for locked password
+-        if (spwd->sp_pwdp[0] == '!') {
+-            fprintf(stderr, "user: %s, password locked, please unlock account first\n", pw->pw_name);
+-            fprintf(stderr, "adbd: exit\n");
+-            exit(127);
+-        }
+-
+-        // check if the password is non-empty
+-        if (spwd->sp_pwdp[0] == '\0') {
+-            fprintf(stderr, "user has no password set, can not start adbd\n");
+-            fprintf(stderr, "adbd: exit\n");
+-            exit(127);
+-        }
+-
+-        /* then switch user and group to "shell" */
+-        if (setgid(AID_SHELL) != 0) {
+-            exit(1);
+-        }
+-        if (setuid(AID_SHELL) != 0) {
+-            exit(1);
+-        }
+-
+-        memset(&header, 0, sizeof(header));
+-        memset(cap, 0, sizeof(cap));
+-
+-        /* set CAP_SYS_BOOT capability, so "adb reboot" will succeed */
+-        header.version = _LINUX_CAPABILITY_VERSION_3;
+-        header.pid = 0;
+-        cap[CAP_TO_INDEX(CAP_SYS_BOOT)].effective |= CAP_TO_MASK(CAP_SYS_BOOT);
+-        cap[CAP_TO_INDEX(CAP_SYS_BOOT)].permitted |= CAP_TO_MASK(CAP_SYS_BOOT);
+-        capset(&header, cap);
+-
+-        D("Local port disabled\n");
+-    } else {
+-        char local_name[30];
+-        build_local_name(local_name, sizeof(local_name), server_port);
+-        if(install_listener(local_name, "*smartsocket*", NULL, 0)) {
+-            exit(1);
+-        }
+-    }
+-
+-    int usb = 0;
+-    if (access(USB_ADB_PATH, F_OK) == 0 || access(USB_FFS_ADB_EP0, F_OK) == 0) {
+-        // listen on USB
+-        usb_init();
+-        usb = 1;
+-    }
+-
+-    // If one of these properties is set, also listen on that port
+-    // If one of the properties isn't set and we couldn't listen on usb,
+-    // listen on the default port.
+-    //property_get("service.adb.tcp.port", value, "");
+-    //if (!value[0]) {
+-        //property_get("persist.adb.tcp.port", value, "");
+-    //}
+-    //if (sscanf(value, "%d", &port) == 1 && port > 0) {
+-    //    printf("using port=%d\n", port);
+-        // listen on TCP port specified by service.adb.tcp.port property
+-    //    local_init(port);
+-    //} else 
+-    if (!usb) {
+-        printf("Using USB\n");
+-        // listen on default port
+-        local_init(DEFAULT_ADB_LOCAL_TRANSPORT_PORT);
+-    }
+-
+-    D("adb_main(): pre init_jdwp()\n");
+-    init_jdwp();
+-    D("adb_main(): post init_jdwp()\n");
++    /* Q2: RSA key authentication is always on (adb_auth_client.c reads the authorized keys), and adbd
++     * listens on USB FunctionFS only: no local smartsocket on 5037, no TCP transport on 5555 and no
++     * JDWP control socket, so nothing on the Q2 or its network reaches it. */
++    auth_enabled = 1;
++    adb_auth_init();
++    usb_init();
+ #endif
+ 
+     if (is_daemon)
+diff --git a/core/adbd/adb.h b/core/adbd/adb.h
+index 9da8af8..2142bd0 100644
+--- a/core/adbd/adb.h
++++ b/core/adbd/adb.h
+@@ -477,7 +477,9 @@ extern int SHELL_EXIT_NOTIFY_FD;
+ #if !ADB_HOST
+ #define USB_ADB_PATH     "/dev/android_adb"
+ 
++#ifndef USB_FFS_ADB_PATH /* Q2: a test points it elsewhere */
+ #define USB_FFS_ADB_PATH  "/dev/usb-ffs/adb/"
++#endif
+ #define USB_FFS_ADB_EP(x) USB_FFS_ADB_PATH#x
+ 
+ #define USB_FFS_ADB_EP0   USB_FFS_ADB_EP(ep0)
+diff --git a/core/adbd/adb_auth.h b/core/adbd/adb_auth.h
+index 1fffa49..6faeb90 100644
+--- a/core/adbd/adb_auth.h
++++ b/core/adbd/adb_auth.h
+@@ -48,6 +48,7 @@ int adb_auth_generate_token(void *token, size_t token_size);
+ int adb_auth_verify(void *token, void *sig, int siglen);
+ void adb_auth_confirm_key(unsigned char *data, size_t len, atransport *t);
+ void adb_auth_reload_keys(void);
++void adb_auth_transport_gone(atransport *t);
+ 
+ #endif // ADB_HOST
+ 
+diff --git a/core/adbd/adb_auth_client.c b/core/adbd/adb_auth_client.c
+index 0b4913e..6d59d9c 100644
+--- a/core/adbd/adb_auth_client.c
++++ b/core/adbd/adb_auth_client.c
+@@ -19,6 +19,7 @@
+ #include <resolv.h>
+ #include <cutils/list.h>
+ #include <cutils/sockets.h>
++#include <sys/stat.h>
+ 
+ #include "sysdeps.h"
+ #include "adb.h"
+@@ -28,6 +29,22 @@
+ 
+ #define TRACE_TAG TRACE_AUTH
+ 
++/* Q2 (q2-coda), docs/adb.md#authorization: a computer is let in when its key is in an authorized keys
++ * file, read again for every connection, or when the Q2's user allows it. As on Android, an unknown key
++ * goes to the UI over a socket (ADB_UI_SOCKET, root's alone) as "PK<adbkey.pub line>"; the UI answers
++ * "OK" to let that computer in this once, after adding the key to ADB_KEYS itself for "Always Allow",
++ * or "NO". With no UI connected, or no answer, the computer stays unauthorized. ADB_KEYS_CARD, a file a
++ * developer puts on the card, is read beside ADB_KEYS while the card is mounted. */
++#ifndef ADB_KEYS
++#define ADB_KEYS "/mnt/data/adb_keys"
++#endif
++#ifndef ADB_KEYS_CARD
++#define ADB_KEYS_CARD "/mnt/mmc/adb_keys"
++#endif
++#ifndef ADB_UI_SOCKET
++#define ADB_UI_SOCKET "/tmp/q2adb-ui"
++#endif
++#define KEYS_MAX 65536 /* a 2048-bit adbkey.pub line is about 720 bytes */
+ 
+ struct adb_public_key {
+     struct listnode node;
+@@ -35,32 +52,27 @@ struct adb_public_key {
+ };
+ 
+ static struct listnode key_list;
++static adb_mutex_t keys_lock = ADB_MUTEX_INITIALIZER;
+ 
+-static char *key_paths[] = {
+-    "/adb_keys",
+-    "/data/misc/adb/adb_keys",
+-    NULL
+-};
+-
+-static fdevent listener_fde;
+-static int framework_fd = -1;
+-
++extern int adb_b64_pton(char const *src, u_char *target, size_t targsize);
+ 
+-static void read_keys(const char *file, struct listnode *list)
++static void parse_keys(char *buf, struct listnode *list)
+ {
+     struct adb_public_key *key;
+-    FILE *f;
+-    char buf[MAX_PAYLOAD];
+-    char *sep;
++    char *line, *next, *sep;
+     int ret;
+ 
+-    f = fopen(file, "r");
+-    if (!f) {
+-        D("Can't open '%s'\n", file);
+-        return;
+-    }
++    for (line = buf; line && *line; line = next) {
++        next = strchr(line, '\n');
++        if (next)
++            *next++ = '\0';
++
++        sep = strpbrk(line, " \t\r");
++        if (sep)
++            *sep = '\0';
++        if (!*line)
++            continue;
+ 
+-    while (fgets(buf, sizeof(buf), f)) {
+         /* Allocate 4 extra bytes to decode the base64 data in-place */
+         key = calloc(1, sizeof(*key) + 4);
+         if (!key) {
+@@ -68,27 +80,21 @@ static void read_keys(const char *file, struct listnode *list)
+             break;
+         }
+ 
+-        sep = strpbrk(buf, " \t");
+-        if (sep)
+-            *sep = '\0';
+-
+-        ret = __b64_pton(buf, (u_char *)&key->key, sizeof(key->key) + 4);
++        ret = adb_b64_pton(line, (u_char *)&key->key, sizeof(key->key) + 4);
+         if (ret != sizeof(key->key)) {
+-            D("%s: Invalid base64 data ret=%d\n", file, ret);
++            D("Invalid base64 data ret=%d\n", ret);
+             free(key);
+             continue;
+         }
+ 
+         if (key->key.len != RSANUMWORDS) {
+-            D("%s: Invalid key len %d\n", file, key->key.len);
++            D("Invalid key len %d\n", key->key.len);
+             free(key);
+             continue;
+         }
+ 
+         list_add_tail(list, &key->node);
+     }
+-
+-    fclose(f);
+ }
+ 
+ static void free_keys(struct listnode *list)
+@@ -102,20 +108,35 @@ static void free_keys(struct listnode *list)
+     }
+ }
+ 
++/* The whole of path, NUL-terminated, in buf (KEYS_MAX + 1 bytes); its length, or -1 when it is
++ * missing, unreadable or larger than KEYS_MAX. */
++static int load(const char *path, char *buf)
++{
++    int fd = adb_open(path, O_RDONLY), n = 0, r = 0;
++
++    if (fd < 0)
++        return -1;
++    while (n <= KEYS_MAX && (r = adb_read(fd, buf + n, KEYS_MAX + 1 - n)) > 0)
++        n += r;
++    adb_close(fd);
++    if (r < 0 || n > KEYS_MAX)
++        return -1;
++    buf[n] = '\0';
++    return n;
++}
++
+ void adb_auth_reload_keys(void)
+ {
+-    char *path;
+-    char **paths = key_paths;
+-    struct stat buf;
++    static char buf[KEYS_MAX + 1];
++    static const char *paths[] = { ADB_KEYS, ADB_KEYS_CARD };
++    unsigned i;
+ 
++    adb_mutex_lock(&keys_lock);
+     free_keys(&key_list);
+-
+-    while ((path = *paths++)) {
+-        if (!stat(path, &buf)) {
+-            D("Loading keys from '%s'\n", path);
+-            read_keys(path, &key_list);
+-        }
+-    }
++    for (i = 0; i < sizeof(paths) / sizeof(*paths); i++)
++        if (load(paths[i], buf) > 0)
++            parse_keys(buf, &key_list);
++    adb_mutex_unlock(&keys_lock);
+ }
+ 
+ int adb_auth_generate_token(void *token, size_t token_size)
+@@ -137,109 +158,132 @@ int adb_auth_verify(void *token, void *sig, int siglen)
+ {
+     struct listnode *item;
+     struct adb_public_key *key;
+-    int ret;
++    int ret = 0;
+ 
+     if (siglen != RSANUMBYTES)
+         return 0;
+ 
++    adb_mutex_lock(&keys_lock);
+     list_for_each(item, &key_list) {
+         key = node_to_item(item, struct adb_public_key, node);
+-        ret = RSA_verify(&key->key, sig, siglen, token);
+-        if (ret)
+-            return 1;
++        if (RSA_verify(&key->key, sig, siglen, token)) {
++            ret = 1;
++            break;
++        }
+     }
++    adb_mutex_unlock(&keys_lock);
++
++    return ret;
++}
++
++static fdevent listener_fde;
++static fdevent ui_fde;
++static int framework_fd = -1;
++static atransport *asking; /* the computer the UI was last asked about, until it answers or goes */
++
++void adb_auth_transport_gone(atransport *t)
++{
++    if (asking == t)
++        asking = NULL;
++}
+ 
+-    return 0;
++static void ui_close(void)
++{
++    if (framework_fd >= 0) {
++        fdevent_remove(&ui_fde);
++        adb_close(framework_fd);
++        framework_fd = -1;
++    }
++    asking = NULL;
+ }
+ 
++/* The UI's answer: "OK" lets the computer asked about in, anything else leaves it out. */
+ static void adb_auth_event(int fd, unsigned events, void *data)
+ {
+-    atransport *t = data;
+     char response[2];
+     int ret;
+ 
+     if (events & FDE_READ) {
+         ret = unix_read(fd, response, sizeof(response));
+-        if (ret < 0) {
+-            D("Disconnect");
+-            fdevent_remove(&t->auth_fde);
+-            framework_fd = -1;
++        if (ret <= 0) {
++            D("UI disconnected\n");
++            ui_close();
++            return;
+         }
+-        else if (ret == 2 && response[0] == 'O' && response[1] == 'K') {
++        if (ret == 2 && response[0] == 'O' && response[1] == 'K' && asking) {
+             adb_auth_reload_keys();
+-            adb_auth_verified(t);
++            adb_auth_verified(asking);
+         }
++        asking = NULL;
+     }
+ }
+ 
++/* The host's public key, once every key it signed with has failed: ask the UI. */
+ void adb_auth_confirm_key(unsigned char *key, size_t len, atransport *t)
+ {
+     char msg[MAX_PAYLOAD];
+     int ret;
+ 
+     if (framework_fd < 0) {
+-        D("Client not connected\n");
++        D("No UI to ask: the key is refused\n");
+         return;
+     }
+-
+-    if (key[len - 1] != '\0') {
++    if (len == 0 || key[len - 1] != '\0') {
+         D("Key must be a null-terminated string\n");
+         return;
+     }
+-
++    /* adb sends its adbkey.pub's line; older adb kept the file's line end */
++    for (len = strlen((char *)key); len && (key[len - 1] == '\n' || key[len - 1] == '\r'); len--)
++        key[len - 1] = '\0';
++    if (!len || strpbrk((char *)key, "\r\n")) {
++        D("Key must be one line\n");
++        return;
++    }
+     ret = snprintf(msg, sizeof(msg), "PK%s", key);
+     if (ret >= (signed)sizeof(msg)) {
+         D("Key too long. ret=%d", ret);
+         return;
+     }
+     D("Sending '%s'\n", msg);
+-
+-    ret = unix_write(framework_fd, msg, ret);
+-    if (ret < 0) {
++    if (unix_write(framework_fd, msg, ret) != ret) {
+         D("Failed to write PK, errno=%d\n", errno);
++        ui_close();
+         return;
+     }
+-
+-    fdevent_install(&t->auth_fde, framework_fd, adb_auth_event, t);
+-    fdevent_add(&t->auth_fde, FDE_READ);
++    asking = t;
+ }
+ 
++/* One UI at a time: a new connection replaces the last. */
+ static void adb_auth_listener(int fd, unsigned events, void *data)
+ {
+-    struct sockaddr addr;
+-    socklen_t alen;
+-    int s;
++    int s = adb_socket_accept(fd, NULL, NULL);
+ 
+-    alen = sizeof(addr);
+-
+-    s = adb_socket_accept(fd, &addr, &alen);
+     if (s < 0) {
+         D("Failed to accept: errno=%d\n", errno);
+         return;
+     }
+-
++    ui_close();
++    close_on_exec(s);
+     framework_fd = s;
++    fdevent_install(&ui_fde, s, adb_auth_event, NULL);
++    fdevent_add(&ui_fde, FDE_READ);
+ }
+ 
+ void adb_auth_init(void)
+ {
+-    int fd, ret;
++    int fd;
+ 
+     list_init(&key_list);
+     adb_auth_reload_keys();
+ 
+-    fd = android_get_control_socket("adbd");
+-    if (fd < 0) {
+-        D("Failed to get adbd socket\n");
+-        return;
+-    }
+-
+-    ret = listen(fd, 4);
+-    if (ret < 0) {
+-        D("Failed to listen on '%d'\n", fd);
++    fd = socket_local_server(ADB_UI_SOCKET, ANDROID_SOCKET_NAMESPACE_FILESYSTEM, SOCK_STREAM);
++    if (fd < 0 || chmod(ADB_UI_SOCKET, 0600)) {
++        D("Failed to listen on '%s'\n", ADB_UI_SOCKET);
++        if (fd >= 0)
++            adb_close(fd);
+         return;
+     }
+-
++    close_on_exec(fd);
+     fdevent_install(&listener_fde, fd, adb_auth_listener, NULL);
+     fdevent_add(&listener_fde, FDE_READ);
+ }
+diff --git a/core/adbd/arpa_nameser.h b/core/adbd/arpa_nameser.h
+index 438dc04..f3d2fee 100644
+--- a/core/adbd/arpa_nameser.h
++++ b/core/adbd/arpa_nameser.h
+@@ -52,6 +52,8 @@
+ 
+ #ifndef _ARPA_NAMESER_H_
+ #define _ARPA_NAMESER_H_
++#ifndef _ARPA_NAMESER_H
++#define _ARPA_NAMESER_H
+ 
+ #define BIND_4_COMPAT
+ 
+@@ -574,4 +576,5 @@ __END_DECLS
+ #define  XLOG(...)   do {} while (0)
+ #endif
+ 
++#endif /* !_ARPA_NAMESER_H */
+ #endif /* !_ARPA_NAMESER_H_ */
+diff --git a/core/adbd/base64.c b/core/adbd/base64.c
+index 7270703..91fc1b2 100644
+--- a/core/adbd/base64.c
++++ b/core/adbd/base64.c
+@@ -134,7 +134,7 @@ static const char Pad64 = '=';
+    */
+ 
+ int
+-b64_ntop(src, srclength, target, targsize)
++adb_b64_ntop(src, srclength, target, targsize)
+ 	u_char const *src;
+ 	size_t srclength;
+ 	char *target;
+@@ -212,7 +212,7 @@ b64_ntop(src, srclength, target, targsize)
+  */
+ 
+ int
+-b64_pton(src, target, targsize)
++adb_b64_pton(src, target, targsize)
+ 	char const *src;
+ 	u_char *target;
+ 	size_t targsize;
+diff --git a/core/adbd/file_sync_service.c b/core/adbd/file_sync_service.c
+index d3e841b..2c49024 100644
+--- a/core/adbd/file_sync_service.c
++++ b/core/adbd/file_sync_service.c
+@@ -21,7 +21,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <dirent.h>
+-#include <utime.h>
++#include <sys/time.h> /* Q2: utimes, which uClibc has in place of utime */
+ 
+ #include <errno.h>
+ 
+@@ -203,11 +203,9 @@ static int handle_send_file(int s, char *path, mode_t mode, char *buffer)
+     }
+ 
+     if(fd >= 0) {
+-        struct utimbuf u;
++        struct timeval tv[2] = { { timestamp, 0 }, { timestamp, 0 } };
+         adb_close(fd);
+-        u.actime = timestamp;
+-        u.modtime = timestamp;
+-        utime(path, &u);
++        utimes(path, tv);
+ 
+         msg.status.id = ID_OKAY;
+         msg.status.msglen = 0;
+diff --git a/core/adbd/services.c b/core/adbd/services.c
+index 05bd0d0..d3cacce 100644
+--- a/core/adbd/services.c
++++ b/core/adbd/services.c
+@@ -20,15 +20,7 @@
+ #include <string.h>
+ #include <errno.h>
+ #include <pwd.h>
+-#include <glib.h>
+-#include <gio/gio.h>
+-
+-#define UNITY_SERVICE "com.canonical.UnityGreeter"
+-#define GREETER_OBJ "/"
+-#define GREETER_INTERFACE "com.canonical.UnityGreeter"
+-#define PROPERTIES_INTERFACE "org.freedesktop.DBus.Properties"
+-#define ACTIVE_PROPERTY "IsActive"
+-#define UNLOCK_PATH "/userdata/.adb_onlock"
++#include <sys/cdefs.h>
+ 
+ #include "sysdeps.h"
+ 
+@@ -43,8 +35,8 @@
+ #    include <sys/ioctl.h>
+ #  endif
+ #else
+-#  include "android_filesystem_config.h"
+-#  include <cutils/android_reboot.h>
++#  include <sys/socket.h>
++#  include <sys/wait.h>
+ #endif
+ 
+ typedef struct stinfo stinfo;
+@@ -85,123 +77,28 @@ static void dns_service(int fd, void *cookie)
+     adb_close(fd);
+ }
+ #else
+-extern int recovery_mode;
+-
+-static void recover_service(int s, void *cookie)
+-{
+-    unsigned char buf[4096];
+-    unsigned count = (unsigned) cookie;
+-    int fd;
+-
+-    fd = adb_creat("/tmp/update", 0644);
+-    if(fd < 0) {
+-        adb_close(s);
+-        return;
+-    }
+-
+-    while(count > 0) {
+-        unsigned xfer = (count > 4096) ? 4096 : count;
+-        if(readx(s, buf, xfer)) break;
+-        if(writex(fd, buf, xfer)) break;
+-        count -= xfer;
+-    }
+-
+-    if(count == 0) {
+-        writex(s, "OKAY", 4);
+-    } else {
+-        writex(s, "FAIL", 4);
+-    }
+-    adb_close(fd);
+-    adb_close(s);
+-
+-    fd = adb_creat("/tmp/update.begin", 0644);
+-    adb_close(fd);
+-}
+-
+-void restart_root_service(int fd, void *cookie)
+-{
+-    char buf[100];
+-    char value[PROPERTY_VALUE_MAX];
+-
+-    if (getuid() == 0) {
+-        snprintf(buf, sizeof(buf), "adbd is already running as root\n");
+-        writex(fd, buf, strlen(buf));
+-        adb_close(fd);
+-    } else {
+-        //property_get("ro.debuggable", value, "");
+-        if (strcmp(value, "1") != 0) {
+-            snprintf(buf, sizeof(buf), "adbd cannot run as root in production builds\n");
+-            writex(fd, buf, strlen(buf));
+-            adb_close(fd);
+-            return;
+-        }
+-
+-        //property_set("service.adb.root", "1");
+-        snprintf(buf, sizeof(buf), "restarting adbd as root\n");
+-        writex(fd, buf, strlen(buf));
+-        adb_close(fd);
+-    }
+-}
+-
+-void restart_tcp_service(int fd, void *cookie)
+-{
+-    char buf[100];
+-    char value[PROPERTY_VALUE_MAX];
+-    int port = (int)cookie;
+-
+-    if (port <= 0) {
+-        snprintf(buf, sizeof(buf), "invalid port\n");
+-        writex(fd, buf, strlen(buf));
+-        adb_close(fd);
+-        return;
+-    }
+-
+-    snprintf(value, sizeof(value), "%d", port);
+-    //property_set("service.adb.tcp.port", value);
+-    snprintf(buf, sizeof(buf), "restarting in TCP mode port: %d\n", port);
+-    writex(fd, buf, strlen(buf));
+-    adb_close(fd);
+-}
+-
+-void restart_usb_service(int fd, void *cookie)
+-{
+-    char buf[100];
+-
+-    //property_set("service.adb.tcp.port", "0");
+-    snprintf(buf, sizeof(buf), "restarting in USB mode\n");
+-    writex(fd, buf, strlen(buf));
+-    adb_close(fd);
+-}
+-
++/* Q2: busybox's reboot, which has init run the shutdown scripts; the argument (bootloader,
++ * recovery) is ignored, as the Q2 has neither. */
+ void reboot_service(int fd, void *arg)
+ {
+     char buf[100];
+-    int pid, ret;
+ 
+-    sync();
++    pid_t pid;
++    int status = -1;
+ 
+-    /* Attempt to unmount the SD card first.
+-     * No need to bother checking for errors.
+-     */
++    sync();
+     pid = fork();
+     if (pid == 0) {
+-        /* ask vdc to unmount it */
+-        execl("/system/bin/vdc", "/system/bin/vdc", "volume", "unmount",
+-                getenv("EXTERNAL_STORAGE"), "force", NULL);
+-    } else if (pid > 0) {
+-        /* wait until vdc succeeds or fails */
+-        waitpid(pid, &ret, 0);
++        execl("/sbin/reboot", "reboot", (char *)NULL);
++        _exit(127);
+     }
+-
+-    ret = android_reboot(ANDROID_RB_RESTART2, 0, (char *) arg);
+-    if (ret < 0) {
+-        snprintf(buf, sizeof(buf), "reboot failed: %s\n", strerror(errno));
++    if (pid < 0 || waitpid(pid, &status, 0) != pid || status) {
++        snprintf(buf, sizeof(buf), "reboot failed\n");
+         writex(fd, buf, strlen(buf));
+     }
+     free(arg);
+     adb_close(fd);
+ }
+-
+ #endif
+ 
+ #if 0
+@@ -268,16 +165,46 @@ static int create_service_thread(void (*func)(int, void *), void *cookie)
+ }
+ 
+ #if !ADB_HOST
+-static int create_subprocess(const char *cmd, const char *arg0, const char *arg1, const char *arg2, const char *arg3,  const char *arg4, pid_t *pid)
++static int create_subprocess(const char *cmd, const char *arg0, const char *arg1, pid_t *pid, int pty)
+ {
+ #ifdef HAVE_WIN32_PROC
+-    D("create_subprocess(cmd=%s, arg0=%s, arg1=%s, arg2=%s, arg3=%, arg4=%ss)\n", cmd, arg0, arg1, arg2, arg3, arg4);
+-    fprintf(stderr, "error: create_subprocess not implemented on Win32 (%s %s %s %s %s %s)\n", cmd, arg0, arg1, arg2, arg3, arg4);
++    D("create_subprocess(cmd=%s, arg0=%s, arg1=%s)\n", cmd, arg0, arg1);
++    fprintf(stderr, "error: create_subprocess not implemented on Win32 (%s %s %s)\n", cmd, arg0, arg1);
+     return -1;
+ #else /* !HAVE_WIN32_PROC */
+     char *devname;
+     int ptm;
+ 
++    if (!pty) {
++        /* Q2: exec: (adb exec-out), as Android 5 and later: no terminal, so the command's output
++         * reaches the computer byte for byte; stderr goes with it, as Android's does. */
++        int sv[2];
++        if (adb_socketpair(sv)) {
++            printf("[ cannot create socket pair - %s ]\n", strerror(errno));
++            return -1;
++        }
++        *pid = fork();
++        if (*pid < 0) {
++            adb_close(sv[0]);
++            adb_close(sv[1]);
++            return -1;
++        }
++        if (*pid == 0) {
++            setsid();
++            adb_close(sv[0]);
++            dup2(sv[1], 0);
++            dup2(sv[1], 1);
++            dup2(sv[1], 2);
++            if (sv[1] > 2)
++                adb_close(sv[1]);
++            execl(cmd, cmd, arg0, arg1, NULL);
++            _exit(127);
++        }
++        adb_close(sv[1]);
++        fcntl(sv[0], F_SETFD, FD_CLOEXEC);
++        return sv[0];
++    }
++
+     ptm = unix_open("/dev/ptmx", O_RDWR); // | O_NOCTTY);
+     if(ptm < 0){
+         printf("[ cannot open /dev/ptmx - %s ]\n",strerror(errno));
+@@ -327,7 +254,7 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
+         } else {
+            D("adb: unable to open %s\n", text);
+         }
+-	execl(cmd, cmd, arg0, arg1, arg2, arg3, arg4, NULL);
++        execl(cmd, cmd, arg0, arg1, NULL);
+         fprintf(stderr, "- exec '%s' failed: %s (%d) -\n",
+                 cmd, strerror(errno), errno);
+         exit(-1);
+@@ -342,7 +269,7 @@ static int create_subprocess(const char *cmd, const char *arg0, const char *arg1
+ }
+ #endif  /* !ABD_HOST */
+ 
+-#if ADB_HOST
++#if ADB_HOST || ADBD_NON_ANDROID
+ #define SHELL_COMMAND "/bin/sh"
+ #else
+ #define SHELL_COMMAND "/system/bin/sh"
+@@ -380,141 +307,20 @@ static void subproc_waiter_service(int fd, void *cookie)
+     }
+ }
+ 
+-int is_phone_locked() {
+-    GError *error = NULL;
+-    GVariant *variant = NULL;
+-    GDBusConnection *connection = NULL;
+-
+-    if (g_file_test(UNLOCK_PATH, G_FILE_TEST_EXISTS)) {
+-        D("unlock path present.");
+-        return 0;
+-    }
+-
+-    // check if the environment variable is present, if not we grab it from
+-    // the phablet user
+-    if (g_getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) {
+-        D("DBUS_SESSION_BUS_ADDRESS missing.\n");
+-        struct passwd *pw = getpwuid(AID_SHELL);
+-        char user_id[15];
+-        gchar *path = NULL;
+-        gchar *contents = NULL;
+-        gchar *session_path = NULL;
+-
+-        snprintf(user_id, sizeof user_id, "%d", pw->pw_uid);
+-
+-        path = g_build_filename("/run", "user", user_id, "dbus-session", NULL);
+-
+-        g_file_get_contents(path, &contents, NULL, &error);
+-        session_path = g_strstrip(g_strsplit(contents, "DBUS_SESSION_BUS_ADDRESS=", -1)[1]);
+-        D("Session bus is %s\n", session_path);
+-
+-        // path is not longer used
+-        g_free(path);
+-
+-        if (error != NULL) {
+-            g_clear_error(&error);
+-            D("Couldn't set session bus\n");
+-            return 1;
+-        }
+-
+-        g_setenv("DBUS_SESSION_BUS_ADDRESS", session_path, TRUE);
+-        g_free(contents);
+-    }
+-
+-    // set the uid to be able to connect to the phablet user session bus
+-    setuid(AID_SHELL);
+-    connection =  g_dbus_connection_new_for_address_sync(g_getenv("DBUS_SESSION_BUS_ADDRESS"),
+-                                                         G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+-                                                         NULL,
+-                                                         NULL,
+-                                                         &error);
+-    if (connection == NULL) {
+-        D("session bus not available: %s", error->message);
+-        g_error_free (error);
+-        return 1;
+-    }
+-
+-    variant = g_dbus_connection_call_sync(connection,
+-                                          UNITY_SERVICE,
+-                                          GREETER_OBJ,
+-                                          PROPERTIES_INTERFACE,
+-                                          "Get",
+-                                          g_variant_new("(ss)", GREETER_INTERFACE, ACTIVE_PROPERTY),
+-                                          g_variant_type_new("(v)"),
+-                                          G_DBUS_CALL_FLAGS_NONE,
+-                                          -1,
+-                                          NULL,
+-                                          &error);
+-
+-    if (error != NULL) {
+-        D("Could not get property: %s", error->message);
+-        g_object_unref(connection);
+-        g_error_free(error);
+-        return 1;
+-    }
+-
+-    if (variant == NULL) {
+-        D("Failed to get property '%s': %s", "IsActive", error->message);
+-        g_object_unref(connection);
+-        g_error_free(error);
+-        return 1;
+-    }
+-
+-    variant = g_variant_get_variant(g_variant_get_child_value(variant, 0));
+-
+-    int active = 1;
+-    if (!g_variant_get_boolean(variant)) {
+-        active = 0;
+-    }
+-
+-    // get back to be root and return the value
+-    g_object_unref(connection);
+-    g_variant_unref(variant);
+-    setuid(0);
+-    return active;
+-}
+-
+-static int create_subproc_thread(const char *name)
++static int create_subproc_thread(const char *name, int pty)
+ {
+-    if (is_phone_locked() ) {
+-        fprintf(stderr, "device is locked\n");
+-        return -1;
+-    }
+-
+     stinfo *sti;
+     adb_thread_t t;
+     int ret_fd;
+     pid_t pid;
+-
+-    struct passwd *user = getpwuid(getuid());
+-    char *shell;
+-    char *shellopts = "-c";
+-    char *home;
+-    char *sudo = "/usr/bin/sudo";
+-    char useropt[256] = "-u";
+-
+-    if (user->pw_name)
+-        strcat(useropt, user->pw_name);
+-
+-    if (user && user->pw_shell) {
+-        shell = user->pw_shell;
+-        shellopts = "-cl";
+-    } else {
+-        shell = SHELL_COMMAND;
+-    }
+-
+-    if (user->pw_dir)
+-        home = user->pw_dir;
+-        if(chdir(home) < 0 )
+-            return 1;
+-
+     if(name) {
+-	ret_fd = create_subprocess(sudo, useropt, "-i", shell, shellopts, name, &pid);
++        ret_fd = create_subprocess(SHELL_COMMAND, "-c", name, &pid, pty);
+     } else {
+-	shellopts = "-l";
+-	ret_fd = create_subprocess(sudo, useropt, "-i", shell, shellopts, 0, &pid);
++        ret_fd = create_subprocess(SHELL_COMMAND, "-", 0, &pid, pty);
+     }
+     D("create_subprocess() ret_fd=%d pid=%d\n", ret_fd, pid);
++    if (ret_fd < 0)
++        return -1;
+ 
+     sti = malloc(sizeof(stinfo));
+     if(sti == 0) fatal("cannot allocate stinfo");
+@@ -574,48 +380,18 @@ int service_to_fd(const char *name)
+         if(n == 0) return -1;
+         ret = create_service_thread(dns_service, n);
+ #else /* !ADB_HOST */
+-    } else if(!strncmp("dev:", name, 4)) {
+-        ret = unix_open(name + 4, O_RDWR);
+-    } else if(!strncmp(name, "framebuffer:", 12)) {
+-        ret = create_service_thread(framebuffer_service, 0);
+-    } else if(recovery_mode && !strncmp(name, "recover:", 8)) {
+-        ret = create_service_thread(recover_service, (void*) atoi(name + 8));
+-    } else if (!strncmp(name, "jdwp:", 5)) {
+-        ret = create_jdwp_connection_fd(atoi(name+5));
+-    } else if (!strncmp(name, "log:", 4)) {
+-        ret = create_service_thread(log_service, get_log_file_path(name + 4));
+-    } else if(!HOST && !strncmp(name, "shell:", 6)) {
+-        if (!is_phone_locked() ) {
+-            if(name[6]) {
+-                ret = create_subproc_thread(name + 6);
+-            } else {
+-                ret = create_subproc_thread(0);
+-            }
+-        }
++    /* Q2: the services a development shell needs. Android's framebuffer:, jdwp:, log:, remount:,
++     * backup:, restore:, recover:, root:, usb: and tcpip: have nothing to act on here. */
++    } else if(!strncmp(name, "shell:", 6)) {
++        ret = create_subproc_thread(name[6] ? name + 6 : 0, 1);
++    } else if(!strncmp(name, "exec:", 5)) {
++        ret = create_subproc_thread(name + 5, 0);
+     } else if(!strncmp(name, "sync:", 5)) {
+-        if (!is_phone_locked() ) {
+-            ret = create_service_thread(file_sync_service, NULL);
+-        }
+-    } else if(!strncmp(name, "remount:", 8)) {
+-        ret = create_service_thread(remount_service, NULL);
++        ret = create_service_thread(file_sync_service, NULL);
+     } else if(!strncmp(name, "reboot:", 7)) {
+         void* arg = strdup(name + 7);
+         if(arg == 0) return -1;
+         ret = create_service_thread(reboot_service, arg);
+-    } else if(!strncmp(name, "backup:", 7)) {
+-        char* arg = strdup(name+7);
+-        if (arg == NULL) return -1;
+-        ret = backup_service(BACKUP, arg);
+-    } else if(!strncmp(name, "restore:", 8)) {
+-        ret = backup_service(RESTORE, NULL);
+-    } else if(!strncmp(name, "tcpip:", 6)) {
+-        int port;
+-        if (sscanf(name + 6, "%d", &port) == 0) {
+-            port = 0;
+-        }
+-        ret = create_service_thread(restart_tcp_service, (void *)port);
+-    } else if(!strncmp(name, "usb:", 4)) {
+-        ret = create_service_thread(restart_usb_service, NULL);
+ #endif
+ #if 0
+     } else if(!strncmp(name, "echo:", 5)){
+diff --git a/core/adbd/sockets.c b/core/adbd/sockets.c
+index 305cb44..0a0bbf6 100644
+--- a/core/adbd/sockets.c
++++ b/core/adbd/sockets.c
+@@ -412,29 +412,12 @@ asocket *create_local_service_socket(const char *name)
+     asocket *s;
+     int fd;
+ 
+-#if !ADB_HOST
+-    if (!strcmp(name,"jdwp")) {
+-        return create_jdwp_service_socket();
+-    }
+-    if (!strcmp(name,"track-jdwp")) {
+-        return create_jdwp_tracker_service_socket();
+-    }
+-#endif
+     fd = service_to_fd(name);
+     if(fd < 0) return 0;
+ 
+     s = create_local_socket(fd);
+     D("LS(%d): bound to '%s' via %d\n", s->id, name, fd);
+ 
+-#if !ADB_HOST
+-    if ((!strncmp(name, "root:", 5) && getuid() != 0)
+-        || !strncmp(name, "usb:", 4)
+-        || !strncmp(name, "tcpip:", 6)) {
+-        D("LS(%d): enabling exit_on_close\n", s->id);
+-        s->exit_on_close = 1;
+-    }
+-#endif
+-
+     return s;
+ }
+ 
+diff --git a/core/adbd/transport.c b/core/adbd/transport.c
+index 9fd6cc2..88eda09 100644
+--- a/core/adbd/transport.c
++++ b/core/adbd/transport.c
+@@ -24,6 +24,7 @@
+ 
+ #define   TRACE_TAG  TRACE_TRANSPORT
+ #include "adb.h"
++#include "adb_auth.h"
+ 
+ static void transport_unref(atransport *t);
+ 
+@@ -596,6 +597,9 @@ static void transport_registration_func(int _fd, unsigned ev, void *data)
+         adb_mutex_unlock(&transport_lock);
+ 
+         run_transport_disconnects(t);
++#if !ADB_HOST
++        adb_auth_transport_gone(t);  /* Q2: a question the UI still has open is for nothing now */
++#endif
+ 
+         if (t->product)
+             free(t->product);
+diff --git a/core/adbd/usb_linux_client.c b/core/adbd/usb_linux_client.c
+index 33875a8..f1e1752 100644
+--- a/core/adbd/usb_linux_client.c
++++ b/core/adbd/usb_linux_client.c
+@@ -20,10 +20,9 @@
+ #include <string.h>
+ 
+ #include <linux/usb/ch9.h>
+-#include <functionfs.h>
++#include <linux/usb/functionfs.h>
+ #include <sys/ioctl.h>
+ #include <sys/types.h>
+-#include <dirent.h>
+ #include <errno.h>
+ 
+ #include "sysdeps.h"
+@@ -31,95 +30,131 @@
+ #define   TRACE_TAG  TRACE_USB
+ #include "adb.h"
+ 
++/* Q2 (q2-coda): FunctionFS only; Android's legacy f_adb driver is not in the Q2's kernel. The
++ * gadget around this function, its IDs and the mass storage function beside it are made by
++ * /usr/bin/q2adb-gadget. */
++
+ #define MAX_PACKET_SIZE_FS	64
+ #define MAX_PACKET_SIZE_HS	512
+ 
+-#define cpu_to_le16(x)  htole16(x)
+-#define cpu_to_le32(x)  htole32(x)
++#if __BYTE_ORDER == __LITTLE_ENDIAN
++# define cpu_to_le16(x) (x)
++# define cpu_to_le32(x) (x)
++#else
++# define cpu_to_le16(x) ((((x) >> 8) & 0xffu) | (((x) & 0xffu) << 8))
++# define cpu_to_le32(x) \
++	((((x) & 0xff000000u) >> 24) | (((x) & 0x00ff0000u) >>  8) | \
++	 (((x) & 0x0000ff00u) <<  8) | (((x) & 0x000000ffu) << 24))
++#endif
+ 
+ struct usb_handle
+ {
+     adb_cond_t notify;
+     adb_mutex_t lock;
+ 
+-    int (*write)(usb_handle *h, const void *data, int len);
+-    int (*read)(usb_handle *h, void *data, int len);
+-    void (*kick)(usb_handle *h);
+-
+-    // Legacy f_adb
+-    int fd;
+-
+-    // FunctionFS
+     int control;
+     int bulk_out; /* "out" from the host's perspective => source for adbd */
+     int bulk_in;  /* "in" from the host's perspective => sink for adbd */
+ };
+ 
++struct func_desc {
++    struct usb_interface_descriptor intf;
++    struct usb_endpoint_descriptor_no_audio source;
++    struct usb_endpoint_descriptor_no_audio sink;
++} __attribute__((packed));
++
++#define FUNC_DESC(max) { \
++    .intf = { \
++        .bLength = sizeof(struct usb_interface_descriptor), \
++        .bDescriptorType = USB_DT_INTERFACE, \
++        .bInterfaceNumber = 0, \
++        .bNumEndpoints = 2, \
++        .bInterfaceClass = ADB_CLASS, \
++        .bInterfaceSubClass = ADB_SUBCLASS, \
++        .bInterfaceProtocol = ADB_PROTOCOL, \
++        .iInterface = 1, /* first string from the provided table */ \
++    }, \
++    .source = { \
++        .bLength = sizeof(struct usb_endpoint_descriptor_no_audio), \
++        .bDescriptorType = USB_DT_ENDPOINT, \
++        .bEndpointAddress = 1 | USB_DIR_OUT, \
++        .bmAttributes = USB_ENDPOINT_XFER_BULK, \
++        .wMaxPacketSize = cpu_to_le16(max), \
++    }, \
++    .sink = { \
++        .bLength = sizeof(struct usb_endpoint_descriptor_no_audio), \
++        .bDescriptorType = USB_DT_ENDPOINT, \
++        .bEndpointAddress = 2 | USB_DIR_IN, \
++        .bmAttributes = USB_ENDPOINT_XFER_BULK, \
++        .wMaxPacketSize = cpu_to_le16(max), \
++    }, \
++}
++
++/* Microsoft OS 1.0 descriptors, which the kernel serves once the gadget's os_desc is in use: the
++ * compatible ID WINUSB has Windows bind its own WinUSB driver to this interface without an INF,
++ * and the DeviceInterfaceGUID property registers the interface under the GUID adb.exe's
++ * AdbWinApi enumerates, so `adb devices` lists the Q2 with no driver installed. As AOSP's
++ * adbd (daemon/usb_ffs.cpp) sends them. The kernel turns the property's ASCII into UTF-16. */
++#define GUID_NAME "DeviceInterfaceGUID"
++#define GUID_ADB "{F72FE0D4-CBCB-407D-8814-9ED673D0DD6B}"
++
++struct os_guid_prop {
++    __le32 dwSize;
++    __le32 dwPropertyDataType;
++    __le16 wPropertyNameLength;
++    char bPropertyName[sizeof(GUID_NAME)];
++    __le32 dwPropertyDataLength;
++    char bProperty[sizeof(GUID_ADB)];
++} __attribute__((packed));
++
+ static const struct {
+-    struct usb_functionfs_descs_head header;
+-    struct {
+-        struct usb_interface_descriptor intf;
+-        struct usb_endpoint_descriptor_no_audio source;
+-        struct usb_endpoint_descriptor_no_audio sink;
+-    } __attribute__((packed)) fs_descs, hs_descs;
++    struct usb_functionfs_descs_head_v2 header;
++    __le32 fs_count;
++    __le32 hs_count;
++    __le32 os_count;
++    struct func_desc fs_descs, hs_descs;
++    struct usb_os_desc_header os_compat_header;
++    struct usb_ext_compat_desc os_compat;
++    struct usb_os_desc_header os_prop_header;
++    struct os_guid_prop os_prop;
+ } __attribute__((packed)) descriptors = {
+     .header = {
+-        .magic = cpu_to_le32(FUNCTIONFS_DESCRIPTORS_MAGIC),
++        .magic = cpu_to_le32(FUNCTIONFS_DESCRIPTORS_MAGIC_V2),
+         .length = cpu_to_le32(sizeof(descriptors)),
+-        .fs_count = 3,
+-        .hs_count = 3,
++        .flags = cpu_to_le32(FUNCTIONFS_HAS_FS_DESC | FUNCTIONFS_HAS_HS_DESC | FUNCTIONFS_HAS_MS_OS_DESC),
+     },
+-    .fs_descs = {
+-        .intf = {
+-            .bLength = sizeof(descriptors.fs_descs.intf),
+-            .bDescriptorType = USB_DT_INTERFACE,
+-            .bInterfaceNumber = 0,
+-            .bNumEndpoints = 2,
+-            .bInterfaceClass = ADB_CLASS,
+-            .bInterfaceSubClass = ADB_SUBCLASS,
+-            .bInterfaceProtocol = ADB_PROTOCOL,
+-            .iInterface = 1, /* first string from the provided table */
+-        },
+-        .source = {
+-            .bLength = sizeof(descriptors.fs_descs.source),
+-            .bDescriptorType = USB_DT_ENDPOINT,
+-            .bEndpointAddress = 1 | USB_DIR_OUT,
+-            .bmAttributes = USB_ENDPOINT_XFER_BULK,
+-            .wMaxPacketSize = MAX_PACKET_SIZE_FS,
+-        },
+-        .sink = {
+-            .bLength = sizeof(descriptors.fs_descs.sink),
+-            .bDescriptorType = USB_DT_ENDPOINT,
+-            .bEndpointAddress = 2 | USB_DIR_IN,
+-            .bmAttributes = USB_ENDPOINT_XFER_BULK,
+-            .wMaxPacketSize = MAX_PACKET_SIZE_FS,
+-        },
++    .fs_count = cpu_to_le32(3),
++    .hs_count = cpu_to_le32(3),
++    .os_count = cpu_to_le32(2),
++    .fs_descs = FUNC_DESC(MAX_PACKET_SIZE_FS),
++    .hs_descs = FUNC_DESC(MAX_PACKET_SIZE_HS),
++    .os_compat_header = {
++        .interface = 0,
++        .dwLength = cpu_to_le32(sizeof(struct usb_os_desc_header) + sizeof(struct usb_ext_compat_desc)),
++        .bcdVersion = cpu_to_le16(1),
++        .wIndex = cpu_to_le16(4),
++        .bCount = 1,
++        .Reserved = 0,
+     },
+-    .hs_descs = {
+-        .intf = {
+-            .bLength = sizeof(descriptors.hs_descs.intf),
+-            .bDescriptorType = USB_DT_INTERFACE,
+-            .bInterfaceNumber = 0,
+-            .bNumEndpoints = 2,
+-            .bInterfaceClass = ADB_CLASS,
+-            .bInterfaceSubClass = ADB_SUBCLASS,
+-            .bInterfaceProtocol = ADB_PROTOCOL,
+-            .iInterface = 1, /* first string from the provided table */
+-        },
+-        .source = {
+-            .bLength = sizeof(descriptors.hs_descs.source),
+-            .bDescriptorType = USB_DT_ENDPOINT,
+-            .bEndpointAddress = 1 | USB_DIR_OUT,
+-            .bmAttributes = USB_ENDPOINT_XFER_BULK,
+-            .wMaxPacketSize = MAX_PACKET_SIZE_HS,
+-        },
+-        .sink = {
+-            .bLength = sizeof(descriptors.hs_descs.sink),
+-            .bDescriptorType = USB_DT_ENDPOINT,
+-            .bEndpointAddress = 2 | USB_DIR_IN,
+-            .bmAttributes = USB_ENDPOINT_XFER_BULK,
+-            .wMaxPacketSize = MAX_PACKET_SIZE_HS,
+-        },
++    .os_compat = {
++        .bFirstInterfaceNumber = 0,
++        .Reserved1 = 1,
++        .CompatibleID = { 'W', 'I', 'N', 'U', 'S', 'B', 0, 0 },
++    },
++    .os_prop_header = {
++        .interface = 0,
++        .dwLength = cpu_to_le32(sizeof(struct usb_os_desc_header) + sizeof(struct os_guid_prop)),
++        .bcdVersion = cpu_to_le16(1),
++        .wIndex = cpu_to_le16(5),
++        .wCount = cpu_to_le16(1),
++    },
++    .os_prop = {
++        .dwSize = cpu_to_le32(sizeof(struct os_guid_prop)),
++        .dwPropertyDataType = cpu_to_le32(1), /* REG_SZ */
++        .wPropertyNameLength = cpu_to_le16(sizeof(GUID_NAME)),
++        .bPropertyName = GUID_NAME,
++        .dwPropertyDataLength = cpu_to_le32(sizeof(GUID_ADB)),
++        .bProperty = GUID_ADB,
+     },
+ };
+ 
+@@ -144,173 +179,77 @@ static const struct {
+     },
+ };
+ 
+-
+-
+-static void *usb_adb_open_thread(void *x)
+-{
+-    struct usb_handle *usb = (struct usb_handle *)x;
+-    int fd;
+-
+-    while (1) {
+-        // wait until the USB device needs opening
+-        adb_mutex_lock(&usb->lock);
+-        while (usb->fd != -1)
+-            adb_cond_wait(&usb->notify, &usb->lock);
+-        adb_mutex_unlock(&usb->lock);
+-
+-        D("[ usb_thread - opening device ]\n");
+-        do {
+-            /* XXX use inotify? */
+-            fd = unix_open("/dev/android_adb", O_RDWR);
+-            if (fd < 0) {
+-                // to support older kernels
+-                fd = unix_open("/dev/android", O_RDWR);
+-            }
+-            if (fd < 0) {
+-                adb_sleep_ms(1000);
+-            }
+-        } while (fd < 0);
+-        D("[ opening device succeeded ]\n");
+-
+-        close_on_exec(fd);
+-        usb->fd = fd;
+-
+-        D("[ usb_thread - registering device ]\n");
+-        register_usb_transport(usb, 0, 0, 1);
+-    }
+-
+-    // never gets here
+-    return 0;
+-}
+-
+-static int usb_adb_write(usb_handle *h, const void *data, int len)
+-{
+-    int n;
+-
+-    D("about to write (fd=%d, len=%d)\n", h->fd, len);
+-    n = adb_write(h->fd, data, len);
+-    if(n != len) {
+-        D("ERROR: fd = %d, n = %d, errno = %d (%s)\n",
+-            h->fd, n, errno, strerror(errno));
+-        return -1;
+-    }
+-    D("[ done fd=%d ]\n", h->fd);
+-    return 0;
+-}
+-
+-static int usb_adb_read(usb_handle *h, void *data, int len)
++/* ep0 stays open for adbd's lifetime. Closing it would make the kernel unbind the whole gadget
++ * (f_fs.c ffs_closed), mass storage with it; with it open the function survives every bind,
++ * unbind, cable pull and host reset, and only the bulk endpoints are reopened. This thread
++ * answers the control requests the host sends to the interface, which would otherwise wait out
++ * the host's timeout, as AOSP's adbd does. */
++static void *usb_ffs_control_thread(void *x)
+ {
++    struct usb_handle *h = x;
++    struct usb_functionfs_event ev;
++    char buf[4096];
+     int n;
+ 
+-    D("about to read (fd=%d, len=%d)\n", h->fd, len);
+-    n = adb_read(h->fd, data, len);
+-    if(n != len) {
+-        D("ERROR: fd = %d, n = %d, errno = %d (%s)\n",
+-            h->fd, n, errno, strerror(errno));
+-        return -1;
++    for (;;) {
++        n = adb_read(h->control, &ev, sizeof(ev));
++        if (n < 0 && errno == EINTR)
++            continue;
++        if (n != sizeof(ev)) {
++            D("[ control read failed: %d errno=%d ]\n", n, errno);
++            return 0;
++        }
++        if (ev.type != FUNCTIONFS_SETUP)
++            continue;
++        if (ev.u.setup.bRequestType & USB_DIR_IN)
++            adb_write(h->control, "", 0);
++        else
++            adb_read(h->control, buf, ev.u.setup.wLength < sizeof(buf) ? ev.u.setup.wLength : sizeof(buf));
+     }
+-    D("[ done fd=%d ]\n", h->fd);
+-    return 0;
+-}
+-
+-static void usb_adb_kick(usb_handle *h)
+-{
+-    D("usb_kick\n");
+-    adb_mutex_lock(&h->lock);
+-    adb_close(h->fd);
+-    h->fd = -1;
+-
+-    // notify usb_adb_open_thread that we are disconnected
+-    adb_cond_signal(&h->notify);
+-    adb_mutex_unlock(&h->lock);
+ }
+ 
+-static void usb_adb_init()
++static int init_control(struct usb_handle *h)
+ {
+-    usb_handle *h;
+     adb_thread_t tid;
+     int fd;
+ 
+-    h = calloc(1, sizeof(usb_handle));
+-
+-    h->write = usb_adb_write;
+-    h->read = usb_adb_read;
+-    h->kick = usb_adb_kick;
+-    h->fd = -1;
+-
+-    adb_cond_init(&h->notify, 0);
+-    adb_mutex_init(&h->lock, 0);
+-
+-    // Open the file /dev/android_adb_enable to trigger 
+-    // the enabling of the adb USB function in the kernel.
+-    // We never touch this file again - just leave it open
+-    // indefinitely so the kernel will know when we are running
+-    // and when we are not.
+-    fd = unix_open("/dev/android_adb_enable", O_RDWR);
+-    if (fd < 0) {
+-       D("failed to open /dev/android_adb_enable\n");
+-    } else {
+-        close_on_exec(fd);
+-    }
+-
+-    D("[ usb_init - starting thread ]\n");
+-    if(adb_thread_create(&tid, usb_adb_open_thread, h)){
+-        fatal_errno("cannot create usb thread");
+-    }
+-}
+-
+-
+-static void init_functionfs(struct usb_handle *h)
+-{
+-    ssize_t ret;
+-
+     D("OPENING %s\n", USB_FFS_ADB_EP0);
+-    h->control = adb_open(USB_FFS_ADB_EP0, O_RDWR);
+-    if (h->control < 0) {
++    fd = adb_open(USB_FFS_ADB_EP0, O_RDWR);
++    if (fd < 0) {
+         D("[ %s: cannot open control endpoint: errno=%d]\n", USB_FFS_ADB_EP0, errno);
+-        goto err;
++        return -1;
+     }
+-
+-    ret = adb_write(h->control, &descriptors, sizeof(descriptors));
+-    if (ret < 0) {
++    if (adb_write(fd, &descriptors, sizeof(descriptors)) != sizeof(descriptors)) {
+         D("[ %s: write descriptors failed: errno=%d ]\n", USB_FFS_ADB_EP0, errno);
+-        goto err;
++        adb_close(fd);
++        return -1;
+     }
+-
+-    ret = adb_write(h->control, &strings, sizeof(strings));
+-    if (ret < 0) {
++    if (adb_write(fd, &strings, sizeof(strings)) != sizeof(strings)) {
+         D("[ %s: writing strings failed: errno=%d]\n", USB_FFS_ADB_EP0, errno);
+-        goto err;
+-    }
+-
+-    h->bulk_out = adb_open(USB_FFS_ADB_OUT, O_RDWR);
+-    if (h->bulk_out < 0) {
+-        D("[ %s: cannot open bulk-out ep: errno=%d ]\n", USB_FFS_ADB_OUT, errno);
+-        goto err;
+-    }
+-
+-    h->bulk_in = adb_open(USB_FFS_ADB_IN, O_RDWR);
+-    if (h->bulk_in < 0) {
+-        D("[ %s: cannot open bulk-in ep: errno=%d ]\n", USB_FFS_ADB_IN, errno);
+-        goto err;
++        adb_close(fd);
++        return -1;
+     }
++    h->control = fd;
++    if (adb_thread_create(&tid, usb_ffs_control_thread, h))
++        fatal_errno("[ cannot create usb control thread ]");
++    return 0;
++}
+ 
+-    return;
++static int open_bulk(struct usb_handle *h)
++{
++    int out = adb_open(USB_FFS_ADB_OUT, O_RDWR), in = out < 0 ? -1 : adb_open(USB_FFS_ADB_IN, O_RDWR);
+ 
+-err:
+-    if (h->bulk_in > 0) {
+-        adb_close(h->bulk_in);
+-        h->bulk_in = -1;
+-    }
+-    if (h->bulk_out > 0) {
+-        adb_close(h->bulk_out);
+-        h->bulk_out = -1;
+-    }
+-    if (h->control > 0) {
+-        adb_close(h->control);
+-        h->control = -1;
++    if (in < 0) {
++        D("[ cannot open bulk endpoints: errno=%d ]\n", errno);
++        if (out >= 0)
++            adb_close(out);
++        return -1;
+     }
+-    return;
++    adb_mutex_lock(&h->lock);
++    h->bulk_out = out;
++    h->bulk_in = in;
++    adb_mutex_unlock(&h->lock);
++    return 0;
+ }
+ 
+ static void *usb_ffs_open_thread(void *x)
+@@ -320,18 +259,12 @@ static void *usb_ffs_open_thread(void *x)
+     while (1) {
+         // wait until the USB device needs opening
+         adb_mutex_lock(&usb->lock);
+-        while (usb->control != -1)
++        while (usb->bulk_in != -1)
+             adb_cond_wait(&usb->notify, &usb->lock);
+         adb_mutex_unlock(&usb->lock);
+ 
+-        while (1) {
+-            init_functionfs(usb);
+-
+-            if (usb->control >= 0)
+-                break;
+-
++        while ((usb->control < 0 && init_control(usb)) || open_bulk(usb))
+             adb_sleep_ms(1000);
+-        }
+ 
+         D("[ usb_thread - registering device ]\n");
+         register_usb_transport(usb, 0, 0, 1);
+@@ -360,7 +293,7 @@ static int bulk_write(int bulk_in, const char *buf, size_t length)
+     return count;
+ }
+ 
+-static int usb_ffs_write(usb_handle *h, const void *data, int len)
++int usb_write(usb_handle *h, const void *data, int len)
+ {
+     int n;
+ 
+@@ -384,7 +317,7 @@ static int bulk_read(int bulk_out, char *buf, size_t length)
+         ret = adb_read(bulk_out, buf + count, length - count);
+         if (ret < 0) {
+             if (errno != EINTR) {
+-                D("[ bulk_read failed fd=%d length=%d count=%d ]\n",
++                D("[ bulk_read failed fd=%d length=%zu count=%zu ]\n",
+                                            bulk_out, length, count);
+                 return ret;
+             }
+@@ -396,7 +329,7 @@ static int bulk_read(int bulk_out, char *buf, size_t length)
+     return count;
+ }
+ 
+-static int usb_ffs_read(usb_handle *h, void *data, int len)
++int usb_read(usb_handle *h, void *data, int len)
+ {
+     int n;
+ 
+@@ -411,7 +344,7 @@ static int usb_ffs_read(usb_handle *h, void *data, int len)
+     return 0;
+ }
+ 
+-static void usb_ffs_kick(usb_handle *h)
++void usb_kick(usb_handle *h)
+ {
+     int err;
+ 
+@@ -424,17 +357,16 @@ static void usb_ffs_kick(usb_handle *h)
+         D("[ kick: sink (fd=%d) clear halt failed (%d) ]", h->bulk_out, errno);
+ 
+     adb_mutex_lock(&h->lock);
+-    adb_close(h->control);
+     adb_close(h->bulk_out);
+     adb_close(h->bulk_in);
+-    h->control = h->bulk_out = h->bulk_in = -1;
++    h->bulk_out = h->bulk_in = -1;
+ 
+     // notify usb_ffs_open_thread that we are disconnected
+     adb_cond_signal(&h->notify);
+     adb_mutex_unlock(&h->lock);
+ }
+ 
+-static void usb_ffs_init()
++void usb_init()
+ {
+     usb_handle *h;
+     adb_thread_t tid;
+@@ -442,14 +374,12 @@ static void usb_ffs_init()
+     D("[ usb_init - using FunctionFS ]\n");
+ 
+     h = calloc(1, sizeof(usb_handle));
+-
+-    h->write = usb_ffs_write;
+-    h->read = usb_ffs_read;
+-    h->kick = usb_ffs_kick;
++    if (!h)
++        fatal("[ cannot allocate usb handle ]");
+ 
+     h->control  = -1;
+     h->bulk_out = -1;
+-    h->bulk_out = -1;
++    h->bulk_in  = -1;
+ 
+     adb_cond_init(&h->notify, 0);
+     adb_mutex_init(&h->lock, 0);
+@@ -460,33 +390,11 @@ static void usb_ffs_init()
+     }
+ }
+ 
+-void usb_init()
+-{
+-    if (access(USB_FFS_ADB_EP0, F_OK) == 0)
+-        usb_ffs_init();
+-    else
+-        usb_adb_init();
+-}
+-
+ void usb_cleanup()
+ {
+ }
+ 
+-int usb_write(usb_handle *h, const void *data, int len)
+-{
+-    return h->write(h, data, len);
+-}
+-
+-int usb_read(usb_handle *h, void *data, int len)
+-{
+-    return h->read(h, data, len);
+-}
+ int usb_close(usb_handle *h)
+ {
+     return 0;
+ }
+-
+-void usb_kick(usb_handle *h)
+-{
+-    h->kick(h);
+-}

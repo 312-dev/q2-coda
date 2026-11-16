@@ -299,6 +299,7 @@ def validate_assets(directory):
     stock = (directory/'stock-demo').read_bytes()
     demo = (directory/'demo').read_bytes()
     from build import patch_timezones, TIMEZONES, CJK, english_ui
+    from build import ADB_HOOK, ADBD, ADB_GADGET, USB_SCRIPTS, adb_wrapper
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -384,7 +385,7 @@ def validate_assets(directory):
         'release/assets/default/raw/styles/'+p for p in AUDIT['styles']} | {
         xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C, *WEB} | {
         'usr/share/web/cgi-bin/%s.cgi' % n for n in ('create', 'delete', 'list', 'download', 'upload')} | {
-        xx+n for n in STOCK_NAMED_ICONS}
+        xx+n for n in STOCK_NAMED_ICONS} | ({'usr/bin/' + n for n in USB_SCRIPTS} if manifest['dev'] else set())  # adb_wrapper
     master = (ROOT/'assets/icons/default_album_home.png').read_bytes()
     for name, size in ART_PLACEHOLDERS.items():
         old, new = read('stock.squashfs', xx+name), read('rootfs.squashfs', xx+name)
@@ -483,8 +484,21 @@ def validate_assets(directory):
         remote = read('rootfs.squashfs', REMOTE)
         assert sha(remote) == manifest['q2remote_sha256'] and remote[:4] == b'\x7fELF'
         assert remote[36:40] == helper[36:40]
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
         assert b'q2-wheel.log' in demo
+        # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
+        # scripts wrapped and kept beside the wrappers
+        adbd = read('rootfs.squashfs', ADBD)
+        assert sha(adbd) == manifest['adbd']['sha256'] and len(adbd) == manifest['adbd']['bytes'] and adbd[:4] == b'\x7fELF'
+        (directory/'adbd-check').write_bytes(adbd)
+        dynamic = subprocess.run(['readelf', '-dl', str(directory/'adbd-check')], capture_output=True, text=True, check=True).stdout
+        (directory/'adbd-check').unlink()
+        assert adbd[36:40] == helper[36:40] and '[Requesting program interpreter: /lib/ld-linux-mipsn8.so.1]' in dynamic
+        assert sorted(re.findall(r'\(NEEDED\)\s+Shared library: \[(.+)\]', dynamic)) == ['libc.so.6', 'libpthread.so.0']
+        assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
+        for n in USB_SCRIPTS:
+            assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
+            assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
     else:
         assert b'q2-wheel.log' not in demo and b'q2-wheel.log' not in expected_start  # a test build's diagnostic
         assert 'q2remote_sha256' not in manifest
@@ -492,6 +506,14 @@ def validate_assets(directory):
         absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), REMOTE],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         assert absent.returncode != 0, 'release rootfs contains q2remote'
+        # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
+        assert 'adbd' not in manifest and not (directory/'adbd').exists()
+        for path in (ADBD, ADB_GADGET, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+            absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            assert absent.returncode != 0, f'release rootfs contains {path}'
+        for n in USB_SCRIPTS:
+            assert read('rootfs.squashfs', 'usr/bin/' + n) == read('stock.squashfs', 'usr/bin/' + n), f'release {n} is not stock\'s'
     assert read('rootfs.squashfs', S90PLAY) == expected_start
     assert read('rootfs.squashfs', S11LOGO) == read('stock.squashfs', S11LOGO).replace(*LOGO_HOOK)  # the card's logo, if saved
     assert read('rootfs.squashfs', BLUEALSA2) == read('stock.squashfs', BLUEALSA2).replace(*BT_KEEPALIVE)  # keep-alive 5 s

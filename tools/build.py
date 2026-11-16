@@ -340,6 +340,26 @@ S11LOGO = 'etc/init.d/S11logo_display_shell'
 LOGO, LOGO_LIGHT = 'release/assets/default/raw/images/xx/logo.jpg', 'release/assets/default/raw/images/xx/logo-light.jpg'
 REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
                b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n/usr/bin/q2remote &\n')
+# --dev only (docs/adb.md): adbd over USB. Its gadget is made and FunctionFS mounted before adbd starts, and before
+# demo, whose first USB check may already want the controller for stock's gadget; adbd is started again if it
+# ends, and its gadget bound once it is up (unless stock's gadget has the controller). After REMOTE_HOOK's line.
+ADBD, ADB_GADGET = 'usr/bin/adbd', 'usr/bin/q2adb-gadget'
+ADB_HOOK = (b'/usr/bin/q2remote &\n',
+            b'/usr/bin/q2remote &\n/usr/bin/q2adb-gadget setup && (while :; do /usr/bin/adbd </dev/null >/dev/null 2>&1 &'
+            b' /usr/bin/q2adb-gadget bind; wait $!; sleep 2; done) &\n')
+# Stock's USB scripts, which demo runs to start and stop USB storage and the USB DAC: in a --dev build each is
+# wrapped (adb_wrapper) and stock's kept beside it as <name>_stock.sh, so the ADB gadget gives way to stock's.
+USB_SCRIPTS = ('storage_config.sh', 'uac_device_config.sh')
+
+
+def adb_wrapper(name):
+    """usr/bin/name in a --dev build: stock's script with the ADB gadget off the USB controller while it runs
+    (docs/adb.md#the-usb-gadget). Stock's exit status is kept."""
+    stock = name.replace('.sh', '_stock.sh')
+    return (f'#!/bin/sh\n# q2-coda --dev: stock\'s {name} is {stock}; the ADB gadget gives the USB controller to its\n'
+            f'# gadget from start to stop (docs/adb.md#the-usb-gadget).\n'
+            f'[ "$1" = start ] && /usr/bin/q2adb-gadget park\n/usr/bin/{stock} "$@"\nr=$?\n'
+            f'[ "$1" = stop ] && /usr/bin/q2adb-gadget unpark\nexit $r\n').encode()
 # --dev only (docs/remote.md#log): demo's console output, and hciplayer's, which inherits it, in RAM, so
 # emptied once a minute past 4 MB (O_APPEND keeps demo writing at its end), in place of the release's stderr
 # file and its cap. In BOOT_HOOK's start path.
@@ -1929,6 +1949,29 @@ def compile_helper(out, cat, src, name, rels):
         *objs, f'-L{out}', *(f'-l:{lib.name}' for lib in libs), '-o', out/name)  # by name: a rebuilt library may have no SONAME
     return (out/name).read_bytes()
 
+def adbd_binary(out):
+    """--dev builds' adbd (docs/adb.md), built by tools/thirdparty.py, stripped into out."""
+    import thirdparty
+    return thirdparty.stripped(thirdparty.build('adbd')/ADBD, out/'adbd').read_bytes()
+
+
+def adb_files(out, cat):
+    """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
+    script, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
+    inode the copy's metadata comes from."""
+    return {ADBD: (HELPER_LIKE, adbd_binary(out)),
+            ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
+            **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
+            **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
+
+
+def adbd_record(out):
+    """The manifest's adbd: its version, SHA-256 and size."""
+    import thirdparty
+    data = (out/'adbd').read_bytes()
+    return dict(version=thirdparty.SOURCES['adbd'][0], sha256=sha(data), bytes=len(data))
+
+
 def append_payload(image, payload, base, memsz, label):
     """Map payload at base through the image's final PT_NULL header, R/W/X: payloads keep static state."""
     segs = segments(image)
@@ -2431,7 +2474,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     s90play = s90play.replace(*BOOT_HOOK)
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK) if dev else s90play)
+    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK) if dev else s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -2546,6 +2589,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                **({LOGO_LIGHT: (xx+'list_tidal.png', light)} if light else {}),  # the swapped logo.jpg has no stock inode left
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
                                **{FONT_DIR + n: ('etc/hosts', (ROOT/'assets/fonts'/n).read_bytes()) for n in FONT_NOTICES},
+                               **(adb_files(out, cat) if dev else {}),
                                **({REMOTE: (HELPER_LIKE, compile_helper(out, cat, 'remote', 'q2remote', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
@@ -2649,6 +2693,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
+        **({'adbd': adbd_record(out)} if dev else {}),
         **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
