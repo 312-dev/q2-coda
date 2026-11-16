@@ -785,12 +785,10 @@ void clicker_step(void);
 int clicker_route(int listening);
 /* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
-enum { DIR_NONE, DIR_UP, DIR_DOWN };                  /* modal_dir: a sort's direction */
 int modal_set(void);
 int modal_row_w(void);
 void *modal_gap(void *view);
 void modal_row(void *row, void *label, const char *icon, const char *value, int how);
-void modal_dir(void *row, int dir);
 void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
 int modal_rows_of(void *w);
@@ -820,7 +818,7 @@ int artist_songs(void *unused);  /* navigation.c: the artist page's songs query 
 void *plays_ranked(void *songs); /* library_lists.c */
 int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
             int w, int align);
-/* song_sort.c: Songs' order under the inset modal's Sort picker */
+/* song_sort.c: Songs' order, Settings > Library > Sorting's Songs */
 enum { SORT_TITLE, SORT_ARTIST, SORT_ALBUM, SORT_ADDED, SORT_N };
 int song_sort(void);
 int song_down(void);
