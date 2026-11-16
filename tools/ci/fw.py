@@ -26,7 +26,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path.home()/'.local/bin/q2-heavy'
 CAP = 6
-WORKER_RSS = {False: 0.5e9, True: 0.9e9}  # one worker's peak, plain and under ASan (docs/building.md#fast-test-runs)
+WORKER_RSS = {False: 0.5e9, True: 2.0e9}  # one worker's peak, plain and under ASan: a serial ASan run peaks at 7.4 GB, and 4 ASan workers overran 5 GB halfway
 RESERVE = 5e9
 
 
