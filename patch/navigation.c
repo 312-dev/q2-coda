@@ -5148,6 +5148,18 @@ static const char *bar_title_of(void *win, void **label) {
     return 0;
 }
 
+/* Folder's title from stock's navbar name s (its storage, "SD", or a path, "SD:/Music"): Folders
+ * at the card's root and the storage list above it (g_folder_layer 1 and 2), else the folder's
+ * own name, the path's last, in place in s. */
+static const char *folder_title(char *s) {
+    if (g_folder_layer <= 2) return "Folders";
+    int n = (int)strlen(s);
+    while (n > 0 && s[n - 1] == '/') s[--n] = 0;
+    char *last = s + n;
+    while (last > s && last[-1] != '/' && last[-1] != ':') --last;
+    return *last ? last : "Folders";
+}
+
 /* Either of st.title_win and st.title_lbl going (page_list rebuilds a caption under a live window)
  * drops both, so the next paint finds them again. */
 int title_gone(void *w, void *event) {
@@ -5289,7 +5301,8 @@ void bar_title_sync(void *win) {
         /* English's only, for a bar too narrow for it; a status row's title has the room */
         t = !geom_val(V_STATUS_Y) && !tk_strcmp(s, "Channel Balance") ? "Balance"
             : !tk_strcmp(s, "(null)") ? "" /* stock's "%s" of a NULL name: no title */
-                                      : s;
+            : !tk_strcmp(widget_get_prop_str(win, "name", ""), "folder_page") ? folder_title(s)
+                                                                              : s;
     }
     if (widget_get_text_utf8(st.bar_title, now, sizeof now) || tk_strcmp(now, t)) {
         widget_set_text_utf8(st.bar_title, t);
