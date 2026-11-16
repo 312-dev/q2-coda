@@ -252,7 +252,11 @@ static void folder_row(void *w, void *canvas, void *row, void *title, int id, re
     while (len[nlen] && nlen < sizeof wlen / sizeof *wlen - 1)
         wlen[nlen] = (unsigned char)len[nlen], ++nlen;
     wlen[nlen] = 0;
-    int left = text ? SONG_NUM_TITLE : FOLDER_TITLE,
+    /* a video (the Videos folder's, playback.c playback_video) has no track number: its title
+     * on the text column, as any list's row (audit2 C3) */
+    int left = !text                 ? FOLDER_TITLE
+               : playback_video(rec) ? geom_val(V_TEXT_X)
+                                     : SONG_NUM_TITLE,
         column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
         len_w = measure(canvas, wlen, nlen, spx),
         end = nlen   ? column - len_w - SONG_COL_GAP
@@ -280,7 +284,7 @@ static void folder_row(void *w, void *canvas, void *row, void *title, int id, re
         selected ? (scheme()->sel_text ? scheme()->sel_text : 0xffffff) : scheme()->muted;
     st.raw_ink = selected;
     canvas_set_text_color(canvas, RGBA(color));
-    if (ft[id].track > 0) {
+    if (ft[id].track > 0 && left == SONG_NUM_TITLE) {
         unsigned num[4], n = put_num(num, (unsigned)ft[id].track % 1000);
         num[n] = 0;
         small_text(canvas, num, geom_val(V_TEXT_X) + HSCROLL_MARGIN + SONG_NUM_W - 40, 40, 1, &r);

@@ -264,11 +264,7 @@ static void refresh(int save) {
     else if (xf.ctx == 2)
         tk_snprintf(t, sizeof t, xf.rs_min ? "%d min" : "Off", xf.rs_min);
     else if (xf.ctx == 3) {
-        tk_snprintf(t, sizeof t,
-                    night_on() == 2 ? "Auto"
-                    : night_on()    ? "%d K"
-                                    : "Off",
-                    night_kelvin());
+        tk_snprintf(t, sizeof t, "%d K", night_kelvin()); /* Off, On or Auto: the row's value */
         image_base_set_image(xf.sw, night_on() ? "switch_on" : "switch_off");
     } else {
         tk_snprintf(t, sizeof t, xf.on ? "%ds" : "Off", xf.seconds);
@@ -353,6 +349,9 @@ static int gone(void *ctx, void *event) {
 }
 
 int xfade_page(void *top) { return xf.page && top == xf.page; }
+/* The open page is Night Shift's: its row a key/value row (Off, On, Auto) that Centre cycles, in
+ * place of a switch, as every setting with three named choices (docs/oled-design.md List row). */
+int night_page(void *top) { return xfade_page(top) && xf.ctx == 3; }
 
 /* The open page's range ends as its value reads them, into lo and hi, n bytes each: the slider's
  * minimum and maximum (slider_page.c). */

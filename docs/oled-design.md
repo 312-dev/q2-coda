@@ -467,6 +467,10 @@ the artist (13 px, Text Tertiary), 46 px right of the text column.
   white knob (Channel Balance fills from the centre; in Light Mode, where white is the canvas, the
   knob is edged 1 px in Track, as iOS edges its white thumb); the range's ends in 15 px Text
   Tertiary centred on y 214, at the two columns. The wheel moves it; there are no +/- buttons.
+  Night Shift's first row is a key/value row, its value Off, On or Auto, which Centre cycles (three
+  named choices: [List row](#list-row)); the value is the warmth ("3400 K") in every mode, and while
+  Off it, the track and the knob are Text Tertiary with no accent, as a disabled row's (the user's,
+  from audit2 J7).
 - **Vertical slider (EQ):** 4 px Track line, Accent Blue fill from 0 dB to the value (Text Tertiary
   while the EQ is off), a 14 px white knob, ringed 2 px in Accent Blue while the wheel is on it
   (1 px in Track otherwise in Light Mode, as the slider page's). The band's name and gain under it
@@ -503,6 +507,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   the object where it can ("Delete playlist “a”?"), then **Cancel**, selected when it opens, and
   the verb that says what the other does ("Shut Down", "Reset", "Delete"), never "OK". Delete
   Song's "Also delete source file" is a third row with a switch on the right column.
+  A confirm whose answer leaves things alone says which under its rows, as iOS's reset alert does,
+  in the [empty note](#empty-and-offline)'s form: Reset Settings Only asks "Reset settings?" over
+  "Music, playlists and ratings are kept".
 - A toast is one line of 16 px Text Primary on a `#1C1C1E` pill, 12 px corners, 32 px tall,
   as wide as its text and 16 px each side, centred on y 252 (y 236 to 268), above the bottom
   glass curve. It is the only raised surface in the theme. The page stays in sight round it,
@@ -529,6 +536,9 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   it and say what is missing ("No favorites", hint "Hold Play/Pause on a song to add it").
 - Folder over a level with nothing in it (an empty card) says "No folders", hint "Copy music to
   the SD card".
+- A card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row and its sync
+  toggle, `patch/addon.c` `empty_view`) is that note too, the info row's subtitle the hint ("Empty Artist
+  has no albums on the server"), with no Add to Sync over nothing and no selectable info row (audit2 F1).
 - Songs over an empty library is one selected row, **Scan Music Now** (Center or a tap runs the
   scan), with "No songs", hint "Copy music to the SD card", under it; stock's picture and pill go.
 - Offline and missing things use the same form (Spotify's "Spotify isn't on the card", the App
@@ -554,7 +564,10 @@ an inset modal over the page, which stays on screen dimmed half way to black; no
 - **Rating** (Now Playing's Centre cycle, a menu's Rate) is a picker in the same panel: Unrated, 1 Heart
   to 5 Hearts, the current one checked; Centre keeps a row's rating and closes, Return closes.
 - **Gaps:** a setting heading the menu stands 12 px above the actions; a destructive row (Delete
-  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule.
+  Song) comes last, 12 px below them, and asks before it acts. Space, never a rule. A panel whose
+  rows are more than six has no gaps, so it scrolls, and ends, on whole rows (the user's, from
+  audit2 E1: a gap cut the end of Now Playing's More); its settings tell themselves apart by the
+  symbol before the label.
 - The menu opens on its first action, lit; the wheel moves, Centre picks, Return closes it back to
   the row it came from.
 
@@ -692,10 +705,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   is made from a song's hold menu, and Import and Export are Settings > Playback > Library & Folders
   rows. An empty list says "No playlists", hint "Hold Play/Pause on a song to add it".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
-  which asks "Delete playlist “name”?" with Cancel first. Rename is the [Search](ipod.md#search) letter
-  strip with the name in it, the cursor at its end (a word's first letter a capital), under one row,
-  Done: Next at the text's end moves to Done as to Search's results, Centre there saves, Return
-  goes back to the strip, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
+  with its field off, titled Rename Playlist, the name prefilled over it with the cursor at its end:
+  Next at the name's end saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Centre plays the list from the song;
@@ -734,6 +746,42 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   already in ("Added N songs", "Already added").
 - Return goes back a level; from the chooser, back to the playlist, which reads its songs again.
 
+### Text entry
+
+One letter strip for every text the wheel types (approved as 05b and 05c from the audit2 mock-ups on
+2026-11-16; `patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners,
+its letters in equal 19 px cells about a fixed accent key, the run's ends fading into the pill's own grey.
+It has two forms, in the same place, width and corners:
+
+- **Field on** (Search, Add Songs' Search): the typed text in a black box at the pill's left with its
+  cursor, the letters from x 148; the results above the strip, and with nothing typed the
+  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs".
+- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centred,
+  and the name written large in the middle of the screen, Inter Medium 22 white centred on y 140 with a
+  steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to
+  save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
+  cursor, as on Search's text.
+
+- **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
+  box stock's keyboard served; the user's P1 from `mock_strip_password.py`, 2026-11-17): field off, a set
+  chip at the pill's left (a `#2C2C2E` pill to x 96, its name in Inter Medium 16 white: abc, ABC, 123 or
+  #+=), the run after it, its lit key at x 192; Play/Pause steps to the next set, each ending in the space
+  and delete. The status row names the page the box is on, and the text shows as a name's does, "Press
+  Next when done" under it; a box holding a number opens on 123. A password reads "Password" (15 px Text
+  Tertiary, y 84) over dots (y 128), the character just typed shown for a second, all of it in plain text
+  while Play/Pause is held, and "Hold Play/Pause to show · Next at the end to join" (13 px, y 176). Next
+  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts.
+
+On every form, the wheel walks the letters and Centre types the lit one. A Return press erases the character
+before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
+the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centred on y 160 and sized
+to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
+fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
+"Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
+happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
+draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its window to the strip
+(`patch/keyboard.c` `kb_strip_due`).
+
 ### Icons
 
 - One set: [Phosphor Icons](https://phosphoricons.com) (MIT), `@phosphor-icons/core` 2.1.1. The
@@ -747,6 +795,11 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   heart and More. Sizes are the design's: 13 px play state, 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
+- **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
+  Home's art, Cover Flow): a `#2C2C2E` tile with Phosphor's `music-notes-simple` (regular) in Text
+  Tertiary, a third of its width, centred (`assets/icons/default_album_home.png`, drawn from the
+  vendored SVG; `tools/build.py` sizes it into stock's `ART_PLACEHOLDERS`), in place of stock's
+  `#787878` disc (the user's, from audit2 I1).
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -829,6 +882,10 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   and its left end while it is scrolled away from its start, so it rests crisp; each goes from
   clear to the colour behind the text (the Canvas, or Accent Blue on the selection). A truncated
   text that is not scrolling keeps its ellipsis (`list.marquee.fade`).
+- **A value cut off scrolls too** (the user's, 2026-11-16, from About's CFW. Version): on the selected
+  row the marquee takes the first text cut off at its column, the title, else a key/value row's value,
+  so any value too long for its row reads in full when its row is selected (`navigation.c`
+  `marq_moved`); every other row's keeps its ellipsis.
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
   same time), and land back at rest together, each followed by its own copy 40 px behind, so
@@ -850,7 +907,7 @@ pattern.
 | Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
-| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron                                         |
+| Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron; videos (Library > Videos) plain rows on the text column |
 | Artists, Genres, Composers          | List row                    | The [A-Z index](#a-z-index) past 50 rows, as Albums                                                        |
 | A card app's artist                 | [Artist page](#artist-page) | Header, Shuffle and Radio, then Top Songs, Albums, Singles & EPs, Similar Artists and All Songs            |
 | A Library artist                    | [Artist page](#artist-page) | Header, Shuffle alone, then Top Songs (once played), Albums and All Songs                                  |
@@ -862,7 +919,7 @@ pattern.
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
 | Hold menu, More                     | [Menus](#menus)             | The inset modal over the page                                                                              |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
-| About                               | Key/value table             | Inert: no selection; values in Text Secondary                                                              |
+| About                               | Key/value table             | The wheel walks the rows and nothing opens; values in Text Secondary, a cut-off one scrolling when selected |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the inset modal's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centred on x 33, its name at x 52, size and chevron; two footers |
@@ -874,8 +931,9 @@ pattern.
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centred, no title                                                        |
-| Search                              | Own                         | An iPod classic's letter strip, a pill at y 254-288, under six single-line results ([ipod](ipod.md#search)) |
-| Keyboard                            | Own                         | Stock's keys as `#1C1C1E` boxes on black, the wheel's key in the accent ([ipod](ipod.md#keyboard))          |
+| Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
+| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
+| Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock left of the play state while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centred under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 14 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centred between the status row and the bottom; the wheel does nothing |
 

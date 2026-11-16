@@ -121,28 +121,23 @@ int keylock_gate(void *e, int remote) {
 }
 
 /* ringnav_paint, after stock painted w: over the top window and the status bar while the card is
- * up, the dim; over the window, the card. */
+ * up, the dim (overlay_scrim); over the window, the card. */
 void keylock_paint(void *w, void *canvas) {
-    if (!kl.shown || !w) return;
-    void *lcd = P(canvas, CANVAS_LCD), *bar = *(void *const *)system_bar;
-    if (!lcd || (w != bar && w != window_manager_get_top_window(window_manager()))) return;
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(canvas, KEYLOCK_DIM);
-    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
-    if (w != bar) {
-        int light = ipod_light(), dy = I(w, W_Y);
-        rect_t card = { CARD_X, CARD_Y - dy, CARD_W, CARD_H };
-        fill_box(canvas, &card, RGBA(flip_if(light, CARD_RGB)), CARD_R);
-        char glyph[32];
-        tk_snprintf(glyph, sizeof glyph, "%skeylock_card_%c", theme()->art, light ? 'l' : 'd');
-        paint_art(w, canvas, glyph, CARD_X + (CARD_W - CARD_GLYPH) / 2, CARD_GLYPH_Y - dy);
-        rect_t title = { CARD_X, CARD_TITLE_Y - CARD_LINE / 2 - dy, CARD_W, CARD_LINE },
-               hint = { CARD_X, CARD_HINT_Y - CARD_LINE / 2 - dy, CARD_W, CARD_LINE };
-        final_text(canvas, "inter-medium", (const unsigned *)L"Buttons Locked", &title,
-                   CARD_TITLE_PX, light ? 0xff000000u : 0xffffffffu);
-        final_text(canvas, "inter", (const unsigned *)L"Press Center to unlock", &hint,
-                   CARD_HINT_PX, 0xff000000u | (light ? TEXT_SECONDARY_L : TEXT_SECONDARY_D));
-    }
+    int dy;
+    if (!kl.shown || !w || !overlay_scrim(w, canvas, KEYLOCK_DIM, &dy)) return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    int light = ipod_light();
+    rect_t card = { CARD_X, CARD_Y - dy, CARD_W, CARD_H };
+    fill_box(canvas, &card, RGBA(flip_if(light, CARD_RGB)), CARD_R);
+    char glyph[32];
+    tk_snprintf(glyph, sizeof glyph, "%skeylock_card_%c", theme()->art, light ? 'l' : 'd');
+    paint_art(w, canvas, glyph, CARD_X + (CARD_W - CARD_GLYPH) / 2, CARD_GLYPH_Y - dy);
+    rect_t title = { CARD_X, CARD_TITLE_Y - CARD_LINE / 2 - dy, CARD_W, CARD_LINE },
+           hint = { CARD_X, CARD_HINT_Y - CARD_LINE / 2 - dy, CARD_W, CARD_LINE };
+    final_text(canvas, "inter-medium", (const unsigned *)L"Buttons Locked", &title, CARD_TITLE_PX,
+               light ? 0xff000000u : 0xffffffffu);
+    final_text(canvas, "inter", (const unsigned *)L"Press Center to unlock", &hint, CARD_HINT_PX,
+               0xff000000u | (light ? TEXT_SECONDARY_L : TEXT_SECONDARY_D));
     stock_canvas_set_fill_color(canvas, fill);
 }
 

@@ -571,6 +571,15 @@ int ringnav_fwupdate(void *win, void *ctx) {
         widget_on(nu.label, EVT_DESTROY, label_gone, nu.label);
         if (nu.state == NU_RUNNING) show("Downloading…");
     }
+    /* SD Card Update acts (or asks) in place, so no chevron; Network Update opens its check, so
+     * it keeps stock's list_into (docs/oled-design.md#list-row) */
+    void *first = view && widget_count_children(view) == 2 ? widget_get_child(view, 0) : 0;
+    for (unsigned i = 0, n = first ? widget_count_children(first) : 0; i < n; ++i) {
+        void *b = widget_get_child(first, i);
+        for (unsigned k = 0, m = widget_count_children(b); k < m; ++k)
+            if (!tk_strcmp(widget_get_prop_str(widget_get_child(b, k), "image", ""), "list_into"))
+                widget_set_visible(widget_get_child(b, k), 0, 0);
+    }
     return result;
 }
 
@@ -823,7 +832,14 @@ static void sh_text(int r) {
     const char *t = s;
     if (i == ROW_CHECK && sh.job == JOB_CHECK)
         t = "Checking…";
-    else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row */
+    else if (i == ROW_CHECK) { /* with no list yet, the press loads it; OLED says so under the row,
+                                * the row alone a plain one, the list's pitch (oled-design.md Empty
+                                * and offline: one line in the list's pitch) */
+        if (!shelf_n && sh.row[r]) { /* the list lays its items out at its item_height */
+            void *view = P(sh.row[r], W_PARENT), *lv = view ? P(view, W_PARENT) : (void *)0;
+            if (lv) widget_set_prop_int(lv, "item_height", page_h(48));
+            widget_resize(sh.row[r], 375, page_h(48)); /* full width */
+        }
         int noted = feedback_empty(sh.page, feedback_below(sh.row[r]),
                                    shelf_n ? (const char *)0 : "No apps listed",
                                    "Connect to Wi-Fi, then Check for Updates");
@@ -831,8 +847,7 @@ static void sh_text(int r) {
         void *title = noted ? widget_get_child(sh.row[r], 0) : (void *)0;
         if (title) /* OLED: one line, centred in the list's pitch, as its other rows keep it */
             widget_move_resize(title, I(title, W_X), 0, I(title, W_W), I(sh.row[r], W_H));
-    }
-    else if (busy && sh.cancel)
+    } else if (busy && sh.cancel)
         t = "Canceling…";
     else if (busy && sh.stage == 1 && sh.percent)
         snprintf(s, sizeof s, "Downloading %d%%", sh.percent);

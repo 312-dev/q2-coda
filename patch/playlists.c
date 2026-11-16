@@ -945,6 +945,10 @@ static int pl_due(const void *info) {
     char click[0x30];
     pl_timer = 0;
     if (!pl_page(win)) return 0;
+    if (action == PL_NEW && theme()->entry_ipod) { /* the letter strip, not stock's keyboard */
+        playlist_new_open();
+        return 0;
+    }
     void *w = pl_find(win, action);
     /* Import writes every song of every list it reads: the art's build steps aside (its reads
      * would make each insert wait), and the rebuild that follows asks again */

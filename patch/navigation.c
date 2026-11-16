@@ -803,6 +803,8 @@ static row_id_t row_id(void *w) {
     return id;
 }
 
+#define DISPLAY_SUB "_display_sub" /* a Display sub-page's DISPLAY_* (ringnav_display) */
+
 /* The local list loaders use these browsing globals: folder_enter/back maintain g_folder_path;
  * load_localclass_list/load_album_detaillist use the class, saved query and artist/album modes.
  * Hash the bounded query object, including its flags, rather than a title or a freed pointer. */
@@ -835,7 +837,8 @@ static int context_now(unsigned *scope) {
         }
         *scope = hash_bytes(h, album_modetype, 4);
     } else if (contexts[ctx].kind == CTX_FIXED) {
-        *scope = 1;
+        /* Display's sub-pages (ringnav_display) are its page opened again: each its own list */
+        *scope = 1 + (unsigned)widget_get_prop_int(top, DISPLAY_SUB, 0);
     } else if (!tk_strcmp(name, "coverflow_page")) {
         *scope = coverflow_scope(top);
         if (!*scope) return -1;
@@ -1956,13 +1959,19 @@ static void marq_stop(void) {
     hscroll_label_stop(label);
     hscroll_label_set_only_focus(label, 1);
 }
-static void *row_scroller(void *w, int depth) {
+/* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
+static int scroller_over(void *label) { return I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W); }
+/* The row's first visible hscroll_label that is cut off, in order (its title, then a key/value
+ * row's value: any value cut off on the selected row scrolls, docs/oled-design.md#motion); with
+ * none cut off, its first. */
+static void *row_scroller(void *w, int depth, int cut) {
     unsigned n = widget_count_children(w);
     for (unsigned i = 0; i < n; ++i) {
         void *c = widget_get_child(w, i);
         if (!widget_get_visible(c)) continue;
-        if (!tk_strcmp(widget_get_type(c), "hscroll_label")) return c;
-        void *in = depth ? row_scroller(c, depth - 1) : (void *)0;
+        if (!tk_strcmp(widget_get_type(c), "hscroll_label") && (!cut || scroller_over(c) > 0))
+            return c;
+        void *in = depth ? row_scroller(c, depth - 1, cut) : (void *)0;
         if (in) return in;
     }
     return (void *)0;
@@ -1992,9 +2001,8 @@ static int marq_moved(const void *info) {
         st.marq_row = (void *)0; /* the next paint with a selection starts over */
         return 0;
     }
-    void *label = row_scroller(row, 2);
-    /* stock's two margins (2 px each by default, 0x5fb23c) count towards its ellipsis */
-    int over = label ? I(label, HSCROLL_TEXT_W) + 4 - I(label, W_W) : 0;
+    void *label = row_scroller(row, 2, 1) ?: row_scroller(row, 2, 0);
+    int over = label ? scroller_over(label) : 0;
     if (over <= 0 || !B(label, HSCROLL_ONLY_FOCUS)) return 0; /* until it moves */
     B(label, HSCROLL_LOOP) = 1;
     st.marq_label = label;
@@ -2348,6 +2356,7 @@ int ringnav_paint(void *w, void *canvas) {
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
+    search_strip_overlay(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
         P(canvas, CANVAS_LCD)) {
@@ -6030,6 +6039,7 @@ int ringnav_display(void *win, void *ctx) {
         return result;
     }
     widget_destroy_children(view);
+    widget_set_prop_int(win, DISPLAY_SUB, sub); /* its own place in position memory (context_now) */
     void *nav = widget_lookup(win, "view_navbar", 1), *title = nav ? widget_get_child(nav, 0) : 0;
     if (title) widget_set_text_utf8(title, titles[sub]);
     if (sub == DISPLAY_COVERFLOW) {
@@ -7890,9 +7900,19 @@ int stream_config(void *ctx, void *event) {
     for (int i = 0; i < 3; ++i)
         st.sc_row[i] = page_row_detail(view, i, "", 0, sc_click), sc_text(i);
     page_row_detail(view, 3, "Stop Streaming Services", 0, sc_click);
-    /* a gap before the toggles, clear as the rows (the theme's default list_item fills) */
-    int rh = page_h(48);
-    widget_use_style(list_item_create(view, 0, 4 * rh, 375, rh), "s_listitem_black");
+    /* a section header before the toggles, a whole row so the list scrolls in whole rows: what
+     * they do, in 15 px Text Tertiary at the text column (docs/oled-design.md Section header),
+     * clear as the rows (the theme's default list_item fills) */
+    int rh = page_h(48), px = 18; /* Inter 15, AWTK's size */
+    void *head = list_item_create(view, 0, 4 * rh, 375, rh);
+    widget_use_style(head, "s_listitem_black");
+    void *label = text(head, theme()->page_x, 0, 375 - 2 * theme()->page_x, rh);
+    widget_set_text_utf8(label, "Show in Streaming");
+    const char *face = theme_face(widget_get_text(label), -1, &px);
+    widget_set_prop_str(label, "style:normal:font_name", face ? face : "default");
+    widget_set_prop_int(label, "style:normal:font_size", px);
+    widget_set_prop_str(label, "style:normal:text_align_h", "left");
+    text_ink(label, RGBA(ipod_light() ? 0x6e6e6e : 0x858585), INK_LABEL);
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int i = 0; i < n; ++i) {
@@ -9736,6 +9756,7 @@ int ringnav_keydown(void *ctx, void *event) {
     if (key == KEY_CENTER)
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Centre held on the Library: Edit Library (library_edit.c) */
+    search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
     un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;

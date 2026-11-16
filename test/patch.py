@@ -8056,7 +8056,8 @@ m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
 m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
 m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
 # New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
-# own: its row's target (OLED's set has no toolbar), stock's dialog. With no covers up, nothing.
+# own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
+# (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
 def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
     class M(PlaylistPageMachine):
         def hook(self,u,address,size,unused):
@@ -8069,7 +8070,8 @@ def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's def
     m.before=m.bar(); m.calls.clear()
     m.call(address=payload_syms['playlists_new'],args=(0,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
     return m
-m=pl_new(); assert m.shut==1 and m.top==m.page and m.dialogs==['dialog/addplaylist_dialog'] and m.navbar()==0; passed()
+m=pl_new(); opened=[c for c in m.calls if c[0]=='window_create']  # page_open's, the strip's page
+assert m.shut==1 and not m.dialogs and len(opened)==1 and m.navbar()==0,(m.dialogs,opened); passed()
 m=pl_new(covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
@@ -12112,7 +12114,7 @@ m.nodes[m.top]['children']=[view]; m.call(address=HOOKS['localmusic_page_init'][
 f,ctx=m.handler(m.nodes[m.nodes[view]['children'][14]]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.page=m.top
 cancel=m.nodes[m.find('scroll_view')]['children'][0]; g,c=m.handler(cancel,O['EVT_CLICK']); m.call(address=g,args=(c,m.event,0,0),gap=0)
 worker,arg=m.threads[0]; m.call(address=worker,args=(arg,0,0,0),gap=0); assert m.probed==[]  # cancelled before the first
-m.advance(250); assert [m.nodes[w]['text'] for w in m.nodes if m.nodes[w]['type']=='hscroll_label' and m.alive(w) and m.nodes[w]['visible']]==['No songs over 10 minutes'] and m.joins==[77]; passed()  # page_list_or: the message in OLED's empty note, the name hidden for the status row
+m.advance(250); assert [m.nodes[w]['text'] for w in m.nodes if m.nodes[w]['type']=='hscroll_label' and m.alive(w) and m.nodes[w]['visible']]==['No long songs','Songs over 10 min show up here'] and m.joins==[77]; passed()  # page_list_or: the message in OLED's empty note, the name hidden for the status row
 # Two CUE tracks to the end of one file probe it once and keep one cache entry.
 m=RateMachine(); m.found=[m.song('A'),m.song('A')]; m.lengths={'/p/A':1300}; m.word(m.found[1]+O['REC_CUE_START'],600)
 m.top=m.node('window','localmusic_page'); view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)])
@@ -12963,7 +12965,7 @@ def stream_page(m):
     assert m.nodes[icon]['image']=='list_tidal' and m.nodes[label]['text']=='Tidal Downloads'
     top=m.top; f,ctx=m.handler(tidal,O['EVT_CLICK']); m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
     assert [m.text(c[1]) for c in m.calls if c[0]=='toolsLoadDirectory']==['/mnt/mmc/.tidal']
-    assert m.nodes[m.top]['name']=='tidal_downloads' and 'No downloads yet' in [n.get('text') for n in m.nodes.values()]
+    assert m.nodes[m.top]['name']=='tidal_downloads' and 'No downloads' in [n.get('text') for n in m.nodes.values()]
     f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.top=top
     # AirPlay, last: stock's own receiver, its switch on System settings' Network service page, one press away.
     airplay=m.nodes[m.nodes[view]['children'][4]]['children'][0]; icon,label=m.nodes[airplay]['children'][:2]
@@ -14073,8 +14075,8 @@ def streaming():
 assert streaming()==[1,'Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
 m.click(rows['Configuration']); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
 SVC=['TIDAL','Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay']
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services',*SVC]
-cap=m.rows()[4]; assert not m.nodes[cap]['children'] and not m.nodes[cap].get('handlers')
+assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming',*SVC]
+cap=m.rows()[4]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
 def ticks(): return [switch(m,i)=='switch_on' for i in range(5,len(m.rows()))]  # Shanling's switches
 assert ticks()==[True]*7
 m.row(7); assert m.config['STREAMHIDE']=='deezer' and ticks()==[True,True,False,True,True,True,True]

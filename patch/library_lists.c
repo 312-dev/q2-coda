@@ -277,8 +277,11 @@ static void *songs_rows(const char *dir, const char *title, int tidal, int album
     if (ll.td_list) deque_destroy(ll.td_list);
     ll.td_list = card_songs(dir, album);
     int n = (int)deque_size(ll.td_list);
-    void *view =
-        page_list_or(ll.td_page, ll.td_page, title, "No downloads yet", n + (tidal && n), 48);
+    void *view = page_list_or(ll.td_page, ll.td_page, title,
+                              tidal ? "No downloads" : "No downloads yet", n + (tidal && n), 48);
+    /* Tidal's songs are kept as they play (docs/downloads.md): the note's hint says so */
+    if (tidal && !n)
+        feedback_empty(ll.td_page, 0, "No downloads", "Songs you play from TIDAL are kept here");
     char name[256];
     for (int i = 0; i < n; i++) {
         song_label(P(deque_at(ll.td_list, (unsigned)i), REC_NAME), tidal, name, sizeof name);
@@ -640,8 +643,9 @@ static void ls_show(void) {
     if (n) qsort(v, n, sizeof *v, by_length);
     for (unsigned i = 0; i < n; i++) _deque_push_back(list, deque_at(songs, v[i].key));
     st.rt_list = list;
-    void *view =
-        page_list_or(st.rt_page, st.rt_page, "Long Songs", "No songs over 10 minutes", (int)n, 64);
+    void *view = page_list_or(st.rt_page, st.rt_page, "Long Songs", "No long songs", (int)n, 64);
+    /* the note's hint says what would list here (docs/oled-design.md#empty-and-offline) */
+    if (!n) feedback_empty(st.rt_page, 0, "No long songs", "Songs over 10 min show up here");
     char name[512], detail[300], t[16];
     for (unsigned i = 0; i < n; i++) {
         void *r = deque_at(list, i);

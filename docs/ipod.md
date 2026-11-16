@@ -501,7 +501,7 @@ The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)):
 
 Centre on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
 
-**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order, stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Centre opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for stock's New over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
+**Playlists as covers.** Display → Cover Flow's **Playlist View: Cover Flow** (`Q2POD PLAYLISTCF`, List by default) opens the Playlists list ([internals.md](internals.md#playlist-art)) as covers, from every entry (Library, Home's list, the shortcut): the page opens veiled, and on the next pass the covers open over it, the playlists in the list's order, stopping at both ends. Return closes both and goes back to where Playlists was opened. With no playlists, or in the Add to Playlist picker, the list shows. A cover is the playlist's art at 160 pixels (a placeholder until it is made): the covers are the view; the caption is its name over "N songs" (or "1 song"), in the album's two lines. There are no letters, no Sort cards and no remembered position. Centre opens the playlist's own list over the covers, as a tap on its row does, and Return comes back to them. A song plays in the list's order; Now Playing's More then has no Delete, which for those songs would take the song out of the library, not the playlist, until another queue plays. Edits made from the covers show as they come back to them: after More…'s Rename or Delete a deleted playlist's cover goes and a renamed one shows its new name, a new playlist gets a cover, and a playlist whose songs changed shows its new count and art. Hold Play/Pause on a cover gives Play Next, Add to Queue, Shuffle and More… as on the list's row, then **New Playlist**, which closes the covers for New Playlist's letter strip over the Playlists page, and, on a set with no toolbar (OLED's), **Select Playlists…**, which closes them for its select mode (a set with a toolbar edits from the page's toolbar).
 
 ## Rounded corners
 
@@ -1059,9 +1059,13 @@ painted it white, which drew the box at rest.
   faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
   rows while it shows. The wheel walks the strip (round from delete to A) and Centre enters the lit character at
   the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
-  text's start it does nothing but click), and a held Return closes Search from anywhere on the page (the hold's
-  700 ms, as [Hold Return](#hold-return) times it, `search_strip_hold`). A space is never typed first or beside
-  another. A text longer than the box scrolls to keep the cursor in it.
+  text's start it does nothing but click), and a held Return closes Search from anywhere on the page: 200 ms into
+  the hold a card says "Keep holding to go back" over the dimmed page, its ring filling until 800 ms, when Search
+  closes; let go before and nothing is erased (`search_strip_down`, [oled-design](oled-design.md#text-entry)). A space is never typed first or beside
+  another. A text longer than the box scrolls to keep the cursor in it. With nothing typed, the free area above
+  the strip says what Search finds, as an empty list's note does: "Search your music" in 16 px Text Secondary and
+  "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centred on y 144 and 168 (Add Songs'
+  Search: "Songs by title or artist").
   What holds the text lists above the strip as it is typed: the songs whose title, artist or album holds it, then
   the artists whose name holds it, then the albums, each artist and album once; six single-line rows from y 58, the
   name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
@@ -1085,13 +1089,31 @@ painted it white, which drew the box at rest.
   plays it, and a drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a
   list's row change does, and Centre, Next, Previous and Return click as a button does, through the Clicker
   setting.
-- <a id="keyboard"></a>**The keyboard.** The keyboard other text boxes open (New Playlist, Rename, the Wi-Fi password)
-  keeps stock's layout and labels on the page's black: each key a `#1C1C1E` box with 8 px corners, every one inside
-  the glass's corners (`patch/keyboard.c`, the same `list.entry.ipod`). The wheel walks the keys of the page showing,
-  the word candidates first while there are any: the first turn lights the first key in the accent, the next ones
-  move along, stopping at either end. Centre presses the lit key as a tap does, so a letter key typed twice in quick
-  succession gives its second letter, as on a phone, and the page keys (ABC, 123, sym) change the page with the light
-  kept in its place. Return is the box's own: it closes the keyboard, or the box with it.
+- <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
+  playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
+  (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip with its typed-text
+  field off: the same pill in the same place, the letters run across the whole of it (x 46 to 329, the lit key centred
+  at x 178, seven cells each side), and the name is written large in the middle of the screen, Inter Medium 22 white
+  centred on y 140 with a steady cursor, over the hint "Press Next to create" or "Press Next to save" in 15 px Text
+  Tertiary on y 180. The status row reads New Playlist or Rename Playlist. A word's first letter is typed as a
+  capital. Previous and Next move the cursor along the name; Next with the cursor at the name's end creates the
+  playlist (`ringnav_playlist_create`, "Playlist created", and the list goes back to open on it) or saves the new name
+  ("Renamed"), and the page closes; an empty name ("Name can't be empty") or one taken ("A playlist has that name")
+  says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
+  on Search.
+- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
+  time one opens, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
+  its keys hidden and the window over the screen under the status row (`search_strip_box`,
+  [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
+  Field off, with its set chip (abc, ABC, 123, #+=,
+  stepped by Play/Pause) and the box's text prefilled; a password shows as dots ("Password" over them, the character
+  just typed for a second, all of it while Play/Pause is held). Next at the text's end writes the
+  text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
+  acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
+  closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
+  keyboard's Return did), leaving the box. Under another theme
+  the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Centre pressing the lit
+  one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
   length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
   an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the

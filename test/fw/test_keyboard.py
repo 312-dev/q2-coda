@@ -125,3 +125,17 @@ def test_a_key_the_keyboard_takes_frees_stock_s_click_latch(fw, ui):
     for key in (KEY_NEXT, KEY_NEXT, KEY_CENTER, KEY_PREV):
         latch.value = 1
         assert k.key(key) == [1] and latch.value == 0
+
+
+def test_a_keyboard_first_seen_gives_way_to_the_letter_strip_for_its_edit(fw, ui):
+    """The user's P1 (2026-11-17): no box keeps the keyboard; the strip opens on its window for the input method's edit,
+    its keys hidden (the input method keeps both, for the box's OK, and no focus moves)."""
+    k = Keyboard(fw, ui)
+    edit = ui.new('edit', 0, 0, 0, 200, 40)
+    C.c_void_p.from_address(C.addressof(k.im) + O['IM_WIDGET']).value = edit
+    k.key(KEY_NEXT)  # its first key (or its first paint) styles it
+    (t, _), = ui.pending('keyboard__kb_strip_due')
+    ui.fire('keyboard__kb_strip_due')
+    from test_search_strip import Ss
+    assert fw.var('search_strip__ss', Ss).box == edit
+    assert k.kb not in ui.hidden and k.pages in ui.hidden and k.cand in ui.hidden  # its window the strip's, keys hidden

@@ -815,7 +815,8 @@ def test_long_songs_with_none_says_so(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw, {LENGTHS: lengths((b'/m/a.flac', 60))})
     call(fw, 'long_songs')
-    assert 'No songs over 10 minutes' in ui.shown(ui.top()) and ui.rows(ui.top()) == []  # no fake row
+    # the house note and its hint (audit2 K1), no fake row
+    assert {'No long songs', 'Songs over 10 min show up here'} <= set(ui.shown(ui.top())) and ui.rows(ui.top()) == []
     call(fw, 'long_songs')  # pressed again while it is open
     assert len(ui.windows) == 1
 
@@ -1760,7 +1761,8 @@ def test_a_download_gone_from_the_card_does_not_play(fw, ui, song):
 def test_no_downloads_says_so(fw, ui, song):
     Card(fw, ui, song, {})
     call(fw, 'tidal_downloads')
-    assert 'No downloads yet' in ui.shown(ui.top()) and ui.rows(ui.top()) == []
+    shown = set(ui.shown(ui.top()))  # the house note and its hint: Tidal keeps what it plays (audit2 K1)
+    assert {'No downloads', 'Songs you play from TIDAL are kept here'} <= shown and ui.rows(ui.top()) == []
 
 
 def test_clear_all_asks_first_and_cancel_keeps_them(fw, ui, song):
@@ -1798,7 +1800,7 @@ def test_remove_clears_every_download(fw, ui, song):
     ui.click(page, 2)
     ui.fire('td_show')
     assert list(card.files) == ['/mnt/mmc/.tidal/.cache-size']  # Keeps settings
-    assert 'No downloads yet' in ui.shown(page)
+    assert 'No downloads' in ui.shown(page)
 
 
 def test_one_download_is_a_track(fw, ui, song):
@@ -1933,7 +1935,9 @@ SERVICES = ['TIDAL', 'Spotify', 'Tidal Downloads', 'Internet Radio', 'AirPlay']
 def test_configuration_lists_the_caches_erase_stop_and_each_service(fw, ui):
     page, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'}, hide=b'RADIO')
     assert ui.name[page] == 'streamconf_page'
-    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services', None]
+    # the toggles under a section header (audit2 E1): a whole row, so the list scrolls in whole rows
+    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services',
+                                     'Show in Streaming']
     assert switches(ui, page) == [(s, s != 'Internet Radio') for s in SERVICES]
     call(fw, 'stream_config')
     assert ui.windows == [page]

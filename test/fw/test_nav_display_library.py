@@ -2988,3 +2988,20 @@ def test_other_sets_keep_the_artist_pages_tabs(fw, st, stand_in, records):
     artist(fw, stand_in, records, rows, songs, view=b'0')
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
     assert page.tab.visible and not fw.fn('artist_local_on', C.c_int, C.c_void_p)(page.win.addr)
+
+
+def test_appearance_keeps_its_own_place_not_displays(fw):
+    """Appearance is Display's page opened again (display_open): position memory (context_now) keys it apart from
+    Display, so it opens on its own first row, not on the row Display was left at (audit2 J9)."""
+    ui = Ui(fw)
+    page = appearance(fw, ui)
+    display_page, sub = page.pages
+    now = fw.fn('navigation__context_now', C.c_int, C.POINTER(C.c_uint))
+    scopes = []
+    for win in (display_page, sub):  # each the top window in turn: the window manager's last
+        ui.wm.children.remove(win)
+        ui.wm.children.append(win)
+        scope = C.c_uint()
+        now(C.byref(scope))
+        scopes.append(scope.value)
+    assert sub.props.get('_display_sub') == 1 and scopes[0] != scopes[1]

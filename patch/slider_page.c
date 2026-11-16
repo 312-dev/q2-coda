@@ -168,10 +168,21 @@ void slider_page_paint(void *w, void *canvas) {
             sp_text(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2, face ? face : faces[0],
                     px, RGBA(0xffffff));
         }
-        switch_mark(canvas, x1, SP_ROW / 2,
-                    !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
+        if (night_page(w)) { /* Night Shift's three choices: a value, white on the bar */
+            static const char *const modes[] = { "Off", "On", "Auto" };
+            int on = night_on();
+            px = theme()->font_px[ROLE_TITLE];
+            sp_text(canvas, buf,
+                    wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
+                    x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
+        } else
+            switch_mark(canvas, x1, SP_ROW / 2,
+                        !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
         st.raw_ink = raw;
     }
+    /* Night Shift while Off: the value, the track and the knob in Text Tertiary, no accent, as a
+     * disabled row (docs/oled-design.md Progress and sliders) */
+    int idle = night_page(w) && !night_on();
     void *view = P(sp.slider, W_PARENT);
     if (!widget_get_visible(view)) { /* stock hides it while Default Volume's switch is off */
         stock_canvas_set_fill_color(canvas, fill);
@@ -185,7 +196,7 @@ void slider_page_paint(void *w, void *canvas) {
         while (*p && *p != ':') ++p;
         if (*p) v = p + 1 + (p[1] == ' ');
         sp_text(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
-                SP_VALUE_PX, RGBA(0xffffff));
+                SP_VALUE_PX, RGBA(idle ? S->muted : 0xffffff));
     }
     /* the track, its fill to the knob's centre, and the knob, final in each half */
     int part = slider_part(sp.slider, x1 - x0 - SP_KNOB), y = SP_TRACK_Y - top;
@@ -200,12 +211,18 @@ void slider_page_paint(void *w, void *canvas) {
         /* Channel Balance's fill runs from the centre, where neither side is turned down */
         float from = sp.kind == SLIDER_BALANCE ? (float)(x0 + x1) / 2 : (float)x0,
               a = from < kx ? from : kx, b = from < kx ? kx : from;
-        if (b - a >= 1) {
+        if (b - a >= 1 && !idle) {
             pill(vg, a, (float)y, b - a, SP_TRACK_H);
             vgcanvas_set_fill_color(vg, RGBA(accent));
             vgcanvas_fill(vg);
         }
-        knob(vg, kx, (float)y + SP_TRACK_H / 2.0f, 0, 0);
+        if (idle) { /* a knob in Text Tertiary, which needs no Light Mode edge */
+            vgcanvas_begin_path(vg);
+            vgcanvas_arc(vg, kx, (float)y + SP_TRACK_H / 2.0f, SP_KNOB / 2.0f, 0, 6.2831853f, 0);
+            vgcanvas_set_fill_color(vg, RGBA(S->muted));
+            vgcanvas_fill(vg);
+        } else
+            knob(vg, kx, (float)y + SP_TRACK_H / 2.0f, 0, 0);
         vgcanvas_restore(vg);
         st.raw_ink = raw;
     }

@@ -1,12 +1,31 @@
-/* A set_switch theme's settings pages that are no list of rows, and the rows' captions (below). About as an inert table
- * (docs/oled-design.md Screens: About): stock's rows, each a key and its value, stay where set_row
- * maps them but take no selection, wheel or tap (disabled, so ringnav's collect passes them), the
- * key in Text Primary and the value in the theme's value grey, in the disable state too, each value
- * as wide as its key leaves it (about_rows); from ipod_list_layout, after set_row. */
+/* A set_switch theme's settings pages that are no list of rows, and the rows' captions (below).
+ * About as a key/value table (docs/oled-design.md Screens: About): stock's rows, each a key and its
+ * value, stay where set_row maps them and take the selection, so the wheel walks them and a value
+ * cut off at its column scrolls on the selected row (the house marquee, navigation.c marq_moved),
+ * but nothing opens: stock's row click (its serial number's QR code) gives way to one that does
+ * nothing. The key is in Text Primary and the value in the theme's value grey, each value as wide
+ * as its key leaves it (about_rows); from ipod_list_layout, after set_row. */
 #include "navigation.h"
 
 #define ABOUT_INK_STATES 4 /* text_ink's normal, pressed, over and disable */
 #define ABOUT_GAP 12       /* between a key's text and the widest its value may reach */
+#define ABOUT_ROW_CLICK ((void *)0x4c12f8) /* systemset_about_row_on_click */
+
+/* A row's tap and Centre do nothing: About is to read. The click makes the row a wheel stop. */
+static int about_click(void *ctx, void *event) { return 0; }
+/* w's stock row click off, ours on, once. */
+static void about_inert(void *w) {
+    if (!w || widget_get_prop_int(w, "_about_click", 0)) return;
+    void *emitter = P(w, W_EMITTER);
+    for (void *e = emitter ? P(emitter, 0) : (void *)0; e; e = P(e, EMIT_NEXT))
+        if (I(e, EMIT_TYPE) == EVT_CLICK && P(e, 12) == ABOUT_ROW_CLICK &&
+            !B(e, EMIT_PENDING_REMOVE)) {
+            widget_off_by_func(w, EVT_CLICK, ABOUT_ROW_CLICK, P(e, 0));
+            break;
+        }
+    widget_on(w, EVT_CLICK, about_click, w);
+    widget_set_prop_int(w, "_about_click", 1);
+}
 
 /* label's text's width in px, in the face and size its row draws it; -1 with no canvas yet */
 static int about_text_w(void *label) {
@@ -37,7 +56,7 @@ void about_rows(void *view) {
         void *item = widget_get_child(view, i),
              *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0,
              *key = (void *)0, *val = (void *)0;
-        widget_set_enable(item, 0);
+        about_inert(b);
         for (unsigned j = 0, k = b ? widget_count_children(b) : 0; j < k && !val; ++j) {
             void *c = widget_get_child(b, j);
             if (tk_strcmp(widget_get_type(c), "hscroll_label")) continue;

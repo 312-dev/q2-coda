@@ -331,7 +331,7 @@ extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
     search_strip_hold(void *top);
-void search_strip_paint(void *w, void *canvas);
+void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
 extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *, void *),
@@ -609,6 +609,9 @@ int video_on(void);
 /* keylock.c: Buttons Lock's padlock and its card (docs/internals.md#buttons-lock) */
 int keylock_gate(void *e, int remote), keylock_bar(void *bar), keylock_room(void);
 void keylock_paint(void *w, void *canvas);
+/* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
+int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
+void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
 int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
 
 /* theme_engine.c */
@@ -774,12 +777,17 @@ int playlist_add(void *r, int dest);
 int playlist_remove(int dest, void *r);
 void playlist_synced(int dest);
 int playlist_rename(int id, const char *name);
+/* a playlist id, -2 for a name taken, -1 when it fails */
+int ringnav_playlist_create(void *list, const char *name);
 int playlist_delete(int id);
 int otg_clear(void);
 int otg_save(char *name, unsigned size);
 int playlist_confirm(const char *question, const char *verb);
 void playlist_pick_open(void *r);
 void playlist_rename_open(int id, const char *name); /* search_strip.c: the letter strip */
+void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its field off */
+/* search_strip.c: a text box on the strip, on its keyboard's window */
+int search_strip_box(void *kb, void *edit, const char *title);
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */

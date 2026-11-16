@@ -9,6 +9,7 @@ import pytest
 
 from conftest import O
 from test_nav_library_pages import Config, Library, Songs, Ui, field
+from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload's state)
 
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
@@ -24,9 +25,12 @@ OLED = b'3'
 
 class Ss(C.Structure):
     _fields_ = [*((k, C.c_void_p) for k in 'page sheet songs match kind'.split()),
-                *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick'.split()),
-                *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 49),
-                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte)]
+                *((k, C.c_int) for k in 'nmatch letter focus sel top nsongs tab any cur by rename pick create'.split()),
+                ('box', C.c_void_p), ('secret', C.c_int), ('set', C.c_int), ('typed_at', C.c_uint), ('show_timer', C.c_uint),
+                ('shown', C.c_ubyte), ('play_held', C.c_ubyte),
+                *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 65),
+                ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
+                ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte)]
 
 
 @pytest.fixture
@@ -520,11 +524,18 @@ def test_the_strip_is_a_low_pill_with_the_text_s_box_and_its_cursor(fw, ui, song
     assert letters == ['9', 'A', 'B', 'C', 'D', 'E', 'F']  # four cells each side of B: the space and delete drawn
 
 
-def test_the_run_s_ends_fade_into_the_strip(fw, ui, song):
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_run_s_ends_fade_into_the_strip(fw, ui, song, st, light):
+    """Each end of the letters' run fades from clear to exactly the pill's own fill (device bug, 2026-11-17: the fade
+    was the pill's grey with red and blue swapped, #1E1C1C on #1C1C1E, a tinted band at each end), in either half."""
     s = Strip(fw, ui, library(song))
+    st('light').value = light
     c = painted(fw, s)
-    fade = {r[0]: ink >> 24 for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff == 0x1c1c1e}
+    pill = [ink for b, ink, _ in c.boxes if b == (40, 196, 295, 34)]
+    assert len(pill) == 1 and rgb(pill[0]) == (0xe3e3e1 if light else 0x1c1c1e)
+    fade = {r[0]: ink >> 24 for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff == pill[0] & 0xffffff}
     assert fade[148] == 255 and fade[326] == 255 and fade[148 + 21] < 20 and 148 + 22 not in fade
+    assert not [r for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff != pill[0] & 0xffffff]
 
 
 def test_the_rows_fill_the_glass_above_the_strip_and_the_tabs_take_the_first_one(fw, ui, song):
@@ -589,19 +600,19 @@ def renaming(fw, ui, name):
 
 
 def test_rename_opens_on_the_name_typing_a_word_s_first_letter_as_a_capital(fw, ui):
-    """A playlist's Rename (its hold menu): the strip with its name, the cursor at its end, a word's first
-    letter a capital; Next at the end moves to Done, Centre there saves (name and filename, as stock's), toasts
-    and goes back."""
+    """A playlist's Rename (its hold menu): the strip with its field off and the name over it, prefilled, the
+    cursor at its end, a word's first letter a capital; Previous and Next move the cursor, and Next at the end
+    saves (name and filename, as stock's), toasts and goes back (audit2 05b)."""
     sql = Renames(fw)
     s = renaming(fw, ui, b"Road")
     ss = s.ss
-    assert ui.name[ui.top()] == 'searchstrip_page' and ss.text == b'Road' and ss.rename == 5 and ss.nmatch == 1
-    assert ss.cur == 4 and 'Rename' in ui.text.values()
+    assert ui.name[ui.top()] == 'searchstrip_page' and ss.text == b'Road' and ss.rename == 5 and ss.nmatch == 0
+    assert ss.cur == 4 and 'Rename Playlist' in ui.text.values()
     s.type(' tu')  # a space, T, then u
     assert ss.text == b'Road Tu'
-    s.key(KEY_FWD_BTN)  # to Done
-    assert ss.focus == 1 and not sql.log
-    s.key(KEY_CENTER)
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)  # the cursor back a character and on again: nothing saved
+    assert ss.cur == 7 and ss.focus == 0 and not sql.log
+    s.key(KEY_FWD_BTN)  # at the end: saved
     assert b"update playlist set name='Road Tu',filename='Road Tu' where id=4" in sql.log
     assert ui.toasts[-1] == 'Renamed' and ui.backs == 1
 
@@ -609,15 +620,50 @@ def test_rename_opens_on_the_name_typing_a_word_s_first_letter_as_a_capital(fw, 
 @pytest.mark.parametrize('taken, fail, said', [(1, False, 'A playlist has that name'), (0, True, 'Could not rename playlist')])
 def test_a_rename_refused_says_why_and_stays(fw, ui, taken, fail, said):
     sql = Renames(fw, taken, fail)
-    renaming(fw, ui, b"Rock 'n' Roll").key(KEY_FWD_BTN, KEY_CENTER)
+    renaming(fw, ui, b"Rock 'n' Roll").key(KEY_FWD_BTN)
     assert any(b"filename='Rock ''n'' Roll'" in st for st in sql.log)  # quoted
     assert ui.toasts[-1] == said and ui.backs == 0
 
 
 def test_an_empty_name_is_not_saved(fw, ui):
     sql = Renames(fw)
-    renaming(fw, ui, b' ').key(KEY_FWD_BTN, KEY_CENTER)
+    renaming(fw, ui, b' ').key(KEY_FWD_BTN)
     assert ui.toasts[-1] == "Name can't be empty" and not sql.log
+
+
+class Creates(Renames):
+    """sqlite3_exec as ringnav_playlist_create runs it: the insert's changes() 1 unless fail."""
+    def run(self, db, sql, callback, ctx, *_):
+        statement = C.string_at(sql)
+        if statement.startswith(b'insert'):
+            self.log.append(statement)
+            if self.fail:
+                return 1
+            value = (C.c_char_p * 1)(b'1')
+            return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_int, C.c_void_p, C.c_void_p)(callback)(ctx, 1, C.addressof(value), None)
+        return super().run(db, sql, callback, ctx)
+
+
+@pytest.mark.parametrize('taken, fail, said, back', [(0, False, 'Playlist created', 1), (1, False, 'A playlist has that name', 0),
+                                                     (0, True, 'Could not create playlist', 0)])
+def test_new_playlist_names_it_on_the_strip_and_next_at_the_end_makes_it(fw, ui, taken, fail, said, back):
+    """New Playlist (audit2 05b): the strip's field off, empty; Next before the name's end moves the cursor, at its
+    end makes the playlist (ringnav_playlist_create), toasts and goes back; refused, it says why and stays."""
+    Config(fw)
+    sql = Creates(fw, taken, fail)
+    fw.fn('playlist_new_open', None)()
+    s = Strip.__new__(Strip)
+    s.fw, s.ui, s.stock = fw, ui, []
+    s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+    assert s.ss.create == 1 and s.ss.text == b'' and 'New Playlist' in ui.text.values()
+    s.type('road trip')
+    assert s.ss.text == b'Road Trip'
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)
+    assert not [q for q in sql.log if q.startswith(b'insert')]
+    s.key(KEY_FWD_BTN)
+    inserts = [q for q in sql.log if q.startswith(b'insert')]
+    assert len(inserts) == (not taken) and all(b"'Road Trip'" in q for q in inserts)
+    assert ui.toasts[-1] == said and ui.backs == back
 
 
 def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_place(fw, ui, song):
@@ -643,3 +689,108 @@ def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_plac
     s.key(KEY_FWD_BTN, KEY_CENTER)
     assert added == [0] and ui.toasts[-1].startswith('Added to') and s.ss.nmatch == 2
     assert ui.backs == 0 and not ui.played
+
+
+# Return held on any letter-strip page (the user's, 2026-11-17, mock_hold_back.py): a press erases; held, a card shows
+# from SHOW_MS and the page closes at HOLD_MS; let go before, and nothing is erased.
+SHOW_MS, HOLD_MS = 200, 800
+
+
+def r_h(ui):
+    """The top window's height, which the scrim covers."""
+    return C.c_int.from_address(ui.top() + O['W_H']).value
+
+
+@pytest.mark.parametrize('held_ms, erased, closed, card', [(60, True, False, False), (400, False, False, True),
+                                                           (HOLD_MS, False, True, False)])
+def test_return_held_shows_its_card_and_leaves_and_a_press_erases(fw, ui, song, held_ms, erased, closed, card):
+    s = Popping(fw, ui, library(song))
+    s.type('ab')
+    down = fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)
+    down(ui.top(), KEY_RETURN)
+    down(ui.top(), KEY_RETURN)  # a repeat while held changes nothing
+    assert len(ui.pending('search_strip__ss_hold_tick')) == 1
+    for at in range(0, held_ms, 33):
+        s.now[0] += min(33, held_ms - at)
+        if s.now[0] - 100000 >= SHOW_MS and ui.pending('search_strip__ss_hold_tick'):
+            ui.fire('search_strip__ss_hold_tick')
+    assert bool(s.ss.held) == card
+    if card:  # over the page, after stock painted it (ringnav_paint), the screen dimmed first
+        from test_nav_painters import Canvas
+        c = Canvas(fw)
+        fw.fn('search_strip_overlay', None, C.c_void_p, C.c_void_p)(ui.top(), c.addr)
+        assert [t for t, *_ in c.texts] == ['Keep holding to go back']
+        assert [(r, ink) for r, ink in c.rects if r[2] == 375][:1] == [((0, 0, 375, r_h(ui)), 0x8c000000)]
+    if not closed:
+        s.key(KEY_RETURN)  # the release
+    assert (s.ss.text == b'a') == erased and (s.ss.text == b'ab') == (not erased)
+    assert ui.backs == int(closed) and not s.ss.held and not s.ss.hold_at
+
+
+def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
+    """Field off (New Playlist, Rename): the name in Inter Medium 22 (AWTK's 27), as the mock-up draws it."""
+    Config(fw)
+    fonts = []
+    fw.mock('canvas_set_font', lambda c, face, px, *_: fonts.append((C.string_at(face), px & 0xffffffff)))
+    s = renaming(fw, ui, b'Road')
+    painted(fw, s)
+    assert (b'inter-medium', 27) in fonts
+
+
+# A stock text box (keyboard.c kb_strip_due) on the strip (the user's P1, mock_strip_password.py): its set chip, Play/Pause
+# stepping abc, ABC, 123, #+=; Next at the text's end the box's own OK.
+LOWER, UPPER, DIGITS, SYMBOLS = 0, 1, 2, 3
+
+
+def boxed(fw, ui, text=b'', kind='password'):
+    """A text box's edit, the input method's, opened on the strip."""
+    Config(fw)
+    edit = ui.new('edit', 0, 0, 0, 200, 40)
+    ui.props[(edit, 'input_type')] = kind
+    ui.text[edit] = text.decode()
+    im = C.create_string_buffer(0x40)
+    C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
+    fw.mock('input_method', lambda *_: C.addressof(im))
+    s = Strip.__new__(Strip)
+    kb = ui.new('window_create', 0, 0, 60, 375, 260)  # the input method's keyboard window, top
+    keys = ui.new('pages', kb, 0, 40, 375, 221)
+    s.fw, s.ui, s.stock, s.im, s.edit, s.kb, s.keys = fw, ui, [], im, edit, kb, keys
+    assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Home Wi-Fi') == 1
+    s.ss, s.take = fw.var('search_strip__ss', Ss), fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+    return s
+
+
+def test_a_password_box_types_its_sets_and_next_at_the_end_is_its_ok(fw, ui):
+    fw.mock('time_now_ms', lambda *_: 50000)  # the last character typed, a moment ago
+    s = boxed(fw, ui)
+    assert s.ss.secret == 1 and s.ss.set == LOWER and 'Home Wi-Fi' in ui.text.values()
+    assert s.ss.page == s.kb and s.keys in ui.hidden  # on the keyboard's window, its keys hidden: no focus moves
+    s.key(KEY_NEXT, KEY_CENTER)  # b
+    s.key(KEY_PLAY)  # ABC
+    s.key(KEY_CENTER)  # the set's first: A
+    s.key(KEY_PLAY, KEY_PLAY, KEY_CENTER)  # #+=: !
+    s.key(KEY_PLAY, KEY_NEXT, KEY_CENTER)  # round to abc: b
+    assert s.ss.text == b'bA!b' and s.ss.set == LOWER
+    texts = [t for t, *_ in painted(fw, s).texts]
+    assert 'Password' in texts and 'abc' in texts and '•••b' in texts  # the last typed shows
+    s.key(KEY_BACK_BTN, KEY_FWD_BTN)
+    assert not fw.calls('input_method_dispatch_action')  # Next before the end moves the cursor
+    s.key(KEY_FWD_BTN)
+    assert ui.text[s.edit] == 'bA!b' and not ui.backs
+    assert [a[0] for _, a in fw.calls('input_method_dispatch_action')] == [C.addressof(s.im)]
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the OK left it open: closed, as Done does
+
+
+def test_a_number_box_opens_on_digits_and_a_text_one_keeps_its_text(fw, ui):
+    assert boxed(fw, ui, b'1000', 'text').ss.set == DIGITS
+
+
+def test_return_held_on_a_box_closes_it_and_its_keyboard(fw, ui):
+    s = boxed(fw, ui, b'abc', 'text')
+    s.now = [100000]
+    fw.mock('time_now_ms', lambda *_: s.now[0])
+    fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)(ui.top(), KEY_RETURN)
+    s.now[0] += HOLD_MS
+    ui.fire('search_strip__ss_hold_tick')
+    assert not ui.backs and not fw.calls('input_method_dispatch_action')
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the keyboard closed with it
