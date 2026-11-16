@@ -312,11 +312,23 @@ int home_rest(void *view, int *foot) {
 
 /* The scroll view's content as AWTK's touch scroll clamps it (to the content less the view): the
  * shown rows, and under them the box's rows past the rest, so a drag stops where the wheel does. A
- * relayout puts stock's back, so the list's paint sets it again (coverflow_home_clip). */
+ * relayout puts stock's back, so the list's paint sets it again (coverflow_home_clip). That
+ * relayout (Home coming back on top) also clamps the scroll to stock's content, which moved a list
+ * scrolled to its end down until its last row sat on the screen's foot. Found with stock's content
+ * (the rows' foot, no padding), the scroll goes back to where the last paint saw the view end
+ * (HOME_END, its foot in the content, plus 1): the paint moves and stretches the view by turns
+ * (its top past the window's in Split's band), which its foot in the content does not see. */
+#define HOME_END "_home_end"
 void home_pad(void *view) {
     int foot, rest = home_rest(view, &foot);
-    if (rest)
-        I(view, VIEW_CONTENT_H) = foot + I(view, W_H) - (rest < I(view, W_H) ? rest : I(view, W_H));
+    if (!rest) return;
+    int h = I(view, W_H), content = foot + h - (rest < h ? rest : h), y = I(view, SCROLL_Y),
+        kept = widget_get_prop_int(view, HOME_END, 0) - 1 - h;
+    int relaid = I(view, VIEW_CONTENT_H) == foot; /* stock's own content: the rows' foot */
+    I(view, VIEW_CONTENT_H) = content;
+    if (relaid && kept > y && kept <= content - h)
+        scroll_view_set_offset(view, I(view, SCROLL_X), y = kept);
+    if (kept != y) prop(view, HOME_END, y + h + 1);
 }
 
 /* coverflow.c coverflow_home_layout, once list (Home's main list) is placed: its box to bottom (the
