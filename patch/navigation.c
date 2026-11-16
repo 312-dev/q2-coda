@@ -9306,9 +9306,10 @@ static int now_playing(void) {
 }
 
 /* Now Playing's visualizer repainting or its lyrics gliding: its 40 ms timer and the glide's steps
- * would run late on an idle pass. Its progress and the lyrics'
- * follow tick every 250 ms and keep up. A game's 33 ms frame timer too: Vortex's raw wheel posts no
- * input to stamp, nor does a card game's, whose travel goes once a pass. */
+ * would run late on an idle pass. Its progress and the lyrics' follow tick every 250 ms and keep
+ * up. A game's 33 ms frame timer too, and the engine's, due every pass (engine.c): Vortex's raw
+ * wheel posts no input to stamp, nor does an engine game's or a card game's, whose travel goes
+ * once a pass. */
 static int np_animating(void) {
     return games_live() || addon_game_on() ||
            (now_playing() && ((NP_VISUALIZER && visualizer_live()) || st.lyric_glide));
@@ -9863,6 +9864,7 @@ int ringnav_keydown(void *ctx, void *event) {
     unsigned key = event ? (unsigned)I(event, EVENT_KEY) : 0;
     if (ple_key(key, 1)) return STOP;
     void *top = window_manager_get_top_window(window_manager());
+    if (usable() && games_keydown(top, key)) return STOP; /* an engine game's press (games.c) */
     /* np_centre's hold, timed from the press: its repeats (every 50 ms while held) keep
      * chord_gate's centre_at, which ringnav_input set before this */
     if (key == KEY_CENTER)

@@ -2,6 +2,7 @@
  * The logic comes first, host-tested (test/peq.py games_check); the page below draws both on a bare
  * sheet (games_paint) and takes a game's keys in ringnav() before stock does (games_key). The state
  * is on the heap only while the page is open; the scratch holds its pointer. */
+#include "engine.h"
 #ifdef PEQ_HOST
 #include "offsets.inc"
 #include "peq.h"
@@ -252,6 +253,12 @@ static unsigned vsqrt(unsigned long long n) {
             r >>= 1;
     return (unsigned)r;
 }
+
+/* engine.h's tables: Vortex's. */
+int eng_sin(int angle) { return vsin(angle); }
+int eng_cos(int angle) { return vcos(angle); }
+int eng_atan2(int y, int x) { return vangle(y, x); }
+unsigned eng_sqrt(unsigned long long n) { return vsqrt(n); }
 
 /* x, y's distance from the centre, 1/256 px. */
 static int radius(int x, int y) {
@@ -517,7 +524,8 @@ int snake_step(struct snake *s) {
 #define SN_CELL 11 /* Snake: the board, under the HUD and clear of the glass's corners */
 #define SN_X ((375 - SN_N * SN_CELL) / 2)
 #define SN_Y 36
-enum { CHOOSER, SUDOKU, VORTEX, SOLITAIRE, SNAKE };
+/* ENGINE + k: engine.c's game k, on the same sheet */
+enum { CHOOSER, SUDOKU, VORTEX, SOLITAIRE, SNAKE, ENGINE };
 /* Vortex, Snake: playing, paused by Play/Pause or the screen, Return's menu */
 enum { RUN, HELD, MENU };
 struct best {
@@ -539,6 +547,7 @@ static struct game {
     struct snake sn;
     int rows; /* the chooser's: its own games, then the card's */
     void *title; /* the caption the bar reads, where the theme's bar holds it */
+    int engines; /* the engine's games, the chooser's rows after its own four */
 } *g __attribute__((section(".scratch")));
 
 static int sud_started(const struct sudoku *s) {
@@ -576,6 +585,7 @@ static void hold(int paused) {
     g->paused = paused;
     wheel_raw = 0;
     stop_timer(&g->frame);
+    eng_hold();
 }
 
 /* A record score saved; an unfinished game never is. */
@@ -647,10 +657,14 @@ static int frame(const void *unused) {
 }
 
 /* A frame timer runs: ringnav_sleep keeps stock's pace. */
-int games_live(void) { return g && g->frame; }
+int games_live(void) { return g && (g->frame || eng_live()); }
 
 static void run(void) {
     g->paused = RUN;
+    if (g->screen >= ENGINE) { /* its own timer and wheel (engine.c) */
+        eng_run();
+        return;
+    }
     g->at = (unsigned)time_now_ms();
     g->acc = 0;
     g->carry = 0;
@@ -659,18 +673,31 @@ static void run(void) {
     if (!g->frame) g->frame = timer_add(frame, 0, FRAME_MS);
 }
 
+static void to(int screen);
+/* engine.c: the screen went off or another window covered the game; the game asked to end. */
+static void engine_held(void) {
+    hold(HELD);
+    widget_invalidate_force(g->page, 0);
+}
+static void engine_left(void) { to(CHOOSER); }
+
 static const char *const game_names[] = { "Games", "Sudoku", "Vortex", "Solitaire", "Snake" };
 /* The chooser or the game target, from the next loop pass. */
 static int show(const void *unused) {
     g->timer = 0;
     int from = g->screen;
     hold(RUN);
+    if (from >= ENGINE) eng_close();
+    if (g->target >= ENGINE && /* no memory for its state: the list stays */
+        !eng_open(eng_game(g->target - ENGINE), g->page, g->sheet, g->h, engine_held, engine_left))
+        g->target = CHOOSER;
     g->screen = g->target;
     g->picking = g->confirm = 0;
     widget_set_visible(g->list, g->screen == CHOOSER, 0);
     widget_set_sensitive(g->list, g->screen == CHOOSER); /* hidden, its rows still took a game's taps */
     widget_set_visible(g->sheet, g->screen != CHOOSER, 0);
-    if (g->title) page_retitle(g->page, g->title, game_names[g->screen]); /* the bar names the game */
+    if (g->title) page_retitle(g->page, g->title,
+                      g->screen >= ENGINE ? eng_game(g->screen - ENGINE)->name : game_names[g->screen]); /* the bar names the game */
     if (g->screen == CHOOSER) {
         flush(1);
         ringnav_select(g->view, from - 1, g->rows);
@@ -692,7 +719,7 @@ static int pick_game(void *ctx, void *event) {
     return 0;
 }
 static int pick_card_game(void *ctx, void *event) { /* the card's, over the whole screen */
-    if (g->screen == CHOOSER) addon_game_start((int)(long)ctx - 4);
+    if (g->screen == CHOOSER) addon_game_start((int)(long)ctx - GAMES_BUILTIN - g->engines);
     return 0;
 }
 
@@ -760,6 +787,24 @@ static int arcade_key(unsigned key, int over) {
     return 1;
 }
 
+/* An engine game's release: Return pauses it under the menu, whose keys and a pause's are
+ * arcade_key's; any other is the game's (engine.c). */
+static void engine_key(unsigned key) {
+    int paused = g->paused, choice = g->choice;
+    if (g->paused || key == KEY_RETURN)
+        arcade_key(key, 0);
+    else
+        eng_key(key, 0);
+    if (paused != g->paused || choice != g->choice) widget_invalidate_force(g->page, 0);
+}
+
+/* ringnav_keydown, before stock: a running engine game's press, so it knows a held button and
+ * stock makes no click of its own. Return's and a paused game's stay stock's. */
+int games_keydown(void *top, unsigned key) {
+    if (!g || top != g->page || g->screen < ENGINE || g->paused) return 0;
+    return eng_key(key, 1);
+}
+
 static void vortex_key(unsigned key) {
     if (!arcade_key(key, g->vx.state == OVER) && key == KEY_CENTER) vortex_launch(&g->vx);
 }
@@ -820,9 +865,14 @@ static void solitaire_key(unsigned key) {
 /* ringnav(), before stock: a game takes every key but Power and a held Return (Home), so the
  * wheel, Centre, Play/Pause and the side buttons never reach the volume, the media or the screen.
  */
+static void engine_key(unsigned key);
 int games_key(void *top, unsigned key) {
     if (!g || top != g->page || g->screen == CHOOSER) return 0;
     if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
+    if (g->screen >= ENGINE) {
+        engine_key(key);
+        return 1;
+    }
     struct game was = *g;
     if (g->screen == SUDOKU)
         sudoku_key(key);
@@ -885,6 +935,11 @@ static int text_at(void *canvas, const char *s, int x, int y, int h, unsigned px
     int r[4] = { x - 1, y, w + 2, h };
     draw_centred(canvas, wide, n, r, px, color);
     return w;
+}
+
+int games_text(void *canvas, const char *s, int x, int y, int h, unsigned px, unsigned color,
+               int align) {
+    return text_at(canvas, s, x, y, h, px, color, align);
 }
 
 /* A score line at y: the name in the quiet ink, the number in the loud one, from x or (right)
@@ -1146,7 +1201,9 @@ void games_paint(void *w, void *canvas) {
     if (!g || w != g->sheet || g->screen == CHOOSER || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), tone = accent_tone(2);
     unsigned raw = ui_ink_raw(0);
-    if (g->screen == SUDOKU)
+    if (g->screen >= ENGINE)
+        ui_ink_raw(1), eng_paint(canvas), ui_ink_raw(0), paused_popup(canvas, 0); /* its colours are final */
+    else if (g->screen == SUDOKU)
         sudoku_paint(canvas, tone);
     else if (g->screen == SOLITAIRE)
         solitaire_paint(canvas, tone);
@@ -1162,6 +1219,7 @@ static int closed(void *ctx, void *event) {
     hold(RUN);
     stop_timer(&g->timer);
     flush(0);
+    eng_close();
     free(g);
     g = 0;
     return 0;
@@ -1184,15 +1242,22 @@ int games_open(void *ctx, void *event) {
     g->list = widget_factory_create_widget(f, "view", page, 0, 0, 375, g->h);
     widget_set_visible(g->sheet, 0, 0);
     int cards = addon_games(); /* then the card's games (addon.c), by name */
-    g->rows = GAMES_BUILTIN + cards;
+    g->engines = eng_count(); /* then the engine's (engine.c), before the card's */
+    g->rows = GAMES_BUILTIN + g->engines + cards;
     g->view = page_list(page, g->list, 0, "Games", g->rows, 48);
     g->title = theme()->page_title_h ? (void *)0 : widget_lookup(g->list, PAGE_TITLE, 1);
     page_row_into(g->view, 0, "Sudoku", pick_game);
     page_row_into(g->view, 1, "Vortex", pick_game);
     page_row_into(g->view, 2, "Solitaire", pick_game);
     page_row_into(g->view, 3, "Snake", pick_game);
+    for (int k = 0; k < g->engines; ++k)
+        page_row_into(g->view, GAMES_BUILTIN + k, eng_game(k)->name, pick_game);
     for (int k = 0; k < cards; ++k)
-        page_row_into(g->view, 4 + k, addon_game_name(k), pick_card_game);
+        page_row_into(g->view, GAMES_BUILTIN + g->engines + k, addon_game_name(k),
+                      pick_card_game);
+    widget_on(g->sheet, EVT_POINTER_DOWN, eng_touch, 0); /* a finger on an engine game */
+    widget_on(page, EVT_POINTER_MOVE_BEFORE, eng_touch, 0);
+    widget_on(page, EVT_POINTER_UP_BEFORE, eng_touch, 0);
     if (!BLOB_IO(GAMES_SUDOKU, g->sud, 0) || !games_ok(&g->sud, sizeof g->sud, SUD_MAGIC) ||
         g->sud.cur > 80)
         sud_new(&g->sud);

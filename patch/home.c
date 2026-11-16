@@ -1,6 +1,7 @@
 /* Home's Library and Streaming: their pages and the lists Home's Split shows; and its main list's
  * overflow, the rows past the seven it rests on, and its selection as Now Playing's row comes and
  * goes. */
+#include "engine.h"
 #include "navigation.h"
 
 /* A Library row titled text; into: one that opens another list, with stock's own list_into
