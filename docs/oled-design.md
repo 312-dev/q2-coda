@@ -280,28 +280,45 @@ settings have none.
 
 ### Edit Library
 
-The Library's rows in the user's own order, from the approved mock-up `library-reorder.html`
-(2026-11-15). There is no Done button: the wheel's keys and a finger do it all.
+The Library's rows, and Home's, in the user's own order and with the user's choice of rows, from
+the approved mock-ups `library-reorder.html` (2026-11-15) and `mock_edit_home.py` (2026-11-16).
+There is no Done button: the wheel's keys and a finger do it all. Edit Home is the same editor on
+Home's list.
 
-- **Entered by** Centre held about half a second (550 ms) on the Library, or a finger held as long
-  on a row, which then drags that row. Centre held again, or Return when no row is lifted, saves
-  and leaves.
-- **In it** the status row reads "Edit Library", each row's chevron gives way to a grip (three
-  18x2 px bars 5 px apart, centred where the chevron was) in Text Tertiary, On Accent on the
-  selection, and a hint, "Drag ≡ to move · Centre picks up", Inter Regular 13 px in Text Tertiary,
-  is centred 14 px above the screen's foot (its middle at y 298), the grip drawn as its glyph.
-- **The wheel:** Centre lifts the selected row: it grows 8% about its middle (the bar's box, so
-  x 2 to 372 and 34 px tall), its words in Inter Medium 22 px, white, with a white grip, on a raised
-  `#2C2C2E` card with 9 px corners, a 1 px `#141414` ring and a soft black shadow 6 px down. The
-  wheel moves it a row a click, stopping at either end; Centre puts it down and saves. Return
-  while it is lifted puts it back exactly where it was, still in Edit Library.
+- **Entered by** Center held about half a second (550 ms) on the Library or on Home's list (not
+  Carousel, not a list a Home row opens), or a finger held as long on a row, which then drags that
+  row. Center held again, or Return when no row is lifted, saves and leaves.
+- **In it** the status row reads "Edit Library" or "Edit Home", every row the user can show is
+  listed, each row's chevron gives way to a grip (three 18x2 px bars 5 px apart, centered where the
+  chevron was) in Text Tertiary, On Accent on the selection, and a hint, "Drag ≡ to move ·
+  Play/Pause shows or hides", Inter Regular 13 px in Text Tertiary, is centered 14 px above the
+  screen's foot (its middle at y 298), the grip drawn as its glyph. Home in Split is laid out as
+  Full while the editor is open.
+- **Check circles:** a 16 px circle centered on x 34 left of each row, its words moved to x 52. A
+  row that shows has the accent's disc with a white 11 px bold check; a hidden row an empty 1.5 px
+  ring in Text Tertiary, its words dimmed to Text Tertiary. On the selection the disc is white with
+  the accent's check, the ring white, the words white. Home's Settings can't be hidden: its circle
+  is a `#3A3A3C` disc with a 10 px padlock in Text Secondary, so Home always has a way back.
+- **Showing and hiding:** Play/Pause, or a tap on a row's circle (its first 52 px), shows a hidden
+  row or hides a shown one, saved at once; the rows hidden leave the list when the editor is left.
+  Each row is Auto until then: it follows its own rule (Shuffle, Hi-Res, Long Songs and Upload
+  Scrobbles hidden; Home's Folders shown only while the SD card has folders to list, Now Playing
+  only while something is loaded), and in the editor an Auto row shows how it stands now. The first
+  toggle makes it the user's, Shown or Hidden, and that sticks (Folders shown on an empty card,
+  hidden with folders).
+- **The wheel:** Center lifts the selected row: it grows 8% about its middle (the bar's box, so
+  x 2 to 372 and 34 px tall), its words in Inter Medium 22 px, white, with a white grip and its
+  circle as the selection's, on a raised `#2C2C2E` card with 9 px corners, a 1 px `#141414` ring and
+  a soft black shadow 6 px down. The wheel moves it a row a click, stopping at either end; Center
+  puts it down and saves. Return while it is lifted puts it back exactly where it was, still in the
+  editor.
 - **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
   the hold. The row follows the finger on its card; the rows it passes slide aside over 150 ms
   (cubic out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
   its place and saves. A tap selects a row and opens nothing.
-- **The order** is kept through a restart and a power cut. A row hidden by the Library (My Fav,
-  Frequent, a media row without its folder) keeps its place; a row a later update adds appears at
-  its default place without disturbing the rest.
+- **The order** is kept through a restart and a power cut. A row the editor doesn't list (the
+  Library's My Fav and Frequent, a media row without its folder) keeps its place; a row a later
+  update adds appears at its default place without disturbing the rest.
 
 ### Tabs
 
@@ -934,7 +951,7 @@ pattern.
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's clock, play state and battery over it at the right, each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
-| Library                             | List row                    | Rows in the user's order: [Edit Library](#edit-library)                                                    |
+| Library                             | List row                    | Rows in the user's order and choice: [Edit Library](#edit-library)                                         |
 | Albums                              | Two-line row with art       |                                                                                                            |
 | Album tracks                        | Song rows                   | Track number, title, length                                                                                |
 | Folder view                         | Song rows                   | Songs as album tracks; folders with the folder glyph and a chevron; videos (Library > Videos) plain rows on the text column |

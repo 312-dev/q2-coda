@@ -2433,7 +2433,7 @@ def test_play_hold_release_matches_only_its_own_press(fw, st):
     struct.pack_into('<i', status, play, O['KEY_PLAY'])
     struct.pack_into('<Q', status, play + O['INPUT_KEY_TIME'], 123456)
     fw.mock('window_manager_get_input_device_status', lambda *_: C.addressof(status))
-    released = fw.fn('navigation__hold_released', C.c_int)
+    released = fw.fn('play_hold_released', C.c_int)
     press = st('qm_press', C.c_ulonglong)
     press.value = 123456
     assert released() == 1 and press.value == 0  # the held press's own release: swallowed

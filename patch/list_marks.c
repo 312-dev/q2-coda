@@ -1,8 +1,9 @@
 /* A theme's own list marks and status glyphs (docs/oled-design.md): the chevron from its own art
  * on every row that opens a page (chevron_icon, spinner_icon), the scroll indicator that shows
- * while the wheel turns (wheel_sb_alpha), the slim battery (battery_slim), a switch (switch_mark)
- * and a scrolling label's faded ends (marquee_fade). Each draws in final colours, its own in each
- * half. */
+ * while the wheel turns (wheel_sb_alpha), the slim battery (battery_slim), a switch (switch_mark),
+ * a scrolling label's faded ends (marquee_fade), and the row editors' grip (grip_mark), lifted
+ * row's card (lift_card_paint) and check circle (check_circle). Each draws in final colours, its
+ * own in each half. */
 #include "navigation.h"
 
 /* CHEV_ICON: the image's centre this far left of the right column, as the design places the
@@ -266,4 +267,83 @@ void switch_mark(void *canvas, int right, int y, int on, int selected) {
     vgcanvas_fill(vg);
     vgcanvas_restore(vg);
     st.raw_ink = raw;
+}
+
+/* A grip (Edit Library's and Edit Home's drag handle, docs/oled-design.md#edit-library): three
+ * GRIP_W x GRIP_H bars GRIP_GAP apart, its middle at cx, cy, in rgb (final), scaled by pct. */
+#define GRIP_W 18
+#define GRIP_H 2
+#define GRIP_GAP 5
+void grip_mark(void *canvas, int cx, int cy, unsigned rgb, int pct) {
+    int w = GRIP_W * pct / 100, gap = GRIP_GAP * pct / 100;
+    unsigned raw = ui_ink_raw(1);
+    stock_canvas_set_fill_color(canvas, RGBA(rgb));
+    for (int k = -1; k <= 1; ++k) canvas_fill_rect(canvas, cx - w / 2, cy + k * gap - 1, w, GRIP_H);
+    ui_ink_raw(raw);
+}
+
+/* A lifted row's raised card (docs/oled-design.md#edit-library): card, CARD_RGB with LIFT_R
+ * corners, a 1 px CARD_RING ring and a soft black shadow 6 px down, each half's. */
+#define CARD_RGB 0x2c2c2e
+#define CARD_RING 0x141414
+#define LIFT_R 9
+void lift_card_paint(void *canvas, const rect_t *card) {
+    int light = ipod_light();
+    unsigned raw = ui_ink_raw(1);
+    rect_t ring = { card->x - 1, card->y - 1, card->w + 2, card->h + 2 }, c = *card;
+    for (int k = 3; k > 0; --k) { /* its shadow, softening out */
+        rect_t s = { card->x - 2 * k, card->y + 6 - 2 * k, card->w + 4 * k, card->h + 4 * k };
+        fill_box(canvas, &s, (RGBA(0) & 0xffffffu) | (unsigned)(0x30 - 0x0c * k) << 24,
+                 (unsigned)(LIFT_R + 2 * k));
+    }
+    fill_box(canvas, &ring, RGBA(flip_if(light, CARD_RING)), LIFT_R + 1);
+    fill_box(canvas, &c, RGBA(flip_if(light, CARD_RGB)), LIFT_R);
+    ui_ink_raw(raw);
+}
+
+/* A row's check circle (Edit Library's and Edit Home's show or hide,
+ * docs/oled-design.md#edit-library), CIRCLE_D px across, its middle at canvas cx, cy: CIRCLE_ON
+ * the accent's disc with a white check (tools/art.py circle_check), CIRCLE_OFF a 1.5 px ring in
+ * Text Tertiary, CIRCLE_LOCKED a gray disc with a padlock in Text Secondary (circle_lock). On the
+ * selection (selected) the disc is white and its check the accent's, the ring white. */
+#define CIRCLE_D 16.0f
+#define CIRCLE_RING 1.5f
+#define CIRCLE_LOCK_RGB 0x3a3a3c
+#define CIRCLE_CHECK_PX 11 /* the art's glyphs' boxes */
+#define CIRCLE_LOCK_PX 10
+void check_circle(void *w, void *canvas, int cx, int cy, int state, int selected) {
+    void *vg = canvas ? canvas_get_vgcanvas(canvas) : (void *)0;
+    if (!vg) return;
+    int light = ipod_light();
+    unsigned accent = scheme()->tones[0] & 0xffffffu, fill = state == CIRCLE_LOCKED
+                                                                 ? flip_if(light, CIRCLE_LOCK_RGB)
+                                                             : selected           ? 0xffffff
+                                                             : state == CIRCLE_ON ? accent
+                                                             : light              ? 0x6e6e6e
+                                                                                  : 0x858585;
+    float x = (float)cx - CIRCLE_D / 2, y = (float)cy - CIRCLE_D / 2;
+    unsigned raw = st.raw_ink;
+    st.raw_ink = 1; /* final: Light Mode's flip leaves them */
+    vgcanvas_save(vg);
+    vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+    if (state == CIRCLE_OFF) { /* the ring's centre line CIRCLE_RING / 2 inside the disc's edge */
+        float in = CIRCLE_RING / 2;
+        round_path(vg, x + in, y + in, CIRCLE_D - CIRCLE_RING, CIRCLE_D - CIRCLE_RING,
+                   (CIRCLE_D - CIRCLE_RING) / 2);
+        vgcanvas_set_line_width(vg, CIRCLE_RING);
+        vgcanvas_set_stroke_color(vg, RGBA(fill));
+        vgcanvas_stroke(vg);
+    } else {
+        round_path(vg, x, y, CIRCLE_D, CIRCLE_D, CIRCLE_D / 2);
+        vgcanvas_set_fill_color(vg, RGBA(fill));
+        vgcanvas_fill(vg);
+    }
+    vgcanvas_restore(vg);
+    st.raw_ink = raw;
+    if (state == CIRCLE_LOCKED)
+        paint_art(w, canvas, theme_art(light ? "circle_lock_l" : "circle_lock_d"),
+                  cx - CIRCLE_LOCK_PX / 2, cy - CIRCLE_LOCK_PX / 2);
+    else if (state == CIRCLE_ON)
+        paint_art(w, canvas, theme_art(selected ? "circle_check_a" : "circle_check_w"),
+                  cx - CIRCLE_CHECK_PX / 2, cy - CIRCLE_CHECK_PX / 2);
 }

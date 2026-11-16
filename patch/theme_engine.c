@@ -259,9 +259,11 @@ static int shortcut_target(void) {
     int s = shortcut();
     return s == SHORTCUT_NONE ? (rockbox_available() ? 0 : 3) : s;
 }
+/* Home's layout, HOME's Split, Full or Carousel; Split shows as Full while Edit Home is open
+ * (library_edit.c), the editor's hint and grips across the screen. */
 int ipod_home(void) {
     accent();
-    return st.home;
+    return !st.home && lr_home_editing() ? 1 : st.home;
 }
 int ipod_light(void) {
     int v = accent();

@@ -1,42 +1,61 @@
-/* The Library's row order and OLED's Edit Library (docs/oled-design.md#edit-library,
- * docs/internals.md#library-order). Each Library row carries a letter (LR_PROP, home.c
- * ringnav_localmusic) that names it in the saved order, LR_FILE: those letters in the user's order,
- * replaced whole (blob_io: written beside it, synced, renamed over it), so a power cut leaves the
- * old order or the new one. lr_resolve reads it against lr_default, the rows' default order, the
- * one table of it: a letter it doesn't know is dropped, and a row it doesn't name (one a later
- * firmware adds) goes in at its default place, after the row before it there.
+/* The Library's and Home's row order and which rows show, and OLED's Edit Library and Edit Home
+ * (docs/oled-design.md#edit-library, docs/internals.md#library-order). Each row carries a letter
+ * (LR_PROP: home.c ringnav_localmusic for the Library's, lr_home_tag for Home's) that names it in
+ * its list's saved order, LR_FILE or LR_HOME_FILE: those letters in the user's order, each led by
+ * LR_SHOWN or LR_HIDDEN once the user has shown or hidden it, replaced whole (blob_io: written
+ * beside it, synced, renamed over it), so a power cut leaves the old file or the new one.
+ * lr_resolve_in reads it against the list's default order (lr_default, lr_home), the one table of
+ * it: a letter it doesn't know is dropped, and a row it doesn't name (one a later firmware adds)
+ * goes in at its default place, after the row before it there.
  *
- * Under OLED, Centre held LR_HOLD_MS on the Library page, or a finger held as long on a row, enters
- * Edit Library: the status row reads "Edit Library", each row's chevron gives way to a grip, and a
- * hint shows under the rows. A finger on a row's grip (the last LR_GRIP_ZONE px) drags it at once,
- * a finger held on a row drags it after LR_HOLD_MS; the rows it passes slide aside over
- * LR_SLIDE_MS, the list scrolls while the finger is within LR_EDGE px of its top or bottom, and the
- * lift puts the row in its place and saves. Centre lifts the selected row (drawn larger, in
- * Inter Medium, on a raised card), the wheel carries it, Centre puts it down and saves; Return
- * while it is carried puts it back where it was. Return, or Centre held again, saves and leaves
- * Edit Library. A hidden row (stock's My Fav and Frequent, a media row without its folder) is
- * neither shown nor moved: the shown rows' new order fills the places they held (lr_merge). */
+ * A row shows or not by its mark: none (Auto) leaves it to the row's own rule, its LR_AUTO (the
+ * menu review's hidden Library rows, Home's Folders only while the card has folders), LR_SHOWN or
+ * LR_HIDDEN is the user's and sticks. A row with no LR_AUTO (stock's My Fav and Frequent, which
+ * Ratings and Most Played replace) is neither shown nor moved; Home's Settings is LR_LOCKED, always
+ * shown, so Home always has a way back.
+ *
+ * Under OLED, Center held LR_HOLD_MS on the Library page or Home's main list, or a finger held as
+ * long on a row, enters the editor: the status row reads "Edit Library" or "Edit Home", every row
+ * the user can show shows (a hidden one dimmed to Text Tertiary), each with a check circle at its
+ * left, its words moved right of it, each row's chevron gives way to a grip, and a hint shows under
+ * the rows. Home is laid out as Full while it is open (theme_engine.c ipod_home). A finger on a
+ * row's grip (the last LR_GRIP_ZONE px) drags it at once, a finger held on a row drags it after
+ * LR_HOLD_MS; the rows it passes slide aside over LR_SLIDE_MS, the list scrolls while the finger is
+ * within LR_EDGE px of its top or bottom, and the lift puts the row in its place and saves. Center
+ * lifts the selected row (drawn larger, in Inter Medium, on a raised card), the wheel carries it,
+ * Center puts it down and saves; Return while it is carried puts it back where it was. Play/Pause,
+ * or a tap on a row's circle (its first LR_VIS_ZONE px), shows or hides the row. Return, or Center
+ * held again, saves and leaves; the rows hidden then leave the list. A row the editor doesn't show
+ * keeps its place: the shown rows' new order fills the places they held (lr_merge). */
 #include "navigation.h"
 
 #define LR_FILE "/mnt/data/ringnav-library-order"
+#define LR_HOME_FILE "/mnt/data/ringnav-home-order"
 #define LR_PROP "_lr_code"
-#define LR_MAX 64       /* the saved order's bytes, its letters and a NUL: room for every row */
-#define LR_HOLD_MS 550  /* Centre or a finger held this long enters (or leaves) Edit Library */
+#define LR_AUTO "_lr_auto" /* the row's own rule: LR_A_* */
+#define LR_SHOWN '+'       /* in the saved order, before a row's letter: the user showed it */
+#define LR_HIDDEN '-'      /* ... hid it */
+#define LR_MAX 64       /* the saved order's bytes, its letters and marks and a NUL: room for all */
+#define LR_HOLD_MS 550  /* Center or a finger held this long enters (or leaves) the editor */
 #define LR_SLIDE_MS 150 /* the rows a moved row passes slide aside over this */
 #define LR_STEP_MS 16   /* ... a frame at a time */
 #define LR_SLOP 8       /* a finger that moves this far before its hold is a scroll */
 #define LR_GRIP_ZONE 64 /* a press this near the screen's right edge is on the grip */
+#define LR_VIS_ZONE 52  /* a tap this near the screen's left edge is on the circle */
 #define LR_EDGE 16      /* a dragged row this near the list's top or bottom scrolls it */
 #define LR_SCROLL_PX 8  /* ... this far */
 #define LR_SCROLL_MS 40 /* ... this often */
-#define LR_GRIP_W 18    /* the grip: three LR_GRIP_H px bars LR_GRIP_GAP apart, centred on the */
-#define LR_GRIP_H 2     /* chevron's place, 5 px left of the right column */
-#define LR_GRIP_GAP 5
-#define LR_LIFT 108 /* the lifted row's card: the selection bar's box grown to 108% */
-#define LR_CARD_RGB 0x2c2c2e
-#define LR_HINT_PX 16 /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
-#define LR_HINT_Y 298 /* its middle, 14 px above the screen's foot */
-#define LR_LIFT_PX 27 /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
+#define LR_GRIP_X 5     /* the grip (list_marks.c grip_mark): its middle this far left of the */
+                        /* right column, where the chevron's is */
+#define LR_CIRCLE_X 34  /* the check circle (list_marks.c check_circle): its middle at this x */
+#define LR_TEXT_X 52    /* the row's words, right of it */
+#define LR_LIFT 108     /* the lifted row's card: the selection bar's box grown to 108% */
+#define LR_HINT_PX 16   /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
+#define LR_HINT_Y 298   /* its middle, 14 px above the screen's foot */
+#define LR_LIFT_PX 27   /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
+
+enum { LR_A_NONE, LR_A_SHOWN, LR_A_HIDDEN, LR_A_LOCKED }; /* LR_AUTO */
+enum { LR_LIBRARY, LR_HOME };
 
 /* The Library's rows in their default order (the menu review's, 2026-11-15), each its letter in
  * LR_FILE: Shuffle (hidden), Songs, Playlists, Artists, Albums, Search, Genres, Years, Ratings, My
@@ -46,30 +65,46 @@
  * and B Books, both retired: a saved order holding them loads without them (lr_resolve). */
 const char lr_default[] = "hspalSgerfncmqiLPAvGUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
+/* Home's main list's rows (tools/ipod.py HOME_ROWS) in their default order, each its letter in
+ * LR_HOME_FILE, by its row's name: Now Playing, Library, Streaming, Folders, Cover Flow, Search,
+ * Settings. The same rule: a new row takes a new letter. */
+const char lr_home[] = "plsfcqS";
+static const char *const lr_home_names[] = { "btn_playing", "btn_localmusic", "btn_stream",
+                                             "btn_folder",  "btn_coverflow",  "btn_home_search",
+                                             "btn_settings" };
+_Static_assert(sizeof lr_home - 1 == sizeof lr_home_names / sizeof *lr_home_names, "a name each");
+
+static const struct {
+    const char *def, *file, *tmp, *title;
+} lr_lists[] = { { lr_default, LR_FILE, LR_FILE ".tmp", "Edit Library" },
+                 { lr_home, LR_HOME_FILE, LR_HOME_FILE ".tmp", "Edit Home" } };
 
 static struct {
-    void *page, *view;    /* the Library page in Edit Library and its rows' view, 0 when not */
-    void *lifted;         /* the row Centre lifted or a finger drags */
+    void *page, *view;    /* the page in its editor and its rows' view, 0 when not */
+    void *lifted;         /* the row Center lifted or a finger drags */
     void *held;           /* the row a finger holds, LR_HOLD_MS not yet up */
     void *watch;          /* ... and its page */
-    unsigned hold;        /* Centre's or that finger's hold timer */
+    unsigned hold;        /* Center's or that finger's hold timer */
     unsigned slide;       /* the rows' slide, a frame at a time */
     unsigned scroll;      /* a dragged row's scroll at the list's edge */
     unsigned slide_at;    /* the slide's start, time_now_ms */
-    int from;             /* the lifted row's place in the view when Centre lifted it */
+    int from;             /* the lifted row's place in the view when Center lifted it */
     int x, y;             /* the finger, on screen */
     int grab;             /* the finger's distance below the dragged row's top */
-    unsigned char centre; /* Centre's hold went off: its release is taken */
+    int list;             /* the editor's list: LR_LIBRARY or LR_HOME */
+    char vis[LR_ROWS];    /* ... and its rows' marks, by their place in its default order */
+    unsigned char centre; /* Center's hold went off: its release is taken */
     unsigned char drag;   /* a finger drags lifted */
     unsigned char quiet;  /* the abort lr_grab sends is its own */
 } lr __attribute__((section(".scratch")));
 
-/* Letter c's place in lr_default, -1 if it names no row. */
-int lr_at(int c) {
-    for (int i = 0; lr_default[i]; ++i)
-        if (lr_default[i] == c) return i;
+/* Letter c's place in the default order def, -1 if it names no row. */
+static int lr_at_in(const char *def, int c) {
+    for (int i = 0; def[i]; ++i)
+        if (def[i] == c) return i;
     return -1;
 }
+int lr_at(int c) { return lr_at_in(lr_default, c); }
 
 static int has(const char *s, int n, int c) {
     for (int i = 0; i < n; ++i)
@@ -78,27 +113,42 @@ static int has(const char *s, int n, int c) {
 }
 
 /* The saved order (NUL-ended) as the rows go: its known letters, each once, then every row it
- * doesn't name at its default place, after the nearest row before it in lr_default (first, if
- * none). out holds LR_MAX. Returns its length. */
-int lr_resolve(const char *saved, char *out) {
-    int n = 0;
-    for (int i = 0; saved[i] && i < LR_MAX - 1; ++i)
-        if (lr_at(saved[i]) >= 0 && has(out, n, saved[i]) < 0) out[n++] = saved[i];
-    for (int i = 0; lr_default[i]; ++i) {
-        if (has(out, n, lr_default[i]) >= 0) continue;
+ * doesn't name at its default place in def, after the nearest row before it there (first, if
+ * none). out holds LR_MAX; vis, if given, LR_ROWS: each row's mark by its place in def, 0 for none.
+ * Returns out's length. */
+int lr_resolve_in(const char *def, const char *saved, char *out, char *vis) {
+    int n = 0, mark = 0;
+    if (vis) memset(vis, 0, LR_ROWS);
+    for (int i = 0; saved[i] && i < LR_MAX - 1; ++i) {
+        int c = saved[i], at = lr_at_in(def, c);
+        if (c == LR_SHOWN || c == LR_HIDDEN) {
+            mark = c;
+            continue;
+        }
+        if (at >= 0 && has(out, n, c) < 0) {
+            out[n++] = (char)c;
+            if (vis) vis[at] = (char)mark;
+        }
+        mark = 0;
+    }
+    for (int i = 0; def[i]; ++i) {
+        if (has(out, n, def[i]) >= 0) continue;
         int at = 0;
         for (int j = i; j-- > 0;) {
-            int k = has(out, n, lr_default[j]);
+            int k = has(out, n, def[j]);
             if (k >= 0) {
                 at = k + 1;
                 break;
             }
         }
         for (int k = n++; k > at; --k) out[k] = out[k - 1];
-        out[at] = lr_default[i];
+        out[at] = def[i];
     }
     out[n] = 0;
     return n;
+}
+int lr_resolve(const char *saved, char *out) {
+    return lr_resolve_in(lr_default, saved, out, (char *)0);
 }
 
 /* full with the shown rows in their new order (shown, NUL-ended): the places shown's rows held
@@ -109,35 +159,140 @@ void lr_merge(char *full, const char *shown) {
         if (has(shown, n, full[i]) >= 0) full[i] = shown[k++];
 }
 
-/* The order the Library's rows go in: LR_FILE's, resolved. */
-static void lr_load(char *out) {
-    char saved[LR_MAX];
-    BLOB_IO(LR_FILE, saved, 0);
+/* The order list's rows go in, its file's resolved, and their marks. */
+static void lr_load(int list, char *out, char *vis) {
+    char saved[LR_MAX] = { 0 };
+    blob_io(lr_lists[list].file, lr_lists[list].tmp, saved, sizeof saved, 0);
     saved[LR_MAX - 1] = 0;
-    lr_resolve(saved, out);
+    lr_resolve_in(lr_lists[list].def, saved, out, vis);
 }
 
-/* ringnav_localmusic's row for letter c, tagged. */
+/* order (resolved) with each row's mark before it, as list's file. */
+static void lr_store(int list, const char *order, const char *vis) {
+    char out[LR_MAX] = { 0 };
+    for (int i = 0, n = 0; order[i] && n < LR_MAX - 2; ++i) {
+        int at = lr_at_in(lr_lists[list].def, order[i]);
+        if (at >= 0 && vis[at]) out[n++] = vis[at];
+        out[n++] = order[i];
+    }
+    blob_io(lr_lists[list].file, lr_lists[list].tmp, out, sizeof out, 1);
+}
+
+/* Whether a row with mark (0, LR_SHOWN, LR_HIDDEN) and rule rule (LR_A_*) shows. */
+int lr_shows(int mark, int rule) {
+    if (rule == LR_A_LOCKED) return 1;
+    return mark ? mark == LR_SHOWN : rule == LR_A_SHOWN;
+}
+
+/* row's mark in list's marks vis. */
+static int lr_mark(int list, const char *vis, void *row) {
+    int at = lr_at_in(lr_lists[list].def, widget_get_prop_int(row, LR_PROP, 0));
+    return at >= 0 ? vis[at] : 0;
+}
+
+/* ringnav_localmusic's row for letter c, tagged, shown by its own rule (lr_auto_hide, lr_retire
+ * change it). */
 void lr_put(void **rows, int c, void *row) {
     int at = lr_at(c);
     if (at < 0 || !row) return;
     rows[at] = row;
     prop(row, LR_PROP, c);
+    prop(row, LR_AUTO, LR_A_SHOWN);
+}
+/* A Library row hidden unless the user shows it (the menu review's). */
+void lr_auto_hide(void *row) {
+    if (row) prop(row, LR_AUTO, LR_A_HIDDEN);
+}
+/* A Library row never shown and not in Edit Library: its place kept, as stock's My Fav. */
+void lr_retire(void *row) {
+    if (!row) return;
+    prop(row, LR_AUTO, LR_A_NONE);
+    widget_set_visible(row, 0, 0);
 }
 
-/* The view's rows, by their letters, in the saved order. */
+/* The view's rows, by their letters, in the saved order, each shown as its mark and rule say. */
 void lr_apply(void **rows) {
-    char order[LR_MAX];
-    lr_load(order);
+    char order[LR_MAX], vis[LR_ROWS];
+    lr_load(LR_LIBRARY, order, vis);
     for (unsigned i = 0, n = 0; order[i]; ++i) {
         void *row = rows[lr_at(order[i])];
-        if (row) widget_restack(row, n++);
+        if (!row) continue;
+        widget_restack(row, n++);
+        int rule = widget_get_prop_int(row, LR_AUTO, LR_A_NONE);
+        if (rule != LR_A_NONE) widget_set_visible(row, lr_shows(vis[lr_at(order[i])], rule), 0);
     }
 }
 
-/* The shown rows' letters in view's order, saved over the places they held. */
+/* Home's main list's rows tagged by their names (coverflow.c coverflow_home): Settings locked
+ * shown, the rest shown by their own rule until lr_home_apply says. */
+void lr_home_tag(void *view) {
+    for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
+        void *row = widget_get_child(view, i);
+        const char *name = widget_get_prop_str(row, "name", "");
+        for (unsigned k = 0; k < sizeof lr_home - 1; ++k)
+            if (!tk_strcmp(name, lr_home_names[k])) {
+                prop(row, LR_PROP, lr_home[k]);
+                prop(row, LR_AUTO, lr_home[k] == 'S' ? LR_A_LOCKED : LR_A_SHOWN);
+            }
+    }
+}
+
+/* Whether the editor is open on Home: theme_engine.c ipod_home lays Home out as Full meanwhile. */
+int lr_home_editing(void) { return lr.page && lr.list == LR_HOME; }
+
+/* The rows view shows before row, in its order. */
+static int lr_shown_before(void *view, void *row) {
+    int k = 0;
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *c = widget_get_child(view, i);
+        if (c == row) break;
+        k += widget_get_visible(c) != 0;
+    }
+    return k;
+}
+
+/* coverflow.c coverflow_home_layout, before the list is laid out again: Home's rows in the saved
+ * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) and
+ * Folders by its own rule only while the card has folders (home.c home_folders); in Edit Home every
+ * row it lists. A row that comes or goes keeps the selection and the rows in view
+ * (home.c home_keep); the hidden rows go last, as the list's layout keeps a hidden row's slot. */
+void lr_home_apply(void *view, int np) {
+    if (!view) return;
+    char order[LR_MAX], vis[LR_ROWS];
+    lr_load(LR_HOME, order, vis);
+    int editing = lr.page && lr.view == view, folders = home_folders();
+    if (editing) memcpy(vis, lr.vis, sizeof vis);
+    void *rows[LR_ROWS];
+    int n = 0;
+    for (int i = 0; order[i]; ++i)
+        for (unsigned j = 0, k = widget_count_children(view); j < k; ++j) {
+            void *row = widget_get_child(view, j);
+            if (widget_get_prop_int(row, LR_PROP, 0) == order[i] && n < LR_ROWS) {
+                widget_restack(row, (unsigned)n);
+                rows[n++] = row;
+                break;
+            }
+        }
+    for (int i = 0; i < n; ++i) {
+        void *row = rows[i];
+        int c = widget_get_prop_int(row, LR_PROP, 0), rule = widget_get_prop_int(row, LR_AUTO, 0);
+        if (c == 'f' && rule != LR_A_LOCKED) rule = folders ? LR_A_SHOWN : LR_A_HIDDEN;
+        if (rule != LR_A_LOCKED) prop(row, LR_AUTO, rule); /* the editor's circle reads it */
+        int on = editing || (lr_shows(vis[lr_at_in(lr_home, c)], rule) && (c != 'p' || np));
+        if (on == !!widget_get_visible(row)) continue;
+        int k = lr_shown_before(view, row);
+        widget_set_visible(row, on, 0);
+        widget_set_sensitive(row, on);
+        home_keep(on ? 1 : -1, k);
+    }
+    for (int i = 0; i < n; ++i) /* the hidden ones last, in their order */
+        if (!widget_get_visible(rows[i])) widget_restack(rows[i], widget_count_children(view) - 1);
+}
+
+/* The shown rows' letters in view's order, saved over the places they held, with the editor's
+ * marks. */
 static void lr_save(void *view) {
-    char full[LR_MAX] = { 0 }, shown[LR_MAX];
+    char full[LR_MAX] = { 0 }, shown[LR_MAX], vis[LR_ROWS];
     int n = 0;
     for (unsigned i = 0, k = widget_count_children(view); i < k && n < LR_MAX - 1; ++i) {
         void *row = widget_get_child(view, i);
@@ -145,9 +300,9 @@ static void lr_save(void *view) {
         if (c && widget_get_visible(row)) shown[n++] = (char)c;
     }
     shown[n] = 0;
-    lr_load(full);
+    lr_load(lr.list, full, vis);
     lr_merge(full, shown);
-    BLOB_IO(LR_FILE, full, 1);
+    lr_store(lr.list, full, lr.vis);
 }
 
 /* The rows the view shows, in order (out holds LR_ROWS); their count. */
@@ -171,11 +326,16 @@ static int lr_child(void *row) {
     return -1;
 }
 
-/* The Library page's rows' view when it is on top and takes input, else 0. */
-static void *lr_view_of(void *top) {
-    if (!top || !usable() || tk_strcmp(widget_get_prop_str(top, "name", ""), "localmusic_page"))
-        return (void *)0;
-    return widget_lookup(top, "scroll_view_localmusic", 1);
+/* The rows' view of the page top when it can be edited and takes input, else 0; *list its list.
+ * The Library page's, or Home's main list's (coverflow.c coverflow_home_edit_view). */
+static void *lr_view_of(void *top, int *list) {
+    if (!top || !usable()) return (void *)0;
+    if (!tk_strcmp(widget_get_prop_str(top, "name", ""), "localmusic_page")) {
+        *list = LR_LIBRARY;
+        return widget_lookup(top, "scroll_view_localmusic", 1);
+    }
+    *list = LR_HOME;
+    return coverflow_home_edit_view(top);
 }
 
 /* The view's top on screen and the height its rows show in: to the set's list end, where a
@@ -190,6 +350,47 @@ static int lr_box(void *view, int *h) {
             y += I(p, W_Y);
     *h = end && end - y < I(view, W_H) ? end - y : I(view, W_H);
     return win + y;
+}
+
+/* w's x on screen. */
+static int lr_screen_x(void *w) {
+    int x = 0;
+    for (void *wm = window_manager(); w && w != wm; w = P(w, W_PARENT)) x += I(w, W_X);
+    return x;
+}
+
+/* A row's words: its first hscroll_label, the row's own (Home's) or its button's (the Library's).
+ */
+static void *lr_label(void *row) {
+    for (unsigned i = 0, n = widget_count_children(row); i < n; ++i) {
+        void *c = widget_get_child(row, i);
+        if (!tk_strcmp(widget_get_type(c), "hscroll_label")) return c;
+        for (unsigned j = 0, k = widget_count_children(c); j < k; ++j)
+            if (!tk_strcmp(widget_get_type(widget_get_child(c, j)), "hscroll_label"))
+                return widget_get_child(c, j);
+    }
+    return (void *)0;
+}
+
+/* In the editor (on) each row's words start at LR_TEXT_X on screen, right of its circle, their
+ * right end kept; out of it (0) back where they were. Again after Home lays its rows out. */
+#define LR_LABEL_X "_lr_lx"
+#define LR_LABEL_W "_lr_lw"
+void lr_edit_labels(void *view, int on) {
+    for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
+        void *row = widget_get_child(view, i), *l = lr_label(row);
+        if (!l || !widget_get_prop_int(row, LR_AUTO, LR_A_NONE)) continue;
+        int dx = LR_TEXT_X - lr_screen_x(l);
+        if (on && dx) {
+            prop(l, LR_LABEL_X, I(l, W_X) + 1);
+            prop(l, LR_LABEL_W, I(l, W_W));
+            widget_move_resize(l, I(l, W_X) + dx, I(l, W_Y), I(l, W_W) - dx, I(l, W_H));
+        } else if (!on && widget_get_prop_int(l, LR_LABEL_X, 0)) {
+            widget_move_resize(l, widget_get_prop_int(l, LR_LABEL_X, 1) - 1, I(l, W_Y),
+                               widget_get_prop_int(l, LR_LABEL_W, I(l, W_W)), I(l, W_H));
+            prop(l, LR_LABEL_X, 0);
+        }
+    }
 }
 
 /* One frame of the slide: each row from where it showed towards its place, cubic out. */
@@ -244,7 +445,7 @@ static int lr_move(void *row, int b) {
     return 1;
 }
 
-/* The status row's title follows the page in or out of Edit Library. */
+/* The status row's title follows the page in or out of its editor. */
 static void lr_title(void *page) {
     title_gone((void *)0, (void *)0);
     bar_title_sync(page);
@@ -300,13 +501,62 @@ static int lr_bind(void *page) {
     return 1;
 }
 
-static void lr_enter(void *page, void *view) {
+/* The selected row, shown place id, selected and in view. */
+static void lr_select(int id, int n) {
+    ringnav_select(lr.view, id, n);
+    widget_invalidate_force(lr.page, (void *)0);
+}
+
+/* Once rows came or went: the row selected among was (the n rows shown before) selected again,
+ * or if it went the first still shown after it, else the last before it. */
+static void lr_reselect(void *view, void **was, int n, int id) {
+    void *rows[LR_ROWS], *row = (void *)0;
+    for (int i = id; i >= 0 && i < n && !row; ++i)
+        if (widget_get_visible(was[i])) row = was[i];
+    for (int i = id < n ? id : n; i-- > 0 && !row;)
+        if (widget_get_visible(was[i])) row = was[i];
+    int k = lr_rows(view, rows), at = row ? lr_index(rows, k, row) : -1;
+    if (at >= 0) ringnav_select(view, at, k);
+}
+
+/* The Library's rows shown as their marks and rules say, or (all) every row Edit Library lists. */
+static void lr_library_show(void *view, const char *vis, int all) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *row = widget_get_child(view, i);
+        int rule = widget_get_prop_int(row, LR_AUTO, LR_A_NONE);
+        if (rule != LR_A_NONE && widget_get_prop_int(row, LR_PROP, 0))
+            widget_set_visible(row, all || lr_shows(lr_mark(LR_LIBRARY, vis, row), rule), 0);
+    }
+}
+
+/* The page's rows as they show now: every row the editor lists while it is open, else the shown
+ * ones; the selection kept on its row. */
+static void lr_show(void *view, int all) {
+    void *was[LR_ROWS];
+    int n = lr_rows(view, was), id = widget_get_prop_int(view, SEL, -1);
+    if (lr.list == LR_HOME) {
+        coverflow_home_layout();          /* lr_home_apply, lr_edit_labels */
+        widget_layout(P(view, W_PARENT)); /* the rows in place now, for a finger's grab */
+    } else {
+        lr_library_show(view, lr.vis, all);
+        widget_layout(view);
+        lr_edit_labels(view, all);
+    }
+    lr_reselect(view, was, n, id);
+}
+
+static void lr_enter(void *page, void *view, int list) {
     if (!lr_bind(page)) return;
+    char order[LR_MAX];
+    lr.list = list;
+    lr_load(list, order, lr.vis);
     lr.page = page, lr.view = view;
+    lr_show(view, 1);
     lr_title(page);
 }
 
-/* Out of Edit Library, the order saved; a row still carried stays where it is. */
+/* Out of the editor, the order and marks saved; a row still carried stays where it is, and the
+ * rows hidden leave the list. */
 static void lr_leave(void) {
     void *page = lr.page, *view = lr.view;
     lr_save(view);
@@ -315,23 +565,22 @@ static void lr_leave(void) {
     lr.page = lr.view = lr.lifted = (void *)0;
     lr.drag = 0;
     widget_layout(view); /* any row still sliding, in its place */
+    lr_show(view, 0);
     lr_title(page);
 }
 
-/* Whether the page is in Edit Library (bar_title_of names it so). */
+/* Whether the page is in its editor (bar_title_of names it so), and the editor's title. */
 int lr_editing(void *page) { return page && page == lr.page; }
+const char *lr_edit_title(void) { return lr_lists[lr.list].title; }
 /* Whether w is a Library row's own child's child in Edit Library: its chevron gives way to the grip
  * (navigation.c paint_into). */
 int lr_edit_row(void *w) {
     for (int i = 0; i < 3 && w; ++i) w = P(w, W_PARENT);
     return w && w == lr.view;
 }
-
-/* The selected row, shown place id, selected and in view. */
-static void lr_select(int id, int n) {
-    ringnav_select(lr.view, id, n);
-    widget_invalidate_force(lr.page, (void *)0);
-}
+/* Whether view is the list in an editor: Home's rows' chevrons give way to grips
+ * (navigation.c paint_chevrons). */
+int lr_edit_list(void *view) { return view && view == lr.view; }
 
 /* The press the rows had at a hold's end let go (EVT_POINTER_ABORT through the page, as
  * az_index.c's), so none stays pressed or clicks. */
@@ -343,38 +592,42 @@ static void lr_abort(void *page) {
     lr.quiet = 0;
 }
 
-/* A finger takes row: Edit Library entered if it wasn't, the press the rows had let go, and the
+/* A finger takes row: the editor entered if it wasn't, the press the rows had let go, and the
  * row follows the finger from where it was caught. */
-static void lr_grab(void *page, void *view, void *row) {
-    if (!lr.page) lr_enter(page, view);
+static void lr_grab(void *page, void *view, void *row, int list) {
+    if (!lr.page) lr_enter(page, view, list);
     if (lr.page != page) return;
     lr.held = (void *)0;
     stop_timer(&lr.hold);
     lr_abort(page);
     pull_cancel(); /* the pull to search the press began is the drag's now */
     list_stop_scroll(view);
-    if (lr.lifted && !lr.drag) lr_save(view); /* a row Centre carried stays where it got to */
+    if (lr.lifted && !lr.drag) lr_save(view); /* a row Center carried stays where it got to */
+    /* the finger's offset from the row where the editor shows it (the rows it lists and Home's Full
+     * layout may have moved it from under the finger): it stays in its place until the finger moves
+     */
     int xy[2] = { lr.x, lr.y };
     widget_to_local(view, xy);
+    lr.grab = xy[1] - I(row, W_Y);
     lr.lifted = row;
     lr.drag = 1;
-    lr.grab = xy[1] - I(row, W_Y);
     void *rows[LR_ROWS];
     int n = lr_rows(view, rows);
     prop(view, SEL, lr_index(rows, n, row));
     widget_invalidate_force(page, (void *)0);
 }
 
-/* The hold: Centre's enters or leaves Edit Library, a finger's takes its row. */
+/* The hold: Center's enters or leaves the editor, a finger's takes its row. */
 static int lr_hold_due(const void *info) {
     (void)info;
     lr.hold = 0;
-    void *top = window_manager_get_top_window(window_manager()), *view = lr_view_of(top),
+    int list = LR_LIBRARY;
+    void *top = window_manager_get_top_window(window_manager()), *view = lr_view_of(top, &list),
          *row = lr.held;
     lr.held = (void *)0;
     if (!view || window_manager_is_animating(window_manager())) return 0;
     if (row) {
-        if (top == lr.watch) lr_grab(top, view, row);
+        if (top == lr.watch) lr_grab(top, view, row, list);
         return 0;
     }
     lr.centre = 1;
@@ -385,7 +638,7 @@ static int lr_hold_due(const void *info) {
     if (lr.page)
         lr_leave();
     else
-        lr_enter(top, view);
+        lr_enter(top, view, list);
     return 0;
 }
 
@@ -420,16 +673,19 @@ static void lr_drag(void) {
 
 /* The finger lifts: the row slides into its place, and the order is saved. */
 static void lr_drop(void) {
-    void *row = lr.lifted, *button = widget_count_children(row) ? widget_get_child(row, 0) : 0;
+    unsigned n = widget_count_children(lr.lifted);
+    void *row = lr.lifted, *button = n ? widget_get_child(row, n - 1) : 0;
     unsigned abort_event[12];
     stop_timer(&lr.scroll);
-    /* a press on the grip reaches the row's button after lr_edit_touch takes it: the button alone
-     * lets it go, as an abort through the page glides the view back to where it was pressed */
+    /* a press on the grip reaches the row's button (Home's: its tap image, its last child) after
+     * lr_edit_touch takes it: the button alone lets it go, as an abort through the page glides
+     * the view back to where it was pressed */
     if (button)
         stock_dispatch_trampoline(
             button, pointer_event_init(abort_event, EVT_POINTER_ABORT, button, lr.x, lr.y));
     lr.drag = 0;
     lr.lifted = (void *)0;
+    st.touch_mode = 0; /* the dropped row stays selected, its circle and grip as the selection's */
     prop(row, "_lr_from", I(row, W_Y));
     lr.slide_at = (unsigned)time_now_ms();
     if (!lr.slide) lr.slide = timer_add(lr_slide_step, (void *)0, LR_STEP_MS);
@@ -437,19 +693,32 @@ static void lr_drop(void) {
     widget_invalidate_force(lr.page, (void *)0);
 }
 
-/* navigation.c's key-down: Centre pressed on the Library page starts its hold. */
+/* row shown or hidden, the other way from how it shows now: the user's from here on, saved. The
+ * locked row stays. */
+static void lr_toggle(void *row) {
+    int at = row ? lr_at_in(lr_lists[lr.list].def, widget_get_prop_int(row, LR_PROP, 0)) : -1,
+        rule = row ? widget_get_prop_int(row, LR_AUTO, LR_A_NONE) : LR_A_NONE;
+    if (at < 0 || rule == LR_A_NONE || rule == LR_A_LOCKED) return;
+    lr.vis[at] = lr_shows(lr.vis[at], rule) ? LR_HIDDEN : LR_SHOWN;
+    lr_save(lr.view);
+    widget_invalidate_force(lr.page, (void *)0);
+}
+
+/* navigation.c's key-down: Center pressed on the Library page or Home's list starts its hold. */
 void lr_edit_keydown(unsigned key) {
     if (key != KEY_CENTER || lr.hold || lr.centre || lr.drag) return;
     void *wm = window_manager();
-    if (!lr_view_of(window_manager_get_top_window(wm)) || window_manager_is_animating(wm)) return;
+    int list;
+    if (!lr_view_of(window_manager_get_top_window(wm), &list) || window_manager_is_animating(wm))
+        return;
     lr.held = (void *)0;
     lr.hold = timer_add(lr_hold_due, (void *)0, LR_HOLD_MS);
 }
 
-/* navigation.c's key filter, a key's release on top: 1 if Edit Library took it. The release of
- * the Centre hold that entered or left it; in it, Centre lifts or drops the selected row, the
+/* navigation.c's key filter, a key's release on top: 1 if the editor took it. The release of
+ * the Center hold that entered or left it; in it, Center lifts or drops the selected row, the
  * wheel carries a lifted row (owned: its press was silenced, so a move clicks), Return puts a
- * carried row back or leaves. */
+ * carried row back or leaves, Play/Pause (not held) shows or hides the selected row. */
 int lr_edit_key(void *top, unsigned key, int owned) {
     if (key == KEY_CENTER) {
         if (lr.centre) {
@@ -462,6 +731,10 @@ int lr_edit_key(void *top, unsigned key, int owned) {
     if (!lr.page || top != lr.page || lr.drag || !usable()) return 0;
     void *rows[LR_ROWS];
     int n = lr_rows(lr.view, rows), id = widget_get_prop_int(lr.view, SEL, -1);
+    if (key == KEY_PLAY) {
+        if (!play_hold_released() && id >= 0 && id < n) lr_toggle(rows[id]);
+        return 1;
+    }
     if (key == KEY_CENTER) {
         *(volatile unsigned char *)KEY_LOCKOUT = 0;
         st.touch_mode = 0;
@@ -499,13 +772,17 @@ int lr_edit_key(void *top, unsigned key, int owned) {
     return 1;
 }
 
-/* navigation.c's touch hook, a press on top after stock's: on a Library row under OLED it starts
- * the row's hold, and in Edit Library a press on a row's grip takes the row at once. Returns 1 if
- * it took the touch. */
+/* navigation.c's touch hook, a press on top after stock's: on a Library or Home row under OLED it
+ * starts the row's hold, and in the editor a press on a row's grip takes the row at once and one
+ * on its circle waits for its tap (lr_edit_click). Returns 1 if it took the touch. */
 int lr_edit_touch(void *event) {
-    void *top = window_manager_get_top_window(window_manager()), *view = lr_view_of(top);
+    int list;
+    void *top = window_manager_get_top_window(window_manager()), *view = lr_view_of(top, &list);
     if (!view || !event) return 0;
     int xy[2] = { lr.x = I(event, EVENT_X), lr.y = I(event, EVENT_Y) }, h;
+    /* a press above the window (Split's raised rows, which the status bar paints) is the bar's: its
+     * lift never reaches the page (lr_event), so it starts no hold */
+    if (lr.y < I(top, W_Y)) return 0;
     lr_box(view, &h);
     widget_to_local(view, xy); /* the view's content's: its scroll counted */
     int y = xy[1];
@@ -516,9 +793,10 @@ int lr_edit_touch(void *event) {
         if (y >= I(rows[i], W_Y) && y < I(rows[i], W_Y) + I(rows[i], W_H)) row = rows[i];
     if (!row || !lr_bind(top)) return 0;
     if (lr.page == top && lr.x >= 375 - LR_GRIP_ZONE) {
-        lr_grab(top, view, row);
+        lr_grab(top, view, row, list);
         return 1;
     }
+    if (lr.page == top && lr.x < LR_VIS_ZONE) return 0;
     lr.held = row;
     lr.watch = top;
     rearm(&lr.hold, lr_hold_due, LR_HOLD_MS);
@@ -528,7 +806,8 @@ int lr_edit_touch(void *event) {
 /* Whether a finger drags a row: navigation.c's touch hook leaves its moves to lr_event. */
 int lr_edit_dragging(void) { return lr.drag; }
 
-/* navigation.c's click observer: in Edit Library a tap on a row selects it and opens nothing. */
+/* navigation.c's click observer: in the editor a tap on a row selects it and opens nothing, and
+ * one on its circle shows or hides it. */
 int lr_edit_click(void *target) {
     if (!lr.view) return 0;
     for (void *w = target; w; w = P(w, W_PARENT))
@@ -537,17 +816,28 @@ int lr_edit_click(void *target) {
             int n = lr_rows(lr.view, rows), id = lr_index(rows, n, w);
             st.touch_mode = 0;
             if (id >= 0) lr_select(id, n);
+            if (id >= 0 && lr.x < LR_VIS_ZONE) lr_toggle(w);
             return 1;
         }
     return 0;
 }
 
-/* The grip, its middle at x, y: three bars in rgb, scaled by pct. */
-static void lr_grip(void *canvas, int x, int y, unsigned rgb, int pct) {
-    int w = LR_GRIP_W * pct / 100, gap = LR_GRIP_GAP * pct / 100;
-    stock_canvas_set_fill_color(canvas, RGBA(rgb));
-    for (int k = -1; k <= 1; ++k)
-        canvas_fill_rect(canvas, x - w / 2, y + k * gap - 1, w, LR_GRIP_H);
+/* Whether the painted text belongs to a row the editor shows dimmed: one that is hidden and not
+ * selected (navigation.c ringnav_style_color: Text Tertiary). */
+int lr_edit_dim(void *w) {
+    if (!lr.view || !w) return 0;
+    for (; w && P(w, W_PARENT) != lr.view; w = P(w, W_PARENT))
+        if (w == lr.page) return 0;
+    if (!w || painting_in(st.sel_accent) || w == lr.lifted) return 0;
+    return !lr_shows(lr_mark(lr.list, lr.vis, w), widget_get_prop_int(w, LR_AUTO, LR_A_NONE));
+}
+
+/* row's check circle's state: shown, hidden, or locked shown. */
+static int lr_circle(void *row) {
+    int rule = widget_get_prop_int(row, LR_AUTO, LR_A_NONE);
+    return rule == LR_A_LOCKED                             ? CIRCLE_LOCKED
+           : lr_shows(lr_mark(lr.list, lr.vis, row), rule) ? CIRCLE_ON
+                                                           : CIRCLE_OFF;
 }
 
 /* s at x (its left), its middle at y, in face at px; its width. */
@@ -562,59 +852,55 @@ static int lr_text(void *canvas, const char *face, const unsigned *s, int x, int
     return w;
 }
 
-/* ringnav_paint: Edit Library over its page w, after everything in it. Each shown row's grip in
- * the chevron's place (Text Tertiary; On Accent on the selection), the lifted row on its card,
- * and the hint under the rows. */
+/* ringnav_paint: the editor over its page w, after everything in it. Each shown row's circle at
+ * its left and grip in the chevron's place (Text Tertiary; On Accent on the selection), the lifted
+ * row on its card, and the hint under the rows, on the ground. */
 void lr_edit_paint(void *w, void *canvas) {
     if (!lr.page || w != lr.page || !P(canvas, CANVAS_LCD)) return;
     static const unsigned drag[] = { 'D', 'r', 'a', 'g', 0 },
-                          rest[] = { ' ',  't', 'o', ' ', 'm', 'o', 'v', 'e', ' ',
-                                     0xb7, ' ', 'C', 'e', 'n', 't', 'r', 'e', ' ',
-                                     'p',  'i', 'c', 'k', 's', ' ', 'u', 'p', 0 };
+                          rest[] = { ' ', 't', 'o', ' ', 'm', 'o', 'v', 'e', ' ', 0xb7,
+                                     ' ', 'P', 'l', 'a', 'y', '/', 'P', 'a', 'u', 's',
+                                     'e', ' ', 's', 'h', 'o', 'w', 's', ' ', 'o', 'r',
+                                     ' ', 'h', 'i', 'd', 'e', 's', 0 };
     void *view = lr.view, *rows[LR_ROWS], *lcd = P(canvas, CANVAS_LCD);
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), ground = ui_ink(RGBA(0)), raw = ui_ink_raw(1);
     int light = ipod_light(), ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
         box = lr_box(view, &h), top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
         sel = st.touch_mode ? -1 : widget_get_prop_int(view, SEL, -1),
-        gx = 375 - geom_val(V_RIGHT_X) - 5 - ox;
+        gx = 375 - geom_val(V_RIGHT_X) - LR_GRIP_X - ox, cx0 = LR_CIRCLE_X - ox;
     unsigned ink = light ? 0x000000 : 0xffffff, third = light ? 0x6e6e6e : 0x858585;
     rect_t old, clip; /* clips are the screen's, within the paint's own */
     if (clip_within(canvas, &old.x, &clip.x, 0, box, 375, h)) {
         canvas_set_clip_rect(canvas, &clip);
         for (int i = 0; i < n; ++i)
-            if (rows[i] != lr.lifted)
-                lr_grip(canvas, gx, top + I(rows[i], W_Y) + I(rows[i], W_H) / 2,
-                        i == sel ? 0xffffff : third, 100);
+            if (rows[i] != lr.lifted) {
+                int y = top + I(rows[i], W_Y) + I(rows[i], W_H) / 2;
+                grip_mark(canvas, gx, y, i == sel ? 0xffffff : third, 100);
+                check_circle(w, canvas, cx0, y, lr_circle(rows[i]), i == sel);
+            }
         canvas_set_clip_rect(canvas, &old);
     }
+    /* the hint's band: the ground from the list's end (a lifted card goes over it), over the rows
+     * that peek through its fade */
+    stock_canvas_set_fill_color(canvas, ground);
+    canvas_fill_rect(canvas, -ox, box + h - oy, 375, 320 - box - h);
     void *row = lr.lifted;
     if (row) { /* the card: the bar's box (16 px in each side) grown about its middle */
         int cy = top + I(row, W_Y) + I(row, W_H) / 2, cx = (375 - 2 * ox) / 2,
             bw = (375 - 32) * LR_LIFT / 100, bh = I(row, W_H) * LR_LIFT / 100;
-        rect_t card = { cx - bw / 2, cy - bh / 2, bw, bh },
-               ring = { card.x - 1, card.y - 1, card.w + 2, card.h + 2 };
+        rect_t card = { cx - bw / 2, cy - bh / 2, bw, bh };
         /* the list's box grown by a card at each end, so one at either end shows whole */
         if (clip_within(canvas, &old.x, &clip.x, 0, box - bh, 375, h + 2 * bh))
             canvas_set_clip_rect(canvas, &clip);
-        for (int k = 3; k > 0; --k) { /* its shadow, 6 px down, softening out */
-            rect_t s = { card.x - 2 * k, card.y + 6 - 2 * k, card.w + 4 * k, card.h + 4 * k };
-            fill_box(canvas, &s, (RGBA(0) & 0xffffffu) | (unsigned)(0x30 - 0x0c * k) << 24,
-                     9 + 2 * k);
+        lift_card_paint(canvas, &card);
+        void *label = lr_label(row);
+        const unsigned *s = label ? widget_get_text(label) : (const unsigned *)0;
+        if (s) { /* the words' left, grown from the middle */
+            int lx = lr_screen_x(label) - ox;
+            lr_text(canvas, "inter-medium", s, cx + (lx - cx) * LR_LIFT / 100, cy, LR_LIFT_PX, ink);
         }
-        fill_box(canvas, &ring, RGBA(flip_if(light, 0x141414)), 10);
-        fill_box(canvas, &card, RGBA(flip_if(light, LR_CARD_RGB)), 9);
-        void *button = widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
-        for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
-            void *c = widget_get_child(button, j);
-            if (tk_strcmp(widget_get_type(c), "hscroll_label")) continue;
-            int lx = I(button, W_X) + I(c, W_X) - ox; /* the words' left, grown from the middle */
-            const unsigned *s = widget_get_text(c);
-            if (s)
-                lr_text(canvas, "inter-medium", s, cx + (lx - cx) * LR_LIFT / 100, cy, LR_LIFT_PX,
-                        ink);
-            break;
-        }
-        lr_grip(canvas, cx + (gx - cx) * LR_LIFT / 100, cy, ink, LR_LIFT);
+        grip_mark(canvas, cx + (gx - cx) * LR_LIFT / 100, cy, ink, LR_LIFT);
+        check_circle(w, canvas, cx + (cx0 - cx) * LR_LIFT / 100, cy, lr_circle(row), 1);
         canvas_set_clip_rect(canvas, &old);
     }
     canvas_set_font(canvas, "inter", LR_HINT_PX);

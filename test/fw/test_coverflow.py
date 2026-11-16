@@ -4005,3 +4005,19 @@ def test_split_fades_follow_the_glass_and_never_the_selected_row(fw):
     assert all(x + w <= 196 for r in rows.values() for x, w, _ in r)  # left of the art
     rows = fades(fw, 32, sel=6)  # row 6 on the screen from 40 + 192 - 32
     assert not [y for y in rows if 200 <= y < 232] and rows[0][-1] == (80, 116, 255)  # the top: the ground at the edge
+
+
+def test_only_homes_main_list_can_be_edited_never_its_settings_list(fw):
+    """Settings keeps a fixed order (user ruling, 2026-11-16): Edit Home takes Home's main list alone, not the
+    Settings list a Home row opens, nor Carousel."""
+    _, ui, h, _ = home_open(fw, HOME='1')
+    edit_view = fw.fn('coverflow_home_edit_view', C.c_void_p, C.c_void_p)
+    assert edit_view(h.win) == h.view
+    assert not edit_view(h.main) and not edit_view(None)  # only with Home on top
+    ui.click(h.rows['img_settings'])
+    assert ui[h.sets].visible and not edit_view(h.win)
+
+
+def test_carousel_has_no_edit_home(fw):
+    _, ui, h, _ = home_open(fw, carousel=True, HOME='2')
+    assert not fw.fn('coverflow_home_edit_view', C.c_void_p, C.c_void_p)(h.win)

@@ -22,6 +22,8 @@ SEL = '_ringnav_index'
 # the Library's rows under OLED (Search leads: its set has no Library icons), as the page shows them
 SHOWN = ['All Songs', 'Playlist', 'Artist', 'Album', 'Search', 'Genre', 'Years', 'Ratings', 'Recently Added', 'Recent',
          'Most Played', 'Games', 'Update Local Music']
+# ... and in Edit Library, with the rows hidden until the user shows them (the menu review's)
+EDITING = ['Shuffle', *SHOWN[:10], 'Most Played', 'Hi-Res', 'Long Songs', 'Games', 'Update Local Music']
 
 
 def resolve(fw, saved):
@@ -174,10 +176,11 @@ def test_centre_held_enters_edit_library_and_held_again_saves_and_leaves(fw, ui,
 def test_centre_lifts_the_wheel_carries_and_centre_drops_and_saves(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(1)  # Playlist
+    assert lib.shown == EDITING
+    lib.select(2)  # Playlist
     assert lib.key(KEY_CENTER)
     assert lib.key(KEY_NEXT) and lib.key(KEY_NEXT)
-    assert lib.shown[:4] == ['All Songs', 'Artist', 'Album', 'Playlist'] and ui.props[(lib.view, SEL)] == 3
+    assert lib.shown[:5] == ['Shuffle', 'All Songs', 'Artist', 'Album', 'Playlist'] and ui.props[(lib.view, SEL)] == 4
     assert lib.saved() == ''  # not until it is dropped
     assert lib.key(KEY_CENTER)
     assert lib.saved().startswith('hsalp')  # the hidden Shuffle keeps its place
@@ -190,28 +193,29 @@ def test_the_carried_row_stops_at_the_ends(fw, ui, st, keys):
     lib.select(0)
     lib.key(KEY_CENTER)
     assert lib.key(KEY_PREV)  # taken, but nowhere to go
-    assert lib.shown == SHOWN
+    assert lib.shown == EDITING
 
 
 def test_return_while_carrying_puts_the_row_back_and_stays_in_edit_library(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(4)  # Search
+    lib.select(5)  # Search
     lib.key(KEY_CENTER)
-    for _ in range(5):
+    for _ in range(6):
         lib.key(KEY_PREV)
     assert lib.shown[0] == 'Search'
     assert lib.key(KEY_RETURN)
-    assert lib.shown == SHOWN and lib.editing and ui.props[(lib.view, SEL)] == 4
+    assert lib.shown == EDITING and lib.editing and ui.props[(lib.view, SEL)] == 5
     assert lib.saved() == ''
     assert lib.key(KEY_RETURN)  # not carrying: saves and leaves
     assert not lib.editing and lib.saved() == DEFAULT
+    assert lib.shown == SHOWN and ui.props[(lib.view, SEL)] == 4  # the hidden rows gone, Search kept
 
 
 def test_the_order_survives_a_reboot_and_hidden_rows_keep_their_places(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(7)  # Ratings, just before the hidden My Fav
+    lib.select(8)  # Ratings, just before the hidden My Fav
     lib.key(KEY_CENTER)
     lib.key(KEY_NEXT)
     lib.key(KEY_CENTER)
@@ -237,11 +241,14 @@ def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, key
         struct.pack_into('<2i', event, O['EVENT_X'], 100, y)
         return handler(C.addressof(event))
 
+    # Shuffle came in above it: Artist stays a row down from the finger, and goes as far as the finger does
+    assert send(EVT_MOVE, 58 + PITCH * 2 + 10) == STOP  # not moved yet: it stays in its place
+    assert lib.shown[:5] == ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album']
     assert send(EVT_MOVE, 58 + PITCH * 4 + 10) == STOP  # two rows down: the list does not scroll
-    assert lib.shown[:5] == ['All Songs', 'Playlist', 'Album', 'Search', 'Artist']
+    assert lib.shown[:6] == ['Shuffle', 'All Songs', 'Playlist', 'Album', 'Search', 'Artist']
     assert lib.saved() == ''
     assert send(EVT_UP, 58 + PITCH * 4 + 10) == STOP
-    assert lib.saved().startswith('hsplSa')  # the hidden Shuffle keeps its place
+    assert lib.saved().startswith('hsplSa')
 
 
 def test_a_tap_in_edit_library_selects_its_row_and_opens_nothing(fw, ui, st, keys):
@@ -257,16 +264,16 @@ def test_a_tap_in_edit_library_selects_its_row_and_opens_nothing(fw, ui, st, key
 def test_rows_slide_aside_over_the_slide_time(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(1)
+    lib.select(2)
     lib.key(KEY_CENTER)
     lib.key(KEY_NEXT)
-    assert lib.y('Playlist') == 2 * PITCH  # the carried row goes at once
-    assert lib.y('Artist') == 2 * PITCH  # Artist still where it showed
+    assert lib.y('Playlist') == 3 * PITCH  # the carried row goes at once
+    assert lib.y('Artist') == 3 * PITCH  # Artist still where it showed
     (t, ms), = ui.pending('lr_slide_step')
     assert ms == LR['LR_STEP_MS']
     fw.mock('time_now_ms', lambda *_: 10 ** 6)
     ui.fire('lr_slide_step')
-    assert lib.y('Artist') == PITCH and not ui.pending('lr_slide_step')
+    assert lib.y('Artist') == 2 * PITCH and not ui.pending('lr_slide_step')
 
 
 def test_a_row_new_to_the_saved_order_shows_at_its_default_place_on_the_page(fw, ui, st):
@@ -274,6 +281,138 @@ def test_a_row_new_to_the_saved_order_shows_at_its_default_place_on_the_page(fw,
     mine = DEFAULT.replace('e', '').replace('g', '') + 'g'
     lib = Library(fw, ui, st, {FILE: mine.encode().ljust(LR['LR_MAX'], b'\0')})
     assert lib.shown[-3:] == ['Update Local Music', 'Genre', 'Years']
+
+
+# Visibility: each row is Auto (no mark: its own rule), Shown ('+' before its letter) or Hidden ('-'), the user's
+KEY_PLAY = O['KEY_PLAY']
+HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
+HOME_DEFAULT = re.findall(r'lr_home\[\] = "(\w+)"', SOURCE)[0]
+HOME_FILE = '/mnt/data/ringnav-home-order'
+
+
+def test_a_mark_before_a_letter_is_the_rows_and_the_order_reads_as_before(fw):
+    out, vis = C.create_string_buffer(LR['LR_MAX']), C.create_string_buffer(32)
+    read = fw.fn('lr_resolve_in', C.c_int, C.c_char_p, C.c_char_p, C.c_void_p, C.c_void_p)
+    read(DEFAULT.encode(), ('+h-s' + DEFAULT[2:]).encode(), out, vis)
+    assert out.value.decode() == DEFAULT
+    assert vis.raw[:3] == b'+-\0'
+    # a mark before a letter this firmware doesn't know goes with it; one alone is dropped
+    read(DEFAULT.encode(), ('+Z-' + DEFAULT).encode(), out, vis)
+    assert out.value.decode() == DEFAULT and vis.raw[:2] == b'-\0'
+    assert resolve(fw, '+h-s' + DEFAULT[2:]) == DEFAULT  # the old reader's view: marks are unknown letters
+
+
+def test_a_mark_is_the_users_and_no_mark_leaves_the_row_to_its_own_rule(fw):
+    shows = fw.fn('lr_shows', C.c_int, C.c_int, C.c_int)
+    shown, hidden, locked = 1, 2, 3
+    assert shows(0, shown) and not shows(0, hidden)
+    assert shows(ord('+'), hidden) and not shows(ord('-'), shown)
+    assert shows(ord('-'), locked) and shows(0, locked)  # Settings always shows
+
+
+def test_an_old_saved_order_with_no_marks_keeps_the_rows_hidden_by_default_hidden(fw, ui, st):
+    mine = DEFAULT.replace('s', '') + 's'
+    lib = Library(fw, ui, st, {FILE: mine.encode().ljust(LR['LR_MAX'], b'\0')})
+    assert lib.shown == SHOWN[1:] + ['All Songs']
+
+
+def test_play_pause_shows_a_hidden_row_and_hides_a_shown_one_and_the_choice_sticks(fw, ui, st, keys):
+    """The four transitions: Auto hidden -> Shown, Auto shown -> Hidden, Shown -> Hidden, Hidden -> Shown."""
+    lib = Library(fw, ui, st)
+    lib.hold_centre()
+    lib.select(EDITING.index('Shuffle'))
+    assert lib.key(KEY_PLAY)  # Auto, hidden by the menu review: Shown
+    assert lib.saved() == '+' + DEFAULT
+    lib.select(EDITING.index('Genre'))
+    assert lib.key(KEY_PLAY)  # Auto, shown: Hidden
+    assert lib.saved() == DEFAULT.replace('h', '+h').replace('g', '-g')
+    assert lib.shown == EDITING  # the editor lists both still, Genre dimmed
+    lib.key(KEY_RETURN)
+    assert lib.shown == ['Shuffle'] + [r for r in SHOWN if r != 'Genre']
+    again = Library(fw, ui, st, dict(lib.disk.files))
+    assert again.shown == lib.shown
+    again.hold_centre()
+    again.select(0)
+    again.key(KEY_PLAY)  # Shown: Hidden
+    again.select(EDITING.index('Genre'))
+    again.key(KEY_PLAY)  # Hidden: Shown
+    again.key(KEY_RETURN)
+    assert again.shown == SHOWN and again.saved() == DEFAULT.replace('h', '-h').replace('g', '+g')
+
+
+def test_play_pause_outside_the_editor_is_not_taken(fw, ui, st, keys):
+    lib = Library(fw, ui, st)
+    assert lib.key(KEY_PLAY) == 0 and lib.saved() == ''
+
+
+def test_a_tap_on_a_rows_circle_shows_or_hides_it(fw, ui, st, keys):
+    lib = Library(fw, ui, st)
+    lib.hold_centre()
+    item = ui.kids[lib.view][[c for c, _ in page_rows(ui, lib.view)].index('Hi-Res')]
+    down = C.create_string_buffer(0x40)
+    struct.pack_into('<i', down, O['EVENT_TYPE'], EVT_DOWN)
+    y = 58 + EDITING.index('Hi-Res') * PITCH + 10
+    for x, saved in ((LR['LR_VIS_ZONE'] + 40, ''), (20, DEFAULT.replace('i', '+i'))):  # past the circle: selects
+        struct.pack_into('<2i', down, O['EVENT_X'], x, y)
+        assert fw.fn('lr_edit_touch', C.c_int, C.c_void_p)(down) == 0
+        assert fw.fn('lr_edit_click', C.c_int, C.c_void_p)(ui.kids[item][0]) == 1
+        assert lib.saved() == saved
+        assert ui.props[(lib.view, SEL)] == EDITING.index('Hi-Res')
+
+
+class Home:
+    """Home's main list's rows, tagged and shown by lr_home_apply; the card's root listed by toolsLoadDirectory."""
+    def __init__(self, fw, ui, files=None, folders=0):
+        self.fw, self.ui, self.folders, self.mtime = fw, ui, folders, 1
+        self.disk = Disk(fw, {'/tmp/mmc_add': b'', **{k: v.ljust(LR['LR_MAX'], b'\0') for k, v in (files or {}).items()}})
+        fw.mock('fw___xstat', self.stat)
+        fw.mock('toolsLoadDirectory', lambda path, *_: self.folders if C.string_at(path) == b'/mnt/mmc' else 0)
+        _, self.view = stock_page(ui, 'scroll_view_home')
+        for row in HOME:
+            item = ui.new('view_create', self.view, 0, 0, 375, PITCH)
+            ui.name[item] = 'btn_' + row
+            ui.text[ui.new('hscroll_label_create', item, 24, 0, 300, PITCH)] = row
+        fw.fn('lr_home_tag', None, C.c_void_p)(self.view)
+
+    def stat(self, version, path, info, *_):
+        struct.pack_into('<I', (C.c_char * 144).from_address(info), 64, self.mtime)  # st_mtime, word 16
+        return 0
+
+    def card(self, folders):
+        """The card's root changes: folders now, or none."""
+        self.folders, self.mtime = folders, self.mtime + 1
+
+    def apply(self, np=1):
+        self.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(self.view, np)
+        return [self.ui.name[i][4:] for i in self.ui.kids[self.view] if i not in self.ui.hidden]
+
+
+def test_home_folows_its_saved_order_and_now_playing_only_with_something_loaded(fw, ui):
+    home = Home(fw, ui, {HOME_FILE: b'Sclpqsf'}, folders=3)
+    assert home.apply() == ['settings', 'coverflow', 'localmusic', 'playing', 'home_search', 'stream', 'folder']
+    assert home.apply(np=0) == ['settings', 'coverflow', 'localmusic', 'home_search', 'stream', 'folder']
+    assert Home(fw, ui, folders=3).apply(np=0) == HOME[1:]
+
+
+def test_folders_is_auto_hidden_until_the_card_has_folders_and_a_users_choice_sticks(fw, ui):
+    """Auto follows the card both ways; Shown stays on an empty card, Hidden with folders."""
+    home = Home(fw, ui)
+    assert 'folder' not in home.apply()
+    home.card(2)
+    assert 'folder' in home.apply()
+    home.card(0)
+    assert 'folder' not in home.apply()
+    shown = Home(fw, ui, {HOME_FILE: ('+f'.join(HOME_DEFAULT.split('f'))).encode()})
+    assert 'folder' in shown.apply()  # Shown, no folders
+    hidden = Home(fw, ui, {HOME_FILE: ('-f'.join(HOME_DEFAULT.split('f'))).encode()}, folders=5)
+    assert 'folder' not in hidden.apply()  # Hidden, folders
+
+
+def test_settings_on_home_cannot_be_hidden(fw, ui):
+    home = Home(fw, ui, {HOME_FILE: ('-S'.join(HOME_DEFAULT.split('S')) + '').encode()}, folders=1)
+    assert home.apply()[-1] == 'settings'
+    other = Home(fw, ui, {HOME_FILE: b'-p-l-s-f-c-qS'}, folders=1)
+    assert other.apply() == ['settings']
 
 
 # A saved order from before Photos' and Books' rows were retired: "o" and "B" were their letters, before Games.

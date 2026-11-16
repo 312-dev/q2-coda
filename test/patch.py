@@ -5462,8 +5462,10 @@ def click_target(m,w):
 def home_list(m):
     """iPod Home as built (ui/home_page.bin) on top: its scroll view and the rows' tap images. Stock
     binds every image but Coverflow's, which the payload binds. A song is paused (mclGetPlayStatus 3),
-    so Now Playing's row shows (coverflow.c np_loaded) and the rows keep HOME_ROWS' order."""
+    so Now Playing's row shows (coverflow.c np_loaded), and the card's root lists a folder, so Folders
+    shows (home.c home_folders): the rows keep HOME_ROWS' order."""
     m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,3)
+    m.stats['/mnt/mmc']=1; m.mock('toolsLoadDirectory',prefix='one:')
     m.top=asset_tree(m,HOME_PAGE)
     imgs=[named(m,m.top,'img_'+HOME_OURS.get(r,r)) for r in HOME_ROWS]
     cf=HOME_ROWS.index('coverflow')
