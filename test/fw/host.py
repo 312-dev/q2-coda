@@ -63,11 +63,11 @@ def platform_header():
     return '\n'.join(lines) + '\n'
 
 
-def stock_header(themes, key):
+def stock_header(themes, key, dev=0):
     lines = [f'extern unsigned char fw_ctx_{name}[{size}];' for name, size in CONTEXT.items()]
     ranges = [tools_build.face_font(f)[1] for f in tools_build.FACES.values() if f.source]
     context = {name: f'fw_ctx_{name}' for name in tools_build.CONTEXT_DATA}
-    return '\n'.join(lines) + '\n' + tools_build.stock_header(context, ranges, themes, repo='owner/repo', key=key)
+    return '\n'.join(lines) + '\n' + tools_build.stock_header(context, ranges, themes, dev=dev, repo='owner/repo', key=key)
 
 
 SIGNING_KEY = 'signing.pem'  # beside fw.so: the private half of the build's release key, made for this build alone
@@ -130,13 +130,14 @@ def compile_one(source, out, extra):
     return obj
 
 
-def build(out, extra=()):
-    """Compile everything into out/fw.so, extra going to cc (test/fw/conftest.py's coverage and sanitizers).
-    Every static gains a global <file>__<name> a test can reach."""
+def build(out, extra=(), dev=0):
+    """Compile everything into out/fw.so, extra going to cc (test/fw/conftest.py's coverage and sanitizers), as a
+    release build's payload, or for dev (a --dev build's number) a --dev build's, Q2POD_DEV 1. Every static gains a global
+    <file>__<name> a test can reach."""
     out.mkdir(parents=True, exist_ok=True)
     themes = tools_theme.builtins()
     (out/'peq_platform.h').write_text(platform_header())
-    (out/'stock.h').write_text(stock_header(themes, signing_key(out)))
+    (out/'stock.h').write_text(stock_header(themes, signing_key(out), dev))
     tools_theme.emit(themes, out)
     with concurrent.futures.ThreadPoolExecutor(8) as pool:
         objects = list(pool.map(lambda s: compile_one(s, out, extra), SOURCES))

@@ -237,10 +237,11 @@ static inline int arc_out(int r, int y) {
  * edge CHEVRON_W from the row's right edge (8 px margin + 50 px image), so every `>` lines up. */
 #define CHEVRON_W 58
 /* iPod Home: Split gives the menu half the screen (HOME_SPLIT_W, the geometry sets' split_row and split_art
- * but OLED's, tools/ipod.py), the art the rest right of it. Labels end HOME_LABEL_END from the row's edge. The selection
+ * but OLED's, tools/ipod.py), the art the rest right of it. Labels end HOME_LABEL_END from the row's edge, where the
+ * chevron's (and Cover Flow's spinner's) 16 px box starts, 5 px left of OLED's 28 px right column. The selection
  * dot (HOME_DOT px) sits at HOME_DOT_X, clear of the bottom row's corner, HOME_DOT_GAP before the
  * labels (HOME_TEXT_X in tools/ipod.py). */
-#define HOME_LABEL_END 33
+#define HOME_LABEL_END 41
 #define HOME_DOT_X 25
 #define HOME_DOT 6
 #define HOME_DOT_GAP 8

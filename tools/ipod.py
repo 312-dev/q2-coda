@@ -166,7 +166,7 @@ HOME_TOP = inc('HOME_TOP')
 HOME_ROW = SET0.home_row
 HOME_REST = inc('HOME_REST')
 HOME_TEXT_X = inc('HOME_DOT_X') + inc('HOME_DOT') + inc('HOME_DOT_GAP')  # labels after the selection dot
-HOME_LABEL_END = inc('HOME_LABEL_END')  # mirror the text inset, clear of the lower-right glass
+HOME_LABEL_END = inc('HOME_LABEL_END')  # clear of the chevron's box, and so of the lower-right glass
 HOME_LIST_W = 375
 # iPod Now Playing (Rockbox iVideo): a 40px top row, the art band below it, then the progress bar
 # with the times under its ends. Stock draws the 3x10 A-B markers at y 250; the 4px line sits at

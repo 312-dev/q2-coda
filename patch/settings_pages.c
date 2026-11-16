@@ -4,7 +4,8 @@
  * cut off at its column scrolls on the selected row (the house marquee, navigation.c marq_moved),
  * but nothing opens: stock's row click (its serial number's QR code) gives way to one that does
  * nothing. The key is in Text Primary and the value in the theme's value grey, each value as wide
- * as its key leaves it (about_rows); from ipod_list_layout, after set_row. */
+ * as its key leaves it (about_rows); from ipod_list_layout, after set_row.
+ * A --dev build's Save Diagnostics row (diagnostics.c) keeps its own click. */
 #include "navigation.h"
 
 #define ABOUT_INK_STATES 4 /* text_ink's normal, pressed, over and disable */
@@ -56,6 +57,7 @@ void about_rows(void *view) {
         void *item = widget_get_child(view, i),
              *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0,
              *key = (void *)0, *val = (void *)0;
+        if (diag_row(item)) continue; /* --dev builds' Save Diagnostics: its own click */
         about_inert(b);
         for (unsigned j = 0, k = b ? widget_count_children(b) : 0; j < k && !val; ++j) {
             void *c = widget_get_child(b, j);

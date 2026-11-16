@@ -384,9 +384,9 @@ void list_value(void *l, const char *t, const char *v) { (void)l, (void)t, (void
  * fixture (main()), with its own white paper */
 static theme_t shim_themes[2] = {
     { .page_row = 32, .page_detail = 52, .page_title_h = 0, .page_x = 24, .page_cap_y = 4, .page_cap_h = 24, .page_det_y = 31, .page_det_h = 20, .home_full_row = 375, .home_text_x = 24,
-      .home_label_end = { 44, 33 }, .cf = CF_STYLE0 },
+      .home_label_end = { 44, 41 }, .cf = CF_STYLE0 },
     { .page_row = 32, .page_detail = 52, .page_title_h = 0, .page_x = 24, .page_cap_y = 4, .page_cap_h = 24, .page_det_y = 31, .page_det_h = 20, .home_full_row = 375, .home_text_x = 24,
-      .home_label_end = { 44, 33 }, .cf = CF_STYLE1 } };
+      .home_label_end = { 44, 41 }, .cf = CF_STYLE1 } };
 static short stub_bar_h = 30;
 const theme_t *theme(void) { return &shim_themes[alt]; }
 const scheme_t *scheme(void) { /* light is only asked of it in its light half */

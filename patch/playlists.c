@@ -1113,8 +1113,11 @@ static void pl_rows(void *win) {
 }
 /* With nothing remembered (a first open, or a count changed) Playlists starts on its first row,
  * On-The-Go, where it opens. Just after New Playlist made one (pl_made), on that one, as an iPod's
- * list lands on what was added; its rows are p_deque_playlist's records in order. */
+ * list lands on what was added; its rows are p_deque_playlist's records in order. Every list's
+ * first paint asks, so with no playlist just made it answers before walking the rows: a 500-row
+ * list's walk alone was 8,000 instructions of its first paint's 100,000 budget (test/patch.py). */
 int pl_first(menu_t *m, int cur) {
+    if (!pl_made[0]) return cur;
     void *lists = P(p_deque_playlist, 0);
     int k = 0, at = -1;
     for (int i = 0; i < m->n && at < 0; ++i) {

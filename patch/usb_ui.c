@@ -102,12 +102,12 @@ static void usb_toast(const char *glyph, const char *text) {
 
 /* The choice this cable gets without asking, USB_ASK for none. Transfer Files and USB Audio follow
  * the tile; Charge Only and USB Debugging are dropped once the tile has changed since they were
- * saved. */
+ * saved. config_value takes a value under its count, so each read names the values it may hold. */
 static int usb_remembered(void) {
-    int pick = config_value("Q2POD", USB_PICK_KEY, 0, USB_ASK);
-    if (pick <= USB_ASK || pick >= USB_CHOICES || (pick == USB_DEBUG && !Q2POD_DEV)) return USB_ASK;
+    int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK);
+    if (pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV)) return USB_ASK;
     if (pick == USB_FILES || pick == USB_AUDIO) return g_usbmode == USB_MODE_DAC ? USB_AUDIO : USB_FILES;
-    if (config_value("Q2POD", USB_PICK_MODE, 0, -1) != g_usbmode) return USB_ASK;
+    if (config_value("Q2POD", USB_PICK_MODE, 256, -1) != g_usbmode) return USB_ASK; /* a byte */
     return pick;
 }
 
@@ -159,7 +159,10 @@ static const char *const usb_glyphs[] = { "usb_charge", "usb_files", "usb_audio"
 static int usb_chooser_closed(void *ctx, void *event) {
     if (u.chooser == ctx) {
         u.chooser = u.view = u.always = (void *)0;
-        if (!u.chosen && g_usbdet_value) usb_apply(USB_CHARGE, 0); /* Return: charge only */
+        if (!u.chosen && g_usbdet_value) { /* Return: charge only, the probe's gadget stopped as a row's */
+            u.chosen = 1;
+            usb_apply(USB_CHARGE, 0);
+        }
     }
     return 0;
 }

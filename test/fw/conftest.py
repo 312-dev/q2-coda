@@ -71,12 +71,33 @@ def high_halves(n):
 def library(tmp_path_factory):
     if os.environ.get('Q2_FW_LIBRARY'):  # one already built: test/cmut/run.py links each mutant's
         return pathlib.Path(os.environ['Q2_FW_LIBRARY'])
+    return host.build(tmp_path_factory.mktemp('fw'), cc_extra())
+
+
+def cc_extra():
+    """cc's flags for this run: Q2_FW_SANITIZE's sanitizers, Q2_FW_COVERAGE's coverage."""
     extra = []
     if os.environ.get('Q2_FW_SANITIZE'):
         extra += ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined', '-fno-sanitize=alignment']
     if os.environ.get('Q2_FW_COVERAGE'):
         extra += ['--coverage']
-    return host.build(tmp_path_factory.mktemp('fw'), extra)
+    return extra
+
+
+@pytest.fixture(scope='session')
+def dev_library(tmp_path_factory):
+    """The library as a --dev build compiles it (Q2POD_DEV 1): its dev-only code, the USB Debugging rows, the ADB
+    prompt and Save Diagnostics. Built only for a test that asks for it."""
+    return host.build(tmp_path_factory.mktemp('fw_dev'), cc_extra(), dev=1)
+
+
+@pytest.fixture
+def fw_dev(dev_library, tmp_path):
+    loaded = host.Fw(dev_library, tmp_path)
+    label = C.create_string_buffer(0x400)  # as fw's
+    loaded.mock('hscroll_label_create', lambda *_: C.addressof(label))
+    yield loaded
+    loaded.close()
 
 
 @pytest.fixture(scope='session')
