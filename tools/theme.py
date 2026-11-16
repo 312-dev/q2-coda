@@ -451,7 +451,7 @@ def unflip(c, paper, ink):
 
 FINAL = [k for k in SCHEMA.values() if k.final]
 
-# The design's colour tokens (docs/oled-design.md#colour), 0xRRGGBB final per half: (dark, light). A light of None is
+# The design's colour tokens (docs/oled-design.md#color), 0xRRGGBB final per half: (dark, light). A light of None is
 # the dark's flip by OLED's light paper and ink (TOKEN_PAPER, assets/themes/oled/theme.xml), the colour flip_if gives. patch/tokens.h holds them for C as TOK_<NAME>
 # (ui_kit.c tok's index), RGB_<NAME> and RGB_<NAME>_L (write_tokens writes it, test/unit/test_theme.py checks it is
 # current); tools/art.py inks its glyphs from them.

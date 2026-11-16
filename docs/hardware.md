@@ -13,14 +13,14 @@ Shanling's figures, as retailers and the launch press list them ([Audiophonics](
 | DAC          | 4 × Cirrus Logic CS43131                                                 |
 | Decoding     | PCM to 768 kHz / 32-bit, DSD512                                          |
 | Screen       | 2.09 in touchscreen, 320 × 375                                           |
-| Controls     | Touch wheel, Centre button, four side buttons                            |
+| Controls     | Touch wheel, Center button, four side buttons                            |
 | Storage      | microSD, up to 2 TB; no user storage inside                              |
 | Battery      | 1850 mAh: 13.5 h on 3.5 mm, 12.5 h on 4.4 mm, 16.5 h on Bluetooth (LDAC) |
 | Bluetooth    | 5.2, send and receive; LDAC, aptX HD, aptX, AAC, SBC                     |
 | Wi-Fi        | Yes (AirPlay, DLNA in stock firmware)                                    |
 | USB          | USB-C: charging, USB DAC to 384 kHz / 32-bit, digital out                |
 | Size, weight | 80 × 50 × 13.5 mm, 83 g; aluminium and glass                             |
-| Colours      | Smoke grey, silver, orange                                               |
+| Colors      | Smoke gray, silver, orange                                               |
 
 | Output                        | 3.5 mm               | 4.4 mm balanced      |
 | ----------------------------- | -------------------- | -------------------- |
@@ -84,7 +84,7 @@ As `/proc/mtd` lists it: a second kernel and a smaller second rootfs sit beside 
 
 From Shanling, in reply to owners' reports (Q2 Muse Discord, 2026-11-13):
 
-- **A Centre button that wiggles or rattles is normal.** The wheel and the Centre button come from two different suppliers, and the tolerance lets the button move slightly. Shaken near the ear, nearly every unit rattles a little or more. Shanling does not treat it as a warranty fault.
+- **A Center button that wiggles or rattles is normal.** The wheel and the Center button come from two different suppliers, and the tolerance lets the button move slightly. Shaken near the ear, nearly every unit rattles a little or more. Shanling does not treat it as a warranty fault.
 - **A sticking wheel is a fault.** Amazon has seen a few cases, caused by the mounting tape under the button not being aligned. It is covered under warranty.
 
 ## Opening it

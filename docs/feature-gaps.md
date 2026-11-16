@@ -157,7 +157,7 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 
 **Support.** Yes. The clock and the time zones are already right ([internals.md, Clock](internals.md#clock)); a card game (`game=1`) runs full screen until it exits and takes the wheel and buttons (`patch/addon.c:39-43`).
 
-**Approach.** One card game, `q2-extras`, with three screens: world clocks from the rootfs zoneinfo (the same `TZ` names `TIMEZONES` in `tools/build.py` uses), a stopwatch with laps (Centre starts and stops, Next marks a lap), and a timer that pauses playback or beeps at zero. No firmware change.
+**Approach.** One card game, `q2-extras`, with three screens: world clocks from the rootfs zoneinfo (the same `TZ` names `TIMEZONES` in `tools/build.py` uses), a stopwatch with laps (Center starts and stops, Next marks a lap), and a timer that pauses playback or beeps at zero. No firmware change.
 
 **Effort and value.** S. Low-medium: nostalgia and the occasional kitchen timer.
 
@@ -189,7 +189,7 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 
 **Effort and value.** L. High: AirPlay is how an iPhone owner plays to a player, and AirPlay 2 adds multi-room and a steadier link than RAOP's.
 
-**Risks.** nqptp needs UDP ports 319 and 320 and keeps timing traffic going, which costs battery while the service runs; start it only from the row, as Spotify does. shairport-sync and nqptp ship as card files, apart from the firmware, so their licences are checked for the release zip, not for Q2 Muse. AirPlay is Apple's trademark and this is not a licensed implementation; the app should say it is independent, as librespot's does for Spotify.
+**Risks.** nqptp needs UDP ports 319 and 320 and keeps timing traffic going, which costs battery while the service runs; start it only from the row, as Spotify does. shairport-sync and nqptp ship as card files, apart from the firmware, so their licenses are checked for the release zip, not for Q2 Muse. AirPlay is Apple's trademark and this is not a licensed implementation; the app should say it is independent, as librespot's does for Spotify.
 
 ## Already in Q2 Muse
 
@@ -225,7 +225,7 @@ iPod-lineage features Q2 Muse or stock already has, with where. Stock means Shan
 | Remote and headset controls                  | headset buttons, AirPods stem controls and ear detection                                   | `patch/headset.c`                                                                 |
 | A-B repeat                                   | stock's A-B Repeat on Now Playing's More                                                   | [ipod.md](ipod.md#now-playing)                                                    |
 
-From the other two yardsticks Q2 Muse already has scrobbling (Last.fm and ListenBrainz, `patch/scrobble.c`), a folder library, favourites, PEQ, Spotify Connect (librespot), an AirPlay 1 receiver and an AirPlay sender, Internet Radio, Tidal (stock), Deezer, Subsonic and Soulseek card apps, Rockbox itself through dual boot (with its crossfeed, bookmarks and plugins, a reboot away), and from stock: Bluetooth receive mode, LDAC and aptX HD, USB DAC, DSD512, car mode and the DLNA renderer.
+From the other two yardsticks Q2 Muse already has scrobbling (Last.fm and ListenBrainz, `patch/scrobble.c`), a folder library, favorites, PEQ, Spotify Connect (librespot), an AirPlay 1 receiver and an AirPlay sender, Internet Radio, Tidal (stock), Deezer, Subsonic and Soulseek card apps, Rockbox itself through dual boot (with its crossfeed, bookmarks and plugins, a reboot away), and from stock: Bluetooth receive mode, LDAC and aptX HD, USB DAC, DSD512, car mode and the DLNA renderer.
 
 **Nearly called missing.** These turned up only on a second search: Composers (stock's list, missing from the Library rows `localmusic_page_init` names, yet handled by Q2 Muse's empty-list toast, `patch/navigation.c:8070`); the sleep timer (stock's page, not a Q2 Muse feature); ReplayGain album mode (stock's, labelled Song and Album); playback speed (stock's, kept per folder by Q2 Muse); A-B repeat (stock's, on More); Recent, Q2 Muse's equivalent of Recently Played (stock's row).
 
@@ -241,7 +241,7 @@ From the other two yardsticks Q2 Muse already has scrobbling (Last.fm and Listen
 | Loudspeaker playback (alarm sounds, clicker on music) | The only speaker is the MCU's buzzer, which beeps and plays nothing else.                                                                    |
 | USB keyboard or remote input                          | The stock kernel has no `hid-generic` ([hardware.md](hardware.md)); a module could add it, but Q2 Muse ships the stock kernel unchanged.      |
 
-MQA decoding is possible in principle but excluded: stock's hciplayer never reaches its MQA decoder, and the decoder needs a licence ([internals.md, MQA detection](internals.md#mqa-detection)).
+MQA decoding is possible in principle but excluded: stock's hciplayer never reaches its MQA decoder, and the decoder needs a license ([internals.md, MQA detection](internals.md#mqa-detection)).
 
 ## Sources
 

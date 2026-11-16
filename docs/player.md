@@ -268,7 +268,7 @@ A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position star
 | `FORCED_EOF` | Only an MP3's frame count ends a song early; other lengths are estimates | [Forced EOF](internals.md#forced-eof) |
 | `MEDIA_INFO_NULL`, the `mcl-seteq` loads | `get-music-info` and `mcl-seteq` between songs answer instead of faulting | [Music info between songs](internals.md#music-info-between-songs) |
 | `PROBE_STOP`, `STOP_SITES`, `STOP_FILL`, `EXIT_HOLD` | A bad next file does not stop the song playing; two `exit`s are never closer than 300 ms | [A bad file next](internals.md#a-bad-file-next) |
-| `PRELOAD_PUBLISH`, `PRELOAD_FAILED`, `COLD_CLEAR`, `PRELOAD_CLOSE` | A preload that lost the race, or was cancelled while opening, is not played | [A preload too late](internals.md#a-preload-too-late) |
+| `PRELOAD_PUBLISH`, `PRELOAD_FAILED`, `COLD_CLEAR`, `PRELOAD_CLOSE` | A preload that lost the race, or was canceled while opening, is not played | [A preload too late](internals.md#a-preload-too-late) |
 | `FLAC_GATE`, `SEEK_NOSYNC`, `SEEK_WORDS`, `FLAC_META_EOF`, `flac_*.c` | A FLAC seek near the end plays to the end (stock ends the song: captured, a seek to 15 s of 20 ends it half a second later); a truncated FLAC does not hang the open | [A FLAC seek near the end](internals.md#a-flac-seek-near-the-end) |
 | `PAUSE_WAIT`, `CMD_DONE`, `IDLE_WAIT` | Paused and stopped, the player sleeps on a futex, not a 10-20 ms poll | [Battery](internals.md#battery) |
 
