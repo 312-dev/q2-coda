@@ -22,7 +22,8 @@ between runs, each with its one reused build (tools/ci/rebuild.py, ~/.cache/q2-b
 4. Red: the batch is split in halves and only the failing suites run on each, on top of what has passed
    so far, down to the branch each failure needs; a half known to fail (its sibling passed) is not tested
    again. The culprits are left out, the remainder is tested again in full (what its own diff needs),
-   and lands when that is green.
+   and lands when that is green. Before any of that, the failing suites run on the tip alone: when the tip
+   fails them too, nothing lands, as every branch would look guilty.
 
 A branch is merged at the commit it was queued at (the ready list records it), so its owner can keep
 committing while a batch runs. Logs and a summary go to ~/.cache/q2-merge-train/<time>/. Exit status: 0
@@ -104,6 +105,12 @@ def integrate(ops, tip, branches, log=print):
             r.head, r.landed = head, todo
             return r
         suites = sorted(bad)
+        # A red tip would make every branch that reaches the failing suites look guilty: check it first.
+        if test(0, tip, suites, f'round {round_}: the tip alone'):
+            log(f'round {round_}: {", ".join(suites)} fail on the integration tip without any branch: '
+                f'nothing lands; make the tip green first')
+            r.skipped.update({b: 'not landed: the integration tip fails the same suites' for b in todo})
+            return r
         good = {'head': tip, 'branches': []}
         before = len(r.culprits)
 
@@ -174,6 +181,7 @@ class Real:
     def __init__(self, target, tip, logs, dev=True, log=print):
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
+        self.batch_plan = None  # the first plan made, the whole batch's: what the tip alone is checked with
 
     def wt(self, level):
         path = CACHE/'wt'/f'{self.target.replace("/", "_")}-L{level}'
@@ -219,12 +227,22 @@ class Real:
         if git('rev-parse', 'HEAD', cwd=wt).stdout.strip() != head:
             git('checkout', '-q', '--detach', '-f', head, cwd=wt)
             git('clean', '-q', '-ffdx', cwd=wt)
-        plan = self.plan(wt)
+        if head == self.tip:
+            # the tip's own diff is empty: run the batch's plan on it, as far as the tip has those files
+            # (the joined suite's line numbers are the batch's, so test/patch.py runs whole)
+            plan = dict(self.batch_plan, patch='all' if self.batch_plan['patch'] else [])
+            for k in ('unit', 'fw'):
+                if plan[k] != 'all':
+                    plan[k] = [f for f in plan[k] if (wt/'test'/k/f).exists()]
+            plan['other'] = [o for o in plan['other'] if (wt/o).exists()]
+        else:
+            plan = self.plan(wt)
+            if self.batch_plan is None:
+                self.batch_plan = plan
         if suites is not None:
             plan = restrict(plan, suites)
         name = re.sub(r'[^\w.-]+', '_', tag)[:80]
-        needs_build = plan['patch'] or 'build' in (suites or []) or \
-            any(o.startswith('test/') and o != 'tools/ci/test_ci.py' for o in plan['other'])
+        needs_build = plan['patch'] or 'build' in (suites or []) or any(o.startswith('test/') for o in plan['other'])
         results, build = {}, ''
         t = time.perf_counter()
         if needs_build:

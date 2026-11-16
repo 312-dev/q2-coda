@@ -169,8 +169,9 @@ class FakeBatch:
     """merge_batch.integrate's ops on a pretend repository: a commit is the tuple of branches merged onto the
     tip; a suite fails when the commit holds a branch that breaks it (bad) or a pair that breaks it together
     (pairs); a branch in conflicts never merges."""
-    def __init__(self, bad=None, pairs=(), conflicts=(), flaky=0):
+    def __init__(self, bad=None, pairs=(), conflicts=(), flaky=0, red_tip=()):
         self.bad, self.pairs, self.conflicts, self.flaky = bad or {}, pairs, set(conflicts), flaky
+        self.red_tip = set(red_tip)  # suites the tip fails on its own
         self.runs = []
 
     def assemble(self, level, base, branches):
@@ -181,6 +182,7 @@ class FakeBatch:
         self.runs.append((level, head, suites))
         broken = {s for b in head for s in self.bad.get(b, ())}
         broken |= {s for a, b, s in self.pairs if a in head and b in head}
+        broken |= self.red_tip
         if self.flaky:
             self.flaky -= 1
             broken.add('unit')
@@ -214,7 +216,7 @@ def test_one_culprit_costs_a_few_runs_wherever_it_is():
         fake = FakeBatch(bad={f'b{i}': {'unit'}})
         r = integrate(fake)
         bisect = [run for run in fake.runs if run[2] is not None]
-        assert list(r.culprits) == [f'b{i}'] and len(bisect) <= 6, (i, len(bisect))  # about log2(10) + 2
+        assert list(r.culprits) == [f'b{i}'] and len(bisect) <= 7, (i, len(bisect))  # the tip, then about log2(10) + 2
 
 
 def test_two_culprits_in_different_halves():
@@ -240,6 +242,13 @@ def test_a_failure_bisection_cannot_find_lands_nothing():
     fake = FakeBatch(flaky=1)  # the batch run fails, every half passes
     r = integrate(fake)
     assert r.head is None and not r.landed and not r.culprits and len(r.skipped) == 10
+
+
+def test_a_red_tip_lands_nothing_and_blames_no_branch():
+    fake = FakeBatch(red_tip={'unit'})
+    r = integrate(fake)
+    assert not r.culprits and not r.landed and len(r.skipped) == 10
+    assert [h for _, h, _ in fake.runs] == [tuple(f'b{i}' for i in range(10)), ()]  # the batch, then the tip
 
 
 def test_a_half_known_to_fail_is_not_tested_again():
