@@ -10281,7 +10281,7 @@ assert [(nm.text(c[1]),0x70000000<=c[1]<0x70010000) for c in nm.calls if c[0]=='
 # Migration (navigation.c theme_boot): a unit an older build left on another theme (IPOD THEME other than 3, or no
 # key) takes OLED's preset once at its first system_bar load, as choosing OLED did, then THEME 3 is written; with
 # THEME 3 nothing is written. The preset is theme.xml's (theme_preset): Light Mode off unless Auto (keep), Blue,
-# Home Full, and its own options' presets; Shortcut and Battery are kept, and only a change is saved. A failed set
+# Home Split, and its own options' presets; Shortcut and Battery are kept, and only a change is saved. A failed set
 # boot migrates all the same, and a second load does nothing again.
 OPT_KEY={'SETTING_LIGHT':'LIGHT','SETTING_ACCENT':'OLED_ACCENT','SETTING_HOME':'HOME','SETTING_SHORTCUT':'SHORTCUT','SETTING_BATTERY':'BATTERY'}
 def preset_writes(config):  # theme_preset's saves for config, from OLED's options (oled/theme.xml), in their order
@@ -10294,7 +10294,7 @@ def preset_writes(config):  # theme_preset's saves for config, from OLED's optio
         if o['values'] and o['def']>=0 and not o['values']>>v&1: v=o['def']
         if o['preset']>=0 and v!=o['keep'] and v!=o['preset']: out.append((o['preset'],'IPOD',key))
     return out
-assert preset_writes({})==[(1,'IPOD','HOME')]  # a fresh unit: only Home differs from OLED's preset
+assert preset_writes({})==[]  # a fresh unit: already OLED's preset (Home Split, Light Mode off, Blue)
 for config,fail in (({},False),({'THEME':'1'},False),({'THEME':'0','LIGHT':'1','HOME':'2','SONGARTIST':'2','SONGLENGTH':'1','NPTIME':'1','OLED_ACCENT':'4'},False),
                     ({'THEME':'2','LIGHT':'2','HOME':'1','BATTERY':'1','SHORTCUT':'5'},False),({'THEME':'12'},False),({'THEME':'1'},True),
                     ({'THEME':'3'},False),({'THEME':'3','LIGHT':'1','HOME':'2'},False)):
@@ -11153,10 +11153,11 @@ for entry,stock in (('device_reboot','reboot'),('dialog_checkfw_dialog_init','ch
     for status in (1,2,3):
         m=Machine(); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(PLAY_STATUS,status)
         m.handlers[payload_syms[f'stock_{stock}_trampoline']]='stock_'+stock
-        m.call(address=syms[entry],args=(0x1234,0x5678,0,0),gap=0)
+        win=m.node('window')  # the dialog's window: sw_update_restarting looks for stock's label in it
+        m.call(address=syms[entry],args=(win,0x5678,0,0),gap=0)
         got=[c for c in m.calls if c[0] in ('save_memoryplay_info','stock_'+stock)]
         assert [c[0] for c in got]==['save_memoryplay_info'][:status!=1]+['stock_'+stock],(entry,status)
-        assert stock!='checkfw' or got[-1][1:3]==(0x1234,0x5678)
+        assert stock!='checkfw' or got[-1][1:3]==(win,0x5678)
 passed()
 
 def long_list(n=40,m=None):
@@ -11229,8 +11230,9 @@ assert got==[(1,1),(1,2),(1,3),(1,4)],got; passed()
 # Slow ticks click on every row; Home's end is silent however long the pause; a repaint and a long wait add
 # nothing.
 m,view=home_machine()
-assert [tick(m) for _ in range(8)]==[1]*8 and m.selected(view)==8
-assert [tick(m,gap=gap) for gap in (1000,50,400,100)]==[0,0,0,0] and m.selected(view)==8
+last=len(HOME_ROWS)-1
+assert [tick(m) for _ in range(last)]==[1]*last and m.selected(view)==last
+assert [tick(m,gap=gap) for gap in (1000,50,400,100)]==[0,0,0,0] and m.selected(view)==last
 m.paint(view); assert not buzzes(m)
 m.advance(10000); assert not buzzes(m); passed()
 # buzzeer_switch also runs when it is silent, so its calls are not the count: stock always calls
@@ -11474,10 +11476,11 @@ assert called('getAllMusic')==[(3,1)] and m.get(payload_syms['library_music'])==
 assert m.names(m.get(syms['tools_pdeq_directory']))==['staged'] and not m.toasts; confirmed('Shuffled Songs'); passed()
 # The note: centred at the page's foot, 28 px up from the window's (library_lists.c shuffle_menu: OLED's set has no title
 # row, so client_h() - 28, 234 under its 58 px bar), its text in the info role's face at 16 px, the muted grey. The set's
-# Library leads with Search (no Library icons, home.c library_search), so Shuffle is its second row.
+# Library's Shuffle row (hidden until Edit Library shows it, home.c ringnav_localmusic) opens the menu.
 nm=oled_set(ShuffleMachine()); view=nm.node('scroll_view','scroll_view_localmusic',[nm.node('list_item') for _ in range(11)]); nm.top=nm.node('window','localmusic_page',[view])
 assert nm.call(address=HOOKS['localmusic_page_init'][0],args=(nm.top,5,0,0),gap=0)==0
-f_,ctx_=nm.handler(nm.nodes[nm.nodes[view]['children'][1]]['children'][0],O['EVT_CLICK']); assert nm.call(address=f_,args=(ctx_,nm.event,0,0),gap=0)==0
+shuffle_row,=[r for r in nm.nodes[view]['children'] if nm.nodes[r]['children'] and 'Shuffle' in [nm.nodes[k].get('text') for k in nm.nodes[nm.nodes[r]['children'][0]]['children']]]
+f_,ctx_=nm.handler(nm.nodes[shuffle_row]['children'][0],O['EVT_CLICK']); assert nm.call(address=f_,args=(ctx_,nm.event,0,0),gap=0)==0
 note=nm.nodes[nm.top]['children'][-1]; assert nm.nodes[note]['text']=='Albums and folders take a moment to shuffle'
 x,y,w,h=[nm.get(note+O[k]) for k in ('W_X','W_Y','W_W','W_H')]; assert (x,y,w,h)==(46,320-OLG.bar-28,283,24)==(46,234,283,24) and x+w/2==375/2
 assert (nm.nodes[note]['style:normal:font_name'],nm.nodes[note]['style:normal:font_size'],nm.nodes[note]['style:normal:text_color'])==(FACE_NAMES[OLT['font[ROLE_INFO]']],16,-0x555556); passed()
@@ -11651,7 +11654,7 @@ pm.top=under_bar(pm,'shuffle_page'); pm.calls=[]
 view=plist(pm,'Shuffle',20,48)
 lv,=page_kids(pm,'list_view'); title,=page_kids(pm,'hscroll_label')
 assert [c[:4] for c in pm.calls if c[0]=='list_view_create']==[('list_view_create',pm.top,0,0)]
-assert signed(pm.get(lv+O['W_H']))==OLG.list_end//OLT['page_row']*OLT['page_row'] and pm.nodes[lv]['item_height']==OLT['page_row'] and pm.nodes[view]['virtual_h']==20*OLT['page_row']
+assert signed(pm.get(lv+O['W_H']))==320-OLG.bar and pm.nodes[lv]['item_height']==OLT['page_row'] and pm.nodes[view]['virtual_h']==20*OLT['page_row']  # to the window's foot: rows past the list end fade (list_fade)
 assert pm.nodes[title]['text']=='Shuffle' and pm.nodes[title]['visible']==0 and box(pm,title)[3]==0 and pm.nodes[pbar]['text']=='Shuffle'
 row=prow(pm,view,3,'Shuffle Songs'); assert box(pm,row)==[0,3*OLT['page_row'],375,OLT['page_row']]
 cap=pm.nodes[row]['children'][0]; assert box(pm,cap)==[PX,0,PW,OLT['page_row']]
@@ -11814,14 +11817,15 @@ motion_open(m,'shuffle_page'); hints+=hint_writes(m); motion_open(m,'coverflow_p
 passed()
 # The Library rows follow the constructor's live body and icon x, whichever group the audit gave them: OLED's set's row
 # poked (boot_values, its index in tools/theme.py geometry_sets) before its boot writes them. Search is the Library's
-# first row there; Shuffle, the second, keeps its (hidden) icon.
+# first row there; Shuffle (hidden until Edit Library shows it) keeps its (hidden) icon.
 OLG_I=[g.name for g in geometry_sets(theme_builtins())].index('oled')
 def set_oled_value(m,name,v): m.u.mem_write(payload_syms['boot_values']+2*len(VALUE_NAMES)*OLG_I+2*VALUE_NAMES.index(name),struct.pack('<H',v))
 m=ShuffleMachine(); set_oled_value(m,SITES[0x535540],60); set_oled_value(m,SITES[0x535678],6); oled_set(m)
 stock=[m.node('list_item') for _ in range(11)]; view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
-button=m.nodes[m.nodes[view]['children'][1]]['children'][0]; icon=m.nodes[button]['children'][0]
-assert m.nodes[m.nodes[button]['children'][1]]['text']=='Shuffle' and m.get(button+O['W_H'])==60 and m.get(icon+O['W_X'])==6; passed()
+button,=[b for r in m.nodes[view]['children'] for b in m.nodes[r]['children'][:1] if 'Shuffle' in [m.nodes[k].get('text') for k in m.nodes[b]['children'][1:2]]]
+icon=m.nodes[button]['children'][0]
+assert m.get(button+O['W_H'])==60 and m.get(icon+O['W_X'])==6; passed()
 # OLED's Library is text: on its set the Library's constructor sites take the set's lib_ values (lib_body, rows with no
 # icon), and Albums' (0x4a69e0) its art_body.
 lm=oled_set(ShuffleMachine()); lstock=[lm.node('list_item') for _ in range(11)]; lv=lm.node('scroll_view','scroll_view_localmusic',lstock)
@@ -11893,27 +11897,14 @@ m.close(); m.calls=[]; m.rescan(); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=50_000_000)==0 and called('getAllMusic')
 m.page=m.top; assert m.texts()==['Most Played']+[x for p in zip(ranked[:3],details[:3]) for x in p]; passed()
 
-# View Queue on a shuffle (Now Playing's hold menu, Up Next's list): a Play/Pause hold on a row plays its track
-# next, a move, not Play Next's copy, the queue as it was; the rows are taken again with the pick at row 0, the
-# selection there, with no menu, toast or play/pause. A row already next stays there; playback is not touched; once
-# the queue changes under the page a hold says so and takes the rows again from the live queue.
+# View Queue (Now Playing's hold menu) opens Up Next (upnext.c) over the queue; its rows, holds, lifts and Clear are
+# test/fw/test_upnext.py's.
 m=CoverflowMachine(page='playing_page',pos=1); q=m.deque([m.song(c) for c in 'ABCDE'])
 m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque(list(range(5)),'int'))
 assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
 m.press(10); assert m.hold()==11 and 'Up Next' not in m.labels(); m.release()
-m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top; assert m.nodes[m.page]['name']=='upnext_page'
-up=m.texts()[1::2]; assert len(up)==4 and 'B' not in up and m.texts()[0]=='View Queue'
-view=m.find('scroll_view'); m.paint(view); m.call(); assert m.selected(view)==1
-m.press(20); assert m.hold()==11 and m.release()==0 and not m.toasts
-want=[up[1],up[0]]+up[2:]; assert m.texts()[1::2]==want and m.names()==list('ABCDE') and m.mcl('MCL_POS')==1
-view=m.find('scroll_view'); assert m.selected(view)==0 and not m.playback() and m.top==m.page
-m.paint(view); m.call(O['KEY_NEXT']); assert m.selected(view)==1
-m.call(O['KEY_PREV']); assert m.selected(view)==0
-toasts=len(m.toasts); m.press(30); assert m.hold()==11 and m.release()==0 and len(m.toasts)==toasts
-assert m.texts()[1::2]==want and m.names()==list('ABCDE')
-m.deqs[q][1][4]=m.song('F'); m.call(O['KEY_NEXT']); toasts=len(m.toasts)
-m.press(40); assert m.hold()==11 and m.release()==0 and len(m.toasts)==toasts+1 and m.toasts[-1][3]=='Queue changed'
-fresh=m.texts()[1::2]; assert fresh[0]==up[1] and 'F' in fresh and 'E' not in fresh and m.selected(m.find('scroll_view'))==0
+m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
+assert m.nodes[m.page]['name']=='upnext_page' and m.texts()[0]=='Up Next'
 m.close(); passed()
 
 # Ratings (ratings.c rate_*): 5 hearts are stock's My Fav, 1-4 kept in /mnt/data/ringnav-ratings by listen_key with
@@ -12375,7 +12366,7 @@ class CardMachine(DepthMachine):
                   'access@GLIBC_2.0','rename@GLIBC_2.0','unlink@GLIBC_2.0','mkdir@GLIBC_2.0','memcmp@GLIBC_2.0',
                   'strlen@GLIBC_2.0','strstr@GLIBC_2.0','canvas_measure_text','canvas_draw_text',
                   'fork@GLIBC_2.0','execl@GLIBC_2.0','exit@GLIBC_2.0','waitpid@GLIBC_2.0','socket@GLIBC_2.0',
-                  'sendto@GLIBC_2.0','close@GLIBC_2.0','open@GLIBC_2.0','setenv@GLIBC_2.0'):
+                  'sendto@GLIBC_2.0','close@GLIBC_2.0','open@GLIBC_2.0','setenv@GLIBC_2.0','connect@GLIBC_2.0'):
             self.handlers[syms[n]]='b:'+n
         self.handlers[syms['mclGetOutputWay']]='b:mclGetOutputWay'
         self.handlers[payload_syms['child_exit']]='b:exit'
@@ -12441,6 +12432,7 @@ class CardMachine(DepthMachine):
             else: self.execs.append((self.text(a),self.text(b),self.text(c),self.text(d),e and (self.text(e),self.get(sp+20)))); ret=-1
         elif name=='waitpid': assert a==self.forked and c==1; ret=self.waited
         elif name=='socket': assert (a,b,c)==(1,1,0); ret=7
+        elif name=='connect': assert self.text(b+2)=='/tmp/q2adb-ui'; ret=0xffffffff  # adbd's UI socket (a dev build's usb_ui.c auth_poll): not listening
         elif name=='sendto':
             sp=u.reg_read(UC_MIPS_REG_SP); to=self.get(sp+16)
             self.sent.append((a,bytes(self.u.mem_read(b,c)).decode('latin1'),c,d,self.get(to)&0xffff,self.text(to+2),self.get(sp+20)))
@@ -12460,6 +12452,11 @@ class CardMachine(DepthMachine):
 # off and leaving each stop them, and closing frees the state.
 CONFIG['SHORTCUT']='6'; m=CardMachine({},{}); del CONFIG['SHORTCUT']
 G_SCREEN,G_PICKING,G_PAUSED,G_CELL,G_CUR,G_VX=36,44,56,76,157,164
+# labels(w): the texts of the hscroll_labels under w, in node order
+def labels(w): return [m.nodes[x].get('text') for x in m.nodes if m.nodes[x]['type']=='hscroll_label' and m.get(x+O['W_PARENT']) in m.nodes and x in m.nodes[m.get(x+O['W_PARENT'])]['children'] and under(x,w)]
+def under(x,w):
+    while x and x!=w: x=m.get(x+O['W_PARENT']) if m.get(x+O['W_PARENT']) in m.nodes else 0
+    return x==w
 def games_open():
     view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
     assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
