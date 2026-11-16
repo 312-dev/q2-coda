@@ -162,8 +162,9 @@ static inline int arc_out(int r, int y) {
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
 #define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
-/* The volume bar's ease (volume.c vol_ease): a first-order follow with this time constant, so 95%
- * of a step in 3 x VOL_EASE_MS. A choice, not a measurement: no source times an iPod's bar. */
+/* A level bar's ease, the volume's (levels.c level_ease): a first-order
+ * follow with this time constant, so 95% of a step in 3 x VOL_EASE_MS. A choice, not a
+ * measurement: no source times an iPod's bar. */
 #define VOL_EASE_MS 60
 /* The wheel's volume acceleration (volume.c vol_accel): (speed / VOL_ACCEL_START)^4 steps a tick,
  * speed in degrees a second, Rockbox's iPod curve; at most VOL_ACCEL_MAX (reached from 475 deg/s),

@@ -642,6 +642,17 @@ int upload_scrobbles(void *ctx, void *event);
 /* volume.c */
 void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
+int vol_accel(void);                  /* volume.c: a wheel tick's steps at its speed */
+/* levels.c: the wheel's step and the bar's ease, the volume's. shown:
+ * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
+typedef struct {
+    int shown, easing;
+    unsigned at;
+} level_ease_t;
+extern level_ease_t vol_bar; /* volume.c */
+int wheel_level(int value, int lo, int hi, int full, int dir);
+void level_ease_from(level_ease_t *e, int from), level_follow(void *win);
+int level_ease(level_ease_t *e, int level), level_shown(const level_ease_t *e, int level);
 
 /* smart_wifi.c */
 void smart_wake(void); /* Smart Wi-Fi's radio back now, if it had it off */

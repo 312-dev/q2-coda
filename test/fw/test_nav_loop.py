@@ -2309,6 +2309,63 @@ def test_the_ring_goes_5_s_after_the_last_input_and_comes_back_where_it_was(fw, 
     assert keys(KEY_NEXT, 10) == STOP and top.ints[b'_cc_focus'] == 2  # back on stop 2, not moved
 
 
+@pytest.mark.parametrize('speed', [0, 300, 400, 600])
+def test_control_center_s_volume_steps_as_now_playing_s(fw, keys, speed):
+    """N ticks at a speed take Control Center's Volume slider where they take Now Playing's (vol_next, its dialog's
+    and every wheel volume's step), up and down."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_VOLUME
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    fw.var('wheel_speed', C.c_int).value = speed
+    step = fw.fn('vol_next', C.c_int, C.c_uint)
+    for key in (KEY_NEXT, KEY_PREV):
+        vol.value, limit.value = 30 if key == KEY_NEXT else 70, 100
+        want = []
+        for _ in range(4):
+            vol.value = step(key)
+            want.append(vol.value)
+        vol.value = 30 if key == KEY_NEXT else 70
+        keys(KEY_CENTER, 600)  # the slider takes the wheel
+        got = []
+        for _ in range(4):
+            assert keys(key, 10) == STOP
+            got.append(vol.value)
+        keys(KEY_CENTER, 600)
+        assert got == want and len(set(b - a for a, b in zip([want[0]] + want, want))) <= 2
+
+
+def full_range_ticks(fw, keys, where, speed, cc_volume):
+    """Wheel ticks from 0 to 100 at a steady speed: Now Playing's volume (vol_next), Control Center's Volume
+    slider."""
+    fw.var('wheel_speed', C.c_int).value = speed
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 0, 100
+    ui = Ui(fw)
+    if where == 'np':
+        step = fw.fn('vol_next', C.c_int, C.c_uint)
+        level = lambda: vol.value
+        tick = lambda: setattr(vol, 'value', step(KEY_NEXT))
+    else:
+        top, _ = cc_window(fw, ui)
+        top.ints[b'_cc_focus'] = cc_volume
+        keys(KEY_CENTER, 600)
+        level = lambda: vol.value
+        tick = lambda: keys(KEY_NEXT, 10)
+    n = 0
+    while level() < 100 and n < 1000:
+        tick()
+        n += 1
+    return n
+
+
+@pytest.mark.parametrize('where', ['np', 'cc_volume'])
+@pytest.mark.parametrize('speed, ticks', [(200, 100), (600, 10)])
+def test_every_wheel_level_crosses_its_range_in_the_same_ticks(fw, keys, where, speed, ticks):
+    """docs/internals.md#wheel-volume's table: 0 to 100 takes 100 ticks turned slowly and 10 on a steady fast spin,
+    for the volume on Now Playing and Control Center."""
+    assert full_range_ticks(fw, keys, where, speed, CC_VOLUME) == ticks
+
 def time_window(ui, name='manualtime_page', at=(4, 2, 4, 9, 5)):
     """Stock's Set Date and Time page: a slide view of a date page (year from 2022, month, day) and a time
     page (hour 0-23, minute), and OK; the sleep timer's has hour and minute only."""

@@ -15,10 +15,11 @@
  * ring) until Centre or Return gives it back. Return on a stop closes the page. The ring is not
  * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
  * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
- * (cc_ring_on). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
- * switch and timer have no call this file can make without their page), so their circle and tile
- * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
- * the network's name, which only the Wi-Fi page reads. */
+ * (cc_ring_on). Volume steps at the wheel's speed and its fill eases, as Now Playing's volume does
+ * (levels.c). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver switch
+ * and timer have no call this file can make without their page), so their circle and tile are lit
+ * only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not the
+ * network's name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
@@ -146,9 +147,10 @@ static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
     paint_art(w, canvas, name, cx - px / 2, cy - px / 2);
 }
 
-/* A slider's level, 0 to 256: Brightness's stock slider, Volume's g_volume of 100. */
+/* A slider's level as its fill draws it, 0 to 256: Brightness's stock slider, Volume's g_volume
+ * of 100 at its bar's eased level (levels.c). */
 static int cc_level(void *win, int i) {
-    if (i == CC_VOLUME) return g_volume >= 100 ? 256 : g_volume * 256 / 100;
+    if (i == CC_VOLUME) return clamp_step(0, 256, level_shown(&vol_bar, g_volume) / 100);
     void *s = widget_lookup(win, "slider_backlight", 1);
     int min = s ? widget_get_prop_int(s, "min", 0) : 0,
         max = s ? widget_get_prop_int(s, "max", 100) : 100;
@@ -366,16 +368,19 @@ void cc_open(void *win) {
         } else
             widget_on(button, EVT_CLICK, cc_click, (void *)(long)i);
     }
+    vol_bar.easing = 0; /* the slider opens on its level */
 }
 
-/* The wheel on the page: from stop to stop, ends kept, or a slider's level while it has it; a tick
- * with no ring showing only brings it up. */
+/* The wheel on the page: from stop to stop, ends kept; or a slider's level while it has it,
+ * Volume's as Now Playing's wheel sets it (vol_next) and Brightness's as the Brightness page's
+ * (bright_wheel). A tick with no ring showing only brings it up. */
 void cc_wheel(void *win, int dir) {
     if (cc_ring_wake(win)) return;
     int focus = widget_get_prop_int(win, CC_FOCUS, 0);
     if (widget_get_prop_int(win, CC_ADJUST, 0)) {
         if (focus == CC_VOLUME) {
-            cc_volume(g_volume + dir);
+            cc_volume(vol_next(dir > 0 ? KEY_NEXT : KEY_PREV));
+            level_follow(win);
         } else {
             void *s = cc_stock(win, CC_BRIGHT);
             if (!s) return;
