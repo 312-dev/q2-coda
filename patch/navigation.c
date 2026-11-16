@@ -12523,6 +12523,16 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         return dir && window_manager_is_animating(wm) ? hold_wheel(ctx, event, dir) : STOP;
     }
+    /* Songs over an empty library: stock hides the list and shows its note over Scan Music Now
+     * (btn_upmusic), which takes no key. With no list under it, Centre would go on to
+     * on_wm_keyup_fun, whose Centre turns the screen off; it presses the button, as a tap does
+     * (docs/internals.md#centre-button). */
+    void *scan = !dir && top ? widget_lookup(top, "btn_upmusic", 1) : (void *)0;
+    if (scan && widget_get_visible(scan) && widget_get_visible(P(scan, W_PARENT))) {
+        unsigned click[12];
+        stock_dispatch_trampoline(scan, pointer_event_init(click, EVT_CLICK, scan, 0, 0));
+        return STOP;
+    }
     coverflow_lost_touch();
     if (!dir) coverflow_wheel_land();     /* Centre opens the album the caption names */
     if (books_key(top, key)) return STOP; /* the reader's pages and caption */

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library: on Songs with no music on the card, pressing Centre presses **Scan Music Now**, as tapping it does. It used to turn the screen off.
   - Playlists (OLED): **On-The-Go** heads Library → Playlists. Hold Play/Pause on a song and choose **Add to On-The-Go** to build it as you listen; open it to **Shuffle**, **Add Songs**, **Save as Playlist** (named On-The-Go 1, On-The-Go 2 and so on, nothing to type) or **Clear** (it asks first). It keeps its songs when the Q2 restarts. **System settings → Playback → On-The-Go** turns it off, which hides its row and the menu's Add to On-The-Go.
   - Playlists (OLED): the list shows each playlist with its own picture when it has one (the card's `_explaylist_data` picture, or a server playlist's cover from the server, with the Subsonic app's matching update), else a plain tile, its name and "N songs". The New Playlist… and Select Playlists… rows are gone, and with them the select mode whose rows overlapped. **Import Playlists** and **Export Playlists** are now in **System settings → Playback → Library & Folders**, in every theme; Export exports every playlist.
   - Playlists (OLED): hold Play/Pause on a playlist for **Play**, **Shuffle**, **Rename** and **Delete**, all in one menu. Rename uses Search's letter strip with the name already in it: turn to a letter, press Centre to add it, Previous to erase, then Return and Centre on **Done**. Delete asks first, with Cancel on top. Reordering a playlist on the Q2 is gone; reorder on your server or phone.
