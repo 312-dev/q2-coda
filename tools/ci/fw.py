@@ -26,8 +26,10 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path.home()/'.local/bin/q2-heavy'
 CAP = 6
-WORKER_RSS = {False: 0.5e9, True: 2.0e9}  # one worker's peak, plain and under ASan: a serial ASan run peaks at 7.4 GB, and 4 ASan workers overran 5 GB halfway
+WORKER_RSS = {False: 0.5e9, True: 3.0e9}  # one worker's peak, plain and under ASan: a serial ASan run peaks at 7.4 GB, and
+# 4 ASan workers overran 5 GB halfway; 3 at a time overran q2-heavy's 8 GB scope twice (memcg OOM, 2026-11-16)
 RESERVE = 5e9
+SCOPE = {False: 3e9, True: 8e9}  # q2-heavy's MemoryMax for the job (Q2_HEAVY_MEM), which all the workers share
 
 
 def workers(asan):
@@ -36,7 +38,8 @@ def workers(asan):
         for line in f:
             if line.startswith('MemAvailable:'):
                 avail = int(line.split()[1]) * 1024
-    return max(1, min(CAP, os.cpu_count() or 1, int((avail - RESERVE) // WORKER_RSS[asan])))
+    return max(1, min(CAP, os.cpu_count() or 1, int((avail - RESERVE) // WORKER_RSS[asan]),
+                      int(SCOPE[asan] // WORKER_RSS[asan])))
 
 
 def main():
