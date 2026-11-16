@@ -1,4 +1,4 @@
-/* Save Diagnostics (--dev builds only, docs/internals.md#save-diagnostics): a row at the foot of
+/* Save Diagnostics (--dev builds only, docs/internals.md#save-diagnostics): a row heading
  * Settings > General > About whose Centre writes what a device problem is read from to one file on
  * the SD card, DIAG_FILE, so it can be read from the card on a computer without a shell: the build,
  * the uptime, the USB controller's state and the gadget bound to it (configfs: each gadget's UDC,
@@ -18,7 +18,8 @@ static const char diag_script[] =
     "grep -q ' /mnt/mmc ' /proc/mounts || exit 2; f=" DIAG_FILE "; {"
     " echo '== version'; echo '" Q2POD_VERSION "';"
     " echo '== date'; date; echo '== uptime'; cat /proc/uptime;"
-    " echo '== udc'; for s in /sys/class/udc/*/state; do echo \"$s: $(cat $s)\"; done;"
+    " echo '== udc'; for s in /sys/class/udc/*/state;"
+    " do [ -f \"$s\" ] && echo \"$s: $(cat $s)\"; done;"
     " echo '== gadgets'; for g in /sys/kernel/config/usb_gadget/*; do [ -d \"$g\" ] || continue;"
     " echo \"$g UDC=$(cat $g/UDC)\"; ls $g/functions; ls -l $g/configs/*/ | grep -- '->';"
     " for l in $g/functions/*/lun.*/file; do [ -f \"$l\" ] && echo \"$l: $(cat $l)\"; done; done;"
@@ -38,12 +39,15 @@ static int diag_save(void *ctx, void *event) {
     return 0;
 }
 
-/* ringnav_about, after stock's rows and CFW. Version: in a --dev build the Save Diagnostics row. */
+/* ringnav_about, after stock's rows and CFW. Version: in a --dev build the Save Diagnostics row,
+ * above them. */
 void diag_about_row(void *view) {
     if (!Q2POD_DEV || !view) return;
     void *label = list_row(view, (const char *)0, diag_save, (void *)0);
+    void *item = P(P(label, W_PARENT), W_PARENT);
     widget_set_text_utf8(label, "Save Diagnostics");
-    widget_set_prop_int(P(P(label, W_PARENT), W_PARENT), DIAG_ROW, 1);
+    widget_set_prop_int(item, DIAG_ROW, 1);
+    widget_restack(item, 0); /* first: the page's one selectable row is in sight as it opens */
 }
 
 /* about_rows: the Save Diagnostics row, which takes the selection as a row does. */

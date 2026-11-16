@@ -21,6 +21,7 @@ class About:
         fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()) or self.status)
         fw.mock('navigator_to_with_context', lambda name, info, *_: self.toasts.append(C.string_at(info + 8).decode()) or 0)
         self.view = self.ui.make(0, 'scroll_view', name='scroll_view_about')
+        self.stock = self.ui.make(self.view, 'list_item')  # stock's rows, CFW. Version's
         fw.fn('diag_about_row', None, C.c_void_p)(self.view)
 
     def rows(self):
@@ -34,18 +35,20 @@ class About:
 
 def test_a_release_build_has_no_save_diagnostics(fw):
     about = About(fw)
-    assert about.rows() == [] and not about.ui[about.view].kids
+    assert about.rows() == [] and about.ui[about.view].kids == [about.stock]
 
 
-def test_a_dev_build_s_about_ends_with_save_diagnostics_which_stays_selectable(fw_dev):
-    """The row, a settings row with its click, marked so about_rows leaves it enabled while it disables the table."""
+def test_a_dev_build_s_about_starts_with_save_diagnostics_which_stays_selectable(fw_dev):
+    """The row, a settings row with its click, first so the page's one selectable row is in sight as it opens, marked
+    so about_rows leaves it enabled while it disables the table."""
     about = About(fw_dev)
     assert about.rows() == ['Save Diagnostics']
-    item, = about.ui[about.view].kids
+    item, stock = about.ui[about.view].kids
+    assert stock == about.stock
     enabled = []
     fw_dev.mock('widget_set_enable', lambda w, on, *_: enabled.append((w, on)))
     fw_dev.fn('about_rows', None, C.c_void_p)(about.view)
-    assert (item, 0) not in enabled and fw_dev.fn('diag_row', C.c_int, C.c_void_p)(item) == 1
+    assert (item, 0) not in enabled and (stock, 0) in enabled and fw_dev.fn('diag_row', C.c_int, C.c_void_p)(item) == 1
 
 
 @pytest.mark.parametrize('status, toast', [(0, 'Saved to SD card: q2-diagnostics.txt'), (2 << 8, 'No SD card'),
