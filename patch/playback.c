@@ -1244,11 +1244,16 @@ int playback_keeps(void *q, int at) {
     return a && b && !strcmp(a, b) && I(ra, REC_CUE_START) == I(rb, REC_CUE_START) &&
            I(ra, REC_CUE_END) == I(rb, REC_CUE_END);
 }
-/* Now Playing, as on_backplay_click opens it, class 0xff: a pick means play this, so a paused file goes
- * on. Its Play waits for the DAC by itself (dac_resume), so no stamp. */
-void playback_np(void) {
+/* Now Playing, as on_backplay_click (the status bar's playing button) opens it, class 0xff: what plays
+ * stays as it is (Control Center's Now Playing block, control_center.c). */
+void playback_np_open(void) {
     static const int context[4] = { 0, 0, 0xff, 2 };
     navigator_switch_to_with_context("playing_page", context, 0);
+}
+/* Now Playing opened by a pick, which means play this, so a paused file goes on. Its Play waits for
+ * the DAC by itself (dac_resume), so no stamp. */
+void playback_np(void) {
+    playback_np_open();
     if (mclGetPlayStatus() == 3) player_play_pause();
 }
 /* Picks of the playing file reach player_start from each of these; none reads its result. */

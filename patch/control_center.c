@@ -10,18 +10,20 @@
  * their circles, take the taps and holds (navigation.c quick_down: held, their settings pages), and
  * its brightness slider, at opacity 0 over the Brightness slider, takes the drags; Centre on those
  * clicks them as a tap would. Every other control is a clear button of this file's (cc_click).
- * The wheel walks CC_STOPS, the toggles, the two sliders and the tiles in reading order, a white
- * ring round the one it is on; Centre acts on it, and on a slider gives it the wheel (an accent
- * ring) until Centre or Return gives it back. Return on a stop closes the page. The ring is not
- * there when the page is pulled down, nor under touch: the first wheel tick or Centre brings it up
- * on the stop the wheel is on, without stepping or acting, and it goes CC_RING_MS after the last
- * (cc_ring_on). The sliders step at the wheel's speed and their fills ease, as Now Playing's volume
- * does (levels.c). A toggle or tile held QUICK_HOLD_MS, by a finger (navigation.c quick_hold) or by
- * Centre (cc_keydown), opens its settings page (cc_hold). Landing open, the blocks overshoot and
- * settle (cc_spring). ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver
- * switch and timer have no call this file can make without their page), so their circle and tile
- * are lit only by AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not
- * the network's name, which only the Wi-Fi page reads. */
+ * The wheel walks CC_STOPS, the toggles, the Now Playing block (while something is loaded), the
+ * two sliders and the tiles in reading order, a white ring round the one it is on; Centre acts on
+ * it, and on a slider gives it the wheel (an accent ring) until Centre or Return gives it back.
+ * Return on a stop closes the page. The ring is not there when the page is pulled down, nor under
+ * touch: the first wheel tick or Centre brings it up on the stop the wheel is on, without stepping
+ * or acting, and it goes CC_RING_MS after the last (cc_ring_on). The sliders step at the wheel's
+ * speed and their fills ease, as Now Playing's volume does (levels.c). A tap on the Now Playing
+ * block, or Centre on it, opens Now Playing; its transport keeps its own taps. A toggle or tile
+ * held QUICK_HOLD_MS, by a finger (navigation.c quick_hold) or by Centre (cc_keydown), opens its
+ * settings page (cc_hold). Landing open, the blocks overshoot and settle (cc_spring).
+ * ponytail: AirPlay and Sleep Timer open their settings pages (stock's receiver switch and timer
+ * have no call this file can make without their page), so their circle and tile are lit only by
+ * AirPlay's flag and never by a running timer; the Wi-Fi circle reads "Wi-Fi", not the network's
+ * name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
 extern int ar_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
@@ -69,6 +71,7 @@ enum {
     CC_BT,
     CC_AIRPLAY,
     CC_CAR,
+    CC_NOW,
     CC_BRIGHT,
     CC_VOLUME,
     CC_LOCK,
@@ -83,14 +86,14 @@ enum {
     CC_BUTTONS
 };
 static const char *const cc_labels[CC_STOPS] = {
-    "Wi-Fi", "Bluetooth",   "AirPlay", "Car",        0, 0, "Lock",
-    "Sleep", "Night Shift", "EQ",      "Smart Wi-Fi"
+    "Wi-Fi", "Bluetooth", "AirPlay", "Car",         0,    0,
+    0,       "Lock",      "Sleep",   "Night Shift", "EQ", "Smart Wi-Fi"
 };
 /* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
 static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",  "bluetooth", "airplay", "car",
-                                                   "sun",   "speaker",   "lock",    "timer",
-                                                   "moon",  "eq",        "leaf",    "back",
-                                                   "pause", "forward" };
+                                                   0,       "sun",       "speaker", "lock",
+                                                   "timer", "moon",      "eq",      "leaf",
+                                                   "back",  "pause",     "forward" };
 /* The landing's offset of the blocks from rest, in quarter pixels every CC_SPRING_STEP ms from
  * the moment the page comes to rest: a damped sine, 8 px past rest at about 50 ms, back through it
  * at 140, 2 px short at about 190 and still at CC_SPRING_MS (amplitude 14.6 px, decay ln 4 per
@@ -99,8 +102,12 @@ static const signed char cc_springs[CC_SPRING_MS / CC_SPRING_STEP + 1] = { 0,  2
                                                                            17, 8,  0,  -5, -8,
                                                                            -8, -6, -4, -2, 0 };
 
-/* Stop i's box on the window: a circle's square, a slider's track, a tile, a transport glyph's. */
+/* Stop i's box on the window: a circle's square, the Now Playing block, a slider's track, a
+ * tile, a transport glyph's. */
 static rect_t cc_box(int i) {
+    if (i == CC_NOW)
+        return (rect_t){ CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP,
+                         CC_BLOCK_H };
     if (i <= CC_CAR) {
         int cx = CC_X0 + 35 + (i % 2) * 68, cy = CC_Y0 + 28 + (i / 2) * 60;
         return (rect_t){ cx - CC_CIRCLE_R, cy - CC_CIRCLE_R, 2 * CC_CIRCLE_R, 2 * CC_CIRCLE_R };
@@ -174,6 +181,11 @@ static int cc_level(void *win, int i) {
                          (max - min))
                : 0;
 }
+/* Something loaded, as Home's Now Playing row is there for: playing or paused. */
+static int cc_np_loaded(void) {
+    int status = media_status();
+    return status == 2 || status == 3;
+}
 
 /* Whether the wheel's ring shows: a wheel tick or key within CC_RING_MS. */
 static int cc_ring_on(void *win) {
@@ -237,17 +249,16 @@ void cc_paint(void *win, void *canvas) {
     int focus = widget_get_prop_int(win, CC_FOCUS, 0),
         adjust = widget_get_prop_int(win, CC_ADJUST, 0), shown = cc_ring_on(win),
         dy = cc_spring(win);
-    rect_t block = { CC_X0, CC_Y0, CC_BLOCK_W, CC_BLOCK_H },
-           np = { CC_X0 + CC_BLOCK_W + CC_GAP, CC_Y0, CC_X1 - CC_X0 - CC_BLOCK_W - CC_GAP,
-                  CC_BLOCK_H };
+    rect_t block = { CC_X0, CC_Y0, CC_BLOCK_W, CC_BLOCK_H }, np = cc_box(CC_NOW);
     if (bar) widget_paint(bar, canvas);
     I(canvas, CANVAS_Y) += dy;
     fill_box(canvas, &block, RGBA(CC_BLOCK), CC_BLOCK_R);
-    fill_box(canvas, &np, RGBA(CC_BLOCK), CC_BLOCK_R);
+    cc_shape(canvas, np, CC_BLOCK_R, CC_BLOCK, focus == CC_NOW && shown, 0);
     for (int i = 0; i < CC_STOPS; ++i) {
         rect_t r = cc_box(i);
         int lit = cc_lit(i),
             ring = i == focus && shown ? 1 + (adjust && (i == CC_BRIGHT || i == CC_VOLUME)) : 0;
+        if (i == CC_NOW) continue; /* drawn under the rest, above */
         if (i == CC_BRIGHT || i == CC_VOLUME) {
             cc_shape(canvas, r, r.h / 2, CC_OFF, ring, 0);
             int k = cc_level(win, i), fw = r.w * k / 256;
@@ -382,6 +393,11 @@ static int cc_act(void *win, int i) {
         st.smart_wifi = !st.smart_wifi;
         write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
         break;
+    case CC_NOW: /* as Home's Now Playing row: only while something is loaded */
+        if (!cc_np_loaded()) break;
+        dialog_quit(win, 0);
+        playback_np_open();
+        return 1;
     case CC_PREV:
         prev_quick_click();
         break;
@@ -439,6 +455,7 @@ void cc_open(void *win) {
         widget_move_resize(c, 0, 0, b.w, b.h);
         widget_set_opacity(c, 0);
     }
+    /* in order, so the transport's buttons lie over the Now Playing block's and take its taps */
     for (int i = CC_AIRPLAY; i < CC_BUTTONS; ++i) {
         if (i == CC_BRIGHT) continue;
         rect_t r = cc_box(i);
@@ -455,9 +472,10 @@ void cc_open(void *win) {
     widget_add_timer(win, cc_land, VOL_POLL_MS);
 }
 
-/* The wheel on the page: from stop to stop, ends kept; or a slider's level while it has it,
- * Volume's as Now Playing's wheel sets it (vol_next) and Brightness's as the Brightness page's
- * (bright_wheel). A tick with no ring showing only brings it up. */
+/* The wheel on the page: from stop to stop, ends kept, past the Now Playing block while nothing is
+ * loaded; or a slider's level while it has it, Volume's as Now Playing's wheel sets it (vol_next)
+ * and Brightness's as the Brightness page's (bright_wheel). A tick with no ring showing only
+ * brings it up. */
 void cc_wheel(void *win, int dir) {
     if (cc_ring_wake(win)) return;
     int focus = widget_get_prop_int(win, CC_FOCUS, 0);
@@ -471,6 +489,7 @@ void cc_wheel(void *win, int dir) {
         }
     } else {
         int next = focus + dir;
+        if (next == CC_NOW && !cc_np_loaded()) next += dir;
         if (next < 0 || next >= CC_STOPS) return;
         widget_set_prop_int(win, CC_FOCUS, next);
     }

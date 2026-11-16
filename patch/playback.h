@@ -49,5 +49,5 @@ enum { THUMB_MOVED = 1, THUMB_TURNED = 2, THUMB_CLICK = 4 }; /* coverflow_wheel_
 int wheel_part(void); /* the way to the next tick, 256ths, + toward Next (tilt.c) */
 void wheel_gate_note(void); /* --dev: tick_gate dropped a tick for want of a frame */
 int playback_keeps(void *q, int at), restart_armed(int key);
-void playback_np(void);
+void playback_np(void), playback_np_open(void);
 #endif

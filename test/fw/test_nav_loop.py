@@ -2154,8 +2154,8 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
     return slider
 
 
-# control_center.c's stops: four toggles, the sliders, five tiles
-CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11
+# control_center.c's stops: four toggles, the Now Playing block, the sliders, five tiles
+CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2188,15 +2188,20 @@ def cc_window(fw, ui, ring=100000):
     return slider.parent, slider
 
 
-def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys):
-    """The toggles, the two sliders and the five tiles in reading order; the ends hold."""
+@pytest.mark.parametrize('status', [0, 2, 3])
+def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
+    """The toggles, Now Playing's block, the two sliders and the five tiles in reading order; the ends hold. With
+    nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
+    fw.mock('mclGetPlayStatus', lambda *_: status)
     ui = Ui(fw)
     top, slider = cc_window(fw, ui)
     stops = []
-    for key in [KEY_NEXT] * (CC_STOPS + 1) + [KEY_PREV] * (CC_STOPS + 1):
+    for key in [KEY_NEXT] * CC_STOPS + [KEY_PREV] * CC_STOPS:
         assert keys(key) == STOP
         stops.append(top.ints[b'_cc_focus'])
-    assert stops == [*range(1, CC_STOPS), CC_STOPS - 1, CC_STOPS - 1, *range(CC_STOPS - 2, -1, -1), 0, 0]
+    walk = [i for i in range(CC_STOPS) if status or i != CC_NOW]
+    ends = CC_STOPS - len(walk)  # the ticks the block's pass leaves at each end
+    assert stops == [*walk[1:], *[CC_STOPS - 1] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
     assert slider.ints[b'value'] == 50
 
 
@@ -2415,6 +2420,20 @@ def test_the_brightness_page_s_wheel_keeps_the_ends(fw, keys, value, key, want):
     assert keys(key) == STOP and slider.ints[b'value'] == want
 
 
+@pytest.mark.parametrize('status, opens', [(2, 1), (3, 1), (0, 0)])
+def test_centre_on_the_now_playing_block_opens_now_playing(fw, keys, status, opens):
+    """Centre on the block closes Control Center and opens Now Playing, as the status bar's playing button does;
+    with nothing loaded it does nothing, as Home's row is not there then."""
+    fw.mock('mclGetPlayStatus', lambda *_: status)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_NOW
+    assert keys(KEY_CENTER) == STOP
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * opens
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page'] * opens
+    assert not fw.calls('player_play_pause')  # what plays stays as it is
+
+
 def cc_opened(fw, ui):
     """Control Center laid out (cc_open) over the window cc_window gives: its clear buttons by stop."""
     top, slider = cc_window(fw, ui)
@@ -2425,6 +2444,20 @@ def cc_opened(fw, ui):
     fw.fn('cc_open', None, C.c_void_p)(top.p)
     stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
     return top, dict(zip(stops, buttons))
+
+
+@pytest.mark.parametrize('status', [2, 0])
+def test_a_tap_on_the_now_playing_block_opens_now_playing_and_the_transport_keeps_its_taps(fw, keys, status):
+    fw.mock('mclGetPlayStatus', lambda *_: status)
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    block, play = buttons[CC_NOW], buttons[CC_STOPS + 1]
+    assert top.children.index(play) > top.children.index(block)  # over it: the transport's taps are its own
+    ui.emit(play, EVT_CLICK)
+    assert fw.calls('player_play_pause') and not fw.calls('dialog_quit')
+    ui.emit(block, EVT_CLICK)
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_switch_to_with_context')] == [b'playing_page'] * (status > 0)
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * (status > 0)
 
 
 HOLDS = [(0, b'systemset/wifi_page'), (1, b'systemset/bluetooth_page'), (2, b'systemset/netservice_page'),
@@ -2497,8 +2530,8 @@ def test_a_short_centre_on_a_tile_acts_and_drops_its_hold(fw, keys):
     assert not ui.due(ui_name(fw.lib, 'cc_hold_due')) and not fw.calls('navigator_to')
 
 
-@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_LOCK, False)])
-def test_centre_held_on_a_slider_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
+@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_LOCK, False)])
+def test_centre_held_on_a_slider_the_block_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=100000 if ring else None)
     top.ints[b'_cc_focus'] = stop

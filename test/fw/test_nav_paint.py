@@ -1848,7 +1848,7 @@ def test_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
     assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
 
 
-CC_BRIGHT = 4  # control_center.c's Brightness stop
+CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
 
 
 def control_center(fw, world, focus=0, adjust=0, ring=True):
@@ -1888,11 +1888,12 @@ def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
     assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
 
 
-def test_pulled_down_the_page_shows_no_ring(fw, world):
-    """No wheel input yet: no ring anywhere; after it, round the stop the wheel is on."""
+def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(fw, world):
+    """No wheel input yet: no ring anywhere. On the Now Playing block the ring goes round the whole block."""
     boxes = lambda canvas: [r for r, c, _ in canvas.rounded if c == rgba(0xffffff)]
     assert boxes(control_center(fw, world, ring=False)) == []
     assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
+    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
 
 
 def landed(fw, world, t):
