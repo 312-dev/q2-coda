@@ -88,7 +88,6 @@ SCHEMA = {k.path: k for k in (
     key('list.art.text_end', 'art_text_end', 'int', 375),
     key('list.art.placeholder', 'art_placeholder', 'int', 51),
     key('list.art.radius', 'art_radius', 'int', 26),  # a row cover's corners on screen at the set's art size; 0: NP_ART_RADIUS's share  # stock's grey tiles (list_folder, list_song) this size, centred in their row; 0: stock's
-    key('list.divider.ink', 'div_ink', 'color', final=True),  # a 1 px divider under each row taller than the pitch, on the text and right columns
     key('list.row.tall_font', 'font[ROLE_TALL]', 'enum'),  # a two-line row's title
     key('list.row.tall_px', 'font_px[ROLE_TALL]', 'int', 64),
     key('playing.artist.font', 'np_meta_font', 'enum'),  # Now Playing's artist and album, at the asset's size; 0: the style's

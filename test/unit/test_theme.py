@@ -225,7 +225,7 @@ M = 'id="oled" name="M" index="0"'
     ('<colorScheme name="graphite" chevron="#eeeeec"/>', M, 'scheme.chevron comes from patch/offsets.inc'),
     ('<colorScheme name="graphite" sel.text="#000000"/>', None, 'scheme.sel.text: #000000 reads as unset; use #010101'),
     ('<colorScheme name="graphite" light.sel.text="#000000"/>', None, 'scheme.sel.text: #000000 reads as unset; use #010101'),
-    ('<view name="list"><element name="divider" ink="#000000"/></view>', None, 'list.divider.ink: #000000 reads as unset; use #010101'),
+    ('<view name="settings"><element name="values" ink="#000000"/></view>', None, 'settings.values.ink: #000000 reads as unset; use #010101'),
 ])
 def test_resolve_rejects(body, attrs, message):
     assert error(resolved, body, *([attrs] if attrs else [])) == f't.xml:1: {message}'
@@ -620,9 +620,9 @@ def test_a_nameless_scheme_is_every_scheme():
 
 def test_theme_level_halves():
     o = oled()
-    assert (o['div_ink'], o['light']['div_ink']) == (0x222222, 0xe5e5e5)  # both halves stated
-    assert theme.half(o, False, 0xffffff, 0)['div_ink'] == 0x222222 and theme.half(o, True, 0xffffff, 0)['div_ink'] == 0xe5e5e5
-    assert theme.half({**o, 'div_ink': 0}, False, 0xffffff, 0)['div_ink'] == theme.unflip(0xe5e5e5, 0xffffff, 0)  # one stated: the other derives
+    assert (o['set_value_ink'], o['light']['set_value_ink']) == (0xababab, 0x5c5c5c)  # both halves stated
+    assert theme.half(o, False, 0xffffff, 0)['set_value_ink'] == 0xababab and theme.half(o, True, 0xffffff, 0)['set_value_ink'] == 0x5c5c5c
+    assert theme.half({**o, 'set_value_ink': 0}, False, 0xffffff, 0)['set_value_ink'] == theme.unflip(0x5c5c5c, 0xffffff, 0)  # one stated: the other derives
     assert error(resolved, '<view name="list"><element name="selection" light.radius="4"/></view>') == \
         't.xml:1: list.selection.radius: one value for both halves'
 
@@ -681,7 +681,7 @@ def test_validate_rejects_mode(body, message):
     ('<colorScheme name="cobalt" dark.mode="dark"/>', 'scheme.mode: one value for both halves'),
     ('<colorScheme name="cobalt" sel.text="#111111" dark.sel.text="#222222"/>', 'scheme.sel.text: stated twice (sel.text and dark.sel.text)'),
     ('<view name="list"><element name="selection" light.inset="4"/></view>', 'list.selection.inset: one value for both halves'),
-    ('<view name="list"><element name="divider" ink="#111111" dark.ink="#222222"/></view>', 'list.divider.ink: stated twice (ink and dark.ink)'),
+    ('<view name="settings"><element name="values" ink="#111111" dark.ink="#222222"/></view>', 'settings.values.ink: stated twice (ink and dark.ink)'),
 ])
 def test_resolve_rejects_halves(body, message):
     assert error(resolved, body) == f't.xml:1: {message}'
@@ -1149,7 +1149,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     g = theme.geometry(o)
     assert (o['id'], o['index'], o['art_id']) == ('oled', 0, 'oled') and g.name == 'oled' and theme.check_set(g) is None
     assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end, g.list_fit) == (58, 23, 32, 32, 32, 24, 28, 224, 1)
-    assert g.bar + g.list_end == 282 and g.list_end // g.pitch == 7 and ipod.fit_rows(g, 0, g.art_pitch) == 4 * 52
+    assert g.bar + g.list_end == 282 and g.list_end // g.pitch == 7 and ipod.fit_rows(g, 0, g.art_pitch) == 320 - 58
     assert ipod.corner_inset(g.bar + g.list_end) + ipod.CORNER_SLACK <= g.text_x
     fonts = {k: v for k, v in o.items() if k.startswith('font')}
     inter, medium = (list(theme.FONTS).index(f) for f in ('inter', 'inter-medium'))
@@ -1162,7 +1162,6 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (blue['sel_text'], blue['light']['sel_text'], blue['muted'], blue['paper'], blue['ink']) == (0xffffff, 0xffffff, 0x858585, 0xffffff, 0)
     assert (o['set_text'], o['set_switch'], o['set_value_ink'], o['light']['set_value_ink']) == (1, 1, 0xababab, 0x5c5c5c)
     assert (o['sel_inset'], o['sel_radius']) == (16, 8)
-    assert (o['div_ink'], o['light']['div_ink']) == (0x222222, 0xe5e5e5)
     # song rows: Song Artist and Song Length, Inline and Albums first
     own_ = {x['key']: (x['names'], x['names'][x['def']]) for x in o['opts'] if x.get('key') in ('SONGARTIST', 'SONGLENGTH')}
     assert own_ == {'SONGARTIST': (['Inline', 'Selected Row', 'Right', 'Off'], 'Inline'), 'SONGLENGTH': (['Albums', 'All Lists', 'Off'], 'Albums')}

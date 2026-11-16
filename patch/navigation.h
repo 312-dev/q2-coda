@@ -177,7 +177,7 @@ typedef struct {
     int pull_x, pull_y, pull_claimed;
     unsigned pull_scope;
     void *sel_w; /* the surface whose selection was last drawn */
-    int sel_row, sel_y;
+    int sel_row, sel_y, sel_h;
     void *paint_w;        /* paint-local color mapping, never stored on recycled widgets */
     unsigned clock_key;   /* minute + 1 and format bits; 0 before the first, ~0 for --:-- */
     unsigned clock_timer; /* clock_due, at the next minute; 0 until the bar first paints */
@@ -688,6 +688,7 @@ extern void *stream_mark_views[2];             /* home.c: the lists whose rows i
 /* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
  * scroll view */
 int home_rest(void *view, int *foot);
+void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1);
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);

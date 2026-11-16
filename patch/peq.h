@@ -316,7 +316,6 @@ void *text(void *parent, int x, int y, int w, int h);
 int feedback_empty(void *parent, int free, const char *message, const char *hint);
 int feedback_note(void *line, void *hint, int free);
 int feedback_below(void *w); /* the screen y under w */
-void page_fit(void *view);   /* a page_list's rows ending above the glass on a list_fit set */
 void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(void *, void *));
 void motion_open(void *page,
                  const char *name); /* navigation.c: page_open's page takes the theme's hint */

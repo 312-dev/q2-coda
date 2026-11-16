@@ -784,7 +784,7 @@ def test_stream_page_rows_per_set(monkeypatch):
              w('list_view', kind='list_view', at=[0, 50, 375, 240], default_item_height=str(ipod.SET_STOCK_ROW)), kind='window')
     data = ipod.encode(page)
     monkeypatch.setitem(ipod.UI_ASSETS, 'stream_page.bin', ipod.sha(data))
-    for g, row, h in ((ipod.SET0, ipod.SET_ROW, ipod.SET_ROWS * ipod.SET_ROW), (OLED_SET, 32, 224)):
+    for g, row, h in ((ipod.SET0, ipod.SET_ROW, ipod.SET_ROWS * ipod.SET_ROW), (OLED_SET, 32, 320 - 58)):  # OLED's runs on to the window's foot, its rows past list_end fading
         assert g.stream_row == row
         n = named(ipod.decode(ipod.patch_asset('stream_page.bin', data, g=g)))
         assert n['list_view'][2]['default_item_height'] == str(row) and n['list_view'][1][3] == h, g.name
@@ -916,7 +916,7 @@ def test_songs_action_row(monkeypatch):
              w('view', at=[0, 100, 375, 193]), w('table_view', kind='table_view', at=[0, 100, 375, 190]), kind='window')
     data = ipod.encode(page); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
     n = named(ipod.decode(ipod.patch_asset(path, data, g=OLED_SET)))
-    assert n['view_navbar_allplay'][1] == [0, 0, 375, 32] and n['table_view'][1] == [0, 32, 375, 192] and n['view'][1][1] == 32  # whole rows down to list_end
+    assert n['view_navbar_allplay'][1] == [0, 0, 375, 32] and n['table_view'][1] == [0, 32, 375, 230] and n['view'][1][1] == 32  # on to the window's foot (fit_rows)
     assert ipod.immediate_values(OLED_SET)['scroll'] == 230 and ipod.immediate_values(ipod.SET0)['scroll'] == 240
     n = named(ipod.decode(ipod.patch_asset(path, data)))
     assert n['view_navbar_allplay'][1] == [0, 0, 375, 50]
@@ -928,7 +928,7 @@ def test_settings_lists_follow_the_set(monkeypatch):
     page = w('sysset_page', w('view_navbar', at=[0, 0, 375, 50]),
              w('list_view', kind='list_view', at=[0, 50, 375, 240], default_item_height='78'), kind='window')
     data = ipod.encode(page); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
-    for g, box, row in ((ipod.SET0, [0, 8, 375, 272], '68'), (OLED_SET, [0, 0, 375, 224], '32')):
+    for g, box, row in ((ipod.SET0, [0, 8, 375, 272], '68'), (OLED_SET, [0, 0, 375, 262], '32')):
         n = named(ipod.decode(ipod.patch_asset(path, data, g=g)))
         assert n['list_view'][1] == box and n['list_view'][2]['default_item_height'] == row and 'item_height' not in n['list_view'][2]
 
@@ -960,18 +960,18 @@ def test_stock_lists_take_settings_rows(monkeypatch, path):
     data = audited_rows(monkeypatch, path, stock_list_page(path[:-4], row))
     n = named(ipod.decode(ipod.patch_asset(path, data, g=OLED_SET)))
     assert n['view_navbar'][2]['visible'] == n['view_navbar'][2]['enable'] == 'false'
-    assert n['list_view'][1] == [0, 0, 375, 224] and n['list_view'][2]['default_item_height'] == '32' and 'item_height' not in n['list_view'][2]
+    assert n['list_view'][1] == [0, 0, 375, 262] and n['list_view'][2]['default_item_height'] == '32' and 'item_height' not in n['list_view'][2]
     assert n['hscroll_label_1'][1] == [10, 0, 266, 70]  # takes the row, whose font a 20 px box wouldn't hold
     assert 'anim_hint' not in ipod.decode(ipod.patch_asset(path, data, g=OLED_SET))[2]
     n = named(ipod.decode(ipod.patch_asset(path, data, g=STOCK_ROW_REVERSED)))  # the rule reversed: stock's pitch, the toolbar still hidden
-    assert n['view_navbar'][2]['visible'] == 'false' and n['list_view'][2]['default_item_height'] == '78' and n['list_view'][1] == [0, 0, 375, 156]  # two whole rows above list_end
+    assert n['view_navbar'][2]['visible'] == 'false' and n['list_view'][2]['default_item_height'] == '78' and n['list_view'][1] == [0, 0, 375, 262]  # on to the window's foot
 
 
 def test_queue_under_the_bar(monkeypatch):
     path = 'playerqueue_page.bin'
     data = audited_rows(monkeypatch, path, stock_table_page('playerqueue_page'))
     n = named(ipod.decode(ipod.patch_asset(path, data, g=OLED_SET)))
-    assert n['view_navbar'][2]['visible'] == 'false' and n['table_view'][1] == [0, 0, 375, 224]
+    assert n['view_navbar'][2]['visible'] == 'false' and n['table_view'][1] == [0, 0, 375, 262]
     assert n['table_client'][2]['row_height'] == '32' and n['table_client'][1][2] == 375
 
 
@@ -1040,7 +1040,7 @@ def test_oled_playlists_list_takes_its_two_line_rows(monkeypatch):
         data = ipod.encode(list_page(path)); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
     data = ipod.encode(list_page('localmusic/playlist_page.bin'))
     n = named(ipod.decode(ipod.patch_asset('localmusic/playlist_page.bin', data, g=oled)))
-    assert n['list_view'][1] == [0, 0, 375, 4 * 52] and n['list_view'][2]['default_item_height'] == '52'
+    assert n['list_view'][1] == [0, 0, 375, 262] and n['list_view'][2]['default_item_height'] == '52'
     assert 'item_height' not in n['list_view'][2] and n['row'][1][3] == 52
     unset = dataclasses.replace(oled, playlist_pitch=0)  # song_pitch's rows, the settings rows' height: told apart
     assert named(ipod.decode(ipod.patch_asset('localmusic/playlist_page.bin', data, g=unset)))['list_view'][2]['item_height'] == '32'
@@ -1540,7 +1540,7 @@ def test_status_row_refuses_an_inset_under_the_glass():
         ipod.status_bar(bar(), g)
 
 
-@pytest.mark.parametrize('pitch, rows', [(32, 7), (52, 4)])
-def test_fit_rows_ends_a_list_on_a_whole_row(pitch, rows):
+@pytest.mark.parametrize('pitch, top', [(32, 0), (52, 0), (32, 50)])
+def test_fit_rows_runs_a_list_on_to_the_window_s_foot(pitch, top):
     g = dataclasses.replace(ipod.SET0, list_end=224, list_fit=1)
-    assert ipod.fit_rows(g, 0, pitch) == rows * pitch
+    assert ipod.fit_rows(g, top, pitch) == 320 - g.bar - top  # whatever the pitch: the rows past list_end fade

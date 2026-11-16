@@ -2412,6 +2412,20 @@ def test_a_page_row_in_a_list_with_covers_is_as_high_as_its_rows(fw):
     assert p.top.art == 1 and (0, 0, 375, 78) in moved and (0, 78, 375, 78) in moved and len(images) == 1
 
 
+def test_a_row_without_a_subtitle_is_a_one_line_row(fw):
+    """addon.c row and stack_rows: in a list without covers, a row with a subtitle is two lines (page_detail), one
+    without is Home's one-line row (page_row), each under the last at its own height, the list's item_height
+    cleared so it keeps them."""
+    p = Page(fw)
+    props = {}
+    fw.mock('widget_set_prop_int', lambda w, name, v, *_: props.__setitem__(C.string_at(name), v) or 0)
+    bare = (b'action', b'op9', b'Row 9', b'', b'', b'')
+    p.answer(rows=[item(0), bare, item(1)])
+    one, two = (fw.fn('page_h', C.c_int, C.c_int)(h) for h in (48, 64))  # the theme's page rows
+    assert [c[1][4] for c in fw.calls('list_item_create')][-3:] == [two, one, two]
+    assert props[b'item_height'] == 0
+
+
 def test_more_is_a_level_of_its_own_at_the_newest_cursor(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list', b'x')])

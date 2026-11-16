@@ -384,12 +384,13 @@ static int ar_lit(void *item) {
            widget_get_prop_int(list, SEL, -1) == widget_index_of(item);
 }
 
-/* The drill-down rows' list (page_list's view, of n rows) moved under the pair, as many whole rows
- * in view as end by the set's list_fit_end; its rows' height. */
+/* The drill-down rows' list (page_list's view, of n rows) moved under the pair, down to the
+ * window's foot at most, its rows past the list end fading (navigation.c list_fade); its rows'
+ * height. */
 int drill_list(void *view, int n) {
     void *lv = P(view, W_PARENT);
-    int h = page_h(48), room = list_fit_end() - AR_LIST_Y, rows = n * h;
-    if (room > 0 && rows > room - room % h) rows = room - room % h;
+    int h = page_h(48), room = 320 - AR_LIST_Y, rows = n * h;
+    if (rows > room) rows = room;
     widget_move_resize(lv, I(lv, W_X), AR_LIST_Y - geom_val(V_BAR), I(lv, W_W), rows);
     widget_resize(view, I(view, W_W), rows);
     return h;

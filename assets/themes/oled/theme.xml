@@ -67,8 +67,6 @@
     <element name="reopen" top="1"/>
     <element name="row" font="inter" title_px="24" meta_font="inter" meta_px="18" tall_font="inter" tall_px="24"/>
     <element name="art" x="24" text_x="72" text_end="319" placeholder="40" radius="4"/>
-    <!-- Divider (#222222, the light half's #e5e5e5) under each two-line row, on the text and right columns -->
-    <element name="divider" dark.ink="#222222" light.ink="#e5e5e5"/>
     <!-- A scrolling text's ends fade into what is behind it (oled-design.md Motion, list_marks.c marquee_fade): rows,
          the status row's title and Now Playing's lines -->
     <element name="marquee" fade="1"/>

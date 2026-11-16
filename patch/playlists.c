@@ -1083,10 +1083,8 @@ static void pl_rows(void *win) {
     widget_set_prop_int(win, PL_MARKING, marking);
     /* the list lays its rows out at pl_pitch's one pitch */
     void *lv = P(view, W_PARENT);
-    int pitch = pl_pitch(view), y = geom_val(V_BAR) + I(lv, W_Y), end = list_fit_end();
+    int pitch = pl_pitch(view);
     widget_set_prop_int(lv, "item_height", pitch);
-    /* the box the build cut to whole rows of the set's pitch, to whole rows of this one */
-    if (!add && end > y) widget_resize(lv, I(lv, W_W), (end - y) - (end - y) % pitch);
     widget_layout(lv);
     if (!marking && marking == was) return;
     /* Stock showed its marks or the dots: the rows go to their places, the list to its new height.

@@ -54,13 +54,10 @@ static void *small_label(void *parent, int x, int w, const char *name, const cha
     return l;
 }
 
-/* Before stock's layout: the Scanning row as Search Again, the header's height and its label, and,
- * when the rows run past the box, the list's box ending on the last whole row that fits from its
- * top, as list_fit's boxes do for one pitch: the section's gap puts the rows below it off the
- * 32 px grid. */
+/* Before stock's layout: the Scanning row as Search Again, the header's height and its label. The
+ * list's box runs on to the window's foot, its rows past the list end fading (navigation.c
+ * list_fade). */
 void wifi_rows_pre(void *view) {
-    void *list = P(view, W_PARENT);
-    int room = geom_val(V_LIST_END) - I(list, W_Y), fits = 0;
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *label = head_label(item);
         if (!label) label = widget_lookup(item, WIFI_HEAD_NAME, 0); /* laid out before */
@@ -87,19 +84,6 @@ void wifi_rows_pre(void *view) {
         void *busy = widget_lookup(item, WIFI_BUSY, 0);
         if (busy) widget_set_text_utf8(busy, wifi_searchtime ? "Searching..." : "");
     }
-    int y = 0;
-    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
-        void *item = widget_get_child(view, i);
-        int h = !widget_get_visible(item)       ? 0
-                : I(item, W_H) == SET_STOCK_ROW ? geom_val(V_SET_ROW) /* set_row's, to come */
-                                                : I(item, W_H);
-        if ((y += h) <= room) fits = y;
-    }
-    /* rows that all fit keep the whole box */
-    if (y <= room) fits = room;
-    if (fits && fits != I(list, W_H)) widget_resize(list, I(list, W_W), fits);
-    /* ... and the scroll view in it, which a rebuild leaves at the size the list had */
-    if (fits && fits != I(view, W_H)) widget_resize(view, I(view, W_W), fits);
 }
 
 /* After set_row: each network's signal image (which set_child hides as a leading icon) shown

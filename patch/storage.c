@@ -179,7 +179,6 @@ static void st_frame(void *page, void *view, int head, int rows, void **top, voi
     int rh = page_h(48), y = I(list, W_Y), h = rows * rh;
     widget_move_resize(list, 0, y + head, 375, h);
     widget_resize(view, 375, h);
-    page_fit(view);
     if (top) *top = widget_factory_create_widget(widget_factory(), "view", page, 0, y, 375, head);
     *foot = widget_factory_create_widget(widget_factory(), "view", page, 0, y + head + I(list, W_H),
                                          375, ST_FOOT);

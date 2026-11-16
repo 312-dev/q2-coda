@@ -392,6 +392,32 @@ static int lip(int x) {
 #define FULL_FOOT_CLEAR 16 /* Full: clear this far above the rest's foot, the ground by y 316 */
 #define FULL_FOOT_GROUND 316
 
+/* Every other scrolling list's fades (navigation.c list_fade), Home (Full)'s on a list whose box
+ * runs on below the set's list end: rows top to bottom on the screen, the list's top and box's foot;
+ * end, the list end (y 282 on OLED), past which rows peek through a fade into the ground from
+ * FULL_FOOT_CLEAR above it to FULL_FOOT_GROUND; above (scrolled) fades its first FULL_TOP_CLEAR px
+ * from FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on
+ * the screen, is never faded. Inside the canvas's clip. */
+void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1) {
+    if (!P(canvas, CANVAS_LCD) || (!above && !below)) return;
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), clip[4];
+    canvas_get_clip_rect(canvas, clip);
+    int y0 = clip[1] > top ? clip[1] : top, y1 = clip[1] + clip[3] < bottom ? clip[1] + clip[3] : bottom;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             ground = ui_ink(RGBA(0)) & 0xffffffu;
+    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR;
+    for (int y = y0; y < y1; ++y) {
+        if (y >= s0 && y < s1) continue;
+        int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
+        if (below) {
+            int b = 256 - smooth(y - from, FULL_FOOT_GROUND - from);
+            if (b < k) k = b;
+        }
+        fade_row(canvas, ox, oy, ground, k, clip[0], y, clip[2]);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
 /* OLED's fades over Home's main list, list's top at screen y list_y, its columns 0 to cols (Split's
  * left of the art): at the top once it has scrolled, at the foot while rows lie past the rest. In
  * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,

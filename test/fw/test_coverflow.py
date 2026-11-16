@@ -2954,9 +2954,9 @@ def test_home_binds_its_cards_and_lists(fw):
     assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
 
 
-def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glass(fw, library):
-    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows end by y 282 on
-    screen, the eighth row no longer under the glass."""
+def test_a_page_list_on_a_list_fit_set_runs_on_to_the_screen_s_foot(fw, library):
+    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows run on to the
+    screen's foot, the rows past y 282 fading there (navigation.c list_fade), as Home's do."""
     themed(fw)
     split_inset_set(fw, library, 2)  # OLED's set
     ui = Ui(fw)
@@ -2969,7 +2969,7 @@ def test_a_page_list_on_a_list_fit_set_ends_on_its_last_whole_row_above_the_glas
     lv = ui[view].parent
     top, h = 320 - client + ui.at(lv)[1], ui.at(lv)[3]
     row = fw.fn('page_h', C.c_int, C.c_int)(48)
-    assert top + h <= 282 and top + h + row > 282 and h % row == 0, (top, h, row)
+    assert top + h == 320 and 12 * row > h, (top, h, row)
     assert ui.at(view)[3] == h
 
 

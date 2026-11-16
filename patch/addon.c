@@ -1406,23 +1406,39 @@ static void *art_row(int index, const char *caption, const char *detail, const c
     return item;
 }
 
+/* view's rows one under the other, each at its own height (a one-line row's or a two-line one's),
+ * and the view's content their sum: page_row_detail places row i at i rows of its own height, and
+ * page_list's item_height would make every row its height, so the list keeps the rows' own. */
+static void stack_rows(void *view) {
+    int y = 0;
+    widget_set_prop_int(P(view, W_PARENT), "item_height", 0);
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *item = widget_get_child(view, i);
+        widget_move_resize(item, I(item, W_X), y, I(item, W_W), I(item, W_H));
+        y += I(item, W_H);
+    }
+    widget_set_prop_int(view, "virtual_h", y);
+}
+
 /* Row i of the level's list; i == l->n: the trailing row, Loading… while a page is on its way (a
- * press does nothing), else More…. */
+ * press does nothing), else More…. Without art a row with no subtitle is a one-line row, as Home's
+ * (docs/oled-design.md#list-row), and only one with a subtitle two lines (stack_rows places them). */
 static void row(lv_t *l, int i) {
     if (i == l->n) {
         if (l->art)
             art_row(i, pg.paging ? "Loading…" : "More…", "", 0, 0);
         else
-            page_row_detail(pg.view, i, pg.paging ? "Loading…" : "More…", "", clicked);
+            page_row_detail(pg.view, i, pg.paging ? "Loading…" : "More…", 0, clicked);
         return;
     }
     void *item;
+    const char *sub = cell(i, 3);
     if (l->art) {
         char url[ART_URL];
-        item = art_row(i, cell(i, 2), cell(i, 3), art_file(i, url) ? url : 0, opens(i));
+        item = art_row(i, cell(i, 2), sub, art_file(i, url) ? url : 0, opens(i));
     } else
         item = (opens(i) ? page_row_detail_into : page_row_detail)(pg.view, i, cell(i, 2),
-                                                                   cell(i, 3), clicked);
+                                                                   *sub ? sub : 0, clicked);
     if (!strcmp(cell(i, 0), "progress")) progress_row(item, strtol(cell(i, 5), 0, 10));
 }
 
@@ -1545,7 +1561,10 @@ static void append(lv_t *l, int from) {
     }
     widget_destroy(widget_get_child(pg.view, (unsigned)from));
     for (int i = from; i < n; ++i) row(l, i);
-    widget_set_prop_int(pg.view, "virtual_h", n * row_h(l));
+    if (l->art)
+        widget_set_prop_int(pg.view, "virtual_h", n * row_h(l));
+    else
+        stack_rows(pg.view);
     ringnav_select(pg.view, cur, n);
 }
 
@@ -1935,6 +1954,7 @@ static void show(void) {
             pg.view = page_list(pg.page, pg.page, 0, l->title, n = l->n + (pg.f[3][0] != 0),
                                 l->art ? ART_ROW_H : 64);
             for (int i = 0; i < n; ++i) row(l, i);
+            if (!l->art) stack_rows(pg.view);
             if (l->find) find_icon(l->sort);
         }
         page_push(pg.view, pg.moved), pg.moved = 0;
