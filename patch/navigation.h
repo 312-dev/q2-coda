@@ -485,10 +485,7 @@ int coverflow_spinner(void), coverflow_wait_input(void *e);
  * after its children */
 void slider_page_open(void *win, void *s, unsigned kind);
 void slider_page_paint(void *w, void *canvas);
-extern void *slider_page_win; /* the page slider_page_paint draws */
-/* ... its text, shared with storage.c */
-void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
-             const char *face, int px, unsigned color);
+extern void *slider_page_win;       /* the page slider_page_paint draws */
 void slider_page_dirty(void *page); /* its switch row, after a change of the hidden switch */
 
 /* wifi_rows.c: a set_switch theme's Wi-Fi page, from ipod_list_layout and paint_into */
@@ -956,19 +953,6 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas);
 const char *usb_ui_title(const char *name);
 int usb_ui_key(void *top, unsigned key);
-/* A mode page (docs/oled-design.md#usb): the solid circle's radius, its glyph's size (tools/art.py
- * USB_MODE_PX), Positive green (RGB_POSITIVE), and the ring that draws no circle (a spinner in its
- * place). */
-#define MODE_R 46
-#define MODE_GLYPH 44
-#define MODE_BARE 0x1000000u
-typedef struct {
-    unsigned ring;     /* 0xRRGGBB, or MODE_BARE */
-    const char *glyph; /* theme image stem, white */
-    int glyph_px;      /* 0: MODE_GLYPH */
-    const char *title, *line, *pill; /* pill 0: none */
-} mode_page_t;
-int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);

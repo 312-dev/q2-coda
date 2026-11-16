@@ -309,7 +309,7 @@ static void st_text(void *canvas, const char *s, int x, int w, int y, int align,
     static const char *const faces[] = FONT_NAMES;
     unsigned buf[96], n = 0;
     while (s[n] && n < 96) buf[n] = (unsigned char)s[n], ++n;
-    sp_text(canvas, buf, n, x, w, y, align, faces[theme()->font[role]], px, color);
+    ui_line_w(canvas, buf, n, x, w, y, align, faces[theme()->font[role]], px, color);
 }
 static void st_dot(void *canvas, int x, int y, unsigned rgb) {
     rect_t r = { x, y - ST_DOT / 2, ST_DOT, ST_DOT };

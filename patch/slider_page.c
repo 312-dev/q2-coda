@@ -22,7 +22,7 @@
 #define SP_BAR_R 8
 #define SP_VALUE_PX TYPE(22) /* Inter Medium 22, AWTK's size (oled-design.md Type) */
 #define SP_ENDS_PX TYPE(15)  /* 15 */
-#define SP_LINE 32           /* a text's box, centred on its row */
+#define SP_LINE 32           /* the value's box, centred on its row */
 #define SP_KNOB_EDGE 1 /* Light Mode's Track ring round a knob no other ring has */
 
 /* A white knob centred on x, y of vg, ringed ring_px in ring (0xRRGGBB, the accent's on a focused
@@ -126,20 +126,6 @@ static void pill(void *vg, float x, float y, float w, float h) {
     vgcanvas_close_path(vg);
 }
 
-/* s, n characters, centred on row y in the columns x to x + w, aligned (1 centre, 2 left, 3 right)
- * in face at px, in color (0xAARRGGBB: ui_ink's unless raw). */
-void sp_text(void *canvas, const unsigned *s, unsigned n, int x, int w, int y, int align,
-             const char *face, int px, unsigned color) {
-    rect_t r = { x, y - SP_LINE / 2, w, SP_LINE };
-    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
-    canvas_set_font(canvas, face, (unsigned)px);
-    canvas_set_text_color(canvas, color);
-    I(canvas, CANVAS_ALIGN_V) = 1;
-    I(canvas, CANVAS_ALIGN_H) = align;
-    canvas_draw_text_in_rect(canvas, s, n, &r);
-    I(canvas, CANVAS_ALIGN_V) = align_v;
-    I(canvas, CANVAS_ALIGN_H) = align_h;
-}
 /* s's UTF-8 as characters in out, n - 1 of them at most and a 0 */
 static unsigned wide(unsigned *out, unsigned n, const char *s) { return ar_wide(s, out, n); }
 
@@ -164,16 +150,16 @@ void slider_page_paint(void *w, void *canvas) {
         if (s && *s) {
             px = theme()->font_px[ROLE_TITLE];
             const char *face = theme_face(s, -1, &px);
-            sp_text(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2, face ? face : faces[0],
-                    px, RGBA(0xffffff));
+            ui_line_w(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2,
+                      face ? face : faces[0], px, RGBA(0xffffff));
         }
         if (night_page(w)) { /* Night Shift's three choices: a value, white on the bar */
             static const char *const modes[] = { "Off", "On", "Auto" };
             int on = night_on();
             px = theme()->font_px[ROLE_TITLE];
-            sp_text(canvas, buf,
-                    wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
-                    x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
+            ui_line_w(canvas, buf,
+                      wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
+                      x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
         } else
             switch_mark(canvas, x1, SP_ROW / 2,
                         !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
@@ -194,8 +180,8 @@ void slider_page_paint(void *w, void *canvas) {
         const unsigned *p = v;
         while (*p && *p != ':') ++p;
         if (*p) v = p + 1 + (p[1] == ' ');
-        sp_text(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
-                SP_VALUE_PX, RGBA(idle ? S->muted : 0xffffff));
+        ui_line_w(canvas, v, wide_len(v), 0, 375, SP_VALUE_Y - top, 1, faces[FONT_INTER_MEDIUM],
+                  SP_VALUE_PX, RGBA(idle ? S->muted : 0xffffff));
     }
     /* the track, its fill to the knob's centre, and the knob, final in each half; Brightness's at
      * its eased level (levels.c bright_wheel), as Control Center's slider */
@@ -247,10 +233,10 @@ void slider_page_paint(void *w, void *canvas) {
         tk_snprintf(lo, sizeof lo, "%d", min), tk_snprintf(hi, sizeof hi, "%d", max);
     px = SP_ENDS_PX;
     const char *face = faces[theme()->font[ROLE_META]];
-    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, lo), x0, x1 - x0, SP_ENDS_Y - top, 2,
-            face, px, RGBA(S->muted));
-    sp_text(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
-            face, px, RGBA(S->muted));
+    ui_line_w(canvas, buf, wide(buf, sizeof buf / sizeof *buf, lo), x0, x1 - x0, SP_ENDS_Y - top, 2,
+              face, px, RGBA(S->muted));
+    ui_line_w(canvas, buf, wide(buf, sizeof buf / sizeof *buf, hi), x0, x1 - x0, SP_ENDS_Y - top, 3,
+              face, px, RGBA(S->muted));
     stock_canvas_set_fill_color(canvas, fill);
     stock_canvas_set_text_color(canvas, text);
 }
@@ -273,7 +259,7 @@ static void eq_ink_text(void *canvas, const char *s, int x, int w, int y, int al
     unsigned buf[48], n = wide(buf, sizeof buf / sizeof *buf, s);
     int fpx = px;
     const char *face = theme_face(buf, (int)n, &fpx);
-    sp_text(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
+    ui_line_w(canvas, buf, n, x, w, y, align, face ? face : faces[0], fpx, RGBA(rgb));
 }
 
 static unsigned eq_primary(void) { return tok(TOK_PRIMARY); }
@@ -371,11 +357,11 @@ void segments_paint(void *canvas, const char *const *names, int n, int open, int
                      SEG_R);
         }
         unsigned buf[16], len = wide(buf, sizeof buf / sizeof *buf, names[i]);
-        sp_text(canvas, buf, len, sx, sw, y + h / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
-                RGBA(shown && focus ? 0xffffff
-                     : shown        ? eq_primary()
-                     : light        ? SEG_INK_LIGHT
-                                    : SEG_INK));
+        ui_line_w(canvas, buf, len, sx, sw, y + h / 2, 1, faces[FONT_INTER_MEDIUM], SEG_PX,
+                  RGBA(shown && focus ? 0xffffff
+                       : shown        ? eq_primary()
+                       : light        ? SEG_INK_LIGHT
+                                      : SEG_INK));
     }
     st.raw_ink = raw;
     stock_canvas_set_fill_color(canvas, fill);

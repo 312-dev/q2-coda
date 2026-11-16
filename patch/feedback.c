@@ -514,6 +514,47 @@ void feedback_shuffled(const char *what, int songs) {
     conf.timer = timer_add(conf_due, (void *)0, CONF_MS);
 }
 
+/* A mode page (docs/oled-design.md#usb, U2-U6; the sign-in steps, SD Card Update, Bluetooth's
+ * receiver): the stack, circle, title, line and the optional Stop pill, centred as one
+ * between the status row's foot (MODE_TOP) and the screen's bottom. */
+#define MODE_TOP 40
+#define MODE_STACK 158
+#define MODE_STACK_PILL 204
+#define MODE_TITLE_Y 120
+#define MODE_TITLE_PX TYPE(22) /* Inter Medium 22 */
+#define MODE_LINE_Y 148
+#define MODE_LINE_PX TYPE(15) /* Inter Regular 15 */
+#define MODE_PILL_Y 172
+#define MODE_PILL_H 32
+#define MODE_PILL_PAD 22
+#define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
+
+/* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
+ * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
+ * coordinates. */
+int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
+    const char *pill = m->pill;
+    unsigned raw = ui_ink_raw(1); /* final colours, each half's */
+    int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
+    int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
+    rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
+    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
+    if (m->glyph) paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
+    ui_line(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
+            tok(TOK_PRIMARY));
+    ui_line(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
+            tok(TOK_SECONDARY));
+    if (pill) {
+        int pw = ui_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
+        rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
+        fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
+        ui_line(canvas, pill, r.x, r.w, r.y + MODE_PILL_H / 2, 1, "inter-medium", MODE_PILL_PX,
+                tok(TOK_PRIMARY));
+    }
+    ui_ink_raw(raw);
+    return top;
+}
+
 /* The confirmation card (docs/oled-design.md#confirmation-card): stock's sortselect_dialog, as the
  * inset modal's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
  * painted here. The scrim dims the page and the status row (confirm_bar_dim); the card is
