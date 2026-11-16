@@ -2899,7 +2899,7 @@ static void qr_paint(void *w, void *canvas) {
     int known = !strcmp(s, "phone") || !strcmp(s, "check") || !strcmp(s, "done") ||
                 !strcmp(s, "fail") || !strcmp(s, "error");
     char glyph[24];
-    tk_snprintf(glyph, sizeof glyph, "signin_%s", s);
+    tk_snprintf(glyph, sizeof glyph, "modepage_%s", s);
     mode_page_paint(w, canvas, widget_get_prop_int(qp.page, "y", 0),
                     &(mode_page_t){ known ? ring : MODE_BARE, known ? glyph : (const char *)0, 0,
                                     qp.title, qp.line, (const char *)0 });

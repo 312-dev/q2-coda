@@ -141,18 +141,16 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     quality = ['quality_d', 'quality_l']  # np_about.c's badge
     lives = [f'mark_{n}_{k}' for n in ('cloud', 'down') for k in ('d', 'l', 'w')]  # catalogue.c's song marks
     store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
-    signin = [f'signin_{n}' for n in ('phone', 'check', 'done', 'fail', 'error')]  # addon.c's QR page steps
+    modepages = [f'modepage_{n}' for n in art.MODE_GLYPHS]  # every mode page's glyph (feedback.c mode_page_paint)
     cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
-    usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')), *(f'usbmode_{n}' for n in art.USB_MODES),
-           *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows, mode pages and toasts
+    usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')),
+           *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows and toasts
     usb += [f'empty_{n}' for n in art.EMPTY_GLYPHS]  # feedback.c empty_state's glyphs
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},
               'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
-    sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
-    sw += [f'btmode_{n}' for n in art.BT_MODES]  # bt_recv.c's mode page glyph
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
     status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'down', *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
@@ -166,9 +164,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
-                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *signin, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
+                                              *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
-                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)), *sw,
+                                              *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
@@ -195,9 +193,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.PL_MARK_PX, c) for n, c in pmarks.items()),
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
-                          *((n, art.SIGNIN_PX, 0xffffff) for n in signin),
+                          *((n, art.MODE_GLYPH_PX, 0xffffff) for n in modepages),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
-                          *((n, art.USB_MODE_PX, 0xffffff) for n in sw),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage

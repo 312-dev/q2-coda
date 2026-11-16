@@ -3909,7 +3909,7 @@ def test_a_step_is_a_mode_page(fw, step):
         r, g, b = rgb >> 16, rgb >> 8 & 255, rgb & 255
         assert plates[0][4] == 0xff000000 | b << 16 | g << 8 | r
     assert q.texts == [('T', top + 120), ('L', top + 148)]
-    assert any(a.endswith(b'signin_' + step) for a in arts)
+    assert any(a.endswith(b'modepage_' + step) for a in arts)
 
 
 def test_an_unknown_step_draws_its_words_without_a_circle(fw):

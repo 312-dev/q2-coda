@@ -14412,7 +14412,7 @@ said=qr_painted(); assert not m.bands and 'Connect the Q2 to Wi-Fi' in said,said
 # A step (q2-subsonic's sign-in) is a mode page: a solid circle, its glyph, the title and the line.
 m.files[SSTATE]=bytearray(f'addr=192.168.1.23:8080\npin=548001\nqr={hexed}\nqrsize=21\nstep=check\ntitle=Signing In\u2026\nline=Checking with music.example.com\n'.encode()); m.advance(1000)
 said=qr_painted(); assert said==['Signing In\u2026','Checking with music.example.com'] and len(m.rounded)==1 and not m.bands,said
-assert any(i.endswith('signin_check') for i in m.image_loads),m.image_loads[-3:]
+assert any(i.endswith('modepage_check') for i in m.image_loads),m.image_loads[-3:]
 m.destroy(qp); m.top=m.page; passed()
 # Holding standby off: while the add-on asks (hold=1), each poll resets standby and auto power-off
 # (not the screen's); once it stops by itself (its loop's pid gone), it is let go.

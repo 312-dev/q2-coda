@@ -373,7 +373,7 @@ void sw_update_paint(void *w, void *canvas) {
     st.raw_ink = 1;
     if (w == swu.page) {
         mode_page_t m = { RGB_NEGATIVE,
-                          "swmode_bad",
+                          "modepage_bad",
                           0,
                           "Update Can't Be Used",
                           "The file is damaged or not for the Q2",
@@ -390,12 +390,12 @@ void sw_update_paint(void *w, void *canvas) {
             break;
         case SW_LATEST:
             sw_installed(s, sizeof s);
-            m = (mode_page_t){ RGB_POSITIVE,   "swmode_latest", 0, "You're Up to Date", s,
+            m = (mode_page_t){ RGB_POSITIVE,   "modepage_done", 0, "You're Up to Date", s,
                                (const char *)0 };
             break;
         case SW_NONE:
             m = (mode_page_t){ RGB_OFF,
-                               "swmode_none",
+                               "modepage_none",
                                0,
                                "No Update Found",
                                "Put update.tar on the SD card",
@@ -403,19 +403,19 @@ void sw_update_paint(void *w, void *canvas) {
             break;
         case SW_NOCARD:
             m = (mode_page_t){
-                RGB_OFF,        "swmode_none", 0, "No SD Card", "Insert the card with update.tar",
+                RGB_OFF,        "modepage_none", 0, "No SD Card", "Insert the card with update.tar",
                 (const char *)0
             };
             break;
         case SW_LOW:
             tk_snprintf(s, sizeof s, "Needs %d%% or a charger · now %d%%", SW_BATTERY, swu.level);
             m = (mode_page_t){
-                RGB_WARNING, "swmode_low", 0, "Charge to Update", s, (const char *)0
+                RGB_WARNING, "modepage_low", 0, "Charge to Update", s, (const char *)0
             };
             break;
         case SW_FULL:
             m = (mode_page_t){
-                RGB_WARNING,    "swmode_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
+                RGB_WARNING,    "modepage_bad", 0, "Not Enough Space", "Free 100 MB on the SD card",
                 (const char *)0
             };
         }
@@ -440,7 +440,7 @@ void sw_update_paint(void *w, void *canvas) {
                 geom_val(V_STATUS_Y) - dy, 240, 2);
         int top =
             mode_page_paint(w, canvas, dy,
-                            &(mode_page_t){ accent, "swmode_restart", 0, "Restarting to Install",
+                            &(mode_page_t){ accent, "modepage_restart", 0, "Restarting to Install",
                                             "Don't turn off the Q2", (const char *)0 });
         rect_t track = { 375 / 2 - SW_BAR_W / 2, top + SW_BAR_Y, SW_BAR_W, SW_BAR_H }, part = track;
         part.w = sw_unpacked(SW_BAR_W);

@@ -35,7 +35,7 @@ void ui_line(void *canvas, const char *s, int x, int w, int y, int align, const 
 int ui_measure(void *canvas, const char *s, const char *face, int px);
 /* feedback.c mode_page_paint: a mode page (docs/oled-design.md#usb) in w's coordinates, dy its y
  * on screen; USB's, the sign-in steps', SD Card Update's and Bluetooth's receiver's. MODE_R: the
- * solid circle's radius; MODE_GLYPH: its glyph's size (tools/art.py USB_MODE_PX); MODE_BARE: the
+ * solid circle's radius; MODE_GLYPH: its glyph's size (tools/art.py MODE_GLYPH_PX); MODE_BARE: the
  * ring that draws no circle (a spinner in its place). Returns the stack's top in w's coordinates.
  */
 #define MODE_R 46

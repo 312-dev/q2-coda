@@ -312,17 +312,17 @@ void usb_ui_paint(void *w, void *canvas) {
         usb_mode_hide(w); /* stock's face for the mode shows the DAC's switches again */
         if (u.ejected && !dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ RGB_POSITIVE, "usbmode_ejected", 0, "OK to Disconnect",
+                            &(mode_page_t){ RGB_POSITIVE, "modepage_done", 0, "OK to Disconnect",
                                             "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "usbmode_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
+                            &(mode_page_t){ accent, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
         else
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "usbmode_files", 0, "Connected", "Eject on your computer first", "Stop" });
+                            &(mode_page_t){ accent, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
-                        &(mode_page_t){ accent, "usbmode_debug", 0, "Debugging", "Charging and connected", "Stop" });
+                        &(mode_page_t){ accent, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
     } else if (u.view && parent == u.view) {
         usb_ready(u.chooser, u.view, &u.view_ready, USB_ROWS + 1);
         usb_layout();
