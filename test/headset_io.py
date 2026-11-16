@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run the real MIPS headset worker against bounded, simulated kernel I/O."""
 import pathlib
-source=pathlib.Path(__file__).with_name('patch.py').read_text()
+import sys; sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from suite_source import source as suite; source=suite()  # test/patch.py's suite, joined
 exec(compile(source[:source.index('checks=0')], 'test/patch.py', 'exec'))
 
 class KernelMachine(Machine):
