@@ -9892,7 +9892,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','0'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
 # theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
@@ -10169,7 +10169,7 @@ m,main,_=display({},sub=0)
 kids=m.nodes[main]['children']
 assert len(kids)==6 and [row_text(r) for r in kids[2:]]==['Smart Awake','Night Shift: Off','Appearance','Cover Flow']  # no Lock Screen
 keep_lit=kids[2]
-assert m.icons_set==['system_display','switch_off','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']
+assert m.icons_set==['system_display','switch_on','display_backlight','list_into','system_display','list_into','playset_covermode','list_into']  # Smart Awake on: its default
 f,ctx=m.handler(m.nodes[kids[4]]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==('systemset/display_page',None) and m.get(payload_syms['display_sub'])==0; passed()
 # Cover Flow: Artist View, Playlist View, Cover Flow Sort, Refresh Cover Flow, Fast Navigation, Song Durations, Cover
@@ -10193,11 +10193,11 @@ for b,l in zip(buttons,labels):
     assert m.nodes[b]['style']=='s_btn_listitem' and [m.get(b+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,70]
     assert m.nodes[l]['type']=='hscroll_label' and m.nodes[l]['style']=='s_scrlabel_white24l' and m.get(l+O['W_X'])==72
 def texts(): return [row_text(r) for r in rows]
-# Smart Awake (IPOD KEEPLIT, #57): a switch, off unless chosen, that only saves.
+# Smart Awake (IPOD KEEPLIT, #57): a switch, on unless chosen, that only saves.
 keep_label=m.nodes[m.nodes[keep_lit]['children'][0]]['children'][1]; assert m.nodes[keep_label]['text']=='Smart Awake'
 f,ctx=m.handler(m.nodes[keep_lit]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')
-assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(1,'IPOD','KEEPLIT')]
+assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,'IPOD','KEEPLIT')]
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 # Time in Title has no row: OLED does not declare it (its own theme's undeclared TIMETITLE), and its clock stays in
 # the title.
@@ -14243,7 +14243,8 @@ m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps;
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return
 # ends it), but the music's keys stay stock's; the wheel's raw travel goes once a poll, and its end gives
 # the wheel back.
-m=AppMachine(); card_app(m,'fidget','name=Buddy\ngame=1\n'); assert 'Buddy' not in stream_rows(m)
+CONFIG['KEEPLIT']='0'; m=AppMachine(); del CONFIG['KEEPLIT']  # Smart Awake off: the idle quit below
+card_app(m,'fidget','name=Buddy\ngame=1\n'); assert 'Buddy' not in stream_rows(m)
 def fn(name,*args): return m.call(address=payload_syms[name],args=(args+(0,0,0,0))[:4],gap=0,clear=False,count=5_000_000)
 assert fn('addon_games')==1 and m.text(fn('addon_game_name',0))=='Buddy' and fn('addon_game_on')==0
 m.forked=0; m.execs=[]; fn('addon_game_start',0); assert m.execs[-1][:2]==('/mnt/mmc/.fidget/q2-fidget',)*2  # the child
