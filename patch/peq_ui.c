@@ -766,9 +766,12 @@ static int render(const void *unused) {
     int selection = 0, offset = 0, kept = 0;
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
-    /* Whole rows only, so the last row is never clipped; a set_switch theme's end above the bottom
-     * corners' glass, as its other lists do (list_end) */
-    int rows = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh;
+    /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
+     * as its other lists do (list_end). rows, the list's box: shown, or under a list_fit set on to
+     * the window's foot, its rows past the list end fading into it (navigation.c list_fade), where
+     * the wheel's end leaves the last row on the last whole row above the end (fit_top). */
+    int shown = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh,
+        rows = list_fit_end() ? height - 48 : shown;
     if (ui.view && ui.rendered != ui.screen && (ui.rendered == HOME || ui.rendered == BAND)) {
         ui.kept[ui.rendered][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;
         ui.kept[ui.rendered][1] = widget_get_prop_int(ui.view, "yoffset", 0);
@@ -784,8 +787,8 @@ static int render(const void *unused) {
         kept = 1;
     } else if (ui.screen == TYPES) { /* opens on the band's type, centred as a picker's value */
         selection = ui.draft.bands[ui.band].type;
-        offset = selection * rh - (rows - rh) / 2;
-        offset = offset < 0 ? 0 : offset > PEQ_TYPES * rh - rows ? PEQ_TYPES * rh - rows : offset;
+        offset = selection * rh - (shown - rh) / 2;
+        offset = offset < 0 ? 0 : offset > PEQ_TYPES * rh - shown ? PEQ_TYPES * rh - shown : offset;
         if (offset < 0) offset = 0; /* a list tall enough for all eight */
     } else if (ui.screen == PICK) { /* opens on the nearest row to the current value (Auto if on it), centred */
         int last = picks[ui.pick - BALANCE].rows - 1;
@@ -793,8 +796,8 @@ static int render(const void *unused) {
         selection = r < 0 ? 0 : r > last ? last : (int)r;
         if (ui.pick == PREAMP && on_auto()) selection = 0;
         else if (ui.pick == PREAMP && !selection) selection = 1;
-        offset = selection * rh - (rows - rh) / 2;
-        offset = offset < 0 ? 0 : offset > (last + 1) * rh - rows ? (last + 1) * rh - rows : offset;
+        offset = selection * rh - (shown - rh) / 2;
+        offset = offset < 0 ? 0 : offset > (last + 1) * rh - shown ? (last + 1) * rh - shown : offset;
     }
     ui.rendered = ui.screen;
     ui.edit = 0;
@@ -1104,8 +1107,8 @@ static void load(eq_state *s) {
     ui.draft.bypass = !g_equalizer_flag || s->mode != EQ_PEQ;
 }
 
-/* The tab bar's tap, or Centre on it: the other tab, the wheel kept on the bar. Neither changes
- * what plays. */
+/* The tab bar's tap, or the wheel or Previous or Next on it (eq_key): that tab, the wheel kept on the
+ * bar. Neither changes what plays. */
 static void tab_to(int tab) {
     if (tab == ui.tab) return;
     if (ui.tab == SIMPLE) {
@@ -1279,7 +1282,7 @@ static void e3_presets(void) {
 
 static void e3_activate(void) {
     e3.status = 0;
-    if (e3.focus == E3_TABS) tab_to(ADVANCED);
+    if (e3.focus == E3_TABS) e3.focus = E3_SWITCH; /* into the tab's rows */
     else if (e3.focus == E3_SWITCH) e3_switch(!e3.on && ui.draft.bypass); /* a playing PEQ shows on */
     else if (e3.focus == E3_PRESETS) e3_presets();
     else if (e3.focus == E3_RESET) {
@@ -1289,9 +1292,16 @@ static void e3_activate(void) {
     e3_show();
 }
 
+/* Advanced's tab bar left for its list's first row, as the bar's Centre or a turn down does. */
+static void tabs_leave(void) {
+    ui.tabs = 0;
+    if (ui.view) widget_set_prop_int(ui.view, "_ringnav_index", 0); /* else its render's first row */
+    e3_show();
+}
+
 static int e3_single(const void *unused) {
     e3.press = 0;
-    if (ui.tab == ADVANCED) tab_to(SIMPLE);
+    if (ui.tab == ADVANCED) tabs_leave();
     else e3_activate();
     return 7;
 }
@@ -1303,11 +1313,21 @@ int eq_tabs_hold(void *view) {
     return view && view == ui.view && ui.tab == ADVANCED && ui.screen == HOME && ui.tabs;
 }
 
-/* ringnav(), the page on top: Simple's wheel and Centre, and Advanced's tab bar, which the wheel
- * reaches past the list's first row. */
+/* ringnav(), the page on top: Simple's wheel and Centre, and the tab bar, which the wheel reaches past
+ * either tab's first row (docs/oled-design.md#tabs). On the bar the wheel moves between the tabs,
+ * each opening as the wheel reaches it, Simple then Advanced: a turn down past Advanced, or Centre,
+ * goes into the open tab's rows, and a turn up on Simple stays. Previous and Next (the buttons, from
+ * ringnav's page keys) open the other tab while the wheel is on the bar, as on Search's tabs. */
 int eq_key(void *top, unsigned key) {
     static const unsigned release[EVENT_KEY / 4 + 1] = { [EVENT_KEY / 4] = KEY_CENTER };
     if (!ui.page || top != ui.page) return 0;
+    int button = key == KEY_FWD_BTN || key == KEY_BACK_BTN;
+    if (button) {
+        if (ui.screen != HOME || e3.adjusting || (ui.tab == ADVANCED ? !ui.tabs : e3.focus != E3_TABS))
+            return 0; /* stock's: off the bar, the track's */
+        tab_to(ui.tab == ADVANCED ? SIMPLE : ADVANCED);
+        return 1;
+    }
     if (e3.caption && (key == KEY_NEXT || key == KEY_PREV)) {
         e3.caption = 0;
         e3.status = 0;
@@ -1315,15 +1335,27 @@ int eq_key(void *top, unsigned key) {
         if (ui.bar) widget_set_text_utf8(ui.bar, "");
     }
     if (ui.tab == ADVANCED) {
-        if (ui.screen != HOME || !ui.view ||
+        if (ui.screen != HOME || (!ui.view && !ui.tabs) ||
             (!ui.tabs && (key != KEY_PREV || widget_get_prop_int(ui.view, "_ringnav_index", -1) > 0)))
             return 0; /* the list's */
-        if (key == KEY_NEXT || key == KEY_PREV) {
-            ui.tabs = key == KEY_PREV;
-            widget_set_prop_int(ui.view, "_ringnav_index", ui.tabs ? -1 : 0);
+        if (key == KEY_PREV && ui.tabs) { /* up the bar: Simple */
+            tab_to(SIMPLE);
+            return 1;
+        }
+        if (key == KEY_NEXT) {
+            tabs_leave();
+            return 1;
+        }
+        if (key == KEY_PREV) { /* up from the first row: the bar */
+            ui.tabs = 1;
+            widget_set_prop_int(ui.view, "_ringnav_index", -1);
             e3_show();
             return 1;
         }
+    }
+    if (ui.tab == SIMPLE && key == KEY_NEXT && e3.focus == E3_TABS && !e3.adjusting) {
+        tab_to(ADVANCED); /* down the bar: Advanced */
+        return 1;
     }
     if (key == KEY_CENTER && e3.adjusting) {
         e3_done();

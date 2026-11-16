@@ -12,6 +12,7 @@ import host
 from conftest import O
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_RETURN = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT'], O['KEY_RETURN']
+KEY_FWD_BTN, KEY_BACK_BTN = O['KEY_FWD_BTN'], O['KEY_BACK_BTN']
 EVT_DESTROY, EVT_VALUE_CHANGED, EVT_CLICK, EVT_FOCUS, EVT_KEY_UP, EVT_IM_ACTION = (O[k] for k in (
     'EVT_DESTROY', 'EVT_VALUE_CHANGED', 'EVT_CLICK', 'EVT_FOCUS', 'EVT_KEY_UP', 'EVT_IM_ACTION'))
 EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE, EVT_POINTER_UP_BEFORE = (O[k] for k in (
@@ -460,27 +461,49 @@ def test_the_wheel_reaches_advanced_s_tab_bar_past_its_first_row(fw):
     p = page(fw).advanced()
     view = p.ui.view
     assert p.ui.tabs == 1 and p.props[(view, '_ringnav_index')] == -1  # a tab opened from the bar keeps the wheel there
-    assert p.key(KEY_NEXT) == 1 and p.ui.tabs == 0 and p.props[(view, '_ringnav_index')] == 0  # down to the first row
+    assert p.key(KEY_NEXT) == 1 and p.ui.tabs == 0 and p.props[(view, '_ringnav_index')] == 0  # past the last tab: its rows
     assert p.key(KEY_NEXT) == 0 and p.key(KEY_CENTER) == 0  # the list's own
+    assert p.key(KEY_FWD_BTN) == 0 and p.key(KEY_BACK_BTN) == 0  # off the bar: stock's track skip
     p.props[(view, '_ringnav_index')] = 1
     assert p.key(KEY_PREV) == 0  # not past its first row
     p.props[(view, '_ringnav_index')] = 0
     assert p.key(KEY_PREV) == 1 and p.ui.tabs == 1 and p.props[(view, '_ringnav_index')] == -1
-    assert p.centre() == 1 and p.ui.tab == ADVANCED  # a single press waits out a double's
-    assert p.run('e3_single') == RET_REMOVE and p.ui.tab == SIMPLE
-    p.settle()
-    assert p.e3.focus == E3_TABS and p.e3.view  # the wheel kept on the bar
+    assert p.centre() == 1 and p.ui.tabs == 1  # a single press waits out a double's
+    assert p.run('e3_single') == RET_REMOVE and p.ui.tab == ADVANCED  # Centre on the bar: into the tab's rows
+    assert p.ui.tabs == 0 and p.props[(view, '_ringnav_index')] == 0 and not p.pending('render')
 
 
-def test_the_wheel_on_simple_s_tabs_opens_advanced_by_centre(fw):
+def test_the_wheel_moves_between_the_tabs_opening_each(fw):
+    """Up from Simple's first row to its tab bar; the wheel then opens Advanced as it reaches it, its rows past it, and
+    back up the bar to Simple, whose own rows Centre enters; a turn up on Simple, the first tab, stays."""
     p = page(fw).open()
     for _ in range(4):
         p.key(KEY_PREV)
-    assert p.e3.focus == E3_TABS
+    assert p.e3.focus == E3_TABS and p.ui.tab == SIMPLE
+    assert p.key(KEY_PREV) == 1 and p.e3.focus == E3_TABS and p.ui.tab == SIMPLE and not p.pending('render')
+    assert p.key(KEY_NEXT) == 1 and p.ui.tab == ADVANCED and p.ui.tabs == 1  # opened at once, the wheel on the bar
+    assert p.key(KEY_NEXT) == 1 and p.ui.tabs == 0  # a turn down before its render: its first row, once it renders
+    p.settle()
+    assert p.props[(p.ui.view, '_ringnav_index')] == 0
+    assert p.key(KEY_PREV) == 1 and p.ui.tabs == 1  # up from it: the bar
+    assert p.key(KEY_PREV) == 1 and p.ui.tab == SIMPLE and p.e3.focus == E3_TABS
+    p.settle()
     p.centre()
     p.run('e3_single')
+    assert p.ui.tab == SIMPLE and p.e3.focus == E3_SWITCH  # Centre: into Simple's rows
+
+
+def test_previous_and_next_on_the_tab_bar_open_the_other_tab(fw):
+    """As on Search's tabs: the buttons switch the tab while the wheel is on the bar, and skip the track elsewhere."""
+    p = page(fw).open()
+    assert p.e3.focus != E3_TABS and p.key(KEY_FWD_BTN) == 0
+    while p.e3.focus != E3_TABS:
+        p.key(KEY_PREV)
+    assert p.key(KEY_FWD_BTN) == 1 and p.ui.tab == ADVANCED and p.ui.tabs == 1
     p.settle()
-    assert p.ui.tab == ADVANCED and p.ui.tabs == 1 and p.props[(p.ui.view, '_ringnav_index')] == -1
+    assert p.key(KEY_FWD_BTN) == 1 and p.ui.tab == SIMPLE and p.e3.focus == E3_TABS
+    p.settle()
+    assert p.key(KEY_BACK_BTN) == 1 and p.ui.tab == ADVANCED
 
 
 def test_a_double_centre_press_is_the_screen_s(fw):
@@ -812,6 +835,22 @@ def test_a_render_lets_t9_go_before_replacing_its_edit(fw):
     p.click('Raise')
     requests = p.requests
     assert requests[-1] == 0 and p.edit() != old and p.ui.keyboard_timer == 0
+
+
+@pytest.mark.parametrize('pick', (None, 'Balance'))
+def test_a_scrolling_list_runs_on_to_the_page_s_foot(fw, pick):
+    """Under a list_fit set (OLED's) Advanced's list and a picker's run from under the tab bar on to the page's foot,
+    so their rows past the list end peek through its fade (navigation.c list_fade) as every list's do, rather than
+    stopping on a whole row above it over a black band."""
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
+    if pick:
+        p.click(pick)
+    view = p.ui.view
+    lv = p.parent[view]
+    box = lambda w: struct.unpack_from('<4i', p.blocks[w], 0)
+    foot = p.props[(p.page, 'h')]
+    assert box(lv)[1] == 48 and box(lv)[1] + box(lv)[3] == foot and box(view)[3] == foot - 48
+    assert (lv, 'resized') not in p.props  # it scrolls: never shrunk to its rows
 
 
 @pytest.mark.parametrize('pick, value, title, rows, row', (('Balance', 0, 'Balance', 49, 24), ('Balance', -3, 'Balance', 49, 18),

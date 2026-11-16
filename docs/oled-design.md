@@ -57,7 +57,10 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Pod's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page).
+  the page comes back on top (Return from a row's page). A list whose top is off the 32 px grid (EQ's, under its
+  48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
+  ends on the last whole row above y 282. The build refuses a list box that stops at or above y 282
+  (`tools/ipod.py` `cut_lists`).
 - Every screen is checked against the glass: a screenshot composited with the 80 px mask shows
   no lit pixel under the curve.
 
@@ -309,6 +312,10 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
 - The open tab a segment 2 px inside the track, rounded 8 px: raised `#3A3A3C` while the wheel is
   elsewhere, Accent Blue only while the wheel is on the tabs, so the open tab reads apart from the
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
+- **The wheel** reaches the tabs past the first row (or control) under them. On them it moves between the tabs, each
+  opening as the wheel reaches it, left to right going down; a turn down past the last tab, or Centre, goes into the
+  open tab's rows, and a turn up past the first stays (EQ) or goes up to what is above (Search's strip). Previous
+  and Next open the tab before and after, round (`peq_ui.c` `eq_key`, `search_strip.c` `search_strip_key`).
 - Labels in Inter Medium 17 px, centred in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
   own control.
@@ -817,6 +824,11 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   Tertiary, a third of its width, centred (`assets/icons/default_album_home.png`, drawn from the
   vendored SVG; `tools/build.py` sizes it into stock's `ART_PLACEHOLDERS`), in place of stock's
   `#787878` disc (the user's, from audit2 I1).
+- **Optical sizes** (the user's, 2026-11-16, `mock_wifi_trash.py`): a size is the glyph's box, and the glyph inside it
+  is scaled about its ink's centre until its ink's longer side is a set length, centred in the box, so a wide glyph
+  (Wi-Fi's signal) and a tall one (the lock, the trash) read as one size. The 20 px symbols (rows', Streaming's marks,
+  Now Playing's heart and More) have 15.5 px of ink (`tools/art.py` `ROW_INK`, `glyph_png`). Wi-Fi's row glyphs end
+  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`).
 - No coloured app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 

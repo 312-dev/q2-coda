@@ -21,6 +21,7 @@
 #define WIFI_INK_STATES 4 /* text_ink's normal, pressed, over and disable */
 #define WIFI_BUSY "_wifi_busy"
 #define WIFI_HEAD_NAME "_wifi_head"
+#define WIFI_TRASH "_wifi_trash" /* the connected row's Forget image, its art wifi_mark's */
 
 /* Stock's signal image's name, wifi_sig1 to wifi_sig4: its level, else 0. */
 int wifi_sig(const char *image) {
@@ -86,8 +87,13 @@ void wifi_rows_pre(void *view) {
     }
 }
 
+static int connected(void *b);
+
 /* After set_row: each network's signal image (which set_child hides as a leading icon) shown
- * again, across the right column's glyphs, for wifi_mark to draw in. */
+ * again, across the right column's glyphs, for wifi_mark to draw in: on the connected row the
+ * last of them is stock's Forget, whose image (navbar_delete) stays its tap, centred on that slot
+ * with no art of its own, so the trash wifi_mark draws ends on the right column like every row's
+ * signal, selected or not (docs/oled-design.md Screens: Wi-Fi). */
 void wifi_rows_post(void *view) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i),
@@ -96,14 +102,17 @@ void wifi_rows_post(void *view) {
             void *c = widget_get_child(b, j);
             const char *image = widget_get_prop_str(c, "image", "");
             if (!wifi_sig(image) || tk_strcmp(widget_get_type(c), "image")) continue;
-            /* the right column, or left of stock's forget image on the connected row */
-            int w = 3 * WIFI_GLYPH + 2 * WIFI_GLYPH_GAP, right = I(b, W_W) - geom_val(V_RIGHT_X);
+            int slots = 3 + connected(b), right = I(b, W_W) - geom_val(V_RIGHT_X),
+                w = slots * WIFI_GLYPH + (slots - 1) * WIFI_GLYPH_GAP;
             for (unsigned m = 0; m < k; ++m) {
                 void *t = widget_get_child(b, m);
-                if (widget_get_visible(t) &&
-                    !tk_strcmp(widget_get_prop_str(t, "image", ""), "navbar_delete") &&
-                    I(t, W_X) < right)
-                    right = I(t, W_X) + (I(t, W_W) - WIFI_GLYPH) / 2 - WIFI_GLYPH_GAP;
+                if (!widget_get_prop_int(t, WIFI_TRASH, 0) &&
+                    tk_strcmp(widget_get_prop_str(t, "image", ""), "navbar_delete"))
+                    continue;
+                widget_set_prop_int(t, WIFI_TRASH, 1);
+                widget_set_prop_str(t, "image", ""); /* wifi_mark draws its trash */
+                widget_move_resize(t, right - (WIFI_GLYPH + I(t, W_W)) / 2, I(t, W_Y), I(t, W_W),
+                                   I(t, W_H));
             }
             widget_move_resize(c, right - w, 0, w, I(b, W_H));
             widget_set_visible(c, 1, 0);
@@ -144,13 +153,19 @@ static void glyph(void *w, void *canvas, const char *name, int cx, int cy) {
 }
 
 /* paint_into, for a network row's signal image w (wifi_sig1..4: level 1..4): from the right
- * column leftwards, the signal, the lock, the check. White on the selection, else Text Primary
+ * column leftwards, the connected row's trash (Forget), the signal, the lock, the check, each
+ * drawn at its optical size (tools/art.py ROW_INK). White on the selection, else Text Primary
  * (the check the accent). */
 void wifi_mark(void *w, void *canvas, int level, int selected) {
     void *b = P(w, W_PARENT);
     int cy = I(w, W_H) / 2, cx = I(w, W_W) - WIFI_GLYPH / 2, step = WIFI_GLYPH + WIFI_GLYPH_GAP;
     const char *half = selected || !ipod_light() ? "_d" : "_l";
     char name[16];
+    if (connected(b)) {
+        tk_snprintf(name, sizeof name, "trash%s", half);
+        glyph(w, canvas, name, cx, cy);
+        cx -= step;
+    }
     tk_snprintf(name, sizeof name, "wifi_%d%s", level >= 4 ? 3 : level == 3 ? 2 : 1, half);
     glyph(w, canvas, name, cx, cy);
     if (locked(b)) {

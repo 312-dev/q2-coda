@@ -1101,8 +1101,9 @@ painted it white, which drew the box at rest.
   turns of the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists
   and albums A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the
   bar; Centre plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
-  tracks in Cover Flow. A turn up from the first result lands on the tabs, where Centre and Next pick the next tab
-  and Previous the one before; a turn down goes back to the results and a turn up to the strip. Previous or Return
+  tracks in Cover Flow. A turn up from the first result lands on the tabs, where the wheel moves between them, each
+  picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Centre, goes back to the results
+  and a turn up past All to the strip; Next picks the next tab and Previous the one before. Previous or Return
   on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
   and no match, "No results" stands in the list's place, and Next stays on the strip; on a tab with nothing, Next
   lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none

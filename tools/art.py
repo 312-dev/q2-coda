@@ -162,10 +162,20 @@ def coverage_nonzero(polys, box):
 PHOSPHOR = ROOT/'assets/icons/phosphor'
 
 
-def tidal_mark(px, rgb):
-    """TIDAL's mark (TIDAL, a 20 unit box) as a px square PNG in rgb."""
-    polys = [[(x * px / 20, y * px / 20) for x, y in poly] for poly in path(TIDAL)]
+def glyph_png(polys, px, rgb, ink=0.0):
+    """polys, a glyph laid in a px box, as a px square PNG in rgb, filled nonzero. ink, its optical size: the glyph
+    scaled about its ink's centre, put on the box's, until its ink's longer side is ink px (docs/oled-design.md Icons),
+    so glyphs of one size read as one size."""
+    if ink:
+        xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
+        k, cx, cy = ink / max(max(xs) - min(xs), max(ys) - min(ys)), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        polys = [[(px / 2 + (x - cx) * k, px / 2 + (y - cy) * k) for x, y in poly] for poly in polys]
     return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
+
+
+def tidal_mark(px, rgb, ink=0.0):
+    """TIDAL's mark (TIDAL, a 20 unit box) as a px square PNG in rgb (glyph_png's ink)."""
+    return glyph_png([[(x * px / 20, y * px / 20) for x, y in poly] for poly in path(TIDAL)], px, rgb, ink)
 
 
 def spinner(f, spokes=8, px=15, radii=(3.4, 6.4), width=1.9, fade=0.1, rgb=0xffffff):
@@ -181,13 +191,13 @@ def spinner(f, spokes=8, px=15, radii=(3.4, 6.4), width=1.9, fade=0.1, rgb=0xfff
     return png(px, px, compose((0, 0, px, px), layers))
 
 
-def phosphor(name, px, rgb):
+def phosphor(name, px, rgb, ink=0.0):
     """Phosphor's icon name (its file's stem, the weight in it; 'q2coda/<stem>' for one of ours) as a px square PNG in
-    rgb, its paths filled nonzero."""
+    rgb, its paths filled nonzero (glyph_png's ink)."""
     svg = (PHOSPHOR.parent/f'{name}.svg' if name.startswith('q2coda/') else PHOSPHOR/f'{name}.svg').read_text()
     check('viewBox="0 0 256 256"' in svg, f'{name}: expected a 256 unit viewBox')
     polys = [[(x * px / 256, y * px / 256) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
-    return png(px, px, laid(px, px, [(coverage_nonzero(polys, (0, 0, px, px)), lambda x, y: (rgb, 1))]))
+    return glyph_png(polys, px, rgb, ink)
 
 
 # A theme's own glyphs (docs/oled-design.md Icons), in final colours per half: _d on black, _l on paper, _w on the
@@ -214,6 +224,7 @@ MODE_PILL_PX = 18  # the antenna in the radio's pill
 # A row's leading glyph (Songs' Shuffle row, list.shuffle.row) and Now Playing's heart and More, regular weight (the
 # full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
+ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}  # Text Secondary in each half, white on the bar
 SORT = 'M0 0H16V2H0ZM0 5H11V7H0ZM0 10H6V12H0Z'
@@ -501,20 +512,22 @@ def images(t):
         # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
         # play_moredown: the empty heart and More in Text Primary, More pressed in Text Secondary, the full heart in
         # the accent, each half's but the accent's
-        out[f'{prefix}_np_fav'] = phosphor('heart-fill', ROW_ICON_PX, on)
+        out[f'{prefix}_np_fav'] = phosphor('heart-fill', ROW_ICON_PX, on, ROW_INK)
         for k, c in STATE_INKS.items():
-            out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c),
-                    f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k])}
+            out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c, ROW_INK), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c, ROW_INK),
+                    f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k], ROW_INK)}
         # the volume's speakers at the bar's ends (volume.c vol_paint, VOL_SPK_PX): Text Secondary per half
         out |= {f'{prefix}_vol_{n}_{k}': phosphor(f'speaker-simple-{g}-fill', VOL_SPK_PX, c)
                 for n, g in (('lo', 'none'), ('hi', 'high')) for k, c in MODE_INKS.items()}
     if t['shuffle_row']:  # Songs' Shuffle row: the accent's top tone at rest, white on the selection, in both halves
-        out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+        out |= {f'{prefix}_shuffle_{k}': phosphor('shuffle', ROW_ICON_PX, c, ROW_INK) for k, c in {'a': on, 'w': 0xffffff}.items()}
     if t['set_switch']:  # a picker's check on the right column: the accent's top tone at rest, white on the selection
         out |= {f'{prefix}_check_{k}': phosphor('check-bold', CHECK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
-        # the Wi-Fi page's network rows (wifi_rows.c): signal and lock in Text Primary per half, white on the selection
-        for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple')):
-            out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c) for k, c in STATE_INKS.items()}
+        # the Wi-Fi page's network rows (wifi_rows.c): signal, lock and the connected one's trash in Text Primary per
+        # half, white on the selection
+        for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
+                            ('trash', 'trash')):
+            out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
     if any(g.modal for g in t['geoms'].values()):  # the inset modal's symbols (menu_modal.c)
         out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
         out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
@@ -533,14 +546,14 @@ def images(t):
         out |= {f'{prefix}_{n}': d for n, d in pop_images(on).items()}
         out[f'{prefix}_holdback'] = phosphor('arrow-u-up-left-bold', HOLD_BACK_PX, 0xffffff)  # Return held's card
     # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
-    out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c) for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c, ROW_INK) for k, c in FOLDER_INKS.items()}
     # feedback.c's confirmation after a shuffle, a Ratings row's hearts and Streaming's service marks
     out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, on)
     out |= {f'{prefix}_rate_{state}_{k}': phosphor(glyph, RATE_PX, c) for state, glyph in (('on', 'heart-fill'), ('off', 'heart'))
             for k, c in FOLDER_INKS.items()}
     for k, c in FOLDER_INKS.items():
-        out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c) for n, glyph in STREAM_MARKS.items()}
-        out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c)
+        out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c, ROW_INK) for n, glyph in STREAM_MARKS.items()}
+        out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c, ROW_INK)
     out |= {f'{prefix}_mark_{n}_{k}': phosphor(glyph, MARK_PX, c) for n, glyph in MARKS.items() for k, c in MARK_INKS.items()}
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}

@@ -236,9 +236,9 @@ def test_return_on_the_results_goes_back_to_the_strip_and_there_erases(fw, ui, s
     s = Strip(fw, ui, library(song))
     s.type('lo')
     s.enter()
-    s.key(KEY_PREV, KEY_CENTER)  # the tabs: Songs
+    s.key(KEY_PREV, KEY_NEXT)  # the tabs, and the wheel on to Songs
     if on == 'results':
-        s.key(KEY_NEXT, KEY_NEXT)
+        s.key(KEY_CENTER, KEY_NEXT)  # Centre: Songs' results
         assert s.ss.focus == ON_LIST and s.ss.sel == 1
     s.key(KEY_RETURN)
     assert s.ss.focus == ON_STRIP and ui.backs == 0 and s.ss.text == b'lo' and s.ss.tab == SONGS
@@ -278,35 +278,44 @@ def test_all_lists_32_songs_before_the_artists_and_songs_lists_every_one(fw, ui,
     assert s.titles() == ['Track %02d' % i for i in range(GROUP)] + ['album: Record']
     assert s.ss.nsongs == GROUP
     s.enter()
-    s.key(KEY_PREV, KEY_CENTER)  # the tabs: Songs
+    s.key(KEY_PREV, KEY_NEXT)  # the tabs, and the wheel on to Songs
     assert s.ss.tab == SONGS and s.titles() == ['Track %02d' % i for i in range(GROUP + 8)]
-    s.key(KEY_NEXT, *[KEY_NEXT] * (GROUP + 3), KEY_CENTER)  # down past All's end
+    s.key(KEY_CENTER, *[KEY_NEXT] * (GROUP + 3), KEY_CENTER)  # into Songs' results, down past All's end
     assert ui.played == [(songs, GROUP + 3, LIBRARY)]
 
 
-def test_the_tabs_pick_a_group_by_centre_and_the_buttons_and_it_stays_while_typing(fw, ui, song):
+def test_the_wheel_moves_between_the_tabs_and_the_buttons_pick_and_the_tab_stays_while_typing(fw, ui, song):
+    """On the tabs the wheel picks each as it reaches it (docs/oled-design.md#tabs): down past Albums, or Centre, into
+    the results, up past All to the strip; Previous and Next pick the tab before and after, round."""
     s = Strip(fw, ui, library(song))
     s.type('o')
     assert s.ss.tab == ALL and s.titles()[:4] == ['Lovely Day', 'Love Will Tear Us Apart', 'Atmosphere', 'Glove']
     s.enter()
     s.key(KEY_PREV)
     assert s.ss.focus == ON_TABS
-    s.key(KEY_CENTER)
-    assert s.ss.tab == SONGS and s.titles() == ['Lovely Day', 'Love Will Tear Us Apart', 'Atmosphere', 'Glove']
+    s.key(KEY_NEXT)
+    assert s.ss.tab == SONGS and s.ss.focus == ON_TABS and s.titles() == ['Lovely Day', 'Love Will Tear Us Apart', 'Atmosphere', 'Glove']
     s.key(KEY_FWD_BTN)
     assert s.ss.tab == ARTISTS and s.titles() == ['artist: Joy Division', 'artist: Somebody']  # A to Z, once each
-    s.key(KEY_CENTER)
-    assert s.ss.tab == ALBUMS and s.titles() == ['album: Love Songs']
-    s.key(KEY_CENTER)
-    assert s.ss.tab == ALL
+    s.key(KEY_NEXT)
+    assert s.ss.tab == ALBUMS and s.ss.focus == ON_TABS and s.titles() == ['album: Love Songs']
+    s.key(KEY_NEXT)  # past the last tab: its results
+    assert s.ss.tab == ALBUMS and s.ss.focus == ON_LIST and s.ss.sel == 0
+    s.key(KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV)  # up the tabs to All
+    assert s.ss.tab == ALL and s.ss.focus == ON_TABS
     s.key(KEY_BACK_BTN)  # Previous: the one before, round
     assert s.ss.tab == ALBUMS and s.ss.focus == ON_TABS and s.ss.text == b'o'
-    s.key(KEY_NEXT)  # down to the results
+    s.key(KEY_CENTER)  # into the results
     assert s.ss.focus == ON_LIST and s.ss.sel == 0
-    s.key(KEY_RETURN, KEY_RETURN)  # back to the strip, and an erase
-    assert s.ss.focus == ON_STRIP and s.ss.text == b'' and s.ss.tab == ALBUMS
+    s.key(KEY_PREV, KEY_RETURN)  # the tabs, then back to the strip
+    assert s.ss.focus == ON_STRIP and s.ss.tab == ALBUMS
+    s.enter()
+    s.key(KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV)  # the tabs, up past All: the strip
+    assert s.ss.focus == ON_STRIP and s.ss.tab == ALL
+    s.key(KEY_RETURN)  # an erase
+    assert s.ss.text == b''
     s.type('s')
-    assert s.ss.tab == ALBUMS and s.titles() == ['album: Love Songs', 'album: Still', 'album: Substance']
+    assert s.ss.tab == ALL and 'album: Substance' in s.titles()
 
 
 def test_a_tab_s_artists_are_every_one_once_a_to_z(fw, ui, song):

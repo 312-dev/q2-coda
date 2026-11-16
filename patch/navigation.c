@@ -9943,6 +9943,10 @@ int ringnav(void *ctx, void *event) {
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (usable() && search_strip_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
+    /* EQ's tab bar takes Previous and Next as Search's tabs do, before stock's track skip */
+    if (usable() && (key == KEY_FWD_BTN || key == KEY_BACK_BTN) &&
+        eq_key(window_manager_get_top_window(window_manager()), key))
+        return STOP;
     if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
     if (usable() && kb_wheel_key(key)) return STOP;
