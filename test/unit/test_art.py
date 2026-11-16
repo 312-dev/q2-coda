@@ -144,6 +144,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     sw = [f'swmode_{n}' for n in art.SW_MODES]  # sw_update.c's result glyphs
+    sw += [f'btmode_{n}' for n in art.BT_MODES]  # bt_recv.c's mode page glyph
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # keylock.c: the status row's padlock and the card's
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c

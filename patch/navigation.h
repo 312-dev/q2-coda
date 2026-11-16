@@ -935,6 +935,9 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
+/* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
+void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
+const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
