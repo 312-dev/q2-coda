@@ -89,7 +89,6 @@ static struct {
     char ask_mac[40];        /* the guest it asks about */
     char keep[80], body[96]; /* the card's Keep row and body, while it is up */
     char who[64];            /* ... and the guest it names (confirm keeps the pointers) */
-    char code[12];           /* the pairing's code, spaced */
     void *np, *set, *set_view, *trust, *trust_view, *hot, *hot_view, *conn, *fail;
     int rows[GU_ROWS], n; /* the settings page's rows */
     int trows[4], tn, hrows[4], hn;
@@ -176,14 +175,13 @@ static int ask_card(int ask) {
         char who[40];
         guest_short(guest, who, sizeof who);
         int digits = strlen(code) == 6;
-        if (digits) tk_snprintf(gu.code, sizeof gu.code, "%.3s %.3s", code, code + 3);
         tk_snprintf(gu.body, sizeof gu.body,
-                    digits ? "wants to play music%s\nCheck it's on %s's phone"
-                           : "wants to play music%s",
+                    digits ? "Wants to play music%s.\nCheck it's on %s's phone."
+                           : "Wants to play music%s.",
                     source_words(gv("source")), who);
-        return confirm(&(confirm_t){ "%s", guest, gu.body, digits ? gu.code : 0, guest_rows, 3,
-                                     CONFIRM_CONSEQUENTIAL, 2, 0, 0, secs * 1000, 2, answered,
-                                     (void *)(long)ASK_GUEST });
+        /* the pairing card (pair_prompt.c), as Car Remote's */
+        return pair_prompt(guest, digits ? code : 0, gu.body, guest_rows, 3, 2, secs * 1000, 2,
+                           answered, (void *)(long)ASK_GUEST) != 0;
     }
     tk_snprintf(gu.keep, sizeof gu.keep, "Keep %s", guest);
     tk_snprintf(gu.body, sizeof gu.body, "%s wants to play music%s", gv("new"),

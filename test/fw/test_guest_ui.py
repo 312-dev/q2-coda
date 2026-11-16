@@ -54,10 +54,11 @@ def test_a_guest_asking_brings_up_the_card(g):
     g.look(state='idle', enabled=1)
     assert 'dialog/sortselect_dialog' not in g.ui.went
     g.look(state='asking', guest="Alex's Pixel", mac='AA:BB', code='482913', countdown=24)
-    assert 'dialog/sortselect_dialog' in g.ui.went  # confirm(): the card
+    assert 'dialog/sortselect_dialog' in g.ui.went  # confirm(): the card, as pair_prompt.c asks it
     gu = C.c_char.in_dll(g.fw.lib, 'guest_ui__gu')
     text = C.string_at(C.addressof(gu), g.fw.sizes['guest_ui__gu'])
-    assert b'482 913' in text and b"Check it's on Alex's phone" in text
+    assert C.string_at(C.addressof(C.c_char.in_dll(g.fw.lib, 'pair_prompt__pair_name'))) == b"Alex's Pixel"  # its title
+    assert b"Wants to play music.\nCheck it's on Alex's phone." in text
 
 
 @pytest.mark.parametrize('ask, row, line', [(1, 0, 'allow-once'), (1, 1, 'allow-always'), (1, 2, 'decline'),

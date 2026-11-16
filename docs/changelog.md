@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Car Remote and Guest Play: a phone pairing now asks on one card over the page: a phone icon, "Pair with Pixel 10 Pro?" (a long name scrolls instead of being cut off), the code in large digits, what to do with it, and a bar for the time left. When it is done the Q2 says "Paired with Pixel 10 Pro".
   - Guest Play: with Smart Awake on, the screen stays lit on a guest's Now Playing while the guest's song plays, as it does on yours.
   - Guest Play (OLED): when a friend's phone asks to play through the Q2, a card asks you (**Allow Once** is selected, so one press of Center lets them play; **Always Allow**, **Decline**; it declines by itself after 30 s, and shows the pairing code to compare on a first pairing). A second guest asks whether to **Keep** the first or **Replace** it.
   - Guest Play (OLED): while a guest plays, their song shows on its own Now Playing with where the sound goes (**Alex's Pixel → Q2 → BMW 6R81**) and the quality on each leg; **Stop Guest Play** ends it in one press. Toasts say when a guest leaves, drops out of range or is declined.

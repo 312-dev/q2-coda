@@ -599,7 +599,9 @@ as its callers move onto it.
 - **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
   wide at x 42 with 16 px corners, its stack centred on y 168 and kept inside y 44 to 302.
 - **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centred, naming
-  the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
+  the object ("Forget WH-1000XM5?", never "Are you sure"), a long one scrolling in the text column (the house
+  marquee: held 2.75 s, then 35 px/s, a copy 40 px behind, its ends faded 12 px into the card), an optional 28 px
+  glyph 6 px over it; at most two body lines in
   15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centred, stacked; 8 px of padding.
@@ -612,8 +614,24 @@ as its callers move onto it.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/navigation.h`); `answer(ctx, row, toggle_on)` runs
-  once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph })` (`patch/navigation.h`); `answer(ctx, row,
+  toggle_on)` runs once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+
+### Pairing
+
+A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or a Guest Play guest
+(`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
+
+- The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
+  as it names itself, scrolling when long; never cut short in the status row.
+- What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
+  music. Check it's on Alex's phone."
+- The code large, Inter Medium 30, as two groups of three ("242 610").
+- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
+- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
+- Its end: "Paired with Pixel 10 Pro" or "Pairing failed" as a toast (`pair_done`).
+- ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
+  not apply.
 
 ### Empty and offline
 

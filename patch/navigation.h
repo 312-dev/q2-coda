@@ -432,10 +432,18 @@ typedef struct {
     int timeout_ms, timeout_row;
     void (*answer)(void *ctx, int row, int toggle_on);
     void *ctx;
+    const char *glyph; /* a theme image's name over the title (pair_prompt's phone), or 0 */
 } confirm_t;
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
+void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
 void confirm_close(void);        /* closes the card without an answer */
 int confirm_up(void);            /* a card is up */
+/* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
+ * (docs/oled-design.md#pairing) */
+void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
+                  int n_rows, int back, int timeout_ms, int timeout_row,
+                  void (*answer)(void *ctx, int row, int toggle_on), void *ctx);
+void pair_done(int paired);
 void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
 void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
