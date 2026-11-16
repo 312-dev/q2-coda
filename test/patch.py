@@ -1895,6 +1895,18 @@ for occupancy in (1,64):
     m.u.hook_del(hook)
 assert costs[0]==costs[1],costs
 passed()
+# A long scroll view's first paint fits the paint hook's budget: 500 rows of OLED's 32 px rows or two-line 52 px ones,
+# scrolled to row 100 or at the top. Every row is walked (load_rows); nothing else may walk them all again (pl_first
+# answers at once with no playlist just made).
+def long_view(h,top=100):
+    lm=Machine(); lw,les=lm.page_list(500,height=266,extent=500*h); lm.word(lw+O['W_W'],375)
+    for i,e in enumerate(les): lm.word(e+O['W_Y'],i*h); lm.word(e+O['W_H'],h)
+    lm.word(lw+O['SCROLL_Y'],top*h); count=[0]; hook=lm.u.hook_add(UC_HOOK_CODE,lambda *a: count.__setitem__(0,count[0]+1))
+    lm.call(address=HOOKS['widget_on_paint_background'][0],args=(lw,lm.canvas,0,0),gap=0); lm.u.hook_del(hook)
+    print(f'OLED scroll view of 500 {h} px rows from row {top}: {count[0]} instructions for its first paint')
+    assert count[0]<100000,count[0]
+for h,top in ((32,0),(32,100),(52,100)): long_view(h,top)
+passed()
 
 # Returning after another scope still applies text matching and stale-index rejection.
 for shortened in (False,True):
