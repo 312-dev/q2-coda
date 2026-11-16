@@ -3,8 +3,10 @@ small made-up files and a fake repository.
 
     python3 -m pytest tools/ci -q     # no build, no stock ZIP; a second or two
 """
+import os
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
@@ -318,3 +320,25 @@ def test_gate_plan_that_runs_everything_is_the_whole_gate(tmp_path):
     only = gate.suites_for(docs, ['fw-asan', 'unit', 'patch'], 'py', tmp_path)
     assert list(only) == ['fw-asan', 'unit']
     assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'
+
+
+def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
+    pidfile = tmp_path/'grandchild'
+    s = gate.Suite('s', ['bash', '-c', f'sleep 30 & echo $! > {pidfile}; wait'])
+    def clock():  # the loop's turn after the grandchild started is when the gate is stopped
+        if pidfile.exists() and pidfile.read_text().strip():
+            raise KeyboardInterrupt
+        return time.monotonic()
+    try:
+        gate.run({'s': s}, [], tmp_path, sys.executable, build='B', log=lambda m: None, mem=lambda: 12.0,
+                 clock=clock, poll=0.05)
+    except KeyboardInterrupt:
+        pass
+    pid = int(pidfile.read_text())
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f'suite s\'s sleep ({pid}) outlived the gate')

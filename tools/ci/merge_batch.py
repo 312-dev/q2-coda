@@ -39,6 +39,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -253,7 +254,13 @@ class Real:
                '--', *self.build_args]
         t = time.perf_counter()
         with open(out/'gate.log', 'w') as f:
-            subprocess.run(cmd, cwd=wt, stdout=f, stderr=subprocess.STDOUT)
+            p = subprocess.Popen(cmd, cwd=wt, stdout=f, stderr=subprocess.STDOUT)
+            try:
+                p.wait()
+            finally:
+                if p.poll() is None:  # this batch was stopped: so is its gate, which stops its suites
+                    p.terminate()
+                    p.wait()
         try:
             results = json.loads((out/'results.json').read_text())
         except (OSError, ValueError):
@@ -353,6 +360,7 @@ def main():
     ap.add_argument('--onto', metavar='BRANCH', help='with --dry-run: plan onto BRANCH, not this worktree\'s')
     ap.add_argument('--release', dest='dev', action='store_false', help='test a release build (default: --dev)')
     args = ap.parse_args()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so a running gate is stopped too
     if args.mark_ready is not None:
         return mark_ready(args.ready, args.mark_ready)
     if args.onto and not args.dry_run:

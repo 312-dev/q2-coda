@@ -33,10 +33,12 @@ any other name the plan lacks not at all; the name `build` builds even when no s
 docs/building.md#gate.
 """
 import argparse
+import contextlib
 import json
 import os
 import pathlib
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -153,47 +155,53 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
         cmd = s.command(build or '', jobs)
         out = subprocess.PIPE if s is builder else open(s.log, 'w')
         s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env}, stdout=out,
-                                  stderr=open(s.log, 'w') if s is builder else subprocess.STDOUT, text=True)
+                                  stderr=open(s.log, 'w') if s is builder else subprocess.STDOUT, text=True,
+                                  start_new_session=True)  # its own group, which the finally below ends whole
         log(f'start {s.name}{f" ({jobs} shards)" if jobs else ""}: {shlex.join(cmd)}')
         running.append(s)
 
-    while pending or running:
-        for s in list(running):
-            if s.proc.poll() is None:
-                continue
-            running.remove(s)
-            s.rc, s.seconds = s.proc.returncode, clock() - s.start
-            if s is builder:
-                lines = s.proc.stdout.read().strip().splitlines()
-                build = lines[-1] if s.rc == 0 and lines else None
-            elif s.rc == 0 and s.after:
-                with open(s.log, 'a') as f:
-                    f.write(f'== {shlex.join(s.after)}\n')
-                    f.flush()
-                    s.rc = subprocess.run(s.after, cwd=ROOT, env={**os.environ, **s.env}, stdout=f,
-                                          stderr=subprocess.STDOUT).returncode
-            done[s.name] = {'rc': s.rc, 'seconds': round(s.seconds), 'log': str(s.log)}
-            log(f'{"ok  " if s.rc == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s)')
-        if builder and builder.rc not in (None, 0):
-            for s in [p for p in pending if p.needs_build]:
-                pending.remove(s)
-                done[s.name] = {'rc': 'no build', 'seconds': 0, 'log': str(builder.log)}
-        now = clock()
-        young = sum(s.mem for s in running if now - s.start < RAMP)
-        for s in list(pending):
-            if s.needs_build and not build:
-                continue
-            free = mem() - young
-            jobs = None
-            if s.name == 'patch':
-                jobs = max(1, min(8, int((free - FLOOR) // SHARD_GB)))  # patch_shards.py's own cap
-                s.mem = jobs * SHARD_GB
-            if free - s.mem >= FLOOR or not running:
-                pending.remove(s)
-                launch(s, jobs)
-                young += s.mem
-        if pending or running:
-            time.sleep(poll)
+    try:
+        while pending or running:
+            for s in list(running):
+                if s.proc.poll() is None:
+                    continue
+                running.remove(s)
+                s.rc, s.seconds = s.proc.returncode, clock() - s.start
+                if s is builder:
+                    lines = s.proc.stdout.read().strip().splitlines()
+                    build = lines[-1] if s.rc == 0 and lines else None
+                elif s.rc == 0 and s.after:
+                    with open(s.log, 'a') as f:
+                        f.write(f'== {shlex.join(s.after)}\n')
+                        f.flush()
+                        s.rc = subprocess.run(s.after, cwd=ROOT, env={**os.environ, **s.env}, stdout=f,
+                                              stderr=subprocess.STDOUT).returncode
+                done[s.name] = {'rc': s.rc, 'seconds': round(s.seconds), 'log': str(s.log)}
+                log(f'{"ok  " if s.rc == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s)')
+            if builder and builder.rc not in (None, 0):
+                for s in [p for p in pending if p.needs_build]:
+                    pending.remove(s)
+                    done[s.name] = {'rc': 'no build', 'seconds': 0, 'log': str(builder.log)}
+            now = clock()
+            young = sum(s.mem for s in running if now - s.start < RAMP)
+            for s in list(pending):
+                if s.needs_build and not build:
+                    continue
+                free = mem() - young
+                jobs = None
+                if s.name == 'patch':
+                    jobs = max(1, min(8, int((free - FLOOR) // SHARD_GB)))  # patch_shards.py's own cap
+                    s.mem = jobs * SHARD_GB
+                if free - s.mem >= FLOOR or not running:
+                    pending.remove(s)
+                    launch(s, jobs)
+                    young += s.mem
+            if pending or running:
+                time.sleep(poll)
+    finally:
+        for s in running:  # stopped early: end each suite with what it started (q2-heavy ends its job on TERM)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(s.proc.pid, signal.SIGTERM)
     return done
 
 
@@ -216,6 +224,7 @@ def main():
     ap.add_argument('--results', type=pathlib.Path, help='also write the results as JSON here')
     ap.add_argument('--python', default=sys.executable)
     args, rest = ap.parse_known_args()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so run() ends its suites
     build_args = [a for a in rest] or ['--dev', '--', '--new-player']
     if build_args and build_args[0] == '--':
         build_args = build_args[1:]
