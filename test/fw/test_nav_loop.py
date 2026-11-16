@@ -2168,6 +2168,7 @@ def test_centre_on_default_volume_turns_its_switch_on_or_off(fw, keys, shown):
     keys(KEY_CENTER)
     ui.fire('navigation__edit_single')
     assert ui.clicks == ([(b'img_bootswitch', EVT_CLICK)] if shown else [])
+    assert (page.p in ui.invalidated) == bool(shown)  # the row's switch drawn anew
     assert len(fw.calls('navigator_back')) == 1 - shown
 
 

@@ -9811,9 +9811,10 @@ static int edit_single(const void *info) {
     else if (!n) {
         void *sw = slider_page(top) ? widget_lookup(top, "img_bootswitch", 1) : (void *)0;
         char click[0x30];
-        if (sw && widget_get_visible(sw))
+        if (sw && widget_get_visible(sw)) {
             stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
-        else if (slider_page(top))
+            widget_invalidate_force(top, (void *)0); /* the hidden switch's change repaints no row */
+        } else if (slider_page(top))
             navigator_back();
     } else if (f < n)
         field_set(top, f + 1);
