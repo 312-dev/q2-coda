@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Confirmations: removing a song from a playlist, and deleting or replacing an EQ preset, now open on **Cancel**, so a stray Center press no longer removes or overwrites anything.
+  - Line Out's warning reads "Line Out sets max volume, continue?" (a missing space).
   - Pages of text you scroll (OLED): when the last line sits just under the fade at the bottom, turning the wheel now scrolls it into view, as a drag does, instead of showing the scroll bar and staying put.
   - Development builds: `q2eq` over adb lists, loads and adjusts the EQ from a computer (every control on the EQ page, presets, import and export), through the same steps as the EQ page, so the page, EQ per Output and what plays stay in step.
   - Display (OLED): every empty page now looks the same: a stack of tiles with a picture, a title such as **No Songs**, **No Playlists** or **No Matches**, a line saying what to do, and at most one button under it (**Scan Music Now**, **Turn on Streaming**, **Turn on Wi-Fi**). Empty Albums, Artists, Composers and Genres open such a page instead of a message, Years opens with no dated albums, and with no SD card in, the Library's pages say **No SD Card**.

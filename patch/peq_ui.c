@@ -817,7 +817,9 @@ static int render(const void *unused) {
         else if (ui.pick == PREAMP && !selection) selection = 1;
         offset = selection * rh - (shown - rh) / 2;
         offset = offset < 0 ? 0 : offset > (last + 1) * rh - shown ? (last + 1) * rh - shown : offset;
-    }
+    } else if (ui.screen == CONFIRM) /* Delete's and Replace's: open on Cancel, so a Centre on
+                                      * arrival keeps the preset (docs/oled-design.md#dialogs-and-toasts) */
+        selection = 1;
     ui.rendered = ui.screen;
     ui.edit = 0;
     widget_destroy_children(ui.page);

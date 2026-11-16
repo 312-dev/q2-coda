@@ -356,7 +356,13 @@ static void ple_show(void) {
     /* only the selected row's long title moves, as Songs' */
     for (int i = 0; !geom_val(V_TOOLBAR) && i < (int)widget_count_children(ple.view); ++i)
         hscroll_label_set_only_focus(widget_get_child(widget_get_child(ple.view, i), 0), 1);
-    if (n) ringnav_select(ple.view, mode == 0 ? ple.selected + 2 < n ? ple.selected + 2 : 0 : 0, n);
+    /* Remove song? opens on Cancel, so a Centre on arrival removes nothing */
+    if (n)
+        ringnav_select(ple.view,
+                       mode == 0   ? ple.selected + 2 < n ? ple.selected + 2 : 0
+                       : mode == 3 ? 1
+                                   : 0,
+                       n);
 }
 static int ple_open(void *ctx, void *event) {
     if (ple.page) return 0;
