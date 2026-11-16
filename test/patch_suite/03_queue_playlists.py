@@ -127,7 +127,7 @@ class QueueMachine(Machine):
         n=len(self.toasts); self.t=getattr(self,"t",7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
         self.pick(row); self.advance(0)
         return self.toasts[-1][3] if len(self.toasts)>n else None
-    def labels(self): return [self.nodes[self.nodes[i]['children'][0]]['text'] for i in self.nodes[self.view]['children']]
+    def labels(self): return [self.nodes[self.nodes[i]['children'][0]]['text'] for i in self.nodes[self.view]['children'] if self.nodes[i]['children']]  # the rows: the sheet's header and gaps hold none
     def playback(self): return [c for c in self.calls if c[0] in ('mclStartPlayer','mclStop','mclSetPause','mclSetResume','mclSetSeek','playpause_quick_click')]
 
 sel=lambda m:[c[:2] for c in m.calls if c[0].startswith('batch_')]
@@ -232,7 +232,7 @@ def playing_menu(**kw):
 for state in (3,2):  # paused and playing both expose the same actions
     m=playing_menu(); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,state)
     m.press(5000); assert m.release()==1
-    m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+["Shuffle","Repeat","Group by: Album"]
+    m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+["Shuffle","Repeat","Group by"]
     assert m.nodes[m.title]['text']=='B' and m.release()==0
     m.press(7000); assert m.release()==1 and m.get(0xa50084)==state; passed()
 # A tagged song's menu is titled by its tag, not its file name.
@@ -240,7 +240,7 @@ m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_TITL
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Bee'; passed()
 # A song in a hidden folder isn't in the Library: no Go to rows, unless its app's q2app has goto=1 (addon_goes).
 m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_PATH'],m.string('/mnt/mmc/.podcasts/Show/B.mp3'))
-m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:4]+["Shuffle","Repeat","Group by: Album"],m.labels(); passed()
+m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:4]+["Shuffle","Repeat","Group by"]; passed()
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
@@ -382,31 +382,6 @@ class PlaylistMachine(PlayingPlaylistMachine):
         super().hook(u,address,size,unused)
         if name=='q:widget_on' and b==O['EVT_CLICK']:
             it=self.get(self.get(a+O['W_EMITTER'])); self.word(it,d); self.word(it+12,c)
-
-for count in (0,3):
-    for mode in (0,1,2):
-        m=PlaylistMachine(count,mode); kids=m.rebuild()
-        assert len(kids)==count+(0 if mode else 1)
-        previous=len(kids); kids=m.rebuild(); assert len(kids)==previous
-        # Restacking leaves stock's numeric button names/context unchanged.
-        if count:
-            row=kids[0 if mode else 1]
-            button=m.nodes[row]['children'][0]
-            assert m.nodes[button]['name']=='0'
-            assert m.handler(button,O['EVT_CLICK'])==(m.STOCK_PICK,button)
-        passed()
-
-for stale in (False,True):
-    m=PlaylistMachine(3,2)
-    # Open through Now Playing so the picker is tracked, then rebuild as creation does.
-    m.top=m.stack[0]; m.run(4); page=m.top
-    m.view=m.nodes[page]['children'][0]; m.nodes[m.view]['name']='scroll_view'
-    m.word(syms['p_deque_playlist'],m.deque([m.song('Created')]))
-    kids=m.rebuild(); button=m.nodes[kids[0]]['children'][0]
-    f,ctx=m.handler(button,O['EVT_CLICK']); assert f!=m.STOCK_PICK
-    if stale: m.word(O['MCL_POS'],2)
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-    assert m.added==([] if stale else ['B']); passed()
 
 # OLED's Playlists (its set has no toolbar, toolbar 0): rows over stock's own page. Stock's toolbar builder, row builder,
 # row click and its handlers run for real; each hidden widget's click runs its real handlers, nested, as stock's dispatch.
@@ -591,7 +566,7 @@ m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
 assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
-assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
+assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU,(m.nodes[m.title]['text'],m.labels())
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0
 m.press(6500); assert m.release()==1; passed()

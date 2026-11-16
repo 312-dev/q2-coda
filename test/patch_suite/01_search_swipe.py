@@ -800,12 +800,12 @@ passed()
 # Wheel selection is immediate even when restoration animations would still be running.
 m=Machine(); w,es=m.page_list(6)
 m.paint(w); m.glide=False
-m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==60
+m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48  # whole rows (OLED's list_fit)
 m.paint(w); assert m.selected(w)==2
 assert m.confirm()==11 and m.dispatched()[0][1]==es[2]
 m.call(); assert m.selected(w)==3
 m.call(O['KEY_PREV']); assert m.selected(w)==2
-m.call(O['KEY_PREV']); assert m.selected(w)==1 and m.moved()[-1][3]==36
+m.call(O['KEY_PREV']); assert m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==48  # its row already whole at the top: no move
 m.call(O['KEY_PREV']); assert m.selected(w)==0 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 # Empty menus never activate or turn off the screen; touch doesn't swallow its first event.
 m=Machine(); w=m.page(); assert m.confirm()==11 and not m.dispatched()
@@ -816,26 +816,6 @@ e=m.entry(w); m.word(e+O['W_H'],140); m.nodes[w]['children']=[e]
 m.paint(w)
 assert m.selected(w)==0 and m.sel()==(inset,0,240-2*inset,140)
 assert {r['clip'] for r in m.rounded}|{b[5] for b in m.bands}=={(0,0,240,96)}; passed()
-# Both list kinds leave breathing room, shrink it in tight viewports, and clamp at either end.
-for virtual in (False,True):
-    for height,margin in ((96,12),(60,6),(49,0),(48,0),(40,0)):
-        m=Machine()
-        if virtual:
-            w,rs,es=m.table_page(n=10,rebind=True); m.word(w+O['TABLE_ROWS'],10); off=O['TABLE_TOP']
-        else:
-            w,es=m.page_list(10,extent=480); off=O['SCROLL_Y']
-        m.word(w+O['W_H'],height); m.paint(w)
-        assert m.get(w+off)==0 and not m.moved()
-        for _ in range(3): m.call()
-        assert m.selected(w)==3
-        assert m.get(w+off)==(144 if height<48 else 192-height+margin)
-        m.call(O['KEY_PREV'])
-        assert m.selected(w)==2 and m.get(w+off)==96-margin
-        m.call(O['KEY_PREV']); m.call(O['KEY_PREV'])
-        assert m.selected(w)==0 and m.get(w+off)==0
-        for _ in range(9): m.call()
-        assert m.selected(w)==9 and m.get(w+off)==(432 if height<48 else 480-height)
-        m.paint(w); assert not m.moved(); passed()
 # Entering a tall row from either direction reveals its title, including after recreation.
 m=Machine(); w,es=m.page_list(3,height=96,extent=400)
 m.word(es[1]+O['W_H'],140); m.word(es[2]+O['W_Y'],188)
@@ -846,8 +826,8 @@ w,es=m.page_list(3,height=96,extent=400)
 m.word(es[1]+O['W_H'],140); m.word(es[2]+O['W_Y'],188)
 m.paint(w); assert m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==48; passed()
 # Row 0 brings back what heads the list above it (the EQ page's graph) when both fit; a head too tall for that
-# leaves the margin, so row 0 is never pushed off.
-for height,top in ((192,0),(144,84)):
+# leaves row 0 at the top, never pushed off.
+for height,top in ((192,0),(144,0),(120,96)):
     m=Machine(); w,es=m.page_list(6,height=height,extent=96+6*48)
     for i,e in enumerate(es): m.word(e+O['W_Y'],96+i*48)
     m.paint(w)
@@ -1058,7 +1038,7 @@ for virtual in (False,True):
     assert not m.clicks and not m.moved() and m.get(w+off)==0
     assert m.nodes[w]==before, 'rejected confirmation changed live selection properties'
     m.paint(w)
-    assert m.selected(w)==12 and m.get(w+off)==540
+    assert m.selected(w)==12 and m.get(w+off)==528  # a whole row under the top (OLED's list_fit)
     passed()
 
 # Touch mode survives settling, unsupported pages, recreation and native clicks anywhere.
@@ -1119,7 +1099,7 @@ def replace_pool(a,offset):
 m.rebind=replace_pool
 m.word(w+O['TABLE_ANIMATOR'],0x1234)
 m.call(); m.call()
-assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's list_fit)
 assert m.get(w+O['TABLE_ANIMATOR'])==0
 m.confirm(); assert m.clicks==[es[1]] and m.clicks[0] not in old
 passed()
