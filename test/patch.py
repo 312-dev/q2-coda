@@ -13685,8 +13685,12 @@ m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offlin
 assert m.toasts[-1][3]=="Spotify didn't answer in time" and len(m.threads)==t and m.labels()[1]=='Shuffle'; m.back(); passed()
 # Account: the name, Premium, and Sign out after a confirmation; then the pairing prompt.
 m.row(8); assert m.asked()==('account',); m.answer(*ME); assert m.labels()==['Account','Alice','Premium','Sign Out','']
-# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has closed
-def card(m,answer,row): m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
+# Sign Out asks on the confirmation card (feedback.c confirm); its answer (spotify.c signout_answer) runs once it has
+# closed, as feedback.c card_answer runs it: the card left up would keep the page off the top, and the pairing poll waits
+# for the page (br_tick).
+def card(m,answer,row):
+    m.call(address=payload_syms['confirm_close'],args=(0,0,0,0),gap=0,clear=False)
+    m.call(address=payload_syms[answer],args=(0,row,0,0),gap=0,clear=False)
 m.row(1); card(m,'signout_answer',0); assert m.labels()[:2]==['Account','Alice']
 t=len(m.threads); m.row(1); card(m,'signout_answer',1); assert m.asked()==('signout',) and len(m.threads)==t+1
 m.answer(*OK,[]); assert m.labels()==PAIR

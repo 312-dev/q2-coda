@@ -97,3 +97,5 @@ int kv_fit(int span, int label_w, int value_w, int *box) {
     *box = span - label_w - KV_GAP;
     return label_w;
 }
+
+int ui_focus_shown(void) { return !st.touch_mode; }

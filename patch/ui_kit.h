@@ -59,6 +59,12 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
  * timeout_row by itself after this long, the seconds left shown on that row and a bar emptying
  * along the card's foot. answer runs once, after the card has closed, with the chosen row and the
  * switch's state. */
+/* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons
+ * and the confirmation card: shown while the last navigation input was the wheel (a turn, or
+ * Centre after one), hidden after a tap, and so on arrival by whichever opened the screen.
+ * navigation.c's st.touch_mode is the one record of it: a touch sets it, the wheel clears it.
+ * Centre with no ring still answers the screen's default. */
+int ui_focus_shown(void);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house

@@ -619,6 +619,21 @@ as its callers move onto it.
   .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
+### Focus ring
+
+<a id="focus-ring"></a>The user's universal rule (2026-11-16), for every screen with one or two buttons (the empty
+states' buttons, a card's answers) and any other mark that shows where the wheel is:
+
+- **Hidden by default.** It shows as soon as the wheel turns on the screen, and on arrival when the screen was
+  reached through the wheel (a turn, then Centre); reached by a tap, it opens hidden.
+- **The last input decides, everywhere at once:** a tap anywhere hides it again, a wheel turn shows it. There is one
+  record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
+  `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
+- **Centre with no ring** still does the screen's default: the primary button, a card's default answer.
+- **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Centre
+  without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
+  boots shown.
+
 ### Empty and offline
 
 **The empty state** (`patch/feedback.c` `empty_state`) is the one form for every page with nothing to show

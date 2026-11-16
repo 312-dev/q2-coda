@@ -934,7 +934,7 @@ void confirm_rows_paint(void *w, void *canvas) {
         void *item = slot[i];
         int x = I(item, W_X), y = I(item, W_Y) + CARD_ROW / 2, cx = x + I(item, W_W) / 2,
             out = theme()->sel_inset - CARD_BAR_IN,
-            lit = ringnav_row_selected(item) && !st.touch_mode;
+            lit = ringnav_row_selected(item) && ui_focus_shown();
         if (k < 0) {
             ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
                     x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 44, 2);
