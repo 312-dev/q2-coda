@@ -9,6 +9,7 @@ import pytest
 
 from conftest import O
 from test_nav_library_pages import Config, Library, Songs, Ui, field
+from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload's state)
 
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
@@ -520,11 +521,18 @@ def test_the_strip_is_a_low_pill_with_the_text_s_box_and_its_cursor(fw, ui, song
     assert letters == ['9', 'A', 'B', 'C', 'D', 'E', 'F']  # four cells each side of B: the space and delete drawn
 
 
-def test_the_run_s_ends_fade_into_the_strip(fw, ui, song):
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_run_s_ends_fade_into_the_strip(fw, ui, song, st, light):
+    """Each end of the letters' run fades from clear to exactly the pill's own fill (device bug, 2026-11-17: the fade
+    was the pill's grey with red and blue swapped, #1E1C1C on #1C1C1E, a tinted band at each end), in either half."""
     s = Strip(fw, ui, library(song))
+    st('light').value = light
     c = painted(fw, s)
-    fade = {r[0]: ink >> 24 for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff == 0x1c1c1e}
+    pill = [ink for b, ink, _ in c.boxes if b == (40, 196, 295, 34)]
+    assert len(pill) == 1 and rgb(pill[0]) == (0xe3e3e1 if light else 0x1c1c1e)
+    fade = {r[0]: ink >> 24 for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff == pill[0] & 0xffffff}
     assert fade[148] == 255 and fade[326] == 255 and fade[148 + 21] < 20 and 148 + 22 not in fade
+    assert not [r for r, ink in c.rects if r[2] == 1 and r[1] == 202 and ink & 0xffffff != pill[0] & 0xffffff]
 
 
 def test_the_rows_fill_the_glass_above_the_strip_and_the_tabs_take_the_first_one(fw, ui, song):

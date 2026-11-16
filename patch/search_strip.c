@@ -542,10 +542,11 @@ void search_strip_paint(void *w, void *canvas) {
             final_text(canvas, theme_face(c, 1, &px), c, &r, (unsigned)px, 0xff000000u | ink);
         }
     }
-    /* the run's ends dissolve into the strip: a column of its grey over each, opaque at the edge */
+    /* the run's ends dissolve into the strip: a column of its grey over each, opaque at the edge,
+     * as color_t lays it out (RGBA), the pill's own fill exactly */
     for (int i = 0; i < SS_FADE; ++i) {
         unsigned a = (unsigned)(255 * (SS_FADE - i) / SS_FADE);
-        stock_canvas_set_fill_color(canvas, a << 24 | strip);
+        stock_canvas_set_fill_color(canvas, a << 24 | (RGBA(strip) & 0xffffffu));
         canvas_fill_rect(canvas, SS_RUN_L + i, y0 + 6, 1, SS_STRIP_H - 12);
         canvas_fill_rect(canvas, SS_RUN_R - 1 - i, y0 + 6, 1, SS_STRIP_H - 12);
     }
