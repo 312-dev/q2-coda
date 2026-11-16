@@ -10180,10 +10180,11 @@ assert row_text(cf_library)=='Library: Local Only'  # a named choice, no switch,
 ctl=display_page(m,3); wheel,hold,tone,lock,wake,guard=m.nodes[ctl]['children']  # tone: the Clicker
 assert [row_text(r) for r in (hold,tone)]==['Hold Return: Recent','Clicker: Off']; passed()
 view=display_page(m,1); rows=setting_rows(m,view)
-kids=m.nodes[view]['children']; light,shortcut,song_artist,song_length,np_time=kids[0],kids[3],kids[5],kids[6],kids[7]
-assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Shortcut: Rockbox','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining']
-assert kids==[light,rows[0],rows[1],shortcut,rows[2],song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
-assert m.icons_set==['system_display','system_display','playset_covermode','playset_covermode','system_powermanager']+['system_display']*3 and all(m.nodes[r]['type']=='list_item' and m.nodes[r]['style']=='s_listitem_black' for r in rows)
+# the theme's options (assets/themes/oled/theme.xml), Home's Shortcut being the Carousel's card alone
+kids=m.nodes[view]['children']; light,song_artist,song_length,np_time=kids[0],kids[4],kids[5],kids[6]
+assert [row_text(r) for r in kids]==['Light Mode: Off','Accent: Blue','Home: Split','Battery: Icon','Song Artist: Inline','Song Length: Albums','Track Time: Remaining'],[row_text(r) for r in kids]
+assert kids==[light,*rows,song_artist,song_length,np_time] and m.nodes[rows[0]].get('visible',1)==1
+assert m.icons_set==['system_display','system_display','playset_covermode','system_powermanager']+['system_display']*3,m.icons_set and all(m.nodes[r]['type']=='list_item' and m.nodes[r]['style']=='s_listitem_black' for r in rows)
 assert not {'switch_on','switch_off'} & set(m.icons_set)  # values, not switches
 buttons=[m.nodes[r]['children'][0] for r in rows]; labels=[m.nodes[b]['children'][1] for b in buttons]
 for b,l in zip(buttons,labels):
@@ -11438,18 +11439,27 @@ m=ShuffleMachine(); stock=[m.node('list_item') for _ in range(11)]
 view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
 assert m.calls[0][:3]==('stock_localmusic',m.top,5)
-# Library order: Shuffle; Artist, Album, All Songs, Genre, Era, Playlist, Ratings (in My Fav's place, hidden);
-# Recently Added, Recent, Most Played, Frequent (hidden: Most Played is its list), Hi-Res, Long Songs; iPod's Games;
-# then Update Local Music, last (stock rows by get_localmusic_showinfo index).
-kids=m.nodes[view]['children']; row,era,rated,top,long=kids[0],kids[5],kids[7],kids[11],kids[14]
-assert [kids[i] for i in (*range(1,5),6,8,9,10,12,13,16)]==[stock[i] for i in (3,2,1,4,10,6,9,8,7,5,0)] and m.nodes[row]['style']=='s_listitem_black'
+# Library order: the rows in library_edit.c's lr_default order (its one table), each row known by its letter: stock's
+# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon. No card media folders here
+# and no scrobbles, so no Search (OLED has lib_art 0, but this page's set does not lead with it), Podcasts and the rest.
+LR_DEFAULT=re.search(r'lr_default\[\] = "(\w+)"',(ROOT/'patch/library_edit.c').read_text()).group(1)
+STOCK_LETTER={'u':0,'s':1,'l':2,'a':3,'g':4,'i':5,'f':6,'q':7,'c':8,'n':9,'p':10}  # home.c L_* by letter
+ADDED_LETTER={'local_shuffle':'h','local_era':'e','local_fav':'r','local_frequentplay':'m','local_longsongs':'L','local_games':'G'}
+def letter_of(k):
+    if k in stock: return next(c for c,i in STOCK_LETTER.items() if stock[i]==k)
+    return ADDED_LETTER[m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][0]]['image']]
+kids=m.nodes[view]['children']; letters=''.join(letter_of(k) for k in kids)
+assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==17,letters
+by=dict(zip(letters,kids)); row,era,rated,top,long=by['h'],by['e'],by['r'],by['m'],by['L']
+assert m.nodes[row]['style']=='s_listitem_black'
 icon,label,into=m.nodes[m.nodes[era]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_era' and m.nodes[label]['text']=='Years' and m.nodes[into]['image']=='list_into'
-icon,label,into=m.nodes[m.nodes[kids[15]]['children'][0]]['children']
-assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games' and len(kids)==17
+icon,label,into=m.nodes[m.nodes[by['G']]['children'][0]]['children']
+assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games'
 icon,label,into=m.nodes[m.nodes[long]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_longsongs' and m.nodes[label]['text']=='Long Songs'
-assert [k for k in kids if not m.nodes[k].get('visible',1)]==[stock[6],stock[7]]  # My Fav and Frequent
+# hidden: My Fav (Ratings' Loved), Frequent (Most Played is its list), and the menu review's Shuffle, Hi-Res, Long Songs
+assert {k for k in kids if not m.nodes[k].get('visible',1)}=={stock[6],stock[7],row,stock[5],long}
 icon,label,into=m.nodes[m.nodes[top]['children'][0]]['children']
 assert m.nodes[icon]['image']=='local_frequentplay' and m.nodes[label]['text']=='Most Played'
 icon,label,into=m.nodes[m.nodes[rated]['children'][0]]['children']
