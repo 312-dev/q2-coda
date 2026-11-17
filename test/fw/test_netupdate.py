@@ -1284,9 +1284,14 @@ def test_download_progress_on_the_row(fw):
 
 def test_with_no_list_check_for_updates_loads_it(fw):
     p = Page(fw)
-    # the row's detail blank: OLED's note under it says why (feedback_empty)
+    # the row's detail blank: the empty state under it says why, compact (a row above it: no glyph), no button
+    # (docs/oled-design.md#empty-and-offline)
     assert p.sh.rows == 1 and p.sh.map[0] == ROW_CHECK and p.label(0) == ''
-    assert {'No apps listed', 'Connect to Wi-Fi, then Check for Updates'} <= set(p.said)
+    es = {C.string_at(a[1]).decode(): C.string_at(a[2]).decode() for _, a in fw.calls('widget_set_prop_str')
+          if C.string_at(a[1]).startswith(b'_es_')}
+    assert es == {'_es_glyph': '', '_es_title': 'No Apps Listed', '_es_hint': 'Connect to Wi-Fi, then Check for Updates',
+                  '_es_row': ''}
+    assert 'No apps listed' not in p.said
     # alone, the row is a plain one, the list's pitch, not a two-line row (audit2 J3)
     pitch = fw.fn('page_h', C.c_int, C.c_int)(48)
     assert [a[2] for _, a in fw.calls('widget_resize') if a[0] == p.sh.row[0]][-1:] == [pitch]

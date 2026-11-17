@@ -720,6 +720,7 @@ the gray one.
 | Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
 | A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
 | On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
+| App Store, nothing listed | none (compact) | No Apps Listed | Connect to Wi-Fi, then Check for Updates | none: under Check for Updates, the row that loads the list |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
@@ -734,7 +735,7 @@ four action rows (no presets is a toast); and Upload Scrobbles with nothing to s
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
-explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+explains use it: a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 

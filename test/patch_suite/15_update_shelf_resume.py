@@ -110,7 +110,7 @@ m=ShelfMachine({LIST:bytearray(REPO_LIST),SPOT_TAG:bytearray(SPOT_PIN.encode()),
                 '/mnt/mmc/.spotify/run':bytearray(b'sh'),'/mnt/mmc/.spotify/librespot':bytearray(b'ELF'),
                 '/proc/mounts':bytearray(b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')})  # the card, for card_mounted before a remove
 m.rockbox_mode=0; m.wifi=-1; apps_open(m)
-BLANK,NOTE='',['','']  # Check for Updates' detail is blank; the note under the rows and its hint (feedback_empty), hidden: there is a list
+BLANK,NOTE='',[]  # Check for Updates' detail is blank; no note under the rows (the empty state, hidden: there is a list)
 assert m.labels()==['App Store','Check for Updates',BLANK,'Rockbox','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']+NOTE and not m.threads; passed()  # no themes without Rockbox; the card apps last
 m.close(); m.wifi=3; m.rockbox_mode=0o100755; m.dirs['/mnt/mmc/.spotify']=[]; apps_open(m)
 assert m.labels()==['App Store','Check for Updates','Checking…','Rockbox','Update','Rockbox Themes','Install','Spotify','Installed','Deezer','Install','Soulseek','Install','File Browser','Install','Subsonic','Install','Podcasts','Install','Live Music Archive','Install','Buddy','Install','Groovebox','Install','AirPlay','Install']+NOTE
@@ -162,11 +162,11 @@ m.listing='        1  10-06-2026 13:18   .rockbox/../../x\n'; m.files.pop('/mnt/
 assert m.toasts[-1][3]=='The download is not a usable app' and m.files['/mnt/mmc/.rockbox/rockbox']==b'ELF3.2'; passed()
 m.close(); passed()
 # No list on the card yet: Check for Updates alone, which loads it with Wi-Fi. The note under the row says so
-# (No apps listed, then its hint), the row's detail blank; the fetched list (its bad lines skipped) is kept
+# (the compact empty state: No Apps Listed, then its hint), the row's detail blank; the fetched list (its bad lines skipped) is kept
 # on the card and its rows shown; a list with no app, or one the release key didn't sign, leaves the one in use.
-NO_LIST=['No apps listed','Connect to Wi-Fi, then Check for Updates']  # sh_text's feedback_empty
+NO_LIST=[]  # sh_text's empty state is no label: its words are the painter's (empty_titles)
 m=ShelfMachine(); m.rockbox_mode=0; m.wifi=-1; apps_open(m)
-assert m.labels()==['App Store','Check for Updates','']+NO_LIST and not m.threads
+assert m.labels()==['App Store','Check for Updates','']+NO_LIST and empty_titles(m)==['No Apps Listed'] and not m.threads
 m.row(0); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; passed()
 m.wifi=3; m.row(0); assert m.labels()[2]=='Checking…' and len(m.threads)==1; m.row(0); assert len(m.threads)==1  # checking already
 m.codes=[404]; shelf_job(m); assert m.toasts[-1][3]=="Can't reach GitHub" and m.labels()[1:]==['Check for Updates','']+NO_LIST

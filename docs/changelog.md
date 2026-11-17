@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - App Store (OLED): with no list yet it shows **No Apps Listed** under Check for Updates, in the same form as other empty pages.
   - Playlists (OLED): a playlist or On-The-Go with no songs shows **No Songs Yet** under Add Songs, with how to fill it.
   - Add Songs (OLED): a search that matches nothing shows **No Matches** with "Try fewer letters" under the Search row, in place of a "No songs match" row the wheel could land on.
   - Settings (OLED): Max Volume, Balance, Brightness, Crossfade's length and Default Volume's level change right in the list. Each row shows a small slider and its value; press Center and the row grows, turn the wheel to set it (heard or seen as you turn), and press Center or Back when done. Crossfade and Default Volume are switches, with their slider showing under them while they're on.

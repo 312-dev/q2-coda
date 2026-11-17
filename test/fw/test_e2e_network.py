@@ -1109,8 +1109,9 @@ def test_the_app_store_removes_an_app_with_what_it_saved_and_without_wifi(w):
 def test_wifi_gates_the_online_jobs_until_it_comes_up(w):
     store = AppStore(w)  # no list on the card yet; opened offline, no check
     before = w.ui.rows(store.page)
-    assert store.rows() == [] and store.detail(store.CHECK) == ''  # OLED's note under the row says why
-    assert w.ui.texts(store.page)[-2:] == ['No apps listed', 'Connect to Wi-Fi, then Check for Updates']
+    assert store.rows() == [] and store.detail(store.CHECK) == ''  # the empty state under the row says why
+    titles = [C.string_at(a[2]).decode() for a in w.calls('widget_set_prop_str') if C.string_at(a[1]) == b'_es_title']
+    assert titles[-1:] == ['No Apps Listed'] and 'No apps listed' not in w.ui.texts(store.page)
     store.press(store.CHECK)
     assert w.ui.toasts == ['Connect to Wi-Fi first'] and not w.ui.started
     w.ui.run(1000)

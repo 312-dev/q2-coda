@@ -836,11 +836,12 @@ static void sh_text(int r) {
             if (lv) widget_set_prop_int(lv, "item_height", page_h(48));
             widget_resize(sh.row[r], 375, page_h(48)); /* full width */
         }
-        int noted = feedback_empty(sh.page, feedback_below(sh.row[r]),
-                                   shelf_n ? (const char *)0 : "No apps listed",
-                                   "Connect to Wi-Fi, then Check for Updates");
-        t = !shelf_n && !noted ? "Connect to Wi-Fi to load the list" : "";
-        void *title = noted ? widget_get_child(sh.row[r], 0) : (void *)0;
+        /* the empty state under the row, compact (a row above it: no glyph), the row its action */
+        static const empty_t none = { 0, "No Apps Listed", "Connect to Wi-Fi, then Check for Updates",
+                                      0 };
+        empty_state(sh.page, feedback_below(sh.row[r]), shelf_n ? (const empty_t *)0 : &none, 0);
+        t = "";
+        void *title = widget_get_child(sh.row[r], 0);
         if (title) /* OLED: one line, centred in the list's pitch, as its other rows keep it */
             widget_move_resize(title, I(title, W_X), 0, I(title, W_W), I(sh.row[r], W_H));
     } else if (busy && sh.cancel)
