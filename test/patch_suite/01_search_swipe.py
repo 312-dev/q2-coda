@@ -50,7 +50,7 @@ for case in ('idle','other','key','missing'):
 # iPod: a confirm dialog's buttons are its rows (contexts.inc BUTTONS). The wheel moves between the
 # side-by-side buttons without scrolling anything, the bar is the button's own tile, the ends are
 # hard and Centre clicks the selected button. The Stock build leaves the dialog stock: the wheel is volume.
-m=Machine(); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm)
+m=Machine(); m.config.update(FLAT); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm)
 m.word(d+O['W_W'],375); m.word(d+O['W_H'],320); m.clip=(0,0,375,320); m.top=d
 buttons=[m.entry(d,220) for _ in range(2)]; m.nodes[d]['children']=buttons
 pair=(53,242)  # a pair of tiles side by side, as Tidal's confirm keeps
@@ -70,7 +70,7 @@ assert m.confirm()==11 and m.dispatched()[0][1]==buttons[0]; passed()
 m.nodes[d]['name']='autoshutdown_dialog'; m.nodes[d]['children']=[buttons[0]]; m.word(buttons[0]+O['W_W'],287)
 m.paint(d); assert [b[:5] for b in m.bands]==bar_bands(inset,220,375-2*inset,80,radius) and not m.strokes and not m.rounded; passed()
 # iPod's confirminfo_dialog.bin: Cancel and OK are full-width rows, so the bar is a list's, unframed.
-m=Machine(); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm)
+m=Machine(); m.config.update(FLAT); d=m.node('dialog','confirminfo_dialog'); m.word(d+O['W_PARENT'],m.wm)
 m.word(d+O['W_W'],375); m.word(d+O['W_H'],320); m.clip=(0,0,375,320); m.top=d
 rows=[m.entry(d,208+48*i) for i in range(2)]; m.nodes[d]['children']=rows
 for r in rows: m.word(r+O['W_W'],375)
@@ -781,7 +781,7 @@ m.click(m.node('button')); assert m.selected(w)==0; passed()
 # the row's half height) reaches the LCD with only its row pixels inside the clip.
 want=[(x+7,y+20) for x,y,*_ in bar_bands(inset,0,240-2*inset,20,radius) if 10<=x+7<=229 and y+20>=30]
 assert radius<20//2 and want
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
+m=Machine(); m.config.update(FLAT); w=m.page(); m.word(w+O['W_H'],96)
 e=m.entry(w,0); m.word(e+O['W_H'],20); m.nodes[w]['children']=[e]
 sink='lcd_fill_rect'
 for name in ('canvas_get_clip_rect','canvas_set_clip_rect',
@@ -810,7 +810,7 @@ m.call(O['KEY_PREV']); assert m.selected(w)==0 and m.get(w+O['VIEW_ANIMATOR'])==
 m=Machine(); w=m.page(); assert m.confirm()==11 and not m.dispatched()
 assert m.touch()==0 and not m.dispatched(); passed()
 # Clip an oversized target to its surface without losing its selection.
-m=Machine(); w=m.page(); m.word(w+O['W_H'],96)
+m=Machine(); m.config.update(FLAT); w=m.page(); m.word(w+O['W_H'],96)
 e=m.entry(w); m.word(e+O['W_H'],140); m.nodes[w]['children']=[e]
 m.paint(w)
 assert m.selected(w)==0 and m.sel()==(inset,0,240-2*inset,140)
@@ -890,7 +890,7 @@ for seeded in ((),(0,),(0,1)):
     passed()
 
 # An inactive pane is never painted, so the outline cannot appear on two panes at once.
-m=Machine(); a,b,_,_=m.panes(96); m.nodes[a]['_ringnav_index']=0
+m=Machine(); m.config.update(FLAT); a,b,_,_=m.panes(96); m.nodes[a]['_ringnav_index']=0
 m.paint(b); assert not m.drawn()
 m.paint(a); assert m.sel()==(inset,0,240-2*inset,48); passed()
 
@@ -1128,7 +1128,7 @@ passed()
 PAST_END=(100,0,300,301,1000,2000)
 for name in ('playlist_page','display_page','playerqueue_page',
              'playermore_page','sortselect_dialog','playset_page','sysset_page'):
-    m,w,es=walk(6,5,height=96,extent=288,name=name); assert m.get(w+O['SCROLL_Y'])==192
+    m,w,es=walk(6,5,height=96,extent=288,name=name,flat=True); assert m.get(w+O['SCROLL_Y'])==192
     for gap in PAST_END:
         assert m.call(gap=gap)==11 and m.selected(w)==5 and m.get(w+O['SCROLL_Y'])==192,(name,gap,m.selected(w))
         m.paint(w,gap=0); assert m.sel()==(inset,48,240-2*inset,48),(name,gap,m.sel())   # on its row
@@ -1157,7 +1157,7 @@ for cls in (0xf003,0xff10):
     for _ in range(5): assert m.call()==11
     for gap in PAST_END: assert m.call(gap=gap)==11 and m.selected(w)==5,(cls,gap,m.selected(w))
     passed()
-m=Machine(); w,es=m.page_list(1,height=96,extent=96,name='playlist_page')
+m=Machine(); m.config.update(FLAT); w,es=m.page_list(1,height=96,extent=96,name='playlist_page')
 m.paint(w)
 for _ in range(3): assert m.call(gap=100)==11 and m.selected(w)==0
 m.paint(w,gap=0); assert m.sel()==(inset,0,240-2*inset,48)

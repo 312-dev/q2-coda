@@ -5,6 +5,7 @@ small made-up files and a fake repository.
 """
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -83,9 +84,31 @@ def test_unknown_file_runs_everything(tmp_path):
 def test_tool_maps_to_its_unit_test_and_a_build_input_to_the_payload(tmp_path):
     root = tree(tmp_path, {'test/unit/test_shelf.py': '', 'test/unit/test_theme.py': ''})
     p = affected.plan_for({'tools/shelf.py': {1}}, root).as_dict()
-    assert p['unit'] == ['test_shelf.py'] and not p['patch'] and not p['fw']
+    assert p['unit'] == ['test_docs.py', 'test_shelf.py'] and not p['patch'] and not p['fw']  # docs: its citations
     p = affected.plan_for({'tools/theme.py': {1}}, root).as_dict()
-    assert p['unit'] == ['test_theme.py'] and p['patch'] == ALL and p['fw'] == ALL
+    assert p['unit'] == ['test_docs.py', 'test_theme.py'] and p['patch'] == ALL and p['fw'] == ALL
+
+
+def test_payload_change_runs_the_unit_rules_over_every_patch_file(tmp_path):
+    """feat/row-press changed patch/tilt.c and its plan left out test_theme.py, whose rule (no literal colour
+    where a token exists) covers every patch/*.c: the queue's batch caught it, and blamed another branch."""
+    root = tree(tmp_path, {'patch/tilt.c': 'int tilt_now(void) {\n  return 0;\n}\n', 'test/fw/test_x.py': '',
+                           'test/unit/test_xiph.py': "src = ROOT/'patch/xiph.c'\n"})
+    assert affected.plan_for({'patch/tilt.c': {1}}, root).as_dict()['unit'] == ['test_art.py', 'test_docs.py',
+                                                                              'test_theme.py']
+    assert affected.plan_for({'patch/theme.h': {1}}, root).as_dict()['unit'] == ['test_docs.py', 'test_theme.py']
+    assert affected.plan_for({'patch/xiph.c': {1}}, root).as_dict()['unit'] == ['test_art.py', 'test_docs.py',
+                                                                              'test_theme.py', 'test_xiph.py']
+
+
+def test_every_folder_a_unit_test_globs_is_in_scanners():
+    """A test/unit file that reads every file of patch/, tools/ or test/ must be in affected.SCANNERS for that
+    folder, or a change there would skip its rule."""
+    root = pathlib.Path(affected.__file__).resolve().parents[2]
+    pattern = re.compile(r"(?:ROOT|parents\[2\])\s*/\s*'(patch|tools|test)'\)\s*\.r?glob\(")
+    found = {(m[1] + '/', f.name) for f in (root/'test/unit').glob('test_*.py') for m in pattern.finditer(f.read_text())}
+    assert ('patch/', 'test_theme.py') in found  # the pattern still sees the rule that was missed
+    assert found <= {(folder, test) for folder, _, test in affected.SCANNERS}
 
 
 def test_docs_only_run_the_anchor_check(tmp_path):

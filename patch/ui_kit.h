@@ -71,6 +71,8 @@ int ui_focus_shown(void);
 #define CTA_BOX (375 - 48)
 #define CTA_INSET 14 /* a label's least room inside its capsule */
 #define CTA_RING_OFF 3
+#define CTA_RING_W 2                                         /* tools/art.py CTA_RING_W */
+#define CTA_RING_H (CTA_H + 2 * (CTA_RING_OFF + CTA_RING_W)) /* tools/art.py CTA_RING_H */
 #define CTA_ACCENT_DOWN 0x1a4dad
 int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
