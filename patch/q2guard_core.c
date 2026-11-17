@@ -186,6 +186,15 @@ int heat_line(char *out, int size, const struct heat_sample *s) {
     return (int)(b.p - out);
 }
 
+int heat_note(char *out, int size, long wall, const char *what) {
+    struct put b = { out, out + size - 2 };
+    put_time(&b, wall);
+    puts_(&b, " "), puts_(&b, what);
+    *b.p++ = '\n';
+    *b.p = 0;
+    return (int)(b.p - out);
+}
+
 /* ---- the top three ---- */
 void top_three(struct top_table *prev, int n, const int *pid, const char (*name)[16],
                const unsigned *ticks, unsigned span, struct proc_top *top) {
@@ -205,7 +214,7 @@ void top_three(struct top_table *prev, int n, const int *pid, const char (*name)
         best[k] = used;
         memcpy(top[k].name, name[i], 16);
         top[k].name[15] = 0;
-        unsigned long long pct = (unsigned long long)used * 1000 / span;
+        unsigned pct = used > 4000000u ? 99999u : used * 1000u / span; /* no 64-bit division (no libgcc) */
         top[k].pct = pct > 99999 ? 99999 : (int)pct;
     }
     int m = n < TOP_PIDS ? n : TOP_PIDS;

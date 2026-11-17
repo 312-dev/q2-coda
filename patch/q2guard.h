@@ -107,6 +107,8 @@ struct heat_sample {
     const char *state;   /* guard_state */
 };
 int heat_line(char *out, int size, const struct heat_sample *s);
+/* "<time> what\n": a note of its own in the log (BOOT, WARN, POWEROFF, ...) */
+int heat_note(char *out, int size, long wall, const char *what);
 
 /* The per-process CPU over an interval: ticks from /proc/[pid]/stat (utime + stime). */
 #define TOP_PIDS 512

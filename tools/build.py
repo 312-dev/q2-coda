@@ -246,6 +246,10 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # watchdog stopped in case demo's kill was not reached, then demo once more. Any other end of demo
 # ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
+# The heat log and overheat guardian (docs/internals.md#overheat-guardian, patch/q2guard.c): BOOT_HOOK starts it.
+GUARD = 'usr/bin/q2guard'
+# --dev only: q2guard takes a temperature from /tmp/q2guard.sensor, so the emulator can play an overheat.
+GUARD_DEV_HOOK = (b' /usr/bin/q2guard ', b' /usr/bin/q2guard --dev ')
 # The boot animation's player (docs/boot.md#boot-animation, patch/splash.c): S11logo_display_shell runs it.
 SPLASH = 'usr/bin/q2splash'
 REMOTE = 'usr/bin/q2remote'
@@ -299,6 +303,11 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             mv -f /mnt/data/config.ini.new /mnt/data/config.ini && echo 1 > $d && sync; }}
         c=/mnt/data/q2-crash.log
         m=/mnt/data/q2-state
+        # q2guard (patch/q2guard.c, docs/internals.md#overheat-guardian): the heat log and overheat guardian, before
+        # demo, told how the last session ended (the state and stall records, read before they are moved below), and
+        # started again whenever it ends
+        e=clean; [ -f $m ] && e=forced; [ -f /mnt/data/q2-stall ] && e=stall
+        (while :; do nice -n -5 /{GUARD} {VERSION}{f"b{BETA}" if BETA else ""} $e; e=respawn; sleep 2; done) &
         [ -f $m ] && {{
             [ -f $c ] || {{
                 echo "== date"; date
@@ -2791,7 +2800,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     s90play = s90play.replace(*BOOT_HOOK)
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK) if dev else s90play)
+    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
+    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -2926,6 +2936,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
