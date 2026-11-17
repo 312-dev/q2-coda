@@ -5,8 +5,8 @@ class PowerMachine(ResumeMachine):
     def __init__(self,config={},files=None):
         super().__init__(files); self.config.update(config); self.writes=[]; self.records=[]  # records: the state record's
         for n in ('fflush@GLIBC_2.0','fsync@GLIBC_2.0','fileno@GLIBC_2.0','unlink@GLIBC_2.0','open@GLIBC_2.0','close@GLIBC_2.0',
-                  'read@GLIBC_2.0','write@GLIBC_2.0','access@GLIBC_2.0'):
-            self.handlers[syms[n]]='p:'+n  # read, write, access: heatguard_poll's (no q2guard here: access fails)
+                  'read@GLIBC_2.0','write@GLIBC_2.0'):
+            self.handlers[syms[n]]='p:'+n  # read, write: heatguard_poll's (the base machine's access finds no q2guard)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a=u.reg_read(REGS[0])
         if name.startswith('r:fclose') and self.open.get(a,[0,0])[1]=='w':
@@ -20,7 +20,7 @@ class PowerMachine(ResumeMachine):
         if not name.startswith('p:'): return super().hook(u,address,size,unused)
         self.calls.append((name[2:].split('@')[0],a,0,0))
         if name.startswith('p:unlink'): self.files.pop(self.text(a),None)
-        self.returns(-1 if name.startswith('p:access') else 0)
+        self.returns(0)
     def pass_(self,ms=O['CHARGE_POLL_MS']):
         self.now+=ms; self.calls=[]
         assert self.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0)==0
