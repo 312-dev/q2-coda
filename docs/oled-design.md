@@ -829,7 +829,7 @@ the gray one.
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
 Not in this form, by design: Now Playing is reachable only while something is loaded, so it has no empty screen;
-the Wi-Fi page always holds its switch, Search Again and Add Network rows; the EQ's Presets page always holds its
+the Wi-Fi page always holds its switch, Search Again, Add Network and Reset Network Settings rows; the EQ's Presets page always holds its
 four action rows (no presets is a toast); and Upload Scrobbles with nothing to send is a toast after the press.
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
@@ -1561,7 +1561,7 @@ pattern.
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
-| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right; Reset Network Settings last |
 | Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
 | A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
 | Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |

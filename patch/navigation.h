@@ -356,7 +356,9 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_usbmode_trampoline(void *, void *, void *, void *),
     stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
-    stock_online_match_trampoline(void *);
+    stock_online_match_trampoline(void *), stock_wifi_switch_row_trampoline(void *, void *),
+    stock_wifi_network_row_trampoline(void *, void *), stock_wifi_rows_trampoline(void *),
+    stock_wifi_checkstatus_trampoline(void);
 extern int scrobble_ready(void), scrobble_start(void), scrobble_poll(int *sent),
     scrobble_flag(const char *key), scrobble_value(const char *key);
 extern const char *now_tag(void *r, int field);
@@ -482,6 +484,9 @@ int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
+void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
+int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);
