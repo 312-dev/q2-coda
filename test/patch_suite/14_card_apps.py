@@ -144,17 +144,17 @@ def streaming():
 assert streaming()==[1,'Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
 m.click(rows['Configuration']); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
 SVC=['TIDAL','Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay']
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming',*SVC]
-cap=m.rows()[4]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
-def ticks(): return [switch(m,i)=='switch_on' for i in range(5,len(m.rows()))]  # Shanling's switches
+assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Download Ahead: 2 Songs','Stop Streaming Services','Show in Streaming',*SVC]
+cap=m.rows()[5]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
+def ticks(): return [switch(m,i)=='switch_on' for i in range(6,len(m.rows()))]  # Shanling's switches
 assert ticks()==[True]*7
-m.row(7); assert m.config['STREAMHIDE']=='deezer' and ticks()==[True,True,False,True,True,True,True]
+m.row(8); assert m.config['STREAMHIDE']=='deezer' and ticks()==[True,True,False,True,True,True,True]
 assert streaming()==[1,'Spotify','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL'
+m.row(11); m.row(6); assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL'
 assert streaming()==[0,'Spotify','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(7); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[False,True,True,True,True,False,True]
+m.row(8); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[False,True,True,True,True,False,True]
 assert streaming()==[0,'Spotify','Deezer','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='' and ticks()==[True]*7; passed()
+m.row(11); m.row(6); assert m.config['STREAMHIDE']=='' and ticks()==[True]*7; passed()
 # Saved: the next Streaming leaves them out, an app by its id whatever its place by name.
 m=AppMachine(); card_app(m,'deezer','name=Deezer\n'); m.config['STREAMHIDE']='soulseek,AIRPLAY,SPOTIFY'
 rows=stream_rows(m); view=m.find('scroll_view',m.top)
