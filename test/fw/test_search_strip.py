@@ -1046,11 +1046,12 @@ def clipped(fw, s):
     """The sheet painted, each text with the clip it was drawn under and its alpha."""
     from test_nav_painters import Canvas
     c = Canvas(fw)
-    c.clipped = []
+    rows: list = []
+    setattr(c, 'clipped', rows)  # read back as c.clipped
 
     def draw(cv, t, n, r, *_):
         c.draw_text(cv, t, n, r)
-        c.clipped.append((c.texts[-1][0], tuple(c.clip), c.texts[-1][2] >> 24, c.texts[-1][1]))
+        rows.append((c.texts[-1][0], tuple(c.clip), c.texts[-1][2] >> 24, c.texts[-1][1]))
         return 0
     fw.mock('canvas_draw_text_in_rect', draw)
     fw.fn('search_strip_paint', None, C.c_void_p, C.c_void_p)(s.ss.sheet, c.addr)
