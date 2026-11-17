@@ -565,9 +565,10 @@ int ipod_list_layout(void *layout, void *view) {
     void *list = view ? P(view, W_PARENT) : (void *)0;
     int settings = settings_list(list);
     int row = stream_list(view) ? geom_val(V_STREAM_ROW) : settings ? geom_val(V_SET_ROW) : 0;
-    int wifi = settings && wifi_list(list);
+    int wifi = settings && wifi_list(list), bt = settings && bt_list(list);
     if (settings) settings_layout(list);
     if (wifi) wifi_rows_pre(view);
+    if (bt) bt_rows_pre(view); /* bt_ui.c */
     unsigned n = row ? widget_count_children(view) : 0;
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
@@ -590,6 +591,7 @@ int ipod_list_layout(void *layout, void *view) {
         if (widget_get_visible(item)) set_row(item);
     }
     if (wifi) wifi_rows_post(view);
+    if (bt) bt_rows_post(view);
     if (settings && about_list(list)) about_rows(view);
     if (settings && reset_list(list)) reset_rows(view); /* settings_pages.c */
     return ret;

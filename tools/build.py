@@ -459,7 +459,7 @@ BT_MAIN = 'etc/bluetooth/main.conf'
 BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
 # The name a phone lists the Q2 as when the user chose none: BlueZ's own Name, which bt_name.c's Alias of "" falls
 # back to (docs/internals.md#bluetooth-name); a chosen one is [Q2POD] BTNAME in config.ini.
-BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2\n')
+BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2 Muse\n')
 # BlueZ 5.66's experimental D-Bus interfaces, off in stock's file: BatteryProviderManager1 among them, through which
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).
@@ -645,6 +645,10 @@ BT_PARAMS = (0x4fe1e4, 0x0411f5ef)  # config_bt_init's reset moves before the co
 # autoLinkBluetooth's bal checkPairDev also skips while the link list holds a connected link.
 BT_STATUS = (0x4fa700, 0x0320f809)
 BT_AUTOLINK = (0x4fbf2c, 0x0411fd04)
+# on_wm_idle_status's two "Bluetooth abnormal" toasts, each before its device_reboot (bal navigator_to_with_context
+# at 0x4f4278 and 0x4f448c, the name loaded in the delay slot), become jal bt_stopped_toast: Bluetooth Stopped's
+# page (patch/bt_stopped.c) says what happened instead, and Not Now keeps the loop's later passes quiet.
+BT_ABNORMAL_TOASTS = ((0x4f4278, 0x04110afe), (0x4f448c, 0x04110a79))
 # player_parsecover_thd's jalr toolsGetExternCover (lw $t9 at 0x51dcbc; Now Playing's folder art, after its
 # embedded art failed) becomes jal coverflow_player_cover, which gives ffmpeg what stock's decoder refuses.
 PLAYER_COVER = (0x51dccc, 0x0320f809)
@@ -895,6 +899,13 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('msg_lowarn', 'Line Out sets max volume,continue?', 'Line Out sets max volume, continue?'),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
+    # Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): the device lists' headers, a paired device's
+    # state, the Audio group's rows and the Quality picker's choices in the design's words; Unpair is Forget
+    ('bt_paireddev', 'Paired Device', 'My Devices'), ('bt_compatiabledev', 'Compatible Device', 'Other Devices'),
+    ('msg_paired', 'Paired', 'Not Connected'), ('msg_connecting', 'Connecting', 'Connecting…'),
+    ('bt_adjvol', 'Bluetooth Headset Volume Control', 'Headset Volume'),
+    ('btcode_ldachq', 'LDAC HQ', 'LDAC Best'), ('btcode_ldacauto', 'LDAC Connection (auto)', 'LDAC Auto'),
+    ('msg_unpairing', 'unpair?', 'Forget This Device?'), ('msg_unpaired', 'Unpaired', 'Device Forgotten'),
     # the card is an SD card in every label (docs/oled-design.md Copy): stock says TF
     ('update_tf', 'TF card update', 'SD Card Update'), ('msg_nottf', 'No TF Card Found', 'No SD Card Found'),
     ('msg_tfeject', 'TF Card Removed', 'SD Card Removed'), ('msg_tfinsert', 'TF Card Inserted', 'SD Card Inserted'),
@@ -1878,6 +1889,14 @@ FUNCTIONS = {
  'getBtLinkSize': ('int', 'void'), 'getBtLinkItem': ('int', 'int, int *, char *'),
  'getBtLinkStatus': ('int', 'char *'), 'addBtLinkItem': ('void', 'char *, int'),
  'updateBtLinkStatus': ('int', 'int, char *'), 'checkPairDev': ('int', 'char *'),
+ 'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
+ 'btmenu_item_on_click': ('int', 'void *, void *'),  # a device row's click: connect, disconnect or Unpair? (bt_ui.c)
+ # a device's page's Forget (bt_detail.c), as stock's row click does it after its Unpair? dialog's OK: the pairing
+ # removed (1, or 2 when it was the output), the output back to a jack, the list read again
+ # Guest Play's join QR codes (guest_ui.c): libqrencode, which demo imports; a QRcode is its version, width and
+ # width x width modules, bit 0 dark
+ 'QRcode_encodeString': ('void *', 'const char *, int, int, int, int'), 'QRcode_free': ('void', 'void *'),
+ 'handleBluetoothPair': ('int', 'int'), 'check_outputdevice': ('int', 'int, int'), 'getSearchResult': ('int', 'void'),
  'btctl_create_daemon_thread': ('int', 'void *'),
  'initBluetoothParam': ('void', 'void'),
  'btctl_set_prompt_callback': ('void', 'void *, void *'),
@@ -1964,6 +1983,7 @@ PRIVATE_FUNCTIONS = {
     "mcl_preload": HOOKS['mcl_preload'][0],
     "mcl_open_preload": HOOKS['mcl_open_preload'][0],
     "btmenu_rows": HOOKS['btmenu_rows'][0],  # systemset_bluetooth_page's list: rows, paired, found
+    "btmenu_item_on_click": 0x4c43a4,  # a device row's click, by its button's name (bt_ui.c bt_stock_click)
     "mcl_shuffle_pick": 0x5ba7d0,
     "album_row": 0x506e94,  # getAllAlbum's sqlite3_exec callback: id, album, songer, fileurl to a record
     "folder_refresh": 0x531efc,  # folder_page's navbar and table from p_deque_showlist (its init, back)
@@ -2002,7 +2022,10 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_wififlag', 'wifi_initstatus', 'wifi_connectstatus', 'g_airplayflag', 'g_dlnaflag',
            'g_synclinkflag', 'g_syncLink_status', 'g_wifitransport_flag', 'g_syncnettime_flag',
            'g_forcerefresh_flag',  # Now Playing's page update writes the title and artist again (catalogue.c np_done)
-           'wifi_searchtime']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
+           'wifi_searchtime',
+           # Settings > Bluetooth (bt_ui.c): its scan's countdown (not 0 while it runs, 1 as it ends), a flag that
+           # has the page's timer rebuild its list, and Quality's choice (the btcode_* row, 0 LDAC Best to 7 SBC)
+           'bt_searchtime', 'g_btsetting_flag', 'g_btcoding']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
 # Audited stock browsing state, deque pointers, art locks, the status bar widget
 # (system_bar_init stores it), the playing cover's track path and the playing track's tags as
 # player_get_id3info parsed them; sizes are checked against the ELF.
@@ -2024,13 +2047,15 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'g_dropdown_menu_state': 4,  # Quick Settings: 1, 2 while it slides or follows a swipe, 3 open
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
-                'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
+                'wifi_showlist': 4,  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
+                'pdeq_btshowlist': 4}  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
-                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'carpair_page', 'artistrows_page',
+                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'artistrows_page',
                    'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page',
-                   'swupdate_page', 'empty_page'}
+                   'swupdate_page', 'empty_page', 'btdevice_page', 'btstopped_page',
+                   'guestnp_page', 'guestset_page', 'guesttrust_page', 'hotspot_page', 'guestconnect_page', 'guestfail_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
 # The stock EQ preset page and the images only it and the stock equalizer page show: the PEQ
 # editor clears that page's widgets on init and never binds the preset button, so none can load.
@@ -2077,7 +2102,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2115,7 +2140,7 @@ def compile_payload(out):  # pragma: no mutate block
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
-        '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
+        '--undefined=headset_status_register', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
         *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
         '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -2559,6 +2584,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           (0x8f99fc1c, 0x0320f809, 0x2484c180), 'Bluetooth status: expected btctl_device_status_callback(0x4fc180)')
     patch_word(patched, *BT_STATUS, jal(ps['headset_status_register']), 'Bluetooth: incoming link during a connect')
     patch_word(patched, *BT_AUTOLINK, jal(ps['headset_bt_autolink']), 'Bluetooth: auto-link keeps an incoming link')
+    for site, stock in BT_ABNORMAL_TOASTS:
+        patch_word(patched, site, stock, jal(ps['bt_stopped_toast']), 'Bluetooth Stopped: its page, not the toast')
     patch_word(patched, *SCAN_REFRESH, jal(ps['ringnav_scan_refresh']), 'folder scan refreshes existing tags')
     patch_word(patched, *TAG_TEXT, jal(ps['ringnav_gbk_tag']), 'tag text GBK only when it reads as GBK')
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GENRE_COPY[0] - 4))[0] == 0x8f99f680,

@@ -351,6 +351,7 @@ static int sel_height(menu_t *m) {
     if (!end || m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
+    end -= lr_edit_room(m->w); /* an editor's list ends higher, over its hint (library_edit.c) */
     return end - y < m->height ? end - y : m->height;
 }
 
