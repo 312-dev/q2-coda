@@ -180,14 +180,20 @@ void tilt_poll(void) {
 /* While the bar leans, before it paints: the canvas's clip (saved in old) widened up and down to
  * the lean's box (tilt.box, which tilt_poll repaints), into the black under the status row's
  * glyphs, so the lift, growth and shadow of a list's first or last row are not cut at the list's
- * edge. 0, the clip untouched, when nothing leans. */
-int tilt_clip(void *canvas, int *old) {
+ * edge; never past frame, the clip the list's own surface clip was cut from (row_paint.c
+ * clip_surface: this pass's dirty area). Past it the bar would cover rows' words this pass never
+ * paints again: any small repaint over the list while the bar leans (the art pane's drift, a
+ * clock tick) left the lit row's words under the bar on every other frame. 0, the clip
+ * untouched, when nothing leans. */
+int tilt_clip(void *canvas, int *old, const int *frame) {
     if (!tilt.p || !tilt.win) return 0;
     canvas_get_clip_rect(canvas, old);
     int wy = I(tilt.win, W_Y), top = wy + tilt.box.y, foot = top + tilt.box.h;
     if (top < 0) top = 0;
     int y0 = old[1] < top ? old[1] : top, y1 = old[1] + old[3] > foot ? old[1] + old[3] : foot;
-    int clip[4] = { old[0], y0, old[2], y1 - y0 };
+    if (y0 < frame[1]) y0 = frame[1];
+    if (y1 > frame[1] + frame[3]) y1 = frame[1] + frame[3];
+    int clip[4] = { old[0], y0, old[2], y1 > y0 ? y1 - y0 : 0 };
     canvas_set_clip_rect(canvas, clip);
     return 1;
 }

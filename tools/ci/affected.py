@@ -21,7 +21,10 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   over patch/, test_docs.py's citations in patch/, tools/ and test/) runs that test too;
 - tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
   test/patch.py and test/fw;
-- a test file runs itself.
+- a test file runs itself;
+- a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
+  pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
+  rejected there. They are run as gate.py defines them (`gate.full_suite`).
 
 Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
 """
@@ -36,6 +39,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'/'ci'))
+import gate  # noqa: E402
 import patch_shards  # noqa: E402
 import q2ci  # noqa: E402
 
@@ -43,6 +47,12 @@ ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
+# gate.py's type-check suites, planned in `other`: a .py under tools/ or test/unit/ (or the mypy config)
+# needs mypy-tools, one under test/fw/ needs mypy-fw. A merge batch runs them, so a branch that skips them
+# here is rejected there.
+MYPY_TOOLS, MYPY_FW = 'mypy-tools', 'mypy-fw'
+MYPY_SUITES = (MYPY_TOOLS, MYPY_FW)
+MYPY_CONFIG = 'pyproject.toml'
 INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
 # A change there runs the test whatever else the file maps to. tools/ci/test_ci.py checks that each folder a
@@ -67,7 +77,7 @@ class Plan:
 
     def everything(self, why):
         self.unit, self.fw, self.patch = ALL, ALL, ALL
-        self.other.add('test/build.py')
+        self.other.update({'test/build.py', *MYPY_SUITES})
         self.why.append(why)
 
     def add(self, suite, parts, why):
@@ -158,12 +168,21 @@ def suite_starts(root):
     return out
 
 
+def mypy_argv(name, python):
+    """The command gate.py runs for the type-check suite `name`."""
+    return gate.full_suite(name, python, pathlib.Path('.'))().argv
+
+
 def plan_for(changes, root=ROOT, patch_source=None):
     """A Plan for changes: {path: set of changed line numbers in the new file (empty if deleted or unknown)}."""
     p = Plan()
     for path, lines in sorted(changes.items()):
         parts = pathlib.PurePath(path).parts
         name, stem, suffix = parts[-1], pathlib.PurePath(path).stem, pathlib.PurePath(path).suffix
+        if suffix == '.py' and (path.startswith(('tools/', 'test/unit/')) or path == MYPY_CONFIG):
+            p.add('other', {MYPY_TOOLS}, f'{path}: type-checked by {MYPY_TOOLS}')
+        if suffix == '.py' and path.startswith('test/fw/') or path == MYPY_CONFIG:
+            p.add('other', {MYPY_FW}, f'{path}: type-checked by {MYPY_FW}')
         for folder, suffixes, test in SCANNERS:
             if path.startswith(folder) and (suffixes is None or suffix in suffixes):
                 p.add('unit', {test}, f'{path}: {test} checks every file of {folder}')
@@ -281,7 +300,9 @@ def run(plan, build, python):
         else:
             go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
-        if other.startswith('tools/ci/test_'):
+        if other in MYPY_SUITES:
+            go(other, mypy_argv(other, python))
+        elif other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))

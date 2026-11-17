@@ -317,11 +317,23 @@ static void ovm_apply(void) {
     for (int i = 0; i < OVM_BOUND; ++i)
         if (bound[i].w) widget_set_opacity(bound[i].w, (unsigned)ovm_opacity(bound[i].o));
 }
+static void (*mo_hooks[MO_HOOKS])(void) __attribute__((section(".scratch")));
+void motion_hook(void (*fn)(void)) {
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i] == fn) return;
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (!mo_hooks[i]) {
+            mo_hooks[i] = fn;
+            return;
+        }
+}
 static int mo_frame(const void *info) {
     (void)info;
     ovm_apply();
     void *top = window_manager_get_top_window(window_manager());
     if (top) widget_invalidate_force(top, (void *)0);
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i]) mo_hooks[i]();
     if ((int)(mo.until - (unsigned)time_now_ms()) > -MO_FRAME_MS) return 8; /* RET_REPEAT */
     mo.timer = 0;
     return 7; /* RET_REMOVE */

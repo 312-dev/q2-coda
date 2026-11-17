@@ -197,7 +197,10 @@ All lists share one grid.
   - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
     glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
     digits' baseline, 3 to 11 px tall and moving on offset sines (a 1.25 s loop); paused, the pause, two 3 px bars
-    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. Only the box repaints as
+    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. On pause the bars stop and
+    cross-dissolve into the pause over 250 ms, `cubic_out`, and back on play, the bars moving again once it ends;
+    the dissolve stays in the 10 x 11 box, so nothing else in the row moves; Reduce Motion swaps them at once (the
+    user's, 2026-11-16 21:52). Only the box repaints as
     the bars move. A tap on it opens Now Playing (`mock_status_bars.py`, 2026-11-15; `mock_status_icons.py`,
     2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
     row](#homes-first-row)).
@@ -1402,7 +1405,7 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
 - **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
   from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
-  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address to type ("Address
+  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address for a phone that does not list it ("Address
   192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
   connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
   for Q2 Muse Remote to scan one.
@@ -1464,14 +1467,14 @@ interruptible: a turn mid-run starts from where it is.
 - **One helper** (`patch/ui_kit.h`, Motion): every animation takes its duration, curve and frames from it. A
   motion has a kind: *spatial* (a slide, a scale, a spring, a lean), *decor* (a loop that says nothing new: the
   charging sweep, Up Next's level bars) or *feedback* (a finger followed, a value or progress: swipe back, the volume
-  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window,
-  and it stops itself after the last one ends.
+  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window
+  (and the status row's play box, through `motion_hook`), and it stops itself after the last one ends.
 - **Reduce Motion** (Settings > Display, the last row: a switch captioned "Fades in place of slides, zooms and
   bounces", `IPOD REDUCEMOTION`, off unless chosen; it applies from the next animation, no restart). On: a page's
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
