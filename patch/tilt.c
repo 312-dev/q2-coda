@@ -112,6 +112,11 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
      * grows down there instead of being cut (tilt_clip widens the clip for the rest) */
     int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window, on screen */
     if (oy + bar->y < wy) bar->y = wy - oy;
+    /* the box tilt_poll paints again reaches the bar's foot and its shadow wherever it now is: moved
+     * down from a row raised above its window (Home's Split list, split_art_up) it can stand up to
+     * that rise into the next row, past the MARGIN round its row */
+    int foot = y + bar->y + bar->h + TILT_MARGIN;
+    if (foot > tilt.box.y + tilt.box.h) tilt.box.h = foot - tilt.box.y;
     for (int i = TILT_SHADOW; i > 0; --i) { /* outermost first, each fainter */
         rect_t s = { bar->x - i, bar->y + i * 2 * e / 256, bar->w + 2 * i, bar->h + i };
         unsigned alpha = (unsigned)(TILT_SHADOW_A * e / 256 / (i + 1));
