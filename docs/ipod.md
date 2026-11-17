@@ -251,8 +251,10 @@ timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows 
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
 Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
-draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
-window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
+draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top, as Home's
+paint draws nothing outside its window; while a page slides over Home, from `page_parallax.c`'s
+paint of the bar after Home's snapshot, drifted and darkened with it and left of the sliding page,
+whose title alone shows over it: [internals](internals.md#page-parallax)). OLED's `split_art_up` is the
 bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
 stand over it. The main menu rises too: with the clock at the row's right, its left side is empty,
 so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
@@ -622,7 +624,8 @@ drifts 30% of the width left and darkens, and Return reverses that over 200 ms; 
 not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
-can hold the UI thread), Cover Flow (its open loads the albums and covers), the dialogs and quick
+can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
+[internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
 assets: Tidal and the other online pages, Wi-Fi transfer and the firmware download. Moving between
 folders reloads the folder page in place, so only opening and leaving that page slides. Stock

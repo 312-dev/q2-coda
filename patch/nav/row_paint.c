@@ -980,6 +980,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == st.np_win) np_modes(w, canvas);
     np_stream_paint(w, canvas); /* a server song loading: the times row's spinner (np_stream.c) */
     coverflow_home_clip(w, canvas, 0);
+    bar_title_fades(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */

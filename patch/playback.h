@@ -33,6 +33,11 @@ void playback_save(void);
 void playback_clear(void);
 /* mclLoadPlayList's loads so far: a queue loaded later is another one (addon.c stream_queue) */
 extern unsigned playback_loads;
+/* The user's moves to another song in the queue playing so far (Next, Previous, a group skip, an Up
+ * Next or car remote pick; playback_pick): one since a card app's .play means the song it waits for
+ * is no longer wanted (addon.c stream_start) */
+extern unsigned playback_picks;
+void playback_pick(void);
 #define WHEEL_PCT_MIN 10 /* the slowest: 140 units a tick, 0.7 of a turn */
 int wheel_pct(void); /* Wheel sensitivity, WHEEL_PCT_MIN-200%, 50 unless set */
 void wheel_set_pct(int n);

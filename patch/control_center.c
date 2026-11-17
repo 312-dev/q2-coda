@@ -5,7 +5,7 @@
  * cc_wifi), Bluetooth, AirPlay, Car Remote, Smart Wi-Fi and EQ. On the right Now Playing, the
  * song's cover beside its title and artist over Previous, Play/Pause and Next; under it a
  * Brightness slider and under that a Volume slider, ending level with the block; and a grab bar
- * under both, where the swipe up that closes it starts. Buttons Lock keeps its hardware hold,
+ * along the sheet's foot, where the swipe up that closes it starts. Buttons Lock keeps its hardware hold,
  * Night Shift and Sleep Timer their Settings rows, Guest Play its Bluetooth row.
  *
  * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth switches, at opacity 0 under
@@ -39,8 +39,9 @@ extern unsigned now_cover_written(const char *file);                           /
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc4_tight.py draws it at 1x: one
  * spacing token, CC_GAP, between every two parts (the status row's glyphs and the blocks, the
- * block and the right column, Now Playing and the sliders, the sliders, the blocks and the grab
- * bar) and round the toggles inside their block */
+ * block and the right column, Now Playing and the sliders, the sliders) and round the toggles
+ * inside their block. The grab bar is not among them: it stands CC_GRAB_INSET off the sheet's
+ * foot, the screen's, wherever the blocks end. */
 #define CC_X0 20
 #define CC_X1 355
 #define CC_Y0 38       /* the status row's glyphs' foot (y 28) + CC_GAP */
@@ -72,7 +73,11 @@ extern unsigned now_cover_written(const char *file);                           /
 #define CC_TRANSPORT_DX 46 /* Previous and Next either side of Play/Pause */
 #define CC_SLIDER_Y (CC_Y0 + CC_NOW_H + CC_GAP)
 #define CC_SLIDER_H 38
-#define CC_GRAB_Y (CC_Y0 + CC_BLOCK_H + CC_GAP)
+#define CC_H 320       /* the sheet's height: the page spans the screen, to its foot */
+#define CC_GRAB_W 36   /* the grab bar, as the page sheets' (menu_modal.c SH_GRAB_Y) */
+#define CC_GRAB_H 5
+#define CC_GRAB_INSET 6 /* its gap to the sheet's edge, as the page sheets' from their top */
+#define CC_GRAB_Y (CC_H - CC_GRAB_INSET - CC_GRAB_H)
 #define CC_WIFI_SEEN "_cc_wifi" /* the Wi-Fi circle's glyph as last drawn (cc_wifi), + 2 */
 #define CC_WIFI_POLL_MS 1000    /* stock updates the link about once a second */
 #define CC_RING 3               /* the focus ring's outer edge past the control, 2 px wide */
@@ -402,7 +407,7 @@ void cc_paint(void *win, void *canvas) {
         rect_t r = cc_box(i);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, i == CC_PLAY ? 30 : CC_ICON);
     }
-    rect_t grab = { 375 / 2 - 18, CC_GRAB_Y, 36, 5 };
+    rect_t grab = { 375 / 2 - CC_GRAB_W / 2, CC_GRAB_Y, CC_GRAB_W, CC_GRAB_H };
     fill_box(canvas, &grab, RGBA(CC_GRAB), 3);
     I(canvas, CANVAS_Y) -= dy;
     st.paint_w = win;
@@ -524,7 +529,7 @@ void cc_open(void *win) {
                                           "label_playset", "label_sysset",  "image0",
                                           "image1" };
     void *c = widget_lookup(win, "view_menu", 1);
-    if (c) widget_move_resize(c, 0, 0, 375, 320);
+    if (c) widget_move_resize(c, 0, 0, 375, CC_H);
     /* the names' scrollers (cc_label), under the buttons made below, so no tap lands on one */
     for (int i = 0; i <= CC_EQ; ++i) {
         rect_t r = cc_box(i);

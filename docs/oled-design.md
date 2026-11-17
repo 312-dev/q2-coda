@@ -1134,8 +1134,7 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
 `design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
 centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
-and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, the blocks and the grab
-bar, and round the toggles inside their block.
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, and round the toggles inside their block.
 
 - **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
   26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
@@ -1166,7 +1165,7 @@ bar, and round the toggles inside their block.
 - **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 258, 10 px under the blocks, where the swipe up that closes the page starts.
+- **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
 - **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
   Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
   guest plays).
@@ -1448,12 +1447,19 @@ interruptible: a turn mid-run starts from where it is.
 
 - **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
   220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
-  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once, and over Home in Split
+  shows only over the sliding page, fading as it goes, while Home's raised rows and art drift and darken with Home
+  in the row beside it (`PAGE_SLIDE_MS`, stock's
   window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
   in over the same 220 ms.
 - **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
+- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
+  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
+  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
+  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
   ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
@@ -1474,7 +1480,7 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, and a track change and the cover into Now Playing cross-fade in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and

@@ -457,16 +457,19 @@ void list_fades(void *canvas, int top, int bottom, int end, int foot, int above,
 }
 
 /* OLED's fades over Home's main list, list's top at screen y list_y, its columns 0 to cols (Split's
- * left of the art): at the top once it has scrolled, at the foot while rows lie past the rest. In
+ * left of the art), drawn shift columns left of there (Home drifting under a window's slide,
+ * coverflow.c coverflow_home_strip): at the top once it has scrolled, at the foot while rows lie
+ * past the rest. In
  * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,
  * so a row dissolves the same way in both; in Full they run straight across. The selected row is
  * never faded. Each row of the band one fill per FADE_COL columns in a corner, inside the canvas's
  * clip. */
-void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {
     void *view = list && widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     int foot, rest = home_rest(view, &foot);
     if (!rest || !P(canvas, CANVAS_LCD)) return;
-    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y); /* its origin on the screen */
+    /* the canvas origin on the screen, moved to where Home's column 0 is drawn */
+    int ox = I(canvas, CANVAS_X) + shift, oy = I(canvas, CANVAS_Y);
     int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest,
         foot_y = lr_edit_foot(view);
     if (!above && !below) return;

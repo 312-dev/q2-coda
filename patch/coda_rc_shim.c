@@ -320,7 +320,7 @@ static int cr_jump(unsigned at, int id) {
         return 0;
     }
     if (check_forbid_play_no_headset(0)) return 1;
-    press_stamp();
+    playback_pick();
     player_start_queue((int)at);
     return 0;
 }

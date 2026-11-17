@@ -612,6 +612,34 @@ int bar_title_fits(void *label) {
     return canvas_measure_text(canvas, s, n) <= I(st.bar_title, W_W) - 4;
 }
 
+/* The title's clip before a slide's fade (bar_title_fades), and whether one is on */
+static struct {
+    int on, clip[4];
+} title_fade __attribute__((section(".scratch")));
+/* Under a window's slide over Home's band in Split (coverflow_home_slide), the bar's title is the
+ * sliding page's: it shows only over that page, faded as far as the page is out, so Home's band
+ * beside it keeps no title. It stays in place, clear of the status row's glyphs. Begun in the
+ * title's background paint (begin 1) and ended in its border paint. */
+static void bar_title_fades(void *w, void *canvas, int begin) {
+    int open, clip[4];
+    float percent;
+    if (!w || w != st.bar_title) return;
+    if (!begin) {
+        if (title_fade.on) {
+            canvas_set_global_alpha(canvas, 0xff);
+            canvas_set_clip_rect(canvas, title_fade.clip);
+        }
+        title_fade.on = 0;
+        return;
+    }
+    title_fade.on = 0;
+    if (!coverflow_home_slide(&open) || !parallax_slide(&percent)) return;
+    clip_within(canvas, title_fade.clip, clip, open, 0, 375 - open, 320);
+    canvas_set_clip_rect(canvas, clip);
+    canvas_set_global_alpha(canvas, (unsigned)(0xff * percent + 0.5f));
+    title_fade.on = 1;
+}
+
 /* Stock paints a widget's background before its children, so the bar sits behind the rows.
  * The selection work for the surface happens here, once per frame, instead of in the border hook;
  * a BUTTONS dialog is itself top-level. Home's art is clipped to its panel until the border hook.
@@ -620,6 +648,7 @@ int bar_title_fits(void *label) {
  * Home's art is also checked when Home is painted under another window. */
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
+    bar_title_fades(w, canvas, 1);
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
     swipe_back_paint(w, canvas); /* the page under a swipe back, left of the page */
@@ -665,6 +694,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         void *page = feedback_top();
         coverflow_home_bar(canvas, page);   /* OLED's art in the bar */
         coverflow_home_strip(canvas, page); /* and Split's list */
+        coverflow_home_dim(canvas, page);   /* both darkened as Home under a slide */
         artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
         np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
