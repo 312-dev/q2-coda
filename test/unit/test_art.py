@@ -221,31 +221,51 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
 
 
 @pytest.mark.parametrize('half, primary, secondary, unlit', [('d', 0xffffff, 0xababab, 0x3a3a3c), ('l', 0, 0x5c5c5c, 0xc7c7cc)])
-def test_the_status_rows_glyphs_share_one_optical_size_in_each_halfs_ink(half, primary, secondary, unlit):
-    """status_row.c's slots (STATUS_GLYPHS): Wi-Fi's levels light their arcs over the rest of wifi-high in STATUS_UNLIT,
-    the full glyph's ink one box in every level, so the shape keeps its width; wifi-x and the headset's Bluetooth in
-    Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last; every one a
-    STATUS_PX box with STATUS_INK px of ink on its longer side (the padlock's 11), centred."""
+def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary, unlit):
+    """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
+    so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
+    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
+    Bluetooth rune (dim while connecting), headphones and the car sized by their height (wifi-x and the car are wider
+    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
     got = art.images(theme.builtins()[0])
-    def ink(name):
+    def ink(name, cut=64):
         w, h, at = pixels(got[f'oled_status_{name}_{half}'])
-        lit = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > 64]
+        lit = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > cut]
         colours = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3] > 250}
         return (w, h), lit, colours
     rgb = lambda c: tuple(c >> s & 255 for s in (16, 8, 0))  # noqa: E731
+    box = lambda lit: (min(x for x, _ in lit), max(x for x, _ in lit), min(y for _, y in lit), max(y for _, y in lit))  # noqa: E731
     boxes = set()
     for level in (1, 2, 3):
-        size, lit, colours = ink(f'wifi_{level}')
-        boxes.add((min(x for x, _ in lit), max(x for x, _ in lit), min(y for _, y in lit), max(y for _, y in lit)))
+        size, lit, colours = ink(f'wifi_{level}', 8)
+        boxes.add(box(lit))
         near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
-        assert size == (art.STATUS_PX,) * 2 and near(primary) and near(unlit) == (level < 3)
-    assert len(boxes) == 1 and 10 <= max(b - a + 1 for a, b in (list(boxes)[0][:2], list(boxes)[0][2:])) <= 12
-    for name in ('wifi_x', 'bt'):
-        size, lit, colours = ink(name)
-        assert size == (art.STATUS_PX,) * 2 and colours == {rgb(primary)}
-        assert 10 <= max(max(x for x, _ in lit) - min(x for x, _ in lit), max(y for _, y in lit) - min(y for _, y in lit)) + 1 <= 12
+        assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
+    assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
+    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_PX), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+                    ('btdim', art.STATUS_PX)):
+        size, lit, colours = ink(name, 8)
+        assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
+        x0, x1, y0, y1 = box(lit)
+        assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
+    x0, x1, _, _ = box(ink('wifi_x', 8)[1])
+    assert x1 - x0 + 1 == 14  # wider than its 11 rows
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(secondary)} for f in range(art.STATUS_SPIN))
+
+
+def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
+    """iOS's fan up its centre line from the apex on the ink's bottom (the clock's baseline): the dot, a 1.4 px gap,
+    a band, a gap, a band, each as STATUS_FAN cuts them (rows more than half covered)."""
+    w, h, at = pixels(art.status_wifi(3, 0xffffff, 0x3a3a3c))
+    column = [at(7, y)[3] + at(8, y)[3] for y in range(h)]  # the two columns either side of the centre line
+    on = [y for y in range(h) if column[y] > 255]
+    runs, start = [], on[0]
+    for a, b in zip(on, on[1:] + [None]):
+        if b != a + 1:
+            runs.append((start, a))
+            start = b
+    assert runs == [(1, 2), (5, 6), (8, 11)]  # outer band, middle band, the dot down to row 11, the ink's bottom
 
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])

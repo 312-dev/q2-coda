@@ -2973,8 +2973,8 @@ def test_an_untitled_page_s_clock_is_centred_across_the_status_row(fw, st):
 def test_a_titled_page_s_clock_sits_beside_the_play_state_and_the_title_ends_short_of_it(fw, st):
     row = StatusRow(fw, st, 'A Long Album Name That Runs On Past The Clock')
     clock = row.place()
-    edge = 322 - 4 - 10 - 6  # the clock's text ends here, 6 px left of the level bars (4 px left of the battery,
-    # 10 wide), hscroll_label's 2 px margin inside its box
+    edge = 322 - 6 - 10 - 7  # the clock's text ends here, CLOCK_BESIDE 7 px left of the level bars (SR_GAP 6 px
+    # left of the battery, 10 wide), hscroll_label's 2 px margin inside its box
     assert clock.box[0] + clock.box[2] - 2 == edge and clock.box[2] == CLOCK_W + 4
     title = row.w['label_title']
     assert title.box[0] + title.box[2] - 2 == edge - CLOCK_W - 12  # its ellipsis 12 px clear of the widest clock
@@ -2988,7 +2988,7 @@ def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
     art = row.ui.add('view', row.ui.top, (196, 0, 179, 262), 'art')
     home.art, home.win = art.addr, row.ui.top.addr
     clock = row.place()
-    assert clock.box[0] + clock.box[2] - 2 == 322 - 4 - 10 - 6
+    assert clock.box[0] + clock.box[2] - 2 == 322 - 6 - 10 - 7
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
     home.sl[0].tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
     clock = row.place()

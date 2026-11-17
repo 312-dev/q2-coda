@@ -585,6 +585,12 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* --dev builds: the emulator's stand-in for Wi-Fi, a headset, a charger; -1 for none */
+#if Q2POD_DEV
+int status_fake(char key);
+#else
+#define status_fake(key) (-1)
+#endif
 /* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
  * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
 void charge_plugged(void), charge_limited(void), usb_charger_in(void);
