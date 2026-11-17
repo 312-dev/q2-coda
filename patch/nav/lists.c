@@ -349,8 +349,8 @@ static int sel_height(menu_t *m) {
     /* a menu sheet's rows end on the list end, the screen's top theirs (menu_modal.c) */
     if (modal_rows_of(m->w)) return modal_sel_height(m->w, m->height);
     /* the confirmation card's answers stand whole inside the card, wherever it sits: cut at the
-     * list end, which crosses the card's answers, the second answer would scroll the first under the
-     * bar and the wheel could never light it (feedback.c confirm) */
+     * list end, which crosses the card's answers, the second answer would scroll the first under
+     * the bar and the wheel could never light it (feedback.c confirm) */
     if (confirm_surface(m->w)) return m->height;
     if (!end || m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
