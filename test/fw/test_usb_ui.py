@@ -379,3 +379,23 @@ def test_a_choice_then_an_unplug_stops_the_probe_only_once(fw):
     u.ui.click(u.row(page, 'Charge Only'))
     u.unplug()
     assert u.commands.count('storage_config.sh stop >/dev/null 2>&1') == 1
+
+
+def test_a_dev_build_probes_with_the_adb_gadget_already_on_the_controller(fw_dev):
+    """The ADB gadget bound when the cable comes is the probe: a computer configuring it gets the chooser with no
+    storage gadget swapped in, so USB Debugging and Charge Only keep the one enumeration the plug made."""
+    u = Usb(fw_dev)
+    u.files.files['/sys/kernel/config/usb_gadget/q2adb/UDC'] = b'13500000.otg\n'
+    page = (u.plug(), u.page('usbchoose_page'))[1]
+    assert page and not u.commands
+    u.ui.click(u.row(page, 'USB Debugging'))
+    assert u.page('usbdebug_page') and not u.commands
+    u.unplug()
+    assert not u.commands
+
+
+def test_a_dev_build_whose_adb_gadget_is_not_back_yet_probes_with_storage(fw_dev):
+    u = Usb(fw_dev)
+    u.files.files['/sys/kernel/config/usb_gadget/q2adb/UDC'] = b'\n'
+    u.plug(host=False)
+    assert u.commands == ['storage_config.sh start /dev/null >/dev/null 2>&1']

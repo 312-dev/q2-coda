@@ -103,7 +103,7 @@ So with a cable in, the Q2 is a USB drive (or the DAC) exactly as stock makes it
 
 Why not one composite storage + adb gadget: it would change the gadget stock's USB storage and its eject handling (`usb_poll`) rely on, adb would come and go with the drive, and while the card is shared the Q2 has unmounted it and its UI sits on USB Connected, which is little use for development. Its own gadget leaves storage and the DAC untouched. Its own USB IDs matter on Windows, which keys its driver choice, and whether it asks for Microsoft OS descriptors at all (the answer is cached), on the vendor, product and `bcdDevice`.
 
-The USB chooser on plug-in ([internals: USB pages](internals.md#usb-pages)) makes **USB Debugging** the way to this gadget: its probe's stop hands the controller back to `q2adb`, and its page's Stop parks it until the cable comes out.
+The USB chooser on plug-in ([internals: USB pages](internals.md#usb-pages)) makes **USB Debugging** the way to this gadget. With `q2adb` on the controller when the cable comes, it is the chooser's probe ([internals: USB cable events](internals.md#usb-cable-events)): the computer sees one device, USB Debugging and Charge Only keep it, and only Transfer Files or USB Audio park it for stock's gadget. When it is not back yet (within about two seconds of a cable out after Transfer Files, while adbd restarts), stock's storage gadget probes instead, and its stop hands the controller back to `q2adb`. USB Debugging's page's Stop parks it until the cable comes out; the cable out stops a probe's storage gadget even when the chooser was never answered.
 
 ### Authorization
 

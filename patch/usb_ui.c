@@ -16,7 +16,10 @@
  *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop pill
  *   (Centre, as Return, leaves the mode). Charge Only stops the probe. USB Debugging stops it too,
  *   which in a --dev build hands the controller back to the ADB gadget (docs/adb.md), and opens
- *   its own mode page, whose Stop parks the ADB gadget.
+ *   its own mode page, whose Stop parks the ADB gadget. A --dev build whose ADB gadget is already
+ *   on the controller probes with it (usb_adb_bound): no storage gadget, nothing to stop.
+ * - The cable is seen in the UI pass after its edge (usb_event.c, usb_ui_poll), and a cable out
+ *   stops the probe's gadget, answered or not (docs/internals.md#usb-cable-events).
  * - A remembered choice skips the chooser: Transfer Files and USB Audio follow the tile, so the
  *   tile still changes them; Charge Only and USB Debugging hold until the tile is changed.
  * - Toasts: Unplugged, OK to Disconnect (the computer's eject while USB mode is not on top) and
@@ -28,6 +31,7 @@
 #define USB_PROBE_MS 3000 /* a computer configures a gadget within a second or two */
 #define USB_PROBE_LOOK_MS 100 /* how often the waiting probe reads the UDC's state */
 #define USB_UDC "/sys/class/udc/13500000.otg/state"
+#define USB_ADB_UDC "/sys/kernel/config/usb_gadget/q2adb/UDC" /* --dev: the ADB gadget's controller */
 #define USB_PICK_KEY "USBPICK" /* [Q2POD]: the remembered choice, USB_* */
 #define USB_PICK_MODE "USBPICKMODE" /* ... and the tile's mode when it was saved */
 enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
@@ -74,6 +78,18 @@ static int usb_host(void) {
     fread(s, 1, sizeof s - 1, f);
     fclose(f);
     return !memcmp(s, "configured", 10);
+}
+
+/* --dev builds: the ADB gadget is on the controller (patch/adb_gadget.sh bind), so a computer at the
+ * cable sees it at once and its answer is the probe's: no storage gadget swapped in and out. */
+static int usb_adb_bound(void) {
+    if (!Q2POD_DEV) return 0;
+    char s[8] = { 0 };
+    void *f = fopen(USB_ADB_UDC, "rb");
+    if (!f) return 0;
+    fread(s, 1, sizeof s - 1, f);
+    fclose(f);
+    return s[0] > ' ';
 }
 
 /* A toast, shown by the next loop pass (feedback.c toast_later): never inside stock's USB pass,
@@ -398,8 +414,10 @@ void usb_ui_status(void) {
         } else {
             g_usblink_status = USB_LINK_HELD;
             if (pick == USB_ASK) {
-                system("storage_config.sh start /dev/null >/dev/null 2>&1"); /* no medium: a probe */
-                u.probing = 1, u.probe_up = 1, u.probe_at = (unsigned)time_now_ms();
+                /* no medium: a probe; in a --dev build the ADB gadget already there is one */
+                u.probe_up = !usb_adb_bound();
+                if (u.probe_up) system("storage_config.sh start /dev/null >/dev/null 2>&1");
+                u.probing = 1, u.probe_at = (unsigned)time_now_ms();
             } else {
                 u.choice = pick;
                 usb_charger_in();
