@@ -9,8 +9,8 @@ import pytest
 
 import host
 from test_coverflow import ART, CX, TOP, VIEW_H, VIEW_W, Ring, api, exact, libc, style  # noqa: F401 (fixture)
-from test_nav_paint import (ART_RADIUS, GEOMETRY, WHITE, Canvas, bitmaps, boot_set, fill, image_add, layout,  # noqa: F401 (fixtures)
-                            st, theme)
+from test_nav_paint import (  # noqa: F401 (fixtures)
+    ART_RADIUS, GEOMETRY, WHITE, Canvas, bitmaps, boot_set, fill, image_add, layout, st, theme)
 
 sys.path.insert(0, str(host.ROOT/'tools'))
 import art  # noqa: E402
@@ -33,7 +33,8 @@ def raster(fills, w, h, under=0x000000):
             for x in range(fx, fx + fw_):
                 assert 0 <= x < w and 0 <= y < h, (x, y)
                 old = px[y][x]
-                px[y][x] = sum(((rgb >> s & 255) * a + (old >> s & 255) * (255 - a) + 127) // 255 << s for s in (0, 8, 16))
+                px[y][x] = sum(((rgb >> s & 255) * a + (old >> s & 255) * (255 - a) + 127) // 255 << s
+                               for s in (0, 8, 16))
     return px
 
 
