@@ -28,13 +28,15 @@ void _exit(int), sync(void);
 long time(long *);
 void *opendir(const char *);
 struct dirent *readdir(void *);
-int closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
+int flock(int, int), closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
 char *strstr(const char *, const char *);
 int atoi(const char *);
 #define O_RDONLY 0
 #define WNOHANG 1
 #define CLOCK_MONOTONIC 1
 #define RB_POWER_OFF 0x4321fedc
+#define LOCK_EX 2
+#define LOCK_NB 4
 #endif
 
 #define GUARD_TICK_MS 5000 /* a sample; 1 s while powering off */
@@ -47,6 +49,7 @@ int atoi(const char *);
 #define STATE "/tmp/q2guard.state"
 #define STATE_TMP "/tmp/q2guard.state.tmp"
 #define ACK "/tmp/q2guard.ack"
+#define LOCK "/tmp/q2guard.lock" /* one q2guard at a time: S90play's loop starts another only once it ended */
 #define SENSOR_HOOK "/tmp/q2guard.sensor" /* --dev only: a temperature in tenths of a degree, or "none" */
 #define PS "/sys/class/power_supply/"
 
@@ -329,6 +332,18 @@ static void answers(int *ack, int *cancel) { /* "ack N" and "cancel N" lines, th
     }
 }
 
+/* The last lines before the power-off (the player stopped, the power-off itself): written while there is time
+ * before the deadline, at most FINAL_MS, then the power-off goes ahead whatever the card does. */
+#define FINAL_MS 3000
+static void flush_final(unsigned deadline) {
+    long wall = time(0);
+    while (fl.pid > 0 && (int)(deadline - now_ms()) > 0) usleep(100000), flush_reap(wall);
+    flush_start(wall);
+    unsigned end = now_ms() + FINAL_MS;
+    if ((int)(end - deadline) > 0) end = deadline;
+    while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap(wall);
+}
+
 static void note(const char *what) { /* a line of its own in the log */
     char b[200];
     heat_note(b, sizeof b, time(0), what);
@@ -338,6 +353,8 @@ static void note(const char *what) { /* a line of its own in the log */
 int main(int argc, char **argv) {
     static struct guard g;
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
+    int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+    if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
@@ -413,6 +430,7 @@ int main(int argc, char **argv) {
         line_due = 0;
         if (o.power_off) {
             note("POWER off now");
+            flush_final(g.off_at + GUARD_DEADLINE_MS);
             sync();
             reboot(RB_POWER_OFF);
         }
