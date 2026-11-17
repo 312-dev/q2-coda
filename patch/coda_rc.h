@@ -148,6 +148,7 @@ int ble_retry_due(uint32_t now_ms);
 void crc_ble_connected(void);
 void crc_ble_bytes(const uint8_t *p, size_t n);
 void crc_ble_gone(void);
+void crc_ble_advertising(int on); /* /tmp/coda-rc.ble while the GATT application and advertisement stand */
 
 #define CRC_PAIR_TIMEOUT_MS 120000
 #define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */
