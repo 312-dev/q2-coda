@@ -295,7 +295,7 @@ void cc_paint(void *win, void *canvas) {
         int bw = (int)bitmap[0], bh = (int)bitmap[1], side = bw < bh ? bw : bh;
         rect_t src = { (bw - side) / 2, (bh - side) / 2, side, side };
         canvas_draw_image(canvas, bitmap, &src, &art);
-        ar_corners(canvas, &art, CC_ART_R, CC_BLOCK);
+        ar_corners(canvas, &art, CC_ART_R, flip_if(ipod_light(), CC_BLOCK)); /* final colour */
     } else
         fill_box(canvas, &art, RGBA(CC_OFF), CC_ART_R);
     int tx = art.x + CC_ART + 8, tw = np.x + np.w - 12 - tx;

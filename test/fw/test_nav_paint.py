@@ -2054,11 +2054,11 @@ USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg
 CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
 
 
-def control_center(fw, world, focus=0, adjust=0, ring=True):
+def control_center(fw, world, focus=0, adjust=0, ring=True, light=False):
     """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
     brightness at half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock
-    at 0) or the page just pulled down. The canvas."""
-    theme(fw)
+    at 0) or the page just pulled down; Light Mode on or off. The canvas."""
+    theme(fw, **({'LIGHT': '1'} if light else {}))
     fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     win, _, _ = quick_window(world)
@@ -2332,7 +2332,7 @@ def test_an_empty_folder_level_says_so(fw, world):
 CC_ART_AT = (178, 50, 52, 52)  # control_center.c: the Now Playing block's cover, CC_ART square
 
 
-def cc_playing(fw, world, mcl, recs, path, cover_type=0):
+def cc_playing(fw, world, mcl, recs, path, cover_type=0, light=False):
     """Control Center over a queue playing one record at path, by artist B on album A; the player's cover thread has
     parsed it as cover_type (now_cover: 1 embedded, 2 folder image, 3 none; 0 not parsed). The canvas."""
     deques = Deques(fw)
@@ -2340,7 +2340,7 @@ def cc_playing(fw, world, mcl, recs, path, cover_type=0):
     mcl.pos = 0
     fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode() if cover_type else b''
     fw.var('g_playcover_type', C.c_ubyte).value = cover_type
-    canvas = control_center(fw, world)
+    canvas = control_center(fw, world, light=light)
     canvas.keep = deques
     return canvas
 
@@ -2372,3 +2372,16 @@ def test_control_center_shows_the_cover_home_shows(fw, world, mcl, recs):
     canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=3)
     assert canvas.arts == [a for a in canvas.arts if a[1] != CC_ART_AT]
     assert (CC_ART_AT, rgba(0x3a3a3c)) in [(r, c) for r, c, _ in canvas.rounded]  # the grey square
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_control_center_s_cover_corners_are_the_block_s_colour_as_painted(fw, world, mcl, recs, light):
+    """The cover's rounded corners are scrubbed in the block's colour as the screen shows it: Light Mode's block is
+    the flipped one, so a dark corner would show on it (the emulator, 2026-11-16, once the cover showed)."""
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=1, light=light)
+    flip = fw.fn('flip_if', C.c_uint, C.c_int, C.c_uint)
+    block = [c for r, c, _ in canvas.rounded if r == (166, 38, 189, 124)]
+    x, y = CC_ART_AT[:2]
+    corner = [c for fx, fy, w, h, c in canvas.fills if (fx, fy, h) == (x, y, 1)]
+    want = flip(int(light), 0x1c1c1e)
+    assert corner and set(corner) == {rgba(want) & 0xffffff | 0xff000000} and block
