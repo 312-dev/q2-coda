@@ -500,6 +500,7 @@ void power_poll(void) {
     ratings_copy_poll();
     wdt_poll();
     state_poll();
+    heatguard_poll(); /* q2guard's cards (heatguard.c) */
     smart_poll();
     wifi_transfer_poll();
 }
