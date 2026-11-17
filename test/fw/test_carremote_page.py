@@ -10,7 +10,7 @@ import time
 from conftest import O, mcl  # noqa: F401
 from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, peer
 from test_nav_library_pages import call, empty_state, signed, ui  # noqa: F401
-from test_nav_hold import recs  # noqa: F401
+from test_nav_hold import recs, scratch, st  # noqa: F401
 
 SEEN = '/mnt/data/coda-rc/seen'
 NOW = calendar.timegm((2026, 11, 16, 8, 24, 0))  # a Monday
@@ -135,7 +135,7 @@ def test_no_phones_is_the_empty_state_with_pair_a_phone_a_row_of_the_one_list(fw
     switch, cta = stops(ui, page)
     assert ui.props[(view, '_ringnav_count')] == 2 and ui.props[(view, '_ringnav_index')] == 1
     assert ui.props.get((cta, '_rings_itself')) == 1  # no selection bar behind the capsule
-    assert geometry(ui, cta)[3] == 38 + 2 * 8 and not [k for k in ui.kids[cta] if ui.kind[k] == 'image_create']  # no chevron
+    assert geometry(ui, cta)[3] == 38 + 2 * 5 and not [k for k in ui.kids[cta] if ui.kind[k] == 'image_create']  # no chevron
     ui.handler(cta, O['EVT_CLICK'])()  # Centre on the capsule
     assert ui.name[ui.top()] == 'carhowto_page'
 
@@ -268,3 +268,28 @@ def test_the_switch_turns_it_on_and_off(fw, ui, mcl, recs):
     assert q2.system[-1].startswith('kill $(cat /tmp/coda-rc.pid')
     ui.fire('cr_page_show')
     assert empty_state(ui, page) is None
+
+
+def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mcl, recs, st):
+    """The user's device (p31 dev, 2026-11-16): with no phones, the wheel moving from the switch to Pair a Phone
+    scrolled the list, the capsule to its top and the switch gone, where everything fits on the screen. The capsule's
+    row, CR_CTA_OUT past it for the ring, ended at y 283 under OLED's set, a pixel past its list end (282), so
+    nav/lists.c reveal scrolled it into view and fit_top took the list on to the row's top (reproduced on the
+    emulator). The row reaches only as far as the ring, so its foot stays inside the list end and nothing scrolls."""
+    from test_nav_hold import use_set
+    oled = use_set(st, 'oled')
+    Car(fw, ui, recs)
+    page = open_page(fw, ui)
+    # the page's list at OLED's y (its switch at the status row's foot, 58), as on the Q2, and the page built again
+    view = lists(ui, page)[-1]
+    struct.pack_into('<i', ui.blocks[page], 4, oled.bar - (fw.fn('feedback_below', C.c_int, C.c_void_p)(view)
+                                                           - geometry(ui, view)[3]))
+    fw.fn('carremote_page__cr_page_show', C.c_int, C.c_void_p)(1)
+    view = lists(ui, page)[-1]
+    top = fw.fn('feedback_below', C.c_int, C.c_void_p)(view) - geometry(ui, view)[3]
+    switch, gap, cta = ui.kids[view]
+    assert top == oled.bar
+    # stock's layout stacks the rows; the switch's caption grows it by what the gap gives up, so the foot holds
+    foot = top + geometry(ui, switch)[3] + geometry(ui, gap)[3] + geometry(ui, cta)[3]
+    assert foot <= oled.bar + oled.list_end
+    assert geometry(ui, cta)[3] == 38 + 2 * 5  # the ring's 2 px, 3 px out, and no more
