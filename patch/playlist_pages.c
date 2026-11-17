@@ -44,12 +44,13 @@ int otg_count(void) {
     return n;
 }
 
-/* The playlist's songs in its own order (stock's Time added, as stored). */
-static int pv_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
+/* Playlist dest's songs in its own order (stock's Time added, as stored), a staged query; shared
+ * with add_songs.c, whose removal takes an entry's ID from it. */
+int playlist_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
 static void pv_reload(void) {
     int n;
     if (pv.songs) deque_destroy(pv.songs);
-    pv.songs = staged(pv_query, (void *)(long)pv.dest, &n);
+    pv.songs = staged(playlist_query, (void *)(long)pv.dest, &n);
 }
 static int pv_size(void) { return pv.songs ? (int)deque_size(pv.songs) : 0; }
 
@@ -96,9 +97,13 @@ static void pv_show(void) {
         pv_row(pv.view, k + i, track_name(title, sizeof title, r), 0, P(r, REC_ARTIST), pv_click,
                i);
     }
-    if (otg && !n)
-        feedback_empty(pv.page, geom_val(V_BAR) + rows * page_h(48),
-                       "Or hold Play/Pause on any song", "and choose Add to On-The-Go.");
+    /* no songs: the empty state under Add Songs, compact (a row above it: no glyph), no button of
+     * its own as Add Songs is the row above (oled-design.md Empty and offline) */
+    static const empty_t none = { 0, "No Songs Yet", "Choose Add Songs to fill it", 0 },
+                         otg_none = { 0, "No Songs Yet", "Hold Play/Pause on a song to add it", 0 };
+    if (!n)
+        empty_state(pv.page, feedback_below(widget_get_child(pv.view, rows - 1)),
+                    otg ? &otg_none : &none, 0);
     if (pv.selected >= rows) pv.selected = rows ? rows - 1 : 0;
     if (rows) ringnav_select(pv.view, pv.selected, rows);
 }
@@ -109,7 +114,7 @@ static int pv_run(const void *unused) {
     int a = pv.pending, n = pv_size();
     char said[80];
     if (a == PV_SHUFFLE && n) {
-        void *all = staged(pv_query, (void *)(long)pv.dest, &n);
+        void *all = staged(playlist_query, (void *)(long)pv.dest, &n);
         shuffle_play(all);
         deque_destroy(all);
     } else if (a == PV_ADD) {

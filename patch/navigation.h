@@ -869,6 +869,7 @@ void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
+int playlist_query(void *dest); /* dest's songs in its own order, for staged */
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
 int add_songs_key(void *top, unsigned key);
