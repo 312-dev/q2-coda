@@ -972,7 +972,10 @@ def test_the_state_record_says_what_the_q2_does_and_a_power_off_removes_it(q2):
     assert [path for path, _ in q2.disk.written].count(STATE) == 1  # rewritten only on a change
     q2.status, q2.way = PLAYING, 1
     lit(q2)
+    q2.loop(ms=5000)  # a change is written once its burst settles (system.c STATE_SETTLE_MS)
     assert q2.flash.files[STATE] == b'screen:on power:running cable:out battery:64 play:playing out:bluetooth\n'
+    q2.status = PAUSED
+    q2.loop()  # a change still settling: the clean end below does not wait for it
     del events[:]
     q2.fw.fn('ringnav_savequeue', C.c_int)()  # the power-off page's into_poweroff saves, hooked
     assert STATE not in q2.flash.files and events == [(9, WDT_STOP, None)]  # a clean end: nothing to report
