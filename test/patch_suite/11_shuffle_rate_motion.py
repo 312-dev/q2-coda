@@ -136,12 +136,11 @@ ev=m.alloc(0x40); m.word(ev,O['EVT_KEY_UP']); m.word(ev+O['EVENT_KEY'],O['KEY_RE
 assert m.call(address=fk,args=(ck,ev,0,0),gap=0)==11 and [c[0] for c in m.calls].count('navigator_back')==1
 m.close(); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.top!=page and m.nodes[m.top]['name']=='shuffle_page'; passed()
 def home_settings(full):
-        # Home's rows in HOME_ROWS' order (tools/ipod.py home_list), Now Playing's and Folders' shown here; Guest
-        # Play's, hidden with no guest playing, restacked last (library_edit.c lr_home_apply), so Home keeps seven.
+        # Home's rows in HOME_ROWS' order (tools/ipod.py home_list), Now Playing's and Folders' shown here.
         CONFIG['HOME']=str(full); m=ShuffleMachine(); del CONFIG['HOME']; view,imgs=home_list(m)
         assert m.call(address=home_hook[0],args=(m.top,0,0,0),gap=0)==0
         order=lambda: [m.nodes[r]['name'][4:] for r in m.nodes[view]['children']]
-        assert order()==[r for r in HOME_ROWS if r!='guest']+['guest'] and not m.nodes[named(m,view,'btn_guest')]['visible']; passed()
+        assert order()==HOME_ROWS; passed()
         # Settings' click is bound at Home init. Settings slides the Settings list, stock's
         # Playback and System setting rows (stock binds them), in from the right as a full-width page
         # (oled/theme.xml home.lists full), the art hidden in Split too; the wheel walks it, and Return slides the list back from the left with

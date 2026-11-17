@@ -2,9 +2,11 @@
 second guest: Keep or Replace; what ended a guest: a toast or Couldn't Connect; the guest's Now Playing with Stop Guest
 Play; Settings > Bluetooth > Guest Play and its pages; Home's row and the status row's glyph."""
 import ctypes as C
+import struct
 
 import pytest
 
+from conftest import O
 from test_guest import Rig
 from test_nav_library_pages import Config, Ui, stock_page
 
@@ -155,41 +157,80 @@ def test_a_trusted_guest_s_page_forgets_and_asks(g):
     assert g.sent()[-1] == 'forget AA:BB'
 
 
-HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'guest', 'settings']
+HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
+EVT_CLICK = O['EVT_CLICK']
+CLICK = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)
 
 
-def test_home_shows_guest_play_only_while_a_guest_plays(g):
-    """Home's Guest Play row is there while a guest plays or is paused, as Now Playing's is while something is loaded;
-    Guest Play merely on (idle, the window open) leaves Home its other rows."""
-    _, view = stock_page(g.ui, 'scroll_view_home')
-    for row in HOME:
-        g.ui.name[g.ui.new('view_create', view, 0, 0, 375, 52)] = 'btn_' + row
-    g.fw.fn('lr_home_tag', None, C.c_void_p)(view)
+class HomeRows:
+    """Home's main list: its rows tagged as coverflow_home tags them, each with its label, Now Playing's as stock
+    translates it."""
+    def __init__(self, g):
+        self.g = g
+        _, self.view = stock_page(g.ui, 'scroll_view_home')
+        for row in HOME:
+            item = g.ui.new('view_create', self.view, 0, 0, 375, 32)
+            g.ui.name[item] = 'btn_' + row
+            label = g.ui.new('hscroll_label_create', item, 24, 0, 300, 32)
+            g.ui.name[label] = 'label_' + row
+            g.ui.text[label] = 'Now Playing' if row == 'playing' else row
+            if row == 'playing':
+                self.label = label
+        g.fw.fn('lr_home_tag', None, C.c_void_p)(self.view)
 
-    def shown():
-        g.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(view, 1)
-        return 'guest' in [g.ui.name[i][4:] for i in g.ui.kids[view] if i not in g.ui.hidden]
-    assert not shown()  # Guest Play off
+    def apply(self, np):
+        """The rows shown, and Now Playing's row's words."""
+        self.g.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(self.view, np)
+        return [self.g.ui.name[i][4:] for i in self.g.ui.kids[self.view] if i not in self.g.ui.hidden], self.g.ui.text[self.label]
+
+
+@pytest.mark.parametrize('np', [1, 0])
+def test_home_keeps_seven_rows_and_now_playing_s_reads_guest_play_while_a_guest_plays(g, np):
+    """No row of its own: Now Playing's row is Guest Play while a guest plays or is paused, shown even with nothing of
+    the owner's loaded, and Now Playing again once the guest is gone."""
+    home = HomeRows(g)
+    rows = [r for r in HOME if r != 'folder']  # Folders' own rule: the card has none here
+    mine = rows if np else rows[1:]
+    assert home.apply(np) == (mine, 'Now Playing')
     g.look(state='idle', enabled=1)
-    assert not shown()
-    g.look(state='open', enabled=1, window=120)
-    assert not shown()
+    assert home.apply(np) == (mine, 'Now Playing')
     g.look(state='playing', enabled=1, guest='Alex')
-    assert shown()
+    assert home.apply(np) == (rows, 'Guest Play')
     g.look(state='paused', enabled=1, guest='Alex')
-    assert shown()
+    assert home.apply(np) == (rows, 'Guest Play')
     g.look(state='idle', enabled=1)
-    assert not shown()
+    assert home.apply(np) == (mine, 'Now Playing')
 
 
-def test_home_s_row_opens_the_window_or_the_guest(g):
+def test_home_s_now_playing_row_opens_the_guest_while_one_plays(g):
+    """Stock's click on the row stays the owner's Now Playing; while a guest plays the row opens the guest's."""
+    stock, fn = [], None
+
+    def opened(ctx, event):
+        stock.append(ctx)
+        return 0
+    fn = CLICK(opened)
+    img = g.ui.new('image_create', g.ui.new('view_create', 0, 0, 0, 375, 32), 0, 0, 375, 32)
+    g.ui.name[img] = 'img_playing'
+    emitter, item = C.create_string_buffer(0x40), C.create_string_buffer(0x40)
+    struct.pack_into('<Q', emitter, 0, C.addressof(item))
+    struct.pack_into('<Q', item, 0, 0x77)  # emitter_on_with_tag's item: {ctx, id, type, handler...}
+    struct.pack_into('<i', item, O['EMIT_TYPE'], EVT_CLICK)
+    struct.pack_into('<Q', item, 12, C.cast(fn, C.c_void_p).value)
+    C.c_void_p.from_address(img + O['W_EMITTER']).value = C.addressof(emitter)
+    g.fw.fn('guest_home_bind', None, C.c_void_p)(img)
+    assert g.ui.offs == [(img, EVT_CLICK, C.cast(fn, C.c_void_p).value, 0x77)]
+    click = g.ui.handler(img, EVT_CLICK)
+    click()
+    assert stock == [0x77] and not g.page('guestnp_page')
+    g.look(state='playing', enabled=1, guest='Alex', source='spotify')  # a receiver's: its page does not open by itself
+    assert not g.page('guestnp_page')
+    click()
+    assert stock == [0x77] and g.page('guestnp_page')
     g.look(state='idle', enabled=1)
-    g.fw.fn('guest_home_click', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    assert g.sent()[-1] == 'open' and g.page('guestconnect_page')
-    g.ui.key(g.page('guestconnect_page'), KEY_CENTER)
-    assert g.sent()[-1] == 'close'
-    g.look(state='playing', enabled=1, guest='Alex')
-    assert g.page('guestnp_page')
+    assert not g.page('guestnp_page')
+    click()
+    assert stock == [0x77, 0x77]
 
 
 @pytest.mark.parametrize('state, enabled, on, value', [('off', 0, 0, 'Off'), ('idle', 1, 1, 'Ask'), ('idle', 0, 0, 'Off')])

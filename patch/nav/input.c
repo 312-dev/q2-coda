@@ -755,7 +755,8 @@ int ringnav(void *ctx, void *event) {
                 select(&g_menu, 0);
                 reveal(&g_menu, 0, 1);
                 widget_invalidate_force(w, (void *)0);
-            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing"))
+            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing") &&
+                       !guest_home_np()) /* the row reads Guest Play: the guest's (guest_ui.c) */
                 compact_now_playing();
             return STOP;
         }

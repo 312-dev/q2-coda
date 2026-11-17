@@ -52,7 +52,7 @@
 #define LR_TEXT_X 52    /* the row's words, right of it */
 #define LR_LIFT 108     /* the lifted row's card: the selection bar's box grown to 108% */
 #define LR_HINT_PX TYPE(13) /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
-#define LR_HINT_Y 298       /* its middle, 14 px above the screen's foot */
+#define LR_HINT_Y 298   /* its middle, 14 px above the screen's foot */
 #define LR_LIFT_PX TYPE(22) /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
 
 enum { LR_A_NONE, LR_A_SHOWN, LR_A_HIDDEN, LR_A_LOCKED }; /* LR_AUTO */
@@ -68,11 +68,11 @@ const char lr_default[] = "hspalSgerfncmqiLPAvGUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
 /* Home's main list's rows (tools/ipod.py HOME_ROWS) in their default order, each its letter in
  * LR_HOME_FILE, by its row's name: Now Playing, Library, Streaming, Folders, Cover Flow, Search,
- * Guest Play, Settings. The same rule: a new row takes a new letter. */
-const char lr_home[] = "plsfcqgS";
+ * Settings. The same rule: a new row takes a new letter. */
+const char lr_home[] = "plsfcqS";
 static const char *const lr_home_names[] = { "btn_playing", "btn_localmusic", "btn_stream",
                                              "btn_folder",  "btn_coverflow",  "btn_home_search",
-                                             "btn_guest",   "btn_settings" };
+                                             "btn_settings" };
 _Static_assert(sizeof lr_home - 1 == sizeof lr_home_names / sizeof *lr_home_names, "a name each");
 
 static const struct {
@@ -253,11 +253,11 @@ static int lr_shown_before(void *view, void *row) {
 }
 
 /* coverflow.c coverflow_home_layout, before the list is laid out again: Home's rows in the saved
- * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) and
- * Folders by its own rule only while the card has folders (home.c home_folders), Guest Play by its
- * own only while a guest plays or is paused (guest.c guest_active); in Edit Home every row it lists. A row
- * that comes or goes keeps the selection and the rows in view (home.c home_keep); the hidden rows
- * go last, as the list's layout keeps a hidden row's slot. */
+ * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) or a
+ * guest plays (guest.c guest_active; the row then reads Guest Play, guest_ui.c guest_home_row) and
+ * Folders by its own rule only while the card has folders (home.c home_folders); in Edit Home every
+ * row it lists. A row that comes or goes keeps the selection and the rows in view
+ * (home.c home_keep); the hidden rows go last, as the list's layout keeps a hidden row's slot. */
 void lr_home_apply(void *view, int np) {
     if (!view) return;
     char order[LR_MAX], vis[LR_ROWS];
@@ -279,9 +279,10 @@ void lr_home_apply(void *view, int np) {
         void *row = rows[i];
         int c = widget_get_prop_int(row, LR_PROP, 0), rule = widget_get_prop_int(row, LR_AUTO, 0);
         if (c == 'f' && rule != LR_A_LOCKED) rule = folders ? LR_A_SHOWN : LR_A_HIDDEN;
-        if (c == 'g' && rule != LR_A_LOCKED) rule = guest_active() ? LR_A_SHOWN : LR_A_HIDDEN;
         if (rule != LR_A_LOCKED) prop(row, LR_AUTO, rule); /* the editor's circle reads it */
-        int on = editing || (lr_shows(vis[lr_at_in(lr_home, c)], rule) && (c != 'p' || np));
+        if (c == 'p') guest_home_row(row); /* guest_ui.c: Guest Play while a guest plays */
+        int on = editing || (lr_shows(vis[lr_at_in(lr_home, c)], rule) &&
+                             (c != 'p' || np || guest_active()));
         if (on == !!widget_get_visible(row)) continue;
         int k = lr_shown_before(view, row);
         widget_set_visible(row, on, 0);
@@ -868,8 +869,8 @@ void lr_edit_paint(void *w, void *canvas) {
                                      ' ', 'h', 'i', 'd', 'e', 's', 0 };
     void *view = lr.view, *rows[LR_ROWS], *lcd = P(canvas, CANVAS_LCD);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), ground = ui_ink(RGBA(0)), raw = ui_ink_raw(1);
-    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h, box = lr_box(view, &h),
-        top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
+        box = lr_box(view, &h), top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
         sel = st.touch_mode ? -1 : widget_get_prop_int(view, SEL, -1),
         gx = 375 - geom_val(V_RIGHT_X) - LR_GRIP_X - ox, cx0 = LR_CIRCLE_X - ox;
     unsigned ink = tok(TOK_PRIMARY), third = tok(TOK_TERTIARY);

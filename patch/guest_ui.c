@@ -99,7 +99,7 @@ static struct {
         unsigned played;
     } trusted[GU_TRUSTED];
     int ntrusted, cur; /* the trusted guests read; the one whose page is open */
-    int home;          /* a guest playing at the last look: Home's Guest Play row shown */
+    int home;          /* a guest playing at the last look: Home's first row reads Guest Play */
 } gu __attribute__((section(".scratch")));
 
 /* ---- the state ---- */
@@ -486,16 +486,54 @@ static void conn_paint(void *w, void *canvas) {
             1);
 }
 
-/* Home's Guest Play row, there while a guest plays (library_edit.c lr_home_apply): the guest's Now
- * Playing; Let a Guest Connect if the guest left before the row went. */
-int guest_home_click(void *ctx, void *event) {
-    (void)ctx, (void)event;
-    int state = guest_ui_state();
-    if (state == G_PLAYING || state == G_PAUSED)
-        guest_np_open();
-    else
-        conn_open(0, 0);
-    return 0;
+/* Home's first row while a guest plays or is paused (docs/ipod.md#home): Now Playing's, read as
+ * Guest Play and opening the guest's Now Playing; Home keeps its seven rows. Back to stock's words
+ * once the guest is gone. */
+static struct {
+    void *label;     /* the label renamed, or 0 */
+    char words[32];  /* its words before */
+    void *click;     /* stock's click on the row (home_page_bind_widget's), and its ctx */
+    void *click_ctx;
+} gh __attribute__((section(".scratch")));
+
+/* library_edit.c lr_home_apply, on each Home layout: row is Now Playing's. */
+void guest_home_row(void *row) {
+    void *label = row ? widget_lookup(row, "label_playing", 1) : (void *)0;
+    if (!label) return;
+    if (guest_active()) {
+        if (gh.label != label) {
+            gh.label = label;
+            widget_get_text_utf8(label, gh.words, sizeof gh.words);
+        }
+        widget_set_text_utf8(label, "Guest Play");
+    } else if (gh.label == label) {
+        gh.label = (void *)0;
+        widget_set_text_utf8(label, gh.words);
+    }
+}
+
+/* The guest's Now Playing, while a guest plays: 1 when it opened (Home's row, its click or Return,
+ * nav/input.c). */
+int guest_home_np(void) {
+    if (!guest_active()) return 0;
+    guest_np_open();
+    return 1;
+}
+static int home_np_click(void *ctx, void *event) {
+    if (guest_home_np() || !gh.click) return 0;
+    return ((int (*)(void *, void *))gh.click)(gh.click_ctx, event);
+}
+/* coverflow_home: stock's click on Now Playing's row (img) swapped for one that opens the guest's
+ * while a guest plays and calls stock's otherwise. */
+void guest_home_bind(void *img) {
+    void *emitter = img ? P(img, W_EMITTER) : (void *)0;
+    for (void *e = emitter ? P(emitter, 0) : (void *)0; e; e = P(e, EMIT_NEXT))
+        if (I(e, EMIT_TYPE) == EVT_CLICK && !B(e, EMIT_PENDING_REMOVE)) {
+            gh.click = P(e, 12), gh.click_ctx = P(e, 0);
+            widget_off_by_func(img, EVT_CLICK, gh.click, gh.click_ctx);
+            widget_on(img, EVT_CLICK, home_np_click, (void *)0);
+            return;
+        }
 }
 
 /* ---- the settings pages ---- */
@@ -827,7 +865,7 @@ void guest_ui_poll(void) {
         return;
     }
     int was = gu.state, state = guest_ui_state(), playing = state == G_PLAYING || state == G_PAUSED;
-    if (playing != gu.home) { /* Home's Guest Play row comes or goes (lr_home_apply) */
+    if (playing != gu.home) { /* Home's first row reads Guest Play or Now Playing (guest_home_row) */
         gu.home = playing;
         coverflow_home_layout();
     }
