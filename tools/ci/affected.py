@@ -24,7 +24,10 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a test file runs itself;
 - a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
   pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
-  rejected there. They are run as gate.py defines them (`gate.full_suite`).
+  rejected there. They are run as gate.py defines them (`gate.full_suite`);
+- a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
+  --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
+  on the trunk's tip after landing, where a failure turns the tip red.
 
 Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
 """
@@ -57,6 +60,7 @@ COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parall
 MYPY_TOOLS, MYPY_FW = 'mypy-tools', 'mypy-fw'
 MYPY_SUITES = (MYPY_TOOLS, MYPY_FW)
 MYPY_CONFIG = 'pyproject.toml'
+SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
 # A change there runs the test whatever else the file maps to. tools/ci/test_ci.py checks that each folder a
@@ -81,7 +85,7 @@ class Plan:
 
     def everything(self, why):
         self.unit, self.fw, self.patch = ALL, ALL, ALL
-        self.other.update({'test/build.py', *MYPY_SUITES})
+        self.other.update({'test/build.py', SMOKE, *MYPY_SUITES})
         self.why.append(why)
 
     def add(self, suite, parts, why):
@@ -207,7 +211,7 @@ def plan_for(changes, root=ROOT, patch_source=None):
             p.add('patch', ALL, f'{path}: the payload')
             fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
             p.add('fw', fw, f'{path}: test/fw ' + ('all' if fw == ALL else ', '.join(sorted(fw))))
-            p.other.add('test/build.py')
+            p.other.update({'test/build.py', SMOKE})
             if any(fnmatch.fnmatchcase(path, g) for g in COVERFLOW_SOURCES):
                 p.other.add('test/coverflow.py')
                 p.why.append(f'{path}: test/coverflow.py')
@@ -282,8 +286,8 @@ def changed(base, head='HEAD', root=ROOT):
     return out
 
 
-def run(plan, build, python):
-    """Run the plan; returns the number of suites that failed."""
+def run(plan, build, python, smoke=False):
+    """Run the plan; returns the number of suites that failed. smoke: run a planned smoke test too."""
     failed = 0
     q2heavy = os.environ.get('Q2_HEAVY', str(pathlib.Path.home()/'.local/bin/q2-heavy'))
     heavy = [q2heavy] if pathlib.Path(q2heavy).exists() else []
@@ -307,7 +311,12 @@ def run(plan, build, python):
         else:
             go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
-        if other in MYPY_SUITES:
+        if other == SMOKE:
+            if smoke and build:
+                go(other, [python, str(ROOT/'tools/ci/smoke.py'), build], is_heavy=True)
+            else:
+                print(f'== {other}: optional; --run BUILD --smoke walks the build on a pooled emulator (about 2 min)')
+        elif other in MYPY_SUITES:
             go(other, mypy_argv(other, python))
         elif other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
@@ -329,6 +338,7 @@ def main():
     ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
+    ap.add_argument('--smoke', action='store_true', help='with --run, also run a planned smoke test (tools/ci/smoke.py)')
     ap.add_argument('--python', default=sys.executable)
     ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_batch.py and merge_train.py hand it')
     args = ap.parse_args()
@@ -351,7 +361,7 @@ def main():
         for why in d['why']:
             print(f'  {why}')
     if args.run is not None:
-        return 1 if run(plan, args.run or None, args.python) else 0
+        return 1 if run(plan, args.run or None, args.python, args.smoke) else 0
     return 0
 
 

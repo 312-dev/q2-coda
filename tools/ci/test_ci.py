@@ -16,6 +16,7 @@ import gate  # noqa: E402
 import merge_batch  # noqa: E402
 import json  # noqa: E402
 import patch_shards  # noqa: E402
+import smoke  # noqa: E402
 
 ALL = affected.ALL
 
@@ -391,7 +392,7 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
     assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
-    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov'}
+    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke'}
     assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
@@ -451,3 +452,74 @@ def test_a_reserved_lease_is_never_reclaimed_or_handed_on(tmp_path, monkeypatch)
         raise AssertionError('a reserved copy was handed on')
     emu_pool.reserve(1, on=False)
     assert emu_pool.get('/c', 'other', 1, wait=False) == 1  # unreserved and expired: reclaimed
+
+
+def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(tmp_path, monkeypatch):
+    root = tree(tmp_path, {'patch/seek.c': 'int seek_step(int x) {\n  return x;\n}\n'})
+    plan = affected.plan_for({'patch/seek.c': {2}}, root)
+    assert 'smoke' in plan.other
+    assert 'smoke' not in affected.plan_for({'docs/ipod.md': {1}}, root).other
+    # the queue runs it on the tip after landing (the post tier), not in the batch
+    assert 'smoke' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path)
+    assert gate.suites_for(None, [], 'py', tmp_path, 'post')['smoke'].argv[1:] == [str(gate.ROOT/'tools/ci/smoke.py'), '{build}']
+    # a worker runs it only when asked
+    import subprocess
+    ran: list = []
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    only = affected.Plan()
+    only.other.add('smoke')
+    assert affected.run(only, '/b', 'py') == 0 and ran == []
+    assert affected.run(only, '/b', 'py', smoke=True) == 0 and ran[-1][-2:] == [str(affected.ROOT/'tools/ci/smoke.py'), '/b']
+
+
+def test_a_lease_can_keep_off_a_slot_and_prepare_the_copy_before_its_boot(tmp_path, monkeypatch):
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path)
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 3)
+    calls: list = []
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: calls.append(a) or type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    (tmp_path/'leases.json').write_text(json.dumps({'1': {'name': 'x', 'build': '/b', 'since': 0, 'until': time.time() + 99}}))
+    k = emu_pool.get('/b', 'smoke-1', 1, wait=False, avoid=(2,), prepare=lambda k: calls.append(('prepare', k)))
+    assert k == 3 and calls[-2:] == [('prepare', 3), (3, 'start', str(pathlib.Path('/b').resolve()))]
+    try:
+        emu_pool.get('/b', 'smoke-2', 1, wait=False, avoid=(2,))  # 2 is free, but avoided
+    except SystemExit as e:
+        assert 'leased' in str(e)
+    else:
+        raise AssertionError('an avoided slot was leased')
+
+    def boom(k):
+        raise RuntimeError('no config')
+    emu_pool.put(3)
+    try:
+        emu_pool.get('/b', 'smoke-3', 1, wait=False, avoid=(2,), prepare=boom)
+    except RuntimeError:
+        pass
+    assert '3' not in json.loads((tmp_path/'leases.json').read_text())  # a failed prepare leaves no lease
+
+
+def test_smoke_compares_the_screen_in_upright_boxes():
+    blank = bytes(smoke.W * smoke.H * 4)
+
+    def lit(x, y):  # upright (x, y) set, as q2remote.framebuffer_png turns the page
+        page = bytearray(blank)
+        i = (x * smoke.W + smoke.W - 1 - y) * 4
+        page[i:i + 3] = b'\xff\xff\xff'
+        return bytes(page)
+    assert smoke.differ(blank, lit(100, 200)) == 1
+    assert smoke.differ(blank, lit(100, 10)) == 0                     # the status row's clock: not counted
+    assert smoke.differ(blank, lit(300, 200), smoke.HOME_LIST) == 0   # Home's art beside its list
+    assert smoke.differ(blank, lit(100, 200), smoke.HOME_LIST) == 1
+
+
+def test_smoke_looks_past_the_status_bar_and_a_toast():
+    assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'msginfo_dialog')]) == 'home_page'
+    assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'statusbar_dialog')]) == 'statusbar_dialog'
+    assert smoke.top([('system_bar', 'system_bar')]) is None and smoke.top(None) is None
+
+
+def test_smoke_turns_bluetooth_off_and_keeps_the_rest_of_the_config():
+    assert smoke.bluetooth_off('[A]\nBLUETOOTH=1\nX=2\n') == '[A]\nBLUETOOTH=0\nX=2\n'
+    assert smoke.bluetooth_off('[SYSSET]\nX=2\n') == '[SYSSET]\nBLUETOOTH=0\nX=2\n'
+    assert smoke.bluetooth_off('[A]\nX=2\n') == '[A]\nX=2\n[SYSSET]\nBLUETOOTH=0\n'

@@ -45,6 +45,7 @@ import emu_pool  # noqa: E402
 DEADLINE = 170       # s from the lease to the verdict
 BOOT_S = 60          # s for Home to come up after `q2emu start`
 STEP_S = 8           # s for a step's window to come up
+INPUT_GAP_S = .3     # s after an input before looking for its effect
 TOAST_S, TOAST_MOST_S = 3, 15  # s with no toast before the first key; s at most to wait for that
 AVOID = (2,)         # the user's own slot (docs/orchestration.md: never touched)
 W, H = 320, 375      # the framebuffer's page (portrait), BGRA
@@ -216,17 +217,22 @@ class Emulator:
             time.sleep(.2)
 
     def do(self, *args):
+        """One input, then the screen at rest. Each device is its own FIFO and demo reads them as they come, so a
+        key sent straight after a turn can land before the turn's last samples (Center on the row the
+        selection was passing): the next input waits for the last one's effect to end."""
         self.alive()
         self.q2emu(*args)
+        time.sleep(INPUT_GAP_S)
+        self.settle(HOME_LIST if top(self.stack()) == 'home_page' else None, most_s=2)
 
     def home(self):
         """Return until Home is on top, looking first each time: Return on Home itself opens Now Playing."""
         for _ in range(6):
             if top(self.stack()) == 'home_page':
-                return
+                break
             self.do('key', 'return')
             time.sleep(1)
-        self.expect('home_page', 'back to Home')
+        self.expect('home_page', 'back to Home')  # and its slide in done: a turn during it goes astray
 
     def row(self, n, from_end=False):
         """Put the selection on row n of the list in focus: from its first row, or its last with from_end."""
@@ -341,6 +347,15 @@ def steps(e, say):
     e.alive()
 
 
+def bluetooth_off(ini):
+    """config.ini's text with Bluetooth off: stock's BLUETOOTH key, under [SYSSET]."""
+    text, n = re.subn(r'(?m)^BLUETOOTH=.*$', 'BLUETOOTH=0', ini)
+    if n:
+        return text
+    text, n = re.subn(r'(?m)^\[SYSSET\]\s*$', '[SYSSET]\nBLUETOOTH=0', ini, count=1)
+    return text if n else ini.rstrip('\n') + '\n[SYSSET]\nBLUETOOTH=0\n'
+
+
 def lease(build, wait_s, prepare, log):
     """A slot running build, waiting up to wait_s for one to come free."""
     end = time.monotonic() + wait_s
@@ -363,6 +378,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('build', type=pathlib.Path)
     ap.add_argument('--logs', type=pathlib.Path, help='default: ~/.cache/q2-smoke/<time>/')
+    ap.add_argument('--shots', type=pathlib.Path, help='a screenshot here as each step starts')
     ap.add_argument('--wait', type=float, default=600, help='seconds to wait for a free emulator (600)')
     args = ap.parse_args(argv)
     if not (args.build/'rootfs.squashfs').exists():
@@ -385,15 +401,17 @@ def main(argv=None):
         ini = emu_pool.copy_dir(k)/'state/data/config.ini'
         if ini.exists():
             saved[k] = ini.read_bytes()
-            text = saved[k].decode('utf-8', 'replace')
-            text, n = re.subn(r'(?m)^BLUETOOTH=.*$', 'BLUETOOTH=0', text)
-            ini.write_text(text if n else text.rstrip('\n') + '\nBLUETOOTH=0\n')
+            ini.write_text(bluetooth_off(saved[k].decode('utf-8', 'replace')))
 
     slot, e, step = None, None, ['lease']
 
     def say(what):
         step[0] = what
         log(what)
+        if args.shots and e is not None:  # the screen each step starts from
+            args.shots.mkdir(parents=True, exist_ok=True)
+            n = len(list(args.shots.glob('*.png')))
+            e.q2emu('shot', args.shots/f'{n:02d}-{re.sub(r"[^A-Za-z0-9]+", "-", what).strip("-")}.png')
 
     try:
         try:
