@@ -19,7 +19,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, block, high_halves, libc
+from conftest import O, Deques, block, high_halves, libc, stock_prop_str
 from test_addon import Dirent
 from test_lyrics import Ly
 
@@ -510,13 +510,16 @@ class Ui:
 
     def prop_str(self, p, name, default, *_):
         """A widget's name, as AWTK hands out its widget->name: one buffer per name a widget has had,
-        kept to the test's end, so a name the C holds stays readable while it asks again."""
-        if s(name) not in ('name', 'image') or p not in self.widgets:
-            return default
-        value = self.get(p).name if s(name) == 'name' else getattr(self.get(p), 'image', None)
-        if value is None:
-            return default
-        key = (p, value)
+        kept to the test's end, so a name the C holds stays readable while it asks again; NULL where stock's
+        is (conftest.stock_prop_str), as for a widget never named."""
+        if p not in self.widgets:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        widget, key = self.get(p), s(name)
+        value = (widget.name or None) if key == 'name' else getattr(widget, 'image', None) if key == 'image' else None
+        value = stock_prop_str(widget.kind.encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        if not isinstance(value, bytes):
+            return 0 if value is None else value
+        key = (p, value.decode())
         if key not in self.names:
             self.names[key] = C.create_string_buffer(key[1].encode())
         return C.addressof(self.names[key])
