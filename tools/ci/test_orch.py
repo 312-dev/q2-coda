@@ -117,6 +117,19 @@ def test_a_suite_that_fails_once_is_run_again_alone_and_counts_as_flaky(tmp_path
     assert (tmp_path/'logs/flaky.first.log').exists()
 
 
+def test_nothing_starts_beside_a_second_try(tmp_path):
+    marker = tmp_path/'ran'
+    flaky = script_suite('flaky', tmp_path, f'if [ -e {marker} ]; then sleep 0.4; exit 0; fi; touch {marker}; exit 1\n')
+    late = script_suite('late', tmp_path, 'true\n')
+    flaky.mem, late.mem = 0.5, 3.0
+    events = []
+    # too little memory for late beside flaky's first run; plenty once that has failed
+    gate.run({'flaky': flaky, 'late': late}, [], tmp_path/'logs', sys.executable, build='B', log=events.append,
+             mem=lambda: 12.0 if marker.exists() else 5.0, poll=0.02, retry=True)
+    order = [e.split(':')[0].split(' (')[0] for e in events]
+    assert order.index('ok   flaky') < order.index('start late'), order
+
+
 def test_a_suite_that_fails_twice_fails_with_its_kind(tmp_path):
     bad = script_suite('bad', tmp_path, 'echo "1 failed"; exit 1\n')
     r = gate.run({'bad': bad}, [], tmp_path/'logs', sys.executable, build='B', log=lambda m: None, mem=lambda: 12.0,
@@ -467,6 +480,7 @@ import guard  # noqa: E402
     'nohup bash -c \'until ! pgrep -f GradleMain; do sleep 3; done; echo done\' &',
     'while kill -0 $P; do sleep 2; done',
     'until grep -q passed run.log; do sleep 5; done',
+    'timeout 600 bash -c "until ! pgrep -f foo; do sleep 2; done"',  # bounded, and still waiting on itself
     'git stash', 'cd x && git stash pop', 'git -C /r stash push -u -m tag',
     'pkill -f patch.py', 'killall python3',
     'python3 -m pytest test/fw -q -n auto',
