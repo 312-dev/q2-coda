@@ -38,7 +38,7 @@ The build carries the Subsonic card app in the root filesystem ([internals](inte
 
 ```sh
 contrib/shanlingq2/build.sh /tmp/q2-subsonic                 # in q2-subsonic: Go 1.22 or later
-mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v0.9-43b537a.zip ~/.cache/q2-apps/
+mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-6bdfe61.zip ~/.cache/q2-apps/
 ```
 
 A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`. The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 adds 3,190,784 bytes to the compressed root filesystem (53,456,896 of the 75,497,472 `rootfs_fits` allows, with `--new-player`).
