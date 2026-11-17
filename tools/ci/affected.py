@@ -15,7 +15,10 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   plus every test that names a changed def or class, through patch_shards.py --lines (the joined suite's
   lines); an edit to the runner (test/patch.py, test/suite_source.py) runs all of it;
 - patch/X.c runs the test/fw files that name X.c, its X__ statics, or a function X.c defines, and the
-  end-to-end files; a source no fw file names runs all of test/fw;
+  end-to-end files; a source no fw file names runs all of test/fw; and the test/unit files that name X.c
+  (they read or compile it);
+- a file in a folder a test/unit file checks whole (`SCANNERS`: test_theme.py's and test_art.py's rules
+  over patch/, test_docs.py's citations in patch/, tools/ and test/) runs that test too;
 - tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
   test/patch.py and test/fw;
 - a test file runs itself.
@@ -41,6 +44,16 @@ ALL = 'all'
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
 INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
+# test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
+# A change there runs the test whatever else the file maps to. tools/ci/test_ci.py checks that each folder a
+# test/unit file globs is here.
+SCANNERS = (
+    ('patch/', ('.c', '.h', '.inc'), 'test_theme.py'),  # colours and type sizes named by token, not restated
+    ('patch/', ('.c',), 'test_art.py'),                  # corner radii in the table, empty-state glyphs drawn
+    ('patch/', None, 'test_docs.py'),                    # every doc anchor a source cites resolves
+    ('tools/', None, 'test_docs.py'),
+    ('test/', None, 'test_docs.py'),
+)
 
 
 class Plan:
@@ -103,6 +116,11 @@ def fw_files_for(source, root=ROOT):
     return hits | {p.name for p in (root/'test/fw').glob('test_e2e_*.py')}
 
 
+def unit_files_for(name, root=ROOT):
+    """The test/unit files that name patch/<name>: those that read or compile it."""
+    return {p.name for p in sorted((root/'test/unit').glob('test_*.py')) if name in p.read_text(errors='replace')}
+
+
 def patch_tests_for(changed_lines, source):
     """Joined-suite line ranges (A:B) holding the tests a change to those lines (of the new suite) touches."""
     stmts = patch_shards.analyse(source)
@@ -146,6 +164,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
     for path, lines in sorted(changes.items()):
         parts = pathlib.PurePath(path).parts
         name, stem, suffix = parts[-1], pathlib.PurePath(path).stem, pathlib.PurePath(path).suffix
+        for folder, suffixes, test in SCANNERS:
+            if path.startswith(folder) and (suffixes is None or suffix in suffixes):
+                p.add('unit', {test}, f'{path}: {test} checks every file of {folder}')
         if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
             starts = suite_starts(root)
             if patch_source is None:
@@ -164,6 +185,8 @@ def plan_for(changes, root=ROOT, patch_source=None):
             fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
             p.add('fw', fw, f'{path}: test/fw ' + ('all' if fw == ALL else ', '.join(sorted(fw))))
             p.other.add('test/build.py')
+            if len(parts) == 2 and (named := unit_files_for(name, root)):
+                p.add('unit', named, f'{path}: test/unit ' + ', '.join(sorted(named)))
         elif parts[0] == 'tools' and len(parts) == 2:
             unit = root/'test/unit'/f'test_{stem}.py'
             p.add('unit', {unit.name} if unit.exists() else ALL, f'{path}: its unit tests')
