@@ -263,7 +263,9 @@ shows the pressed song at once: its title, artist and album from the row, its pl
 one). The song that was playing stops, so its time and sound don't run on under the new title.
 Now Playing goes back to the player's song as soon as the player parses one (the pressed
 song once it plays, or another the user picked), when nothing of the list could play, or after
-60 s with neither (`CATPLAY_SHOW_MS`).
+60 s with neither (`CATPLAY_SHOW_MS`). A Next or Previous while the pressed song is still to come
+plays the song it moves to, and the pressed song, once it lands, stays on the card without
+playing (`addon.c` `moved_on`).
 
 ### Compatibility
 

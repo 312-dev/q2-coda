@@ -1,10 +1,12 @@
 /* Now Playing's lines as one marquee (docs/oled-design.md#motion), under a theme whose scrolling
  * text fades (list.marquee.fade, OLED's): the title, artist and album that overflow their column
- * hold at rest NPM_HOLD_MS, then slide left together and land back at rest together, then hold
- * again. Each slides its text's width and NPM_GAP more, so the copy stock's hscroll_label draws
- * after its loop_interval_distance arrives where the text began: no snap back. The longest sets
- * the pass at NPM_PX_S, linear; the others are stretched to it. A line that fits never moves. A
- * new text, the page opening and the page back on top start from rest.
+ * hold at rest NPM_HOLD_MS, then slide left together until each one's end meets its column's end,
+ * hold there MARQUEE_HOLD_MS, and go back to rest together. Each slides only what overflows, so
+ * some of every line is always in view: V1.36's hscroll_label draws no copy behind the text (its
+ * paint draws one only under stop_at_begin, 0x5fc1a0, and not where a loop would need it), and a
+ * line slid its whole width left its column blank until the next pass. The longest sets the pass
+ * at NPM_PX_S, linear; the others are stretched to it. A line that fits never moves. A new text,
+ * the page opening and the page back on top start from rest.
  *
  * Stock's own timer never runs for these labels (ringnav_hscroll_start asks np_marq_owns, and
  * np_marq_reset stops the one stock's page init starts), so stock never paints their ellipsis;
@@ -13,8 +15,8 @@
  * when due rather than on the loop's 25 ms pass. */
 #include "navigation.h"
 
-#define NPM_GAP 40       /* px between a line's end and its copy */
 #define NPM_HOLD_MS 2750 /* at rest before each pass */
+#define NPM_END_MS MARQUEE_HOLD_MS /* at the end of each pass */
 #define NPM_PX_S 35      /* the longest line's speed, px a second */
 
 static struct {
@@ -67,7 +69,7 @@ static int npm_tick(const void *info) {
     int span[3], longest = 0;
     for (int i = 0; i < 3; ++i) {
         void *w = npm_line(i);
-        span[i] = w && widget_get_visible(w) && npm_over(w) ? I(w, HSCROLL_TEXT_W) + NPM_GAP : 0;
+        span[i] = w && widget_get_visible(w) ? npm_over(w) : 0;
         if (span[i] > longest) longest = span[i];
     }
     if (!longest) { /* everything fits: rest, and nothing to wake for */
@@ -76,13 +78,21 @@ static int npm_tick(const void *info) {
         return 0;
     }
     unsigned pass = (unsigned)longest * 1000u / NPM_PX_S, t = now - npm.start;
-    if (t >= NPM_HOLD_MS + pass) npm.start = now, t = 0; /* landed: the next cycle's hold */
+    if (t >= NPM_HOLD_MS + pass + NPM_END_MS) npm.start = now, t = 0; /* back at rest */
     if (t < NPM_HOLD_MS) {
         npm_rest();
         npm_arm(now, NPM_HOLD_MS - t);
         return 0;
     }
     t -= NPM_HOLD_MS;
+    if (t >= pass) { /* at the end, each line's end at its column's */
+        for (int i = 0; i < 3; ++i) {
+            void *w = npm_line(i);
+            if (w && I(w, HSCROLL_XOFFSET) != span[i]) hscroll_label_set_xoffset(w, span[i]);
+        }
+        npm_arm(now, pass + NPM_END_MS - t);
+        return 0;
+    }
     for (int i = 0; i < 3; ++i) {
         void *w = npm_line(i);
         int off = span[i] ? (int)((unsigned)span[i] * t / pass) : 0;
@@ -95,11 +105,10 @@ static int npm_tick(const void *info) {
     return 0;
 }
 
-/* A line of the page painted: the cycle runs if it isn't running. Its loop gap and no ellipsis are
- * set here, as stock rebinds the labels' attributes with the page. */
+/* A line of the page painted: the cycle runs if it isn't running. No ellipsis is set here, as
+ * stock rebinds the labels' attributes with the page. */
 void np_marq_kick(void *w) {
     if (!np_marq_owns(w)) return;
-    if (I(w, HSCROLL_LOOP_GAP) != NPM_GAP) hscroll_label_set_loop_interval_distance(w, NPM_GAP);
     if (B(w, HSCROLL_ELLIPSES)) hscroll_label_set_ellipses(w, 0);
     if (npm.timer || !npm_over(w)) return;
     npm.start = (unsigned)time_now_ms();

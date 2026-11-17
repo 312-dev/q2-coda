@@ -75,7 +75,7 @@ deque_assign deque_destroy deque_size deque_at window_create widget_factory
 widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses
 slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create list_item_create image_set_draw_type
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
-widget_set_text_utf8 widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
+widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
 widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
@@ -241,6 +241,8 @@ int widget_set_name(void *x, const char *s) { snprintf(W(x)->type, 32, "%s", s);
 void page_empty(void *body, const char *name) { (void)body; (void)name; } /* navigation.c: page_list_or only */
 int widget_use_style(void *x, const char *s) { return 0; }
 int widget_set_text_utf8(void *x, const char *s) { if (s) snprintf(W(x)->text, 160, "%s", s); return 0; } /* stock: NULL keeps the text */
+int widget_get_text_utf8(void *x, char *s, unsigned n) { return snprintf(s, n, "%s", W(x)->text) >= (int)n; } /* stock: nonzero when it doesn't fit */
+unsigned widget_add_timer(void *x, int (*f)(const void *), unsigned ms) { (void)x, (void)f, (void)ms; return 1; } /* the empty page's poll: not run here */
 int widget_restack(void *x, unsigned i) { return 0; }
 void *widget_animator_prop_create(void *x, unsigned d, unsigned l, int e, const char *p) { return 0; }
 int widget_animator_prop_set_params(void *a, double f, double t) { return 0; }
@@ -338,8 +340,31 @@ void home_pad(void *view) {}
 void home_np_keep(int d) {} /* home.c's selection as Now Playing's row comes or goes */
 void home_overflow(void *list, int bottom) {}
 void home_in_place(void *list) {}
-void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {}
+/* page_parallax.c: no window slides in these tests */
+void *parallax_slide(float *percent) { return 0; }
+int parallax_under_x(int w, float percent) { return 0; }
+unsigned parallax_dim(float percent) { return 0; }
 int shuffle_songs(void *ctx, void *event) { return 0; }
+/* Home's first row, edit mode, folders' rule and shortcut (home_np.c, library_edit.c, home.c, theme_engine.c,
+ * navigation.c): Home as stock has it, none of it edited or playing here */
+void home_np_bind(void *win) {}
+void home_np_sync(void) {}
+void home_sets_bind(void *win) {}
+void ipod_shortcut_seen(void) {}
+void lr_home_tag(void *view) {}
+void lr_home_apply(void *view, int np) {}
+void lr_edit_labels(void *view, int on) {}
+int lr_home_editing(void) { return 0; }
+int home_folders(void) { return 0; }
+/* ui_kit.c's motion: reduced, and a theme row with no duration, so a level changes at once */
+int motion_reduced(void) { return 0; }
+const motion_t *motion_row(int kind) { static const motion_t still; return &still; }
+/* feedback.c's empty-page mark, cf_empty.c's page (none: the page is plain here) and catalogue.c's playlist covers (none) */
+int empty_shown(void *page) { return 0; }
+int cf_empty(void *page, void *body) { return 0; }
+void catalogue_playlist_covers(void) {}
+int catalogue_playlist_cover(int list, char *url) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
 int artist_local_on(void *win) { return 0; }
@@ -372,9 +397,9 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
-static int spun_dirty, spun_done; /* list_marks.c's spinner calls, for slow_open */
-void spinner_dirty(void *win) { ++spun_dirty; }
-void spinner_done(void) { ++spun_done; }
+static volatile int spun_paints; /* the frames step_turning painted itself, for slow_open */
+int spinner_turn(void) { return 2; } /* list_marks.c's: a frame due */
+int ringnav_wm_paint(void *wm) { (void)wm; return ++spun_paints, 0; }
 void forget_rows(void *list) { (void)list; }
 int title_gone(void *w, void *event) { (void)w, (void)event; return 0; }
 int bar_title_fits(void *label) { return 1; }
@@ -609,12 +634,14 @@ static void album(const char *name, const char *art) {
 static int unknown_row, unknown_songs;
 static char unknown_record[0x60], untagged_song[0x60], untagged_more[0x60];
 static int untagged_two; /* getMusicByAlbum(NULL) finds untagged_more too */
-static unsigned all_ms; /* what each getAllAlbum takes on the fake clock (slow_open) */
+static unsigned all_ms, all_hold; /* what each getAllAlbum takes on the fake clock; held for paints (slow_open) */
 static int all_queries;
 int getAllAlbum(void) {
     deque *d = shim_dir;
     ++queries, ++all_queries;
     clock_ms += all_ms;
+    for (int start = spun_paints, i = 0; all_hold && spun_paints < start + 3 && i < 2000; ++i)
+        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     d->n = 0;
     for (int i = 0, j; i < albums; ++i) {
         for (j = 0; j < i && strcasecmp(names[j], names[i]); ++j) {}
@@ -1757,7 +1784,7 @@ static void depth(void) {
     tex_fail = 0;
 }
 
-/* Display settings' Cover Flow Sort (coverflow_sort_step): each press takes the next order, saved and
+/* Library settings' Cover Flow Sort picker (coverflow_sort_set): each press takes the next order, saved and
    taken at the next open; ties keep the stock order. */
 static const char *album_at(int i) {
     static char got[160];
@@ -1777,9 +1804,10 @@ static int saved_sort(void) {
     if (f) assert(fread(&v, sizeof v, 1, f) == 1), fclose(f);
     return v;
 }
-extern void coverflow_sort_step(void), coverflow_refresh_art(void);
-static void press_sort(void) {
-    coverflow_sort_step();
+extern void coverflow_sort_set(int), coverflow_refresh_art(void);
+extern int coverflow_sort_now(void), coverflow_sort_count(void);
+static void press_sort(void) { /* the picker's next choice, as library_settings.c's rows take it */
+    coverflow_sort_set((coverflow_sort_now() + 1) % coverflow_sort_count());
     close_page();
     open_page();
 }
@@ -1963,9 +1991,10 @@ static void unknown_card(void) {
 }
 
 /* A cold open that takes a while (docs/internals.md#coverflow): once getAllAlbum has taken half of
-   150 ms, Home stays up with the spinner, a step a timer pass, the keys, the wheel and a second
-   press go nowhere, and the page opens after the last step; Return gives the open up, and the next
-   open queries again. A quick one opens as it is pressed, the spinner never asked for. */
+   150 ms, Home stays up with the spinner, each step on a thread of its own (step_turning) while the
+   UI thread paints the spinner's frames itself, a timer pass between steps; the keys, the wheel and
+   a second press go nowhere, and the page opens after the last step; Return gives the open up, and
+   the next open queries again. A quick one opens as it is pressed, the spinner never shown. */
 static void slow_open(void) {
     extern int coverflow_spinner(void), coverflow_wait_input(void *);
     int down[16] = {0}, back[16] = {0}, touch[16] = {0};
@@ -1975,26 +2004,25 @@ static void slow_open(void) {
     widget home;
     memset(&home, 0, sizeof(home));
     coverflow_home(&home, 0);
-    int dirty = spun_dirty, done = spun_done, q = all_queries;
+    int painted = spun_paints, q = all_queries;
     rescan();
     all_ms = 70; /* under half: the open does not wait */
     open_page();
-    assert(all_queries == q + 1 && slide() && spun_dirty == dirty && !coverflow_spinner());
+    assert(all_queries == q + 1 && slide() && spun_paints == painted && !coverflow_spinner());
     close_page();
     rescan();
     all_ms = 80;
     page = &w[nw + 1];
-    unsigned at = clock_ms;
-    home.click(home.ctx, 0); /* getAllAlbum alone, then a pass */
-    assert(all_queries == q + 2 && timer_fn && !slide() && spun_dirty == dirty + 1);
-    assert(coverflow_spinner() == 1); /* 80 ms in: the first frame */
-    clock_ms = at + 250;
-    assert(coverflow_spinner() == 3); /* a frame each 100 ms */
+    all_hold = 1, painted = spun_paints;
+    home.click(home.ctx, 0); /* getAllAlbum alone, held until three frames painted, then a pass */
+    all_hold = 0;
+    assert(all_queries == q + 2 && timer_fn && !slide() && coverflow_spinner());
+    assert(spun_paints >= painted + 3); /* the spinner turned within the step */
     assert(coverflow_wait_input(down) && coverflow_wait_input(touch)); /* taken */
     home.click(home.ctx, 0); /* a second press opens nothing more */
     assert(all_queries == q + 2);
     run();
-    assert(slide() && !coverflow_spinner() && spun_done == done + 1 && !coverflow_wait_input(down));
+    assert(slide() && !coverflow_spinner() && !coverflow_wait_input(down));
     assert(slide()->nkids == albums);
     close_page();
     rescan();
@@ -2002,12 +2030,12 @@ static void slow_open(void) {
     home.click(home.ctx, 0);
     assert(timer_fn && coverflow_spinner());
     assert(coverflow_wait_input(back)); /* Return's release gives it up */
-    assert(!timer_fn && !coverflow_spinner() && spun_done == done + 2);
+    assert(!timer_fn && !coverflow_spinner());
     run();
     assert(!slide());
-    all_ms = 0, dirty = spun_dirty;
+    all_ms = 0, painted = spun_paints;
     open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
-    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_dirty == dirty);
+    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_paints == painted);
     close_page();
 }
 
@@ -7299,7 +7327,7 @@ int main(void) {
     int drew = draws;
     coverflow_home_clip(home_art, canvas, 0);
     assert(draws == drew + 1);
-    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black. */
+    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black, dimmed in the vignette's rows. */
     clear_cover = 1;
     static const struct { int light; unsigned paper; } papers[] = {
         { 1, 0xff000000u | LIGHT_PAPER * 0x010101u }, { 0, 0xff000000u } };
@@ -7308,7 +7336,8 @@ int main(void) {
         coverflow_home_layout();
         coverflow_home_art(win);
         coverflow_home_clip(home_art, canvas, 0);
-        assert(shown[0] == papers[i].paper && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
+        /* the panel's top rows are under the vignette (vig_k): darker than the paper, the black one's unchanged; below it, the paper */
+        assert(shown[0] <= papers[i].paper && (i || (shown[0] & 255) < (papers[i].paper & 255)) && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
     }
     clear_cover = 0;
 
