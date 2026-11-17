@@ -8,7 +8,7 @@ No other suite runs the real demo with its real AWTK: test/fw links the payload'
 stock's functions, and test/patch.py runs the payload under Unicorn with stock's code beside it but no window
 manager. On 2026-11-17 a NULL read on every Now Playing open (Library > Songs > Center) passed both for
 about 1.5 h, because the fw stand-in for widget_get_prop_str returned the default where stock returns NULL.
-This drives the build as a user would, in about a minute:
+This drives the build as a user would, in about a minute and a half:
 
     boot                     Home on top
     Library > Songs > Center Now Playing opens (playing_page); Return to Songs; back to Home
