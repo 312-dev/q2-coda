@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/inotify.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -87,6 +88,10 @@ ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);
 ssize_t recvfrom(int, void *, size_t, int, void *, socklen_t *);
 int ioctl(int, unsigned long, ...);
 int poll(struct pollfd *, unsigned long, int);
+#define IN_MOVED_TO 0x80
+#define IN_NONBLOCK O_NONBLOCK
+#define IN_CLOEXEC O_CLOEXEC
+int inotify_init1(int), inotify_add_watch(int, const char *, uint32_t);
 int clock_gettime(int, struct timespec *);
 long time(long *);
 int getpid(void), kill(int, int), setpriority(int, unsigned, int);

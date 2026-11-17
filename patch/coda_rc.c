@@ -16,7 +16,7 @@
 #define HELLO_MS 10000
 #define AUTH_MS 150000
 #define ACK_MS 4000
-#define POLL_MS 250
+#define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
 #define LOG_MAX 65536
 
 enum { TR_TCP, TR_BLE };
@@ -632,6 +632,40 @@ void crc_ble_advertising(int on) {
 
 static void on_term(int sig) { quit = 1; }
 
+/* ms from now to at, 0 when it has passed */
+static uint32_t until(uint32_t at, uint32_t now) {
+    uint32_t d = at - now;
+    return d >= 0x80000000u ? 0 : d;
+}
+
+static int position_wanted(void) {
+    for (int i = 0; i < MAX_TCP; ++i)
+        if (tcp[i].used && tcp[i].s.state == S_AUTHED && tcp[i].s.subscribed & 2) return 1;
+    return ble.used && ble.s.state == S_AUTHED && ble.s.subscribed & 2;
+}
+
+/* How long the loop's poll may sleep: until the next thing falls due, at most TICK_MS. A socket's bytes and demo's
+ * files (renamed into /tmp by its shim: inotify's IN_MOVED_TO) end it sooner. Due: the second's tick, mDNS's next
+ * look or announcement, a playing song's position for a phone that follows it, Now Playing's bytes held back,
+ * a command's ACK_MS; at once while libdbus holds a message it read while sending. */
+static int wait_ms(uint32_t now, uint32_t last_tick) {
+    uint32_t w = until(last_tick + TICK_MS, now), d;
+    if ((d = mdns_due(now)) < w) w = d;
+    if (np.state == 1 && position_wanted() && (d = until(pos_pushed + 1000, now)) < w) w = d;
+    if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
+    if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
+    return ble_pending() ? 0 : (int)w;
+}
+
+/* demo's shim renames each file into /tmp: a watch on it ends the loop's sleep. Without one (no inotify) the loop
+ * looks every TICK_MS. */
+static int files_watch(void) {
+    char p[256];
+    int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd >= 0 && inotify_add_watch(fd, crc_path(p, sizeof p, "/tmp"), IN_MOVED_TO) < 0) close(fd), fd = -1;
+    return fd;
+}
+
 static void timeouts(conn *c) {
     if (!c->used) return;
     uint32_t age = crc_now_ms() - c->opened;
@@ -765,24 +799,30 @@ int main(int argc, char **argv) {
     int bfd = use_ble ? ble_start() : -1;
     if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;
-    uint32_t last_tick = 0;
+    int wfd = files_watch();
+    uint32_t last_tick = crc_now_ms() - TICK_MS;
     while (!quit) {
-        struct pollfd fds[MAX_TCP + 3];
+        struct pollfd fds[MAX_TCP + 4];
         int nf = 0, mfd = mdns_fd();
         if (lfd >= 0) fds[nf++] = (struct pollfd){lfd, POLLIN, 0};
         if (mfd >= 0) fds[nf++] = (struct pollfd){mfd, POLLIN, 0};
         if (bfd >= 0) fds[nf++] = (struct pollfd){bfd, (short)ble_events(), 0};
+        if (wfd >= 0) fds[nf++] = (struct pollfd){wfd, POLLIN, 0};
         int at[MAX_TCP];
         for (int i = 0; i < MAX_TCP; ++i) {
             at[i] = -1;
             if (tcp[i].used) { at[i] = nf; fds[nf++] = (struct pollfd){tcp[i].fd, POLLIN, 0}; }
         }
-        int r = poll(fds, nf, POLL_MS);
+        int r = poll(fds, nf, wait_ms(crc_now_ms(), last_tick));
         if (r < 0 && errno != EINTR) break;
         int k = 0;
         if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd);
         if (mfd >= 0 && fds[k++].revents & POLLIN) mdns_handle();
         if (bfd >= 0) ++k;
+        if (wfd >= 0 && fds[k++].revents & POLLIN) { /* which file does not matter: each is read below */
+            char ev[512];
+            while (read(wfd, ev, sizeof ev) > 0) {}
+        }
         ble_handle(); /* every pass: libdbus may hold bytes it has already read */
         for (int i = 0; i < MAX_TCP; ++i)
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
@@ -791,7 +831,7 @@ int main(int argc, char **argv) {
         online_poll();
         uint32_t now = crc_now_ms();
         mdns_poll(now);
-        if (now - last_tick >= 1000) {
+        if (now - last_tick >= TICK_MS) {
             last_tick = now;
             crc_tick();
             peers_poll();
@@ -807,6 +847,7 @@ int main(int argc, char **argv) {
     if (ble.used) conn_close(&ble);
     ble_stop();
     mdns_stop();
+    if (wfd >= 0) close(wfd);
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.online");
     unlink_at("/tmp/coda-rc.pid");
