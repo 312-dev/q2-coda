@@ -1949,10 +1949,18 @@ static void reboot_save(void) {
     ringnav_clean_end();
     if (mclGetPlayStatus() != 1) save_memoryplay_info(); /* ringnav_savequeue */
 }
-int ringnav_reboot(void) {
-    reboot_record(__builtin_return_address(0)); /* a Bluetooth abnormal reboot's crash log */
+int bt_stopped_hold(void *caller); /* bt_stopped.c */
+/* The reboot, for caller (reboot_record's): ringnav_reboot's, and Bluetooth Stopped's once its
+ * countdown ends (bt_stopped.c). */
+int ringnav_reboot_from(void *caller) {
+    reboot_record(caller); /* a Bluetooth abnormal reboot's crash log */
     reboot_save();
     return stock_reboot_trampoline();
+}
+int ringnav_reboot(void) {
+    void *caller = __builtin_return_address(0);
+    if (bt_stopped_hold(caller)) return 0; /* Bluetooth Stopped asks first (bt_stopped.c) */
+    return ringnav_reboot_from(caller);
 }
 void sw_update_restarting(void *win); /* sw_update.c */
 int ringnav_checkfw(void *win, void *ctx) {

@@ -169,6 +169,37 @@ def test_the_bar_never_rises_past_its_windows_top(fw):
     assert y == 0 and h > 32
 
 
+@pytest.mark.parametrize('share', (-1 + 1 / UNITS, -.5, .5, 1 - 1 / UNITS))
+def test_a_bar_moved_down_off_its_windows_top_stays_inside_the_box_painted_again(fw, share):
+    """Home's Split list starts 18 px above its window (split_art_up), so its first row's leaning bar is moved down
+    to the window's top, as far as 18 px into the next row. All it paints, its shadow too, stays inside tilt.box,
+    which tilt_poll paints again as the lean changes, else the bar's foot is left behind on the next row (user,
+    2026-11-16: a 6 px band of the bar left across Library, the selected row's text flickering)."""
+    bar = Bar(fw, win_y=58, list_y=-18)
+    bar.paint(y=0)
+    bar.turn(share)
+    x, y, w, h = bar.paint(y=0)
+    box = bar.state.box  # the window's coordinates; the bar is the list's, 18 px higher
+    assert y - 18 >= 0  # moved down to the window's top
+    shadow_foot = y - 18 + h + 3 * 2 + 3  # TILT_SHADOW rings, each 2 px lower and 1 px taller
+    assert box.y <= y - 18 and shadow_foot <= box.y + box.h
+
+
+@pytest.mark.parametrize('share', (-1 + 1 / UNITS, 1 - 1 / UNITS))
+def test_a_full_lean_s_shadow_stays_inside_the_box_painted_again(fw, share):
+    """An ordinary row's bar at a full lean: lifted TILT_LIFT px, grown, its outermost shadow ring 2 px lower a ring
+    and 1 px taller, ends 45 px below the row's top, a px past MARGIN round the row; the box tilt_poll paints again
+    reaches it, else that ring's last line stays on the row below once the bar springs back."""
+    bar = Bar(fw, win_y=58)
+    bar.paint(y=64)
+    bar.turn(share)
+    x, y, w, h = bar.paint(y=64)
+    box = bar.state.box
+    shadow = (x - 3, y + 3 * 2 * ease(255) // 256, w + 6, h + 3)  # tilt.c's outermost ring at this lean
+    assert box.x <= shadow[0] and shadow[0] + shadow[2] <= box.x + box.w
+    assert box.y <= min(y, shadow[1]) and shadow[1] + shadow[3] <= box.y + box.h
+
+
 def test_under_reduce_motion_the_bar_steps_without_leaning(fw):
     """A lean is MO_SPATIAL (ui_kit.h): with IPOD REDUCEMOTION on, a tug leaves the bar where it is."""
     from test_nav_painters import theme

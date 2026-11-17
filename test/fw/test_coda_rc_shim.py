@@ -126,45 +126,69 @@ def test_seek_and_volume(fw, ui, mcl, recs):
     assert q2.files[ACK] == b'6 1\n'
 
 
-def test_pairing_shows_the_code_and_cancel_tells_the_daemon(fw, ui, mcl, recs):
+def card_route(fw, ui):
+    """navigator_to opening stock's sortselect_dialog, as confirm() (feedback.c) asks for its card."""
+    def go(name, *_):
+        name = C.string_at(name).decode()
+        ui.went.append(name)
+        if name == 'dialog/sortselect_dialog':
+            d = ui.new('window_create', 0, 0, 0, 375, 320)
+            ui.name[d] = 'sortselect_dialog'
+            nav = ui.new('view', d, 0, 0, 375, 44)
+            ui.name[nav] = 'view_navbar'
+            ui.name[ui.new('image_create', nav, 0, 0, 44, 44)] = 'img_return'
+            lv = ui.new('list_view', d, 0, 44, 375, 210)
+            ui.name[lv] = 'list_view'
+            ui.name[ui.new('scroll_view_create', lv, 0, 0, 375, 210)] = 'scroll_view'
+    fw.mock('navigator_to', go)
+
+
+def test_pairing_asks_on_the_pairing_card_and_cancel_tells_the_daemon(fw, ui, mcl, recs):
+    """The code on pair_prompt.c's card (docs/oled-design.md#pairing): the phone in its title, Cancel its one answer
+    and Return's; the daemon is told."""
     q2 = Q2(fw, ui, recs)
+    card_route(fw, ui)
     q2.files[PAIR] = b'123456\nPixel 8\n'
     q2.tick()
-    page = ui.top()
-    assert ui.name[page] == 'carpair_page'
-    assert {'Pair with "Pixel 8"?', '123 456', 'Enter this code in Q2 Muse Remote'} <= set(ui.shown(page))
-    assert ui.captions(page) == ['Cancel']
-    ui.key(page, KEY_RETURN)
-    assert q2.files[PAIR_CANCEL] == b'1\n' and page not in ui.windows
+    card = ui.top()
+    assert ui.name[card] == 'sortselect_dialog' and 'carpair_page' not in ui.went
+    assert C.string_at(C.addressof(C.c_char.in_dll(fw.lib, 'pair_prompt__pair_name'))) == b'Pixel 8'
+    event = C.create_string_buffer(0x40)
+    C.c_int.from_buffer(event, O['EVENT_TYPE']).value = O['EVT_KEY_UP']
+    C.c_int.from_buffer(event, O['EVENT_KEY']).value = KEY_RETURN
+    ui.handler(card, O['EVT_KEY_UP'])(C.addressof(event))
+    ui.fire('card_answer')
+    assert q2.files[PAIR_CANCEL] == b'1\n' and card not in ui.windows
 
 
 def test_pairing_shows_a_new_code_that_came_between_two_polls(fw, ui, mcl, recs):
-    """The daemon ended one code and showed another inside one poll: the Dialog must not keep the old one."""
+    """The daemon ended one code and showed another inside one poll: the card must not keep the old one."""
     q2 = Q2(fw, ui, recs)
+    card_route(fw, ui)
     q2.files[PAIR] = b'242610\nPixel 10 Pro\n'
     q2.tick()
     old = ui.top()
-    assert '242 610' in ui.shown(old)
     q2.files[PAIR] = b'852219\nPixel 10 Pro\n'
     q2.tick()
     q2.tick()
-    page = ui.top()
-    assert old not in ui.windows and ui.name[page] == 'carpair_page'
-    assert '852 219' in ui.shown(page) and '242 610' not in ui.shown(page)
+    new = ui.top()
+    assert old not in ui.windows and new != old and ui.name[new] == 'sortselect_dialog'
+    assert ui.went.count('dialog/sortselect_dialog') == 2  # a second card, for the new code
     assert PAIR_CANCEL not in q2.files  # the daemon's own change: nothing cancelled
 
 
-def test_pairing_closes_when_the_daemon_ends_it_and_toasts(fw, ui, mcl, recs):
+def test_pairing_closes_when_the_daemon_ends_it_and_names_the_phone(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
-    q2.files[PAIR] = b'654321\nPhone\n'
+    card_route(fw, ui)
+    q2.files[PAIR] = b'654321\nPixel 8\n'
     q2.tick()
-    page = ui.top()
+    card = ui.top()
     del q2.files[PAIR]
     q2.files[PAIR_END] = b'1\n'
     q2.tick()
-    assert page not in ui.windows and PAIR_END not in q2.files
+    assert card not in ui.windows and PAIR_END not in q2.files
     ui.fire('cr_toast')
-    assert ui.toasts == ['Phone paired']
+    assert ui.toasts == ['Pixel 8 paired']
 
 
 def peer(name, id_=bytes(8)):

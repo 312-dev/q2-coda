@@ -408,27 +408,22 @@ static int pair_cancel(void *ctx, void *event) {
     return 0;
 }
 
-static int pair_keyup(void *ctx, void *event) {
-    if (I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
-    pair_cancel(ctx, event);
-    return STOP;
+/* The card's Cancel, Return, or its timeout (the daemon's CRC_PAIR_TIMEOUT_MS): the card is
+ * closing itself. */
+static void pair_answer(void *ctx, int row, int toggle_on) {
+    cr.pair_page = 0;
+    pair_cancel(ctx, 0);
 }
 
-/* The Dialog: the question as its title, the code in two groups of three as Wi-Fi transfer's PIN, a hint,
- * and Cancel (docs/remote-protocol.md#pairing-on-the-q2). */
+/* The pairing card (pair_prompt.c, docs/oled-design.md#pairing): the phone named in its title, the
+ * code in two groups of three, where to enter it, Cancel, and the pairing's 120 s as its bar
+ * (docs/remote-protocol.md#pairing-on-the-q2). */
 static void pair_show(const char *code, const char *name) {
-    char title[64], digits[8];
-    snprintf(title, sizeof title, "Pair with \"%s\"?", name);
-    snprintf(digits, sizeof digits, "%.3s %.3s", code, code + 3);
+    static const char *const rows[] = { "Cancel" };
     reset_poweroptions_timer(1, 1, 1); /* the screen on and kept on, as a key press would */
-    if (!(cr.pair_page = page_open("carpair_page", pair_closed, pair_keyup))) return;
-    void *view = page_list(cr.pair_page, cr.pair_page, 0, title, 1, 48);
-    page_row_detail(view, 0, "Cancel", 0, pair_cancel);
-    ringnav_select(view, 0, 1);
-    const scheme_t *c = scheme();
-    widget_set_text_utf8(label(cr.pair_page, 0, 120, 375, 64, "s_scrlabel_white20c", 56, 0xff000000u | c->ink), digits);
-    widget_set_text_utf8(label(cr.pair_page, 0, 196, 375, 24, "s_scrlabel_white20c", 16, 0xff000000u | c->muted),
-                         "Enter this code in Q2 Muse Remote");
+    cr.pair_page = pair_prompt(name, code, "Enter this code in Q2 Muse Remote", rows, 1, 0,
+                               120000, 0, pair_answer, 0);
+    if (cr.pair_page) widget_on(cr.pair_page, EVT_DESTROY, pair_closed, 0);
 }
 
 static void cr_pairing(void) {
