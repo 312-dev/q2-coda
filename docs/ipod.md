@@ -251,8 +251,10 @@ timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows 
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
 Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
-draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
-window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
+draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top, as Home's
+paint draws nothing outside its window; while a page slides over Home, from `page_parallax.c`'s
+paint of the bar after Home's snapshot, drifted and darkened with it and left of the sliding page,
+whose title alone shows over it: [internals](internals.md#page-parallax)). OLED's `split_art_up` is the
 bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
 stand over it. The main menu rises too: with the clock at the row's right, its left side is empty,
 so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
@@ -622,7 +624,8 @@ drifts 30% of the width left and darkens, and Return reverses that over 200 ms; 
 not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
-can hold the UI thread), Cover Flow (its open loads the albums and covers), the dialogs and quick
+can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
+[internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
 assets: Tidal and the other online pages, Wi-Fi transfer and the firmware download. Moving between
 folders reloads the folder page in place, so only opening and leaving that page slides. Stock
@@ -820,12 +823,14 @@ fast spin is heard as a few jumps and lands on the target. A press of the center
 and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Center cycles the controls the wheel sets, as an iPod classic's
-does (`np_centre`): a press starts scrubbing at once,
-the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
-Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
-picker, whose Center saves and leaves the page at rest, the wheel back on the volume. Return, a
-touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+plays from the target at Play. Center works as an iPod classic's
+(`np_centre`): a press starts scrubbing at once, and the next ends the scrub and puts a ring on
+Shuffle. The wheel then moves the ring across Shuffle, Repeat and the heart, changing nothing;
+Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One) and the
+ring stays, and on the heart opens the rating picker, whose Center saves and leaves the page at
+rest, the wheel back on the volume. While a radio plays the ring has only the heart; under a theme
+without the pair there is no ring and the scrub's press opens the picker. Return, a touch or 3
+seconds without a key end the ring. A short hold (`NP_HOLD_MS`, 400 ms) turns the
 screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 

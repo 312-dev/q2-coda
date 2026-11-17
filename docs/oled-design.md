@@ -196,7 +196,7 @@ All lists share one grid.
   [internals](internals.md#status-row-slots)):
   - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
     glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
-    digits' baseline, 3 to 11 px tall and moving on offset sines (a 1.25 s loop); paused, the pause, two 3 px bars
+    digits' baseline, 3 to 11 px tall, moving as every [level bar](#level-bars); paused, the pause, two 3 px bars
     11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. On pause the bars stop and
     cross-dissolve into the pause over 250 ms, `cubic_out`, and back on play, the bars moving again once it ends;
     the dissolve stays in the 10 x 11 box, so nothing else in the row moves; Reduce Motion swaps them at once (the
@@ -242,6 +242,16 @@ All lists share one grid.
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
+### Level bars
+
+The playing song's three level bars (the status row's play state, Home's first row, Up Next's header) are one
+motion wherever they show (`ui_kit.h` `lvl_*`): each bar passes through its column of the status row's ten approved
+frames (`mock_status_bars.py`: offset sines, a 1.25 s loop) every 125 ms, on a smooth curve between them, repainted
+30 times a second, so it rises and falls continuously instead of stepping between a few heights (the user's,
+2026-11-17 08:35: "smoother fps"). A height between two pixels shows its top row part-lit. Each screen keeps its own
+size (the status row's 2 px bars 3 to 11 px, Home's and Up Next's 3 px bars 5 to 12 px). Only the bars' own box
+repaints. Paused, they hold where they stopped and go on from there; under Reduce Motion they stand still.
+
 ### Home's first row
 
 Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`):
@@ -250,7 +260,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
   Edit Home lists it as Playing.
 - It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
-  sight: Up Next's level bars (3 px wide, 4.5 px apart, up to 12 px, a frame every 125 ms) in the accent while
+  sight: Up Next's [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px) in the accent while
   playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
   paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
   (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.
@@ -548,7 +558,7 @@ has no place for keeps a place of its own:
   the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
-  the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
+  the Center cycle's ring outlines the control the wheel has moved it to (Shuffle, Repeat or the heart) in today's 2 px Text Primary stroke, 9 px corners, no fill;
   a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
   shows the square. Both fit what is drawn: the glyph's ink alone with no dot showing (Up Next, radio, and
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
@@ -589,8 +599,8 @@ Tertiary), 46 px right of the text column. The list runs edge to edge to the foo
 as a menu's; a lit row's foot never passes y 282.
 
 - **The playing song** is the sheet's header and takes no selection: its cover, its title with
-  three Accent Blue level bars (3 px wide, 4.5 px apart, up to 12 px high) 7 px after it, moving
-  about 8 times a second while it plays and still while paused, and its artist and album
+  three Accent Blue [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
+  while it plays and still while paused, and its artist and album
   ("Pink Floyd · The Dark Side of the Moon").
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
@@ -757,8 +767,8 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
   record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
   `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
 - **Center with no ring** still does the screen's default: the primary button, a card's default answer.
-- **Now Playing's Center cycle** follows it too: the Shuffle or Repeat stage keeps its place, but its outline
-  (`np_bar.c` `glyph_framed`) draws only while `ui_focus_shown()`.
+- **Now Playing's Center cycle** follows it too: the ring on Shuffle, Repeat or the heart keeps its place, but its outline
+  (`np_bar.c` `glyph_framed`, `heart_ring`) draws only while `ui_focus_shown()`.
 - **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Center
   without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
   boots shown.
@@ -1148,8 +1158,7 @@ its window to the strip (`patch/keyboard.c` `kb_strip_due`).
 The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
 `design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
 centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
-and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, the blocks and the grab
-bar, and round the toggles inside their block.
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, and round the toggles inside their block.
 
 - **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
   26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
@@ -1180,7 +1189,7 @@ bar, and round the toggles inside their block.
 - **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 258, 10 px under the blocks, where the swipe up that closes the page starts.
+- **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
 - **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
   Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
   guest plays).
@@ -1462,12 +1471,19 @@ interruptible: a turn mid-run starts from where it is.
 
 - **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
   220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
-  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once, and over Home in Split
+  shows only over the sliding page, fading as it goes, while Home's raised rows and art drift and darken with Home
+  in the row beside it (`PAGE_SLIDE_MS`, stock's
   window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
   in over the same 220 ms.
 - **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
+- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
+  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
+  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
+  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
   ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
@@ -1488,7 +1504,7 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, and a track change and the cover into Now Playing cross-fade in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
@@ -1508,8 +1524,8 @@ interruptible: a turn mid-run starts from where it is.
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
-  same time), and land back at rest together, each followed by its own copy 40 px behind, so
-  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  same time) until each line's end meets its column's end, hold there 1.5 s, and go back to rest
+  together. A line slides only what overflows, so part of it always shows: none goes blank. The progress bar's fill moves a pixel at a time between the player's
   seconds rather than a second's width at once.
 
 ## Screens

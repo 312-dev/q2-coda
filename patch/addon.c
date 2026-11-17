@@ -363,6 +363,7 @@ static struct {
     char first[512]; /* the session's first song */
     char want[512];  /* the entry waited for */
     unsigned loads;  /* playback_loads at its start, then once its queue was loaded */
+    unsigned picks;  /* playback_picks at its start: a song the user moved to since ends its wait */
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
@@ -485,10 +486,18 @@ static int scanning(void) {
            navigator_window_is_exist("updatemusic_dialog");
 }
 
+/* Whether the user left a session still waiting for its first song: a playlist's by playing another
+ * queue, any by moving to another song of the queue playing (Next or Previous on the one before:
+ * the device, 2026-11-17, Shuffle's first song landed half way through the song Next had played,
+ * and played over it). The song waited for is left on the card. */
+static int moved_on(void) {
+    return (sm.m3u && playback_loads != sm.loads) || playback_picks != sm.picks;
+}
+
 static int stream_start(const void *unused) {
     (void)unused;
     sm.timer = 0;
-    if (sm.m3u && playback_loads != sm.loads) sm.state = S_DONE; /* the user played a queue since */
+    if (moved_on()) sm.state = S_DONE; /* the user played a queue, or another song, since */
     if (sm.state != S_WAIT) return 0;
     if (scanning()) { /* no listing during a scan, no play over its dialog: looked at again after */
         sm.seen = 0;
@@ -612,8 +621,9 @@ static void now_poll(void) {
 static int urls_start(const void *unused) {
     (void)unused;
     sm.timer = 0;
-    if (playback_loads != sm.loads) sm.state = S_DONE; /* the user played a queue since */
-    if (sm.state != S_WAIT || scanning()) return 0;    /* looked at again after the scan */
+    if (playback_loads != sm.loads || playback_picks != sm.picks)
+        sm.state = S_DONE; /* the user played a queue, or another song, since */
+    if (sm.state != S_WAIT || scanning()) return 0; /* looked at again after the scan */
     press_natural = 1;
     if (app_urls_play(sm.dir)) {
         qa.app = sm.app, qa.loads = playback_loads;
@@ -661,7 +671,7 @@ static void stream_poll(app_t *a) {
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = 0, sm.first[0] = sm.want[0] = 0;
-        sm.loads = playback_loads;
+        sm.loads = playback_loads, sm.picks = playback_picks;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
@@ -676,15 +686,15 @@ static void stream_poll(app_t *a) {
      * play_folder would open Now Playing over the dialog, so nothing until it closes. */
     int scan = scanning();
     if (sm.state == S_WAIT && sm.urls) { /* played whole at once, by stock's Tidal player */
-        if (playback_loads != sm.loads)
-            sm.state = S_DONE; /* the user played a queue before it started */
+        if (playback_loads != sm.loads || playback_picks != sm.picks)
+            sm.state = S_DONE; /* the user played a queue, or another song, before it started */
         else if (!sm.timer && !scan && !addon_game_audio()) /* not under a card game's sound */
             sm.timer = timer_add(urls_start, 0, 0);
         return;
     }
     if (sm.state == S_WAIT) {
-        if (sm.m3u && playback_loads != sm.loads)
-            sm.state = S_DONE; /* the user played a queue before its first song came */
+        if (moved_on())
+            sm.state = S_DONE; /* the user played a queue, or another song, before its first came */
         else if (!sm.timer && !scan && !addon_game_audio() && /* the game's sound: the song waits */
                  (sm.m3u ? m3u_ready() : stream_newer(sm.dir, "")))
             sm.timer = timer_add(stream_start, 0, 0);

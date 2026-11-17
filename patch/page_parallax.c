@@ -3,7 +3,8 @@
  * dims to PX_DIM_ALPHA; a pop is the reverse, PAGE_POP_MS against the push's PAGE_SLIDE_MS. The
  * status row is the system bar's own window, painted over the slide in place, so it stays put
  * (ponytail: its title changes to the new page's at once; a cross-fade would draw both pages'
- * titles in the bar, which Home's raised list also paints rows into).
+ * titles in the bar). Over Home in Split it shows only over the sliding page, faded with it, as
+ * Home's band beside the page holds its own rows (theme_titles_paint.c bar_title_fades).
  *
  * Stock's htranslate window animator (the hint every sliding page carries, tools/ipod.py SLIDE)
  * draws both pages from the snapshots it took at the start: the page under (prev_img) moved the
@@ -13,7 +14,10 @@
  * - parallax_update: a close's time runs PAGE_SLIDE_MS / PAGE_POP_MS as fast, so the animator
  *   ends sooner (its end is the time's, read after this);
  * - parallax_prev: the page under drawn at PX_UNDER_PCT of stock's offset, then darkened where the
- *   new page does not yet cover it, in proportion to how far the new one is in.
+ *   new page does not yet cover it, in proportion to how far the new one is in. With Home in
+ *   Split under, it then paints the system bar again: Home's band, the rows above its window, is
+ *   the bar's to draw (coverflow.c coverflow_home_bar), and stock's own paint of the bar comes
+ *   before this frame's percent (parallax_slide).
  * Under Reduce Motion the hint is a fade (ui_kit.c motion_row), so none of this runs. Every window
  * that slides takes it: pages, Now Playing's close, Cover Flow.
  */
@@ -33,6 +37,24 @@
 
 #define F(p, off) (*(float *)((char *)(p) + (off)))
 
+/* The page under the slide and how far the new page is in, while parallax_prev paints the bar */
+static struct {
+    void *under;
+    float percent;
+    int painting;
+} px __attribute__((section(".scratch")));
+extern int coverflow_home_slide(int *open); /* coverflow.c */
+
+/* The page under the window sliding now, and in *percent how far the sliding one is in (0..1),
+ * while parallax_prev paints the system bar over the frame it just drew; else 0. Stock paints
+ * the bar first in each frame (window_animator_begin_frame), before update_percent, so a paint
+ * there would see the frame before. */
+void *parallax_slide(float *percent) {
+    if (!px.painting) return (void *)0;
+    *percent = px.percent;
+    return px.under;
+}
+
 /* The page under's offset from its place, px left, with the new page percent (0..1) in. */
 int parallax_under_x(int w, float percent) {
     return (int)(w * percent * PX_UNDER_PCT / 100 + 0.5f);
@@ -51,17 +73,23 @@ int parallax_update(void *wa) {
 
 int parallax_prev(void *wa) {
     float percent = F(wa, WA_PERCENT);
-    void *win = P(wa, WA_PREV_WIN), *c = P(wa, WA_CANVAS);
+    void *win = P(wa, WA_PREV_WIN), *c = P(wa, WA_CANVAS), *bar = *(void *const *)system_bar;
     F(wa, WA_PERCENT) = percent * PX_UNDER_PCT / 100;
     int r = htranslate_draw_prev(wa);
     F(wa, WA_PERCENT) = percent;
     void *lcd = c ? P(c, CANVAS_LCD) : (void *)0;
     int w = win ? I(win, W_W) : 0, open = w - (int)(w * percent + 0.5f);
     unsigned a = parallax_dim(percent);
-    if (r || !lcd || open <= 0 || !a) return r;
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    stock_canvas_set_fill_color(c, a << 24); /* black in both halves, as iOS dims */
-    canvas_fill_rect(c, 0, I(win, W_Y), open, I(win, W_H));
-    stock_canvas_set_fill_color(c, fill);
+    if (r || !lcd) return r;
+    if (open > 0 && a) {
+        unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+        stock_canvas_set_fill_color(c, a << 24); /* black in both halves, as iOS dims */
+        canvas_fill_rect(c, 0, I(win, W_Y), open, I(win, W_H));
+        stock_canvas_set_fill_color(c, fill);
+    }
+    /* Home in Split under the slide: the bar again, this frame's, its band drifting with Home */
+    px.under = win, px.percent = percent, px.painting = 1;
+    if (bar && coverflow_home_slide(&open)) widget_paint(bar, c);
+    px.painting = 0;
     return r;
 }

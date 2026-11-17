@@ -5,7 +5,8 @@
  * guest_active); it is there only while one of those holds (library_edit.c lr_home_apply,
  * coverflow.c np_loaded). Its glyph leads it at the text column, the status row's play state moved
  * here while the row shows (status_row.c play_shown): Up Next's level bars (upnext.c un_bars, 3 px
- * wide, 4.5 px apart, up to 12 px, a frame every HN_FRAME_MS, still under Reduce Motion) in the
+ * wide, 4.5 px apart, HN_BAR_LO to 12 px, ui_kit.h's one level-bar motion repainting only the
+ * glyph's box every MO_LOOP_MS, still under Reduce Motion) in the
  * accent while playing, Phosphor pause's two bars (4 x 12 px, 2 px apart) in Text Secondary while
  * paused, either white on the selection; a guest's the same by the guest's state. Only this row's
  * words move: they start HN_TEXT_DX after the glyph's column (the label's left margin), the other
@@ -19,7 +20,7 @@
  * (ui_kit.c ovm_bind), never from a paint. Under Reduce Motion both are a cut. */
 #include "navigation.h"
 
-#define HN_FRAME_MS 125 /* the bars' frame, Up Next's UN_BARS_MS */
+#define HN_BAR_LO 5     /* the bars' least height, Up Next's UN_BAR_LO */
 #define HN_MORPH_MS 250 /* bars <-> pause, and the words' cross-fade */
 #define HN_TEXT_DX 18   /* the words after the glyph's column: its 12 px and a 6 px gap */
 #define HN_MARGIN 2     /* hscroll_label's own left margin, the text column's start */
@@ -32,8 +33,8 @@ static struct {
     void *win, *row, *img, *label, *was; /* Home, its first row, the click target, the words, the
                                             old words while they fade */
     void *click, *click_ctx; /* stock's click on img (home_page_bind_widget's), its ctx */
-    unsigned timer;
-    int frame, state, editing;
+    lvl_clock_t clock;       /* the bars' time along their loop (ui_kit.h lvl_h16) */
+    int state, editing;
     anim_t morph;       /* the glyph's run from p_from to p_to */
     short p_from, p_to; /* 0 the bars, 1000 the pause */
     ovm_t in, out;      /* the words' cross-fade: the new ones' level, the old ones' */
@@ -116,24 +117,33 @@ int home_np_lead(void) {
     return list && widget_get_visible(list);
 }
 
-/* Whether the bars move now: playing, the morph done, the row in sight and motion allowed
- * (MO_DECOR: still under Reduce Motion). */
+/* Whether the bars move now: lit, playing, the morph done, the row in sight and motion allowed
+ * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
 static int hn_moving(void) {
-    return hn.img && !hn.p_to && !anim_running(&hn.morph) && home_np_lead() &&
-           motion_ms(HN_FRAME_MS, MO_DECOR);
+    return hn.img && hn.label && !hn.p_to && !anim_running(&hn.morph) && g_backlight_status &&
+           home_np_lead() && motion_ms(LVL_STEP_MS, MO_DECOR);
 }
-/* Every HN_FRAME_MS while the bars move: the next frame; it ends itself when they stop. */
-static int hn_tick(const void *info) {
-    (void)info;
-    if (!hn_moving()) return hn.timer = 0; /* RET_REMOVE */
-    ++hn.frame;
-    widget_invalidate_force(hn.img, (void *)0);
-    return 8; /* RET_REPEAT */
+/* The glyph's box on img_playing: the text column, HN_PAUSE_H and the bars' part-covered top row
+ * above base, 13 px wide (the outer bar's right edge at 12). */
+static rect_t hn_box(void) {
+    int x = I(hn.label, W_X) - I(hn.img, W_X) + HN_MARGIN, base = I(hn.img, W_H) / 2 + HN_BASE;
+    return (rect_t){ x, base - HN_PAUSE_H - 1, 13, HN_PAUSE_H + 1 };
+}
+/* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: the
+ * glyph's box repainted at the clock's time; 0 (dropped) once they stop. */
+static int hn_frame(void) {
+    int on = hn_moving();
+    lvl_run(&hn.clock, on);
+    if (on) {
+        rect_t r = hn_box();
+        widget_invalidate_force(hn.img, &r);
+    }
+    return on;
 }
 
 /* coverflow.c coverflow_home_np, on every bar paint (each second at least, and as the play state
  * changes): a change of state starts the morph and the words' cross-fade (the shared frame timer
- * paints them, ui_kit.c motion_frames), and the bars' timer runs while they move. */
+ * paints them, ui_kit.c motion_frames), and the bars' loop runs while they move. */
 void home_np_sync(void) {
     if (!hn.win) return;
     if (hn.was && !ovm_running(&hn.out)) hn_fade_done();
@@ -147,13 +157,14 @@ void home_np_sync(void) {
         }
         if (state != hn.state) hn_words_to(state);
     }
-    if (!hn.timer && hn_moving()) hn.timer = timer_add(hn_tick, (void *)0, HN_FRAME_MS);
+    int on = hn_moving();
+    lvl_run(&hn.clock, on);
+    if (on) motion_loop(hn_frame);
 }
 
 static int hn_gone(void *win, void *event) {
     (void)event;
     if (win != hn.win) return 0;
-    stop_timer(&hn.timer);
     ovm_bind(&hn.in, (void *)0);
     ovm_bind(&hn.out, (void *)0);
     memset(&hn, 0, sizeof hn);
@@ -196,21 +207,19 @@ static unsigned hn_mix_rgb(unsigned a, unsigned b, int p) {
 /* The glyph at x (the text column) standing on base, at p (0 the bars, 1000 the pause; between,
  * the morph: design/home-np-icon/mock_transition.py glyph), in rgb. */
 static void hn_glyph(void *canvas, int x, int base, int p, unsigned rgb) {
-    static const unsigned char h[4][3] = { { 7, 11, 5 }, { 10, 6, 9 }, { 5, 9, 11 }, { 9, 12, 6 } };
-    const unsigned char *hs = h[hn.frame & 3];
+    unsigned t = lvl_time(&hn.clock);
     for (int i = 0; i < 3; ++i) { /* left to right, as Up Next's */
-        rect_t r;
         unsigned ink = RGBA(rgb);
-        if (i == 1) { /* the middle one narrows and fades */
-            int wm = hn_mix(3, 0, p), bh = hn_mix(hs[1], HN_PAUSE_H / 2, p);
+        int h16 = lvl_h16(i, t, HN_BAR_LO, HN_PAUSE_H); /* sixteenths, lvl_fill's */
+        if (i == 1) {                                   /* the middle one narrows and fades */
+            int wm = hn_mix(3, 0, p);
             if (wm <= 0) continue;
-            r = (rect_t){ x + 4 + (3 - wm) / 2, base - bh, wm, bh };
             ink = (ink & 0xffffffu) | (unsigned)(255 * (1000 - p) / 1000) << 24;
+            lvl_fill(canvas, x + 4 + (3 - wm) / 2, base, wm, hn_mix(h16, HN_PAUSE_H * 8, p), ink);
         } else { /* the outer two: x 0 and 9 (4.5 apart) to the pause's 1 and 7, 3 to 4 px wide */
-            int bh = hn_mix(hs[i], HN_PAUSE_H, p);
-            r = (rect_t){ x + hn_mix(i ? 9 : 0, i ? 7 : 1, p), base - bh, hn_mix(3, 4, p), bh };
+            lvl_fill(canvas, x + hn_mix(i ? 9 : 0, i ? 7 : 1, p), base, hn_mix(3, 4, p),
+                     hn_mix(h16, HN_PAUSE_H * 16, p), ink);
         }
-        fill_box(canvas, &r, ink, 1);
     }
 }
 
@@ -222,6 +231,6 @@ void home_np_paint(void *w, void *canvas) {
     unsigned rgb = lit ? tok(TOK_ON_ACCENT)
                        : hn_mix_rgb(scheme()->tones[0] & 0xffffffu,
                                     light ? RGB_SECONDARY_L : RGB_SECONDARY, p);
-    int x = I(hn.label, W_X) - I(w, W_X) + HN_MARGIN, base = I(w, W_H) / 2 + HN_BASE;
-    hn_glyph(canvas, x, base, p, rgb);
+    rect_t box = hn_box();
+    hn_glyph(canvas, box.x, box.y + HN_PAUSE_H + 1, p, rgb);
 }
