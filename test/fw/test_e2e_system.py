@@ -7,7 +7,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Files, in_fork
+from conftest import O, Files, in_fork, stock_prop_str
 
 W_PARENT, EVT_CLICK, TIMER_CTX = O['W_PARENT'], O['EVT_CLICK'], O['TIMER_CTX']
 EVT_KEY_DOWN, EVT_KEY_UP = O['EVT_KEY_DOWN'], O['EVT_KEY_UP']
@@ -69,8 +69,8 @@ class Screen:
         fw.mock('widget_get_visible', lambda w, *_: self.shown.get(w, 1))
         fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: self.box(w, x, y, ww, h))
         fw.mock('widget_resize', lambda w, ww, h, *_: self.resize(w, ww, h))
-        fw.mock('widget_get_prop_str', lambda w, key, default, *_: self.prop(w, key, default, str))
-        fw.mock('widget_get_prop_int', lambda w, key, default, *_: self.prop(w, key, default, int))
+        fw.mock('widget_get_prop_str', self.prop_str)
+        fw.mock('widget_get_prop_int', lambda w, key, default, *_: self.prop(w, key, default))
         fw.mock('widget_set_prop_str', lambda w, key, v, *_: self.set_prop(w, C.string_at(key).decode(),
                                                                            C.string_at(v).decode()))
         fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.set_prop(w, C.string_at(key).decode(),
@@ -134,11 +134,17 @@ class Screen:
         x, y, _, _ = self.at(w)
         self.box(w, x, y, ww, h)
 
-    def prop(self, w, key, default, kind):
+    def prop(self, w, key, default):
         value = self.props.get(w, {}).get(C.string_at(key).decode())
-        if value is None:
-            return default
-        return self.string(value) if kind is str else value
+        return default if value is None else value
+
+    def prop_str(self, w, key, default, *_):
+        if w not in self.types:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        key = C.string_at(key).decode()
+        value = self.names.get(w) if key == 'name' else self.props.get(w, {}).get(key)
+        value = stock_prop_str(self.types[w].encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.string(value.decode()) if isinstance(value, bytes) else value
 
     def set_prop(self, w, key, value):
         self.props.setdefault(w, {})[key] = value
