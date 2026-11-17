@@ -197,6 +197,12 @@ HOOKS = {
     'stream_row': (0x540f7c, 'ringnav_stream_row', 'stream_row'),
     'netservice_row': (0x4cce64, 'ringnav_netservice_row', 'netservice_row'),
     'playermore_online': (0x539614, 'ringnav_online_match', 'online_match'),
+    # Settings > Wi-Fi's flows (wifi_flows.c, docs/internals.md#wi-fi-page-flows): the switch and Search Again rows'
+    # click, a network row's click and the list's builder (none has a symbol), and stock's 500 ms Wi-Fi poll
+    'wifimenu_switch_row': (0x4d61e0, 'ringnav_wifi_switch_row', 'wifi_switch_row'),
+    'wifimenu_network_row': (0x4d62d8, 'ringnav_wifi_network_row', 'wifi_network_row'),
+    'wifimenu_rows_build': (0x4d5950, 'ringnav_wifi_rows', 'wifi_rows'),
+    'network_checkstatus': (0x518cf0, 'ringnav_wifi_checkstatus', 'wifi_checkstatus'),
     # Scan Folders' row click: a tap on a folder with no folders inside ticks it (scan_folders.c)
     'specfolder_click': (0x53f9b4, 'ringnav_specfolder_click', 'specfolder_click'),
     # The boot animation plays to its end: demo's screen shows nothing until it has (splash_hold.c)
@@ -1991,6 +1997,13 @@ FUNCTIONS = {
  'wifi_switch': ('int', 'int'),
  'networkGetConnectStatus': ('int', 'void'),  # 0 no link (networkStop), above 0 connected
  'mclGetPlayType': ('int', 'void'),  # the queue's type: 2, 3, 0xf1 and 0xf2 stream (on_wm_timer_networkstatus)
+ # Settings > Wi-Fi's flows (wifi_flows.c): a scan record's join and Forget by its index in wifi_showlist,
+ # whether a network is saved, wpa_supplicant's disconnect, and the saved list dropped and read again
+ 'wifi_action_connect': ('int', 'int'), 'wifi_action_deleterecord': ('int', 'int'),
+ 'networkCheckConnectedSsid': ('int', 'const char *'), 'networkDisconnect': ('int', 'void'),
+ 'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
+ # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
+ 'networkCheckSsidPassword': ('int', 'const char *, const char *'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
@@ -2021,6 +2034,11 @@ PRIVATE_FUNCTIONS = {
     "stream_row": HOOKS['stream_row'][0],  # Streaming's Tidal row: atoi of the button's name
     "netservice_row": HOOKS['netservice_row'][0],  # Network service's DLNA, AirPlay and Wi-Fi transfer
     "playermore_online": HOOKS['playermore_online'][0],  # More's Download Cover & Lyrics: (window)
+    # Settings > Wi-Fi's flows (wifi_flows.c): the switch and Search Again rows' click (row named 0 or 1), a network
+    # row's click (named by its scan record) and the list's builder (window)
+    "wifimenu_switch_row": HOOKS['wifimenu_switch_row'][0],
+    "wifimenu_network_row": HOOKS['wifimenu_network_row'][0],
+    "wifimenu_rows_build": HOOKS['wifimenu_rows_build'][0],
     "specfolder_click": HOOKS['specfolder_click'][0],  # Scan Folders' row click
 }
 GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a Tidal list loaded
@@ -2047,7 +2065,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_wififlag', 'wifi_initstatus', 'wifi_connectstatus', 'g_airplayflag', 'g_dlnaflag',
            'g_synclinkflag', 'g_syncLink_status', 'g_wifitransport_flag', 'g_syncnettime_flag',
            'g_forcerefresh_flag',  # Now Playing's page update writes the title and artist again (catalogue.c np_done)
-           'wifi_searchtime',
+           'wifi_searchtime', 'g_wifisetting_flag',  # the Wi-Fi page's timer rebuilds its list (wifi_flows.c)
            # Settings > Bluetooth (bt_ui.c): its scan's countdown (not 0 while it runs, 1 as it ends), a flag that
            # has the page's timer rebuild its list, and Quality's choice (the btcode_* row, 0 LDAC Best to 7 SBC)
            'bt_searchtime', 'g_btsetting_flag', 'g_btcoding']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
@@ -2073,6 +2091,9 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
                 'wifi_showlist': 4,  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
+                # Settings > Wi-Fi's flows (wifi_flows.c): stock's monitor's last STATUS (wpa_state @0xd8), the network
+                # a join tries, and the network and password the password entry asks for
+                'g_wifiStatus': 248, 'wifi_name': 256, 'prepare_linkssid': 256, 'prepare_linkpasswd': 128,
                 'pdeq_btshowlist': 4}  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
@@ -2127,7 +2148,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its

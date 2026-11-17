@@ -2422,14 +2422,26 @@ static int swipe(void *ctx, void *event) {
     return 11; /* RET_STOP */
 }
 
+/* Whether field row i takes a password, which the letter strip shows as dots (search_strip.c
+ * ss_secret_box). Q2SPOT/1 has no word for one, so it is a field titled as one ("Password",
+ * "Passcode": "pass" in any case) or one whose subtitle is asterisks alone, the app's mask. */
+static int field_secret(int i) {
+    const char *sub = cell(i, 3);
+    if (strcasestr(cell(i, 2), "pass")) return 1;
+    while (*sub == '*') ++sub;
+    return *cell(i, 3) && !*sub;
+}
+
 /* peq_ui.c's T9 edit over the title, its keyboard open: a Search row's press, or its icon's tap
- * (field 0); or field row field - 1's press, its title the box's hint. */
+ * (field 0); or field row field - 1's press, its title the box's hint, marked _secret when it
+ * takes a password (field_secret). */
 static void search_box(int field) {
     keep_sel();
     pg.field = field;
     widget_destroy_children(pg.page), pg.view = 0; /* the box alone, as Spotify's */
     pg.edit = edit_create(pg.page, "text", 2, 26);
     widget_set_prop_str(pg.edit, "tips", field ? cell(field - 1, 2) : app()->tips);
+    if (field && field_secret(field - 1)) widget_set_prop_int(pg.edit, "_secret", 1);
     widget_on(pg.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(pg.edit, EVT_IM_ACTION, searched, 0);
     widget_on(pg.edit, EVT_BLUR, search_left, 0);

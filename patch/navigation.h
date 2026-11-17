@@ -117,7 +117,7 @@ typedef struct {
     void *ch_page;
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
-    int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
+    int ch_cue, ch_end; /* the Chapters track's CUE start and end, file seconds */
     /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
      * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, Download Ahead's label, the
      * provider page's Cache and Erase Spotify Data labels; each 0 while its page is closed */
@@ -329,7 +329,7 @@ extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
-    search_strip_hold(void *top);
+    search_strip_hold(void *top), search_strip_owns(void *top);
 void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
@@ -356,7 +356,9 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_usbmode_trampoline(void *, void *, void *, void *),
     stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
-    stock_online_match_trampoline(void *);
+    stock_online_match_trampoline(void *), stock_wifi_switch_row_trampoline(void *, void *),
+    stock_wifi_network_row_trampoline(void *, void *), stock_wifi_rows_trampoline(void *),
+    stock_wifi_checkstatus_trampoline(void);
 extern int scrobble_ready(void), scrobble_start(void), scrobble_poll(int *sent),
     scrobble_flag(const char *key), scrobble_value(const char *key);
 extern const char *now_tag(void *r, int field);
@@ -484,6 +486,9 @@ int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
+void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
+int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);
@@ -494,15 +499,15 @@ void synclink_default(void);
 int about_list(void *list);
 void about_rows(void *view);
 int reset_list(void *list);
-void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
-int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
+void reset_rows(void *view); /* settings_pages.c: Reset Settings' rows */
+int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face; -1 unmeasured */
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-    *const reduce_motion_caption;
+                                                      *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
@@ -665,7 +670,8 @@ int np_about_key(void *top, unsigned key);
 int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
-int np_mode_shuffle(void), np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
+int np_mode_shuffle(void),
+    np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, then a focus ring
  * the wheel moves across shuffle, repeat and the heart (nav/now_playing.c np_centre; np_bar.c
  * np_modes draws it) */
@@ -953,6 +959,7 @@ int search_strip_box(void *kb, void *edit, const char *title);
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
 void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
+void search_strip_secret(void);           /* ... the next one's text a password, as dots */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */
@@ -1041,7 +1048,8 @@ void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
-void carremote_poll(void), carremote_paired(const char *name), carremote_paint(void *w, void *canvas);
+void carremote_poll(void), carremote_paired(const char *name),
+    carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
 int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
 void song_radio_poll(void);
@@ -1064,11 +1072,11 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
-int sw_update_key(void *top, unsigned key); /* its page's wheel and Centre */
+int sw_update_key(void *top, unsigned key);           /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);
-int tsv_split(char *line, char **f, int max);         /* catalogue.c */
+int tsv_split(char *line, char **f, int max); /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
  * a list this long or shorter has none; a touch this near the list's right edge is the index's;

@@ -275,6 +275,8 @@ demo	0x4d3a80	0xc8	systemset_sysset_timer_start	Adds the 500 ms page timer once,
 demo	0x4d3b48	0x60	systemset_sysset_page_on_foreground	Page handler for window to foreground: shows the play gif, sets the wheel-mode focus keys, starts the page timer.
 demo	0x4d418c	0xb8	systemset_system_item_on_click	New in V1.34. System row click: opens systemset/fwupdate_page, reset_page or about_page by the row's name.
 demo	0x4d5950	0x82c	wifimenu_rows_build	Rebuilds the Wi-Fi page list: switch row, scan results with signal icons, add network.
+demo	0x4d61e0	0xf8	wifimenu_switch_row	The Wi-Fi page's switch and Scanning rows' click, by the row's name: wifi_switch, or wifi_scan.
+demo	0x4d62d8	0x210	wifimenu_network_row	A Wi-Fi network row's click: check_wifinextaction's Forget, Disconnect, join, or the password entry.
 demo	0x4d9b34	0x14c	testmode_test_key_play_wav	Test-key page action: in output mode 4 stops playback and closes the page, else loads /mnt/mmc and plays test1.wav.
 demo	0x4da594	0x290	btrecv_info_labels_update	Fills label_title and label_artist from the Bluetooth receive info and lyric buffer, with the play time.
 demo	0x4e0a1c	0x36c	tidal_albuminfo_bind_widget	Tidal album page's per-widget visitor: binds the bar's buttons by name (img_return, img_home, btn_allplay, img_fav, img_search) and sizes list_view_tidalalbum.

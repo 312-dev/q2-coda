@@ -3066,6 +3066,24 @@ def test_a_field_row_sends_its_text_and_takes_the_reply_in_the_levels_place(fw):
     assert b'Username:' in texts and not [t for t in texts if SECRET in t]  # nothing on screen holds it
 
 
+@pytest.mark.parametrize('row, secret', [
+    (PASSWORD, True), (USER, False),
+    ((b'field', b'pin', b'Passcode', b'', b'', b''), True),  # titled as one, empty yet
+    ((b'field', b'key', b'API key', b'****', b'', b''), True),  # the app's mask
+    ((b'field', b'host', b'Server', b'', b'', b''), False),
+])
+def test_a_password_field_s_box_is_marked_for_the_strip_s_dots(fw, row, secret):
+    """The letter strip shows a box marked _secret as dots (search_strip.c ss_secret_box); Q2SPOT/1 has no word for a
+    password, so a field titled as one or showing the app's asterisks is one."""
+    p = Page(fw)
+    marks = []
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: C.string_at(k) == b'_secret' and marks.append((w, v)))
+    p.answer(rows=[row])
+    box = edit_box(fw)
+    p.click(0)
+    assert marks == ([(box, 1)] if secret else [])
+
+
 def test_a_field_text_of_63_bytes_is_sent_whole(fw):
     p = Page(fw)
     p.answer(rows=[USER])

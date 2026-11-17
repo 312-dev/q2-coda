@@ -568,21 +568,34 @@ def cta_ring_end(right, rgb):
     return png(r, CTA_RING_H, laid(r, CTA_RING_H, [(cov, lambda x, y: (rgb, 1))]))
 
 
-# Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a letter, the lit key grows a bubble
-# holding the letter at POP_LETTER_PX, and the key keeps the letter at the strip's size, dimmed (the echo). Panel px.
+# Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a character, the lit key grows a bubble
+# holding it at POP_LETTER_PX (the key keeps it at the strip's size, dimmed, drawn by the payload). Panel px.
 # The bubble is one closed path: a POP_HEAD head with POP_HEAD_R corners whose sides each run one cubic S-curve
 # over POP_NECK px, leaving the head and meeting the key vertically (tangents continuous, so the edge never kinks),
 # ending inside the key's top 6 px; then the POP_KEY key with POP_KEY_R corners. Even widths with an even
-# difference, so head, key and letter share one centre. The image is the head's width and reaches the key's foot.
+# difference, so head, key and character share one centre. The image is the head's width and reaches the key's foot.
 POP_KEY_W, POP_KEY_H, POP_KEY_R = 18, 24, 5
 POP_HEAD_W, POP_HEAD_H, POP_HEAD_R = 30, 30, 9
 POP_NECK = 18
 POP_H = POP_HEAD_H + POP_NECK + POP_KEY_H - 6
-POP_LETTER_PX, POP_LETTER_DY = 26, 2  # the big letter's ink centred on the head, 2 px below its middle
-POP_ECHO_PX, POP_ECHO_A = 19, 153  # the echo: Inter Regular at the strip's size, white at 60 %
-POP_ECHO_H = 34  # the echo's box is the key's width by the strip's height, its baseline the strip letters' own
-POP_ECHO_BASELINE = 23  # ... where the payload's text rule puts the strip's 19 px letters (measured)
-POP_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+POP_LETTER_PX, POP_LETTER_DY = 24, 2  # the big character's ink centred on the head, 2 px below its middle
+# every character of the strip's sets but the space, in their order (search_strip.c ss_sets): abc, ABC, 123, #+=
+POP_CHARS = ('abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' '0123456789'
+             '!@#$%&*-_.?/+=:;,\'"()[]{}<>^~`\\|')
+# the strip's return key's mark (search_strip.c SS_RET_MARK): the keyboard's return symbol, a stem down the right, a
+# slightly rounded corner, a bar to the left ending in an open arrowhead, round capped and joined; centred in a
+# RETURN_PX box, its strokes RETURN_STROKE wide, in white on the accent's circle and in the accent on white
+RETURN_PX, RETURN_STROKE, RETURN_CORNER = 20, 2.2, 2.5
+
+
+def return_mark(rgb):
+    """The return key's mark as a RETURN_PX square PNG in rgb."""
+    c, r = RETURN_PX / 2, RETURN_CORNER
+    bend = [(c + 7 - r + r * math.cos(a * math.pi / 16), c + 3 - r + r * math.sin(a * math.pi / 16)) for a in range(9)]
+    stem = [(c + 7, c - 7), *bend, (c - 7, c + 3)]
+    head = [(c - 3, c - 1), (c - 7, c + 3), (c - 3, c + 7)]
+    polys = stroke([stem, head], RETURN_STROKE)
+    return png(RETURN_PX, RETURN_PX, laid(RETURN_PX, RETURN_PX, [(coverage_nonzero(polys, (0, 0, RETURN_PX, RETURN_PX)), lambda x, y: (rgb, 1))]))
 
 
 def pop_bubble_d():
@@ -616,19 +629,17 @@ def ink_polys(ch, px, cx, cy=None, baseline=None, face='Medium'):
 
 
 def pop_images(accent):
-    """{name: PNG}: the bubble in the accent, and two strips of the characters in POP_CHARS' order, white: the big
-    letters, one head's box each, and the echoes, one key's box each (one image a strip, not one a character: a
-    third of the bytes)."""
+    """{name: PNG}: the bubble in the accent, a strip of the characters in POP_CHARS' order, white, one head's box each
+    (one image, not one a character: a third of the bytes), and the return key's mark in white and in the accent."""
     n, out = len(POP_CHARS), {}
     out['search_pop'] = png(POP_HEAD_W, POP_H, laid(POP_HEAD_W, POP_H, [
         (coverage_nonzero(path(pop_bubble_d()), (0, 0, POP_HEAD_W, POP_H)), lambda x, y: (accent, 1))]))
-    for name, cell, h, a, place in (
-            ('search_pop_letters', POP_HEAD_W, POP_HEAD_H, 1,
-             lambda ch, cx: ink_polys(ch, POP_LETTER_PX, cx, cy=POP_HEAD_H / 2 + POP_LETTER_DY)),
-            ('search_pop_echoes', POP_KEY_W, POP_ECHO_H, POP_ECHO_A / 255,
-             lambda ch, cx: ink_polys(ch, POP_ECHO_PX, cx, baseline=POP_ECHO_BASELINE, face='Regular'))):
-        polys = [p for i, ch in enumerate(POP_CHARS) for p in place(ch, cell * i + cell / 2)]
-        out[name] = png(cell * n, h, laid(cell * n, h, [(coverage_nonzero(polys, (0, 0, cell * n, h)), lambda x, y, a=a: (0xffffff, a))]))
+    polys = [p for i, ch in enumerate(POP_CHARS)
+             for p in ink_polys(ch, POP_LETTER_PX, POP_HEAD_W * i + POP_HEAD_W / 2, cy=POP_HEAD_H / 2 + POP_LETTER_DY)]
+    out['search_pop_letters'] = png(POP_HEAD_W * n, POP_HEAD_H, laid(POP_HEAD_W * n, POP_HEAD_H, [
+        (coverage_nonzero(polys, (0, 0, POP_HEAD_W * n, POP_HEAD_H)), lambda x, y: (0xffffff, 1))]))
+    out['search_return_w'] = return_mark(0xffffff)
+    out['search_return_a'] = return_mark(accent)
     return out
 
 

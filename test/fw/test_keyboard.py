@@ -139,3 +139,23 @@ def test_a_keyboard_first_seen_gives_way_to_the_letter_strip_for_its_edit(fw, ui
     from test_search_strip import Ss
     assert fw.var('search_strip__ss', Ss).box == edit
     assert k.kb not in ui.hidden and k.pages in ui.hidden and k.cand in ui.hidden  # its window the strip's, keys hidden
+
+
+def test_a_keyboard_opened_again_at_the_same_address_gives_way_to_the_strip_again(fw, ui):
+    """A box opened a second time (Add Network's password, 2026-11-17): stock's input method frees the keyboard as it
+    closes and the next is often at the same address; that one is the strip's too, and the strip lets the first go."""
+    from test_search_strip import Ss
+    k = Keyboard(fw, ui)
+    edit = ui.new('edit', 0, 0, 0, 200, 40)
+    C.c_void_p.from_address(C.addressof(k.im) + O['IM_WIDGET']).value = edit
+    ss = fw.var('search_strip__ss', Ss)
+    for _ in range(2):
+        k.key(KEY_NEXT)  # its first key (or its first paint) styles it
+        ui.fire('keyboard__kb_strip_due')
+        assert ss.page == k.kb and ss.box == edit and k.pages in ui.hidden
+        # the box closes: the window's EVT_DESTROY handlers run, and a new keyboard opens at its address, keys showing
+        for h in [h for h in ui.handlers if h[0] == k.kb and h[1] == O['EVT_DESTROY']]:
+            ui.handlers.remove(h)
+            C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(h[2])(h[3], None)
+        assert not ss.page and not ss.box  # the strip let the closed window go
+        ui.hidden.difference_update({k.pages, k.cand})
