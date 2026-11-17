@@ -143,6 +143,7 @@ int lib_has_server(void);
 int ble_start(void);
 int ble_events(void);
 void ble_handle(void);
+int ble_pending(void); /* messages read and not yet handled: poll without waiting */
 int ble_write(const uint8_t *p, size_t n);
 void ble_disconnect(void);
 void ble_stop(void);
@@ -170,6 +171,7 @@ size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *
 void mdns_start(const char *ifname); /* answer on ifname's address whenever it has one */
 int mdns_fd(void);                   /* the socket to poll for POLLIN, -1 with none */
 void mdns_poll(uint32_t now_ms);     /* every pass: the address and name followed, announcements sent */
+uint32_t mdns_due(uint32_t now_ms);  /* ms until mdns_poll has something to do; 0xffffffff never */
 void mdns_handle(void);              /* a packet waiting on mdns_fd */
 void mdns_stop(void);                /* goodbye, and closed */
 

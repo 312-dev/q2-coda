@@ -477,6 +477,58 @@ def test_rockbox_is_a_file_on_the_card(fw, fn, path, result, mode, available):
     assert fw.fn(fn, C.c_int)() == available
 
 
+def test_the_status_rows_binaries_are_looked_at_again_only_when_due(fw):
+    """rockbox_seen and groovebox_seen, asked on every status-row paint: the card again CARD_RECHECK_MS on, at once after
+    a library scan (library_gen) or the Shelf's install or removal (card_bins_changed)."""
+    now, stats, on = [100000], [], [True]
+    fw.mock('time_now_ms', lambda *_: now[0])
+
+    def stat(version, path, info, *_):
+        stats.append(C.string_at(path))
+        C.c_uint.from_address(info + 20).value = 0o100755
+        return 0 if on[0] else -1
+    fw.mock('fw___xstat', stat)
+    rockbox, groovebox = fw.fn('rockbox_seen', C.c_int), fw.fn('groovebox_seen', C.c_int)
+    assert (rockbox(), groovebox()) == (1, 1) and len(stats) == 2  # both binaries, once
+    on[0] = False
+    now[0] += O['CARD_RECHECK_MS'] - 1
+    assert [rockbox() for _ in range(100)] == [1] * 100 and len(stats) == 2  # a paint a pass: no stat
+    now[0] += 1
+    assert (rockbox(), groovebox()) == (0, 0) and len(stats) == 4  # the card gone: seen at the next look
+    on[0] = True
+    fw.var('library_gen', C.c_uint).value += 1  # a scan has rewritten the library
+    assert rockbox() == 1 and len(stats) == 6
+    on[0] = False
+    fw.fn('card_bins_changed', None)()  # the Shelf removed it
+    assert rockbox() == 0 and len(stats) == 8
+
+
+def test_homes_folders_rule_looks_at_the_card_only_when_due(fw):
+    """home_folders, asked on every bar paint on Home: the card and its root's mtime again CARD_RECHECK_MS on, or at once
+    after a library scan; the root listed again only when they changed."""
+    now, looked, listed, card = [100000], [], [], {'there': True, 'mtime': 1}
+    fw.mock('time_now_ms', lambda *_: now[0])
+    fw.mock('fw_access', lambda path, *_: looked.append(C.string_at(path)) or (0 if card['there'] else -1))
+
+    def stat(version, path, info, *_):
+        C.c_uint.from_address(info + 64).value = card['mtime']  # st_mtime, the key's second word
+        return 0
+    fw.mock('fw___xstat', stat)
+    fw.mock('toolsLoadDirectory', lambda *_: listed.append(1) or 3)
+    folders = fw.fn('home_folders', C.c_int)
+    assert folders() == 1 and (len(looked), len(listed)) == (1, 1)
+    card['mtime'] = 2  # a folder made at the root
+    assert [folders() for _ in range(50)] == [1] * 50 and (len(looked), len(listed)) == (1, 1)
+    now[0] += O['CARD_RECHECK_MS']
+    assert folders() == 1 and (len(looked), len(listed)) == (2, 2)  # looked again, the root changed: listed again
+    now[0] += 1
+    folders()
+    assert (len(looked), len(listed)) == (2, 2)
+    card['there'] = False
+    fw.var('library_gen', C.c_uint).value += 1  # a scan's end: at once
+    assert folders() == 0 and (len(looked), len(listed)) == (3, 2)  # no card: nothing to list
+
+
 @pytest.mark.parametrize('flag, choice', [(0, 0), (1, 1)])
 def test_lock_choice_is_off_or_on(fw, flag, choice):
     fw.var('g_keylock_flag', C.c_ubyte).value = flag

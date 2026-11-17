@@ -5,6 +5,7 @@ import ctypes as C
 
 import pytest
 
+O_UP = 30000  # guest.c GUEST_UP_MS
 CMD, STATE, PID, CONFIG = '/tmp/q2-guest.cmd', '/tmp/q2-guest.state', '/tmp/q2-guest.pid', '/mnt/data/q2-guest/config'
 PLAYING, PAUSED, STOPPED = 2, 3, 1
 NEXT, PLAYPAUSE, PREV, STOP, PAUSE, PLAYCD, PAUSECD, PLAYKEY = 163, 164, 165, 166, 119, 200, 201, 207
@@ -26,10 +27,11 @@ class Rig:
         fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() == '/proc/77' else -1)
         fw.mock('time_now_ms', lambda *_: self.ms)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
-        self.handles = {}
+        self.handles, self.opened = {}, []
 
     def fopen(self, path, mode, *_):
         path = C.string_at(path).decode()
+        self.opened.append(path)
         if path not in self.files:
             return 0
         h = 0x3000 + len(self.handles)
@@ -112,6 +114,7 @@ def test_the_state_is_read_for_the_ui(rig, fw):
     seq = fw.fn('guest_seq', C.c_uint)
     rig.poll()
     assert seq() == 0 and rig.field('state') == ''
+    rig.send('on')  # the daemon starts
     rig.state(seq=7, state='asking', guest="Alex's Pixel", code='482913')
     rig.poll()
     assert seq() == 7 and rig.field('state') == 'asking' and rig.field('guest') == "Alex's Pixel"
@@ -125,6 +128,58 @@ def test_it_is_read_no_more_than_every_quarter_second(rig, fw):
     rig.ms += 100
     fw.fn('guest_poll', None)()
     assert fw.fn('guest_seq', C.c_uint)() == 1
+
+
+def reads(rig):
+    return rig.opened.count(STATE)
+
+
+def test_with_no_daemon_the_state_file_is_not_asked_for(rig):
+    rig.poll()  # the first pass looks: an earlier demo's daemon may still run
+    for _ in range(20):
+        rig.poll()
+    assert reads(rig) == 1
+
+
+def test_a_daemon_an_earlier_demo_started_is_read_from_the_first_pass(rig, fw):
+    rig.state(seq=3, state='idle')
+    rig.poll()
+    rig.state(seq=4, state='idle')
+    rig.poll()
+    assert fw.fn('guest_seq', C.c_uint)() == 4
+
+
+def test_a_started_daemon_is_read_until_it_ends(rig, fw):
+    rig.poll()
+    rig.files[CONFIG] = b'enabled=1\nname=\n'
+    fw.fn('guest_bt_on', None)()  # Bluetooth on starts it; its first state comes a while later
+    for _ in range(30):
+        rig.poll()
+    rig.state(seq=1, state='idle')
+    rig.ms += 20000
+    rig.poll()
+    assert fw.fn('guest_seq', C.c_uint)() == 1
+    rig.ms += 60000  # past its start's window, read while the file is there
+    rig.state(seq=2, state='idle')
+    rig.poll()
+    assert fw.fn('guest_seq', C.c_uint)() == 2
+    del rig.files[STATE]  # q2-guest removes it as it ends
+    rig.poll()
+    before = reads(rig)
+    for _ in range(20):
+        rig.poll()
+    assert fw.fn('guest_seq', C.c_uint)() == 0 and reads(rig) == before
+
+
+def test_a_daemon_that_never_comes_up_is_given_up_after_its_wait(rig, fw):
+    rig.send('on')  # started, nothing reads the FIFO: the command waits, and is kept trying
+    rig.fifo_up = True
+    rig.poll()  # sent: nothing waits now
+    rig.ms += O_UP
+    before = reads(rig)
+    for _ in range(20):
+        rig.poll()
+    assert reads(rig) == before
 
 
 def session(rig, status=PLAYING, leave='resume'):
@@ -203,6 +258,7 @@ def test_the_receiver_page_stays_shut_while_guest_play_is_on(rig, fw):
     a2dp = fw.fn('guest_a2dp', C.c_int, C.c_int, C.c_void_p, C.c_void_p)
     rig.poll()  # no daemon: stock's receiver mode
     assert a2dp(0x103, None, None) == 0 and len(rig.fw.calls('stock_btrecv_trampoline')) == 1
+    rig.send('on')  # the daemon starts
     rig.state(state='off')
     rig.poll()
     a2dp(0x103, None, None)

@@ -410,10 +410,15 @@ static inline int arc_out(int r, int y) {
 /* With the screen off the UI loop idles this long a turn instead of stock's 8 ms, about 10 turns a
  * second; screen-off keys (volume, play/pause, wake) wait at most this much longer. */
 #define SCREEN_OFF_SLEEP_MS 100
-/* Stock's player status sync (5 a second) and Tidal's stream poll sleep at least this long a turn
- * while ringnav_sleep finds the Q2 dark and quiet (ringnav_dark_usleep), its cover pollers (20 and
- * 10) whenever it is dark (ringnav_dark_cover_usleep); DARK_POLLS in tools/build.py. */
+/* Stock's player status sync (5 a second) and player scheduling (ringnav_mainscheduling, 10) run at
+ * least this far apart while ringnav_sleep finds the Q2 dark and nothing needs the position soon
+ * (dark_slow: ringnav_dark_usleep), its cover pollers (20 and 10) whenever it is dark
+ * (ringnav_dark_cover_usleep); DARK_POLLS in tools/build.py. */
 #define DARK_POLL_US 1000000
+/* Dark and playing, the player polls keep stock's pace from this many seconds before the track's
+ * end (as the status cache has it): mclAutoChange's Gapless preload (under 6 s), plus a slow poll's
+ * age and the status thread's last long sleep. */
+#define DARK_END_LEAD_S 10
 /* Screen off, nothing playing (media_playing) and the DAC already off (check_dacoff_state, about 31
  * s after playback stops; g_dacoff_time -1): the turn idles DARK_IDLE_SLEEP_MS, about 4 turns a
  * second, so a Q2 left dark without Standby stops waking the CPU for nothing. The first key waits
@@ -436,6 +441,9 @@ static inline int arc_out(int r, int y) {
 #define CHARGE_STOP 80
 #define CHARGE_RESUME 75
 #define CHARGE_POLL_MS 5000
+/* The card's Rockbox and Groovebox binaries, and Home's Folders rule, are looked at again at most
+ * this often, sooner on a library scan's end (theme_engine.c card_bins, home.c home_folders). */
+#define CARD_RECHECK_MS 5000
 /* Hardware watchdog (docs/internals.md#watchdog): the UI loop feeds it every pass, so a loop or a
  * kernel stalled WDT_MS reboots. Well above any ordinary pass (a 65k-song list, a cover decode:
  * seconds). The known long ones on the UI thread, an import's tag reads and a folder add's directory
@@ -684,6 +692,10 @@ static inline int arc_out(int r, int y) {
 #define MCL_JUMPFOLDER 0xa5002b /* byte: Folder Skip, read only for class 1 queues */
 #define MCL_GAPLESS 0xa5002c    /* byte: stock's Gapless setting (mclGetGaplessMode); mclAutoChange preloads only with it */
 #define MCL_FD 0xa5008c         /* player socket, -1 none */
+/* g_repeatinfo, A-B Repeat's state: byte on, then words A and B (seconds) and 2 once both are set;
+ * check_abrepeatmode (0x51d3d0) seeks back to A each idle pass that finds the position past B. */
+#define REPEAT_INFO 0xa551fc
+#define REPEAT_AB_STATE 0xc
 #define INITCONFIG_MODE_RET 0x51e0d0 /* player_initconfig's mclSetPlayMode call (jalr 0x51e0c8) returns here */
 /* mclUsbAudioSetVol (0x5bec64): the USB DAC's volume control, -1 before the first set, -2 when it
  * has none and hciplayer's soft volume (mcl-softvolflag) applies instead (0x5bab48 opens hw:1). */

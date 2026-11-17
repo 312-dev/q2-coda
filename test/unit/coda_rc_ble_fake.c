@@ -77,6 +77,7 @@ int dbus_connection_add_filter(DBusConnection *c, dbus_msg_fn f, void *d, void (
 }
 int dbus_connection_read_write(DBusConnection *c, int t) { (void)c, (void)t; return 1; }
 int dbus_connection_dispatch(DBusConnection *c) { (void)c; return 2; /* DBUS_DISPATCH_COMPLETE */ }
+int dbus_connection_get_dispatch_status(DBusConnection *c) { (void)c; return 2; }
 int dbus_connection_send(DBusConnection *c, DBusMessage *m, uint32_t *s) { (void)c, (void)m, (void)s; return 1; }
 void dbus_connection_flush(DBusConnection *c) { (void)c; }
 int dbus_connection_send_with_reply(DBusConnection *c, DBusMessage *m, DBusPendingCall **pc, int t) {

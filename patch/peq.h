@@ -734,6 +734,9 @@ unsigned playlist_index(int cd_num);
 void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
+/* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */
+int rockbox_seen(void), groovebox_seen(void);
+void card_bins_changed(void);
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */
