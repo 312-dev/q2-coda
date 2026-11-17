@@ -768,7 +768,6 @@ static void paint_selection(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-
 static void edit_paint(void *w, void *canvas);
 
 /* Stock's radio images (select, unselect) are emptied (ringnav_image_add): a checked row gets the
@@ -970,8 +969,12 @@ int ringnav_paint(void *w, void *canvas) {
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
     carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
-    bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
-    sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
+    bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
+    bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
+    bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
+    guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
+    home_np_paint(w, canvas);    /* Home's first row's glyph (home_np.c) */
+    sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
     if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);
@@ -984,8 +987,9 @@ int ringnav_paint(void *w, void *canvas) {
 
 /* A list_fit set's scrolling list whose box runs on below the set's list end (y 282 on OLED): its
  * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
- * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners).
- * Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
+ * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners). In
+ * Edit Library its end is a row higher and its rows fade into the hint's band (library_edit.c
+ * lr_edit_room, lr_edit_foot). Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
  * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
@@ -1007,7 +1011,7 @@ static void list_fade(void *w, void *canvas) {
     int y = 0;
     void *wm = window_manager();
     for (void *p = w; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
-    int end = list_fit_end(), bottom = y + I(w, W_H);
+    int end = list_fit_end() - lr_edit_room(w), bottom = y + I(w, W_H);
     if (bottom <= end) return; /* a box cut above the end */
     int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
         content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
@@ -1026,6 +1030,6 @@ static void list_fade(void *w, void *canvas) {
     }
     int s0 = 1, s1 = 0; /* the selected row, on the screen */
     if (st.sel_w == w) s0 = y + st.sel_y - st.sel_h / 2, s1 = s0 + st.sel_h;
-    list_fades(canvas, y, bottom, end, off > 0, y + content - off > end, s0, s1);
+    list_fades(canvas, y, bottom, end, lr_edit_foot(w), off > 0, y + content - off > end, s0, s1);
 }
 

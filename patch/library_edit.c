@@ -18,16 +18,18 @@
  * long on a row, enters the editor: the status row reads "Edit Library" or "Edit Home", every row
  * the user can show shows (a hidden one dimmed to Text Tertiary), each with a check circle at its
  * left, its words moved right of it, each row's chevron gives way to a grip, and a hint shows under
- * the rows. Home is laid out as Full while it is open (theme_engine.c ipod_home). A finger on a
- * row's grip (the last LR_GRIP_ZONE px) drags it at once, a finger held on a row drags it after
- * LR_HOLD_MS; the rows it passes slide aside over LR_SLIDE_MS (at once under Reduce Motion), the
+ * the rows: the list ends LR_ROOM higher, and its rows past that end and above its top fade as
+ * every list's do, into the hint's band (lr_edit_room, lr_edit_foot). Home is laid out as Full
+ * while it is open (theme_engine.c ipod_home). A finger on a row's grip (the last LR_GRIP_ZONE px)
+ * drags it at once, a finger held on a row drags it after LR_HOLD_MS, the row held inside the
+ * list's box; the rows it passes slide aside over LR_SLIDE_MS (at once under Reduce Motion), the
  * list scrolls while the finger is within LR_EDGE px of its top or bottom, and the lift puts the
- * row in its place and saves. Center lifts the selected row (drawn larger, in Inter Medium, on a
- * raised card), the wheel carries it, Center puts it down and saves; Return while it is carried
- * puts it back where it was. Play/Pause, or a tap on a row's circle (its first LR_VIS_ZONE px),
- * shows or hides the row. Return, or Center held again, saves and leaves; the rows hidden then
- * leave the list. A row the editor doesn't show keeps its place: the shown rows' new order fills
- * the places they held (lr_merge). */
+ * row in its place and saves. Center lifts the selected row (on a raised card in the selection
+ * bar's box, its words in Inter Medium, nothing of it moved), the wheel carries it, Center puts it
+ * down and saves; Return while it is carried puts it back where it was. Play/Pause, or a tap on a
+ * row's circle (its first LR_VIS_ZONE px), shows or hides the row. Return, or Center held again,
+ * saves and leaves; the rows hidden then leave the list. A row the editor doesn't show keeps its
+ * place: the shown rows' new order fills the places they held (lr_merge). */
 #include "navigation.h"
 
 #define LR_FILE "/mnt/data/ringnav-library-order"
@@ -50,10 +52,15 @@
                         /* right column, where the chevron's is */
 #define LR_CIRCLE_X 34  /* the check circle (list_marks.c check_circle): its middle at this x */
 #define LR_TEXT_X 52    /* the row's words, right of it */
-#define LR_LIFT 108     /* the lifted row's card: the selection bar's box grown to 108% */
+#define LR_LABEL_PAD 2  /* their label's own margin before them (tools/ipod.py NP_GRID_MARGIN) */
+#define LR_LIFT 108     /* the lifted row's card: the selection bar's box, 108% of its height */
+#define LR_CARD_X 16    /* ... its sides, the bar's inset (docs/oled-design.md#selection-bar) */
 #define LR_HINT_PX TYPE(13) /* the hint: Inter Regular 13 px (AWTK's line size, 13 x 1.21) */
-#define LR_HINT_Y 298   /* its middle, 14 px above the screen's foot */
-#define LR_LIFT_PX TYPE(22) /* the lifted row's words: Inter Medium 22 px, 20 px grown 8% */
+#define LR_HINT_Y 298       /* its middle, 14 px above the screen's foot */
+#define LR_LIFT_PX TYPE(20) /* the lifted row's words: Inter Medium at the row's 20 px */
+#define LR_ROOM 32  /* the editor's list ends a row higher than the set's, the hint below it */
+#define LR_FOOT 284 /* ... and the rows past that end fade into the ground by this y, 34 px */
+                    /* below it, as a list's do 34 px below the set's (home.c list_fades) */
 
 enum { LR_A_NONE, LR_A_SHOWN, LR_A_HIDDEN, LR_A_LOCKED }; /* LR_AUTO */
 enum { LR_LIBRARY, LR_HOME };
@@ -253,7 +260,8 @@ static int lr_shown_before(void *view, void *row) {
 }
 
 /* coverflow.c coverflow_home_layout, before the list is laid out again: Home's rows in the saved
- * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) and
+ * order, each shown as its mark and rule say, Now Playing only while something is loaded (np) or a
+ * guest plays (guest.c guest_active), its words its state's (home_np.c home_np_row), and
  * Folders by its own rule only while the card has folders (home.c home_folders); in Edit Home every
  * row it lists. A row that comes or goes keeps the selection and the rows in view
  * (home.c home_keep); the hidden rows go last, as the list's layout keeps a hidden row's slot. */
@@ -279,7 +287,9 @@ void lr_home_apply(void *view, int np) {
         int c = widget_get_prop_int(row, LR_PROP, 0), rule = widget_get_prop_int(row, LR_AUTO, 0);
         if (c == 'f' && rule != LR_A_LOCKED) rule = folders ? LR_A_SHOWN : LR_A_HIDDEN;
         if (rule != LR_A_LOCKED) prop(row, LR_AUTO, rule); /* the editor's circle reads it */
-        int on = editing || (lr_shows(vis[lr_at_in(lr_home, c)], rule) && (c != 'p' || np));
+        if (c == 'p') home_np_row(row, editing); /* home_np.c: Playing, Paused or Guest Play */
+        int on = editing ||
+                 (lr_shows(vis[lr_at_in(lr_home, c)], rule) && (c != 'p' || np || guest_active()));
         if (on == !!widget_get_visible(row)) continue;
         int k = lr_shown_before(view, row);
         widget_set_visible(row, on, 0);
@@ -340,10 +350,12 @@ static void *lr_view_of(void *top, int *list) {
 }
 
 /* The view's top on screen and the height its rows show in: to the set's list end, where a
- * selected row stops (docs/oled-design.md#corners), which counts from the view's window (the
- * Library's starts under the status row), as navigation.c sel_height reads it. */
+ * selected row stops (docs/oled-design.md#corners), LR_ROOM higher in the editor, which counts
+ * from the view's window (the Library's starts under the status row), as navigation.c sel_height
+ * reads it. */
 static int lr_box(void *view, int *h) {
     int y = 0, win = 0, end = geom_val(V_LIST_END);
+    if (end) end -= lr_edit_room(view);
     for (void *p = view, *wm = window_manager(); p && p != wm; p = P(p, W_PARENT))
         if (P(p, W_PARENT) == wm)
             win = I(p, W_Y);
@@ -583,6 +595,12 @@ int lr_edit_row(void *w) {
 /* Whether view is the list in an editor: Home's rows' chevrons give way to grips
  * (navigation.c paint_chevrons). */
 int lr_edit_list(void *view) { return view && view == lr.view; }
+/* How much higher view's list ends than the set's list end: LR_ROOM in an editor, which keeps the
+ * row's room above its hint, else 0 (navigation.c sel_height, row_paint.c list_fade, home.c
+ * home_rest). And where the rows past that end have faded into the ground (list_fade,
+ * home_fades): in an editor LR_FOOT, the hint's band's top; elsewhere 0, the screen's foot's. */
+int lr_edit_room(void *view) { return view && view == lr.view ? LR_ROOM : 0; }
+int lr_edit_foot(void *view) { return view && view == lr.view ? LR_FOOT : 0; }
 
 /* The press the rows had at a hold's end let go (EVT_POINTER_ABORT through the page, as
  * az_index.c's), so none stays pressed or clicks. */
@@ -665,7 +683,10 @@ static void lr_drag(void) {
         if (!lr.scroll) lr.scroll = timer_add(lr_scroll_due, (void *)0, LR_SCROLL_MS);
     } else
         stop_timer(&lr.scroll);
-    int y = at + I(view, SCROLL_Y) - lr.grab, last = (n - 1) * pitch;
+    /* the row's top in the content: under the finger, but never past the list's box on the screen
+     * (its top, or the list end less a row), nor past the first row's place or the last's */
+    int lo = I(view, SCROLL_Y), hi = lo + h - pitch, y = at + lo - lr.grab, last = (n - 1) * pitch;
+    y = y < lo ? lo : y > hi ? hi : y;
     y = y < 0 ? 0 : y > last ? last : y;
     int b = pitch > 0 ? (y + pitch / 2) / pitch : 0;
     if (lr_move(row, b)) prop(view, SEL, b);
@@ -854,11 +875,14 @@ static int lr_text(void *canvas, const char *face, const unsigned *s, int x, int
     return w;
 }
 
-/* ringnav_paint: the editor over its page w, after everything in it. Each shown row's circle at
- * its left and grip in the chevron's place (Text Tertiary; On Accent on the selection), the lifted
- * row on its card, and the hint under the rows, on the ground. */
+/* ringnav_paint: the editor's marks and its hint and lifted card. On its rows' view w, before the
+ * list's own fades (row_paint.c list_fade, home.c home_fades) go over it: each shown row's circle
+ * at its left and grip in the chevron's place (Text Tertiary; On Accent on the selection), in the
+ * view's box, so the rows past the list end and a scrolled list's top row fade with their marks. On
+ * its page w, after everything in it: the hint's band and the hint, and the lifted row on its card
+ * over all of it, its circle, words and grip where the row's own stand, so a lift moves nothing. */
 void lr_edit_paint(void *w, void *canvas) {
-    if (!lr.page || w != lr.page || !P(canvas, CANVAS_LCD)) return;
+    if (!lr.page || (w != lr.page && w != lr.view) || !P(canvas, CANVAS_LCD)) return;
     static const unsigned drag[] = { 'D', 'r', 'a', 'g', 0 },
                           rest[] = { ' ', 't', 'o', ' ', 'm', 'o', 'v', 'e', ' ', 0xb7,
                                      ' ', 'P', 'l', 'a', 'y', '/', 'P', 'a', 'u', 's',
@@ -866,44 +890,42 @@ void lr_edit_paint(void *w, void *canvas) {
                                      ' ', 'h', 'i', 'd', 'e', 's', 0 };
     void *view = lr.view, *rows[LR_ROWS], *lcd = P(canvas, CANVAS_LCD);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), ground = ui_ink(RGBA(0)), raw = ui_ink_raw(1);
-    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h,
-        box = lr_box(view, &h), top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h, box = lr_box(view, &h),
+        top = box - oy - I(view, SCROLL_Y), n = lr_rows(view, rows),
         sel = st.touch_mode ? -1 : widget_get_prop_int(view, SEL, -1),
         gx = 375 - geom_val(V_RIGHT_X) - LR_GRIP_X - ox, cx0 = LR_CIRCLE_X - ox;
     unsigned ink = tok(TOK_PRIMARY), third = tok(TOK_TERTIARY);
     rect_t old, clip; /* clips are the screen's, within the paint's own */
-    if (clip_within(canvas, &old.x, &clip.x, 0, box, 375, h)) {
-        canvas_set_clip_rect(canvas, &clip);
-        for (int i = 0; i < n; ++i)
-            if (rows[i] != lr.lifted) {
-                int y = top + I(rows[i], W_Y) + I(rows[i], W_H) / 2;
-                grip_mark(canvas, gx, y, i == sel ? 0xffffff : third, 100);
-                check_circle(w, canvas, cx0, y, lr_circle(rows[i]), i == sel);
-            }
-        canvas_set_clip_rect(canvas, &old);
-    }
-    /* the hint's band: the ground from the list's end (a lifted card goes over it), over the rows
-     * that peek through its fade */
-    stock_canvas_set_fill_color(canvas, ground);
-    canvas_fill_rect(canvas, -ox, box + h - oy, 375, 320 - box - h);
-    void *row = lr.lifted;
-    if (row) { /* the card: the bar's box (16 px in each side) grown about its middle */
-        int cy = top + I(row, W_Y) + I(row, W_H) / 2, cx = (375 - 2 * ox) / 2,
-            bw = (375 - 32) * LR_LIFT / 100, bh = I(row, W_H) * LR_LIFT / 100;
-        rect_t card = { cx - bw / 2, cy - bh / 2, bw, bh };
-        /* the list's box grown by a card at each end, so one at either end shows whole */
-        if (clip_within(canvas, &old.x, &clip.x, 0, box - bh, 375, h + 2 * bh))
+    if (w == view) {
+        if (clip_within(canvas, &old.x, &clip.x, 0, box, 375, I(view, W_H))) {
             canvas_set_clip_rect(canvas, &clip);
+            for (int i = 0; i < n; ++i)
+                if (rows[i] != lr.lifted) {
+                    int y = top + I(rows[i], W_Y) + I(rows[i], W_H) / 2;
+                    grip_mark(canvas, gx, y, i == sel ? 0xffffff : third, 100);
+                    check_circle(w, canvas, cx0, y, lr_circle(rows[i]), i == sel);
+                }
+            canvas_set_clip_rect(canvas, &old);
+        }
+        ui_ink_raw(raw);
+        stock_canvas_set_fill_color(canvas, fill);
+        return;
+    }
+    /* the hint's band: the ground from where the rows past the list end have faded into it */
+    stock_canvas_set_fill_color(canvas, ground);
+    canvas_fill_rect(canvas, -ox, LR_FOOT - oy, 375, 320 - LR_FOOT);
+    void *row = lr.lifted;
+    if (row) { /* the card: the selection bar's box, LR_LIFT tall */
+        int cy = top + I(row, W_Y) + I(row, W_H) / 2, bh = I(row, W_H) * LR_LIFT / 100;
+        rect_t card = { LR_CARD_X - ox, cy - bh / 2, 375 - 2 * LR_CARD_X, bh };
         lift_card_paint(canvas, &card);
         void *label = lr_label(row);
         const unsigned *s = label ? widget_get_text(label) : (const unsigned *)0;
-        if (s) { /* the words' left, grown from the middle */
-            int lx = lr_screen_x(label) - ox;
-            lr_text(canvas, "inter-medium", s, cx + (lx - cx) * LR_LIFT / 100, cy, LR_LIFT_PX, ink);
-        }
-        grip_mark(canvas, cx + (gx - cx) * LR_LIFT / 100, cy, ink, LR_LIFT);
-        check_circle(w, canvas, cx + (cx0 - cx) * LR_LIFT / 100, cy, lr_circle(row), 1);
-        canvas_set_clip_rect(canvas, &old);
+        if (s) /* lr_text's left is 1 px short of where its words start */
+            lr_text(canvas, "inter-medium", s, lr_screen_x(label) + LR_LABEL_PAD - 1 - ox, cy,
+                    LR_LIFT_PX, ink);
+        grip_mark(canvas, gx, cy, ink, 100);
+        check_circle(w, canvas, cx0, cy, lr_circle(row), 1);
     }
     canvas_set_font(canvas, "inter", LR_HINT_PX);
     int w1 = (int)(canvas_measure_text(canvas, drag, wide_len(drag)) + 0.5f),

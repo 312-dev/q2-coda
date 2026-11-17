@@ -268,7 +268,8 @@ STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
-                 'status_down': ('arrow-down-bold', 8, 0)}
+                 'status_down': ('arrow-down-bold', 8, 0), 'status_headphones': ('headphones-bold', STATUS_PX, STATUS_INK),
+                 'status_car': ('car-profile-bold', STATUS_PX, STATUS_INK)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8
@@ -341,6 +342,7 @@ CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-f
             'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
             'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
             'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
+            'guest': ('device-mobile-fill', 22, 0xffffff),
             'play': ('play-fill', 30, 0xffffff)}
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
@@ -359,6 +361,18 @@ MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
+PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
+# Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
+# Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
+# and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
+# battery's red).
+BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-profile', 'speaker': 'speaker-hifi',
+                 'phone': 'device-mobile'}
+BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
+BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-fill', 0xffffff),
+             'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
+             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
+             'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
 # Settings > Car Remote's phone rows (carremote_page.c): Phosphor device-mobile, regular, Text Secondary per half,
 # white on the selection
 CR_PHONE_PX = 20
@@ -560,6 +574,8 @@ def status_images(prefix):
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, STATUS_PX, STATUS_INK, c, STATUS_UNLIT[k])
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
+    out |= {f'{prefix}_status_btdim_{k}': phosphor('bluetooth-bold', STATUS_PX, c, STATUS_INK) for k, c in BT_SPIN_INKS.items()}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
     return out
@@ -657,6 +673,17 @@ def images(t):
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
+            for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
+    out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
+    out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # and the status row's relay mark (phone › car) in Text Secondary per half
+    out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
+    out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
