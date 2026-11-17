@@ -224,8 +224,6 @@ static void lock_set(int choice) {
     write_int_config(g_keylock_mode, "SYSSET", "LOCKMODE");
     write_int_config(g_keylock_flag, "SYSSET", "LOCKFLAG");
 }
-/* Control Center's Lock tile (control_center.c): Buttons Lock on or off. */
-void keylock_toggle(void) { lock_set(!g_keylock_flag); }
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
     void *win = window_manager_get_top_window(window_manager());

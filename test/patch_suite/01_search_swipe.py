@@ -139,7 +139,7 @@ assert m.confirm()==11 and m.clicks==[sw] and 'navigator_back' not in [c[0] for 
 # within its range; Return gives it back, and Return off a slider closes it, as its swipe up does (dialog_quit), not
 # stock's screen off and Home.
 QS_ADJUST='_cc_adjust'  # control_center.c CC_ADJUST: 1 while a slider has the wheel
-CC_BRIGHT=5  # control_center.c's Brightness stop
+CC_BRIGHT=7  # control_center.c's Brightness stop
 RING='_cc_seen'  # control_center.c CC_SEEN: the wheel's last tick, time_now_ms + 1, so its ring shows and a key acts
 m=Machine(); bright=m.node('slider','slider_backlight',value=99)
 m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_focus=CC_BRIGHT,**{RING:m.now+1}); m.mock('dialog_quit')

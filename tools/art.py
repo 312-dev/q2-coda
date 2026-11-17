@@ -332,13 +332,12 @@ TILE_INKS = BUMP_INKS
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
-# Control Center's glyphs (control_center.c cc_glyph, from mock_cc3.py): fill, white on its toggles, tiles and transport
+# Control Center's glyphs (control_center.c cc_glyph, from mock_cc4_stack.py): fill, white on its toggles and transport
 # (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
 CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
             'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
             'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
-            'lock': ('lock-simple-fill', 22, 0xffffff), 'timer': ('timer-fill', 22, 0xffffff),
-            'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
+            'eq': ('equalizer-fill', 22, 0xffffff),
             'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
             'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
             'play': ('play-fill', 30, 0xffffff)}

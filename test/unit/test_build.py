@@ -525,6 +525,23 @@ def test_the_faces_header_lists_each_face_by_its_index():
         build.faces_header(RANGES[:1])
 
 
+def test_the_faces_header_holds_each_face_s_ascii_advances_its_line_and_em():
+    """ui_kit.c ui_set's table (face_advances): per face, printable ASCII's advance widths in font units as its subset
+    maps them (the digits on Inter's tabular figures), its line (hhea ascent - descent, what AWTK sizes it by) and its
+    em; stock's uncut face all zeros, which ui_set measures instead."""
+    from fontTools.ttLib import TTFont
+    header = dict(line.split(' ', 2)[1:] for line in build.faces_header(RANGES))
+    assert (header['FONT_ADV_FIRST'], header['FONT_ADV_LAST']) == ('0x20', '0x7e')
+    rows = [[int(v) for v in row.split(',')] for row in header['FONT_ADV'][2:-2].split('},{')]
+    assert len(rows) == 3 and all(len(r) == 0x7f - 0x20 for r in rows) and set(rows[0]) == {0}
+    font = TTFont(build.ROOT/'assets/fonts/Inter-Medium.ttf')
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    medium = rows[list(build.FACES).index('inter-medium')]
+    assert medium[ord('W') - 0x20] == hmtx[cmap[ord('W')]][0] and medium[ord(' ') - 0x20] == hmtx[cmap[32]][0]
+    assert len({medium[ord(c) - 0x20] for c in '0123456789'}) == 1  # tabular, as the subset draws them
+    assert header['FONT_LINE'] == f'{{0,{2478},{2478}}}' and header['FONT_UPM'] == '{0,2048,2048}'
+
+
 @pytest.mark.parametrize('face', ['inter', 'inter-medium'])
 def test_both_faces_are_given_a_play_mark_on_the_middle_of_their_capitals(face):
     """View Queue's mark (navigation.c stock_row_style): neither source has U+25B6, and a title holding

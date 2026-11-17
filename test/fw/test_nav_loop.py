@@ -2224,8 +2224,13 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
     return slider
 
 
-# control_center.c's stops: four toggles, the Now Playing block, the sliders, five tiles
-CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12
+# control_center.c's stops in the wheel's order: the six toggles by rows, the Now Playing block, the two sliders
+CC_AIRPLAY, CC_CAR, CC_SMART, CC_EQ, CC_NOW, CC_BRIGHT, CC_VOLUME, CC_STOPS = 2, 3, 4, 5, 6, 7, 8, 9
+
+
+def smart_written(fw):
+    """Smart Wi-Fi's setting as Control Center wrote it (control_center.c cc_act): each value, in order."""
+    return [c[1][0] for c in fw.calls('write_int_config') if C.string_at(c[1][2]) == b'SMARTWIFI']
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2260,7 +2265,7 @@ def cc_window(fw, ui, ring=100000):
 
 @pytest.mark.parametrize('status', [0, 2, 3])
 def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
-    """The toggles, Now Playing's block, the two sliders and the five tiles in reading order; the ends hold. With
+    """The six toggles by rows, Now Playing's block, then Brightness and Volume under it; the ends hold. With
     nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
     fw.mock('mclGetPlayStatus', lambda *_: status)
     ui = Ui(fw)
@@ -2309,14 +2314,57 @@ def test_centre_on_wi_fi_or_bluetooth_clicks_stock_s_button(fw, keys, stop, clic
     assert ui.clicks == clicked and not fw.calls('dialog_quit')
 
 
-def test_centre_on_the_lock_tile_turns_buttons_lock_on_and_off(fw, keys):
+def test_centre_on_smart_wi_fi_turns_it_on_and_off(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    flag, mode = fw.var('g_keylock_flag', C.c_ubyte), fw.var('g_keylock_mode', C.c_ubyte)
-    flag.value, mode.value = 0, 3  # off, an earlier version's Everything last
-    assert keys(KEY_CENTER) == STOP and (flag.value, mode.value) == (1, 2)  # On: the buttons
-    assert keys(KEY_CENTER) == STOP and flag.value == 0
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_CENTER) == STOP and keys(KEY_CENTER) == STOP
+    assert smart_written(fw) == [1, 0] and not fw.calls('dialog_quit')
+
+
+def cc_names(fw, top, widths):
+    """The toggles' names' scrollers cc_open makes (cc_name0 to 5), each its text's width as cc_paint stored it; the
+    scrollers stock's start and stop were called for, in order, and each xoffset set."""
+    names = [top.add(W(top.ui, 'hscroll_label', f'cc_name{i}', w=72, h=16)) for i in range(6)]
+    for name, w in zip(names, widths):
+        name.int(O['HSCROLL_TEXT_W'], w)
+    for fn in ('hscroll_label_start', 'hscroll_label_stop'):
+        fw.mock(fn, lambda w, *_: 0)
+    fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: top.ui.by[w].int(O['HSCROLL_XOFFSET'], x) or 0)
+    return names
+
+
+def test_a_name_wider_than_its_column_scrolls_while_the_wheel_is_on_its_circle(fw, keys):
+    """control_center.c cc_marq: the wheel onto Smart Wi-Fi (75 px in a 68 px column) starts its scroller, the house
+    marquee (ringnav_hscroll_start's hold and pace, the lull's loop); off it, the scroller stops and is back at its
+    start. A name that fits (EQ) never scrolls."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    names = cc_names(fw, top, [38, 60, 42, 22, 75, 18])
+    top.ints[b'_cc_focus'] = CC_CAR
+    started = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_start')]  # noqa: E731
+    stopped = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_stop')]  # noqa: E731
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_SMART
+    assert started() == [names[CC_SMART]] and names[CC_SMART].block[O['HSCROLL_LOOP']] == b'\x01'
+    names[CC_SMART].int(O['HSCROLL_XOFFSET'], 5)  # stock's timer moved it
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_EQ
+    assert stopped() == [names[CC_SMART]] and names[CC_SMART].int(O['HSCROLL_XOFFSET']) == 0
+    assert names[CC_SMART].block[O['HSCROLL_LOOP']] == b'\x00' and started() == [names[CC_SMART]]
+
+
+def test_a_scrolling_name_stops_when_the_ring_goes_or_a_slider_takes_the_wheel(fw, keys):
+    """No ring, no selection: CC_RING_MS after the last input the scroller stops at its start, as it does while the
+    wheel is a slider's."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    names = cc_names(fw, top, [38, 60, 42, 22, 75, 18])
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_NEXT) == STOP and [c[1][0] for c in fw.calls('hscroll_label_start')] == [names[CC_SMART].p]
+    ring = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == 5000]
+    keys.clock.now += 5000
+    timers.fire(ring[-1])
+    assert [c[1][0] for c in fw.calls('hscroll_label_stop')] == [names[CC_SMART].p]
 
 
 def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):
@@ -2347,18 +2395,17 @@ def test_control_center_opens_with_no_ring_and_the_first_tick_only_brings_it_up(
     it, and Centre then does not act; the next tick steps."""
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=None)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_LOCK and top.ints[b'_cc_seen'] == 100001
-    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_LOCK + 1
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_SMART and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_SMART + 1
 
 
 def test_centre_with_no_ring_only_brings_it_up(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=None)
-    flag = fw.var('g_keylock_flag', C.c_ubyte)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    assert keys(KEY_CENTER) == STOP and flag.value == 0 and top.ints[b'_cc_seen'] == 100001
-    assert keys(KEY_CENTER, 600) == STOP and flag.value == 1  # with the ring up, Centre acts
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_CENTER) == STOP and smart_written(fw) == [] and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_CENTER, 600) == STOP and smart_written(fw) == [1]  # with the ring up, Centre acts
 
 
 def test_the_ring_goes_5_s_after_the_last_input_and_comes_back_where_it_was(fw, keys):
@@ -2531,8 +2578,7 @@ def test_a_tap_on_the_now_playing_block_opens_now_playing_and_the_transport_keep
 
 
 HOLDS = [(0, b'systemset/wifi_page'), (1, b'systemset/bluetooth_page'), (2, b'systemset/netservice_page'),
-         (3, None), (CC_LOCK, b'systemset/keylock_page'), (CC_SLEEP, b'systemset/sleepshutdown_page'),
-         (CC_NIGHT, b'playset/bootvol_page'), (CC_EQ, b'playset/equalizer_page'), (CC_SMART, b'systemset/wifi_page')]
+         (CC_CAR, None), (CC_SMART, b'systemset/wifi_page'), (CC_EQ, b'playset/equalizer_page')]
 
 
 def opened(fw):
@@ -2544,8 +2590,8 @@ def opened(fw):
 
 
 @pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[0] > 1])
-def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
-    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle or tile
+def test_a_finger_held_on_a_toggle_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
+    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle
     closes Control Center and opens its page; its release does not click it."""
     ui = Ui(fw)
     top, buttons = cc_opened(fw, ui)
@@ -2563,17 +2609,16 @@ def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw
     assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
 
 
-def test_a_tap_on_a_tile_acts_and_opens_nothing(fw, keys):
+def test_a_tap_on_a_toggle_acts_and_opens_nothing(fw, keys):
     ui = Ui(fw)
     _, buttons = cc_opened(fw, ui)
-    flag = fw.var('g_keylock_flag', C.c_ubyte)
-    ui.emit(buttons[CC_LOCK], EVT_CLICK)
-    assert flag.value == 1 and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
+    ui.emit(buttons[CC_SMART], EVT_CLICK)
+    assert smart_written(fw) == [1] and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
 
 
 @pytest.mark.parametrize('stop, page', HOLDS)
-def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop, page):
-    """Centre held QUICK_HOLD_MS with the ring on a toggle or tile: Control Center closes, its page opens, and the
+def test_centre_held_on_a_toggle_opens_its_settings_page(fw, keys, stop, page):
+    """Centre held QUICK_HOLD_MS with the ring on a toggle: Control Center closes, its page opens, and the
     release does nothing more (no toggle, no click on the page now in front)."""
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
@@ -2587,20 +2632,20 @@ def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop,
     assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
     assert opened(fw) == [page]
     seen = top.ints[b'_cc_seen']
-    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and fw.var('g_keylock_flag', C.c_ubyte).value == 0
+    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and smart_written(fw) == []
     assert len(fw.calls('dialog_quit')) == 1 and top.ints[b'_cc_seen'] == seen  # the release reached nothing
 
 
-def test_a_short_centre_on_a_tile_acts_and_drops_its_hold(fw, keys):
+def test_a_short_centre_on_a_toggle_acts_and_drops_its_hold(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
-    top.ints[b'_cc_focus'] = CC_LOCK
+    top.ints[b'_cc_focus'] = CC_SMART
     keys.press(KEY_CENTER)
-    assert keys(KEY_CENTER, 200) == STOP and fw.var('g_keylock_flag', C.c_ubyte).value == 1
+    assert keys(KEY_CENTER, 200) == STOP and smart_written(fw) == [1]
     assert not ui.due(ui_name(fw.lib, 'cc_hold_due')) and not fw.calls('navigator_to')
 
 
-@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_LOCK, False)])
+@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_SMART, False)])
 def test_centre_held_on_a_slider_the_block_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=100000 if ring else None)

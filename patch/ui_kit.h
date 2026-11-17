@@ -24,6 +24,17 @@ unsigned ui_fade_alpha(unsigned at);
 int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
             int w, int align);
 unsigned ui_wide(const char *s, unsigned *out, unsigned n);
+/* Set text (docs/oled-design.md#type): UTF-8 s drawn glyph by glyph at Inter's own advances
+ * (stock.h FONT_ADV) plus track thousandths of an em between glyphs, each glyph at its own pen
+ * rounded, so its gaps are even: AWTK's own text rounds every advance to a pixel, carrying the
+ * error on, and draws a space about 3 px wider than Inter's at 13 px. Faces and colour as ui_text,
+ * from x, its row centred on y, never cut or ellipsized: a caller with a column clips it (Control
+ * Center's labels fade, text_fade). Returns its width; ui_set_w the width alone. TRACK_CAPTION:
+ * the house tracking for the 13 px captions. */
+#define TRACK_CAPTION 0
+int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+           int track);
+int ui_set_w(void *canvas, const char *s, int medium, int px, int track);
 int ui_measure_w(void *canvas, const char *face, int px, const unsigned *s, unsigned n);
 /* Text in a box: s (n characters, or UTF-8 for ui_line) centred on row y in the columns x to x + w,
  * aligned (1 centre, 2 left, 3 right), in face at px, in color (ui_line_w: 0xAARRGGBB; ui_line:

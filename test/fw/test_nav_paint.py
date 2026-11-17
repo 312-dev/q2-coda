@@ -2050,16 +2050,15 @@ def test_a_scan_window_lower_down_keeps_its_stack_s_place_on_the_screen(fw, worl
 USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
 
 
-CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
+CC_SMART, CC_NOW, CC_BRIGHT, CC_VOLUME = 4, 6, 7, 8  # control_center.c's stops
 
 
 def control_center(fw, world, focus=0, adjust=0, ring=True):
-    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
-    brightness at half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock
-    at 0) or the page just pulled down. The canvas."""
+    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, nothing playing, the brightness at
+    half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock at 0) or the page
+    just pulled down. The canvas."""
     theme(fw)
     fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
-    fw.var('g_keylock_flag', C.c_ubyte).value = 1
     win, _, _ = quick_window(world)
     world[win].props.update(_cc_focus=focus, _cc_adjust=adjust, **({'_cc_seen': 1} if ring else {}))
     canvas = Canvas(fw)
@@ -2067,35 +2066,132 @@ def control_center(fw, world, focus=0, adjust=0, ring=True):
     return canvas
 
 
-def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
-    """The connectivity block and Now Playing's from y 38, the toggles' circles (Wi-Fi lit), the sliders under them,
-    the five tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
+def cc_words(canvas):
+    """The words the page set glyph by glyph (ui_set), spaces dropped: a word ends where the next glyph is on another
+    row or more than 16 px on (wider than a glyph and a space at 13 px), or back to the left."""
+    words, last = [], None
+    for ch, (x, y, _, _), *_ in canvas.texts:
+        if last is None or y != last[1] or not 0 < x - last[0] <= 16:
+            words.append('')
+        words[-1] += ch
+        last = (x, y)
+    return words
+
+
+def test_control_center_is_v4_s_stacked_columns(fw, world):
+    """v4 (stack v2, mock_cc4_stack.py): the toggles' block 150 x 258 from (20, 38), two by three with circles 74 px
+    apart across and 86 down; Now Playing 177 x 154 from x 178; Brightness and Volume under it, each 177 x 38, 14 px
+    apart; the grab bar at y 304; the wheel's white ring on Wi-Fi. No tiles."""
     canvas = control_center(fw, world)
     accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
     boxes = [(r, c) for r, c, _ in canvas.rounded]
-    assert ((20, 38, 138, 124), block) in boxes and ((166, 38, 189, 124), block) in boxes
-    assert ((35, 46, 40, 40), accent) in boxes and ((103, 46, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
-    assert ((32, 43, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
-    assert ((32, 216, 44, 44), accent) in boxes  # Lock, on
+    assert ((20, 38, 150, 258), block) in boxes and ((178, 38, 177, 154), block) in boxes
+    circles = [r for r, c, radius in canvas.rounded if radius == 20 and r[2] == 40]
+    assert circles == [(58 - 20 + dx, 74 - 20 + dy, 40, 40) for dy in (0, 86, 172) for dx in (0, 74)]
+    assert ((38, 54, 40, 40), accent) in boxes and ((112, 54, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
+    assert ((35, 51, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
+    assert ((178, 206, 177, 38), off) in boxes and ((178, 258, 177, 38), off) in boxes
     assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
-    words = [t for t, *_ in canvas.texts]
-    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi'):
-        assert label in words, label
+    assert not [r for r, c, radius in canvas.rounded if radius == 12]  # v3's tiles' corners
+    assert cc_words(canvas)[:6] == ['Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'SmartWi-Fi', 'EQ']
 
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
-    rings = lambda canvas: [r for r, c, _ in canvas.rounded if r == (17, 167, 169, 44)]
-    assert rings(control_center(fw, world, focus=CC_BRIGHT, adjust=1)) and \
-        [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
-    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
+    ring = (175, 203, 183, 44)  # Brightness's, 3 px out
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == ring] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == ring] == [rgba(0xffffff)]
 
 
 def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(fw, world):
     """No wheel input yet: no ring anywhere. On the Now Playing block the ring goes round the whole block."""
     boxes = lambda canvas: [r for r, c, _ in canvas.rounded if c == rgba(0xffffff)]
     assert boxes(control_center(fw, world, ring=False)) == []
-    assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
-    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
+    assert boxes(control_center(fw, world)) == [(35, 51, 46, 46)]  # Wi-Fi's
+    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(175, 35, 183, 160)]
+
+
+SCREEN = 375 * 320
+BEHIND, INK = 0xff1c1c1e, 0xffffffff
+
+
+def inter_pens(text, px=16):
+    """text's pens as Inter Medium sets it at AWTK size px: each glyph's start from the first's, exact, in px."""
+    from fontTools.ttLib import TTFont
+    font = TTFont(host.ROOT/'assets/fonts/Inter-Medium.ttf')
+    cmap, hmtx, line = font.getBestCmap(), font['hmtx'], font['hhea'].ascent - font['hhea'].descent
+    pens, at = [], 0.0
+    for ch in text:
+        pens.append(at)
+        at += hmtx[cmap[ord(ch)]][0] * px / line
+    return pens, at
+
+
+def cc_label_fb(fw, world, focus=0, xoffset=0):
+    """Control Center painted into a 375 x 320 BGRA buffer of the block's colour, each glyph stock draws inking its
+    rect's first 6 columns over rows y 4 above to 4 below its row, as far as the clip lets it; the toggles' names'
+    scrollers there (cc_open's), Smart Wi-Fi's scrolled xoffset px. (canvas, the buffer, Smart Wi-Fi's scroller)."""
+    theme(fw)
+    win, _, _ = quick_window(world)
+    names = [world.add(win, f'cc_name{i}', 'hscroll_label', box=(0, 0, 72, 16)) for i in range(6)]
+    struct.pack_into('<i', world[names[4]].block, O['HSCROLL_XOFFSET'], xoffset)
+    world[win].props.update(_cc_focus=focus, _cc_seen=1)
+    canvas = Canvas(fw)
+    fb = (C.c_uint * SCREEN)(*([BEHIND] * SCREEN))
+    struct.pack_into('<Q', canvas.lcd, O['LCD_OFFLINE_FB'], C.addressof(fb))
+    for k, v in (('LCD_W', 375), ('LCD_H', 320), ('LCD_LINE_LENGTH', 4 * 375), ('LCD_FORMAT', O['LCD_BGRA8888'])):
+        struct.pack_into('<i', canvas.lcd, O[k], v)
+    canvas.clip = (0, 0, 375, 320)
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: setattr(canvas, 'clip', struct.unpack('<4i', C.string_at(r, 16))) or 0)
+
+    def ink(c, s, n, r, *_):
+        canvas.texts.append((wide(s, n), rect(r), canvas.text_color, canvas.font))
+        x, y, w, h = rect(r)
+        cx, cy, cw, ch = canvas.clip
+        for yy in range(max(y + h // 2 - 4, cy), min(y + h // 2 + 4, cy + ch)):
+            for xx in range(max(x, cx), min(x + 6, cx + cw)):
+                fb[yy * 375 + xx] = INK
+        return 0
+    fw.mock('canvas_draw_text_in_rect', ink)
+    paint_bg(fw, win, canvas)
+    return canvas, fb, world[names[4]]
+
+
+def test_a_toggle_s_name_is_set_at_inter_s_own_advances(fw, world):
+    """ui_set: each glyph of "Bluetooth" starts at its exact pen from Inter Medium's advances, rounded on its own (AWTK
+    rounds every advance and carries the error), centred on its circle (x 132); the space in "Smart Wi-Fi" is Inter's
+    3.5 px, not the 7 AWTK leaves."""
+    canvas, _, _ = cc_label_fb(fw, world)
+    glyphs = [(t, r[0]) for t, r, *_ in canvas.texts if len(t) == 1]
+    pens, w = inter_pens('Bluetooth')
+    x0 = 132 - round(w) // 2
+    blue = [x for t, x in glyphs if x >= 90 and t in 'Bluetooth'][:9]
+    assert blue == [x0 + int(p + 0.5) for p in pens]
+    pens, _ = inter_pens('Smart Wi-Fi')
+    smart = [r[0] for t, r, *_ in canvas.texts if r[1] == 275 - 16 and r[0] < 110]  # its row's left column: no space drawn
+    assert smart == [24 + int(p + 0.5) for k, p in enumerate(pens) if k != 5]
+
+
+def test_a_name_wider_than_its_column_fades_out_at_its_edge_inside_its_box(fw, world):
+    """Smart Wi-Fi (75 px; its column 68 from x 24, rows 267 to 283): at rest it starts at the column's left, its
+    text whole there; the right end's last column shows only what is behind it, the columns before it a blend (the
+    text itself fading, no band painted); nothing is drawn outside the column. Its scroller holds its width."""
+    canvas, fb, name = cc_label_fb(fw, world)
+    px = lambda x, y: fb[y * 375 + x]  # noqa: E731
+    assert struct.unpack_from('<i', name.block, O['HSCROLL_TEXT_W'])[0] == round(inter_pens('Smart Wi-Fi')[1])
+    rows = range(255, 300)
+    assert all(px(x, y) == BEHIND for y in rows for x in (*range(14, 24), *range(92, 100)))
+    assert all(px(91, y) == BEHIND for y in rows)  # the end column: the text weighs 0 there
+    assert INK in [px(x, 275) for x in range(24, 30)]  # the start whole
+    ramp = {px(x, 275) for x in range(80, 91)} - {BEHIND, INK}
+    assert ramp and not [y for y in (*range(255, 267), *range(283, 300)) for x in range(24, 92) if px(x, y) != BEHIND]
+
+
+def test_a_scrolled_name_fades_at_both_ends(fw, world):
+    """Scrolled off its start (the marquee, cc_marq) the left end fades too; at the end of its range only the left."""
+    _, fb, _ = cc_label_fb(fw, world, focus=4, xoffset=3)
+    assert all(fb[y * 375 + 24] == BEHIND for y in range(267, 283)) and all(fb[y * 375 + 91] == BEHIND for y in range(267, 283))
+    _, fb, _ = cc_label_fb(fw, world, focus=4, xoffset=7)  # 75 - 68: its end in view
+    assert all(fb[y * 375 + 24] == BEHIND for y in range(267, 283)) and INK in [fb[275 * 375 + x] for x in range(84, 92)]
 
 
 def landed(fw, world, t, **keys):
@@ -2116,9 +2212,9 @@ def landed(fw, world, t, **keys):
 
 @pytest.mark.parametrize('t, dy', [(0, 0), (50, 8), (140, 0), (190, -2), (279, 0), (280, 0), (5000, 0)])
 def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, t, dy):
-    """The landing's spring (cc_springs): every block, slider and tile drawn dy lower (the canvas's offset)."""
+    """The landing's spring (cc_springs): every block, circle and slider drawn dy lower (the canvas's offset)."""
     drawn = landed(fw, world, t)
-    blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
+    blocks = [d for d in drawn if d[0] == (20, 38, 150, 258)]
     assert blocks and {y for _, _, y in drawn} == {dy}
 
 
@@ -2137,7 +2233,7 @@ def test_the_sliders_fill_to_their_eased_levels(fw, world):
     struct.pack_into('<iiI', fw.var('bright_bar', C.c_char * 12), 0, 25 << 8, 1, 0)
     canvas = control_center(fw, world)
     fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
-    assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
+    assert (178, 258, 177 * 128 // 256, 38) in fills and (178, 206, 177 * 64 // 256, 38) in fills
 
 
 def usb_page(fw, world, st, mode=0):
