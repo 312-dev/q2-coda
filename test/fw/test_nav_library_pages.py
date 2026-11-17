@@ -1325,7 +1325,9 @@ def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):
 
 
 def stock_stub(address, result, log):
-    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork."""
+    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork.
+    The code holds log's address, not log: the caller keeps log alive while the stub can run, or the stub
+    writes into whatever Python object took its memory."""
     claim(address)
     code = (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008 48895010') +
             b'\xb8' + struct.pack('<I', result) + b'\xc3')
@@ -1360,11 +1362,13 @@ def test_fewer_hearts_on_a_my_fav_take_it_out(fw, ui, song, mcl):
 def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, key, told):
     path = b'/mnt/mmc/Jellyfin/A/now.flac'
     heart = Heart(fw, ui, song, mcl, fav=fav, path=path, table=ratings((listen_key(path), kept)) if kept else None)
-    stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
+    log = (C.c_long * 3)()
+    stock_stub(FAV_CLICK, 0, log)
     favdir_card(fw, heart.files.files)
     heart.hold()
     heart.key(key)
     heart.key(KEY_CENTER)
+    assert log[0] == Heart.CTX  # My Fav in or out through stock's toggle
     assert heart.files.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + told + b'\t' + path + b'\n'
 
 
