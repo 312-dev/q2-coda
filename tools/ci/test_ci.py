@@ -101,6 +101,31 @@ def test_payload_change_runs_the_unit_rules_over_every_patch_file(tmp_path):
                                                                               'test_theme.py', 'test_xiph.py']
 
 
+def test_a_python_change_plans_the_mypy_suite_that_checks_it(tmp_path):
+    root = tree(tmp_path, {'test/unit/test_art.py': '', 'test/unit/test_shelf.py': ''})
+    other = lambda path: affected.plan_for({path: {1}}, root).as_dict()['other']  # noqa: E731
+    assert 'mypy-tools' in other('test/unit/test_art.py') and 'mypy-fw' not in other('test/unit/test_art.py')
+    assert 'mypy-tools' in other('tools/shelf.py') and 'mypy-tools' in other('tools/ci/gate.py')
+    assert 'mypy-fw' in other('test/fw/test_art_zoom.py') and 'mypy-tools' not in other('test/fw/test_art_zoom.py')
+    assert 'mypy-fw' in other('test/fw/helpers.py')
+    assert {'mypy-tools', 'mypy-fw'} <= set(other('pyproject.toml'))  # the mypy config; also an everything plan
+    for path in ('patch/seek.c', 'docs/ipod.md', 'tools/pwm.c', 'test/fw/fixture.json'):
+        assert not {'mypy-tools', 'mypy-fw'} & set(other(path)), path
+
+
+def test_mypy_suites_run_as_the_gate_runs_them(tmp_path):
+    for name in ('mypy-tools', 'mypy-fw'):
+        assert affected.mypy_argv(name, 'py') == gate.full_suite(name, 'py', tmp_path)().argv
+    every = affected.Plan()
+    every.everything('x')
+    assert {'mypy-tools', 'mypy-fw'} <= every.other
+
+
+def test_a_bisection_run_keeps_the_mypy_suites():
+    whole = {'unit': [], 'fw': [], 'patch': [], 'other': ['mypy-fw', 'test/gone.py'], 'why': []}
+    assert merge_batch.widen(None, whole, lambda f: False)['other'] == ['mypy-fw']
+
+
 def test_every_folder_a_unit_test_globs_is_in_scanners():
     """A test/unit file that reads every file of patch/, tools/ or test/ must be in affected.SCANNERS for that
     folder, or a change there would skip its rule."""
@@ -109,6 +134,23 @@ def test_every_folder_a_unit_test_globs_is_in_scanners():
     found = {(m[1] + '/', f.name) for f in (root/'test/unit').glob('test_*.py') for m in pattern.finditer(f.read_text())}
     assert ('patch/', 'test_theme.py') in found  # the pattern still sees the rule that was missed
     assert found <= {(folder, test) for folder, _, test in affected.SCANNERS}
+
+
+def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
+    # test/coverflow.py compiles its own host build and takes no BUILD; the plan once handed it one and argparse
+    # refused it, so the suite had not run for a day when anyone noticed.
+    import subprocess
+    root = pathlib.Path(__file__).resolve().parents[2]
+    real_run, ran = subprocess.run, []
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    plan = affected.Plan()
+    plan.other.add('test/coverflow.py')
+    assert affected.run(plan, '/some/build', 'python3') == 0
+    assert ran[-1][-1:] == ['test/coverflow.py']  # nothing after the script
+    assert gate.other_suite('test/coverflow.py', 'python3').argv[-1:] == ['test/coverflow.py']
+    # and the suite does refuse an extra argument, so the line above is the one that matters
+    refused = real_run([sys.executable, str(root/'test/coverflow.py'), '/some/build'], capture_output=True, text=True)
+    assert refused.returncode == 2 and 'unrecognized arguments' in refused.stderr
 
 
 def test_docs_only_run_the_anchor_check(tmp_path):

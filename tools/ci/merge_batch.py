@@ -92,16 +92,18 @@ def suites_of(plan):
 def widen(own, whole, exists):
     """The plan a bisection run (or the tip's check) uses: whole, the plan of the round's run of everything
     that failed, joined with own, the run's head's plan (None for the tip), keeping only the files exists()
-    finds at that head. A head's own plan can be narrower than whole's: a branch whose own plan skipped a
-    suite part it breaks would pass its level, and the next branch whose plan reaches that part would be
-    blamed for it. test/patch.py runs whole: the plans' joined-suite line numbers differ from head to head."""
+    finds at that head (the mypy suites are no files and stay). A head's own plan can be narrower than
+    whole's: a branch whose own plan skipped a suite part it breaks would pass its level, and the next
+    branch whose plan reaches that part would be blamed for it. test/patch.py runs whole: the plans'
+    joined-suite line numbers differ from head to head."""
     out = {'why': whole.get('why', [])}
     for k in ('unit', 'fw'):
         parts = [whole[k]] + ([own[k]] if own else [])
         out[k] = 'all' if 'all' in parts else sorted(f for f in set().union(*map(set, parts))
                                                      if exists(f'test/{k}/{f}'))
     out['patch'] = 'all' if whole['patch'] or (own and own['patch']) else []
-    out['other'] = sorted(o for o in set(whole['other']) | set(own['other'] if own else ()) if exists(o))
+    names = set(whole['other']) | set(own['other'] if own else ())
+    out['other'] = sorted(o for o in names if exists(o) or o.startswith('mypy-'))
     return out
 
 
