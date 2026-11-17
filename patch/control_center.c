@@ -1,11 +1,12 @@
 /* Control Center (docs/oled-design.md#control-center, v4 "stack v2", approved on 2026-11-16 from
  * design/control-center-v4 mock_cc4_stack.py): stock's pull-down (statusbar_dialog, Quick
- * Settings) drawn as iOS's Control Center under the status row, in two columns down to the grab bar.
- * On the left a block of six round toggles, two by three, each named under it: Wi-Fi, Bluetooth,
- * AirPlay, Car Remote, Smart Wi-Fi and EQ. On the right Now Playing, the song's cover, title and
- * artist over Previous, Play/Pause and Next; under it a Brightness slider and under that a Volume
- * slider, each the column's width; and a grab bar at the foot, where the swipe up that closes it
- * starts. Buttons Lock keeps its hardware hold, Night Shift and Sleep Timer their Settings rows.
+ * Settings) drawn as iOS's Control Center under the status row, in two columns down to the grab
+ * bar. On the left a block of six round toggles, two by three, each named under it: Wi-Fi,
+ * Bluetooth, AirPlay, Car Remote, Smart Wi-Fi and EQ. On the right Now Playing, the song's cover,
+ * title and artist over Previous, Play/Pause and Next; under it a Brightness slider and under that
+ * a Volume slider, each the column's width; and a grab bar at the foot, where the swipe up that
+ * closes it starts. Buttons Lock keeps its hardware hold, Night Shift and Sleep Timer their
+ * Settings rows.
  *
  * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth buttons, at opacity 0 over
  * their circles, take the taps and holds (navigation.c quick_down: held, their settings pages), and
@@ -42,9 +43,9 @@ extern unsigned char now_cover(void *r, const char **file);                    /
 #define CC_BLOCK_W 150 /* the toggles' block, y CC_Y0 to CC_Y0 + CC_BLOCK_H */
 #define CC_BLOCK_H 258
 #define CC_BLOCK_R 22
-#define CC_GAP 8      /* between the block and the right column */
-#define CC_COL 74     /* the circles' columns, centre to centre */
-#define CC_ROW 86     /* the circles' rows, centre to centre: three over the block's height */
+#define CC_GAP 8  /* between the block and the right column */
+#define CC_COL 74 /* the circles' columns, centre to centre */
+#define CC_ROW 86 /* the circles' rows, centre to centre: three over the block's height */
 #define CC_RIGHT_X (CC_X0 + CC_BLOCK_W + CC_GAP)
 #define CC_RIGHT_W (CC_X1 - CC_RIGHT_X)
 #define CC_NOW_H 154
@@ -52,14 +53,14 @@ extern unsigned char now_cover(void *r, const char **file);                    /
 #define CC_CIRCLE_R 20
 #define CC_ICON 22
 /* The toggles' names: every number their geometry takes, here alone (cc_label, cc_open) */
-#define CC_LABEL_W 68           /* a name's room, centred on its circle: the column less 6 px */
-#define CC_LABEL_PX TYPE(13)    /* Inter Medium 13 px */
-#define CC_LABEL_DY 29          /* a name's row under its circle's centre */
+#define CC_LABEL_W 68        /* a name's room, centred on its circle: the column less 6 px */
+#define CC_LABEL_PX TYPE(13) /* Inter Medium 13 px */
+#define CC_LABEL_DY 29       /* a name's row under its circle's centre */
 #define CC_LABEL_TRACK TRACK_CAPTION /* thousandths of an em between glyphs (ui_set) */
 #define CC_ART 64
 #define CC_ART_R 9
-#define CC_ART_IN 12   /* the cover's inset in the Now Playing block */
-#define CC_TEXT_GAP 10 /* between the cover and the title */
+#define CC_ART_IN 12    /* the cover's inset in the Now Playing block */
+#define CC_TEXT_GAP 10  /* between the cover and the title */
 #define CC_TRANSPORT 34 /* the transport's row over the Now Playing block's foot */
 #define CC_SLIDER_Y (CC_Y0 + CC_NOW_H + CC_SPACE)
 #define CC_SLIDER_H 38
@@ -94,8 +95,9 @@ enum {
     CC_NEXT,
     CC_BUTTONS
 };
-static const char *const cc_labels[CC_STOPS] = { "Wi-Fi", "Bluetooth",   "AirPlay", "Car",
-                                                 "Smart Wi-Fi", "EQ", 0, 0, 0 };
+static const char *const cc_labels[CC_STOPS] = {
+    "Wi-Fi", "Bluetooth", "AirPlay", "Car", "Smart Wi-Fi", "EQ", 0, 0, 0
+};
 /* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
 static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",    "bluetooth", "airplay", "car",
                                                    "leaf",    "eq",        0,         "sun",
@@ -173,7 +175,7 @@ static void cc_label(void *win, void *canvas, int i, unsigned rgb, int cx, int c
     int off = lab ? I(lab, HSCROLL_XOFFSET) : 0;
     off = off < 0 ? 0 : off > over ? over : off;
     int was[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y),
-        col[4] = { ox + x0, oy + y - CC_LABEL_PX / 2, CC_LABEL_W, CC_LABEL_PX };
+                col[4] = { ox + x0, oy + y - CC_LABEL_PX / 2, CC_LABEL_W, CC_LABEL_PX };
     canvas_get_clip_rect(canvas, was);
     int l = col[0] > was[0] ? col[0] : was[0], t = col[1] > was[1] ? col[1] : was[1],
         r = col[0] + col[2] < was[0] + was[2] ? col[0] + col[2] : was[0] + was[2],
@@ -492,8 +494,8 @@ void cc_open(void *win) {
     for (int i = 0; i <= CC_EQ; ++i) {
         rect_t r = cc_box(i);
         int x0 = r.x + r.w / 2 - CC_LABEL_W / 2, y = r.y + r.h / 2 + CC_LABEL_DY;
-        void *name = hscroll_label_create(win, x0 - 2, y - CC_LABEL_PX / 2, CC_LABEL_W + 4,
-                                          CC_LABEL_PX);
+        void *name =
+            hscroll_label_create(win, x0 - 2, y - CC_LABEL_PX / 2, CC_LABEL_W + 4, CC_LABEL_PX);
         if (!name) continue;
         char n[12];
         tk_snprintf(n, sizeof n, "cc_name%d", i);

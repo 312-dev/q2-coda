@@ -370,7 +370,7 @@ int mono_on(void);   /* crossfade.c: Mono Audio's setting */
 #define NS_STEP 100
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
-void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ tile */
+void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
 void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */

@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Control Center (OLED): a new layout. Six round switches fill the left side in two columns: Wi-Fi, Bluetooth, AirPlay, Car, Smart Wi-Fi and EQ. On the right, Now Playing is taller with a bigger cover, and Brightness and Volume are full-width sliders, one under the other. The row of square buttons along the bottom is gone: Buttons Lock stays on its hold, and Night Shift and the Sleep Timer stay in Settings. The wheel goes down the switches row by row, then Now Playing, Brightness and Volume.
+  - Control Center (OLED): the names under the switches are evenly spaced (no extra gap after "Smart"). A name too long for its space fades out at its edge instead of being cut off with "...", and scrolls when the wheel is on its switch.
   - Home (OLED, Split): moving the selection onto the top row no longer leaves a thin strip of the blue bar across the row below it, which made the selected row's text look like it was flickering.
   - Home (OLED, Split): a toast such as **Unplugged** or **Charging** no longer puts a black bar across the top of the screen and cuts off the first row while it shows.
   - Car Remote (OLED): with no phone paired, turning the wheel to **Pair a Phone** no longer scrolls the page away from the Car Remote switch, and the ring around the selected button is a smooth outline that follows its rounded ends.

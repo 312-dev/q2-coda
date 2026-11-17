@@ -108,10 +108,9 @@ static void ui_set_pens(void *canvas, const unsigned *s, unsigned n, const char 
         gap = track * px * upm * 64 / (1000 * line);
     canvas_set_font(canvas, face, (unsigned)px);
     for (unsigned k = 0; k < n; ++k) {
-        unsigned c = s[k],
-                 u = fi >= 0 && c >= FONT_ADV_FIRST && c <= FONT_ADV_LAST
-                         ? ui_adv[fi][c - FONT_ADV_FIRST]
-                         : 0;
+        unsigned c = s[k], u = fi >= 0 && c >= FONT_ADV_FIRST && c <= FONT_ADV_LAST
+                                   ? ui_adv[fi][c - FONT_ADV_FIRST]
+                                   : 0;
         pen[k] = at;
         at += u ? (int)((u * (unsigned)px * 64 + (unsigned)line / 2) / (unsigned)line)
                 : (int)(canvas_measure_text(canvas, s + k, 1) * 64 + 0.5f);

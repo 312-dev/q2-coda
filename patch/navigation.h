@@ -417,7 +417,7 @@ int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
-int confirm_surface(void *w);    /* w holds the card's answers */
+int confirm_surface(void *w); /* w holds the card's answers */
 void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
 void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
@@ -681,7 +681,7 @@ void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
 void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
-int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
+int ringnav_wm_paint(void *wm);                   /* window_manager_paint's leaf */
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
@@ -738,7 +738,7 @@ void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 /* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
 int vol_wm_keyup(void *ctx, void *e);
-int vol_accel(void);                  /* volume.c: a wheel tick's steps at its speed */
+int vol_accel(void); /* volume.c: a wheel tick's steps at its speed */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
 typedef struct {
