@@ -4699,6 +4699,8 @@ int coverflow_home_back(void *top) {
 
 /* The list one of Home's rows opened while top is Home, which Return leaves (swipe_back.c); else 0. */
 void *coverflow_home_sublist(void *top) { return top && top == home.win ? home_open() : (void *)0; }
+/* Home's art pane, which shows the selected row's cover (art_zoom.c: Now Playing grows from it) */
+void *coverflow_home_pane(void) { return home.art; }
 
 /* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */
 int coverflow_home_sub(void) { return home_open() != (void *)0; }

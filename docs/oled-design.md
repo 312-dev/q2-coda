@@ -1142,6 +1142,11 @@ interruptible: a turn mid-run starts from where it is.
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
   ([internals](internals.md#now-playing-motion)).
+- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
+  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
+  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
+  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
+  ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
   the other side over 200 ms, `cubic_out`, from 60 ms: 260 ms in all. The times, the bar and the heart change at once;
@@ -1161,7 +1166,8 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, a track change cross-fades in place and so does the cover into Now
+  Playing; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
