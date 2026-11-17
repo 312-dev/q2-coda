@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Edit Home and Edit Library (OLED): lifting a row no longer makes it jump: its circle, name and grip stay exactly where they were and only its look changes, on a card that stays inside the side margins. The list ends a row higher, so no row sits against the hint at the bottom, a dragged row stays inside the list, and the rows fade out at whichever end has more to scroll, as in every other list.
   - Car Remote (OLED): with no phone paired, turning the wheel to **Pair a Phone** no longer scrolls the page away from the Car Remote switch, and the ring around the selected button is a smooth outline that follows its rounded ends.
   - Car Remote: **Settings → Car Remote** is redesigned. Each phone's row says whether it's **Connected over Wi-Fi** or **over Bluetooth**, or when it was last seen; before, its second line was cut off and showed nothing. **Pair a Phone** says how to pair and shows the Q2 Muse's address. Each phone has its own page with when it paired and last connected, **Rename** and **Forget Phone**, and a new pairing is announced by the phone's name ("Pixel 10 Pro paired").
   - Car Remote: Q2 Muse Remote can browse and play your Favorites (hearted songs) and Recently Added (the 100 newest songs) from the Q2 Muse.

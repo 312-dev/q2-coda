@@ -984,8 +984,9 @@ int ringnav_paint(void *w, void *canvas) {
 
 /* A list_fit set's scrolling list whose box runs on below the set's list end (y 282 on OLED): its
  * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
- * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners).
- * Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
+ * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners). In
+ * Edit Library its end is a row higher and its rows fade into the hint's band (library_edit.c
+ * lr_edit_room, lr_edit_foot). Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
  * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
@@ -1007,7 +1008,7 @@ static void list_fade(void *w, void *canvas) {
     int y = 0;
     void *wm = window_manager();
     for (void *p = w; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
-    int end = list_fit_end(), bottom = y + I(w, W_H);
+    int end = list_fit_end() - lr_edit_room(w), bottom = y + I(w, W_H);
     if (bottom <= end) return; /* a box cut above the end */
     int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
         content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
@@ -1026,6 +1027,6 @@ static void list_fade(void *w, void *canvas) {
     }
     int s0 = 1, s1 = 0; /* the selected row, on the screen */
     if (st.sel_w == w) s0 = y + st.sel_y - st.sel_h / 2, s1 = s0 + st.sel_h;
-    list_fades(canvas, y, bottom, end, off > 0, y + content - off > end, s0, s1);
+    list_fades(canvas, y, bottom, end, lr_edit_foot(w), off > 0, y + content - off > end, s0, s1);
 }
 

@@ -336,8 +336,12 @@ Home's list.
   listed, each row's chevron gives way to a grip (three 18x2 px bars 5 px apart, centered where the
   chevron was) in Text Tertiary, On Accent on the selection, and a hint, "Drag ≡ to move ·
   Play/Pause shows or hides", Inter Regular 13 px in Text Tertiary, is centered 14 px above the
-  screen's foot (its middle at y 298), the grip drawn as its glyph. Home in Split is laid out as
-  Full while the editor is open.
+  screen's foot (its middle at y 298), the grip drawn as its glyph. The list ends a row higher
+  than other lists, on y 250, so the hint has the room under the rows that a list has above the
+  screen's foot: the rows past that end peek through the same fade, into the ground by y 284, and a
+  scrolled list's top row fades as every list's does, circles and grips with their rows (the user,
+  2026-11-16: no row against an edge, and the fade at whichever end has more to scroll). Six rows
+  show, so Edit Home's seven scroll. Home in Split is laid out as Full while the editor is open.
 - **Check circles:** a 16 px circle centered on x 34 left of each row, its words moved to x 52. A
   row that shows has the accent's disc with a white 11 px bold check; a hidden row an empty 1.5 px
   ring in Text Tertiary, its words dimmed to Text Tertiary. On the selection the disc is white with
@@ -350,15 +354,18 @@ Home's list.
   only while something is loaded), and in the editor an Auto row shows how it stands now. The first
   toggle makes it the user's, Shown or Hidden, and that sticks (Folders shown on an empty card,
   hidden with folders).
-- **The wheel:** Center lifts the selected row: it grows 8% about its middle (the bar's box, so
-  x 2 to 372 and 34 px tall), its words in Inter Medium 22 px, white, with a white grip and its
-  circle as the selection's, on a raised `#2C2C2E` card with 9 px corners, a 1 px `#141414` ring and
-  a soft black shadow 6 px down. The wheel moves it a row a click, stopping at either end; Center
+- **The wheel:** Center lifts the selected row: nothing of it moves (the user, 2026-11-16: no
+  layout shift entering or leaving the drag), only its look changes. Its words in Inter Medium at
+  the row's 20 px, white, with a white grip and its circle as the selection's, each where it stood,
+  on a raised `#2C2C2E` card in the selection bar's box (x 16 to 359, inside the side margins) and
+  34 px tall about the row's middle, with 9 px corners, a 1 px `#141414` ring and a soft black
+  shadow 6 px down. The wheel moves it a row a click, stopping at either end; Center
   puts it down and saves. Return while it is lifted puts it back exactly where it was, still in the
   editor.
 - **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
-  the hold. The row follows the finger on its card; the rows it passes slide aside over 150 ms
-  (cubic out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
+  the hold. The row follows the finger on its card, held inside the list (from y 58 to the list's
+  end), never over the status row or the hint; the rows it passes slide aside over 150 ms (cubic
+  out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
   its place and saves. A tap selects a row and opens nothing.
 - **The order** is kept through a restart and a power cut. A row the editor doesn't list (the
   Library's My Fav and Frequent, a media row without its folder) keeps its place; a row a later
