@@ -124,7 +124,8 @@ static int cap_gone(void *view, void *event) {
     return 0;
 }
 /* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
- * none. */
+ * none. A row already in the table keeps its one entry, so a caller may run on every layout: a
+ * second entry for the row, never measured, would set its height in cap_step after the first. */
 void caption_row(void *label, const unsigned *text) {
     void *item = label && text ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
          *view = item ? P(item, W_PARENT) : (void *)0;
@@ -133,6 +134,12 @@ void caption_row(void *label, const unsigned *text) {
         cap_gone(cap.view, 0);
         cap.view = view;
         widget_on(view, EVT_DESTROY, cap_gone, view);
+    }
+    int had = cap_find(item);
+    if (had >= 0) {
+        if (cap.text[had] != text) /* another caption: measured again at its next paint */
+            cap.text[had] = text, cap.lines[had] = 0, memset(cap.cut[had], 0, CAP_LINES);
+        return;
     }
     for (int i = 0; i < CAP_MAX; ++i)
         if (!cap.item[i]) {

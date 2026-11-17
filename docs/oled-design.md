@@ -73,6 +73,10 @@ The tokens live once, in `tools/theme.py` `TOKENS`, written to `patch/tokens.h` 
 `patch/ui_kit.c` picks the half; `RGB_<NAME>` and `RGB_<NAME>_L` are each half) and read by `tools/art.py` for
 its glyphs' inks. A test fails on a color literal equal to a token anywhere else in `patch/`.
 
+The tokens live once, in `tools/theme.py` `TOKENS`, written to `patch/tokens.h` for the payload (`tok()` in
+`patch/ui_kit.c` picks the half; `RGB_<NAME>` and `RGB_<NAME>_L` are each half) and read by `tools/art.py` for
+its glyphs' inks. A test fails on a colour literal equal to a token anywhere else in `patch/`.
+
 | Token          | Hex       | Use                                                                          | Concept measurement                                        |
 | -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Canvas         | `#000000` | Every background                                                             | `#000000` on all grid screens                              |
@@ -185,6 +189,7 @@ All lists share one grid.
     standing 6 px below the row's center, 3 to 11 px tall and moving on offset sines (a 1.25 s loop) in Text
     Primary while playing; paused, frozen at their last heights in Text Secondary; stopped, nothing. Only their
     10 px box repaints as they move. A tap on them opens Now Playing (`mock_status_bars.py`, the user's, 2026-11-15).
+    On Home, while its first row is in sight, they lead that row instead ([Home's first row](#homes-first-row)).
   - **Wi-Fi**, 5 px left of the bars: Phosphor `wifi-high` (bold) lit by the signal, one, two or three arcs in Text
     Primary and the rest in `#3A3A3C` so the shape keeps its width; `wifi-x` (bold) connected with no internet;
     nothing with Wi-Fi off or not connected (`mock_wifi_status.py`).
@@ -192,8 +197,12 @@ All lists share one grid.
     `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
-  - **Headset battery**, 5 px left: a connected Bluetooth headset's level, Phosphor `bluetooth` (bold) then the
-    level and "%" in the battery's percentage type, Text Primary.
+  - **Bluetooth**, 5 px left (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is
+    connected; Phosphor `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one
+    is connected; a headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled
+    to the level as the status battery's (red under 20%); a car, `car-profile` (bold). While a guest plays
+    ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
+    Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
   - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
 - The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centered on the
   row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
@@ -213,6 +222,22 @@ All lists share one grid.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
+
+### Home's first row
+
+Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`):
+
+- Stock's Now Playing row reads **Playing** while something plays, **Paused** while it is paused and **Guest Play**
+  while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
+  Edit Home lists it as Playing.
+- It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
+  sight: Up Next's level bars (3 px wide, 4.5 px apart, up to 12 px, a frame every 125 ms) in the accent while
+  playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
+  paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
+  (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.
+- Between playing and paused the glyph morphs over 250 ms, cubic out: the bars freeze, the middle one narrows and
+  fades, the outer two widen and rise into the pause's bars, the accent turning Text Secondary; on resume the same
+  backwards, then the bars move again. The words cross-fade in the same 250 ms. Under Reduce Motion both are a cut.
 
 ### Selection bar
 
@@ -641,7 +666,9 @@ as its callers move onto it.
 - **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
   wide at x 42 with 16 px corners, its stack centered on y 168 and kept inside y 44 to 302.
 - **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centered, naming
-  the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
+  the object ("Forget WH-1000XM5?", never "Are you sure"), a long one scrolling in the text column (the house
+  marquee: held 2.75 s, then 35 px/s, a copy 40 px behind, its ends faded 12 px into the card), an optional 28 px
+  glyph 6 px over it; at most two body lines in
   15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
@@ -654,8 +681,25 @@ as its callers move onto it.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+
+### Pairing
+
+A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or a Guest Play guest
+(`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
+
+- The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
+  as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
+  glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
+- What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
+  music. Check it's on Alex's phone."
+- The code large, Inter Medium 30, as two groups of three ("242 610").
+- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
+- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
+- Its end, Car Remote's: the icon toast "Pixel 10 Pro paired" (Positive's check-circle) or "Pairing failed" (`carremote_page.c` `carremote_paired`).
+- ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
+  not apply.
 
 ### Focus ring
 
@@ -1052,8 +1096,11 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
   13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
 - **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night Shift, EQ and Smart Wi-Fi, 44 px squares with 12 px corners on y 238, 12 px
-  in from the blocks' ends and evenly apart, named under them as the toggles are.
+- **Tiles**: Lock, Sleep, Night (Night Shift), EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on
+  y 238, 12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest
+  Play's switch (a hold opens its settings), lit and named by the guest ("Alex") while one plays
+  ([Guest Play](#guest-play), `mock_bt.py`'s `control_center`). ponytail: at 13 px "Smart Wi-Fi" and "Guest" meet
+  edge to edge; the mock drew the labels at 11 px, which the type scale no longer has.
 - **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
   Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
@@ -1089,6 +1136,76 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
+
+### Bluetooth
+
+Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `patch/bt_ui.c`, `patch/bt_detail.c`,
+`patch/bt_stopped.c`; approved from `design/bt-redesign`, its `NOTES.md` and sheets, on 2026-11-16):
+
+- **Devices before settings.** The switch, Name (the name as its value), then My Devices (the paired ones) and
+  Other Devices (the found ones), each a section header in 15 px Text Tertiary a whole row high, then Audio:
+  Quality (its choice as the value), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
+  switch, Name and a line in 13 px Text Tertiary: "Turn on to play to headphones, a car or a speaker."
+- **Scanning is automatic** while the page is open, the list's spinner (Text Tertiary) beside "Other Devices"
+  while a scan runs: one as the page opens, then again each time one ends while nothing is connected. No Scan
+  row.
+- **Device rows** lead with the device's kind (Phosphor `headphones`, `car-profile`, `speaker-hifi`,
+  `device-mobile`, else `bluetooth`; regular, 20 px, Text Secondary, white on the selection) centred on x 33, the
+  name at x 52. The connected one is a two-line row: the name over "Connected · LDAC · 72%" (what is known: the
+  codec, the headset's battery) after the Positive dot, with a chevron. Another paired one says "Not Connected"
+  as a value before its chevron; one connecting, "Connecting…" with the activity spinner on the right column.
+- **Centre** on a paired row connects it; on the connected one it opens the device's page; Play/Pause held on
+  any paired row opens its page.
+- **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
+  line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
+  fixes it), then Battery (when reported), Disconnect (Connect when not connected), Rename and Forget This
+  Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
+  again to use it.", Cancel first and Forget Device in red. Rename is the letter strip, "Shows on this Q2"
+  under the name.
+- **Quality**: each choice with its bit rate in 15 px Text Tertiary before the check where the codec fixes one
+  (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
+  "Steps with the signal, 330 to 990 kbps".
+- **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
+  name, the hint in 13 px under that.
+- **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5
+  disconnected" (the glyph in Text Secondary), "BMW 6R81 connected · resuming" with Resume on Connect on,
+  "Headphones low · 10%" (battery-warning, red) once at 20% and once at 10% each connection.
+- **Bluetooth Stopped**: when the radio never answers, a mode page, the warning glyph on an orange (Warning)
+  circle, "Bluetooth Stopped", "Restarting the Q2 to fix it in 9 s" counting down, and a Not Now pill (Centre,
+  Return or a tap), instead of a toast and an unannounced restart.
+
+### Guest Play
+
+A guest's phone plays through the Q2 to what the Q2 plays to ([internals](internals.md#guest-play-screens),
+`patch/guest_ui.c`, on q2-guest's [contract](internals.md#contract); approved from `design/bt-redesign`'s
+`bt-guest-flow.png`, G1 to G12, and N8 to N13):
+
+- **Asking** (G3, G4): the [confirmation card](#confirmation-card): the guest's name, "wants to play music" (or "on
+  Spotify", "over AirPlay"), on a first pairing the phone's code large ("482 913") with "Check that Alex's phone
+  shows this code"; Allow Once (selected: one Centre answers), Always Allow, Decline, and the daemon's 30 s
+  counting down to Decline. Return declines. A second guest while one plays (G6): "Replace Alex's Pixel?", "Sam's
+  iPhone wants to play music", Keep Alex's Pixel (selected) and Replace, counting down to Keep.
+- **The guest's Now Playing** (G5, G12): the art's place, the guest's title and artist, the phone glyph in the
+  accent with "Playing from Alex's Pixel", "Your music is paused" (or "Paused on Alex's phone"), the path "Alex's
+  Pixel → Q2 → BMW 6R81" (17 px) and each leg's codec line (14 px Text Tertiary), and one selected thing, Stop
+  Guest Play: Centre stops at once, no confirm. Play/Pause, Next and Previous go to the guest's phone. It opens as
+  a phone's guest starts.
+- **Toasts** (G7, G8, G11): "Alex left. Resuming your music", "Lost Alex. Resuming your music" (warning, orange),
+  "Declined Alex's Pixel" (no answer too), "Sam iPhone isn't a trusted guest", "Turned away Sam iPhone"
+  (prohibit, Text Secondary). A failed pairing (G10) is a mode page: the warning on orange, "Couldn't Connect",
+  "Try again from Alex's phone" and Try Again, which opens the window again.
+- **Settings > Bluetooth > Guest Play** (N10, N11): the switch, Name (the strip, "Guests and AirPlay see this
+  name"), Let a Guest Connect, then Allow (Ask Every Time, Trusted Guests Only), When a Guest Leaves (Resume My
+  Music, Stay Paused), each choice checked, Trusted Guests (each its page: Rename, Ask Before Playing, Forget on
+  the card) and Hotspot. Switched off, the switch and a line saying what it gives. The Bluetooth page's Audio group
+  leads with its row, the value Ask, Trusted or Off.
+- **Let a Guest Connect** (G2): "On your phone, connect to", the name in 30 px, "in Bluetooth settings"; the
+  window's two minutes as an accent ring emptying round m:ss; while the hotspot runs, its join QR code with
+  "AirPlay or Spotify?"; Done (Centre, a tap, Return) closes the window.
+- **Hotspot** (N13): its switch, Name (Guest Play's) and Password (the strip), and while it runs its join QR code,
+  "Scan to join".
+- **Home**: while a guest plays, its first row reads Guest Play and opens the guest's Now Playing
+  ([Home's first row](#homes-first-row)).
 
 ### Streaming Configuration
 
@@ -1345,7 +1462,10 @@ pattern.
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
 | Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
-| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot; Name a key/value row opening the letter strip               |
+| Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
+| A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
+| Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |
+| Guest Play and its pages            | [Guest Play](#guest-play)   | The prompts on the confirmation card, the guest's Now Playing, the settings, Let a Guest Connect, Hotspot  |
 | Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |

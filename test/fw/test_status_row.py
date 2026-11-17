@@ -1,5 +1,5 @@
 """patch/status_row.c: the status row's glyph slots, right to left the battery, the level bars, Wi-Fi, a card app's
-sync, a headset's battery and Buttons Lock's padlock; their layout (the clock's edge), paint, taps and repaints."""
+sync, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's padlock; their layout (the clock's edge), paint, taps and repaints."""
 import ctypes as C
 import struct
 
@@ -91,21 +91,69 @@ def test_a_hidden_slot_takes_no_room(fw, st, status, wifi, left):
     assert row.left() == left
 
 
-def test_the_headset_slot_is_its_glyph_and_its_percentage(fw, row):
-    """bt_headset_battery's level (bt_battery.c's; none with no headset): the Bluetooth glyph's 14 px box,
-    2 px, then the level and "%" at the battery's advances (10 and 14 before its first paint measures them); -1
-    hides it."""
-    width = fw.fn('status_row__headset_w', C.c_int, C.c_int)
-    assert width(-1) == 0 and fw.fn('bt_headset_battery', C.c_int)() == -1
-    assert width(80) == 14 + 2 + 2 * 10 + 14 and width(100) == 14 + 2 + 3 * 10 + 14 and width(5) == 14 + 2 + 10 + 14
+HEAD = 'AA:BB:CC:DD:EE:01'
+
+
+def bt_link(fw, status=None, level=None, cls=None, thread=0):
+    """Stock's link list (its last item HEAD at status, or none), a link thread running, Bluetooth on and the battery
+    loop's file ("MAC PCT RATE CLASS")."""
+    from conftest import Files
+    links = [(HEAD, status)] if status is not None else []
+    fw.var('g_bluetoothflag', C.c_ubyte).value = 1
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = thread
+    fw.mock('getBtLinkSize', lambda *_: len(links))
+
+    def item(i, st_, mac, *_):
+        C.c_int.from_address(st_).value = links[i][1]
+        C.memmove(mac, HEAD.encode() + b'\0', len(HEAD) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)
+    lv = '' if level is None else level
+    files = Files(fw, {'/tmp/q2-btbatt': f'{HEAD} {lv} 48000 {cls or ""}\n'.encode()})
+    fw.fn('bt_headset_battery', C.c_int)()  # its loop started; the file read at the next look
+    now = [100000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    return files
+
+
+@pytest.mark.parametrize('status, thread, level, cls, width, art', [
+    (None, 0, None, None, 0, []),  # off or idle: nothing
+    (1, 1, None, None, 14, ['oled_status_btdim_d']),  # connecting: the dim rune
+    (3, 0, None, None, 14, ['oled_status_bt_d']),  # connected, no level: the white rune
+    (3, 0, 72, 0x240404, 14 + 2 + 15 + 2, ['oled_status_headphones_d']),  # a headset's level: headphones, battery
+    (3, 0, None, 0x200420, 14, ['oled_status_car_d']),  # a car
+])
+def test_the_bluetooth_slot_says_what_the_link_is(fw, row, status, thread, level, cls, width, art):
+    bt_link(fw, status, level, cls, thread)
+    assert fw.fn('status_row__headset_shown', C.c_int)() == width
     canvas = Canvas(fw)
-    canvas.art = {'oled_status_bt_d': (14, 14)}
-    drawn: list = []
-    fw.mock('canvas_draw_text', lambda c, s, n, x, y, *_: drawn.append(
-        (''.join(chr(C.c_uint.from_address(s + 4 * i).value) for i in range(n & 0xffffffff)), i32(x), i32(y), canvas.text_color)))
-    fw.fn('status_row__headset_draw', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY, 80)
-    assert canvas.images[0][:2] == (200, CY - 7)
-    assert drawn == [('80%', 200 + 16, CY - O['BATT_PX'] // 2, 0xffffffff)]
+    names: list = []
+    load = canvas.load_image
+    fw.mock('widget_load_image', lambda w, n, b, *_: names.append(C.string_at(n).decode()) or load(w, n, b))
+    canvas.art = {n: (14, 14) for n in art}
+    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
+    assert names == art
+
+
+@pytest.mark.parametrize('level, fill', [(72, 0xffffff), (20, 0xffffff), (19, 0xff453a)])
+def test_the_headset_s_battery_is_15_by_8_and_red_under_20(fw, row, level, fill):
+    from test_peq_page import rgb
+    bt_link(fw, 3, level, 0x240404)
+    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+    canvas = Canvas(fw)
+    canvas.art = {'oled_status_headphones_d': (14, 14)}
+    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
+    assert rgb(fw.calls('vgcanvas_set_fill_color')[0][1][1]) == fill  # the level's fill, then the nub's grey
+    assert len(fw.calls('vgcanvas_stroke')) == 1  # the body's outline
+
+
+def test_the_slot_s_kind_repaints_the_row(fw, row):
+    bt_link(fw, 1, None, None, 1)
+    row.sync_sig()
+    assert row.sync_sig() == 0
+    bt_link(fw, 3, None, None, 0)
+    assert row.sync_sig() == 1
 
 
 def test_the_bars_stand_on_the_row_white_while_playing_and_grey_when_paused(fw, row):
@@ -241,3 +289,22 @@ def test_a_download_outranks_a_check_and_a_stopped_app_says_nothing(fw, row):
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(C.byref(got)) == 2 and got.value == 600
     row.ap.a[1].launched = 0
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(None) == 1
+
+
+@pytest.mark.parametrize('out, width, art', [('BMW 6R81', 14 + 2 + 8 + 2 + 14, ['oled_status_guest', 'oled_status_relay_d', 'oled_status_headphones_d']),
+                                            ('jack', 14, ['oled_status_guest'])])
+def test_a_guest_playing_shows_its_phone_and_where_it_plays(fw, row, out, width, art):
+    """While a guest plays (guest.c's state), the slot is its phone in the accent, and relayed to the Q2's Bluetooth
+    device the relay mark and that device's glyph (a car's car; this one reports no Class: headphones)."""
+    from test_guest import Rig
+    rig = Rig(fw)
+    rig.state(state='playing', out=out)
+    rig.poll()
+    assert fw.fn('status_row__headset_shown', C.c_int)() == width
+    canvas = Canvas(fw)
+    names: list = []
+    load = canvas.load_image
+    fw.mock('widget_load_image', lambda w, n, b, *_: names.append(C.string_at(n).decode()) or load(w, n, b))
+    canvas.art = {n: (14, 14) for n in art}
+    fw.fn('status_row__headset_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY)
+    assert names == art

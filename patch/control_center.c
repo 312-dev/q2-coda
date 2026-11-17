@@ -2,8 +2,9 @@
  * design/mockups/mock_cc3.py cc3(True)): stock's pull-down (statusbar_dialog, Quick Settings)
  * drawn as iOS's Control Center under the status row. A block of four round toggles, Wi-Fi,
  * Bluetooth, AirPlay and Car Remote; beside it Now Playing, the song's cover, title and artist over
- * Previous, Play/Pause and Next; under both a Brightness slider and a Volume slider; then five
- * square tiles, Buttons Lock, Sleep Timer, Night Shift, EQ and Smart Wi-Fi, each named under it;
+ * Previous, Play/Pause and Next; under both a Brightness slider and a Volume slider; then six
+ * square tiles, Buttons Lock, Sleep Timer, Night Shift, EQ, Smart Wi-Fi and Guest (Guest Play's
+ * switch, lit and named by the guest while one plays, guest_ui.c), each named under it;
  * and a grab bar at the foot, where the swipe up that closes it starts.
  *
  * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth buttons, at opacity 0 over
@@ -48,7 +49,8 @@ extern int xfade_open(void *ctx, void *event);              /* crossfade.c */
 #define CC_ART_R 9
 #define CC_SLIDER_Y (CC_Y0 + CC_BLOCK_H + CC_GAP)
 #define CC_SLIDER_H 38
-#define CC_TILE 44
+#define CC_TILE 40    /* six tiles (mock_bt.py control_center) */
+#define CC_GUEST_W 54 /* the Guest tile's label: "Guest", or the guest's name, cut to this */
 #define CC_TILE_R 12
 #define CC_TILE_Y (CC_SLIDER_Y + CC_SLIDER_H + 30)
 #define CC_GRAB_Y 304
@@ -78,21 +80,22 @@ enum {
     CC_NIGHT,
     CC_EQ,
     CC_SMART,
+    CC_GUEST,
     CC_STOPS,
     CC_PREV = CC_STOPS,
     CC_PLAY,
     CC_NEXT,
     CC_BUTTONS
 };
-static const char *const cc_labels[CC_STOPS] = {
-    "Wi-Fi", "Bluetooth", "AirPlay", "Car",         0,    0,
-    0,       "Lock",      "Sleep",   "Night Shift", "EQ", "Smart Wi-Fi"
-};
+static const char *const cc_labels[CC_STOPS] = { "Wi-Fi", "Bluetooth", "AirPlay", "Car",
+                                                 0,       0,           0,         "Lock",
+                                                 "Sleep", "Night",     "EQ",      "Smart Wi-Fi",
+                                                 "Guest" };
 /* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name> */
 static const char *const cc_glyphs[CC_BUTTONS] = { "wifi",  "bluetooth", "airplay", "car",
                                                    0,       "sun",       "speaker", "lock",
                                                    "timer", "moon",      "eq",      "leaf",
-                                                   "back",  "pause",     "forward" };
+                                                   "guest", "back",      "pause",   "forward" };
 /* The landing's offset of the blocks from rest, in quarter pixels every CC_SPRING_STEP ms from
  * the moment the page comes to rest: a damped sine, 8 px past rest at about 50 ms, back through it
  * at 140, 2 px short at about 190 and still at CC_SPRING_MS (amplitude 14.6 px, decay ln 4 per
@@ -114,8 +117,9 @@ static rect_t cc_box(int i) {
     int half = (CC_X1 - CC_X0 - CC_GAP) / 2;
     if (i == CC_BRIGHT || i == CC_VOLUME)
         return (rect_t){ i == CC_BRIGHT ? CC_X0 : CC_X1 - half, CC_SLIDER_Y, half, CC_SLIDER_H };
-    if (i < CC_STOPS) { /* five tiles, 12 px in from the ends, evenly apart */
-        int k = i - CC_LOCK, cx = CC_X0 + 12 + CC_TILE / 2 + k * (CC_X1 - CC_X0 - 24 - CC_TILE) / 4;
+    if (i < CC_STOPS) { /* six tiles, 12 px in from the ends, evenly apart */
+        int k = i - CC_LOCK, cx = CC_X0 + 12 + CC_TILE / 2 +
+                                  k * (CC_X1 - CC_X0 - 24 - CC_TILE) / (CC_STOPS - CC_LOCK - 1);
         return (rect_t){ cx - CC_TILE / 2, CC_TILE_Y - CC_TILE / 2, CC_TILE, CC_TILE };
     }
     int nx = CC_X0 + CC_BLOCK_W + CC_GAP, mid = nx + (CC_X1 - nx) / 2,
@@ -141,6 +145,8 @@ static int cc_lit(int i) {
         return g_equalizer_flag != 0;
     case CC_SMART:
         return st.smart_wifi != 0;
+    case CC_GUEST: /* Guest Play on (guest_ui.c) */
+        return guest_ui_on();
     default:
         return 0;
     }
@@ -270,8 +276,14 @@ void cc_paint(void *win, void *canvas) {
         cc_shape(canvas, r, i <= CC_CAR ? CC_CIRCLE_R : CC_TILE_R, lit ? accent : CC_OFF, ring,
                  i <= CC_CAR ? CC_BLOCK : 0);
         cc_glyph(win, canvas, i, r.x + r.w / 2, r.y + r.h / 2, CC_ICON);
-        ui_text(canvas, cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY, 0,
-                r.x + r.w / 2, r.y + r.h + 9, 120, 1);
+        char who[24] = "";
+        if (i == CC_GUEST && guest_active()) { /* the guest's own name while one plays */
+            char guest[64];
+            guest_field("guest", guest, sizeof guest);
+            guest_short(guest, who, sizeof who);
+        }
+        ui_text(canvas, *who ? who : cc_labels[i], 1, CC_LABEL_PX, lit ? 0xffffff : RGB_SECONDARY,
+                0, r.x + r.w / 2, r.y + r.h + 9, i == CC_GUEST ? CC_GUEST_W : 120, 1);
     }
     /* Now Playing: the cover, the title and artist, and the transport */
     unsigned pos, n;
@@ -357,6 +369,9 @@ void cc_hold(int i) {
     case CC_EQ: /* an open EQ page is already the goal: a second would share peq_ui.c's one state */
         if (!navigator_window_is_exist("equalizer_page")) navigator_to("playset/equalizer_page");
         break;
+    case CC_GUEST:
+        guest_settings_open((void *)0, (void *)0);
+        break;
     }
 }
 
@@ -392,6 +407,9 @@ static int cc_act(void *win, int i) {
     case CC_SMART: /* Battery's row's setting (navigation.c pod_click, smart_wifi.c) */
         st.smart_wifi = !st.smart_wifi;
         write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
+        break;
+    case CC_GUEST: /* Guest Play's switch (guest_ui.c), as its settings page's */
+        guest_send(guest_ui_on() ? "off" : "on");
         break;
     case CC_NOW: /* as Home's Now Playing row: only while something is loaded */
         if (!cc_np_loaded()) break;
