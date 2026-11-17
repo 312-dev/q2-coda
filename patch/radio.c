@@ -141,7 +141,7 @@ static struct {
 } fx __attribute__((section(".scratch")));
 
 enum { MENU, PICK, STATIONS };
-enum { R_PLAYING, R_FAVS, R_FEATURED, R_TOP, R_COUNTRY, R_GENRE, A_PICK, A_SEARCH, A_SHOW };
+enum { R_PLAYING, R_FAVS, R_FEATURED, R_TOP, R_COUNTRY, R_GENRE, A_PICK, A_SEARCH, A_SHOW, A_RETRY };
 
 /* The lists page and the Now Playing page, while open. note: a caption over no rows (loading or a
  * failed fetch) stands in for level's list; want is the level a fetch fills, az whether it sorts it
@@ -150,7 +150,8 @@ static struct {
     void *page, *view, *edit; /* edit: the pull-down's search box */
     unsigned timer, go, leave;
     int level, next, arg, want, az, note, genre, favs, from, rows[6], sel[3];
-    int wifi; /* the fetch waits for Smart Wi-Fi's link */
+    int wifi;    /* the fetch waits for Smart Wi-Fi's link */
+    int offline; /* the empty state shown is unreached's offline one */
     list_t pick, list;
     char caption[64];
 } ui __attribute__((section(".scratch")));
@@ -571,16 +572,30 @@ static void show(int level) {
     if (n) ringnav_select(ui.view, ui.sel[level] < n ? ui.sel[level] : n - 1, n);
 }
 
-/* A caption over no rows, in place of the list, or with none the empty state's "No Stations";
- * Return leaves it for the list. */
-static void note(const char *caption) {
+/* A caption over no rows, in place of the list, or with none the empty state e (no_stations
+ * unless given); Return leaves it for the list. */
+static int unfetched(void *ctx, void *event);
+static void note_or(const char *caption, const empty_t *e) {
     if (ui.view && !ui.note) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     ui.note = 1;
     ui.view = ui.edit = 0;
     if (caption)
         page_list_or(ui.page, ui.page, "Internet Radio", caption, 0, 48);
     else
-        empty_list(ui.page, ui.page, "Internet Radio", &no_stations, 0);
+        empty_list(ui.page, ui.page, "Internet Radio", e ? e : &no_stations, e ? unfetched : 0);
+}
+static void note(const char *caption) { note_or(caption, 0); }
+
+/* A fetch that could not run (oled-design.md Empty and offline): with no Wi-Fi, Turn on Wi-Fi
+ * (Settings > Wi-Fi, whose open wakes Smart Wi-Fi's radio) and Try Again; with Wi-Fi but no reply,
+ * Try Again alone. */
+static const empty_t offline = { "cloud-slash", "Not Connected", "Turn on Wi-Fi to find stations",
+                                 "Turn on Wi-Fi", "Try Again" },
+                     down = { "cloud-warning", "Can't Load Stations", "Try again in a moment",
+                              "Try Again", 0 };
+static void unreached(void) {
+    ui.offline = get_wifisignal() <= 0;
+    note_or(0, ui.offline ? &offline : &down);
 }
 
 static void fetch_cancel(void) {
@@ -613,7 +628,10 @@ static void fetch_run(void) {
     fx.code = 0;
     fx.running = get_wifisignal() > 0 && (fx.body = calloc(FETCH_MAX, 1)) &&
                  !pthread_create(&fx.thread, 0, fetch_worker, 0);
-    note(fx.running ? "Loading…" : get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
+    if (fx.running)
+        note("Loading…");
+    else
+        unreached();
 }
 
 static unsigned fetch_got(const char *data, unsigned size, unsigned n, void *unused) {
@@ -665,7 +683,7 @@ static int tick(const void *unused) {
         else
             note((const char *)0); /* no stations */
     } else
-        note(get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
+        unreached();
     free(fx.body);
     fx.body = 0;
     return 8;
@@ -686,6 +704,12 @@ static int go(const void *unused) {
         show(STATIONS);
     } else if (ui.next == A_SHOW) {
         show(ui.level);
+    } else if (ui.next == A_RETRY) { /* the last fetch again, for the level it was to fill */
+        fetch_cancel();
+        if ((ui.wifi = smart_wifi_wait()))
+            note("Connecting to Wi-Fi…");
+        else
+            fetch_run();
     } else if (ui.next == A_SEARCH) {
         url_escape(ui.caption, key, sizeof key);
         tk_snprintf(path, sizeof path, "/m3u/stations/byname/%s" RADIO_QUERY, key);
@@ -731,6 +755,15 @@ static int menu_click(void *ctx, void *event) {
     }
     if (!rd.pid && !rd.wait) radio_play(rd.at);
     np_open();
+    return 0;
+}
+
+/* unreached's buttons: on a timer, as a row's click may not rebuild the list it is in. */
+static int unfetched(void *ctx, void *event) {
+    if (!ctx && ui.offline) /* offline's first: Turn on Wi-Fi */
+        navigator_to("systemset/wifi_page");
+    else
+        later(A_RETRY, 0);
     return 0;
 }
 

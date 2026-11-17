@@ -1147,6 +1147,15 @@ def empty_states(p):
 
 
 NO_STATIONS = (b'radio', b'No Stations', b'Add stations from your computer')
+# A fetch that could not run (docs/oled-design.md#empty-and-offline): no Wi-Fi, or Wi-Fi but no reply
+OFFLINE = (b'cloud-slash', b'Not Connected', b'Turn on Wi-Fi to find stations')
+DOWN = (b'cloud-warning', b"Can't Load Stations", b'Try again in a moment')
+
+
+def buttons(p):
+    """The newest empty state's button labels: (primary, gray one) or (primary, b'')."""
+    (w,) = [w for w, (kind, _, _) in p.w.made.items() if kind == 'view' and (w, b'_es_title') in p.w.strs][-1:]
+    return p.w.strs[(w, b'_es_row')], p.w.strs[(w, b'_es_alt')]
 
 
 def test_top_stations_fetches_by_votes_over_verified_tls(fw):
@@ -1198,7 +1207,7 @@ def test_genres_by_tag_escaped(fw):
 def test_no_wifi_no_fetch(fw):
     p = page(fw, wifi=0)
     p.menu('Top Stations')
-    assert p.threads == [] and fx(fw).running == 0 and 'No Wi-Fi' in note(p) and ui(fw).note == 1
+    assert p.threads == [] and fx(fw).running == 0 and empty_states(p)[-1:] == [OFFLINE] and ui(fw).note == 1
 
 
 @pytest.mark.parametrize('code, error, body', [(500, 0, m3u(('A', 'http://a/'))), (200, 28, m3u(('A', 'http://a/'))),
@@ -1208,7 +1217,38 @@ def test_a_failed_fetch_says_the_directory_is_unavailable(fw, code, error, body)
     curl = Curl(fw, body, code=code, error=error)
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert 'Directory unavailable' in note(p) and ui(fw).note == 1
+    assert empty_states(p)[-1:] == [DOWN] and ui(fw).note == 1
+
+
+def test_no_wi_fi_offers_turn_on_wi_fi_beside_try_again(fw):
+    """Turn on Wi-Fi (the primary) opens Settings > Wi-Fi; Try Again, once it is up, fetches the same list again,
+    on a timer (a row's click may not rebuild its own list)."""
+    p = page(fw, wifi=0)
+    went = []
+    fw.mock('navigator_to', lambda name, *_: went.append(C.string_at(name).decode()) or 0)
+    p.menu('Top Stations')
+    assert empty_states(p)[-1:] == [OFFLINE] and buttons(p) == (b'Turn on Wi-Fi', b'Try Again')
+    url = fx(fw).url
+    p.rows('unfetched')[0]()
+    assert went == ['systemset/wifi_page'] and p.threads == []
+    p.wifi = 3
+    p.rows('unfetched')[1]()
+    assert p.threads == []  # not from the click itself
+    p.run('go')
+    assert len(p.threads) == 1 and fx(fw).url == url and fx(fw).running == 1
+
+
+def test_a_failed_fetch_offers_try_again_alone_and_it_fetches_again(fw):
+    p = page(fw)
+    curl = Curl(fw, b'', code=500)
+    p.menu('Top Stations')
+    fetched(fw, p, curl)
+    assert empty_states(p)[-1:] == [DOWN] and buttons(p) == (b'Try Again', b'')
+    curl.code, curl.body = 200, m3u(('A', 'http://a.example/'))
+    p.rows('unfetched')[0]()
+    p.run('go')
+    fetched(fw, p, curl)
+    assert ui(fw).list.n == 1 and ui(fw).note == 0
 
 
 def test_a_fetch_with_no_stations_says_so(fw):
@@ -1224,7 +1264,7 @@ def test_a_body_over_256_kb_is_cut_off(fw):
     curl = Curl(fw, m3u(('A', 'http://a/')) + b'#' * (300 << 10), chunk=64 << 10)
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert curl.wrote == [64 << 10] * 3 + [0] and 'Directory unavailable' in note(p)
+    assert curl.wrote == [64 << 10] * 3 + [0] and empty_states(p)[-1:] == [DOWN]
 
 
 def test_the_tick_waits_for_the_worker(fw):
@@ -1342,7 +1382,7 @@ def test_a_fetch_that_fails_after_a_good_one_says_so(fw):
     curl.error = 28  # CURLE_OPERATION_TIMEDOUT, part of the body in
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert ui(fw).note == 1 and 'Directory unavailable' in note(p)
+    assert ui(fw).note == 1 and empty_states(p)[-1:] == [DOWN]
 
 
 def test_a_finished_fetch_s_thread_is_joined_once(fw):
@@ -1461,7 +1501,7 @@ def test_a_fetch_whose_thread_won_t_start_says_the_directory_is_unavailable(fw):
     p = page(fw, wifi=1)
     fw.mock('fw_pthread_create', lambda *_: 11)  # EAGAIN
     p.menu('Top Stations')
-    assert fx(fw).running == 0 and ui(fw).note == 1 and 'Directory unavailable' in note(p)
+    assert fx(fw).running == 0 and ui(fw).note == 1 and empty_states(p)[-1:] == [DOWN]
 
 
 def test_wi_fi_lost_during_a_fetch_says_no_wi_fi(fw):
@@ -1470,7 +1510,7 @@ def test_wi_fi_lost_during_a_fetch_says_no_wi_fi(fw):
     p.menu('Top Stations')
     p.wifi = 0
     fetched(fw, p, curl)
-    assert 'No Wi-Fi' in note(p)
+    assert empty_states(p)[-1:] == [OFFLINE]
 
 
 def test_no_curl_handle_no_transfer(fw):
@@ -1479,7 +1519,7 @@ def test_no_curl_handle_no_transfer(fw):
     fw.mock('fw_curl_easy_init', lambda *_: 0)
     p.menu('Top Stations')
     fetched(fw, p, curl)
-    assert curl.opts == {} and fw.calls('fw_curl_easy_perform') == [] and 'Directory unavailable' in note(p)
+    assert curl.opts == {} and fw.calls('fw_curl_easy_perform') == [] and empty_states(p)[-1:] == [DOWN]
 
 
 def test_return_while_connecting_ends_the_transfer_through_its_progress_callback(fw):

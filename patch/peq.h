@@ -284,9 +284,10 @@ void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
 /* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
  * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
- * one button */
+ * one button, or a pair (row the primary, alt the gray one beside it; on_row's ctx says which:
+ * 0 or 1) */
 typedef struct {
-    const char *glyph, *title, *hint, *row;
+    const char *glyph, *title, *hint, *row, *alt;
 } empty_t;
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);

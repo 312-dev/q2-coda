@@ -273,6 +273,8 @@ int feedback_empty(void *parent, int free, const char *message, const char *hint
  * (ES_ROW_NAME) the wheel and Centre reach as any, its row the button's band, its own words hidden:
  * the capsule and its label are painted with the stack, ringed by the focus rule
  * (docs/oled-design.md#focus-ring), and the list's selection bar is not drawn (empty_button). A
+ * pair (e->alt) is that list with two rows side by side, each the half of the band its capsule is
+ * in, so the wheel steps between them and a tap takes the one under it. A
  * page drawn by its own painter (Search's sheet) paints the stack itself (empty_paint, at
  * empty_top).
  */
@@ -305,7 +307,8 @@ int empty_row_y(int free_top) {
 }
 /* The empty state in page, made once and written again on each call: e 0 hides it (0). An e with a
  * row but no on_row keeps the button's place in the stack for the caller's own (empty_row_y). The
- * row list is made with the view; a later call shows or hides it but keeps its words and click. */
+ * row list is made with the view; a later call shows or hides it but keeps its words, its click and
+ * its one or two rows. */
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event)) {
     if (!page) return 0;
     void *art = widget_lookup(page, ES_NAME, 0), *row = widget_lookup(page, ES_ROW_NAME, 0);
@@ -325,19 +328,25 @@ int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *
     widget_set_prop_str(art, "_es_title", e->title ? e->title : "");
     widget_set_prop_str(art, "_es_hint", e->hint ? e->hint : "");
     widget_set_prop_str(art, "_es_row", e->row && on_row ? e->row : "");
+    widget_set_prop_str(art, "_es_alt", e->row && e->alt && on_row ? e->alt : "");
     widget_set_prop_int(art, "_es_top", top);
     widget_set_visible(art, 1, 0);
     widget_invalidate_force(art, 0);
     if (row)
         widget_set_visible(row, e->row && on_row, 0);
     else if (e->row && on_row) {
+        int n = e->alt ? 2 : 1;
         void *view =
-            rows_view(page, top + es_text(compact) + CTA_GAP_ABOVE - y, 375, CTA_H, 1, CTA_H);
+            rows_view(page, top + es_text(compact) + CTA_GAP_ABOVE - y, 375, CTA_H, n, CTA_H);
         widget_set_name(P(view, W_PARENT), ES_ROW_NAME);
         widget_set_prop_int(P(view, W_PARENT), "style:normal:bg_color",
-                            0);                  /* the capsule under it */
-        page_row_detail(view, 0, "", 0, on_row); /* its words are the capsule's (_es_row) */
-        ringnav_select(view, 0, 1);              /* already selected, as the design has it */
+                            0); /* the capsule under it */
+        widget_set_prop_int(view, "virtual_h", CTA_H); /* a pair side by side: nothing to scroll */
+        for (int i = 0; i < n; ++i) { /* its words are the capsules' (_es_row, _es_alt) */
+            void *item = page_row_detail(view, i, "", 0, on_row);
+            if (n > 1) widget_move_resize(item, i * (375 / 2 + 1), 0, 375 / 2, CTA_H);
+        }
+        ringnav_select(view, 0, n); /* the first already selected, as the design has it */
     }
     return 1;
 }
@@ -372,14 +381,16 @@ void empty_state_paint(void *w, void *canvas) {
                   widget_get_prop_str(w, "_es_hint", ""), 0 };
     int top = widget_get_prop_int(w, "_es_top", ES_TOP) - screen_y(w);
     empty_paint(w, canvas, &e, top);
-    const char *label = widget_get_prop_str(w, "_es_row", "");
-    void *row = *label ? widget_lookup(P(w, W_PARENT), ES_ROW_NAME, 0) : (void *)0,
+    const char *labels[2] = { widget_get_prop_str(w, "_es_row", ""),
+                              widget_get_prop_str(w, "_es_alt", "") };
+    int n = *labels[1] ? 2 : 1;
+    void *row = *labels[0] ? widget_lookup(P(w, W_PARENT), ES_ROW_NAME, 0) : (void *)0,
          *list = row && widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
     if (list && widget_get_visible(row)) {
-        /* selected: the wheel's list is the button's, on its one row */
-        int sel = g_menu.w == list && widget_get_prop_int(list, SEL, -1) == 0 ? 0 : -1;
-        ui_cta_paint(canvas, &label, 1, top + es_text(!*e.glyph) + CTA_GAP_ABOVE, sel,
-                     pointer_down() && !sel);
+        /* selected: the wheel's list is the buttons', on one of its rows */
+        int at = widget_get_prop_int(list, SEL, -1), sel = g_menu.w == list && at >= 0 && at < n ? at : -1;
+        ui_cta_paint(canvas, labels, n, top + es_text(!*e.glyph) + CTA_GAP_ABOVE, sel,
+                     pointer_down() && sel >= 0);
     }
 }
 /* A list page with nothing listed (page_list's, no rows): the empty state in body, the page's name

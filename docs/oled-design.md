@@ -694,7 +694,9 @@ is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 
 pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
 gray (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
 ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; gray `#3A3A3C`,
-`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar. A page with one button of either kind draws it with `ui_button` (Software Update's offer, the
+`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar.
+A pair (`empty_t`'s `alt`) is one list of two rows side by side, each the half of the band its capsule is in: the
+wheel steps between them and a tap takes the one under it. A page with one button of either kind draws it with `ui_button` (Software Update's offer, the
 library scan): **primary** (the screen's main action) is the accent capsule, **secondary** (a lesser action: Stop)
 the gray one.
 
@@ -724,6 +726,8 @@ the gray one.
 | Battery History, nothing recorded yet | `chart-line` | No History Yet | Recording starts when you unplug | |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
+| Internet Radio, a directory list with no Wi-Fi | `cloud-slash` | Not Connected | Turn on Wi-Fi to find stations | **Turn on Wi-Fi** (opens Settings > Wi-Fi) and **Try Again** (the pair) |
+| Internet Radio, the directory not answering | `cloud-warning` | Can't Load Stations | Try again in a moment | **Try Again** |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
 | Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |

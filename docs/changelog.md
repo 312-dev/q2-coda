@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Internet Radio (OLED): with Wi-Fi off a directory list shows **Not Connected** with **Turn on Wi-Fi** and **Try Again** buttons; when the station directory doesn't answer it shows **Can't Load Stations** with **Try Again**. Before, it only said "No Wi-Fi" or "Directory unavailable" and you had to go back and open the list again.
   - Battery History (OLED): before anything is recorded the page shows a chart glyph, **No History Yet** and "Recording starts when you unplug".
   - App Store (OLED): with no list yet it shows **No Apps Listed** under Check for Updates, in the same form as other empty pages.
   - Playlists (OLED): a playlist or On-The-Go with no songs shows **No Songs Yet** under Add Songs, with how to fill it.
