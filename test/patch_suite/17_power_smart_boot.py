@@ -119,7 +119,7 @@ for usb,play in ((1,3),(0,2)):  # a cable in, or playing: it stays on, and no la
 # /dev/jz_watchdog and starts it at WDT_MS, every pass feeds it, Standby stops it around the suspend
 # and starts it again, and a clean end stops it and removes the record; nothing is fed or written
 # after. No device, or a refused start: tried once, and the record is kept all the same. The record
-# is rewritten only when it changes, and as suspending just before Standby's suspend.
+# is rewritten only when it changes, a burst once it settles, and as suspending just before Standby's suspend.
 WDT_START,WDT_STOP,WDT_FEED=0x8004570d,0x2000570e,0x2000570f
 class WatchdogMachine(StandbyMachine):
     def __init__(self,config={},fd=3,refuse_start=False,**k):
@@ -140,9 +140,11 @@ m=WatchdogMachine(key=600); m.pass_(1)
 assert m.wdt_opens==1 and m.ioctls==[(3,WDT_START,O['WDT_MS'])],(m.ioctls)
 assert m.record()==b'screen:on power:running cable:out battery:0 play:paused out:jack\n',m.record()
 m.pass_(1); m.pass_(1); assert m.ioctls[1:]==[(3,WDT_FEED)]*2 and m.wdt_opens==1 and len(m.records)==1; passed()
-level(m,57,0); m.pass_(1); assert m.records[-1]==(RECORD,b'screen:on power:running cable:out battery:57 play:paused out:jack\n')
-n=len(m.records); m.pass_(1); assert len(m.records)==n  # unchanged: not rewritten
-m.byte(syms['g_backlight_status'],0); m.byte(syms['g_usbdet_value'],1); m.pass_(1)
+# a change is written once it has held STATE_SETTLE_MS (5 s, system.c): a burst is one write of its latest line
+n=len(m.records); level(m,56,0); m.pass_(1); level(m,57,0); m.pass_(1); assert len(m.records)==n
+m.pass_(5000); assert m.records[-1]==(RECORD,b'screen:on power:running cable:out battery:57 play:paused out:jack\n') and len(m.records)==n+1
+n=len(m.records); m.pass_(1); m.pass_(6000); assert len(m.records)==n  # unchanged: not rewritten
+m.byte(syms['g_backlight_status'],0); m.byte(syms['g_usbdet_value'],1); m.pass_(1); m.pass_(5000)
 assert m.records[-1][1]==b'screen:off power:running cable:in battery:57 play:paused out:jack\n'; passed()
 m.ioctls=[]; assert m.standby()==[('wdt',WDT_STOP),'suspend',('wdt',WDT_START)],m.events
 assert m.records[-1][1]==b'screen:off power:suspending cable:in battery:57 play:paused out:jack\n'
@@ -753,7 +755,7 @@ for site in AUDIO_EXTENSION_CALLS:
 for path in ('/mnt/mmc/Novel.m4b','/mnt/mmc/Music/Novel.M4B','/mnt/mmc/Novel.m4B'):
     m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]
     m.word(r+O['REC_PATH'],m.string(path)); playing(m,0,200,pos=0,n=110)
-    assert m.places()==[(fnv(path),61)] and '/mnt/data/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
+    assert m.places()==[(fnv(path),61)] and '/mnt/mmc/.q2pod/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
     m.poll(110,200,n=3)
     files=m.files
     m=ResumeMachine(files); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; m.word(r+O['REC_PATH'],m.string(path))

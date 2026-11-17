@@ -72,3 +72,41 @@ int ringnav_ini_write(const char *path, const char *section, const char *key, co
     ini_heal(path);
     return stock_ini_write_trampoline(path, section, key, value);
 }
+
+/* Settled writes (docs/internals.md#where-q2-muse-writes): the keys a wheel steps, each step a whole
+ * rewrite of config.ini on the flash, are held by write_int_config's hook (ringnav_write_config)
+ * and written once CONFIG_SETTLE_MS after their last change, so a turn of ten steps is one write.
+ * config_settle(1) writes what is held at once: before the payload reads one of them back
+ * (config_value, ringnav_output), at Standby and at a clean end. ponytail: a forced restart or a
+ * flat battery within CONFIG_SETTLE_MS of the last step loses that step's value, the one before it
+ * coming back at boot. */
+static const char *const settle_keys[][2] = {
+    { "PLAYSET", "VOLUME" },     { "PLAYSET", "BT_VOLUME" }, { "Q2POD", "AIRVOL" },
+    { "PLAYSET", "MAXVOLUME" },  { "PLAYSET", "BOOTVOLUME" }, { "PLAYSET", "BALANCE" },
+    { "SYSSET", "LIGHTNESS" },   { "Q2POD", "XFADESEC" },
+};
+#define SETTLE_N (sizeof settle_keys / sizeof *settle_keys)
+static struct {
+    int value[SETTLE_N];
+    unsigned at[SETTLE_N]; /* time_now_ms of the last change; 0 nothing held */
+} settle __attribute__((section(".scratch")));
+
+int config_hold(int value, const char *section, const char *key) {
+    for (unsigned i = 0; i < SETTLE_N; i++)
+        if (!tk_strcmp(section, settle_keys[i][0]) && !tk_strcmp(key, settle_keys[i][1])) {
+            unsigned now = (unsigned)time_now_ms();
+            settle.value[i] = value;
+            settle.at[i] = now | !now;
+            return 1;
+        }
+    return 0;
+}
+
+void config_settle(int now_too) {
+    unsigned now = (unsigned)time_now_ms();
+    for (unsigned i = 0; i < SETTLE_N; i++)
+        if (settle.at[i] && (now_too || now - settle.at[i] >= CONFIG_SETTLE_MS)) {
+            settle.at[i] = 0;
+            stock_write_config_trampoline(settle.value[i], settle_keys[i][0], settle_keys[i][1]);
+        }
+}
