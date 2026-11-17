@@ -1367,22 +1367,45 @@ def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
     return [*(f'#define {f.c} {i}' for i, f in enumerate(FACES.values())), f'#define FONT_N {len(FACES)}']
 
+ADV_FIRST, ADV_LAST = 0x20, 0x7e  # the characters FONT_ADV holds: printable ASCII
+
+def face_advances(face):
+    """face's advance widths, ADV_FIRST to ADV_LAST, in its font units as its subset maps them (TABULAR's
+    characters on their tabular glyphs), with its line (hhea ascent - descent, which stb sizes a face by)
+    and units per em: (advances, line, upm). Stock's uncut face: zeros, which ui_kit.c's ui_set takes as
+    "measure it". ui_set sets a label's glyphs at these exact widths: AWTK rounds each glyph's advance to
+    a whole pixel and draws a space wider than its own, so at 13 px its gaps run uneven."""
+    if not face.source:
+        return [0] * (ADV_LAST - ADV_FIRST + 1), 0, 0
+    from fontTools.ttLib import TTFont
+    font = TTFont(ROOT/'assets/fonts'/face.source, lazy=True)
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    glyph = lambda u: cmap[u] + face.tabular if face.tabular and chr(u) in TABULAR else cmap[u]  # noqa: E731
+    adv = [hmtx[glyph(u)][0] if u in cmap else 0 for u in range(ADV_FIRST, ADV_LAST + 1)]
+    return adv, font['hhea'].ascent - font['hhea'].descent, font['head'].unitsPerEm
+
 def faces_header(ranges):
     """stock.h's faces, ranges the subset faces' range macros in FACES' order: font_indices, then
     FONT_NAMES, FONT_FALLBACK and FONT_FALLBACK_PCT by index, FONT_RANGES every subset face's runs one
-    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character)."""
+    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character), and
+    face_advances' FONT_ADV (each face's row), FONT_LINE and FONT_UPM by index."""
     faces = list(FACES.values())
     cut = [f for f in faces if f.source]
     check(len(ranges) == len(cut), 'One ranges macro per subset face')
     runs = dict(zip((f.name for f in cut), (r.split(' ', 2)[2][1:-1].split(',') for r in ranges)))
     at = [0]
     for f in faces: at.append(at[-1] + len(runs.get(f.name, ())))
+    adv = [face_advances(f) for f in faces]
     return [*font_indices(), *ranges,
             '#define FONT_NAMES {' + ','.join(json.dumps(f.name) for f in faces) + '}',
             '#define FONT_FALLBACK {' + ','.join(FACES[f.fallback].c if f.fallback else '0' for f in faces) + '}',
             '#define FONT_FALLBACK_PCT {' + ','.join(str(f.fallback_pct) for f in faces) + '}',
             '#define FONT_RANGES {' + ','.join(v for f in cut for v in runs[f.name]) + '}',
-            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}']
+            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}',
+            f'#define FONT_ADV_FIRST 0x{ADV_FIRST:x}', f'#define FONT_ADV_LAST 0x{ADV_LAST:x}',
+            '#define FONT_ADV {' + ','.join('{' + ','.join(map(str, a[0])) + '}' for a in adv) + '}',
+            '#define FONT_LINE {' + ','.join(str(a[1]) for a in adv) + '}',
+            '#define FONT_UPM {' + ','.join(str(a[2]) for a in adv) + '}']
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and

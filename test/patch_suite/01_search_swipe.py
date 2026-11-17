@@ -139,7 +139,7 @@ assert m.confirm()==11 and m.clicks==[sw] and 'navigator_back' not in [c[0] for 
 # within its range; Return gives it back, and Return off a slider closes it, as its swipe up does (dialog_quit), not
 # stock's screen off and Home.
 QS_ADJUST='_cc_adjust'  # control_center.c CC_ADJUST: 1 while a slider has the wheel
-CC_BRIGHT=5  # control_center.c's Brightness stop
+CC_BRIGHT=7  # control_center.c's Brightness stop
 RING='_cc_seen'  # control_center.c CC_SEEN: the wheel's last tick, time_now_ms + 1, so its ring shows and a key acts
 m=Machine(); bright=m.node('slider','slider_backlight',value=99)
 m.top=m.node('dialog','statusbar_dialog',[m.node('view','view_backlight',[bright])],_cc_focus=CC_BRIGHT,**{RING:m.now+1}); m.mock('dialog_quit')
@@ -160,7 +160,7 @@ hook=m.u.hook_add(UC_HOOK_CODE,count_payload,begin=BASE,end=SCRATCH-1)
 m.call(address=payload_syms['cc_paint'],args=(m.top,m.canvas,0,0),gap=0,count=5_000_000)
 m.u.hook_del(hook)
 print('Control Center landing frame:',instructions[0],'payload instructions')
-assert any(r['rect']==(20,38,138,124) for r in m.rounded),m.rounded  # cc_paint ran: the connectivity block
+assert any(r['rect']==(20,38,158,210) for r in m.rounded),m.rounded  # cc_paint ran: the toggles' block
 assert instructions[0]<600_000,instructions; passed()
 # A swipe down whose release the pull-down never got (stock state 1 or 2, no touch, no slide timer)
 # leaves it on top off screen, the page under it stopped (#189): the next UI pass hands it the

@@ -152,6 +152,11 @@ Rules:
   20 is 24, 22 is 27. The payload writes `TYPE(px)` (`patch/ui_kit.h`), never the AWTK number.
 - **Truncate, then scroll.** A long title ends in an ellipsis; the selected row's title scrolls.
   Never shrink type to fit.
+- **Set text for small labels the payload draws itself.** AWTK places each glyph on its advance rounded to a
+  whole pixel and carries the error on, and draws a space about 3 px wider than Inter's, so at 13 px a label's
+  gaps run uneven ("Smart  Wi-Fi"). `ui_set` (`patch/ui_kit.c`) sets each glyph from Inter's own advances
+  (`FONT_ADV`, written into `stock.h` by `tools/build.py` `face_advances`), each rounded on its own, with no
+  added tracking (`TRACK_CAPTION` 0). Control Center's names are set this way.
 
 ## Spacing
 
@@ -1123,41 +1128,61 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 
 ### Control Center
 
-The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `design/mockups/mock_cc3.py`
-`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centered:
+The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
+`design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
+centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, the blocks and the grab
+bar, and round the toggles inside their block.
 
-- **Blocks** from y 38, `#1C1C1E` with 22 px corners: connectivity, 138 x 124 from x 20; Now Playing, 8 px
-  right of it to x 355.
-- **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
-  (centers x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
-  under in Inter Medium 13, white when on, Text Secondary off.
-- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in, the one Home's art pane shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter
-  13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
-- **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
-  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night (Night Shift), EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on
-  y 238, 12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest
-  Play's switch (a hold opens its settings), lit and named by the guest ("Alex") while one plays
-  ([Guest Play](#guest-play), `mock_bt.py`'s `control_center`). ponytail: at 13 px "Smart Wi-Fi" and "Guest" meet
-  edge to edge; the mock drew the labels at 11 px, which the type scale no longer has.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
+- **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
+  26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
+  Smart Wi-Fi, EQ. Accent Blue when on, `#3A3A3C` off.
+- **Glyphs**: Phosphor fill, each at one optical size, its ink's longer side 18 px (`tools/art.py` `CC_INK`):
+  Bluetooth `bluetooth`, AirPlay `airplay`, Car Remote `car-profile`, Smart Wi-Fi `leaf`, EQ `equalizer`. White on
+  a lit circle; in Light Mode a circle that is off takes Text Primary (`CC_LIGHT`).
+- **The Wi-Fi circle is the link**, as the status row reads it (`status_row.c` `wifi_level`, `wifi_offline`):
+  `wifi-slash` off, `wifi-none` on but not joined, `wifi-low`, `wifi-medium` and `wifi-high` by stock's bars (1, 2,
+  then 3 and 4), `wifi-x` joined with no link up. Phosphor's fill levels draw the whole fan and fill as much of it
+  as the signal, so the glyph keeps one footprint. Joined, it is lit even where the radio's switch reads off, so it
+  and the status row never disagree. It is drawn again when that changes while the page is open
+  (`cc_wifi_poll`, every second, the circle's box alone). Its name stays "Wi-Fi", the tile's function, not the
+  network's.
+- **Names**: each circle's, its line 1 px under the circle, Inter Medium 13, white when on, Text Secondary off, set
+  glyph by glyph at Inter's own advances (see [Type](#type)), centered on the circle in 76 px of room, 8 px from the
+  block's edge (the mock's 10 px assumed a 13 px em; the house 13 px is an em of 13.2, which makes "Smart Wi-Fi"
+  75 px). A name wider than its room is never shrunk or cut with an ellipsis: it starts at the room's left and its
+  last 12 px fade out, the text itself going transparent onto the block (the marquee's fade, no painted band), and
+  while the wheel is on its circle it scrolls as the selected row's title does ([Motion](#motion)), both ends
+  fading while it is away from its start, back at its start when the wheel leaves or the ring goes. The six names
+  all fit.
+- **Now Playing**: 167 x 114 from (188, 38): 12 px in, the cover, 52 px with 9 px corners, the one Home's art pane
+  shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter 13, Text
+  Secondary) 10 px right of it, 10 px above and below its middle; under them, 8 px down, the transport's 30 px row,
+  Previous, Play/Pause (30 px) and Next 46 px apart; 12 px under it the block's foot. Light Mode inks the transport
+  Text Primary.
+- **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
+  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
+  fill is dark). Volume ends at y 248, the toggles block's foot.
+- **Grab bar**: 36 x 5, `#5A5A5E`, at y 258, 10 px under the blocks, where the swipe up that closes the page starts.
+- **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
+  Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
+  guest plays).
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
-  playing or paused, as Home's Now Playing row), the two sliders, the five tiles. The ring is not there when the
-  page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
-  is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
-  on the same stop.
+  Accent Blue. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
+  (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume. The ring is not there
+  when the page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the
+  wheel is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it
+  back on the same stop.
 - **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
   Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
-- **Holds**: a toggle or tile held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes
-  the page and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings >
-  Bluetooth; AirPlay: the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Lock:
-  Buttons Lock; Sleep: Sleep Timer; Night Shift: its slider page (Display's Night Shift row); EQ: the EQ page;
-  Smart Wi-Fi: Settings > Wi-Fi. The sliders and the Now Playing block have no hold.
+- **Holds**: a toggle held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes the page
+  and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings > Bluetooth; AirPlay:
+  the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Smart Wi-Fi: Settings >
+  Wi-Fi; EQ: the EQ page. The sliders and the Now Playing block have no hold.
 - **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
   8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
   sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.

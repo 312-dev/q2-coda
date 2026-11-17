@@ -546,6 +546,10 @@ void np_skip_at(int t, int reduced, int dir, int *a_old, int *x_old, int *a_new,
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
+/* ... and any text a painter draws itself into the columns x0 to x1, rows y to y + h (the canvas's
+ * coordinates): its ends (1 left, 2 right) copied before it, faded after it; 1 when armed */
+int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends);
+void text_fade(void *canvas);
 void sel_bar_flat(void *canvas, int x, int y, int w, int h); /* list_marks.c: the flat bar */
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
 int np_marq_owns(void *w);
@@ -589,6 +593,9 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* ... and the Wi-Fi link as it reads it: stock's bars 1 to 4 while joined, else 0; joined with no
+ * link up (Control Center's Wi-Fi circle, control_center.c cc_wifi) */
+int wifi_level(void), wifi_offline(void);
 /* --dev builds: the emulator's stand-in for Wi-Fi, a headset, a charger; -1 for none */
 #if Q2POD_DEV
 int status_fake(char key);

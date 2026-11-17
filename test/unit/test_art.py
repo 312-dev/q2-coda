@@ -156,7 +156,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
     modepages = [f'modepage_{n}' for n in art.MODE_GLYPHS]  # every mode page's glyph (feedback.c mode_page_paint)
     offers = [f'swoffer_{n}' for n in art.SW_OFFER]  # Software Update's offer (sw_update.c sw_offer_paint)
-    cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
+    cc = [f'cc_{n}{k}' for n in art.CC_ICONS for k in ('', '_l')]  # control_center.c's glyphs, each half's
     usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')),
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows and toasts
     usb += [f'empty_{n}_{k}' for n in art.EMPTY_GLYPHS for k in ('d', 'l')]  # feedback.c empty_state's glyphs, per half
@@ -226,7 +226,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.SW_OFFER_PX, 0xffffff) for n in offers),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
                           *((n, art.ROW_ICON_PX, c) for n, c in btdev.items()), *((n, art.USB_TOAST_PX, c) for n, c in bttoast.items()),
-                          *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
+                          *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items()),
+                          *((f'cc_{n}_l', px, art.CC_LIGHT[n]) for n, (_, px, _) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
         assert (w, h) == (px, px) and inked == {tuple(rgb >> s & 255 for s in (16, 8, 0))}
