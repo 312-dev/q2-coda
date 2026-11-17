@@ -209,7 +209,9 @@ static int ss_pop_cell(int e) {
     return e < ss_run() - 1 ? at + e : -1;
 }
 /* The run kept about the highlight: shown from its first entry, scrolled only to keep the
- * highlight a cell in from either edge. */
+ * highlight a cell in from either edge. ponytail: the run steps a whole cell at once, where the
+ * mock-up eases it over 90 ms (as under Reduce Motion); an eased offset needs a repaint timer and
+ * the run clipped to its cells. */
 static void ss_follow(void) {
     if (!ss_in_run()) return;
     int r = ss.stop - 1, most = ss_run() - SS_VISIBLE;
