@@ -510,6 +510,10 @@ void tilt_end(void *w, int dir);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
+void swipe_back_paint(void *w, void *canvas);
+/* page_parallax.c: a page's push and pop, the page under drifting and dimming */
+int parallax_under_x(int w, float percent);
+unsigned parallax_dim(float percent);
 /* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
 void np_settle_poll(void);
 int np_settle_scale(void);

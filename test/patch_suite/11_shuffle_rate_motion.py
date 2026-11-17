@@ -159,16 +159,16 @@ def home_settings(full):
         assert m.nodes[sets]['visible'] and not m.nodes[lst]['visible'] and not m.nodes[art]['visible'] and m.nodes[sets]['animated']=='x'
         assert m.nodes[sets]['sensitive']==1 and m.nodes[lst]['sensitive']==0
         assert [c[1:3] for c in m.calls if c[0]=='widget_move_resize'][:1]==[(sets,375)]; passed()
-        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==O['PAGE_SLIDE_MS']==120
-        m.advance(119); assert signed(m.get(sets+O['W_X']))>0
+        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==O['PAGE_SLIDE_MS']==220
+        m.advance(219); assert signed(m.get(sets+O['W_X']))>0
         m.advance(1); assert m.get(sets+O['W_X'])==0 and not m.props
         m.paint(sview); assert m.selected(sview)==0 and m.call()==11 and m.selected(sview)==1; passed()
         m.calls=[]; assert m.call(O['KEY_RETURN'])==11
         assert m.nodes[lst]['visible'] and not m.nodes[sets]['visible'] and m.nodes[lst]['animated']=='x'
         assert m.nodes[lst]['sensitive']==1 and m.nodes[sets]['sensitive']==0
         assert [c[1:3] for c in m.calls if c[0]=='widget_move_resize'][:1]==[(lst,-(375 if full else O['HOME_SPLIT_W'])&0xffffffff)]  # the main list from its own width
-        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==120
-        m.advance(120); assert m.get(lst+O['W_X'])==0 and not m.props
+        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==220
+        m.advance(220); assert m.get(lst+O['W_X'])==0 and not m.props
         m.paint(view); assert m.selected(view)==6; passed()
         # Return on Home's main list selects Now Playing; Return there opens it without starting a track.
         m.calls=[]; assert m.call(O['KEY_RETURN'])==11 and m.selected(view)==0 and not destinations(m)

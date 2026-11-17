@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Pages slide in over the page you came from as on an iPhone: the page underneath drifts a little to the left and darkens, and slides back when you go back. Swiping back from the left edge now shows that page underneath instead of black.
   - Now Playing: skipping to the next or previous song slides the old cover and song name out and the new ones in, the way you skipped, instead of swapping them at once. With Reduce Motion on, they cross-fade.
   - Now Playing: when you pause, the album art settles back to a slightly smaller size, and grows back when you press Play, as on an iPhone. With Reduce Motion on, the art stays its size.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.

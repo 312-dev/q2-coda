@@ -3,10 +3,15 @@
  * edge swipe does; let go past SB_DONE_PCT of the width, or flicked right at SB_FLICK px a second
  * or faster, and it goes on off the right edge and Return goes back; otherwise it springs back.
  * The layer that moves is what Return leaves: the top window, when there is a window under it to go
- * back to, or on Home the list one of its rows opened (coverflow.c coverflow_home_sublist). What it
- * uncovers is black: the window manager paints from the top normal window up, so the page under is
- * not drawn until Return has closed the one over it (ponytail: painting it there would take a
- * snapshot of it, as stock's window animator does, a full paint's cost at the claim).
+ * back to, or on Home the list one of its rows opened (coverflow.c coverflow_home_sublist). Under a
+ * window it uncovers the page under it, as a push's parallax leaves it (page_parallax.c): the
+ * window manager paints from the top normal window up, so at the claim the window under is painted
+ * once into a bitmap, as stock's window animator snapshots it (under_snap), and each frame's
+ * swipe_back_paint, the top window's background paint, draws it left of the page, PX_UNDER_PCT of
+ * the width short of its place and darkened to PX_DIM_ALPHA at the start, both easing to nothing
+ * as the page leaves; Reduce Motion keeps it still and undimmed. Each move invalidates the whole
+ * screen, as the strip left of the page moves too. Home's lists uncover black (ponytail: Home's
+ * main list could be drawn there the same way).
  *
  * A touch is a candidate from its press (swipe_back_down, from navigation.c's touch hook) and
  * claimed once it has moved SB_CLAIM_PX right and more right than up or down: the page's own
@@ -17,8 +22,8 @@
  * with sideways drags of their own (Now Playing's pages, Cover Flow, the letter strip, sliders)
  * keep them; at the edge the swipe wins.
  *
- * Completing, the layer slides on to the right edge over the theme's swap motion's time
- * (motion.swap.ms, as long as a page's slide), eased cubic_out (sb_ease), then Return goes in as a
+ * Completing, the layer slides on to the right edge over SB_GLIDE_MS from where the finger let
+ * go, eased cubic_out (sb_ease), then Return goes in as a
  * press and a release through the window manager's input (navigation.c ringnav_input), so it does
  * whatever a Return press does there; the closing window's own slide (its close_anim_hint) is
  * cleared first, as the page has already left. Where Return does not leave the page after all, the
@@ -31,11 +36,14 @@
  */
 #include "navigation.h"
 
-#define SB_EDGE_PX 24  /* a press this near the left edge */
-#define SB_CLAIM_PX 10 /* moved this far right, more than up or down: the swipe's (TAP_PX) */
-#define SB_DONE_PCT 40 /* let go past this share of the width: back */
-#define SB_FLICK 500   /* or moving right this fast, px a second, over the last SB_VEL_MS */
-#define SB_VEL_MS 100  /* a sample older than this gives no speed */
+#define SB_EDGE_PX 24   /* a press this near the left edge */
+#define SB_CLAIM_PX 10  /* moved this far right, more than up or down: the swipe's (TAP_PX) */
+#define SB_DONE_PCT 40  /* let go past this share of the width: back */
+#define SB_FLICK 500    /* or moving right this fast, px a second, over the last SB_VEL_MS */
+#define SB_VEL_MS 100   /* a sample older than this gives no speed */
+#define SB_GLIDE_MS 160 /* the finish or the spring back, from where the finger let go */
+#define SB_W 375
+#define SB_H 320
 #define SB_BOUND "_sb_bound"
 
 extern int ringnav_input(void *wm, void *e);
@@ -52,6 +60,7 @@ static struct {
     unsigned last_t, prev_t;
     int from, to;    /* a glide: the offset it started from and goes to */
     unsigned at, ms; /* ... its start (time_now_ms, 0 with none) and length */
+    void *under;     /* the window under, painted at the claim (under_snap); 0 none */
 } sb __attribute__((section(".scratch")));
 
 /* cubic_out over k 0..256: 1 - (1 - k)^3 */
@@ -87,21 +96,66 @@ static void place(int off) {
     void *w = sb.layer;
     sb.off = off;
     widget_move(w, sb.lx + off, I(w, W_Y));
+    if (sb.under) widget_invalidate_force(window_manager(), (void *)0); /* the strip moves too */
+}
+
+/* The window under, painted once into a bitmap as stock's window animator snapshots it; 0 when
+ * there is no memory for it (the strip stays black). */
+static void *under_snap(void *under) {
+    void *c = under ? canvas_offline_create(SB_W, SB_H, LCD_BGRA8888) : (void *)0, *b = (void *)0;
+    if (!c) return (void *)0;
+    canvas_offline_begin_draw(c);
+    widget_paint(under, c);
+    canvas_offline_end_draw(c);
+    void *lcd = P(c, CANVAS_LCD);
+    const unsigned char *fb = lcd ? P(lcd, LCD_OFFLINE_FB) : (void *)0;
+    if (fb && I(lcd, LCD_W) == SB_W && I(lcd, LCD_H) == SB_H &&
+        I(lcd, LCD_FORMAT) == LCD_BGRA8888 && I(lcd, LCD_LINE_LENGTH) == SB_W * 4)
+        b = bitmap_create_ex(SB_W, SB_H, SB_W * 4, LCD_BGRA8888);
+    unsigned char *px = b ? bitmap_lock_buffer_for_write(b) : (unsigned char *)0;
+    if (px) {
+        memcpy(px, fb, SB_W * SB_H * 4);
+        bitmap_unlock_buffer(b);
+        *(unsigned short *)((char *)b + 0xc) |= 1; /* opaque: drawn a row at a time */
+    } else if (b) {
+        bitmap_destroy(b);
+        b = (void *)0;
+    }
+    canvas_offline_destroy(c);
+    return b;
+}
+
+/* ringnav_paint_bg, the top window's background: while a swipe moves it, the window under in the
+ * strip it uncovers, at its parallax place and darkened (in the window's canvas, whose origin is
+ * the page's place, off px right and below the status row; the bitmap is the whole screen). */
+void swipe_back_paint(void *w, void *canvas) {
+    if (!w || w != sb.page || !sb.under || !sb.off || !P(canvas, CANVAS_LCD)) return;
+    int off = sb.off, still = motion_reduced(),
+        from = still ? 0 : parallax_under_x(SB_W, 1.0f - (float)off / SB_W);
+    rect_t src = { from, 0, off, SB_H }, dst = { -off, -I(w, W_Y), off, SB_H }; /* the screen's */
+    canvas_draw_image(canvas, sb.under, &src, &dst);
+    unsigned a = still ? 0 : parallax_dim(1.0f - (float)off / SB_W);
+    if (!a) return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, a << 24); /* black in both halves, as a push dims it */
+    canvas_fill_rect(canvas, -off, -I(w, W_Y), off, SB_H);
+    stock_canvas_set_fill_color(canvas, fill);
 }
 
 static void reset(void) {
+    if (sb.under) bitmap_destroy(sb.under);
+    sb.under = (void *)0;
     sb.page = sb.layer = (void *)0;
     sb.claimed = sb.at = 0;
     sb.off = 0;
 }
 
-/* The layer from where it is to off over the theme's swap motion, which a page's slide keeps pace
- * with (both PAGE_SLIDE_MS); at once without one. It finishes what the finger did, so Reduce Motion
- * keeps it (MO_FEEDBACK). */
+/* The layer from where it is to off over SB_GLIDE_MS, as iOS finishes an interactive pop faster
+ * than a push. It finishes what the finger did, so Reduce Motion keeps it (MO_FEEDBACK). */
 static void glide(int off) {
     sb.from = sb.off;
     sb.to = off;
-    sb.ms = motion_ms(theme()->motion[MOTION_SWAP].ms, MO_FEEDBACK);
+    sb.ms = motion_ms(SB_GLIDE_MS, MO_FEEDBACK);
     sb.at = (unsigned)time_now_ms() | 1;
 }
 
@@ -180,6 +234,7 @@ static int sb_event(void *page, void *event) {
         sb.aborting = 0;
         sb.prev_x = sb.last_x = sb.x0;
         sb.prev_t = sb.last_t = (unsigned)time_now_ms();
+        if (sb.layer == page) sb.under = under_snap(window_under(window_manager(), page));
     }
     unsigned now = (unsigned)time_now_ms();
     if (x != sb.last_x) {

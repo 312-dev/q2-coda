@@ -603,11 +603,12 @@ going Home, with its slide when held on the list itself. The release latch on th
 
 ## Transitions
 
-Pages slide with stock's own window animator; the payload adds no animation code. The build sets
-`anim_hint` to `SLIDE` (`tools/ipod.py`) on the window of the nine local browsing pages, the
-settings and streaming pages and the equalizer page. A hinted page slides in from the right,
-pushing the page below it out to the left, and Return reverses that; the status bar is not part
-of either page and stays still.
+Pages slide with stock's own window animator, its page under drawn with parallax
+(`page_parallax.c`, [internals](internals.md#page-parallax)). The build sets `anim_hint` to `SLIDE`
+(`tools/ipod.py`) on the window of the nine local browsing pages, the settings and streaming pages
+and the equalizer page. A hinted page slides in from the right over 220 ms while the page below it
+drifts 30% of the width left and darkens, and Return reverses that over 200 ms; the status bar is
+not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
 can hold the UI thread), Cover Flow (its open loads the albums and covers), the dialogs and quick
