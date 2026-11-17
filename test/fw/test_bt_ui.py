@@ -464,3 +464,41 @@ def test_a_device_the_list_has_not_read_is_named_by_blue_z(fw):
     p.link(HEAD, 80, HEADPHONES)
     p.link()
     assert p.ui.toasts == ['Pixel Buds connected', 'Pixel Buds disconnected']
+
+
+# A tap or Centre on a row that is connecting cancels that connect (docs/internals.md#bluetooth-page).
+class Tap(Page):
+    """The page with stock's link list: the row's device the link thread's target, at status (5 while its Connect
+    runs), and stock's click and updateBtLinkStatus recorded."""
+    def __init__(self, fw, state='connecting', status=5, linking=1, target=CAR):
+        devices = [(HEAD, 'WH-1000XM5', 'paired'), (CAR, 'BMW 6R81', state)]
+        super().__init__(fw, devices)
+        self.links = [(target, status)]
+        fw.var('fw_ctx_bt_connectstatus', C.c_int).value = linking
+        self.stock, self.updates = [], []
+        fw.mock('btmenu_item_on_click', lambda b, e, *_: self.stock.append(b) or 0)
+        fw.mock('updateBtLinkStatus', lambda st, mac, *_: self.updates.append((st, C.string_at(mac).decode())) or 0)
+
+    def tap(self, name='d1'):
+        b = self.ui.kids[self.row(name)][0]
+        return self.ui.handler(b, EVT_CLICK)()
+
+
+def test_a_tap_on_a_connecting_row_cancels_its_connect(fw):
+    t = Tap(fw)
+    assert t.tap() == 11  # STOP
+    assert t.updates == [(4, CAR)] and t.stock == []  # the thread's wait ends as a failure: stock's quiet path
+
+
+@pytest.mark.parametrize('why, kw', [('before its connect runs', dict(status=1)), ('no link thread', dict(linking=0)),
+                                     ("another device's connect", dict(target=HEAD))])
+def test_a_connecting_row_whose_connect_is_not_running_goes_to_stock(fw, why, kw):
+    t = Tap(fw, **kw)
+    t.tap()
+    assert t.updates == [] and len(t.stock) == 1  # stock's click, as before: it ignores it while a thread runs
+
+
+def test_a_tap_on_a_paired_row_still_connects(fw):
+    t = Tap(fw, state='paired', linking=0, status=3, target=HEAD)
+    t.tap()
+    assert t.updates == [] and len(t.stock) == 1
