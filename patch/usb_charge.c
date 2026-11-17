@@ -13,10 +13,10 @@ static struct {
     void *row; /* Power's USB DAC Charging label, while that page is built */
 } usb_charge __attribute__((section(".scratch")));
 
-/* g_last_otgid 1: the Q2 is a USB host powering the bus, and stock's check_otg_status has turned the
- * bus power on (PC20) and the charger off (PE22 high) by writing the pins directly. The charger stays
- * off then, whatever the choice or Charge Limit asks: on, it charges the battery from the Q2's own
- * bus power. */
+/* g_last_otgid 1: the Q2 is a USB host powering the bus, and stock's check_otg_status has turned
+ * the bus power on (PC20) and the charger off (PE22 high) by writing the pins directly. The charger
+ * stays off then, whatever the choice or Charge Limit asks: on, it charges the battery from the
+ * Q2's own bus power. */
 static int charge_apply(int force) {
     int allowed = usb_charge.ready && g_last_otgid != 1 &&
                   (g_usbdac_chargeflag == 1 || (usb_charge.cable == 1 && g_usbmode == 0));
