@@ -45,7 +45,7 @@ static void spot_keep(unsigned key, int sec, int total) {
         for (; i < RESUME_SLOTS - 1; i++) st.spots[i] = st.spots[i + 1];
         st.spots[i].key = 0;
     }
-    BLOB_IO(RESUME_FILE, st.spots, 1);
+    card_blob_write(RESUME_STORE, st.spots, sizeof st.spots);
 }
 
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
@@ -62,7 +62,7 @@ static void play_count(void *r, unsigned key) {
     for (; i > 0; i--) st.plays[i] = st.plays[i - 1];
     st.plays[0].key = key;
     st.plays[0].n = n;
-    BLOB_IO(PLAYS_FILE, st.plays, 1);
+    card_blob_write(PLAYS_STORE, st.plays, sizeof st.plays);
 }
 
 /* Scrobbling (docs/internals.md#scrobbling): a Rockbox-style AudioScrobbler 1.1 log at the card's
@@ -128,10 +128,13 @@ void resume_restart(void) { st.rs_stopped = 0; }
 /* Once a second from the UI loop: a long track saves its place and, when it starts playing near
  * its beginning, jumps to the saved one. A spoken CUE track saves its file's place but jumps only
  * when a Resume row (book_place) started it. A track change waits a poll, so the previous track's
- * time never counts for the new one. */
+ * time never counts for the new one. Places and counts kept in RAM while the card was away go to
+ * it here once it is back. */
 static void resume_poll(void) {
     unsigned now = (unsigned)time_now_ms(), at, n;
     if (now - st.rs_at < 1000) return;
+    card_blob_flush(RESUME_STORE);
+    card_blob_flush(PLAYS_STORE);
     st.rs_at = now;
     int sec = 0, total = 0;
     void *r = queue_now(&at, &n);
@@ -302,13 +305,15 @@ static int np_animating(void) {
 }
 
 /* Keep stock VOLUME for wired/USB and boot; Bluetooth saves its own level. Smart Wi-Fi's own
- * toggles of the Wi-Fi switch save nothing (smart_config). */
+ * toggles of the Wi-Fi switch save nothing (smart_config). A key a wheel steps is held and written
+ * once it settles (config_hold, config_ini.c), under the output's key as it was at the step. */
 int ringnav_write_config(int value, const char *section, const char *key) {
     if (smart_config(section, key)) return 0;
     if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && airplay_on())
         section = "Q2POD", key = "AIRVOL"; /* an AirPlay speaker's, while it plays (airplay.c) */
     else if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && mclGetOutputWay() == 1)
         key = "BT_VOLUME";
+    if (config_hold(value, section, key)) return 0;
     return stock_write_config_trampoline(value, section, key);
 }
 
@@ -318,6 +323,7 @@ int ringnav_output(int way) {
     if (changed &&
         !airplay_on()) { /* a speaker's level stays its own; airplay.c swaps back at its end */
         write_int_config(g_volume, "PLAYSET", "VOLUME");
+        config_settle(1); /* the old output's level on the flash before the new one's is read */
         char s[256] = "";
         toolsReadConfig("/mnt/data/config.ini", "PLAYSET", way == 1 ? "BT_VOLUME" : "VOLUME", s,
                         "");

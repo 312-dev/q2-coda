@@ -1290,7 +1290,7 @@ def test_a_go_to_that_opened_nothing_keeps_no_restore(fw, ui, st, recs):
 class Card(Files):
     """Files, appends too ("ab" keeps what the file held), with access() and fputs."""
     def __init__(self, fw, files=None):
-        super().__init__(fw, files)
+        super().__init__(fw, files, card=True)  # places and counts are on it (card_store.c)
         fw.mock('fw_access', lambda path, *_: 0 if cstr(path) in self.files else -1)
         fw.mock('fw_fputs', lambda s, f, *_: self.fwrite(s, 1, len(C.string_at(s)), f) and 0)
 
@@ -2367,7 +2367,7 @@ def test_a_pull_down_moving_or_held_is_left(fw, ui, state, idex, pressed):
 
 
 # Resume: a long track's place, kept each second by the UI loop (resume_poll), and a spoken book's.
-RESUME_FILE, PLAYS_FILE = '/mnt/data/ringnav-resume', '/mnt/data/ringnav-plays'
+RESUME_FILE, PLAYS_FILE = '/mnt/mmc/.q2pod/ringnav-resume', '/mnt/mmc/.q2pod/ringnav-plays'  # card_store.c
 EDGE, SAVE_S = O['RESUME_EDGE_S'], O['RESUME_SAVE_S']
 
 
@@ -2999,7 +2999,7 @@ def test_a_clean_end_stops_the_watchdog_and_removes_the_state_record(fw, ui):
     end(), end()
     wdt.poll()
     fw.fn('system__state_poll', None)()
-    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files == {}
+    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files.keys() <= {'/proc/mounts'}
 
 
 # The state record (state_poll): /mnt/data/q2-state, one line rewritten whenever it changes.

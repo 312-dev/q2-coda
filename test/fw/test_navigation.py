@@ -543,6 +543,7 @@ def test_bluetooth_keeps_its_own_volume(fw, way, section, key, saved):
     fw.mock('mclGetOutputWay', lambda *_: way)
     fw.mock('stock_write_config_trampoline', lambda value, s, k, *_: seen.append(C.string_at(k)) and 0)
     fw.fn('ringnav_write_config', C.c_int, C.c_int, C.c_char_p, C.c_char_p)(5, section, key)
+    fw.fn('config_settle', None, C.c_int)(1)  # a volume key is held until it settles (config_ini.c)
     assert seen == [saved]
 
 

@@ -1,4 +1,4 @@
-"""battery.c: Battery History's record on the flash (a fall appends, an unplug starts again, its bound, a reload,
+"""battery.c: Battery History's record on the card (a fall appends, an unplug starts again, its bound, a reload,
 a damaged file), the log it exports to the card, and its page: the graph, the reading the wheel is on and Export
 Log."""
 import calendar
@@ -11,7 +11,8 @@ import pytest
 from conftest import O, Files
 from test_peq_page import Canvas  # the EQ graph's canvas: the rectangles filled and the texts drawn
 
-RECORD, LOG = '/mnt/data/q2-battery', '/mnt/mmc/battery-log.txt'
+RECORD, LOG = '/mnt/mmc/.q2pod/q2-battery', '/mnt/mmc/battery-log.txt'
+FLASH = '/mnt/data/q2-battery'  # where releases before card_store.c kept it
 MAGIC, ROWS = 0x31484251, 100
 # Battery History's window and a toast's, each a zeroed widget (no parent, no name): OLED's toast and title checks read
 # the window on top
@@ -24,9 +25,10 @@ MOUNTS = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
 
 
 class Q2:
-    """The flash and card's files, the wall clock (UTC as the local time), the cable and the level."""
+    """The flash's and card's files, the wall clock (UTC as the local time), the cable and the level."""
     def __init__(self, fw, files=None):
         self.fw, self.files, self.now = fw, Files(fw, files), NOON
+        self.files.files.setdefault('/proc/mounts', MOUNTS)  # the card in, unless a test takes it out
         fw.mock('fw_time', lambda *_: self.now)
         fw.mock('fw_localtime_r', self.local)
         self.tick = fw.fn('battery_tick', None, C.c_int, C.c_int)
@@ -43,14 +45,14 @@ class Q2:
         self.tick(level, cable)
 
     def rows(self):
-        """The record on the flash: [(time, level)]."""
+        """The record on the card: [(time, level)]."""
         data = self.files.files[RECORD]
         magic, n = struct.unpack_from('<II', data)
         assert magic == MAGIC and len(data) == 8 + 8 * ROWS
         return [struct.unpack_from('<II', data, 8 + 8 * k) for k in range(n)]
 
     def reboot(self):
-        """A power-off and on: the payload's memory zeroed, the flash kept."""
+        """A power-off and on: the payload's memory zeroed, the files kept."""
         bh = C.c_char.in_dll(self.fw.lib, 'battery__bh')
         C.memset(C.addressof(bh), 0, self.fw.sizes['battery__bh'])
 
@@ -430,8 +432,8 @@ def test_centre_exports_the_log_whole_or_says_why_not(fw, q2, usb, mounted, free
     page = Page(fw)
     page.free = free
     fw.mock('navigator_window_is_exist', lambda name, *_: usb and C.string_at(name) == b'usbmode_page')
-    if mounted:
-        q2.files.files['/proc/mounts'] = MOUNTS
+    if not mounted:
+        q2.files.files.pop('/proc/mounts')
     page.open()
     assert page.key(KEY_CENTER) == 1
     assert page.toasts == [said_]
@@ -479,3 +481,31 @@ def test_the_button_gives_way_to_a_toast(fw, q2):
     assert page.toasts == []
     page.top = PAGE
     assert 'Export Log' in said(graph(fw, page)[4], 0)
+
+
+def test_with_the_card_away_rows_are_kept_in_ram_and_written_when_it_is_back(fw, q2):
+    q2.poll(90)
+    q2.files.files.pop('/proc/mounts')  # USB storage, or the card out
+    q2.poll(89, minutes=10)
+    q2.poll(88, minutes=10)
+    assert q2.rows() == [(NOON, 90)]  # the card's copy is the one before it went
+    assert FLASH not in q2.files.files  # and nothing went to the flash instead
+    q2.files.files['/proc/mounts'] = MOUNTS
+    q2.poll(88, minutes=1)  # the next poll, no new row: the held one is written
+    assert q2.rows() == [(NOON, 90), (NOON + 600, 89), (NOON + 1200, 88)]
+
+
+def test_the_flash_record_is_read_with_no_card_and_copied_to_it_once(fw):
+    first = Q2(fw)
+    first.poll(70)
+    first.poll(69, minutes=10)
+    old = first.files.files.pop(RECORD)
+    q2 = Q2(fw, {FLASH: old})
+    first.reboot()
+    q2.files.files.pop('/proc/mounts')
+    q2.poll(69, minutes=1)  # boot with no card: the flash's history reads, and nothing is written
+    assert q2.log().count('%') == 2 and RECORD not in q2.files.files
+    q2.files.files['/proc/mounts'] = MOUNTS
+    q2.poll(68, minutes=9)  # this Q2's clock: NOON + 600
+    assert q2.rows() == [(NOON, 70), (NOON + 600, 69), (NOON + 600, 68)]
+    assert q2.files.files[FLASH] == old  # left as it was, never written again

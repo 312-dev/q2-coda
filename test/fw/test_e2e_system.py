@@ -1018,6 +1018,8 @@ def test_bluetooth_and_the_wire_keep_their_own_volumes_across_a_restart(q2):
     output(q2, 1)  # a headset connects
     assert q2.way == 1 and volume() == 30  # no Bluetooth level saved yet: the wired one carries over
     set_volume(q2, 55)
+    assert q2.flash.get('PLAYSET', 'BT_VOLUME') is None  # held: a turn is one write, once it settles
+    q2.loop(ms=3000)
     assert q2.flash.get('PLAYSET', 'VOLUME') == '30' and q2.flash.get('PLAYSET', 'BT_VOLUME') == '55'
     output(q2, 0)  # it goes
     assert volume() == 30 and q2.fw.calls('device_set_volume')[-1][1][0] == 30
@@ -1081,6 +1083,7 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
     headset.level = 100  # its own keys: 100 of its 127, which reads as the Q2's 95
     q2.loop(ms=500)
     assert q2.var('g_volume').value == reads_as(100) == 95
+    q2.loop(ms=3000)  # saved once it settles (config_ini.c config_settle)
     assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '95'
     q2.var('g_maxvolume').value = 60
     headset.level = 127

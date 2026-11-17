@@ -92,12 +92,15 @@ class OutputVolumeMachine(Machine):
         volume=self.u.mem_read(syms['g_volume'],1)[0]
         assert [c[1:3] for c in self.calls if c[0]=='device_set_volume']==([(volume,1)] if changed else [])
         return volume
-    def save(self,volume,section='PLAYSET',key='VOLUME'):
+    def save(self,volume,section='PLAYSET',key='VOLUME',settle=True):
         self.byte(syms['g_volume'],volume)
-        return self.call(address=syms['write_int_config'],args=(volume,self.string(section),self.string(key),0),gap=0)
+        ret=self.call(address=syms['write_int_config'],args=(volume,self.string(section),self.string(key),0),gap=0)
+        if settle: self.call(address=payload_syms['config_settle'],args=(1,0,0,0),gap=0)  # held until it settles (config_ini.c)
+        return ret
 
 ov=OutputVolumeMachine(); assert ov.output(1)==20  # first connection inherits the current level
-ov.save(65); assert ov.config=={'VOLUME':'20','BT_VOLUME':'65'}
+ov.save(65,settle=False); assert ov.config=={'VOLUME':'20'}  # a wheel step's level is held, not written yet
+ov.call(address=payload_syms['config_settle'],args=(1,0,0,0),gap=0); assert ov.config=={'VOLUME':'20','BT_VOLUME':'65'}
 assert ov.output(0)==20; ov.save(13)
 assert ov.output(1)==65 and ov.output(1)==65 and ov.output(2)==13
 assert ov.output(0)==13 and ov.output(1)==65; passed()

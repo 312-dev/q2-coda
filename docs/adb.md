@@ -7,7 +7,7 @@ A `--dev` build ([building.md](building.md)) runs `adbd`, Android's debug daemon
 1. Install a `--dev` update on the Q2.
 2. On the PC, unpack Google's [SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (it holds `adb.exe`) and open a terminal in that folder. No driver: the Q2 tells Windows to use its own WinUSB driver.
 3. Run `adb devices` once: it makes the PC's key, `%USERPROFILE%\.android\adbkey.pub` (`~/.android/adbkey.pub` elsewhere).
-4. Authorize the PC: plug the Q2 in (it shows **USB Connected**, the card on the PC as a drive), copy `adbkey.pub` to the card's root as `adb_keys` (more than one computer: one line each), and eject the card on the PC. The Q2's own **Allow USB Debugging?** prompt, which will make this step a press on the Q2, is not built yet ([Authorization](#authorization)).
+4. Authorize the PC: plug the Q2 in (it shows **USB Connected**, the card on the PC as a drive), copy `adbkey.pub` to the card's root as `adb_keys` (more than one computer: one line each), and eject the card on the PC. Or skip the file: with the PC's adb running, the Q2 asks **Allow USB Debugging?** and a press there lets that computer in ([Authorization](#authorization)).
 5. Press **Return** on the Q2. Its card is mounted again, the UI is usable, and the PC now sees "Q2 (ADB)".
 6. `adb devices` lists `Q2CODA  device`, and `adb shell id` prints `uid=0(root) gid=0(root)`.
 
