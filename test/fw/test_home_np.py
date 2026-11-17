@@ -11,7 +11,7 @@ from conftest import O
 from test_guest import PAUSED, PLAYING
 from test_guest_ui import Gui
 from test_nav_library_pages import stock_page
-from test_nav_painters import Canvas
+from test_nav_painters import Canvas, theme
 
 HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
 EVT_CLICK = O['EVT_CLICK']
@@ -22,8 +22,9 @@ LABEL_X = 24  # Now Playing's label in its row; the text column is 2 px in (hscr
 class Home(Gui):
     """Home's window and main list: the rows as coverflow_home tags them, each with its label (Now Playing's as stock
     translates it) and the row's image, stock's click on Now Playing's."""
-    def __init__(self, fw):
+    def __init__(self, fw, reduce=False):
         super().__init__(fw)
+        theme(fw, **({'REDUCEMOTION': b'1'} if reduce else {}))
         self.win, self.view = stock_page(self.ui, 'scroll_view_home')
         self.ui.windows.append(self.win)
         self.stock: list = []
@@ -137,3 +138,56 @@ def test_the_status_row_s_play_state_moves_to_the_row_only_while_home_shows_it(f
     home.ui.windows.pop()
     home.apply(np=0)  # the row gone
     assert lead() == 0
+
+
+PAUSE = [(LABEL_X + 3, 10, 4, 12), (LABEL_X + 9, 10, 4, 12)]
+
+
+def words(home):
+    """The row's words shown: [(text, label)], the old ones' copy first while they fade."""
+    row = home.ui.lookup(home.view, 'btn_playing', 1)
+    return [home.ui.text.get(k) for k in home.ui.kids[row] if home.ui.kind[k] == 'hscroll_label_create']
+
+
+def test_pausing_morphs_the_bars_into_the_pause_and_cross_fades_the_words(fw):
+    home = Home(fw)
+    home.apply(playing=PLAYING)
+    bars = home.paint()
+    home.status = PAUSED
+    home.ui.fire('hn_tick')
+    assert home.paint() == bars  # the morph's start: the bars, still
+    assert words(home) == ['Paused', 'Playing']  # the label, then the old words' copy over it
+    home.now += 125
+    mid = home.paint()
+    assert len(mid) == 3 and mid[1][0][2] < 3 and mid[1][1] >> 24 < 0xff  # the middle narrows and fades
+    assert bars[0][1] != mid[0][1] != 0xffababab  # on its way from the accent to Text Secondary
+    home.now += 125
+    assert [b[0] for b in home.paint()] == PAUSE and {b[1] for b in home.paint()} == {0xffababab}
+    home.ui.fire('hn_tick')
+    assert words(home) == ['Paused']  # the copy gone once faded
+
+
+def test_resuming_mid_morph_turns_back_from_where_it_is_and_then_the_bars_move(fw):
+    home = Home(fw)
+    home.apply(playing=PLAYING)
+    bars = home.paint()
+    home.status = PAUSED
+    home.ui.fire('hn_tick')
+    home.now += 125
+    mid = home.paint()
+    home.status = PLAYING
+    home.ui.fire('hn_tick')
+    assert home.paint() == mid  # back from where it stood
+    home.now += 250
+    assert home.paint() == bars
+    home.ui.fire('hn_tick')
+    assert home.paint() != bars  # the bars move again
+
+
+def test_under_reduce_motion_the_switch_is_a_cut(fw):
+    home = Home(fw, reduce=True)
+    home.apply(playing=PLAYING)
+    home.status = PAUSED
+    home.ui.fire('hn_tick')
+    assert [b[0] for b in home.paint()] == PAUSE
+    assert words(home) == ['Paused']

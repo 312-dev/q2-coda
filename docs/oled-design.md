@@ -189,6 +189,7 @@ All lists share one grid.
     standing 6 px below the row's center, 3 to 11 px tall and moving on offset sines (a 1.25 s loop) in Text
     Primary while playing; paused, frozen at their last heights in Text Secondary; stopped, nothing. Only their
     10 px box repaints as they move. A tap on them opens Now Playing (`mock_status_bars.py`, the user's, 2026-11-15).
+    On Home, while its first row is in sight, they lead that row instead ([Home's first row](#homes-first-row)).
   - **Wi-Fi**, 5 px left of the bars: Phosphor `wifi-high` (bold) lit by the signal, one, two or three arcs in Text
     Primary and the rest in `#3A3A3C` so the shape keeps its width; `wifi-x` (bold) connected with no internet;
     nothing with Wi-Fi off or not connected (`mock_wifi_status.py`).
@@ -221,6 +222,22 @@ All lists share one grid.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
+
+### Home's first row
+
+Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`):
+
+- Stock's Now Playing row reads **Playing** while something plays, **Paused** while it is paused and **Guest Play**
+  while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
+  Edit Home lists it as Playing.
+- It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
+  sight: Up Next's level bars (3 px wide, 4.5 px apart, up to 12 px, a frame every 125 ms) in the accent while
+  playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
+  paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
+  (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.
+- Between playing and paused the glyph morphs over 250 ms, cubic out: the bars freeze, the middle one narrows and
+  fades, the outer two widen and rise into the pause's bars, the accent turning Text Secondary; on resume the same
+  backwards, then the bars move again. The words cross-fade in the same 250 ms. Under Reduce Motion both are a cut.
 
 ### Selection bar
 

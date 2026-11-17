@@ -13,7 +13,7 @@
  *   Allow, When a Guest Leaves, Trusted Guests (each its page, guesttrust_page) and Hotspot
  *   (hotspot_page: its switch, name, password and join QR code).
  * The status row's guest glyph is status_row.c's, Control Center's Guest tile control_center.c's,
- * Home's Guest Play row library_edit.c's (guest_home_shows), each reading guest_ui_state. */
+ * Home's first row reading Guest Play home_np.c's, each reading the guest's state. */
 #include "navigation.h"
 
 #define GU_POLL_MS 250 /* guest.c reads the state as often */
@@ -301,7 +301,7 @@ static int gnp_tap(void *ctx, void *event) {
     guest_send("stop");
     return STOP;
 }
-/* Home's Guest Play row while a guest plays, and the guest starting: the page. */
+/* Home's first row while a guest plays (home_np.c), and the guest starting: the page. */
 void guest_np_open(void) {
     if (gu.np || !(gu.np = page_open("guestnp_page", np_closed, np_key))) return;
     widget_on(gu.np, EVT_CLICK, gnp_tap, 0);
