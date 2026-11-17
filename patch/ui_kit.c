@@ -121,6 +121,30 @@ int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w) {
     *w = ui_cta_w(canvas, labels, n);
     return 375 / 2 - (n * *w + (n - 1) * CTA_GAP) / 2 + i * (*w + CTA_GAP);
 }
+/* The buttons' focus ring in a, CTA_RING_H tall: its round ends tools/art.py's supersampled
+ * images (cta_ring_end, Text Primary in the half's ink), the straight runs between them
+ * CTA_RING_W whole rows of ink at its top and foot. Without the images (another set's art),
+ * round_ring's row-at-a-time rings, a pixel apart. */
+static void cta_ring(void *canvas, const rect_t *a, unsigned ink) {
+    unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
+    int end = CTA_RING_H / 2, light = ipod_light();
+    for (int right = 0; right < 2; ++right) {
+        char name[16];
+        tk_snprintf(name, sizeof name, "ctaring_%c_%c", right ? 'r' : 'l', light ? 'l' : 'd');
+        if (a->h != CTA_RING_H || widget_load_image(window_manager(), theme_art(name), bitmap)) {
+            rect_t b = { a->x + 1, a->y + 1, a->w - 2, a->h - 2 };
+            round_ring(canvas, a, a->h / 2, ink);
+            round_ring(canvas, &b, b.h / 2, ink);
+            return;
+        }
+        rect_t src = { 0, 0, (int)bitmap[0], (int)bitmap[1] },
+               dst = { right ? a->x + a->w - end : a->x, a->y, src.w, src.h };
+        canvas_draw_image(canvas, bitmap, &src, &dst);
+    }
+    canvas_set_fill_color(canvas, ink);
+    canvas_fill_rect(canvas, a->x + end, a->y, a->w - 2 * end, CTA_RING_W);
+    canvas_fill_rect(canvas, a->x + end, a->y + a->h - CTA_RING_W, a->w - 2 * end, CTA_RING_W);
+}
 /* One capsule at r: primary the accent, else the grey; ringed while ui_focus_shown when lit; down
  * a step darker. */
 static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary, int lit,
@@ -131,19 +155,10 @@ static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary,
                              : (scheme()->tones[0] & 0xffffffu);
     unsigned raw = ui_ink_raw(1); /* final in both halves */
     if (lit && ui_focus_shown()) {
-        /* a 2 px ring in Text Primary CTA_RING_OFF px out, concentric with the capsule: two
-         * one-pixel strokes of AWTK's antialiased rounded rect (the capsule's fill is its fill
-         * counterpart), each a pill of its own height, as frame_box draws a frame. A canvas
-         * that declines them (no vgcanvas) takes round_ring's row-at-a-time rings. */
-        int o = CTA_RING_OFF + 2;
-        rect_t a = { r->x - o, r->y - o, r->w + 2 * o, r->h + 2 * o },
-               b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
-        unsigned ink = RGBA(tok(TOK_PRIMARY));
-        if (canvas_stroke_rounded_rect(canvas, &a, (void *)0, &ink, a.h / 2, 1) ||
-            canvas_stroke_rounded_rect(canvas, &b, (void *)0, &ink, b.h / 2, 1)) {
-            round_ring(canvas, &a, a.h / 2, ink);
-            round_ring(canvas, &b, b.h / 2, ink);
-        }
+        /* a CTA_RING_W px ring in Text Primary CTA_RING_OFF px out, concentric with the capsule */
+        int o = CTA_RING_OFF + CTA_RING_W;
+        rect_t a = { r->x - o, r->y - o, r->w + 2 * o, r->h + 2 * o };
+        cta_ring(canvas, &a, RGBA(tok(TOK_PRIMARY)));
     }
     fill_box(canvas, r, RGBA(fill), CTA_H / 2);
     ui_ink_raw(raw);
