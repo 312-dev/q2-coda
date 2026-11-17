@@ -729,7 +729,7 @@ static void paint_selection(void *w, void *canvas) {
         int in = tile ? 0 : T->sel_inset, radius = tile ? 0 : pill_radius(g_menu.at[i], r.h, in);
         if (radius > T->sel_radius) radius = T->sel_radius;
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
-        int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip);
+        int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip, &old.x);
         if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* its press, or its lean */
         if (modal_is_red(g_menu.at[i])) /* a menu's destructive row (menu_modal.c modal_red) */
             fill_box(canvas, &bar, RGBA(MODAL_RED), (unsigned)radius);
