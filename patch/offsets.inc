@@ -441,6 +441,9 @@ static inline int arc_out(int r, int y) {
 #define CHARGE_STOP 80
 #define CHARGE_RESUME 75
 #define CHARGE_POLL_MS 5000
+/* The card's Rockbox and Groovebox binaries, and Home's Folders rule, are looked at again at most
+ * this often, sooner on a library scan's end (theme_engine.c card_bins, home.c home_folders). */
+#define CARD_RECHECK_MS 5000
 /* Hardware watchdog (docs/internals.md#watchdog): the UI loop feeds it every pass, so a loop or a
  * kernel stalled WDT_MS reboots. Well above any ordinary pass (a 65k-song list, a cover decode:
  * seconds). The known long ones on the UI thread, an import's tag reads and a folder add's directory
