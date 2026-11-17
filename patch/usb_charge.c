@@ -1,6 +1,9 @@
 /* Apply the saved DAC charging choice before insertion, not only once usbmode_page opens.
  * Every switch_charge_enable call passes here; stock's direct PE22 writes and other GPIOs are not
- * hooked. No enumeration timeout is evidence of a charger: a host rejecting the Q2 looks the same.
+ * hooked, but each USB pass reads PE22 back and writes the guard's choice again (charge_apply), so
+ * the one direct write that must stand, check_otg_status's charger off while the Q2 powers the bus,
+ * is part of the choice (docs/internals.md#early-usb-dac-charging-guard). No enumeration timeout is
+ * evidence of a charger: a host rejecting the Q2 looks the same.
  */
 #include "navigation.h"
 
@@ -10,9 +13,13 @@ static struct {
     void *row; /* Power's USB DAC Charging label, while that page is built */
 } usb_charge __attribute__((section(".scratch")));
 
+/* g_last_otgid 1: the Q2 is a USB host powering the bus, and stock's check_otg_status has turned
+ * the bus power on (PC20) and the charger off (PE22 high) by writing the pins directly. The charger
+ * stays off then, whatever the choice or Charge Limit asks: on, it charges the battery from the
+ * Q2's own bus power. */
 static int charge_apply(int force) {
-    int allowed =
-        usb_charge.ready && (g_usbdac_chargeflag == 1 || (usb_charge.cable == 1 && g_usbmode == 0));
+    int allowed = usb_charge.ready && g_last_otgid != 1 &&
+                  (g_usbdac_chargeflag == 1 || (usb_charge.cable == 1 && g_usbmode == 0));
     int enable = allowed && (!usb_charge.have_request || usb_charge.requested);
     if (force || !usb_charge.have_applied || usb_charge.applied != enable ||
         toolsGpioGetValue("PE22") != !enable) {
