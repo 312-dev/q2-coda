@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Control Center: the song's album cover shows in the Now Playing block, the same one Home shows; before, the square stayed grey for every song. A song streamed from your server (Subsonic) also shows its album's cover from the server, on Now Playing, Home, Up Next and Control Center, when the file has no picture of its own.
   - Home (OLED, Split): moving the selection onto the top row no longer leaves a thin strip of the blue bar across the row below it, which made the selected row's text look like it was flickering.
   - Home (OLED, Split): a toast such as **Unplugged** or **Charging** no longer puts a black bar across the top of the screen and cuts off the first row while it shows.
   - Home (OLED): the first row says what's playing: **Playing** with moving level bars, **Paused** with a pause sign (the bars turn into it and back), and it's gone when nothing is queued. On Home the play state moves there from the status bar.

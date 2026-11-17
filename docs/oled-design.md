@@ -1099,7 +1099,7 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
 - **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
   (centers x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
   under in Inter Medium 13, white when on, Text Secondary off.
-- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in; the title (Inter Medium 16) and artist (Inter
+- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in, the one Home's art pane shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter
   13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
 - **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
