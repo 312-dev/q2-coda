@@ -717,6 +717,7 @@ the gray one.
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
 | Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |

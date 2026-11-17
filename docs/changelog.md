@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Add Songs (OLED): a search that matches nothing shows **No Matches** with "Try fewer letters" under the Search row, in place of a "No songs match" row the wheel could land on.
   - Settings (OLED): Max Volume, Balance, Brightness, Crossfade's length and Default Volume's level change right in the list. Each row shows a small slider and its value; press Center and the row grows, turn the wheel to set it (heard or seen as you turn), and press Center or Back when done. Crossfade and Default Volume are switches, with their slider showing under them while they're on.
   - Battery History (OLED): the graph takes the page, with the reading the wheel is on above it ("Nov 16, 3:10 PM · 51%") and **Export Log** as one button under it; Center exports. The list of readings is gone (Export Log still writes them all).
   - Add to Playlist from an album, an artist or Now Playing: the page is titled Add to Playlist and its playlists carry no chevron, as they add in place rather than open.
