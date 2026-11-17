@@ -29,6 +29,7 @@
 #define MDNS_CHECK_MS 1000     /* the address looked at this often */
 #define MDNS_NAME_MS 5000      /* the Bluetooth name this often */
 #define MDNS_SPACING_MS 1000   /* between the two announcements, and the least between two sends of a record */
+#define MDNS_RETRY_MS 30000    /* a socket refused on an address is tried again this much later (or on a new one) */
 #define MDNS_PKT 1500
 
 enum { DNS_A = 1, DNS_PTR = 12, DNS_TXT = 16, DNS_SRV = 33, DNS_ANY = 255, DNS_IN = 1, DNS_FLUSH = 0x8000 };
@@ -242,6 +243,8 @@ static struct {
     uint32_t checked, named, next_announce;
     int announces;           /* still to send */
     uint32_t sent[5];        /* when each record (MD_* bit) was last multicast */
+    uint8_t refused[4];      /* the address a socket was last refused on, and when */
+    uint32_t refused_at;
     char name[NAME_MAX + 1]; /* the Bluetooth name as last read */
 } md = {.fd = -1};
 
@@ -318,11 +321,17 @@ static int md_up(const uint8_t ip[4]) {
     struct ip_mreq m;
     memcpy(&m.imr_interface.s_addr, ip, 4);
     m.imr_multiaddr.s_addr = htonl(MDNS_GROUP);
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) || bind(fd, (void *)&a, sizeof a) ||
-        setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof m) ||
-        setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &m.imr_interface, sizeof m.imr_interface) ||
-        setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl)) {
-        crc_log("mdns: socket refused (%d)", errno);
+    const char *step = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one)) step = "SO_REUSEADDR";
+    else if (bind(fd, (void *)&a, sizeof a)) step = "bind";
+    else if (setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof m)) step = "IP_ADD_MEMBERSHIP";
+    else if (setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl)) step = "IP_MULTICAST_TTL";
+    /* Sends leave by this address's interface. Not fatal: without it they follow the route, wlan0 on a Q2.
+     * qemu-user 8.2 (the emulator) refuses every form of it with EADDRNOTAVAIL. */
+    if (!step && setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &m.imr_interface, sizeof m.imr_interface))
+        crc_log("mdns: IP_MULTICAST_IF refused (errno %d); sending by the route", errno);
+    if (step) {
+        crc_log("mdns: %s refused on %u.%u.%u.%u (errno %d)", step, ip[0], ip[1], ip[2], ip[3], errno);
         close(fd);
         return 0;
     }
@@ -364,7 +373,8 @@ void mdns_poll(uint32_t now) {
         uint8_t ip[4];
         int have = if_addr(md.ifname, ip);
         if (md.fd >= 0 && (!have || memcmp(ip, md.me.ip, 4) || renamed)) md_down();
-        if (have && md.fd < 0) md_up(ip);
+        if (have && md.fd < 0 && (memcmp(ip, md.refused, 4) || now - md.refused_at >= MDNS_RETRY_MS) && !md_up(ip))
+            memcpy(md.refused, ip, 4), md.refused_at = now;
     }
     if (md.fd >= 0 && md.announces && now - md.next_announce < 0x80000000u) {
         send_records(MD_PTR | MD_SRV | MD_TXT | MD_A, MDNS_TTL);
