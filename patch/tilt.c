@@ -67,7 +67,7 @@ static struct {
 /* The release's spring, after the mock-up's e^(-5.5 x) cos(1.6 pi x): x in sixteenths of
  * PRESS_SPRING_MS, the share of the way still to go in thousandths, below 0 past rest (the one
  * overshoot, about +3 thousandths at x 0.46). */
-static const short spring[17] = { 1000, 674, 407, 210, 78, 0, -39, -53, -52,
+static const short spring[17] = { 1000, 674, 407, 210, 78, 0,  -39, -53, -52,
                                   -43,  -32, -22, -13, -7, -3, 0,   1 };
 
 /* The bar's size now, thousandths: PRESS_FOCUS at rest; 1000 under Reduce Motion. */
@@ -89,7 +89,9 @@ static int press_bright(void) {
     return press.bright_from * (1000 - anim_at(&press.fade)) / 1000;
 }
 
-static unsigned press_sign(void) { return (unsigned)press_scale() << 11 | (unsigned)press_bright(); }
+static unsigned press_sign(void) {
+    return (unsigned)press_scale() << 11 | (unsigned)press_bright();
+}
 
 /* A press on the bar runs or settles: the lean has no say (the press wins). */
 static int pressing(void) {
@@ -221,7 +223,7 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
     bar->y += dir * TILT_LIFT * e / 256 - gh / 2, bar->h += gh;
     /* never past its window's top, where the status row's window covers it: the first row's bar
      * grows down there instead of being cut (tilt_clip widens the clip for the rest). A list in no
-     * window (one being built or torn down) paints only its rest lift, with no top to keep under. */
+     * window (being built or torn down) paints only its rest lift, with no top to keep under. */
     if (tilt.win) {
         int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window */
         if (oy + bar->y < wy) bar->y = wy - oy;
