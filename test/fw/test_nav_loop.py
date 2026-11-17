@@ -2315,6 +2315,24 @@ def test_centre_on_wi_fi_or_bluetooth_clicks_stock_s_button(fw, keys, stop, clic
     assert ui.clicks == clicked and not fw.calls('dialog_quit')
 
 
+@pytest.mark.parametrize('joining, ended', [(1, [b'disconnect']), (0, [])])
+def test_the_wi_fi_circle_ends_a_join_that_is_trying_before_stock_s_click(fw, keys, joining, ended):
+    """Stock's click on Wi-Fi's switch returns at once while a join is trying (wifi_connectstatus 1); the circle ends
+    the join first (wifi_flows.c wifi_flows_cancel_join, as Settings > Wi-Fi's switch does), then stock's click
+    turns Wi-Fi off."""
+    seen = []
+    fw.mock('networkDisconnect', lambda *_: seen.append(b'disconnect') or 0)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    fw.var('wifi_initstatus', C.c_ubyte).value = 0
+    fw.var('wifi_connectstatus', C.c_ubyte).value = joining
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = 0
+    assert keys(KEY_CENTER) == STOP
+    assert seen == ended and fw.var('wifi_connectstatus', C.c_ubyte).value == 0
+    assert ui.clicks == [(b'img_wifiswitch', EVT_CLICK)]
+
+
 def test_centre_on_smart_wi_fi_turns_it_on_and_off(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)

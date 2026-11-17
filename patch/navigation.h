@@ -486,7 +486,7 @@ void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
 /* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
-int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top);
+int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);
