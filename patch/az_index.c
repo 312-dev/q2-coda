@@ -11,9 +11,9 @@
  * the fast-scroll letter (navigation.c paint_letter). While it shows, the rows' right column and
  * the selection bar's right end move in (az_right, az_bar_in) so nothing on a row runs under it.
  *
- * The lists: Songs (allmusic_page, titles A to Z: not its other orders, own_order, nor an
- * artist's or a genre's songs, which come unsorted) and the Library's Albums, Artists, Composers
- * and Genres (localclass_page and album_page by class), each a table over p_deque_showlist. A row's
+ * The lists: Songs (allmusic_page, titles A to Z: not its other orders, nor an artist's or a
+ * genre's songs, which come unsorted; name_sorted) and the Library's Albums, Artists, Composers and
+ * Genres (localclass_page and album_page by class), each a table over p_deque_showlist. A row's
  * letter is its name's first character past the article the sort skips (ringnav_sort_key), A to Z
  * in either case, anything else "#", as stock's own Initial is (catalogue.c initial). While the
  * strip is hidden this costs a test of wheel_speed on each list tick, of az.list on each paint and
@@ -73,6 +73,32 @@ int az_initial(const char *s) {
     return c >= 'A' && c <= 'Z' ? (int)(c - 'A' + 1) : 0;
 }
 
+/* The top page's list is a name-sorted Library list: the one rule for the fast-scroll letter
+ * (navigation.c, where the wheel arms it) and the A-Z index (az_kind). An explicit list, as every
+ * other list is in an order of its own: Wi-Fi's networks by signal, Bluetooth's devices, Settings,
+ * the queue, Most Played, Era's albums by year, a card app's or a stream's rows as their source
+ * gives them (docs/internals.md#a-z-index).
+ * allmusic_page shows lists of both kinds, so there the class and the Sort decide: Recent,
+ * Frequent and Recently Added (0xf007 to 0xf009) and Songs under Time added (g_sort_flag 3 or 4,
+ * or song_sort.c's own orders) are newest or most played first; a playlist's songs (0xff13) under
+ * its Sort's Time added (g_playlistsort_flag not 0) are in the order they were added; an artist's
+ * and a genre's songs (0xff07, 0xff09) come as the database holds them. Edit Playlist's songs are
+ * as added too (ple_listing); its Add Songs picker is the whole library A to Z. */
+int name_sorted(const char *page) {
+    static const char *const sorted[] = { "localclass_page", "album_page", "artistinfo_page",
+                                          "folder_page", "coverflow_page" };
+    if (!tk_strcmp(page, "allmusic_page")) {
+        int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
+        return !((cls >= 0xf007 && cls <= 0xf009) || cls == 0xff07 || cls == 0xff09 ||
+                 (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
+                 (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own())));
+    }
+    if (!tk_strcmp(page, "playlistedit_page")) return !ple_listing();
+    for (unsigned i = 0; i < sizeof sorted / sizeof *sorted; ++i)
+        if (!tk_strcmp(page, sorted[i])) return 1;
+    return 0;
+}
+
 /* Which list table w shows, AZ_*, or AZ_NONE: not an indexed one, or too short. */
 static int az_kind(void *w) {
     if (!w || tk_strcmp(widget_get_type(w), "table_client")) return AZ_NONE;
@@ -81,8 +107,7 @@ static int az_kind(void *w) {
     if (rows <= AZ_MIN_ROWS || !list || (int)deque_size(list) != rows || !win) return AZ_NONE;
     const char *page = widget_get_prop_str(win, "name", "");
     int cls = I(g_class_type, 0);
-    if (!tk_strcmp(page, "allmusic_page"))
-        return own_order(page) || cls == 0xff07 || cls == 0xff09 ? AZ_NONE : AZ_SONGS;
+    if (!tk_strcmp(page, "allmusic_page")) return name_sorted(page) ? AZ_SONGS : AZ_NONE;
     if (tk_strcmp(page, "localclass_page") && tk_strcmp(page, "album_page")) return AZ_NONE;
     return cls >= CLASS_ALBUMS && cls <= 0xf006 ? AZ_ALBUMS + (cls - CLASS_ALBUMS) : AZ_NONE;
 }

@@ -1931,7 +1931,7 @@ class Disk(Files):
         return C.addressof(ent)
 
 
-# Streaming's Configuration.
+# Streaming's Configuration (two levels, 25 v3 B: docs/oled-design.md#streaming-configuration).
 def configuration(fw, ui, files=None, hide=None):
     disk = Disk(fw, files)
     config = Config(fw, **({} if hide is None else {'STREAMHIDE': hide}))
@@ -1939,49 +1939,68 @@ def configuration(fw, ui, files=None, hide=None):
     return ui.top(), disk, config, config.written
 
 
-def switches(ui, page):
-    """The service rows' captions and switches."""
+def provider(fw, ui, page, sp):
+    """TIDAL's (sp 0) or Spotify's page, opened from its row on Configuration."""
+    ui.click(page, 2 + sp)
+    return ui.top()
+
+
+def switches(ui, page, first=0):
+    """The switch rows' captions and switches, from row first."""
     out = []
-    for item in ui.kids[ui.view(page)][5:]:
+    for item in ui.kids[ui.view(page)][first:]:
         label, switch = ui.kids[item][0], ui.lookup(item, '_setting_switch', 0)
-        out.append((ui.text[label], ui.image[switch] == 'switch_on'))
+        if switch:
+            out.append((ui.text[label], ui.image[switch] == 'switch_on'))
     return out
 
 
-SERVICES = ['TIDAL', 'Spotify', 'Tidal Downloads', 'Internet Radio', 'AirPlay']
-
-
-def test_configuration_lists_the_caches_erase_stop_and_each_service(fw, ui):
-    page, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'}, hide=b'RADIO')
+def test_configuration_is_stop_the_providers_then_the_lone_switches(fw, ui):
+    page, *_ = configuration(fw, ui, hide=b'RADIO,SPOTIFY')
     assert ui.name[page] == 'streamconf_page'
-    # the toggles under a section header (audit2 E1): a whole row, so the list scrolls in whole rows
-    assert ui.captions(page)[:5] == ['Tidal Cache: 2 GB', 'Spotify Cache: 1 GB', 'Erase Spotify Data', 'Stop Streaming Services',
-                                     'Show in Streaming']
-    assert switches(ui, page) == [(s, s != 'Internet Radio') for s in SERVICES]
+    # the headers are whole rows, so the list scrolls in whole rows (audit2 E1)
+    assert ui.rows(page)[:5] == [('Stop Streaming Services', None), ('Services', None), ('TIDAL', 'Shown'),
+                                 ('Spotify', 'Hidden'), ('Show in Streaming', None)]
+    rows = ui.kids[ui.view(page)]
+    assert all(any(ui.image.get(k) == 'list_into' for k in ui.kids[rows[r]]) for r in (2, 3))  # each opens a page
+    assert switches(ui, page, 5) == [('Internet Radio', False), ('AirPlay', True)]  # Tidal Downloads is TIDAL's
     call(fw, 'stream_config')
     assert ui.windows == [page]
+
+
+@pytest.mark.parametrize('sp, rows', [
+    (0, [('Show in Streaming', None), ('Show Downloads', None), ('Cache', '2 GB')]),
+    (1, [('Show in Streaming', None), ('Cache', '1 GB'), ('Erase Spotify Data', None)])])
+def test_a_provider_row_opens_its_page(fw, ui, sp, rows):
+    page, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'}, hide=b'DOWNLOADS')
+    sub = provider(fw, ui, page, sp)
+    assert ui.name[sub] == 'streamsvc_page' and ui.rows(sub) == rows
+    assert switches(ui, sub) == [('Show in Streaming', True)] + ([('Show Downloads', False)] if not sp else [])
 
 
 @pytest.mark.parametrize('saved, shown', [(b'512M', '512 MB'), (b'8192M', '8 GB'), (b'3000M', '2 GB'), (b'', '2 GB')])
 def test_a_cache_size_reads_back(fw, ui, saved, shown):
     page, *_ = configuration(fw, ui, {f'{TIDAL_DIR}/.cache-size': saved})
-    assert ui.captions(page)[0] == f'Tidal Cache: {shown}'
+    assert ui.rows(provider(fw, ui, page, 0))[2] == ('Cache', shown)
 
 
-@pytest.mark.parametrize('row, folder, saved, after, shown', [
+@pytest.mark.parametrize('sp, folder, saved, after, shown', [
     (0, TIDAL_DIR, None, b'4096M', '4 GB'), (1, SPOT_DIR, b'4096M', b'8192M', '8 GB'), (0, TIDAL_DIR, b'8192M', b'512M', '512 MB')])
-def test_a_cache_row_steps_to_the_next_size_and_keeps_it(fw, ui, row, folder, saved, after, shown):
+def test_a_cache_row_steps_to_the_next_size_and_keeps_it(fw, ui, sp, folder, saved, after, shown):
     page, disk, *_ = configuration(fw, ui, {} if saved is None else {f'{folder}/.cache-size': saved})
-    ui.click(page, row)
+    sub = provider(fw, ui, page, sp)
+    row = 2 - sp
+    ui.click(sub, row)
     assert disk.files[f'{folder}/.cache-size'] == after  # librespot's --cache-size-limit form
-    assert ui.captions(page)[row].endswith(shown) and [C.string_at(c[1][0]).decode() for c in fw.calls('fw_mkdir')] == [folder]
+    assert ui.rows(sub)[row] == ('Cache', shown) and [C.string_at(c[1][0]).decode() for c in fw.calls('fw_mkdir')] == [folder]
 
 
 def test_a_cache_size_that_cannot_be_kept_says_so(fw, ui):
     page, disk, *_ = configuration(fw, ui)
+    sub = provider(fw, ui, page, 0)
     disk.fail_rename = True
-    ui.click(page, 0)
-    assert ui.toasts == ['Could not save setting'] and ui.captions(page)[0] == 'Tidal Cache: 2 GB'
+    ui.click(sub, 2)
+    assert ui.toasts == ['Could not save setting'] and ui.rows(sub)[2] == ('Cache', '2 GB')
 
 
 def erasing(fw):
@@ -1990,42 +2009,46 @@ def erasing(fw):
 
 
 def erase_answer(fw, row):
-    """Erase Spotify Data's confirmation card answered (navigation.c sc_erase_answer), as feedback.c runs it."""
-    fw.fn('navigation__sc_erase_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+    """Erase Spotify Data's confirmation card answered (stream_config.c sc_erase_answer), as feedback.c runs it."""
+    fw.fn('stream_config__sc_erase_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
 
 
 def test_erase_asks_on_the_card_first(fw, ui):
     erasing(fw)
     page, *_ = configuration(fw, ui)
-    ui.click(page, 2)
+    sub = provider(fw, ui, page, 1)
+    ui.click(sub, 2)
     assert 'dialog/sortselect_dialog' in ui.went and not fw.calls('fw_system')  # the card, nothing erased
     erase_answer(fw, 0)  # Cancel
-    assert ui.captions(page)[2] == 'Erase Spotify Data' and not fw.calls('fw_system')
+    assert ui.captions(sub)[2] == 'Erase Spotify Data' and not fw.calls('fw_system')
     erase_answer(fw, 1)  # Erase
-    assert ui.captions(page)[2] == 'Erasing…' and fw.calls('fw_system')  # librespot stopped first
+    assert ui.captions(sub)[2] == 'Erasing…' and fw.calls('fw_system')  # librespot stopped first
 
 
 def test_while_erasing_spotify_s_cache_and_erase_wait(fw, ui):
     erasing(fw)
     page, disk, *_ = configuration(fw, ui)
+    sub = provider(fw, ui, page, 1)
     erase_answer(fw, 1)
-    ui.click(page, 1)
+    ui.click(sub, 1)
     assert ui.toasts == ['Wait for the one in progress'] and f'{SPOT_DIR}/.cache-size' not in disk.files
     asked = ui.went.count('dialog/sortselect_dialog')
-    ui.click(page, 2)  # no card while one runs: it says to wait
-    assert ui.toasts[-1] == 'Wait for the one in progress' and ui.captions(page)[2] == 'Erasing…'
+    ui.click(sub, 2)  # no card while one runs: it says to wait
+    assert ui.toasts[-1] == 'Wait for the one in progress' and ui.captions(sub)[2] == 'Erasing…'
     assert ui.went.count('dialog/sortselect_dialog') == asked
 
 
 def test_an_erase_s_end_shows_on_the_page(fw, ui):
     page, disk, *_ = configuration(fw, ui, {f'{SPOT_DIR}/.cache-size': b'1024M'})
+    sub = provider(fw, ui, page, 1)
     del disk.files[f'{SPOT_DIR}/.cache-size']  # netupdate.c's erase took it, and calls back
     fw.fn('stream_erased', None)()
-    assert ui.captions(page)[1:3] == ['Spotify Cache: 2 GB', 'Erase Spotify Data']
+    assert ui.rows(sub)[1:3] == [('Cache', '2 GB'), ('Erase Spotify Data', None)]
 
 
-def test_an_erase_s_end_with_the_page_gone_writes_nothing(fw, ui):
+def test_an_erase_s_end_with_the_pages_gone_writes_nothing(fw, ui):
     page, *_ = configuration(fw, ui)
+    ui.close(provider(fw, ui, page, 1))
     ui.close(page)
     writes = len(fw.calls('widget_set_text_utf8'))
     fw.fn('stream_erased', None)()
@@ -2037,17 +2060,19 @@ def test_stop_streaming_ends_streams_and_leaves_local_music(fw, ui, mcl, kind, s
     page, *_ = configuration(fw, ui)
     mcl.type = kind
     fw.mock('mclGetPlayStatus', lambda *_: status)
-    ui.click(page, 3)
+    ui.click(page, 0)
     assert ui.toasts == ['Streaming stopped'] and len(fw.calls('player_stop')) == stops
     assert fw.calls('fw_system')  # librespot's loop ended whatever played
 
 
 def test_a_service_row_hides_it(fw, ui):
     page, _, config, written = configuration(fw, ui, hide=b'TIDAL')
-    ui.click(page, 5 + 3)
-    assert written == [b'TIDAL,RADIO'] and switches(ui, page)[3] == ('Internet Radio', False)
     ui.click(page, 5)
-    assert written[-1] == b'RADIO' and switches(ui, page)[0] == ('TIDAL', True)
+    assert written == [b'TIDAL,RADIO'] and switches(ui, page, 5)[0] == ('Internet Radio', False)
+    sub = provider(fw, ui, page, 0)
+    ui.click(sub, 0)  # TIDAL's Show in Streaming: shown again, and its row on Configuration says so
+    assert written[-1] == b'RADIO' and switches(ui, sub)[0] == ('Show in Streaming', True)
+    assert ui.rows(page)[2] == ('TIDAL', 'Shown')
 
 
 # Stock's pages the payload rearranges: Streaming, the Library and About.
@@ -2195,11 +2220,12 @@ def test_a_service_hidden_on_configuration_goes_from_streaming_at_once(fw, ui):
     ui.handler(button, EVT_CLICK)()  # Configuration
     config = ui.top()
     assert ui.name[config] == 'streamconf_page'
-    ui.click(config, 5 + 3)  # Internet Radio's switch
+    ui.click(config, 5)  # Internet Radio's switch
     assert dict(page_rows(ui, view))['Internet Radio'] is False
-    ui.click(config, 5 + 3)
+    ui.click(config, 5)
     assert dict(page_rows(ui, view))['Internet Radio'] is True
-    ui.click(config, 5 + 0)  # stock's own TIDAL row too
+    ui.click(config, 2)  # stock's own TIDAL row too, from TIDAL's page
+    ui.click(ui.top(), 0)
     assert dict(page_rows(ui, view))['TIDAL'] is False
 
 

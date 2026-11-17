@@ -1619,7 +1619,7 @@ TICK_MS = 40  # a brisk spin's ticks
 
 def test_a_fast_spin_on_a_long_list_speeds_up(fw, keys):
     ui = Ui(fw)
-    sv = list_page(ui, rows=SHORT_LIST_MAX + 200)
+    sv = list_page(ui, name='allmusic_page', rows=SHORT_LIST_MAX + 200)  # Songs, A to Z: its letter is opt-in
     select(fw, sv, 0)
     seen = []
     for i in range(30):

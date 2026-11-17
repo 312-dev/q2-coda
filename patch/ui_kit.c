@@ -121,29 +121,41 @@ int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w) {
     *w = ui_cta_w(canvas, labels, n);
     return 375 / 2 - (n * *w + (n - 1) * CTA_GAP) / 2 + i * (*w + CTA_GAP);
 }
+/* One capsule at r: primary the accent, else the grey; ringed while ui_focus_shown when lit; down
+ * a step darker. */
+static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary, int lit,
+                        int down) {
+    int light = ipod_light();
+    unsigned fill = !primary ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
+                    : down   ? CTA_ACCENT_DOWN
+                             : (scheme()->tones[0] & 0xffffffu);
+    if (lit && ui_focus_shown()) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */
+        int o = CTA_RING_OFF + 2;
+        rect_t a = { r->x - o, r->y - o, r->w + 2 * o, r->h + 2 * o },
+               b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
+        unsigned ink = RGBA(tok(TOK_PRIMARY));
+        round_ring(canvas, &a, a.h / 2, ink);
+        round_ring(canvas, &b, b.h / 2, ink);
+    }
+    unsigned raw = ui_ink_raw(1); /* final in both halves */
+    fill_box(canvas, r, RGBA(fill), CTA_H / 2);
+    ui_ink_raw(raw);
+    ui_text(canvas, label, 1, CTA_PX, primary ? 0xffffff : tok(TOK_PRIMARY), 1, r->x + r->w / 2,
+            r->y + r->h / 2, r->w - 2 * CTA_INSET, 1);
+}
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed) {
-    int light = ipod_light(), ring = ui_focus_shown();
     for (int i = 0; i < n; ++i) {
         rect_t r = { 0, y, 0, CTA_H };
         r.x = ui_cta_x(canvas, labels, n, i, &r.w);
-        int lit = i == sel, down = lit && pressed;
-        unsigned fill = i ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
-                        : down ? CTA_ACCENT_DOWN
-                               : (scheme()->tones[0] & 0xffffffu);
-        if (lit && ring) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */
-            int o = CTA_RING_OFF + 2;
-            rect_t a = { r.x - o, r.y - o, r.w + 2 * o, r.h + 2 * o },
-                   b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
-            unsigned ink = RGBA(tok(TOK_PRIMARY));
-            round_ring(canvas, &a, a.h / 2, ink);
-            round_ring(canvas, &b, b.h / 2, ink);
-        }
-        unsigned raw = ui_ink_raw(1); /* final in both halves */
-        fill_box(canvas, &r, RGBA(fill), CTA_H / 2);
-        ui_ink_raw(raw);
-        ui_text(canvas, labels[i], 1, CTA_PX, i ? tok(TOK_PRIMARY) : 0xffffff, 1, r.x + r.w / 2,
-                r.y + r.h / 2, r.w - 2 * CTA_INSET, 1);
+        cta_capsule(canvas, &r, labels[i], !i, i == sel, i == sel && pressed);
     }
+}
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed) {
+    int w = ui_cta_w(canvas, &label, 1);
+    rect_t r = { cx - w / 2, cy - CTA_H / 2, w, CTA_H };
+    cta_capsule(canvas, &r, label, primary, focused, pressed);
+    return w;
 }
 
 /* Motion (ui_kit.h): the one Reduce Motion flag, the curves, a run's progress and the shared

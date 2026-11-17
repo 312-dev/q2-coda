@@ -1204,12 +1204,16 @@ for virtual in (False,True):
     assert m.call(gap=100)==11; m.advance(O['LETTER_MS']-1); m.paint(w,gap=0); assert m.letters
     m.advance(1); assert any(c[:2]==('widget_invalidate_force',w) for c in m.calls)
     m.paint(w,gap=0); assert not m.letters and canvas_state(m)==before; passed()
-# Nor on Library's category list, which Home's split shows beside the pane (localmusic_page's own is CTX_FIXED).
-m,w,rs,es=letter_machine(False); m.nodes[w]['name']='scroll_view_localmusic'
-for _ in range(4): m.call(gap=100)
-m.paint(w,gap=0); assert not m.letters
-m.nodes[w]['name']=''; m.paint(w,gap=0); assert m.letters; passed()  # the same spin elsewhere shows it
-# Nor over a page whose list is in an order of its own (own_order, where the wheel arms the letter): Up Next, Chapters,
+# Only a name-sorted list arms it (az_index.c name_sorted): not Library's category list beside Home's pane, Wi-Fi's
+# networks (by signal), Internet Radio (file order) or a settings list; the same spin on Songs shows it.
+for name,shown in (('home_page',False),('wifi_page',False),('radio_page',False),('sysset_page',False),
+                   ('allmusic_page',True)):
+    m=Machine(); w,es=m.page_list(40,extent=40*48,name=name)
+    for e in es: m.nodes[e]['text']='row'
+    m.paint(w,gap=0)
+    for _ in range(4): m.call(gap=100)
+    m.paint(w,gap=0); assert bool(m.letters)==shown,name; passed()
+# Nor over a page whose list is in an order of its own (name_sorted says no): Up Next, Chapters,
 # and Library's song list by the class it shows and Songs' Sort. That list in name order, and another page left with
 # the song list's class and Sort, keep the letter.
 # A playlist's Sort is its own flag (0 by name, 1 Time added), read in sort's place for 0xff13.
