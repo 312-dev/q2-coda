@@ -1763,7 +1763,6 @@ FUNCTIONS = {
  'hscroll_label_set_only_parent_focus': ('int', 'void *, int'),
  'hscroll_label_set_ellipses': ('int', 'void *, int'),
  'hscroll_label_set_xoffset': ('int', 'void *, int'),
- 'hscroll_label_set_loop_interval_distance': ('int', 'void *, int'),  # Now Playing's lines' copy (np_marquee.c)
  'hscroll_label_start': ('int', 'void *'),
  'hscroll_label_stop': ('int', 'void *'),
  'widget_add_timer': ('unsigned', 'void *, int (*)(const void *), unsigned'),

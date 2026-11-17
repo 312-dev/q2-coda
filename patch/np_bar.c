@@ -466,12 +466,12 @@ static void glyph_framed(void *win, void *canvas, const char *name, int x, int y
         rect_t sq = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p };
         fill_box(canvas, &sq, RGBA(blend(NP_PRESS_INK, 0, press)), NP_FRAME_R);
     }
-    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD */
+    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD; fill_box's canvas inks Light Mode */
         int p = NP_FOCUS_PAD + 2;
         rect_t ring = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p },
                in = { ring.x + 2, ring.y + 2, ring.w - 4, ring.h - 4 };
-        fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), NP_FRAME_R);
-        fill_box(canvas, &in, ui_ink(RGBA(0)), NP_FRAME_R - 2);
+        fill_box(canvas, &ring, RGBA(0xffffff), NP_FRAME_R);
+        fill_box(canvas, &in, RGBA(0), NP_FRAME_R - 2);
     }
     canvas_draw_icon(canvas, bitmap, x, y);
     if (dot) fill_box(canvas, &d, RGBA(accent_tone(TONE_LIGHT)), NP_DOT / 2);

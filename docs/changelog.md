@@ -2,6 +2,8 @@
 
 - **Unreleased (q2-coda)**:
   - Now Playing: after a scrub, turning the wheel moves the outline between Shuffle, Repeat and the heart instead of switching Shuffle or Repeat. Press Center (or tap) to change the outlined one; Center on the heart opens the rating picker.
+  - Now Playing (Light Mode): the outline around Shuffle or Repeat is a thin dark ring again, not a solid black square.
+  - Now Playing: a long title, artist or album no longer scrolls right off and leaves its line blank for over a second. It slides just far enough to show its end, pauses there, then goes back to the start.
   - Lists (OLED): the selected row's words no longer flicker while you drag the wheel part of the way to the next row; the leaning bar covered them on every other frame.
   - Car Remote: **Pair a Phone** says exactly what to do on the phone for the way it can find this Q2 Muse right now. With Bluetooth off (or while the Q2 Muse can't be found over Bluetooth) it gives the Wi-Fi steps: in Q2 Muse Remote, **Pair a Q2 Muse > Wi-Fi address**, type the address the page shows, then the code. With no Wi-Fi either, it says to join a Wi-Fi network first. The steps change as soon as Wi-Fi or Bluetooth comes on. Before, it gave Bluetooth's steps that could not work and named a "Tap Add a Q2 Muse" button the app doesn't have.
   - Car Remote: with Bluetooth off, the Car Remote log no longer gains two error lines every 30 seconds; it says once that Bluetooth isn't running and waits for it to come on.

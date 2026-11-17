@@ -1494,8 +1494,8 @@ interruptible: a turn mid-run starts from where it is.
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
-  same time), and land back at rest together, each followed by its own copy 40 px behind, so
-  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  same time) until each line's end meets its column's end, hold there 1.5 s, and go back to rest
+  together. A line slides only what overflows, so part of it always shows: none goes blank. The progress bar's fill moves a pixel at a time between the player's
   seconds rather than a second's width at once.
 
 ## Screens

@@ -2190,10 +2190,10 @@ def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, t
     assert (got, shown.value) == fit
 
 
-# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides its text and the gap
-# in the same time, a frame a pixel, and lands back at rest.
-NPM_GAP, NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0])
-                               for n in ('NPM_GAP', 'NPM_HOLD_MS', 'NPM_PX_S'))
+# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides what overflows in the
+# same time, a frame a pixel, holds at its end and goes back to rest; no line ever leaves its column empty.
+NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0]) for n in ('NPM_HOLD_MS', 'NPM_PX_S'))
+NPM_END = O['MARQUEE_HOLD_MS']
 
 
 class Marquee:
@@ -2206,7 +2206,8 @@ class Marquee:
         fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_XOFFSET']), 0, x))
         for w, tw in ((self.now.title, text_w), (self.now.album, album_w)):
             struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_TEXT_W']), 0, tw)
-        self.pass_ms = (text_w + NPM_GAP) * 1000 // NPM_PX_S if text_w > 160 else (album_w + NPM_GAP) * 1000 // NPM_PX_S
+        self.over = {self.now.title: max(text_w - 160, 0), self.now.album: max(album_w - 160, 0)}
+        self.pass_ms = max(self.over.values()) * 1000 // NPM_PX_S
 
     def off(self, w):
         return C.c_int.from_address(w + O['HSCROLL_XOFFSET']).value
@@ -2221,21 +2222,36 @@ class Marquee:
         self.ui.run(t)
 
 
-def test_the_lines_hold_then_slide_together_and_land_back_at_rest(fw, ui, mcl, st):
+def test_the_lines_hold_slide_what_overflows_hold_at_the_end_and_go_back_to_rest(fw, ui, mcl, st):
     m = Marquee(fw, ui, mcl, st)
     m.kick()
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.now.album) == 0  # at rest first
-    m.step(NPM_HOLD + m.pass_ms // 2)
     half = m.pass_ms // 2
-    assert m.off(m.now.title) == (300 + NPM_GAP) * half // m.pass_ms  # each its own span in the same time
-    assert m.off(m.now.album) == (200 + NPM_GAP) * half // m.pass_ms
+    m.step(NPM_HOLD + half)
+    assert m.off(m.now.title) == 140 * half // m.pass_ms  # each what overflows in the same time
+    assert m.off(m.now.album) == 40 * half // m.pass_ms
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] <= 1000 // NPM_PX_S + 1  # the longest line's next pixel
-    m.step(m.pass_ms - half)  # landed: at rest together, the next hold
+    m.step(m.pass_ms - half)  # each line's end at its column's end, held there
+    assert (m.off(m.now.title), m.off(m.now.album)) == (140, 40)
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_END
+    m.step(NPM_END)  # back at rest together, the next hold
     assert m.off(m.now.title) == m.off(m.now.album) == 0
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_HOLD
+
+
+def test_no_line_ever_scrolls_past_its_end(fw, ui, mcl, st):
+    # a line slid further than it overflows leaves its column empty (V1.36's hscroll_label draws no copy behind it):
+    # on a Q2 the title was blank for over a second each pass
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    for _ in range(400):
+        (t,) = ui.due('npm_tick')
+        m.step(ui.timers[t][2])
+        assert all(0 <= m.off(w) <= over for w, over in m.over.items()), [m.off(w) for w in m.over]
 
 
 def test_every_frame_moves_the_longest_line_one_pixel(fw, ui, mcl, st):
