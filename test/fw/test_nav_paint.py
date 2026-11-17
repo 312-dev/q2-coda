@@ -2111,7 +2111,7 @@ def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(
 
 
 SCREEN = 375 * 320
-BEHIND, INK = 0xff1c1c1e, 0xffffffff
+CC_BEHIND, CC_INK = 0xff1c1c1e, 0xffffffff
 
 
 def inter_pens(text, px=16):
@@ -2136,7 +2136,7 @@ def cc_label_fb(fw, world, focus=0, xoffset=0):
     struct.pack_into('<i', world[names[4]].block, O['HSCROLL_XOFFSET'], xoffset)
     world[win].props.update(_cc_focus=focus, _cc_seen=1)
     canvas = Canvas(fw)
-    fb = (C.c_uint * SCREEN)(*([BEHIND] * SCREEN))
+    fb = (C.c_uint * SCREEN)(*([CC_BEHIND] * SCREEN))
     struct.pack_into('<Q', canvas.lcd, O['LCD_OFFLINE_FB'], C.addressof(fb))
     for k, v in (('LCD_W', 375), ('LCD_H', 320), ('LCD_LINE_LENGTH', 4 * 375), ('LCD_FORMAT', O['LCD_BGRA8888'])):
         struct.pack_into('<i', canvas.lcd, O[k], v)
@@ -2149,7 +2149,7 @@ def cc_label_fb(fw, world, focus=0, xoffset=0):
         cx, cy, cw, ch = canvas.clip
         for yy in range(max(y + h // 2 - 4, cy), min(y + h // 2 + 4, cy + ch)):
             for xx in range(max(x, cx), min(x + 6, cx + cw)):
-                fb[yy * 375 + xx] = INK
+                fb[yy * 375 + xx] = CC_INK
         return 0
     fw.mock('canvas_draw_text_in_rect', ink)
     paint_bg(fw, win, canvas)
@@ -2179,19 +2179,19 @@ def test_a_name_wider_than_its_column_fades_out_at_its_edge_inside_its_box(fw, w
     px = lambda x, y: fb[y * 375 + x]  # noqa: E731
     assert struct.unpack_from('<i', name.block, O['HSCROLL_TEXT_W'])[0] == round(inter_pens('Smart Wi-Fi')[1])
     rows = range(255, 300)
-    assert all(px(x, y) == BEHIND for y in rows for x in (*range(14, 24), *range(92, 100)))
-    assert all(px(91, y) == BEHIND for y in rows)  # the end column: the text weighs 0 there
-    assert INK in [px(x, 275) for x in range(24, 30)]  # the start whole
-    ramp = {px(x, 275) for x in range(80, 91)} - {BEHIND, INK}
-    assert ramp and not [y for y in (*range(255, 267), *range(283, 300)) for x in range(24, 92) if px(x, y) != BEHIND]
+    assert all(px(x, y) == CC_BEHIND for y in rows for x in (*range(14, 24), *range(92, 100)))
+    assert all(px(91, y) == CC_BEHIND for y in rows)  # the end column: the text weighs 0 there
+    assert CC_INK in [px(x, 275) for x in range(24, 30)]  # the start whole
+    ramp = {px(x, 275) for x in range(80, 91)} - {CC_BEHIND, CC_INK}
+    assert ramp and not [y for y in (*range(255, 267), *range(283, 300)) for x in range(24, 92) if px(x, y) != CC_BEHIND]
 
 
 def test_a_scrolled_name_fades_at_both_ends(fw, world):
     """Scrolled off its start (the marquee, cc_marq) the left end fades too; at the end of its range only the left."""
     _, fb, _ = cc_label_fb(fw, world, focus=4, xoffset=3)
-    assert all(fb[y * 375 + 24] == BEHIND for y in range(267, 283)) and all(fb[y * 375 + 91] == BEHIND for y in range(267, 283))
+    assert all(fb[y * 375 + 24] == CC_BEHIND for y in range(267, 283)) and all(fb[y * 375 + 91] == CC_BEHIND for y in range(267, 283))
     _, fb, _ = cc_label_fb(fw, world, focus=4, xoffset=7)  # 75 - 68: its end in view
-    assert all(fb[y * 375 + 24] == BEHIND for y in range(267, 283)) and INK in [fb[275 * 375 + x] for x in range(84, 92)]
+    assert all(fb[y * 375 + 24] == CC_BEHIND for y in range(267, 283)) and CC_INK in [fb[275 * 375 + x] for x in range(84, 92)]
 
 
 def landed(fw, world, t, **keys):
