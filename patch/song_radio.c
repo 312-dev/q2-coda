@@ -22,8 +22,9 @@
 #define SR_RECENT 128    /* songs a local radio leaves out: the last played or queued */
 #define SR_SEEK_MS                                                                                 \
     30000 /* the radio's queue playing the seed this soon after the tap takes its place */
-#define SR_RETRY_MS 60000 /* a local radio that found nothing to add looks again this much later   \
-                           */
+#define SR_RETRY_MS                                                                                \
+    60000 /* a local radio that found nothing to add looks again this much later                   \
+           */
 
 static struct {
     int local;                  /* a local radio plays: its queue is the one loads names */
@@ -31,11 +32,12 @@ static struct {
     int shuf, rep;              /* Now Playing's modes before it, put back after */
     unsigned retry_at;          /* no look for more before (0: any time) */
     char artist[96], genre[64]; /* its seed's, folded to lower case */
-    int recent[SR_RECENT];      /* songs played or queued lately, by REC_ID, a ring */
+    unsigned recent[SR_RECENT]; /* songs played or queued lately, by key, a ring */
     unsigned nrecent, last_id;  /* how many went in; the playing song as last noted */
     unsigned ask, ask_at;       /* an app's request waiting for its answer (its seq), and when */
     char path[512];             /* that request's seed, for the local radio when the app declines */
-    int id, sec;         /* the seed's REC_ID, and its place at the tap (-1: from its start) */
+    unsigned id;                /* the seed's key */
+    int sec;                    /* its place at the tap (-1: from its start) */
     unsigned seek_at;    /* the seed sought once the radio's queue plays it, until SR_SEEK_MS */
     unsigned seek_loads; /* playback_loads at the tap: the radio's queue is a later one */
 } sr __attribute__((section(".scratch")));
@@ -54,10 +56,17 @@ static int same(const char *folded, const char *s) {
     return folded[0] && !strcmp(folded, t);
 }
 
-static void heard(int id) {
+/* A song's key: its path's FNV-1a. Not REC_ID: a queue's records and the library's (staged) number
+ * one song differently. 0 for none. */
+static unsigned key(void *r) {
+    const char *p = r ? P(r, REC_PATH) : 0;
+    return p && *p ? hash_bytes(FNV_SEED, (const unsigned char *)p, strlen(p)) | 1 : 0;
+}
+
+static void heard(unsigned id) {
     if (id > 0) sr.recent[sr.nrecent++ % SR_RECENT] = id;
 }
-static int recent(int id) {
+static int recent(unsigned id) {
     unsigned n = sr.nrecent < SR_RECENT ? sr.nrecent : SR_RECENT;
     for (unsigned i = 0; i < n; ++i)
         if (sr.recent[i] == id) return 1;
@@ -81,7 +90,7 @@ static unsigned picks(void *all, void *out, unsigned want) {
         unsigned n = 0;
         for (unsigned i = 0; i < m; ++i) {
             void *r = deque_at(all, i);
-            int id = I(r, REC_ID);
+            unsigned id = key(r);
             const char *path = P(r, REC_PATH);
             if (id == sr.id || recent(id) || !path || catalogue_path(path) || playback_video(r))
                 continue;
@@ -95,7 +104,7 @@ static unsigned picks(void *all, void *out, unsigned want) {
         }
         for (unsigned i = 0; i < n && got < want; ++i, ++got) {
             void *r = deque_at(all, ix[i]);
-            heard(I(r, REC_ID));
+            heard(key(r));
             _deque_push_back(out, r);
         }
     }
@@ -113,7 +122,7 @@ static void local_end(void) {
  * sec
  * (-1: from its start). 1 when it plays. */
 static int local_start(void *r, int sec) {
-    sr.id = I(r, REC_ID);
+    sr.id = key(r);
     fold(sr.artist, sizeof sr.artist, P(r, REC_ARTIST));
     fold(sr.genre, sizeof sr.genre, P(r, REC_STYLE));
     heard(sr.id);
@@ -152,7 +161,7 @@ static int start(void *r, int sec) {
     if (addon_radio_start(path, seq)) {
         sr.ask = seq, sr.ask_at = time_now_ms();
         tk_snprintf(sr.path, sizeof sr.path, "%s", path);
-        sr.id = I(r, REC_ID), sr.sec = sec;
+        sr.id = key(r), sr.sec = sec;
         sr.seek_loads = playback_loads, sr.seek_at = 0;
         return 1;
     }
@@ -236,11 +245,10 @@ void song_radio_poll(void) {
     if (sr.seek_at && (now - sr.seek_at >= SR_SEEK_MS || !r)) sr.seek_at = 0;
     if (sr.seek_at && playback_loads != sr.seek_loads && media_playing()) {
         const char *p = P(r, REC_PATH);
-        if (p && (!strcmp(p, sr.path) || I(r, REC_ID) == sr.id)) player_seek_time(sr.sec);
+        if (p && key(r) == sr.id) player_seek_time(sr.sec);
         sr.seek_at = 0; /* the radio's first song is the seed, or the seed is past */
     }
-    if (r && (unsigned)I(r, REC_ID) != sr.last_id)
-        sr.last_id = (unsigned)I(r, REC_ID), heard(I(r, REC_ID));
+    if (r && key(r) != sr.last_id) sr.last_id = key(r), heard(key(r));
     if (!sr.local) return;
     if (playback_loads != sr.loads) { /* another queue: the radio's is gone */
         local_end();

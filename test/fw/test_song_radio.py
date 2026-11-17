@@ -111,3 +111,15 @@ def test_a_radio_adds_songs_as_they_run_out_and_none_twice(fw, ui, mcl, recs):
     ids = q2.ids(ui.deques[played.value])
     assert len(ids) == 46 and len(set(ids)) == len(ids)  # the other 20 like it (not Cy's Jazz); none twice
     assert q2.on() == 1  # an insert is not another queue
+
+
+def test_the_seed_is_never_queued_again_whatever_its_record_id(fw, ui, mcl, recs):
+    """A queue's record and the library's (staged) can number one song differently: the emulator's Songs list played
+    Song 1, and its radio queued Song 1 again after Song 2 (2026-11-16). Songs are told apart by path."""
+    q2 = Radio(fw, ui, recs)
+    seed = recs(id_=999, path='/mnt/mmc/m/10.flac', name='10.flac', title='Song 10', artist='Ann', genre='Rock')
+    q2.fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = ui.deques.new([seed])
+    q2.tap(None)
+    (queue, _, _), = ui.played
+    paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0) for r in queue]
+    assert paths.count(b'/mnt/mmc/m/10.flac') == 1 and len(queue) == 6
