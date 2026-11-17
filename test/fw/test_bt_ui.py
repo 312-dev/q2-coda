@@ -434,6 +434,29 @@ def test_quality_s_choices_show_their_bit_rates(fw):
     assert rates == ['990 kbps', '660 kbps', None, '576 kbps', '384 kbps', None, None, None]
 
 
+def test_quality_s_auto_caption_is_one_entry_however_often_the_picker_lays_out(fw):
+    """Each layout of the picker (each step of the caption's own growth lays the list out again) must not add Auto's
+    row to the caption table again: settings_pages.c cap_step sets each entry's row height, and a later, unmeasured
+    copy of the row would hold it at its title's height, the caption never drawn."""
+    ui = Ui(fw)
+    Config(fw)
+    win = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[win] = 'btquality_page'
+    lv = ui.new('list_view_create', win, 0, 26, 375, 294)
+    view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto']):
+        item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
+        b = ui.new('button_create', item, 0, 0, 375, 32)
+        ui.name[b] = str(i)
+        ui.text[ui.new('hscroll_label_create', b, 22, 0, 266, 32)] = n
+    for _ in range(3):
+        fw.fn('bt_rows_post', None, C.c_void_p)(view)
+    table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
+    auto = ui.kids[view][2]
+    assert table[0] == view and [table[1 + k] for k in range(8)].count(auto) == 1
+    assert C.wstring_at(table[9]) == 'Steps with the signal, 330 to 990 kbps'
+
+
 def test_a_device_the_list_has_not_read_is_named_by_blue_z(fw):
     """Away from the Bluetooth page stock's list may be empty: the battery loop's Alias names it, and its drop."""
     p = Links(fw, devices=())
