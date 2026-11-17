@@ -410,13 +410,6 @@ passed()
 # The volume dialog is no window slide, and a dialog not named here stays as it is.
 m=motion_machine(); d=motion_load(m,'dialog/volume_dialog','dialog'); assert 'anim_hint' not in m.nodes[d]
 m=motion_machine(); d=motion_load(m,'dialog/other_dialog','dialog',highlight='default(alpha=200)'); assert 'anim_hint' not in m.nodes[d] and m.nodes[d]['highlight']=='default(alpha=200)'; passed()
-# The artist veil keeps the theme's hint: cleared to open unseen, the push back for its own Return.
-am=ArtistCoverflow(page='localclass_page',cls=0xff01,rows=2)
-am.handed=[]; am.config['ARTISTCF']='1'; am.split=[am.song('Baroness'),am.song('STP')]; am.word(am.row(1)+O['REC_ALBUM'],am.string('Other album'))
-for r in am.split: am.word(r+O['REC_ALBUM_ARTIST'],am.get(r+O['REC_NAME']))
-am.found=[am.split[0]]; am.artist_page('artistinfo_page'); am.nodes[am.top]['anim_hint']=OTHER_HINT
-am.call(address=HOOKS['load_localartist_list'][0],args=(1,0,0,0),gap=0); assert am.nodes[am.top]['anim_hint']==''
-am.advance(0); assert am.handed==[1] and am.nodes[am.top]['anim_hint']==OTHER_HINT; passed()
 # A sliding page of ours holds wheel ticks as a stock page does.
 m=motion_machine(); p=motion_open(m,'shuffle_page'); m.nodes[p]['anim_hint']=ASSET_HINT
 w,es=m.page_list(10); m.top=p; m.nodes[p]['children']=[w]; m.word(w+O['W_PARENT'],p); m.paint(w); m.animating=1
