@@ -37,7 +37,11 @@
 #define CR_DOT 7        /* the Positive dot before "Connected" */
 #define CR_DOT_GAP 5
 #define CR_VALUE_PX TYPE(20)
-#define CR_CTA_OUT 8 /* the capsule's row reaches this far past it, for its focus ring (ui_kit.h CTA_RING_OFF) */
+/* The capsule's row reaches this far past it, its focus ring's 2 px CTA_RING_OFF out (ui_kit.c cta_capsule) and no
+ * further: under the switch the row's foot then stays above the set's list end (y 282 on OLED), so the wheel moving
+ * on to it scrolls nothing. A foot past the list end, by a pixel even, has the list scroll the capsule to its top
+ * (nav/lists.c reveal, then fit_top's whole rows), the switch gone. */
+#define CR_CTA_OUT (CTA_RING_OFF + 2)
 #define CR_STEP_PX TYPE(15)
 #define CR_ROW_KIND "_cr_kind"
 #define CR_VALUE "_cr_value"
