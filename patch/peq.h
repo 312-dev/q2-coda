@@ -467,6 +467,7 @@ int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 /* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
 int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
 int addon_radio_answer(unsigned seq);
+const char *addon_radio_missing(const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
