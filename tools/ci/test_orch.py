@@ -644,6 +644,7 @@ def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
            'Q2_HEAVY_RESERVE_GB': '0', 'Q2_HEAVY_PSI': str(tmp_path/'no-pressure'), 'Q2_HEAVY_DISK_START_GB': '0',
            'Q2_HEAVY_DISK_STOP_GB': '0', 'Q2_HEAVY_AC': str(tmp_path/'no-ac')}
     env.pop('Q2_HEAVY_JOB', None)
+    env.pop('Q2_HEAVY_CLASS', None)  # the queue runs these tests too, with its own class in the environment
     job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_MAX_S': '2'}, cwd=CI,
                            stderr=subprocess.PIPE, text=True)
     record = tmp_path/'q2-heavy/jobs'/str(job.pid)
