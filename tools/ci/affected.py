@@ -3,7 +3,7 @@
 
     python3 tools/ci/affected.py                      # changes against release/p31's merge base, as a plan
     python3 tools/ci/affected.py --base main --json   # the same plan as JSON
-    python3 tools/ci/affected.py --run BUILD          # and run it (patch.py through tools/ci/patch_shards.py)
+    python3 tools/ci/affected.py --run BUILD          # and run it (all of test/patch.py serially)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
 
 A feature branch runs what its files map to; an integration branch (release/*, main) runs everything, as
@@ -252,8 +252,10 @@ def run(plan, build, python):
     if d['fw']:
         go('fw', [python, str(ROOT/'tools/ci/fw.py'), *([] if d['fw'] == ALL else [f'test/fw/{f}' for f in d['fw']])])
     if d['patch'] and build:
-        go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build,
-                     *([] if d['patch'] == ALL else ['--lines', ','.join(d['patch'])])])
+        if d['patch'] == ALL:  # one process: a shard set replays most of the suite in every shard
+            go('patch', [python, 'test/patch.py', build], is_heavy=True)
+        else:
+            go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
         if other == 'tools/ci/test_ci.py':
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])

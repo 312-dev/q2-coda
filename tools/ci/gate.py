@@ -14,7 +14,7 @@ checkout's venv, ~/repos/q2-pod/.venv, has them all). The whole gate's suites:
     mypy-fw        mypy test/fw
     fw             tools/ci/fw.py: test/fw on xdist workers
     fw-asan        tools/ci/fw.py --asan
-    patch          tools/ci/patch_shards.py BUILD: test/patch.py in shards
+    patch          test/patch.py BUILD: the suite in one process, as it is written
     test/build.py  test/build.py --build BUILD
     test/peq.py    test/peq.py
 
@@ -22,8 +22,10 @@ The build (tools/ci/rebuild.py: this worktree's reused build) starts at once, be
 none; the rest start when it is done. The longest suites start first. A suite starts only when
 MemAvailable, less what suites started in the last RAMP seconds will still take, stays at least FLOOR GB
 after its own estimate (MEM_GB); else it waits for one to finish. When nothing is running it starts anyway
-and q2-heavy's own checks hold it. patch_shards.py's shard count comes from the memory left when it starts.
-Heavy suites run under q2-heavy (fw.py and patch_shards.py wrap their own processes). Each suite writes
+and q2-heavy's own checks hold it. Heavy suites run under q2-heavy (fw.py wraps its own processes).
+test/patch.py runs serially: its tests share one script's state, and a serial run (4:39 on one core,
+1.2 GB) beat eight shards (10:26, 5.2 GB) on an idle machine on 2026-11-16. A plan that names lines of it
+runs those through patch_shards.py --lines. Each suite writes
 its own log; the table gives each one's exit status and time. Exit status: 0 when all passed, else 1.
 
 A plan (affected.py --json) that runs unit, fw and patch whole is the whole gate; any other plan runs what
@@ -48,10 +50,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
-SHARD_GB = 1.5  # patch_shards.py's SHARD_RSS
 # A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16: the
 # order they start in and what each needs free.
-MEM_GB = {'build': 2.0, 'unit': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 6.0,
+MEM_GB = {'build': 2.0, 'unit': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 6.0, 'patch': 1.5,
           'test/build.py': 1.0, 'test/peq.py': 1.0}
 SECONDS = {'fw-asan': 720, 'unit': 330, 'patch': 270, 'fw': 100, 'test/build.py': 60, 'test/peq.py': 60,
            'mypy-tools': 40, 'mypy-fw': 30}
@@ -70,10 +71,8 @@ class Suite:
         self.rc: Any = None
         self.seconds = 0.0
 
-    def command(self, build, jobs=None):
+    def command(self, build):
         argv = [build if a == '{build}' else a for a in self.argv]
-        if self.name == 'patch' and jobs:
-            argv += ['-j', str(jobs)]
         return ([str(HEAVY)] if self.heavy and HEAVY.exists() else []) + argv
 
 
@@ -91,7 +90,7 @@ def full_suite(name, py, logs):
         'mypy-fw': lambda: Suite('mypy-fw', [py, '-m', 'mypy', 'test/fw']),
         'fw': lambda: Suite('fw', [py, str(ROOT/'tools/ci/fw.py')]),
         'fw-asan': lambda: Suite('fw-asan', [py, str(ROOT/'tools/ci/fw.py'), '--asan']),
-        'patch': lambda: Suite('patch', [py, str(ROOT/'tools/ci/patch_shards.py'), '{build}'], needs_build=True),
+        'patch': lambda: Suite('patch', [py, 'test/patch.py', '{build}'], needs_build=True, heavy=True),
         'test/build.py': lambda: Suite('test/build.py', [py, 'test/build.py', '--build', '{build}'], needs_build=True,
                                        heavy=True),
         'test/peq.py': lambda: Suite('test/peq.py', [py, 'test/peq.py'], heavy=True),
@@ -120,9 +119,11 @@ def suites_for(plan, only, py, logs):
             files = [] if plan['fw'] == 'all' else [f'test/fw/{f}' for f in plan['fw']]
             out['fw'] = Suite('fw', [py, str(ROOT/'tools/ci/fw.py'), *files])
         if plan['patch']:
-            lines = [] if plan['patch'] == 'all' else ['--lines', ','.join(plan['patch'])]
-            out['patch'] = Suite('patch', [py, str(ROOT/'tools/ci/patch_shards.py'), '{build}', *lines],
-                                 needs_build=True)
+            if plan['patch'] == 'all':
+                out['patch'] = full_suite('patch', py, logs)()
+            else:  # some tests of it: patch_shards.py replays what those lines need
+                out['patch'] = Suite('patch', [py, str(ROOT/'tools/ci/patch_shards.py'), '{build}', '--lines',
+                                               ','.join(plan['patch'])], needs_build=True)
         for o in plan['other']:
             out[o] = full_suite(o, py, logs)() if o in FULL else other_suite(o, py)
     if only:
@@ -153,16 +154,16 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
         builder = Suite('build', [py, str(ROOT/'tools/ci/rebuild.py'), *build_args], heavy=True)
         pending.insert(0, builder)
 
-    def launch(s, jobs=None):
+    def launch(s):
         s.log = logs/f'{s.name.replace("/", "_")}.log'
         s.start = clock()
-        cmd = s.command(build or '', jobs)
+        cmd = s.command(build or '')
         log_file = open(s.log, 'w')
         s.proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **s.env},
                                   stdout=subprocess.PIPE if s is builder else log_file,  # the build's path
                                   stderr=log_file if s is builder else subprocess.STDOUT, text=True,
                                   start_new_session=True)  # its own group, which the finally below ends whole
-        log(f'start {s.name}{f" ({jobs} shards)" if jobs else ""}: {shlex.join(cmd)}')
+        log(f'start {s.name}: {shlex.join(cmd)}')
         running.append(s)
 
     try:
@@ -193,13 +194,9 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                 if s.needs_build and not build:
                     continue
                 free = mem() - young
-                jobs = None
-                if s.name == 'patch':
-                    jobs = max(1, min(8, int((free - FLOOR) // SHARD_GB)))  # patch_shards.py's own cap
-                    s.mem = jobs * SHARD_GB
                 if free - s.mem >= FLOOR or not running:
                     pending.remove(s)
-                    launch(s, jobs)
+                    launch(s)
                     young += s.mem
             if pending or running:
                 time.sleep(poll)
