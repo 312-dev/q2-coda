@@ -153,6 +153,11 @@ void anim_start(anim_t *a, int ms, int ease, int kind);
 int anim_at(const anim_t *a);
 int anim_running(const anim_t *a);
 void motion_frames(unsigned ms); /* the shared timer repaints for ms more at least */
+/* A painter outside the top window (the status row, on the system bar) has fn called on each of
+ * the shared timer's frames, to repaint its own box while its run moves, and once more after the
+ * last run ends; at most MO_HOOKS, each added once. */
+#define MO_HOOKS 2
+void motion_hook(void (*fn)(void));
 /* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
  * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
  * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn

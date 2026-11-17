@@ -55,6 +55,10 @@ static struct {
     int x[SLOT_N], w[SLOT_N]; /* the last layout, in the bar's pixels */
     int frame, spin;          /* the bars' frame and the arrows' */
     unsigned timer, sig, nav;
+    anim_t xfade;             /* the play state's dissolve from p_from to p_to */
+    short p_from, p_to;       /* 0 the bars, 1000 the pause */
+    unsigned char seen;       /* the play slot shown at the last sync */
+    unsigned char xf_dirty;   /* the dissolve's box still to repaint */
     int down, down_x, down_y; /* the slot a touch went down on, + 1 */
 } sr __attribute__((section(".scratch")));
 
@@ -155,16 +159,17 @@ static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 
 /* The play state, in Text Primary as every glyph: playing, the level bars (Up Next's, upnext.c
  * un_level), 2 px wide with round ends, moving a frame a tick and standing on the digits' baseline;
- * paused, the pause, two SR_PAUSE_W bars SR_INK tall in the bars' own box. */
+ * paused, the pause, two SR_PAUSE_W bars SR_INK tall in the bars' own box. Between the two the
+ * stopped bars and the pause cross-dissolve (play_paint, play_xfade_sync). */
 static const unsigned char bar_h[SR_FRAMES][3] = { { 7, 10, 3 }, { 9, 8, 3 },  { 11, 5, 5 },
                                                    { 11, 3, 7 }, { 9, 3, 10 }, { 7, 4, 11 },
                                                    { 5, 6, 11 }, { 3, 9, 9 },  { 3, 11, 7 },
                                                    { 5, 11, 4 } };
-/* The play state's bars at x on cy, each its left, top, width, height and corner radius: three
- * level bars playing, the pause's two otherwise; returns how many. */
-static int play_bars(int x, int cy, float (*bar)[5]) {
+/* The play state's bars at x on cy, each its left, top, width, height and corner radius: the
+ * pause's two when pause, else three level bars at the current frame; returns how many. */
+static int play_bars(int x, int cy, int pause, float (*bar)[5]) {
     float base = (float)(cy + SR_BAR_DROP);
-    if (bar_status() != 2) {
+    if (pause) {
         for (int i = 0; i < 2; ++i) {
             float *b = bar[i];
             b[0] = (float)x + SR_PAUSE_AT + (float)i * SR_PAUSE_PITCH, b[1] = base - SR_INK;
@@ -179,18 +184,30 @@ static int play_bars(int x, int cy, float (*bar)[5]) {
     }
     return 3;
 }
+#define SR_XFADE_MS 250 /* bars <-> pause, a cross-dissolve on the house ease-out (home_np.c's) */
+
+/* The glyph now: 0 the bars .. 1000 the pause, eased */
+static int play_p(void) { return sr.p_from + (sr.p_to - sr.p_from) * anim_at(&sr.xfade) / 1000; }
+/* The bars at 1000 - p's opacity under the pause at p's (one of them alone at either end): the
+ * bars stand at their frame while they dissolve, and both glyphs keep to the SR_BARS_W box. */
 static void play_paint(void *bar, void *canvas, int x, int cy) {
     (void)bar;
     void *vg = canvas_get_vgcanvas(canvas);
     if (!vg) return;
-    float bars[3][5];
-    int n = play_bars(x, cy, bars);
+    int p = play_p();
+    unsigned ink = RGBA(ipod_light() ? 0 : 0xffffff);
     vgcanvas_save(vg);
     vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
-    vgcanvas_set_fill_color(vg, RGBA(ipod_light() ? 0 : 0xffffff));
-    for (int i = 0; i < n; ++i) {
-        round_path(vg, bars[i][0], bars[i][1], bars[i][2], bars[i][3], bars[i][4]);
-        vgcanvas_fill(vg);
+    for (int pause = 0; pause < 2; ++pause) {
+        int a = pause ? p : 1000 - p;
+        if (a <= 0) continue;
+        float bars[3][5];
+        int n = play_bars(x, cy, pause, bars);
+        vgcanvas_set_fill_color(vg, (ink & 0xffffffu) | (unsigned)(255 * a / 1000) << 24);
+        for (int i = 0; i < n; ++i) {
+            round_path(vg, bars[i][0], bars[i][1], bars[i][2], bars[i][3], bars[i][4]);
+            vgcanvas_fill(vg);
+        }
     }
     vgcanvas_restore(vg);
 }
@@ -415,7 +432,7 @@ static int sr_tick(const void *info) {
     }
     int playing = bar_status() == 2, checking = addon_sync((int *)0) == 1;
     layout();
-    if (playing && sr.w[SLOT_PLAY]) {
+    if (playing && sr.w[SLOT_PLAY] && !anim_running(&sr.xfade)) { /* still while they dissolve */
         sr.frame = (sr.frame + 1) % SR_FRAMES;
         rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
         widget_invalidate_force(bar, &r);
@@ -428,13 +445,43 @@ static int sr_tick(const void *info) {
     return 8; /* RET_REPEAT */
 }
 
-/* bar_state_sync, each bar paint and each second: the frames' timer started while lit and
- * something moves; 1 when what the slots show changed (which slots, the play state, Wi-Fi's level
- * or its internet, the sync's kind and its ring to the 50th, the Bluetooth slot's kind and the
- * headset's level, the lock), so the bar repaints whole after the frame and the clock moves beside
- * the new leftmost slot. */
+/* The shared frame timer's (ui_kit.c motion_hook), while the play state dissolves: its box
+ * repainted, as sr_tick's, and once more after the dissolve's end. */
+static void sr_xfade_frame(void) {
+    if (!sr.xf_dirty) return;
+    if (!anim_running(&sr.xfade)) sr.xf_dirty = 0; /* this repaint shows the end */
+    void *bar = *(void *const *)system_bar;
+    if (!bar || !g_backlight_status || !geom_val(V_STATUS_Y) || layout() < 0 || !sr.w[SLOT_PLAY])
+        return;
+    rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
+    widget_invalidate_force(bar, &r);
+}
+
+/* The play state's glyph to the bars playing or the pause paused: a dissolve over SR_XFADE_MS from
+ * where it stands when the slot showed at the last sync too (MO_SPATIAL: a cut under Reduce
+ * Motion), else at once, so a page opened on a paused song shows the pause. */
+static void play_xfade_sync(void) {
+    int shown = !!play_shown(), to = bar_status() == 2 ? 0 : 1000;
+    if (shown && to != sr.p_to) {
+        if (sr.seen) {
+            sr.p_from = (short)play_p(), sr.p_to = (short)to;
+            anim_start(&sr.xfade, SR_XFADE_MS, EASE_CUBIC_OUT, MO_SPATIAL);
+            if (sr.xfade.ms) sr.xf_dirty = 1, motion_hook(sr_xfade_frame);
+        } else {
+            sr.p_from = sr.p_to = (short)to, sr.xfade.at = 0;
+        }
+    }
+    sr.seen = (unsigned char)shown;
+}
+
+/* bar_state_sync, each bar paint and each second: the play state's dissolve started on a change,
+ * the frames' timer started while lit and something moves; 1 when what the slots show changed
+ * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
+ * 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar repaints whole
+ * after the frame and the clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
     if (!geom_val(V_STATUS_Y)) return 0;
+    play_xfade_sync();
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
     int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(),
