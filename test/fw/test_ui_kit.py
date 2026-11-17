@@ -315,3 +315,101 @@ def test_an_overlay_rises_and_fades_in_then_leaves_from_where_it_is(fw, on):
     assert level(p) == 438
     now[0] += o.a.ms
     assert level(p) == 0 and not shown(p)
+
+
+# The level bars' one motion (ui_kit.h lvl_*): Up Next's header, Home's first row and the status row draw it.
+LVL_KEYS = [(500, 875, 0), (750, 625, 0), (1000, 250, 250), (1000, 0, 500), (750, 0, 875), (500, 125, 1000),
+            (250, 375, 1000), (0, 750, 750), (0, 1000, 500), (250, 1000, 125)]  # the status row's approved ten frames
+LVL_STEP, LVL_LOOP, LOOP_MS = 125, 1250, 33
+
+
+class LvlClock(C.Structure):
+    _fields_ = [('base', C.c_uint), ('at', C.c_uint), ('run', C.c_ubyte)]
+
+
+def lvl_h16(fw, i, t, lo=3, hi=11):
+    return fw.fn('lvl_h16', C.c_int, C.c_int, C.c_uint, C.c_int, C.c_int)(i, t, lo, hi)
+
+
+@pytest.mark.parametrize('lo, hi', [(3, 11), (5, 12)])
+def test_the_bars_pass_through_their_keyframes_on_a_125_ms_step(fw, lo, hi):
+    """Each bar meets its column of the approved frames every LVL_STEP_MS, scaled to the user's lo..hi, and the loop
+    repeats every 1.25 s."""
+    for k, keys in enumerate(LVL_KEYS):
+        for i in range(3):
+            assert lvl_h16(fw, i, k * LVL_STEP, lo, hi) == lo * 16 + (hi - lo) * 16 * keys[i] // 1000
+            assert lvl_h16(fw, i, k * LVL_STEP + 7, lo, hi) == lvl_h16(fw, i, LVL_LOOP + k * LVL_STEP + 7, lo, hi)
+
+
+def test_between_keyframes_the_bars_move_in_small_continuous_steps_never_holding_or_jumping(fw):
+    """The user's (08:35): the bars stepped through a few heights at 8 a second and read as jumpy. Sampled at the
+    loop timer's 33 ms, each bar takes a different height nearly every frame, never moves more than a pixel and a half
+    a frame, and stays in lo..hi; stepping between the 125 ms keyframes alone, each jumped 2 px or more at once."""
+    for i in range(3):
+        hs = [lvl_h16(fw, i, t) for t in range(0, LVL_LOOP + 1, LOOP_MS)]
+        assert all(3 * 16 <= h <= 11 * 16 for h in hs)
+        steps = [abs(b - a) for a, b in zip(hs, hs[1:])]
+        assert max(steps) <= 24  # sixteenths: 1.5 px a frame at most
+        assert len(set(hs)) >= 25  # of 38 frames: no few discrete heights
+        keys = [lvl_h16(fw, i, t) for t in range(0, LVL_LOOP + 1, LVL_STEP)]
+        assert max(abs(b - a) for a, b in zip(keys, keys[1:])) >= 32  # the old steps: 2 px or more at once
+
+
+def test_the_clock_holds_when_stopped_and_goes_on_from_there(fw):
+    now, _ = clock(fw)
+    c = LvlClock()
+    run = fw.fn('lvl_run', None, C.c_void_p, C.c_int)
+    t = lambda: fw.fn('lvl_time', C.c_uint, C.c_void_p)(C.addressof(c))
+    assert t() == 0  # zero: stopped at the loop's start
+    run(C.addressof(c), 1)
+    now[0] += 400
+    assert t() == 400
+    run(C.addressof(c), 0)  # a pause, or Reduce Motion
+    now[0] += 3000
+    assert t() == 400
+    run(C.addressof(c), 0)  # stopping twice keeps the time
+    run(C.addressof(c), 1)
+    assert t() == 400  # no jump on resuming
+    now[0] += 33
+    assert t() == 433
+
+
+@pytest.mark.parametrize('h16, boxes', [(8 * 16, [((10, 22, 3, 8), 0xff3366ff)]),
+                                        (8 * 16 + 8, [((10, 22, 3, 8), 0xff3366ff), ((10, 21, 3, 1), 0x7f3366ff)]),
+                                        (4, [((10, 29, 3, 1), 0x3f3366ff)])])
+def test_a_bar_s_part_covered_top_row_shows_its_part_as_alpha(fw, h16, boxes):
+    """lvl_fill: whole pixels solid, the row above them at the part of a pixel the height covers, so a height between
+    pixels moves smoothly on a canvas without subpixel boxes."""
+    from test_nav_painters import Canvas
+    canvas = Canvas(fw)
+    fw.fn('lvl_fill', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_uint)(canvas.addr, 10, 30, 3, h16, 0xff3366ff)
+    assert [(b[0], b[1]) for b in canvas.boxes] == boxes
+
+
+def test_every_loop_shares_one_33_ms_timer_that_never_repaints_the_top_window(fw):
+    """motion_loop: one timer for every loop, each fn called a frame and dropped when it returns 0, the timer gone
+    with the last; the top window is never invalidated (only motion_frames does that)."""
+    now, timers = clock(fw)
+    loops = C.c_char.in_dll(fw.lib, 'ui_kit__loops')
+    C.memset(C.addressof(loops), 0, fw.sizes['ui_kit__loops'])
+    calls, keep = [], {'a': 3, 'b': 1}
+    invalidated = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: invalidated.append(w) or 0)
+    def make(name):
+        def fn():
+            calls.append(name)
+            keep[name] -= 1
+            return int(keep[name] > 0)
+        return C.CFUNCTYPE(C.c_int)(fn)
+    a, b = make('a'), make('b')
+    add = fw.fn('motion_loop', None, C.c_void_p)
+    for f in (a, b, a):  # a added twice is one loop
+        add(C.cast(f, C.c_void_p).value)
+    assert timers == [LOOP_MS]
+    frame = fw.fn('ui_kit__loop_frame', C.c_int, C.c_void_p)
+    assert frame(None) == 8 and calls == ['a', 'b']  # b said 0: dropped
+    assert frame(None) == 8 and calls == ['a', 'b', 'a']
+    assert frame(None) == 7 and calls == ['a', 'b', 'a', 'a']  # the last loop ended: RET_REMOVE
+    assert invalidated == []
+    add(C.cast(b, C.c_void_p).value)
+    assert timers == [LOOP_MS, LOOP_MS]  # a new loop starts it again

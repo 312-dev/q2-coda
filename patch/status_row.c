@@ -11,8 +11,8 @@
  * only their own box. */
 #include "navigation.h"
 
-#define SR_FRAME_MS 125 /* the level bars and the sync arrows: 8 frames a second */
-#define SR_FRAMES 10    /* the bars' loop, 1.25 s */
+#define SR_FRAME_MS 125 /* the sync arrows: 8 frames a second */
+#define SR_BAR_LO 3     /* the level bars' heights, lo to SR_INK px (ui_kit.h lvl_h16) */
 #define SR_SPIN 8       /* the arrows' frames, tools/art.py STATUS_SPIN: a half turn a second */
 #define SR_BARS_W 10    /* three 2 px bars, 4 px apart; paused, the pause in the same box */
 #define SR_BAR_W 2
@@ -53,7 +53,8 @@ typedef struct {
 
 static struct {
     int x[SLOT_N], w[SLOT_N]; /* the last layout, in the bar's pixels */
-    int frame, spin;          /* the bars' frame and the arrows' */
+    int spin;                 /* the arrows' frame */
+    lvl_clock_t clock;        /* the bars' time along their loop */
     unsigned timer, sig, nav;
     anim_t xfade;             /* the play state's dissolve from p_from to p_to */
     short p_from, p_to;       /* 0 the bars, 1000 the pause */
@@ -158,16 +159,13 @@ static int headset_shown(void) {
 }
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 
-/* The play state, in Text Primary as every glyph: playing, the level bars (Up Next's, upnext.c
- * un_level), 2 px wide with round ends, moving a frame a tick and standing on the digits' baseline;
- * paused, the pause, two SR_PAUSE_W bars SR_INK tall in the bars' own box. Between the two the
- * stopped bars and the pause cross-dissolve (play_paint, play_xfade_sync). */
-static const unsigned char bar_h[SR_FRAMES][3] = { { 7, 10, 3 }, { 9, 8, 3 },  { 11, 5, 5 },
-                                                   { 11, 3, 7 }, { 9, 3, 10 }, { 7, 4, 11 },
-                                                   { 5, 6, 11 }, { 3, 9, 9 },  { 3, 11, 7 },
-                                                   { 5, 11, 4 } };
-/* The play state's bars at x on cy, each its left, top, width, height and corner radius: the
- * pause's two when pause, else three level bars at the current frame; returns how many. */
+/* The play state, in Text Primary as every glyph: playing, the level bars (ui_kit.h lvl_h16, the
+ * motion Up Next's and Home's share), 2 px wide with round ends, SR_BAR_LO to SR_INK tall at their
+ * clock's time and standing on the digits' baseline; paused, the pause, two SR_PAUSE_W bars SR_INK
+ * tall in the bars' own box. Between the two the stopped bars and the pause cross-dissolve
+ * (play_paint, play_xfade_sync). play_bars: the glyph's bars at x on cy, each its left, top,
+ * width, height and corner radius, the pause's two when pause, else the three level bars; returns
+ * how many. */
 static int play_bars(int x, int cy, int pause, float (*bar)[5]) {
     float base = (float)(cy + SR_BAR_DROP);
     if (pause) {
@@ -179,7 +177,7 @@ static int play_bars(int x, int cy, int pause, float (*bar)[5]) {
         return 2;
     }
     for (int i = 0; i < 3; ++i) {
-        float *b = bar[i], h = (float)bar_h[sr.frame % SR_FRAMES][i];
+        float *b = bar[i], h = (float)lvl_h16(i, lvl_time(&sr.clock), SR_BAR_LO, SR_INK) / 16;
         b[0] = (float)(x + i * SR_BAR_PITCH), b[1] = base - h, b[2] = SR_BAR_W, b[3] = h;
         b[4] = SR_BAR_W / 2.0f;
     }
@@ -418,12 +416,10 @@ void status_touch(unsigned type, int x, int y) {
         sr.nav = timer_add(np_due, (void *)0, 0);
 }
 
-/* Whether a slot moves: the bars while playing, the arrows while an app checks. */
-static int moving(void) {
-    return geom_val(V_STATUS_Y) && (bar_status() == 2 || addon_sync((int *)0) == 1);
-}
-/* Each frame, while lit and something moves: the next frame, and only the moving slots' boxes
- * repainted (ringnav_paint_bg paints them with the bar's background under them). */
+/* Whether the arrows turn: an app checks. */
+static int moving(void) { return geom_val(V_STATUS_Y) && addon_sync((int *)0) == 1; }
+/* Each frame, while lit and the arrows turn: the next one, and only their box repainted
+ * (ringnav_paint_bg paints it with the bar's background under it). */
 static int sr_tick(const void *info) {
     (void)info;
     void *bar = *(void *const *)system_bar;
@@ -431,14 +427,8 @@ static int sr_tick(const void *info) {
         sr.timer = 0;
         return 0; /* RET_REMOVE */
     }
-    int playing = bar_status() == 2, checking = addon_sync((int *)0) == 1;
     layout();
-    if (playing && sr.w[SLOT_PLAY] && !anim_running(&sr.xfade)) { /* still while they dissolve */
-        sr.frame = (sr.frame + 1) % SR_FRAMES;
-        rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
-        widget_invalidate_force(bar, &r);
-    }
-    if (checking && sr.w[SLOT_SYNC]) {
+    if (sr.w[SLOT_SYNC]) {
         sr.spin = (sr.spin + 1) % SR_SPIN;
         rect_t r = { sr.x[SLOT_SYNC], 0, SR_RING, I(bar, W_H) };
         widget_invalidate_force(bar, &r);
@@ -446,16 +436,43 @@ static int sr_tick(const void *info) {
     return 8; /* RET_REPEAT */
 }
 
-/* The shared frame timer's (ui_kit.c motion_hook), while the play state dissolves: its box
- * repainted, as sr_tick's, and once more after the dissolve's end. */
-static void sr_xfade_frame(void) {
-    if (!sr.xf_dirty) return;
-    if (!anim_running(&sr.xfade)) sr.xf_dirty = 0; /* this repaint shows the end */
+/* The play box repainted, when the bar is lit and the slot shows (only that box: the rest of the
+ * row stays as it is). */
+static void play_box_dirty(void) {
     void *bar = *(void *const *)system_bar;
     if (!bar || !g_backlight_status || !geom_val(V_STATUS_Y) || layout() < 0 || !sr.w[SLOT_PLAY])
         return;
     rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
     widget_invalidate_force(bar, &r);
+}
+/* Whether the bars move: lit, playing, the slot shown and not dissolving, and motion allowed
+ * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
+static int bars_moving(void) {
+    return g_backlight_status && geom_val(V_STATUS_Y) && bar_status() == 2 && play_shown() &&
+           !anim_running(&sr.xfade) && motion_ms(SR_FRAME_MS, MO_DECOR);
+}
+/* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: their box
+ * repainted at the clock's time; 0 (dropped) once they stop. */
+static int sr_bars_frame(void) {
+    int on = bars_moving();
+    lvl_run(&sr.clock, on);
+    if (on) play_box_dirty();
+    return on;
+}
+/* The bars' clock and loop started when they move, the clock stopped when they don't. */
+static void bars_sync(void) {
+    if (bars_moving())
+        lvl_run(&sr.clock, 1), motion_loop(sr_bars_frame);
+    else
+        lvl_run(&sr.clock, 0);
+}
+/* The shared frame timer's (ui_kit.c motion_hook), while the play state dissolves: its box
+ * repainted, and once more after the dissolve's end, when the bars move on from where they stood.
+ */
+static void sr_xfade_frame(void) {
+    if (!sr.xf_dirty) return;
+    if (!anim_running(&sr.xfade)) sr.xf_dirty = 0, bars_sync(); /* this repaint shows the end */
+    play_box_dirty();
 }
 
 /* The play state's glyph to the bars playing or the pause paused: a dissolve over SR_XFADE_MS from
@@ -473,13 +490,14 @@ static void play_xfade_sync(void) {
         }
     }
     sr.seen = (unsigned char)shown;
+    bars_sync();
 }
 
 /* bar_state_sync, each bar paint and each second: the play state's dissolve started on a change,
- * the frames' timer started while lit and something moves; 1 when what the slots show changed
- * (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its ring to the
- * 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar repaints whole
- * after the frame and the clock moves beside the new leftmost slot. */
+ * the bars' loop while they move, the arrows' timer while lit and they turn; 1 when what the slots
+ * show changed (which slots, the play state, Wi-Fi's level or its internet, the sync's kind and its
+ * ring to the 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar
+ * repaints whole after the frame and the clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
     if (!geom_val(V_STATUS_Y)) return 0;
     play_xfade_sync();

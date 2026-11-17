@@ -196,7 +196,7 @@ All lists share one grid.
   [internals](internals.md#status-row-slots)):
   - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
     glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
-    digits' baseline, 3 to 11 px tall and moving on offset sines (a 1.25 s loop); paused, the pause, two 3 px bars
+    digits' baseline, 3 to 11 px tall, moving as every [level bar](#level-bars); paused, the pause, two 3 px bars
     11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. On pause the bars stop and
     cross-dissolve into the pause over 250 ms, `cubic_out`, and back on play, the bars moving again once it ends;
     the dissolve stays in the 10 x 11 box, so nothing else in the row moves; Reduce Motion swaps them at once (the
@@ -242,6 +242,16 @@ All lists share one grid.
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
+### Level bars
+
+The playing song's three level bars (the status row's play state, Home's first row, Up Next's header) are one
+motion wherever they show (`ui_kit.h` `lvl_*`): each bar passes through its column of the status row's ten approved
+frames (`mock_status_bars.py`: offset sines, a 1.25 s loop) every 125 ms, on a smooth curve between them, repainted
+30 times a second, so it rises and falls continuously instead of stepping between a few heights (the user's,
+2026-11-17 08:35: "smoother fps"). A height between two pixels shows its top row part-lit. Each screen keeps its own
+size (the status row's 2 px bars 3 to 11 px, Home's and Up Next's 3 px bars 5 to 12 px). Only the bars' own box
+repaints. Paused, they hold where they stopped and go on from there; under Reduce Motion they stand still.
+
 ### Home's first row
 
 Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`):
@@ -250,7 +260,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
   Edit Home lists it as Playing.
 - It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
-  sight: Up Next's level bars (3 px wide, 4.5 px apart, up to 12 px, a frame every 125 ms) in the accent while
+  sight: Up Next's [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px) in the accent while
   playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
   paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
   (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.
@@ -589,8 +599,8 @@ Tertiary), 46 px right of the text column. The list runs edge to edge to the foo
 as a menu's; a lit row's foot never passes y 282.
 
 - **The playing song** is the sheet's header and takes no selection: its cover, its title with
-  three Accent Blue level bars (3 px wide, 4.5 px apart, up to 12 px high) 7 px after it, moving
-  about 8 times a second while it plays and still while paused, and its artist and album
+  three Accent Blue [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
+  while it plays and still while paused, and its artist and album
   ("Pink Floyd · The Dark Side of the Moon").
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the

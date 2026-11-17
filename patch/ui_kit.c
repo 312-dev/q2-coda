@@ -343,6 +343,76 @@ void motion_frames(unsigned ms) {
     if (!mo.timer || (int)(end - mo.until) > 0) mo.until = end;
     if (!mo.timer) mo.timer = timer_add(mo_frame, (void *)0, MO_FRAME_MS);
 }
+static struct {
+    int (*fn[MO_LOOPS])(void);
+    unsigned timer;
+} loops __attribute__((section(".scratch")));
+static int loop_frame(const void *info) {
+    (void)info;
+    int any = 0;
+    for (int i = 0; i < MO_LOOPS; ++i)
+        if (loops.fn[i]) {
+            if (loops.fn[i]())
+                any = 1;
+            else
+                loops.fn[i] = 0;
+        }
+    if (any) return 8; /* RET_REPEAT */
+    loops.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+void motion_loop(int (*fn)(void)) {
+    int free = -1;
+    for (int i = 0; i < MO_LOOPS; ++i) {
+        if (loops.fn[i] == fn) free = -2;
+        if (free == -1 && !loops.fn[i]) free = i;
+    }
+    if (free >= 0) loops.fn[free] = fn;
+    if (free != -1 && !loops.timer) loops.timer = timer_add(loop_frame, (void *)0, MO_LOOP_MS);
+}
+
+/* The level bars' keyframes, 0 low to 1000 high, a column a bar: offset sines over the loop (the
+ * status row's ten frames as approved, mock_status_bars.py). */
+static const short lvl_keys[LVL_KEYS][3] = {
+    { 500, 875, 0 },    { 750, 625, 0 },    { 1000, 250, 250 }, { 1000, 0, 500 }, { 750, 0, 875 },
+    { 500, 125, 1000 }, { 250, 375, 1000 }, { 0, 750, 750 },    { 0, 1000, 500 }, { 250, 1000, 125 }
+};
+void lvl_run(lvl_clock_t *c, int run) {
+    if (!run == !c->run) return;
+    unsigned now = (unsigned)time_now_ms();
+    if (run)
+        c->base = now - c->at;
+    else
+        c->at = now - c->base;
+    c->run = (unsigned char)!!run;
+}
+unsigned lvl_time(const lvl_clock_t *c) {
+    return c->run ? (unsigned)time_now_ms() - c->base : c->at;
+}
+int lvl_h16(int i, unsigned t, int lo, int hi) {
+    unsigned step = t / LVL_STEP_MS;
+    int k = (int)(step % LVL_KEYS), u = (int)(t % LVL_STEP_MS) * 1000 / LVL_STEP_MS;
+    int p0 = lvl_keys[(k + LVL_KEYS - 1) % LVL_KEYS][i], p1 = lvl_keys[k][i],
+        p2 = lvl_keys[(k + 1) % LVL_KEYS][i], p3 = lvl_keys[(k + 2) % LVL_KEYS][i];
+    int u2 = u * u / 1000, u3 = u2 * u / 1000; /* in thousandths: no 64-bit sums */
+    int v = (2 * p1 * 1000 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+             (-p0 + 3 * p1 - 3 * p2 + p3) * u3) /
+            2000;
+    v = v < 0 ? 0 : v > 1000 ? 1000 : v;
+    return lo * 16 + (hi - lo) * 16 * v / 1000;
+}
+void lvl_fill(void *canvas, int x, int base, int w, int h16, unsigned rgba) {
+    int whole = h16 >> 4, part = h16 & 15;
+    if (whole > 0) {
+        rect_t r = { x, base - whole, w, whole };
+        fill_box(canvas, &r, rgba, 1);
+    }
+    if (part) {
+        rect_t top = { x, base - whole - 1, w, 1 };
+        fill_box(canvas, &top, (rgba & 0xffffffu) | ((rgba >> 24) * (unsigned)part / 16) << 24, 1);
+    }
+}
+
 void anim_start(anim_t *a, int ms, int ease, int kind) {
     a->at = (unsigned)time_now_ms() ?: 1;
     a->ms = (unsigned short)motion_ms(ms, kind);
