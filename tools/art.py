@@ -373,6 +373,9 @@ BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-f
              'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
              'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
              'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
+# Settings > Car Remote's phone rows (carremote_page.c): Phosphor device-mobile, regular, Text Secondary per half,
+# white on the selection
+CR_PHONE_PX = 20
 # The software update's check (sw_update.c, docs/oled-design.md Software Update): iOS's twelve-spoke spinner in the
 # half's Text Primary (_d white, _l black) on no circle, 48 px across (its results' glyphs are MODE_GLYPHS).
 SW_SPIN_SPOKES = 12
@@ -668,6 +671,7 @@ def images(t):
     out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
     out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
     out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)

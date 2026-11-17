@@ -423,7 +423,6 @@ int confirm_surface(void *w); /* w holds the card's answers */
 void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
                   int n_rows, int back, int timeout_ms, int timeout_row,
                   void (*answer)(void *ctx, int row, int toggle_on), void *ctx);
-void pair_done(int paired);
 void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
 void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
@@ -528,6 +527,19 @@ void tilt_end(void *w, int dir);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
+void swipe_back_paint(void *w, void *canvas);
+/* page_parallax.c: a page's push and pop, the page under drifting and dimming */
+int parallax_under_x(int w, float percent);
+unsigned parallax_dim(float percent);
+/* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
+void np_settle_poll(void);
+int np_settle_scale(void);
+int np_settle_box(void *w, int *box);
+void np_settle_begin(void *w, void *canvas);
+void np_settle_paint(void *w, void *canvas);
+/* np_skip.c: Now Playing's track change slides and fades the art and lines */
+void np_skip_begin(void *w, void *canvas), np_skip_end(void *w, void *canvas);
+void np_skip_at(int t, int reduced, int dir, int *a_old, int *x_old, int *a_new, int *x_new);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
@@ -909,6 +921,7 @@ void search_strip_text(const char *title, const char *text, int max,
 void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
+int playlist_query(void *dest); /* dest's songs in its own order, for staged */
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
 int add_songs_key(void *top, unsigned key);
@@ -988,9 +1001,14 @@ void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
-void coda_rc_poll(void);
+void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+/* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
+void carremote_poll(void), carremote_paired(const char *name), carremote_paint(void *w, void *canvas);
+/* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
+int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
+void song_radio_poll(void);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);

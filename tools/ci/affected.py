@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Which tests a feature branch's changes need, from the files it changed against a base.
 
-    python3 tools/ci/affected.py                      # changes against release/p31's merge base, as a plan
+    python3 tools/ci/affected.py                      # changes against the trunk's merge base, as a plan
     python3 tools/ci/affected.py --base main --json   # the same plan as JSON
-    python3 tools/ci/affected.py --run BUILD          # and run it (patch.py through tools/ci/patch_shards.py)
+    python3 tools/ci/affected.py --run BUILD          # and run it (all of test/patch.py serially)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
 
 A feature branch runs what its files map to; an integration branch (release/*, main) runs everything, as
@@ -34,6 +34,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'/'ci'))
 import patch_shards  # noqa: E402
+import q2ci  # noqa: E402
 
 ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
@@ -171,7 +172,7 @@ def plan_for(changes, root=ROOT, patch_source=None):
                 p.add('fw', ALL, f'{path}: a build input (test/fw builds from tools/ lists)')
                 p.other.add('test/build.py')
         elif parts[:2] == ('tools', 'ci'):
-            p.other.add('tools/ci/test_ci.py')
+            p.other.update({'tools/ci/test_ci.py', 'tools/ci/test_orch.py'})
             p.why.append(f'{path}: the CI tools\' own tests')
         elif parts[0] == 'assets':
             p.add('patch', ALL, f'{path}: an asset the build rewrites')
@@ -252,10 +253,12 @@ def run(plan, build, python):
     if d['fw']:
         go('fw', [python, str(ROOT/'tools/ci/fw.py'), *([] if d['fw'] == ALL else [f'test/fw/{f}' for f in d['fw']])])
     if d['patch'] and build:
-        go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build,
-                     *([] if d['patch'] == ALL else ['--lines', ','.join(d['patch'])])])
+        if d['patch'] == ALL:  # one process: a shard set replays most of the suite in every shard
+            go('patch', [python, 'test/patch.py', build], is_heavy=True)
+        else:
+            go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
-        if other == 'tools/ci/test_ci.py':
+        if other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))
@@ -268,12 +271,13 @@ def run(plan, build, python):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--base', default='release/p31', help='what the branch is compared with (default: release/p31)')
+    ap.add_argument('--base', default=q2ci.trunk(), help='what the branch is compared with (default: the trunk, '
+                    f'now {q2ci.trunk()})')
     ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
     ap.add_argument('--python', default=sys.executable)
-    ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_train.py hands it')
+    ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_batch.py and merge_train.py hand it')
     args = ap.parse_args()
     branch = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True,
                             text=True).stdout.strip()

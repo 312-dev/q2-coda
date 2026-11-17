@@ -12,7 +12,7 @@ import struct
 
 import host
 import messy_playlists
-from conftest import O, Deques
+from conftest import O, Deques, Files
 
 
 class Songs(C.Structure):
@@ -338,3 +338,84 @@ def test_a_row_whose_art_is_gone_shows_the_tile(fw):
     asked = C.c_int(1)
     fw.fn('playlists__pl_art_row', None, C.c_void_p, C.c_void_p)(0x77, C.byref(asked))
     assert shown == [(art, b'')]
+
+
+class PlcAt(C.Structure):  # catalogue.c's plc.at[i]: a stock playlist and its server identity (pls_t)
+    _fields_ = [('list', C.c_int), ('app', C.c_char * 16), ('pid', C.c_char * 200)]
+
+
+class Plc(C.Structure):
+    _fields_ = [('n', C.c_int), ('at', C.c_void_p)]
+
+
+class Job(C.Structure):  # playlist_art.c's pl_job_t
+    _fields_ = [('name', C.c_char_p), ('server', C.c_char_p), ('cd_num', C.c_int), ('made', C.c_int),
+                ('asked', C.c_uint), ('read', C.c_int), ('hash', C.c_uint), ('songs', C.c_uint)]
+
+
+SERVER_COVER = '/mnt/mmc/.subsonic/covers/pl-pl7.jpg'
+
+
+def server_playlist(fw, pictures):
+    """Playlist 3, Road Trip, as the catalogue's mapping has it (subsonic's pl7), with its app's cover on the card;
+    pictures: the files __xstat finds, each a regular file of 9 bytes, changed at 1800000000. The hash
+    picture() gives each, as playlist_art.c names its file."""
+    files = Files(fw, {SERVER_COVER: b'\xff\xd8collage'})
+    at = (PlcAt * 100)()
+    at[0] = PlcAt(3, b'subsonic', b'pl7')
+    plc = fw.var('catalogue__plc', Plc)
+    plc.n, plc.at = 1, C.addressof(at)
+    def stat(version, path, info, *_):
+        if C.string_at(path).decode() not in pictures:
+            return -1
+        words = (C.c_uint * 36).from_address(info)
+        words[5], words[12], words[16] = 0o100644, 9, 1800000000
+        return 0
+    fw.mock('fw___xstat', stat)
+    fnv = fw.fn('fnv', C.c_uint, C.c_uint, C.c_char_p)
+    bytes_ = fw.fn('hash_bytes', C.c_uint, C.c_uint, C.c_char_p, C.c_uint)
+    def named(src):
+        h = bytes_(bytes_(fnv(2166136261, src.encode()), struct.pack('<I', 9), 4), struct.pack('<I', 1800000000), 4)
+        return '/mnt/mmc/.coverflow/plc_3_%08x' % (h or 1)
+    return files, at, named
+
+
+def test_a_server_playlist_s_art_is_its_server_cover(fw):
+    """Cover Flow's playlist covers (playlist_art, no PL_ART_OWN) and OLED's rows: a server playlist with no picture
+    of its own shows its server's cover (the app's covers/pl-<pid>.jpg, Navidrome's collage), built as its own
+    picture is, not the 2x2 of its albums (2026-11-16: the first albums' covers showed)."""
+    files, at, named = server_playlist(fw, [SERVER_COVER])
+    art = fw.fn('playlist_art', C.c_int, C.c_int, C.c_char_p, C.c_int, C.c_char_p, C.c_int)
+    url = C.create_string_buffer(600)
+    fw.mock('fw_pthread_create', lambda *_: 1)  # the build queued, no worker run
+    assert art(3, b'Road Trip', 0, url, 600) == 0  # not built yet: queued, with its server cover's file
+    pl = fw.var('playlist_art__pl', Pl)
+    assert pl.total == 1 and pl.jobs, 'no build queued: no picture found'
+    job = Job.from_address(pl.jobs)
+    assert job.cd_num == 3 and job.server == SERVER_COVER.encode()
+    stem = named(SERVER_COVER)
+    files.files[stem + '.jpg'] = b'\xff\xd8built'
+    assert art(3, b'Road Trip', 0, url, 600) == 1 and url.value == f'file://{stem}.jpg'.encode()
+    assert art(3, b'Road Trip', 1 | 2, url, 600) == 1 and url.value == f'file://{stem}_s.jpg'.encode()  # OLED's rows
+    fw.fn('playlist_art_stop', None)()
+
+
+def test_a_playlist_s_own_picture_comes_before_its_server_cover(fw):
+    own = '/mnt/mmc/_explaylist_data/Road Trip.jpg'
+    files, at, named = server_playlist(fw, [SERVER_COVER, own])
+    files.files[named(own) + '.jpg'] = b'\xff\xd8mine'
+    files.files[named(SERVER_COVER) + '.jpg'] = b'\xff\xd8built'
+    url = C.create_string_buffer(600)
+    assert fw.fn('playlist_art', C.c_int, C.c_int, C.c_char_p, C.c_int, C.c_char_p, C.c_int)(
+        3, b'Road Trip', 0, url, 600) == 1 and url.value == f'file://{named(own)}.jpg'.encode()
+
+
+def test_a_local_playlist_has_no_server_cover(fw):
+    files, at, named = server_playlist(fw, [SERVER_COVER])
+    url = C.create_string_buffer(600)
+    files.files[named(SERVER_COVER) + '.jpg'] = b'\xff\xd8built'
+    at[0].list = 1  # pl7 is another playlist
+    fw.mock('fw_pthread_create', lambda *_: 1)
+    assert fw.fn('playlist_art', C.c_int, C.c_int, C.c_char_p, C.c_int, C.c_char_p, C.c_int)(
+        3, b'Road Trip', 1 | 2, url, 600) == 0
+    fw.fn('playlist_art_stop', None)()

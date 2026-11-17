@@ -167,15 +167,6 @@ def test_a_long_phone_name_scrolls_in_the_title_never_cut(fw, ui, st):
     assert len(titles) == 2 and ui.fn('feedback__card_marq') in ui.pending()
 
 
-def test_the_pairing_ends_with_the_phone_named(fw, ui, st):
-    theme(fw)
-    card = Card(fw, ui)
-    pair(fw, card, b'Pixel 10 Pro')
-    fw.fn('pair_done', None, C.c_int)(1)
-    fw.fn('pair_done', None, C.c_int)(0)
-    assert ui.toasts[-2:] == ['Paired with Pixel 10 Pro', 'Pairing failed']
-
-
 def test_a_guests_pairing_drops_the_glyph_rather_than_run_past_the_screen(fw, ui, st):
     """A guest's pairing (two body lines, the code, three answers) is 282 px with the glyph, past the 258 px between
     the status row and the glass's foot (y 44 to 302): the glyph goes, so the card (248 px) shows whole."""

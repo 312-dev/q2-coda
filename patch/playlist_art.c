@@ -1,9 +1,11 @@
 /* Playlist art (docs/internals.md#playlist-art): a playlist's own picture,
- * _explaylist_data/<name>.jpg or .png, else a 2x2 of four of its albums' covers, as files in Cover
- * Flow's cache. A file's name holds a hash of what it shows (the picture's name, size and time; the
- * songs' files in id order), so changed songs or a new picture get a new name and the image cache
- * never shows stale art; a name is only given to a whole file. One worker pthread builds them, a
- * playlist at a time, touching only files, its own SQLite connection and Cover Flow's art calls. */
+ * _explaylist_data/<name>.jpg or .png, else a server playlist's cover from its card app
+ * (catalogue_playlist_cover: Navidrome's collage), else a 2x2 of four of its albums' covers, as
+ * files in Cover Flow's cache. A file's name holds a hash of what it shows (the picture's path,
+ * size and time; the songs' files in id order), so changed songs or a new picture get a new name
+ * and the image cache never shows stale art; a name is only given to a whole file. One worker
+ * pthread builds them, a playlist at a time, touching only files, its own SQLite connection and
+ * Cover Flow's art calls. */
 #include "playlist_art.h"
 #include "coverflow.h"
 
@@ -48,6 +50,7 @@ typedef struct {
 } pl_songs_t;
 typedef struct {
     char *name;
+    char *server; /* its server cover's file, as the UI found it when queued; 0: none */
     int cd_num, made;
     unsigned asked;       /* the UI's hash for it when queued */
     int read;             /* the worker read its songs: */
@@ -183,15 +186,21 @@ static void fat_name(char *out, unsigned size, const char *name) {
     if (size) out[i] = 0;
 }
 
-/* The playlist's own picture in src (600 bytes), and a hash of its name, size and time; 0: none.
- * stat is o32's: st_mode word 5, st_size word 12, st_mtime word 16. */
-static unsigned picture(const char *name, char *src) {
+/* The playlist's picture in src (600 bytes), and a hash of its path, size and time; 0: none. Its
+ * own, else server (its server cover's file, 0 for none). stat is o32's: st_mode word 5, st_size
+ * word 12, st_mtime word 16. */
+static unsigned picture(const char *name, const char *server, char *src) {
     static const char *const ext[] = { ".jpg", ".png" };
     char fat[256];
     unsigned st[36];
     fat_name(fat, sizeof fat, name);
-    for (unsigned i = 0; i < 2; ++i) {
-        tk_snprintf(src, 600, PL_DIR "/%s%s", fat, ext[i]);
+    for (unsigned i = 0; i < 3; ++i) {
+        if (i < 2)
+            tk_snprintf(src, 600, PL_DIR "/%s%s", fat, ext[i]);
+        else if (server && *server)
+            tk_snprintf(src, 600, "%s", server);
+        else
+            break;
         if (__xstat(3, src, st) || (st[5] & 0170000) != 0100000) continue;
         unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)src),
                                 (const unsigned char *)&st[12], 4);
@@ -305,7 +314,7 @@ static int four(pl_songs_t *s, const char *at, unsigned kills) {
 static int pl_build(pl_job_t *j) {
     char src[600], at[512], path[540];
     if (access(ART_DIR, 0) || !card_space(ART_DIR)) return 0;
-    unsigned kills = ff_kills, pic = picture(j->name, src);
+    unsigned kills = ff_kills, pic = picture(j->name, j->server, src);
     long n = pic ? file_size(named(path, stem(at, "plc", j->cd_num, pic), ".jpg")) : 0;
     if (n > 0) return 0;
     int w = 0, h = 0;
@@ -359,7 +368,7 @@ static void pl_start(void) {
 }
 
 static void pl_reset(void) {
-    for (int i = 0; i < pl.total; ++i) free(pl.jobs[i].name);
+    for (int i = 0; i < pl.total; ++i) free(pl.jobs[i].name), free(pl.jobs[i].server);
     pl.total = pl.done = pl.told = pl.cancel = 0;
 }
 
@@ -419,6 +428,7 @@ static void playlist_art_poll(void) {
 
 /* Every playlist's songs read again, by the worker: once per Playlists rebuild, no SQLite here. */
 void playlist_art_refresh(void) {
+    catalogue_playlist_covers(); /* which are server playlists, for the asks that follow */
     __atomic_store_n(&pl.want_lists, 1, __ATOMIC_RELEASE);
     if (!pl.running) pl_start();
 }
@@ -445,11 +455,12 @@ void playlist_art_clean_end(void) {
 }
 
 /* cd_num queued once (one being built counts: a change meanwhile waits for the next ask). */
-static void pl_queue(int cd_num, const char *name, unsigned asked) {
+static void pl_queue(int cd_num, const char *name, const char *server, unsigned asked) {
     int i = __atomic_load_n(&pl.done, __ATOMIC_ACQUIRE);
     while (i < pl.total && pl.jobs[i].cd_num != cd_num) ++i;
     if (i == pl.total && i < PL_JOBS && (pl.jobs || (pl.jobs = calloc(PL_JOBS, sizeof *pl.jobs))) &&
         (pl.jobs[i].name = strdup(name ? name : ""))) {
+        pl.jobs[i].server = server ? strdup(server) : 0; /* none on a failed copy: the 2x2 */
         pl.jobs[i].cd_num = cd_num, pl.jobs[i].made = pl.jobs[i].read = 0;
         pl.jobs[i].asked = asked;
         __atomic_store_n(&pl.total, i + 1, __ATOMIC_RELEASE);
@@ -457,13 +468,15 @@ static void pl_queue(int cd_num, const char *name, unsigned asked) {
     if (!pl.running && pl.done < pl.total) pl_start();
 }
 
-/* Its picture's file when that decoded, else the 2x2 of its songs as the last refresh read them
+/* Its picture's file when that decoded (its own, else its server's cover, which the last
+ * catalogue_playlist_covers mapped), else the 2x2 of its songs as the last refresh read them
  * (none before the first read: the poll that brings it asks again), unless small has PL_ART_OWN
- * (OLED's rows: the picture or nothing); a marker (empty) is none. No SQLite: the UI thread asks
- * per row. */
+ * (OLED's rows: a picture or nothing); a marker (empty) is none. No SQLite: the UI thread asks per
+ * row. */
 int playlist_art(int cd_num, const char *name, int small, char *url, int size) {
-    char src[600], at[512], path[540];
-    unsigned pic = picture(name, src), hash = FNV_SEED; /* no songs: the empty playlist's */
+    char src[600], at[512], path[540], cover[600];
+    const char *server = catalogue_playlist_cover(cd_num, cover) ? cover + 7 : 0; /* past file:// */
+    unsigned pic = picture(name, server, src), hash = FNV_SEED; /* no songs: the empty playlist's */
     long n = pic ? file_size(named(path, stem(at, "plc", cd_num, pic), ".jpg")) : 0;
     int i = pl_entry(cd_num);
     if (i < pl.lists.n) hash = pl.lists.at[i].hash;
@@ -474,6 +487,6 @@ int playlist_art(int cd_num, const char *name, int small, char *url, int size) {
         tk_snprintf(url, size, "file://%s", named(path, at, small ? "_s.jpg" : ".jpg"));
         return 1;
     }
-    if (n < 0) pl_queue(cd_num, name, hash);
+    if (n < 0) pl_queue(cd_num, name, server, hash);
     return 0;
 }

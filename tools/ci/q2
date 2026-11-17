@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""Who is doing what, and how to end it: the status, the stop and the workers' registry.
+
+    q2 status                         # the queue, the ready list, workers, heavy jobs, old shells, the machine
+    q2 stop-all                       # what a stop would end (nothing is touched)
+    q2 stop-all --yes                 # stop the queue's batch, every heavy job and every q2 process; say what survived
+    q2 agent start NAME [--item TEXT] # a worker registers its worktree (refused when one is working there already)
+    q2 agent end NAME --state READY   # ... and signs off: refused while anything it started still runs
+    q2 agent list
+    q2 jobs                           # q2-heavy's jobs alone
+    q2 trunk                          # the trunk's name (git merge "$(q2 trunk)")
+
+Installed as ~/.local/bin/q2 (docs/orchestration.md#install). The rules it enforces are there too.
+
+stop-all ends, in this order: the queue's running batch (the STOP file; the service stays up and idles
+until `merge_queue.py resume`), each q2-heavy job by its systemd scope, then every process that belongs
+to q2 work: one with no terminal that is, or descends from, a shell a Claude Code session started in a q2
+directory, or that runs a q2 tool or test. It never touches the queue's service, a session itself (stop agents from the
+session: TaskStop, or Ctrl+X Ctrl+K), the emulator pool's copies (leases expire; slot 2 is the user's)
+or ~/q2-emu-server, the Android Auto rig (Xvfb, the DHU and its viewer), a process with a terminal (the
+user's own shell), or the process asking. Anything else with no session behind it whose directory is a
+q2 one (a detached loop someone left with nohup, but also a rig nobody listed here) is shown as `left
+alone`, by status too, and is the reader's to judge and kill by id. A worker's registry row is marked
+stopped. The exit status is 1 when something it meant to stop survived.
+"""
+import argparse
+import contextlib
+import fcntl
+import json
+import os
+import pathlib
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HOME = pathlib.Path.home()
+QUEUE = pathlib.Path(os.environ.get('Q2_QUEUE_DIR', HOME/'.cache/q2-queue'))
+HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY_LOCKDIR', HOME/'.cache'))/'q2-heavy/jobs'
+READY = pathlib.Path(os.environ.get('Q2_MERGE_CACHE', HOME/'.cache/q2-merge-train'))/'ready.txt'
+# Where q2 work happens: a process whose directory or command names one of these may be q2's.
+ROOTS = [pathlib.Path(p) for p in os.environ.get('Q2_ROOTS', '').split(':') if p] or [
+    HOME/'repos/q2-pod', HOME/'repos/q2-pod-wt', HOME/'repos/q2-subsonic', HOME/'repos/q2-subsonic-wt',
+    HOME/'repos/q2-auto-remote', HOME/'.cache/q2-builds', HOME/'.cache/q2-merge-train', HOME/'.cache/q2-gate']
+# Never stopped: the emulator pool's copies and the user's own rig.
+KEEP = re.compile(os.environ.get('Q2_KEEP', r'q2-emu-pool\d|q2-emu-server|emu_pool\.py|dhu|Xvfb'))
+SESSIONS = set(os.environ.get('Q2_SESSION_NAMES', 'claude').split(','))  # a Claude Code session's process name
+SHELLS = {'bash', 'sh', 'zsh', 'dash'}
+ADOPTERS = ('systemd', 'init', 'Relay', 'SessionLeader')  # what a process whose parent has gone belongs to (WSL's too)
+TOOLS = re.compile(r'q2-heavy|q2-wait|tools/ci/|tools/build\.py|test/[\w/]+\.py|pytest|q2live|GradleWrapperMain|GradleMain')
+OLD_SHELL = 15 * 60  # s: a session's shell older than this is listed by status
+
+
+class Proc:
+    def __init__(self, pid):
+        self.pid = pid
+        stat = pathlib.Path(f'/proc/{pid}/stat').read_text()
+        self.comm = stat[stat.index('(') + 1:stat.rindex(')')]
+        rest = stat[stat.rindex(')') + 2:].split()
+        self.ppid, self.sid, self.tty, self.start = int(rest[1]), int(rest[3]), int(rest[4]), int(rest[19])
+        self.cmd = pathlib.Path(f'/proc/{pid}/cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace').strip()
+        try:
+            self.cwd = os.readlink(f'/proc/{pid}/cwd')
+        except OSError:
+            self.cwd = ''
+
+    def age(self):
+        return time.time() - (BOOT + self.start / TICK)
+
+
+TICK = os.sysconf('SC_CLK_TCK')
+BOOT = time.time() - float(pathlib.Path('/proc/uptime').read_text().split()[0])
+
+
+def processes():
+    out = {}
+    me = os.getuid()
+    for d in pathlib.Path('/proc').iterdir():
+        if d.name.isdigit():
+            with contextlib.suppress(OSError, ValueError):
+                if d.stat().st_uid == me:
+                    out[int(d.name)] = Proc(int(d.name))
+    return out
+
+
+def chain(procs, pid):
+    """pid and its ancestors, nearest first."""
+    out = []
+    while pid in procs and pid not in out:
+        out.append(pid)
+        pid = procs[pid].ppid
+    return out
+
+
+def own(procs, me):
+    """The asking process, its ancestors and the rest of its session (the tool call it is part of: a pipe's
+    other side, the shell): never a target."""
+    mine = set(chain(procs, me))
+    sid = procs[me].sid if me in procs else None
+    return mine | {p.pid for p in procs.values() if p.sid == sid}
+
+
+def in_roots(p):
+    return any(p.cwd == str(r) or p.cwd.startswith(str(r) + '/') or str(r) in p.cmd for r in ROOTS)
+
+
+def q2_processes(procs=None, me=None):
+    """The processes stop-all ends (see the module's text), oldest first."""
+    procs = procs or processes()
+    mine = own(procs, me or os.getpid())
+    queue_pid = None
+    with contextlib.suppress(OSError, ValueError):
+        queue_pid = json.loads((QUEUE/'status.json').read_text())['pid']
+    out = []
+    for p in procs.values():
+        if p.pid in mine or p.tty or p.comm in SESSIONS or p.pid == queue_pid or p.comm == 'dtach':
+            continue
+        if 'merge_queue.py run' in p.cmd or p.comm.startswith(ADOPTERS):
+            continue
+        up = [procs[a] for a in chain(procs, p.pid)]
+        if any(KEEP.search(a.cmd) or KEEP.search(a.cwd) for a in up):
+            continue
+        # a shell a session started (the Bash tool, a background task), or anything under one
+        shell = next((a for a in up if a.comm in SHELLS and a.ppid in procs and procs[a.ppid].comm in SESSIONS), None)
+        if (shell is not None and (in_roots(p) or in_roots(shell))) or (in_roots(p) and TOOLS.search(p.cmd)):
+            out.append(p)
+    return sorted(out, key=lambda p: -p.age())
+
+
+def left_alone(procs=None, me=None):
+    """Processes in a q2 directory that no session is behind and stop-all does not stop: shown, never ended."""
+    procs = procs or processes()
+    mine = own(procs, me or os.getpid())
+    stopped = {p.pid for p in q2_processes(procs, me)}
+    out = []
+    for p in procs.values():
+        if p.pid in mine or p.pid in stopped or p.tty or p.comm in SESSIONS or p.comm.startswith(ADOPTERS):
+            continue
+        up = [procs[a] for a in chain(procs, p.pid)]
+        if any(a.comm in SESSIONS for a in up) or 'merge_queue.py run' in p.cmd:
+            continue
+        if any(p.cwd == str(r) or p.cwd.startswith(str(r) + '/') for r in ROOTS):
+            out.append(p)
+    return sorted(out, key=lambda p: -p.age())
+
+
+def heavy_jobs():
+    """q2-heavy's job records: [{pid, class, worktree, started, deadline, scope, command}], the dead ones dropped."""
+    out = []
+    if HEAVY.is_dir():
+        for f in sorted(HEAVY.iterdir()):
+            if not f.name.isdigit():
+                continue
+            if not pathlib.Path(f'/proc/{f.name}').exists():
+                continue
+            job = dict(line.split('=', 1) for line in f.read_text().splitlines() if '=' in line)
+            out.append({**job, 'pid': int(f.name)})
+    return out
+
+
+def kill(pids, sig):
+    for pid in pids:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, sig)
+
+
+def stop_all(yes, out=print, grace=5.0):
+    jobs, targets = heavy_jobs(), q2_processes()
+    batch = None
+    with contextlib.suppress(OSError, ValueError):
+        s = json.loads((QUEUE/'status.json').read_text())
+        if s['state'] in ('batch', 'post') and pathlib.Path(f'/proc/{s["pid"]}').exists():
+            batch = s
+    out(f'{"stopping" if yes else "would stop"}: the queue\'s {batch["state"] if batch else "next"} run'
+        f'{"" if batch else " (none is running)"}, {len(jobs)} heavy jobs, {len(targets)} processes')
+    for j in jobs:
+        out(f'  heavy {j["pid"]} {j.get("class", "?"):6} {j.get("worktree", "?")}: {j.get("command", "")[:90]}')
+    for p in targets:
+        out(f'  proc  {p.pid} {int(p.age() // 60):4d} min  {p.cwd}: {p.cmd[:110]}')
+    for p in left_alone():
+        out(f'  left alone {p.pid} {int(p.age() // 60):4d} min  {p.cwd}: {p.cmd[:100]}')
+    if not yes:
+        out('nothing was touched; --yes does it')
+        return 0
+    QUEUE.mkdir(parents=True, exist_ok=True)
+    (QUEUE/'STOP').write_text(f'q2 stop-all at {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
+    for j in jobs:
+        subprocess.run(['systemctl', '--user', 'stop', j.get('scope', '')], capture_output=True)
+        kill([j['pid']], signal.SIGTERM)
+    end = time.monotonic() + (25 if batch else 0)  # the queue ends its batch itself within seconds of the STOP file
+    while batch and time.monotonic() < end:
+        with contextlib.suppress(OSError, ValueError):
+            if json.loads((QUEUE/'status.json').read_text())['state'] not in ('batch', 'post'):
+                break
+        time.sleep(1)
+    kill([p.pid for p in q2_processes()], signal.SIGTERM)
+    end = time.monotonic() + grace
+    while time.monotonic() < end and q2_processes():
+        time.sleep(0.2)
+    kill([p.pid for p in q2_processes()], signal.SIGKILL)
+    time.sleep(0.3)
+    left, jobs_left = q2_processes(), heavy_jobs()
+    for row in registry_read():
+        if row['state'] == 'running':
+            registry_set(row['name'], 'stopped')
+    with contextlib.suppress(OSError):
+        with open(QUEUE/'events.log', 'a') as f:
+            f.write(f'{time.strftime("%Y-%m-%dT%H:%M:%S")} STOP_ALL survivors={len(left) + len(jobs_left)}\n')
+    for p in left:
+        out(f'  SURVIVED {p.pid}: {p.cmd[:120]}')
+    for j in jobs_left:
+        out(f'  SURVIVED heavy job {j["pid"]}: {j.get("command", "")[:100]}')
+    out('nothing q2 is left running' if not (left or jobs_left) else f'{len(left) + len(jobs_left)} survived')
+    out('the queue is held (STOP): python3 tools/ci/merge_queue.py resume lets it take batches again')
+    out('agents are not processes: stop each from its session (TaskStop; Ctrl+X Ctrl+K stops all background agents)')
+    return 1 if (left or jobs_left) else 0
+
+
+# --- the workers' registry ---
+
+REGISTRY = QUEUE/'agents.tsv'
+FIELDS = ('name', 'worktree', 'branch', 'started', 'state', 'ended', 'item')
+ENDS = ('READY', 'BLOCKED', 'HANDOFF', 'STOPPED')
+
+
+@contextlib.contextmanager
+def registry_lock():
+    QUEUE.mkdir(parents=True, exist_ok=True)
+    with open(QUEUE/'agents.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        yield
+
+
+def registry_read():
+    if not REGISTRY.exists():
+        return []
+    return [dict(zip(FIELDS, line.split('\t'))) for line in REGISTRY.read_text().splitlines() if line.strip()]
+
+
+def registry_write(rows):
+    tmp = REGISTRY.with_suffix('.tmp')
+    tmp.write_text(''.join('\t'.join(r.get(k, '') for k in FIELDS) + '\n' for r in rows))
+    tmp.replace(REGISTRY)
+
+
+def registry_set(name, state):
+    with registry_lock():
+        rows = registry_read()
+        for r in rows:
+            if r['name'] == name and r['state'] == 'running':
+                r['state'], r['ended'] = state.lower(), time.strftime('%Y-%m-%dT%H:%M:%S')
+        registry_write(rows)
+
+
+def toplevel(path):
+    p = subprocess.run(['git', '-C', str(path), 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    return p.stdout.strip() if p.returncode == 0 else str(pathlib.Path(path).resolve())
+
+
+def agent_start(name, worktree, item, takeover=False):
+    wt = toplevel(worktree)
+    branch = subprocess.run(['git', '-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True, text=True).stdout.strip()
+    with registry_lock():
+        rows = registry_read()
+        for r in rows:
+            if r['state'] == 'running' and (r['worktree'] == wt or r['name'] == name):
+                if not takeover:
+                    raise SystemExit(f'refused: {r["name"]} has been working in {r["worktree"]} since {r["started"]}. Two '
+                                     f'workers in one worktree overwrite each other. Stop that agent first (TaskStop), '
+                                     f'then start with --takeover.')
+                r['state'], r['ended'] = 'replaced', time.strftime('%Y-%m-%dT%H:%M:%S')
+        rows.append({'name': name, 'worktree': wt, 'branch': branch, 'started': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                     'state': 'running', 'ended': '', 'item': item.replace('\t', ' ').replace('\n', ' ')})
+        registry_write(rows)
+    print(f'{name} registered in {wt} on {branch}')
+    return 0
+
+
+def still_running(wt, me=None):
+    """What a worker in worktree wt would leave behind: its heavy jobs and its processes."""
+    procs = processes()
+    mine = own(procs, me or os.getpid())
+    left = [f'heavy job {j["pid"]}: {j.get("command", "")[:90]}' for j in heavy_jobs() if j.get('worktree') == wt]
+    for p in procs.values():
+        if p.pid in mine or p.tty or p.comm in SESSIONS or KEEP.search(p.cmd):
+            continue
+        if p.cwd == wt or p.cwd.startswith(wt + '/'):
+            left.append(f'process {p.pid} ({int(p.age())} s): {p.cmd[:90]}')
+    return left
+
+
+def agent_end(name, state, force=False):
+    rows = [r for r in registry_read() if r['name'] == name and r['state'] == 'running']
+    if not rows:
+        raise SystemExit(f'{name} is not registered as running (q2 agent list)')
+    wt = rows[0]['worktree']
+    wrong = still_running(wt)
+    if state == 'READY':
+        if subprocess.run(['git', '-C', wt, 'status', '--porcelain', '--untracked-files=no'], capture_output=True,
+                          text=True).stdout.strip():
+            wrong.append('uncommitted changes in the worktree')
+        ahead = subprocess.run(['git', '-C', wt, 'rev-list', '--count', '@{upstream}..HEAD'], capture_output=True, text=True)
+        if ahead.returncode or ahead.stdout.strip() != '0':
+            wrong.append('the branch is not pushed (git push -u origin BRANCH)')
+    if wrong and not force:
+        raise SystemExit(f'refused: {name} cannot end as {state} while these remain:\n  ' + '\n  '.join(wrong) +
+                         '\nStop each (TaskStop for a background task, kill PID for a process), then end again.')
+    registry_set(name, state)
+    print(f'{name} ended as {state}')
+    return 0
+
+
+def agent_check(cwd):
+    """For the SubagentStop hook: what the running worker of cwd's worktree still has running."""
+    wt = toplevel(cwd)
+    if not any(r['state'] == 'running' and r['worktree'] == wt for r in registry_read()):
+        return []
+    return still_running(wt)
+
+
+# --- status ---
+
+def age(seconds):
+    seconds = int(seconds)
+    return f'{seconds // 3600}h{seconds % 3600 // 60:02d}' if seconds >= 3600 else f'{seconds // 60}m{seconds % 60:02d}s'
+
+
+def status(out=print):
+    mem = {k: int(v.split()[0]) / 1048576 for k, v in
+           (line.split(':', 1) for line in pathlib.Path('/proc/meminfo').read_text().splitlines())}
+    disk = subprocess.run(['df', '--output=avail', '-BG', '/mnt/c'], capture_output=True, text=True).stdout.split()
+    out(f'machine: load {os.getloadavg()[0]:.1f}, {mem["MemAvailable"]:.1f} GB available, '
+        f'swap used {mem["SwapTotal"] - mem["SwapFree"]:.1f} GB, /mnt/c {disk[-1] if disk else "?"} free')
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    try:
+        import merge_queue
+        merge_queue.show(QUEUE, out)
+    except ImportError:  # installed outside a checkout: the queue's own files still say it
+        out(f'queue: see {QUEUE}/status.json')
+    rows = [r for r in registry_read() if r['state'] == 'running']
+    out(f'workers: {len(rows)} running')
+    for r in rows:
+        last = subprocess.run(['git', '-C', r['worktree'], 'log', '-1', '--format=%cr: %s'], capture_output=True, text=True)
+        out(f'  {r["name"]:14} {r["branch"]:28} since {r["started"][11:16]}  last commit {last.stdout.strip()[:60] or "?"}')
+        out(f'  {"":14} {r["item"][:100]}')
+    jobs = heavy_jobs()
+    out(f'heavy jobs: {len(jobs)}')
+    now = time.time()
+    for j in jobs:
+        out(f'  {j["pid"]:8} {j.get("class", "?"):6} {age(now - int(j.get("started", now)))} of '
+            f'{age(int(j.get("deadline", now)) - int(j.get("started", now)))}  {pathlib.Path(j.get("worktree", "?")).name}: '
+            f'{j.get("command", "")[:80]}')
+    procs = processes()
+    old = [p for p in procs.values() if p.comm in SHELLS and p.ppid in procs and procs[p.ppid].comm in SESSIONS
+           and p.age() > OLD_SHELL]
+    out(f'session shells older than {OLD_SHELL // 60} min: {len(old)}')
+    for p in sorted(old, key=lambda p: -p.age()):
+        tail = p.cmd.split(' eval ', 1)[-1]
+        out(f'  {p.pid:8} {age(p.age())}  {tail[:130]}')
+    alone = [p for p in left_alone(procs) if p.age() > OLD_SHELL]
+    out(f'left in a q2 directory with no session behind it, older than {OLD_SHELL // 60} min: {len(alone)} (rigs are expected)')
+    for p in alone:
+        out(f'  {p.pid:8} {age(p.age())}  {pathlib.Path(p.cwd).name}: {p.cmd[:110]}')
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest='command', required=True)
+    sub.add_parser('status')
+    sub.add_parser('jobs')
+    sub.add_parser('trunk')
+    s = sub.add_parser('stop-all')
+    s.add_argument('--yes', action='store_true', help='do it (without: only list)')
+    a = sub.add_parser('agent')
+    a.add_argument('action', choices=('start', 'end', 'list', 'check'))
+    a.add_argument('name', nargs='?')
+    a.add_argument('--worktree', default='.', help='default: the current directory\'s')
+    a.add_argument('--item', default='', help='start: the backlog item, one line')
+    a.add_argument('--takeover', action='store_true', help='start: replace a worker you have already stopped')
+    a.add_argument('--state', choices=ENDS, default='READY', help='end: how it ends')
+    a.add_argument('--force', action='store_true', help='end: sign off even with things left running (they are listed)')
+    args = ap.parse_args()
+    if args.command == 'status':
+        return status()
+    if args.command == 'trunk':
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import q2ci
+        print(q2ci.trunk())
+        return 0
+    if args.command == 'jobs':
+        for j in heavy_jobs():
+            print(json.dumps(j))
+        return 0
+    if args.command == 'stop-all':
+        return stop_all(args.yes)
+    if args.action == 'list':
+        for r in registry_read():
+            print('\t'.join(r.get(k, '') for k in FIELDS))
+        return 0
+    if args.action == 'check':
+        left = agent_check(args.worktree)
+        print('\n'.join(left))
+        return 1 if left else 0
+    if not args.name:
+        ap.error('agent start and end need a NAME')
+    if args.action == 'start':
+        return agent_start(args.name, args.worktree, args.item, args.takeover)
+    return agent_end(args.name, args.state, args.force)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

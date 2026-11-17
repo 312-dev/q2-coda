@@ -5,11 +5,14 @@
     python3 tools/ci/emu_pool.py put SLOT                             # stop it, end the lease
     python3 tools/ci/emu_pool.py renew SLOT [--hours H]
     python3 tools/ci/emu_pool.py status
+    python3 tools/ci/emu_pool.py reserve SLOT [--off]                 # its lease never expires to another agent
 
 `get` prints the slot, its folder and its viewer's URL; drive it with that folder's own q2emu
 (`~/q2-emu-pool2/q2emu shot out.png`, `... key centre`; Q2EMU_PORT is set in its q2emu). A lease
 lasts --hours (2) and is renewed with `renew`; an expired one is stopped and handed to the next `get`.
 A lease asked for a build a copy already runs, by the same NAME, reuses it without a reboot.
+A reserved lease (`get --reserve`, or `reserve SLOT` on a held one: the user's own rig) is never
+reclaimed when it expires and never handed to another NAME; only `put` or `reserve --off` frees it.
 
 The copies are ~/q2-emu-pool1 .. ~/q2-emu-poolK (K = Q2_EMU_POOL, 4), made on first use from
 ~/q2-emu-server's scripts and serial record (state/mtd5.bin; never its rootfs/ or the rest of state/,
@@ -133,20 +136,26 @@ def expired(lease):
     return lease['until'] < time.time()
 
 
-def get(build, name, hours, wait):
+def reclaimable(lease):
+    """An expired lease that isn't reserved: its copy may go to the next `get`."""
+    return expired(lease) and not lease.get('reserved')
+
+
+def get(build, name, hours, wait, reserve=False):
     build = str(pathlib.Path(build).resolve())
     said = False
     while True:
         with Locked() as t:
             for k in map(str, range(1, K + 1)):  # an expired lease: stop its emulator, free the copy
-                if k in t.leases and expired(t.leases[k]):
+                if k in t.leases and reclaimable(t.leases[k]):
                     q2emu(int(k), 'stop')
                     del t.leases[k]
             mine = [k for k, v in t.leases.items() if v['name'] == name and v['build'] == build]
             free = [k for k in map(str, range(1, K + 1)) if k not in t.leases]
             k = (mine or free or [None])[0]
             if k is not None:
-                t.leases[k] = {'name': name, 'build': build, 'since': time.time(), 'until': time.time() + hours * 3600}
+                t.leases[k] = {'name': name, 'build': build, 'since': time.time(), 'until': time.time() + hours * 3600,
+                               **({'reserved': True} if reserve or t.leases.get(k, {}).get('reserved') else {})}
                 break
         if not wait:
             raise SystemExit(f'all {K} pool emulators are leased; `status` says by whom')
@@ -184,6 +193,17 @@ def renew(k, hours):
     print(f'slot {k}: leased for {hours} h more')
 
 
+def reserve(k, on=True):
+    with Locked() as t:
+        if str(k) not in t.leases:
+            raise SystemExit(f'slot {k} is not leased')
+        if on:
+            t.leases[str(k)]['reserved'] = True
+        else:
+            t.leases[str(k)].pop('reserved', None)
+    print(f'slot {k}: ' + ('reserved: never reclaimed or handed to another agent' if on else 'no longer reserved'))
+
+
 def status():
     with Locked() as t:
         for k in range(1, K + 1):
@@ -192,7 +212,7 @@ def status():
             if lease:
                 left = (lease['until'] - time.time()) / 60
                 print(f'{k}: {run}, port {port(k)}, {lease["name"]}, {lease["build"]}, '
-                      + (f'{left:.0f} min left' if left > 0 else 'expired'))
+                      + (f'{left:.0f} min left' if left > 0 else 'expired') + (', RESERVED' if lease.get('reserved') else ''))
             else:
                 print(f'{k}: {run}, port {port(k)}, free')
 
@@ -206,17 +226,23 @@ def main():
                    help='who holds it (default: $Q2_AGENT, else this folder\'s name)')
     g.add_argument('--hours', type=float, default=2)
     g.add_argument('--no-wait', dest='wait', action='store_false')
+    g.add_argument('--reserve', action='store_true', help='never reclaimed on expiry nor handed to another name')
     p = sub.add_parser('put')
     p.add_argument('slot', type=int)
     r = sub.add_parser('renew')
     r.add_argument('slot', type=int)
     r.add_argument('--hours', type=float, default=2)
+    v = sub.add_parser('reserve')
+    v.add_argument('slot', type=int)
+    v.add_argument('--off', action='store_true')
     sub.add_parser('status')
     args = ap.parse_args()
     if args.cmd == 'get':
-        get(args.build, args.name, args.hours, args.wait)
+        get(args.build, args.name, args.hours, args.wait, args.reserve)
     elif args.cmd == 'put':
         put(args.slot)
+    elif args.cmd == 'reserve':
+        reserve(args.slot, not args.off)
     elif args.cmd == 'renew':
         renew(args.slot, args.hours)
     else:

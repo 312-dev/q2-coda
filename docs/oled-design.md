@@ -508,13 +508,14 @@ has no place for keeps a place of its own:
   even. Shuffle and repeat are Text Secondary off; on, Accent Blue with a 4 px Accent Blue dot 2 px
   under the glyph (repeat-once's glyph for One). A tap on shuffle turns it on or off, a tap on
   repeat steps Off, All, One, and each keeps the other as it was. Stock's Shuffle never ends, so
-  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while the
-  playing app plays a radio it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
+  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while a
+  radio plays (the playing app's, or the Q2's own) it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
   "Radio" (Inter Medium 16 px, white): turning on, the pill grows from the glyph's width over
   200 ms (ease out) while the gaps shrink, the word fading in over the last 40 %, and back the same
   way off. While radio is on, shuffle and repeat are `#444446` and ignore taps and the Center
-  cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
-  starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
+  cycle, as the radio picks the order. A tap on the antenna starts a radio of the playing song
+  ([internals: Radio](internals.md#radio)) and "Starting Radio…" while its app is asked; a tap on
+  the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
   the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
@@ -696,7 +697,7 @@ A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or 
 - The code large, Inter Medium 30, as two groups of three ("242 610").
 - The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
 - The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
-- Its end: "Paired with Pixel 10 Pro" or "Pairing failed" as a toast (`pair_done`).
+- Its end, Car Remote's: the icon toast "Pixel 10 Pro paired" (Positive's check-circle) or "Pairing failed" (`carremote_page.c` `carremote_paired`).
 - ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
   not apply.
 
@@ -761,11 +762,14 @@ the gray one.
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
 | Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
+| A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
+| On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone to pair | **Pair a Phone** (opens the how-to page), under the switch ([Car Remote](#car-remote)) |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -775,8 +779,7 @@ four action rows (no presets is a toast); and Upload Scrobbles with nothing to s
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
-explains use it: the App Store's "No apps listed" under its Check for Updates row, On-The-Go's how-to under its
-rows, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
@@ -980,8 +983,9 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
-  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
-  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song opens its
+  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone over the compact
+  empty state, "No Songs Yet", hint "Hold Play/Pause on a song to add it"; a playlist with no songs likewise,
+  hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
   On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
@@ -1312,6 +1316,32 @@ over the whole page, under the status row titled "Battery History":
 - ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs
   the key's down and up told apart in `battery_key`.
 
+### Car Remote
+
+Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carremote.py`; `patch/carremote_page.c`):
+
+- **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Q2 Muse
+  from Android Auto with Q2 Muse Remote."
+- **No phones:** the [empty state](#empty-and-offline) under the switch in its compact form (no glyph), "No Paired
+  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button, selected as the page opens.
+  The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
+  mock-up's address line under the hint ("Q2 Muse at 192.168.1.30") needs a fourth line in the shared empty state;
+  the how-to page shows the address meanwhile.
+- **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
+  its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
+  [two-line row](#two-line-row) 52 px tall: Phosphor `device-mobile` (regular, 20 px, Text Secondary, centred on x 34),
+  the name at x 56 over its state in Text Tertiary: "Connected over Wi-Fi" after a 7 px Positive dot, or
+  "Not connected · last seen Friday"; a chevron opens the phone's page.
+- **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
+  Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
+  a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
+- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
+  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
+  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+  for Q2 Muse Remote to scan one.
+- **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
+  `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
+  this branch yet.
 ### Overlay motion
 
 A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit
@@ -1333,10 +1363,11 @@ interruptible: a turn mid-run starts from where it is.
 ### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
-  drags right takes the page with it, the status row staying; what it uncovers is black. Let go
+  drags right takes the page with it, the status row staying; what it uncovers is the page under, drifting in
+  from 30% left and lightening as a pop's does (still and undimmed under Reduce Motion; on Home's lists, black). Let go
   past 40% of the width, or flicked right, and the page slides on off the right edge and Return
-  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`, Reduce Motion's
-  too: they finish what the finger did.
+  goes back; let go short and it springs back. Both take 160 ms from where the finger let go, `cubic_out`, Reduce
+  Motion's too: they finish what the finger did.
   Wherever Return leaves a page: a page over another, and on Home the list a row opened
   (Settings, Streaming). A drag up or down from the edge scrolls as anywhere; a sideways drag that
   starts mid-screen stays the screen's own (Now Playing's pages, Cover Flow, the letter strip,
@@ -1345,7 +1376,19 @@ interruptible: a turn mid-run starts from where it is.
 
 ### Motion
 
-- Page push and pop: 120 ms horizontal slide, `cubic_out` (`PAGE_SLIDE_MS`, stock's window animator).
+- **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
+  220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
+  in over the same 220 ms.
+- **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
+  `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
+  on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
+- **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
+  the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
+  the other side over 200 ms, `cubic_out`, from 60 ms: 260 ms in all. The times, the bar and the heart change at once;
+  a skip mid-run starts from the frame on screen. Reduce Motion cross-fades the two in place over 150 ms.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
 - Nothing pulses, glows or bounces, a list's end included, with two deliberate exceptions: Control Center's
   landing (an 8 px overshoot and one 2 px undershoot over 280 ms as it comes to rest open, [Control
@@ -1361,9 +1404,9 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
-  back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
+  back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now

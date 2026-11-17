@@ -330,9 +330,7 @@ static void ple_show(void) {
         return;
     }
     ple.edit = 0;
-    int n = mode == 0   ? (int)deque_size(ple.songs) + 2
-            : mode == 1 ? (ple.nmatch ? ple.nmatch + 1 : 2)
-                        : 3;
+    int n = mode == 0 ? (int)deque_size(ple.songs) + 2 : mode == 1 ? ple.nmatch + 1 : 3;
     char title[180], name[512];
     tk_snprintf(title, sizeof title, "%s: %s",
                 mode == 0   ? "Editing"
@@ -349,15 +347,17 @@ static void ple_show(void) {
         page_row_detail(ple.view, 0, search, 0, ple_pick);
         /* a tick on a song the playlist already holds: same path and CUE segment */
         unsigned mask, *in = ple.nmatch ? rec_index(ple.songs, &mask) : 0;
-        if (!ple.nmatch)
-            page_row_detail(ple.view, 1, "No songs match", 0, 0);
-        else
-            for (int i = 0; i < ple.nmatch; i++) {
-                void *row = page_row_detail(
-                    ple.view, i + 1, track_name(name, sizeof name, ple.match[i]), 0, ple_pick);
-                if (in && rec_find(ple.songs, in, mask, ple.match[i])) ple_tick(row);
-            }
+        for (int i = 0; i < ple.nmatch; i++) {
+            void *row = page_row_detail(ple.view, i + 1,
+                                        track_name(name, sizeof name, ple.match[i]), 0, ple_pick);
+            if (in && rec_find(ple.songs, in, mask, ple.match[i])) ple_tick(row);
+        }
         free(in);
+        /* a search that matches nothing: the empty state under the Search row, compact (its row
+         * above it: no glyph), no button (oled-design.md Empty and offline) */
+        static const empty_t none = { 0, "No Matches", "Try fewer letters", 0 };
+        if (!ple.nmatch)
+            empty_state(ple.page, feedback_below(widget_get_child(ple.view, 0)), &none, 0);
     } else
         for (int i = 0; i < n; i++) {
             const char *caption =
@@ -1231,8 +1231,8 @@ static void pl_art_row(void *button, int *asked) {
     if (!r) return;
     if (!*asked) playlist_art_refresh();
     *asked = 1;
-    /* its own picture, else its server's cover, else pl_tile_paint's tile (none, or not made
-     * yet: never the last) */
+    /* its own picture, else its server's cover (playlist_art's copy once built, the app's file
+     * until then), else pl_tile_paint's tile (none, or not made yet: never the last) */
     image_base_set_image(
         art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE), 1 | PL_ART_OWN, url, sizeof url) ||
                      catalogue_playlist_cover(I(r, REC_DISC), url)
@@ -1256,7 +1256,6 @@ static int pl_arts(void *win) {
     int asked = 0;
     pl_art_page = win;
     playlist_art_ready = pl_art_ready;
-    catalogue_playlist_covers(); /* the server playlists', once */
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_count_children(item)) pl_art_row(widget_get_child(item, 0), &asked);

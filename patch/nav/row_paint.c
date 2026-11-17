@@ -435,11 +435,14 @@ static void cf_label(void *w, void *canvas) {
 /* Playing art is rounded after scaling, so opposite corners share the same pixel grid.
  * NP_ART_RADIUS at 166px (or the theme's playing.art.radius, in px at any size), painted over it in
  * the page's black: each corner row outside the arc, then its edge pixel at the alpha of its
- * uncovered part (1/16 px). */
+ * uncovered part (1/16 px). Now Playing's art settled smaller on pause (np_settle.c) is drawn here
+ * first, and its corners round its smaller box. */
 static void paint_cover(void *w, void *canvas) {
     if (!w || !P(canvas, CANVAS_LCD)) return;
+    np_settle_paint(w, canvas);                  /* settled smaller on pause (np_settle.c) */
     if (w == st.np_cover) np_tap_dim(w, canvas); /* held: under the corners */
-    int x = 0, y0 = 0;
+    int x = 0, y0 = 0, box[4], ww, h;
+    if (w == st.np_cover) np_settle_box(w, box), x = box[0], y0 = box[1]; /* settled: smaller */
     if (w == st.bc[2]) {
         w = widget_lookup(w, "img_bigcover", 1);
         if (!w) return;
@@ -447,7 +450,9 @@ static void paint_cover(void *w, void *canvas) {
     } else if (w != st.np_cover && w != spot_art())
         return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    int ww = I(w, W_W), h = I(w, W_H), own = theme()->np_art_radius;
+    int own = theme()->np_art_radius;
+    ww = I(w, W_W), h = I(w, W_H);
+    if (w == st.np_cover) own = own * box[2] / ww, ww = box[2], h = box[3];
     int r = own ? own : (ww < h ? ww : h) * NP_ART_RADIUS / 166;
     for (int i = 0; i < r; ++i) {
         int out = arc_out(r, i), n = out >> 4;
@@ -680,7 +685,10 @@ static void paint_selection(void *w, void *canvas) {
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
-    if (empty_button(w)) { /* an empty state's button rings itself (feedback.c), no bar */
+    /* an empty state's button rings itself (feedback.c), no bar; so does a row standing for one in a page's own
+     * list (carremote_page.c's Pair a Phone) */
+    if (empty_button(w) || widget_get_prop_int(g_menu.at[i], "_rings_itself", 0) ||
+        widget_get_prop_int(P(g_menu.at[i], W_PARENT), "_rings_itself", 0)) {
         st.sel_w = w;
         st.sel_row = i;
         return;
@@ -960,12 +968,14 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
+    carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
     bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
     bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
     bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
     guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
     home_np_paint(w, canvas);    /* Home's first row's glyph (home_np.c) */
     sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
+    np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
     if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */

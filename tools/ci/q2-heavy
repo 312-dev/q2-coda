@@ -1,6 +1,6 @@
 #!/bin/bash
 # q2-heavy CMD...: run a memory-heavy q2-pod job (test/fw, test/patch.py, a patch_shards.py shard, a
-# build) in one of Q2_HEAVY_SLOTS slots (default 4), so parallel agents share the machine without running
+# build) in one of Q2_HEAVY_SLOTS slots (default 10), so parallel agents share the machine without running
 # it out of memory or disk. Installed as ~/.local/bin/q2-heavy from tools/ci/q2-heavy; see
 # docs/building.md#fast-test-runs.
 #
@@ -13,15 +13,27 @@
 #     name other sysfs files, and Q2_HEAVY_PSI another /proc/pressure, for a test).
 # Under 10 GB free on /mnt/c it refuses outright (exit 75), and a running job is paused (SIGSTOP) until
 # 25 GB are free again (Q2_HEAVY_DISK_START_GB and Q2_HEAVY_DISK_STOP_GB move the two marks). Starts are
-# spaced Q2_HEAVY_RAMP seconds (15) apart, so the next job's check sees the last one's memory. Each job runs
+# spaced Q2_HEAVY_RAMP seconds (5) apart, so the next job's check sees the last one's memory. Each job runs
 # in its own systemd scope with MemoryMax=Q2_HEAVY_MEM (3G; 8G under ASan), so a runaway is killed alone,
 # and with tools/ci/nodump.c preloaded, so a crash writes no core dump.
 # A q2-heavy inside a q2-heavy job runs its command at once (it already holds a slot).
-slots=${Q2_HEAVY_SLOTS:-4}
+#
+# Every job has a class, a deadline and a record:
+#   - Q2_HEAVY_CLASS is `branch` (the default: a worker's own run) or `queue` (the merge queue's, set by
+#     tools/ci/merge_queue.py). At most Q2_HEAVY_BRANCH_SLOTS (4) branch jobs run at once and each gets a low
+#     CPU weight, so the queue's batch keeps its speed whatever the workers run.
+#   - Q2_HEAVY_MAX_S (1800) is the longest a job may run: its scope is stopped then (RuntimeMaxSec) and
+#     q2-heavy exits 143, so nothing heavy outlives its purpose. The longest suite takes under five minutes.
+#   - While it runs, ~/.cache/q2-heavy/jobs/<pid> says whose it is (class, worktree, command, start,
+#     deadline, scope): `q2 status` lists them and `q2 stop-all` stops each by its scope.
+slots=${Q2_HEAVY_SLOTS:-10}
 # An ASan job (libasan in LD_PRELOAD) gets 8G: test/fw under ASan in one process peaks at 7.4 GB (measured).
 case "$LD_PRELOAD" in *libasan*) mem=${Q2_HEAVY_MEM:-8G} ;; *) mem=${Q2_HEAVY_MEM:-3G} ;; esac
 reserve=${Q2_HEAVY_RESERVE_GB:-5}
-ramp=${Q2_HEAVY_RAMP:-15}
+ramp=${Q2_HEAVY_RAMP:-5}
+class=${Q2_HEAVY_CLASS:-branch}
+max_s=${Q2_HEAVY_MAX_S:-1800}
+branch_slots=${Q2_HEAVY_BRANCH_SLOTS:-4}
 disk_start=${Q2_HEAVY_DISK_START_GB:-25}
 disk_stop=${Q2_HEAVY_DISK_STOP_GB:-10}
 ac=${Q2_HEAVY_AC:-/sys/class/power_supply/AC1/online}
@@ -30,7 +42,7 @@ dir=${Q2_HEAVY_LOCKDIR:-/home/gray/.cache}
 state=$dir/q2-heavy
 [ $# -gt 0 ] || { echo 'usage: q2-heavy CMD...' >&2; exit 2; }
 if [ -n "$Q2_HEAVY_JOB" ]; then exec "$@"; fi
-mkdir -p "$state"
+mkdir -p "$state/jobs"
 
 # The no-core-dump preload, built once from the repository's source next to this script's install.
 nodump=$state/nodump.so
@@ -66,9 +78,22 @@ busy() {  # slots held now
     echo $n
 }
 
+branch_jobs() {  # branch-class jobs running now, by their records (one whose q2-heavy is gone is dropped)
+    local f n=0
+    for f in "$state"/jobs/*; do
+        [ -f "$f" ] || continue
+        if ! kill -0 "${f##*/}" 2>/dev/null; then rm -f "$f"; continue; fi
+        grep -q '^class=branch$' "$f" && n=$((n + 1))
+    done
+    echo $n
+}
+
 # Why a job may not start now: empty when it may.
 why_not() {
     local d m pm pio
+    if [ "$class" = branch ] && [ "$(branch_jobs)" -ge "$branch_slots" ]; then
+        echo "$branch_slots branch jobs are running already (the rest of the machine is the queue's)"; return
+    fi
     d=$(disk_gb); m=$(avail_gb); pm=$(psi memory some); pio=$(psi io full)
     if [ -n "$d" ] && [ "$d" -lt "$disk_start" ]; then echo "only ${d} GB free on /mnt/c (needs $disk_start)"; return; fi
     if [ "$m" -lt "$reserve" ]; then echo "${m} GB available (needs $reserve)"; return; fi
@@ -113,13 +138,29 @@ done
 export Q2_HEAVY_JOB=$slot
 [ -s "$nodump" ] && export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$nodump"
 ulimit -c 0
+# The job gets the slot's lock (held while it runs, even if this script dies) but not the start lock: a job
+# holding that would keep every other job from starting until it ended.
+scope=q2h-$$
+record=$state/jobs/$$
+weight=100
+[ "$class" = branch ] && weight=20
+{
+    echo "class=$class"
+    echo "worktree=$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    echo "started=$(date +%s)"
+    echo "deadline=$(( $(date +%s) + max_s ))"
+    echo "scope=$scope.scope"
+    echo "command=$*"
+} > "$record.tmp" && mv "$record.tmp" "$record"
+trap 'rm -f "$record"' EXIT
 if systemd-run --user --scope -q true 2>/dev/null; then
-    setsid systemd-run --user --scope -q --collect -p MemoryMax="$mem" -p MemorySwapMax=512M -- "$@" &
+    setsid systemd-run --user --scope -q --collect --unit "$scope" -p MemoryMax="$mem" -p MemorySwapMax=512M \
+        -p RuntimeMaxSec="$max_s" -p CPUWeight="$weight" -- "$@" {start}>&- &
 else
-    setsid "$@" &
+    setsid timeout "$max_s" "$@" {start}>&- &
 fi
 job=$!
-trap 'kill -TERM -- -$job 2>/dev/null' INT TERM HUP
+trap 'kill -TERM -- -$job 2>/dev/null; systemctl --user stop "$scope.scope" 2>/dev/null' INT TERM HUP
 # Hold the start lock through the ramp, so the next job's memory check counts this one.
 ( sleep "$ramp"; ) &
 ramp_pid=$!
@@ -143,4 +184,7 @@ while kill -0 "$job" 2>/dev/null; do
 done
 wait "$job"
 rc=$?
+if [ $(( $(date +%s) - $(sed -n 's/^started=//p' "$record") )) -ge "$max_s" ]; then
+    echo "q2-heavy: the job ran past its ${max_s} s deadline and was stopped (Q2_HEAVY_MAX_S)" >&2
+fi
 exit $rc

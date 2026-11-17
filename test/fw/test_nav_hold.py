@@ -781,9 +781,19 @@ def test_a_search_that_matches_nothing_says_so(editor, ui):
     ui.nodes[ui.lookup(editor.ple.page, 'search_edit', 1)].text = 'zz'
     assert ui.key(editor.ple.page, KEY_RETURN) == STOP  # Return applies the box, from the next pass
     ui.due('ple_run')
-    assert editor.rows() == ['Search: zz', 'No songs match']
-    ui.click(ui.find(editor.ple.view, 'No songs match'))
-    assert not ui.timers  # the note is no row to pick
+    # docs/oled-design.md#empty-and-offline: the Search row alone, the empty state under it in its compact form
+    # (a row above it: no glyph), centred from the row's foot, with no button and no fake row to pick
+    assert editor.rows() == ['Search: zz']
+    art = ui.lookup(editor.ple.page, '_empty_state', 0)
+    assert art and ui.nodes[art].visible
+    props = ui.nodes[art].props
+    assert (props['_es_glyph'], props['_es_title'], props['_es_hint'], props['_es_row']) == ('', 'No Matches', 'Try fewer letters', '')
+    assert not ui.lookup(editor.ple.page, '_empty_row', 1)
+    editor.pick('Search: zz')  # a search that matches: the state goes with the page's rows
+    ui.nodes[ui.lookup(editor.ple.page, 'search_edit', 1)].text = 'tw'
+    ui.key(editor.ple.page, KEY_RETURN)
+    ui.due('ple_run')
+    assert editor.rows() == ['Search: tw', 'Two', 'Twenty'] and not ui.lookup(editor.ple.page, '_empty_state', 0)
 
 
 def test_the_search_box_keeps_its_query(editor, ui):
