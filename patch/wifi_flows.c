@@ -256,6 +256,8 @@ static int reset_click(void *ctx, void *event) {
 int ringnav_wifi_rows(void *win) {
     int r = stock_wifi_rows_trampoline(win);
     void *view = win ? widget_lookup(win, WIFI_VIEW, 1) : (void *)0;
-    if (view) widget_set_text_utf8(list_row(view, 0, reset_click, 0), "Reset Network Settings");
+    if (view) /* the label across the button, as stock's Add Network: no right column to stop at */
+        widget_set_text_utf8(list_row_core(view, 0, reset_click, 0, 325, 0),
+                             "Reset Network Settings");
     return r;
 }
