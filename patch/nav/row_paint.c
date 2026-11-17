@@ -698,7 +698,10 @@ static void paint_selection(void *w, void *canvas) {
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
-    if (empty_button(w)) { /* an empty state's button rings itself (feedback.c), no bar */
+    /* an empty state's button rings itself (feedback.c), no bar; so does a row standing for one in a page's own
+     * list (carremote_page.c's Pair a Phone) */
+    if (empty_button(w) || widget_get_prop_int(g_menu.at[i], "_rings_itself", 0) ||
+        widget_get_prop_int(P(g_menu.at[i], W_PARENT), "_rings_itself", 0)) {
         st.sel_w = w;
         st.sel_row = i;
         return;

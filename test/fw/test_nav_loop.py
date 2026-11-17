@@ -1600,6 +1600,31 @@ def test_the_wheel_moves_the_selection_a_row_a_tick(fw, keys):
     assert keys(KEY_PREV, 200) == STOP and sv.ints[SEL] == 1
 
 
+def test_two_lists_that_each_hold_a_selection_give_the_wheel_neither(fw, keys):
+    """Settings > Car Remote with no phones had its switch's list and the empty state's button's, each selected
+    (emulator, 2026-11-16): surface_under picks no surface, so the wheel moved nothing. One list holding the selection
+    (the page's own, with the button as its row since) moves."""
+    ui = Ui(fw)
+    top = ui.window('sysset_page')
+    views = []
+    for y, n in ((0, 2), (150, 1)):
+        lv = top.add(W(ui, 'list_view', y=y, h=48 * n))
+        sv = lv.add(W(ui, 'scroll_view', 'view', h=48 * n))
+        sv.block[O['VIEW_VERTICAL']] = 1
+        sv.int(O['VIEW_CONTENT_H'], 48 * n)
+        for i in range(n):
+            sv.add(W(ui, 'list_item', 'r%d' % i, y=i * 48, h=48, text='Row', click=True))
+        views.append(sv)
+    pick = fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)
+    pick(views[0].p, 0, 2)
+    pick(views[1].p, 0, 1)
+    keys(KEY_NEXT)
+    assert (views[0].ints[SEL], views[1].ints[SEL]) == (0, 0)  # neither moved
+    pick(views[1].p, -1, 1)
+    keys(KEY_NEXT, 200)
+    assert views[0].ints[SEL] == 1
+
+
 @pytest.mark.parametrize('name', [None, 'about_page'])
 def test_a_list_stops_at_both_ends_however_long_the_pause(fw, keys, name):
     ui = Ui(fw)

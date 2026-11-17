@@ -37,11 +37,12 @@
 #define CR_DOT 7        /* the Positive dot before "Connected" */
 #define CR_DOT_GAP 5
 #define CR_VALUE_PX TYPE(20)
+#define CR_CTA_OUT 8 /* the capsule's row reaches this far past it, for its focus ring (ui_kit.h CTA_RING_OFF) */
 #define CR_STEP_PX TYPE(15)
 #define CR_ROW_KIND "_cr_kind"
 #define CR_VALUE "_cr_value"
 
-enum { K_SWITCH = 1, K_ACTION, K_PHONE, K_VALUE, K_FORGET };
+enum { K_SWITCH = 1, K_ACTION, K_PHONE, K_VALUE, K_FORGET, K_CTA, K_CTA_GAP };
 
 typedef struct {
     unsigned char id[8];
@@ -57,6 +58,7 @@ static struct {
     unsigned char phone_id[8]; /* whose page */
     unsigned shown, phone_shown; /* what each shows (cr_read's sum) */
     int sel;                 /* 0 while the switch's bar shows (it is laid out tall), else -1 */
+    int cta_y;               /* with no phones: the capsule row's top in the list, else 0 */
     char forget_name[32];
 } cp __attribute__((section(".scratch")));
 
@@ -395,18 +397,34 @@ static int cr_click(void *ctx, void *event) {
 static int cr_page_show(const void *ctx) {
     if (!cp.page) return 0;
     cr_peer p[CR_PEERS_MAX];
-    int n = cr_read(p, &cp.shown), on = coda_rc_enabled(), rows = on && n ? 2 + n : 1;
-    int sel = ctx && cp.view ? cr_selected(cp.view) : 0;
+    int n = cr_read(p, &cp.shown), on = coda_rc_enabled(), empty = on && !n, rows = on && n ? 2 + n : empty ? 2 : 1;
+    int sel = ctx && cp.view ? cr_selected(cp.view) : empty ? 1 : 0;
     cp.view = 0;
     void *view = page_list(cp.page, cp.page, 0, "Car Remote", rows > 1 ? rows + 1 : 1, 48);
     void *sw = cr_row(view, 0, K_SWITCH, "", 0, page_x(), cr_click);
     list_toggle(widget_get_child(sw, 0), "Car Remote", on);
-    if (rows > 1) {
+    /* none: the empty state under the switch, in its compact form as rows stand above it (feedback.c
+     * empty_compact; docs/oled-design.md#empty-and-offline). Its button, Pair a Phone, is a row of this list
+     * (empty_state keeps its place in the stack and leaves it to the page), so the wheel has the one list: two
+     * lists that each hold a selection give it none (nav/lists.c surface_under), and it moved nothing. */
+    static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
+                                  "Pair a Phone" };
+    int free_top = cr_screen_y(view) + cr_switch_h(1);
+    cp.cta_y = empty ? empty_row_y(free_top) - cr_screen_y(view) - CR_CTA_OUT : 0;
+    if (empty) {
+        void *gap = list_item_create(view, 0, 0, 375, cp.cta_y - CR_ROW);
+        widget_use_style(gap, "s_listitem_black");
+        widget_set_prop_int(gap, CR_ROW_KIND, K_CTA_GAP);
+        void *cta = cr_row(view, 1, K_CTA, "", 0, page_x(), cr_click); /* its index opens the how-to page */
+        widget_set_prop_int(cta, "_rings_itself", 1); /* no selection bar (nav/row_paint.c paint_selection) */
+        row_into(cta, CTA_H + 2 * CR_CTA_OUT);
+    }
+    if (rows > 1 && !empty) {
         cr_gap(view, CR_GAP);
         void *pair = cr_row(view, 1, K_ACTION, "Pair a Phone", 0, CR_ACTION_X - 2, cr_click);
         widget_set_prop_int(widget_get_child(pair, 0), "style:normal:text_color", (int)RGBA(scheme()->tones[0]));
     }
-    for (int i = 0; i < rows - 2; ++i) {
+    for (int i = 0; on && i < n; ++i) {
         char state[64];
         cr_state(state, sizeof state, p + i);
         void *item = cr_row(view, 2 + i, K_PHONE, p[i].name, state, CR_PHONE_X, cr_click);
@@ -417,19 +435,15 @@ static int cr_page_show(const void *ctx) {
         widget_set_prop_int(item, "_cr_online", p[i].online);
         row_into(item, page_h(64));
     }
-    /* rows counts what the wheel stops on (the gap is passed, so Pair a Phone is row 1, as its click's index) */
+    /* rows counts what the wheel stops on (a gap is passed, so Pair a Phone is row 1 either way, as its click's
+     * index) */
+    if (sel < 0) sel = 0;
     if (sel >= rows) sel = rows - 1;
     cr_fit(view); /* the switch grows at its first paint with the bar on it (carremote_paint) */
     cp.sel = -1;
     ringnav_select(view, sel, rows);
     cp.view = view;
-    /* none: the empty state under the switch, in its compact form as rows stand above it (feedback.c
-     * empty_compact; docs/oled-design.md#empty-and-offline), its button Pair a Phone, selected as the page opens */
-    static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
-                                  "Pair a Phone" };
-    int empty = on && !n;
-    empty_state(cp.page, cr_screen_y(view) + cr_switch_h(1), empty ? &none : 0,
-                cr_howto_open);
+    empty_state(cp.page, free_top, empty ? &none : 0, 0);
     return 0;
 }
 
@@ -451,6 +465,9 @@ void carremote_paint(void *w, void *canvas) {
         if (lit != cp.sel) {
             cp.sel = lit;
             I(w, W_H) = cr_switch_h(!lit);
+            /* the capsule keeps its place under the empty state's words: its gap takes up the change */
+            void *gap = cp.cta_y && widget_count_children(view) > 1 ? widget_get_child(view, 1) : (void *)0;
+            if (gap && widget_get_prop_int(gap, CR_ROW_KIND, 0) == K_CTA_GAP) I(gap, W_H) = cp.cta_y - I(w, W_H);
             widget_layout(P(view, W_PARENT));
             widget_invalidate_force(window_of(view), 0);
         }
@@ -463,6 +480,9 @@ void carremote_paint(void *w, void *canvas) {
                 CR_CAP_TOP + CR_CAP_LINE / 2 + 1, 2, "inter", CR_CAP_PX, RGB_CAPTION_ON_ACCENT);
         ui_line(canvas, "with Q2 Muse Remote.", page_x(), 375 - 2 * page_x(),
                 CR_CAP_TOP + CR_CAP_LINE + CR_CAP_LINE / 2 + 1, 2, "inter", CR_CAP_PX, RGB_CAPTION_ON_ACCENT);
+    } else if (k == K_CTA) { /* the empty state's button, Pair a Phone: ringed while selected, darker pressed */
+        const char *label = "Pair a Phone";
+        ui_cta_paint(canvas, &label, 1, CR_CTA_OUT, on ? 0 : -1, on && pointer_down());
     } else if (k == K_ACTION || k == K_FORGET) {
         unsigned ink = RGBA(on ? 0xffffff : k == K_ACTION ? scheme()->tones[0] & 0xffffffu : tok(TOK_NEGATIVE));
         if (k == K_ACTION) {

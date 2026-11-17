@@ -121,14 +121,21 @@ def test_off_is_the_switch_alone(fw, ui, mcl, recs):
     assert rows(ui, page) == [('Car Remote', None)] and empty_state(ui, page) is None
 
 
-def test_no_phones_is_the_empty_state_with_pair_a_phone(fw, ui, mcl, recs):
+def test_no_phones_is_the_empty_state_with_pair_a_phone_a_row_of_the_one_list(fw, ui, mcl, recs):
+    """Pair a Phone was the empty state's own list beside the page's (emulator, 2026-11-16): each held a selection,
+    so the wheel had no list to move (nav/lists.c surface_under gives none when two do) and the switch no bar. The
+    capsule is the page's own row 1, selected as the page opens, painting its own ring, and Centre on it opens the
+    how-to page."""
     Car(fw, ui, recs)
     page = open_page(fw, ui)
-    assert rows(ui, page) == [('Car Remote', None)]
     assert empty_state(ui, page) == ('', 'No Paired Phones', 'Open Q2 Muse Remote on your phone to pair',  # compact
-                                     'Pair a Phone')
-    button = ui.lookup(page, '_empty_row', 1)
-    ui.handler(ui.kids[ui.kids[button][0]][0], O['EVT_CLICK'])()  # Centre on the capsule
+                                     None)  # its button is the page's row, not the empty state's
+    assert len([w for w in ui.subtree(page) if ui.kind[w] == 'scroll_view_create']) == 1  # one list for the wheel
+    view = lists(ui, page)[-1]
+    switch, cta = stops(ui, page)
+    assert ui.props[(view, '_ringnav_count')] == 2 and ui.props[(view, '_ringnav_index')] == 1
+    assert ui.props.get((cta, '_rings_itself')) == 1  # no selection bar behind the capsule
+    ui.handler(cta, O['EVT_CLICK'])()  # Centre on the capsule
     assert ui.name[ui.top()] == 'carhowto_page'
 
 

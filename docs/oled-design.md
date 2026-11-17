@@ -1121,7 +1121,10 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Q2 Muse
   from Android Auto with Q2 Muse Remote."
 - **No phones:** the [empty state](#empty-and-offline) under the switch in its compact form (no glyph), "No Paired
-  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button.
+  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button, selected as the page opens.
+  The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
+  mock-up's address line under the hint ("Q2 Muse at 192.168.1.30") needs a fourth line in the shared empty state;
+  the how-to page shows the address meanwhile.
 - **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
   its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
   [two-line row](#two-line-row) 52 px tall: Phosphor `device-mobile` (regular, 20 px, Text Secondary, centred on x 34),
