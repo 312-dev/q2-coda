@@ -223,7 +223,7 @@ for cf_open,view,found,want in ((True,'0',True,'coverflow_page'),(False,'1',True
     m=CoverflowMachine(cls=0xf001); m.config['ARTISTCF']=view
     if cf_open: m.open_pages.add('coverflow_page')
     if not found: m.found=[]
-    page=m.top; assert m.run(4,steps=2) is None and m.top!=page
+    page=m.top; assert m.run('Go to Album',steps=2) is None and m.top!=page
     assert m.nodes[m.top].get('name')==want or m.opened[-1][0]==want; passed()
 # An artist's All albums card, after the covers, plays every album from the first song as a library queue: the
 # covers' order, each album's songs in album order. A Play/Pause hold on it opens nothing; one album has no card.
@@ -484,7 +484,7 @@ for action,want in ((0,['A','T2','B','C']),(1,None)):
     m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks()
     m.call(); assert m.selected(view)==1
     m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='T2' and m.release()==0
-    assert m.labels()==['Play Next','Play Last','Add to Favorites','Go to Artist']
+    assert m.labels()==[*SONG_MENU[:5],'Go to Artist']  # the menu sheet's own song, Go to Album aside
     assert m.hold()==0  # a repeated hold while the dialog is open cannot open another
     m.pick(action); m.pick(action); m.advance(0)
     assert m.names()==(want or played_last(m,['T2'])) and m.top==m.page and m.selected(view)==1 and not m.playback() and not m.plays
@@ -492,7 +492,7 @@ for action,want in ((0,['A','T2','B','C']),(1,None)):
     m.press(200); assert m.release()==1; passed()
 # Its favourite is batch-select's over Coverflow's own deque, its songs taken as All Songs rows; each in-place
 # action says what it did in a toast (navigation.c, docs/oled-design.md: "Added to Favorites", "Added to Queue").
-m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks(); assert m.run(2)=='Added to Favorites'
+m=CoverflowMachine(cls=O['CLASS_ALBUMS']); m.open(); view=m.tracks(); assert m.run('Favorite')=='Added to Favorites'
 assert [c[1:3] for c in m.calls if c[0]=='batch_add_file']==[(0xf001,0xf00a)] and [c[1] for c in m.calls if c[0]=='batch_init_selectrecord']==[2]
 assert [c[3] for c in m.calls if c[0]=='batch_add_file'][0]!=m.get(syms['p_deque_showlist']); passed()
 m=CoverflowMachine(queue=0,cls=O['CLASS_ALBUMS']); m.open(); m.tracks()

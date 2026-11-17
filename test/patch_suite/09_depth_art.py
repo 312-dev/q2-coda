@@ -617,9 +617,10 @@ print(f'Coverflow depth on MIPS: {rest_cost} instructions for the first paint (d
 # moves by fractions of a pixel at a sharpness that hardly changes with the phase. Each axis is a
 # linear ping-pong of its own period across the zoom's margin, from the unzoomed crop. One timer
 # runs it while Home is on top, lit and still; a step repaints only the panel.
-SPLIT=O['HOME_SPLIT_W']; PW=375-SPLIT; X,Y,TICK=O['DRIFT_X_MS'],O['DRIFT_Y_MS'],O['DRIFT_TICK_MS']
+PX=OLED_G.split_art; PW,CH=375-PX,320-OLED_G.bar; PH=CH+OLED_G.split_art_up  # OLED's pane: its client and its rows in the bar (pane_h)
+X,Y,TICK=O['DRIFT_X_MS'],O['DRIFT_Y_MS'],O['DRIFT_TICK_MS']
 m=DepthMachine(); pan_counter=m.u.hook_add(UC_HOOK_BLOCK,count_block,begin=BASE,end=SCRATCH-1)  # before any code is cached
-m.budget=80_000_000  # filtering and sharpening a 1914 px cover passes 50 million
+m.budget=80_000_000  # filtering and sharpening a 2112 px cover passes 50 million
 m.open(); m.top=m.home; m.word(m.home+O['W_PARENT'],m.wm); np=m.node('window','playing_page')
 m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,2)  # playing: the pane shows the playing cover (art_source)
 m.byte(syms['g_playcover_type'],1); m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0')
@@ -628,7 +629,7 @@ def drifts(): return [t for t in m.timers.values() if t[1]==payload_syms['home_d
 def invalidated(): return [(c[1],c[2] and tuple(signed(m.get(c[2]+4*i)) for i in range(4))) for c in m.calls if c[0]=='widget_invalidate_force']
 def tex_of(w,h):  # the last cover loaded (opaque) as slide_load leaves it, and its zoomed size
     url,=m.pixels; px=struct.unpack(f'<{w*h}I',bytes(m.u.mem_read(m.pixels[url],w*h*4)))
-    fw,fh=(PW,-(-PW*h//w)) if PW*h>290*w else (-(-290*w//h),290); tw,th=fw*O['DRIFT_ZOOM_PCT']//100,fh*O['DRIFT_ZOOM_PCT']//100
+    fw,fh=(PW,-(-PW*h//w)) if PW*h>PH*w else (-(-PH*w//h),PH); tw,th=fw*O['DRIFT_ZOOM_PCT']//100,fh*O['DRIFT_ZOOM_PCT']//100
     out=[]
     for y in range(th):
         y0=y*h//th; y1=max((y+1)*h//th,y0+1)
@@ -644,7 +645,7 @@ def tex_of(w,h):  # the last cover loaded (opaque) as slide_load leaves it, and 
     cols=[sharpen([rows[y][x] for y in range(th)]) for x in range(tw)]
     rows=[[c_[y] for c_ in cols[:1]+cols+cols[-1:]*2] for y in range(th)]  # the edges a texel left and above, two right and below
     rows=rows[:1]+rows+rows[-1:]*2
-    return dict(px=[p for r in rows for p in r],ts=tw+3,u0=(fw-PW)//2,v0=(fh-290)//2,rx=tw-fw,ry=th-fh)
+    return dict(px=[p for r in rows for p in r],ts=tw+3,u0=(fw-PW)//2,v0=(fh-PH)//2,rx=tw-fw,ry=th-fh)
 def at(r,period,t):  # drift_at: smoothstep ping-pong, s in 1/65536
     t%=2*period; s=((t if t<period else 2*period-t)<<16)//period; return r*256*((s*s*(3*65536-2*s))>>24)>>24
 def bspline(t):  # bspline_w: the cubic B-spline's 4 weights at phase t/256, in 1/256
@@ -656,29 +657,29 @@ def tap4(a,b,c_,d,w):  # tap4: 4 texels weighted, rounded
 def framed(c,t):  # the panel at phase t, as home_render filters it: across each cover row, then down
     u,v=c['u0']*256+at(c['rx'],X,t),c['v0']*256+at(c['ry'],Y,t); ts,px=c['ts'],c['px']
     wx,wy=bspline(u&255),bspline(v&255); i=(v>>8)*ts+(u>>8)  # texel -1, -1 from u, v
-    rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+293*ts,ts)]
-    out=[vig(tap4(*k,wy),VIG(y)) for y in range(290) for k in zip(*rows[y:y+4])]
+    rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+(PH+3)*ts,ts)]
+    out=[vig(tap4(*k,wy),VIG(y)) for y in range(PH) for k in zip(*rows[y:y+4])]
     return struct.pack(f'<{len(out)}I',*out)
 # Split's vignette (coverflow.c vig_k, vig): the frame's rows darkened at its top and bottom edges, in 256ths, by the
-# tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 30.
+# tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 320 - PH.
 VIG_T={n:[int(v) for v in re.search(rf'{n}\[VIG_\w+\] = {{([^}}]*)}}',(ROOT/'patch/coverflow.c').read_text()).group(1).split(',')]
        for n in ('vig_top','vig_bot')}
 def VIG(y):
-    y+=320-290; return VIG_T['vig_top'][max(y,0)] if y<len(VIG_T['vig_top']) else VIG_T['vig_bot'][319-y] if y>=320-len(VIG_T['vig_bot']) else 256
+    y+=320-PH; return VIG_T['vig_top'][max(y,0)] if y<len(VIG_T['vig_top']) else VIG_T['vig_bot'][319-y] if y>=320-len(VIG_T['vig_bot']) else 256
 def vig(c,k): return c if k>=256 else c&0xff000000|((c&0xff00ff)*k>>8&0xff00ff)|((c&0xff00)*k>>8&0xff00)
 def drawn():
     n=len(m.draws); m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0)
-    assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,290) and m.draws[-1][4]&1,m.draws[n:]
+    assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,CH) and m.draws[-1][4]&1,m.draws[n:]
     return m.draws[-1][5]
-# 319 square: fits 290 and zooms to 319, a texel a pixel; 638 square: each texel 2 x 2 averaged;
-# 1914 square: 6 x 6 sampled 3 x 3.
-m.art_size=(319,319); m.pixels.clear(); paint_home(); c=tex_of(319,319)
-assert m.nodes[m.art]['image']=='' and [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[SPLIT,0,PW,290]
-assert (c['u0'],c['v0'],c['rx'],c['ry'])==((290-PW)//2,0,29,29) and not drifts()
+# 352 square: fits the pane's PH (320) and zooms to 352, a texel a pixel; 704 square: each texel 2 x 2 averaged;
+# 2112 square: 6 x 6 sampled 3 x 3.
+m.art_size=(352,352); m.pixels.clear(); paint_home(); c=tex_of(352,352)
+assert m.nodes[m.art]['image']=='' and [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,CH]
+assert (c['u0'],c['v0'],c['rx'],c['ry'])==((PH-PW)//2,0,32,32) and not drifts()
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) in [x[:1] for x in m.calls]
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) not in [x[:1] for x in m.calls]  # unmoved: not rendered again
 paint_home(); m.advance(0); assert len(drifts())==1  # it arms on the next paint
-m.calls.clear(); m.advance(TICK); assert set(invalidated())=={(m.home,(SPLIT,0,PW,290))},invalidated()
+m.calls.clear(); m.advance(TICK); assert set(invalidated())=={(m.home,(PX,0,PW,CH))},invalidated()
 assert drawn()==framed(c,TICK)!=framed(c,0)  # a tick moves it by a fraction of a pixel
 m.advance(1000-TICK); assert drawn()==framed(c,1000) and len(drifts())==1; passed()
 m.advance(TICK); instructions[0]=0; assert drawn()==framed(c,1000+TICK); frame_cost=instructions[0]
@@ -727,16 +728,16 @@ def faded(old,new):
     while f<FADE: m.advance(FTICK); t+=FTICK; f+=FTICK
     assert drawn()==framed(new,t) and len(drifts())==1
     assert next(v[3] for v in m.timers.values() if v[1]==payload_syms['home_drift'])==TICK  # the pan's period again
-m.art_size=(638,638); m.pixels.clear(); m.byte(syms['g_playcover_type'],2)
-instructions[0]=0; paint_home(); filter_cost=instructions[0]; old,c=c,tex_of(638,638)
+m.art_size=(704,704); m.pixels.clear(); m.byte(syms['g_playcover_type'],2)
+instructions[0]=0; paint_home(); filter_cost=instructions[0]; old,c=c,tex_of(704,704)
 faded(old,c)
-m.art_size=(1914,1914); m.pixels.clear(); m.byte(syms['g_playcover_type'],1)
-instructions[0]=0; paint_home(); big_cost=instructions[0]; m.u.hook_del(pan_counter); old,c=c,tex_of(1914,1914); faded(old,c); passed()
+m.art_size=(2112,2112); m.pixels.clear(); m.byte(syms['g_playcover_type'],1)
+instructions[0]=0; paint_home(); big_cost=instructions[0]; m.u.hook_del(pan_counter); old,c=c,tex_of(2112,2112); faded(old,c); passed()
 # A player cover too long for DRIFT_TEXELS stays still, even with a Coverflow thumbnail that
 # could pan; neither arms the timer.
 m.art_sizes={'externpic.jpg':(4000,100)}; m.byte(syms['g_playcover_type'],2); m.advance(TICK); paint_home(); m.advance(TICK); paint_home()
-assert not drifts() and m.nodes[m.art]['image'].endswith('externpic.jpg') and m.get(m.art+O['W_W'])==290*40; passed()
-print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {ink_cost} to ink the bar\'s {PW} x {IH} rows over the pane, {fade_cost[0]} a cross-fade frame (every SLIDE_TICK_MS), {filter_cost} and {big_cost} to filter a 638 and a 1914 px cover once (payload only)')
+assert not drifts() and m.nodes[m.art]['image'].endswith('externpic.jpg') and m.get(m.art+O['W_W'])==CH*40; passed()
+print(f'Home pan on MIPS: {frame_cost} instructions a frame (every DRIFT_TICK_MS), {ink_cost} to ink the bar\'s {PW} x {IH} rows over the pane, {fade_cost[0]} a cross-fade frame (every SLIDE_TICK_MS), {filter_cost} and {big_cost} to filter a 704 and a 2112 px cover once (payload only)')
 
 # Accent (docs/internals.md#accent). The mapping: stock red blended with a neutral becomes the same
 # blend of the preset's red tone, alpha kept, under every preset, Crimson's too; greys, other hues and the

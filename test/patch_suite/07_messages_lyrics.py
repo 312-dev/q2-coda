@@ -1247,11 +1247,9 @@ m=CoverflowMachine(); m.open(); m.press(100)
 assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_KEY_LONG'],gap=0)==11
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
-# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the menu sheet, which the first
-# system_bar load writes) the playlist's own menu, Play, Shuffle, Rename and Delete; before it, the list's menu
-# (playlist_hold) with More… and New Playlist (stock's toolbar page edits from its toolbar). The playlist is found in the
-# live list by its cd_num, as New, Rename and Delete read that list again under the covers after they copied it: More…
-# opens the More page at its index there, and a playlist gone from it holds nothing.
+# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): the menu sheet's playlist menu, Play, Shuffle, Rename
+# and Delete. The playlist is found in the live list by its cd_num, as New, Rename and Delete read that list again under
+# the covers after they copied it, and a playlist gone from it holds nothing.
 PL_COVER_MENU=['Play','Shuffle','Rename','Delete']
 class PlaylistCoverMachine(CoverflowMachine):
     def __init__(self):
@@ -1283,11 +1281,9 @@ m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.rele
 rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
 assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # read again, reordered
-m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'
-m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',2); passed()
-for row in (0,1):  # its songs, by cd_num 10's query
-    m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))
-    assert m.run(row)==('Playing Next','Playing Last')[row] and m.query[:2]==('getMusicByPlayList',10) and len(m.names())==5; passed()
+m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'; passed()
+m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # Play: its songs, by cd_num 10's query
+assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',10) and m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2); passed()
 # ... each runs once the menu's dialog is destroyed (its close may still be animating, the dialog on top, and the
 # Playlists page's own click acts only on the top page), and from the pass after: the covers never close inside the
 # dialog's destroy.
@@ -1299,12 +1295,12 @@ def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in orde
     if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
     for t,f,ctx in list(m.nodes[w].get('handlers',())):
         if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-m=ClosingCoverMachine()  # New Playlist
+m=ClosingCoverMachine()  # Play
 m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
-m.pick(4); m.advance(0,clear=False); m.advance(0,clear=False)
-assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
-destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
-assert m.edits==[0] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
+m.pick('Play'); m.advance(0,clear=False); m.advance(0,clear=False)
+assert m.closing==[dlg] and m.top==dlg and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.closing,m.opened)
+destroyed(m,dlg); assert len(m.opened)==1; m.advance(0,clear=False)
+assert [o[0] for o in m.opened]==['dialog/sortselect_dialog','playing_page'],m.opened; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[1:]))  # List 0 deleted under the covers
 m.press(100); assert m.hold()!=11 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 # More's Rename or Delete over the covers: as the covers come back to the front the playlists are read again
@@ -1321,12 +1317,11 @@ assert len(m.nodes[s]['children'])==2 and m.get(s+O['SLIDE_INDEX'])==0 and cover
 m.heads=[]; closes=sum(c[0]=='window_manager_close_window_force' for c in m.calls); pl_front(m)
 assert sum(c[0]=='window_manager_close_window_force' for c in m.calls)==closes+1; passed()
 # A Rename under the covers: the covers show the new name and so does the hold's title, from the cover's own record, the
-# live list (p_deque_playlist) keeping the old name until the page is on top; More… still goes by its index there.
+# live list (p_deque_playlist) keeping the old name until the page is on top.
 m=PlaylistCoverMachine(); m.word(m.slide+O['SLIDE_INDEX'],1); m.advance(0)
 new_one=m.song('Renamed',4); m.word(new_one+O['REC_TITLE'],m.string('Renamed')); m.word(new_one+O['REC_DISC'],11)
 m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
-m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
-m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
+m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']; passed()
 # New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
 # own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
 # (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
