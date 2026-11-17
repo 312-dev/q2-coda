@@ -273,7 +273,7 @@ def main():
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
     ap.add_argument('--python', default=sys.executable)
-    ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_train.py hands it')
+    ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_batch.py and merge_train.py hand it')
     args = ap.parse_args()
     branch = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True,
                             text=True).stdout.strip()

@@ -1,13 +1,18 @@
-"""Checks of tools/ci: the affected-tests rules and patch_shards.py's slices, on small made-up files.
+"""Checks of tools/ci: the affected-tests rules, patch_shards.py's slices and merge_batch.py's bisection, on
+small made-up files and a fake repository.
 
     python3 -m pytest tools/ci -q     # no build, no stock ZIP; a second or two
 """
+import os
 import pathlib
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
 import emu_pool  # noqa: E402
+import gate  # noqa: E402
+import merge_batch  # noqa: E402
 import patch_shards  # noqa: E402
 
 ALL = affected.ALL
@@ -161,3 +166,186 @@ def test_a_changed_run_script_is_refused(tmp_path):
         assert 'run.sh has changed' in str(e)
     else:
         raise AssertionError('fit took a run.sh it cannot place the stand-in in')
+
+
+class FakeBatch:
+    """merge_batch.integrate's ops on a pretend repository: a commit is the tuple of branches merged onto the
+    tip; a suite fails when the commit holds a branch that breaks it (bad) or a pair that breaks it together
+    (pairs); a branch in conflicts never merges."""
+    def __init__(self, bad=None, pairs=(), conflicts=(), flaky=0, red_tip=()):
+        self.bad, self.pairs, self.conflicts, self.flaky = bad or {}, pairs, set(conflicts), flaky
+        self.red_tip = set(red_tip)  # suites the tip fails on its own
+        self.runs = []
+
+    def assemble(self, level, base, branches):
+        merged = [b for b in branches if b not in self.conflicts and b not in base]
+        return base + tuple(merged), merged, {b: 'conflicts' for b in branches if b in self.conflicts}
+
+    def test(self, level, head, suites, tag):
+        self.runs.append((level, head, suites))
+        broken = {s for b in head for s in self.bad.get(b, ())}
+        broken |= {s for a, b, s in self.pairs if a in head and b in head}
+        broken |= self.red_tip
+        if self.flaky:
+            self.flaky -= 1
+            broken.add('unit')
+        everything = ['unit', 'fw', 'patch']
+        return {s: merge_batch.Suite(s not in broken, f'{s}.log') for s in (suites or everything)}
+
+
+def integrate(fake, n=10):
+    return merge_batch.integrate(fake, (), [f'b{i}' for i in range(n)], log=lambda m: None)
+
+
+def test_a_green_batch_lands_whole_after_one_run():
+    fake = FakeBatch()
+    r = integrate(fake)
+    assert r.landed == [f'b{i}' for i in range(10)] and r.head == tuple(r.landed) and not r.culprits
+    assert len(fake.runs) == 1 and fake.runs[0][2] is None  # one run, of everything
+
+
+def test_one_culprit_is_found_and_the_rest_land_on_a_tested_commit():
+    fake = FakeBatch(bad={'b6': {'patch'}})
+    r = integrate(fake)
+    assert list(r.culprits) == ['b6'] and set(r.culprits['b6']) == {'patch'}
+    assert r.landed == [b for b in (f'b{i}' for i in range(10)) if b != 'b6']
+    assert r.head == tuple(r.landed) and fake.runs[-1] == (0, r.head, None)  # the remainder, tested in full
+    bisect = [run for run in fake.runs if run[2] is not None]
+    assert all(s == ['patch'] for _, _, s in bisect)  # only the failing suite while bisecting
+
+
+def test_one_culprit_costs_a_few_runs_wherever_it_is():
+    for i in range(10):
+        fake = FakeBatch(bad={f'b{i}': {'unit'}})
+        r = integrate(fake)
+        bisect = [run for run in fake.runs if run[2] is not None]
+        assert list(r.culprits) == [f'b{i}'] and len(bisect) <= 7, (i, len(bisect))  # the tip, then about log2(10) + 2
+
+
+def test_two_culprits_in_different_halves():
+    fake = FakeBatch(bad={'b1': {'unit'}, 'b8': {'fw'}})
+    r = integrate(fake)
+    assert set(r.culprits) == {'b1', 'b8'} and len(r.landed) == 8
+    assert r.culprits['b1'].keys() == {'unit'} and r.culprits['b8'].keys() == {'fw'}
+
+
+def test_a_pair_that_fails_together_rejects_the_later_one():
+    fake = FakeBatch(pairs=[('b2', 'b7', 'patch')])
+    r = integrate(fake)
+    assert list(r.culprits) == ['b7'] and 'b2' in r.landed
+
+
+def test_a_conflict_is_skipped_not_a_stop():
+    fake = FakeBatch(conflicts=['b3'])
+    r = integrate(fake)
+    assert r.skipped == {'b3': 'conflicts'} and len(r.landed) == 9 and len(fake.runs) == 1
+
+
+def test_a_failure_bisection_cannot_find_lands_nothing():
+    fake = FakeBatch(flaky=1)  # the batch run fails, every half passes
+    r = integrate(fake)
+    assert r.head is None and not r.landed and not r.culprits and len(r.skipped) == 10
+
+
+def test_a_red_tip_lands_nothing_and_blames_no_branch():
+    fake = FakeBatch(red_tip={'unit'})
+    r = integrate(fake)
+    assert not r.culprits and not r.landed and len(r.skipped) == 10
+    assert [h for _, h, _ in fake.runs] == [tuple(f'b{i}' for i in range(10)), ()]  # the batch, then the tip
+
+
+def test_a_half_known_to_fail_is_not_tested_again():
+    fake = FakeBatch(bad={'b9': {'unit'}})
+    integrate(fake)
+    heads = [h for _, h, suites in fake.runs if suites is not None]
+    assert len(heads) == len(set(heads))  # no commit tested twice while bisecting
+
+
+def test_restrict_keeps_the_named_suites():
+    plan = {'unit': ['test_docs.py'], 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
+    cut = merge_batch.restrict(plan, ['fw', 'test/build.py'])
+    assert cut['unit'] == [] and cut['patch'] == [] and cut['fw'] == 'all' and cut['other'] == ['test/build.py']
+
+
+def test_ready_list_last_line_for_a_branch_wins(tmp_path):
+    ready = tmp_path/'ready.txt'
+    ready.write_text('feat/a 111\n# a comment\nfeat/b\nfeat/a 222  # again\n')
+    assert merge_batch.read_ready(ready) == [('feat/a', '222'), ('feat/b', None)]
+    assert merge_batch.take_ready(ready, tmp_path/'taken') == [('feat/a', '222'), ('feat/b', None)]
+    assert ready.read_text() == '' and 'feat/b' in (tmp_path/'taken').read_text()
+
+
+def fake_suite(name, seconds, rc=0, needs_build=False):
+    return gate.Suite(name, [sys.executable, '-c', f'import time, sys; time.sleep({seconds}); sys.exit({rc})'],
+                      needs_build=needs_build)
+
+
+def test_gate_holds_a_suite_that_would_leave_too_little_memory(tmp_path):
+    a, b = fake_suite('a', 0.3), fake_suite('b', 0.1)
+    a.mem = b.mem = 1.5
+    events = []
+    results = gate.run({'a': a, 'b': b}, [], tmp_path, sys.executable, build='B', log=events.append, mem=lambda: 6.0,
+                       poll=0.02)
+    starts = [e for e in events if e.startswith(('start', 'ok'))]
+    # 6 GB less a's 1.5 leaves 4.5, and b's 1.5 more would go under the 4 GB floor: b waits for a
+    assert [e.split()[1].rstrip(':') for e in starts] == ['a', 'a', 'b', 'b']
+    assert results['a']['rc'] == 0 and results['b']['rc'] == 0
+
+
+def test_gate_runs_suites_together_when_memory_allows(tmp_path):
+    a, b = fake_suite('a', 0.3), fake_suite('b', 0.3)
+    events = []
+    gate.run({'a': a, 'b': b}, [], tmp_path, sys.executable, build='B', log=events.append, mem=lambda: 12.0, poll=0.02)
+    assert [e.split()[0] for e in events[:2]] == ['start', 'start']
+
+
+def test_gate_skips_what_needs_a_failed_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, 'ROOT', tmp_path)
+    (tmp_path/'tools/ci').mkdir(parents=True)
+    (tmp_path/'tools/ci/rebuild.py').write_text('import sys; sys.exit(3)\n')
+    monkeypatch.setattr(gate, 'HEAVY', tmp_path/'none')
+    suites = {'p': fake_suite('p', 0, needs_build=True), 'u': fake_suite('u', 0, rc=1)}
+    results = gate.run(suites, [], tmp_path/'logs', sys.executable, log=lambda m: None, mem=lambda: 12.0, poll=0.02)
+    assert results['build']['rc'] == 3 and results['p']['rc'] == 'no build' and results['u']['rc'] == 1
+    assert 'FAILED: build, u, p' in gate.table(results, 1) or 'FAILED: build, p, u' in gate.table(results, 1)
+
+
+def test_gate_plan_that_runs_everything_is_the_whole_gate(tmp_path):
+    every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
+    assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.FULL)
+    docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
+    assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
+    # --only: the plan's unit as the plan has it, fw-asan (only the whole gate has it) whole, patch (the
+    # plan lacks it: its changes cannot reach it) not at all
+    only = gate.suites_for(docs, ['fw-asan', 'unit', 'patch'], 'py', tmp_path)
+    assert list(only) == ['fw-asan', 'unit']
+    assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'
+
+
+def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
+    pidfile = tmp_path/'grandchild'
+    s = gate.Suite('s', ['bash', '-c', f'sleep 30 & echo $! > {pidfile}; wait'])
+    def clock():  # the loop's turn after the grandchild started is when the gate is stopped
+        if pidfile.exists() and pidfile.read_text().strip():
+            raise KeyboardInterrupt
+        return time.monotonic()
+    try:
+        gate.run({'s': s}, [], tmp_path, sys.executable, build='B', log=lambda m: None, mem=lambda: 12.0,
+                 clock=clock, poll=0.05)
+    except KeyboardInterrupt:
+        pass
+    pid = int(pidfile.read_text())
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f'suite s\'s sleep ({pid}) outlived the gate')
+
+
+def test_bisection_never_takes_more_than_the_dry_run_says():
+    for n in (1, 2, 5, 10):
+        fake = FakeBatch(bad={f'b{i}': {'unit'} for i in range(n)})  # every branch bad: the worst case
+        integrate(fake, n)
+        assert len([run for run in fake.runs if run[2] is not None]) <= 2 * n - 1  # merge_batch.dry_run's bound
