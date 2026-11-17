@@ -1010,7 +1010,7 @@ assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 # Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, the seven its box shows and then
 # any it scrolls in, so the last rests where the seventh did; it stops at both ends however long the
 # pause, Return selects Now Playing, the bar spans the list's width and centre clicks the image.
-m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
+m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
 m.paint(view)
 assert m.selected(view)==0
 last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),7)
@@ -1029,7 +1029,7 @@ assert not m.slides and m.confirm()==11 and m.dispatched()[0][1]==imgs[2]; passe
 
 # Boot: if Home's first paint comes before the screen is usable, no row is chosen or drawn. The
 # status bar's next paint repaints the list, once, and Now Playing gets the bar.
-m=Machine(); view,imgs=home_list(m); bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar); m.word(bar+O['W_PARENT'],m.wm)
+m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar); m.word(bar+O['W_PARENT'],m.wm)
 paint_bar=lambda: m.call(address=HOOKS['widget_on_paint_background'][0],args=(bar,m.canvas,0,0))
 m.byte(syms['g_backlight_status'],0); m.paint(view); assert m.selected(view)==-1 and not m.drawn()
 paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.calls]
@@ -1170,7 +1170,7 @@ def canvas_state(m):
     return (m.lcd_colors(),m.get(m.lcd+O['LCD_TEXT_COLOR']),m.get(m.canvas+O['CANVAS_ALIGN_V']),
             m.get(m.canvas+O['CANVAS_ALIGN_H']),m.clip)
 def letter_machine(virtual,n=40,**config):
-    m=Machine(); m.config.update(config); m.word(m.canvas+O['CANVAS_ALIGN_V'],2)
+    m=Machine(); m.config.update(FLAT); m.config.update(config); m.word(m.canvas+O['CANVAS_ALIGN_V'],2)
     m.word(m.canvas+O['CANVAS_ALIGN_H'],3); m.word(m.lcd+O['LCD_TEXT_COLOR'],0x11223344)
     if virtual:
         w,rs,es=m.table_page(rebind=True); m.word(w+O['TABLE_ROWS'],n)

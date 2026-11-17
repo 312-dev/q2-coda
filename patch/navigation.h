@@ -520,12 +520,15 @@ void cc_keydown(unsigned key), cc_hold(int stop);
 /* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
 #define QUICK_CC 16
 void quick_hold(void *button, int page);
-/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
+/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep),
+ * and sinks and springs back under Centre (tilt_press, from ringnav_input; tilt_tone its blue) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 int tilt_clip(void *canvas, int *old);
 void tilt_end(void *w, int dir);
+void tilt_press(int down);
+unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
@@ -584,6 +587,12 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* --dev builds: the emulator's stand-in for Wi-Fi, a headset, a charger; -1 for none */
+#if Q2POD_DEV
+int status_fake(char key);
+#else
+#define status_fake(key) (-1)
+#endif
 /* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
  * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
 void charge_plugged(void), charge_limited(void), usb_charger_in(void);
