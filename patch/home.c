@@ -314,7 +314,8 @@ static int shown_foot(void *view) {
 int home_rest(void *view, int *foot) {
     if (!view || view != coverflow_home_view() || !widget_count_children(view)) return 0;
     if (foot) *foot = shown_foot(view);
-    return HOME_REST * I(widget_get_child(view, 0), W_H);
+    /* a row fewer in Edit Home, the hint under them (library_edit.c lr_edit_room) */
+    return HOME_REST * I(widget_get_child(view, 0), W_H) - lr_edit_room(view);
 }
 
 /* The scroll view's content as AWTK's touch scroll clamps it (to the content less the view): the
@@ -429,22 +430,25 @@ static int lip(int x) {
 /* Every other scrolling list's fades (navigation.c list_fade), Home (Full)'s on a list whose box
  * runs on below the set's list end: rows top to bottom on the screen, the list's top and box's foot;
  * end, the list end (y 282 on OLED), past which rows peek through a fade into the ground from
- * FULL_FOOT_CLEAR above it to FULL_FOOT_GROUND; above (scrolled) fades its first FULL_TOP_CLEAR px
- * from FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on
- * the screen, is never faded. Inside the canvas's clip. */
-void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1) {
+ * FULL_FOOT_CLEAR above it to foot, or FULL_FOOT_GROUND when foot is 0 (an editor's hint's band,
+ * library_edit.c lr_edit_foot); above (scrolled) fades its first FULL_TOP_CLEAR px from
+ * FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on the
+ * screen, is never faded. Inside the canvas's clip. */
+void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
+                int s1) {
     if (!P(canvas, CANVAS_LCD) || (!above && !below)) return;
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), clip[4];
     canvas_get_clip_rect(canvas, clip);
     int y0 = clip[1] > top ? clip[1] : top, y1 = clip[1] + clip[3] < bottom ? clip[1] + clip[3] : bottom;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
              ground = ui_ink(RGBA(0)) & 0xffffffu;
-    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR;
+    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR,
+        ground_y = foot ? foot : FULL_FOOT_GROUND;
     for (int y = y0; y < y1; ++y) {
         if (y >= s0 && y < s1) continue;
         int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
         if (below) {
-            int b = 256 - smooth(y - from, FULL_FOOT_GROUND - from);
+            int b = 256 - smooth(y - from, ground_y - from);
             if (b < k) k = b;
         }
         fade_row(canvas, ox, oy, ground, k, clip[0], y, clip[2]);
@@ -463,7 +467,8 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
     int foot, rest = home_rest(view, &foot);
     if (!rest || !P(canvas, CANVAS_LCD)) return;
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y); /* its origin on the screen */
-    int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest;
+    int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest,
+        foot_y = lr_edit_foot(view);
     if (!above && !below) return;
     /* the selected row, on the screen: SEL counts the rows shown */
     int sel = widget_get_prop_int(view, SEL, -1), s0 = 1, s1 = 0;
@@ -485,8 +490,8 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
         if (!split) {
             int clear = list_y + FULL_TOP_CLEAR, end = list_y + rest - FULL_FOOT_CLEAR;
             int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
-            if (below) {
-                int b = 256 - smooth(y - end, FULL_FOOT_GROUND - end);
+            if (below) { /* into Edit Home's hint's band while it is open */
+                int b = 256 - smooth(y - end, (foot_y ? foot_y : FULL_FOOT_GROUND) - end);
                 if (b < k) k = b;
             }
             fade_row(canvas, ox, oy, ground, k, 0, y, cols);

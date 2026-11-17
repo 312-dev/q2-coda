@@ -111,8 +111,10 @@ typedef struct {
     int timeout_ms, timeout_row;
     void (*answer)(void *ctx, int row, int toggle_on);
     void *ctx;
+    const char *glyph; /* a theme image's name over the title (pair_prompt's phone), or 0 */
 } confirm_t;
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
+void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
 void confirm_close(void);        /* closes the card without an answer */
 int confirm_up(void);            /* a card is up */
 /* Motion (docs/oled-design.md#motion): every animation's duration, curve and timer go through

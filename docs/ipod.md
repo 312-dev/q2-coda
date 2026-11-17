@@ -101,8 +101,13 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, by default in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
-Folders, Cover Flow, Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
+The seven rows, by default in the order the menu review chose (2026-11-15), are the play state's row, Library,
+Streaming, Folders, Cover Flow, Search and Settings. **The first row** is stock's Now Playing row named for what plays
+(`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
+guest plays ([internals](internals.md#guest-play)), when it opens the guest's Now Playing (its click and a short
+Return, `guest_home_np`), else the owner's. It leads with the play state, which leaves the status row while the row
+is in sight (`home_np_lead`, [oled-design](oled-design.md#homes-first-row)), and only its words move, 18 px past the
+glyph; Edit Home lists it as Playing. The row is there only while something is loaded, playing or paused, or a guest plays, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;

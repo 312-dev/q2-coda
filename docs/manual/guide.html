@@ -330,12 +330,12 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
   <h2 id="ui">Finding your way around</h2>
   <img class="shot" src="../../assets/screenshots/home-split.png" alt="Home in the Split layout: Now Playing, Library, Cover Flow, Folder, Favorites, Streaming and Settings on the left, the playing album’s cover on the right">
   <ul>
-    <li><b>Home:</b> a list (Now Playing, there while a song is playing or paused, Library, Streaming, Folders, there once the SD card has folders, Cover Flow, Search, Settings) beside the playing track’s cover; the cover follows the row you’re on, the playing album’s on Now Playing and your library’s covers in turn on the others. <b>Settings</b> lists <b>Wi-Fi</b>, <b>Bluetooth</b>, <b>General</b> (About, System Update, Storage, Date &amp; Time, App Store, Network, Reset Settings, Restart and Shut Down), <b>Playback</b>, <b>Car Remote</b>, <b>Display</b>, <b>Controls</b> and <b>Battery</b>. It stops at either end. A short Return on it selects its first row, and on Now Playing another opens it without changing playback; Return there goes back to Home. <b>Your own Home (Theme: OLED):</b> hold Center on Home, or hold a row with your finger, for <b>Edit Home</b>: move rows as in Edit Library (below), and press Play/Pause, or tap the circle on a row’s left, to show or hide it (a filled circle shows, an empty one is hidden). Settings always stays. Folders, once shown or hidden here, stays that way.</li>
+    <li><b>Home:</b> a list (<b>Playing</b> or <b>Paused</b>, there while a song is playing or paused, with moving bars or a pause sign before it, Library, Streaming, Folders, there once the SD card has folders, Cover Flow, Search, Settings) beside the playing track’s cover; the cover follows the row you’re on, the playing album’s on Playing and your library’s covers in turn on the others. <b>Settings</b> lists <b>Wi-Fi</b>, <b>Bluetooth</b>, <b>General</b> (About, System Update, Storage, Date &amp; Time, App Store, Network, Reset Settings, Restart and Shut Down), <b>Playback</b>, <b>Car Remote</b>, <b>Display</b>, <b>Controls</b> and <b>Battery</b>. It stops at either end. A short Return on it selects its first row, and on Playing or Paused another opens Now Playing without changing playback; Return there goes back to Home. <b>Your own Home (Theme: OLED):</b> hold Center on Home, or hold a row with your finger, for <b>Edit Home</b>: move rows as in Edit Library (below), and press Play/Pause, or tap the circle on a row’s left, to show or hide it (a filled circle shows, an empty one is hidden). Settings always stays. Folders, once shown or hidden here, stays that way.</li>
     <li><b>Home layouts:</b> <b>Home: Full</b> drops the cover and widens the list. <b>Home: Carousel</b> shows Shanling’s home carousel instead: eight cards (Now Playing, Library, Cover Flow, Folder, a shortcut to Rockbox when it’s on the card, otherwise Favorites, Streaming, Playback and System settings) in Shanling’s own colors. The wheel moves through the cards, Center opens one, and Return works as it does on Shanling’s own Home.</li>
     <li><b>Settings:</b> slides <b>Playback</b> and <b>System</b> into the list’s place, as an iPod’s submenu, with the cover still beside it. It stops at its ends too; Return goes back.</li>
     <li><b>Folder:</b> opens the SD card directly when no OTG drive is connected. Return at the SD root goes back to Home; inside a folder it goes up one level. With OTG connected when Folder opens, choose SD or OTG first. A folder set in <b>Playback → Library &amp; Folders → Folder Root</b> opens directly either way; Return climbs from it to the SD root, then to Home, or to the SD/OTG choice with OTG connected.</li>
     <li><b>Lists:</b> four rows per screen with a full-width accent bar; <b>&gt;</b> marks rows that open another list.</li>
-    <li><b>Status bar:</b> play state, EQ, time, Bluetooth, Wi-Fi and battery. The Bluetooth codec (AAC, LDAC…) shows briefly on connect. Under the OLED theme, right to left: the battery, moving level bars while a song plays (tap them for Now Playing), Wi-Fi's signal, a streaming app's sync, a Bluetooth headset's battery and the Buttons Lock padlock.</li>
+    <li><b>Status bar:</b> play state, EQ, time, Bluetooth, Wi-Fi and battery. The Bluetooth codec (AAC, LDAC…) shows briefly on connect. Under the OLED theme, right to left: the battery, moving level bars while a song plays (tap them for Now Playing), Wi-Fi's signal, a streaming app's sync, Bluetooth (a headset's battery, a car) and the Buttons Lock padlock.</li>
     <li><b>Page slides:</b> pages slide in from the right and back out on Return.</li>
     <li><b>Long titles:</b> pause on a row and a title too long to fit scrolls so you can read it.</li>
     <li><b>Fast-scroll letter:</b> spinning a long list shows the letter it sorts under (C for The Cure). A list with the A-Z index shows it on the index instead.</li>
@@ -913,7 +913,7 @@ http://stream.radioparadise.com/mp3-128</pre>
       <tr><td>Track Time</td><td>Now Playing’s right-hand time: Remaining (default) or Total. Tapping the time switches it</td></tr>
       <tr><td>Enlarged Album Art</td><td>Stock’s setting. On: after 10 seconds on Now Playing’s art page the album art fills the screen; any tap or Return closes it</td></tr>
       <tr><td>Position Bar</td><td>Off (default). On: a thin bar under the captions shows where you are in the covers while you browse, then fades when you stop</td></tr>
-      <tr><td>Smart Awake</td><td>On (default): while a song plays, the screen stays lit on Now Playing’s lyrics page, full-screen lyrics included, on its About page and on the full-screen album art, so you can read along or watch without pressing a key. With Enlarged Album Art on, that includes the art page once the full-screen art opens there. An App Store game in Games stays open and lit too, playing or not, until you close it. Otherwise, on the art page, while paused, or anywhere else, Screen Off Time applies as usual</td></tr>
+      <tr><td>Smart Awake</td><td>On (default): while a song plays, the screen stays lit on Now Playing’s lyrics page, full-screen lyrics included, on its About page and on the full-screen album art, so you can read along or watch without pressing a key. With Enlarged Album Art on, that includes the art page once the full-screen art opens there. A guest’s Now Playing (Guest Play) stays lit too while the guest’s song plays. An App Store game in Games stays open and lit too, playing or not, until you close it. Otherwise, on the art page, while paused, or anywhere else, Screen Off Time applies as usual</td></tr>
       <tr><td>Night Shift</td><td>Off (default), On or Auto, with a warmth from 5000K to 2000K, 3400K by default: the screen’s colors shift warmer, easier on the eyes at night. Center (or a tap on its row) cycles Off, On and Auto; Auto warms the screen from 19:00 to 7:00, the hours Light Mode’s Auto is dark. Turn the wheel or drag the slider right for warmer; a move while it is off turns it on. Videos stay untinted.</td></tr>
     </tbody>
   </table>
@@ -1007,17 +1007,19 @@ http://stream.radioparadise.com/mp3-128</pre>
   <div class="sec">
   <h2 id="bt">Bluetooth headphones</h2>
   <ul>
-    <li><b>Codec:</b> the Bluetooth codec (AAC, LDAC…) shows briefly in the status bar on connect.</li>
-    <li><b>Quality:</b> LDAC HQ is 990 kbps (909 for 44.1 kHz music), LDAC Standard 660 (606), and LDAC Connection (auto) adapts to the connection, including intermediate 492 and 396 kbps rates at 48/96 kHz. Auto uses discrete rates, not 1 kbps increments. Try Auto when HQ breaks up. Rockbox uses the last choice made here.</li>
+    <li><b>The page:</b> <b>Settings → Bluetooth</b> lists your devices first, <b>My Devices</b> then <b>Other Devices</b> (it looks for new ones by itself while open; a spinner turns beside Other Devices), then the settings under <b>Audio</b>. The connected device reads <b>Connected · LDAC · 72%</b> (its codec and, if it reports one, its battery).</li>
+    <li><b>Connecting:</b> Center on a paired device connects it. Center on the connected one, or hold Play/Pause on any paired one, opens its page: how the sound gets there and at what quality, its battery, <b>Disconnect</b> (or <b>Connect</b>), <b>Rename</b> (the name shown on this Q2) and <b>Forget This Device</b>, which asks first; you'll need to pair it again to use it.</li>
+    <li><b>Status bar:</b> a dim Bluetooth glyph while a device connects, a white one once connected, headphones with a small battery (red under 20%) when the headset reports its level, or a car. A toast says when a device connects or disconnects, and when headphones run low (at 20% and 10%).</li>
+    <li><b>Quality:</b> each choice shows its bit rate. LDAC Best is 990 kbps (909 for 44.1 kHz music), LDAC Standard 660 (606), and LDAC Auto adapts to the connection, including intermediate 492 and 396 kbps rates at 48/96 kHz. Auto uses discrete rates, not 1 kbps increments. Try Auto when HQ breaks up. Rockbox uses the last choice made here.</li>
     <li><b>Where things play:</b> Spotify, Internet Radio and video sound play on the headphone jack, Bluetooth or a USB DAC.</li>
   </ul>
   <div class="sub">
   <h3>Name</h3>
-  <p>Phones, cars and speakers list the Q2 as <b>Q2</b>. To call it something else, open <b>Settings → Bluetooth → Name</b> (second row, while Bluetooth is on), type the new name on the letter strip (Play/Pause switches between lower case, capitals, numbers and symbols) and press <b>Next</b> at the end of the name. Up to 30 characters; hold <b>Return</b> to leave without changing it. The new name is used at once: a phone searching sees it straight away, and one already paired shows it the next time it connects (some phones keep the old name until you forget and pair the Q2 again). It stays through updates; resetting the Q2's settings brings back <b>Q2</b>.</p>
+  <p>Phones, cars and speakers list the Q2 as <b>Q2 Muse</b>. To call it something else, open <b>Settings → Bluetooth → Name</b> (second row), type the new name on the letter strip (Play/Pause switches between lower case, capitals, numbers and symbols) and press <b>Next</b> at the end of the name. Up to 30 characters; hold <b>Return</b> to leave without changing it. The new name is used at once: a phone searching sees it straight away, and one already paired shows it the next time it connects (some phones keep the old name until you forget and pair the Q2 again). It stays through updates; resetting the Q2’s settings brings back <b>Q2 Muse</b>.</p>
   </div>
   <div class="sub">
   <h3>Guest Play</h3>
-  <p>A friend’s phone can play through the Q2 to whatever the Q2 plays to: your car, your headphones, or the headphone jack. Turn on <b>Settings → Bluetooth → Guest Play</b>, then choose <b>Let a Guest Connect</b>: for two minutes the Q2 shows up on phones under the Guest Play name (your Bluetooth name unless you set another). A new phone shows a six-digit code on both screens; check they match, then answer on the Q2.</p>
+  <p>A friend’s phone can play through the Q2 to whatever the Q2 plays to: your car, your headphones, or the headphone jack. Turn on <b>Settings → Bluetooth → Guest Play</b>, then choose <b>Let a Guest Connect</b>: for two minutes the Q2 shows up on phones under the Guest Play name (your Bluetooth name unless you set another). A new phone shows a six-digit code on both screens; the Q2 asks “Pair with Alex’s Pixel?” over the code. Check they match, then answer on the Q2.</p>
   <ul>
     <li><b>Allow Once</b> (selected, so one Center press answers) lets it play this time; <b>Always Allow</b> adds it to <b>Trusted Guests</b>, which play without asking; <b>Decline</b> refuses. With no answer the Q2 declines after 30 s.</li>
     <li>One guest at a time: a second asks to <b>Replace</b> the first, with <b>Keep</b> selected.</li>
@@ -1025,11 +1027,13 @@ http://stream.radioparadise.com/mp3-128</pre>
     <li>The car shows the guest’s song, and its buttons (play, pause, next, previous) control the guest’s phone. Guests play in AAC or SBC.</li>
     <li><b>Hotspot</b> (in Guest Play's settings): the Q2 makes its own Wi-Fi network for guests, named after Guest Play, with a password made up for you (change it if you like) and a QR code a phone’s camera can join from. It stays on alongside the Q2’s own Wi-Fi connection, on the same channel.</li>
     <li>Turning Guest Play on or off reconnects a connected car or headset once. While it is on, the Q2 does not act as a Bluetooth receiver for your own phone.</li>
+    <li><b>While a guest plays</b>, their song shows on the Q2 with where the sound goes and the quality on each leg; press Center for <b>Stop Guest Play</b>. Play/Pause, Next and Previous control the guest’s phone. The status bar shows a blue phone.</li>
+    <li><b>Shortcuts:</b> the <b>Guest</b> tile in Control Center turns Guest Play on or off (hold it for the settings), and while a guest plays Home’s first row reads <b>Guest Play</b> and opens the guest’s song.</li>
   </ul>
   </div>
   <div class="sub">
   <h3>Resume on Connect</h3>
-  <p>This setting sits under <b>Bluetooth Headset Volume Control</b>, while Bluetooth is on.</p>
+  <p>This setting sits under <b>Audio</b>, after <b>Headset Volume</b>, while Bluetooth is on.</p>
   <table>
     <thead><tr><th>Option</th><th>What happens when a headset connects</th></tr></thead>
     <tbody>
@@ -1039,8 +1043,8 @@ http://stream.radioparadise.com/mp3-128</pre>
   </table>
   </div>
   <div class="sub">
-  <h3>Control Device Volume</h3>
-  <p>This switch sits under <b>Resume on Connect</b>, while Bluetooth is on.</p>
+  <h3>Link Volume</h3>
+  <p>This switch sits under <b>Resume on Connect</b>, last under <b>Audio</b>, while Bluetooth is on.</p>
   <table>
     <thead><tr><th>Option</th><th>What the Q2’s volume does</th></tr></thead>
     <tbody>
@@ -1188,7 +1192,8 @@ http://stream.radioparadise.com/mp3-128</pre>
     <li><b>Cover Flow prepares artwork every time it opens.</b> Albums it finishes are never prepared again, even those with no cover, so the count is albums it couldn’t finish. Usually the library still lists songs that were moved, renamed or deleted on the card: run <b>Library → Update Local Music</b>, and the count goes away. If it stays, those albums’ covers are probably too big to read: shrink them as above, then press <b>Refresh Cover Flow</b>. The Q2 doesn’t say which albums they are.</li>
     <li><b>No sound, or sound from the wrong output.</b> Unplug and reconnect the headphones, and check <b>Volume</b> and the status bar. Playback uses whichever output is active when it starts: headphone jack, Bluetooth or a USB DAC. For Spotify, pause and play again after switching. If local music stays silent after streaming, use <b>Streaming → Configuration → Stop Streaming Services</b> (<a href="#stream-config">Configuration</a>).</li>
     <li><b>The PC doesn’t see the Q2 as a USB DAC.</b> Windows needs Shanling’s USB driver (V5.20, for the MTouch players), from <a href="https://en.shanling.com/download/69">en.shanling.com/download/69</a>. Install it, then plug the Q2 in again.</li>
-    <li><b>Bluetooth headphones drop out.</b> Set the quality to <b>LDAC Connection (auto)</b>, which adapts to the link. HQ is the most likely to break up (<a href="#bt">Bluetooth headphones</a>).</li>
+    <li><b>Bluetooth Stopped.</b> The Bluetooth chip stopped answering. The Q2 restarts itself after 10 s to bring it back; press Center for <b>Not Now</b> to keep using it without Bluetooth (and Wi-Fi, on the same chip) until you restart it.</li>
+    <li><b>Bluetooth headphones drop out.</b> Set the quality to <b>LDAC Auto</b>, which adapts to the link. LDAC Best is the most likely to break up (<a href="#bt">Bluetooth headphones</a>).</li>
     <li><b>Spotify won’t pair or download.</b> The phone and the Q2 must be on the same Wi-Fi, and the Spotify app’s device list must show Q2. New tracks need Wi-Fi; downloaded songs play without it. Browsing needs q2-librespot v1.3 or later, and <b>Download Playlist</b> needs v1.6 (<a href="#spinstall">Installing and pairing Spotify</a>). <b>Playback didn’t start</b> means no track arrived within 15 seconds: go back and try again.</li>
     <li><b>The screen turns off when you choose a row.</b> Two quick Center presses turn the screen off, on every page and over the keyboard. Choosing rows quickly, press once and wait a moment.</li>
     <li><b>Pocket controls wake the screen or press buttons.</b> Choose <b>Wake: Double Press</b> or set <b>Buttons Lock</b> (<a href="#settings-controls">Controls</a>).</li>

@@ -129,15 +129,22 @@ static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary,
     unsigned fill = !primary ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
                     : down   ? CTA_ACCENT_DOWN
                              : (scheme()->tones[0] & 0xffffffu);
-    if (lit && ui_focus_shown()) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */
+    unsigned raw = ui_ink_raw(1); /* final in both halves */
+    if (lit && ui_focus_shown()) {
+        /* a 2 px ring in Text Primary CTA_RING_OFF px out, concentric with the capsule: two
+         * one-pixel strokes of AWTK's antialiased rounded rect (the capsule's fill is its fill
+         * counterpart), each a pill of its own height, as frame_box draws a frame. A canvas
+         * that declines them (no vgcanvas) takes round_ring's row-at-a-time rings. */
         int o = CTA_RING_OFF + 2;
         rect_t a = { r->x - o, r->y - o, r->w + 2 * o, r->h + 2 * o },
                b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
         unsigned ink = RGBA(tok(TOK_PRIMARY));
-        round_ring(canvas, &a, a.h / 2, ink);
-        round_ring(canvas, &b, b.h / 2, ink);
+        if (canvas_stroke_rounded_rect(canvas, &a, (void *)0, &ink, a.h / 2, 1) ||
+            canvas_stroke_rounded_rect(canvas, &b, (void *)0, &ink, b.h / 2, 1)) {
+            round_ring(canvas, &a, a.h / 2, ink);
+            round_ring(canvas, &b, b.h / 2, ink);
+        }
     }
-    unsigned raw = ui_ink_raw(1); /* final in both halves */
     fill_box(canvas, r, RGBA(fill), CTA_H / 2);
     ui_ink_raw(raw);
     ui_text(canvas, label, 1, CTA_PX, primary ? 0xffffff : tok(TOK_PRIMARY), 1, r->x + r->w / 2,
