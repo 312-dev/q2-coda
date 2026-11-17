@@ -147,6 +147,12 @@ static void mono(void *canvas, const char *name, int x, int y, int d, int px, un
     ui_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
 }
 
+/* An album's cover in the header, on screen (art_zoom.c: Now Playing grows from it). */
+int hero_cover_box(rect_t *r) {
+    r->x = geom_val(V_TEXT_X), r->y = HERO_Y, r->w = r->h = HERO_MONO;
+    return 1;
+}
+
 /* The header's art, its top dy px down the canvas from the header's top on screen: the name's
  * monogram, or an album's cover (hero_cover) cropped square to HERO_MONO px with HERO_ART_R
  * corners, the #2C2C2E placeholder while it has none. */
