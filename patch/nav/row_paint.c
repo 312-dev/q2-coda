@@ -729,7 +729,8 @@ static void paint_selection(void *w, void *canvas) {
         if (modal_is_red(g_menu.at[i])) /* a menu's destructive row (menu_modal.c modal_red) */
             fill_box(canvas, &bar, RGBA(MODAL_RED), (unsigned)radius);
         else
-            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+            gradient(canvas, bar, tilt_tone(S->tones[0]), tilt_tone(S->tones[1]),
+                     tilt_tone(S->tones[4]), radius); /* brighter while pressed (tilt.c) */
         if (!tile) tilt_gleam(canvas, &bar, radius);
         if (leaning) canvas_set_clip_rect(canvas, surface_clip); /* the rows' own clip again */
         if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);

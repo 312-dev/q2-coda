@@ -206,6 +206,9 @@ int ringnav_input(void *wm, void *e) {
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
+    /* the selection bar's press (tilt.c), past the gates that drop a press with its release */
+    if (key == KEY_CENTER && (type == EVT_KEY_DOWN || type == EVT_KEY_UP))
+        tilt_press(type == EVT_KEY_DOWN);
     if (video_on()) {
         if (e && I(e, EVENT_TYPE) == EVT_KEY_UP) video_key((unsigned)I(e, EVENT_KEY));
         return 0;
