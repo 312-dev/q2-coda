@@ -374,3 +374,11 @@ def test_the_rest_lift_casts_a_shadow_that_the_press_pulls_in(fw):
     bar.poll(DOWN_MS)
     down = rings()
     assert len(down) == 3 and all(d < r for d, r in zip(down, rest))  # fainter: pulled in to a quarter
+
+
+def test_a_bar_in_no_window_paints_at_rest(fw):
+    """A list not under the window manager (a page being built or torn down) has no window: the rest lift sizes its
+    bar without the window's top to keep it under."""
+    bar = Press(fw)
+    C.c_void_p.from_buffer(bar.list, W_PARENT).value = None
+    assert bar.paint() == REST
