@@ -22,13 +22,17 @@ static inline card_blob *card_blob_at(card_blob *b, const char *card, const char
     return b;
 }
 
-/* 1 when the write is kept: on the card, or in RAM until card_blob_flush gets it there */
+/* 1 when the write is kept: on the card, or with the card away in RAM until card_blob_flush gets it
+ * there; 0 when a mounted card refuses it (nothing held: the caller retries) or RAM can't hold it */
 int card_blob_write(card_blob *b, const void *buf, unsigned n);
 /* the newest copy into buf (cap bytes at most): its length, or -1 for none anywhere */
 int card_blob_read(card_blob *b, void *buf, unsigned cap);
 /* a RAM copy to the card if it is up: 1 when nothing is left held */
 int card_blob_flush(card_blob *b);
-/* the record forgotten: the RAM copy and the card's file (the flash file is left) */
+/* the newest file to read in place, stdio, at its start, or 0 for none: the card's (copied from the
+ * flash once), or the flash's while there is no card. A RAM copy is not in it: card_blob_flush first. */
+void *card_blob_open(card_blob *b);
+/* the record forgotten: the card's file left empty, which reads as none (the flash file is left) */
 void card_blob_drop(card_blob *b);
 
 typedef struct {

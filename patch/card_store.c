@@ -55,11 +55,10 @@ static int cs_hold(card_blob *b, const void *buf, unsigned n) {
 }
 
 int card_blob_write(card_blob *b, const void *buf, unsigned n) {
-    if (card_mounted() && cs_save(b->card, buf, n)) {
-        b->held = 0, b->moved = 1;
-        return 1;
-    }
-    return cs_hold(b, buf, n);
+    if (!card_mounted()) return cs_hold(b, buf, n);
+    if (!cs_save(b->card, buf, n)) return 0; /* a card that refuses it: the caller retries */
+    b->held = 0, b->moved = 1;
+    return 1;
 }
 
 int card_blob_flush(card_blob *b) {
@@ -71,21 +70,46 @@ int card_blob_flush(card_blob *b) {
 
 int card_blob_read(card_blob *b, void *buf, unsigned cap) {
     if (b->held) {
+        if (!b->len) return -1; /* dropped */
         unsigned n = b->len < cap ? b->len : cap;
         memcpy(buf, b->ram, n);
         return (int)n;
     }
     int n = card_mounted() ? cs_load(b->card, buf, cap) : -1;
-    if (n >= 0 || !b->flash) return n;
+    if (n >= 0 || !b->flash || b->moved) return n > 0 ? n : -1; /* empty: dropped */
     /* No card copy yet: the flash file a release before this one wrote, copied to the card once. */
     n = cs_load(b->flash, buf, cap);
-    if (n >= 0 && card_mounted() && !b->moved) b->moved = cs_save(b->card, buf, (unsigned)n);
+    if (n >= 0 && card_mounted()) b->moved = cs_save(b->card, buf, (unsigned)n);
     return n;
+}
+
+/* The flash file copied whole to the card (cap bytes at most): 1 when the card has it. */
+static int cs_copy(card_blob *b) {
+    void *f = fopen(b->flash, "rb");
+    if (!f) return 0;
+    long size = !fseek(f, 0, 2) ? ftell(f) : -1;
+    void *buf = size > 0 && size <= (long)b->cap && !fseek(f, 0, 0) ? calloc(1, size) : 0;
+    int ok = buf && fread(buf, size, 1, f) == 1;
+    fclose(f);
+    ok = ok && cs_save(b->card, buf, (unsigned)size);
+    free(buf);
+    return ok;
+}
+
+void *card_blob_open(card_blob *b) {
+    if (!card_mounted()) return b->flash && !b->moved ? fopen(b->flash, "rb") : 0;
+    void *f = fopen(b->card, "rb");
+    if (!f && !b->moved && b->flash && (b->moved = cs_copy(b))) f = fopen(b->card, "rb");
+    unsigned char first;
+    if (f && fread(&first, 1, 1, f) != 1) fclose(f), f = 0; /* empty: dropped */
+    if (f) fseek(f, 0, 0);
+    return f;
 }
 
 void card_blob_drop(card_blob *b) {
     b->held = 0;
-    if (card_mounted()) unlink(b->card);
+    /* An empty file, not none: none would read the flash file again. */
+    if (!card_mounted() || !cs_save(b->card, "", 0)) cs_hold(b, "", 0);
 }
 
 /* The ring's oldest whole lines dropped until n more bytes fit. */
