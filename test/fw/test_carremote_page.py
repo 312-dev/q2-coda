@@ -8,7 +8,7 @@ import struct
 import time
 
 from conftest import O, mcl  # noqa: F401
-from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, peer
+from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, card_route, peer
 from test_nav_library_pages import call, empty_state, signed, ui  # noqa: F401
 from test_nav_hold import recs, scratch, st  # noqa: F401
 
@@ -166,9 +166,10 @@ def test_pair_a_phone_says_how_and_closes_when_one_pairs(fw, ui, mcl, recs):
     howto = ui.top()
     assert ui.name[howto] == 'carhowto_page'
     q2.files[PAIR] = b'852219\nGalaxy S24\n'
+    card_route(fw, ui)
     q2.tick()
-    assert ui.name[ui.top()] == 'carpair_page'
-    assert {'Pair with "Galaxy S24"?', '852 219', 'Enter this code in Q2 Muse Remote'} <= set(ui.shown(ui.top()))
+    assert ui.name[ui.top()] == 'sortselect_dialog'  # the pairing card (pair_prompt.c)
+    assert C.string_at(C.addressof(C.c_char.in_dll(fw.lib, 'pair_prompt__pair_name'))) == b'Galaxy S24'
     del q2.files[PAIR]
     q2.files[PAIR_END] = b'1\n'
     q2.tick()

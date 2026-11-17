@@ -680,6 +680,16 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_SCRIM 0x80000000u /* black at 50% */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
 #define CARD_COUNT_PX TYPE(15)
+#define CARD_GLYPH 28    /* tools/art.py PAIR_GLYPH_PX: a glyph over the title */
+#define CARD_GLYPH_GAP 6 /* its foot to the title's box */
+/* A title wider than the text column scrolls: the house marquee (docs/oled-design.md#motion),
+ * held CARD_MARQ_HOLD_MS at its start, then CARD_MARQ_PX px a second, a copy CARD_MARQ_GAP px
+ * behind, its ends faded CARD_MARQ_FADE px into the card. */
+#define CARD_MARQ_HOLD_MS 2750
+#define CARD_MARQ_PX 35
+#define CARD_MARQ_GAP 40
+#define CARD_MARQ_FADE 12
+#define CARD_MARQ_MS 33
 /* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
  * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity, which
  * ovm_bind hands to the frame timer: stock never paints a dialog at opacity 0); an
@@ -696,8 +706,9 @@ static struct {
     char title[96], body[2][64], code[16], row[2][24], toggle[48];
     const char *rows[2];
     int lines, toggle_on, top, rows_y, h, chosen;
-    unsigned timer, answer_timer, until;
-    ovm_t mo; /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
+    unsigned timer, answer_timer, until, marq_timer, marq_at;
+    int title_w; /* the title's width, measured at its first paint; 0 until then */
+    ovm_t mo;    /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
@@ -708,15 +719,22 @@ static int card_destructive(int row) {
     return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
 }
 
-/* The card's height and top, and where its switch row and answers start (screen y). */
+/* The card's height and top, and where its switch row and answers start (screen y). A glyph
+ * that would take the card past CARD_TOP to CARD_FOOT goes (a guest's pairing: two body lines,
+ * the code and three answers), so the card shows whole. */
 static void card_body(const char *s);
 static void card_layout(void) {
-    int h = CARD_PAD_TOP + CARD_TITLE_H;
-    if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
-    if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
-    int rows = h + CARD_ROWS_GAP;
-    h = rows + card_items() * CARD_ROW + (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) +
-        CARD_PAD_FOOT;
+    int h = 0, rows = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        h = CARD_PAD_TOP + CARD_TITLE_H + (cf.c.glyph ? CARD_GLYPH + CARD_GLYPH_GAP : 0);
+        if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
+        if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
+        rows = h + CARD_ROWS_GAP;
+        h = rows + card_items() * CARD_ROW +
+            (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) + CARD_PAD_FOOT;
+        if (h <= CARD_FOOT - CARD_TOP || !cf.c.glyph) break;
+        cf.c.glyph = (const char *)0;
+    }
     int top = CARD_CY - h / 2;
     if (top + h > CARD_FOOT) top = CARD_FOOT - h;
     if (top < CARD_TOP) top = CARD_TOP;
@@ -728,8 +746,10 @@ void confirm_close(void) {
     void *d = cf.dialog;
     cf.dialog = cf.view = (void *)0;
     if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    if (cf.marq_timer) timer_remove(cf.marq_timer), cf.marq_timer = 0;
     if (d) window_close(d);
 }
+void *confirm_dialog(void) { return cf.dialog; }
 
 static int card_answer(const void *unused) {
     cf.answer_timer = 0;
@@ -771,8 +791,68 @@ static int card_gone(void *dialog, void *event) {
         cf.dialog = cf.view = (void *)0;
         cf.stock = 0;
         if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+        if (cf.marq_timer) timer_remove(cf.marq_timer), cf.marq_timer = 0;
     }
     return 0;
+}
+/* s's width in the title's face (Inter Medium 20, a fallback face for a character Inter lacks). */
+static int card_text_w(void *canvas, const char *s) {
+    unsigned buf[96], n = ui_wide(s, buf, sizeof buf / sizeof *buf);
+    int px = TYPE(20);
+    const char *face = theme_face(buf, (int)n, &px);
+    if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    canvas_set_font(canvas, face, (unsigned)px);
+    return (int)(canvas_measure_text(canvas, buf, n) + 0.5f);
+}
+/* A column of h px from (x, y) in c, its alpha c's top byte. */
+static void scrub_col(void *canvas, unsigned c, int x, int y, int h) {
+    stock_canvas_set_fill_color(canvas, (RGBA(c & 0xffffffu) & 0xffffffu) | (c & 0xff000000u));
+    canvas_fill_rect(canvas, x, y, 1, h);
+}
+/* The scrolling title's frame: a repaint. */
+static int card_marq(const void *unused) {
+    if (!cf.dialog) return cf.marq_timer = 0, 0;
+    widget_invalidate_force(cf.dialog, (void *)0);
+    return 1;
+}
+/* The title's offset now, px from its start: the hold, then a run of its width and the gap. */
+static int card_marq_off(void) {
+    unsigned t = (unsigned)time_now_ms() - cf.marq_at, run = (unsigned)(cf.title_w + CARD_MARQ_GAP),
+             run_ms = run * 1000 / CARD_MARQ_PX, cycle = CARD_MARQ_HOLD_MS + run_ms;
+    t %= cycle;
+    return t < CARD_MARQ_HOLD_MS ? 0 : (int)((t - CARD_MARQ_HOLD_MS) * CARD_MARQ_PX / 1000);
+}
+/* The title: centred when it fits, else scrolling in the text column with its ends faded into
+ * the card (fill, its colour). */
+static void card_title(void *canvas, int cx, int y, int tw, unsigned fill) {
+    if (!cf.title_w) cf.title_w = card_text_w(canvas, cf.title);
+    if (cf.title_w <= tw) {
+        ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+        return;
+    }
+    if (!cf.marq_timer) {
+        cf.marq_at = (unsigned)time_now_ms();
+        cf.marq_timer = timer_add(card_marq, (void *)0, CARD_MARQ_MS);
+    }
+    int x0 = cx - tw / 2, off = card_marq_off(), was[4];
+    canvas_get_clip_rect(canvas, was);
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
+    rect_t col = { x0 + ox, y - CARD_TITLE_H / 2 + oy, tw, CARD_TITLE_H }, in = col;
+    if (in.x < was[0]) in.w -= was[0] - in.x, in.x = was[0];
+    if (in.y < was[1]) in.h -= was[1] - in.y, in.y = was[1];
+    if (in.x + in.w > was[0] + was[2]) in.w = was[0] + was[2] - in.x;
+    if (in.y + in.h > was[1] + was[3]) in.h = was[1] + was[3] - in.y;
+    if (in.w <= 0 || in.h <= 0) return;
+    canvas_set_clip_rect(canvas, &in);
+    for (int k = 0; k < 2; ++k)
+        ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1,
+                x0 - off + k * (cf.title_w + CARD_MARQ_GAP), y, cf.title_w + 8, 2);
+    for (int i = 0; i < CARD_MARQ_FADE; ++i) { /* the ends into the card */
+        unsigned a = (unsigned)(255 - 255 * i / CARD_MARQ_FADE) << 24 | (fill & 0xffffffu);
+        if (off) scrub_col(canvas, a, x0 + i, y - CARD_TITLE_H / 2, CARD_TITLE_H);
+        scrub_col(canvas, a, x0 + tw - 1 - i, y - CARD_TITLE_H / 2, CARD_TITLE_H);
+    }
+    canvas_set_clip_rect(canvas, (rect_t *)was);
 }
 /* The timeout's tick: a repaint for its seconds and bar, the answer at the end. */
 static int card_tick(const void *unused) {
@@ -993,7 +1073,11 @@ void confirm_paint(void *w, void *canvas) {
     rect_t card = { CARD_X, top, CARD_W, cf.h };
     fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
     int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
-    ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+    if (cf.c.glyph) {
+        paint_art(w, canvas, theme_art(cf.c.glyph), cx - CARD_GLYPH / 2, top + CARD_PAD_TOP);
+        y += CARD_GLYPH + CARD_GLYPH_GAP;
+    }
+    card_title(canvas, cx, y, tw, ipod_light() ? 0xffffff : RGB_RAISED);
     y += CARD_TITLE_H / 2;
     if (cf.lines) y += CARD_BODY_GAP;
     for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)

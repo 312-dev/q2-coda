@@ -769,7 +769,6 @@ static void paint_selection(void *w, void *canvas) {
     canvas_set_clip_rect(canvas, &old);
 }
 
-
 static void edit_paint(void *w, void *canvas);
 
 /* Stock's radio images (select, unselect) are emptied (ringnav_image_add): a checked row gets the
@@ -971,8 +970,12 @@ int ringnav_paint(void *w, void *canvas) {
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
     carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
-    bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
-    sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
+    bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
+    bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
+    bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
+    guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
+    home_np_paint(w, canvas);    /* Home's first row's glyph (home_np.c) */
+    sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
     if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);

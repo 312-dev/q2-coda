@@ -161,6 +161,7 @@ class Machine:
             self.handlers[payload_syms['press_stamp']]='stock_press_stamp'
             self.handlers[payload_syms['mute_stamp']]='stock_mute_stamp'
         for name in FUNCTIONS: self.handlers[syms[name]]=name
+        self.handlers[syms['strstr@GLIBC_2.0']]='strstr@GLIBC_2.0'  # libc's, which the payload's state-file reads call
         # canvas_get_vgcanvas runs stock, down to the mocked lcd_get_vgcanvas, as the rounded wrappers need
         for name in ('slide_menu_item_width','slide_menu_on_scroll_done','canvas_get_vgcanvas',
                      'widget_animator_scroll_set_params','slide_menu_set_value','toolsTimeItoa','on_wm_keyup_fun','table_client_get_virtual_h',
