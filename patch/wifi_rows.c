@@ -7,7 +7,7 @@
  * each network a row whose right column holds its signal (stock's wifi_sig1..4 image, its art
  * emptied by the image hook) and, before it, a lock when the network asks for a password (its
  * scan record's flags name WPA or WEP), and the Accent check when it is the connected one (stock's
- * second line reads Connected); Add Network last, as stock has it. Laid out from ipod_list_layout
+ * second line reads Connected); Add Network after the networks, as stock has it (Reset Network Settings, wifi_flows.c, after it). Laid out from ipod_list_layout
  * (wifi_rows_pre before stock's layout stacks the rows, wifi_rows_post after set_row has mapped
  * them) and drawn by wifi_mark from paint_into. ponytail: the emulator has no radio, so the
  * connected row and a real scan were seen only with a stubbed wpa_cli. */
@@ -85,6 +85,14 @@ void wifi_rows_pre(void *view) {
         void *busy = widget_lookup(item, WIFI_BUSY, 0);
         if (busy) widget_set_text_utf8(busy, wifi_searchtime ? "Searching..." : "");
     }
+}
+
+/* The section line's "Searching..." set now, from wifi_searchtime, on the Wi-Fi page win: stock's
+ * Search Again starts a scan (wifi_scan) without rebuilding the list, which is when wifi_rows_pre
+ * writes the line, so the search would show nothing until it ended (wifi_flows.c). */
+void wifi_busy_show(void *win) {
+    void *busy = win ? widget_lookup(win, WIFI_BUSY, 1) : (void *)0;
+    if (busy) widget_set_text_utf8(busy, wifi_searchtime ? "Searching..." : "");
 }
 
 static int connected(void *b);

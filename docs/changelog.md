@@ -1,6 +1,10 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > Wi-Fi: when joining a network fails, its password entry opens again saying **Wrong password** or **Couldn't connect**, and the password you enter replaces the saved one. Before, a toast said it failed and the next tap tried the same wrong password again.
+  - Settings > Wi-Fi: hold Play/Pause on a saved network to forget it, and a new **Reset Network Settings** row at the bottom forgets every saved network (both ask first).
+  - Settings > Wi-Fi: **Search Again** shows "Searching..." as soon as you press it; before, nothing changed until the search had finished, so it looked like it did nothing.
+  - Settings > Wi-Fi: turning Wi-Fi off, or pressing the network that is connecting, stops the connection attempt at once; before, both were ignored for up to a minute until the attempt gave up.
   - Car Remote: **Pair a Phone** says exactly what to do on the phone for the way it can find this Q2 Muse right now. With Bluetooth off (or while the Q2 Muse can't be found over Bluetooth) it gives the Wi-Fi steps: in Q2 Muse Remote, **Pair a Q2 Muse > Wi-Fi address**, type the address the page shows, then the code. With no Wi-Fi either, it says to join a Wi-Fi network first. The steps change as soon as Wi-Fi or Bluetooth comes on. Before, it gave Bluetooth's steps that could not work and named a "Tap Add a Q2 Muse" button the app doesn't have.
   - Car Remote: with Bluetooth off, the Car Remote log no longer gains two error lines every 30 seconds; it says once that Bluetooth isn't running and waits for it to come on.
   - Confirmation cards (Software Update's **Install**, Delete, Forget and the rest): the wheel moves from Cancel to the other answer; before, the bar leaned toward it and sprang back. A long title such as "Install Q2 Muse Dev · V0RHi?" scrolls instead of standing still cut off, and a long explanation wraps onto more lines, the card growing to fit, instead of ending in "...". A card that answers by itself after a while (a guest's request) counts down to the end.
