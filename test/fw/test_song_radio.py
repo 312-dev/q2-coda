@@ -1,7 +1,8 @@
 """Song radio, patch/song_radio.c (docs/internals.md#radio): Now Playing's Radio on a song of the card plays the
 library's radio of it (the seed's artist, then its genre, each shuffled, nothing played lately), the seed playing on
 where it was; the pill lights while it plays and a tap on it stops it; a server song goes to its app, and one the
-app answers is not its own falls back to the library's. The rig is test_coda_rc_shim's: /tmp is a dict, AWTK
+app answers is not its own falls back to the library's; a streamed song's request names its stream file, whose name
+carries the server id; an app too old for radios says so. The rig is test_coda_rc_shim's: /tmp is a dict, AWTK
 test_nav_library_pages' fake and the songs test_nav_hold's Records."""
 import ctypes as C
 
@@ -9,6 +10,7 @@ from conftest import O, mcl  # noqa: F401
 from test_coda_rc_shim import ACK, CMD, Q2
 from test_nav_library_pages import ui  # noqa: F401
 from test_nav_hold import recs  # noqa: F401
+from test_addon import card, scan
 
 SONGS = [  # (id, artist, genre)
     (10, 'Ann', 'Rock'),  # the seed
@@ -123,3 +125,55 @@ def test_the_seed_is_never_queued_again_whatever_its_record_id(fw, ui, mcl, recs
     (queue, _, _), = ui.played
     paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0) for r in queue]
     assert paths.count(b'/mnt/mmc/m/10.flac') == 1 and len(queue) == 6
+
+
+# A song the Subsonic app streams: its stream cache's file (stream_path.h), which no library record has (the player's
+# id 0), the server's id between its name's last brackets. The user's, 2026-11-16: Radio on a streamed 10 Years song.
+STREAMED = '/mnt/mmc/.subsonic/stream/5f3a/original/0/Wasteland [tr-77].flac'
+
+
+def streaming(fw, ui, recs, q2app):
+    """The Radio rig playing STREAMED, with the Subsonic app on the card (its q2app's text), running."""
+    q2 = Radio(fw, ui, recs)
+    q2.songs = q2.songs[-1:]  # the card's library: Cy's Jazz, nothing like the seed
+    world = card(fw, subsonic=q2app)  # the card's files from here on, and the clock
+    fw.mock('fw_fclose', lambda *_: 0)  # Q2's Files' close and tell, of files World opened
+    fw.mock('fw_ftell', lambda f, *_: world.at[f])
+    world.files.update({b'/tmp/q2-subsonic': b'1', b'/tmp/q2-subsonic.browse.sock': b''})
+    scan(fw)
+    song = recs(id_=0, path=STREAMED, name=STREAMED.rsplit('/', 1)[1], title='Wasteland', artist='10 Years',
+                genre='Rock')
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = ui.deques.new([song])
+    C.c_int.from_address(O['MCL_POS']).value = 0
+    return q2, world
+
+
+def test_a_streamed_songs_radio_is_asked_of_its_app_by_its_path(fw, ui, mcl, recs):
+    """The seed is the stream file's path, which carries the server id: the app reads it there (q2-subsonic's
+    songOf, streamID), as catalogue.c and coda-rc do (stream_path.h)."""
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\nradio=1\n')
+    q2.tap(None)
+    assert ui.toasts == ['Starting Radio…'] and not ui.played  # nothing local: the app plays it
+    seq, op, path = world.files[b'/tmp/q2-subsonic.radio'].decode().rstrip('\n').split(' ', 2)
+    assert op == 'start' and path == STREAMED and path.endswith('[tr-77].flac')
+    world.files[b'/tmp/q2-subsonic.state'] = f'version=1\nradioack={seq} 0\n'.encode()
+    q2.radio_poll()
+    assert ui.toasts == ['Starting Radio…'] and not ui.played
+
+
+def test_a_server_with_nothing_like_it_is_told_apart_from_the_library(fw, ui, mcl, recs):
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\nradio=1\n')
+    q2.tap(None)
+    seq = world.files[b'/tmp/q2-subsonic.radio'].split(b' ')[0].decode()
+    world.files[b'/tmp/q2-subsonic.state'] = f'version=1\nradioack={seq} 2\n'.encode()  # no radio: the server's none
+    q2.radio_poll()
+    assert ui.toasts[-1] == "Radio isn't available for this song" and not ui.played
+
+
+def test_an_app_too_old_for_radio_says_so(fw, ui, mcl, recs):
+    """q2-subsonic before q2-v1.0 (the firmware carried q2-v0.9 until p32) has no radio=1: no app is asked, the
+    library has nothing like a server song, and "No similar songs on this Q2 Muse" read as the server having none."""
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\n')
+    q2.tap(None)
+    assert b'/tmp/q2-subsonic.radio' not in world.files and not ui.played
+    assert ui.toasts == ['Update Subsonic to use Radio']

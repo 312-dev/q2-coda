@@ -2826,6 +2826,16 @@ int addon_radio_start(const char *path, unsigned seq) {
     return 1;
 }
 
+/* The name of the app whose folder holds path (a streamed song's file, a Library server row's path)
+ * when that app plays no song radios: its q2app has no radio=1, as a version from before them
+ * (q2-subsonic before q2-v1.0). 0 for any other path, or an app that does. */
+const char *addon_radio_missing(const char *path) {
+    char id[APP_ID];
+    app_t *a = path && card_id(path, id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    return a && a->present && !a->radio && a->name[0] ? a->name : 0;
+}
+
 /* The playing queue's app's radio stopped; 1 when asked. */
 int addon_radio_stop(unsigned seq) {
     app_t *a = qa.app && playback_loads == qa.loads && qa.app->radio ? qa.app : 0;
