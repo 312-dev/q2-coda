@@ -9,7 +9,12 @@
  * (motion_ms, MO_FEEDBACK).
  * A server song (a card app's stream download, or the pressed catalogue row) also has a format
  * badge at the art's bottom line, on the art's page so a swipe takes it with the heart and More:
- * the file's format beside a cloud, or the crossed-out cloud while the app says server=down. */
+ * the file's format beside a cloud, or the crossed-out cloud while the app says server=down.
+ * A server song that can't go on while the server is down (pressed and not yet the player's, or
+ * one the player waits for) shows "Can't reach the server" in the times row in the spinner's place
+ * and Retry (selected) and Skip, the empty states' capsule pair, in the state row's place: Retry
+ * (a tap, or Centre at rest) asks the app to try again now (/tmp/q2-<id>.retry), Skip plays the
+ * next song as Next does. The wheel stays the volume's. */
 #include "navigation.h"
 #include "ui_kit.h"
 
@@ -33,6 +38,8 @@ static struct {
     unsigned timer, checked;
     rect_t box;      /* what was painted last, for the next frame's repaint */
     int badge, down; /* a server song shows its badge; its app says server=down */
+    int error;       /* that song can't go on with its server down: the message, Retry and Skip */
+    char id[16];     /* its app */
     char label[8];   /* its format, the file's extension in capitals */
 } ns __attribute__((section(".scratch")));
 
@@ -71,6 +78,7 @@ static void ns_badge_read(void) {
     const char *p = ns_path(), *dot = p ? strrchr(p, '.') : 0;
     ns.badge = p && dot && !strstr(dot, "/") && ns_server(p, id, sizeof id);
     if (!ns.badge) return;
+    tk_snprintf(ns.id, sizeof ns.id, "%s", id);
     unsigned i = 0;
     for (++dot; dot[i] && i + 1 < sizeof ns.label; ++i)
         ns.label[i] = dot[i] >= 'a' && dot[i] <= 'z' ? (char)(dot[i] - 32) : dot[i];
@@ -115,10 +123,18 @@ static int ns_tick(const void *unused) {
     unsigned now = (unsigned)time_now_ms();
     if (now - ns.checked >= NS_CHECK_MS) {
         sline_t l;
-        int on = ns_loading(&l), badge = ns.badge, down = ns.down;
+        int on = ns_loading(&l), badge = ns.badge, down = ns.down, error = ns.error;
         char label[sizeof ns.label];
         memcpy(label, ns.label, sizeof label);
         ns_badge_read();
+        unsigned at, n;
+        const char *p = ns_path();
+        /* stuck: the pressed song, or one the player waits for, while its server is down */
+        ns.error =
+            ns.badge && ns.down && (catalogue_np_now(&at, &n) || (p && stream_player_waits(p)));
+        if (ns.error) on = 0; /* the message in the spinner's place */
+        if (error != ns.error)
+            widget_invalidate_force(win, (void *)0); /* the times and state rows */
         if (st.np_cover &&
             (badge != ns.badge || down != ns.down || memcmp(label, ns.label, sizeof label)))
             widget_invalidate_force(P(st.np_cover, W_PARENT), (void *)0);
@@ -161,6 +177,11 @@ void np_stream_paint(void *w, void *canvas) {
         return;
     }
     if (w != st.np_win) return;
+    if (ns.error) {
+        ui_text(canvas, "Can't reach the server", 0, TYPE(NS_PX), tok(TOK_SECONDARY), 1, 375 / 2,
+                NS_Y, 200, 1);
+        return;
+    }
     if (!ns.timer)
         ns.checked = (unsigned)time_now_ms() - NS_CHECK_MS, ns.timer = timer_add(ns_tick, 0, 0);
     if (!ns.on) return;
@@ -179,4 +200,27 @@ void np_stream_paint(void *w, void *canvas) {
         canvas_draw_icon(canvas, bitmap, x + NS_SPIN / 2, NS_Y);
     ui_text(canvas, s, 0, px, tok(TOK_SECONDARY), 1, x + NS_SPIN + NS_GAP, NS_Y, tw + 2, 2);
     ns.box = (rect_t){ x - 2, NS_Y - px, gw + 6, 2 * px };
+}
+
+/* Retry and Skip in the state row's place while ns.error (np_bar.c np_modes, np_mode_click; the
+ * Centre at rest, now_playing.c np_centre). */
+static const char *const ns_cta[] = { "Retry", "Skip" };
+int np_stream_error(void) { return ns.error && st.np_win; }
+void np_stream_cta_paint(void *canvas, int cy) {
+    ui_cta_paint(canvas, ns_cta, 2, cy - CTA_H / 2, 0, 0);
+}
+/* Retry: the app tries the song again now (its run reads the file and takes it); Skip: Next. */
+void np_stream_retry(void) {
+    char file[48], tmp[52];
+    tk_snprintf(file, sizeof file, "/tmp/q2-%s.retry", ns.id);
+    tk_snprintf(tmp, sizeof tmp, "%s.tmp", file);
+    blob_io(file, tmp, "1\n", 2, 1);
+}
+/* A tap at screen x on the state row: the capsule it falls on (the pair is centred: left of the
+ * middle is Retry). */
+void np_stream_cta_click(int x) {
+    if (x < 375 / 2)
+        np_stream_retry();
+    else
+        media_key(KEY_FWD_BTN);
 }

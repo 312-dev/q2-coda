@@ -375,6 +375,13 @@ Then Now Playing's times row shows the spinner and `<bytes> of <total> MB` from 
 and the car remote's NowPlaying says buffering (below). Read at Now Playing's 500 ms tick, and only
 while a stream's `.stream` exists.
 
+**Retry** (firmware to app): while a server song can't go on because the app says `server=down`
+(the pressed song, or one q2player waits for), Now Playing shows "Can't reach the server" and Retry
+and Skip (`np_stream.c`). Retry writes `/tmp/q2-<id>.retry` (`1` and a newline); the app's stream
+run takes it by deleting it and tries every song still to fetch at once, its backoff or a lost
+server's wait cut short (`takeRetry`). Skip is Next. An app without it leaves the file, and the
+next Retry writes it again.
+
 **The car remote** (`remote/coda-rc.proto`, `CAP_BUFFERING` = 8192): NowPlaying gains `buffering` (13, the
 loading state above), `buffered_bytes` (14) and `total_bytes` (15) (the `.stream` line's, 0 when
 not streaming) and `buffered_ms` (16) (bytes over total times length, 0 when unknown), sent when they change,

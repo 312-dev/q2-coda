@@ -163,3 +163,28 @@ def test_a_card_file_has_no_badge(fw, mcl, songs, scratch):
     page = art_page(np, scratch)
     texts, loads, _ = badge(np, page)
     assert texts == [] and loads == []
+
+
+def test_a_song_stuck_with_its_server_down_offers_retry_and_skip(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, status(b'get', 7_040_000))
+    np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
+    error = fw.fn('np_stream_error', C.c_int)
+    np.paint()
+    np.tick()
+    np.paint()
+    assert error() == 1
+    assert [t for t, _ in np.texts] == ["Can't reach the server"] and np.loads == []  # no spinner, no amount
+    fw.fn('np_stream_cta_click', None, C.c_int)(100)  # left of the middle: Retry
+    assert np.world.files[b'/tmp/q2-subsonic.retry'] == b'1\n'
+    del np.world.files[b'/tmp/q2-subsonic.state']  # the server answers again
+    for _ in range(6):
+        np.tick()
+    assert error() == 0
+
+
+def test_a_song_that_plays_on_is_not_stuck_whatever_the_server(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
+    np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
+    np.paint()
+    np.tick()
+    assert fw.fn('np_stream_error', C.c_int)() == 0

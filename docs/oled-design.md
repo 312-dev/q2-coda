@@ -507,6 +507,11 @@ has no place for keeps a place of its own:
   outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
   file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
   the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
+  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
+  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+  wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
