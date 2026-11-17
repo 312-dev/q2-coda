@@ -1134,8 +1134,7 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
 `design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
 centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
-and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, the blocks and the grab
-bar, and round the toggles inside their block.
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, and round the toggles inside their block.
 
 - **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
   26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
@@ -1166,7 +1165,7 @@ bar, and round the toggles inside their block.
 - **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 258, 10 px under the blocks, where the swipe up that closes the page starts.
+- **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
 - **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
   Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
   guest plays).
