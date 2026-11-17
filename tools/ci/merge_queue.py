@@ -45,6 +45,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import merge_batch  # noqa: E402
@@ -68,7 +69,7 @@ class Queue:
         self.dir = pathlib.Path(directory or q2ci.queue_dir())
         self.ready = pathlib.Path(ready or merge_batch.READY)
         self.child = None
-        self.state = {'tip_red': [], 'crashes': 0, 'undecided': {}, 'post_tree': None, 'post_ok': None,
+        self.state: dict[str, Any] = {'tip_red': [], 'crashes': 0, 'undecided': {}, 'post_tree': None, 'post_ok': None,
                       'last_landed': None, 'batches': 0}
         self.state_file = self.dir/'state.json'
         if self.state_file.exists():

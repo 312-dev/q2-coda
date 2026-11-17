@@ -637,7 +637,7 @@ def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
     assert fields['class'] == 'branch' and fields['command'] == 'sleep 30' and fields['worktree'] == str(CI.parents[1])
     t = time.monotonic()
     assert job.wait(15) == 143 and time.monotonic() - t < 10
-    assert 'deadline' in job.stderr.read() and not record.exists()
+    assert 'deadline' in (job.stderr.read() if job.stderr else '') and not record.exists()
     # the queue's class is recorded as such, and stop-all ends a job by its scope
     job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_CLASS': 'queue'}, cwd=CI)
     record = tmp_path/'q2-heavy/jobs'/str(job.pid)
