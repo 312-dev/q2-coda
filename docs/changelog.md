@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Less wear on the Q2's built-in storage: the small record of what the Q2 is doing (used to report a forced restart) is saved at most once every five seconds instead of on every screen wake, battery percent or play/pause.
   - USB Debugging: the **Allow USB Debugging?** prompt now appears when an unknown computer connects. Before, the Q2 looked for adbd's socket with the wrong socket type, so the prompt never showed and every new computer stayed `unauthorized`.
   - Less wear on the Q2's built-in storage: the queue and where it was, audiobook and long-track places, play counts and Battery History are kept on the card instead, and turning the volume (or a slider such as Brightness or Volume Limit) saves it once, three seconds after you stop, instead of on every click. With the card out or lent to a computer they are kept in memory and saved to the card when it is back; the first time, what was on the built-in storage is copied over.
   - USB: when the Q2 powers a USB device it is plugged into as a host (a USB drive, a DAC), its charger now stays off as Shanling's firmware leaves it. Before, it was turned back on at once, so the Q2 charged its battery from its own USB power, which wastes power as heat.
