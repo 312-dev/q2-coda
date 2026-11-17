@@ -272,8 +272,8 @@ int np_time_toggle(void) {
 }
 /* Shortcut with no key (or a value this build does not know, such as an old build's reading of a
  * newer one) is Rockbox while the card has it, else Favorites: asked each time (rockbox_seen), as
- * the card may mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the carousel's card,
- * which cannot leave, takes the default (shortcut_target). */
+ * the card may mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the
+ * carousel's card, which cannot leave, takes the default (shortcut_target). */
 int shortcut(void) {
     accent();
     return st.shortcut < SETTING_N_SHORTCUT ? st.shortcut : rockbox_seen() ? 0 : 3;
