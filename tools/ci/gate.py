@@ -137,12 +137,19 @@ def full_suite(name, py, logs):
     }.get(name)
 
 
+# test/*.py suites whose own parser takes no BUILD argument (the host suites compile what they test); every
+# other test/X.py is run as `python3 test/X.py BUILD`. tools/ci/affected.py runs them the same way.
+NO_BUILD_ARG = ('test/coverflow.py', 'test/peq.py')
+
+
 def other_suite(path, py):
     """A plan's `other` path, run as tools/ci/affected.py runs it."""
     if path.startswith('tools/ci/test_'):
         return Suite(path, [py, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', path])
     if path == 'test/build.py':
         return Suite(path, [py, path, '--build', '{build}'], needs_build=True, heavy=True)
+    if path in NO_BUILD_ARG:
+        return Suite(path, [py, path], heavy=True)
     return Suite(path, [py, path, '{build}'], needs_build=True, heavy=True)
 
 
