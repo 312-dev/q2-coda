@@ -994,9 +994,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   rows. An empty list shows the [empty state](#empty-and-offline) under its rows, "No Playlists", "Make one with New
   Playlist".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
-  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
-  with its field off, titled Rename Playlist, the name prefilled over it with the cursor at its end:
-  Next at the name's end saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry),
+  titled Rename Playlist, the name prefilled over it with the cursor at its end: submitting (Play/Pause,
+  or Center on the return key) saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Center plays the list from the song;
@@ -1040,39 +1040,52 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
 ### Text entry
 
 One letter strip for every text the wheel types (approved as 05b and 05c from the audit2 mock-ups on
-2026-11-16; `patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners,
-its letters in equal 19 px cells about a fixed accent key, the run's ends fading into the pill's own gray.
-It has two forms, in the same place, width and corners:
+2026-11-16, redesigned from the user's `keyboard-inscreen/strip.html`, approved 2026-11-17;
+`patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners, one loop
+the wheel walks:
 
-- **Field on** (Search, Add Songs' Search): the typed text in a black box at the pill's left with its
-  cursor, the letters from x 148; the results above the strip, and with nothing typed the
-  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs";
-  with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer letters".
-- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centered,
-  and the name written large in the middle of the screen, Inter Medium 22 white centered on y 140 with a
-  steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to
-  save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
-  cursor, as on Search's text.
+- **The set switcher**, docked at the pill's left: a `#2C2C2E` pill to x 96 (the accent while the wheel is
+  on it) naming the set in Inter Medium 16 white, abc, ABC, 123 or #+= (all 32 printable ASCII symbols, the
+  most used in passwords first). Center cycles the set and the highlight stays on the switcher.
+- **The run**: the set's characters and a space, 17 px Inter Text Primary in equal 19 px cells from x 106,
+  ten in view, the lit one white on an 18 px accent key 5 px in. It starts at its first character and moves
+  only when the highlight comes within a cell of an edge. Where more of the set lies past an edge the letters
+  fade out toward it over 22 px: the text's own alpha, never a band painted over it.
+- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with the
+  return mark in white (a stem down the right, a slightly rounded corner, a bar to the left ending in an open
+  arrowhead, 2.2 px round strokes), inverted, a white circle with the mark in the accent, while the wheel is
+  on it. Center on it submits.
 
+One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
+from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
+cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
+each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
+pop bubble rises over the lit character as the wheel lands on it.
+
+Where the text shows, by form:
+
+- **Search** (and Add Songs' Search): the query on the page's first line after a magnifier, with its cursor,
+  "Search your music" in Text Tertiary while empty, a 1 px rule under it; the results between it and the
+  strip, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
+  letters".
+- **A name** (New Playlist, Rename Playlist): written large in the middle of the screen, Inter Medium 22
+  white centered on y 140 with a steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press
+  Play/Pause to create" or "Press Play/Pause to save".
 - **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
-  box stock's keyboard served; the user's P1 from `mock_strip_password.py`, 2026-11-17): field off, a set
-  chip at the pill's left (a `#2C2C2E` pill to x 96, its name in Inter Medium 16 white: abc, ABC, 123 or
-  #+=), the run after it, its lit key at x 192; Play/Pause steps to the next set, each ending in the space
-  and delete. The status row names the page the box is on, and the text shows as a name's does, "Press
-  Next when done" under it; a box holding a number opens on 123. A password reads "Password" (15 px Text
-  Tertiary, y 84) over dots (y 128), the character just typed shown for a second, all of it in plain text
-  while Play/Pause is held, and "Hold Play/Pause to show · Next at the end to join" (13 px, y 176). Next
-  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`) is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth: Next at the end saves the name.
+  box stock's keyboard served): as a name, "Press Play/Pause when done" under it; a box holding a number
+  opens on 123. A password reads "Password" (15 px Text Tertiary, y 84) over dots (y 128), the character
+  just typed shown for a second, and "Press Play/Pause to join" (13 px, y 176). Submitting is the box's own
+  OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`)
+  is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth.
 
-On every form, the wheel walks the letters and Center types the lit one. A Return press erases the character
-before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
-the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized
-to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
-fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
-"Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
-happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
-draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its window to the strip
-(`patch/keyboard.c` `kb_strip_due`).
+Held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into the hold the page
+dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized to its line with
+24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent fills clockwise
+from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it, "Keep holding to go
+back" in Inter Medium 16 white; at 600 ms the page closes. Let go before that and the highlight is on the
+return key. The dim covers the status row too, as Buttons Lock's card's does: both draw it the same way
+(`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its
+window to the strip (`patch/keyboard.c` `kb_strip_due`).
 
 ### Icons
 
@@ -1495,8 +1508,8 @@ pattern.
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centered, no title                                                        |
-| Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
-| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
+| Search                              | [Text entry](#text-entry)   | The query on the first line, four single-line results, the letter strip ([ipod](ipod.md#search))            |
+| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip, the name large over it ([ipod](ipod.md#name-strip))                                       |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centered under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |

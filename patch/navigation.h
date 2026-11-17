@@ -117,7 +117,7 @@ typedef struct {
     void *ch_page;
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
-    int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
+    int ch_cue, ch_end; /* the Chapters track's CUE start and end, file seconds */
     /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
      * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, the provider page's Cache
      * and Erase Spotify Data labels; each 0 while its page is closed */
@@ -329,7 +329,7 @@ extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
-    search_strip_hold(void *top);
+    search_strip_hold(void *top), search_strip_owns(void *top);
 void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
@@ -491,15 +491,15 @@ void synclink_default(void);
 int about_list(void *list);
 void about_rows(void *view);
 int reset_list(void *list);
-void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
-int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
+void reset_rows(void *view); /* settings_pages.c: Reset Settings' rows */
+int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face; -1 unmeasured */
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-    *const reduce_motion_caption;
+                                                      *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
@@ -643,7 +643,8 @@ int np_about_key(void *top, unsigned key);
 int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
-int np_mode_shuffle(void), np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
+int np_mode_shuffle(void),
+    np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
  * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
 enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
@@ -1017,7 +1018,8 @@ void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
-void carremote_poll(void), carremote_paired(const char *name), carremote_paint(void *w, void *canvas);
+void carremote_poll(void), carremote_paired(const char *name),
+    carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
 int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
 void song_radio_poll(void);
@@ -1040,11 +1042,11 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
-int sw_update_key(void *top, unsigned key); /* its page's wheel and Centre */
+int sw_update_key(void *top, unsigned key);           /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);
-int tsv_split(char *line, char **f, int max);         /* catalogue.c */
+int tsv_split(char *line, char **f, int max); /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
  * a list this long or shorter has none; a touch this near the list's right edge is the index's;

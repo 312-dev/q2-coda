@@ -761,6 +761,10 @@ static int home_cf_hold(void *top) {
 int ringnav_keylong(void *ctx, void *event) {
     if (event && ple_key((unsigned)I(event, EVENT_KEY), 3)) return STOP;
     if (event && seek_held((unsigned)I(event, EVENT_KEY))) return STOP;
+    /* the letter strip's Previous and Next are its text's cursor, Previous held erasing there */
+    if (event && (I(event, EVENT_KEY) == KEY_BACK_BTN || I(event, EVENT_KEY) == KEY_FWD_BTN) &&
+        search_strip_owns(window_manager_get_top_window(window_manager())))
+        return STOP;
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
@@ -796,4 +800,3 @@ unsigned ringnav_hold_timer(int (*fn)(const void *), void *ids, unsigned ms, int
     if (key == KEY_CENTER) st.centre_hold = id; /* chord_gate may end it */
     return id;
 }
-
