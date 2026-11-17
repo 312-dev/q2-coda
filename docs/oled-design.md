@@ -1359,9 +1359,11 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
   Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
-- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
-  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
-  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+- **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
+  from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
+  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address to type ("Address
+  192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
+  connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
   for Q2 Muse Remote to scan one.
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on

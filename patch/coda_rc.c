@@ -600,6 +600,13 @@ void crc_ble_gone(void) {
     if (ble.used) conn_close(&ble);
 }
 
+/* Whether a phone's Bluetooth scan can find this Q2 now: the Pair a Phone page reads it (carremote_page.c
+ * cr_howto_mode) to give the Bluetooth steps only then, the Wi-Fi ones otherwise. */
+void crc_ble_advertising(int on) {
+    if (on) crc_write_file("/tmp/coda-rc.ble", "1\n", 2, 0644);
+    else unlink_at("/tmp/coda-rc.ble");
+}
+
 /* ---- the loop ---- */
 
 static void on_term(int sig) { quit = 1; }
@@ -729,6 +736,7 @@ int main(int argc, char **argv) {
     crc_write_file("/tmp/coda-rc.pid", b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
     device_id();
     unlink_at("/tmp/coda-rc.pair");
+    unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
     int lfd = tcp_listen();
     crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
     int bfd = use_ble ? ble_start() : -1;
