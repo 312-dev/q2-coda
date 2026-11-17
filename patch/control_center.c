@@ -466,6 +466,7 @@ static int cc_act(void *win, int i) {
     case CC_WIFI:
     case CC_BT: {
         void *b = cc_stock(win, i);
+        if (i == CC_WIFI) wifi_flows_cancel_join(); /* stock's click ignores a join that is trying */
         if (b) stock_dispatch_trampoline(b, pointer_event_init(click, EVT_CLICK, b, 0, 0));
         break;
     }
