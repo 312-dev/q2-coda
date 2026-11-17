@@ -96,9 +96,13 @@ static void pv_show(void) {
         pv_row(pv.view, k + i, track_name(title, sizeof title, r), 0, P(r, REC_ARTIST), pv_click,
                i);
     }
-    if (otg && !n)
-        feedback_empty(pv.page, geom_val(V_BAR) + rows * page_h(48),
-                       "Or hold Play/Pause on any song", "and choose Add to On-The-Go.");
+    /* no songs: the empty state under Add Songs, compact (a row above it: no glyph), no button of
+     * its own as Add Songs is the row above (oled-design.md Empty and offline) */
+    static const empty_t none = { 0, "No Songs Yet", "Choose Add Songs to fill it", 0 },
+                         otg_none = { 0, "No Songs Yet", "Hold Play/Pause on a song to add it", 0 };
+    if (!n)
+        empty_state(pv.page, feedback_below(widget_get_child(pv.view, rows - 1)),
+                    otg ? &otg_none : &none, 0);
     if (pv.selected >= rows) pv.selected = rows ? rows - 1 : 0;
     if (rows) ringnav_select(pv.view, pv.selected, rows);
 }

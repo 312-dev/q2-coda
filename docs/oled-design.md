@@ -718,6 +718,8 @@ the gray one.
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
 | Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
 | Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
+| A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
+| On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
@@ -732,8 +734,7 @@ four action rows (no presets is a toast); and Upload Scrobbles with nothing to s
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
-explains use it: the App Store's "No apps listed" under its Check for Updates row, On-The-Go's how-to under its
-rows, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
@@ -937,8 +938,9 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
-  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
-  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song opens its
+  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone over the compact
+  empty state, "No Songs Yet", hint "Hold Play/Pause on a song to add it"; a playlist with no songs likewise,
+  hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
   On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
