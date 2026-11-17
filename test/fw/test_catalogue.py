@@ -924,6 +924,62 @@ def test_a_server_albums_cover_is_the_apps_by_its_album_id(rig, fw):
     assert album(url('s2', 'al2').encode(), b'/tmp/x', 100, 100) == 0 and thumbs == [cover]
 
 
+def test_a_streaming_songs_download_is_its_server_row_by_the_sid_in_its_name(rig, fw):
+    """The app streams a server song from its stream cache, /mnt/mmc/.<app>/stream/<hash>/original/0/<title>
+    [<sid>].<suffix>, a file catalogue.avail does not name (the player's id 0; the device, 2026-11-16: Control
+    Center's art blank for 'Heart Shaped Box'). The sid in its name makes it the server row (stream_path.h), so its
+    album's cover, its play key and its hearts are the row's, as for an offline copy; a sid the catalogue lacks, a
+    sid with a glob or path character, another app's folder or a card file are none."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1'),
+                  song_row('s-2_X', 'Two', 'B', 'C', 1, 100, 2, album_id='al2')])
+    rig.poll()
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    rig.files.files['/mnt/mmc/.subsonic/covers/al2.jpg'] = b'jpeg'
+    find = fw.fn('catalogue_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_uint)
+
+    def ask(path):
+        out = C.create_string_buffer(512)
+        return out.value.decode() if find(path.encode(), out, 512) else None
+    stream = '/mnt/mmc/.subsonic/stream/9f3a/original/0/'
+    assert ask(stream + 'One [s1].flac') == '/mnt/mmc/.subsonic/covers/al1.jpg'
+    assert ask(stream + 'Two (live) [x] [s-2_X].mp3') == '/mnt/mmc/.subsonic/covers/al2.jpg'  # the last brackets
+    for other in (stream + 'Three [s3].flac', stream + 'One [s*].flac', stream + 'One [].flac', stream + 'One.flac',
+                  '/mnt/mmc/.other/stream/9f3a/original/0/One [s1].flac', '/mnt/mmc/.subsonic/cache/One [s1].flac',
+                  '/mnt/mmc/Music/One [s1].flac'):
+        assert ask(other) is None, other
+    key = fw.fn('catalogue_song_key', C.c_uint, C.c_void_p, C.c_uint)
+    assert key(rig.record(stream + 'One [s1].flac'), 7) == listen_key(url('s1'))
+    assert key(rig.record('/mnt/mmc/Music/One [s1].flac'), 7) == 7
+
+
+def test_a_streaming_songs_cover_is_the_players_else_its_apps(rig, fw):
+    """song_cover_url (coverflow.c), which Control Center and the modal header share with Home's pane: a streaming
+    song's download the player parsed shows the player's file (its embedded picture); one it found no picture in,
+    or has not parsed yet, its app's cover of the album; with none fetched, nothing (the placeholder). The player's
+    cover thread finds the app's cover for it too (coverflow_player_cover), so Home and Now Playing show it."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    path = '/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
+    r = rig.record(path)
+    cover = fw.fn('song_cover_url', C.c_int, C.c_void_p, C.c_char_p, C.c_uint)
+
+    def ask(kind):
+        fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode() if kind else b''
+        fw.var('g_playcover_type', C.c_ubyte).value = kind
+        out = C.create_string_buffer(600)
+        return out.value.decode() if cover(r, out, 600) else None
+    assert ask(3) is None and ask(0) is None  # no app cover fetched: the placeholder
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    assert ask(1) == 'file:///tmp/coverpic.jpg'  # the stream file's embedded picture
+    assert ask(3) == ask(0) == 'file:///mnt/mmc/.subsonic/covers/al1.jpg'
+    # the player's cover thread, after the download's embedded art failed: the app's cover goes to ffmpeg first
+    fw.mock('toolsGetExternCover', lambda *_: 0)
+    forks = []
+    fw.mock('fw_fork', lambda *_: forks.append(1) and -1)
+    fw.fn('coverflow_player_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)(path.encode(), b'/tmp/externpic.jpg', 300, 300)
+    assert len(forks) == 2  # the app's cover, then the probe; before, the probe alone
+
+
 def group_record(rig, field, name, rid=1):
     """A row of Search's Artists, Albums or Genres tab as its callback fills it: a directory's type, its id
     and the name in its tab's field alone (the others overlap it as host pointers)."""
