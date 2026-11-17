@@ -36,26 +36,81 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }
 
-/* ... or, on the selected row while Cover Flow opens, the spinner's frame (1-8, coverflow.c
- * coverflow_spinner) in its place, white (tools/art.py spinner). */
+/* The activity spinner (tools/art.py spinner: eight spokes, the bright one a step clockwise each
+ * SPIN_FRAME_MS), one for every list that shows one: Home's Cover Flow row while it opens, and
+ * Settings > Bluetooth's connecting row and Other Devices' scan. Its frame is the clock's, so no
+ * painter keeps a count, and a painter says where it drew it (spinner_painted): one timer,
+ * every MO_FRAME_MS while any spinner shows, repaints those boxes as the frame changes, and stops
+ * once none was painted for two frames. A box is its widget's and goes with it (EVT_DESTROY).
+ * spinner_turn is the timer's work, for a caller that holds the UI thread and paints itself
+ * (coverflow.c open_step). */
+#define SPIN_FRAME_MS 100
+#define SPIN_BOXES 4
 static struct {
-    void *w;  /* the list it was last painted on, 0 once it is done */
-    int x, y; /* its centre there */
+    struct {
+        void *w;           /* the widget it was painted on, 0 a free slot */
+        rect_t r;          /* the box in w; w's whole when r.w is 0 */
+        unsigned frame;    /* the clock's frame it was last painted at */
+        unsigned char ask; /* its repaint asked for since */
+    } at[SPIN_BOXES];
+    unsigned timer;
 } spin __attribute__((section(".scratch")));
-void spinner_icon(void *w, void *canvas, int right, int y, int frame) {
+static unsigned spin_clock(void) { return (unsigned)time_now_ms() / SPIN_FRAME_MS; }
+int spinner_frame(void) { return (int)(spin_clock() % 8); }
+static int spin_gone(void *ctx, void *event) {
+    (void)event;
+    for (int i = 0; i < SPIN_BOXES; ++i)
+        if (spin.at[i].w == ctx) spin.at[i].w = (void *)0;
+    return 0;
+}
+/* Each box whose frame is due asked to repaint: 2 when one was, 1 when a spinner shows and none is
+ * due yet, 0 when none shows. */
+int spinner_turn(void) {
+    unsigned now = spin_clock();
+    int live = 0;
+    for (int i = 0; i < SPIN_BOXES; ++i) {
+        __typeof__(spin.at[0]) *b = &spin.at[i];
+        if (!b->w || now - b->frame > 2) continue; /* not painted lately: not shown */
+        if (!live) live = 1;
+        if (b->ask || now == b->frame) continue;
+        b->ask = 1, live = 2;
+        widget_invalidate_force(b->w, b->r.w ? &b->r : (const rect_t *)0);
+    }
+    return live;
+}
+static int spin_tick(const void *info) {
+    (void)info;
+    if (spinner_turn()) return 8; /* RET_REPEAT */
+    spin.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+void spinner_painted(void *w, const rect_t *r) {
+    int k = -1;
+    unsigned now = spin_clock();
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i)
+        if (spin.at[i].w == w) k = i;
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i)
+        if (!spin.at[i].w) k = i;
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i) /* full: the one painted longest ago */
+        if (now - spin.at[i].frame > 2) k = i;
+    if (k < 0) return;
+    if (spin.at[k].w != w) widget_on(w, EVT_DESTROY, spin_gone, w);
+    spin.at[k].w = w, spin.at[k].frame = now, spin.at[k].ask = 0;
+    spin.at[k].r = r ? *r : (rect_t){ 0, 0, 0, 0 };
+    if (!spin.timer) spin.timer = timer_add(spin_tick, (void *)0, MO_FRAME_MS);
+}
+
+/* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)
+ * in its place, white. */
+void spinner_icon(void *w, void *canvas, int right, int y) {
     unsigned bitmap[64]; /* bitmap_t */
     char name[8];
-    tk_snprintf(name, sizeof name, "spin_%d", frame - 1);
-    spin.w = w, spin.x = right - CHEV_SHIFT, spin.y = y;
+    rect_t r = { right - CHEV_SHIFT - SPIN_BOX / 2, y - SPIN_BOX / 2, SPIN_BOX, SPIN_BOX };
+    tk_snprintf(name, sizeof name, "spin_%d", spinner_frame());
     if (!widget_load_image(w, theme_art(name), bitmap))
-        canvas_draw_icon(canvas, bitmap, spin.x, spin.y);
+        canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
+    spinner_painted(w, &r);
 }
-/* The spinner's next frame: its box on its list repainted, or win's whole until it has painted. */
-void spinner_dirty(void *win) {
-    rect_t r = { spin.x - SPIN_BOX / 2, spin.y - SPIN_BOX / 2, SPIN_BOX, SPIN_BOX };
-    widget_invalidate_force(spin.w ? spin.w : win, spin.w ? &r : (void *)0);
-}
-void spinner_done(void) { spin.w = 0; }
 
 /* ... and a disabled row's (stock's list_intodown, docs/oled-design.md Chevrons and disabled rows),
  * in the half's Text Tertiary, selected or not: the wheel never selects such a row. */

@@ -3216,31 +3216,57 @@ static void *open_page(void) {
  * with a spinner for its chevron (coverflow_spinner) and input is taken, until the page opens. A
  * warm open, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
  * the keys, the wheel and touches go nowhere (coverflow_wait_input), and Return gives the open up.
- * ponytail: the spinner turns between steps, not within one: getAllAlbum's and the grouping's
- * queries each hold the UI thread (stock's library calls are the UI thread's), and demo imports no
- * sqlite3_progress_handler to paint from inside them; a frame from it would turn it smoothly. */
+ * Within a step the spinner turns too: getAllAlbum's and the grouping's queries take seconds on a
+ * large library and stock's library calls hold whichever thread runs them, so each step runs on a
+ * thread of its own while the UI thread waits for it (step_turning, name_order.c's way), and,
+ * once the spinner shows, paints its frames itself (list_marks.c spinner_turn, then the window
+ * manager's paint). Only the step's thread touches the library meanwhile: the staging pointer
+ * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
-#define SPIN_FRAME_MS 100                                 /* a spoke on, eight a turn */
-extern void spinner_dirty(void *win), spinner_done(void); /* list_marks.c */
+#define STEP_TICK_MS 16 /* the UI thread's look at a running step: MO_FRAME_MS */
+extern int spinner_turn(void);         /* list_marks.c */
+extern int ringnav_wm_paint(void *wm); /* nav/input.c */
 static struct {
     unsigned at, timer;
     void *home; /* the window it opens over: gone, the open is given up */
     int waiting, step, spin;
+    volatile int done, ret; /* step_turning's thread: finished, and query_step's answer */
 } op __attribute__((section(".scratch")));
 static void open_end(void) {
     if (op.timer) timer_remove(op.timer);
     query_drop();
     if (cf_traced) unlink(CF_TRACE), cf_traced = 0;
-    if (op.spin) spinner_done(), widget_invalidate_force(op.home, 0);
+    if (op.spin) widget_invalidate_force(op.home, 0); /* the row's chevron again */
     op.waiting = op.timer = op.spin = 0;
+}
+static void *step_thread(void *k) {
+    op.ret = query_step((int)(long)k, op.at);
+    op.done = 1;
+    return k;
+}
+/* query_step(k) on a thread of its own, the spinner turning meanwhile from OPEN_SPIN_MS / 2 into
+ * the open; in place when no thread starts (a started one has a nonzero id). */
+static int step_turning(int k) {
+    unsigned long t = 0;
+    op.done = 0;
+    if (pthread_create(&t, 0, step_thread, (void *)(long)k) || !t) return query_step(k, op.at);
+    while (!op.done) {
+        usleep(STEP_TICK_MS * 1000);
+        if (!op.spin && (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)
+            op.spin = 1, widget_invalidate_force(op.home, 0); /* Home with its row's spinner */
+        else if (!op.spin || spinner_turn() < 2)
+            continue;
+        ringnav_wm_paint(window_manager());
+    }
+    pthread_join(t, 0);
+    return op.ret;
 }
 static int open_step(const void *unused) {
     op.timer = 0;
     if (window_manager_get_top_window(window_manager()) != op.home) return open_end(), 0;
-    while (!query_step(op.step++, op.at))
+    while (!step_turning(op.step++))
         if (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2) {
-            if (!op.spin) op.spin = 1;
-            spinner_dirty(op.home);
+            if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0);
             op.timer = timer_add(open_step, 0, 0); /* Home's input and paint, then the next */
             return 0;
         }
@@ -3248,11 +3274,9 @@ static int open_step(const void *unused) {
     if ((cf.page = open_page())) load();
     return 0;
 }
-/* The spinner's frame, 1-8, while an open waits on its query, else 0 (navigation.c
- * paint_chevrons). */
-int coverflow_spinner(void) {
-    return op.spin ? (int)(((unsigned)time_now_ms() - op.at) / SPIN_FRAME_MS % 8) + 1 : 0;
-}
+/* Whether Home's Cover Flow row shows the spinner for its chevron: an open waits on its query
+ * (nav/row_paint.c paint_chevrons, list_marks.c spinner_icon). */
+int coverflow_spinner(void) { return op.spin; }
 /* ringnav_input: whether e goes nowhere while an open waits. Return's release gives it up. */
 int coverflow_wait_input(void *e) {
     if (!op.waiting) return 0;
