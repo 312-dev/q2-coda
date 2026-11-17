@@ -381,7 +381,9 @@ def test_oleds_search_pop_is_one_bubble_and_a_strip_of_every_character():
 def test_the_pop_s_characters_are_the_strip_s_sets_in_order():
     """search_strip.c finds a character's cell by its sets' order (ss_pop_cell): POP_CHARS must be ss_sets joined."""
     src = (art.ROOT / 'patch/search_strip.c').read_text()
-    body = re.search(r'ss_sets\[SS_SETS\] = \{(.*?)\};', src, re.S).group(1)
+    found = re.search(r'ss_sets\[SS_SETS\] = \{(.*?)\};', src, re.S)
+    assert found, 'ss_sets moved: update this test'
+    body = found.group(1)
     sets = [ast.literal_eval(m) for m in re.findall(r'"(?:[^"\\]|\\.)*"', body)]
     assert len(sets) == 4 and ''.join(sets) == art.POP_CHARS and len(set(art.POP_CHARS)) == 94
 
