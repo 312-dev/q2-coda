@@ -298,7 +298,7 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
 
 BLE = '/tmp/coda-rc.ble'
 WIFI_STEPS = ['1', 'Open the Q2 Muse Remote app', '2', 'Pair a Q2 Muse > Wi-Fi address', '3',
-              'Type the address below, tap Next', '4', 'Type the code shown here']
+              'Pick Q2 Muse, then tap Next', '4', 'Type the code shown here']
 
 
 def howto_texts(fw, ui, howto):
@@ -329,6 +329,16 @@ def test_pair_a_phone_with_bluetooth_off_gives_the_wi_fi_steps_and_the_address(f
     _, howto = open_howto(fw, ui, recs)
     assert howto_texts(fw, ui, howto) == WIFI_STEPS + ['Q2 Muse', 'Address  192.168.1.30', 'Phone and Q2 Muse on one Wi-Fi',
                                                        'Waiting for a phone…']
+
+
+def test_wi_fi_steps_pick_the_q2_by_its_bluetooth_name(fw, ui, mcl, recs):
+    """Q2 Muse Remote's Wi-Fi tab lists the Q2 under its mDNS instance, the Bluetooth name (coda_rc_mdns.c)."""
+    def read(path, section, key, out, default, *_):
+        v = b'Car Q2' if C.string_at(key) == b'BTNAME' else C.string_at(default)
+        C.memmove(out, v + b'\0', len(v) + 1)
+    _, howto = open_howto(fw, ui, recs)
+    fw.mock('toolsReadConfig', read)
+    assert howto_texts(fw, ui, howto)[5] == 'Pick Car Q2, then tap Next'
 
 
 def test_bluetooth_on_but_not_advertising_is_still_the_wi_fi_steps(fw, ui, mcl, recs):
