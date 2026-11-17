@@ -272,7 +272,7 @@ def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
     column = [at(7, y)[3] + at(8, y)[3] for y in range(h)]  # the two columns either side of the centre line
     on = [y for y in range(h) if column[y] > 255]
     runs, start = [], on[0]
-    for a, b in zip(on, on[1:] + [None]):
+    for a, b in zip(on, on[1:] + [-1]):  # -1 ends the last run, as no row is -1
         if b != a + 1:
             runs.append((start, a))
             start = b
