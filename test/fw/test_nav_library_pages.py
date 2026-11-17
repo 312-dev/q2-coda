@@ -10,7 +10,7 @@ import struct
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, ui_name
+from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
 from conftest import Rows as HeldRows  # Rows here is Folder view's list
 from test_navigation import Sa  # test_navigation.py keeps the mirror
 from test_tidal import HEARTS, urls_play
@@ -113,11 +113,15 @@ class Ui:
         return 0
 
     def prop_str(self, w, key, default, *_):
+        if w not in self.kind:
+            return default  # stock: widget_get_prop fails on a NULL widget
         key = C.string_at(key).decode()
         value = {'name': self.name, 'image': self.image}.get(key, {}).get(w)
         if value is None:
             value = self.props.get((w, key))
-        return self.cstr(value) if isinstance(value, str) else default
+        kind = TYPES.get(self.kind[w], self.kind[w]).encode()
+        value = stock_prop_str(kind, key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.cstr(value.decode()) if isinstance(value, bytes) else value
 
     def lookup(self, w, name, deep):
         for k in self.kids.get(w, ()):
