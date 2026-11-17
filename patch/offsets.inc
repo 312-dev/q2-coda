@@ -564,6 +564,9 @@ static inline int arc_out(int r, int y) {
  * on_wm_keyup_before_fun (ringnav's hook) clears it. A key ringnav takes before stock's key-up body
  * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
 #define KEY_TONE_LATCH 0xa4bc00
+/* no symbol: what stock's editwifi_dialog types, its init's ctx (sw at 0x49a698): nonzero Add Network's password
+ * (hint keyboard_password, 0x49a6b4), 0 its network name; kbwifiadd's two rows open it with 1 and 0 (0x49ae08, 0x49abb8) */
+#define EDITWIFI_PASSWORD 0xa3b070
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 #define NAME_SORT_FLAG 0xa5011d /* no symbol: toolsQueryDbTable's name sort uses comparator 0x5cd188 when set, the pinyin 0x5cc870 when clear */
 

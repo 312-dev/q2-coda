@@ -1,4 +1,5 @@
 """tools/art.py: the theme images it draws, from the shipped theme's values."""
+import ast
 import dataclasses
 import math
 import pathlib
@@ -189,7 +190,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
-                                              'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
+                                              'search_pop', 'search_pop_letters', 'search_return_w', 'search_return_a', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -353,11 +354,11 @@ def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
     assert art.coverage(ring, (0, 0, 16, 16))[8 * 16 + 8] == 1  # the union rule would fill it
 
 
-def test_oleds_search_pop_is_one_bubble_and_two_letter_strips():
+def test_oleds_search_pop_is_one_bubble_and_a_strip_of_every_character():
     """Search's key pop (search_strip.c): the bubble, 30 px wide to the key's foot 66 px down, in Accent Blue, a
-    rounded head over a neck narrowing to the 18 px key, clear beside the key; the letters' and echoes' strips, a head's
-    and a key's cell per strip character, white, the echo at 60 %; each glyph's ink centred on its cell's middle
-    within a tenth of a pixel, read from the edge columns' coverage (H: two upright stems)."""
+    rounded head over a neck narrowing to the 18 px key, clear beside the key; the characters' strip, a head's cell per
+    character of the strip's sets, white; each glyph's ink centred on its cell's middle within a tenth of a pixel, read
+    from the edge columns' coverage (H: two upright stems)."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -365,16 +366,37 @@ def test_oleds_search_pop_is_one_bubble_and_two_letter_strips():
     assert (w, h) == (30, 66) and at(15, 15) == (*blue.to_bytes(3, 'big'), 255) and at(15, 60) == (*blue.to_bytes(3, 'big'), 255)
     assert at(0, 0)[3] == 0 and at(0, 15)[3] == 255 and at(29, 15)[3] == 255  # the head's rounded corner; its sides
     assert at(3, 60)[3] == 0 and at(26, 60)[3] == 0 and at(6, 60)[3] == 255 and at(23, 60)[3] == 255  # the key, 6 px in
-    n = len(art.POP_CHARS)
-    for name, cell, ch, alpha in (('letters', 30, 30, 255), ('echoes', 18, 34, 153)):
-        w, h, at = pixels(got[f'oled_search_pop_{name}'])
-        assert (w, h) == (cell * n, ch)
-        i = art.POP_CHARS.index('H')
-        cols = [max(at(cell * i + x, y)[3] for y in range(h)) / alpha for x in range(cell)]
+    n, cell = len(art.POP_CHARS), 30
+    w, h, at = pixels(got['oled_search_pop_letters'])
+    assert (w, h) == (cell * n, 30)
+    for ch in 'H|':
+        i = art.POP_CHARS.index(ch)
+        cols = [max(at(cell * i + x, y)[3] for y in range(h)) / 255 for x in range(cell)]
         assert max(cols) == pytest.approx(1, abs=0.01) and {at(cell * i + x, y)[:3] for x in range(cell) for y in range(h) if at(cell * i + x, y)[3]} == {(255, 255, 255)}
         lit = [x for x, c in enumerate(cols) if c > 0.01]
         left, right = lit[0] + 1 - cols[lit[0]], cell - (lit[-1] + cols[lit[-1]])
         assert left == pytest.approx(right, abs=0.1)
+
+
+def test_the_pop_s_characters_are_the_strip_s_sets_in_order():
+    """search_strip.c finds a character's cell by its sets' order (ss_pop_cell): POP_CHARS must be ss_sets joined."""
+    src = (art.ROOT / 'patch/search_strip.c').read_text()
+    found = re.search(r'ss_sets\[SS_SETS\] = \{(.*?)\};', src, re.S)
+    assert found, 'ss_sets moved: update this test'
+    body = found.group(1)
+    sets = [ast.literal_eval(m) for m in re.findall(r'"(?:[^"\\]|\\.)*"', body)]
+    assert len(sets) == 4 and ''.join(sets) == art.POP_CHARS and len(set(art.POP_CHARS)) == 94
+
+
+def test_the_return_key_s_mark_is_white_and_the_accent_s_in_a_20_px_box():
+    t = theme.builtins()[0]
+    got = art.images(t)
+    blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+    for name, rgb in (('w', 0xffffff), ('a', blue)):
+        w, h, at = pixels(got[f'oled_search_return_{name}'])
+        assert (w, h) == (20, 20) and at(17, 4) == (*rgb.to_bytes(3, 'big'), 255)  # the stem
+        assert at(3, 12)[3] == 255 and at(10, 12)[3] == 255 and at(6, 9)[3] == 255  # the bar, to the arrowhead
+        assert at(10, 4)[3] == 0 and at(0, 0)[3] == 0  # clear above the bar, left of the stem
 
 
 def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
@@ -425,7 +447,7 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
     full, got = set(art.images(oled)), set(art.images(bare))
     groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
-              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_holdback', 'oled_bump_')
+              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_search_return', 'oled_holdback', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
 
 

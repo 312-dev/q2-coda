@@ -779,6 +779,7 @@ static int hot_click(void *ctx, void *event) {
         break;
     case 2:
         search_strip_note("Guests type it to join the Q2's Wi-Fi");
+        search_strip_secret(); /* dots on the strip, as every password's */
         search_strip_text("Hotspot", gv("hotspot_pass"), GU_PASS_MAX, pass_done);
         break;
     }

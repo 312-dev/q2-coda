@@ -1091,68 +1091,76 @@ painted it white, which drew the box at rest.
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
-  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` pill low in the glass,
-  x 40 to 335 and y 254 to 288 with 17 px corners, the typed text in 18 px white in a black box at its left (x 46 to
-  142, 5 px in, 12 px corners) with a steady 2 px cursor, and A to Z, 0 to 9, a space and delete in 19 px Inter, each
-  centered in an equal 19 px cell, the lit one white on a fixed accent key in the middle of the run (x 148 to 327),
-  the rest Text Secondary, both ends of the run fading into the pill's gray over 22 px. When the wheel lands on a
-  letter or digit its key pops up, as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head
-  with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding the letter in 26 px white Inter
-  Medium, and the key keeps the letter at 19 px in white at 60 %; it goes 300 ms after the wheel stops. Turning
-  faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
-  rows while it shows. The wheel walks the strip (round from delete to A) and Center enters the lit character at
-  the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
-  text's start it does nothing but click), and a held Return closes Search from anywhere on the page: 200 ms into
-  the hold a card says "Keep holding to go back" over the dimmed page, its ring filling until 800 ms, when Search
-  closes; let go before and nothing is erased (`search_strip_down`, [oled-design](oled-design.md#text-entry)). A space is never typed first or beside
-  another. A text longer than the box scrolls to keep the cursor in it. With nothing typed, the free area above
-  the strip says what Search finds, as an empty list's note does: "Search your music" in 16 px Text Secondary and
-  "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centered on y 144 and 168 (Add Songs'
-  Search: "Songs by title or artist").
-  What holds the text lists above the strip as it is typed: the songs whose title, artist or album holds it, then
-  the artists whose name holds it, then the albums, each artist and album once; six single-line rows from y 58, the
-  name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
-  "Album" and its artist on an album's. Next with the cursor at the text's end moves to the results: the selection
-  bar takes the first one, the strip's key goes gray, and an iOS segmented control takes the first row (All, Songs,
-  Artists, Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent
-  while the wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving five rows under it. All lists
-  the three groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five
-  turns of the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists
-  and albums A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the
-  bar; Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
-  tracks in Cover Flow. A turn up from the first result lands on the tabs, where the wheel moves between them, each
-  picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Center, goes back to the results
-  and a turn up past All to the strip; Next picks the next tab and Previous the one before. Previous or Return
-  on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
-  and no match, the empty state stands in the list's place, "No Matches", "Try fewer letters"
-  ([oled-design](oled-design.md#empty-and-offline)), and Next stays on the strip; on a tab with nothing, Next
-  lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none
-  of whose songs can, is grayed with the offline mark at its right, as in every other list
-  ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the alphabet a letter
-  per 19 px as the finger goes, popping each one as the wheel does, and types nothing; a tap on a letter, the faded
-  ones at the ends too, pops it and types it at the cursor; a tap on a tab opens it, a tap on a result opens or
-  plays it, and a drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a
-  list's row change does, and Center, Next, Previous and Return click as a button does, through the Clicker
-  setting.
+  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`, the user's mock-up
+  `keyboard-inscreen/strip.html`). The query reads on the page's first line: a magnifier in Text Secondary at x 31,
+  the text in 20 px white from x 48 with a steady 2 px cursor while the strip has the wheel, or "Search your music"
+  in Text Tertiary while it is empty (Add Songs' Search: "Search songs"), and a 1 px raised-gray rule under it on
+  y 93. The strip is a `#1C1C1E` pill low in the glass, x 40 to 335 and y 254 to 288 with 17 px corners, and one
+  loop the wheel walks: the set switcher docked at its left (x 40 to 96, a `#2C2C2E` pill naming the set, abc, ABC,
+  123 or #+=, in Inter Medium 16, the accent while the wheel is on it); the set's characters and a space, each in
+  17 px Inter Text Primary in an equal 19 px cell from x 106, the lit one white on an 18 px accent key; and the
+  return key docked at its right, a 34 px circle in the accent with the return mark (a stem down the right, a
+  rounded corner, a bar to the left ending in an open arrowhead) in white, turned to a white circle with the mark
+  in the accent while the wheel is on it. #+= holds all 32 printable ASCII symbols, so the four sets type every
+  printable character. Ten cells show; the run starts at its first character and moves only when the highlight
+  comes within a cell of an edge, its letters themselves fading out over 22 px where more of the set lies past that
+  edge (nothing is painted over them). One turn of the wheel (ticks under 250 ms apart) stops on the return key; a
+  new turn goes on round to the switcher. Search opens on A. When the wheel lands on a character its key pops up,
+  as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head with 9 px corners narrowing
+  over 18 px to the 18 px key, the accent) holding it in 24 px white Inter Medium, and the key keeps it at the
+  strip's size in white at 60 %; it goes 300 ms after the wheel stops. Turning faster than 8 characters a second
+  shows none until the wheel stops, then one. The bubble may cover the last result rows while it shows. Center
+  types the lit character at the cursor, cycles the set on the switcher (the highlight stays on it), and submits on
+  the return key; Play/Pause submits from anywhere on the strip. Return jumps the highlight to the return key, a
+  Center away from submitting, and a held Return closes Search from anywhere on the page: 200 ms into the hold a
+  card says "Keep holding to go back" over the dimmed page, its ring filling until 600 ms, when Search closes; let
+  go before and the highlight is on the return key (`search_strip_down`, [oled-design](oled-design.md#text-entry)).
+  Previous and Next move the cursor along the text; Previous held erases the character before it 450 ms into the
+  hold, the next 500 ms later and each after that 15 % sooner, down to one every 110 ms, and its release moves
+  nothing (a hold of Previous or Next there never scans the song). There is no delete key. A space is never typed
+  first or beside another. A query longer than its line scrolls to keep the cursor in it.
+  What holds the text lists under the query as it is typed: the songs whose title, artist or album holds it, then
+  the artists whose name holds it, then the albums, each artist and album once; four single-line rows from y 98,
+  the name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
+  "Album" and its artist on an album's. Submitting moves to the results: the selection bar takes the first one, the
+  strip's highlights go, and an iOS segmented control takes the first row under the query (All, Songs, Artists,
+  Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent while the
+  wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving three rows under it. All lists the three
+  groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five turns of
+  the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists and albums
+  A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the bar;
+  Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
+  tracks in Cover Flow; Play/Pause there is the player's. A turn up from the first result lands on the tabs, where
+  the wheel moves between them, each picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past
+  Albums, or Center, goes back to the results and a turn up past All to the strip; Next picks the next tab and
+  Previous the one before. Previous or Return on the results, and Return on the tabs, go back to the strip with the
+  text, cursor and tab as they were. With text and no match, the empty state stands in the list's place, "No
+  Matches", "Try fewer letters" ([oled-design](oled-design.md#empty-and-offline)), and a submit stays on the strip;
+  on a tab with nothing, it lands on the tabs. A server song that can't play now (offline, no copy on the card),
+  and an artist or album none of whose songs can, is grayed with the offline mark at its right, as in every other
+  list ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the highlight a
+  cell per 19 px as the finger goes (to the left the later characters), popping each as the wheel does, as one
+  turn, and types nothing; a tap on a character pops it and types it at the cursor, a tap on the switcher cycles
+  the set and a tap on the return key submits; a tap on a tab opens it, a tap on a result opens or plays it, and a
+  drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change
+  does, and Center, Next, Previous and Return click as a button does, through the Clicker setting.
 - <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
   playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
-  (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip with its typed-text
-  field off: the same pill in the same place, the letters run across the whole of it (x 46 to 329, the lit key centered
-  at x 178, seven cells each side), and the name is written large in the middle of the screen, Inter Medium 22 white
-  centered on y 140 with a steady cursor, over the hint "Press Next to create" or "Press Next to save" in 15 px Text
-  Tertiary on y 180. The status row reads New Playlist or Rename Playlist. A word's first letter is typed as a
-  capital. Previous and Next move the cursor along the name; Next with the cursor at the name's end creates the
-  playlist (`ringnav_playlist_create`, "Playlist created", and the list goes back to open on it) or saves the new name
-  ("Renamed"), and the page closes; an empty name ("Name can't be empty") or one taken ("A playlist has that name")
-  says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
-  on Search.
-- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
-  time one opens, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
+  (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip, opening on abc, and
+  the name is written large in the middle of the screen, Inter Medium 22 white centered on y 140 with a steady
+  cursor, over the hint "Press Play/Pause to create" or "Press Play/Pause to save" in 15 px Text Tertiary on y 180.
+  The status row reads New Playlist or Rename Playlist. Capitals are ABC's. Previous and Next move the cursor along
+  the name; submitting (Play/Pause, or Center on the return key) creates the playlist (`ringnav_playlist_create`,
+  "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
+  an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held
+  Return and held Previous are as on Search.
+- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: each
+  time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
   its keys hidden and the window over the screen under the status row (`search_strip_box`,
   [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
-  Field off, with its set chip (abc, ABC, 123, #+=,
-  stepped by Play/Pause) and the box's text prefilled; a password shows as dots ("Password" over them, the character
-  just typed for a second, all of it while Play/Pause is held). Next at the text's end writes the
+  The box's text is prefilled, the strip opening on abc (123 for a box holding a number); a password shows as dots
+  ("Password" over them), the character just typed for a second, with no way to show the rest: a Wi-Fi network's,
+  Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the

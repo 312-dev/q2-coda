@@ -10,10 +10,9 @@ import pytest
 
 from conftest import O
 from test_nav_library_pages import Config, Ui
-from test_search_strip import HOLD_MS, Ss
+from test_search_strip import HOLD_MS, Strip
 
-KEY_RETURN, KEY_CENTER, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN = (
-    O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN'))
+KEY_RETURN, KEY_PLAY = (O[k] for k in ('KEY_RETURN', 'KEY_PLAY'))
 EVT_CLICK = O['EVT_CLICK']
 LOWER, UPPER, DIGITS = 0, 1, 2
 
@@ -91,7 +90,7 @@ def test_bluetooth_off_keeps_the_name_row_after_the_switch(fw, ui):
     assert labels == ['Name', 'Car Kit'] and [a[2] for _, a in fw.calls('widget_resize') if a[0] == row] == [78]
 
 
-class Rename:
+class Rename(Strip):
     """The Name row clicked: the strip on its own page."""
     def __init__(self, fw, ui, **config):
         self.fw, self.ui = fw, ui
@@ -99,28 +98,8 @@ class Rename:
         self.config, self.view = bt_page(fw, ui, **config)
         row, _ = name_row(ui, self.view)
         ui.handler(ui.kids[row][0], EVT_CLICK)()
-        self.ss = fw.var('search_strip__ss', Ss)
-        self.take = fw.fn('search_strip_key', C.c_int, C.c_void_p, C.c_uint)
+        self.attach(fw, ui)  # the strip's keys, typing and erasing (test_search_strip.Strip)
 
-    def key(self, *keys):
-        return [self.take(self.ui.top(), k) for k in keys]
-
-    def type(self, text):
-        """Each character from the strip's sets: Play/Pause to its set, the wheel to it, Centre."""
-        sets = ['abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '0123456789', '!@#$%&*-_.?/+=']
-        for ch in text:
-            if ch == ' ':
-                want_set, want = self.ss.set, len(sets[self.ss.set])
-            else:
-                want_set = next(i for i, s in enumerate(sets) if ch in s)
-                want = sets[want_set].index(ch)
-            while self.ss.set != want_set:
-                self.key(KEY_PLAY)
-            entries = len(sets[want_set]) + 2
-            self.key(*[KEY_NEXT] * ((want - self.ss.letter) % entries), KEY_CENTER)
-
-    def erase(self, n):
-        self.key(*[KEY_RETURN] * n)
 
 
 def test_the_name_row_opens_the_strip_as_a_text_box_on_the_name(fw, ui):
@@ -129,13 +108,13 @@ def test_the_name_row_opens_the_strip_as_a_text_box_on_the_name(fw, ui):
     assert r.ss.box == r.ss.page and r.ss.set == LOWER and 'Bluetooth' in ui.text.values()
 
 
-def test_next_at_the_end_saves_applies_and_shows_the_new_name(fw, ui):
+def test_play_saves_applies_and_shows_the_new_name(fw, ui):
     r = Rename(fw, ui)
     assert r.ss.text == b'Q2 Muse'
     r.erase(7)
     r.type('My Q2')
     assert r.ss.text == b'My Q2'
-    r.key(KEY_FWD_BTN)
+    r.key(KEY_PLAY)
     assert r.config.values[b'BTNAME'] == b'My Q2' and ui.toasts[-1] == 'Renamed' and ui.backs == 1
     assert len(r.system.commands) == 1 and "'variant:string:My Q2'" in r.system.commands[0]
     assert name_row(ui, r.view)[1] == ['Name', 'My Q2']  # the row under the strip says it at once
@@ -145,7 +124,7 @@ def test_q2_muse_again_is_saved_as_none(fw, ui):
     r = Rename(fw, ui, BTNAME=b'Old')
     r.erase(3)
     r.type('Q2 Muse')
-    r.key(KEY_FWD_BTN)
+    r.key(KEY_PLAY)
     assert r.config.values[b'BTNAME'] == b'' and "'variant:string:'" in r.system.commands[0] and ui.backs == 1
 
 
@@ -153,10 +132,10 @@ def test_edge_spaces_go_and_an_empty_name_is_refused(fw, ui):
     r = Rename(fw, ui)
     r.erase(7)
     r.type('  ')
-    r.key(KEY_FWD_BTN)
+    r.key(KEY_PLAY)
     assert ui.toasts[-1] == "Name can't be empty" and not r.config.written and not r.system.commands and not ui.backs
     r.type('a ')
-    r.key(KEY_FWD_BTN)
+    r.key(KEY_PLAY)
     assert r.config.values[b'BTNAME'] == b'a' and ui.backs == 1
 
 
@@ -168,11 +147,9 @@ def test_the_name_stops_at_30_characters(fw, ui):
 
 def test_a_held_return_leaves_the_name_as_it_was(fw, ui):
     r = Rename(fw, ui, BTNAME=b'Car Kit')
-    now = [100000]
-    fw.mock('time_now_ms', lambda *_: now[0])
     r.type('z')
-    fw.fn('search_strip_down', None, C.c_void_p, C.c_uint)(ui.top(), KEY_RETURN)
-    now[0] += HOLD_MS
+    r.down(ui.top(), KEY_RETURN)
+    r.now[0] += HOLD_MS
     ui.fire('search_strip__ss_hold_tick')
     assert ui.backs == 1 and not r.config.written and not r.system.commands
 
