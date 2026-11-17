@@ -11,14 +11,15 @@
  *   stops and usb_charger_in (charging.c) toasts the charge. A cable in at all tells charging.c
  *   (charge_plugged), whose plug-in screen lights a dark Q2.
  * - Transfer Files and USB Audio hand back to stock: the probe stops, g_usbmode is set for this
- *   cable (the tile's choice again once it is out, unless Always Do This saved it) and
+ *   cable (stock's saved one, SYSSET USBMODE, again once it is out, unless Always Do This saved it) and
  *   g_usblink_status 0 lets stock's next pass start its gadget and open usbmode_page, which is
- *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop pill
+ *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop button
  *   (Centre, as Return, leaves the mode). Charge Only stops the probe. USB Debugging stops it too,
  *   which in a --dev build hands the controller back to the ADB gadget (docs/adb.md), and opens
  *   its own mode page, whose Stop parks the ADB gadget.
- * - A remembered choice skips the chooser: Transfer Files and USB Audio follow the tile, so the
- *   tile still changes them; Charge Only and USB Debugging hold until the tile is changed.
+ * - A remembered choice skips the chooser, Transfer Files and USB Audio in their own mode for the
+ *   cable, and holds until a mode page's Stop forgets it (back to asking, so the next cable gets
+ *   the chooser): Control Center shows no USB tile to change it.
  * - Toasts: Unplugged, OK to Disconnect (the computer's eject while USB mode is not on top) and
  *   USB Audio Ready (the DAC mode reached without the chooser).
  * - --dev builds: adbd's question about an unknown computer (docs/adb.md#authorization), "Allow USB
@@ -28,7 +29,6 @@
 #define USB_PROBE_MS 3000 /* a computer configures a gadget within a second or two */
 #define USB_UDC "/sys/class/udc/13500000.otg/state"
 #define USB_PICK_KEY "USBPICK" /* [Q2POD]: the remembered choice, USB_* */
-#define USB_PICK_MODE "USBPICKMODE" /* ... and the tile's mode when it was saved */
 enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_LINK_HELD 3 /* g_usblink_status: stock leaves the cable to us until it is out */
 #define USB_MODE_DAC 1  /* g_usbmode: Audio and DAC; anything else USB storage (2, stock's) */
@@ -79,18 +79,20 @@ static void usb_toast(const char *glyph, const char *text) {
     if (g_backlight_status) toast_later(glyph, text);
 }
 
-/* The choice this cable gets without asking, USB_ASK for none. Transfer Files and USB Audio follow
- * the tile; Charge Only and USB Debugging are dropped once the tile has changed since they were
- * saved. config_value takes a value under its count, so each read names the values it may hold. */
+/* The choice this cable gets without asking, USB_ASK for none (USB Debugging's in a release build).
+ * config_value takes a value under its count, so the read names the values it may hold. */
 static int usb_remembered(void) {
     int pick = config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK);
-    if (pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV)) return USB_ASK;
-    if (pick == USB_FILES || pick == USB_AUDIO) return g_usbmode == USB_MODE_DAC ? USB_AUDIO : USB_FILES;
-    if (config_value("Q2POD", USB_PICK_MODE, 256, -1) != g_usbmode) return USB_ASK; /* a byte */
-    return pick;
+    return pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV) ? USB_ASK : pick;
 }
 
-/* g_usbmode for this cable; the tile's comes back when it is out. */
+/* A mode page's Stop: the remembered choice back to asking, so the next cable gets the chooser. */
+static void usb_forget(void) {
+    if (config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK) != USB_ASK)
+        write_int_config(USB_ASK, "Q2POD", USB_PICK_KEY);
+}
+
+/* g_usbmode for this cable; stock's saved one comes back when it is out. */
 static void usb_mode(int audio) {
     if (!u.mode_saved) u.mode_saved = g_usbmode + 1; /* 0: none saved */
     g_usbmode = audio ? USB_MODE_DAC : USB_MODE_FILES;
@@ -113,10 +115,9 @@ static void usb_apply(int pick, int always) {
         write_int_config(pick, "Q2POD", USB_PICK_KEY);
         if (pick == USB_FILES || pick == USB_AUDIO) {
             g_usbmode = pick == USB_AUDIO ? USB_MODE_DAC : USB_MODE_FILES;
-            write_int_config(g_usbmode, "SYSSET", "USBMODE"); /* the tile's own */
+            write_int_config(g_usbmode, "SYSSET", "USBMODE"); /* stock's own */
             u.mode_saved = 0;
         }
-        write_int_config(g_usbmode, "Q2POD", USB_PICK_MODE);
     }
     if (pick == USB_FILES || pick == USB_AUDIO) {
         if (!always) usb_mode(pick == USB_AUDIO);
@@ -218,6 +219,7 @@ static int usb_debug_key(void *ctx, void *event) {
     if (key == KEY_CENTER) { /* Stop: the ADB gadget off the controller until the cable is out */
         system("/usr/bin/q2adb-gadget park >/dev/null 2>&1");
         u.choice = USB_CHARGE;
+        usb_forget();
     }
     return STOP;
 }
@@ -275,11 +277,19 @@ const char *usb_ui_title(const char *name) {
 }
 
 /* The ringnav keyup gate: on usbmode_page Centre is its Stop, a click on stock's back arrow (unseen,
- * usb_mode_hide), which leaves the mode. */
+ * usb_mode_hide), which leaves the mode and forgets a remembered choice. Once the computer has
+ * ejected the card the page has no Stop (OK to Disconnect): Centre only leaves. On a mode page the
+ * wheel shows Stop's focus ring (docs/oled-design.md#focus-ring) and goes on to stock, whose
+ * USB Audio turns the volume with it. */
 int usb_ui_key(void *top, unsigned key) {
+    if ((key == KEY_NEXT || key == KEY_PREV) && top && (top == u.mode || top == u.debug)) {
+        if (st.touch_mode) st.touch_mode = 0, widget_invalidate_force(top, (void *)0);
+        return 0;
+    }
     if (key != KEY_CENTER || !top || top != u.mode) return 0;
     void *ret = widget_lookup(top, "img_return", 1);
     if (!ret) return 0;
+    if (!u.ejected || g_usbmode == USB_MODE_DAC) usb_forget();
     char click[0x30];
     stock_dispatch_trampoline(ret, pointer_event_init(click, EVT_CLICK, ret, 0, 0));
     return 1;
@@ -312,13 +322,13 @@ void usb_ui_paint(void *w, void *canvas) {
                                             "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
+                            &(mode_page_t){ accent | MODE_BUTTON, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
         else
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
+                            &(mode_page_t){ accent | MODE_BUTTON, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
-                        &(mode_page_t){ accent, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
+                        &(mode_page_t){ accent | MODE_BUTTON, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
     } else if (u.view && parent == u.view) {
         usb_ready(u.chooser, u.view, &u.view_ready, USB_ROWS + 1);
         usb_layout();
@@ -349,7 +359,8 @@ void usb_ui_status(void) {
         u.choice = USB_ASK, u.chosen = 0;
         int pick = usb_remembered();
         if (pick == USB_FILES || pick == USB_AUDIO) {
-            u.choice = pick; /* stock's own path, in the tile's mode */
+            u.choice = pick; /* stock's own path, in the choice's mode for this cable */
+            if ((g_usbmode == USB_MODE_DAC) != (pick == USB_AUDIO)) usb_mode(pick == USB_AUDIO);
         } else {
             g_usblink_status = USB_LINK_HELD;
             if (pick == USB_ASK) {
