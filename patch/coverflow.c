@@ -1682,27 +1682,45 @@ static void plain_column(shelf_t *f, int col, const unsigned *tex, int h, int br
 /* The same in a corner's column, texel k across the art: each end row the corner covers in part
  * takes the corner pixel's coverage at its texel too (docs/internals.md#rounded-corners), so the
  * arc is anti-aliased where it runs steep as well as where it runs flat; its reflection mirrors it.
- * A row at a time and plain, as only the corners' few columns come here; the rows the corner
- * leaves wholly clear are not visited. */
+ * Only the corner's bands (the rows from either end whose texel row is under part) go a row at a
+ * time; the rows between them are whole and go as plain_column's do, and the rows the corner leaves
+ * wholly clear are not visited. */
 static void corner_column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
     unsigned *d = f->d + col;
     int part = cf_part[k], clear = cf_clear[k], R = cf_r;
     const unsigned char *corner = cf_cover + (k < R ? k : ART_SIZE - 1 - k);
     int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
     int ins = h * part / ART_SIZE, out = h * clear / ART_SIZE;
-    int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col];
+    int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col], pitch = f->pitch;
     int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < cfs.view_h ? end : cfs.view_h;
+    /* [b1, b2): the rows whose centres lie past both bands, whole and of no corner */
+    int b1 = (top + ins + 255) >> 8, b2 = (bottom - ins) >> 8;
     int v = (((y << 8) + 128 - top) >> 4) * step >> 4; /* 16.16 texel row */
     if (y < 0) v -= y * step, y = 0;
-    unsigned wash = shade(cf_paper, 256u - (unsigned)bright);
-    for (unsigned *px = d + y * f->pitch; y < last; ++y, v += step, px += f->pitch) {
-        if (y >= solid_top && y < solid_bottom) continue;
+    unsigned *px = d + y * pitch, wash = shade(cf_paper, 256u - (unsigned)bright);
+    int whole = bright >= 256;
+    while (y < last) {
+        if (y >= solid_top && y < solid_bottom) {
+            int skip = solid_bottom - y;
+            v += skip * step, px += skip * pitch, y = solid_bottom;
+            continue;
+        }
+        if (y >= b1 && y < b2) {
+            int run = b2 < last ? b2 : last;
+            if (y < solid_top && solid_top < run) run = solid_top;
+            for (; y < run; ++y, v += step, px += pitch) {
+                unsigned t = tex[(v >> 16) * ART_SIZE];
+                put(px, whole ? t : shade(t, (unsigned)bright) + wash, 256);
+            }
+            continue;
+        }
         int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
         int cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row; /* corner row */
         int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
         unsigned cov = (unsigned)(to - from), c = cr < part ? corner[cr * R] : 255;
         cov = cov * (c + (c >> 7)) >> 8; /* of 256, no divide */
-        if (cov) put(px, bright >= 256 ? tex[row * ART_SIZE] : shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
+        if (cov) put(px, whole ? tex[row * ART_SIZE] : shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
+        ++y, v += step, px += pitch;
     }
     int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
     int fade = (256 << 16) / reflect;
