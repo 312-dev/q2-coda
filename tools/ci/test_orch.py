@@ -278,6 +278,65 @@ def test_mark_ready_refuses_a_branch_that_conflicts_with_the_trunk(tmp_path, mon
     assert 'READY feat/clean' in (tmp_path/'q/events.log').read_text()
 
 
+# Stand-ins for a worktree's tools/ci/affected.py and gate.py: a file's plan is PLANS[name]; the unit suite
+# fails when its plan reaches test_theme.py and theme.c holds BREAK.
+STUB_AFFECTED = '''import json, subprocess, sys
+PLANS = {'a.txt': ['test_a.py'], 'theme.c': ['test_art.py'], 'stream.py': 'all'}
+base = sys.argv[sys.argv.index('--base') + 1]
+unit = []
+for f in subprocess.run(['git', 'diff', '--name-only', base], capture_output=True, text=True).stdout.split():
+    p = PLANS.get(f, [])
+    unit = 'all' if 'all' in (p, unit) else sorted(set(unit) | set(p))
+print(json.dumps({'unit': unit, 'fw': [], 'patch': [], 'other': [], 'why': []}))
+'''
+STUB_GATE = '''import json, os, pathlib, sys
+a = sys.argv
+plan = json.loads(pathlib.Path(a[a.index('--plan-json') + 1]).read_text())
+logs, only = pathlib.Path(a[a.index('--logs') + 1]), a[a.index('--only') + 1].split(',') if '--only' in a else None
+res = {}
+if plan['unit'] and (only is None or 'unit' in only):
+    reaches = plan['unit'] == 'all' or 'test_theme.py' in plan['unit']
+    rc = int(reaches and os.path.exists('theme.c') and 'BREAK' in open('theme.c').read())
+    (logs/'unit.log').write_text('FAILED test/unit/test_theme.py::test_tokens\\n' if rc else 'ok\\n')
+    res['unit'] = {'rc': rc, 'log': str(logs/'unit.log')}
+pathlib.Path(a[a.index('--results') + 1]).write_text(json.dumps(res))
+(logs/'summary.txt').write_text(json.dumps(res))
+'''
+
+
+def test_bisection_blames_the_branch_that_breaks_a_test_only_a_later_branchs_plan_runs(tmp_path, monkeypatch):
+    """Batch 20261116-232912's shape: row-press broke test_theme but its own plan ran only test_art, and
+    streaming's plan ran all of test/unit. Every level runs the batch's plan, so row-press is the culprit."""
+    for k in ('AUTHOR', 'COMMITTER'):
+        monkeypatch.setenv(f'GIT_{k}_NAME', 't')
+        monkeypatch.setenv(f'GIT_{k}_EMAIL', 't@t')
+    repo = Repo(tmp_path/'r')
+    repo.write('tools/ci/affected.py', STUB_AFFECTED, 'stub affected')
+    repo.write('tools/ci/gate.py', STUB_GATE, 'stub gate')
+    tip = repo.git('rev-parse', 'HEAD').stdout.strip()
+    shas = {'fix/cta': repo.branch('fix/cta', 'a.txt', 'a\n'),
+            'feat/row-press': repo.branch('feat/row-press', 'theme.c', 'BREAK\n'),
+            'feat/streaming': repo.branch('feat/streaming', 'stream.py', 's\n')}
+    git = merge_batch.git
+    monkeypatch.setattr(merge_batch, 'git', lambda *a, cwd=repo.path, check=True: git(*a, cwd=cwd, check=check))
+    monkeypatch.setattr(merge_batch, 'CACHE', tmp_path/'cache')
+    (tmp_path/'logs').mkdir()
+    real = merge_batch.Real(repo.trunk, tip, tmp_path/'logs', log=lambda m: None)
+    real.shas = shas
+    r = merge_batch.integrate(real, tip, list(shas), log=lambda m: None)
+    assert list(r.culprits) == ['feat/row-press'] and r.culprits['feat/row-press'].keys() == {'unit'}
+    assert sorted(r.landed) == ['feat/streaming', 'fix/cta']
+
+
+def test_widen_joins_a_heads_plan_to_the_rounds_and_keeps_what_the_head_has():
+    whole = {'unit': ['test_theme.py', 'test_gone.py'], 'fw': [], 'patch': ['3:9'], 'other': ['test/x.py'], 'why': []}
+    own = {'unit': ['test_art.py'], 'fw': ['test_seek.py'], 'patch': [], 'other': [], 'why': []}
+    w = merge_batch.widen(own, whole, lambda f: 'gone' not in f)
+    assert w['unit'] == ['test_art.py', 'test_theme.py'] and w['fw'] == ['test_seek.py']
+    assert w['patch'] == 'all' and w['other'] == ['test/x.py']  # the joined suite's lines differ by head
+    assert merge_batch.widen(None, dict(whole, unit='all'), lambda f: True)['unit'] == 'all'  # the tip's check
+
+
 def test_the_trunk_name_comes_from_the_environment_then_the_config_file(tmp_path, monkeypatch):
     monkeypatch.setenv('Q2_CONFIG', str(tmp_path))
     monkeypatch.delenv('Q2_TRUNK', raising=False)

@@ -518,12 +518,15 @@ void cc_keydown(unsigned key), cc_hold(int stop);
 /* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
 #define QUICK_CC 16
 void quick_hold(void *button, int page);
-/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
+/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep),
+ * and sinks and springs back under Centre (tilt_press, from ringnav_input; tilt_tone its blue) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 int tilt_clip(void *canvas, int *old);
 void tilt_end(void *w, int dir);
+void tilt_press(int down);
+unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
@@ -586,6 +589,12 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* --dev builds: the emulator's stand-in for Wi-Fi, a headset, a charger; -1 for none */
+#if Q2POD_DEV
+int status_fake(char key);
+#else
+#define status_fake(key) (-1)
+#endif
 /* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
  * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
 void charge_plugged(void), charge_limited(void), usb_charger_in(void);
@@ -814,7 +823,8 @@ extern void *stream_mark_views[2];             /* home.c: the lists whose rows i
 /* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
  * scroll view */
 int home_rest(void *view, int *foot);
-void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1);
+void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
+                int s1);
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
@@ -959,6 +969,8 @@ void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
 void modal_after(void *w, void *canvas);
 void modal_head(const char *title, const char *sub, void *r);
+/* coverflow.c: r's cover as Home finds it, a file:// URL in url; 0, url empty, for none */
+int song_cover_url(void *r, char *url, unsigned size);
 void modal_red(void *row);
 int modal_is_red(void *row);
 int modal_sel_height(void *view, int h);
@@ -1065,7 +1077,8 @@ void lr_home_tag(void *view), lr_home_apply(void *view, int np), lr_edit_labels(
 void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
-    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void);
+    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void),
+    lr_edit_room(void *view), lr_edit_foot(void *view);
 const char *lr_edit_title(void);
 /* home.c: Home's Folders rule and its list's rows coming and going; coverflow.c: Home's list */
 int home_folders(void);

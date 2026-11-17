@@ -92,7 +92,8 @@ i	<pid>	<sid>	<card path or empty>
   whenever it has one: the cover of an album the catalogue has `s` rows of, a baseline JPEG of at
   most 160 px a side (Cover Flow's texture; the Library's rows and grids are smaller). The
   firmware finds it by the album id in a server row's path, or in the path of that row's offline
-  copy, and uses it where it would use a card album's cover: the Library's album rows and grids
+  copy, or of a song's download in the app's stream cache (`.../stream/.../<title> [<sid>].<suffix>`,
+  which no `catalogue.avail` line names: the sid in its name is the row's, `patch/stream_path.h`), and uses it where it would use a card album's cover: the Library's album rows and grids
   (`grid_cover`, through stock's thumbnailer), Cover Flow's carousel (its art cache, built from
   it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
   under OLED the app's own artist page's Albums, Singles & EPs, Top Songs and All Songs

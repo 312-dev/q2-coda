@@ -7,6 +7,7 @@
  * are the daemon's own file (PLACES). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
+#include "stream_path.h"
 
 #define DB "/mnt/data/database.db"
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
@@ -80,19 +81,14 @@ void lib_art_of(const char *path, char *art, size_t cap) {
     akey(path, art, cap);
 }
 
-/* A card app's streaming song plays from its temporary download, /mnt/mmc/.<app>/stream/<hash>/original/0/<title>
- * [<sid>].<suffix> (the app's stream cache), with no library record (the shim's id is 0) and the file's name as its
- * title. Its server id is between the name's last brackets; app gets ".<app>". 0 for any other path. */
+/* A card app's streaming song's file in its stream cache (stream_path.h, the payload's catalogue.c reads the same
+ * paths with it): its server id into sid and ".<app>" into app; 0 for any other path. */
 static int stream_sid(const char *path, char *app, size_t appcap, char *sid, size_t cap) {
-    if (!path || strncmp(path, "/mnt/mmc/.", 10)) return 0;
-    const char *slash = strchr(path + 10, '/');
-    if (!slash || strncmp(slash, "/stream/", 8)) return 0;
-    const char *name = strrchr(path, '/') + 1, *o = strrchr(name, '['), *c = o ? strchr(o, ']') : 0;
-    if (!c || c == o + 1 || (size_t)(c - o) > cap) return 0;
-    for (const char *k = o + 1; k < c; ++k)
-        if (!(*k >= '0' && *k <= '9') && !((*k | 32) >= 'a' && (*k | 32) <= 'z') && *k != '-' && *k != '_') return 0;
-    snprintf(sid, cap, "%.*s", (int)(c - o - 1), o + 1);
-    snprintf(app, appcap, "%.*s", (int)(slash - (path + 9)), path + 9);
+    const char *a, *s;
+    int an, sn;
+    if (!stream_path_sid(path, &a, &an, &s, &sn) || (size_t)sn >= cap || (size_t)an + 1 >= appcap) return 0;
+    snprintf(sid, cap, "%.*s", sn, s);
+    snprintf(app, appcap, ".%.*s", an, a);
     return 1;
 }
 
