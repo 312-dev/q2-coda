@@ -1829,13 +1829,9 @@ def named(world, win, name):
     return world.find(win, name)
 
 
-# The library scan's page (scan_page.c): Update Local Music's dialog as a page of rows.
+# The library scan's page (scan_page.c): Update Local Music's dialog as the empty states' stack.
 
 SCAN_WHOLE = O['SCAN_WHOLE']
-SCAN_X, SCAN_END, SCAN_BAR_Y = 24, 347, 228  # the bar: from the text column to the right column, at y 228
-_track = re.search(r'<element name="scrubber" [^>]*track="#(\w+)"', _OLED_XML)
-assert _track
-TRACK = int(_track[1], 16)
 
 
 @pytest.fixture
@@ -1874,14 +1870,14 @@ def count(fw, threads, songs):
 
 
 def test_the_scan_dialog_s_page_lives_with_its_window(fw, world, st):
-    """Stock's widgets stay for its look-ups, hidden; one count runs, detached; the poll every 200 ms follows the
+    """Stock's widgets stay for its look-ups, hidden; one count runs, detached; the poll every 80 ms (the spinner's frame) follows the
     window, which takes both with it as it goes."""
     win, threads = scan_dialog(fw, world, st)
     for name in ('img_animation', 'label_msg', 'label_scanfolder'):
         assert world[named(world, win, name)].visible == 0
     assert len(threads) == 1 and fw.calls('fw_pthread_detach')
     (fn, _, ms), = world.timers
-    assert ms == 200 and st('msg_win', C.c_void_p).value == win
+    assert ms == 80 and st('msg_win', C.c_void_p).value == win
     for gone in world.on(win, EVT_DESTROY):
         gone()
     assert st('msg_win', C.c_void_p).value is None and world.removed == [1]
@@ -1910,77 +1906,148 @@ def poll(world):
     return world.fire(1)
 
 
-def msg_paint(fw, win, y=0, world=None):
-    if world:
-        world.box(win, 0, y, 375, 320 - y)
+@pytest.fixture
+def done(fw):
+    """Stock's scan-over counter (wait_scan sets it), at its fixed address, and its stop flag (toolsGetUserStop's
+    answer): 0 ran to the end, 1 Stop, 2 /mnt/data full. Both go back."""
+    counter = C.c_int.from_address(O['SCAN_DONE'])
+    saved, stop = counter.value, [0]
+    fw.mock('toolsGetUserStop', lambda *_: stop[0])
+    counter.value = 0
+    yield counter, stop
+    counter.value = saved
+
+
+def scan_page(fw, win):
+    """The scan page painted: its words (text, centre x, centre y, colour) and its art (name, x, y)."""
     canvas = Canvas(fw)
     paint_bg(fw, win, canvas)
-    return canvas
+    words = [(t, r[0] + r[2] // 2, r[1] + r[3] // 2, c) for t, r, c, _ in canvas.texts]
+    return canvas, words, [(n, d[0], d[1]) for n, d in canvas.arts]
 
 
-def scan_bar(fills):
-    """The scan's bar among fills, if it has its track (playing.scrubber.track's grey, theme.xml's): the track's x,
-    end and rows, and its fill's (the rest's) end, the furthest, and rows."""
-    if not fills:
-        return None
-    lit = [f for f in fills if f[4] & 0xffffff not in (TRACK, 0)]
-    return (min(f[0] for f in fills), max(f[0] + f[2] for f in fills), {f[1] for f in fills},
-            max((f[0] + f[2] for f in lit), default=-1), {f[1] for f in lit})
+def said(words):
+    return [w[0] for w in words]
 
 
-def counted(fw, world, st, whole, text, songs=704):
-    """A whole-library scan's dialog at stock's text, painted before the count answers and after: the dialog and
-    what the count added (scan_bar's)."""
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, text)
-    before = msg_paint(fw, win)
-    count(fw, threads, songs)
-    return win, scan_bar(added(msg_paint(fw, win), before))
+SCAN_FIG_Y, SCAN_TITLE_CY, SCAN_LINE_CY, SCAN_BTN_CY = 92, 178, 200, 249  # 27 v4's stack, centred from y 40 to 320
 
 
-def test_the_scan_counts_against_the_library_before_it(fw, world, st, whole):
+def test_the_scan_counts_against_the_library_before_it(fw, world, st, whole, done):
+    """Late: the ring's percent (its line's arc needs a vgcanvas, none here), "312 of 704 songs", Stop; the poll
+    repaints the stack only when stock's text changes or the spinner turns."""
     whole.value = 1
     win, threads = scan_dialog(fw, world, st, 'Scanned 312')
-    before = msg_paint(fw, win)
     count(fw, threads, 704)
     assert poll(world) == RET_REPEAT
-    line, button = named(world, win, 'msg_line'), named(world, win, 'btn_no')
-    assert world[line].text == '312 of 704'  # msg_sync's own example
-    assert world[button].text == 'Cancel'  # over stock's word
     (target, box), = world.invalid
-    after = msg_paint(fw, win)  # the line in its place, the bar drawn
-    bar = added(after, before)
-    assert target == win and box == (0, 58, 375, 282 - 58)  # the rows under the status row, to the list's end
-    assert scan_bar(bar) and inside(world.at(line), box)
-    assert all(inside(f[:4], box) for f in bar)  # the line and the bar repainted
-    assert poll(world) == RET_REPEAT and len(world.invalid) == 1  # nothing new: nothing repainted
+    assert target == win and box == (0, 40, 375, 320 - 40)  # under the status row, to the screen's end
+    _, words, _ = scan_page(fw, win)
+    assert ('312 of 704 songs', 187, SCAN_TITLE_CY, 0xffffffff) in words
+    assert '44%' in said(words) and 'Stop' in said(words)
+    assert poll(world) == RET_REPEAT and len(world.invalid) == 1  # nothing new, no spinner: nothing repainted
 
 
-def test_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
-    """The scan page (oled_scan): the title in the status row's place (its text from STATUS_ROW_INSET, its line
-    centred on status_y), Songs and Folder rows from y 58, stock's
-    Cancel as the row after them on the selection bar; the count against the library's songs on the Songs row
-    ("312 of 704"), the name of stock's folder on the Folder row, and the 6 px bar at y 228 from the text column to the right
-    column, its fill the count's share."""
+def test_the_scan_dialog_is_the_empty_states_stack(fw, world, st, whole, done):
+    """Early (27 v4): the status row the dialog covers, painted under its title, the spinner in the figure's box, "1,284 songs found", the
+    folder's glyph before the name stock writes on a whole scan, and stock's button unseen over the painted Stop, which Centre and a tap press."""
     whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 312')
+    win, threads = scan_dialog(fw, world, st, 'Scanned 1284')
     for name in ('img_animation', 'label_msg', 'label_scanfolder'):
         assert world[named(world, win, name)].visible == 0
     world[named(world, win, 'label_scanfolder')].text = 'SD:/Music/Brent Faiyaz/'
-    heading, line, button = (named(world, win, n) for n in ('msg_heading', 'msg_line', 'btn_no'))
-    assert world[heading].text == 'Update Library' and world.at(heading)[:2] == (O['STATUS_ROW_INSET'] - 2, 23 - 16)
-    assert world.at(button) == (16, 122, 343, 32) and world[button].props['style:normal:round_radius'] == 8
-    before = msg_paint(fw, win)
+    folder, button = (named(world, win, n) for n in ('msg_folder', 'btn_no'))
+    assert fw.fn('msg_title', C.c_char_p, C.c_char_p)(b'updatemusic_dialog') == b'Update Library'  # the status row's
+    assert fw.fn('msg_title', C.c_char_p, C.c_char_p)(b'updatemusic_page') is None
+    bar, painted = fw.var('fw_ctx_system_bar', C.c_void_p), []
+    saved_bar, bar.value = bar.value, 0x5eed
+    fw.mock('widget_paint', lambda w, c, *_: painted.append(w) or 0)
+    assert world[button].props['style:normal:bg_color'] == 0 and world[button].props['style:normal:text_color'] == 0
+    poll(world)
+    canvas, words, arts = scan_page(fw, win)
+    bar.value = saved_bar
+    assert painted == [0x5eed]  # the status row the dialog covers, painted first, as Control Center's
+    assert ('1,284 songs found', 187, SCAN_TITLE_CY, 0xffffffff) in words
+    assert [a for a in arts if a[0].startswith('oled_swspin_d_')] and \
+        [(x, y) for n, x, y in arts if n.startswith('oled_swspin_d_')] == [(187 - 24, SCAN_FIG_Y + 30 - 24)]
+    assert world[folder].text == 'Brent Faiyaz' and world[folder].visible
+    assert world[folder].props['style:normal:text_color'] & 0xffffffff == 0xffababab  # Text Secondary, opaque
+    (fx, fy), = [(x, y) for n, x, y in arts if n == 'oled_scan_folder_d']
+    assert fy == SCAN_LINE_CY - 7 and world.at(folder)[0] == fx + 15 + 6 - 2  # the glyph, 6 px, the name
+    bx, by, bw, bh = world.at(button)
+    assert (by, bh) == (SCAN_BTN_CY - 19, 38) and bx == (375 - bw) // 2  # over the painted Stop
+    pill = [r for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19 and r[3] == 38]
+    assert pill and pill[0][2] == bw and ('Stop', 187, SCAN_BTN_CY, 0xffffffff) in [(t, x, y, c) for t, x, y, c in words if t == 'Stop']
+
+
+def test_the_spinner_turns_with_the_poll(fw, world, st, whole, done):
+    win, _ = scan_dialog(fw, world, st, 'Scanned 3')
+    frames = []
+    for _ in range(3):
+        assert poll(world) == RET_REPEAT
+        frames += [n for n, *_ in scan_page(fw, win)[2] if n.startswith('oled_swspin')]
+    assert frames == ['oled_swspin_d_1', 'oled_swspin_d_2', 'oled_swspin_d_3'] and len(world.invalid) == 3
+    _, words, arts = scan_page(fw, win)  # stock named no folder: the line says what is scanned, no glyph
+    assert ('Scanning the SD card', 187, SCAN_LINE_CY) in [w[:3] for w in words] and not [a for a in arts if 'folder' in a[0]]
+
+
+@pytest.mark.parametrize('stop, whole_scan, text, total, figure, title, line, card', [
+    (0, 1, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs, 34 new', 1),
+    (0, 1, 'Updated 3800', 800, 'oled_scan_done_d', 'Library Updated', '3,800 songs, 3,000 new', 1),  # thousands, both
+    (0, 1, 'Updated 700', 704, 'oled_scan_done_d', 'Library Updated', '700 songs', 1),  # fewer: no "new"
+    (0, 0, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs', 1),  # a folder's scan: not measured
+    (1, 1, 'Updated 120', 704, 'oled_scan_done_d', 'Scan Stopped', '120 songs found', 1),
+    (2, 1, 'No storage', 704, 'oled_scan_card_d', 'Not Enough Space', "Some songs weren't added", 1),
+    # the card pulled mid-scan (emulator, 2026-11-16): stock ends as a finish with the count it had and toasts
+    # "SD Card Removed"; the library is not left as it was (3,800 songs became 3,000)
+    (0, 1, 'Updated 3000', 3800, 'oled_scan_card_d', 'SD Card Removed', 'Put it back and scan again', 0)])
+def test_the_scan_s_ending_says_how_it_ended(fw, world, st, whole, done, stop, whole_scan, text, total, figure, title, line,
+                                            card):
+    """Once wait_scan sets SCAN_DONE stock writes its ending into label_msg (scan_updatefinish, or msg_no_storage
+    with the stop flag at 2): the check circle or the memory chip, the title, the line and Done in the accent. With the
+    card gone (stock's /tmp/mmc_add) it says so instead."""
+    fw.mock('fw_access', lambda path, *_: 0 if card or C.string_at(path) != b'/tmp/mmc_add' else -1)
+    whole.value = whole_scan
+    win, threads = scan_dialog(fw, world, st, 'Scanned 100')
+    count(fw, threads, total)
+    poll(world)
+    done[0].value, done[1][0] = 1, stop
+    world[named(world, win, 'label_msg')].text = text
+    poll(world)
+    canvas, words, arts = scan_page(fw, win)
+    assert [(n, x, y) for n, x, y in arts if n.startswith('oled_scan_')] == [(figure, 187 - 30, SCAN_FIG_Y)]
+    assert (title, 187, SCAN_TITLE_CY) in [w[:3] for w in words] and (line, 187, SCAN_LINE_CY) in [w[:3] for w in words]
+    assert 'Done' in said(words) and not world[named(world, win, 'msg_folder')].visible
+    assert [c for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19] == [rgba(0x2160d8)]  # the primary button
+
+
+def test_an_ending_a_paint_read_first_still_repaints_the_whole_stack(fw, world, st, whole, done):
+    """Stock repaints its hidden label's box as it writes the ending; that paint's msg_sync sees the new text first,
+    and the next poll still repaints the stack, so the button turns from Stop to Done with the rest."""
+    win, threads = scan_dialog(fw, world, st, 'Scanned 100')
     count(fw, threads, 704)
     poll(world)
-    assert world[line].text == '312 of 704' and world.at(line)[1] == 58
-    source = world[named(world, win, 'label_scanfolder')]
-    assert [n for n in world.nodes.values() if n is not source and n.text == 'Brent Faiyaz']  # the folder's own name
-    bar = added(msg_paint(fw, win), before)
-    rows = {f[1] for f in bar}
-    assert rows == set(range(228, 234)) and min(f[0] for f in bar) == 24 and max(f[0] + f[2] for f in bar) == 347
-    lit = [f for f in bar if f[4] & 0xffffff not in (0x333333, 0)]
-    assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
+    done[0].value = 1
+    world[named(world, win, 'label_msg')].text = 'Updated 738'
+    scan_page(fw, win)  # stock's own repaint, before the poll
+    before = len(world.invalid)
+    poll(world)
+    assert len(world.invalid) == before + 1 and world.invalid[-1] == (win, (0, 40, 375, 280))
+
+
+def test_a_scan_window_lower_down_keeps_its_stack_s_place_on_the_screen(fw, world, st, whole, done):
+    """The stack is in screen rows: the window's own origin is read when it paints."""
+    win, _ = scan_dialog(fw, world, st, 'Scanned 9')
+    poll(world)
+    full = scan_page(fw, win)[1]
+    world.box(win, 0, 26, 375, 320 - 26)
+    low = scan_page(fw, win)[1]
+    assert [(t, y - 26) for t, _, y, _ in full] == [(t, y) for t, _, y, _ in low]
+
+
+# USB mode's page: the computer's eject.
+
+USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
 
 
 CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
@@ -2071,54 +2138,6 @@ def test_the_sliders_fill_to_their_eased_levels(fw, world):
     canvas = control_center(fw, world)
     fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
     assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
-
-
-@pytest.mark.parametrize('flag, text, songs, line', [(0, 'Scanned 312', 704, '312'), (1, 'Scanned 800', 704, '800'),
-                                                     (1, 'Scanning', 704, 'Scanning'), (1, 'Scanned 3', 0, '3')])
-def test_without_a_total_to_measure_the_line_is_the_count_and_no_bar(fw, world, st, whole, flag, text, songs, line):
-    """A folder's scan, a scan past the total, no number yet (stock's text), or no library before it."""
-    whole.value = flag
-    win, threads = scan_dialog(fw, world, st, text)
-    before = msg_paint(fw, win)
-    count(fw, threads, songs)
-    poll(world)
-    assert world[named(world, win, 'msg_line')].text == line and added(msg_paint(fw, win), before) == []
-
-
-def test_before_the_count_answers_the_line_is_the_count_and_no_bar(fw, world, st, whole):
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 9')
-    poll(world)
-    before = msg_paint(fw, win)
-    assert world[named(world, win, 'msg_line')].text == '9'
-    count(fw, threads, 704)
-    assert scan_bar(added(msg_paint(fw, win), before))  # the track comes with the count
-
-
-def test_the_scan_s_bar_fills_to_its_part(fw, world, st, whole):
-    win, (x, end, rows, fill_end, fill_rows) = counted(fw, world, st, whole, 'Scanned 352')
-    assert (x, end, rows) == (SCAN_X, SCAN_END, set(range(SCAN_BAR_Y, SCAN_BAR_Y + 6)))
-    assert fill_end == x + (end - x) * 352 // 704 and fill_rows <= rows  # the count's share, on the track
-    heading, line = named(world, win, 'msg_heading'), named(world, win, 'msg_line')
-    assert world.at(heading)[1] < world.at(line)[1] and world.at(line)[1] + world.at(line)[3] <= min(rows)
-    assert world[line].text == '352 of 704'
-
-
-def test_a_scan_window_lower_down_keeps_its_bar_s_place_on_the_screen(fw, world, st, whole):
-    """The bar is in screen rows: the window's own origin is read when it paints."""
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 352')
-    before = msg_paint(fw, win)
-    count(fw, threads, 704)
-    full = scan_bar(added(msg_paint(fw, win), before))
-    world.box(win, 0, 26, 375, 320 - 26)
-    low = scan_bar(added(msg_paint(fw, win), before))
-    assert full and low and low[2] == {y - 26 for y in full[2]} and low[:2] == full[:2] and low[3] == full[3]
-
-
-# USB mode's page: the computer's eject.
-
-USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
 
 
 def usb_page(fw, world, st, mode=0):

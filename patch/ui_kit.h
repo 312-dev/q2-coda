@@ -76,6 +76,11 @@ int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
+/* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
+ * the accent with white words (a screen's main action), else the grey with Text Primary words;
+ * focused: ringed while ui_focus_shown; pressed: a step darker. Returns its width. */
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house

@@ -347,7 +347,7 @@ CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-f
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
 # circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
-# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and SD Card Update's
+# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and Software Update's
 # results (sw_update.c: done for up to date, none, low, bad, restart). Each glyph is drawn once; the bold check is
 # done for all three that show it.
 MODE_GLYPH_PX = 44
@@ -380,6 +380,17 @@ SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
+# Software Update's offer (sw_update.c sw_offer_paint): its source's glyph, white on the accent's 60 px circle: the
+# internet's download tray, the card's file.
+SW_OFFER_PX = 30
+SW_OFFER = {'net': 'download-simple-fill', 'sd': 'file-arrow-down-fill'}
+# The library scan's page (scan_page.c, docs/oled-design.md#update-library): its ending's figure, regular weight,
+# SCAN_GLYPH_PX in Text Secondary per half (done the check circle; stopped short the memory chip, as the empty
+# state's card), and the folder glyph before the scanned folder's name, SCAN_FOLDER_PX. Scanning is SW_SPIN's spinner.
+SCAN_GLYPH_PX = 60
+SCAN_FOLDER_PX = 15
+SCAN_GLYPHS = {'done': 'check-circle', 'card': 'memory', 'folder': 'folder'}
+SCAN_INKS = inks('secondary', 'd', 'l')
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
 # Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
@@ -654,6 +665,7 @@ def images(t):
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
+    out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
     out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
@@ -676,4 +688,6 @@ def images(t):
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
             for k, c in inks('secondary', 'd', 'l').items()}
+    out |= {f'{prefix}_scan_{n}_{k}': phosphor(g, SCAN_FOLDER_PX if n == 'folder' else SCAN_GLYPH_PX, c)
+            for n, g in SCAN_GLYPHS.items() for k, c in SCAN_INKS.items()}
     return out
