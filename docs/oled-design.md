@@ -176,37 +176,48 @@ All lists share one grid.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
   ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
   row of its own, so the list keeps its place.
-- The clock, in the same face, size and color, right-aligned 6 px left of the leftmost glyph
-  (the battery's body when it is alone). Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
+- The clock, in the same face, size and color, its digits' ink 8 px left of the leftmost glyph
+  (the battery's body when it is alone); its figures stand on rows 17 to 27, and every glyph beside them is
+  their height. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
   artist) have no title, and there the clock is centered across the row (x 187.5) instead, unless centered it would
   reach the glyphs; Home in
-  Split keeps it at the right, over the art, inked white or black as one glyph with the other glyphs
-  and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
+  Split keeps it at the right, over the art (approved from `mock_clock_center.py` and `mock_clock_right.py` on
+  2026-11-15), where the clock and every glyph take one ink, white or black, picked once for the row from the art's
+  mean lightness under all of them, as iOS's status bar takes one style; the battery's green, red and orange keep
+  their hue (`mock_status_icons.py`, the user's, 2026-11-16). Under Split's vignette the top of the art is darkened
+  toward 25%, so that ink is white over almost any cover.
 - Right, right to left: the battery, its nub's end 62 px from the right edge (x 313), then the glyph
   slots, each shown only while it has something to say, nothing in the row ever wrapping (`status_row.c`;
   [internals](internals.md#status-row-slots)):
-  - **Play state**, 4 px left of the battery's body: three level bars as Up Next's, 2 px wide and 4 px apart,
-    standing 6 px below the row's center, 3 to 11 px tall and moving on offset sines (a 1.25 s loop) in Text
-    Primary while playing; paused, frozen at their last heights in Text Secondary; stopped, nothing. Only their
-    10 px box repaints as they move. A tap on them opens Now Playing (`mock_status_bars.py`, the user's, 2026-11-15).
-    On Home, while its first row is in sight, they lead that row instead ([Home's first row](#homes-first-row)).
-  - **Wi-Fi**, 5 px left of the bars: Phosphor `wifi-high` (bold) lit by the signal, one, two or three arcs in Text
-    Primary and the rest in `#3A3A3C` so the shape keeps its width; `wifi-x` (bold) connected with no internet;
-    nothing with Wi-Fi off or not connected (`mock_wifi_status.py`).
-  - **Sync**, 4 px left of the glyph before it: while a card app checks its server or its metadata, Phosphor
+  - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
+    glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
+    digits' baseline, 3 to 11 px tall and moving on offset sines (a 1.25 s loop); paused, the pause, two 3 px bars
+    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. Only the box repaints as
+    the bars move. A tap on it opens Now Playing (`mock_status_bars.py`, 2026-11-15; `mock_status_icons.py`,
+    2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
+    row](#homes-first-row)).
+  - **Wi-Fi**, left of the play state: iOS's fan, a 90 degree sector 11 px in radius from an apex on the digits'
+    baseline (15.6 x 11 px), cut into a dot (radius 3.6) and two bands (5.0 to 7.3, 8.7 to 11) with 1.4 px gaps;
+    the signal lights the dot, then the bands, in Text Primary and the rest is `#3A3A3C` (`#C7C7CC` in Light
+    Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
+    off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
+  - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
-  - **Bluetooth**, 5 px left (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is
-    connected; Phosphor `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one
-    is connected; a headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled
-    to the level as the status battery's (red under 20%); a car, `car-profile` (bold). While a guest plays
+  - **Bluetooth** (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is connected; Phosphor
+    `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one is connected; a
+    headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
+    the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
     ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
     Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
-  - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
-- The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centered on the
-  row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
-- Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
+  - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
+- Every glyph is 11 px tall, the clock's digits' height, on their rows (17 to 27): the Phosphor ones sized by
+  their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
+  out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
+  from the first, as iOS spaces them (`mock_status_icons.py`, the user's, 2026-11-16).
+- Battery, in iOS's proportions: a 25x12 body on rows 16 to 27 (a row past the digits' top, as iOS's stands)
+  with 4 px corners and a 1 px `#6E6E6E` outline,
   the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
   Text Primary (under 20 % `#FF453A`, the only red on any screen; `#34C759` green on a cable that
   charges it, holds it full or holds it at Charge Limit; `#FF9F0A` orange on a charger too weak to
@@ -241,7 +252,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 
 ### Selection bar
 
-- Accent Blue, flat, the full row pitch tall, inset 16 px each side on every row, 8 px corners,
+- Accent Blue, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,
   (`list.selection.inset`, `list.selection.radius`).
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
@@ -258,6 +269,10 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
   The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
   black band and down into the fade.
+- **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
+  sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
+  blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
+  press during a tug wins; the lean goes. Reduce Motion: the brighter blue only, no scale and no shadow.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
@@ -1070,9 +1085,9 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
-- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's Wi-Fi, sync and Bluetooth, Now
+- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync and Bluetooth, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
-  heart and More. Sizes are the design's: 13 px padlock and 14 px status glyphs, 15 px chevron, 20 px row symbols,
+  heart and More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
@@ -1085,7 +1100,9 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   is scaled about its ink's center until its ink's longer side is a set length, centered in the box, so a wide glyph
   (Wi-Fi's signal) and a tall one (the lock, the trash) read as one size. The 20 px symbols (rows', Streaming's marks,
   Now Playing's heart and More) have 15.5 px of ink (`tools/art.py` `ROW_INK`, `glyph_png`). Wi-Fi's row glyphs end
-  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`).
+  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`). The status row is
+  the exception: there every glyph is sized by its ink's height, 11 px, the clock's digits' (`tools/art.py`
+  `status_fit`), since beside a row of figures a wide glyph sized by its width came out short (Wi-Fi at 8 px).
 - No colored app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
@@ -1531,10 +1548,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, glyphs
-  and battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
-  art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
-  charging green and low red keep their colors (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
-  ink a glyph from the same day, as each pixel's own pick speckled over lettering), the playing cover panning slowly
+  and battery over them, all in one ink, white or black, whichever has the higher WCAG contrast against the art's
+  mean luminance under them, weighted by each glyph's coverage and held 0.03 past the bound against flicker; the
+  charging green and low red keep their colors (`home_ink`, approved from `mock_split_top.py` on 2026-11-14; one
+  ink for the row from `mock_status_icons.py` on 2026-11-16, as one ink a glyph put dark bars beside a white
+  clock), the playing cover panning slowly
   across its 110 % zoom with an eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a
   cover's own border never shows, on Now Playing's row (there only while something is playing or paused), and with no
   cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every

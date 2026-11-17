@@ -119,30 +119,37 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
     arr = (C.c_char_p * 1)(b'Scan Music Now')
     fw.fn('ui_cta_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(
         c.addr, C.addressof(arr), 1, 100, 0, 0)
-    assert bool(c.frames) == ringed and len(c.boxes) == 1  # the capsule either way
+    beside = [r for r, _ in c.rects if r[1] < 100 or r[1] >= 138]  # the ring's rows, above and below the capsule
+    assert bool(beside) == ringed and len(c.boxes) == 1  # the capsule either way
 
 
 @pytest.mark.parametrize('light', [0, 1])
-def test_the_focus_ring_is_two_antialiased_pills_concentric_with_the_capsule(fw, st, light):
-    """The user's device (2026-11-16, Car Remote's Pair a Phone at 3x): the ring was aliased, its round ends dotted
-    and a flat segment over its top that did not follow the pill. It was drawn a row at a time from tools/art.py's
-    corner coverage, which has no table for its radii (24, 23), so it fell back to hard one-pixel steps. It is AWTK's
-    antialiased rounded rect, as the capsule's fill is: two one-pixel strokes, each a whole pill (radius half its
-    height), CTA_RING_OFF (3) px out and one in from it, in Text Primary, and nothing else drawn outside the capsule."""
+def test_the_focus_ring_is_tools_art_pys_supersampled_ends_and_whole_rows_between(fw, st, light):
+    """The user's device (2026-11-16, Car Remote's Pair a Phone): the ring was aliased, its round ends dotted, drawn a
+    row at a time from corner tables with none for its radii (24, 23); then two one-pixel AWTK strokes, whose arcs
+    still stepped unevenly at 6x where they met. Its ends are tools/art.py's images (cta_ring_end, 16 x 16 samples a
+    pixel, the half's Text Primary), 24 x 48, at the ring's box CTA_RING_OFF + 2 (5) px out from the capsule, and the
+    straight runs between them two whole rows of the ink at the box's top and foot, nothing else outside the
+    capsule."""
     from test_nav_painters import Canvas, theme
     theme(fw)
     st('light').value = light
     st('touch_mode').value = 0
     c = Canvas(fw, char_w=7)
+    prefix = C.string_at(fw.fn('theme_art', C.c_void_p, C.c_char_p)(b'')).decode()
+    half = 'l' if light else 'd'
+    c.art = {f'{prefix}ctaring_{s}_{half}': (24, 48) for s in 'lr'}
     arr = (C.c_char_p * 1)(b'Pair a Phone')
     fw.fn('ui_cta_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(
         c.addr, C.addressof(arr), 1, 100, 0, 0)
     (capsule, _, radius), = c.boxes
     x, y, w, h = capsule
     assert (y, h, radius) == (100, 38, 19)
+    box = (x - 5, y - 5, w + 10, h + 10)
+    assert c.images == [(box[0], box[1], 24, 48), (box[0] + box[2] - 24, box[1], 24, 48)]
     ink = 0xff000000 | host.tools_theme.token('primary', bool(light))
-    assert c.frames == [((x - 5, y - 5, w + 10, h + 10), ink, 24), ((x - 4, y - 4, w + 8, h + 8), ink, 23)]
-    assert not [r for (r, _) in c.rects if r[1] < y or r[1] >= y + h]  # no row or segment of its own
+    assert c.rects == [((box[0] + 24, box[1], box[2] - 48, 2), ink), ((box[0] + 24, box[1] + 46, box[2] - 48, 2), ink)]
+    assert not c.frames
 
 
 @pytest.mark.parametrize('light', [0, 1])
