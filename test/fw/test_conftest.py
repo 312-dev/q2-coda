@@ -1,7 +1,7 @@
 """conftest.py's shared fakes themselves: what the other test files stand on."""
 import ctypes as C
 
-from conftest import Files, stock_prop_str
+from conftest import Files, stock_prop_str, stock_start_with
 from test_nav_lists import Ui
 
 
@@ -31,6 +31,12 @@ def test_widget_props_read_as_strings_are_null_where_stocks_are():
     assert stock_prop_str(b'window', b'open_anim_hint', None, b'') is None
     assert stock_prop_str(b'label', b'open_anim_hint', None, b'd') == b'd'
     assert stock_prop_str(b'image', b'image', None, b'') is None
+
+
+def test_tk_str_start_with_is_false_for_a_null_as_stocks_is():
+    row, r = C.create_string_buffer(b'row'), C.create_string_buffer(b'r')
+    assert stock_start_with(C.addressof(row), C.addressof(r)) and not stock_start_with(C.addressof(r), C.addressof(row))
+    assert not stock_start_with(0, C.addressof(r)) and not stock_start_with(C.addressof(row), 0)
 
 
 def test_the_shared_ui_answers_names_and_strcmp_as_stock(fw):
