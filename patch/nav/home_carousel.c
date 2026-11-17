@@ -51,7 +51,7 @@ static void motion_hint(void *win, int kind) {
 static void motion_load(void *root, int np) {
     if (np) art_zoom_load(root); /* from a cover: it grows into the art (art_zoom.c) */
     if (!motion_row(MOTION_PAGE)->hint && !motion_row(MOTION_PLAYING)->hint) return;
-    if (np && !widget_get_prop_str(root, "open_anim_hint", "")[0])
+    if (np && !window_hint(root, "open_anim_hint")[0])
         motion_hint(root, MOTION_PLAYING);
     else if (!np && slides(root))
         motion_hint(root, MOTION_PAGE);
