@@ -237,7 +237,7 @@ static void paint_chevrons(void *w, void *canvas) {
         int sel = st.sel_w == w && i == st.sel_row,
             spin = home && sel && cover_flow_row(g_menu.at[i]) ? coverflow_spinner() : 0;
         if (spin)
-            spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, spin);
+            spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2);
         else
             chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, sel);
     }
