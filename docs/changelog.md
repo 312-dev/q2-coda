@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB Debugging: the **Allow USB Debugging?** prompt now appears when an unknown computer connects. Before, the Q2 looked for adbd's socket with the wrong socket type, so the prompt never showed and every new computer stayed `unauthorized`.
   - USB: when the Q2 powers a USB device it is plugged into as a host (a USB drive, a DAC), its charger now stays off as Shanling's firmware leaves it. Before, it was turned back on at once, so the Q2 charged its battery from its own USB power, which wastes power as heat.
   - USB: a choice saved with **Always Do This** no longer sticks for good. Press **Stop** on the USB Debugging, Transfer Files or USB Audio page and the next cable asks again with the chooser. Before, nothing on the Q2 could clear it, so every cable went straight to the saved choice.
   - USB: **Stop** on the USB Debugging, Transfer Files and USB Audio pages is a proper button and shows an outline when you turn the wheel, so you can see it is selected.

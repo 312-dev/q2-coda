@@ -50,7 +50,8 @@ class Usb:
         fw.mock('fw_MD5_Init', lambda *_: setattr(self, 'md5', hashlib.md5()) or 1)
         fw.mock('fw_MD5_Update', lambda ctx, data, n, *_: self.md5.update(C.string_at(data, n)) or 1)
         fw.mock('fw_MD5_Final', lambda out, *_: C.memmove(out, self.md5.digest(), 16) and 1)
-        fw.mock('fw_socket', lambda *_: 7)
+        self.sockets = []  # (domain, type) of every socket() the payload made
+        fw.mock('fw_socket', lambda domain, kind, *_: self.sockets.append((domain, kind)) or 7)
         fw.mock('fw_connect', lambda *_: 0 if self.socket else -1)
         fw.mock('fw_recv', self.recv)
         fw.mock('fw_send', lambda fd, data, n, *_: self.sent.append(C.string_at(data, n).decode()) or n)
@@ -377,6 +378,14 @@ def adb_question(fw_dev):
     asked = [C.string_at(a[0]) for _, a in fw_dev.calls('navigator_to')]
     assert b'dialog/sortselect_dialog' in asked
     return u
+
+
+def test_adbd_s_socket_is_a_mips_stream_socket(fw_dev):
+    """MIPS Linux numbers SOCK_DGRAM 1 and SOCK_STREAM 2: AF_UNIX (1) with type 1 made a datagram socket that never
+    reached adbd's listener, so no prompt ever appeared and every new computer stayed unauthorized."""
+    u = Usb(fw_dev)
+    u.poll()
+    assert u.sockets == [(1, 2)]
 
 
 def card_answer(fw_dev, row, always):

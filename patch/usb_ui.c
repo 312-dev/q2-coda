@@ -465,7 +465,9 @@ static void auth_poll(void) {
     if (u.fd <= 0) {
         if (now - u.auth_at < 1000) return;
         u.auth_at = now;
-        int fd = socket(1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        /* MIPS Linux numbers the socket types differently from x86 (MIPS ABI: SOCK_DGRAM 1, SOCK_STREAM 2), and adbd's
+         * socket is a stream: 1 here would be a datagram socket and connect would never reach adbd's listener. */
+        int fd = socket(1 /* AF_UNIX */, 2 /* SOCK_STREAM (MIPS) */, 0);
         struct {
             unsigned short family;
             char path[108];
