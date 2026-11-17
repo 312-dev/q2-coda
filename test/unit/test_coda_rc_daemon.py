@@ -17,7 +17,8 @@ import coda_rc_client as client
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATCH = ROOT / 'patch'
-SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c', PATCH / 'monocypher/monocypher.c',
+SOURCES = [PATCH / 'coda_rc.c', PATCH / 'coda_rc_core.c', PATCH / 'coda_rc_lib.c', PATCH / 'coda_rc_mdns.c',
+           PATCH / 'monocypher/monocypher.c',
            PATCH / 'monocypher/monocypher-ed25519.c', ROOT / 'test/unit/coda_rc_ble_host.c']
 SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'
 CAP_RADIO = 16384

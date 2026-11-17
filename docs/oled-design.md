@@ -1418,7 +1418,7 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
 - **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
   from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
-  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address to type ("Address
+  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address for a phone that does not list it ("Address
   192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
   connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
   for Q2 Muse Remote to scan one.
