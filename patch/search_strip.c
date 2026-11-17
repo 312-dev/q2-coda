@@ -912,7 +912,7 @@ static void ss_run_letter(void *canvas, int e, int x, unsigned rgb, int fade_l, 
 /* The strip (docs/oled-design.md#text-entry): a pill in the raised grey; the set switcher docked
  * at its left, its set's name on a #2C2C2E pill, the accent's while the wheel is on it; the
  * return key docked at its right, an accent circle with the return mark in white, turned to a
- * white circle with the mark in the accent while the wheel is on it; between them the run, a
+ * white circle (in either half) with the mark in the accent while the wheel is on it; between them the run, a
  * cell of each character in Text Primary from the first shown, the lit one on an accent box (or
  * under its pop). The highlights show while the strip has the wheel. */
 static void ss_strip_paint(void *canvas, unsigned primary, unsigned accent, int light) {
@@ -940,7 +940,7 @@ static void ss_strip_paint(void *canvas, unsigned primary, unsigned accent, int 
     (void)n;
     int ret = on && ss_on_ret();
     fill_box(canvas, &(rect_t){ SS_RET_L, y0, SS_STRIP_H, SS_STRIP_H },
-             RGBA(ret ? primary : accent), SS_STRIP_R);
+             RGBA(ret ? 0xffffff : accent), SS_STRIP_R);
     paint_art(ss.sheet, canvas, theme_art(ret ? "search_return_a" : "search_return_w"),
               SS_RET_L + (SS_STRIP_H - SS_RET_MARK) / 2, y0 + (SS_STRIP_H - SS_RET_MARK) / 2);
     if (pop) ss_pop_paint(canvas);

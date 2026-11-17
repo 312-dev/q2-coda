@@ -645,6 +645,14 @@ def test_the_strip_docks_the_switcher_left_and_the_return_key_right_the_run_from
     assert boxes[((301, 196, 34, 34), 17)] == 0xffffff and boxes[((40, 196, 56, 34), 17)] == 0x2c2c2e
 
 
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_lit_return_key_is_a_white_circle_in_either_half(fw, ui, song, st, light):
+    s = Strip(fw, ui, library(song))
+    st('light').value = light
+    s.key(KEY_RETURN)
+    assert {(b, r): rgb(ink) for b, ink, r in painted(fw, s).boxes}[((301, 196, 34, 34), 17)] == 0xffffff
+
+
 def test_the_run_s_letters_fade_only_where_more_lies_past_an_edge_and_nothing_is_painted_over_them(fw, ui, song):
     s = Strip(fw, ui, library(song))
     c = painted(fw, s)
