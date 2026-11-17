@@ -1290,7 +1290,7 @@ def test_a_go_to_that_opened_nothing_keeps_no_restore(fw, ui, st, recs):
 class Card(Files):
     """Files, appends too ("ab" keeps what the file held), with access() and fputs."""
     def __init__(self, fw, files=None):
-        super().__init__(fw, files)
+        super().__init__(fw, files, card=True)  # places and counts are on it (card_store.c)
         fw.mock('fw_access', lambda path, *_: 0 if cstr(path) in self.files else -1)
         fw.mock('fw_fputs', lambda s, f, *_: self.fwrite(s, 1, len(C.string_at(s)), f) and 0)
 
@@ -2367,7 +2367,7 @@ def test_a_pull_down_moving_or_held_is_left(fw, ui, state, idex, pressed):
 
 
 # Resume: a long track's place, kept each second by the UI loop (resume_poll), and a spoken book's.
-RESUME_FILE, PLAYS_FILE = '/mnt/data/ringnav-resume', '/mnt/data/ringnav-plays'
+RESUME_FILE, PLAYS_FILE = '/mnt/mmc/.q2pod/ringnav-resume', '/mnt/mmc/.q2pod/ringnav-plays'  # card_store.c
 EDGE, SAVE_S = O['RESUME_EDGE_S'], O['RESUME_SAVE_S']
 
 
@@ -2999,21 +2999,27 @@ def test_a_clean_end_stops_the_watchdog_and_removes_the_state_record(fw, ui):
     end(), end()
     wdt.poll()
     fw.fn('system__state_poll', None)()
-    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files == {}
+    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files.keys() <= {'/proc/mounts'}
 
 
-# The state record (state_poll): /mnt/data/q2-state, one line rewritten whenever it changes.
+# The state record (state_poll): /mnt/data/q2-state, one line rewritten when it changes, a burst's latest
+# STATE_SETTLE_MS (5 s) after its first change; a run's first line and the power field at once.
 class State:
     def __init__(self, fw, ui):
-        self.fw, self.card = fw, Card(fw)
+        self.fw, self.card, self.ms = fw, Card(fw), 1000
         self.status, self.out = 2, 0
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('mclGetOutputWay', lambda *_: self.out)
+        fw.mock('time_now_ms', lambda *_: self.ms)
         self.poll_fn = fw.fn('system__state_poll', None)
 
-    def poll(self):
+    def poll(self, ms=0):
+        self.ms += ms
         self.poll_fn()
         return self.card.files.get('/mnt/data/q2-state', b'').decode()
+
+    def writes(self):
+        return len([a for _, a in self.fw.calls('fw_fopen') if C.string_at(a[0]) == b'/mnt/data/q2-state'])
 
 
 def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
@@ -3023,7 +3029,8 @@ def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     fw.var('g_usbdet_value', C.c_ubyte).value = 1
     state.status, state.out = 3, 1
-    assert state.poll() == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
+    state.poll()  # the change seen; written once it has settled
+    assert state.poll(5000) == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
 
 
 @pytest.mark.parametrize('level, status, out, line', [
@@ -3039,11 +3046,40 @@ def test_the_state_records_odd_readings(fw, ui, level, status, out, line):
 
 def test_the_state_record_is_written_only_when_it_changes(fw, ui):
     state = State(fw, ui)
-    state.poll(), state.poll()
-    assert len(fw.calls('fw_fopen')) == 1 and len(fw.calls('fw_fsync')) == 1
+    state.poll()  # a run's first line: at once, the forced-restart mark
+    assert state.writes() == 1 and len(fw.calls('fw_fsync')) == 1
+    for _ in range(20):
+        state.poll(1000)  # nothing changed: nothing written, however long
+    assert state.writes() == 1
     state.status = 3
+    state.poll(), state.poll(4999)
+    assert state.writes() == 1  # a change waits for the burst
+    assert 'play:paused' in state.poll(1) and state.writes() == 2
+
+
+def test_a_burst_of_changes_is_one_write_of_the_latest_line(fw, ui):
+    state = State(fw, ui)
     state.poll()
-    assert len(fw.calls('fw_fopen')) == 2
+    for level in range(90, 80, -1):  # ten changes, 400 ms apart: battery, screen, playback
+        fw.var('fw_ctx_g_power_capacity', C.c_int).value = level
+        fw.var('g_backlight_status', C.c_ubyte).value = level % 2
+        state.status = 2 + level % 2
+        state.poll(400)
+    assert state.writes() == 1
+    line = state.poll(1400)  # 5 s after the burst's first change
+    assert state.writes() == 2 and line == 'screen:on power:running cable:out battery:81 play:paused out:jack\n'
+    state.poll(5000)
+    assert state.writes() == 2
+
+
+def test_a_change_undone_within_the_burst_writes_nothing(fw, ui):
+    state = State(fw, ui)
+    state.poll()
+    state.status = 3
+    state.poll(1000)
+    state.status = 2
+    state.poll(1000), state.poll(5000)
+    assert state.writes() == 1
 
 
 def test_a_record_that_cant_be_written_is_tried_again(fw, ui):
@@ -3058,8 +3094,12 @@ def test_standby_records_the_suspend_it_may_never_wake_from(fw, ui, power):
     state = State(fw, ui)
     seen = []
     fw.mock('stock_standby_trampoline', lambda *_: seen.append(state.card.files['/mnt/data/q2-state'].decode()) or 0)
-    fw.fn('ringnav_standby', C.c_int)()
-    assert 'power:suspending' in seen[0] and power('suspended').value == 0
+    state.poll()
+    state.status = 3
+    state.poll(100)  # a change waiting out its burst
+    fw.fn('ringnav_standby', C.c_int)()  # 100 ms after the last write: the suspend is not held back
+    assert 'power:suspending' in seen[0] and 'play:paused' in seen[0] and power('suspended').value == 0
+    assert 'power:running' in state.poll(100)  # and the resume, at once too
 
 
 # The RTC's clock (rtc_now), as Standby's limit reads it.

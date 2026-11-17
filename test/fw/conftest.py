@@ -345,9 +345,12 @@ class Rows(Deques):
 
 
 class Files:
-    """The card's and flash's files as a dict: fopen and all, so blob_io and the snapshot's reader run whole; "a" appends."""
-    def __init__(self, fw, files=None):
+    """The card's and flash's files as a dict: fopen and all, so blob_io and the snapshot's reader run whole; "a" appends.
+    card: /proc/mounts lists the card, as card_mounted reads it, which card_store.c's files need."""
+    def __init__(self, fw, files=None, card=False):
         self.files = files if files is not None else {}
+        if card:
+            self.files.setdefault('/proc/mounts', b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')
         self.open = {}
         self.fail_rename = False
         fw.mock('fw_fopen', self.fopen)

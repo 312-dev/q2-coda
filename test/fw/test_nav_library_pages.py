@@ -12,6 +12,7 @@ import pytest
 import host
 from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
 from conftest import Rows as HeldRows  # Rows here is Folder view's list
+
 from test_navigation import Sa  # test_navigation.py keeps the mirror
 from test_tidal import HEARTS, urls_play
 
@@ -24,7 +25,7 @@ PLAYS_SLOTS, RATE_SLOTS, RESUME_SLOTS = O['PLAYS_SLOTS'], O['RATE_SLOTS'], O['RE
 LONG_SONG_S, RATE_HOLD_MS = O['LONG_SONG_S'], O['RATE_HOLD_MS']
 LIBRARY, FOLDER = 0xf001, 1
 STOP, REPEAT = 11, 8  # a handler's RET_STOP; a timer's RET_REPEAT
-PLAYS_FILE, RESUME_FILE = '/mnt/data/ringnav-plays', '/mnt/data/ringnav-resume'
+PLAYS_FILE, RESUME_FILE = '/mnt/mmc/.q2pod/ringnav-plays', '/mnt/mmc/.q2pod/ringnav-resume'  # card_store.c
 RATINGS, ALBUM_RATINGS, LENGTHS = '/mnt/data/ringnav-ratings', '/mnt/data/ringnav-album-ratings', '/mnt/data/ringnav-durations-v1'
 FAV_CLICK = 0x53c968  # Now Playing's heart: stock's My Fav toggle
 TIDAL_DIR, SPOT_DIR = '/mnt/mmc/.tidal', '/mnt/mmc/.spotify'
@@ -496,7 +497,7 @@ def plays(*counts):
 
 def test_most_played_lists_the_counted_songs_most_played_first(fw, ui, song):
     a, b, c, d = (song(b'/m/%c.flac' % x, b'Song %c' % x, artist) for x, artist in zip(b'abcd', (b'X', b'', b'Y', b'Z')))
-    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 1), (b'/m/c.flac', 5), (b'/m/a.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 1), (b'/m/c.flac', 5), (b'/m/a.flac', 1))}, card=True)  # card_store.c
     Library(fw, ui, [a, b, c, d])
     call(fw, 'most_played')
     page = ui.top()
@@ -517,7 +518,7 @@ def test_most_played_with_no_plays_says_so(fw, ui, song):
 
 def test_most_played_ranks_its_kept_songs_again_without_the_library(fw, ui, song, st):
     a, b = song(b'/m/a.flac', b'A'), song(b'/m/b.flac', b'B')
-    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))}, card=True)  # card_store.c
     library = Library(fw, ui, [a, b])
     call(fw, 'most_played')
     ui.close(ui.top())
@@ -528,7 +529,7 @@ def test_most_played_ranks_its_kept_songs_again_without_the_library(fw, ui, song
 
 def test_most_played_reads_the_library_again_after_it_changed(fw, ui, song):
     a, b = song(b'/m/a.flac', b'A'), song(b'/m/b.flac', b'B')
-    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))}, card=True)  # card_store.c
     library = Library(fw, ui, [a])
     call(fw, 'most_played')
     ui.close(ui.top())
@@ -548,7 +549,7 @@ def test_most_played_opens_once(fw, ui, song):
 
 def test_most_played_finds_a_kept_song(fw, ui, song):
     a, b = song(b'/m/a.flac'), song(b'/m/b.flac')
-    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 4), (b'/m/a.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 4), (b'/m/a.flac', 1))}, card=True)  # card_store.c
     Library(fw, ui, [a, b])
     find = fw.fn('library_lists__mp_find', C.c_int, C.c_uint)
     assert find(listen_key(b'/m/a.flac')) == -1  # nothing kept before the page opens
@@ -558,7 +559,7 @@ def test_most_played_finds_a_kept_song(fw, ui, song):
 
 def test_album_plays_sums_each_album_s_listens(fw, ui, song):
     a1, a2, b1, other = (song(b'/m/%s.flac' % n) for n in (b'a1', b'a2', b'b1', b'x'))
-    Files(fw, {PLAYS_FILE: plays((b'/m/a1.flac', 3), (b'/m/b1.flac', 2), (b'/m/a2.flac', 4))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a1.flac', 3), (b'/m/b1.flac', 2), (b'/m/a2.flac', 4))}, card=True)  # card_store.c
     Library(fw, ui, [a1, a2, b1, other])
     album = {a1: 0, a2: 0, b1: 1, other: -1}
     of = C.CFUNCTYPE(C.c_int, C.c_void_p)(lambda r: album[r])
@@ -2824,7 +2825,7 @@ def spots(*places, slots=RESUME_SLOTS):
 
 
 def book_place(fw, song, files, path=b'/mnt/mmc/Audiobooks/b.flac'):
-    Files(fw, files)
+    Files(fw, files, card=True)  # places are on it (card_store.c)
     fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
     deques = Deques(fw)
     tracks = [song(path, b'A', cue=0, end=600), song(path, b'B', cue=600, end=1200), song(path, b'C', cue=1200)]
