@@ -382,3 +382,27 @@ def test_a_bar_in_no_window_paints_at_rest(fw):
     bar = Press(fw)
     C.c_void_p.from_buffer(bar.list, W_PARENT).value = None
     assert bar.paint() == REST
+
+
+def test_everything_the_press_draws_stays_inside_the_box_it_repaints(fw):
+    """tilt.box (the bar's box and TILT_MARGIN round it) is what tilt_poll invalidates: the bar and its shadow rings,
+    at rest, at the bottom of a press and through the spring's overshoot, never paint past it, or a press would leave a
+    stale slice of them behind."""
+    bar = Press(fw)  # the list at its window's origin: the list's coordinates are the box's
+    rings = []
+    fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: rings.append(tuple((C.c_int * 4).from_address(r))))
+
+    def inside():
+        rings.clear()
+        drawn = [bar.paint()] + rings
+        b = bar.state.box
+        return all(b.x <= x and b.y <= y and x + w <= b.x + b.w and y + h <= b.y + b.h for x, y, w, h in drawn), drawn
+    assert inside()[0]  # at rest, raised with its shadow
+    bar.press()
+    bar.poll(DOWN_MS)
+    assert inside()[0]  # pressed
+    bar.press(0)
+    for _ in range(SPRING // 10):  # the spring, its overshoot included
+        ok, drawn = inside()
+        assert ok, drawn
+        bar.poll(10)
