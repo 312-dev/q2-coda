@@ -138,12 +138,12 @@ static rect_t cc_box(int i) {
 }
 
 /* The Wi-Fi circle's glyph, by the link as the status row reads it (status_row.c wifi_level,
- * wifi_offline): -1 off (wifi-slash), 0 on but not joined (wifi-none), 1 to 3 joined by stock's
- * bars (1, 2, then 3 and 4: wifi-low to wifi-high), 4 joined with no link up (wifi-x). */
+ * wifi_offline), so the two never disagree: 1 to 3 joined by stock's bars (1, 2, then 3 and 4:
+ * wifi-low to wifi-high), 4 joined with no link up (wifi-x), else -1 off (wifi-slash) or 0 on but
+ * not joined (wifi-none). */
 static int cc_wifi(void) {
-    if (!g_wififlag) return -1;
     int level = wifi_level();
-    return !level ? 0 : wifi_offline() ? 4 : level > 3 ? 3 : level;
+    return level ? (wifi_offline() ? 4 : level > 3 ? 3 : level) : g_wififlag ? 0 : -1;
 }
 /* Every CC_WIFI_POLL_MS while the page is open: the Wi-Fi circle drawn again when its glyph
  * changes. Its box, ring and all: nothing else moves with it. */
@@ -161,8 +161,8 @@ static int cc_wifi_poll(const void *info) {
 
 static int cc_lit(int i) {
     switch (i) {
-    case CC_WIFI:
-        return g_wififlag != 0;
+    case CC_WIFI: /* on, or joined as the status row reads it (cc_wifi) */
+        return g_wififlag != 0 || wifi_level() != 0;
     case CC_BT:
         return g_bluetoothflag != 0;
     case CC_AIRPLAY:

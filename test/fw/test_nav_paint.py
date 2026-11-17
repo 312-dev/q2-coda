@@ -2212,7 +2212,8 @@ def test_text_that_fits_its_column_is_centred_and_unclipped(fw):
 
 
 @pytest.mark.parametrize('flag, image, online, glyph', [
-    (0, 'bar_wifi3', 1, 'cc_wifi_slash'),  # off
+    (0, 'bar_wifi0', 1, 'cc_wifi_slash'),  # off
+    (0, 'bar_wifi3', 1, 'cc_wifi_3'),      # the status row's bars win: the two never disagree
     (1, 'bar_wifi0', 1, 'cc_wifi_0'),      # on, not joined
     (1, 'bar_wifi1', 1, 'cc_wifi_1'), (1, 'bar_wifi2', 1, 'cc_wifi_2'),
     (1, 'bar_wifi3', 1, 'cc_wifi_3'), (1, 'bar_wifi4', 1, 'cc_wifi_3'),

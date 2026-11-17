@@ -1128,7 +1128,8 @@ bar, and round the toggles inside their block.
 - **The Wi-Fi circle is the link**, as the status row reads it (`status_row.c` `wifi_level`, `wifi_offline`):
   `wifi-slash` off, `wifi-none` on but not joined, `wifi-low`, `wifi-medium` and `wifi-high` by stock's bars (1, 2,
   then 3 and 4), `wifi-x` joined with no link up. Phosphor's fill levels draw the whole fan and fill as much of it
-  as the signal, so the glyph keeps one footprint. It is drawn again when that changes while the page is open
+  as the signal, so the glyph keeps one footprint. Joined, it is lit even where the radio's switch reads off, so it
+  and the status row never disagree. It is drawn again when that changes while the page is open
   (`cc_wifi_poll`, every second, the circle's box alone). Its name stays "Wi-Fi", the tile's function, not the
   network's.
 - **Names**: each circle's, its line 1 px under the circle, Inter Medium 13, white when on, Text Secondary off, set
