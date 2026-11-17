@@ -1,5 +1,6 @@
 /* Logical menu selection is independent of native touch focus. Stock code owns gestures. */
 #include "navigation.h"
+#include "card_store.h"
 #include "playlist_art.h"
 extern int stock_sorted_query_trampoline(const char *, const char *, void *, int);
 extern int stock_seek_time_trampoline(int);

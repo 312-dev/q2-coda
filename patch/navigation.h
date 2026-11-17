@@ -826,10 +826,13 @@ int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void)
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);
 
-/* config_ini.c: toolsWriteConfig's hook */
+/* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
     stock_ini_write_trampoline(const char *path, const char *section, const char *key,
                                const char *value);
+#define CONFIG_SETTLE_MS 3000 /* a held key is written this long after its last change */
+int config_hold(int value, const char *section, const char *key);
+void config_settle(int now_too);
 
 /* library_lists.c */
 int era_menu(void *ctx, void *event);

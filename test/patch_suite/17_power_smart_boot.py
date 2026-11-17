@@ -753,7 +753,7 @@ for site in AUDIO_EXTENSION_CALLS:
 for path in ('/mnt/mmc/Novel.m4b','/mnt/mmc/Music/Novel.M4B','/mnt/mmc/Novel.m4B'):
     m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]
     m.word(r+O['REC_PATH'],m.string(path)); playing(m,0,200,pos=0,n=110)
-    assert m.places()==[(fnv(path),61)] and '/mnt/data/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
+    assert m.places()==[(fnv(path),61)] and '/mnt/mmc/.q2pod/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
     m.poll(110,200,n=3)
     files=m.files
     m=ResumeMachine(files); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; m.word(r+O['REC_PATH'],m.string(path))

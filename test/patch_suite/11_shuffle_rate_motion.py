@@ -18,8 +18,9 @@ class ShuffleMachine(CoverflowMachine):
             self.queued=self.names(self.get(u.reg_read(REGS[1])))
         if not name.startswith('s:'): return super().hook(u,address,size,unused)
         name=name[2:].split('@')[0]; a,b=u.reg_read(REGS[0]),u.reg_read(REGS[1]); ret=0; self.calls.append((name,a,b))
+        # no card (/proc/mounts doesn't open): the counts an earlier release left on the flash (card_store.c)
         if name=='fopen': ret=1 if self.text(a)=='/mnt/data/ringnav-plays' and self.counts else 0
-        elif name=='fread': self.u.mem_write(a,self.counts); ret=1
+        elif name=='fread': self.u.mem_write(a,self.counts); ret=len(self.counts)//b if b else 0  # items of b bytes
         elif name=='getAllMusic':
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',e) for e in self.found]; ret=len(self.found)
             self.calls[-1]=(name,a,self.get(payload_syms['library_music']))  # scoped to music (MUSIC_WHERE)
