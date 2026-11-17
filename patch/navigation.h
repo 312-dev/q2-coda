@@ -958,8 +958,8 @@ int search_strip_box(void *kb, void *edit, const char *title);
  * else is a toast saying why not, the text kept to edit */
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
-void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
-void search_strip_secret(void);           /* ... the next one's text a password, as dots */
+void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
+void search_strip_secret(void);             /* ... the next one's text a password, as dots */
 void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);

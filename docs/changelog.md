@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Text entry (OLED): what you type shows where it belongs instead of in the middle of the screen: a search on its search line, a playlist's name in its own row of the list, Bluetooth's or Guest Play's name in the Name row after the word Name, and a Wi-Fi password in a field under "Password". The cursor blinks, a text too long for its space slides to keep the cursor in view and fades out at the edge where it is cut off, and the "Press Play/Pause..." lines are gone.
   - Settings > Bluetooth and Home: the loading spinner keeps turning the whole time a device is connecting and while Cover Flow loads a large library; before, it stopped on one frame until the wait was over.
   - Text entry (OLED): a text box opened a second time (Add Network's password, say) gets the letter strip again instead of the old keyboard.
   - Text entry (OLED): passwords show as dots on the letter strip, the character you just typed for a second: a Wi-Fi network's password, Add Network's, the Guest Play hotspot's and a card app's password field.
