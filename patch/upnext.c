@@ -232,7 +232,7 @@ static int un_click(void *ctx, void *event) {
     unsigned at = un.idx[k];
     int keeps = q && playback_keeps(q, (int)at);
     if (!keeps && q && at < deque_size(q) && !check_forbid_play_no_headset(0))
-        press_stamp(), player_start_queue((int)at);
+        playback_pick(), player_start_queue((int)at);
     navigator_back();
     if (keeps) playback_np();
     return 0;

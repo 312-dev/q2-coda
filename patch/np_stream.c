@@ -22,7 +22,10 @@
 #define NS_FRAME_MS 83  /* a spoke a frame: one turn a second */
 #define NS_SPIN 14      /* tools/art.py NP_SPIN_PX */
 #define NS_GAP 6        /* between the spinner and the amount */
-#define NS_Y 250        /* the times row's centre (docs/oled-design.md Now Playing) */
+/* The times row's centre on the screen (docs/oled-design.md Now Playing). Now Playing's window
+ * starts under the status row (y 58), and its paint's coordinates are its own: drawn at NS_Y less
+ * the window's y. */
+#define NS_Y 250
 #define NS_PX 13
 #define NB_H 20 /* the badge (np_about.c's quality badge): 20 px high, 6 px corners */
 #define NB_R 6
@@ -178,8 +181,8 @@ void np_stream_paint(void *w, void *canvas) {
     }
     if (w != st.np_win) return;
     if (ns.error) {
-        ui_text(canvas, "Can't reach the server", 0, TYPE(NS_PX), tok(TOK_SECONDARY), 1, 375 / 2,
-                NS_Y, 200, 1);
+        ui_text(canvas, "Can't reach the server", 0, TYPE(NS_PX), tok(TOK_SECONDARY), 1,
+                375 / 2 - I(w, W_X), NS_Y - I(w, W_Y), 200, 1);
         return;
     }
     if (!ns.timer)
@@ -192,14 +195,14 @@ void np_stream_paint(void *w, void *canvas) {
     else
         tk_snprintf(s, sizeof s, "%s MB", a);
     int px = TYPE(NS_PX), tw = ui_text_w(canvas, s, 0, px), gw = NS_SPIN + NS_GAP + tw,
-        x = 375 / 2 - gw / 2;
+        x = 375 / 2 - I(w, W_X) - gw / 2, y = NS_Y - I(w, W_Y);
     unsigned bitmap[64]; /* bitmap_t */
     char name[20];
     tk_snprintf(name, sizeof name, "npspin_%c_%d", ipod_light() ? 'l' : 'd', ns.frame);
     if (!widget_load_image(w, theme_art(name), bitmap))
-        canvas_draw_icon(canvas, bitmap, x + NS_SPIN / 2, NS_Y);
-    ui_text(canvas, s, 0, px, tok(TOK_SECONDARY), 1, x + NS_SPIN + NS_GAP, NS_Y, tw + 2, 2);
-    ns.box = (rect_t){ x - 2, NS_Y - px, gw + 6, 2 * px };
+        canvas_draw_icon(canvas, bitmap, x + NS_SPIN / 2, y);
+    ui_text(canvas, s, 0, px, tok(TOK_SECONDARY), 1, x + NS_SPIN + NS_GAP, y, tw + 2, 2);
+    ns.box = (rect_t){ x - 2, y - px, gw + 6, 2 * px };
 }
 
 /* Retry and Skip in the state row's place while ns.error (np_bar.c np_modes, np_mode_click; the

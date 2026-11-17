@@ -1144,6 +1144,51 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     assert not shown()
 
 
+def test_the_players_title_comes_back_after_a_pressed_song_though_stocks_flag_is_taken(rig, fw, mcl):
+    """The device, 2026-11-17: Shuffle Songs pressed a server song still to download, Next played another, and the
+    pressed song's title stayed on it. Stock's update writes its title only on g_forcerefresh_flag, and the Songs
+    page's timer under Now Playing clears that flag first. The player's title and artist are written back, once
+    the player has parsed the song playing (g_play_id3_info names its path), not before."""
+    rig.online = True
+    rig.write(1, [song_row('s2', 'Streamed', 'Band', 'Album', 2, 100, 2, album_id='al2')])
+    rig.poll()
+    fw.mock('mclGetPlayStatus', lambda *_: 1)
+    fw.mock('timer_add', lambda *_: 1)
+    from test_nav_painters import Ui
+    ui = Ui(fw)
+    win = ui.window('playing_page')
+    labels = [ui.add('hscroll_label', win, name=n) for n in ('scrlabel_title', 'scrlabel_artist')]
+    text = fw.fn('catalogue_np_text', None, C.c_void_p)
+    parses, refresh = fw.var('id3_parses', C.c_uint), fw.var('g_forcerefresh_flag', C.c_ubyte)
+    assert load(rig, rig.rows.rows([rig.record(url('s2', 'al2'))]), 0)[0] == 2
+    at, n = C.c_uint(), C.c_uint()
+    shown = fw.fn('catalogue_np_now', C.c_void_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint))(C.byref(at), C.byref(n))
+    # its title and artist, set on the shown copy after the load (the title's host pointer overlaps the path's)
+    tags = [C.create_string_buffer(t) for t in (b'Streamed', b'Band')]
+    rig.keep += tags
+    C.c_void_p.from_address(shown + O['REC_TITLE']).value = C.addressof(tags[0])
+    C.c_void_p.from_address(shown + O['REC_ARTIST']).value = C.addressof(tags[1])
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band']
+    # Next: another queue's song, B, plays; the player parses it, which ends the pressed song
+    b = rig.record('/mnt/mmc/Music/B.flac')
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = rig.rows.rows([b])
+    mcl.pos = 0
+    info = fw.var('fw_ctx_g_play_id3_info', C.c_char * 2716)
+    parses.value += 1
+    text(win.addr)  # its tags not parsed yet (the path is written last): nothing written
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band'] and refresh.value == 1
+    refresh.value = 0  # the Songs page's timer took the flag: stock's update never writes its title
+    C.memmove(C.addressof(info) + O['ID3_TITLE'], b'Song B\0', 7)
+    C.memmove(C.addressof(info) + O['ID3_ARTIST'], b'Band B\0', 7)
+    info.value = b'/mnt/mmc/Music/B.flac'
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Song B', 'Band B']
+    ui.set_text(labels[0], 'Stock')  # written once: stock's own writes after are left alone
+    text(win.addr)
+    assert ui.text(labels[0]) == 'Stock'
+
+
 def test_cover_flow_shows_server_albums_with_the_apps_cover_and_greys_them_offline(rig, fw):
     """With Local + Server, Cover Flow's album queries read the server's songs too (as the Library's
     Albums list does), so its carousel has the server's albums; a server album's art is its app's cover,
