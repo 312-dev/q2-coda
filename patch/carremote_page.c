@@ -355,6 +355,7 @@ static int cr_phone_click(void *ctx, void *event) {
     int n = cr_read(p, 0), i = cr_find(p, n, cp.phone_id);
     if (i < 0) return 0;
     if (k == 3) {
+        search_strip_label("Rename"); /* typed in its row, after the label (search_strip.c) */
         search_strip_text("Rename Phone", p[i].name, 31, cr_rename_done);
     } else if (k == 4) {
         static const char *const rows[] = { "Cancel", "Forget Phone" };

@@ -63,6 +63,9 @@ static theme_t t = { .cf = { %s } };
 int client_h(void) { return 290; }
 const theme_t *theme(void) { return &t; }
 #include <stdio.h>
+#undef calloc /* the shim's name for the payload's calloc (corner_cover.c's tables): libc's here */
+void *calloc(size_t, size_t);
+void *shim_calloc(size_t n, size_t size) { return calloc(n, size); }
 void coverflow_render(unsigned *, int, int, const unsigned *const[7]);
 int ipod_light(void) { return %d; }
 int ipod_square_art(void) { return 0; }

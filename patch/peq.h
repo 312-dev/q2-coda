@@ -681,6 +681,9 @@ int title_gone(void *w, void *event); /* ... and looks for its source again at t
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);                 /* theme_engine.c: Light Mode */
 unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's flip turns into v */
+/* corner_cover.c: a radius r corner's anti-aliased coverage, r rows of r from the outermost, out
+ * of 255; 0 for r < 1 (docs/internals.md#rounded-corners) */
+const unsigned char *corner_cover(int r);
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */

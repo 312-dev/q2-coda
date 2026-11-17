@@ -20,35 +20,26 @@ static int pill_radius(void *row, int h, int inset) {
 }
 
 /* A vertical gradient in one-pixel bands, then a one-pixel top highlight; equal ends give a solid
- * fill. r.h is at least 2. A pill (radius, at most r.h / 2) insets the bands at either end to that
- * radius's circle; 0 is square. Plain fills keep this off the stock gradient_t ABI, which is not
- * audited. */
+ * fill. r.h is at least 2. A pill (radius, at most r.h / 2) rounds the bands at either end to that
+ * radius's corners, each corner pixel the band's colour at its coverage (corner_cover.c); 0 is
+ * square. Plain fills keep this off the stock gradient_t ABI, which is not audited. */
 static void gradient(void *canvas, rect_t r, unsigned top, unsigned bottom, unsigned hi,
                      int radius) {
+    const unsigned char *cover = radius > 0 ? corner_cover(radius) : (const unsigned char *)0;
     for (int j = 0; j < r.h; ++j) {
-        int out = 0, D = 2 * radius, d = 2 * j + 1 - r.h;
-        d = (d < 0 ? -d : d) - (r.h - D); /* half pixels past the end circle's centre */
-        if (radius && d > 0) {            /* 1/16-pixel chord, sampled at the band's centre. */
-            int v = (D * D - d * d) * 64, k = 0;
-            int end = 8 * D;
-            while (k < end) {
-                int mid = (k + end + 1) / 2;
-                if (mid * mid <= v)
-                    k = mid;
-                else
-                    end = mid - 1;
-            }
-            out = 8 * D - k;
-        }
-        int in = (out + 15) / 16;
+        int row = j < radius ? j : j >= r.h - radius ? r.h - 1 - j : -1, in = 0;
+        const unsigned char *c =
+            cover && row >= 0 ? cover + row * radius : (const unsigned char *)0;
+        while (c && in < radius && c[in] < 255)
+            ++in; /* the part and clear pixels in from each end */
         unsigned color = RGBA(j ? mix(top, bottom, j, r.h - 1) : hi);
         canvas_set_fill_color(canvas, color);
         canvas_fill_rect(canvas, r.x + in, r.y + j, r.w - 2 * in, 1);
-        if (out & 15) {
-            canvas_set_fill_color(canvas,
-                                  (color & 0xffffff) | (unsigned)(16 - (out & 15)) * 17 << 24);
-            canvas_fill_rect(canvas, r.x + in - 1, r.y + j, 1, 1);
-            canvas_fill_rect(canvas, r.x + r.w - in, r.y + j, 1, 1);
+        for (int k = 0; k < in; ++k) {
+            if (!c[k]) continue;
+            canvas_set_fill_color(canvas, (color & 0xffffff) | (unsigned)c[k] << 24);
+            canvas_fill_rect(canvas, r.x + k, r.y + j, 1, 1);
+            canvas_fill_rect(canvas, r.x + r.w - 1 - k, r.y + j, 1, 1);
         }
     }
 }
@@ -57,13 +48,9 @@ static void gradient(void *canvas, rect_t r, unsigned top, unsigned bottom, unsi
 int round_inset(int R, int i, int h) {
     return i < R ? arc_out(R, i) >> 4 : i >= h - R ? arc_out(R, h - 1 - i) >> 4 : 0;
 }
-/* R's corner pixels' coverage out of 255, by radius (tools/art.py CORNERS); a radius outside the
- * table takes a hard corner. */
-static const unsigned char *const round_cover[] = ROUND_COVER;
-static const unsigned char *cover_of(int R) {
-    return (unsigned)R < sizeof round_cover / sizeof *round_cover ? round_cover[R]
-                                                                  : (const unsigned char *)0;
-}
+/* R's corner pixels' coverage out of 255 (corner_cover.c), at any radius; only a failed heap
+ * gives none, and a hard corner. */
+static const unsigned char *cover_of(int R) { return corner_cover(R); }
 /* The corner's row r's row i falls in, -1 between the corners. */
 static int corner_row(const rect_t *r, int R, int i) {
     return i < R ? i : i >= r->h - R ? r->h - 1 - i : -1;
@@ -88,7 +75,7 @@ void round_row(void *canvas, const rect_t *r, int R, int i, unsigned c) {
     round_row_ends(canvas, r, R, i, c, ROUND_LEFT | ROUND_RIGHT);
 }
 /* A ring a pixel wide just inside r: what R's corners cover and R - 1's, a pixel in, don't. With
- * either out of the table, hard corners. */
+ * either table missing (a failed heap), hard corners. */
 void round_ring(void *canvas, const rect_t *r, int R, unsigned c) {
     const unsigned char *out = cover_of(R), *in = cover_of(R - 1);
     for (int i = 0; i < r->h; ++i) {
@@ -107,6 +94,28 @@ void round_ring(void *canvas, const rect_t *r, int R, unsigned c) {
                 scrub_row(canvas, ink, r->x + n, r->y + i, 1);
                 scrub_row(canvas, ink, r->x + r->w - 1 - n, r->y + i, 1);
             }
+        }
+    }
+}
+/* What lies outside r's corners, radius R, painted over in behind (a final 0xRRGGBB), each pixel
+ * at the share of it the arc leaves: rounds what is already drawn in r, a square cover, into what
+ * stands behind it, anti-aliased (docs/internals.md#rounded-corners). Each corner row is one fill
+ * of the pixels wholly outside, then one fill a part pixel. */
+void corner_mask(void *canvas, const rect_t *r, int R, unsigned behind) {
+    behind &= 0xffffffu;
+    if (2 * R > r->w) R = r->w / 2;
+    if (2 * R > r->h) R = r->h / 2;
+    const unsigned char *cover = cover_of(R);
+    for (int i = 0; cover && i < R; ++i) {
+        const unsigned char *row = cover + i * R;
+        int n = 0;
+        while (n < R && !row[n]) ++n;
+        for (int c = 0; c < 4; ++c) {
+            int y = r->y + (c & 1 ? r->h - 1 - i : i), right = c & 2;
+            if (n) scrub_row(canvas, 0xff000000u | behind, right ? r->x + r->w - n : r->x, y, n);
+            for (int k = n; k < R && row[k] < 255; ++k)
+                scrub_row(canvas, (unsigned)(255 - row[k]) << 24 | behind,
+                          right ? r->x + r->w - 1 - k : r->x + k, y, 1);
         }
     }
 }
@@ -161,13 +170,21 @@ void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, un
     const char *face = theme_face(s, (int)n, &fpx);
     draw_in_face(canvas, face, s, n, r, (unsigned)fpx, color);
 }
-/* A rounded box in color, or a square one when the canvas declines to round it (no vgcanvas, or a
- * radius under 3, which stock zeroes and then fails). */
+/* A rounded box in color (a color_t). Where the canvas declines to round it (no vgcanvas, or a
+ * radius under 3, which stock zeroes and then fails), its rows with corner_cover.c's anti-aliased
+ * corners from a radius of 2 (round_row, in the colour as Light Mode inks it); a radius of 0 or 1,
+ * or one too large for the box, is square. */
 void fill_box(void *canvas, rect_t *r, unsigned color, unsigned radius) {
-    if (canvas_fill_rounded_rect(canvas, r, (void *)0, &color, radius)) {
-        canvas_set_fill_color(canvas, color);
-        canvas_fill_rect(canvas, r->x, r->y, r->w, r->h);
+    if (!canvas_fill_rounded_rect(canvas, r, (void *)0, &color, radius)) return;
+    if (radius >= 2 && 2 * (int)radius <= r->w && 2 * (int)radius <= r->h) {
+        unsigned c = ui_ink(color);
+        c = (c & 0xff000000u) | (c & 255) << 16 | (c & 0xff00u) | (c >> 16 & 255);
+        for (int i = 0; i < r->h; ++i) round_row(canvas, r, (int)radius, i, c);
+        canvas_set_fill_color(canvas, color); /* left set, as the square box leaves it */
+        return;
     }
+    canvas_set_fill_color(canvas, color);
+    canvas_fill_rect(canvas, r->x, r->y, r->w, r->h);
 }
 
 /* A two-pixel frame in color, two concentric one-pixel rounded strokes, or a square one when the
@@ -454,16 +471,9 @@ static void paint_cover(void *w, void *canvas) {
     ww = I(w, W_W), h = I(w, W_H);
     if (w == st.np_cover) own = own * box[2] / ww, ww = box[2], h = box[3];
     int r = own ? own : (ww < h ? ww : h) * NP_ART_RADIUS / 166;
-    for (int i = 0; i < r; ++i) {
-        int out = arc_out(r, i), n = out >> 4;
-        for (int c = 0; c < 4; ++c) {
-            int y = c & 1 ? h - 1 - i : i, left = !(c & 2);
-            canvas_set_fill_color(canvas, RGBA(0));
-            canvas_fill_rect(canvas, x + (left ? 0 : ww - n), y0 + y, n, 1);
-            canvas_set_fill_color(canvas, (unsigned)(out & 15) * 17 << 24);
-            canvas_fill_rect(canvas, x + (left ? n : ww - n - 1), y0 + y, 1, 1);
-        }
-    }
+    unsigned page = ui_ink(RGBA(0)); /* the page's black as drawn, back to 0xRRGGBB */
+    rect_t art = { x, y0, ww, h };
+    corner_mask(canvas, &art, r, (page & 255) << 16 | (page & 0xff00) | (page >> 16 & 255));
     stock_canvas_set_fill_color(canvas, fill);
 }
 

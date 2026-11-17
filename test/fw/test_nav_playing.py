@@ -1990,7 +1990,7 @@ def set_values(g):
 
 @pytest.fixture
 def code():
-    """stock's code words at the boot sites, which conftest's map keeps past a test: put back after."""
+    """stock's code words at the boot sites, which conftest's map keeps past a load: put back after."""
     saved = [(a, C.c_uint.from_address(a).value) for a, _ in SITES]
     yield {a: C.c_uint.from_address(a) for a, _ in SITES}
     for a, v in saved:

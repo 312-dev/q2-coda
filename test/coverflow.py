@@ -26,7 +26,7 @@ SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77
 
 # coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c and playlist_art.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""
@@ -1006,17 +1006,22 @@ static void renderer(void) {
     }
     assert(rows >= CF_REFLECT - 1 && rows <= CF_REFLECT);
     /* No seam where a body ends mid-row: down any column from a cover's middle, brightness never
-       dips between the body, the row they share and the reflection. */
+       dips between the body, the row they share and the reflection. Square covers: mid-turn the
+       centre column can fall on a rounded corner, whose reflection mirrors the arc and so does
+       brighten for a few rows below the edge (corner_column). */
     const unsigned *alone[7] = { 0, 0, 0, flat[3], 0, 0, 0 };
     render(0, alone);
     assert(px(CF_CX, CF_TOP + 80) == colours[3]);
     assert(px(CF_CX - 80, CF_TOP) == 0xff000000u);
     assert(px(CF_CX - 80, CF_TOP + 160) == 0xff000000u);
+    theme_t *t = (theme_t *)theme();
+    int radius = t->cf.radius;
+    close_page(); t->cf.radius = 0; open_page();
     for (int frac = -ONE / 2; frac < ONE / 2; frac += ONE / 16 + 77) {
         render(frac, alone);
         for (int x = 0; x < CF_VIEW_W; ++x) {
             if (slot_of(px(x, CF_TOP + 80)) != 3) continue;
-            if (x != CF_CX) continue; /* rounded edges leave a gap before their reflection */
+            if (x != CF_CX) continue;
             int body = 256, dipped = 0;
             for (int y = CF_TOP + 80; y < CF_VIEW_H; ++y) {
                 int v = ch(px(x, y), 0);
@@ -1026,6 +1031,7 @@ static void renderer(void) {
             assert(!dipped);
         }
     }
+    close_page(); t->cf.radius = radius; open_page();
     /* Symmetry: a mirror-image ring renders the mirror image, at rest and mid-turn either way. */
     for (int j = 0; j < 7; ++j) mirror[j] = flat[j < 3 ? j : 6 - j];
     render(0, mirror);
@@ -1536,49 +1542,48 @@ static void ref_put(unsigned *px, unsigned colour, unsigned cov) {
     have += w;
     *px = ((*px & 0xffffffu) + ref_shade(colour, w)) | (have > 255 ? 255u : have) << 24;
 }
-static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pitch, short *solid, int col, const unsigned *tex, int h, int bright, int inset) {
+/* Each row's coverage of a column by the plain rule: the share of the row the cover spans, times, in a corner's
+   columns, the corner pixel's coverage (corner_cover.c) at the row's texel. */
+static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pitch, short *solid, int col, const unsigned *tex, int h, int bright, int k) {
     if (h < 16) return;
     unsigned *d = d0 + col;
+    int R = ART_SIZE * c->radius / 166;
+    const unsigned char *cover = corner_cover(R);
+    int kc = k < 0 || !cover ? -1 : k < R ? k : k >= ART_SIZE - R ? ART_SIZE - 1 - k : -1;
     int top = 256 * c->top + 40960 * c->horizon / 100 - h * c->horizon / 100, bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
-    int ins = h * inset / (ART_SIZE * 256), clipped_top = top + ins, clipped_bottom = bottom - ins;
-    int solid_top = solid[0], solid_bottom = solid[1];
-    int y = clipped_top >> 8, end = (clipped_bottom + 255) >> 8, last = end < c->view_h ? end : c->view_h;
-    int first = y, final = end - 1;
+    int solid_top = solid[0], solid_bottom = solid[1], part = 0;
+    int clear = 0;
+    while (kc >= 0 && part < R && cover[part * R + kc] < 255) clear += !cover[part * R + kc], ++part;
+    int out = h * clear / ART_SIZE; /* the rows wholly clear at either end are not visited */
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < c->view_h ? end : c->view_h;
     int v = (((y << 8) + 128 - top) >> 4) * step >> 4;
     if (y < 0) v -= y * step, y = 0;
     unsigned *px = d + y * pitch, wash = ref_shade(paper, 256u - (unsigned)bright);
-    while (y < last) {
-        if (y >= solid_top && y < solid_bottom) {
-            int skip = solid_bottom - y;
-            v += skip * step, px += skip * pitch, y = solid_bottom;
-            continue;
-        }
-        int run = y < solid_top && solid_top < last ? solid_top : last;
-        for (; y < run; ++y, v += step, px += pitch) {
-            int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
-            unsigned cov = 256;
-            if (y == first || y == final) {
-                int from = y << 8 > clipped_top ? y << 8 : clipped_top, to = (y + 1) << 8 < clipped_bottom ? (y + 1) << 8 : clipped_bottom;
-                cov = (unsigned)(to - from);
-            }
-            ref_put(px, ref_shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
-        }
+    for (; y < last; ++y, v += step, px += pitch) {
+        if (y >= solid_top && y < solid_bottom) continue;
+        int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16, cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row;
+        int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
+        unsigned cov = (unsigned)(to - from);
+        if (cr < part) cov = cov * (cover[cr * R + kc] + (cover[cr * R + kc] >> 7)) >> 8;
+        if (cov) ref_put(px, bright >= 256 ? tex[row * ART_SIZE] : ref_shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
     }
     int reflect = h * c->reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
     int fade = (256 << 16) / reflect;
     unsigned dim = (unsigned)bright * c->reflect_top >> 8;
     wash = ref_shade(paper, 256u - dim);
     if (stop > c->view_h) stop = c->view_h;
-    for (y = (bottom + ins) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
-        int from = y << 8 > bottom + ins ? y << 8 : bottom + ins, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
+    for (y = (bottom + out) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
+        int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
         if (dist >= reflect) break;
         if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
         int mirrored = dist * step >> 8 >> 16;
         int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
         unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        if (mirrored < part) cov = cov * (cover[mirrored * R + kc] + (cover[mirrored * R + kc] >> 7)) >> 8;
         ref_put(px, ref_shade(tex[row * ART_SIZE], dim) + wash, cov);
     }
-    int s0 = (clipped_top + 255) >> 8, s1 = clipped_bottom >> 8;
+    int ins = h * part / ART_SIZE;
+    int s0 = (top + ins + 255) >> 8, s1 = (bottom - ins) >> 8;
     s0 = s0 < 0 ? 0 : s0, s1 = s1 > c->view_h ? c->view_h : s1;
     if (s1 <= s0) return;
     if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
@@ -1590,8 +1595,9 @@ static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pi
 }
 void cf_column(unsigned *, int, short *, int, const unsigned *, int, int, int);
 /* column() byte for byte its reference, over many random columns in both shim themes, dark and
-   light: any height to three times the rest's, brightness (whole half the time), corner inset,
-   texture column, solid span, and what lies under it (empty, opaque or part covered). */
+   light: any height to three times the rest's, brightness (whole half the time), the texel across
+   (a corner's column a third of the time), texture column, solid span, and what lies under it
+   (empty, opaque or part covered). */
 static void column_fuzz(void) {
     enum { ROWS = 300, N = 40000 };
     static unsigned a[ROWS * PITCH], b[ROWS * PITCH], tex[160 * 160];
@@ -1604,7 +1610,7 @@ static void column_fuzz(void) {
         for (light = 0; light < 2; ++light)
             for (int n = 0; n < N; ++n) {
                 int col = (int)(RND() % CF_VIEW_W), h = (int)(RND() % (3 * 40960)), bright = RND() & 1 ? 256 : (int)(RND() % 256) + 1;
-                int inset = RND() % 3 ? 0 : (int)(RND() % 4000);
+                int k = RND() % 3 ? -1 : (int)(RND() % 160); /* the shim themes' radius makes some corner columns */
                 const unsigned *t = tex + RND() % 160;
                 short sa[2] = { 0, 0 }, sb[2];
                 if (RND() % 3) {
@@ -1616,8 +1622,8 @@ static void column_fuzz(void) {
                     unsigned k = RND() % 4, p = RND() << 8 ^ RND();
                     a[y * PITCH + col] = b[y * PITCH + col] = k == 0 ? 0 : k == 1 ? p | 0xff000000u : p;
                 }
-                ref_column(c, light ? scheme()->paper : 0, a, PITCH, sa, col, t, h, bright, inset);
-                cf_column(b, PITCH, sb, col, t, h, bright, inset);
+                ref_column(c, light ? scheme()->paper : 0, a, PITCH, sa, col, t, h, bright, k);
+                cf_column(b, PITCH, sb, col, t, h, bright, k);
                 assert(sa[0] == sb[0] && sa[1] == sb[1]);
                 for (int y = 0; y < ROWS; ++y) assert(a[y * PITCH + col] == b[y * PITCH + col]);
             }
@@ -3339,7 +3345,7 @@ static void enter_frames(void) {
 void cf_shelf_still(int still);
 static void rest_pinned(void) {
     static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
-    static const unsigned pinned[CF_THEMES] = { 0xfc1b693eu };
+    static const unsigned pinned[CF_THEMES] = { 0xa723fc9cu };
     static unsigned f[300 * PITCH], art[15][160 * 160];
     const cf_style_t ticks = shim_themes[0].cf;
     for (int i = 0; i < 15; ++i)
@@ -7394,7 +7400,7 @@ def main():
     # every built-in theme's .cf, for the checks that run each shipped look in turn
     cf_style.append(f'-DCF_THEMES={len(builtins())}')
     cf_style.append('-DCF_SHIPPED_ALL={ ' + ', '.join('{ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in t.items() if f.startswith('cf.')) + ' }' for t in builtins()) + ' }')
-    cf_style.append('-DPINNED_FRAMES=0x055534d4u')
+    cf_style.append('-DPINNED_FRAMES=0x3cbea4d0u')
     # The built-in numbers the checks use, as coverflow.h and coverflow.c have them
     cf_style += [f'-D{k}={v}' for k, v in re.findall(r'^#define (CF_FOLD_MS|CF_ENTER_SPEED|FOLD_FROM|FOLD_TO|ENTER_RUN|LD_SLOTS|FX_ENTER_MS|FX_LETTERS_MS|FX_SLACK_MS|FX_LATE_MS|HALF_GAP_MS) (\d+)',
                                                  ''.join((ROOT/'patch'/f).read_text() for f in ('coverflow.h', 'coverflow.c', 'coverflow_letters.c', 'coverflow_loader.c')), re.M)]

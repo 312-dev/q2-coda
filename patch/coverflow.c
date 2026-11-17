@@ -1606,13 +1606,22 @@ HOT void put(unsigned *px, unsigned colour, unsigned cov) {
 /* What dimming washes towards: black, or Light Mode's paper (set per frame). */
 static unsigned cf_paper;
 
+/* The covers' corners (cf_corners): their radius in texels and its coverage table (corner_cover.c),
+ * cf_r rows of cf_r from the outermost; 0 for square. */
+static int cf_r;
+static const unsigned char *cf_cover;
+/* By texel column: the corner's rows from either end it covers in part, and of those the ones it
+ * leaves clear; 0 off the corners (cf_corners) */
+static unsigned char cf_part[ART_SIZE], cf_clear[ART_SIZE];
+
 /* One texture column (texels ART_SIZE apart) h high (1/256 px) on the horizon at frame column col,
- * its partial end rows by coverage, then its reflection fading out below. */
-static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int inset) {
+ * its partial end rows by coverage, then its reflection fading out below: a column off the
+ * corners, the hot path. */
+static void plain_column(shelf_t *f, int col, const unsigned *tex, int h, int bright) {
     if (h < 16) return;
     unsigned *d = f->d + col;
     int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
-    int ins = h * inset / (ART_SIZE * 256), clipped_top = top + ins, clipped_bottom = bottom - ins;
+    int ins = 0, clipped_top = top, clipped_bottom = bottom;
     int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col];
     int y = clipped_top >> 8, end = (clipped_bottom + 255) >> 8,
         last = end < cfs.view_h ? end : cfs.view_h;
@@ -1670,16 +1679,97 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
     f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
 }
 
+/* The same in a corner's column, texel k across the art: each end row the corner covers in part
+ * takes the corner pixel's coverage at its texel too (docs/internals.md#rounded-corners), so the
+ * arc is anti-aliased where it runs steep as well as where it runs flat; its reflection mirrors it.
+ * Only the corner's bands (the rows from either end whose texel row is under part) go a row at a
+ * time; the rows between them are whole and go as plain_column's do, and the rows the corner leaves
+ * wholly clear are not visited. */
+static void corner_column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    unsigned *d = f->d + col;
+    int part = cf_part[k], clear = cf_clear[k], R = cf_r;
+    const unsigned char *corner = cf_cover + (k < R ? k : ART_SIZE - 1 - k);
+    int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
+    int ins = h * part / ART_SIZE, out = h * clear / ART_SIZE;
+    int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col], pitch = f->pitch;
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < cfs.view_h ? end : cfs.view_h;
+    /* [b1, b2): the rows whose centres lie past both bands, whole and of no corner */
+    int b1 = (top + ins + 255) >> 8, b2 = (bottom - ins) >> 8;
+    int v = (((y << 8) + 128 - top) >> 4) * step >> 4; /* 16.16 texel row */
+    if (y < 0) v -= y * step, y = 0;
+    unsigned *px = d + y * pitch, wash = shade(cf_paper, 256u - (unsigned)bright);
+    int whole = bright >= 256;
+    while (y < last) {
+        if (y >= solid_top && y < solid_bottom) {
+            int skip = solid_bottom - y;
+            v += skip * step, px += skip * pitch, y = solid_bottom;
+            continue;
+        }
+        if (y >= b1 && y < b2) {
+            int run = b2 < last ? b2 : last;
+            if (y < solid_top && solid_top < run) run = solid_top;
+            for (; y < run; ++y, v += step, px += pitch) {
+                unsigned t = tex[(v >> 16) * ART_SIZE];
+                put(px, whole ? t : shade(t, (unsigned)bright) + wash, 256);
+            }
+            continue;
+        }
+        int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
+        int cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row; /* corner row */
+        int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
+        unsigned cov = (unsigned)(to - from), c = cr < part ? corner[cr * R] : 255;
+        cov = cov * (c + (c >> 7)) >> 8; /* of 256, no divide */
+        if (cov) put(px, whole ? tex[row * ART_SIZE] : shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
+        ++y, v += step, px += pitch;
+    }
+    int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
+    int fade = (256 << 16) / reflect;
+    unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
+    wash = shade(cf_paper, 256u - dim);
+    if (stop > cfs.view_h) stop = cfs.view_h;
+    for (y = (bottom + out) >> 8; y < stop; ++y) {
+        int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
+        if (dist >= reflect) break;
+        if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
+        int mirrored = dist * step >> 8 >> 16; /* texel rows up from the bottom edge */
+        int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
+        unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        unsigned c = mirrored < part ? corner[mirrored * R] : 255;
+        put(d + y * f->pitch, shade(tex[row * ART_SIZE], dim) + wash, cov * (c + (c >> 7)) >> 8);
+    }
+    /* the rows it covers whole join the opaque span, as plain_column's do */
+    int s0 = (top + ins + 255) >> 8, s1 = (bottom - ins) >> 8;
+    s0 = s0 < 0 ? 0 : s0, s1 = s1 > cfs.view_h ? cfs.view_h : s1;
+    if (s1 <= s0) return;
+    if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
+        s0 = s0 < solid_top ? s0 : solid_top;
+        s1 = s1 > solid_bottom ? s1 : solid_bottom;
+    } else if (s1 - s0 <= solid_bottom - solid_top)
+        return;
+    f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
+}
+
+/* A column, k its texel across the art or -1: a corner's to corner_column, else the plain one. */
+static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    if (h < 16) return;
+    if (k >= 0 && cf_part[k])
+        corner_column(f, col, tex, h, bright, k);
+    else
+        plain_column(f, col, tex, h, bright);
+}
+
 #ifdef PEQ_HOST
+static void cf_corners(void);
 /* test/coverflow.py's column_fuzz: column() alone, on the caller's frame and solid span (solid[0]
- * its top, solid[1] its bottom, kept), the open page's values, the light half's paper as the
- * render takes it. */
+ * its top, solid[1] its bottom, kept), the open page's values and corners, the light half's paper
+ * as the render takes it; k the column's texel, or -1. */
 void cf_column(unsigned *d, int pitch, short *solid, int col, const unsigned *tex, int h,
-               int bright, int inset) {
+               int bright, int k) {
     static shelf_t f;
+    cf_corners();
     cf_paper = ipod_light() ? scheme()->paper : 0;
     f.d = d, f.pitch = pitch, f.solid_top[col] = solid[0], f.solid_bottom[col] = solid[1];
-    column(&f, col, tex, h, bright, inset);
+    column(&f, col, tex, h, bright, k);
     solid[0] = f.solid_top[col], solid[1] = f.solid_bottom[col];
 }
 #endif
@@ -1696,13 +1786,21 @@ void cf_restyle(void) {
     cf_s1 = rest.s, cf_rest16 = project(&rest, CF_HALF16);
     cf_top256 = 256 * cfs.top + 40960 * cfs.horizon / 100;
 }
-/* cf_inset follows the theme's radius. */
+/* cf_inset (coverflow_hit's), cf_r and cf_cover (column's) follow the theme's radius. */
 static void cf_corners(void) {
     static short filled __attribute__((section(".scratch")));
     int radius = cfs.radius;
-    if (radius == filled) return;
+    if (radius == filled && (cf_cover || !cf_r)) return;
     filled = (short)radius;
     int r = ART_SIZE * radius / 166;
+    cf_r = r, cf_cover = corner_cover(r);
+    memset(cf_part, 0, sizeof cf_part), memset(cf_clear, 0, sizeof cf_clear);
+    for (int k = 0; cf_cover && k < r; ++k) {
+        int n = 0, z = 0;
+        while (n < r && cf_cover[n * r + k] < 255) z += !cf_cover[n * r + k], ++n;
+        cf_part[k] = cf_part[ART_SIZE - 1 - k] = (unsigned char)n;
+        cf_clear[k] = cf_clear[ART_SIZE - 1 - k] = (unsigned char)z;
+    }
     memset(cf_inset, 0, sizeof cf_inset);
     for (int k = 0; k < r; ++k)
         cf_inset[k] = cf_inset[ART_SIZE - 1 - k] = (unsigned short)(arc_out(r, k) * 16);
@@ -1735,7 +1833,7 @@ void draw_posed(shelf_t *f, const pose_t *p, int side, const unsigned *tex) {
         if (col < 0 || col >= CF_VIEW_W || !unproject(p, (2 * v + 1 - 2 * CF_CX) * 8, &u, &h))
             continue;
         int k = cf_texel(u + CF_HALF16, 2 * CF_HALF16, q);
-        column(f, col, tex + (side > 0 ? k : ART_SIZE - 1 - k), h, p->bright, cf_inset[k]);
+        column(f, col, tex + (side > 0 ? k : ART_SIZE - 1 - k), h, p->bright, k);
     }
 }
 
@@ -1758,7 +1856,7 @@ void draw_quad(shelf_t *f, int xl, int xr, int hl, int hr, const unsigned *tex, 
         float p = (float)dx / (float)(xr - xl);
         int k = cf_texel(left ? xr - xl - dx : dx, xr - xl, q);
         k = left ? ART_SIZE - 1 - k : k;
-        column(f, col, tex + k, (int)((float)hl + (float)(hr - hl) * p), bright, cf_inset[k]);
+        column(f, col, tex + k, (int)((float)hl + (float)(hr - hl) * p), bright, k);
     }
 }
 

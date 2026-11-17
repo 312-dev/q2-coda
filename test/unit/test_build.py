@@ -1129,7 +1129,6 @@ def test_stock_header_versions(dev, beta, repo, version, tag, flag, monkeypatch)
 def test_stock_header_is_c(tmp_path, monkeypatch):
     """stock.h as the payload's C reads it: built into a host library whose data ctypes reads back."""
     monkeypatch.setattr(build, 'BETA', 0)
-    import art
     import ipod
     import theme
     themes = theme.builtins()
@@ -1142,14 +1141,13 @@ const char *const h_cities[] = TIMEZONE_CITIES;
 const int h_order[] = TIMEZONE_ORDER;
 const char h_icons[] = SETTINGS_ICON_NAMES;
 const unsigned char *const h_context[] = {{{', '.join(build.CONTEXT_DATA)}}};
-const unsigned char *const h_round[] = ROUND_COVER;
 const unsigned short h_medium[] = INTER_MEDIUM_RANGES;
 const char *const h_faces[FONT_N] = FONT_NAMES;
 const unsigned char h_fallback[FONT_N] = FONT_FALLBACK, h_pct[FONT_N] = FONT_FALLBACK_PCT;
 const unsigned short h_ranges[] = FONT_RANGES, h_at[FONT_N + 1] = FONT_RANGE_AT;
 const int h_inter[] = {{FONT_INTER, FONT_INTER_MEDIUM}};
 const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cities / sizeof *h_cities,
-    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_round / sizeof *h_round, sizeof h_medium / sizeof *h_medium}};
+    sizeof h_order / sizeof *h_order, sizeof h_icons, sizeof h_medium / sizeof *h_medium}};
 ''')
     subprocess.run(['clang', '-shared', '-fPIC', '-std=c11', '-Wall', '-Wextra', '-Werror', str(tmp_path/'h.c'), '-o', str(tmp_path/'h.so')],
                    check=True)
@@ -1157,7 +1155,7 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
 
     def array(kind, name, n):
         return list((kind * n).in_dll(lib, name))
-    zones, cities, order, icons, rounds, medium = array(ctypes.c_ulong, 'h_sizes', 6)
+    zones, cities, order, icons, medium = array(ctypes.c_ulong, 'h_sizes', 5)
     assert array(ctypes.c_int, 'h_ints', 4) == [build.RING_STEP, len(themes), len(theme.theme_keys(themes)), 0]
     assert [s.decode() for s in array(ctypes.c_char_p, 'h_strings', 6)] == [
         build.ROCKBOX_FLAG, 'V1.36', f'{build.VERSION} Muse', build.VERSION, build.REPO, f'Q2Muse/{build.VERSION} (https://github.com/{build.REPO})']
@@ -1175,10 +1173,6 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     assert icons.endswith(b'\0\0') and all(n.endswith('.png') for n in ipod.SETTINGS_ICONS)
     assert sorted(icons[:-2].split(b'\0')) == sorted(n.removesuffix('.png').encode() for n in ipod.SETTINGS_ICONS)
     assert array(ctypes.c_void_p, 'h_context', len(build.CONTEXT_DATA)) == [0x700000 + 16 * i for i in range(len(build.CONTEXT_DATA))]
-    # by radius: r rows of r pixels for each corner, NULL between
-    assert rounds == max(art.CORNERS) + 1
-    for r, p in enumerate(array(ctypes.c_void_p, 'h_round', rounds)):
-        assert (ctypes.string_at(p, r * r) if p else None) == (bytes(art.corner_cover(r)) if r in art.CORNERS else None)
     assert array(ctypes.c_ushort, 'h_medium', medium) == [0x30, 0x3a]
     # the faces' table (navigation.c face_has, theme_font), by FONT_*
     n = len(build.FACES)

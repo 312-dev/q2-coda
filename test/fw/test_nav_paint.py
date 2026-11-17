@@ -436,7 +436,7 @@ def test_stock_s_thumbnails_take_the_list_art_s_corners(fw, st, bitmaps, name):
     assert alpha[r][r] == 255 and alpha[0][r] == 255 and alpha[r][0] == 255  # past the arc
     assert alpha[83][83] == 255 and all(row == row[::-1] for row in alpha) and alpha == alpha[::-1]
     assert any(0 < a < 255 for a in alpha[0][:r])  # an antialiased step on the arc
-    assert alpha[r - 1][0] < 255  # the arc reaches the radius down the side
+    assert alpha[r - 2][0] < 255 == alpha[r - 1][0]  # the arc runs down the side to the radius, meeting it within a pixel
     assert all(alpha[y][:r] == sorted(alpha[y][:r]) for y in range(r))  # rising inwards along each row
     assert bm.flags & OPAQUE == 0 and {p[:3] for row in bm.rows() for p in row} == {(255, 255, 255)}
 
@@ -1838,7 +1838,7 @@ SCAN_WHOLE = O['SCAN_WHOLE']
 
 @pytest.fixture
 def whole(fw):
-    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives the test, so it goes back."""
+    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives a load, so it goes back."""
     flag = C.c_ubyte.from_address(SCAN_WHOLE)
     saved = flag.value
     yield flag
@@ -2409,7 +2409,7 @@ def test_a_set_the_boot_can_t_write_leaves_stock_s(fw, world, st):
 
 @in_fork
 def test_the_system_bar_s_load_boots_the_theme_s_set_once(fw, world, st):
-    """In a child: the boot writes the set's values into stock's code pages, which outlive a test here."""
+    """In a child: the boot writes the set's values into stock's code pages, which stay in the child."""
     theme(fw)
     load = boot(fw, world, st)
     want = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())

@@ -393,6 +393,8 @@ int painting_in(void *row);
 int round_inset(int R, int i, int h);
 void round_ring(void *canvas, const rect_t *r, int R, unsigned c);
 void round_row(void *canvas, const rect_t *r, int R, int i, unsigned c);
+/* nav/row_paint.c: rounds what is drawn in r into behind (0xRRGGBB, final), anti-aliased */
+void corner_mask(void *canvas, const rect_t *r, int R, unsigned behind);
 int slider_part(void *s, int w);
 const char *style_key(char *key, const char *state, const char *name);
 unsigned wide_len(const unsigned *s);
@@ -537,6 +539,8 @@ unsigned tilt_tone(unsigned c);
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 void swipe_back_paint(void *w, void *canvas);
+void *window_under(void *wm, void *top); /* the normal window under top, 0 none */
+void *under_snap(void *under); /* a window painted once into a whole-screen bitmap, 0 none */
 /* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
 void art_zoom_load(void *np_win);
 const char *window_hint(void *win, const char *name);
@@ -958,8 +962,9 @@ int search_strip_box(void *kb, void *edit, const char *title);
  * else is a toast saying why not, the text kept to edit */
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
-void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
-void search_strip_secret(void);           /* ... the next one's text a password, as dots */
+void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
+void search_strip_secret(void);             /* ... the next one's text a password, as dots */
+void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */
