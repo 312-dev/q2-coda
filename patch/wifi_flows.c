@@ -1,7 +1,7 @@
 /* Settings > Wi-Fi's flows past stock's (docs/internals.md#wi-fi-page-flows): a failed join asks
  * for the password again with why; a held saved network offers Forget; Reset Network Settings at
- * the page's foot; Search Again shows its search at once; and the switch or the network's own row
- * ends a join that is still trying, where stock's click handlers ignore both until it gives up. */
+ * the page's foot; Search Again shows its search at once; and the switch (and Control Center's Wi-Fi
+ * circle) or the network's own row ends a join that is still trying, where stock's click handlers ignore both until it gives up. */
 #include "navigation.h"
 
 /* g_wifiStatus at 0xd8: wpa_supplicant's wpa_state as stock's monitor thread last read its STATUS,
@@ -67,6 +67,15 @@ static void cancel(void) {
     wf.ask = 0;
 }
 
+/* Ends the join that is trying, if one is (wifi_switch's guard: Wi-Fi on, a join going, stock's init
+ * finished), so a switch click after it turns Wi-Fi off. Shared with Control Center's Wi-Fi circle
+ * (control_center.c cc_act). 1 when a join ended. */
+int wifi_flows_cancel_join(void) {
+    if (!g_wififlag || !connecting() || wifi_initstatus) return 0;
+    cancel();
+    return 1;
+}
+
 /* systemset_wifi_page's switch and Search Again rows (one click handler, 0x4d61e0, by the row's
  * name: 0 the switch, 1 Search Again). Stock ignores both while a join is trying
  * (wifi_connectstatus 1, for up to a minute: network_checkstatus's two 30-tick tries). The switch
@@ -76,7 +85,7 @@ static void cancel(void) {
  * ends. */
 int ringnav_wifi_switch_row(void *button, void *event) {
     int row = atoi(name_of(button));
-    if (row == 0 && g_wififlag && connecting() && !wifi_initstatus) cancel();
+    if (row == 0) wifi_flows_cancel_join();
     if (row == 1 && g_wififlag && connecting() && !wifi_initstatus) {
         toast("Connecting to Wi-Fi\xe2\x80\xa6");
         return 0;
