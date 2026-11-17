@@ -9,6 +9,7 @@
   - Settings > Wi-Fi: when joining a network fails, its password entry opens again saying **Wrong password** or **Couldn't connect**, and the password you enter replaces the saved one. Before, a toast said it failed and the next tap tried the same wrong password again.
   - Settings > Wi-Fi: hold Play/Pause on a saved network to forget it, and a new **Reset Network Settings** row at the bottom forgets every saved network (both ask first).
   - Settings > Wi-Fi: **Search Again** shows "Searching..." as soon as you press it; before, nothing changed until the search had finished, so it looked like it did nothing.
+  - Control Center: the Wi-Fi circle turns Wi-Fi off at once while a connection attempt is running; before, a tap or Center on it was ignored for up to a minute until the attempt gave up.
   - Settings > Wi-Fi: turning Wi-Fi off, or pressing the network that is connecting, stops the connection attempt at once; before, both were ignored for up to a minute until the attempt gave up.
   - Now Playing: opening it from Home or an album page grows the album cover into Now Playing's art, and Return shrinks it back. With Reduce Motion on, the two cross-fade.
   - Home (OLED, Split): moving the selection onto the top row no longer leaves a thin strip of the blue bar across the row below it, which made the selected row's text look like it was flickering.

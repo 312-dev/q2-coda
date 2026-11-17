@@ -29,6 +29,7 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
 """
 import argparse
+import fnmatch
 import ast
 import json
 import os
@@ -47,6 +48,9 @@ ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
+# test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
+# page_parallax.c and playlist_art.c. It is in no gate tier, so a change to any of these plans it (in `other`).
+COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parallax.c', 'patch/playlist_art.c')
 # gate.py's type-check suites, planned in `other`: a .py under tools/ or test/unit/ (or the mypy config)
 # needs mypy-tools, one under test/fw/ needs mypy-fw. A merge batch runs them, so a branch that skips them
 # here is rejected there.
@@ -204,6 +208,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
             fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
             p.add('fw', fw, f'{path}: test/fw ' + ('all' if fw == ALL else ', '.join(sorted(fw))))
             p.other.add('test/build.py')
+            if any(fnmatch.fnmatchcase(path, g) for g in COVERFLOW_SOURCES):
+                p.other.add('test/coverflow.py')
+                p.why.append(f'{path}: test/coverflow.py')
             if len(parts) == 2 and (named := unit_files_for(name, root)):
                 p.add('unit', named, f'{path}: test/unit ' + ', '.join(sorted(named)))
         elif parts[0] == 'tools' and len(parts) == 2:

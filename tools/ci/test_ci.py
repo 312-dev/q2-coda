@@ -153,6 +153,17 @@ def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
     assert refused.returncode == 2 and 'unrecognized arguments' in refused.stderr
 
 
+def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
+    # test/coverflow.py is in no gate tier, so only a change to the file itself used to plan it.
+    for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
+                 'patch/page_parallax.c', 'patch/playlist_art.c'):
+        assert 'test/coverflow.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
+
+
+def test_an_unrelated_payload_file_does_not_plan_the_coverflow_suite(tmp_path):
+    assert 'test/coverflow.py' not in affected.plan_for({'patch/volume.c': {1}}, tmp_path).as_dict()['other']
+
+
 def test_docs_only_run_the_anchor_check(tmp_path):
     p = affected.plan_for({'docs/ipod.md': {4}}, tmp_path).as_dict()
     assert p['unit'] == ['test_docs.py'] and not p['patch'] and not p['fw']
