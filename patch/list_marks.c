@@ -74,7 +74,7 @@ int spinner_turn(void) {
         if (!live) live = 1;
         if (b->ask || now == b->frame) continue;
         b->ask = 1, live = 2;
-        widget_invalidate_force(b->w, b->r.w ? &b->r : (const rect_t *)0);
+        widget_invalidate_force(b->w, b->r.w ? &b->r : (rect_t *)0);
     }
     return live;
 }
