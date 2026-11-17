@@ -40,7 +40,8 @@
 #define UN_PILL_REST RGB_RAISED_2
 #define UN_PILL_INK 0x7fa6f5
 #define UN_PILL_REST_L 0xe5e5ea /* Light Mode's: the tab track's grey, the accent's words */
-#define UN_BARS_MS 125          /* the level bars, about 8 frames a second */
+#define UN_BAR_LO 5             /* the level bars, UN_BAR_LO to UN_BAR_HI px (ui_kit.h lvl_h16) */
+#define UN_BAR_HI 12
 #define UN_POLL_MS 1000
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */
@@ -60,13 +61,14 @@ static struct {
     void *now, *head, *clear; /* the header's space, Playing Next's heading and its Clear */
     unsigned idx[UN_ROWS];    /* the rows' queue indices: Playing Next's first, npn of them */
     unsigned n, npn, sig;     /* the rows, how many are queued, what they were taken from */
-    unsigned poll, bars, hold, fresh_timer;
-    int lifted;       /* a lifted queued row's place + 1, 0 none */
-    int lift_from;    /* ... and where it was lifted from */
-    int centre;       /* the Centre hold that lifted one: its release is taken */
-    int fresh;        /* the bumped row's place + 1 while its edge shows */
-    int frame;        /* the level bars' frame */
-    char source[128]; /* the queue's source (un_source_take) */
+    unsigned poll, hold, fresh_timer;
+    int lifted;        /* a lifted queued row's place + 1, 0 none */
+    int lift_from;     /* ... and where it was lifted from */
+    int centre;        /* the Centre hold that lifted one: its release is taken */
+    int fresh;         /* the bumped row's place + 1 while its edge shows */
+    lvl_clock_t clock; /* the level bars' time along their loop */
+    rect_t bars_at;    /* their box at the last paint, on screen (w 0: none painted) */
+    char source[128];  /* the queue's source (un_source_take) */
 } un __attribute__((section(".scratch")));
 
 /* A pick that loads a queue (playback.c ringnav_load): where it came from, for "From ...": an
@@ -179,8 +181,8 @@ static void un_fill(int sel) {
     if (un.npn) {
         un.head = label_create(view, 0, 0, 375, UN_HEAD_H);
         widget_use_style(un.head, "s_listitem_black");
-        widget_set_prop_int(un.head, "style:normal:bg_color", 0);  /* on the sheet */
-        un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H);  /* placed when painted */
+        widget_set_prop_int(un.head, "style:normal:bg_color", 0); /* on the sheet */
+        un.clear = list_item_create(un.head, 0, 0, 0, UN_PILL_H); /* placed when painted */
         /* its corners the sheet's, and no frame: the row style's border shows without its fill */
         widget_set_prop_int(un.clear, "style:normal:bg_color", 0);
         widget_set_prop_int(un.clear, "style:normal:border_color", 0);
@@ -360,37 +362,52 @@ int un_key(void *top, unsigned key, int owned) {
     return 1;
 }
 
-/* Once a second: the queue moved on (un_sig) takes the rows again, the selection's stop kept */
+static void un_bars_sync(void);
+/* Once a second: the queue moved on (un_sig) takes the rows again, the selection's stop kept; the
+ * level bars started again once the song plays */
 static int un_poll(const void *info) {
     (void)info;
     if (!un.page) return 0;
+    un_bars_sync();
     if (!un.lifted && !un.hold && un_sig() != un.sig)
         un_fill(widget_get_prop_int(un.view, SEL, -1));
     return 8; /* RET_REPEAT */
 }
 
-/* The level bars' frame, while the sheet is in front and the song plays; MO_DECOR (ui_kit.h), so
- * still under Reduce Motion */
-static int un_bars_due(const void *info) {
-    (void)info;
-    if (!un.page) return 0;
-    if (window_manager_get_top_window(window_manager()) != un.page || mclGetPlayStatus() != 2 ||
-        !motion_ms(UN_BARS_MS, MO_DECOR))
-        return 8; /* RET_REPEAT: still, the frame stays (Reduce Motion's too) */
-    ++un.frame;
-    if (un.now) widget_invalidate_force(un.now, (void *)0);
-    return 8;
+/* Whether the level bars move: the sheet lit and in front, the song playing, motion allowed
+ * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
+static int un_bars_moving(void) {
+    return un.page && g_backlight_status &&
+           window_manager_get_top_window(window_manager()) == un.page && mclGetPlayStatus() == 2 &&
+           motion_ms(LVL_STEP_MS, MO_DECOR);
+}
+/* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: their box
+ * as last painted repainted, on the sheet's window; 0 (dropped) once they stop. */
+static int un_bars_frame(void) {
+    int on = un_bars_moving();
+    lvl_run(&un.clock, on);
+    if (on && un.bars_at.w) {
+        rect_t r = un.bars_at;
+        r.x -= I(un.page, W_X), r.y -= I(un.page, W_Y);
+        widget_invalidate_force(un.page, &r);
+    }
+    return on;
+}
+static void un_bars_sync(void) {
+    int on = un_bars_moving();
+    lvl_run(&un.clock, on);
+    if (on) motion_loop(un_bars_frame);
 }
 
 static int un_closed(void *ctx, void *event) {
     (void)ctx, (void)event;
     un_unload();
     stop_timer(&un.poll);
-    stop_timer(&un.bars);
     stop_timer(&un.hold);
     stop_timer(&un.fresh_timer);
     un.page = un.view = un.now = un.head = un.clear = (void *)0;
     un.lifted = un.centre = un.fresh = 0;
+    un.bars_at.w = 0;
     return 0;
 }
 
@@ -412,7 +429,7 @@ void up_next(void) {
     }
     un_fill(-1);
     un.poll = timer_add(un_poll, (void *)0, UN_POLL_MS);
-    un.bars = timer_add(un_bars_due, (void *)0, UN_BARS_MS);
+    un_bars_sync();
 }
 
 /* Whether w's place on the list is lit: the selection, shown */
@@ -421,15 +438,16 @@ static int un_lit(void *w) {
            widget_get_prop_int(un.view, SEL, -1) == widget_get_prop_int(w, "_un_stop", -2);
 }
 
-/* The playing song's level bars from x, standing on base, in the accent: three, moving with
- * un.frame (the sheet's header, menu_modal.c modal_after) */
+/* The playing song's level bars from x, standing on base, in the accent: three, 3 px wide and 4.5
+ * apart, at the clock's time (the sheet's header, menu_modal.c modal_after); their box kept for
+ * un_bars_frame. */
 void un_bars(void *canvas, int x, int base) {
-    static const unsigned char h[4][3] = { { 7, 11, 5 }, { 10, 6, 9 }, { 5, 9, 11 }, { 9, 12, 6 } };
-    for (int i = 0; i < 3; ++i) {
-        int bh = h[un.frame & 3][i];
-        rect_t r = { x + i * 9 / 2, base - bh, 3, bh };
-        fill_box(canvas, &r, RGBA(scheme()->tones[0] & 0xffffffu), 1);
-    }
+    unsigned t = lvl_time(&un.clock), ink = RGBA(scheme()->tones[0] & 0xffffffu);
+    for (int i = 0; i < 3; ++i)
+        lvl_fill(canvas, x + i * 9 / 2, base, 3, lvl_h16(i, t, UN_BAR_LO, UN_BAR_HI), ink);
+    un.bars_at = (rect_t){ x + I(canvas, CANVAS_X), base - UN_BAR_HI - 1 + I(canvas, CANVAS_Y), 12,
+                           UN_BAR_HI + 1 };
+    un_bars_sync();
 }
 
 #define UN_GRIP_X 5 /* the grip's middle this far left of the right column, as Edit Library's */
