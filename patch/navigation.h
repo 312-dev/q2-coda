@@ -523,7 +523,7 @@ void quick_hold(void *button, int page);
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
-int tilt_clip(void *canvas, int *old);
+int tilt_clip(void *canvas, int *old, const int *frame);
 void tilt_end(void *w, int dir);
 void tilt_press(int down);
 unsigned tilt_tone(unsigned c);

@@ -63,9 +63,9 @@ class Row(StatusRow):
         return canvas, names
 
     def bars(self, x=100):
-        """The play state's bars at x on CY (play_bars): (left, top, width, height, radius) each."""
+        """The play state's bars at x on CY (play_bars) for the state now: (left, top, width, height, radius) each."""
         out = (C.c_float * 5 * 3)()
-        n = self.fw.fn('status_row__play_bars', C.c_int, C.c_int, C.c_int, C.c_void_p)(x, CY, out)
+        n = self.fw.fn('status_row__play_bars', C.c_int, C.c_int, C.c_int, C.c_int, C.c_void_p)(x, CY, int(self.status != 2), out)
         return [tuple(round(v, 3) for v in out[i]) for i in range(n)]
 
     def sync_sig(self):
@@ -167,21 +167,26 @@ def test_the_slot_s_kind_repaints_the_row(fw, row):
 def test_the_play_state_stands_on_the_digits_baseline_in_text_primary_playing_or_paused(fw, st, row):
     """Playing, the level bars: 2 px wide with round ends, 4 px apart, up to 11 tall, their feet on CY + 5 (row 27's
     bottom, the digits' baseline); paused, the pause: two 3 px bars 11 tall at 0.5 and 6.5 of the same 10 px box.
-    Both in Text Primary, as Wi-Fi and the battery (Text Secondary grey made the paused bars read as signal bars)."""
+    Both in Text Primary, as Wi-Fi and the battery (Text Secondary grey made the paused bars read as signal bars).
+    Under Reduce Motion, so each change is a cut and a paint shows one glyph."""
+    st('reduce_motion').value = 1
     bars = row.bars()
     assert bars == [(100 + 4 * i, CY + 5 - h, 2, h, 1) for i, h in enumerate(BARS[0])]
     assert max(h for *_, h, _ in bars) <= INK
     fills: list = []
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     fw.mock('vgcanvas_set_fill_color', lambda vg, c, *_: fills.append(c & 0xffffffff))
+    row.sync_sig()
     row.paint()
     row.status = 3
     assert row.bars() == [(100.5, CY + 5 - INK, 3, INK, 0.9), (106.5, CY + 5 - INK, 3, INK, 0.9)]
+    row.sync_sig()
     row.paint()
     assert len(fw.calls('vgcanvas_fill')) == 3 + 2 and fills == [0xffffffff] * 2  # white: Text Primary each time
     st('light').value = 1  # Light Mode: black, paused and playing
     row.paint()
     row.status = 2
+    row.sync_sig()
     row.paint()
     assert fills[2:] == [0xff000000] * 2
 
@@ -193,7 +198,139 @@ def test_the_bars_move_a_frame_a_tick_repainting_only_their_box_and_stop_when_pa
     assert [b[3] for b in row.bars()] == list(BARS[1])
     row.status = 3  # paused: the timer ends and the pause stands still
     assert tick(None) == 0 and len(row.bars()) == 2 and row.dirty == [(BODY - GAP - 10, 0, 10, 26)]
-    assert row.sync_sig() == 1 and len(row.timers) == 1  # a new state, and nothing moves: no timer
+    assert row.sync_sig() == 1  # a new state, and the bars stop: no timer of their own, only the shared one (MO_FRAME_MS)
+    assert [ms for _, ms in row.timers] == [125, 16]  # that runs the dissolve into the pause
+
+
+class Xfade(Row):
+    """Row with the clock in hand, the shared frame timer's hook in reach and play_paint's fills recorded:
+    [(alpha, [bar boxes])] a paint, one entry per glyph drawn."""
+    def __init__(self, fw, st):
+        super().__init__(fw, st)
+        self.now = 5000
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+        self.ink: list = []  # [colour, fills] per vgcanvas_set_fill_color
+        fw.mock('vgcanvas_set_fill_color', lambda vg, c, *_: self.ink.append([c & 0xffffffff, 0]))
+        fw.mock('vgcanvas_fill', lambda *_: self.ink[-1].__setitem__(1, self.ink[-1][1] + 1))
+        hooks = (C.c_void_p * 2).in_dll(fw.lib, 'ui_kit__mo_hooks')
+        C.memset(C.addressof(hooks), 0, C.sizeof(hooks))
+        self.hooks = hooks
+
+    def glyphs(self):
+        """What play_paint draws now: [(alpha 0-255, colour 0xRRGGBB, n bars)], the bars first."""
+        self.ink.clear()
+        self.fw.fn('ui_ink_raw', C.c_uint, C.c_uint)(1)  # final colours, as status_slots_paint paints the slots
+        self.fw.fn('status_row__play_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(None, Canvas(self.fw).addr, 100, CY)
+        return [(c >> 24, c & 0xffffff, n) for c, n in self.ink if n]
+
+    def bars_of(self, pause):
+        """play_bars' boxes for the bars (0) or the pause (1), whatever the state."""
+        out = (C.c_float * 5 * 3)()
+        n = self.fw.fn('status_row__play_bars', C.c_int, C.c_int, C.c_int, C.c_int, C.c_void_p)(100, CY, pause, out)
+        return [tuple(round(v, 3) for v in out[i]) for i in range(n)]
+
+    def frame(self):
+        """The shared timer's frame: each hook motion_hook added."""
+        for h in self.hooks:
+            if h:
+                C.CFUNCTYPE(None)(h)()
+
+
+@pytest.fixture
+def xf(fw, st):
+    return Xfade(fw, st)
+
+
+PLAY_BOX = (BODY - GAP - 10, 0, 10, 26)  # the play slot's box on the bar, the only rect a dissolve repaints
+
+
+def test_pausing_stops_the_bars_and_cross_dissolves_them_into_the_pause_in_their_box(fw, xf):
+    """The user's (21:52): paused, the bars stop and cross-dissolve into the pause over SR_XFADE_MS (250 ms, the
+    house cubic ease-out), the frames coming from the shared timer's hook and repainting only the play box; the
+    slot keeps its place and width, so nothing else in the row moves."""
+    xf.sync_sig()
+    assert xf.glyphs() == [(255, 0xffffff, 3)]
+    left = xf.left()
+    xf.status = 3
+    assert xf.sync_sig() == 1  # the bar repaints whole once, as for any change
+    xf.dirty.clear()
+    assert xf.glyphs() == [(255, 0xffffff, 3)]  # the dissolve's start: the bars, whole
+    xf.now += 125
+    xf.frame()
+    assert xf.dirty == [PLAY_BOX]  # a frame repaints the play box only
+    assert xf.glyphs() == [(31, 0xffffff, 3), (223, 0xffffff, 2)]  # half way, eased to 875: bars out, pause in
+    xf.now += 125
+    assert xf.glyphs() == [(255, 0xffffff, 2)]  # the pause alone at 250 ms
+    xf.frame()
+    xf.frame()
+    assert xf.dirty == [PLAY_BOX, PLAY_BOX]  # the end's repaint, then no more
+    assert xf.left() == left
+
+
+def test_the_bars_stand_still_while_they_dissolve_and_move_again_after(fw, xf):
+    xf.sync_sig()
+    tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(xf.timers[0][0])
+    assert tick(None) == 8
+    frozen = xf.bars_of(0)
+    xf.status = 3
+    xf.sync_sig()
+    xf.now += 100
+    assert xf.bars_of(0) == frozen  # paused: the dissolving bars are the frame they stopped on
+    xf.status = 2  # resumed mid-dissolve: the bars' timer runs, but no frame moves until the dissolve back ends
+    xf.sync_sig()
+    xf.dirty.clear()
+    assert tick(None) == 8 and xf.bars_of(0) == frozen and xf.dirty == []
+    xf.now += 250
+    assert tick(None) == 8 and xf.bars_of(0) != frozen and xf.dirty == [PLAY_BOX]  # done: they move again
+
+
+def test_resuming_mid_dissolve_turns_back_from_where_it_stands(fw, xf):
+    xf.sync_sig()
+    xf.status = 3
+    xf.sync_sig()
+    xf.now += 125
+    mid = xf.glyphs()
+    xf.status = 2
+    xf.sync_sig()
+    assert xf.glyphs() == mid  # back from where it stood, no jump
+    xf.now += 250
+    assert xf.glyphs() == [(255, 0xffffff, 3)]
+
+
+def test_under_reduce_motion_the_swap_is_a_cut(fw, st, xf):
+    st('reduce_motion').value = 1
+    xf.sync_sig()
+    xf.status = 3
+    xf.sync_sig()
+    assert xf.glyphs() == [(255, 0xffffff, 2)]
+    assert not any(xf.hooks)  # no dissolve: no frames from the shared timer
+    xf.status = 2
+    xf.sync_sig()
+    assert xf.glyphs() == [(255, 0xffffff, 3)]
+
+
+def test_a_slot_that_appears_shows_its_state_at_once(fw, xf):
+    """A page opened on a paused song (or Home's first row leaving the slot) shows the pause, with no dissolve."""
+    xf.status = 3
+    xf.sync_sig()
+    assert xf.glyphs() == [(255, 0xffffff, 2)] and not any(xf.hooks)
+    xf.status = 0  # stopped: the slot goes
+    xf.sync_sig()
+    xf.status = 2
+    xf.sync_sig()
+    assert xf.glyphs() == [(255, 0xffffff, 3)] and not any(xf.hooks)
+
+
+@pytest.mark.parametrize('light, rgb', [(0, 0xffffff), (1, 0x000000)])
+def test_both_glyphs_dissolve_in_the_row_s_ink(fw, st, xf, light, rgb):
+    """The same colour as every status glyph (Text Primary: white, black in Light Mode) through the dissolve."""
+    st('light').value = light
+    xf.sync_sig()
+    xf.status = 3
+    xf.sync_sig()
+    xf.now += 100
+    assert {c for _, c, _ in xf.glyphs()} == {rgb} and len(xf.glyphs()) == 2
 
 
 def test_a_dark_screen_starts_no_frames(fw, row):
