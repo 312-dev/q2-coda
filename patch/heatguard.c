@@ -20,6 +20,11 @@ static struct {
     int norun_shown;
 } hg __attribute__((section(".scratch")));
 
+/* The tests' seams (test/fw/test_heatguard.py): 0 on the Q2, so confirm and toast_later. */
+int (*hg_confirm)(const confirm_t *c) __attribute__((section(".scratch")));
+void (*hg_toast)(const char *glyph, const char *text) __attribute__((section(".scratch")));
+static int hg_card(const confirm_t *c) { return (hg_confirm ? hg_confirm : confirm)(c); }
+
 static int hg_field(const char *s, const char *key, char *out, int size) { /* key=value's value */
     int n = (int)strlen(key);
     for (const char *p = s; (p = strstr(p, key));) {
@@ -63,7 +68,7 @@ static const char *const hg_off_row[] = { "Shutting Down" };
 static int hg_info(const char *title, const char *body) {
     confirm_t c = { .title = title, .body = body, .rows = hg_ok_row, .n_rows = 1, .kind = CONFIRM_INFO,
                     .back = -1, .answer = hg_ok };
-    return confirm(&c);
+    return hg_card(&c);
 }
 
 /* The power-off: answer, pause the audio, show the countdown, and at its end stock's own Shut Down
@@ -86,7 +91,7 @@ static void hg_power_off(int seq, int left, int load) {
                     .body = load ? "Q2 worked hard with no temperature sensor." : "Shutting down to cool off.",
                     .rows = hg_off_row, .n_rows = 1, .kind = CONFIRM_INFO, .back = -1,
                     .timeout_ms = (int)(hg.off_ms - gone), .timeout_row = 0, .answer = hg_off_answer };
-    if (confirm(&c)) hg.seq_shown = seq;
+    if (hg_card(&c)) hg.seq_shown = seq;
 }
 
 void heatguard_poll(void) {
@@ -117,7 +122,7 @@ void heatguard_poll(void) {
     if (seq == hg.seq_shown) return;
     int shown = 1;
     if (!tk_strcmp(card, "warn")) {
-        toast_later("chargetoast_weak", "Q2 is getting hot");
+        (hg_toast ? hg_toast : toast_later)("chargetoast_weak", "Q2 is getting hot");
     } else if (!tk_strcmp(card, "nosensor")) {
         shown = hg_info("Temperature sensor not available",
                         "Q2 can't detect overheating; it will\nwatch CPU load instead.");
@@ -127,7 +132,7 @@ void heatguard_poll(void) {
                         .rows = hg_load_rows, .n_rows = 2, .kind = CONFIRM_CONSEQUENTIAL, .back = 0,
                         .timeout_ms = left > 0 ? left : 60000, .timeout_row = 1,
                         .answer = hg_load_answer, .ctx = (void *)(long)seq };
-        shown = confirm(&c);
+        shown = hg_card(&c);
     }
     if (shown) hg.seq_shown = seq;
 }
