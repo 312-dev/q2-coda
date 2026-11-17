@@ -1448,7 +1448,9 @@ interruptible: a turn mid-run starts from where it is.
 
 - **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
   220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
-  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once, and over Home in Split
+  shows only over the sliding page, fading as it goes, while Home's raised rows and art drift and darken with Home
+  in the row beside it (`PAGE_SLIDE_MS`, stock's
   window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
   in over the same 220 ms.
 - **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,

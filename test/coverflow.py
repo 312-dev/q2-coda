@@ -338,7 +338,11 @@ void home_pad(void *view) {}
 void home_np_keep(int d) {} /* home.c's selection as Now Playing's row comes or goes */
 void home_overflow(void *list, int bottom) {}
 void home_in_place(void *list) {}
-void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {}
+/* page_parallax.c: no window slides in these tests */
+void *parallax_slide(float *percent) { return 0; }
+int parallax_under_x(int w, float percent) { return 0; }
+unsigned parallax_dim(float percent) { return 0; }
 int shuffle_songs(void *ctx, void *event) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
