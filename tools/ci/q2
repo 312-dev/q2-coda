@@ -8,6 +8,7 @@
     q2 agent end NAME --state READY   # ... and signs off: refused while anything it started still runs
     q2 agent list
     q2 jobs                           # q2-heavy's jobs alone
+    q2 trunk                          # the trunk's name (git merge "$(q2 trunk)")
 
 Installed as ~/.local/bin/q2 (docs/orchestration.md#install). The rules it enforces are there too.
 
@@ -340,6 +341,7 @@ def main():
     sub = ap.add_subparsers(dest='command', required=True)
     sub.add_parser('status')
     sub.add_parser('jobs')
+    sub.add_parser('trunk')
     s = sub.add_parser('stop-all')
     s.add_argument('--yes', action='store_true', help='do it (without: only list)')
     a = sub.add_parser('agent')
@@ -353,6 +355,11 @@ def main():
     args = ap.parse_args()
     if args.command == 'status':
         return status()
+    if args.command == 'trunk':
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import q2ci
+        print(q2ci.trunk())
+        return 0
     if args.command == 'jobs':
         for j in heavy_jobs():
             print(json.dumps(j))
