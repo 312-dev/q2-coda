@@ -892,7 +892,7 @@ def test_rockbox_leaves_its_flag_and_ends_demo(fw, power):
     fw.fn('rockbox_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert host.tools_build.ROCKBOX_FLAG in card.files  # S90play runs Rockbox on it
     cmd = C.string_at(fw.calls('fw_system')[-1][1][0])
-    assert cmd.endswith(b'kill -9 $PPID') and b'checkappprocess.sh' in cmd and b'hciplayer' in cmd
+    assert cmd.endswith(b'kill -9 $PPID') and b'hciplayer' in cmd and b'checkappprocess' not in cmd  # S90play reboots, not a watchdog
     assert fw.calls('save_memoryplay_info')  # the queue kept as power-off keeps it
     assert power('ended').value == 1 and (6, WDT_STOP) in [(c[1][0], c[1][1] & 0xffffffff) for c in fw.calls('fw_ioctl')]
     assert STATE.encode() in [C.string_at(c[1][0]) for c in fw.calls('fw_unlink')]  # a clean end, nothing to report

@@ -241,10 +241,10 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # power-on default (missing or invalid retains Rockbox). ponytail: the card's mount is awaited (up to 3 s without a card)
 # unless Q2 Muse was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
 # with the launcher contract in its tools/shanlingq2/README; demo starts when it exits, or when the
-# card has none. demo keeps its argv[0], which checkappprocess.sh pgreps for. iPod's Home Rockbox row
-# (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills demo: Rockbox runs again, its
-# watchdog stopped in case demo's kill was not reached, then demo once more. Any other end of demo
-# ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
+# card has none. iPod's Home Rockbox row (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills
+# demo: Rockbox runs again, then demo once more. Any other end of demo ends the loop and reboots, as
+# stock's watchdog did (WATCHDOG): at once after a crash's log, 10 s on after a clean end (power-off,
+# Restart, an update), which the Q2 going down ends first. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
 # The boot animation's player (docs/boot.md#boot-animation, patch/splash.c): S11logo_display_shell runs it.
 SPLASH = 'usr/bin/q2splash'
@@ -353,7 +353,6 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             s=$?
             [ -e {ROCKBOX_FLAG} ] || break
             rm -f {ROCKBOX_FLAG}
-            killall checkappprocess.sh 2>/dev/null
             # demo is gone: what it just launched gets this long to reach a name WIFI_OFF kills (build.py)
             usleep 300000
             (usleep 2000000; {WIFI_OFF}) &
@@ -380,6 +379,10 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             }} > $c.tmp 2>&1; mv $c.tmp $c
             sync
         fi
+        # demo is gone for good: reboot, as stock's watchdog did (build.py WATCHDOG); after a clean end only
+        # if the Q2 is still up 10 s on, as a power-off or Restart takes this shell down first
+        [ "$s" ] || sleep 10
+        reboot
     ) &
 '''.encode())
 # User boot logo (docs/boot.md#custom-boot-logo): demo copies the card's to /mnt/data, which
@@ -524,9 +527,12 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
                     (0x42d09c, 0x0041463c, None, 0x004147a0))
-# platform_init's crash watchdog forks pgrep every 2 s; 10 s is still quick to reboot a dead UI.
+# platform_init's crash watchdog, checkappprocess.sh, forked pgrep "/release/bin/demo" every 2 s and rebooted when it
+# found none: demo gone. S90play runs demo and waits for it (BOOT_HOOK), so it reboots there instead, and the script
+# platform_init still starts ends at once: no process starts every few seconds for the life of the Q2.
 WATCHDOG = 'usr/bin/checkappprocess.sh'
-WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
+WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
+                 b'exit 0\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
@@ -2544,7 +2550,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     (out/'bluealsa').write_bytes(bluealsa)
     bluetoothd = patch_bluetoothd(cat(BLUETOOTHD))
     (out/'bluetoothd').write_bytes(bluetoothd)
-    (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
+    (out/'watchdog').write_bytes(WATCHDOG_STUB)
     shadow = lock_root(cat(SHADOW))
     check(not password_logins(shadow), 'A password still logs in')
     (out/'shadow').write_bytes(shadow)

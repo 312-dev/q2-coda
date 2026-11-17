@@ -265,9 +265,8 @@ static int bt_vol_q2(unsigned level) {
  * demo leaves S90play's flag and ends; S90play sees it, runs Rockbox and starts demo again when
  * Rockbox exits. Bluetooth's daemons are not demo's children and keep the headphones connected, so
  * Rockbox finds them and plays there (q2-rockbox's pcm-alsa). The queue is saved as power-off
- * saves it, charging is handed back as Rockbox expects it at boot, the
- * watchdog (checkappprocess.sh, which reboots once demo is gone) and hciplayer (which holds the
- * DAC's PCM) are stopped, and demo is killed outright, so no exit handler can hang it. */
+ * saves it, charging is handed back as Rockbox expects it at boot, hciplayer (which holds the
+ * DAC's PCM) is stopped, and demo is killed outright, so no exit handler can hang it. */
 int rockbox_open(void *ctx, void *event) {
     void *flag = !rockbox_available() ? (void *)0 : fopen(ROCKBOX_FLAG, "w");
     if (!flag) {
@@ -288,7 +287,7 @@ int rockbox_open(void *ctx, void *event) {
         (unsigned)btctl_transport_get_volume() <= 127)
         btctl_transport_set_volume(bt_vol_avrcp(g_maxvolume));
     ringnav_clean_end(); /* the watchdog would outlive demo's kill; nothing to report */
-    system("killall checkappprocess.sh; killall -9 hciplayer; " SPOT_KILL "; sync; kill -9 $PPID");
+    system("killall -9 hciplayer; " SPOT_KILL "; sync; kill -9 $PPID");
     return 0;
 }
 
