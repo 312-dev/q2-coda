@@ -21,8 +21,11 @@ adb shell 'cat /proc/meminfo'              # one command (through a terminal: li
 adb exec-out 'cat /mnt/data/config.ini'    # bytes exactly as written, no terminal; stderr comes with them
 adb push song.flac /mnt/mmc/Music/         # and adb pull
 adb reboot
+adb exec-out 'cat /mnt/mmc/.q2muse/logs/q2-heat.1 /mnt/mmc/.q2muse/logs/q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -   # the heat log, oldest file first
 python3 tools/q2remote.py shot --adb out.png   # the screen as an upright PNG, over adb exec-out
 ```
+
+The heat log (`q2guard`, [internals](internals.md#overheat-guardian)) is read back with the last line of that block: `.1` then `.0` so the lines come out in order, `2>/dev/null` inside the quotes because `exec-out` passes the Q2's stderr through (a Q2 whose first log hasn't filled has no `.1`), and `tools/q2heat.py` turns them into a timeline with the fastest rise and the processes using the CPU then. The card has to be mounted on the Q2: with it lent to a computer (USB Transfer Files) the files are not there to read, and the lines wait in RAM.
 
 `q2remote.py shot --adb` runs `q2remote --shot` on the Q2 through `adb exec-out` and turns the framebuffer the same way `shot` does over Wi-Fi; `--settle` works too. By hand: `adb exec-out "q2remote --shot 2>/dev/null | gzip -1" > shot.gz` gives the raw page (`Q2FB` header, then 320 × 375 BGRA rows, [remote.md](remote.md#protocol)).
 

@@ -5,10 +5,20 @@
 #include "../../patch/q2guard.h"
 
 struct guard *guard_new(void) { return calloc(1, sizeof(struct guard)); }
-struct heat_log *log_new(void) { return calloc(1, sizeof(struct heat_log)); }
+/* q2guard.c's role, as the tests play it: card_mounted is false while lines are added (the watching process
+ * only holds them) and true for the flush (the writing child). */
+static int card_up;
+int card_mounted(void) { return card_up; }
+void card(int up) { card_up = up; }
+card_log *log_new(const char *dir) {
+    char *path = malloc(256);
+    snprintf(path, 256, "%s/q2-heat.0", dir);
+    return card_log_at(calloc(1, sizeof(card_log)), path, HEAT_RAM);
+}
+int log_dropped(const card_log *l) { return (int)l->dropped; }
 struct top_table *table_new(void) { return calloc(1, sizeof(struct top_table)); }
-int log_used(const struct heat_log *l) { return l->used; }
-const char *log_ram(const struct heat_log *l) { return l->ram; }
+int log_used(const card_log *l) { return (int)l->len; }
+const char *log_ram(const card_log *l) { return l->ring; }
 int guard_load(const struct guard *g) { return g->load; }
 
 /* One step; out: kill_player, flush, power_off. The event. */

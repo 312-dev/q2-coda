@@ -7,7 +7,8 @@ the CPU then.
     adb shell cat /mnt/mmc/.q2muse/logs/q2-heat.1 /mnt/mmc/.q2muse/logs/q2-heat.0 | python3 tools/q2heat.py -
 
 A line is `TIME up=S t=C ... top=name:pct,... g=STATE`; a note is `TIME WORD ...` (BOOT, SENSOR, WARN, LOADWARN,
-POWEROFF, NOANSWER, POWER, CARD, GAP). Lines that are neither are skipped."""
+POWEROFF, NOANSWER, POWER, CARD). The card store's `== N lines lost while the card was away` line is read as
+a GAP note at the time of the line before it. Lines that are none of these are skipped."""
 import argparse
 import datetime
 import re
@@ -16,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 TIME = re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (.*)$')
+LOST = re.compile(r'^== (\d+) lines lost while the card was away$')  # patch/card_store.c's note
 
 
 @dataclass
@@ -45,13 +47,17 @@ def num(v):
 
 def parse(lines):
     """Samples and notes, in the order given."""
-    samples, notes, boot = [], [], 0
+    samples, notes, boot, last = [], [], 0, None
     for raw in lines:
         m = TIME.match(raw.rstrip('\n'))
         if not m:
+            lost = LOST.match(raw.rstrip('\n'))
+            if lost and last:
+                notes.append(Note(last, f'GAP card away, {lost[1]} lines lost', boot))
             continue
         when = datetime.datetime.strptime(m[1], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
         rest = m[2]
+        last = when
         if not rest.startswith('up='):
             boot += rest.startswith('BOOT ')
             notes.append(Note(when, rest, boot))
