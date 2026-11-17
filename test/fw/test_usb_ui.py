@@ -295,3 +295,87 @@ def test_adbd_going_away_answers_nothing_more(fw_dev):
     fw_dev.mock('fw_recv', lambda *_: 0)  # the socket closed
     u.poll()
     assert not u.sent
+
+
+# The cable's edges (patch/usb_event.c, docs/internals.md#usb-cable-events) and the probe's gadget at an unplug.
+
+def edges(fw, *stamps):
+    """usb_event.c's thread for one burst: the kernel's line events (struct gpioevent_data: the u64 timestamp in ns,
+    the id) read from the line's file until it has none, the bounce slept off in between."""
+    queue = [s for s in stamps]
+    sleeps = []
+
+    def read(fd, buf, n, *_):
+        if not queue:
+            return -1
+        C.memmove(buf, C.c_uint64(queue.pop(0)).value.to_bytes(8, 'little') + b'\x01\0\0\0\0\0\0\0', 16)
+        return 16
+    fw.mock('fw_read', read)
+    fw.mock('fw_usleep', lambda us, *_: sleeps.append(us) or 0)
+    assert fw.fn('usb_event_wait', C.c_int, C.c_int)(5) == 1
+    return sleeps
+
+
+def test_a_burst_of_edges_is_one_cable_change_stamped_with_its_first_edge(fw):
+    """The thread reads an edge, sleeps the contacts' bounce off (USB_SETTLE_MS), drains the rest of the burst and
+    counts it once; the UI thread takes it once, with the first edge's time."""
+    take = fw.fn('usb_event_take', C.c_int, C.POINTER(C.c_uint64))
+    edge = C.c_uint64()
+    assert not take(C.byref(edge))
+    assert edges(fw, 7_000_000, 7_400_000, 9_000_000) == [20000]
+    assert take(C.byref(edge)) == 1 and edge.value == 7_000_000
+    assert not take(C.byref(edge))
+
+
+def test_an_edge_runs_stock_s_cable_read_and_the_usb_check_in_the_same_pass(fw):
+    """usb_ui_poll, every UI pass: an edge runs get_battery_capacity (which sets g_usbdet_value, as the status bar's
+    one-second timer would) and check_usb_status's hook at once, so the probe starts in that pass with no
+    usb_ui_status from stock; demo's log says how the cable was seen and how long after its edge."""
+    u = Usb(fw)
+    u.status()  # the first pass: no cable
+    fw.mock('get_battery_capacity', lambda *_: setattr(u.det, 'value', 1) or 0)
+    fw.mock('stock_usb_status_trampoline', lambda *_: 0)
+    fw.mock('fw_clock_gettime', lambda clock, ts, *_: C.memmove(ts, bytes(C.c_long(1)) + bytes(C.c_long(9_000_000)), 2 * C.sizeof(C.c_long)) and 0)
+    logged = []
+    fw.mock('fw_write', lambda fd, data, n, *_: logged.append((fd, C.string_at(data, n).decode())) or n)
+    edges(fw, 1_000_000_000)
+    u.poll()
+    assert u.link.value == 3 and u.commands == ['storage_config.sh start /dev/null >/dev/null 2>&1']
+    assert logged == [(2, 'q2 usb: cable in, seen after its edge, 9 ms\n')]
+
+
+def test_the_waiting_probe_reads_the_computer_s_answer_every_tenth_of_a_second(fw):
+    """The chooser follows the computer's answer, not stock's next second: usb_ui_poll looks at the UDC's state every
+    USB_PROBE_LOOK_MS while the probe waits."""
+    u = Usb(fw)
+    u.plug(host=False)
+    u.files.files[UDC] = b'configured\n'
+    u.now += 50
+    u.poll()
+    assert not u.page('usbchoose_page')  # under USB_PROBE_LOOK_MS since the last look
+    u.now += 50
+    u.poll()
+    assert u.page('usbchoose_page')
+
+
+@pytest.mark.parametrize('answered', [False, True])
+def test_unplugging_stops_the_probe_s_gadget_whether_it_waited_or_its_chooser_was_up(fw, answered):
+    """Seen on a Q2 (p31, 2026-11-16): a cable out with the chooser up and unanswered left the probe's storage gadget
+    running, configfs mounted and the ADB gadget parked, so the next cable's probe could not start. The probe's
+    gadget now goes with the cable, once."""
+    u = Usb(fw)
+    u.plug(host=answered)
+    assert bool(u.page('usbchoose_page')) == answered
+    u.unplug()
+    assert u.commands == ['storage_config.sh start /dev/null >/dev/null 2>&1', 'storage_config.sh stop >/dev/null 2>&1']
+    assert not u.page('usbchoose_page')
+    u.link.value = 0  # stock's pass at the cable out (check_usb_status: "=====usb disconnect==")
+    u.plug(host=False)
+    assert u.commands[-1] == 'storage_config.sh start /dev/null >/dev/null 2>&1'
+
+
+def test_a_choice_then_an_unplug_stops_the_probe_only_once(fw):
+    u, page = chooser(fw)
+    u.ui.click(u.row(page, 'Charge Only'))
+    u.unplug()
+    assert u.commands.count('storage_config.sh stop >/dev/null 2>&1') == 1

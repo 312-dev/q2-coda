@@ -975,6 +975,10 @@ int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
 /* usb_ui.c */
 void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui_ejected(void *win);
+/* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
+void usb_event_start(void);
+int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);
+unsigned long long usb_event_now_ns(void);
 void usb_ui_paint(void *w, void *canvas);
 const char *usb_ui_title(const char *name);
 int usb_ui_key(void *top, unsigned key);
