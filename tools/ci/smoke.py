@@ -146,13 +146,14 @@ def boot_rule(stack, card):
     return 'confirm' if t == GUARD_DIALOG and card in GUARD_CARDS else 'fail'
 
 
-def guard_files(pid):
+def guard_files(pid) -> 'tuple[dict[str, str], dict[str, str]] | None':
     """q2guard's state and demo's answers as dicts (key: value), from the sandbox's /tmp through demo's root;
     None when the build has no q2guard."""
     root = pathlib.Path(f'/proc/{pid}/root')
     if not (root/'usr/bin/q2guard').exists():
         return None
-    state, answers = {}, {}
+    state: dict[str, str] = {}
+    answers: dict[str, str] = {}
     for path, out in ((root/'tmp/q2guard.state', state), (root/'tmp/q2guard.ack', answers)):
         try:
             text = path.read_text()
@@ -220,6 +221,11 @@ class Emulator:
             time.sleep(.5)
         raise Failed(f'Home did not come up in {BOOT_S} s (windows: {self.pid and windows(self.pid)})')
 
+    def guard_card(self):
+        """The must-confirm card demo says is up ("-" none), or None."""
+        files = guard_files(self.pid)
+        return files[1].get('card') if files else None
+
     def guard(self):
         """Wait for q2guard's verdict on its sensor and confirm the card it brings (GUARD_CARDS); any other
         dialog over Home fails."""
@@ -234,13 +240,13 @@ class Emulator:
             if rule == 'fail':
                 raise Failed(f'boot: a dialog over Home: windows are {[n for _, n in self.stack()]}, card {card}')
             if rule == 'confirm':
-                self.log(f'boot: confirmed {GUARD_CARDS[card]}')
+                self.log(f'boot: confirmed {GUARD_CARDS.get(card or "", "")}')
                 confirmed.add(state.get('seq'))
                 self.q2emu('key', 'centre')
                 gone = time.monotonic() + STEP_S  # one press: wait for demo to say the card has closed
-                while (guard_files(self.pid) or ({}, {}))[1].get('card') == card:
+                while self.guard_card() == card:
                     if time.monotonic() > gone:
-                        raise Failed(f'boot: {GUARD_CARDS[card]} did not close on OK')
+                        raise Failed(f'boot: {GUARD_CARDS.get(card or "", "")} did not close on OK')
                     time.sleep(.2)
                 continue
             waiting = state.get('state', 'pending') == 'pending' or (
