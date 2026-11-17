@@ -4,8 +4,9 @@
 class PowerMachine(ResumeMachine):
     def __init__(self,config={},files=None):
         super().__init__(files); self.config.update(config); self.writes=[]; self.records=[]  # records: the state record's
-        for n in ('fflush@GLIBC_2.0','fsync@GLIBC_2.0','fileno@GLIBC_2.0','unlink@GLIBC_2.0','open@GLIBC_2.0','close@GLIBC_2.0'):
-            self.handlers[syms[n]]='p:'+n
+        for n in ('fflush@GLIBC_2.0','fsync@GLIBC_2.0','fileno@GLIBC_2.0','unlink@GLIBC_2.0','open@GLIBC_2.0','close@GLIBC_2.0',
+                  'read@GLIBC_2.0','write@GLIBC_2.0'):
+            self.handlers[syms[n]]='p:'+n  # read, write: heatguard_poll's (the base machine's access finds no q2guard)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a=u.reg_read(REGS[0])
         if name.startswith('r:fclose') and self.open.get(a,[0,0])[1]=='w':
@@ -128,6 +129,7 @@ class WatchdogMachine(StandbyMachine):
         self.byte(syms['g_backlight_status'],1); self.byte(syms['g_usbdet_value'],0)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a,b,c=[u.reg_read(r) for r in REGS[:3]]
+        if name=='p:open@GLIBC_2.0' and self.text(a)=='/tmp/q2guard.state': self.returns(0xffffffff); return  # no q2guard here
         if name=='p:open@GLIBC_2.0':
             assert self.text(a)=='/dev/jz_watchdog' and b==0x80002; self.wdt_opens+=1; self.returns(self.fd&0xffffffff); return
         if name=='d:ioctl':

@@ -781,7 +781,7 @@ void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 /* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
 int vol_wm_keyup(void *ctx, void *e);
-int vol_accel(void); /* volume.c: a wheel tick's steps at its speed */
+int vol_accel(void);     /* volume.c: a wheel tick's steps at its speed */
 void vol_show(int from); /* volume.c: a change not the wheel's, on screen */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
@@ -815,6 +815,7 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 
 /* system.c */
 void power_poll(void);
+void heatguard_poll(void); /* heatguard.c: q2guard's cards, from power_poll */
 
 /* power_rows.c */
 void power_rows(void *view);
