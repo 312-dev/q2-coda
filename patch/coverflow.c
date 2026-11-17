@@ -1610,29 +1610,22 @@ static unsigned cf_paper;
  * cf_r rows of cf_r from the outermost; 0 for square. */
 static int cf_r;
 static const unsigned char *cf_cover;
+/* By texel column: the corner's rows from either end it covers in part, and of those the ones it
+ * leaves clear; 0 off the corners (cf_corners) */
+static unsigned char cf_part[ART_SIZE], cf_clear[ART_SIZE];
 
 /* One texture column (texels ART_SIZE apart) h high (1/256 px) on the horizon at frame column col,
- * its partial end rows by coverage, then its reflection fading out below. k is the column's texel
- * across the art (0 to ART_SIZE - 1, either way round), or -1: in the corners' columns each end
- * row the corner covers in part takes the corner pixel's coverage at that texel too, so the arc is
- * anti-aliased where it runs steep as well as where it runs flat
- * (docs/internals.md#rounded-corners). */
-static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+ * its partial end rows by coverage, then its reflection fading out below: a column off the
+ * corners, the hot path. */
+static void plain_column(shelf_t *f, int col, const unsigned *tex, int h, int bright) {
     if (h < 16) return;
     unsigned *d = f->d + col;
     int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
-    /* the corner's column (stride cf_r), and its texel rows from either end not wholly covered */
-    int kc = k < 0 ? -1 : k < cf_r ? k : k >= ART_SIZE - cf_r ? ART_SIZE - 1 - k : -1, part = 0;
-    const unsigned char *corner = kc >= 0 && cf_cover ? cf_cover + kc : (const unsigned char *)0;
-    int clear = 0; /* of those, the rows it leaves wholly clear */
-    while (corner && part < cf_r && corner[part * cf_r] < 255) clear += !corner[part * cf_r], ++part;
-    int ins = h * part / ART_SIZE, clipped_top = top + ins, clipped_bottom = bottom - ins;
-    int out = h * clear / ART_SIZE; /* 1/256 px at either end with nothing to draw */
+    int ins = 0, clipped_top = top, clipped_bottom = bottom;
     int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col];
-    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8,
+    int y = clipped_top >> 8, end = (clipped_bottom + 255) >> 8,
         last = end < cfs.view_h ? end : cfs.view_h;
-    /* the rows between in0 and in1 are wholly the art's; the rest are the edge rows */
-    int in0 = (clipped_top + 255) >> 8, in1 = clipped_bottom >> 8;
+    int first = y, final = end - 1; /* the rows the edges cross */
     int v = (((y << 8) + 128 - top) >> 4) * step >> 4, pitch = f->pitch; /* v: 16.16 texel row */
     if (y < 0) v -= y * step, y = 0;
     unsigned *px = d + y * pitch, wash = shade(cf_paper, 256u - (unsigned)bright);
@@ -1646,18 +1639,11 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
         int run = y < solid_top && solid_top < last ? solid_top : last; /* up to the opaque span */
         for (; y < run; ++y, v += step, px += pitch) {
             unsigned cov = 256, t;
-            if (y < in0 || y >= in1) { /* only the edge rows' centres can fall off the art */
-                int from = y << 8 > top ? y << 8 : top,
-                    to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
-                int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
+            if (y == first || y == final) { /* only the edge rows' centres can fall off the art */
+                int from = y << 8 > clipped_top ? y << 8 : clipped_top,
+                    to = (y + 1) << 8 < clipped_bottom ? (y + 1) << 8 : clipped_bottom;
                 cov = (unsigned)(to - from);
-                if (part) {
-                    int cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row; /* corner row */
-                    unsigned c = cr < part ? corner[cr * cf_r] : 255;
-                    cov = cov * (c + (c >> 7)) >> 8; /* of 256, no divide */
-                    if (!cov) continue;
-                }
-                t = tex[row * ART_SIZE];
+                t = tex[(v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16) * ART_SIZE];
             } else
                 t = tex[(v >> 16) * ART_SIZE];
             put(px, whole ? t : shade(t, (unsigned)bright) + wash, cov); /* put ignores t's alpha */
@@ -1669,8 +1655,8 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
     unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
     wash = shade(cf_paper, 256u - dim);
     if (stop > cfs.view_h) stop = cfs.view_h;
-    for (y = (bottom + out) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
-        int from = y << 8 > bottom ? y << 8 : bottom,
+    for (y = (bottom + ins) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
+        int from = y << 8 > bottom + ins ? y << 8 : bottom + ins,
             dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
         if (dist >= reflect) break;
         if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
@@ -1678,15 +1664,11 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
         int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
         unsigned cov =
             (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
-        if (mirrored < part) {
-            unsigned c = corner[mirrored * cf_r];
-            cov = cov * (c + (c >> 7)) >> 8;
-        }
         put(px, shade(tex[row * ART_SIZE], dim) + wash, cov);
     }
     /* The rows this body covers whole are opaque now: join them to the known span, or keep the
      * longer of the two. */
-    int s0 = in0, s1 = in1;
+    int s0 = (clipped_top + 255) >> 8, s1 = clipped_bottom >> 8;
     s0 = s0 < 0 ? 0 : s0, s1 = s1 > cfs.view_h ? cfs.view_h : s1;
     if (s1 <= s0) return;
     if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
@@ -1695,6 +1677,67 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
     } else if (s1 - s0 <= solid_bottom - solid_top)
         return;
     f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
+}
+
+/* The same in a corner's column, texel k across the art: each end row the corner covers in part
+ * takes the corner pixel's coverage at its texel too (docs/internals.md#rounded-corners), so the
+ * arc is anti-aliased where it runs steep as well as where it runs flat; its reflection mirrors it.
+ * A row at a time and plain, as only the corners' few columns come here; the rows the corner
+ * leaves wholly clear are not visited. */
+static void corner_column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    unsigned *d = f->d + col;
+    int part = cf_part[k], clear = cf_clear[k], R = cf_r;
+    const unsigned char *corner = cf_cover + (k < R ? k : ART_SIZE - 1 - k);
+    int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
+    int ins = h * part / ART_SIZE, out = h * clear / ART_SIZE;
+    int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col];
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < cfs.view_h ? end : cfs.view_h;
+    int v = (((y << 8) + 128 - top) >> 4) * step >> 4; /* 16.16 texel row */
+    if (y < 0) v -= y * step, y = 0;
+    unsigned wash = shade(cf_paper, 256u - (unsigned)bright);
+    for (unsigned *px = d + y * f->pitch; y < last; ++y, v += step, px += f->pitch) {
+        if (y >= solid_top && y < solid_bottom) continue;
+        int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
+        int cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row; /* corner row */
+        int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
+        unsigned cov = (unsigned)(to - from), c = cr < part ? corner[cr * R] : 255;
+        cov = cov * (c + (c >> 7)) >> 8; /* of 256, no divide */
+        if (cov) put(px, bright >= 256 ? tex[row * ART_SIZE] : shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
+    }
+    int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
+    int fade = (256 << 16) / reflect;
+    unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
+    wash = shade(cf_paper, 256u - dim);
+    if (stop > cfs.view_h) stop = cfs.view_h;
+    for (y = (bottom + out) >> 8; y < stop; ++y) {
+        int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
+        if (dist >= reflect) break;
+        if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
+        int mirrored = dist * step >> 8 >> 16; /* texel rows up from the bottom edge */
+        int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
+        unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        unsigned c = mirrored < part ? corner[mirrored * R] : 255;
+        put(d + y * f->pitch, shade(tex[row * ART_SIZE], dim) + wash, cov * (c + (c >> 7)) >> 8);
+    }
+    /* the rows it covers whole join the opaque span, as plain_column's do */
+    int s0 = (top + ins + 255) >> 8, s1 = (bottom - ins) >> 8;
+    s0 = s0 < 0 ? 0 : s0, s1 = s1 > cfs.view_h ? cfs.view_h : s1;
+    if (s1 <= s0) return;
+    if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
+        s0 = s0 < solid_top ? s0 : solid_top;
+        s1 = s1 > solid_bottom ? s1 : solid_bottom;
+    } else if (s1 - s0 <= solid_bottom - solid_top)
+        return;
+    f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
+}
+
+/* A column, k its texel across the art or -1: a corner's to corner_column, else the plain one. */
+static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    if (h < 16) return;
+    if (k >= 0 && cf_part[k])
+        corner_column(f, col, tex, h, bright, k);
+    else
+        plain_column(f, col, tex, h, bright);
 }
 
 #ifdef PEQ_HOST
@@ -1733,6 +1776,13 @@ static void cf_corners(void) {
     filled = (short)radius;
     int r = ART_SIZE * radius / 166;
     cf_r = r, cf_cover = corner_cover(r);
+    memset(cf_part, 0, sizeof cf_part), memset(cf_clear, 0, sizeof cf_clear);
+    for (int k = 0; cf_cover && k < r; ++k) {
+        int n = 0, z = 0;
+        while (n < r && cf_cover[n * r + k] < 255) z += !cf_cover[n * r + k], ++n;
+        cf_part[k] = cf_part[ART_SIZE - 1 - k] = (unsigned char)n;
+        cf_clear[k] = cf_clear[ART_SIZE - 1 - k] = (unsigned char)z;
+    }
     memset(cf_inset, 0, sizeof cf_inset);
     for (int k = 0; k < r; ++k)
         cf_inset[k] = cf_inset[ART_SIZE - 1 - k] = (unsigned short)(arc_out(r, k) * 16);
