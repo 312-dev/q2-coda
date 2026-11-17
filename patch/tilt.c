@@ -53,8 +53,7 @@ static struct {
 #define PRESS_FADE_MS 120    /* the blue's way back after the release, linear */
 #define PRESS_RM_HOLD_MS 80  /* Reduce Motion: the blue held this long past the release */
 #define PRESS_LIFT 160       /* the rest shadow's strength, 256ths of the lean's at the tick */
-#define PRESS_BLUE 0x4080f0  /* the OLED blue's pressed step (#2160d8's) */
-#define PRESS_WHITE 184      /* any other accent's: this far toward white, 1000ths */
+#define PRESS_BLUE 0x4080f0  /* the pressed step of OLED's one accent, its Blue scheme */
 
 static struct {
     anim_t down, up, fade; /* the press, the spring and the blue's way back */
@@ -120,12 +119,12 @@ void tilt_press(int down) {
 }
 
 /* The bar's tone c (the accent's top, bottom or highlight) at the press's blue step (row_paint.c
- * paint_selection): toward PRESS_BLUE from the OLED blue, else PRESS_WHITE of the way to white. */
+ * paint_selection): toward PRESS_BLUE. ponytail: OLED has one accent, Blue (theme.xml oled-blue),
+ * whose five tones are all the one blue, so every tone steps to PRESS_BLUE; a second accent would
+ * need its own pressed step, carried in its scheme. */
 unsigned tilt_tone(unsigned c) {
     int b = press_bright();
-    if (!b) return c;
-    unsigned lit = (c & 0xffffff) == 0x2160d8 ? PRESS_BLUE : mix(c, 0xffffff, PRESS_WHITE, 1000);
-    return mix(c, lit, b, 1000);
+    return b ? mix(c, PRESS_BLUE, b, 1000) : c;
 }
 
 /* A wheel tick that met an end of w's list, toward dir (+1 the last row): the selection stays, and
