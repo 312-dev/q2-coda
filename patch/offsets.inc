@@ -303,7 +303,7 @@ static inline int arc_out(int r, int y) {
 #define TILE_INSET 2 /* album cards stay inside their tile on all four sides */
 #define TILE_CLEARANCE 4 /* artwork and labels sit this far inside the card */
 #define EDIT_OK_PX 18 /* the date, time and sleep timer pages' OK label, on that card */
-#define PAGE_SLIDE_MS 120
+#define PAGE_SLIDE_MS 220 /* a page's push; its pop is page_parallax.c's PAGE_POP_MS */
 #define GLIDE_MS 300 /* a remembered row's recall glide */
 #define HOME_SLIDE_MS 200 /* Cover Flow's and the carousel's wheel step */
 #define HOME_FAST_SLIDE_MS 120 /* ... and within HOME_FAST_WINDOW_MS of the last */

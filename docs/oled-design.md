@@ -1136,10 +1136,11 @@ interruptible: a turn mid-run starts from where it is.
 ### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
-  drags right takes the page with it, the status row staying; what it uncovers is black. Let go
+  drags right takes the page with it, the status row staying; what it uncovers is the page under, drifting in
+  from 30% left and lightening as a pop's does (still and undimmed under Reduce Motion; on Home's lists, black). Let go
   past 40% of the width, or flicked right, and the page slides on off the right edge and Return
-  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`, Reduce Motion's
-  too: they finish what the finger did.
+  goes back; let go short and it springs back. Both take 160 ms from where the finger let go, `cubic_out`, Reduce
+  Motion's too: they finish what the finger did.
   Wherever Return leaves a page: a page over another, and on Home the list a row opened
   (Settings, Streaming). A drag up or down from the edge scrolls as anywhere; a sideways drag that
   starts mid-screen stays the screen's own (Now Playing's pages, Cover Flow, the letter strip,
@@ -1148,7 +1149,11 @@ interruptible: a turn mid-run starts from where it is.
 
 ### Motion
 
-- Page push and pop: 120 ms horizontal slide, `cubic_out` (`PAGE_SLIDE_MS`, stock's window animator).
+- **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
+  220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
+  in over the same 220 ms.
 - **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
@@ -1174,7 +1179,7 @@ interruptible: a turn mid-run starts from where it is.
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
   the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
-  back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
+  back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now

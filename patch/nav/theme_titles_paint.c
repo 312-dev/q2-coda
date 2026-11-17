@@ -615,6 +615,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
+    swipe_back_paint(w, canvas); /* the page under a swipe back, left of the page */
     confirm_prompt(w, canvas);
     feedback_toast_paint(w, canvas); /* the toast's pill */
     album_tile(w);
