@@ -141,8 +141,10 @@ int np_tap_lit(void *w) { return w && npt.lit > NPT_ART && w == npt_widget(npt.l
 void np_tap_dim(void *w, void *canvas) {
     if (!w || npt.lit != NPT_ART || w != st.np_cover || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    int box[4];
+    np_settle_box(w, box); /* where the art is: whole, or settled smaller on pause */
     stock_canvas_set_fill_color(canvas, (RGBA(0) & 0xffffffu) | (unsigned)DIM_ALPHA << 24);
-    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    canvas_fill_rect(canvas, box[0], box[1], box[2], box[3]);
     stock_canvas_set_fill_color(canvas, fill);
 }
 

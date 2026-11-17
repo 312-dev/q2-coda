@@ -1231,8 +1231,8 @@ static void pl_art_row(void *button, int *asked) {
     if (!r) return;
     if (!*asked) playlist_art_refresh();
     *asked = 1;
-    /* its own picture, else its server's cover, else pl_tile_paint's tile (none, or not made
-     * yet: never the last) */
+    /* its own picture, else its server's cover (playlist_art's copy once built, the app's file
+     * until then), else pl_tile_paint's tile (none, or not made yet: never the last) */
     image_base_set_image(
         art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE), 1 | PL_ART_OWN, url, sizeof url) ||
                      catalogue_playlist_cover(I(r, REC_DISC), url)
@@ -1256,7 +1256,6 @@ static int pl_arts(void *win) {
     int asked = 0;
     pl_art_page = win;
     playlist_art_ready = pl_art_ready;
-    catalogue_playlist_covers(); /* the server playlists', once */
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_count_children(item)) pl_art_row(widget_get_child(item, 0), &asked);

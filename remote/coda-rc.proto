@@ -38,6 +38,7 @@ option java_multiple_files = true;
 //   0x40 Play             -> 0x21 Ack
 //   0x42 GetQueue         -> 0x43 QueueResp
 //   0x44 PlayQueueItem    -> 0x21 Ack              (CAP_QUEUE_JUMP)
+//   0x46 StartRadio       -> 0x21 Ack              (CAP_RADIO)
 //   0x50 GetCover         -> 0x51 Cover
 //   0x7e Ping             -> 0x7f Pong                 (any payload, echoed; plain before Auth)
 //
@@ -83,6 +84,8 @@ enum Capability {
   CAP_RESUME = 1024;     // Play.resume, and ACTION_RESUME on playlists
   CAP_FAVORITES = 2048;  // the library's "favorites" node: the hearted songs (5 hearts, the Q2's Favorites)
   CAP_RECENT = 4096;     // the library's "recent" node: the 100 songs added last, newest first
+  // 8192 is CAP_BUFFERING (feat/p32-streaming)
+  CAP_RADIO = 16384;     // StartRadio, and NowPlaying.radio
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -176,6 +179,8 @@ message NowPlaying {
   uint32 volume = 10;    // 0..100 (the Q2's own 0..100 steps)
   uint32 hearts = 11;    // CAP_RATE: the song's rating, 0..5 hearts; 5 is the Q2's Favorites
   bool rateable = 12;    // CAP_RATE: Rate works on this song (a card or server song, not a stream)
+  // 13..16 are CAP_BUFFERING's (feat/p32-streaming)
+  bool radio = 17;       // CAP_RADIO: a radio plays (the Q2's blue Radio pill): it picks the order and adds songs
 }
 
 enum PlayState {
@@ -359,6 +364,18 @@ message Play {
   string start_id = 3;
   bool shuffle = 4;
   bool resume = 5;
+}
+
+// type 0x46, CAP_RADIO. Starts a radio as Now Playing's Radio does: songs like a seed, endless, the seed first.
+// seed_id empty: the playing song, which plays on where it is. A "song:" id: that song, from its start. An
+// artist node ("artist:<k>" from Browse): one of the artist's songs, picked at random. A server song's radio
+// is its app's (the server's similar songs); any other song's is the Q2's own library (the same artist, then
+// the same genre). stop ends the radio playing, its queued songs playing on; seed_id is then ignored. Acked
+// once the Q2 took it (for a server song, once its app was asked); NowPlaying.radio says when it plays.
+// NOT_FOUND: no song with that id, or an artist with no songs; UNAVAILABLE: the Q2 did not take it.
+message StartRadio {
+  string seed_id = 1;
+  bool stop = 2;
 }
 
 // type 0x42
