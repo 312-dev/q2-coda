@@ -118,13 +118,17 @@ typedef struct {
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
-    void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
+    /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
+     * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, the provider page's Cache
+     * and Erase Spotify Data labels; each 0 while its page is closed */
+    void *sc_page, *sc_sub, *sc_prov[2], *sc_cache, *sc_erase;
+    int sc_of;
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
 #define SVC_HIDE 260 /* STREAMHIDE, "key,key" */
 #define SVC_PROP "ringnav_svc"
-    void *sc_check[SVC_MAX]; /* the Configuration page's switch labels, by service */
+    void *sc_check[SVC_MAX]; /* the Configuration pages' switch labels, by service, while shown */
     int svc_n;               /* the card apps Streaming listed at its last build */
     /* Ratings (ratings.c keeps the rest): Now Playing's window and the window the picker is up on
      * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
@@ -759,6 +763,7 @@ void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
 int battery_history(void *ctx, void *event);
 void battery_paint(void *w, void *canvas);
+int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre exports */
 
 /* system.c */
 void power_poll(void);
@@ -825,6 +830,7 @@ int rt_play(void *ctx, void *event);
 /* scan_page.c */
 void msg_open(void *win);
 void msg_paint(void *w, void *canvas);
+const char *msg_title(const char *name); /* its status row's title, else 0 */
 
 /* playlists.c */
 /* The Playlists rows (pl_dress): a page's add mode (ringnav_playlist), the button of a row that
@@ -876,6 +882,7 @@ void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
+int playlist_query(void *dest); /* dest's songs in its own order, for staged */
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
 int add_songs_key(void *top, unsigned key);
@@ -955,12 +962,14 @@ void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
-void coda_rc_poll(void);
+void coda_rc_poll(void), coda_rc_toggle(void);
+int coda_rc_enabled(void);
+/* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
+int carremote_open(void *ctx, void *event);
+void carremote_poll(void), carremote_paired(const char *name), carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
 int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
 void song_radio_poll(void);
-int coda_rc_enabled(void);
-int carremote_open(void *ctx, void *event);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
@@ -978,6 +987,7 @@ const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
+int sw_update_key(void *top, unsigned key); /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);
@@ -990,6 +1000,7 @@ int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 #define AZ_MIN_ROWS 50
 #define AZ_EDGE_PX 28
 #define AZ_SPIN_DPS 300
+int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
@@ -1032,7 +1043,6 @@ void *folder_root_row(void *view); /* Folder Root's row, its label */
 void settings_gap(void *view);     /* a 12 px space between a settings page's rows */
 void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
-int own_order(const char *page);    /* a page whose list is not in name order */
 void ringnav_sort_key(char *s);     /* a name's sort key: trimmed, its article dropped */
 
 #endif

@@ -241,7 +241,8 @@ All lists share one grid.
 ### List row
 
 - 32 px pitch, title at the text inset, a chevron on the right column when the row opens
-  another page, nothing at the right when it acts in place (a song).
+  another page, nothing at the right when it acts in place (a song, a playlist in Add to Playlist, Reset Settings'
+  rows), or opens only a confirmation card.
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centered 5 px left of the right column:
   Chevron gray, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
@@ -297,7 +298,9 @@ An iOS section index that is not there at rest (the user's option B from `mock_a
 other song lists its page shows in name order: Favorites, Hi-Res, a playlist sorted by name),
 Artists, Albums, Composers and Genres. Lists in any other order (Recently Added, Songs by artist
 or album, an album's tracks, a playlist by time added, an artist's or a genre's songs) and
-settings have none.
+settings have none. The rule is one opt-in list of name-sorted Library lists (`az_index.c`
+`name_sorted`), shared with the fast-scroll letter: Wi-Fi's networks, Bluetooth's devices, Up Next,
+Most Played, Battery History and card apps are in their own order and show neither.
 
 - **Shown by** a finger on the list's right edge (its last 28 px), or the wheel spun fast (300
   degrees a second or more, the speed at which Rockbox's list acceleration first moves two rows a
@@ -692,7 +695,9 @@ is a filled Accent Blue capsule 38 px tall, its label Inter Medium 17 in white, 
 pair is two equal capsules 10 px apart (20 px each side, at least 120, the two within the 327 px text box), the second
 gray (`#2C2C2E`, Light Mode `#E5E5EA`) with its label in Text Primary. Selected, a button wears a 2 px Text Primary
 ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a step (`#1A4DAD`; gray `#3A3A3C`,
-`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar.
+`#D1D1D6`). The first is selected when the page opens, and the wheel reaches it as a row; it has no selection bar. A page with one button of either kind draws it with `ui_button` (Software Update's offer, the
+library scan): **primary** (the screen's main action) is the accent capsule, **secondary** (a lesser action: Stop)
+the gray one.
 
 | Screen | Glyph | Title | Hint | Button |
 | --- | --- | --- | --- | --- |
@@ -713,11 +718,14 @@ ring 3 px out, under the [focus rule](#focus-ring); pressed, its fill darkens a 
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
 | Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
+| A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
+| On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
 | Search, typed text matching nothing | `magnifying-glass` (compact under the tabs) | No Matches | Try fewer letters | none (painted in the free area above the strip) |
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone to pair | **Pair a Phone** (opens the how-to page), under the switch ([Car Remote](#car-remote)) |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -727,8 +735,7 @@ four action rows (no presets is a toast); and Upload Scrobbles with nothing to s
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
-explains use it: the App Store's "No apps listed" under its Check for Updates row, On-The-Go's how-to under its
-rows, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
@@ -932,8 +939,9 @@ page, On-The-Go) and `patch/add_songs.c`.
 - **On-The-Go** (Settings > Playback > Library > On-The-Go, on by default; off hides its row and Add to On-The-Go):
   Shuffle, Add Songs, Save as Playlist (`arrow-down`), Clear (`x`), then its songs. Save as Playlist
   makes "On-The-Go N", the first number free, with its songs, empties On-The-Go and lands on the new
-  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone with the note
-  "Or hold Play/Pause on any song", hint "and choose Add to On-The-Go.". A hold on a song opens its
+  playlist in the list; Clear asks first, Cancel first. Empty, it is Add Songs alone over the compact
+  empty state, "No Songs Yet", hint "Hold Play/Pause on a song to add it"; a playlist with no songs likewise,
+  hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
   On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
@@ -1082,6 +1090,49 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
 
+### Streaming Configuration
+
+<a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
+`patch/stream_config.c`) is two levels of [list rows](#list-row), values on the right.
+
+- **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
+  its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
+  the caption "Its cache, downloads and place in Streaming" (Spotify: "Its cache, sign-in and place in Streaming");
+  a "Show in Streaming" header; then one switch per service that has only a switch (the card apps, Internet Radio,
+  AirPlay).
+- **TIDAL:** Show in Streaming, Show Downloads (Tidal Downloads' row on Streaming), and Cache, "2 GB", captioned
+  "Space kept for songs played from TIDAL"; Center steps through 512 MB, 1, 2, 4 and 8 GB in place.
+- **Spotify:** Show in Streaming, Cache ("Space kept for songs played from Spotify") and Erase Spotify Data ("Signs
+  out of Spotify and clears its cache"), which asks on the [confirmation card](#confirmation-card).
+- Headers are 32 px rows of 15 px Text Tertiary, so the list scrolls in whole rows.
+- ponytail: the captions above are approved but not built. A `page_list` page's rows sit at fixed offsets, so a
+  selected row cannot grow under its title as a settings list's does ([internals](internals.md#streaming-configuration)).
+
+### Update Library
+
+<a id="update-library"></a>The library scan (Update Local Music, Scan Music Now, a folder's scan; approved as 27 v4 on
+2026-11-16, `patch/scan_page.c`) is the empty states' stack over stock's dialog: a 60 px figure, 14 px, the title in
+Inter Medium 20, the line in 15 px Text Secondary, 20 px, then the shared [button](#buttons), the whole centered from
+y 40 to the screen's end. The full status row stays, titled "Update Library": stock's dialog covers the bar, so the
+page paints it first, as Control Center does (`msg_title`).
+
+| State | Figure | Title | Line | Button |
+| --- | --- | --- | --- | --- |
+| Scanning, no total yet | Software Update's twelve-spoke spinner | "1,284 songs found" | folder glyph and the folder's name (the house marquee when long) | Stop, secondary |
+| Scanning against the library before it | a 56 px ring, 4 px, Accent on Track, the percent in Medium 16 inside (at most 99%) | "312 of 704 songs" | as above | Stop |
+| Done | Phosphor `check-circle`, regular, Text Secondary | "Library Updated" | "738 songs, 34 new" (a whole scan that grew the library), else "738 songs" | Done, primary |
+| Stopped (Stop) | as Done | "Scan Stopped" | "120 songs found" | Done |
+| `/mnt/data` full | Phosphor `memory`, regular, Text Secondary | "Not Enough Space" | "Some songs weren't added" | Done |
+| The card pulled during the scan | as `/mnt/data` full | "SD Card Removed" | "Put it back and scan again" | Done |
+
+- No frame draws the focus ring until the wheel turns ([focus ring](#focus-ring)); Center presses the one button.
+- Stock holds the ending about 2.6 s (three polls, then a 2 s sleep on the UI thread) and closes the dialog itself,
+  so Done shows what happened rather than waiting for a press.
+- The card-removed ending's line differs from the mock-up's "Your library is unchanged": with the card pulled
+  mid-scan (emulator, 2026-11-16) stock ends the scan as a finish, toasts its own "SD Card Removed", and keeps
+  only the songs it had read (3,800 became 3,000), so the library is not unchanged. The page tells it from a
+  finish by stock's `/tmp/mmc_add`, gone once the card is. The wording is the default pending the user's OK.
+
 ### Plug-in screen
 
 A cable in while the screen is off lights it for 3 s and then turns it off again (S1, V1 from
@@ -1100,11 +1151,26 @@ screen, only the toast and the status row. Black in both halves, over the whole 
 
 ### Software Update
 
-SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
-`design/mockups/mock_fwupdate.py` on 2026-11-16), the status row "Software Update" over mode pages as USB's:
+General's one **Software Update** row ([internals](internals.md#sd-card-update), `patch/sw_update.c`, approved from
+`design/mockups/mock_fwupdate.py` on 2026-11-16 and as 29 v3 the same day) checks online and the SD card at once,
+the status row "Software Update" over mode pages as USB's:
 
-- **Checking for an Update…**, "Looking on the SD card": no circle, a 48 px spinner of twelve round 4 px spokes in
+- **Checking for an Update…**, "Looking online and on the SD card" ("Looking on the SD card" with Wi-Fi off, when only
+  the card is checked): no circle, a 48 px spinner of twelve round 4 px spokes in
   Text Primary, the head turning a spoke every 80 ms and each spoke behind it dimmer, to a quarter.
+- **The two checks are independent.** The online one (the latest release's tag and its update.tar's size, about 10 s
+  at most) failing, from no Wi-Fi link, no DNS, no internet or a timeout, never fails or holds up the card's: the
+  card's result shows, with "Couldn't check online · Try Again" under it.
+- **The offer** (29 v3): a 60 px accent circle (its glyph white, 30 px: `download-simple` from the internet,
+  `file-arrow-down` from the card) centered on y 92, the update's name ("Q2 Muse 1.8.3", Inter Medium 22) on 142, "From
+  the internet · 55.6 MB" or "From the SD card · 55.6 MB" (15 px Text Secondary) on 168, "Installed: 1.8.2" (13 px
+  Text Tertiary) on 188, and the [button](#buttons), selected, centered on 225: **Download and Install** or
+  **Install**. When both have an update the internet's is offered and "Install from SD Card instead" sits under the
+  button on y 266 (15 px Accent Text); with Wi-Fi off the card's is offered with "Turn on Wi-Fi to check online"
+  (Settings > Wi-Fi) there. The wheel reaches the line after the button (an underline marks it); Center acts on the
+  one in focus.
+- **Downloading the Update**, its percent ("Verifying…" while the signature is checked) and the restart's bar
+  filling in Accent Blue; Return leaves and cancels it. Then the card's check runs on what it fetched.
 - **Install Update?** on the [confirmation card](#confirmation-card) over the check's page: "Install Q2 Muse 1.8.3 ·
   V1830?", its body "SIZE MB, over TAG. Takes about 2 min;" over "your music and settings stay.", then Cancel
   (selected) and Install and Restart.
@@ -1112,9 +1178,53 @@ SD Card Update ([internals](internals.md#sd-card-update), `patch/sw_update.c`, a
   round ends under the stack (top + 172), Track `#333333` filled in Accent Blue with the unpacking (the user's, 2026-11-16: progress fills are the accent).
 - **Results**, each a fill glyph on its circle: You're Up to Date (check, bold, Positive green, "VERSION (TAG) is
   installed"), No Update Found and No SD Card (`file-arrow-down`, `#3A3A3C`), Charge to Update and Not Enough Space
-  (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`). Return or Center
-  leaves.
+  (`battery-warning` and `warning`, `#FF9F0A`), Update Can't Be Used (`warning`, `#FF453A`), each with the online
+  check's line under it when it has one (28 px under the page's own). Return leaves, and so does Center unless the
+  wheel is on that line.
 
+### Battery History
+
+<a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16, `patch/battery.c`) is a graph
+over the whole page, under the status row titled "Battery History":
+
+- **Readout**, centered at y 70 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
+  (the status bar's 12- or 24-hour form; "+1:23 · 51%" with the clock never set).
+- **Graph**, 100% at y 99 to 0% at y 199 (a pixel a percent): faint lines at 100% and 50%, the axis at 0%, their
+  labels right-aligned in 15 px Text Tertiary; the level as steps in the accent's light tone over a faint fill; the
+  reading's 1 px hairline in Text Secondary from 100% to 0% and a 10 px white dot on its level.
+- **Export Log**, the shared gray [button](#buttons) centered at y 237. The wheel always moves the reading (clockwise to
+  the newer) and Center always exports, so the button is the page's only action and no frame draws the focus ring.
+- **Results** are the house toasts in the button's place ("Saved to battery-log.txt", "The card is in use over USB",
+  "Storage unavailable", "The card is full", "Couldn't save"): the button gives way while one shows.
+- ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs
+  the key's down and up told apart in `battery_key`.
+
+### Car Remote
+
+Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carremote.py`; `patch/carremote_page.c`):
+
+- **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Q2 Muse
+  from Android Auto with Q2 Muse Remote."
+- **No phones:** the [empty state](#empty-and-offline) under the switch in its compact form (no glyph), "No Paired
+  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button, selected as the page opens.
+  The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
+  mock-up's address line under the hint ("Q2 Muse at 192.168.1.30") needs a fourth line in the shared empty state;
+  the how-to page shows the address meanwhile.
+- **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
+  its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
+  [two-line row](#two-line-row) 52 px tall: Phosphor `device-mobile` (regular, 20 px, Text Secondary, centred on x 34),
+  the name at x 56 over its state in Text Tertiary: "Connected over Wi-Fi" after a 7 px Positive dot, or
+  "Not connected · last seen Friday"; a chevron opens the phone's page.
+- **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
+  Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
+  a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
+- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
+  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
+  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+  for Q2 Muse Remote to scan one.
+- **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
+  `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
+  this branch yet.
 ### Overlay motion
 
 A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit

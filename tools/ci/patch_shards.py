@@ -25,7 +25,8 @@ runs it before a release (docs/building.md#fast-test-runs).
 Shard boundaries balance measured time: each run records how long each statement took in
 ~/.cache/q2-patch-shards/profile.json (keyed by the statement's text), and the next run cuts by it.
 N defaults to what memory allows: MemAvailable less a 5 GB reserve, over one shard's peak RSS (about
-0.9 GB), at most the CPU count and 8.
+1.5 GB), at most the CPU count, 8, and two fewer than q2-heavy's slots (Q2_HEAVY_SLOTS, 10), so a shard
+set never holds every slot and other agents' small jobs still start.
 """
 import argparse
 import ast
@@ -454,7 +455,8 @@ def memory_shards():
         for line in f:
             if line.startswith('MemAvailable:'):
                 avail = int(line.split()[1]) * 1024
-    return max(1, min(8, os.cpu_count() or 1, int((avail - RESERVE) // SHARD_RSS)))
+    slots = int(os.environ.get('Q2_HEAVY_SLOTS', '10'))  # q2-heavy's default
+    return max(1, min(8, slots - 2, os.cpu_count() or 1, int((avail - RESERVE) // SHARD_RSS)))
 
 
 def no_core_dump():

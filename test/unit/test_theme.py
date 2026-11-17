@@ -1213,6 +1213,17 @@ def test_every_theme_has_what_the_marks_draw_with(body, message):
     assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'
 
 
+def test_accent_text_reads_on_either_half():
+    """accent_text, the accent as text (action rows, links): WCAG's 4.5:1 for body text on each half's canvas."""
+    def lum(c):
+        ch = [(c >> s & 255) / 255 for s in (16, 8, 0)]
+        r, g, b = (x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in ch)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    for light in (False, True):
+        a, b = lum(theme.token('accent_text', light)), lum(theme.token('canvas', light))
+        assert (max(a, b) + 0.05) / (min(a, b) + 0.05) >= 4.5, light
+
+
 def test_tokens_h_is_written_from_tokens(tmp_path):
     assert (theme.ROOT/'patch/tokens.h').read_text() == theme.token_header(), 'run tools/theme.py write_tokens'
     theme.write_tokens(tmp_path/'tokens.h')
