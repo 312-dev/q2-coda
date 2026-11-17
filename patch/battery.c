@@ -1,17 +1,21 @@
 /* Battery History: the level's falls since the charger was last unplugged, kept on the flash, and
  * Power's page that graphs them, reads one out under the wheel and exports them to the card. */
 #include "navigation.h"
+#include "card_store.h"
 
 /* Battery History (docs/internals.md#battery-history): charge_poll hands battery_tick the level it
  * reads every CHARGE_POLL_MS. With the cable out, a level under the last row's is a row, the time
  * and the level; the first row is the start: the first poll after the cable comes out, or after a
  * boot with none in. A level over the last row's by more than BH_REBOUND starts again too: the Q2
  * charged while powered off, where demo saw no cable. Each row is one write of the whole record,
- * temp and rename (blob_io), so the flash is written once a percent at most. Within a history the
+ * temp and rename, to the card (card_store.c: kept in RAM while the card is away and written when it
+ * is back; the flash file earlier releases wrote is read until then, and copied once), so nothing
+ * here writes the flash. Within a history the
  * level only falls, from 100 at most to 1 (0 never reads: demo powers off first), so BH_ROWS rows
  * always hold one. ponytail: a charge of BH_REBOUND or less while powered off reads as the same
  * history, its rows below the last one's level again. */
-#define BH_FILE PEQ_ROOT "/mnt/data/q2-battery"
+#define BH_FLASH PEQ_ROOT "/mnt/data/q2-battery" /* before Q2 Muse kept it on the card */
+#define BH_FILE CARD_STORE_DIR "/q2-battery"
 #define BH_LOG PEQ_ROOT "/mnt/mmc/battery-log.txt"
 #define BH_MAGIC 0x31484251u /* "QBH1" */
 #define BH_ROWS 100
@@ -27,14 +31,17 @@ static struct {
     int cur;         /* the reading the wheel is on, its row; -1 the newest, following new ones */
     void *page, *graph;
     rect_t button; /* Export Log's, on screen, as last painted (0 wide: not drawn) */
+    card_blob store;
 } bh __attribute__((section(".scratch")));
+#define BH_STORE card_blob_at(&bh.store, BH_FILE, BH_FLASH, sizeof bh.rec)
 
-/* The record from the flash, once; one that isn't whole, isn't this layout or whose levels don't
+/* The record from the card, once; one that isn't whole, isn't this layout or whose levels don't
  * fall row by row is dropped, and the next tick starts again. */
 static void bh_load(void) {
     if (bh.read) return;
     bh.read = 1;
-    int ok = BLOB_IO(BH_FILE, bh.rec, 0) && bh.rec.magic == BH_MAGIC && bh.rec.n <= BH_ROWS;
+    int ok = card_blob_read(BH_STORE, &bh.rec, sizeof bh.rec) == (int)sizeof bh.rec &&
+             bh.rec.magic == BH_MAGIC && bh.rec.n <= BH_ROWS;
     for (unsigned i = 0; ok && i < bh.rec.n; ++i)
         ok = bh.rec.row[i].pct &&
              (i ? bh.rec.row[i].pct < bh.rec.row[i - 1].pct : bh.rec.row[i].pct <= 100);
@@ -44,6 +51,7 @@ static void bh_load(void) {
 void battery_tick(int level, int cable) {
     if (level <= 0 || level > 100) return; /* not read yet */
     bh_load();
+    card_blob_flush(BH_STORE); /* a row kept in RAM while the card was away */
     unsigned n = bh.rec.n;
     int unplugged = bh.cable && !cable;
     bh.cable = cable;
@@ -57,7 +65,7 @@ void battery_tick(int level, int cable) {
     bh.rec.row[n].at = wall == -1 ? 0 : (unsigned)wall;
     bh.rec.row[n].pct = (unsigned)level;
     bh.rec.n = n + 1;
-    BLOB_IO(BH_FILE, bh.rec, 1);
+    card_blob_write(BH_STORE, &bh.rec, sizeof bh.rec);
     if (bh.page) widget_invalidate_force(bh.page, (void *)0); /* drawn at the next lit frame */
 }
 
