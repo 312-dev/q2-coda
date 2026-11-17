@@ -523,6 +523,8 @@ void inline_value_text(int kind, int v, char *out, unsigned n);
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
 int cc_key(void *win, unsigned key), cc_key_release(unsigned key);
 void cc_keydown(unsigned key), cc_hold(int stop);
+/* A settings page by its folder and name, unless that window is open already (control_center.c). */
+void cc_page(const char *path);
 /* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
 #define QUICK_CC 16
 void quick_hold(void *button, int page);
