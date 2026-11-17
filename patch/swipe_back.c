@@ -76,8 +76,9 @@ int sb_done(int off, int w, int v) {
     return v >= SB_FLICK || off * 100 >= w * SB_DONE_PCT;
 }
 
-/* The normal window under top in the window manager's stack, 0 if top is the last. */
-static void *window_under(void *wm, void *top) {
+/* The normal window under top in the window manager's stack, 0 if top is the last (also the
+ * letter strip's, search_strip.c ss_place). */
+void *window_under(void *wm, void *top) {
     int n = (int)widget_count_children(wm), below = 0;
     for (int i = n - 1; i >= 0; --i) {
         void *w = widget_get_child(wm, (unsigned)i);
@@ -100,8 +101,9 @@ static void place(int off) {
 }
 
 /* The window under, painted once into a bitmap as stock's window animator snapshots it; 0 when
- * there is no memory for it (the strip stays black). */
-static void *under_snap(void *under) {
+ * there is no memory for it (the strip stays black). The letter strip snaps the page it types for
+ * the same way (search_strip.c ss_place). */
+void *under_snap(void *under) {
     void *c = under ? canvas_offline_create(SB_W, SB_H, LCD_BGRA8888) : (void *)0, *b = (void *)0;
     if (!c) return (void *)0;
     canvas_offline_begin_draw(c);

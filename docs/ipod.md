@@ -1147,9 +1147,12 @@ painted it white, which drew the box at rest.
 - <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
   playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
   (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip, opening on abc, and
-  the name is written large in the middle of the screen, Inter Medium 22 white centered on y 140 with a steady
-  cursor, over the hint "Press Play/Pause to create" or "Press Play/Pause to save" in 15 px Text Tertiary on y 180.
-  The status row reads New Playlist or Rename Playlist. Capitals are ABC's. Previous and Next move the cursor along
+  the name is typed in the row the wheel was on, in its place over the page under ([oled-design](oled-design.md#text-entry)'s
+  row form), with a blinking cursor and no hint. The strip is a page of its own, so the window manager no longer
+  paints the page under it: `ss_place` paints that page once into a bitmap as it opens (`under_snap`, the swipe
+  back's) and finds the row from navigation's selection (`st.sel_w`, `sel_y`, `sel_h`, matched only while the row's
+  list is still in that page), and with no such row in sight, or one the strip would cover, the text goes in a field
+  of its own. The status row reads New Playlist or Rename Playlist. Capitals are ABC's. Previous and Next move the cursor along
   the name; submitting (Play/Pause, or Center on the return key) creates the playlist (`ringnav_playlist_create`,
   "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
   an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held
@@ -1158,9 +1161,11 @@ painted it white, which drew the box at rest.
   time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
   its keys hidden and the window over the screen under the status row (`search_strip_box`,
   [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
-  The box's text is prefilled, the strip opening on abc (123 for a box holding a number); a password shows as dots
-  ("Password" over them), the character just typed for a second, with no way to show the rest: a Wi-Fi network's,
-  Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
+  The box's text is prefilled, the strip opening on abc (123 for a box holding a number), and typed where the box's
+  value lives: a search box's on the query line, a Wi-Fi password or network name in a field under its label, a box
+  whose page names its row (`_strip_label`: an EQ preset's Name, a band's Frequency or Q, a card app's field) in that
+  row. A password shows as dots, the character just typed for a second, with no way to show the rest: a Wi-Fi
+  network's, Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the

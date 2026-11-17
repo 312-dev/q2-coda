@@ -656,6 +656,7 @@ static int set_click(void *ctx, void *event) {
         break;
     case R_NAME:
         search_strip_note("Guests and AirPlay see this name");
+        search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
         search_strip_text("Guest Play", play_name(s, sizeof s), GU_NAME_MAX, name_done);
         break;
     case R_CONNECT:
@@ -725,6 +726,7 @@ static int trust_click(void *ctx, void *event) {
     char line[64];
     switch ((int)(long)ctx) {
     case 0:
+        search_strip_label("Rename");
         search_strip_text("Rename", gu.trusted[gu.cur].name, GU_NAME_MAX, trust_renamed);
         break;
     case 1:
@@ -775,6 +777,7 @@ static int hot_click(void *ctx, void *event) {
         break;
     case 1: /* the hotspot is named as Guest Play is */
         search_strip_note("Guests and AirPlay see this name");
+        search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
         search_strip_text("Guest Play", play_name(s, sizeof s), GU_NAME_MAX, name_done);
         break;
     case 2:

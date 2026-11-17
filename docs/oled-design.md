@@ -1095,22 +1095,32 @@ cursor; Previous held erases the character before it, the first 450 ms into the 
 each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
 pop bubble rises over the lit character as the wheel lands on it.
 
-Where the text shows, by form:
+Where the text shows (the user's `keyboard-inscreen/strip.html` and `all-inputs.png`, 2026-11-17): where the
+value lives, never in a box of the strip's own, and with no keyboard hints on the screen. The text is 20 px Text
+Primary (a field's Inter Medium 22) with a 2 px cursor after the characters before it, blinking 530 ms on and
+530 ms off while the strip has the wheel (lit again at each key, steady under Reduce Motion). A text wider than
+its field scrolls by as little as keeps the cursor 10 px in from either edge, and an edge that cuts it fades the
+text out over 16 px inside the field, in the text's own alpha, never a band painted over it; a text that fits is
+left-aligned (right-aligned in a cell). By form:
 
-- **Search** (and Add Songs' Search): the query on the page's first line after a magnifier, with its cursor,
-  "Search your music" in Text Tertiary while empty, a 1 px rule under it; the results between it and the
+- **Search** (and Add Songs' Search, and every search box: Internet Radio's, a card app's, a playlist's song
+  search): the query on the page's first line after a magnifier, "Search your music" (a box's own tips, else
+  "Search") in Text Tertiary while empty, a 1 px rule under it; on Search, the results between it and the
   strip, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
   letters".
-- **A name** (New Playlist, Rename Playlist): written large in the middle of the screen, Inter Medium 22
-  white centered on y 140 with a steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press
-  Play/Pause to create" or "Press Play/Pause to save".
-- **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
-  box stock's keyboard served): as a name, "Press Play/Pause when done" under it; a box holding a number
-  opens on 123. A password reads "Password" (15 px Text Tertiary, y 84) over dots (y 128), the character
-  just typed shown for a second, and "Press Play/Pause to join" (13 px, y 176; a Wi-Fi password's, "to save" for
-  the Guest Play hotspot's, "when done" for a card app's). Submitting is the box's own
-  OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`)
-  is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth.
+- **A row** (New Playlist, Rename Playlist): the page under as it was, and over the row the wheel was on, in its
+  place, a box from x 16 to 359 in the raised grey with 8 px corners and a 2 px accent line, the text from x 24.
+- **A cell** (Bluetooth's Name, Guest Play's Name, a device's or a phone's Rename, an EQ preset's Name, a card
+  app's field): the same box, the row's label from x 24 in Text Secondary and the text after it, right-aligned to
+  the right column. Who sees the text ("Phones and cars see this name") is 13 px Text Tertiary centered 24 px
+  under the box, the page under showing only down to the box.
+- **A field** (a Wi-Fi password, Add Network's name, the Guest Play hotspot's password, and a row or cell whose
+  row is not in sight or would sit under the strip: an EQ band's Frequency or Q, a card app's field on its
+  own page): its label in 15 px Text Tertiary from x 40 on y 92 over a raised pill from x 40 to 335 and y 106
+  to 150 with 12 px corners, the text 16 px in from either end.
+
+A password is dots, the character just typed shown for a second, in whichever form. A box holding a number opens
+on 123. Submitting a box is its own OK, as the keyboard's Enter was: the box takes the text and acts.
 
 Held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into the hold the page
 dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized to its line with

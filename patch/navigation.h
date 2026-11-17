@@ -539,6 +539,8 @@ unsigned tilt_tone(unsigned c);
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 void swipe_back_paint(void *w, void *canvas);
+void *window_under(void *wm, void *top); /* the normal window under top, 0 none */
+void *under_snap(void *under); /* a window painted once into a whole-screen bitmap, 0 none */
 /* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
 void art_zoom_load(void *np_win);
 int art_zoom_source(void *top, rect_t *r);
@@ -959,8 +961,9 @@ int search_strip_box(void *kb, void *edit, const char *title);
  * else is a toast saying why not, the text kept to edit */
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
-void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
-void search_strip_secret(void);           /* ... the next one's text a password, as dots */
+void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
+void search_strip_secret(void);             /* ... the next one's text a password, as dots */
+void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */

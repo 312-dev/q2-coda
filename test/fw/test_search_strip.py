@@ -39,7 +39,9 @@ class Ss(C.Structure):
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
                 ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte),
                 ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
-                ('peek_timer', C.c_uint)]
+                ('peek_timer', C.c_uint), ('under', C.c_void_p), ('label', C.c_void_p),
+                *((k, C.c_short) for k in 'form row_y row_h scroll fx fy fw fh'.split()),
+                ('blink_at', C.c_uint), ('blink_timer', C.c_uint)]
 
 
 @pytest.fixture
@@ -943,7 +945,7 @@ def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     assert s.ss.text == b'bA!b' and s.ss.set == LOWER
     texts = [t for t, *_ in painted(fw, s).texts]
     assert 'Password' in texts and 'abc' in texts and '•••b' in texts  # the last typed shows
-    assert 'Press Play/Pause to join' in texts
+    assert not [t for t in texts if t.startswith('Press ')]  # no keyboard hints (the user's, on the mock-up)
     s.now[0] += 1000
     assert '••••' in [t for t, *_ in painted(fw, s).texts]  # a second on: dots alone
     s.key(KEY_BACK_BTN, KEY_FWD_BTN, KEY_FWD_BTN)
@@ -986,18 +988,18 @@ def test_add_network_s_dialog_is_a_password_only_when_stock_opened_it_for_one(fw
     texts = [t for t, *_ in painted(fw, s).texts]
     mode.value = 0  # stock's memory outlives the test
     if password:
-        assert s.ss.secret and '•••••' in texts and 'Press Play/Pause to join' in texts
+        assert s.ss.secret and '•••••' in texts and 'Password' in texts
     else:
-        assert not s.ss.secret and 'Homex' in texts and 'Password' not in texts
+        assert not s.ss.secret and 'Homex' in texts and 'Network Name' in texts and 'Password' not in texts
 
 
 def test_a_card_app_s_password_box_shows_dots_and_is_done_not_joined(fw, ui):
-    """A box the payload marks _secret (addon.c, a card app's password field): dots, its hint the box's own."""
-    s = boxed(fw, ui, b'', '', 'addon_page', _secret=1)
+    """A box the payload marks _secret (addon.c, a card app's password field): dots, under its row's label."""
+    s = boxed(fw, ui, b'', '', 'addon_page', _secret=1, _strip_label='Password')
     s.type('pw')
     s.now[0] += 1000
     texts = [t for t, *_ in painted(fw, s).texts]
-    assert '••' in texts and 'Password' in texts and 'Press Play/Pause when done' in texts
+    assert '••' in texts and 'Password' in texts
 
 
 def test_a_password_text_of_the_payload_s_own_shows_dots(fw, ui):
@@ -1011,7 +1013,7 @@ def test_a_password_text_of_the_payload_s_own_shows_dots(fw, ui):
     s = attached(fw, ui)
     texts = [t for t, *_ in painted(fw, s).texts]
     assert s.ss.secret and '••••••••' in texts and not any('otter' in t for t in texts)
-    assert 'Press Play/Pause to save' in texts
+    assert 'Password' in texts
     s.type('x')
     assert '••••••••x' in [t for t, *_ in painted(fw, s).texts]
     s.key(KEY_PLAY)
@@ -1032,3 +1034,242 @@ def test_return_held_on_a_box_closes_it_and_its_keyboard(fw, ui):
     ui.fire('search_strip__ss_hold_tick')
     assert not ui.backs and not fw.calls('input_method_dispatch_action')
     assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the keyboard closed with it
+
+
+# The text where it lives (docs/oled-design.md#text-entry, the mock-up's value()): its field, the cursor kept 10 px in
+# while the text overflows, fades only at an edge that cuts the text, and in the text's own alpha.
+KEEP, EDGE, BLINK_MS = 10, 16, 530
+QUERY_X0, QUERY_X1 = 48, 351  # Search's query field on the sheet: a character is 10 px on the test canvas
+
+
+def clipped(fw, s):
+    """The sheet painted, each text with the clip it was drawn under and its alpha."""
+    from test_nav_painters import Canvas
+    c = Canvas(fw)
+    rows: list = []
+    setattr(c, 'clipped', rows)  # read back as c.clipped
+
+    def draw(cv, t, n, r, *_):
+        c.draw_text(cv, t, n, r)
+        rows.append((c.texts[-1][0], tuple(c.clip), c.texts[-1][2] >> 24, c.texts[-1][1]))
+        return 0
+    fw.mock('canvas_draw_text_in_rect', draw)
+    fw.fn('search_strip_paint', None, C.c_void_p, C.c_void_p)(s.ss.sheet, c.addr)
+    return c
+
+
+def cursor(c, h=25):
+    """The cursor's x: the one 2 px column the field painted (none while the blink hides it)."""
+    xs = [r[0] for r, _ in c.rects if r[2:] == (2, h)]
+    return xs[0] if xs else None
+
+
+def model(n, cur, scroll, x0=QUERY_X0, x1=QUERY_X1, cw=10):
+    """strip.html's value(): the text's left and the scroll kept, for a text of n characters."""
+    room, full, cx = x1 - x0, n * cw + 3, cur * cw
+    if full <= room:
+        return x0, 0
+    scroll = min(max(scroll, cx - room + KEEP), max(0, cx - KEEP))
+    scroll = max(0, min(scroll, full - room))
+    return x0 - scroll, scroll
+
+
+def test_an_overflowing_text_scrolls_as_little_as_keeps_the_cursor_10_px_in(fw, ui, song):
+    """Previous from the end of a text wider than its field walks the cursor left in place until it is 10 px from
+    the field's left, then the text scrolls under it; Next walks it back. Each step lands where the mock-up's
+    script puts it."""
+    s = Strip(fw, ui, library(song))
+    text = b'abcdefghij' * 4
+    s.ss.text, s.ss.cur = text, len(text)
+    scroll, seen = 0, []
+    for key in [None] + [KEY_BACK_BTN] * 40 + [KEY_FWD_BTN] * 40:
+        if key:
+            s.key(key)
+        left, scroll = model(len(text), s.ss.cur, scroll)
+        x = cursor(clipped(fw, s))
+        assert x == left + (s.ss.cur * 10 + 1 if s.ss.cur else 0)
+        assert s.ss.scroll == scroll
+        if 0 < scroll < len(text) * 10 + 3 - (QUERY_X1 - QUERY_X0):  # text hidden past both edges
+            assert QUERY_X0 + KEEP <= x - 1 <= QUERY_X1 - KEEP  # the column after the cursor's character
+        seen.append(scroll)
+    assert 0 in seen and max(seen) == 100 and len(set(seen)) > 10  # it scrolled all the way, a step at a time
+
+
+def fades(c, text):
+    """The slices of text drawn below full alpha: (clip's left, its right, alpha)."""
+    return [(clip[0], clip[0] + clip[2], a) for t, clip, a, _ in c.clipped if t == text and a < 0xff]
+
+
+def test_the_text_fades_only_at_an_edge_that_cuts_it_and_in_its_own_alpha(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE', 4  # fits: drawn once, whole
+    c = clipped(fw, s)
+    assert [a for t, _, a, _ in c.clipped if t == 'LOVE'] == [0xff] and not fades(c, 'LOVE')
+    text = 'abcdefghij' * 4
+    s.ss.text, s.ss.cur = text.encode(), 40  # the end in view: cut at the left alone
+    c = clipped(fw, s)
+    cut = fades(c, text)
+    assert cut and all(QUERY_X0 <= l and r <= QUERY_X0 + EDGE for l, r, _ in cut)
+    assert [a for _, _, a in cut] == sorted(a for _, _, a in cut)  # fading out toward the edge
+    assert cut[0][2] < 0x20 and cut[-1][2] > 0xd0
+    full = [clip for t, clip, a, _ in c.clipped if t == text and a == 0xff]
+    assert full == [(QUERY_X0 + EDGE, full[0][1], QUERY_X1 - QUERY_X0 - EDGE, full[0][3])]  # the rest to the edge
+    # nothing laid over the field: the one fill in its band is the cursor's
+    assert [r for r, _ in c.rects if r[1] < 32 and r[1] + r[3] > 0 and r[2] != 2] == []
+    s.ss.cur, s.ss.scroll = 0, 0  # the start in view: cut at the right alone
+    cut = fades(clipped(fw, s), text)
+    assert cut and all(QUERY_X1 - EDGE <= l and r <= QUERY_X1 for l, r, _ in cut)
+    s.ss.cur, s.ss.scroll = 20, 50  # the middle, scrolled: cut at both
+    c = clipped(fw, s)
+    cut = fades(c, text)
+    assert {l < QUERY_X0 + EDGE for l, _, _ in cut} == {True, False}
+    assert all(t != text or QUERY_X0 <= clip[0] and clip[0] + clip[2] <= QUERY_X1 for t, clip, *_ in c.clipped)
+
+
+def test_a_password_s_dots_scroll_and_fade_as_any_text_and_show_its_last_character_a_second(fw, ui):
+    """A masked field's text is its dots, the character just typed among them for SS_PEEK_MS, in the same field."""
+    s = boxed(fw, ui)
+    s.ss.text, s.ss.cur = b'x' * 30, 30
+    s.type('q')
+    c = clipped(fw, s)
+    shown = [t for t, *_ in c.clipped if t.startswith('•')]
+    assert shown and shown[0] == '•' * 30 + 'q' and fades(c, shown[0])  # cut at the left, the peek at the end
+    s.now[0] += 1000
+    assert [t for t, *_ in clipped(fw, s).clipped if t.startswith('•')][0] == '•' * 31
+
+
+def test_the_cursor_blinks_on_its_own_and_starts_lit_after_each_key(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('L')
+    assert cursor(clipped(fw, s)) is not None
+    (_, ms), = ui.pending('search_strip__ss_blink_due')
+    assert ms == BLINK_MS
+    s.now[0] += BLINK_MS
+    ui.fire('search_strip__ss_blink_due')  # repaints the field alone, and goes on
+    (w, rect), = [a[:2] for _, a in fw.calls('widget_invalidate_force')][-1:]
+    assert w == s.ss.sheet and rect
+    assert cursor(clipped(fw, s)) is None and ui.pending('search_strip__ss_blink_due')
+    s.key(KEY_FWD_BTN)  # a key: lit again
+    assert cursor(clipped(fw, s)) is not None
+    s.enter()  # the results have the wheel: no cursor, and the blink stops
+    ui.fire('search_strip__ss_blink_due')
+    assert not ui.pending('search_strip__ss_blink_due')
+
+
+def test_under_reduce_motion_the_cursor_is_steady(fw, ui, song):
+    from test_ui_kit import reduce_motion
+    reduce_motion(fw, 1)  # read once, before the strip opens
+    s = Strip(fw, ui, library(song))
+    s.type('L')
+    assert not ui.pending('search_strip__ss_blink_due')
+    s.now[0] += BLINK_MS
+    assert cursor(clipped(fw, s)) is not None
+
+
+def under_page(fw, ui, st, row_y=58 + 32, row_h=32):
+    """The page a text is typed for: a list whose selected row is at screen y row_y (navigation's selection)."""
+    Config(fw)
+    page = ui.new('window_create', 0, 0, 0, 375, 320)
+    rows = ui.new('view', page, 0, 58, 375, 262)
+    st('sel_w', C.c_void_p).value = rows
+    st('sel_y').value, st('sel_h').value = row_y - 58 + row_h // 2, row_h
+    return page
+
+
+def text_on_strip(fw, ui, text, label=None, note=None, secret=False):
+    done = DONE(lambda t: None)
+    ui.done = done  # kept alive
+    if note:
+        fw.fn('search_strip_note', None, C.c_char_p)(note)
+    if label:
+        fw.fn('search_strip_label', None, C.c_char_p)(label)
+    if secret:
+        fw.fn('search_strip_secret', None)()
+    fw.fn('search_strip_text', None, C.c_char_p, C.c_char_p, C.c_int, DONE)(b'Bluetooth', text, 30, done)
+    return attached(fw, ui)
+
+
+def sheet_y(ui, s):
+    """The sheet's top on the screen."""
+    y, w = 0, s.ss.sheet
+    while w:
+        y += struct.unpack_from('<i', ui.blocks[w], 4)[0]
+        w = ui.parent(w)
+    return y
+
+
+def test_a_named_row_s_text_is_a_cell_in_the_row_the_wheel_was_on_with_its_note_under_it(fw, ui, st):
+    """Bluetooth's Name: the row's own place on the page under, an accent-lined box, the label at its left in Text
+    Secondary, the name right-aligned with its cursor at its end, and who sees it 24 px under the row."""
+    under_page(fw, ui, st)
+    s = text_on_strip(fw, ui, b'Q2 Muse', b'Name', b'Phones and cars see this name')
+    y = 58 + 32 - sheet_y(ui, s)
+    assert (s.ss.form, s.ss.row_y, s.ss.row_h) == (2, y, 32)
+    c = clipped(fw, s)
+    boxes = [b for b, _, r in c.boxes if r in (8, 6)]
+    assert boxes[:2] == [(16, y, 343, 32), (18, y + 2, 339, 28)]  # the accent line, then the box in it
+    texts = {t: r for t, r, _ in c.texts}
+    assert texts['Name'][0] == 24
+    assert texts['Q2 Muse'][0] == 347 - 73  # right-aligned: 70 px of text and the cursor's 3
+    assert cursor(c) == 347 - 73 + 70 + 1  # after the text's last character
+    assert texts['Phones and cars see this name'][1] + 16 == y + 32 + 24  # centred 24 px under the row
+    assert not [t for t in texts if t.startswith('Press ')]
+
+
+def test_a_row_without_a_label_takes_its_whole_width_from_the_left(fw, ui, st):
+    under_page(fw, ui, st, row_y=58 + 64)
+    s = text_on_strip(fw, ui, b'Morning Ru')
+    assert s.ss.form == 1
+    assert {t: r for t, r, _ in clipped(fw, s).texts}['Morning Ru'][0] == 24
+
+
+@pytest.mark.parametrize('where', ['gone', 'low'])
+def test_a_row_not_in_sight_or_too_low_types_in_a_field_under_its_label(fw, ui, st, where):
+    """With the selection not on the page under (the page's own row gone), or a row the strip would cover, the text
+    goes in a field of its own: the label over a raised pill, the text in Inter Medium 22 inside it."""
+    under_page(fw, ui, st, row_y=58 + 190)
+    if where == 'gone':
+        st('sel_w', C.c_void_p).value = ui.new('view', 0, 0, 0, 10, 10)
+    s = text_on_strip(fw, ui, b'Gray', b'Name')
+    assert s.ss.form == 3
+    c = clipped(fw, s)
+    assert ((40, 48, 295, 44), 12) in [(b, r) for b, _, r in c.boxes]
+    texts = {t: r for t, r, _ in c.texts}
+    assert texts['Name'][0] == 40 and texts['Gray'][0] == 56
+
+
+def test_a_password_with_no_label_is_a_field_under_password(fw, ui, st):
+    under_page(fw, ui, st)
+    s = text_on_strip(fw, ui, b'otter-42', secret=True)
+    assert s.ss.form == 3 and 'Password' in [t for t, *_ in clipped(fw, s).texts]
+
+
+def test_a_search_box_types_on_the_query_line_its_tips_the_placeholder(fw, ui):
+    """A box no page names (a search box: Internet Radio's, a card app's Search): the query line, as Search's."""
+    s = boxed(fw, ui, b'', 'edit', 'radio_page', tips='Search stations')
+    assert s.ss.form == 0
+    c = clipped(fw, s)
+    assert [r[0] for t, r, _ in c.texts if t == 'Search stations'] == [QUERY_X0]
+    assert cursor(c) == QUERY_X0
+
+
+def test_a_box_its_page_names_is_a_cell_in_its_row(fw, ui, st):
+    """An EQ preset's name: the edit's _strip_label names the row the selection is on; the row's box is painted over
+    the page as it was, its edit hidden for the picture and shown again."""
+    page = under_page(fw, ui, st)
+    snaps = []
+    fw.mock('canvas_offline_create', lambda *a: snaps.append(set(ui.hidden)) and 0)
+    Config(fw)
+    edit = ui.new('edit', page, 12, 2, 351, 26)
+    ui.name[edit] = 'edit'
+    ui.props[(edit, '_strip_label')] = 'Name'
+    ui.text[edit] = 'My Car EQ'
+    im = C.create_string_buffer(0x40)
+    C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
+    fw.mock('input_method', lambda *_: C.addressof(im))
+    kb = ui.new('window_create', 0, 0, 60, 375, 260)
+    assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Save Preset') == 1
+    s = attached(fw, ui)
+    assert s.ss.form == 2 and snaps == [{edit} | (ui.hidden - {edit})] and edit not in ui.hidden
+    texts = {t: r for t, r, _ in clipped(fw, s).texts}
+    assert texts['Name'][0] == 24 and 'My Car EQ' in texts
