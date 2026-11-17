@@ -765,8 +765,8 @@ int ringnav_keylong(void *ctx, void *event) {
     if (!event || I(event, EVENT_KEY) != KEY_PLAY) return stock_keylong_trampoline(ctx, event);
     void *top = window_manager_get_top_window(window_manager());
     const char *fav = radio_hold(top);
-    int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || bt_ui_hold(top) || wifi_flows_hold(top) ||
-                un_hold(top) || home_cf_hold(top) || artist_local_on(top) ||
+    int taken = fav || spot_hold(top) || addon_hold(top) || storage_hold(top) || bt_ui_hold(top) ||
+                wifi_flows_hold(top) || un_hold(top) || home_cf_hold(top) || artist_local_on(top) ||
                 playlist_page_hold(top) ||
                 lr_editing(top); /* Edit Library and Edit Home: Play/Pause's tap alone */
     if (!taken && qm_hold()) return STOP;

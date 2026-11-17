@@ -1,7 +1,7 @@
-/* Settings > Wi-Fi's flows past stock's (docs/internals.md#wi-fi-page-flows): a failed join asks for
- * the password again with why; a held saved network offers Forget; Reset Network Settings at the
- * page's foot; Search Again shows its search at once; and the switch or the network's own row ends
- * a join that is still trying, where stock's click handlers ignore both until it gives up. */
+/* Settings > Wi-Fi's flows past stock's (docs/internals.md#wi-fi-page-flows): a failed join asks
+ * for the password again with why; a held saved network offers Forget; Reset Network Settings at
+ * the page's foot; Search Again shows its search at once; and the switch or the network's own row
+ * ends a join that is still trying, where stock's click handlers ignore both until it gives up. */
 #include "navigation.h"
 
 /* g_wifiStatus at 0xd8: wpa_supplicant's wpa_state as stock's monitor thread last read its STATUS,
@@ -15,9 +15,9 @@
 
 /* ssid: the network a join is trying (stock's wifi_name while wifi_connectstatus is 1); shook: that
  * join reached the handshake that checks its password; linked: it got past it (COMPLETED); ask: it
- * failed and a timer asks for the password again (ask_again), wrong: as a wrong password; tries: the
- * timer passes left to find the entry's box (reason_tip); forget: the network the Forget card asks
- * about. */
+ * failed and a timer asks for the password again (ask_again), wrong: as a wrong password; tries:
+ * the timer passes left to find the entry's box (reason_tip); forget: the network the Forget card
+ * asks about. */
 static struct {
     char ssid[SSID_MAX], forget[SSID_MAX];
     int shook, linked, ask, wrong, tries;
@@ -68,11 +68,12 @@ static void cancel(void) {
 }
 
 /* systemset_wifi_page's switch and Search Again rows (one click handler, 0x4d61e0, by the row's
- * name: 0 the switch, 1 Search Again). Stock ignores both while a join is trying (wifi_connectstatus
- * 1, for up to a minute: network_checkstatus's two 30-tick tries). The switch ends the join and
- * turns Wi-Fi off now (wifi_switch's off clears what is left and stops wpa_supplicant); Search
- * Again says why it waits. A search started shows "Searching..." now: stock sets it going
- * (wifi_scan) but rebuilds the list, the only place the line is written, only once it ends. */
+ * name: 0 the switch, 1 Search Again). Stock ignores both while a join is trying
+ * (wifi_connectstatus 1, for up to a minute: network_checkstatus's two 30-tick tries). The switch
+ * ends the join and turns Wi-Fi off now (wifi_switch's off clears what is left and stops
+ * wpa_supplicant); Search Again says why it waits. A search started shows "Searching..." now: stock
+ * sets it going (wifi_scan) but rebuilds the list, the only place the line is written, only once it
+ * ends. */
 int ringnav_wifi_switch_row(void *button, void *event) {
     int row = atoi(name_of(button));
     if (row == 0 && g_wififlag && connecting() && !wifi_initstatus) cancel();
@@ -150,7 +151,8 @@ static int reason_tip(const void *unused) {
  * tap on a network it has no password for opens it), its box reading why the join failed
  * (reason_tip). From a timer, as stock's own dialogs open from on_wm_timer_dialog: the entry runs
  * its own loop, and one opened from ringnav_sleep's polls took no input (the emulator, 2026-11-17).
- * The password entered replaces the saved one (stock's Forget, then its join); Cancel keeps it. */
+ * A password entered replaces the saved one (stock's Forget, then its join); Cancel, or an OK with
+ * no password fit for the network, keeps it. */
 static int ask_again(const void *unused) {
     if (!wf.ask) return 0; /* the join was ended or the networks reset since */
     wf.why = wf.wrong ? "Wrong password" : "Couldn't connect";
@@ -171,7 +173,11 @@ static int ask_again(const void *unused) {
     tk_snprintf((char *)prepare_linkssid, 256, "%s", ssid); /* check_wifinextaction's */
     if (navigator_to("dialog/kbwifipass_dialog")) return 0;
     int at = find(ssid);
-    if (at < 0) return 0;
+    void *r = record(at);
+    /* the entry's OK with no fit password (Return can give it one, empty) changes nothing, as
+     * wifi_action_connect would refuse it: the saved one stays */
+    if (!r || !networkCheckSsidPassword((const char *)P(r, 4), (const char *)prepare_linkpasswd))
+        return 0;
     if (networkCheckConnectedSsid(ssid)) wifi_action_deleterecord(at);
     wifi_action_connect(at);
     g_wifisetting_flag = 1; /* the page's timer rebuilds: the row reads Connecting */

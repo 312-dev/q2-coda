@@ -2000,6 +2000,8 @@ FUNCTIONS = {
  'wifi_action_connect': ('int', 'int'), 'wifi_action_deleterecord': ('int', 'int'),
  'networkCheckConnectedSsid': ('int', 'const char *'), 'networkDisconnect': ('int', 'void'),
  'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
+ # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
+ 'networkCheckSsidPassword': ('int', 'const char *, const char *'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {

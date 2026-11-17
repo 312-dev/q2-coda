@@ -62,6 +62,8 @@ class Page:
         fw.mock('stock_wifi_switch_row_trampoline', lambda b, e, *_: self.calls.append(('switch_row', self.ui.name[b])) or 0)
         fw.mock('stock_wifi_network_row_trampoline', lambda b, e, *_: self.calls.append(('network_row', self.ui.name[b])) or 0)
         fw.mock('networkDisconnect', lambda *_: self.calls.append(('disconnect',)) or 0)
+        self.fit = 1
+        fw.mock('networkCheckSsidPassword', lambda f, pw, *_: self.fit)
         fw.mock('networkCheckConnectedSsid', lambda s, *_: C.string_at(s).decode() in self.saved)
         fw.mock('wifi_action_deleterecord', lambda i, *_: self.calls.append(('forget', i)) or 0)
         fw.mock('wifi_action_connect', lambda i, *_: self.calls.append(('connect', i)) or 0)
@@ -226,6 +228,17 @@ def test_a_join_that_never_reached_the_network_says_couldn_t_connect(fw):
     p.ask()
     assert p.went == [('dialog/kbwifipass_dialog', 'Home')] and p.calls == []
     assert p.tips == "Couldn't connect"
+
+
+def test_an_ok_with_no_fit_password_keeps_the_saved_one(fw):
+    """Return can quit the entry with OK and an empty box: wifi_action_connect would refuse it, so nothing is
+    forgotten or joined."""
+    p = Page(fw)
+    p.joining('Home')
+    fail(fw, p, [b'SCANNING'])
+    p.fit = 0
+    p.ask()
+    assert p.went == [('dialog/kbwifipass_dialog', 'Home')] and p.calls == []
 
 
 def test_an_open_network_s_failure_stays_stock_s_toast(fw):
