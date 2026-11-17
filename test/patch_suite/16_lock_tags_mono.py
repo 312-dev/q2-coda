@@ -632,7 +632,7 @@ def ring(R):
 for R in (14,5,4,0):  # 14 and 4 had no table before corner_cover.c, 5 had
     rows={}; [rows.setdefault(b[1],[]).append(b) for b in ring(R).bands]; assert sorted(rows)==list(range(40,70))
     for y in range(41,69):
-        xs=sorted(b[0] for b in rows[y]); assert xs==sorted(20+60-1-x for x in xs),(R,y)  # its sides, mirrored
+        xs=sorted(b[0] for b in rows[y]); assert xs==sorted(20+(20+60-1)-x for x in xs),(R,y)  # its sides, mirrored about the ring's centre
     assert sorted(b[0] for b in rows[55])==[20,79]  # the straight sides, a pixel each
     assert (R==0)==all(b[4]>>24==0xff for y in range(40,44) for b in rows[y]),R  # part pixels round a corner
 passed()
