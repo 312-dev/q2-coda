@@ -1149,12 +1149,13 @@ painted it white, which drew the box at rest.
   "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
   an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held
   Return and held Previous are as on Search.
-- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
-  time one opens, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
+- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: each
+  time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
   its keys hidden and the window over the screen under the status row (`search_strip_box`,
   [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
   The box's text is prefilled, the strip opening on abc (123 for a box holding a number); a password shows as dots
-  ("Password" over them), the character just typed for a second, with no way to show the rest. Submitting writes the
+  ("Password" over them), the character just typed for a second, with no way to show the rest: a Wi-Fi network's,
+  Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the

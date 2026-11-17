@@ -71,7 +71,7 @@ static void kb_clear(void *w) {
     widget_set_prop_int(w, "_kb_clear", 1);
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) kb_clear(widget_get_child(w, i));
 }
-/* The keyboard first seen, from the next loop pass: its window and edit to the letter strip (the
+/* A keyboard just opened, from the next loop pass: its window and edit to the letter strip (the
  * input method keeps both, so the box's OK reaches the edit and nothing takes its focus). */
 static int kb_strip_due(const void *unused) {
     void *kb = kb_window(), *im = input_method(), *edit = im ? P(im, IM_WIDGET) : (void *)0;
@@ -83,8 +83,8 @@ static int kb_strip_due(const void *unused) {
     return 0;
 }
 
-/* The keyboard's window going: forgotten, so the next one is new to kb_style even at its address
- * (stock's input method frees each keyboard as it closes, and the next is often at the same one). */
+/* The keyboard's window going: forgotten, so the next one is new to kb_style even at its
+ * address (stock's input method frees each keyboard as it closes, the next often at the same). */
 static int kb_gone(void *ctx, void *event) {
     stop_timer(&kw.timer);
     kw.kb = kw.lit = (void *)0;

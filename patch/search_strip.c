@@ -118,8 +118,9 @@
 #define SS_PX_CHIP TYPE(16)  /* 16 */
 #define SS_PX_SMALL TYPE(13) /* 13 */
 #define SS_PEEK_MS 1000      /* a password's last character typed shows this long */
-/* ss.secret: what the text is (ss_secret_box, search_strip_secret); a password shows as dots */
-enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI /* ... a Wi-Fi network's: submitting joins */ };
+/* ss.secret: what the text is (ss_secret_box, search_strip_secret); a password shows as dots,
+ * and a Wi-Fi network's joins when submitted */
+enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 /* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
  * the key 18 px wide from the lit cell's left and SS_KEY_IN below the strip's top, as the lit
  * cell's accent box is; the big characters a strip of a head's box per character, in

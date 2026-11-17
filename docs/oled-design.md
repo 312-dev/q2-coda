@@ -1097,7 +1097,8 @@ Where the text shows, by form:
 - **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
   box stock's keyboard served): as a name, "Press Play/Pause when done" under it; a box holding a number
   opens on 123. A password reads "Password" (15 px Text Tertiary, y 84) over dots (y 128), the character
-  just typed shown for a second, and "Press Play/Pause to join" (13 px, y 176). Submitting is the box's own
+  just typed shown for a second, and "Press Play/Pause to join" (13 px, y 176; a Wi-Fi password's, "to save" for
+  the Guest Play hotspot's, "when done" for a card app's). Submitting is the box's own
   OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`)
   is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth.
 
@@ -1107,8 +1108,8 @@ dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 1
 from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it, "Keep holding to go
 back" in Inter Medium 16 white; at 600 ms the page closes. Let go before that and the highlight is on the
 return key. The dim covers the status row too, as Buttons Lock's card's does: both draw it the same way
-(`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its
-window to the strip (`patch/keyboard.c` `kb_strip_due`).
+(`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): each one that opens gives
+its window to the strip (`patch/keyboard.c` `kb_strip_due`).
 
 ### Icons
 
