@@ -75,7 +75,7 @@ deque_assign deque_destroy deque_size deque_at window_create widget_factory
 widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses
 slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create list_item_create image_set_draw_type
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
-widget_set_text_utf8 widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
+widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
 widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
@@ -241,6 +241,8 @@ int widget_set_name(void *x, const char *s) { snprintf(W(x)->type, 32, "%s", s);
 void page_empty(void *body, const char *name) { (void)body; (void)name; } /* navigation.c: page_list_or only */
 int widget_use_style(void *x, const char *s) { return 0; }
 int widget_set_text_utf8(void *x, const char *s) { if (s) snprintf(W(x)->text, 160, "%s", s); return 0; } /* stock: NULL keeps the text */
+int widget_get_text_utf8(void *x, char *s, unsigned n) { return snprintf(s, n, "%s", W(x)->text) >= (int)n; } /* stock: nonzero when it doesn't fit */
+unsigned widget_add_timer(void *x, int (*f)(const void *), unsigned ms) { (void)x, (void)f, (void)ms; return 1; } /* the empty page's poll: not run here */
 int widget_restack(void *x, unsigned i) { return 0; }
 void *widget_animator_prop_create(void *x, unsigned d, unsigned l, int e, const char *p) { return 0; }
 int widget_animator_prop_set_params(void *a, double f, double t) { return 0; }
@@ -340,6 +342,25 @@ void home_overflow(void *list, int bottom) {}
 void home_in_place(void *list) {}
 void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
 int shuffle_songs(void *ctx, void *event) { return 0; }
+/* Home's first row, edit mode, folders' rule and shortcut (home_np.c, library_edit.c, home.c, theme_engine.c,
+ * navigation.c): Home as stock has it, none of it edited or playing here */
+void home_np_bind(void *win) {}
+void home_np_sync(void) {}
+void home_sets_bind(void *win) {}
+void ipod_shortcut_seen(void) {}
+void lr_home_tag(void *view) {}
+void lr_home_apply(void *view, int np) {}
+void lr_edit_labels(void *view, int on) {}
+int lr_home_editing(void) { return 0; }
+int home_folders(void) { return 0; }
+/* ui_kit.c's motion: reduced, and a theme row with no duration, so a level changes at once */
+int motion_reduced(void) { return 0; }
+const motion_t *motion_row(int kind) { static const motion_t still; return &still; }
+/* feedback.c's empty-page mark, cf_empty.c's page (none: the page is plain here) and catalogue.c's playlist covers (none) */
+int empty_shown(void *page) { return 0; }
+int cf_empty(void *page, void *body) { return 0; }
+void catalogue_playlist_covers(void) {}
+int catalogue_playlist_cover(int list, char *url) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
 int artist_local_on(void *win) { return 0; }
@@ -1757,7 +1778,7 @@ static void depth(void) {
     tex_fail = 0;
 }
 
-/* Display settings' Cover Flow Sort (coverflow_sort_step): each press takes the next order, saved and
+/* Library settings' Cover Flow Sort picker (coverflow_sort_set): each press takes the next order, saved and
    taken at the next open; ties keep the stock order. */
 static const char *album_at(int i) {
     static char got[160];
@@ -1777,9 +1798,10 @@ static int saved_sort(void) {
     if (f) assert(fread(&v, sizeof v, 1, f) == 1), fclose(f);
     return v;
 }
-extern void coverflow_sort_step(void), coverflow_refresh_art(void);
-static void press_sort(void) {
-    coverflow_sort_step();
+extern void coverflow_sort_set(int), coverflow_refresh_art(void);
+extern int coverflow_sort_now(void), coverflow_sort_count(void);
+static void press_sort(void) { /* the picker's next choice, as library_settings.c's rows take it */
+    coverflow_sort_set((coverflow_sort_now() + 1) % coverflow_sort_count());
     close_page();
     open_page();
 }
@@ -7299,7 +7321,7 @@ int main(void) {
     int drew = draws;
     coverflow_home_clip(home_art, canvas, 0);
     assert(draws == drew + 1);
-    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black. */
+    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black, dimmed in the vignette's rows. */
     clear_cover = 1;
     static const struct { int light; unsigned paper; } papers[] = {
         { 1, 0xff000000u | LIGHT_PAPER * 0x010101u }, { 0, 0xff000000u } };
@@ -7308,7 +7330,8 @@ int main(void) {
         coverflow_home_layout();
         coverflow_home_art(win);
         coverflow_home_clip(home_art, canvas, 0);
-        assert(shown[0] == papers[i].paper && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
+        /* the panel's top rows are under the vignette (vig_k): darker than the paper, the black one's unchanged; below it, the paper */
+        assert(shown[0] <= papers[i].paper && (i || (shown[0] & 255) < (papers[i].paper & 255)) && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
     }
     clear_cover = 0;
 
