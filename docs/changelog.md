@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Lists (OLED): the selected row responds to Center like Apple TV: the bar sits slightly raised with a soft shadow, sinks and turns a brighter blue while you press, and springs back as you let go. With Reduce Motion on, it only brightens.
+  - Car Remote (OLED): with no phone paired, turning the wheel to **Pair a Phone** no longer scrolls the page away from the Car Remote switch, and the ring around the selected button is a smooth outline that follows its rounded ends.
   - Car Remote: **Settings → Car Remote** is redesigned. Each phone's row says whether it's **Connected over Wi-Fi** or **over Bluetooth**, or when it was last seen; before, its second line was cut off and showed nothing. **Pair a Phone** says how to pair and shows the Q2 Muse's address. Each phone has its own page with when it paired and last connected, **Rename** and **Forget Phone**, and a new pairing is announced by the phone's name ("Pixel 10 Pro paired").
   - Car Remote: Q2 Muse Remote can browse and play your Favorites (hearted songs) and Recently Added (the 100 newest songs) from the Q2 Muse.
   - Playlists (OLED): a playlist or On-The-Go with no songs shows **No Songs Yet** under Add Songs, with how to fill it.
