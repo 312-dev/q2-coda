@@ -18,6 +18,7 @@ static struct {
     unsigned off_at, off_ms;
     int acked, cancel; /* the answers last written */
     int norun_shown;
+    int installed; /* /usr/bin/q2guard there: 1, not: -1, not looked yet: 0 */
 } hg __attribute__((section(".scratch")));
 
 /* The tests' seams (test/fw/test_heatguard.py): 0 on the Q2, so confirm and toast_later. */
@@ -117,7 +118,10 @@ void heatguard_poll(void) {
     s[n > 0 ? n : 0] = 0;
     int beat = hg_field(s, "beat", v, sizeof v) ? hg_int(v) : -1;
     if (beat != hg.beat) hg.beat = beat, hg.beat_at = now;
-    if (!hg.norun_shown && now - hg.start >= HG_GRACE_MS && now - hg.beat_at >= HG_STALE_MS &&
+    /* only where q2guard is installed: a crash loop or a start that fails leaves its beat still */
+    if (!hg.installed) hg.installed = access("/usr/bin/q2guard", 0) ? -1 : 1;
+    if (!hg.norun_shown && hg.installed > 0 && now - hg.start >= HG_GRACE_MS &&
+        now - hg.beat_at >= HG_STALE_MS &&
         hg_info("Overheat protection isn't running",
                 "Q2 can't watch for overheating\nuntil it restarts."))
         hg.norun_shown = 1;

@@ -26,6 +26,8 @@ class Rig:
         fw.mock('fw_read', self.read)
         fw.mock('fw_write', self.write)
         fw.mock('fw_close', lambda *_: 0)
+        self.installed = True
+        fw.mock('fw_access', lambda path, *_: 0 if self.installed and C.string_at(path) == b'/usr/bin/q2guard' else -1)
         fw.mock('time_now_ms', lambda *_: self.ms)
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('player_play_pause', self.pause)
@@ -172,5 +174,13 @@ def test_a_silent_guardian_after_a_minute_is_a_card_once(rig):
 def test_a_guardian_that_beats_raises_no_card(rig):
     for i in range(140):
         rig.state(0, 'none')
+        rig.poll()
+    assert rig.cards == []
+
+
+def test_with_no_guardian_installed_there_is_no_card(rig):
+    """A build or a test world without /usr/bin/q2guard has nothing to miss."""
+    rig.installed = False
+    for _ in range(140):
         rig.poll()
     assert rig.cards == []
