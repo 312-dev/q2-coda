@@ -903,6 +903,30 @@ def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
     assert not painted and not ui.timer(address(fw, 'coverflow__strip_due'))
 
 
+@pytest.mark.parametrize('toast', (False, True))
+def test_a_toast_over_home_leaves_the_split_rows_in_the_bar(fw, library, toast):
+    """OLED's toast (msginfo_dialog) over Home in Split: the bar still paints the list's rows Split raises above Home's
+    window, as with nothing over Home (user, 2026-11-16: "Unplugged" and toasts like it ran a black bar across the
+    top, the first row cut, as the bar painted for the toast as if it were the page)."""
+    ui = Ui(fw)
+    split_inset_set(fw, library, 2)
+    home = fw.var('coverflow__home', Home)
+    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
+    home.art = ui.make(win, 'image', 196, 0, 179, 262)
+    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
+    ui.top = ui.make(ui.wm, 'dialog', 0, 0, 375, 320, name='msginfo_dialog') if toast else win
+    painted: list[int] = []
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda *_: None)
+    fw.mock('canvas_translate', lambda *_: None)
+    fw.mock('widget_paint', lambda w, c, *_: painted.append(w))
+    fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(bar, Canvas(fw).p)
+    assert home.list in painted
+
+
 def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
     row, client = split_inset_set(fw, library, 2)  # OLED's
     pw, ph = 375 - row['split_art'], client + row['split_art_up']
