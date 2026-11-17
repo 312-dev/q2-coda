@@ -253,8 +253,9 @@ static int cr_howto_open(void *ctx, void *event) {
 /* How a phone can find this Q2 Muse now, the address into addr with Wi-Fi: CR_BY_BLE while the daemon advertises
  * (Bluetooth on and bluetoothd took the GATT application, docs/remote-protocol.md#bluetooth-le-primary), else
  * CR_BY_WIFI while Wi-Fi has an address (Q2 Muse Remote's Wi-Fi address tab), else CR_BY_NONE. Q2 Muse Remote's
- * Bluetooth tab finds a Q2 Muse by its advertisement only, and its Wi-Fi tab by the address typed, so the page
- * gives the steps of the one that can work and never the other's. */
+ * Bluetooth tab finds a Q2 Muse by its advertisement only, and its Wi-Fi tab lists the ones the daemon announces
+ * over mDNS (docs/remote-protocol.md#discovery) or takes an address typed, so the page gives the steps of the one
+ * that can work and never the other's. */
 enum { CR_BY_NONE, CR_BY_WIFI, CR_BY_BLE };
 static int cr_howto_mode(char *addr, unsigned n) {
     int wifi = cr_address(addr, n) != 0;
@@ -271,7 +272,9 @@ static unsigned cr_howto_sum(void) {
 }
 
 /* Its steps in Q2 Muse Remote's own words (its Pair a Q2 Muse screen, its Bluetooth and Wi-Fi address tabs, Next),
- * then what they need: the address to type (the app's port, 7720, is coda-rc's), and that it waits. With neither
+ * then what they need: the address, for a phone that does not list it (the app's port, 7720, is coda-rc's), and
+ * that it waits. The Wi-Fi tab lists this Q2 Muse by its Bluetooth name (the mDNS instance), so its step names
+ * that; the Bluetooth tab's advertisement is always "Q2 Muse" (coda_rc_ble.c). With neither
  * link, the steps join a Wi-Fi network first; the page turns to the Wi-Fi steps once it has (carremote_poll). Each
  * line fits the 297 px beside its number at CR_STEP_PX. ponytail: no QR code until Q2 Muse Remote can scan one
  * (design/carremote-page NOTES.md, question 2). */
@@ -279,22 +282,23 @@ static void cr_howto_paint(void *w, void *canvas) {
     static const char *const steps[3][4] = {
         [CR_BY_NONE] = { "Open Settings > Wi-Fi", "Join the Wi-Fi your phone is on", "Come back here to pair", 0 },
         [CR_BY_WIFI] = { "Open the Q2 Muse Remote app", "Pair a Q2 Muse > Wi-Fi address",
-                         "Type the address below, tap Next", "Type the code shown here" },
+                         0 /* "Pick <name>, then tap Next" */, "Type the code shown here" },
         [CR_BY_BLE] = { "Open the Q2 Muse Remote app", "Pair a Q2 Muse > Bluetooth", "Pick Q2 Muse, then tap Next",
                         "Type the code shown here" },
     };
-    char addr[20], line[64];
+    char addr[20], line[64], name[40], pick[64];
     int mode = cr_howto_mode(addr, sizeof addr), y = 66 - cr_screen_y(w);
+    tk_snprintf(pick, sizeof pick, "Pick %s, then tap Next", bt_name(name, sizeof name));
     /* Text Primary as the dark theme's: ui_text's ink turns it for Light Mode, as the muted lines'. The digits sit
      * on Raised 2's disc, which fill_box leaves dark in either mode, so theirs is white in both (turned twice). */
     unsigned primary = 0xffffff, digit_ink = flip_if(ipod_light(), 0xffffff), muted = tok(TOK_TERTIARY);
-    for (int i = 0; i < 4 && steps[mode][i]; ++i, y += 28) {
+    for (int i = 0; i < 4 && (steps[mode][i] || mode == CR_BY_WIFI); ++i, y += 28) {
         rect_t disc = { 24, y - 10, 20, 20 };
         char digit[4];
         fill_box(canvas, &disc, RGBA(tok(TOK_RAISED_2)), 10);
         tk_snprintf(digit, sizeof digit, "%d", i + 1);
         ui_text(canvas, digit, 1, TYPE(13), digit_ink, 0, 34, y, 20, 1);
-        ui_text(canvas, steps[mode][i], 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
+        ui_text(canvas, steps[mode][i] ? steps[mode][i] : pick, 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
     }
     y = 190 - cr_screen_y(w);
     ui_text(canvas, "Q2 Muse", 1, TYPE(17), primary, 0, 24, y, 327, 2);
