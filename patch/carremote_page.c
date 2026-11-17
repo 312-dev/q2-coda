@@ -284,14 +284,16 @@ static void cr_howto_paint(void *w, void *canvas) {
                         "Type the code shown here" },
     };
     char addr[20], line[64];
-    int mode = cr_howto_mode(addr, sizeof addr), light = ipod_light(), y = 66 - cr_screen_y(w);
-    unsigned primary = flip_if(light, 0xffffff), muted = tok(TOK_TERTIARY);
+    int mode = cr_howto_mode(addr, sizeof addr), y = 66 - cr_screen_y(w);
+    /* Text Primary as the dark theme's: ui_text's ink turns it for Light Mode, as the muted lines'. The digits sit
+     * on Raised 2's disc, which fill_box leaves dark in either mode, so theirs is white in both (turned twice). */
+    unsigned primary = 0xffffff, digit_ink = flip_if(ipod_light(), 0xffffff), muted = tok(TOK_TERTIARY);
     for (int i = 0; i < 4 && steps[mode][i]; ++i, y += 28) {
         rect_t disc = { 24, y - 10, 20, 20 };
         char digit[4];
         fill_box(canvas, &disc, RGBA(tok(TOK_RAISED_2)), 10);
         tk_snprintf(digit, sizeof digit, "%d", i + 1);
-        ui_text(canvas, digit, 1, TYPE(13), primary, 0, 34, y, 20, 1);
+        ui_text(canvas, digit, 1, TYPE(13), digit_ink, 0, 34, y, 20, 1);
         ui_text(canvas, steps[mode][i], 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
     }
     y = 190 - cr_screen_y(w);
