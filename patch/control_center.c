@@ -436,25 +436,37 @@ static void *cc_stock(void *win, int i) {
 
 /* Whether stop i has a settings page, which a hold on it opens (cc_hold): the toggles. */
 static int cc_paged(int i) { return i <= CC_EQ; }
+/* A settings page Control Center (or stock's quick settings, nav/rows_settings.c quick_long)
+ * opens, unless it is open already: then it is the goal, and a second would stack on it (the
+ * emulator, 2026-11-17: held on Settings > Wi-Fi, a second wifi_page, and Return took two presses
+ * to leave Wi-Fi), or share its one state (peq_ui.c's EQ). path is its folder and name; the
+ * window's name is the part after the '/'. */
+void cc_page(const char *path) {
+    const char *name = path;
+    for (const char *c = path; *c; ++c)
+        if (*c == '/') name = c + 1;
+    if (!navigator_window_is_exist(name)) navigator_to(path);
+}
+
 /* Stop i's settings page, opened by a hold on it once the page is closed: by a finger (navigation.c
  * quick_long) or Centre (cc_hold_due). Smart Wi-Fi's is Wi-Fi's. */
 void cc_hold(int i) {
     switch (i) {
     case CC_WIFI:
     case CC_SMART:
-        navigator_to("systemset/wifi_page");
+        cc_page("systemset/wifi_page");
         break;
     case CC_BT:
-        navigator_to("systemset/bluetooth_page");
+        cc_page("systemset/bluetooth_page");
         break;
     case CC_AIRPLAY:
-        navigator_to("systemset/netservice_page");
+        cc_page("systemset/netservice_page");
         break;
-    case CC_CAR:
+    case CC_CAR: /* one page: carremote_open opens none over its own */
         carremote_open((void *)0, (void *)0);
         break;
-    case CC_EQ: /* an open EQ page is already the goal: a second would share peq_ui.c's one state */
-        if (!navigator_window_is_exist("equalizer_page")) navigator_to("playset/equalizer_page");
+    case CC_EQ:
+        cc_page("playset/equalizer_page");
         break;
     }
 }
@@ -472,7 +484,7 @@ static int cc_act(void *win, int i) {
     }
     case CC_AIRPLAY:
         dialog_quit(win, 0);
-        navigator_to("systemset/netservice_page");
+        cc_page("systemset/netservice_page");
         return 1;
     case CC_CAR:
         coda_rc_toggle();

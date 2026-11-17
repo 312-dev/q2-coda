@@ -2857,6 +2857,20 @@ def test_a_finger_held_on_a_toggle_opens_its_settings_page_and_a_tap_still_acts(
     assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
 
 
+@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[1]])
+def test_a_hold_over_its_own_open_page_opens_no_second(fw, keys, stop, page):
+    """Control Center pulled down on Settings > Wi-Fi and Wi-Fi held: Control Center closes on the Wi-Fi page there
+    is, and no second one stacks on it (the emulator, 2026-11-17: two wifi_page, two Returns to leave Wi-Fi)."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    window = page.split(b'/')[-1]
+    fw.mock('navigator_window_is_exist', lambda n, *_: C.string_at(n) == window)
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(buttons[stop], O['EVT_POINTER_DOWN'])
+    ui.fire(ui_name(fw.lib, 'quick_long'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] and opened(fw) == []
+
+
 CC_PREV, CC_PLAY, CC_NEXT = CC_STOPS, CC_STOPS + 1, CC_STOPS + 2
 
 

@@ -993,6 +993,42 @@ def test_a_page_stock_refused_binds_nothing(fw, ui, mcl, st):
     assert st.np_win == 0 and ui.handlers == []
 
 
+def stack_with(fw, ui, *names):
+    """Windows under the one Now opens, bottom first; a forced close takes one off the stack, as AWTK's does."""
+    under = [ui.widget(ui.wm, name, kind='window') for name in names]
+    fw.mock('window_manager_close_window_force', lambda wm, w, *_: ui.kids[ui.wm].remove(w))
+    return under
+
+
+def test_a_new_now_playing_closes_the_one_it_was_opened_over(fw, ui, mcl, st):
+    """Stock's navigator opens a playing_page over whatever is in front, so Shuffle on the artist page Now
+    Playing's artist tap opened left the first Now Playing under it: covered, it kept the song it last showed,
+    and Return came back to it before Home (the emulator, 2026-11-17: Song 1 at 1:01 while Song 2 played). The
+    new page closes the older one as it opens; the pages between stay, so Return goes to the artist and Home."""
+    theme(fw, st)
+    home, old, artist = stack_with(fw, ui, 'home_page', 'playing_page', 'artistinfo_page')
+    now = Now(fw, ui, mcl, st)
+    assert [a[1] for _, a in fw.calls('window_manager_close_window_force')] == [old]
+    assert ui.kids[ui.wm] == [home, artist, now.win] and st.np_win == now.win
+
+
+def test_the_only_now_playing_closes_nothing(fw, ui, mcl, st):
+    theme(fw, st)
+    stack_with(fw, ui, 'home_page', 'allmusic_page')
+    Now(fw, ui, mcl, st)
+    assert not fw.calls('window_manager_close_window_force')
+
+
+def test_a_now_playing_stock_refused_leaves_the_one_under_it(fw, ui, mcl, st):
+    """Headphones required with none to play to: stock closes the new page itself, and the one the user had stays."""
+    theme(fw, st)
+    stack_with(fw, ui, 'home_page', 'playing_page', 'artistinfo_page')
+    now = Now(fw, ui, mcl, st, opened=False)
+    fw.mock('stock_playing_trampoline', lambda w, ctx, *_: 11)
+    assert now.open() == 11
+    assert not fw.calls('window_manager_close_window_force')
+
+
 # Scrub: a Centre press starts it, the wheel previews, one press commits.
 def press(now, at):
     now.ui.now = at
