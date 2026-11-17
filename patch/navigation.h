@@ -543,6 +543,7 @@ void *window_under(void *wm, void *top); /* the normal window under top, 0 none 
 void *under_snap(void *under); /* a window painted once into a whole-screen bitmap, 0 none */
 /* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
 void art_zoom_load(void *np_win);
+const char *window_hint(void *win, const char *name);
 int art_zoom_source(void *top, rect_t *r);
 void art_zoom_at(int k, const rect_t *a, const rect_t *b, unsigned *page, unsigned *np,
                  rect_t *art);

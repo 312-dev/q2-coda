@@ -38,6 +38,15 @@ static struct {
     int registered;
 } az __attribute__((section(".scratch")));
 
+/* win's open_anim_hint or close_anim_hint, "" when it has none. Stock's window_base_get_prop answers
+ * these itself with the window's own field, which is NULL until one is set, and widget_get_prop_str
+ * passes that NULL on instead of its default: a window loaded new (Now Playing over a list, the
+ * first time) has none. */
+const char *window_hint(void *win, const char *name) {
+    const char *hint = widget_get_prop_str(win, name, "");
+    return hint ? hint : "";
+}
+
 /* w's box on screen */
 static rect_t screen_rect(void *w) {
     rect_t r = { 0, 0, I(w, W_W), I(w, W_H) };
@@ -139,7 +148,7 @@ void art_zoom_load(void *np_win) {
     }
     az.from = art_zoom_source(top, &az.cover) ? top : (void *)0;
     if (!az.from) { /* a reused window's last open: immediate again */
-        if (*widget_get_prop_str(np_win, "open_anim_hint", ""))
+        if (window_hint(np_win, "open_anim_hint")[0])
             widget_set_prop_str(np_win, "open_anim_hint", "");
         return;
     }

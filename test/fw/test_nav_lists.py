@@ -12,7 +12,7 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
@@ -120,8 +120,15 @@ class Ui:
         return C.addressof(self.strings[value])
 
     def prop_str(self, w, name, default, *_):
-        value = self.by[w].props.get(C.string_at(name)) if w in self.by else None
-        return self.cstr(value) if isinstance(value, bytes) else default
+        widget, key = self.by.get(w), C.string_at(name)
+        value = widget.props.get(key) if widget else None
+        if isinstance(value, bytes):
+            return self.cstr(value)
+        # stock's window_base_get_prop answers a window's anim hints itself, RET_OK with its field, which
+        # is NULL until one is set: widget_get_prop_str returns that NULL, not the default
+        if widget and widget.kind == b'window' and key in (b'open_anim_hint', b'close_anim_hint'):
+            return 0
+        return default
 
     def prop_int(self, w, name, default, *_):
         value = self.by[w].props.get(C.string_at(name)) if w in self.by else None
@@ -2447,6 +2454,7 @@ def test_setting_keys_name_each_option_in_config(fw):
     assert key_of(T, 0) == b'OLED_ACCENT'  # the theme's own accent key
 
 
+@in_fork  # Now Playing's new window answers NULL for its open_anim_hint: a bad read kills the process
 def test_a_window_takes_its_themes_motion_as_it_loads(fw, ui):
     theme(fw)
     oled, = host.tools_theme.builtins()

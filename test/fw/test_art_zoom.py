@@ -5,6 +5,7 @@ import ctypes as C
 
 import pytest
 
+from conftest import in_fork
 from test_nav_lists import ui  # noqa: F401  (ui: fixture)
 from test_nav_painters import scratch, st  # noqa: F401  (fixtures)
 from test_ui_kit import reduce_motion
@@ -59,10 +60,25 @@ def test_now_playing_opened_over_an_album_page_takes_the_zoom_both_ways(fw, ui, 
     assert h.registered == ([] if reduced else [b'art_zoom'])
 
 
+@in_fork  # a NULL read here kills the process: the child's death fails the test instead
 def test_now_playing_opened_from_a_list_opens_at_once(fw, ui):
     reduce_motion(fw, 0)
     h = Hints(fw, ui)
     ui.widget('window', ui.wm, (0, 40, 375, 280), name='allmusic_page')
     h.load(fw)
     assert h.np is not None
+    assert b'open_anim_hint' not in h.np.props and h.registered == []  # nothing set: stock's immediate open
+
+
+@in_fork
+def test_now_playing_loaded_new_over_an_albums_tracks_opens_at_once(fw, ui):
+    """Cover Flow > an album's tracks > Previous > Centre > wheel 4 > Centre loaded Now Playing's window new over the
+    track list, which shows no cover. A new window's open_anim_hint is NULL from stock (Ui.prop_str), and
+    art_zoom_load, first in motion_load, read it: demo died with SIGSEGV there (2026-11-17, release/p32)."""
+    reduce_motion(fw, 0)
+    h = Hints(fw, ui)
+    ui.widget('window', ui.wm, (0, 40, 375, 280), name='albuminfo_page')  # not dressed: the plain track list
+    h.np = ui.widget('window', ui.wm, (0, 0, 375, 320), name='playing_page')
+    ui.top = h.np
+    fw.fn('navigation__motion_load', None, C.c_void_p, C.c_int)(h.np.at, 1)  # ringnav_ui_load's call
     assert b'open_anim_hint' not in h.np.props and h.registered == []  # nothing set: stock's immediate open
