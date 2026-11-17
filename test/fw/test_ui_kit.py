@@ -126,8 +126,8 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
 @pytest.mark.parametrize('light', [0, 1])
 def test_the_focus_ring_is_tools_art_pys_supersampled_ends_and_whole_rows_between(fw, st, light):
     """The user's device (2026-11-16, Car Remote's Pair a Phone): the ring was aliased, its round ends dotted, drawn a
-    row at a time from corner tables with none for its radii (24, 23); then two one-pixel AWTK strokes, whose arcs
-    still stepped unevenly at 6x where they met. Its ends are tools/art.py's images (cta_ring_end, 16 x 16 samples a
+    row at a time from the build's corner tables, which then held none for its radii (24, 23); then two one-pixel
+    AWTK strokes, whose arcs still stepped unevenly at 6x where they met. Its ends are tools/art.py's images (cta_ring_end, 16 x 16 samples a
     pixel, the half's Text Primary), 24 x 48, at the ring's box CTA_RING_OFF + 2 (5) px out from the capsule, and the
     straight runs between them two whole rows of the ink at the box's top and foot, nothing else outside the
     capsule."""

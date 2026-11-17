@@ -83,17 +83,11 @@ static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* A square image's corners over r rounded to R: the pixels outside each arc in behind, the final
- * 0xRRGGBB of what stands behind it. Up Next's covers too (upnext.c). */
+/* A square image's corners over r rounded to R, anti-aliased into behind, the final 0xRRGGBB of
+ * what stands behind it (nav/row_paint.c corner_mask). Up Next's and Control Center's covers too.
+ */
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
-    for (int i = 0; i < R; ++i) {
-        int n = round_inset(R, i, r->h);
-        for (int b = 0; b < 2 && n; ++b) {
-            int y = r->y + (b ? r->h - 1 - i : i);
-            scrub_row(canvas, 0xff000000u | behind, r->x, y, n);
-            scrub_row(canvas, 0xff000000u | behind, r->x + r->w - n, y, n);
-        }
-    }
+    corner_mask(canvas, r, R, behind);
 }
 
 static unsigned ar_accent(void) { return scheme()->tones[0] & 0xffffffu; }

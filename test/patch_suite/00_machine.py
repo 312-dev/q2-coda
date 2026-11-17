@@ -985,25 +985,36 @@ bg,border=names.index('stock_paint_bg'),names.index('stock_paint')
 assert all(bg<i<border for i,n in enumerate(names) if n=='canvas_fill_rect')
 assert not m.rounded and not m.strokes and m.global_alpha==0
 # OLED's bar (paint_selection, gradient): the accent's one tone, its list.selection.inset in from each side of the
-# surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end
-# circle's chord sampled at the band's centre in 1/16 px, a partly covered edge pixel at that coverage's alpha.
+# surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end's
+# corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
 OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
 OLED_BLUE,inset,radius=color_t(OLED_TONES[0]),OLED_T['sel_inset'],OLED_T['sel_radius']
-def chord(j,h,D=None):  # the band's inset in whole pixels and its 1/16 px remainder, for end circles D across (a pill's: h)
-    D=h if D is None else D; d=abs(2*j+1-h)-(h-D)
-    out=8*D-math.isqrt((D*D-d*d)*64) if d>0 else 0
-    return (out+15)//16, out&15
+def corner_mask_bands(x,y,w,h,R,color):
+    """corner_mask's fills (nav/row_paint.c) rounding the box x, y, w, h by R into color (a color_t, opaque): each
+    corner row's clear pixels in one fill, then each part pixel at the alpha the arc leaves; corners in the order top
+    left, bottom left, top right, bottom right."""
+    from art import corner_cover
+    cover,want=corner_cover(R),[]
+    for i in range(R):
+        row=cover[i*R:(i+1)*R]; n=next((k for k,c in enumerate(row) if c),R)
+        for c in range(4):
+            yy=y+(h-1-i if c&1 else i); right=c&2
+            if n: want.append((x+w-n if right else x,yy,n,1,color))
+            want+=[(x+w-1-k if right else x+k,yy,1,1,(color&0xffffff)|(255-row[k])<<24) for k in range(n,R) if row[k]<255]
+    return want
 def bar_bands(x,y,w,h,radius,color=OLED_BLUE):
+    from art import corner_cover
+    cover=corner_cover(radius) if radius else b''
     want=[]
     for j in range(h):
-        n,frac=chord(j,h,2*radius) if radius else (0,0)
+        cr=j if j<radius else h-1-j if j>=h-radius else -1
+        row=cover[cr*radius:(cr+1)*radius] if cr>=0 else b''
+        n=next((k for k,c in enumerate(row) if c==255),len(row))
         want.append((x+n,y+j,w-2*n,1,color))
-        if frac:
-            edge=(color&0xffffff)|((16-frac)*17<<24)
-            want.extend([(x+n-1,y+j,1,1,edge),(x+w-n,y+j,1,1,edge)])
+        want.extend(e for k in range(n) if row[k] for e in ((x+k,y+j,1,1,(color&0xffffff)|row[k]<<24),(x+w-1-k,y+j,1,1,(color&0xffffff)|row[k]<<24)))
     return want
 assert [b[:5] for b in m.bands]==bar_bands(inset,0,240-2*inset,48,radius) and radius<48//2
 assert all(b[5]==(0,0,240,96) for b in m.bands)
@@ -1912,6 +1923,9 @@ passed()
 def long_view(h,top=100):
     lm=Machine(); lw,les=lm.page_list(500,height=266,extent=500*h); lm.word(lw+O['W_W'],375)
     for i,e in enumerate(les): lm.word(e+O['W_Y'],i*h); lm.word(e+O['W_H'],h)
+    # each corner radius's coverage table is made once a boot, at its first paint (corner_cover.c): made first, so this
+    # counts the paint alone
+    for r in range(1,17): lm.call(address=payload_syms['corner_cover'],args=(r,0,0,0),gap=0)
     lm.word(lw+O['SCROLL_Y'],top*h); count=[0]; hook=lm.u.hook_add(UC_HOOK_CODE,lambda *a: count.__setitem__(0,count[0]+1))
     lm.call(address=HOOKS['widget_on_paint_background'][0],args=(lw,lm.canvas,0,0),gap=0); lm.u.hook_del(hook)
     print(f'OLED scroll view of 500 {h} px rows from row {top}: {count[0]} instructions for its first paint')
