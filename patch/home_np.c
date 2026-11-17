@@ -197,7 +197,7 @@ static void hn_glyph(void *canvas, int x, int base, int p, unsigned rgb) {
             int wm = hn_mix(3, 0, p), bh = hn_mix(hs[1], HN_PAUSE_H / 2, p);
             if (wm <= 0) continue;
             r = (rect_t){ x + 4 + (3 - wm) / 2, base - bh, wm, bh };
-            ink = ink & 0xffffffu | (unsigned)(255 * (1000 - p) / 1000) << 24;
+            ink = (ink & 0xffffffu) | (unsigned)(255 * (1000 - p) / 1000) << 24;
         } else { /* the outer two: x 0 and 9 (4.5 apart) to the pause's 1 and 7, 3 to 4 px wide */
             int bh = hn_mix(hs[i], HN_PAUSE_H, p);
             r = (rect_t){ x + hn_mix(i ? 9 : 0, i ? 7 : 1, p), base - bh, hn_mix(3, 4, p), bh };
