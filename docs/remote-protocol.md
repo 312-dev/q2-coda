@@ -63,9 +63,29 @@ Implemented with BlueZ's D-Bus API (`org.bluez.GattManager1`, `org.bluez.LEAdver
 
 ### TCP (fallback, and the emulator)
 
-TCP port 7720, the frame stream as is. For the emulator, for a car whose hotspot the Q2 and phone share (the research's fallback when LE cannot run beside A2DP), and for pairing with Bluetooth off. It is not advertised (no mDNS, no multicast responder); the user types the address the Q2's Pair a Phone page shows into Q2 Muse Remote's Wi-Fi address tab. The daemon accepts at most 4 TCP sessions at once and drops one that has not sent `Hello` within 10 seconds or `Auth` within 150 seconds. With Smart Wi-Fi on, Car Remote on keeps the Q2's Wi-Fi on, as AirPlay does ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)), so the phone finds the Q2 on the network whenever the car starts.
+TCP port 7720, the frame stream as is. For the emulator, for a car whose hotspot the Q2 and phone share (the research's fallback when LE cannot run beside A2DP), and for pairing with Bluetooth off. The Q2 announces it over mDNS ([Discovery](#discovery)), so Q2 Muse Remote's Wi-Fi address tab lists it; the address the Q2's Pair a Phone page shows can still be typed there. The daemon accepts at most 4 TCP sessions at once and drops one that has not sent `Hello` within 10 seconds or `Auth` within 150 seconds. With Smart Wi-Fi on, Car Remote on keeps the Q2's Wi-Fi on, as AirPlay does ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)), so the phone finds the Q2 on the network whenever the car starts.
 
 Being on the same network grants nothing: TCP sessions authenticate and seal exactly as BLE ones do, and a passive listener sees frame sizes and types only.
+
+### Discovery
+
+While Car Remote is on and Wi-Fi is joined, the daemon answers multicast DNS (RFC 6762, IPv4 only, UDP 5353 on `wlan0`) for one DNS-SD service (RFC 6763), `_q2muse._tcp`:
+
+| Name | Type | Value |
+|---|---|---|
+| `_q2muse._tcp.local` | PTR | `<name>._q2muse._tcp.local` |
+| `<name>._q2muse._tcp.local` | SRV | priority 0, weight 0, port 7720, `q2muse-<6 hex>.local` |
+| `<name>._q2muse._tcp.local` | TXT | `id=<device id>` `v=1` |
+| `q2muse-<6 hex>.local` | A | `wlan0`'s address |
+| `_services._dns-sd._udp.local` | PTR | `_q2muse._tcp.local` (service type enumeration) |
+
+- `<name>` is the Q2's Bluetooth name (Settings > Bluetooth > Name, config.ini's `[Q2POD] BTNAME`), `Q2 Muse` unless renamed. The host label is `q2muse-` and the first three bytes of the device id in hex: stock's own hostname, `ingenic`, is every Q2's.
+- `id` is `HelloResp.device_id` as 16 lowercase hex digits, the key the app keeps a Q2's pairing under, so the app shows a Q2 once however many addresses it has had. `v` is this page's protocol version. The device id is in every `Hello` anyway; it names a Q2, never its owner.
+- Every record has a TTL of 120 s, so a Q2 that leaves without a goodbye drops out of a phone's list within two minutes.
+- It sends two announcements a second apart when it starts and whenever the address or the name changes (a goodbye for the old records first), and a goodbye (TTL 0) when the daemon stops (Car Remote off) or Wi-Fi loses its address. Otherwise it only answers: no periodic announcements, and a record is multicast at most once a second. A query whose known answers already hold the PTR with half its TTL left gets no answer (RFC 6762 section 7.1).
+- It answers only the names above, only to queries from port 5353, and ignores responses and malformed packets.
+
+The responder is `patch/coda_rc_mdns.c`, part of the daemon's poll loop. Stock's AirPlay receiver, shairport, has an mDNS responder of its own built in, with no way for another program to register with it; each binds 5353 with `SO_REUSEADDR`, as librespot's does, and all of them get every packet. ponytail: no probing or conflict resolution (RFC 6762 section 9), so two Q2s with the same Bluetooth name on one network claim one instance and the phone lists one of them; renaming either fixes it.
 
 ## Pairing and authentication
 
@@ -183,4 +203,5 @@ The emulator proves the protocol, the daemon, the data and the TCP transport end
 6. **AVRCP untouched.** With the car connected (A2DP + AVRCP: steering-wheel buttons and the car's track display working), connect and use the app over LE. Pass: the car's buttons and metadata keep working throughout (coda-rc never touches Classic profiles; SyncLink's `"SyncLink Mode | disconnect"` line must not appear in `logread`/demo's log).
 7. **Cover latency.** Time a cold `GetCover` for a 96 px thumbnail and a `Browse` of 50 items, over LE and TCP.
 8. **Forget.** Forget the phone in Settings > Car Remote while it is connected: its session closes within a second and its next `Hello` reports `paired: false`.
-9. **Off means off.** Car Remote off: `netstat -ltn` shows nothing on 7720, and no advertisement is seen.
+9. **Off means off.** Car Remote off: `netstat -ltn` shows nothing on 7720, `netstat -lun` no coda-rc on 5353, and no advertisement is seen.
+10. **Discovery.** With Car Remote on and the phone on the Q2's Wi-Fi, Q2 Muse Remote's Wi-Fi address tab lists the Q2 under its Bluetooth name within a few seconds, and the log says `mdns: <name> on <address>`. From a computer on that Wi-Fi, `avahi-browse -rt _q2muse._tcp` shows its SRV, TXT and address. Turn Car Remote off: the entry goes at once (the goodbye). The emulator proves the same against python-zeroconf with the daemon on the host's interface (`--mdns-if eth0`), as of 2026-11-17.
