@@ -53,6 +53,7 @@ def test_now_playing_opened_over_an_album_page_takes_the_zoom_both_ways(fw, ui, 
     album.props[b'_lb_page'] = 1  # dressed as the design's album page (library_album.c)
     h.load(fw)
     want = b'fade(duration=150)' if reduced else b'art_zoom(duration=300)'
+    assert h.np is not None
     assert h.np.props[b'open_anim_hint'] == want
     assert h.np.props[b'close_anim_hint'] == (b'fade(duration=150)' if reduced else b'art_zoom(duration=240)')
     assert h.registered == ([] if reduced else [b'art_zoom'])
@@ -63,4 +64,5 @@ def test_now_playing_opened_from_a_list_opens_at_once(fw, ui):
     h = Hints(fw, ui)
     ui.widget('window', ui.wm, (0, 40, 375, 280), name='allmusic_page')
     h.load(fw)
+    assert h.np is not None
     assert b'open_anim_hint' not in h.np.props and h.registered == []  # nothing set: stock's immediate open
