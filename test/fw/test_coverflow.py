@@ -927,6 +927,64 @@ def test_a_toast_over_home_leaves_the_split_rows_in_the_bar(fw, library, toast):
     assert home.list in painted
 
 
+def test_a_slide_over_home_paints_its_band_drifting_with_home(fw, library):
+    """A page sliding over Home in Split (a push, or a Return back to Home): stock paints the bar before each frame's
+    percent, so page_parallax.c's draw of the page under paints it again, and the bar draws Home's band, the list's
+    rows above Home's window, drifted with Home's snapshot, left of the sliding page and darkened as the snapshot is;
+    the title shows only over the sliding page, faded as far as it is out (user, 2026-11-17: Control Center > hold
+    Bluetooth > Return, or Library > Return, ran a flat band across the top for the whole slide, Home's raised top row
+    cut, the closing page's title over it)."""
+    ui = Ui(fw)
+    split_inset_set(fw, library, 2)
+    home = fw.var('coverflow__home', Home)
+    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
+    home.art = ui.make(win, 'image', 196, 0, 179, 262)
+    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
+    title = ui.make(bar, 'hscroll_label', 64, 0, 120, 58, name='label_title')
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
+    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='localmusic_page')  # the sliding page
+    ui.animating = 1
+    canvas = Canvas(fw)
+    clips, moves, painted, alphas = [], [], [], []
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
+    fw.mock('canvas_translate', lambda c, x, y, *_: moves.append((C.c_int(x).value, C.c_int(y).value)))
+    fw.mock('canvas_set_global_alpha', lambda c, a, *_: alphas.append(a))
+    paint_bg = fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)
+    paint_border = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
+
+    def paint(w, c, *_):  # stock's widget_paint of the bar: its background, then the title's
+        painted.append(w)
+        if w == bar:
+            paint_bg(bar, c)
+            paint_bg(title, c)
+            paint_border(title, c)
+    fw.mock('widget_paint', paint)
+    # stock's own paint of the bar, before the frame's percent: no band
+    paint_bg(bar, canvas.p)
+    assert home.list not in painted
+    wa = C.create_string_buffer(0x100)
+    struct.pack_into('<QQ', wa, 0x14, win, ui.top)  # prev_win, curr_win
+    struct.pack_into('<Q', wa, 0xb8, canvas.p)
+    struct.pack_into('<f', wa, 0xb4, 0.5)  # the new page half in
+    fw.mock('htranslate_draw_prev', lambda *_: 0)
+    clips.clear(), moves.clear(), canvas.rects.clear()
+    assert fw.fn('parallax_prev', C.c_int, C.c_void_p)(C.addressof(wa)) == 0
+    dx, open_ = round(375 * 0.5 * 0.3), 375 - round(375 * 0.5)  # Home drifts 56 px; the page covers from 187
+    assert painted[:2] == [bar, home.list]
+    assert (0 - dx, 58) in moves and (dx, -58) in moves  # the list at Home's drifted place
+    assert (0, 0, 196 - dx, 58) in clips  # its columns left of the art, all left of the page
+    assert (0x20000000, 0, 0, open_, 58) in canvas.rects  # the band darkened as Home's snapshot below it
+    assert (open_, 0, 375 - open_, 320) in clips and alphas == [128, 255]  # the title over the page alone, faded
+    # the frame painted: the bar's next paint is stock's again, no band
+    painted.clear()
+    paint_bg(bar, canvas.p)
+    assert home.list not in painted
+    ui.animating = 0
+
+
 def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
     row, client = split_inset_set(fw, library, 2)  # OLED's
     pw, ph = 375 - row['split_art'], client + row['split_art_up']
@@ -4052,7 +4110,7 @@ def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()
         ui[view].props['_ringnav_index'] = sel
     canvas = Canvas(fw)
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
-    fw.fn('home_fades', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(canvas.p, home.list, list_y, cols, split)
+    fw.fn('home_fades', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(canvas.p, home.list, list_y, cols, split, 0)
     rows = {}
     for colour, x, y, w, h in canvas.rects:
         assert h == 1 and colour & 0xffffff == 0  # one row of the black ground

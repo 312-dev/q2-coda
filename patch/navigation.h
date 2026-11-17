@@ -541,6 +541,7 @@ int hero_cover_box(rect_t *r);
 /* page_parallax.c: a page's push and pop, the page under drifting and dimming */
 int parallax_under_x(int w, float percent);
 unsigned parallax_dim(float percent);
+void *parallax_slide(float *percent);
 /* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
 void np_settle_poll(void);
 int np_settle_scale(void);
