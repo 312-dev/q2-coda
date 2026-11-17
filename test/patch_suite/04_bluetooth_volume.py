@@ -159,7 +159,7 @@ assert b.writes()==[0] and [c[1:3] for c in b.calls if c[0]=='stock_btvol']==[(0
 for cur in (-1,128,255):
     b=BtVolumeMachine(); b.absolute=cur
     assert b.volume(20,30)==[(20,30)] and not b.writes(); passed()
-b=BtVolumeMachine(); b.write_result=-1
+b=BtVolumeMachine(); b.write_result=-1; b.absolute=40  # not 30's level already: a write it refuses
 assert b.volume(20,30)==[(20,30)] and b.writes()==[10]; passed()
 for name,value in (('g_bluetoothflag',0),('bt_linkstatus',0),('bt__recv_pageflag',1),('bt_showcoding',0)):
     b=BtVolumeMachine()
