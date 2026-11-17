@@ -50,7 +50,7 @@ INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
 SCANNERS = (
     ('patch/', ('.c', '.h', '.inc'), 'test_theme.py'),  # colours and type sizes named by token, not restated
     ('patch/', ('.c',), 'test_art.py'),                  # corner radii in the table, empty-state glyphs drawn
-    ('patch/', None, 'test_docs.py'),                    # docs/X.md#anchor citations resolve
+    ('patch/', None, 'test_docs.py'),                    # every doc anchor a source cites resolves
     ('tools/', None, 'test_docs.py'),
     ('test/', None, 'test_docs.py'),
 )
