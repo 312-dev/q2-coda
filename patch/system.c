@@ -310,6 +310,7 @@ void ringnav_clean_end(void) {
     if (pw.ended) return;
     pw.ended = 1;
     wdt_set(0);
+    config_settle(1);
     durations_shutdown(1);
     unlink(STATE_FILE);
     unlink(STALL_FILE); /* one the thread hadn't removed yet: S90play's next demo never would */
@@ -376,7 +377,8 @@ int ringnav_standby(void) {
     unsigned alarm = start + hours[st.standby_limit] * 3600;
     int armed = start && rtc_alarm(0) && rtc_alarm(alarm);
     pw.suspended = 1;
-    state_poll(); /* the record a resume that never comes leaves behind */
+    config_settle(1); /* a suspend may end in a power-off */
+    state_poll();     /* the record a resume that never comes leaves behind */
     wdt_set(0);   /* it would count through the suspend */
     int result = stock_standby_trampoline();
     wdt_set(1);
@@ -520,4 +522,5 @@ void power_poll(void) {
     state_poll();
     smart_poll();
     wifi_transfer_poll();
+    config_settle(0);
 }

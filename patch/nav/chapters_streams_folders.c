@@ -2,8 +2,9 @@
 static int spot_at(unsigned key) {
     if (!st.spots_read) {
         st.spots_read = 1;
-        if (!BLOB_IO(RESUME_FILE, st.spots, 0)) /* earlier releases kept 32 */
-            blob_io(RESUME_FILE, RESUME_FILE, st.spots, 32 * sizeof *st.spots, 0);
+        int n = card_blob_read(RESUME_STORE, st.spots, sizeof st.spots);
+        if (n != (int)sizeof st.spots && n != 32 * (int)sizeof *st.spots) /* earlier releases kept 32 */
+            memset(st.spots, 0, sizeof st.spots);
     }
     for (int i = 0; i < RESUME_SLOTS; i++)
         if (st.spots[i].key == key) return st.spots[i].sec;
@@ -13,7 +14,8 @@ static int spot_at(unsigned key) {
 void plays_load(void) {
     if (!st.plays_read) {
         st.plays_read = 1;
-        BLOB_IO(PLAYS_FILE, st.plays, 0);
+        if (card_blob_read(PLAYS_STORE, st.plays, sizeof st.plays) != (int)sizeof st.plays)
+            memset(st.plays, 0, sizeof st.plays);
     }
 }
 

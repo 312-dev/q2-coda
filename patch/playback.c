@@ -4,10 +4,22 @@
 #include "chapters.h"
 #include "offsets.inc"
 #include "peq.h"
+#include "card_store.h"
 #include "stock.h"
 #define M(a) (*(volatile int *)(a))
-#define QUEUE_FILE "/mnt/data/ringnav-queue"
+/* On the card (card_store.c, docs/internals.md#where-q2-muse-writes): a queue's songs are there too.
+ * The flash files earlier releases wrote are read until the card has a copy. */
+#define QUEUE_FLASH "/mnt/data/ringnav-queue"
+#define QUEUE_FILE CARD_STORE_DIR "/ringnav-queue"
 #define CHECKPOINT_FILE QUEUE_FILE "-elapsed"
+/* the snapshot's RAM copy while the card is away: a few hundred songs' paths; a larger one waits
+ * for the card, retried as a failed save is */
+#define QUEUE_HELD_MAX (256 * 1024)
+static card_blob queue_store __attribute__((section(".scratch"))),
+    elapsed_store __attribute__((section(".scratch")));
+#define QUEUE_STORE card_blob_at(&queue_store, QUEUE_FILE, QUEUE_FLASH, QUEUE_HELD_MAX)
+#define ELAPSED_STORE                                                                              \
+    card_blob_at(&elapsed_store, CHECKPOINT_FILE, QUEUE_FLASH "-elapsed", sizeof(checkpoint))
 #define QUEUE_LIMIT 65536
 #define HISTORY_LIMIT 4096
 /* ponytail: Play Next's pending list holds 64 queue indices; a new one past that drops the oldest
@@ -505,7 +517,7 @@ static void release(void) {
     s.groups = s.seen = s.history = 0;
     s.n = s.hn = s.cursor = s.npend = 0;
     s.resume_key = s.resume_pending = s.resume_wait = s.save_failed = 0;
-    unlink(QUEUE_FILE);
+    card_blob_drop(QUEUE_STORE);
     s.dirty = 1; /* the next save writes a plain snapshot whole */
 }
 /* Albums as Coverflow tells them apart (album_cmp: tagged albums first), or folders. */
@@ -1524,7 +1536,7 @@ typedef struct {
 static int save_elapsed(int sec) {
     checkpoint c = { 0, s.saved_sum, s.saved_pos, (unsigned)sec };
     c.checksum = hash_bytes(FNV_SEED, (const unsigned char *)&c.snapshot, 3 * 4);
-    return BLOB_IO(CHECKPOINT_FILE, c, 1);
+    return card_blob_write(ELAPSED_STORE, &c, sizeof c);
 }
 void playback_save(void) {
     /* Without advanced play a local queue (folder or library, as Play Next grows) is kept plain,
@@ -1539,7 +1551,7 @@ void playback_save(void) {
     unsigned n = plain ? deque_size(queue()) : s.n;
     if (plain && !n) return; /* boot's empty queue, before the snapshot restores */
     if (!n || n > SAVE_LIMIT) {
-        unlink(QUEUE_FILE);
+        card_blob_drop(QUEUE_STORE);
         s.dirty = 0;
         s.saved_queue = 0;
         return;
@@ -1614,7 +1626,7 @@ void playback_save(void) {
         p += identity[0];
     }
     unsigned sum = ((snapshot *)buf)->checksum = hash_bytes(FNV_SEED, buf, size);
-    int ok = blob_io(QUEUE_FILE, QUEUE_FILE ".tmp", buf, size, 1);
+    int ok = card_blob_write(QUEUE_STORE, buf, size);
     free(buf);
     if (ok) {
         s.saved_elapsed = sec;
@@ -1654,7 +1666,9 @@ static int stock_memory(void *out) {
 }
 int ringnav_memory(void *out) {
     if (!g_memory_play && !g_carmode) return stock_memory(out);
-    void *f = fopen(QUEUE_FILE, "rb");
+    card_blob_flush(QUEUE_STORE); /* a RAM copy is not in the file: the card's turn first */
+    card_blob_flush(ELAPSED_STORE);
+    void *f = card_blob_open(QUEUE_STORE);
     if (!f) return stock_memory(out);
     snapshot h = { 0 };
     /* Raw header words, as the file has them: version 3 and 4 end with npend, type; version 2 with
@@ -1692,7 +1706,7 @@ int ringnav_memory(void *out) {
         ok = 0;
     if (fclose(f)) ok = 0;
     checkpoint c;
-    if (ok && BLOB_IO(CHECKPOINT_FILE, c, 0) && c.snapshot == h.checksum && c.pos == h.pos &&
+    if (ok && card_blob_read(ELAPSED_STORE, &c, sizeof c) == (int)sizeof c && c.snapshot == h.checksum && c.pos == h.pos &&
         c.elapsed <= 0x7fffffff && hash_bytes(FNV_SEED, (const unsigned char *)&c.snapshot, 3 * 4) == c.checksum)
         h.elapsed = c.elapsed;
     /* Validate the entire snapshot before queries or mutations. */
@@ -1926,12 +1940,14 @@ void playback_poll(void) {
     mono_sync();
     unsigned now = time_now_ms();
     /* playback_save writes only what changed, at most every 5 s. A track that just plays on
-     * writes its elapsed second every 30 s instead (a synced flash write each); a new track, a
-     * pause or a seek go within 5 s, a failed write retries every 30 s, and power-off saves
-     * exactly (ringnav_savequeue). */
+     * writes its elapsed second every 30 s instead (a synced card write each, or a RAM copy while
+     * the card is away, written here once it is back); a new track, a pause or a seek go within
+     * 5 s, a failed write retries every 30 s, and power-off saves exactly (ringnav_savequeue). */
     if (!(s.dirty && !s.save_failed)) {
         if (now - s.stamp < (s.save_failed ? 30000u : 5000u) || now - s.poll_stamp < 5000) return;
         s.poll_stamp = now;
+        card_blob_flush(QUEUE_STORE);
+        card_blob_flush(ELAPSED_STORE);
         int sec = 0, total = 0;
         mclGetPlayTime(&sec, &total);
         if (now - s.stamp < 30000 && !s.save_failed && mclGetPlayStatus() == 2 &&

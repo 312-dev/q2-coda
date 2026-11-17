@@ -8,6 +8,7 @@
 int config_value(const char *section, const char *key, int n, int def) {
     char s[256] = "", d[12];
     tk_snprintf(d, sizeof d, "%d", def);
+    config_settle(1); /* a held key reads back as last set */
     toolsReadConfig("/mnt/data/config.ini", section, key, s, d);
     int v = 0, i = 0;
     for (; i < 3 && s[i] >= '0' && s[i] <= '9'; ++i) v = v * 10 + s[i] - '0';

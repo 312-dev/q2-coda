@@ -120,7 +120,8 @@ class Rig:
         return self.lib.sqlite3_exec(db, fixed, cb, ctx, err)
 
     def host(self, path):
-        return self.tmp/path[len(CARD_DB):].decode() if path.startswith(CARD_DB) else None
+        # the catalogue's database files, on disk for sqlite; card_store.c's records there stay in the Files dict
+        return self.tmp/path[len(CARD_DB):].decode() if path.startswith(CARD_DB + b'catalogue') else None
 
     def access(self, path, mode, *_):
         path = C.string_at(path)

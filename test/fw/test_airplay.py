@@ -53,7 +53,9 @@ class Tap:
         fw.mock('mclGetOutputWay', lambda *_: self.way)
         self.volume, self.limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
         self.volume.value, self.limit.value = 60, 80
-        self.save = fw.fn('ringnav_write_config', C.c_int, C.c_int, C.c_void_p, C.c_void_p)  # stock's write_int_config, hooked
+        hook, settle = fw.fn('ringnav_write_config', C.c_int, C.c_int, C.c_void_p, C.c_void_p), fw.fn('config_settle', None, C.c_int)
+        # stock's write_int_config, hooked; a held volume key written at once, so each save is seen in order
+        self.save = lambda v, s, k: (hook(v, s, k), settle(1))[0]
         fw.mock('write_int_config', lambda v, s, k, *_: self.save(C.c_int(v).value, s, k))  # as tools/build.py routes it
 
     def open(self, path, flags, *_):
