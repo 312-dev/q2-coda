@@ -55,7 +55,7 @@ class Bar:
         self.bar_fn = fw.fn('tilt_bar', None, C.c_void_p, C.c_void_p, C.POINTER(Rect), C.c_uint, C.c_int)
         self.poll_fn = fw.fn('tilt_poll', None)
         self.end_fn = fw.fn('tilt_end', None, C.c_void_p, C.c_int)
-        self.clip_fn = fw.fn('tilt_clip', C.c_int, C.c_void_p, C.POINTER(C.c_int))
+        self.clip_fn = fw.fn('tilt_clip', C.c_int, C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_int))
 
     def paint(self, x=16, y=40, w=343, h=32):
         """tilt_bar on a bar at x, y (the list's coordinates): the box it leaves."""
@@ -157,13 +157,32 @@ def test_the_clip_widens_to_the_lean_and_only_while_it_leans(fw):
     bar = Bar(fw, win_y=58)
     bar.paint(y=0)  # the first row
     old = (C.c_int * 4)()
-    assert not bar.clip_fn(C.addressof(bar.canvas), old) and not bar.set_clips  # at rest: untouched
+    screen = (C.c_int * 4)(0, 0, 375, 320)  # this pass's clip before the list's own
+    assert not bar.clip_fn(C.addressof(bar.canvas), old, screen) and not bar.set_clips  # at rest: untouched
     bar.turn(-.5)
     bar.paint(y=0)
-    assert bar.clip_fn(C.addressof(bar.canvas), old) == 1 and list(old) == bar.clip
+    assert bar.clip_fn(C.addressof(bar.canvas), old, screen) == 1 and list(old) == bar.clip
     box = bar.state.box  # in the window's coordinates, MARGIN round the bar
     top, foot = max(0, 58 + box.y), 58 + box.y + box.h
     assert bar.set_clips == [[0, min(60, top), 375, max(260, foot) - min(60, top)]]
+
+
+@pytest.mark.parametrize('frame', ([0, 200, 375, 40], [0, 100, 375, 4], [0, 50, 375, 20]))
+def test_the_widened_clip_stays_inside_this_pass_s_clip(fw, frame):
+    """The lean's clip is widened past the list's edges, never past the clip this paint pass had before the list's
+    own (frame: its dirty area). A small repaint over the list while the bar leans (the art pane's drift, a clock
+    tick) paints only there; widened past it the bar covered the lit row's words, which that pass never paints
+    again, so they vanished on every other frame (user, 2026-11-17: the text inside the selected row flickers while
+    the wheel is dragged short of a tick)."""
+    bar = Bar(fw, win_y=58)
+    bar.clip = [0, max(frame[1], 60), 375, 4]  # the list's clip: the pass's, cut to the list
+    bar.paint(y=40)
+    bar.turn(.5)
+    bar.paint(y=40)
+    old = (C.c_int * 4)()
+    assert bar.clip_fn(C.addressof(bar.canvas), old, (C.c_int * 4)(*frame)) == 1
+    x, y, w, h = bar.set_clips[-1]
+    assert frame[1] <= y and y + h <= frame[1] + frame[3]
 
 
 def test_the_bar_never_rises_past_its_windows_top(fw):
