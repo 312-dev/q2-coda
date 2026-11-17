@@ -110,7 +110,8 @@ class Queue:
                '--result', str(batch/'result.json')]
         with open(batch/'batch.log', 'w') as f:
             return self.wait(subprocess.Popen(cmd, cwd=self.wt, stdout=f, stderr=subprocess.STDOUT,
-                                              env={**os.environ, 'Q2_QUEUE': '1'}, start_new_session=True))
+                                              env={**os.environ, 'Q2_QUEUE': '1', 'Q2_HEAVY_CLASS': 'queue'},
+                                              start_new_session=True))
 
     def run_post(self, logs):
         """The post tier on the tip; (exit status, the failed suites)."""
@@ -118,7 +119,8 @@ class Queue:
         cmd = [self.python, str(self.wt/'tools/ci/gate.py'), '--tier', 'post', '--logs', str(logs), '--results', str(results)]
         logs.mkdir(parents=True, exist_ok=True)
         with open(logs/'gate.log', 'w') as f:
-            rc = self.wait(subprocess.Popen(cmd, cwd=self.wt, stdout=f, stderr=subprocess.STDOUT, start_new_session=True))
+            rc = self.wait(subprocess.Popen(cmd, cwd=self.wt, stdout=f, stderr=subprocess.STDOUT, start_new_session=True,
+                                            env={**os.environ, 'Q2_HEAVY_CLASS': 'queue'}))
         try:
             bad = sorted(n for n, r in json.loads(results.read_text()).items() if r['rc'] != 0)
         except (OSError, ValueError):

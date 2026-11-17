@@ -454,3 +454,198 @@ def test_a_stop_file_stops_a_running_batch_and_what_it_started(tmp_path):
             return
         time.sleep(0.02)
     raise AssertionError(f'the batch\'s sleep ({pid}) outlived the stop')
+
+
+# --- the command guard (tools/ci/hooks/guard.py) ---
+
+sys.path.insert(0, str(CI/'hooks'))
+import guard  # noqa: E402
+
+
+@pytest.mark.parametrize('command', [
+    'until ! pgrep -f "rebuild.py --dev" >/dev/null; do sleep 5; done; tail -3 log',
+    'nohup bash -c \'until ! pgrep -f GradleMain; do sleep 3; done; echo done\' &',
+    'while kill -0 $P; do sleep 2; done',
+    'until grep -q passed run.log; do sleep 5; done',
+    'git stash', 'cd x && git stash pop', 'git -C /r stash push -u -m tag',
+    'pkill -f patch.py', 'killall python3',
+    'python3 -m pytest test/fw -q -n auto',
+    'git push origin release/p31', 'git push origin HEAD:release/p32', 'git push origin +main',
+    'Q2_QUEUE=1 git merge --ff-only x', 'env Q2_TRUNK_ADMIN=1 git branch -f release/p31 abc',
+    'python3 tools/ci/patch_shards.py "$B"', 'q2-heavy python tools/ci/patch_shards.py $B -j 8',
+    'python3 tools/ci/emu_pool.py put 2', 'rm -rf ~/q2-emu-server',
+])
+def test_the_guard_refuses(command):
+    assert guard.refusal(command), command
+
+
+@pytest.mark.parametrize('command', [
+    'q2-wait --pid 123 --timeout 600',
+    'timeout 600 bash -c "while kill -0 $P; do sleep 2; done"',
+    'n=0; until [ -f done ] || [ $n -gt 30 ]; do sleep 5; n=$((n+1)); done',
+    'for f in a b; do echo $f; sleep 1; done',
+    'while read -r line; do echo "$line"; done < file',
+    'git stash list', 'git commit -m "say why git stash is banned and pkill -f too"',
+    'grep -rn "pkill" docs/', 'kill 12345',
+    'python3 -m pytest test/fw -q -n 6',
+    'git push -u origin infra/orchestration', 'git push origin feat/release-notes',
+    'python3 tools/ci/patch_shards.py "$B" --lines 100:200', 'grep -n SHARD tools/ci/patch_shards.py',
+    'git log --oneline -- tools/ci/patch_shards.py',
+    'q2-heavy python3 test/patch.py "$B"',
+    'python3 tools/ci/emu_pool.py put 3', 'python3 tools/ci/emu_pool.py get "$B"',
+])
+def test_the_guard_allows(command):
+    assert guard.refusal(command) is None, command
+
+
+def hook(script, event):
+    return subprocess.run([sys.executable, str(CI/'hooks'/script)], input=json.dumps(event), capture_output=True, text=True)
+
+
+def test_the_guard_as_a_hook_blocks_with_exit_2_and_passes_everything_else():
+    p = hook('guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'until ! pgrep -f X; do sleep 3; done'}})
+    assert p.returncode == 2 and 'q2-wait' in p.stderr
+    assert hook('guard.py', {'tool_name': 'Bash', 'tool_input': {'command': 'ls'}}).returncode == 0
+    assert hook('guard.py', {'tool_name': 'Read', 'tool_input': {'file_path': 'git stash'}}).returncode == 0
+    assert subprocess.run([sys.executable, str(CI/'hooks/guard.py')], input='not json', capture_output=True,
+                          text=True).returncode == 0
+
+
+# --- q2-wait ---
+
+def wait_cmd(*args):
+    return subprocess.run([sys.executable, str(CI/'q2-wait'), *args], capture_output=True, text=True)
+
+
+def test_q2_wait_ends_with_the_process_the_line_or_the_clock(tmp_path):
+    child = subprocess.Popen(['sleep', '0.3'])
+    assert wait_cmd('--pid', str(child.pid), '--timeout', '10', '--poll', '0.05').returncode == 0
+    child.wait()
+    t = time.monotonic()
+    p = wait_cmd('--pid', str(os.getpid()), '--timeout', '0.4', '--poll', '0.05')
+    assert p.returncode == 124 and 'timed out' in p.stdout and time.monotonic() - t < 5
+    log = tmp_path/'run.log'
+    log.write_text('starting\n12 passed in 3s\n')
+    assert wait_cmd('--log', str(log), '--match', 'passed|failed', '--timeout', '5').stdout.strip() == '12 passed in 3s'
+    log.write_text('starting\nTraceback (most recent call last):\n')
+    assert wait_cmd('--log', str(log), '--match', 'passed', '--fail', 'Traceback', '--timeout', '5').returncode == 1
+    log.write_text('starting\npass')  # a line not ended yet is not a match
+    assert wait_cmd('--log', str(log), '--match', 'pass', '--timeout', '0.3', '--poll', '0.05').returncode == 124
+
+
+def test_q2_wait_will_not_wait_without_a_limit():
+    assert wait_cmd('--pid', '1').returncode == 2
+    assert wait_cmd('--pid', '1', '--timeout', '99999').returncode == 2
+    assert wait_cmd('--timeout', '5').returncode == 2
+
+
+# --- q2: the registry, the stop ---
+
+def q2(tmp_path, *args, **env):
+    e = {**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q'), 'Q2_HEAVY_LOCKDIR': str(tmp_path/'heavy'),
+         'Q2_ROOTS': str(tmp_path/'work'), **env}
+    return subprocess.run([sys.executable, str(CI/'q2'), *args], capture_output=True, text=True, env=e)
+
+
+def test_a_second_worker_in_a_worktree_is_refused(tmp_path):
+    repo = Repo(tmp_path/'work/r')
+    assert q2(tmp_path, 'agent', 'start', 'w1', '--worktree', str(repo.path), '--item', 'the lyrics page').returncode == 0
+    again = q2(tmp_path, 'agent', 'start', 'w2', '--worktree', str(repo.path))
+    assert again.returncode != 0 and 'w1 has been working' in again.stderr
+    assert q2(tmp_path, 'agent', 'start', 'w2', '--worktree', str(repo.path), '--takeover').returncode == 0
+    rows = [line.split('\t') for line in q2(tmp_path, 'agent', 'list').stdout.splitlines()]
+    assert [(r[0], r[4]) for r in rows] == [('w1', 'replaced'), ('w2', 'running')]
+
+
+def test_a_worker_cannot_end_with_a_process_left_in_its_worktree(tmp_path):
+    repo = Repo(tmp_path/'work/r')
+    q2(tmp_path, 'agent', 'start', 'w1', '--worktree', str(repo.path))
+    left = subprocess.Popen(['sleep', '60'], cwd=repo.path, start_new_session=True)
+    try:
+        refused = q2(tmp_path, 'agent', 'end', 'w1', '--state', 'BLOCKED')
+        assert refused.returncode != 0 and f'process {left.pid}' in refused.stderr
+        stop = hook('subagent_stop.py', {'cwd': str(repo.path), 'hook_event_name': 'SubagentStop'})
+        # the hook asks the installed registry, so point it at this test's through the environment
+        stop = subprocess.run([sys.executable, str(CI/'hooks/subagent_stop.py')], capture_output=True, text=True,
+                              input=json.dumps({'cwd': str(repo.path)}),
+                              env={**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q'), 'Q2_HEAVY_LOCKDIR': str(tmp_path/'heavy')})
+        assert stop.returncode == 2 and f'process {left.pid}' in stop.stderr
+    finally:
+        left.kill()
+        left.wait()
+    assert q2(tmp_path, 'agent', 'end', 'w1', '--state', 'BLOCKED').returncode == 0
+    stop = subprocess.run([sys.executable, str(CI/'hooks/subagent_stop.py')], capture_output=True, text=True,
+                          input=json.dumps({'cwd': str(repo.path)}), env={**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q')})
+    assert stop.returncode == 0
+    # READY also needs the work committed and pushed
+    q2(tmp_path, 'agent', 'start', 'w3', '--worktree', str(repo.path))
+    assert 'not pushed' in q2(tmp_path, 'agent', 'end', 'w3', '--state', 'READY').stderr
+
+
+def gone(pid, seconds=5):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            state = pathlib.Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
+        except OSError:
+            return True
+        if state == 'Z':
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_stop_all_ends_q2_processes_and_nothing_else(tmp_path):
+    work = tmp_path/'work'
+    (work/'tools/ci').mkdir(parents=True)
+    script = work/'tools/ci/fake_suite.sh'
+    script.write_text('sleep 60 & wait\n')
+    other = tmp_path/'elsewhere'
+    other.mkdir()
+    ours = subprocess.Popen(['bash', str(script)], cwd=work, start_new_session=True)
+    rig = subprocess.Popen(['bash', '-c', f'exec -a q2-emu-pool2-viewer bash {script}'], cwd=work, start_new_session=True)
+    bystander = subprocess.Popen(['sleep', '60'], cwd=other, start_new_session=True)
+    try:
+        time.sleep(0.3)
+        listed = q2(tmp_path, 'stop-all')
+        assert listed.returncode == 0 and f'proc  {ours.pid}' in listed.stdout and 'nothing was touched' in listed.stdout
+        assert ours.poll() is None  # a listing stops nothing
+        done = q2(tmp_path, 'stop-all', '--yes')
+        assert done.returncode == 0 and 'nothing q2 is left running' in done.stdout, done.stdout + done.stderr
+        assert gone(ours.pid)
+        assert rig.poll() is None and bystander.poll() is None  # the user's rig and what is not q2's are left alone
+        assert (tmp_path/'q/STOP').exists()
+    finally:
+        for p in (ours, rig, bystander):
+            with __import__('contextlib').suppress(ProcessLookupError):
+                os.killpg(p.pid, 9)
+            p.wait()
+
+
+@pytest.mark.skipif(subprocess.run(['systemd-run', '--user', '--scope', '-q', 'true'], capture_output=True).returncode != 0,
+                    reason='no systemd user session')
+def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
+    env = {**os.environ, 'Q2_HEAVY_LOCKDIR': str(tmp_path), 'Q2_HEAVY_RAMP': '0', 'Q2_HEAVY_NODUMP_SRC': '/none'}
+    env.pop('Q2_HEAVY_JOB', None)
+    job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_MAX_S': '2'}, cwd=CI,
+                           stderr=subprocess.PIPE, text=True)
+    record = tmp_path/'q2-heavy/jobs'/str(job.pid)
+    end = time.monotonic() + 5
+    while not record.exists() and time.monotonic() < end:
+        time.sleep(0.05)
+    fields = dict(line.split('=', 1) for line in record.read_text().splitlines())
+    assert fields['class'] == 'branch' and fields['command'] == 'sleep 30' and fields['worktree'] == str(CI.parents[1])
+    t = time.monotonic()
+    assert job.wait(15) == 143 and time.monotonic() - t < 10
+    assert 'deadline' in job.stderr.read() and not record.exists()
+    # the queue's class is recorded as such, and stop-all ends a job by its scope
+    job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_CLASS': 'queue'}, cwd=CI)
+    record = tmp_path/'q2-heavy/jobs'/str(job.pid)
+    end = time.monotonic() + 5
+    while not record.exists() and time.monotonic() < end:
+        time.sleep(0.05)
+    assert 'class=queue' in record.read_text()
+    done = subprocess.run([sys.executable, str(CI/'q2'), 'stop-all', '--yes'], capture_output=True, text=True,
+                          env={**os.environ, 'Q2_QUEUE_DIR': str(tmp_path/'q'), 'Q2_HEAVY_LOCKDIR': str(tmp_path),
+                               'Q2_ROOTS': str(tmp_path/'none')})
+    assert job.wait(15) != 0 and 'nothing q2 is left running' in done.stdout, done.stdout

@@ -172,7 +172,7 @@ def plan_for(changes, root=ROOT, patch_source=None):
                 p.add('fw', ALL, f'{path}: a build input (test/fw builds from tools/ lists)')
                 p.other.add('test/build.py')
         elif parts[:2] == ('tools', 'ci'):
-            p.other.add('tools/ci/test_ci.py')
+            p.other.update({'tools/ci/test_ci.py', 'tools/ci/test_orch.py'})
             p.why.append(f'{path}: the CI tools\' own tests')
         elif parts[0] == 'assets':
             p.add('patch', ALL, f'{path}: an asset the build rewrites')
@@ -258,7 +258,7 @@ def run(plan, build, python):
         else:
             go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
-        if other == 'tools/ci/test_ci.py':
+        if other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))
