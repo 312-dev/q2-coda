@@ -1015,6 +1015,37 @@ def test_a_level_the_headset_already_shows_is_kept(fw):
     assert not fw.calls('btctl_transport_set_volume')
 
 
+# Link Volume unset: on for headphones and headsets (their Class), off for anything else; a choice saved wins.
+CLASSES = {'headphones': 0x240418, 'headset': 0x240404, 'speaker': 0x240414, 'car': 0x240420, 'unknown': 0}
+PX7 = 'AA:BB:CC:DD:EE:07'
+
+
+def linked_device(fw, kind, link=None):
+    """bt_link's link with the device connected now of kind (its Class, as the battery loop's file gives it), and
+    Link Volume as saved (None: never chosen)."""
+    bt_link(fw)
+    Config(fw, **({} if link is None else {'BTVOLLINK': link}))
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    def item(i, status, mac, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(mac, PX7.encode() + b'\0', len(PX7) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)  # the battery loop's start
+    Files(fw, {'/tmp/q2-btbatt': f'{PX7} 80 48000 {CLASSES[kind]} Px7\n'.encode()})
+
+
+@pytest.mark.parametrize('kind, link, synced', [('headphones', None, True), ('headset', None, True), ('speaker', None, False),
+                                                ('car', None, False), ('unknown', None, False), ('headphones', b'0', False),
+                                                ('speaker', b'1', True)])
+def test_link_volume_unset_follows_headphones_and_a_choice_wins(fw, kind, link, synced):
+    linked_device(fw, kind, link)
+    headset = Headset(fw, 30)
+    headset.btvol(40, 20)
+    assert (headset.level == curve(40)) == synced
+    assert headset.gains == ([(100, 50)] if synced else [(40, 20)])
+
+
 @pytest.mark.parametrize('kind', ['unlinked', 'no codec', 'jack', 'receiver', 'off', 'down'])
 def test_without_a_ready_link_the_volume_stays_in_software(fw, kind):
     bt_link(fw, link=b'0' if kind == 'unlinked' else b'1', codec=0 if kind == 'no codec' else 1, way=0 if kind == 'jack' else 1)

@@ -341,7 +341,8 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and Playlist View
  * (PLAYLISTCF).
  */
-/* Bluetooth's Link Volume on: the Q2's volume is the device's own (bt_audio_ready). */
+/* Bluetooth's Link Volume as saved, -1 never chosen (bt_link): on, the Q2's volume is the device's
+ * own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
 /* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
  * to On-The-Go; on unless the key says 0. */
@@ -403,9 +404,12 @@ static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_ST
 void pod_settings(void) {
     if (st.pod_read) return;
     for (unsigned i = 0; i < sizeof pod_keys / sizeof *pod_keys; ++i)
-        if (pod_keys[i]) /* Artist albums defaults to Coverflow, On-The-Go to on */
+        if (pod_keys[i]) /* Artist albums defaults to Coverflow, On-The-Go to on; Link Volume
+                          * never chosen is -1 (bt_link) */
             *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
-                                          i == POD_ARTIST_CF || i == POD_OTG);
+                                          i == POD_BT_LINK                     ? -1
+                                          : i == POD_ARTIST_CF || i == POD_OTG ? 1
+                                                                               : 0);
     st.pod_read = 1;
 }
 int ringnav_year_old(void) {
@@ -453,9 +457,13 @@ int ringnav_bt_resume(void) {
     pod_settings();
     return st.resume;
 }
+/* Link Volume as it applies now: the choice saved, else on for the device connected now when its
+ * Class is headphones or a headset (bt_kind's "headphones", from the battery loop's read of it,
+ * bt_battery.c) and off for a speaker, a car or a device not yet known, whose own amplifier a low
+ * Q2 volume would turn down with it (docs/internals.md#headset-controls-and-volume). */
 static int bt_link(void) {
     pod_settings();
-    return bt_vol_link;
+    return bt_vol_link >= 0 ? bt_vol_link : !tk_strcmp(bt_kind(bt_headset_class()), "headphones");
 }
 /* read_artistype_value (a Library list's or artist page's init) and boot (playback.c
  * ringnav_bootmode): Artists as stock reads it, PLAYSET ARTISTTYPE, but Album Artist when no choice
@@ -516,6 +524,7 @@ static void pod_text(int i) {
             : i == POD_CARMODE     ? g_carmode != 0
             : i == POD_COVERMODE   ? g_bigcovermode == 1
             : i == POD_FOLDERCOVER ? g_foldercover_flag != 0
+            : i == POD_BT_LINK     ? bt_link() /* never chosen: what applies now */
             : pod_values[i]        ? *pod_values[i]
                                    : 0;
     /* a set_switch theme's Charge Limit is a key/value row, Off or its level, as names[] has it */
@@ -580,7 +589,7 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(g_foldercover_flag, "PLAYSET", "FOLDERCOVER");
     } else {
         int *value = pod_values[i];
-        *value = (*value + 1) % pod_choices(i);
+        *value = i == POD_BT_LINK ? !bt_link() : (*value + 1) % pod_choices(i);
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();

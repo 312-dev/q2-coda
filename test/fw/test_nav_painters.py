@@ -1958,6 +1958,29 @@ def test_device_volume_off_gives_stock_its_gain_back_at_once(fw, way, sent):
     assert [c[1][:2] for c in fw.calls('device_set_volume')] == [(37, 0)] * sent
 
 
+def test_link_volume_unset_shows_and_turns_off_from_what_applies(fw):
+    """Never chosen, the switch shows what applies to the device connected now: on for headphones; a click saves the
+    other way from there (off), and that choice holds."""
+    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 5, row_h=78)
+    fw.mock('stock_btrows_trampoline', build)
+    g(fw, 'g_bluetoothflag', 1)
+    mac = 'AA:BB:CC:DD:EE:07'
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    def item(i, status, out, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(out, mac.encode() + b'\0', len(mac) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)
+    Files(fw, {'/tmp/q2-btbatt': f'{mac} 80 48000 {0x240418} Px7\n'.encode()})  # headphones
+    fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
+    link = row(ui, view, 'Link Volume')
+    bt_link = fw.fn('navigation__bt_link', C.c_int)
+    assert switch(link) == 'switch_on' and bt_link() == 1
+    click(ui, link)
+    assert switch(link) == 'switch_off' and settings.written == [('BTVOLLINK', 0)] and bt_link() == 0
+
+
 def playset(fw, ui, view, stock_rows=13):
     """Stock's Playback rows, s0-s12: s8 Headphones required, s11 Volume and Album Display, s12 Folder skip."""
     def build(*_):

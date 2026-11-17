@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: **Link Volume** is on by itself for headphones and headsets, so their volume buttons and the Q2's wheel move one volume out of the box. Speakers and car stereos keep their own volume, as before. Once you switch Link Volume on or off yourself, your choice applies to every device.
   - Bluetooth: tapping a device (or pressing Center on it) while it says **Connecting…** stops connecting, including the automatic reconnect after Bluetooth comes on; the row goes back to **Not Connected**. Before, the tap did nothing until the 15-second attempt ran out.
   - Bluetooth: with **Link Volume** on, the volume steps sound even from quiet to loud. Before, half volume was already close to full on headphones such as the Bowers & Wilkins Px7, so only the bottom half of the range was usable; now about 80 sounds like the old 50. Pressing the headphones' own volume buttons now shows the volume on the screen while it is lit, as turning the wheel does, on any page (Now Playing, Control Center's slider and Settings > Playback > Volume follow it too).
   - Lists (OLED): the selected row's words no longer flicker while you drag the wheel part of the way to the next row; the leaning bar covered them on every other frame.
