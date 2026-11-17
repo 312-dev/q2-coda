@@ -32,6 +32,9 @@ def color_t(rgb): return 0xff000000|(rgb&255)<<16|(rgb>>8&255)<<8|rgb>>16
 O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth glyph a codec badge fades into
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
 SEED={}  # values a Machine reads for a missing key in place of the payload's default
+# Reduce Motion's flat selection bar, for the checks that pin the bar's shape and place: the bar's rest lift and press
+# (tilt.c, docs/internals.md#row-press) widen it and cast a shadow, and test/fw/test_tilt.py pins those.
+FLAT={'REDUCEMOTION':'1'}
 SETUP=[]  # functions a new Machine runs before anything can read config (QueueMachine's constructor does)
 FILL,RADIUS=(0x40<<24)|O['FILL_RGB'],9  # the stock rounded-rect checks' translucent fill and radius
 LCD_COLORS=(0x9abcdef0,0x12345678)
@@ -973,7 +976,7 @@ assert m.call()==11 and m.moved()[0][0]=='scroll_view_set_offset' and m.moved()[
 assert m.get(w+O['SCROLL_Y'])==148 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 
 # Painting establishes selection without a sacrificial button press or native focus.
-m=Machine(); w,entries=m.page_list(5,extent=1000)
+m=Machine(); m.config.update(FLAT); w,entries=m.page_list(5,extent=1000)
 assert m.paint(w)==0 and m.selected(w)==0
 # The bar is painted behind the rows: every band precedes the border hook, which draws nothing.
 names=[c[0] for c in m.calls]
@@ -1010,7 +1013,7 @@ assert m.clip==(0,0,240,240) and m.lcd_colors()==LCD_COLORS
 assert not any(m.get(e+O['W_FOCUS'])&0x80 for e in entries); passed()
 # A left image the round end would cut shrinks the radius (pill_radius); hidden (Folder's multi-select check) it doesn't.
 for visible,want in ((1,2),(0,radius)):
-    k=Machine(); kw,es=k.page_list(5,extent=1000)
+    k=Machine(); k.config.update(FLAT); kw,es=k.page_list(5,extent=1000)
     check=k.node('image','img_choice',visible=visible); k.nodes[es[0]]['children']=[check]
     for o,v in zip(('W_X','W_Y','W_W','W_H'),(inset,0,50,48)): k.word(check+O[o],v)
     k.paint(kw); assert [b[:5] for b in k.bands]==bar_bands(inset,0,240-2*inset,48,want),visible
@@ -1033,7 +1036,7 @@ for offset in (0, 24):
         assert g.rounded[-1]['radius']==0
         assert g.rounded[-1]['color']==OLED_BLUE; passed()
 # Touch mode draws nothing; the wheel brings the bar back.
-c=Machine(); cw,_=c.page_list(5,extent=1000); c.paint(cw)
+c=Machine(); c.config.update(FLAT); cw,_=c.page_list(5,extent=1000); c.paint(cw)
 c.touch(); c.paint(cw); assert not c.drawn() and c.clip==(0,0,240,240)
 c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,36,240-2*inset,48); passed()
 # Status bar: a solid fill on the bar widget alone, no highlight, LCD fill restored.
@@ -1758,13 +1761,13 @@ m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); m.bind(rows); m.paint(w
 assert m.selected(w)==0; passed()
 
 # A recreated page recalls the last selected row and reveals it without a sacrificial press.
-def walk(n,steps,texts=(),extent=1000,**kw):
-    """Paint a fresh labelled list of n entries, then wheel down steps rows."""
-    m=Machine(); w,es=m.page_list(n,extent=extent,**kw); m.label(es,texts); m.paint(w)
+def walk(n,steps,texts=(),extent=1000,flat=False,**kw):
+    """Paint a fresh labelled list of n entries, then wheel down steps rows; flat: its bar FLAT's."""
+    m=Machine(); flat and m.config.update(FLAT); w,es=m.page_list(n,extent=extent,**kw); m.label(es,texts); m.paint(w)
     for _ in range(steps): assert m.call()==11
     assert m.selected(w)==steps
     return m,w,es
-m,w,es=walk(10,5); assert m.get(w+O['SCROLL_Y'])==204
+m,w,es=walk(10,5,flat=True); assert m.get(w+O['SCROLL_Y'])==204
 w2,es2=m.page_list(10,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
 assert m.sel()==(inset,36,240-2*inset,48)

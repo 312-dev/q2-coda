@@ -216,7 +216,7 @@ All lists share one grid.
 
 ### Selection bar
 
-- Accent Blue, flat, the full row pitch tall, inset 16 px each side on every row, 8 px corners,
+- Accent Blue, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,
   (`list.selection.inset`, `list.selection.radius`).
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
@@ -233,6 +233,10 @@ All lists share one grid.
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
   The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
   black band and down into the fade.
+- **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
+  sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
+  blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
+  press during a tug wins; the lean goes. Reduce Motion: the brighter blue only, no scale and no shadow.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
