@@ -139,7 +139,9 @@ static int guest_relayed(void) {
     return *out && tk_strcmp(out, "jack");
 }
 /* The linked device's glyph's width: a car's is wider than the others' 14 px box at 11 px tall */
-static int linked_w(void) { return !tk_strcmp(bt_kind(bt_headset_class()), "car") ? SR_CAR_W : SR_GLYPH; }
+static int linked_w(void) {
+    return !tk_strcmp(bt_kind(bt_headset_class()), "car") ? SR_CAR_W : SR_GLYPH;
+}
 static int headset_shown(void) {
     int slot = bt_slot();
     if (slot == BT_SLOT_GUEST)
@@ -278,8 +280,8 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
             int at = x + SR_GLYPH + SR_BT_GAP;
             glyph(bar, canvas, "status_relay", at, SR_RELAY, cy, SR_RELAY);
             at += SR_RELAY + SR_BT_GAP;
-            status_art(bar, canvas, linked_w() == SR_CAR_W ? "status_car" : "status_headphones",
-                       at, cy);
+            status_art(bar, canvas, linked_w() == SR_CAR_W ? "status_car" : "status_headphones", at,
+                       cy);
         }
         break;
     case BT_SLOT_HEADSET: {
