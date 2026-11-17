@@ -33,6 +33,7 @@ uint8_t crc_device_id[8];
 typedef struct {
     int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
+    int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
     char path[512], title[160], artist[160], album[160];
 } np_t;
 
@@ -207,7 +208,7 @@ int crc_write(crc_session *s, const uint8_t *buf, size_t n) {
 /* ---- Now Playing: the shim's /tmp/coda-rc.now (coda_rc_shim.c np_write) ---- */
 
 static np_t np, np_sent;
-static uint32_t np_at, pos_pushed;
+static uint32_t np_at, pos_pushed, buf_pushed;
 
 static void np_parse(const char *b, np_t *o) {
     memset(o, 0, sizeof *o);
@@ -224,7 +225,8 @@ static void np_parse(const char *b, np_t *o) {
             if (0) {}
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
-            NUM("seq", seq) NUM("hearts", hearts) NUM("radio", radio) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
+            NUM("bms", bms) NUM("radio", radio) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -255,7 +257,7 @@ int crc_shim_alive(void) {
 
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
-           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_RADIO : 0) |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }
 
@@ -302,7 +304,11 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 10, np.volume);
     pb_varint(w, 11, np.hearts > 0 ? np.hearts : 0);
     pb_varint(w, 12, np.hearts >= 0 && rid > 0);
-    pb_varint(w, 17, np.radio != 0); /* CAP_RADIO; 13..16 are CAP_BUFFERING's (feat/p32-streaming) */
+    pb_varint(w, 13, np.buf != 0); /* CAP_BUFFERING: a server song loading, how far it has come */
+    pb_varint(w, 14, (uint32_t)np.bhave);
+    pb_varint(w, 15, (uint32_t)np.btotal);
+    pb_varint(w, 16, crc_buffered_ms((uint32_t)np.bhave, (uint32_t)np.btotal, (uint32_t)np.bms));
+    pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_end(w, m);
 }
 
@@ -344,14 +350,20 @@ static void np_poll(void) {
     if (!np_read() && !(np.state == 1 && crc_now_ms() - pos_pushed >= 1000)) return;
     int parts = 0;
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
-        np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts || np.radio != np_sent.radio ||
-        strcmp(np.path, np_sent.path) ||
+        np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
+        np.radio != np_sent.radio ||
+        strcmp(np.path, np_sent.path) || np.buf != np_sent.buf ||
+        /* its bytes: at most twice a second */
+        (np.bhave != np_sent.bhave && crc_now_ms() - buf_pushed >= 500) ||
         strcmp(np.title, np_sent.title))
         parts |= 1 | 2;
     if (np.qgen != np_sent.qgen || np.qpos != np_sent.qpos || np.qlen != np_sent.qlen) parts |= 4;
     if (np.pos_ms != np_sent.pos_ms) parts |= 2;  /* a seek, or the shim's once-a-second refresh */
     if (np.state == 1 && crc_now_ms() - pos_pushed >= 1000) parts |= 2;
+    int bhave = parts & 1 ? np.bhave : np_sent.bhave; /* bytes held back are sent at a later look */
     np_sent = np;
+    np_sent.bhave = bhave;
+    if (parts & 1) buf_pushed = crc_now_ms();
     if (!parts) return;
     lib_now(np.qgen, np.id);
     if (parts & 2) pos_pushed = crc_now_ms();
@@ -609,6 +621,13 @@ void crc_ble_gone(void) {
     if (ble.used) conn_close(&ble);
 }
 
+/* Whether a phone's Bluetooth scan can find this Q2 now: the Pair a Phone page reads it (carremote_page.c
+ * cr_howto_mode) to give the Bluetooth steps only then, the Wi-Fi ones otherwise. */
+void crc_ble_advertising(int on) {
+    if (on) crc_write_file("/tmp/coda-rc.ble", "1\n", 2, 0644);
+    else unlink_at("/tmp/coda-rc.ble");
+}
+
 /* ---- the loop ---- */
 
 static void on_term(int sig) { quit = 1; }
@@ -740,6 +759,7 @@ int main(int argc, char **argv) {
     crc_write_file("/tmp/coda-rc.pid", b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
     device_id();
     unlink_at("/tmp/coda-rc.pair");
+    unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
     int lfd = tcp_listen();
     crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
     int bfd = use_ble ? ble_start() : -1;

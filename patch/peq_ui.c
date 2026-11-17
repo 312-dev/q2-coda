@@ -52,7 +52,7 @@ static int eq_commit(eq_state *s) {
     return 1;
 }
 
-/* Control Center's EQ tile (control_center.c): off, or on as the EQ page's Enabled switch turns it
+/* Control Center's EQ circle (control_center.c): off, or on as the EQ page's Enabled switch turns it
  * on (PEQ, 3EQ off); nothing if that cannot be saved. */
 void eq_toggle(void) {
     eq_state s;
@@ -1602,7 +1602,7 @@ void q2eq_poll(void) {
         eq_state s;
         if (rq.arg == ui.draft.bypass) q2eq_act(HOME, BYPASS); /* Advanced's Enabled */
         else if (!rq.arg && eq_load(&s) && s.mode != EQ_OFF)
-            eq_toggle(), load(&s); /* 3EQ plays: off as Control Center's EQ tile turns it */
+            eq_toggle(), load(&s); /* 3EQ plays: off as Control Center's EQ circle turns it */
     } else if (rq.op == Q2EQ_PER_OUTPUT) {
         if (rq.arg != ringnav_eq_output()) q2eq_act(HOME, PER_OUTPUT);
     } else if (rq.op == Q2EQ_APPLY) {

@@ -3,9 +3,11 @@
  * Q2 is a peripheral a phone connects to. The frame stream rides the control characteristic's writes in and the
  * event characteristic's notifications out, cut at the link's MTU and joined again by the frames' lengths.
  *
- * bluetoothd is stock's BlueZ 5.66, started by demo when Bluetooth is on. When it is not on the bus, or goes,
- * registration is tried again every 30 s, and TCP goes on meanwhile. Proven only on a real Q2: the emulator has
- * no Bluetooth (docs/remote-protocol.md#testing-on-a-q2). */
+ * bluetoothd is stock's BlueZ 5.66, started by demo when Bluetooth is on. While it is off the bus (Bluetooth off)
+ * nothing is tried: its NameOwnerChanged, when it comes, starts the registration 2 s later. A refusal while it is
+ * on is tried again every 30 s. Each failure is logged once, not at every try, and TCP goes on meanwhile.
+ * /tmp/coda-rc.ble exists while both registrations stand, for the Pair a Phone page (crc_ble_advertising). Proven
+ * only on a real Q2: the emulator has no Bluetooth (docs/remote-protocol.md#testing-on-a-q2). */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 
@@ -87,12 +89,32 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 static struct {
     DBusConnection *bus;
     int fd, registered, notifying, mtu;
+    int absent;  /* bluetoothd is not on the bus: wait for its NameOwnerChanged, try nothing */
     DBusPendingCall *app_call, *adv_call;
     uint32_t failed_at;
+    char logged[96];  /* the last failure logged, so a failure that repeats is logged once */
     char device[96];  /* the connected phone's object path, from its writes */
 } b;
 
 /* ---- building replies ---- */
+
+/* what (a failure) logged unless it is the one logged last; 0 forgets it, so the next is logged */
+static void log_once(const char *what) {
+    if (!what) {
+        b.logged[0] = 0;
+        return;
+    }
+    if (!strcmp(what, b.logged)) return;
+    snprintf(b.logged, sizeof b.logged, "%s", what);
+    crc_log("ble: %s", what);
+}
+
+/* registered is both registrations' bits; the page's file follows whether both stand */
+static void set_registered(int bits) {
+    int was = b.registered == 3;
+    b.registered = bits;
+    if (was != (bits == 3)) crc_ble_advertising(bits == 3);
+}
 
 static void add_str(DBusMessageIter *it, int type, const char *s) { dbus_message_iter_append_basic(it, type, &s); }
 
@@ -300,14 +322,22 @@ static int on_message(DBusConnection *c, DBusMessage *m, void *data) {
 static int on_signal(DBusConnection *c, DBusMessage *m, void *data) {
     if (dbus_message_is_signal(m, "org.freedesktop.DBus", "NameOwnerChanged")) {
         DBusMessageIter it;
-        const char *name = "";
-        if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_STR) dbus_message_iter_get_basic(&it, &name);
+        const char *name = "", *owner = "";
+        if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_STR) {
+            dbus_message_iter_get_basic(&it, &name);
+            /* name, old owner, new owner: an empty new owner is bluetoothd gone */
+            if (dbus_message_iter_next(&it) && dbus_message_iter_next(&it) && dbus_message_iter_get_arg_type(&it) == T_STR)
+                dbus_message_iter_get_basic(&it, &owner);
+        }
         if (!strcmp(name, "org.bluez")) {
-            if (b.registered) crc_log("ble: bluetoothd changed; registering again");
-            b.registered = 0;
+            set_registered(0);
             b.notifying = 0;
             b.device[0] = 0;
             crc_ble_gone();
+            b.absent = !*owner;
+            log_once(0);
+            crc_log("ble: bluetoothd %s", b.absent ? "left the bus; waiting for it" : "started; registering in 2 s");
+            if (b.absent) snprintf(b.logged, sizeof b.logged, "bluetoothd is not running");
             b.failed_at = crc_now_ms() - RETRY_MS + 2000;  /* in 2 s, once it has its objects up */
         }
     }
@@ -339,19 +369,32 @@ static void pending(void) {
         dbus_pending_call_unref(pc);
         *calls[i] = 0;
         if (r && dbus_message_get_type(r) == DBUS_TYPE_ERROR_MSG) {
-            crc_log("ble: %s refused: %s", i ? "advertisement" : "GATT application", dbus_message_get_error_name(r));
+            const char *e = dbus_message_get_error_name(r);
+            char what[96];
+            e = e ? e : "?";
+            /* nobody owns org.bluez: Bluetooth is off. Its NameOwnerChanged starts the next try (on_signal). */
+            if (!strcmp(e, "org.freedesktop.DBus.Error.ServiceUnknown") || !strcmp(e, "org.freedesktop.DBus.Error.NameHasNoOwner")) {
+                b.absent = 1;
+                snprintf(what, sizeof what, "bluetoothd is not running");
+            } else {
+                snprintf(what, sizeof what, "registration refused: %s", e);
+            }
+            log_once(what);
             b.failed_at = crc_now_ms();
-            b.registered = 0;
+            set_registered(0);
         } else if (r) {
-            b.registered |= 1 << i;
-            if (b.registered == 3) crc_log("ble: registered");
+            set_registered(b.registered | 1 << i);
+            if (b.registered == 3) {
+                log_once(0);
+                crc_log("ble: registered");
+            }
         }
         if (r) dbus_message_unref(r);
     }
 }
 
 static int start_registration(void) {
-    b.registered = 0;
+    set_registered(0);
     b.app_call = call_register("org.bluez.GattManager1", "RegisterApplication", APP);
     b.adv_call = call_register("org.bluez.LEAdvertisingManager1", "RegisterAdvertisement", ADV);
     dbus_connection_flush(b.bus);
@@ -365,7 +408,9 @@ int ble_start(void) {
     b.failed_at = crc_now_ms();
     b.bus = dbus_bus_get(DBUS_BUS_SYSTEM, &e);
     if (!b.bus) {
-        crc_log("ble: no system bus: %s", e.message ? e.message : "?");
+        char what[96];
+        snprintf(what, sizeof what, "no system bus: %s", e.message ? e.message : "?");
+        log_once(what);
         dbus_error_free(&e);
         return -1;
     }
@@ -391,11 +436,12 @@ void ble_handle(void) {
     dbus_connection_flush(b.bus);
 }
 
-/* called once a second from the loop: try the registration again after a failure */
+/* called once a second from the loop: try the registration again 30 s after a refusal, never while bluetoothd is
+ * off the bus (on_signal ends that) */
 int ble_retry_due(uint32_t now) {
     if (!b.bus) return now - b.failed_at >= RETRY_MS;
     if (!dbus_connection_get_is_connected(b.bus)) return 0;
-    if (b.registered != 3 && !b.app_call && !b.adv_call && now - b.failed_at >= RETRY_MS) {
+    if (b.registered != 3 && !b.absent && !b.app_call && !b.adv_call && now - b.failed_at >= RETRY_MS) {
         b.failed_at = now;
         start_registration();
     }
@@ -463,4 +509,5 @@ void ble_stop(void) {
         }
     }
     dbus_connection_flush(b.bus);
+    set_registered(0);
 }

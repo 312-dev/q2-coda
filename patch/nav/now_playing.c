@@ -417,6 +417,10 @@ static int np_centre(unsigned now) {
         np_single();
         return STOP;
     }
+    if (!st.scrub && st.np_stage == NP_STAGE_REST && np_stream_error()) {
+        np_stream_retry(); /* Retry, the selected one (np_stream.c) */
+        return STOP;
+    }
     if (st.scrub) {
         scrub_end();
         if (theme()->np_modes && !np_radio_on()) /* a radio's order is the app's: no stops */
