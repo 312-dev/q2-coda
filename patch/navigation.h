@@ -518,12 +518,15 @@ void cc_keydown(unsigned key), cc_hold(int stop);
 /* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
 #define QUICK_CC 16
 void quick_hold(void *button, int page);
-/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
+/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep),
+ * and sinks and springs back under Centre (tilt_press, from ringnav_input; tilt_tone its blue) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
 int tilt_clip(void *canvas, int *old);
 void tilt_end(void *w, int dir);
+void tilt_press(int down);
+unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
