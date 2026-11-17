@@ -417,7 +417,7 @@ static int cr_page_show(const void *ctx) {
         widget_set_prop_int(gap, CR_ROW_KIND, K_CTA_GAP);
         void *cta = cr_row(view, 1, K_CTA, "", 0, page_x(), cr_click); /* its index opens the how-to page */
         widget_set_prop_int(cta, "_rings_itself", 1); /* no selection bar (nav/row_paint.c paint_selection) */
-        row_into(cta, CTA_H + 2 * CR_CTA_OUT);
+        widget_resize(cta, 375, CTA_H + 2 * CR_CTA_OUT); /* no chevron: it acts, as a button */
     }
     if (rows > 1 && !empty) {
         cr_gap(view, CR_GAP);

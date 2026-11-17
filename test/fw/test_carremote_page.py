@@ -135,6 +135,7 @@ def test_no_phones_is_the_empty_state_with_pair_a_phone_a_row_of_the_one_list(fw
     switch, cta = stops(ui, page)
     assert ui.props[(view, '_ringnav_count')] == 2 and ui.props[(view, '_ringnav_index')] == 1
     assert ui.props.get((cta, '_rings_itself')) == 1  # no selection bar behind the capsule
+    assert geometry(ui, cta)[3] == 38 + 2 * 8 and not [k for k in ui.kids[cta] if ui.kind[k] == 'image_create']  # no chevron
     ui.handler(cta, O['EVT_CLICK'])()  # Centre on the capsule
     assert ui.name[ui.top()] == 'carhowto_page'
 
