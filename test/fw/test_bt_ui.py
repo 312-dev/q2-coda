@@ -502,3 +502,61 @@ def test_a_tap_on_a_paired_row_still_connects(fw):
     t = Tap(fw, state='paired', linking=0, status=3, target=HEAD)
     t.tap()
     assert t.updates == [] and len(t.stock) == 1
+
+
+class Spinning(Page):
+    """A device connecting, its row's spinner painted as AWTK would: each loop pass the poll, then every timer due,
+    then the marks whose boxes were asked to repaint (the mark, or a widget holding it, invalidated)."""
+    def __init__(self, fw, devices, scanning=0):
+        super().__init__(fw, devices)
+        self.ui.windows.append(self.win) if self.win not in self.ui.windows else None
+        fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1  # stock's link thread runs
+        fw.var('bt_searchtime', C.c_ubyte).value = 50 if scanning else 0
+        fw.mock('btStartSearch', lambda *_: 0)
+        self.drawn, self.dirty, self.due = [], [], {}
+        fw.mock('widget_load_image', lambda w, name, *_: self.drawn.append((w, C.string_at(name).decode())) or 1)
+        fw.mock('widget_invalidate_force', lambda w, *_: self.dirty.append(w) or 0)
+        self.layout()
+
+    def mark(self, row, name):
+        return self.ui.lookup(self.row(row), name, 1)
+
+    def paint(self, mark):
+        """The frame mark shows now: the spinner art's name it loads."""
+        self.drawn.clear()
+        self.fw.fn('bt_ui_paint', None, C.c_void_p, C.c_void_p)(mark, None)
+        return [n for w, n in self.drawn if 'spin' in n]
+
+    def frames(self, mark, ms=1000, step=16):
+        """What the screen shows over ms of loop passes every step ms: each frame painted as its box repaints."""
+        shown = [self.paint(mark)]
+        for _ in range(ms // step):
+            self.dirty.clear()
+            self.now += step
+            self.fw.fn('bt_ui_poll', None)()
+            for t, (fn, ctx, every) in list(self.ui.timers.items()):
+                at = self.due.setdefault(t, self.now - step)
+                if self.now - at >= every:
+                    self.due[t] = self.now
+                    if TICK(fn)(ctx) != 8:
+                        self.ui.timers.pop(t, None)
+            if any(w == mark or mark in set(self.ui.subtree(w)) for w in self.dirty):
+                shown.append(self.paint(mark))
+        return shown
+
+
+TICK = C.CFUNCTYPE(C.c_int, C.c_void_p)
+
+
+@pytest.mark.parametrize('scanning', [0, 1])
+def test_a_connecting_row_s_spinner_turns_the_whole_connect(fw, scanning):
+    """Device report (p32, 2026-11-17): the row's spinner froze while a headset connected. Stock connects on a link
+    thread of its own, so nothing holds the UI thread: the spinner turns a spoke every 100 ms whether a scan runs or
+    not (the page starts none while a device connects), its box repainted for each."""
+    s = Spinning(fw, [(CAR, 'BMW 6R81', 'paired'), (SPEAKER, 'JBL Flip 6', 'connecting')], scanning)
+    mark = s.mark('d1', '_bt_spin')
+    assert mark
+    shown = s.frames(mark)
+    turns = [f for f in shown if f]
+    assert len({f[0] for f in turns}) == 8  # every spoke
+    assert len([1 for a, b in zip(turns, turns[1:]) if a != b]) >= 9  # a second: ten steps

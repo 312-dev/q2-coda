@@ -175,6 +175,32 @@ void motion_frames(unsigned ms); /* the shared timer repaints for ms more at lea
  * last run ends; at most MO_HOOKS, each added once. */
 #define MO_HOOKS 2
 void motion_hook(void (*fn)(void));
+/* A loop that says nothing new (MO_DECOR: the level bars) repaints only its own box: fn, added
+ * once, is called every MO_LOOP_MS by one shared loop timer while it returns 1 (it invalidates its
+ * box then), and dropped when it returns 0; the timer ends with the last loop. Unlike motion_frames
+ * it never repaints the top window. At most MO_LOOPS. */
+#define MO_LOOP_MS 33 /* 30 frames a second */
+#define MO_LOOPS 4
+void motion_loop(int (*fn)(void));
+/* The level bars (docs/oled-design.md#level-bars): Up Next's header, Home's first row and the
+ * status row draw the one motion. Bar i's height follows its column of LVL_KEYS keyframes
+ * LVL_STEP_MS apart, through a Catmull-Rom spline, so it moves continuously at any frame rate and
+ * passes each keyframe without stopping; the loop is LVL_KEYS * LVL_STEP_MS. lvl_clock_t is one
+ * user's time along it: running, it goes on with time_now_ms; stopped (paused, Reduce Motion) it
+ * holds, and running again goes on from where it held, so the bars never jump. Zero is stopped at
+ * the loop's start. lvl_h16: bar i's height at t, lo to hi px, in sixteenths. lvl_fill: a bar w px
+ * wide standing on base, h16 sixteenths tall, its part-covered top row at that part of its alpha,
+ * so a height between pixels shows as one. */
+#define LVL_KEYS 10
+#define LVL_STEP_MS 125
+typedef struct {
+    unsigned base, at; /* running: t is now - base; stopped: t is at */
+    unsigned char run;
+} lvl_clock_t;
+void lvl_run(lvl_clock_t *c, int run);
+unsigned lvl_time(const lvl_clock_t *c);
+int lvl_h16(int i, unsigned t, int lo, int hi);
+void lvl_fill(void *canvas, int x, int base, int w, int h16, unsigned rgba);
 /* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
  * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
  * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn

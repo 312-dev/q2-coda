@@ -35,7 +35,6 @@
 #define BT_DOT_GAP 4          /* ... and the room after it */
 #define BT_SPIN 16            /* the spinner's box (list_marks.c SPIN_BOX) */
 #define BT_SPIN_GAP 8         /* between "Other Devices" and its spinner */
-#define BT_SPIN_MS 100        /* a spoke a frame */
 #define BT_POLL_MS 500        /* the scan's and the class file's checks, the link's */
 #define BT_CLASS_WAIT_MS 6000 /* a connect toast waits this long at most for the device's Class */
 #define BT_STATE_W 150      /* a paired row's state ("Not Connected"), right-aligned in this much */
@@ -63,8 +62,9 @@ static struct {
     void *view;      /* the Bluetooth page's list while it is open */
     void *head_spin; /* Other Devices' spinner mark */
     void *line;      /* the connected row's second line */
-    unsigned poll_at, spin_at, class_hash, class_seen;
-    int frame, scans;   /* the spinner's frame; scans started for this view */
+    unsigned poll_at, class_hash, class_seen;
+    int scans;          /* scans started for this view */
+    int scan_shown;     /* Other Devices' spinner shown at the last poll */
     char link[24];      /* the device connected at the last look, "" none */
     char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
@@ -626,10 +626,11 @@ void bt_ui_paint(void *w, void *canvas) {
             cy = I(l, W_Y) + I(l, W_H) / 2;
         }
         if (selected)
-            tk_snprintf(stem, sizeof stem, "spin_%d", bt.frame % 8);
+            tk_snprintf(stem, sizeof stem, "spin_%d", spinner_frame());
         else
-            tk_snprintf(stem, sizeof stem, "btspin_%c_%d", light ? 'l' : 'd', bt.frame % 8);
+            tk_snprintf(stem, sizeof stem, "btspin_%c_%d", light ? 'l' : 'd', spinner_frame());
         art(w, canvas, stem, x, cy);
+        spinner_painted(w, (const rect_t *)0); /* list_marks.c turns it */
         break;
     }
     }
@@ -652,10 +653,9 @@ static int busy(void) {
 static void page_poll(unsigned now) {
     void *win = bt.view ? window_of(bt.view) : (void *)0;
     if (!win || win != window_manager_get_top_window(window_manager())) return;
-    if (bt.head_spin && bt_searchtime > 1 && now - bt.spin_at >= BT_SPIN_MS) {
-        bt.spin_at = now;
-        ++bt.frame;
-        widget_invalidate_force(P(bt.head_spin, W_PARENT), (void *)0);
+    if (bt.head_spin && (bt_searchtime > 1) != bt.scan_shown) { /* the scan's spinner on or off */
+        bt.scan_shown = bt_searchtime > 1;
+        widget_invalidate_force(bt.head_spin, (void *)0);
     }
     if (now - bt.poll_at < BT_POLL_MS) return;
     bt.poll_at = now;

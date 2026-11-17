@@ -397,9 +397,9 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
-static int spun_dirty, spun_done; /* list_marks.c's spinner calls, for slow_open */
-void spinner_dirty(void *win) { ++spun_dirty; }
-void spinner_done(void) { ++spun_done; }
+static volatile int spun_paints; /* the frames step_turning painted itself, for slow_open */
+int spinner_turn(void) { return 2; } /* list_marks.c's: a frame due */
+int ringnav_wm_paint(void *wm) { (void)wm; return ++spun_paints, 0; }
 void forget_rows(void *list) { (void)list; }
 int title_gone(void *w, void *event) { (void)w, (void)event; return 0; }
 int bar_title_fits(void *label) { return 1; }
@@ -634,12 +634,14 @@ static void album(const char *name, const char *art) {
 static int unknown_row, unknown_songs;
 static char unknown_record[0x60], untagged_song[0x60], untagged_more[0x60];
 static int untagged_two; /* getMusicByAlbum(NULL) finds untagged_more too */
-static unsigned all_ms; /* what each getAllAlbum takes on the fake clock (slow_open) */
+static unsigned all_ms, all_hold; /* what each getAllAlbum takes on the fake clock; held for paints (slow_open) */
 static int all_queries;
 int getAllAlbum(void) {
     deque *d = shim_dir;
     ++queries, ++all_queries;
     clock_ms += all_ms;
+    for (int start = spun_paints, i = 0; all_hold && spun_paints < start + 3 && i < 2000; ++i)
+        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     d->n = 0;
     for (int i = 0, j; i < albums; ++i) {
         for (j = 0; j < i && strcasecmp(names[j], names[i]); ++j) {}
@@ -1989,9 +1991,10 @@ static void unknown_card(void) {
 }
 
 /* A cold open that takes a while (docs/internals.md#coverflow): once getAllAlbum has taken half of
-   150 ms, Home stays up with the spinner, a step a timer pass, the keys, the wheel and a second
-   press go nowhere, and the page opens after the last step; Return gives the open up, and the next
-   open queries again. A quick one opens as it is pressed, the spinner never asked for. */
+   150 ms, Home stays up with the spinner, each step on a thread of its own (step_turning) while the
+   UI thread paints the spinner's frames itself, a timer pass between steps; the keys, the wheel and
+   a second press go nowhere, and the page opens after the last step; Return gives the open up, and
+   the next open queries again. A quick one opens as it is pressed, the spinner never shown. */
 static void slow_open(void) {
     extern int coverflow_spinner(void), coverflow_wait_input(void *);
     int down[16] = {0}, back[16] = {0}, touch[16] = {0};
@@ -2001,26 +2004,25 @@ static void slow_open(void) {
     widget home;
     memset(&home, 0, sizeof(home));
     coverflow_home(&home, 0);
-    int dirty = spun_dirty, done = spun_done, q = all_queries;
+    int painted = spun_paints, q = all_queries;
     rescan();
     all_ms = 70; /* under half: the open does not wait */
     open_page();
-    assert(all_queries == q + 1 && slide() && spun_dirty == dirty && !coverflow_spinner());
+    assert(all_queries == q + 1 && slide() && spun_paints == painted && !coverflow_spinner());
     close_page();
     rescan();
     all_ms = 80;
     page = &w[nw + 1];
-    unsigned at = clock_ms;
-    home.click(home.ctx, 0); /* getAllAlbum alone, then a pass */
-    assert(all_queries == q + 2 && timer_fn && !slide() && spun_dirty == dirty + 1);
-    assert(coverflow_spinner() == 1); /* 80 ms in: the first frame */
-    clock_ms = at + 250;
-    assert(coverflow_spinner() == 3); /* a frame each 100 ms */
+    all_hold = 1, painted = spun_paints;
+    home.click(home.ctx, 0); /* getAllAlbum alone, held until three frames painted, then a pass */
+    all_hold = 0;
+    assert(all_queries == q + 2 && timer_fn && !slide() && coverflow_spinner());
+    assert(spun_paints >= painted + 3); /* the spinner turned within the step */
     assert(coverflow_wait_input(down) && coverflow_wait_input(touch)); /* taken */
     home.click(home.ctx, 0); /* a second press opens nothing more */
     assert(all_queries == q + 2);
     run();
-    assert(slide() && !coverflow_spinner() && spun_done == done + 1 && !coverflow_wait_input(down));
+    assert(slide() && !coverflow_spinner() && !coverflow_wait_input(down));
     assert(slide()->nkids == albums);
     close_page();
     rescan();
@@ -2028,12 +2030,12 @@ static void slow_open(void) {
     home.click(home.ctx, 0);
     assert(timer_fn && coverflow_spinner());
     assert(coverflow_wait_input(back)); /* Return's release gives it up */
-    assert(!timer_fn && !coverflow_spinner() && spun_done == done + 2);
+    assert(!timer_fn && !coverflow_spinner());
     run();
     assert(!slide());
-    all_ms = 0, dirty = spun_dirty;
+    all_ms = 0, painted = spun_paints;
     open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
-    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_dirty == dirty);
+    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_paints == painted);
     close_page();
 }
 

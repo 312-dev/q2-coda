@@ -823,12 +823,14 @@ fast spin is heard as a few jumps and lands on the target. A press of the center
 and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Center cycles the controls the wheel sets, as an iPod classic's
-does (`np_centre`): a press starts scrubbing at once,
-the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
-Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
-picker, whose Center saves and leaves the page at rest, the wheel back on the volume. Return, a
-touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+plays from the target at Play. Center works as an iPod classic's
+(`np_centre`): a press starts scrubbing at once, and the next ends the scrub and puts a ring on
+Shuffle. The wheel then moves the ring across Shuffle, Repeat and the heart, changing nothing;
+Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One) and the
+ring stays, and on the heart opens the rating picker, whose Center saves and leaves the page at
+rest, the wheel back on the volume. While a radio plays the ring has only the heart; under a theme
+without the pair there is no ring and the scrub's press opens the picker. Return, a touch or 3
+seconds without a key end the ring. A short hold (`NP_HOLD_MS`, 400 ms) turns the
 screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
