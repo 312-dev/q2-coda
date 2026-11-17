@@ -101,6 +101,31 @@ def test_payload_change_runs_the_unit_rules_over_every_patch_file(tmp_path):
                                                                               'test_theme.py', 'test_xiph.py']
 
 
+def test_a_python_change_plans_the_mypy_suite_that_checks_it(tmp_path):
+    root = tree(tmp_path, {'test/unit/test_art.py': '', 'test/unit/test_shelf.py': ''})
+    other = lambda path: affected.plan_for({path: {1}}, root).as_dict()['other']  # noqa: E731
+    assert 'mypy-tools' in other('test/unit/test_art.py') and 'mypy-fw' not in other('test/unit/test_art.py')
+    assert 'mypy-tools' in other('tools/shelf.py') and 'mypy-tools' in other('tools/ci/gate.py')
+    assert 'mypy-fw' in other('test/fw/test_art_zoom.py') and 'mypy-tools' not in other('test/fw/test_art_zoom.py')
+    assert 'mypy-fw' in other('test/fw/helpers.py')
+    assert {'mypy-tools', 'mypy-fw'} <= set(other('pyproject.toml'))  # the mypy config; also an everything plan
+    for path in ('patch/seek.c', 'docs/ipod.md', 'tools/pwm.c', 'test/fw/fixture.json'):
+        assert not {'mypy-tools', 'mypy-fw'} & set(other(path)), path
+
+
+def test_mypy_suites_run_as_the_gate_runs_them(tmp_path):
+    for name in ('mypy-tools', 'mypy-fw'):
+        assert affected.mypy_argv(name, 'py') == gate.full_suite(name, 'py', tmp_path)().argv
+    every = affected.Plan()
+    every.everything('x')
+    assert {'mypy-tools', 'mypy-fw'} <= every.other
+
+
+def test_a_bisection_run_keeps_the_mypy_suites():
+    whole = {'unit': [], 'fw': [], 'patch': [], 'other': ['mypy-fw', 'test/gone.py'], 'why': []}
+    assert merge_batch.widen(None, whole, lambda f: False)['other'] == ['mypy-fw']
+
+
 def test_every_folder_a_unit_test_globs_is_in_scanners():
     """A test/unit file that reads every file of patch/, tools/ or test/ must be in affected.SCANNERS for that
     folder, or a change there would skip its rule."""

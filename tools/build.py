@@ -254,7 +254,7 @@ Q2EQ = 'usr/bin/q2eq'
 # The car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): demo's payload starts it
 # while Settings > Car Remote is on (patch/coda_rc_shim.c). SQLite reads the library, libdbus talks to BlueZ.
 CODA_RC = 'usr/bin/coda-rc'
-CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'monocypher/monocypher',
+CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'coda_rc_mdns', 'monocypher/monocypher',
                    'monocypher/monocypher-ed25519']
 CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6', 'usr/lib/libdbus-1.so.3.19.15']
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
