@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: playing a song from a page Now Playing opened (tapping the artist or album, then Shuffle or a song) no longer leaves an old Now Playing behind it. Before, Return went back to the artist page, then to a stale Now Playing still showing the previous song, and only then Home.
   - USB Debugging: the **Allow USB Debugging?** prompt now appears when an unknown computer connects. Before, the Q2 looked for adbd's socket with the wrong socket type, so the prompt never showed and every new computer stayed `unauthorized`.
   - USB: when the Q2 powers a USB device it is plugged into as a host (a USB drive, a DAC), its charger now stays off as Shanling's firmware leaves it. Before, it was turned back on at once, so the Q2 charged its battery from its own USB power, which wastes power as heat.
   - USB: a choice saved with **Always Do This** no longer sticks for good. Press **Stop** on the USB Debugging, Transfer Files or USB Audio page and the next cable asks again with the chooser. Before, nothing on the Q2 could clear it, so every cable went straight to the saved choice.

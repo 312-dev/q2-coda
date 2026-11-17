@@ -563,9 +563,25 @@ static int np_lyric_touch(void *ctx, void *event) {
     return 0;
 }
 
+/* Now Playing is one page. Stock's navigator opens a playing_page over whatever is in front, so a
+ * song played from a page Now Playing opened (its artist or album tap, the ⋯ page's Look up, then
+ * Shuffle or a song there) left the first one under it: covered, its 250 ms timer stopped, it kept
+ * the song it last showed, and Return came back to it before Home (the emulator, 2026-11-17: Song
+ * 1 at 1:01 while Song 2 played). Every older one closes as win opens; the pages between stay.
+ * coverflow.c play_folder also closes one in front before it opens, so that open slides from the
+ * page under it. */
+static void np_only(void *win) {
+    void *wm = window_manager();
+    for (int i = (int)widget_count_children(wm) - 1; i >= 0; --i) {
+        void *w = widget_get_child(wm, i);
+        if (w && w != win && !tk_strcmp(widget_get_prop_str(w, "name", ""), "playing_page"))
+            window_manager_close_window_force(wm, w);
+    }
+}
+
 /* playing_page_init: stock builds the page and starts its 250 ms timer, then the iPod labels bind.
  * Headphones required with none to play to: stock toasts, closes the window it was given and
- * returns STOP before it builds anything (0x53e4b4), so nothing binds. */
+ * returns STOP before it builds anything (0x53e4b4), so nothing binds and the page under stays. */
 int ringnav_playing(void *win, void *ctx) {
     if (st.np_full)
         np_full(0); /* another Now Playing: the last one's lyrics back in their column */
@@ -573,6 +589,7 @@ int ringnav_playing(void *win, void *ctx) {
     st.lyric_held = 0;
     int result = stock_playing_trampoline(win, ctx);
     if (!win || result == STOP) return result;
+    np_only(win); /* before st.np_win is win: an older page's np_gone still clears its own */
     rate_bind(win);
     np_glyphs_bind(win);
     /* np_gone leaves a replaced page's state alone: its Genre line is that page's. */
