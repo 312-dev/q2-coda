@@ -92,9 +92,20 @@ def test_the_round_corners_cover_their_arcs():
     assert all(f'[{r}] = ' in art.corner_table() for r in art.CORNERS)
 
 
-def test_a_theme_drawing_anothers_art_shares_its_images():
+# A whole theme renders in about 3 s plain and about 9 s under coverage (its pixel loops are traced); this test needs
+# four distinct renders (36 s under coverage), so the 60 s default leaves no room when other suites share the CPUs.
+@pytest.mark.timeout(110)
+def test_a_theme_drawing_anothers_art_shares_its_images(monkeypatch):
     """A theme stating art="oled" draws OLED's images, by OLED's names and bytes, packaged once; a value that would
     draw them otherwise stops the build, as the payload loads one image per name."""
+    render, rendered = art.images, {}  # one render for each distinct theme, whichever call asks for it
+
+    def once(t):
+        if (key := repr(t)) not in rendered:
+            rendered[key] = render(t)
+        return rendered[key]
+
+    monkeypatch.setattr(art, 'images', once)
     oled = theme.builtins()[0]
     other = {**oled, 'id': 'other'}  # OLED's values under another id, as a theme extending it resolves
     mine = art.images(oled)
