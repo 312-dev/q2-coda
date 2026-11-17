@@ -152,6 +152,11 @@ Rules:
   20 is 24, 22 is 27. The payload writes `TYPE(px)` (`patch/ui_kit.h`), never the AWTK number.
 - **Truncate, then scroll.** A long title ends in an ellipsis; the selected row's title scrolls.
   Never shrink type to fit.
+- **Set text for small labels the payload draws itself.** AWTK places each glyph on its advance rounded to a
+  whole pixel and carries the error on, and draws a space about 3 px wider than Inter's, so at 13 px a label's
+  gaps run uneven ("Smart  Wi-Fi"). `ui_set` (`patch/ui_kit.c`) sets each glyph from Inter's own advances
+  (`FONT_ADV`, written into `stock.h` by `tools/build.py` `face_advances`), each rounded on its own, with no
+  added tracking (`TRACK_CAPTION` 0). Control Center's names are set this way.
 
 ## Spacing
 
@@ -192,7 +197,10 @@ All lists share one grid.
   - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
     glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
     digits' baseline, 3 to 11 px tall and moving on offset sines (a 1.25 s loop); paused, the pause, two 3 px bars
-    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. Only the box repaints as
+    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. On pause the bars stop and
+    cross-dissolve into the pause over 250 ms, `cubic_out`, and back on play, the bars moving again once it ends;
+    the dissolve stays in the 10 x 11 box, so nothing else in the row moves; Reduce Motion swaps them at once (the
+    user's, 2026-11-16 21:52). Only the box repaints as
     the bars move. A tap on it opens Now Playing (`mock_status_bars.py`, 2026-11-15; `mock_status_icons.py`,
     2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
     row](#homes-first-row)).
@@ -546,6 +554,21 @@ has no place for keeps a place of its own:
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
   inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
   control turns on. The radio's pill is its own press.
+- **A server song loading** (approved as streaming-v3's variant D, `design/streaming-states/`): while the song waits
+  to start, or playback has caught up with its download, a 14 px 12-spoke spinner (Text Secondary, a turn a second,
+  turning under Reduce Motion too, as it reports progress) and "7.0 of 20 MB" (Inter 13 px, Text Secondary) sit
+  centred in the times row, 6 px apart, between the elapsed and the remaining, which both stay. Nothing dims, the bar
+  does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
+- **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
+  art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
+  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
+  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
+  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
+  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
+  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+  wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
@@ -690,8 +713,8 @@ as its callers move onto it.
 - **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centered, naming
   the object ("Forget WH-1000XM5?", never "Are you sure"), a long one scrolling in the text column (the house
   marquee: held 2.75 s, then 35 px/s, a copy 40 px behind, its ends faded 12 px into the card), an optional 28 px
-  glyph 6 px over it; at most two body lines in
-  15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
+  glyph 6 px over it; the body in 15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence
+  case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
 - **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
@@ -1108,41 +1131,61 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
 
 ### Control Center
 
-The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `design/mockups/mock_cc3.py`
-`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centered:
+The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
+`design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
+centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, the blocks and the grab
+bar, and round the toggles inside their block.
 
-- **Blocks** from y 38, `#1C1C1E` with 22 px corners: connectivity, 138 x 124 from x 20; Now Playing, 8 px
-  right of it to x 355.
-- **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
-  (centers x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
-  under in Inter Medium 13, white when on, Text Secondary off.
-- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in, the one Home's art pane shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter
-  13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
-- **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
-  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night (Night Shift), EQ, Smart Wi-Fi and Guest, 40 px squares with 12 px corners on
-  y 238, 12 px in from the blocks' ends and evenly apart, named under them as the toggles are. Guest is Guest
-  Play's switch (a hold opens its settings), lit and named by the guest ("Alex") while one plays
-  ([Guest Play](#guest-play), `mock_bt.py`'s `control_center`). ponytail: at 13 px "Smart Wi-Fi" and "Guest" meet
-  edge to edge; the mock drew the labels at 11 px, which the type scale no longer has.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
+- **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
+  26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
+  Smart Wi-Fi, EQ. Accent Blue when on, `#3A3A3C` off.
+- **Glyphs**: Phosphor fill, each at one optical size, its ink's longer side 18 px (`tools/art.py` `CC_INK`):
+  Bluetooth `bluetooth`, AirPlay `airplay`, Car Remote `car-profile`, Smart Wi-Fi `leaf`, EQ `equalizer`. White on
+  a lit circle; in Light Mode a circle that is off takes Text Primary (`CC_LIGHT`).
+- **The Wi-Fi circle is the link**, as the status row reads it (`status_row.c` `wifi_level`, `wifi_offline`):
+  `wifi-slash` off, `wifi-none` on but not joined, `wifi-low`, `wifi-medium` and `wifi-high` by stock's bars (1, 2,
+  then 3 and 4), `wifi-x` joined with no link up. Phosphor's fill levels draw the whole fan and fill as much of it
+  as the signal, so the glyph keeps one footprint. Joined, it is lit even where the radio's switch reads off, so it
+  and the status row never disagree. It is drawn again when that changes while the page is open
+  (`cc_wifi_poll`, every second, the circle's box alone). Its name stays "Wi-Fi", the tile's function, not the
+  network's.
+- **Names**: each circle's, its line 1 px under the circle, Inter Medium 13, white when on, Text Secondary off, set
+  glyph by glyph at Inter's own advances (see [Type](#type)), centered on the circle in 76 px of room, 8 px from the
+  block's edge (the mock's 10 px assumed a 13 px em; the house 13 px is an em of 13.2, which makes "Smart Wi-Fi"
+  75 px). A name wider than its room is never shrunk or cut with an ellipsis: it starts at the room's left and its
+  last 12 px fade out, the text itself going transparent onto the block (the marquee's fade, no painted band), and
+  while the wheel is on its circle it scrolls as the selected row's title does ([Motion](#motion)), both ends
+  fading while it is away from its start, back at its start when the wheel leaves or the ring goes. The six names
+  all fit.
+- **Now Playing**: 167 x 114 from (188, 38): 12 px in, the cover, 52 px with 9 px corners, the one Home's art pane
+  shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter 13, Text
+  Secondary) 10 px right of it, 10 px above and below its middle; under them, 8 px down, the transport's 30 px row,
+  Previous, Play/Pause (30 px) and Next 46 px apart; 12 px under it the block's foot. Light Mode inks the transport
+  Text Primary.
+- **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
+  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
+  fill is dark). Volume ends at y 248, the toggles block's foot.
+- **Grab bar**: 36 x 5, `#5A5A5E`, at y 258, 10 px under the blocks, where the swipe up that closes the page starts.
+- **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
+  Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
+  guest plays).
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
-  playing or paused, as Home's Now Playing row), the two sliders, the five tiles. The ring is not there when the
-  page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
-  is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
-  on the same stop.
+  Accent Blue. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
+  (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume. The ring is not there
+  when the page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the
+  wheel is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it
+  back on the same stop.
 - **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
   Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
-- **Holds**: a toggle or tile held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes
-  the page and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings >
-  Bluetooth; AirPlay: the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Lock:
-  Buttons Lock; Sleep: Sleep Timer; Night Shift: its slider page (Display's Night Shift row); EQ: the EQ page;
-  Smart Wi-Fi: Settings > Wi-Fi. The sliders and the Now Playing block have no hold.
+- **Holds**: a toggle held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes the page
+  and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings > Bluetooth; AirPlay:
+  the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Smart Wi-Fi: Settings >
+  Wi-Fi; EQ: the EQ page. The sliders and the Now Playing block have no hold.
 - **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
   8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
   sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.
@@ -1236,7 +1279,8 @@ A guest's phone plays through the Q2 to what the Q2 plays to ([internals](intern
 <a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
 `patch/stream_config.c`) is two levels of [list rows](#list-row), values on the right.
 
-- **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
+- **Configuration:** Stop Streaming Services; Download Ahead, its value "2 Songs" (Off, 1 Song, 2 or 3 Songs, stepped
+  in place by Center); a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
   its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
   the caption "Its cache, downloads and place in Streaming" (Spotify: "Its cache, sign-in and place in Streaming");
   a "Show in Streaming" header; then one switch per service that has only a switch (the card apps, Internet Radio,
@@ -1359,9 +1403,11 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
   Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
-- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
-  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
-  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+- **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
+  from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
+  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address to type ("Address
+  192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
+  connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
   for Q2 Muse Remote to scan one.
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
@@ -1426,15 +1472,14 @@ interruptible: a turn mid-run starts from where it is.
 - **One helper** (`patch/ui_kit.h`, Motion): every animation takes its duration, curve and frames from it. A
   motion has a kind: *spatial* (a slide, a scale, a spring, a lean), *decor* (a loop that says nothing new: the
   charging sweep, Up Next's level bars) or *feedback* (a finger followed, a value or progress: swipe back, the volume
-  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window,
-  and it stops itself after the last one ends.
+  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window
+  (and the status row's play box, through `motion_hook`), and it stops itself after the last one ends.
 - **Reduce Motion** (Settings > Display, the last row: a switch captioned "Fades in place of slides, zooms and
   bounces", `IPOD REDUCEMOTION`, off unless chosen; it applies from the next animation, no restart). On: a page's
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, a track change cross-fades in place and so does the cover into Now
-  Playing; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, and a track change and the cover into Now Playing cross-fade in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and

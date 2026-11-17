@@ -29,7 +29,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource',b'radio'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource',b'ahead',b'radio'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Card games (addon.c, q2app game=1): Library's Games lists them, Streaming doesn't. A row runs the binary
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return
@@ -144,18 +144,18 @@ def streaming():
 assert streaming()==[1,'Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
 m.click(rows['Configuration']); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
 SVC=['Deezer','Soulseek','Internet Radio','AirPlay']  # the lone switches: TIDAL's, Spotify's and Tidal Downloads' are on their pages
-assert m.labels()[:10]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming',*SVC]
-cap=m.rows()[4]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
-def ticks(): return [switch(m,i)=='switch_on' for i in range(5,len(m.rows()))]  # Shanling's switches
+assert m.labels()[:11]==['Configuration','Stop Streaming Services','Download Ahead','Services','TIDAL','Spotify','Show in Streaming',*SVC]
+cap=m.rows()[5]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
+def ticks(): return [switch(m,i)=='switch_on' for i in range(6,len(m.rows()))]  # Shanling's switches
 assert ticks()==[True]*4
-m.row(5); assert m.config['STREAMHIDE']=='deezer' and ticks()==[False,True,True,True]
+m.row(6); assert m.config['STREAMHIDE']=='deezer' and ticks()==[False,True,True,True]
 assert streaming()==[1,'Spotify','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
-conf=m.page; m.row(7); m.row(2); sub=m.page=m.top; m.row(0); m.page=conf  # TIDAL's on its page
+conf=m.page; m.row(8); m.row(3); sub=m.page=m.top; m.row(0); m.page=conf  # TIDAL's on its page
 assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL' and m.labels().count('Hidden')==1  # its row on Configuration
 assert streaming()==[0,'Spotify','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(5); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[True,True,False,True]
+m.row(6); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[True,True,False,True]
 assert streaming()==[0,'Spotify','Deezer','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(7); m.page=sub; m.row(0); m.page=conf; assert m.config['STREAMHIDE']=='' and ticks()==[True]*4; passed()
+m.row(8); m.page=sub; m.row(0); m.page=conf; assert m.config['STREAMHIDE']=='' and ticks()==[True]*4; passed()
 # Saved: the next Streaming leaves them out, an app by its id whatever its place by name.
 m=AppMachine(); card_app(m,'deezer','name=Deezer\n'); m.config['STREAMHIDE']='soulseek,AIRPLAY,SPOTIFY'
 rows=stream_rows(m); view=m.find('scroll_view',m.top)

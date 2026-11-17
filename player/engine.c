@@ -310,6 +310,8 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             data = rw.buf + (size_t)rw.used * fb;
             rw.used += n, rw.fed += n;
         } else if ((n = source_read(s, &data)) <= 0) {
+            /* a song still arriving gives up its wait for a stop or a skip (grow.c): taken above */
+            if (n < 0 && __atomic_load_n(&c->cut, __ATOMIC_RELAXED)) continue;
             return ENDED;
         }
         if (sx) n = stretch_run(sx, data, n, &data);

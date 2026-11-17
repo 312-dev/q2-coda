@@ -12,8 +12,8 @@
  *   page, guestconnect_page: the name to pick, the window's countdown, the hotspot's QR code),
  *   Allow, When a Guest Leaves, Trusted Guests (each its page, guesttrust_page) and Hotspot
  *   (hotspot_page: its switch, name, password and join QR code).
- * The status row's guest glyph is status_row.c's, Control Center's Guest tile control_center.c's,
- * Home's first row reading Guest Play home_np.c's, each reading the guest's state. */
+ * The status row's guest glyph is status_row.c's and Home's first row reading Guest Play
+ * home_np.c's, each reading the guest's state. */
 #include "navigation.h"
 
 #define GU_POLL_MS 250 /* guest.c reads the state as often */
@@ -132,7 +132,7 @@ int guest_ui_state(void) {
 int guest_ui_on(void) { return guest_ui_state() != G_OFF && !gv_is("enabled", "0"); }
 
 /* The owner's short word for a guest (open question 7): "Alex" for "Alex's Pixel", the name up
- * to its first space for others, as the toasts and the Control Center tile name them. */
+ * to its first space for others, as the toasts name them. */
 void guest_short(const char *name, char *out, unsigned n) {
     const char *s = strstr(name, "'s ");
     unsigned len = s ? (unsigned)(s - name) : (unsigned)strlen(name);
@@ -624,7 +624,7 @@ static int set_closed(void *ctx, void *event) {
     if (ctx == gu.set) gu.set = gu.set_view = (void *)0;
     return 0;
 }
-/* Settings > Bluetooth's Guest Play row, Control Center's Guest tile held: the page. */
+/* Settings > Bluetooth's Guest Play row: the page. */
 int guest_settings_open(void *ctx, void *event) {
     (void)ctx, (void)event;
     if (gu.set || !(gu.set = page_open("guestset_page", set_closed, page_keyup))) return 0;

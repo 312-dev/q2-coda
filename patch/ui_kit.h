@@ -24,6 +24,23 @@ unsigned ui_fade_alpha(unsigned at);
 int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
             int w, int align);
 unsigned ui_wide(const char *s, unsigned *out, unsigned n);
+/* Set text (docs/oled-design.md#type): UTF-8 s drawn glyph by glyph at Inter's own advances
+ * (stock.h FONT_ADV) plus track thousandths of an em between glyphs, each glyph at its own pen
+ * rounded, so its gaps are even: AWTK's own text rounds every advance to a pixel, carrying the
+ * error on, and draws a space about 3 px wider than Inter's at 13 px. Faces and colour as ui_text,
+ * from x, its row centred on y, never cut or ellipsized (ui_set_in fits it to a column). Returns
+ * its width; ui_set_w the width alone. TRACK_CAPTION: the house tracking for the 13 px captions. */
+#define TRACK_CAPTION 0
+int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+           int track);
+int ui_set_w(void *canvas, const char *s, int medium, int px, int track);
+/* ... in the column x to x + w, its row centred on y and px rows tall (AWTK's line): centred when
+ * it fits; wider, from the column's left less off (a scroller's xoffset, kept within the overflow),
+ * clipped to the column and never ellipsized, its ends fading (list_marks.c text_fade, the
+ * marquee's fade: the text itself onto what is behind it): the right while text runs past it, the
+ * left while off > 0. Nothing is drawn outside that box. Returns the text's width. */
+int ui_set_in(void *canvas, const char *s, int medium, int px, unsigned rgb, int x, int w, int y,
+              int off, int track);
 int ui_measure_w(void *canvas, const char *face, int px, const unsigned *s, unsigned n);
 /* Text in a box: s (n characters, or UTF-8 for ui_line) centred on row y in the columns x to x + w,
  * aligned (1 centre, 2 left, 3 right), in face at px, in color (ui_line_w: 0xAARRGGBB; ui_line:
@@ -153,6 +170,11 @@ void anim_start(anim_t *a, int ms, int ease, int kind);
 int anim_at(const anim_t *a);
 int anim_running(const anim_t *a);
 void motion_frames(unsigned ms); /* the shared timer repaints for ms more at least */
+/* A painter outside the top window (the status row, on the system bar) has fn called on each of
+ * the shared timer's frames, to repaint its own box while its run moves, and once more after the
+ * last run ends; at most MO_HOOKS, each added once. */
+#define MO_HOOKS 2
+void motion_hook(void (*fn)(void));
 /* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
  * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
  * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn

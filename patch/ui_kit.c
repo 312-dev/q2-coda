@@ -90,6 +90,93 @@ int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int r
     return ink;
 }
 
+/* Set text (ui_set): each face's advances in its font units (tools/build.py face_advances), its
+ * line, which AWTK sizes it by, and its em. */
+static const unsigned short ui_adv[FONT_N][FONT_ADV_LAST - FONT_ADV_FIRST + 1] = FONT_ADV;
+static const unsigned short ui_line_units[FONT_N] = FONT_LINE, ui_upm[FONT_N] = FONT_UPM;
+
+/* s's n characters set in face at AWTK size px with track thousandths of an em between them: where
+ * each starts, pen[k] in 1/64 px from the first's, and pen[n] the whole width. A character the
+ * table lacks (or a face it has no row for) takes its width from the canvas, a whole pixel. */
+static void ui_set_pens(void *canvas, const unsigned *s, unsigned n, const char *face, int px,
+                        int track, int *pen) {
+    int fi = !tk_strcmp(face, "inter-medium") ? FONT_INTER_MEDIUM
+             : !tk_strcmp(face, "inter")      ? FONT_INTER
+                                              : -1;
+    if (fi >= 0 && !ui_line_units[fi]) fi = -1;
+    int line = fi >= 0 ? ui_line_units[fi] : 121, upm = fi >= 0 ? ui_upm[fi] : 100, at = 0,
+        gap = track * px * upm * 64 / (1000 * line);
+    canvas_set_font(canvas, face, (unsigned)px);
+    for (unsigned k = 0; k < n; ++k) {
+        unsigned c = s[k], u = fi >= 0 && c >= FONT_ADV_FIRST && c <= FONT_ADV_LAST
+                                   ? ui_adv[fi][c - FONT_ADV_FIRST]
+                                   : 0;
+        pen[k] = at;
+        at += u ? (int)((u * (unsigned)px * 64 + (unsigned)line / 2) / (unsigned)line)
+                : (int)(canvas_measure_text(canvas, s + k, 1) * 64 + 0.5f);
+        if (k + 1 < n) at += gap;
+    }
+    pen[n] = at;
+}
+
+#define UI_SET_MAX 48 /* a set label's characters; past them it is cut */
+int ui_set_w(void *canvas, const char *s, int medium, int px, int track) {
+    unsigned buf[UI_SET_MAX + 1], n = ui_wide(s, buf, UI_SET_MAX + 1);
+    if (!n) return 0;
+    const char *face = theme_face(buf, (int)n, &px);
+    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    int pen[UI_SET_MAX + 1];
+    ui_set_pens(canvas, buf, n, face, px, track, pen);
+    return (pen[n] + 32) >> 6;
+}
+int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+           int track) {
+    unsigned buf[UI_SET_MAX + 1], n = ui_wide(s, buf, UI_SET_MAX + 1);
+    if (!n) return 0;
+    int fpx = px, pen[UI_SET_MAX + 1];
+    const char *face = theme_face(buf, (int)n, &fpx);
+    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    ui_set_pens(canvas, buf, n, face, fpx, track, pen);
+    unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR),
+             was = ui_ink_raw((unsigned)raw);
+    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
+    canvas_set_text_color(canvas, RGBA(rgb));
+    I(canvas, CANVAS_ALIGN_V) = 1;
+    I(canvas, CANVAS_ALIGN_H) = 2;
+    for (unsigned k = 0; k < n; ++k) {
+        if (buf[k] == ' ') continue;
+        /* one glyph from its own pen, rounded: no glyph's error carries to the next */
+        rect_t r = { x + ((pen[k] + 32) >> 6), y - fpx, 2 * fpx, 2 * fpx };
+        canvas_draw_text_in_rect(canvas, buf + k, 1, &r);
+    }
+    I(canvas, CANVAS_ALIGN_V) = align_v;
+    I(canvas, CANVAS_ALIGN_H) = align_h;
+    ui_ink_raw(was);
+    stock_canvas_set_text_color(canvas, text);
+    return (pen[n] + 32) >> 6;
+}
+
+int ui_set_in(void *canvas, const char *s, int medium, int px, unsigned rgb, int x, int w, int y,
+              int off, int track) {
+    int ink = ui_set_w(canvas, s, medium, px, track), over = ink - w;
+    if (over <= 0) return ui_set(canvas, s, medium, px, rgb, 0, x + (w - ink) / 2, y, track);
+    off = off < 0 ? 0 : off > over ? over : off;
+    int was[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y),
+                col[4] = { ox + x, oy + y - px / 2, w, px };
+    canvas_get_clip_rect(canvas, was);
+    int l = col[0] > was[0] ? col[0] : was[0], t = col[1] > was[1] ? col[1] : was[1],
+        r = col[0] + col[2] < was[0] + was[2] ? col[0] + col[2] : was[0] + was[2],
+        b = col[1] + col[3] < was[1] + was[3] ? col[1] + col[3] : was[1] + was[3];
+    if (r <= l || b <= t) return ink;
+    int clip[4] = { l, t, r - l, b - t };
+    canvas_set_clip_rect(canvas, clip);
+    int faded = text_fade_under(canvas, x, x + w, y - px / 2, px, (off > 0) | (off < over) << 1);
+    ui_set(canvas, s, medium, px, rgb, 0, x - off, y, track);
+    if (faded) text_fade(canvas);
+    canvas_set_clip_rect(canvas, was);
+    return ink;
+}
+
 int kv_fit(int span, int label_w, int value_w, int *box) {
     int keep = value_w < KV_VALUE_MIN ? value_w : KV_VALUE_MIN; /* the value's least */
     if (label_w > span - KV_GAP - keep) label_w = span - KV_GAP - keep;
@@ -230,11 +317,23 @@ static void ovm_apply(void) {
     for (int i = 0; i < OVM_BOUND; ++i)
         if (bound[i].w) widget_set_opacity(bound[i].w, (unsigned)ovm_opacity(bound[i].o));
 }
+static void (*mo_hooks[MO_HOOKS])(void) __attribute__((section(".scratch")));
+void motion_hook(void (*fn)(void)) {
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i] == fn) return;
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (!mo_hooks[i]) {
+            mo_hooks[i] = fn;
+            return;
+        }
+}
 static int mo_frame(const void *info) {
     (void)info;
     ovm_apply();
     void *top = window_manager_get_top_window(window_manager());
     if (top) widget_invalidate_force(top, (void *)0);
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i]) mo_hooks[i]();
     if ((int)(mo.until - (unsigned)time_now_ms()) > -MO_FRAME_MS) return 8; /* RET_REPEAT */
     mo.timer = 0;
     return 7; /* RET_REMOVE */

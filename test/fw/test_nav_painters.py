@@ -2366,9 +2366,9 @@ def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st)
     """Control Center (control_center.c cc_open): Wi-Fi's and Bluetooth's buttons over their circles at opacity 0, so a
     tap and a hold there are stock's; the rest of stock's buttons hidden; the brightness slider over its track."""
     quick = Quick(fw, st)
-    assert [quick.icons[n].box for n in ('img_wifiswitch', 'img_btswitch')] == [(35, 46, 40, 40), (103, 46, 40, 40)]
+    assert [quick.icons[n].box for n in ('img_wifiswitch', 'img_btswitch')] == [(46, 48, 40, 40), (112, 48, 40, 40)]
     assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 0, 0, 0, 0, 0, 0]
-    assert quick.slider.parent.box == (20, 170, 163, 38) and quick.slider.box == (0, 0, 163, 38)
+    assert quick.slider.parent.box == (188, 162, 167, 38) and quick.slider.box == (0, 0, 167, 38)
 
 
 # A page's switch as a row, under a set without stock's toolbars.
