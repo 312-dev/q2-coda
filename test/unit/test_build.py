@@ -1253,10 +1253,10 @@ def test_bluetooth_discovery_times_out():
     assert main.replace(*build.BT_DISCOVERABLE) == b'# 0 = disable timer\n#DiscoverableTimeout = 0\nDiscoverableTimeout = 180\n'
 
 
-def test_bluetooth_name_is_q2():
+def test_bluetooth_name_is_q2_muse():
     main = b"[General]\n# Defaults to 'BlueZ X.YZ'\nName = Shanling Q2\n"
     assert main.count(build.BT_NAME[0]) == 1
-    assert main.replace(*build.BT_NAME) == b"[General]\n# Defaults to 'BlueZ X.YZ'\nName = Q2\n"
+    assert main.replace(*build.BT_NAME) == b"[General]\n# Defaults to 'BlueZ X.YZ'\nName = Q2 Muse\n"
 
 
 def test_bluez_experimental_interfaces_are_on():

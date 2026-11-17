@@ -378,14 +378,16 @@ int ringnav_display(void *win, void *ctx) {
 
 /* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
  * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
- * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
+ * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is.
+ */
 static int set_open(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (i == 2) return carremote_open(0, event);
     if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
-    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
-                                         "systemset/display_page", 0,
-                                         "systemset/powermanager_page" };
+    static const char *const pages[] = {
+        "systemset/wifi_page",        "systemset/bluetooth_page", 0, "systemset/display_page", 0,
+        "systemset/powermanager_page"
+    };
     navigator_to(pages[i]);
     return 0;
 }

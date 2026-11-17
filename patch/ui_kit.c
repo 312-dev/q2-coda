@@ -156,6 +156,27 @@ int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int ra
     return (pen[n] + 32) >> 6;
 }
 
+int ui_set_in(void *canvas, const char *s, int medium, int px, unsigned rgb, int x, int w, int y,
+              int off, int track) {
+    int ink = ui_set_w(canvas, s, medium, px, track), over = ink - w;
+    if (over <= 0) return ui_set(canvas, s, medium, px, rgb, 0, x + (w - ink) / 2, y, track);
+    off = off < 0 ? 0 : off > over ? over : off;
+    int was[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y),
+                col[4] = { ox + x, oy + y - px / 2, w, px };
+    canvas_get_clip_rect(canvas, was);
+    int l = col[0] > was[0] ? col[0] : was[0], t = col[1] > was[1] ? col[1] : was[1],
+        r = col[0] + col[2] < was[0] + was[2] ? col[0] + col[2] : was[0] + was[2],
+        b = col[1] + col[3] < was[1] + was[3] ? col[1] + col[3] : was[1] + was[3];
+    if (r <= l || b <= t) return ink;
+    int clip[4] = { l, t, r - l, b - t };
+    canvas_set_clip_rect(canvas, clip);
+    int faded = text_fade_under(canvas, x, x + w, y - px / 2, px, (off > 0) | (off < over) << 1);
+    ui_set(canvas, s, medium, px, rgb, 0, x - off, y, track);
+    if (faded) text_fade(canvas);
+    canvas_set_clip_rect(canvas, was);
+    return ink;
+}
+
 int kv_fit(int span, int label_w, int value_w, int *box) {
     int keep = value_w < KV_VALUE_MIN ? value_w : KV_VALUE_MIN; /* the value's least */
     if (label_w > span - KV_GAP - keep) label_w = span - KV_GAP - keep;

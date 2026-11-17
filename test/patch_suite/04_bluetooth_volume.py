@@ -114,7 +114,7 @@ assert ov.config=={'VOLUME':'7','OTHER':'8'}; passed()  # other writes keep thei
 class BtVolumeMachine(Machine):
     def __init__(self,link=True):
         super().__init__()
-        if link: self.config['BTVOLLINK']='1'  # Bluetooth's Control Device Volume
+        if link: self.config['BTVOLLINK']='1'  # Bluetooth's Link Volume
         self.absolute=10; self.write_result=0; self.way=1
         self.byte(syms['g_bluetoothflag'],1); self.byte(syms['bt_linkstatus'],1)
         self.word(syms['bt_showcoding'],1); self.byte(syms['g_volume'],20); self.byte(syms['g_maxvolume'],100)
@@ -145,7 +145,7 @@ for left,right,want in ((0,0,0),(0,20,25),(20,0,25),(1,1,1),(20,20,25),(40,30,51
     gain=(max(0,left)*100//max(left,right),max(0,right)*100//max(left,right)) if want else (left,right)  # AVRCP 0 isn't silent on every headset: keep stock's mute
     b=BtVolumeMachine(); assert b.volume(left,right)==[gain] and b.writes()==[want]
     assert b.volume(left,right)==[gain] and not b.writes(); passed()
-# Control Device Volume off (the default): the Q2's volume is stock's gain alone, the device's own
+# Link Volume off (the default): the Q2's volume is stock's gain alone, the device's own
 # volume is never read or written, and the poll leaves it be.
 b=BtVolumeMachine(link=False); assert b.volume(20,20)==[(20,20)] and b.volume(40,30)==[(40,30)]
 b.poll(); b.poll(); assert not [c for c in b.calls if c[0].startswith('btctl_')]; passed()

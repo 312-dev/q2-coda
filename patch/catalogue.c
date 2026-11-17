@@ -23,6 +23,7 @@
  * it isn't running: addon.c addon_wake), the offline queue, and the ratings channel (ratings.out,
  * ratings.in). */
 #include "navigation.h"
+#include "stream_path.h"
 
 #define CAT_DIR "/mnt/mmc/.q2pod"
 #define CAT_DB CAT_DIR "/catalogue.db"
@@ -1150,13 +1151,26 @@ int catalogue_seconds(const char *path) {
     return e ? e->sec : -1;
 }
 
-/* The server row whose offline copy path is, or 0: a Stream Cache file the app played it from. */
+static int cat_app_of(const char *path);
+/* The server row whose offline copy path is, or 0: a Stream Cache file the app played it from,
+ * named in catalogue.avail, or a song it streams, whose download in its stream cache only the sid
+ * in the file's name ties to the row (stream_path.h; the device, 2026-11-16: no cover in Control
+ * Center or the car for one). Every UI lookup from a playing path to its server row comes here:
+ * its cover (catalogue_cover: the player's cover thread, Up Next, the modal header), its play key
+ * and hearts (cat_row_of) and its genre and year (catalogue_np_info). */
 static const cat_ent *cat_copy_of(const char *path) {
     if (!path || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
     for (unsigned i = 0; i < cat.ix.n; ++i)
         if (cat.ix.e[i].local && !strcmp(ix_str(&cat.ix, cat.ix.e[i].local), path))
             return &cat.ix.e[i];
-    return 0;
+    const char *app, *sid;
+    int appn, sidn, slot = -1;
+    char key[64];
+    if (!stream_path_sid(path, &app, &appn, &sid, &sidn) || sidn >= (int)sizeof key ||
+        (slot = cat_app_of(path)) < 0)
+        return 0;
+    memcpy(key, sid, (unsigned)sidn), key[sidn] = 0;
+    return ix_sid(&cat.ix, slot, key);
 }
 /* The server row r plays as: r's own path is a Stream Cache copy of it (not a linked card file's
  * row, which plays from the card). 0 for any other record. On the UI thread only (stock's cover

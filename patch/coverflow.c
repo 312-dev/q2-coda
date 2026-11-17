@@ -3529,6 +3529,7 @@ static struct {
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
 extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
+extern void home_np_bind(void *win), home_np_sync(void); /* home_np.c: Home's first row */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
@@ -3571,6 +3572,32 @@ unsigned char now_cover(void *r, const char **file) {
         path && !tk_strcmp((const char *)g_lastcover_url, path) ? g_playcover_type : 0;
     *file = type < sizeof(player_covers) / sizeof(*player_covers) ? player_covers[type] : 0;
     return type;
+}
+
+/* r's cover as a file:// URL in url (size bytes, a cover's path cut short counted as none), as Home's pane finds it: the player's file once
+ * the cover thread has parsed r (now_cover: embedded, folder image or downloaded; for a server
+ * song's stream download, its app's cover first, catalogue.c cat_copy_of), else the app's cover of
+ * a server row's album (catalogue_cover), else Cover Flow's cache of the album by its tags
+ * (now_tag: the playing file's own). 0, url empty, for none: the caller's placeholder. Control
+ * Center and the modal header take it. */
+int song_cover_url(void *r, char *url, unsigned size) {
+    const char *file = (const char *)0;
+    char art[512];
+    *url = 0;
+    if (!r || size < 8) return 0;
+    if (now_cover(r, &file) && file && *file) {
+        tk_snprintf(url, size, "%s", file); /* a file:// URL already */
+        return 1;
+    }
+    tk_snprintf(url, 8, "file://");
+    if (catalogue_cover(P(r, REC_PATH), url + 7, size - 7)) return 1;
+    art_path(art, tags_key(now_tag(r, REC_ARTIST), now_tag(r, REC_ALBUM)), "");
+    if (file_size(art) > 0 && strlen(art) < size - 7) {
+        tk_snprintf(url + 7, size - 7, "%s", art);
+        return 1;
+    }
+    *url = 0;
+    return 0;
 }
 
 /* Repaint every window once the paint that changed the art is over: AWTK drops what a paint
@@ -4536,9 +4563,11 @@ static int np_loaded(void) {
         home.np_timer = timer_add(np_due, (void *)0, (unsigned)left);
     return home.np && left > 0;
 }
-/* Every bar paint (navigation.c bar_sync): Home laid out again once Now Playing's row is to come
- * or go, or, with Home on top, Folders' rule changes (home.c home_folders). */
+/* Every bar paint (navigation.c bar_sync): Home's first row follows the play state (home_np.c),
+ * and Home is laid out again once Now Playing's row is to come or go, or, with Home on top,
+ * Folders' rule changes (home.c home_folders). */
 void coverflow_home_np(void) {
+    home_np_sync(); /* its first row's state (home_np.c) */
     if (!home.list) return;
     int top = window_manager_get_top_window(window_manager()) == home.win;
     if (np_loaded() != home.np || (top && home_folders() != home.folders)) coverflow_home_layout();
@@ -4719,6 +4748,7 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    home_np_bind(win); /* its first row's click and glyph (home_np.c) */
     home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);

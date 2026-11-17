@@ -557,7 +557,7 @@ def validate_assets(directory):
     assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
     assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
-    assert b'\nName = Q2\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
+    assert b'\nName = Q2 Muse\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.

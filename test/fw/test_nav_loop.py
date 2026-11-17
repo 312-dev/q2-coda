@@ -2335,12 +2335,12 @@ def cc_names(fw, top, widths):
 
 
 def test_a_name_wider_than_its_column_scrolls_while_the_wheel_is_on_its_circle(fw, keys):
-    """control_center.c cc_marq: the wheel onto Smart Wi-Fi (75 px in a 68 px column) starts its scroller, the house
+    """control_center.c cc_marq: the wheel onto a name wider than its 76 px room (90 px here) starts its scroller, the house
     marquee (ringnav_hscroll_start's hold and pace, the lull's loop); off it, the scroller stops and is back at its
     start. A name that fits (EQ) never scrolls."""
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
-    names = cc_names(fw, top, [38, 60, 42, 22, 75, 18])
+    names = cc_names(fw, top, [33, 61, 42, 22, 90, 18])
     top.ints[b'_cc_focus'] = CC_CAR
     started = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_start')]  # noqa: E731
     stopped = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_stop')]  # noqa: E731
@@ -2358,13 +2358,33 @@ def test_a_scrolling_name_stops_when_the_ring_goes_or_a_slider_takes_the_wheel(f
     timers = WidgetTimers(fw)
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=None)
-    names = cc_names(fw, top, [38, 60, 42, 22, 75, 18])
+    names = cc_names(fw, top, [33, 61, 42, 22, 90, 18])
     top.ints[b'_cc_focus'] = CC_SMART
     assert keys(KEY_NEXT) == STOP and [c[1][0] for c in fw.calls('hscroll_label_start')] == [names[CC_SMART].p]
     ring = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == 5000]
     keys.clock.now += 5000
     timers.fire(ring[-1])
     assert [c[1][0] for c in fw.calls('hscroll_label_stop')] == [names[CC_SMART].p]
+
+
+def test_the_wi_fi_circle_is_drawn_again_when_the_link_changes_while_open(fw, keys):
+    """control_center.c cc_wifi_poll, every CC_WIFI_POLL_MS from cc_open: nothing while the glyph the circle shows
+    (_cc_wifi, as cc_glyph drew it) is still right; Wi-Fi turned off under the open page, its circle's box, ring and
+    all (43, 45, 46 x 46), drawn again, and only that."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_opened(fw, ui)
+    poll = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == 1000]
+    assert len(poll) == 1
+    dirty = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: dirty.append(struct.unpack('<4i', C.string_at(r, 16)) if r else None))
+    flag = fw.var('g_wififlag', C.c_ubyte)
+    flag.value = 1
+    top.ints[b'_cc_wifi'] = 0 + 2  # drawn on, not joined (stock's bars: none)
+    assert timers.fire(poll[0]) == 8 and dirty == []
+    flag.value = 0
+    assert timers.fire(poll[0]) == 8 and dirty == [(43, 45, 46, 46)] and top.ints[b'_cc_wifi'] == -1 + 2
+    assert timers.fire(poll[0]) == 8 and dirty == [(43, 45, 46, 46)]
 
 
 def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):

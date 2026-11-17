@@ -1063,8 +1063,8 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
     assert headset.level == 64 and q2.var('g_volume').value == 55  # Off: each keeps its own
     q2.build('ringnav_btrows', 'bluetooth_page', 'scroll_view_bluetooth',  # System settings → Bluetooth
              *((f'stock_{i}', 'list_item', 'scroll_view_bluetooth') for i in range(4)))
-    q2.screen.click('Control Device Volume')
-    assert q2.screen.switch('Control Device Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
+    q2.screen.click('Link Volume')
+    assert q2.screen.switch('Link Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
     # the Q2's level sent, as the headset's nearest step, and the Q2's own gain full
     assert headset.level == nearest(55 * 127 / 100) and headset.gain[-1] == (100, 100)
     headset.level = 100  # its own keys: 100/127 of its range, 79 of the Q2's 100

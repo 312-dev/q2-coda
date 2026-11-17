@@ -464,6 +464,7 @@ int ringnav_sleep(void *loop) {
     stale_heal();
     quick_poll();
     headset_poll();
+    bt_ui_poll(); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
     headset_eq_poll();
     bt_volume_poll();
     video_poll();

@@ -268,7 +268,8 @@ STATUS_PX = 14
 STATUS_INK = 11.0
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
-                 'status_down': ('arrow-down-bold', 8, 0)}
+                 'status_down': ('arrow-down-bold', 8, 0), 'status_headphones': ('headphones-bold', STATUS_PX, STATUS_INK),
+                 'status_car': ('car-profile-bold', STATUS_PX, STATUS_INK)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8
@@ -332,15 +333,28 @@ TILE_INKS = BUMP_INKS
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
-# Control Center's glyphs (control_center.c cc_glyph, from mock_cc4_stack.py): fill, white on its toggles and transport
-# (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
-CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
-            'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
-            'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
+# Control Center's glyphs (control_center.c cc_glyph, from mock_cc4_tight.py): Phosphor fill, white on its toggles
+# and transport (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill. The
+# Wi-Fi circle's is the link's (cc_wifi): wifi-slash off, wifi-none on but not joined, wifi-low to wifi-high by the
+# status row's level (Phosphor's fill levels draw the whole fan and fill as much of it as the signal), wifi-x with no
+# internet. The toggles' glyphs are at CC_INK, their optical size: each ink's longer side 18 px, so the wide fan and
+# the tall Bluetooth rune read as one size.
+CC_ICONS = {'wifi_slash': ('wifi-slash-fill', 22, 0xffffff), 'wifi_0': ('wifi-none-fill', 22, 0xffffff),
+            'wifi_1': ('wifi-low-fill', 22, 0xffffff), 'wifi_2': ('wifi-medium-fill', 22, 0xffffff),
+            'wifi_3': ('wifi-high-fill', 22, 0xffffff), 'wifi_x': ('wifi-x-fill', 22, 0xffffff),
+            'bluetooth': ('bluetooth-fill', 22, 0xffffff), 'airplay': ('airplay-fill', 22, 0xffffff),
+            'car': ('car-profile-fill', 22, 0xffffff), 'leaf': ('leaf-fill', 22, 0xffffff),
             'eq': ('equalizer-fill', 22, 0xffffff),
-            'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
-            'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
-            'play': ('play-fill', 30, 0xffffff)}
+            'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
+            'back': ('skip-back-fill', 22, 0xffffff), 'forward': ('skip-forward-fill', 22, 0xffffff),
+            'pause': ('pause-fill', 30, 0xffffff), 'play': ('play-fill', 30, 0xffffff)}
+# Light Mode's (control_center.c cc_glyph, <name>_l): the art is final, so the light half has its own: a toggle
+# off and the transport in the light half's Text Primary on the light block, the sliders' sun and speaker white on
+# the fill that is dark there. A toggle on keeps the white on Accent Blue.
+CC_LIGHT = {**{n: token('primary', True) for n in CC_ICONS if n not in ('sun', 'speaker')},
+            'sun': 0xffffff, 'speaker': 0xffffff}
+CC_INK = {n: 18.0 for n in ('wifi_slash', 'wifi_0', 'wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bluetooth', 'airplay',
+                            'car', 'leaf', 'eq')}
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
 # circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
@@ -358,6 +372,18 @@ MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
+PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
+# Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
+# Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
+# and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
+# battery's red).
+BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-profile', 'speaker': 'speaker-hifi',
+                 'phone': 'device-mobile'}
+BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
+BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-fill', 0xffffff),
+             'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
+             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
+             'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
 # Settings > Car Remote's phone rows (carremote_page.c): Phosphor device-mobile, regular, Text Secondary per half,
 # white on the selection
 CR_PHONE_PX = 20
@@ -559,6 +585,8 @@ def status_images(prefix):
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
     out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, STATUS_PX, STATUS_INK, c, STATUS_UNLIT[k])
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
+    out |= {f'{prefix}_status_btdim_{k}': phosphor('bluetooth-bold', STATUS_PX, c, STATUS_INK) for k, c in BT_SPIN_INKS.items()}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
     return out
@@ -652,10 +680,22 @@ def images(t):
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
     out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
-    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c, CC_INK.get(n, 0.0)) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_cc_{n}_l': phosphor(g, px, CC_LIGHT[n], CC_INK.get(n, 0.0)) for n, (g, px, _) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
+            for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
+    out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
+    out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # and the status row's relay mark (phone › car) in Text Secondary per half
+    out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
+    out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
