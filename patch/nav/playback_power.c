@@ -482,6 +482,7 @@ int ringnav_sleep(void *loop) {
     lyric_poll();
     keep_lit_poll();
     np_art_poll();
+    np_settle_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
