@@ -1617,8 +1617,15 @@ keeps it inhibited while stock `config_init` reads settings, then reconciles tho
 the detected cable. This covers a running player waiting for insertion; it cannot control the
 PMIC before Linux and this startup script execute.
 
-The policy is `requested && ready && (g_usbdac_chargeflag == 1 || (cable == 1 && g_usbmode == 0))`:
+The policy is `requested && ready && g_last_otgid != 1 && (g_usbdac_chargeflag == 1 || (cable == 1 && g_usbmode == 0))`:
 USB DAC Charging On permits charging, as does a detected cable with USB Storage selected.
+`g_last_otgid` 1 is the Q2 as a USB host: stock's `check_otg_status` (`0x4f3408`), with the ID pin
+(`PD18`) low, turns the bus power on (`PC20` high) and the charger off (`PE22` high) by writing the
+pins directly, and `get_battery_capacity` reads no cable while it lasts. Each USB pass reads `PE22`
+back and writes the policy again when the two differ, so without that term the guard turned the
+charger back on within the same pass (seen in the emulator with the pins recorded, 2026-11-17:
+`PC20=1`, `PE22=1`, then `PE22=0` in the same millisecond), charging the battery from the Q2's own
+bus power; Charge Limit's hand-back did the same. `test/fw/test_usb_charge.py` covers both.
 An unknown setting, failed enumeration or a timeout never establishes a dedicated charger. With
 Audio and DAC selected and charging Off, an unidentified wall charger is therefore inhibited too:
 select USB Storage or turn USB DAC Charging On. No charger-type detector or PMIC register changes
