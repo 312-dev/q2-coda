@@ -5,7 +5,7 @@
 #include "navigation.h"
 
 /* g_wifiStatus at 0xd8: wpa_supplicant's wpa_state as stock's monitor thread last read its STATUS,
- * once a second (0x5c28e4: "COMPLETED" and "ASSOCIATED" are its link, networkGetPhysicStatus) */
+ * once a second ("COMPLETED" and "ASSOCIATED" are its link, networkGetPhysicStatus) */
 #define WPA_STATE ((const char *)g_wifiStatus + 0xd8)
 #define WIFI_CONF "/mnt/data/wpa_supplicant.conf"
 #define WIFI_CONF_DEFAULT "/release/assets/default/raw/wpa_supplicant.conf" /* no network in it */
