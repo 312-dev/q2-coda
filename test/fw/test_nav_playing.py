@@ -1187,8 +1187,8 @@ def ringed(fw, ui, mcl, st, heart=True):
     fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
     now = Now(fw, ui, mcl, st, opened=False)
     if heart:
-        now.heart = ui.widget(now.art_page, 'img_fav', 180, 150, 40, 40)
-        ui.set_str(now.heart, b'image', b'play_unfav')
+        fav = ui.widget(now.art_page, 'img_fav', 180, 150, 40, 40)
+        ui.set_str(fav, b'image', b'play_unfav')
     assert now.open() == 41
     mcl.mode = 0
     assert cpress(now, 200000) == STOP and st.scrub == 1
