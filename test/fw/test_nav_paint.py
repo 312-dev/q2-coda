@@ -1838,7 +1838,7 @@ SCAN_WHOLE = O['SCAN_WHOLE']
 
 @pytest.fixture
 def whole(fw):
-    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives the test, so it goes back."""
+    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives a load, so it goes back."""
     flag = C.c_ubyte.from_address(SCAN_WHOLE)
     saved = flag.value
     yield flag
@@ -2409,7 +2409,7 @@ def test_a_set_the_boot_can_t_write_leaves_stock_s(fw, world, st):
 
 @in_fork
 def test_the_system_bar_s_load_boots_the_theme_s_set_once(fw, world, st):
-    """In a child: the boot writes the set's values into stock's code pages, which outlive a test here."""
+    """In a child: the boot writes the set's values into stock's code pages, which stay in the child."""
     theme(fw)
     load = boot(fw, world, st)
     want = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
