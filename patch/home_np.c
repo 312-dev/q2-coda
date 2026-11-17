@@ -116,12 +116,26 @@ int home_np_lead(void) {
     return list && widget_get_visible(list);
 }
 
-/* Every HN_FRAME_MS while Home is open: a change of state starts the morph and the words'
- * cross-fade (the shared frame timer paints them, ui_kit.c motion_frames); the bars step while they
- * play, the morph is done and the row is in sight (MO_DECOR: still under Reduce Motion). */
+/* Whether the bars move now: playing, the morph done, the row in sight and motion allowed
+ * (MO_DECOR: still under Reduce Motion). */
+static int hn_moving(void) {
+    return hn.img && !hn.p_to && !anim_running(&hn.morph) && home_np_lead() &&
+           motion_ms(HN_FRAME_MS, MO_DECOR);
+}
+/* Every HN_FRAME_MS while the bars move: the next frame; it ends itself when they stop. */
 static int hn_tick(const void *info) {
     (void)info;
-    if (!hn.win) return hn.timer = 0;
+    if (!hn_moving()) return hn.timer = 0; /* RET_REMOVE */
+    ++hn.frame;
+    widget_invalidate_force(hn.img, (void *)0);
+    return 8; /* RET_REPEAT */
+}
+
+/* coverflow.c coverflow_home_np, on every bar paint (each second at least, and as the play state
+ * changes): a change of state starts the morph and the words' cross-fade (the shared frame timer
+ * paints them, ui_kit.c motion_frames), and the bars' timer runs while they move. */
+void home_np_sync(void) {
+    if (!hn.win) return;
     if (hn.was && !ovm_running(&hn.out)) hn_fade_done();
     int state = hn_state();
     if (!hn.editing && hn.label) {
@@ -129,16 +143,11 @@ static int hn_tick(const void *info) {
         if (to != hn.p_to) {
             hn.p_from = (short)hn_p(), hn.p_to = (short)to;
             anim_start(&hn.morph, HN_MORPH_MS, EASE_CUBIC_OUT, MO_SPATIAL);
+            if (hn.img) widget_invalidate_force(hn.img, (void *)0);
         }
         if (state != hn.state) hn_words_to(state);
-        if (hn.img && !anim_running(&hn.morph)) widget_invalidate_force(hn.img, (void *)0);
     }
-    if (!hn.p_to && !anim_running(&hn.morph) && home_np_lead() &&
-        motion_ms(HN_FRAME_MS, MO_DECOR) && hn.img) {
-        ++hn.frame;
-        widget_invalidate_force(hn.img, (void *)0);
-    }
-    return 8; /* RET_REPEAT */
+    if (!hn.timer && hn_moving()) hn.timer = timer_add(hn_tick, (void *)0, HN_FRAME_MS);
 }
 
 static int hn_gone(void *win, void *event) {
@@ -159,7 +168,7 @@ static int hn_click(void *ctx, void *event) {
 }
 
 /* coverflow_home, after stock bound Home's widgets: stock's click on img_playing swapped for
- * hn_click, and the row's timer. */
+ * hn_click. */
 void home_np_bind(void *win) {
     void *img = win ? widget_lookup(win, "img_playing", 1) : (void *)0;
     if (!img) return;
@@ -174,7 +183,6 @@ void home_np_bind(void *win) {
         }
     widget_on(img, EVT_CLICK, hn_click, (void *)0);
     widget_on(win, EVT_DESTROY, hn_gone, win);
-    if (!hn.timer) hn.timer = timer_add(hn_tick, (void *)0, HN_FRAME_MS);
 }
 
 static int hn_mix(int a, int b, int p) { return a + (b - a) * p / 1000; }

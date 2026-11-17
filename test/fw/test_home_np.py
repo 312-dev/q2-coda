@@ -54,6 +54,10 @@ class Home(Gui):
         self.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(self.view, np)
         return [self.ui.name[i][4:] for i in self.ui.kids[self.view] if i not in self.ui.hidden], self.ui.text[self.label]
 
+    def sync(self):
+        """A bar paint: the row follows the play state."""
+        self.fw.fn('home_np_sync', None)()
+
     def margin(self):
         return self.ui.props.get((self.label, 'style:normal:margin_left'))
 
@@ -154,7 +158,7 @@ def test_pausing_morphs_the_bars_into_the_pause_and_cross_fades_the_words(fw):
     home.apply(playing=PLAYING)
     bars = home.paint()
     home.status = PAUSED
-    home.ui.fire('hn_tick')
+    home.sync()
     assert home.paint() == bars  # the morph's start: the bars, still
     assert words(home) == ['Paused', 'Playing']  # the label, then the old words' copy over it
     home.now += 125
@@ -163,7 +167,7 @@ def test_pausing_morphs_the_bars_into_the_pause_and_cross_fades_the_words(fw):
     assert bars[0][1] != mid[0][1] != 0xffababab  # on its way from the accent to Text Secondary
     home.now += 125
     assert [b[0] for b in home.paint()] == PAUSE and {b[1] for b in home.paint()} == {0xffababab}
-    home.ui.fire('hn_tick')
+    home.sync()
     assert words(home) == ['Paused']  # the copy gone once faded
 
 
@@ -172,14 +176,15 @@ def test_resuming_mid_morph_turns_back_from_where_it_is_and_then_the_bars_move(f
     home.apply(playing=PLAYING)
     bars = home.paint()
     home.status = PAUSED
-    home.ui.fire('hn_tick')
+    home.sync()
     home.now += 125
     mid = home.paint()
     home.status = PLAYING
-    home.ui.fire('hn_tick')
+    home.sync()
     assert home.paint() == mid  # back from where it stood
     home.now += 250
     assert home.paint() == bars
+    home.sync()
     home.ui.fire('hn_tick')
     assert home.paint() != bars  # the bars move again
 
@@ -188,6 +193,22 @@ def test_under_reduce_motion_the_switch_is_a_cut(fw):
     home = Home(fw, reduce=True)
     home.apply(playing=PLAYING)
     home.status = PAUSED
-    home.ui.fire('hn_tick')
+    home.sync()
     assert [b[0] for b in home.paint()] == PAUSE
     assert words(home) == ['Paused']
+
+
+def test_the_bars_timer_runs_only_while_they_move_on_home(home):
+    """No timer of its own while paused or with a page over Home: the suite's pages count their timers."""
+    home.apply(playing=PAUSED)
+    home.sync()
+    assert not home.ui.pending('hn_tick')
+    home.status = PLAYING
+    home.sync()
+    home.now += 250
+    home.sync()
+    assert home.ui.pending('hn_tick')
+    home.ui.windows.append(home.ui.new('window_create', 0, 0, 0, 0, 0))  # a page over Home
+    assert home.ui.fire('hn_tick') == 0 and not home.ui.pending('hn_tick')
+    home.sync()
+    assert not home.ui.pending('hn_tick')

@@ -873,6 +873,7 @@ int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void
 void home_np_row(void *row, int editing), home_np_bind(void *win),
     home_np_paint(void *w, void *canvas);
 int home_np_lead(void);
+void home_np_sync(void);
 const char *guest_ui_value(void), *guest_ui_title(const char *name);
 int guest_ui_keeps_lit(void *top);
 void guest_short(const char *name, char *out, unsigned n);
