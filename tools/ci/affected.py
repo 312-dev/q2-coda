@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which tests a feature branch's changes need, from the files it changed against a base.
 
-    python3 tools/ci/affected.py                      # changes against release/p31's merge base, as a plan
+    python3 tools/ci/affected.py                      # changes against the trunk's merge base, as a plan
     python3 tools/ci/affected.py --base main --json   # the same plan as JSON
     python3 tools/ci/affected.py --run BUILD          # and run it (all of test/patch.py serially)
     python3 tools/ci/affected.py --all --run BUILD    # everything: what an integration branch runs
@@ -34,6 +34,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'/'ci'))
 import patch_shards  # noqa: E402
+import q2ci  # noqa: E402
 
 ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
@@ -270,7 +271,8 @@ def run(plan, build, python):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--base', default='release/p31', help='what the branch is compared with (default: release/p31)')
+    ap.add_argument('--base', default=q2ci.trunk(), help='what the branch is compared with (default: the trunk, '
+                    f'now {q2ci.trunk()})')
     ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
