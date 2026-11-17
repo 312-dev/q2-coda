@@ -2492,13 +2492,19 @@ def wide(text):
     return (C.c_uint * (len(text) + 1))(*map(ord, text), 0)
 
 
-def test_without_vgcanvas_the_letters_box_is_square(fw, ui):
+def test_without_vgcanvas_the_letters_box_is_rounded_a_row_at_a_time(fw, ui):
+    """fill_box's own rows when AWTK declines: the same box, its corners antialiased (corner_cover.c)."""
     page, canvas = spun(fw, ui, titles(200))
     canvas.declines = 1
     letter(fw, page, canvas)
     (_, box, _), = canvas.boxes
     (_, rounded, color, _), = canvas.rounds  # asked for first, and declined
-    assert rounded == box and (color, *box) in canvas.fills  # the same square, its corners square
+    x, y, w, h = box
+    assert rounded == box and all(x <= fx and fx + fw_ <= x + w and y <= fy < y + h for _, fx, fy, fw_, _ in canvas.fills)
+    assert (color, x, y + h // 2, w, 1) in canvas.fills  # a middle row whole, in the box's colour
+    top = [(c, fx, fw_) for c, fx, fy, fw_, _ in canvas.fills if fy == y]
+    assert min(fx for _, fx, _ in top) > x  # the corner's outermost pixel clear
+    assert any(0 < c >> 24 < color >> 24 for c, _, _ in top)  # part pixels along the flat of the arc
 
 
 @pytest.mark.parametrize('declines, box, rounded', [(0, (10, 10, 80, 40), True), (1, (10, 10, 80, 40), False), (0, (10, 10, 20, 20), False)])

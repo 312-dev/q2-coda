@@ -11,39 +11,39 @@
  * coverflow.shelf.radius of 166 would need 160. */
 #define CORNER_MAX 160
 
-/* floor(sqrt(v)), v >= 0: bit by bit, as the payload links no libm. */
-static unsigned isqrt(unsigned v) {
-    unsigned r = 0, bit = 1u << 30;
-    while (bit > v) bit >>= 2;
-    for (; bit; bit >>= 2)
-        if (v >= r + bit)
-            v -= r + bit, r = (r >> 1) + bit;
-        else
-            r >>= 1;
-    return r;
-}
-
 /* Table t (r rows of r, the outermost row and column first) of a radius r corner: each pixel's
  * share of 16 x 16 sample points inside the circle, out of 255. A sample (i, j) of 16r across the
  * corner is inside when (32r - 2i - 1)^2 + (32r - 2j - 1)^2 <= (32r)^2 (tools/art.py corner_cover
  * samples the same points), so a row of samples has its first inside one where the integer root
- * of (32r)^2 - dy^2 says, one root a row of samples. */
+ * of (32r)^2 - dy^2 says. That root only grows from one row of samples to the next, so it is
+ * stepped up from the last, 32r steps in all for the corner (the payload links no libm, and a
+ * first paint of rows with two radii keeps to its budget). The samples' first inside ones fall
+ * further in down a row of pixels, so only the pixels between the first and last row's are counted,
+ * from running sums; those before are clear and those after whole. */
 static void corner_fill(unsigned char *t, int r) {
-    int in[16]; /* each sample row's samples outside the circle, from the outer edge */
+    /* in[j]: sample row j's samples outside the circle, from the outer edge, falling as j grows;
+     * sum[k]: in[0] to in[k - 1] added up */
+    int in[16], sum[17], s = 0, next = 1; /* next: (s + 1)^2 */
     for (int y = 0; y < r; ++y) {
+        sum[0] = 0;
         for (int j = 0; j < 16; ++j) {
-            int dy = 32 * r - 2 * (16 * y + j) - 1;
-            int s = (int)isqrt((unsigned)(1024 * r * r - dy * dy));
+            int dy = 32 * r - 2 * (16 * y + j) - 1, v = 1024 * r * r - dy * dy;
+            while (next <= v) next += 2 * s + 3, ++s; /* s = floor(sqrt(v)) */
             in[j] = s >= 32 * r - 1 ? 0 : (32 * r - 2 - s) / 2 + 1;
+            sum[j + 1] = sum[j] + in[j];
         }
-        for (int x = 0; x < r; ++x) {
-            int n = 0;
-            for (int j = 0; j < 16; ++j) {
-                int o = in[j] - 16 * x; /* this pixel's samples outside, 0 to 16 */
-                n += 16 - (o < 0 ? 0 : o > 16 ? 16 : o);
-            }
-            t[y * r + x] = (unsigned char)((n * 255 + 128) / 256);
+        unsigned char *row = t + y * r;
+        int x = 0, clear = in[15] / 16, whole = (in[0] + 15) / 16;
+        for (; x < clear && x < r; ++x) row[x] = 0;
+        /* pixel x: rows j < lo have all 16 of its samples outside, rows from hi none, and the
+         * rows between 16x + 16 - in[j] inside; both bounds only fall as x grows */
+        for (int lo = 16, hi = 16; x < whole && x < r; ++x) {
+            while (lo && in[lo - 1] < 16 * x + 16) --lo;
+            while (hi && in[hi - 1] <= 16 * x) --hi;
+            int n = 16 * (16 - hi) + (hi - lo) * (16 * x + 16) - (sum[hi] - sum[lo]);
+            row[x] = (unsigned char)((n * 255 + 128) / 256);
         }
+        for (; x < r; ++x) row[x] = 255;
     }
 }
 
