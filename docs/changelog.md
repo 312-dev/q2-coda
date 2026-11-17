@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): a song from a music server shows its format beside a cloud under the album, and a crossed-out cloud while the server can't be reached.
   - Now Playing (OLED): while a song from a music server loads, a small spinner and how much has downloaded ("7.0 of 20 MB") show between the two times under the bar, and go once it plays. With the new player, such a song starts after a few seconds of it have downloaded instead of once all of it has.
   - Car Remote: while a song from a music server loads on the Q2 Muse, the car shows its loading spinner (with a new enough Q2 Muse Remote).
   - Streaming > Configuration: a **Download Ahead** row (Off, 1, 2 or 3 songs; 2 by default). A music-server app such as Subsonic downloads that many of the songs coming next, in the order the Q2 Muse will play them (shuffle and Up Next included), so a skip or the next song starts at once.

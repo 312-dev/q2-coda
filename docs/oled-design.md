@@ -502,6 +502,11 @@ has no place for keeps a place of its own:
   turning under Reduce Motion too, as it reports progress) and "7.0 of 20 MB" (Inter 13 px, Text Secondary) sit
   centred in the times row, 6 px apart, between the elapsed and the remaining, which both stay. Nothing dims, the bar
   does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
+- **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
+  art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
+  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
+  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
+  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32

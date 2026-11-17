@@ -31,8 +31,8 @@ class Np:
             self.world.mtime[STREAM] = 1000
         if waits:
             self.world.files[b'/tmp/q2player.wait'] = SONG + b'\n'
-        deques = Deques(fw)
-        q = deques.new()
+        self.deques = deques = Deques(fw)
+        self.q = q = deques.new()
         deques[q].append(songs(SONG))
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = q
         mcl.pos = 0
@@ -115,3 +115,51 @@ def test_a_small_total_shows_tenths_and_an_unknown_one_none(fw, mcl, songs, scra
         np.tick()
     np.paint()
     assert np.texts[-1][0] == '1.2 MB'
+
+
+W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
+
+
+def art_page(np, scratch):
+    """Now Playing's art (24, 0, 150 x 150) on its page, as tools/ipod.py np_grid lays them out."""
+    page, art = C.create_string_buffer(0x200), C.create_string_buffer(0x200)
+    for off, v in ((W_X, 24), (W_Y, 0), (W_W, 150), (W_H, 150)):
+        struct.pack_into('<i', art, off, v)
+    struct.pack_into('<Q', art, W_PARENT, C.addressof(page))
+    np.keep = (page, art)
+    C.c_void_p.from_address(C.addressof(np.fw.var('st', C.c_char)) + scratch['np_cover']).value = C.addressof(art)
+    return C.addressof(page)
+
+
+def badge(np, page):
+    np.paint()
+    np.tick()
+    np.texts.clear(), np.loads.clear(), np.icons.clear()
+    np.fw.fn('np_stream_paint', None, C.c_void_p, C.c_void_p)(page, C.addressof(np.canvas))
+    return [t for t, _ in np.texts], np.loads, np.icons
+
+
+def test_a_server_song_shows_its_format_and_the_cloud_on_the_art_page(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
+    page = art_page(np, scratch)
+    texts, loads, icons = badge(np, page)
+    assert texts == ['FLAC'] and loads == ['oled_npcloud_d']
+    assert icons == [(192 + 11, 150 - 10)]  # the glyph 11 px into the badge, its centre on the badge's
+    x, _, _, _ = np.texts[0][1]
+    assert x == 192 + 21  # the label 21 px in
+
+
+def test_the_cloud_is_crossed_out_while_the_server_cant_be_reached(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
+    np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
+    page = art_page(np, scratch)
+    texts, loads, _ = badge(np, page)
+    assert texts == ['FLAC'] and loads == ['oled_npcloudoff_d']
+
+
+def test_a_card_file_has_no_badge(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, waits=False)
+    np.deques[np.q][:] = [songs(b'/mnt/mmc/Music/a.flac')]
+    page = art_page(np, scratch)
+    texts, loads, _ = badge(np, page)
+    assert texts == [] and loads == []

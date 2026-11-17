@@ -6,7 +6,10 @@
  * q2player waits for more of it
  * (/tmp/q2player.wait). It goes once the song plays on. Under OLED only (the status row's set).
  * Nothing dims, no "Buffering…". The spinner reports progress, so it turns under Reduce Motion too
- * (motion_ms, MO_FEEDBACK). */
+ * (motion_ms, MO_FEEDBACK).
+ * A server song (a card app's stream download, or the pressed catalogue row) also has a format
+ * badge at the art's bottom line, on the art's page so a swipe takes it with the heart and More:
+ * the file's format beside a cloud, or the crossed-out cloud while the app says server=down. */
 #include "navigation.h"
 #include "ui_kit.h"
 
@@ -16,12 +19,21 @@
 #define NS_GAP 6        /* between the spinner and the amount */
 #define NS_Y 250        /* the times row's centre (docs/oled-design.md Now Playing) */
 #define NS_PX 13
+#define NB_H 20 /* the badge (np_about.c's quality badge): 20 px high, 6 px corners */
+#define NB_R 6
+#define NB_GAP 18 /* from the art's right edge: the title's column (tools/ipod.py NP_GRID_GAP) */
+#define NB_GLYPH 12
+#define NB_GLYPH_X 11 /* the glyph's centre from the badge's left */
+#define NB_TEXT_X 21  /* the label from the badge's left */
+#define NB_PAD 30     /* the badge's width past its label's */
 
 static struct {
     int on, frame;
     unsigned have, total; /* bytes */
     unsigned timer, checked;
-    rect_t box; /* what was painted last, for the next frame's repaint */
+    rect_t box;      /* what was painted last, for the next frame's repaint */
+    int badge, down; /* a server song shows its badge; its app says server=down */
+    char label[8];   /* its format, the file's extension in capitals */
 } ns __attribute__((section(".scratch")));
 
 /* MB of 10^6 bytes, tenths below 10 MB and for what has come, as Storage counts (no 64-bit
@@ -32,6 +44,41 @@ static void ns_mb(char *s, unsigned n, unsigned bytes, int tenths) {
         tk_snprintf(s, n, "%u.%u", t / 10, t % 10);
     else
         tk_snprintf(s, n, "%u", (t + 5) / 10);
+}
+
+/* The path of the song Now Playing shows: the pressed one before the player has it, else the
+ * queue's at MCL_POS; 0 for none. */
+static const char *ns_path(void) {
+    unsigned at, n;
+    void *pressed = catalogue_np_now(&at, &n);
+    if (pressed) return P(pressed, REC_PATH);
+    void *q = P(mcl_pdeqplaylist, 0);
+    unsigned pos = (unsigned)I(MCL_POS, 0);
+    return q && pos < deque_size(q) ? P(deque_at(q, pos), REC_PATH) : 0;
+}
+
+/* Whether path is a server song: a card app's stream download or a catalogue row, its app's id
+ * into id. */
+static int ns_server(const char *path, char *id, unsigned n) {
+    if (!stream_app_of(path, id, n)) return 0;
+    const char *rest = path + 10 + strlen(id);
+    return tk_str_start_with(rest, "/stream/") || tk_str_start_with(rest, "/cat/");
+}
+
+/* The badge's state for the song Now Playing shows: ns.badge, ns.label, ns.down. */
+static void ns_badge_read(void) {
+    char id[16], file[48], raw[256], v[8];
+    const char *p = ns_path(), *dot = p ? strrchr(p, '.') : 0;
+    ns.badge = p && dot && !strstr(dot, "/") && ns_server(p, id, sizeof id);
+    if (!ns.badge) return;
+    unsigned i = 0;
+    for (++dot; dot[i] && i + 1 < sizeof ns.label; ++i)
+        ns.label[i] = dot[i] >= 'a' && dot[i] <= 'z' ? (char)(dot[i] - 32) : dot[i];
+    ns.label[i] = 0;
+    tk_snprintf(file, sizeof file, "/tmp/q2-%s.state", id);
+    v[0] = 0;
+    if (state_read(file, raw, sizeof raw)) field(raw, "server", v, sizeof v);
+    ns.down = tk_str_start_with(v, "down");
 }
 
 /* Whether the song Now Playing shows is loading, and its line. */
@@ -49,8 +96,8 @@ static int ns_loading(sline_t *l) {
            stream_line(id, p, l) && (l->state == SL_GET || l->state == SL_STALL);
 }
 
-/* For the car remote (coda_rc_shim.c): whether the song Now Playing shows is loading, and its bytes and
- * length (0 when not). */
+/* For the car remote (coda_rc_shim.c): whether the song Now Playing shows is loading, and its bytes
+ * and length (0 when not). */
 int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms) {
     sline_t l;
     int on = ns_loading(&l);
@@ -68,7 +115,13 @@ static int ns_tick(const void *unused) {
     unsigned now = (unsigned)time_now_ms();
     if (now - ns.checked >= NS_CHECK_MS) {
         sline_t l;
-        int on = ns_loading(&l);
+        int on = ns_loading(&l), badge = ns.badge, down = ns.down;
+        char label[sizeof ns.label];
+        memcpy(label, ns.label, sizeof label);
+        ns_badge_read();
+        if (st.np_cover &&
+            (badge != ns.badge || down != ns.down || memcmp(label, ns.label, sizeof label)))
+            widget_invalidate_force(P(st.np_cover, W_PARENT), (void *)0);
         ns.checked = now;
         if (on != ns.on || (on && (l.have != ns.have || l.total != ns.total))) {
             ns.on = on, ns.have = on ? l.have : 0, ns.total = on ? l.total : 0;
@@ -84,8 +137,30 @@ static int ns_tick(const void *unused) {
     return 0;
 }
 
+/* The badge on the art's page (its widget's own coordinates): bottom-aligned with the art. */
+static void ns_badge_paint(void *w, void *canvas) {
+    void *art = st.np_cover;
+    int light = ipod_light(), px = TYPE(13);
+    int x = I(art, W_X) + I(art, W_W) + NB_GAP, y = I(art, W_Y) + I(art, W_H) - NB_H;
+    unsigned ink = tok(TOK_SECONDARY), fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    int bw = ui_text(canvas, ns.label, 1, px, ink, 1, x + NB_TEXT_X, y + NB_H / 2, 120, 2) + NB_PAD;
+    rect_t r = { x, y, bw, NB_H };
+    round_ring(canvas, &r, NB_R, 0xff000000u | ink);
+    stock_canvas_set_fill_color(canvas, fill);
+    unsigned bitmap[64]; /* bitmap_t */
+    char name[16];
+    tk_snprintf(name, sizeof name, "np%s_%c", ns.down ? "cloudoff" : "cloud", light ? 'l' : 'd');
+    if (!widget_load_image(w, theme_art(name), bitmap))
+        canvas_draw_icon(canvas, bitmap, x + NB_GLYPH_X, y + NB_H / 2);
+}
+
 void np_stream_paint(void *w, void *canvas) {
-    if (!w || w != st.np_win || !geom_val(V_STATUS_Y) || !P(canvas, CANVAS_LCD)) return;
+    if (!w || !st.np_win || !geom_val(V_STATUS_Y) || !P(canvas, CANVAS_LCD)) return;
+    if (st.np_cover && w == P(st.np_cover, W_PARENT)) {
+        if (ns.badge && ns.label[0]) ns_badge_paint(w, canvas);
+        return;
+    }
+    if (w != st.np_win) return;
     if (!ns.timer)
         ns.checked = (unsigned)time_now_ms() - NS_CHECK_MS, ns.timer = timer_add(ns_tick, 0, 0);
     if (!ns.on) return;
