@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status row (OLED): the icons beside the clock are one size, as tall as the clock's numbers. Wi-Fi is the iPhone's fan shape and no longer looks smaller than the rest; the playing bars stand level with the clock, and paused they become a pause sign in the same white as the other icons instead of grey bars that looked like a signal meter. The headset's percentage is a size smaller than the clock, and the icons are evenly spaced.
+  - Home (OLED, Split): over the album art the clock and all the status icons are always the same color, white or black, picked together. Before, the playing bars could come out black beside a white clock.
   - Car Remote (OLED): with no phone paired, turning the wheel to **Pair a Phone** no longer scrolls the page away from the Car Remote switch, and the ring around the selected button is a smooth outline that follows its rounded ends.
   - Home (OLED, Split): a toast such as **Unplugged** or **Charging** no longer puts a black bar across the top of the screen and cuts off the first row while it shows.
   - Car Remote: **Settings → Car Remote** is redesigned. Each phone's row says whether it's **Connected over Wi-Fi** or **over Bluetooth**, or when it was last seen; before, its second line was cut off and showed nothing. **Pair a Phone** says how to pair and shows the Q2 Muse's address. Each phone has its own page with when it paired and last connected, **Rename** and **Forget Phone**, and a new pairing is announced by the phone's name ("Pixel 10 Pro paired").

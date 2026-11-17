@@ -259,27 +259,33 @@ those columns of them in the same frame (`coverflow_home_painted`, after each fr
 every invalidate by a few pixels, so the bar's repaint of the rows paints the list's top rows in the
 window too; without that test each repaint asked for the next, and Home repainted about 15 times a
 second while it showed, its pan's steps the whole screen. Settings and the other
-lists Home opens are full pages under OLED, and stay in the window. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
-against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
-256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
-there, white while that is at most 0.179. The glyph keeps its shape, and an antialiased edge blends
-the ink over the art by its share, so a play state or battery over lettering stays one smooth
-shape rather than a speckle of both inks. A glyph is a run of the bar's columns with ink, parted
-from the next by four empty ones (`INK_GAP`; a pause's two bars are one glyph). It keeps its ink
-until the mean passes the bound by 0.03 (`INK_HOLD`), so a mean the pan carries along the bound
-doesn't flicker: on the emulator's test covers (30 s pans) a hold of 0.03 left a glyph changing ink
-at most twice, each time for seconds, where with none a battery over lettering changed up to ten
-times, and inside that band either ink still has at least 3.98:1. The ink last chosen is held per pane column
-(`home.held`). To get the glyphs alone, the bar's background leaves the pane's rows its flat ground
+lists Home opens are full pages under OLED, and stay in the window. The clock and every glyph
+are drawn in one ink for the whole row, white or black, whichever has the higher WCAG contrast
+against the art under them all, as Scrolly's feed-end line does and as iOS's status bar takes one
+style (`mock_status_icons.py`, the user's, 2026-11-16: inked a glyph at a time, the level bars came
+out black beside a white clock over a mid-grey cover): the art's relative luminance (from a
+256-entry linear table) averaged under every glyph together, each pixel weighted by its glyph's
+coverage there, white while that is at most 0.179. Each glyph keeps its shape, and an antialiased
+edge blends the ink over the art by its share, so a play state or battery over lettering stays one
+smooth shape rather than a speckle of both inks. A glyph is still a run of the bar's columns with
+ink, parted from the next by four empty ones (`INK_GAP`; a pause's two bars are one glyph), so the
+battery's charging green and low red are found in their own glyph and keep their hue. The row
+keeps its ink until the mean passes the bound by 0.03 (`INK_HOLD`), so a mean the pan carries
+along the bound doesn't flicker: on the emulator's test covers (30 s pans) a hold of 0.03 left a
+glyph changing ink at most twice, each time for seconds, where with none a battery over lettering
+changed up to ten times, and inside that band either ink still has at least 3.98:1. The row's ink
+is held in every pane column (`home.held`). Under the vignette the art behind rows 17 to 27 is
+darkened to between 38% and 51% of itself, so the row is white over almost any cover; a white cover sits
+near the bound and stays white. To get the glyphs alone, the bar's background leaves the pane's rows its flat ground
 when it draws straight onto the screen; the glyphs paint on that, and the bar's border paint
 (`coverflow_home_clip`, `home_ink`) reads each pixel's distance from the ground as the glyph's
-share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
-where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
-part alone would average differently. A pan step invalidates those rows of the bar with the
+share and writes the art with the ink over it, only within the paint's clip. A paint the clip
+cuts short of the pane (the play state's frames, a repaint of part of the battery) keeps the row's
+ink, as its part alone would average differently. A pan step invalidates those rows of the bar with the
 window's, so the ink follows the art. Inking them costs about 0.84 million instructions a step
 (`test/patch.py`, 188 × 58 with a pause and a battery), a sixth of the frame's render: a pixel left
 the ground's color (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
-is inked as one glyph like the others.
+is inked with the others.
 The battery's charging green and low red keep their own colors over the art, each pixel's share
 read against the glyph's most saturated pixel, and only its gray part (the dim outline as a
 lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
@@ -1029,18 +1035,18 @@ Now Playing's bar has no thumb: stock draws its dragger (a box and knob, the sto
 painted it white, which drew the box at rest.
 
 - **The status row.** No bar band: the page's title, small and gray, from x 62, and on the right, right to left, a
-  slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (frozen
-  and gray while paused; a tap on them opens Now Playing), Wi-Fi's signal while connected (a crossed glyph with no
-  link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each centered on y 23, up in
-  the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
+  slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
+  in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
+  (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
+  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each the clock's digits' height (11 px) on their
+  rows, 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
   blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
-  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 6 px left of the leftmost of them,
+  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 8 px left of the leftmost of them,
   and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
   an artist's are titled by the artist) has the clock centered across the row instead (at the right where centered it
-  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black as
-  one glyph with the others (`clock_place`).
+  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black with
+  the others, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
