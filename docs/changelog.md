@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Battery History (OLED): before anything is recorded the page shows a chart glyph, **No History Yet** and "Recording starts when you unplug".
   - App Store (OLED): with no list yet it shows **No Apps Listed** under Check for Updates, in the same form as other empty pages.
   - Playlists (OLED): a playlist or On-The-Go with no songs shows **No Songs Yet** under Add Songs, with how to fill it.
   - Add Songs (OLED): a search that matches nothing shows **No Matches** with "Try fewer letters" under the Search row, in place of a "No songs match" row the wheel could land on.

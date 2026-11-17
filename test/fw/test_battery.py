@@ -409,12 +409,18 @@ def test_only_the_open_page_s_graph_is_painted_on(fw, q2):
     assert page.key(KEY_CENTER) == 0 and page.toasts == []
 
 
-def test_no_history_says_to_unplug(fw, q2):
+def test_no_history_is_the_empty_state(fw, q2):
+    """docs/oled-design.md#empty-and-offline: no history, the page is the empty state whole (its chart-line glyph,
+    No History Yet, how it starts), no button, and no graph."""
     q2.poll(70, cable=1)
     page = Page(fw)
     page.open()
-    assert 'Unplug to start' in page.texts.values()
-    assert not fw.calls('widget_factory_create_widget')  # no graph
+    es = {C.string_at(a[1]).decode(): C.string_at(a[2]).decode() for _, a in fw.calls('widget_set_prop_str')
+          if C.string_at(a[1]).startswith(b'_es_')}
+    assert es == {'_es_glyph': 'chart-line', '_es_title': 'No History Yet', '_es_hint': 'Recording starts when you unplug',
+                  '_es_row': ''}
+    assert 'Unplug to start' not in page.texts.values()
+    assert not [a for _, a in fw.calls('widget_on') if a[1] == O['EVT_POINTER_UP_BEFORE']]  # no graph's export tap
     assert page.key(KEY_CENTER) == 0 and page.key(KEY_NEXT) == 0  # nothing to scrub or export
 
 

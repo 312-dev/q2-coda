@@ -387,7 +387,7 @@ EMPTY_PX = 60
 EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'chart-line')} | {'sd-card': 'memory',
     'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,

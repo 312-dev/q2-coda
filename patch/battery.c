@@ -195,15 +195,21 @@ static int bh_touch(void *ctx, void *event) {
     if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) bh_export();
     return 0;
 }
-/* Power's Battery History row. No history: "Unplug to start". Else the status row's title (a row
- * of the page's list, which stays hidden), and the graph's view over the rest. */
+/* Power's Battery History row. No history: the empty state (oled-design.md Empty and offline).
+ * Else the status row's title (a row of the page's list, which stays hidden), and the graph's view
+ * over the rest. */
 int battery_history(void *ctx, void *event) {
     if (bh.page || !(bh.page = page_open("battery_page", bh_closed, page_keyup))) return 0;
     bh_load();
     bh.cur = -1;
     unsigned n = bh.rec.n;
-    void *view = page_list_or(bh.page, bh.page, "Battery History", "Unplug to start", n ? 1 : 0, 48);
-    if (!n) return 0;
+    static const empty_t none = { "chart-line", "No History Yet", "Recording starts when you unplug",
+                                  0 };
+    if (!n) {
+        empty_list(bh.page, bh.page, "Battery History", &none, 0);
+        return 0;
+    }
+    void *view = page_list(bh.page, bh.page, 0, "Battery History", 1, 48);
     void *list = P(view, W_PARENT);
     int y = I(list, W_Y), h = widget_get_prop_int(bh.page, "h", client_h());
     widget_set_visible(list, 0, 0);
