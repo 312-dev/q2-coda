@@ -483,13 +483,14 @@ has no place for keeps a place of its own:
   even. Shuffle and repeat are Text Secondary off; on, Accent Blue with a 4 px Accent Blue dot 2 px
   under the glyph (repeat-once's glyph for One). A tap on shuffle turns it on or off, a tap on
   repeat steps Off, All, One, and each keeps the other as it was. Stock's Shuffle never ends, so
-  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while the
-  playing app plays a radio it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
+  shuffle with repeat Off plays on as with All. Radio is the antenna in Text Secondary; while a
+  radio plays (the playing app's, or the Q2's own) it is a 92 x 34 Accent Blue pill holding the antenna (18 px, white) and
   "Radio" (Inter Medium 16 px, white): turning on, the pill grows from the glyph's width over
   200 ms (ease out) while the gaps shrink, the word fading in over the last 40 %, and back the same
   way off. While radio is on, shuffle and repeat are `#444446` and ignore taps and the Center
-  cycle, as the app picks the order. A tap on radio opens the playing app's page, where a radio
-  starts and stops; with no app playing it does nothing. The queue button, and a swipe up on the
+  cycle, as the radio picks the order. A tap on the antenna starts a radio of the playing song
+  ([internals: Radio](internals.md#radio)) and "Starting Radio…" while its app is asked; a tap on
+  the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
   the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
@@ -1245,10 +1246,11 @@ interruptible: a turn mid-run starts from where it is.
 ### Gestures
 
 - **Swipe back**, as iOS's: a finger that comes down within 24 px of the screen's left edge and
-  drags right takes the page with it, the status row staying; what it uncovers is black. Let go
+  drags right takes the page with it, the status row staying; what it uncovers is the page under, drifting in
+  from 30% left and lightening as a pop's does (still and undimmed under Reduce Motion; on Home's lists, black). Let go
   past 40% of the width, or flicked right, and the page slides on off the right edge and Return
-  goes back; let go short and it springs back. Both take the page slide's 120 ms, `cubic_out`, Reduce Motion's
-  too: they finish what the finger did.
+  goes back; let go short and it springs back. Both take 160 ms from where the finger let go, `cubic_out`, Reduce
+  Motion's too: they finish what the finger did.
   Wherever Return leaves a page: a page over another, and on Home the list a row opened
   (Settings, Streaming). A drag up or down from the edge scrolls as anywhere; a sideways drag that
   starts mid-screen stays the screen's own (Now Playing's pages, Cover Flow, the letter strip,
@@ -1257,7 +1259,19 @@ interruptible: a turn mid-run starts from where it is.
 
 ### Motion
 
-- Page push and pop: 120 ms horizontal slide, `cubic_out` (`PAGE_SLIDE_MS`, stock's window animator).
+- **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
+  220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
+  in over the same 220 ms.
+- **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
+  `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
+  on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
+- **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
+  the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
+  the other side over 200 ms, `cubic_out`, from 60 ms: 260 ms in all. The times, the bar and the heart change at once;
+  a skip mid-run starts from the frame on screen. Reduce Motion cross-fades the two in place over 150 ms.
 - Selection bar: moves with the wheel, no animation of its own beyond the list's scroll.
 - Nothing pulses, glows or bounces, a list's end included, with two deliberate exceptions: Control Center's
   landing (an 8 px overshoot and one 2 px undershoot over 280 ms as it comes to rest open, [Control
@@ -1273,9 +1287,9 @@ interruptible: a turn mid-run starts from where it is.
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
-  back's finger tracking and its finish, the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
+  back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
   A-Z index's fades, and spinners.
 - **Marquee fades.** A scrolling text (the selected row's title, the status row's title, Now

@@ -970,7 +970,7 @@ class Modes:
     def tap(self, side):
         event = C.create_string_buffer(0x40)
         struct.pack_into('<i', event, 0, O['EVT_CLICK'])
-        struct.pack_into('<ii', event, O['EVENT_X'], 64 if side == 'shuffle' else 228, 286)
+        struct.pack_into('<ii', event, O['EVENT_X'], {'shuffle': 64, 'radio': 146}.get(side, 228), 286)
         return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
 
 
@@ -985,6 +985,17 @@ def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
     assert m.sent == [2, 1]
     m.tap('repeat')  # repeat Off, shuffle off: order
     assert m.sent == [2, 1, 0]
+
+
+def test_the_radio_tap_starts_a_radio_of_the_playing_song(fw, st, mcl):
+    """The Radio button starts a song radio (song_radio.c song_radio_tap, on a timer: a radio's queue opens Now
+    Playing). It opened the playing app's page (addon_more) before, which did nothing for the Subsonic app, whose
+    q2app has no more= (the user's dead tap, 2026-11-16 17:09); stock's mode is left alone."""
+    m = Modes(fw, st, mcl, 0)
+    timers: list = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 1)
+    assert m.tap('radio') == 1 and m.sent == []
+    assert timers[-1] == C.cast(fw.lib.song_radio_tap, C.c_void_p).value
 
 
 def test_each_control_finds_the_other_as_it_was(fw, st, mcl):

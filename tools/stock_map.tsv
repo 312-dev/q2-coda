@@ -474,6 +474,8 @@ demo	0x69b6ac	0x2a0	window_manager_default_on_event	Widget on_event of the windo
 demo	0x69b94c	0x138	window_manager_default_on_native_window_event	Slot of the window manager vtable (0x9b3cec) taking native window events: the first kind refreshes size and layout, two call input_device_status pointer enter/leave, one aborts keys and mouse.
 demo	0x69ba84	0x64	window_manager_default_on_locale_changed	Refreshes the window manager (0x698d50) and the highlighter, returns bad params for a NULL manager.
 demo	0x69bae8	0x88	window_manager_default_snap_prev_window_drop_highlighter	Snaps the previous window; on success destroys the wm dialog highlighter (+0x300) through 0x6989dc and clears the pointer.
+demo	0x696bd0	0x70	htranslate_update	The htranslate window animator's update_percent: percent from time_percent through the easing, reversed for a close. Name is ours.
+demo	0x696d90	0x228	htranslate_draw_prev	The htranslate window animator's draw_prev_window: the window under's snapshot w * percent left, and the windows between shifted with it. Name is ours.
 demo	0x69bb70	0x340	window_manager_default_create_animator	Creates the open or close window animator from anim_hint; returns 2 when none applies.
 demo	0x69beb0	0x15c	window_manager_default_open_window_idle	Idle callback finishing a window open: dispatches window events 0x128 to 0x12a and animates; returns remove.
 demo	0x69c00c	0x108	window_manager_default_open_window	Vtable slot 0 of the window manager: restacks the new window on top, listens for its foreground event, creates the open animator, dispatches background (0x12a) and foreground (0x12b) window events.

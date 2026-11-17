@@ -245,3 +245,76 @@ def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
     assert t == T['COVER'] and client.one(m, 1) == len(image) and client.one(m, 3) == image[:4096]
     f.unlink()
     assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
+
+
+def test_a_server_playlist_s_art_is_its_server_cover(lib, tmp_path):
+    """A server playlist (cat.serverlists) shows its server's cover, the app's covers/pl-<pid>.jpg (Navidrome's
+    collage), once the app has it; until then, and for a card playlist always, its first song's album's
+    (2026-11-16: every playlist showed its first album's cover in the car)."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    db = sqlite3.connect(tmp_path / 'mnt/data/database.db')
+    db.executemany('insert into playlist values (?,?,?,?)', [
+        (3, 'Mix', None, None), (4, 'Card', None, None),
+        (101, None, '/mnt/mmc/.subsonic/cat/third/s2.flac', 3), (102, None, '/mnt/mmc/a/1.flac', 3),
+        (103, None, '/mnt/mmc/b/3.flac', 4)])
+    db.commit()
+    cat = sqlite3.connect(tmp_path / 'mnt/mmc/.q2pod/catalogue.db')
+    cat.executemany('insert into serverlists values (?,?,?,?)', [('subsonic', 'pl7', 3, 0)])
+    cat.commit()
+    def arts():
+        return {i['title']: i.get('art') for i in q2.browse('playlists')['items']}
+    first = arts()
+    assert first['Mix'] == 'sthird' and first['Card'].startswith('l')  # no cover yet: the first album's
+    collage = b'\xff\xd8' + bytes(range(256)) * 20 + b'\xff\xd9'
+    cover = tmp_path / 'mnt/mmc/.subsonic/covers/pl-pl7.jpg'
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(collage)
+    assert arts() == {'Mix': 'ppl7', 'Card': first['Card']}
+    t, m = q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 0), (3, 4096), (4, 96)])
+    assert t == T['COVER'] and client.one(m, 1) == len(collage) and client.one(m, 3) == collage[:4096]
+    assert client.text(m, 4) == 'image/jpeg'
+    t, m = q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 4096), (3, 4096), (4, 96)])
+    assert client.one(m, 3) == collage[4096:]
+    assert q2.ask(T['GET_COVER'], [(1, 'pnope'), (2, 0), (3, 4096), (4, 96)]) == 'NOT_FOUND'
+    cover.unlink()
+    assert q2.ask(T['GET_COVER'], [(1, 'ppl7'), (2, 0), (3, 4096), (4, 96)]) == 'NOT_FOUND'
+
+
+def test_a_big_ask_gets_the_app_s_512_px_cover(lib, tmp_path):
+    """The app keeps each server album's cover at 160 px (covers/<album>.jpg, the Q2's) and, after those, at 512 px
+    (covers/512/<album>.jpg): a phone asking for more than 160 px gets the 512 one when it is there, else the
+    160 one (2026-11-16 17:04: album art looked low-res in the car, a 160 px cover in a ~350 px box)."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    small, big = b'\xff\xd8small\xff\xd9', b'\xff\xd8' + bytes(range(256)) * 30 + b'\xff\xd9'
+    covers = tmp_path / 'mnt/mmc/.subsonic/covers'
+    (covers / '512').mkdir(parents=True)
+    (covers / 'third.jpg').write_bytes(small)
+    (covers / '512/third.jpg').write_bytes(big)
+    def got(max_px):
+        t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, max_px)])
+        assert t == T['COVER']
+        return client.one(m, 1), client.one(m, 3)
+    assert got(350) == (len(big), big[:4096])
+    assert got(160) == (len(small), small)  # the Q2's size: the small one
+    (covers / '512/third.jpg').unlink()
+    assert got(350) == (len(small), small)  # none at 512 yet
+
+
+def test_an_artists_radio_is_one_of_its_songs(lib, tmp_path):
+    """StartRadio (CAP_RADIO) with an artist node: the shim gets a radio of one of the artist's songs, picked at random
+    (song_radio.c seeds by a song); a song id goes as it is, no seed is the playing song, and anything else is refused."""
+    q2 = Q2(lib, tmp_path)
+    shim_verb = ctypes.c_char.in_dll(lib, 'shim_verb')
+    artists = {i['title']: i['id'] for i in q2.browse('artists')['items']}
+    seen = set()
+    for _ in range(40):
+        assert q2.ask(T['START_RADIO'], [(1, artists['Bob'])])[0] == T['ACK']
+        seen.add(ctypes.string_at(ctypes.addressof(shim_verb)).decode())
+    assert seen == {'radio 3', 'radio 4'}  # Charlie and Delta, Bob's
+    for seed, verb in (('song:t2', 'radio 2'), (None, 'radio 0')):
+        assert q2.ask(T['START_RADIO'], [(1, seed)])[0] == T['ACK']
+        assert ctypes.string_at(ctypes.addressof(shim_verb)).decode() == verb
+    assert q2.ask(T['START_RADIO'], [(2, True)])[0] == T['ACK']
+    assert ctypes.string_at(ctypes.addressof(shim_verb)).decode() == 'radio stop'
+    assert q2.ask(T['START_RADIO'], [(1, 'album:x')]) == 'BAD_REQUEST'
+    assert q2.ask(T['START_RADIO'], [(1, 'artist:nobody')]) == 'NOT_FOUND'
