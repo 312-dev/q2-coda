@@ -544,3 +544,35 @@ def test_return_lets_the_sheet_go_and_up_next_opens_again(fw, up):
     assert page.closed == [PAGE]
     page.open()
     assert page.opened == 2 and page.captions
+
+
+def test_the_header_s_level_bars_ride_the_shared_loop_and_repaint_only_their_box(fw, plain):
+    """The user's (08:35): smoother bars. Up Next's header bars move on ui_kit's one 33 ms loop (lvl_h16's continuous
+    heights), each frame repainting the 12 x 13 box they were last painted in, not the header; paused, they hold and
+    the loop drops them."""
+    from test_nav_painters import Canvas
+    _, page = plain
+    now, status, dirty = [5000], [2], []
+    fw.mock('time_now_ms', lambda *_: now[0])
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    loops = C.c_char.in_dll(fw.lib, 'ui_kit__loops')
+    C.memset(C.addressof(loops), 0, fw.sizes['ui_kit__loops'])
+    page.open()
+    assert [ms for _, ms in page.timers].count(33) == 1  # the shared loop; no 125 ms timer of its own
+    def paint():
+        canvas = Canvas(fw, x=0, y=60)  # the header, painted 60 px down the screen
+        fw.fn('un_bars', None, C.c_void_p, C.c_int, C.c_int)(canvas.addr, 200, 28)
+        return canvas.boxes
+    first = paint()
+    fw.mock('widget_invalidate_force', lambda w, r, *_: dirty.append((w, struct.unpack('<4i', C.string_at(r, 16)) if r else None)))
+    now[0] += 33
+    assert page.run(33) == 8 and dirty == [(PAGE, (200, 60 + 28 - 13, 12, 13))]
+    moved = paint()
+    assert moved != first
+    status[0] = 3
+    dirty.clear()
+    assert page.run(33) == 7 and dirty == []  # paused: RET_REMOVE, nothing repainted
+    held = paint()
+    now[0] += 500
+    assert paint() == held

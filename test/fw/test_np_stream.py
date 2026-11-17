@@ -11,6 +11,7 @@ from test_nav_painters import theme
 CANVAS_LCD = O['CANVAS_LCD']
 SONG = b'/mnt/mmc/.subsonic/stream/acct/q/a/Song [s1].flac'
 STREAM = b'/tmp/q2-subsonic.stream'
+NP_WIN_Y = 58  # Now Playing's window, under OLED's status row
 
 
 def status(state, have, total=20_000_000):
@@ -36,7 +37,10 @@ class Np:
         deques[q].append(songs(SONG))
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = q
         mcl.pos = 0
-        self.win = 0x5000
+        # the window as the device has it: under the status row, at y 58 (its paint's coordinates are its own)
+        self.winbuf = C.create_string_buffer(0x400)
+        struct.pack_into('<i', self.winbuf, O['W_Y'], NP_WIN_Y)
+        self.win = C.addressof(self.winbuf)
         C.c_void_p.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['np_win']).value = self.win
         fw.mock('window_manager_get_top_window', lambda *_: self.win)
         self.timers, self.loads, self.icons, self.texts = [], [], [], []
@@ -66,7 +70,9 @@ def test_a_song_the_player_waits_for_shows_the_spinner_and_the_amount(fw, mcl, s
     np.tick()
     np.paint()
     assert np.texts and np.texts[-1][0] == '7.0 of 20 MB'
-    assert np.loads[-1] == 'oled_npspin_d_1' and np.icons[-1][1] == 250
+    # the times row's centre, y 250 on the screen: the device, 2026-11-17, drew it 58 px low, half off the panel
+    assert np.loads[-1] == 'oled_npspin_d_1' and np.icons[-1][1] + NP_WIN_Y == 250
+    assert np.texts[-1][1][1] + np.texts[-1][1][3] // 2 + NP_WIN_Y in (249, 250)
     # spinner and amount centred together on the screen's middle
     x, _, w, _ = np.texts[-1][1]
     left = np.icons[-1][0] - 7

@@ -330,7 +330,7 @@ class Machine:
         if name=='memcpy': self.u.mem_write(a,bytes(self.u.mem_read(b,c))); ret=a
         elif name=='strncpy@GLIBC_2.0': self.u.mem_write(a,self.raw(b)[:c].ljust(c,b'\0')); ret=a
         elif name=='memset': self.u.mem_write(a,bytes([b&255])*c); ret=a
-        elif name=='thread:run': self.nested(c,d); ret=0
+        elif name=='thread:run': self.word(a,77); self.nested(c,d); ret=0  # its id written, as pthread_create does
         elif name in ('table_row_create', 'list_item_create', 'button_create', 'image_create', 'view_create',
                        'hscroll_label_create', 'gif_image_create', 'label_create'):
             kind = {'gif_image_create': 'gif'}.get(name, name.removesuffix('_create'))

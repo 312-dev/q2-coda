@@ -47,6 +47,7 @@ class Home(Gui):
         C.c_void_p.from_address(self.img + O['W_EMITTER']).value = C.addressof(self.emitter)
         fw.fn('lr_home_tag', None, C.c_void_p)(self.view)
         fw.fn('home_np_bind', None, C.c_void_p)(self.win)
+        fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the bars move only then
 
     def apply(self, np=1, playing=PLAYING):
         """The rows shown and Now Playing's row's words, Home laid out again."""
@@ -119,7 +120,8 @@ def test_playing_leads_with_up_next_s_bars_in_the_accent(fw, home):
     home.apply(playing=PLAYING)
     boxes = home.paint()
     x = LABEL_X + 2
-    assert [b[0] for b in boxes] == [(x + i * 9 // 2, 16 + 6 - h, 3, h) for i, h in enumerate((7, 11, 5))]
+    # at the loop's start, 5 to 12 px (ui_kit.h lvl_h16): 8.5, 11.125 and 5 px, each part-covered top row its own box
+    assert [b[0] for b in boxes] == [(x, 14, 3, 8), (x, 13, 3, 1), (x + 4, 11, 3, 11), (x + 4, 10, 3, 1), (x + 9, 17, 3, 5)]
     canvas = Canvas(fw)  # Up Next's own bars, drawn at the same place, frame and colour
     fw.fn('un_bars', None, C.c_void_p, C.c_int, C.c_int)(canvas.addr, x, 16 + 6)
     assert boxes == canvas.boxes and {b[1] for b in boxes} != {0xffababab, 0xffffffff}
@@ -163,7 +165,8 @@ def test_pausing_morphs_the_bars_into_the_pause_and_cross_fades_the_words(fw):
     assert words(home) == ['Paused', 'Playing']  # the label, then the old words' copy over it
     home.now += 125
     mid = home.paint()
-    assert len(mid) == 3 and mid[1][0][2] < 3 and mid[1][1] >> 24 < 0xff  # the middle narrows and fades
+    middle = [b for b in mid if b[0][2] < 3]
+    assert middle and all(b[1] >> 24 < 0xff for b in middle)  # the middle narrows and fades
     assert bars[0][1] != mid[0][1] != 0xffababab  # on its way from the accent to Text Secondary
     home.now += 125
     assert [b[0] for b in home.paint()] == PAUSE and {b[1] for b in home.paint()} == {0xffababab}
@@ -185,8 +188,9 @@ def test_resuming_mid_morph_turns_back_from_where_it_is_and_then_the_bars_move(f
     home.now += 250
     assert home.paint() == bars
     home.sync()
-    home.ui.fire('hn_tick')
-    assert home.paint() != bars  # the bars move again
+    home.now += 33
+    home.ui.fire('loop_frame')
+    assert home.paint() != bars  # the bars move again, on the shared loop
 
 
 def test_under_reduce_motion_the_switch_is_a_cut(fw):
@@ -202,13 +206,31 @@ def test_the_bars_timer_runs_only_while_they_move_on_home(home):
     """No timer of its own while paused or with a page over Home: the suite's pages count their timers."""
     home.apply(playing=PAUSED)
     home.sync()
-    assert not home.ui.pending('hn_tick')
+    assert not home.ui.pending('loop_frame')
     home.status = PLAYING
     home.sync()
     home.now += 250
     home.sync()
-    assert home.ui.pending('hn_tick')
+    assert home.ui.pending('loop_frame')
     home.ui.windows.append(home.ui.new('window_create', 0, 0, 0, 0, 0))  # a page over Home
-    assert home.ui.fire('hn_tick') == 0 and not home.ui.pending('hn_tick')
+    assert home.ui.fire('loop_frame') == 7 and not home.ui.pending('loop_frame')  # RET_REMOVE: the last loop
     home.sync()
-    assert not home.ui.pending('hn_tick')
+    assert not home.ui.pending('loop_frame')
+
+
+def test_a_dark_screen_runs_no_bars_loop(fw, home):
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    home.apply(playing=PLAYING)
+    home.sync()
+    assert not home.ui.pending('loop_frame')
+
+
+def test_a_bars_frame_repaints_only_the_glyph_s_box(fw, home):
+    """The row is 375 px wide; a frame of the bars repaints their 13 x 13 box at the text column, not the row."""
+    home.apply(playing=PLAYING)
+    home.sync()
+    dirty = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: dirty.append((w, struct.unpack('<4i', C.string_at(r, 16)) if r else None)))
+    home.now += 33
+    assert home.ui.fire('loop_frame') == 8
+    assert dirty == [(home.img, (LABEL_X + 2, 16 + 6 - 13, 13, 13))]

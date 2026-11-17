@@ -149,8 +149,8 @@ OLED=theme_builtins()[0]; assert [q.u.mem_read(w+0x34,1)[0] for w in (glyph,albu
 # Scrub: Centre on Now Playing starts it at once and the next press ends it (np_centre); the wheel then
 # moves a target of SCRUB_STEP seconds times the ramp, previewed on the slider and both labels however far
 # apart the ticks, and committed once through player_seek_time (track seconds) when the scrub ends. Stock's
-# page timer stops meanwhile. The press that ends it goes on to the Centre cycle's shuffle stage (OLED's
-# playing.modes pair), whose wheel is the shuffle's until NP_STAGE_MS (SCRUB_MS) without a key.
+# page timer stops meanwhile. The press that ends it puts the Centre cycle's ring on shuffle (OLED's
+# playing.modes pair), which takes the wheel until NP_STAGE_MS (SCRUB_MS) without a key.
 CONFIG.clear(); FILL_HI=signed(color_t(O['MINIMAL_FILL'])); FG='style:normal:fg_color'  # FILL_HI: MINIMAL_FILL, which a block further down checks
 def scrub_page(value=100,mx=225,m=None):  # m: Now Playing opened again on that machine
     if not m: m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'

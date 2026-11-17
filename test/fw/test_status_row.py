@@ -35,6 +35,8 @@ class Row(StatusRow):
         self.ap = fw.var('addon__ap', Ap)
         sr = C.c_char.in_dll(fw.lib, 'status_row__sr')  # StatusRow's first sync ran under its own timer_add
         C.memset(C.addressof(sr), 0, fw.sizes['status_row__sr'])
+        loops = C.c_char.in_dll(fw.lib, 'ui_kit__loops')  # ... and may have started the shared loop
+        C.memset(C.addressof(loops), 0, fw.sizes['ui_kit__loops'])
 
     def wifi(self, level):
         node = self.w['img_wifi']
@@ -191,17 +193,6 @@ def test_the_play_state_stands_on_the_digits_baseline_in_text_primary_playing_or
     assert fills[2:] == [0xff000000] * 2
 
 
-def test_the_bars_move_a_frame_a_tick_repainting_only_their_box_and_stop_when_paused(fw, row):
-    assert row.sync_sig() == 1 and [ms for _, ms in row.timers] == [125]
-    tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(row.timers[0][0])
-    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 10, 0, 10, 26)]
-    assert [b[3] for b in row.bars()] == list(BARS[1])
-    row.status = 3  # paused: the timer ends and the pause stands still
-    assert tick(None) == 0 and len(row.bars()) == 2 and row.dirty == [(BODY - GAP - 10, 0, 10, 26)]
-    assert row.sync_sig() == 1  # a new state, and the bars stop: no timer of their own, only the shared one (MO_FRAME_MS)
-    assert [ms for _, ms in row.timers] == [125, 16]  # that runs the dissolve into the pause
-
-
 class Xfade(Row):
     """Row with the clock in hand, the shared frame timer's hook in reach and play_paint's fills recorded:
     [(alpha, [bar boxes])] a paint, one entry per glyph drawn."""
@@ -266,23 +257,6 @@ def test_pausing_stops_the_bars_and_cross_dissolves_them_into_the_pause_in_their
     xf.frame()
     assert xf.dirty == [PLAY_BOX, PLAY_BOX]  # the end's repaint, then no more
     assert xf.left() == left
-
-
-def test_the_bars_stand_still_while_they_dissolve_and_move_again_after(fw, xf):
-    xf.sync_sig()
-    tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(xf.timers[0][0])
-    assert tick(None) == 8
-    frozen = xf.bars_of(0)
-    xf.status = 3
-    xf.sync_sig()
-    xf.now += 100
-    assert xf.bars_of(0) == frozen  # paused: the dissolving bars are the frame they stopped on
-    xf.status = 2  # resumed mid-dissolve: the bars' timer runs, but no frame moves until the dissolve back ends
-    xf.sync_sig()
-    xf.dirty.clear()
-    assert tick(None) == 8 and xf.bars_of(0) == frozen and xf.dirty == []
-    xf.now += 250
-    assert tick(None) == 8 and xf.bars_of(0) != frozen and xf.dirty == [PLAY_BOX]  # done: they move again
 
 
 def test_resuming_mid_dissolve_turns_back_from_where_it_stands(fw, xf):
@@ -477,3 +451,52 @@ def test_a_dev_builds_stand_in_shows_wifi_and_a_charger_the_emulator_lacks(fw_de
     assert fake(b'w') == 2  # read again only after STATUS_FAKE_MS
     clock[0] += 500
     assert (fake(b'w'), fake(b'c')) == (-1, 0)  # "wifi" with no value: none
+
+
+def test_the_bars_move_smoothly_on_the_shared_loop_repainting_only_their_box_and_stop_when_paused(fw, xf):
+    """The user's (08:35): smoother bars. They ride ui_kit's one 33 ms loop timer (no 125 ms timer of their own), each
+    frame moving them a fraction of a pixel along lvl_h16's curve and repainting the play box alone; paused, the loop
+    drops them and they hold."""
+    xf.sync_sig()
+    assert [ms for _, ms in xf.timers] == [33]
+    loop = C.CFUNCTYPE(C.c_int, C.c_void_p)(xf.timers[0][0])
+    before = xf.bars_of(0)
+    xf.now += 33
+    xf.dirty.clear()
+    assert loop(None) == 8 and xf.dirty == [PLAY_BOX]
+    after = xf.bars_of(0)
+    assert after != before and max(abs(a[3] - b[3]) for a, b in zip(before, after)) <= 1.5
+    assert any(b[3] != int(b[3]) for b in after)  # between whole pixels: vgcanvas draws the part
+    xf.status = 3
+    xf.dirty.clear()
+    assert loop(None) == 7 and xf.dirty == []  # RET_REMOVE: nothing else loops
+    held = xf.bars_of(0)
+    xf.now += 500
+    assert xf.bars_of(0) == held
+
+
+def test_the_bars_stand_still_while_they_dissolve_and_move_on_from_there_after(fw, xf):
+    xf.sync_sig()
+    xf.now += 100
+    frozen = xf.bars_of(0)
+    xf.status = 3
+    xf.sync_sig()
+    xf.now += 100
+    assert xf.bars_of(0) == frozen  # paused: the dissolving bars are where they stopped
+    xf.status = 2  # resumed mid-dissolve: still until the dissolve back ends
+    xf.sync_sig()
+    xf.now += 100
+    assert xf.bars_of(0) == frozen
+    xf.now += 200
+    xf.frame()  # the dissolve's last frame starts their clock again, from where it held
+    xf.now += 33
+    moved = xf.bars_of(0)
+    assert moved != frozen and max(abs(a[3] - b[3]) for a, b in zip(frozen, moved)) <= 1.5  # no jump
+
+
+def test_under_reduce_motion_the_bars_stand_still(fw, st, xf):
+    st('reduce_motion').value = 1
+    xf.sync_sig()
+    still = xf.bars_of(0)
+    xf.now += 400
+    assert xf.sync_sig() == 0 and xf.bars_of(0) == still and 33 not in [ms for _, ms in xf.timers]
