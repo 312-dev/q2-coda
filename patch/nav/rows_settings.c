@@ -286,11 +286,10 @@ static int quick_long(const void *unused) {
     dialog_quit(win, 0);
     if (page >= QUICK_CC)
         return cc_hold(page - QUICK_CC), 0; /* Control Center's (control_center.c) */
-    /* An open EQ page is already the goal: a second would share peq_ui.c's one state. */
-    if (page == 3 && navigator_window_is_exist("equalizer_page")) return 0;
-    navigator_to(page == 1   ? "systemset/wifi_page"
-                 : page == 2 ? "systemset/bluetooth_page"
-                             : "playset/equalizer_page"); /* as Playback's EQ row (0x4bd114) */
+    /* an open page is already the goal (control_center.c cc_page) */
+    cc_page(page == 1   ? "systemset/wifi_page"
+            : page == 2 ? "systemset/bluetooth_page"
+                        : "playset/equalizer_page"); /* as Playback's EQ row (0x4bd114) */
     return 0;
 }
 static int quick_down(void *icon, void *event) {

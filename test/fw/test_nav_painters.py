@@ -2362,10 +2362,15 @@ def test_a_release_before_the_hold_is_stocks_tap(fw, st):
     assert not fw.calls('navigator_to') and not fw.calls('dialog_quit')
 
 
-def test_an_open_eq_page_is_already_the_goal(fw, st):
+@pytest.mark.parametrize('name, window', [('img_wifiswitch', b'wifi_page'), ('img_btswitch', b'bluetooth_page'),
+                                          ('img_playset', b'equalizer_page')])
+def test_an_open_settings_page_is_already_the_goal(fw, st, name, window):
+    """Held over the page it opens (Control Center pulled down on Settings > Wi-Fi), a hold closes Control Center
+    and opens no second page: a second wifi_page stacked on the first, and Return took two presses to leave
+    Wi-Fi (the emulator, 2026-11-17)."""
     quick = Quick(fw, st)
-    fw.mock('navigator_window_is_exist', lambda name, *_: C.string_at(name) == b'equalizer_page')
-    quick.press('img_playset')
+    fw.mock('navigator_window_is_exist', lambda n, *_: C.string_at(n) == window)
+    quick.press(name)
     quick.hold()
     assert fw.calls('dialog_quit') and not fw.calls('navigator_to')
 
