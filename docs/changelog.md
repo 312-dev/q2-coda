@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > Bluetooth and Home: the loading spinner keeps turning the whole time a device is connecting and while Cover Flow loads a large library; before, it stopped on one frame until the wait was over.
   - Now Playing: opening it from Home or an album page grows the album cover into Now Playing's art, and Return shrinks it back. With Reduce Motion on, the two cross-fade.
   - Home (OLED, Split): moving the selection onto the top row no longer leaves a thin strip of the blue bar across the row below it, which made the selected row's text look like it was flickering.
   - Home (Split): going back to Home (Return from the Library, or from Bluetooth's page held open in Control Center) or opening a page from it no longer runs a flat bar across the top for the whole slide with Home's top row cut off and the old page's title over it. The art and the raised rows slide and dim with Home, and the page's title shows only over the page as it slides away.
