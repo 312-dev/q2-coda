@@ -149,6 +149,8 @@ Every list ends at its ends: Home's and its Settings list, Settings pages, the L
 
 A drag stops at the ends too. AWTK's scroll view lets a drag run on past an end by `slide_limit_ratio` of its height (half, by default) and springs back on release; `load` sets each list's scroll view to 0 when it binds it, so the content stops under the finger. A virtual table (`table_client`) has no such bound: its pointer move (`0x5ddf04`, `TABLE_DRAG_CALL`) calls `table_client_set_yoffset` with the finger's offset unbounded, and its release scrolls back from past an end with `table_client_scroll_to`, which clamps to the rows less the client's height. That call is a `jal` to `ringnav_table_drag`, which holds the offset between 0 and that same end, so nothing moves on release. The bar is hidden under touch ([Touch mode](#touch-mode)), so a drag past an end shows nothing more: ponytail: no stretch under a finger on the screen; lifting that needs the bar shown during a drag (against touch mode's rule) or a stretch of the rows themselves, a new effect.
 
+The [confirmation card](oled-design.md#confirmation-card)'s answers (`feedback.c` `confirm`, a list over the card) never scroll: `sel_height` gives them their whole height (`confirm_surface`). Cut at the set's list end (y 224 on OLED's), which the card's answers cross, the second answer scrolled the first under the bar as it took the selection, and the wheel looked stuck on Cancel.
+
 Carousels are not lists and keep their own ends: Cover Flow's covers go round, an artist's albums and the playlists there stop with their bounce (`coverflow_bounded`, `home_step`), and Search's letter strip goes round.
 
 ## Key Tone

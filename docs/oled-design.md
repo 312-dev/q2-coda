@@ -690,8 +690,8 @@ as its callers move onto it.
 - **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centered, naming
   the object ("Forget WH-1000XM5?", never "Are you sure"), a long one scrolling in the text column (the house
   marquee: held 2.75 s, then 35 px/s, a copy 40 px behind, its ends faded 12 px into the card), an optional 28 px
-  glyph 6 px over it; at most two body lines in
-  15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
+  glyph 6 px over it; the body in 15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence
+  case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
 - **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
