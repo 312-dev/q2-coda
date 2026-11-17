@@ -658,7 +658,7 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     page = Settings(fw, ui)
     # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
-    assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'system_update', 'Storage',
+    assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
                                  'system_time', 'App Store', 'stock_2',
                                  'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
                                  'stock_7', 'stock_8', 'Restart', 'Shut Down']
@@ -669,11 +669,13 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     # the rows stock moved to its System page open stock's pages from here
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
-    for key in ('system_time', 'system_update', 'system_reset', 'system_about'):
+    for key in ('system_time', 'system_reset', 'system_about'):
         ui.click(button_of(page.view, key))
-    assert opened == ['systemset/datetime_page', 'systemset/fwupdate_page', 'systemset/reset_page', 'systemset/about_page']
-    # Storage opens its own page (storage.c storage_open)
+    assert opened == ['systemset/datetime_page', 'systemset/reset_page', 'systemset/about_page']
+    # Software Update and Storage open their own pages (sw_update.c sw_update_open, storage.c storage_open)
     fw.mock('window_create', lambda *_: 0)
+    ui.click(button_of(page.view, 'Software Update'))
+    assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
 

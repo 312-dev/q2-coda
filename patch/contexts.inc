@@ -29,7 +29,8 @@
 { "longsongs_page", CTX_FIXED, 0 },  /* runtime window (patch/library_lists.c); fixed: the hold menu */
 { "radio_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/radio.c) */
 { "spotbrowse_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/spotify.c) */
-{ "streamconf_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/navigation.c) */
+{ "streamconf_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/stream_config.c) */
+{ "streamsvc_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/stream_config.c): TIDAL's or Spotify's */
 { "apps_page", CTX_DYNAMIC, 0 },       /* runtime window (patch/netupdate.c) */
 { "tidal_downloads", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_lists.c) */
 { "app_songs", CTX_DYNAMIC, 0 },       /* runtime window (patch/library_lists.c) */
