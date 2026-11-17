@@ -45,8 +45,12 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-CACHE = pathlib.Path.home()/'.cache/q2-merge-train'
+sys.path.insert(0, str(ROOT/'tools/ci'))
+import q2ci  # noqa: E402
+
+CACHE = pathlib.Path(os.environ.get('Q2_MERGE_CACHE', pathlib.Path.home()/'.cache/q2-merge-train'))
 READY = CACHE/'ready.txt'
+FIX = 'fix'  # a ready line's last word when the branch repairs a failure the tip has
 SUITES = ('unit', 'fw', 'patch')  # a plan's keyed suites; each path in its 'other' list is a suite too
 
 
@@ -57,6 +61,7 @@ class Suite:
     ok: bool
     log: str = ''
     failures: list = dataclasses.field(default_factory=list)
+    kind: str = 'fail'  # gate.py's: 'crash' when the suite's process died instead of giving a verdict
 
 
 @dataclasses.dataclass
@@ -66,6 +71,8 @@ class Report:
     culprits: dict = dataclasses.field(default_factory=dict)   # branch: {suite: Suite}
     head: object = None       # the commit to land, None when nothing passed
     tests: int = 0            # test runs made, the first included
+    infra: list = dataclasses.field(default_factory=list)     # suites that crashed: nobody's fault, nothing lands
+    tip_red: list = dataclasses.field(default_factory=list)   # suites the integration tip fails on its own
 
 
 def restrict(plan, suites):
@@ -106,11 +113,19 @@ def integrate(ops, tip, branches, log=print):
             r.head, r.landed = head, todo
             return r
         suites = sorted(bad)
+        if all(v.kind == 'crash' for v in bad.values()):
+            # the gate ran each of these twice and its process died both times: the machine or the harness,
+            # which bisecting would only pin on whichever branch the next crash landed on
+            log(f'round {round_}: {", ".join(suites)} crashed, twice each: nothing lands and no branch is blamed')
+            r.infra = suites
+            r.skipped.update({b: f'not landed: {", ".join(suites)} crashed (the harness or the machine)' for b in todo})
+            return r
         # A red tip would make every branch that reaches the failing suites look guilty: check it first.
         if test(0, tip, suites, f'round {round_}: the tip alone'):
             log(f'round {round_}: {", ".join(suites)} fail on the integration tip without any branch: '
                 f'nothing lands; make the tip green first')
             r.skipped.update({b: 'not landed: the integration tip fails the same suites' for b in todo})
+            r.tip_red = suites
             return r
         good = {'head': tip, 'branches': []}
         before = len(r.culprits)
@@ -268,7 +283,8 @@ class Real:
             return {'gate': Suite(False, str(out/'gate.log'), failures((out/'gate.log').read_text(), wt))}
         self.log(f'  gate: {time.perf_counter() - t:.0f} s')
         self.log('\n'.join('    ' + line for line in (out/'summary.txt').read_text().splitlines()))
-        return {s: Suite(r['rc'] == 0, r['log'], [] if r['rc'] == 0 else failures(pathlib.Path(r['log']).read_text(), wt))
+        return {s: Suite(r['rc'] == 0, r['log'], [] if r['rc'] == 0 else failures(pathlib.Path(r['log']).read_text(), wt),
+                         r.get('kind', 'fail'))
                 for s, r in results.items()}
 
 
@@ -284,13 +300,20 @@ def locked(path):
 
 def read_ready(path):
     """[(branch, sha or None)] from the ready list, the last line for a branch winning, in first-seen order."""
+    return [(b, sha) for b, sha, _ in read_ready_lines(path)]
+
+
+def read_ready_lines(path):
+    """The ready list as [(branch, sha or None, fixes the tip)]: a line is `branch [sha] [fix]`."""
     out = {}
     if path.exists():
         for line in path.read_text().splitlines():
             f = line.split('#')[0].split()
             if f:
-                out[f[0]] = f[1] if len(f) > 1 else None
-    return list(out.items())
+                fix = f[-1] == FIX and len(f) > 1
+                rest = f[1:-1] if fix else f[1:]
+                out[f[0]] = (rest[0] if rest else None, fix)
+    return [(b, sha, fix) for b, (sha, fix) in out.items()]
 
 
 def take_ready(path, keep):
@@ -304,19 +327,44 @@ def take_ready(path, keep):
 
 
 def append_ready(path, items):
+    """Queue items: (branch, sha) or (branch, sha, fixes the tip)."""
     with locked(path):
         with open(path, 'a') as f:
-            for b, sha in items:
-                f.write(f'{b} {sha}\n' if sha else f'{b}\n')
+            for b, sha, *fix in items:
+                f.write(' '.join(x for x in (b, sha, FIX if fix and fix[0] else None) if x) + '\n')
 
 
-def mark_ready(path, branch):
-    if git('status', '--porcelain', '--untracked-files=no').stdout.strip():
-        raise SystemExit(f'{ROOT} has uncommitted changes: commit them, run affected.py, then mark it ready')
-    branch = branch or git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
-    sha = git('rev-parse', f'{branch}^{{commit}}').stdout.strip()
-    append_ready(path, [(branch, sha)])
-    print(f'{branch} {sha[:8]} queued in {path}')
+def conflicts(onto, sha, cwd=ROOT):
+    """The files a merge of sha onto onto would leave in conflict, from git merge-tree (nothing is written
+    to a worktree); None when sha is in onto already."""
+    if git('merge-base', '--is-ancestor', sha, onto, cwd=cwd, check=False).returncode == 0:
+        return None
+    m = git('merge-tree', '--write-tree', '--name-only', '--no-messages', onto, sha, cwd=cwd, check=False)
+    return m.stdout.split()[1:] if m.returncode else []
+
+
+def mark_ready(path, branch, onto=None, fix=False, cwd=ROOT):
+    """Queue branch at its commit, unless it would not merge: the one who wrote it resolves a conflict in
+    minutes, by merging the trunk into the branch, where the queue could only skip it."""
+    if git('status', '--porcelain', '--untracked-files=no', cwd=cwd).stdout.strip():
+        raise SystemExit(f'{cwd} has uncommitted changes: commit them, run affected.py, then mark it ready')
+    branch = branch or git('rev-parse', '--abbrev-ref', 'HEAD', cwd=cwd).stdout.strip()
+    sha = git('rev-parse', f'{branch}^{{commit}}', cwd=cwd).stdout.strip()
+    onto = onto or q2ci.trunk()
+    tip = git('rev-parse', '-q', '--verify', f'{onto}^{{commit}}', cwd=cwd, check=False).stdout.strip()
+    if not tip:
+        raise SystemExit(f'{onto}: no such branch (the trunk: $Q2_TRUNK or ~/.config/q2/trunk)')
+    if re.match(r'(release/|integrate/|main$|master$)', branch):
+        raise SystemExit(f'{branch} is an integration branch: only feature branches are queued')
+    clash = conflicts(tip, sha, cwd)
+    if clash is None:
+        raise SystemExit(f'{branch} {sha[:8]} is in {onto} already: nothing to queue')
+    if clash:
+        raise SystemExit(f'{branch} conflicts with {onto} {tip[:8]} in {", ".join(clash)}: merge {onto} into the '
+                         f'branch (git merge {onto}), resolve, run the pre-READY tests again, then mark it ready')
+    append_ready(path, [(branch, sha, fix)])
+    print(f'{branch} {sha[:8]} queued in {path}' + (' (fixes the tip)' if fix else ''))
+    q2ci.event('READY', branch, sha=sha[:8], fix='yes' if fix else None)
     return 0
 
 
@@ -361,12 +409,16 @@ def main():
     ap.add_argument('--mark-ready', nargs='?', const='', metavar='BRANCH',
                     help='append BRANCH (default: this worktree\'s) at its current commit to the ready list')
     ap.add_argument('--dry-run', action='store_true', help='print the plan; merge, build and test nothing')
-    ap.add_argument('--onto', metavar='BRANCH', help='with --dry-run: plan onto BRANCH, not this worktree\'s')
+    ap.add_argument('--onto', metavar='BRANCH', help='with --dry-run: plan onto BRANCH, not this worktree\'s; with '
+                    '--mark-ready: the branch it must merge into cleanly (default: the trunk)')
+    ap.add_argument('--fixes-tip', action='store_true', help='with --mark-ready: this branch repairs a failure the '
+                    'trunk has; the queue takes it while it holds the others')
+    ap.add_argument('--result', type=pathlib.Path, help='also write what happened as JSON here (the queue reads it)')
     ap.add_argument('--release', dest='dev', action='store_false', help='test a release build (default: --dev)')
     args = ap.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so a running gate is stopped too
     if args.mark_ready is not None:
-        return mark_ready(args.ready, args.mark_ready)
+        return mark_ready(args.ready, args.mark_ready, args.onto, args.fixes_tip)
     if args.onto and not args.dry_run:
         raise SystemExit('--onto is for --dry-run: a real batch lands on the branch of the worktree it runs in')
     target = args.onto or git('rev-parse', '--abbrev-ref', 'HEAD').stdout.strip()
@@ -435,6 +487,13 @@ def main():
             git('branch', '-D', batch, check=False)
     elif not r.culprits:
         status = 2
+    if args.result:
+        q2ci.write_json(args.result, {
+            'target': target, 'tip': tip, 'head': r.head if r.landed else None, 'status': status, 'logs': str(logs),
+            'landed': {b: real.shas[b] for b in r.landed}, 'skipped': r.skipped, 'infra': r.infra,
+            'tip_red': r.tip_red, 'tests': r.tests, 'shas': real.shas,
+            'culprits': {b: {s: {'log': v.log, 'failures': v.failures[:5]} for s, v in bad.items()}
+                         for b, bad in r.culprits.items()}})
     elapsed = time.perf_counter() - t0
     log(f'\n=== batch onto {target}: {len(r.landed)} landed, {len(r.culprits)} failed, {len(r.skipped)} skipped; '
         f'{r.tests} test runs, {elapsed / 60:.1f} min ===')
