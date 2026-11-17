@@ -7,10 +7,11 @@
  * server's similar songs and adds more as they run out (q2-subsonic's radio.go), and says radio= in
  * its state file while it plays (addon_radio); the seed is the song's path, which for a streamed
  * file carries its server id (stream_path.h). Any other song, one the app answers is not its own,
- * or one whose app is too old to play radios (addon_radio_missing), is this file's local radio: the library's songs by the seed's artist, then of its genre,
- * each shuffled, leaving out the last SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left
- * before more join the queue's end. A local radio plays in order (Now Playing's shuffle and repeat
- * off, put back when it ends) and ends when another queue loads.
+ * or one whose app is too old to play radios (addon_radio_missing), is this file's local radio:
+ * the library's songs by the seed's artist, then of its genre, each shuffled, leaving out the last
+ * SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left before more join the queue's end. A
+ * local radio plays in order (Now Playing's shuffle and repeat off, put back when it ends) and
+ * ends when another queue loads.
  *
  * The seed plays on where it was: the radio's queue starts with it, and once that queue plays the
  * seed, it is sought to the place it had at the tap (sr.seek). */

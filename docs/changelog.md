@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Subsonic: the firmware carries Subsonic q2-v1.0, so **Radio** on a song streamed from your server plays the server's similar songs; before, the built-in q2-v0.9 had no song radio and Radio said "No similar songs on this Q2 Muse". If a Subsonic app too old for Radio is installed, Radio on a server song now says **Update Subsonic to use Radio** instead.
   - Control Center: the song's album cover shows in the Now Playing block, the same one Home shows; before, the square stayed grey for every song. A song streamed from your server (Subsonic) also shows its album's cover from the server, on Now Playing, Home, Up Next and Control Center, when the file has no picture of its own.
   - Home (OLED, Split): moving the selection onto the top row no longer leaves a thin strip of the blue bar across the row below it, which made the selected row's text look like it was flickering.
   - Home (OLED, Split): a toast such as **Unplugged** or **Charging** no longer puts a black bar across the top of the screen and cuts off the first row while it shows.

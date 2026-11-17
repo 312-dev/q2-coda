@@ -41,7 +41,7 @@ contrib/shanlingq2/build.sh /tmp/q2-subsonic                 # in q2-subsonic: G
 mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-6bdfe61.zip ~/.cache/q2-apps/
 ```
 
-A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`. The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 adds 3,190,784 bytes to the compressed root filesystem (53,456,896 of the 75,497,472 `rootfs_fits` allows, with `--new-player`).
+A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`. The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 added 3,190,784 bytes to the compressed root filesystem; q2-v1.0 (an 8,064,479-byte binary) adds about 20 KB more: a `--dev` build of p32 with it is 53,137,408 of the 75,497,472 `rootfs_fits` allows, 22.4 MB to spare.
 
 ### What the rootfs drops
 

@@ -1,7 +1,8 @@
 """Song radio, patch/song_radio.c (docs/internals.md#radio): Now Playing's Radio on a song of the card plays the
 library's radio of it (the seed's artist, then its genre, each shuffled, nothing played lately), the seed playing on
 where it was; the pill lights while it plays and a tap on it stops it; a server song goes to its app, and one the
-app answers is not its own falls back to the library's. The rig is test_coda_rc_shim's: /tmp is a dict, AWTK
+app answers is not its own falls back to the library's; a streamed song's request names its stream file, whose name
+carries the server id; an app too old for radios says so. The rig is test_coda_rc_shim's: /tmp is a dict, AWTK
 test_nav_library_pages' fake and the songs test_nav_hold's Records."""
 import ctypes as C
 
