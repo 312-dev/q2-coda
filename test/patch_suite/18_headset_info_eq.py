@@ -129,7 +129,7 @@ assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(
 # while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
-    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(3); m.page=m.top  # Spotify's page
+    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(4); m.page=m.top  # Spotify's page
 def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
 assert m.labels()==['Spotify','Show in Streaming','Cache','Erase Spotify Data','4 GB']
