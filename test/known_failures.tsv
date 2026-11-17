@@ -1,0 +1,4 @@
+# Tests that fail on the trunk and whose fix is owed. tools/ci/gate.py deselects each until its date, so
+# one known failure blocks nobody else's merge; past the date the gate fails until the line is fixed,
+# renewed or removed. Tab-separated: suite (unit or fw), pytest id, expires (YYYY-MM-DD), owner, reason.
+# test/patch.py has no entries here: its tests share state, so a failure there is fixed, not skipped.

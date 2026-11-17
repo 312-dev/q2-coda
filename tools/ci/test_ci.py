@@ -311,9 +311,12 @@ def test_gate_skips_what_needs_a_failed_build(tmp_path, monkeypatch):
     assert 'FAILED: build, u, p' in gate.table(results, 1) or 'FAILED: build, p, u' in gate.table(results, 1)
 
 
-def test_gate_plan_that_runs_everything_is_the_whole_gate(tmp_path):
+def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
-    assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.FULL)
+    assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
+    assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
+    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov'}
+    assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
     # --only: the plan's unit as the plan has it, fw-asan (only the whole gate has it) whole, patch (the

@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""The integration gate: one build, then every suite at once, as memory allows, with a table at the end.
+"""The gate: one build, then every suite at once, as memory allows, with a table at the end.
 
-    python3 tools/ci/gate.py                          # the release gate: everything, on a --dev --new-player build
+    python3 tools/ci/gate.py                          # a release's gate: the merge and post tiers, everything
+    python3 tools/ci/gate.py --tier merge             # what a batch must pass before it lands
+    python3 tools/ci/gate.py --tier post              # what runs on the trunk after a landing
     python3 tools/ci/gate.py --only fw-asan,unit      # some of it
     python3 tools/ci/gate.py --plan-json plan.json    # what an affected.py plan names (merge_batch.py's runs)
     python3 tools/ci/gate.py -- --dev                 # rebuild.py's options (default: --dev -- --new-player)
 
 Run it with a python that has pytest, pytest-xdist, coverage, mypy, unicorn and fontTools (the main
-checkout's venv, ~/repos/q2-pod/.venv, has them all). The whole gate's suites:
+checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
 
-    unit           test/unit under coverage, then `coverage report` (the floor in pyproject.toml)
-    mypy-tools     mypy tools test/unit
-    mypy-fw        mypy test/fw
-    fw             tools/ci/fw.py: test/fw on xdist workers
-    fw-asan        tools/ci/fw.py --asan
-    patch          test/patch.py BUILD: the suite in one process, as it is written
-    test/build.py  test/build.py --build BUILD
-    test/peq.py    test/peq.py
+    merge   patch              test/patch.py BUILD: the suite in one process, as it is written
+            unit               test/unit
+            fw                 tools/ci/fw.py: test/fw on xdist workers
+            test/playback.py   test/playback.py BUILD
+            test/build.py      test/build.py --build BUILD
+            test/peq.py        test/peq.py
+            test/headset_io.py test/headset_io.py BUILD
+            mypy-tools         mypy tools test/unit
+            mypy-fw            mypy test/fw
+    post    fw-asan            tools/ci/fw.py --asan: the sanitizers, a group of files to a process
+            unit-cov           test/unit under coverage, then `coverage report` (the floor in pyproject.toml)
 
 The build (tools/ci/rebuild.py: this worktree's reused build) starts at once, beside the suites that need
 none; the rest start when it is done. The longest suites start first. A suite starts only when
@@ -25,17 +30,33 @@ after its own estimate (MEM_GB); else it waits for one to finish. When nothing i
 and q2-heavy's own checks hold it. Heavy suites run under q2-heavy (fw.py wraps its own processes).
 test/patch.py runs serially: its tests share one script's state, and a serial run (4:39 on one core,
 1.2 GB) beat eight shards (10:26, 5.2 GB) on an idle machine on 2026-11-16. A plan that names lines of it
-runs those through patch_shards.py --lines. Each suite writes
-its own log; the table gives each one's exit status and time. Exit status: 0 when all passed, else 1.
+runs those through patch_shards.py --lines. Each suite writes its own log; the table gives each one's
+exit status and time. Exit status: 0 when all passed, else 1.
 
-A plan (affected.py --json) that runs unit, fw and patch whole is the whole gate; any other plan runs what
+A suite that passed on this exact tree is not run again (`cached` in the table): its pass is recorded in
+~/.cache/q2-verified/ under the tree's hash, the suite's command and the build's options, and only when
+the worktree has no change git does not hold. So a release's gate after a batch on the same commit costs
+only what the batch did not run. --no-cache runs everything.
+
+A suite that fails is run once more, alone (--no-retry: not). One that then passes is `flaky` (it failed,
+then passed: the run counts as passed) and is appended to ~/.cache/q2-queue/flakes.jsonl. A result's
+`kind` says what a failure was: `crash` when the process died of a signal or its log shows one (a Unicorn
+segfault, a memory limit's kill, a deadline's), else `fail`. merge_batch.py blames no branch for a crash.
+
+test/known_failures.tsv lists pytest tests that fail on the trunk and whose fix is owed: the gate
+deselects them, so they block nothing until the entry's date. A line past its date, or one the file's
+rules refuse, fails the gate as the suite `known-failures`. test/patch.py has no such list: a later test
+needs the state an earlier one left, so a failure there is fixed, not skipped.
+
+A plan (affected.py --json) that runs unit, fw and patch whole is the merge tier; any other plan runs what
 it names, each `other` path a suite of its own. --only keeps just those names: a plan's suite as the plan
-has it, one only the whole gate has (GATE_ONLY: fw-asan, mypy-tools, mypy-fw, test/peq.py) whole, and
-any other name the plan lacks not at all; the name `build` builds even when no suite needs it.
-docs/building.md#gate.
+has it, one only a whole tier has (GATE_ONLY) whole, and any other name the plan lacks not at all; the
+name `build` builds even when no suite needs it. docs/building.md#gate.
 """
 import argparse
 import contextlib
+import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -52,12 +73,25 @@ FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
 # A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16: the
 # order they start in and what each needs free.
-MEM_GB = {'build': 2.0, 'unit': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 6.0, 'patch': 1.5,
-          'test/build.py': 1.0, 'test/peq.py': 1.0}
-SECONDS = {'fw-asan': 720, 'unit': 330, 'patch': 270, 'fw': 100, 'test/build.py': 60, 'test/peq.py': 60,
-           'mypy-tools': 40, 'mypy-fw': 30}
-FULL = tuple(SECONDS)
-GATE_ONLY = ('fw-asan', 'mypy-tools', 'mypy-fw', 'test/peq.py')  # in the whole gate, never in a narrower plan
+MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
+          'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5}
+SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'test/playback.py': 80, 'fw': 50,
+           'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5}
+POST = ('fw-asan', 'unit-cov')
+MERGE = tuple(n for n in SECONDS if n not in POST)
+FULL = MERGE + POST
+TIERS = {'merge': MERGE, 'post': POST, 'release': FULL}
+# in a whole tier, and in no narrower plan or only by chance: --only runs these whole when the plan lacks them
+GATE_ONLY = ('fw-asan', 'unit-cov', 'mypy-tools', 'mypy-fw', 'test/peq.py', 'test/playback.py', 'test/headset_io.py')
+VERIFIED = pathlib.Path(os.environ.get('Q2_VERIFIED', pathlib.Path.home()/'.cache/q2-verified'))
+FLAKES = pathlib.Path(os.environ.get('Q2_FLAKES', pathlib.Path.home()/'.cache/q2-queue/flakes.jsonl'))
+KNOWN = ROOT/'test/known_failures.tsv'
+# which suites a known failure's first column reaches: both runs of the same tests
+KNOWN_SUITES = {'unit': ('unit', 'unit-cov'), 'fw': ('fw', 'fw-asan')}
+# Exit statuses that are a death, not a verdict: 128 + SIGABRT, SIGBUS, SIGFPE, SIGKILL (a memory limit),
+# SIGSEGV, SIGTERM (a deadline), and timeout(1)'s 124. Python reports its own child's signal as negative.
+CRASH_RC = (124, 134, 135, 136, 137, 139, 143)
+CRASH_TEXT = ('Segmentation fault', 'Fatal Python error', 'CRASHED (exit', 'oom-kill')
 
 
 class Suite:
@@ -70,6 +104,7 @@ class Suite:
         self.log: Any = None
         self.rc: Any = None
         self.seconds = 0.0
+        self.retried: Any = None  # the kind of its first failure, once it is being run again
 
     def command(self, build):
         argv = [build if a == '{build}' else a for a in self.argv]
@@ -83,9 +118,14 @@ def everything(plan):
 def full_suite(name, py, logs):
     cov = {'COVERAGE_FILE': str(logs/'.coverage')}
     return {
-        'unit': lambda: Suite('unit', [py, '-m', 'coverage', 'run', '-m', 'pytest', 'test/unit', '-q', '-p',
-                                       'no:cacheprovider'], heavy=True, env=cov,
-                              after=[py, '-m', 'coverage', 'report']),
+        'unit': lambda: Suite('unit', [py, '-m', 'pytest', 'test/unit', '-q', '-p', 'no:cacheprovider'], heavy=True),
+        'unit-cov': lambda: Suite('unit-cov', [py, '-m', 'coverage', 'run', '-m', 'pytest', 'test/unit', '-q', '-p',
+                                               'no:cacheprovider'], heavy=True, env=cov,
+                                  after=[py, '-m', 'coverage', 'report']),
+        'test/playback.py': lambda: Suite('test/playback.py', [py, 'test/playback.py', '{build}'], needs_build=True,
+                                          heavy=True),
+        'test/headset_io.py': lambda: Suite('test/headset_io.py', [py, 'test/headset_io.py', '{build}'],
+                                            needs_build=True, heavy=True),
         'mypy-tools': lambda: Suite('mypy-tools', [py, '-m', 'mypy', 'tools', 'test/unit']),
         'mypy-fw': lambda: Suite('mypy-fw', [py, '-m', 'mypy', 'test/fw']),
         'fw': lambda: Suite('fw', [py, str(ROOT/'tools/ci/fw.py')]),
@@ -106,11 +146,12 @@ def other_suite(path, py):
     return Suite(path, [py, path, '{build}'], needs_build=True, heavy=True)
 
 
-def suites_for(plan, only, py, logs):
-    """The suites to run: the whole gate for an everything plan, else the plan's, cut to only."""
+def suites_for(plan, only, py, logs, tier=None):
+    """The suites to run: a whole tier for an everything plan (a release's with no plan, the merge tier
+    with one), else the plan's, cut to only."""
     out = {}
     if everything(plan):
-        out = {n: full_suite(n, py, logs)() for n in FULL}
+        out = {n: full_suite(n, py, logs)() for n in TIERS[tier or ('release' if plan is None else 'merge')]}
     else:
         if plan['unit']:
             files = ['test/unit'] if plan['unit'] == 'all' else [f'test/unit/{f}' for f in plan['unit']]
@@ -133,6 +174,69 @@ def suites_for(plan, only, py, logs):
     return out
 
 
+def known_failures(path, today):
+    """test/known_failures.tsv as ({suite: [pytest ids to deselect]}, [what is wrong with the file]). A line is
+    `suite<TAB>test id<TAB>expires (YYYY-MM-DD)<TAB>owner<TAB>reason`; `#` starts a comment."""
+    skip: dict = {}
+    wrong = []
+    if not path.exists():
+        return skip, wrong
+    for n, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        f = [c.strip() for c in line.split('\t')]
+        if len(f) != 5 or not all(f):
+            wrong.append(f'line {n}: needs five tab-separated fields (suite, test id, expires, owner, reason)')
+            continue
+        suite, test, expires = f[:3]
+        if suite not in KNOWN_SUITES:
+            wrong.append(f'line {n}: suite {suite!r} cannot skip a test (only {", ".join(KNOWN_SUITES)}); '
+                         'a test/patch.py failure is fixed, not listed')
+            continue
+        if '::' not in test:
+            wrong.append(f'line {n}: {test!r} is not a pytest id (test/unit/test_x.py::test_name)')
+            continue
+        try:
+            last = datetime.date.fromisoformat(expires)
+        except ValueError:
+            wrong.append(f'line {n}: {expires!r} is not a date (YYYY-MM-DD)')
+            continue
+        if last < today:
+            wrong.append(f'line {n}: {test} expired on {expires} (owner {f[3]}): fix it or renew the line')
+            continue
+        for reached in KNOWN_SUITES[suite]:
+            skip.setdefault(reached, []).append(test)
+    return skip, wrong
+
+
+def classify(rc, text):
+    """What a failed suite's end was: 'crash' (the process died, or says one of its own did) or 'fail'."""
+    if isinstance(rc, int) and (rc < 0 or rc in CRASH_RC):
+        return 'crash'
+    return 'crash' if any(t in text for t in CRASH_TEXT) else 'fail'
+
+
+def tree_key(root=ROOT):
+    """The tree's hash when the worktree holds nothing else (no changed tracked file, no file git does not
+    know outside its ignores), else None: only then does a pass say something about a commit."""
+    def git(*a):
+        return subprocess.run(['git', '-C', str(root), *a], capture_output=True, text=True)
+    status = git('status', '--porcelain')
+    tree = git('rev-parse', 'HEAD^{tree}')
+    if status.returncode or tree.returncode or status.stdout.strip():
+        return None
+    return tree.stdout.strip()
+
+
+def cache_file(tree, suite, build_args):
+    """Where suite's pass on tree is recorded: by the tree, the suite's command and the build's options."""
+    def plain(arg):  # the same command from another worktree or venv is the same command
+        return 'python' if pathlib.PurePath(arg).name.startswith('python') else arg.replace(str(ROOT), '.')
+    what = json.dumps([tree, suite.name, [plain(a) for a in suite.argv], sorted(suite.env),
+                       [plain(a) for a in suite.after or []], build_args])
+    return VERIFIED/(hashlib.sha256(what.encode()).hexdigest()[:40] + '.json')
+
+
 def avail_gb():
     with open('/proc/meminfo') as f:
         for line in f:
@@ -142,13 +246,23 @@ def avail_gb():
 
 
 def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock=time.monotonic, force_build=False,
-        poll=2.0):
+        poll=2.0, retry=False, tree=None, flakes=None):
     """Build (unless build is given, or nothing needs it and not force_build) and run the suites, as memory
-    allows; returns {name: {'rc', 'seconds', 'log'}} with 'build' among them when it ran."""
+    allows; returns {name: {'rc', 'seconds', 'log'}} with 'build' among them when it ran. A failed result
+    has 'kind' (classify). retry: a suite that fails runs once more, with nothing beside it, and a pass then
+    is the result, marked 'flaky' with the first failure's kind and appended to the file flakes. tree (the
+    hash tree_key gives): a suite recorded as passed on it is not run ('cached'), and each pass is recorded."""
     logs.mkdir(parents=True, exist_ok=True)
+    done: dict = {}
+    if tree:
+        for s in list(suites.values()):
+            hit = cache_file(tree, s, build_args)
+            if hit.exists():
+                done[s.name] = {**json.loads(hit.read_text()), 'cached': True, 'seconds': 0}
+                log(f'ok   {s.name} (cached: passed on this tree, {done[s.name].get("when", "earlier")})')
+        suites = {n: s for n, s in suites.items() if n not in done}
     pending: list[Suite] = sorted(suites.values(), key=lambda s: -SECONDS.get(s.name, 60))
     running: list[Suite] = []
-    done: dict = {}
     builder: Suite | None = None
     if build is None and (force_build or any(s.needs_build for s in pending)):
         builder = Suite('build', [py, str(ROOT/'tools/ci/rebuild.py'), *build_args], heavy=True)
@@ -182,17 +296,51 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
                         f.flush()
                         s.rc = subprocess.run(s.after, cwd=ROOT, env={**os.environ, **s.env}, stdout=f,
                                               stderr=subprocess.STDOUT).returncode
-                done[s.name] = {'rc': s.rc, 'seconds': round(s.seconds), 'log': str(s.log)}
-                log(f'{"ok  " if s.rc == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s)')
+                result = {'rc': s.rc, 'seconds': round(s.seconds), 'log': str(s.log)}
+                if s.rc != 0:
+                    result['kind'] = classify(s.rc, pathlib.Path(s.log).read_text(errors='replace')[-20000:])
+                    if retry and s is not builder and s.retried is None:
+                        s.retried = result['kind']
+                        first = s.log.with_suffix('.first.log')
+                        s.log.replace(first)
+                        log(f'FAIL {s.name} ({s.seconds:.0f} s, {s.retried}): running it once more, alone; '
+                            f'the first log is {first}')
+                        pending.insert(0, s)
+                        continue
+                elif s.retried:
+                    result['flaky'] = s.retried
+                    if flakes:
+                        flakes.parent.mkdir(parents=True, exist_ok=True)
+                        with open(flakes, 'a') as f:
+                            f.write(json.dumps({'when': time.strftime('%Y-%m-%dT%H:%M:%S'), 'suite': s.name,
+                                                'first': s.retried, 'tree': tree, 'worktree': ROOT.name,
+                                                'log': str(s.log.with_suffix('.first.log'))}) + '\n')
+                if s.rc == 0 and tree and s is not builder and not s.retried:
+                    # a pass after a failure is not recorded: the next run on this tree tests it again
+                    hit = cache_file(tree, s, build_args)
+                    hit.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = hit.with_suffix(f'.{os.getpid()}.tmp')
+                    tmp.write_text(json.dumps({**result, 'when': time.strftime('%Y-%m-%d %H:%M'), 'tree': tree}))
+                    tmp.replace(hit)
+                done[s.name] = result
+                note = f', flaky: first {s.retried}' if s.rc == 0 and s.retried else \
+                    f', {result["kind"]}' if s.rc != 0 else ''
+                log(f'{"ok  " if s.rc == 0 else "FAIL"} {s.name} ({s.seconds:.0f} s{note})')
             if builder and builder.rc not in (None, 0):
                 for s in [p for p in pending if p.needs_build]:
                     pending.remove(s)
                     done[s.name] = {'rc': 'no build', 'seconds': 0, 'log': str(builder.log)}
             now = clock()
             young = sum(s.mem for s in running if now - s.start < RAMP)
+            alone = any(s.retried for s in running)  # a second try has the machine to itself
             for s in list(pending):
-                if s.needs_build and not build:
+                if alone or (s.needs_build and not build):
                     continue
+                if s.retried:
+                    if not running:
+                        pending.remove(s)
+                        launch(s)
+                    break  # and nothing starts ahead of it
                 free = mem() - young
                 if free - s.mem >= FLOOR or not running:
                     pending.remove(s)
@@ -208,11 +356,13 @@ def run(suites, build_args, logs, py, build=None, log=print, mem=avail_gb, clock
 
 
 def table(results, wall):
-    rows = [f'{"suite":15} {"rc":>8} {"time":>7}  log']
+    rows = [f'{"suite":18} {"rc":>8} {"time":>7}  log']
     for name, r in results.items():
-        rows.append(f'{name:15} {str(r["rc"]):>8} {r["seconds"] // 60:4d}:{r["seconds"] % 60:02d}  {r["log"]}')
+        note = ' (cached)' if r.get('cached') else f' (flaky: first {r["flaky"]})' if r.get('flaky') else \
+            f' ({r["kind"]})' if r.get('kind') else ''
+        rows.append(f'{name:18} {str(r["rc"]):>8} {r["seconds"] // 60:4d}:{r["seconds"] % 60:02d}  {r["log"]}{note}')
     bad = [n for n, r in results.items() if r['rc'] != 0]
-    rows.append(f'{"wall":15} {"":>8} {int(wall) // 60:4d}:{int(wall) % 60:02d}  '
+    rows.append(f'{"wall":18} {"":>8} {int(wall) // 60:4d}:{int(wall) % 60:02d}  '
                 + (f'FAILED: {", ".join(bad)}' if bad else 'all passed'))
     return '\n'.join(rows)
 
@@ -221,6 +371,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--plan-json', metavar='FILE', help='an affected.py plan (- for stdin): run what it names')
     ap.add_argument('--only', help='comma-separated suite names: just these')
+    ap.add_argument('--tier', choices=sorted(TIERS), help='which suites an everything plan means (default: release '
+                    'with no plan, merge with one)')
+    ap.add_argument('--no-cache', action='store_true', help='run a suite even when it passed on this tree before')
+    ap.add_argument('--no-retry', action='store_true', help='do not run a failed suite a second time')
     ap.add_argument('--build', help='use this build, do not build')
     ap.add_argument('--logs', type=pathlib.Path, help='default: ~/.cache/q2-gate/<worktree>-<time>/')
     ap.add_argument('--results', type=pathlib.Path, help='also write the results as JSON here')
@@ -235,12 +389,22 @@ def main():
         plan = json.loads(sys.stdin.read() if args.plan_json == '-' else pathlib.Path(args.plan_json).read_text())
     logs = args.logs or pathlib.Path.home()/'.cache/q2-gate'/f'{ROOT.name}-{time.strftime("%Y%m%d-%H%M%S")}'
     only = [n for n in (args.only or '').split(',') if n]
-    suites = suites_for(plan, [n for n in only if n != 'build'], args.python, logs)
+    suites = suites_for(plan, [n for n in only if n != 'build'], args.python, logs, args.tier)
+    skip, wrong = known_failures(KNOWN, datetime.date.today())
+    for name, tests in skip.items():
+        if name in suites:
+            suites[name].argv += [f'--deselect={t}' for t in tests]
     t = time.monotonic()
     head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True).stdout.strip()
     print(f'gate on {ROOT.name} {head}: {", ".join(suites) or "nothing"}; logs in {logs}', flush=True)
     results = run(suites, build_args, logs, args.python, args.build, log=lambda m: print(m, flush=True),
-                  force_build='build' in only)
+                  force_build='build' in only, retry=not args.no_retry, tree=None if args.no_cache else tree_key(),
+                  flakes=FLAKES)
+    if wrong:
+        logs.mkdir(parents=True, exist_ok=True)
+        (logs/'known-failures.log').write_text('\n'.join(f'{KNOWN.name}: {w}' for w in wrong) + '\n')
+        results['known-failures'] = {'rc': 1, 'seconds': 0, 'log': str(logs/'known-failures.log'), 'kind': 'fail'}
+        print('\n'.join(f'{KNOWN.name}: {w}' for w in wrong), flush=True)
     out = table(results, time.monotonic() - t)
     print('\n' + out)
     (logs/'summary.txt').write_text(out + '\n')
