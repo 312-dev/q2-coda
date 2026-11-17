@@ -111,7 +111,7 @@ def test_sensor_down_is_a_card_with_one_ok_that_waits_its_turn(rig):
     rig.poll()
     rig.poll()
     card, = rig.cards
-    assert card['title'] == 'Temperature sensor not available' and card['rows'] == ['OK'] and card['timeout'] == 0
+    assert card['title'] == 'No Temperature Sensor' and card['rows'] == ['OK'] and card['timeout'] == 0
     assert 'watch CPU load instead' in card['body']
 
 

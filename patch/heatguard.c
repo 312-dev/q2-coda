@@ -16,7 +16,7 @@ static struct {
     int beat, seq_seen, seq_shown; /* the state's beat and seq; the last seq a card or toast took */
     int off;                       /* the power-off taken over: its seq */
     unsigned off_at, off_ms;
-    int acked, cancel;             /* the answers last written */
+    int acked, cancel; /* the answers last written */
     int norun_shown;
 } hg __attribute__((section(".scratch")));
 
@@ -56,7 +56,8 @@ static void hg_answer(void) { /* both answers, rewritten whole */
 }
 
 static void hg_load_answer(void *ctx, int row, int toggle_on) {
-    if (row == 0) hg.cancel = (int)(long)ctx, hg_answer(); /* Cancel; the countdown's end is row 1 */
+    if (row == 0)
+        hg.cancel = (int)(long)ctx, hg_answer(); /* Cancel; the countdown's end is row 1 */
 }
 static void hg_off_answer(void *ctx, int row, int toggle_on) { navigator_to("poweroff_page"); }
 static void hg_ok(void *ctx, int row, int toggle_on) {}
@@ -66,8 +67,13 @@ static const char *const hg_load_rows[] = { "Cancel", "Shut Down" };
 static const char *const hg_off_row[] = { "Shutting Down" };
 
 static int hg_info(const char *title, const char *body) {
-    confirm_t c = { .title = title, .body = body, .rows = hg_ok_row, .n_rows = 1, .kind = CONFIRM_INFO,
-                    .back = -1, .answer = hg_ok };
+    confirm_t c = { .title = title,
+                    .body = body,
+                    .rows = hg_ok_row,
+                    .n_rows = 1,
+                    .kind = CONFIRM_INFO,
+                    .back = -1,
+                    .answer = hg_ok };
     return hg_card(&c);
 }
 
@@ -88,9 +94,15 @@ static void hg_power_off(int seq, int left, int load) {
     }
     if (hg.seq_shown == seq) return;
     confirm_t c = { .title = load ? "Shutting Down" : "Q2 is too hot",
-                    .body = load ? "Q2 worked hard with no temperature sensor." : "Shutting down to cool off.",
-                    .rows = hg_off_row, .n_rows = 1, .kind = CONFIRM_INFO, .back = -1,
-                    .timeout_ms = (int)(hg.off_ms - gone), .timeout_row = 0, .answer = hg_off_answer };
+                    .body = load ? "Q2 worked hard with no temperature sensor."
+                                 : "Shutting down to cool off.",
+                    .rows = hg_off_row,
+                    .n_rows = 1,
+                    .kind = CONFIRM_INFO,
+                    .back = -1,
+                    .timeout_ms = (int)(hg.off_ms - gone),
+                    .timeout_row = 0,
+                    .answer = hg_off_answer };
     if (hg_card(&c)) hg.seq_shown = seq;
 }
 
@@ -124,14 +136,20 @@ void heatguard_poll(void) {
     if (!tk_strcmp(card, "warn")) {
         (hg_toast ? hg_toast : toast_later)("chargetoast_weak", "Q2 is getting hot");
     } else if (!tk_strcmp(card, "nosensor")) {
-        shown = hg_info("Temperature sensor not available",
+        shown = hg_info("No Temperature Sensor",
                         "Q2 can't detect overheating; it will\nwatch CPU load instead.");
     } else if (!tk_strcmp(card, "loadwarn")) {
         confirm_t c = { .title = "Q2 has been working hard",
-                        .body = "2 minutes with no temperature sensor.\nShutting down to protect it.",
-                        .rows = hg_load_rows, .n_rows = 2, .kind = CONFIRM_CONSEQUENTIAL, .back = 0,
-                        .timeout_ms = left > 0 ? left : 60000, .timeout_row = 1,
-                        .answer = hg_load_answer, .ctx = (void *)(long)seq };
+                        .body =
+                            "2 minutes with no temperature sensor.\nShutting down to protect it.",
+                        .rows = hg_load_rows,
+                        .n_rows = 2,
+                        .kind = CONFIRM_CONSEQUENTIAL,
+                        .back = 0,
+                        .timeout_ms = left > 0 ? left : 60000,
+                        .timeout_row = 1,
+                        .answer = hg_load_answer,
+                        .ctx = (void *)(long)seq };
         shown = hg_card(&c);
     }
     if (shown) hg.seq_shown = seq;

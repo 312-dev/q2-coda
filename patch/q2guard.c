@@ -429,10 +429,15 @@ int main(int argc, char **argv) {
         }
         line_due = 0;
         if (o.power_off) {
-            note("POWER off now");
+            static int now_said;
+            if (!now_said++) note("POWER off now");
             flush_final(g.off_at + GUARD_DEADLINE_MS);
             sync();
             reboot(RB_POWER_OFF);
+            /* still here: refused (the emulator's sandbox can); said once, tried again every tick */
+            static int said;
+            if (!said++) note("POWER off refused, trying again");
+            g.powered = 0;
         }
     }
 }
