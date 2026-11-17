@@ -175,6 +175,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'crphone_d', 'crphone_l', 'crphone_w',
+                                              *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
@@ -392,3 +393,26 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
     groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
               'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_holdback', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
+
+
+@pytest.mark.parametrize('right', [False, True])
+def test_the_focus_rings_ends_are_its_annulus_supersampled_and_meet_its_straight_runs(right):
+    """cta_ring_end (ui_kit.c cta_ring; patch/ui_kit.h CTA_RING_W, CTA_RING_H): 24 x 48, each pixel the share of it
+    between the circles of radius 24 and 22 about the end's centre, so the column beside the straight run is two
+    whole rows at the top and foot and clear between, the edges graded, and nothing outside the ring drawn. Two
+    one-pixel AWTK strokes left the arcs stepped and uneven at 6x (the user, 2026-11-16)."""
+    header = (pathlib.Path(__file__).parents[2]/'patch'/'ui_kit.h').read_text()
+    assert re.search(r'#define CTA_RING_W 2\b', header) and (art.CTA_RING_H, art.CTA_RING_W) == (38 + 2 * (3 + 2), 2)
+    w, h, at = pixels(art.cta_ring_end(right, 0xffffff))
+    assert (w, h) == (24, 48)
+    def alpha(x, y):  # the left end's frame
+        return at(w - 1 - x if right else x, y)[3]
+    assert [alpha(23, y) for y in (0, 1, 2, 45, 46, 47)] == [255, 255, 0, 0, 255, 255]
+    for y in range(h):
+        for x in range(w):
+            d = math.hypot(x + .5 - 24, y + .5 - 24)
+            if d > 24 + .75 or d < 22 - .75:
+                assert alpha(x, y) == 0, (x, y)  # wholly outside the ring
+            elif 22 + .75 < d < 24 - .75:
+                assert alpha(x, y) == 255, (x, y)  # wholly inside it
+    assert len({alpha(x, y) for y in range(h) for x in range(w)}) > 20  # graded edges, not steps

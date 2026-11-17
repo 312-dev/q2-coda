@@ -1192,6 +1192,11 @@ class Page:
         return {y: (min(r), max(r) + 1, [r[x] for x in sorted(r)]) for y, r in sorted(rows.items())}
 
 
+# The bar's flat form, Reduce Motion's: the shape tests below pin its inset, ends, pitch and tones; its rest lift
+# (tilt.c, 1.02 and a shadow) is pinned by test_the_bar_at_rest_is_lifted_with_a_shadow_under_it and test_tilt.py.
+FLAT = {'REDUCEMOTION': b'1'}
+
+
 def solid(row):
     return len(set(row[2])) == 1 and row[2][0]
 
@@ -1225,7 +1230,7 @@ def text_ink(fw, st, w, color=0xffffffff):
 def test_the_selected_row_is_the_accents_bar_inset_with_round_ends(fw, st, layout):
     """list.selection: the bar sel_inset in from each side, its ends sel_radius round, a one-pixel highlight over the
     accent's gradient, each row j / 47 of the way top tone to bottom (OLED's tones are one blue: solid)."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     S = Scheme(fw, layout)
     T = THEMES[OLED]
     inset, radius = T['sel_inset'], T['sel_radius']
@@ -1236,6 +1241,19 @@ def test_the_selected_row_is_the_accents_bar_inset_with_round_ends(fw, st, layou
     assert solid(band[72]) == rgba(mix(S.tones[0], S.tones[1], 24, 47)) and band[48][2][len(band[48][2]) // 2] == rgba(S.tones[4])
     assert S.tones[0] == T['schemes'][T['accents'].bit_length() - 1]['tones'][0]  # OLED's Accent Blue
     assert page.canvas.restored() and page.canvas.clip == [0, 0, 375, 320]
+
+
+def test_the_bar_at_rest_is_lifted_with_a_shadow_under_it(fw, layout):
+    """The press's rest state (tilt.c, docs/internals.md#row-press): the bar 1.02 of its size about its centre, 3 px
+    wider each side on a 375 px list, the same height, and the accent's translucent shadow in the rows under it."""
+    inset = THEMES[OLED]['sel_inset']
+    page = Page(fw)
+    band = page.band() if page.paint() else {}
+    grow = (375 - 2 * inset) * 20 // 1000 // 2
+    opaque = sorted(x for (x, y), c in page.canvas.px.items() if y == 72 and c >> 24 == 255)  # the bar, not its shadow
+    assert (opaque[0], opaque[-1] + 1) == (inset - grow, 375 - inset + grow)
+    assert min(band) == 48 and max(band) > 95  # the shadow below the bar's last row
+    assert all(c >> 24 < 255 for c in band[max(band)][2])  # translucent
 
 
 # A theme's own selection shape and accent (an OLED theme's: a flat exact blue, 8 px in, 6 px ends), written into the
@@ -1263,7 +1281,7 @@ def own_shape(fw, theme_layout, layout, radius, inset):
 
 
 def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, theme_layout):
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     own_shape(fw, theme_layout, layout, 6, 8)
     band = page.band() if page.paint() else {}
     blue = rgba(0x2f5bea)
@@ -1275,7 +1293,7 @@ def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, the
 
 
 def test_a_theme_s_square_ended_bar_keeps_its_inset(fw, layout, theme_layout):
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     own_shape(fw, theme_layout, layout, 0, 8)
     band = page.band() if page.paint() else {}
     assert list(band) == list(range(48, 96)) and all(r[:2] == (8, 375 - 8) and solid(r) == rgba(0x2f5bea) for r in band.values())
@@ -1332,7 +1350,7 @@ def test_the_shuffle_rows_label_on_the_bar_keeps_the_selections_ink_in_light_mod
 
 
 def test_a_fresh_page_settles_on_its_first_row(fw, layout):
-    page = Page(fw, sel=None)
+    page = Page(fw, sel=None, **FLAT)
     band = page.band() if page.paint() else {}
     assert min(band) == 0 and max(band) == 47
     assert page.view.props['_ringnav_index'] == 0 and page.view.props['_ringnav_count'] == 4
@@ -1346,7 +1364,7 @@ def test_touch_hides_the_selection_until_the_wheel(fw, st):
 
 def test_the_band_takes_a_rows_whole_pitch_under_its_button(fw):
     """The Library's row is a button over its pitch's top: the bar fills the row."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     for item in page.view.children:
         item.move(*item.box[:3], 56)
         item.children[0].move(20, 0, 335, 48)
@@ -1390,7 +1408,7 @@ def test_a_grid_tile_keeps_its_own_card_inset_all_round(fw, layout):
 
 def test_a_page_under_a_sliding_one_draws_the_row_it_holds(fw, st):
     """The snapshot of the page under a sliding page: its own held row, nothing loaded or settled."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     top = page.ui.window('playset_page')
     top.props['anim_hint'] = 'htranslate'
     page.view.props['_ringnav_index'] = 3
