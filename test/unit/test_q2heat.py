@@ -52,3 +52,31 @@ def test_the_report_reads_a_real_line_and_skips_garbage():
     q2heat.report(samples, notes, out)
     text = out.getvalue()
     assert 'hciplayer 12.3%' in text and '** GAP card away' in text and 'Fastest rise: +1.5 C' in text
+
+
+def test_under_a_minute_of_samples_flags_the_steepest_step():
+    """A log shorter than a minute (a quick reboot loop, say): the steepest step between neighbours instead."""
+    log = [line(0, 10, t=30.0), line(5, 15, t=30.5), line(10, 20, t=33.0), line(15, 25, t=33.2)]
+    samples, _ = q2heat.parse(log)
+    a, b, rise, kind = q2heat.fastest_minute(samples)
+    assert kind == 'temp' and (a.up, b.up) == (15, 20) and round(rise, 1) == 2.5
+
+
+def test_a_log_with_no_samples_says_so_and_leaves_unknown_notes_out():
+    out = io.StringIO()
+    samples, notes = q2heat.parse(['2026-11-17T14:00:00Z BOOT build=x last=clean\n',
+                                   '2026-11-17T14:00:01Z SOMETHING else\n'])
+    assert q2heat.report(samples, notes, out) is None
+    text = out.getvalue()
+    assert '** BOOT build=x' in text and 'SOMETHING' not in text and 'Too few samples to find a rise.' in text
+
+
+def test_main_reads_the_files_oldest_first_and_standard_input(tmp_path, monkeypatch, capsys):
+    old, new = tmp_path / 'q2-heat.1', tmp_path / 'q2-heat.0'
+    old.write_text(line(0, 100, t=40.0))
+    new.write_text(line(60, 160, t=45.0, top='adbd:50.0'))
+    q2heat.main([str(old), str(new)])
+    assert 'Fastest rise: +5 C' in capsys.readouterr().out
+    monkeypatch.setattr(sys, 'stdin', io.StringIO(line(0, 1, t=40.0) + line(60, 61, t=41.0)))
+    q2heat.main(['-'])
+    assert 'Fastest rise: +1 C' in capsys.readouterr().out
