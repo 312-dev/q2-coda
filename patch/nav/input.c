@@ -211,6 +211,10 @@ int ringnav_input(void *wm, void *e) {
         return 0;
     }
     if (addon_game_input(e)) return 0;
+    /* the selection bar's press (tilt.c): past the gates that drop a press with its release, and
+     * the video and the card game that own every key */
+    if (key == KEY_CENTER && (type == EVT_KEY_DOWN || type == EVT_KEY_UP))
+        tilt_press(type == EVT_KEY_DOWN);
     if (e && seek_input(e)) return 0; /* a held Previous or Next's repeats: seek.c */
     if (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) { /* a finger (stale_heal) */
         st.touch_at = st.last_input;

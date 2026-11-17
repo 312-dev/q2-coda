@@ -92,9 +92,20 @@ def test_the_round_corners_cover_their_arcs():
     assert all(f'[{r}] = ' in art.corner_table() for r in art.CORNERS)
 
 
-def test_a_theme_drawing_anothers_art_shares_its_images():
+# A whole theme renders in about 3 s plain and about 9 s under coverage (its pixel loops are traced); this test needs
+# four distinct renders (36 s under coverage), so the 60 s default leaves no room when other suites share the CPUs.
+@pytest.mark.timeout(110)
+def test_a_theme_drawing_anothers_art_shares_its_images(monkeypatch):
     """A theme stating art="oled" draws OLED's images, by OLED's names and bytes, packaged once; a value that would
     draw them otherwise stops the build, as the payload loads one image per name."""
+    render, rendered = art.images, {}  # one render for each distinct theme, whichever call asks for it
+
+    def once(t):
+        if (key := repr(t)) not in rendered:
+            rendered[key] = render(t)
+        return rendered[key]
+
+    monkeypatch.setattr(art, 'images', once)
     oled = theme.builtins()[0]
     other = {**oled, 'id': 'other'}  # OLED's values under another id, as a theme extending it resolves
     mine = art.images(oled)
@@ -175,6 +186,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'crphone_d', 'crphone_l', 'crphone_w',
+                                              *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
@@ -221,31 +233,51 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
 
 
 @pytest.mark.parametrize('half, primary, secondary, unlit', [('d', 0xffffff, 0xababab, 0x3a3a3c), ('l', 0, 0x5c5c5c, 0xc7c7cc)])
-def test_the_status_rows_glyphs_share_one_optical_size_in_each_halfs_ink(half, primary, secondary, unlit):
-    """status_row.c's slots (STATUS_GLYPHS): Wi-Fi's levels light their arcs over the rest of wifi-high in STATUS_UNLIT,
-    the full glyph's ink one box in every level, so the shape keeps its width; wifi-x and the headset's Bluetooth in
-    Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last; every one a
-    STATUS_PX box with STATUS_INK px of ink on its longer side (the padlock's 11), centred."""
+def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary, unlit):
+    """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
+    so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
+    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
+    Bluetooth rune (dim while connecting), headphones and the car sized by their height (wifi-x and the car are wider
+    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
     got = art.images(theme.builtins()[0])
-    def ink(name):
+    def ink(name, cut=64):
         w, h, at = pixels(got[f'oled_status_{name}_{half}'])
-        lit = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > 64]
+        lit = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > cut]
         colours = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3] > 250}
         return (w, h), lit, colours
     rgb = lambda c: tuple(c >> s & 255 for s in (16, 8, 0))  # noqa: E731
+    box = lambda lit: (min(x for x, _ in lit), max(x for x, _ in lit), min(y for _, y in lit), max(y for _, y in lit))  # noqa: E731
     boxes = set()
     for level in (1, 2, 3):
-        size, lit, colours = ink(f'wifi_{level}')
-        boxes.add((min(x for x, _ in lit), max(x for x, _ in lit), min(y for _, y in lit), max(y for _, y in lit)))
+        size, lit, colours = ink(f'wifi_{level}', 8)
+        boxes.add(box(lit))
         near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
-        assert size == (art.STATUS_PX,) * 2 and near(primary) and near(unlit) == (level < 3)
-    assert len(boxes) == 1 and 10 <= max(b - a + 1 for a, b in (list(boxes)[0][:2], list(boxes)[0][2:])) <= 12
-    for name in ('wifi_x', 'bt'):
-        size, lit, colours = ink(name)
-        assert size == (art.STATUS_PX,) * 2 and colours == {rgb(primary)}
-        assert 10 <= max(max(x for x, _ in lit) - min(x for x, _ in lit), max(y for _, y in lit) - min(y for _, y in lit)) + 1 <= 12
+        assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
+    assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
+    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_PX), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+                    ('btdim', art.STATUS_PX)):
+        size, lit, colours = ink(name, 8)
+        assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
+        x0, x1, y0, y1 = box(lit)
+        assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
+    x0, x1, _, _ = box(ink('wifi_x', 8)[1])
+    assert x1 - x0 + 1 == 14  # wider than its 11 rows
     frames = [got[f'oled_status_sync_{f}_{half}'] for f in range(art.STATUS_SPIN)]
     assert len(set(frames)) == art.STATUS_SPIN and all(ink(f'sync_{f}')[2] == {rgb(secondary)} for f in range(art.STATUS_SPIN))
+
+
+def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
+    """iOS's fan up its centre line from the apex on the ink's bottom (the clock's baseline): the dot, a 1.4 px gap,
+    a band, a gap, a band, each as STATUS_FAN cuts them (rows more than half covered)."""
+    w, h, at = pixels(art.status_wifi(3, 0xffffff, 0x3a3a3c))
+    column = [at(7, y)[3] + at(8, y)[3] for y in range(h)]  # the two columns either side of the centre line
+    on = [y for y in range(h) if column[y] > 255]
+    runs, start = [], on[0]
+    for a, b in zip(on, on[1:] + [None]):
+        if b != a + 1:
+            runs.append((start, a))
+            start = b
+    assert runs == [(1, 2), (5, 6), (8, 11)]  # outer band, middle band, the dot down to row 11, the ink's bottom
 
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])
@@ -393,3 +425,26 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
     groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
               'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_holdback', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
+
+
+@pytest.mark.parametrize('right', [False, True])
+def test_the_focus_rings_ends_are_its_annulus_supersampled_and_meet_its_straight_runs(right):
+    """cta_ring_end (ui_kit.c cta_ring; patch/ui_kit.h CTA_RING_W, CTA_RING_H): 24 x 48, each pixel the share of it
+    between the circles of radius 24 and 22 about the end's centre, so the column beside the straight run is two
+    whole rows at the top and foot and clear between, the edges graded, and nothing outside the ring drawn. Two
+    one-pixel AWTK strokes left the arcs stepped and uneven at 6x (the user, 2026-11-16)."""
+    header = (pathlib.Path(__file__).parents[2]/'patch'/'ui_kit.h').read_text()
+    assert re.search(r'#define CTA_RING_W 2\b', header) and (art.CTA_RING_H, art.CTA_RING_W) == (38 + 2 * (3 + 2), 2)
+    w, h, at = pixels(art.cta_ring_end(right, 0xffffff))
+    assert (w, h) == (24, 48)
+    def alpha(x, y):  # the left end's frame
+        return at(w - 1 - x if right else x, y)[3]
+    assert [alpha(23, y) for y in (0, 1, 2, 45, 46, 47)] == [255, 255, 0, 0, 255, 255]
+    for y in range(h):
+        for x in range(w):
+            d = math.hypot(x + .5 - 24, y + .5 - 24)
+            if d > 24 + .75 or d < 22 - .75:
+                assert alpha(x, y) == 0, (x, y)  # wholly outside the ring
+            elif 22 + .75 < d < 24 - .75:
+                assert alpha(x, y) == 255, (x, y)  # wholly inside it
+    assert len({alpha(x, y) for y in range(h) for x in range(w)}) > 20  # graded edges, not steps

@@ -1,6 +1,8 @@
 """patch/tilt.c, tug to tilt: the selection bar's lean from the wheel's part of a tick (wheel_part), its spring back
 once the finger lifts, the clip it widens to paint past its list's edges, its stop at its window's top, and its hold
-against a list's end (tilt_end) while the finger turns on past it."""
+against a list's end (tilt_end) while the finger turns on past it. And the press (docs/internals.md#row-press): the bar
+raised at rest, sunk by Centre's press with its blue brightened, sprung back with one overshoot on the release, and
+under Reduce Motion the blue alone."""
 import ctypes as C
 
 import pytest
@@ -10,6 +12,8 @@ from conftest import O
 W_Y, W_PARENT, CANVAS_Y = O['W_Y'], O['W_PARENT'], O['CANVAS_Y']
 UNITS = 160  # the wheel's travel per tick, whatever Wheel Sensitivity sets: wheel_part is a share of it
 LIFT, GROW, SPRING_MS, MARGIN = 3, 35, 220, 12  # tilt.c's TILT_LIFT, TILT_GROW, TILT_SPRING_MS, TILT_MARGIN
+FOCUS = 20  # tilt.c's PRESS_FOCUS less 1000: the bar's rest lift, thousandths
+REST = (16 - 343 * FOCUS // 1000 // 2, 40, 343 + 343 * FOCUS // 1000, 32)  # a 343 x 32 bar at 16, 40, lifted
 
 
 class Rect(C.Structure):
@@ -82,7 +86,9 @@ def test_a_tug_leans_the_bar_toward_the_next_row_by_its_eased_share(fw):
     bar.turn(.5)
     assert bar.state.p == 128
     e = ease(128)
-    gw, gh = 343 * GROW * e // 256000, 32 * GROW * e // 256000
+    grow = FOCUS + GROW * e // 256  # the lean grows the lifted bar
+    gw, gh = 343 * grow // 1000, 32 * grow // 1000
+    assert rest == REST
     assert bar.paint() == (16 - gw // 2, 40 + LIFT * e // 256 - gh // 2, 343 + gw, 32 + gh) != rest
     assert fw.calls('widget_invalidate_force')  # its box painted again as the lean changed
 
@@ -103,7 +109,7 @@ def test_a_lift_springs_the_bar_back_to_rest(fw):
     assert bar.lift() == full  # the spring starts from the lean shown
     assert 0 < bar.poll(SPRING_MS // 2) < full // 4  # cubic: most of the way back by half its time
     assert bar.poll(SPRING_MS // 2) == 0
-    assert bar.paint() == (16, 40, 343, 32)
+    assert bar.paint() == REST
 
 
 def test_a_tick_at_a_lists_end_holds_the_lean_full_while_the_finger_turns_on(fw):
@@ -208,3 +214,230 @@ def test_under_reduce_motion_the_bar_steps_without_leaning(fw):
     rest = bar.paint()
     bar.turn(.5)
     assert bar.state.p == 0 and bar.paint() == rest
+
+
+DOWN, DOWN_MS, SPRING, FADE_MS, RM_HOLD_MS = 965, 90, 280, 120, 80  # tilt.c's PRESS_DOWN and its timings, ms
+BLUE, PRESSED = 0x2160d8, 0x4080f0  # the OLED accent and its pressed step (PRESS_BLUE)
+
+
+def cubic_out(t):
+    return 1000 - (1000 - t) ** 3 // 1000000
+
+
+def sized(scale):
+    """A 343 x 32 bar at 16, 40 at scale thousandths, as tilt_bar sizes it (C's division: toward 0)."""
+    gw, gh = int(343 * (scale - 1000) / 1000), int(32 * (scale - 1000) / 1000)
+    return (16 - int(gw / 2), 40 - int(gh / 2), 343 + gw, 32 + gh)
+
+
+def mixed(a, b, j):
+    """theme_engine.c's mix: a to b by j thousandths, per channel."""
+    return sum(((a >> s & 255) * (1000 - j) + (b >> s & 255) * j) // 1000 << s for s in (0, 8, 16))
+
+
+class Press(Bar):
+    def __init__(self, fw, **kw):
+        super().__init__(fw, **kw)
+        self.press_fn = fw.fn('tilt_press', None, C.c_int)
+        self.tone_fn = fw.fn('tilt_tone', C.c_uint, C.c_uint)
+
+    def press(self, down=1, after=0):
+        self.now += after
+        self.press_fn(down)
+        self.poll()
+
+    def tone(self):
+        return self.tone_fn(BLUE)
+
+
+def test_centre_down_sinks_the_bar_over_90_ms_cubic_out_and_brightens_its_blue(fw):
+    bar = Press(fw)
+    assert bar.paint() == REST and bar.tone() == BLUE
+    bar.press()
+    assert bar.paint() == REST  # its first frame
+    half = cubic_out(500)
+    bar.poll(DOWN_MS // 2)
+    assert bar.paint() == sized(1020 - 55 * half // 1000) and bar.tone() == mixed(BLUE, PRESSED, half)
+    bar.poll(DOWN_MS // 2)
+    assert bar.paint() == sized(DOWN) == (22, 40, 331, 31) and bar.tone() == PRESSED
+    bar.poll(500)  # held: it stays down
+    assert bar.paint() == sized(DOWN) and bar.tone() == PRESSED
+
+
+def test_the_release_springs_back_past_rest_once_and_settles_in_280_ms(fw):
+    bar = Press(fw)
+    bar.paint()
+    bar.press(after=0)
+    bar.poll(200)
+    bar.press(0)
+    widths = []
+    for _ in range(SPRING // 4):
+        widths.append(bar.paint()[2])
+        bar.poll(4)
+    rest = REST[2]
+    assert widths[0] == 331 and max(widths) == rest + 1  # the overshoot, about +3 thousandths
+    over = [w > rest for w in widths]
+    runs = sum(1 for a, b in zip([False] + over, over) if b and not a)
+    assert runs == 1  # one overshoot, no second
+    assert widths.index(max(widths)) * 4 < SPRING // 2 + 40  # it peaks early, as the page starts to open
+    assert bar.paint() == REST
+
+
+def test_the_blue_fades_back_over_120_ms_after_the_release(fw):
+    bar = Press(fw)
+    bar.paint()
+    bar.press()
+    bar.poll(DOWN_MS)
+    bar.press(0)
+    assert bar.tone() == PRESSED
+    bar.poll(FADE_MS // 2)
+    assert bar.tone() == mixed(BLUE, PRESSED, 500)
+    bar.poll(FADE_MS // 2)
+    assert bar.tone() == BLUE
+
+
+def test_a_release_mid_press_springs_from_where_the_bar_got_to(fw):
+    bar = Press(fw)
+    bar.paint()
+    bar.press()
+    bar.poll(DOWN_MS // 3)
+    got = bar.paint()
+    bar.press(0)
+    assert bar.paint() == got and REST[2] > got[2] > 331
+
+
+def test_a_press_wins_over_the_lean(fw):
+    bar = Press(fw)
+    bar.paint()
+    bar.turn(.5)
+    assert bar.state.p == 128
+    bar.press()
+    assert bar.state.p == 0
+    bar.turn(.7)  # the finger still turning: no lean while the press runs
+    assert bar.state.p == 0 and bar.paint() == REST
+
+
+def test_the_press_repaints_from_the_ui_loop_not_from_its_paint(fw):
+    """tilt_bar paints only; tilt_poll, each UI loop pass, asks for the bar's box again while the press changes
+    (a paint that invalidated would schedule its own next paint: the loop ui_kit.h's timer exists to prevent)."""
+    bar = Press(fw)
+    bar.paint()
+    before = len(fw.calls('widget_invalidate_force'))
+    bar.paint()
+    bar.paint()
+    assert len(fw.calls('widget_invalidate_force')) == before
+    bar.press_fn(1)
+    bar.poll(10)
+    asks = fw.calls('widget_invalidate_force')[before:]
+    assert asks and all(a[0] == C.addressof(bar.win) and a[1] for _, a in asks)  # the window, with a box
+    bar.paint()
+    n = len(fw.calls('widget_invalidate_force'))
+    bar.poll(0)  # nothing new to show since that paint: no ask
+    assert len(fw.calls('widget_invalidate_force')) == n
+    assert fw.calls('timer_add')  # the shared Motion timer runs the frames
+
+
+def test_a_repeat_of_the_press_changes_nothing(fw):
+    bar = Press(fw)
+    bar.paint()
+    bar.press()
+    bar.poll(DOWN_MS)
+    bar.press()  # Centre's repeat while held
+    assert bar.paint() == sized(DOWN)
+
+
+def test_no_press_on_a_bar_whose_window_is_not_on_top(fw):
+    bar = Press(fw)
+    bar.paint()
+    other = C.create_string_buffer(0x100)
+    fw.mock('window_manager_get_top_window', lambda *_: C.addressof(other))
+    bar.press()
+    bar.now += DOWN_MS
+    assert bar.paint() == REST and bar.tone() == BLUE
+
+
+def test_a_press_whose_window_leaves_the_top_ends_there(fw):
+    """A hold that opens a page: AWTK drops its release; the list is not found pressed on the way back."""
+    bar = Press(fw)
+    bar.paint()
+    bar.press()
+    bar.poll(DOWN_MS)
+    other = C.create_string_buffer(0x100)
+    fw.mock('window_manager_get_top_window', lambda *_: C.addressof(other))
+    bar.poll(500)
+    fw.mock('window_manager_get_top_window', lambda *_: C.addressof(bar.win))
+    assert bar.paint() == REST and bar.tone() == BLUE
+
+
+def test_under_reduce_motion_a_press_only_brightens_the_blue(fw):
+    """Reduce Motion: no rest lift, no scale, no shadow; the blue steps up for the press and down 80 ms after the
+    release."""
+    from test_nav_painters import theme
+    theme(fw, REDUCEMOTION=b'1')
+    bar = Press(fw)
+    flat = (16, 40, 343, 32)
+    rings = len(fw.calls('canvas_fill_rounded_rect'))
+    assert bar.paint() == flat and len(fw.calls('canvas_fill_rounded_rect')) == rings  # no shadow
+    bar.press()
+    assert bar.paint() == flat and bar.tone() == PRESSED  # at once
+    bar.poll(DOWN_MS)
+    assert bar.paint() == flat and len(fw.calls('canvas_fill_rounded_rect')) == rings
+    bar.press(0)
+    bar.poll(RM_HOLD_MS - 1)
+    assert bar.paint() == flat and bar.tone() == PRESSED
+    bar.poll(1)
+    assert bar.tone() == BLUE
+
+
+def test_the_rest_lift_casts_a_shadow_that_the_press_pulls_in(fw):
+    bar = Press(fw)
+    alphas = []
+    fw.mock('canvas_fill_rounded_rect',  # the colour is read in the call: it lives on fill_box's stack
+            lambda canvas, r, _, color, *__: alphas.append(C.c_uint.from_address(color).value >> 24))
+
+    def rings():
+        alphas.clear()
+        bar.paint()
+        return list(alphas)
+    rest = rings()
+    assert len(rest) == 3 and all(rest)  # TILT_SHADOW's rings
+    bar.press()
+    bar.poll(DOWN_MS)
+    down = rings()
+    assert len(down) == 3 and all(d < r for d, r in zip(down, rest))  # fainter: pulled in to a quarter
+
+
+def test_a_bar_in_no_window_paints_at_rest(fw):
+    """A list not under the window manager (a page being built or torn down) has no window: the rest lift sizes its
+    bar without the window's top to keep it under."""
+    bar = Press(fw)
+    C.c_void_p.from_buffer(bar.list, W_PARENT).value = None
+    assert bar.paint() == REST
+
+
+def test_everything_the_press_draws_stays_inside_the_box_it_repaints(fw):
+    """tilt.box (the bar's box and TILT_MARGIN round it) is what tilt_poll invalidates: the bar and its shadow rings,
+    at rest, at the bottom of a press, through the spring's overshoot and under a full lean, never paint past it, or
+    a move would leave a stale slice of them behind."""
+    bar = Press(fw)  # the list at its window's origin: the list's coordinates are the box's
+    rings = []
+    fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: rings.append(tuple((C.c_int * 4).from_address(r))))
+
+    def inside():
+        rings.clear()
+        drawn = [bar.paint()] + rings
+        b = bar.state.box
+        return all(b.x <= x and b.y <= y and x + w <= b.x + b.w and y + h <= b.y + b.h for x, y, w, h in drawn), drawn
+    assert inside()[0]  # at rest, raised with its shadow
+    bar.press()
+    bar.poll(DOWN_MS)
+    assert inside()[0]  # pressed
+    bar.press(0)
+    for _ in range(SPRING // 10):  # the spring, its overshoot included
+        ok, drawn = inside()
+        assert ok, drawn
+        bar.poll(10)
+    bar.poll(SPRING)
+    bar.turn(.99)  # a full lean: the growth, the lift and the deepest shadow
+    ok, drawn = inside()
+    assert ok, drawn

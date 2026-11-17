@@ -5,19 +5,28 @@
  * sits beside the leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title
  * gives way. The battery is stock's view_battery, laid out by the bar's right group and painted by
  * navigation.c paint_battery; every other slot is painted here, from the bar's background
- * (ringnav_paint_bg), so Home in Split inks them by contrast with the rest (coverflow.c home_ink):
- * slots keep INK_GAP columns of ground between them, and the animated ones repaint only their own
- * box. */
+ * (ringnav_paint_bg), so Home in Split inks them with the clock over its art (coverflow.c home_ink,
+ * one ink for the row). Every glyph is the clock's digits' height, 11 px on rows 17 to 27 (cy 23),
+ * with SR_GAP of ground between two (docs/oled-design.md#status-row); the animated ones repaint
+ * only their own box. */
 #include "navigation.h"
 
 #define SR_FRAME_MS 125 /* the level bars and the sync arrows: 8 frames a second */
 #define SR_FRAMES 10    /* the bars' loop, 1.25 s */
 #define SR_SPIN 8       /* the arrows' frames, tools/art.py STATUS_SPIN: a half turn a second */
-#define SR_BARS_W 10    /* three 2 px bars, 4 px apart */
+#define SR_BARS_W 10    /* three 2 px bars, 4 px apart; paused, the pause in the same box */
 #define SR_BAR_W 2
 #define SR_BAR_PITCH 4
-#define SR_BAR_DROP 6  /* the bars stand this far below the row's centre */
-#define SR_GLYPH 14    /* tools/art.py STATUS_PX */
+#define SR_BAR_DROP 5   /* the bars stand on the row's centre's row + this, the digits' baseline */
+#define SR_PAUSE_W 3.0f /* the pause's bars, SR_PAUSE_AT and + SR_PAUSE_PITCH into its box */
+#define SR_PAUSE_AT 0.5f
+#define SR_PAUSE_PITCH 6.0f
+#define SR_PAUSE_R 0.9f
+#define SR_INK 11      /* every glyph's height, tools/art.py STATUS_INK */
+#define SR_GAP 6       /* the ground between two glyphs */
+#define SR_GLYPH 14    /* tools/art.py STATUS_PX: a status glyph's box's height */
+#define SR_WIFI_W 16   /* tools/art.py STATUS_WIFI_W: the fan's 15.6 px */
+#define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
 #define SR_RING_R 7.0f /* its centre line's radius */
@@ -44,16 +53,43 @@ typedef struct {
 
 static struct {
     int x[SLOT_N], w[SLOT_N]; /* the last layout, in the bar's pixels */
-    int frame, spin;          /* the bars' frame (held while paused) and the arrows' */
+    int frame, spin;          /* the bars' frame and the arrows' */
     unsigned timer, sig, nav;
     int down, down_x, down_y; /* the slot a touch went down on, + 1 */
 } sr __attribute__((section(".scratch")));
+
+#if Q2POD_DEV
+/* --dev builds only, for the emulator, which has no radio or charger: STATUS_FAKE's "wifi=N
+ * charge=1" (either, each found by its first letter, key) stands in for what the Q2 would report;
+ * -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
+#define STATUS_FAKE "/mnt/data/q2-status.fake"
+#define STATUS_FAKE_MS 500
+int status_fake(char key) {
+    static char raw[64] __attribute__((section(".scratch")));
+    static unsigned at __attribute__((section(".scratch")));
+    unsigned now = (unsigned)time_now_ms();
+    if (!at || now - at >= STATUS_FAKE_MS) {
+        at = now ? now : 1;
+        if (!state_read(STATUS_FAKE, raw, sizeof raw)) raw[0] = 0;
+    }
+    for (const char *s = raw; *s; ++s)
+        if (*s == key && (s == raw || s[-1] == ' ' || s[-1] == '\n')) {
+            while (*s && *s != '=') ++s;
+            if (!*s) return -1;
+            int v = 0, any = 0;
+            for (++s; *s >= '0' && *s <= '9'; ++s) v = v * 10 + (*s - '0'), any = 1;
+            return any ? v : -1;
+        }
+    return -1;
+}
+#endif
 
 /* Stock's status-bar Wi-Fi (img_wifi, off-screen under a status row, its image kept current by
  * systembar_showface): bar_wifi1 to bar_wifi4 while connected, as get_wifisignal's bars; 0 for
  * anything else (off, Smart Wi-Fi's radio off, not connected, bar_wifi0). No I/O. Control Center's
  * Wi-Fi circle reads it too (control_center.c cc_wifi). */
 int wifi_level(void) {
+    if (status_fake('w') >= 0) return status_fake('w');
     void *w = st.bar_wifi;
     if (!w || !widget_get_visible(w)) return 0;
     const char *s = widget_get_prop_str(w, "image", "");
@@ -74,7 +110,7 @@ static int play_shown(void) {
     int s = bar_status();
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
-static int wifi_shown(void) { return wifi_level() ? SR_GLYPH : 0; }
+static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
 static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
@@ -103,35 +139,66 @@ static int guest_relayed(void) {
     guest_field("out", out, sizeof out);
     return *out && tk_strcmp(out, "jack");
 }
+/* The linked device's glyph's width: a car's is wider than the others' 14 px box at 11 px tall */
+static int linked_w(void) {
+    return !tk_strcmp(bt_kind(bt_headset_class()), "car") ? SR_CAR_W : SR_GLYPH;
+}
 static int headset_shown(void) {
     int slot = bt_slot();
     if (slot == BT_SLOT_GUEST)
-        return SR_GLYPH + (guest_relayed() ? SR_BT_GAP + SR_RELAY + SR_BT_GAP + SR_GLYPH : 0);
+        return SR_GLYPH + (guest_relayed() ? SR_BT_GAP + SR_RELAY + SR_BT_GAP + linked_w() : 0);
     return slot == BT_SLOT_NONE      ? 0
            : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
+           : slot == BT_SLOT_CAR     ? SR_CAR_W
                                      : SR_GLYPH;
 }
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 
-/* The level bars (Up Next's, upnext.c un_level): playing, Text Primary, moving a frame a tick;
- * paused, held at their last heights in Text Secondary. */
+/* The play state, in Text Primary as every glyph: playing, the level bars (Up Next's, upnext.c
+ * un_level), 2 px wide with round ends, moving a frame a tick and standing on the digits' baseline;
+ * paused, the pause, two SR_PAUSE_W bars SR_INK tall in the bars' own box. */
 static const unsigned char bar_h[SR_FRAMES][3] = { { 7, 10, 3 }, { 9, 8, 3 },  { 11, 5, 5 },
                                                    { 11, 3, 7 }, { 9, 3, 10 }, { 7, 4, 11 },
                                                    { 5, 6, 11 }, { 3, 9, 9 },  { 3, 11, 7 },
                                                    { 5, 11, 4 } };
+/* The play state's bars at x on cy, each its left, top, width, height and corner radius: three
+ * level bars playing, the pause's two otherwise; returns how many. */
+static int play_bars(int x, int cy, float (*bar)[5]) {
+    float base = (float)(cy + SR_BAR_DROP);
+    if (bar_status() != 2) {
+        for (int i = 0; i < 2; ++i) {
+            float *b = bar[i];
+            b[0] = (float)x + SR_PAUSE_AT + (float)i * SR_PAUSE_PITCH, b[1] = base - SR_INK;
+            b[2] = SR_PAUSE_W, b[3] = SR_INK, b[4] = SR_PAUSE_R;
+        }
+        return 2;
+    }
+    for (int i = 0; i < 3; ++i) {
+        float *b = bar[i], h = (float)bar_h[sr.frame % SR_FRAMES][i];
+        b[0] = (float)(x + i * SR_BAR_PITCH), b[1] = base - h, b[2] = SR_BAR_W, b[3] = h;
+        b[4] = SR_BAR_W / 2.0f;
+    }
+    return 3;
+}
 static void play_paint(void *bar, void *canvas, int x, int cy) {
     (void)bar;
-    int light = ipod_light(), paused = bar_status() != 2;
-    unsigned rgb = paused ? (light ? RGB_SECONDARY_L : RGB_SECONDARY) : (light ? 0 : 0xffffff);
-    for (int i = 0; i < 3; ++i) {
-        int h = bar_h[sr.frame % SR_FRAMES][i];
-        rect_t r = { x + i * SR_BAR_PITCH, cy + SR_BAR_DROP - h, SR_BAR_W, h };
-        fill_box(canvas, &r, RGBA(rgb), 1);
+    void *vg = canvas_get_vgcanvas(canvas);
+    if (!vg) return;
+    float bars[3][5];
+    int n = play_bars(x, cy, bars);
+    vgcanvas_save(vg);
+    vgcanvas_translate(vg, (float)I(canvas, CANVAS_X), (float)I(canvas, CANVAS_Y));
+    vgcanvas_set_fill_color(vg, RGBA(ipod_light() ? 0 : 0xffffff));
+    for (int i = 0; i < n; ++i) {
+        round_path(vg, bars[i][0], bars[i][1], bars[i][2], bars[i][3], bars[i][4]);
+        vgcanvas_fill(vg);
     }
+    vgcanvas_restore(vg);
 }
 
 /* A theme glyph of box px centred in a slot box w wide on cy, its top rounded up as stock's image
- * widget centres one (an odd box's half row above), so the padlock lands where its widget put it.
+ * widget centres one (an odd box's half row above), so the padlock lands where its widget put it,
+ * and a SR_GLYPH box's ink (tools/art.py STATUS_TOP) on the digits' rows.
  */
 static void glyph(void *bar, void *canvas, const char *stem, int x, int w, int cy, int px) {
     char name[40];
@@ -139,8 +206,17 @@ static void glyph(void *bar, void *canvas, const char *stem, int x, int w, int c
     paint_art(bar, canvas, theme_art(name), x + (w - px) / 2, cy - (px + 1) / 2);
 }
 
-/* Wi-Fi: 1 to 3 lit arcs by the bars (1 one, 2 two, 3 and 4 all three), the rest dim
- * (tools/art.py status_wifi); wifi-x connected with no internet. */
+/* A status glyph's art (tools/art.py STATUS_FIT, the fan), SR_GLYPH tall and as wide as its ink, at
+ * x on cy: its ink on the digits' rows. */
+static void status_art(void *bar, void *canvas, const char *stem, int x, int cy) {
+    char name[40];
+    tk_snprintf(name, sizeof name, "%s_%c", stem, ipod_light() ? 'l' : 'd');
+    paint_art(bar, canvas, theme_art(name), x, cy - (SR_GLYPH + 1) / 2);
+}
+
+/* Wi-Fi: iOS's fan, 1 to 3 of its dot and two bands lit by the bars (1 one, 2 two, 3 and 4 all
+ * three), the rest dim (tools/art.py status_wifi); wifi-x connected with no internet. Both are
+ * SR_WIFI_W x SR_GLYPH. */
 static void wifi_paint(void *bar, void *canvas, int x, int cy) {
     int level = wifi_level();
     char stem[24];
@@ -148,7 +224,7 @@ static void wifi_paint(void *bar, void *canvas, int x, int cy) {
         tk_snprintf(stem, sizeof stem, "status_wifi_x");
     else
         tk_snprintf(stem, sizeof stem, "status_wifi_%d", level > 3 ? 3 : level);
-    glyph(bar, canvas, stem, x, SR_GLYPH, cy, SR_GLYPH);
+    status_art(bar, canvas, stem, x, cy);
 }
 
 /* A card app's sync: checking, the arrows turning in Text Secondary; downloading, a ring that fills
@@ -197,7 +273,7 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
         glyph(bar, canvas, "status_bt", x, SR_GLYPH, cy, SR_GLYPH);
         break;
     case BT_SLOT_CAR:
-        glyph(bar, canvas, "status_car", x, SR_GLYPH, cy, SR_GLYPH);
+        status_art(bar, canvas, "status_car", x, cy);
         break;
     case BT_SLOT_GUEST: /* the guest's phone in the accent, then › and where it plays */
         paint_art(bar, canvas, theme_art("status_guest"), x, cy - (SR_GLYPH + 1) / 2);
@@ -205,10 +281,8 @@ static void headset_paint(void *bar, void *canvas, int x, int cy) {
             int at = x + SR_GLYPH + SR_BT_GAP;
             glyph(bar, canvas, "status_relay", at, SR_RELAY, cy, SR_RELAY);
             at += SR_RELAY + SR_BT_GAP;
-            glyph(bar, canvas,
-                  !tk_strcmp(bt_kind(bt_headset_class()), "car") ? "status_car"
-                                                                 : "status_headphones",
-                  at, SR_GLYPH, cy, SR_GLYPH);
+            status_art(bar, canvas, linked_w() == SR_CAR_W ? "status_car" : "status_headphones", at,
+                       cy);
         }
         break;
     case BT_SLOT_HEADSET: {
@@ -226,16 +300,16 @@ static void lock_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "keylock", x, SR_LOCK, cy, SR_LOCK);
 }
 
-/* Right to left; the battery's own row is stock's widget (shown is never called for it). The gaps
- * are mock_status_bars.py's, mock_wifi_status.py's and mock_sync_status.py's: each at least INK_GAP
- * (coverflow.c) columns of ground, so Split inks every glyph by itself. */
+/* Right to left; the battery's own row is stock's widget (shown is never called for it). Every gap
+ * is SR_GAP, iOS's (mock_status_icons.py): more than coverflow.c's INK_GAP, so Split still tells a
+ * status colour's glyph from the rest. */
 static const status_slot_t slots[SLOT_N] = {
     [SLOT_BATTERY] = { 0, 0, 0 },
-    [SLOT_PLAY] = { play_shown, 4, play_paint },
-    [SLOT_WIFI] = { wifi_shown, 5, wifi_paint },
-    [SLOT_SYNC] = { sync_shown, 4, sync_paint },
-    [SLOT_HEADSET] = { headset_shown, 5, headset_paint },
-    [SLOT_LOCK] = { lock_shown, 5, lock_paint },
+    [SLOT_PLAY] = { play_shown, SR_GAP, play_paint },
+    [SLOT_WIFI] = { wifi_shown, SR_GAP, wifi_paint },
+    [SLOT_SYNC] = { sync_shown, SR_GAP, sync_paint },
+    [SLOT_HEADSET] = { headset_shown, SR_GAP, headset_paint },
+    [SLOT_LOCK] = { lock_shown, SR_GAP, lock_paint },
 };
 
 /* The slots laid out from the battery's left, in the bar's pixels (its right group is a child of
