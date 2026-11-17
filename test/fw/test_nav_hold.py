@@ -2669,6 +2669,16 @@ def test_only_a_listen_the_card_takes_counts_for_an_upload(fw, player, recs, tak
     assert fw.var('scrobble_ui__sa', C.c_uint).value == takes  # pending, the struct's first field
 
 
+def test_reads_3_s_apart_still_count_as_heard(player, recs):
+    """Dark, stock's status cache is up to DARK_POLL_US old, so two reads a second apart can be 3 s apart."""
+    player.play([recs(path='/mnt/mmc/Music/a.flac', artist='A')], total=200)
+    for s in range(0, 103, 3):  # heard from the second poll (3 s) on: 99 s
+        player.poll(s)
+    assert PLAYS_FILE not in player.card.files
+    player.poll(105)
+    assert plays(player.card.files[PLAYS_FILE]) == [(key_of('/mnt/mmc/Music/a.flac'), 1)]
+
+
 def test_a_seek_is_not_heard(player, recs):
     player.play([recs(path='/mnt/mmc/Music/a.flac', artist='A')], total=200)
     player.poll(0), player.poll(1), player.poll(150), player.poll(151)

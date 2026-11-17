@@ -15,7 +15,7 @@ def rockbox(card):
 m,names=rockbox(True)
 texts={c[0]:m.text(c[1]) for c in m.calls if c[0] in ('fopen','system')}
 assert texts=={'fopen':'/tmp/q2pod-rockbox',
-               'system':'killall checkappprocess.sh; killall -9 hciplayer; kill -9 $(cat /tmp/q2-librespot); '
+               'system':'killall -9 hciplayer; kill -9 $(cat /tmp/q2-librespot); '
                          'killall -9 librespot aplay; rm -f /tmp/q2-librespot /tmp/q2-librespot.state /tmp/q2-librespot.out /tmp/q2-librespot.download; sync; kill -9 $PPID'}
 assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop','system')]==['fclose','save_memoryplay_info','player_stop','system']; passed()
 m,names=rockbox(False)

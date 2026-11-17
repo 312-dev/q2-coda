@@ -26,6 +26,27 @@ int rockbox_available(void) { return bin_available(ROCKBOX_BIN); }
 /* The Groovebox card app (a game with the sound, addon.c), Home's Shortcut when it is installed. */
 int groovebox_available(void) { return bin_available(GROOVEBOX_BIN); }
 
+/* The two as the status row asks on every paint (bar_sync, shortcut): looked at again once a
+ * library scan has rewritten the library (library_gen), at once after the Shelf installs or
+ * removes an app (card_bins_changed), and else CARD_RECHECK_MS after the last look, which a card's
+ * mount or removal waits out as logo_poll's edge does. Stat'ing both on each paint cost Now
+ * Playing 150 syscalls a second. ponytail: a binary copied on some other way shows on Home up to
+ * CARD_RECHECK_MS late. */
+static struct {
+    unsigned at, gen;
+    unsigned char read, rockbox, groovebox;
+} cb __attribute__((section(".scratch")));
+void card_bins_changed(void) { cb.read = 0; }
+static void card_bins(void) {
+    unsigned now = time_now_ms();
+    if (cb.read && cb.gen == library_gen && now - cb.at < CARD_RECHECK_MS) return;
+    cb.read = 1, cb.gen = library_gen, cb.at = now;
+    cb.rockbox = (unsigned char)rockbox_available();
+    cb.groovebox = (unsigned char)groovebox_available();
+}
+int rockbox_seen(void) { return card_bins(), cb.rockbox; }
+int groovebox_seen(void) { return card_bins(), cb.groovebox; }
+
 /* Light Mode (docs/ipod.md#light-mode): a neutral colour, its channels within LIGHT_SPREAD, flipped
  * per channel from black to the light half's paper and white to its ink (LIGHT_PAPER and LIGHT_INK
  * unless the scheme sets them); any other hue, and the alpha byte, as they are. Either byte order
@@ -250,19 +271,19 @@ int np_time_toggle(void) {
     return 1;
 }
 /* Shortcut with no key (or a value this build does not know, such as an old build's reading of a
- * newer one) is Rockbox while the card has it, else Favorites: asked each time, as the card may
- * mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the carousel's card,
- * which cannot leave, takes the default (shortcut_target). */
+ * newer one) is Rockbox while the card has it, else Favorites: asked each time (rockbox_seen), as
+ * the card may mount after the first read. SHORTCUT_NONE is read as it is, for the picker; the
+ * carousel's card, which cannot leave, takes the default (shortcut_target). */
 int shortcut(void) {
     accent();
-    return st.shortcut < SETTING_N_SHORTCUT ? st.shortcut : rockbox_available() ? 0 : 3;
+    return st.shortcut < SETTING_N_SHORTCUT ? st.shortcut : rockbox_seen() ? 0 : 3;
 }
 /* What the Shortcut opens and names: None's card, in Carousel, is the default's.
  * ponytail: Carousel keeps the card (home_card clones in stock's slide_menu, which lays out hidden
  * cards too); a card left out would need re-adding with the setting. */
 static int shortcut_target(void) {
     int s = shortcut();
-    return s == SHORTCUT_NONE ? (rockbox_available() ? 0 : 3) : s;
+    return s == SHORTCUT_NONE ? (rockbox_seen() ? 0 : 3) : s;
 }
 /* Home's layout, HOME's Split, Full or Carousel; Split shows as Full while Edit Home is open
  * (library_edit.c), the editor's hint and grips across the screen. */
@@ -277,8 +298,8 @@ int ipod_light(void) {
 /* The card's Rockbox and Groovebox as the carousel's Shortcut card was last named for
  * (coverflow_home_layout): the bar's pass lays it out again when either comes or goes. */
 void ipod_shortcut_seen(void) {
-    st.home_rockbox = rockbox_available();
-    st.home_groovebox = groovebox_available();
+    st.home_rockbox = rockbox_seen();
+    st.home_groovebox = groovebox_seen();
 }
 const char *ipod_home_shortcut(void) {
     static const char *const names[] = { "Rockbox",

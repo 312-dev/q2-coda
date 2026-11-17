@@ -383,6 +383,18 @@ void mdns_poll(uint32_t now) {
     }
 }
 
+uint32_t mdns_due(uint32_t now) {
+    if (!md.on) return 0xffffffffu;
+    uint32_t due = md.checked + MDNS_CHECK_MS - now;
+    if (due > MDNS_CHECK_MS) due = 0; /* already due */
+    if (md.fd >= 0 && md.announces) {
+        uint32_t a = md.next_announce - now;
+        if (a >= 0x80000000u) a = 0;
+        if (a < due) due = a;
+    }
+    return due;
+}
+
 void mdns_handle(void) {
     uint8_t pkt[MDNS_PKT];
     struct sockaddr_in from;

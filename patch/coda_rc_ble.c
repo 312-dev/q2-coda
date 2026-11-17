@@ -29,6 +29,7 @@ int dbus_connection_register_object_path(DBusConnection *, const char *, const D
 int dbus_connection_add_filter(DBusConnection *, dbus_msg_fn, void *, void (*)(void *));
 int dbus_connection_read_write(DBusConnection *, int);
 int dbus_connection_dispatch(DBusConnection *);
+int dbus_connection_get_dispatch_status(DBusConnection *);
 int dbus_connection_send(DBusConnection *, DBusMessage *, uint32_t *);
 void dbus_connection_flush(DBusConnection *);
 int dbus_connection_send_with_reply(DBusConnection *, DBusMessage *, DBusPendingCall **, int);
@@ -427,6 +428,8 @@ int ble_start(void) {
 }
 
 int ble_events(void) { return POLLIN; }
+/* libdbus holds messages it read while sending (a flush reads too): the loop's next poll must not wait */
+int ble_pending(void) { return b.bus && dbus_connection_get_dispatch_status(b.bus) == DBUS_DATA_REMAINS; }
 
 void ble_handle(void) {
     if (!b.bus) return;

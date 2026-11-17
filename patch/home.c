@@ -376,23 +376,33 @@ void home_keep(int d, int k) {
  * list, the test Folders' empty page makes (feedback.c feedback_folder): stock's listing of the
  * card's root (toolsLoadDirectory, which leaves out what stock hides) holds a row. It is read again
  * only when the card comes or goes or its root changes (its mtime), never while a library scan
- * fills the listing's deque, and only with Home on top, so no Folders page holds that listing.
- * ponytail: a stat of the card's root a bar paint on Home; Folder Root's folder is not what is
- * listed (the card's root is), so a Folder Root holding nothing still shows Folders. */
+ * fills the listing's deque, and only with Home on top, so no Folders page holds that listing. The
+ * card and its root are looked at on a bar paint on Home at most every CARD_RECHECK_MS, and at once
+ * after a library scan (library_gen), not on every paint. ponytail: a card's mount, removal or new
+ * root folder shows on Home up to CARD_RECHECK_MS late; Folder Root's folder is not what is listed
+ * (the card's root is), so a Folder Root holding nothing still shows Folders. */
 #define HOME_CARD "/mnt/mmc"
+/* The card's root as a key: 1 with no card, else its device and mtime hashed, never 0 or 1. */
+static unsigned home_card_key(void) {
+    unsigned s[36] = { 0 };
+    if (access("/tmp/mmc_add", 0) || __xstat(3, HOME_CARD, s)) return 1;
+    return hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&s[0], 4),
+                      (const unsigned char *)&s[16], 8) |
+           2;
+}
 static struct {
     unsigned key; /* the root's identity at the last listing, 0: none yet */
     unsigned char folders;
+    unsigned seen, at, gen; /* the key last looked at (0: never), when, and library_gen then */
 } hf __attribute__((section(".scratch")));
 int home_folders(void) {
-    unsigned s[36] = { 0 }, key = 1;
-    if (!access("/tmp/mmc_add", 0) && !__xstat(3, HOME_CARD, s))
-        key = hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&s[0], 4),
-                         (const unsigned char *)&s[16], 8) |
-              2;
-    if (key != hf.key && !library_scanning()) {
-        hf.key = key;
-        hf.folders = key != 1 && toolsLoadDirectory(HOME_CARD) > 0;
+    unsigned now = time_now_ms();
+    if (!hf.seen || hf.gen != library_gen || now - hf.at >= CARD_RECHECK_MS) {
+        hf.seen = home_card_key(), hf.at = now, hf.gen = library_gen;
+    }
+    if (hf.seen != hf.key && !library_scanning()) {
+        hf.key = hf.seen;
+        hf.folders = hf.seen != 1 && toolsLoadDirectory(HOME_CARD) > 0;
     }
     return hf.folders;
 }

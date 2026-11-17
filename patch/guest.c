@@ -3,7 +3,7 @@
  * - starts it (at Bluetooth on when Guest Play is on, and for a command when it is not running) and
  *   passes the UI's commands to its FIFO (guest_send), keeping a few while it starts;
  * - reads its state file for the UI (guest_seq, guest_field, guest_active), at most every
- *   GUEST_READ_MS, from headset_poll;
+ *   GUEST_READ_MS, from headset_poll, and only while the daemon may be running (guest_poll);
  * - stops the owner's music when a guest starts and restarts it when the guest leaves, as the
  *   settings say, then sends the owner's song to the car again;
  * - hands the car's buttons to the guest's phone while one plays (guest_key, from headset_command);
@@ -23,6 +23,7 @@
 #define GUEST_CONFIG "/mnt/data/q2-guest/config"
 #define GUEST_READ_MS 250
 #define GUEST_START_MS 3000 /* a daemon just started is not started again before this */
+#define GUEST_UP_MS 30000   /* a daemon just started has this long to write its first state */
 #define GUEST_LINE 208      /* a command, its newline and NUL (the contract's 200 bytes) */
 #define GUEST_QUEUE 4       /* commands kept while the daemon starts */
 
@@ -37,7 +38,8 @@ static struct {
     char raw[2048];               /* the state file behind a '\n', as field() reads it */
     unsigned read_at, started_at; /* time_now_ms, as headset.c times its polls */
     unsigned seq;
-    volatile int on; /* Guest Play is on: read by guest_a2dp on libbtctl's thread */
+    int looked, seen; /* the state file was looked for; it was there at the last look */
+    volatile int on;  /* Guest Play is on: read by guest_a2dp on libbtctl's thread */
     int active, stopped, was_playing;
     unsigned netdeny_seq;
     char held[12]; /* the receiver held paused until allowed */
@@ -150,13 +152,21 @@ static void owner_resume(void) {
     sendBtHeadsetPlayStatus();
 }
 
+/* The state file is looked for only while the daemon may be running: at the first pass (one an
+ * earlier demo started outlives it), for GUEST_UP_MS from each start, while commands wait for it,
+ * and for as long as the last look found the file, which q2-guest removes as it ends. With Guest
+ * Play off nothing asks for it, where a failed open came 4 times a second. */
 void guest_poll(void) {
     unsigned now = time_now_ms();
     if (now - gp.read_at < GUEST_READ_MS) return;
+    if (gp.looked && !gp.seen && !gp.queued &&
+        !(gp.started_at && now - gp.started_at < GUEST_UP_MS))
+        return;
     gp.read_at = now;
+    gp.looked = 1;
     char state[12] = "";
-    if (state_read(GUEST_STATE, gp.raw,
-                   sizeof gp.raw)) { /* none: the daemon isn't running, Guest Play off */
+    gp.seen = state_read(GUEST_STATE, gp.raw, sizeof gp.raw) != 0;
+    if (gp.seen) { /* none: the daemon isn't running, Guest Play off */
         gp.seq = (unsigned)number(gp.raw, "seq");
         field(gp.raw, "state", state, sizeof state);
     } else

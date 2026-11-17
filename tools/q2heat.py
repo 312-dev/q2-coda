@@ -106,7 +106,8 @@ def top_during(samples, a, b):
     return sorted(((n, t / max(len(span), 1)) for n, t in total.items()), key=lambda x: -x[1])
 
 
-def report(samples, notes, out=sys.stdout):
+def report(samples, notes, out=None):
+    out = out or sys.stdout  # looked up per call: a redirected stdout is the one written
     for n in notes:
         if n.text.startswith(('BOOT', 'POWEROFF', 'GAP', 'NOANSWER', 'SENSOR', 'WARN', 'LOADWARN', 'POWER', 'CARD')):
             print(f'{n.when:%Y-%m-%d %H:%M:%S}  ** {n.text}', file=out)
