@@ -436,7 +436,7 @@ def test_stock_s_thumbnails_take_the_list_art_s_corners(fw, st, bitmaps, name):
     assert alpha[r][r] == 255 and alpha[0][r] == 255 and alpha[r][0] == 255  # past the arc
     assert alpha[83][83] == 255 and all(row == row[::-1] for row in alpha) and alpha == alpha[::-1]
     assert any(0 < a < 255 for a in alpha[0][:r])  # an antialiased step on the arc
-    assert alpha[r - 1][0] < 255  # the arc reaches the radius down the side
+    assert alpha[r - 2][0] < 255 == alpha[r - 1][0]  # the arc runs down the side to the radius, meeting it within a pixel
     assert all(alpha[y][:r] == sorted(alpha[y][:r]) for y in range(r))  # rising inwards along each row
     assert bm.flags & OPAQUE == 0 and {p[:3] for row in bm.rows() for p in row} == {(255, 255, 255)}
 

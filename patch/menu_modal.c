@@ -653,26 +653,39 @@ void modal_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* r (canvas coordinates) rounded by R on the sheet: its corners the material under them; on a
- * canvas not the screen's, or before the material is made, the flat sheet's colour. */
+/* The screen pixel d moved towards the material's m by a of 255, per channel. */
+static unsigned toward(unsigned d, unsigned m, unsigned a) {
+    unsigned out = 0;
+    for (int s = 0; s < 32; s += 8) {
+        unsigned p = d >> s & 255, q = m >> s & 255;
+        out |= (p * (255 - a) + q * a + 127) / 255 << s;
+    }
+    return out;
+}
+
+/* r (canvas coordinates) rounded by R on the sheet, anti-aliased: each corner pixel the material
+ * under it by the share the arc leaves (corner_cover.c); on a canvas not the screen's, or before
+ * the material is made, the flat sheet's colour (ar_corners). */
 void modal_corners(void *canvas, const rect_t *r, int R) {
     unsigned *fb = sheet_fb(canvas);
-    if (!fb || !fr.buf) {
+    const unsigned char *cover = corner_cover(R);
+    if (!fb || !fr.buf || !cover) {
         ar_corners(canvas, r, R, flip_if(ipod_light(), MODAL_FILL));
         return;
     }
     int c[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
     sheet_clip(canvas, c);
     for (int i = 0; i < R; ++i) {
-        int n = round_inset(R, i, r->h);
-        for (int b = 0; b < 2 && n; ++b) {
+        for (int b = 0; b < 2; ++b) {
             int y = oy + r->y + (b ? r->h - 1 - i : i);
             if (y < c[1] || y >= c[3] || y < SH_TOP) continue;
-            for (int k = 0; k < n; ++k)
+            for (int k = 0; k < R && cover[i * R + k] < 255; ++k)
                 for (int side = 0; side < 2; ++side) {
                     int x = ox + (side ? r->x + r->w - 1 - k : r->x + k);
                     if (x >= c[0] && x < c[2])
-                        fb[y * SH_W + x] = fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x];
+                        fb[y * SH_W + x] =
+                            toward(fb[y * SH_W + x], fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x],
+                                   255u - cover[i * R + k]);
                 }
         }
     }

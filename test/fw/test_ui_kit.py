@@ -125,8 +125,8 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
 @pytest.mark.parametrize('light', [0, 1])
 def test_the_focus_ring_is_two_antialiased_pills_concentric_with_the_capsule(fw, st, light):
     """The user's device (2026-11-16, Car Remote's Pair a Phone at 3x): the ring was aliased, its round ends dotted
-    and a flat segment over its top that did not follow the pill. It was drawn a row at a time from tools/art.py's
-    corner coverage, which has no table for its radii (24, 23), so it fell back to hard one-pixel steps. It is AWTK's
+    and a flat segment over its top that did not follow the pill. It was drawn a row at a time from the build's corner
+    coverage tables, which then held none for its radii (24, 23), so it fell back to hard one-pixel steps. It is AWTK's
     antialiased rounded rect, as the capsule's fill is: two one-pixel strokes, each a whole pill (radius half its
     height), CTA_RING_OFF (3) px out and one in from it, in Text Primary, and nothing else drawn outside the capsule."""
     from test_nav_painters import Canvas, theme

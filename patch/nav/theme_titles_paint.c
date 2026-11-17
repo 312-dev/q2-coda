@@ -815,15 +815,17 @@ static int settings_icon(const char *name) { return named_in(SETTINGS_ICON_NAMES
  * BUTTON_IMAGE*'s label) is a surface and takes the light tone, which keeps the white legible; red
  * marks on their own keep the red tone. bitmap_t: w @0, h @4, format @0xe; the 32-bit formats 1-4
  * hold r, g, b at these byte offsets. */
-/* Clamp straight alpha to the arc coverage: reusing an already rounded bitmap is harmless. */
+/* Clamp straight alpha to the arc's coverage (corner_cover.c): reusing an already rounded bitmap
+ * is harmless. */
 static void round_corners(unsigned char *px, int w, int h, int stride, int alpha) {
     /* a theme's list.art.radius is on screen, at the set's art size: the bitmap's own scale */
     int side = w < h ? w : h, art = geom(G_ART), radius = theme()->art_radius;
     int r = radius && art ? (side * radius + art / 2) / art : side * NP_ART_RADIUS / 166;
-    for (int y = 0; y < r; ++y) {
-        int out = arc_out(r, y);
-        for (int x = 0; x <= out / 16; ++x) {
-            unsigned coverage = x < out / 16 ? 0 : (unsigned)(16 - (out & 15)) * 255 / 16;
+    if (2 * r > side) r = side / 2;
+    const unsigned char *cover = corner_cover(r);
+    for (int y = 0; cover && y < r; ++y) {
+        for (int x = 0; x < r && cover[y * r + x] < 255; ++x) {
+            unsigned coverage = cover[y * r + x];
             for (int c = 0; c < 4; ++c) {
                 unsigned char *a =
                     px + (c & 1 ? h - 1 - y : y) * stride + (c & 2 ? w - 1 - x : x) * 4 + alpha;

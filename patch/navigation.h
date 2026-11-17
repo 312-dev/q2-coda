@@ -391,6 +391,8 @@ int painting_in(void *row);
 int round_inset(int R, int i, int h);
 void round_ring(void *canvas, const rect_t *r, int R, unsigned c);
 void round_row(void *canvas, const rect_t *r, int R, int i, unsigned c);
+/* nav/row_paint.c: rounds what is drawn in r into behind (0xRRGGBB, final), anti-aliased */
+void corner_mask(void *canvas, const rect_t *r, int R, unsigned behind);
 int slider_part(void *s, int w);
 const char *style_key(char *key, const char *state, const char *name);
 unsigned wide_len(const unsigned *s);

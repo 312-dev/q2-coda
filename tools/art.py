@@ -491,18 +491,13 @@ def png(w, h, rgba):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b'')
 
 
-# A coverage table per radius of the round boxes the painter draws a row at a time (navigation.c paint_round_rows): their
-# corners' pixels take the row's colour at this alpha, so they stay the scheme's.
-CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16)
+# A radius r corner's coverage table, the one patch/corner_cover.c works out at run time for any radius the payload
+# rounds (docs/internals.md#rounded-corners): the tests hold the C to this.
 def corner_cover(r):
     """A radius r corner's coverage out of 255, r rows of r pixels, the outermost first."""
     n = 16
     inside = lambda x, y: sum(math.hypot(r - x - (i + .5) / n, r - y - (j + .5) / n) <= r for i in range(n) for j in range(n))
     return bytes(round(inside(x, y) * 255 / n ** 2) for y in range(r) for x in range(r))
-def corner_table():
-    """The tables as a C initialiser, by radius."""
-    rows = (f'[{r}] = (const unsigned char[]){{ {",".join(map(str, corner_cover(r)))} }}' for r in CORNERS)
-    return '{ ' + ', '.join(rows) + ' }'
 
 
 # Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a letter, the lit key grows a bubble

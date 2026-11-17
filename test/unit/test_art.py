@@ -69,18 +69,8 @@ def test_gradient_holds_the_first_stops_colour_before_it():
     assert g(10) == g(50) == 0x204060
 
 
-def test_every_literal_corner_radius_is_in_the_table():
-    source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('**/*.c')))
-    def literal(names, text=source):
-        return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', text)}
-    assert literal('round_row', 'round_row(canvas, &track, 3, i, rest);') == {3}  # the pattern still reads a call
-    radii = literal('paint_round_rows|round_row|row_below|inset_top|round_ring')
-    assert radii <= set(art.CORNERS)  # none at all is fine: every rounded box may take its radius from a name
-    assert {r - 1 for r in literal('round_ring')} <= set(art.CORNERS)  # a ring reads its radius less one too
-
-
 def test_the_round_corners_cover_their_arcs():
-    for r in art.CORNERS:
+    for r in (2, 3, 4, 5, 9, 16, 21):  # patch/corner_cover.c makes any radius; test/fw/test_corners.py holds it to these
         cover = art.corner_cover(r)
         assert len(cover) == r * r and cover == bytes(cover[x * r + y] for y in range(r) for x in range(r))  # about its diagonal
         assert cover[0] == {2: 81, 3: 6}.get(r, 0) and cover[-1] == 255  # the small corners' outer pixels keep some cover
@@ -89,7 +79,6 @@ def test_the_round_corners_cover_their_arcs():
             for x in range(r):
                 inside = sum(math.hypot(r - x - (i + .5) / n, r - y - (j + .5) / n) <= r for i in range(n) for j in range(n))
                 assert abs(cover[y * r + x] - inside * 255 / n ** 2) <= 16, (r, x, y)
-    assert all(f'[{r}] = ' in art.corner_table() for r in art.CORNERS)
 
 
 def test_a_theme_drawing_anothers_art_shares_its_images():

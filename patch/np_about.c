@@ -367,20 +367,6 @@ void np_about_fill(void *win) {
     cap_ask();
 }
 
-/* The cover's corners rounded into the page's black: each corner row outside the arc, then its
- * edge pixel at the alpha of its uncovered part (navigation.c paint_cover's way). */
-static void ab_corners(void *canvas, int x, int y, unsigned black) {
-    for (int i = 0; i < AB_ART_R; ++i) {
-        int out = arc_out(AB_ART_R, i), n = out >> 4;
-        unsigned a = (unsigned)(out & 15) * 17;
-        for (int c = 0; c < 4; ++c) {
-            int row = c & 1 ? y + AB_ART - 1 - i : y + i, left = !(c & 2);
-            if (n) scrub_row(canvas, 0xff000000u | black, left ? x : x + AB_ART - n, row, n);
-            if (a) scrub_row(canvas, a << 24 | black, left ? x + n : x + AB_ART - n - 1, row, 1);
-        }
-    }
-}
-
 /* The grid, its screen rows less oy (the canvas's top on screen, less the scroll). */
 static void ab_draw(void *w, void *canvas, int oy) {
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), bm[64];
@@ -389,7 +375,7 @@ static void ab_draw(void *w, void *canvas, int oy) {
     if (*ab.t.art && !widget_load_image(w, ab.t.art, bm) && bm[0] && bm[1]) {
         rect_t src = { 0, 0, (int)bm[0], (int)bm[1] }, dst = { AB_ART_X, y, AB_ART, AB_ART };
         canvas_draw_image(canvas, bm, &src, &dst);
-        ab_corners(canvas, AB_ART_X, y, black);
+        corner_mask(canvas, &dst, AB_ART_R, black); /* into the page's black */
     } else {
         rect_t r = { AB_ART_X, y, AB_ART, AB_ART };
         for (int i = 0; i < AB_ART; ++i)
