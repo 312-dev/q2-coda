@@ -689,7 +689,7 @@ def test_a_dark_pass_sleeps_longer_once_nothing_plays_and_the_dac_is_off(q2):
     quiet = q2.sleeps()[-1]
     usleep(200000)
     assert playing == paused < quiet
-    assert polls()[0] == 200000 < polls()[1]  # dark and quiet, stock's pollers slow down too
+    assert polls()[:2] == [O['DARK_POLL_US']] * 2  # dark, playing or quiet, stock's status poll slows down too
     lit(q2)
     usleep(200000)
     assert polls()[-1] == 200000

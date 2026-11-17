@@ -1228,11 +1228,11 @@ def test_a_dropped_link_clears_the_state(fw):
 
 
 # The UI loop's pacing.
-def test_a_dark_and_quiet_wait_stretches_to_the_dark_poll(fw):
+def test_a_slow_dark_wait_stretches_to_the_dark_poll(fw):
     sleep = fw.fn('ringnav_dark_usleep', C.c_int, C.c_uint)
     for us in (10000, 999999, 1000000, 3000000):
         sleep(us)
-    C.c_int.in_dll(fw.lib, 'navigation__dark_quiet').value = 1
+    C.c_int.in_dll(fw.lib, 'navigation__dark_slow').value = 1
     for us in (10000, 999999, 1000000, 3000000):
         sleep(us)
     dark = O['DARK_POLL_US']
@@ -1273,9 +1273,9 @@ def test_mainscheduling_runs_every_100_ms(fw):
     assert Scheduling(fw).at(0, 50, 99, 100, 150, 200) == [True, False, False, True, False, True]
 
 
-def test_dark_and_quiet_it_runs_every_dark_poll(fw):
+def test_dark_and_slow_it_runs_every_dark_poll(fw):
     sched = Scheduling(fw)
-    C.c_int.in_dll(fw.lib, 'navigation__dark_quiet').value = 1
+    C.c_int.in_dll(fw.lib, 'navigation__dark_slow').value = 1
     poll = O['DARK_POLL_US'] // 1000
     assert sched.at(0, 100, poll - 1, poll) == [True, False, False, True]
 
@@ -1296,6 +1296,98 @@ def test_mainscheduling_at_a_zero_clock_still_paces(fw):
     sched = Scheduling(fw)
     sched.clock.now = 0
     assert sched.at(0, 50, 101) == [True, False, True]  # its stamp is 1, never 0 (a ms late)
+
+
+# Dark while playing: the player polls (mclSyncPlayerStatus' wait, ringnav_mainscheduling) slow down
+# unless something follows the position (docs/internals.md#battery).
+class DarkPlay:
+    """A dark loop pass with the local player playing at sec of total, scheduling run before it as on_wm_idle_status does."""
+    def __init__(self, fw, stock_bytes, sec=60, total=240, status=2, car=b'0'):
+        self.ab = stock_bytes(O['REPEAT_INFO'], 16)
+        self.loop = Loop(fw, stock_bytes, lit=False)
+        self.fw, self.sec, self.total, self.status = fw, sec, total, status
+        Config(fw, CARREMOTE=car)
+        fw.mock('mclGetPlayStatus', lambda *_: self.status)
+        fw.mock('player_playtime_and_length', self.position)
+        fw.mock('player_mainscheduling', lambda *_: 5)
+        self.schedule = fw.fn('ringnav_mainscheduling', C.c_int)
+        self.usleep = fw.fn('ringnav_dark_usleep', C.c_int, C.c_uint)
+
+    def position(self, sec, total, *_):
+        C.c_int.from_address(sec).value, C.c_int.from_address(total).value = self.sec, self.total
+        return 0 if self.sec >= 0 else -1
+
+    def __call__(self, after=100):
+        """A pass: whether stock's scheduling ran, and how long the status thread's 200 ms wait now sleeps."""
+        self.loop.clock.now += after
+        ran = self.schedule() == 5
+        self.loop()
+        calls = len(self.fw.calls('fw_usleep'))
+        self.usleep(200000)
+        return ran, self.fw.calls('fw_usleep')[calls][1][0]
+
+
+def test_dark_and_playing_the_status_polls_run_at_the_dark_poll(fw, stock_bytes):
+    play, poll = DarkPlay(fw, stock_bytes), O['DARK_POLL_US']
+    assert play(0) == (True, poll)  # the first dark pass: the scheduling ran before the pass slowed it
+    assert [play(100) for _ in range(9)] == [(False, poll)] * 9
+    assert play(100) == (True, poll)  # a second on
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the status thread's next wait is stock's
+    assert play(100) == (False, 200000)
+    assert play(100) == (True, 200000)  # and the scheduling's next pass
+
+
+def test_dark_the_tracks_last_seconds_keep_stocks_pace(fw, stock_bytes):
+    """mclAutoChange's Gapless preload (under 6 s from the end) and a change without Gapless see what they did lit."""
+    play, lead = DarkPlay(fw, stock_bytes, sec=200, total=240), O['DARK_END_LEAD_S']
+    play(0), play(100)
+    play.sec = 240 - lead - 1
+    assert play(100)[1] == O['DARK_POLL_US']
+    play.sec = 240 - lead
+    play(1000)
+    assert [play(100) for _ in range(3)] == [(True, 200000)] * 3
+    play.sec, play.total = 240, 240  # its end, then the next track's first seconds
+    play(100)
+    play.sec, play.total = 0, 180
+    assert play(1900) == (True, 200000)
+    play(100)
+    assert play(100)[1] == O['DARK_POLL_US']  # MAINSCHEDULING_END_MS on: slow again
+
+
+@pytest.mark.parametrize('sec, total', [(-1, 0), (30, 0)])
+def test_dark_with_no_position_or_length_to_go_by_it_keeps_stocks_pace(fw, stock_bytes, sec, total):
+    play = DarkPlay(fw, stock_bytes, sec=sec, total=total)
+    play(0)
+    assert play(100) == (True, 200000)
+
+
+def test_dark_and_paused_the_polls_slow_before_the_dac_is_off(fw, stock_bytes):
+    play = DarkPlay(fw, stock_bytes, sec=230, total=240, status=3)  # paused near the end: nothing moves
+    fw.var('fw_ctx_g_dacoff_time', C.c_int).value = 30
+    play(0)
+    assert play(100) == (False, O['DARK_POLL_US'])
+
+
+@pytest.mark.parametrize('why', ['a-b', 'car', 'airplay', 'receiver'])
+def test_dark_what_follows_the_position_keeps_stocks_pace(fw, stock_bytes, why):
+    play = DarkPlay(fw, stock_bytes, car=b'1' if why == 'car' else b'0')
+    if why == 'a-b':  # check_abrepeatmode seeks back to A from the cached position
+        C.c_ubyte.from_address(play.ab).value = 1
+        C.c_int.from_address(play.ab + O['REPEAT_AB_STATE']).value = 2
+    elif why == 'airplay':
+        fw.mock('airplayGetFlag', lambda *_: 2)
+    elif why == 'receiver':
+        fw.var('bt__recv_pageflag', C.c_ubyte).value = 2
+    play(0)
+    assert play(100) == (True, 200000)
+
+
+def test_a_b_repeat_with_only_a_set_lets_the_polls_slow(fw, stock_bytes):
+    play = DarkPlay(fw, stock_bytes)
+    C.c_ubyte.from_address(play.ab).value = 1
+    C.c_int.from_address(play.ab + O['REPEAT_AB_STATE']).value = 1  # A marked, B not yet: nothing loops
+    play(0)
+    assert play(100)[1] == O['DARK_POLL_US']
 
 
 def now_playing_top(fw, name=b'playing_page'):

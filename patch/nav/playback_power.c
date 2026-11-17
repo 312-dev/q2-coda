@@ -190,8 +190,10 @@ static void resume_poll(void) {
             int pct = scrobble_value("PERCENT");
             st.ls_pct = pct >= 1 && pct <= 100 ? pct : 0;
         }
+        /* up to 3 s on counts as heard: dark, the cached second is up to DARK_POLL_US old, so two
+         * reads a second apart can be 3 s apart; a longer step is a seek */
         int d = sec - st.ls_sec;
-        if (d > 0 && d <= 2) st.ls_heard += d;
+        if (d > 0 && d <= 3) st.ls_heard += d;
         st.ls_sec = sec;
         int listen = total / 2 < LISTEN_MAX_S ? total / 2 : LISTEN_MAX_S;
         if (!st.ls_done && total > LISTEN_MIN_S && st.ls_heard >= listen) {
@@ -439,10 +441,30 @@ static void bt_volume_poll(void) {
  * (woke_at). With the screen on, a pass idles IDLE_SLEEP_MS once input and window animations have
  * been still for IDLE_MS, except while Now Playing animates or the volume row's push runs (it
  * leaves 5.3 s after the last key). */
-static volatile int dark_quiet; /* read by ringnav_dark_usleep on stock's threads */
-static int tone_dark;           /* this pass clicked with the screen off (ringnav_buzzer) */
+static int dark_quiet;         /* dark, nothing playing, the DAC off: the long idle */
+static volatile int dark_slow; /* the player polls' slow pace; read on stock's status thread */
+static int player_quick;       /* ringnav_mainscheduling: the track's end is near or just passed */
+static int tone_dark;          /* this pass clicked with the screen off (ringnav_buzzer) */
+/* mclSyncPlayerStatus' 200 ms wait (DARK_POLLS): DARK_POLL_US while dark_slow. */
 int ringnav_dark_usleep(unsigned us) {
-    return usleep(dark_quiet && us < DARK_POLL_US ? DARK_POLL_US : us);
+    return usleep(dark_slow && us < DARK_POLL_US ? DARK_POLL_US : us);
+}
+/* Dark, may stock's status sync and player scheduling slow to DARK_POLL_US? Always when quiet.
+ * While the local player plays or is paused, only the screen reads its position closely, so they
+ * slow down unless something else follows it: the track's last DARK_END_LEAD_S and the moments
+ * after its end (player_quick: the Gapless preload, a change without Gapless, the sleep timer's
+ * end, Download Ahead's next song), A-B Repeat's loop (check_abrepeatmode reads the cached
+ * position), Car Remote (the phone shows it), or another player (AirPlay, Bluetooth receive, a
+ * video), which keeps stock's pace. Play and pause need neither: mclSetPause and mclSetResume
+ * set the status word themselves. ponytail: dark, the cached second can be up to DARK_POLL_US
+ * old: Resume's place, a card app's .now and the listen count (playback_power.c resume_poll) see
+ * the position that much later; and lit again, the thread finishes its long sleep first, so Now
+ * Playing's time and a lyric line can lag up to a second at wake. */
+static int dark_slow_ok(int quiet) {
+    if (quiet) return 1;
+    return !player_quick && media_owner() == 1 && !video_on() && airplayGetFlag() != 2 &&
+           (signed char)bt__recv_pageflag != 2 && !coda_rc_enabled() &&
+           !(*(volatile unsigned char *)REPEAT_INFO && I(REPEAT_INFO, REPEAT_AB_STATE) == 2);
 }
 /* The cover pollers feed only what is painted, so they slow down whenever the screen is off,
  * playing or not. ponytail: art parsed while dark can show up to DARK_POLL_US late after wake. */
@@ -451,23 +473,27 @@ int ringnav_dark_cover_usleep(unsigned us) {
 }
 /* on_wm_idle_status ran player_mainscheduling every UI pass, and its mclAutoChange asks hciplayer
  * for its status and waits for the answer on the UI thread: 40 to 125 round trips a second, each
- * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark and quiet:
+ * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark_slow:
  * a lyric line and the play-state notifications follow within that, as stock's 200 ms status sync
  * does. From a second before the playing track's end (player_playtime_and_length's cache, a CUE
  * track's own end) until MAINSCHEDULING_END_MS after, it runs every pass, so a change without
- * Gapless starts as soon as stock's did; paused, it stays paced. ponytail: a length that overstates
- * the audio (a VBR MP3 without a Xing header) ends outside the window, up to 100 ms late; follow
- * mclAutoChange's own end flag if that shows. */
+ * Gapless starts as soon as stock's did; paused, it stays paced. Playing, from DARK_END_LEAD_S
+ * before the end, or with no length or position to go by, player_quick keeps dark_slow off.
+ * ponytail: a length that overstates the audio (a VBR MP3 without a Xing header) ends outside the
+ * window, up to 100 ms late (DARK_POLL_US dark); follow mclAutoChange's own end flag if that
+ * shows. */
 #define MAINSCHEDULING_MS 100
 #define MAINSCHEDULING_END_MS 2000
 int ringnav_mainscheduling(void) {
     static unsigned last, end;
-    int sec = -1, total = 0;
-    if (mclGetPlayStatus() == 2) player_playtime_and_length(&sec, &total);
+    int sec = -1, total = 0, playing = mclGetPlayStatus() == 2;
+    if (playing) player_playtime_and_length(&sec, &total);
     unsigned now = (unsigned)time_now_ms(),
-             gap = dark_quiet ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
+             gap = dark_slow ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
     if (total > 0 && total - sec <= 1) end = now | !now;
-    if (last && now - last < gap && !(end && now - end < MAINSCHEDULING_END_MS)) return 0;
+    int ending = end && now - end < MAINSCHEDULING_END_MS;
+    player_quick = ending || (playing && (total <= 0 || sec < 0 || total - sec <= DARK_END_LEAD_S));
+    if (last && now - last < gap && !ending) return 0;
     last = now | !now; /* never 0 */
     return player_mainscheduling();
 }
@@ -524,10 +550,11 @@ int ringnav_sleep(void *loop) {
                     airplayGetFlag() != 2 && (signed char)bt__recv_pageflag != 2 &&
                     time_now_ms() - st.wake_at >= WAKE_MS;
         dark_quiet = quiet;
+        dark_slow = dark_slow_ok(quiet);
         if ((unsigned)time_now_ms() - st.tick_at >= DARK_TURN_MS)
             sleep_ms(quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS);
     } else if (st.dark) {
-        dark_quiet = 0;
+        dark_quiet = dark_slow = 0;
         if (st.dark & 2) st.woke_at = (unsigned)time_now_ms();
         st.dark = 0;
         if (st.clock_timer) clock_show(); /* a time set while dark */

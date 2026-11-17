@@ -357,7 +357,7 @@ folder='SD:/Music/'+'\u97f3\u697d'*150; label=m.node('label','label_location',te
 m.call(address=payload_syms['ringnav_np_info'],args=(m.node('window','playing_page',[label]),0,0,0),gap=0)
 assert m.nodes[label]['text']=='Location: '+folder; passed()
 # on_wm_idle_status's player_mainscheduling (its status round trip) runs every MAINSCHEDULING_MS, a second
-# while dark with nothing playing.
+# while dark_slow (dark, and nothing follows the position: playback_power.c dark_slow_ok).
 from build import MAINSCHEDULING_CALL
 assert struct.unpack_from('<I',demo,fileoff(demo,MAINSCHEDULING_CALL[0]))[0]==jal(payload_syms['ringnav_mainscheduling'])
 m=Machine()
@@ -365,8 +365,8 @@ def scheduled(): return sum(c[0]=='player_mainscheduling' for c in m.calls)
 def schedule(): m.call(address=payload_syms['ringnav_mainscheduling'],args=(0,0,0,0),gap=0,clear=False)
 for wait,runs in ((0,1),(50,0),(50,1),(99,0),(1,1)):
     m.now+=wait; m.calls=[]; schedule(); assert scheduled()==runs,(wait,runs)
-m.word(payload_syms['dark_quiet'],1); m.now+=100; m.calls=[]; schedule(); assert scheduled()==0
-m.now+=900; schedule(); assert scheduled()==1; m.word(payload_syms['dark_quiet'],0)
+m.word(payload_syms['dark_slow'],1); m.now+=100; m.calls=[]; schedule(); assert scheduled()==0
+m.now+=900; schedule(); assert scheduled()==1; m.word(payload_syms['dark_slow'],0)
 # Playing, from a second before the track's end (player_playtime_and_length: 225 s) until
 # MAINSCHEDULING_END_MS after, every pass: a change without Gapless starts as soon as stock's did.
 # Paused there, it stays paced.
