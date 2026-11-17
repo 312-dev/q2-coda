@@ -661,8 +661,10 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, ui_ink(RGBA(BAR_COLOR))); /* flat */
         canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
         stock_canvas_set_fill_color(canvas, fill);
-        coverflow_home_bar(canvas, window_manager_get_top_window(wm));   /* OLED's art in the bar */
-        coverflow_home_strip(canvas, window_manager_get_top_window(wm)); /* and Split's list */
+        /* the page in sight: under OLED's toast, the page it is over, so Home's band stays its own */
+        void *page = feedback_top();
+        coverflow_home_bar(canvas, page);   /* OLED's art in the bar */
+        coverflow_home_strip(canvas, page); /* and Split's list */
         artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
         np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
@@ -681,7 +683,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         bar_sync(bar);
         bar_title_sync(top);
         bar_title(bar, top);
-        clock_place(bar, top);
+        clock_place(bar, feedback_top()); /* beside Split's art under a toast too */
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
         feedback_folder(top);                /* an empty folder level's note */
