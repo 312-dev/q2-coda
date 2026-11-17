@@ -445,7 +445,7 @@ def test_a_theme_draws_only_the_images_its_keys_ask_for():
             'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
     full, got = set(art.images(oled)), set(art.images(bare))
     groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
-              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_holdback', 'oled_bump_')
+              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_search_return', 'oled_holdback', 'oled_bump_')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
 
 
