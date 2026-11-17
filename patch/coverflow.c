@@ -3513,7 +3513,7 @@ static struct {
     int clip[4]; /* the canvas clip while the art paints, restored after */
     int clipped;
     /* the bar whose border paint inks the pane's rows (coverflow_home_bar), 0: none due; ground:
-     * the bar's background there (BGRA); held: each pane column's glyph's last ink (home_ink) */
+     * the bar's background there (BGRA); held: the row's ink, a byte a pane column (home_ink) */
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
@@ -4189,13 +4189,16 @@ static const unsigned short srgb_lin[256] = {
     60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952, 65535
 };
 #define INK_WHITE_MAX 117392049u
-/* A glyph keeps its ink until the mean crosses the bound by 0.03 of L, so a pan easing over a
+/* The row keeps its ink until the mean crosses the bound by 0.03 of L, so a pan easing over a
  * mean near it doesn't flicker (docs/ipod.md#home has the measure); between L 0.149 and 0.209
  * either ink keeps at least 3.98:1. */
 #define INK_HOLD 19660500u
 /* Glyphs are the bar's columns with ink, parted by at least INK_GAP empty ones (a pause's bars,
- * a battery's body and nub, are one glyph; STATUS_GAP and more part two). */
+ * a battery's body and nub, are one glyph; status_row.c SR_GAP and more part two): each finds its
+ * own status colour, though the row takes one ink. */
 #define INK_GAP 4
+/* The most glyphs a row holds: the pane is at most 179 columns, a glyph and its gap 5. */
+#define INK_GLYPHS 40
 /* 1: a coloured pixel (the slim battery's charging green or low red) keeps its own colour over
  * the art, and only the glyph's grey part is inked; 0: it is inked with the rest. */
 #define INK_KEEP_STATUS_COLOURS 1
@@ -4222,47 +4225,62 @@ static unsigned ink_share(unsigned p, unsigned ground, unsigned *spread) {
     return c;
 }
 
+/* A glyph: its columns [x, end), its status colour's pixel, spread and share (spread 0: none). */
+typedef struct {
+    int x, end;
+    unsigned hue, hue_s, hue_c;
+} ink_glyph_t;
+
 /* The bar's rows over the pane, w x h at fb (the screen's BGRA8888, pitch words a row), as its
  * background and glyphs left them on the flat ground (BGRA): each pixel becomes the art's (art,
- * the frame's RGBA8888, apitch words a row), and each glyph is laid over it in one contrast ink,
- * a pixel by its share, its greatest channel's distance from the ground (an antialiased edge, or
- * the slim battery's dim outline, a part), so it keeps its shape and smooth edges. held has a
- * byte a column, the ink each glyph there last had (1 white, 2 black, 0 none): it is kept until
- * INK_HOLD past the bound. cut (INK_CUT_*) names the edges where the canvas's clip, not the
- * pane, ends the rows: a glyph there may go on past it, so with an ink it keeps it (a repaint of
- * part of the battery chose its part's own). A status colour stays itself
- * (INK_KEEP_STATUS_COLOURS), its share read against its own full colour, the glyph's most
- * saturated pixel. test/fw/test_coverflow.py */
+ * the frame's RGBA8888, apitch words a row), and every glyph, the clock's and the status slots'
+ * alike, is laid over it in one contrast ink for the whole row, as iOS's status bar takes one
+ * style: white or black by the art's mean L under all of their inked pixels together, each pixel
+ * weighed by its share, its greatest channel's distance from the ground (an antialiased edge, or
+ * the slim battery's dim outline, a part), so each keeps its shape and smooth edges. held has a
+ * byte a column, the row's ink when it was last picked (1 white, 2 black, 0 none): it is kept
+ * until INK_HOLD past the bound. cut (INK_CUT_*) says the canvas's clip, not the pane, ends the
+ * rows there: a repaint of part of the row (the play state's 8 frames a second, a battery's
+ * level) shows too little of it to pick from, so with an ink held it keeps it. A status colour
+ * stays itself (INK_KEEP_STATUS_COLOURS), its share read against its own full colour, its
+ * glyph's most saturated pixel. test/fw/test_coverflow.py */
 void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, int h,
               unsigned ground, unsigned char *held, int cut) {
+    ink_glyph_t g[INK_GLYPHS];
+    int n = 0;
     unsigned sp;
-    for (int x = 0; x < w;) {
+    for (int x = 0; x < w;) { /* the glyphs: each on to INK_GAP empty columns */
         int lit = 0, b = x, gap = 0;
         for (int y = 0; y < h && !lit; ++y) lit = INKED(fb[y * pitch + x], ground);
-        if (lit) /* the glyph: on to INK_GAP empty columns */
-            for (b = x + 1; b < w && gap < INK_GAP; ++b) {
-                int on = 0;
-                for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
-                gap = on ? 0 : gap + 1;
-            }
-        b = lit ? b - gap : x + 1;
-        /* its status colour, if any: the most saturated pixel */
-        unsigned hue = 0, hue_s = 0, hue_c = 0;
-        for (int y = 0; lit && INK_KEEP_STATUS_COLOURS && y < h; ++y)
-            for (int i = x; i < b; ++i) {
+        if (!lit) {
+            ++x;
+            continue;
+        }
+        for (b = x + 1; b < w && (gap < INK_GAP || n == INK_GLYPHS - 1); ++b) {
+            int on = 0;
+            for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
+            gap = on ? 0 : gap + 1;
+        }
+        ink_glyph_t *k = &g[n++];
+        k->x = x, k->end = b - gap, k->hue = k->hue_s = k->hue_c = 0;
+        for (int y = 0; INK_KEEP_STATUS_COLOURS && y < h; ++y) /* the most saturated pixel */
+            for (int i = x; i < k->end; ++i) {
                 unsigned p = fb[y * pitch + i], c = ink_share(p, ground, &sp);
-                if (sp > hue_s) hue = p, hue_s = sp, hue_c = c;
+                if (sp > k->hue_s) k->hue = p, k->hue_s = sp, k->hue_c = c;
             }
-        if (hue_s < INK_HUE_MIN) hue_s = 0;
-        /* the art's L under its inked share, and the ink */
-        unsigned long long sum = 0;
-        unsigned weight = 0; /* at most 255 a pixel */
-        for (int y = 0; lit && y < h; ++y)
-            for (int i = x; i < b; ++i) {
+        if (k->hue_s < INK_HUE_MIN) k->hue_s = 0;
+        x = k->end;
+    }
+    /* the art's L under every glyph's inked share, less its status colour's */
+    unsigned long long sum = 0;
+    unsigned weight = 0; /* at most 255 a pixel */
+    for (ink_glyph_t *k = g; k < g + n; ++k)
+        for (int y = 0; y < h; ++y)
+            for (int i = k->x; i < k->end; ++i) {
                 if (!INKED(fb[y * pitch + i], ground)) continue; /* no share: adds nothing */
                 unsigned c = ink_share(fb[y * pitch + i], ground, &sp), a = art[y * apitch + i];
-                if (hue_s) {
-                    unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
+                if (k->hue_s) {
+                    unsigned q = sp >= k->hue_s ? 256 : (sp << 8) / k->hue_s, t = k->hue_c * q >> 8;
                     c = c > t ? c - t : 0;
                 }
                 sum += (unsigned long long)c *
@@ -4270,33 +4288,32 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
                         2126u * srgb_lin[a & 255]);
                 weight += c;
             }
-        unsigned was = 0, ink = 0;
-        for (int i = x; i < b && !was; ++i) was = held[i];
-        /* a glyph the clip cuts shows only a part: it keeps the ink it has */
-        if (was && ((x == 0 && cut & INK_CUT_LEFT) || (b == w && cut & INK_CUT_RIGHT) ||
-                    cut & INK_CUT_ROWS))
-            ink = was;
-        else if (weight) {
-            unsigned bound = was == 1   ? INK_WHITE_MAX + INK_HOLD
-                             : was == 2 ? INK_WHITE_MAX - INK_HOLD
-                                        : INK_WHITE_MAX;
-            ink = sum <= (unsigned long long)weight * bound ? 1 : 2;
-            for (int i = x; i < b; ++i) held[i] = (unsigned char)ink;
-        }
-        for (int y = 0; y < h; ++y)
-            for (int i = x; i < b; ++i) {
-                unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
-                         c = lit && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
-                if (c && hue_s) {
-                    unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
-                    a = lerp(a, hue, k);
-                    c = c > t ? c - t : 0;
-                }
-                if (c && ink) a = lerp(a, ink == 1 ? 0xffffffffu : 0xff000000u, c + (c >> 7));
-                *p = a;
-            }
-        x = b;
+    unsigned was = 0, ink = 0;
+    for (int i = 0; i < w && !was; ++i) was = held[i];
+    if (was && cut) /* part of the row: it keeps the ink it has */
+        ink = was;
+    else if (weight) {
+        unsigned bound = was == 1   ? INK_WHITE_MAX + INK_HOLD
+                         : was == 2 ? INK_WHITE_MAX - INK_HOLD
+                                    : INK_WHITE_MAX;
+        ink = sum <= (unsigned long long)weight * bound ? 1 : 2;
     }
+    if (ink)
+        for (int i = 0; i < w; ++i) held[i] = (unsigned char)ink;
+    for (int y = 0; y < h; ++y) /* the art, and the glyphs on it */
+        for (int i = 0, k = 0; i < w; ++i) {
+            while (k < n && i >= g[k].end) ++k;
+            unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
+                     c = k < n && i >= g[k].x && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
+            if (c && g[k].hue_s) {
+                unsigned q = sp >= g[k].hue_s ? 256 : (sp << 8) / g[k].hue_s,
+                         t = g[k].hue_c * q >> 8;
+                a = lerp(a, g[k].hue, q);
+                c = c > t ? c - t : 0;
+            }
+            if (c && ink) a = lerp(a, ink == 1 ? 0xffffffffu : 0xff000000u, c + (c >> 7));
+            *p = a;
+        }
 }
 
 /* The screen's buffer while canvas draws straight into it (nightshift.c's warm reads it the same
