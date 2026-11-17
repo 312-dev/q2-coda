@@ -1,4 +1,4 @@
-/* Battery History: the level's falls since the charger was last unplugged, kept on the flash, and
+/* Battery History: the level's falls since the charger was last unplugged, kept on the card, and
  * Power's page that graphs them, reads one out under the wheel and exports them to the card. */
 #include "navigation.h"
 #include "card_store.h"

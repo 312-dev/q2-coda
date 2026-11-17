@@ -1413,8 +1413,9 @@ int clip_within(void *canvas, int *old, int *clip, int x, int y, int w, int h) {
     return clip[2] && clip[3];
 }
 
-/* Resume, play counts, video places, the last album and Boot to: each file is written whole, to a
- * .tmp, synced and renamed. Shared with navigation.c and videos.c. */
+/* Video places, the last album, Boot to, games and the rest: each file is written whole, to a .tmp,
+ * synced and renamed. Shared with navigation.c and videos.c; card_store.c does the same for the
+ * records kept on the card. */
 int blob_io(const char *path, const char *tmp, void *buf, unsigned size, int write) {
     void *f = fopen(write ? tmp : path, write ? "wb" : "rb");
     if (!f) return 0;
