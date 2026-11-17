@@ -101,9 +101,9 @@ void *card_blob_open(card_blob *b) {
     void *f = fopen(b->card, "rb");
     if (!f && !b->moved && b->flash && (b->moved = cs_copy(b))) f = fopen(b->card, "rb");
     unsigned char first;
-    if (f && fread(&first, 1, 1, f) != 1) fclose(f), f = 0; /* empty: dropped */
-    if (f) fseek(f, 0, 0);
-    return f;
+    int empty = f && fread(&first, 1, 1, f) != 1; /* dropped */
+    if (f) fclose(f);
+    return f && !empty ? fopen(b->card, "rb") : 0; /* again, at its start */
 }
 
 void card_blob_drop(card_blob *b) {
