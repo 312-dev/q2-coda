@@ -2943,7 +2943,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
-                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core'], 'q2guard', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_card'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),

@@ -1,5 +1,5 @@
 /* q2guard: the heat recorder and overheat guardian (docs/internals.md#overheat-guardian). The
- * decisions, the log line and the log's storage, with no reads of the device: q2guard_core.c,
+ * decisions, the log line and the log's rotation, with no reads of the device: q2guard_core.c,
  * tested on this machine by test/unit/test_q2guard.py. The device's side is q2guard.c. */
 #ifndef Q2GUARD_H
 #define Q2GUARD_H
@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdlib.h>
 #include <unistd.h>
 #else
 /* No MIPS sysroot (as boot.c): glibc 2.28's declarations, with MIPS o32 open flags. */
@@ -18,6 +19,12 @@ int open(const char *, int, ...), close(int), fsync(int), rename(const char *, c
 int mkdir(const char *, unsigned), snprintf(char *, size_t, const char *, ...);
 ssize_t write(int, const void *, size_t);
 long lseek(int, long, int);
+/* what card_store.c uses (a FILE is a void *, as there) */
+void *fopen(const char *, const char *), *calloc(size_t, size_t);
+size_t fread(void *, size_t, size_t, void *), fwrite(const void *, size_t, size_t, void *);
+int fclose(void *), fflush(void *), fseek(void *, long, int), fileno(void *);
+long ftell(void *);
+void free(void *);
 void *memcpy(void *, const void *, size_t), *memmove(void *, const void *, size_t);
 size_t strlen(const char *);
 #define O_WRONLY 1
@@ -27,6 +34,12 @@ size_t strlen(const char *);
 #define O_CLOEXEC 0x80000
 #define SEEK_END 2
 #endif
+
+#ifndef PEQ_ROOT
+#define PEQ_ROOT "" /* card_store.h's CARD_STORE_DIR is on the card itself (host tests give a scratch one) */
+#endif
+#include "card_store.h"
+int card_mounted(void); /* card_store.c asks: q2guard.c's (the writing child's), the host test's */
 
 #define GUARD_NONE (-100000) /* a temperature not read */
 
@@ -122,20 +135,12 @@ struct top_table {
 void top_three(struct top_table *prev, int n, const int *pid, const char (*name)[16],
                const unsigned *ticks, unsigned span, struct proc_top *top);
 
-/* The log: lines held in RAM and written to the card in batches. */
-#define HEAT_RAM 65536          /* held while the card is away; the oldest lines go first */
-#define HEAT_FILE_MAX 262144    /* each of the two files */
-struct heat_log {
-    char ram[HEAT_RAM];
-    int used;
-    int dropped;     /* lines dropped from the RAM ring since the last write */
-    int away;        /* the card was away (or a write failed) since the last write */
-    long away_since; /* wall clock then */
-};
-void heat_add(struct heat_log *l, const char *line); /* one line, with its newline */
-/* Write what is held to dir/q2-heat.0, moving .0 to .1 when it would pass HEAT_FILE_MAX; on any
- * failure keep it all. 0 written (or nothing held), -1 kept. now: for the gap's marker. */
-int heat_flush(struct heat_log *l, const char *dir, long now);
-void heat_card_away(struct heat_log *l, long now); /* the card is not available */
+/* The log: lines held in card_store.c's RAM ring and written to the card in batches. */
+#define HEAT_RAM 65536          /* the ring's bytes while the card is away; the oldest lines go first */
+#define HEAT_FILE_MAX 262144    /* a file is moved on when a flush finds it this big */
+void heat_add(card_log *l, const char *line); /* one line, with its newline */
+/* Rotate dir/q2-heat.0 into .1 if it is full, then append the ring to it in order (card_log_flush,
+ * which also notes lines dropped for room). 0 when nothing is left held, -1 when the card refused. */
+int heat_flush(card_log *l, const char *dir);
 
 #endif

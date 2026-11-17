@@ -1,4 +1,4 @@
-/* q2guard's decisions, log line and log storage (docs/internals.md#overheat-guardian). No reads of
+/* q2guard's decisions, log line and log rotation (docs/internals.md#overheat-guardian). No reads of
  * the device here: q2guard.c feeds a sample every 5 s and acts on what guard_step says. */
 #include "q2guard.h"
 
@@ -222,62 +222,12 @@ void top_three(struct top_table *prev, int n, const int *pid, const char (*name)
     prev->n = m;
 }
 
-/* ---- the log ---- */
-void heat_add(struct heat_log *l, const char *line) {
-    int n = (int)strlen(line);
-    if (n <= 0 || n > HEAT_RAM / 4) return;
-    while (l->used + n > HEAT_RAM) { /* the oldest line goes */
-        int k = 0;
-        while (k < l->used && l->ram[k] != '\n') ++k;
-        k = k < l->used ? k + 1 : l->used;
-        memmove(l->ram, l->ram + k, l->used - k);
-        l->used -= k;
-        ++l->dropped;
-    }
-    memcpy(l->ram + l->used, line, n);
-    l->used += n;
-}
-
-void heat_card_away(struct heat_log *l, long now) {
-    if (!l->away) l->away = 1, l->away_since = now;
-}
-
-struct sink {
-    char p0[160], p1[160];
-    int fd;
-    long size;
-};
-static int sink_open(struct sink *s, int fresh) {
-    s->fd = open(s->p0, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | (fresh ? O_TRUNC : 0), 0644);
-    if (s->fd < 0) return -1;
-    s->size = fresh ? 0 : lseek(s->fd, 0, SEEK_END);
-    return s->size < 0 ? -1 : 0;
-}
-/* Whole lines of buf, moving to a fresh .0 (the old one to .1) where the next line would pass
- * HEAT_FILE_MAX; how many bytes went out. */
-static int sink_write(struct sink *s, const char *buf, int n) {
-    int done = 0;
-    while (done < n) {
-        int k = done;
-        while (k < n) { /* the lines that fit, at least one in an empty file */
-            int e = k;
-            while (e < n && buf[e] != '\n') ++e;
-            e += e < n;
-            if (s->size + (e - done) > HEAT_FILE_MAX && (k > done || s->size)) break;
-            k = e;
-        }
-        if (k > done) {
-            if (write(s->fd, buf + done, k - done) != k - done) return done;
-            s->size += k - done;
-            done = k;
-        }
-        if (done < n) {
-            fsync(s->fd), close(s->fd);
-            s->fd = -1;
-            if (rename(s->p0, s->p1) || sink_open(s, 1)) return done;
-        }
-    }
-    return done;
+/* ---- the log ----
+ * Lines are held in card_store.c's RAM ring (card_log_append, with the card_mounted that q2guard.c
+ * gives: false in the watching process, true in the child that writes). heat_flush is that child's
+ * part: the folder made, the file rotated, the ring appended in order. */
+void heat_add(card_log *l, const char *line) {
+    card_log_append(l, line, (unsigned)strlen(line));
 }
 
 static void mkdirs(char *path) { /* each parent of path's last part, and path itself */
@@ -286,49 +236,23 @@ static void mkdirs(char *path) { /* each parent of path's last part, and path it
     mkdir(path, 0755);
 }
 
-int heat_flush(struct heat_log *l, const char *dir, long now) {
-    if (!l->used) return 0;
-    struct sink s;
-    char d[128];
+/* q2-heat.0 moved to .1 (the older .1 goes) once it has reached HEAT_FILE_MAX, so each file ends below
+ * HEAT_FILE_MAX plus one flush (at most HEAT_RAM). */
+static void rotate(const char *p0, const char *p1) {
+    int fd = open(p0, O_WRONLY | O_APPEND | O_CLOEXEC);
+    long size = fd < 0 ? 0 : lseek(fd, 0, SEEK_END);
+    if (fd >= 0) close(fd);
+    if (size >= HEAT_FILE_MAX) rename(p0, p1);
+}
+
+int heat_flush(card_log *l, const char *dir) {
+    char d[128], p0[160], p1[160];
     int n = (int)strlen(dir);
     if (n >= (int)sizeof d) return -1;
     memcpy(d, dir, n + 1);
     mkdirs(d);
-    snprintf(s.p0, sizeof s.p0, "%s/q2-heat.0", dir);
-    snprintf(s.p1, sizeof s.p1, "%s/q2-heat.1", dir);
-    if (sink_open(&s, 0)) {
-        if (s.fd >= 0) close(s.fd);
-        heat_card_away(l, now);
-        return -1;
-    }
-    if (l->away || l->dropped) {
-        char m[160];
-        int lines = 0;
-        for (int i = 0; i < l->used; ++i) lines += l->ram[i] == '\n';
-        struct put b = { m, m + sizeof m - 2 };
-        put_time(&b, now);
-        puts_(&b, " GAP card away since ");
-        if (l->away) put_time(&b, l->away_since);
-        else puts_(&b, "-");
-        field(&b, "held", lines), field(&b, "dropped", l->dropped);
-        *b.p++ = '\n';
-        int len = (int)(b.p - m);
-        if (sink_write(&s, m, len) != len) {
-            if (s.fd >= 0) close(s.fd);
-            heat_card_away(l, now);
-            return -1;
-        }
-    }
-    int done = sink_write(&s, l->ram, l->used);
-    if (s.fd >= 0) fsync(s.fd), close(s.fd);
-    memmove(l->ram, l->ram + done, l->used - done); /* what went out is not written twice */
-    l->used -= done;
-    l->dropped = 0;
-    if (l->used) {
-        l->away = 0; /* the marker is out; a fresh one for what is left */
-        heat_card_away(l, now);
-        return -1;
-    }
-    l->away = 0;
-    return 0;
+    snprintf(p0, sizeof p0, "%s/q2-heat.0", dir);
+    snprintf(p1, sizeof p1, "%s/q2-heat.1", dir);
+    rotate(p0, p1);
+    return card_log_flush(l) ? 0 : -1;
 }

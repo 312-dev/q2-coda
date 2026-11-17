@@ -46,7 +46,7 @@ def test_a_rise_never_spans_a_reboot():
 
 def test_the_report_reads_a_real_line_and_skips_garbage():
     log = ['garbage\n', line(0, 1, t=41.5, top='hciplayer:12.3,demo:8.0'), line(60, 61, t=43.0),
-           '2026-11-17T14:02:00Z GAP card away since 2026-11-17T13:50:00Z held=3 dropped=0\n']
+           '== 3 lines lost while the card was away\n']
     out = io.StringIO()
     samples, notes = q2heat.parse(log)
     q2heat.report(samples, notes, out)
