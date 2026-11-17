@@ -48,7 +48,7 @@ enum {
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
 #define CAP_FAVORITES 2048u /* the library's favorites node */
 #define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
-/* 8192 CAP_BUFFERING (feat/p32-streaming) */
+#define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
@@ -94,6 +94,8 @@ typedef struct crc_session {
 
 /* ---- what the platform provides (coda_rc.c; the host test's fakes) ---- */
 void crc_random(void *buf, size_t n);
+/* NowPlaying.buffered_ms: have of total bytes as a share of ms, 0 without a total or a length; in 32 bits */
+uint32_t crc_buffered_ms(uint32_t have, uint32_t total, uint32_t ms);
 uint32_t crc_now_ms(void);
 uint32_t crc_now_s(void);  /* wall clock, for crc_peer.created */
 int crc_write(crc_session *s, const uint8_t *buf, size_t n);  /* the whole frame, or -1 */

@@ -546,6 +546,21 @@ has no place for keeps a place of its own:
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
   inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
   control turns on. The radio's pill is its own press.
+- **A server song loading** (approved as streaming-v3's variant D, `design/streaming-states/`): while the song waits
+  to start, or playback has caught up with its download, a 14 px 12-spoke spinner (Text Secondary, a turn a second,
+  turning under Reduce Motion too, as it reports progress) and "7.0 of 20 MB" (Inter 13 px, Text Secondary) sit
+  centred in the times row, 6 px apart, between the elapsed and the remaining, which both stay. Nothing dims, the bar
+  does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
+- **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
+  art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
+  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
+  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
+  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
+  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
+  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+  wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
@@ -1236,7 +1251,8 @@ A guest's phone plays through the Q2 to what the Q2 plays to ([internals](intern
 <a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
 `patch/stream_config.c`) is two levels of [list rows](#list-row), values on the right.
 
-- **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
+- **Configuration:** Stop Streaming Services; Download Ahead, its value "2 Songs" (Off, 1 Song, 2 or 3 Songs, stepped
+  in place by Center); a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
   its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
   the caption "Its cache, downloads and place in Streaming" (Spotify: "Its cache, sign-in and place in Streaming");
   a "Show in Streaming" header; then one switch per service that has only a switch (the card apps, Internet Radio,

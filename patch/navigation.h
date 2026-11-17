@@ -119,9 +119,9 @@ typedef struct {
     unsigned ch_timer, ch_track, ch_key;
     int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
     /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
-     * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, the provider page's Cache
-     * and Erase Spotify Data labels; each 0 while its page is closed */
-    void *sc_page, *sc_sub, *sc_prov[2], *sc_cache, *sc_erase;
+     * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, Download Ahead's label, the
+     * provider page's Cache and Erase Spotify Data labels; each 0 while its page is closed */
+    void *sc_page, *sc_sub, *sc_prov[2], *sc_ahead, *sc_cache, *sc_erase;
     int sc_of;
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
@@ -554,6 +554,10 @@ unsigned np_marq_wait(unsigned max);
 unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
+int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms); /* and for the car remote */
+int np_stream_error(void); /* np_stream.c: a server song stuck with its server down */
+void np_stream_cta_paint(void *canvas, int cy), np_stream_retry(void), np_stream_cta_click(int x);
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);

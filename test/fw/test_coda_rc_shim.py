@@ -373,3 +373,26 @@ def test_a_card_apps_streaming_song_can_be_rated(fw, ui, mcl, recs):
     q2.files[CMD] = b'40 rate 3 0\n'
     q2.tick()
     assert q2.files.pop(ACK) == b'40 0\n' and q2.now()['hearts'] == '3'
+
+
+def test_a_streaming_song_the_player_waits_for_is_buffering(fw, ui, mcl, recs):
+    """docs/server-library.md#download-ahead-and-the-streaming-state: the song playing is a card app's download that
+    q2player waits for (/tmp/q2player.wait names it): Now Playing says so with its .stream line's bytes and length,
+    for coda-rc's NowPlaying.buffering; once it plays on, it doesn't."""
+    q2 = Q2(fw, ui, recs, songs=0)
+    song = '/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].flac'
+    q2.songs = [recs(id_=0, path=song, name='hello [VcF5].flac', title='Hello', artist='Adele', album='Hello Album')]
+    q2.queue(at=0)
+    def stat(v, p, st, *_):  # its mtime now (time() is 0 here): a fresh line
+        C.memset(st, 0, 36 * 4)
+        return 0 if C.string_at(p).decode() in q2.files else -1
+    fw.mock('fw___xstat', stat)
+    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    q2.files['/tmp/q2-subsonic.stream'] = f'#Q2STREAM/1\tseq=1\nget\t7000000\t20000000\t780000\t{song}\n'.encode()
+    q2.files['/tmp/q2player.wait'] = f'{song}\n'.encode()
+    q2.tick()
+    now = q2.now()
+    assert (now['buf'], now['bhave'], now['btotal'], now['bms']) == ('1', '7000000', '20000000', '780000')
+    del q2.files['/tmp/q2player.wait']
+    q2.tick()
+    assert (q2.now()['buf'], q2.now()['bhave']) == ('0', '0')

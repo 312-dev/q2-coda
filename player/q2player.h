@@ -102,6 +102,13 @@ struct sacd *sacd_open(const char *path, int *error);
 struct AVIOContext *sacd_avio(struct sacd *);
 void sacd_close(struct sacd *);
 
+/* grow.c: a card app's song still arriving in place, read with a wait at the end of its bytes */
+struct grow;
+int grow_arriving(const char *url); /* the app's .stream says url is still arriving */
+struct grow *grow_open(const char *url, int *error);
+struct AVIOContext *grow_avio(struct grow *);
+void grow_close(struct grow *);
+
 /* output.c */
 struct output;
 struct output *output_open(const struct pcm_format *, int outputway, int hw);
