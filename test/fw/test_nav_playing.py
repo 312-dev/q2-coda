@@ -1164,11 +1164,12 @@ def test_reopening_the_page_mid_wait_shows_the_target_again(fw, ui, mcl, st):
     assert third.value() == now.sec and st.held_sec == 0
 
 
-# Centre cycles the controls the wheel sets, as an iPod classic's: scrubber, shuffle, repeat, rating, rest. A short
-# hold turns the screen off.
+# Centre, after an iPod classic's: a press scrubs, the next puts a focus ring on shuffle; the wheel moves the ring across
+# shuffle, repeat and the heart and changes nothing, and Centre works the ringed control. A short hold turns the
+# screen off.
 NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
                            for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
-REST, SHUFFLE, REPEAT = range(3)
+REST, SHUFFLE, REPEAT, RATING = range(4)
 
 
 def cpress(now, at, held=60):
@@ -1177,26 +1178,55 @@ def cpress(now, at, held=60):
     return press(now, at)
 
 
-def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
+def ringed(fw, ui, mcl, st, heart=True):
+    """Now Playing under OLED, with the heart on the art page when heart, the play mode Order, scrubbed and
+    then a Centre press on: the ring on shuffle. The modes stock is asked for go to the list returned."""
     theme(fw, st)
     releases, modes = [], []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
-    now = Now(fw, ui, mcl, st)
+    now = Now(fw, ui, mcl, st, opened=False)
+    if heart:
+        now.heart = ui.widget(now.art_page, 'img_fav', 180, 150, 40, 40)
+        ui.set_str(now.heart, b'image', b'play_unfav')
+    assert now.open() == 41
     mcl.mode = 0
     assert cpress(now, 200000) == STOP and st.scrub == 1
-    cpress(now, 200500)  # the scrub ends, shuffle's turn
+    cpress(now, 200500)  # the scrub ends, the ring on shuffle
     assert st.scrub == 0 and st.np_stage == SHUFFLE
-    assert now.key(KEY_NEXT) == STOP and modes == [2]  # the wheel turns shuffle on
+    return now, modes, releases
+
+
+def test_the_wheel_moves_the_ring_and_changes_nothing(fw, ui, mcl, st):
+    now, modes, _ = ringed(fw, ui, mcl, st)
+    assert now.key(KEY_NEXT) == STOP and st.np_stage == REPEAT and modes == []  # shuffle stays off
+    now.key(KEY_NEXT)
+    assert st.np_stage == RATING and modes == []
+    now.key(KEY_NEXT)  # the last stop: the ring stays
+    assert st.np_stage == RATING
+    now.key(KEY_PREV), now.key(KEY_PREV), now.key(KEY_PREV)
+    assert st.np_stage == SHUFFLE and modes == []
+    (t,) = ui.due('np_stage_end')  # each tick restarts the stage's timeout
+    assert ui.timers[t][2] == NP_STAGE_MS
+
+
+def test_centre_works_the_ringed_control_and_the_ring_stays(fw, ui, mcl, st):
+    now, modes, releases = ringed(fw, ui, mcl, st)
     cpress(now, 201000)
-    assert st.np_stage == REPEAT
-    now.key(KEY_NEXT)  # repeat All under shuffle: the mode stays Shuffle
-    now.key(KEY_NEXT)  # Repeat One
-    assert modes == [2, 1]
-    now.key(KEY_PREV)  # back to All
-    assert modes == [2, 1, 2]
-    cpress(now, 201500)  # the rating picker's turn: the cycle rests behind it
-    assert st.np_stage == REST and releases == []
+    assert modes == [2] and st.np_stage == SHUFFLE  # shuffle on, the ring still on it
+    now.key(KEY_NEXT)
+    cpress(now, 201500)  # repeat All under shuffle: the mode stays Shuffle
+    cpress(now, 202000)  # Repeat One
+    assert modes == [2, 1] and st.np_stage == REPEAT
+    now.key(KEY_NEXT)
+    cpress(now, 202500)  # the heart: its rating picker, the cycle at rest behind it
+    assert st.np_stage == REST and releases == [] and modes == [2, 1]
+
+
+def test_without_the_heart_the_ring_ends_at_repeat(fw, ui, mcl, st):
+    now, modes, _ = ringed(fw, ui, mcl, st, heart=False)
+    now.key(KEY_NEXT), now.key(KEY_NEXT)
+    assert st.np_stage == REPEAT and modes == []
 
 
 def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):

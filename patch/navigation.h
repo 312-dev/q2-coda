@@ -655,9 +655,11 @@ int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled *
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
 int np_mode_shuffle(void), np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
-/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
- * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
-enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
+/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, then a focus ring
+ * the wheel moves across shuffle, repeat and the heart (nav/now_playing.c np_centre; np_bar.c
+ * np_modes draws it) */
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_RATING };
+void *np_heart(void); /* np_bar.c: the heart, while it shows on the art page, else 0 */
 int np_mode_click(void *target, void *event);
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
