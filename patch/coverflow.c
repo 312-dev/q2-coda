@@ -2861,13 +2861,22 @@ void album_memory(void *r) {
     tk_snprintf((char *)m + 0x611, 0x100, "%s", album ? album : "");
 }
 
-/* Start a queue at idx with its playback class; playing_page copies dq synchronously. */
+/* Start a queue at idx with its playback class; playing_page copies dq synchronously. Stock's
+ * navigator_to_with_context opens a new playing_page even over one, and then both pages' timers
+ * run stock's update (0x53cf08), which writes the title and artist only while g_autochange_flag or
+ * g_forcerefresh_flag is set and clears them: the page under may take the flag, and the one on top
+ * keeps the last song's title through every Next (the device, 2026-11-17: a card app's first song
+ * started over the pressed server song's Now Playing, addon.c stream_start). Now Playing on top is
+ * closed first, so there is one, and Return leaves for the page under it. */
 void play_folder(void *dq, int idx, int cls) {
     if (cls == 0xff10) album_memory(deque_at(dq, (unsigned)idx));
     struct {
         void *dq;
         int idx, cls, mode;
     } context = { dq, idx, cls, 2 };
+    void *top = window_manager_get_top_window(window_manager());
+    if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+        window_manager_close_window_force(window_manager(), top);
     navigator_to_with_context("playing_page", &context);
 }
 
