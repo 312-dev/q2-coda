@@ -2083,7 +2083,8 @@ def cc_words(canvas):
 def test_control_center_is_v4_s_tightened_layout(fw, world):
     """v4, A tightened (mock_cc4_tight.py): one 10 px gap everywhere. The toggles' block 158 x 210 from (20, 38), two by
     three, circles 66 px apart both ways (centres x 66 and 132, y 68, 134, 200); Now Playing 188, 38, 167 x 114;
-    Brightness at y 162 and Volume at y 210, each 167 x 38, ending level with the block; the grab bar at y 258; the
+    Brightness at y 162 and Volume at y 210, each 167 x 38, ending level with the block; the grab bar along the
+    screen's foot (test below); the
     wheel's white ring on Wi-Fi. No tiles. Every name set, Smart Wi-Fi's whole."""
     canvas = control_center(fw, world)
     accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
@@ -2094,9 +2095,17 @@ def test_control_center_is_v4_s_tightened_layout(fw, world):
     assert ((46, 48, 40, 40), accent) in boxes and ((112, 48, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
     assert ((43, 45, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
     assert ((188, 162, 167, 38), off) in boxes and ((188, 210, 167, 38), off) in boxes
-    assert ((375 // 2 - 18, 258, 36, 5), rgba(0x5a5a5e)) in boxes
     assert not [r for r, c, radius in canvas.rounded if radius == 12]  # v3's tiles' corners
     assert cc_words(canvas)[:6] == ['Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'SmartWi-Fi', 'EQ']
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_the_grab_bar_stands_on_the_sheet_s_foot_as_the_page_sheets_stand_off_their_top(fw, world, light):
+    """The grab bar is centred, 36 x 5, 6 px off the sheet's foot (the screen's, y 320), the gap menu_modal.c's sheets keep
+    off their top (grab at 46 under a top of 40); not 10 px under the blocks, which end at y 248. It is the one thing
+    that moved: the blocks stay where the layout test puts them."""
+    grabs = [(r, c) for r, c, radius in control_center(fw, world, light=light).rounded if r[2:] == (36, 5)]
+    assert [r for r, _ in grabs] == [(375 // 2 - 18, 309, 36, 5)] and 320 - (309 + 5) == 6
 
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):

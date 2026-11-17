@@ -61,6 +61,13 @@ static int back_to __attribute__((section(".scratch"))), back_at __attribute__((
  * ponytail: RAM only, so a reboot mid-shuffle keeps Shuffle; a queue-file header field fixes it. */
 static int unshuffle __attribute__((section(".scratch")));
 unsigned playback_loads __attribute__((section(".scratch")));
+unsigned playback_picks __attribute__((section(".scratch")));
+/* A song the user moved to in the queue playing: counted (a skip nobody pressed is not), and
+ * stamped as a press (crossfade.c). */
+void playback_pick(void) {
+    if (!press_natural) ++playback_picks;
+    press_stamp();
+}
 /* The wheel's ticks. Stock's encoder thread looks at the wheel once per 80 ms (200 ms after
  * touching) and ticks at most once a look, dropping any travel past its threshold: on the device
  * a tick took 27 units of travel against a threshold of 12, a fast half turn gave a single tick,
@@ -1165,7 +1172,7 @@ static int change_music(int next) {
     /* Stock's skip past a file it can't play is automatic, and never asks. */
     if (!press_natural && restart_refused(next, place_held() && change_restarts(next)))
         return 0; /* the caller toasts -1 (no storage) and -5 */
-    press_stamp();
+    playback_pick();
     if (!s.active) {
         if (!next || !list_end()) return stock_change_trampoline(next);
         ringnav_next(0); /* stops */
@@ -1297,7 +1304,7 @@ int playback_group_skip(int forward) {
     }
     close_preload();
     M(MCL_POS) = (int)next;
-    press_stamp();
+    playback_pick();
     mclStartPlayer();
     playback_save();
     return 1;

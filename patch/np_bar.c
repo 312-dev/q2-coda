@@ -31,7 +31,7 @@ int np_sync(void *top) {
     /* a pressed server song while it loads (catalogue.c), else the playing one */
     void *pressed = catalogue_np_now(&at, &n), *r = pressed ? pressed : queue_now(&at, &n);
     const char *album = pressed ? P(pressed, REC_ALBUM) : now_tag(r, REC_ALBUM);
-    if (pressed) catalogue_np_text(top);
+    catalogue_np_text(top);      /* the pressed song's lines, or the player's back after it */
     unsigned pos[2] = { at, n }; /* a new song of the same album restarts its marquee too */
     unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)album), (const unsigned char *)pos,
                             sizeof pos);

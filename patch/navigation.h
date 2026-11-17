@@ -532,9 +532,17 @@ unsigned tilt_tone(unsigned c);
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
 void swipe_back_paint(void *w, void *canvas);
+/* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
+void art_zoom_load(void *np_win);
+int art_zoom_source(void *top, rect_t *r);
+void art_zoom_at(int k, const rect_t *a, const rect_t *b, unsigned *page, unsigned *np,
+                 rect_t *art);
+void *coverflow_home_pane(void);
+int hero_cover_box(rect_t *r);
 /* page_parallax.c: a page's push and pop, the page under drifting and dimming */
 int parallax_under_x(int w, float percent);
 unsigned parallax_dim(float percent);
+void *parallax_slide(float *percent);
 /* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
 void np_settle_poll(void);
 int np_settle_scale(void);
