@@ -10,7 +10,7 @@ manager. On 2026-11-17 a NULL read on every Now Playing open (Library > Songs > 
 about 1.5 h, because the fw stand-in for widget_get_prop_str returned the default where stock returns NULL.
 This drives the build as a user would, in about a minute and a half:
 
-    boot                     Home on top
+    boot                     Home on top; a guardian card (No Temperature Sensor) confirmed, any other dialog fails
     Library > Songs > Center Now Playing opens (playing_page); Return to Songs; back to Home
     Cover Flow > Center      an album's tracks (the screen changes); Center on a track: Now Playing
     Settings                 General, Playback, Display and Battery open and close
@@ -47,6 +47,13 @@ BOOT_S = 60          # s for Home to come up after `q2emu start`
 STEP_S = 8           # s for a step's window to come up
 INPUT_GAP_S = .3     # s after an input before looking for its effect
 TOAST_S, TOAST_MOST_S = 3, 15  # s with no toast before the first key; s at most to wait for that
+# q2guard's must-confirm cards (patch/heatguard.c, docs/internals.md#overheat-guardian): a confirm card
+# (GUARD_DIALOG) that demo says, in its answer file's "card" line, is one of these. q2guard decides on its
+# sensor within GUARD_S of its start before demo (three empty readings 5 s apart on the emulator), and the card
+# follows: boot waits for that verdict, confirms such a card with OK, and fails on any other dialog over Home.
+GUARD_S = 40
+GUARD_DIALOG = 'sortselect_dialog'
+GUARD_CARDS = {'nosensor': 'No Temperature Sensor', 'norun': "Overheat protection isn't running"}
 AVOID = (2,)         # the user's own slot (docs/orchestration.md: never touched)
 W, H = 320, 375      # the framebuffer's page (portrait), BGRA
 CHANGED_PX = 1500    # pixels that must differ for "the screen changed"
@@ -130,6 +137,36 @@ def top(stack):
     return names[-1] if names else None
 
 
+def boot_rule(stack, card):
+    """Over Home at boot: None when Home is on top, 'confirm' for a guardian card demo vouches for (card, from
+    its answer file), 'fail' for any other window."""
+    t = top(stack)
+    if t == 'home_page':
+        return None
+    return 'confirm' if t == GUARD_DIALOG and card in GUARD_CARDS else 'fail'
+
+
+def guard_files(pid):
+    """q2guard's state and demo's answers as dicts (key: value), from the sandbox's /tmp through demo's root;
+    None when the build has no q2guard."""
+    root = pathlib.Path(f'/proc/{pid}/root')
+    if not (root/'usr/bin/q2guard').exists():
+        return None
+    state, answers = {}, {}
+    for path, out in ((root/'tmp/q2guard.state', state), (root/'tmp/q2guard.ack', answers)):
+        try:
+            text = path.read_text()
+        except OSError:
+            continue
+        for word in text.replace('\n', ' ').split(' '):
+            if '=' in word:
+                out.setdefault(word.split('=', 1)[0], word.split('=', 1)[1])
+        for line in text.splitlines():
+            if ' ' in line and '=' not in line:
+                out[line.split(' ', 1)[0]] = line.split(' ', 1)[1]
+    return state, answers
+
+
 class Emulator:
     """A leased pool copy running the build under test, driven as a user would."""
 
@@ -178,9 +215,42 @@ class Emulator:
                     if (windows(self.pid) or [('', '')])[-1][1] in TRANSIENT[1:]:
                         calm = time.monotonic()
                     time.sleep(.2)
+                self.guard()
                 return
             time.sleep(.5)
         raise Failed(f'Home did not come up in {BOOT_S} s (windows: {self.pid and windows(self.pid)})')
+
+    def guard(self):
+        """Wait for q2guard's verdict on its sensor and confirm the card it brings (GUARD_CARDS); any other
+        dialog over Home fails."""
+        end, confirmed = time.monotonic() + GUARD_S, set()
+        while True:
+            files = guard_files(self.pid)
+            if files is None:
+                return  # a build without the guardian
+            state, answers = files
+            card = answers.get('card')
+            rule = boot_rule(self.stack(), card)
+            if rule == 'fail':
+                raise Failed(f'boot: a dialog over Home: windows are {[n for _, n in self.stack()]}, card {card}')
+            if rule == 'confirm':
+                self.log(f'boot: confirmed {GUARD_CARDS[card]}')
+                confirmed.add(state.get('seq'))
+                self.q2emu('key', 'centre')
+                gone = time.monotonic() + STEP_S  # one press: wait for demo to say the card has closed
+                while (guard_files(self.pid) or ({}, {}))[1].get('card') == card:
+                    if time.monotonic() > gone:
+                        raise Failed(f'boot: {GUARD_CARDS[card]} did not close on OK')
+                    time.sleep(.2)
+                continue
+            waiting = state.get('state', 'pending') == 'pending' or (
+                state.get('card') == 'nosensor' and state.get('seq') not in confirmed)
+            if not waiting:
+                self.settle(HOME_LIST)
+                return
+            if time.monotonic() > end:
+                raise Failed(f'boot: q2guard gave no verdict in {GUARD_S} s (state {state}, answers {answers})')
+            time.sleep(.5)
 
     def expect(self, name, why):
         """Wait for window name on top, then for it to finish opening: a key sent mid-slide is dropped."""

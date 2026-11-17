@@ -523,3 +523,17 @@ def test_smoke_turns_bluetooth_off_and_keeps_the_rest_of_the_config():
     assert smoke.bluetooth_off('[A]\nBLUETOOTH=1\nX=2\n') == '[A]\nBLUETOOTH=0\nX=2\n'
     assert smoke.bluetooth_off('[SYSSET]\nX=2\n') == '[SYSSET]\nBLUETOOTH=0\nX=2\n'
     assert smoke.bluetooth_off('[A]\nX=2\n') == '[A]\nX=2\n[SYSSET]\nBLUETOOTH=0\n'
+
+
+def test_smoke_confirms_only_the_guardian_cards_demo_vouches_for_at_boot():
+    """smoke.py's boot step (boot_rule): Home on top goes on; a confirm card demo's answer file names as one of
+    q2guard's must-confirm cards is confirmed; the same dialog without that word, or any other window, fails."""
+    home = [('normal', 'system_bar'), ('normal', 'home_page')]
+    card = home + [('dialog', 'sortselect_dialog')]
+    assert smoke.boot_rule(home, None) is None
+    assert smoke.boot_rule(home + [('dialog', 'msginfo_dialog')], None) is None  # a toast passes over
+    assert smoke.boot_rule(card, 'nosensor') == 'confirm'
+    assert smoke.boot_rule(card, 'norun') == 'confirm'
+    assert smoke.boot_rule(card, '-') == 'fail'                                 # a confirm card of another kind
+    assert smoke.boot_rule(card, None) == 'fail'
+    assert smoke.boot_rule(home + [('dialog', 'confirminfo_dialog')], 'nosensor') == 'fail'

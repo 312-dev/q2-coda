@@ -17,6 +17,7 @@ static struct {
     int off;                       /* the power-off taken over: its seq */
     unsigned off_at, off_ms;
     int acked, cancel; /* the answers last written */
+    const char *card;  /* the must-confirm card up (hg_info), or 0 */
     int norun_shown;
     int installed; /* /usr/bin/q2guard there: 1, not: -1, not looked yet: 0 */
 } hg __attribute__((section(".scratch")));
@@ -47,9 +48,12 @@ static int hg_int(const char *v) { /* a decimal, "-1" as -1 */
     return neg ? -n : n;
 }
 
-static void hg_answer(void) { /* both answers, rewritten whole */
-    char b[48];
-    int n = tk_snprintf(b, sizeof b, "ack %d\ncancel %d\n", hg.acked, hg.cancel);
+/* Both answers, and which must-confirm card is up ("card nosensor", "card norun", "card -"): the
+ * smoke test (tools/ci/smoke.py) confirms a card at boot only when demo says it is this one. */
+static void hg_answer(void) {
+    char b[64];
+    int n = tk_snprintf(b, sizeof b, "ack %d\ncancel %d\ncard %s\n", hg.acked, hg.cancel,
+                        hg.card ? hg.card : "-");
     int fd = open(HG_ACK, 0x80301, 0644); /* O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC (MIPS) */
     if (fd < 0) return;
     write(fd, b, n);
@@ -61,13 +65,13 @@ static void hg_load_answer(void *ctx, int row, int toggle_on) {
         hg.cancel = (int)(long)ctx, hg_answer(); /* Cancel; the countdown's end is row 1 */
 }
 static void hg_off_answer(void *ctx, int row, int toggle_on) { navigator_to("poweroff_page"); }
-static void hg_ok(void *ctx, int row, int toggle_on) {}
+static void hg_ok(void *ctx, int row, int toggle_on) { hg.card = 0, hg_answer(); }
 
 static const char *const hg_ok_row[] = { "OK" };
 static const char *const hg_load_rows[] = { "Cancel", "Shut Down" };
 static const char *const hg_off_row[] = { "Shutting Down" };
 
-static int hg_info(const char *title, const char *body) {
+static int hg_info(const char *card, const char *title, const char *body) {
     confirm_t c = { .title = title,
                     .body = body,
                     .rows = hg_ok_row,
@@ -75,7 +79,9 @@ static int hg_info(const char *title, const char *body) {
                     .kind = CONFIRM_INFO,
                     .back = -1,
                     .answer = hg_ok };
-    return hg_card(&c);
+    if (!hg_card(&c)) return 0;
+    hg.card = card, hg_answer();
+    return 1;
 }
 
 /* The power-off: answer, pause the audio, show the countdown, and at its end stock's own Shut Down
@@ -122,7 +128,7 @@ void heatguard_poll(void) {
     if (!hg.installed) hg.installed = access("/usr/bin/q2guard", 0) ? -1 : 1;
     if (!hg.norun_shown && hg.installed > 0 && now - hg.start >= HG_GRACE_MS &&
         now - hg.beat_at >= HG_STALE_MS &&
-        hg_info("Overheat protection isn't running",
+        hg_info("norun", "Overheat protection isn't running",
                 "Q2 can't watch for overheating\nuntil it restarts."))
         hg.norun_shown = 1;
     if (beat < 0) return;
@@ -140,7 +146,7 @@ void heatguard_poll(void) {
     if (!tk_strcmp(card, "warn")) {
         (hg_toast ? hg_toast : toast_later)("chargetoast_weak", "Q2 is getting hot");
     } else if (!tk_strcmp(card, "nosensor")) {
-        shown = hg_info("No Temperature Sensor",
+        shown = hg_info("nosensor", "No Temperature Sensor",
                         "Q2 can't detect overheating; it will\nwatch CPU load instead.");
     } else if (!tk_strcmp(card, "loadwarn")) {
         confirm_t c = { .title = "Q2 has been working hard",

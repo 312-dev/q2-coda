@@ -115,6 +115,9 @@ def test_sensor_down_is_a_card_with_one_ok_that_waits_its_turn(rig):
     card, = rig.cards
     assert card['title'] == 'No Temperature Sensor' and card['rows'] == ['OK'] and card['timeout'] == 0
     assert 'watch CPU load instead' in card['body']
+    assert rig.written[ACK].endswith('card nosensor\n')  # what smoke.py confirms at boot
+    rig.answer(0)
+    assert rig.written[ACK].endswith('card -\n')
 
 
 def test_the_load_warning_counts_down_and_its_cancel_is_answered(rig):
