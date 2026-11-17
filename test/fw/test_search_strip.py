@@ -27,6 +27,7 @@ STRIP_Y, STEP, RUN_X, VISIBLE, RET_L = 196, 19, 106, 10, 301  # the strip's top 
 EVT_POINTER_MOVE_BEFORE = O['EVT_POINTER_MOVE_BEFORE']
 GESTURE_MS = 250  # wheel ticks closer than this are one turn
 OLED = b'3'
+DONE = C.CFUNCTYPE(C.c_char_p, C.c_char_p)  # search_strip_text's done: 0 to close, else why not
 
 
 class Ss(C.Structure):
@@ -37,7 +38,8 @@ class Ss(C.Structure):
                 *((k, C.c_short) for k in 'down_x down_y pressed swiped'.split()), ('text', C.c_char * 65),
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
                 ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte),
-                ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte)]
+                ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
+                ('peek_timer', C.c_uint)]
 
 
 @pytest.fixture
@@ -909,11 +911,18 @@ def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
 
 
 # A stock text box (keyboard.c kb_strip_due) on the strip: the sets on its switcher; Play/Pause its own OK.
-def boxed(fw, ui, text=b'', kind='password'):
-    """A text box's edit, the input method's, opened on the strip."""
+def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', **props):
+    """A text box's edit, the input method's, in its window, opened on the strip. By default a Wi-Fi network's password
+    (kbwifipass_dialog's edit_passwd); as stock's every box, its input_type reads 0 (text) whatever its page says. props
+    are the edit's own (a card app's _secret)."""
     Config(fw)
-    edit = ui.new('edit', 0, 0, 0, 200, 40)
-    ui.props[(edit, 'input_type')] = kind
+    dialog = ui.new('window_create', 0, 0, 0, 375, 320)
+    ui.name[dialog] = window
+    edit = ui.new('edit', dialog, 0, 0, 200, 40)
+    ui.name[edit] = name
+    ui.props[(edit, 'input_type')] = 0
+    for k, v in props.items():
+        ui.props[(edit, k)] = v
     ui.text[edit] = text.decode()
     im = C.create_string_buffer(0x40)
     C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
@@ -928,7 +937,7 @@ def boxed(fw, ui, text=b'', kind='password'):
 
 def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     s = boxed(fw, ui)
-    assert s.ss.secret == 1 and s.ss.set == LOWER and s.ss.stop == 1 and 'Home Wi-Fi' in ui.text.values()
+    assert s.ss.secret and s.ss.set == LOWER and s.ss.stop == 1 and 'Home Wi-Fi' in ui.text.values()
     assert s.ss.page == s.kb and s.keys in ui.hidden  # on the keyboard's window, its keys hidden: no focus moves
     s.type('bA!b')
     assert s.ss.text == b'bA!b' and s.ss.set == LOWER
@@ -945,12 +954,79 @@ def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     assert [a[1] for _, a in fw.calls('input_method_request')] == [0]  # the OK left it open: closed, as Done does
 
 
+def test_the_last_character_typed_turns_to_a_dot_after_a_second_unprompted(fw, ui):
+    """The peek ends on its own: a timer a second after the character repaints, with no key pressed."""
+    s = boxed(fw, ui)
+    s.type('ab')
+    (t, ms), = ui.pending('search_strip__ss_peek_due')
+    assert ms == 1000
+    s.now[0] += 1000
+    ui.fire('search_strip__ss_peek_due')
+    assert [a[0] for _, a in fw.calls('widget_invalidate_force')][-1] == s.ss.sheet
+    assert '••' in [t for t, *_ in painted(fw, s).texts]
+
+
+def test_the_peek_is_the_character_just_typed_alone(fw, ui):
+    """Previous within the second moves the cursor: the character now before it stays a dot."""
+    s = boxed(fw, ui)
+    s.type('ab')
+    s.key(KEY_BACK_BTN)
+    assert s.ss.cur == 1 and '••' in [t for t, *_ in painted(fw, s).texts]
+
+
+@pytest.mark.parametrize('password', [1, 0])
+def test_add_network_s_dialog_is_a_password_only_when_stock_opened_it_for_one(fw, ui, password):
+    """Add Network's rows both open editwifi_dialog, one edit named edit; its init keeps which in EDITWIFI_PASSWORD
+    (1 the password row's, 0 the network name's): dots for the one, the name in plain for the other."""
+    mode = C.c_int.from_address(O['EDITWIFI_PASSWORD'])
+    mode.value = password
+    s = boxed(fw, ui, b'Home', 'edit', 'editwifi_dialog')
+    s.type('x')
+    s.now[0] += 1000
+    texts = [t for t, *_ in painted(fw, s).texts]
+    mode.value = 0  # stock's memory outlives the test
+    if password:
+        assert s.ss.secret and '•••••' in texts and 'Press Play/Pause to join' in texts
+    else:
+        assert not s.ss.secret and 'Homex' in texts and 'Password' not in texts
+
+
+def test_a_card_app_s_password_box_shows_dots_and_is_done_not_joined(fw, ui):
+    """A box the payload marks _secret (addon.c, a card app's password field): dots, its hint the box's own."""
+    s = boxed(fw, ui, b'', '', 'addon_page', _secret=1)
+    s.type('pw')
+    s.now[0] += 1000
+    texts = [t for t, *_ in painted(fw, s).texts]
+    assert '••' in texts and 'Password' in texts and 'Press Play/Pause when done' in texts
+
+
+def test_a_password_text_of_the_payload_s_own_shows_dots(fw, ui):
+    """search_strip_secret, then search_strip_text (the Guest Play hotspot's password): dots, the last character
+    for a second, Play/Pause saves; the next text is plain again."""
+    Config(fw)
+    taken = []
+    done = DONE(lambda t: taken.append(t) or None)
+    fw.fn('search_strip_secret', None)()
+    fw.fn('search_strip_text', None, C.c_char_p, C.c_char_p, C.c_int, DONE)(b'Hotspot', b'otter-42', 63, done)
+    s = attached(fw, ui)
+    texts = [t for t, *_ in painted(fw, s).texts]
+    assert s.ss.secret and '••••••••' in texts and not any('otter' in t for t in texts)
+    assert 'Press Play/Pause to save' in texts
+    s.type('x')
+    assert '••••••••x' in [t for t, *_ in painted(fw, s).texts]
+    s.key(KEY_PLAY)
+    assert taken == [b'otter-42x']
+    ui.close(ui.top())
+    fw.fn('search_strip_text', None, C.c_char_p, C.c_char_p, C.c_int, DONE)(b'Name', b'Q2', 31, done)
+    assert attached(fw, ui).ss.secret == 0
+
+
 def test_a_number_box_opens_on_digits_and_a_text_one_keeps_its_text(fw, ui):
-    assert boxed(fw, ui, b'1000', 'text').ss.set == DIGITS
+    assert boxed(fw, ui, b'1000', 'edit').ss.set == DIGITS
 
 
 def test_return_held_on_a_box_closes_it_and_its_keyboard(fw, ui):
-    s = boxed(fw, ui, b'abc', 'text')
+    s = boxed(fw, ui, b'abc', 'edit')
     s.down(ui.top(), KEY_RETURN)
     s.now[0] += HOLD_MS
     ui.fire('search_strip__ss_hold_tick')

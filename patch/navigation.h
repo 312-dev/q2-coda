@@ -941,6 +941,7 @@ int search_strip_box(void *kb, void *edit, const char *title);
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
 void search_strip_note(const char *note); /* ... the next one's note: who sees the text */
+void search_strip_secret(void);           /* ... the next one's text a password, as dots */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */

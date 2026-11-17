@@ -11,9 +11,10 @@
  * keyboard (kb_style), and kb_wheel_bg paints in its place under the label stock still draws.
  *
  * Under a list.entry.ipod theme no box keeps it (the user's, 2026-11-17: the letter strip, option
- * P1, for the Wi-Fi password and every other text box): a keyboard seen for the first time gives
- * its window to the letter strip for the same edit, its keys hidden (kb_strip_due, search_strip.c
- * search_strip_box), titled as the page the box is on. The rest of this file is what it was for a
+ * P1, for the Wi-Fi password and every other text box): each keyboard that opens, a box's second
+ * opening as its first, gives its window to the letter strip for the same edit, its keys hidden
+ * (kb_strip_due, search_strip.c search_strip_box), titled as the page the box is on; the window's
+ * close ends both (kb_gone, search_strip.c ss_closed). The rest of this file is what it was for a
  * keyboard the strip could not take. */
 #include "navigation.h"
 
@@ -82,9 +83,19 @@ static int kb_strip_due(const void *unused) {
     return 0;
 }
 
+/* The keyboard's window going: forgotten, so the next one is new to kb_style even at its address
+ * (stock's input method frees each keyboard as it closes, and the next is often at the same one). */
+static int kb_gone(void *ctx, void *event) {
+    stop_timer(&kw.timer);
+    kw.kb = kw.lit = (void *)0;
+    kw.at = 0;
+    return 0;
+}
+
 static void kb_style(void *kb) {
     if (kb == kw.kb) return;
     kw.kb = kb;
+    widget_on(kb, EVT_DESTROY, kb_gone, 0);
     rearm(&kw.timer, kb_strip_due, 0);
     kw.lit = (void *)0;
     kw.at = 0;

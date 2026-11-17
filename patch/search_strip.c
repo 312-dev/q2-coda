@@ -118,6 +118,8 @@
 #define SS_PX_CHIP TYPE(16)  /* 16 */
 #define SS_PX_SMALL TYPE(13) /* 13 */
 #define SS_PEEK_MS 1000      /* a password's last character typed shows this long */
+/* ss.secret: what the text is (ss_secret_box, search_strip_secret); a password shows as dots */
+enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI /* ... a Wi-Fi network's: submitting joins */ };
 /* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
  * the key 18 px wide from the lit cell's left and SS_KEY_IN below the strip's top, as the lit
  * cell's accent box is; the big characters a strip of a head's box per character, in
@@ -167,7 +169,7 @@ static struct {
     const char *(*done)(const char *); /* ... the latter's, given the text when submitted */
     int max;                           /* ... the latter's characters, at most */
     const char *note;           /* ... and who sees the text, over its hint (search_strip_note) */
-    int secret, set;            /* the box is a password; the strip's set, SS_SET_* */
+    int secret, set;            /* the text is a password, SS_SECRET_*; the strip's set, SS_SET_* */
     unsigned typed_at, turn_at; /* the last character typed (shown a moment); the last tick */
     unsigned char halted;       /* this turn stopped on the return key */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
@@ -178,6 +180,7 @@ static struct {
     unsigned char held;              /* the hold's card shows */
     unsigned erase_timer, erase_gap; /* Previous held: its timer, the gap to the next erase */
     unsigned char prev_down, erased; /* Previous is down; its hold erased (the release is its) */
+    unsigned peek_timer;             /* a password's last character typed: dots again when due */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -285,6 +288,13 @@ static void ss_filter(void) {
     }
 }
 
+/* A password's last character typed has shown its second: the text is dots again. */
+static int ss_peek_due(const void *unused) {
+    ss.peek_timer = 0;
+    if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
+    return 0;
+}
+
 /* Run entry e typed at the cursor: the set's character as it reads, or a space (on Search and a
  * name not first, nor beside another). The text is ASCII, a byte a character. */
 static void ss_type(int e) {
@@ -296,6 +306,7 @@ static void ss_type(int e) {
         return;
     unsigned now = (unsigned)time_now_ms();
     ss.typed_at = now ? now : 1; /* 0: nothing typed */
+    if (ss.secret) rearm(&ss.peek_timer, ss_peek_due, SS_PEEK_MS);
     for (int i = n + 1; i > at; --i) ss.text[i] = ss.text[i - 1];
     ss.text[at] = c;
     ++ss.cur;
@@ -643,9 +654,9 @@ int search_strip_key(void *top, unsigned key) {
     else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
         ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
     else if (button < 0) {
-        if (ss.cur) --ss.cur;
+        if (ss.cur) --ss.cur, ss.typed_at = 0; /* the peek is the character just typed alone */
     } else if (button > 0) {
-        if (ss.text[ss.cur]) ++ss.cur;
+        if (ss.text[ss.cur]) ++ss.cur, ss.typed_at = 0;
     } else
         return 0;
     if (ss.page) { /* a submit may have closed it */
@@ -803,7 +814,11 @@ static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
     *o = 0;
     ss_centred(canvas, 0, "Password", SS_LABEL_Y, SS_PX_HINT, tertiary);
     ss_value_paint(canvas, shown, ss.cur, SS_SECRET_Y, primary);
-    ss_centred(canvas, 0, "Press Play/Pause to join", SS_SECRET_HINT_Y, SS_PX_SMALL, tertiary);
+    ss_centred(canvas, 0,
+               ss.secret == SS_SECRET_WIFI ? "Press Play/Pause to join"
+               : ss.done                   ? "Press Play/Pause to save"
+                                           : "Press Play/Pause when done",
+               SS_SECRET_HINT_Y, SS_PX_SMALL, tertiary);
 }
 
 /* ringnav_paint, after stock painted w: Return held, the screen dimmed by black at 55%
@@ -1107,6 +1122,7 @@ static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
     stop_timer(&ss.hold_timer);
     stop_timer(&ss.erase_timer);
+    stop_timer(&ss.peek_timer);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
     free(ss.kind);
@@ -1173,6 +1189,19 @@ void add_songs_search(void) {
     ss.tab = SS_TAB_SONGS;
 }
 
+/* What a text box's edit takes, SS_SECRET_*. Stock's Wi-Fi password boxes say so by neither
+ * input_type (its pages' "password" reads back as 0, text) nor anything else on the edit:
+ * a network's own (kbwifipass_dialog) is the edit named edit_passwd, and Add Network's two rows
+ * both type in editwifi_dialog, whose init keeps which in EDITWIFI_PASSWORD. A payload box marks
+ * itself _secret (addon.c search_box, a card app's password field). */
+static int ss_secret_box(void *edit) {
+    if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), "edit_passwd") ||
+        (!tk_strcmp(widget_get_prop_str(window_of(edit), "name", ""), "editwifi_dialog") &&
+         *(volatile int *)EDITWIFI_PASSWORD))
+        return SS_SECRET_WIFI;
+    return widget_get_prop_int(edit, "_secret", 0) ? SS_SECRET_PASS : SS_SECRET_NONE;
+}
+
 /* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip types for
  * it on the keyboard's own window, the keys hidden and the window over the
  * screen under the status row, so nothing takes the edit's focus (a page of its own would: a
@@ -1189,7 +1218,7 @@ int search_strip_box(void *kb, void *edit, const char *title) {
     widget_set_prop_int(kb, "h", 320 - top);
     widget_on(kb, EVT_DESTROY, ss_closed, 0);
     ss.box = edit;
-    ss.secret = !tk_strcmp(widget_get_prop_str(edit, "input_type", ""), "password");
+    ss.secret = ss_secret_box(edit);
     widget_get_text_utf8(edit, ss.text, sizeof ss.text);
     ss.cur = (int)strlen(ss.text);
     int digits = ss.cur > 0;
@@ -1212,13 +1241,19 @@ int search_strip_box(void *kb, void *edit, const char *title) {
  * name"), in 15 px Text Secondary under it, the hint then in 13 px under that. */
 static const char *strip_note __attribute__((section(".scratch")));
 void search_strip_note(const char *note) { strip_note = note; }
+/* The next search_strip_text's text is a password (the Guest Play hotspot's): dots, the character
+ * just typed shown a second, as a password box's. */
+static int strip_secret __attribute__((section(".scratch")));
+void search_strip_secret(void) { strip_secret = 1; }
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *)) {
     const char *note = strip_note;
-    strip_note = 0;
+    int secret = strip_secret;
+    strip_note = 0, strip_secret = 0;
     if (ss.page || !done || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
     ss.box = ss.page, ss.done = done, ss.note = note;
+    ss.secret = secret ? SS_SECRET_PASS : SS_SECRET_NONE;
     ss.max = max > 0 && max < SS_TEXT_MAX ? max : SS_TEXT_MAX;
     tk_snprintf(ss.text, (unsigned)ss.max + 1, "%s", text ? text : "");
     ss.cur = (int)strlen(ss.text);
