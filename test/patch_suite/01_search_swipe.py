@@ -160,7 +160,7 @@ hook=m.u.hook_add(UC_HOOK_CODE,count_payload,begin=BASE,end=SCRATCH-1)
 m.call(address=payload_syms['cc_paint'],args=(m.top,m.canvas,0,0),gap=0,count=5_000_000)
 m.u.hook_del(hook)
 print('Control Center landing frame:',instructions[0],'payload instructions')
-assert any(r['rect']==(20,38,138,124) for r in m.rounded),m.rounded  # cc_paint ran: the connectivity block
+assert any(r['rect']==(20,38,158,210) for r in m.rounded),m.rounded  # cc_paint ran: the toggles' block
 assert instructions[0]<600_000,instructions; passed()
 # A swipe down whose release the pull-down never got (stock state 1 or 2, no touch, no slide timer)
 # leaves it on top off screen, the page under it stopped (#189): the next UI pass hands it the

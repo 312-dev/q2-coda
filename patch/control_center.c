@@ -8,10 +8,10 @@
  * under both, where the swipe up that closes it starts. Buttons Lock keeps its hardware hold,
  * Night Shift and Sleep Timer their Settings rows, Guest Play its Bluetooth row.
  *
- * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth buttons, at opacity 0 over
- * their circles, take the taps and holds (navigation.c quick_down: held, their settings pages), and
- * its brightness slider, at opacity 0 over the Brightness slider, takes the drags; Centre on those
- * clicks them as a tap would. Every other control is a clear button of this file's (cc_click).
+ * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth switches, at opacity 0 under
+ * their circles, are clicked by a tap or Centre there (cc_act), and its brightness slider, at
+ * opacity 0 over the Brightness slider, takes the drags. Every circle, the Now Playing block, its
+ * transport and the Volume slider are clear buttons of this file's (cc_click, cc_drag).
  * The wheel walks CC_STOPS, the toggles by rows, the Now Playing block (while something is
  * loaded) and the two sliders, a white ring round the one it is on; Centre acts on it, and on a
  * slider gives it the wheel (an accent ring) until Centre or Return gives it back.
@@ -539,11 +539,13 @@ void cc_open(void *win) {
     }
     for (unsigned i = 0; i < sizeof hidden / sizeof *hidden; ++i)
         if ((c = widget_lookup(win, hidden[i], 1))) widget_set_visible(c, 0, 0);
+    /* stock's Wi-Fi and Bluetooth switches, clicked by cc_act, under their circles' buttons: left
+     * at stock's places, a tap on the block's padding would toggle them */
     for (int i = CC_WIFI; i <= CC_BT; ++i) {
         rect_t r = cc_box(i);
         if (!(c = cc_stock(win, i))) continue;
         widget_move_resize(c, r.x, r.y, r.w, r.h);
-        widget_set_opacity(c, 0); /* held: their settings pages (navigation.c quick_long) */
+        widget_set_opacity(c, 0);
     }
     rect_t b = cc_box(CC_BRIGHT);
     if ((c = widget_lookup(win, "view_backlight", 1))) widget_move_resize(c, b.x, b.y, b.w, b.h);
@@ -552,8 +554,11 @@ void cc_open(void *win) {
         widget_move_resize(c, 0, 0, b.w, b.h);
         widget_set_opacity(c, 0);
     }
-    /* in order, so the transport's buttons lie over the Now Playing block's and take its taps */
-    for (int i = CC_AIRPLAY; i < CC_BUTTONS; ++i) {
+    /* a clear button over every stop but Brightness, in order, so the transport's lie over the Now
+     * Playing block's and take its taps. Wi-Fi and Bluetooth have theirs too: stock's hidden
+     * label_wifi and label_bt still take a touch (its hit test skips no hidden widget) and lie over
+     * their switches inside view_menu, so a tap or hold never reached the switch. */
+    for (int i = CC_WIFI; i < CC_BUTTONS; ++i) {
         if (i == CC_BRIGHT) continue;
         rect_t r = cc_box(i);
         void *button = button_create(win, r.x, r.y, r.w, r.h);

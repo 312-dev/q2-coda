@@ -1491,10 +1491,11 @@ class Ui:
         self.handlers.append((w, kind, fn, ctx))
         return len(self.handlers)
 
-    def emit(self, w, kind):
-        """Run w's handlers for kind, as stock's emitter would."""
+    def emit(self, w, kind, x=0, y=0):
+        """Run w's handlers for kind, as stock's emitter would; a pointer event's place x, y."""
         e = C.create_string_buffer(0x40)
         struct.pack_into('<i', e, EVENT_TYPE, kind)
+        struct.pack_into('<ii', e, O['EVENT_X'], x, y)
         for hw, hk, fn, ctx in list(self.handlers):
             if hw == w.p and hk == kind:
                 HANDLER(fn)(ctx, C.addressof(e))
@@ -2579,7 +2580,7 @@ def cc_opened(fw, ui):
     fw.mock('button_create', lambda win, x, y, w, h, *_: buttons.append(ui.by[win].add(W(ui, 'button', x=x, y=y, w=w, h=h)))
             or buttons[-1].p)
     fw.fn('cc_open', None, C.c_void_p)(top.p)
-    stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
+    stops = [i for i in range(CC_STOPS + 3) if i != CC_BRIGHT]  # Wi-Fi to the transport's Next
     return top, dict(zip(stops, buttons))
 
 
@@ -2609,7 +2610,7 @@ def opened(fw):
     return [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] + fw.cc_windows
 
 
-@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[0] > 1])
+@pytest.mark.parametrize('stop, page', HOLDS)
 def test_a_finger_held_on_a_toggle_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
     """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle
     closes Control Center and opens its page; its release does not click it."""
@@ -2627,6 +2628,52 @@ def test_a_finger_held_on_a_toggle_opens_its_settings_page_and_a_tap_still_acts(
     event = C.create_string_buffer(0x40)
     struct.pack_into('<i', event, EVENT_TYPE, EVT_CLICK)
     assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
+
+
+CC_PREV, CC_PLAY, CC_NEXT = CC_STOPS, CC_STOPS + 1, CC_STOPS + 2
+
+
+def test_every_stop_has_a_button_over_it_above_stock_s_widgets(fw, keys):
+    """cc_open: a clear button over each circle (Wi-Fi's and Bluetooth's too), the Now Playing block, the Volume
+    slider and each transport glyph, made after stock's view_menu so a touch finds it first: stock's hidden label_wifi
+    and label_bt lie over those two switches inside view_menu and took their taps (the device, 2026-11-17: tapping
+    Wi-Fi or Bluetooth did nothing)."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    boxes = {stop: (b.int(W_X), b.int(W_X + 4), b.int(W_X + 8), b.int(W_X + 12)) for stop, b in buttons.items()}
+    assert boxes[0] == (46, 48, 40, 40) and boxes[1] == (112, 48, 40, 40) and boxes[CC_EQ] == (112, 180, 40, 40)
+    assert boxes[CC_NOW] == (188, 38, 167, 114) and boxes[CC_VOLUME] == (188, 210, 167, 38)
+    assert boxes[CC_PLAY] == (271 - 21, 125 - 21, 42, 42) and boxes[CC_PREV][0] + 46 == boxes[CC_NEXT][0] - 46
+    assert all(b.opacity == 0 for b in buttons.values())
+
+
+@pytest.mark.parametrize('stop, clicked', [(0, b'img_wifiswitch'), (1, b'img_btswitch')])
+def test_a_tap_on_wi_fi_or_bluetooth_clicks_stock_s_switch_as_centre_does(fw, keys, stop, clicked):
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    ui.emit(buttons[stop], EVT_CLICK)
+    assert ui.clicks == [(clicked, EVT_CLICK)] and not fw.calls('dialog_quit') and not fw.calls('navigator_to')
+
+
+@pytest.mark.parametrize('stop, fn', [(CC_PREV, 'prev_quick_click'), (CC_PLAY, 'player_play_pause'),
+                                      (CC_NEXT, 'next_quick_click')])
+def test_a_tap_on_the_transport_skips_or_plays(fw, keys, stop, fn):
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    ui.emit(buttons[stop], EVT_CLICK)
+    assert len(fw.calls(fn)) == 1 and not fw.calls('dialog_quit')
+
+
+@pytest.mark.parametrize('x, want', [(188 + 83, 83 * 100 // 167), (188, 0), (188 + 167, 100), (400, 100)])
+def test_a_finger_on_the_volume_slider_sets_the_volume_where_it_is(fw, keys, x, want):
+    """cc_drag: from the press, the volume is where the finger is along the slider (up to Volume Limit)."""
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 30, 100
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(buttons[CC_VOLUME], O['EVT_POINTER_DOWN'], x=x, y=229)
+    assert vol.value == want and [c[1][0] for c in fw.calls('device_set_volume')] == [want]
 
 
 def test_a_tap_on_a_toggle_acts_and_opens_nothing(fw, keys):
