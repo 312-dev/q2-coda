@@ -148,6 +148,27 @@ int ble_retry_due(uint32_t now_ms);
 void crc_ble_connected(void);
 void crc_ble_bytes(const uint8_t *p, size_t n);
 void crc_ble_gone(void);
+int crc_tcp_port(void); /* the port TCP sessions are accepted on (CRC_TCP_PORT, or --port) */
+
+/* ---- mDNS (coda_rc_mdns.c, docs/remote-protocol.md#discovery) ---- */
+#define MDNS_TTL 120 /* seconds, every record */
+enum { MD_PTR = 1, MD_SRV = 2, MD_TXT = 4, MD_A = 8, MD_ENUM = 16, MD_ALL = 31 };
+typedef struct {
+    uint8_t ip[4], id[8]; /* the address (network order) and crc_device_id */
+    uint16_t port;
+    char name[64]; /* the instance: the Bluetooth name */
+    char host[64]; /* the host's label, before .local */
+} mdns_self;
+/* the records a packet asks for (MD_* bits), 0 none of ours or not a query, -1 malformed */
+int mdns_query(const mdns_self *me, const uint8_t *p, size_t n);
+/* a response with those records as answers (and what they lead to as additionals) at ttl into out; its size,
+ * 0 when it does not fit */
+size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *out, size_t cap);
+void mdns_start(const char *ifname); /* answer on ifname's address whenever it has one */
+int mdns_fd(void);                   /* the socket to poll for POLLIN, -1 with none */
+void mdns_poll(uint32_t now_ms);     /* every pass: the address and name followed, announcements sent */
+void mdns_handle(void);              /* a packet waiting on mdns_fd */
+void mdns_stop(void);                /* goodbye, and closed */
 
 #define CRC_PAIR_TIMEOUT_MS 120000
 #define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */

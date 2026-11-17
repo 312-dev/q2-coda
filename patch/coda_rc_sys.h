@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -41,6 +42,12 @@ typedef unsigned socklen_t;
 #define F_SETFL 4
 #define AF_INET 2
 #define SOCK_STREAM 2 /* MIPS swaps STREAM and DGRAM */
+#define SOCK_DGRAM 1
+#define IPPROTO_IP 0
+#define IP_MULTICAST_IF 32
+#define IP_MULTICAST_TTL 33
+#define IP_ADD_MEMBERSHIP 35
+#define SIOCGIFADDR 0x8915
 #define SOL_SOCKET 0xffff
 #define SO_REUSEADDR 4
 #define SO_SNDTIMEO 0x1005
@@ -63,6 +70,7 @@ typedef unsigned socklen_t;
 #define errno (*__errno_location())
 struct in_addr { uint32_t s_addr; };
 struct sockaddr_in { unsigned short sin_family, sin_port; struct in_addr sin_addr; char zero[8]; };
+struct ip_mreq { struct in_addr imr_multiaddr, imr_interface; };
 struct pollfd { int fd; short events, revents; };
 struct timespec { long tv_sec, tv_nsec; };
 struct timeval { long tv_sec, tv_usec; };
@@ -75,6 +83,9 @@ long lseek(int, long, int);
 int socket(int, int, int), setsockopt(int, int, int, const void *, socklen_t), bind(int, const void *, socklen_t);
 int listen(int, int), accept(int, void *, socklen_t *);
 ssize_t send(int, const void *, size_t, int);
+ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);
+ssize_t recvfrom(int, void *, size_t, int, void *, socklen_t *);
+int ioctl(int, unsigned long, ...);
 int poll(struct pollfd *, unsigned long, int);
 int clock_gettime(int, struct timespec *);
 long time(long *);

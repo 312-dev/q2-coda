@@ -5,6 +5,8 @@
  * radio commands, the pairing code and the connected phones in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
+ * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
+ * names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
@@ -21,6 +23,11 @@ enum { TR_TCP, TR_BLE };
 
 static char root[160];
 static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
+#ifdef CODA_HOST
+static const char *mdns_if; /* the tests' daemon is never on the network unless asked */
+#else
+static const char *mdns_if = "wlan0";
+#endif
 uint8_t crc_device_id[8];
 
 typedef struct {
@@ -578,6 +585,8 @@ static int tcp_listen(void) {
     return fd;
 }
 
+int crc_tcp_port(void) { return port; }
+
 /* ---- BLE's session (coda_rc_ble.c calls these) ---- */
 
 void crc_ble_connected(void) {
@@ -719,6 +728,8 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
+        else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
+        else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
     }
     setpriority(PRIO_PROCESS, 0, 19);
     signal(SIGPIPE, SIG_IGN);
@@ -732,12 +743,14 @@ int main(int argc, char **argv) {
     int lfd = tcp_listen();
     crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
     int bfd = use_ble ? ble_start() : -1;
+    if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;
     uint32_t last_tick = 0;
     while (!quit) {
         struct pollfd fds[MAX_TCP + 3];
-        int nf = 0;
+        int nf = 0, mfd = mdns_fd();
         if (lfd >= 0) fds[nf++] = (struct pollfd){lfd, POLLIN, 0};
+        if (mfd >= 0) fds[nf++] = (struct pollfd){mfd, POLLIN, 0};
         if (bfd >= 0) fds[nf++] = (struct pollfd){bfd, (short)ble_events(), 0};
         int at[MAX_TCP];
         for (int i = 0; i < MAX_TCP; ++i) {
@@ -748,6 +761,7 @@ int main(int argc, char **argv) {
         if (r < 0 && errno != EINTR) break;
         int k = 0;
         if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd);
+        if (mfd >= 0 && fds[k++].revents & POLLIN) mdns_handle();
         if (bfd >= 0) ++k;
         ble_handle(); /* every pass: libdbus may hold bytes it has already read */
         for (int i = 0; i < MAX_TCP; ++i)
@@ -756,6 +770,7 @@ int main(int argc, char **argv) {
         ack_poll();
         online_poll();
         uint32_t now = crc_now_ms();
+        mdns_poll(now);
         if (now - last_tick >= 1000) {
             last_tick = now;
             crc_tick();
@@ -771,6 +786,7 @@ int main(int argc, char **argv) {
         if (tcp[i].used) conn_close(&tcp[i]);
     if (ble.used) conn_close(&ble);
     ble_stop();
+    mdns_stop();
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.online");
     unlink_at("/tmp/coda-rc.pid");
