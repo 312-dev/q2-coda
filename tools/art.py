@@ -286,6 +286,7 @@ ROW_ICON_PX = 20
 ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = inks('secondary', 'd', 'l', 'w')  # Text Secondary in each half, white on the bar
+CTA_RING_INKS = inks('primary', 'd', 'l')  # the buttons' focus ring (cta_ring_end), Text Primary per half
 SORT = 'M0 0H16V2H0ZM0 5H11V7H0ZM0 10H6V12H0Z'
 SORT_BOX = (0, 0, 16, 12)  # Songs' Sort (navigation.c action_row), white as stock's glyphs: Light Mode flips it to the ink
 CIRCLE_CHECK_PX = 11  # the row editors' check circle's glyphs (list_marks.c CIRCLE_CHECK_PX, CIRCLE_LOCK_PX)
@@ -499,6 +500,22 @@ def corner_cover(r):
     n = 16
     inside = lambda x, y: sum(math.hypot(r - x - (i + .5) / n, r - y - (j + .5) / n) <= r for i in range(n) for j in range(n))
     return bytes(round(inside(x, y) * 255 / n ** 2) for y in range(r) for x in range(r))
+
+# The buttons' focus ring (ui_kit.c cta_capsule, docs/oled-design.md#buttons): CTA_RING_W px in Text Primary, 3 px out
+# from the 38 px capsule (ui_kit.h CTA_RING_OFF), so CTA_RING_H tall, its ends half circles of radius CTA_RING_H / 2
+# outside and CTA_RING_W less inside. Its two ends are these images, 16 x 16 samples a pixel as the corner tables'; the
+# straight runs between them are whole pixels, which the payload fills.
+CTA_RING_H, CTA_RING_W = 48, 2
+def cta_ring_end(right, rgb):
+    """The ring's left (right False) or right end, CTA_RING_H / 2 wide and CTA_RING_H tall, as a PNG in rgb."""
+    r, n = CTA_RING_H // 2, 16
+    def cover(x, y):
+        return sum(r - CTA_RING_W < math.hypot(x + (i + .5) / n - r, y + (j + .5) / n - r) <= r
+                   for i in range(n) for j in range(n)) / n ** 2
+    cov = [cover(r - 1 - x if right else x, y) for y in range(CTA_RING_H) for x in range(r)]
+    return png(r, CTA_RING_H, laid(r, CTA_RING_H, [(cov, lambda x, y: (rgb, 1))]))
+
+
 def corner_table():
     """The tables as a C initialiser, by radius."""
     rows = (f'[{r}] = (const unsigned char[]){{ {",".join(map(str, corner_cover(r)))} }}' for r in CORNERS)
@@ -672,6 +689,8 @@ def images(t):
     out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
+    # the buttons' focus ring's ends (ui_kit.c cta_capsule), Text Primary per half
+    out |= {f'{prefix}_ctaring_{s}_{k}': cta_ring_end(s == 'r', c) for s in 'lr' for k, c in CTA_RING_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
     out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
