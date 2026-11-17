@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
 import emu_pool  # noqa: E402
+import json  # noqa: E402
 import patch_shards  # noqa: E402
 
 ALL = affected.ALL
@@ -161,3 +162,27 @@ def test_a_changed_run_script_is_refused(tmp_path):
         assert 'run.sh has changed' in str(e)
     else:
         raise AssertionError('fit took a run.sh it cannot place the stand-in in')
+
+
+def test_a_reserved_lease_is_never_reclaimed_or_handed_on(tmp_path, monkeypatch):
+    """The user's rig (slot 2) was handed to an agent once its lease ran out (2026-11-16 18:30): a reserved lease
+    stays with its holder past its end, and `get` by another name takes a free copy or waits."""
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path)
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': 'running', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    past = 1.0
+    (tmp_path/'leases.json').write_text(json.dumps({'1': {'name': 'aa-dhu', 'build': '/b', 'since': 0, 'until': past, 'reserved': True},
+                                                    '2': {'name': 'old', 'build': '/b', 'since': 0, 'until': past}}))
+    assert emu_pool.get('/b', 'agent', 1, wait=False) == 2  # the unreserved expired one, not the user's
+    leases = json.loads((tmp_path/'leases.json').read_text())
+    assert leases['1']['name'] == 'aa-dhu' and leases['1']['reserved'] and leases['2']['name'] == 'agent'
+    try:
+        emu_pool.get('/c', 'other', 1, wait=False)
+    except SystemExit as e:
+        assert 'leased' in str(e)
+    else:
+        raise AssertionError('a reserved copy was handed on')
+    emu_pool.reserve(1, on=False)
+    assert emu_pool.get('/c', 'other', 1, wait=False) == 1  # unreserved and expired: reclaimed

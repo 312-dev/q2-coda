@@ -183,6 +183,8 @@ python3 tools/ci/emu_pool.py get "$B"              # borrow a shared emulator (s
 
 `python3 tools/ci/emu_pool.py get BUILD` leases one of four shared emulator copies, `~/q2-emu-pool1` to `~/q2-emu-pool4` (port 2401 up), boots BUILD on it and prints how to drive it (`~/q2-emu-pool2/q2emu shot out.png`, `key centre`, `wheel 3`, `tap X Y`). `put SLOT` gives it back; a lease lasts two hours unless renewed (`renew SLOT`), and an expired one is stopped for the next agent. Asking again for the same build under the same name reuses the running emulator. When all four are leased, `get` waits. The copies are made from `~/q2-emu-server`'s scripts and serial record; nothing there is changed. Use the pool instead of cloning a copy of your own: 14 emulators and builds at once took the machine down on 2026-11-16.
 
+A lease made with `get --reserve`, or marked later with `emu_pool.py reserve SLOT` (the user's own rig, slot 2), is never reclaimed when it expires and never handed to another name; `status` shows it RESERVED, and only `put` or `reserve SLOT --off` frees it.
+
 Each copy's Car Remote daemon listens on its own TCP port, 7700 plus the slot (`~/q2-emu-pool2`'s on 7702), not the Q2's 7720, so two copies with Car Remote on never fight over one port. `emu_pool.py` (`fit`) gives each copy's `q2emu` its `Q2EMU_CODA_PORT`, and its `run.sh` binds a stand-in over `/usr/bin/coda-rc` that runs the build's own daemon with `--port`; the firmware is unchanged. A phone or Android Auto rig that reaches the Q2 at `127.0.0.1:7720` through `adb reverse` points at a slot with `adb reverse tcp:7720 tcp:7702` (the aa-dhu rig on slot 2), or sets the app's TCP address to `127.0.0.1:7702` instead. A copy made before this gets it at its next `get`.
 
 ### Live reload
