@@ -3573,6 +3573,32 @@ unsigned char now_cover(void *r, const char **file) {
     return type;
 }
 
+/* r's cover as a file:// URL in url (size bytes, a cover's path cut short counted as none), as Home's pane finds it: the player's file once
+ * the cover thread has parsed r (now_cover: embedded, folder image or downloaded; for a server
+ * song's stream download, its app's cover first, catalogue.c cat_copy_of), else the app's cover of
+ * a server row's album (catalogue_cover), else Cover Flow's cache of the album by its tags
+ * (now_tag: the playing file's own). 0, url empty, for none: the caller's placeholder. Control
+ * Center and the modal header take it. */
+int song_cover_url(void *r, char *url, unsigned size) {
+    const char *file = (const char *)0;
+    char art[512];
+    *url = 0;
+    if (!r || size < 8) return 0;
+    if (now_cover(r, &file) && file && *file) {
+        tk_snprintf(url, size, "%s", file); /* a file:// URL already */
+        return 1;
+    }
+    tk_snprintf(url, 8, "file://");
+    if (catalogue_cover(P(r, REC_PATH), url + 7, size - 7)) return 1;
+    art_path(art, tags_key(now_tag(r, REC_ARTIST), now_tag(r, REC_ALBUM)), "");
+    if (file_size(art) > 0 && strlen(art) < size - 7) {
+        tk_snprintf(url + 7, size - 7, "%s", art);
+        return 1;
+    }
+    *url = 0;
+    return 0;
+}
+
 /* Repaint every window once the paint that changed the art is over: AWTK drops what a paint
  * invalidates when the frame ends, so the new art would reach only regions repainted later. */
 static int home_repaint(const void *unused) {

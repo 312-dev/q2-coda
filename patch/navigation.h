@@ -916,6 +916,8 @@ void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
 void modal_after(void *w, void *canvas);
 void modal_head(const char *title, const char *sub, void *r);
+/* coverflow.c: r's cover as Home finds it, a file:// URL in url; 0, url empty, for none */
+int song_cover_url(void *r, char *url, unsigned size);
 void modal_red(void *row);
 int modal_is_red(void *row);
 int modal_sel_height(void *view, int h);

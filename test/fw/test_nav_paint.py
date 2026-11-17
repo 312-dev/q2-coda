@@ -11,6 +11,7 @@ import pytest
 
 import host
 from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, in_fork, libc
+from test_nav_hold import recs  # noqa: F401  stSongInfo records P() reads whole
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -2326,3 +2327,48 @@ def test_an_empty_folder_level_says_so(fw, world):
     deques[level].clear()
     folder(other)
     assert not world.find(other, '_empty_state')
+
+
+CC_ART_AT = (178, 50, 52, 52)  # control_center.c: the Now Playing block's cover, CC_ART square
+
+
+def cc_playing(fw, world, mcl, recs, path, cover_type=0):
+    """Control Center over a queue playing one record at path, by artist B on album A; the player's cover thread has
+    parsed it as cover_type (now_cover: 1 embedded, 2 folder image, 3 none; 0 not parsed). The canvas."""
+    deques = Deques(fw)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = deques.new([recs(path=path, title='Song', artist='B', album='A')])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode() if cover_type else b''
+    fw.var('g_playcover_type', C.c_ubyte).value = cover_type
+    canvas = control_center(fw, world)
+    canvas.keep = deques
+    return canvas
+
+
+def test_control_center_shows_the_cover_home_shows(fw, world, mcl, recs):
+    """Control Center's Now Playing block takes the song's cover from the same lookup as Home's pane and the modal
+    header (coverflow.c song_cover_url): the player's file once it has parsed the song (embedded art or a folder
+    image, its cached bitmap dropped when the song changes, as the player writes each song's to one file), else Cover
+    Flow's cache of the album; none is the block's grey square. Before, the block asked for the
+    player's file as "file://file://..." and showed the grey square for every song (the device, 2026-11-16: 'Heart
+    Shaped Box' blank while Home showed its cover)."""
+    files = Files(fw)
+    for kind in (1, 2):
+        canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=kind)
+        name = 'file:///tmp/coverpic.jpg' if kind == 1 else 'file:///tmp/externpic.jpg'
+        assert canvas.art(name) == [CC_ART_AT], (kind, sorted(set(canvas.loaded.values())))
+    unloads = lambda: fw.calls('image_manager_unload_bitmap_by_name')  # the name was cc_paint's own buffer
+    before = len(unloads())
+    paint_bg(fw, world.top, Canvas(fw))  # the same song and file: the cached bitmap stays
+    assert len(unloads()) == before
+    cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/b.flac', cover_type=1)  # the next song, the same file
+    assert len(unloads()) == before + 1
+    key = fw.fn('tags_key', C.c_uint, C.c_char_p, C.c_char_p)(b'B', b'A')
+    cached = f'/mnt/mmc/.coverflow/{key:08x}.jpg'
+    files.files[cached] = b'\xff\xd8jpeg'
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=3)  # the player found none
+    assert canvas.art('file://' + cached) == [CC_ART_AT]
+    del files.files[cached]
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=3)
+    assert canvas.arts == [a for a in canvas.arts if a[1] != CC_ART_AT]
+    assert (CC_ART_AT, rgba(0x3a3a3c)) in [(r, c) for r, c, _ in canvas.rounded]  # the grey square

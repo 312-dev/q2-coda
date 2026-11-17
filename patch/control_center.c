@@ -26,12 +26,13 @@
  * name, which only the Wi-Fi page reads. */
 #include "navigation.h"
 
+extern unsigned now_cover_written(const char *file); /* coverflow.c */
+
 extern int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x,
                    int y, int w, int align);
 extern void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
-extern void keylock_toggle(void), coda_rc_toggle(void);     /* navigation.c, coda_rc_shim.c */
-extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
-extern int xfade_open(void *ctx, void *event);              /* crossfade.c */
+extern void keylock_toggle(void), coda_rc_toggle(void); /* navigation.c, coda_rc_shim.c */
+extern int xfade_open(void *ctx, void *event);          /* crossfade.c */
 
 /* The layout, in the window's (the screen's) pixels, as mock_cc3.py draws it at 1x */
 #define CC_X0 20
@@ -277,13 +278,20 @@ void cc_paint(void *win, void *canvas) {
     unsigned pos, n;
     void *rec = queue_now(&pos, &n);
     rect_t art = { np.x + 12, CC_Y0 + 12, CC_ART, CC_ART };
-    const char *cover = 0;
-    char url[600] = "file://";
-    if (rec) now_cover(rec, &cover);
+    /* the song's cover as Home's pane finds it (coverflow.c song_cover_url), else the grey square.
+     * The player writes every song's cover to one file: when the song or that file changes, the
+     * image cache's bitmap of the last is dropped first, as Now Playing's np_art_poll does. */
+    static unsigned art_key __attribute__((section(".scratch")));
+    char url[600];
     unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
-    if (cover && *cover && strlen(cover) < sizeof url - 8)
-        memcpy(url + 7, cover, strlen(cover) + 1);
-    if (cover && *cover && !widget_load_image(win, url, bitmap) && bitmap[0] && bitmap[1]) {
+    int found = song_cover_url(rec, url, sizeof url);
+    unsigned key = found ? fnv(fnv(FNV_SEED, (const unsigned char *)url),
+                               (const unsigned char *)P(rec, REC_PATH)) ^
+                               now_cover_written(url)
+                         : 0;
+    if (key != art_key && found) image_manager_unload_bitmap_by_name(image_manager(), url);
+    art_key = key;
+    if (found && !widget_load_image(win, url, bitmap) && bitmap[0] && bitmap[1]) {
         int bw = (int)bitmap[0], bh = (int)bitmap[1], side = bw < bh ? bw : bh;
         rect_t src = { (bw - side) / 2, (bh - side) / 2, side, side };
         canvas_draw_image(canvas, bitmap, &src, &art);
