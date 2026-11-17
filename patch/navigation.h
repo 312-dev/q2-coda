@@ -861,7 +861,10 @@ void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int
 void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
 int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
     guest_home_np(void);
-void guest_home_row(void *row), guest_home_bind(void *img);
+/* home_np.c: Home's first row led by the play state (docs/ipod.md#home) */
+void home_np_row(void *row, int editing), home_np_bind(void *win),
+    home_np_paint(void *w, void *canvas);
+int home_np_lead(void);
 const char *guest_ui_value(void), *guest_ui_title(const char *name);
 int guest_ui_keeps_lit(void *top);
 void guest_short(const char *name, char *out, unsigned n);

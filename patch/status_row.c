@@ -69,6 +69,7 @@ static int wifi_level(void) {
 static int wifi_offline(void) { return networkGetConnectStatus() <= 0; }
 
 static int play_shown(void) {
+    if (home_np_lead()) return 0; /* Home's first row leads with it (home_np.c) */
     int s = bar_status();
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
@@ -370,7 +371,8 @@ int status_row_sync(void) {
                               : head > 100 ? 100
                                            : head)
                        << 14 |
-                   (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23;
+                   (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
+                   (unsigned)home_np_lead() << 26;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;
