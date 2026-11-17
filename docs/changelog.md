@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing: skipping to the next or previous song slides the old cover and song name out and the new ones in, the way you skipped, instead of swapping them at once. With Reduce Motion on, they cross-fade.
   - Now Playing: when you pause, the album art settles back to a slightly smaller size, and grows back when you press Play, as on an iPhone. With Reduce Motion on, the art stays its size.
   - Now Playing (OLED): the progress bar's track and its played part have round ends, as the design has them; they were square.
   - Menus (OLED): the hold menus, Now Playing's ⋯ and a playlist's ⋯ now open as a frosted sheet over the page, which shrinks back and dims behind it. The sheet shows the song, album or playlist at the top with its cover, its rows run the full width of the screen and fade at the bottom, and Delete and Remove rows are red.

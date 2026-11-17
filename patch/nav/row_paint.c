@@ -983,6 +983,7 @@ int ringnav_paint(void *w, void *canvas) {
     usb_ui_paint(w, canvas);
     bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
+    np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
     if (w && w == st.np_win) np_modes(w, canvas);
     coverflow_home_clip(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
