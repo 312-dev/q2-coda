@@ -150,9 +150,10 @@ static void cta_ring(void *canvas, const rect_t *a, unsigned ink) {
 static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary, int lit,
                         int down) {
     int light = ipod_light();
-    unsigned fill = !primary ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
-                    : down   ? CTA_ACCENT_DOWN
-                             : (scheme()->tones[0] & 0xffffffu);
+    unsigned fill = !primary
+                        ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
+                    : down ? CTA_ACCENT_DOWN
+                           : (scheme()->tones[0] & 0xffffffu);
     unsigned raw = ui_ink_raw(1); /* final in both halves */
     if (lit && ui_focus_shown()) {
         /* a CTA_RING_W px ring in Text Primary CTA_RING_OFF px out, concentric with the capsule */
