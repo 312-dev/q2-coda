@@ -558,7 +558,7 @@ has no place for keeps a place of its own:
   the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
-  the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
+  the Center cycle's ring outlines the control the wheel has moved it to (Shuffle, Repeat or the heart) in today's 2 px Text Primary stroke, 9 px corners, no fill;
   a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
   shows the square. Both fit what is drawn: the glyph's ink alone with no dot showing (Up Next, radio, and
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
@@ -767,8 +767,8 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
   record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
   `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
 - **Center with no ring** still does the screen's default: the primary button, a card's default answer.
-- **Now Playing's Center cycle** follows it too: the Shuffle or Repeat stage keeps its place, but its outline
-  (`np_bar.c` `glyph_framed`) draws only while `ui_focus_shown()`.
+- **Now Playing's Center cycle** follows it too: the ring on Shuffle, Repeat or the heart keeps its place, but its outline
+  (`np_bar.c` `glyph_framed`, `heart_ring`) draws only while `ui_focus_shown()`.
 - **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Center
   without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
   boots shown.
@@ -1510,8 +1510,8 @@ interruptible: a turn mid-run starts from where it is.
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
-  same time), and land back at rest together, each followed by its own copy 40 px behind, so
-  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  same time) until each line's end meets its column's end, hold there 1.5 s, and go back to rest
+  together. A line slides only what overflows, so part of it always shows: none goes blank. The progress bar's fill moves a pixel at a time between the player's
   seconds rather than a second's width at once.
 
 ## Screens

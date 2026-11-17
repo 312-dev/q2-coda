@@ -154,13 +154,12 @@ static unsigned *fade_fb(void *canvas, int *pitch, int *fw, int *fh) {
 /* Which ends of w fade this frame, its column's ends in *x0, *x1 (w's coordinates); 0 none. */
 static int fade_ends(void *w, int *x0, int *x1) {
     if (tk_strcmp(widget_get_type(w), "hscroll_label")) return 0;
-    int loop = np_marq_owns(w); /* Now Playing's lines: their copy follows, so the right fades on */
     void *style = P(w, W_ASTYLE);
     *x0 = style_get_int(style, "margin_left", 2),
     *x1 = I(w, W_W) - style_get_int(style, "margin_right", 2);
     int off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (*x1 - *x0);
-    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return 0;
-    return (off > 0) | (loop || off < over) << 1;
+    if (over <= 0 || (B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return 0;
+    return (off > 0) | (off < over) << 1;
 }
 
 /* Before text is drawn in the columns x0 to x1 (the canvas's coordinates), rows y to y + h: what
