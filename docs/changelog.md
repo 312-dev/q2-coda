@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Battery: with the screen off and music playing, the Q2's processor wakes about a third less often, as the player's position is checked once a second instead of five to ten times (it keeps the quick checks near the end of a song, during A-B Repeat and with Car Remote on). Paused with the screen off it wakes about two thirds less. The status row no longer checks the card up to 150 times a second, the crash watchdog no longer starts a program every 10 seconds, Car Remote's helper sleeps until it has something to do, and nothing looks for Guest Play while it is off.
   - Less wear on the Q2's built-in storage: the small record of what the Q2 is doing (used to report a forced restart) is saved at most once every five seconds instead of on every screen wake, battery percent or play/pause.
   - USB Debugging: the **Allow USB Debugging?** prompt now appears when an unknown computer connects. Before, the Q2 looked for adbd's socket with the wrong socket type, so the prompt never showed and every new computer stayed `unauthorized`.
   - Less wear on the Q2's built-in storage: the queue and where it was, audiobook and long-track places, play counts and Battery History are kept on the card instead, and turning the volume (or a slider such as Brightness or Volume Limit) saves it once, three seconds after you stop, instead of on every click. With the card out or lent to a computer they are kept in memory and saved to the card when it is back; the first time, what was on the built-in storage is copied over.
