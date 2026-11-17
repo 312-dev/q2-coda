@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, libc
+from conftest import O, Deques, libc, stock_prop_str
 
 # Up Next's sheet, stock's sortselect dialog as a zeroed widget (no parent): OLED's title and toast checks read the
 # window on top
@@ -161,11 +161,13 @@ class Page:
         return C.addressof(self.strs[-1])
 
     def prop_str(self, w, key, default, *_):
+        if not w:
+            return default  # stock: widget_get_prop fails on a NULL widget
         name = C.string_at(key)
-        if name == b'name':
-            return self.cstr(self.names[w]) if w in self.names else 0
-        v = self.props.get((w, name))
-        return self.cstr(v.encode()) if isinstance(v, str) else default
+        v = self.names.get(w) if name == b'name' else self.props.get((w, name))
+        kind = self.kinds.get(w, 'dialog').replace('_create', '').encode()
+        v = stock_prop_str(kind, name, v.encode() if isinstance(v, str) else v, default)
+        return 0 if v is None else self.cstr(v) if isinstance(v, bytes) else v
 
     def place(self, w, x, y, ww, h, *_):
         for off, v in zip(('W_X', 'W_Y', 'W_W', 'W_H'), (x, y, ww, h)):

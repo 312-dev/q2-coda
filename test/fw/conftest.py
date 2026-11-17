@@ -51,6 +51,12 @@ def stock_prop_str(kind, key, value, default):
     return default
 
 
+def stock_start_with(s, prefix, *_):
+    """tk_str_start_with as stock's (0x72c488), for fw.mock: false for a NULL string or prefix, as
+    widget_get_prop_str's NULL name of a widget never named is."""
+    return bool(s and prefix) and C.string_at(s).startswith(C.string_at(prefix))
+
+
 def ui_name(lib, name):
     """The symbol of navigation.c's `name`, wherever the split put it: `name` itself once navigation.h shares it,
     else `<unit>__<name>`, a static of navigation.c or of a unit split out of it."""

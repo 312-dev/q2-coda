@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves, stock_prop_str, stock_start_with
 
 W_PARENT, EVT_CLICK, EVENT_TYPE, EVENT_KEY, EVENT_X = O['W_PARENT'], O['EVT_CLICK'], O['EVENT_TYPE'], O['EVENT_KEY'], O['EVENT_X']
 STOP = 11
@@ -178,11 +178,10 @@ class Ui:
         name = C.string_at(name).decode()
         widget = self.at.get(w)
         if widget is None:
-            return default
-        if name == 'name':
-            return self.cstr(widget.name) if widget.name else default
-        value = widget.props.get(name)
-        return self.cstr(value) if isinstance(value, (bytes, str)) else default
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (widget.name or None) if name == 'name' else widget.props.get(name)  # '' is a widget never named
+        value = stock_prop_str(widget.kind.encode(), name.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.cstr(value) if isinstance(value, bytes) else value
 
     def get_text(self, w, out, n, *_):
         s = self.at[w].text.encode()[:n - 1]
@@ -841,7 +840,7 @@ class Info:
         self.timers = []
         fw.mock('np_info', lambda *_: 7)
         fw.mock('getFormatString', lambda key, out, n, *_: C.memmove(out, location + b'\0', len(location) + 1))
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, ms)) or len(self.timers))
         self.fill = fw.fn('ringnav_np_info', C.c_int, C.c_void_p)
 
@@ -1691,7 +1690,7 @@ class Rows:
         self.names = names
         Config(fw, THEME=b'%d' % OLED)
         st('geom').value = names[geom]
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         self.ui, self.fw = ui, fw
         self.view = ui.add('scroll_view', ui.window(window), (0, 30, 375, 290))
         self.lay = layout()
@@ -2956,7 +2955,7 @@ def test_songs_load_straight_into_the_showlist(fw, records):
 
 def test_a_playlist_hides_its_spoken_songs(fw, records):
     lib = Library(fw)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     rows = [records.song(title=b'song', path=b'/mnt/mmc/Music/a.flac'), records.song(title=b'book', path=b'/mnt/mmc/x.m4b'),
             records.song(title=b'episode', path=b'/mnt/mmc/Podcasts/e.mp3'), records.song(title=b'chapter', path=b'/mnt/mmc/Audiobooks/c.mp3'),
             records.song(title=b'folder', path=b'/mnt/mmc/Podcasts', kind=4)]

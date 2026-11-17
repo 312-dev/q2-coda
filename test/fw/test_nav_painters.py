@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -177,11 +177,10 @@ class Ui:
     def prop_str(self, w, name, default, *_):
         node, key = self.nodes.get(w), C.string_at(name).decode()
         if node is None:
-            return default
-        if key == 'name':
-            return self.c(node.name)
-        value = node.props.get(key)
-        return self.c(value) if isinstance(value, str) else default
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (node.name or None) if key == 'name' else node.props.get(key)  # '' is a node never named
+        value = stock_prop_str(node.kind.encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.c(value.decode()) if isinstance(value, bytes) else value
 
     def prop_int(self, w, name, default, *_):
         node = self.nodes.get(w)
@@ -353,7 +352,7 @@ def st(fw, scratch):
 
 
 def strings(fw):
-    fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
+    fw.mock('tk_str_start_with', stock_start_with)
 
 
 def theme(fw, **values):
@@ -3069,7 +3068,7 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     for i in (1, 2):  # Local Only: a server row can't play
         fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
     page.paint()  # before the rows: the greyed rows' titles end 12 px clear of the mark's ink (322 +- 10), their
@@ -3115,7 +3114,7 @@ def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     for i in (0, 1):  # Local Only: a server row can't play
         fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
     for paint in range(3):  # a box changed under a paint is final on the next, and stays
@@ -3158,7 +3157,7 @@ def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, 
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[2].parent.addr, C.addressof(record), 0)
     page.paint()
     assert [a.box[2] for a in artists] == [320, 320, 272, 320]  # as the title: 30 + 272 = 322 - 10 - 12 + 2
@@ -3180,7 +3179,7 @@ def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low,
         page.ui.add('tab_button', group, value=tab)
         page.ui.add('tab_button', group, value=1 - tab)
     fw.var('catalogue_source', C.c_int).value = 1
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     keep = []
 
     def record(path):

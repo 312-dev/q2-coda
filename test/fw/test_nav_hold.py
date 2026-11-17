@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, ui_name
+from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
 
 W_X, W_PARENT, W_EMITTER = O['W_X'], O['W_PARENT'], O['W_EMITTER']
 EMIT_TYPE, EMIT_PENDING_REMOVE, EMIT_NEXT = O['EMIT_TYPE'], O['EMIT_PENDING_REMOVE'], O['EMIT_NEXT']
@@ -270,8 +270,11 @@ class Ui:
 
     def prop_str(self, w, name, default):
         node = self.nodes.get(w)
-        value = None if node is None else node.name if name == 'name' else node.image if name == 'image' else node.props.get(name)
-        return self.c(w, value) if isinstance(value, str) and value else default
+        if node is None:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (node.name or None) if name == 'name' else (node.image or None) if name == 'image' else node.props.get(name)
+        value = stock_prop_str(node.kind.encode(), name.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.c(w, value.decode()) if isinstance(value, bytes) else value
 
     def set(self, w, name, value):
         if w in self.nodes:
