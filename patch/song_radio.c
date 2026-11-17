@@ -5,11 +5,13 @@
  * A server song (a streamed file, a Library server row, a synced song of an app's queue) is its
  * app's radio: addon_radio_start asks the app (q2app radio=1), which plays the seed and the
  * server's similar songs and adds more as they run out (q2-subsonic's radio.go), and says radio= in
- * its state file while it plays (addon_radio). Any other song, or one the app answers is not its
- * own, is this file's local radio: the library's songs by the seed's artist, then of its genre,
- * each shuffled, leaving out the last SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left
- * before more join the queue's end. A local radio plays in order (Now Playing's shuffle and repeat
- * off, put back when it ends) and ends when another queue loads.
+ * its state file while it plays (addon_radio); the seed is the song's path, which for a streamed
+ * file carries its server id (stream_path.h). Any other song, one the app answers is not its own,
+ * or one whose app is too old to play radios (addon_radio_missing), is this file's local radio:
+ * the library's songs by the seed's artist, then of its genre, each shuffled, leaving out the last
+ * SR_RECENT played or queued, SR_BATCH at a time, SR_LOW left before more join the queue's end. A
+ * local radio plays in order (Now Playing's shuffle and repeat off, put back when it ends) and
+ * ends when another queue loads.
  *
  * The seed plays on where it was: the radio's queue starts with it, and once that queue plays the
  * seed, it is sought to the place it had at the tap (sr.seek). */
@@ -119,9 +121,11 @@ static void local_end(void) {
 }
 
 /* A local radio of the song r (its fields copied first: the queue it is in goes), from its place
- * sec
- * (-1: from its start). 1 when it plays. */
-static int local_start(void *r, int sec) {
+ * sec (-1: from its start). With nothing like it, the toast says so, or, when app is the name of
+ * the app the song is a server song of and that app is too old to play radios, that it needs
+ * updating: the library rarely holds a server song's artist, and "No similar songs" read as the
+ * server having none. 1 when it plays. */
+static int local_start(void *r, int sec, const char *app) {
     sr.id = key(r);
     fold(sr.artist, sizeof sr.artist, P(r, REC_ARTIST));
     fold(sr.genre, sizeof sr.genre, P(r, REC_STYLE));
@@ -146,7 +150,12 @@ static int local_start(void *r, int sec) {
         sr.local = 1, sr.loads = playback_loads, sr.retry_at = 0;
     }
     deque_destroy(dq);
-    if (!got) toast("No similar songs on this Q2 Muse");
+    if (!got && app) {
+        char msg[64];
+        tk_snprintf(msg, sizeof msg, "Update %s to use Radio", app);
+        toast(msg);
+    } else if (!got)
+        toast("No similar songs on this Q2 Muse");
     return got != 0;
 }
 
@@ -165,7 +174,7 @@ static int start(void *r, int sec) {
         sr.seek_loads = playback_loads, sr.seek_at = 0;
         return 1;
     }
-    return local_start(r, sec);
+    return local_start(r, sec, addon_radio_missing(path));
 }
 
 static void stop(void) {
@@ -234,7 +243,7 @@ void song_radio_poll(void) {
             if (r && !strcmp(P(r, REC_PATH), sr.path)) {
                 int sec = -1, total = 0;
                 player_playtime_and_length(&sec, &total);
-                local_start(r, sec); /* it plays on from where it is now */
+                local_start(r, sec, 0); /* it plays on from where it is now */
             }
         } else if (code > 1 || now - sr.ask_at >= SR_WAIT_MS) {
             sr.ask = 0;
