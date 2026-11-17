@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from conftest import FNV_SEED, O, Files, Rows, in_fork
+from conftest import FNV_SEED, O, Files, Rows, in_fork, stock_start_with
 from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
 from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
 
@@ -80,7 +80,7 @@ class Rig:
         fw.mock('fw_opendir', self.opendir)
         fw.mock('fw_readdir', self.readdir)
         fw.mock('fw_pthread_create', lambda t, attr, fn, arg, *_: C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg) and 0)
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('fw_time', lambda *_: 1700000000)
         fw.mock('networkGetConnectStatus', lambda *_: 3 if self.online else 0)

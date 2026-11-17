@@ -12,7 +12,7 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, stock_prop_str, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, stock_prop_str, stock_start_with, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
@@ -107,8 +107,7 @@ class Ui:
         mock('time_now_ms', lambda *_: self.now)
         mock('scroll_view_set_offset', self.set_offset)
         mock('scroll_view_scroll_delta_to', self.glide)
-        # stock's (0x72c488) is false for a NULL string or prefix, as for a widget with no name
-        mock('tk_str_start_with', lambda s, prefix, *_: bool(s and prefix) and C.string_at(s).startswith(C.string_at(prefix)))
+        mock('tk_str_start_with', stock_start_with)
 
     def widget(self, kind, parent=None, box=(0, 0, 0, 0), **kwargs):
         w = Widget(kind, parent, box, **kwargs)

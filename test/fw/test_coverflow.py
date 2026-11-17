@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import host
-from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork
+from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork, stock_prop_str
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
@@ -2967,9 +2967,13 @@ class Ui:
         return 0
 
     def prop_str(self, w, k, d, *_):
-        k = self.str(k)
-        value = self[w].image if k == 'image' else self[w].name if k == 'name' else self[w].props.get(k)
-        return self.cstr(value) if value is not None else d
+        if not w or w not in self.w:
+            return d  # stock: widget_get_prop fails on a NULL widget
+        k, widget = self.str(k), self[w]
+        # '' is a name, style or image never set
+        value = (getattr(widget, k) or None) if k in ('name', 'style', 'image') else widget.props.get(k)
+        value = stock_prop_str(widget.type.encode(), k.encode(), value.encode() if isinstance(value, str) else value, d)
+        return 0 if value is None else self.cstr(value.decode()) if isinstance(value, bytes) else value
 
     def add_timer(self, fn, ctx, ms, *_):
         self.ids += 1

@@ -93,7 +93,9 @@ def power(fw, power_fields):
 
 
 def stock_stub(address, result, log):
-    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork."""
+    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork.
+    The code holds log's address, not log: the caller keeps log alive while the stub can run, or the stub
+    writes into whatever Python object took its memory."""
     claim(address)
     code = (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008 48895010') +
             b'\xb8' + struct.pack('<I', result) + b'\xc3')

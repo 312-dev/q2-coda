@@ -1169,7 +1169,10 @@ painted it white, which drew the box at rest.
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
-  keyboard's Return did), leaving the box. Under another theme
+  keyboard's Return did), leaving the box; on Add Network's two rows, whose dialog (`editwifi_dialog`) holds nothing
+  but the box, it quits the dialog too, a loop pass later (quit inside the keyboard's close, demo crashes), back to the
+  rows with their text as it was. That dialog's own box, in a row at the status row's height, is hidden while the strip
+  is up (`search_strip_box`) and shown again if the dialog outlives the strip. Under another theme
   the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Center pressing the lit
   one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
