@@ -142,11 +142,12 @@ assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.s
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
 assert m.labels()[2:]==['Cache','Erase Spotify Data','2 GB']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
-# entry; the two streaming Now Playing pages, a card app's QR code page and Now Playing's About (np_about.c, its
-# Return its own), none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its
+# entry; the two streaming Now Playing pages, a card app's QR code page, Now Playing's About (np_about.c, its
+# Return its own), Guest Play's Now Playing, failure and connect pages (guest_ui.c) and Bluetooth Stopped (bt_stopped.c),
+# none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its
 # window a caller's) is in the list for its one row.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
-assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','npabout_page'} and '"empty_page"' in (ROOT/'patch/contexts.inc').read_text(); passed()
+assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','npabout_page','guestnp_page','guestfail_page','guestconnect_page','btstopped_page'} and '"empty_page"' in (ROOT/'patch/contexts.inc').read_text(); passed()
 m=CardMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)
