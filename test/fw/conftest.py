@@ -27,6 +27,30 @@ NAVIGATION_SOURCE = ''.join([*((ROOT/'patch'/n).read_text() for n in ['navigatio
                              *(p.read_text() for p in sorted((ROOT/'patch/nav').glob('*.c')))])  # navigation.c's pieces
 
 
+# What stock V1.36's widget_get_prop_str (0x66c99c) returns. It calls widget_get_prop and hands back value_str of
+# the answer, and returns its default only when widget_get_prop fails; value_str (0x730134) is NULL for any value
+# that is not a string. widget_get_prop (0x66b744) answers these keys for every widget itself, RET_OK:
+# `text` as a wide string (so NULL here), the rest with the widget's own field, NULL until set. A window's
+# vtable (window_base_get_prop, 0x67e5xx) answers its anim hints, theme and applet name the same way, and an
+# image's (image_base_get_prop, 0x656a90) its image. A custom prop set with widget_set_prop_int is an int: NULL too.
+STOCK_STR_FIELDS = (b'name', b'style', b'tr_text', b'pointer_cursor', b'self_layout', b'children_layout')
+WINDOW_STR_FIELDS = (b'anim_hint', b'open_anim_hint', b'close_anim_hint', b'theme', b'applet_name')
+IMAGE_STR_FIELDS = (b'image',)
+WINDOW_KINDS = (b'window', b'dialog', b'popup', b'overlay', b'system_bar')
+
+
+def stock_prop_str(kind, key, value, default):
+    """widget_get_prop_str as stock answers it for a widget of type kind (bytes) whose prop key holds value (bytes for a
+    string, an int, None when never set): the string, NULL (None here) where stock's is NULL, else default."""
+    if isinstance(value, bytes) and key != b'text':
+        return value
+    if value is not None or key == b'text' or key in STOCK_STR_FIELDS:
+        return None
+    if kind in WINDOW_KINDS and key in WINDOW_STR_FIELDS or kind == b'image' and key in IMAGE_STR_FIELDS:
+        return None
+    return default
+
+
 def ui_name(lib, name):
     """The symbol of navigation.c's `name`, wherever the split put it: `name` itself once navigation.h shares it,
     else `<unit>__<name>`, a static of navigation.c or of a unit split out of it."""

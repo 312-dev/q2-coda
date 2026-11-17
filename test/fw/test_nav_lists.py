@@ -12,7 +12,7 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, stock_prop_str, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
@@ -107,7 +107,8 @@ class Ui:
         mock('time_now_ms', lambda *_: self.now)
         mock('scroll_view_set_offset', self.set_offset)
         mock('scroll_view_scroll_delta_to', self.glide)
-        mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
+        # stock's (0x72c488) is false for a NULL string or prefix, as for a widget with no name
+        mock('tk_str_start_with', lambda s, prefix, *_: bool(s and prefix) and C.string_at(s).startswith(C.string_at(prefix)))
 
     def widget(self, kind, parent=None, box=(0, 0, 0, 0), **kwargs):
         w = Widget(kind, parent, box, **kwargs)
@@ -121,14 +122,12 @@ class Ui:
 
     def prop_str(self, w, name, default, *_):
         widget, key = self.by.get(w), C.string_at(name)
-        value = widget.props.get(key) if widget else None
-        if isinstance(value, bytes):
-            return self.cstr(value)
-        # stock's window_base_get_prop answers a window's anim hints itself, RET_OK with its field, which
-        # is NULL until one is set: widget_get_prop_str returns that NULL, not the default
-        if widget and widget.kind == b'window' and key in (b'open_anim_hint', b'close_anim_hint'):
+        if widget is None:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        if key == b'text':  # the label's text, which stock answers as a wide string: NULL
             return 0
-        return default
+        value = stock_prop_str(widget.kind, key, widget.props.get(key), default)
+        return 0 if value is None else self.cstr(value) if isinstance(value, bytes) else value
 
     def prop_int(self, w, name, default, *_):
         value = self.by[w].props.get(C.string_at(name)) if w in self.by else None

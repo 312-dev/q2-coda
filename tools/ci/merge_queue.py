@@ -23,7 +23,7 @@ Every outcome is one line in ~/.cache/q2-queue/events.log (q2ci.event), which th
     REQUEUED branch                 not its fault (a crash, a red tip, an undecided failure): it runs again
     TIP_RED suites                  the trunk fails on its own: only `--mark-ready --fixes-tip` branches are taken
     INFRA suites                    suites crashed twice: the harness or the machine, no branch
-    POST_OK / POST_RED              the post tier (sanitizers, coverage) on the trunk's tip
+    POST_OK / POST_RED              the post tier (sanitizers, coverage, the emulator smoke test) on the trunk's tip
     PUSHED / PUSH_FAILED            the trunk on origin
     QUEUE_STOPPED / QUEUE_STARTED / QUEUE_ERROR
 
@@ -33,6 +33,9 @@ clears the stop, the crash count and a red tip's hold.
 
 When nothing is ready and the tip has not had it, the post tier runs on the tip: a failure there is
 reported (POST_RED) against a commit that has already landed and is fixed by the next branch, as any bug.
+A failed smoke test (TIP_SUITES: the build crashes or loses its way on an emulator) is more than that: the
+tip goes TIP_RED as well, so only a `--fixes-tip` branch lands until one makes it pass. smoke.py's exit 3 (no
+emulator came free) is no verdict and holds nothing.
 A branch whose batch failed with no culprit found (a flaky test) is tried once more, then rejected.
 """
 import argparse
@@ -51,6 +54,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import merge_batch  # noqa: E402
 import q2ci  # noqa: E402
 
+# post-tier suites whose failure (exit status TIP_RC) makes the tip red, not just POST_RED
+TIP_SUITES = ('smoke',)
+TIP_RC = 1
 UNDECIDED_TRIES = 2  # batches a branch may fail in with no culprit found before it is rejected
 CRASH_STOP = 2       # batches in a row that only crashed before the queue stops itself
 
@@ -115,7 +121,7 @@ class Queue:
                                               start_new_session=True))
 
     def run_post(self, logs):
-        """The post tier on the tip; (exit status, the failed suites)."""
+        """The post tier on the tip; (exit status, the failed suites, those of them that make the tip red)."""
         results = logs/'results.json'
         cmd = [self.python, str(self.wt/'tools/ci/gate.py'), '--tier', 'post', '--logs', str(logs), '--results', str(results)]
         logs.mkdir(parents=True, exist_ok=True)
@@ -123,10 +129,11 @@ class Queue:
             rc = self.wait(subprocess.Popen(cmd, cwd=self.wt, stdout=f, stderr=subprocess.STDOUT, start_new_session=True,
                                             env={**os.environ, 'Q2_HEAVY_CLASS': 'queue'}))
         try:
-            bad = sorted(n for n, r in json.loads(results.read_text()).items() if r['rc'] != 0)
+            done = json.loads(results.read_text())
         except (OSError, ValueError):
-            bad = ['gate'] if rc else []
-        return rc, bad
+            return rc, ['gate'] if rc else [], []
+        bad = sorted(n for n, r in done.items() if r['rc'] != 0)
+        return rc, bad, [n for n in TIP_SUITES if n in done and done[n]['rc'] == TIP_RC]
 
     def wait(self, child):
         """child's exit status; a STOP file or this process's end stops it and everything it started."""
@@ -210,12 +217,15 @@ class Queue:
             tree = git(self.wt, 'rev-parse', f'{self.trunk}^{{tree}}').stdout.strip()
             if tree and tree != self.state['post_tree']:
                 self.save('post', since=time.strftime('%H:%M:%S'))
-                rc, bad = self.run_post(self.dir/'post'/stamp)
+                rc, bad, red = self.run_post(self.dir/'post'/stamp)
                 if self.stopped():
                     return 'stopped'
                 self.state['post_tree'], self.state['post_ok'] = tree, rc == 0
                 self.event('POST_OK' if rc == 0 else 'POST_RED', ','.join(bad), tip=self.tip()[:8],
                            logs=self.dir/'post'/stamp)
+                if red:  # the trunk itself is broken on screen: hold everything but its fix
+                    self.state['tip_red'] = red
+                    self.event('TIP_RED', ','.join(red), tip=self.tip()[:8], log=self.dir/'post'/stamp/'gate.log')
                 self.save('idle')
                 return 'post'
         self.save('idle')

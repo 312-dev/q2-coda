@@ -399,6 +399,7 @@ class FakeQueue(q2queue.Queue):
         self.lines = []
         super().__init__(self.repo.path, self.repo.trunk, tmp_path/'q', tmp_path/'ready.txt', log=self.lines.append, **kw)
         self.outcomes, self.batches, self.posts = list(outcomes), [], 0
+        self.post_results: list = []  # what each post tier returns, (rc, failed, red); a pass once they run out
 
     def run_batch(self, batch, ready):
         names = [b for b, _ in merge_batch.take_ready(ready, batch/'ready.taken')]
@@ -412,7 +413,7 @@ class FakeQueue(q2queue.Queue):
 
     def run_post(self, logs):
         self.posts += 1
-        return 0, []
+        return self.post_results.pop(0) if self.post_results else (0, [], [])
 
     def events(self):
         return [' '.join(line.split()[1:3]) for line in (self.dir/'events.log').read_text().splitlines()]
@@ -460,6 +461,51 @@ def test_a_red_tip_holds_everything_but_its_fix(tmp_path):
     merge_batch.append_ready(q.ready, [('fix/tip', 'f1', True)])
     assert q.turn() == 'batch' and q.batches[-1] == ['fix/tip'] and q.state['tip_red'] == []
     assert q.turn() == 'batch' and q.batches[-1] == ['feat/a', 'feat/b']
+
+
+def test_a_smoke_test_that_fails_after_a_landing_turns_the_tip_red(tmp_path):
+    # 2026-11-17: a crash on every Now Playing open passed every merge suite and sat on the trunk for 1.5 h
+    q = FakeQueue(tmp_path, [land, land, land])
+    q.post_results = [(1, ['smoke'], ['smoke'])]
+    merge_batch.append_ready(q.ready, [('feat/np', 'a1')])
+    assert q.turn() == 'batch' and q.turn() == 'post'
+    assert q.events()[-2:] == ['POST_RED smoke', 'TIP_RED smoke'] and q.state['tip_red'] == ['smoke']
+    merge_batch.append_ready(q.ready, [('feat/b', 'b1')])
+    assert q.turn() == 'idle' and q.batches == [['feat/np']]  # held: the tip is red
+    merge_batch.append_ready(q.ready, [('fix/np', 'f1', True)])
+    assert q.turn() == 'batch' and q.batches[-1] == ['fix/np'] and q.state['tip_red'] == []
+    q.repo.write('np.txt', 'fixed\n', 'fixed')  # the tip's tree moves, so the post tier runs on it again
+    assert q.turn() == 'batch' and q.batches[-1] == ['feat/b']
+    assert q.turn() == 'post' and q.events()[-1].startswith('POST_OK') and q.posts == 2
+
+
+def test_a_post_failure_that_is_no_smoke_verdict_leaves_the_tip_alone(tmp_path):
+    q = FakeQueue(tmp_path, [land, land])
+    q.post_results = [(1, ['fw-asan', 'smoke'], [])]  # an ASan finding; smoke found no emulator (exit 3)
+    merge_batch.append_ready(q.ready, [('feat/a', 'a1')])
+    assert q.turn() == 'batch' and q.turn() == 'post'
+    assert q.events()[-1] == 'POST_RED fw-asan,smoke' and q.state['tip_red'] == []
+    merge_batch.append_ready(q.ready, [('feat/b', 'b1')])
+    assert q.turn() == 'batch' and q.batches[-1] == ['feat/b']
+
+
+def test_run_post_reads_which_failures_make_the_tip_red(tmp_path, monkeypatch):
+    repo = Repo(tmp_path/'r')
+    q = q2queue.Queue(repo.path, repo.trunk, tmp_path/'q', tmp_path/'ready.txt', log=lambda m: None)
+    logs = tmp_path/'post'
+
+    def gate(results):
+        def wait(child):
+            child.wait()
+            (logs/'results.json').write_text(json.dumps(results))
+            return 1 if any(r['rc'] for r in results.values()) else 0
+        return wait
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 1}, 'unit-cov': {'rc': 0}}))
+    assert q.run_post(logs) == (1, ['smoke'], ['smoke'])
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 3}, 'fw-asan': {'rc': 1}}))
+    assert q.run_post(logs) == (1, ['fw-asan', 'smoke'], [])
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 'no build'}}))
+    assert q.run_post(logs) == (1, ['smoke'], [])
 
 
 def test_two_batches_that_only_crash_stop_the_queue_and_keep_the_branches(tmp_path):
