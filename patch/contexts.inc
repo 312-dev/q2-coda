@@ -37,7 +37,9 @@
 { "addon_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/addon.c) */
 { "artistrows_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_artist.c) */
 { "battery_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/battery.c) */
-{ "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/coda_rc_shim.c) */
+{ "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/carremote_page.c) */
+{ "carphone_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
+{ "carhowto_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
 { "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */

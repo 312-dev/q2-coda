@@ -721,7 +721,7 @@ the gray one.
 | Internet Radio, a station list with none | `radio` | No Stations | Add stations from your computer | |
 | Streaming, a service with no link | `cloud-slash` | Not Connected | Turn on Wi-Fi to stream | **Turn on Wi-Fi** (opens Settings > Wi-Fi) |
 | Library, no SD card | `sd-card` (Phosphor's `memory`) | No SD Card | Insert an SD card with music | |
-| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone | none: under the switch; a phone pairs from its own app |
+| Car Remote, no phone paired | none (compact) | No Paired Phones | Open Q2 Muse Remote on your phone to pair | **Pair a Phone** (opens the how-to page), under the switch ([Car Remote](#car-remote)) |
 | Downloads (Tidal Downloads, a card app's songs) | `download-simple` | No Downloads Yet | Synced music shows up here | |
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
@@ -1195,6 +1195,32 @@ over the whole page, under the status row titled "Battery History":
 - ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs
   the key's down and up told apart in `battery_key`.
 
+### Car Remote
+
+Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carremote.py`; `patch/carremote_page.c`):
+
+- **The switch** alone while off, its caption under it while selected ([Captioned row](#list-row)): "Control your Q2 Muse
+  from Android Auto with Q2 Muse Remote."
+- **No phones:** the [empty state](#empty-and-offline) under the switch in its compact form (no glyph), "No Paired
+  Phones", "Open Q2 Muse Remote on your phone to pair", and the Pair a Phone button, selected as the page opens.
+  The button is a row of the page's own list after the switch, so the wheel moves between the two. ponytail: the
+  mock-up's address line under the hint ("Q2 Muse at 192.168.1.30") needs a fourth line in the shared empty state;
+  the how-to page shows the address meanwhile.
+- **Phones:** 10 px under the switch, Pair a Phone as the blue top-action row (the accent's `plus-circle`, 18 px at x 26,
+  its label at x 54 in the accent; white on the selection, as a playlist's action rows), then each phone as a
+  [two-line row](#two-line-row) 52 px tall: Phosphor `device-mobile` (regular, 20 px, Text Secondary, centred on x 34),
+  the name at x 56 over its state in Text Tertiary: "Connected over Wi-Fi" after a 7 px Positive dot, or
+  "Not connected · last seen Friday"; a chevron opens the phone's page.
+- **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
+  Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
+  a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
+- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
+  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
+  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+  for Q2 Muse Remote to scan one.
+- **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
+  `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
+  this branch yet.
 ### Overlay motion
 
 A toast, the [confirmation card](#confirmation-card), the menu sheet and Up Next in it share one enter and exit

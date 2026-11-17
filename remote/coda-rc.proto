@@ -81,6 +81,8 @@ enum Capability {
   CAP_QUEUE_JUMP = 256;  // PlayQueueItem
   CAP_RATE = 512;        // Rate, and NowPlaying.hearts / rateable
   CAP_RESUME = 1024;     // Play.resume, and ACTION_RESUME on playlists
+  CAP_FAVORITES = 2048;  // the library's "favorites" node: the hearted songs (5 hearts, the Q2's Favorites)
+  CAP_RECENT = 4096;     // the library's "recent" node: the 100 songs added last, newest first
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -254,6 +256,8 @@ message Rate {
 // screen as Android Auto's back stack needs:
 //
 //   root > library > tracks | playlists | artists | albums | genres | years | dir:   (Folders)
+//                    | favorites (CAP_FAVORITES) | recent (Recently Added, CAP_RECENT)
+//   favorites > song:<id> (the tracks' orders);   recent > song:<id> (newest first, at most 100, no letters)
 //   artists > artist:<k> > artist-tracks:<k> (All tracks) | album:<k>
 //   genres > genre:<k> > genre-tracks:<k> | album:<k>;   years > year:<y> > album:<k>
 //   playlists > pl:<n>;   dir:<path> > dir:<sub> | song:<id>;   album:<k> > song:<id>
@@ -310,6 +314,8 @@ enum ItemIcon {
   ICON_GENRES = 5;
   ICON_YEARS = 6;
   ICON_FOLDERS = 7;
+  ICON_FAVORITES = 8;  // a heart
+  ICON_RECENT = 9;     // a clock
 }
 
 message SortChoice {
