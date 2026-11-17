@@ -5,12 +5,15 @@ import struct
 
 import pytest
 
-from conftest import O
+from conftest import O, Files
 from test_addon import Ap
 from test_nav_painters import Canvas, StatusRow, i32, scratch, st  # noqa: F401 (fixtures)
 
 BODY = 322  # StatusRow's view_battery on the bar: the battery's body starts here
 CY = 23  # OLED's status_y: the glyphs' centre row
+GAP = 6  # SR_GAP: the ground between two glyphs
+INK = 11  # SR_INK: every glyph's height, the clock's digits' (rows 17 to 27)
+WIFI_W, BT_W = 16, 8  # SR_WIFI_W, SR_BT_W
 SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK = range(6)
 TOUCH_DOWN, TOUCH_UP = 0xff, 0x103
 BARS = [(7, 10, 3), (9, 8, 3), (11, 5, 5), (11, 3, 7), (9, 3, 10), (7, 4, 11), (5, 6, 11), (3, 9, 9), (3, 11, 7), (5, 11, 4)]
@@ -53,11 +56,17 @@ class Row(StatusRow):
             names.append(C.string_at(name).decode())
             return load(w, name, bitmap)
         self.fw.mock('widget_load_image', loaded)
-        canvas.art = {n: (14, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d',
-                                            'oled_keylock_d', 'oled_status_bt_d', 'oled_status_down_d')}
+        canvas.art = {n: (WIFI_W, 14) for n in ('oled_status_wifi_3_d', 'oled_status_wifi_2_d', 'oled_status_wifi_1_d', 'oled_status_wifi_x_d')}
+        canvas.art |= {'oled_keylock_d': (14, 14), 'oled_status_bt_d': (BT_W, 14), 'oled_status_down_d': (14, 14)}
         canvas.art |= {f'oled_status_sync_{f}_d': (14, 14) for f in range(8)}
         self.fw.fn('status_slots_paint', None, C.c_void_p, C.c_void_p)(self.bar.addr, canvas.addr)
         return canvas, names
+
+    def bars(self, x=100):
+        """The play state's bars at x on CY (play_bars): (left, top, width, height, radius) each."""
+        out = (C.c_float * 5 * 3)()
+        n = self.fw.fn('status_row__play_bars', C.c_int, C.c_int, C.c_int, C.c_void_p)(x, CY, out)
+        return [tuple(round(v, 3) for v in out[i]) for i in range(n)]
 
     def sync_sig(self):
         return self.fw.fn('status_row_sync', C.c_int)()
@@ -69,20 +78,19 @@ def row(fw, st):
 
 
 def test_the_slots_lay_out_right_to_left_from_the_battery(fw, row):
-    """Each shown slot's box, then its gap to the one on its right (mock_status_bars.py, mock_wifi_status.py,
-    mock_sync_status.py): the bars 10 wide 4 left of the body, Wi-Fi 14 wide 5 left of them, a sync's ring 16 wide 4
-    left, Buttons Lock's padlock 13 wide 5 left."""
-    assert row.left() == BODY - 4 - 10
+    """Each shown slot's box, then GAP to the one on its right (mock_status_icons.py, iOS's spacing): the bars 10
+    wide, Wi-Fi's fan 16, a sync's ring 16, Buttons Lock's padlock 13."""
+    assert row.left() == BODY - GAP - 10
     row.wifi(3)
-    assert row.left() == BODY - 4 - 10 - 5 - 14
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W
     row.app(1)
-    assert row.left() == BODY - 4 - 10 - 5 - 14 - 4 - 16
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
-    assert row.left() == BODY - 4 - 10 - 5 - 14 - 4 - 16 - 5 - 13
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16 - GAP - 13
 
 
-@pytest.mark.parametrize('status, wifi, left', [(1, None, BODY), (0, 3, BODY - 5 - 14), (3, 0, BODY - 4 - 10),
-                                                (2, 5, BODY - 4 - 10), (2, None, BODY - 4 - 10)])
+@pytest.mark.parametrize('status, wifi, left', [(1, None, BODY), (0, 3, BODY - GAP - WIFI_W), (3, 0, BODY - GAP - 10),
+                                                (2, 5, BODY - GAP - 10), (2, None, BODY - GAP - 10)])
 def test_a_hidden_slot_takes_no_room(fw, st, status, wifi, left):
     """Stopped there are no bars; Wi-Fi off, not connected (bar_wifi0) or an image stock never names shows none:
     the clock moves up to what is left."""
@@ -92,43 +100,56 @@ def test_a_hidden_slot_takes_no_room(fw, st, status, wifi, left):
 
 
 def test_the_headset_slot_is_its_glyph_and_its_percentage(fw, row):
-    """bt_headset_battery's level (bt_battery.c's; none with no headset): the Bluetooth glyph's 14 px box,
-    2 px, then the level and "%" at the battery's advances (10 and 14 before its first paint measures them); -1
+    """bt_headset_battery's level (bt_battery.c's; none with no headset): the Bluetooth rune's 8 px box, 2 px, then
+    the level and "%" at 13 px, a step under the clock, a row under centred so it stands on the clock's baseline.
+    Its width is the characters' advances (8 a figure and 12 the sign before the first paint measures them); -1
     hides it."""
     width = fw.fn('status_row__headset_w', C.c_int, C.c_int)
     assert width(-1) == 0 and fw.fn('bt_headset_battery', C.c_int)() == -1
-    assert width(80) == 14 + 2 + 2 * 10 + 14 and width(100) == 14 + 2 + 3 * 10 + 14 and width(5) == 14 + 2 + 10 + 14
+    assert width(80) == BT_W + 2 + 2 * 8 + 12 and width(100) == BT_W + 2 + 3 * 8 + 12 and width(5) == BT_W + 2 + 8 + 12
     canvas = Canvas(fw)
-    canvas.art = {'oled_status_bt_d': (14, 14)}
+    canvas.art = {'oled_status_bt_d': (BT_W, 14)}
     drawn: list = []
     fw.mock('canvas_draw_text', lambda c, s, n, x, y, *_: drawn.append(
         (''.join(chr(C.c_uint.from_address(s + 4 * i).value) for i in range(n & 0xffffffff)), i32(x), i32(y), canvas.text_color)))
+    fonts: list = []
+    fw.mock('canvas_set_font', lambda c, name, px, *_: fonts.append(px))
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: 7.0 if C.c_uint.from_address(s).value != ord('%') else 11.0)
     fw.fn('status_row__headset_draw', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(row.bar.addr, canvas.addr, 200, CY, 80)
-    assert canvas.images[0][:2] == (200, CY - 7)
-    assert drawn == [('80%', 200 + 16, CY - O['BATT_PX'] // 2, 0xffffffff)]
+    assert canvas.images[0][:2] == (200, CY - 7) and fonts == [13]
+    assert drawn == [('80%', 200 + BT_W + 2, CY - 13 // 2 + 1, 0xffffffff)]
+    assert width(80) == BT_W + 2 + 7 + 7 + 11  # measured
 
 
-def test_the_bars_stand_on_the_row_white_while_playing_and_grey_when_paused(fw, row):
-    canvas, _ = row.paint()
-    x = BODY - 4 - 10
-    assert [b for b in canvas.boxes] == [((x + 4 * i, CY + 6 - h, 2, h), 0xffffffff, 1) for i, h in enumerate(BARS[0])]
-    assert canvas.restored()
+def test_the_play_state_stands_on_the_digits_baseline_in_text_primary_playing_or_paused(fw, st, row):
+    """Playing, the level bars: 2 px wide with round ends, 4 px apart, up to 11 tall, their feet on CY + 5 (row 27's
+    bottom, the digits' baseline); paused, the pause: two 3 px bars 11 tall at 0.5 and 6.5 of the same 10 px box.
+    Both in Text Primary, as Wi-Fi and the battery (Text Secondary grey made the paused bars read as signal bars)."""
+    bars = row.bars()
+    assert bars == [(100 + 4 * i, CY + 5 - h, 2, h, 1) for i, h in enumerate(BARS[0])]
+    assert max(h for *_, h, _ in bars) <= INK
+    fills: list = []
+    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+    fw.mock('vgcanvas_set_fill_color', lambda vg, c, *_: fills.append(c & 0xffffffff))
+    row.paint()
     row.status = 3
-    canvas, _ = row.paint()
-    assert [b[1] for b in canvas.boxes] == [0xffababab] * 3  # Text Secondary, at the same heights
-    assert [b[0][3] for b in canvas.boxes] == list(BARS[0])
+    assert row.bars() == [(100.5, CY + 5 - INK, 3, INK, 0.9), (106.5, CY + 5 - INK, 3, INK, 0.9)]
+    row.paint()
+    assert len(fw.calls('vgcanvas_fill')) == 3 + 2 and fills == [0xffffffff] * 2  # white: Text Primary each time
+    st('light').value = 1  # Light Mode: black, paused and playing
+    row.paint()
+    row.status = 2
+    row.paint()
+    assert fills[2:] == [0xff000000] * 2
 
 
-def test_the_bars_move_a_frame_a_tick_repainting_only_their_box_and_hold_when_paused(fw, row):
+def test_the_bars_move_a_frame_a_tick_repainting_only_their_box_and_stop_when_paused(fw, row):
     assert row.sync_sig() == 1 and [ms for _, ms in row.timers] == [125]
     tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(row.timers[0][0])
-    assert tick(None) == 8 and row.dirty == [(BODY - 14, 0, 10, 26)]
-    canvas, _ = row.paint()
-    assert [b[0][3] for b in canvas.boxes] == list(BARS[1])
-    row.status = 3  # paused: the timer ends, the frame stays
-    assert tick(None) == 0
-    canvas, _ = row.paint()
-    assert [b[0][3] for b in canvas.boxes] == list(BARS[1]) and row.dirty == [(BODY - 14, 0, 10, 26)]
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 10, 0, 10, 26)]
+    assert [b[3] for b in row.bars()] == list(BARS[1])
+    row.status = 3  # paused: the timer ends and the pause stands still
+    assert tick(None) == 0 and len(row.bars()) == 2 and row.dirty == [(BODY - GAP - 10, 0, 10, 26)]
     assert row.sync_sig() == 1 and len(row.timers) == 1  # a new state, and nothing moves: no timer
 
 
@@ -145,23 +166,23 @@ def test_wifi_lights_arcs_by_its_bars_and_crosses_out_with_no_internet(fw, row, 
     row.wifi(level)
     row.online = online
     canvas, names = row.paint()
-    x = BODY - 4 - 10 - 5 - 14
-    assert names == [art] and canvas.images == [(x, CY - 7, 14, 14)]
+    x = BODY - GAP - 10 - GAP - WIFI_W
+    assert names == [art] and canvas.images == [(x, CY - 7, WIFI_W, 14)]
 
 
 def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
     row.status = 0
     row.app(1)
     canvas, names = row.paint()
-    assert names == ['oled_status_sync_0_d'] and canvas.images == [(BODY - 4 - 16 + 1, CY - 7, 14, 14)]
+    assert names == ['oled_status_sync_0_d'] and canvas.images == [(BODY - GAP - 16 + 1, CY - 7, 14, 14)]
     assert row.sync_sig() == 1 and len(row.timers) == 1
     tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(row.timers[0][0])
-    assert tick(None) == 8 and row.dirty == [(BODY - 4 - 16, 0, 16, 26)]
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 16, 0, 16, 26)]
     assert row.paint()[1] == ['oled_status_sync_1_d']
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
     canvas, names = row.paint()
-    assert names == ['oled_status_down_d'] and canvas.images == [(BODY - 4 - 16 + 4, CY - 4, 14, 14)]
+    assert names == ['oled_status_down_d'] and canvas.images == [(BODY - GAP - 16 + 4, CY - 4, 14, 14)]
     assert len(fw.calls('vgcanvas_arc')) == 2 and len(fw.calls('vgcanvas_stroke')) == 2  # the track, then the fill
     assert tick(None) == 0  # a download does not turn
 
@@ -172,7 +193,7 @@ def test_the_padlock_sits_where_buttons_lock_put_it(fw, row):
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     row.status = 0
     canvas, names = row.paint()
-    assert names == ['oled_keylock_d'] and canvas.images == [(BODY - 5 - 13, CY - 7, 14, 14)]
+    assert names == ['oled_keylock_d'] and canvas.images == [(BODY - GAP - 13, CY - 7, 14, 14)]
 
 
 @pytest.mark.parametrize('change', ['wifi', 'offline', 'lock', 'status', 'sync', 'ring'])
@@ -193,10 +214,11 @@ def test_a_ring_moving_less_than_a_fiftieth_waits(fw, row):
     assert row.sync_sig() == 0
 
 
-@pytest.mark.parametrize('x, slot', [(BODY + 12, SLOT_BATTERY), (BODY - 9, SLOT_PLAY), (BODY + 2, SLOT_BATTERY), (BODY + 1, SLOT_PLAY),
-                                     (BODY - 1, SLOT_PLAY), (BODY - 9 - 22, SLOT_PLAY), (BODY - 9 - 23, -1), (BODY + 12 + 22, -1)])
+@pytest.mark.parametrize('x, slot', [(BODY + 12, SLOT_BATTERY), (BODY - 11, SLOT_PLAY), (BODY + 1, SLOT_BATTERY), (BODY, SLOT_PLAY),
+                                     (BODY - 1, SLOT_PLAY), (BODY - 11 - 22, SLOT_PLAY), (BODY - 11 - 23, -1), (BODY + 12 + 22, -1)])
 def test_a_touch_finds_the_nearest_slot_inside_its_target(fw, row, x, slot):
-    """44 x 40 round each centre: the battery's body's (12 in), the bars' (5 in); where they meet, the nearer."""
+    """44 x 40 round each centre: the battery's body's (12 in), the bars' (5 in, GAP left of the body); where they
+    meet, the nearer."""
     assert fw.fn('status_slot_at', C.c_int, C.c_int, C.c_int)(x, 13) == slot
 
 
@@ -217,7 +239,7 @@ def test_a_tap_on_the_bars_opens_now_playing_after_the_dispatch(fw, row):
 def test_a_centred_clock_that_would_reach_the_slots_goes_beside_them(fw, row):
     fw.mock('canvas_measure_text', lambda *_: 250.0)  # centred, it would end at 313
     clock = row.place()
-    edge = BODY - 4 - 10 - 6
+    edge = BODY - GAP - 10 - 7  # CLOCK_BESIDE
     assert clock.box[0] + clock.box[2] - 2 == edge
 
 
@@ -241,3 +263,18 @@ def test_a_download_outranks_a_check_and_a_stopped_app_says_nothing(fw, row):
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(C.byref(got)) == 2 and got.value == 600
     row.ap.a[1].launched = 0
     assert fw.fn('addon_sync', C.c_int, C.POINTER(C.c_int))(None) == 1
+
+
+def test_a_dev_builds_stand_in_shows_wifi_a_headset_and_a_charger_the_emulator_lacks(fw_dev):
+    """--dev only: /mnt/data/q2-status.fake's keys stand in for the radio, a headset and a charger, so the emulator
+    can show every slot; a key it does not name is -1, and stock's state stands."""
+    files = Files(fw_dev, {})
+    clock = [1000]
+    fw_dev.mock('time_now_ms', lambda *_: clock[0])
+    fake = fw_dev.fn('status_fake', C.c_int, C.c_char)
+    files.files['/mnt/data/q2-status.fake'] = b'wifi=2 bt=72 charge=1\n'
+    assert (fake(b'w'), fake(b'b'), fake(b'c')) == (2, 72, 1)
+    files.files['/mnt/data/q2-status.fake'] = b'bt=5 wifi'
+    assert fake(b'w') == 2  # read again only after STATUS_FAKE_MS
+    clock[0] += 500
+    assert (fake(b'w'), fake(b'b'), fake(b'c')) == (-1, 5, -1)  # "wifi" with no value: none
