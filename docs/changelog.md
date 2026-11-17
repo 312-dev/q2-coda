@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Settings > Bluetooth and Home: the loading spinner keeps turning the whole time a device is connecting and while Cover Flow loads a large library; before, it stopped on one frame until the wait was over.
   - Lists (OLED): the selected row's words no longer flicker while you drag the wheel part of the way to the next row; the leaning bar covered them on every other frame.
   - Car Remote: **Pair a Phone** says exactly what to do on the phone for the way it can find this Q2 Muse right now. With Bluetooth off (or while the Q2 Muse can't be found over Bluetooth) it gives the Wi-Fi steps: in Q2 Muse Remote, **Pair a Q2 Muse > Wi-Fi address**, type the address the page shows, then the code. With no Wi-Fi either, it says to join a Wi-Fi network first. The steps change as soon as Wi-Fi or Bluetooth comes on. Before, it gave Bluetooth's steps that could not work and named a "Tap Add a Q2 Muse" button the app doesn't have.
   - Car Remote: with Bluetooth off, the Car Remote log no longer gains two error lines every 30 seconds; it says once that Bluetooth isn't running and waits for it to come on.

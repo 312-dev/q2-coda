@@ -3223,7 +3223,7 @@ static void *open_page(void) {
  * manager's paint). Only the step's thread touches the library meanwhile: the staging pointer
  * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
-#define STEP_TICK_MS 16 /* the UI thread's look at a running step: MO_FRAME_MS */
+#define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
 extern int spinner_turn(void);         /* list_marks.c */
 extern int ringnav_wm_paint(void *wm); /* nav/input.c */
 static struct {
