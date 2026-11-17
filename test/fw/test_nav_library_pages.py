@@ -1144,15 +1144,15 @@ class Heart:
     def key(self, key, top=None):
         return self.fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(top or self.win, key)
 
+    def pick(self, n):
+        """n hearts picked in OLED's rating picker, the menu sheet's (ratings.c rate_modal): its pick."""
+        self.fw.fn('ratings__rate_picked', None, C.c_int)(n)
+
     def kept(self):
         return self.fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, listen_key(b'/m/now.flac'))
 
     def copy_due(self):
         return self.fw.var('ratings__rc_due', C.c_int).value
-
-
-def hearts(n, on='play_fav', off='play_unfav'):
-    return [on] * n + [off] * (5 - n)
 
 
 def test_the_heart_s_click_is_swapped_for_one_that_tells_a_hold(fw, ui, song, mcl):
@@ -1201,25 +1201,18 @@ def test_a_streamed_track_has_no_badge(fw, ui, song, mcl):
     assert heart.badge() is None
 
 
-def test_holding_the_heart_opens_the_picker_on_its_rating(fw, ui, song, mcl):
+def test_holding_the_heart_opens_the_picker_and_lets_go_of_the_press(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=3)
     assert heart.picker() is None
     ui.handler(heart.heart, EVT_POINTER_DOWN)()
     assert [ms for _, ms in ui.pending('rate_long')] == [RATE_HOLD_MS]
     ui.fire('rate_long')
-    assert heart.picker() == ('3 of 5', hearts(3)) and heart.panel() not in ui.dull
     # the press is aborted, so the slide_view under the heart lets go of it
     (_, (_, kind, target, *_)), = fw.calls('pointer_event_init')
     assert kind == EVT_POINTER_ABORT and target == heart.win
     assert [c[1][0] for c in fw.calls('widget_dispatch_event_to_target_recursive')] == [heart.win]
     ui.handler(heart.heart, EVT_CLICK)()  # the hold's own release: stock's toggle never runs
-    assert heart.picker() == ('3 of 5', hearts(3))
-
-
-def test_a_my_fav_opens_the_picker_on_five(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=2, fav=True)
-    heart.hold()
-    assert heart.picker() == ('5 of 5', hearts(5))
+    assert heart.kept() == 3
 
 
 def test_a_short_press_opens_nothing(fw, ui, song, mcl):
@@ -1229,78 +1222,12 @@ def test_a_short_press_opens_nothing(fw, ui, song, mcl):
     assert heart.picker() is None and not fw.calls('pointer_event_init')
 
 
-def test_the_wheel_moves_the_rating_and_return_leaves_it(fw, ui, song, mcl):
+@pytest.mark.parametrize('kept, badge', [(4, '4'), (1, '1'), (0, None)])
+def test_the_picked_rating_is_kept(fw, ui, song, mcl, kept, badge):
     heart = Heart(fw, ui, song, mcl, kept=3)
     heart.hold()
-    seen = []
-    for key in (KEY_NEXT, KEY_NEXT, KEY_NEXT, *[KEY_PREV] * 6):
-        assert heart.key(key) == 1
-        seen.append(heart.picker()[0])
-    assert seen == ['4 of 5', '5 of 5', '5 of 5', '4 of 5', '3 of 5', '2 of 5', '1 of 5', 'Unrated', 'Unrated']
-    assert heart.picker()[1] == hearts(0)
-    assert heart.key(KEY_RETURN) == 1 and heart.picker() is None and heart.panel() in ui.dull
-    assert heart.kept() == 3 and not heart.copy_due() and heart.badge() == '3'
-
-
-@pytest.mark.parametrize('moves, kept, badge', [(1, 4, '4'), (-2, 1, '1'), (-3, 0, None)])
-def test_centre_keeps_the_picked_rating(fw, ui, song, mcl, moves, kept, badge):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.hold()
-    for _ in range(abs(moves)):
-        heart.key(KEY_NEXT if moves > 0 else KEY_PREV)
-    assert heart.key(KEY_CENTER) == 1 and heart.picker() is None
+    heart.pick(kept)
     assert heart.kept() == kept and heart.copy_due() and heart.badge() == badge
-
-
-def test_the_picker_leaves_other_keys_and_windows_alone(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    assert heart.key(KEY_NEXT) == 0  # no picker
-    heart.hold()
-    assert heart.key(KEY_PLAY) == 0 and heart.key(KEY_NEXT, top=0x1234) == 0
-    assert heart.picker() == ('3 of 5', hearts(3))
-
-
-def test_a_tap_on_a_heart_keeps_that_many(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    hearts_ = ui.kids[heart.panel()][1:]
-    assert heart.tap(hearts_[1]) == STOP
-    assert heart.kept() == 2 and heart.picker() is None and heart.badge() == '2'
-
-
-def test_the_release_of_the_hold_that_opened_the_picker_picks_nothing(fw, ui, song, mcl):
-    """#303: the picker opens under the held finger, whose release chose the heart there."""
-    clock = [5001]  # odd: the stamp is the time | 1
-    fw.mock('time_now_ms', lambda *_: clock[0])
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    hearts_ = ui.kids[heart.panel()][1:]
-    assert ui.handler(hearts_[4], EVT_CLICK)() == STOP  # no press came down on it
-    assert heart.kept() == 1 and heart.picker() == ('1 of 5', hearts(1))
-    clock[0] += 399  # the same finger settling
-    assert heart.tap(hearts_[4]) == STOP and heart.kept() == 1 and heart.picker() == ('1 of 5', hearts(1))
-    clock[0] += 1
-    assert heart.tap(hearts_[3]) == STOP and heart.kept() == 4 and heart.picker() is None
-    heart.hold()
-    clock[0] += 400
-    heart.tap(hearts_[2])
-    assert ui.handler(hearts_[1], EVT_CLICK)() == STOP and heart.kept() == 3  # one press, one tap
-
-
-def test_a_tap_on_the_rating_it_has_takes_it_away(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.hold()
-    assert heart.tap(ui.kids[heart.panel()][3]) == STOP
-    assert heart.kept() == 0 and heart.picker() is None and heart.badge() is None
-
-
-def test_the_picker_is_made_once_per_window(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    heart.key(KEY_RETURN)
-    made = len(ui.kids[heart.win])
-    heart.hold()
-    assert len(ui.kids[heart.win]) == made and heart.picker() == ('1 of 5', hearts(1))
 
 
 def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
@@ -1338,8 +1265,7 @@ def test_five_hearts_are_a_my_fav_through_the_heart_s_own_click(fw, ui, song, mc
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(5)
     assert list(log[:2]) == [Heart.CTX, 0]  # stock's toggle, with its own context
     assert heart.kept() == 0 and heart.copy_due()  # 5 is My Fav's, not kept here
 
@@ -1350,21 +1276,19 @@ def test_fewer_hearts_on_a_my_fav_take_it_out(fw, ui, song, mcl):
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     heart.hold()
-    heart.key(KEY_PREV)
-    heart.key(KEY_CENTER)
+    heart.pick(4)
     assert log[0] == Heart.CTX and heart.kept() == 4
 
 
 @in_fork
-@pytest.mark.parametrize('fav, kept, key, told', [(False, 4, KEY_NEXT, b'1'), (True, 0, KEY_PREV, b'0')])
-def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, key, told):
+@pytest.mark.parametrize('fav, kept, pick, told', [(False, 4, 5, b'1'), (True, 0, 4, b'0')])
+def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, pick, told):
     path = b'/mnt/mmc/Jellyfin/A/now.flac'
     heart = Heart(fw, ui, song, mcl, fav=fav, path=path, table=ratings((listen_key(path), kept)) if kept else None)
     stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
     favdir_card(fw, heart.files.files)
     heart.hold()
-    heart.key(key)
-    heart.key(KEY_CENTER)
+    heart.pick(pick)
     assert heart.files.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + told + b'\t' + path + b'\n'
 
 
@@ -1441,8 +1365,7 @@ def test_the_heart_on_a_song_an_app_synced_is_stock_s_and_told_to_the_app(fw, ui
 def test_a_full_ratings_table_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, table=b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(RATE_SLOTS)))
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(1)
     assert ui.toasts == ['Ratings are full'] and heart.kept() == 0
 
 
@@ -1450,8 +1373,7 @@ def test_a_rating_that_cannot_be_written_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=2)
     heart.files.fail_rename = True
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(3)
     assert ui.toasts == ['Rating not saved'] and heart.kept() == 2 and heart.badge() == '2'
 
 
@@ -1476,11 +1398,8 @@ def album_menu(fw, ui, song, st, album_id=0xa1b0):
 def test_an_album_s_rating_is_kept_apart_from_its_songs(fw, ui, song, st):
     files = Files(fw)
     win, ids = album_menu(fw, ui, song, st)
-    show = fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)
-    assert show(win, 4, 0xa1b0) == 1 and show(win, 2, 0xa1b0) == 0  # one picker at a time
-    key = fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)
-    key(win, KEY_NEXT)
-    key(win, KEY_CENTER)
+    fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
+    fw.fn('ratings__rate_picked', None, C.c_int)(5)
     kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
     assert kept(1, 0xa1b0) == 5 and kept(0, 0xa1b0) == 0 and RATINGS not in files.files
     assert ALBUM_RATINGS in files.files
@@ -1491,7 +1410,7 @@ def test_an_album_no_longer_under_the_picker_is_not_rated(fw, ui, song, st):
     win, ids = album_menu(fw, ui, song, st)
     fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
     ui.new('window_create', 0, 0, 0, 0, 0)  # another page over it
-    fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(win, KEY_CENTER)
+    fw.fn('ratings__rate_picked', None, C.c_int)(4)
     assert ui.toasts == ['Album changed'] and not files.files
 
 
@@ -1499,7 +1418,7 @@ def test_an_album_whose_row_changed_is_not_rated(fw, ui, song, st):
     files = Files(fw)
     win, ids = album_menu(fw, ui, song, st, album_id=0xb2c0)  # the row now holds another album
     fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
-    fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(win, KEY_CENTER)
+    fw.fn('ratings__rate_picked', None, C.c_int)(4)
     assert ui.toasts == ['Album changed'] and not files.files
 
 

@@ -1219,12 +1219,9 @@ def test_hearts_picked_on_a_stream_copy_are_the_server_rows_and_go_to_the_server
     """Three hearts picked on Now Playing while the copy plays are kept under the server row's key (its
     fileurl's listen_key, as play counts are), and its ratings.out line names the row's sid, so the app sends
     them and the Library's row has them; the copy's own path keys nothing."""
-    from test_nav_library_pages import KEY_CENTER, KEY_NEXT
     heart = heart_on_copy(rig, fw, ui, song, mcl)
     heart.hold()
-    for _ in range(3):
-        heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(3)
     kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
     row = listen_key(url('s1'))
     assert kept(0, row) == 3 and kept(0, listen_key('/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac')) == 0
@@ -1335,16 +1332,14 @@ def test_a_tap_on_a_server_favourite_s_heart_takes_the_row_out(rig, fw, ui, song
 
 @in_fork
 def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui, song, mcl):
-    """The picker opens on five for the row's favourite; three keep three under the row's key and take the row out
-    of My Fav without stock's toggle, which would put the copy in."""
-    from test_nav_library_pages import FAV_CLICK, KEY_CENTER, KEY_PREV, stock_stub
+    """Three hearts picked on the row's favourite keep three under the row's key and take the row out of My Fav
+    without stock's toggle, which would put the copy in."""
+    from test_nav_library_pages import FAV_CLICK, stock_stub
     heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     heart.hold()
-    assert heart.picker()[0] in ('5 of 5', '5 Hearts')
-    heart.key(KEY_PREV), heart.key(KEY_PREV)
-    heart.key(KEY_CENTER)
+    heart.pick(3)
     row = listen_key(url('s1'))
     assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
     assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.badge() == '3'

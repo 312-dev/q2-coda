@@ -1914,11 +1914,14 @@ def test_no_streamhide_key_hides_nothing(fw):
     assert seen == [b''] and hide.value == b''
 
 
-def test_root_click_saves_the_next_folder(fw):
+def test_root_click_saves_the_next_folder(fw, st):
+    from test_nav_display_library import Ui
     Card(fw, FOLDERS)
     Config(fw, FOLDERROOT=b'art')
     seen = []
     fw.mock('toolsWriteConfig', lambda path, section, key, value, *_: seen.append((C.string_at(key), C.string_at(value))) and 0)
+    ui = Ui(fw)  # the row it is the click of (folder_root_row), whose label it writes
+    st('root_label', C.c_void_p).value = ui.add('hscroll_label', ui.add('button', ui.window('playset_page'), (20, 0, 335, 32))).addr
     fw.fn('navigation__root_click', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert seen == [(b'FOLDERROOT', b'Music')]
 

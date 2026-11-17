@@ -277,7 +277,7 @@ def test_a_fresh_list_takes_its_first_whole_row_then_the_tick_moves_on(fw, ui):
     paint(fw, page)
     assert page.selected == 4
     key(fw, ui, KEY_NEXT)
-    assert page.selected == 5 and page.offset == ROW_H * 3 + 5  # in view already: the list stays
+    assert page.selected == 5 and page.offset == ROW_H * 4  # OLED's whole rows (list_fit): row 4 lands on the top
 
 
 def test_ticks_scroll_only_as_far_as_the_row_needs(fw, ui):
@@ -303,7 +303,7 @@ def test_a_tick_up_from_the_top_row_of_a_scrolled_list_brings_it_in(fw, ui):
     paint(fw, page)
     assert page.selected == 10
     key(fw, ui, KEY_PREV, ui.now + SLOW)
-    assert page.selected == 9 and page.shows(9) and page.screen_y(9) > 0
+    assert page.selected == 9 and page.shows(9) and page.screen_y(9) == 0  # whole on the top: OLED's list_fit keeps no margin
 
 
 def test_a_spin_steps_by_the_documented_ramp(fw, ui):

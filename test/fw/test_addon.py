@@ -5288,14 +5288,8 @@ def test_an_artists_reply_under_the_inset_modal_is_its_page(fw, nav_st):
     assert (b'_ar_name', b'Foo') in sets and (b'_ar_sub', b'4 albums') in sets and (b'_ar_count', b'4') in sets
 
 
-def test_other_sets_and_other_replies_keep_the_plain_rows(fw, nav_st):
-    p = Page(fw)
-    p.answer(rows=artist_rows())  # no modal set
-    assert p.top.lay == LAY_PLAIN and p.drawn == 9
-    from test_nav_hold import use_set
-    C.c_void_p.from_address(p.view + O['W_PARENT']).value = block(fw, size=4096)
-    use_set(nav_st)
-    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+def test_other_replies_keep_the_plain_rows(fw, nav_st):
+    p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows(radio=False))  # no Radio: an album's page, say
     assert p.top.lay == LAY_PLAIN and p.drawn == 8
 

@@ -17,7 +17,7 @@ from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_for
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
 VIEW_W, VIEW_H = 375, 220
-HOME_PW, HOME_H = 188, 290
+HOME_PW = 188  # coverflow.c HOME_PW: the widest pane, home.ring's and home.held's rows
 # Split's art pane as home_render fills it under the geometry set the build bakes (coverflow.c pane_w, pane_h), and a
 # cover zoomed 110% to cover it (slide_load)
 _G = host.tools_theme.built_geometry(host.tools_theme.builtins())
@@ -785,8 +785,12 @@ def test_slide_load_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
     tex, home, frame = tex_rig(fw, 300, 300, pixels)
     assert tex(b'x') == 1
     s = home.sl[0]
-    assert (s.tw, s.th, s.rx, s.ry, s.lib) == (319, 319, 29, 29, 0)  # the fit, 290 square, plus 10%
-    assert (s.u0, s.v0) == ((290 - 188) // 2, 0)  # the old crop
+    # the fit to OLED's PANE_W x PANE_H pane, PANE_H square, plus 10%; the pan's ends keep split_inset's 2% of it
+    # (7 texels) clear of each edge (drift_axis)
+    fit, t, ins = PANE_H, PANE_H * 11 // 10, PANE_H * 11 // 10 * 2 // 100
+    assert (s.tw, s.th, s.lib) == (t, t, 0)
+    assert (s.u0, s.rx) == ((fit - PANE_W) // 2, t - fit)  # the old crop, the whole zoom's room
+    assert (s.v0, s.ry) == (ins, t - PANE_H - ins - ins)  # no crop: the inset at each end
     assert struct.unpack_from('<H', frame, 0xc)[0] & 1  # opaque
 
 
@@ -3490,7 +3494,7 @@ def test_play_starting_mid_library_fade_fades_from_the_frame_as_it_stands(fw):
     assert frame()
     after = pixels_of(b, home.frame)
     for y in range(len(before)):
-        for x in range(HOME_PW):
+        for x in range(PANE_W):
             p, q = before[y][x], after[y][x]
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
     home.fade = O['SLIDE_FADE_MS'] - 1
@@ -3549,7 +3553,7 @@ def test_under_oled_the_wheel_off_now_playing_mid_fade_fades_the_show_in_over_th
     assert frame()
     after = pixels_of(b, home.frame)
     for y in range(len(before)):
-        for x in range(HOME_PW):
+        for x in range(PANE_W):
             p, q = before[y][x], after[y][x]
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
 

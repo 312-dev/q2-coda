@@ -113,7 +113,9 @@ def test_a_finger_on_the_right_edge_jumps_to_the_letter_and_holds_the_touch(fw, 
     assert pull.send(EVT_MOVE, 0, letter_y('B') - pull.y) == STOP  # the list neither scrolls nor taps
     assert table.selected == 3
     assert pull.send(EVT_MOVE, 0, 320 - pull.y) == STOP  # past the end: Z, as far down as the list goes
-    assert table.selected == 75 and table.client.int(O['TABLE_TOP']) == 78 * ROW_H - table.client.box[3]
+    # the last row's foot on OLED's list end (y 282 on screen), the box running on 16 px past it under the 58 px bar
+    pad = 58 + table.client.box[3] - fw.fn('list_fit_end', C.c_int)()
+    assert table.selected == 75 and table.client.int(O['TABLE_TOP']) == 78 * ROW_H - table.client.box[3] + pad
     assert pull.send(EVT_UP, 0, 0) == STOP
     (fade,) = ui.due('az_due')
     assert ui.timers[fade][2] == AZ['UI_SHOW_MS'] - AZ['UI_FADE_MS']
