@@ -41,7 +41,7 @@ class Ss(C.Structure):
                 ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
                 ('peek_timer', C.c_uint), ('under', C.c_void_p), ('label', C.c_void_p),
                 *((k, C.c_short) for k in 'form row_y row_h scroll fx fy fw fh'.split()),
-                ('blink_at', C.c_uint), ('blink_timer', C.c_uint)]
+                ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p)]
 
 
 @pytest.fixture
@@ -60,6 +60,8 @@ class Strip:
     edit: int
     kb: int
     keys: int
+    dialog: int  # ... the edit's window, and the row it sits in
+    holder: int
 
     def __init__(self, fw, ui, songs):
         self.attach(fw, ui)
@@ -913,14 +915,18 @@ def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
 
 
 # A stock text box (keyboard.c kb_strip_due) on the strip: the sets on its switcher; Play/Pause its own OK.
-def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', **props):
+def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0, **props):
     """A text box's edit, the input method's, in its window, opened on the strip. By default a Wi-Fi network's password
     (kbwifipass_dialog's edit_passwd); as stock's every box, its input_type reads 0 (text) whatever its page says. props
-    are the edit's own (a card app's _secret)."""
+    are the edit's own (a card app's _secret). wm: the window manager's address, the windows' parent."""
     Config(fw)
-    dialog = ui.new('window_create', 0, 0, 0, 375, 320)
+    dialog = ui.new('window_create', wm, 0, 0, 375, 320)
     ui.name[dialog] = window
-    edit = ui.new('edit', dialog, 0, 0, 200, 40)
+    holder = dialog
+    if window == 'editwifi_dialog':  # stock's: the edit sits in a row of its own, at the dialog's top
+        holder = ui.new('view', dialog, 65, 5, 310, 50)
+        ui.name[holder] = 'list_item_edit'
+    edit = ui.new('edit', holder, 0, 0, 200, 40)
     ui.name[edit] = name
     ui.props[(edit, 'input_type')] = 0
     for k, v in props.items():
@@ -929,11 +935,11 @@ def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', **pr
     im = C.create_string_buffer(0x40)
     C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
     fw.mock('input_method', lambda *_: C.addressof(im))
-    kb = ui.new('window_create', 0, 0, 60, 375, 260)  # the input method's keyboard window, top
+    kb = ui.new('window_create', wm, 0, 60, 375, 260)  # the input method's keyboard window, top
     keys = ui.new('pages', kb, 0, 40, 375, 221)
     assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Home Wi-Fi') == 1
     s = attached(fw, ui)
-    s.im, s.edit, s.kb, s.keys = im, edit, kb, keys
+    s.im, s.edit, s.kb, s.keys, s.dialog, s.holder = im, edit, kb, keys, dialog, holder
     return s
 
 
@@ -991,6 +997,41 @@ def test_add_network_s_dialog_is_a_password_only_when_stock_opened_it_for_one(fw
         assert s.ss.secret and '•••••' in texts and 'Password' in texts
     else:
         assert not s.ss.secret and 'Homex' in texts and 'Network Name' in texts and 'Password' not in texts
+
+
+def test_add_network_s_own_text_box_is_hidden_while_the_strip_types_for_it(fw, ui):
+    """editwifi_dialog's edit sits in the status row; the strip's field shows the text, so stock's box is covered, and is
+    shown again when the keyboard goes with the dialog still up (an OK that leaves it open)."""
+    fw.mock('window_manager', lambda *_: 1)  # a real one, whose children the C looks through for a live window
+    s = boxed(fw, ui, b'Home', 'edit', 'editwifi_dialog', wm=1)
+    assert s.holder in ui.hidden and s.edit not in ui.hidden
+    ui.destroy(s.kb)
+    assert s.holder not in ui.hidden
+
+
+def test_a_box_s_row_is_left_alone_when_its_dialog_went_first(fw, ui):
+    """An OK that closes the dialog frees the row before the keyboard goes: nothing is shown through a dead widget."""
+    fw.mock('window_manager', lambda *_: 1)
+    s = boxed(fw, ui, b'Home', 'edit', 'editwifi_dialog', wm=1)
+    ui.destroy(s.dialog)
+    ui.destroy(s.kb)
+    assert not [c for c in fw.calls('widget_set_visible') if c[1][0] == s.holder and c[1][1] & 0xff]
+
+
+def test_return_held_on_add_network_s_box_closes_its_dialog_too(fw, ui):
+    """The dialog is only that box (stock closes it on its next Return): left up it shows the box alone, shifted to
+    the top of the screen, so the hold quits it (a modal dialog), a loop pass after the keyboard's close."""
+    closed: list = []
+    fw.mock('dialog_quit', lambda w, *_: closed.append(w) or ui.destroy(w))
+    fw.mock('window_manager', lambda *_: 1)
+    s = boxed(fw, ui, b'abc', 'edit', 'editwifi_dialog', wm=1)
+    s.down(ui.top(), KEY_RETURN)
+    s.now[0] += HOLD_MS
+    ui.fire('search_strip__ss_hold_tick')
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0]
+    assert closed == []  # not inside the keyboard's own close
+    ui.fire('search_strip__ss_quit_due')
+    assert closed == [s.dialog]
 
 
 def test_a_card_app_s_password_box_shows_dots_and_is_done_not_joined(fw, ui):

@@ -219,6 +219,8 @@ static struct {
     short scroll;         /* the text's scroll in its field, px (ss_field) */
     short fx, fy, fw, fh; /* the field as last painted, on the sheet, for the blink to repaint */
     unsigned blink_at, blink_timer; /* the cursor shown from (its blink's start); the timer */
+    void *covered;     /* stock's own text box's row, hidden under the strip (Add Network's) */
+    void *covered_win; /* ... and its dialog */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -408,7 +410,18 @@ static void ss_box_done(void) {
     if (ss.box && P(im, IM_WIDGET) == edit) input_method_request(im, (void *)0);
 }
 /* Return held on a text box: the box's keyboard closes, the strip with it, as the keyboard's Return
- * did (navigation.c search_key: our own edits emptied first, so their pages back out). */
+ * did (navigation.c search_key: our own edits emptied first, so their pages back out). Add
+ * Network's dialog is only the box, a modal one that stock leaves up for a second Return to close:
+ * it is quit too, back to the page's rows with the text as it was, from the next loop pass (quit
+ * inside the keyboard's own close, demo crashes). */
+static unsigned ss_quit_timer __attribute__((section(".scratch")));
+static void *ss_quit_win __attribute__((section(".scratch")));
+static int ss_holds(void *root, void *w);
+static int ss_quit_due(const void *unused) {
+    ss_quit_timer = 0;
+    if (ss_holds(window_manager(), ss_quit_win)) dialog_quit(ss_quit_win, 0);
+    return 0;
+}
 static void ss_box_cancel(void) {
     void *edit = ss.box, *im = input_method();
     if (ss.done) { /* the payload's own text: its page closes, the text as it was */
@@ -419,7 +432,10 @@ static void ss_box_cancel(void) {
     if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), EDIT_NAME))
         widget_set_text_utf8(edit, "");
     widget_set_focused(edit, 0);
+    void *win = window_of(edit);
+    int own = !tk_strcmp(widget_get_prop_str(win, "name", ""), "editwifi_dialog");
     input_method_request(im, (void *)0);
+    if (own) ss_quit_win = win, rearm(&ss_quit_timer, ss_quit_due, 0);
 }
 
 /* The result at sel: a song plays, the songs found after it as the queue (a song list's class, as
@@ -1232,12 +1248,23 @@ static int ss_touch(void *ctx, void *event) {
     return 0;
 }
 
+/* Whether w is in the tree under root (w only compared, never read: it may be gone). */
+static int ss_holds(void *root, void *w) {
+    if (!root || !w) return 0;
+    if (root == w) return 1;
+    for (unsigned i = 0, n = widget_count_children(root); i < n; ++i)
+        if (ss_holds(widget_get_child(root, i), w)) return 1;
+    return 0;
+}
+
 static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
     stop_timer(&ss.hold_timer);
     stop_timer(&ss.erase_timer);
     stop_timer(&ss.peek_timer);
     stop_timer(&ss.blink_timer);
+    if (ss.covered && ss_holds(window_manager(), ss.covered_win))
+        widget_set_visible(ss.covered, 1, 0); /* a dialog an OK left open shows its box again */
     if (ss.under) bitmap_destroy(ss.under);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
@@ -1257,15 +1284,6 @@ static void ss_sheet(const char *caption) {
     widget_on(ss.sheet, EVT_POINTER_DOWN, ss_touch, 0);
     widget_on(ss.page, EVT_POINTER_MOVE_BEFORE, ss_touch, 0);
     widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);
-}
-
-/* Whether w is in the tree under root (w only compared, never read: it may be gone). */
-static int ss_holds(void *root, void *w) {
-    if (!root || !w) return 0;
-    if (root == w) return 1;
-    for (unsigned i = 0, n = widget_count_children(root); i < n; ++i)
-        if (ss_holds(widget_get_child(root, i), w)) return 1;
-    return 0;
 }
 
 /* Where the text lives (docs/oled-design.md#text-entry), as the strip opens over under, the page
@@ -1401,7 +1419,12 @@ int search_strip_box(void *kb, void *edit, const char *title) {
         label = *(tips = widget_get_prop_str(edit, "tips", "")) ? tips : "Search";
     tk_snprintf(ss_box_label, sizeof ss_box_label, "%s", label);
     ss.label = ss_box_label;
-    ss_place(window_of(edit), form, edit);
+    /* Add Network's dialog is its box alone, in a row at the status row's height (stock lifts it
+     * above its keyboard): the strip's field shows the text, so the row stays out of sight. */
+    void *win = window_of(edit), *row = P(edit, W_PARENT);
+    if (!tk_strcmp(widget_get_prop_str(win, "name", ""), "editwifi_dialog") && row && row != win)
+        ss.covered = row, ss.covered_win = win, widget_set_visible(row, 0, 0);
+    ss_place(win, form, edit);
     bar_title_sync(kb);
     widget_invalidate_force(kb, (void *)0);
     return 1;
