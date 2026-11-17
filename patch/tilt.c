@@ -53,8 +53,7 @@ static struct {
 #define PRESS_FADE_MS 120    /* the blue's way back after the release, linear */
 #define PRESS_RM_HOLD_MS 80  /* Reduce Motion: the blue held this long past the release */
 #define PRESS_LIFT 160       /* the rest shadow's strength, 256ths of the lean's at the tick */
-#define PRESS_BLUE 0x4080f0  /* the OLED blue's pressed step (#2160d8's) */
-#define PRESS_WHITE 184      /* any other accent's: this far toward white, 1000ths */
+#define PRESS_BLUE 0x4080f0  /* the pressed step of OLED's one accent, its Blue scheme */
 
 static struct {
     anim_t down, up, fade; /* the press, the spring and the blue's way back */
@@ -120,12 +119,12 @@ void tilt_press(int down) {
 }
 
 /* The bar's tone c (the accent's top, bottom or highlight) at the press's blue step (row_paint.c
- * paint_selection): toward PRESS_BLUE from the OLED blue, else PRESS_WHITE of the way to white. */
+ * paint_selection): toward PRESS_BLUE. ponytail: OLED has one accent, Blue (theme.xml oled-blue),
+ * whose five tones are all the one blue, so every tone steps to PRESS_BLUE; a second accent would
+ * need its own pressed step, carried in its scheme. */
 unsigned tilt_tone(unsigned c) {
     int b = press_bright();
-    if (!b) return c;
-    unsigned lit = (c & 0xffffff) == 0x2160d8 ? PRESS_BLUE : mix(c, 0xffffff, PRESS_WHITE, 1000);
-    return mix(c, lit, b, 1000);
+    return b ? mix(c, PRESS_BLUE, b, 1000) : c;
 }
 
 /* A wheel tick that met an end of w's list, toward dir (+1 the last row): the selection stays, and
@@ -218,19 +217,22 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
     }
     k += (256 - k) * e / 256;
     if (!grow && !k) return;
-    int dir = p < 0 ? -1 : 1, gw = bar->w * grow / 1000, gh = bar->h * grow / 1000;
+    int dir = p < 0 ? -1 : 1, gw = bar->w * grow / 1000, gh = bar->h * grow / 1000, rest = bar->y;
     bar->x -= gw / 2, bar->w += gw;
     bar->y += dir * TILT_LIFT * e / 256 - gh / 2, bar->h += gh;
-    /* never past its window's top, where the status row's window covers it: the first row's bar
-     * grows down there instead of being cut (tilt_clip widens the clip for the rest). A list in no
+    /* never higher past its window's top than it rests, where the status row's window covers it: the
+     * first row's bar grows down there instead of being cut (tilt_clip widens the clip for the
+     * rest). A row already raised above its window (Home's Split list, split_art_up, whose band
+     * the bar paints) leans from where it rests: brought down to the window's top it would stand
+     * up to that rise below its words, the bar sliding off its row on every tug. A list in no
      * window (being built or torn down) paints only its rest lift, with no top to keep under. */
     if (tilt.win) {
         int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window */
-        if (oy + bar->y < wy) bar->y = wy - oy;
+        int top = wy - oy < rest ? wy - oy : rest;
+        if (bar->y < top) bar->y = top;
     }
-    /* the box tilt_poll paints again reaches the bar's foot and its shadow wherever it now is: moved
-     * down from a row raised above its window (Home's Split list, split_art_up) it can stand up to
-     * that rise into the next row, past the MARGIN round its row */
+    /* the box tilt_poll paints again reaches the bar's foot and its shadow wherever it now is, a
+     * full lean's outermost shadow ring a px past the MARGIN round its row */
     int foot = y + bar->y + bar->h + TILT_MARGIN;
     if (foot > tilt.box.y + tilt.box.h) tilt.box.h = foot - tilt.box.y;
     for (int i = TILT_SHADOW; i > 0 && k; --i) { /* outermost first, each fainter */

@@ -597,7 +597,8 @@ def test_client_commands(q2, capsys, tmp_path):
     st = run(capsys, 'state')
     assert st == {'now_playing': {'track_id': 's:12', 'title': 'Song', 'artist': 'Artist', 'album': 'Album',
                                   'duration_ms': 200000, 'art': 'a:3', 'play_state': 1, 'shuffle': 1, 'repeat': 2,
-                                  'volume': 40, 'hearts': 3, 'rateable': True, 'radio': False},
+                                  'volume': 40, 'hearts': 3, 'rateable': True, 'buffering': False, 'buffered_bytes': 0,
+                                  'total_bytes': 0, 'buffered_ms': 0, 'radio': False},
                   'position': {'position_ms': 30000, 'at_ms': 99}, 'queue': {'version': 4, 'index': 2, 'total': 9}}
     b = run(capsys, 'browse', 'albums', '--sort', 'name', '--limit', '2')
     assert b['items'][0] == {'id': 'al:1', 'title': 'One', 'subtitle': 'A', 'art': 'a:1', 'group': 'O',
@@ -753,3 +754,22 @@ def test_frames_arriving_a_byte_at_a_time_and_a_bare_state():
     assert s.send(0x12, req_id=40) == 40 and s.frame() == (0x11, 40, b'')
     assert s.req == 0  # an explicit id leaves the counter alone
     assert client.state(b'') == {}
+
+
+@pytest.mark.parametrize('have,total,ms,want', [
+    (7_000_000, 20_000_000, 780_000, 273_000),     # 7.0 of 20 MB of a 13-minute song
+    (0, 20_000_000, 780_000, 0), (20_000_000, 20_000_000, 780_000, 780_000),
+    (4_000_000_000, 4_294_967_295, 36_000_000, 33_528_880),  # past 32 bits in the product: no overflow
+    (5, 0, 1000, 0), (5, 10, 0, 0), (30, 10, 1000, 1000),    # no total or length: 0; never past the length
+])
+def test_buffered_ms_is_the_bytes_share_of_the_length(lib, have, total, ms, want):
+    f = lib.crc_buffered_ms
+    f.restype, f.argtypes = ctypes.c_uint32, [ctypes.c_uint32] * 3
+    assert abs(f(have, total, ms) - want) <= max(2, want // 10000)
+
+
+def test_client_reads_the_buffering_fields():
+    raw = client.encode([(1, client.encode([(2, 'Song'), (13, 1), (14, 7_000_000), (15, 20_000_000), (16, 273_000)]))])
+    np = client.state(raw)['now_playing']
+    assert (np['buffering'], np['buffered_bytes'], np['total_bytes'], np['buffered_ms']) == (True, 7_000_000, 20_000_000, 273_000)
+    assert client.state(client.encode([(1, client.encode([(2, 'Song')]))]))['now_playing']['buffering'] is False

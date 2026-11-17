@@ -264,8 +264,8 @@ PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's pl
 # app's, so the app keeps its data in the card's .<id>. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v0.9', 'q2-subsonic-v0.9-43b537a.zip', 2834040,
-                 'fd96e4790e655cd95cb1c2c044b9ac3787960a0c1bc035126d886625471d710a'),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6bdfe61.zip', 2859355,
+                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10'),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -1367,22 +1367,45 @@ def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
     return [*(f'#define {f.c} {i}' for i, f in enumerate(FACES.values())), f'#define FONT_N {len(FACES)}']
 
+ADV_FIRST, ADV_LAST = 0x20, 0x7e  # the characters FONT_ADV holds: printable ASCII
+
+def face_advances(face):
+    """face's advance widths, ADV_FIRST to ADV_LAST, in its font units as its subset maps them (TABULAR's
+    characters on their tabular glyphs), with its line (hhea ascent - descent, which stb sizes a face by)
+    and units per em: (advances, line, upm). Stock's uncut face: zeros, which ui_kit.c's ui_set takes as
+    "measure it". ui_set sets a label's glyphs at these exact widths: AWTK rounds each glyph's advance to
+    a whole pixel and draws a space wider than its own, so at 13 px its gaps run uneven."""
+    if not face.source:
+        return [0] * (ADV_LAST - ADV_FIRST + 1), 0, 0
+    from fontTools.ttLib import TTFont
+    font = TTFont(ROOT/'assets/fonts'/face.source, lazy=True)
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    glyph = lambda u: cmap[u] + face.tabular if face.tabular and chr(u) in TABULAR else cmap[u]  # noqa: E731
+    adv = [hmtx[glyph(u)][0] if u in cmap else 0 for u in range(ADV_FIRST, ADV_LAST + 1)]
+    return adv, font['hhea'].ascent - font['hhea'].descent, font['head'].unitsPerEm
+
 def faces_header(ranges):
     """stock.h's faces, ranges the subset faces' range macros in FACES' order: font_indices, then
     FONT_NAMES, FONT_FALLBACK and FONT_FALLBACK_PCT by index, FONT_RANGES every subset face's runs one
-    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character)."""
+    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character), and
+    face_advances' FONT_ADV (each face's row), FONT_LINE and FONT_UPM by index."""
     faces = list(FACES.values())
     cut = [f for f in faces if f.source]
     check(len(ranges) == len(cut), 'One ranges macro per subset face')
     runs = dict(zip((f.name for f in cut), (r.split(' ', 2)[2][1:-1].split(',') for r in ranges)))
     at = [0]
     for f in faces: at.append(at[-1] + len(runs.get(f.name, ())))
+    adv = [face_advances(f) for f in faces]
     return [*font_indices(), *ranges,
             '#define FONT_NAMES {' + ','.join(json.dumps(f.name) for f in faces) + '}',
             '#define FONT_FALLBACK {' + ','.join(FACES[f.fallback].c if f.fallback else '0' for f in faces) + '}',
             '#define FONT_FALLBACK_PCT {' + ','.join(str(f.fallback_pct) for f in faces) + '}',
             '#define FONT_RANGES {' + ','.join(v for f in cut for v in runs[f.name]) + '}',
-            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}']
+            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}',
+            f'#define FONT_ADV_FIRST 0x{ADV_FIRST:x}', f'#define FONT_ADV_LAST 0x{ADV_LAST:x}',
+            '#define FONT_ADV {' + ','.join('{' + ','.join(map(str, a[0])) + '}' for a in adv) + '}',
+            '#define FONT_LINE {' + ','.join(str(a[1]) for a in adv) + '}',
+            '#define FONT_UPM {' + ','.join(str(a[2]) for a in adv) + '}']
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and
@@ -2102,7 +2125,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its

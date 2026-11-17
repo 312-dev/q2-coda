@@ -86,8 +86,9 @@ int status_fake(char key) {
 
 /* Stock's status-bar Wi-Fi (img_wifi, off-screen under a status row, its image kept current by
  * systembar_showface): bar_wifi1 to bar_wifi4 while connected, as get_wifisignal's bars; 0 for
- * anything else (off, Smart Wi-Fi's radio off, not connected, bar_wifi0). No I/O. */
-static int wifi_level(void) {
+ * anything else (off, Smart Wi-Fi's radio off, not connected, bar_wifi0). No I/O. Control Center's
+ * Wi-Fi circle reads it too (control_center.c cc_wifi). */
+int wifi_level(void) {
     if (status_fake('w') >= 0) return status_fake('w');
     void *w = st.bar_wifi;
     if (!w || !widget_get_visible(w)) return 0;
@@ -102,7 +103,7 @@ static int wifi_level(void) {
  * the link and its address, not the internet: nothing on the Q2 probes past the access point (stock
  * has no such check, and a probe would cost a request a poll); a captive portal or a dead uplink
  * shows the full glyph. A DNS lookup or an HTTP check from a worker would lift it. */
-static int wifi_offline(void) { return networkGetConnectStatus() <= 0; }
+int wifi_offline(void) { return networkGetConnectStatus() <= 0; }
 
 static int play_shown(void) {
     if (home_np_lead()) return 0; /* Home's first row leads with it (home_np.c) */

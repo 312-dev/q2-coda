@@ -370,7 +370,7 @@ int mono_on(void);   /* crossfade.c: Mono Audio's setting */
 #define NS_STEP 100
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
-void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ tile */
+void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
 void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */
@@ -423,6 +423,20 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 #define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
+/* stream_state.c: Download Ahead and a card app's .stream
+ * (docs/server-library.md#download-ahead-and-the-streaming-state) */
+enum { SL_NONE, SL_WAIT, SL_GET, SL_STALL, SL_DONE, SL_FAIL };
+typedef struct {
+    int state;               /* SL_* */
+    unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
+} sline_t;
+int ahead_n(void), ahead_step(void);
+const char *ahead_caps(void);
+int stream_line(const char *id, const char *path, sline_t *l);
+int stream_startable(const char *id, const char *path);
+int stream_app_of(const char *path, char *id, unsigned size);
+int stream_player_waits(const char *path);
+void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
@@ -467,6 +481,7 @@ int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 /* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
 int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
 int addon_radio_answer(unsigned seq);
+const char *addon_radio_missing(const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
