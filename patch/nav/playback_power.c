@@ -266,14 +266,12 @@ static int now_playing(void) {
     return top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page");
 }
 
-/* Now Playing's visualizer repainting or its lyrics gliding: its 40 ms timer and the glide's steps
- * would run late on an idle pass. Its progress and the lyrics' follow tick every 250 ms and keep
- * up. A game's 33 ms frame timer too, and the engine's, due every pass (engine.c): Vortex's raw
- * wheel posts no input to stamp, nor does an engine game's or a card game's, whose travel goes
- * once a pass. */
+/* Now Playing's lyrics gliding: the glide's steps would run late on an idle pass. Its progress
+ * and the lyrics' follow tick every 250 ms and keep up. A game's 33 ms frame timer too, and the
+ * engine's, due every pass (engine.c): Vortex's raw wheel posts no input to stamp, nor does an
+ * engine game's or a card game's, whose travel goes once a pass. */
 static int np_animating(void) {
-    return games_live() || addon_game_on() ||
-           (now_playing() && ((NP_VISUALIZER && visualizer_live()) || st.lyric_glide));
+    return games_live() || addon_game_on() || (now_playing() && st.lyric_glide);
 }
 
 /* Keep stock VOLUME for wired/USB and boot; Bluetooth saves its own level. Smart Wi-Fi's own
@@ -473,6 +471,7 @@ int ringnav_sleep(void *loop) {
     radio_poll();
     addon_poll();
     coda_rc_poll();
+    song_radio_poll();
     airplay_poll();
     playback_poll();
     resume_poll();
@@ -484,6 +483,7 @@ int ringnav_sleep(void *loop) {
     lyric_poll();
     keep_lit_poll();
     np_art_poll();
+    np_settle_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;

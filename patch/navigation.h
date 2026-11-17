@@ -199,7 +199,7 @@ typedef struct {
     void *np_win, *np_album, *np_slider, *np_remain, *np_elapsed, *np_cover, *np_title, *np_artist;
     int np_meta[2];          /* face_font's answers for np_artist and np_album, -1 none yet */
     int np_bold;             /* the title's font: theme_font's face | px << 2, -1 not set yet */
-    void *np_slide, *np_lrc; /* the art/lyrics/visualizer pages and the lyric lines' scroll_view */
+    void *np_slide, *np_lrc; /* the art and lyrics pages and the lyric lines' scroll_view */
     /* Now Playing's full-screen lyrics (np_full) and where the last touch on them came down
      * (np_lyric_touch) */
     int np_full, np_tap_x, np_tap_y;
@@ -493,6 +493,14 @@ extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
     *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
+/* inline_slider.c: Settings' one-value rows that change in place
+ * (docs/oled-design.md#inline-sliders) */
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+void *inline_slider_row(void *view, const char *icon, int kind);
+void inline_pair(void *view, const char *icon, int kind);
+void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);
+int inline_slider_key(void *top, unsigned key, int owned), inline_value(int kind);
+void inline_value_text(int kind, int v, char *out, unsigned n);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
  * keys) */
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
@@ -510,6 +518,15 @@ void tilt_end(void *w, int dir);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
+/* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
+void np_settle_poll(void);
+int np_settle_scale(void);
+int np_settle_box(void *w, int *box);
+void np_settle_begin(void *w, void *canvas);
+void np_settle_paint(void *w, void *canvas);
+/* np_skip.c: Now Playing's track change slides and fades the art and lines */
+void np_skip_begin(void *w, void *canvas), np_skip_end(void *w, void *canvas);
+void np_skip_at(int t, int reduced, int dir, int *a_old, int *x_old, int *a_new, int *x_new);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
@@ -861,7 +878,6 @@ void search_strip_text(const char *title, const char *text, int max,
 void playlist_page_open(int dest, const char *name);
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
-int add_songs_open(void);
 int add_songs_key(void *top, unsigned key);
 void add_songs_paint(void *w, void *canvas);
 int add_songs_mark(void *r);
@@ -883,7 +899,7 @@ extern int clicker_kind; /* CLICK_KIND_*, 0 the wheel's (zero at start, as .scra
 const char *clicker_text(void);
 void clicker_step(void);
 int clicker_route(int listening);
-/* menu_modal.c: the inset modal (docs/oled-design.md#menus) */
+/* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
 int modal_set(void);
 int modal_row_w(void);
@@ -891,14 +907,25 @@ void *modal_gap(void *view);
 void modal_row(void *row, void *label, const char *icon, const char *value, int how);
 void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
+void modal_after(void *w, void *canvas);
+void modal_head(const char *title, const char *sub, void *r);
+void modal_red(void *row);
+int modal_is_red(void *row);
+int modal_sel_height(void *view, int h);
+/* a menu's destructive row: its words and bar (the confirm card's red) */
+#define MODAL_RED 0xff3b30
 int modal_rows_of(void *w);
-int modal_sb_right(void *list, int sb_w);
 int modal_win(void *w);
 void modal_row_paint(void *w, void *canvas, void *row, rect_t r, int selected);
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void modal_more(void *win);
 void modal_playlist_more(void *win);
-/* library_album.c: a Library album's page under the inset modal's set (albuminfo_page,
+void *modal_sheet(int (*back)(void *dialog, void *event), int (*gone)(void *dialog, void *event));
+void modal_head_bars(void);
+void modal_close(void *win);
+int modal_closing(void);
+void modal_corners(void *canvas, const rect_t *r, int R);
+/* library_album.c: a Library album's page under the menu sheet's set (albuminfo_page,
  * playerjumpinfo_page) */
 void album_local_load(void *win);
 int album_local_on(void *win);
@@ -907,7 +934,7 @@ void album_local_paint(void *w, void *canvas);
 int pair_key(void *top, void *w, int dir);
 int pair_holds(void *w);
 void artist_cap(void *bar, void *canvas);
-/* library_artist.c: a Library artist's page under the inset modal's set (artistinfo_page) */
+/* library_artist.c: a Library artist's page under the menu sheet's set (artistinfo_page) */
 int artist_local(void);
 int artist_local_on(void *win);
 void artist_local_paint(void *w, void *canvas);
@@ -929,6 +956,9 @@ extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pas
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
 void coda_rc_poll(void);
+/* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
+int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
+void song_radio_poll(void);
 int coda_rc_enabled(void);
 int carremote_open(void *ctx, void *event);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */

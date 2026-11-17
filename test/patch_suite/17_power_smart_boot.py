@@ -67,17 +67,9 @@ m.word(payload_syms['wheel_frame_at'],(m.now-O['WHEEL_FRESH_MS'])&0xffffffff)  #
 m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,clear=False); assert m.pass_(1)[1]==[O['SCREEN_OFF_SLEEP_MS']]
 m.word(payload_syms['wheel_frame_at'],m.now); m.call(address=inp,args=(m.wm,m.event,0,0),event_type=O['EVT_KEY_DOWN'],gap=0,clear=False)
 assert m.pass_(0)[1]==[] and m.pass_(O['DARK_TURN_MS']-1)[1]==[] and m.pass_(1)[1]==[O['SCREEN_OFF_SLEEP_MS']]; passed()
-# Now Playing keeps stock's pace only while its visualizer repaints; idle, it idles like any page.
-if O['NP_VISUALIZER']:
-    class Live(PowerMachine):
-        def hook(self,u,address,size,unused):
-            if self.handlers.get(address)=='v:live':
-                self.returns(self.live); return
-            return super().hook(u,address,size,unused)
-    m=Live(); m.handlers[payload_syms['visualizer_live']]='v:live'; m.live=1
-    m.top=m.node('window','playing_page'); m.pass_(1)
-    assert m.pass_(O['IDLE_MS'])[1]==[]; m.live=0; assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
-else: assert 'visualizer_live' not in payload_syms; passed()
+# Now Playing with its lyrics at rest idles like any page.
+m=PowerMachine(); m.top=m.node('window','playing_page'); m.pass_(1); m.pass_(O['IDLE_MS'])
+assert m.pass_(1)[1]==[O['IDLE_SLEEP_MS']]; passed()
 # Standby limit (docs/internals.md#standby-limit): with a limit, toolsIntoStandby's suspend runs
 # between the RTC wake alarm's set (the limit past since_epoch) and its clear. A resume at or past the
 # alarm powers off on the next pass (poweroff_page), once, unless a cable is in or the music plays; a
@@ -336,7 +328,7 @@ for case,setup,kept in CASES:
     assert (not m.switch())==kept and (kept or m.flag()==0),case
 passed()
 # The payload's own users hold it on while they run: librespot, a station, a card app, an upload,
-# Network Update's download or an Apps job, Download Album Lyrics, a Tidal download and Car Remote on.
+# Network Update's download or an Apps job, Get Album Lyrics, a Tidal download and Car Remote on.
 class SmartBusy(SmartMachine):
     def __init__(self,name,busy):
         super().__init__(); self.busy=busy; self.handlers[payload_syms[name]]='b:'+name  # every address is hooked here
@@ -517,7 +509,7 @@ m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
 # The same for the other presses that start a job: Network Update's download, an Apps install and
-# Download Album Lyrics each start once, not cancelled by the held press ("Canceling…").
+# Get Album Lyrics each start once, not cancelled by the held press ("Canceling…").
 m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
 m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
 view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])

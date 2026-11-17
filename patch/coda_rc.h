@@ -23,7 +23,7 @@ enum {
     T_SUBSCRIBE = 0x10, T_STATE, T_GET_STATE,
     T_TRANSPORT = 0x20, T_ACK, T_SET_MODE, T_RATE = 0x24,
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
-    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM,
+    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM, T_START_RADIO = 0x46,
     T_GET_COVER = 0x50, T_COVER,
     T_PING = 0x7e, T_PONG,
 };
@@ -46,7 +46,9 @@ enum {
 #define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
 #define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
-#define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes (2048 and 4096 are taken) */
+/* 2048 CAP_FAVORITES, 4096 CAP_RECENT (feat/carremote-lists) */
+#define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
+#define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;

@@ -128,7 +128,7 @@ HOOKS = {
     'mclIsUtf8WithoutBOM': (0x5bbc4c, 'ringnav_lrc_utf8', None),
     # Now Playing's lyrics match (patch/onlinematch.c): LRCLIB alone, in place of stock's Kugou search
     'kugou_obtainlyric': (0x51b3f4, 'ringnav_lyric_search', None),
-    # its ⋯ page: Download Album Lyrics under stock's Download Cover & Lyrics (onlinematch.c)
+    # its ⋯ page: Get Album Lyrics under stock's Download Cover & Lyrics (onlinematch.c)
     'playermore_page_init': (0x539f60, 'ringnav_playermore', 'playermore'),
     # The sleep timer's switch as a row, under a set that hides its toolbar (navigation.c)
     'systemset_sleepshutdown_page_init': (0x4d1224, 'ringnav_sleeptimer', 'sleeptimer'),
@@ -1691,7 +1691,7 @@ FUNCTIONS = {
  'canvas_measure_text': ('float', 'void *, const unsigned *, unsigned'),
  'canvas_fill_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned'),
  'canvas_stroke_rounded_rect': ('int', 'void *, const void *, const void *, const void *, unsigned, unsigned'),
- # The PEQ curve (peq_ui.c) and the visualizer (visualizer.c): AWTK's software nanovg, float_t float, color_t by value
+ # The PEQ curve (peq_ui.c) among others: AWTK's software nanovg, float_t float, color_t by value
  'canvas_get_vgcanvas': ('void *', 'void *'),
  'vgcanvas_save': ('int', 'void *'), 'vgcanvas_restore': ('int', 'void *'),
  'vgcanvas_translate': ('int', 'void *, float, float'),
@@ -1900,7 +1900,11 @@ FUNCTIONS = {
  'screen_action': ('int', 'int'),  # 1: the backlight and stock's power timers; 0: the panel blanks (disable_fb)
  'btctl_transport_get_volume': ('int', 'void'),
  'btctl_transport_set_volume': ('int', 'int'),
- 'device_set_volume': ('int', 'int, int'),  # volume, notify: the DAC's or hciplayer's, as the volume dialog
+ 'device_set_volume': ('int', 'int, int'),
+ # Settings' inline sliders (inline_slider.c): stock's setters, each as its page sets a step
+ 'config_balance': ('int', 'int'),  # -10 (left) to 10: the DAC's ioctl and PLAYSET BALANCE; the caller clamps
+ 'config_lightness': ('int', 'int'),  # 0 to 100: g_lightness, the backlight and SYSSET LIGHTNESS
+ 'mclGetBalance': ('int', 'void'),  # volume, notify: the DAC's or hciplayer's, as the volume dialog
  # Spotify (spotify.c): the headphone output as a headset insert sets it, then PCM mode and unmuted, as AirPlay's page
  'config_outputchannel': ('int', 'int, int'),  # g_headset_output, 2
  'mclSetPcmMode': ('int', 'void'),
@@ -1980,6 +1984,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_bluetoothflag', 'bt_linkstatus', 'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag', 'g_equalizer_flag', 'g_navbar_status', 'g_playcover_type',
            'g_keytone_flag', 'g_folder_layer', 'g_otg_status', 'g_delete_flag', 'g_volume', 'g_maxvolume',
+           'g_lightness', 'g_bootvolume', 'g_bootvol_flag',  # Brightness, Default Volume's level and switch (inline_slider.c)
            'g_po_status', 'g_bal_status',  # 3.5 mm and 4.4 mm jacks: 1 plugged (check_headset_status)
            'g_usbvol_mode',  # USB DAC volume: 0 fixed, else the volume (config_usbvolmode, device_set_volume)
            'g_usbdac_chargeflag',  # USB mode's charge choice, which switch_charge_enable gets there
@@ -2069,15 +2074,31 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c', 'stream_state.c', 'np_stream.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c', 'stream_state.c', 'np_stream.c', 'np_settle.c', 'np_skip.c', 'song_radio.c']
+
+# Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
+# pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
+# KeyError at the lookup.
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'ringnav_ab_x', 'ringnav_album_label',
+                 'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
+                 'ringnav_artist_covers', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
+                 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text', 'ringnav_dark_cover_usleep',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag',
+                 'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
+                 'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_scan_dir',
+                 'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
+                 'ringnav_table_load', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
+
 
 def compile_payload(out):  # pragma: no mutate block
     """Compile and link the payload."""
     from peq import compile_common
     extra = compile_common(out, out/'stock-demo')  # also writes the libc/libcstl imports navigation.c uses
     nav = [out/f'{name[:-2]}.o' for name in NAVIGATION]
+    # A section per function and per object, as UI_SOURCES get (peq.py compile_common), so --gc-sections drops
+    # whatever nothing reaches; what only build.py or ipod.py patch in is kept by its --undefined below.
     for name, o in zip(NAVIGATION, nav):
-        run('clang',*FLAGS,*FILL,'-I',out,'-c',ROOT/'patch'/name,'-o',o)
+        run('clang',*FLAGS,*FILL,'-ffunction-sections','-fdata-sections','-I',out,'-c',ROOT/'patch'/name,'-o',o)
     asm = ['.set noreorder', '.text']
     resume = {x: address for address, _, x in HOOKS.values() if x}
     for x, address in resume.items():
@@ -2092,6 +2113,8 @@ def compile_payload(out):  # pragma: no mutate block
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
         '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
+        *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
+        '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
     # link.ld has no .data: an initialised static would land in the payload's read-only text
     check(not re.search(r'\] \.s?data ', run('readelf', '-SW', out/'patch.elf')), 'Payload has .data: writable state goes in .scratch')

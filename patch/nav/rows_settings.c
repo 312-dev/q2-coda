@@ -665,13 +665,32 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
 
 /* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
  * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
- * and Album Display and Folder skip), then ours as built. */
+ * and Album Display and Folder skip, and hides its Balance, 10, for the inline one), then ours as
+ * built. */
 static const unsigned char playset_order[] = {
-    2 /* EQ */,           19 /* Library */,     3 /* Play Mode */,     7 /* Gapless */,
-    11 /* Crossfade */,   6 /* Memory play */,  12 /* Resume Songs */, 8 /* Headphones required */,
-    15 /* Sleep Timer */, 16 /* Volume */,      17 /* Max Volume */,   18 /* Default Vol */,
-    0 /* Gain */,         9 /* ReplayGain */,   10 /* Balance */,      13 /* Mono Audio */,
-    14 /* Swap L/R */,    1 /* Filters */,      4 /* DSD Output */,    5 /* USB Audio */,
+    2 /* EQ */,
+    22 /* Library */,
+    3 /* Play Mode */,
+    7 /* Gapless */,
+    11 /* Crossfade */,
+    12 /* its Duration */,
+    6 /* Memory play */,
+    13 /* Resume Songs */,
+    8 /* Headphones required */,
+    16 /* Sleep Timer */,
+    17 /* Volume */,
+    18 /* Max Volume */,
+    19 /* Default Volume */,
+    20 /* its Level */,
+    0 /* Gain */,
+    9 /* ReplayGain */,
+    21 /* Balance */,
+    10 /* stock's Balance, hidden */,
+    14 /* Mono Audio */,
+    15 /* Swap L/R */,
+    1 /* Filters */,
+    4 /* DSD Output */,
+    5 /* USB Audio */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -769,10 +788,11 @@ static int to_page(void *ctx, void *event) {
  * instead of stock's: Folders keeps stock's Folder skip (12), the others none. Playback itself
  * drops stock's Volume and Album Display (11) and Folder skip; Album Display's rows are elsewhere,
  * Max Volume and Default Volume here, Enlarged Album Art on Display and Folder Album Cover on
- * Library > Folders, opening stock's pages and flipping stock's switches (pod_click). Playback's
- * Volume row, before Max Volume, opens the slider page on the volume (crossfade.c xfade_open 4).
- * Each page
- * builds only its own rows, so a row's kept label is its page's. */
+ * Library > Folders, flipping stock's switches (pod_click). Max Volume, Balance and Crossfade's and
+ * Default Volume's values are inline sliders, set in the list (inline_slider.c); stock's Balance
+ * row stays, hidden. Playback's Volume row, before Max Volume, opens the slider page on the volume
+ * (crossfade.c xfade_open 4). Each page builds only its own rows, so a row's kept label is its
+ * page's. */
 static int playset_sub __attribute__((section(".scratch")));
 int library_open(void *ctx, void *event) {
     playset_sub = (int)(long)ctx;
@@ -801,7 +821,8 @@ int ringnav_audioset(void *win, void *ctx) {
         library_page(win, view, sub);
         return result;
     }
-    xfade_row(list_row_into(view, "playset_gapless", xfade_open, (void *)0));  /* crossfade.c */
+    /* Crossfade and its Duration (inline_slider.c) */
+    inline_pair(view, "playset_gapless", IS_XFADE);
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
@@ -810,12 +831,11 @@ int ringnav_audioset(void *win, void *ctx) {
         list_row_into(view, "system_powermanager", to_page, (void *)"systemset/sleepshutdown_page"),
         "Sleep Timer");
     volume_row(list_row_into(view, "playset_maxvol", xfade_open, (void *)4)); /* crossfade.c */
-    widget_set_tr_text(
-        list_row_into(view, "playset_maxvol", to_page, (void *)"playset/maxvol_page"),
-        "playset_maxvol");
-    widget_set_tr_text(
-        list_row_into(view, "playset_bootvol", to_page, (void *)"playset/bootvol_page"),
-        "playset_bootvol");
+    inline_slider_row(view, "playset_maxvol", IS_MAXVOL);
+    inline_pair(view, "playset_bootvol", IS_BOOTVOL); /* Default Volume and its Level */
+    inline_slider_row(view, "playset_balance", IS_BALANCE);
+    /* stock's Balance, which opens its page */
+    widget_set_visible(widget_get_child(view, 10), 0, 0);
     widget_set_text_utf8(
         list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);

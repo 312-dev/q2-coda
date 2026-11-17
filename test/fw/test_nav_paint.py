@@ -1022,26 +1022,36 @@ def test_another_dialog_s_labels_stay(fw, world):
 
 def test_a_toast_rises_and_fades_in_then_sinks_and_fades_out_over_the_page(fw, world):
     """docs/oled-design.md#overlay-motion: the pill comes up 10 px and fades in over 200 ms cubic out (the dialog's
-    opacity, its line moved with the pill), nothing on its first frame; once its dialog goes, the page under paints it
-    sinking 4 px and fading over 150 ms cubic in, then nothing."""
+    opacity, set by the shared frame timer: stock's widget_paint skips a widget under opacity 9, so the toast's own
+    paint never could; its line moved with the pill), nothing on its first frame; once its dialog goes, the page under
+    paints it sinking 4 px and fading over 150 ms cubic in, then nothing."""
     theme(fw)
     now = [10000]
     fw.mock('time_now_ms', lambda *_: now[0])
     page = world.window('settings_page')
     win = world.window('msginfo_dialog', 'dialog')
     line = world.add(win, 'line', 'label', box=(30, 60, 315, 40), text='Saved')
-    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
-    paint_bg(fw, win, Canvas(fw))
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity') if a[0] == win][-1]  # noqa: E731
+    frame_fn = C.cast(fw.lib.ui_kit__mo_frame, C.c_void_p).value
+
+    def frame():
+        """The shared frame timer's tick (ui_kit.c mo_frame), then the toast's paint only as stock would: at 9 up."""
+        world.fire(max(i + 1 for i, (fn, _, _) in enumerate(world.timers) if fn == frame_fn))
+        canvas = Canvas(fw)
+        if opacity() >= 9:
+            paint_bg(fw, win, canvas)
+        return canvas
+
+    paint_bg(fw, win, Canvas(fw))  # its first frame, at stock's 255
     assert not world[line].visible and opacity() == 0
     now[0] += 100  # 875 of the way in
-    paint_bg(fw, win, Canvas(fw))
+    frame()
     assert world[line].visible and world.at(line)[1] == 236 + 1 and opacity() == 223
     now[0] += 100
-    canvas = Canvas(fw)
-    paint_bg(fw, win, canvas)
+    canvas = frame()
     assert world.at(line)[1] == 236 and opacity() == 255 and canvas.rounded[0][0][1] == 236
-    gone, = [(fn, ctx) for w, evt, fn, ctx in world.handlers if w == win and evt == O['EVT_DESTROY']]
-    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(gone[0])(gone[1], None)
+    for gone in world.on(win, O['EVT_DESTROY']):  # toast_gone and ovm_bind's ovm_gone
+        gone()
     world.top = page
     leave = fw.fn('feedback_toast_leave', None, C.c_void_p, C.c_void_p)
     now[0] += 75  # half way out, cubic in: 1/8 gone
@@ -1121,7 +1131,7 @@ def navbar_page(world, text='Albums', kind='hscroll_label'):
 
 
 def test_an_inset_modal_back_on_top_names_the_page_under_it_again(fw, world, st):
-    """A playlist's More (an inset modal) over Playlists, then Delete Playlist's confirm over it, which writes its
+    """A playlist's More (a menu sheet) over Playlists, then Delete Playlist's confirm over it, which writes its
     question into the bar (feedback.c): after Cancel the modal is on top again, and the bar names Playlists, not the
     question, while it stays open."""
     label = bar_title(fw, world, st)

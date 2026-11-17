@@ -19,12 +19,17 @@ static struct eng {
     long long state[];             /* the game's, aligned for anything */
 } *en __attribute__((section(".scratch")));
 
-/* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, and
- * only with [Q2POD] ENGINEDEMO=1 in config.ini. */
-static const struct eng_game *const eng_games[] = { &eng_bricks, &eng_demo };
+/* The registry: Games' rows after its own, in this order. The demo scene is a --dev build's, last,
+ * and only with [Q2POD] ENGINEDEMO=1 in config.ini; a release build links none of it. */
+static const struct eng_game *const eng_games[] = {
+    &eng_bricks,
+#if Q2POD_DEV
+    &eng_demo,
+#endif
+};
 int eng_count(void) {
     int n = (int)(sizeof eng_games / sizeof *eng_games);
-    return Q2POD_DEV && config_value("Q2POD", "ENGINEDEMO", 2, 0) ? n : n - 1;
+    return Q2POD_DEV && !config_value("Q2POD", "ENGINEDEMO", 2, 0) ? n - 1 : n;
 }
 const struct eng_game *eng_game(int k) { return eng_games[k]; }
 
@@ -265,26 +270,6 @@ void eng_fill(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb) {
     rgb |= 0xff000000;
     for (int j = c[1]; j < c[3]; ++j)
         for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p) *p = rgb;
-}
-
-void eng_blend(struct eng_surface *s, int x, int y, int w, int h, unsigned rgb, unsigned alpha) {
-    int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
-    alpha += alpha >> 7; /* 255 is all of it */
-    for (int j = c[1]; j < c[3]; ++j)
-        for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p)
-            *p = blend1(*p, rgb, alpha);
-}
-
-void eng_mask(struct eng_surface *s, int x, int y, int w, int h, const unsigned char *alpha,
-              int stride, unsigned rgb) {
-    int c[4];
-    if (!clip(s, x, y, w, h, c)) return;
-    for (int j = c[1]; j < c[3]; ++j) {
-        const unsigned char *a = alpha + (j - y) * stride + (c[0] - x);
-        for (unsigned *p = row(s, c[0], j), *end = p + (c[2] - c[0]); p < end; ++p, ++a)
-            if (*a) *p = blend1(*p, rgb, *a + (*a >> 7));
-    }
 }
 
 static unsigned root(unsigned n) {

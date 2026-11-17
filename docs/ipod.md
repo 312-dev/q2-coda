@@ -89,7 +89,7 @@ selection until wheel/center input; the native pressed state remains visible. A 
 (`s_btn_listitem`) is gray across the whole row (`pressed_pill`), and a pressed tile under half its
 row's width (the album grid's, the playlist page's pair) is the tile's card, `TILE_INSET` inside it;
 other pressed widgets keep stock's box. The same hooks cover settings, streaming, dialogs, PEQ rows
-and media browser chrome. Video, EQ plots and the visualizer keep their own
+and media browser chrome. Video and EQ plots keep their own
 drawing.
 
 A list left with Return opens at its top when it is chosen again (`list.reopen.top`, OLED's), as an
@@ -381,7 +381,7 @@ review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth op
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
 (`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
@@ -479,7 +479,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas. Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
+with their original touch areas, where they still open (Settings sets them in its list instead). Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
@@ -741,7 +741,7 @@ sit under those, and the swipe's other pages stop above the bar. Each line that 
 the end it runs past (Display's [Theme](#theme)).
 
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
-with the lyrics page; two page dots (three with the visualizer built in, below). The track's details are not a page of
+with the lyrics page; two page dots. The track's details are not a page of
 the swipe: ⋯'s last row, **About** (under OLED last before Delete Song), opens them as a page of their own, titled
 About, and Return goes back to ⋯ (under OLED its panel, over Now Playing), as from ⋯'s other
 rows' pages. The build takes stock's info page out of the slide_view and leaves it hidden in Now
@@ -845,24 +845,6 @@ Lyrics moved by the wheel or a finger stay where they are, while the bar and the
 highlight go on, a swipe to another page and back included, until Now Playing closes or another
 song starts at the top. A tap shows them full screen, and another brings the
 page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
-
-### Visualizer
-
-Off for now, for the battery: `NP_VISUALIZER` in `patch/offsets.inc` is 0, so Now Playing has no
-visualizer page and the payload no visualizer code (navigation.c calls none of `patch/visualizer.c`,
-and the link's `--gc-sections` drops it; `test/fw` still builds and tests it). Field cost demo about
-a third of a host core in the emulator against 9% on the art page ([internals](internals.md#visualizer-ipod)).
-Built with it at 1, the slide_view gains a last page, after the art and lyrics pages, and the page dots a third dot.
-It shows the music as heard, EQ included, as **Field**, after iTunes' Magnetosphere: 40 soft
-glowing points in each of five bands of the spectrum, a color each, flowing round the center on
-rings each band's level swells and ripples. It is drawn from glow sprites (`field_sprites`). It
-fills the whole screen, with the status row, the progress bar, the song's line and the page
-dots shown over it only while a thumb rests on the wheel
-([internals](internals.md#visualizer-ipod)). A tap on it does
-nothing. It animates at `VIS_FPS` only while the page shows with the screen on, and comes to rest
-when playback pauses; at rest the track's title and artist show at the bottom. Tunables are `VIS_*`
-in `patch/offsets.inc`; `VIS_LATENCY_MS` sets how far the picture runs behind the decoder, to match
-what you hear. See [internals.md](internals.md#visualizer-ipod).
 
 ## Previous and Next
 
@@ -969,7 +951,7 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   captioned "Fades in place of slides, zooms and bounces": what it changes is [oled-design.md:
   Motion](oled-design.md#motion).
 - Display's main page: a "Smart Awake" switch (`IPOD KEEPLIT`, on unless chosen, and a reset's `config.ini` says 1;
-  `keep_lit_poll`): with Now Playing lit in front on its lyrics page (or the visualizer's, when built in), or its
+  `keep_lit_poll`): with Now Playing lit in front on its lyrics page, or its
   full-screen art (`bigcover_page`) or ⋯'s About in front, and a song playing, it calls
   `reset_poweroptions_timer(1, 1, 1)` once a second, so the screen stays on there (with Enlarged Album
   Art on, the art page too, once its countdown opens the full-screen art);

@@ -154,7 +154,7 @@ int lrc_name(char *out, unsigned n, const char *name) {
     return 1;
 }
 
-/* Download Album Lyrics (docs/internals.md#album-lyrics): the tracks it copies off stock's records,
+/* Get Album Lyrics (docs/internals.md#album-lyrics): the tracks it copies off stock's records,
  * and its job, which the row's timer reads while the worker runs. */
 typedef struct {
     char path[0x200], title[0x200], artist[0x100]; /* keyinfo's sizes */
@@ -353,7 +353,7 @@ static int lrclib(const char *title, const char *artist, const char *out, volati
 }
 
 /* kugou_obtainlyric(keyword, out), online_lyricthd's first source, in its place: LRCLIB alone, as
- * Kugou's often came back for another song, asked again while busy as Download Album Lyrics does.
+ * Kugou's often came back for another song, asked again while busy as Get Album Lyrics does.
  * Nonzero ends the thread's search, so NetEase, its next source, is skipped too (its search asks for
  * a phone-bound account and finds nothing); the page shows whatever out holds. ponytail: LRCLIB's
  * first synced result by title and artist, no duration check. */
@@ -406,7 +406,7 @@ static int downpic(char *out, unsigned n, const char *name) {
 
 /* Download Cover & Lyrics' accept (0x535f24) builds cp -rf /tmp/oslyric_N "/mnt/mmc/.downpic/<name>"
  * for system() with snprintf, whose call (LYRIC_SAVE_CALL) jumps here: the lyrics (tmp) go beside the
- * song instead, as <path less extension>.lrc, as Download Album Lyrics saves them, and a .downpic copy
+ * song instead, as <path less extension>.lrc, as Get Album Lyrics saves them, and a .downpic copy
  * that would hide them goes; cmd becomes ":", which system() runs as nothing, and stock reloads the
  * lyrics as before. When the song isn't in the queue (or is a CUE track) or the card can't be
  * written there, the lyrics go to stock's .downpic/<name> instead, copied here too: stock's command
@@ -446,12 +446,12 @@ int ringnav_cover_copy(char *cmd, unsigned n, const char *fmt, const char *from,
     return snprintf(cmd, n, ":");
 }
 
-/* Download Album Lyrics (docs/internals.md#album-lyrics): a row under stock's Download Cover &
+/* Get Album Lyrics (docs/internals.md#album-lyrics): a row under stock's Download Cover &
  * Lyrics on Now Playing's ⋯ page saves LRCLIB's lyrics beside every song of the playing song's
  * album, found as that search finds them, on a thread of its own that outlives the page. */
 extern void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
 int np_about_open(void *ctx, void *event); /* np_about.c: ⋯'s About */
-static const char AL_TITLE[] = "Download Album Lyrics";
+static const char AL_TITLE[] = "Get Album Lyrics";
 static struct {
     lyr_job job;
     lyr_track *tracks;
@@ -678,7 +678,7 @@ static void covers(void) {
     free(body);
 }
 
-/* Smart Wi-Fi (smart_wifi.c smart_needed): Download Album Lyrics running keeps the radio on. */
+/* Smart Wi-Fi (smart_wifi.c smart_needed): Get Album Lyrics running keeps the radio on. */
 int album_lyrics_busy(void) { return al.running; }
 
 /* online_coverthd's sources (docs/internals.md#cover-search): kugou_obtaincover(keyword), then

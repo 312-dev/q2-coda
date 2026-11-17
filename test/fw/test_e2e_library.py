@@ -284,6 +284,7 @@ class Q2:
         self.status, self.file_sec, self.start_seek = STOPPED, 0, 0
         self.opened, self.seeks, self.toasts, self.pages, self.texts = [], [], [], [], {}
         self.blocks, self.keep, self.made, self.children, self.handlers, self.np = [], [], [], {}, {}, {}
+        self.names, self.destroys, self.sheet = {}, {}, 0  # the menu sheet's widgets by name; destroy handlers
         self.titles = {}  # Up Next's rows' _un_title, by row
         self.timers, self.timer_n = {}, 0
         self.preloads, self.gapless, self.sent, self.speeds = [], [], [], []
@@ -326,7 +327,11 @@ class Q2:
             'toolsLoadDirectory': self.load_directory,
             # pages and the rest
             'navigator_to_with_context': self.navigate, 'navigator_switch_to_with_context': self.navigate,
-            'navigator_back': self.back, 'navigator_to': lambda name, *_: self.pages.append(C.string_at(name).decode()),
+            'navigator_back': self.back, 'navigator_to': self.navigator_to,
+            'window_manager_get_top_window': lambda *_: self.sheet if self.sheet in self.pages else 0,
+            'widget_lookup': lambda w, name, *_: self.lookup(w, C.string_at(name)),
+            'widget_get_prop_str': lambda w, k, d, *_: self.name_of(w) if C.string_at(k) == b'name' else 0,
+            'widget_set_name': lambda w, name, *_: self.names.__setitem__(w, C.string_at(name)) or 0,
             'time_now_ms': lambda *_: self.ms & 0xffffffff, 'fw_clock_gettime': self.clock_gettime,
             'fw_time': lambda *_: 1_750_000_000 + self.ms // 1000, 'toolsReadConfig': self.read_config,
             'tk_str_start_with': lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)),
@@ -341,7 +346,9 @@ class Q2:
                      'list_view_create', 'button_create', 'label_create'):
             model[kind] = lambda parent, *_, kind=kind: self.widget(parent, kind)
         model['window_create'] = lambda *_: self.pages.append(self.widget(0, 'window_create')) or self.pages[-1]
-        model['widget_on'] = lambda w, event, fn, ctx, *_: self.handlers.__setitem__((w, event), (fn, ctx)) or 1
+        model['widget_on'] = lambda w, event, fn, ctx, *_: (self.handlers.__setitem__((w, event), (fn, ctx)),
+                                                            self.destroys.setdefault(w, []).append((fn, ctx))
+                                                            if event == O['EVT_DESTROY'] else 0) and 1
         model['widget_destroy_children'] = lambda w, *_: self.children.pop(w, None) and 0
         for name, fn in model.items():
             fw.mock(name, fn)
@@ -400,12 +407,37 @@ class Q2:
         return place, self.texts.get(self.np['np_album'])
 
     def back(self, *_):
-        """navigator_back: the page on top closes, and a payload page's destroy handler runs, as AWTK's does."""
+        """navigator_back: the page on top closes, and a payload page's destroy handlers run, as AWTK's do."""
         top = self.pages.pop() if self.pages else None
-        if isinstance(top, int) and (top, O['EVT_DESTROY']) in self.handlers:
-            fn, ctx = self.handlers[top, O['EVT_DESTROY']]
+        for fn, ctx in self.destroys.pop(top, []) if isinstance(top, int) else []:
             C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
         return 0
+
+    def navigator_to(self, name, *_):
+        """navigator_to: a page by name; stock's sortselect dialog, which the menu sheet is (menu_modal.c
+        modal_sheet), as a window with its list_view and scroll_view, on top."""
+        name = C.string_at(name).decode()
+        if name != 'dialog/sortselect_dialog':
+            self.pages.append(name)
+            return 0
+        self.sheet = self.widget(0, 'window_create')
+        lv = self.widget(self.sheet, 'list_view_create')
+        self.names.update({self.sheet: b'sortselect_dialog', lv: b'list_view',
+                           self.widget(lv, 'scroll_view_create'): b'scroll_view'})
+        self.pages.append(self.sheet)
+        return 0
+
+    def lookup(self, w, name):
+        for k in self.children.get(w, []):
+            if self.names.get(k) == name or (found := self.lookup(k, name)):
+                return k if self.names.get(k) == name else found
+        return 0
+
+    def name_of(self, w):
+        if w not in self.names:
+            return 0
+        self.keep.append(C.create_string_buffer(self.names[w]))
+        return C.addressof(self.keep[-1])
 
     def add_timer(self, fn, ctx, ms, *_):
         self.timer_n += 1
@@ -972,8 +1004,8 @@ def shuffle_albums(q):
 
 
 def up_next(q):
-    """View Queue in a shuffle: Up Next's songs after the playing one, each (title,)."""
-    q.fw.fn('up_next', None, C.c_void_p)(C.cast(q.fw.lib.page_keyup, C.c_void_p))
+    """View Queue in a shuffle: Up Next's songs after the playing one, each (title,), in the menu sheet."""
+    q.fw.fn('up_next', None)()
     return q.songs_of(q.last('scroll_view_create'))
 
 

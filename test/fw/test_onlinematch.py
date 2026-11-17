@@ -1,5 +1,5 @@
 """patch/onlinematch.c: URLs built from a song's tags, LRCLIB's lyrics and their credits, accent folding,
-Download Album Lyrics' job, and the cover searches' replies."""
+Get Album Lyrics' job, and the cover searches' replies."""
 import ctypes as C
 import json
 import random
@@ -544,7 +544,7 @@ def test_the_row_says_where_the_job_is(fw):
     show()
     al.job.cancel = 1
     show()
-    assert seen == ['Download Album Lyrics', 'Downloading 2 of 5', 'Downloading 5 of 5', 'Canceling…']
+    assert seen == ['Get Album Lyrics', 'Downloading 2 of 5', 'Downloading 5 of 5', 'Canceling…']
 
 
 class Net:
@@ -882,7 +882,7 @@ def test_our_covers_are_the_only_ones(fw):
     assert net.urls == asked and covers.added == ['https://archive.org/x.jpg', 'https://i/600x600.jpg']
 
 
-# Stock's records, its queue and library, and the card, for the lyrics save and Download Album Lyrics.
+# Stock's records, its queue and library, and the card, for the lyrics save and Get Album Lyrics.
 BOM = b'\xef\xbb\xbf'
 THREAD = 0x7e57
 FMT = b'cp -rf %s "/mnt/mmc/.downpic/%s"'  # stock's accept command (docs/internals.md#lyrics-search)
@@ -1095,7 +1095,7 @@ class More:
         return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
 
     def click(self, i=-1):
-        """The click on the i-th row list_row made (the last: Download Album Lyrics' when there is one)."""
+        """The click on the i-th row list_row made (the last: Get Album Lyrics' when there is one)."""
         return self.handler(self.button, O['EVT_CLICK'], i)
 
 

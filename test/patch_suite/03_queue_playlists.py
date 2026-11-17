@@ -244,7 +244,7 @@ m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
-# View Queue opens Up Next (upnext.c, a page of the payload's), not stock's queue page, and plays nothing
+# View Queue opens Up Next (upnext.c, in the menu sheet), not stock's queue page, and plays nothing
 m=playing_menu(); assert m.run(2) is None and not any(o[0]=='playerqueue_page' for o in m.opened) and m.names()==['A','B','C'] and not m.playback(); passed()
 # OLED says what an in-place action did (navigation.c's toasts): Playing Next, Added to Queue, the favourites' own.
 # Play Last lands at the end of Playing Next (playback.c), here empty: right after the playing song, as Play Next does

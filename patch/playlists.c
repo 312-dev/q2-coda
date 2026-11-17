@@ -547,7 +547,7 @@ static int confirm_over(void *prompt, const char *verb) {
     return answer;
 }
 static int pl_headers(void *unused) { return getAllPlayList(); }
-/* The inset modal's Add to Playlist… (a song's hold under OLED, docs/oled-design.md#playlists):
+/* The menu sheet's Add to Playlist… (a song's hold under OLED, docs/oled-design.md#playlists):
  * New Playlist, then each playlist by name (getAllPlayList's order); a pick adds the song there
  * at once and says so. New Playlist makes "New Playlist N", N the playlists' count and one, or the
  * first free after it, to be renamed from its own hold. The song is a copy, so the list it came
@@ -709,7 +709,13 @@ int ringnav_playlistsmore(void *win, void *ctx) {
             widget_move_resize(c, x, I(c, W_Y), I(c, W_W), I(c, W_H));
             theme_font(c, ROLE_TITLE, FONT_ROW);
         }
-        if (modal_set()) modal_playlist_more(win); /* a dialog over Playlists (menu_modal.c) */
+        if (modal_set()) { /* a dialog over Playlists (menu_modal.c), headed by the playlist */
+            void *lists = P(p_deque_playlist, 0);
+            unsigned at = (unsigned)(long)ctx;
+            void *r = lists && at < deque_size(lists) ? deque_at(lists, at) : (void *)0;
+            if (r) modal_head(P(r, REC_NAME), "Playlist", (void *)0);
+            modal_playlist_more(win);
+        }
     }
     return result;
 }
@@ -1224,8 +1230,8 @@ static void pl_art_row(void *button, int *asked) {
     if (!r) return;
     if (!*asked) playlist_art_refresh();
     *asked = 1;
-    /* its own picture, else its server's cover, else pl_tile_paint's tile (none, or not made
-     * yet: never the last) */
+    /* its own picture, else its server's cover (playlist_art's copy once built, the app's file
+     * until then), else pl_tile_paint's tile (none, or not made yet: never the last) */
     image_base_set_image(
         art, playlist_art(I(r, REC_DISC), P(r, REC_TITLE), 1 | PL_ART_OWN, url, sizeof url) ||
                      catalogue_playlist_cover(I(r, REC_DISC), url)
@@ -1249,7 +1255,6 @@ static int pl_arts(void *win) {
     int asked = 0;
     pl_art_page = win;
     playlist_art_ready = pl_art_ready;
-    catalogue_playlist_covers(); /* the server playlists', once */
     for (unsigned i = 0, n = view ? widget_count_children(view) : 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         if (widget_count_children(item)) pl_art_row(widget_get_child(item, 0), &asked);

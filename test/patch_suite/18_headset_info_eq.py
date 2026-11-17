@@ -485,7 +485,7 @@ m=ShuffleMachine(); ebar=page_bar(m); empty_row(m,11); shows_empty(m,ebar,'No Pl
 m=SpotMachine(files={}); ebar=page_bar(m); erows=stream_rows(m); f,ctx=m.handler(erows['Tidal Downloads'],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000); shows_empty(m,ebar,'No Downloads Yet','Tidal Downloads'); passed()
 m=CoverflowMachine(page='playing_page',pos=0); ebar=page_bar(m); q=m.deque([m.song('A')]); m.word(syms['mcl_pdeqplaylist'],q); m.word(O['MCL_POOL'],m.deque([0],'int')); assert m.call(address=payload_syms['playback_set'],args=(0,1,0,0),gap=0)==1
 m.press(10); assert m.hold()==11; m.release(); m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
-assert m.nodes[m.page]['name']=='upnext_page' and bar_reads(m,ebar)=='Up Next'; passed()  # never empty: the playing song heads it (upnext.c)
+assert m.nodes[m.page]['name']=='upnext_page' and any(n.get('name')=='_mm_head' for n in m.nodes.values()); passed()  # never empty: the playing song heads the sheet (upnext.c)
 m=ChapterMachine(ready=False); m.open_chapters(); m.advance(50)
 f,ctx=m.handler(m.page,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
 assert m.cancelled==1

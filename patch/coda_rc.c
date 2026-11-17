@@ -1,8 +1,8 @@
 /* coda-rc, the car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): the platform under
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
- * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate and queue
- * commands, the pairing code and the connected phones in.
+ * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate, queue and
+ * radio commands, the pairing code and the connected phones in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
@@ -24,7 +24,7 @@ static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
 uint8_t crc_device_id[8];
 
 typedef struct {
-    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen;
+    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
     int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
     char path[512], title[160], artist[160], album[160];
@@ -219,7 +219,7 @@ static void np_parse(const char *b, np_t *o) {
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
             NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
-            NUM("bms", bms) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("bms", bms) NUM("radio", radio) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -250,7 +250,7 @@ int crc_shim_alive(void) {
 
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS |
-           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING : 0) |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }
 
@@ -301,6 +301,7 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 14, (uint32_t)np.bhave);
     pb_varint(w, 15, (uint32_t)np.btotal);
     pb_varint(w, 16, crc_buffered_ms((uint32_t)np.bhave, (uint32_t)np.btotal, (uint32_t)np.bms));
+    pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_end(w, m);
 }
 
@@ -343,6 +344,7 @@ static void np_poll(void) {
     int parts = 0;
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
         np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
+        np.radio != np_sent.radio ||
         strcmp(np.path, np_sent.path) || np.buf != np_sent.buf ||
         /* its bytes: at most twice a second */
         (np.bhave != np_sent.bhave && crc_now_ms() - buf_pushed >= 500) ||
@@ -525,7 +527,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_SET_MODE: np_read(); return set_mode(s, req_id, p, n);
     case T_RATE: np_read(); return rate(s, req_id, p, n);
     case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
-    case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY:
+    case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:
         np_read();
         return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);
     }

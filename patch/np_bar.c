@@ -19,7 +19,7 @@ static struct {
  * was. */
 int np_sync(void *top) {
     if (!top || top != st.np_win) return 0;
-    if (addon_radio() != rad.on) row_frame(0); /* radio came or went: the row grows or shrinks */
+    if (song_radio_on() != rad.on) row_frame(0); /* radio came or went: the row grows or shrinks */
     st.np_bold = theme_font(st.np_title, ROLE_NP, st.np_bold); /* the title, as it changes */
     const theme_t *T = theme();
     if (T->np_meta_font) { /* the artist and album in the theme's face, as their text allows */
@@ -336,7 +336,8 @@ void np_mode_set(int on, int rep) {
     void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
     if (mode) widget_invalidate_force(mode, (void *)0);
 }
-/* The pair Now Playing's buttons show, for Car Remote (coda_rc_shim.c): shuffle on, and repeat as NP_REPEAT_* */
+/* The pair Now Playing's buttons show, for Car Remote (coda_rc_shim.c): shuffle on, and repeat as
+ * NP_REPEAT_* */
 int np_mode_shuffle(void) { return np_shuffle_on(*(volatile int *)MCL_MODE); }
 int np_mode_repeat(void) { return np_repeat_of(*(volatile int *)MCL_MODE); }
 /* A step of one control: shuffle (repeat 0) on or off, or repeat Off, All, One (dir 1) or back. */
@@ -349,16 +350,15 @@ void np_mode_step(int repeat, int dir) {
  * outer buttons' edges stay at the target's ends and the three gaps between the buttons are even.
  * Shuffle and repeat are their glyph in Text Secondary, or the accent with an NP_DOT dot NP_DOT_DY
  * under its centre while on; Repeat One has its own glyph. Radio is the antenna in Text Secondary,
- * or while the playing app plays a radio (addon.c addon_radio) an NP_PILL wide accent pill holding
- * the antenna and "Radio": turning on, the pill grows from the glyph's width over NP_GROW_MS and
- * the gaps shrink with it, the word fading in over the last part (back the same way off; at once
- * under Reduce Motion). While
- * radio is on, shuffle and repeat are NP_DIM and ignore taps and the Centre cycle: the app picks
- * the order. The one the Centre cycle's wheel sets (np_stage) stands in a Text Primary outline,
- * and a tapped one on a #2C2C2E square that fades out over NP_PRESS_MS
- * (docs/oled-design.md#now-playing, approved as 22 v4 on 2026-11-16): each fits what is drawn, the
- * glyph's ink and, while it shows, the on dot, padded NP_FOCUS_PAD to the outline's inner edge or
- * NP_PRESS_PAD to the square's. */
+ * or while a radio plays (song_radio.c song_radio_on: the app's or the library's) an NP_PILL wide
+ * accent pill holding the antenna and "Radio": turning on, the pill grows from the glyph's width
+ * over NP_GROW_MS and the gaps shrink with it, the word fading in over the last part (back the same
+ * way off; at once under Reduce Motion). While radio is on, shuffle and repeat are NP_DIM and
+ * ignore taps and the Centre cycle: the radio picks the order. The one the Centre cycle's wheel
+ * sets (np_stage) stands in a Text Primary outline, and a tapped one on a #2C2C2E square that fades
+ * out over NP_PRESS_MS (docs/oled-design.md#now-playing, approved as 22 v4 on 2026-11-16): each
+ * fits what is drawn, the glyph's ink and, while it shows, the on dot, padded NP_FOCUS_PAD to the
+ * outline's inner edge or NP_PRESS_PAD to the square's. */
 #define NP_BTN 22  /* a glyph, and a button's width in the row */
 #define NP_PILL 92 /* the radio's pill, on */
 #define NP_PILL_H 34
@@ -390,7 +390,7 @@ static int row_frame(const void *info) {
 /* The pill's width now, eased 1 - (1 - t)^2 from where it was when radio last changed; 0..100 in
  * *word, the word's share of its ink. A grow under way asks for its next frame. */
 static int pill_w(int *word) {
-    int on = addon_radio();
+    int on = song_radio_on();
     unsigned now = (unsigned)time_now_ms();
     if (!rad.to) rad.from = rad.to = on ? NP_PILL : NP_BTN, rad.on = on; /* first paint: no grow */
     int ms = motion_ms(NP_GROW_MS, MO_SPATIAL), t = ms ? (int)(now - rad.at) * 1000 / ms : 1000;
@@ -486,14 +486,9 @@ static int press_share(int k) {
 }
 
 /* A tap on the row (the play mode's target): the button nearest it. Shuffle and repeat step as
- * the Centre cycle's wheel does, unless radio is on; radio opens the playing app's page (addon.c
- * addon_more), where a radio starts and stops; Up Next opens the queue (navigation.c np_queue).
+ * the Centre cycle's wheel does, unless radio is on; radio starts a radio of the playing song, or
+ * the pill stops it (song_radio.c song_radio_tap); Up Next opens the queue (navigation.c np_queue).
  * 1 when it took the tap, stock's step through the one mode never. */
-static int row_radio(const void *info) {
-    (void)info;
-    addon_more();
-    return 0;
-}
 int np_mode_click(void *target, void *event) {
     if (!target || target != np_row_widget() || !theme()->np_modes) /* the theme last */
         return 0;
@@ -511,7 +506,7 @@ int np_mode_click(void *target, void *event) {
     if (k == NB_QUEUE)
         timer_add(np_queue, (void *)0, 0);
     else if (k == NB_RADIO)
-        timer_add(row_radio, (void *)0, 0);
+        timer_add(song_radio_tap, (void *)0, 0);
     else if (!rad.on)
         np_mode_step(k == NB_REPEAT, 1);
     return 1;
@@ -540,8 +535,8 @@ void np_modes(void *win, void *canvas) {
                     : i && rep == NP_REPEAT_ONE ? "1_on"
                     : lit[i]                    ? "_on"
                                                 : off);
-        /* on: the accent's dot under it; the wheel's stage: the outline round it, while the wheel is the
-         * modality (ui_focus_shown) */
+        /* on: the accent's dot under it; the wheel's stage: the outline round it, while the wheel
+         * is the modality (ui_focus_shown) */
         glyph_framed(win, canvas, name, x, cy, lit[i] && !rad.on,
                      st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i) && ui_focus_shown(),
                      rad.on ? 0 : press_share(k));

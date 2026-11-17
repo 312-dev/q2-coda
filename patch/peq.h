@@ -152,20 +152,6 @@ void peq_reset(peq_dsp *d, int rate, int channels, const peq_preset *p);
 int peq_update(peq_dsp *d, const peq_preset *p);
 void peq_process(peq_dsp *d, float *audio, unsigned frames);
 
-/* The visualizer's PCM tap (docs/internals.md#visualizer-ipod): hciplayer's filter writes what
- * plays, its first two channels and above 48 kHz every rate / 44100th frame, to ring[seq %
- * VIS_RING], then sets rate (of the ring), stamp (CLOCK_MONOTONIC ns of that write) and seq, the
- * frames written. demo creates the file, sized, under another name and renames it, so it never maps
- * a short one, and bumps want each frame it shows: a second of audio without a bump and the writer
- * stops copying. */
-#define VIS_FILE PEQ_ROOT "/tmp/q2vis"
-#define VIS_RING 65536 /* a power of two: 1.5 s at 44.1 kHz, room for VIS_LATENCY_MS */
-typedef struct {
-    unsigned seq, rate;
-    long long stamp;
-    unsigned want, pad;
-    float ring[VIS_RING][2];
-} vis_tap;
 long long now_ns(void);
 unsigned long long now_ms(void);
 /* Crossfade (docs/internals.md#crossfade): demo writes the next track change's fade, an int in ms,
@@ -317,7 +303,7 @@ void *page_row_detail_into(void *view, int index, const char *caption, const cha
                            int (*click)(void *, void *));
 void page_row_into(void *view, int index, const char *caption, int (*click)(void *, void *));
 void row_into(void *item, int h);
-/* artist_page.c: an artist's page under the inset modal's set (docs/oled-design.md#artist-page) */
+/* artist_page.c: an artist's page under the menu sheet's set (docs/oled-design.md#artist-page) */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta);
 void *hero_now(void);
 void pair_open(void *head, void *list, const char *const label[2], const char *const icon[2],
@@ -341,6 +327,8 @@ int modal_set(void); /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
+int xfade_state(int *seconds);       /* crossfade.c: Crossfade 1 on; *seconds its length */
+void xfade_set(int on, int seconds); /* ... both set and saved */
 /* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
@@ -490,6 +478,9 @@ int addon_goes(const char *path);      /* addon.c: Go to on path opens a page */
 int addon_scrobbles(const char *path); /* addon.c: not when path's app says scrobble=0 */
 int addon_more(void); /* addon.c: Now Playing's ⋯ opens the playing queue's app's page */
 int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
+/* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
+int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
+int addon_radio_answer(unsigned seq);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -684,7 +675,6 @@ void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 /* slider_page.c: an iOS segmented control of n segments, w by h from x, y; open is lit */
 void segments_paint(void *canvas, const char *const *names, int n, int open, int focus, int x,
                     int y, int w, int h);
-int ipod_battery(void);               /* theme_engine.c: IPOD BATTERY, 0 Icon, else a percentage */
 int title_gone(void *w, void *event); /* ... and looks for its source again at the next sync */
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);                 /* theme_engine.c: Light Mode */
@@ -728,7 +718,7 @@ const char *shelf_busy(void);           /* netupdate.c: the app folder a job rep
 const char *shelf_moving(void);         /* netupdate.c: the app folder deleted or moved into */
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
 void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
-void album_lyrics_stop(void); /* onlinematch.c: Download Album Lyrics before USB storage */
+void album_lyrics_stop(void); /* onlinematch.c: Get Album Lyrics before USB storage */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };
 void sig_hex(const unsigned char *in, unsigned n, char *out);

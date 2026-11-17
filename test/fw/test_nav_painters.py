@@ -654,14 +654,13 @@ def test_the_thumb_is_the_themes_in_either_half(fw, st):
     assert rgba(lists.T['sb_thumb']) in dark and dark != light
 
 
-def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
-    """OLED's wheel indicator on an inset modal's rows (menu_modal.c): inside the panel's right padding, clear of the
-    selection bar's end, so nothing lights past the panel's edge (x 58 to 317 on screen, the rows' box from 50)."""
+def test_a_menu_sheets_scroll_indicator_is_the_lists_own(fw, st):
+    """OLED's wheel indicator on a menu sheet's rows (menu_modal.c): the rows span the screen on the house grid, so the
+    indicator is a list's, in the gutter right of the rows' right column (x 347 on screen), inside the screen."""
     now = [5000]
     fw.mock('time_now_ms', lambda *_: now[0])
     ui = Ui(fw)
     theme(fw)
-    T = THEMES[OLED]
     win = ui.window('sortselect_dialog', kind='dialog')
     lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
     view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
@@ -673,17 +672,15 @@ def test_an_inset_modals_scroll_indicator_stays_in_its_panel(fw, st):
     fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
     view.int_at(O['VIEW_CONTENT_H']).value = 320
     fw.fn('wheel_sb_arm', None, C.c_void_p)(view.addr)
-    out = T['sel_inset'] - 8  # the panel's left edge in the rows' box
-    canvas = Canvas(fw, x=58 - out, y=66)
+    canvas = Canvas(fw, x=0, y=58)
     fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(lv.addr, canvas.addr)
     x0, y0, x1, y1 = thumb_box(canvas.px)
-    assert x0 >= out + 259 - 8 and x1 <= out + 259  # in the right padding, past the bar's end
-    assert y0 >= -8 and y1 <= 6 * 32 + 8
+    assert x0 >= 375 - 28 and x1 <= 375
 
 
 @pytest.mark.parametrize('rows, gap', [(5, 12), (8, 0)])
-def test_an_inset_modals_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
-    """menu_modal.c modal_frame (audit2 E1): a destructive row's 12 px gap stands while every row shows; a panel that
+def test_a_menu_sheets_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
+    """menu_modal.c modal_frame (audit2 E1): a destructive row's 12 px gap stands while every row shows; a sheet that
     scrolls drops it, so it scrolls and ends on whole 32 px rows, not cut by 12 px (Now Playing's More)."""
     ui = Ui(fw)
     theme(fw)
@@ -973,7 +970,7 @@ class Modes:
     def tap(self, side):
         event = C.create_string_buffer(0x40)
         struct.pack_into('<i', event, 0, O['EVT_CLICK'])
-        struct.pack_into('<ii', event, O['EVENT_X'], 64 if side == 'shuffle' else 228, 286)
+        struct.pack_into('<ii', event, O['EVENT_X'], {'shuffle': 64, 'radio': 146}.get(side, 228), 286)
         return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
 
 
@@ -988,6 +985,17 @@ def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
     assert m.sent == [2, 1]
     m.tap('repeat')  # repeat Off, shuffle off: order
     assert m.sent == [2, 1, 0]
+
+
+def test_the_radio_tap_starts_a_radio_of_the_playing_song(fw, st, mcl):
+    """The Radio button starts a song radio (song_radio.c song_radio_tap, on a timer: a radio's queue opens Now
+    Playing). It opened the playing app's page (addon_more) before, which did nothing for the Subsonic app, whose
+    q2app has no more= (the user's dead tap, 2026-11-16 17:09); stock's mode is left alone."""
+    m = Modes(fw, st, mcl, 0)
+    timers: list = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 1)
+    assert m.tap('radio') == 1 and m.sent == []
+    assert timers[-1] == C.cast(fw.lib.song_radio_tap, C.c_void_p).value
 
 
 def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
@@ -1951,37 +1959,29 @@ def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
-    ids = [r.name for r in rows]
-    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'
-    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
-    at = {r.name or icon(r): k for k, r in enumerate(rows)}  # Max Volume's icon: Volume's row has it too
-    volume = next(k for k, r in enumerate(rows) if icon(r) == 'playset_maxvol')
-    assert at['s2'] == 0 and rows[1] is row(ui, view, 'Library') and 'list_into' in [c.props.get('image') for c in rows[1].walk()]
-    assert at['s3'] == 2  # Play Mode after EQ and the Library
-    assert at['playset_gapless'] == at['s7'] + 1 and at['playset_memplay'] == at['s6'] + 1  # Crossfade, Resume Songs
-    assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
-    assert rows[at['s8'] + 1] is row(ui, view, 'Sleep Timer')
-    assert [volume, at['playset_maxvol'], at['playset_bootvol'], at['s0'], at['s9'], at['s10']] == list(range(at['s8'] + 2, at['s8'] + 8))
-    balance = [k for k, r in enumerate(rows) if icon(r) == 'playset_balance']
-    assert balance == [at['s10'] + 1, at['s10'] + 2]  # Mono Audio and Swap L/R
-    assert [at['s1'], at['s4'], at['s5']] == [balance[1] + 1, balance[1] + 2, 19]  # Filters, DSD Output, USB Audio last
-    assert 'playset_covermode' not in at and not [r for r in rows if not r.name and ui.text(label_of(r)) == 'On-The-Go']
-    assert ui.text(label_of(rows[volume])).startswith('Volume')  # crossfade.c volume_row, just before Max Volume
+    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'; stock's Balance (s10) stays,
+    # hidden, after the inline Balance (inline_slider.c); Crossfade's Duration and Default Volume's Level under them
+    seq = [r.name or ui.text(label_of(r)).split(':')[0] for r in rows]
+    assert seq == ['s2', 'Library', 's3', 's7', 'Crossfade', 'Duration', 's6', 'Resume Songs', 's8', 'Sleep Timer',
+                   'Volume', 'Max Volume', 'Default Volume', 'Level', 's0', 's9', 'Balance', 's10', 'Mono Audio',
+                   'Swap L/R', 's1', 's4', 's5']
+    assert 'list_into' in [c.props.get('image') for c in rows[1].walk()] and not rows[seq.index('s10')].visible
+    assert 'playset_covermode' not in [icon(r) for r in rows]
+    assert icon(rows[seq.index('Volume')]) == 'playset_maxvol'  # crossfade.c volume_row, just before Max Volume
 
 
-def test_playback_s_volume_rows_open_stock_s_pages(fw):
+def test_playback_s_volume_rows_change_in_place(fw):
+    """Max Volume and Default Volume open no page: an inline slider and a switch (inline_slider.c)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    ours = {icon(r): r for r in view.children if not r.name}
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
-    for key in ('playset_maxvol', 'playset_bootvol'):
-        assert 'list_into' in [c.props.get('image') for c in ours[key].walk()]
-        click(ui, ours[key])
-    assert opened == ['playset/maxvol_page', 'playset/bootvol_page']
-    # stock's rows, stock's translations
-    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_maxvol', b'playset_bootvol']
+    for title in ('Max Volume', 'Default Volume'):
+        item = row(ui, view, title)
+        assert 'list_into' not in [c.props.get('image') for c in item.walk()]
+        click(ui, item)
+    assert opened == []
 
 
 def test_enlarged_album_art_is_display_s_last_row_and_stock_s_switch(fw):
@@ -2041,7 +2041,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 20  # the next open is the main page again
+    assert len(again.children) == 23  # the next open is the main page again
 
 
 def caption_texts(fw, view):
@@ -3177,6 +3177,213 @@ def test_about_s_rows_take_the_selection_but_open_nothing(fw, st):
     assert offs == [(button.addr, EVT_CLICK, 0x4c12f8, 0x77)]
     assert len([h for h in button.handlers if h[0] == EVT_CLICK]) == 1
     assert not [a for _, a in fw.calls('widget_set_enable') if a[0] == item.addr]
+
+
+# The menu sheet (menu_modal.c, docs/oled-design.md#menus): the page receding above it and the frosted material under
+# its rows, drawn straight into the screen's buffer once its first paint is whole.
+class Clock:
+    """time_now_ms, and the timers the sheet's motion adds (menu_modal.c sheet_tick, and ui_kit.c's shared repaint
+    through ovm_t), run by hand."""
+    def __init__(self, fw):
+        self.now, self.timers = 10_000, []
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('timer_add', lambda f, ctx, ms, *_: self.timers.append(f) or len(self.timers))
+
+    def at(self, fw, ms):
+        """ms after the motion's start: its frame taken (the tick), as the timer would."""
+        self.now = 10_000 + ms
+        return fw.fn('menu_modal__sheet_tick', C.c_int, C.c_void_p)(None)
+
+
+def sheet(fw, st, rows=10, risen=True, reduce=False):
+    """A sortselect dialog framed as the sheet on OLED's set, with a header, and the screen's buffer behind a canvas:
+    the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
+    the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
+    buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
+    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
+    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    fw.mock('window_manager_is_animating', lambda *_: 0)
+    ui = Ui(fw)
+    theme(fw)
+    st('reduce_motion').value = reduce  # the keys count as read (settings_read): the flag as accent() leaves it
+    win = ui.window('sortselect_dialog', kind='dialog')
+    lv = ui.add('list_view', win, (0, 44, 375, 210), 'list_view')
+    view = ui.add('scroll_view', lv, (0, 0, 375, 210), 'scroll_view')
+    for _ in range(rows):
+        ui.add('list_item', view, (0, 0, 375, 32))
+    fw.fn('modal_head', None, C.c_char_p, C.c_char_p, C.c_void_p)(b'Time', b'Pink Floyd', None)
+    fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
+    canvas = Canvas(fw)
+    buf = (C.c_uint * (375 * 320))(*([0xffffffff] * (375 * 160) + [0xff0000ff] * (375 * 160)))
+    for off, v in ((O['LCD_W'], 375), (O['LCD_H'], 320), (O['LCD_LINE_LENGTH'], 4 * 375),
+                   (O['LCD_FORMAT'], O['LCD_BGRA8888'])):
+        C.c_int.from_buffer(canvas.lcd, off).value = v
+    C.c_void_p.from_buffer(canvas.lcd, O['LCD_OFFLINE_FB']).value = C.addressof(buf)
+    fw.sheet_clock = Clock(fw)
+    if risen:
+        page = list(buf)
+        fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+        assert fw.sheet_clock.at(fw, 1000) == 0  # done: the timer ends
+        buf[:] = page
+    return ui, win, view, canvas, buf
+
+
+class Rect(C.Structure):
+    _fields_ = [('x', C.c_int), ('y', C.c_int), ('w', C.c_int), ('h', C.c_int)]
+
+
+def rgb(buf, x, y):
+    v = buf[y * 375 + x]
+    return v >> 16 & 255, v >> 8 & 255, v & 255
+
+
+def test_a_menu_sheet_frames_its_rows_under_its_header(fw, st):
+    """The list from y 50 to the screen's foot, a 72 px header space heading the rows, each the screen's width; the
+    content padded by what lies past the list end (y 282), which list_pad takes back so the last row ends there."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    head = view.children[0]
+    assert head.name == '_mm_head' and head.box == (0, 0, 375, 72)
+    assert [k.box[1] for k in view.children[1:3]] == [72, 104] and view.children[1].box[2] == 375
+    assert view.props['virtual_h'] == 72 + 10 * 32 + 38 and view.props['_list_pad'] == 38
+
+
+def test_a_menu_sheet_recedes_the_page_and_frosts_it(fw, st):
+    """Above y 40 the page at 94% about the centre, dimmed half way; outside the sheet's 40 px top corners the same;
+    on the sheet the page blurred, its colour raised 1.6 times, 28% kept under 6% white: blue stays blue, dark. The
+    material is made once: a later paint over another page draws the same."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert all(120 <= c <= 135 for c in rgb(buf, 187, 20))  # white, dimmed half way
+    assert rgb(buf, 0, 20) == (0, 0, 0)  # past the receding page's edge: black
+    assert all(120 <= c <= 135 for c in rgb(buf, 20, 41))  # outside the corner's curve
+    assert all(60 <= c <= 100 for c in rgb(buf, 187, 41))  # the sheet, over white: grey, dark
+    r, g, b = rgb(buf, 187, 300)
+    assert 70 <= b <= 95 and r <= 20 and g <= 20  # over blue
+    was = list(buf)
+    for i in range(375 * 320):
+        buf[i] = 0xff00ff00
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 300) == tuple((was[300 * 375 + 187] >> s) & 255 for s in (16, 8, 0))
+
+
+def test_a_menu_sheet_waits_for_a_whole_paint_to_make_its_material(fw, st):
+    """A first paint of part of the screen can't see the whole page: the flat sheet until a whole one."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    canvas.clip = [0, 100, 375, 50]
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 300) == (0, 0, 255)  # the buffer untouched: drawn as rects on the canvas instead
+    assert canvas.rects
+
+
+def test_a_menu_sheets_rows_fade_into_it_past_the_list_end(fw, st):
+    """The rows' text past y 266 fades into the material, to nothing at the foot; above it untouched."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    mat, foot = rgb(buf, 100, 300), rgb(buf, 100, 318)
+    buf[200 * 375 + 100] = buf[300 * 375 + 100] = buf[318 * 375 + 100] = 0xffffffff
+    fw.fn('modal_after', None, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
+    assert rgb(buf, 100, 200) == (255, 255, 255)
+    faded = rgb(buf, 100, 300)
+    assert all(m < f < 255 for m, f in zip(mat, faded)) and faded[0] - mat[0] < 80, (mat, faded)
+    assert all(f - 1 <= c <= f + 1 for c, f in zip(rgb(buf, 100, 318), foot))  # the material's, at the foot
+
+
+def test_a_destructive_rows_words_are_red_and_white_on_its_bar(fw, st):
+    """modal_red: the label's ink the confirm's red at rest, white while lit, set only when it changes."""
+    ui, win, view, canvas, buf = sheet(fw, st, rows=1)
+    row = view.children[1]
+    label = ui.add('hscroll_label', row, (24, 0, 300, 32))
+    fw.fn('modal_red', None, C.c_void_p)(row.addr)
+    assert fw.fn('modal_is_red', C.c_int, C.c_void_p)(row.addr)
+    paint = fw.fn('modal_row_paint', None, C.c_void_p, C.c_void_p, C.c_void_p, Rect, C.c_int)
+    paint(view.addr, canvas.addr, row.addr, Rect(0, 0, 375, 32), 0)
+    red = label.props['style:normal:text_color']
+    paint(view.addr, canvas.addr, row.addr, Rect(0, 0, 375, 32), 1)
+    white = label.props['style:normal:text_color']
+    assert red & 0xffffff == 0x303bff and white & 0xffffff == 0xffffff  # AWTK's colour: red in the low byte
+
+
+def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
+    """What the sheet drew straight into the screen's buffer goes when the last sheet closes: cleared to black and
+    the whole screen painted again on the next pass, so a page that paints nothing under the status row (Edit Home)
+    never shows the receding page or the sheet's top."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    timers = []
+    fw.mock('timer_add', lambda f, ctx, ms, *_: timers.append(f) or 1)
+    fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)(win.addr, canvas.addr)
+    assert rgb(buf, 187, 30) != (0, 0, 0)
+    fw.fn('menu_modal__modal_gone', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
+    assert all(v == 0xff000000 for v in buf) and timers
+
+
+# The sheet's motion (menu_modal.c sheet_run through ui_kit.h's ovm_t, docs/oled-design.md#menus): it rises 260 ms (cubic_out) from the
+# screen's foot while the page recedes and dims and the frost fades in; Return lets it fall 180 ms (ease-in), keys
+# taken meanwhile, then it closes.
+def list_y(ui, view):
+    return ui.nodes[view.addr].parent.box[1]
+
+
+def test_a_menu_sheet_rises_from_the_page(fw, st):
+    """Its first whole paint is the page alone, the rows a sheet's height (280 px) below their place; half way through
+    the rise (130 ms: cubic_out's 87.5%) the sheet's top is 35 px low, the page above it dimmed part way, the rows 35 px
+    low; at 260 ms it stands, its rows in place, the timer done, the page half dimmed and the frost under y 40."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50 + 280
+    paint(win.addr, canvas.addr)
+    assert list(buf) == page and len(clock.timers) == 2  # the sheet's tick and ui_kit.c's shared repaint
+    assert clock.at(fw, 130) == 8  # RET_REPEAT
+    assert list_y(ui, view) == 50 + 35
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(130 < c < 255 for c in rgb(buf, 187, 20))  # white, dimmed part way (half way at rest)
+    assert rgb(buf, 187, 70) != rgb(buf, 187, 80)  # the sheet's top edge between them: page above, frost under
+    assert clock.at(fw, 260) == 0 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(120 <= c <= 135 for c in rgb(buf, 187, 20)) and all(60 <= c <= 100 for c in rgb(buf, 187, 41))
+
+
+def test_return_lets_a_menu_sheet_fall_then_closes_it(fw, st):
+    """modal_close: the sheet stays open while it falls, every key taken (modal_closing); at 90 ms (ease-in: a quarter
+    gone) its rows are 70 px low; at 180 ms it closes, and the next close is at once."""
+    ui, win, view, canvas, buf = sheet(fw, st)
+    clock = fw.sheet_clock
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert not fw.calls('window_close') and fw.fn('modal_closing', C.c_int)() == 1
+    assert clock.at(fw, 1000 + 90) == 8 and list_y(ui, view) == 50 + 70
+    assert clock.at(fw, 1000 + 180) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_under_reduce_motion_a_menu_sheet_fades_in_and_out_in_place(fw, st):
+    """ovm_t under Reduce Motion (docs/oled-design.md#overlay-motion): the rows stand in their place throughout; the
+    rise is a 150 ms linear fade, the page above the rows half way back at 75 ms, and the fall a 120 ms one, the
+    window closed at its end."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False, reduce=True)
+    page = list(buf)
+    clock = fw.sheet_clock
+    paint = fw.fn('modal_paint', None, C.c_void_p, C.c_void_p)
+    assert list_y(ui, view) == 50
+    paint(win.addr, canvas.addr)
+    assert clock.at(fw, 75) == 8 and list_y(ui, view) == 50
+    buf[:] = page
+    paint(win.addr, canvas.addr)
+    assert all(180 <= c <= 200 for c in rgb(buf, 187, 20))  # white, half way to its dimmed half
+    assert clock.at(fw, 150) == 0 and list_y(ui, view) == 50
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert clock.at(fw, 150 + 60) == 8 and list_y(ui, view) == 50 and not fw.calls('window_close')
+    assert clock.at(fw, 150 + 120) == 0
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr]
+
+
+def test_a_sheet_closes_at_once_before_its_first_whole_paint(fw, st):
+    """With no material yet (nothing drawn of it) there is nothing to fall: it closes at once."""
+    ui, win, view, canvas, buf = sheet(fw, st, risen=False)
+    fw.fn('modal_close', None, C.c_void_p)(win.addr)
+    assert [a[0] for _, a in fw.calls('window_close')] == [win.addr] and fw.fn('modal_closing', C.c_int)() == 0
 
 
 @pytest.mark.parametrize('key, value, key_w', [
