@@ -383,7 +383,7 @@ static void usb_probe_look(void) {
     u.probe_look_at = now;
     if (usb_host()) {
         u.probing = 0, u.chosen = 0;
-        usb_log("a computer answered the probe after the plug,", (int)(now - u.plug_at));
+        usb_log("a computer answered the probe after the plug", (int)(now - u.plug_at));
         usb_chooser_open();
     } else if (now - u.probe_at > USB_PROBE_MS) {
         u.probing = 0;
