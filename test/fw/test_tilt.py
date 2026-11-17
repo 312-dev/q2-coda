@@ -170,17 +170,18 @@ def test_the_bar_never_rises_past_its_windows_top(fw):
 
 
 @pytest.mark.parametrize('share', (-1 + 1 / UNITS, -.5, .5, 1 - 1 / UNITS))
-def test_a_bar_moved_down_off_its_windows_top_stays_inside_the_box_painted_again(fw, share):
-    """Home's Split list starts 18 px above its window (split_art_up), so its first row's leaning bar is moved down
-    to the window's top, as far as 18 px into the next row. All it paints, its shadow too, stays inside tilt.box,
-    which tilt_poll paints again as the lean changes, else the bar's foot is left behind on the next row (user,
-    2026-11-16: a 6 px band of the bar left across Library, the selected row's text flickering)."""
+def test_a_row_raised_above_its_window_leans_from_where_it_rests(fw, share):
+    """Home's Split list starts 18 px above its window (split_art_up), its first row's top in the status row's band,
+    which the bar paints. That row's leaning bar moves by its lean (TILT_LIFT and the growth) from where it rests, not
+    down to the window's top: that put it up to 18 px below its words on every tug, a blue slice lagging off the row
+    (user, 2026-11-16, on the Q2: Home's selected text flickering, "a lagging blue slice"). All it paints, its
+    shadow too, stays inside the box tilt_poll paints again."""
     bar = Bar(fw, win_y=58, list_y=-18)
     bar.paint(y=0)
     bar.turn(share)
     x, y, w, h = bar.paint(y=0)
+    assert -2 <= y <= LIFT and h <= 32 + 2  # its own row's place, give or take the lean
     box = bar.state.box  # the window's coordinates; the bar is the list's, 18 px higher
-    assert y - 18 >= 0  # moved down to the window's top
     shadow_foot = y - 18 + h + 3 * 2 + 3  # TILT_SHADOW rings, each 2 px lower and 1 px taller
     assert box.y <= y - 18 and shadow_foot <= box.y + box.h
 

@@ -105,16 +105,19 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
     int p = tilt.p, a = p < 0 ? -p : p > 256 ? 256 : p, e = ease(a > 256 ? 256 : a);
     if (!e) return;
     int dir = p < 0 ? -1 : 1, gw = bar->w * TILT_GROW * e / 256000,
-        gh = bar->h * TILT_GROW * e / 256000;
+        gh = bar->h * TILT_GROW * e / 256000, rest = bar->y;
     bar->x -= gw / 2, bar->w += gw;
     bar->y += dir * TILT_LIFT * e / 256 - gh / 2, bar->h += gh;
-    /* never past its window's top, where the status row's window covers it: the first row's bar
-     * grows down there instead of being cut (tilt_clip widens the clip for the rest) */
+    /* never higher past its window's top than it rests, where the status row's window covers it: the
+     * first row's bar grows down there instead of being cut (tilt_clip widens the clip for the
+     * rest). A row already raised above its window (Home's Split list, split_art_up, whose band
+     * the bar paints) leans from where it rests: brought down to the window's top it would stand
+     * up to that rise below its words, the bar sliding off its row on every tug. */
     int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window, on screen */
-    if (oy + bar->y < wy) bar->y = wy - oy;
-    /* the box tilt_poll paints again reaches the bar's foot and its shadow wherever it now is: moved
-     * down from a row raised above its window (Home's Split list, split_art_up) it can stand up to
-     * that rise into the next row, past the MARGIN round its row */
+    int top = wy - oy < rest ? wy - oy : rest;
+    if (bar->y < top) bar->y = top;
+    /* the box tilt_poll paints again reaches the bar's foot and its shadow wherever it now is, a
+     * full lean's outermost shadow ring a px past the MARGIN round its row */
     int foot = y + bar->y + bar->h + TILT_MARGIN;
     if (foot > tilt.box.y + tilt.box.h) tilt.box.h = foot - tilt.box.y;
     for (int i = TILT_SHADOW; i > 0; --i) { /* outermost first, each fainter */
