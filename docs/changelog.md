@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - USB: a choice saved with **Always Do This** no longer sticks for good. Press **Stop** on the USB Debugging, Transfer Files or USB Audio page and the next cable asks again with the chooser. Before, nothing on the Q2 could clear it, so every cable went straight to the saved choice.
+  - USB: **Stop** on the USB Debugging, Transfer Files and USB Audio pages is a proper button and shows an outline when you turn the wheel, so you can see it is selected.
   - Rounded corners are smooth everywhere instead of stepped: album covers in Control Center, Up Next, the artist pages, About and Now Playing, Cover Flow's covers, list thumbnails, the selection bar's ends and small pills such as the sheet's grabber.
   - Text entry (OLED): what you type shows where it belongs instead of in the middle of the screen: a search on its search line, a playlist's name in its own row of the list, Bluetooth's or Guest Play's name in the Name row after the word Name, and a Wi-Fi password in a field under "Password". The cursor blinks, a text too long for its space slides to keep the cursor in view and fades out at the edge where it is cut off, and the "Press Play/Pause..." lines are gone.
   - Settings > Bluetooth and Home: the loading spinner keeps turning the whole time a device is connecting and while Cover Flow loads a large library; before, it stopped on one frame until the wait was over.

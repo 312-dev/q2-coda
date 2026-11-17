@@ -63,6 +63,8 @@ typedef struct {
     const char *glyph;               /* theme image stem, white */
     int glyph_px;                    /* 0: MODE_GLYPH */
     const char *title, *line, *pill; /* pill 0: none */
+    int button; /* the pill is the page's one button (Centre presses it): the empty states'
+                   secondary button (ui_button), ringed under the focus rule */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 

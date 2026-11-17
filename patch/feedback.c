@@ -626,8 +626,8 @@ void feedback_shuffled(const char *what, int songs) {
 #define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
 
 /* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
- * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
- * coordinates. */
+ * MODE_BARE: a spinner), the title, the line and the optional pill, or a button centred where the
+ * pill would be (m->button). Returns the stack's top in w's coordinates. */
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
     const char *pill = m->pill;
     unsigned raw = ui_ink_raw(1); /* final colours, each half's */
@@ -640,7 +640,9 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
             tok(TOK_PRIMARY));
     ui_line(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
             tok(TOK_SECONDARY));
-    if (pill) {
+    if (pill && m->button) {
+        ui_button(canvas, cx, top + MODE_PILL_Y + MODE_PILL_H / 2, pill, 0, 1, 0);
+    } else if (pill) {
         int pw = ui_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
         rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
         fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
