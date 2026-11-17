@@ -12,6 +12,7 @@ usage: coda_rc_client.py [--host H] [--port P] [--keys DIR] COMMAND ...
   jump INDEX SONG_ID                 play the queue's song at INDEX (its id from queue)
   shuffle off|on | repeat off|one|all
   rate HEARTS SONG_ID                0..5 hearts for the playing song (5 is Favorites)
+  radio [SEED_ID|stop]               a radio of the playing song, a "song:" id or an "artist:" node; or stop it
   key play|pause|toggle|next|previous|volume-up|volume-down
   seek SECONDS | volume 0..100
   cover ART_ID OUT [--px N]
@@ -38,7 +39,7 @@ SEALED = 1
 T = dict(HELLO=0x01, HELLO_RESP=0x02, PAIR_START=0x03, PAIR_CHALLENGE=0x04, PAIR_FINISH=0x05, PAIR_RESULT=0x06,
          AUTH=0x07, AUTH_RESP=0x08, ERROR=0x0F, SUBSCRIBE=0x10, STATE=0x11, GET_STATE=0x12, TRANSPORT=0x20, ACK=0x21,
          SET_MODE=0x22, RATE=0x24, BROWSE=0x30, BROWSE_RESP=0x31, SEARCH=0x32, SEARCH_RESP=0x33, PLAY=0x40,
-         GET_QUEUE=0x42, QUEUE_RESP=0x43, PLAY_QUEUE_ITEM=0x44, GET_COVER=0x50, COVER=0x51, PING=0x7E, PONG=0x7F)
+         GET_QUEUE=0x42, QUEUE_RESP=0x43, PLAY_QUEUE_ITEM=0x44, START_RADIO=0x46, GET_COVER=0x50, COVER=0x51, PING=0x7E, PONG=0x7F)
 ERRORS = {1: "UNSUPPORTED", 2: "UNAUTHORIZED", 3: "BAD_REQUEST", 4: "NOT_FOUND", 5: "BUSY", 6: "PAIRING_FAILED",
           7: "PAIRING_LOCKED", 8: "TOO_LARGE", 9: "INTERNAL", 10: "VERSION", 11: "UNAVAILABLE", 12: "PAIRING_CANCELLED",
           13: "PAIRING_FULL"}
@@ -137,7 +138,8 @@ def state(raw):
         out["now_playing"] = {"track_id": text(n, 1), "title": text(n, 2), "artist": text(n, 3), "album": text(n, 4),
                               "duration_ms": one(n, 5, 0), "art": text(n, 6), "play_state": one(n, 7, 0),
                               "shuffle": one(n, 8, 0), "repeat": one(n, 9, 0), "volume": one(n, 10, 0),
-                              "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0))}
+                              "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0)),
+                              "radio": bool(one(n, 17, 0))}
     if 2 in m:
         p = decode(m[2][0])
         out["position"] = {"position_ms": one(p, 1, 0), "at_ms": one(p, 2, 0)}
@@ -295,6 +297,10 @@ class Session:
     def jump(self, index, track_id):
         self.call(T["PLAY_QUEUE_ITEM"], encode([(1, index), (2, track_id)]), T["ACK"])
 
+    def start_radio(self, seed_id="", stop=False):
+        """StartRadio (CAP_RADIO): seed_id "" is the playing song, else a "song:" id or an "artist:" node."""
+        self.call(T["START_RADIO"], encode([(1, seed_id or None), (2, stop or None)]), T["ACK"])
+
     def queue(self, offset=0, limit=50):
         m = decode(self.call(T["GET_QUEUE"], encode([(1, offset), (2, limit)]), T["QUEUE_RESP"]))
         return {"version": one(m, 1, 0), "index": one(m, 2, 0), "total": one(m, 3, 0), "offset": one(m, 4, 0),
@@ -435,6 +441,10 @@ def main(argv=None):
         out = {"ok": True}
     elif a.cmd == "rate":
         s.rate(a.args[1], int(a.args[0]))
+        out = {"ok": True}
+    elif a.cmd == "radio":
+        seed = a.args[0] if a.args else ""
+        s.start_radio(stop=True) if seed == "stop" else s.start_radio(seed)
         out = {"ok": True}
     elif a.cmd == "queue":
         out = s.queue(a.offset, a.limit)

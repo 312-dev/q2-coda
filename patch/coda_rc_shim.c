@@ -3,11 +3,12 @@
  * is on, it:
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off;
- * - writes Now Playing for it to /tmp/coda-rc.now, and the queue's song ids to /tmp/coda-rc.queue;
+ * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays), and the queue's song ids
+ *   to /tmp/coda-rc.queue;
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
- *   repeat, rate the playing song, play a song of the queue; and answers each in /tmp/coda-rc.ack, a
- *   Pause or Play once the player shows it;
+ *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
+ *   answers each in /tmp/coda-rc.ack, a Pause or Play once the player shows it;
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
  * Settings > Car Remote is this file's page too: the switch, the paired phones (Connected or Not connected,
@@ -161,6 +162,7 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "qpos", (int)pos);
     put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
+    put_int(b, sizeof b, &n, "radio", song_radio_on());
     put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
     put(b, sizeof b, &n, "title", title);
     put(b, sizeof b, &n, "artist", r ? P(r, REC_ARTIST) : "");
@@ -258,6 +260,28 @@ static int cr_play(const void *unused) {
     return 0;
 }
 
+/* StartRadio's work, from a timer as Play's (a radio's queue opens Now Playing): "radio <id>", a radio of
+ * the song with that record id, 0 the playing one, or "radio stop" (song_radio.c song_radio_car). */
+static int cr_radio(const void *unused) {
+    char raw[64];
+    int id = 0;
+    cr.play_timer = 0;
+    if (!state_read(CR_CMD, raw, sizeof raw)) return 0;
+    unsigned seq = (unsigned)atoi(raw + 1);
+    char *verb = strstr(raw + 1, " ");
+    int stop = verb && !strncmp(verb, " radio stop", 11);
+    if (!verb || (!stop && __isoc99_sscanf(verb, " radio %d", &id) != 1)) return 0;
+    unlink(CR_CMD);
+    if (!stop && (library_scanning() || addon_game_audio() || navigator_window_is_exist("usbmode_page"))) {
+        cr_ack(seq, 2);
+        return 0;
+    }
+    int code = song_radio_car(id, stop);
+    cr_now();
+    cr_ack(seq, code);
+    return 0;
+}
+
 /* A Pause or Play waiting for the player: ack 0 once it plays or is paused as asked, 1 (the phone gets
  * UNAVAILABLE) if it is not within CR_SETTLE_MS, as when a card game's sound holds stock's player off. */
 static void cr_settle(void) {
@@ -308,8 +332,8 @@ static void cr_command(void) {
     char *verb = strstr(raw + 1, " ");
     int v = 0, w = 0;
     cr.want = 0; /* a newer command: the daemon has answered the one waiting, and its ack would be stale */
-    if (verb && !strncmp(verb, " play ", 6)) {
-        cr.play_timer = timer_add(cr_play, 0, 0);
+    if (verb && (!strncmp(verb, " play ", 6) || !strncmp(verb, " radio ", 7))) {
+        cr.play_timer = timer_add(verb[1] == 'p' ? cr_play : cr_radio, 0, 0);
         return;
     }
     unlink(CR_CMD);

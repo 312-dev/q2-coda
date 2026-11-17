@@ -93,7 +93,7 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
-    "more fav now catalogue ratings artist album playlists storage signin libsource"
+    "more fav now catalogue ratings artist album playlists storage signin libsource radio"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -111,6 +111,7 @@ typedef struct {
     char more[48]; /* q2app's more: an op, a space and a title (addon_more) */
     int qr, game, audio, hidden, present, launched, hold, relaunch, restart;
     int nostop; /* q2app's stop=0: no Stop row on its page */
+    int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
 } app_t;
@@ -220,6 +221,7 @@ static void scan_one(const char *id, const char *from) {
     char stop[4]; /* as text, as scrobble: number() is 0 for a missing key too */
     field(raw, "stop", stop, sizeof stop);
     a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
+    a->radio = number(raw, "radio") == 1;
     field(raw, "more", a->more, sizeof a->more);
     unsigned k = strlen(a->more);
     if (k && a->more[k - 1] == '\r') a->more[k - 1] = 0; /* a Windows editor's line end */
@@ -2782,6 +2784,67 @@ int addon_radio(void) {
         on = seed[0] && seed[0] != '\r';
     }
     return on;
+}
+
+/* A song's radio asked of the app that plays it (song_radio.c, docs/internals.md#radio): the app
+ * whose folder holds path (a streamed song's file, a Library server row's path) when its q2app says
+ * radio=1, else the playing queue's app when it says so. Its request is /tmp/q2-<id>.radio, one
+ * line, "<seq> start <path>" or "<seq> stop", written only once the app's socket is there (it takes
+ * a request already there at its start as answered, as a .catplay); it answers in its state file,
+ * radioack=<seq> <code> (0 started or stopped, 1 not its song, 2 no radio). */
+static struct {
+    app_t *app;     /* the app asked last */
+    char line[600]; /* its request, while waiting for its socket */
+    unsigned at;    /* when it was asked */
+} rq __attribute__((section(".scratch")));
+
+static void radio_send(void) {
+    char path[48];
+    if (!rq.line[0] || !rq.app || !addon_ready(rq.app->id)) return;
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.radio", rq.app->id);
+    blob_io(path, "/tmp/q2-radio.tmp", rq.line, strlen(rq.line), 1);
+    rq.line[0] = 0;
+}
+
+static app_t *radio_app(const char *path) {
+    char id[APP_ID];
+    app_t *a = path && card_id(path, id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan(); /* a Library server row's app, not listed since boot */
+    if ((!a || !a->present || !a->radio) && qa.app && playback_loads == qa.loads) a = qa.app;
+    return a && a->present && a->radio ? a : 0;
+}
+
+/* 1 when an app takes the request for a radio of path's song (seq names its answer), started for
+ * it when it doesn't run; 0 when no app plays radios of it. */
+int addon_radio_start(const char *path, unsigned seq) {
+    app_t *a = radio_app(path);
+    if (!a || addon_wake(a->id) < 0) return 0;
+    unsigned n = (unsigned)tk_snprintf(rq.line, sizeof rq.line, "%u start %s\n", seq, path);
+    if (n >= sizeof rq.line) return rq.line[0] = 0, 0; /* cut, it would name another song */
+    rq.app = a, rq.at = time_now_ms();
+    radio_send();
+    return 1;
+}
+
+/* The playing queue's app's radio stopped; 1 when asked. */
+int addon_radio_stop(unsigned seq) {
+    app_t *a = qa.app && playback_loads == qa.loads && qa.app->radio ? qa.app : 0;
+    if (!a) return 0;
+    tk_snprintf(rq.line, sizeof rq.line, "%u stop\n", seq);
+    rq.app = a, rq.at = time_now_ms();
+    radio_send();
+    return 1;
+}
+
+/* The app's answer to request seq: its code, or -1 while there is none. Polled by song_radio.c,
+ * which sends a request waiting for its socket. */
+int addon_radio_answer(unsigned seq) {
+    char raw[QR_RAW], v[24], want[16];
+    radio_send();
+    if (!rq.app || !state_read(rq.app->state, raw, sizeof raw)) return -1;
+    field(raw, "radioack", v, sizeof v);
+    unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
+    return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
 }
 
 
