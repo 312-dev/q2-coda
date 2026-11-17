@@ -1000,17 +1000,22 @@ static void renderer(void) {
     }
     assert(rows >= CF_REFLECT - 1 && rows <= CF_REFLECT);
     /* No seam where a body ends mid-row: down any column from a cover's middle, brightness never
-       dips between the body, the row they share and the reflection. */
+       dips between the body, the row they share and the reflection. Square covers: mid-turn the
+       centre column can fall on a rounded corner, whose reflection mirrors the arc and so does
+       brighten for a few rows below the edge (corner_column). */
     const unsigned *alone[7] = { 0, 0, 0, flat[3], 0, 0, 0 };
     render(0, alone);
     assert(px(CF_CX, CF_TOP + 80) == colours[3]);
     assert(px(CF_CX - 80, CF_TOP) == 0xff000000u);
     assert(px(CF_CX - 80, CF_TOP + 160) == 0xff000000u);
+    theme_t *t = (theme_t *)theme();
+    int radius = t->cf.radius;
+    close_page(); t->cf.radius = 0; open_page();
     for (int frac = -ONE / 2; frac < ONE / 2; frac += ONE / 16 + 77) {
         render(frac, alone);
         for (int x = 0; x < CF_VIEW_W; ++x) {
             if (slot_of(px(x, CF_TOP + 80)) != 3) continue;
-            if (x != CF_CX) continue; /* rounded edges leave a gap before their reflection */
+            if (x != CF_CX) continue;
             int body = 256, dipped = 0;
             for (int y = CF_TOP + 80; y < CF_VIEW_H; ++y) {
                 int v = ch(px(x, y), 0);
@@ -1020,6 +1025,7 @@ static void renderer(void) {
             assert(!dipped);
         }
     }
+    close_page(); t->cf.radius = radius; open_page();
     /* Symmetry: a mirror-image ring renders the mirror image, at rest and mid-turn either way. */
     for (int j = 0; j < 7; ++j) mirror[j] = flat[j < 3 ? j : 6 - j];
     render(0, mirror);
@@ -3333,7 +3339,7 @@ static void enter_frames(void) {
 void cf_shelf_still(int still);
 static void rest_pinned(void) {
     static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
-    static const unsigned pinned[CF_THEMES] = { 0xfc1b693eu };
+    static const unsigned pinned[CF_THEMES] = { 0xa723fc9cu };
     static unsigned f[300 * PITCH], art[15][160 * 160];
     const cf_style_t ticks = shim_themes[0].cf;
     for (int i = 0; i < 15; ++i)
@@ -7388,7 +7394,7 @@ def main():
     # every built-in theme's .cf, for the checks that run each shipped look in turn
     cf_style.append(f'-DCF_THEMES={len(builtins())}')
     cf_style.append('-DCF_SHIPPED_ALL={ ' + ', '.join('{ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in t.items() if f.startswith('cf.')) + ' }' for t in builtins()) + ' }')
-    cf_style.append('-DPINNED_FRAMES=0x055534d4u')
+    cf_style.append('-DPINNED_FRAMES=0x3cbea4d0u')
     # The built-in numbers the checks use, as coverflow.h and coverflow.c have them
     cf_style += [f'-D{k}={v}' for k, v in re.findall(r'^#define (CF_FOLD_MS|CF_ENTER_SPEED|FOLD_FROM|FOLD_TO|ENTER_RUN|LD_SLOTS|FX_ENTER_MS|FX_LETTERS_MS|FX_SLACK_MS|FX_LATE_MS|HALF_GAP_MS) (\d+)',
                                                  ''.join((ROOT/'patch'/f).read_text() for f in ('coverflow.h', 'coverflow.c', 'coverflow_letters.c', 'coverflow_loader.c')), re.M)]
