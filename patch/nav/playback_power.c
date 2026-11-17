@@ -45,7 +45,7 @@ static void spot_keep(unsigned key, int sec, int total) {
         for (; i < RESUME_SLOTS - 1; i++) st.spots[i] = st.spots[i + 1];
         st.spots[i].key = 0;
     }
-    BLOB_IO(RESUME_FILE, st.spots, 1);
+    card_blob_write(RESUME_STORE, st.spots, sizeof st.spots);
 }
 
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
@@ -62,7 +62,7 @@ static void play_count(void *r, unsigned key) {
     for (; i > 0; i--) st.plays[i] = st.plays[i - 1];
     st.plays[0].key = key;
     st.plays[0].n = n;
-    BLOB_IO(PLAYS_FILE, st.plays, 1);
+    card_blob_write(PLAYS_STORE, st.plays, sizeof st.plays);
 }
 
 /* Scrobbling (docs/internals.md#scrobbling): a Rockbox-style AudioScrobbler 1.1 log at the card's
@@ -128,10 +128,13 @@ void resume_restart(void) { st.rs_stopped = 0; }
 /* Once a second from the UI loop: a long track saves its place and, when it starts playing near
  * its beginning, jumps to the saved one. A spoken CUE track saves its file's place but jumps only
  * when a Resume row (book_place) started it. A track change waits a poll, so the previous track's
- * time never counts for the new one. */
+ * time never counts for the new one. Places and counts kept in RAM while the card was away go to
+ * it here once it is back. */
 static void resume_poll(void) {
     unsigned now = (unsigned)time_now_ms(), at, n;
     if (now - st.rs_at < 1000) return;
+    card_blob_flush(RESUME_STORE);
+    card_blob_flush(PLAYS_STORE);
     st.rs_at = now;
     int sec = 0, total = 0;
     void *r = queue_now(&at, &n);
