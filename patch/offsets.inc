@@ -162,6 +162,10 @@ static inline int arc_out(int r, int y) {
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
 #define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
+/* Stock's volume dialog's close count, a byte: its timer (on_volume_tsup_fun's, 0x4a3248) adds 1 a
+ * tick and closes the dialog at 31; dialog_volume_dialog_init and volume_dialog_on_keyup zero it.
+ * volume.c vol_show zeroes it too, so a headset's change keeps the dialog up as a wheel tick does. */
+#define VOL_DIALOG_COUNT 0xa3b0d0
 /* A level bar's ease, the volume's and the brightness's (levels.c level_ease): a first-order
  * follow with this time constant, so 95% of a step in 3 x VOL_EASE_MS. A choice, not a
  * measurement: no source times an iPod's bar. */

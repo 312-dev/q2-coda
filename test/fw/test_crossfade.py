@@ -610,6 +610,15 @@ def test_the_volume_page_sets_and_saves_the_volume_up_to_max_volume(fw):
     assert page.key(CENTER) == 0  # no switch: Centre is stock's, which goes back
 
 
+def test_the_volume_page_follows_a_volume_set_elsewhere(fw):
+    page = volume_page(fw, 40, 100)
+    shown = fw.fn('xfade_volume_shown', C.c_int, C.c_void_p)
+    fw.var('g_volume', C.c_ubyte).value = 55  # a headset's own keys (bt_volume_poll)
+    assert shown(PAGE) == 1 and page.label() == '55' and page.moved[-1] == page.widgets['slider_bootvol']
+    assert not page.config.written and not fw.calls('device_set_volume')  # the setter saved and played it
+    assert shown(BELOW) == 0  # another window in front: the dialog shows it there
+
+
 def test_a_drag_on_the_volume_plays_each_step_and_saves_at_its_release(fw):
     page = volume_page(fw, 10, 60)
     for value in (30, 120):  # past Max Volume: held to it

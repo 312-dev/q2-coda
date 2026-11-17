@@ -906,6 +906,19 @@ def test_rockbox_gets_charging_back(fw, st, held, enabled):
     assert [c[1][0] for c in fw.calls('switch_charge_enable')] == enabled
 
 
+def curve(v):
+    """The headset level (0-127) for Q2 volume v (0-100), as docs/internals.md#headset-controls-and-volume gives it:
+    a 40 dB curve, 127 x 10^(-40 (100 - v) / 100 / 20), never below 127 v / 400 (a level every three steps where
+    the curve's levels crowd), at least 1 above 0."""
+    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def reads_as(level):
+    """The Q2 volume (0-100) a headset level (0-127) shows as: the one whose curve level is nearest, the lowest of
+    those that share it."""
+    return min(range(101), key=lambda v: (abs(curve(v) - level), v))
+
+
 def bt_link(fw, link=b'1', codec=1, way=1):
     Config(fw, BTVOLLINK=link)
     fw.var('g_bluetoothflag', C.c_ubyte).value = 1
@@ -914,7 +927,7 @@ def bt_link(fw, link=b'1', codec=1, way=1):
     fw.mock('mclGetOutputWay', lambda *_: way)
 
 
-@pytest.mark.parametrize('limit, level', [(100, 127), (60, 76), (150, 127), (0, 0)])
+@pytest.mark.parametrize('limit, level', [(100, 127), (60, curve(60)), (150, 127), (0, 0)])
 def test_rockbox_opens_the_headsets_volume_to_the_limit(fw, st, limit, level):
     rockbox(fw)
     bt_link(fw)
@@ -955,27 +968,42 @@ class Headset:
         return 0
 
 
-def reads_as(level):
-    """The Q2 volume (0-100) a headset level (0-127) shows as: the nearest (127 is odd, so no level is
-    half way between two)."""
-    return round(level * 100 / 127)
-
-
 @pytest.mark.parametrize('left, right, gains', [(40, 20, (100, 50)), (20, 40, (50, 100)), (70, 70, (100, 100)), (55, 0, (100, 0))])
 def test_the_headset_takes_the_volume_and_the_q2_keeps_only_the_balance(fw, left, right, gains):
     bt_link(fw)
     headset = Headset(fw)
     headset.btvol(left, right)
-    assert reads_as(headset.level) == max(left, right) and headset.gains == [gains]
+    assert headset.level == curve(max(left, right)) and headset.gains == [gains]
 
 
-def test_every_volume_reads_back_as_itself(fw):
+def test_the_volume_curve_keeps_its_ends_and_rises_evenly_in_db(fw):
+    avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
+    table = [avrcp(v) for v in range(101)]
+    assert table == [curve(v) for v in range(101)]
+    assert (table[0], table[1], table[100]) == (0, 1, 127) and table == sorted(table)
+    assert (avrcp(-5), avrcp(150)) == (0, 127)
+    # the top half no longer sits in the headset's last 6 dB: half volume is a sixth of its level, 80 two fifths
+    assert (table[50], table[80]) == (16, 51)
+    # no Q2 step is more than two from a change
+    assert max(sum(1 for w in table if w == level) for level in set(table)) <= 4
+
+
+def test_every_headset_level_reads_as_its_nearest_volume_and_back(fw):
+    q2 = fw.fn('navigation__bt_vol_q2', C.c_int, C.c_uint)
+    for level in range(128):
+        assert q2(level) == reads_as(level)
+    for v in range(101):
+        assert curve(q2(curve(v))) == curve(v)  # a level the Q2 wrote reads back as a volume that writes it again
+
+
+def test_every_volume_reaches_the_headset_on_the_curve(fw):
     bt_link(fw)
     headset = Headset(fw)
     for v in range(101):
         headset.btvol(v, v)
-        assert reads_as(headset.level) == v
-    assert len(fw.calls('btctl_transport_set_volume')) == 100  # one write per new level: 0 it showed already
+        assert headset.level == curve(v)
+    writes = [c[1][0] for c in fw.calls('btctl_transport_set_volume')]
+    assert writes == sorted(set(curve(v) for v in range(1, 101)))  # one write per new level: 0 it showed already
 
 
 def test_a_level_the_headset_already_shows_is_kept(fw):
@@ -985,6 +1013,37 @@ def test_a_level_the_headset_already_shows_is_kept(fw):
         headset.btvol(reads_as(level), 0)
         assert headset.level == level  # its own steps hold
     assert not fw.calls('btctl_transport_set_volume')
+
+
+# Link Volume unset: on for headphones and headsets (their Class), off for anything else; a choice saved wins.
+CLASSES = {'headphones': 0x240418, 'headset': 0x240404, 'speaker': 0x240414, 'car': 0x240420, 'unknown': 0}
+PX7 = 'AA:BB:CC:DD:EE:07'
+
+
+def linked_device(fw, kind, link=None):
+    """bt_link's link with the device connected now of kind (its Class, as the battery loop's file gives it), and
+    Link Volume as saved (None: never chosen)."""
+    bt_link(fw)
+    Config(fw, **({} if link is None else {'BTVOLLINK': link}))
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    def item(i, status, mac, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(mac, PX7.encode() + b'\0', len(PX7) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)  # the battery loop's start
+    Files(fw, {'/tmp/q2-btbatt': f'{PX7} 80 48000 {CLASSES[kind]} Px7\n'.encode()})
+
+
+@pytest.mark.parametrize('kind, link, synced', [('headphones', None, True), ('headset', None, True), ('speaker', None, False),
+                                                ('car', None, False), ('unknown', None, False), ('headphones', b'0', False),
+                                                ('speaker', b'1', True)])
+def test_link_volume_unset_follows_headphones_and_a_choice_wins(fw, kind, link, synced):
+    linked_device(fw, kind, link)
+    headset = Headset(fw, 30)
+    headset.btvol(40, 20)
+    assert (headset.level == curve(40)) == synced
+    assert headset.gains == ([(100, 50)] if synced else [(40, 20)])
 
 
 @pytest.mark.parametrize('kind', ['unlinked', 'no codec', 'jack', 'receiver', 'off', 'down'])
@@ -1067,16 +1126,74 @@ def test_the_headsets_own_keys_move_the_q2s_volume_to_the_limit(fw, stock_bytes,
     assert [(c[1][0], C.string_at(c[1][1]), C.string_at(c[1][2])) for c in fw.calls('write_int_config')] == [(want, b'PLAYSET', b'VOLUME')]
 
 
-def test_the_volume_dialogs_slider_follows_the_headset(fw, stock_bytes):
+class Front:
+    """The window in front for a headset's volume change: its name and AWTK type, and what was opened over it."""
+    TOP, SLIDER = 0x5100, 0x5200
+
+    def __init__(self, fw, name, kind=b'window', lit=1):
+        self.name, self.kind, self.opened = C.create_string_buffer(name), C.create_string_buffer(kind), []
+        fw.var('g_backlight_status', C.c_ubyte).value = lit
+        fw.mock('window_manager_get_top_window', lambda *_: self.TOP)
+        fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(self.name) if w == self.TOP else default)
+        fw.mock('widget_get_type', lambda w, *_: C.addressof(self.kind) if w == self.TOP else 0)
+        fw.mock('widget_lookup', lambda w, key, *_: self.SLIDER if C.string_at(key) == b'slider_vol' else 0)
+        fw.mock('navigator_to', lambda path, *_: self.opened.append(C.string_at(path)) or 0)
+
+
+def headset_step(fw, stock_bytes, front, level=127, volume=40):
+    """The headset's own keys take it to level while front is in front; the dialog's close count, stock's, set
+    part way first."""
     stock_bytes(0xa4cbb5, 1)
-    vol = VolPoll(fw, volume=40)
-    name = C.create_string_buffer(b'volume_dialog')
-    fw.mock('window_manager_get_top_window', lambda *_: 0x5100)
-    fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(name) if w == 0x5100 else default)
-    fw.mock('widget_lookup', lambda w, key, *_: 0x5200 if C.string_at(key) == b'slider_vol' else 0)
-    vol.headset.level = 127
+    count = stock_bytes(O['VOL_DIALOG_COUNT'], 1)
+    C.c_byte.from_address(count).value = 20
+    vol = VolPoll(fw, volume=volume)
+    vol.headset.level = level
     vol.poll()
-    assert [(c[1][0], C.string_at(c[1][1]), c[1][2]) for c in fw.calls('widget_set_prop_int')] == [(0x5200, b'value', 100)]
+    return C.c_byte.from_address(count).value
+
+
+def test_the_volume_dialogs_slider_follows_the_headset_and_stays_open(fw, stock_bytes):
+    front = Front(fw, b'volume_dialog', b'dialog')
+    assert headset_step(fw, stock_bytes, front) == 0  # its 3 s start again, as a wheel tick's do
+    assert [(c[1][0], C.string_at(c[1][1]), c[1][2]) for c in fw.calls('widget_set_prop_int')] == [(Front.SLIDER, b'value', 100)]
+    assert front.opened == []
+
+
+@pytest.mark.parametrize('name', [b'playing_page', b'bluetooth_page', b'home_page'])
+def test_a_headsets_volume_change_opens_the_volume_on_the_lit_screen(fw, stock_bytes, name):
+    front = Front(fw, name)
+    assert headset_step(fw, stock_bytes, front) == 20
+    assert front.opened == [b'dialog/volume_dialog'] and fw.var('g_volume', C.c_ubyte).value == 100
+
+
+@pytest.mark.parametrize('lit, video, kind, flag', [(0, 0, b'window', None), (1, 1, b'window', None), (1, 0, b'dialog', None),
+                                                     *((1, 0, b'window', f) for f in ('g_lockscreen_pageflag', 'g_testmode_flag',
+                                                                                      'g_guideflag', 'g_poweroff_state'))])
+def test_a_headsets_volume_change_opens_nothing_dark_over_a_video_a_dialog_or_where_stock_wont(fw, stock_bytes, lit, video, kind, flag):
+    front = Front(fw, b'confirm_dialog' if kind == b'dialog' else b'playing_page', kind, lit)
+    fw.var('videos__vid', Vid).pid = 77 if video else 0
+    if flag:
+        fw.var(flag, C.c_ubyte).value = 1
+    headset_step(fw, stock_bytes, front)
+    assert front.opened == [] and fw.var('g_volume', C.c_ubyte).value == 100  # the volume follows all the same
+
+
+def test_control_centers_slider_eases_to_a_headsets_change(fw, stock_bytes):
+    front = Front(fw, b'statusbar_dialog', b'dialog')
+    timers = []
+    fw.mock('widget_add_timer', lambda w, f, ms, *_: timers.append((w, ms)) or 1)
+    headset_step(fw, stock_bytes, front, volume=40)
+    assert front.opened == [] and timers == [(Front.TOP, O['VOL_POLL_MS'])]
+    bar = fw.var('vol_bar', C.c_int * 3)
+    assert (bar[0], bar[1]) == (40 << 8, 1)  # easing, from where it was
+
+
+def test_a_q2_volume_step_opens_nothing(fw, stock_bytes):
+    front = Front(fw, b'playing_page')
+    vol = VolPoll(fw, volume=40)
+    vol.headset.btvol(60, 60)
+    vol.poll()
+    assert front.opened == []
 
 
 def test_an_unmoved_headset_changes_nothing(fw):

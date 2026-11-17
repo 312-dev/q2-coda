@@ -492,7 +492,7 @@ class Machine:
                     found=lookup(child) if c else (child if self.nodes[child].get('name')==self.text(b) else 0)
                     if found: return found
                 return 0
-            ret=lookup(a) if a else 0
+            ret=lookup(a) if a in self.nodes else 0  # the window manager (self.wm) is no node: nothing found in it
         elif name=='scroll_bar_cast': ret=a
         elif name=='scroll_bar_is_mobile': ret=n.get('type')=='scroll_bar_m'
         elif name=='widget_set_opacity': self.byte(a+0x34,b); ret=0

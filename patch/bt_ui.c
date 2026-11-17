@@ -14,8 +14,8 @@
  * is a two-line row: its name over "Connected · LDAC · 72%" (stock's codec, bt_showcoding, and the
  * headset's battery, bt_battery.c) after the Positive dot; another paired one is a key/value row,
  * "Not Connected", or "Connecting…" with the activity spinner on the right column. Centre on a
- * paired row connects it, on the connected one opens its page (bt_detail.c); a found one pairs, as
- * stock.
+ * paired row connects it, on one connecting stops that (cancel_connect), on the connected one opens
+ * its page (bt_detail.c); a found one pairs, as stock.
  */
 #include "navigation.h"
 
@@ -314,8 +314,26 @@ int bt_stock_click(int dev, int x) {
     return 0;
 }
 
+/* The connect to mac in flight, cancelled: the link thread's target marked failed (4), as
+ * headset.c's adoption ends its wait, so the thread's 100 ms loop (0x4fc930) ends and
+ * checkBluetoothStatus takes stock's failure path, which shows nothing: btDisconnect (BlueZ fails
+ * the pending Connect as cancelled), the link list cleared, bt_connectstatus 0. Only while the
+ * thread runs for mac with its Connect started (5): at 1 the thread has yet to set 5 over it.
+ * 1 when it was cancelled. ponytail: BlueZ's Disconnect cancels its own Connect; whether the
+ * controller's page in progress stops with it is for a Q2 to show. */
+static int cancel_connect(const char *mac) {
+    char target[32] = "";
+    int status = 0, n = getBtLinkSize();
+    if (!mac || I(bt_connectstatus, 0) != 1 || n <= 0) return 0;
+    getBtLinkItem(n - 1, &status, target);
+    if (status != 5 || strcmp(target, mac)) return 0;
+    updateBtLinkStatus(4, target);
+    return 1;
+}
+
 /* A device row's Centre or tap (docs/oled-design.md#bluetooth): the connected device opens its
- * page, any other connects (or pairs), as stock's click. */
+ * page, one connecting stops connecting (stock ignores a tap then), any other connects (or pairs),
+ * as stock's click. */
 static int row_click(void *b, void *event) {
     (void)event;
     void *item = P(b, W_PARENT);
@@ -323,7 +341,7 @@ static int row_click(void *b, void *event) {
     if (dev < 0) return 0;
     if (row_state(b) == BT_CONNECTED)
         bt_detail_open(dev);
-    else
+    else if (row_state(b) != BT_CONNECTING || !cancel_connect(dev_at(dev, 0)))
         bt_stock_click(dev, 0);
     return STOP;
 }

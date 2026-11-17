@@ -60,17 +60,19 @@ for owner in (1,2,3,4):
     m.ears(1); m.fn('headset_manual'); m.ears(3); assert not m.playing
     passed()
 
-for absolute,limit,want in ((127,40,40),(0,100,0),(64,100,50),(1,100,1),(126,100,99)):
+# The headset's level reads as the Q2 volume nearest on bt_vol_curve (docs/internals.md#headset-controls-and-volume);
+# past the limit the headset is pulled back to the limit's level (40 is 13), else its own level stays.
+for absolute,limit,want,level in ((127,40,40,13),(0,100,0,0),(64,100,85,64),(1,100,1,1),(126,100,100,126)):
     b=BtVolumeMachine(); b.poll(); b.byte(syms['g_maxvolume'],limit)
     b.absolute=absolute; b.poll()
     assert b.u.mem_read(syms['g_volume'],1)[0]==want
-    assert b.absolute==(want*127+50)//100
+    assert b.absolute==level
     b.poll(); assert not b.writes()
     passed()
-# A headset step that already reads as the Q2 volume stays: 2 is volume 2, never rewritten to 3.
+# A headset step that already reads as the Q2 volume stays: 2 is volume 4 (the lowest of 4 to 7), never rewritten.
 b=BtVolumeMachine(); b.poll(); b.absolute=2; b.poll()
-assert b.u.mem_read(syms['g_volume'],1)[0]==2 and not b.writes() and b.absolute==2
-assert b.volume(2,2)==[(100,100)] and not b.writes(); b.poll(); assert not b.writes(); passed()
+assert b.u.mem_read(syms['g_volume'],1)[0]==4 and not b.writes() and b.absolute==2
+assert b.volume(4,4)==[(100,100)] and not b.writes(); b.poll(); assert not b.writes(); passed()
 print('M4B recognition/resume and headset routing, ear masks, manual cancellation, malformed packets and volume limits passed.')
 
 # Real helper APIs: explicit pause/resume is observable and repeatable, with shared gain changes.
