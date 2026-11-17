@@ -639,12 +639,15 @@ def test_stop_all_ends_q2_processes_and_nothing_else(tmp_path):
 @pytest.mark.skipif(subprocess.run(['systemd-run', '--user', '--scope', '-q', 'true'], capture_output=True).returncode != 0,
                     reason='no systemd user session')
 def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
-    env = {**os.environ, 'Q2_HEAVY_LOCKDIR': str(tmp_path), 'Q2_HEAVY_RAMP': '0', 'Q2_HEAVY_NODUMP_SRC': '/none'}
+    # no admission wait: this test is about the record and the deadline, whatever else the machine is doing
+    env = {**os.environ, 'Q2_HEAVY_LOCKDIR': str(tmp_path), 'Q2_HEAVY_RAMP': '0', 'Q2_HEAVY_NODUMP_SRC': '/none',
+           'Q2_HEAVY_RESERVE_GB': '0', 'Q2_HEAVY_PSI': str(tmp_path/'no-pressure'), 'Q2_HEAVY_DISK_START_GB': '0',
+           'Q2_HEAVY_DISK_STOP_GB': '0', 'Q2_HEAVY_AC': str(tmp_path/'no-ac')}
     env.pop('Q2_HEAVY_JOB', None)
     job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_MAX_S': '2'}, cwd=CI,
                            stderr=subprocess.PIPE, text=True)
     record = tmp_path/'q2-heavy/jobs'/str(job.pid)
-    end = time.monotonic() + 5
+    end = time.monotonic() + 30
     while not record.exists() and time.monotonic() < end:
         time.sleep(0.05)
     fields = dict(line.split('=', 1) for line in record.read_text().splitlines())
@@ -655,7 +658,7 @@ def test_q2_heavy_records_its_job_and_stops_it_at_the_deadline(tmp_path):
     # the queue's class is recorded as such, and stop-all ends a job by its scope
     job = subprocess.Popen(['bash', str(CI/'q2-heavy'), 'sleep', '30'], env={**env, 'Q2_HEAVY_CLASS': 'queue'}, cwd=CI)
     record = tmp_path/'q2-heavy/jobs'/str(job.pid)
-    end = time.monotonic() + 5
+    end = time.monotonic() + 30
     while not record.exists() and time.monotonic() < end:
         time.sleep(0.05)
     assert 'class=queue' in record.read_text()

@@ -15,10 +15,13 @@ Installed as ~/.local/bin/q2 (docs/orchestration.md#install). The rules it enfor
 stop-all ends, in this order: the queue's running batch (the STOP file; the service stays up and idles
 until `merge_queue.py resume`), each q2-heavy job by its systemd scope, then every process that belongs
 to q2 work: one with no terminal that is, or descends from, a shell a Claude Code session started in a q2
-directory, or that runs a q2 tool or test. It never touches a session itself (stop agents from the
+directory, or that runs a q2 tool or test. It never touches the queue's service, a session itself (stop agents from the
 session: TaskStop, or Ctrl+X Ctrl+K), the emulator pool's copies (leases expire; slot 2 is the user's)
-or ~/q2-emu-server, a process with a terminal (the user's own shell), or the process asking. A worker's
-registry row is marked stopped. The exit status is 1 when something survived.
+or ~/q2-emu-server, the Android Auto rig (Xvfb, the DHU and its viewer), a process with a terminal (the
+user's own shell), or the process asking. Anything else with no session behind it whose directory is a
+q2 one (a detached loop someone left with nohup, but also a rig nobody listed here) is shown as `left
+alone`, by status too, and is the reader's to judge and kill by id. A worker's registry row is marked
+stopped. The exit status is 1 when something it meant to stop survived.
 """
 import argparse
 import contextlib
@@ -41,9 +44,10 @@ ROOTS = [pathlib.Path(p) for p in os.environ.get('Q2_ROOTS', '').split(':') if p
     HOME/'repos/q2-pod', HOME/'repos/q2-pod-wt', HOME/'repos/q2-subsonic', HOME/'repos/q2-subsonic-wt',
     HOME/'repos/q2-auto-remote', HOME/'.cache/q2-builds', HOME/'.cache/q2-merge-train', HOME/'.cache/q2-gate']
 # Never stopped: the emulator pool's copies and the user's own rig.
-KEEP = re.compile(os.environ.get('Q2_KEEP', r'q2-emu-pool\d|q2-emu-server|emu_pool\.py'))
+KEEP = re.compile(os.environ.get('Q2_KEEP', r'q2-emu-pool\d|q2-emu-server|emu_pool\.py|dhu|Xvfb'))
 SESSIONS = set(os.environ.get('Q2_SESSION_NAMES', 'claude').split(','))  # a Claude Code session's process name
 SHELLS = {'bash', 'sh', 'zsh', 'dash'}
+ADOPTERS = ('systemd', 'init', 'Relay', 'SessionLeader')  # what a process whose parent has gone belongs to (WSL's too)
 TOOLS = re.compile(r'q2-heavy|q2-wait|tools/ci/|tools/build\.py|test/[\w/]+\.py|pytest|q2live|GradleWrapperMain|GradleMain')
 OLD_SHELL = 15 * 60  # s: a session's shell older than this is listed by status
 
@@ -112,12 +116,31 @@ def q2_processes(procs=None, me=None):
     for p in procs.values():
         if p.pid in mine or p.tty or p.comm in SESSIONS or p.pid == queue_pid or p.comm == 'dtach':
             continue
+        if 'merge_queue.py run' in p.cmd or p.comm.startswith(ADOPTERS):
+            continue
         up = [procs[a] for a in chain(procs, p.pid)]
         if any(KEEP.search(a.cmd) or KEEP.search(a.cwd) for a in up):
             continue
         # a shell a session started (the Bash tool, a background task), or anything under one
         shell = next((a for a in up if a.comm in SHELLS and a.ppid in procs and procs[a.ppid].comm in SESSIONS), None)
         if (shell is not None and (in_roots(p) or in_roots(shell))) or (in_roots(p) and TOOLS.search(p.cmd)):
+            out.append(p)
+    return sorted(out, key=lambda p: -p.age())
+
+
+def left_alone(procs=None, me=None):
+    """Processes in a q2 directory that no session is behind and stop-all does not stop: shown, never ended."""
+    procs = procs or processes()
+    mine = own(procs, me or os.getpid())
+    stopped = {p.pid for p in q2_processes(procs, me)}
+    out = []
+    for p in procs.values():
+        if p.pid in mine or p.pid in stopped or p.tty or p.comm in SESSIONS or p.comm.startswith(ADOPTERS):
+            continue
+        up = [procs[a] for a in chain(procs, p.pid)]
+        if any(a.comm in SESSIONS for a in up) or 'merge_queue.py run' in p.cmd:
+            continue
+        if any(p.cwd == str(r) or p.cwd.startswith(str(r) + '/') for r in ROOTS):
             out.append(p)
     return sorted(out, key=lambda p: -p.age())
 
@@ -155,6 +178,8 @@ def stop_all(yes, out=print, grace=5.0):
         out(f'  heavy {j["pid"]} {j.get("class", "?"):6} {j.get("worktree", "?")}: {j.get("command", "")[:90]}')
     for p in targets:
         out(f'  proc  {p.pid} {int(p.age() // 60):4d} min  {p.cwd}: {p.cmd[:110]}')
+    for p in left_alone():
+        out(f'  left alone {p.pid} {int(p.age() // 60):4d} min  {p.cwd}: {p.cmd[:100]}')
     if not yes:
         out('nothing was touched; --yes does it')
         return 0
@@ -333,6 +358,10 @@ def status(out=print):
     for p in sorted(old, key=lambda p: -p.age()):
         tail = p.cmd.split(' eval ', 1)[-1]
         out(f'  {p.pid:8} {age(p.age())}  {tail[:130]}')
+    alone = [p for p in left_alone(procs) if p.age() > OLD_SHELL]
+    out(f'left in a q2 directory with no session behind it, older than {OLD_SHELL // 60} min: {len(alone)} (rigs are expected)')
+    for p in alone:
+        out(f'  {p.pid:8} {age(p.age())}  {pathlib.Path(p.cwd).name}: {p.cmd[:110]}')
     return 0
 
 
