@@ -611,7 +611,7 @@ void feedback_shuffled(const char *what, int songs) {
 }
 
 /* A mode page (docs/oled-design.md#usb, U2-U6; the sign-in steps, SD Card Update, Bluetooth's
- * receiver): the stack, circle, title, line and the optional Stop pill, centred as one
+ * receiver): the stack, circle, title, line and the optional pill or button, centred as one
  * between the status row's foot (MODE_TOP) and the screen's bottom. */
 #define MODE_TOP 40
 #define MODE_STACK 158
@@ -627,20 +627,21 @@ void feedback_shuffled(const char *what, int songs) {
 
 /* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
  * MODE_BARE: a spinner), the title, the line and the optional pill, or a button centred where the
- * pill would be (m->button). Returns the stack's top in w's coordinates. */
+ * pill would be (MODE_BUTTON). Returns the stack's top in w's coordinates. */
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
     const char *pill = m->pill;
     unsigned raw = ui_ink_raw(1); /* final colours, each half's */
     int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
     int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
     rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
-    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
+    unsigned ring = m->ring & ~MODE_BUTTON;
+    if (ring != MODE_BARE) fill_box(canvas, &circle, RGBA(ring), MODE_R);
     if (m->glyph) paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
     ui_line(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
             tok(TOK_PRIMARY));
     ui_line(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
             tok(TOK_SECONDARY));
-    if (pill && m->button) {
+    if (pill && (m->ring & MODE_BUTTON)) {
         ui_button(canvas, cx, top + MODE_PILL_Y + MODE_PILL_H / 2, pill, 0, 1, 0);
     } else if (pill) {
         int pw = ui_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;

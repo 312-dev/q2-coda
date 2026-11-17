@@ -13,7 +13,7 @@
  * - Transfer Files and USB Audio hand back to stock: the probe stops, g_usbmode is set for this
  *   cable (stock's saved one, SYSSET USBMODE, again once it is out, unless Always Do This saved it) and
  *   g_usblink_status 0 lets stock's next pass start its gadget and open usbmode_page, which is
- *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop pill
+ *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop button
  *   (Centre, as Return, leaves the mode). Charge Only stops the probe. USB Debugging stops it too,
  *   which in a --dev build hands the controller back to the ADB gadget (docs/adb.md), and opens
  *   its own mode page, whose Stop parks the ADB gadget.
@@ -322,13 +322,13 @@ void usb_ui_paint(void *w, void *canvas) {
                                             "Safe to unplug now", (const char *)0 });
         else if (dac)
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop", 1 });
+                            &(mode_page_t){ accent | MODE_BUTTON, "modepage_audio", 0, "Playing from Computer", "Wheel sets the volume", "Stop" });
         else
             mode_page_paint(w, canvas, I(w, W_Y),
-                            &(mode_page_t){ accent, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop", 1 });
+                            &(mode_page_t){ accent | MODE_BUTTON, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
-                        &(mode_page_t){ accent, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop", 1 });
+                        &(mode_page_t){ accent | MODE_BUTTON, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
     } else if (u.view && parent == u.view) {
         usb_ready(u.chooser, u.view, &u.view_ready, USB_ROWS + 1);
         usb_layout();

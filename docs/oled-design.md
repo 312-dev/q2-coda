@@ -1232,7 +1232,7 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   selected, the row grown to hold it; then Always Do This, a switch row, after a gap.
 - **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
   white; the eject's a bold check on Positive green), the title, a line in Text Secondary and Stop, the gray
-  [button](#buttons) (`mode_page_t.button`), ringed under the [focus rule](#focus-ring); a wheel turn on the page
+  [button](#buttons) (`MODE_BUTTON`), ringed under the [focus rule](#focus-ring); a wheel turn on the page
   shows the ring. Stop forgets a choice Always Do This saved; Ejected has no Stop.
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
   USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it

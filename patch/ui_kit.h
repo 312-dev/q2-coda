@@ -53,18 +53,19 @@ int ui_measure(void *canvas, const char *s, const char *face, int px);
 /* feedback.c mode_page_paint: a mode page (docs/oled-design.md#usb) in w's coordinates, dy its y
  * on screen; USB's, the sign-in steps', SD Card Update's and Bluetooth's receiver's. MODE_R: the
  * solid circle's radius; MODE_GLYPH: its glyph's size (tools/art.py MODE_GLYPH_PX); MODE_BARE: the
- * ring that draws no circle (a spinner in its place). Returns the stack's top in w's coordinates.
+ * ring that draws no circle (a spinner in its place); MODE_BUTTON, or'd into the ring: the pill is
+ * the page's one button (Centre presses it), the empty states' secondary button (ui_button),
+ * ringed under the focus rule. Returns the stack's top in w's coordinates.
  */
 #define MODE_R 46
 #define MODE_GLYPH 44
 #define MODE_BARE 0x1000000u
+#define MODE_BUTTON 0x2000000u
 typedef struct {
     unsigned ring;                   /* 0xRRGGBB, or MODE_BARE */
     const char *glyph;               /* theme image stem, white */
     int glyph_px;                    /* 0: MODE_GLYPH */
     const char *title, *line, *pill; /* pill 0: none */
-    int button; /* the pill is the page's one button (Centre presses it): the empty states'
-                   secondary button (ui_button), ringed under the focus rule */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 
