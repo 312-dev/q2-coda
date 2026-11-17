@@ -992,6 +992,19 @@ OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['settin
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
 OLED_BLUE,inset,radius=color_t(OLED_TONES[0]),OLED_T['sel_inset'],OLED_T['sel_radius']
+def corner_mask_bands(x,y,w,h,R,color):
+    """corner_mask's fills (nav/row_paint.c) rounding the box x, y, w, h by R into color (a color_t, opaque): each
+    corner row's clear pixels in one fill, then each part pixel at the alpha the arc leaves; corners in the order top
+    left, bottom left, top right, bottom right."""
+    from art import corner_cover
+    cover,want=corner_cover(R),[]
+    for i in range(R):
+        row=cover[i*R:(i+1)*R]; n=next((k for k,c in enumerate(row) if c),R)
+        for c in range(4):
+            yy=y+(h-1-i if c&1 else i); right=c&2
+            if n: want.append((x+w-n if right else x,yy,n,1,color))
+            want+=[(x+w-1-k if right else x+k,yy,1,1,(color&0xffffff)|(255-row[k])<<24) for k in range(n,R) if row[k]<255]
+    return want
 def bar_bands(x,y,w,h,radius,color=OLED_BLUE):
     from art import corner_cover
     cover=corner_cover(radius) if radius else b''

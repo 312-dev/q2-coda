@@ -620,7 +620,7 @@ def screen_box(m,w):
         if p==m.top or p==m.wm: break
         x,y=x+signed(m.get(p+O['W_X'])),y+signed(m.get(p+O['W_Y']))
     return x,y,ww,h
-# A corner painter with no table for its radius takes a hard corner: a ring whose radius, or its radius less one, has none (and 0, its less-one off the table's front).
+# A ring at any radius has antialiased corners (corner_cover.c), its sides mirrored; at radius 0, square.
 def paint_canvas():  # a machine, Light on, to paint on
     SETUP[:]=[lambda k:(k.config.update(LIGHT='1'),k)]
     try: return QueueMachine()
@@ -629,10 +629,12 @@ def ring(R):
     lk=paint_canvas(); r=lk.alloc(16)
     for i,v in enumerate((20,40,60,30)): lk.word(r+4*i,v)
     blank(lk); lk.call(address=payload_syms['round_ring'],args=(lk.canvas,r,R,0xff112233),gap=0); return lk
-for R in (14,5,0):  # 14 has no table; 5 has, 4 hasn't
+for R in (14,5,4,0):  # 14 and 4 had no table before corner_cover.c, 5 had
     rows={}; [rows.setdefault(b[1],[]).append(b) for b in ring(R).bands]; assert sorted(rows)==list(range(40,70))
-    for y in range(41,69): assert len(rows[y])==2 and rows[y][0][0]<=rows[y][1][0] and rows[y][0][0]-20==20+60-1-rows[y][1][0],(R,y)  # its sides, mirrored
-    assert rows[55][0][0]==20 and rows[55][1][0]==79 and (R in (0,5) or rows[42][0][0]>20)  # 5's arc is in by row 2 less than a pixel
+    for y in range(41,69):
+        xs=sorted(b[0] for b in rows[y]); assert xs==sorted(20+60-1-x for x in xs),(R,y)  # its sides, mirrored
+    assert sorted(b[0] for b in rows[55])==[20,79]  # the straight sides, a pixel each
+    assert (R==0)==all(b[4]>>24==0xff for y in range(40,44) for b in rows[y]),R  # part pixels round a corner
 passed()
 # Every Search row site holds the set's value once OLED's set is written (theme.xml's search_* geometry), and stock's before.
 SEARCH_SITES={0x49d470:52,0x49e7b0:52,0x49f320:52,0x49d4a8:52,0x49e7e8:52,0x49f35c:52,0x49f6fc:52,0x49cdd8:52,0x49cec4:52,0x49d62c:52,0x49e970:52,0x49f164:52,0x49cde0:0,0x49d67c:4,0x49e9c0:4,0x49d670:28,0x49e9b4:28,0x49d724:31,0x49ea28:31,0x49d718:20,0x49ea1c:20}

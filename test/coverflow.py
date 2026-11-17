@@ -1519,8 +1519,10 @@ static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pi
     int kc = k < 0 || !cover ? -1 : k < R ? k : k >= ART_SIZE - R ? ART_SIZE - 1 - k : -1;
     int top = 256 * c->top + 40960 * c->horizon / 100 - h * c->horizon / 100, bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
     int solid_top = solid[0], solid_bottom = solid[1], part = 0;
-    while (kc >= 0 && part < R && cover[part * R + kc] < 255) ++part;
-    int y = top >> 8, end = (bottom + 255) >> 8, last = end < c->view_h ? end : c->view_h;
+    int clear = 0;
+    while (kc >= 0 && part < R && cover[part * R + kc] < 255) clear += !cover[part * R + kc], ++part;
+    int out = h * clear / ART_SIZE; /* the rows wholly clear at either end are not visited */
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < c->view_h ? end : c->view_h;
     int v = (((y << 8) + 128 - top) >> 4) * step >> 4;
     if (y < 0) v -= y * step, y = 0;
     unsigned *px = d + y * pitch, wash = ref_shade(paper, 256u - (unsigned)bright);
@@ -1529,7 +1531,7 @@ static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pi
         int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16, cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row;
         int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
         unsigned cov = (unsigned)(to - from);
-        if (cr < part) cov = cov * cover[cr * R + kc] / 255;
+        if (cr < part) cov = cov * (cover[cr * R + kc] + (cover[cr * R + kc] >> 7)) >> 8;
         if (cov) ref_put(px, bright >= 256 ? tex[row * ART_SIZE] : ref_shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
     }
     int reflect = h * c->reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
@@ -1537,14 +1539,14 @@ static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pi
     unsigned dim = (unsigned)bright * c->reflect_top >> 8;
     wash = ref_shade(paper, 256u - dim);
     if (stop > c->view_h) stop = c->view_h;
-    for (y = bottom >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
+    for (y = (bottom + out) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
         int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
         if (dist >= reflect) break;
         if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
         int mirrored = dist * step >> 8 >> 16;
         int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
         unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
-        if (mirrored < part) cov = cov * cover[mirrored * R + kc] / 255;
+        if (mirrored < part) cov = cov * (cover[mirrored * R + kc] + (cover[mirrored * R + kc] >> 7)) >> 8;
         ref_put(px, ref_shade(tex[row * ART_SIZE], dim) + wash, cov);
     }
     int ins = h * part / ART_SIZE;
