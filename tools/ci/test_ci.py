@@ -136,6 +136,23 @@ def test_every_folder_a_unit_test_globs_is_in_scanners():
     assert found <= {(folder, test) for folder, _, test in affected.SCANNERS}
 
 
+def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
+    # test/coverflow.py compiles its own host build and takes no BUILD; the plan once handed it one and argparse
+    # refused it, so the suite had not run for a day when anyone noticed.
+    import subprocess
+    root = pathlib.Path(__file__).resolve().parents[2]
+    real_run, ran = subprocess.run, []
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    plan = affected.Plan()
+    plan.other.add('test/coverflow.py')
+    assert affected.run(plan, '/some/build', 'python3') == 0
+    assert ran[-1][-1:] == ['test/coverflow.py']  # nothing after the script
+    assert gate.other_suite('test/coverflow.py', 'python3').argv[-1:] == ['test/coverflow.py']
+    # and the suite does refuse an extra argument, so the line above is the one that matters
+    refused = real_run([sys.executable, str(root/'test/coverflow.py'), '/some/build'], capture_output=True, text=True)
+    assert refused.returncode == 2 and 'unrecognized arguments' in refused.stderr
+
+
 def test_docs_only_run_the_anchor_check(tmp_path):
     p = affected.plan_for({'docs/ipod.md': {4}}, tmp_path).as_dict()
     assert p['unit'] == ['test_docs.py'] and not p['patch'] and not p['fw']

@@ -306,6 +306,8 @@ def run(plan, build, python):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))
+        elif other in gate.NO_BUILD_ARG:
+            go(other, [python, other], is_heavy=True)
         elif other.endswith('.py') and build:
             go(other, [python, other, build], is_heavy=True)
         else:
