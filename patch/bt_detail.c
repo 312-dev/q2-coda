@@ -211,6 +211,7 @@ static int bd_click(void *ctx, void *event) {
         break;
     case ROW_RENAME:
         search_strip_note("Shows on this Q2");
+        search_strip_label("Rename"); /* typed in its row, after the label (search_strip.c) */
         search_strip_text("Rename", bd.name, BD_NAME_MAX, renamed);
         break;
     case ROW_FORGET:

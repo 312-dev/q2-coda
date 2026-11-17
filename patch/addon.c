@@ -2433,14 +2433,15 @@ static int field_secret(int i) {
 }
 
 /* peq_ui.c's T9 edit over the title, its keyboard open: a Search row's press, or its icon's tap
- * (field 0); or field row field - 1's press, its title the box's hint, marked _secret when it
- * takes a password (field_secret). */
+ * (field 0); or field row field - 1's press, its title the box's hint and its label on the letter
+ * strip, marked _secret when it takes a password (field_secret). */
 static void search_box(int field) {
     keep_sel();
     pg.field = field;
     widget_destroy_children(pg.page), pg.view = 0; /* the box alone, as Spotify's */
     pg.edit = edit_create(pg.page, "text", 2, 26);
     widget_set_prop_str(pg.edit, "tips", field ? cell(field - 1, 2) : app()->tips);
+    if (field) widget_set_prop_str(pg.edit, "_strip_label", cell(field - 1, 2)); /* search_strip_box */
     if (field && field_secret(field - 1)) widget_set_prop_int(pg.edit, "_secret", 1);
     widget_on(pg.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(pg.edit, EVT_IM_ACTION, searched, 0);

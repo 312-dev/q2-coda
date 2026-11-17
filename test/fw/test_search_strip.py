@@ -39,7 +39,9 @@ class Ss(C.Structure):
                 ('pop_timer', C.c_uint), ('pop_step_at', C.c_uint), ('pop', C.c_ubyte),
                 ('hold_at', C.c_uint), ('hold_timer', C.c_uint), ('held', C.c_ubyte),
                 ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
-                ('peek_timer', C.c_uint)]
+                ('peek_timer', C.c_uint), ('under', C.c_void_p), ('label', C.c_void_p),
+                *((k, C.c_short) for k in 'form row_y row_h scroll fx fy fw fh'.split()),
+                ('blink_at', C.c_uint), ('blink_timer', C.c_uint)]
 
 
 @pytest.fixture
@@ -943,7 +945,7 @@ def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     assert s.ss.text == b'bA!b' and s.ss.set == LOWER
     texts = [t for t, *_ in painted(fw, s).texts]
     assert 'Password' in texts and 'abc' in texts and '•••b' in texts  # the last typed shows
-    assert 'Press Play/Pause to join' in texts
+    assert not [t for t in texts if t.startswith('Press ')]  # no keyboard hints (the user's, on the mock-up)
     s.now[0] += 1000
     assert '••••' in [t for t, *_ in painted(fw, s).texts]  # a second on: dots alone
     s.key(KEY_BACK_BTN, KEY_FWD_BTN, KEY_FWD_BTN)
@@ -986,18 +988,18 @@ def test_add_network_s_dialog_is_a_password_only_when_stock_opened_it_for_one(fw
     texts = [t for t, *_ in painted(fw, s).texts]
     mode.value = 0  # stock's memory outlives the test
     if password:
-        assert s.ss.secret and '•••••' in texts and 'Press Play/Pause to join' in texts
+        assert s.ss.secret and '•••••' in texts and 'Password' in texts
     else:
-        assert not s.ss.secret and 'Homex' in texts and 'Password' not in texts
+        assert not s.ss.secret and 'Homex' in texts and 'Network Name' in texts and 'Password' not in texts
 
 
 def test_a_card_app_s_password_box_shows_dots_and_is_done_not_joined(fw, ui):
-    """A box the payload marks _secret (addon.c, a card app's password field): dots, its hint the box's own."""
-    s = boxed(fw, ui, b'', '', 'addon_page', _secret=1)
+    """A box the payload marks _secret (addon.c, a card app's password field): dots, under its row's label."""
+    s = boxed(fw, ui, b'', '', 'addon_page', _secret=1, _strip_label='Password')
     s.type('pw')
     s.now[0] += 1000
     texts = [t for t, *_ in painted(fw, s).texts]
-    assert '••' in texts and 'Password' in texts and 'Press Play/Pause when done' in texts
+    assert '••' in texts and 'Password' in texts
 
 
 def test_a_password_text_of_the_payload_s_own_shows_dots(fw, ui):
@@ -1011,7 +1013,7 @@ def test_a_password_text_of_the_payload_s_own_shows_dots(fw, ui):
     s = attached(fw, ui)
     texts = [t for t, *_ in painted(fw, s).texts]
     assert s.ss.secret and '••••••••' in texts and not any('otter' in t for t in texts)
-    assert 'Press Play/Pause to save' in texts
+    assert 'Password' in texts
     s.type('x')
     assert '••••••••x' in [t for t, *_ in painted(fw, s).texts]
     s.key(KEY_PLAY)
