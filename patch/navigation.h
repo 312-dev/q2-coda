@@ -813,7 +813,8 @@ extern void *stream_mark_views[2];             /* home.c: the lists whose rows i
 /* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
  * scroll view */
 int home_rest(void *view, int *foot);
-void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1);
+void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
+                int s1);
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
@@ -1064,7 +1065,8 @@ void lr_home_tag(void *view), lr_home_apply(void *view, int np), lr_edit_labels(
 void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
-    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void);
+    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void),
+    lr_edit_room(void *view), lr_edit_foot(void *view);
 const char *lr_edit_title(void);
 /* home.c: Home's Folders rule and its list's rows coming and going; coverflow.c: Home's list */
 int home_folders(void);
