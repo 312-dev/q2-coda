@@ -366,17 +366,28 @@ TILE_INKS = BUMP_INKS
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
-# Control Center's glyphs (control_center.c cc_glyph, from mock_cc3.py): fill, white on its toggles, tiles and transport
-# (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
-CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
-            'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
+# Control Center's glyphs (control_center.c cc_glyph, from mock_cc4_tight.py): Phosphor fill, white on its toggles
+# and transport (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill. The
+# Wi-Fi circle's is the link's (cc_wifi): wifi-slash off, wifi-none on but not joined, wifi-low to wifi-high by the
+# status row's level (Phosphor's fill levels draw the whole fan and fill as much of it as the signal), wifi-x with no
+# internet. The toggles' glyphs are at CC_INK, their optical size: each ink's longer side 18 px, so the wide fan and
+# the tall Bluetooth rune read as one size.
+CC_ICONS = {'wifi_slash': ('wifi-slash-fill', 22, 0xffffff), 'wifi_0': ('wifi-none-fill', 22, 0xffffff),
+            'wifi_1': ('wifi-low-fill', 22, 0xffffff), 'wifi_2': ('wifi-medium-fill', 22, 0xffffff),
+            'wifi_3': ('wifi-high-fill', 22, 0xffffff), 'wifi_x': ('wifi-x-fill', 22, 0xffffff),
+            'bluetooth': ('bluetooth-fill', 22, 0xffffff), 'airplay': ('airplay-fill', 22, 0xffffff),
+            'car': ('car-profile-fill', 22, 0xffffff), 'leaf': ('leaf-fill', 22, 0xffffff),
+            'eq': ('equalizer-fill', 22, 0xffffff),
             'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
-            'lock': ('lock-simple-fill', 22, 0xffffff), 'timer': ('timer-fill', 22, 0xffffff),
-            'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
-            'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
-            'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
-            'guest': ('device-mobile-fill', 22, 0xffffff),
-            'play': ('play-fill', 30, 0xffffff)}
+            'back': ('skip-back-fill', 22, 0xffffff), 'forward': ('skip-forward-fill', 22, 0xffffff),
+            'pause': ('pause-fill', 30, 0xffffff), 'play': ('play-fill', 30, 0xffffff)}
+# Light Mode's (control_center.c cc_glyph, <name>_l): the art is final, so the light half has its own: a toggle
+# off and the transport in the light half's Text Primary on the light block, the sliders' sun and speaker white on
+# the fill that is dark there. A toggle on keeps the white on Accent Blue.
+CC_LIGHT = {**{n: token('primary', True) for n in CC_ICONS if n not in ('sun', 'speaker')},
+            'sun': 0xffffff, 'speaker': 0xffffff}
+CC_INK = {n: 18.0 for n in ('wifi_slash', 'wifi_0', 'wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bluetooth', 'airplay',
+                            'car', 'leaf', 'eq')}
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
 # circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
@@ -416,6 +427,15 @@ SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
+# Now Playing's loading spinner (np_stream.c, docs/server-library.md#download-ahead-and-the-streaming-state): the
+# software update's twelve spokes and fade at 14 px, Text Secondary per half, as streaming-v3's variant D draws it.
+NP_SPIN_PX = 14
+NP_SPIN_R = (3.25, 6.5)
+NP_SPIN_STROKE = 1.5
+NP_SPIN_INKS = inks('secondary', 'd', 'l')
+# Now Playing's format badge for a server song (np_stream.c, streaming-v3): the cloud, or the crossed-out cloud while
+# the server can't be reached, 12 px in Text Secondary per half, as About's quality badge's glyph (QUALITY_PX)
+NP_CLOUDS = {'cloud': 'cloud', 'cloudoff': 'cloud-slash'}
 # Software Update's offer (sw_update.c sw_offer_paint): its source's glyph, white on the accent's 60 px circle: the
 # internet's download tray, the card's file.
 SW_OFFER_PX = 30
@@ -730,7 +750,8 @@ def images(t):
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
     out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
-    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c, CC_INK.get(n, 0.0)) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_cc_{n}_l': phosphor(g, px, CC_LIGHT[n], CC_INK.get(n, 0.0)) for n, (g, px, _) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
     # the buttons' focus ring's ends (ui_kit.c cta_capsule), Text Primary per half
@@ -753,6 +774,9 @@ def images(t):
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
+    out |= {f'{prefix}_np{n}_{k}': phosphor(g, QUALITY_PX, c) for n, g in NP_CLOUDS.items() for k, c in NP_SPIN_INKS.items()}
+    out |= {f'{prefix}_npspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, NP_SPIN_PX, NP_SPIN_R, NP_SPIN_STROKE, SW_SPIN_FADE, c)
+            for k, c in NP_SPIN_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
             for k, c in inks('secondary', 'd', 'l').items()}
     out |= {f'{prefix}_scan_{n}_{k}': phosphor(g, SCAN_FOLDER_PX if n == 'folder' else SCAN_GLYPH_PX, c)

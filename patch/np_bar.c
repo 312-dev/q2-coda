@@ -492,6 +492,10 @@ static int press_share(int k) {
 int np_mode_click(void *target, void *event) {
     if (!target || target != np_row_widget() || !theme()->np_modes) /* the theme last */
         return 0;
+    if (np_stream_error()) { /* Retry or Skip (np_stream.c): the screen's x */
+        np_stream_cta_click(I(event, EVENT_X));
+        return 1;
+    }
     int x = I(event, EVENT_X), word, cx[NB_N], k = 0;
     for (void *p = target; p && p != window_manager(); p = P(p, W_PARENT)) x -= I(p, W_X);
     row_x(0, I(target, W_W), pill_w(&word), cx);
@@ -512,6 +516,10 @@ void np_modes(void *win, void *canvas) {
     void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
                                                             : (void *)0;
     if (!mode) return;
+    if (np_stream_error()) { /* Retry and Skip in the row's place (np_stream.c) */
+        np_stream_cta_paint(canvas, I(mode, W_Y) + I(mode, W_H) / 2);
+        return;
+    }
     int m = *(volatile int *)MCL_MODE, cy = I(mode, W_Y) + I(mode, W_H) / 2, rep = np_repeat_of(m),
         word, w = pill_w(&word), cx[NB_N];
     row_x(I(mode, W_X), I(mode, W_W), w, cx);

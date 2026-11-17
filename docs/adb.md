@@ -55,7 +55,7 @@ Edits go to the editor's draft, as on the Q2: the Advanced tab's **Apply changes
 | Simple: Presets (a stock preset, playing at once)        | `simple preset NAME`                                                                    |
 | Advanced: Apply changes                                  | `apply` (or `--now` on any edit)                                                        |
 | Advanced: Reset to defaults                              | `reset`                                                                                 |
-| Advanced: Enabled                                        | `on`, `off` (`off` turns Simple's 3EQ off too, as Control Center's EQ tile does)        |
+| Advanced: Enabled                                        | `on`, `off` (`off` turns Simple's 3EQ off too, as Control Center's EQ circle does)        |
 | Advanced: EQ per Output                                  | `per-output on`, `per-output off`                                                       |
 | Advanced: Balance                                        | `balance DB`                                                                            |
 | Advanced: Preamp, and its Auto row                       | `preamp DB`, `preamp auto` (Auto's cut is `auto_preamp`)                                |

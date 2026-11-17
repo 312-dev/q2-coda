@@ -139,6 +139,8 @@ def state(raw):
                               "duration_ms": one(n, 5, 0), "art": text(n, 6), "play_state": one(n, 7, 0),
                               "shuffle": one(n, 8, 0), "repeat": one(n, 9, 0), "volume": one(n, 10, 0),
                               "hearts": one(n, 11, 0), "rateable": bool(one(n, 12, 0)),
+                              "buffering": bool(one(n, 13, 0)), "buffered_bytes": one(n, 14, 0),
+                              "total_bytes": one(n, 15, 0), "buffered_ms": one(n, 16, 0),
                               "radio": bool(one(n, 17, 0))}
     if 2 in m:
         p = decode(m[2][0])

@@ -289,6 +289,47 @@ def test_bad_preload(player, songs, tmp):
     return 'played to the end, then exit, error and /tmp/notsupport'
 
 
+def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
+    """A card app's song still arriving in place (player/grow.c): a fifth of a1 is there and its .stream says get;
+    the player plays what is there, waits at its end (naming the song in /tmp/q2player.wait) rather than ending,
+    and once the rest lands and the line says done plays it to its end: the whole song, frame for frame."""
+    out = tmp/'grow'
+    card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
+    card.mkdir(parents=True, exist_ok=True)
+    whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
+    head = len(whole) // 5
+    path.write_bytes(whole[:head])
+    seen = []
+
+    def line(state, have):
+        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{have}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+
+    def beat(s):  # the app rewrites its line twice a second while the song arrives
+        line('get', head)
+        seen.append((out/'tmp/q2player.wait').exists() and (out/'tmp/q2player.wait').read_text())
+
+    def land(s):
+        with open(path, 'ab') as f: f.write(whole[head:])
+        line('done', len(whole))
+
+    boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
+    steps = boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 32)] + [(16.0, land), (40.0, None)]
+    s = fakedemo.Session(out)  # it empties out/tmp: the line after it
+    s.music = songs
+    line('get', head)
+    s.run(steps, fakedemo.launch_host(player, str(songs), 4), 4)
+    got = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    want = reference(songs/'a1.flac')
+    at = first_difference(got, want)
+    assert at is None, f'{len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
+    assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
+    assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'], exits
+    waited = seen.count('/mnt/mmc/.foo/grow.flac\n')
+    return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
+
+
 def check_not_played(player, songs, tmp, scenario):
     s, pcm, names = play(player, songs, scenario, tmp/scenario, speed=4)
     a1, a2, b1 = (reference(songs/n) for n in ('a1.flac', 'a2.flac', 'b1.mp3'))

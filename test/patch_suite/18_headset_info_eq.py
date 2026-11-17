@@ -109,13 +109,13 @@ m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][
 conf=m.nodes[m.nodes[view]['children'][5]]['children'][0]; icon,label=m.nodes[conf]['children'][:2]
 assert m.nodes[icon]['image']=='stream_config' and m.nodes[label]['text']=='Configuration'
 m.click(conf); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-assert m.labels()[:8]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming','Internet Radio','AirPlay']
-conf=m.page; m.row(2); m.page=m.top; assert m.nodes[m.page]['name']=='streamsvc_page'  # TIDAL's page
+assert m.labels()[:9]==['Configuration','Stop Streaming Services','Download Ahead','Services','TIDAL','Spotify','Show in Streaming','Internet Radio','AirPlay']
+conf=m.page; m.row(3); m.page=m.top; assert m.nodes[m.page]['name']=='streamsvc_page'  # TIDAL's page
 assert m.labels()==['TIDAL','Show in Streaming','Show Downloads','Cache','2 GB']
 m.row(2); assert m.files[TCAP]==b'4096M' and m.labels()[-1]=='4 GB' and endpoint(m,'stream_cache',0)==3
 m.row(2); m.row(2); assert m.files[TCAP]==b'512M' and m.labels()[-1]=='512 MB'
 f,ctx=m.handler(m.page,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
-m.page=conf; m.row(3); m.page=m.top  # Spotify's page
+m.page=conf; m.row(4); m.page=m.top  # Spotify's page
 m.row(1); assert m.files[SCAP]==b'4096M' and '4 GB' in m.labels() and endpoint(m,'stream_cache',1)==3
 m.files[SCAP]=bytearray(b'9G'); assert endpoint(m,'stream_cache',1)==2  # not a choice: 2 GB
 m.word(O['MCL_TYPE'],5); m.play=2; m.waited=m.forked
@@ -129,7 +129,7 @@ assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(
 # while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
-    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(3); m.page=m.top  # Spotify's page
+    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(4); m.page=m.top  # Spotify's page
 def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
 assert m.labels()==['Spotify','Show in Streaming','Cache','Erase Spotify Data','4 GB']

@@ -269,7 +269,9 @@ int addon_scan(void) {
     }
     /* libsource's state first: an app reading the caps finds it there (library_settings.c) */
     library_source_file();
-    blob_io(CAPS_FILE, CAPS_FILE ".tmp", ADDON_CAPS "\n", sizeof(ADDON_CAPS "\n") - 1, 1);
+    char caps[sizeof ADDON_CAPS + 16]; /* Download Ahead's words (stream_state.c ahead_caps) */
+    int n = tk_snprintf(caps, sizeof caps, "%s%s\n", ADDON_CAPS, ahead_caps());
+    blob_io(CAPS_FILE, CAPS_FILE ".tmp", caps, (unsigned)n, 1);
     return ap.shown;
 }
 
@@ -341,7 +343,9 @@ int addon_ready(const char *id) {
  * end, as Add to Queue adds them (playback_queue_insert); the path of the one playing is left in
  * /tmp/q2-<id>.playing, so the app fetches only a few ahead and deletes the ones long played. Or
  * .play names an .m3u on the card (q2-subsonic's queue), one card path a line: its songs are queued
- * in its order, each waited for until it is there (m3u_songs). */
+ * in its order, each waited for until it is there (m3u_songs), or with "grow" until enough of it
+ * is (stream_startable); and while it plays the app is told the songs after the one playing in
+ * /tmp/q2-<id>.ahead (stream_state.c, docs/server-library.md#download-ahead-and-the-streaming-state). */
 #define M3U_MAX (256 << 10) /* a playlist file read this far: about 2,000 card paths */
 #define M3U_BATCH 32        /* folders listed a poll at most, so a long list doesn't stall the UI */
 static struct {
@@ -433,8 +437,8 @@ static void *m3u_songs(void) {
             ++sm.next;
             continue;
         }
-        if (access(line, 0)) {
-            tk_snprintf(sm.want, sizeof sm.want, "%s", line);
+        if (access(line, 0) || !stream_startable(sm.app ? sm.app->id : "", line)) {
+            tk_snprintf(sm.want, sizeof sm.want, "%s", line); /* not there, or arriving (grow) */
             break;
         }
         char *slash = strrchr(line, '/');
@@ -469,7 +473,8 @@ static void *m3u_songs(void) {
 
 /* m3u mode's wake: a batch to go on with, the file rewritten, or the song waited for there. */
 static int m3u_ready(void) {
-    return sm.more || changed(sm.dir) || (sm.want[0] && !access(sm.want, 0));
+    return sm.more || changed(sm.dir) ||
+           (sm.want[0] && !access(sm.want, 0) && stream_startable(sm.app ? sm.app->id : "", sm.want));
 }
 
 /* A scan running, or its window still open: the user's own Update Local Music page
@@ -696,6 +701,7 @@ static void stream_poll(app_t *a) {
             if (deque_size(add)) playback_queue_insert(q, add, 0);
             deque_destroy(add);
         }
+        ahead_poll(a->id, sm.seq, q); /* Download Ahead: the songs after the one playing */
     } else if (!scan && stream_newer(sm.dir, sm.last)) {
         void *songs = app_album_songs(sm.dir), *add = _create_deque("stSongInfo");
         deque_init(add);

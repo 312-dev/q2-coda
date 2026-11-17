@@ -1,6 +1,7 @@
 /* Streaming's Configuration (docs/internals.md#streaming-configuration), two levels (approved as
  * 25 v3 B on 2026-11-16, docs/oled-design.md#streaming-configuration): Stop Streaming Services,
- * then TIDAL and Spotify as rows that open their own page (their switch, Tidal Downloads' switch,
+ * Download Ahead (docs/server-library.md#download-ahead-and-the-streaming-state), then TIDAL and
+ * Spotify as rows that open their own page (their switch, Tidal Downloads' switch,
  * the cache cap and Erase Spotify Data), then a switch per service that has only its switch. */
 #include "navigation.h"
 
@@ -50,13 +51,15 @@ char *svc_find(char *hide, int i) {
 }
 
 /* The rows that read what they set, whichever pages are open: a provider row's Shown or Hidden,
- * the provider page's Cache and Erase Spotify Data. */
+ * Download Ahead's songs, the provider page's Cache and Erase Spotify Data. */
 static void sc_text(void) {
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int p = 0; p < 2; ++p)
         if (st.sc_prov[p])
             list_value(st.sc_prov[p], svc(p, 1), svc_find(hide, p) ? "Hidden" : "Shown");
+    static const char *const ahead[] = { "Off", "1 Song", "2 Songs", "3 Songs" };
+    if (st.sc_ahead) list_value(st.sc_ahead, "Download Ahead", ahead[ahead_n()]);
     if (st.sc_cache) list_value(st.sc_cache, "Cache", sc_sizes[stream_cache(st.sc_of)]);
     if (st.sc_erase)
         widget_set_text_utf8(st.sc_erase, shelf_erase(0) ? "Erasing…" : "Erase Spotify Data");
@@ -161,7 +164,7 @@ static int sc_closed(void *ctx, void *event) {
         st.sc_check[0] = st.sc_check[1] = st.sc_check[SVC_DOWNLOADS] = 0;
     }
     if (ctx == st.sc_page) {
-        st.sc_page = st.sc_prov[0] = st.sc_prov[1] = 0;
+        st.sc_page = st.sc_prov[0] = st.sc_prov[1] = st.sc_ahead = 0;
         for (int i = 2; i < SVC_FIXED + st.svc_n; ++i)
             if (i != SVC_DOWNLOADS) st.sc_check[i] = 0;
     }
@@ -181,12 +184,13 @@ static void sc_open_sub(int sp) {
     sc_text();
 }
 
-/* Configuration's rows, by index: Stop Streaming Services; the Services header; TIDAL and Spotify,
- * each opening its page; the Show in Streaming header; then the card apps', Internet Radio's and
- * AirPlay's switches. Stop Streaming Services ends librespot and its restart loop, a radio
- * station, the card apps (addon.c) and a stock stream (Tidal's) queue, so the keys and the output
- * are local music's again; local music already stopped is left as it is. */
-#define SC_FIRST_SWITCH 5
+/* Configuration's rows, by index: Stop Streaming Services; Download Ahead, which steps Off, 1, 2
+ * and 3 songs (stream_state.c; the app is told at the next .ahead); the Services header; TIDAL and
+ * Spotify, each opening its page; the Show in Streaming header; then the card apps', Internet
+ * Radio's and AirPlay's switches. Stop Streaming Services ends librespot and its restart loop, a
+ * radio station, the card apps (addon.c) and a stock stream (Tidal's) queue, so the keys and the
+ * output are local music's again; local music already stopped is left as it is. */
+#define SC_FIRST_SWITCH 6
 static int sc_click(void *ctx, void *event) {
     int row = (int)(long)ctx;
     if (row == 0) {
@@ -198,7 +202,8 @@ static int sc_click(void *ctx, void *event) {
         toast("Streaming stopped");
         return 0;
     }
-    if (row == 2 || row == 3) return sc_open_sub(row - 2), 0;
+    if (row == 1) return ahead_step(), sc_text(), 0;
+    if (row == 3 || row == 4) return sc_open_sub(row - 3), 0;
     int k = row - SC_FIRST_SWITCH; /* the card apps, then Internet Radio and AirPlay */
     return k < 0 ? 0 : svc_toggle(k < st.svc_n ? 2 + k : SVC_RADIO + k - st.svc_n);
 }
@@ -208,13 +213,14 @@ int stream_config(void *ctx, void *event) {
     int n = st.svc_n + 2; /* the card apps, Internet Radio, AirPlay */
     void *view = page_list(st.sc_page, st.sc_page, 0, "Configuration", SC_FIRST_SWITCH + n, 48);
     page_row_detail(view, 0, "Stop Streaming Services", 0, sc_click);
-    sc_header(view, 1, "Services");
+    st.sc_ahead = widget_get_child(page_row_detail(view, 1, "", 0, sc_click), 0);
+    sc_header(view, 2, "Services");
     for (int p = 0; p < 2; ++p) {
-        void *item = page_row_detail(view, 2 + p, "", 0, sc_click);
+        void *item = page_row_detail(view, 3 + p, "", 0, sc_click);
         row_into(item, page_h(48));
         st.sc_prov[p] = widget_get_child(item, 0);
     }
-    sc_header(view, 4, "Show in Streaming");
+    sc_header(view, 5, "Show in Streaming");
     char hide[SVC_HIDE];
     svc_hidden(hide);
     for (int k = 0; k < n; ++k) {
