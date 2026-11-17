@@ -327,6 +327,8 @@ int modal_set(void); /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
+int xfade_state(int *seconds);       /* crossfade.c: Crossfade 1 on; *seconds its length */
+void xfade_set(int on, int seconds); /* ... both set and saved */
 /* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */

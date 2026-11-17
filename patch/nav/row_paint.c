@@ -691,8 +691,10 @@ static void paint_selection(void *w, void *canvas) {
      * pop-up's buttons, which open on their first (Cancel). */
     int home = home_menu(top);
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
-    /* a captioned settings row grows while selected (settings_pages.c) */
+    /* a captioned settings row grows while selected (settings_pages.c), a grabbed inline slider's
+     * while grabbed (inline_slider.c) */
     caption_sel(w, i < 0 || (!shown && !home) ? (void *)0 : P(g_menu.at[i], W_PARENT));
+    inline_slider_sel(w, i < 0 || (!shown && !home) ? (void *)0 : P(g_menu.at[i], W_PARENT));
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
@@ -943,6 +945,7 @@ int ringnav_paint(void *w, void *canvas) {
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     add_songs_paint(w, canvas);
+    inline_slider_paint(w, canvas); /* Settings' inline sliders (inline_slider.c) */
     /* Even a page with no navigable pane must end pending input when it is painted. */
     if (st.center_timer || st.home_surface) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);

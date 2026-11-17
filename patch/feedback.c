@@ -26,7 +26,8 @@ static int top_named(void *w, const char *name) {
 static char pill_glyph[48] __attribute__((section(".scratch")));
 
 /* The toast's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: it rises
- * TOAST_RISE px and fades in over TOAST_IN_MS, cubic out (the dialog's opacity, its line moved
+ * TOAST_RISE px and fades in over TOAST_IN_MS, cubic out (the dialog's opacity, set by the frame
+ * timer through ovm_bind, its line moved
  * with the pill); when its dialog goes, the pill stays painted over the page under it
  * (feedback_toast_leave), sinking TOAST_SINK px and fading over TOAST_OUT_MS, cubic in. */
 #define TOAST_IN_MS 200
@@ -44,7 +45,8 @@ static struct {
 } tm __attribute__((section(".scratch")));
 static int toast_gone(void *w, void *event) {
     (void)event;
-    if (tm.w == w) tm.w = (void *)0, ovm_exit(&tm.mo, TOAST_OUT_MS, EASE_CUBIC_IN);
+    if (tm.w == w)
+        tm.w = (void *)0, ovm_bind(&tm.mo, 0), ovm_exit(&tm.mo, TOAST_OUT_MS, EASE_CUBIC_IN);
     return 0;
 }
 
@@ -106,8 +108,8 @@ void feedback_toast_paint(void *w, void *canvas) {
         widget_on(w, EVT_DESTROY, toast_gone, w);
         tm.w = w;
         ovm_enter(&tm.mo, TOAST_IN_MS, EASE_CUBIC_OUT);
+        ovm_bind(&tm.mo, w); /* the frame timer fades it in, from the next frame */
     }
-    widget_set_opacity(w, (unsigned)ovm_alpha(&tm.mo, 255)); /* from the next frame */
     void *line = (void *)0;
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *c = widget_get_child(w, i);
@@ -120,7 +122,7 @@ void feedback_toast_paint(void *w, void *canvas) {
             line = c;
     }
     if (!line) return;
-    /* its first frame is the one painted before the opacity above applies: nothing shows */
+    /* its first frame is painted at stock's opacity, before ovm_bind's: nothing shows */
     widget_set_visible(line, !first, 0);
     if (first) return;
     const unsigned *s = widget_get_text(line);
@@ -689,7 +691,8 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_MARQ_FADE 12
 #define CARD_MARQ_MS 33
 /* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
- * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity); an
+ * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity, which
+ * ovm_bind hands to the frame timer: stock never paints a dialog at opacity 0); an
  * answer fades it out over CARD_OUT_MS, linear, before the dialog closes and the answer runs.
  * ponytail: the approved 1.06 to 1 scale on the way in is not drawn; the rows are stock list items
  * the canvas cannot scale, so it would need the card painted once into a snapshot first. */
@@ -916,8 +919,8 @@ int confirm(const confirm_t *c) {
         widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
     }
     cf.dialog = dialog, cf.view = view;
-    widget_set_opacity(dialog, 0); /* confirm_paint fades it in */
     ovm_enter(&cf.mo, CARD_IN_MS, EASE_CUBIC_OUT);
+    ovm_bind(&cf.mo, dialog); /* the frame timer fades it in */
     int first = c->kind == CONFIRM_NEUTRAL ? c->n_rows - 1 : 0;
     st.touch_mode = 0;
     ringnav_select(view, first + !!c->toggle, card_items());
@@ -1052,7 +1055,8 @@ void confirm_bar_dim(void *w, void *canvas) {
     if (!cf.dialog || w != bar || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
     stock_canvas_set_fill_color(
-        canvas, cf.stock ? CARD_SCRIM : (unsigned)ovm_alpha(&cf.mo, CARD_SCRIM >> 24) << 24);
+        canvas,
+        cf.stock ? CARD_SCRIM : (CARD_SCRIM >> 24) * (unsigned)ovm_opacity(&cf.mo) / 255 << 24);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -1064,7 +1068,6 @@ void confirm_paint(void *w, void *canvas) {
     if (!cf.dialog || w != cf.dialog || !lcd) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
-    if (!cf.stock) widget_set_opacity(w, (unsigned)ovm_alpha(&cf.mo, 255)); /* the next frame's */
     stock_canvas_set_fill_color(canvas, CARD_SCRIM);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
     rect_t card = { CARD_X, top, CARD_W, cf.h };

@@ -499,6 +499,14 @@ extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
     *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
+/* inline_slider.c: Settings' one-value rows that change in place
+ * (docs/oled-design.md#inline-sliders) */
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+void *inline_slider_row(void *view, const char *icon, int kind);
+void inline_pair(void *view, const char *icon, int kind);
+void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);
+int inline_slider_key(void *top, unsigned key, int owned), inline_value(int kind);
+void inline_value_text(int kind, int v, char *out, unsigned n);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
  * keys) */
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);

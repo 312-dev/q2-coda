@@ -167,4 +167,12 @@ int ovm_shift(const ovm_t *o, int px);
 int ovm_scale(const ovm_t *o, int from);
 int ovm_running(const ovm_t *o);
 int ovm_shown(const ovm_t *o);
+/* An overlay drawn through its widget's opacity (a toast's or the card's dialog): ovm_bind ties w
+ * to o, and the shared frame timer sets w's opacity to ovm_opacity on each frame until w goes (or
+ * ovm_bind(o, 0)). Never from w's own paint: stock's widget_paint (demo 0x672848) skips a widget
+ * whose opacity is under OVM_PAINT_MIN, so a paint that raised it from 0 would never run.
+ * ovm_opacity: 0..255 at o's level; 255 at once for an enter under Reduce Motion. */
+#define OVM_PAINT_MIN 9
+void ovm_bind(ovm_t *o, void *w);
+int ovm_opacity(const ovm_t *o);
 #endif
