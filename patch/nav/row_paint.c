@@ -202,6 +202,10 @@ static int drill(void *w) {
     if (more_image(w)) return 0;
     if (!tk_strcmp(widget_get_prop_str(w, "name", ""), PL_ACTION)) return 0;
     w = window_of(w);
+    /* a row that acts in place opens nothing: the Add to Playlist picker's add and close */
+    if (w && widget_get_prop_int(w, PL_MODE, 0) &&
+        !tk_strcmp(widget_get_prop_str(w, "name", ""), "playlist_page"))
+        return 0;
     int ctx = w ? context_id(widget_get_prop_str(w, "name", (void *)0)) : -1;
     return ctx >= 0 && (contexts[ctx].flags & DRILL);
 }
@@ -378,24 +382,6 @@ static void draw_letter(void *canvas, const unsigned *c, unsigned n, rect_t *box
     st.raw_ink = raw;
 }
 
-/* A page whose list is in an order of its own, where a row's first letter says nothing of how far
- * a spin has got: an album's songs (disc and track, comparator 0x5063f0), Up Next (play order),
- * Chapters (the file's), Edit Playlist's songs as added (ple_listing; its Add Songs picker is A to
- * Z). In Library's song list the class decides (internals.md, fast-scroll letter): Recent, Frequent
- * and Recently Added (0xf007-0xf009), Songs under Time added (getAllMusic 3 and 4) and a playlist's
- * songs (0xff13) under its Sort's Time added (g_playlistsort_flag not 0, getMusicByPlayList
- * 0x50b6c8) are in their own order. */
-int own_order(const char *page) {
-    if (!tk_strcmp(page, "allmusic_page")) {
-        int cls = I(g_class_type, 0), sort = I(g_sort_flag, 0);
-        return (cls >= 0xf007 && cls <= 0xf009) || (cls == 0xff13 && I(g_playlistsort_flag, 0)) ||
-               (cls == 0xf001 && (sort == 3 || sort == 4 || song_sort_own()));
-    }
-    return !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page") ||
-           !tk_strcmp(page, "upnext_page") || !tk_strcmp(page, "chapters_page") ||
-           (!tk_strcmp(page, "playlistedit_page") && ple_listing());
-}
-
 /* iPod fast scroll: while the wheel ramp moves more than one row per step, the selected row's
  * first character sits in a dark translucent square over the list until LETTER_MS after the last
  * such step. A virtual table resolves the logical row in its recycled pool; an offscreen or
@@ -404,12 +390,8 @@ static void paint_letter(void *w, void *canvas) {
     rect_t old;
     if (!st.letter_timer || w != st.wheel_surface || st.wheel_run <= LIST_FIRST_MS ||
         st.touch_mode || az_on(w) || !P(canvas, CANVAS_LCD) || !load_rows(&g_menu, w) ||
-        (g_menu.ctx >= 0 && contexts[g_menu.ctx].kind == CTX_FIXED) || /* menus: not alphabetical */
-        /* nor Library's categories beside Home's pane */
-        !tk_strcmp(widget_get_prop_str(w, "name", ""), "scroll_view_localmusic") ||
-        /* nor an album's tracks in Cover Flow, which are in album order (disc and track).
-         * A page whose list is in an order of its own never arms it (the wheel handler, own_order).
-         * ponytail: the lists own_order doesn't know keep it (internals.md) */
+        /* Only a name-sorted list arms it (the wheel handler, az_index.c name_sorted); Cover Flow is
+         * one until an album is open, whose tracks are in album order (disc and track). */
         coverflow_tracks(window_of(w)))
         return;
     int i = index_of(&g_menu, widget_get_prop_int(w, SEL, -1));
@@ -696,12 +678,17 @@ static void paint_selection(void *w, void *canvas) {
      * pop-up's buttons, which open on their first (Cancel). */
     int home = home_menu(top);
     if (home && i >= 0) coverflow_home_row(w, g_menu.at[i], g_menu.id[i], 1);
-    /* a captioned settings row grows while selected (settings_pages.c) */
+    /* a captioned settings row grows while selected (settings_pages.c), a grabbed inline slider's
+     * while grabbed (inline_slider.c) */
     caption_sel(w, i < 0 || (!shown && !home) ? (void *)0 : P(g_menu.at[i], W_PARENT));
+    inline_slider_sel(w, i < 0 || (!shown && !home) ? (void *)0 : P(g_menu.at[i], W_PARENT));
     if (i < 0 || (!shown && !home && g_menu.kind != 4)) return;
     if (st.shuffle_on && st.shuffle_on == st.action_view && st.shuffle_list == w)
         return;          /* the selection is on the Shuffle row above (shuffle_paint) */
-    if (empty_button(w)) { /* an empty state's button rings itself (feedback.c), no bar */
+    /* an empty state's button rings itself (feedback.c), no bar; so does a row standing for one in a page's own
+     * list (carremote_page.c's Pair a Phone) */
+    if (empty_button(w) || widget_get_prop_int(g_menu.at[i], "_rings_itself", 0) ||
+        widget_get_prop_int(P(g_menu.at[i], W_PARENT), "_rings_itself", 0)) {
         st.sel_w = w;
         st.sel_row = i;
         return;
@@ -949,6 +936,7 @@ int ringnav_paint(void *w, void *canvas) {
     games_paint(w, canvas);
     search_strip_paint(w, canvas);
     add_songs_paint(w, canvas);
+    inline_slider_paint(w, canvas); /* Settings' inline sliders (inline_slider.c) */
     /* Even a page with no navigable pane must end pending input when it is painted. */
     if (st.center_timer || st.home_surface) {
         void *wm = window_manager(), *top = window_manager_get_top_window(wm);
@@ -981,6 +969,7 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
+    carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
     bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
     sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
     np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */

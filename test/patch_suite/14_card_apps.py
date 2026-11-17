@@ -29,7 +29,7 @@ passed()
 CAPS='/tmp/q2-addon.caps'
 m=AppMachine(); stream_rows(m); caps=bytes(m.files[CAPS])
 assert caps.endswith(b'\n') and caps.count(b'\n')==1,caps
-assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource'},caps
+assert set(caps.split())=={b'playlist',b'progress',b'pages',b'library',b'goto',b'sleep',b'game',b'audio',b'sections',b'art',b'window',b'urls',b'sort',b'field',b'more',b'fav',b'now',b'catalogue',b'ratings',b'artist',b'album',b'playlists',b'storage',b'signin',b'libsource',b'radio'},caps
 m.files[CAPS]=bytearray(b'stale\n'); stream_rows(m); assert m.files[CAPS]==caps; passed()
 # Card games (addon.c, q2app game=1): Library's Games lists them, Streaming doesn't. A row runs the binary
 # over the screen; each input event reaches its socket as a text datagram instead of the UI (a held Return
@@ -143,23 +143,24 @@ def streaming():
     return [m.nodes[kids[0]]['visible']]+[m.nodes[m.nodes[m.nodes[r]['children'][0]]['children'][1]]['text'] for r in kids[1:] if m.nodes[r]['visible']]
 assert streaming()==[1,'Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
 m.click(rows['Configuration']); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-SVC=['TIDAL','Spotify','Deezer','Soulseek','Tidal Downloads','Internet Radio','AirPlay']
-assert m.labels()==['Configuration','Tidal Cache: 2 GB','Spotify Cache: 2 GB','Erase Spotify Data','Stop Streaming Services','Show in Streaming',*SVC]
+SVC=['Deezer','Soulseek','Internet Radio','AirPlay']  # the lone switches: TIDAL's, Spotify's and Tidal Downloads' are on their pages
+assert m.labels()[:10]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming',*SVC]
 cap=m.rows()[4]; assert len(m.nodes[cap]['children'])==1 and not m.nodes[cap].get('handlers')  # the section header: no press
 def ticks(): return [switch(m,i)=='switch_on' for i in range(5,len(m.rows()))]  # Shanling's switches
-assert ticks()==[True]*7
-m.row(7); assert m.config['STREAMHIDE']=='deezer' and ticks()==[True,True,False,True,True,True,True]
+assert ticks()==[True]*4
+m.row(5); assert m.config['STREAMHIDE']=='deezer' and ticks()==[False,True,True,True]
 assert streaming()==[1,'Spotify','Soulseek','Tidal Downloads','Internet Radio','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL'
+conf=m.page; m.row(7); m.row(2); sub=m.page=m.top; m.row(0); m.page=conf  # TIDAL's on its page
+assert m.config['STREAMHIDE']=='deezer,RADIO,TIDAL' and m.labels().count('Hidden')==1  # its row on Configuration
 assert streaming()==[0,'Spotify','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(7); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[False,True,True,True,True,False,True]
+m.row(5); assert m.config['STREAMHIDE']=='RADIO,TIDAL' and ticks()==[True,True,False,True]
 assert streaming()==[0,'Spotify','Deezer','Soulseek','Tidal Downloads','AirPlay','Configuration']
-m.row(10); m.row(5); assert m.config['STREAMHIDE']=='' and ticks()==[True]*7; passed()
+m.row(7); m.page=sub; m.row(0); m.page=conf; assert m.config['STREAMHIDE']=='' and ticks()==[True]*4; passed()
 # Saved: the next Streaming leaves them out, an app by its id whatever its place by name.
 m=AppMachine(); card_app(m,'deezer','name=Deezer\n'); m.config['STREAMHIDE']='soulseek,AIRPLAY,SPOTIFY'
 rows=stream_rows(m); view=m.find('scroll_view',m.top)
 assert streaming()==[1,'Deezer','Tidal Downloads','Internet Radio','Configuration']
-m.click(rows['Configuration']); m.page=m.top; assert ticks()==[True,False,True,False,True,True,False]; passed()
+m.click(rows['Configuration']); m.page=m.top; assert ticks()==[True,False,True,False] and m.labels().count('Hidden')==1; passed()
 # Soulseek: q2-soulseek from the card's .soulseek folder.
 SBIN,SBROWSE,SSTATE,SPID='/mnt/mmc/.soulseek/q2-soulseek','/tmp/q2-soulseek.browse.sock','/tmp/q2-soulseek.state','/tmp/q2-soulseek'
 class SlskMachine(AppMachine): pass
@@ -1287,7 +1288,7 @@ m.open_pages.discard('updatemusic_dialog'); m.poll(); assert m.files[DONE]==b'50
 # Now Playing, and System and Playback settings' own pages, all together here. Any other holds the request until it
 # closes: a page this list doesn't know (a new one's), the App Store, the Library menu, an app's
 # songs and Up Next among them.
-SAFE=['home_page','stream_page','streamconf_page','addon_page','qrcode_page','playing_page','sysset_page','display_page',
+SAFE=['home_page','stream_page','streamconf_page','streamsvc_page','addon_page','qrcode_page','playing_page','sysset_page','display_page',
       'backlight_page','lighttime_page','keylock_page','language_page','datetime_page','autotime_page','manualtime_page',
       'standby_page','powermanager_page','sleepshutdown_page','about_page','bluetooth_page',
       'btquality_page','btadjustvol_page','wifi_page','wifiset_page','netservice_page','playset_page','audiosetting_page',
@@ -1327,11 +1328,11 @@ assert m.nodes[title]['text']==PRODUCT_NAME and m.nodes[value]['text']==f"{VERSI
 assert not m.nodes[button].get('handlers') and not m.nodes[button].get('name'); passed()
 m.nodes[view]['children']=rows[:7]; assert m.call(address=HOOKS['systemset_about_page_init'][0],args=(m.top,5,0,0),gap=0)==0 and m.nodes[view]['children']==rows[:7]; passed()
 
-# Network Update (netupdate.c): System Update's second row, built by stock's own row builder
-# (0x4c8660), is renamed "2" so stock's click (atoi of the name: 0 TF card, 1 Shanling) skips it, and
-# fetches the latest GitHub release's update.tar.sig, then its update.tar over verified TLS to the card
-# (a .part, renamed once its signature checks, docs/internals.md#release-signatures), then runs stock's
-# TF card update (0x4c7eb4). A failure keeps the old update.tar.
+# Software Update's download (netupdate.c): stock's System Update page's second row, built by stock's own
+# row builder (0x4c8660), is renamed "2" so stock's click (atoi of the name: 0 TF card, 1 Shanling) skips
+# it, and opens Software Update (sw_update.c). Its download fetches the latest GitHub release's
+# update.tar.sig, then its update.tar over verified TLS to the card (a .part, renamed once its signature
+# checks, docs/internals.md#release-signatures). A failure keeps the old update.tar.
 # The payload's release key is the manifest's; these checks swap in a key made for this run, whose private half signs.
 import signing
 assert (B/'patch.bin').read_bytes()[payload_syms['release_key']-BASE:][:32].hex()==manifest['signing_key']

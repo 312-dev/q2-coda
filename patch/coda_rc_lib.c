@@ -19,6 +19,7 @@
 #define SERVER_ID 0x40000000 /* catalogue.c: server song ids start here */
 #define PLACES "/mnt/data/coda-rc/places" /* "rid key" a line, the most recent first */
 #define PLACES_MAX 16
+#define RECENT_CAP 100    /* Recently Added: the newest songs, at most this many */
 
 /* ---- small helpers ---- */
 
@@ -162,6 +163,32 @@ static void f_hkey(sqlite3_context *c, int n, sqlite3_value **v) {
     sqlite3_result_text(c, b, 10, SQLITE_TRANSIENT);
 }
 
+/* A server playlist's cover, its app's /mnt/mmc/.<app>/covers/pl-<pid>.jpg (docs/server-library.md#covers),
+ * under --root in out; its size, or -1 when it is not there or the names could leave the folder. */
+static long file_len(const char *path);
+static long pl_cover(const char *app, const char *pid, char *out, size_t cap) {
+    char rel[300];
+    if (!app || !pid || !*app || !*pid || strchr(app, '/') || strchr(pid, '/') || strlen(app) > 15 ||
+        strlen(pid) > 46)
+        return -1;
+    snprintf(rel, sizeof rel, "/mnt/mmc/.%s/covers/pl-%s.jpg", app, pid);
+    long n = file_len(crc_path(out, cap, rel));
+    return n > 0 ? n : -1;
+}
+
+/* plart(app, pid): a server playlist's art id, "p<pid>", while its app has its cover; else null, and the row's
+ * art is its first song's album's */
+static void f_plart(sqlite3_context *c, int n, sqlite3_value **v) {
+    const char *app = (const char *)sqlite3_value_text(v[0]), *pid = (const char *)sqlite3_value_text(v[1]);
+    char p[512], id[48];
+    if (pl_cover(app, pid, p, sizeof p) < 0) {
+        sqlite3_result_null(c);
+        return;
+    }
+    snprintf(id, sizeof id, "p%s", pid);
+    sqlite3_result_text(c, id, -1, SQLITE_TRANSIENT);
+}
+
 static int alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 /* q2bridge.py prefix_of: up to the key's first n letters, padded to n and uppercased, or "123" */
@@ -274,6 +301,7 @@ int lib_has_server(void) {
     secs " secs, " srv " srv"
 
 static sqlite3 *db;
+static int cat_on; /* the catalogue is attached (Local + Server) */
 static char sql[6144];
 
 static void lib_close(void) {
@@ -295,12 +323,14 @@ static int lib_open(void) {
     for (unsigned i = 0; i < sizeof fns / sizeof *fns; ++i)
         sqlite3_create_function(db, fns[i].name, fns[i].n, SQLITE_UTF8 | SQLITE_DETERMINISTIC, 0, fns[i].f, 0, 0);
     dur_load();
+    sqlite3_create_function(db, "plart", 2, SQLITE_UTF8, 0, f_plart, 0, 0); /* reads the card: not deterministic */
     int server = lib_has_server();
     if (server) {
         char q[300];
         snprintf(sql, sizeof sql, "attach '%s' as cat", crc_path(q, sizeof q, CAT));
         if (strchr(q, '\'') || sqlite3_exec(db, sql, 0, 0, 0) != SQLITE_OK) server = 0;
     }
+    cat_on = server;
     /* no format string: MUSIC_WHERE's LIKE patterns hold '%' */
     snprintf(sql, sizeof sql, "%s%s%s",
              "create temp view songs as " SONG_COLS("songtable", "t", "dur(songtable.fileurl)", "0")
@@ -383,6 +413,8 @@ static const sort_t IN_ALBUM_SORTS[] = {{"track", "Track order"}, {"title", "Tit
 static const sort_t PL_SORTS[] = {{"order", "Playlist order"}, {"title", "Title"}, {"artist", "Artist"},
                                   {"album", "Album"}, {0, 0}};
 static const sort_t PLS_SORTS[] = {{"order", "Q2 order"}, {"name", "Name"}, {0, 0}};
+static const sort_t FAV_SORTS[] = {{"title", "Title"}, {"artist", "Artist"}, {"album", "Album"},
+                                   {"added", "Recently added"}, {0, 0}};
 
 /* a song's row outside an album: no number (Item.number is the track number in an album) */
 #define TRACK_ITEM "'song:'||sid c0, title c1, artist c2, ak c3, 0 c4, 0 c5, secs c6, 0 c7, 0 c8"
@@ -396,6 +428,8 @@ static const sort_t PLS_SORTS[] = {{"order", "Q2 order"}, {"name", "Name"}, {0, 
 #define ICON_GENRES_ 5
 #define ICON_YEARS_ 6
 #define ICON_FOLDERS_ 7
+#define ICON_FAVORITES_ 8
+#define ICON_RECENT_ 9
 
 /* A list: rows of `src` (item columns then bk, the bucket key, or null) in `order`, with its bucket filter. */
 typedef struct {
@@ -470,6 +504,22 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sort = pick(l->sorts, sort)->key;
         l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
         snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0") " from s2 where %s", bk, where);
+    } else if (!strcmp(kind, "favorites")) {
+        /* the hearted songs: stock's My Fav (five hearts, docs/internals.md#ratings), by path */
+        l->sorts = FAV_SORTS;
+        l->actions = 3;
+        l->sort = pick(l->sorts, sort)->key;
+        l->order = order_of("tracks", l->sort, &l->bucketed, &l->years, &bk);
+        snprintf(l->title, sizeof l->title, "Favorites");
+        snprintf(l->src, sizeof l->src, "select " TRACK_ITEM TAIL("%s", "0")
+                 " from s2 where url in (select fileurl from main.myfav)", bk);
+    } else if (!strcmp(kind, "recent")) {
+        /* the RECENT_CAP songs added last, newest first; one order, so no letters */
+        l->actions = 3;
+        l->order = "-added, nt";
+        snprintf(l->title, sizeof l->title, "Recently Added");
+        snprintf(l->src, sizeof l->src, "select * from (select " TRACK_ITEM TAIL("null", "0")
+                 " from s2 order by added desc, nt limit %d)", RECENT_CAP);
     } else if (!strcmp(kind, "album")) {
         l->sorts = IN_ALBUM_SORTS;
         l->sort = pick(l->sorts, sort)->key;
@@ -524,10 +574,14 @@ static int list_of(const char *base, const char *sort, list_t *l) {
         l->sorts = PLS_SORTS;
         l->sort = pick(l->sorts, sort)->key;
         l->order = !strcmp(l->sort, "name") ? "nt, pos" : "pos";
-        snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, (select s2.ak from main.playlist p "
-                 "join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id limit 1) c3, %d c4, "
-                 "1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
-                 " from main.playlist h where h.id <= 100", ICON_PLAYLISTS_);
+        /* a server playlist's art is its server's cover (Navidrome's collage) once its app has it, else, as a
+         * card playlist's, its first song's album's */
+        snprintf(l->src, sizeof l->src, "select 'pl:'||h.id c0, h.name c1, '' c2, coalesce(%s(select s2.ak from "
+                 "main.playlist p join s2 on s2.url = p.fileurl where p.id > 100 and p.cd_num = h.id order by p.id "
+                 "limit 1)) c3, %d c4, 1 c5, 0 c6, 0 c7, 0 c8" NO_TAIL("null", "norm(h.name)", "h.id", "0")
+                 " from main.playlist h where h.id <= 100",
+                 cat_on ? "(select plart(sl.app, sl.pid) from cat.serverlists sl where sl.list = h.id), " : "",
+                 ICON_PLAYLISTS_);
     } else if (!strcmp(kind, "dir")) {
         /* a card folder (q2bridge.py index_folders): its subfolders by name, then its songs by file name.
          * Server songs live in hidden folders, and hidden folders are left out. */
@@ -612,9 +666,11 @@ static int browse(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
             {"tracks", "Tracks", 0, 0, 0, ICON_TRACKS_, 1, 0, 0, 0}, {"playlists", "Playlists", 0, 0, 0, ICON_PLAYLISTS_, 1, 0, 0, 0},
             {"artists", "All artists", 0, 0, 0, ICON_ARTISTS_, 1, 0, 0, 0}, {"albums", "Albums", 0, 0, 0, ICON_ALBUMS_, 1, 0, 0, 0},
             {"genres", "Genres", 0, 0, 0, ICON_GENRES_, 1, 0, 0, 0}, {"years", "Years", 0, 0, 0, ICON_YEARS_, 1, 0, 0, 0},
-            {"dir:", "Folders", 0, 0, 0, ICON_FOLDERS_, 1, 0, 0, 0}};
+            {"dir:", "Folders", 0, 0, 0, ICON_FOLDERS_, 1, 0, 0, 0},
+            {"favorites", "Favorites", 0, 0, 0, ICON_FAVORITES_, 1, 0, 0, 0},
+            {"recent", "Recently Added", 0, 0, 0, ICON_RECENT_, 1, 0, 0, 0}};
         static const item_t top = {"library", "Library", 0, 0, 0, 0, 1, 0, 0, 0};
-        int root_ = node[0] == 'r', total = root_ ? 1 : 7;
+        int root_ = node[0] == 'r', total = root_ ? 1 : (int)(sizeof lib / sizeof *lib);
         pb_str(&w, 2, root_ ? "Q2" : "Library");
         pb_varint(&w, 3, total);
         pb_varint(&w, 4, offset);
@@ -1019,8 +1075,8 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
 
 /* ---- covers ---- */
 
-/* Where an album's picture is: Cover Flow's 160 px cache when it is small enough, a server app's cover,
- * a picture file in the folder, or the first FLAC's embedded picture (q2bridge.py cover). */
+/* Where an album's picture is: Cover Flow's 160 px cache when it is small enough, a server app's cover (its 512 px
+ * one for a bigger ask), a picture file in the folder, or the first FLAC's embedded picture (q2bridge.py cover). */
 typedef struct {
     char path[400];
     long off, len;
@@ -1131,11 +1187,14 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
     const char *a, *app;
     size_t an, appn;
     if (server_album(url, &a, &an, &app, &appn)) {
-        char rel[160];
-        snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/covers/%.*s.jpg", (int)appn, app, (int)an, a);
-        crc_path(p, sizeof p, rel);
-        long n = file_len(p);
-        if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
+        /* the app's 512 px copy (covers/512/) for an ask over 160 px, else its 160 px one */
+        for (int big = max_px > 160; big >= 0; --big) {
+            char rel[160];
+            snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/covers/%s%.*s.jpg", (int)appn, app, big ? "512/" : "", (int)an, a);
+            crc_path(p, sizeof p, rel);
+            long n = file_len(p);
+            if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
+        }
         return stream_picture(art, app, appn, c);
     }
     static const char *names[] = {"cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png"};
@@ -1150,6 +1209,23 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
     crc_path(p, sizeof p, url);
     if (flac_picture(p, c)) { snprintf(c->path, sizeof c->path, "%s", p); return 1; }
     return 0;
+}
+
+/* A server playlist's art id ("p<pid>", f_plart): its app's cover of it, at most 160 px a side as the app
+ * fetches it */
+static int pl_cover_find(const char *pid, cover_t *c) {
+    sqlite3_stmt *st;
+    char app[16] = "";
+    memset(c, 0, sizeof *c);
+    if (!cat_on || sqlite3_prepare_v2(db, "select app from cat.serverlists where pid = ?1 limit 1", -1, &st, 0))
+        return 0;
+    sqlite3_bind_text(st, 1, pid, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) snprintf(app, sizeof app, "%s", sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    long n = pl_cover(app, pid, c->path, sizeof c->path);
+    if (n < 0) return 0;
+    c->len = n;
+    return 1;
 }
 
 static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
@@ -1167,7 +1243,7 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     if (k < 0 || limit > 4096 || !*art) return crc_error(s, req_id, E_BAD_REQUEST, "GetCover");
     if (lib_open()) return crc_error(s, req_id, E_UNAVAILABLE, "no library");
     cover_t c;
-    int found = cover_find(art, max_px ? (int)max_px : 160, &c);
+    int found = art[0] == 'p' ? pl_cover_find(art + 1, &c) : cover_find(art, max_px ? (int)max_px : 160, &c);
     lib_close();
     if (!found) return crc_error(s, req_id, E_NOT_FOUND, "no cover");
     if (c.len > 16 * 1024 * 1024 || (long)offset > c.len) return crc_error(s, req_id, E_BAD_REQUEST, "offset");
@@ -1196,8 +1272,45 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     return crc_send(s, T_COVER, req_id, out, w.n);
 }
 
+/* ---- StartRadio (CAP_RADIO): a song radio in demo (song_radio.c), through the shim ---- */
+
+/* seed_id 1: "" the playing song, a "song:" id, or an artist node ("artist:<k>"), whose radio is one of its
+ * songs' picked at random; stop 2. The shim answers 3 for a song it doesn't have (NOT_FOUND). */
+static int start_radio(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    pbr r = {p, p + n};
+    pbf f;
+    char seed[400] = "", verb[32];
+    int stop = 0, rid = 0, k;
+    while ((k = pb_next(&r, &f)) > 0) {
+        if (f.field == 1 && f.wire == 2) pb_cstr(&f, seed, sizeof seed);
+        if (f.field == 2 && f.wire == 0) stop = f.v != 0;
+    }
+    if (k < 0 || strchr(seed, '\n')) return crc_error(s, req_id, E_BAD_REQUEST, "StartRadio");
+    if (stop) return crc_shim_command(s, req_id, "radio stop");
+    if (*seed && !(rid = lib_song_rid(seed))) {
+        if (strncmp(seed, "artist:", 7) || strchr(seed, '|')) return crc_error(s, req_id, E_BAD_REQUEST, "seed_id");
+        char base[420];
+        snprintf(base, sizeof base, "artist-tracks:%s", seed + 7);
+        if (lib_open()) return crc_error(s, req_id, E_UNAVAILABLE, "no library");
+        list_t l;
+        memset(&l, 0, sizeof l);
+        sqlite3_stmt *st = 0;
+        if (list_of(base, "", &l)) {
+            snprintf(sql, sizeof sql, "select * from (%s) order by random() limit 1", l.src);
+            if (sqlite3_prepare_v2(db, sql, -1, &st, 0) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+                rid = lib_song_rid((const char *)sqlite3_column_text(st, 0));
+            sqlite3_finalize(st);
+        }
+        lib_close();
+        if (!rid) return crc_error(s, req_id, E_NOT_FOUND, "artist");
+    }
+    snprintf(verb, sizeof verb, "radio %d", rid);
+    return crc_shim_command(s, req_id, verb);
+}
+
 int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos) {
     switch (type) {
+    case T_START_RADIO: return start_radio(s, req_id, p, n);
     case T_BROWSE: return browse(s, req_id, p, n);
     case T_SEARCH: return search(s, req_id, p, n);
     case T_PLAY: return play(s, req_id, p, n, qgen);

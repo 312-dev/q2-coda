@@ -1,0 +1,37 @@
+#!/bin/sh
+# git's reference-transaction hook for the shared repository (docs/orchestration.md#install): the trunk
+# moves only through the merge queue. A ref under refs/heads/release/ or refs/heads/main may be created,
+# moved or deleted only by a process with Q2_QUEUE=1 (tools/ci/merge_queue.py's batches, which fast-forward the
+# trunk to a commit the gate passed) or Q2_TRUNK_ADMIN=1 (the user, by hand: cutting a new trunk). So a
+# commit, merge, reset or branch -f on the trunk from any worktree fails here, before anything changes.
+# `git config q2.protect 'refs/heads/release/* refs/heads/main'` names other patterns.
+[ "$1" = prepared ] || exit 0
+[ "$Q2_QUEUE" = 1 ] && exit 0
+[ "$Q2_TRUNK_ADMIN" = 1 ] && exit 0
+patterns=$(git config --get q2.protect 2>/dev/null)
+[ -n "$patterns" ] || patterns='refs/heads/release/* refs/heads/main'
+while read -r old new ref; do
+    for p in $patterns; do
+        # shellcheck disable=SC2254  # the pattern is meant to glob
+        case "$ref" in
+        $p)
+            # old is all zeros when the caller named no expected value, so ask where the ref points now:
+            # a transaction that leaves it there changes nothing
+            now=$(git rev-parse -q --verify "$ref" 2>/dev/null) || now=$(printf '%040d' 0)
+            [ "$new" = "$now" ] && continue 2
+            # git pack-refs (and gc, which runs it) deletes the loose file of a ref it has just packed, and
+            # git 2.43 shows that here as a deletion though the ref keeps its value: let that one through
+            if [ "$new" = "$(printf '%040d' 0)" ]; then
+                case "$(tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null)" in
+                *' pack-refs '*) continue 2 ;;
+                esac
+            fi
+            echo "q2: $ref is the trunk: it moves only through the merge queue." >&2
+            echo "q2: commit on a feature branch and queue it: python3 tools/ci/merge_batch.py --mark-ready" >&2
+            echo "q2: (docs/orchestration.md; the user alone may override with Q2_TRUNK_ADMIN=1)" >&2
+            exit 1
+            ;;
+        esac
+    done
+done
+exit 0

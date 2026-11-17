@@ -302,15 +302,16 @@ def test_display_adds_smart_awake_night_shift_and_its_two_pages_among_stocks_row
     ui = Ui(fw)
     page = display(fw, ui)
     view = page.view()
-    # stock's first two, then Smart Awake and Night Shift, then Appearance and Cover Flow, then Enlarged Album Art
-    # (stock's switch, by its translation key), then Reduce Motion last; its third, Lock Screen, and its fourth, Show
-    # Navigation Bar, are not offered
-    assert titles(view) == ['stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance', 'Cover Flow',
-                            'playset_covermode', 'Reduce Motion']
-    # Night Shift and the two pages open a page, so they carry the chevron; Smart Awake, Enlarged Album Art and Reduce
-    # Motion change in place
+    # Brightness, an inline slider in place of stock's first row (kept, hidden), then stock's second, Smart Awake and
+    # Night Shift, then Appearance and Cover Flow, then Enlarged Album Art (stock's switch, by its translation key), then
+    # Reduce Motion last; its third, Lock Screen, and its fourth, Show Navigation Bar, are not offered
+    assert titles(view) == ['Brightness', 'stock_0', 'stock_1', 'Smart Awake', 'Night Shift', 'Appearance',
+                            'Cover Flow', 'playset_covermode', 'Reduce Motion']
+    assert not view.children[1].visible and view.children[0].visible
+    # Night Shift and the two pages open a page, so they carry the chevron; Brightness, Smart Awake, Enlarged Album Art
+    # and Reduce Motion change in place
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children) for item in view.children if not item.name]
-    assert into == [False, True, True, True, False, False]
+    assert into == [False, False, True, True, True, False, False]
 
 
 def titles(view):
@@ -631,10 +632,10 @@ def test_playback_has_the_sleep_timer_and_leaves_the_library_s_rows(fw):
     page = Pages(fw, ui)
     page.open('playset/playset_page')
     texts = page.texts()
-    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade: Off', 'stock_6', 'Resume Songs: 30 min',
-                     'stock_8', 'Sleep Timer', 'Volume: 0', 'playset_maxvol', 'playset_bootvol', 'stock_0', 'stock_9',
-                     'stock_10',
-                     'Mono Audio', 'Swap L/R', 'stock_1', 'stock_4', 'stock_5']  # EQ (stock_2), then the Library
+    assert texts == ['stock_2', 'Library', 'stock_3', 'stock_7', 'Crossfade', 'Duration', 'stock_6',
+                     'Resume Songs: 30 min', 'stock_8', 'Sleep Timer', 'Volume: 0', 'Max Volume', 'Default Volume',
+                     'Level', 'stock_0', 'stock_9', 'Balance', 'stock_10', 'Mono Audio', 'Swap L/R', 'stock_1',
+                     'stock_4', 'stock_5']  # EQ (stock_2), then the Library
     ui.click(button_of(page.view(), 'Sleep Timer'))
     assert page.opened[-1] == 'systemset/sleepshutdown_page'
 
@@ -657,7 +658,7 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     page = Settings(fw, ui)
     # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
-    assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'system_update', 'Storage',
+    assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
                                  'system_time', 'App Store', 'stock_2',
                                  'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
                                  'stock_7', 'stock_8', 'Restart', 'Shut Down']
@@ -668,11 +669,13 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     # the rows stock moved to its System page open stock's pages from here
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
-    for key in ('system_time', 'system_update', 'system_reset', 'system_about'):
+    for key in ('system_time', 'system_reset', 'system_about'):
         ui.click(button_of(page.view, key))
-    assert opened == ['systemset/datetime_page', 'systemset/fwupdate_page', 'systemset/reset_page', 'systemset/about_page']
-    # Storage opens its own page (storage.c storage_open)
+    assert opened == ['systemset/datetime_page', 'systemset/reset_page', 'systemset/about_page']
+    # Software Update and Storage open their own pages (sw_update.c sw_update_open, storage.c storage_open)
     fw.mock('window_create', lambda *_: 0)
+    ui.click(button_of(page.view, 'Software Update'))
+    assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
 

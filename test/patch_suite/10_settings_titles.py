@@ -25,7 +25,7 @@ assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to_with_context']==['d
 m,view,_=display({},sub=0)
 m.paint(view)
 for _ in range(3): m.call()
-assert m.selected(view)==3 and m.confirm()==11 and m.dispatched()[0][1]==m.nodes[m.nodes[view]['children'][3]]['children'][0]; passed()
+assert m.selected(view)==3 and m.confirm()==11 and m.dispatched()[0][1]==m.nodes[m.nodes[view]['children'][4]]['children'][0]; passed()  # the fourth shown row, Night Shift: stock's Brightness row (children[1]) is hidden under the inline one
 # PEQ's value edit has action_text "done": stock edit_on_event reports the keyboard's OK only for it (or "next").
 stock=(B/'stock-demo').read_bytes()
 def at(va,n): return next(stock[o+va-v:o+va-v+n] for _,(t,o,v,_,f,*_) in segments(stock) if t==1 and v<=va<v+f)

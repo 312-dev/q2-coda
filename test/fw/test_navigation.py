@@ -695,12 +695,12 @@ def test_csv_toggle_round_trip(fw, heap):
 @pytest.mark.parametrize('i, key, label', [(0, b'TIDAL', b'TIDAL'), (1, b'SPOTIFY', b'Spotify'), (2, b'DOWNLOADS', b'Tidal Downloads'),
                                            (3, b'RADIO', b'Internet Radio'), (4, b'AIRPLAY', b'AirPlay')])
 def test_fixed_services(fw, i, key, label):
-    svc = fw.fn('navigation__svc', C.c_char_p, C.c_int, C.c_int)
+    svc = fw.fn('stream_config__svc', C.c_char_p, C.c_int, C.c_int)
     assert svc(i, 0) == key and svc(i, 1) == label
 
 
 def test_card_apps_sit_between_spotify_and_the_rest(fw, st):
-    svc = fw.fn('navigation__svc', C.c_char_p, C.c_int, C.c_int)
+    svc = fw.fn('stream_config__svc', C.c_char_p, C.c_int, C.c_int)
     st('svc_n').value = 2
     assert svc(1, 0) == b'SPOTIFY' and svc(2, 0) is None and svc(3, 0) is None  # no apps on this card
     assert svc(4, 0) == b'DOWNLOADS' and svc(6, 0) == b'AIRPLAY'
@@ -1879,7 +1879,7 @@ class Services:
             C.c_void_p.from_address(base + 8 * i).value = C.addressof(self.keep[0])
         self.config = Config(fw, **config)
         fw.mock('toolsWriteConfig', lambda path, section, key, value, *_: self.written.append(C.string_at(value)) and 0)
-        self.toggle = fw.fn('navigation__svc_toggle', C.c_int, C.c_int)
+        self.toggle = fw.fn('stream_config__svc_toggle', C.c_int, C.c_int)
 
 
 def test_a_service_hides_and_shows_again(fw, st, scratch):
@@ -1895,7 +1895,7 @@ def test_a_full_list_refuses_with_a_toast(fw, st, scratch):
     services = Services(fw, st, scratch, STREAMHIDE=b'x' * 194)
     seen = []
     fw.mock('navigator_to_with_context', lambda name, *_: seen.append(C.string_at(name)) and 0)
-    services.toggle(3)  # 194 + , + RADIO is ROOT_MAX: stock's config line can't keep more
+    services.toggle(3)  # 194 + , + RADIO is SVC_LINE: stock's config line can't keep more
     assert not services.written and seen == [b'dialog/msginfo_dialog']
 
 

@@ -970,7 +970,7 @@ class Modes:
     def tap(self, side):
         event = C.create_string_buffer(0x40)
         struct.pack_into('<i', event, 0, O['EVT_CLICK'])
-        struct.pack_into('<ii', event, O['EVENT_X'], 64 if side == 'shuffle' else 228, 286)
+        struct.pack_into('<ii', event, O['EVENT_X'], {'shuffle': 64, 'radio': 146}.get(side, 228), 286)
         return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
 
 
@@ -985,6 +985,17 @@ def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
     assert m.sent == [2, 1]
     m.tap('repeat')  # repeat Off, shuffle off: order
     assert m.sent == [2, 1, 0]
+
+
+def test_the_radio_tap_starts_a_radio_of_the_playing_song(fw, st, mcl):
+    """The Radio button starts a song radio (song_radio.c song_radio_tap, on a timer: a radio's queue opens Now
+    Playing). It opened the playing app's page (addon_more) before, which did nothing for the Subsonic app, whose
+    q2app has no more= (the user's dead tap, 2026-11-16 17:09); stock's mode is left alone."""
+    m = Modes(fw, st, mcl, 0)
+    timers: list = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 1)
+    assert m.tap('radio') == 1 and m.sent == []
+    assert timers[-1] == C.cast(fw.lib.song_radio_tap, C.c_void_p).value
 
 
 def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
@@ -1948,37 +1959,29 @@ def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
-    ids = [r.name for r in rows]
-    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'
-    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
-    at = {r.name or icon(r): k for k, r in enumerate(rows)}  # Max Volume's icon: Volume's row has it too
-    volume = next(k for k, r in enumerate(rows) if icon(r) == 'playset_maxvol')
-    assert at['s2'] == 0 and rows[1] is row(ui, view, 'Library') and 'list_into' in [c.props.get('image') for c in rows[1].walk()]
-    assert at['s3'] == 2  # Play Mode after EQ and the Library
-    assert at['playset_gapless'] == at['s7'] + 1 and at['playset_memplay'] == at['s6'] + 1  # Crossfade, Resume Songs
-    assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
-    assert rows[at['s8'] + 1] is row(ui, view, 'Sleep Timer')
-    assert [volume, at['playset_maxvol'], at['playset_bootvol'], at['s0'], at['s9'], at['s10']] == list(range(at['s8'] + 2, at['s8'] + 8))
-    balance = [k for k, r in enumerate(rows) if icon(r) == 'playset_balance']
-    assert balance == [at['s10'] + 1, at['s10'] + 2]  # Mono Audio and Swap L/R
-    assert [at['s1'], at['s4'], at['s5']] == [balance[1] + 1, balance[1] + 2, 19]  # Filters, DSD Output, USB Audio last
-    assert 'playset_covermode' not in at and not [r for r in rows if not r.name and ui.text(label_of(r)) == 'On-The-Go']
-    assert ui.text(label_of(rows[volume])).startswith('Volume')  # crossfade.c volume_row, just before Max Volume
+    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'; stock's Balance (s10) stays,
+    # hidden, after the inline Balance (inline_slider.c); Crossfade's Duration and Default Volume's Level under them
+    seq = [r.name or ui.text(label_of(r)).split(':')[0] for r in rows]
+    assert seq == ['s2', 'Library', 's3', 's7', 'Crossfade', 'Duration', 's6', 'Resume Songs', 's8', 'Sleep Timer',
+                   'Volume', 'Max Volume', 'Default Volume', 'Level', 's0', 's9', 'Balance', 's10', 'Mono Audio',
+                   'Swap L/R', 's1', 's4', 's5']
+    assert 'list_into' in [c.props.get('image') for c in rows[1].walk()] and not rows[seq.index('s10')].visible
+    assert 'playset_covermode' not in [icon(r) for r in rows]
+    assert icon(rows[seq.index('Volume')]) == 'playset_maxvol'  # crossfade.c volume_row, just before Max Volume
 
 
-def test_playback_s_volume_rows_open_stock_s_pages(fw):
+def test_playback_s_volume_rows_change_in_place(fw):
+    """Max Volume and Default Volume open no page: an inline slider and a switch (inline_slider.c)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    ours = {icon(r): r for r in view.children if not r.name}
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
-    for key in ('playset_maxvol', 'playset_bootvol'):
-        assert 'list_into' in [c.props.get('image') for c in ours[key].walk()]
-        click(ui, ours[key])
-    assert opened == ['playset/maxvol_page', 'playset/bootvol_page']
-    # stock's rows, stock's translations
-    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_maxvol', b'playset_bootvol']
+    for title in ('Max Volume', 'Default Volume'):
+        item = row(ui, view, title)
+        assert 'list_into' not in [c.props.get('image') for c in item.walk()]
+        click(ui, item)
+    assert opened == []
 
 
 def test_enlarged_album_art_is_display_s_last_row_and_stock_s_switch(fw):
@@ -2038,7 +2041,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 20  # the next open is the main page again
+    assert len(again.children) == 23  # the next open is the main page again
 
 
 def caption_texts(fw, view):

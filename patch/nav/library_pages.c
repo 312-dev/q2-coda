@@ -874,7 +874,7 @@ int page_keyup(void *ctx, void *event) {
     return STOP;
 }
 
-/* The close of navigation.c's own pages: Chapters and Streaming's Configuration. */
+/* The close of navigation.c's own page, Chapters. */
 static int page_closed(void *ctx, void *event) {
     if (ctx == st.ch_page) {
         st.ch_page = 0;
@@ -885,7 +885,6 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 

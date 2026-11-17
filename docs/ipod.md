@@ -379,9 +379,9 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
 review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
-(`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
@@ -479,7 +479,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas. Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
+with their original touch areas, where they still open (Settings sets them in its list instead). Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
@@ -665,12 +665,14 @@ once a step moves more than one row, from 300 ms of continuous spin
 ([internals.md](internals.md#wheel-movement)), and disappears 400 ms after the last such step, or
 at once on a slow tick, a touch or the end of the list. Latin letters show in
 capitals; leading spaces are skipped, as is a leading "The", "A" or "An" in library lists
-([internals.md](internals.md#sorting)), and any other character shows as it is. Home, Library's categories (on its page or beside Home's pane), settings menus
-(`CTX_FIXED` windows, which are not alphabetical) and other short lists never show it, and nor does an album's track list, in Cover Flow or the Library, which is in album order (disc and track).
-Nor do these lists, which are in an order of their own, where a row's letter would say nothing of
-how far the spin has got: a playlist's songs in the order they were added (Sort: Time added, and
-always in Edit Playlist), Recent, Frequent and Recently Added, Songs sorted by Time added, View
-Queue while a shuffle is on (Up Next) and Chapters. Values are in `patch/offsets.inc` (`LETTER_*`); see
+([internals.md](internals.md#sorting)), and any other character shows as it is. Only the
+Library's lists in name order take it: Songs A to Z (and a playlist sorted by name, Hi-Res and
+Favorites), Albums, Artists, Composers, Genres, an artist's albums, Folders, Cover Flow's covers
+and Edit Playlist's Add Songs picker. Every other list is in an order of its own, where a row's
+letter would say nothing of how far the spin has got, and never shows it: Wi-Fi's networks,
+Bluetooth's devices, settings, Home, the queue, Chapters, Recent, Frequent, Recently Added, Songs
+sorted by Time added, a playlist in the order songs were added, an artist's or a genre's songs,
+an album's tracks, Most Played, Era, Internet Radio, card apps and streaming lists. Values are in `patch/offsets.inc` (`LETTER_*`); see
 [internals.md](internals.md#drawing).
 
 ## Now Playing

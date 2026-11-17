@@ -76,6 +76,11 @@ int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
+/* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
+ * the accent with white words (a screen's main action), else the grey with Text Primary words;
+ * focused: ringed while ui_focus_shown; pressed: a step darker. Returns its width. */
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house
@@ -165,4 +170,12 @@ int ovm_shift(const ovm_t *o, int px);
 int ovm_scale(const ovm_t *o, int from);
 int ovm_running(const ovm_t *o);
 int ovm_shown(const ovm_t *o);
+/* An overlay drawn through its widget's opacity (a toast's or the card's dialog): ovm_bind ties w
+ * to o, and the shared frame timer sets w's opacity to ovm_opacity on each frame until w goes (or
+ * ovm_bind(o, 0)). Never from w's own paint: stock's widget_paint (demo 0x672848) skips a widget
+ * whose opacity is under OVM_PAINT_MIN, so a paint that raised it from 0 would never run.
+ * ovm_opacity: 0..255 at o's level; 255 at once for an enter under Reduce Motion. */
+#define OVM_PAINT_MIN 9
+void ovm_bind(ovm_t *o, void *w);
+int ovm_opacity(const ovm_t *o);
 #endif
