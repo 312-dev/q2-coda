@@ -44,12 +44,13 @@ int otg_count(void) {
     return n;
 }
 
-/* The playlist's songs in its own order (stock's Time added, as stored). */
-static int pv_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
+/* Playlist dest's songs in its own order (stock's Time added, as stored), a staged query; shared
+ * with add_songs.c, whose removal takes an entry's ID from it. */
+int playlist_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
 static void pv_reload(void) {
     int n;
     if (pv.songs) deque_destroy(pv.songs);
-    pv.songs = staged(pv_query, (void *)(long)pv.dest, &n);
+    pv.songs = staged(playlist_query, (void *)(long)pv.dest, &n);
 }
 static int pv_size(void) { return pv.songs ? (int)deque_size(pv.songs) : 0; }
 
@@ -113,7 +114,7 @@ static int pv_run(const void *unused) {
     int a = pv.pending, n = pv_size();
     char said[80];
     if (a == PV_SHUFFLE && n) {
-        void *all = staged(pv_query, (void *)(long)pv.dest, &n);
+        void *all = staged(playlist_query, (void *)(long)pv.dest, &n);
         shuffle_play(all);
         deque_destroy(all);
     } else if (a == PV_ADD) {
