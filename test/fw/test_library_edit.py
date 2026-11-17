@@ -464,9 +464,14 @@ def test_a_tap_on_a_rows_circle_shows_or_hides_it(fw, ui, st, keys):
 
 
 class Home:
-    """Home's main list's rows, tagged and shown by lr_home_apply; the card's root listed by toolsLoadDirectory."""
+    """Home's main list's rows, tagged and shown by lr_home_apply; the card's root listed by toolsLoadDirectory. The
+    clock moves CARD_RECHECK_MS with each Home and each change of the card, as home_folders looks again no sooner."""
+    ms = 10 ** 6
+
     def __init__(self, fw, ui, files=None, folders=0):
         self.fw, self.ui, self.folders, self.mtime = fw, ui, folders, 1
+        Home.ms += O['CARD_RECHECK_MS']
+        fw.mock('time_now_ms', lambda *_: Home.ms)
         self.disk = Disk(fw, {'/tmp/mmc_add': b'', **{k: v.ljust(LR['LR_MAX'], b'\0') for k, v in (files or {}).items()}})
         fw.mock('fw___xstat', self.stat)
         fw.mock('toolsLoadDirectory', lambda path, *_: self.folders if C.string_at(path) == b'/mnt/mmc' else 0)
@@ -484,6 +489,7 @@ class Home:
     def card(self, folders):
         """The card's root changes: folders now, or none."""
         self.folders, self.mtime = folders, self.mtime + 1
+        Home.ms += O['CARD_RECHECK_MS']
 
     def apply(self, np=1):
         self.fw.fn('lr_home_apply', None, C.c_void_p, C.c_int)(self.view, np)

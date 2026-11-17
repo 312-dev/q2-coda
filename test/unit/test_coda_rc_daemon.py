@@ -48,6 +48,7 @@ class Shim:
     """demo's side: Now Playing written, each command answered with code."""
     def __init__(self, root):
         self.root, self.seq, self.code, self.verbs = root, 0, 0, []
+        self.loop: threading.Thread | None = None  # the daemon's loop, once started
         (root / 'tmp').mkdir()
         (root / 'mnt/data').mkdir(parents=True)
         self.now(radio=0)
@@ -153,6 +154,7 @@ def test_with_nothing_to_do_the_loop_wakes_once_a_second(q2):
     s, shim = q2
     s.subscribe(position=False)
     WAIT(1.2)
+    assert shim.loop and shim.loop.native_id
     before = sleeps(shim.loop.native_id)
     WAIT(3)
     assert sleeps(shim.loop.native_id) - before <= 5  # about 3; a 250 ms poll woke 12 times
