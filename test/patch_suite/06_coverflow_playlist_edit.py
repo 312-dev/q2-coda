@@ -67,11 +67,12 @@ class CoverflowMachine(QueueMachine):
             self.freed+=a!=0; self.live.pop(a,0)
             if a in getattr(self,'poison',{}): self.u.mem_write(a,b'\0'*self.poison.pop(a))
         elif name=='statfs': self.word(b+4,4096); self.word(b+28,1<<20 if getattr(self,'room',True) else 1024)  # 4 GB free, or 4 MB
-        elif name=='pthread_create':
-            self.word(a,77)
-            if c==payload_syms['step_thread']: self.nested(c,d)  # an open's query step (coverflow.c step_turning): it runs, here at once
+        elif name=='pthread_create':  # an open's query step (coverflow.c step_turning) runs at once, as thread 78
+            step=c==payload_syms['step_thread']; self.word(a,78 if step else 77)
+            if step: self.nested(c,d)
             else: self.threads.append((c,d))
-        elif name=='pthread_join': self.joins.append(a)
+        elif name=='pthread_join':
+            if a!=78: self.joins.append(a)  # the step's join is step_turning's own
         self.returns(ret,clobber=True)
     def open(self):
         """Home with its Cover Flow row selected: centre confirms its image, whose click opens Coverflow."""
