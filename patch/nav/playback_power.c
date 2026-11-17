@@ -228,6 +228,33 @@ static void resume_poll(void) {
     }
 }
 
+/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100): 0 silent, 100
+ * the headset's top, and between a 40 dB curve, 127 x 10^(-40 dB x (100 - v) / 100 / 20), so each
+ * Q2 step is the same 0.4 dB louder wherever it is. A straight 127 v / 100 put the top half in the
+ * headset's last 6 dB, where a headset that takes the value as a gain is loudest. Under v 58 the
+ * curve's levels come closer together than AVRCP's steps, so there the value rises no slower than
+ * one level every three steps (127 v / 400) and no Q2 step is more than two steps from a change.
+ * At least 1 above 0, so only 0 mutes. docs/internals.md#headset-controls-and-volume. */
+static const unsigned char bt_vol_curve[101] = {
+    0,  1,  1,  1,  2,  2,  2,  2,  3,  3,  3,  3,   4,   4,   4,   5,   5,  5,  6,  6,  6,
+    7,  7,  7,  8,  8,  8,  9,  9,  9,  10, 10, 10,  10,  11,  11,  11,  12, 12, 12, 13, 13,
+    13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 17, 17,  17,  17,  18,  18,  18, 19, 20, 21, 22,
+    23, 24, 25, 27, 28, 29, 30, 32, 33, 35, 37, 38,  40,  42,  44,  46,  48, 51, 53, 55, 58,
+    61, 64, 67, 70, 73, 77, 80, 84, 88, 92, 96, 101, 106, 111, 116, 121, 127
+};
+static unsigned bt_vol_avrcp(int v) { return bt_vol_curve[v < 0 ? 0 : v > 100 ? 100 : v]; }
+/* The Q2 volume a headset's level reads as: the one whose curve value is nearest, the lowest of
+ * those that share it, so a level the Q2 wrote reads back as a volume that writes it again. */
+static int bt_vol_q2(unsigned level) {
+    int best = 0;
+    unsigned off = 255;
+    for (int v = 0; v <= 100; ++v) {
+        unsigned d = bt_vol_curve[v] > level ? bt_vol_curve[v] - level : level - bt_vol_curve[v];
+        if (d < off) best = v, off = d;
+    }
+    return best;
+}
+
 /* Home's Rockbox row (docs/boot.md#rockbox-from-home), bound by coverflow_home: a click leaves
  * Q2 Muse for Rockbox. demo cannot start it itself: Rockbox needs the screen, the keys and ALSA. So
  * demo leaves S90play's flag and ends; S90play sees it, runs Rockbox and starts demo again when
@@ -254,7 +281,7 @@ int rockbox_open(void *ctx, void *event) {
      */
     if (bt_link() && g_bluetoothflag && bt_linkstatus &&
         (unsigned)btctl_transport_get_volume() <= 127)
-        btctl_transport_set_volume(((g_maxvolume < 100 ? g_maxvolume : 100) * 127 + 50) / 100);
+        btctl_transport_set_volume(bt_vol_avrcp(g_maxvolume));
     ringnav_clean_end(); /* the watchdog would outlive demo's kill; nothing to report */
     system("killall checkappprocess.sh; killall -9 hciplayer; " SPOT_KILL "; sync; kill -9 $PPID");
     return 0;
@@ -326,10 +353,10 @@ static int bt_sync_volume(int left, int right) {
     if (cur > 127) return btvol.failed = 1, 0; /* no absolute volume (yet): the slow pace */
     int v = left > right ? left : right;
     v = v < 0 ? 0 : v > 100 ? 100 : v;
-    /* 128 headset steps onto 101: one that already reads as v stays, so the headset's own steps
-     * hold */
-    if ((int)(cur * 100 + 63) / 127 != v) {
-        unsigned want = (v * 127 + 50) / 100;
+    /* v's level on the curve, unless the headset is there or at a level of its own that reads as
+     * v, so the headset's own steps hold */
+    unsigned want = bt_vol_avrcp(v);
+    if (cur != want && bt_vol_q2(cur) != v) {
         if (btctl_transport_set_volume(want)) return btvol.failed = 1, 0;
         cur = want;
     }
@@ -381,7 +408,7 @@ static void bt_volume_poll(void) {
         return;
     }
     if (cur == btvol.last) return;
-    int v = (cur * 100 + 63) / 127;
+    int v = bt_vol_q2((unsigned)cur), from = g_volume;
     int limit = g_maxvolume < 100 ? g_maxvolume : 100;
     if (v > limit) v = limit;
     btvol.last = cur;
@@ -389,11 +416,7 @@ static void bt_volume_poll(void) {
     *(volatile signed char *)0xa4cbb5u = (signed char)v; /* stock responseSetVolume's level */
     device_set_volume(v, 1);
     write_int_config(v, "PLAYSET", "VOLUME");
-    void *top = vol_top();
-    if (top) {
-        void *slider = widget_lookup(top, "slider_vol", 1);
-        if (slider) widget_set_prop_int(slider, "value", v);
-    }
+    vol_show(from); /* on screen, as a wheel's change: volume.c */
 }
 
 /* main_loop_sleep_default paces the UI loop at 8 ms (125 Hz), screen on or off. With the backlight

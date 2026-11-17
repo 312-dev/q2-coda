@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: tapping a device (or pressing Center on it) while it says **Connecting…** stops connecting, including the automatic reconnect after Bluetooth comes on; the row goes back to **Not Connected**. Before, the tap did nothing until the 15-second attempt ran out.
+  - Bluetooth: with **Link Volume** on, the volume steps sound even from quiet to loud. Before, half volume was already close to full on headphones such as the Bowers & Wilkins Px7, so only the bottom half of the range was usable; now about 80 sounds like the old 50. Pressing the headphones' own volume buttons now shows the volume on the screen while it is lit, as turning the wheel does, on any page (Now Playing, Control Center's slider and Settings > Playback > Volume follow it too).
   - Lists (OLED): the selected row's words no longer flicker while you drag the wheel part of the way to the next row; the leaning bar covered them on every other frame.
   - Car Remote: **Pair a Phone** says exactly what to do on the phone for the way it can find this Q2 Muse right now. With Bluetooth off (or while the Q2 Muse can't be found over Bluetooth) it gives the Wi-Fi steps: in Q2 Muse Remote, **Pair a Q2 Muse > Wi-Fi address**, type the address the page shows, then the code. With no Wi-Fi either, it says to join a Wi-Fi network first. The steps change as soon as Wi-Fi or Bluetooth comes on. Before, it gave Bluetooth's steps that could not work and named a "Tap Add a Q2 Muse" button the app doesn't have.
   - Car Remote: with Bluetooth off, the Car Remote log no longer gains two error lines every 30 seconds; it says once that Bluetooth isn't running and waits for it to come on.

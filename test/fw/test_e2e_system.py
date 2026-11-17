@@ -1038,9 +1038,14 @@ class Headset:
         q2.fw.mock('stock_btvol_trampoline', lambda left, right, *_: self.gain.append((left, right)) or 0)
 
 
-def nearest(x):
-    """The nearest whole step to x, a half up: a volume carried between the Q2's 101 steps and the headset's 128."""
-    return int(x + 0.5)
+def curve(v):
+    """The headset's level for Q2 volume v on its 40 dB curve (docs/internals.md#headset-controls-and-volume)."""
+    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def reads_as(level):
+    """The Q2 volume a headset level reads as: the nearest on the curve, the lowest of those sharing it."""
+    return min(range(101), key=lambda v: (abs(curve(v) - level), v))
 
 
 @pytest.fixture
@@ -1065,16 +1070,16 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
              *((f'stock_{i}', 'list_item', 'scroll_view_bluetooth') for i in range(4)))
     q2.screen.click('Link Volume')
     assert q2.screen.switch('Link Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
-    # the Q2's level sent, as the headset's nearest step, and the Q2's own gain full
-    assert headset.level == nearest(55 * 127 / 100) and headset.gain[-1] == (100, 100)
-    headset.level = 100  # its own keys: 100/127 of its range, 79 of the Q2's 100
+    # the Q2's level sent, on the curve, and the Q2's own gain full
+    assert headset.level == curve(55) == 17 and headset.gain[-1] == (100, 100)
+    headset.level = 100  # its own keys: 100 of its 127, which reads as the Q2's 95
     q2.loop(ms=500)
-    assert q2.var('g_volume').value == nearest(100 * 100 / 127) == 79
-    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '79'
+    assert q2.var('g_volume').value == reads_as(100) == 95
+    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '95'
     q2.var('g_maxvolume').value = 60
     headset.level = 127
     q2.loop(ms=500)
     # the volume limit holds, the headset pulled back to it
-    assert q2.var('g_volume').value == 60 and headset.level == nearest(60 * 127 / 100)
+    assert q2.var('g_volume').value == 60 and headset.level == curve(60)
     q2.loop(ms=500)
-    assert q2.var('g_volume').value == 60 and headset.level == nearest(60 * 127 / 100)
+    assert q2.var('g_volume').value == 60 and headset.level == curve(60)

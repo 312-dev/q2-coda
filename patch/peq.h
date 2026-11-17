@@ -652,6 +652,7 @@ void slider_page_dirty(
     void *page); /* slider_page.c: its switch row, after the hidden switch changes */
 void stock_more_speed(void *win);
 int xfade_page(void *top);                       /* crossfade.c */
+int xfade_volume_shown(void *top);               /* crossfade.c */
 int night_page(void *top);                       /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
