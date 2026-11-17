@@ -1712,7 +1712,7 @@ The Q2's built-in storage (`/mnt/data`, UBIFS on raw NAND) wears with every writ
 | `.q2pod/ringnav-resume` | long tracks' places | every 60 s on a long track, a pause, a track change | card |
 | `.q2pod/ringnav-plays` | play counts | each counted play | card |
 | `.q2pod/q2-battery` | Battery History | each percent fallen | card |
-| `q2-state` | the [state record](#watchdog) | each change of screen, playback, cable, battery percent | flash: it must outlive a forced restart before the card is mounted |
+| `q2-state` | the [state record](#watchdog) | a change once it has held 5 s (a burst is one write); a run's first line and Standby's at once | flash: it must outlive a forced restart before the card is mounted |
 | `q2-stall`, `q2-cf-trace` | a stall's, a cold Cover Flow open's record | only on a stall or a cold open | flash, for the same reason |
 | ratings, sorts, library and Home order, games, EQ presets, Car Remote pairings, `adb_keys`, `boot-target`, the boot logo, Wi-Fi networks | user data and what boot needs | once per deliberate change | flash |
 
