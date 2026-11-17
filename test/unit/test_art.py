@@ -156,8 +156,15 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               'chargetoast_battery_d': 0xffffff, 'chargetoast_battery_l': 0}  # charging.c's toasts
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
-    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'down', *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
+    status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
+                                          *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
+    # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
+    btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
+    btspin = [f'btspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SPIN_SPOKES)]
+    guest = ['guestphone_a', 'pairing_phone', 'status_guest', 'status_relay_d', 'status_relay_l']  # guest_ui.c's, pair_prompt.c's, status_row.c's
+    bttoast = {**{f'bttoast_{n}': c for n, (_, c) in art.BT_TOASTS.items()},
+               **{f'bttoast_{n}_off': 0xababab for n in art.BT_TOASTS if n != 'low'}}
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
                'circle_lock_d': (art.CIRCLE_LOCK_PX, 0xababab), 'circle_lock_l': (art.CIRCLE_LOCK_PX, 0x5c5c5c)}  # list_marks.c
     card = [f'keylock_card_{k}' for k in ('d', 'l')]
@@ -172,7 +179,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
-                                              *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)))}
+                                              *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
+                                              *btdev, *btspin, *bttoast, *guest)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -203,6 +211,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MODE_GLYPH_PX, 0xffffff) for n in modepages),
                           *((n, art.SW_OFFER_PX, 0xffffff) for n in offers),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
+                          *((n, art.ROW_ICON_PX, c) for n, c in btdev.items()), *((n, art.USB_TOAST_PX, c) for n, c in bttoast.items()),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
         inked = {at(x, y)[:3] for y in range(h) for x in range(w) if at(x, y)[3]}  # straight alpha: one colour, any coverage
@@ -214,9 +223,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
 def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(half, primary, secondary, unlit):
     """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
-    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x and the
-    headset's Bluetooth sized by their height (wifi-x is wider than tall: by its longer side it came out 8 px tall)
-    in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
+    lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
+    Bluetooth rune (dim while connecting), headphones and the car sized by their height (wifi-x and the car are wider
+    than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
     got = art.images(theme.builtins()[0])
     def ink(name, cut=64):
         w, h, at = pixels(got[f'oled_status_{name}_{half}'])
@@ -232,9 +241,10 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
         near = lambda c: any(max(abs(a - b) for a, b in zip(rgb(c), k)) <= 16 for k in colours)  # noqa: E731 (blended edges)
         assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
     assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
-    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_BT_W)):
+    for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_PX), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
+                    ('btdim', art.STATUS_PX)):
         size, lit, colours = ink(name, 8)
-        assert size == (w, art.STATUS_PX) and colours == {rgb(primary)}
+        assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
         x0, x1, y0, y1 = box(lit)
         assert (y0, y1) == (1, 11) and x1 - x0 + 1 <= w
     x0, x1, _, _ = box(ink('wifi_x', 8)[1])

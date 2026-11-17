@@ -1,13 +1,14 @@
 /* The status row's glyph slots (docs/oled-design.md#status-row,
  * docs/internals.md#status-row-slots): right to left the battery, the play state's level bars,
- * Wi-Fi, a card app's sync, a Bluetooth headset's battery and Buttons Lock's padlock. Each slot
- * that shows takes its box and the gap before the one on its right; the clock sits beside the
- * leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title gives way. The
- * battery is stock's view_battery, laid out by the bar's right group and painted by navigation.c
- * paint_battery; every other slot is painted here, from the bar's background (ringnav_paint_bg), so
- * Home in Split inks them with the clock over its art (coverflow.c home_ink, one ink for the row).
- * Every glyph is the clock's digits' height, 11 px on rows 17 to 27 (cy 23), with SR_GAP of ground
- * between two (docs/oled-design.md#status-row); the animated ones repaint only their own box. */
+ * Wi-Fi, a card app's sync, Bluetooth (its link, a headset's battery, a car) and Buttons Lock's
+ * padlock. Each slot that shows takes its box and the gap before the one on its right; the clock
+ * sits beside the leftmost (navigation.c clock_place), so nothing in the row ever wraps: the title
+ * gives way. The battery is stock's view_battery, laid out by the bar's right group and painted by
+ * navigation.c paint_battery; every other slot is painted here, from the bar's background
+ * (ringnav_paint_bg), so Home in Split inks them with the clock over its art (coverflow.c home_ink,
+ * one ink for the row). Every glyph is the clock's digits' height, 11 px on rows 17 to 27 (cy 23),
+ * with SR_GAP of ground between two (docs/oled-design.md#status-row); the animated ones repaint
+ * only their own box. */
 #include "navigation.h"
 
 #define SR_FRAME_MS 125 /* the level bars and the sync arrows: 8 frames a second */
@@ -25,15 +26,17 @@
 #define SR_GAP 6       /* the ground between two glyphs */
 #define SR_GLYPH 14    /* tools/art.py STATUS_PX: a status glyph's box's height */
 #define SR_WIFI_W 16   /* tools/art.py STATUS_WIFI_W: the fan's 15.6 px */
-#define SR_BT_W 8      /* tools/art.py STATUS_BT_W: the Bluetooth rune's 7.7 px */
-#define SR_PCT_PX 13   /* the headset's percentage: a step under the clock's 15 */
+#define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
 #define SR_RING_R 7.0f /* its centre line's radius */
 #define SR_RING_LINE 1.6f
-#define SR_DOWN 8   /* the arrow inside it */
-#define SR_BT_GAP 2 /* the Bluetooth rune's box, then the percentage: 3 px to its ink */
-#define SR_PCT_DY 1 /* the percentage a row under centred, on the clock's baseline */
+#define SR_DOWN 8       /* the arrow inside it */
+#define SR_BT_GAP 2     /* the headphones glyph's box, then the headset's battery */
+#define SR_HS_BATT_W 15 /* the headset's battery: a 15x8 body (list_marks.c battery_slim) */
+#define SR_HS_BATT_H 8
+#define SR_HS_NUB 2 /* ... and its nub's columns past it */
+#define SR_RELAY 8  /* a guest's relay mark between its phone and the Q2's device (tools/art.py) */
 #define SR_TAP_W 44 /* a slot's tap target round its centre, as the battery's */
 #define SR_TAP_H 40
 #define SR_TAP_SLOP 12
@@ -51,15 +54,14 @@ typedef struct {
 static struct {
     int x[SLOT_N], w[SLOT_N]; /* the last layout, in the bar's pixels */
     int frame, spin;          /* the bars' frame and the arrows' */
-    unsigned char adv[11];    /* the headset's '0'-'9' and '%' at SR_PCT_PX, at its first paint */
     unsigned timer, sig, nav;
     int down, down_x, down_y; /* the slot a touch went down on, + 1 */
 } sr __attribute__((section(".scratch")));
 
 #if Q2POD_DEV
-/* --dev builds only, for the emulator, which has no radio, headset or charger: STATUS_FAKE's
- * "wifi=N bt=N charge=1" (any of them, each found by its first letter, key) stands in for what the
- * Q2 would report; -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
+/* --dev builds only, for the emulator, which has no radio or charger: STATUS_FAKE's "wifi=N
+ * charge=1" (either, each found by its first letter, key) stands in for what the Q2 would report;
+ * -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
 #define STATUS_FAKE "/mnt/data/q2-status.fake"
 #define STATUS_FAKE_MS 500
 int status_fake(char key) {
@@ -102,38 +104,51 @@ static int wifi_level(void) {
  * shows the full glyph. A DNS lookup or an HTTP check from a worker would lift it. */
 static int wifi_offline(void) { return networkGetConnectStatus() <= 0; }
 
-/* The headset's level and "%" in s, its length returned. */
-static unsigned pct_text(unsigned *s, int level) {
-    unsigned n = put_num(s, (unsigned)(level > 100 ? 100 : level));
-    s[n++] = '%';
-    return n;
-}
-/* That text's width at SR_PCT_PX: its characters' advances as the headset's first paint measured
- * them (sr.adv), estimated before it (Inter's 13 px figures about 8, its "%" 12). */
-static int pct_w(int level) {
-    unsigned s[5], n = pct_text(s, level);
-    int w = 0;
-    for (unsigned i = 0; i < n; ++i) {
-        int k = s[i] == '%' ? 10 : (int)(s[i] - '0');
-        w += sr.adv[k] ? sr.adv[k] : k == 10 ? 12 : 8;
-    }
-    return w;
-}
-/* The headset's level (bt_battery.c's), or the --dev stand-in's. */
-static int headset_level(void) {
-    int fake = status_fake('b');
-    return fake >= 0 ? fake : bt_headset_battery();
-}
-
 static int play_shown(void) {
+    if (home_np_lead()) return 0; /* Home's first row leads with it (home_np.c) */
     int s = bar_status();
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
 static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
 static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
-/* The headset's slot at level (bt_headset_battery's): its width, 0 for none */
-static int headset_w(int level) { return level >= 0 ? SR_BT_W + SR_BT_GAP + pct_w(level) : 0; }
-static int headset_shown(void) { return headset_w(headset_level()); }
+/* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
+ * link list's last item is the device it links (status 3 connected, as its rows read it); a link
+ * thread running (bt_connectstatus 1) is a device connecting. */
+enum {
+    BT_SLOT_NONE,
+    BT_SLOT_CONNECTING,
+    BT_SLOT_RUNE,
+    BT_SLOT_HEADSET,
+    BT_SLOT_CAR,
+    BT_SLOT_GUEST
+};
+static int bt_slot(void) {
+    if (guest_active()) return BT_SLOT_GUEST; /* a guest plays (guest_ui.c) */
+    char item[32] = "";
+    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
+    if (n > 0) getBtLinkItem(n - 1, &status, item);
+    if (status != 3)
+        return n > 0 && I(bt_connectstatus, 0) == 1 ? BT_SLOT_CONNECTING : BT_SLOT_NONE;
+    if (!tk_strcmp(bt_kind(bt_headset_class()), "car")) return BT_SLOT_CAR;
+    return bt_headset_battery() >= 0 ? BT_SLOT_HEADSET : BT_SLOT_RUNE;
+}
+/* A guest's: its phone, and while relayed to a Bluetooth device the mark and that device's glyph */
+static int guest_relayed(void) {
+    char out[64];
+    guest_field("out", out, sizeof out);
+    return *out && tk_strcmp(out, "jack");
+}
+/* The linked device's glyph's width: a car's is wider than the others' 14 px box at 11 px tall */
+static int linked_w(void) { return !tk_strcmp(bt_kind(bt_headset_class()), "car") ? SR_CAR_W : SR_GLYPH; }
+static int headset_shown(void) {
+    int slot = bt_slot();
+    if (slot == BT_SLOT_GUEST)
+        return SR_GLYPH + (guest_relayed() ? SR_BT_GAP + SR_RELAY + SR_BT_GAP + linked_w() : 0);
+    return slot == BT_SLOT_NONE      ? 0
+           : slot == BT_SLOT_HEADSET ? SR_GLYPH + SR_BT_GAP + SR_HS_BATT_W + SR_HS_NUB
+           : slot == BT_SLOT_CAR     ? SR_CAR_W
+                                     : SR_GLYPH;
+}
 static int lock_shown(void) { return g_keylock_flag ? SR_LOCK : 0; }
 
 /* The play state, in Text Primary as every glyph: playing, the level bars (Up Next's, upnext.c
@@ -188,6 +203,14 @@ static void glyph(void *bar, void *canvas, const char *stem, int x, int w, int c
     paint_art(bar, canvas, theme_art(name), x + (w - px) / 2, cy - (px + 1) / 2);
 }
 
+/* A status glyph's art (tools/art.py STATUS_FIT, the fan), SR_GLYPH tall and as wide as its ink, at
+ * x on cy: its ink on the digits' rows. */
+static void status_art(void *bar, void *canvas, const char *stem, int x, int cy) {
+    char name[40];
+    tk_snprintf(name, sizeof name, "%s_%c", stem, ipod_light() ? 'l' : 'd');
+    paint_art(bar, canvas, theme_art(name), x, cy - (SR_GLYPH + 1) / 2);
+}
+
 /* Wi-Fi: iOS's fan, 1 to 3 of its dot and two bands lit by the bars (1 one, 2 two, 3 and 4 all
  * three), the rest dim (tools/art.py status_wifi); wifi-x connected with no internet. Both are
  * SR_WIFI_W x SR_GLYPH. */
@@ -198,9 +221,7 @@ static void wifi_paint(void *bar, void *canvas, int x, int cy) {
         tk_snprintf(stem, sizeof stem, "status_wifi_x");
     else
         tk_snprintf(stem, sizeof stem, "status_wifi_%d", level > 3 ? 3 : level);
-    char name[40];
-    tk_snprintf(name, sizeof name, "%s_%c", stem, ipod_light() ? 'l' : 'd');
-    paint_art(bar, canvas, theme_art(name), x, cy - (SR_GLYPH + 1) / 2);
+    status_art(bar, canvas, stem, x, cy);
 }
 
 /* A card app's sync: checking, the arrows turning in Text Secondary; downloading, a ring that fills
@@ -236,28 +257,39 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     glyph(bar, canvas, "status_down", x, SR_RING, cy, SR_DOWN);
 }
 
-/* The headset: the Bluetooth rune, SR_INK tall, then SR_BT_GAP on its level and "%" at SR_PCT_PX,
- * a step under the clock so it reads as secondary to the Q2's own battery, Text Primary, on one
- * line standing on the clock's baseline. */
-static void headset_draw(void *bar, void *canvas, int x, int cy, int level) {
-    int px = SR_PCT_PX;
-    unsigned s[5], n = pct_text(s, level);
-    char name[24];
-    tk_snprintf(name, sizeof name, "status_bt_%c", ipod_light() ? 'l' : 'd');
-    paint_art(bar, canvas, theme_art(name), x, cy - (SR_GLYPH + 1) / 2);
-    void *lcd = P(canvas, CANVAS_LCD);
-    unsigned text = lcd ? (unsigned)I(lcd, LCD_TEXT_COLOR) : 0;
-    canvas_set_font(canvas, theme_face(s, (int)n, &px), (unsigned)px);
-    for (unsigned k = 0; !sr.adv[10] && k < 11; ++k) { /* the face holds until a restart */
-        unsigned c = k == 10 ? '%' : '0' + k;
-        sr.adv[k] = (unsigned char)(canvas_measure_text(canvas, &c, 1) + 0.5f);
-    }
-    canvas_set_text_color(canvas, RGBA(ipod_light() ? 0 : 0xffffff));
-    canvas_draw_text(canvas, s, n, x + SR_BT_W + SR_BT_GAP, cy - px / 2 + SR_PCT_DY);
-    if (lcd) stock_canvas_set_text_color(canvas, text);
-}
+/* The Bluetooth slot: a guest playing (Guest Play), its phone in the accent, and relayed to a car
+ * or headset "› car"; else nothing while off or idle; the rune dim while a device connects and in
+ * Text Primary once one is connected; a headset that reports its level, the headphones glyph and a
+ * 15x8 battery, filled to the level and red under 20% as the status battery's; a car, its glyph. */
 static void headset_paint(void *bar, void *canvas, int x, int cy) {
-    headset_draw(bar, canvas, x, cy, headset_level());
+    switch (bt_slot()) {
+    case BT_SLOT_CONNECTING:
+        glyph(bar, canvas, "status_btdim", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_RUNE:
+        glyph(bar, canvas, "status_bt", x, SR_GLYPH, cy, SR_GLYPH);
+        break;
+    case BT_SLOT_CAR:
+        status_art(bar, canvas, "status_car", x, cy);
+        break;
+    case BT_SLOT_GUEST: /* the guest's phone in the accent, then › and where it plays */
+        paint_art(bar, canvas, theme_art("status_guest"), x, cy - (SR_GLYPH + 1) / 2);
+        if (guest_relayed()) {
+            int at = x + SR_GLYPH + SR_BT_GAP;
+            glyph(bar, canvas, "status_relay", at, SR_RELAY, cy, SR_RELAY);
+            at += SR_RELAY + SR_BT_GAP;
+            status_art(bar, canvas, linked_w() == SR_CAR_W ? "status_car" : "status_headphones",
+                       at, cy);
+        }
+        break;
+    case BT_SLOT_HEADSET: {
+        int level = bt_headset_battery();
+        glyph(bar, canvas, "status_headphones", x, SR_GLYPH, cy, SR_GLYPH);
+        battery_slim(bar, canvas, x + SR_GLYPH + SR_BT_GAP, cy - SR_HS_BATT_H / 2, SR_HS_BATT_W,
+                     SR_HS_BATT_H, (unsigned)(level > 100 ? 100 : level) << 4);
+        break;
+    }
+    }
 }
 
 /* Buttons Lock's padlock (keylock.c), the theme's keylock art in Text Primary. */
@@ -396,20 +428,23 @@ static int sr_tick(const void *info) {
 
 /* bar_state_sync, each bar paint and each second: the frames' timer started while lit and
  * something moves; 1 when what the slots show changed (which slots, the play state, Wi-Fi's level
- * or its internet, the sync's kind and its ring to the 50th, the headset's level, the lock), so the
- * bar repaints whole after the frame and the clock moves beside the new leftmost slot. */
+ * or its internet, the sync's kind and its ring to the 50th, the Bluetooth slot's kind and the
+ * headset's level, the lock), so the bar repaints whole after the frame and the clock moves beside
+ * the new leftmost slot. */
 int status_row_sync(void) {
     if (!geom_val(V_STATUS_Y)) return 0;
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
-    int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(), head = headset_level();
+    int permille = 0, kind = addon_sync(&permille), wifi = wifi_level(),
+        head = bt_headset_battery();
     unsigned sig = (unsigned)bar_status() | (unsigned)(wifi && wifi_offline() ? 5 : wifi) << 3 |
                    (unsigned)kind << 6 | (unsigned)(kind == 2 ? permille / 20 : 0) << 8 |
                    (unsigned)(head < 0     ? 127
                               : head > 100 ? 100
                                            : head)
                        << 14 |
-                   (unsigned)!!g_keylock_flag << 21 | 1u << 22;
+                   (unsigned)!!g_keylock_flag << 21 | 1u << 22 | (unsigned)bt_slot() << 23 |
+                   (unsigned)home_np_lead() << 26;
     if (sig == sr.sig) return 0;
     sr.sig = sig;
     return 1;

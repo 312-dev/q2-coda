@@ -3529,6 +3529,7 @@ static struct {
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
 extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
+extern void home_np_bind(void *win), home_np_sync(void); /* home_np.c: Home's first row */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
@@ -4553,9 +4554,11 @@ static int np_loaded(void) {
         home.np_timer = timer_add(np_due, (void *)0, (unsigned)left);
     return home.np && left > 0;
 }
-/* Every bar paint (navigation.c bar_sync): Home laid out again once Now Playing's row is to come
- * or go, or, with Home on top, Folders' rule changes (home.c home_folders). */
+/* Every bar paint (navigation.c bar_sync): Home's first row follows the play state (home_np.c),
+ * and Home is laid out again once Now Playing's row is to come or go, or, with Home on top,
+ * Folders' rule changes (home.c home_folders). */
 void coverflow_home_np(void) {
+    home_np_sync(); /* its first row's state (home_np.c) */
     if (!home.list) return;
     int top = window_manager_get_top_window(window_manager()) == home.win;
     if (np_loaded() != home.np || (top && home_folders() != home.folders)) coverflow_home_layout();
@@ -4736,6 +4739,7 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    home_np_bind(win); /* its first row's click and glyph (home_np.c) */
     home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);
