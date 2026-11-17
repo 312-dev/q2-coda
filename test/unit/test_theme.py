@@ -124,7 +124,7 @@ THUMB = dict(thumb=1, ticks_turn=36, ticks_album=7, fast_at=23, fast_full=90, to
 
 MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow') for a in ('ms', 'easing', 'anim')},
                 **{f'motion.{k}.{a}': 0 for k in ('inplace', 'swap', 'step', 'step_fast', 'coverflow_step', 'coverflow_step_fast') for a in ('ms', 'easing')},
-                'motion.page.ms': 120, 'motion.page.easing': 5, 'motion.swap.ms': 120, 'motion.swap.easing': 8,
+                'motion.page.ms': 220, 'motion.page.easing': 5, 'motion.swap.ms': 220, 'motion.swap.easing': 8,
                 'motion.step.ms': 200, 'motion.step.easing': 8, 'motion.step_fast.ms': 120, 'motion.step_fast.easing': 8,
                 'motion.coverflow_step.ms': 200, 'motion.coverflow_step.easing': 8, 'motion.coverflow_step_fast.ms': 120, 'motion.coverflow_step_fast.easing': 8,
                 'recall_ms': 300}
@@ -1078,8 +1078,8 @@ def test_motion_today(tmp_path):  # OLED: the asset hint kept (0), offsets.inc's
     o = oled()
     assert {k.field: o[k.field] for k in theme.SCHEMA.values() if k.cls == 'motion'} == MOTION_TODAY
     inc = boot_inc(tmp_path, theme.builtins())
-    assert inc.count('.motion[MOTION_PAGE].hint = 0,') == 1 and ipod.SLIDE == 'htranslate(duration=120)'
-    for f, v in (('motion[MOTION_SWAP].ms', 120), ('motion[MOTION_SWAP].easing', 8), ('motion[MOTION_STEP].ms', 200),
+    assert inc.count('.motion[MOTION_PAGE].hint = 0,') == 1 and ipod.SLIDE == 'htranslate(duration=220)'
+    for f, v in (('motion[MOTION_SWAP].ms', 220), ('motion[MOTION_SWAP].easing', 8), ('motion[MOTION_STEP].ms', 200),
                  ('motion[MOTION_STEP_FAST].ms', 120), ('motion[MOTION_STEP].easing', 8), ('recall_ms', 300)):
         assert inc.count(f'.{f} = {v},') == 1, f
     assert inc.count('.motion[MOTION_COVERFLOW].hint = 0,') == 1 and inc.count('.motion[MOTION_INPLACE].ms = 0,') == 1
@@ -1211,6 +1211,17 @@ def test_resolve_rejects_an_unknown_art():
     ('<view name="list"><element name="scrollbar" w="0"/></view>', "list.scrollbar: the wheel's indicator needs w, top and bottom")])
 def test_every_theme_has_what_the_marks_draw_with(body, message):
     assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'
+
+
+def test_accent_text_reads_on_either_half():
+    """accent_text, the accent as text (action rows, links): WCAG's 4.5:1 for body text on each half's canvas."""
+    def lum(c):
+        ch = [(c >> s & 255) / 255 for s in (16, 8, 0)]
+        r, g, b = (x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in ch)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    for light in (False, True):
+        a, b = lum(theme.token('accent_text', light)), lum(theme.token('canvas', light))
+        assert (max(a, b) + 0.05) / (min(a, b) + 0.05) >= 4.5, light
 
 
 def test_tokens_h_is_written_from_tokens(tmp_path):

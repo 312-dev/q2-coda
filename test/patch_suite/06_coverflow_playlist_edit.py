@@ -332,7 +332,7 @@ assert m.showlabels()==['Search: beat','T1']
 m.choose(1); assert m.toasts[-1][3]=='Added to Playlist' and m.showlabels()==['Search: beat','T1']
 ple_search(m,'zeb'); assert m.showlabels()==['Search: zeb','T2']
 ple_search(m,''); assert m.showlabels()==['Search','T1','T2'] and m.ticks()==[False,True,False]
-ple_search(m,'zzz'); assert m.showlabels()==['Search: zzz','No songs match']
+ple_search(m,'zzz'); assert m.showlabels()==['Search: zzz'] and empty_titles(m)==['No Matches']  # compact, under Search
 # Return from the box applies its text, and a filtered pick can close the page cleanly.
 m.choose(0); m.nodes[m.find('edit')]['text']='t1'; assert m.key()==11
 assert m.showlabels()==['Search: t1','T1']; m.close(); passed()

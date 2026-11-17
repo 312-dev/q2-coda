@@ -46,7 +46,8 @@ enum {
 #define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
 #define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
-/* 2048 CAP_FAVORITES, 4096 CAP_RECENT (feat/carremote-lists) */
+#define CAP_FAVORITES 2048u /* the library's favorites node */
+#define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
 #define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 

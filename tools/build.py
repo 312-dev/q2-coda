@@ -10,7 +10,7 @@ ZIP_SHA = '4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e'
 DEMO_SHA = 'e65d638d6e70332b4c3193af8ac2044941ec0157d20e41e40233aac5b0c2c59f'
 VERSION = '1.8.2'  # major.minor.patch, single digits, shown as is (About and release tag)
 BETA = 0  # a pre-release's beta number (1-9), 0 for the release itself
-REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo) and release.py publishes
+REPO = '312-dev/q2-coda'  # whose releases Software Update fetches (--update-repo) and release.py publishes
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
@@ -89,7 +89,7 @@ HOOKS = {
     'toolsWriteConfig': (0x5d0284, 'ringnav_ini_write', 'ini_write'),
     'main_loop_sleep_default': (0x65c470, 'ringnav_sleep', 'sleep'),
     'systemset_about_page_init': (0x4c1390, 'ringnav_about', 'about'),
-    # Network Update (patch/netupdate.c): the latest GitHub release to the card's update.tar
+    # stock's System Update page (patch/netupdate.c): its second row opens Software Update (sw_update.c)
     'systemset_fwupdate_page_init': (0x4c88d0, 'ringnav_fwupdate', 'fwupdate'),
     # Podcasts and Audiobooks: folder_page opened at their folder, and Back there leaving it
     'folder_page_init': (0x533ed0, 'ringnav_folder', 'folder'),
@@ -118,7 +118,7 @@ HOOKS = {
     # the firmware update's dialog, which stops the player before it flashes and reboots
     'device_reboot': (0x502004, 'ringnav_reboot', 'reboot'),
     'dialog_checkfw_dialog_init': (0x49982c, 'ringnav_checkfw', 'checkfw'),
-    # SD Card Update (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
+    # Software Update's card half (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
     'fwupdate_tf': (0x4c7eb4, 'ringnav_fwupdate_tf', None),
     'mclLoadPlayList': (0x5bcfc8, 'ringnav_load', 'load'),
     'mclNextSong': (0x5c063c, 'ringnav_next', 'next'),
@@ -1838,6 +1838,7 @@ FUNCTIONS = {
  'bitmap_lock_buffer_for_read': ('const unsigned char *', 'void *'),
  'canvas_draw_image': ('int', 'void *, void *, const void *, const void *'),
  'canvas_set_global_alpha': ('int', 'void *, unsigned'),
+ 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'),
  'widget_paint': ('int', 'void *, void *'),  # a widget painted into another's canvas (coverflow.c coverflow_home_strip)
  # Cover Flow's flip paints the tracks panel to a bitmap as stock's window snapshots do (coverflow.c flip_capture)
  'canvas_offline_create': ('void *', 'unsigned, unsigned, unsigned'),
@@ -1860,7 +1861,7 @@ FUNCTIONS = {
  'check_forbid_play_no_headset': ('int', 'int'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'get_wifisignal': ('int', 'void'),  # the status bar's Wi-Fi bars, 1-4; -1 when not connected
- 'fwupdate_tf': ('int', 'void'),  # System Update's SD Card Update (sw_update.c ringnav_fwupdate_tf)
+ 'fwupdate_tf': ('int', 'void'),  # the card's update alone (sw_update.c ringnav_fwupdate_tf)
  # its stock checks: -15 battery under 16% with no cable, -2 no card, -11 no file, -12 under 0.1 GB free, else 1
  'check_updatefw_exist': ('int', 'const char *, const char *'),
  'widget_set_tr_text': ('int', 'void *, const char *'),
@@ -1949,6 +1950,8 @@ FUNCTIONS = {
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
+    # stock's htranslate window animator's own (its vtable, HTRANSLATE_VT): page_parallax.c runs each after its change
+    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90,
     "playlist_delete_click": 0x4b62c8,
     'volume_dialog_on_keyup': HOOKS['volume_dialog_on_keyup'][0],
     'keylock_rows': HOOKS['keylock_rows'][0],
@@ -1968,7 +1971,7 @@ PRIVATE_FUNCTIONS = {
     "folder_click": HOOKS['folder_click'][0],  # folder_page's row click (folder_enter, then a file's queue)
     "np_info": 0x53bc78,  # Now Playing's info page labels, from the track (NP_INFO_CALL)
     "ab_x": 0x53b9d8,  # an A-B marker's x, on the boot set's np_bar_x and np_bar_w (AB_X_CALLS)
-    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's SD Card Update
+    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's card update
     # Smart Wi-Fi's held stock actions (smart_wifi.c smart_hold)
     "stream_row": HOOKS['stream_row'][0],  # Streaming's Tidal row: atoi of the button's name
     "netservice_row": HOOKS['netservice_row'][0],  # Network service's DLNA, AirPlay and Wi-Fi transfer
@@ -2024,8 +2027,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
-                   'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
-                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carpair_page', 'artistrows_page',
+                   'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
+                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'carpair_page', 'artistrows_page',
                    'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page',
                    'swupdate_page', 'empty_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
@@ -2074,12 +2077,12 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c', 'stream_state.c', 'np_stream.c', 'np_settle.c', 'np_skip.c', 'song_radio.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'ringnav_ab_x', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_x', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text', 'ringnav_dark_cover_usleep',
@@ -2287,6 +2290,11 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
+# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent
+# and draw_prev_window at +0x14 and +0x18, each pointed at page_parallax.c's, which runs stock's with its change (docs/internals.md#page-parallax).
+HTRANSLATE_VT = 0x93b234
+HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'))
+
 PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
@@ -2325,7 +2333,7 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     return '\n'.join(header)+'\n'
 
 def signing_key(path, dev):
-    """The release key's 32 public bytes that Network Update and the App Store check signatures with
+    """The release key's 32 public bytes that Software Update and the App Store check signatures with
     (docs/internals.md#release-signatures): assets/signing/q2-coda-release.pub, which a release build must have;
     a --dev build may take another (path), such as a test key whose private half is at hand."""
     from signing import PUBLIC_KEY, public_key
@@ -2560,6 +2568,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for address in CUE_TEXT:
         patch_word(patched, address, branch(0x04110000, address, syms['toolsIconvConvert']),
                    jal(ps['ringnav_cue_text']), 'CUE text read as UTF-8, GBK or Windows-1252')
+    for slot, (old, name) in enumerate(HTRANSLATE_SLOTS):  # page push and pop with parallax (page_parallax.c)
+        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: the page under drifts and dims')
     patch_word(patched, DIALOG_CLOSE, branch(0x04110000, DIALOG_CLOSE, syms['idle_add']),
                jal(ps['ringnav_dialog_close']), "a modal dialog's close skips one already gone")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,
@@ -2977,7 +2987,7 @@ if __name__ == '__main__':
     ap.add_argument('--flac-experiments', default='sync,lpc,output', metavar='sync,lpc,output',
                     help='FLAC fast paths (comma-separated subset; empty for stock FLAC)')
     ap.add_argument('--update-repo', default=REPO, metavar='OWNER/NAME',
-                    help="GitHub repo whose latest release Network Update fetches (default: %(default)s), for a fork's test builds")
+                    help="GitHub repo whose latest release Software Update fetches (default: %(default)s), for a fork's test builds")
     ap.add_argument('--signing-key', type=pathlib.Path, metavar='PUB.PEM',
                     help='Ed25519 public key that updates and the app list must be signed with, in place of assets/signing/q2-coda-release.pub (requires --dev)')
     ap.add_argument('--aic-idle-wait', action='store_true',

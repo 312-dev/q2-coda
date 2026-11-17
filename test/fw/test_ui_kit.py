@@ -123,6 +123,30 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
     assert bool(beside) == ringed
 
 
+@pytest.mark.parametrize('light', [0, 1])
+@pytest.mark.parametrize('primary, pressed, fill', [(1, 0, None), (1, 1, 0x1a4dad), (0, 0, 'grey'), (0, 1, 'down')])
+def test_one_button_is_the_empty_states_capsule_in_either_kind(fw, st, light, primary, pressed, fill):
+    """ui_kit.c ui_button, Software Update's and the library scan's (docs/oled-design.md#buttons): the empty states'
+    capsule, 38 px tall, its label Inter Medium 17 with 24 px each side and at least 140 px, centred on (cx, cy);
+    primary the accent with white words, secondary the grey with Text Primary words, and pressed a step darker."""
+    from test_nav_painters import OLED as OLED_THEME, THEMES, Canvas, rgba, theme
+    theme(fw)
+    st('light').value = light
+    st('touch_mode').value = 1
+    c = Canvas(fw, char_w=7)
+    w = fw.fn('ui_button', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_char_p, C.c_int, C.c_int, C.c_int)(
+        c.addr, 187, 100, b'Stop', primary, 0, pressed)
+    assert w == 140  # 'Stop' is 28 px + 48: the least width
+    t = THEMES[OLED_THEME]
+    accent = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+    grey = {('grey', 0): 0x2c2c2e, ('grey', 1): 0xe5e5ea, ('down', 0): 0x3a3a3c, ('down', 1): 0xd1d1d6}
+    want = accent if fill is None else grey.get((fill, light), fill)
+    (box, ink, radius), = c.boxes
+    assert box == (187 - 70, 100 - 19, 140, 38) and ink == rgba(want) and radius == 19
+    (words, _, color), = c.texts
+    assert words == 'Stop' and color & 0xffffff == (0xffffff if primary else host.tools_theme.token('primary', bool(light)))
+
+
 # ---- motion (ui_kit.h, docs/oled-design.md#motion) ----
 MO_SPATIAL, MO_DECOR, MO_FEEDBACK = range(3)
 EASE_LINEAR, EASE_QUAD_IN, EASE_QUAD_OUT, EASE_CUBIC_IN, EASE_CUBIC_OUT = 0, 1, 2, 4, 5

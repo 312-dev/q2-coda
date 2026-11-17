@@ -71,7 +71,7 @@ python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-dev --dev   # test 
 python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-build       # release build
 
 # Tests of a build: the real MIPS payload under Unicorn.
-python3 test/patch.py /tmp/q2-dev        # the UI payload (about 3.5 minutes)
+python3 test/patch.py /tmp/q2-dev        # the UI payload (about 4.5 minutes, one core)
 python3 test/playback.py /tmp/q2-dev     # queue traversal and the wheel's ticks
 
 ./tools/format.sh                        # clang-format and prettier, before a pull request; --check changes nothing
@@ -81,14 +81,17 @@ The full list of suites, with what each needs, is in [docs/building.md](docs/bui
 
 ## Working beside other agents
 
-Many agents share one 16 GB laptop: use the shared tools in [building: Fast test runs](docs/building.md#fast-test-runs), not your own copies.
+Many agents share one 16 GB laptop, and a script, not an agent, integrates their work. **If you were spawned as a worker, read [docs/orchestration.md](docs/orchestration.md) first** (the worker's contract: how you register, test, queue your branch and end); if you are the main thread, it is how you run workers, read the queue and stop everything. The short form:
 
+- Register: `q2 agent start NAME --item '...'` in your worktree. Refused means another worker is there: stop and say so.
 - Build with `B=$(python3 tools/ci/rebuild.py --dev | tail -1)`: one reused build per worktree, skipped when nothing changed. Not a new `bN` each time.
-- Test with `python3 tools/ci/affected.py --run "$B"`: what your branch's changes need. `tools/ci/patch_shards.py "$B"` and `tools/ci/fw.py` run whole suites in parallel; `test/patch.py` and `test/fw` run directly only for a serial check.
-- Wrap anything else heavy in `q2-heavy` (memory, disk, power and no-core-dump guards). Never `pytest -n auto`.
-- Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`.
+- Test with `python3 tools/ci/affected.py --run "$B"`, in the foreground: what your branch's changes need. For a payload change that is all of `test/patch.py`, run serially (under five minutes on one core); never `tools/ci/patch_shards.py` on the whole suite, which takes twice as long and seven times the memory ([building: Fast test runs](docs/building.md#fast-test-runs)).
+- Wrap anything else heavy in `q2-heavy` (memory, disk, power, no core dump, a deadline). Never `pytest -n auto`.
+- Wait with `q2-wait --pid PID --timeout S` or `q2-wait --log FILE --match REGEX --timeout S`. Never a loop around `pgrep`, never a wait with no limit.
+- Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`; slot 2 is the user's.
 - UI work: `python3 tools/ci/q2live.py` rebuilds demo and reloads a pooled emulator on every save under `patch/`, back on your page ([building: Live reload](docs/building.md#live-reload)).
-- Integrating: `python3 tools/ci/merge_train.py BRANCH...` in the integration worktree.
+- The trunk (`q2 trunk`) moves only through the merge queue: a commit, merge or push to it is refused. When your branch is done, merge the trunk into it, run `affected.py --run "$B"` again, push, and queue it: `python3 tools/ci/merge_batch.py --mark-ready` (refused if it would conflict: resolve in your branch). Then `q2 agent end NAME --state READY` and end with `READY <branch> <sha>`. Do not wait for the merge; the queue lands it within a batch or sends it back with the failing test.
+- Leave nothing running: `q2 agent end` is refused while a job or process of your worktree is alive.
 
 ## Traps
 

@@ -71,10 +71,11 @@ def test_gradient_holds_the_first_stops_colour_before_it():
 
 def test_every_literal_corner_radius_is_in_the_table():
     source = ''.join(p.read_text() for p in sorted((pathlib.Path(__file__).parents[2] / 'patch').glob('**/*.c')))
-    def literal(names):
-        return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', source)}
+    def literal(names, text=source):
+        return {int(r) for r in re.findall(rf'(?:{names})\([^;]*?,\s*(\d+)(?:,[^;]*?)?\);', text)}
+    assert literal('round_row', 'round_row(canvas, &track, 3, i, rest);') == {3}  # the pattern still reads a call
     radii = literal('paint_round_rows|round_row|row_below|inset_top|round_ring')
-    assert radii and radii <= set(art.CORNERS)
+    assert radii <= set(art.CORNERS)  # none at all is fine: every rounded box may take its radius from a name
     assert {r - 1 for r in literal('round_ring')} <= set(art.CORNERS)  # a ring reads its radius less one too
 
 
@@ -124,8 +125,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     sign-in steps (fill, the done check bold, 44 px) in white for their solid circles, Control Center's glyphs (fill,
     white, its sliders' in the block's grey), the USB pages' rows, mode glyphs and toasts, and Up Next's bump arrow and
     Now Playing's queue and radio glyphs, charging's toasts (fill, 15 px, each in its colour, the battery's in each
-    half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green), and SD Card Update's result glyphs
-    (white, 44 px) and its spinner. The status battery's inset glyphs have their own test."""
+    half's Text Primary) and the plug-in screen's bolt (fill, 26 px, Positive green), and Software Update's result glyphs
+    (white, 44 px), its offer's (white, 30 px) and its spinner, and Car Remote's phone (20 px) in Text Secondary (each
+    half's) and white. The status battery's inset glyphs have their own test."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
@@ -142,10 +144,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     lives = [f'mark_{n}_{k}' for n in ('cloud', 'down') for k in ('d', 'l', 'w')]  # catalogue.c's song marks
     store = ['store_pick_a', 'store_pick_w'] + [f'store_auto_{k}' for k in ('d', 'l', 'w')]  # storage.c's Downloads
     modepages = [f'modepage_{n}' for n in art.MODE_GLYPHS]  # every mode page's glyph (feedback.c mode_page_paint)
+    offers = [f'swoffer_{n}' for n in art.SW_OFFER]  # Software Update's offer (sw_update.c sw_offer_paint)
     cc = [f'cc_{n}' for n in art.CC_ICONS]  # control_center.c's glyphs
     usb = [*(f'usb_{n}_{k}' for n in art.USB_ROWS for k in ('d', 'l', 'w')),
            *(f'usbtoast_{n}' for n in art.USB_TOASTS)]  # usb_ui.c's chooser rows and toasts
     usb += [f'empty_{n}_{k}' for n in art.EMPTY_GLYPHS for k in ('d', 'l')]  # feedback.c empty_state's glyphs, per half
+    usb += [f'scan_{n}_{k}' for n in ('done', 'card', 'folder') for k in ('d', 'l')]  # scan_page.c's figures
     upnext = [f'bump_{k}' for k in ('d', 'l', 'w')] + [f'mode_{n}' for n in ('queue_d', 'queue_l', 'radio_d', 'radio_l', 'radio_w',
                                                                               'shuffle_xd', 'shuffle_xl', 'repeat_xd', 'repeat_xl')]
     charge = {**{f'chargetoast_{n}': c for n, (_, c) in art.CHARGE_TOASTS.items()},
@@ -163,11 +167,12 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
               for k, c in (('d', d), ('l', l), ('w', 0xffffff))}
     assert set(got) == {'sort_bars'} | {f'oled_{n}' for n in ('chevron_d', 'chevron_l', 'chevron_w', 'chevron_td', 'chevron_tl', 'play_d', 'play_l',
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
+                                              'crphone_d', 'crphone_l', 'crphone_w',
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', 'search_pop_echoes', 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
-                                              *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
+                                              *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'np{n}_{k}' for n in ('cloud', 'cloudoff') for k in ('d', 'l')))}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
@@ -176,6 +181,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('shuffle_a', art.ROW_ICON_PX, blue), ('shuffle_w', art.ROW_ICON_PX, 0xffffff),
                           ('folder_d', art.ROW_ICON_PX, 0xababab), ('folder_l', art.ROW_ICON_PX, 0x5c5c5c),
                           ('folder_w', art.ROW_ICON_PX, 0xffffff), ('confirm_shuffle', art.CONFIRM_GLYPH_PX, blue),
+                          ('crphone_d', art.CR_PHONE_PX, 0xababab), ('crphone_l', art.CR_PHONE_PX, 0x5c5c5c),
+                          ('crphone_w', art.CR_PHONE_PX, 0xffffff),  # Car Remote's phone rows
                           ('chevron_td', art.CARET_PX, 0x858585), ('chevron_tl', art.CARET_PX, 0x6e6e6e),
                           ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
                           ('holdback', art.HOLD_BACK_PX, 0xffffff),  # search_strip.c's Return-held card
@@ -196,6 +203,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.MARK_PX, {'d': 0x858585, 'l': 0x6e6e6e, 'w': 0xffffff}[n[-1]]) for n in lives),
                           *((n, art.MARK_PX, {'a': blue, 'd': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in store),
                           *((n, art.MODE_GLYPH_PX, 0xffffff) for n in modepages),
+                          *((n, art.SW_OFFER_PX, 0xffffff) for n in offers),
                           *((n, art.USB_TOAST_PX, c) for n, c in charge.items()), ('chargebolt', art.CHARGE_BOLT_PX, 0x34c759),
                           *((f'cc_{n}', px, c) for n, (_, px, c) in art.CC_ICONS.items())):
         w, h, at = pixels(got[f'oled_{name}'])
