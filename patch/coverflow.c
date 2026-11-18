@@ -4210,7 +4210,7 @@ void coverflow_home_art(void *top) {
     int moves = cover ? slide_show(cover, 0, cut) : -1;
     if (moves < 0 && r) moves = slide_show(url, 0, cut), src = url;
     /* no cover: the placeholder as the pane's slide, so it runs up under the status row as a cover
-     * does (coverflow_home_bar) */
+     * does */
     if (moves < 0) moves = slide_show(HOME_PLACEHOLDER, 0, cut), src = HOME_PLACEHOLDER;
     if (moves > 0) return;
     slides_drop();

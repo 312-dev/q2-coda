@@ -136,9 +136,8 @@ scrolls the others as a list does: scrolled to its end, its last row sits where 
 to). The menu runs on to the screen's bottom, and the rows below the seventh show through a fade
 into the black: in Full a straight one from 16 px above the seventh's foot (y 266) to y 316, and
 once the menu has scrolled another over its first row's top 14 px; in Split both follow the glass's
-rounded edge, 34 px from its top edge and 56 px from its bottom one, and the row above y 40, in the
-status row, shows through the top one (`home_fades`, from the list's paint and
-`coverflow_home_strip`'s). A fade is drawn only while rows lie past it, and never over the selected
+rounded edge, 34 px from its top edge and 56 px from its bottom one (`home_fades`, from the list's
+paint). A fade is drawn only while rows lie past it, and never over the selected
 row. The labels start at `home.rows.text_x` (OLED's 24) in the theme's Home face (Inter at 24 here,
 the design's 20), and end `home.rows.label_end_split` (44) before the art in Split and
 `HOME_LABEL_END` (41) from the screen edge in Full, where the chevron's box starts. Both menus are 375 pixels wide in the asset; the
@@ -249,23 +248,7 @@ down. An inset the zoom's margin cannot hold leaves the cover still in the zoom'
 timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows open in Split
 (Settings, and Library and Streaming where a set keeps them on Home) as pages: the list takes the
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
-Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
-frame is that much taller, Home's window draws its rows from the window's top down, and the bar
-draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top, as Home's
-paint draws nothing outside its window; while a page slides over Home, from `page_parallax.c`'s
-paint of the bar after Home's snapshot, drifted and darkened with it and left of the sliding page,
-whose title alone shows over it: [internals](internals.md#page-parallax)). OLED's `split_art_up` is the
-bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
-stand over it. The main menu rises too: with the clock at the row's right, its left side is empty,
-so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
-paints those rows of it after the art (`coverflow_home_strip`: the list painted at its place on the
-screen, clipped to them and left of the pane); a tap there reaches the bar. AWTK keeps a
-widget's invalidate inside its window, so a paint of the list in the window (a new selection, a
-slide's frame) repaints those rows of the bar after the frame (`strip_due`), unless the bar painted
-those columns of them in the same frame (`coverflow_home_painted`, after each frame). AWTK widens
-every invalidate by a few pixels, so the bar's repaint of the rows paints the list's top rows in the
-window too; without that test each repaint asked for the next, and Home repainted about 15 times a
-second while it showed, its pan's steps the whole screen. Settings and the other
+Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above the status row's foot: Home's window is the whole screen ([oled-design: Full-bleed](oled-design.md#full-bleed)), so the pane is one widget from there to the screen's bottom and Home's own paint and its snapshot under a slide hold it all. OLED's `split_art_up` is the bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery stand over it; on the screen itself the bar lays its flat ground over the pane's rows before its glyphs (`coverflow_home_bar`) and its border paint puts the art back with them inked by contrast (`home_ink`). The main menu rises too: with the clock at the row's right, its left side is empty, so the list starts at y 40 (`HOME_SPLIT_TOP`), its top rows under the row's overlay. Settings and the other
 lists Home opens are full pages under OLED, and stay in the window. The clock and every glyph
 are drawn in one ink for the whole row, white or black, whichever has the higher WCAG contrast
 against the art under them all, as Scrolly's feed-end line does and as iOS's status bar takes one

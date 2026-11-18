@@ -48,8 +48,13 @@ Every page is full-bleed: its window is the whole 375x320 screen (`tools/build.p
 row is an overlay painted after it, its glyphs on top with nothing behind them, so a page's background, the glow and
 its art run to the top and bottom edges. The layout insets are rest positions for content, not clip edges: a list's
 first row rests at y 58 and its last at y 282. Stock's pages move their content down the 58 px the row takes
-(`tools/ipod.py` `full_bleed`), so each rests where it did. The pages the payload builds (`page_open`) still start under
-the row (`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it.
+(`tools/ipod.py` `full_bleed`), so each rests where it did; payload code that lays such a page out from the row's foot
+adds the window's `bar_foot` (`patch/theme_engine.c`), and a list end or a settings row is measured on the screen
+(`list_fit_end`). The row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable
+style). The pages the payload builds (`page_open`, the shuffle confirmation) still start under the row
+(`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it. A page
+slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
+on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
 
 ### Corners
 
@@ -1824,7 +1829,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every
   other row the library's covers in turn as an iPod classic's menu shows them, cross-fading from the frame as it
   stands as the wheel moves between the two, each zooming between 1 and 0.9 of the cover and drifting once over its 9 s, 1.5 s cross-fades between covers
-  and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
+  and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows under the status row (approved from
   `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
   (`home.lists.full`).
 - Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the

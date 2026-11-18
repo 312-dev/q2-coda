@@ -228,9 +228,9 @@ void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius) {
     bar->y += dir * TILT_LIFT * e / 256 - gh / 2, bar->h += gh;
     /* never higher past its window's top than it rests, where the status row's window covers it: the
      * first row's bar grows down there instead of being cut (tilt_clip widens the clip for the
-     * rest). A row already raised above its window (Home's Split list, split_art_up, whose band
-     * the bar paints) leans from where it rests: brought down to the window's top it would stand
-     * up to that rise below its words, the bar sliding off its row on every tug. A list in no
+     * rest). A row resting above its window's top leans from where it rests: brought down to the
+     * window's top it would stand up to that rise below its words, the bar sliding off its row on
+     * every tug. A list in no
      * window (being built or torn down) paints only its rest lift, with no top to keep under. */
     if (tilt.win) {
         int oy = I(canvas, CANVAS_Y), wy = I(tilt.win, W_Y); /* the bar's origin and its window */

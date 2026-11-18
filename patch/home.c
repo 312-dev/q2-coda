@@ -282,9 +282,8 @@ void stream_rows(void *list) {
 /* Home's overflow (docs/ipod.md#home): its main list holds more rows than it rests on, HOME_REST
  * of them from its top, as many as fit every set's window; the rest scroll, and scrolled to its end
  * the last row stops where the seventh's foot is. The list's box is those rows, which clips the
- * rest; under OLED's pages it runs on to the screen's bottom instead, and the rows there and, in
- * Split, the row above it (coverflow.c coverflow_home_strip) show through fades into the ground,
- * measured as docs/oled-design.md's Home rows say. */
+ * rest; under OLED's pages it runs on to the screen's bottom instead, and the rows there show
+ * through fades into the ground, measured as docs/oled-design.md's Home rows say. */
 
 /* The foot of view's last shown row: stock's list_view layout keeps a hidden row's slot
  * (Rockbox's, restacked last), so its content can end a row past it. */
@@ -456,9 +455,8 @@ void list_fades(void *canvas, int top, int bottom, int end, int foot, int above,
 }
 
 /* OLED's fades over Home's main list, list's top at screen y list_y, its columns 0 to cols (Split's
- * left of the art), drawn shift columns left of there (Home drifting under a window's slide,
- * coverflow.c coverflow_home_strip): at the top once it has scrolled, at the foot while rows lie
- * past the rest. In
+ * left of the art), drawn shift columns left of there: at the top once it has scrolled, at the foot
+ * while rows lie past the rest. In
  * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,
  * so a row dissolves the same way in both; in Full they run straight across. The selected row is
  * never faded. Each row of the band one fill per FADE_COL columns in a corner, inside the canvas's
