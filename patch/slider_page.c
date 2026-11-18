@@ -11,13 +11,14 @@
  * rows and vertical sliders here too (eq_rows_paint, at the end). */
 #include "navigation.h"
 
-/* Screen rows (docs/oled-design.md), less the window's top at the set's bar */
+/* Screen rows (docs/oled-design.md): less the status row's foot in the view's rows, less the window's
+ * screen row (0 on a full-bleed page) in the window's */
 #define SP_VALUE_Y 150 /* the value's centre */
 #define SP_TRACK_Y 186 /* the track's top */
 #define SP_ENDS_Y 214  /* the range ends' centre */
 #define SP_TRACK_H 6
 #define SP_KNOB 14
-#define SP_ROW 32            /* the switch row, from the window's top */
+#define SP_ROW 32            /* the switch row, from the status row's foot (bar_foot) */
 #define SP_VALUE_PX TYPE(22) /* Inter Medium 22, AWTK's size (oled-design.md Type) */
 #define SP_ENDS_PX TYPE(15)  /* 15 */
 #define SP_LINE 32           /* the value's box, centred on its row */
@@ -71,13 +72,14 @@ void slider_page_open(void *win, void *s, unsigned kind) {
                              *const states[] = { "normal", "pressed", "over", "disable",
                                                  "focused" };
     char key[STYLE_KEY];
-    int top = geom_val(V_BAR), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
+    /* top: the view's rows count from the status row's foot; foot: that row in win */
+    int top = geom_val(V_BAR), foot = bar_foot(win), view_y = kind == SLIDER_BOOT ? SP_ROW : 0;
     void *view = P(s, W_PARENT), *c;
     bright_bar.easing = 0; /* the page opens on its value */
     slider_page_win = win, sp.slider = s, sp.kind = (unsigned char)kind,
     sp.value = sp.sw = (void *)0;
     widget_on(win, EVT_DESTROY, sp_gone, win);
-    widget_move_resize(view, 0, view_y, 375, client_h() - view_y);
+    widget_move_resize(view, 0, foot + view_y, 375, client_h() - view_y);
     /* the slider's box on the track, a knob's height either side for a finger; stock's own bar
      * drawn in nothing, as slider_page_paint draws it */
     widget_move_resize(s, geom_val(V_TEXT_X), SP_TRACK_Y + SP_TRACK_H / 2 - top - view_y - SP_KNOB,
@@ -101,7 +103,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
         widget_set_visible(sp.nav, 0, 0);
         widget_set_enable(sp.nav, 0);
     }
-    c = image_create(win, 0, 0, 375, SP_ROW);
+    c = image_create(win, 0, foot, 375, SP_ROW);
     widget_set_name(c, "switch_hit");
     widget_set_prop_str(c, "clickable", "true");
     widget_on(c, EVT_CLICK, sp_row_hit, win);
@@ -110,7 +112,7 @@ void slider_page_open(void *win, void *s, unsigned kind) {
 /* The switch row of page, when it is this page: its hidden switch's image change repaints
  * nothing (crossfade.c's switch). */
 void slider_page_dirty(void *page) {
-    rect_t row = { 0, 0, 375, SP_ROW };
+    rect_t row = { 0, page ? bar_foot(page) : 0, 375, SP_ROW };
     if (page && page == slider_page_win) widget_invalidate_force(page, &row);
 }
 
@@ -136,18 +138,19 @@ void slider_page_paint(void *w, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD), *vg = canvas_get_vgcanvas(canvas);
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink, buf[48];
-    int top = geom_val(V_BAR), x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X), px;
+    /* top: the window's screen row (screen rows less it are the window's); foot: the status row's */
+    int top = I(w, W_Y), foot = bar_foot(w), x0 = geom_val(V_TEXT_X), x1 = 375 - geom_val(V_RIGHT_X), px;
     unsigned accent = S->tones[0] & 0xffffffu;
     void *sw = sp.kind == SLIDER_BOOT ? widget_lookup(w, "img_bootswitch", 1) : (void *)0;
     if (sw && widget_get_visible(sw)) { /* the selected row: its title is the toolbar's */
         void *title = sp.nav && widget_count_children(sp.nav) ? widget_get_child(sp.nav, 0) : 0;
         const unsigned *s = title ? widget_get_text(title) : (void *)0;
         st.raw_ink = 1; /* final: white on the accent in either half */
-        sel_bar_flat(canvas, 0, 0, 375, SP_ROW);
+        sel_bar_flat(canvas, 0, foot, 375, SP_ROW);
         if (s && *s) {
             px = theme()->font_px[ROLE_TITLE];
             const char *face = theme_face(s, -1, &px);
-            ui_line_w(canvas, s, wide_len(s), x0, x1 - x0 - 48, SP_ROW / 2, 2,
+            ui_line_w(canvas, s, wide_len(s), x0, x1 - x0 - 48, foot + SP_ROW / 2, 2,
                       face ? face : faces[0], px, RGBA(0xffffff));
         }
         if (night_page(w)) { /* Night Shift's three choices: a value, white on the bar */
@@ -156,9 +159,9 @@ void slider_page_paint(void *w, void *canvas) {
             px = theme()->font_px[ROLE_TITLE];
             ui_line_w(canvas, buf,
                       wide(buf, sizeof buf / sizeof *buf, modes[on < 0 || on > 2 ? 0 : on]), x0,
-                      x1 - x0, SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
+                      x1 - x0, foot + SP_ROW / 2, 3, faces[theme()->font[ROLE_TITLE]], px, RGBA(0xffffff));
         } else
-            switch_mark(canvas, x1, SP_ROW / 2,
+            switch_mark(canvas, x1, foot + SP_ROW / 2,
                         !tk_strcmp(widget_get_prop_str(sw, "image", ""), "switch_on"), 1);
         st.raw_ink = raw;
     }

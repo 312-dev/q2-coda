@@ -129,6 +129,9 @@ int client_h(void) { return 320 - geom_val(V_BAR); }
 void client_window(void *w) {
     if (w) widget_move_resize(w, 0, geom_val(V_BAR), 375, client_h());
 }
+/* The row in window w where the status row ends: V_BAR on a full-bleed page, 0 on one
+ * client_window put under the row. A layout that counts from the row's foot adds it. */
+int bar_foot(void *w) { return geom_val(V_BAR) - (w ? I(w, W_Y) : 0); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
                    V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,

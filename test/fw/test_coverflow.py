@@ -861,7 +861,7 @@ def test_a_toast_over_home_leaves_the_rows_under_the_status_row_home_s(fw, libra
 
 def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
     """A payload page under the row sliding over Home in Split (a push, or a Return back to Home): stock paints the bar
-    before each frame's percent, so page_parallax.c's draw of the page under paints it again. Home's band, its rows
+    before each frame's percent, so page_parallax.c's draw of the new page paints it again. Home's band, its rows
     under the status row, is in Home's own snapshot, drifted and darkened with it, so the bar lays its flat ground only
     over the sliding page's columns; the title shows only over the sliding page, faded as far as it is out (user,
     2026-11-17: Control Center > hold Bluetooth > Return, or Library > Return, ran a flat band across the top for the
@@ -893,8 +893,10 @@ def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
     struct.pack_into('<Q', wa, 0xb8, canvas.p)
     struct.pack_into('<f', wa, 0xb4, 0.5)  # the new page half in
     fw.mock('htranslate_draw_prev', lambda *_: 0)
+    fw.mock('htranslate_draw_curr', lambda *_: 0)
     clips.clear(), canvas.rects.clear()
     assert fw.fn('parallax_prev', C.c_int, C.c_void_p)(C.addressof(wa)) == 0
+    assert fw.fn('parallax_curr', C.c_int, C.c_void_p)(C.addressof(wa)) == 0  # the bar over both pages
     open_ = 375 - round(375 * 0.5)  # the page covers from 187
     assert painted[:1] == [bar] and home.list not in painted  # the band is Home's snapshot's, not the bar's
     assert (0x20000000, 0, 0, open_, 320) in canvas.rects  # Home's snapshot darkened, its band with it
@@ -3233,8 +3235,12 @@ def home_row(fw, surface, row, id=0, painting=0):
 
 
 def pane_rect(fw, h):
-    x = fw.fn('coverflow__pane_x', C.c_int)()
-    return h.win, (x, 0, 375 - x, fw.fn('client_h', C.c_int)())
+    """The pane's box in Home's window, the whole screen (docs/oled-design.md#full-bleed): split_art_up rows above
+    the status row's foot to the screen's bottom."""
+    names = host.tools_theme.GEOM_VALS
+    row = dict(zip(names, (C.c_short * len(names)).in_dll(fw.lib, 'theme_engine__geom_vals')))
+    x, ph = fw.fn('coverflow__pane_x', C.c_int)(), fw.fn('client_h', C.c_int)() + row['split_art_up']
+    return h.win, (x, 320 - ph, 375 - x, ph)
 
 
 @pytest.mark.parametrize('name', ('img_library', 'img_cover_flow', 'img_folder', 'img_services', 'img_settings',
