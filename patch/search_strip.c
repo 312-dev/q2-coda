@@ -43,6 +43,9 @@
  * and gives the wheel back to the strip; a hold or a drag shows a loupe over the cursor, the text
  * at 1.6 times (ss_loupe_paint), and the cursor follows the finger; held at an edge that cuts the
  * text, the finger nudges it a character at a time (ss_nudge_due). The release leaves the cursor.
+ * A double tap selects a word and a triple tap the text (ss_sel), the accent behind it and a
+ * handle at either end; a drag on from the double tap, or on a handle, moves an end (ss_reach).
+ * Typing replaces a selection, Previous held deletes it, and Previous or Next collapses it.
  *
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
  * the wheel, and only one of them shows a selection at a time.
@@ -169,6 +172,21 @@ enum {
 #define SS_LOUPE_STEP_MS 33
 #define SS_ZOOM(v) (((v) * 8 + 2) / 5)
 #define SS_NUDGE_MS 150
+/* A selection (ss_sel, docs/oled-design.md#text-entry): a second tap within SS_MULTI_MS of a tap's
+ * release and SS_MULTI_DX of it selects the word there, a third all of the text. The highlight is
+ * the accent at SS_SEL_ALPHA behind the selected characters, the cursor's height; each end has a
+ * 2 px line in the accent and an SS_DOT dot, over the start and under the end, which a press within
+ * SS_HANDLE_DX of grabs. */
+#define SS_MULTI_MS 350
+#define SS_MULTI_DX 20
+#define SS_SEL_ALPHA 0x66u /* 40% */
+#define SS_DOT 8
+#define SS_HANDLE_DX 12
+enum {
+    SS_DRAG_CARET,
+    SS_DRAG_WORD,
+    SS_DRAG_HANDLE
+}; /* what a finger in the text moves (ss_reach) */
 /* The set switcher: a #2C2C2E pill (the accent while the wheel is on it), its set's name in Inter
  * Medium 16 */
 #define SS_CHIP_RGB RGB_RAISED_2
@@ -259,6 +277,12 @@ static struct {
     short grab_x;              /* ... where it is on the sheet */
     unsigned loupe_at, loupe_timer, nudge_timer; /* the loupe shown at; its timer; the nudge's */
     int ret; /* the return key's mark its caller asked for, STRIP_* (peq.h; ss_ret_kind) */
+    /* The selection: from the byte mark - 1 (0: none) to the cursor, either way round (ss_sel); a
+     * double tap's word, which a drag on from it keeps; the last tap's x and release, and how
+     * many came in a row; what the finger in the text moves, SS_DRAG_* */
+    short mark, word_a, word_b, tap_x;
+    unsigned tap_at;
+    unsigned char taps, drag;
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -373,11 +397,14 @@ static int ss_peek_due(const void *unused) {
     return 0;
 }
 
+static void ss_cut_sel(int tidy);
 /* Run entry e typed at the cursor: the set's character as it reads, or a space (on Search and a
  * name not first, nor beside another). What the strip types is ASCII, a byte each (ss_step). */
 static void ss_type(int e) {
-    int n = (int)strlen(ss.text), at = ss.cur;
     char c = (char)ss_char(e);
+    ss_cut_sel(c == ' '); /* typing replaces the selection; a space, never doubled */
+    ss.mark = 0;
+    int n = (int)strlen(ss.text), at = ss.cur;
     /* a box takes any space (a password may hold them); a name or a search no doubled one */
     if (n >= (ss.max ? ss.max : SS_TEXT_MAX) ||
         (c == ' ' && !ss.box && (!at || ss.text[at - 1] == ' ' || ss.text[at] == ' ')))
@@ -395,16 +422,19 @@ static void ss_type(int e) {
  * typed elsewhere (a playlist's name, a Bluetooth name) is UTF-8, and its characters are stepped
  * over whole. A password shows a dot a byte (ss_shown), so it steps a byte at a time. */
 static int ss_mid(int at) { return !ss.secret && (ss.text[at] & 0xc0) == 0x80; }
-/* The cursor a character on, dir 1 or -1; nothing past either end. */
-static void ss_step(int dir) {
-    int at = ss.cur;
+/* The byte a character on from at, dir 1 or -1; nothing past either end. */
+static int ss_next(int at, int dir) {
     if (dir < 0 && at > 0) do
             --at;
         while (at > 0 && ss_mid(at));
     if (dir > 0 && ss.text[at]) do
             ++at;
         while (ss_mid(at));
-    ss.cur = at;
+    return at;
+}
+/* The cursor a character on, dir 1 or -1. */
+static void ss_step(int dir) {
+    ss.cur = ss_next(ss.cur, dir);
     ss.typed_at = 0; /* a password's peek is the character just typed alone */
 }
 /* The characters the text shows before byte at; the byte of shown character k. */
@@ -421,9 +451,59 @@ static int ss_byte_of(int k) {
     return at;
 }
 
-/* The character before the cursor taken off (Previous held); nothing at the text's start. */
+/* The selection's bytes, a to b; 0 while there is only the cursor. */
+static int ss_sel(int *a, int *b) {
+    int m = ss.mark - 1;
+    if (!ss.mark || m == ss.cur) return 0;
+    *a = m < ss.cur ? m : ss.cur, *b = m < ss.cur ? ss.cur : m;
+    return 1;
+}
+/* The selection taken out, the cursor where it began; when tidy (Previous held) and not a box's
+ * text, a space it leaves doubled, or first, goes with it, as no name or search types one. */
+static void ss_cut_sel(int tidy) {
+    int a, b;
+    if (!ss_sel(&a, &b)) return;
+    memmove(ss.text + a, ss.text + b, strlen(ss.text + b) + 1);
+    if (tidy && !ss.box && ss.text[a] == ' ' && (!a || ss.text[a - 1] == ' '))
+        memmove(ss.text + a, ss.text + a + 1, strlen(ss.text + a));
+    ss.cur = a, ss.mark = 0;
+    ss.typed_at = 0;
+}
+/* The word around byte at (spaces end it), or the run of spaces it is in: a double tap's. A
+ * password's words don't show, so its word is all of it. */
+static void ss_word(int at) {
+    int a = at, b = at, sp;
+    if (ss.secret) {
+        ss.word_a = 0, ss.word_b = (short)strlen(ss.text);
+        return;
+    }
+    if ((!ss.text[a] || ss.text[a] == ' ') && a > 0 && ss.text[a - 1] != ' ')
+        --a; /* the word it ends */
+    sp = ss.text[a] == ' ';
+    while (a > 0 && (ss.text[a - 1] == ' ') == sp) --a;
+    while (ss.text[b] && (ss.text[b] == ' ') == sp) ++b;
+    ss.word_a = (short)a, ss.word_b = (short)b;
+}
+/* Previous or Next pressed: a selection collapsed to its start or end, else the cursor stepped. */
+static void ss_move(int dir) {
+    int a, b;
+    if (ss_sel(&a, &b))
+        ss.cur = dir < 0 ? a : b, ss.typed_at = 0;
+    else
+        ss_step(dir);
+    ss.mark = 0;
+}
+
+/* The character before the cursor taken off (Previous held), or the selection; nothing at the
+ * text's start. */
 static void ss_erase(void) {
-    int n = (int)strlen(ss.text), at = ss.cur;
+    int n = (int)strlen(ss.text), at = ss.cur, a, b;
+    if (ss_sel(&a, &b)) {
+        ss_cut_sel(1);
+        if (!ss_named()) ss_filter();
+        return;
+    }
+    ss.mark = 0;
     if (!at) return;
     ss_step(-1);
     memmove(ss.text + ss.cur, ss.text + at, (unsigned)(n - at + 1)); /* the peek went with it */
@@ -794,7 +874,7 @@ int search_strip_key(void *top, unsigned key) {
     else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
         ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
     else if (button)
-        ss_step(button);
+        ss_move(button);
     else
         return 0;
     if (ss.page) { /* a submit may have closed it */
@@ -963,10 +1043,33 @@ static void ss_field(void *canvas, const char *s, int cur, int x0, int x1, int y
     for (unsigned k = 0; k <= n; ++k) ss.edge[k] = (short)(ss.edge[k] + left);
     ss.fx = (short)(x0 - 2), ss.fy = (short)(y - SS_PITCH / 2), ss.fw = (short)(room + 4),
     ss.fh = SS_PITCH;
+    int a, b, sel = ss_sel(&a, &b);
+    if (sel) { /* the highlight, under the text and inside the field */
+        int ka = ss_chars(a), kb = ss_chars(b), h0 = ss.edge[ka > (int)n ? (int)n : ka],
+            h1 = ss.edge[kb > (int)n ? (int)n : kb];
+        if (h0 < x0) h0 = x0;
+        if (h1 > x1) h1 = x1;
+        stock_canvas_set_fill_color(canvas,
+                                    (RGBA(accent_tone(2)) & 0xffffffu) | SS_SEL_ALPHA << 24);
+        if (h0 < h1) canvas_fill_rect(canvas, h0, y - 13, h1 - h0, (unsigned)ch);
+    }
     if (n) {
         struct ss_line l = { wide, face, fpx, { left, y - SS_PITCH / 2, full + 2, SS_PITCH }, rgb };
         ss_fade(canvas, left, full + 2, y - SS_PITCH / 2, SS_PITCH, x0, x1, SS_EDGE,
                 left<x0, left + full> x1, ss_line_ink, &l);
+    }
+    if (sel) { /* a handle at either end in view: its line, a dot over the start, under the end */
+        for (int end = 0; end < 2; ++end) {
+            int k = ss_chars(end ? b : a), hx = ss.edge[k > (int)n ? (int)n : k];
+            if (hx < x0 - 1 || hx > x1 + 1) continue;
+            stock_canvas_set_fill_color(canvas, RGBA(accent_tone(2)));
+            canvas_fill_rect(canvas, hx - 1, y - 13, 2, (unsigned)ch);
+            fill_box(canvas,
+                     &(rect_t){ hx - SS_DOT / 2, end ? y - 13 + ch - 2 : y - 13 - SS_DOT + 2,
+                                SS_DOT, SS_DOT },
+                     RGBA(accent_tone(2)), SS_DOT / 2);
+        }
+        return; /* no cursor while there is a selection */
     }
     if (ss.focus || !ss_blink_on()) return;
     stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_PRIMARY)));
@@ -1041,7 +1144,9 @@ static void ss_form_paint(void *canvas, unsigned primary, unsigned secondary, un
  * SS_LOUPE_LINE outline round a lens in the field's own ground (the canvas under Search's query,
  * the raised grey in a row, cell or field); in it the text drawn again by the same renderer at
  * 1.6 times (SS_ZOOM: the face's size, the field's ends and fades), the cursor's boundary at its
- * middle under a steady 3 px cursor. Grows in from half its size about its foot (ss_loupe_due). */
+ * middle under a steady 3 px cursor; a selection's highlight under the text too, and the cursor in
+ * the accent, its moving end's handle. Grows in from half its size about its foot (ss_loupe_due).
+ */
 static int ss_fx0(void), ss_fx1(void), ss_fcy(void), ss_cut(int dir);
 static void ss_loupe_paint(void *w, void *canvas) {
     void *bar = *(void *const *)system_bar, *lcd = P(canvas, CANVAS_LCD);
@@ -1084,6 +1189,17 @@ static void ss_loupe_paint(void *w, void *canvas) {
             fr = ss_cut(1) && f1 <= c1;
         if (f0 > c0) c0 = f0;
         if (f1 < c1) c1 = f1;
+        int a, b, sel = ss_sel(&a, &b);
+        if (sel) { /* the selection's highlight, as the field's, at 1.6 times */
+            int ka = ss_chars(a), kb = ss_chars(b);
+            ka = ka > (int)n ? (int)n : ka, kb = kb > (int)n ? (int)n : kb;
+            int h0 = lx + (int)(canvas_measure_text(canvas, wide, (unsigned)ka) + 0.5f),
+                h1 = lx + (int)(canvas_measure_text(canvas, wide, (unsigned)kb) + 0.5f);
+            h0 = h0 < c0 ? c0 : h0, h1 = h1 > c1 ? c1 : h1;
+            stock_canvas_set_fill_color(canvas,
+                                        (RGBA(accent_tone(2)) & 0xffffffu) | SS_SEL_ALPHA << 24);
+            if (h0 < h1) canvas_fill_rect(canvas, h0, mid - zh / 2, h1 - h0, (unsigned)zh);
+        }
         if (n && c0 < c1) {
             struct ss_line l = { wide,
                                  ss.fface,
@@ -1093,7 +1209,8 @@ static void ss_loupe_paint(void *w, void *canvas) {
             ss_fade(canvas, lx, zfull + 2, lens.y, lens.h, c0, c1, SS_ZOOM(SS_EDGE), fl, fr,
                     ss_line_ink, &l);
         }
-        stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_PRIMARY)));
+        /* the cursor, or the moving end's handle line in the accent */
+        stock_canvas_set_fill_color(canvas, RGBA(sel ? accent_tone(2) : tok(TOK_PRIMARY)));
         canvas_fill_rect(canvas, cx - 1, mid - zh / 2, 3, (unsigned)zh);
         canvas_set_clip_rect(canvas, (rect_t *)old);
     }
@@ -1384,6 +1501,16 @@ static int ss_nearest(int x) {
 static int ss_cut(int dir) {
     return dir < 0 ? ss.edge[0] < ss_fx0() : ss.edge[ss.nedge] + 3 > ss_fx1();
 }
+/* The finger at byte at: the cursor there; a selection's moving end there (a handle's, kept off
+ * the other end), or, on from a double tap, the word and on to there. */
+static void ss_reach(int at) {
+    if (ss.drag == SS_DRAG_WORD) {
+        int out = at < ss.word_a || at > ss.word_b;
+        ss.mark = (short)((at < ss.word_a ? ss.word_b : ss.word_a) + 1);
+        ss.cur = out ? at : ss.word_b;
+    } else if (ss.drag != SS_DRAG_HANDLE || at != ss.mark - 1)
+        ss.cur = at;
+}
 /* The finger's nudge: the cursor a character on toward the edge it is held at, while the text is
  * cut there; once that end of the text is in view, the cursor follows the finger again. */
 static void ss_aim(void);
@@ -1395,15 +1522,16 @@ static int ss_nudge_due(const void *unused) {
         ss_aim();
         return 0;
     }
-    ss_step(ss.nudge);
+    ss_reach(ss_next(ss.cur, ss.nudge));
+    ss.typed_at = 0;
     ss_dirty();
     ss_loupe_dirty();
     ss.nudge_timer = timer_add(ss_nudge_due, (void *)0, SS_NUDGE_MS);
     return 0;
 }
-/* The cursor where the finger is: at the boundary nearest it, or, with the loupe up and the finger
- * held SS_KEEP from an edge that cuts the text, there and then a character on toward the edge, at
- * once and every SS_NUDGE_MS after (ss_nudge_due). */
+/* The cursor (or what the finger holds, ss_reach) where the finger is: at the boundary nearest it,
+ * or, with the loupe up and the finger held SS_KEEP from an edge that cuts the text, there and
+ * then a character on toward the edge, at once and every SS_NUDGE_MS after (ss_nudge_due). */
 static void ss_aim(void) {
     int x = ss.grab_x, dir = !ss.loupe                              ? 0
                              : x < ss_fx0() + SS_KEEP && ss_cut(-1) ? -1
@@ -1411,12 +1539,11 @@ static void ss_aim(void) {
                                                                     : 0;
     if (dir && dir == ss.nudge) return; /* nudging already */
     ss.nudge = (signed char)dir;
-    ss.cur = ss_byte_of(ss_nearest(x));
     ss.typed_at = 0;
-    if (dir) {
-        ss_step(dir);
+    ss_reach(ss_next(ss_byte_of(ss_nearest(x)), dir));
+    if (dir)
         rearm(&ss.nudge_timer, ss_nudge_due, SS_NUDGE_MS);
-    } else
+    else
         stop_timer(&ss.nudge_timer);
     ss_dirty();
     if (ss.loupe) ss_loupe_dirty();
@@ -1430,21 +1557,50 @@ static void ss_ungrab(void) {
 }
 /* A finger in the text: a press within the field puts the cursor at the boundary nearest it and
  * gives the wheel back to the strip; held or moved, the loupe shows and the cursor follows it;
- * the release leaves the cursor where it is. 1 when the event was the text's. */
+ * the release leaves the cursor where it is. A second press soon after a tap and near it selects
+ * the word there, a third the text; a press on a selection's handle takes that end. 1 when the
+ * event was the text's. */
 static int ss_grab(int type, int x, int y) {
+    unsigned now = (unsigned)time_now_ms();
     if (type == EVT_POINTER_DOWN) {
         if (!ss.fw || x < ss_fx0() - SS_GRAB_DX || x >= ss_fx1() + SS_GRAB_DX ||
             ss_dist(y - ss_fcy()) >= SS_GRAB_DY)
             return 0;
+        int again = ss.taps && now - ss.tap_at < SS_MULTI_MS && ss_dist(x - ss.tap_x) < SS_MULTI_DX,
+            a, b, end = -1;
         ss.grab = 1, ss.loupe = 0, ss.nudge = 0;
         ss.down_x = ss.grab_x = (short)x, ss.down_y = (short)y;
         ss.focus = SS_ON_STRIP;
+        ss.taps = (unsigned char)(again && ss.taps < 3 ? ss.taps + 1 : 1);
+        ss.drag = SS_DRAG_CARET;
         rearm(&ss.loupe_timer, ss_loupe_due, SS_LOUPE_HOLD_MS);
-        ss_aim();
+        if (ss.taps == 1 && ss_sel(&a, &b)) { /* on a handle: the nearer end's */
+            int da = ss_dist(ss.edge[ss_chars(a)] - x), db = ss_dist(ss.edge[ss_chars(b)] - x);
+            end = db <= da && db < SS_HANDLE_DX ? b : da < SS_HANDLE_DX ? a : -1;
+        }
+        if (end >= 0) {
+            if (end == ss.mark - 1) ss.mark = (short)(ss.cur + 1); /* the anchor's: the two swap */
+            ss.cur = end, ss.taps = 0, ss.drag = SS_DRAG_HANDLE;
+            ss_dirty();
+        } else if (ss.taps == 1) {
+            ss.mark = 0;
+            ss_aim();
+        } else { /* the word there, or all of it */
+            ss_word(ss_byte_of(ss_nearest(x)));
+            if (ss.taps == 3) ss.word_a = 0, ss.word_b = (short)strlen(ss.text);
+            ss.drag = SS_DRAG_WORD;
+            ss_reach(ss.word_b);
+            ss.typed_at = 0;
+            ss_dirty();
+        }
         return 1;
     }
     if (!ss.grab) return 0;
-    if (type != EVT_POINTER_MOVE_BEFORE) {
+    if (type != EVT_POINTER_MOVE_BEFORE) { /* a tap's release starts the next tap's clock */
+        if (ss.loupe || ss.drag == SS_DRAG_HANDLE)
+            ss.taps = 0;
+        else
+            ss.tap_at = now, ss.tap_x = ss.down_x;
         ss_ungrab();
         ss_dirty();
         return 1;

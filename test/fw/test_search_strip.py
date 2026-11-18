@@ -44,7 +44,9 @@ class Ss(C.Structure):
                 ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p),
                 ('edge', C.c_short * 65), ('nedge', C.c_short), ('fface', C.c_void_p), ('fpx', C.c_int),
                 ('fch', C.c_int), ('grab', C.c_ubyte), ('loupe', C.c_ubyte), ('nudge', C.c_byte), ('grab_x', C.c_short),
-                ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint), ('ret', C.c_int)]
+                ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint), ('ret', C.c_int),
+                *((k, C.c_short) for k in 'mark word_a word_b tap_x'.split()), ('tap_at', C.c_uint), ('taps', C.c_ubyte),
+                ('drag', C.c_ubyte)]
 
 
 @pytest.fixture
@@ -118,9 +120,10 @@ class Strip:
         """Play/Pause: submitted (Search's results)."""
         return self.key(KEY_PLAY)
 
-    def touch(self, x0, y0, x1=None, y1=None, moves=()):
-        """A press at x0, y0 on the sheet, moves through moves, and its release at x1, y1 (the press's place: a tap),
-        in the sheet's coordinates."""
+    def touch(self, x0, y0, x1=None, y1=None, moves=(), ms=400):
+        """A press at x0, y0 on the sheet ms after the last thing done (taps further apart than a double tap's), moves
+        through moves, and its release at x1, y1 (the press's place: a tap), in the sheet's coordinates."""
+        self.now[0] += ms
         self.feed(EVT_POINTER_DOWN, x0, y0, self.ss.sheet)
         for x, y in moves:
             self.feed(EVT_POINTER_MOVE_BEFORE, x, y, self.ss.page)
@@ -1677,3 +1680,161 @@ def test_search_strip_return_is_the_next_text_s_alone(fw, ui):
     assert s.ss.ret == STRIP_SAVE and mark(fw, s) == 'save_w'
     ui.close(ui.top())
     assert mark(fw, text_on_strip(fw, ui, b'Q2', label=b'Name')) == 'go_w'
+
+
+# Selection (docs/oled-design.md#text-entry, iOS's): a double tap selects the word under it, a triple tap all of the
+# text; a drag on from the double tap, or on either handle, moves an end; typing replaces the selection, Previous held
+# deletes it, and a press of Previous or Next collapses it to its start or end. The highlight is the accent at 40%,
+# the handles the accent.
+MULTI_MS, HANDLE_DOT, SEL_ALPHA = 350, 8, 0x66
+
+
+def sel(s):
+    """The selection, as the bytes it runs from and to; None while there is only the cursor."""
+    a, b = s.ss.mark - 1, s.ss.cur
+    return (min(a, b), max(a, b)) if s.ss.mark and a != b else None
+
+
+def query(fw, ui, song, text=b'LOVE WILL TEAR'):
+    """Search with text typed and painted: a character each 10 px from QUERY_X0, the line at y 16."""
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = text, len(text)
+    clipped(fw, s)
+    return s
+
+
+def taps(s, x, n, y=16):
+    """n taps at x, 100 ms apart: a double tap at 2, a triple at 3."""
+    s.touch(x, y)
+    for _ in range(n - 1):
+        s.touch(x, y, ms=100)
+
+
+def highlight(c):
+    """The selection's highlight: its rects drawn in an alpha of SEL_ALPHA."""
+    return [r for r, ink in c.rects if ink >> 24 == SEL_ALPHA]
+
+
+def test_a_double_tap_selects_the_word_under_it(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)  # in WILL
+    assert sel(s) == (5, 9) and s.ss.text == b'LOVE WILL TEAR'
+    c = clipped(fw, s)
+    (x, _, w, _), = highlight(c)
+    assert (x, w) == (QUERY_X0 + 50, 40)  # over WILL alone
+    assert {r[0] for r, _ in c.rects if r[2:] == (2, 25)} == {QUERY_X0 + 49, QUERY_X0 + 89}  # the handles: no cursor
+    s.touch(QUERY_X0 + 121, 16)  # collapsed
+    taps(s, QUERY_X0 + 92, 2)  # after its last letter
+    assert sel(s) == (5, 9)  # the word the boundary ends
+
+
+def test_taps_further_apart_than_a_double_tap_only_place_the_cursor(fw, ui, song):
+    s = query(fw, ui, song)
+    s.touch(QUERY_X0 + 65, 16)
+    s.touch(QUERY_X0 + 65, 16, ms=MULTI_MS)
+    assert sel(s) is None and s.ss.cur == 6
+    s.touch(QUERY_X0 + 105, 16, ms=100)  # soon enough, but 40 px off: a tap of its own
+    assert sel(s) is None and s.ss.cur == 10
+
+
+def test_a_triple_tap_selects_all_and_a_fourth_places_the_cursor(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 3)
+    assert sel(s) == (0, 14)
+    assert [(x, w) for x, _, w, _ in highlight(clipped(fw, s))] == [(QUERY_X0, 140)]
+    s.touch(QUERY_X0 + 65, 16, ms=100)
+    assert sel(s) is None and s.ss.cur == 6
+
+
+def test_a_tap_collapses_the_selection_where_it_lands(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)
+    s.touch(QUERY_X0 + 121, 16)
+    assert sel(s) is None and s.ss.cur == 12
+    assert not highlight(clipped(fw, s))
+
+
+def test_a_drag_on_from_a_double_tap_extends_the_selection_either_way(fw, ui, song):
+    s = query(fw, ui, song)
+    s.touch(QUERY_X0 + 65, 16)
+    s.now[0] += 100
+    press(s, QUERY_X0 + 65, 16)  # the second tap's press: WILL selected
+    assert sel(s) == (5, 9)
+    drag(s, QUERY_X0 + 131, 16)  # on past its end: the word kept, its end following the finger
+    assert sel(s) == (5, 13) and s.ss.loupe
+    assert highlight(loupe(fw, ui))  # the loupe shows the selection too
+    drag(s, QUERY_X0 + 12, 16)  # back past its start: the word kept, its start following
+    assert sel(s) == (1, 9)
+    lift(s, QUERY_X0 + 12, 16)
+    assert sel(s) == (1, 9) and not s.ss.loupe
+
+
+def test_both_handles_can_be_grabbed_and_dragged(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)  # WILL, 5 to 9
+    s.now[0] += 400
+    press(s, QUERY_X0 + 53, 16)  # on the start's handle
+    drag(s, QUERY_X0 + 21, 16)
+    assert sel(s) == (2, 9) and s.ss.loupe and s.ss.cur == 2  # the loupe on the end moving
+    lift(s, QUERY_X0 + 21, 16)
+    s.now[0] += 400
+    press(s, QUERY_X0 + 87, 16)  # on the end's handle
+    drag(s, QUERY_X0 + 139, 16)
+    assert sel(s) == (2, 14)
+    lift(s, QUERY_X0 + 139, 16)
+    s.now[0] += 400
+    press(s, QUERY_X0 + 20, 16)  # the start's again, dragged past the end: they change places
+    drag(s, QUERY_X0 + 160, 16)
+    assert sel(s) == (2, 14)  # never onto the other end
+    drag(s, QUERY_X0 + 119, 16)
+    assert sel(s) == (12, 14)
+    lift(s, QUERY_X0 + 119, 16)
+    assert sel(s) == (12, 14)
+
+
+def test_the_highlight_is_the_accent_with_a_handle_at_either_end(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)
+    c = clipped(fw, s)
+    (hx, hy, hw, hh), = highlight(c)
+    ink = [ink for r, ink in c.rects if ink >> 24 == SEL_ALPHA][0] & 0xffffff
+    bars = [r for r, i in c.rects if r[2] == 2 and i & 0xffffff == ink and i >> 24 == 0xff]
+    dots = sorted(b for b, i, rad in c.boxes if rad == HANDLE_DOT // 2 and i & 0xffffff == ink)
+    assert [x for x, _, _, _ in bars] == [QUERY_X0 + 49, QUERY_X0 + 89]  # each end's line, on its boundary
+    assert all(y == hy and h == hh for _, y, _, h in bars)
+    assert dots == [(QUERY_X0 + 46, hy - 6, HANDLE_DOT, HANDLE_DOT), (QUERY_X0 + 86, hy + hh - 2, HANDLE_DOT, HANDLE_DOT)]
+
+
+def test_typing_replaces_the_selection(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)
+    s.type('X')
+    assert s.ss.text == b'LOVE X TEAR' and s.ss.cur == 6 and sel(s) is None
+
+
+def test_previous_held_deletes_the_selection_and_then_erases_on(fw, ui, song):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)
+    s.erase(1)
+    assert s.ss.text == b'LOVE TEAR' and s.ss.cur == 5 and sel(s) is None  # the space it left doubled taken out
+    clipped(fw, s)
+    taps(s, QUERY_X0 + 65, 2)  # TEAR
+    s.erase(2)
+    assert s.ss.text == b'LOVE' and s.ss.cur == 4
+
+
+@pytest.mark.parametrize('key, cur', [(KEY_BACK_BTN, 5), (KEY_FWD_BTN, 9)])
+def test_previous_or_next_collapses_the_selection_to_its_start_or_end(fw, ui, song, key, cur):
+    s = query(fw, ui, song)
+    taps(s, QUERY_X0 + 65, 2)
+    s.key(key)
+    assert sel(s) is None and s.ss.cur == cur and s.ss.text == b'LOVE WILL TEAR'
+
+
+def test_a_double_tap_in_a_password_selects_all_of_it(fw, ui):
+    s = boxed(fw, ui, b'otter-42')
+    c = clipped(fw, s)
+    left = [r for t, r, _ in c.texts if t.startswith('•')][0][0]
+    s.touch(left + 31, s.ss.fy + 16)
+    s.touch(left + 31, s.ss.fy + 16, ms=100)
+    assert sel(s) == (0, 8)  # its words don't show: the whole of it
