@@ -535,7 +535,49 @@ def test_each_lease_starts_with_the_library_that_lists_the_fixtures_songs(tmp_pa
     assert db.read_text() == 'the last lease'                           # nothing to put back: left as it is
 
 
-def test_a_card_is_not_reset_when_a_lease_is_reused_or_reserved_and_a_missing_fixture_is_said(tmp_path, monkeypatch):
+def test_each_lease_starts_with_the_settings_and_per_run_state_of_the_data_fixture(tmp_path, monkeypatch):
+    """A scripted tour left Light Mode, Smart Awake and Song Length changed in slot 1's config.ini and the next
+    workers' runs started from them (2026-11-18). A lease now puts state/data's settings back from a data fixture and
+    drops the per-run files; the pool's own files and the user's Wi-Fi stay, and the library is the library fixture's."""
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'HOME', tmp_path/'pool')
+    monkeypatch.delenv('Q2_EMU_CARD', raising=False)
+    monkeypatch.delenv('Q2_EMU_DATA', raising=False)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    source = tmp_path/'source'
+    card_tree(source, {'Music/one.flac': 'one'})
+    emu_pool.make_fixture(source)
+    clean = '[SYSSET]\nBLUETOOTH=0\nLIGHTMODE=0\n[IPOD]\nKEEPLIT=1\nSONGLENGTH=0\n'
+    ini = tmp_path/'seed/config.ini'
+    card_tree(tmp_path/'seed', {'config.ini': clean})
+    fx = emu_pool.make_data_fixture(tmp_path/'seed')
+    assert fx == tmp_path/'state/data' and (fx/'config.ini').read_text() == clean
+    assert not os.access(fx/'config.ini', os.W_OK) or os.geteuid() == 0
+    data = emu_pool.copy_dir(1)/'state/data'
+    card_tree(data, {'config.ini': '[SYSSET]\nBLUETOOTH=1\nLIGHTMODE=1\n[IPOD]\nKEEPLIT=0\nSONGLENGTH=1\n',
+                     'memoryfile': 'old', 'q2-state': 'x', 'ringnav-plays': 'x', 'ringnav-queue': 'x', 'ringnav-ratings': 'x',
+                     'wpa_supplicant.conf': 'wifi', 'q2-defaults': '1\n', 'coda-rc/x': 'pool'})
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    assert (data/'config.ini').read_text() == clean                     # settings back to the fixture's
+    assert os.access(data/'config.ini', os.W_OK) and (data/'config.ini').stat().st_ino != (fx/'config.ini').stat().st_ino
+    assert sorted(p.name for p in data.iterdir()) == ['coda-rc', 'config.ini', 'q2-defaults', 'wpa_supplicant.conf']
+    (data/'config.ini').write_text('dirty again')                       # a lease of the same name and build, running
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': 'running', 'stderr': ''})())
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    assert (data/'config.ini').read_text() == 'dirty again'             # reused: not reset
+    emu_pool.put(1)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    assert (data/'config.ini').read_text() == clean                     # a fresh lease: reset again
+    slot2 = emu_pool.copy_dir(2)/'state/data'
+    card_tree(slot2, {'config.ini': 'user'})
+    assert (slot2/'config.ini').read_text() == 'user'                   # slot 2 is never leased here, so never touched
+
+
+def test_a_card_is_not_reset_when_a_lease_is_reused_or_reserved_and_a_missing_fixture_is_said_or_reserved_and_a_missing_fixture_is_said(tmp_path, monkeypatch):
     monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
     monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
     monkeypatch.setattr(emu_pool, 'K', 2)

@@ -1834,9 +1834,9 @@ static void *cat_offline(void *q, int *at) {
 }
 /* ---- Now Playing while a catplay waits (server-library.md#now-playing-while-it-loads) ---- */
 
-/* The song playing, stopped once stock's press is over: its player_start, after ringnav_load
- * loaded nothing, plays the queue it has again. So its time and sound don't run on under the
- * pressed song's title. */
+/* The song playing or paused, stopped once stock's press is over (its player_start's start of the
+ * queue it had is refused: playback.c playback_start_refused). So its time and sound don't run on
+ * under the pressed song's title. */
 static int np_stop(const void *unused) {
     (void)unused;
     if (cat.np_list && mclGetPlayStatus() != 1) mclStop();

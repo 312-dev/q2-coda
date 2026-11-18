@@ -32,6 +32,7 @@ void playback_poll(void);
 void playback_speed_start(void);
 void playback_track_speed(void); /* a track's start: the folder's speed, to the decoder */
 int playback_start_fits(void);   /* 0: the track at MCL_POS is too long to open */
+int playback_start_refused(void); /* 1: player_start's replay after a load of nothing */
 int playback_video(void *record); /* a video file, kept out of audio queues */
 void xfade_poll(int next, int shuffled); /* crossfade.c */
 void mono_sync(void);      /* crossfade.c */

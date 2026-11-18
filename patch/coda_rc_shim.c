@@ -438,9 +438,11 @@ static void cr_command(void) {
     } else if (verb && __isoc99_sscanf(verb, " volume %d", &v) == 1 && v >= 0 && v <= 100) {
         /* as the AirPlay app sets it (airplay.c): up to Volume Limit, saved for the output in use */
         if (v > g_maxvolume) v = g_maxvolume;
+        int from = g_volume;
         g_volume = (unsigned char)v;
         device_set_volume(v, 1);
         write_int_config(v, "PLAYSET", mclGetOutputWay() == 1 ? "BT_VOLUME" : "VOLUME");
+        if (v != from) vol_show(from); /* on the Q2's screen too, as a headset's change (volume.c) */
         cr_ack(seq, 0);
     } else {
         cr_ack(seq, 1);

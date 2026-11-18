@@ -78,11 +78,11 @@ AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 class Pg(C.Structure):
     _fields_ = [*((n, C.c_void_p) for n in ('page', 'view', 'edit')), *((n, C.c_uint) for n in ('timer', 'go', 'leave', 'again')),
                 *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'a', 'code', 'arow', 'busy', 'qrnext')), ('acted', C.c_uint),
-                ('term', C.c_char * 64), ('aop', C.c_char * 16), ('lv', C.POINTER(Lv)), ('buf', C.c_void_p * ADDON_PAGES),
+                ('term', C.c_char * 64), ('aop', C.c_char * 16), ('lv', C.POINTER(Lv)), ('kept', C.c_void_p), ('buf', C.c_void_p * ADDON_PAGES),
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
-                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte)]
+                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte)]
 
 
 class Qp(C.Structure):
@@ -2191,7 +2191,7 @@ def test_a_loaded_level_opens_once_its_reply_comes(fw):
     p, lists = overlay(fw)
     p.answer(rows=[item(3)])
     assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.op == b'op1' and p.top.title == b'Row 1'
-    assert p.top.state == K_READY and p.top.n == 1 and p.pg.lv[0].state == K_LOAD
+    assert p.top.state == K_READY and p.top.n == 1 and p.pg.lv[0].state == K_READY  # kept for Back
     p.tick(), p.tick()
     assert p.pg.depth == 2 and len(fw.calls('scroll_view_create')) == lists + 1  # opened once
 
@@ -2227,14 +2227,85 @@ def test_centre_while_loading_sends_nothing_again(fw):
     assert p.req.id == sent and p.pg.pend == 1 and p.pg.depth == 1
 
 
-def test_a_level_under_another_lets_its_reply_go_and_asks_again_on_back(fw):
+def test_a_level_under_another_keeps_its_reply_and_asks_again_on_back(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list')])
     p.click(0)
     p.answer(rows=[item(2)])
-    assert p.pg.lv[0].state == K_LOAD and p.pg.lv[0].n == 0 and p.pg.pages == 1  # the pages are the new level's
+    assert p.pg.lv[0].state == K_READY and p.pg.lv[0].n == 1 and p.pg.pages == 1  # the pages are the new level's
     p.back()
-    assert p.pg.depth == 1 and p.top.state == K_LOAD and p.request().endswith(b'\tmenu\n')
+    assert p.pg.depth == 1 and p.top.state == K_READY and p.request().endswith(b'\tmenu\n')
+
+
+# Back (docs/oled-design.md#loading): the level below is shown at once from the reply it kept, and asked again, its
+# rows written anew in place only when the answer differs. Nothing waits, so there is no overlay to cancel.
+def deeper(fw, depth=2):
+    p = Page(fw)
+    p.answer(rows=[item(1, b'list'), item(2)])
+    for d in range(1, depth):
+        p.sel = 1
+        p.click(0)
+        p.answer(rows=[item(10 * d + 1, b'list'), item(10 * d + 2), item(10 * d + 3)])
+    return p
+
+
+def test_back_shows_the_level_below_at_once_from_its_kept_rows(fw):
+    p = deeper(fw)
+    lists = len(fw.calls('scroll_view_create'))
+    sel = selects(fw)
+    p.sel = 0  # ringnav's prop only writes a change
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.state == K_READY and p.top.n == 2
+    assert p.cell(0, 2) == b'Row 1' and p.cell(1, 1) == b'op2' and sel[-1] == 1  # its rows and its selection
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # drawn at once: no Loading… page
+    assert p.req.running and p.request().endswith(b'\tmenu\n') and p.top.id == p.req.id  # asked again
+
+
+def test_back_s_answer_the_same_redraws_nothing(fw):
+    p = deeper(fw)
+    p.back()
+    lists = len(fw.calls('scroll_view_create'))
+    p.answer(rows=[item(1, b'list'), item(2)])
+    assert p.top.state == K_READY and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+
+
+def test_back_s_answer_changed_is_drawn_in_its_place(fw):
+    p = deeper(fw)
+    p.back()
+    lists = len(fw.calls('scroll_view_create'))
+    p.answer(rows=[item(1, b'list'), item(2), item(3)])
+    assert p.pg.depth == 1 and p.top.n == 3 and p.cell(2, 1) == b'op3'
+    assert len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_back_twice_shows_each_level_from_its_kept_rows(fw):
+    p = deeper(fw, 3)
+    p.back()
+    assert p.pg.depth == 2 and p.top.state == K_READY and p.top.n == 3 and p.cell(0, 1) == b'op11'
+    p.back()
+    assert p.pg.depth == 1 and p.top.state == K_READY and p.top.n == 2 and p.cell(0, 1) == b'op1'
+
+
+def test_a_row_pressed_before_back_s_answer_loads_under_the_overlay(fw):
+    p = deeper(fw)
+    p.back()
+    refresh = p.req.id
+    p.click(0)
+    assert p.pg.pend and p.pending.op == b'op1' and p.req.id == refresh + 1  # the refresh let go
+    assert p.pg.depth == 1 and p.top.n == 2
+
+
+def test_a_paged_level_below_comes_back_with_every_page(fw):
+    p = Page(fw)
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])
+    p.answer(msg=b'pages', rows=[item(2), item(3)])  # its last page
+    assert p.top.n == 4 and p.pg.pages == 2
+    p.click(0)
+    p.answer(rows=[item(5)])
+    p.back()
+    assert p.top.n == 4 and p.pg.pages == 2 and p.cell(3, 1) == b'op3'
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])  # the first page as before
+    assert p.top.n == 4 and p.pg.paging == 0  # kept: not paged again
 
 
 def test_an_action_sends_its_context_toasts_and_asks_again(fw):
@@ -2728,7 +2799,7 @@ def test_a_next_window_selects_the_first_content_row(fw, kind, sel):
     p = Page(fw)
     p.answer(rows=[(kind, b'op', b'Row', b'', b'', b'')])
     fw.fn('addon__page_to', None, C.c_void_p, C.c_char_p, C.c_int)(C.addressof(p.top), b'c', 1)
-    assert p.top.sel == sel
+    assert p.pending.sel == sel
 
 
 def test_a_claimed_swipe_stops_the_lists_fling(fw):
@@ -2815,7 +2886,55 @@ def test_a_reload_asks_for_the_window_on_show(fw):
     p.click(0)
     p.answer(rows=[item(4)])
     p.back()
-    assert p.top.state == K_LOAD and p.request().endswith(b'\top1\tctx\tc200\n')
+    assert p.top.state == K_READY and p.request().endswith(b'\top1\tctx\tc200\n')
+
+
+# The loading overlay (docs/oled-design.md#loading) over a window's page rows: the window on show stays until the
+# next one comes, then that one takes its place.
+def windowing(fw, uri=b'next'):
+    p = windowed(fw)
+    p.answer(rows=[item(2), item(3), (b'page', uri, b'Page', b'', b'c200', b'')])
+    lists = len(fw.calls('scroll_view_create'))
+    p.click(2)
+    return p, lists
+
+
+@pytest.mark.parametrize('uri', [b'next', b'prev'])
+def test_a_page_row_loads_under_the_overlay_not_a_loading_page(fw, uri):
+    p, lists = windowing(fw, uri)
+    assert p.pg.pend and p.pg.depth == 2 and p.top.state == K_READY and p.top.n == 3 and p.pg.buf[0]  # rows kept
+    assert p.top.args == b'\tctx' and p.request().endswith(b'\top1\tctx\tc200\n')
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+
+
+@pytest.mark.parametrize('uri, sel', [(b'next', 1), (b'prev', 2)])
+def test_a_page_rows_window_takes_the_levels_place_once_it_comes(fw, uri, sel):
+    p, lists = windowing(fw, uri)
+    sel_set = selects(fw)
+    p.answer(rows=[(b'page', b'prev', b'Previous page', b'', b'', b''), item(5), item(6)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.args == b'\tctx\tc200' and p.top.n == 3
+    assert len(fw.calls('scroll_view_create')) == lists + 1 and sel_set[-1] == sel
+    p.tick(), p.tick()
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # opened once
+
+
+def test_return_cancels_a_page_rows_load_and_its_late_reply_changes_nothing(fw):
+    p, lists = windowing(fw)
+    cancelled = p.req.id
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.args == b'\tctx' and p.top.n == 3 and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(5)], id=cancelled)
+    assert p.top.args == b'\tctx' and p.top.n == 3 and len(fw.calls('scroll_view_create')) == lists
+    p.click(2)  # pressed again: asked for again
+    assert p.pg.pend and p.req.id == cancelled + 1
+
+
+def test_centre_on_a_page_row_while_it_loads_sends_nothing_again(fw):
+    p, _ = windowing(fw)
+    sent = p.req.id
+    p.click(2), p.click(0)
+    assert p.req.id == sent and p.pg.pend
 
 
 def test_a_press_with_a_page_in_flight_asks_for_the_window(fw):
@@ -2824,7 +2943,7 @@ def test_a_press_with_a_page_in_flight_asks_for_the_window(fw):
     p.answer(msg=b'pages', cursor=b'c1', rows=[item(2), NEXT])
     assert p.pg.paging == 1 and p.request().endswith(b'\top1\tctx\tc1\n')
     p.click(1)
-    assert p.pg.paging == 0 and p.request().endswith(b'\top1\tctx\tc200\n') and p.top.id == p.req.id
+    assert p.pg.paging == 0 and p.request().endswith(b'\top1\tctx\tc200\n') and p.pending.id == p.req.id
     p.answer(rows=[item(3), item(4)])
     assert p.top.state == K_READY and p.top.n == 2 and p.cell(0, 2) == b'Row 3'
 
@@ -2894,6 +3013,38 @@ def test_loading_does_nothing_and_a_press_on_it_is_dropped(fw):
     p.answer(msg=b'pages', cursor=b'c0', rows=rows_of(0, 2))
     p.press(2)
     assert p.pg.go == 0
+
+
+# The loading overlay over a list whose next page is on its way: that page is let go and its Loading… row is More…
+# again, at the cursor it was asking for, so a cancel leaves a way on.
+def paging_press(fw):
+    p = Page(fw)
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])
+    assert p.pg.paging == 1
+    lists = len(fw.calls('scroll_view_create'))
+    p.click(0)
+    return p, lists
+
+
+def test_a_row_pressed_while_the_next_page_comes_loads_under_the_overlay(fw):
+    p, lists = paging_press(fw)
+    assert p.pg.pend and p.pending.op == b'op0' and p.request().endswith(b'\top0\n')
+    assert p.pg.depth == 1 and p.top.n == 2 and p.pg.paging == 0 and p.pg.f[3] == b'c0'  # More… at the page asked for
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+    p.answer(rows=[item(5)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.n == 1 and len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_a_cancelled_row_pressed_while_the_next_page_came_leaves_more(fw):
+    p, lists = paging_press(fw)
+    cancelled = p.req.id
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.pg.paging == 0 and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(msg=b'pages', cursor=b'c1', rows=[item(2)], id=cancelled)  # late: nothing opens or appends
+    assert p.pg.depth == 1 and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+    p.click(2)  # More…: the rest, as a level of its own
+    assert p.pending.args == b'\tc0'
 
 
 def test_a_list_without_pages_keeps_more(fw):
@@ -3259,7 +3410,51 @@ def test_the_search_box_opens_a_level_for_its_text(fw):
     fw.mock('widget_get_text_utf8', typed)
     fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     fw.fn('addon__go', C.c_int, C.c_void_p)(None)
-    assert p.top.op == b'search' and p.top.args == b'\ta b' and p.top.title == b'a b' and p.top.base == 4
+    assert p.pending.op == b'search' and p.pending.args == b'\ta b' and p.pending.title == b'a b' and p.pending.base == 4
+
+
+# The loading overlay over a text typed in the box (a search, a field's): the box closes onto the level's rows, and
+# the spinner waits over them.
+def test_a_search_loads_under_the_overlay_over_its_levels_rows(fw):
+    p = Page(fw)
+    p.answer(rows=[SEARCH, item(0, b'list'), item(1)])
+    tap_find(p)
+    lists = len(fw.calls('scroll_view_create'))
+    fw.mock('widget_get_text_utf8', lambda w, out, n, *_: C.memmove(out, b'abc\0', 4) and 0)
+    fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.pg.pend and p.pg.edit is None and p.pg.view and p.top.state == K_READY and p.pg.depth == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # the rows again, not a Loading… page
+    fw.fn('addon__search_left', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # the box's blur after its OK
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.pg.pend and len(fw.calls('scroll_view_create')) == lists + 1
+    p.answer(rows=[item(4)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.op == b'search' and p.top.n == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 2
+
+
+def test_a_field_s_text_loads_under_the_overlay_over_its_levels_rows(fw):
+    p = Page(fw)
+    p.answer(rows=[item(0, b'info'), USER, PASSWORD])
+    lists = len(fw.calls('scroll_view_create'))
+    field(p, 2)
+    assert p.pg.pend and p.pg.edit is None and p.top.state == K_READY and p.top.n == 3 and p.pg.depth == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # the rows again, not a Loading… page
+    p.answer(rows=[item(7)])
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.n == 1 and p.top.op == b'menu'
+    assert len(fw.calls('scroll_view_create')) == lists + 2
+
+
+def test_return_cancels_a_field_s_load_and_its_text_goes_nowhere(fw):
+    p = Page(fw)
+    p.answer(rows=[USER, PASSWORD])
+    field(p, 1)
+    cancelled, lists = p.req.id, len(fw.calls('scroll_view_create'))
+    p.back()
+    assert p.pg.pend == 0 and p.top.state == K_READY and p.top.n == 2 and not p.req.buf and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(7)], id=cancelled)
+    assert p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
 
 
 def test_an_empty_search_goes_back_to_the_menu(fw):
@@ -3298,9 +3493,9 @@ def test_a_field_row_sends_its_text_and_takes_the_reply_in_the_levels_place(fw):
     p.sel = 2
     field(p, 2)
     assert p.tips == [b'Password:']
-    assert p.request().endswith(b'\tlogin\tpw\ts3cr%25t\n') and p.pg.act == 0
-    assert p.pg.depth == 1 and p.top.op == b'menu' and p.top.args == b'' and p.top.title == b'Foo'
-    assert p.top.state == K_LOAD and p.top.id == p.req.id and p.top.sel == 2
+    assert p.request().endswith(b'\tlogin\tpw\ts3cr%25t\n') and p.pg.act == 0 and p.req.field == 1
+    assert p.pg.depth == 1 and p.pending.op == b'menu' and p.pending.args == b'' and p.pending.title == b'Foo'
+    assert p.pending.id == p.req.id and p.pending.sel == 2
     assert p.pg.term == b'' and p.pg.field == 0
     p.answer(rows=[item(0, b'info'), USER, (b'field', b'login', b'Password:', b'*****', b'pw', b'')])
     assert p.top.state == K_READY and p.top.n == 3 and p.cell(2, 3) == b'*****' and p.pg.depth == 1
@@ -3461,7 +3656,7 @@ def test_without_a_title_bar_a_next_window_selects_past_a_search_and_a_sort_row(
     p = Page(fw)
     p.answer(rows=[SEARCH, SORT, item(0)])
     fw.fn('addon__page_to', None, C.c_void_p, C.c_char_p, C.c_int)(C.addressof(p.top), b'c', 1)
-    assert p.top.sel == 3
+    assert p.pending.sel == 3
 
 
 def test_a_sort_row_left_as_a_row_is_a_list_row(fw):
@@ -3820,6 +4015,8 @@ def test_the_search_boxs_blur_after_its_ok_keeps_the_search(fw):
     fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     fw.fn('addon__search_left', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # the keyboard's close blurs it
     fire(p)
+    assert p.pending.op == b'search' and p.pending.args == b'\tabc'
+    p.answer(rows=[item(2)])
     assert p.pg.depth == 2 and p.top.op == b'search' and p.top.args == b'\tabc'
 
 

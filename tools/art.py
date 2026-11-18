@@ -286,7 +286,8 @@ STATE_INKS = inks('primary', 'd', 'l')
 # (STATE_INKS). Every one is STATUS_INK px tall, the clock's digits' height, with its ink's top STATUS_TOP rows into a
 # STATUS_PX tall box that status_row.c puts on the row's centre less 7, so the glyphs stand on rows 17 to 27 with the
 # digits. STATUS_FIT's are Phosphor's, sized by their ink's height (status_fit), centred across their box: STATUS_PX
-# square, or wider where the ink is (wifi-x, the car). The Bluetooth rune dims while a device connects (BT_SPIN_INKS).
+# square, or wider where the ink is (wifi-x, the car); the volume pill's speakers among them. The Bluetooth rune dims while
+# a device connects (BT_SPIN_INKS).
 # Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
 # STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
 # sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
@@ -301,7 +302,9 @@ STATUS_FAN = ((0, 3.6), (5.0, 7.3), (8.7, 11.0))  # the dot and the bands' radii
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
                  'status_down': ('arrow-down-bold', 8, 0)}
 STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W), 'status_bt': ('bluetooth-bold', STATUS_PX),
-              'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W)}
+              'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W),
+              # the volume pill's speaker, and muted at 0 (vol_pill.c)
+              'status_vol': ('speaker-simple-high-fill', STATUS_PX), 'status_mute': ('speaker-simple-x-fill', STATUS_PX)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8

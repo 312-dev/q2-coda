@@ -1120,7 +1120,7 @@ painted it white, which drew the box at rest.
   Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
   tracks in Cover Flow; Play/Pause there is the player's. A turn up from the first result lands on the tabs, where
   the wheel moves between them, each picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past
-  Albums, or Center, goes back to the results and a turn up past All to the strip; Next picks the next tab and
+  Albums, or Center, goes back to the results and a turn up past All to the query line, which takes the selection bar and nothing more (the strip stays shut and the wheel goes on down to the tabs); Center or Return there, or a tap, opens the strip; Next picks the next tab and
   Previous the one before. Previous or Return on the results, and Return on the tabs, go back to the strip with the
   text, cursor and tab as they were. With text and no match, the empty state stands in the list's place, "No
   Matches", "Try fewer letters" ([oled-design](oled-design.md#empty-and-offline)), and a submit stays on the strip;
@@ -1132,7 +1132,7 @@ painted it white, which drew the box at rest.
   the set and a tap on the return key submits; a tap on a tab opens it, a tap on a result opens or plays it, and a
   drag up or down the results scrolls them a row per 32 px. In the text, in every form a text takes (the query
   line, a row, a cell, a field), a tap puts the cursor at the nearest character boundary and gives the wheel back
-  to the strip; held 250 ms, or moved, the finger brings up a loupe as an iPhone's does: a 104 by 46 px lens with
+  to the strip (while the wheel is elsewhere on Search, the tap counts when the finger lifts within 8 px of where it went down; a drag from the query is a scroll and changes nothing); held 250 ms, or moved, the finger brings up a loupe as an iPhone's does: a 104 by 46 px lens with
   14 px corners and a `#6E6E6E` line, its foot 10 px over the text's top and kept 4 px inside the screen (over the
   status row on Search), showing the text around the cursor at 1.6 times, drawn by the same text renderer, with a
   steady cursor in its middle; it grows in from half its size over 100 ms (at once under Reduce Motion) and the

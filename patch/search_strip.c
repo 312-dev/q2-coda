@@ -25,8 +25,10 @@
  * artist page) or an album (its tracks in Cover Flow). A turn up from the first result lands on
  * the tabs, where the wheel moves between them, each picked as it is reached
  * (docs/oled-design.md#tabs): a turn down past Albums, or Centre, goes back to the results, a
- * turn up past All to the strip, and Next picks the next tab and Previous the one before.
- * Previous or Return on the results, and Return on the tabs, go back to the strip, the text,
+ * turn up past All to the query line, and Next picks the next tab and Previous the one before.
+ * The query line then takes the selection bar and nothing else (SS_ON_FIELD): the strip stays shut,
+ * the wheel goes on down to the tabs, and Centre, Return or a tap opens the strip. Previous or
+ * Return on the results, and Return on the tabs, go back to the strip, the text,
  * cursor and tab kept. A held Return closes Search from any of them (search_strip_hold, from Hold
  * Return's compact_now_playing). Off the strip Play/Pause is the player's.
  *
@@ -41,7 +43,8 @@
  * switcher cycles the set and on the return key submits; a tap on a tab picks it, a tap on a
  * result opens or plays it, and a drag up or down the results scrolls them a row per 32 px. In the
  * text (ss_grab, the mock-up's caretAt), a tap puts the cursor at the nearest character boundary
- * and gives the wheel back to the strip; a hold or a drag shows a loupe over the cursor, the text
+ * and gives the wheel back to the strip (while the wheel is off the strip the tap counts at the
+ * release, and a drag from the query is no tap); a hold or a drag shows a loupe over the cursor, the text
  * at 1.6 times (ss_loupe_paint), and the cursor follows the finger; held at an edge that cuts the
  * text, the finger nudges it a character at a time (ss_nudge_due). The release leaves the cursor.
  * A double tap selects a word and a triple tap the text (ss_sel), the accent behind it and a
@@ -228,7 +231,7 @@ enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 #define SS_ERASE_MIN_MS 110
 enum { SS_SONG, SS_ARTIST, SS_ALBUM };                                     /* a result's kind */
 enum { SS_TAB_ALL, SS_TAB_SONGS, SS_TAB_ARTISTS, SS_TAB_ALBUMS, SS_TABS }; /* tab, kind + 1 */
-enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS };                              /* what has the wheel */
+enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS, SS_ON_FIELD }; /* what has the wheel */
 
 static struct {
     void *page, *sheet, *songs; /* the page, what it paints on, the library's songs A to Z */
@@ -284,6 +287,7 @@ static struct {
     short mark, word_a, word_b, tap_x;
     unsigned tap_at;
     unsigned char taps, drag;
+    unsigned char fpress; /* a finger went down on the query while the strip had no wheel (ss_grab) */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -846,20 +850,31 @@ int search_strip_key(void *top, unsigned key) {
             return 1;
         }
     }
-    if (ss.focus == SS_ON_LIST && (button < 0 || (wheel < 0 && !ss.sel)))
-        ss.focus = button || ss.pick ? SS_ON_STRIP : SS_ON_TABS, wheel = button = 0, key = 0;
+    if (ss.focus == SS_ON_LIST && (button < 0 || (wheel < 0 && !ss.sel))) {
+        ss.focus = button ? SS_ON_STRIP : ss.pick ? SS_ON_FIELD : SS_ON_TABS;
+        wheel = button = 0, key = 0;
+    }
     if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
         return 0; /* Play/Pause, on the results */
     if (ss.focus == SS_ON_TABS) {
         int to = ss.tab + wheel; /* the wheel's tab, past either end off the tabs */
-        if (key == KEY_RETURN || to < 0)
+        if (key == KEY_RETURN)
             ss.focus = SS_ON_STRIP;
+        else if (to < 0)
+            ss.focus = SS_ON_FIELD;
         else if (wheel && to < SS_TABS)
             ss_pick(to);
         else if ((wheel || key == KEY_CENTER) && ss.nmatch)
             ss.focus = SS_ON_LIST, ss.sel = ss.top;
         else if (button)
             ss_pick(ss.tab + button);
+    } else if (ss.focus == SS_ON_FIELD) {
+        /* the query line, highlighted: the wheel passes on down, Centre or Return types */
+        if (key == KEY_CENTER || key == KEY_RETURN)
+            ss.focus = SS_ON_STRIP;
+        else if (wheel > 0)
+            ss.focus = ss.pick ? (ss.nmatch ? SS_ON_LIST : SS_ON_FIELD) : SS_ON_TABS,
+            ss.sel = ss.top;
     } else if (ss.focus == SS_ON_LIST) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
         if (key == KEY_CENTER) ss_play();
@@ -1273,7 +1288,13 @@ void search_strip_overlay(void *w, void *canvas) {
  * query in 20 px from SS_QUERY_X with its cursor while the strip has the wheel (ss_field; or the
  * placeholder, ss.label, in Text Tertiary while it is empty), and a 1 px rule in the raised grey
  * under it. */
-static void ss_query_paint(void *canvas, unsigned primary, unsigned secondary, unsigned tertiary) {
+static void ss_query_paint(void *canvas, unsigned primary, unsigned secondary, unsigned tertiary,
+                           unsigned accent) {
+    if (ss.focus == SS_ON_FIELD) { /* the wheel is on the line: the selection bar, white on it */
+        fill_box(canvas, &(rect_t){ 16, SS_QUERY_Y - SS_PITCH / 2, 375 - 32, SS_PITCH },
+                 RGBA(accent), 8);
+        primary = secondary = tertiary = 0xffffff;
+    }
     void *vg = canvas_get_vgcanvas(canvas);
     if (vg) {
         float x = (float)I(canvas, CANVAS_X), y = (float)I(canvas, CANVAS_Y), cx = x + SS_GLASS_X,
@@ -1373,7 +1394,7 @@ void search_strip_paint(void *w, void *canvas) {
     unsigned primary = tok(TOK_PRIMARY), secondary = tok(TOK_SECONDARY),
              tertiary = tok(TOK_TERTIARY), accent = accent_tone(2);
     if (ss.form == SS_FORM_QUERY)
-        ss_query_paint(canvas, primary, secondary, tertiary);
+        ss_query_paint(canvas, primary, secondary, tertiary, accent);
     else
         ss_form_paint(canvas, primary, secondary, tertiary, accent);
     if (ss_tabs()) {
@@ -1572,9 +1593,12 @@ static int ss_grab(int type, int x, int y) {
             return 0;
         int again = ss.taps && now - ss.tap_at < SS_MULTI_MS && ss_dist(x - ss.tap_x) < SS_MULTI_DX,
             a, b, end = -1;
-        ss.grab = 1, ss.loupe = 0, ss.nudge = 0;
         ss.down_x = ss.grab_x = (short)x, ss.down_y = (short)y;
-        ss.focus = SS_ON_STRIP;
+        if (ss.focus != SS_ON_STRIP) { /* the wheel is elsewhere: a tap is the click, a drag a scroll */
+            ss.fpress = 1;
+            return 1;
+        }
+        ss.grab = 1, ss.loupe = 0, ss.nudge = 0;
         ss.taps = (unsigned char)(again && ss.taps < 3 ? ss.taps + 1 : 1);
         ss.drag = SS_DRAG_CARET;
         rearm(&ss.loupe_timer, ss_loupe_due, SS_LOUPE_HOLD_MS);
@@ -1598,6 +1622,15 @@ static int ss_grab(int type, int x, int y) {
             ss_dirty();
         }
         return 1;
+    }
+    if (ss.fpress) {
+        if (type == EVT_POINTER_MOVE_BEFORE) {
+            if (ss_dist(x - ss.down_x) >= SS_TAP || ss_dist(y - ss.down_y) >= SS_TAP) ss.fpress = 0;
+            return 1;
+        }
+        ss.fpress = 0; /* released where it went down: a tap, the strip has the wheel and the cursor */
+        ss.focus = SS_ON_STRIP;
+        ss_grab(EVT_POINTER_DOWN, ss.down_x, ss.down_y);
     }
     if (!ss.grab) return 0;
     if (type != EVT_POINTER_MOVE_BEFORE) { /* a tap's release starts the next tap's clock */

@@ -26,7 +26,7 @@ none in time is exit 3, which the merge queue does not count against the tip.
 The emulator is leased from tools/ci/emu_pool.py under the name smoke-PID, never slot 2 (the user's own),
 with BLUETOOTH=0 in the copy's config.ini for the run (a Bluetooth stack that is not there would only add
 a scan to every boot); the file is put back as it was and the lease returned whatever happens, a signal
-included. Its card is the pool's fixture (emu_pool.reset_card); one that holds no songs is exit 3 too, said
+included. Its card is the pool's fixture (emu_pool.reset_card), its settings the data fixture's (emu_pool.reset_data); one that holds no songs is exit 3 too, said
 as such ("the card has no songs"), not as a missing emulator. docs/building.md#smoke-test.
 """
 import argparse

@@ -514,7 +514,7 @@ void reveal(menu_t *m, int id, int immediate) {
     /* Stock scroll views cannot retarget an animator whose old goal is a boundary. */
     stop_scroll(m);
     if (m->kind == 2) {
-        table_client_scroll_to(m->w, want);
+        table_client_scroll_to(m->w, want, glide);
     } else
         scroll_view_scroll_delta_to(m->w, 0, want - top, glide);
 }

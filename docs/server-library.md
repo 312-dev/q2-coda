@@ -261,6 +261,10 @@ the firmware's own queue, 4 s on, or up to 15 s more while an app that wasn't ru
 shows the pressed song at once: its title, artist and album from the row, its place in the list
 ("2 of 12"), and the app's cover of its album (stock's placeholder until the app has fetched
 one). The song that was playing stops, so its time and sound don't run on under the new title.
+Stock's `player_start` would start the queue it had again after the load that loaded nothing, the
+song playing or paused from its start until that stop reached the player, heard as a blip of the
+paused song; the payload refuses that start (`patch/playback.c` `playback_start_refused`, from the
+`mclStartPlayer` hook), so the song stays where it was until it stops.
 Now Playing goes back to the player's song as soon as the player parses one (the pressed
 song once it plays, or another the user picked), when nothing of the list could play, or after
 60 s with neither (`CATPLAY_SHOW_MS`). The car remote's Now Playing follows the same song from the press ([remote-protocol.md](remote-protocol.md#a-streaming-song)). A Next or Previous while the pressed song is still to come

@@ -5,7 +5,7 @@
     python3 tools/ci/emu_pool.py put SLOT                             # stop it, end the lease
     python3 tools/ci/emu_pool.py renew SLOT [--hours H]
     python3 tools/ci/emu_pool.py status
-    python3 tools/ci/emu_pool.py fixture DIR [--library DB]           # (re)make the card fixture from DIR's files, hardlinked
+    python3 tools/ci/emu_pool.py fixture [DIR] [--library DB] [--data DDIR]  # (re)make the card and/or data fixture, hardlinked
     python3 tools/ci/emu_pool.py reserve SLOT [--off]                 # its lease never expires to another agent
 
 `get` prints the slot, its folder and its viewer's URL; drive it with that folder's own q2emu
@@ -17,7 +17,11 @@ whatever the last lease left there and hardlinks the fixture's tree in, so no da
 outlives its lease. With the library the fixture was scanned into (`fixture DIR --library DB`, kept as card.db beside
 it), `get` copies that over the copy's state/data/database.db too, so Library > Songs lists the card's songs and no
 other; a new fixture without one drops the old library, and the copy's database.db is then left as it was.
-A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card and library.
+A fresh lease also starts with the settings of state/data (/mnt/data) the data fixture holds, ~/.cache/q2-emu-pool/data
+(Q2_EMU_DATA; `fixture --data DDIR`, a clean default config.ini with BLUETOOTH=0): `get` copies its files over the
+copy's and removes the per-run files (DATA_PER_RUN: the queue, play counts, ratings, Memory Playback, the state record)
+the last lease left; Wi-Fi, the pool's own files and the rest are kept. With no data fixture state/data is left alone.
+A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card, library and data.
 A reserved lease (`get --reserve`, or `reserve SLOT` on a held one: the user's own rig) is never
 reclaimed when it expires and never handed to another NAME; only `put` or `reserve --off` frees it.
 
@@ -195,6 +199,67 @@ def make_fixture(src, library=None):
     return fx
 
 
+# state/data's files that are one run's own state, not settings or something the copy needs: removed at each fresh
+# lease. Everything else there stays: wpa_supplicant.conf and q2-defaults (boot and Wi-Fi), q2-battery, coda-rc (the
+# pool's stand-in), userequalizer and the logs; database.db is the library fixture's (reset_card).
+DATA_PER_RUN = ('memoryfile', 'q2-state', 'q2-stall', 'q2-cf-trace', 'q2-library-scope', 'peq-active', 'ringnav-*')
+
+
+def data_fixture_dir():
+    """The settings every fresh lease starts from: Q2_EMU_DATA, else ~/.cache/q2-emu-pool/data."""
+    return pathlib.Path(os.environ.get('Q2_EMU_DATA') or STATE/'data')
+
+
+def make_data_fixture(src):
+    """The data fixture as hardlinks of src's files (top level only; database.db is the library fixture's, not
+    here), read-only; the tree it replaces is unlinked, never written to."""
+    fx = data_fixture_dir()
+    src = pathlib.Path(src)
+    if not src.is_dir():
+        raise SystemExit(f'{src} is not a directory')
+    fx.parent.mkdir(parents=True, exist_ok=True)
+    new = fx.with_name(fx.name + '.new')
+    if new.exists():
+        shutil.rmtree(new)
+    new.mkdir()
+    for f in sorted(src.iterdir()):
+        if f.is_file() and f.name != 'database.db':
+            try:
+                os.link(f, new/f.name)
+            except OSError as e:
+                raise SystemExit(f'cannot hardlink {f} to {new/f.name}: {e.strerror} (the data fixture and the source '
+                                 f'must share a filesystem)') from None
+            (new/f.name).chmod((new/f.name).stat().st_mode & ~0o222)
+    if not any(new.iterdir()):
+        shutil.rmtree(new)
+        raise SystemExit(f'{src} holds no files to make a data fixture from')
+    if fx.exists():
+        shutil.rmtree(fx)
+    new.rename(fx)
+    return fx
+
+
+def reset_data(k):
+    """Copy k's state/data given the data fixture's settings: DATA_PER_RUN's files removed, each of the fixture's files
+    copied over (not linked: stock writes config.ini in place, which would change the fixture for every lease).
+    Called for a copy this lease holds, its emulator stopped; with no data fixture, nothing changes."""
+    fx = data_fixture_dir()
+    if not fx.is_dir():
+        return
+    data = copy_dir(k)/'state/data'
+    data.mkdir(parents=True, exist_ok=True)
+    for pattern in DATA_PER_RUN:
+        for f in data.glob(pattern):
+            if f.is_file() or f.is_symlink():
+                f.unlink()
+    for f in sorted(fx.iterdir()):
+        if f.is_file():
+            tmp = data/(f.name + '.new')
+            shutil.copyfile(f, tmp)
+            tmp.chmod(0o644)
+            tmp.replace(data/f.name)
+
+
 def card_songs(k):
     """How many audio files copy k's card holds."""
     return sum(1 for _, _, files in os.walk(copy_dir(k)/'state/mmc') for f in files if pathlib.Path(f).suffix.lower() in AUDIO)
@@ -205,7 +270,7 @@ def reset_card(k):
     unlinked and the fixture's tree hardlinked in, and its library (state/data/database.db) a copy of the
     fixture's, when there is one: stock's database.db is not rescanned at boot, so one left by another card lists
     songs this card does not hold. Called for a copy this lease holds, its emulator stopped; the rest of
-    state/data (/mnt/data) is not touched."""
+    state/data (/mnt/data) is reset_data's."""
     fx = fixture_dir()
     if not fx.is_dir() or not any(fx.iterdir()):
         raise SystemExit(f'no card fixture at {fx}: make it with `python3 {pathlib.Path(__file__).resolve()} fixture DIR` '
@@ -271,6 +336,7 @@ def get(build, name, hours, wait, reserve=False, avoid=(), prepare=None):
             if not was_reserved:
                 q2emu(k, 'stop')  # the card changes under no running emulator
                 reset_card(k)
+                reset_data(k)
             if prepare:
                 prepare(k)
             p = q2emu(k, 'start', build)
@@ -347,8 +413,9 @@ def main():
     v = sub.add_parser('reserve')
     v.add_argument('slot', type=int)
     v.add_argument('--off', action='store_true')
-    f = sub.add_parser('fixture', help='make the card every lease starts from, hardlinked from DIR')
-    f.add_argument('dir')
+    f = sub.add_parser('fixture', help='make the card and/or the data every lease starts from, hardlinked from DIR / DDIR')
+    f.add_argument('dir', nargs='?', help='the card (omit it to change only --data)')
+    f.add_argument('--data', metavar='DDIR', help="the settings (config.ini, ...) each fresh lease puts in state/data; seed it from a build's default config with BLUETOOTH=0")
     f.add_argument('--library', help="a database.db that lists DIR's songs, copied to each lease's state/data")
     sub.add_parser('status')
     args = ap.parse_args()
@@ -359,8 +426,13 @@ def main():
     elif args.cmd == 'reserve':
         reserve(args.slot, not args.off)
     elif args.cmd == 'fixture':
-        print(f'card fixture {make_fixture(args.dir, args.library)}: {sum(len(f) for _, _, f in os.walk(fixture_dir()))} files, '
-              f'hardlinked from {args.dir}; library {library_fixture() if args.library else "none"}')
+        if not args.dir and not args.data:
+            raise SystemExit('fixture needs a card DIR, --data DDIR, or both')
+        if args.data:
+            print(f'data fixture {make_data_fixture(args.data)}: {", ".join(sorted(p.name for p in data_fixture_dir().iterdir()))}')
+        if args.dir:
+            print(f'card fixture {make_fixture(args.dir, args.library)}: {sum(len(f) for _, _, f in os.walk(fixture_dir()))} files, '
+                  f'hardlinked from {args.dir}; library {library_fixture() if args.library else "none"}')
     elif args.cmd == 'renew':
         renew(args.slot, args.hours)
     else:

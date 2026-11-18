@@ -423,7 +423,9 @@ demo	0x5db11c	0x4	toolsQueryDbTableAndSort	`lw $2, GOT[sub_5c0000]` (3rd of 7 su
 demo	0x5db1a8	0x4	toolsQueryDbTableAndSort	`lw $2, GOT[sub_5d0000]` (5th of 7 such); tools/build.py NAME_COMPARATORS
 demo	0x5dc4d8	0x4	toolsLoadAllFile	the only call to toolsCheckItemExist, after "%s/%s"; tools/build.py SCAN_REFRESH
 demo	0x5dcdac	0x4	table_client_load_rows	1st of 2 calls to a pointer; tools/build.py TABLE_LOAD_CALL
+demo	0x5ddd14	0x4	table_view_on_event	1st of 2 calls to table_client_scroll_to, after `addiu $6, $zero, 0x12c`; tools/build.py TABLE_SCROLL_CALLS
 demo	0x5ddf04	0x4	table_view_on_event	the only call to table_client_set_yoffset; tools/build.py TABLE_DRAG_CALL
+demo	0x5dde50	0x4	table_view_on_event	2nd of 2 calls to table_client_scroll_to, after `lw $5, 0xc8($16)`; tools/build.py TABLE_SCROLL_CALLS
 demo	0x5de094	0x4	table_view_on_event	`addiu $2, $zero, 0x107`, before 1st of 2 calls to widget_dispatch_event_to_target_recursive, after "table_view"; patch/ipod.json event_abi_words
 demo	0x5fb23c	0x4	hscroll_label_text_edge_x	`addiu $6, $zero, 0x2` (2nd of 2 such), before 2nd of 2 calls to style_get_int, after "margin_left"; patch/nav/row_paint.c marq_stop
 demo	0x5fb394	0x4	hscroll_label_step	`lwc1 $f0, 0x8c($16)` (1st of 2 such); patch/offsets.inc HSCROLL_SPEED

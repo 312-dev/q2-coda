@@ -80,6 +80,10 @@ static int back_to __attribute__((section(".scratch"))), back_at __attribute__((
 /* Shuffle Songs is one-shot: the stock mode it replaced + 1, which the next other queue restores.
  * ponytail: RAM only, so a reboot mid-shuffle keeps Shuffle; a queue-file header field fixes it. */
 static int unshuffle __attribute__((section(".scratch")));
+/* Inside stock's player_start (ringnav_player_start): 1, and 2 once its load loaded nothing (a
+ * server row handed to its app, or one that can't play), so its mclStartPlayer of the queue it
+ * had is refused (playback_start_refused). */
+static int in_start __attribute__((section(".scratch")));
 unsigned playback_loads __attribute__((section(".scratch")));
 unsigned playback_picks __attribute__((section(".scratch")));
 /* A song the user moved to in the queue playing: counted (a skip nobody pressed is not), and
@@ -1019,7 +1023,10 @@ int ringnav_load(void *q, int at, int type) {
     if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
     /* Server rows (catalogue.c): handed to their app online, else card rows and offline copies */
     void *served = 0;
-    if (!s.restoring && catalogue_load(q, &at, &served) == 2) return 0;
+    if (!s.restoring && catalogue_load(q, &at, &served) == 2) {
+        if (in_start) in_start = 2;
+        return 0;
+    }
     void *own = no_videos(served ? served : q, &at);
     int result = stock_load_trampoline(own ? own : served ? served : q, at, type);
     /* a list pick: Up Next's "From ..." from the rows stock was handed, while they are still there */
@@ -1310,8 +1317,16 @@ int ringnav_player_start(void *q, int at, int cls, int mode) {
             player_play_pause();
         return 1;
     }
-    return stock_player_start_trampoline(q, at, cls, mode);
+    in_start = 1;
+    int result = stock_player_start_trampoline(q, at, cls, mode);
+    in_start = 0;
+    return result;
 }
+/* mclStartPlayer's: 1 while stock's player_start goes on after a load of nothing. It would start
+ * the queue it had again, at its song's start: a paused song was heard from there until np_stop's
+ * stop reached the player (the device, 2026-11-18: a blip of the paused song at a server song's
+ * press), and a playing one went back to 0 under a toast. The song stays as it was instead. */
+int playback_start_refused(void) { return in_start == 2; }
 int playback_group_skip(int forward) {
     if (!s.active && !playback_set(2, s.folder)) return 0;
     unsigned at = (unsigned)M(MCL_POS), next = s.n;

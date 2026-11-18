@@ -73,7 +73,7 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
+  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
   the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
   scans): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
   no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
@@ -263,6 +263,19 @@ All lists share one grid.
   colors, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
   the glyphs to its left move over for it.
+- **The volume pill.** A volume change made off Now Playing (a headset's own keys or its AVRCP volume, the Car
+  Remote) shows in the clock's place: a Raised (`#1C1C1E`) pill 30 px tall on the row's centre (rows 8 to 37) with
+  15 px round ends, 199 px wide and centred on x 187.5, narrower (still centred) where the glyph slots leave it less
+  room, down to 141 px, which then ends 8 px short of the leftmost slot. Inside, 12 px from each end: the speaker
+  (Phosphor `speaker-simple-high-fill`, 11 px tall as every status glyph, Text Primary), 8 px, a 4 px track in Track
+  with round ends filled in Text Primary to the level, 8 px, and the number (0 to 100) in the row's face, Inter
+  Medium 15 px, Text Secondary, ending at the pill's inner edge in a 32 px column of tabular digits, so the track
+  never moves. At 0, the mute, `speaker-simple-x-fill` and an empty track. The number and fill are the Q2's 0 to 100 in
+  every case: with Link Volume on a headset, its own level read back on that scale, as everywhere else. The clock and the title go out while it
+  shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
+  (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
+  Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
+  `mock.html` on 2026-11-18 ("status pill").
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
@@ -466,7 +479,7 @@ Search's All, Songs, Artists and Albums ([ipod](ipod.md#search)), the theme's on
   wheel's place. In Light Mode the track is `#E5E5EA` and the raised segment white.
 - **The wheel** reaches the tabs past the first row (or control) under them. On them it moves between the tabs, each
   opening as the wheel reaches it, left to right going down; a turn down past the last tab, or Center, goes into the
-  open tab's rows, and a turn up past the first stays (EQ) or goes up to what is above (Search's strip). Previous
+  open tab's rows, and a turn up past the first stays (EQ) or goes up to what is above (Search's query line, which only lights as a selection; Center there opens the strip). Previous
   and Next open the tab before and after, round (`peq_ui.c` `eq_key`, `search_strip.c` `search_strip_key`).
 - Labels in Inter Medium 17 px, centered in their segments: the open one white (Text Primary on Light
   Mode's white segment), the other `#ABABAB` (`#8A8A8E` in Light Mode), at the size of iOS's
@@ -964,10 +977,16 @@ own.
 - **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
   Stop), after the app's 15 s at most.
 - **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
-  browse, the search results, Albums and the other rows of an artist's page, a sort, and More…. Not yet (`ponytail:`,
-  each keeps its Loading… page): Back to the level below, which is asked again; a list's next or previous window
-  (Next page); a sign-in field's text; a row pressed while a list's next page is on its way; Spotify's browser;
-  Internet Radio's directory; and Chapters.
+  browse, the search results, Albums and the other rows of an artist's page, a sort, More…, and a list's Next page and
+  Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
+  page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.
+  A search or a sign-in field's text, once typed, closes the box onto the list it was opened from, the spinner over it.
+  Spotify's browser: a list pressed on a page showing its rows (the menu, a list, Search's categories, More…).
+  Internet Radio's directory: Top Stations, By Country, By Genre, a country or a genre, and a search, over the list
+  they were opened from. Not yet (`ponytail:`, each keeps its Loading… page): Chapters.
+- **Back** in a card app waits on nothing, so it has no overlay: the level below comes back at once, as it was left,
+  its selected row and every page of it, and is asked again behind the scenes; its rows change only if the answer
+  differs.
 
 ### Menus
 
@@ -1245,6 +1264,11 @@ left-aligned (right-aligned in a cell). By form:
   "Search") in Text Tertiary while empty, a 1 px rule under it; on Search, the results between it and the
   strip, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
   letters".
+  The wheel reaching the query from the tabs (or from Add Songs' songs) only **highlights** it: the selection bar
+  (the accent, 8 px corners, x 16 to 359 over the query's 32 px line) with the magnifier and the text in white and
+  no cursor, the strip left as it was and unlit. A turn on goes down to the tabs; Center, Return or a tap on the
+  line opens the strip with the cursor in the text. A tap counts when the finger lifts within 8 px of where it went
+  down; a drag that starts on the line is a scroll and leaves it as it was.
 - **A row** (New Playlist, Rename Playlist): the page under as it was, and over the row the wheel was on, in its
   place, a box from x 16 to 359 in the raised grey with 8 px corners and a 2 px accent line, the text from x 24.
 - **A cell** (Bluetooth's Name, Guest Play's Name, a device's or a phone's Rename, an EQ preset's Name, a card

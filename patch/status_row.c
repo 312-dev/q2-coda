@@ -361,8 +361,8 @@ int status_slots_reach(void) {
     return reach;
 }
 
-/* The bar's background paint under the status row: every shown slot but the battery, in final
- * colours (st.raw_ink), restoring the canvas's fill. */
+/* The bar's background paint under the status row: every shown slot but the battery and the volume
+ * pill while it shows, in final colours (st.raw_ink), restoring the canvas's fill. */
 void status_slots_paint(void *bar, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD);
     if (!lcd || layout() < 0) return;
@@ -370,6 +370,7 @@ void status_slots_paint(void *bar, void *canvas) {
     int cy = geom_val(V_STATUS_Y);
     for (int i = SLOT_BATTERY + 1; i < SLOT_N; ++i)
         if (sr.w[i]) slots[i].paint(bar, canvas, sr.x[i], cy);
+    vol_pill_paint(bar, canvas); /* a volume change's pill, in the clock's place (vol_pill.c) */
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -510,6 +511,9 @@ static void play_xfade_sync(void) {
  * ring to the 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar
  * repaints whole after the frame and the clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
+#if Q2POD_DEV
+    vol_pill_fake(); /* the emulator's stand-in for a headset's volume (vol_pill.c) */
+#endif
     play_xfade_sync();
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
