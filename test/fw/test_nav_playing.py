@@ -22,11 +22,7 @@ W_PARENT = O['W_PARENT']
 CANVAS_LCD, LCD_FILL, LCD_TEXT = O['CANVAS_LCD'], O['LCD_FILL_COLOR'], O['LCD_TEXT_COLOR']
 SCROLL_X, SCROLL_Y, CONTENT_H = O['SCROLL_X'], O['SCROLL_Y'], O['VIEW_CONTENT_H']
 KEY_NEXT, KEY_PREV, KEY_CENTER = O['KEY_NEXT'], O['KEY_PREV'], O['KEY_CENTER']
-PCT_W, NUB_W, ROOM, STATUS_GAP, BT_REACH = (O[k] for k in ('BATT_PCT_W', 'BATT_NUB_W', 'BATT_ROOM', 'STATUS_GAP',
-                                                           'BT_REACH'))
-CODECS = re.findall(r'"(\w+)"', host.ROOT.joinpath('patch/offsets.inc').read_text().split('#define BT_CODECS', 1)[1].split('\n')[0])
-CODEC_REACH = [int(v) for v in re.findall(r'\d+', host.ROOT.joinpath('patch/offsets.inc').read_text()
-                                          .split('#define BT_CODEC_REACH', 1)[1].split('\n')[0])]
+PCT_W, NUB_W = O['BATT_PCT_W'], O['BATT_NUB_W']
 BT_GLYPH = b'bar_btcon'
 # the named periods of navigation.h and its units (NAVIGATION_SOURCE), as their comments state the behaviour by them
 NAV = {k: int(v) for k, v in re.findall(r'^#define (\w+) (\d+)\b', NAVIGATION_SOURCE, re.M)}
@@ -432,16 +428,13 @@ def test_a_new_level_repaints_the_bar_with_nothing_else_painting(fw, st, ui, mod
     assert tick('86%') == 0  # dark: the wake paints it
 
 
-def test_a_codec_badge_takes_the_room_until_it_fades_to_the_glyph(fw, st, ui):
+def test_a_codec_badge_fades_to_the_glyph_and_takes_no_room(fw, st, ui):
     theme(fw, st, BATTERY=1)
     bar = Bar(fw, ui)
     ui.shown[bar.wifi] = 1
-    group = PCT_W + ui.box(bar.wifi)[2] + 2 * STATUS_GAP  # the percentage, Wi-Fi and Bluetooth, a gap apart
-    ldac = CODECS.index('bar_ldac')
-    assert group + CODEC_REACH[ldac] > ROOM >= group + BT_REACH
     ui.set_str(bar.bt, b'image', b'bar_ldac')
     bar.sync()
-    assert slot_width(ui, bar) == ICON_W  # crowded out to the icon
+    assert slot_width(ui, bar) == PCT_W  # the badge is off the row, which has the room: the percentage stays
     assert [ui.timers[t][2] for t in ui.due('codec_fade')] == [O['CODEC_MS']]
     ui.run_all('codec_fade')
     assert ui.prop(bar.bt, b'image') == BT_GLYPH
@@ -2005,6 +1998,25 @@ def test_an_ab_marker_keeps_its_share_of_a_fitted_bar(fw, ui, mcl, st):
     assert (x, w) != (x0, w0)  # the bar elsewhere, or the share proves nothing
     assert ab_x(1) == x + (w0 // 2) * w // w0 and ab_x(3) == x
     assert ab_x(2) == 0  # no point to mark
+
+
+# A-B markers on a bar laid out off the immediates' place (ringnav_ab_move): centered on the bar, not at stock's y 250.
+def test_an_ab_marker_is_centered_on_the_bar(fw, ui, mcl, st):
+    theme(fw, st)
+    moves = []
+    fw.mock('widget_move', lambda w, x, y, *_: moves.append((w, x, y)))
+    ab_move = fw.fn('ringnav_ab_move', C.c_int, C.c_void_p, C.c_int, C.c_int)
+    marker = ui.widget(ui.wm, 'img_repeata', 0, 250, 3, 10)
+    ab_move(marker, 77, 250)
+    assert moves == [(marker, 77, 250)]  # no Now Playing: stock's
+    now = Now(fw, ui, mcl, st, sec=10, total=4000)
+    marker = ui.widget(now.win, 'img_repeata', 0, 250, 3, 10)
+    struct.pack_into('<ii', (C.c_char * 8).from_address(now.slider + 4), 0, 300, 20)  # the bar elsewhere than stock's
+    _, y, _, h = ui.box(now.slider)
+    assert y + h // 2 != 255
+    moves.clear()
+    ab_move(marker, 77, 250)
+    assert moves == [(marker, 77, y + h // 2 - 5)]
 
 
 @pytest.mark.parametrize('value, part', [(0, 0), (50, 102), (100, 204), (25, 51)])

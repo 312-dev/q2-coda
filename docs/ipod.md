@@ -311,7 +311,7 @@ left and the clock, the payload's glyph slots and the battery on the right ([The
 slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
 `label_clock` (see [internals.md](internals.md#status-bar-ipod)).
 
-**Time in Title.** `IPOD TIMETITLE` (on unless chosen) is a theme option (`<option setting="time_title">`) that OLED does not offer, so Appearance has no row for it: the status row names the page in a title of its own and keeps the clock beside it, whatever the key holds (`bar_title`). ponytail: the theme engine still reads the key into `st.time_title`, which nothing reads; it goes with the option.
+**Time in Title.** There is no such setting: the status row names the page in a title of its own and keeps the clock beside it (`bar_title`). An `IPOD TIMETITLE` key an older build wrote is never read.
 
 **Codec.** The Bluetooth images are 42-pixel canvases with their ink at the right: the glyph takes
 10 pixels, while stock's codec badges take up to 40 (aptX HD). A new badge shows for a second
@@ -333,8 +333,10 @@ The playback, Bluetooth and Wi-Fi glyphs share smooth edges, rounded ends and a 
 
 In Icon and Icon + Percent, charging fills the icon solid green (`BATT_CHARGE_RGB`); low battery always uses
 `BATT_LOW_RGB` (`#FF1448`) under every accent; OLED's slim battery fills green while charging and
-red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone wherever the
-group's ink would reach past `BATT_ROOM` (94 pixels from the margin), as a wide codec badge does until it fades.
+red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone where the
+battery and the status row's glyphs would squeeze the title out: `batt_room` (navigation.c) is the span from the battery's end
+(`STATUS_ROW_INSET`) to the title's start, less the clock's widest, `CLOCK_BESIDE` and `CLOCK_CLEAR`, and the group is the
+battery's form and `status_slots_reach`.
 
 The navbar is hidden, as on the local pages, on the settings pages
 (`systemset/*`, `playset/*`), `audiosetting_page` and `stream_page`, listed in
@@ -998,7 +1000,7 @@ The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.
 
 A change is saved at once with the stock `write_int_config(value, "IPOD", key)` (`0x4fe67c`):
 `sprintf("%d")`, then `toolsWriteConfig("/mnt/data/config.ini", section, key, text)`, which
-rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`; its hook first starts a section run into the line before it on a line of its own, [config.ini](internals.md#config-ini)). The keys are `OLED_ACCENT` (OLED's accent), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `SHORTCUT`, `KEEPLIT`, `CLICKER`, `TIMETITLE`, `THEME` ([Theme](#theme)), and OLED's own `SONGARTIST`, `SONGLENGTH` and `NPTIME`; `ACCENT`, the accent key of a theme that names none, is read but not OLED's. The retired themes' keys (`MINIMAL_ACCENT`, `CLASSIC_LIGHT_ACCENT`, `ROUNDED`, `STATUSBAR`, `NPCENTRED`, `SCRUBSINGLE`, `HOMELIB`, `ROWPREVIEW`, `ROWART`) stay in the file, unread. The values are read once,
+rewrites the key or appends `[IPOD]` with it (`"[%s]\n%s=%s\n"`; its hook first starts a section run into the line before it on a line of its own, [config.ini](internals.md#config-ini)). The keys are `OLED_ACCENT` (OLED's accent), `LIGHT` (Light Mode: 0 Off, 1 On, 2 Auto; missing is Off), `HOME`, `BATTERY`, `SHORTCUT`, `KEEPLIT`, `CLICKER`, `THEME` ([Theme](#theme)), and OLED's own `SONGARTIST`, `SONGLENGTH` and `NPTIME`; `ACCENT`, the accent key of a theme that names none, is read but not OLED's. The retired themes' keys (`MINIMAL_ACCENT`, `CLASSIC_LIGHT_ACCENT`, `ROUNDED`, `STATUSBAR`, `NPCENTRED`, `SCRUBSINGLE`, `HOMELIB`, `ROWPREVIEW`, `ROWART`) stay in the file, unread. The values are read once,
 on the payload's first use (after stock `config_init`: `application_init` runs `platform_init`, which
 calls it, before it opens any window), with `toolsReadConfig` (`0x5cfff4`), in the order stock `config_init`
 calls it: `(path, section, key, out, default)`. It reads the file line by line

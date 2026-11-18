@@ -351,6 +351,16 @@ int status_slots_left(void) {
     return left < 0 ? 375 : left;
 }
 
+/* The room the shown slots take left of the battery: each one's width and the gap before it. */
+int status_slots_reach(void) {
+    int reach = 0;
+    for (int i = SLOT_BATTERY + 1; i < SLOT_N; ++i) {
+        int w = slots[i].shown();
+        if (w) reach += slots[i].gap + w;
+    }
+    return reach;
+}
+
 /* The bar's background paint under the status row: every shown slot but the battery, in final
  * colours (st.raw_ink), restoring the canvas's fill. */
 void status_slots_paint(void *bar, void *canvas) {
