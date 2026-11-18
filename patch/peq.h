@@ -490,6 +490,9 @@ int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
 int addon_radio_answer(unsigned seq);
 const char *addon_radio_missing(const char *path);
+/* addon.c: a song's lyrics asked of its app (lyrics.c); the answer to request seq, -1 none yet */
+int addon_lyrics_ask(const char *path, unsigned seq);
+int addon_lyrics_answer(unsigned seq, const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -593,6 +596,8 @@ typedef struct {
  * first), repainting it while page shows; lyrics_paint draws a row's line, lyrics_fade OLED's
  * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
+void lyrics_ask_poll(int front); /* a server song's lyrics asked of its app (addon_lyrics_ask) */
+int ringnav_lyric(void);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
     lyrics_row_h(void),
     lyrics_row_h(void),

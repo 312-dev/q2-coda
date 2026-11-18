@@ -846,7 +846,9 @@ finger stays and springing back when it lets go, still following, so a stray tou
 Lyrics moved by the wheel or a finger stay where they are, while the bar and the
 highlight go on, a swipe to another page and back included, until Now Playing closes or another
 song starts at the top. A tap shows them full screen, and another brings the
-page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
+page back. A song from a card app's server (Subsonic's) with no lyrics of its own has them asked of its app
+while the page shows it; the page shows none until they arrive, then fills in
+([Lyrics from a card app's server](internals.md#server-lyrics)). See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
 
 ## Previous and Next
 

@@ -993,6 +993,21 @@ def test_a_copy_left_by_an_earlier_open_is_not_this_loads(fw, mcl, stock_words):
     assert loader.list == [(9, b'stock')] and not state(fw).next
 
 
+def test_an_unsynced_lrc_stock_kept_nothing_of_is_plain_text(fw, mcl, stock_words):
+    """A card app's .lrc of plain lyrics (docs/internals.md#server-lyrics): stock keeps only lines starting with a
+    stamp, so none; it fills the list a line a line at no time, as an unsynced tag does, without LRC's tags."""
+    loader = Loader(fw, mcl, BOM + b'[ar:Someone]\nline one\r\n\nline two\n', [])
+    assert loader.load() == 1
+    assert loader.list == [(FAR, b'line one'), (FAR, b'line two')] and not state(fw).next
+
+
+def test_an_lrc_of_tags_alone_gives_way_to_the_songs_tags(fw, mcl, taglib):
+    loader = Loader(fw, mcl, b'[ar:Someone]\n[ti:Something]\n', [])
+    loader.playing(b'/mnt/mmc/a.flac')
+    taglib({'LYRICS': b'line one\n'})
+    assert loader.load() == 1 and loader.list == [(FAR, b'line one')]
+
+
 class TagLib:
     """libtag_c as demo's GOT has it bound: TAGLIB_NEW_GOT holds taglib_file_new's address, and its property
     calls sit at their offsets from it. The Q2's addresses are 32 bits, so here they are in a low mapping,
