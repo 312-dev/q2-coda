@@ -2,7 +2,8 @@
  * way and hardware type, the file's own rate and width with ALSA's resampling off, a 500 ms buffer in 16 periods,
  * and stock's software parameters (alsa_sw: a dry PCM plays on through silence, and sink moves past what it missed).
  * Bluetooth is asked for 48 kHz, as stock asks it, and plays at the rate bluealsa gives (its transport's), the song
- * resampled to it here; a device that refuses the song's width is given another (stock's fallback, and S24_3LE);
+ * resampled to it here, and opened again when bluealsa closes it under a stream (a codec switch: bt_reopen); a
+ * device that refuses the song's width is given another (stock's fallback, and S24_3LE);
  * Bluetooth's and, when demo says so, a USB DAC's volume is done here in software, by stock's law. With
  * Q2PLAYER_PCM set to a directory it is a file a test reads back: one per open, NNNN_RATE_CH_FORMAT[_WAY].raw (s16,
  * s24, s32, f32, dop or dsd; _bt or _usb off the DAC), written as fast as it would play, or Q2PLAYER_SPEED times as
@@ -453,6 +454,44 @@ static int convert(struct output *o, const uint8_t *data, int frames, const uint
     return frames;
 }
 
+#ifdef HAVE_ALSA
+/* bluealsa's PCM gone from under a stream. A codec switch (SelectCodec, as the link monitor's step-down sends:
+ * docs/internals.md#bluetooth-link-monitor) has BlueZ clear the old transport, which closes the PCM's FIFO, so the
+ * plugin answers -ENODEV, and set up a new one that bluealsa leaves idle, no encoder running, until a client opens
+ * its PCM. So it is opened again, as at a song's start, and the write goes on into it: BT_REOPEN_TRIES looks
+ * BT_REOPEN_WAIT_MS apart while the new PCM is not there yet. A headset that went away leaves none, and the song
+ * fails as before, after the wait. The new transport's rate may differ (SBC's), so the resampler and the history
+ * are made again, and a click playing in the old PCM is let go; 1 when the device's width changed too, as the rest
+ * of the block in hand is in the old one. ponytail: the wait holds the play loop, so a stop or pause sent in it is
+ * taken after it, at most BT_REOPEN_TRIES * BT_REOPEN_WAIT_MS later. */
+enum { BT_REOPEN_TRIES = 50, BT_REOPEN_WAIT_MS = 100 };
+
+static int bt_reopen(struct output *o) {
+    struct pcm_format was = o->f;
+    snd_pcm_close(o->pcm);
+    o->pcm = NULL;
+    o->clk_at = o->clk_len;
+    for (int i = 0; i < BT_REOPEN_TRIES; ++i) {
+        if (i) usleep(BT_REOPEN_WAIT_MS * 1000);
+        o->f = o->in;
+        if (alsa_open(o, o->way, 0) < 0) continue;
+        free(o->hist);
+        o->hist = NULL, o->hist_at = o->hist_n = 0;
+        history(o);
+        if (resampler(o) < 0) {
+            snd_pcm_close(o->pcm);
+            o->pcm = NULL;
+            return -1;
+        }
+        fprintf(stderr, "q2player: bluealsa's PCM came back at %d Hz after %d looks\n", o->f.rate, i + 1);
+        return o->f.bytes != was.bytes || o->f.is_float != was.is_float;
+    }
+    o->f = was;
+    fprintf(stderr, "q2player: bluealsa's PCM did not come back\n");
+    return -1;
+}
+#endif
+
 static int sink(struct output *o, const uint8_t *data, int frames) {
 #ifdef HAVE_ALSA
     if (o->pcm) {
@@ -469,16 +508,20 @@ static int sink(struct output *o, const uint8_t *data, int frames) {
         while (frames > 0) {
             snd_pcm_sframes_t n = snd_pcm_writei(o->pcm, data, frames);
             if (n == -EINTR || n == -EAGAIN) continue;
-            if (n == -EPIPE || n == -ESTRPIPE) { /* the buffer ran dry: start again from here */
-                if (snd_pcm_prepare(o->pcm) < 0) return -1;
+            if (n == -EPIPE || n == -ESTRPIPE) n = snd_pcm_prepare(o->pcm); /* the buffer ran dry: start again here */
+            if (n == -ENODEV && o->way == 1) { /* bluealsa's PCM went away: bt_reopen */
+                int r = bt_reopen(o);
+                if (r) return r < 0 ? -1 : 0;
                 continue;
             }
             if (n < 0) return -1;
+            if (n == 0) continue;
             data += n * o->f.channels * o->f.bytes, frames -= n;
         }
         return 0;
     }
 #endif
+    if (!o->file) return -1; /* a Bluetooth PCM that did not come back (bt_reopen) */
     if (fwrite(data, (size_t)o->f.channels * o->f.bytes, frames, o->file) != (size_t)frames) return -1;
     if ((int64_t)(since(&o->t0) * o->speed * o->f.rate) > o->written) { /* it ran dry: the clock starts again here */
         clock_gettime(CLOCK_MONOTONIC, &o->t0);
