@@ -1941,6 +1941,14 @@ def look(p, w):
             p.w.ints.get((w, b'style:normal:text_color'), 0) & 0xffffffff)
 
 
+def np_body(p, np):
+    """Now Playing's view, Spotify's (spotify.c spot_np): from the status row's foot, the page's whole width and the
+    rest of its height, holding the layout."""
+    body, = p.w.under(np.page, 'view')
+    assert p.w.made[body][2] == (0, 58, 375)  # its height is the factory's sixth argument, which a stub doesn't pass on
+    return body
+
+
 def test_now_playing_has_spotify_s_layout(fw):
     """docs/internals.md: "Internet Radio" above, the art, the station, artist and song in Spotify's title, artist and
     album rows, the stream from where its elapsed time starts to the running time, which is in its remaining time's
@@ -1948,7 +1956,7 @@ def test_now_playing_has_spotify_s_layout(fw):
     p = page(fw)
     play(fw, p)
     np = np_(fw)
-    radio = p.w.under(np.page, 'hscroll_label_create')
+    radio = p.w.under(np_body(p, np), 'hscroll_label_create')
     mark = len(p.w.made)
     fw.fn('spotify__spot_np', None)()
     spotify = [w for w in list(p.w.made)[mark:] if p.w.made[w][0] == 'hscroll_label_create']
@@ -1958,7 +1966,7 @@ def test_now_playing_has_spotify_s_layout(fw):
     (x, y, w, h), *rest = look(p, np.info)
     (ex, ey, _, eh), *erest = look(p, elapsed)
     assert ((x, y, h), *rest) == ((ex, ey, eh), *erest) and x + w == p.w.made[np.elapsed][2][0]
-    art = [w for w in p.w.under(np.page, 'image_create') if w != np.heart]
+    art = [w for w in p.w.under(np_body(p, np), 'image_create') if w != np.heart]
     spot_art = [w for w in list(p.w.made)[mark:] if p.w.made[w][0] == 'image_create']
     assert p.w.made[art[0]][2] == p.w.made[spot_art[0]][2]
 
@@ -1970,7 +1978,7 @@ def test_the_art_and_the_heart_are_local_now_playing_s(fw):
     p = page(fw)
     play(fw, p)
     np = np_(fw)
-    art = [w for w in p.w.under(np.page, 'image_create') if w != np.heart][0]
+    art = [w for w in p.w.under(np_body(p, np), 'image_create') if w != np.heart][0]
     draw = {a[0]: a[1] for _, a in fw.calls('image_set_draw_type')}
     assert draw[art] == O['IMAGE_DRAW_SCALE_DOWN'] and draw[np.heart] == O['IMAGE_DRAW_CENTER']
     _, art_y, _, art_h = p.w.made[art][2]
@@ -1988,9 +1996,9 @@ def test_now_playing_keeps_its_own_layout(fw):
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     p.run('np_tick')
     np = np_(fw)
-    name = p.w.under(np.page, 'hscroll_label_create')[0]
-    art = [w for w in p.w.under(np.page, 'image_create') if w != np.heart][0]
-    assert not [a for _, a in fw.calls('widget_move_resize') if a[0] in p.w.under(np.page)]
+    name = p.w.under(np_body(p, np), 'hscroll_label_create')[0]
+    art = [w for w in p.w.under(np_body(p, np), 'image_create') if w != np.heart][0]
+    assert not [a for _, a in fw.calls('widget_move_resize') if a[0] in p.w.under(np_body(p, np))]
     assert (name, 0) not in [a[:2] for _, a in fw.calls('widget_set_visible')]
     assert [C.string_at(a[1]) for _, a in fw.calls('image_base_set_image') if a[0] == art] == [b'stream_radio']
 

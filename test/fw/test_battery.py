@@ -18,6 +18,7 @@ MAGIC, ROWS = 0x31484251, 100
 # the window on top
 _WINDOWS = C.create_string_buffer(0x400), C.create_string_buffer(0x400)
 PAGE, TOAST = (C.addressof(w) for w in _WINDOWS)
+struct.pack_into('<ii', _WINDOWS[0], O['W_W'], 375, 320)  # the page's window: the whole screen (full-bleed)
 EVT_CLICK = O['EVT_CLICK']
 SEL, COUNT = b'_ringnav_index', b'_ringnav_count'
 NOON = calendar.timegm((2026, 11, 11, 12, 0, 0))  # the clock in UTC, as localtime here reads it
@@ -215,7 +216,7 @@ def test_the_graph_runs_by_time_up_to_now(fw, q2):
 KEY_CENTER, KEY_PREV, KEY_NEXT = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT']
 TOP, BOT, BTN_CY, READ_CY = 84, 226, 263, 66  # battery.c BH_TOP, BH_BOT, BH_BTN_CY, BH_READ_CY: the screen's rows
 CTA_H = 38  # ui_kit.h: the shared button's height
-CLIENT_Y = 58  # the page's window on the screen, under OLED's status row: a view's y counts from it
+CLIENT_Y = 0  # the page's window on the screen, the whole of it (full-bleed): a view's y counts from it
 
 
 class Page:

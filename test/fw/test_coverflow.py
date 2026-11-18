@@ -843,8 +843,8 @@ def full_bleed_home(fw, library):
 def test_a_toast_over_home_leaves_the_rows_under_the_status_row_home_s(fw, library, toast):
     """OLED's toast (msginfo_dialog) over Home in Split: the bar lays no flat ground over the rows under it, which
     Home's own paint holds, as with nothing over Home (user, 2026-11-16: "Unplugged" and toasts like it ran a black bar
-    across the top, the first row cut, as the bar painted for the toast as if it were the page). A payload page under
-    the row (theme_engine.c client_window) gets the flat ground across the whole bar."""
+    across the top, the first row cut, as the bar painted for the toast as if it were the page). A payload page is
+    full-bleed (coverflow.c page_open) and gets none either: its own ground runs under the bar."""
     ui, home, win, bar = full_bleed_home(fw, library)
     ui.top = ui.make(ui.wm, 'dialog', 0, 0, 375, 320, name='msginfo_dialog') if toast else win
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
@@ -853,22 +853,22 @@ def test_a_toast_over_home_leaves_the_rows_under_the_status_row_home_s(fw, libra
     canvas = Canvas(fw)
     paint_bg(bar, canvas.p)
     assert not [r for r in canvas.rects if r[1] < 196 and r[2] < 58]  # nothing over the list's columns in the band
-    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='queue_page')
+    ui.top = ui.make(ui.wm, 'window', 0, 0, 375, 320, name='queue_page')
     canvas.rects.clear()
     paint_bg(bar, canvas.p)
-    assert [r[1:] for r in canvas.rects][:1] == [(0, 0, 375, 58)]
+    assert not [r for r in canvas.rects if r[2] < 58]
 
 
 def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
-    """A payload page under the row sliding over Home in Split (a push, or a Return back to Home): stock paints the bar
-    before each frame's percent, so page_parallax.c's draw of the new page paints it again. Home's band, its rows
-    under the status row, is in Home's own snapshot, drifted and darkened with it, so the bar lays its flat ground only
-    over the sliding page's columns; the title shows only over the sliding page, faded as far as it is out (user,
+    """A payload page sliding over Home in Split (a push, or a Return back to Home): stock paints the bar before each
+    frame's percent, so page_parallax.c's draw of the new page paints it again. Home's band, its rows under the status
+    row, is in Home's own snapshot, drifted and darkened with it, and the sliding page's ground is its own, full-bleed,
+    so the bar lays no flat ground; the title shows only over the sliding page, faded as far as it is out (user,
     2026-11-17: Control Center > hold Bluetooth > Return, or Library > Return, ran a flat band across the top for the
     whole slide, Home's raised top row cut, the closing page's title over it)."""
     ui, home, win, bar = full_bleed_home(fw, library)
     title = ui.make(bar, 'hscroll_label', 64, 0, 120, 58, name='label_title')
-    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='queue_page')  # the sliding page, under the row
+    ui.top = ui.make(ui.wm, 'window', 0, 0, 375, 320, name='queue_page')  # the sliding page, full-bleed
     ui.animating = 1
     canvas = Canvas(fw)
     clips, painted, alphas = [], [], []
@@ -885,9 +885,9 @@ def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
             paint_bg(title, c)
             paint_border(title, c)
     fw.mock('widget_paint', paint)
-    # stock's own paint of the bar, before the frame's percent: the page's ground across the bar
+    # stock's own paint of the bar, before the frame's percent: no ground of the bar's own
     paint_bg(bar, canvas.p)
-    assert [r[1:] for r in canvas.rects][:1] == [(0, 0, 375, 58)]
+    assert not [r for r in canvas.rects if r[2] < 58]
     wa = C.create_string_buffer(0x100)
     struct.pack_into('<QQ', wa, 0x14, win, ui.top)  # prev_win, curr_win
     struct.pack_into('<Q', wa, 0xb8, canvas.p)
@@ -900,8 +900,7 @@ def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
     open_ = 375 - round(375 * 0.5)  # the page covers from 187
     assert painted[:1] == [bar] and home.list not in painted  # the band is Home's snapshot's, not the bar's
     assert (0x20000000, 0, 0, open_, 320) in canvas.rects  # Home's snapshot darkened, its band with it
-    assert (open_, 0, 375 - open_, 58) in [r[1:] for r in canvas.rects]  # the page's ground, its columns alone
-    assert not [r for r in canvas.rects if r[0] != 0x20000000 and r[1] < open_ and r[2] < 58]
+    assert not [r for r in canvas.rects if r[0] != 0x20000000 and r[2] < 58]  # no flat ground: each page's own
     assert (open_, 0, 375 - open_, 320) in clips and alphas == [128, 255]  # the title over the page alone, faded
     ui.animating = 0
 
@@ -3759,8 +3758,8 @@ def page_list_or(fw, page, body, name, none, n, item_h=48):
 def test_an_empty_page_says_so_and_a_bar_still_reads_its_name(fw):
     themed(fw)
     ui = Ui(fw)
-    page = ui.make(0, 'window')
-    body = ui.make(page, 'view')
+    page = ui.make(0, 'window', 0, 0, 375, 320)  # full-bleed
+    body = ui.make(page, 'view', 0, 58, 375, 262)  # Cover Flow's: from the status row's foot
     page_list_or(fw, page, body, b'Most Played', b'No plays yet', 0)
     labels = ui.of('hscroll_label', body)
     assert [ui[w].text for w in labels if ui[w].visible] == ['No plays yet']
@@ -3775,8 +3774,8 @@ def test_a_page_list_s_rows_run_from_its_title_to_the_page_s_bottom_or_its_last_
     under it."""
     t = themed(fw)
     ui = Ui(fw)
-    page = ui.make(0, 'window')
-    body = ui.make(page, 'view')
+    page = ui.make(0, 'window', 0, 0, 375, 320)  # full-bleed
+    body = ui.make(page, 'view', 0, 58, 375, 262)  # Cover Flow's: from the status row's foot
     view = page_list_or(fw, page, body, b'Albums', b'None', n)
     lv, row = ui[view].parent, t['page_row']
     assert t['page_title_h'] == 0  # OLED's: the title is the bar's, when it fits
@@ -4051,3 +4050,41 @@ def test_only_homes_main_list_can_be_edited_never_its_settings_list(fw):
 def test_carousel_has_no_edit_home(fw):
     _, ui, h, _ = home_open(fw, carousel=True, HOME='2')
     assert not fw.fn('coverflow_home_edit_view', C.c_void_p, C.c_void_p)(h.win)
+
+
+# A page the payload builds (page_open), full-bleed as stock's (docs/oled-design.md#full-bleed).
+def code_page(fw, ui, name=b'mostplayed_page'):
+    """page_open's page over window_create's whole-screen window, on top."""
+    fw.mock('window_create', lambda *_: ui.make(ui.wm, 'window', 0, 0, 375, 320))
+    ui.top = fw.fn('page_open', C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(name, None, None)
+    return ui.top
+
+
+def test_a_code_built_page_covers_the_screen_and_its_rows_rest_under_the_status_row(fw):
+    """page_open's window stays the whole 375x320 screen, its ground under the status row too, and page_list lays its
+    rows out from the row's foot (bar_foot), where they rested when the window started under the row."""
+    t = themed(fw)
+    ui = Ui(fw)
+    page = code_page(fw, ui)
+    assert ui.at(page) == (0, 0, 375, 320)
+    view = fw.fn('page_list', C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_char_p, C.c_int, C.c_int)(
+        page, page, None, b'Most Played', 30, 48)
+    lv, title, bar = ui[view].parent, ui[page].kids[0], fw.fn('bar_foot', C.c_int, C.c_void_p)(None)
+    top = bar + ui.at(title)[3]  # under the caption, a row of the page where the bar can't hold it
+    assert bar == 58 and ui.at(title)[1] == bar and ui.at(lv) == (0, top, 375, 320 - top)  # to the screen's foot
+    assert fw.fn('page_room', C.c_int, C.c_void_p)(page) == fw.fn('client_h', C.c_int)() == 320 - bar
+
+
+def test_the_bar_paints_no_artist_header_over_a_code_built_page(fw, library):
+    """A card app's artist page (addon.c, on page_open's page): the monogram's top, above the status row's foot, is
+    the page's own paint on its full-bleed window; the bar paints nothing of it again."""
+    ui, home, win, bar = full_bleed_home(fw, library)
+    page = code_page(fw, ui, b'addon_page')
+    fw.fn('hero_open', C.c_void_p, C.c_void_p, C.c_char_p, C.c_char_p, C.c_char_p)(page, b'Artist', b'', b'')
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda *_: None)
+    canvas = Canvas(fw)
+    mark = {name: len(fw.calls(name)) for name in ('canvas_fill_rounded_rect', 'canvas_draw_image')}
+    fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(bar, canvas.p)
+    assert not [r for r in canvas.rects if r[2] < 58]
+    assert {name: len(fw.calls(name)) for name in mark} == mark

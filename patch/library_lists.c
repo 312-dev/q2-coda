@@ -80,8 +80,9 @@ int shuffle_menu(void *ctx, void *event) {
     page_row_detail(view, 2, "Shuffle Folders", 0, sp_pick);
     /* With the title in the bar: centred at the page's foot (28 px up from the window's), its box
      * clear of the glass. */
-    void *note = theme()->page_title_h ? text(ll.sp_page, 20, 200, 335, 24)
-                                       : text(ll.sp_page, 46, client_h() - 28, 283, 24);
+    int top = bar_foot(ll.sp_page);
+    void *note = theme()->page_title_h ? text(ll.sp_page, 20, top + 200, 335, 24)
+                                       : text(ll.sp_page, 46, top + client_h() - 28, 283, 24);
     widget_set_prop_int(note, "style:normal:text_color", (int)0xffaaaaaau);
     widget_set_text_utf8(note, "Albums and folders take a moment to shuffle");
     theme_font(note, ROLE_INFO, FONT_ROW);

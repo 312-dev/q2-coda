@@ -1458,7 +1458,7 @@ void search_strip_paint(void *w, void *canvas) {
         if (grey) catalogue_mark_paint(canvas, SS_MARK_X, y + SS_PITCH / 2, ink);
     }
     if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
-        int y = I(ss.page, W_Y), free = y + ss_list_y(); /* empty_top's are screen ys */
+        int y = I(ss.page, W_Y) + I(ss.sheet, W_Y), free = y + ss_list_y(); /* screen ys */
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
         empty_t e = none;
         if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
@@ -1749,12 +1749,12 @@ static int ss_closed(void *ctx, void *event) {
 
 /* The page and its sheet, titled caption on the status row. */
 static void ss_sheet(const char *caption) {
-    void *title = text(ss.page, 0, 0, 375, 28); /* what the status row reads */
+    void *title = text(ss.page, 0, bar_foot(ss.page), 375, 28); /* what the status row reads */
     widget_set_text_utf8(title, caption);
     widget_set_name(title, PAGE_TITLE);
     widget_set_visible(title, 0, 0);
-    ss.sheet = widget_factory_create_widget(widget_factory(), "view", ss.page, 0, 0, 375,
-                                            widget_get_prop_int(ss.page, "h", client_h()));
+    ss.sheet = widget_factory_create_widget(widget_factory(), "view", ss.page, 0, bar_foot(ss.page),
+                                            375, page_room(ss.page));
     widget_on(ss.sheet, EVT_POINTER_DOWN, ss_touch, 0);
     widget_on(ss.page, EVT_POINTER_MOVE_BEFORE, ss_touch, 0);
     widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);

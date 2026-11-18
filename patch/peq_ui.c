@@ -811,7 +811,7 @@ static int render_rows(const void *unused) {
     int selection = 0, offset = 0, kept = 0;
     /* foot: the status row's in the page's window, which takes the whole screen
      * (docs/oled-design.md#full-bleed); every child starts there, and height is the rows under it. */
-    int foot = bar_foot(ui.page), height = widget_get_prop_int(ui.page, "h", 320) - foot,
+    int foot = bar_foot(ui.page), height = page_room(ui.page),
         graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
     /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
@@ -1225,7 +1225,7 @@ int peq_page_init(void *page, void *context) {
     ui.tabs = 0;
     page_load();
     e3.focus = E3_LOW;
-    e3.h = widget_get_prop_int(page, "h", 320) - bar_foot(page); /* the sliders' view, under the row */
+    e3.h = page_room(page); /* the sliders' view, under the row */
     widget_on(page, EVT_DESTROY, closed, 0);
     widget_on(page, EVT_KEY_UP, keyup, 0);
     widget_on(page, EVT_POINTER_MOVE_BEFORE, e3_touch, 0); /* a slider's drag */

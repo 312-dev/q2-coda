@@ -2107,14 +2107,15 @@ static void bar_icon(int x, int y, int h, const char *s, int code) {
 #define TITLE_END (SORT_X + 15) /* 280: the sort's ink */
 static void find_icon(int sort) {
     void *title = widget_get_child(pg.page, 0);
-    int h = I(title, W_H), end = sort ? TITLE_END : FIND_X;
-    widget_move_resize(title, 375 - end, 0, 2 * end - 375, h); /* centred: 95 to 280, or 73 to 302 */
+    int h = I(title, W_H), y = I(title, W_Y), end = sort ? TITLE_END : FIND_X;
+    /* centred: 95 to 280, or 73 to 302 */
+    widget_move_resize(title, 375 - end, y, 2 * end - 375, h);
     /* stock's sort style draws its image from the box's top left (draw type 0), where the glass's
-     * centres it: a 50 px box centred on the title puts both at the same height. Made first: its box
-     * overlaps the glass's (302 to 315), and a tap goes to the last child made, so the glass keeps
-     * all of its own */
-    if (sort) bar_icon(SORT_X, (h - 50) / 2, 50, "s_img_order_navbar", G_SORT);
-    bar_icon(FIND_X, 0, h, "s_img_search", G_FIND);
+     * centres it: a 50 px box centred on the title puts both at the same height. Made first: its
+     * box overlaps the glass's (302 to 315), and a tap goes to the last child made, so the glass
+     * keeps all of its own */
+    if (sort) bar_icon(SORT_X, y + (h - 50) / 2, 50, "s_img_order_navbar", G_SORT);
+    bar_icon(FIND_X, y, h, "s_img_search", G_FIND);
 }
 
 /* Rows from.. added to the shown list in place of its trailing row, the rest left as they are;
@@ -2985,7 +2986,7 @@ static void search_box(int field) {
     keep_sel();
     pg.field = field;
     widget_destroy_children(pg.page), pg.view = 0; /* the box alone, as Spotify's */
-    pg.edit = edit_create(pg.page, "text", 2, 26);
+    pg.edit = edit_create(pg.page, "text", bar_foot(pg.page) + 2, 26);
     widget_set_prop_str(pg.edit, "tips", field ? cell(field - 1, 2) : app()->tips);
     if (field) widget_set_prop_str(pg.edit, "_strip_label", cell(field - 1, 2)); /* search_strip_box */
     widget_set_prop_int(pg.edit, STRIP_RETURN, field ? STRIP_GO : STRIP_SEARCH); /* its return mark */
@@ -3665,8 +3666,8 @@ static void qr_open(const char *state, const char *title) {
     tk_snprintf(qp.marker, sizeof qp.marker, "%.*s.qrpage", (int)k, state);
     void *f = fopen(qp.marker, "wb");
     if (f) fclose(f);
-    int h = widget_get_prop_int(qp.page, "h", client_h());
-    qp.view = widget_factory_create_widget(widget_factory(), "view", qp.page, 0, 0, 375, h);
+    qp.view = widget_factory_create_widget(widget_factory(), "view", qp.page, 0, bar_foot(qp.page),
+                                           375, page_room(qp.page));
     qp.seen = 0; /* nothing read yet: no read hashes to 0 but by chance, and then only once */
     qr_refresh();
     qp.timer = timer_add(qr_tick, 0, 500);
@@ -3692,7 +3693,7 @@ static void qr_text(void *canvas, const char *s, int y, const char *face, unsign
     ui_ink_raw(raw);
 }
 
-/* The page as qr_refresh read it, on qp.view (the page's coordinates). */
+/* The page as qr_refresh read it, on qp.view (its rows count from the status row's foot). */
 static void qr_paint(void *w, void *canvas) {
     unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {

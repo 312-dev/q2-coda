@@ -174,7 +174,8 @@ static void *placed(void *x, int left, int top, int ww, int h) {
     return x;
 }
 static int window_fail; /* no memory for a page */
-void *window_create(void *p, int x, int y, int ww, int h) { return window_fail ? 0 : make(0, "window"); }
+/* a page's window: the whole screen (tools/build.py FULL_BLEED) */
+void *window_create(void *p, int x, int y, int ww, int h) { return window_fail ? 0 : placed(make(0, "window"), 0, 0, 375, 320); }
 void *widget_factory(void) { return (void *)1; }
 void *widget_factory_create_widget(void *f, const char *t, void *p, int x, int y, int ww, int h) { return placed(make(p, t), x, y, ww, h); }
 #define CREATE(name, type) void *name(void *p, int x, int y, int ww, int h) { return placed(make(p, type), x, y, ww, h); }
@@ -418,6 +419,9 @@ const scheme_t *scheme(void) { /* light is only asked of it in its light half */
     return &s;
 }
 int client_h(void) { return 320 - stub_bar_h; }
+/* theme_engine.c's, on the stub bar: a page's window is the whole screen, its content from the bar's foot */
+int bar_foot(void *w) { return stub_bar_h - (w ? ((int *)W(w)->raw)[1] : 0); }
+int page_room(void *w) { return w ? ((int *)W(w)->raw)[3] - bar_foot(w) : client_h(); }
 int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* stock's grid's (STOCK_GRID) */
 int list_fit_end(void) { return 0; } /* unread by these sources */
 int theme_font(void *w, int role, int was) { return was; } /* the font only: no geometry */
@@ -450,8 +454,6 @@ int widget_move_resize(void *x, int left, int top, int ww, int h) {
     return 0;
 }
 int widget_resize(void *x, int ww, int h) { return widget_move_resize(x, ((int *)W(x)->raw)[0], ((int *)W(x)->raw)[1], ww, h); }
-/* page_open's page back under the status row, as theme_engine.c client_window places it. */
-void client_window(void *x) { if (x) widget_move_resize(x, 0, stub_bar_h, 375, client_h()); }
 void *widget_get_canvas(void *x) { return 0; } /* no canvas: the panel keeps its reserve */
 static int insensitive; /* the widget last made insensitive */
 int widget_set_sensitive(void *x, int v) { W(x)->numb = !v; if (!v) insensitive = W(x) - w; return 0; }

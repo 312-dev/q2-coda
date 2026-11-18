@@ -12,13 +12,13 @@
  * (library_album.c).
  *
  * The header stands from screen y HERO_Y, above the status row's foot (V_BAR), where its view
- * starts: its monogram's top is drawn again in the status bar's background paint (artist_cap),
- * clipped to the bar. The pair is a pair of stops above the list (pair_key), as Songs' Shuffle
- * row is (navigation.c shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next
- * to the first row; a tick up from the first row comes back to Radio. A page with Shuffle alone
- * (a library artist's, library_artist.c) has one stop, the pair's width. While a stop is lit the
- * list's own bar is hidden (pair_holds). Centre or a tap on a panel presses its action. Each draws
- * in final colours, Light Mode's flip applied by ui_ink as for any payload text. */
+ * starts: its monogram's top paints over the full-bleed window's rows under the status row. The
+ * pair is a pair of stops above the list (pair_key), as Songs' Shuffle row is (navigation.c
+ * shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next to the first row; a tick
+ * up from the first row comes back to Radio. A page with Shuffle alone (a library artist's,
+ * library_artist.c) has one stop, the pair's width. While a stop is lit the list's own bar is
+ * hidden (pair_holds). Centre or a tap on a panel presses its action. Each draws in final colours,
+ * Light Mode's flip applied by ui_ink as for any payload text. */
 #include "navigation.h"
 
 #define HERO_Y 52    /* the header's top on screen: the monogram's */
@@ -64,7 +64,6 @@ static struct {
     int ctx[2];        /* each panel's press's context */
     signed char *stop; /* the level's: 0 the list's row, 1 Shuffle, 2 Radio */
     int (*press)(void *, void *);
-    unsigned cap; /* the bar asked to paint the monogram's top (cap_due), 0 not yet */
 } ar __attribute__((section(".scratch")));
 
 static int ar_gone(void *w, void *event) {
@@ -217,31 +216,6 @@ void hero_text(void *head, const char *name, const char *sub, const char *meta) 
     widget_invalidate_force(head, (void *)0);
 }
 
-/* The status bar's background (navigation.c ringnav_paint_bg): the monogram's (or cover's) top,
- * which stands above a page under the row (theme_engine.c client_window: a card app's), while the
- * header's page is on top (or under a menu sheet, which
- * dims the bar with it) and still: a sliding page leaves the bar as it is. */
-void artist_cap(void *bar, void *canvas) {
-    void *wm = window_manager(), *win = ar.head ? window_of(ar.head) : (void *)0,
-         *top = window_manager_get_top_window(wm);
-    /* a full-bleed page (bar_foot above 0) paints the monogram's top itself, under the row */
-    if (!win || !P(canvas, CANVAS_LCD) || (win != top && !modal_win(top)) ||
-        window_manager_is_animating(wm) || bar_foot(win) > 0)
-        return;
-    hero_art(canvas, ar.head, HERO_Y - I(bar, W_Y));
-}
-/* The bar painted again once the page has come to rest: nothing else repaints it then. Asked from
- * the header's first paint, where an invalidate would be lost, so from the next pass on, until the
- * window manager has no slide running. */
-static int cap_due(const void *info) {
-    (void)info;
-    void *bar = *(void *const *)system_bar;
-    if (!ar.head) return 0;
-    if (window_manager_is_animating(window_manager())) return 8; /* RET_REPEAT */
-    if (bar) widget_invalidate_force(bar, (void *)0);
-    return 0;
-}
-
 /* The action pair under the header: label[k] after the theme's pair_<icon[k]> art, each panel a
  * tap target whose press (the page's row click) gets ctx[k]; stop is the level's lit stop, kept
  * by the page across its rebuilds. list: the rows under it, whose bar hides while a stop is lit.
@@ -313,8 +287,8 @@ static void pair_paint(void *p, void *canvas) {
             r.y + PAIR_H / 2, r.w, 2);
 }
 
-/* The header: the monogram or cover (its top above the window is artist_cap's) and the three
- * lines. */
+/* The header: the monogram or cover (its top above the view's, under the status row) and the
+ * three lines. */
 static void hero_paint(void *head, void *canvas) {
     int bar = geom_val(V_BAR), right = 375 - geom_val(V_RIGHT_X), w = right - HERO_TEXT;
     const char *meta = widget_get_prop_str(head, AR_META, "");
@@ -325,7 +299,6 @@ static void hero_paint(void *head, void *canvas) {
             HERO_SUB_Y - bar, w, 2);
     if (meta && *meta)
         ui_text(canvas, meta, 0, TYPE(13), RGB_TERTIARY, 0, HERO_TEXT, HERO_META_Y - bar, w, 2);
-    if (!ar.cap) ar.cap = timer_add(cap_due, (void *)0, 0) | 1;
 }
 
 /* Whether a row of a list is lit: the list's selection, shown, and no pair stop over it. */
