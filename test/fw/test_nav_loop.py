@@ -1239,14 +1239,6 @@ def test_a_slow_dark_wait_stretches_to_the_dark_poll(fw):
     assert [c[1][0] for c in fw.calls('fw_usleep')] == [10000, 999999, 1000000, 3000000, dark, dark, dark, 3000000]
 
 
-def test_the_cover_pollers_slow_whenever_the_screen_is_off(fw):
-    sleep = fw.fn('ringnav_dark_cover_usleep', C.c_int, C.c_uint)
-    sleep(50000)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    sleep(50000)
-    assert [c[1][0] for c in fw.calls('fw_usleep')] == [O['DARK_POLL_US'], 50000]
-
-
 class Scheduling:
     """ringnav_mainscheduling: the player's position as stock's cache has it, the clock as the test moves it."""
     def __init__(self, fw, status=2, sec=10, total=200):
@@ -2434,8 +2426,9 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
     return slider
 
 
-# control_center.c's stops in the wheel's order: the six toggles by rows, the Now Playing block, the two sliders
-CC_AIRPLAY, CC_CAR, CC_SMART, CC_EQ, CC_NOW, CC_BRIGHT, CC_VOLUME, CC_STOPS = 2, 3, 4, 5, 6, 7, 8, 9
+# control_center.c's stops in the wheel's order: the six toggles by rows, the Now Playing block, the two sliders, the
+# USB row (while a cable is in)
+CC_AIRPLAY, CC_CAR, CC_SMART, CC_EQ, CC_NOW, CC_BRIGHT, CC_VOLUME, CC_USB, CC_STOPS = 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 
 def smart_written(fw):
@@ -2473,20 +2466,23 @@ def cc_window(fw, ui, ring=100000):
     return slider.parent, slider
 
 
+@pytest.mark.parametrize('cable', [0, 1])
 @pytest.mark.parametrize('status', [0, 2, 3])
-def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
-    """The six toggles by rows, Now Playing's block, then Brightness and Volume under it; the ends hold. With
-    nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
+def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status, cable):
+    """The six toggles by rows, Now Playing's block, then Brightness and Volume under it, then the USB row while a
+    cable is in; the ends hold. With nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by;
+    with no cable there is no USB row to stop on."""
     fw.mock('mclGetPlayStatus', lambda *_: status)
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
     ui = Ui(fw)
     top, slider = cc_window(fw, ui)
     stops = []
     for key in [KEY_NEXT] * CC_STOPS + [KEY_PREV] * CC_STOPS:
         assert keys(key) == STOP
         stops.append(top.ints[b'_cc_focus'])
-    walk = [i for i in range(CC_STOPS) if status or i != CC_NOW]
-    ends = CC_STOPS - len(walk)  # the ticks the block's pass leaves at each end
-    assert stops == [*walk[1:], *[CC_STOPS - 1] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
+    walk = [i for i in range(CC_STOPS) if (status or i != CC_NOW) and (cable or i != CC_USB)]
+    ends = CC_STOPS - len(walk)  # the ticks the passes leave at each end
+    assert stops == [*walk[1:], *[walk[-1]] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
     assert slider.ints[b'value'] == 50
 
 
@@ -2799,6 +2795,31 @@ def test_centre_on_the_now_playing_block_opens_now_playing(fw, keys, status, ope
     assert not fw.calls('player_play_pause')  # what plays stays as it is
 
 
+@pytest.mark.parametrize('ring', [None, 100000])
+def test_control_center_s_wheel_is_the_wheel_for_the_focus_rule(fw, keys, st, ring):
+    """Control Center is pulled down by a finger, so the one record says touch; a wheel tick there, the one that only
+    brings the ring up too, is the wheel's input as a list's is (docs/oled-design.md#focus-ring). The emulator,
+    2026-11-17: the USB picker opened from the USB row showed no selection, the turns that reached the row having left
+    touch mode on."""
+    ui = Ui(fw)
+    cc_window(fw, ui, ring=ring)
+    st('touch_mode').value = 1
+    assert keys(KEY_NEXT) == STOP and st('touch_mode').value == 0
+
+
+@pytest.mark.parametrize('cable', [1, 0])
+def test_centre_on_the_usb_row_opens_the_usb_picker(fw, keys, cable):
+    """Centre on the USB row closes Control Center and opens the USB picker Settings > General > USB opens
+    (usb_ui.c usb_pick_open); a cable gone since the wheel reached it leaves the row with nothing to do."""
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
+    fw.mock('window_create', lambda *_: 0)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_USB
+    assert keys(KEY_CENTER) == STOP
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * cable and len(fw.calls('window_create')) == cable
+
+
 def cc_opened(fw, ui):
     """Control Center laid out (cc_open) over the window cc_window gives: its clear buttons by stop."""
     top, slider = cc_window(fw, ui)
@@ -2884,6 +2905,7 @@ def test_every_stop_has_a_button_over_it_above_stock_s_widgets(fw, keys):
     boxes = {stop: (b.int(W_X), b.int(W_X + 4), b.int(W_X + 8), b.int(W_X + 12)) for stop, b in buttons.items()}
     assert boxes[0] == (46, 48, 40, 40) and boxes[1] == (112, 48, 40, 40) and boxes[CC_EQ] == (112, 180, 40, 40)
     assert boxes[CC_NOW] == (188, 38, 167, 114) and boxes[CC_VOLUME] == (188, 210, 167, 38)
+    assert boxes[CC_USB] == (20, 258, 335, 38)  # under the cluster, its full width, the sliders' height
     assert boxes[CC_PLAY] == (271 - 21, 125 - 21, 42, 42) and boxes[CC_PREV][0] + 46 == boxes[CC_NEXT][0] - 46
     assert all(b.opacity == 0 for b in buttons.values())
 
@@ -3232,6 +3254,16 @@ class Loop:
         return C.c_int.in_dll(self.fw.lib, 'navigation__dark_quiet').value
 
 
+def test_each_pass_wakes_the_parked_album_cover_thread_for_a_request(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    fw.var('fw_ctx_plist_albumtasklist', C.c_ulong).value = 0x5000
+    fw.var('fw_ctx_albumcover_taskstate', C.c_int).value = 1
+    fw.mock('fw_list_size', lambda *_: 3)  # a page's rows queued (cover_wake.c)
+    fw.var('cover_wake__cover_parked', C.c_int * 2)[0] = 1
+    loop()
+    assert [c[1][1:3] for c in fw.calls('cover_futex')] == [(129, 1)]  # FUTEX_WAKE_PRIVATE, one waiter
+
+
 def test_dark_and_quiet_the_loop_idles_long(fw, stock_bytes, st):
     loop = Loop(fw, stock_bytes, lit=False)
     assert loop() == [O['DARK_IDLE_SLEEP_MS']] and loop.dark_quiet() == 1 and st('dark').value & 1
@@ -3564,7 +3596,7 @@ def test_every_pass_feeds_the_watchdog(fw, stock_bytes, power):
     loop = Loop(fw, stock_bytes)
     power('wdt').value = 7
     loop(), loop(10)
-    assert [c[1][:2] for c in fw.calls('fw_ioctl')] == [(7, WDT_FEED)] * 2
+    assert [c[1][:2] for c in fw.calls('fw_ioctl') if c[1][0] == 7] == [(7, WDT_FEED)] * 2  # usb_event.c asks for its line too
 
 
 class Input:

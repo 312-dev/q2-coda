@@ -49,6 +49,7 @@
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */
+{ "usbpick_page", CTX_FIXED, CHOICE },  /* runtime window (patch/usb_ui.c): the USB picker */
 { "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
 { "albuminfo_page", CTX_LOCAL, 0 },

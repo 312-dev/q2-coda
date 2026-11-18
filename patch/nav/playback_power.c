@@ -477,11 +477,6 @@ static int dark_slow_ok(int quiet) {
            (signed char)bt__recv_pageflag != 2 && !coda_rc_enabled() &&
            !(*(volatile unsigned char *)REPEAT_INFO && I(REPEAT_INFO, REPEAT_AB_STATE) == 2);
 }
-/* The cover pollers feed only what is painted, so they slow down whenever the screen is off,
- * playing or not. ponytail: art parsed while dark can show up to DARK_POLL_US late after wake. */
-int ringnav_dark_cover_usleep(unsigned us) {
-    return usleep(!g_backlight_status && us < DARK_POLL_US ? DARK_POLL_US : us);
-}
 /* on_wm_idle_status ran player_mainscheduling every UI pass, and its mclAutoChange asks hciplayer
  * for its status and waits for the answer on the UI thread: 40 to 125 round trips a second, each
  * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark_slow:
@@ -532,6 +527,7 @@ static int playing_stream(void) {
 }
 
 int ringnav_sleep(void *loop) {
+    cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
     stale_heal();
@@ -588,4 +584,3 @@ int ringnav_sleep(void *loop) {
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
     return stock_sleep_trampoline(loop);
 }
-

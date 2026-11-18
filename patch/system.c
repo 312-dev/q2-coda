@@ -112,9 +112,9 @@ int ringnav_wifi_signal(void) {
  * closely), on the first pass after the cable flag (g_usbdet_value, which get_battery_capacity's
  * usb_detect sets after these reads) changed, and below BATT_DARK_FLOOR, where
  * check_lowbattery_state counts the voltage towards its power-off. The cable's own read stays
- * stock's, every second; a caller that reads the cable at its edge (fix/usb-replug's
- * get_battery_capacity) gets the battery read on the pass after, by the same flag change. Charging
- * stays a read, not an event: the AXP2101 driver's interrupt handlers that call
+ * stock's, every second; a caller that reads the cable at its edge (usb_ui.c's
+ * get_battery_capacity on a usb_event.c edge) gets the battery read on the pass after, by the same
+ * flag change. Charging stays a read, not an event: the AXP2101 driver's interrupt handlers that call
  * power_supply_changed are not requested by the stock kernel, so no uevent is known to come at a
  * charge start or end. ponytail: dark on battery, a new level reaches Battery History up to
  * BATT_DARK_MS late, and a wake shows a level that old for its first second; a device check of the

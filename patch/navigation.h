@@ -820,7 +820,8 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 
 /* system.c */
 void power_poll(void);
-void heatguard_poll(void); /* heatguard.c: q2guard's cards, from power_poll */
+void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
 void power_rows(void *view);
@@ -831,6 +832,9 @@ void usb_charge_row(void *win, void *view); /* Power's USB DAC Charging */
 int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void);
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);
+
+/* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
+int ringnav_otg_status(void), stock_otg_status_trampoline(void);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
@@ -1070,11 +1074,15 @@ void song_radio_poll(void);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
-/* usb_ui.c */
+/* usb_ui.c: the USB pages and the USB picker (docs/internals.md#usb-pages) */
 void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui_ejected(void *win);
-void usb_ui_paint(void *w, void *canvas);
-const char *usb_ui_title(const char *name);
-int usb_ui_key(void *top, unsigned key);
+void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
+const char *usb_ui_title(const char *name), *usb_ui_value(void);
+int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+/* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
+void usb_event_start(void);
+int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);
+unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
