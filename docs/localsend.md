@@ -99,6 +99,13 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 
 ### Receiving
 
+- **Trusted devices** (approved by the user on 2026-11-18, the adb prompt's pattern): the Accept card has an
+  "Always accept from this device" switch, off by default. Accepted with it on, the sender's certificate
+  fingerprint goes on the list in `/mnt/data/q2send/trusted` beside the identity, and its later requests skip the
+  card, with a "Receiving from <name>" pill so a receive is never silent. Trust is the client certificate's
+  fingerprint alone, never the name or a fingerprint a request's body claims; a sender with no client certificate
+  is always asked. The space, name and one-session checks still apply. The LocalSend page has a Trusted Devices
+  row: its page lists them, Center removes one, Remove All in red.
 - Every incoming request asks on the Q2: the [confirmation card](oled-design.md#confirmation-card) with the
   sender's name and device glyph, what it sends ("12 files · 48.2 MB"), Accept and Decline, Decline after 60 s.
   Return declines. A second sender while one transfers gets 409, no card.
