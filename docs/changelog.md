@@ -2,6 +2,10 @@
 
 - **Unreleased (q2-coda)**:
   - Settings > Bluetooth: while the Q2 searches for devices, the page no longer shows the Other Devices header twice, one drawn over the Audio header, and coming back from Headset Volume no longer makes the list jump down and back up. Any list scrolled to its end stays put when its page is rebuilt or comes back on top.
+  - Now Playing (OLED): the A-B repeat markers sit on the progress bar, as before at their points along it, instead of at the old bar's height, where the ones near either end were partly under the rounded glass.
+  - Card apps (OLED): a page of only an info row that has more results keeps its More... row, so the rest can be loaded; before, it showed the empty-page note and no way on.
+  - Status row (OLED): the Percent battery no longer swaps to the icon while a Bluetooth headset's codec badge (off this row) is up; it gives way only where the battery and the glyphs beside it would leave the title no room.
+  - Settings: the unused Time in Title setting is gone. OLED never offered it and the clock always stands beside the title.
   - Touch: after a swipe back on a page that stays open (one whose first Return moves within the page, as the letter strip's results do), the page now still slides away when it later closes. Before, the swipe left it closing at once from then on.
   - Song lists: the song playing now stands out in every song list (Songs, an album's or artist's songs, folders, playlists, Search, Most Played, Long Songs and the Ratings lists): its title is in the accent colour, with four small bars on the right, beside its length, or in the length's place where there is no room or no length. On the wheel's highlight both turn white.
   - Song lists: choosing the song that is already playing no longer starts it again from the beginning. It opens Now Playing and the song plays on (a paused one resumes). Chosen from another list of the same kind, the songs after it in that list now play after it.
