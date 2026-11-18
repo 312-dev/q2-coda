@@ -84,7 +84,8 @@ static int bt_name_open(void *ctx, void *event) {
     (void)ctx, (void)event;
     char name[BT_NAME_MAX + 1];
     search_strip_note("Phones and cars see this name");
-    search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
+    search_strip_label("Name");      /* typed in its row, after the label (search_strip.c) */
+    search_strip_return(STRIP_SAVE); /* the return key's check */
     search_strip_text("Bluetooth", bt_name(name, sizeof name), BT_NAME_MAX, bt_name_done);
     return 0;
 }

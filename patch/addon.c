@@ -2483,6 +2483,7 @@ static void search_box(int field) {
     pg.edit = edit_create(pg.page, "text", 2, 26);
     widget_set_prop_str(pg.edit, "tips", field ? cell(field - 1, 2) : app()->tips);
     if (field) widget_set_prop_str(pg.edit, "_strip_label", cell(field - 1, 2)); /* search_strip_box */
+    widget_set_prop_int(pg.edit, STRIP_RETURN, field ? STRIP_GO : STRIP_SEARCH); /* its return mark */
     if (field && field_secret(field - 1)) widget_set_prop_int(pg.edit, "_secret", 1);
     widget_on(pg.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(pg.edit, EVT_IM_ACTION, searched, 0);

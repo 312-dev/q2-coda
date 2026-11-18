@@ -9,7 +9,7 @@ import urllib.parse
 import pytest
 
 import ipod
-from conftest import O, Files
+from conftest import O, Files, STRIP_SEARCH, strip_return
 
 RADIO = '/mnt/mmc/Radio'
 FAVS, LAST, STATE = f'{RADIO}/favourites.m3u', f'{RADIO}/.last', '/tmp/q2radio.state'
@@ -2032,3 +2032,9 @@ def test_nothing_read_is_kept(fw):
         round_()
         grew.append(heap() - used)
     assert min(grew) < 32 << 10 and p.card.files[FAVS] == favs
+
+
+def test_the_search_box_gives_the_strip_its_magnifier(fw):
+    page(fw)
+    fw.fn('radio_search', None)()
+    assert strip_return(fw, ui(fw).edit) == STRIP_SEARCH

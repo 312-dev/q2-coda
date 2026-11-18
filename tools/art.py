@@ -610,19 +610,24 @@ POP_LETTER_PX, POP_LETTER_DY = 24, 2  # the big character's ink centred on the h
 # every character of the strip's sets but the space, in their order (search_strip.c ss_sets): abc, ABC, 123, #+=
 POP_CHARS = ('abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' '0123456789'
              '!@#$%&*-_.?/+=:;,\'"()[]{}<>^~`\\|')
-# the strip's return key's mark (search_strip.c SS_RET_MARK): the keyboard's return symbol, a stem down the right, a
-# slightly rounded corner, a bar to the left ending in an open arrowhead, round capped and joined; centred in a
-# RETURN_PX box, its strokes RETURN_STROKE wide, in white on the accent's circle and in the accent on white
-RETURN_PX, RETURN_STROKE, RETURN_CORNER = 20, 2.2, 2.5
+# the strip's return key's marks (search_strip.c SS_RET_MARK, ss_ret_kind), by the field it submits: a magnifier for a
+# search, a check for a name or value saved, an arrow right for anything else. The user's mock-up's glyphs (returnkey
+# context.html) on a 24-unit grid, round capped and joined, scaled to a RETURN_PX box: the mock-up draws them 22 px on
+# its 38 px key, the strip's key is 34 px, so 20. White on the accent's circle, the accent on white.
+RETURN_PX, RETURN_GRID = 20, 24
+RETURN_MARKS: 'dict[str, tuple[float, list[list[tuple[float, float]]]]]' = {
+    'search': (2.4, [[(10.5 + 5.5 * math.cos(a * math.pi / 24), 10.5 + 5.5 * math.sin(a * math.pi / 24)) for a in range(49)],
+                     [(14.6, 14.6), (19, 19)]]),
+    'go': (2.4, [[(5, 12), (19, 12)], [(13.5, 6.5), (19, 12), (13.5, 17.5)]]),
+    'save': (2.6, [[(5.5, 12.5), (9.7, 16.7), (18.5, 7.8)]]),
+}
 
 
-def return_mark(rgb):
-    """The return key's mark as a RETURN_PX square PNG in rgb."""
-    c, r = RETURN_PX / 2, RETURN_CORNER
-    bend = [(c + 7 - r + r * math.cos(a * math.pi / 16), c + 3 - r + r * math.sin(a * math.pi / 16)) for a in range(9)]
-    stem = [(c + 7, c - 7), *bend, (c - 7, c + 3)]
-    head = [(c - 3, c - 1), (c - 7, c + 3), (c - 3, c + 7)]
-    polys = stroke([stem, head], RETURN_STROKE)
+def return_mark(kind, rgb):
+    """The return key's mark for kind (RETURN_MARKS) as a RETURN_PX square PNG in rgb."""
+    width, lines = RETURN_MARKS[kind]
+    k = RETURN_PX / RETURN_GRID
+    polys = stroke([[(x * k, y * k) for x, y in line] for line in lines], width * k)
     return png(RETURN_PX, RETURN_PX, laid(RETURN_PX, RETURN_PX, [(coverage_nonzero(polys, (0, 0, RETURN_PX, RETURN_PX)), lambda x, y: (rgb, 1))]))
 
 
@@ -658,7 +663,7 @@ def ink_polys(ch, px, cx, cy=None, baseline=None, face='Medium'):
 
 def pop_images(accent):
     """{name: PNG}: the bubble in the accent, a strip of the characters in POP_CHARS' order, white, one head's box each
-    (one image, not one a character: a third of the bytes), and the return key's mark in white and in the accent."""
+    (one image, not one a character: a third of the bytes), and the return key's marks in white and in the accent."""
     n, out = len(POP_CHARS), {}
     out['search_pop'] = png(POP_HEAD_W, POP_H, laid(POP_HEAD_W, POP_H, [
         (coverage_nonzero(path(pop_bubble_d()), (0, 0, POP_HEAD_W, POP_H)), lambda x, y: (accent, 1))]))
@@ -666,8 +671,7 @@ def pop_images(accent):
              for p in ink_polys(ch, POP_LETTER_PX, POP_HEAD_W * i + POP_HEAD_W / 2, cy=POP_HEAD_H / 2 + POP_LETTER_DY)]
     out['search_pop_letters'] = png(POP_HEAD_W * n, POP_HEAD_H, laid(POP_HEAD_W * n, POP_HEAD_H, [
         (coverage_nonzero(polys, (0, 0, POP_HEAD_W * n, POP_HEAD_H)), lambda x, y: (0xffffff, 1))]))
-    out['search_return_w'] = return_mark(0xffffff)
-    out['search_return_a'] = return_mark(accent)
+    out |= {f'search_return_{kind}_{k}': return_mark(kind, c) for kind in RETURN_MARKS for k, c in {'w': 0xffffff, 'a': accent}.items()}
     return out
 
 

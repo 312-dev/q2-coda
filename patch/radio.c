@@ -526,6 +526,7 @@ void radio_search(void) {
     widget_destroy_children(ui.page), ui.view = 0; /* the box alone: the keyboard leaves no room for the rows */
     ui.edit = edit_create(ui.page, "text", 2, 26);
     widget_set_prop_str(ui.edit, "tips", "Search stations");
+    widget_set_prop_int(ui.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */
     widget_on(ui.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(ui.edit, EVT_IM_ACTION, searched, 0);
     widget_on(ui.edit, EVT_BLUR, search_left, 0);
