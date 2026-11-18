@@ -1856,6 +1856,7 @@ int ringnav_memory(void *out) {
                     (unsigned)I(r, REC_CUE_START) == id[1] &&
                     (unsigned)I(r, REC_CUE_END) == id[2]) {
                     map[i] = deque_size(q);
+                    card_record_tags(r); /* a card app's download: its tags, not its file's name */
                     _deque_push_back(q, r);
                     break;
                 }
