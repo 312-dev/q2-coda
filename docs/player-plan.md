@@ -145,7 +145,7 @@ What the plan above said and the work found otherwise: the CA bundle is the one 
 
 - **Goal:** `q2player` is the player; hciplayer and its patches are gone.
 - **Work:** invert then remove the fallback; stop installing hciplayer; delete `patch_player` and the player lists from `tools/peq.py`, `patch/peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c`, `flac_*.c`, `tools/flac.py` and the Unicorn player suites (`test/hci_*.py`, `player_seam.py`, `xfade_player.py`, `mp3_gapless_player.py`), keeping `patch/peq.c`; drop `libmad`; update `docs/architecture.md`, `source-map.md`, `third-party.md`, `rebasing.md` (the player's sites leave `stock_sites.tsv`), `internals.md`'s player sections (what the new player does, not what was patched), `changelog.md`.
-- **Exit:** the whole checklist verified, `tools/scan.py` shows hciplayer's FFmpeg 3.0 and OpenSSL 1.0.1 findings gone, the root filesystem is smaller than before phase 2.
+- **Exit:** the whole checklist verified, `tools/scan.py` shows hciplayer's FFmpeg 3.0 and OpenSSL 1.0.1 findings gone, the root filesystem is smaller than before phase 2. The scan half is met (2026-11-18, release build: [third-party: What the scan still finds](third-party.md#what-the-scan-still-finds)).
 
 ## Testing
 
