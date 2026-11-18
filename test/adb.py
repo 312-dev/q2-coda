@@ -188,10 +188,18 @@ class Adbd:
         for ep in ('ep1', 'ep2'):
             os.mkfifo(self.ffs/ep)
         mmc = ['--bind', str(card), '/mnt/mmc'] if card else ['--dir', '/mnt/mmc']
+        # q2-heavy preloads nodump.so, which makes a process non-dumpable, and a non-dumpable bwrap may not
+        # write its own uid_map ("setting up uid map: Permission denied"). So bwrap starts without the
+        # preload, qemu gets it back inside the sandbox (no core from it either), and -U keeps it from adbd,
+        # whose MIPS loader cannot load a host library.
+        env = dict(os.environ)
+        preload = env.pop('LD_PRELOAD', None)
+        keep = ['--setenv', 'LD_PRELOAD', preload] if preload else []
         self.p = subprocess.Popen(['bwrap', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc',
                                    '--tmpfs', '/mnt', *mmc, '--bind', str(data), '/mnt/data', '--dir', '/dev/usb-ffs',
                                    '--bind', str(self.ffs), '/dev/usb-ffs/adb', '--bind', str(work/'tmp'), '/tmp',
-                                   '--die-with-parent', *qemu, str(adbd)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   *keep, '--die-with-parent', qemu[0], '-U', 'LD_PRELOAD', *qemu[1:], str(adbd)],
+                                  env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         end = time.monotonic() + 20
         while (self.ffs/'ep0').stat().st_size == 0 and time.monotonic() < end and self.p.poll() is None:
             time.sleep(.05)
