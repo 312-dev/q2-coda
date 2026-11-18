@@ -97,7 +97,7 @@ class PullMachine(Machine):
                 if ret==11:break
         return ret
     def start_pull(self,page,w,x=100,y=60):
-        self.top=page; self.word(w+O['W_PARENT'],page);self.word(page+O['W_Y'],30)
+        self.top=page; self.word(w+O['W_PARENT'],page);self.word(page+O['W_Y'],0)  # full-bleed: the list at 58 (Machine.page)
         self.word(self.event+O['EVENT_Y'],y)
         return self.call(key=x,address=HOOKS['on_wm_tsdown_before_fun'][0],event_type=O['EVT_POINTER_DOWN'],gap=0)
     def prompt(self,page):
@@ -230,6 +230,7 @@ for cancel in ('below','horizontal','upward','midlist','outside','edge0','edge30
     m=PullMachine();w,es=m.page_list(8,height=240,name='localmusic_page');page=m.top
     y=30 if cancel=='edge30' else 0 if cancel=='edge0' else 31 if cancel=='edge31' else 60
     if cancel=='midlist':m.word(w+O['SCROLL_Y'],20)
+    if cancel.startswith('edge'):m.word(w+O['W_Y'],30)  # a list from y 30: the quick edge (31), not the list's top, decides
     m.start_pull(page,w,x=250 if cancel=='outside' else 100,y=y)
     if cancel=='horizontal':m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],x=170,y=y+20)
     elif cancel=='upward':m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],y=y-10)

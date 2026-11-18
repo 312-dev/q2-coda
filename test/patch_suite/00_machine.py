@@ -783,7 +783,8 @@ class Machine:
             self.call(O['KEY_CENTER'],address=syms['on_wm_keyup_fun'],gap=0,clear=False)
         return ret
     def page(self,name='sysset_page',t='scroll_view'):
-        child=self.node(t)
+        # full-bleed (tools/ipod.py full_bleed): the window is the whole screen, its child starts under the status row
+        child=self.node(t); self.word(child+O['W_Y'],58)
         self.top=self.node('window',name,[child]); self.word(self.wm+O['W_KEY_TARGET'],self.top)  # opened: its keys' target
         if t=='slide_menu':
             self.word(child+O['SLIDE_INDEX'],0)
@@ -904,9 +905,6 @@ for populated in (False,True):
 
 for t,off in [('scroll_view',O['SCROLL_Y']),('table_client',O['TABLE_TOP'])]:
     m=Machine(); w=m.page(t=t)
-    # where a built page has its list: the window is the whole screen and its children start under the status row (58,
-    # tools/ipod.py full_bleed), so a 240 px view stops at the list end, 224, as it does on the device
-    m.word(w+O['W_Y'],58)
     for _ in range(20): assert m.call()==11
     assert m.get(w+off)==min(20*manifest['ring_step_pixels'],736 if t=='scroll_view' else 4560)  # OLED's list end, the pad past it scrolling too
     assert m.call(O['KEY_PREV'])==11 and m.moved()

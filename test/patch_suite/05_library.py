@@ -938,12 +938,19 @@ assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 # coverflow.c's, whose home_rest would rest it on its seven); it stops at both ends however long the pause, Return selects
 # Now Playing, the bar spans the list's width and centre clicks the image.
 m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
+# The built (full-bleed) Home's box runs to y 290 on the screen, past the list end (282), so list_fade darkens the rows
+# past it in black after the bar (the Q2's Home rests on coverflow.c home_rest instead and has no fade): the bar is its
+# accent bands, the rest the fade's.
+def bar_drawn():
+    bands=[b[:5] for b in m.bands]
+    assert all(b[4]&0xffffff==0 for b in bands if b[4]&0xffffff!=OLED_BLUE&0xffffff)
+    return [b for b in bands if b[4]&0xffffff==OLED_BLUE&0xffffff]
 m.paint(view)
 assert m.selected(view)==0
 last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),(OLED_G.list_end-HOME_TOP)//HOME_ROW)
 for i in range(1,last+1): assert m.call()==11 and m.selected(view)==i
 assert m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
-m.paint(view); assert not m.rounded and [b[:5] for b in m.bands]==bar_bands(inset,(shown-1)*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
+m.paint(view); assert not m.rounded and bar_drawn()==bar_bands(inset,(shown-1)*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
 for gap in (50,300,1000):
     assert m.call(gap=gap)==11 and m.selected(view)==last and m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
 for i in range(last-1,-1,-1): assert m.call(O['KEY_PREV'])==11 and m.selected(view)==i
@@ -962,7 +969,7 @@ m.byte(syms['g_backlight_status'],0); m.paint(view); assert m.selected(view)==-1
 paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.calls]
 m.touch(); m.byte(syms['g_backlight_status'],1)
 paint_bar(); assert ('widget_invalidate_force',view) in [c[:2] for c in m.calls]
-m.paint(view); assert m.selected(view)==0 and [b[:5] for b in m.bands]==bar_bands(inset,0,HOME_LIST_W-2*inset,HOME_ROW,radius)
+m.paint(view); assert m.selected(view)==0 and bar_drawn()==bar_bands(inset,0,HOME_LIST_W-2*inset,HOME_ROW,radius)
 paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.calls]; passed()
 
 # Chevrons: OLED's own (list_marks.c chevron_icon), on each visible row of a drill window (contexts.inc), centred
