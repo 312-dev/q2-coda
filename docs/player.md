@@ -1,6 +1,6 @@
 # The stock player
 
-What `hciplayer` is, how `demo` drives it, and everything it does besides decoding, written down so a new player ([player-plan.md](player-plan.md)) can stand in for it. Every address is stock V1.36's. Facts come from three places, named with each: the binaries (`usr/bin/hciplayer`, SHA-256 `f02ccc45…`, stripped; `release/bin/demo`, which has symbols), traffic captured from the real programs under qemu ([Capturing](#capturing)), and [internals.md](internals.md), which already covers each fault Q2 Muse patches. Where the emulator cannot settle something, [Open questions](#open-questions) says what measurement on a Q2 would.
+What stock's `hciplayer` is, how `demo` drives it, and everything it does besides decoding: the contract `q2player` ([player-plan.md](player-plan.md)), which replaces it, keeps. Every address is stock V1.36's. Facts come from three places, named with each: the binaries (`usr/bin/hciplayer`, SHA-256 `f02ccc45…`, stripped; `release/bin/demo`, which has symbols), traffic captured from the real programs under qemu ([Capturing](#capturing)), and [internals.md](internals.md), which already covers each fault Q2 Muse patches. Where the emulator cannot settle something, [Open questions](#open-questions) says what measurement on a Q2 would.
 
 ## What it is
 
@@ -253,7 +253,7 @@ A WMA file's `LENGTH` is its whole seconds (5 for 5.99 s), and its position star
 
 ## What Q2 Muse patches
 
-`tools/peq.py`'s `patch_player` is the whole list: each row is a checked word or slot in hciplayer pointed at `patch/peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c` or `flac_*.c`, mapped at `0xe20000`. A new player has no such faults to patch, but must do what each fix made true.
+Q2 Muse shipped hciplayer patched until 2026-11-18, when `q2player` replaced it and the patches (`tools/peq.py`'s `patch_player`, `patch/peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c`, `flac_*.c`) were deleted; they are in the history before that. Each row is a fault of the stock player and what its fix made true, which `q2player` must also make true ([player-plan: Parity checklist](player-plan.md#parity-checklist)).
 
 | Patch (`tools/peq.py`) | What it makes true | Detail |
 | --- | --- | --- |
