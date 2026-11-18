@@ -31,8 +31,9 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 | ------------- | ---------------------------- | --------------------------------------------------------------------------------------- |
 | Panel         | 375x320, upright             | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
 | Glass corners | 80 px radius (`GLASS_R`)     | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners)       |
-| Status row    | glyphs centered on y 23       | No band and no rule: the bar is 58 px of the page's black; ends 62 px in from each side |
-| Content area  | 375x262 from y 58            | Seven 32 px rows, y 58 to 282                                                           |
+| Status row    | glyphs centered on y 23       | An overlay on the page: no band, no rule, no fill; ends 62 px in from each side         |
+| Page          | 375x320, the whole screen     | [Full-bleed](#full-bleed): backgrounds and art reach both edges under the status row    |
+| List rest     | rows from y 58 to 282        | Seven 32 px rows; where content rests, not where it is clipped                          |
 | Panel type    | LCD (`lcd_h0209s`), not OLED | Black is a color here, not "off": keep large areas black anyway, it is the look        |
 
 The geometry below (the status row, the 58 px list top, the 16 px selection inset, the 28 px right column and
@@ -40,6 +41,15 @@ the scroll indicator) is what the user chose from mock-ups on 2026-11-13 (mock-u
 follow-up), in place of a first draft that stepped the selection bar in at the corners and drew the scroll
 track along the glass. The status row's height and ends are the user's from `mock_status_up.py` on 2026-11-15
 ("do 62 and '...' any title thats too long"): up from y 37 into the glass's top curve, the list's top unchanged.
+
+### Full-bleed
+
+Every page is full-bleed: its window is the whole 375x320 screen (`tools/build.py` `FULL_BLEED`), and the status
+row is an overlay painted after it, its glyphs on top with nothing behind them, so a page's background, the glow and
+its art run to the top and bottom edges. The layout insets are rest positions for content, not clip edges: a list's
+first row rests at y 58 and its last at y 282. Stock's pages move their content down the 58 px the row takes
+(`tools/ipod.py` `full_bleed`), so each rests where it did. The pages the payload builds (`page_open`) still start under
+the row (`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it.
 
 ### Corners
 
@@ -638,14 +648,14 @@ row gone; while a swipe moves it, it slides in the pages' column. Nothing on it 
 
 | Element    | Position (x, y) and size                    | Notes                                                                                   |
 | ---------- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Title      | centred, line top 64                        | Inter Medium 19 px (AWTK 23), Text Primary, one line, an ellipsis when long              |
+| Title      | centred, line top 46                        | Inter Medium 19 px (AWTK 23), Text Primary, one line, an ellipsis when long              |
 | Artist     | centred, 3 px under the title               | Inter 15 px (AWTK 18), Text Secondary                                                    |
 | Stars      | five 44 px, 14 px apart, centred, top 128   | Phosphor `star-fill` in Text Primary up to the rating, `star` outlines at 30% for the rest |
 | Target     | 52 px (1.18 times) on its star's centre      | the wheel's: filled if within the rating, else a full Text Primary outline              |
 | Page dots  | 6 px, 7 px apart, centred, top 292          | one a page, this one Text Primary, the others at 30%                                    |
 
-No words under the stars, no hint, no progress bar, and no colour but the glow's. The mock-up has the title at
-46; the window starts under the status row's band at 58, so the title stands on Now Playing's own title line.
+No words under the stars, no hint, no progress bar, and no colour but the glow's. The page is [full-bleed](#full-bleed):
+the glow runs to the screen's top edge under the status row, and the title stands on the mock-up's own row, 46.
 
 - **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), apart from the like: the heart on the
   art's page sets no stars and five stars like nothing. This page is the one place to rate (the user, 2026-11-18:
@@ -938,8 +948,8 @@ own.
 
 - **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
   15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
-- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status
-  row places it by its screen y, so it is never centered on the room under the bar.
+- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. The page's window is the
+  whole screen ([full-bleed](#full-bleed)), so its rows are the screen's.
 - **The page beneath** stays in sight, undimmed, with its status row and its selection: the overlay asks nothing, and
   the 50% scrim is the [confirmation card](#confirmation-card)'s, for a question.
 - **While it loads** Return, or a tap anywhere off the spinner, cancels: the page stays as it was and the answer, when it

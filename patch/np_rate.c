@@ -24,9 +24,9 @@
 
 /* The design's place on screen (the approved mock-up, 2026-11-18): the title's and artist's line
  * tops and px, the stars' top, size and gap, the target's size, the dots' top, size and gap. The
- * window starts under the status row's band, at y 58 (tools/ipod.py np_grid's g.bar), so the title
- * stands on Now Playing's own title line, y 64, where the mock-up has 46. */
-#define NR_TITLE_Y 64
+ * page is full-bleed under the status row (docs/oled-design.md#full-bleed), so these are the
+ * mock-up's own rows. */
+#define NR_TITLE_Y 46
 #define NR_TITLE_PX 19
 #define NR_ARTIST_GAP 3
 #define NR_ARTIST_PX 15
@@ -44,9 +44,8 @@
 #define NR_POLL_MS 500 /* the rating read again while the page shows (a change from the server) */
 /* The glow (the mock-up's radial wash): its centre's screen row and the ellipse's radii, in px;
  * where it reaches black, in 1/256 of them; the cover's grid; each cell's colour boost (1/256)
- * about its luma, its gain (1/256), and the channel cap. The status row's band above the window is
- * flat black (navigation.c ringnav_paint_bg), so the glow fades in over the window's first
- * NR_TOP_FADE rows rather than meeting it with an edge. */
+ * about its luma, its gain (1/256), and the channel cap. The window is the whole screen and the
+ * status row an overlay on it, so the glow runs to the screen's top edge. */
 #define NR_GLOW_CY 122
 #define NR_GLOW_RX 273
 #define NR_GLOW_RY 220
@@ -55,7 +54,6 @@
 #define NR_GLOW_SAT 358
 #define NR_GLOW_GAIN 115
 #define NR_GLOW_MAX 60
-#define NR_TOP_FADE 32
 
 /* The page's state, on the heap (the scratch arena is full): the page and the lyrics page that
  * show the glow, the glow and the cover it was made for, how many were made (a test's count), the
@@ -143,14 +141,13 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
     for (int y = 0; y < h; ++y) {
         /* the grid's rows about cell centres, in 1/256 of a cell */
         int fy = nr_clamp((2 * y + 1) * NR_GRID * 128 / h - 128, 0, (NR_GRID - 1) * 256),
-            y0 = fy >> 8, y1 = y0 + (y0 < NR_GRID - 1), v = (y - cy) * 256 / NR_GLOW_RY,
-            top = y >= NR_TOP_FADE ? 256 : y * 256 / NR_TOP_FADE;
+            y0 = fy >> 8, y1 = y0 + (y0 < NR_GRID - 1), v = (y - cy) * 256 / NR_GLOW_RY;
         fy &= 255;
         unsigned *row = px + y * w;
         for (int x = 0; x < w; ++x) {
             int u = (x - cx) * 256 / NR_GLOW_RX,
                 t2 = (u * u + v * v) * 256 / (NR_GLOW_END * NR_GLOW_END);
-            if (t2 >= 256 || !top) {
+            if (t2 >= 256) {
                 row[x] = 0xff000000u;
                 continue;
             }
@@ -159,7 +156,6 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
                 x0 = fx >> 8, x1 = x0 + (x0 < NR_GRID - 1),
                 grain = (int)(((unsigned)x * 73856093u ^ (unsigned)y * 19349663u) >> 8) % 3 - 1;
             fx &= 255;
-            f = f * top >> 8;
             unsigned out = 0xff000000u;
             for (int k = 0; k < 3; ++k) {
                 int a = cell[y0 * NR_GRID + x0][k] * (256 - fx) + cell[y0 * NR_GRID + x1][k] * fx,

@@ -103,9 +103,8 @@ void spinner_painted(void *w, const rect_t *r) {
 /* The loading overlay's spinner (docs/oled-design.md#loading): the busy spinner's form
  * (name_order.c spin_paint: a #1C1C1E square with 12 px corners, eight 7 px dots 15 px out, the lit
  * one a step clockwise each frame and each before it dimmer) painted by the canvas over window w,
- * turned by the shared timer above. Its centre is the screen's (375 x 320 with the status row), so
- * its box is placed in screen rows and moved by w's own y: a window under the status row centred on
- * its own height would sit half the bar's height low. */
+ * turned by the shared timer above. Its centre is the screen's (375 x 320, the status row over it):
+ * every page window is the whole screen (tools/build.py FULL_BLEED), so window rows are screen rows. */
 #define LOAD_SPIN_R 12
 #define LOAD_DOT 7
 #define LOAD_DOT_OUT 15
@@ -117,9 +116,8 @@ void load_spinner_paint(void *w, void *canvas) {
     static const unsigned char lit[8] = { 255, 200, 160, 128, 100, 80, 64, 56 };
     if (!w || !canvas || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
-    int f = spinner_frame(), dy = I(w, W_Y), cx = LOAD_SPIN_X + LOAD_SPIN_BOX / 2,
-        cy = LOAD_SPIN_Y + LOAD_SPIN_BOX / 2 - dy;
-    rect_t box = { LOAD_SPIN_X, LOAD_SPIN_Y - dy, LOAD_SPIN_BOX, LOAD_SPIN_BOX };
+    int f = spinner_frame(), cx = LOAD_SPIN_X + LOAD_SPIN_BOX / 2, cy = LOAD_SPIN_Y + LOAD_SPIN_BOX / 2;
+    rect_t box = { LOAD_SPIN_X, LOAD_SPIN_Y, LOAD_SPIN_BOX, LOAD_SPIN_BOX };
     fill_box(canvas, &box, RGBA(RGB_RAISED), LOAD_SPIN_R);
     for (int k = 0; k < 8; ++k) {
         /* 15 px out on the axes, 11 on the diagonals, as spin_paint's */

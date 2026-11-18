@@ -122,6 +122,13 @@ _Static_assert(__builtin_offsetof(scheme_t, mode) == SCHEME_MODE_OFF, "test/patc
 /* A value of the theme's geometry set (tools/ipod.py Geometry) that is not an immediate: V_BAR, ... */
 int geom_val(int v) { return geom_vals[v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
+/* A page the payload builds (coverflow.c page_open, the shuffle confirmation): every normal window
+ * takes the whole screen (tools/build.py FULL_BLEED), and these lay their children out from the
+ * status row's foot, so each goes back under the row, its box set once as the window manager sets
+ * a window's (docs/oled-design.md#full-bleed). The bar fills black over a window placed so. */
+void client_window(void *w) {
+    if (w) widget_move_resize(w, 0, geom_val(V_BAR), 375, client_h());
+}
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
                    V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,

@@ -1254,6 +1254,7 @@ void *text(void *parent, int x, int y, int w, int h) {
 void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(void *, void *)) {
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return 0;
+    client_window(page);
     widget_set_name(page, name);
     widget_set_prop_int(page, "style:normal:bg_color", (int)0xff000000u);
     widget_on(page, EVT_DESTROY, closed, page);

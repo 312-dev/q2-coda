@@ -2533,14 +2533,15 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # a prefix-trimmed typo cannot silently disable a screen this way.
     from ipod import (AUDIT, ARTIST_ALBUMS, SETTINGS_ICONS, inc, ui_pages,
                       QUIET_ICONS, quiet_icon, imagemagick, patch_code, CLOSE_LOAD, DUMMY_LOAD, patch_style, patch_word, branch, settings_icon,
-                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art)
+                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art, full_bleed)
     contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
     check(contexts, 'No navigation contexts audited')
-    windows, chinese = set(), set()  # chinese: the UI assets english_ui rewrites
+    windows, chinese, ui_bins = set(), set(), set()  # chinese: the UI assets english_ui rewrites; ui_bins: every one
     for line in run('unsquashfs', '-l', sq).splitlines():
         found = re.search(r'/raw/ui/(.+)\.bin$', line)
         if not found: continue
         rel = found.group(1)
+        ui_bins.add(rel + '.bin')  # each page is written full-bleed (full_bleed)
         data = cat('release/assets/default/raw/ui/'+rel+'.bin')
         if CJK.search(data.decode('utf-8', 'replace')) and 'release/assets/default/raw/ui/'+rel+'.bin' not in STOCK_EQ + STOCK_PAGES:
             chinese.add(rel + '.bin')  # the stock EQ pages go, and the pages not offered
@@ -3049,7 +3050,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pages = ui_pages(cat, geom)
     patched_ui = list(pages)
     check(chinese, 'No Chinese UI text found')
-    assets = ['ui/'+rel for rel in patched_ui + sorted(chinese - set(patched_ui))] + ['strings/en_US.bin']
+    assets = ['ui/'+rel for rel in patched_ui + sorted(ui_bins - set(patched_ui))] + ['strings/en_US.bin']
     assets += ['styles/'+rel for rel in AUDIT['styles']]
     # images changed in place, so each keeps its inode metadata: settings icons pre-sized to the rows'
     # SET_ICON and the art placeholders
@@ -3057,6 +3058,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for rel in assets:
         kind, name = rel.split('/', 1)
         path = 'release/assets/default/raw/' + ('images/xx/'+name if kind == 'images' else rel)
+        if kind == 'ui' and name not in patched_ui and name not in chinese and not inode(p, path.encode()):
+            continue  # a page the build took out of the image (STOCK_PAGES)
         original = cat(path)
         data = (relabel(original) if kind == 'strings' else
                 patch_style(original, AUDIT['styles'][name]) if kind == 'styles' else
@@ -3065,6 +3068,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                 pages[name] if name in pages else original)
         if kind == 'ui' and name in chinese:
             data = english_ui(name, data)
+        if kind == 'ui':
+            data = full_bleed(data, geom.bar)
         target = out/rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)

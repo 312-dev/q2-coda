@@ -589,6 +589,7 @@ void feedback_shuffled(const char *what, int songs) {
     if (conf.page || songs <= 0) return;
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return;
+    client_window(page);
     conf.page = page;
     widget_set_name(page, "shuffle_confirm");
     widget_set_prop_int(page, "style:normal:bg_color", (int)RGBA(scheme()->paper));
