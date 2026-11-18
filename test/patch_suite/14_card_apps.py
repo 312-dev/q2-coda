@@ -176,7 +176,7 @@ m.open(); m.answer('ok','refresh','',SMENU); assert m.x_pushes()==[]
 m.pick(2); assert m.labels()==SLABELS and m.x_pushes()==[]  # its level asked for under the loading overlay: the menu stays
 m.answer('ok','','',[('info','','No downloads yet','','','')]); assert m.x_pushes()==[],m.x_pushes()
 lv=m.get(m.find('scroll_view',m.page)+O['W_PARENT']); assert signed(m.get(lv+O['W_X']))==0
-m.back(); assert m.labels()==SLABELS and m.requests[-1]==('menu',) and m.x_pushes()==[]  # the menu it kept, asked again
+t=len(m.threads); m.back(); assert m.labels()==SLABELS and len(m.threads)==t+1 and m.x_pushes()==[]  # the menu it kept, asked again
 m.answer('ok','refresh','',SMENU); assert m.x_pushes()==[]
 m.advance(2000); m.answer('ok','refresh','',[*SMENU[:2],('list','downloads','Downloads','1 downloading','',''),*SMENU[3:]])
 assert '1 downloading' in m.labels() and m.x_pushes()==[]; passed()
@@ -363,9 +363,10 @@ s.answer('ok','Playing Artist 070','',[]); assert s.requests[-1]==('playartist',
 s.answer('ok','pages','c1',arts(0)); view=s.find('scroll_view'); assert s.nodes[view]['_ringnav_index']==50
 s.answer('ok','pages','c2',arts(1)); assert s.nodes[view]['_ringnav_index']==70; s.answer('ok','pages','',arts(2,20))
 s.pick(105); s.answer('ok','','',[]); s.back()  # every page it kept, at once, its row selected, the first page asked again
-assert len(s.rows())==120 and s.requests[-1]==('downloads',) and s.nodes[s.find('scroll_view')]['_ringnav_index']==105
-rows=s.rows(); t=len(s.threads); s.answer('ok','pages','c1',arts(0))  # as it was: nothing redrawn or paged again
-assert s.rows()==rows and len(s.threads)==t and s.nodes[s.find('scroll_view')]['_ringnav_index']==105; passed()
+assert len(s.rows())==120 and s.nodes[s.find('scroll_view')]['_ringnav_index']==105
+rows=s.rows(); s.answer('ok','pages','c1',arts(0)); t=len(s.threads)  # as it was: nothing redrawn or paged again
+assert s.requests[-1]==('downloads',) and s.rows()==rows and s.nodes[s.find('scroll_view')]['_ringnav_index']==105
+s.advance(2000); assert len(s.threads)==t; passed()
 # Without "pages" (every app before it: q2-deezer, q2-soulseek, q2-filebrowser) a reply with a cursor keeps
 # More… and nothing more is asked; a later page without it ends the list at More… as well.
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); t=len(s.threads); s.answer('ok','','c1',arts(0))
