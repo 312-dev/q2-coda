@@ -514,8 +514,9 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   offline mark goes. A server song that can't play now keeps the grayed row and `cloud-slash`
   ([server-library.md](server-library.md#grayed-rows)). The length and the title end 12 px short of a mark, as they
   do of the offline mark.
-- Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
-  for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
+- Ratings' lists show a song's stars as five Phosphor glyphs at 14 px at the start of its second line, `star-fill`
+  for its stars and `star` for the rest, in Text Primary (white on the selection), no colour, then "· Artist".
+  A song with no stars (one only liked, in Loved) has none, and its words start where the line does.
 - **The playing song's row**, as the user approved from its mock-up on 2026-11-18 ("B. A where constrained"),
   in every song list (Songs and a genre's, an artist's, an album's tracks and Cover Flow's, Folder view, a playlist's
   songs, Search's results, Most Played, Long Songs, the Ratings lists, the card's songs; Up Next already heads with
@@ -634,10 +635,11 @@ row gone; while a swipe moves it, it slides in the pages' column. Nothing on it 
 No words under the stars, no hint, no progress bar, and no colour but the glow's. The mock-up has the title at
 46; the window starts under the status row's band at 58, so the title stands on Now Playing's own title line.
 
-- **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), the song's hearts one for one: 5 is the
-  favourite, the heart on the art's page. The wheel moves the target from the rating's top (a tick from 3 is 4 or
-  2), within the five, and it goes back to rest after 4 s without a turn; Centre keeps it. A tap keeps a star at
-  once. The rating's own top star, tapped or kept by Centre, clears it (unrated): the page's "0". Centre with no
+- **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), apart from the like: the heart on the
+  art's page sets no stars and five stars like nothing. This page is the one place to rate (the user, 2026-11-18:
+  "the screen serves as the ratings screen. heart is only for liking a song"). The wheel moves the target from
+  the rating's top (a tick from 3 is 4 or 2), within the five, and it goes back to rest after 4 s without a
+  turn; Centre keeps it. A tap keeps a star at once. The rating's own top star, tapped or kept by Centre, clears it (unrated): the page's "0". Centre with no
   target puts it on the rating's top star, the first when unrated. Nothing that can be rated (a stream, a
   radio) leaves the wheel on the volume.
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
@@ -890,7 +892,8 @@ the gray one.
 | Recently Added | `sparkle` | No Songs Added Yet | New music on the card shows up here | |
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
-| Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Ratings' song lists | `star` | No Rated Songs Yet | Swipe to the stars on Now Playing | |
+| Ratings' Loved | `heart-slash` | No Loved Songs Yet | Tap the heart on Now Playing | |
 | Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
 | A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
 | On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
@@ -945,8 +948,8 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   After Album, Off, Song, Album, All (Folder in place of Album when grouped by folder); Group by
   Album or Folder. Group by, two choices, flips in place on Center; the others open a picker in the
   sheet, the current choice with the accent's check before its label.
-- **Rating** (Now Playing's Center cycle, a menu's Rate) is a picker in a sheet: Unrated, 1 Heart
-  to 5 Hearts, the current one checked; Center keeps a row's rating and closes, Return closes.
+- **Rating** is no menu's: no hold menu has a Rate row and the heart has no hold, so the
+  [rating page](#rating-page) is the one place to rate.
 - **Destructive rows** (Delete Song, Delete, Delete Playlist, Remove from Playlist): red `#FF3B30`
   at rest, white on a red bar when lit, as the confirm card's. Such a row comes last, 12 px below
   the actions, and asks before it acts. Space, never a rule. A sheet whose rows are more than six

@@ -352,7 +352,7 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
     <li>Shape the sound with three simple tone sliders, or up to 30 EQ bands with a live curve and AutoEQ and Equalizer APO presets</li>
     <li>Stream Spotify (Premium), AirPlay from your iPhone, and Internet Radio, and install apps and updates over Wi-Fi</li>
     <li>Send your listens to Last.fm or ListenBrainz over Wi-Fi</li>
-    <li>Rate songs and albums 0–5 hearts, then browse Top Rated, Loved and rated albums</li>
+    <li>Rate songs 0–5 stars and like them with the heart, then browse Top Rated, Loved and favorite albums</li>
     <li>Use favorites, playlists you can edit, Years, Most Played, Long Songs, Play Next, Crossfade, and shuffle by song, album or folder, and pick up the queue where you left it</li>
     <li>Read synced lyrics, or download lyrics and covers for your songs over Wi-Fi</li>
     <li>Resume <code>.m4b</code> audiobooks (also split by a CUE sheet) and podcasts where you stopped, with per-folder playback speed, and keep videos on the card</li>
@@ -433,20 +433,19 @@ p:has(+ ul), p:has(+ ol), p:has(+ table), p:has(+ pre), .task, h2, h3 { break-af
   </div>
   <div class="sec">
   <h2 id="ratings">Rating songs and albums</h2>
-  <p>Every song can have 0 to 5 hearts.</p>
+  <p>Every song can have 0 to 5 stars, and, apart from them, you can like it.</p>
   <ul>
-    <li><b>Rate a song:</b> hold the heart on Now Playing, or choose <b>Hold Play/Pause → Rate</b>. Turn the wheel to choose, press Center to save, or Return to leave it as it was; tapping a heart saves that many, and tapping the rating it already has takes it away.</li>
-    <li><b>Five hearts is a favorite:</b> they’re the same thing. <b>Add to Favorites</b> gives a song five hearts, rating it five adds it to your favorites, and <b>Loved</b> and Home’s <b>Favorites</b> shortcut list the same songs.</li>
-    <li><b>Tap the heart</b> on Now Playing to make a song a favorite (five hearts) or take it out (unrated). A song rated 1 to 4 shows its number on the empty heart. On a song from a card app that supports it, such as Jellyfin, the heart also makes it a favorite in the app, whether it streams or was synced to the card; the app sends it on the next time it runs.</li>
-    <li><b>Library → Ratings</b> lists <b>Top Rated</b> (4 and 5 hearts), <b>Loved</b> (5), <b>All Rated</b> and <b>Disliked</b> (1), most hearts first. A row plays the list from that song.</li>
+    <li><b>Rate a song:</b> on Now Playing, swipe past the lyrics to the stars. Turn the wheel to choose and press Center to save, or tap a star; tapping the rating it already has takes it away. This is the only place to rate.</li>
+    <li><b>Like a song:</b> tap the heart on Now Playing (or choose <b>Hold Play/Pause → Add to Favorites</b>). A like is not a rating: it gives no stars, and five stars don’t make a song a favorite. <b>Loved</b> and Home’s <b>Favorites</b> shortcut list your liked songs. On a song from a card app that supports it, such as Jellyfin, the heart also makes it a favorite in the app, whether it streams or was synced to the card; the app sends it on the next time it runs.</li>
+    <li><b>Library → Ratings</b> lists <b>Top Rated</b> (4 and 5 stars), <b>Loved</b> (your liked songs), <b>All Rated</b> and <b>Disliked</b> (1 star), most stars first. A row plays the list from that song.</li>
     <li>Ratings are kept by file path, so they survive Update Local Music but not moving or renaming the file.</li>
     <li>A copy of your song and album ratings stays on the card as <b>.ratings.tsv</b>, to read on a computer. It is updated soon after a change, and it is only a copy: editing it changes nothing on the Q2.</li>
   </ul>
-  <p>Albums have 0 to 5 hearts of their own.</p>
+  <p>Albums can be favorites too.</p>
   <ul>
-    <li><b>Rate an album:</b> in Cover Flow (also an artist’s), <b>Library → Album</b> or an artist’s albums, hold <b>Play/Pause</b> on the album. <b>Add to Favorites</b> gives it five hearts and makes all its songs favorites, <b>Remove from Favorites</b> takes the hearts away and the songs out, and <b>Rate Album</b> opens the same picker; rating an album five does the same as adding it. The row shows the album’s hearts.</li>
-    <li><b>Library → Ratings → Albums</b> shows the rated albums in Cover Flow, most hearts first. Its <b>Sort</b> card cycles <b>Rating</b>, <b>Album</b>, <b>Artist</b>, <b>Year</b> (as <b>Years</b>) and <b>Most Played</b>, and is remembered. Return goes back to Ratings.</li>
-    <li>An album is its name with its album artist, or its folder when it has none (disc folders count as one), so a rating survives Update Local Music, but retagging or moving the album starts it unrated.</li>
+    <li><b>Like an album:</b> in Cover Flow (also an artist’s), <b>Library → Album</b> or an artist’s albums, hold <b>Play/Pause</b> on the album. <b>Add to Favorites</b> makes all its songs favorites, <b>Remove from Favorites</b> takes them out.</li>
+    <li><b>Library → Ratings → Albums</b> shows your favorite albums (and albums rated before ratings moved to the stars) in Cover Flow. Its <b>Sort</b> card cycles <b>Rating</b>, <b>Album</b>, <b>Artist</b>, <b>Year</b> (as <b>Years</b>) and <b>Most Played</b>, and is remembered. Return goes back to Ratings.</li>
+    <li>An album is its name with its album artist, or its folder when it has none (disc folders count as one), so a favorite survives Update Local Music, but retagging or moving the album starts it over.</li>
   </ul>
 
   </div>
@@ -621,7 +620,7 @@ AUTO=1</pre>
   <p>For synced lyrics, copy the song’s <code>.lrc</code> file into the same folder as the song on the SD card. Embedded lyrics may not display; use the separate <code>.lrc</code> file. Or, with Wi-Fi, open <b>⋯</b> on Now Playing: <b>Get Cover &amp; Lyrics</b> finds a cover and lyrics for the playing song, and <b>Get Album Lyrics</b> saves them beside every song of its album, leaving songs that already have a <code>.lrc</code> file alone.</p>
   <ul>
     <li><b>Options:</b> hold <b>Play/Pause</b> for the queue, favorites, playlists, shuffle and repeat. During Shuffle Albums or Folders it also has <b>Next Album / Previous Album</b>.</li>
-    <li><b>Rate:</b> hold the heart, turn to 0–5 hearts, and press Center to save.</li>
+    <li><b>Rate:</b> swipe past the lyrics to the stars, turn to 0–5 stars, and press Center to save. The heart only likes the song.</li>
     <li><b>Radio (Theme: OLED):</b> tap the antenna under the progress bar for an endless radio of songs like the one playing, which plays on where it is. For a Subsonic song the server picks them; for a song on the card, the Q2 Muse plays the same artist’s songs, then the same genre’s, shuffled, leaving out what played lately. While it plays the antenna is a blue <b>Radio</b> pill and Shuffle and Repeat are dimmed, as the radio picks the order; tap the pill to stop the radio, and the songs already queued play on. Playing anything else ends it too.</li>
     <li><b>Scrub:</b> press Center, then turn: 5s per tick, and you hear the song jump as you turn. Double-press, Return, touch or wait 3s to finish. Paused, it stays silent and paused, and plays from there. A double press turns the screen off, as on other pages.</li>
     <li><b>Lyrics:</b> on the lyrics page, turn to scroll them. They stay where you leave them, even if you swipe to another page and back; they follow the song again when you leave Now Playing or the next song starts. Tap the lyrics to fill the screen with them; tap again or press Return to go back. <b>Smart Awake</b> (<a href="#display">Display</a>), on unless you turn it off, keeps the screen on while you read along.</li>
@@ -811,7 +810,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   <ul>
     <li><b>Turning it on:</b> <b>Settings → Car Remote</b>, then the switch at the top (Off by default), or the Car Remote button in Control Center. While it’s off, nothing on the Q2 listens for a phone.</li>
     <li><b>Pairing a phone (once):</b> with Car Remote on, start pairing in the app. The Q2 shows <b>Pair with “your phone’s name”?</b> and a six-digit code; type that code on the phone. The Q2 says <b>Phone paired</b> when it’s done. Press <b>Cancel</b> or Return on the Q2 to refuse. Only a phone that has seen this code on the Q2’s screen can control it.</li>
-    <li><b>In the car:</b> the phone finds the Q2 by itself over Bluetooth (keep the Q2’s Bluetooth on), or over Wi-Fi when the Q2 and the phone share the car’s or the phone’s hotspot. From the car’s screen you can browse or search the library (Tracks, Playlists, Artists, Albums, Genres, Years and Folders), play or shuffle a list, pick up a playlist where you left it (<b>Resume</b>), play, pause, skip, seek, change the volume, turn Shuffle and Repeat on or off, rate the playing song with hearts, and jump to a song in the queue.</li>
+    <li><b>In the car:</b> the phone finds the Q2 by itself over Bluetooth (keep the Q2’s Bluetooth on), or over Wi-Fi when the Q2 and the phone share the car’s or the phone’s hotspot. From the car’s screen you can browse or search the library (Tracks, Playlists, Artists, Albums, Genres, Years and Folders), play or shuffle a list, pick up a playlist where you left it (<b>Resume</b>), play, pause, skip, seek, change the volume, turn Shuffle and Repeat on or off, rate the playing song with stars, and jump to a song in the queue.</li>
     <li><b>Wi-Fi:</b> with <b>Smart Wi-Fi</b> on, Car Remote on keeps the Q2’s Wi-Fi on, so the phone can find it as soon as the car starts.</li>
     <li><b>Forgetting a phone:</b> <b>Settings → Car Remote</b> lists each paired phone under the switch. Press one and choose <b>Forget</b>; it’s disconnected within a second and has to pair again to come back.</li>
   </ul>
@@ -1165,7 +1164,7 @@ http://stream.radioparadise.com/mp3-128</pre>
   <h2 id="tips">Things you might not know</h2>
   <ul>
     <li><b>Hold Play/Pause</b> on Now Playing for the queue, favorites, playlists, shuffle and repeat.</li>
-    <li><b>Rate songs with hearts:</b> hold the heart on Now Playing, turn to 0–5 hearts, press Center to save. Five hearts is a favorite; <b>Library → Ratings</b> lists them.</li>
+    <li><b>Rate songs with stars:</b> on Now Playing swipe past the lyrics, turn to 0–5 stars, press Center to save. The heart likes a song, apart from its stars; <b>Library → Ratings</b> lists both.</li>
     <li><b>Double-press the Center button</b> to turn the screen off on any page (videos and Now Playing excepted); on Now Playing a single press does it, and a double press seeks.</li>
     <li><b>Hold Return</b> to jump to Now Playing from anywhere; hold it again there to go back where you were. Rather go Home? <b>Settings → Controls → Hold Return: Home</b>.</li>
     <li><b>Where is search?</b> In <b>Library</b>, pull the list down from the top until “Release to search” appears, or choose <b>Search</b> in Library. It searches your local songs.</li>
