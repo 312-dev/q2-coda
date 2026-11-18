@@ -19,8 +19,8 @@ for name,key in (('demo','demo_sha256'),('stock-demo','stock_demo_sha256'),('pat
         raise SystemExit(f'{B/name} does not match manifest.json; rebuild into a fresh directory')
 assert manifest['version'] == (dev_tag(manifest['dev']) if manifest.get('dev') else TAG), 'Wrong version'
 assert manifest.get('compact_code')
-from ipod import INC, O  # patch/offsets.inc and its integer #defines
-from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_GEOM_OFF, THEME_MOTION_OFF, builtins as theme_builtins, geometry_sets
+from ipod import GEOM_VALS, INC, O, VALUE_NAMES  # patch/offsets.inc and its integer #defines; the geometry tables' columns
+from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_MOTION_OFF, builtins as theme_builtins, built_geometry
 from theme import theme_keys  # tools/theme.py: the theme's own keys
 CONFIG_READS=9+len(theme_keys(theme_builtins()))  # settings_read: the payload's nine keys (REDUCEMOTION last), then the theme's own
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
@@ -882,8 +882,8 @@ assert m.confirm()==11 and m.dispatched()[0][1]==buttons[-1]; passed()
 # Execute the stock offset setter after cancelling an animator headed to either boundary.
 # Cover selected rows and the pixel-scroll fallback.
 for populated in (False,True):
-    for endpoint,key,selected,want in ((0,O['KEY_NEXT'],4,204),
-                                      (864,O['KEY_PREV'],5,180)):
+    for endpoint,key,selected,want in ((0,O['KEY_NEXT'],4,192),
+                                      (864,O['KEY_PREV'],5,192)):  # OLED's whole rows: either way the offset lands on a whole row
         m=Machine(); w,es=m.page_list(20 if populated else 0)
         m.word(w+0x74,syms['g_scroll_view_vtable'])
         m.paint(w)
@@ -905,7 +905,7 @@ for populated in (False,True):
 for t,off in [('scroll_view',O['SCROLL_Y']),('table_client',O['TABLE_TOP'])]:
     m=Machine(); w=m.page(t=t)
     for _ in range(20): assert m.call()==11
-    assert m.get(w+off)==min(20*manifest['ring_step_pixels'],720 if t=='scroll_view' else 4560)
+    assert m.get(w+off)==min(20*manifest['ring_step_pixels'],736 if t=='scroll_view' else 4560)  # OLED's list end, the pad past it scrolling too
     assert m.call(O['KEY_PREV'])==11 and m.moved()
     for _ in range(120): m.call(O['KEY_PREV'])
     assert m.get(w+off)==0
@@ -991,6 +991,7 @@ assert not m.rounded and not m.strokes and m.global_alpha==0
 # surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end's
 # corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
+OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geom']  # its grid, baked into the build
 OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
@@ -1053,7 +1054,7 @@ for offset in (0, 24):
 # Touch mode draws nothing; the wheel brings the bar back.
 c=Machine(); c.config.update(FLAT); cw,_=c.page_list(5,extent=1000); c.paint(cw)
 c.touch(); c.paint(cw); assert not c.drawn() and c.clip==(0,0,240,240)
-c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,36,240-2*inset,48); passed()
+c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,48,240-2*inset,48); passed()  # OLED's lists keep no reading margin (reveal)
 # Status bar: a solid fill on the bar widget alone, no highlight, LCD fill restored.
 s=Machine(); s.clock_minutes=True; title=s.node('hscroll_label','label_clock')
 def top_level(t,name,children=()):
@@ -1089,31 +1090,6 @@ def writes(): return [c for c in s.calls if c[0]=='widget_set_text_utf8']
 def reads(): return [c for c in s.calls if c[0] in ('time@GLIBC_2.0','localtime_r')]
 def minute(ms=1000): s.advance(ms)
 s.advance(0); assert clock()=='6:14 PM'; passed()  # the gradient check's paint above started it
-# Time in Title off: the bar names the page in front (Now Playing, or stock's title in its hidden
-# navbar, a settings page's unnamed first child); a pop-up leaves it; Home, a shown navbar or no title is the clock.
-def title_machine(**config):
-    CONFIG.update(config); t=Machine(); CONFIG.clear(); t.clock_minutes=True
-    label=t.node('hscroll_label','label_clock'); bar=t.node('system_bar','system_bar',[label])
-    t.word(bar+O['W_PARENT'],t.wm); t.word(syms['system_bar'],bar)
-    def show(top):
-        t.top=top; t.call(address=HOOKS['widget_on_paint_background'][0],args=(bar,t.canvas,0,0),gap=0)
-        t.wrote=any(c[0]=='widget_set_text' for c in t.calls); t.advance(1)
-        return t.nodes[label].get('text')
-    def page(title,shown=0,name='scrlabel_title'):
-        kids=[t.node('hscroll_label',name,text=title)] if title is not None else []
-        w=t.node('window','some_page',[t.node('view','view_navbar',kids,visible=shown)]); t.word(w+O['W_PARENT'],t.wm); return w
-    return t,label,show,page
-t,label,show,page=title_machine(TIMETITLE='0'); time=show(t.node('window','home_page'))
-assert time=='6:14 PM' and show(page('Albums'))=='Albums' and t.nodes[label]['style:normal:font_name']=='inter-medium'  # bar.title's face (oled/theme.xml)
-assert show(page('Display',name=''))=='Display' and show(t.node('dialog','volume_dialog'))=='Display' and show(t.node('keyboard','kb_default'))=='Display'
-assert show(t.node('window','coverflow_page'))=='Cover Flow'
-assert show(page('Bootvol',shown=1))==time and show(page('Empty'))=='Empty' and show(page(''))==time and show(page(None))==time; passed()
-show(page('Albums')); assert t.wrote; show(t.top); assert not t.wrote; passed()  # only a new title is written
-t.clock=(6,15); t.advance(61000); assert t.nodes[label]['text']=='Albums'  # the clock's minute leaves a title alone
-assert show(t.node('window','home_page'))!=time; passed()
-t,label,show,page=title_machine(TIMETITLE='0'); assert show(page('Albums'))=='Albums' and t.nodes[label]['style:normal:font_name']=='inter-medium'
-assert show(page(None))=='6:14 PM' and t.nodes[label]['style:normal:font_name']=='default'; passed()
-t,label,show,page=title_machine(); assert show(page('Albums'))=='6:14 PM'; passed()  # the clock unless chosen
 for h,mi,want in ((0,0,'12:00 AM'),(0,5,'12:05 AM'),(9,7,'9:07 AM'),(11,59,'11:59 AM'),(12,0,'12:00 PM'),
                   (12,59,'12:59 PM'),(13,0,'1:00 PM'),(23,59,'11:59 PM')):
     s.clock=(h,mi); minute(); assert clock()==want,(h,mi,clock())
@@ -1210,17 +1186,17 @@ def battery_checks():
     # level change: the badge's fade leaves the plain glyph's BT_REACH.
     b,bar,w,paint=battery_bar(1); b.nodes[w['label_battery']]['text']='100%'
     b.nodes[w['img_bt']]['image']='bar_aptxhd'
-    paint(); assert b.get(w['view_battery']+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W']
+    paint(); assert b.get(w['view_battery']+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W']
     b.advance(O['CODEC_MS'])
     for _ in range(O['CODEC_STEPS']): b.advance(O['CODEC_STEP_MS'])
     b.calls=[]; paint()
     assert b.get(w['view_battery']+O['W_W'])==O['BATT_PCT_W']
     assert ('widget_invalidate_force',bar) in [c[:2] for c in b.calls]
     # OLED offers Icon and Percent (theme.xml battery values): a stored 2 (Icon + Percent) or 3 (Percent Inside) reads
-    # as its default, the icon, as an invalid value does; the body SET0's (geom batt_w) with its nub outside.
+    # as its default, the icon, as an invalid value does; the body the set's (geom batt_w) with its nub outside.
     for invalid in ('2','3','4','9','-1','33','bad',''):
         b,bar,w,paint=battery_bar(invalid); paint()
-        assert b.get(w['view_battery']+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W'],invalid
+        assert b.get(w['view_battery']+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W'],invalid
     for mode in range(2):
         for bt in (0,1):
             for wifi in (0,1):
@@ -1230,18 +1206,18 @@ def battery_checks():
                 b.nodes[w['label_battery']]['text']='100%'
                 paint()
                 assert shown(b,w)==['view_battery']
-                assert b.get(w['view_battery']+O['W_W'])==(O['BATT_PCT_W'] if mode==1 else O['BATT_BODY_W']+O['BATT_NUB_W'])
+                assert b.get(w['view_battery']+O['W_W'])==(O['BATT_PCT_W'] if mode==1 else OLED_G.batt_w+O['BATT_NUB_W'])
     passed()
-    # The slot takes the bar's height in the set theme_boot wrote (geom_vals[st.geom][V_BAR], 30 under SET0): 26 poked into SET0's row sizes it 26, then 30 again.
-    b,bar,w,paint=battery_bar(1); assert b.u.mem_read(payload_syms['geom_vals'],2)==struct.pack('<h',30)
-    for bar_h in (26,30):
-        b.u.mem_write(payload_syms['geom_vals'],struct.pack('<h',bar_h)); b.word(w['view_battery']+O['W_H'],0); paint()
+    # The slot takes the set's bar height (geom_vals[V_BAR], OLED's 58): 26 poked there sizes it 26, then 58 again.
+    b,bar,w,paint=battery_bar(1); assert b.u.mem_read(payload_syms['geom_vals']+2*GEOM_VALS.index('bar'),2)==struct.pack('<h',OLED_G.bar)
+    for bar_h in (26,OLED_G.bar):
+        b.u.mem_write(payload_syms['geom_vals']+2*GEOM_VALS.index('bar'),struct.pack('<h',bar_h)); b.word(w['view_battery']+O['W_H'],0); paint()
         assert b.get(w['view_battery']+O['W_H'])==bar_h
     passed()
 battery_checks()
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[0]; passed()
-assert m.call()==11 and m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==12
-assert m.call()==11 and m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==60
+assert m.call()==11 and m.selected(w)==1 and m.get(w+O['SCROLL_Y'])==0  # OLED's set: whole rows, no reading margin, the list ending at list_end
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[2]; passed()
 # The separate Play/Pause key remains native even with an active selection.
 assert m.call(O['KEY_PLAY'])==0 and not m.dispatched(); passed()
@@ -1304,20 +1280,6 @@ def destroy(a,b):
 m.on_click=destroy
 assert m.confirm()==11 and len(m.dispatched())==1; passed()
 
-# Execute native row-pool constructors, including the untouched album grid branch.
-# The 52px artwork keeps the stock nine-pixel inset in Stock; iPod keeps that same 52px
-# artwork at natural size (no rescaling) and gives it an even eight-pixel inset on all four
-# sides of the 68px row body. The playing overlay follows.
-ARTWORK = {
-    0x533bc4: [('img_icon', (4, 9, 52, 52), (0, 8, 52, 52)),
-               ('git_playing', (0, 9, 52, 52), (0, 8, 52, 52))],
-    0x4ac588: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68)),
-               ('img_gifbg', (0, 9, 50, 52), (0, 8, 50, 52))],
-    0x4b39f4: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68))],
-    0x4a6910: [('img_icon', (48, 0, 50, 70), (48, 0, 52, 68)),
-               ('img_gifbg', (0, 9, 50, 52), (0, 8, 50, 52))],
-}
-
 def native_row_layout(m, button):
     # Run the real stock layout dispatcher and horizontal layouter. Mock only toolkit
     # collection/geometry services, not the width arithmetic or native child positioning.
@@ -1332,59 +1294,6 @@ def native_row_layout(m, button):
             for i,child in enumerate(children): m.word(values+4*i,child)
             m.word(array,len(children)); m.word(array+8,values); m.word(node+0x5c,array)
     assert m.call(address=syms['widget_layout_children'],args=(button,0,0,0))==0
-
-def check_title_bounds(m, button, drill=False):
-    children=m.nodes[button]['children']
-    text=next(c for c in children if m.nodes[c]['type']=='hscroll_label' or any(
-        m.nodes[t]['type']=='hscroll_label' for t in m.nodes[c]['children']))
-    title=next((c for c in m.nodes[text]['children'] if m.nodes[c]['type']=='hscroll_label'),text)
-    layout=m.get(button+O['W_CHILDREN_LAYOUT'])
-    vtable=m.get(layout+O['CHILDREN_LAYOUT_VTABLE'])
-    stock_vtable=O['DEFAULT_LAYOUT_VTABLE']
-    assert vtable!=stock_vtable
-    # Clone, destroy, parameter and serialization functions remain native.
-    for i in (0,1,3,4,5,6,7): assert m.get(vtable+4*i)==m.get(stock_vtable+4*i)
-    margin=m.u.mem_read(layout+O['DEFAULT_LAYOUT_X_MARGIN'],1)[0]
-    gap=m.u.mem_read(layout+O['DEFAULT_LAYOUT_SPACING'],1)[0]
-    widths={c:m.get(c+O['W_W']) for c in children}
-    title_width=m.get(title+O['W_W'])
-    title_yh=(m.get(title+O['W_Y']),m.get(title+O['W_H']))
-    attributes={k:v for k,v in m.nodes[title].items() if k=='style' or 'hscroll' in k}
-    for artwork in (0,1):
-        for controls in (0,1):
-            for choice in (0,1):
-                for c in children:
-                    if c==text: continue
-                    name=m.nodes[c]['name']
-                    m.nodes[c]['visible']=choice if name.startswith('img_choice') else controls if c in children[children.index(text)+1:] else artwork
-                # Rebind the same row with different strings, then repeat layout (scroll/reuse).
-                for label in ('Short','A very long title '*12,'日本語の長い曲名と歌手 - සිංහල - العربية'):
-                    m.nodes[title]['text']=label
-                    native_row_layout(m,button)
-                    before=children[:children.index(text)]
-                    after=children[children.index(text)+1:]
-                    left=margin+sum(widths[c]+gap for c in before if m.nodes[c]['visible'])
-                    # A drill row lays out as if a stock img_into (CHEVRON_W with the margin) came last.
-                    more=any(m.nodes[c]['name'].startswith('img_more') and m.nodes[c]['visible'] for c in children)
-                    edge=O['CHEVRON_W']+gap if drill and not more else margin
-                    right=m.get(button+O['W_W'])-edge-sum(widths[c]+gap for c in after if m.nodes[c]['visible'])
-                    assert m.get(text+O['W_X'])==left
-                    # A long title keeps its ellipsis: it scrolls only focused, which no row is.
-                    assert m.nodes[title].get('hscroll_label_set_only_focus')==1
-                    assert left+m.get(text+O['W_W'])==right
-                    if title!=text:
-                        assert m.get(title+O['W_X'])+m.get(title+O['W_W'])==m.get(text+O['W_W'])
-                    cursor=right+gap
-                    for c in after:
-                        if m.nodes[c]['visible']:
-                            assert m.get(c+O['W_X'])==cursor
-                            cursor+=widths[c]+gap
-                    assert cursor-gap==m.get(button+O['W_W'])-edge
-                    assert (m.get(title+O['W_Y']),m.get(title+O['W_H']))==title_yh
-                    assert m.nodes[title]['text']==label
-                    assert all(m.nodes[title][k]==v for k,v in attributes.items())
-                    for c in children:
-                        if c!=text: assert m.get(c+O['W_W'])==widths[c]
 
 def check_album_tile(m, button):
     def descendants(w):
@@ -1430,66 +1339,33 @@ m=Machine(); root=asset_node(m,decode((B/'ui/localmusic/album_page.bin').read_by
 for button in [w for w,n in m.nodes.items() if n['type']=='button' and n['children']]:
     check_album_tile(m,button)
 
-for address in (0x533bc4, 0x4ac588, 0x4b39f4, 0x4a6910):
-    for grid in ((0, 1) if address == 0x4a6910 else (0,)):
-        m = Machine(); w = m.page('artistinfo_page' if grid else 'folder_page', 'table_client')
-        m.mock('table_row_create', 'button_create', 'image_create', 'view_create',
-               'hscroll_label_create', 'gif_image_create', 'widget_use_style',
-               'widget_set_name', 'widget_set_children_layout', 'image_set_draw_type',
-               'image_base_set_image', 'set_hscroll_label_attribute')
-        m.word(syms['album_modetype'], grid)
-        assert m.call(address=address, args=(w, w, 4, 0)) == 0
-        rows = m.nodes[w]['children']
-        assert len(rows) == 4
-        for row in rows:
-            assert m.get(row+O['W_H']) == (210 if grid else 72)
-            for button in m.nodes[row]['children']:
-                assert m.get(button+O['W_H']) == (160 if grid else 68)
-        if grid:
-            m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
-            for row in rows:
-                for button in m.nodes[row]['children']: check_album_tile(m,button)
-        if not grid:
-            for name, stock, compact_geometry in ARTWORK[address]:
-                arts = [n for n, v in m.nodes.items() if v.get('name') == name]
-                assert arts, name
-                for art in arts:
-                    geometry = tuple(signed(m.get(art+O[off])) for off in ('W_X', 'W_Y', 'W_W', 'W_H'))
-                    assert geometry == compact_geometry, (name, geometry)
-        # Preparing an existing pool does not recreate or resize its rows.
-        before = len(m.nodes)
-        assert m.call(address=address, args=(w, w, 4, 0)) == 0 and len(m.nodes) == before
-        if not grid:
-            for row in rows[:2]:  # independently recreated rows as well as repeated reuse
-                check_title_bounds(m,m.nodes[row]['children'][0])
-            into=[n for n,v in m.nodes.items() if v.get('name')=='img_into']
-            if into:  # the payload's chevron column is stock's, after layout
-                button=m.nodes[rows[0]]['children'][0]
-                assert m.get(into[0]+O['W_X'])==m.get(button+O['W_W'])-O['CHEVRON_W'] and m.get(into[0]+O['W_W'])==50
-            if address==0x533bc4:
-                # Execute the real folder text/style rebind after layout: its stock 140/190px
-                # reset must no longer undo the computed width while a row pool is recycled.
-                button=m.nodes[rows[0]]['children'][0]
-                title=next(c for c in m.nodes[button]['children'] if m.nodes[c]['name']=='scrlabel_name')
-                width=m.get(title+O['W_W'])
-                m.row_record=m.alloc(0x80); m.word(m.row_record+0x34,8)
-                m.mock('deque_at','tk_snprintf','widget_set_text_utf8','file_is_playing')
-                for navbar,label in ((0,'再利用された長いフォルダー名 '*5), (1,'99% Invisible'),
-                                     (0,'100% true %s %n.mp3'), (1,'plain.mp3'), (0,'x'*600)):
-                    m.byte(syms['g_navbar_status'],navbar)
-                    m.word(m.row_record+8,m.string(label))
-                    assert m.call(address=0x532c30,args=(button,7,0,0))==0
-                    assert m.nodes[title]['text']==label.encode()[:511].decode()
-                    assert m.get(title+O['W_W'])==width
-        else:
-            assert all(m.get(n+O['W_CHILDREN_LAYOUT'])==0 for row in rows for n in m.nodes[row]['children'])
+# The album grid's branch of the native row-pool constructor (0x4a6910 with album_modetype 1), untouched by the set:
+# 210 px rows of 160 px tiles, stock's layout, and a second prepare reuses the pool.
+m = Machine(); w = m.page('artistinfo_page', 'table_client')
+m.mock('table_row_create', 'button_create', 'image_create', 'view_create',
+       'hscroll_label_create', 'gif_image_create', 'widget_use_style',
+       'widget_set_name', 'widget_set_children_layout', 'image_set_draw_type',
+       'image_base_set_image', 'set_hscroll_label_attribute')
+m.word(syms['album_modetype'], 1)
+assert m.call(address=0x4a6910, args=(w, w, 4, 0)) == 0
+rows = m.nodes[w]['children']
+assert len(rows) == 4
+for row in rows:
+    assert m.get(row+O['W_H']) == 210
+    for button in m.nodes[row]['children']:
+        assert m.get(button+O['W_H']) == 160
+m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
+for row in rows:
+    for button in m.nodes[row]['children']: check_album_tile(m,button)
+before = len(m.nodes)
+assert m.call(address=0x4a6910, args=(w, w, 4, 0)) == 0 and len(m.nodes) == before
+assert all(m.get(n+O['W_CHILDREN_LAYOUT'])==0 for row in rows for n in m.nodes[row]['children'])
 passed()
 
-def oled_boot(m,fail=None):  # the first system_bar load: theme_boot writes OLED's oled set (st.geom), as on a unit
-    m.record_syscalls(fail or (lambda page:False)); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+def oled_boot(m):  # the first system_bar load, as on a unit (accent, theme_boot's migration): the windows stock_ui_load was asked for
+    m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
     return [m.text(c[1]) for c in m.calls if c[0]=='stock_ui_load']
-OLED_G=OLED_T['geoms']['oled']  # OLED's geometry set (theme.xml <geometry name="oled">)
 # OLED's Artists/Composers/Genres rows are one line at its set's lib_pitch (32 px): the leading artwork (lib_art 0)
 # and playing gif and the second line hide, and the title sits centred in the row.
 assert OLED_G.lib_pitch==32 and OLED_G.lib_art==0
@@ -1529,15 +1405,6 @@ for address in (0x4b39f4,):
     assert not m.nodes[unnamed]['visible'],address
 passed()
 
-# Before theme_boot writes a set (SET0), the Songs rows stay stock's 72 px rows with their art.
-m=Machine(); w=m.page('allmusic_page','table_client')
-m.mock('table_row_create','button_create','image_create','view_create','hscroll_label_create','gif_image_create',
-       'widget_use_style','widget_set_name','widget_set_children_layout','image_set_draw_type','image_base_set_image',
-       'set_hscroll_label_attribute','widget_set_visible')
-assert m.call(address=0x4ac588,args=(w,w,1,0))==0
-button=m.nodes[m.nodes[w]['children'][0]]['children'][0]; assert m.get(button+O['W_H'])==68
-native_row_layout(m,button); assert [m.nodes[c]['visible'] for c in m.nodes[button]['children']][1]; passed()
-
 # OLED's Albums row (its set's art_pitch, 52 px): the title takes the tall role (list.row tall_font, tall_px) and the
 # second line, nested in stock's view_artist, the meta role (meta_font at meta_px), and stock's secondary grey in its
 # one state a row uses, which the style hook turns to the theme's muted. Its colour is written once.
@@ -1564,9 +1431,7 @@ m.nodes[next(n for n,v in m.nodes.items() if v['name']=='img_choice')]['visible'
 assert rx+m.get(art_+O['W_X'])==OLED_T['art_x'] and rx+m.get(info+O['W_X'])==OLED_T['art_text_x']-2 and m.get(info+O['W_W'])==OLED_T['art_text_end']-OLED_T['art_text_x']+4,(rx,m.get(art_+O['W_X']),m.get(info+O['W_X']),m.get(info+O['W_W']))
 m.nodes[meta]['style:normal:text_color']=0; native_row_layout(m,button); assert m.nodes[meta]['style:normal:text_color']==0; passed()
 
-# The three non-pooled constructors: album tracks, artist tracks and playlists.
-# These use distinct title/container names and must receive the same native layout behavior;
-# only a drill window (playlist_page) reserves the chevron's space.
+# The three non-pooled constructors: album tracks, artist tracks and playlists, each building its one row.
 for address,page in ((0x4a7f44,'artistinfo_page'),(0x4af8ac,'artistinfo_page'),(0x4b4ee8,'artistinfo_page'),(0x4b4ee8,'playlist_page')):
     for reopen in range(2):
         m=Machine(); w=m.page(page,'scroll_view')
@@ -1587,7 +1452,6 @@ for address,page in ((0x4a7f44,'artistinfo_page'),(0x4af8ac,'artistinfo_page'),(
         assert m.call(address=address,args=(w,0,0,0))==0
         buttons=[n for n,v in m.nodes.items() if v['type']=='button']
         assert len(buttons)==1
-        check_title_bounds(m,buttons[0],drill=page=='playlist_page')
         if address==0x4b4ee8:
             button=buttons[0]
             more=next(c for c in m.nodes[button]['children'] if m.nodes[c]['name'].startswith('img_more'))
@@ -1755,7 +1619,7 @@ passed()
 m=Machine(); w,rows,entries=m.table_page(rebind=True)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
-assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==60
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's whole rows)
 assert m.moved()[-1][0]=='table_client_set_yoffset'
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A wheel step ends its scroll as a touch scroll does, so stock lists load the covers in view.
@@ -1782,16 +1646,16 @@ def walk(n,steps,texts=(),extent=1000,flat=False,**kw):
     for _ in range(steps): assert m.call()==11
     assert m.selected(w)==steps
     return m,w,es
-m,w,es=walk(10,5,flat=True); assert m.get(w+O['SCROLL_Y'])==204
+m,w,es=walk(10,5,flat=True); assert m.get(w+O['SCROLL_Y'])==192  # OLED's whole rows: the row a whole row under the top
 w2,es2=m.page_list(10,extent=1000)
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
-assert m.sel()==(inset,36,240-2*inset,48)
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
+assert m.sel()==(inset,48,240-2*inset,48)
 assert m.confirm()==11 and m.dispatched()[0][1]==es2[5]; passed()
 # The theme's recall (recall_ms, GLIDE_MS for OLED): the remembered row glides in over its 300 ms.
 ms=OLED_T['recall_ms']; assert ms==O['GLIDE_MS']==300
 rm,_,_=walk(10,5)
 rw,_=rm.page_list(10,extent=1000); rm.calls=[]
-assert rm.paint(rw)==0 and rm.selected(rw)==5 and rm.get(rw+O['SCROLL_Y'])==204
+assert rm.paint(rw)==0 and rm.selected(rw)==5 and rm.get(rw+O['SCROLL_Y'])==192
 assert rm.moved()[0][0]=='scroll_view_scroll_delta_to' and rm.nodes[rw].get('glide_ms',0)==ms
 passed()
 
@@ -1812,7 +1676,7 @@ m.paint(w); m.touch(); m.word(w+O['SCROLL_Y'],240); m.word(w+O['VIEW_ANIMATOR'],
 m.paint(w); assert m.selected(w)==0
 m.word(w+O['VIEW_ANIMATOR'],0); m.paint(w); assert m.selected(w)==5
 w2,es2=m.page_list(10,extent=1000)
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204; passed()
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192; passed()
 
 # Position memory follows row text across a recreation, not just the index.
 m,w,es=walk(6,4,[f'track {i}' for i in range(6)])
@@ -1888,7 +1752,7 @@ for reuse in (False,True):
         m.folder(path)
         if not reuse: w,es=m.page_list(10,name='folder_page')
         m.word(w+O['SCROLL_Y'],0); m.paint(w)
-        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48+12
+        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48  # a whole row under the top (OLED's whole rows)
     passed()
 
 # Exactly 64 scopes fit. Selection promotes; restoration alone does not change recency.
@@ -1963,7 +1827,7 @@ for cls in (O['CLASS_ALBUMS'],0xf004,0xf005,0xf006):
         w,rs,es=m.table_page(n=12,name='localclass_page',rebind=True)
         m.word(w+O['W_H'],288); m.paint(w)
         for _ in range(7): m.call()
-        before=(m.selected(w),m.get(w+O['TABLE_TOP'])); assert before==(7,108)
+        before=(m.selected(w),m.get(w+O['TABLE_TOP'])); assert before==(7,160)  # OLED's 32 px rows
         page=m.top; m.page('artistinfo_page')
         m.u.mem_write(syms['g_local_classinfo_save']+0x10d,b'Selected Artist\0')
         m.top=page
@@ -1999,7 +1863,7 @@ for reuse in (False,True):
             m.word(syms[changed],query)
             if not reuse: w,rs,es=m.table_page(n=20)
             m.word(w+O['TABLE_TOP'],0); m.paint(w)
-            assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48+12
+            assert m.selected(w)==wanted and m.get(w+O['TABLE_TOP'])==(wanted-1)*48
         passed()
 # Without an audited content identity, a recreated detail, dialog or network page starts fresh.
 for name in ('netdiskfolder_page','tidal_albuminfo_page','playerqueue_page',

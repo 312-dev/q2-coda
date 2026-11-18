@@ -351,11 +351,11 @@ int status_slots_left(void) {
     return left < 0 ? 375 : left;
 }
 
-/* The bar's background paint under a status row: every shown slot but the battery, in final
+/* The bar's background paint under the status row: every shown slot but the battery, in final
  * colours (st.raw_ink), restoring the canvas's fill. */
 void status_slots_paint(void *bar, void *canvas) {
     void *lcd = P(canvas, CANVAS_LCD);
-    if (!geom_val(V_STATUS_Y) || !lcd || layout() < 0) return;
+    if (!lcd || layout() < 0) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int cy = geom_val(V_STATUS_Y);
     for (int i = SLOT_BATTERY + 1; i < SLOT_N; ++i)
@@ -376,7 +376,7 @@ int status_slot_at(int x, int y) {
     int cy = I(row, W_Y) + (I(row, W_H) + 1) / 2, best = -1, near = 1 << 30;
     if (y < cy - SR_TAP_H / 2 || y >= cy + SR_TAP_H / 2) return -1;
     for (int i = 0; i < SLOT_N; ++i) {
-        if (i != SLOT_BATTERY && (!geom_val(V_STATUS_Y) || !sr.w[i])) continue;
+        if (i != SLOT_BATTERY && !sr.w[i]) continue;
         int cx = sr.x[i] + (i == SLOT_BATTERY && !st.batt_mode ? geom_val(V_BATT_W) : sr.w[i]) / 2,
             d = x - cx;
         if (d < -SR_TAP_W / 2 || d >= SR_TAP_W / 2) continue;
@@ -418,7 +418,7 @@ void status_touch(unsigned type, int x, int y) {
 }
 
 /* Whether the arrows turn: an app checks. */
-static int moving(void) { return geom_val(V_STATUS_Y) && addon_sync((int *)0) == 1; }
+static int moving(void) { return addon_sync((int *)0) == 1; }
 /* Each frame, while lit and the arrows turn: the next one, and only their box repainted
  * (ringnav_paint_bg paints it with the bar's background under it). */
 static int sr_tick(const void *info) {
@@ -441,7 +441,7 @@ static int sr_tick(const void *info) {
  * row stays as it is). */
 static void play_box_dirty(void) {
     void *bar = *(void *const *)system_bar;
-    if (!bar || !g_backlight_status || !geom_val(V_STATUS_Y) || layout() < 0 || !sr.w[SLOT_PLAY])
+    if (!bar || !g_backlight_status || layout() < 0 || !sr.w[SLOT_PLAY])
         return;
     rect_t r = { sr.x[SLOT_PLAY], 0, SR_BARS_W, I(bar, W_H) };
     widget_invalidate_force(bar, &r);
@@ -449,7 +449,7 @@ static void play_box_dirty(void) {
 /* Whether the bars move: lit, playing, the slot shown and not dissolving, and motion allowed
  * (MO_DECOR: still under Reduce Motion). Their clock runs only then. */
 static int bars_moving(void) {
-    return g_backlight_status && geom_val(V_STATUS_Y) && bar_status() == 2 && play_shown() &&
+    return g_backlight_status && bar_status() == 2 && play_shown() &&
            !anim_running(&sr.xfade) && motion_ms(SR_FRAME_MS, MO_DECOR);
 }
 /* The shared loop timer's (ui_kit.c motion_loop), MO_LOOP_MS apart while the bars move: their box
@@ -500,7 +500,6 @@ static void play_xfade_sync(void) {
  * ring to the 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar
  * repaints whole after the frame and the clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
-    if (!geom_val(V_STATUS_Y)) return 0;
     play_xfade_sync();
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);

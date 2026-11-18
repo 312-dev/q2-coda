@@ -2,7 +2,6 @@
 #include "navigation.h"
 #include "ui_kit.h"
 
-static int bar_bold __attribute__((section(".scratch"))); /* the bar's title set bold (bar_title) */
 static int row_frame(const void *info);
 static struct {
     int on;            /* radio as last painted (np_modes) */
@@ -87,82 +86,20 @@ int np_time_tap(void *ctx, void *event) {
     return 0;
 }
 
-/* Time in Title off: the bar's centre names the page in front, as an iPod's, in the bar role's
- * face: Now Playing or Cover Flow, else stock's title in the page's hidden navbar (scrlabel_title,
- * or a settings page's unnamed first child). Home, a page showing its navbar and an untitled page
- * keep the clock; a pop-up or keyboard leaves the bar as it is. This runs in a paint, which drops
- * the label's invalidate, so bar_repaint follows; the clock waits for its timer. */
-void bar_title(void *bar, void *top) {
-    static const unsigned
-        now_playing[] = { 'N', 'o', 'w', ' ', 'P', 'l', 'a', 'y', 'i', 'n', 'g', 0 },
-        cover_flow[] = { 'C', 'o', 'v', 'e', 'r', ' ', 'F', 'l', 'o', 'w', 0 }, none = 0;
-    if (st.bar_title) { /* this bar names the page in its own label: off, the clock makes way */
-        const unsigned *own = widget_get_text(st.bar_title);
-        /* a status row (tools/ipod.py status_row): the title where the page has one, the clock
-         * either way */
-        int titled = (!st.time_title || geom_val(V_STATUS_Y)) && own && *own;
-        void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
-        if (!clock) return;
-        st.bar_titled = titled;
-        st.clock_key = 0;
-        /* a status row keeps the clock beside a title (navigation.c clock_place places both) */
-        if (titled && !geom_val(V_STATUS_Y))
-            widget_set_text(clock, &none);
-        else
-            rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
-        /* the title takes the clock's room while it makes way, up to EQ's box, parked where the
-         * right group's room starts (tools/ipod.py) */
-        static int title_w;
-        if (!title_w) title_w = I(st.bar_title, W_W);
-        void *eq = st.bar_eq ? P(st.bar_eq, W_PARENT) : (void *)0;
-        int wide = eq ? I(eq, W_X) + I(st.bar_eq, W_X) - I(st.bar_title, W_X) : title_w;
-        if (!geom_val(V_STATUS_Y)) /* a status row's: clock_place */
-            widget_resize(st.bar_title, titled && wide > title_w ? wide : title_w,
-                          I(st.bar_title, W_H));
-        if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
-        return;
-    }
-    if (st.time_title && !st.bar_titled) return; /* the clock, every paint */
-    if (!top || tk_strcmp(widget_get_type(top), "window")) return;
-    void *label = widget_lookup(bar, "label_clock", 1);
-    if (!label) return;
-    const unsigned *title = (void *)0;
-    if (!st.time_title) {
-        void *nav = widget_lookup(top, "view_navbar", 0), *t = (void *)0;
-        if (nav && !widget_get_visible(nav)) {
-            t = widget_lookup(nav, "scrlabel_title", 0);
-            if (!t && widget_count_children(nav)) t = widget_get_child(nav, 0);
-            if (t && tk_strcmp(widget_get_type(t), "hscroll_label")) t = (void *)0;
-        }
-        title = top == st.np_win                                                     ? now_playing
-                : !tk_strcmp(widget_get_prop_str(top, "name", ""), "coverflow_page") ? cover_flow
-                : t ? widget_get_text(t)
-                    : (void *)0;
-        if (title && !*title) title = (void *)0;
-        static const unsigned null_name[] = { '(', 'n', 'u', 'l', 'l', ')', 0 };
-        const unsigned *a = title, *b = null_name; /* stock's "%s" of a NULL name: no title */
-        while (a && *a && *a == *b) ++a, ++b;
-        if (a && !*a && !*b) title = (void *)0;
-    }
-    if (!title) {
-        if (!st.bar_titled) return;
-        st.bar_titled = 0;
-        st.clock_key = 0; /* clock_show writes it again */
-        if (bar_bold) label_font(label);
-        bar_bold = 0;
-        rearm(&st.clock_timer, clock_due, 0);
-        return;
-    }
-    const unsigned *had = widget_get_text(label), *want = title;
-    while (had && *had && *had == *want) ++had, ++want;
-    int changed = !st.bar_titled || !had || *had != *want;
-    if (changed) widget_set_text(label, title);
-    st.bar_titled = 1;
-    int bold =
-        theme_font(label, ROLE_NP, bar_bold); /* a new Theme can change it under the same title */
-    if ((changed || bold != bar_bold) && !st.bar_timer)
-        st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
-    bar_bold = bold;
+/* The status row (tools/ipod.py status_row) names the page in its own label, label_title: the
+ * title where the page has one, the clock beside it either way (navigation.c clock_place places
+ * both). This runs in a paint, which drops the label's invalidate, so bar_repaint follows; the
+ * clock waits for its timer. */
+void bar_title(void *bar) {
+    if (!st.bar_title) return; /* bar_sync has not found the row's labels */
+    const unsigned *own = widget_get_text(st.bar_title);
+    int titled = own && *own;
+    void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
+    if (!clock) return;
+    st.bar_titled = titled;
+    st.clock_key = 0;
+    rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
+    if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
 }
 
 /* No knob in any state on a plain slider (tools/ipod.py plain_slider): Now Playing's, Quick
@@ -195,10 +132,8 @@ void slider_fill(void *slider, unsigned color) {
 }
 void np_fill(int scrub) {
     if (!st.np_slider) return;
-    /* a status row's set (OLED's) keeps the accent and marks the scrub with paint_scrubber's knob
-     */
-    slider_fill(st.np_slider,
-                scrub && !geom_val(V_STATUS_Y) ? 0xffffffff : RGBA(accent_tone(TONE_LIGHT)));
+    /* the status row's set keeps the accent and marks the scrub with paint_scrubber's knob */
+    slider_fill(st.np_slider, RGBA(accent_tone(TONE_LIGHT)));
     /* a theme whose fill is near white already marks the scrub with a thicker line */
     const theme_t *T = theme();
     if (T->np_scrub != T->np_bar)
@@ -263,7 +198,7 @@ void paint_scrubber(void *w, void *canvas) {
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
         stock_canvas_set_fill_color(canvas, saved);
     }
-    if (st.scrub && n > 0 && geom_val(V_STATUS_Y)) { /* the scrub's knob, as a slider's (np_fill) */
+    if (st.scrub && n > 0) { /* the scrub's knob, as a slider's (np_fill) */
         int x = fill < NP_KNOB / 2        ? NP_KNOB / 2
                 : fill > bw - NP_KNOB / 2 ? bw - NP_KNOB / 2
                                           : fill;

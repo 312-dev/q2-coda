@@ -19,7 +19,7 @@ def test_a_set_switch_themes_on_off_row_is_a_switch(fw):
 def test_oled_settings_text_starts_on_the_text_column(fw, st, geometry, stand_in):
     """A row without an icon: its label's box at text_x less hscroll_label's 2 px, so its text starts on text_x."""
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED', theme=b'%d' % OLED)
+    lst = SettingsList(fw, ui, st, geometry, stand_in, theme=b'%d' % OLED)
     item = lst.row(('hscroll_label', (10, 0, 260, STOCK_BODY), 'label'))
     lst()
     assert item.children[0].children[0].box[0] == lst.g['V_TEXT_X'] - 2
@@ -29,7 +29,7 @@ def wifi_list(fw, st, geometry, stand_in, searching):
     """Stock's Wi-Fi list as wifimenu_rows_build leaves it with Wi-Fi on: the switch row, the Scanning row, the
     centred header, one network (its signal image leading) and Add Network."""
     ui = Ui(fw)
-    lst = SettingsList(fw, ui, st, geometry, stand_in, geom='GEOM_OLED', theme=b'%d' % OLED, window='wifi_page',
+    lst = SettingsList(fw, ui, st, geometry, stand_in, theme=b'%d' % OLED, window='wifi_page',
                        view='scroll_view_wifi')
     lst.list.name = 'list_view_wifi'
     fw.var('wifi_searchtime', C.c_ubyte).value = searching

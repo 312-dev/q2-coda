@@ -144,10 +144,10 @@ static void cap_ask(void) {
     if (!ab.cap) ab.cap = timer_add(cap_due, (void *)0, 0) | 1;
 }
 
-/* The scroll's furthest: the content's last row's bottom on the set's list end (list_fit_end, or
- * the screen's bottom), 0 when it fits. */
+/* The scroll's furthest: the content's last row's bottom on the set's list end (list_fit_end), 0
+ * when it fits. */
 static int ab_room(void) {
-    int fit = list_fit_end(), over = ab.end - (fit ? fit : 320);
+    int over = ab.end - list_fit_end();
     return over > 0 ? over : 0;
 }
 

@@ -606,11 +606,11 @@ m.alive=False
 m.alive=False; m.poll(10000); m.poll(30000); assert 'killall -9 librespot aplay' in m.systems[-1]; passed()
 
 # Back reveals the saved More row, and paint keeps it selected: the list scrolled to its end, the 51st
-# 52 px row (OLED's page.rows.detail_height) ending at the view's bottom.
+# 52 px row (OLED's page.rows.detail_height) ending on the view's last whole row.
 m=BrowseMachine(); m.open(); m.answer(*ME); m.row(0)
 m.answer('ok','','next',[track('spotify:track:'+str(i),str(i)) for i in range(50)])
 m.pick(50); m.answer(*OK,[]); m.back(); view=m.find('scroll_view')
-assert m.nodes[view]['_ringnav_index']==50 and m.get(view+O['SCROLL_Y'])==51*52-m.get(view+O['W_H'])
+vh=m.get(view+O['W_H']); assert m.nodes[view]['_ringnav_index']==50 and m.get(view+O['SCROLL_Y'])==51*52-vh//52*52  # OLED's whole rows: the 51st's foot on the view's last whole row (lists.c reveal)
 m.paint(view); assert m.nodes[view]['_ringnav_index']==50; passed()
 # More beyond the history limit keeps the operation, context and title while recycling a level.
 m=BrowseMachine(); m.open(); m.answer(*ME); m.row(2)

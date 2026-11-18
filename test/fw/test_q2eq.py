@@ -27,14 +27,6 @@ class Reply(C.Structure):
                 ('applied', C.c_char * 256), ('automatic', C.c_double), ('state', EqState), ('draft', Preset)]
 
 
-@pytest.fixture(autouse=True)
-def oled_set(fw_dev, dev_library):
-    """OLED's geometry, as test_peq_page sets it for its pages."""
-    offsets = host.offsets(dev_library.parent/'navigation.o', 'scratch_t')
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    C.c_int.from_address(C.addressof(fw_dev.var('st', C.c_char)) + offsets['geom']).value = [g.name for g in sets].index('oled')
-
-
 class Q2eq:
     """The EQ page's world (test_peq_page.Page, not opened unless asked) and the request file's owner and mode."""
     def __init__(self, fw, s=None, files=None, values=None):

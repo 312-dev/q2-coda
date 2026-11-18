@@ -9,7 +9,7 @@ import pytest
 import art
 import ipod
 import theme
-from ipod import Geometry, O, SET0
+from ipod import Geometry, O, STOCK_GRID
 from theme import ThemeError
 
 
@@ -110,8 +110,8 @@ def opt(setting, default=-1, preset=-1, keep=-1, values=0):
     return {'setting': setting, 'def': default, 'preset': preset, 'keep': keep, 'values': values}
 
 
-def own(key, label, names, sets, default=-1, preset=-1, keep=-1):  # a theme's own option, as resolve() keeps it
-    return {**opt('SETTING_OWN', default, preset, keep), 'key': key, 'label': label, 'names': list(names), 'sets': sets and list(sets)}
+def own(key, label, names, default=-1, preset=-1, keep=-1):  # a theme's own option, as resolve() keeps it
+    return {**opt('SETTING_OWN', default, preset, keep), 'key': key, 'label': label, 'names': list(names)}
 
 
 THUMB = dict(thumb=1, ticks_turn=36, ticks_album=7, fast_at=23, fast_full=90, top_speed=20, track=30, snap=25, spin=130, far_left=250,
@@ -134,10 +134,10 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
 CF_LO = '<view name="coverflow">' + ''.join(
     f'<element name="{e}" ' + ' '.join(f'{k.path.rpartition(".")[2]}="{41 if k.path.endswith(".eye") else k.lo}"' for k in theme.SCHEMA.values()
                                        if k.path.startswith(f'coverflow.{e}.')) + '/>' for e in ('shelf', 'caption')) + '</view>'
-# The engine's tests' base: a synthetic theme with no base of its own that offers every ACCENTS row, on a set of its
+# The engine's tests' base: a synthetic theme with no base of its own that offers every ACCENTS row, on a grid of its
 # own with a right column (the chevrons and song rows stand on it) and the wheel's scroll indicator, which every
 # theme draws (theme.validate).
-BASE_GEOM = '<geometry name="base" right_x="28"/><geometry set="base"/>'
+BASE_GEOM = '<geometry right_x="28"/>'
 BASE_SB = '<view name="list"><element name="scrollbar" w="4" right="5" top="134" bottom="206" min="8" thumb="#e5e5e5"/></view>'
 A = '<option setting="accent" key="ACCENT"/>'
 BASE_BODY = BASE_GEOM + '<option setting="light" preset="off" keep="auto"/>' + A + BASE_SB + CF_LO
@@ -247,8 +247,7 @@ def test_resolve_checks_role_macros(monkeypatch):
 
 
 N = 'id="t" name="T" index="2"'
-V = '<value label="Off" set="base"/><value label="On" set="base"/>'
-P = '<geometry name="pico" bar="26"/>'
+V = '<value label="Off"/><value label="On"/>'
 C = '<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" default="cobalt" preset="cobalt"/>'
 @pytest.mark.parametrize('body, attrs, message', [
     ('<option setting="light"/>', None, 'no accent option'),
@@ -258,14 +257,8 @@ C = '<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" defau
     ('<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" preset="green"/>', None, 'accent preset green is not in colorSchemes'),
     ('<colorSchemes accents="cobalt"/><option setting="accent" key="ACCENT" default="graphite"/>', None, 'accent default graphite is not in colorSchemes'),
     ('<colorSchemes accents=""/>', None, 'colorSchemes is empty'),
-    (A + f'<option key="ART" label="Art">{V}</option><option key="ART" label="Art">{V}</option>', None, 'ART declared twice'),
-    ('<option setting="accent" key="ART"/>' + f'<option key="ART" label="Art">{V}</option>', None, 'ART declared twice'),
-    (A + f'<option key="ART" label="Art">{V}</option><option key="AUX" label="Aux">{V}</option>', None,
-     'one option per theme selects the geometry set'),
-    (A + P + '<option key="ART" label="Art" default="On"><value label="Off" set="base"/><value label="On" set="pico"/></option>', None,
-     "ART: default On boots pico, the theme's geometry is base"),
-    (A + P + '<option key="ART" label="Art" default="Off"><value label="Off" set="base"/><value label="On" set="pico"/></option>', None,
-     "ART: set pico has a 26 px bar, the theme's is 30"),
+    (A + f'<option key="NPTIME" label="Art">{V}</option><option key="NPTIME" label="Art">{V}</option>', None, 'NPTIME declared twice'),
+    ('<option setting="accent" key="NPTIME"/>' + f'<option key="NPTIME" label="Art">{V}</option>', None, 'NPTIME declared twice'),
     (A + '<colorScheme name="sky" base="cobalt" label="Sky"/><colorScheme name="sea" base="tidal" label="Sea"/>', None,
      '11 accents, at most 10'),
     (A + '<option setting="battery" default="percent"/>', None,
@@ -381,33 +374,38 @@ def test_emit(tmp_path):
     assert 'const theme_t themes[THEME_N] = {\n    {\n        .sel_radius = 8,\n        .sel_inset = 16,\n' in text
 
 
+def on_oleds_set(t):
+    """t on OLED's grid: the build bakes one, so themes emitted together share it."""
+    return dict(t, geom=oled()['geom'])
+
+
 def test_emit_both(tmp_path):
     """The engine still emits several themes: each its schemes and options, then the one table."""
     t = resolved(C, 'id="t" name="T" index="1" extends="base"')
-    theme.emit([oled(), t], tmp_path)
+    theme.emit([oled(), on_oleds_set(t)], tmp_path)
     text = (tmp_path/'themes.inc').read_text()
     assert [l.split(' = ')[0] for l in text.splitlines() if l.startswith('static const')] == [
         'static const unsigned oled_tones[][5]', 'static const scheme_t oled_schemes[]', 'static const scheme_t oled_light[]',
         'static const option_t oled_opts[]', 'static const scheme_t t_schemes[]', 'static const option_t t_opts[]',
-        'static const volatile short geom_vals[GEOM_N][V_N]']
+        'static const volatile short geom_vals[V_N]']
     assert 'extern const theme_t themes[THEME_N];' in (tmp_path/'themes.h').read_text()
     assert ('    { .tones = accents[7], .chevron = 0x000000, .muted = 0x000000, .sel_text = 0x000000, .mode = SCHEME_DERIVE, '
             '.paper = 0xf4f4f4, .ink = 0x161616 },\n    { .tones = accents[8]') in text.split('t_schemes[] = {')[1]  # one array, both halves
     assert '    { .setting = SETTING_ACCENT, .def = 4, .preset = 4, .keep = -1, .values = 0x10 },' in text
     assert '        .accent_slot = &st.accent,\n        .accent_key = "ACCENT",\n        .schemes = t_schemes,' in text
-    assert '    },\n};\nconst volatile unsigned short boot_values' in text
-    assert (tmp_path/'themes.h').read_text().startswith('/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */\nenum { GEOM_IPOD, GEOM_OLED, GEOM_BASE, GEOM_N };\n')
+    assert '    },\n};\nconst volatile unsigned short geom_words' in text
+    assert (tmp_path/'themes.h').read_text().startswith('/* tools/theme.py wrote this from assets/themes/<id>/theme.xml; edit those. */\nenum { G_PITCH, ')
 
 
 def test_view_attr():
     assert theme.view_attr('list.selection.radius') and theme.view_attr('home.rows.top')
-    assert not theme.view_attr('geometry.set') and not theme.view_attr('scheme.muted')
+    assert not theme.view_attr('scheme.muted')
     assert not theme.view_attr('scheme.sel.text')  # a scheme role has two dots too
 
 
 # Enum fields and value counts come out as C names, so a reordered or added value is a compile error.
 def test_emit_names_enums_and_counts(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     assert inc.count('.font[ROLE_NP] = FONT_INTER_MEDIUM,') == 1 and '.font[ROLE_NP] = 2,' not in inc
     assert '.mode = SCHEME_DERIVE' in inc and '.mode = 0' not in inc
     for name, (_, values) in theme.SETTINGS.items():
@@ -498,9 +496,8 @@ def test_coverflow_swing_near_edge_clears_the_eye_mid_step():
         theme.validate({**oled(), 'cf.swing': 1, 'cf.eye': 81, 'cf.z1': 0, 'cf.tilt': 90}, 't.xml')
 
 
-def test_coverflow_caption_follows_the_bar(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'tall', Geometry(name='tall', bar=34, right_x=28))
-    t = {**oled(), 'geom_set': 'tall'}
+def test_coverflow_caption_follows_the_bar():
+    t = {**oled(), 'geom': Geometry(name='tall', bar=34, right_x=28)}
     with pytest.raises(theme.ThemeError, match='text_y \\+ 55 = 287 exceeds the client height 286'):
         theme.validate({**t, 'cf.text_y': 232}, 't.xml')
     theme.validate({**t, 'cf.text_y': 231}, 't.xml')
@@ -523,7 +520,7 @@ def test_oled_shelf():  # its side covers' geometry from its keys; the frame hol
         assert abs(outer(n)[0] - x) <= 1 and (h is None or abs(outer(n)[1] - h) <= 1)
     assert (t['cf.horizon'], t['cf.swing'], t['cf.lift'], t['cf.eye_turn']) == (64, 2, 0, 0)  # straight out, as #329's lab
     assert t['cf.reflect_top'] == 0  # no reflection floor: the reflection's top at 0 of its cover's brightness
-    assert t['cf.top'] + 160 + t['cf.reflect'] <= t['cf.view_h'] <= 320 - t['geoms'][t['geom_set']].bar
+    assert t['cf.top'] + 160 + t['cf.reflect'] <= t['cf.view_h'] <= 320 - t['geom'].bar
 
 
 def test_oled_caption_tails_end_on_the_list_end():
@@ -543,7 +540,7 @@ def test_oled_caption_tails_end_on_the_list_end():
     top = t['cf.text_y'] + t['cf.artist_y'] + (O['CF_ARTIST_H'] - t['cf.artist_px']) // 2
     baseline = math.floor(top + font['hhea'].ascent * scale)
     tail = baseline + max(depth(ch) for ch in 'pygqj') * scale
-    assert tail <= t['geoms'][t['geom_set']].list_end  # window rows: the screen's y 282 under the 58 px status row
+    assert tail <= t['geom'].list_end  # window rows: the screen's y 282 under the 58 px status row
 
 
 def test_emit_cf(tmp_path):
@@ -588,14 +585,6 @@ def test_emit_page_rows(tmp_path):
     assert all(text.count(f'.{k} = {v},') == 1 for k, v in (('page_row', 32), ('page_detail', 52), ('page_title_h', 0), ('page_cap_y', 4)))
 
 
-TEST = Geometry(name='test', pitch=28)
-
-
-@pytest.fixture
-def test_set(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'test', TEST)
-
-
 def oled_with(geometry):
     text = (THEMES/'oled/theme.xml').read_text()
     text = re.sub(r'(<theme\b[^>]*>)', r'\1' + geometry, text, count=1)
@@ -605,30 +594,30 @@ def oled_with(geometry):
     return t
 
 
-def test_oled_is_on_its_own_set():
+def test_oled_is_on_its_own_grid():
     o = oled()
-    assert theme.geometry(o) == theme.sets(o)['oled'] and theme.geometry_sets([o]) == [SET0, theme.geometry(o)]
-    assert bare(oled_with('')) == bare(o)
+    assert theme.geometry(o) == o['geom'] != STOCK_GRID and theme.built_geometry([o]) == theme.geometry(o)
 
 
 @pytest.mark.parametrize('geometry, message', [
-    ('<geometry set="other"/>', 'unknown geometry set "other"'),
-    ('<geometry set="ipod" bar="26"/>', 'unknown key geometry.bar')])
+    ('<geometry bar="26"/>', 'one <geometry> per theme'),
+    ('<geometry set="oled"/>', 'unknown key geometry.set')])
 def test_geometry_rejects(geometry, message):
     with pytest.raises(theme.ThemeError, match=message):
         oled_with(geometry)
 
 
-def test_geometry_sets_set0_first(test_set):
+def test_built_geometry_is_the_themes_one_grid():
     o = oled()
-    assert theme.geometry_sets([dict(o, geom_set='test'), dict(o, geom_set='ipod')]) == [SET0, TEST]
-    assert theme.geometry_sets([dict(o, geom_set='test')]) == [SET0, TEST]
+    test = Geometry(name='test', pitch=28)
+    assert theme.built_geometry([dict(o, geom=test)]) == test
+    with pytest.raises(ValueError, match='2 grids: the build bakes one'):
+        theme.built_geometry([o, dict(o, geom=test)])
 
 
-def test_geometry_sets_refuse_a_wide_value(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'wide', Geometry(name='wide', pitch=0x8000))
+def test_built_geometry_refuses_a_wide_value():
     with pytest.raises(ValueError, match='wide: pitch 32768 does not fit an immediate'):
-        theme.geometry_sets([dict(oled(), geom_set='wide')])
+        theme.built_geometry([dict(oled(), geom=Geometry(name='wide', pitch=0x8000))])
 
 
 def test_a_nameless_scheme_is_every_scheme():
@@ -707,7 +696,7 @@ def test_resolve_rejects_halves(body, message):
 
 
 def test_emit_mode_and_undeclared(tmp_path):
-    inc = boot_inc(tmp_path, [oled(), resolved(C, 'id="t" name="T" index="1" extends="base"')])
+    inc = geom_inc(tmp_path, [oled(), on_oleds_set(resolved(C, 'id="t" name="T" index="1" extends="base"'))])
     # a theme whose halves differ only by the flip shares one array for both
     assert '.light = t_schemes,' in inc and 't_light' not in inc
     assert '.mode = SCHEME_DERIVE, .paper = 0xf4f4f4, .ink = 0x161616' in inc
@@ -746,7 +735,7 @@ def test_own_scheme_restated_is_its_row():
 
 
 def test_emit_own_scheme(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     assert inc.split('static const scheme_t oled_schemes[] = {')[1].split('\n')[10].startswith('    { .tones = oled_tones[0], ')
     assert '.label = "Blue" }' in inc and inc.count('.n_schemes = 10,') == 1
     assert inc.count('/ sizeof *oled_schemes >= ACCENT_N') == 1
@@ -805,7 +794,7 @@ def test_own_scheme_states_its_tones(tmp_path):
     assert blue['tones'] == (0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea) and blue['base'] == 4
     assert not any('tones' in s for s in t['schemes'][:9])  # the ACCENTS rows keep theirs
     assert (t['sel_radius'], t['sel_inset'], t['np_track_rgb']) == (6, 8, 0x262626)
-    inc = boot_inc(tmp_path, [t])
+    inc = geom_inc(tmp_path, [t])
     assert 'static const unsigned t_tones[][5] = {\n    { 0x2f5bea, 0x2f5bea, 0x5a7cee, 0x5a7cee, 0x2f5bea },\n};\n' \
            'static const scheme_t t_schemes[] = {' in inc
     rows = inc.split('static const scheme_t t_schemes[] = {\n')[1].split('\n};')[0].splitlines()
@@ -819,7 +808,7 @@ def test_own_scheme_without_tones_keeps_its_base_s():
 
 def test_builtins_state_no_tones(tmp_path):
     """Every built-in scheme's tones stay its ACCENTS row but OLED's Blue, its own row: only OLED writes a tones table."""
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     assert inc.count('_tones[][5] = {') == 1 and 'static const unsigned oled_tones[][5] = {' in inc
     assert [(t['id'], s['name']) for t in theme.builtins() for s in t['schemes'] if 'tones' in s] == [('oled', 'oled-blue')]
 
@@ -836,9 +825,9 @@ def test_tones_reject(body, message):
     assert error(resolved, body) == f't.xml:1: {message}'
 
 
-SONGARTIST = own('SONGARTIST', 'Song Artist', ('Inline', 'Selected Row', 'Right', 'Off'), None, default=0, preset=0)
-SONGLENGTH = own('SONGLENGTH', 'Song Length', ('Albums', 'All Lists', 'Off'), None, default=0, preset=0)
-NPTIME = own('NPTIME', 'Track Time', ('Remaining', 'Total'), None, default=0, preset=0)
+SONGARTIST = own('SONGARTIST', 'Song Artist', ('Inline', 'Selected Row', 'Right', 'Off'), default=0, preset=0)
+SONGLENGTH = own('SONGLENGTH', 'Song Length', ('Albums', 'All Lists', 'Off'), default=0, preset=0)
+NPTIME = own('NPTIME', 'Track Time', ('Remaining', 'Total'), default=0, preset=0)
 
 
 def test_own_option():
@@ -847,31 +836,25 @@ def test_own_option():
     assert theme.theme_keys([o]) == {'OLED_ACCENT': (10, 9, None), 'SONGARTIST': (4, 0, SONGARTIST), 'SONGLENGTH': (3, 0, SONGLENGTH), 'NPTIME': (2, 0, NPTIME)}
     assert {'ACCENT', 'HOME', 'BATTERY', 'THEME', 'LIGHT'} <= theme.PAYLOAD_KEYS and 'VIS' not in theme.PAYLOAD_KEYS
     assert not {'SONGARTIST', 'OLED_ACCENT'} & theme.PAYLOAD_KEYS and set(theme.ACCENT_KEYS) == {'ACCENT'}
-    # an own option whose values name geometry sets boots the set its stored value names
-    t = resolved(A + '<geometry name="pico"/><option key="ART" label="Art" default="Off"><value label="Off" set="base"/><value label="On" set="pico"/></option>')
-    assert t['opts'][-1] == own('ART', 'Art', ('Off', 'On'), ('base', 'pico'), default=0)
-    assert theme.geometry(t) == theme.sets(t)['base'] and theme.geometry(t, {'ART': 'On'}) == theme.sets(t)['pico']
-    assert theme.geometry(t, {'ART': 'Off'}) == theme.sets(t)['base'] and theme.geometry(o, {'ART': 'On'}) == theme.geometry(o)
 
 
 @pytest.mark.parametrize('body, message', [
-    ('<option key="ART" label="Art"><value label="Off" set="ipod"/></option>', 'ART: 2 to 10 values expected'),
-    ('<option key="ART" label="Art"><value label="Off" set="ipod"/><value label="Off" set="ipod"/></option>', 'ART: duplicate value Off'),
-    ('<option key="ART" label="Art"><value label="Off" set="flat"/><value label="On" set="ipod"/></option>', 'unknown geometry set "flat"'),
-    ('<option key="ART" label="Art"><value label="Off"/><value label="On" set="ipod"/></option>', 'ART: every value names a set, or none does'),
+    ('<option key="NPTIME" label="Art"><value label="Off"/></option>', 'NPTIME: 2 to 10 values expected'),
+    ('<option key="NPTIME" label="Art"><value label="Off"/><value label="Off"/></option>', 'NPTIME: duplicate value Off'),
     ('<option key="ART" label="Art"><value label="Off"/><value label="On"/></option>', 'ART: a plain choice the payload does not read (PLAIN_KEYS)'),
-    ('<option key="ART" label="Art"><value label="Off" set="ipod" tint="1"/><value label="On" set="ipod"/></option>', 'unknown key value.tint'),
-    ('<option key="ART" label="Art"><value themes="picker"/><value label="On" set="ipod"/></option>', 'unknown key value.themes'),
-    (f'<option key="ART" label="Art" default="Dim">{V}</option>', 'ART: unknown value Dim'),
+    ('<option key="NPTIME" label="Art"><value label="Off" set="ipod"/><value label="On"/></option>', 'unknown key value.set'),
+    ('<option key="NPTIME" label="Art"><value label="Off" tint="1"/><value label="On"/></option>', 'unknown key value.tint'),
+    ('<option key="NPTIME" label="Art"><value themes="picker"/><value label="On"/></option>', 'unknown key value.themes'),
+    (f'<option key="NPTIME" label="Art" default="Dim">{V}</option>', 'NPTIME: unknown value Dim'),
     (f'<option key="art" label="Art">{V}</option>', 'option.key: expected [A-Z][A-Z0-9_]*'),
     (f'<option key="LIGHT" label="Light">{V}</option>', "LIGHT: the payload's key"),
     (f'<option key="ART" label="">{V}</option>', 'ART: label expected 1..24 bytes, no control characters'),
-    ('<option key="ART" label="Art"><value label="" set="ipod"/><value label="On" set="ipod"/></option>',
-     'ART: value label expected 1..24 bytes, no control characters'),
-    ('<option setting="home"><value label="Off" set="ipod"/></option>', 'home: a payload setting takes no <value>'),
+    ('<option key="NPTIME" label="Art"><value label=""/><value label="On"/></option>',
+     'NPTIME: value label expected 1..24 bytes, no control characters'),
+    ('<option setting="home"><value label="Off"/></option>', 'home: a payload setting takes no <value>'),
     ('<option setting="home" label="H"/>', 'home: a payload setting takes no label'),
-    (f'<option key="ART" label="Art" preset="Dim">{V}</option>', 'ART: unknown value Dim'),
-    (f'<option key="ART" label="Art" keep="Dim">{V}</option>', 'ART: unknown value Dim'),
+    (f'<option key="NPTIME" label="Art" preset="Dim">{V}</option>', 'NPTIME: unknown value Dim'),
+    (f'<option key="NPTIME" label="Art" keep="Dim">{V}</option>', 'NPTIME: unknown value Dim'),
     (f'<option key="ART" label="Art">{V}<view name="bar"/></option>', 'unknown element <view>'),
 ])
 def test_own_option_rejects(body, message):
@@ -907,164 +890,113 @@ def test_builtins_rejects_a_shared_own_key(tmp_path):
         (tmp_path/folder).mkdir(exist_ok=True)
         (tmp_path/folder/'theme.xml').write_text(
             f'<theme format="1" id="{folder}" name="{folder}" index="{index}">{BASE_BODY}'
-            f'<option key="ART" label="{label}"{presets}>{V}</option></theme>')
+            f'<option key="NPTIME" label="{label}"{presets}>{V}</option></theme>')
     put('a', 0, 'Art', ' preset="On"'); put('b', 1, 'Art', ' preset="Off" keep="On"')
-    assert list(theme.theme_keys(theme.builtins(tmp_path))) == ['ART']  # one key, one slot each
+    assert list(theme.theme_keys(theme.builtins(tmp_path))) == ['NPTIME']  # one key, one slot each
     assert {t['id']: (t['opts'][-1]['preset'], t['opts'][-1]['keep']) for t in theme.builtins(tmp_path)} == {'a': (1, -1), 'b': (0, 1)}
     put('b', 1, 'Row Art')
-    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: ART is a's, with other values or default"
+    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: NPTIME is a's, with other values or default"
 
 
 def test_emit_own_options(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     opts = inc.split('static const option_t oled_opts[] = {\n')[1].split('};')[0].splitlines()
     assert opts[-3:] == [f'    {{ .setting = SETTING_OWN + {i}, .def = 0, .preset = 0, .keep = -1, .values = 0x0 }},' for i in (1, 2, 3)]
     assert inc.count('.accent_slot = &st.own[0],') == 1 and '.accent_key = "OLED_ACCENT",' in inc
     assert ('const theme_key_t theme_keys[THEME_KEYS] = {\n'
-            '    { .key = "OLED_ACCENT", .label = 0, .names = 0, .sets = 0, .n = 10, .def = 9 },\n'
-            '    { .key = "SONGARTIST", .label = "Song Artist", .names = (const char *const[]){"Inline", "Selected Row", "Right", "Off"}, .sets = 0, .n = 4, .def = 0 },\n'
-            '    { .key = "SONGLENGTH", .label = "Song Length", .names = (const char *const[]){"Albums", "All Lists", "Off"}, .sets = 0, .n = 3, .def = 0 },\n'
-            '    { .key = "NPTIME", .label = "Track Time", .names = (const char *const[]){"Remaining", "Total"}, .sets = 0, .n = 2, .def = 0 },\n};') in inc
-    assert inc.index('const theme_key_t theme_keys') > inc.index('enum { GEOM_IPOD, GEOM_OLED, GEOM_N };')
+            '    { .key = "OLED_ACCENT", .label = 0, .names = 0, .n = 10, .def = 9 },\n'
+            '    { .key = "SONGARTIST", .label = "Song Artist", .names = (const char *const[]){"Inline", "Selected Row", "Right", "Off"}, .n = 4, .def = 0 },\n'
+            '    { .key = "SONGLENGTH", .label = "Song Length", .names = (const char *const[]){"Albums", "All Lists", "Off"}, .n = 3, .def = 0 },\n'
+            '    { .key = "NPTIME", .label = "Track Time", .names = (const char *const[]){"Remaining", "Total"}, .n = 2, .def = 0 },\n};') in inc
     assert '#define OWN_OLED_ACCENT 0\n#define OWN_SONGARTIST 1\n#define OWN_SONGLENGTH 2\n#define OWN_NPTIME 3\n' in inc
 
 
-def test_emit_a_set_an_option_boots(tmp_path):
-    """An own option's sets are emitted as GEOM_* names, after the enum that defines them."""
-    t = resolved(A + '<geometry name="pico" extends="base"/><option key="ART" label="Art" default="Off"><value label="Off" set="base"/><value label="On" set="pico"/></option>')
-    inc = boot_inc(tmp_path, [t])
-    assert ('    { .key = "ART", .label = "Art", .names = (const char *const[]){"Off", "On"}, '
-            '.sets = (const unsigned char[]){GEOM_BASE, GEOM_PICO}, .n = 2, .def = 0 },\n};') in inc
-    assert inc.index('const theme_key_t theme_keys') > inc.index('enum { GEOM_IPOD, GEOM_BASE, GEOM_PICO, GEOM_N };')
-
-
-def test_oled_sets_from_its_theme_file():
-    """OLED's set is its theme.xml's: it states every Geometry field but a few SET0 already holds as OLED wants
-    them. No tool names it."""
+def test_oled_grid_from_its_theme_file():
+    """OLED's grid is its theme.xml's <geometry>: it states every Geometry field but a few STOCK_GRID already holds as
+    OLED wants them. No tool names it."""
     o = oled()
     g = theme.geometry(o)
-    assert theme.sets(o) == {'ipod': SET0, 'oled': g} and o['geoms'] == {'oled': g}
-    decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'oled'/'theme.xml').children
-            if e.tag == 'geometry' and 'name' in e.attrs}
-    unstated = {f.name for f in dataclasses.fields(Geometry)} - {'name'} - set(decl['oled'])
-    assert all(getattr(g, f) == getattr(SET0, f) for f in unstated)
+    decl, = [e.attrs for e in theme.load(THEMES/'oled'/'theme.xml').children if e.tag == 'geometry']
+    unstated = {f.name for f in dataclasses.fields(Geometry)} - {'name'} - set(decl)
+    assert all(getattr(g, f) == getattr(STOCK_GRID, f) for f in unstated) and g.name == 'oled'
     assert not hasattr(ipod, 'OLED')
 
 
 def test_geometry_declared():
-    # An omitted field is SET0's, or its extends= set's; <geometry set> names a declared set; an extending
-    # theme inherits its base's sets.
-    t = resolved('<geometry name="pico" bar="26"/><geometry name="pico-2" extends="pico" text_x="20"/>'
-                 '<geometry set="pico-2"/>')
-    pico = dataclasses.replace(SET0, name='pico', bar=26)
-    assert t['geoms'] == {'base': dataclasses.replace(SET0, name='base', right_x=28), 'pico': pico, 'pico-2': dataclasses.replace(pico, name='pico-2', text_x=20)}
-    assert theme.geometry(t) == t['geoms']['pico-2'] and theme.geometry_sets([t]) == [SET0, t['geoms']['pico-2']]
+    # An omitted field is the extended theme's, or STOCK_GRID's for a theme that extends none; an extending theme
+    # that states none keeps its base's.
+    t = resolved('<geometry bar="26" text_x="20"/>')
+    assert theme.geometry(t) == dataclasses.replace(STOCK_GRID, name='t', right_x=28, bar=26, text_x=20)
+    assert theme.built_geometry([t]) == theme.geometry(t)
     u = resolved('', 'id="u" name="U" index="3" extends="oled"')
-    assert theme.sets(u) == theme.sets(oled()) and theme.geometry(u) == theme.geometry(oled())
+    assert theme.geometry(u) == theme.geometry(oled())
 
 
 def test_geometry_ranges():
-    """Every Geometry field has a range, so a task that adds a field adds one; SET0 and OLED's set lie inside."""
+    """Every Geometry field has a range, so a task that adds a field adds one; STOCK_GRID and OLED's grid lie inside."""
     assert set(theme.GEOM_RANGES) == {f.name for f in dataclasses.fields(Geometry)} - {'name'}
-    assert [theme.check_set(g) for g in (SET0, theme.geometry(oled()))] == [None, None]
-    assert theme.check_set(dataclasses.replace(SET0, name='x', set_rows=5)) == 'geometry.set_rows: 5 outside 1..4'
+    assert [theme.check_set(g) for g in (STOCK_GRID, theme.geometry(oled()))] == [None, None]
+    assert theme.check_set(dataclasses.replace(STOCK_GRID, name='x', set_rows=5)) == 'geometry.set_rows: 5 outside 1..4'
 
 
 @pytest.mark.parametrize('body, message', [
-    ('<geometry name="Pico"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="pico-text-and-much-much-more"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="n"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="ipod"/>', 'geometry set ipod declared twice'),
-    ('<geometry name="base"/>', 'geometry set base declared twice'),  # its base's
-    ('<geometry name="pico"/><geometry name="pico"/>', 'geometry set pico declared twice'),
-    ('<geometry name="pico" tint="1"/>', 'unknown key geometry.tint'),
-    ('<geometry name="pico" set="ipod"/>', 'unknown key geometry.set'),
-    ('<geometry name="pico" pitch="2x"/>', 'geometry.pitch: expected an integer'),
-    ('<geometry name="pico" bar="24"/>', 'geometry.bar: 24 outside 26..40'),
-    ('<geometry name="pico" pitch="28"/>', 'geometry.body: 68 outside 24..28'),
-    ('<geometry name="pico" art_inset="9"/>', 'geometry.art_inset: 9 outside 0..8'),
-    ('<geometry name="pico" pitch="28" body="28"/>', 'geometry.text_art: 52 outside 0..28'),
-    ('<geometry name="pico" home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
-    ('<geometry name="pico" split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
-    ('<geometry name="pico" split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
-    ('<geometry name="pico" split_art_up="31"/>', 'geometry.split_art_up: 31 outside 0..30'),
-    ('<geometry name="pico" np_art="201"/>', 'geometry.np_art: 201 outside 0..200'),
-    ('<geometry name="pico" extends="flat"/>', 'unknown geometry set "flat"'),
-    ('<geometry set="pico"/><geometry name="pico" bar="26"/>', 'unknown geometry set "pico"'),
+    ('<geometry/><geometry/>', 'one <geometry> per theme'),
+    ('<geometry name="pico"/>', 'unknown key geometry.name'),
+    ('<geometry extends="base"/>', 'unknown key geometry.extends'),
+    ('<geometry set="ipod"/>', 'unknown key geometry.set'),
+    ('<geometry tint="1"/>', 'unknown key geometry.tint'),
+    ('<geometry pitch="2x"/>', 'geometry.pitch: expected an integer'),
+    ('<geometry bar="24"/>', 'geometry.bar: 24 outside 26..40'),
+    ('<geometry pitch="28"/>', 'geometry.body: 68 outside 24..28'),
+    ('<geometry art_inset="9"/>', 'geometry.art_inset: 9 outside 0..8'),
+    ('<geometry pitch="28" body="28"/>', 'geometry.text_art: 52 outside 0..28'),
+    ('<geometry home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
+    ('<geometry split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
+    ('<geometry split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
+    ('<geometry split_art_up="31"/>', 'geometry.split_art_up: 31 outside 0..30'),
+    ('<geometry np_art="201"/>', 'geometry.np_art: 201 outside 0..200'),
 ])
 def test_geometry_declare_rejects(body, message):
     assert error(resolved, body) == f't.xml:1: {message}'
 
 
-def test_builtins_rejects_a_shared_set_name(tmp_path):
-    """A set name is one GEOM_* id and one <set>_<name>.bin prefix: the themes that declare it declare it alike."""
-    def put(folder, index, bar):
-        (tmp_path/folder).mkdir(exist_ok=True)
-        (tmp_path/folder/'theme.xml').write_text(
-            f'<theme format="1" id="{folder}" name="{folder}" index="{index}">{BASE_BODY}'
-            f'<geometry name="pico" extends="base" bar="{bar}"/><geometry set="pico"/></theme>')
-    put('a', 0, 26); put('b', 1, 26)
-    assert [theme.geometry(t).name for t in theme.builtins(tmp_path)] == ['pico', 'pico']
-    put('b', 1, 28)
-    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: geometry set pico is a's, with other values"
-
-
-def boot_inc(tmp_path, themes, **kw):
-    theme.emit(themes, tmp_path, **kw)
+def geom_inc(tmp_path, themes):
+    theme.emit(themes, tmp_path)
     return (tmp_path/'themes.h').read_text() + (tmp_path/'themes.inc').read_text()
 
 
-def test_emit_boot_tables(tmp_path):
-    inc = boot_inc(tmp_path, [resolved('<geometry set="ipod"/>')])
+def test_emit_geom_words(tmp_path):
+    t = resolved('')  # the test base's grid: STOCK_GRID's, with a right column
+    inc = geom_inc(tmp_path, [t])
     names = ipod.VALUE_NAMES
-    sites = [(int(a, 16), g['value']) for g in ipod.AUDIT['immediates'] if isinstance(g['value'], str) for a, _ in g['sites']]
-    assert len(sites) == 89
-    assert 'enum { GEOM_IPOD, GEOM_N };' in (tmp_path/'themes.h').read_text() and 'GEOM_N };' not in (tmp_path/'themes.inc').read_text()
     assert 'enum { ' + ', '.join(f'G_{n.upper()}' for n in names) + ', G_N };' in inc
-    assert '#define BOOT_SITES 89' in inc and '#define CLIENT_H_MAX 290' in inc
-    assert 'const boot_site_t boot_sites[BOOT_SITES] = {' + ', '.join(f'{{{a:#x}, G_{v.upper()}}}' for a, v in sites) + '};' in inc
-    row = ', '.join(str(ipod.immediate_values(SET0)[n]) for n in names)
-    assert f'const volatile unsigned short boot_values[GEOM_N][G_N] = {{{{{row}}}}};' in inc
-    assert 'const char *const geom_names[GEOM_N] = {"ipod"};' in inc
-    assert 'const volatile ui_redirect_t ui_redirects[] = {{0, 0}};' in inc
-    assert re.findall(r'\.geom = (\d+)', inc) == ['0']
-    assert all(s in inc for s in geom_vals_text([SET0]))
-    assert '#define THEME_GEOM_OFF 0\n#define THEME_MOTION_OFF 4\n#define SCHEME_MODE_OFF 4' in inc
+    row = ', '.join(str(ipod.immediate_values(STOCK_GRID)[n]) for n in names)
+    assert f'const volatile unsigned short geom_words[G_N] = {{{row}}};' in inc
+    assert all(s in inc for s in geom_vals_text(theme.geometry(t)))
+    assert '#define THEME_MOTION_OFF 4\n#define SCHEME_MODE_OFF 4' in inc
+    for gone in ('GEOM_N', 'boot_sites', 'boot_values', 'geom_names', 'ui_redirects', '.geom = '):
+        assert gone not in inc
 
 
-def geom_vals_text(sets):
+def geom_vals_text(g):
     return ('enum { ' + ', '.join(f'V_{n.upper()}' for n in ipod.GEOM_VALS) + ', V_N };',
-            'geom_vals[GEOM_N][V_N] = {' + ', '.join('{' + ', '.join(str(getattr(g, n)) for n in ipod.GEOM_VALS) + '}' for g in sets) + '};')
+            'geom_vals[V_N] = {' + ', '.join(str(getattr(g, n)) for n in ipod.GEOM_VALS) + '};')
 
 
 def test_emit_geom_vals(tmp_path):
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     g = theme.geometry(oled())
-    assert all(s in inc for s in geom_vals_text([SET0, g]))
-    assert ipod.GEOM_VALS[:3] == ('bar', 'set_row', 'set_icon')
-    assert [[getattr(x, n) for n in ipod.GEOM_VALS[:3]] for x in (SET0, g)] == [[30, 68, 40], [58, 32, 0]]
+    assert all(s in inc for s in geom_vals_text(g))
+    assert ipod.GEOM_VALS[:3] == ('bar', 'set_row', 'batt_w')
+    assert [getattr(g, n) for n in ipod.GEOM_VALS[:3]] == [58, 32, 25]
+    words = ', '.join(str(ipod.immediate_values(g)[n]) for n in ipod.VALUE_NAMES)
+    assert f'geom_words[G_N] = {{{words}}};' in inc  # OLED's, which patch_code bakes
 
 
-def test_emit_refuses_a_long_redirect(tmp_path):
-    # 'oled_' + 58 characters is 63 bytes plus the NUL: it fits; 59 does not.
-    boot_inc(tmp_path, theme.builtins(), redirects={'x' * 58: 2})
-    with pytest.raises(ValueError, match='exceeds ringnav_ui_load'):
-        boot_inc(tmp_path, theme.builtins(), redirects={'x' * 59: 2})
-
-
-def test_emit_second_set(tmp_path, test_set):
-    t = resolved('<geometry set="ipod"/>')
-    inc = boot_inc(tmp_path, [t, dict(t, id='u', index=1, geom_set='test')], redirects={'system_bar': 2, 'dialog/volume_dialog': 2})
-    assert 'enum { GEOM_IPOD, GEOM_TEST, GEOM_N };' in inc and '{"ipod", "test"}' in inc
-    rows = ['{' + ', '.join(str(ipod.immediate_values(g)[n]) for n in ipod.VALUE_NAMES) + '}' for g in (SET0, TEST)]
-    assert '= {' + ', '.join(rows) + '};' in inc
-    assert 'ui_redirects[] = {{"dialog/volume_dialog", 2}, {"system_bar", 2}, {0, 0}};' in inc
-    assert re.findall(r'\.geom = (\d+)', inc) == ['0', '1']
-
-
-def test_emit_refuses_a_set0_redirect(tmp_path):
-    with pytest.raises(ValueError, match='system_bar: SET0 never redirects'):
-        boot_inc(tmp_path, theme.builtins(), redirects={'system_bar': 1})
+def test_emit_refuses_a_second_grid(tmp_path):
+    t = resolved('')
+    with pytest.raises(ValueError, match='2 grids: the build bakes one'):
+        geom_inc(tmp_path, [t, dict(t, id='u', index=1, geom=Geometry(name='test', pitch=28))])
 
 
 def test_easings_are_awtk():
@@ -1077,7 +1009,7 @@ def test_easings_are_awtk():
 def test_motion_today(tmp_path):  # OLED: the asset hint kept (0), offsets.inc's numbers (ROLE_MACROS)
     o = oled()
     assert {k.field: o[k.field] for k in theme.SCHEMA.values() if k.cls == 'motion'} == MOTION_TODAY
-    inc = boot_inc(tmp_path, theme.builtins())
+    inc = geom_inc(tmp_path, theme.builtins())
     assert inc.count('.motion[MOTION_PAGE].hint = 0,') == 1 and ipod.SLIDE == 'htranslate(duration=220)'
     for f, v in (('motion[MOTION_SWAP].ms', 220), ('motion[MOTION_SWAP].easing', 8), ('motion[MOTION_STEP].ms', 200),
                  ('motion[MOTION_STEP_FAST].ms', 120), ('motion[MOTION_STEP].easing', 8), ('recall_ms', 300)):
@@ -1105,7 +1037,7 @@ def test_motion_composes_hints(tmp_path):
                  '<element name="step" ms="250" easing="quadratic_out"/><element name="inplace" ms="300"/>'
                  '<element name="recall" ms="0"/></view>')
     assert t['motion.playing.anim'] == 2 and t['motion.step.easing'] == 2
-    inc = boot_inc(tmp_path, [*theme.builtins(), t])
+    inc = geom_inc(tmp_path, [*theme.builtins(), on_oleds_set(t)])
     for line in ('.motion[MOTION_PAGE].hint = "htranslate(duration=300,easing=sin_inout)",',
                  '.motion[MOTION_COVERFLOW].hint = "slide_left(duration=230)",',
                  '.motion[MOTION_STEP].ms = 250,', '.motion[MOTION_STEP].easing = 2,',
@@ -1126,12 +1058,12 @@ def test_motion_rejects(element, message):
         resolved(f'<view name="motion">{element}</view>')
 
 
-def test_bar_font_size_is_the_sets_bar_px(tmp_path):
-    """The bar's label is laid out at its set's bar_px (tools/ipod.py status_row): its text size must match."""
+def test_bar_font_size_is_the_grids_bar_px(tmp_path):
+    """The bar's label is laid out at its grid's bar_px (tools/ipod.py status_row): its text size must match."""
     xml = (THEMES/'oled/theme.xml').read_text()
     assert xml.count('font="inter-medium" font_size="18"') == 1
     (tmp_path/'oled').mkdir(); (tmp_path/'oled'/'theme.xml').write_text(xml.replace('font="inter-medium" font_size="18"', 'font="inter-medium" font_size="24"'))
-    with pytest.raises(theme.ThemeError, match=r"bar.title.font_size 24 is not set oled's bar_px 18$"):
+    with pytest.raises(theme.ThemeError, match=r"bar.title.font_size 24 is not the geometry's bar_px 18$"):
         theme.builtins(tmp_path)
 
 
@@ -1168,7 +1100,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     o = oled()
     g = theme.geometry(o)
     assert (o['id'], o['index'], o['art_id']) == ('oled', 0, 'oled') and g.name == 'oled' and theme.check_set(g) is None
-    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end, g.list_fit) == (58, 23, 32, 32, 32, 24, 28, 224, 1)
+    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end) == (58, 23, 32, 32, 32, 24, 28, 224)
     assert g.bar + g.list_end == 282 and g.list_end // g.pitch == 7 and ipod.fit_rows(g, 0, g.art_pitch) == 320 - 58
     assert ipod.corner_inset(g.bar + g.list_end) + ipod.CORNER_SLACK <= g.text_x
     fonts = {k: v for k, v in o.items() if k.startswith('font')}
@@ -1192,13 +1124,11 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (o['np_meta_font'], o['np_modes'], o['marquee_fade'], o['reopen_top'], o['shuffle_row'], o['home_lists_full']) == (inter, 1, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and the top edge
     assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, o['home_label_end[0]']) == (204, 196, 58, 2, 44)
-    # The More pages and hold menus as the menu sheet (menu_modal.c)
-    assert g.modal == 1
     # its toast and confirm (patch/feedback.c), and the confirmation's glyph
     assert 'oled_confirm_shuffle' in art.images(o) and 'oled_confirm_shadow' not in art.images(o)
-    inc = boot_inc(tmp_path, [o])
+    inc = geom_inc(tmp_path, [o])
     assert '#define OWN_OLED_ACCENT' in inc and 'static const scheme_t oled_schemes[] = {' in inc
-    assert re.findall(r'\.geom = (\d+)', inc) == ['1'] and '.art = "oled_",' in inc
+    assert '.art = "oled_",' in inc
     assert 'theme_rows' not in inc and '.name = ' not in inc  # one theme: no picker, no name in the payload
 
 
@@ -1207,7 +1137,7 @@ def test_resolve_rejects_an_unknown_art():
 
 
 @pytest.mark.parametrize('body, message', [
-    ('<geometry set="ipod"/>', "the chevrons and song rows need the set's right_x"),
+    ('<geometry right_x="0"/>', "the chevrons and song rows need the grid's right_x"),
     ('<view name="list"><element name="scrollbar" w="0"/></view>', "list.scrollbar: the wheel's indicator needs w, top and bottom")])
 def test_every_theme_has_what_the_marks_draw_with(body, message):
     assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'

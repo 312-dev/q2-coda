@@ -1,4 +1,4 @@
-/* A Library album's page under a set with the menu sheet (OLED's; docs/oled-design.md#album-page
+/* A Library album's page (docs/oled-design.md#album-page
  * and docs/internals.md#library-album-page): stock's two album pages, albuminfo_page (Library >
  * Albums, Search's albums) and playerjumpinfo_page (Now Playing's album and art taps, Look up
  * Album, Go to Album), keep their window, their list of tracks (song_rows.c draws them: number,
@@ -151,14 +151,13 @@ static int lb_front(void *win, void *event) {
     return 0;
 }
 
-/* navigation.c ringnav_ui_load, as a window's UI loads: an album page under the menu sheet's set
- * is dressed. One is drawn at a time, as artist_page.c keeps one header: a second album page
+/* navigation.c ringnav_ui_load, as a window's UI loads: an album page is dressed. One is drawn at a time, as artist_page.c keeps one header: a second album page
  * opened over the first takes it, and the first takes it back as it comes to the top again
  * (lb_front). */
 void album_local_load(void *win) {
     const char *name = widget_get_prop_str(win, "name", "");
     int jump = !tk_strcmp(name, "playerjumpinfo_page");
-    if (!modal_set() || (!jump && tk_strcmp(name, "albuminfo_page"))) return;
+    if (!jump && tk_strcmp(name, "albuminfo_page")) return;
     void *surface = widget_lookup(win, jump ? "music_table_client" : "scroll_view", 1);
     if (!surface) return;
     widget_set_prop_int(win, LB_DRESSED, 2); /* it opens on Play */
