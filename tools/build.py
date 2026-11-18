@@ -280,8 +280,8 @@ PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's pl
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6bdfe61.zip', 2859355,
-                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-9aef2f9.zip', 2861732,
+                 '1b14b3e8299667bad92e6c66d9b2ac14a96fe0c882e6bc3a2d0c397a009cd448', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
