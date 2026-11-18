@@ -38,7 +38,11 @@
  * Touch (ss_touch): a drag along the strip moves the highlight a cell per 19 px as the finger
  * goes, popping as the wheel does, and types nothing; a tap on a character types it, on the
  * switcher cycles the set and on the return key submits; a tap on a tab picks it, a tap on a
- * result opens or plays it, and a drag up or down the results scrolls them a row per 32 px.
+ * result opens or plays it, and a drag up or down the results scrolls them a row per 32 px. In the
+ * text (ss_grab, the mock-up's caretAt), a tap puts the cursor at the nearest character boundary
+ * and gives the wheel back to the strip; a hold or a drag shows a loupe over the cursor, the text
+ * at 1.6 times (ss_loupe_paint), and the cursor follows the finger; held at an edge that cuts the
+ * text, the finger nudges it a character at a time (ss_nudge_due). The release leaves the cursor.
  *
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
  * the wheel, and only one of them shows a selection at a time.
@@ -142,6 +146,29 @@ enum {
 #define SS_KEEP 10
 #define SS_EDGE 16
 #define SS_BLINK_MS 530
+/* A finger in the text (ss_grab, the mock-up's caretAt): a press within SS_GRAB_DX of the field's
+ * ends and SS_GRAB_DY of its line. Held SS_LOUPE_HOLD_MS, or moved SS_TAP, it shows the loupe
+ * (ss_loupe_paint, the mock-up's loupe()): a lens SS_LOUPE_W by SS_LOUPE_H with SS_LOUPE_R
+ * corners, its foot the text's size and SS_LOUPE_GAP over its line, centred on the cursor and
+ * kept SS_LOUPE_IN inside the screen, its text at 1.6 times (SS_ZOOM) kept SS_LOUPE_PAD in from its
+ * sides, clear of the corners, its line SS_LOUPE_LINE; it grows in over SS_LOUPE_GROW_MS from half
+ * its size, a frame each SS_LOUPE_STEP_MS, and shows whole at once under Reduce Motion. Held within
+ * SS_KEEP of an edge that cuts the text, the finger nudges the cursor a character toward it every
+ * SS_NUDGE_MS. */
+#define SS_GRAB_DX 12
+#define SS_GRAB_DY 22
+#define SS_LOUPE_HOLD_MS 250
+#define SS_LOUPE_W 104
+#define SS_LOUPE_H 46
+#define SS_LOUPE_R 14
+#define SS_LOUPE_GAP 10
+#define SS_LOUPE_IN 4
+#define SS_LOUPE_PAD 4
+#define SS_LOUPE_LINE 0x6e6e6e
+#define SS_LOUPE_GROW_MS 100
+#define SS_LOUPE_STEP_MS 33
+#define SS_ZOOM(v) (((v) * 8 + 2) / 5)
+#define SS_NUDGE_MS 150
 /* The set switcher: a #2C2C2E pill (the accent while the wheel is on it), its set's name in Inter
  * Medium 16 */
 #define SS_CHIP_RGB RGB_RAISED_2
@@ -221,6 +248,16 @@ static struct {
     unsigned blink_at, blink_timer; /* the cursor shown from (its blink's start); the timer */
     void *covered;     /* stock's own text box's row, hidden under the strip (Add Network's) */
     void *covered_win; /* ... and its dialog */
+    /* The text as last painted (ss_field), for a finger in it and the loupe: each character
+     * boundary's x on the sheet, the characters shown, the face and its size, the cursor's height
+     */
+    short edge[SS_TEXT_MAX + 1], nedge;
+    const char *fface;
+    int fpx, fch;
+    unsigned char grab, loupe; /* a finger is in the text (ss_grab); the loupe shows */
+    signed char nudge;         /* ... held at the edge the text is nudged toward, -1 or 1 */
+    short grab_x;              /* ... where it is on the sheet */
+    unsigned loupe_at, loupe_timer, nudge_timer; /* the loupe shown at; its timer; the nudge's */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -353,13 +390,42 @@ static void ss_type(int e) {
     if (!ss_named()) ss_filter();
 }
 
+/* ss.cur is a byte of the text, always a character's first: the strip types ASCII, but a text
+ * typed elsewhere (a playlist's name, a Bluetooth name) is UTF-8, and its characters are stepped
+ * over whole. A password shows a dot a byte (ss_shown), so it steps a byte at a time. */
+static int ss_mid(int at) { return !ss.secret && (ss.text[at] & 0xc0) == 0x80; }
+/* The cursor a character on, dir 1 or -1; nothing past either end. */
+static void ss_step(int dir) {
+    int at = ss.cur;
+    if (dir < 0 && at > 0) do
+            --at;
+        while (at > 0 && ss_mid(at));
+    if (dir > 0 && ss.text[at]) do
+            ++at;
+        while (ss_mid(at));
+    ss.cur = at;
+    ss.typed_at = 0; /* a password's peek is the character just typed alone */
+}
+/* The characters the text shows before byte at; the byte of shown character k. */
+static int ss_chars(int at) {
+    int k = 0;
+    for (int i = 0; i < at && ss.text[i]; ++i) k += !ss_mid(i);
+    return k;
+}
+static int ss_byte_of(int k) {
+    int at = 0;
+    for (; k > 0 && ss.text[at]; --k) do
+            ++at;
+        while (ss_mid(at));
+    return at;
+}
+
 /* The character before the cursor taken off (Previous held); nothing at the text's start. */
 static void ss_erase(void) {
     int n = (int)strlen(ss.text), at = ss.cur;
     if (!at) return;
-    for (int i = at - 1; i < n; ++i) ss.text[i] = ss.text[i + 1];
-    --ss.cur;
-    ss.typed_at = 0; /* a password's peek goes with it */
+    ss_step(-1);
+    memmove(ss.text + ss.cur, ss.text + at, (unsigned)(n - at + 1)); /* the peek went with it */
     if (!ss_named()) ss_filter();
 }
 
@@ -726,11 +792,9 @@ int search_strip_key(void *top, unsigned key) {
         ss_submit();
     else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
         ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
-    else if (button < 0) {
-        if (ss.cur) --ss.cur, ss.typed_at = 0; /* the peek is the character just typed alone */
-    } else if (button > 0) {
-        if (ss.text[ss.cur]) ++ss.cur, ss.typed_at = 0;
-    } else
+    else if (button)
+        ss_step(button);
+    else
         return 0;
     if (ss.page) { /* a submit may have closed it */
         ss_keep();
@@ -865,7 +929,8 @@ static void ss_line_ink(void *canvas, const void *arg, unsigned alpha) {
  * x0; its cursor, 2 px by ch, after cur characters while the strip has the wheel and the blink
  * shows it. A text wider than the field scrolls by as little as keeps the cursor SS_KEEP px in
  * from either edge (ss.scroll, kept between paints as a text field keeps its own), and an edge
- * that cuts the text fades it out over SS_EDGE px inside the field (ss_fade). */
+ * that cuts the text fades it out over SS_EDGE px inside the field (ss_fade). Where each
+ * character boundary lies is kept (ss.edge), for a finger in the text and the loupe. */
 static void ss_field(void *canvas, const char *s, int cur, int x0, int x1, int y, const char *face,
                      int px, int ch, int right, unsigned rgb) {
     unsigned wide[SS_TEXT_MAX * 3 + 1]; /* a password's dots are 3 bytes of UTF-8 each */
@@ -873,11 +938,15 @@ static void ss_field(void *canvas, const char *s, int cur, int x0, int x1, int y
     int fpx = px;
     if (!face) face = theme_face(wide, (int)n, &fpx);
     canvas_set_font(canvas, face, (unsigned)fpx);
-    int room = x1 - x0, full = (int)(canvas_measure_text(canvas, wide, n) + 0.5f) + 3,
-        cx = cur > 0 && (unsigned)cur <= n
-                 ? (int)(canvas_measure_text(canvas, wide, (unsigned)cur) + 0.5f)
-                 : 0,
-        left;
+    if (n > SS_TEXT_MAX) n = SS_TEXT_MAX; /* the text is at most this many bytes */
+    if (cur > (int)n) cur = (int)n;
+    float run = 0;
+    for (unsigned k = 0; k <= n; ++k) {
+        ss.edge[k] = (short)(run + 0.5f);
+        if (k < n) run += canvas_measure_text(canvas, wide + k, 1);
+    }
+    ss.nedge = (short)n, ss.fface = face, ss.fpx = fpx, ss.fch = ch;
+    int room = x1 - x0, full = ss.edge[n] + 3, cx = cur > 0 ? ss.edge[cur] : 0, left;
     if (full <= room) {
         left = right ? x1 - full : x0;
         ss.scroll = 0;
@@ -890,6 +959,7 @@ static void ss_field(void *canvas, const char *s, int cur, int x0, int x1, int y
         ss.scroll = (short)sc;
         left = x0 - sc;
     }
+    for (unsigned k = 0; k <= n; ++k) ss.edge[k] = (short)(ss.edge[k] + left);
     ss.fx = (short)(x0 - 2), ss.fy = (short)(y - SS_PITCH / 2), ss.fw = (short)(room + 4),
     ss.fh = SS_PITCH;
     if (n) {
@@ -933,7 +1003,7 @@ static void ss_form_paint(void *canvas, unsigned primary, unsigned secondary, un
                     SS_FIELD_W, SS_PX_LABEL, tertiary);
         fill_box(canvas, &(rect_t){ SS_FIELD_X, SS_FIELD_Y, SS_FIELD_W, SS_FIELD_H },
                  RGBA(tok(TOK_RAISED)), SS_FIELD_R);
-        ss_field(canvas, shown, ss.cur, SS_FIELD_X + SS_FIELD_IN,
+        ss_field(canvas, shown, ss_chars(ss.cur), SS_FIELD_X + SS_FIELD_IN,
                  SS_FIELD_X + SS_FIELD_W - SS_FIELD_IN, SS_FIELD_Y + SS_FIELD_H / 2,
                  faces[FONT_INTER_MEDIUM], SS_PX_NAME, 26, 0, primary);
         note_y = SS_FIELD_NOTE_Y;
@@ -956,11 +1026,77 @@ static void ss_form_paint(void *canvas, unsigned primary, unsigned secondary, un
             x0 = SS_ROW_TEXT + lw + SS_CELL_GAP;
             if (x0 < SS_CELL_MIN) x0 = SS_CELL_MIN;
         }
-        ss_field(canvas, shown, ss.cur, x0, SS_RIGHT, y + h / 2, 0, SS_PX_ROW, 25,
+        ss_field(canvas, shown, ss_chars(ss.cur), x0, SS_RIGHT, y + h / 2, 0, SS_PX_ROW, 25,
                  ss.form == SS_FORM_CELL, primary);
         note_y = y + h + SS_NOTE_DY;
     }
     if (ss.note) ss_centred(canvas, 0, ss.note, note_y, SS_PX_SMALL, tertiary);
+}
+
+/* The loupe (the mock-up's loupe(), docs/oled-design.md#text-entry), over w after stock painted
+ * it: the top window, and the status row it may reach over, each painting its part. Centred on the
+ * cursor (kept SS_LOUPE_IN inside the screen), its foot the text's own size (AWTK's px back to the
+ * design's) and SS_LOUPE_GAP over the text's line, at least SS_LOUPE_IN from the screen's top; an
+ * SS_LOUPE_LINE outline round a lens in the field's own ground (the canvas under Search's query,
+ * the raised grey in a row, cell or field); in it the text drawn again by the same renderer at
+ * 1.6 times (SS_ZOOM: the face's size, the field's ends and fades), the cursor's boundary at its
+ * middle under a steady 3 px cursor. Grows in from half its size about its foot (ss_loupe_due). */
+static int ss_fx0(void), ss_fx1(void), ss_fcy(void), ss_cut(int dir);
+static void ss_loupe_paint(void *w, void *canvas) {
+    void *bar = *(void *const *)system_bar, *lcd = P(canvas, CANVAS_LCD);
+    if (!ss.loupe || !ss.sheet || !ss.fface || !lcd ||
+        (w != bar && w != window_manager_get_top_window(window_manager())))
+        return;
+    char dots[SS_TEXT_MAX * 3 + 1];
+    unsigned wide[SS_TEXT_MAX * 3 + 1],
+        n = ss_wide(ss_shown(dots), wide, sizeof wide / sizeof *wide);
+    if (n > (unsigned)ss.nedge) n = (unsigned)ss.nedge, wide[n] = 0;
+    int k = ss_chars(ss.cur), at, cx, top, grown, lw, lh;
+    if (k > (int)n) k = (int)n;
+    at = ss.edge[k];
+    cx = at < SS_LOUPE_IN + SS_LOUPE_W / 2         ? SS_LOUPE_IN + SS_LOUPE_W / 2
+         : at > 375 - SS_LOUPE_IN - SS_LOUPE_W / 2 ? 375 - SS_LOUPE_IN - SS_LOUPE_W / 2
+                                                   : at;
+    top = feedback_below(ss.sheet) - I(ss.sheet, W_H) + ss_fcy() - (ss.fpx * 100 + 60) / 121 -
+          SS_LOUPE_GAP - SS_LOUPE_H;
+    if (top < SS_LOUPE_IN) top = SS_LOUPE_IN;
+    top -= feedback_below(w) - I(w, W_H); /* on w */
+    grown = motion_reduced() ? SS_LOUPE_GROW_MS : (int)((unsigned)time_now_ms() - ss.loupe_at);
+    if (grown > SS_LOUPE_GROW_MS) grown = SS_LOUPE_GROW_MS;
+    lw = SS_LOUPE_W * (SS_LOUPE_GROW_MS + grown) / (2 * SS_LOUPE_GROW_MS);
+    lh = SS_LOUPE_H * (SS_LOUPE_GROW_MS + grown) / (2 * SS_LOUPE_GROW_MS);
+    rect_t box = { cx - lw / 2, top + SS_LOUPE_H - lh, lw, lh },
+           lens = { box.x + 1, box.y + 1, lw - 2, lh - 2 };
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    fill_box(canvas, &box, RGBA(SS_LOUPE_LINE), SS_LOUPE_R);
+    fill_box(canvas, &lens, RGBA(tok(ss.form == SS_FORM_QUERY ? TOK_CANVAS : TOK_RAISED)),
+             SS_LOUPE_R - 1);
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), old[4], clip[4],
+        mid = top + SS_LOUPE_H / 2, zpx = SS_ZOOM(ss.fpx), zh = SS_ZOOM(ss.fch);
+    if (clip_within(canvas, old, clip, ox + lens.x, oy + lens.y, lens.w, lens.h)) {
+        canvas_set_clip_rect(canvas, (rect_t *)clip);
+        canvas_set_font(canvas, ss.fface, (unsigned)zpx);
+        int zat = k ? (int)(canvas_measure_text(canvas, wide, (unsigned)k) + 0.5f) : 0,
+            zfull = (int)(canvas_measure_text(canvas, wide, n) + 0.5f) + 3, lx = cx - zat,
+            f0 = cx - SS_ZOOM(at - ss_fx0()), f1 = cx + SS_ZOOM(ss_fx1() - at),
+            c0 = box.x + SS_LOUPE_PAD, c1 = box.x + lw - SS_LOUPE_PAD, fl = ss_cut(-1) && f0 >= c0,
+            fr = ss_cut(1) && f1 <= c1;
+        if (f0 > c0) c0 = f0;
+        if (f1 < c1) c1 = f1;
+        if (n && c0 < c1) {
+            struct ss_line l = { wide,
+                                 ss.fface,
+                                 zpx,
+                                 { lx, mid - SS_ZOOM(SS_PITCH) / 2, zfull + 2, SS_ZOOM(SS_PITCH) },
+                                 tok(TOK_PRIMARY) };
+            ss_fade(canvas, lx, zfull + 2, lens.y, lens.h, c0, c1, SS_ZOOM(SS_EDGE), fl, fr,
+                    ss_line_ink, &l);
+        }
+        stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_PRIMARY)));
+        canvas_fill_rect(canvas, cx - 1, mid - zh / 2, 3, (unsigned)zh);
+        canvas_set_clip_rect(canvas, (rect_t *)old);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
 }
 
 /* ringnav_paint, after stock painted w: Return held, the screen dimmed by black at 55%
@@ -976,6 +1112,7 @@ void search_strip_overlay(void *w, void *canvas) {
     static const char *const faces[] = FONT_NAMES;
     static const char line[] = "Keep holding to go back";
     int dy;
+    ss_loupe_paint(w, canvas);
     if (!ss.held || !ss.page || !overlay_scrim(w, canvas, SS_HOLD_SCRIM, &dy)) return;
     unsigned wide[32], n = ss_wide(line, wide, sizeof wide / sizeof *wide),
                        fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
@@ -1034,8 +1171,8 @@ static void ss_query_paint(void *canvas, unsigned primary, unsigned secondary, u
     if (!ss.text[0]) /* the placeholder, the cursor before it */
         ss_text(canvas, 0, ss.label ? ss.label : "Search", SS_QUERY_X, SS_QUERY_Y - SS_PITCH / 2,
                 SS_PITCH, SS_RIGHT + 4 - SS_QUERY_X, SS_PX_QUERY, tertiary);
-    ss_field(canvas, ss.text, ss.cur, SS_QUERY_X, SS_RIGHT + 4, SS_QUERY_Y, 0, SS_PX_QUERY, 25, 0,
-             primary);
+    ss_field(canvas, ss.text, ss_chars(ss.cur), SS_QUERY_X, SS_RIGHT + 4, SS_QUERY_Y, 0,
+             SS_PX_QUERY, 25, 0, primary);
     stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_RAISED)));
     canvas_fill_rect(canvas, 24, SS_RULE_Y, 375 - 48, 1);
 }
@@ -1178,13 +1315,134 @@ static void ss_slide(int n) {
     for (int i = 0; i < (n < 0 ? -n : n); ++i) ss_turn(n < 0 ? -1 : 1, ss.swiped || i);
 }
 
+/* The text's field as last painted (ss_field): its ends on the sheet, and its line. */
+static int ss_fx0(void) { return ss.fx + 2; }
+static int ss_fx1(void) { return ss.fx + ss.fw - 2; }
+static int ss_fcy(void) { return ss.fy + SS_PITCH / 2; }
+
+/* The loupe repainted where it was and where it is: the page, and the status row it may reach
+ * over. */
+static void ss_loupe_dirty(void) {
+    void *bar = *(void *const *)system_bar;
+    widget_invalidate_force(ss.page, (void *)0);
+    if (bar) widget_invalidate_force(bar, (void *)0);
+}
+/* The loupe's turn: shown at the hold's end, then grown in a frame at a time. */
+static int ss_loupe_due(const void *unused);
+static void ss_loupe_show(void) {
+    unsigned now = (unsigned)time_now_ms();
+    ss.loupe = 1;
+    ss.loupe_at = now;
+    if (motion_reduced())
+        stop_timer(&ss.loupe_timer);
+    else
+        rearm(&ss.loupe_timer, ss_loupe_due, SS_LOUPE_STEP_MS);
+    ss_loupe_dirty();
+}
+static int ss_loupe_due(const void *unused) {
+    ss.loupe_timer = 0;
+    if (!ss.page || !ss.grab) return 0;
+    if (!ss.loupe) {
+        ss_loupe_show();
+        return 0;
+    }
+    ss_loupe_dirty();
+    if ((unsigned)time_now_ms() - ss.loupe_at < SS_LOUPE_GROW_MS)
+        ss.loupe_timer = timer_add(ss_loupe_due, (void *)0, SS_LOUPE_STEP_MS);
+    return 0;
+}
+
+/* The boundary nearest x on the sheet, as a shown character's index (ss.edge). */
+static int ss_nearest(int x) {
+    int best = 0;
+    for (int k = 1; k <= ss.nedge; ++k)
+        if (ss_dist(ss.edge[k] - x) < ss_dist(ss.edge[best] - x)) best = k;
+    return best;
+}
+/* Whether the field cuts the text at its left (dir -1) or right (1), as last painted. */
+static int ss_cut(int dir) {
+    return dir < 0 ? ss.edge[0] < ss_fx0() : ss.edge[ss.nedge] + 3 > ss_fx1();
+}
+/* The finger's nudge: the cursor a character on toward the edge it is held at, while the text is
+ * cut there; once that end of the text is in view, the cursor follows the finger again. */
+static void ss_aim(void);
+static int ss_nudge_due(const void *unused) {
+    ss.nudge_timer = 0;
+    if (!ss.page || !ss.grab || !ss.nudge) return 0;
+    if (!ss_cut(ss.nudge)) {
+        ss.nudge = 0;
+        ss_aim();
+        return 0;
+    }
+    ss_step(ss.nudge);
+    ss_dirty();
+    ss_loupe_dirty();
+    ss.nudge_timer = timer_add(ss_nudge_due, (void *)0, SS_NUDGE_MS);
+    return 0;
+}
+/* The cursor where the finger is: at the boundary nearest it, or, with the loupe up and the finger
+ * held SS_KEEP from an edge that cuts the text, there and then a character on toward the edge, at
+ * once and every SS_NUDGE_MS after (ss_nudge_due). */
+static void ss_aim(void) {
+    int x = ss.grab_x, dir = !ss.loupe                              ? 0
+                             : x < ss_fx0() + SS_KEEP && ss_cut(-1) ? -1
+                             : x > ss_fx1() - SS_KEEP && ss_cut(1)  ? 1
+                                                                    : 0;
+    if (dir && dir == ss.nudge) return; /* nudging already */
+    ss.nudge = (signed char)dir;
+    ss.cur = ss_byte_of(ss_nearest(x));
+    ss.typed_at = 0;
+    if (dir) {
+        ss_step(dir);
+        rearm(&ss.nudge_timer, ss_nudge_due, SS_NUDGE_MS);
+    } else
+        stop_timer(&ss.nudge_timer);
+    ss_dirty();
+    if (ss.loupe) ss_loupe_dirty();
+}
+/* The finger let go, or the page gone: the loupe and the nudge stop, the cursor where it is. */
+static void ss_ungrab(void) {
+    stop_timer(&ss.loupe_timer);
+    stop_timer(&ss.nudge_timer);
+    if (ss.loupe && ss.page) ss_loupe_dirty();
+    ss.grab = ss.loupe = 0, ss.nudge = 0;
+}
+/* A finger in the text: a press within the field puts the cursor at the boundary nearest it and
+ * gives the wheel back to the strip; held or moved, the loupe shows and the cursor follows it;
+ * the release leaves the cursor where it is. 1 when the event was the text's. */
+static int ss_grab(int type, int x, int y) {
+    if (type == EVT_POINTER_DOWN) {
+        if (!ss.fw || x < ss_fx0() - SS_GRAB_DX || x >= ss_fx1() + SS_GRAB_DX ||
+            ss_dist(y - ss_fcy()) >= SS_GRAB_DY)
+            return 0;
+        ss.grab = 1, ss.loupe = 0, ss.nudge = 0;
+        ss.down_x = ss.grab_x = (short)x, ss.down_y = (short)y;
+        ss.focus = SS_ON_STRIP;
+        rearm(&ss.loupe_timer, ss_loupe_due, SS_LOUPE_HOLD_MS);
+        ss_aim();
+        return 1;
+    }
+    if (!ss.grab) return 0;
+    if (type != EVT_POINTER_MOVE_BEFORE) {
+        ss_ungrab();
+        ss_dirty();
+        return 1;
+    }
+    ss.grab_x = (short)x;
+    if (!ss.loupe && (ss_dist(x - ss.down_x) >= SS_TAP || ss_dist(y - ss.down_y) >= SS_TAP))
+        ss_loupe_show();
+    ss_aim();
+    return 1;
+}
+
 /* The sheet's press, and the page's moves and release wherever they land (as 3EQ's sliders take
- * theirs). A drag on the strip moves the highlight as it goes, to the left the later
- * characters. */
+ * theirs). A press in the text is the text's (ss_grab). A drag on the strip moves the highlight
+ * as it goes, to the left the later characters. */
 static int ss_touch(void *ctx, void *event) {
     int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) }, type = I(event, EVENT_TYPE);
     if (!ss.sheet) return 0;
     widget_to_local(ss.sheet, xy);
+    if (ss_grab(type, xy[0], xy[1])) return 0;
     if (type == EVT_POINTER_DOWN) {
         ss.down_x = (short)xy[0], ss.down_y = (short)xy[1], ss.pressed = 1, ss.swiped = 0;
         return 0;
@@ -1263,6 +1521,8 @@ static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.erase_timer);
     stop_timer(&ss.peek_timer);
     stop_timer(&ss.blink_timer);
+    stop_timer(&ss.loupe_timer);
+    stop_timer(&ss.nudge_timer);
     if (ss.covered && ss_holds(window_manager(), ss.covered_win))
         widget_set_visible(ss.covered, 1, 0); /* a dialog an OK left open shows its box again */
     if (ss.under) bitmap_destroy(ss.under);

@@ -41,7 +41,10 @@ class Ss(C.Structure):
                 ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
                 ('peek_timer', C.c_uint), ('under', C.c_void_p), ('label', C.c_void_p),
                 *((k, C.c_short) for k in 'form row_y row_h scroll fx fy fw fh'.split()),
-                ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p)]
+                ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p),
+                ('edge', C.c_short * 65), ('nedge', C.c_short), ('fface', C.c_void_p), ('fpx', C.c_int),
+                ('fch', C.c_int), ('grab', C.c_ubyte), ('loupe', C.c_ubyte), ('nudge', C.c_byte), ('grab_x', C.c_short),
+                ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint)]
 
 
 @pytest.fixture
@@ -1314,3 +1317,272 @@ def test_a_box_its_page_names_is_a_cell_in_its_row(fw, ui, st):
     assert s.ss.form == 2 and snaps == [{edit} | (ui.hidden - {edit})] and edit not in ui.hidden
     texts = {t: r for t, r, _ in clipped(fw, s).texts}
     assert texts['Name'][0] == 24 and 'My Car EQ' in texts
+
+
+# Touch in the text (the mock-up's caretAt() and loupe(), docs/oled-design.md#text-entry): a tap puts the cursor at
+# the nearest character boundary; a hold or a drag shows a 1.6x loupe over the cursor, the cursor following the
+# finger; a finger at an edge that cuts the text nudges it a character at a time.
+LOUPE_W, LOUPE_H, LOUPE_R, LOUPE_HOLD_MS, LOUPE_IN_MS, NUDGE_MS = 104, 46, 14, 250, 100, 150
+
+
+def press(s, x, y):
+    s.feed(EVT_POINTER_DOWN, x, y, s.ss.sheet)
+
+
+def drag(s, x, y):
+    s.feed(EVT_POINTER_MOVE_BEFORE, x, y, s.ss.page)
+
+
+def lift(s, x, y):
+    s.feed(EVT_POINTER_UP_BEFORE, x, y, s.ss.page)
+
+
+def win_y(ui):
+    return struct.unpack_from('<i', ui.blocks[ui.top()], 4)[0]
+
+
+def loupe(fw, ui):
+    """The overlay over the top window (ringnav_paint's search_strip_overlay): the loupe's box, its texts with the
+    clip each was drawn under, the faces' sizes set, and its cursor's column."""
+    from test_nav_painters import Canvas
+    c = Canvas(fw)
+    fonts: list = []
+    rows: list = []
+    setattr(c, 'fonts', fonts)
+    setattr(c, 'clipped', rows)
+    fw.mock('canvas_set_font', lambda cv, face, px, *_: fonts.append(px & 0xffff) or 0)
+
+    def draw(cv, t, n, r, *_):
+        c.draw_text(cv, t, n, r)
+        rows.append((c.texts[-1][0], tuple(c.clip), c.texts[-1][2] >> 24, c.texts[-1][1]))
+        return 0
+    fw.mock('canvas_draw_text_in_rect', draw)
+    fw.fn('search_strip_overlay', None, C.c_void_p, C.c_void_p)(ui.top(), c.addr)
+    return c
+
+
+def loupe_box(c):
+    """The loupe's outline box (its 1 px line, then the lens 1 px in)."""
+    boxes = [b for b, _, r in c.boxes if r == LOUPE_R]
+    return boxes[0] if boxes else None
+
+
+def test_a_tap_in_the_query_puts_the_cursor_at_the_nearest_boundary(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE WILL', 9
+    clipped(fw, s)  # painted: where each character lies
+    for x, cur in [(QUERY_X0 + 23, 2), (QUERY_X0 + 27, 3), (QUERY_X0 + 300, 9), (QUERY_X0 - 6, 0), (QUERY_X0 + 4, 0)]:
+        s.touch(x, 16)
+        assert s.ss.cur == cur, x
+        clipped(fw, s)
+    assert s.ss.text == b'LOVE WILL' and s.ss.stop == 1  # nothing typed, the strip's highlight where it was
+    assert not ui.pending('search_strip__ss_loupe_due') and not s.ss.loupe  # a tap: no loupe
+    s.ss.text, s.ss.cur = b'LO', 2
+    s.type('V')  # LOV, matched
+    s.enter()  # the results have the wheel: a tap in the text gives it back to the strip, the cursor there
+    assert s.ss.focus == ON_LIST
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 21, 16)
+    assert s.ss.focus == ON_STRIP and s.ss.cur == 2
+    assert cursor(clipped(fw, s)) == QUERY_X0 + 21  # lit at once, after the second character
+
+
+def test_a_tap_below_the_text_is_not_in_it(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE', 4
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 15, 16 + 23)  # under the field's band
+    assert s.ss.cur == 4
+
+
+def test_a_name_s_multibyte_characters_are_whole_to_the_cursor(fw, ui, st):
+    """A name typed elsewhere may hold any character (Rename's prefilled "Café Tacvba"): the cursor stands after
+    whole characters, painted after as many as it follows, a tap lands on a character's boundary, and Previous, Next
+    and an erase step over a character, never into one."""
+    under_page(fw, ui, st)
+    s = renaming(fw, ui, 'Café Tacvba'.encode())
+    assert s.ss.cur == 12  # bytes: é is two
+    c = clipped(fw, s)
+    left = {t: r for t, r, _ in c.texts}['Café Tacvba'][0]
+    assert cursor(c) == left + 11 * 10 + 1  # after its 11 characters
+    s.touch(left + 39, s.ss.row_y + s.ss.row_h // 2)  # nearest the boundary after é
+    assert s.ss.cur == 5
+    s.touch(left + 31, s.ss.row_y + s.ss.row_h // 2)  # ... before it
+    assert s.ss.cur == 3
+    s.key(KEY_FWD_BTN)
+    assert s.ss.cur == 5
+    s.key(KEY_BACK_BTN)
+    assert s.ss.cur == 3
+    s.key(KEY_FWD_BTN)
+    s.erase(1)
+    assert s.ss.text == b'Caf Tacvba' and s.ss.cur == 3
+
+
+def test_a_tap_among_a_password_s_dots_is_a_character_each(fw, ui):
+    s = boxed(fw, ui, b'otter-42')
+    c = clipped(fw, s)
+    left = [r for t, r, _ in c.texts if t.startswith('•')][0][0]
+    s.touch(left + 31, s.ss.fy + 16)
+    assert s.ss.cur == 3
+
+
+@pytest.mark.parametrize('form', ['query', 'row', 'cell', 'field'])
+def test_a_hold_shows_the_loupe_over_the_cursor_at_1_6x_in_every_form(fw, ui, st, song, form):
+    """A finger held in the text: after 250 ms a lens 104 by 46 px with 14 px corners, its foot the text's size and
+    10 px over the line, centred on the cursor, showing the text there at 1.6 times its size with a steady cursor in
+    its middle; it goes with the finger."""
+    if form == 'query':
+        s = Strip(fw, ui, library(song))
+        s.ss.text, s.ss.cur = b'LOVE WILL TEAR', 14
+        px, design = 24, 20
+    else:
+        under_page(fw, ui, st, row_y=58 + (190 if form == 'field' else 32))
+        s = text_on_strip(fw, ui, b'LOVE WILL TEAR', b'Name' if form == 'cell' else None)
+        px, design = (27, 22) if form == 'field' else (24, 20)
+    assert s.ss.form == ['query', 'row', 'cell', 'field'].index(form)
+    c = clipped(fw, s)
+    left = {t: r for t, r, _ in c.texts}['LOVE WILL TEAR'][0]
+    cy = s.ss.fy + 16
+    press(s, left + 50, cy)
+    assert s.ss.cur == 5 and not s.ss.loupe and loupe_box(loupe(fw, ui)) is None
+    (_, ms), = ui.pending('search_strip__ss_loupe_due')
+    assert ms == LOUPE_HOLD_MS
+    s.now[0] += LOUPE_HOLD_MS
+    ui.fire('search_strip__ss_loupe_due')
+    s.now[0] += LOUPE_IN_MS
+    while ui.pending('search_strip__ss_loupe_due'):
+        ui.fire('search_strip__ss_loupe_due')
+    clipped(fw, s)
+    c = loupe(fw, ui)
+    sy, wy = sheet_y(ui, s), win_y(ui)
+    centre = left + 50
+    top = max(4, sy + cy - design - LOUPE_H - 10)
+    assert loupe_box(c) == (centre - LOUPE_W // 2, top - wy, LOUPE_W, LOUPE_H)
+    assert round(px * 1.6) in c.fonts
+    mid = top - wy + LOUPE_H // 2
+    h = 40 if px == 24 else 42  # the cursor's 25 or 26 px at 1.6x
+    assert [r for r, _ in c.rects if r[2] == 3] == [(centre - 1, mid - h // 2, 3, h)]
+    seen = [(clip, r) for t, clip, a, r in c.clipped if t == 'LOVE WILL TEAR']
+    assert seen and all(centre - LOUPE_W // 2 + 4 <= clip[0] and clip[0] + clip[2] <= centre + LOUPE_W // 2 - 4
+                        and top - wy < clip[1] and clip[1] + clip[3] < top - wy + LOUPE_H for clip, _ in seen)
+    assert {r[0] for _, r in seen} == {centre - 5 * 10}  # the text's left: five characters before the cursor
+    drag(s, left + 81, cy)  # the finger moves: the cursor and the lens with it
+    assert s.ss.cur == 8
+    clipped(fw, s)
+    assert loupe_box(loupe(fw, ui))[0] == left + 80 - LOUPE_W // 2
+    lift(s, left + 81, cy)
+    assert s.ss.cur == 8 and not s.ss.loupe and not ui.pending('search_strip__ss_loupe_due')
+    assert loupe_box(loupe(fw, ui)) is None
+
+
+def test_the_loupe_keeps_4_px_inside_the_screen(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'ab', 0
+    clipped(fw, s)
+    press(s, QUERY_X0, 16)
+    drag(s, QUERY_X0 - 9, 16)  # a drag shows it at once
+    assert s.ss.loupe
+    s.now[0] += LOUPE_IN_MS
+    while ui.pending('search_strip__ss_loupe_due'):
+        ui.fire('search_strip__ss_loupe_due')
+    box = loupe_box(loupe(fw, ui))
+    assert box[0] == 4 and box[1] + win_y(ui) == 4  # the cursor at x 48: the lens at the screen's left, not past it
+    lift(s, QUERY_X0 - 9, 16)
+    s.ss.text, s.ss.cur = b'abcdefghij' * 4, 40
+    clipped(fw, s)
+    x = QUERY_X1 - KEEP - 1
+    press(s, x, 16)
+    drag(s, x - 9, 16)
+    s.now[0] += LOUPE_IN_MS
+    while ui.pending('search_strip__ss_loupe_due'):
+        ui.fire('search_strip__ss_loupe_due')
+    clipped(fw, s)
+    box = loupe_box(loupe(fw, ui))
+    assert box[0] + LOUPE_W == 375 - 4  # at the right
+
+
+def test_the_loupe_grows_in_and_under_reduce_motion_shows_at_once(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE WILL', 9
+    clipped(fw, s)
+    press(s, QUERY_X0 + 40, 16)
+    s.now[0] += LOUPE_HOLD_MS
+    ui.fire('search_strip__ss_loupe_due')
+    small = loupe_box(loupe(fw, ui))
+    assert small[2] < LOUPE_W and small[3] < LOUPE_H
+    (_, ms), = ui.pending('search_strip__ss_loupe_due')  # its frames
+    assert ms == 33
+    s.now[0] += LOUPE_IN_MS
+    ui.fire('search_strip__ss_loupe_due')
+    assert loupe_box(loupe(fw, ui))[2:] == (LOUPE_W, LOUPE_H) and not ui.pending('search_strip__ss_loupe_due')
+    lift(s, QUERY_X0 + 40, 16)
+
+
+def test_under_reduce_motion_the_loupe_shows_whole_at_once(fw, ui, song):
+    from test_ui_kit import reduce_motion
+    reduce_motion(fw, 1)
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE WILL', 9
+    clipped(fw, s)
+    press(s, QUERY_X0 + 40, 16)
+    s.now[0] += LOUPE_HOLD_MS
+    ui.fire('search_strip__ss_loupe_due')
+    assert loupe_box(loupe(fw, ui))[2:] == (LOUPE_W, LOUPE_H) and not ui.pending('search_strip__ss_loupe_due')
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+def test_a_finger_at_an_edge_that_cuts_the_text_nudges_it_a_character_each_150_ms(fw, ui, song, side):
+    """Held at the field's edge, where the text is cut, the cursor steps a character toward it at once and then every
+    150 ms, the text scrolling under it, until that end of the text is in view; then the cursor follows the finger
+    again. The release leaves it there."""
+    s = Strip(fw, ui, library(song))
+    text = b'abcdefghij' * 4
+    s.ss.text, s.ss.cur = text, (40 if side == 'left' else 0)
+    clipped(fw, s)
+    mid = (QUERY_X0 + QUERY_X1) // 2
+    press(s, mid, 16)
+    start = s.ss.cur
+    edge = QUERY_X0 + 3 if side == 'left' else QUERY_X1 - 3
+    step = -1 if side == 'left' else 1
+    drag(s, edge, 16)  # the cursor to the finger, and a step past it at once
+    assert s.ss.loupe and (s.ss.cur < start if side == 'left' else s.ss.cur > start)
+    steps = 1
+    while ui.pending('search_strip__ss_nudge_due'):
+        (_, ms), = ui.pending('search_strip__ss_nudge_due')
+        assert ms == NUDGE_MS
+        clipped(fw, s)  # each step painted, the text scrolled under the cursor
+        before = s.ss.cur
+        s.now[0] += NUDGE_MS
+        ui.fire('search_strip__ss_nudge_due')
+        if ui.pending('search_strip__ss_nudge_due'):
+            assert s.ss.cur == before + step
+            steps += 1
+        assert steps < 60
+    assert s.ss.scroll == (0 if side == 'left' else 100)  # that end of the text in view
+    c = clipped(fw, s)
+    assert abs(cursor(c) - edge) <= 6  # the cursor nearest the finger
+    lift(s, edge, 16)
+    after = s.ss.cur
+    assert not s.ss.loupe and not ui.pending('search_strip__ss_nudge_due') and s.ss.cur == after
+    assert s.ss.text == text
+
+
+def test_a_finger_at_an_edge_of_a_text_that_fits_follows_with_no_nudge(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'LOVE', 4
+    clipped(fw, s)
+    press(s, QUERY_X0 + 20, 16)
+    drag(s, QUERY_X0 + 2, 16)
+    assert s.ss.cur == 0 and not ui.pending('search_strip__ss_nudge_due')
+    lift(s, QUERY_X0 + 2, 16)
+
+
+def test_closing_the_page_mid_drag_stops_the_loupe_and_nudge(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.ss.text, s.ss.cur = b'abcdefghij' * 4, 40
+    clipped(fw, s)
+    press(s, 200, 16)
+    drag(s, QUERY_X0 + 3, 16)
+    assert ui.pending('search_strip__ss_nudge_due') or ui.pending('search_strip__ss_loupe_due')
+    ui.close(ui.top())
+    assert not ui.pending('search_strip__ss_nudge_due') and not ui.pending('search_strip__ss_loupe_due')
