@@ -688,6 +688,7 @@ int np_rate_centre(void);               /* Centre on the page: 1 taken */
 unsigned np_rate_builds(void);          /* glows made (tests) */
 void np_full_set(int on);               /* now_playing.c np_full: the column full screen, or back */
 int np_mode_click(void *target, void *event);
+void np_corner_tap(int x0, int y0, int x, int y); /* np_bar.c: np_tap's tap past the row */
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
 int song_list(void *w);

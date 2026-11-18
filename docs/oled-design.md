@@ -564,7 +564,16 @@ has no place for keeps a place of its own:
   cycle, as the radio picks the order. A tap on the antenna starts a radio of the playing song
   ([internals: Radio](internals.md#radio)) and "Starting Radio…" while its app is asked; a tap on
   the pill stops it ("Radio Off"). The queue button, and a swipe up on the
-  art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
+  art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too. The swipe up
+  counts only when it comes down on the art's page, above the bar: never on the times or the state
+  row, so a tap on Radio that rolls up as it lifts is no swipe (the user's, 2026-11-18).
+- **The state row's touch** (the user's, 2026-11-18): a tap goes to the button nearest it across
+  the row's target (x 53 to 322, y 264 to 308). The outer two reach further, touch only: shuffle's
+  from the screen's left edge and Up Next's to its right, each from the row's top (y 264) down to the
+  screen's foot, and across as far as their share of the row reaches, the midpoint with radio for
+  shuffle and with repeat for Up Next, so neither reaches Radio, its pill or the swipe up. On
+  screen, radio off: shuffle x 0 to 105, Up Next 270 to 374; radio on: shuffle 0 to 111, Up Next 282
+  to 374 (the pill is 112 to 204). Their glyphs, press squares and focus ring stay where they are.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
   the Center cycle's ring outlines the control the wheel has moved it to (Shuffle, Repeat or the heart) in today's 2 px Text Primary stroke, 9 px corners, no fill;
   a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
@@ -660,6 +669,13 @@ as a menu's; a lit row's foot never passes y 282.
   back where it was.
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.
+- **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet
+  (over y 40), or a drag down of 48 px or more, more down than across (the swipe up that opens it,
+  reversed), that starts on the grab bar's strip or on the rows while they are at their top. The
+  sheet falls away as on Return ([Overlay motion](#overlay-motion)); a drag on rows scrolled down
+  scrolls them. ponytail: the sheet does not follow the finger while it drags; it falls once the
+  finger lifts past 48 px, and following it needs the drag's offset in the sheet's frame
+  (`menu_modal.c` `sheet_frame`).
 
 ### Progress and sliders
 
