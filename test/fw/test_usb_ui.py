@@ -420,3 +420,168 @@ def test_adbd_going_away_answers_nothing_more(fw_dev):
     fw_dev.mock('fw_recv', lambda *_: 0)  # the socket closed
     u.poll()
     assert not u.sent
+
+
+# The USB picker (usb_pick_open): Settings > General > USB and Control Center's USB row, the remembered choice.
+
+PICK = ['Ask Every Time', 'Transfer Files', 'USB Audio', 'Charge Only']
+DEV_PICK = PICK + ['USB Debugging']
+SORTSELECT = b'dialog/sortselect_dialog'  # the confirmation card's dialog (feedback.c confirm)
+
+
+def picker(u):
+    assert u.fw.fn('usb_pick_open', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
+    page = u.page('usbpick_page')
+    assert page
+    return page
+
+
+def checked(u, page):
+    """The rows holding stock's select image, which the theme paints as the picker's check (row_paint.c paint_radio)
+    and the wheel opens on (contexts.inc CHOICE)."""
+    return [t for t, row in u.rows(page) if any(u.ui[i].image == 'select' for i in u.ui.of('image', row))]
+
+
+def value(fw):
+    return fw.fn('usb_ui_value', C.c_char_p)().decode()
+
+
+def asked(fw):
+    return [C.string_at(a[0]) for _, a in fw.calls('navigator_to')].count(SORTSELECT)
+
+
+@pytest.mark.parametrize('pick, row', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),
+                                       (3, 'USB Audio')])
+def test_the_picker_lists_the_choices_and_checks_the_remembered_one(fw, pick, row):
+    u = Usb(fw, ini={'USBPICK': pick})
+    page = picker(u)
+    assert [t for t, _ in u.rows(page)] == PICK and checked(u, page) == [row] and value(fw) == row
+
+
+def test_a_dev_build_s_picker_offers_usb_debugging(fw_dev):
+    u = Usb(fw_dev, ini={'USBPICK': 4})
+    page = picker(u)
+    assert [t for t, _ in u.rows(page)] == DEV_PICK and checked(u, page) == ['USB Debugging']
+
+
+def test_a_release_build_reads_a_remembered_usb_debugging_as_ask_every_time(fw):
+    u = Usb(fw, ini={'USBPICK': 4})
+    assert checked(u, picker(u)) == ['Ask Every Time'] and value(fw) == 'Ask Every Time'
+
+
+@pytest.mark.parametrize('pick, lines', [
+    (0, ['Plug into a computer to choose.']),
+    (4, ['A computer gets adb on every cable.', 'Stop on its page asks again next time.'])])
+def test_the_footer_says_what_the_checked_choice_does(fw_dev, st, pick, lines):
+    """docs/oled-design.md#usb: the checked choice's note under the list, 13 px Text Tertiary on the text column, its
+    lines 17 px apart."""
+    u = Usb(fw_dev, ini={'USBPICK': pick})
+    foot = u.ui.lookup(picker(u), '_usb_pick_foot')
+    c = Canvas(fw_dev)
+    fw_dev.fn('usb_ui_paint', None, C.c_void_p, C.c_void_p)(foot, c.addr)
+    assert [t for t, _, _ in c.texts] == lines
+    ys = [box[1] + box[3] / 2 for _, box, _ in c.texts]
+    assert ys[0] == 19 and all(b - a == 17 for a, b in zip(ys, ys[1:]))
+
+
+def test_a_pick_with_no_cable_only_saves_it_and_ask_every_time_undoes_a_saved_charge_only(fw):
+    """The gap feat/usb-mode-row left: a saved Charge Only had no way back. With no cable in a pick is only saved
+    (Transfer Files with stock's mode, as Always Do This saves it); the link, which stock's USB-mode exit prompt may
+    still hold at 2, is left alone. Ask Every Time puts USBPICK back to 0, and the next cable gets the chooser."""
+    u = Usb(fw, ini={'USBPICK': 1}, tile=1)
+    u.link.value = 2
+    page = picker(u)
+    u.ui.click(u.row(page, 'Transfer Files'))
+    assert u.saved == [('Q2POD', 'USBPICK', 2), ('SYSSET', 'USBMODE', 2)]
+    assert checked(u, page) == ['Transfer Files'] and u.page('usbpick_page') and (u.link.value, u.commands) == (2, [])
+    u.ui.click(u.row(page, 'Transfer Files'))  # the checked one again: nothing
+    u.ui.click(u.row(page, 'Ask Every Time'))
+    assert u.saved[2:] == [('Q2POD', 'USBPICK', 0)] and checked(u, page) == ['Ask Every Time']
+    assert value(fw) == 'Ask Every Time' and not asked(fw)
+    u.link.value = 0
+    u.plug()
+    assert u.page('usbchoose_page')
+
+
+def test_a_pick_while_a_cable_charges_switches_it_now(fw):
+    """A remembered Charge Only holds the cable (g_usblink_status 3); USB Audio picked then is saved and handed to
+    stock at once, in its mode."""
+    u = Usb(fw, ini={'USBPICK': 1}, tile=2)
+    u.plug()
+    assert u.link.value == 3
+    u.ui.click(u.row(picker(u), 'USB Audio'))
+    assert u.saved == [('Q2POD', 'USBPICK', 3), ('SYSSET', 'USBMODE', 1)] and (u.link.value, u.mode.value) == (0, 1)
+    assert not asked(fw)
+
+
+def test_leaving_usb_audio_for_charge_only_closes_stock_s_mode_at_once(fw):
+    """Stock's mode is left by closing its window, whose EVT_WINDOW_CLOSE runs stock's usbmode_exit (the gadget
+    stopped, g_usblink_status 3). Only Transfer Files asks first."""
+    u = Usb(fw, ini={'USBPICK': 3})
+    u.plug()
+    mode_page(u)
+    u.ui.click(u.row(picker(u), 'Charge Only'))
+    assert not u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 1)] and not asked(fw)
+
+
+def files_mounted(fw, ejected=False):
+    u = Usb(fw, ini={'USBPICK': 2})
+    u.plug()
+    win = mode_page(u)
+    if ejected:
+        fw.fn('usb_ui_ejected', None, C.c_void_p)(win)
+    return u, picker(u)
+
+
+def pick_answer(fw, row):
+    fw.fn('usb_ui__usb_pick_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, 0)
+
+
+@pytest.mark.parametrize('row', [0, 1])
+def test_leaving_transfer_files_while_the_computer_has_the_card_asks_first(fw, row):
+    """A copy in progress is not cut off unasked: USB Audio picked while Transfer Files' page is up and the card not
+    ejected asks on the confirmation card, and nothing changes until it answers. Cancel (row 0) leaves it all;
+    Switch (row 1) leaves stock's mode and hands the cable to stock again as USB Audio."""
+    u, page = files_mounted(fw)
+    u.ui.click(u.row(page, 'USB Audio'))
+    assert asked(fw) == 1 and u.page('usbmode_page') and u.saved == [] and checked(u, page) == ['Transfer Files']
+    pick_answer(fw, row)
+    if not row:
+        assert u.page('usbmode_page') and u.saved == [] and checked(u, page) == ['Transfer Files']
+        return
+    assert not u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 3), ('SYSSET', 'USBMODE', 1)]
+    assert (u.link.value, u.mode.value) == (0, 1) and checked(u, page) == ['USB Audio']
+
+
+def test_once_ejected_transfer_files_is_left_without_asking(fw):
+    u, page = files_mounted(fw, ejected=True)
+    u.ui.click(u.row(page, 'Charge Only'))
+    assert not asked(fw) and not u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 1)]
+
+
+def test_ask_every_time_while_transfer_files_is_up_only_clears_the_choice(fw):
+    u, page = files_mounted(fw)
+    u.ui.click(u.row(page, 'Ask Every Time'))
+    assert not asked(fw) and u.page('usbmode_page') and u.saved == [('Q2POD', 'USBPICK', 0)]
+
+
+def test_a_dev_build_switches_debugging_off_and_on(fw_dev):
+    """From USB Debugging's page, Charge Only closes it and parks the ADB gadget; USB Debugging again unparks it and
+    opens the page."""
+    u = Usb(fw_dev, ini={'USBPICK': 4})
+    u.plug()
+    assert u.page('usbdebug_page')
+    page = picker(u)
+    u.ui.click(u.row(page, 'Charge Only'))
+    assert not u.page('usbdebug_page') and u.commands[-1] == '/usr/bin/q2adb-gadget park >/dev/null 2>&1'
+    u.ui.click(u.row(page, 'USB Debugging'))
+    assert u.page('usbdebug_page') and u.commands[-1] == '/usr/bin/q2adb-gadget unpark >/dev/null 2>&1'
+    assert u.saved == [('Q2POD', 'USBPICK', 1), ('Q2POD', 'USBPICK', 4)]
+
+
+def test_the_cable_is_what_stock_reads(fw):
+    u = Usb(fw)
+    cable = fw.fn('usb_ui_cable', C.c_int)
+    assert cable() == 0
+    u.det.value = 1
+    assert cable() == 1

@@ -1067,11 +1067,11 @@ void song_radio_poll(void);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
-/* usb_ui.c */
+/* usb_ui.c: the USB pages and the USB picker (docs/internals.md#usb-pages) */
 void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui_ejected(void *win);
-void usb_ui_paint(void *w, void *canvas);
-const char *usb_ui_title(const char *name);
-int usb_ui_key(void *top, unsigned key);
+void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
+const char *usb_ui_title(const char *name), *usb_ui_value(void);
+int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
