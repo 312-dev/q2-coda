@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O
+from conftest import O, STRIP_SAVE, strip_return
 
 KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_RETURN = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT'], O['KEY_RETURN']
 KEY_FWD_BTN, KEY_BACK_BTN = O['KEY_FWD_BTN'], O['KEY_BACK_BTN']
@@ -1700,3 +1700,18 @@ def test_under_the_inset_modal_the_band_s_list_waits_and_a_pick_sets_the_type(fw
     assert p.ui.draft.bands[0].type == NO and p.ui.screen == BAND and 'Type Notch' in p.captions()
     assert p.props[(p.ui.view, '_ringnav_index')] == 2 and p.ui.dirty == 1
     assert p.props[(p.ui.view, '_ringnav_count')] == 5  # a count ringnav keeps the row by: no Gain row on a notch
+
+
+@pytest.mark.parametrize('what', ['Frequency', 'Q'])
+def test_a_band_s_value_box_gives_the_strip_its_check(fw, what):
+    """EQ frequency and Q are values saved: the letter strip's return key shows the check (search_strip.c)."""
+    p = adjust(fw, what)
+    assert strip_return(fw, p.edit()) == STRIP_SAVE
+
+
+def test_a_preset_s_name_box_gives_the_strip_its_check(fw):
+    p = page(fw, files={f'{FOLDER}/Rock.txt': b'x'}).advanced()
+    p.click('Presets')
+    p.click('Rename a preset')
+    p.click('Rock.txt')
+    assert strip_return(fw, p.edit()) == STRIP_SAVE

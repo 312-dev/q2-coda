@@ -553,9 +553,10 @@ def main(argv):
         if a == ["-f"]:
             shell(f"tail -f {LOG}", timeout=None, sink=sys.stdout.buffer); return 0
         if a == ["--clear"]:
-            shell(f": >{LOG}"); return 0
+            shell(f": >{LOG}; rm -f {LOG}.1"); return 0
         if a and not a[0].isdigit(): raise ValueError("usage: log [LINES|-f|--clear]")
-        out, rc = run(f"tail -n {a[0] if a else 100} {LOG}")
+        # the newest lines across S90play's roll (tools/build.py LOG_HOOK): .1 holds the ones before it
+        out, rc = run(f"cat {LOG}.1 {LOG} 2>/dev/null | tail -n {a[0] if a else 100}")
         sys.stdout.buffer.write(out); return rc
     if cmd == "find" and not a:
         print("\n".join(find())); return 0

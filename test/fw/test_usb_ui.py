@@ -455,18 +455,22 @@ def test_a_burst_of_edges_is_one_cable_change_stamped_with_its_first_edge(fw):
 def test_an_edge_runs_stock_s_cable_read_and_the_usb_check_in_the_same_pass(fw):
     """usb_ui_poll, every UI pass: an edge runs get_battery_capacity (which sets g_usbdet_value, as the status bar's
     one-second timer would) and check_usb_status's hook at once, so the probe starts in that pass with no
-    usb_ui_status from stock; demo's log says how the cable was seen and how long after its edge."""
+    usb_ui_status from stock; the unified log says how the cable was seen and how long after its edge."""
     u = Usb(fw)
     u.status()  # the first pass: no cable
     fw.mock('get_battery_capacity', lambda *_: setattr(u.det, 'value', 1) or 0)
     fw.mock('stock_usb_status_trampoline', lambda *_: 0)
     fw.mock('fw_clock_gettime', lambda clock, ts, *_: C.memmove(ts, bytes(C.c_long(1)) + bytes(C.c_long(9_000_000)), 2 * C.sizeof(C.c_long)) and 0)
+    fw.mock('fw_time', lambda *_: 1794926102)  # 2026-11-17T14:35:02Z
     logged = []
     fw.mock('fw_write', lambda fd, data, n, *_: logged.append((fd, C.string_at(data, n).decode())) or n)
     edges(fw, 1_000_000_000)
     u.poll()
     assert u.link.value == 3 and u.commands == ['storage_config.sh start /dev/null >/dev/null 2>&1']
-    assert logged == [(2, 'q2 usb: cable in, seen after its edge, 9 ms\n')]
+    # a unified log line (ulog.c) on stderr: the time, the uptime in ms, the level and the source
+    # (usb_record.c's line of the edge, its pins, comes first, through the same ulog)
+    assert logged[0][1].startswith('2026-11-17T14:35:02Z 1009 I usb in PD18=')
+    assert logged[1:] == [(2, '2026-11-17T14:35:02Z 1009 I usb cable in, seen after its edge, 9 ms\n')]
 
 
 def test_the_waiting_probe_reads_the_computer_s_answer_every_tenth_of_a_second(fw):

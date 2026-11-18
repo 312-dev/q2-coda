@@ -1964,7 +1964,9 @@ void playback_poll(void) {
     playback_save(), s.stamp = now;
 }
 
+void ulog_end(const char *why); /* ulog.c: the unified log's snapshot, on the card before the Q2 goes down */
 int ringnav_savequeue(void) {
+    ulog_end("power-off");
     ringnav_clean_end(); /* stock's only call is into_poweroff's */
     playback_save();
     return stock_savequeue_trampoline();
@@ -1984,6 +1986,7 @@ int bt_stopped_hold(void *caller); /* bt_stopped.c */
  * countdown ends (bt_stopped.c). */
 int ringnav_reboot_from(void *caller) {
     reboot_record(caller); /* a Bluetooth abnormal reboot's crash log */
+    ulog_end("restart");
     reboot_save();
     return stock_reboot_trampoline();
 }
@@ -1994,6 +1997,7 @@ int ringnav_reboot(void) {
 }
 void sw_update_restarting(void *win); /* sw_update.c */
 int ringnav_checkfw(void *win, void *ctx) {
+    ulog_end("update");
     reboot_save();
     int result = stock_checkfw_trampoline(win, ctx);
     sw_update_restarting(win); /* drawn as Restarting to Install */

@@ -1089,10 +1089,16 @@ the wheel walks:
   ten in view, the lit one white on an 18 px accent key 5 px in. It starts at its first character and moves
   only when the highlight comes within a cell of an edge. Where more of the set lies past an edge the letters
   fade out toward it over 22 px: the text's own alpha, never a band painted over it.
-- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with the
-  return mark in white (a stem down the right, a slightly rounded corner, a bar to the left ending in an open
-  arrowhead, 2.2 px round strokes), inverted, a white circle with the mark in the accent, while the wheel is
-  on it. Center on it submits.
+- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with its
+  mark in white, inverted, a white circle with the mark in the accent, while the wheel is on it, in either half.
+  Center on it submits. The mark says what submitting does, by the field (the user's 2026-11-17 ruling, mock-up
+  `returnkey/context.html`; 24-unit glyphs drawn 20 px, round caps and joins):
+  - a **magnifier** (a ring and a handle to the bottom right, 2.4 units) on every search: Search, Add Songs'
+    Search, a playlist's song search, Internet Radio's, Spotify's, TIDAL's and a card app's;
+  - a **check** (2.6 units) where a name or a value is saved: New Playlist, Rename Playlist, the Bluetooth name,
+    Guest Play's name, an EQ preset's name, a band's frequency and Q;
+  - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
+    a card app's fields, Car Remote's phone name, and any field no caller names.
 
 One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
 from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's

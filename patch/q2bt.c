@@ -266,6 +266,7 @@ int bt_flush_due(void) {
 void bt_sleep(unsigned ms) {
     unsigned end_at = now_ms() + ms;
     for (;;) {
+        if (guard_woke) return; /* a request that came while q2guard was busy: answered now */
         unsigned now = now_ms();
         int left = (int)(end_at - now), step = left;
         if (left <= 0) return;
@@ -273,7 +274,8 @@ void bt_sleep(unsigned ms) {
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
-        if (step > 0) usleep((unsigned)step * 1000u);
+        if (step > 0) usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
+        if (guard_woke) return;                        /* a request to answer now (q2guard.c) */
         now = now_ms();
         if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }

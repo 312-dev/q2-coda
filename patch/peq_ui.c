@@ -995,6 +995,7 @@ static int render_rows(const void *unused) {
         widget_set_text_utf8(ui.edit, s);
         /* the letter strip types it in its row, after this label (search_strip.c search_strip_box) */
         widget_set_prop_str(ui.edit, "_strip_label", ui.screen == NAMING ? "Name" : ui.adjust == QUALITY ? "Q" : "Frequency");
+        widget_set_prop_int(ui.edit, STRIP_RETURN, STRIP_SAVE); /* a name or a value saved: the check */
         widget_on(ui.edit, EVT_VALUE_CHANGED, ui.screen == NAMING ? named : typed, 0);
         if (ui.screen == ADJUST) widget_on(ui.edit, EVT_FOCUS, focused, 0);
         else {
