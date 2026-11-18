@@ -3409,7 +3409,7 @@ class Wait:
         fw.mock('cf_syscall', syscall)
         fw.mock('timer_manager', lambda *_: self.tm)
         fw.mock('widget_animator_manager', lambda *_: self.am)
-        fw.mock('widget_get_native_window', lambda *_: self.nw)
+        fw.mock('widget_get_native_window', lambda w, *_: self.nw if w == loop.page.p else 0)  # a window's, not the wm's
         fw.mock('idle_manager_count', lambda *_: 1)
 
     def u32(self, at, v):

@@ -86,7 +86,8 @@ unsigned loop_span(unsigned base, unsigned most, int timers) {
     int next = lw_next_timer((unsigned)time_now_ms());
     if (next < 0) return base;
     if (timers) {
-        void *nw = widget_get_native_window(window_manager());
+        void *top = window_manager_get_top_window(window_manager()); /* the wm has no window */
+        void *nw = top ? widget_get_native_window(top) : 0;
         if (nw && I(nw, NW_DIRTY)) return base;
         if ((unsigned)next < most) most = (unsigned)next;
     }
