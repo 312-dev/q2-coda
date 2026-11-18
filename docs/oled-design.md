@@ -1632,12 +1632,13 @@ the canvas's origin, not the view's own y:
 - **Graph**, 100% at y 84 to 0% at y 226 (142 px): faint lines at 100% and 50%, the axis at 0%, their
   labels right-aligned in 15 px Text Tertiary; the level as steps in the accent's light tone over a faint fill; the
   reading's 1 px hairline in Text Secondary from 100% to 0% and a 10 px white dot on its level.
-- **Export Log**, the shared gray [button](#buttons) centered at y 263 (y 244 to 282, 38 px above the screen's edge). The
-  wheel always moves the reading (clockwise to the newer) and Center always exports, so the button is the page's only
-  action and no frame draws the focus ring.
-- **Results** are the house toasts in the button's place ("Saved to battery-log.txt", "The card is in use over USB",
-  "Storage unavailable", "The card is full", "Couldn't save"): the button gives way while one shows.
-- ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs
+- **Share Log**, the shared gray [button](#buttons) centered at y 263 (y 244 to 282, 38 px above the screen's edge). The
+  wheel always moves the reading (clockwise to the newer) and Center always shares, so the button is the page's only
+  action and no frame draws the focus ring. It writes the log to `/tmp/battery-log.txt` and opens LocalSend's share
+  sheet ([localsend](localsend.md#sending)).
+- **Results** are the house toasts in the button's place ("Couldn't write the log"; the share sheet's own after a
+  send): the button gives way while one shows.
+- ponytail: the button has no pressed frame under Center (the share runs on the key's press); a press frame needs
   the key's down and up told apart in `battery_key`.
 
 ### Car Remote

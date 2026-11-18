@@ -2,31 +2,18 @@
 
 Design for replacing Wi-Fi Transfer with [LocalSend](https://localsend.org), the open AirDrop-like protocol
 (v2.2, [spec](https://github.com/localsend/protocol)). A phone or computer with the free LocalSend app sends
-files to the Q2, and the Q2 sends files (Export Log, the logs folder) to them. Approved by the user on
-2026-11-16 ("replace with LocalSend yes"). The screens are drafts until the user approves the mock-up; nothing
-here is built yet except where [Status](#status) says so.
+files to the Q2, and the Q2 sends files (Battery History's Share Log, the logs folder) to them. Approved by the user on
+2026-11-16 ("replace with LocalSend yes"); the screens as the mock-up the user approved on 2026-11-18. How the demo
+side works: [internals](internals.md#localsend).
 
 ## What it replaces
 
-Wi-Fi Transfer is Shanling's web page: thttpd 2.29 on port 8888, started by `switch_wifitransport(1)` while
-Settings > Network > Wi-Fi File Transfer is open, with Q2 Muse's PIN, session cookie, idle stop and safe CGIs on
-top ([internals: Wi-Fi transfer](internals.md#wi-fi-transfer)). Removing it takes:
-
-| Where | What goes |
-| ----- | --------- |
-| `patch/wifi_transfer.c`, `patch/cgi_root.c`, `assets/web/q2cgi` | the PIN, the idle stop, the set-uid CGI wrapper, the file-manager script |
-| `tools/build.py` | the two `HOOKS` (`switch_wifitransport`, `systemset_wifitransport_page_init`), `patch_web` and `WEB`, `THTTPD_USER`, the q2cgi and CGI inode installs, `CGI_MODE` |
-| `patch/system.c` | the `wifi_transfer_poll` call |
-| `patch/smart_wifi.c` | `wifitransport_page` and `g_wifitransport_flag` in the Wi-Fi hold; the LocalSend page takes its place |
-| `patch/navigation.h` | the `wifi_transfer.c` declarations |
-| tests | `test/fw/test_wifi_transfer.py`, `test/fw/test_cgi_root.py`, `test/wifi_transfer_cgi.sh`, the q2cgi checks in `test/build.py`, `tools/scan.py`'s q2cgi rules and `test/unit/test_scan.py` |
-| docs | internals' `## Wi-Fi transfer`, third-party.md's thttpd lines and its "What reaches them" row, inefficiencies.md, source-map.md, the manual's Network page |
-
-Stock's thttpd binary, `/etc/thttpd.conf` and `/usr/share/web` stay in the rootfs (the repack keeps every stock
-inode), but nothing starts them: `switch_wifitransport` keeps a hook that refuses to start the server, so no
-stock path can bring port 8888 back. Network's third row, today "Wi-Fi File Transfer" (`netservice_wifitrans`),
-becomes **LocalSend** and opens the new page (`smart_wifi.c` `ringnav_netservice_row` already owns that row's
-click).
+Stock's Wi-Fi File Transfer: a web page served by thttpd 2.29 on port 8888 while Settings > Network > Wi-Fi File
+Transfer was open, to which Q2 Muse had added a PIN, an idle stop and its own CGIs. None of that is in Q2 Muse:
+stock's thttpd binary, `/etc/thttpd.conf` and `/usr/share/web` stay in the rootfs as shipped (the repack keeps every
+stock inode), but nothing starts them: `switch_wifitransport` keeps a hook that refuses to start the server, so no
+stock path can bring port 8888 back. Network's third row (`netservice_wifitrans`) is **LocalSend** and opens its
+page (`smart_wifi.c` `ringnav_netservice_row`).
 
 ## The protocol, as the reference app speaks it
 
@@ -100,7 +87,8 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 ### Receiving
 
 - **Trusted devices** (approved by the user on 2026-11-18, the adb prompt's pattern): the Accept card has an
-  "Always accept from this device" switch, off by default. Accepted with it on, the sender's certificate
+  **Always Accept** switch, off by default (the approved "Always accept from this device" is wider than the card;
+  USB debugging's is "Always Allow"). Accepted with it on, the sender's certificate
   fingerprint goes on the list in `/mnt/data/q2send/trusted` beside the identity, and its later requests skip the
   card, with a "Receiving from <name>" pill so a receive is never silent. Trust is the client certificate's
   fingerprint alone, never the name or a fingerprint a request's body claims; a sender with no client certificate
@@ -117,9 +105,10 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
   a 16 MB margin (the sender sees 403 and the Q2 a toast saying why).
 - A file is written to `name.part` and renamed when its last byte is in and its `sha256` (when sent) matches; a
   cancel or a dropped connection removes the `.part`.
-- Songs that arrive are added to the library: at the end of the session demo runs the stock scan on
-  `/mnt/mmc/Received` (Update Library's code path, scoped to the folder). Ponytail: a whole-library rescan if
-  scoping it turns out to need a new hook.
+- Songs that arrive are added to the library: once the daemon has stopped and nothing plays, demo opens stock's
+  Update Local Music on the whole library (`library_quiet`, as a card app's sync waits). ponytail: stock's scan
+  takes no single folder without a new hook into its scan thread; scoping it to `Received` would make a large
+  library's update seconds instead of minutes.
 
 ### Sending
 
@@ -135,27 +124,23 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 
 ## Costs
 
-Measured where it says so; the rest are estimates until the demo side is built.
+Measured where it says so; the rest are estimates.
 
 | | Cost |
 | --- | --- |
-| Flash | `q2send` 43,524 bytes (measured, 2026-11-18); the demo side about 12 KB of payload (estimate). Less q2cgi (20 KB), `q2cgi-root` and the web patch. TLS: 0 (rootfs OpenSSL) |
-| Payload scratch | under 2 KB: the page's device list (8 devices), the transfer's numbers |
+| Flash | `q2send` 43,524 bytes (measured, 2026-11-18); the demo side 15,296 bytes of payload code (measured: the payload's 1,217,256 bytes to 1,232,552). Less q2cgi (20 KB), `q2cgi-root` and the web patch. TLS: 0 (rootfs OpenSSL) |
+| Payload scratch | 568 bytes (measured: 16,388 free to 15,820): the pages' state; the device list is read into the stack each poll |
 | RAM, only while running | `q2send` about 1.5 to 2.5 MB RSS: libssl and libcrypto's pages are shared with demo, which maps libcrypto already; 64 KB file buffer per upload, at most two at once |
 | CPU | one TLS handshake per request; ChaCha20 at Wi-Fi speed is expected to leave the player its headroom (to be measured on the device) |
 | Attack surface | port 53317 TCP and UDP, only while the page or sheet is open; nothing written without the user's Accept. Less than today: thttpd and a set-uid CGI are gone |
 
 ## Status
 
-- Design and mock-up: approved by the user on 2026-11-18 as drawn (`mock_localsend.py`, 14 screens).
-- Protocol core and daemon: built. `patch/localsend_core.c` (JSON, info, peers, HTTP heads, chunked bodies, safe
-  names, the session; 13.4 KB of MIPS code) and `patch/localsend.c` (`q2send`, 43.5 KB linked, installed at
-  `/usr/bin/q2send`). `test/unit/test_localsend.py` checks the core with the texts the reference app sent;
-  `test/localsend_e2e.py CLI` runs `q2send` beside the reference CLI 1.18.2 and passes its 19 checks both with a host
-  build and with the build's own MIPS program under qemu-mipsel against the rootfs's OpenSSL 1.1.1w: each finds the
-  other, a file received after Accept, refused after Decline and while held, two files sent and accepted, one
-  declined, the identity kept across a restart. A peer resumes its TLS session on each request, which OpenSSL refuses
-  with a client certificate asked for until the server context has a session id context (found by the run: the
-  uploads' handshakes failed until it was set).
-- Not built yet: the demo side (`patch/localsend_ui.c`), the Network row, Battery History's Share Log, and the
-  removal of Wi-Fi Transfer.
+Built and on the branch `feat/localsend`: the protocol core and `q2send` (`patch/localsend_core.c`,
+`patch/localsend.c`), the demo side (`patch/localsend_ui.c`: the page, the share sheet, Send to, the transfer page,
+the Accept card, Trusted Devices), Network's row, Battery History's Share Log, and Wi-Fi File Transfer's removal.
+Tests: `test/unit/test_localsend.py` (the core against the reference app's texts), `test/localsend_e2e.py CLI`
+(`q2send` beside the reference CLI 1.18.2: discovery both ways, accept, decline, hold, trust, sending, identity kept),
+`test/fw/test_localsend_ui.py` and `test/fw/test_battery.py`. Measured in the emulator against the reference CLI and
+a Python peer (2026-11-18): found both ways, logs sent and accepted, two files (43 MB) and three (9 MB) received
+after Accept, a trusted sender received with no card, a name clash saved as " (2)".

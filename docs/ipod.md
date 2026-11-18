@@ -596,7 +596,7 @@ Left immediate: Home (opened once, never closed), Now Playing (its open starts t
 can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
 [internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
-assets: Tidal and the other online pages, Wi-Fi transfer and the firmware download. Moving between
+assets: Tidal and the other online pages and the firmware download. Moving between
 folders reloads the folder page in place, so only opening and leaving that page slides. Stock
 drops every key and touch while a page slides; none is queued
 ([internals.md](internals.md#page-transitions-ipod)).
@@ -1215,17 +1215,13 @@ photos, wallpapers and videos are never changed.
 ponytail: a non-square or transparent cover in Cover Flow keeps black bars and a black background
 inside its square (`cf_decode`).
 
-## Wi-Fi File Transfer
+## LocalSend
 
-**System settings → Network → Wi-Fi File Transfer** keeps stock's page, with the address to open in
-a browser on the same Wi-Fi network (`http://<address>:8888`) at the bottom. In place of its picture
-is a line, **PIN for the web page**, and under it a new six-digit PIN each time the page opens, in
-56 px type as two groups of three. The
-web page asks for the PIN once; without it nothing on the card can be listed, downloaded, uploaded
-or deleted. Five wrong PINs show **Locked** in the PIN's place: Return and open the page again for a
-new PIN. Leaving the page turns transfer off, as in stock, and so do 10 minutes with no request,
-with a toast saying so. How the PIN and the timer work:
-[internals.md](internals.md#wi-fi-transfer-pin).
+**System settings → Network → LocalSend** takes the place of stock's Wi-Fi File Transfer: files go to and
+from a phone or computer running the free LocalSend app on the same Wi-Fi, with nothing to type. The page
+lists **Send Logs**, the devices found nearby and, once there are any, **Trusted Devices**; a phone sending
+asks on the Accept card, and what arrives goes to `Received` on the card and into the library. The design,
+the protocol and the daemon: [localsend.md](localsend.md).
 
 ## Games
 
