@@ -1120,6 +1120,17 @@ left-aligned (right-aligned in a cell). By form:
   own page): its label in 15 px Text Tertiary from x 40 on y 92 over a raised pill from x 40 to 335 and y 106
   to 150 with 12 px corners, the text 16 px in from either end.
 
+Touch in the text, in every form (the user's "tap or drag to move cursor with a magnification effect on any
+input", `strip.html`'s `caretAt()` and `loupe()`, approved 2026-11-16): a tap puts the cursor at the nearest
+character boundary; a hold of 250 ms, or a drag, shows the loupe, a 104 by 46 px lens with 14 px corners, a 1 px
+`#6E6E6E` line and the field's own ground (the canvas under Search's query, the raised grey in a box), its foot
+the text's size and 10 px over its line and kept 4 px inside the screen, centered on the cursor; in it the text
+around the cursor at 1.6 times, drawn again by the same text renderer (never a copy of the screen), clipped and
+faded at the field's edges as the field is, with a steady 3 px cursor in its middle. It grows in from half its
+size about its foot over 100 ms, and shows whole at once under Reduce Motion. The cursor follows the finger; held
+within 10 px of an edge that cuts the text, the finger nudges the cursor a character toward it every 150 ms, the
+text scrolling under it, until that end is in view. Letting go leaves the cursor where it is.
+
 A password is dots, the character just typed shown for a second, in whichever form. A box holding a number opens
 on 123. Submitting a box is its own OK, as the keyboard's Enter was: the box takes the text and acts.
 

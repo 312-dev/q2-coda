@@ -218,7 +218,7 @@ static struct {
     int nmatch, stop, off, focus, sel, top; /* the strip's stop (ss_stops), its run's first cell
                                              * shown; focus: SS_ON_* */
     int nsongs, tab, any; /* the songs first in match; the tab, SS_TAB_*; anything matches */
-    int cur, by;          /* the cursor's place in text; ss_by_name's field */
+    int cur, by;          /* the cursor's byte in text (ss_step); ss_by_name's field */
     int rename;           /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
     int pick;             /* Add Songs' (add_songs_search): songs alone, Centre adds them */
     int create;           /* New Playlist's (playlist_new_open) */
@@ -373,7 +373,7 @@ static int ss_peek_due(const void *unused) {
 }
 
 /* Run entry e typed at the cursor: the set's character as it reads, or a space (on Search and a
- * name not first, nor beside another). The text is ASCII, a byte a character. */
+ * name not first, nor beside another). What the strip types is ASCII, a byte each (ss_step). */
 static void ss_type(int e) {
     int n = (int)strlen(ss.text), at = ss.cur;
     char c = (char)ss_char(e);
