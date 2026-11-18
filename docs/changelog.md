@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streamed songs: a queue of server songs picks up where it left off after a restart. Memory Playback brought back only the one or two songs already downloaded, Up Next stopped there and nothing fetched the rest; now the app (Subsonic with `resume=1`) streams the queue again from the song that was playing, still paused, and Up Next lists every song. Without the app, or if it declines, the songs on the card play as before.
   - Now Playing (OLED): the A-B repeat markers sit on the progress bar, as before at their points along it, instead of at the old bar's height, where the ones near either end were partly under the rounded glass.
   - Card apps (OLED): a page of only an info row that has more results keeps its More... row, so the rest can be loaded; before, it showed the empty-page note and no way on.
   - Status row (OLED): the Percent battery no longer swaps to the icon while a Bluetooth headset's codec badge (off this row) is up; it gives way only where the battery and the glyphs beside it would leave the title no room.

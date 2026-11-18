@@ -20,6 +20,14 @@ static card_blob queue_store __attribute__((section(".scratch"))),
 #define QUEUE_STORE card_blob_at(&queue_store, QUEUE_FILE, QUEUE_FLASH, QUEUE_HELD_MAX)
 #define ELAPSED_STORE                                                                              \
     card_blob_at(&elapsed_store, CHECKPOINT_FILE, QUEUE_FLASH "-elapsed", sizeof(checkpoint))
+/* A stream's songs not yet queued (Up Next's pending rows), which the snapshot doesn't hold, kept
+ * beside the snapshot they belong to (save_tail), so a restore can ask their app for them
+ * (docs/internals.md#memory-playback-and-a-streamed-queue) */
+#define TAIL_FILE QUEUE_FILE "-stream"
+#define TAIL_MAGIC 0x51325254
+static card_blob tail_store __attribute__((section(".scratch")));
+static int tail_kept __attribute__((section(".scratch"))); /* one written since boot: drop it */
+#define TAIL_STORE card_blob_at(&tail_store, TAIL_FILE, 0, QUEUE_HELD_MAX)
 #define QUEUE_LIMIT 65536
 #define HISTORY_LIMIT 4096
 /* ponytail: Play Next's pending list holds 64 queue indices; a new one past that drops the oldest
@@ -1020,7 +1028,7 @@ int ringnav_load(void *q, int at, int type) {
     if (served) deque_destroy(served);
     back_to = 0;
     if (s.restoring == 2)
-        s.restoring = 0;
+        s.restoring = 0, addon_resume_follow(); /* Now Playing's start loads the restored queue */
     else if (!s.restoring) {
         press_stamp(); /* a list pick, after stock's load names the queue's type */
         s.resume_key = s.resume_pending = 0;
@@ -1600,6 +1608,66 @@ static int save_elapsed(int sec) {
     c.checksum = hash_bytes(FNV_SEED, (const unsigned char *)&c.snapshot, 3 * 4);
     return card_blob_write(ELAPSED_STORE, &c, sizeof c);
 }
+/* The tail beside the snapshot whose checksum is sum, of n songs: magic, its own checksum (of what
+ * follows it), sum, the count, then each path and its NUL. With none, one written since boot is
+ * dropped; one an earlier boot left belongs to its own snapshot, which read_tail checks, so no card
+ * write is spent on it. Written with the snapshot, which a session's song joining the queue
+ * rewrites. ponytail: an app's rewrite of its queue file (a radio's more songs) is not seen until
+ * the next; the tail then lacks the songs it added. */
+static void save_tail(unsigned sum, unsigned n) {
+    unsigned k = 0, bytes = 0;
+    char *paths = addon_pending_paths(SAVE_LIMIT - n, &k, &bytes);
+    unsigned *buf = paths ? malloc(16 + bytes) : 0;
+    if (!buf) {
+        free(paths);
+        if (tail_kept) card_blob_drop(TAIL_STORE), tail_kept = 0;
+        return;
+    }
+    buf[0] = TAIL_MAGIC, buf[2] = sum, buf[3] = k;
+    memcpy(buf + 4, paths, bytes);
+    buf[1] = hash_bytes(FNV_SEED, (const unsigned char *)(buf + 2), 8 + bytes);
+    tail_kept = card_blob_write(TAIL_STORE, buf, 16 + bytes);
+    free(buf), free(paths);
+}
+/* The tail of the snapshot whose checksum is sum, on the heap (the caller frees it), its paths from
+ * byte 16, *n of them; 0 when there is none, or it is another snapshot's or damaged. */
+static unsigned *read_tail(unsigned sum, unsigned *n) {
+    unsigned *buf = malloc(QUEUE_HELD_MAX);
+    int got = buf ? card_blob_read(TAIL_STORE, buf, QUEUE_HELD_MAX) : -1;
+    *n = 0;
+    if (got < 16 || buf[0] != TAIL_MAGIC || buf[2] != sum || buf[3] > SAVE_LIMIT ||
+        hash_bytes(FNV_SEED, (const unsigned char *)(buf + 2), (unsigned)got - 8) != buf[1] ||
+        ((char *)buf)[got - 1])
+        return free(buf), (unsigned *)0;
+    unsigned k = 0;
+    for (const char *p = (char *)(buf + 4), *end = (char *)buf + got; p < end; p += strlen(p) + 1)
+        ++k;
+    if (k != buf[3]) return free(buf), (unsigned *)0;
+    *n = k;
+    return buf;
+}
+/* A restore's ask of a stream's app for its songs not restored (addon_resume_ask): songs, the
+ * snapshot's identities and paths, n of them; map, each one's place in the restored queue (~0u
+ * none); pos, the current song's there. */
+static void ask_resume(const unsigned char *songs, unsigned n, const unsigned *map, unsigned pos,
+                       unsigned sum) {
+    unsigned k = 0, at = n, *tail = read_tail(sum, &k);
+    const char **paths = calloc(n + k, sizeof *paths);
+    unsigned char *in = calloc(n + k, 1);
+    for (unsigned i = 0; paths && in && i < n + k; ++i) {
+        if (i < n) {
+            unsigned len;
+            memcpy(&len, songs, 4);
+            paths[i] = (const char *)songs + 12, songs += 12 + len;
+            in[i] = map[i] != ~0u;
+            if (map[i] == pos && at == n) at = i;
+        } else
+            paths[i] = i == n ? (const char *)(tail + 4) : paths[i - 1] + strlen(paths[i - 1]) + 1;
+    }
+    if (paths && in && at < n)
+        addon_resume_ask(paths, in, n + k, at, s.resume_elapsed, g_carmode, time_now_ms() | 1);
+    free(paths), free(in), free(tail);
+}
 void playback_save(void) {
     /* Without advanced play a local queue (folder or library, as Play Next grows) is kept plain,
      * while Memory Playback or car mode would restore it (ringnav_memory reads nothing otherwise). */
@@ -1691,6 +1759,7 @@ void playback_save(void) {
     int ok = card_blob_write(QUEUE_STORE, buf, size);
     free(buf);
     if (ok) {
+        save_tail(sum, n);
         s.saved_elapsed = sec;
         s.saved_pos = pos;
         s.saved_sum = sum;
@@ -1920,6 +1989,8 @@ int ringnav_memory(void *out) {
             s.resume_pending = s.resume_wait = 1;
             s.resume_elapsed = g_memory_play == 2 || g_carmode ? (int)h.elapsed : 0;
             result = (int)pos;
+            ask_resume(buf + header_size + (h.n * 3 + h.hn + h.npend) * 4, h.n, map, pos,
+                       h.checksum);
         }
         s.restoring = result >= 0 ? 2 : 0;
     }
