@@ -33,7 +33,7 @@ demo	0x49cec4	0x4	list_into_icon_create	`addiu $2, $zero, 0x46`, before the only
 demo	0x49d17c	0x4	search_track_row_on_click	the only call to access, after "track"; tools/build.py CATALOGUE_ACCESS
 demo	0x49d470	0x4	search_fill_track_tab	`addiu $2, $zero, 0x4e`, before 2nd of 2 calls to widget_set_enable, after "label_track_msg"; patch/ipod.json immediates search_row (Search's rows: creation (Genres' rows take the list's default height))
 demo	0x49d4a8	0x4	search_fill_track_tab	`addiu $2, $zero, 0x46` (1st of 2 such), before the only call to button_create, after "label_track_msg"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
-demo	0x49d554	0x4	search_fill_track_tab	the only call to widget_set_children_layout, after "label_track_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x49d554	0x4	search_fill_track_tab	the only call to widget_set_children_layout, after "label_track_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x49d62c	0x4	search_fill_track_tab	`addiu $2, $zero, 0x46` (2nd of 2 such), before the only call to view_create, after "imgtrack_%d"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
 demo	0x49d670	0x4	search_fill_track_tab	`addiu $2, $zero, 0x18`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates search_title_h (Search's rows: the title's box, which holds the row's font)
 demo	0x49d67c	0x4	search_fill_track_tab	`addiu $6, $zero, 0xb`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates search_title_y (Search's Songs rows: the title's y)
@@ -41,7 +41,7 @@ demo	0x49d718	0x4	search_fill_track_tab	`addiu $2, $zero, 0x10` (2nd of 2 such),
 demo	0x49d724	0x4	search_fill_track_tab	`addiu $6, $zero, 0x29`, before 2nd of 2 calls to hscroll_label_create, after "labeltrack"; patch/ipod.json immediates search_meta_y (Search's rows: the second line's y)
 demo	0x49e7b0	0x4	search_fill_album_tab	`addiu $2, $zero, 0x4e`, before 2nd of 2 calls to widget_set_enable, after "label_album_msg"; patch/ipod.json immediates search_row (Search's rows: creation (Genres' rows take the list's default height))
 demo	0x49e7e8	0x4	search_fill_album_tab	`addiu $2, $zero, 0x46` (1st of 2 such), before the only call to button_create, after "label_album_msg"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
-demo	0x49e894	0x4	search_fill_album_tab	the only call to widget_set_children_layout, after "label_album_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x49e894	0x4	search_fill_album_tab	the only call to widget_set_children_layout, after "label_album_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x49e970	0x4	search_fill_album_tab	`addiu $2, $zero, 0x46` (2nd of 2 such), before the only call to view_create, after "imgalbum_%d"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
 demo	0x49e9b4	0x4	search_fill_album_tab	`addiu $2, $zero, 0x18`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates search_title_h (Search's rows: the title's box, which holds the row's font)
 demo	0x49e9c0	0x4	search_fill_album_tab	`addiu $6, $zero, 0xe`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates search_title24_y (Search's Albums rows: the title's y)
@@ -50,9 +50,9 @@ demo	0x49ea28	0x4	search_fill_album_tab	`addiu $6, $zero, 0x29`, before 2nd of 2
 demo	0x49f164	0x4	search_row_name_label_create	`addiu $2, $zero, 0x46`; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
 demo	0x49f320	0x4	search_fill_artist_tab	`addiu $2, $zero, 0x4e`, before 2nd of 2 calls to widget_set_enable, after "label_artist_msg"; patch/ipod.json immediates search_row (Search's rows: creation (Genres' rows take the list's default height))
 demo	0x49f35c	0x4	search_fill_artist_tab	`addiu $2, $zero, 0x46`, before the only call to button_create, after "label_artist_msg"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
-demo	0x49f404	0x4	search_fill_artist_tab	the only call to widget_set_children_layout, after "label_artist_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x49f404	0x4	search_fill_artist_tab	the only call to widget_set_children_layout, after "label_artist_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x49f6fc	0x4	search_fill_genre_tab	`addiu $2, $zero, 0x46`, before the only call to button_create, after "label_genre_msg"; patch/ipod.json immediates search_body (Search's rows: the button and its full-height children)
-demo	0x49f7a8	0x4	search_fill_genre_tab	the only call to widget_set_children_layout, after "label_genre_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x49f7a8	0x4	search_fill_genre_tab	the only call to widget_set_children_layout, after "label_genre_msg"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x4a1fd8	0x4	statusbar_dialog_slide_timer	1st of 2 calls to dialog_quit; tools/build.py FUNCTIONS
 demo	0x4a2de4	0x4	dialog_updatemusic_dialog_init	`sw $zero, -0x4f3c($2)`, the delay slot of the only call to toolsClearDbCount; patch/nav/input.c ringnav
 demo	0x4a36b4	0x4	volume_dialog_on_keyup	`beqz $2, +70 words`; tools/build.py VOL_DARK
@@ -255,6 +255,7 @@ demo	0x4faa68	0x4	switchBtPriority	`lw $2, 0x0($4)`, before the only call to btc
 demo	0x4faa74	0x4	switchBtPriority	`nop` (1st of 4 such), before the only call to btctl_set_codec_priority; tools/build.py LDAC_HQ
 demo	0x4faa80	0x4	switchBtPriority	`addiu $4, $zero, 0x16`, before 1st of 4 calls to btctl_set_ldac_quality; tools/build.py LDAC_HQ
 demo	0x4fbf2c	0x4	autoLinkBluetooth	the only call to checkPairDev; tools/build.py BT_AUTOLINK
+demo	0x4fc930	0x4	bluetooth_link_thread	`lbu $2, 0x0($17), forming g_bluetoothflag` (1st of 3 such), before 2nd of 4 calls to getBtLinkStatus; patch/bt_ui.c cancel_connect
 demo	0x4fdcbc	0x4	checkBluetoothStatus	1st of 3 calls to player_save_start, after "[%s]"; tools/build.py BT_CONNECT_START
 demo	0x4fe1e4	0x4	config_bt_init	the only call to initBluetoothParam; tools/build.py BT_PARAMS
 demo	0x4ff268	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetBatterycapacity; tools/build.py BATTERY_READS
@@ -295,8 +296,9 @@ demo	0x51f0ec	0x4	player_seek_start	`slti $2, $2, 0xb`, before 2nd of 4 calls to
 demo	0x51f5c8	0x4	player_get_id3info	the load of $25 for 1st of 2 calls to strcpy; tools/build.py ID3_PATH, tools/build.py build
 demo	0x51f5d0	0x4	player_get_id3info	1st of 2 calls to strcpy; tools/build.py ID3_PATH
 demo	0x51f6c0	0x4	player_get_id3info	`lw $4, 0x28($16)` (2nd of 4 such), before 2nd of 4 calls to player_set_coverinfo; patch/offsets.inc REC_COVER
-demo	0x5264c4	0x4	startPlayFolderSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c ringnav_player_start
-demo	0x5266b4	0x4	startPlayClassSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c ringnav_player_start
+demo	0x5264c4	0x4	startPlayFolderSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
+demo	0x5266b4	0x4	startPlayClassSong	`addiu $18, $zero, 0x1`, before 2nd of 2 calls to getFormatString, after "stSongInfo"; patch/playback.c has_server_row
+demo	0x52c7c8	0x4	sub_52c660	the only call to player_set_coverinfo; patch/cover_wake.c
 demo	0x531f60	0x4	folder_refresh	the load of $25 for the only call to widget_move_resize, after "tableview_folder"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x532000	0x4	folder_refresh	`addiu $5, $zero, 0x4e`, before the only call to table_client_set_row_height, after "tableclient_folder"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
 demo	0x532308	0x4	folder_page_go_up	`addiu $3, $zero, 0x4e`, after "sync"; patch/ipod.json immediates folder_pitch (Folder view: row creation, reset and artwork offset divisors (art_pitch unless the set gives its own))
@@ -327,6 +329,7 @@ demo	0x53550c	0x4	localmusic_page_init	`addiu $2, $zero, 0x4e`, before the only 
 demo	0x535540	0x4	localmusic_page_init	`addiu $20, $zero, 0x46`, before 1st of 8 calls to widget_use_style, after "s_btn_listitem"; patch/ipod.json immediates lib_body (the Library's row height (its constructor; navigation.c list_row_core reads it live)), patch/offsets.inc LIBRARY_ROW_BODY
 demo	0x535678	0x4	localmusic_page_init	`addiu $5, $zero, 0xa`, before 1st of 5 calls to image_create, after "s_btn_listitem"; patch/ipod.json immediates lib_inset (the Library's row icon x (its constructor; navigation.c list_row_core reads it live)), patch/offsets.inc LIBRARY_ROW_ICON_X
 demo	0x5356ac	0x4	localmusic_page_init	the load of $25 for 1st of 3 calls to image_set_draw_type, after "s_btn_listitem"; patch/nav/rows_settings.c list_row_core
+demo	0x5360f8	0x4	onlinematching_save_cover_lyric	the only call to player_set_coverinfo, after "/mnt/mmc/.downpic/s_%s.jpg"; patch/cover_wake.c
 demo	0x536484	0x4	onlinematching_save_cover_lyric	`addiu $6, $6, 0x67f0, forming "cp -rf %s "/mnt/mmc/.downpic/%s""` (6th of 7 such), before 6th of 7 calls to snprintf, after "/tmp/mmc_add"; tools/build.py LYRIC_SAVE_CALL, LYRIC_SAVE_FMT
 demo	0x53650c	0x4	onlinematching_save_cover_lyric	7th of 7 calls to snprintf, after "/tmp/mmc_add"; tools/build.py LYRIC_DROP_CALL, LYRIC_DROP_FMT
 demo	0x536510	0x4	onlinematching_save_cover_lyric	`addiu $6, $6, 0x6814, forming "rm -rf "/mnt/mmc/.downpic/%s""`, the delay slot of 7th of 7 calls to snprintf, after "/tmp/mmc_add"; tools/build.py LYRIC_DROP_CALL, LYRIC_DROP_FMT
@@ -337,7 +340,7 @@ demo	0x538510	0x4	songlist_row_on_load_data	1st of 2 calls to widget_set_text_ut
 demo	0x538a18	0x4	music_table_scroll_covers	`addiu $16, $zero, 0x4e`, before the only call to widget_lookup; patch/ipod.json immediates stock_row (stock's own table rows (Go to, Queue, special folders): creation, Go to's scroll divisor, special folders' row height)
 demo	0x538d5c	0x4	playerjumpinfo_table_on_prepare_row	`addiu $2, $zero, 0x4e`, before the only call to table_row_create, after "img_icon"; patch/ipod.json immediates stock_row (stock's own table rows (Go to, Queue, special folders): creation, Go to's scroll divisor, special folders' row height)
 demo	0x538d94	0x4	playerjumpinfo_table_on_prepare_row	`addiu $3, $zero, 0x46` (1st of 2 such), before the only call to button_create, after "img_icon"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
-demo	0x538e04	0x4	playerjumpinfo_table_on_prepare_row	1st of 2 calls to widget_set_children_layout, after "img_icon"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x538e04	0x4	playerjumpinfo_table_on_prepare_row	1st of 2 calls to widget_set_children_layout, after "img_icon"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x538e0c	0x4	playerjumpinfo_table_on_prepare_row	`addiu $3, $zero, 0x46` (2nd of 2 such), before 1st of 2 calls to image_create, after "img_icon"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
 demo	0x538eb4	0x4	playerjumpinfo_table_on_prepare_row	`addiu $2, $zero, 0x14`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_h (Go to's title box, which holds the row's font)
 demo	0x538ec0	0x4	playerjumpinfo_table_on_prepare_row	`addiu $6, $zero, 0xb`, before 1st of 2 calls to hscroll_label_create, after "view_info"; patch/ipod.json immediates stock_title_y (Go to's title y in its row)
@@ -347,7 +350,7 @@ demo	0x539a00	0x4	playermore_artist_info	`addiu $4, $4, -0x3324, forming "localm
 demo	0x53a01c	0x4	playermore_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_more"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x53acf8	0x4	playerqueue_row_on_click	`lw $gp, 0x10($sp)` (9th of 9 such), before the only call to sub_53aaf0, after "dialog/msginfo_dialog"; patch/playback.c VIEW_QUEUE_RET
 demo	0x53ae48	0x4	playerqueue_row_on_load_data	the only call to widget_set_text_utf8, after "scrlabel_name"; patch/ipod.json stock_row_text_calls (stock's own table rows: the title's face follows its text, bound with no relayout)
-demo	0x53aeac	0x4	playerqueue_row_on_load_data	the only call to widget_use_style, after "s_scrlabel_red24l"; patch/ipod.json stock_row_style_calls (Queue's rows: the playing row's mark, and its colour under a set that re-pitches them)
+demo	0x53aeac	0x4	playerqueue_row_on_load_data	the only call to widget_use_style, after "s_scrlabel_red24l"; patch/ipod.json stock_row_style_calls (Queue's rows: the playing row's mark, and its colour, as the set re-pitches them)
 demo	0x53b0fc	0x4	playerqueue_table_on_prepare_row	`addiu $2, $zero, 0x4e`, before the only call to table_row_create, after "s_scrlabel_white24l"; patch/ipod.json immediates stock_row (stock's own table rows (Go to, Queue, special folders): creation, Go to's scroll divisor, special folders' row height)
 demo	0x53b128	0x4	playerqueue_table_on_prepare_row	`addiu $fp, $zero, 0x46`, before 1st of 3 calls to widget_use_style, after "s_scrlabel_white24l"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
 demo	0x53b308	0x4	playerqueue_page_init	the load of $25 for the only call to widget_move_resize, after "table_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -372,10 +375,11 @@ demo	0x53f75c	0x4	specfolder_table_setup	`addiu $5, $zero, 0x4e`, before the onl
 demo	0x53fd48	0x4	specfolder_row_load_name	the only call to widget_set_text_utf8, after "listsscrlabel"; patch/ipod.json stock_row_text_calls (stock's own table rows: the title's face follows its text, bound with no relayout)
 demo	0x5402a0	0x4	specfolder_table_on_prepare_row	`addiu $2, $zero, 0x4e`, before the only call to table_row_create, after "img_choice"; patch/ipod.json immediates stock_row (stock's own table rows (Go to, Queue, special folders): creation, Go to's scroll divisor, special folders' row height)
 demo	0x5402d8	0x4	specfolder_table_on_prepare_row	`addiu $17, $zero, 0x46`, the delay slot of 1st of 3 calls to widget_use_style, after "img_choice"; patch/ipod.json immediates stock_body (stock's own table rows: the button and its full-height children)
-demo	0x540348	0x4	specfolder_table_on_prepare_row	the only call to widget_set_children_layout, after "img_choice"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout under a set that re-pitches them)
+demo	0x540348	0x4	specfolder_table_on_prepare_row	the only call to widget_set_children_layout, after "img_choice"; patch/ipod.json stock_row_layout_calls (stock's own table rows fit their title on a relayout, as the set re-pitches them)
 demo	0x541218	0x4	stream_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_stream"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x5412a4	0x4	stream_page_init	`addiu $2, $zero, 0x4e`, before the only call to list_item_create, after "s_btn_listitem"; patch/ipod.json immediates toolbar switch pages: no Home or Now Playing button (the keys go there) (the Library's and Streaming's stock rows take the list's default_item_height, as ours do (V1.32 passed 0, V1.36 passes 78))
 demo	0x541a70	0x4	systembar_showface	`lw $2, GOT[a page]` (2nd of 16 such), before 4th of 7 calls to widget_set_visible, after "bar_vol0"; patch/peq_ui.c peq_stock_eq
+demo	0x541e2c	0x4	systembar_showface	`lw $2, GOT[a page]` (16th of 16 such), after "bar_wifi0"; patch/nav/lyrics_status_bar.c battery_now
 demo	0x5422e4	0x4	updatemusic_page_bind_widget	the load of $25 for the only call to widget_move_resize, after "list_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x5bbc3c	0x4	mclSyncPlayerStatus	2nd of 2 calls to usleep, after "no-playing-status"; tools/build.py DARK_POLLS
 demo	0x5bc304	0x4	mcl_parse_lrc_file	the load of $25 for 2nd of 2 calls to fopen, after "cp "%s" %s"; tools/build.py LYRIC_OPEN, tools/build.py build

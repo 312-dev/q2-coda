@@ -159,7 +159,6 @@ class Machine:
         self.handlers=Handlers()
         if patched:  # a file and a clock; test/playback.py tests them
             self.handlers[payload_syms['press_stamp']]='stock_press_stamp'
-            self.handlers[payload_syms['mute_stamp']]='stock_mute_stamp'
             self.handlers[payload_syms['lw_syscall']]='stock_lw_syscall'  # 0: no eventfd, so the UI loop idles in sleep_ms (loop_wake.c)
         for name in FUNCTIONS: self.handlers[syms[name]]=name
         self.handlers[syms['strstr@GLIBC_2.0']]='strstr@GLIBC_2.0'  # libc's, which the payload's state-file reads call

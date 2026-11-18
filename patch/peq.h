@@ -224,10 +224,6 @@ _Static_assert(__builtin_offsetof(cast_tap, stamp) == 128 &&
 extern int
     press_natural; /* crossfade.c: inside a track change nobody pressed for, nothing stamps */
 void press_stamp(void), press_forget(void);
-/* An unpause goes back to where the fade began (docs/internals.md#unpause): demo writes now_ms,
- * never 0, just before a pause's mute; hciplayer reads it at the resume. */
-#define MUTE_FILE PEQ_ROOT "/tmp/q2mute"
-void mute_stamp(void);
 /* librespot (spotify.c) and its restart loop, whose pid its launcher left, stopped: Spotify's idle
  * stop and Home's Rockbox row, which lets ALSA go too. A q2video sink ends with librespot's pipe.
  */
