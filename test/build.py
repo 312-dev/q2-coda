@@ -365,6 +365,10 @@ def validate_assets(directory):
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
     demo = (directory/'demo').read_bytes()
+    # platform_init's PD18 input: pull_hiz (0) in stock, pull_up (2) here (docs/internals.md#otg-host-power)
+    from build import ID_PULL_UP
+    at, old, new = ID_PULL_UP
+    assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
     from build import ADB_HOOK, ADBD, ADB_GADGET, USB_SCRIPTS, adb_wrapper
     zones = bytearray(stock)

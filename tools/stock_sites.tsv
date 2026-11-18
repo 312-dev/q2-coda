@@ -280,6 +280,7 @@ demo	0x518768	0x4	importPlayList	the only call to toolsGetDirectoryM3u8, after "
 demo	0x518e84	0x4	network_checkstatus	the load of $25 for the only call to networkDisconnect; patch/wifi_flows.c cancel
 demo	0x51cd04	0x4	check_mem_thd	`addiu $gp, $gp, -0x2220`; tools/build.py DROP_CACHES
 demo	0x51d248	0x4	platform_init	the only call to btctl_create_daemon_thread, after "int"; tools/build.py BT_INIT
+demo	0x51d33c	0x4	platform_init	`move $5, $zero` (13th of 13 such), before 4th of 4 calls to toolsGpioInput, after "PD17"; tools/build.py ID_PULL_UP
 demo	0x51db14	0x4	player_parsecover_thd	2nd of 3 calls to snprintf, after "/mnt/mmc/.downpic/%s.jpg"; tools/build.py COVER_PICK_CALL, COVER_PICK_FMT
 demo	0x51db18	0x4	player_parsecover_thd	`addiu $6, $6, 0x2974, forming "cp -f "%s" '%s'"`, the delay slot of 2nd of 3 calls to snprintf, after "/mnt/mmc/.downpic/%s.jpg"; tools/build.py COVER_PICK_CALL, COVER_PICK_FMT
 demo	0x51dc5c	0x4	player_parsecover_thd	the only call to usleep, after "/tmp/airplaypic.png"; tools/build.py COVER_WAITS
