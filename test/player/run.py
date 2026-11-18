@@ -289,45 +289,87 @@ def test_bad_preload(player, songs, tmp):
     return 'played to the end, then exit, error and /tmp/notsupport'
 
 
-def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
-    """A card app's song still arriving in place (player/grow.c): a fifth of a1 is there and its .stream says get;
-    the player plays what is there, waits at its end (naming the song in /tmp/q2player.wait) rather than ending,
-    and once the rest lands and the line says done plays it to its end: the whole song, frame for frame."""
-    out = tmp/'grow'
+def grow(player, songs, out, head, land_at, extra=()):
+    """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
+    get, the rest landing at land_at (the line then done); extra are more steps (a seek). Returns the session, the PCM,
+    and the beats' reads of /tmp/q2player.wait (False when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
     whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
-    head = len(whole) // 5
     path.write_bytes(whole[:head])
-    seen = []
+    seen, have = [], [head]
 
-    def line(state, have):
-        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{have}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    def line(state, n):
+        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
 
     def beat(s):  # the app rewrites its line twice a second while the song arrives
-        line('get', head)
+        if have[0] < len(whole): line('get', have[0])
         seen.append((out/'tmp/q2player.wait').exists() and (out/'tmp/q2player.wait').read_text())
 
     def land(s):
         with open(path, 'ab') as f: f.write(whole[head:])
+        have[0] = len(whole)
         line('done', len(whole))
 
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
-    steps = boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 32)] + [(16.0, land), (40.0, None)]
+    steps = sorted(boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 2 * int(land_at) + 2)]
+                   + [(land_at, land), *extra], key=lambda st: st[0]) + [(land_at + 24.0, None)]
     s = fakedemo.Session(out)  # it empties out/tmp: the line after it
     s.music = songs
     line('get', head)
     s.run(steps, fakedemo.launch_host(player, str(songs), 4), 4)
-    got = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'], f'the song ended other than once, at its end: {exits}'
+    return s, pcm, seen
+
+
+def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
+    """A card app's song still arriving in place (player/grow.c): a fifth of a1 is there and its .stream says get;
+    the player plays what is there, waits at its end (naming the song in /tmp/q2player.wait) rather than ending,
+    and once the rest lands and the line says done plays it to its end: the whole song, frame for frame."""
+    whole = (songs/'a1.flac').read_bytes()
+    s, got, seen = grow(player, songs, tmp/'grow', len(whole) // 5, 16.0)
     want = reference(songs/'a1.flac')
     at = first_difference(got, want)
     assert at is None, f'{len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
     assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
-    assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
-    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
-    assert exits == ['{player-status\\exit}'], exits
     waited = seen.count('/mnt/mmc/.foo/grow.flac\n')
     return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
+
+
+def test_grow_seek_inside(player, songs, tmp):
+    """A seek inside the part of a growing FLAC on the card (a1 has no SEEKTABLE, so FFmpeg searches the file for it):
+    the song plays from the target at once, without waiting for the rest, and on to its end once the rest lands."""
+    whole = (songs/'a1.flac').read_bytes()
+    seek = [(2.0, '{mcl-seek\\9}')]  # 13 of a1's 20 s are there; the rest lands 6 s after the seek
+    s, got, seen = grow(player, songs, tmp/'grow-inside', len(whole) * 13 // 20, 8.0, seek)
+    ref = reference(songs/'a1.flac')
+    tail = ref[9 * 44100 * 4:]
+    assert got.endswith(tail), f'the PCM does not end with the reference from 9 s ({len(got) // 4} frames)'
+    head = got[:len(got) - len(tail)]
+    assert ref.startswith(head), f'{len(head) // 4} frames before the seek are not the reference start'
+    # what plays from 9 s by the time the rest lands (6 s after the seek, 4 s of it at the least) came before it
+    after = [p for t, p in s.positions if 2.0 < t < 8.0]
+    assert after and max(after) >= 12, f'the seek waited for the rest of the song: positions {after}'
+    assert '/mnt/mmc/.foo/grow.flac\n' not in seen, 'the player waited although the target was on the card'
+    return f'{len(head) // 4} frames, then the reference from 9 s at once (position {max(after)} s before the rest landed)'
+
+
+def test_grow_seek_beyond(player, songs, tmp):
+    """A seek past the part of a growing FLAC on the card: the player waits there (naming the song for the spinner)
+    rather than ending the song, and plays from the target once its bytes land: the reference from 15 s to the end."""
+    whole = (songs/'a1.flac').read_bytes()
+    seek = [(2.0, '{mcl-seek\\15}')]  # 4 of a1's 20 s are there; the rest lands 6 s after the seek
+    s, got, seen = grow(player, songs, tmp/'grow-beyond', len(whole) // 5, 8.0, seek)
+    ref = reference(songs/'a1.flac')
+    tail = ref[15 * 44100 * 4:]
+    assert got.endswith(tail), f'the PCM does not end with the reference from 15 s ({len(got) // 4} frames)'
+    head = got[:len(got) - len(tail)]
+    assert ref.startswith(head), f'{len(head) // 4} frames before the seek are not the reference start'
+    assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
+    return f'{len(head) // 4} frames, a wait, then the reference from 15 s to the end'
 
 
 def check_not_played(player, songs, tmp, scenario):
