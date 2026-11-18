@@ -610,7 +610,7 @@ m.alive=False; m.poll(10000); m.poll(30000); assert 'killall -9 librespot aplay'
 m=BrowseMachine(); m.open(); m.answer(*ME); m.row(0)
 m.answer('ok','','next',[track('spotify:track:'+str(i),str(i)) for i in range(50)])
 m.pick(50); m.answer(*OK,[]); m.back(); view=m.find('scroll_view')
-assert m.nodes[view]['_ringnav_index']==50 and m.get(view+O['SCROLL_Y'])==51*52-m.get(view+O['W_H'])
+assert m.nodes[view]['_ringnav_index']==50 and m.get(view+O['SCROLL_Y'])==51*52-m.get(view+O['W_H']),('DIAG',m.get(view+O['SCROLL_Y']),m.get(view+O['W_H']),signed(m.get(view+O['W_Y'])),m.nodes[view]['_ringnav_index'])
 m.paint(view); assert m.nodes[view]['_ringnav_index']==50; passed()
 # More beyond the history limit keeps the operation, context and title while recycling a level.
 m=BrowseMachine(); m.open(); m.answer(*ME); m.row(2)
