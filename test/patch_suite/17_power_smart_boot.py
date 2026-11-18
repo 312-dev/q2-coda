@@ -105,7 +105,8 @@ class StandbyMachine(PowerMachine):
         self.opened=[]; self.pass_(1); return [p for p,*_ in self.opened]==['poweroff_page']
 start=1792363806
 m=StandbyMachine(key=600); m.calls=[]; assert m.standby()==['suspend'] and not m.opens
-assert [m.text(c[1]) for c in m.calls if c[0]=='system@GLIBC_2.0']==['/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1']
+assert [m.text(c[1]) for c in m.calls if c[0]=='system@GLIBC_2.0']==['/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1',
+    'devmem 0x1000003c 32 $(( $(devmem 0x1000003c) | 0x20000000 )); devmem 0x10000040 32 $(( $(devmem 0x10000040) | 0x01800000 ))']  # usb_otg.c otg_hold
 assert not m.off(); passed()
 for i in (1,2,3):
     alarm=start+O[f'STANDBY_LIMIT_{i}']*3600; m=StandbyMachine({'STANDBYLIMIT':str(i)})
