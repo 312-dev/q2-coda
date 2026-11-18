@@ -255,6 +255,10 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 BOOT = 'usr/bin/q2boot'
 # The heat log and overheat guardian (docs/internals.md#overheat-guardian, patch/q2guard.c): BOOT_HOOK starts it.
 GUARD = 'usr/bin/q2guard'
+# The link monitor's codec switch (docs/internals.md#bluetooth-link-monitor, patch/q2bt_codec.c): q2guard runs it to
+# step a weak link down from aptX HD; libdbus sends bluealsa the SelectCodec dbus-send cannot.
+BT_CODEC = 'usr/bin/q2bt-codec'
+BT_CODEC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 # --dev only: q2guard takes a temperature from /tmp/q2guard.sensor, so the emulator can play an overheat.
 GUARD_DEV_HOOK = (b' /usr/bin/q2guard ', b' /usr/bin/q2guard --dev ')
 # The boot animation's player (docs/boot.md#boot-animation, patch/splash.c): S11logo_display_shell runs it.
@@ -2993,6 +2997,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
+                               BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
