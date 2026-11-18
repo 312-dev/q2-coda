@@ -77,7 +77,7 @@ def search(text,event='EVT_VALUE_CHANGED'):
     assert m.get(edit+O['W_Y'])+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')  # above the keyboard, alone
     m.nodes[edit]['text']=text; f,ctx=m.handler(edit,O[event])
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
-search('jazz fm'); assert m.labels()==['Internet Radio','Loading…',''] and not m.find('edit')
+search('jazz fm'); assert m.labels()[0]=='Internet Radio' and 'Loading…' not in m.labels() and not m.find('edit')  # the box closed onto the menu, the loading overlay over it
 m.reply=b'#EXTM3U\n#EXTINF:1,Jazz FM\nhttp://jazz/fm\n'; m.worker()
 assert m.opts[10002]=='https://all.api.radio-browser.info/m3u/stations/byname/jazz%20fm?order=votes&reverse=true&limit=100&hidebroken=true'
 assert m.labels()==['jazz fm','Jazz FM']; m.back(); assert m.labels()[0]=='Internet Radio'
@@ -198,10 +198,11 @@ for count, padding, saved in ((200, b'', True), (201, b'', False),
     assert bytes(large.files[RDIR+'/favourites.m3u']) == (b'#EXTM3U\n' + b''.join(
         f'#EXTINF:-1,http://station/{i}\nhttp://station/{i}\n'.encode() for i in range(1, count)) if saved else original)
 passed()
-# Top Stations: the directory's m3u, fetched on the worker over verified TLS, "Loading…" meanwhile.
+# Top Stations: the directory's m3u, fetched on the worker over verified TLS, the menu under the loading overlay
+# meanwhile.
 # Return goes up a level at a time, then back to Streaming. Without Wi-Fi it says so.
 m.back(); assert m.labels()[0]=='Internet Radio' and m.labels()[1]=='Now Playing'
-m.row(3); assert m.labels()==['Internet Radio','Loading…',''] and len(m.threads)==1
+m.row(3); assert m.labels()[:2]==['Internet Radio','Now Playing'] and len(m.threads)==1
 m.reply=b'#EXTM3U\n#RADIOBROWSERUUID:7\n#EXTINF:1,MANGORADIO\nhttps://mango/r\n\n#EXTINF:1,Dance Wave!\nhttps://dance/w.mp3\n'
 m.worker(); assert m.labels()==['Top Stations','MANGORADIO','Dance Wave!']
 assert m.opts[10002]=='https://all.api.radio-browser.info/m3u/stations/topvote/100?hidebroken=true'

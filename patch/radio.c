@@ -153,6 +153,10 @@ static struct {
     int wifi; /* the fetch waits for Smart Wi-Fi's link */
     list_t pick, list;
     char caption[64];
+    /* pend: a fetch from a list on show waits under the loading overlay
+     * (docs/oled-design.md#loading), the list left as it is until the new one, or its note, is
+     * there */
+    char pend;
 } ui __attribute__((section(".scratch")));
 
 static struct {
@@ -521,7 +525,7 @@ static int search_left(void *ctx, void *event) {
 /* navigation.c's pull-to-search, released on the radio page: peq_ui.c's T9 edit over the title,
  * its keyboard open. */
 void radio_search(void) {
-    if (!ui.page || ui.note || ui.edit) return;
+    if (!ui.page || ui.note || ui.edit || ui.pend) return;
     if (ui.view) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     widget_destroy_children(ui.page), ui.view = 0; /* the box alone: the keyboard leaves no room for the rows */
     ui.edit = edit_create(ui.page, "text", 2, 26);
@@ -607,14 +611,38 @@ static void fetch(const char *path, int want, int az) {
         fetch_run();
 }
 
-/* fx.url fetched on fx's pthread, "Loading…" meanwhile. */
+/* fx.url fetched on fx's pthread: from a list on show under the loading overlay, else (a fetch
+ * Smart Wi-Fi held back, its note on show) "Loading…" meanwhile. */
 static void fetch_run(void) {
     fx.n = 0;
     fx.cancel = fx.done = 0;
     fx.code = 0;
     fx.running = get_wifisignal() > 0 && (fx.body = calloc(FETCH_MAX, 1)) &&
                  !pthread_create(&fx.thread, 0, fetch_worker, 0);
-    note(fx.running ? "Loading…" : get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
+    if (fx.running && ui.view && !ui.note)
+        ui.pend = 1, widget_invalidate_force(ui.page, 0);
+    else
+        note(fx.running ? "Loading…" : get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
+}
+
+/* The loading overlay let go: the transfer stopped and joined, the list as it was (Return, or a
+ * tap off the spinner). */
+static void load_cancel(void) {
+    ui.pend = 0;
+    fetch_cancel();
+    if (ui.page) widget_invalidate_force(ui.page, 0);
+}
+
+/* The page's touches while the overlay shows: taken from its rows (list_marks.c load_touch). */
+static int touched(void *ctx, void *event) {
+    return ui.pend && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
+               ? load_touch(ui.page, event, load_cancel)
+               : 0;
+}
+
+/* nav/row_paint.c, after stock painted w: the overlay over the page while a fetch waits. */
+void radio_paint(void *w, void *canvas) {
+    if (ui.pend && w && w == ui.page) load_spinner_paint(w, canvas);
 }
 
 static unsigned fetch_got(const char *data, unsigned size, unsigned n, void *unused) {
@@ -657,6 +685,7 @@ static int tick(const void *unused) {
     if (!fx.running || !fx.done) return 8; /* RET_REPEAT */
     pthread_join(fx.thread, 0);
     fx.running = 0;
+    ui.pend = 0;
     if (fx.code == 200 && fx.n) {
         list_t *l = ui.want == PICK ? &ui.pick : &ui.list;
         list_set(l, fx.body, fx.n, ui.want == PICK, !ui.genre);
@@ -677,6 +706,7 @@ static int go(const void *unused) {
     char key[128], path[256];
     int i = ui.arg;
     ui.go = 0;
+    if (ui.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (ui.next == R_FAVS) {
         favs_read(&ui.list, 1);
         tk_snprintf(ui.caption, sizeof ui.caption, "Favorites"); /* none: the empty state (show) */
@@ -690,6 +720,8 @@ static int go(const void *unused) {
     } else if (ui.next == A_SEARCH) {
         url_escape(ui.caption, key, sizeof key);
         tk_snprintf(path, sizeof path, "/m3u/stations/byname/%s" RADIO_QUERY, key);
+        if (ui.edit)
+            show(ui.level);       /* the box closed onto the list, the search under the overlay */
         fetch(path, STATIONS, 0); /* Search and Top Stations stay by votes */
     } else if (ui.next == R_TOP) {
         tk_snprintf(ui.caption, sizeof ui.caption, "Top Stations");
@@ -718,6 +750,7 @@ static void later(int next, int arg) {
 
 static int menu_click(void *ctx, void *event) {
     int r = ui.rows[(int)(long)ctx];
+    if (ui.pend) return 0;
     if (r != R_PLAYING) {
         ui.favs = r == R_FAVS, ui.from = MENU;
         ui.sel[STATIONS] = 0;
@@ -736,12 +769,14 @@ static int menu_click(void *ctx, void *event) {
 }
 
 static int pick_click(void *ctx, void *event) {
+    if (ui.pend) return 0;
     ui.favs = 0, ui.from = PICK;
     later(A_PICK, (int)(long)ctx);
     return 0;
 }
 
 static int station_click(void *ctx, void *event) {
+    if (ui.pend) return 0;
     list_copy(&rd.list, &ui.list);
     radio_play((int)(long)ctx);
     np_open();
@@ -763,7 +798,10 @@ const char *radio_hold(void *top) {
 
 static int leave(const void *unused) {
     ui.leave = 0;
-    if (ui.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box */
+    if (ui.pend) /* the fetch cancelled: the list stays */
+        load_cancel();
+    else if (ui.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the
+                         box */
         widget_set_text_utf8(ui.edit, ""), widget_set_focused(ui.edit, 0);
     else if (ui.note)
         fetch_cancel(), show(ui.level);
@@ -793,6 +831,10 @@ static int closed(void *ctx, void *event) {
 /* Streaming's Internet Radio row (home.c ringnav_stream). */
 int radio_open(void *ctx, void *event) {
     if (ui.page || !(ui.page = page_open("radio_page", closed, keyup))) return 0;
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(ui.page, touches[t], touched, 0);
     if (access(RADIO_DIR, 0)) mkdir(RADIO_DIR, 0777);
     ui.timer = timer_add(tick, 0, 250);
     show(MENU);
