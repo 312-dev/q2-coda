@@ -537,8 +537,9 @@ assert fl('Songs',(TFACE,TPX)) and fl('歌',CJK) and fl('Песни',(TFACE,TPX)
 # A virtual table binds a pooled row's text with no relayout (table_client's load loop, #217): ringnav_table_load runs stock's on_load_data (a PIC
 # call), then each label its layout gave a face finds it again for the new text, at its own role's size (a title and a tall title, each
 # Inter at its px; CJK stock's face at Inter's fallback share); a label never themed stays as it was.
-from build import TABLE_LOAD_CALL
+from build import TABLE_LOAD_CALL, TABLE_SCROLL_CALLS
 tdemo=(B/'demo').read_bytes(); assert struct.unpack_from('<I',tdemo,fileoff(tdemo,TABLE_LOAD_CALL))[0]==jal(payload_syms['ringnav_table_load'])
+assert all(struct.unpack_from('<I',tdemo,fileoff(tdemo,a))[0]==jal(payload_syms['ringnav_table_scroll']) for a,_ in TABLE_SCROLL_CALLS)  # a table's release clamps to the list end
 class LoadMachine(Machine):
     def hook(self,u,address,size,unused):
         if self.handlers.get(address)!='tbl:load': return super().hook(u,address,size,unused)

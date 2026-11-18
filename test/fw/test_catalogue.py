@@ -418,6 +418,33 @@ def test_offline_a_list_plays_its_card_rows_and_copies_and_shuffle_leaves_the_re
     assert load(rig, queue(rig, ['/mnt/mmc/Music/a.flac']), 0) == (0, 0, None)
 
 
+@pytest.mark.parametrize('pressed', ['s2', 'card'])
+def test_a_press_that_loads_nothing_does_not_start_the_queue_stock_had_again(rig, fw, pressed):
+    """Stock's player_start loads the list (ringnav_load), then starts the queue at its position, whatever the load
+    did. A server row that loaded nothing (handed to its app, or here one that can't play offline) left the old
+    queue there, and its song started again from 0: a paused song was heard until np_stop's stop reached the player
+    (the device, 2026-11-18). That start is refused; a card row's press starts as before, and so does a start after."""
+    rig.write(1, [song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    q = queue(rig, ['/mnt/mmc/Music/a.flac', url('s2')])
+    at = 1 if pressed == 's2' else 0
+    order = []
+    load = fw.fn('ringnav_load', C.c_int, C.c_void_p, C.c_int, C.c_int)
+    start = fw.fn('ringnav_start_player', C.c_int)
+    fw.mock('stock_load_trampoline', lambda *_: order.append('load') or 1)
+    fw.mock('stock_start_player_trampoline', lambda *_: order.append('start') or 1)
+
+    def stock_player_start(q, at, cls, mode, *_):  # player_start (0x520b4c): mclLoadPlayList, then mclStartPlayer
+        load(q, at, cls)
+        order.append(start())
+        return 1
+    fw.mock('stock_player_start_trampoline', stock_player_start)
+    fw.fn('ringnav_player_start', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int)(q, at, 0xf001, 2)
+    assert order == ([-1] if pressed == 's2' else ['load', 'start', 1])
+    order.clear()
+    assert start() == 1 and order == ['start']  # the next start, a Play press, is stock's
+
+
 def app_running(rig):
     """The catalogue app on the card and running: its binary, and its launcher's pid file."""
     rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''

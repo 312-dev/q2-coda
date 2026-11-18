@@ -1066,9 +1066,8 @@ def test_stop_during_first_fill(player, songs, tmp):
 
 
 def test_stop_right_after_a_next(player, songs, tmp):
-    """A stop 20 ms after a set-nexturl, before the player has taken the song it named (patch/catalogue.c np_stop, after
-    stock's player_start plays its queue again at a server song's press): nothing plays after it, and the stop is
-    answered. The device, 2026-11-18: the stop was lost, and the song playing started again from 0."""
+    """A stop 20 ms after a set-nexturl, before the player has taken the song it named (what a server song's press
+    sent before patch/playback.c playback_start_refused): nothing plays after it, and the stop is answered. The device, 2026-11-18: the stop was lost, and the song playing started again from 0."""
     s, pcm, names = play(player, songs, 'restart-stop', tmp/'restart-stop')
     out, a1 = b''.join(pcm), reference(songs/'a1.flac')
     got = len(out) // 4
@@ -1080,6 +1079,19 @@ def test_stop_right_after_a_next(player, songs, tmp):
     a1_path = f'{songs}/a1.flac'
     assert logged == [f'q2player: set-songurl {a1_path}', f'q2player: set-nexturl {a1_path}', 'q2player: mcl-stop'], logged
     return f'{got / 44100:.1f} s played, then stopped; {events(s)}'
+
+
+def test_pause_then_pick(player, songs, tmp):
+    """A song paused at 3 s, another picked at 5 s (set-nexturl): no frame of the paused song is written after the
+    pick, only those before the pause (2 s heard and the PCM's 500 ms ahead, dropped at the cut), then the picked
+    song from its start in the same PCM."""
+    s, pcm, names = play(player, songs, 'pause-pick', tmp/'pause-pick')
+    out, a1, a2 = b''.join(pcm), reference(songs/'a1.flac'), reference(songs/'a2.flac')
+    old = (first_difference(out, a1) or 0) // 4
+    assert old <= int(2.6 * 44100), f'{old} frames of the paused song, {old / 44100:.2f} s: some came after the pause'
+    assert out[old * 4:] == a2[:len(out) - old * 4] and len(out) > old * 4, f'{names}: not a2 from its start after the paused song'
+    assert names == ['0000_44100_2_s16.raw'] and events(s) == ['{player-nextstatus\\exit}'], (names, events(s))
+    return f'{old / 44100:.2f} s of the paused song, then the pick'
 
 
 def qq_env(tmp):

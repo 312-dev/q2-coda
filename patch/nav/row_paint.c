@@ -938,6 +938,7 @@ int ringnav_paint(void *w, void *canvas) {
         if (bar) paint_scrollbar(canvas, bar, table);
     }
     addon_paint(w, canvas);
+    radio_paint(w, canvas); /* Internet Radio's loading overlay */
     artist_local_paint(w, canvas);
     np_about_paint(w, canvas);
     peq_paint(w, canvas);

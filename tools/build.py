@@ -609,6 +609,10 @@ TABLE_LOAD_CALL = 0x5dcdac
 # by bal table_client_set_yoffset(client, yoffset_save - dy) with no bound, and its release springs back from past an
 # end: jal ringnav_table_drag, which holds the offset between the list's ends.
 TABLE_DRAG_CALL = (0x5ddf04, 0x0411fbf6)
+# Its release scrolls to the fling's target (and back from an over-drag) by bal table_client_scroll_to, whose clamp is
+# the rows less the client's height: the box's foot at the screen's, where a drag held to the list end would be sent
+# back to. Both calls become jal ringnav_table_scroll, which clamps to the list end.
+TABLE_SCROLL_CALLS = ((0x5ddd14, 0x0411fd7a), (0x5dde50, 0x0411fd2b))
 # Folder row names are text, not printf formats ("99% Invisible" crashes stock's formatter).
 # tk_strncpy writes its terminator at n, so reserve the last byte of the 512-byte buffer.
 FOLDER_NAME = ((0x532cb0, 0x24050200, 0x240601ff),  # a2 = 511
@@ -1822,7 +1826,7 @@ FUNCTIONS = {
  'widget_dispatch_simple_event': ('int', 'void *, unsigned'),
  'scroll_view_set_offset': ('int', 'void *, int, int'),
  'scroll_view_scroll_to': ('int', 'void *, int, int, int'),
- 'table_client_scroll_to': ('int', 'void *, int'),
+ 'table_client_scroll_to': ('int', 'void *, int, int'),
  'table_client_get_virtual_h': ('int', 'void *'),
  'scroll_view_scroll_delta_to': ('int', 'void *, int, int, int'),
  'widget_destroy_children': ('int', 'void *'),
@@ -2235,7 +2239,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
-                 'ringnav_table_load', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
+                 'ringnav_table_load', 'ringnav_table_scroll', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
 
 
 def compile_payload(out):  # pragma: no mutate block
@@ -2752,6 +2756,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           "table load: expected on_load_data's callback")  # lw t9, 0xe4(s4)
     patch_word(patched, TABLE_LOAD_CALL, 0x0320f809, jal(ps['ringnav_table_load']), "a bound table row's faces")
     patch_word(patched, *TABLE_DRAG_CALL, jal(ps['ringnav_table_drag']), 'a drag stops at a table\'s ends')
+    for call in TABLE_SCROLL_CALLS:
+        patch_word(patched, *call, jal(ps['ringnav_table_scroll']), 'a fling stops at a table\'s list end')
     for word in FOLDER_NAME:
         patch_word(patched, *word, 'folder names are literal text')
     # The GOT loads Q2 Muse writes (FOLDER_NAME's, and tools/ipod.py's two): no stock word beside one names its slot, and

@@ -8,7 +8,7 @@ import ctypes as C
 import pytest
 
 from conftest import O, Files, STRIP_SEARCH, strip_return
-from test_streaming import (A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
+from test_streaming import (SPOT_DEPTH, S_READY, A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
                             L_LIST, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
 
 STATE, DOWNLOAD, LOG, OUT = '/tmp/q2-librespot.state', '/tmp/q2-librespot.download', '/mnt/mmc/.spotify/spot.log', '/tmp/q2-librespot.out'
@@ -810,6 +810,11 @@ class Browser:
     def top(self):
         return self.br.lv[self.br.depth - 1]
 
+    @property
+    def asked(self):
+        """The level a press asked for: the one under the loading overlay (spotify.c push) until its reply comes."""
+        return self.br.lv[SPOT_DEPTH] if self.br.pend else self.top
+
     def request(self):
         return C.string_at(self.wk.buf)[:self.wk.len] if self.wk.buf else b''
 
@@ -880,7 +885,7 @@ def test_search_lays_its_box_over_the_menu_and_opens_the_term_s_categories(fw):
     assert b.w.title == 'AC%DC' and b.opens() == [True] * 4 and not b.br.edit  # the term over its four categories
     albums = b.captions()[1]
     b.click(1)  # tracks, albums, artists, playlists
-    assert b.request().endswith(b'\tsearch\talbums\tAC%25DC\n') and b.top.title.decode() == albums and b.top.kind == L_LIST
+    assert b.request().endswith(b'\tsearch\talbums\tAC%25DC\n') and b.asked.title.decode() == albums and b.asked.kind == L_LIST
 
 
 def test_the_keyboard_shut_with_text_searches_too(fw):
@@ -921,7 +926,9 @@ def test_return_goes_back_a_level_then_from_the_menu_to_streaming(fw):
     b.menu()
     menu = b.listing()
     b.click(ALBUMS)
-    assert b.br.depth == 2 and b.request().endswith(b'\talbums\n')
+    assert b.request().endswith(b'\talbums\n')
+    b.answer(rows=[track(1)])
+    assert b.br.depth == 2
     b.back()
     assert b.br.depth == 1 and b.listing() == menu and not fw.calls('navigator_back')
     b.back()
@@ -955,7 +962,7 @@ def test_an_older_add_on_s_download_status_is_toasted(fw):
     b.click(2)  # the note to update the add-on: nothing to send
     assert b.wk.id == asked
     b.click(0)  # Downloaded Tracks
-    assert b.top.op == b'downloaded' and b.request().endswith(b'\tdownloaded\n')
+    assert b.asked.op == b'downloaded' and b.request().endswith(b'\tdownloaded\n')
 
 
 def test_without_the_status_op_the_update_note_does_nothing(fw):
@@ -982,7 +989,7 @@ def storage(fw, which):
 
 def test_tracks_are_selected_previewed_and_removed_once_confirmed(fw):
     b = storage(fw, REMOVE_TRACKS)
-    assert b.top.kind == L_SELECT and b.request().endswith(b'\tdownloaded\n')
+    assert b.asked.kind == L_SELECT and b.request().endswith(b'\tdownloaded\n')
     b.answer(rows=[track(1, b''), track(2, b''), track(3, b'')])
     assert b.captions()[:3] == ['Song 1', 'Song 2', 'Song 3'] and len(b.captions()) == 4  # and Remove Selected…
     unselected = b.details()[0]
@@ -1004,7 +1011,7 @@ def test_tracks_are_selected_previewed_and_removed_once_confirmed(fw):
 
 def test_playlists_are_removed_by_their_ids_comma_separated(fw):
     b = storage(fw, REMOVE_PLAYLISTS)
-    assert b.top.kind == L_SELECT and b.request().endswith(b'\tcollections\n')
+    assert b.asked.kind == L_SELECT and b.request().endswith(b'\tcollections\n')
     b.answer(rows=[(b'collection', b'liked', b'Liked Songs', b'50 of 50', b'', b''),
                    (b'collection', b'spotify:playlist:9', b'Road Trip', b'3 of 40', b'', b'')])
     b.click(0)
@@ -1060,7 +1067,7 @@ def test_a_saved_playlist_plays_from_its_manifest_and_has_its_download_controls(
     b.answer(rows=[(b'collection', b'liked', b'Liked Songs', b'50 of 50', b'', b'')])
     assert b.opens() == [True]
     b.click(0)
-    assert b.top.op == b'collection' and b.top.title == b'Liked Songs' and b.request().endswith(b'\tcollection\tliked\n')
+    assert b.asked.op == b'collection' and b.asked.title == b'Liked Songs' and b.request().endswith(b'\tcollection\tliked\n')
     b.answer(rows=[(b'track', b'spotify:track:7', b'Seven', b'A', b'liked', b'51'),
                    (b'missing', b'spotify:track:8', b'Eight', b'Unavailable', b'liked', b'52')])
     assert b.captions()[:2] == ['Seven', 'Eight'] and b.opens() == [False, False, True]  # and its download controls
@@ -1103,6 +1110,55 @@ def test_liked_songs_downloads_whole_with_saved_collections(fw, caps, offered):
         assert b.request().endswith(b'\tdownloadliked\n') and b.br.act == A_DOWNLOAD
         b.answer(msg=b'Downloading 50 tracks')
         assert b.toasts == ['Downloading 50 tracks']
+
+
+# The loading overlay (docs/oled-design.md#loading): a list is asked for over the shown rows, entered once it comes.
+def loading(fw):
+    b = Browser(fw)
+    b.menu()
+    menu = b.listing()
+    b.click(LIKED)
+    return b, menu
+
+
+def spot_touch(b, kind, x, y):
+    e = C.create_string_buffer(0x40)
+    for field, v in (('EVENT_TYPE', O[kind]), ('EVENT_X', x), ('EVENT_Y', y)):
+        C.c_int.from_buffer(e, O[field]).value = v
+    return handler(b.fw, b.br.page, O[kind])(C.addressof(e))
+
+
+def test_a_list_loads_under_the_overlay_over_the_menu(fw):
+    b, menu = loading(fw)
+    assert b.br.pend == 1 and b.br.depth == 1 and b.top.state == S_READY and b.listing() == menu  # the menu stays
+    assert b.request().endswith(b'\tliked\n') and b.br.lv[SPOT_DEPTH].op == b'liked'
+    b.answer(rows=[track(1), track(2)])
+    assert b.br.pend == 0 and b.br.depth == 2 and b.top.op == b'liked' and b.top.state == S_READY and b.top.n == 2
+    assert len(b.captions()) == 2
+
+
+def test_return_cancels_a_spotify_list_and_stays_on_the_menu(fw):
+    b, menu = loading(fw)
+    cancelled = b.wk.id
+    b.back()
+    assert b.br.pend == 0 and b.br.depth == 1 and b.listing() == menu and not b.wk.running and not b.wk.buf
+    b.tick(), b.tick()
+    assert b.br.depth == 1 and b.wk.id == cancelled  # nothing asked again, nothing opened
+
+
+def test_a_tap_off_the_spinner_cancels_a_spotify_list(fw):
+    b, menu = loading(fw)
+    assert spot_touch(b, 'EVT_POINTER_DOWN', 187, 160) == 11 and spot_touch(b, 'EVT_POINTER_UP_BEFORE', 187, 160) == 11
+    assert b.br.pend == 1  # on the spinner
+    assert spot_touch(b, 'EVT_POINTER_DOWN', 40, 100) == 11 and spot_touch(b, 'EVT_POINTER_UP_BEFORE', 40, 100) == 11
+    assert b.br.pend == 0 and b.br.depth == 1 and b.listing() == menu
+
+
+def test_centre_on_the_menu_while_a_list_loads_asks_nothing_again(fw):
+    b, _ = loading(fw)
+    sent = b.wk.id
+    b.click(PLAYLISTS)
+    assert b.wk.id == sent and b.br.pend == 1 and b.br.lv[SPOT_DEPTH].op == b'liked'
 
 
 def asked_card(fw):

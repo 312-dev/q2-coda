@@ -1693,8 +1693,9 @@ static int req_done(void) {
 }
 
 /* The page: addon_page, for app slot pg.a, one page_list rebuilt per level.
- * A level is an op and its arguments; only the top one keeps its reply, cut in place by spot_reply
- * into the header's 4 fields and 6 a row; Back asks again for the one below. A row's kind: list
+ * A level is an op and its arguments; the top one's reply is the shown one, cut in place by
+ * spot_reply into the header's 4 fields and 6 a row, and each level under it keeps its own (kept)
+ * so Back shows it at once and asks for it again. A row's kind: list
  * opens the level uri (its context the argument), action sends uri with the context and toasts the
  * reply's message, search opens the T9 box (OK opens "search" for the text; a list's first one is
  * the title bar's search icon instead, take_find), sort opens as list does (caps word "sort"; one
@@ -1742,6 +1743,14 @@ typedef struct {
                          rows' */
 } lv_t;
 
+/* A level under the top one's reply, kept for Back (pop): its pages, their fields (calloc'd, 4 + 6
+ * a row) and its sort icon's row. f 0: none kept. */
+typedef struct {
+    char *buf[ADDON_PAGES], **f;
+    int pages;
+    char *sort[6];
+} kept_t;
+
 static struct {
     void *page, *view, *edit;
     unsigned timer, go, leave, again; /* again: when a waiting or live level asks again */
@@ -1753,6 +1762,7 @@ static struct {
     unsigned acted; /* when the action was sent */
     char term[64], aop[16];
     lv_t *lv; /* ADDON_DEPTH of them, calloc'd, and one more: the level push() waits on (pend) */
+    kept_t *kept; /* ADDON_DEPTH, calloc'd with lv: kept[i] level i's reply while one is over it */
     /* The shown reply, the top level's (no other keeps one): pages replies, each realloc'd to its
      * size, their fields in f (calloc'd with lv), every page's rows in turn; paging: a next page in
      * flight (page_next). */
@@ -1767,10 +1777,12 @@ static struct {
     int art_lo, art_hi; /* the rows whose covers may be decoded, half open (art_window) */
     char *sort[6];      /* the sort icon's row (take_sort), its fields in the shown reply */
     int field;          /* the box open is field row field - 1's; 0, a search's */
-    /* pend: a pushed level's first reply awaited under the loading overlay, the shown level and its
-     * rows left as they are (docs/oled-design.md#loading); the level waits in lv[ADDON_DEPTH], its
-     * id the request's, never reused, so a reply to a cancelled one matches nothing */
+    /* pend: a level's first reply awaited under the loading overlay (P_*: how it is taken), the
+     * shown level and its rows left as they are (docs/oled-design.md#loading); the level waits in
+     * lv[ADDON_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
+     * nothing; pmoved: the way a level in the top's place slides in */
     char pend;
+    signed char pmoved;
 } pg __attribute__((section(".scratch")));
 
 static void qr_open(const char *state, const char *title);
@@ -2550,16 +2562,37 @@ static void keep_sel(void) {
         top()->sel = widget_get_prop_int(pg.view, "_ringnav_index", 0);
 }
 
-/* next over the top level, which lets its reply go (Back asks for it again). */
+static void kept_free(kept_t *k) {
+    while (k->pages) free(k->buf[--k->pages]);
+    free(k->f);
+    k->f = 0;
+}
+
+/* next over the top level, which keeps its reply for Back (kept; pop shows it at once and asks
+ * again) when it shows its rows, else lets it go (Back asks for it again, its Loading… page
+ * meanwhile). ponytail: every level under the top keeps its pages, up to ADDON_DEPTH - 1 of them
+ * of ADDON_PAGES replies each, where letting the lower ones go would bound it at one level's. */
 static void enter(const lv_t *next) {
     keep_sel();
     if (pg.depth == ADDON_DEPTH) { /* the oldest past the base forgotten */
-        for (int i = 1; i < ADDON_DEPTH - 1; ++i) pg.lv[i] = pg.lv[i + 1];
+        kept_free(&pg.kept[1]);
+        for (int i = 1; i < ADDON_DEPTH - 1; ++i)
+            pg.lv[i] = pg.lv[i + 1], pg.kept[i] = pg.kept[i + 1];
+        memset(&pg.kept[ADDON_DEPTH - 1], 0, sizeof *pg.kept);
         --pg.depth;
     }
     lv_t *l = top();
+    kept_t *k = &pg.kept[pg.depth - 1];
+    unsigned n = 4 + 6 * (unsigned)l->n;
+    kept_free(k);
+    if (l->state == K_READY && pg.pages && (k->f = calloc(n, sizeof *k->f))) {
+        memcpy(k->f, pg.f, n * sizeof *k->f);
+        memcpy(k->buf, pg.buf, sizeof k->buf);
+        memcpy(k->sort, pg.sort, sizeof k->sort);
+        k->pages = pg.pages, pg.pages = 0; /* drop() frees none of them */
+    }
     drop();
-    l->n = 0, l->state = K_LOAD;
+    if (!k->f) l->n = 0, l->state = K_LOAD;
     pg.lv[pg.depth++] = *next;
     pg.moved = 1;
 }
@@ -2572,6 +2605,42 @@ static void load_cancel(void) {
     if (pg.page) widget_invalidate_force(pg.page, 0);
 }
 
+/* How the loading overlay's level is taken once its reply comes (load_take): entered over the top
+ * one (push), or in the top's place (page_to). */
+enum { P_PUSH = 1, P_PLACE };
+
+/* Whether the top level shows its rows, so a level can be asked for under the overlay over them. */
+static int stageable(void) { return top()->state == K_READY && pg.view; }
+
+/* next asked for under the loading overlay, to be taken how (P_*) once its reply comes (got): op
+ * and args sent (0: next's own); the staged level, its id the request's. */
+static lv_t *stage(const lv_t *next, int how, const char *op, const char *args) {
+    lv_t *w = &pg.lv[ADDON_DEPTH];
+    if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
+    if (pg.paging) /* the next page let go: its Loading… row More… again, at the cursor it asked */
+        pg.paging = 0, append(top(), top()->n);
+    *w = *next;
+    req_send(app()->browse, op ? op : w->op, op ? args : w->args);
+    pg.act = 0;
+    w->id = req.id;
+    pg.pend = (char)how;
+    widget_invalidate_force(pg.page, 0);
+    return w;
+}
+
+/* The overlay's level, its reply come: entered, or in the top's place sliding in from pmoved's
+ * side; got() then takes the reply as its own. */
+static void load_take(void) {
+    lv_t *w = &pg.lv[ADDON_DEPTH];
+    int how = pg.pend;
+    pg.pend = 0;
+    if (how == P_PUSH)
+        enter(w);
+    else
+        drop(), *top() = *w, pg.moved = pg.pmoved;
+    widget_invalidate_force(pg.page, 0);
+}
+
 /* A level over the top one; base: args' bytes that name its list, before a More…'s cursor. Over a
  * level showing its rows, it is asked for under the loading overlay and entered once its reply
  * comes (got); else at once, its Loading… page meanwhile. The level, to set its layout. */
@@ -2581,33 +2650,35 @@ static lv_t *push(const char *op, const char *args, unsigned base, const char *t
     tk_snprintf(next.args, sizeof next.args, "%s", args);
     tk_snprintf(next.title, sizeof next.title, "%s", title);
     next.base = base < sizeof next.args ? base : 0;
-    /* ponytail: a next page in flight (paging) keeps the Loading… page, as the overlay's cancel
-     * would leave its Loading… row with nothing asking for it */
-    if (top()->state == K_READY && pg.view && !pg.paging) {
-        lv_t *w = &pg.lv[ADDON_DEPTH];
-        if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
-        *w = next;
-        req_send(app()->browse, w->op, w->args);
-        pg.act = 0;
-        w->id = req.id;
-        pg.pend = 1;
-        widget_invalidate_force(pg.page, 0);
-        return w;
-    }
+    if (stageable()) return stage(&next, P_PUSH, 0, 0);
     enter(&next);
     show();
     return top();
 }
 
-/* ponytail: Back pages the level below again from its first page, where keeping a paged level's
- * replies under a pushed one would spare it. */
+/* Back: the level below shown at once from the reply it kept (enter), every page of it, and asked
+ * again, its rows written anew only when the answer differs (got, as a live level's); one that
+ * kept none is asked again under its Loading… page. ponytail: only the first page is compared, so
+ * a later page that changed shows as it was until the level is asked again whole. */
 static void pop(void) {
     req_cancel();
     drop();
     --pg.depth;
-    top()->state = K_LOAD;
+    lv_t *l = top();
+    kept_t *k = &pg.kept[pg.depth - 1];
     pg.moved = -1;
+    if (!k->f) {
+        l->state = K_LOAD;
+        show();
+        return;
+    }
+    memcpy(pg.buf, k->buf, sizeof pg.buf);
+    memcpy(pg.f, k->f, (4 + 6 * (unsigned)l->n) * sizeof *pg.f);
+    memcpy(pg.sort, k->sort, sizeof pg.sort);
+    pg.pages = k->pages, k->pages = 0;
+    kept_free(k);
     show();
+    fetch(l);
 }
 
 /* Section i shown as the first level: its op asked, its list sliding in from dir's side (1 from the
@@ -2628,7 +2699,8 @@ static void sec_open(int i, int dir) {
 }
 
 /* A page row's press: the top level's list from cursor c, in the level's place, so Back leaves the
- * list instead of stepping back through its pages; dir: 1 a later page, -1 an earlier one. */
+ * list instead of stepping back through its pages; dir: 1 a later page, -1 an earlier one. Asked
+ * for under the loading overlay, the window on show staying until the new one comes (load_take). */
 static void page_to(lv_t *l, const char *c, int dir) {
     char a[sizeof l->args] = "";
     if (!cursor_args(l, a, sizeof a, c)) return;
@@ -2636,6 +2708,15 @@ static void page_to(lv_t *l, const char *c, int dir) {
     int first = !strcmp(cell(0, 0), "search");
     first += first < l->n && !strcmp(cell(first, 0), "sort");
     ++first;
+    if (stageable()) {
+        lv_t next = *l;
+        memcpy(next.args, a, sizeof a);
+        next.n = 0, next.state = K_LOAD;
+        next.sel = dir > 0 ? first : 1 << 20; /* show() clamps it to the last row */
+        pg.pmoved = (signed char)dir;
+        stage(&next, P_PLACE, 0, 0);
+        return;
+    }
     req_cancel();
     drop();
     memcpy(l->args, a, sizeof a);
@@ -2669,8 +2750,7 @@ static int sec_take(char **g, int n) {
 
 /* The finished request: an action's toast, or the top level's rows. */
 static void got(void) {
-    if (pg.pend && !pg.act && req.id == pg.lv[ADDON_DEPTH].id) /* the overlay's level: entered */
-        pg.pend = 0, enter(&pg.lv[ADDON_DEPTH]), widget_invalidate_force(pg.page, 0);
+    if (pg.pend && !pg.act && req.id == pg.lv[ADDON_DEPTH].id) load_take(); /* the overlay's */
     lv_t *l = top();
     char id[12], *head[4], *g[4 + 6 * ADDON_ROWS], *reply = req.buf, *fit;
     /* its own size, before spot_reply points into it: a full list keeps ADDON_PAGES of them */
@@ -2821,16 +2901,8 @@ static int search_left(void *ctx, void *event) {
 static int swipe(void *ctx, void *event) {
     (void)ctx;
     int type = I(event, EVENT_TYPE);
-    if (pg.pend && type != EVT_POINTER_ABORT) { /* the overlay takes every touch */
-        if (type == EVT_POINTER_UP_BEFORE) {
-            unsigned abort_event[12]; /* a row pressed under it is let go, unclicked */
-            pointer_event_init(abort_event, EVT_POINTER_ABORT, pg.page, I(event, EVENT_X),
-                               I(event, EVENT_Y));
-            widget_dispatch_event_to_target_recursive(pg.page, abort_event);
-            if (!load_spinner_hit(I(event, EVENT_X), I(event, EVENT_Y))) load_cancel();
-        }
-        return 11; /* RET_STOP */
-    }
+    if (pg.pend && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
+        return load_touch(pg.page, event, load_cancel);
     if (type == EVT_POINTER_ABORT || pg.nsec < 2 || pg.depth != 1 || pg.edit) {
         pg.sdown = pg.sclaim = 0;
         return 0;
@@ -2910,7 +2982,8 @@ static lv_t *open_list(const char *uri, const char *ctx, const char *title) {
 
 /* A field row's text, typed in its box: sent to the row's uri after its context, and the reply
  * taken as the level's own (got), in its place: no level pushed, nothing titled with the text, the
- * level's Loading… page meanwhile and its selected row kept. A failure is the level's error page,
+ * box closed onto the level's rows with the loading overlay over them meanwhile (P_PLACE), and its
+ * selected row kept. A failure is the level's error page,
  * whose Retry asks for the level's own op, so the text is never sent again. The text is cleared
  * once it is in the request, which the worker clears once it is sent: a password goes to no title,
  * log or cache. A row no longer a field (a reply landed under the box) sends nothing. */
@@ -2921,16 +2994,16 @@ static void field_sent(lv_t *l) {
     if (l->state == K_READY && i >= 0 && i < l->n && !strcmp(cell(i, 0), "field") &&
         cell(i, 1)[0] && (!cell(i, 4)[0] || put(a, sizeof a, cell(i, 4))) &&
         put(a, sizeof a, pg.term)) {
-        req_send(app()->browse, cell(i, 1), a);
+        lv_t next = *l;
+        next.n = 0, next.state = K_LOAD;
+        show(); /* the box closed onto the rows, which keep the reply the uri points into */
+        pg.pmoved = 0;
+        stage(&next, P_PLACE, cell(i, 1), a);
         req.field = 1;
-        pg.act = 0;
-        l->id = req.id;
-        drop(); /* after: the uri was the shown reply's */
-        l->n = 0, l->state = K_LOAD;
-    }
+    } else
+        show();
     memset(pg.term, 0, sizeof pg.term);
     memset(a, 0, sizeof a);
-    show();
 }
 
 /* A row's choice, on a timer: a row's click may not rebuild the list it is in. */
@@ -2950,8 +3023,8 @@ static int go(const void *unused) {
         if (l->state == K_READY && l->find) search_box(0);
     } else if (pg.next == G_SORT) { /* the sort icon, opening as its row would */
         if (l->state == K_READY && l->sort) open_list(pg.sort[1], pg.sort[4], pg.sort[2]);
-    } else if (pg.next == G_SEARCH) {
-        if (put(a, sizeof a, pg.term)) push("search", a, strlen(a), pg.term);
+    } else if (pg.next == G_SEARCH) { /* the box closed onto the rows, the search over them */
+        if (put(a, sizeof a, pg.term)) show(), push("search", a, strlen(a), pg.term);
     } else if (pg.next == G_FIELD)
         field_sent(l);
     else if (l->state == K_ERROR && i == 1 && app()->nostop) { /* Cancel, as Return */
@@ -3051,6 +3124,8 @@ static int closed(void *ctx, void *event) {
     stop_timer(&pg.go);
     stop_timer(&pg.leave);
     drop();
+    for (int i = 0; pg.kept && i < ADDON_DEPTH; ++i) kept_free(&pg.kept[i]);
+    free(pg.kept);
     free(pg.lv);
     free(pg.f);
     free(pg.sec);
@@ -3071,8 +3146,9 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
         return toast("Wait until the App Store finishes"), 1;
     if (pg.page || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
     if (!(pg.f = calloc(4 + 6 * ADDON_ROWS * ADDON_PAGES, sizeof *pg.f)) ||
+        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) ||
         !(pg.page = page_open("addon_page", closed, keyup)))
-        return free(pg.lv), free(pg.f), pg.lv = 0, pg.f = 0, 0;
+        return free(pg.lv), free(pg.f), free(pg.kept), pg.lv = 0, pg.f = 0, pg.kept = 0, 0;
     pg.a = k;
     app_t *a = app();
     int missing = access(a->bin, 0);
