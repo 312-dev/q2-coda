@@ -74,7 +74,8 @@ m.close(); m.files[RDIR+'/favourites.m3u']=bytearray(b'#EXTM3U\n'); radio_open(m
 def search(text,event='EVT_VALUE_CHANGED'):
     assert m.call(address=payload_syms['radio_search'],gap=0,count=5_000_000)==0
     edit=m.find('edit'); assert m.nodes[edit]['focused']==1
-    assert m.get(edit+O['W_Y'])+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')  # above the keyboard, alone
+    y=m.get(edit+O['W_Y'])-OLED_G.bar  # the full-bleed page's rows from the status row's foot (bar_foot)
+    assert 0<=y and y+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')  # above the keyboard, alone
     m.nodes[edit]['text']=text; f,ctx=m.handler(edit,O[event])
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
 search('jazz fm'); assert m.labels()[0]=='Internet Radio' and 'Loading…' not in m.labels() and not m.find('edit')  # the box closed onto the menu, the loading overlay over it
@@ -525,7 +526,8 @@ m.row(0); m.answer(*ME); assert m.labels()==MENU; passed()
 # the term's categories, each searched by its name and the term, escaped.
 def search(text,event='EVT_VALUE_CHANGED'):
     m.row(4); edit=m.find('edit'); assert m.nodes[edit]['focused']==1 and m.nodes[edit]['tips']=='Search Spotify'
-    assert m.get(edit+O['W_Y'])+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')  # above the keyboard, alone
+    y=m.get(edit+O['W_Y'])-OLED_G.bar  # the full-bleed page's rows from the status row's foot (bar_foot)
+    assert 0<=y and y+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')  # above the keyboard, alone
     m.nodes[edit]['text']=text; f,ctx=m.handler(edit,O[event])
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
 asked=len(m.threads)
