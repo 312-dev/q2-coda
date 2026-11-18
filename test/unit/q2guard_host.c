@@ -15,6 +15,12 @@ card_log *log_new(const char *dir) {
     snprintf(path, 256, "%s/q2-heat.0", dir);
     return card_log_at(calloc(1, sizeof(card_log)), path, HEAT_RAM);
 }
+/* a log of another name in dir, its ring cap bytes (test_q2bt.py's q2-bt.0) */
+card_log *log_named(const char *dir, const char *name, unsigned cap) {
+    char *path = malloc(256);
+    snprintf(path, 256, "%s/%s", dir, name);
+    return card_log_at(calloc(1, sizeof(card_log)), path, cap);
+}
 int log_dropped(const card_log *l) { return (int)l->dropped; }
 struct top_table *table_new(void) { return calloc(1, sizeof(struct top_table)); }
 int log_used(const card_log *l) { return (int)l->len; }

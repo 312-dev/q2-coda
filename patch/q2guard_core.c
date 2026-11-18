@@ -236,23 +236,25 @@ static void mkdirs(char *path) { /* each parent of path's last part, and path it
     mkdir(path, 0755);
 }
 
-/* q2-heat.0 moved to .1 (the older .1 goes) once it has reached HEAT_FILE_MAX, so each file ends below
- * HEAT_FILE_MAX plus one flush (at most HEAT_RAM). */
-static void rotate(const char *p0, const char *p1) {
+/* name.0 moved to .1 (the older .1 goes) once it has reached max, so each file ends below max plus
+ * one flush (at most the ring's size). */
+static void rotate(const char *p0, const char *p1, long max) {
     int fd = open(p0, O_WRONLY | O_APPEND | O_CLOEXEC);
     long size = fd < 0 ? 0 : lseek(fd, 0, SEEK_END);
     if (fd >= 0) close(fd);
-    if (size >= HEAT_FILE_MAX) rename(p0, p1);
+    if (size >= max) rename(p0, p1);
 }
 
-int heat_flush(card_log *l, const char *dir) {
+int log_flush(card_log *l, const char *dir, const char *name, long max) {
     char d[128], p0[160], p1[160];
     int n = (int)strlen(dir);
     if (n >= (int)sizeof d) return -1;
     memcpy(d, dir, n + 1);
     mkdirs(d);
-    snprintf(p0, sizeof p0, "%s/q2-heat.0", dir);
-    snprintf(p1, sizeof p1, "%s/q2-heat.1", dir);
-    rotate(p0, p1);
+    snprintf(p0, sizeof p0, "%s/%s.0", dir, name);
+    snprintf(p1, sizeof p1, "%s/%s.1", dir, name);
+    rotate(p0, p1, max);
     return card_log_flush(l) ? 0 : -1;
 }
+
+int heat_flush(card_log *l, const char *dir) { return log_flush(l, dir, "q2-heat", HEAT_FILE_MAX); }

@@ -33,6 +33,49 @@ size_t strlen(const char *);
 #define O_TRUNC 0x200
 #define O_CLOEXEC 0x80000
 #define SEEK_END 2
+/* q2guard.c's and q2bt.c's */
+struct timespec {
+    long tv_sec, tv_nsec;
+};
+struct dirent { /* glibc's, MIPS o32, no LFS */
+    unsigned d_ino;
+    long d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[256];
+};
+typedef int pid_t;
+ssize_t read(int, void *, size_t);
+int clock_gettime(int, struct timespec *), usleep(unsigned), kill(int, int), reboot(int);
+pid_t fork(void), waitpid(pid_t, int *, int);
+void _exit(int), sync(void);
+long time(long *);
+void *opendir(const char *);
+struct dirent *readdir(void *);
+int flock(int, int), closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
+char *strstr(const char *, const char *);
+int atoi(const char *);
+#define O_RDONLY 0
+#define WNOHANG 1
+#define CLOCK_MONOTONIC 1
+#define RB_POWER_OFF 0x4321fedc
+#define LOCK_EX 2
+#define LOCK_NB 4
+/* q2bt.c's: the HCI socket, MIPS o32's numbers (_IOR on MIPS is 2 << 29) */
+struct pollfd {
+    int fd;
+    short events, revents;
+};
+int socket(int, int, int), bind(int, const void *, unsigned), setsockopt(int, int, int, const void *, unsigned);
+int ioctl(int, unsigned long, ...), poll(struct pollfd *, unsigned long, int);
+int execl(const char *, const char *, ...);
+#define AF_BLUETOOTH 31
+#define BTPROTO_HCI 1
+#define SOCK_RAW 3
+#define SOCK_CLOEXEC O_CLOEXEC
+#define POLLIN 1
+#define HCIGETDEVINFO 0x400448d3u
+#define HCIGETCONNLIST 0x400448d4u
 #endif
 
 #ifndef PEQ_ROOT
@@ -142,5 +185,16 @@ void heat_add(card_log *l, const char *line); /* one line, with its newline */
 /* Rotate dir/q2-heat.0 into .1 if it is full, then append the ring to it in order (card_log_flush,
  * which also notes lines dropped for room). 0 when nothing is left held, -1 when the card refused. */
 int heat_flush(card_log *l, const char *dir);
+/* The same for any log: dir/name.0, rotated into name.1 once it has reached max bytes */
+int log_flush(card_log *l, const char *dir, const char *name, long max);
+
+/* q2guard.c's readers, which q2bt.c shares */
+int slurp(const char *path, char *buf, int size); /* the file's start, NUL-terminated: its length, -1 none */
+int read_int(const char *path, int *v);           /* 0 when read */
+unsigned now_ms(void);                            /* CLOCK_MONOTONIC */
+struct cpu {
+    unsigned long long all, idle;
+};
+int busy_since(struct cpu *c, int *cores); /* all cores' busy percent since the last call, -1 the first */
 
 #endif
