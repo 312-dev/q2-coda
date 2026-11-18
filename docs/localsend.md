@@ -89,8 +89,8 @@ has no AES instructions.
 ### When it listens
 
 Off by default. Nothing listens until the LocalSend page opens; leaving the page stops the daemon unless a
-transfer is running, which finishes (its progress then shows as a toast-sized strip on whatever page is up, see
-the mock-up). The Share sheet starts it too, for as long as it is open. Smart Wi-Fi holds Wi-Fi on while either
+transfer is running, which finishes in the background (Return on the progress page leaves it running; the
+result is a toast on whatever page is up). The Share sheet starts it too, for as long as it is open. Smart Wi-Fi holds Wi-Fi on while either
 is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch in the first version.
 
 ### Receiving
@@ -113,7 +113,8 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 ### Sending
 
 - **Share** opens a sheet listing the devices found (an announcement burst as it opens, the list filling as they
-  register), each with its glyph and model. Center sends. The peer's user then accepts on their device: the Q2
+  register), each with its glyph and system ("macOS", "Android"). Center sends. On the LocalSend page itself,
+  Center on a device asks what to send it (Logs, Battery Log). The peer's user then accepts on their device: the Q2
   shows "Waiting for MacBook Air…" with Cancel until the answer, then progress, then a toast.
 - Export Log on Battery History becomes **Share Log** and opens the sheet with `battery-log.txt` (written to
   `/tmp`, not the card).
@@ -135,5 +136,6 @@ Estimates until built; the build's figures replace them.
 
 ## Status
 
-- Design: this page. Mock-up: drawn, waiting for the user's approval (no UI code before it).
+- Design: this page. Mock-up: drawn (`mock_localsend.py`, 14 screens), waiting for the user's approval; no UI code
+  before it.
 - Protocol core: see `STATUS.md` on the branch while in progress.
