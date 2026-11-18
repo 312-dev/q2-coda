@@ -16,15 +16,15 @@
 #include "navigation.h"
 
 #if Q2POD_DEV
-#define AUTH_KEYS "/mnt/data/adb_keys"         /* tools/adbd.patch ADB_KEYS */
-#define AUTH_ADDED "/mnt/data/adb_keys.added"  /* id[8] when[4] little-endian per computer */
-#define AUTH_ID 8                              /* a computer's id: its key's MD5, the first bytes */
+#define AUTH_KEYS "/mnt/data/adb_keys"        /* tools/adbd.patch ADB_KEYS */
+#define AUTH_ADDED "/mnt/data/adb_keys.added" /* id[8] when[4] little-endian per computer */
+#define AUTH_ID 8                             /* a computer's id: its key's MD5, the first bytes */
 #define AUTH_REC (AUTH_ID + 4)
-#define AUTH_LINE_MAX 2048                     /* a 2048-bit adbkey.pub line is about 720 bytes */
-#define ADB_ASK_MS 30000                       /* the card's wait before it answers Deny */
-#define ADB_TRUST_MAX 12                       /* computers listed */
+#define AUTH_LINE_MAX 2048 /* a 2048-bit adbkey.pub line is about 720 bytes */
+#define ADB_ASK_MS 30000   /* the card's wait before it answers Deny */
+#define ADB_TRUST_MAX 12   /* computers listed */
 #define ADB_NAME_MAX 40
-#define ADB_CAP_H 26                           /* a caption's gap item under the rows */
+#define ADB_CAP_H 26 /* a caption's gap item under the rows */
 #define ADB_CAP_PX TYPE(13)
 #define ADB_CAP_LINE 17
 
@@ -35,7 +35,7 @@ typedef struct {
 } adb_computer;
 
 static struct {
-    const char *line;         /* the key adbd asked about (usb_ui.c's), while the card is up */
+    const char *line; /* the key adbd asked about (usb_ui.c's), while the card is up */
     unsigned char id[AUTH_ID];
     char who[ADB_NAME_MAX], note[48];
     void *dev, *dev_view, *trust, *trust_view, *cap[2];
@@ -46,8 +46,12 @@ static struct {
 /* ---- keys ---- */
 
 static int b64(int c) {
-    return c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
-           : c == '+' ? 62 : c == '/' ? 63 : -1;
+    return c >= 'A' && c <= 'Z'   ? c - 'A'
+           : c >= 'a' && c <= 'z' ? c - 'a' + 26
+           : c >= '0' && c <= '9' ? c - '0' + 52
+           : c == '+'             ? 62
+           : c == '/'             ? 63
+                                  : -1;
 }
 /* The MD5 of line's key (its first word, base64-decoded), as Android's fingerprint takes it. */
 static void key_md5(const char *line, unsigned char md[16]) {
@@ -113,7 +117,8 @@ static void added_note(const unsigned char *id) {
     unsigned char rec[(ADB_TRUST_MAX + 1) * AUTH_REC];
     int n = added_read(rec, ADB_TRUST_MAX), k = 0;
     for (int i = 0; i < n; ++i)
-        if (memcmp(rec + i * AUTH_REC, id, AUTH_ID)) memmove(rec + k++ * AUTH_REC, rec + i * AUTH_REC, AUTH_REC);
+        if (memcmp(rec + i * AUTH_REC, id, AUTH_ID))
+            memmove(rec + k++ * AUTH_REC, rec + i * AUTH_REC, AUTH_REC);
     unsigned t = (unsigned)wall_time();
     unsigned char *r = rec + k++ * AUTH_REC;
     memcpy(r, id, AUTH_ID);
@@ -145,7 +150,8 @@ static void list_read(void) {
     int n = added_read(rec, ADB_TRUST_MAX);
     for (int i = 0; i < at.n; ++i)
         for (int k = 0; k < n; ++k)
-            if (!memcmp(rec + k * AUTH_REC, at.pc[i].id, AUTH_ID)) at.pc[i].when = rec_when(rec + k * AUTH_REC);
+            if (!memcmp(rec + k * AUTH_REC, at.pc[i].id, AUTH_ID))
+                at.pc[i].when = rec_when(rec + k * AUTH_REC);
 }
 
 /* AUTH_KEYS again without the lines of id (all of them with 0), AUTH_ADDED's record with it. */
@@ -174,7 +180,8 @@ static void keys_remove(const unsigned char *id) {
     unsigned char rec[ADB_TRUST_MAX * AUTH_REC];
     int n = added_read(rec, ADB_TRUST_MAX), k = 0;
     for (int i = 0; i < n; ++i)
-        if (memcmp(rec + i * AUTH_REC, id, AUTH_ID)) memmove(rec + k++ * AUTH_REC, rec + i * AUTH_REC, AUTH_REC);
+        if (memcmp(rec + i * AUTH_REC, id, AUTH_ID))
+            memmove(rec + k++ * AUTH_REC, rec + i * AUTH_REC, AUTH_REC);
     f = fopen(AUTH_ADDED ".tmp", "wb");
     if (!f) return;
     int ok = fwrite(rec, AUTH_REC, (unsigned)k, f) == (unsigned)k;
@@ -208,7 +215,10 @@ static void prompt_answer(void *ctx, int row, int always) {
     char host[ADB_NAME_MAX + 16];
     const char *h = at.who; /* the host, after user@ */
     while (*h && *h != '@') ++h;
-    tk_snprintf(host, sizeof host, "%s allowed", *h && h[1] ? h + 1 : at.who[0] ? at.who : "Computer");
+    tk_snprintf(host, sizeof host, "%s allowed",
+                *h && h[1]  ? h + 1
+                : at.who[0] ? at.who
+                            : "Computer");
     status_pill_show("adbpill", host);
     if (at.trust) trust_fill();
     if (at.dev) dev_fill();
@@ -222,8 +232,8 @@ int adb_prompt_open(const char *line) {
     key_md5(line, md);
     memcpy(at.id, md, AUTH_ID);
     key_name(line, at.who, sizeof at.who);
-    tk_snprintf(at.note, sizeof at.note, "Key %02X:%02X:%02X:%02X \xe2\x80\xa6 %02X:%02X", md[0], md[1], md[2],
-                md[3], md[14], md[15]);
+    tk_snprintf(at.note, sizeof at.note, "Key %02X:%02X:%02X:%02X \xe2\x80\xa6 %02X:%02X", md[0],
+                md[1], md[2], md[3], md[14], md[15]);
     at.line = line;
     awake_screen();
     int shown = confirm(&(confirm_t){ .title = "Allow this computer?",
@@ -271,7 +281,8 @@ static void remove_answer(void *ctx, int row, int toggle_on) {
 /* A computer's row (index i) or Remove All (index n): asks on the card, Cancel first. */
 static int trust_click(void *ctx, void *event) {
     (void)event;
-    static const char *const one[] = { "Cancel", "Remove" }, *const all[] = { "Cancel", "Remove All" };
+    static const char *const one[] = { "Cancel", "Remove" }, *const all[] = { "Cancel",
+                                                                              "Remove All" };
     int i = (int)(long)ctx;
     if (i < 0 || i > at.n) return 0;
     at.removing = i < at.n ? i : -1;
@@ -298,7 +309,8 @@ static void *gap_item(void *view, int h) {
  * the screen's foot (carremote_page.c cr_fit's way). */
 static void fit(void *view) {
     int y = 0;
-    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) y += I(widget_get_child(view, i), W_H);
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i)
+        y += I(widget_get_child(view, i), W_H);
     void *list = P(view, W_PARENT);
     int room = 320 - (feedback_below(list) - I(list, W_H)), h = y < room ? y : room;
     widget_set_prop_int(list, "item_height", 0);
@@ -307,9 +319,11 @@ static void fit(void *view) {
     widget_layout(list);
 }
 
-/* A row's value on the right column, Text Secondary */
-static void row_value(void *item, const char *s) {
-    int right = 375 - geom_val(V_RIGHT_X), w = 120;
+/* A row's value, Text Secondary: on the right column, or before the chevron of a row that opens a
+ * page (coverflow.c row_into's labels end at x 316) */
+#define ADB_VALUE_W 90
+static void row_value(void *item, const char *s, int into) {
+    int right = into ? 312 : 375 - geom_val(V_RIGHT_X), w = ADB_VALUE_W;
     void *v = label(item, right - w, 0, w, I(item, W_H), "s_scrlabel_white20r", TYPE(20),
                     0xff000000u | tok(TOK_SECONDARY));
     widget_set_text_utf8(v, s);
@@ -322,20 +336,26 @@ static void trust_fill(void) {
     list_read();
     int sel = at.trust_view ? widget_get_prop_int(at.trust_view, "_ringnav_index", 0) : 0;
     at.cap[0] = at.cap[1] = (void *)0;
-    void *view = at.trust_view = page_list_or(at.trust, at.trust, "Trusted Computers", "No trusted computers",
-                                              at.n ? at.n + 3 : 0, 48);
+    void *view = at.trust_view = page_list_or(at.trust, at.trust, "Trusted Computers",
+                                              "No trusted computers", at.n ? at.n + 3 : 0, 48);
     if (!at.n) return;
     for (int i = 0; i < at.n; ++i) {
         char day[24];
         void *item = page_row_detail(view, i, at.pc[i].name, 0, trust_click);
         void *name = widget_get_child(item, 0);
-        widget_move_resize(name, I(name, W_X), I(name, W_Y), 375 - geom_val(V_RIGHT_X) - 128 - I(name, W_X),
+        widget_move_resize(name, I(name, W_X), I(name, W_Y),
+                           375 - geom_val(V_RIGHT_X) - ADB_VALUE_W - 8 - I(name, W_X),
                            I(name, W_H));
-        if (day_or_date(day, sizeof day, at.pc[i].when)) row_value(item, day);
+        /* a long name rests on its ellipsis and scrolls only on the selection (artist_page.c
+         * cover_row) */
+        widget_set_prop_int(name, "loop", 0);
+        hscroll_label_set_only_focus(name, 1);
+        if (day_or_date(day, sizeof day, at.pc[i].when)) row_value(item, day, 0);
     }
     at.cap[0] = gap_item(view, ADB_CAP_H);
     void *all = page_row_detail(view, at.n, "Remove All", 0, trust_click);
-    widget_set_prop_int(widget_get_child(all, 0), "style:normal:text_color", (int)RGBA(tok(TOK_NEGATIVE)));
+    widget_set_prop_int(widget_get_child(all, 0), "style:normal:text_color",
+                        (int)RGBA(tok(TOK_NEGATIVE)));
     at.cap[1] = gap_item(view, ADB_CAP_H + ADB_CAP_LINE);
     fit(view);
     ringnav_select(view, sel <= at.n ? sel : at.n, at.n + 1); /* the gaps are passed */
@@ -363,7 +383,7 @@ static void dev_fill(void) {
     void *view = at.dev_view = page_list(at.dev, at.dev, 0, "Developer Options", 1, 48);
     void *item = page_row_detail_into(view, 0, "Trusted Computers", 0, trust_open);
     tk_snprintf(n, sizeof n, "%d", at.n);
-    row_value(item, n);
+    row_value(item, n, 1);
     ringnav_select(view, 0, 1);
 }
 
@@ -379,10 +399,13 @@ int adb_dev_open(void *ctx, void *event) {
 void adb_trust_paint(void *w, void *canvas) {
     if (!w || !at.trust || (w != at.cap[0] && w != at.cap[1]) || !P(canvas, CANVAS_LCD)) return;
     static const char *const caps[2][2] = { { "Center to remove a computer", 0 },
-                                            { "A computer you remove asks again", "the next time it connects." } };
+                                            { "A computer you remove asks again",
+                                              "the next time it connects." } };
     const char *const *c = caps[w == at.cap[1]];
-    int x = geom_val(V_TEXT_X) - I(canvas, CANVAS_X), cw = 375 - geom_val(V_TEXT_X) - geom_val(V_RIGHT_X);
+    int x = geom_val(V_TEXT_X) - I(canvas, CANVAS_X),
+        cw = 375 - geom_val(V_TEXT_X) - geom_val(V_RIGHT_X);
     for (int k = 0; k < 2 && c[k]; ++k)
-        ui_line(canvas, c[k], x, cw, ADB_CAP_H / 2 + k * ADB_CAP_LINE, 2, "inter", ADB_CAP_PX, tok(TOK_TERTIARY));
+        ui_line(canvas, c[k], x, cw, ADB_CAP_H / 2 + k * ADB_CAP_LINE, 2, "inter", ADB_CAP_PX,
+                tok(TOK_TERTIARY));
 }
 #endif

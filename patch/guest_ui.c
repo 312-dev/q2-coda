@@ -188,7 +188,7 @@ static int ask_card(int ask) {
                 source_words(gv("newsource")));
     rows[0] = gu.keep, rows[1] = "Replace";
     return confirm(&(confirm_t){ "Replace %s?", guest, gu.body, 0, rows, 2, CONFIRM_CONSEQUENTIAL,
-                                 0, 0, 0, secs * 1000, 0, answered, (void *)(long)ASK_REPLACE, 0 });
+                                 0, 0, 0, secs * 1000, 0, answered, (void *)(long)ASK_REPLACE, 0, 0, 0 });
 }
 
 /* The state's question against the card up: a new one shown, a settled one closed (the daemon
@@ -739,7 +739,7 @@ static int trust_click(void *ctx, void *event) {
     case 2:
         confirm(&(confirm_t){ "Forget %s?", gu.trusted[gu.cur].name,
                               "They'll be asked before playing again.", 0, rows, 2,
-                              CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forgot, 0, 0 });
+                              CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forgot, 0, 0, 0, 0 });
         break;
     }
     return 0;

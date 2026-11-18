@@ -110,6 +110,20 @@ def test_allow_lets_the_computer_in_and_always_keeps_its_key_with_the_day(fw, ui
     assert adb.pill() == ('adbpill', 'MacBook-Pro allowed')
 
 
+def test_the_allowed_pill_shows_over_now_playing_too(fw, ui, st):
+    """The volume pill stays off Now Playing (its own volume band), but "allowed" is no volume: it shows over the song,
+    as the approved mock has it."""
+    adb = Adb(fw, ui)
+    ui.nodes[ui.wm].children.append(ui.window('playing_page'))  # page_in_use's top window
+    adb.ask()
+    ui.click(items(adb.card)[2])
+    ui.due()
+    canvas = Canvas(fw, char_w=5)
+    fw.fn('vol_pill_paint', None, C.c_void_p, C.c_void_p)(None, canvas.addr)  # the status row's paint, Now Playing on top
+    assert adb.sent == ['OK'] and adb.pill() == ('adbpill', 'MacBook-Pro allowed')
+    assert 'MacBook-Pro allowed' in [t[0] for t in canvas.texts]
+
+
 @pytest.mark.parametrize('how', ['deny', 'return', 'timeout'])
 def test_deny_return_or_30_s_unanswered_leave_the_computer_out(fw, ui, st, how):
     """Nothing lets a computer in but a press on the Q2: Deny, Return or 30 s with no answer send NO and keep
