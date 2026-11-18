@@ -53,7 +53,7 @@ The figures from a build are a `--dev` build's: its `manifest.json`, `stock.squa
 
 - **Where:** `tools/build.py:32` (`SCRATCH`), `check_layout` in `tools/build.py`, `patch/link.ld`.
 - **State:** `SCRATCH` is `0xc80000`, so code and constants have 1.5 MB below it (it was `0xbc0000`, then `0xc00000`). demo's heap starts where the scratch state ends (a running demo's `/proc/<pid>/maps` shows one anonymous mapping from the payload's end through the heap), so nothing of stock's lies in the range the move took.
-- **Watch:** `patch_bytes` in a build's `manifest.json` against `SCRATCH - BASE` (1,572,864).
+- **Watch:** `patch_bytes` in a build's `manifest.json` against `SCRATCH - BASE` (1,572,864), and `scratch_free_bytes`, what is left of the scratch state's 128 KB (`SCRATCH_SIZE`); the build prints both ([architecture: The payload](architecture.md#the-payload)).
 
 ### 4. The theme picker's order and Status Bar's values (resolved)
 

@@ -659,8 +659,7 @@ static int b64(int c) {
 }
 /* The key's fingerprint as Android shows it, the MD5 of the decoded key, its first eight bytes. */
 static void auth_fingerprint(void) {
-    static unsigned char raw[600];
-    unsigned char md[16];
+    unsigned char raw[600], md[16];
     unsigned n = 0, acc = 0, bits = 0;
     for (const char *p = u.key; *p && *p != ' ' && n < sizeof raw; ++p) {
         int v = b64((unsigned char)*p);

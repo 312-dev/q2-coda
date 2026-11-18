@@ -30,6 +30,7 @@ def dev_tag(number):
     return 'V' + digits + 'i'
 BASE = 0xb00000
 SCRATCH = 0xc80000  # 1.5 MB of payload text below it; demo's heap starts after the scratch state
+SCRATCH_SIZE = 0x20000  # the scratch state's room (docs/architecture.md#the-payload)
 RING_STEP = 48
 HOOKS = {
     # USB charging is inhibited before insertion and guarded through enumeration/disconnect.
@@ -2256,10 +2257,15 @@ def compile_payload(out):  # pragma: no mutate block
     return symbols(out/'patch.elf')
 
 def check_layout(payload, ps):
-    """The payload at BASE ends by SCRATCH, and its scratch state starts there and fills at most 128 KB."""
+    """The payload at BASE ends by SCRATCH, and its scratch state starts there and fills at most 128 KB
+    (SCRATCH_SIZE). Prints the bytes free in each and returns the scratch state's."""
     check(len(payload) <= SCRATCH-BASE, 'Payload overlaps its scratch page')
     check(ps['__scratch_start'] == SCRATCH, 'Scratch state moved')
-    check(ps['__scratch_end'] <= SCRATCH + 0x20000, 'Scratch state exceeds its 128 KB')
+    check(ps['__scratch_end'] <= SCRATCH + SCRATCH_SIZE, 'Scratch state exceeds its 128 KB')
+    free = SCRATCH + SCRATCH_SIZE - ps['__scratch_end']
+    print(f'payload room: code and constants {SCRATCH-BASE-len(payload):,} bytes free of {SCRATCH-BASE:,}; '
+          f'scratch state {free:,} bytes free of {SCRATCH_SIZE:,}', flush=True)
+    return free
 
 def compile_helper(out, cat, src, name, rels):
     """Link patch/{src}.c (or each of a list of sources under patch/) and start.c as name against the stock
@@ -2554,7 +2560,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     emit(themes, out)
     ps = compile_payload(out)
     payload = (out/'patch.bin').read_bytes()
-    check_layout(payload, ps)
+    scratch_free = check_layout(payload, ps)
     patched = bytearray(raw_demo)
     patch_timezones(patched)
     def jump(off, name): patched[off:off+8] = struct.pack('<II', j(ps[name]), 0)
@@ -3091,7 +3097,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
-        patch_bytes=len(payload), ring_step_pixels=RING_STEP,
+        patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
@@ -3103,7 +3109,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
               {'imagemagick': imagemagick('-version', data=b'').decode().splitlines()[0]})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
+    print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','scratch_free_bytes','version']},indent=2))
 
 if __name__ == '__main__':
     ap=argparse.ArgumentParser(description=__doc__)
