@@ -481,5 +481,5 @@ Covers come sooner, not later: from Next to Now Playing's cover parsed (`g_playc
 ### 29. `lockscreen.c` says the rootfs has no room (resolved)
 
 - **Where:** `patch/lockscreen.c:1-2`: "drawn here since the rootfs has no room for image files".
-- **Evidence:** a `--dev --new-player` build's rootfs of 2026-11-15 was 50,393,088 bytes (`rootfs_bytes` in its `manifest.json`) against the stock image's 50,688,000, then the limit; `tools/build.py` `rootfs_fits` now allows 75,497,472.
+- **Evidence:** a `--dev --new-player` build's rootfs of 2026-11-15 was 50,393,088 bytes (`rootfs_squashfs_bytes` in its `manifest.json`) against the stock image's 50,688,000, then the limit; `tools/build.py` `rootfs_fits` now allows 75,497,472.
 - **State:** the head comment said the wallpapers were drawn by `wall_render` and shipped as no image files. The lock screen and `lockscreen.c` are gone since ([internals](internals.md#screen-off-and-wake)).
