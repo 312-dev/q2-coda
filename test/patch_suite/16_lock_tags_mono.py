@@ -586,7 +586,7 @@ assert texts(kv=False)==['Resume on Connect','Link Volume','Name','Guest Play'];
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # off: the switch, Name and a line (bt_ui.c)
-assert texts()==['Name']; passed()
+assert texts(kv=False)==['Name']; passed()
 
 def oled_set(m):  # the first system_bar load, as on a unit (accent, theme_boot); the calls it made cleared
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
