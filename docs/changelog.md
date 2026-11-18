@@ -2,6 +2,7 @@
 
 - **Unreleased (q2-coda)**:
   - Streamed songs: a queue of server songs picks up where it left off after a restart. Memory Playback brought back only the one or two songs already downloaded, Up Next stopped there and nothing fetched the rest; now the app (Subsonic with `resume=1`) streams the queue again from the song that was playing, still paused, and Up Next lists every song. Without the app, or if it declines, the songs on the card play as before.
+  - Subsonic: covers fetched on demand for the car; stars and likes sync separately; a queue you were playing comes back in full after a restart.
   - Wi-Fi: the connected network no longer has a second line that read like another network's name. Its check mark already says it is connected; the word **Connected** now shows as a small caption under the row only while the row is selected, as Reduce Motion's caption does. A network that is connecting keeps its line, as a small grey caption under the name.
   - Settings: three rows that wrote their value into the label (**Clicker: Both** on Controls, **Boot to: Rockbox** on Battery, **AirPlay: Kitchen** on Now Playing's more page) now show the label on the left and the value on the right in the secondary grey, like the other settings rows. Center still cycles them as before.
   - Settings > General: **Reset Settings** is now the last row, directly under Shut Down, in red like the other rows that lose something. It still opens the same three choices, each behind its confirmation.
