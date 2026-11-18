@@ -3,8 +3,8 @@
 minute the temperature rose fastest (with no temperature in the log, the CPU's busy share) and which processes used
 the CPU then.
 
-    python3 tools/q2heat.py q2-heat.1 q2-heat.0          # oldest file first, as the Q2 keeps them
-    adb shell cat /mnt/mmc/.q2muse/logs/q2-heat.1 /mnt/mmc/.q2muse/logs/q2-heat.0 | python3 tools/q2heat.py -
+    python3 tools/q2heat.py q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0   # oldest file first, as the Q2 keeps them
+    adb shell 'cd /mnt/mmc/.q2muse/logs; cat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -
 
 A line is `TIME up=S t=C ... top=name:pct,... g=STATE`; a note is `TIME WORD ...` (BOOT, SENSOR, WARN, LOADWARN,
 POWEROFF, NOANSWER, POWER, CARD). The card store's `== N lines lost while the card was away` line is read as
@@ -135,7 +135,7 @@ def report(samples, notes, out=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('files', nargs='+', help='q2-heat.1 then q2-heat.0, or - for standard input')
+    ap.add_argument('files', nargs='+', help='q2-heat.3 to q2-heat.0, oldest first, or - for standard input')
     args = ap.parse_args(argv)
     lines = []
     for f in args.files:

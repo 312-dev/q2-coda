@@ -451,15 +451,16 @@ void bt_page(void *view, int on) {
 /* ---- Quality's last row: the step-down's switch ----
  * "Lower quality when the signal is weak", [Q2POD] BTSTEPDOWN, on unless 0: under LDAC Auto,
  * q2guard moves a link the radio cannot keep up with from aptX HD to aptX, then SBC, and back once
- * it is clean (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
+ * it is clean, and on SBC (LDAC Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises it
+ * again (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
  * (q2bt.h's BT_STEP_KEY, the same name: q2guard's headers are not the payload's).
  * Added before the picker's first layout, after stock's eight choices, and found again by its
  * item's _bt_step on every later one; no state of its own. */
 #define BT_STEP_KEY "BTSTEPDOWN"
 #define BT_STEP_TITLE "Lower quality when the signal is weak"
 #define BT_STEP_CAPTION                                                                            \
-    ((const unsigned *)L"On LDAC Auto, aptX HD steps down to aptX, then SBC, while the signal is " \
-                       L"weak, and back once it is strong again")
+    ((const unsigned *)L"On LDAC Auto or SBC, lowers the bit rate while the signal is weak, and "  \
+                       L"raises it once it is strong again")
 static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 1); }
 static int step_click(void *label, void *event) {
     int on = !step_on();

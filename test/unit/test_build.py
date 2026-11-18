@@ -873,9 +873,11 @@ def test_bt_silence_commands(monkeypatch):
 def test_bt_silence():
     code, symbols = build.bt_silence()
     assert len(code) % 4 == 0 and len(code) > 0
-    for name in ('timeout', 'fill', 'read'):
+    for name in ('timeout', 'fill', 'read', 'sbc_bp'):
         assert build.BT_SILENCE <= symbols[name] < build.BT_SILENCE + len(code)
     assert symbols['timeout'] == build.BT_SILENCE  # its entry
+    # SBC's three bytes where q2guard writes them (patch/q2bt.h BT_SBC_POOL), past the code
+    assert symbols['sbc_pool'] == build.BT_SBC_POOL and len(code) == build.BT_SBC_POOL - build.BT_SILENCE + 4
 
 
 def bluealsa():
@@ -890,7 +892,8 @@ def bluealsa():
 
 @pytest.fixture
 def silence(monkeypatch):
-    symbols = {'timeout': build.BT_SILENCE, 'fill': build.BT_SILENCE + 8, 'read': build.BT_SILENCE + 16}
+    symbols = {'timeout': build.BT_SILENCE, 'fill': build.BT_SILENCE + 8, 'read': build.BT_SILENCE + 16,
+               'sbc_bp': build.BT_SILENCE + 20, 'sbc_pool': build.BT_SBC_POOL}
     monkeypatch.setattr(build, 'bt_silence', lambda: (b'\x11' * 24, symbols))
     return symbols
 
@@ -935,7 +938,8 @@ def test_patch_bluealsa_hooks(silence):
     reset = build.BT_DROP_PAYLOAD + 21 * 4
     assert struct.unpack_from('<2I', out, build.fileoff(raw, build.BT_DROP_HANDLER)) == (build.j(reset), 0)
     expected = {0x41465c: build.j(silence['timeout']), 0x414684: build.j(silence['fill']), 0x414688: 0x00002825,
-                0x414754: build.jal(silence['read']), 0x42d09c: 0x004147a0}
+                0x414754: build.jal(silence['read']), 0x42d09c: 0x004147a0,
+                0x406580: build.jal(silence['sbc_bp'])}  # the SBC encoder's one sbc_encode
     for address, new in expected.items():
         assert struct.unpack_from('<I', out, build.fileoff(raw, address))[0] == new
 
@@ -947,12 +951,18 @@ def test_patch_bluealsa_refuses_a_moved_caller(silence):
         build.patch_bluealsa(bytes(raw))
 
 
-@pytest.mark.parametrize('site', range(5))
+@pytest.mark.parametrize('site', range(6))
 def test_patch_bluealsa_refuses_a_moved_site(silence, site):
     raw = bytearray(bluealsa())
     struct.pack_into('<I', raw, build.fileoff(raw, build.BT_SILENCE_SITES[site][0]), 0xdead)
     with pytest.raises(ValueError, match='^Bluetooth silence site mismatch$'):
         build.patch_bluealsa(bytes(raw))
+
+
+def test_patch_bluealsa_refuses_sbc_bytes_elsewhere(silence):
+    silence['sbc_pool'] += 4
+    with pytest.raises(ValueError, match='^SBC bitpool bytes not at BT_SBC_POOL$'):
+        build.patch_bluealsa(bluealsa())
 
 
 def test_patch_bluealsa_payload_may_fill_its_room(silence, monkeypatch):

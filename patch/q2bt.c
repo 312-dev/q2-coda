@@ -9,7 +9,10 @@
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
  * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
  * step-down's setting on, a link the radio cannot keep up with is moved from aptX HD to aptX to SBC
- * and back (bt_step), each switch q2bt-codec's SelectCodec. Every read that fails leaves its
+ * and back (bt_step), each switch q2bt-codec's SelectCodec; and on SBC (under LDAC Auto, or SBC
+ * chosen, with the same setting on) its bitpool is lowered a rung at a time and raised again
+ * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
+ * takes from the next frame. Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. */
 #include "q2bt.h"
@@ -62,6 +65,9 @@ static struct {
     char pcm[96];        /* the A2DP source PCM's object path, "" none */
     int codec_pid;       /* q2bt-codec running a switch, 0 none */
     int codec_failed;    /* a switch failed in this stream: no more until the next */
+    struct bt_sbc sbc;   /* SBC's bitpool, afresh at each START */
+    int sbc_allowed;     /* bt_sbc_allowed's, from config.ini */
+    int sbc_failed;      /* bluealsa's byte would not take a write: none until the next START */
 } bt;
 
 static void note(const char *what) {
@@ -248,7 +254,9 @@ static void enc_find(unsigned now) {
 /* ---- the codec ---- */
 static void allowed_read(void) {
     char b[8192];
-    bt.allowed = slurp(CONFIG, b, sizeof b) > 0 ? bt_step_allowed(b) : -1;
+    int n = slurp(CONFIG, b, sizeof b);
+    bt.allowed = n > 0 ? bt_step_allowed(b) : -1;
+    bt.sbc_allowed = n > 0 ? bt_sbc_allowed(b) : -1;
 }
 static void pcms_start(unsigned now) {
     if (bt.pcms_pid > 0) return;
@@ -300,14 +308,65 @@ static void step_reap(unsigned now) {
     ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
     bt.codec_failed = 1;
 }
+/* ---- SBC's bitpool: bluealsa's BT_SBC_POOL bytes, through /proc/PID/mem ---- */
+static int pool_at(int fd) { return lseek(fd, BT_SBC_POOL, SEEK_SET) == BT_SBC_POOL; }
+/* the bitpool asked for, the encoder thread's own and the last used, into b[3]: 1 read (0 with no
+ * bluealsa, or one without the bytes: an unpatched build's address is not mapped) */
+static int pool_read(unsigned char *b) {
+    char p[32];
+    if (!bt.ba) return 0;
+    snprintf(p, sizeof p, "/proc/%d/mem", bt.ba);
+    int fd = open(p, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    int ok = pool_at(fd) && read(fd, b, 3) == 3;
+    close(fd);
+    return ok;
+}
+/* v asked for, and read back: 1 when bluealsa has it */
+static int pool_write(int v) {
+    char p[32];
+    unsigned char b[3], c = (unsigned char)v;
+    if (!bt.ba) return 0;
+    snprintf(p, sizeof p, "/proc/%d/mem", bt.ba);
+    int fd = open(p, O_RDWR | O_CLOEXEC);
+    if (fd < 0) return 0;
+    int ok = pool_at(fd) && write(fd, &c, 1) == 1;
+    close(fd);
+    return ok && pool_read(b) && b[0] == c;
+}
+static void say(char level, const char *line) {
+    note(line);
+    ulog_add(bt.ulog, time(0), now_ms(), level, "bt", line);
+}
+/* One line on SBC: bt_sbc_step's rung, and bluealsa's byte made to agree with it (a q2guard started
+ * again, or a new stream, finds whatever was left there). have: pb was read. */
+static void sbc_step(unsigned now, int have, const unsigned char *pb, int wq, int fly, int bufs) {
+    char line[64];
+    int rank = bt_codec_rank(bt.codec), own = have ? pb[1] : 0;
+    int was = bt.sbc.pool ? bt.sbc.pool : own;
+    int to = bt_sbc_step(&bt.sbc, now, bt.sbc_allowed, rank, rank == 1 ? own : 0, wq, fly, bufs);
+    if (to >= 0) {
+        int now_pool = to ? to : own;
+        snprintf(line, sizeof line, "STEP SBC bitpool %d -> %d", was, now_pool);
+        say('I', line);
+    }
+    if (!have || bt.sbc_failed || pb[0] == bt.sbc.pool) return;
+    if (pool_write(bt.sbc.pool)) return;
+    snprintf(line, sizeof line, "STEP failed SBC bitpool %d: /proc/%d/mem", bt.sbc.pool, bt.ba);
+    say('W', line);
+    bt.sbc_failed = 1;
+}
+
 static void step(unsigned now, int wq, int fly, int bufs) {
     char line[160];
     step_reap(now);
-    int to = bt_step(&bt.step, now, bt.allowed, bt_codec_rank(bt.codec), wq, fly, bufs);
+    int rank = bt_codec_rank(bt.codec);
+    /* SBC with its bitpool lowered: the bitpool climbs back before the codec does */
+    int to =
+        bt_step(&bt.step, now, bt.allowed, rank, wq, rank == 1 && bt.sbc.pool ? -1 : fly, bufs);
     if (!to || bt.codec_pid > 0 || bt.codec_failed || !bt.pcm[0]) return;
     snprintf(line, sizeof line, "STEP %s -> %s", bt.codec, bt_codec_name(to));
-    note(line);
-    ulog_add(bt.ulog, time(0), now_ms(), 'I', "bt", line);
+    say('I', line);
     snprintf(line, sizeof line, CODEC_PROG " %s %s > " CODEC_FILE " 2>&1", bt.pcm,
              bt_codec_name(to)); /* bt_pcms_path lets no shell character through */
     int pid = fork();
@@ -332,6 +391,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.wlan = wlan(&bt.wtx, &bt.wrx);
     busy_since(&bt.cpu, &cores);
     bt.codec[0] = 0, bt.hz = 0, bt.enc_name[0] = 0, bt.fly.have = 0, bt.codec_failed = 0;
+    memset(&bt.sbc, 0, sizeof bt.sbc), bt.sbc_failed = 0;
     allowed_read();
     enc_find(now);
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
@@ -392,9 +452,13 @@ static void sample(unsigned now, const struct bt_counts *c) {
     s.er = got && got == bt.enc_stat ? bt_rate(run - bt.enc_run, ms) : -1;
     s.ew = got == 1 && bt.enc_stat == 1 ? bt_rate(wait - bt.enc_wait, ms) : -1;
     if (got) bt.enc_run = run, bt.enc_wait = wait, bt.enc_stat = got;
+    unsigned char pb[3];
+    int have = pool_read(pb);
+    s.bp = have && !strcmp(bt.enc_name, "ba-a2dp-sbc") ? pb[2] : -1;
     bt_line(line, sizeof line, &s);
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;
+    sbc_step(now, have, pb, s.wq, s.fly, c->acl_pkts);
     step(now, s.wq, s.fly, c->acl_pkts);
 }
 static void tick(unsigned now) {

@@ -2,7 +2,8 @@
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
  * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
  * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
- * under LDAC Auto, aptX HD is stepped down while the radio cannot keep up (bt_step). The
+ * under LDAC Auto, aptX HD is stepped down while the radio cannot keep up (bt_step), and SBC's
+ * bitpool lowered (bt_sbc_step). The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
 #ifndef Q2BT_H
@@ -17,8 +18,10 @@
     30000 /* under BT_START_BPS this long: the stream ended (a stall is sampled through) */
 #define BT_PCMS_MS 60000 /* bluealsa asked for the codec again this often while a stream runs */
 #define BT_RAM 65536     /* the log's RAM ring while the card is away (about 9 minutes of lines) */
-#define BT_FILE_MAX                                                                                \
-    1048576 /* q2-bt.0 moved to .1 at this size: the two hold about 4 hours of streaming */
+#define BT_FILE_MAX 1048576 /* q2-bt.0 moved on at this size: a megabyte is about 2 hours at 1 Hz  \
+                             */
+#define BT_FILES                                                                                   \
+    4 /* q2-bt.0 to .3: after a move 3 MB, about 6 hours, and never past 4 MB and a flush */
 #define BT_UNSET (-1000) /* a signed reading not taken */
 
 /* ---- is a stream running ----
@@ -129,6 +132,41 @@ int bt_step_allowed(const char *ini);
  * into path (n bytes); 0 none, or one holding anything but letters, digits, _ and / */
 int bt_pcms_path(const char *text, char *path, int n);
 
+/* ---- SBC's bitpool (docs/internals.md#bluetooth-link-monitor) ----
+ * bluealsa's SBC encoder takes its bitpool from tools/bt_silence.S's sbc_pool byte at each frame,
+ * as the lesser of it and the bitpool the encoder thread started with (0 or 1: that one), which
+ * libsbc applies from the next frame: no renegotiation, no gap. The three bytes at BT_SBC_POOL in
+ * bluealsa (tools/build.py's BT_SBC_POOL): the bitpool asked for (q2guard writes it through
+ * /proc/PID/mem), the thread's own (written by its first frame) and the last one encoded with. */
+#define BT_SBC_POOL 0x450600
+#define BT_SBC_FLOOR 19         /* the lowest rung: about 150 kbit/s at 48 kHz joint stereo */
+#define BT_SBC_SETTLE_MS 2000   /* after a change: the queue drains at the new rate, not counted */
+#define BT_SBC_CLEAN 30         /* seconds in a row with nothing waiting before a rung up, */
+#define BT_SBC_UP_MS 60000      /* and no sooner than this after the last change; */
+#define BT_SBC_UP_MAX_MS 480000 /* doubled, to this, each time a rung up stalls again within it */
+struct bt_sbc {
+    int pool;         /* the bitpool asked for, 0 the thread's own */
+    int stall, clean; /* seconds in a row congested, clean */
+    int have;         /* last is set */
+    unsigned last;    /* ms of the last change */
+    unsigned up_ms;   /* the wait before a rung up, 0 BT_SBC_UP_MS */
+    int raised;       /* the last change was up, at raised_at (ms) */
+    unsigned raised_at;
+};
+/* The rung after pool (0 the thread's own, own) going down (dir -1) or up (1): down below own and
+ * not under BT_SBC_FLOOR, up to 0 once the next rung reaches own; -1 none (or own not known, 0). */
+int bt_sbc_next(int pool, int own, int dir);
+/* One line: allowed (bt_sbc_allowed), the codec's rank (bt_codec_rank), own, wq, fly (-1 not read)
+ * and the controller's buffer count, as bt_step's. The bitpool to ask for now (0 the thread's own),
+ * else -1. Another codec, or the switch turned off, asks for 0 once. */
+int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
+                int bufs);
+#define BT_SBC_HQ 6 /* [SYSSET] BTCODING's SBC HQ and SBC rows (g_btcoding) */
+#define BT_SBC_ROW 7
+/* config.ini's text: 1 LDAC Auto, SBC HQ or SBC with BT_STEP_KEY's switch on, 0 those with it off,
+ * -1 another choice (or none saved) */
+int bt_sbc_allowed(const char *ini);
+
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
  * while the controller's ACL buffers are full), or -1 with no such table. */
@@ -166,6 +204,7 @@ struct bt_sample {
     int fcc;    /* struct bt_link's; BT_UNSET none */
     int done;   /* packets a second the controller delivered (Number Of Completed Packets); -1 */
     int fly;    /* packets in the controller now (bt_fly_step); -1 */
+    int bp; /* SBC's bitpool on the last frame (BT_SBC_POOL's third byte); -1 not SBC or not read */
 };
 int bt_line(char *out, int size, const struct bt_sample *s);
 /* per-second rates over ms: n counted in ms, as a whole count a second (no 64-bit division) */
@@ -173,7 +212,8 @@ int bt_rate(unsigned n, unsigned ms);
 /* clock ticks (100 a second) over ms as tenths of a percent of one core */
 int bt_ticks_pct(unsigned ticks, unsigned ms);
 
-/* The log: q2-bt.0 in dir, rotated into .1 at BT_FILE_MAX (log_flush, q2guard_core.c). */
+/* The log: q2-bt.0 in dir, moved on at BT_FILE_MAX through BT_FILES files (log_flush,
+ * q2guard_core.c). */
 int bt_flush(card_log *l, const char *dir);
 
 /* ---- q2bt.c: the device's side ---- */
