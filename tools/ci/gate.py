@@ -189,6 +189,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/headset_io.py': ['{build}'],
     'test/ldac.py': ['{build}'],
     'test/library_scope.py': [],
+    'test/localsend_e2e.py': ['{build}'],  # takes a build and finds the CLI itself; without one it prints skip and passes
     'test/m4b.py': ['{build}'],
     'test/mcu_park.py': ['{stockfs}/usr/data/libmcu-bare.bin'],
     'test/mcu_sleep.py': ['{stockfs}/usr/data/libmcu-bare.bin'],
