@@ -928,7 +928,8 @@ own.
   the 50% scrim is the [confirmation card](#confirmation-card)'s, for a question.
 - **While it loads** Return, or a tap anywhere off the spinner, cancels: the page stays as it was and the answer, when it
   comes, is dropped. A tap on the spinner does nothing; the wheel's Centre and a tap on a row do nothing either, so
-  nothing is asked twice.
+  nothing is asked twice. A slow load has no Stop row (a Loading… page's after 3 s): Return cancels it, and the app's
+  own menu keeps its Stop row.
 - **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
   Stop), after the app's 15 s at most.
 - **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's

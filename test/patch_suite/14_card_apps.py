@@ -517,12 +517,10 @@ assert m.systems==[SKILL] and m.labels()==['Starting Soulseek…'],(m.systems,m.
 m.poll(); assert m.systems==[SKILL]  # the old loop still there
 m.files.pop(SPID); m.poll(); assert m.systems==[SKILL,'/bin/sh /mnt/mmc/.soulseek/run'],m.systems
 m.advance(500); m.answer('ok','refresh','',SMENU); assert m.labels()==SLABELS,m.labels(); passed()
-# A level loading for 3 s (a frozen app holding the request, which gives up at 15 s) shows Stop
-# Soulseek under Loading….
+# A level loading for 3 s (a frozen app holding the request, which gives up at 15 s) keeps the menu under the
+# loading overlay, with no Stop row of its own: Return cancels it, and the menu's Stop Soulseek ends the app.
 m=SlskMachine(); m.open(); m.answer('ok','refresh','',SMENU); m.files[SPID]=bytearray(b'123'); m.pick(2)
-assert m.labels()==['Loading…']; m.advance(2900); assert m.labels()==['Loading…']
-m.advance(400); assert m.labels()==['Loading…','Stop Soulseek'],m.labels()  # the page's next 250 ms tick
-m.systems=[]; m.row(0); assert m.systems==[SKILL] and m.toasts[-1][3]=='Soulseek stopped' and 'navigator_back' in [c[0] for c in m.calls]
+assert m.labels()==SLABELS; m.advance(3300); assert m.labels()==SLABELS,m.labels()
 m.close(); passed()
 # An app that isn't running (it stopped by itself) has nothing to stop: Retry alone, which starts it.
 m=SlskMachine(); m.open(); m.answer('ok','refresh','',SMENU); m.serve=None; m.advance(10000); m.poll(); m.worker()
