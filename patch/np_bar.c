@@ -8,7 +8,7 @@ static struct {
     int from, to;      /* the pill's width at the grow's start and its end */
     unsigned at;       /* the grow's start, time_now_ms */
     unsigned timer;    /* the grow's next frame */
-    int pressed;       /* the button a tap last pressed, + 1 (np_mode_click) */
+    int pressed;       /* the button a tap last pressed, + 1 (row_press) */
     unsigned press_at; /* its time_now_ms: its square fades out over NP_PRESS_MS */
 } rad __attribute__((section(".scratch")));
 
@@ -444,10 +444,23 @@ static int press_share(int k) {
     return 100 - (int)(ms * 100 / NP_PRESS_MS);
 }
 
-/* A tap on the row (the play mode's target): the button nearest it. Shuffle and repeat step as
- * Centre on their ring does, unless radio is on; radio starts a radio of the playing song, or
- * the pill stops it (song_radio.c song_radio_tap); Up Next opens the queue (navigation.c np_queue).
- * 1 when it took the tap, stock's step through the one mode never. */
+/* Button k of the row tapped: shuffle and repeat step as Centre on their ring does, unless radio is
+ * on; radio starts a radio of the playing song, or the pill stops it (song_radio.c
+ * song_radio_tap); Up Next opens the queue (navigation.c np_queue). Its press square shows, the
+ * pill's excepted, which is its own press. */
+static void row_press(int k) {
+    if (k != NB_RADIO || !rad.on)
+        rad.pressed = k + 1, rad.press_at = (unsigned)time_now_ms(), row_frame(0);
+    if (k == NB_QUEUE)
+        timer_add(np_queue, (void *)0, 0);
+    else if (k == NB_RADIO)
+        timer_add(song_radio_tap, (void *)0, 0);
+    else if (!rad.on)
+        np_mode_step(k == NB_REPEAT, 1);
+}
+
+/* A tap on the row (the play mode's target): the button nearest it (row_press). 1 when it took
+ * the tap, stock's step through the one mode never. */
 int np_mode_click(void *target, void *event) {
     if (!target || target != np_row_widget() || !theme()->np_modes) /* the theme last */
         return 0;
@@ -460,15 +473,36 @@ int np_mode_click(void *target, void *event) {
     row_x(0, I(target, W_W), pill_w(&word), cx);
     for (int i = 1; i < NB_N; ++i) /* past the midpoint between two centres: the next */
         if (x > (cx[i - 1] + cx[i]) / 2) k = i;
-    if (k != NB_RADIO || !rad.on) /* the pill is its own press */
-        rad.pressed = k + 1, rad.press_at = (unsigned)time_now_ms(), row_frame(0);
-    if (k == NB_QUEUE)
-        timer_add(np_queue, (void *)0, 0);
-    else if (k == NB_RADIO)
-        timer_add(song_radio_tap, (void *)0, 0);
-    else if (!rad.on)
-        np_mode_step(k == NB_REPEAT, 1);
+    row_press(k);
     return 1;
+}
+
+/* The outer buttons' touch past the target (the user's, 2026-11-18;
+ * docs/oled-design.md#now-playing): shuffle's from the window's left edge, Up Next's to its right,
+ * each from the row's top down to the window's foot, and across as far as np_mode_click's share for
+ * it reaches: shuffle's to the midpoint with radio, Up Next's from the midpoint with repeat, so
+ * they never reach Radio or its pill. Only where the target is not: a tap on it is its click. The
+ * button (NB_SHUFFLE or NB_QUEUE) whose corner holds the screen's (x, y), else -1. Touch only: what
+ * is drawn, its press and its ring stay the glyph's. */
+static int row_corner(int x, int y) {
+    void *mode = np_row_widget();
+    if (!mode || !st.np_win || np_stream_error() || !theme()->np_modes) return -1;
+    int mx = 0, my = 0, word, cx[NB_N];
+    for (void *p = mode; p && p != window_manager(); p = P(p, W_PARENT))
+        mx += I(p, W_X), my += I(p, W_Y);
+    if (x < 0 || x >= I(st.np_win, W_W) || y < my || y >= I(st.np_win, W_H) || np_hit(mode, x, y))
+        return -1;
+    row_x(mx, I(mode, W_W), pill_w(&word), cx);
+    return x <= (cx[NB_SHUFFLE] + cx[NB_RADIO]) / 2 ? NB_SHUFFLE
+           : x > (cx[NB_REPEAT] + cx[NB_QUEUE]) / 2 ? NB_QUEUE
+                                                    : -1;
+}
+
+/* np_taps.c np_tap: a tap that came down at (x0, y0) and lifted at (x, y), within TAP_PX, presses
+ * the corner's button when both are in the same one. */
+void np_corner_tap(int x0, int y0, int x, int y) {
+    int k = row_corner(x0, y0);
+    if (k >= 0 && row_corner(x, y) == k) row_press(k);
 }
 
 /* The heart while it shows: Now Playing's, bound (np_glyphs_bind), visible with every parent, on

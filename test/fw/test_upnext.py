@@ -9,6 +9,7 @@ import pytest
 
 import host
 from conftest import O, Deques, libc, stock_prop_str
+from test_nav_hold import recs  # noqa: F401
 
 # Up Next's sheet, stock's sortselect dialog as a zeroed widget (no parent): OLED's title and toast checks read the
 # window on top
@@ -577,3 +578,92 @@ def test_the_header_s_level_bars_ride_the_shared_loop_and_repaint_only_their_box
     held = paint()
     now[0] += 500
     assert paint() == held
+
+
+def finger(page, at, to, scrolled=0):
+    """A finger down at at and up at to on the sheet (its window's pointer handlers, before its children's), the rows
+    scrolled down by scrolled, then what that asked of the next pass: 1 when the sheet was closed."""
+    C.c_int.from_address(page.view + O['SCROLL_Y']).value = scrolled
+    timers = len(page.timers)
+    for kind, (x, y) in ((O['EVT_POINTER_DOWN'], at), (O['EVT_POINTER_UP_BEFORE'], to)):
+        ev = C.create_string_buffer(0x40)
+        struct.pack_into('<i', ev, O['EVENT_TYPE'], kind)
+        struct.pack_into('<ii', ev, O['EVENT_X'], x, y)
+        for fn, ctx in page.bound.get((PAGE, kind), []):
+            assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev)) == 0  # the rows keep it
+    for fn, _ in page.timers[timers:]:
+        info = C.create_string_buffer(0x40)
+        C.c_void_p.from_address(C.addressof(info) + O['TIMER_CTX']).value = PAGE
+        C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(C.addressof(info))
+    return int(PAGE in page.closed)
+
+
+@pytest.mark.parametrize('at, to', [((180, 20), (184, 24)), ((30, 5), (30, 5)), ((360, 38), (352, 32))],
+                         ids=['scrim', 'status-row', 'scrim-wobble'])
+def test_a_tap_on_the_dimmed_page_above_the_sheet_closes_it(fw, up, at, to):
+    """The user's, 2026-11-18 00:06: only Return closed Up Next. A tap above the sheet's top (y 40), on the page
+    receding behind it, lets it fall away as Return does (menu_modal.c modal_close)."""
+    _, page = up
+    page.open()
+    assert finger(page, at, to) == 1
+
+
+def test_a_drag_down_on_the_sheet_closes_it(fw, up):
+    """A drag down of 48 px or more, more down than across, that came down on the grab bar's strip or on the rows
+    while they are at their top, lets the sheet fall away; a drag on rows scrolled down scrolls them."""
+    _, page = up
+    page.open()
+    assert finger(page, (187, 46), (190, 94)) == 1  # the grab bar, 48 px down
+
+
+@pytest.mark.parametrize('at, to, scrolled', [
+    ((187, 120), (187, 160), 0),   # 40 px: short of it
+    ((187, 120), (260, 180), 0),   # as much across as down
+    ((187, 180), (187, 120), 0),   # up: the rows scroll
+    ((187, 120), (187, 220), 92),  # the rows scrolled down: they scroll back
+    ((180, 20), (180, 80), 0),     # from above the sheet: no tap, no drag on it
+    ((187, 200), (187, 205), 0),   # a tap on a row: the row's
+], ids=['short', 'sideways', 'up', 'scrolled', 'from-scrim', 'row-tap'])
+def test_what_does_not_close_the_sheet(fw, up, at, to, scrolled):
+    _, page = up
+    page.open()
+    assert finger(page, at, to, scrolled) == 0
+
+
+def test_rows_at_their_top_drag_the_sheet_down(fw, up):
+    _, page = up
+    page.open()
+    assert finger(page, (187, 150), (187, 260)) == 1
+
+
+def test_a_row_of_the_playing_songs_album_takes_the_cover_now_playing_shows(fw, mcl, recs):
+    """The user's, 2026-11-17: Up Next's rows of "Idle Moments" were grey: their album had no cover saved by
+    Subsonic and none in Cover Flow's cache, though Now Playing showed the song's own art. A row of the playing
+    song's album takes the player's cover of that song; a row of another album never does."""
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
+    page = Page(fw)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = Deques(fw).new([
+        recs(path='/mnt/mmc/.subsonic/stream/a/original/0/Jean De Fleur [s1].flac', title='Jean De Fleur',
+             artist='Grant Green', album='Idle Moments'),
+        recs(path='/mnt/mmc/.subsonic/stream/a/original/0/Idle Moments [s2].flac', title='Idle Moments',
+             artist='Grant Green', album='Idle Moments'),
+        recs(path='/mnt/mmc/m/Speak No Evil.flac', title='Speak No Evil', artist='Wayne Shorter',
+             album='Speak No Evil'),
+    ])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = b'/mnt/mmc/.subsonic/stream/a/original/0/Jean De Fleur [s1].flac'
+    fw.var('g_playcover_type', C.c_ubyte).value = 1  # embedded art, the player's /tmp/coverpic.jpg
+    covers: list[str] = []
+    fw.mock('image_base_set_image', lambda w, name, *_: covers.append(C.string_at(name).decode()) or 0)
+    page.open()
+    assert len(covers) == 1 and covers[0].endswith('/tmp/coverpic.jpg')  # Idle Moments' row; not Speak No Evil's
+    starts: list[str] = []
+    def create(t, attr, fn, job, *_):  # started: the fetch runs (busy) until the test ends
+        starts.append(C.string_at(job + 8).decode())
+        C.c_ulong.from_address(t).value = 1
+        return 0
+    fw.mock('fw_pthread_create', create)
+    page.close()
+    page.open()
+    assert starts == ['/mnt/mmc/m/Speak No Evil.flac']  # Speak No Evil's cover fetched from its file, once
+    fw.var('album_cover__ac', C.c_uint).value = 0  # the fetch over (ac.busy), for the tests after
