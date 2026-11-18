@@ -401,13 +401,16 @@ static void cover_paint(void *item, void *canvas) {
         ar_corners(canvas, &r, AR_THUMB_R, on ? ar_accent() : flip_if(ipod_light(), 0));
     }
     stock_canvas_set_fill_color(canvas, fill);
-    if (right && *right)
-        ui_text(canvas, right, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0,
-                375 - geom_val(V_RIGHT_X), h / 2, 60, 3);
+    /* the playing song's (song_rows.c): its bars on the right column, its length beside them */
+    int col = 375 - geom_val(V_RIGHT_X), has = right && *right,
+        room = playing_row(item, canvas, col - 1, has ? 50 : 0, on);
+    if (has)
+        ui_text(canvas, right, 0, TYPE(15), on ? 0xffffff : RGB_TERTIARY, 0, col - room, h / 2, 60,
+                3);
     if (after && *after) { /* the title's ink and two spaces, then what is left of its column */
         char title[160];
         unsigned buf[96], n;
-        int x = r.x + thumb + 10, w = 375 - geom_val(V_RIGHT_X) - (right && *right ? 50 : 0) - x,
+        int x = r.x + thumb + 10, w = col - room - (has ? 50 : 0) - x,
             px = widget_get_prop_int(item, AR_PX, TYPE(20));
         tk_snprintf(title, sizeof title, "%s  ", widget_get_prop_str(item, AR_TITLE, ""));
         n = ui_wide(title, buf, sizeof buf / sizeof *buf);

@@ -40,7 +40,7 @@ extern int album_before(const void *, const void *), folder_cmp(void *, void *),
     album_only(void *, void *, int);
 extern unsigned queue_hash(void *); /* navigation.c */
 extern int resume_held(void);       /* navigation.c */
-extern void resume_return(void), resume_restart(void);
+extern void resume_restart(void);
 extern void un_source_take(void *q, int at, int type); /* upnext.c */
 
 typedef struct {
@@ -959,16 +959,18 @@ static void commit(unsigned next) {
     s.dirty = 1;
 }
 /* player_start_queue: stock's View Queue row (and its queue delete, DLNA and URL plays) start queue
- * index at. In advanced play the pick is committed first: a shuffle's through Play Next's path, so
- * the order carries on after it and it neither plays again later in the pass nor drops the tracks
- * it jumped; an ordered queue's in place, so the tracks after it follow. A pick inside a pending
- * Play Next takes only its entry off the list, the rest stay pending. */
+ * index at. View Queue's row of the song playing or paused opens Now Playing, the song never sent
+ * again (song_rows.c song_playing, as ringnav_player_start's picks). In advanced play the pick is
+ * committed first: a shuffle's through Play Next's path, so the order carries on after it and it
+ * neither plays again later in the pass nor drops the tracks it jumped; an ordered queue's in
+ * place, so the tracks after it follow. A pick inside a pending Play Next takes only its entry off
+ * the list, the rest stay pending. */
 #define VIEW_QUEUE_RET 0x53acf8 /* playerqueue_row_on_click: View Queue's row, past its checks */
 int ringnav_start_queue(int at) {
     unsigned x = (unsigned)at;
     follow_queue();
     if (__builtin_return_address(0) == (void *)VIEW_QUEUE_RET && x == (unsigned)M(MCL_POS) &&
-        playback_keeps(queue(), at)) {
+        queue() && x < deque_size(queue()) && song_playing(deque_at(queue(), x))) {
         playback_np();
         return 1;
     }
@@ -1261,21 +1263,44 @@ void playback_np(void) {
 #define PAGE_PICK_RET 0x53e514  /* playing_page_init, which opens Now Playing itself */
 #define ALBUM_PLAY_RET 0x4a97c0 /* the album page's play (0x4a96c0), which stays on its page */
 #define ALBUMINFO_PLAY_RET 0x4ac008 /* a song list's Play All (localmusic_songs_play_all) */
-/* The same row of the same list: nothing starts. SyncLink's (0x5264c4, 0x5266b4), off the UI thread, stays
- * silent, the track playing on. From another list stock loads it, and the poll goes back to the place. Not a
- * press: an app's .play (press_natural), Shuffle Albums' load, DLNA and online. */
+/* A pick of the song playing or paused (song_rows.c song_playing: its path and CUE track, a server
+ * row by its fileurl) never loads it again, from any row of any list (the user's report: a tap on
+ * the playing song's row restarted it; docs/oled-design.md#song-rows): the same row of the same
+ * list changes nothing, another list's of the same class (a queue's class is stock's: a folder's,
+ * an album's, a playlist's) puts that list's songs after it, as a radio of it does
+ * (playback_queue_rest), and the queue stays as it is for any other, or when a server row is in
+ * the list (the firmware plays none after it). A page that stays (an album's play, Play All) opens
+ * Now Playing; Now Playing's own pick plays a paused song on. SyncLink's (0x5264c4, 0x5266b4), off
+ * the UI thread, stays silent. Not a press: an app's .play (press_natural), Shuffle Albums' load,
+ * DLNA and online, nor a local list over a DLNA or online queue, which stock loads. */
+static int has_server_row(void *q) {
+    for (unsigned i = 0, n = deque_size(q); i < n; ++i)
+        if (catalogue_path(P(deque_at(q, i), REC_PATH))) return 1;
+    return 0;
+}
 int ringnav_player_start(void *q, int at, int cls, int mode) {
     void *from = __builtin_return_address(0);
-    if (!press_natural && !s.grouping && local_class(cls) && playback_keeps(q, at)) {
-        if (at != M(MCL_POS) || deque_size(q) != deque_size(queue()) || cls != M(MCL_TYPE))
-            resume_return();
-        else {
-            if (from == (void *)ALBUM_PLAY_RET || from == (void *)ALBUMINFO_PLAY_RET)
-                playback_np();
-            else if (from == (void *)PAGE_PICK_RET && mclGetPlayStatus() == 3)
-                player_play_pause();
-            return 1;
+    void *r = q && at >= 0 && (unsigned)at < deque_size(q) ? deque_at(q, (unsigned)at) : (void *)0;
+    if (!press_natural && !s.grouping && local_class(cls) && local_class(M(MCL_TYPE)) && r &&
+        song_playing(r)) {
+        int same = queue() && at == M(MCL_POS) && deque_size(q) == deque_size(queue()) &&
+                   cls == M(MCL_TYPE);
+        if (!same && cls == M(MCL_TYPE) && !has_server_row(q)) {
+            int from_at = at;
+            void *own = no_videos(q, &from_at), *list = own ? own : q,
+                 *rest = _create_deque("stSongInfo");
+            deque_init(rest);
+            for (unsigned i = (unsigned)from_at + 1, n = deque_size(list); i < n; ++i)
+                _deque_push_back(rest, deque_at(list, i));
+            if (playback_queue_rest(rest)) un_source_take(list, from_at, cls);
+            deque_destroy(rest);
+            if (own) deque_destroy(own);
         }
+        if (from == (void *)ALBUM_PLAY_RET || from == (void *)ALBUMINFO_PLAY_RET)
+            playback_np();
+        else if (from == (void *)PAGE_PICK_RET && mclGetPlayStatus() == 3)
+            player_play_pause();
+        return 1;
     }
     return stock_player_start_trampoline(q, at, cls, mode);
 }

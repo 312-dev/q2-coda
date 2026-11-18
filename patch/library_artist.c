@@ -91,10 +91,12 @@ static void la_rows(int kind) {
             tk_snprintf(right, sizeof right, y > 0 ? "%d" : "", y);
             cover_row(view, i, 40, 32, 0, name && *name ? name : "Unknown Album", right, cover,
                       la_pick, i);
-        } else
-            cover_after(cover_row(view, i, 36, 28, AR_SONG_PX, track_name(text, sizeof text, r),
-                                  duration_text(right, sizeof right, r), cover, la_pick, i),
-                        name);
+        } else {
+            void *item = cover_row(view, i, 36, 28, AR_SONG_PX, track_name(text, sizeof text, r),
+                                   duration_text(right, sizeof right, r), cover, la_pick, i);
+            cover_after(item, name);
+            playing_mark(item, r, 1); /* artist_page.c cover_paint draws its bars */
+        }
     }
     ringnav_select(view, 0, n);
 }

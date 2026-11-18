@@ -1423,15 +1423,16 @@ m=RealKeyMachine(); m.install([('ch','/a/book.m4b','B',0,0,600,1200)],0); m.word
 assert m.key(PREV_KEY)=='seek'
 checks+=2
 
-# A list pick of the playing file, from each caller's own words into player_start. No caller reads its result: the same
-# row of the same list starts nothing, what the page does after depends on who called. A short song keeps stock's restart.
+# A list pick of the playing file, from each caller's own words into player_start. No caller reads its result: no pick of
+# the file playing or paused sends it again (a long track's or a short song's), what the page does after depends on who
+# called.
 class PickMachine(ChangeMachine):
     PAGE=(0x53e4f4,0x53e514); ALBUM=(0x4a97a8,0x4a97c0); INFO=(0x4abff0,0x4ac008); SYNC=(0x5264ac,0x5264c4); SYNC2=(0x52669c,0x5266b4); ROW=(0x53acec,0x53acf8)
     def __init__(self,status=2,cls=1):
         super().__init__(); self.install([('x','/a/x','A',0,0,0,0),('1','/a/1','A',0,1,0,0)],1); self.held=1; self.word(O['MCL_TYPE'],cls); self.word(O['MCL_MODE'],0); self.byte(O['MCL_JUMPFOLDER'],0)
         for n in ('player_start','player_start_queue','player_play_pause','navigator_back'): self.handlers.pop(syms[n],None)
         self.handlers[ps['stock_player_start_trampoline']]='x:stock_start'; self.handlers[ps['stock_start_queue_trampoline']]='x:stock_queue'
-        self.handlers[ps['stock_pause_trampoline']]='x:unpause'; self.handlers[ps['resume_return']]='x:go_back'
+        self.handlers[ps['stock_pause_trampoline']]='x:unpause'
         self.handlers[syms['navigator_switch_to_with_context']]='pick:np'; self.handlers[syms['navigator_back']]='x:back'
         self.handlers.pop(syms['mclGetPlayStatus'],None); self.word(0xa50084,status)
         self.ctx=self.alloc(16); self.cell=self.alloc(4); self.np=[]
@@ -1464,7 +1465,7 @@ class PickMachine(ChangeMachine):
         assert not self.get(ps['restart_ask']) and self.get(syms['mcl_pdeqplaylist'])==queue
         return [e for e in self.seen if e!='resume_held']
     def picked(self,**kw): return self.at_site(self.PAGE,**kw)
-START,GO=['stock_start'],['go_back','stock_start']
+START=['stock_start']
 for site in (PickMachine.PAGE,PickMachine.SYNC):
     m=PickMachine(); assert m.at_site(site)==[] and m.at_site(site)==[]  # the same row, twice, without asking or arming
 # Album pages stay on their page after a start: refused, they open Now Playing, class 0xff as on_backplay_click.
@@ -1476,15 +1477,16 @@ for site in (PickMachine.SYNC,PickMachine.SYNC2):
     m=PickMachine(status=3); assert m.at_site(site)==[],site
 m=PickMachine(status=3); assert m.picked()==['unpause']  # the page opens itself
 m=PickMachine(status=1); assert m.picked()==START  # stopped: a real start, never Now Playing in silence
-m=PickMachine(); m.held=0; assert m.picked()==START and PickMachine().picked()==[]  # a short song, or no place to lose
+m=PickMachine(); m.held=0; assert m.picked()==[] and PickMachine().picked()==[]  # a short song too: never sent again
 m=PickMachine(); assert m.picked(at=0)==START  # another row
 m=PickMachine(); assert m.picked(at=5)==START  # stock's to refuse
-# Another list with the same file: stock loads it and the poll goes back. By position, by size, by class.
+# Another list with the same file: nothing is sent. Of the queue's class its songs after the file follow it in the queue
+# (playback_queue_rest); of another the queue stays. By position, by size, by class.
 m=PickMachine(); assert m.picked(q=m.other,at=1)==START
-m=PickMachine(); assert m.picked(q=m.rows_of('/a/1'),at=0)==GO
-m=PickMachine(); assert m.picked(q=m.rows_of('/a/x','/a/1','/a/w'),at=1)==GO
-m=PickMachine(); assert m.picked(q=m.rows_of('/a/1','/a/x'),at=0)==GO
-m=PickMachine(); assert m.picked(cls=0xff10)==GO
+m=PickMachine(); assert m.picked(q=m.rows_of('/a/1'),at=0)==[]
+m=PickMachine(); assert m.picked(q=m.rows_of('/a/x','/a/1','/a/w'),at=1)==[]
+m=PickMachine(); assert m.picked(q=m.rows_of('/a/1','/a/x'),at=0)==[]
+m=PickMachine(); assert m.picked(cls=0xff10)==[]
 # A CUE row of the file playing whole is another track, the first chapter too (start 0, an end): stock, nothing to go back to.
 for start,end in ((600,1200),(0,600),(600,0)):
     m=PickMachine(); q=m.rows_of('/a/x','/a/1'); r=list(m.items(q))[1]; m.word(r+O['REC_CUE_START'],start); m.word(r+O['REC_CUE_END'],end); assert m.picked(q=q)==START,(start,end)
@@ -1498,7 +1500,7 @@ m=PickMachine(); assert m.at_site(m.ROW)==['np']
 m=PickMachine(status=3); assert m.at_site(m.ROW)==['np','unpause']
 m=PickMachine(); assert m.at_site(m.ROW,at=0)==['stock_queue']
 m=PickMachine(status=1); assert m.at_site(m.ROW)==['stock_queue']
-m=PickMachine(); m.held=0; assert m.at_site(m.ROW)==['stock_queue']
+m=PickMachine(); m.held=0; assert m.at_site(m.ROW)==['np']  # a short song too
 m=PickMachine(); m.handlers.pop(syms['player_start_queue'],None); m.fn('ringnav_start_queue',1); assert m.seen==['resume_held','stock_queue'] or m.seen==['stock_queue'],m.seen  # DLNA, a delete
 # Up Next's row of it closes the sheet, then opens Now Playing. Any other row plays, as before.
 def up_next_row(m,at):  # upnext.c's rows as un_fill leaves them: one song, queue index at, nothing queued
@@ -1507,7 +1509,8 @@ def up_next_row(m,at):  # upnext.c's rows as un_fill leaves them: one song, queu
 m=PickMachine(); m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['back','np'],m.seen
 m=PickMachine(); m.held=0; m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['stock_queue','back'],m.seen
 checks+=30
-# player_start's real body: another list loads and starts through the hook, past stock's mclLoadPlayList and mclStartPlayer.
+# player_start's real body: another list's pick of the playing file reaches neither stock's mclLoadPlayList nor
+# mclStartPlayer.
 class BodyMachine(PickMachine):
     def __init__(self):
         super().__init__(); self.handlers.pop(ps['stock_player_start_trampoline'])
@@ -1515,9 +1518,10 @@ class BodyMachine(PickMachine):
         for name in ('mclSetPlayMode','sendBtHeadsetPlayStatus','sendBtHeadsetPlayInfo','dmrRenderQplayQueueSize'):
             if name in syms: self.handlers[syms[name]]='x:body'
         self.handlers[ps['stock_load_trampoline']]='x:loaded'; self.handlers[syms['mclStartPlayer']]='x:started'
-m=BodyMachine(); r=[e for e in m.picked(q=m.rows_of('/a/1'),at=0) if e!='body']; assert r==['go_back','loaded','started'],r
+m=BodyMachine(); r=[e for e in m.picked(q=m.rows_of('/a/1'),at=0) if e!='body']; assert r==[],r
 m=BodyMachine(); r=[e for e in m.picked() if e!='body']; assert r==[],r
-# The return itself, through the real poll: stock's load plays the file from 0, the poll seeks back and the place stands.
+# Through the real poll: another list's pick of the long file playing sends nothing, so it plays on at its place and
+# the poll has nothing to seek back to; another file starts.
 class ReturnMachine(RealKeyMachine):
     def __init__(self):
         super().__init__(); self.install([('book','/a/book.m4b','B',0,0,0,0)],0); self.word(O['MCL_TYPE'],1); self.keys(); self.poll(0,2); self.poll(100,3)
@@ -1529,11 +1533,10 @@ class ReturnMachine(RealKeyMachine):
         rows=[]
         for p in paths: r=self.song(p); self.word(r+O['REC_PATH'],self.string(p)); rows.append(r)
         self.call(address=syms['player_start'],args=(self.deque(rows),at,cls,2),gap=0)
-m=ReturnMachine(); kept=m.places(); m.pick('/a/book.m4b'); assert m.started==1 and m.places()==kept
-m.poll(0); assert not m.seeks; m.poll(1); assert m.seeks==[100] and m.places()==kept; m.poll(100,3); assert m.places()==kept
-m=ReturnMachine(); kept=m.places(); m.pick('/a/book.m4b'); m.poll(100,9); assert not m.seeks and m.started==1  # it never restarted: the wait runs out
+m=ReturnMachine(); kept=m.places(); m.pick('/a/book.m4b'); assert m.started==0 and m.places()==kept  # it plays on
+m.poll(100); assert not m.seeks; m.poll(101); assert not m.seeks and m.places()==kept  # nothing to go back to
 m=ReturnMachine(); m.pick('/a/other'); assert m.started==1; m.poll(0,2); assert not m.seeks  # another file: nothing to go back to here
-checks+=5
+checks+=4
 
 print(f'{checks} advanced playback/wheel MIPS checks passed')
 
@@ -1935,11 +1938,13 @@ m=guarded(); assert asks(m,'player_seek_start')==1 and m.nothing() and not m.sto
 m.now+=2000; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.seen==7001 and m.at()==7001
 m=guarded(); assert asks(m,'player_change_music',1)==0 and m.nothing() and not m.stock
 m.now+=2000; asks(m,'player_change_music',1); assert m.stock==['xf:change'] and m.seen==7001 and m.at()==7001
-# A pick that starts nothing stamps nothing; one of a short song goes on to stock, where ringnav_load stamps.
+# A pick of the playing file starts nothing and stamps nothing, a short song's too; another song's goes on to stock,
+# where ringnav_load stamps.
 m=guarded(); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
 m.now+=2000; assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
 m=guarded(); m.word(0xa50084,3); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing()
-m=guarded(); m.held=0; q=m.get(syms['mcl_pdeqplaylist']); asks(m,'player_start',q,0,1,2); assert m.stock==['xf:player_start']
+m=guarded(); m.held=0; q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
+m=guarded(); m.install([('a','/a/a','A',0,0,0,0),('b','/a/b','A',0,0,0,0)],0); q=m.get(syms['mcl_pdeqplaylist']); asks(m,'player_start',q,1,1,2); assert m.stock==['xf:player_start']
 m=guarded(); m.sec=2; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.nothing()
 # An earlier stamp stands through a refusal: the press it was for, not this one.
 m=guarded(); m.held=0; asks(m,'player_change_music',1); assert m.at()==5001; m.held=1; m.now=9000; asks(m,'player_seek_start'); assert m.at()==5001
@@ -1993,6 +1998,6 @@ m.now+=2000; asks(m,'player_change_music',1); assert m.at()==7001 and m.stock==[
 m.handlers[syms['player_change_music']]='xf:none'; m.advance_song(1); assert m.at()==0 and m.get(ps['press_natural'])==0
 m=guarded(StartMachine); assert asks(m,'player_seek_start')==1; m.now+=2000; asks(m,'player_seek_start'); assert m.at()==7001 and m.site()==STOCK and m.at()==7001
 m.advance_song(1); assert m.at()==0
-m=guarded(StartMachine); m.word(ps['press_natural'],2); m.site(); m.word(ps['press_natural'],0); m.held=0; asks(m,'player_start',m.get(syms['mcl_pdeqplaylist']),0,1,2)
-assert m.stock==['xf:player_start'] and m.site()==STOCK and m.at()==0  # a real pick's start mutes, and clears the mark it isn't for
+m=guarded(StartMachine); m.install([('a','/a/a','A',0,0,0,0),('b','/a/b','A',0,0,0,0)],0); m.word(ps['press_natural'],2); m.site(); m.word(ps['press_natural'],0); asks(m,'player_start',m.get(syms['mcl_pdeqplaylist']),1,1,2)
+assert m.stock==['xf:player_start'] and m.site()==STOCK and m.at()==0  # another song's pick starts: it mutes, and clears the mark it isn't for
 print('Start: a natural start on the jack skips demo\'s mute and sleep and marks the word; everything else keeps stock\'s')

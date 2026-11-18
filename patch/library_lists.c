@@ -201,7 +201,8 @@ int most_played(void *ctx, void *event) {
         unsigned plays = (score[i] - 1) / PLAYS_SLOTS, a = artist && *artist;
         tk_snprintf(detail, sizeof detail, a ? "%s · %u play%s" : "%s%u play%s", a ? artist : "",
                     plays, plays == 1 ? "" : "s");
-        page_row_detail(view, i, track_name(name, sizeof name, t), detail, mp_play);
+        playing_mark(page_row_detail(view, i, track_name(name, sizeof name, t), detail, mp_play), t,
+                     0);
     }
     return 0;
 }
@@ -299,8 +300,9 @@ static void *songs_rows(const char *dir, const char *title, int tidal, int album
                    : empty_list(ll.td_page, ll.td_page, title, &none, 0);
     char name[256];
     for (int i = 0; i < n; i++) {
-        song_label(P(deque_at(ll.td_list, (unsigned)i), REC_NAME), tidal, name, sizeof name);
-        page_row_detail(view, i, name, 0, td_play);
+        void *r = deque_at(ll.td_list, (unsigned)i);
+        song_label(P(r, REC_NAME), tidal, name, sizeof name);
+        playing_mark(page_row_detail(view, i, name, 0, td_play), r, 0);
     }
     if (tidal && n) page_row_detail(view, n, "Clear All Downloads…", 0, td_clear);
     return view;
@@ -651,7 +653,8 @@ static void ls_show(void) {
         toolsTimeItoa(t, (int)v[i].sec);
         tk_snprintf(detail, sizeof detail, artist && *artist ? "%s · %s" : "%s%s",
                     artist && *artist ? artist : "", t);
-        page_row_detail(view, (int)i, track_name(name, sizeof name, r), detail, rt_play);
+        playing_mark(
+            page_row_detail(view, (int)i, track_name(name, sizeof name, r), detail, rt_play), r, 0);
     }
     free(v);
     deque_destroy(songs);

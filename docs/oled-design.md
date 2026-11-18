@@ -516,6 +516,18 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   do of the offline mark.
 - Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
   for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
+- **The playing song's row**, as the user approved from its mock-up on 2026-11-18 ("B. A where constrained"),
+  in every song list (Songs and a genre's, an artist's, an album's tracks and Cover Flow's, Folder view, a playlist's
+  songs, Search's results, Most Played, Long Songs, the Ratings lists, the card's songs; Up Next already heads with
+  it): the song playing or paused, known by its path and CUE track (a server song by its row, the copy playing it
+  mapped back), never its title. Its title is Accent Blue, and four bars stand on the right: Up Next's level bars'
+  shape (3 px wide, 4.5 px apart), 8, 12, 5 and 10 px high, centred on the row, Accent Blue, still (no list repaints
+  for them). **B:** where the row has a length, the bars stand SONG_COL_GAP (12 px) before it and the title ends 12 px
+  before them. **A:** where it has none (a mixed list, a two-line row), or the title would keep under 80 px beside
+  both, the bars take the length's place on the right column. On the selection the title and bars are white. A
+  playlist's or a cover row's right-hand text moves left of the bars, as a length does. Centre or a tap on the row
+  opens Now Playing and the song plays on, never sent to the player again ([internals](internals.md), a pick of the
+  playing file).
 
 ### Now Playing
 
