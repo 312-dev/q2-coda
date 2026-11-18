@@ -684,9 +684,14 @@ Playing's own title line.
   target puts it on the rating's top star, the first when unrated. Nothing that can be rated (a stream, a
   radio) leaves the wheel on the volume.
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
-  times about its luma and dimmed to 45%, spread across the window and shaded by an ellipse centred at y 122
-  (radii 273 by 220 px) that is black from 80% of the way out, and faded in over the window's top 32 rows
-  at the screen's top, under the status row's glyphs. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
+  times about its luma and dimmed to 45%, spread across the whole screen and shaded by the mock-up's own wash
+  (the approved `apple` mock-up, 2026-11-18): an ellipse centred at x 187, y 112 (radii 273 by 220 px), its
+  brightness the mock-up's measured falloff (`patch/np_rate.c` `nr_fall`), so a cover at the cap reads as the
+  mock-up does: down x 60 about 17 at the top edge, 44 at its peak (y 100 to 120), 26 at y 200, black by
+  y 300; it is dark only at the screen's corners. It runs under the status row to the top edge on both
+  pages: full screen from the page itself, and on the lyrics page in its column from Now Playing's window
+  above and below the column (behind the progress bar and the state row), which draws the glow's rows over
+  the glow pages and moves them with a swipe, so there is no seam at the page's edges. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
   keeps WCAG's 4.5:1 over its brightest pixel, and the lyrics' edge fades go into the glow, not black. It is
   made once for each cover shown, never per frame; Light Mode has none.
 
