@@ -582,7 +582,7 @@ assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
+assert texts(kv=False)==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # off: the switch, Name and a line (bt_ui.c)
