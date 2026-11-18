@@ -1210,6 +1210,17 @@ size about its foot over 100 ms, and shows whole at once under Reduce Motion. Th
 within 10 px of an edge that cuts the text, the finger nudges the cursor a character toward it every 150 ms, the
 text scrolling under it, until that end is in view. Letting go leaves the cursor where it is.
 
+Selecting, in every form (approved by the user, after iOS's text selection): a second tap
+within 350 ms and 20 px of a tap selects the word there (the one a boundary ends, else the one it starts; a
+password's whole text, its words not showing), a third all of the text, a fourth puts the cursor back. The
+selected characters sit on the accent at 40%, the cursor's height, and the cursor is hidden; each end has a
+handle in the accent, a 2 px line the cursor's height with an 8 px dot over the start and under the end. A
+finger kept down after the double tap drags on: the word stays selected and the end on the finger's side follows
+it. A press within 12 px of a handle takes that end, the loupe over it (the highlight shown in it too, its line in
+the accent), and it follows the finger, never onto the other end. A tap anywhere else in the text puts the
+cursor there. Typing replaces the selection; Previous held deletes it first (a space it leaves doubled goes with
+it) and erases on as before; a press of Previous or Next puts the cursor at its start or end.
+
 A password is dots, the character just typed shown for a second, in whichever form. A box holding a number opens
 on 123. Submitting a box is its own OK, as the keyboard's Enter was: the box takes the text and acts.
 

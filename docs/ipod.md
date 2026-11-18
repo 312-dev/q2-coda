@@ -1151,7 +1151,10 @@ painted it white, which drew the box at rest.
   status row on Search), showing the text around the cursor at 1.6 times, drawn by the same text renderer, with a
   steady cursor in its middle; it grows in from half its size over 100 ms (at once under Reduce Motion) and the
   cursor follows the finger. Held within 10 px of an edge that cuts the text, the finger nudges it a character
-  every 150 ms until that end is in view. Letting go leaves the cursor there. A name typed elsewhere (a
+  every 150 ms until that end is in view. Letting go leaves the cursor there. A double tap selects a word and a
+  triple tap the whole text, on the accent at 40% with a handle at either end ([oled-design](oled-design.md#text-entry));
+  a drag on from the double tap, or on either handle, moves an end, typing replaces the selection, Previous held
+  deletes it, and Previous or Next puts the cursor at its start or end. A name typed elsewhere (a
   playlist's, a Bluetooth name) may hold any character: the cursor steps, erases and lands on whole ones. Each
   tick along the strip clicks as a list's row change does, and Center, Next, Previous and Return click as a button
   does, through the Clicker setting.
