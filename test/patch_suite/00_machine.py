@@ -881,7 +881,7 @@ assert m.confirm()==11 and m.dispatched()[0][1]==buttons[-1]; passed()
 # Cover selected rows and the pixel-scroll fallback.
 for populated in (False,True):
     for endpoint,key,selected,want in ((0,O['KEY_NEXT'],4,192),
-                                      (864,O['KEY_PREV'],5,192)):  # OLED's list_fit: either way the offset lands on a whole row
+                                      (864,O['KEY_PREV'],5,192)):  # OLED's whole rows: either way the offset lands on a whole row
         m=Machine(); w,es=m.page_list(20 if populated else 0)
         m.word(w+0x74,syms['g_scroll_view_vtable'])
         m.paint(w)
@@ -1052,7 +1052,7 @@ for offset in (0, 24):
 # Touch mode draws nothing; the wheel brings the bar back.
 c=Machine(); c.config.update(FLAT); cw,_=c.page_list(5,extent=1000); c.paint(cw)
 c.touch(); c.paint(cw); assert not c.drawn() and c.clip==(0,0,240,240)
-c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,48,240-2*inset,48); passed()  # a list_fit set keeps no reading margin (reveal)
+c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,48,240-2*inset,48); passed()  # OLED's lists keep no reading margin (reveal)
 # Status bar: a solid fill on the bar widget alone, no highlight, LCD fill restored.
 s=Machine(); s.clock_minutes=True; title=s.node('hscroll_label','label_clock')
 def top_level(t,name,children=()):
@@ -1088,26 +1088,6 @@ def writes(): return [c for c in s.calls if c[0]=='widget_set_text_utf8']
 def reads(): return [c for c in s.calls if c[0] in ('time@GLIBC_2.0','localtime_r')]
 def minute(ms=1000): s.advance(ms)
 s.advance(0); assert clock()=='6:14 PM'; passed()  # the gradient check's paint above started it
-# Time in Title off: the bar names the page in front (Now Playing, or stock's title in its hidden
-# navbar, a settings page's unnamed first child); a pop-up leaves it; Home, a shown navbar or no title is the clock.
-def title_machine(**config):
-    CONFIG.update(config); t=Machine(); CONFIG.clear(); t.clock_minutes=True
-    label=t.node('hscroll_label','label_clock'); bar=t.node('system_bar','system_bar',[label])
-    t.word(bar+O['W_PARENT'],t.wm); t.word(syms['system_bar'],bar)
-    def show(top):
-        t.top=top; t.call(address=HOOKS['widget_on_paint_background'][0],args=(bar,t.canvas,0,0),gap=0)
-        t.wrote=any(c[0]=='widget_set_text' for c in t.calls); t.advance(1)
-        return t.nodes[label].get('text')
-    def page(title,shown=0,name='scrlabel_title'):
-        kids=[t.node('hscroll_label',name,text=title)] if title is not None else []
-        w=t.node('window','some_page',[t.node('view','view_navbar',kids,visible=shown)]); t.word(w+O['W_PARENT'],t.wm); return w
-    return t,label,show,page
-t,label,show,page=title_machine(TIMETITLE='0'); time=show(t.node('window','home_page'))
-assert time=='6:14 PM' and show(page('Albums'))=='Albums' and t.nodes[label]['style:normal:font_name']=='inter-medium'  # bar.title's face (oled/theme.xml)
-assert show(page('Display',name=''))=='Display' and show(t.node('dialog','volume_dialog'))=='Display' and show(t.node('keyboard','kb_default'))=='Display'
-assert show(t.node('window','coverflow_page'))=='Cover Flow'
-assert show(page('Bootvol',shown=1))==time and show(page('Empty'))=='Empty' and show(page(''))==time and show(page(None))==time; passed()
-show(page('Albums')); assert t.wrote; show(t.top); assert not t.wrote; passed()  # only a new title is written
 for h,mi,want in ((0,0,'12:00 AM'),(0,5,'12:05 AM'),(9,7,'9:07 AM'),(11,59,'11:59 AM'),(12,0,'12:00 PM'),
                   (12,59,'12:59 PM'),(13,0,'1:00 PM'),(23,59,'11:59 PM')):
     s.clock=(h,mi); minute(); assert clock()==want,(h,mi,clock())
@@ -1637,7 +1617,7 @@ passed()
 m=Machine(); w,rows,entries=m.table_page(rebind=True)
 m.paint(w); assert m.selected(w)==0
 assert m.call()==11 and m.selected(w)==1
-assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's list_fit)
+assert m.call()==11 and m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's whole rows)
 assert m.moved()[-1][0]=='table_client_set_yoffset'
 assert m.confirm()==11 and m.dispatched()[0][1]==entries[1]; passed()
 # A wheel step ends its scroll as a touch scroll does, so stock lists load the covers in view.
@@ -1770,7 +1750,7 @@ for reuse in (False,True):
         m.folder(path)
         if not reuse: w,es=m.page_list(10,name='folder_page')
         m.word(w+O['SCROLL_Y'],0); m.paint(w)
-        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48  # a whole row under the top (OLED's list_fit)
+        assert m.selected(w)==wanted and m.get(w+O['SCROLL_Y'])==(wanted-1)*48  # a whole row under the top (OLED's whole rows)
     passed()
 
 # Exactly 64 scopes fit. Selection promotes; restoration alone does not change recency.

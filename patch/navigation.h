@@ -374,7 +374,6 @@ unsigned put_num(unsigned *s, unsigned v);
 int clock_due(const void *info);
 int bar_repaint(const void *info);
 void clock_text(void *label, int negative, int t);
-void label_font(void *w);
 void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into);
@@ -693,7 +692,7 @@ void paint_art(void *w, void *canvas, const char *name, int x, int y); /* naviga
 
 /* np_bar.c */
 int np_sync(void *top);
-void bar_title(void *bar, void *top);
+void bar_title(void *bar);
 void slider_fill(void *slider, unsigned color);
 void slider_knobless(void *slider);
 void np_theme(void);

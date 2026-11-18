@@ -649,7 +649,7 @@ def test_the_play_state_is_the_themes_art_in_its_half(fw, st, ui):
     assert ui.prop(bar.state, b'image') == b'oled_play_l'
 
 
-# Time in Title off: the bar's centre names the page in front.
+# The page's window, and its hidden navbar's stock title.
 def window(ui, name, navbar_title=None, navbar_shown=0):
     win = ui.widget(ui.wm, name, 0, 0, 375, 320, kind='window')
     ui.set_str(win, b'name', name.encode())
@@ -660,60 +660,8 @@ def window(ui, name, navbar_title=None, navbar_shown=0):
     return win
 
 
-def bar_title(fw, bar, top):
-    fw.fn('bar_title', None, C.c_void_p, C.c_void_p)(bar.bar, top)
-
-
-def test_with_time_in_title_on_the_clock_stays(fw, st, ui):
-    theme(fw, st)
-    bar = Bar(fw, ui)
-    bar_title(fw, bar, window(ui, 'display_page', 'Display'))
-    assert ui.text(bar.clock) == '12:00'
-
-
-@pytest.mark.parametrize('name, navbar, want', [('playing_page', None, 'Now Playing'), ('coverflow_page', None, 'Cover Flow'),
-                                                ('display_page', 'Display', 'Display')])
-def test_the_bar_names_the_page_in_front(fw, st, ui, name, navbar, want):
-    theme(fw, st, TIMETITLE=0)
-    bar = Bar(fw, ui)
-    top = window(ui, name, navbar)
-    if name == 'playing_page':
-        st.np_win = top
-    bar_title(fw, bar, top)
-    assert ui.text(bar.clock) == want and len(ui.due('bar_repaint')) == 1
-    sets = len(fw.calls('widget_set_text'))
-    bar_title(fw, bar, top)
-    assert len(fw.calls('widget_set_text')) == sets  # the same title is written once
-
-
-@pytest.mark.parametrize('title, shown', [('Display', 1), ('', 0), ('(null)', 0)])
-def test_a_page_without_a_hidden_title_gives_the_clock_back(fw, st, ui, title, shown):
-    theme(fw, st, TIMETITLE=0)
-    bar = Bar(fw, ui)
-    bar_title(fw, bar, window(ui, 'display_page', 'Display'))
-    assert ui.text(bar.clock) == 'Display'
-    bar_title(fw, bar, window(ui, 'other_page', title, navbar_shown=shown))
-    assert st.bar_titled == 0 and st.clock_key == 0 and len(ui.due('clock_due')) == 1
-
-
-def test_the_page_is_named_in_the_now_playing_face_and_the_clock_goes_back_to_stocks(fw, st, ui):
-    theme(fw, st, TIMETITLE=0)
-    bar = Bar(fw, ui)
-    st.np_win = top = window(ui, 'playing_page')
-    bar_title(fw, bar, top)
-    assert ui.prop(bar.clock, b'style:normal:font_name') == FACES[OLED['font[ROLE_NP]']]  # Inter Medium
-    bar_title(fw, bar, window(ui, 'home_page', 'Q2', navbar_shown=1))
-    assert ui.prop(bar.clock, b'style:normal:font_name') == b'default' and len(ui.due('clock_due')) == 1
-
-
-def test_a_dialog_or_no_window_leaves_the_bar(fw, st, ui):
-    theme(fw, st, TIMETITLE=0)
-    bar = Bar(fw, ui)
-    dialog = window(ui, 'volume_dialog', 'Volume')
-    ui.types[dialog] = b'dialog'
-    bar_title(fw, bar, dialog)
-    bar_title(fw, bar, 0)
-    assert ui.text(bar.clock) == '12:00'
+def bar_title(fw, bar):
+    fw.fn('bar_title', None, C.c_void_p)(bar.bar)
 
 
 def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
@@ -723,9 +671,12 @@ def test_oled_s_status_row_keeps_the_clock_beside_a_title(fw, st, ui):
     bar = Bar(fw, ui, title=True)
     st.bar_title = bar.title
     ui.set_text(bar.title, 'Albums')
-    bar_title(fw, bar, 0)
+    bar_title(fw, bar)
     assert st.bar_titled == 1 and ui.text(bar.clock) == '12:00' and len(ui.due('clock_due')) == 1
     assert ui.box(bar.title)[2] == 91  # not widened to EQ's left edge
+    ui.set_text(bar.title, '')  # a page with no title: the clock alone, timed again
+    bar_title(fw, bar)
+    assert st.bar_titled == 0 and len(ui.due('clock_due')) == 1
 
 
 # The theme's faces (theme_font, theme_face): its own face (Inter) where it has the text's characters, else its

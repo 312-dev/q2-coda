@@ -637,7 +637,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         }
         bar_sync(bar);
         bar_title_sync(top);
-        bar_title(bar, top);
+        bar_title(bar);
         clock_place(bar, feedback_top()); /* beside Split's art under a toast too */
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
