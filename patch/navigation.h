@@ -815,6 +815,10 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 /* system.c */
 void power_poll(void);
 void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+/* ulog.c: a line in the unified log through demo's stderr (docs/internals.md#unified-log): level E, W or
+ * I, src ui, player, usb, bt or wifi; and a clean end's snapshot, waited for (power-off, restart, update) */
+void ulog(char level, const char *src, const char *msg);
+void ulog_end(const char *why);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */

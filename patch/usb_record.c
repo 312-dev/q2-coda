@@ -70,6 +70,11 @@ void usb_record(const char *what) {
     if (n <= 0 || n >= (int)sizeof line) return;
     rotate();
     card_log_append(card_log_at(&rec.log, USB_RECORD_FILE, USB_RECORD_RAM), line, (unsigned)n);
+    /* and in the unified log (ulog.c, docs/internals.md#unified-log), from the event word on: the
+     * line there has its own time and uptime */
+    const char *ev = line;
+    for (int sp = 0; *ev && sp < 2; ++ev) sp += *ev == ' ';
+    ulog('I', "usb", ev);
 }
 
 /* A cable edge (usb_ui_status): its line now, and a second one USB_RECORD_LATER_MS on. */
