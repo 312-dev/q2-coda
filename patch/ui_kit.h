@@ -68,6 +68,12 @@ typedef struct {
     const char *title, *line, *pill; /* pill 0: none */
 } mode_page_t;
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
+/* list_marks.c: the loading overlay's spinner (docs/oled-design.md#loading), on window w over what
+ * it shows, centred on the whole screen (status row included) whatever w's own y; and whether a
+ * pointer event's screen point is on it. */
+#define LOAD_SPIN_BOX 64
+void load_spinner_paint(void *w, void *canvas);
+int load_spinner_hit(int x, int y);
 
 /* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons
  * and the confirmation card: shown while the last navigation input was the wheel (a turn, or
