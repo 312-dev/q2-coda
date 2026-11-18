@@ -9,7 +9,7 @@ Q2 Muse ships no program of Shanling's and no source of theirs. `tools/build.py`
 | File on the Q2                                | Change                                                                  | Where                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `release/bin/demo` (the UI)                   | hooks, single words, and the payload mapped at `0xb00000`               | `build()` in `tools/build.py`; `patch_code` in `tools/ipod.py` |
-| `usr/bin/hciplayer` (the player)              | the PEQ filter, gapless, crossfade and FLAC paths, mapped at `0xe20000` | `patch_player` in `tools/peq.py`                               |
+| `usr/bin/hciplayer` (the player)              | replaced by `q2player`, Q2 Muse's own player (`player/`)                | `tools/player.py`, installed by `build()` in `tools/build.py`  |
 | `usr/bin/bluealsa`                            | AAC capability, DROP handling, silence through a skip                   | `patch_bluealsa` in `tools/build.py`                           |
 | `usr/lib/libtag_c.so.2.0.1`                   | M4B covers                                                              | `patch_m4b_cover` in `tools/build.py`                          |
 | UI assets, styles, strings and icons          | rewritten in place from the audit in `patch/ipod.json`                  | `patch_asset` in `tools/ipod.py`; `tools/art.py`               |
@@ -28,7 +28,7 @@ It is compiled from two lists, and a new file in neither is not part of it:
 - **`NAVIGATION`** (`tools/build.py`): `navigation.c` and the files split out of it. They include `patch/navigation.h`.
 - **`UI_SOURCES`** (`tools/peq.py`): the features that stand apart (Cover Flow, the EQ page, Spotify, card apps, Games and the rest). They include `patch/peq.h`.
 
-The player's payload is a third list, in `compile_common` (`tools/peq.py`): `peq.c`, `peq_player.c`, `mp3_gapless.c`, `lavf_gapless.c` and the chosen `flac_*.c`. `peq.c` is in both programs.
+The player is not patched: `q2player` (`player/`) is a program of its own, built by `tools/player.py` (`player/Makefile`, which compiles `patch/peq.c` into it for the EQ) ([player-plan](player-plan.md)).
 
 ### Generated headers
 
@@ -87,12 +87,12 @@ Settings are keys in stock's `/mnt/data/config.ini`, read once and kept in `st`:
 | a label                           | `LABELS` (`tools/build.py`), or `ENGLISH` (`tools/build.py`) for a Chinese string                                                                                                                                                       |
 | a theme's colors or sizes        | `assets/themes/<id>/theme.xml`, checked by `tools/theme.py` ([Themes](internals.md#themes))                                                                                                                                             |
 | a list row's geometry             | `Geometry` (`tools/ipod.py`) and `GEOM_RANGES` in `tools/theme.py`                                                                                                                                                                      |
-| what the player does to the sound | `patch/peq_player.c`, hooked from `tools/peq.py`                                                                                                                                                                                        |
+| what the player does to the sound | `player/dsp.c` and `patch/peq.c`, in `q2player`                                                                                                                                                                                         |
 | the boot scripts                  | `BOOT_HOOK` (`tools/build.py`), checked by `test/build.py` under the host `sh`                                                                                                                                                          |
 
 ## Two host builds of the C
 
-- **`PEQ_HOST`:** the host suites (`test/peq.py`, `test/coverflow.py`, `test/chapters.py`, `test/library_scope.py`, `test/mp3_gapless.py`) compile one or a few files with `-DPEQ_HOST`, which swaps stock's calls for the file's own stand-ins (the `PEQ_HOST` branch of `patch/peq.h`).
+- **`PEQ_HOST`:** the host suites (`test/peq.py`, `test/coverflow.py`, `test/chapters.py`, `test/library_scope.py`) compile one or a few files with `-DPEQ_HOST`, which swaps stock's calls for the file's own stand-ins (the `PEQ_HOST` branch of `patch/peq.h`).
 - **`test/fw`:** the whole payload as it is for the Q2, with every stock call a recording stub ([building.md](building.md#firmware-tests)).
 
 `test/patch.py` and the scripts that take a `BUILD` run the built MIPS under Unicorn, so they need a build and the stock ZIP.

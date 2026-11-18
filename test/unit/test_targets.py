@@ -105,7 +105,7 @@ def test_targets_skip_the_stock_bound_and_import_only_functions():
     assert all((aic, art, build, ipod, peq, pwm, rotator))  # each still has functions to mutate
     assert not {'build', 'compile_payload'} & set(build)
     assert 'patch_asset' not in ipod and 'patch_code' in ipod  # patch_code pins no stock hash: test_patch_code
-    assert not {'compile_common', 'patch_player'} & set(peq)
+    assert 'compile_common' not in set(peq)
     assert 'validate_stock' not in aic and 'patch_module' not in aic and 'patch_module' not in rotator
     assert not {'link', 'patch_pwm', 'patch_mcu', 'patch_bundle'} & set(pwm)
     assert 'wave' not in art

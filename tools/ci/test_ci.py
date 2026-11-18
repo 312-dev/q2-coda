@@ -77,6 +77,13 @@ def test_source_no_fw_file_names_runs_all_fw(tmp_path):
     assert affected.plan_for({'patch/tilt.c': {1}}, root).as_dict()['fw'] == ALL
 
 
+def test_a_deleted_host_suite_is_not_run(tmp_path):
+    """A test script the branch deleted (the stock player's suites, 2026-11-18) is not planned: it is not there to run."""
+    root = tree(tmp_path, {'test/kept.py': ''})
+    p = affected.plan_for({'test/kept.py': {1}, 'test/gone.py': set()}, root).as_dict()
+    assert 'test/kept.py' in p['other'] and 'test/gone.py' not in p['other'], p['other']
+
+
 def test_unknown_file_runs_everything(tmp_path):
     p = affected.plan_for({'Makefile.new': set()}, tmp_path).as_dict()
     assert p['unit'] == p['fw'] == p['patch'] == ALL

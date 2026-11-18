@@ -108,7 +108,6 @@ jobs:
         include:
           - {file: library_scope, floor: 87}
           - {file: chapters, floor: 90}
-          - {file: mp3_gapless, floor: 68}
           - {file: headset, floor: 92}
           - {file: radio, floor: 87}
     env:

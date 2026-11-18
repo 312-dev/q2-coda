@@ -131,7 +131,7 @@ class Worker:
         reason = lines[-1][:200] if lines else ''
         if code < 0: return 'crash', reason
         # The test's own build of the file refusing the mutant is the compiler's verdict, not the test's: its wrapper
-        # can use what the file alone leaves unused, as mp3_gapless.py's calls mp3_trim. A disk the run filled isn't.
+        # can use what the file alone leaves unused. A disk the run filled isn't.
         if (lines and re.match(r"subprocess\.CalledProcessError: Command '[\[(]'cc'", lines[-1])
                 and not environmental('\n'.join(lines))): return 'invalid', reason
         return ('assert' if re.match(r'\w*AssertionError', reason) else 'error'), reason

@@ -49,7 +49,7 @@ import q2ci  # noqa: E402
 
 ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
-BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
+BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
 # test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
 # page_parallax.c and playlist_art.c. It is in no gate tier, so a change to any of these plans it (in `other`).
@@ -242,8 +242,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
             else:
                 p.add('unit', ALL, f'{path}: unit infrastructure')
         elif parts[0] == 'test' and len(parts) == 2 and suffix in ('.py', '.sh'):
-            p.other.add(path)
-            p.why.append(f'{path}: itself')
+            if (root/path).exists():  # one the branch deleted is not there to run
+                p.other.add(path)
+                p.why.append(f'{path}: itself')
         elif parts[:2] == ('test', 'player') or parts[0] == 'player':
             p.other.add('test/player/run.py')
             p.why.append(f'{path}: the new player')

@@ -700,7 +700,6 @@ static const unsigned char sysset_order[] = {
     11 /* Update */,
     14 /* Storage */,
     15 /* USB */,
-    16 /* Player */,
     10 /* Date and time */,
     9 /* App Store */,
     2 /* Network */,

@@ -30,7 +30,7 @@ python3 tools/build.py 'Q2 Firmware V1.36.zip' --out /tmp/q2-dev --dev          
 
 Rebuilt firmware uses `assets/boot-logo.jpg` as the boot splash, with the [boot animation](boot.md#boot-animation) in its place in Dark Mode. Pass another 320x375 JPEG with `--logo` to use your own; see [boot.md](boot.md#custom-boot-logo).
 
-The build replaces the stock equalizer page with a 30-band PEQ editor (bands, shelves, preamp, on/off, presets, stock's built-in genre presets, `/EQ` import) and patch `hciplayer`'s equalizer filter with the matching DSP. Both also clear the 44.1 kHz AAC capability bit in `bluealsa` (see [internals.md](internals.md#bluetooth-aac)).
+The build replaces the stock equalizer page with a 30-band PEQ editor (bands, shelves, preamp, on/off, presets, stock's built-in genre presets, `/EQ` import) and `q2player` plays the matching DSP (`patch/peq.c`). The build also clears the 44.1 kHz AAC capability bit in `bluealsa` (see [internals.md](internals.md#bluetooth-aac)).
 
 ### Bundled apps
 
@@ -95,18 +95,15 @@ All three kernel-module experiments were on by default from 1.5.0 to 1.6.1 and w
 
 `--dev --mcu-idle-sleep` is off in release builds. It adds an interruptible MCU sleep with an explicit wake handshake. See [MCU sleep](mcu-sleep.md).
 
-Every build, release and `--dev`, installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, and the patched hciplayer, the stock player kept as the fallback, xz-compressed at `/usr/lib/hciplayer-stock/hciplayer.xz`. `q2player` unpacks it to `/tmp/hciplayer-stock/hciplayer` and runs it in its place when Settings > General > Player is Stock (`/mnt/data/stock-player`) or when `q2player` has crashed three times in a row ([the fallback](player-plan.md#architecture)). It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. `--stock-player` leaves `q2player` out and installs the patched hciplayer as `/usr/bin/hciplayer`; `--new-player` is the default and changes nothing. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
+Every build installs the player, `q2player` ([player-plan.md](player-plan.md)), as `/usr/bin/hciplayer`, where stock's player was, so demo starts and stops it by that name. It builds `q2player` with `tools/player.py` (FFmpeg on first use, some minutes; the toolchain and mbedTLS that `tools/thirdparty.py` keeps in `~/.cache/q2-thirdparty`) against the image's own `libasound.so.2`, and records `q2player_sha256` in the manifest. The root filesystem holds 75,497,472 bytes (`ROOTFS_ROOM`: mtd2 less a bad-block spare, [hardware](hardware.md#flash-layout)): past that the build stops and says by how much.
 
 ## Tests
 
 ```sh
-python3 test/peq.py                        # PEQ parser, storage, DSP, EQ page (both tabs), 3EQ filters, player and scrobble upload (host cc; player needs -m32 libs, upload libcrypto)
+python3 test/peq.py                        # PEQ parser, storage, DSP, EQ page (both tabs), 3EQ filters, Videos' audio writer and scrobble upload (host cc; the writer needs -m32 libs, upload libcrypto)
 python3 test/coverflow_position.py          # position pixels, wheel/touch redraw and fade (host cc)
 python3 test/coverflow.py                  # Coverflow art cache and depth renderer (host cc -m32, pthreads)
 python3 test/coverflow.py --captures /tmp/cf  # the same, plus the renderer's frames as PNGs
-python3 test/mp3.py                        # native Xing seek bounds, CRC and truncated headers; TXXX encodings
-python3 test/mp3_gapless.py                # gapless parser/PCM and generated LAME/FFmpeg comparisons (cc, lame, ffmpeg, pkg-config, libavcodec/libavutil/libmad development files)
-python3 test/mp3_gapless_player.py BUILD   # the built gapless hooks, then stock's demuxer and libmad under Unicorn on generated files (lame, unsquashfs, readelf)
 python3 test/build.py                      # JPEG headers, dev tags, and the boot scripts (S90play's dual boot and crash log, S11logo's splash) under the host sh; no ZIP or emulator
 python3 test/build.py 'Q2 Firmware V1.36.zip'   # packaging checks (custom logo, quoted paths)
 python3 test/build.py --build BUILD         # a finished build's payloads and packaging
@@ -124,15 +121,7 @@ python3 test/playback.py /tmp/q2-build     # grouped traversal, snapshots and th
 python3 test/patch.py /tmp/q2-build        # the patched MIPS payload, wheel and UI scenarios (cc)
 python3 test/chapters.py                   # embedded chapter parsing, both MP4 formats and async extraction
 python3 test/m4b.py /tmp/q2-build          # native TagLib M4B/MP4 metadata dispatch
-python3 test/id3.py /tmp/q2-build          # the built player's MP3 ReplayGain on ID3v2.3/2.4 tags
-python3 test/hci_wait.py /tmp/q2-build     # the built player's futex waits for Play and while paused
-python3 test/hci_ao.py /tmp/q2-build       # a natural change in the real player against a kernel-faithful PCM: reopens, a kept PCM, a dry first write
 python3 test/player/run.py                  # the new player (player/): bit-exact output, the DSP, the click and the socket protocol; builds its FFmpeg on first use, needs ffmpeg, lame and cc, no ZIP
-python3 test/bt_resample.py /tmp/q2-build  # the built player's Bluetooth resampler across a gapless change
-python3 test/xfade_player.py /tmp/q2-build  # the built player's crossfade: the hold, the mix at the same and another rate, the drops
-python3 test/hci_natural.py /tmp/q2-build   # natural changes in the real player: a bit-exact seam, a bad next file, an understated length, a late preload, Crossfade's late next and moved fade
-python3 test/player_seam.py /tmp/q2-build   # AAC, Opus and Vorbis gapless trims in the real player, each format's seam and each wrong tag against stock (ffmpeg, unsquashfs)
-python3 test/mp3_gapless_player.py /tmp/q2-build  # built MIPS gapless hooks, preload isolation, seeks and cleanup
 python3 test/ldac.py /tmp/q2-build         # shipped LDAC intermediate rates and native adaptive controller
 python3 test/headset_io.py /tmp/q2-build   # real MIPS headset worker with simulated kernel I/O (cc)
 python3 test/bluealsa.py /tmp/q2-build     # the patched bluealsa's DROP paths against stock's, delayed encoder signal
@@ -285,7 +274,7 @@ Q2_FW_STRICT=1 python3 -m pytest test/fw    # fail a test that reaches a stub to
 - **Writing one:** `fw.fn('lyrics__lrc_time', restype, *argtypes)` reaches a static as `<file>__<name>`, and `fw.mock` and `fw.calls` take stub names: a stock function's, or `fw_<name>` for libc (`fw_fopen`). Work out the expected answer from what the function is for before running it.
 - **Song durations:** `python3 -m pytest test/fw/test_durations.py test/fw/test_nav_library_pages.py -k 'durations or long_songs or lengths or cue'` covers the shared cache, Long Songs and Update Local Music's pass; the MIPS worker is `test/patch.py`'s.
 - **A known bug** stays as `@pytest.mark.xfail(strict=True, reason='BUG: ...')`: the test fails the job as soon as the bug is fixed, until the mark goes.
-- **Limits:** the code runs 64-bit, so `long` and pointers are wider than on the Q2, and stock widgets' layouts don't hold. Code that depends on those stays with `test/patch.py`. `peq_player.c`, `mp3_gapless.c` and the FLAC paths are the player's, tested by `test/peq.py`, `test/mp3_gapless.py` and the `test/flac_*.py` scripts.
+- **Limits:** the code runs 64-bit, so `long` and pointers are wider than on the Q2, and stock widgets' layouts don't hold. Code that depends on those stays with `test/patch.py`. The player, `q2player`, is a program of its own, tested by `test/player/run.py`.
 
 ## Formatting
 
@@ -345,7 +334,7 @@ CMUT_PYTHON=$pythonLocation test/cmut/sandbox.sh patch/radio.c /tmp/cmut/radio-l
 python3 test/cmut/report.py patch/radio.c /tmp/cmut/radio-left /tmp/cmut/radio-left.jsonl --survivors /tmp/cmut/radio-left.txt
 ```
 
-- **Wired up:** a table in `sandbox.sh` holds each file, its test and what that test reads. `library_scope.c`, `chapters.c` and `mp3_gapless.c` run through their own scripts, which build the file themselves, with the flags the table repeats. `headset.c` and `radio.c` run through their own `test/fw/test_<name>.py` alone. Another file `test/fw` builds is one more name in the table's `test/fw` line, and its run takes longer the less of it its tests select: a test file that forks runs all its tests for every mutant, as below, so `navigation.c`'s and `playback.c`'s would.
+- **Wired up:** a table in `sandbox.sh` holds each file, its test and what that test reads. `library_scope.c` and `chapters.c` run through their own scripts, which build the file themselves, with the flags the table repeats. `headset.c` and `radio.c` run through their own `test/fw/test_<name>.py` alone. Another file `test/fw` builds is one more name in the table's `test/fw` line, and its run takes longer the less of it its tests select: a test file that forks runs all its tests for every mutant, as below, so `navigation.c`'s and `playback.c`'s would.
 - **`test/fw`'s files:** `test/fw/host.py` builds the library once. A mutant compiles its one file with `host.py`'s flags, its statics renamed as `host.build` renames them, and links with the other objects into a library of its own, which `conftest.py` loads instead of building one when `Q2_FW_LIBRARY` names it. `run.py` stops if that link makes a library unlike `host.build`'s, or the original compiles to other symbols. Each mutant's object waits for its test on the tmpfs while 256 MB of it is left, and is compiled again for its test after that, so a large file's mutants take longer but can't fill it.
 - **Only the tests that reach it:** a test that never runs a mutant's lines sees what the original does. So `run.py` builds the original with gcov's counters and runs each test alone first, and a mutant runs only the tests that ran its lines; a line with no code of its own (a table, a `#define`'s body), a line with a `case` label, as the `switch` jumps there from tests that ran other lines, or a line no test runs, runs them all. Not yet for a test file that forks (`in_fork`): a child's counts used to end with it, unwritten; they now reach the file when the child closes the library, so `run.py` could select for those files too, once measured. pytest stops at the first failure and runs the test that killed the last mutant first, as neighbouring mutants mostly fall to the same test, once the original passes its tests backwards as well as forwards. Each run forks from a process that has already imported pytest and `host.py`, and has seconds of CPU, not of the clock, so a loaded machine can't time out a survivor.
 - **`CMUT_PYTHON`:** the image's own Python can't load `test/fw` (see [Firmware tests](#firmware-tests)), so `sandbox.sh` mounts the folder `CMUT_PYTHON` names, read-only: a position-independent Python 3.12 with `requirements.txt` and `test/unit/requirements.txt` installed, as `actions/setup-python`'s (`$pythonLocation`). The host suites don't need it.
@@ -356,11 +345,10 @@ python3 test/cmut/report.py patch/radio.c /tmp/cmut/radio-left /tmp/cmut/radio-l
 | ----------------- | ------------------------- | ------: | -----: | -----: | ----: | -----------: |
 | `library_scope.c` | `test/library_scope.py`   |     612 |    427 |  89.0% |   87% |         58 s |
 | `chapters.c`      | `test/chapters.py`        |   1,050 |    773 |  92.2% |   90% |   3 min 58 s |
-| `mp3_gapless.c`   | `test/mp3_gapless.py`     |   2,069 |  1,106 |  70.8% |   68% |   6 min 44 s |
 | `headset.c`       | `test/fw/test_headset.py` |   1,701 |  1,429 |  94.0% |   92% |   5 min 30 s |
 | `radio.c`         | `test/fw/test_radio.py`   |   2,198 |  1,884 |  89.4% |   87% |   5 min 59 s |
 
-The seven files then wired, `photos.c` (1,707 mutants, retired with Photos since) among them, 13,658 in all, took 38 minutes one file after another, pinned with `CMUT_CPUS` to four threads on two cores of a Ryzen 7 7800X3D desktop, as a 4-vCPU runner's threads are, at a load average under 6, and 45 minutes before `test/fw`'s files had their survivors' tests, at a load average of 10 to 22. A runner's slower cores could take that past an hour, so the job gives each file a runner of its own and 60 minutes, against 7 for the longest here. The results' last lines add up to 7,604 seconds of the container's CPU time (`cpu_seconds`, which load from outside stretches less than the clock's). Runs with the same tests agreed on every mutant but one, in `photos.c`. What `test/fw`'s files leave alive is mostly design constants (colors, coordinates, dither tables, waits) that the tests check by relation rather than by value, and lines with no code of their own, which every test runs against. The host suites check their limits by relation too, so a mutant that moves one consistently lives: `SCOPE_MAX` one lower for both the scan and the reader, or `chapters_poll`'s reads a tick and bytes a read. `mp3_gapless.c`'s checks from the pilot's branch expect a tag frame too small for LAME's extension to be refused, which the parser now reads as a silent frame, so they stay behind and its score is the suite's as it is.
+The seven files then wired, `photos.c` (1,707 mutants, retired with Photos since) and `mp3_gapless.c` (2,069, retired with the stock player) among them, 13,658 in all, took 38 minutes one file after another, pinned with `CMUT_CPUS` to four threads on two cores of a Ryzen 7 7800X3D desktop, as a 4-vCPU runner's threads are, at a load average under 6, and 45 minutes before `test/fw`'s files had their survivors' tests, at a load average of 10 to 22. A runner's slower cores could take that past an hour, so the job gives each file a runner of its own and 60 minutes, against 7 for the longest here. The results' last lines add up to 7,604 seconds of the container's CPU time (`cpu_seconds`, which load from outside stretches less than the clock's). Runs with the same tests agreed on every mutant but one, in `photos.c`. What `test/fw`'s files leave alive is mostly design constants (colors, coordinates, dither tables, waits) that the tests check by relation rather than by value, and lines with no code of their own, which every test runs against. The host suites check their limits by relation too, so a mutant that moves one consistently lives: `SCOPE_MAX` one lower for both the scan and the reader, or `chapters_poll`'s reads a tick and bytes a read. `mp3_gapless.c`'s checks from the pilot's branch expect a tag frame too small for LAME's extension to be refused, which the parser now reads as a silent frame, so they stay behind and its score is the suite's as it is.
 
 The order for the rest:
 
