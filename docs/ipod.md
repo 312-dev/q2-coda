@@ -733,8 +733,9 @@ There is no on-screen transport row: the buttons play, pause and skip.
 OLED lays the page out on its own grid ([oled-design.md](oled-design.md#now-playing)): the
 150-pixel art at the 24-pixel text column under the status row, which shows the clock, its corners
 6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
-the artist and album in Inter's 18 in Text Secondary; More and the heart at the right end of the
-art's foot, on an 18-pixel line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
+the artist and album in Inter's 18 in Text Secondary, the album one line ending in an ellipsis; the
+heart, 34 pixels, in the gap under the album; More at the right end of the art's foot, on an 18-pixel
+line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centered under them in the
 accent when on, gray when off, over the play mode button: a tap on shuffle turns it on or off and
 a tap on repeat steps Off, All, One, each keeping the other. The page dots

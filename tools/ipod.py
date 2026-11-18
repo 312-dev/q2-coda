@@ -698,8 +698,8 @@ def np_rate_page(named):
 
 # Now Playing on the grid (Geometry.np_art: docs/oled-design.md#now-playing), in window rows from the grid's
 # bar: the art np_art square at text_x on the window's top, its corners the theme's playing.art.radius; NP_GRID_GAP
-# right of it the title, artist and album, their line tops NP_GRID_LINES down the art, More and the heart at the right
-# end of the art's bottom row (the design has no place for them: they stay on the art's page); the slide
+# right of it the title, artist and album, their line tops NP_GRID_LINES down the art, the heart under the album
+# (NP_GRID_HEART) and More at the right end of the art's bottom row (both on the art's page); the slide
 # NP_GRID_SLIDE_GAP above the bar, which runs from text_x to the right column with its top at np_bar_y on screen; the
 # times NP_GRID_TIMES_DY under that, centred, on the same columns; the row of shuffle, radio, repeat and Up Next
 # (np_bar.c np_modes) centred NP_GRID_MODES_DY under it, over the play mode's target, which spans the row; the page
@@ -715,8 +715,12 @@ NP_GRID_ROW_PX = 18
 NP_GRID_ROW_ASCENT = 14
 NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
-NP_GRID_ICON = 34  # More's and the heart's targets, the theme's 20 px glyphs centred in them (np_bar.c np_glyphs)
+NP_GRID_ICON = 34  # More's target, the theme's 20 px glyph centred in it (np_bar.c np_glyphs)
+# The heart's target (the user's, 2026-11-18, docs/oled-design.md#now-playing): x from NP_GRID_HEART[0] left of the
+# text column, top on the album line's foot, w by h, the theme's 34 px heart (tools/art.py NP_HEART_PX) centred in it,
+# so it stands at screen x 193 to 227 and y 146 to 180 and the target covers x 182 to 238 and y 142 to 184
 NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
+NP_GRID_HEART = (10, 56, 42)
 NP_GRID_BAR = 6
 NP_GRID_TOUCH = 22  # the bar's target, short of the heart's above and the times' below
 NP_GRID_SLIDE_GAP = 5
@@ -740,12 +744,15 @@ def np_grid(root, named, g, title, artist, album, remain):
         for key in n[2]:
             if key.endswith(':font_size'): n[2][key] = str(px)
             if n is not title and key.endswith(':text_color'): n[2][key] = NP_GRID_SECONDARY
+    # the album one line ending in stock's ellipsis, never scrolled (np_marquee.c drives the title and artist alone),
+    # so the heart under it keeps its place
+    album[2].update(only_focus='true', ellipses='true')
     named['view_buttons'][3].remove(named['img_more'])
     cy = a - NP_GRID_ROW_ASCENT + NP_GRID_ROW_PX // 2
     more_x = right - NP_GRID_MORE_INSET - NP_GRID_ICON // 2
-    fav_x = more_x - NP_GRID_ICON
     named['img_more'][1] = [more_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
-    named['img_fav'][1] = [fav_x, cy - NP_GRID_ICON // 2, NP_GRID_ICON, NP_GRID_ICON]
+    pad, w, h = NP_GRID_HEART
+    named['img_fav'][1] = [tx - pad, NP_GRID_LINES[2] + NP_GRID_META_PX, w, h]
     page.remove(named['img_playmode'])
     page.append(named['img_more'])
     slide_h = bar_y - NP_GRID_SLIDE_GAP

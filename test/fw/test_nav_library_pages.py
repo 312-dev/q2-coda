@@ -1180,7 +1180,7 @@ def test_a_heart_without_stock_s_click_is_left_alone(fw, ui, song, mcl, handler,
 
 @pytest.mark.parametrize('kept, fav, stars', [(3, False, 3), (0, False, 0), (3, True, 3), (0, True, 0), (5, False, 5),
                                               (5, True, 5)])
-@pytest.mark.parametrize('image', ['play_unfav', 'oled_np_unfav_d', 'oled_np_fav'])
+@pytest.mark.parametrize('image', ['play_unfav', 'oled_np_unfav_d', 'oled_np_fav_d'])
 def test_the_heart_has_no_badge_and_the_stars_are_the_kept_rating_alone(fw, ui, song, mcl, kept, fav, stars, image):
     """The heart is the like alone: nothing is added beside it, whatever its image, and nothing is written on it as
     the tick runs. The rating page's stars are the kept ones, whether the song is liked or not (np_rate.c)."""

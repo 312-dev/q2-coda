@@ -316,6 +316,7 @@ MODE_PILL_PX = 18  # the antenna in the radio's pill
 # full heart fill) at the 20 px row type's size
 ROW_ICON_PX = 20
 ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
+NP_HEART_PX = 34  # Now Playing's heart under the album (tools/ipod.py NP_GRID_HEART), Phosphor's own margins
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = inks('secondary', 'd', 'l', 'w')  # Text Secondary in each half, white on the bar
 CTA_RING_INKS = inks('primary', 'd', 'l')  # the buttons' focus ring (cta_ring_end), Text Primary per half
@@ -729,11 +730,11 @@ def images(t):
         out[f'{prefix}_mode_radio_w'] = phosphor('broadcast-bold', MODE_PILL_PX, 0xffffff)
         out |= {f'{prefix}_mode_{n}_x{k}': phosphor(f'{n}-bold', MODE_PX, c) for n in ('shuffle', 'repeat') for k, c in MODE_DIM_INKS.items()}
         # and its heart and More (np_bar.c np_glyphs), named after stock's play_fav, play_unfav, play_more and
-        # play_moredown: the empty heart and More in Text Primary, More pressed in Text Secondary, the full heart in
-        # the accent, each half's but the accent's
-        out[f'{prefix}_np_fav'] = phosphor('heart-fill', ROW_ICON_PX, on, ROW_INK)
+        # play_moredown: the heart NP_HEART_PX, outlined, or filled while liked, in Text Primary, no colour; More in Text
+        # Primary, pressed in Text Secondary; each half's
         for k, c in STATE_INKS.items():
-            out |= {f'{prefix}_np_unfav_{k}': phosphor('heart', ROW_ICON_PX, c, ROW_INK), f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c, ROW_INK),
+            out |= {f'{prefix}_np_fav_{k}': phosphor('heart-fill', NP_HEART_PX, c), f'{prefix}_np_unfav_{k}': phosphor('heart', NP_HEART_PX, c),
+                    f'{prefix}_np_more_{k}': phosphor('dots-three', ROW_ICON_PX, c, ROW_INK),
                     f'{prefix}_np_moredown_{k}': phosphor('dots-three', ROW_ICON_PX, MODE_INKS[k], ROW_INK)}
         # the volume's speakers at the bar's ends (volume.c vol_paint, VOL_SPK_PX): Text Secondary per half
         out |= {f'{prefix}_vol_{n}_{k}': phosphor(f'speaker-simple-{g}-fill', VOL_SPK_PX, c)

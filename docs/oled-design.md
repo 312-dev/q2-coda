@@ -551,13 +551,22 @@ No page title, no reflection, and no background art blur on the art's page (the 
 
 Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) with the theme's
 `playing.art.radius`, `playing.artist.font`, `playing.scrubber.height` and `playing.modes.icons`.
-The album is one line that scrolls, as the title and artist do, rather than two. What the design
+The album is one line ending in an ellipsis (the title and artist scroll), rather than two, so the heart under it keeps its place. What the design
 has no place for keeps a place of its own:
 
-- **More and the heart** stand at the right end of the art's bottom line (baseline 208), on the
-  art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
-  More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
-  Accent Blue while the song is a favorite.
+- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up): Phosphor `heart`,
+  34 px, at x 193 to 227 and y 146 to 180, outlined, or `heart-fill` while the song is liked, both Text Primary, no
+  colour. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
+  one line ending in an ellipsis, never scrolled, so the heart's place never moves.
+- **More** stands at the right end of the art's bottom line (baseline 208), on the art's page, so a swipe takes it
+  away with it: Phosphor `dots-three` (regular, 20 px, Text Primary; pressed in Text Secondary), its ink ending on
+  the right column. Its touch reaches right to the screen's edge and down to the progress bar's target: x 292 to
+  374, y 172 to 219. The badge row keeps the quality badge on the left and More on the right.
+- **Touch areas** stay off the progress bar's target (y 220 to 242), the times' row and each other: the state row's
+  buttons each reach to the midpoints with their neighbours and down to the screen's foot, Shuffle and Up Next
+  from the row's top (x 0 to 105 and 270 to 374), Radio and Repeat under the row (x 106 to 187 and 188 to 269,
+  y 308 to 319; radio on: 112 to 205 and 206 to 281). What is drawn, its press square and its focus ring stay the
+  glyph's.
 - **The page dots** are hidden: the state row's on dots sit where they were. The lyrics and the
   [rating page](#rating-page) are the swipe's other pages, in that order; the lyrics end 5 px above
   the bar, and the rating page, which draws its own dots, rests full screen. Now Playing shows no place in the

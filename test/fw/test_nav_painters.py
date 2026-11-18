@@ -931,10 +931,10 @@ def test_now_playings_heart_and_more_are_the_themes_glyphs_in_each_half(fw, st):
     assert [more.props[f'style:{s}:bg_image'] for s in states] == ['oled_np_more_d', 'oled_np_moredown_d'] + ['oled_np_more_d'] * 3
     fav.props['image'] = 'play_fav'  # stock's click
     glyphs(win.addr)
-    assert fav.props['image'] == 'oled_np_fav'
+    assert fav.props['image'] == 'oled_np_fav_d'  # Text Primary, no colour: the half's too
     st('light').value = 1
     glyphs(win.addr)
-    assert fav.props['image'] == 'oled_np_fav' and more.props['style:pressed:bg_image'] == 'oled_np_moredown_l'
+    assert fav.props['image'] == 'oled_np_fav_l' and more.props['style:pressed:bg_image'] == 'oled_np_moredown_l'
     fav.props['image'] = 'oled_np_unfav_d'
     glyphs(win.addr)
     assert fav.props['image'] == 'oled_np_unfav_l' and more.props['style:normal:bg_image'] == 'oled_np_more_l'
@@ -1044,26 +1044,32 @@ class Corners(Row):
         return 'shuffle' if self.sent else None
 
 
-# The outer buttons' touch past the target (the user's, 2026-11-18 00:07): shuffle's to the screen's left edge, Up
-# Next's to its right, each down to its foot, from the row's top; across, each as far as the target gives it. On
-# screen, radio off: shuffle x 0 to 105, Up Next 270 to 374; radio on (the pill 112 to 204): shuffle 0 to 111, Up
-# Next 282 to 374; both y 264 to 319. The drawn row, its press and its ring stay where they are.
-CORNERS = {False: ((0, 105), (270, 374)), True: ((0, 111), (282, 374))}
+# Each button's touch past the target (the user's, 2026-11-18 00:07 and 05:10): shuffle's to the screen's left edge,
+# Up Next's to its right, each from the row's top down to the foot; Radio's and Repeat's under the target, down to the
+# foot; across, each as far as the target gives it (the midpoints with its neighbours). Every hit rect on screen,
+# x0, x1, y0, y1 inclusive, radio off and on (the pill 112 to 204). The drawn row, its press and its ring stay where
+# they are; nothing reaches above y 264, the times' row (the scrubber's target ends at 242).
+HITS = {False: {'shuffle': (0, 105, 264, 319), 'radio': (106, 187, 308, 319), 'repeat': (188, 269, 308, 319),
+                'queue': (270, 374, 264, 319)},
+        True: {'shuffle': (0, 111, 264, 319), 'radio': (112, 205, 308, 319), 'repeat': (206, 281, 308, 319),
+               'queue': (282, 374, 264, 319)}}
 
 
 @pytest.mark.parametrize('radio', [False, True], ids=['radio-off', 'radio-on'])
-def test_the_outer_buttons_take_a_tap_out_to_the_screens_edges_and_foot(fw, st, mcl, radio):
+def test_each_row_button_takes_a_tap_out_to_its_hit_rect(fw, st, mcl, radio):
     row = Corners(fw, st, mcl, radio)
-    (s0, s1), (q0, q1) = CORNERS[radio]
-    for x, y in ((s0, 319), (s0, 264), (s1, 319), (20, 300), (40, 312)):
-        assert row.press(x, y) == (None if radio else 'shuffle'), (x, y)  # radio on: shuffle ignores taps
-    for x, y in ((q1, 319), (q1, 264), (q0, 319), (350, 290), (330, 315)):
-        assert row.press(x, y) == 'queue', (x, y)
-    # past each corner: nothing new, the neighbours' and the times' own
-    assert row.press(s1 + 1, 315) is None and row.press(q0 - 1, 315) is None
-    assert row.press(10, 263) is None and row.press(360, 263) is None  # the times' row above
-    assert row.press(158 if radio else 146, 316) is None  # under Radio: still no Up Next
-    assert row.press(20, 300, to=(60, 300)) is None  # a drag is no tap
+    want = {'shuffle': None if radio else 'shuffle', 'repeat': None if radio else 'shuffle',  # radio on: ignored
+            'radio': 'radio', 'queue': 'queue'}
+    for name, (x0, x1, y0, y1) in HITS[radio].items():
+        for x, y in ((x0, y1), (x1, y1), (x0, max(y0, 309)), (x1, max(y0, 309)), ((x0 + x1) // 2, 318)):
+            assert row.press(x, y) == want[name], (name, x, y)
+        if name in ('shuffle', 'queue'):
+            assert row.press(x0 if name == 'shuffle' else x1, y0) == want[name], name
+    # the times' row above is no button's; a drag is no tap
+    assert row.press(10, 263) is None and row.press(360, 263) is None and row.press(146, 263) is None
+    assert row.press(20, 300, to=(60, 300)) is None
+    # down in one button's rect and up in its neighbour's: nothing
+    assert row.press(HITS[radio]['radio'][1], 315, to=(HITS[radio]['repeat'][0] + 1, 315)) is None
 
 
 def test_the_corners_draw_nothing_new(fw, st, mcl):

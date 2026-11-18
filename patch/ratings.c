@@ -129,10 +129,10 @@ static void *rate_track(void) {
     return queue_now(&at, &n);
 }
 
-/* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
+/* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav_d" or "_l") */
 static int heart_full(const char *image) {
     unsigned k = (unsigned)strlen(image);
-    return k >= 4 && !tk_strcmp(image + k - 4, "_fav");
+    return (k >= 4 && !tk_strcmp(image + k - 4, "_fav")) || strstr(image, "np_fav_") != 0;
 }
 static void heart_set(const char *image) {
     image_base_set_image(ra.rate_fav, image);

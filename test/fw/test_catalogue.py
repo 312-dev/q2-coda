@@ -332,7 +332,7 @@ def test_each_layer_hides_a_server_song_that_is_a_card_file(rig, layer):
     assert not rig.unavailable('/mnt/mmc/Music/x.flac')
     rig.fw.fn('catalogue_rated', None, C.c_void_p, C.c_int)(rig.record('/mnt/mmc/Music/x.flac'), 4)
     key = listen_key('/mnt/mmc/Music/x.flac')
-    assert rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\t4\t1700000000\n'.encode()
+    assert rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\tstars=4\t1700000000\n'.encode()
 
 
 @pytest.mark.parametrize('case', ['other mbid', 'live take', 'longer', 'unreadable length'])
