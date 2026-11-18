@@ -259,7 +259,7 @@ def skip_reason(path):
     args = SCRIPTS.get(path)
     if isinstance(args, str):
         return args
-    return 'it needs a static qemu-mipsel, which this machine lacks' if '{qemu_static}' in ' '.join(args) else 'it needs qemu-mipsel, which this machine lacks'
+    return 'it needs a static qemu-mipsel, which this machine lacks' if '{qemu_static}' in ' '.join(args or []) else 'it needs qemu-mipsel, which this machine lacks'
 
 
 def named_suite(name, py, logs):
