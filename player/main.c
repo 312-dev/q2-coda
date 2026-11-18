@@ -9,6 +9,7 @@
  * so demo's `nice -n -5 hciplayer -ao alsa &` and `killall -9 hciplayer` work the same on both. If it cannot be
  * unpacked or run, this program plays. Every path is under PEQ_ROOT, the session's directory in the host tests. */
 #include "q2player.h"
+#include "ulog_line.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +30,7 @@
 #define CLICKS_FILE "/tmp/q2clicks"
 /* The crash-loop guard. CRASHES_FILE holds how many times in a row q2player has crashed within HEALTHY_S of its start
  * this boot; at CRASH_LIMIT the stock player plays until the next boot, FALLBACK_FILE says so to the Settings row
- * (patch/player_choice.c), and demo's log has the line. */
+ * (patch/player_choice.c), and the unified log has the line (plog). */
 #define CRASHES_FILE PEQ_ROOT "/tmp/q2player.crashes"
 #define FALLBACK_FILE PEQ_ROOT "/tmp/q2player.fallback"
 #define CRASH_LIMIT 3
@@ -67,6 +68,19 @@ static int unpack_stock(void) {
     return rename(part, STOCK_PLAYER);
 }
 
+/* A line in the unified log (docs/internals.md#unified-log): stamped as ulog_line.h has it, source "player", on stderr,
+ * which is demo's (S90play keeps it), where q2guard reads it. Async-signal-safe: crashed writes one too. */
+static void plog(char level, const char *msg, int n) {
+    struct timespec wall, up;
+    char line[256];
+    clock_gettime(CLOCK_REALTIME, &wall);
+    clock_gettime(CLOCK_MONOTONIC, &up);
+    int len = ulog_line(line, sizeof line, wall.tv_sec, (unsigned)(up.tv_sec * 1000 + up.tv_nsec / 1000000), level,
+                        "player", msg, n);
+    if (len > 0 && write(2, line, (size_t)len) < 0) { /* nowhere else to say it */
+    }
+}
+
 /* CRASHES_FILE's count, 0 when there is none. Async-signal-safe: crashed reads it too. */
 static int crashes(void) {
     char c = '0';
@@ -85,7 +99,7 @@ static void crashed(int sig) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     int n = now.tv_sec - started < HEALTHY_S ? crashes() + 1 : 1;
-    char line[] = "q2player: crashed, signal 00, crash 0 of " STR(CRASH_LIMIT) " in a row\n";
+    char line[] = "q2player: crashed, signal 00, crash 0 of " STR(CRASH_LIMIT) " in a row";
     char *at = line + 26; /* the signal's two digits; the count's is ten on */
     at[0] = '0' + sig / 10 % 10, at[1] = '0' + sig % 10, at[10] = '0' + (n > 9 ? 9 : n);
     int fd = open(CRASHES_FILE, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
@@ -93,8 +107,7 @@ static void crashed(int sig) {
         if (write(fd, at + 10, 1) < 0) at[10] = '?'; /* the log says the count was not kept */
         close(fd);
     }
-    if (write(2, line, sizeof line - 1) < 0) { /* nowhere else to say it */
-    }
+    plog('E', line, sizeof line - 1);
     if (!connected && self[0] && n <= CRASH_LIMIT) execv(self, args); /* bounded: no stock player, no loop */
     signal(sig, SIG_DFL);
     raise(sig);
@@ -106,7 +119,8 @@ static int stock_plays(void) {
     int n = crashes();
     if (n < CRASH_LIMIT) return 0;
     if (access(FALLBACK_FILE, F_OK) != 0) {
-        fprintf(stderr, "q2player: crashed %d times in a row; the stock player plays until the next restart\n", n);
+        char line[96];
+        plog('W', line, snprintf(line, sizeof line, "q2player: crashed %d times in a row; the stock player plays until the next restart", n));
         close(open(FALLBACK_FILE, O_WRONLY | O_CREAT | O_CLOEXEC, 0644));
     }
     return 1;

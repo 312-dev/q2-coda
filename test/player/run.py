@@ -1208,10 +1208,13 @@ def test_fallback(player, songs, tmp):
         p.send_signal(signal.SIGSEGV); assert p.wait(5) == -signal.SIGSEGV, p.returncode
         conn.close(); srv.close()
         assert (d/'tmp/q2player.crashes').read_text() == str(n), (d/'tmp/q2player.crashes').read_text()
-        assert f'q2player: crashed, signal 11, crash {n} of 3 in a row' in (d/'player.log').read_text(), (d/'player.log').read_text()
+        # a unified-log line (docs/internals.md#unified-log): time, uptime, level, source, then the text
+        assert re.search(rf'^\d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ \d+ E player q2player: crashed, signal 11, crash {n} of 3 in a row$',
+                         (d/'player.log').read_text(), re.M), (d/'player.log').read_text()
     # the next start after the third: the stock player, logged once, FALLBACK_FILE made
     p, srv = session(crashes=3); stock_ran(p); srv.close()
-    assert 'q2player: crashed 3 times in a row; the stock player plays until the next restart' in (d/'player.log').read_text()
+    assert re.search(r' W player q2player: crashed 3 times in a row; the stock player plays until the next restart$',
+                     (d/'player.log').read_text(), re.M), (d/'player.log').read_text()
     assert (d/'tmp/q2player.fallback').exists()
     # crashes before demo has the socket: each starts q2player again in the same process, the third gives the stock player
     p, _ = session(listen=False)
