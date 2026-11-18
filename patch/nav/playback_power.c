@@ -447,52 +447,66 @@ static void bt_volume_poll(void) {
 static int dark_quiet;         /* dark, nothing playing, the DAC off: the long idle */
 static volatile int dark_slow; /* the player polls' slow pace; read on stock's status thread */
 static int player_quick;       /* ringnav_mainscheduling: the track's end is near or just passed */
+static volatile int push_pace; /* the player polls wait on q2player's push (player_push.c) */
 static int tone_dark;          /* this pass clicked with the screen off (ringnav_buzzer) */
-/* mclSyncPlayerStatus' 200 ms wait (DARK_POLLS): DARK_POLL_US while dark_slow. */
+/* mclSyncPlayerStatus' 200 ms wait (DARK_POLLS): DARK_POLL_US while dark_slow, else until
+ * q2player's push while push_pace, else stock's. */
 int ringnav_dark_usleep(unsigned us) {
-    return usleep(dark_slow && us < DARK_POLL_US ? DARK_POLL_US : us);
+    if (us >= DARK_POLL_US) return usleep(us);
+    if (dark_slow) return usleep(DARK_POLL_US);
+    return push_pace ? player_push_wait(us) : usleep(us);
 }
-/* Dark, may stock's status sync and player scheduling slow to DARK_POLL_US? Always when quiet.
+/* nothing_follows: nothing but the screen reads the local player's position closely (below), so
+ * lit the polls may wait on q2player's push; Car Remote is no exception there, as each second is
+ * pushed. dark_slow_ok: dark, may stock's status sync and player scheduling slow to DARK_POLL_US,
+ * blind? Always when quiet.
  * While the local player plays or is paused, only the screen reads its position closely, so they
  * slow down unless something else follows it: the track's last DARK_END_LEAD_S and the moments
  * after its end (player_quick: the Gapless preload, a change without Gapless, the sleep timer's
  * end, Download Ahead's next song), A-B Repeat's loop (check_abrepeatmode reads the cached
- * position), Car Remote (the phone shows it), or another player (AirPlay, Bluetooth receive, a
- * video), which keeps stock's pace. Play and pause need neither: mclSetPause and mclSetResume
- * set the status word themselves. ponytail: dark, the cached second can be up to DARK_POLL_US
- * old: Resume's place, a card app's .now and the listen count (playback_power.c resume_poll) see
- * the position that much later; and lit again, the thread finishes its long sleep first, so Now
- * Playing's time and a lyric line can lag up to a second at wake. */
-static int dark_slow_ok(int quiet) {
-    if (quiet) return 1;
+ * position), Car Remote while dark (the phone shows it, and the dark second is blind), or another
+ * player (AirPlay, Bluetooth receive, a video), which keeps stock's pace. Play and pause need
+ * neither: mclSetPause and mclSetResume set the status word themselves. ponytail: dark, the cached
+ * second can be up to DARK_POLL_US old: Resume's place, a card app's .now and the listen count
+ * (playback_power.c resume_poll) see the position that much later; and lit again, the thread
+ * finishes its long sleep first, so Now Playing's time and a lyric line can lag up to a second at
+ * wake. */
+static int nothing_follows(void) {
     return !player_quick && media_owner() == 1 && !video_on() && airplayGetFlag() != 2 &&
-           (signed char)bt__recv_pageflag != 2 && !coda_rc_enabled() &&
+           (signed char)bt__recv_pageflag != 2 &&
            !(*(volatile unsigned char *)REPEAT_INFO && I(REPEAT_INFO, REPEAT_AB_STATE) == 2);
 }
+static int dark_slow_ok(int quiet) { return quiet || (nothing_follows() && !coda_rc_enabled()); }
 /* on_wm_idle_status ran player_mainscheduling every UI pass, and its mclAutoChange asks hciplayer
  * for its status and waits for the answer on the UI thread: 40 to 125 round trips a second, each
  * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark_slow:
  * a lyric line and the play-state notifications follow within that, as stock's 200 ms status sync
- * does. From a second before the playing track's end (player_playtime_and_length's cache, a CUE
- * track's own end) until MAINSCHEDULING_END_MS after, it runs every pass, so a change without
- * Gapless starts as soon as stock's did; paused, it stays paced. Playing, from DARK_END_LEAD_S
- * before the end, or with no length or position to go by, player_quick keeps dark_slow off.
- * ponytail: a length that overstates the audio (a VBR MP3 without a Xing header) ends outside the
- * window, up to 100 ms late (DARK_POLL_US dark); follow mclAutoChange's own end flag if that
- * shows. */
+ * does. While push_pace (q2player's push is bound and nothing_follows), it runs on the pass after
+ * the status thread took a push, at most every MAINSCHEDULING_MS, else DARK_POLL_US after its last
+ * run (docs/internals.md#player-status-push). From a second before the playing track's end
+ * (player_playtime_and_length's cache, a CUE track's own end) until MAINSCHEDULING_END_MS after, it
+ * runs every pass, so a change without Gapless starts as soon as stock's did; paused, it stays
+ * paced. Playing, from DARK_END_LEAD_S before the end, or with no length or position to go by,
+ * player_quick keeps dark_slow and push_pace off. ponytail: a length that overstates the audio (a
+ * VBR MP3 without a Xing header) ends outside the window, up to 100 ms late (DARK_POLL_US dark);
+ * follow mclAutoChange's own end flag if that shows. */
 #define MAINSCHEDULING_MS 100
 #define MAINSCHEDULING_END_MS 2000
 int ringnav_mainscheduling(void) {
-    static unsigned last, end;
+    static unsigned last, end, seq;
     int sec = -1, total = 0, playing = mclGetPlayStatus() == 2;
     if (playing) player_playtime_and_length(&sec, &total);
-    unsigned now = (unsigned)time_now_ms(),
-             gap = dark_slow ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
+    unsigned now = (unsigned)time_now_ms();
     if (total > 0 && total - sec <= 1) end = now | !now;
     int ending = end && now - end < MAINSCHEDULING_END_MS;
     player_quick = ending || (playing && (total <= 0 || sec < 0 || total - sec <= DARK_END_LEAD_S));
-    if (last && now - last < gap && !ending) return 0;
+    int pushed = push_pace = player_push_live() && nothing_follows();
+    unsigned gap = dark_slow || pushed ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
+    if (last && !ending && now - last < gap &&
+        !(pushed && player_push_seq() != seq && now - last >= MAINSCHEDULING_MS))
+        return 0;
     last = now | !now; /* never 0 */
+    seq = player_push_seq();
     return player_mainscheduling();
 }
 

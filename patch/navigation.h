@@ -1173,6 +1173,9 @@ unsigned loop_span(unsigned base, unsigned most, int timers);
 void bt_vol_event_start(void);
 int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void),
     bt_vol_event_wait(void);
+/* player_push.c: q2player's status push, waited on by the player polls (docs/internals.md#player-status-push) */
+int player_push_wait(unsigned us), player_push_live(void);
+unsigned player_push_seq(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);

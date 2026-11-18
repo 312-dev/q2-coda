@@ -79,6 +79,8 @@ int main(int argc, char **argv) {
         if (i == 50) return 1;
         usleep(100000);
     }
+    const char *push = getenv("Q2PLAYER_PUSH");
+    ipc_push_open(push ? push : "/tmp/q2player.push");
     if (pthread_create(&engine, NULL, engine_thread, NULL)) return 1;
     ipc_thread(NULL);
     return 0;
