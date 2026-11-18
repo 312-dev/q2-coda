@@ -15,7 +15,7 @@
  * The sheet rises from the screen's foot over SH_RISE_MS, cubic_out, while the page behind recedes
  * and dims and the frost fades in; Return lets it fall away over SH_CLOSE_MS, ease-in
  * (modal_close), its keys taken meanwhile (modal_closing); Up Next's falls too on a tap above it or
- * a drag down on it (modal_touch_close). Both run through ui_kit.h's ovm_t
+ * a drag down on it, which it follows (modal_touch_close). Both run through ui_kit.h's ovm_t
  * (docs/oled-design.md#overlay-motion), so under Reduce Motion each is a cross-fade in place,
  * MO_FADE_MS in and MO_OUT_FADE_MS out (sheet_run). */
 #include "navigation.h"
@@ -104,9 +104,10 @@ static const unsigned char foot_alpha[SH_H - SH_FOOT] = {
 #define SH_RISE_MS 260
 #define SH_CLOSE_MS 180
 #define SH_FRAME_MS 16
-enum { MO_NONE, MO_WAIT, MO_RISE, MO_UP, MO_FALL };
+enum { MO_NONE, MO_WAIT, MO_RISE, MO_UP, MO_FALL, MO_DRAG };
 static struct {
-    int phase;  /* MO_WAIT: opened, its first whole paint (sheet_build) starts the rise */
+    int phase;  /* MO_WAIT: opened, its first whole paint (sheet_build) starts the rise; MO_DRAG:
+                 * a finger has it (sheet_touch) */
     int e, off; /* this frame's progress, 0 the page alone to 256 the sheet up; the sheet's drop */
     ovm_t ov;   /* the rise and the fall (ui_kit.c), read once a frame by sheet_tick */
     unsigned timer;
@@ -191,7 +192,9 @@ int modal_sel_height(void *view, int h) {
 
 /* This frame's progress, 256 with nothing moving, and how far below its place the sheet is */
 static int mo_e(void) {
-    return mo.phase == MO_WAIT || mo.phase == MO_RISE || mo.phase == MO_FALL ? mo.e : 256;
+    return mo.phase == MO_WAIT || mo.phase == MO_RISE || mo.phase == MO_FALL || mo.phase == MO_DRAG
+               ? mo.e
+               : 256;
 }
 static int mo_off(void) { return mo_e() < 256 && !motion_reduced() ? mo.off : 0; }
 
@@ -241,35 +244,59 @@ static void sheet_wait(void) {
 /* A sheet is falling away: navigation.c's key filter takes every key meanwhile. */
 int modal_closing(void) { return mo.phase == MO_FALL; }
 
+static int drag_level(int off);
 /* Win closed as a sheet does: it falls away, then closes (sheet_tick). At once when the motion
  * can't run (no material yet, a picker over another sheet) or win is no sheet. A fall during
- * the rise starts from where the rise has the sheet. */
+ * the rise starts from where the rise has the sheet, one while a finger drags it from where the
+ * finger has it. */
 void modal_close(void *win) {
-    int open = 0;
+    int open = 0, drag = mo.phase == MO_DRAG;
     for (int k = 0; k < MODAL_MAX; ++k) open += modals[k].win != 0;
     if (mo.phase == MO_FALL) return;
     if (!win || open != 1 || !modal_win(win) || !fr.buf || !mo.page ||
-        (mo.phase != MO_UP && mo.phase != MO_RISE)) {
+        (mo.phase != MO_UP && mo.phase != MO_RISE && !drag)) {
         if (win) window_close(win);
         return;
     }
     mo.phase = MO_FALL, mo.win = win;
     sheet_run(1);
+    if (drag) mo.ov.from = (short)drag_level(mo.off);
 }
 
 /* A finger that closes a sheet (the user's, 2026-11-18, for Up Next; docs/oled-design.md#up-next):
- * a tap on the page receding above it (down and up over SH_TOP, within TAP_PX), or a drag down of
- * SH_DRAG_PX or more, more down than across (the swipe up that opens Up Next, reversed), that came
- * down on the sheet's strip above its rows (the grab bar's) or on its rows while they are at their
- * top. A drag on rows scrolled down scrolls them, as anywhere. The sheet falls away as Return lets
- * it (modal_close), from the next pass, outside the touch's dispatch. The handlers return 0: the
- * rows keep their taps and drags. ponytail: the sheet does not follow the finger as it drags; it
- * falls once the finger lifts past the threshold (a drag offset fed to sheet_frame would). */
+ * a tap on the page receding above it (down and up over SH_TOP, within TAP_PX), or a drag down,
+ * more down than across (the swipe up that opens Up Next, reversed), that came down on the sheet's
+ * strip above its rows (the grab bar's) or on its rows while they are at their top. A drag on rows
+ * scrolled down scrolls them, as anywhere.
+ *
+ * The drag is claimed in the window's move-before, before its children see the move, once it has
+ * gone TAP_PX down and more down than across: from there the rows' scroll would take it, and
+ * aborts the press on its way (EVT_POINTER_ABORT through the window), so the sheet's own pressed
+ * widgets are aborted first (as swipe_back.c and pull-to-search claim theirs) and the moves and the
+ * lift are swallowed. A drag up or sideways first is left to the rows. Claimed, the sheet follows
+ * the finger (mo.off, MO_DRAG), the page behind coming forward as it drops; let go SH_DRAG_PX or
+ * more down and it falls away from there as Return lets it (modal_close, from the next pass,
+ * outside the touch's dispatch), short of it it rises back. Under Reduce Motion, or with no motion
+ * to run (no material yet, a picker over another sheet), it stays put and the lift decides alone.
+ * Another's abort (a swipe back's) puts the sheet back. */
 #define SH_DRAG_PX 48
-enum { MT_NONE, MT_SCRIM, MT_SHEET };
+enum { MT_NONE, MT_SCRIM, MT_SHEET, MT_DRAG };
 static struct {
-    int x, y, from; /* where the touch came down, and on what (MT_*) */
+    int x, y, from; /* where the touch came down, and on what (MT_*): MT_DRAG once claimed */
+    int aborting;   /* the claim's own abort is passing through the window */
 } mt __attribute__((section(".scratch")));
+
+/* The sheet at off below its place while a finger drags it: the motion's level as the rise's
+ * frames would have it there (sheet_tick), so a fall or a rise from it starts where it is. */
+static int drag_level(int off) { return 1000 - off * 1000 / (SH_H - SH_TOP); }
+static void sheet_drag(int off) {
+    off = off < 0 ? 0 : off > SH_H - SH_TOP ? SH_H - SH_TOP : off;
+    mo.off = off, mo.e = drag_level(off) * 256 / 1000;
+    for (int k = 0; k < MODAL_MAX; ++k)
+        if (modals[k].win) sheet_shift(k, off);
+    void *top = window_manager_get_top_window(window_manager());
+    if (top) widget_invalidate_force(top, (void *)0);
+}
 
 static int sheet_touch_close(const void *info) {
     void *win = P(info, TIMER_CTX);
@@ -279,11 +306,21 @@ static int sheet_touch_close(const void *info) {
     }
     return 0;
 }
+/* A drag let go short of closing, or taken by another: the sheet rises back from where it is. */
+static void drag_back(void) {
+    if (mo.phase != MO_DRAG) return;
+    int level = drag_level(mo.off);
+    mo.phase = MO_RISE;
+    sheet_run(0);
+    mo.ov.from = (short)level;
+}
 static int sheet_touch(void *win, void *event) {
     int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y), k = 0;
     while (k < MODAL_MAX && modals[k].win != win) ++k;
+    if (mt.aborting) return 0;
     if (k == MODAL_MAX || type == EVT_POINTER_ABORT) {
         mt.from = MT_NONE;
+        drag_back();
         return 0;
     }
     if (type == EVT_POINTER_DOWN) {
@@ -294,19 +331,39 @@ static int sheet_touch(void *win, void *event) {
                                                                          : MT_NONE;
         return 0;
     }
-    if (type != EVT_POINTER_UP_BEFORE) return 0;
     int dx = x - mt.x, dy = y - mt.y, from = mt.from;
-    mt.from = MT_NONE;
     if (dx < 0) dx = -dx;
+    if (type == EVT_POINTER_MOVE_BEFORE) {
+        if (from == MT_SHEET) {
+            if (dy <= -TAP_PX || (dx >= TAP_PX && dx >= dy)) mt.from = MT_NONE; /* the rows' */
+            if (dy < TAP_PX || dx >= dy) return 0;
+            mt.from = MT_DRAG;
+            unsigned abort_event[12];
+            pointer_event_init(abort_event, EVT_POINTER_ABORT, win, mt.x, mt.y);
+            mt.aborting = 1;
+            widget_dispatch_event_to_target_recursive(win, abort_event);
+            mt.aborting = 0;
+            if (mo.phase == MO_UP && mo.page && fr.buf && !motion_reduced()) mo.phase = MO_DRAG;
+        }
+        if (mt.from != MT_DRAG) return 0;
+        if (mo.phase == MO_DRAG) sheet_drag(dy);
+        return STOP;
+    }
+    if (type != EVT_POINTER_UP_BEFORE) return 0;
+    mt.from = MT_NONE;
     int tap = dx <= TAP_PX && (dy < 0 ? -dy : dy) <= TAP_PX;
-    if ((from == MT_SCRIM && tap && y < SH_TOP) ||
-        (from == MT_SHEET && dy >= SH_DRAG_PX && 2 * dx < dy))
+    if (from == MT_SCRIM && tap && y < SH_TOP) timer_add(sheet_touch_close, win, 0);
+    if (from != MT_DRAG) return 0;
+    if (dy >= SH_DRAG_PX && 2 * dx < dy)
         timer_add(sheet_touch_close, win, 0);
-    return 0;
+    else
+        drag_back();
+    return STOP;
 }
 /* win, an open sheet, closed by a finger too (sheet_touch) */
 void modal_touch_close(void *win) {
-    static const unsigned types[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    static const unsigned types[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                      EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
     for (unsigned i = 0; win && i < sizeof types / sizeof *types; ++i)
         widget_on(win, types[i], sheet_touch, win);
 }

@@ -1106,8 +1106,8 @@ painted it white, which drew the box at rest.
   [oled-design](oled-design.md#text-entry)). #+= holds all 32 printable ASCII symbols, so the four sets type every
   printable character. Ten cells show; the run starts at its first character and moves only when the highlight
   comes within a cell of an edge, its letters themselves fading out over 22 px where more of the set lies past that
-  edge (nothing is painted over them). One turn of the wheel (ticks under 250 ms apart) stops on the return key; a
-  new turn goes on round to the switcher. Search opens on A. When the wheel lands on a character its key pops up,
+  edge (nothing is painted over them). One turn of the wheel (ticks under 250 ms apart) stops on the switcher or the return
+  key, whichever end it reaches; a new turn goes on round to the other. Search opens on A. When the wheel lands on a character its key pops up,
   as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head with 9 px corners narrowing
   over 18 px to the 18 px key, the accent) holding it in 24 px white Inter Medium, and the key keeps it at the
   strip's size in white at 60 %; it goes 300 ms after the wheel stops. Turning faster than 8 characters a second
