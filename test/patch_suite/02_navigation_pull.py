@@ -194,6 +194,28 @@ assert len(sb_inputs())==2 and signed(m.get(page+O['W_X']))==0  # Return's press
 sb_move,sb_step=max(sb_moves[1:]),max(sb_steps[:-1]); assert sb_move<600_000 and sb_step<600_000; passed()
 print(f'Swipe back on MIPS: {sb_move} instructions a move at most (the page moved with the finger), {sb_step} a glide step (payload only; stock\'s repaint of the moved window is its own)')
 
+# Swipe back where Return leaves the window open (a page whose Return moves focus first) keeps its close_anim_hint.
+# go_back clears the hint before Return and puts it back after, here on stock's own widget_get_prop_str and
+# widget_set_prop_str down through window_base_get_prop/set_prop (g_window_vtable; the hint at 0x90), tk_str_copy and
+# tk_realloc. Stock's get answers the window's own field, not a copy, and the clear reallocs that block to one byte
+# (moved here, the old one spoilt, as glibc may; glibc shrinks in place, leaving it ""): a hint kept only as the
+# pointer read was lost either way.
+m=PullMachine(); under=m.node('window','home_page'); w,es=m.page_list(5,name='albums_page'); page=m.top
+m.nodes[m.wm]=dict(type='window_manager',name='',children=[under,page],visible=1,enable=1)
+m.word(page+O['W_W'],375); m.handlers[payload_syms['stock_input_trampoline']]='stock_input'
+HINT=b'htranslate(duration=120)'; hint=m.alloc(32); m.u.mem_write(hint,HINT+b'\0'); m.sized[hint]=len(HINT)+1  # as tk_strdup left it
+m.word(page+0x74,syms['g_window_vtable']); m.word(page+0x90,hint)
+m.start_pull(page,w,x=5,y=150)
+for x in (20,200): m.now+=16; m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],x=x,y=150)
+m.now+=16; m.emit(page,O['EVT_POINTER_UP_BEFORE'],x=200,y=150)
+for n in ('widget_get_prop_str','widget_set_prop_str'): del m.handlers[syms[n]]
+for _ in range(40):
+    m.now+=8; m.call(address=payload_syms['swipe_back_poll'],args=(0,0,0,0),gap=0,clear=False)
+    if [c for c in m.calls if c[0]=='stock_input']: break
+m.mock('widget_get_prop_str','widget_set_prop_str')
+assert len([c for c in m.calls if c[0]=='stock_input'])==2 and signed(m.get(page+O['W_X']))==0  # Return given; the window stays
+assert m.raw(m.get(page+0x90))==HINT, m.raw(m.get(page+0x90)); passed()
+
 # Local Songs' virtual table keeps its rows and top offset across a search.
 m=PullMachine();w,rows,es=m.table_page(name='localmusic_page');page=m.top
 m.start_pull(page,w);count=m.get(w+O['TABLE_ROWS'])
