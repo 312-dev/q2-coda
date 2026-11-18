@@ -59,7 +59,9 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page). A row that grows in place, a captioned row showing its caption
+  the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
+  scans): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
+  no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
   or a grabbed inline slider, scrolls the list by whole rows until its grown foot is on or above y 282 as well, never
   only inside the list's box, which runs on to the screen's foot (`nav/lists.c` `list_shown_h`). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
