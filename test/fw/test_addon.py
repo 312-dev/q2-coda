@@ -5794,3 +5794,45 @@ def test_a_card_app_s_field_gets_the_strip_s_arrow(fw):
     box = edit_box(fw)
     p.click(0)
     assert p.pg.edit == box and strip_return(fw, box) == STRIP_GO
+
+
+SUB_STREAM = b'/mnt/mmc/.subsonic/stream'
+SEED = SUB_STREAM + b'/0000 - Wasteland [tr-77].flac'
+
+
+def test_an_apps_radio_of_the_song_playing_leaves_that_song_playing(fw, mcl, songs):
+    """The user's, 2026-11-17: Radio "jumped backwards". The app's radio queue starts with the seed, so loading it
+    played the seed again from its start (a re-fetch of it at that) and then sought back. A radio of the song playing
+    now keeps it: the queue file's first entry, that song, is passed over, not waited for, nothing loads, nothing is
+    sought or started, and only the songs after it are replaced by the radio's."""
+    s = Stream(fw, mcl, songs, subsonic=b'name=Subsonic\nradio=1\n')
+    s.world.files[b'/tmp/q2-subsonic.browse.sock'] = b''
+    s.land(SEED)
+    old_next = b'/mnt/mmc/Music/a/02.flac'
+    s.deques[s.queue][:] = [songs(SEED), songs(old_next)]
+    mcl.pos = 0
+    fw.mock('mclGetPlayStatus', lambda *_: 2)
+    fw.mock('fw_deque_pop_back', lambda q, *_: s.deques[q].pop() and 0)
+    def times(sec, total, *_):
+        C.c_int.from_address(sec).value, C.c_int.from_address(total).value = 42, 200
+        return 0
+    fw.mock('player_playtime_and_length', times)
+    fw.fn('song_radio_tap', C.c_int, C.c_void_p)(None)
+    seq = s.world.files[b'/tmp/q2-subsonic.radio'].split(b' ')[0].decode()
+    s.world.files[b'/tmp/q2-subsonic.state'] = f'version=1\nradioack={seq} 0\n'.encode()
+    fw.fn('song_radio_poll', None)()
+    radio = [SUB_STREAM + b'/0001 - Echoes [tr-78].flac', SUB_STREAM + b'/0002 - Fault [tr-79].flac']
+    m3u = SUB_STREAM + b'/queue-9.m3u'
+    s.world.files[m3u] = b'\n'.join([SEED, *radio]) + b'\n'
+    s.world.files.pop(SEED)  # the app's new list emptied its folder's top: the seed fetched again, not yet there
+    s.land(radio[0])
+    s.play(b'9 ' + m3u + b'\n', app=b'subsonic')
+    for _ in range(3):
+        s.step()
+        fw.fn('song_radio_poll', None)()
+    assert s.loads == [] and mcl.pos == 0  # no load: the player plays on, at its place
+    assert s.queued() == [SEED, radio[0]]  # the same song first, the radio's after it, the old next gone
+    assert not fw.calls('player_seek_time') and not fw.calls('player_start_queue')
+    s.land(radio[1])
+    s.step()
+    assert s.queued() == [SEED, *radio] and s.loads == []  # the session goes on into the same queue

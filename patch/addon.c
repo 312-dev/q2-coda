@@ -390,6 +390,7 @@ static struct {
     unsigned picks;  /* playback_picks at its start: a song the user moved to since ends its wait */
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
     unsigned skip;   /* playback_picks after a Next that waits for sm.want (addon_next_waits) */
+    int keep;        /* its first entry is the song playing, which plays on (song_radio_keeps) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
 /* The app whose .play started the queue playing, and playback_loads after that queue's load: the
@@ -459,6 +460,10 @@ static void *m3u_songs(void) {
         unsigned k = strlen(line);
         if (k && line[k - 1] == '\r') line[--k] = 0;
         if (!k || line[0] == '#' || entry++ < sm.next) continue;
+        if (!sm.next && sm.state == S_WAIT && song_radio_keeps(line)) { /* plays now: passed over */
+            sm.keep = 1, ++sm.next;
+            continue;
+        }
         if (!card_path(line) || k >= sizeof sm.want) {
             ++sm.next;
             continue;
@@ -531,7 +536,15 @@ static int stream_start(const void *unused) {
     }
     void *songs = sm.m3u ? m3u_songs() : app_album_songs(sm.dir);
     unsigned n = deque_size(songs);
-    if (n) {
+    if (sm.keep) { /* an app's radio of the song playing: it plays on, the rows after it replaced */
+        void *q = P(mcl_pdeqplaylist, 0);
+        sm.state = S_DONE;
+        if (playback_queue_rest(songs)) {
+            tk_snprintf(sm.first, sizeof sm.first, "%s", (const char *)P(deque_at(q, 0), REC_PATH));
+            sm.state = S_PLAY, sm.loads = playback_loads; /* no load: the queue is the same one */
+            qa.app = sm.app, qa.loads = playback_loads;
+        }
+    } else if (n) {
         if (sm.m3u)
             tk_snprintf(sm.first, sizeof sm.first, "%s",
                         (const char *)P(deque_at(songs, 0), REC_PATH));
@@ -725,7 +738,7 @@ static void stream_poll(app_t *a) {
         char own[40];
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
-        sm.next = sm.more = 0, sm.first[0] = sm.want[0] = 0;
+        sm.next = sm.more = sm.keep = 0, sm.first[0] = sm.want[0] = 0;
         sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = 0;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */

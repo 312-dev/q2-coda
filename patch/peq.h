@@ -552,6 +552,8 @@ int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);
+/* catalogue.c: whether two paths play one song (song_radio.c) */
+int catalogue_same_song(const char *a, const char *b);
 /* catalogue.c: Now Playing shows r, not yet the player's, at its place at of n (addon.c) */
 void catalogue_np_show(void *r, unsigned at, unsigned n);
 /* tags.c: a card app's song's record named before it plays, from its server row or its file */
