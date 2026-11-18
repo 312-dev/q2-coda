@@ -5,12 +5,16 @@
     python3 tools/ci/emu_pool.py put SLOT                             # stop it, end the lease
     python3 tools/ci/emu_pool.py renew SLOT [--hours H]
     python3 tools/ci/emu_pool.py status
+    python3 tools/ci/emu_pool.py fixture DIR                          # (re)make the card fixture from DIR's files, hardlinked
     python3 tools/ci/emu_pool.py reserve SLOT [--off]                 # its lease never expires to another agent
 
 `get` prints the slot, its folder and its viewer's URL; drive it with that folder's own q2emu
 (`~/q2-emu-pool2/q2emu shot out.png`, `... key centre`; Q2EMU_PORT is set in its q2emu). A lease
 lasts --hours (2) and is renewed with `renew`; an expired one is stopped and handed to the next `get`.
 A lease asked for a build a copy already runs, by the same NAME, reuses it without a reboot.
+Every lease's card (state/mmc, /mnt/mmc) starts as the fixture, ~/.cache/q2-emu-pool/card (Q2_EMU_CARD): `get` removes
+whatever the last lease left there and hardlinks the fixture's tree in, so no data is copied and a changed card never
+outlives its lease. A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card.
 A reserved lease (`get --reserve`, or `reserve SLOT` on a held one: the user's own rig) is never
 reclaimed when it expires and never handed to another NAME; only `put` or `reserve --off` frees it.
 
@@ -40,6 +44,8 @@ BASE_PORT = 2400
 # Car Remote's daemon in copy k listens on CODA_RC_BASE + k (7701 up), not the Q2's TCP 7720, so copies
 # running side by side never fight over one port (docs/building.md#emulator-pool).
 CODA_RC_BASE = 7700
+# the songs a card must hold for the Songs list to have anything in it (tools/ci/smoke.py)
+AUDIO = {'.flac', '.mp3', '.wav', '.ogg', '.m4a', '.ape', '.wma', '.aac', '.opus', '.dsf', '.dff'}
 SKIP = {'rootfs', 'state'}  # Shanling's files and a copy's own state: never copied
 
 
@@ -127,6 +133,73 @@ def make_copy(k):
     return d
 
 
+def fixture_dir():
+    """The card every lease starts from: Q2_EMU_CARD, else ~/.cache/q2-emu-pool/card."""
+    return pathlib.Path(os.environ.get('Q2_EMU_CARD') or STATE/'card')
+
+
+def link_tree(src, dst):
+    """dst made to hold src's tree: directories new, files hardlinked (nothing is copied), symlinks kept."""
+    dst.mkdir()
+    for entry in sorted(src.iterdir()):
+        to = dst/entry.name
+        if entry.is_symlink():
+            to.symlink_to(os.readlink(entry))
+        elif entry.is_dir():
+            link_tree(entry, to)
+        else:
+            try:
+                os.link(entry, to)
+            except OSError as e:
+                raise SystemExit(f'cannot hardlink {entry} to {to}: {e.strerror} (the card fixture and the pool copies '
+                                 f'must share a filesystem; nothing is copied instead)') from None
+
+
+def make_fixture(src):
+    """The card fixture as hardlinks of src's tree, its files read-only so that a lease writing a file in place
+    fails instead of changing every card; the tree it replaces is unlinked, never written to."""
+    fx = fixture_dir()
+    src = pathlib.Path(src)
+    if not src.is_dir():
+        raise SystemExit(f'{src} is not a directory')
+    fx.parent.mkdir(parents=True, exist_ok=True)
+    new = fx.with_name(fx.name + '.new')
+    if new.exists():
+        shutil.rmtree(new)
+    link_tree(src, new)
+    for root, _, files in os.walk(new):
+        for f in files:
+            p = pathlib.Path(root)/f
+            if not p.is_symlink():
+                p.chmod(p.stat().st_mode & ~0o222)
+    if fx.exists():
+        shutil.rmtree(fx)
+    new.rename(fx)
+    return fx
+
+
+def card_songs(k):
+    """How many audio files copy k's card holds."""
+    return sum(1 for _, _, files in os.walk(copy_dir(k)/'state/mmc') for f in files if pathlib.Path(f).suffix.lower() in AUDIO)
+
+
+def reset_card(k):
+    """Copy k's card (state/mmc) put back to the fixture: whatever the last lease added, switched or removed is
+    unlinked and the fixture's tree hardlinked in. Called for a copy this lease holds, its emulator stopped:
+    state/data (/mnt/data) is not touched."""
+    fx = fixture_dir()
+    if not fx.is_dir() or not any(fx.iterdir()):
+        raise SystemExit(f'no card fixture at {fx}: make it with `python3 {pathlib.Path(__file__).resolve()} fixture DIR` '
+                         f'(DIR: a card to start every lease from; its files are hardlinked, not copied)')
+    card = copy_dir(k)/'state/mmc'
+    if card.is_symlink() or card.is_file():
+        card.unlink()
+    elif card.exists():
+        shutil.rmtree(card)
+    card.parent.mkdir(parents=True, exist_ok=True)
+    link_tree(fx, card)
+
+
 def q2emu(k, *args):
     return subprocess.run([str(copy_dir(k)/'q2emu'), *args], capture_output=True, text=True,
                           env={**os.environ, 'Q2EMU_PORT': str(port(k)), 'Q2EMU_CODA_PORT': str(coda_port(k))})
@@ -156,6 +229,7 @@ def get(build, name, hours, wait, reserve=False, avoid=(), prepare=None):
             free = [k for k in map(str, range(1, K + 1)) if k not in t.leases and int(k) not in avoid]
             k = (mine or free or [None])[0]
             if k is not None:
+                was_reserved = bool(t.leases.get(k, {}).get('reserved'))  # the user's rig: its card is its own
                 t.leases[k] = {'name': name, 'build': build, 'since': time.time(), 'until': time.time() + hours * 3600,
                                **({'reserved': True} if reserve or t.leases.get(k, {}).get('reserved') else {})}
                 break
@@ -169,6 +243,9 @@ def get(build, name, hours, wait, reserve=False, avoid=(), prepare=None):
     make_copy(k)
     if not (mine and q2emu(k, 'status').stdout.strip() == 'running'):
         try:
+            if not was_reserved:
+                q2emu(k, 'stop')  # the card changes under no running emulator
+                reset_card(k)
             if prepare:
                 prepare(k)
             p = q2emu(k, 'start', build)
@@ -245,6 +322,8 @@ def main():
     v = sub.add_parser('reserve')
     v.add_argument('slot', type=int)
     v.add_argument('--off', action='store_true')
+    f = sub.add_parser('fixture', help='make the card every lease starts from, hardlinked from DIR')
+    f.add_argument('dir')
     sub.add_parser('status')
     args = ap.parse_args()
     if args.cmd == 'get':
@@ -253,6 +332,8 @@ def main():
         put(args.slot)
     elif args.cmd == 'reserve':
         reserve(args.slot, not args.off)
+    elif args.cmd == 'fixture':
+        print(f'card fixture {make_fixture(args.dir)}: {sum(len(f) for _, _, f in os.walk(fixture_dir()))} files, hardlinked from {args.dir}')
     elif args.cmd == 'renew':
         renew(args.slot, args.hours)
     else:

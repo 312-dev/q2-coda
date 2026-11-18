@@ -439,8 +439,6 @@ int ringnav_systemset(void *win, void *ctx) {
         widget_set_text_utf8(list_row_into(view, "playset_folderjump", storage_open, 0), "Storage");
         /* USB (usb_ui.c): the remembered choice, and its picker */
         usb_ui_row(list_row_into(view, "playset_folderjump", usb_pick_open, 0));
-        /* Player (player_choice.c): New or Stock, from the player's next start */
-        player_choice_row(view);
         static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };
         for (unsigned i = 0; i < sizeof hidden; ++i)
             widget_set_visible(widget_get_child(view, hidden[i]), 0, 0);

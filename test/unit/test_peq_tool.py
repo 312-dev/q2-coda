@@ -1,4 +1,4 @@
-"""tools/peq.py's stock-free parts; compile_common and patch_player link against stock (# pragma: no mutate block).
+"""tools/peq.py's stock-free parts; compile_common links against stock (# pragma: no mutate block).
 Not test_peq.py: test/fw has one, and neither folder is a package, so pytest can't collect both."""
 import build
 import peq
