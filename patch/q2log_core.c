@@ -1,0 +1,229 @@
+/* The unified log's parsers, guesses, rotation and snapshot (docs/internals.md#unified-log): no reads
+ * of the device but the files it is handed, so test/unit/test_q2log.py runs it on this machine.
+ * q2guard.c reads the feeds and calls these; the lines wait in card_store.c's RAM ring until its
+ * writing child appends them (q2guard_core.c's heat log works the same way). */
+#include "q2log.h"
+
+/* ---- a line's level and source ---- */
+
+static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+static int alnum(int c) { return (c >= '0' && c <= '9') || (lower(c) >= 'a' && lower(c) <= 'z'); }
+
+/* w (lower case) in s, any case; whole: only as a word of its own, not inside one ("bt" in "subtitle") */
+static int has(const char *s, int n, const char *w, int whole) {
+    int k = (int)strlen(w);
+    for (int i = 0; i + k <= n; ++i) {
+        int j = 0;
+        while (j < k && lower(s[i + j]) == w[j]) ++j;
+        if (j < k) continue;
+        if (!whole || ((!i || !alnum(s[i - 1])) && (i + k == n || !alnum(s[i + k])))) return 1;
+    }
+    return 0;
+}
+
+/* Who a line names, in this order: the player first, as "hciplayer" holds "hci". */
+static const struct {
+    const char *word, *src;
+    int whole;
+} names[] = {
+    { "q2player", "player", 0 }, { "hciplayer", "player", 0 }, { "alsa", "player", 0 },
+    { "decoder", "player", 0 },  { "bluealsa", "bt", 0 },      { "rtk_hci", "bt", 0 },
+    { "bluetooth", "bt", 0 },    { "hci", "bt", 1 },           { "hci0", "bt", 1 },
+    { "bt", "bt", 1 },           { "a2dp", "bt", 0 },          { "l2cap", "bt", 0 },
+    { "wpa_", "wifi", 0 },       { "wlan", "wifi", 0 },        { "wifi", "wifi", 0 },
+    { "wi-fi", "wifi", 0 },      { "udhcpc", "wifi", 0 },      { "8733bs", "wifi", 0 },
+    { "usb", "usb", 0 },         { "gadget", "usb", 0 },       { "udc", "usb", 1 },
+};
+static const char *const errors[] = { "error", "fail", "fatal", "panic", "cannot", "can't", "unable",
+                                      "denied", "refused", "timed out", "timeout", "abort", "segfault" };
+
+char ulog_guess(const char *s, int n, const char **src) {
+    *src = "ui"; /* demo itself, and stock's lines that name nothing */
+    for (unsigned i = 0; i < sizeof names / sizeof *names; ++i)
+        if (has(s, n, names[i].word, names[i].whole)) {
+            *src = names[i].src;
+            break;
+        }
+    for (unsigned i = 0; i < sizeof errors / sizeof *errors; ++i)
+        if (has(s, n, errors[i], 0)) return 'E';
+    return has(s, n, "warn", 0) ? 'W' : 'I';
+}
+
+/* ---- into the ring ---- */
+
+static void add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src, const char *s, int n) {
+    char line[ULOG_PART + 64];
+    int len = ulog_line(line, sizeof line, wall, up_ms, level, src, s, n);
+    card_log_append(l, line, (unsigned)len);
+}
+
+void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *src, const char *msg) {
+    add_line(l, wall, up_ms, level, src, msg, (int)strlen(msg));
+}
+
+char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) {
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ')) --n;
+    int start = 0;
+    while (start < n && (s[start] == ' ' || s[start] == '\t')) ++start;
+    if (start == n) return 0;
+    if (ulog_is_line(s, n)) {
+        char line[ULOG_PART + 2];
+        if (n > ULOG_PART) n = ULOG_PART;
+        memcpy(line, s, n);
+        line[n] = '\n';
+        card_log_append(l, line, (unsigned)n + 1);
+        int i = 21; /* past the time and its space: the uptime, then the level */
+        while (s[i] != ' ') ++i;
+        return s[i + 1];
+    }
+    const char *src;
+    char level = ulog_guess(s + start, n - start, &src);
+    add_line(l, wall, up_ms, level, src, s + start, n - start);
+    return level;
+}
+
+/* ---- a file another process appends to ---- */
+
+void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end) {
+    t->path = path, t->off = 0, t->plen = 0;
+    if (!from_end) return;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    long size = lseek(fd, 0, SEEK_END);
+    close(fd);
+    t->off = size > 0 ? size : 0;
+}
+
+/* buf's lines into l, after the start held from the last read; a start with no end yet is held */
+static int take(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms, const char *buf, int n) {
+    int got = 0;
+    for (int i = 0; i < n; ++i) {
+        if (buf[i] != '\n') {
+            if (t->plen < ULOG_PART) t->part[t->plen++] = buf[i];
+            if (t->plen < ULOG_PART) continue;
+        }
+        char level = ulog_add_raw(l, wall, up_ms, t->part, t->plen); /* an end, or a start cut at ULOG_PART */
+        t->plen = 0;
+        if (level) got |= 1 | (level == 'E' || level == 'W' ? 2 : 0);
+        if (buf[i] != '\n') /* the cut line goes on: skip to its end */
+            while (i + 1 < n && buf[i + 1] != '\n') ++i;
+    }
+    return got;
+}
+
+/* path from off to its end (max bytes at most) into l; the new offset, or -1 for no file */
+static long read_from(struct ulog_tail *t, const char *path, long off, int max, card_log *l, long wall,
+                      unsigned up_ms, int *got, long *size) {
+    static char buf[ULOG_READ_MAX];
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    *size = lseek(fd, 0, SEEK_END);
+    long want = *size - off;
+    if (want > max) want = max;
+    int n = 0;
+    if (want > 0 && lseek(fd, off, SEEK_SET) == off) n = (int)read(fd, buf, (size_t)want);
+    close(fd);
+    if (n <= 0) return off;
+    *got |= take(t, l, wall, up_ms, buf, n);
+    return off + n;
+}
+
+int ulog_tail(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms) {
+    int got = 0;
+    long size = 0, old = 0;
+    int fd = open(t->path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    size = lseek(fd, 0, SEEK_END);
+    close(fd);
+    if (size < t->off) { /* rolled: what was added before the roll is at the end of path.1 */
+        char p1[160];
+        snprintf(p1, sizeof p1, "%s.1", t->path);
+        read_from(t, p1, t->off, ULOG_READ_MAX, l, wall, up_ms, &got, &old);
+        t->off = 0;
+    }
+    long off = read_from(t, t->path, t->off, ULOG_READ_MAX, l, wall, up_ms, &got, &size);
+    if (off >= 0) t->off = off;
+    return got;
+}
+
+/* ---- the kernel's ---- */
+
+char ulog_kmsg(card_log *l, long wall, const char *rec, int n) {
+    int i = 0, pri = 0;
+    while (i < n && rec[i] >= '0' && rec[i] <= '9') pri = pri * 10 + (rec[i++] - '0');
+    if (i == 0 || i >= n || rec[i] != ',') return 0;
+    if (pri >> 3 || (pri & 7) > 4) return 0; /* not the kernel's (a program's, facility 1 and up), or under warning */
+    ++i;
+    while (i < n && rec[i] != ',') ++i; /* the sequence number */
+    int usec = ++i, digits = 0;
+    while (i < n && rec[i] >= '0' && rec[i] <= '9') ++i, ++digits;
+    /* microseconds to ms by dropping three digits: no 64-bit division on the Q2 (no libgcc) */
+    unsigned ms = 0;
+    for (int k = usec; k < usec + digits - 3; ++k) ms = ms * 10 + (unsigned)(rec[k] - '0');
+    while (i < n && rec[i] != ';') ++i;
+    if (i >= n) return 0;
+    int start = ++i;
+    while (i < n && rec[i] != '\n') ++i; /* the continuation lines ( KEY=value) are left out */
+    char level = (pri & 7) <= 3 ? 'E' : 'W';
+    add_line(l, wall, ms, level, "kernel", rec + start, i - start);
+    return level;
+}
+
+/* ---- the card ---- */
+
+int ulog_flush(card_log *l, const char *dir, const char *name, long max, int files) {
+    char d[128], from[160], to[160];
+    int n = (int)strlen(dir);
+    if (n >= (int)sizeof d) return -1;
+    memcpy(d, dir, n + 1);
+    for (char *p = d + 1; *p; ++p) /* each parent, then dir */
+        if (*p == '/') *p = 0, mkdir(d, 0755), *p = '/';
+    mkdir(d, 0755);
+    snprintf(from, sizeof from, "%s/%s.0", dir, name);
+    int fd = open(from, O_RDONLY | O_CLOEXEC);
+    long size = fd < 0 ? 0 : lseek(fd, 0, SEEK_END);
+    if (fd >= 0) close(fd);
+    if (size >= max) /* .2 to .3 (the old .3 goes), .1 to .2, .0 to .1 */
+        for (int k = files - 1; k > 0; --k) {
+            snprintf(from, sizeof from, "%s/%s.%d", dir, name, k - 1);
+            snprintf(to, sizeof to, "%s/%s.%d", dir, name, k);
+            rename(from, to);
+        }
+    return card_log_flush(l) ? 0 : -1;
+}
+
+/* ---- a snapshot ---- */
+
+/* the value of "Key:" in meminfo, in kB, or -1 */
+static long mem_kb(const char *m, const char *key) {
+    const char *p = strstr(m, key);
+    if (!p) return -1;
+    p += strlen(key);
+    while (*p == ' ') ++p;
+    long v = 0;
+    while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+    return v;
+}
+
+void ulog_snapshot(card_log *l, long wall, unsigned up_ms, char level, const char *why, const char *meminfo,
+                   const char *loadavg, const char *state) {
+    char b[ULOG_PART];
+    snprintf(b, sizeof b, "snapshot %s", why);
+    ulog_add(l, wall, up_ms, level, "guard", b);
+    if (meminfo) {
+        snprintf(b, sizeof b, "mem total=%ld free=%ld available=%ld cached=%ld kB", mem_kb(meminfo, "MemTotal:"),
+                 mem_kb(meminfo, "MemFree:"), mem_kb(meminfo, "MemAvailable:"), mem_kb(meminfo, "Cached:"));
+        ulog_add(l, wall, up_ms, 'I', "guard", b);
+    }
+    if (loadavg) {
+        int n = (int)strlen(loadavg);
+        while (n && loadavg[n - 1] == '\n') --n;
+        snprintf(b, sizeof b, "load %.*s", n, loadavg);
+        ulog_add(l, wall, up_ms, 'I', "guard", b);
+    }
+    if (state) {
+        const char *s = strstr(state, " up="); /* the heat line from its uptime on: its time is the line's */
+        snprintf(b, sizeof b, "state%s", s ? s : state);
+        ulog_add(l, wall, up_ms, 'I', "guard", b);
+    }
+}
