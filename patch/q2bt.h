@@ -1,7 +1,8 @@
 /* q2bt: the Bluetooth link monitor, a part of q2guard (docs/internals.md#bluetooth-link-monitor).
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
- * sent, what is waiting for it, what the controller says of the link, and what else was busy. The
- * one thing it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle. The
+ * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
+ * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
+ * under LDAC Auto, aptX HD is stepped down while the radio cannot keep up (bt_step). The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
 #ifndef Q2BT_H
@@ -98,6 +99,36 @@ int bt_edr_step(struct bt_edr *e, int handle, unsigned char *out);
  * or one unlike the last it had), 1 for the q2-bt log only, 0 not an answer to it. */
 int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, int size);
 
+/* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
+ * Under LDAC Auto with Quality's "Lower quality when the signal is weak" on, a link the radio
+ * cannot keep up with is moved down a codec, aptX HD to aptX to SBC, and back up one at a time once
+ * clean. */
+#define BT_STEP_WQ 4096         /* bytes waiting in the A2DP socket over this, */
+#define BT_STEP_STALL 2         /* with the controller's buffers full, this many seconds in a row */
+#define BT_STEP_CLEAN 60        /* seconds in a row with nothing waiting before a step up */
+#define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconnect's gap, not counted either way */
+#define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch */
+/* "aptX-HD" 3, "aptX" 2, "SBC" 1, any other (LDAC, AAC, none) 0; and back */
+int bt_codec_rank(const char *codec);
+const char *bt_codec_name(int rank);
+struct bt_step {
+    int top;          /* the rank the stream was on before any step: never stepped above */
+    int stall, clean; /* seconds in a row congested, clean */
+    int have;         /* last is set */
+    unsigned last;    /* ms of the last switch */
+};
+/* One line: allowed (bt_step_allowed), the codec's rank now, wq, fly (-1 not read) and the
+ * controller's buffer count. The rank to select now, else 0. */
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs);
+#define BT_LDAC_AUTO 2           /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
+#define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: the setting, on unless 0 (patch/bt_ui.c) */
+/* config.ini's text: 1 LDAC Auto with the setting on, 0 LDAC Auto with it off, -1 another choice
+ * (or none saved) */
+int bt_step_allowed(const char *ini);
+/* GetPCMs (as bt_pcms reads it): the A2DP source PCM's object path, which SelectCodec is sent to,
+ * into path (n bytes); 0 none, or one holding anything but letters, digits, _ and / */
+int bt_pcms_path(const char *text, char *path, int n);
+
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
  * while the controller's ACL buffers are full), or -1 with no such table. */
@@ -146,7 +177,7 @@ int bt_ticks_pct(unsigned ticks, unsigned ms);
 int bt_flush(card_log *l, const char *dir);
 
 /* ---- q2bt.c: the device's side ---- */
-void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log for the EDR outcome */
+void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log (EDR, STEP) */
 /* Sleep ms; while a stream runs, wake each second to sample it. A signal that sets guard_woke
  * (q2guard.c: a request, a SIGTERM) ends it early. */
 void bt_sleep(unsigned ms);

@@ -457,6 +457,58 @@ def test_quality_s_auto_caption_is_one_entry_however_often_the_picker_lays_out(f
     assert C.wstring_at(table[9]) == 'Steps with the signal, 330 to 990 kbps'
 
 
+STEP_TITLE = 'Lower quality when the signal is weak'
+
+
+def quality_page(fw, **config):
+    """Quality's picker as stock builds it, its eight choices, laid out twice (each step of a caption's growth lays
+    the list out again): pre, then post, as ipod_list_layout runs them."""
+    ui = Ui(fw)
+    cfg = Config(fw, **config)
+    win = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[win] = 'btquality_page'
+    lv = ui.new('list_view_create', win, 0, 26, 375, 294)
+    view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']):
+        item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
+        b = ui.new('button_create', item, 0, 0, 375, 32)
+        ui.name[b] = str(i)
+        ui.text[ui.new('hscroll_label_create', b, 22, 0, 266, 32)] = n
+    for _ in range(2):
+        fw.fn('bt_rows_pre', None, C.c_void_p)(view)
+        fw.fn('bt_rows_post', None, C.c_void_p)(view)
+    return ui, cfg, view
+
+
+def step_row(ui, view):
+    """The step-down's row: its button, its title and whether its switch is on."""
+    rows = [item for item in ui.kids[view] if any(ui.text.get(w) == STEP_TITLE for w in ui.subtree(item))]
+    assert len(rows) == 1 and rows[0] == ui.kids[view][-1]  # one, after the eight choices
+    b = ui.kids[rows[0]][0]
+    switch = [w for w in ui.subtree(b) if ui.name.get(w) == '_setting_switch']
+    assert len(switch) == 1
+    assert not [w for w in ui.subtree(b) if ui.name.get(w) == '_bt_kbps']  # no choice's bit rate
+    return b, ui.image[switch[0]] == 'switch_on'
+
+
+def test_quality_ends_with_the_step_down_switch_on_by_default(fw):
+    """Lower quality when the signal is weak (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from
+    aptX HD under LDAC Auto, on unless [Q2POD] BTSTEPDOWN says 0; one row however often the picker lays out."""
+    ui, _, view = quality_page(fw)
+    assert step_row(ui, view)[1] is True
+    ui, _, view = quality_page(fw, BTSTEPDOWN=b'0')
+    assert step_row(ui, view)[1] is False
+
+
+def test_the_step_down_switch_toggles_and_saves(fw):
+    ui, cfg, view = quality_page(fw)
+    b, _ = step_row(ui, view)
+    ui.handler(b, EVT_CLICK)()
+    assert cfg.values[b'BTSTEPDOWN'] == b'0' and step_row(ui, view)[1] is False
+    ui.handler(b, EVT_CLICK)()
+    assert cfg.values[b'BTSTEPDOWN'] == b'1' and step_row(ui, view)[1] is True
+
+
 @pytest.mark.parametrize('codec, status, caption', [
     (13, 3, 'Streams aptX HD to this headset, 576 kbps'),  # a B&W Px7 on LDAC Auto: no LDAC, aptX HD at 48 kHz
     (2, 3, 'Streams AAC to this headset'),                 # no fixed rate to name

@@ -1,7 +1,8 @@
 """q2bt's core (patch/q2bt_core.c, docs/internals.md#bluetooth-link-monitor): when a stream counts as running, the
 kernel's hci_dev_info and connection list as laid out, the four HCI commands and their answers, the A2DP socket's
-queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, and the EDR
-packet-type command to the A2DP sink's link. Built for this machine
+queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, the EDR
+packet-type command to the A2DP sink's link, and the step-down from aptX HD (bt_step, the config it obeys and the
+PCM path SelectCodec goes to). Built for this machine
 with test/unit/q2guard_host.c."""
 import ctypes as C
 import subprocess
@@ -41,6 +42,11 @@ def L(tmp_path_factory):
     lib.bt_edr_event.argtypes = [C.c_void_p, C.c_char_p, C.c_int, C.c_void_p, C.c_int]
     lib.bt_pcms_sink.argtypes = [C.c_char_p, C.c_void_p]
     lib.bt_acl_handle_of.argtypes = [C.c_char_p, C.c_int, C.c_char_p]
+    lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
+    lib.bt_codec_rank.argtypes = [C.c_char_p]
+    lib.bt_codec_name.restype = C.c_void_p
+    lib.bt_step_allowed.argtypes = [C.c_char_p]
+    lib.bt_pcms_path.argtypes = [C.c_char_p, C.c_char_p, C.c_int]
     lib.log_named.restype = C.c_void_p
     lib.log_named.argtypes = [C.c_char_p, C.c_char_p, C.c_uint]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -493,3 +499,134 @@ def test_the_packet_type_change_is_read_and_noted(L):
     edr_step(L, e, 5)
     assert edr_event(L, e, ptype_changed(0x24, 5, 0xcc18)) == (2, 'LINK ptype=0xcc18 status=0x24 h=5')
     assert edr_event(L, edr(L), ptype_changed(0, 2, 0x0018)) == (0, '')     # nothing sent: not ours
+
+
+# ---- the step-down: aptX HD to aptX to SBC under LDAC Auto when the radio is the limit ----
+
+class Step(C.Structure):
+    _fields_ = [('top', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint)]
+
+
+SBC, APTX, APTX_HD = 1, 2, 3
+BUFS = 8
+
+
+def step(L, s, t, allowed, rank, wq, fly, bufs=BUFS):
+    return L.bt_step(C.byref(s), t * 1000, allowed, rank, wq, fly, bufs)
+
+
+def test_codec_ranks_and_names(L):
+    assert [L.bt_codec_rank(n) for n in (b'aptX-HD', b'aptX', b'SBC', b'LDAC', b'AAC', b'')] == [3, 2, 1, 0, 0, 0]
+    assert [C.string_at(L.bt_codec_name(r)) for r in (1, 2, 3)] == [b'SBC', b'aptX', b'aptX-HD']
+
+
+def test_two_seconds_queued_with_the_buffers_full_steps_down(L):
+    s = Step()
+    assert step(L, s, 0, 1, APTX_HD, 0, 3) == 0
+    assert step(L, s, 1, 1, APTX_HD, 5000, BUFS) == 0       # one second: not yet
+    assert step(L, s, 2, 1, APTX_HD, 5000, BUFS) == APTX    # two in a row: aptX
+    for t in range(3, 12):                                  # the switch's 10 s gap: stalls not counted
+        assert step(L, s, t, 1, APTX, 9000, BUFS) == 0
+    assert step(L, s, 12, 1, APTX, 9000, BUFS) == 0
+    assert step(L, s, 13, 1, APTX, 9000, BUFS) == SBC       # aptX stalls too
+    assert step(L, s, 30, 1, SBC, 9000, BUFS) == 0          # nothing below SBC
+
+
+def test_a_queue_without_full_buffers_or_a_small_one_is_not_the_radio(L):
+    s = Step()
+    for t in range(10):
+        assert step(L, s, t, 1, APTX_HD, 5000, BUFS - 1) == 0   # the encoder or the source, not the link
+    for t in range(10, 20):
+        assert step(L, s, t, 1, APTX_HD, 4096, BUFS) == 0       # 4 kB is not over
+    for t in range(20, 30, 2):                                  # never two in a row
+        assert step(L, s, t, 1, APTX_HD, 9000, BUFS) == 0 and step(L, s, t + 1, 1, APTX_HD, 0, 2) == 0
+    assert step(L, s, 40, 1, APTX_HD, 9000, -1) == 0 and step(L, s, 41, 1, APTX_HD, 9000, -1) == 0  # fly not read
+
+
+def test_back_up_after_a_clean_minute_at_most_every_three_minutes(L):
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    ups = [t for t in range(3, 360) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD]
+    assert ups == [182]                                    # clean long since, but 3 minutes after the switch
+    s2 = Step()
+    step(L, s2, 0, 1, APTX_HD, 0, 0)
+    step(L, s2, 1, 1, APTX_HD, 9000, BUFS)
+    step(L, s2, 2, 1, APTX_HD, 9000, BUFS)
+    for t in range(3, 300):                                # one queued second each 50 s: never a clean minute
+        assert step(L, s2, t, 1, APTX, 9000 if t % 50 == 0 else 0, 2) == 0
+
+
+def test_never_above_where_it_started(L):
+    s = Step()
+    for t in range(400):
+        assert step(L, s, t, 1, APTX, 0, 1) == 0            # the headset chose aptX: left there
+
+
+def test_only_under_ldac_auto_with_the_setting_on(L):
+    for allowed in (0, -1):                                 # the setting off, or another choice: never
+        s = Step()
+        for t in range(10):
+            assert step(L, s, t, allowed, APTX_HD, 9000, BUFS) == 0
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    assert step(L, s, 20, 0, APTX, 0, 1) == APTX_HD         # turned off while stepped down: back at once
+    assert step(L, s, 21, 0, APTX, 0, 1) == 0               # asked once
+
+
+def test_ldac_aac_or_no_codec_is_left_alone(L):
+    s = Step()
+    for t in range(10):
+        assert step(L, s, t, 1, 0, 9000, BUFS) == 0
+
+
+def test_another_choice_while_stepped_down_is_left_alone(L):
+    """Quality changed from LDAC Auto to a fixed choice: stock selects that codec, and nothing is put back over it;
+    Auto chosen again starts from what it streams then."""
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    for t in range(20, 30):
+        assert step(L, s, t, -1, APTX, 0, 1) == 0
+    for t in range(300, 700):
+        assert step(L, s, t, 1, APTX, 0, 1) == 0             # aptX is where Auto now started
+
+
+INI = b"""[SYSSET]\r\nLANG=1\r\nBTCODING=2\r\n[PLAYSET]\r\nBTSTEPDOWN=0\r\n[Q2POD]\r\nBTNAME=Q2\r\n%s"""
+
+
+@pytest.mark.parametrize('ini, allowed', [
+    (INI % b'', 1),                                          # LDAC Auto, the setting never chosen: on
+    (INI % b'BTSTEPDOWN=1\r\n', 1),
+    (INI % b'BTSTEPDOWN=0\r\n', 0),                          # off; PLAYSET's key of that name is not it
+    (INI.replace(b'BTCODING=2', b'BTCODING=3') % b'', -1),   # aptX HD chosen
+    (INI.replace(b'BTCODING=2', b'BTCODING=21') % b'', -1),
+    (INI.replace(b'BTCODING=2', b'BTCODINGX=2') % b'', -1),
+    (b'', -1),                                               # no config.ini read
+])
+def test_allowed_is_ldac_auto_and_the_setting(L, ini, allowed):
+    assert L.bt_step_allowed(ini) == allowed
+
+
+def test_the_a2dp_source_pcm_s_path_for_select_codec(L):
+    out = C.create_string_buffer(96)
+    assert L.bt_pcms_path(PCMS, out, 96) == 1
+    assert out.value == b'/org/bluealsa/hci0/dev_00_11_22_33_44_55/a2dpsrc/sink'
+    assert L.bt_pcms_path(PCMS, out, 40) == 0                               # no room
+    assert L.bt_pcms_path(PCMS.split(b'a2dpsrc')[0], out, 96) == 0          # no A2DP source
+    assert L.bt_pcms_path(PCMS.replace(b'dev_00', b"dev_0'"), out, 96) == 0  # never a quote to the shell
+
+
+def test_a_codec_not_known_yet_keeps_where_it_started(L):
+    """A stream's START asks bluealsa for the codec again: until it answers, the rank is 0, and a stream that comes
+    back from a pause on aptX still climbs back to the aptX HD it started on."""
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    assert step(L, s, 100, 1, 0, 0, -1) == 0                # paused, resumed: not known yet
+    assert next(t for t in range(101, 400) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD) == 182

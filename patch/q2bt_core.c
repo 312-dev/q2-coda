@@ -199,6 +199,90 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
     return 2;
 }
 
+/* ---- the step-down ---- */
+static const char *const codec_names[4] = { "", "SBC", "aptX", "aptX-HD" };
+int bt_codec_rank(const char *codec) {
+    for (int r = 1; r < 4; ++r)
+        if (!strcmp(codec, codec_names[r])) return r;
+    return 0;
+}
+const char *bt_codec_name(int rank) { return codec_names[rank > 0 && rank < 4 ? rank : 0]; }
+/* Congested: the socket queued past BT_STEP_WQ and the controller holding every buffer, so the
+ * radio, not the encoder or the player, is behind. Down at BT_STEP_STALL such seconds in a row;
+ * up one rank after BT_STEP_CLEAN clean ones and BT_STEP_UP_MS since the last switch. The setting
+ * turned off while stepped down: back to where it started, once. Another Quality choice: left to
+ * it (stock's change selects that codec), and where it started forgotten. */
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs) {
+    if (!rank || allowed < 0) { /* no codec known yet, or not one of the three: nothing to count */
+        if (allowed < 0) s->top = rank;
+        s->stall = s->clean = 0;
+        return 0;
+    }
+    if (rank > s->top) s->top = rank;
+    if (!allowed) {
+        int back = rank < s->top ? s->top : 0;
+        s->top = rank, s->stall = s->clean = 0; /* asked once: the next line sees it as the top */
+        if (back) s->have = 1, s->last = now;
+        return back;
+    }
+    if (s->have && now - s->last < BT_STEP_SETTLE_MS) {
+        s->stall = s->clean = 0;
+        return 0;
+    }
+    int full = fly >= 0 && bufs > 0 && fly >= bufs;
+    s->stall = wq > BT_STEP_WQ && full ? s->stall + 1 : 0;
+    s->clean = wq == 0 && fly >= 0 && !full ? s->clean + 1 : 0;
+    int to = 0;
+    if (s->stall >= BT_STEP_STALL && rank > 1)
+        to = rank - 1;
+    else if (s->clean >= BT_STEP_CLEAN && rank < s->top &&
+             (!s->have || now - s->last >= BT_STEP_UP_MS))
+        to = rank + 1;
+    if (to) s->have = 1, s->last = now, s->stall = s->clean = 0;
+    return to;
+}
+
+/* config.ini's [section] key's value (up to its line's end), 0 when it has none */
+static const char *ini_value(const char *ini, const char *section, const char *key) {
+    int in = 0, k = (int)strlen(key), n = (int)strlen(section);
+    for (const char *p = ini; p && *p;) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+        if (*p == '[')
+            in = !strncmp(p + 1, section, (size_t)n) && p[1 + n] == ']';
+        else if (in && !strncmp(p, key, (size_t)k)) {
+            const char *v = p + k;
+            while (*v == ' ') ++v;
+            if (*v == '=') {
+                for (++v; *v == ' ';) ++v;
+                return v;
+            }
+        }
+        p = strchr(p, '\n');
+    }
+    return 0;
+}
+int bt_step_allowed(const char *ini) {
+    const char *coding = ini_value(ini, "SYSSET", "BTCODING"), *on;
+    if (!coding || coding[0] != '0' + BT_LDAC_AUTO || (coding[1] >= '0' && coding[1] <= '9'))
+        return -1;
+    on = ini_value(ini, "Q2POD", BT_STEP_KEY);
+    return !on || on[0] != '0' || (on[1] >= '0' && on[1] <= '9');
+}
+int bt_pcms_path(const char *text, char *path, int n) {
+    const char *src = strstr(text, "/a2dpsrc"), *a = src, *b = src;
+    if (!src) return 0;
+    while (a > text && a[-1] != '"') --a;
+    while (*b && *b != '"') ++b;
+    if (a == text || *b != '"' || *a != '/' || b - a >= n) return 0;
+    for (const char *c = a; c < b; ++c) /* it goes to a shell: only what an object path holds */
+        if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') ||
+              *c == '_' || *c == '/'))
+            return 0;
+    memcpy(path, a, (size_t)(b - a));
+    path[b - a] = 0;
+    return 1;
+}
+
 /* ---- text ---- */
 static const char *find_in(const char *p, const char *end, const char *needle) {
     const char *f = strstr(p, needle);

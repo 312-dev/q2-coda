@@ -803,15 +803,19 @@ static void clear_bitmap(void *bitmap) {
 
 /* Scales a decoded 32-bit bitmap (at most 64 px square; alpha at byte a of each pixel) into a to x
  * to square at its middle, each pixel the alpha-weighted mean of the pixels it covers (a straight
- * or a premultiplied colour alike), the rest cleared, and clears its opaque flag. */
+ * or a premultiplied colour alike), the rest cleared, and clears its opaque flag. The copy it reads
+ * from is on the heap for the call (up to 16 KB, once per tile the image manager loads), not in the
+ * scratch state; when that allocation fails the tile is left as it was. */
 static void shrink_centred(void *bitmap, int to, int a) {
-    static unsigned char src[64 * 64 * 4]; /* the UI thread's */
     int w = I(bitmap, 0), h = I(bitmap, 4), stride = bitmap_get_line_length(bitmap);
     int premul = *(unsigned short *)((char *)bitmap + 0xc) & BITMAP_PREMULTI;
-    unsigned char *px = w <= 64 && h <= 64 && 0 < to && to < w && to < h
-                            ? bitmap_lock_buffer_for_write(bitmap)
-                            : (void *)0;
-    if (!px) return;
+    if (!(w <= 64 && h <= 64 && 0 < to && to < w && to < h)) return;
+    unsigned char *src = calloc(4u * (unsigned)w, (unsigned)h);
+    unsigned char *px = src ? bitmap_lock_buffer_for_write(bitmap) : (void *)0;
+    if (!px) {
+        free(src);
+        return;
+    }
     for (int y = 0; y < h; ++y) memcpy(src + 4 * w * y, px + stride * y, 4u * (unsigned)w);
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) {
@@ -833,6 +837,7 @@ static void shrink_centred(void *bitmap, int to, int a) {
         }
     *(unsigned short *)((char *)bitmap + 0xc) &= ~1u;
     bitmap_unlock_buffer(bitmap);
+    free(src);
 }
 
 int ringnav_image_add(void *manager, const char *name, void *bitmap) {
