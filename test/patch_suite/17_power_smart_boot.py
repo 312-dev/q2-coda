@@ -689,29 +689,32 @@ def boot_row(value=None,mode=0o100755):
     button=m.nodes[kids[8]]['children'][0]
     label=m.nodes[button]['children'][1]
     return m,button,label
+def boot_said(m,button,label):  # the row as it reads: the title, and its value on the right column (row_value_text, list_value)
+    vals=[m.nodes[c]['text'] for c in m.nodes[button]['children'] if m.nodes[c].get('name')=='_setting_value']
+    return m.nodes[label]['text']+(f': {vals[0]}' if vals else '')
 def toggle_boot(m,button):
     f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
 for value,expected in ((None,'Rockbox'),(b'bad','Rockbox'),(b'q2pod','Q2 Muse'),(b'rockbox','Rockbox'),
                        (b'q2pod\n','Q2 Muse'),(b'q2pod\0bad','Rockbox')):
     m,button,label=boot_row(value)
-    assert m.nodes[label]['text']=='Boot to: '+expected
+    assert boot_said(m,button,label)=='Boot to: '+expected
     toggle_boot(m,button)
     next_value=b'rockbox' if expected=='Q2 Muse' else b'q2pod'
     assert m.files['/mnt/data/boot-target']==next_value
-    assert m.nodes[label]['text']=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Muse')
-    restarted,_,l=boot_row(next_value); assert restarted.nodes[l]['text']==m.nodes[label]['text']
+    assert boot_said(m,button,label)=='Boot to: '+('Rockbox' if next_value==b'rockbox' else 'Q2 Muse')
+    restarted,b2,l=boot_row(next_value); assert boot_said(restarted,b2,l)==boot_said(m,button,label)
     passed()
 for mode in (0,0o040755,0o020644): boot_row(mode=mode); passed()
 for failure in ('fopen','fwrite','fflush','fsync','fclose','rename'):
     m,button,label=boot_row(b'rockbox'); m.failure=failure
     toggle_boot(m,button)
-    assert m.files['/mnt/data/boot-target']==b'rockbox' and m.nodes[label]['text']=='Boot to: Rockbox'
+    assert m.files['/mnt/data/boot-target']==b'rockbox' and boot_said(m,button,label)=='Boot to: Rockbox'
     assert '/mnt/data/boot-target.tmp' not in m.files
     assert any(c[0]=='navigator_to_with_context' for c in m.calls)
     passed()
 m,button,label=boot_row(); m.rockbox_mode=0; toggle_boot(m,button)
-assert m.nodes[label]['text']=='Boot to: Rockbox' and '/mnt/data/boot-target' not in m.files; passed()
+assert boot_said(m,button,label)=='Boot to: Rockbox' and '/mnt/data/boot-target' not in m.files; passed()
 # Wheel centre reaches Boot to through the existing selection/dispatch path.
 m,button,label=boot_row(); view=m.nodes[m.top]['children'][0]; view=m.nodes[view]['children'][0]
 m.paint(view)
@@ -728,9 +731,9 @@ for mode in (0o100755,0):
     m.top=m.node('window','sysset_page',[m.node('list_view','list_view_sysset',[view])])
     assert m.call(address=HOOKS['systemset_sysset_page_init'][0],args=(m.top,5,0,0),gap=0)==0
     kids=m.nodes[view]['children']; assert len(kids)==19
-    assert [kids.index(e) for e in entries]==[8,9,6,10,11,12,13,14,15]  # Network (stock's third) in place, the rest hidden
+    assert [kids.index(e) for e in entries]==[7,8,6,9,10,11,12,13,14]  # Network (stock's third) in place, the rest hidden; Reset is last
     assert [m.nodes[e]['visible'] for e in entries]==[0,0,1,0,0,0,0,0,0]
-    about,update,storage,usb,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,5,7))
+    about,update,storage,usb,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,5,18))
     assert m.nodes[m.nodes[usb]['children'][1]]['text']=='USB' and m.handler(usb,O['EVT_CLICK'])[0]==payload_syms['usb_pick_open']
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
@@ -738,7 +741,7 @@ for mode in (0o100755,0):
     for b,key,page in ((date,'system_time','systemset/datetime_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
-    assert m.nodes[kids[16]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[17:]]==['Restart','Shut Down']
+    assert m.nodes[kids[15]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16:18]]==['Restart','Shut Down']  # then Reset Settings, last (kids[18])
     passed()
 print('Boot settings: conditional row/order, restart, card removal and failed atomic writes passed.')
 
