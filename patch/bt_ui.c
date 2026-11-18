@@ -449,20 +449,20 @@ void bt_page(void *view, int on) {
     class_fetch();
 }
 
-/* ---- Quality's last row: the step-down's switch ----
- * "Lower quality when the signal is weak", [Q2POD] BTSTEPDOWN, on unless 0: under LDAC Auto,
- * q2guard moves a link the radio cannot keep up with from aptX HD to aptX, then SBC, and back once
- * it is clean, and on SBC (LDAC Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises it
- * again (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
+/* ---- Quality's last row: Adapt to Signal ----
+ * [Q2POD] BTSTEPDOWN, off unless 1 (a Q2 that never saved the key is off): under LDAC Auto,
+ * q2guard moves a link the radio cannot keep up with from aptX HD or aptX straight to SBC, and back
+ * once it is clean, and on SBC (LDAC Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises
+ * it again (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
  * (q2bt.h's BT_STEP_KEY, the same name: q2guard's headers are not the payload's).
  * Added before the picker's first layout, after stock's eight choices, and found again by its
  * item's _bt_step on every later one; no state of its own. */
 #define BT_STEP_KEY "BTSTEPDOWN"
-#define BT_STEP_TITLE "Lower quality when the signal is weak"
+#define BT_STEP_TITLE "Adapt to Signal"
 #define BT_STEP_CAPTION                                                                            \
-    ((const unsigned *)L"On LDAC Auto or SBC, lowers the bit rate while the signal is weak, and "  \
-                       L"raises it once it is strong again")
-static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 1); }
+    ((const unsigned *)L"On LDAC Auto or SBC, lowers quality to keep playing when the signal "     \
+                       L"is weak")
+static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 0); }
 static int step_click(void *label, void *event) {
     int on = !step_on();
     toolsWriteConfig("/mnt/data/config.ini", "Q2POD", BT_STEP_KEY, on ? "1" : "0");
