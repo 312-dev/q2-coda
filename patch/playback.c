@@ -1189,8 +1189,9 @@ static int change_music(int next) {
     if (!press_natural && restart_refused(next, place_held() && change_restarts(next)))
         return 0; /* the caller toasts -1 (no storage) and -5 */
     playback_pick();
-    /* a playlist session's next song still to land: the Next plays it once it does (addon.c), not
-     * stock's wrap to the queue's first song, the one playing (the device, 2026-11-17: a radio) */
+    /* a playlist session's next song still to land: the Next shows it at once and plays it once it
+     * can (addon.c), not stock's wrap to the queue's first song, the one playing (the device,
+     * 2026-11-17: a radio) */
     if (next && !press_natural && addon_next_waits()) return 0;
     if (!s.active) {
         if (!next || !list_end()) return stock_change_trampoline(next);
@@ -1964,7 +1965,9 @@ void playback_poll(void) {
     playback_save(), s.stamp = now;
 }
 
+void ulog_end(const char *why); /* ulog.c: the unified log's snapshot, on the card before the Q2 goes down */
 int ringnav_savequeue(void) {
+    ulog_end("power-off");
     ringnav_clean_end(); /* stock's only call is into_poweroff's */
     playback_save();
     return stock_savequeue_trampoline();
@@ -1984,6 +1987,7 @@ int bt_stopped_hold(void *caller); /* bt_stopped.c */
  * countdown ends (bt_stopped.c). */
 int ringnav_reboot_from(void *caller) {
     reboot_record(caller); /* a Bluetooth abnormal reboot's crash log */
+    ulog_end("restart");
     reboot_save();
     return stock_reboot_trampoline();
 }
@@ -1994,6 +1998,7 @@ int ringnav_reboot(void) {
 }
 void sw_update_restarting(void *win); /* sw_update.c */
 int ringnav_checkfw(void *win, void *ctx) {
+    ulog_end("update");
     reboot_save();
     int result = stock_checkfw_trampoline(win, ctx);
     sw_update_restarting(win); /* drawn as Restarting to Install */

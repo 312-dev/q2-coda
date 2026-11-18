@@ -369,9 +369,20 @@ void *engine_thread(void *unused) {
                 c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
                 pthread_cond_wait(&c->wake, &c->mu);
             }
+            /* An mcl-stop after the song's command (a set-songurl or set-nexturl clears an older one: ipc.c) came before
+             * this thread took the song: nothing plays, as stock's answers. demo sends the two that close when a press of
+             * a server song stops the queue stock's player_start played again (patch/catalogue.c np_stop). */
+            if (c->stop) {
+                c->play = c->next = c->stop = c->seek = c->paused = c->cut = 0;
+                pthread_mutex_unlock(&c->mu);
+                if (out) dac_mute(out_way), output_drop(out);
+                close_output(0);
+                ipc_send("{player-stopstatus\\exit}");
+                continue;
+            }
             song = c->play_song;
             song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
-            c->play = c->next = c->stop = c->seek = c->paused = c->cut = 0;
+            c->play = c->next = c->seek = c->paused = c->cut = 0;
             c->state = OPENING;
             pthread_mutex_unlock(&c->mu);
             int error;

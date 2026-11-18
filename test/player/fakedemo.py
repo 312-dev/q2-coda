@@ -83,6 +83,10 @@ def scenarios(m):
         'pause-seek': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-pause\\null}'), (4.0, '{mcl-seek\\10}'), (6.0, '{mcl-play\\null}'), (8.0, '{mcl-stop\\null}'), (10.0, None)],
         # set-songurl while a song plays, which demo sends only when it believes nothing is playing
         'replace': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-songurl', b1)), (7.0, '{mcl-stop\\null}'), (9.0, None)],
+        # a press of a server song while one plays (patch/catalogue.c np_stop): stock's player_start plays the queue
+        # it has again (set-nexturl), and demo's stop follows 20 ms on, before the player has taken that song. Stock
+        # answers nextstatus, then stopstatus, and plays nothing (captured under qemu, 2026-11-18)
+        'restart-stop': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-nexturl', a1)), (4.02, '{mcl-stop\\null}'), (7.0, None)],
         # other formats: what media-info names them and how the PCM is opened
         'formats': boot + [(1.0, song('set-songurl', c96)), (4.0, song('set-nexturl', m4a)), (7.0, song('set-nexturl', ogg)), (10.0, '{mcl-stop\\null}'), (12.0, None)],
         # a whole 24-bit 96 kHz song

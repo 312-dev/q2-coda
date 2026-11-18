@@ -978,6 +978,23 @@ def test_stop_during_first_fill(player, songs, tmp):
     return f'stopstatus {t[0] - 3.0:.3f} s after the stop'
 
 
+def test_stop_right_after_a_next(player, songs, tmp):
+    """A stop 20 ms after a set-nexturl, before the player has taken the song it named (patch/catalogue.c np_stop, after
+    stock's player_start plays its queue again at a server song's press): nothing plays after it, and the stop is
+    answered. The device, 2026-11-18: the stop was lost, and the song playing started again from 0."""
+    s, pcm, names = play(player, songs, 'restart-stop', tmp/'restart-stop')
+    out, a1 = b''.join(pcm), reference(songs/'a1.flac')
+    got = len(out) // 4
+    assert out == a1[:len(out)], f'{got} frames: not a1 from its start alone (played again after the stop?)'
+    assert got < 4.5 * 44100, f'{got} frames played, {got / 44100:.1f} s: a1 went on past the stop at 4 s'
+    assert events(s) == ['{player-nextstatus\\exit}', '{player-stopstatus\\exit}'], events(s)
+    # each song handed over, and the stop, in the unified log
+    logged = re.findall(r' I player (q2player: .*)', (tmp/'restart-stop/player.log').read_text())
+    a1_path = f'{songs}/a1.flac'
+    assert logged == [f'q2player: set-songurl {a1_path}', f'q2player: set-nexturl {a1_path}', 'q2player: mcl-stop'], logged
+    return f'{got / 44100:.1f} s played, then stopped; {events(s)}'
+
+
 def qq_env(tmp):
     """The environment that has q2player load qmstub.c as libQMDecryption.so."""
     lib = tmp/'qmstub'/'libQMDecryption.so'
@@ -1158,6 +1175,27 @@ def check_protocol(player, songs, tmp, fixture):
         near = [q for u, q in got_pos if t - 1.6 < u < t + 0.5]
         assert not near or min(abs(q - p) for q in near) <= 2, f'{name}: at {t} s position {near}, fixture {p}'
     return f'{len(b)} events, {len(ib)} media-info answers, {len(want_pos)} positions'
+
+
+def test_crash_count(player, songs, tmp):
+    """player/main.c: a fatal signal is counted in /tmp/q2player.crashes (one more within 60 s of the start) and logged
+    to the unified log, and the process dies of it, as demo then starts the player again."""
+    import signal, socket, time
+    d = tmp/'crashes'
+    for n in (1, 2, 3):
+        if n == 1: shutil.rmtree(d, ignore_errors=True); (d/'tmp').mkdir(parents=True)
+        (d/'tmp/sock_play').unlink(missing_ok=True)
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); srv.bind(str(d/'tmp/sock_play')); srv.listen(1); srv.settimeout(5)
+        p = subprocess.Popen([player, '-ao', 'alsa'], cwd=d, stdout=open(d/'player.log', 'w'), stderr=subprocess.STDOUT,
+                             env={'PATH': '/usr/bin:/bin', 'Q2PLAYER_SOCK': str(d/'tmp/sock_play'), 'Q2PLAYER_PCM': str(d)})
+        conn, _ = srv.accept(); time.sleep(0.2)
+        p.send_signal(signal.SIGSEGV); assert p.wait(5) == -signal.SIGSEGV, p.returncode
+        conn.close(); srv.close()
+        assert (d/'tmp/q2player.crashes').read_text() == str(n), (d/'tmp/q2player.crashes').read_text()
+        # a unified-log line (docs/internals.md#unified-log): time, uptime, level, source, then the text
+        assert re.search(rf'^\d{{4}}-\d\d-\d\dT\d\d:\d\d:\d\dZ \d+ E player q2player: crashed, signal 11, crash {n} in a row$',
+                         (d/'player.log').read_text(), re.M), (d/'player.log').read_text()
+    return 'three crashes, each counted, logged and the process ended by its signal'
 
 
 def main():

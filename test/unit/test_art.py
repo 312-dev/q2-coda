@@ -178,7 +178,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
-                                              'search_pop', 'search_pop_letters', 'search_return_w', 'search_return_a', 'holdback',
+                                              'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -390,15 +390,25 @@ def test_the_pop_s_characters_are_the_strip_s_sets_in_order():
     assert len(sets) == 4 and ''.join(sets) == art.POP_CHARS and len(set(art.POP_CHARS)) == 94
 
 
-def test_the_return_key_s_mark_is_white_and_the_accent_s_in_a_20_px_box():
+# each return mark's pixels it inks and those it leaves clear (20 px, the mock-up's 24-unit grid at 20/24)
+RETURN_INKED = {'search': ((8, 4), (14, 14)), 'go': ((6, 9), (11, 5)), 'save': ((8, 13), (12, 9))}
+RETURN_CLEAR = {'search': ((8, 8), (6, 9)), 'go': ((8, 4), (8, 13)), 'save': ((8, 4), (6, 9), (11, 5))}
+
+
+@pytest.mark.parametrize('kind', ['search', 'go', 'save'])
+def test_the_return_key_s_marks_are_a_magnifier_an_arrow_and_a_check_white_and_the_accent_s_in_20_px(kind):
+    """The user's mock-up (returnkey context.html): the magnifier a ring, hollow, its handle to the bottom right; the
+    arrow a bar at the middle with its head to the right; the check's vertex low left of centre."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, rgb in (('w', 0xffffff), ('a', blue)):
-        w, h, at = pixels(got[f'oled_search_return_{name}'])
-        assert (w, h) == (20, 20) and at(17, 4) == (*rgb.to_bytes(3, 'big'), 255)  # the stem
-        assert at(3, 12)[3] == 255 and at(10, 12)[3] == 255 and at(6, 9)[3] == 255  # the bar, to the arrowhead
-        assert at(10, 4)[3] == 0 and at(0, 0)[3] == 0  # clear above the bar, left of the stem
+        w, h, at = pixels(got[f'oled_search_return_{kind}_{name}'])
+        assert (w, h) == (20, 20)
+        for p in RETURN_INKED[kind]:
+            assert at(*p) == (*rgb.to_bytes(3, 'big'), 255), p
+        for p in RETURN_CLEAR[kind] + ((0, 0), (19, 19)):
+            assert at(*p)[3] == 0, p
 
 
 def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():

@@ -268,8 +268,12 @@ plays the song it moves to, and the pressed song, once it lands, stays on the ca
 playing (`addon.c` `moved_on`).
 
 Next on the last song queued while the app's next song is still downloading (a radio's first
-minutes) waits for that song and plays it once it lands, saying "Next song is loading"; the
-song playing plays on meanwhile (`addon.c` `addon_next_waits`).
+minutes) moves Now Playing to that song at once, named and with its cover, the song playing
+stopped and the spinner turning while it loads; it plays once the download is whole with stock's
+player, or once enough of it is there with q2player, which plays a song still arriving
+(`addon.c` `addon_next_waits`). Songs streamed into the queue take their server row's tags, or
+their file's, as they join, so Up Next names them as the Library does (`tags.c`
+`card_record_tags`).
 
 ### Compatibility
 

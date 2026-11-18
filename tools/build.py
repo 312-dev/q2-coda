@@ -39,6 +39,8 @@ HOOKS = {
     'check_usb_status': (0x4f3744, 'ringnav_usb_status', 'usb_status'),
     # OTG host power (PC20) only after the ID pin settles low with no VBUS on the port (usb_otg.c)
     'check_otg_status': (0x4f3408, 'ringnav_otg_status', 'otg_status'),
+    # The USB record's first line once stock has set the USB pins up, with PD18's pull (usb_record.c)
+    'platform_init': (0x51cd94, 'ringnav_platform_init', 'platform_init'),
     'createPlayListItem': (0x517fdc, 'ringnav_playlist_create', None),
     'playlist_delete_click': (0x4b62c8, 'ringnav_playlist_delete', None),
     'localmusic_playlistsmore_page_init': (0x4b6614, 'ringnav_playlistsmore', 'playlistsmore'),
@@ -279,8 +281,8 @@ GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-pla
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6bdfe61.zip', 2859355,
-                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-9aef2f9.zip', 2861732,
+                 '1b14b3e8299667bad92e6c66d9b2ac14a96fe0c882e6bc3a2d0c397a009cd448', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -359,9 +361,10 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
         fi
         # demo's stderr (docs/boot.md#rockbox-from-home): stock starts its Bluetooth and Wi-Fi helpers from demo,
         # so they inherit it and their reasons for failing land here, in RAM, instead of on the serial console;
-        # emptied once a minute past 512 KB (O_APPEND keeps demo writing at its end), its tail goes in the crash
-        # log. stdout stays on the console as stock's; --dev takes both (LOG_HOOK)
-        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${{n:-0}}" -gt 524288 ] && : >/tmp/q2-demo.err; done) &
+        # q2guard reads it into the unified log on the card (docs/internals.md#unified-log). Rolled once a minute
+        # past 256 KB: copied to .1 (the one before goes), then emptied (O_APPEND keeps demo writing at its
+        # end); its tail goes in the crash log. stdout stays on the console as stock's; --dev takes both (LOG_HOOK)
+        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${{n:-0}}" -gt 262144 ] && cp /tmp/q2-demo.err /tmp/q2-demo.err.1 && : >/tmp/q2-demo.err; done) &
         while :; do
             /release/bin/demo 2>>/tmp/q2-demo.err
             s=$?
@@ -388,10 +391,16 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
                 [ -f /tmp/q2-scan.log ] && {{ echo "== scan"; tail -n 60 /tmp/q2-scan.log; }}
                 [ -f /tmp/q2-art-file ] && {{ echo "== last art"; cat /tmp/q2-art-file; }}
                 [ -f /tmp/q2-art.log ] && {{ echo "== art"; tail -n 60 /tmp/q2-art.log; }}
-                [ -f /tmp/q2-demo.err ] && {{ echo "== stderr"; tail -n 60 /tmp/q2-demo.err; }}
-                [ -f /tmp/q2-demo.log ] && {{ echo "== q2-demo.log"; tail -n 200 /tmp/q2-demo.log; }}
+                [ -f /tmp/q2-demo.err ] && {{ echo "== stderr"; cat /tmp/q2-demo.err.1 /tmp/q2-demo.err 2>/dev/null | tail -n 60; }}
+                [ -f /tmp/q2-demo.log ] && {{ echo "== q2-demo.log"; cat /tmp/q2-demo.log.1 /tmp/q2-demo.log 2>/dev/null | tail -n 200; }}
             }} > $c.tmp 2>&1; mv $c.tmp $c
             sync
+            # the unified log's crash snapshot (docs/internals.md#unified-log): q2guard reads demo's last lines,
+            # notes the crash and writes the log to the card; its answer (the request gone) is waited 3 s at most
+            echo "crash demo exit $s" > /tmp/q2guard.snap
+            kill -USR1 "$(cat /tmp/q2guard.lock 2>/dev/null)" 2>/dev/null &&
+                {{ i=0; while [ -f /tmp/q2guard.snap ] && [ $i -lt 30 ]; do usleep 100000; i=$((i+1)); done; }}
+            rm -f /tmp/q2guard.snap
         fi
         # demo is gone for good: reboot, as stock's watchdog did (build.py WATCHDOG); after a clean end only
         # if the Q2 is still up 10 s on, as a power-off or Restart takes this shell down first
@@ -431,11 +440,12 @@ def adb_wrapper(name):
             f'[ "$1" = start ] && /usr/bin/q2adb-gadget park\n/usr/bin/{stock} "$@"\nr=$?\n'
             f'[ "$1" = stop ] && /usr/bin/q2adb-gadget unpark\nexit $r\n').encode()
 # --dev only (docs/remote.md#log): demo's console output, and hciplayer's, which inherits it, in RAM, so
-# emptied once a minute past 4 MB (O_APPEND keeps demo writing at its end), in place of the release's stderr
-# file and its cap. In BOOT_HOOK's start path.
-LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${n:-0}" -gt 524288 ] && : >/tmp/q2-demo.err; done) &\n'
+# rolled once a minute past 2 MB as the release's stderr file is (copied to .1, then emptied; O_APPEND keeps
+# demo writing at its end), in its place; q2guard --dev reads this one (docs/internals.md#unified-log). In
+# BOOT_HOOK's start path.
+LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${n:-0}" -gt 262144 ] && cp /tmp/q2-demo.err /tmp/q2-demo.err.1 && : >/tmp/q2-demo.err; done) &\n'
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
-            b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 4000000 ] && : >/tmp/q2-demo.log; done) &\n'
+            b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
@@ -619,6 +629,11 @@ STANDBY_WAKE = (0x5024b4, 0x0411ff26, 0x24020001)
 # sb stores $zero (the bar shown) and WHEELMODE's movz $v0, $zero, $v1 becomes li $v0, 1, whatever the keys hold. Neither
 # key is written, and stock's two rows are not offered (navigation.c ringnav_display, ringnav_systemset).
 NAV_SHOWN = (0x504b5c, 0xa0620000, 0xa0600000)
+# platform_init sets the USB cable sense and ID pins up as inputs, toolsGpioInput(name, pull): 0 is pull_hiz, 1 pull_down,
+# 2 pull_up. PD18, the ID pin, was given 0 and floated, and a floating ID made demo power the bus into a computer
+# (docs/internals.md#otg-host-power); S12usbcharge's pull_up before demo did not last past this call. Its move $a1, $zero
+# becomes li $a1, 2: stock's own call sets it input pull_up.
+ID_PULL_UP = (0x51d33c, 0x00002825, 0x24050002)
 WHEEL_MODE = (0x504ba4, 0x0003100a, 0x24020001)
 # V1.36's home_page_init binds a key-up of its own on Home (0x534a74: Return opens Now Playing and stops there; its wheel and
 # Centre act only outside Volume Mode). Home's keys are ringnav's and on_wm_keyup_fun's, as they were: the widget_on call goes.
@@ -2192,7 +2207,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2596,6 +2611,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *KEY_ABORTED, 'A press the window changed under stays ended until its release')
     patch_word(patched, *STANDBY_WAKE, 'Standby resume stays dark')
     patch_word(patched, *NAV_SHOWN, "stock's navigation bar stays shown")
+    patch_word(patched, *ID_PULL_UP, "platform_init sets the USB ID pin's pull-up")
     patch_word(patched, *WHEEL_MODE, "stock's wheel stays in Volume Mode")
     patch_word(patched, *HOME_KEYUP, 'Home binds no key-up of its own')
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
@@ -2946,7 +2962,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
-                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core'], 'q2guard', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),

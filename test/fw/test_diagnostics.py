@@ -80,7 +80,9 @@ def test_the_file_holds_the_device_s_state_and_nothing_personal(fw_dev, tmp_path
     (root/'gadget/storage_demo/UDC').write_text('13500000.otg\n')
     (root/'gadget/storage_demo/functions/mass_storage.msg/lun.0/file').write_text('/dev/mmcblk0p1\n')
     (root/'gadget/storage_demo/configs/c.1/mass_storage.msg').symlink_to(root/'gadget/storage_demo/functions/mass_storage.msg')
-    (root/'log/q2-demo.log').write_text(''.join(f'line {i}\n' for i in range(400)))
+    # rolled (tools/build.py LOG_HOOK): the older lines in .1, the newest in the file itself
+    (root/'log/q2-demo.log.1').write_text(''.join(f'line {i}\n' for i in range(390)))
+    (root/'log/q2-demo.log').write_text(''.join(f'line {i}\n' for i in range(390, 400)))
     (root/'log/q2-demo.err').write_text('q2player: started\n')
     mounts = root/'mounts'
     for old, new in (('/mnt/mmc', f'{root}/mmc'), ('/proc/mounts', str(mounts)), ('/sys/class/udc', f'{root}/udc'),
@@ -97,5 +99,5 @@ def test_the_file_holds_the_device_s_state_and_nothing_personal(fw_dev, tmp_path
                      '== q2-demo.err', '== q2-demo.log (demo and q2player)']
     assert f'{root}/udc/13500000.otg/state: configured' in text and 'UDC=13500000.otg' in text
     assert 'mass_storage.msg' in text and 'lun.0/file: /dev/mmcblk0p1' in text and 'q2player: started' in text
-    assert 'line 399' in text and 'line 99\n' not in text  # the log's last 300 lines
+    assert 'line 399' in text and 'line 100\n' in text and 'line 99\n' not in text  # the log's last 300 lines, across its roll
     assert ' dev ' in text.split('== version\n')[1].split('\n')[0]  # the build, a --dev one's

@@ -57,6 +57,7 @@ extern struct ctl ctl;
 /* ipc.c */
 int ipc_connect(const char *path);
 void ipc_send(const char *text);
+void plog(char level, const char *msg, int n); /* main.c: a line in the unified log, source "player" */
 void *ipc_thread(void *);
 
 /* source.c: one open file or stream, decoded to interleaved PCM in the format the output is opened with. */

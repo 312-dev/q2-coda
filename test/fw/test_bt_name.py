@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from conftest import O
+from conftest import O, STRIP_SAVE
 from test_nav_library_pages import Config, Ui
 from test_search_strip import HOLD_MS, Strip
 
@@ -183,3 +183,10 @@ def test_the_command_hands_dbus_send_the_alias_as_typed(fw, tmp_path, saved, ali
     assert args == ['--system', '--print-reply', '--dest=org.bluez', '/org/bluez/hci0',
                     'org.freedesktop.DBus.Properties.Set', 'string:org.bluez.Adapter1', 'string:Alias',
                     f'variant:string:{alias}']
+
+
+def test_the_name_s_return_key_is_a_check(fw, ui):
+    """Bluetooth's Name saves a name: the strip's return key shows the check (search_strip.c ss_ret_kind)."""
+    from test_search_strip import mark
+    r = Rename(fw, ui)
+    assert r.ss.ret == STRIP_SAVE and mark(fw, r) == 'save_w'

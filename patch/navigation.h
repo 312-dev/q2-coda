@@ -815,6 +815,10 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 /* system.c */
 void power_poll(void);
 void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+/* ulog.c: a line in the unified log through demo's stderr (docs/internals.md#unified-log): level E, W or
+ * I, src ui, player, usb, bt or wifi; and a clean end's snapshot, waited for (power-off, restart, update) */
+void ulog(char level, const char *src, const char *msg);
+void ulog_end(const char *why);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
@@ -829,9 +833,11 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
@@ -974,6 +980,7 @@ void search_strip_text(const char *title, const char *text, int max,
 void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
 void search_strip_secret(void);             /* ... the next one's text a password, as dots */
 void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
+void search_strip_return(int kind);         /* ... the next one's return mark, STRIP_* (peq.h) */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */

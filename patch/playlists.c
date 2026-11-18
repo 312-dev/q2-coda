@@ -319,6 +319,7 @@ static void ple_search_show(void) {
     ple.edit = edit_create(ple.page, "text", 2, 26);
     widget_set_name(ple.edit, "search_edit");
     widget_set_prop_str(ple.edit, "tips", "Search songs");
+    widget_set_prop_int(ple.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */
     if (*ple.query) widget_set_text_utf8(ple.edit, ple.query);
     widget_on(ple.edit, EVT_IM_ACTION, ple_searched, 0);
     widget_set_focused(ple.edit, 1);
