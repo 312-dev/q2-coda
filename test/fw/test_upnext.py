@@ -601,10 +601,6 @@ def test_a_row_of_the_playing_songs_album_takes_the_cover_now_playing_shows(fw, 
     fw.mock('image_base_set_image', lambda w, name, *_: covers.append(C.string_at(name).decode()) or 0)
     page.open()
     assert len(covers) == 1 and covers[0].endswith('/tmp/coverpic.jpg')  # Idle Moments' row; not Speak No Evil's
-    def statfs(path, out, *_):  # the card: 1 GB free
-        C.c_uint.from_address(out + 4).value, C.c_uint.from_address(out + 28).value = 4096, 1 << 18
-        return 0
-    fw.mock('fw_statfs', statfs)
     starts: list[str] = []
     def create(t, attr, fn, job, *_):  # started: the fetch runs (busy) until the test ends
         starts.append(C.string_at(job + 8).decode())

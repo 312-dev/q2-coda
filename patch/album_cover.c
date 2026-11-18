@@ -42,8 +42,9 @@ static int ac_find(const char *dir, const char *sid, int depth, char *out) {
         const char *n = e->d_name, *at = strrchr(n, '[');
         if (n[0] == '.') continue;
         if (tk_snprintf(path, sizeof path, "%s/%s", dir, n) >= (int)sizeof path) continue;
-        if (at && !strncmp(at + 1, sid, k) && at[1 + k] == ']' && at[2 + k] == '.' &&
-            !access(path, 4))
+        const char *ext = at ? at + 2 + k : 0; /* a download's .part or .tmp is no copy yet */
+        if (at && !strncmp(at + 1, sid, k) && at[1 + k] == ']' && *ext == '.' &&
+            !strrchr(ext + 1, '.') && !access(path, 4))
             found = tk_snprintf(out, 512, "%s", path) < 512;
         else if (depth < 3)
             found = ac_find(path, sid, depth + 1, out);
@@ -71,8 +72,9 @@ static int ac_stream_copy(const char *row, char *out) {
 static void *ac_worker(void *arg) {
     ac_job *j = arg;
     char track[512], dst[512], tmp[512];
-    int tried = 0;
-    for (unsigned i = 0; i < j->n && !tried; ++i) {
+    *strrchr(art_path(dst, j->key, ""), '/') = 0; /* Cover Flow's folder: room for a cover */
+    int tried = 0, room = card_space(dst);
+    for (unsigned i = 0; room && i < j->n && !tried; ++i) {
         const char *t = j->track[i];
         if (catalogue_path(t) ? !ac_stream_copy(t, track) : access(t, 4)) continue;
         if (!catalogue_path(t)) tk_snprintf(track, sizeof track, "%s", t);
@@ -91,7 +93,7 @@ static void *ac_worker(void *arg) {
             kills == ff_kills && !catalogue_path(t) && !access(track, 0) ? fopen(dst, "w") : 0;
         if (f) fclose(f);
     }
-    if (!tried) ac.none[ac.nnone++ % AC_NONE] = j->key;
+    if (room && !tried) ac.none[ac.nnone++ % AC_NONE] = j->key;
     free(j);
     __atomic_store_n(&ac.busy, 0, __ATOMIC_RELEASE);
     return 0;
@@ -102,9 +104,7 @@ static void *ac_worker(void *arg) {
 static void ac_fetch(unsigned key, void *const *songs, unsigned n) {
     for (unsigned i = 0; i < AC_NONE && i < ac.nnone; ++i)
         if (ac.none[i] == key) return;
-    char dir[512];
-    *strrchr(art_path(dir, key, ""), '/') = 0; /* Cover Flow's folder */
-    if (ac.busy || !card_space(dir)) return;
+    if (ac.busy) return;
     ac_job *j = calloc(1, sizeof *j);
     for (unsigned i = 0; j && i < n && j->n < AC_TRIES; ++i) {
         const char *p = songs[i] ? P(songs[i], REC_PATH) : 0;
