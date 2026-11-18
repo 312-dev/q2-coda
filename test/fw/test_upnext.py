@@ -9,6 +9,7 @@ import pytest
 
 import host
 from conftest import O, Deques, libc, stock_prop_str
+from test_nav_hold import recs  # noqa: F401
 
 # Up Next's sheet, stock's sortselect dialog as a zeroed widget (no parent): OLED's title and toast checks read the
 # window on top
@@ -633,3 +634,36 @@ def test_rows_at_their_top_drag_the_sheet_down(fw, up):
     _, page = up
     page.open()
     assert finger(page, (187, 150), (187, 260)) == 1
+
+
+def test_a_row_of_the_playing_songs_album_takes_the_cover_now_playing_shows(fw, mcl, recs):
+    """The user's, 2026-11-17: Up Next's rows of "Idle Moments" were grey: their album had no cover saved by
+    Subsonic and none in Cover Flow's cache, though Now Playing showed the song's own art. A row of the playing
+    song's album takes the player's cover of that song; a row of another album never does."""
+    fw.mock('window_manager_get_top_window', lambda *_: PAGE)
+    page = Page(fw)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = Deques(fw).new([
+        recs(path='/mnt/mmc/.subsonic/stream/a/original/0/Jean De Fleur [s1].flac', title='Jean De Fleur',
+             artist='Grant Green', album='Idle Moments'),
+        recs(path='/mnt/mmc/.subsonic/stream/a/original/0/Idle Moments [s2].flac', title='Idle Moments',
+             artist='Grant Green', album='Idle Moments'),
+        recs(path='/mnt/mmc/m/Speak No Evil.flac', title='Speak No Evil', artist='Wayne Shorter',
+             album='Speak No Evil'),
+    ])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = b'/mnt/mmc/.subsonic/stream/a/original/0/Jean De Fleur [s1].flac'
+    fw.var('g_playcover_type', C.c_ubyte).value = 1  # embedded art, the player's /tmp/coverpic.jpg
+    covers: list[str] = []
+    fw.mock('image_base_set_image', lambda w, name, *_: covers.append(C.string_at(name).decode()) or 0)
+    page.open()
+    assert len(covers) == 1 and covers[0].endswith('/tmp/coverpic.jpg')  # Idle Moments' row; not Speak No Evil's
+    starts: list[str] = []
+    def create(t, attr, fn, job, *_):  # started: the fetch runs (busy) until the test ends
+        starts.append(C.string_at(job + 8).decode())
+        C.c_ulong.from_address(t).value = 1
+        return 0
+    fw.mock('fw_pthread_create', create)
+    page.close()
+    page.open()
+    assert starts == ['/mnt/mmc/m/Speak No Evil.flac']  # Speak No Evil's cover fetched from its file, once
+    fw.var('album_cover__ac', C.c_uint).value = 0  # the fetch over (ac.busy), for the tests after

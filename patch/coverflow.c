@@ -3636,6 +3636,13 @@ unsigned char now_cover(void *r, const char **file) {
     return type;
 }
 
+/* AWTK's bitmaps of the player's cover files let go of: every song's cover is written to the same
+ * file, so a list showing one (album_cover.c) takes the file again, not the last song's bitmap. */
+void now_cover_forget(void) {
+    for (unsigned i = 0; i < sizeof(player_covers) / sizeof(*player_covers); ++i)
+        if (player_covers[i]) image_manager_unload_bitmap_by_name(image_manager(), player_covers[i]);
+}
+
 /* r's cover as a file:// URL in url (size bytes, a cover's path cut short counted as none), as Home's pane finds it: the player's file once
  * the cover thread has parsed r (now_cover: embedded, folder image or downloaded; for a server
  * song's stream download, its app's cover first, catalogue.c cat_copy_of), else the app's cover of
