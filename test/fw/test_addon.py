@@ -5750,6 +5750,16 @@ def test_an_empty_artist_is_the_empty_note_without_its_sync_row(fw, nav_st, extr
         assert p.drawn > 0 and b'Add to Sync' in said
 
 
+def test_an_info_only_page_with_more_results_keeps_its_more_row(fw, nav_st):
+    """A reply holding only an info row and a cursor is not empty: the info row and More… are drawn, as the list's
+    next page is still to come."""
+    p = oled_page(fw, nav_st)
+    said = []
+    fw.mock('widget_set_text_utf8', lambda w, s, *_: said.append(C.string_at(s)))
+    p.answer(cursor=b'c1', rows=[(b'info', b'', b'Nothing yet', b'', b'', b'')])
+    assert p.drawn == 2 and b'More\xe2\x80\xa6' in said
+
+
 def test_a_server_songs_radio_is_asked_of_its_app(fw):
     """Song radio (song_radio.c, docs/internals.md#radio): a song in an app's folder whose q2app says radio=1 is the
     app's to radio, asked in /tmp/q2-<id>.radio once its socket is there; its state file's radioack answers."""

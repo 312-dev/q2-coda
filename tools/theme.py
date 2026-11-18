@@ -17,8 +17,7 @@ ALL_ACCENTS = (1 << len(ACCENT_NAMES)) - 1
 SETTINGS = {'light': ('SETTING_LIGHT', ('off', 'on', 'auto')), 'accent': ('SETTING_ACCENT', ACCENT_NAMES),
             'home': ('SETTING_HOME', ('split', 'full', 'carousel')),
             'battery': ('SETTING_BATTERY', ('icon', 'percent', 'both', 'inside')),
-            'shortcut': ('SETTING_SHORTCUT', ('rockbox', 'artists', 'albums', 'favorites', 'rated_albums', 'shuffle', 'games', 'playlists', 'podcasts', 'audiobooks', 'groovebox', 'none')),
-            'time_title': ('SETTING_TIMETITLE', ('off', 'on'))}
+            'shortcut': ('SETTING_SHORTCUT', ('rockbox', 'artists', 'albums', 'favorites', 'rated_albums', 'shuffle', 'games', 'playlists', 'podcasts', 'audiobooks', 'groovebox', 'none'))}
 ACCENT_KEYS = {'ACCENT': '&st.accent'}
 # The IPOD keys the payload reads itself (theme_engine.c setting_keys[], every "IPOD", "<KEY>" literal): a
 # theme's own key is never one of them.
