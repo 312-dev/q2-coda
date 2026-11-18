@@ -4,7 +4,7 @@
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off;
  * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays; a pressed server song from the
- *   press on, as Now Playing shows it), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
+ *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
@@ -33,6 +33,7 @@
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
 #define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
 #define CR_HEARTS_MS 5000 /* the playing song's hearts read again at least this often */
+#define CR_NOTE_MS 4000   /* a toast stays in Now Playing for the car this long (NowPlaying.notice) */
 
 static struct {
     int checked, on;
@@ -46,11 +47,22 @@ static struct {
     int toast_what;
     int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
     unsigned hearts_at, hearts_id, hearts_gen;
+    char note[96]; /* the toast shown last, for the car, until note_at + CR_NOTE_MS; note_n counts them */
+    unsigned note_at, note_n;
 } cr __attribute__((section(".scratch")));
 
 int coda_rc_enabled(void) {
     if (!cr.checked) cr.checked = 1, cr.on = config_value("Q2POD", "CARREMOTE", 2, 0);
     return cr.on;
+}
+
+/* A toast the Q2 Muse shows (library_pages.c toast): the car shows it too, for CR_NOTE_MS, in place of its
+ * artist (NowPlaying.notice), as Android Auto draws no phone toast. */
+void coda_rc_note(const char *text) {
+    if (!coda_rc_enabled() || !text || !*text) return;
+    tk_snprintf(cr.note, sizeof cr.note, "%s", text);
+    cr.note_at = time_now_ms() | 1;
+    ++cr.note_n;
 }
 
 /* ---- the daemon ---- */
@@ -209,6 +221,9 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "btotal", (int)btotal);
     put_int(b, sizeof b, &n, "bms", (int)bms);
     put_int(b, sizeof b, &n, "radio", song_radio_on());
+    if (cr.note_at && time_now_ms() - cr.note_at >= CR_NOTE_MS) cr.note_at = 0, cr.note[0] = 0;
+    put_int(b, sizeof b, &n, "noten", (int)cr.note_n);
+    put(b, sizeof b, &n, "note", cr.note);
     put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
     put(b, sizeof b, &n, "title", title);
     put(b, sizeof b, &n, "artist", r ? P(r, REC_ARTIST) : "");

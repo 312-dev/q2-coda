@@ -34,7 +34,8 @@ typedef struct {
     int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
     int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
-    char path[512], title[160], artist[160], album[160];
+    int noten;                   /* the Q2 Muse's toasts so far; note the last, while shown */
+    char path[512], title[160], artist[160], album[160], note[96];
 } np_t;
 
 typedef struct {
@@ -226,7 +227,7 @@ static void np_parse(const char *b, np_t *o) {
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
             NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
-            NUM("bms", bms) NUM("radio", radio) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("bms", bms) NUM("radio", radio) NUM("noten", noten) STR("note", note) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -257,7 +258,7 @@ int crc_shim_alive(void) {
 
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
-           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO : 0) |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO | CAP_NOTICE : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }
 
@@ -309,6 +310,8 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 15, (uint32_t)np.btotal);
     pb_varint(w, 16, crc_buffered_ms((uint32_t)np.bhave, (uint32_t)np.btotal, (uint32_t)np.bms));
     pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
+    pb_str(w, 18, np.note);          /* CAP_NOTICE: the toast shown, while it is */
+    pb_varint(w, 19, (uint32_t)np.noten);
     pb_end(w, m);
 }
 
@@ -351,7 +354,7 @@ static void np_poll(void) {
     int parts = 0;
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
         np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
-        np.radio != np_sent.radio ||
+        np.radio != np_sent.radio || np.noten != np_sent.noten || strcmp(np.note, np_sent.note) ||
         strcmp(np.path, np_sent.path) || np.buf != np_sent.buf ||
         /* its bytes: at most twice a second */
         (np.bhave != np_sent.bhave && crc_now_ms() - buf_pushed >= 500) ||

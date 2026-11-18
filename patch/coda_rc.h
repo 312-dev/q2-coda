@@ -50,6 +50,7 @@ enum {
 #define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
 #define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
+#define CAP_NOTICE 32768u   /* NowPlaying.notice: the Q2 Muse's toast, for the car to show a moment */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;

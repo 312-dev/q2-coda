@@ -781,6 +781,7 @@ void toast(const char *text) {
         char text[0x400];
     } info = { 1, 1500, { 0 } };
     for (unsigned i = 0; text[i] && i < sizeof info.text - 1; ++i) info.text[i] = text[i];
+    coda_rc_note(info.text); /* the car shows it too (coda_rc_shim.c) */
     ++st.toasts; /* its loop runs the UI's polls, which may toast again */
     navigator_to_with_context("dialog/msginfo_dialog", &info);
     --st.toasts;
