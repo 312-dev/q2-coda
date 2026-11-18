@@ -42,6 +42,7 @@
 #define LS_FOOT_Y 290
 #define LS_SHEET_TOP 26 /* the share sheet's file line to its Send to header */
 #define LS_CTA_OUT (CTA_RING_OFF + CTA_RING_W)
+#define LS_STACK 118 /* the empty state's stack with its glyph (feedback.c ES_TEXT) */
 #define LS_KIND "_ls_kind"
 #define LS_VALUE "_ls_value"
 #define LS_DEV "_ls_dev"
@@ -73,7 +74,7 @@ static struct {
     void *xfer;          /* Sending or Receiving */
     int xfer_recv;       /* the transfer page's: 1 a receive */
     unsigned at, started_at, shown[5]; /* each page's sum when built (by P_*) */
-    int live, asking, scan_due, wifi_off, cta_y;
+    int live, asking, scan_due, wifi_off, cta_y, page_none, share_none;
     char rphase[16], sphase[16]; /* the phases at the last poll */
     char ask_id[72];             /* the request the card asks about */
     char to_fp[65], to_alias[40];
@@ -403,9 +404,8 @@ static int ls_share_show(const void *ctx) {
     if (sel >= s.n) sel = s.n - 1;
     if (s.n) ringnav_select(view, sel < 0 ? 0 : sel, s.n);
     ls.share_view = view;
-    static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer on this Wi-Fi",
-                                  0 };
-    empty_state(ls.share, ls_screen_y(view) + LS_SHEET_TOP + LS_ROW, s.n ? 0 : &none, 0);
+    ls.share_none = !s.n; /* the empty state's stack, painted (localsend_paint) */
+    empty_state(ls.share, 0, 0, 0);
     return 0;
 }
 
@@ -533,7 +533,7 @@ static int ls_page_show(const void *ctx) {
     void *view = page_list(ls.page, ls.page, 0, "LocalSend", rows, 48);
     int free_top = ls_screen_y(view);
     if (ls.wifi_off) {
-        static const empty_t off = { "wifi-slash", "Wi-Fi Is Off", "LocalSend works over the same Wi-Fi as your phone or computer",
+        static const empty_t off = { "wifi-slash", "Wi-Fi Is Off", "Join the Wi-Fi your phone or computer is on",
                                      "Turn On Wi-Fi" };
         ls.cta_y = empty_row_y(free_top) - free_top - LS_CTA_OUT;
         ls_gap(view, ls.cta_y, K_GAP, 0);
@@ -565,9 +565,8 @@ static int ls_page_show(const void *ctx) {
     if (sel >= rows) sel = rows - 1;
     ringnav_select(view, sel < 0 ? 0 : sel, rows);
     ls.view = view;
-    static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer on this Wi-Fi",
-                                  0 };
-    empty_state(ls.page, free_top + LS_ROW + LS_HEAD_GAP + LS_ROW, s.n ? 0 : &none, 0);
+    ls.page_none = !s.n; /* the empty state's stack, painted (localsend_paint) */
+    empty_state(ls.page, 0, 0, 0);
     return 0;
 }
 
@@ -613,7 +612,7 @@ static int ls_xfer_open(int recv, int phone) {
         return 1;
     }
     if (!(ls.xfer = page_open("lsxfer_page", ls_xfer_closed, page_keyup))) return 0;
-    page_list(ls.xfer, ls.xfer, 0, recv ? "Receiving" : "Sending", 0, 48);
+    page_list(ls.xfer, ls.xfer, 0, recv ? "Receiving" : "Sending", 1, 48); /* the title; no rows */
     widget_on(ls.xfer, EVT_POINTER_UP_BEFORE, ls_xfer_touch, 0);
     widget_invalidate_force(ls.xfer, 0);
     return 1;
@@ -669,6 +668,14 @@ static void ls_xfer_paint(void *w, void *canvas) {
 
 /* ---- painting ---- */
 
+/* None found: the empty state's stack with its glyph, as the mock-up draws it, centred between top and end (screen
+ * rows): the house's compact form under rows has no glyph (feedback.c empty_compact), so the page paints it
+ * (empty_paint). */
+static void ls_none_paint(void *w, void *canvas, int top, int end) {
+    static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer", 0 };
+    empty_paint(w, canvas, &none, top + (end - top - LS_STACK) / 2 - ls_screen_y(w));
+}
+
 /* ringnav_paint's, for the pages: the glyphs, the header's spinner, a value at a row's right, the captions and the
  * footer, Remove All's red, and the transfer page. */
 void localsend_paint(void *w, void *canvas) {
@@ -683,6 +690,10 @@ void localsend_paint(void *w, void *canvas) {
         tk_snprintf(foot, sizeof foot, "Visible as %s while this page is open", bt_name(name, sizeof name));
         ui_text(canvas, foot, 0, TYPE(13), tok(TOK_TERTIARY), 0, page_x(), LS_FOOT_Y - ls_screen_y(w), 375 - 2 * page_x(),
                 2);
+        if (ls.page_none && ls.view) {
+            int top = ls_screen_y(P(ls.view, W_PARENT)) + I(P(ls.view, W_PARENT), W_H);
+            ls_none_paint(w, canvas, top, LS_LIST_END);
+        }
         return;
     }
     if (w == ls.share) {
@@ -691,6 +702,10 @@ void localsend_paint(void *w, void *canvas) {
         tk_snprintf(stem, sizeof stem, "lsfile_%c", light ? 'l' : 'd');
         paint_art(w, canvas, theme_art(stem), 32 - 7, 70 - 7 - dy);
         ui_text(canvas, ls.share_line, 0, TYPE(15), tok(TOK_TERTIARY), 0, 46, 70 - dy, 375 - 46 - 24, 2);
+        if (ls.share_none && ls.share_view) {
+            int top = ls_screen_y(P(ls.share_view, W_PARENT)) + I(P(ls.share_view, W_PARENT), W_H);
+            ls_none_paint(w, canvas, top, 320);
+        }
         return;
     }
     void *view = P(w, W_PARENT);
@@ -705,7 +720,7 @@ void localsend_paint(void *w, void *canvas) {
         paint_art(w, canvas, theme_art(art), page_x() + tw + 7, h / 2 + 2 - 7);
         spinner_painted(w, (const rect_t *)0);
     } else if (k == K_CAPTION) {
-        ui_text(canvas, widget_get_prop_str(w, LS_VALUE, ""), 0, TYPE(15), tok(TOK_TERTIARY), 0, page_x(), h / 2 + 2,
+        ui_text(canvas, widget_get_prop_str(w, LS_VALUE, ""), 0, TYPE(13), tok(TOK_TERTIARY), 0, page_x(), h / 2 + 2,
                 375 - 2 * page_x(), 2);
     } else if (k == K_CTA) {
         const char *words = widget_get_prop_str(w, LS_VALUE, "");
@@ -768,7 +783,7 @@ static void ls_ask(void) {
                                       .n_rows = 2,
                                       .kind = CONFIRM_CONSEQUENTIAL,
                                       .back = 1,
-                                      .toggle = "Always accept from this device",
+                                      .toggle = "Always Accept", /* as USB debugging's "Always Allow" */
                                       .timeout_ms = LS_ASK_MS,
                                       .timeout_row = 1,
                                       .glyph = ls.x_phone ? "lscard_phone" : "lscard_laptop",
@@ -809,7 +824,7 @@ static void ls_recv_moved(const ls_xfer *x) {
     const char *ph = x->phase;
     if (!tk_strcmp(ph, "run") && x->trusted) {
         tk_snprintf(text, sizeof text, "Receiving from %s", x->alias);
-        toast_icon(theme_art(ls.x_phone ? "lstoast_phone" : "lstoast_laptop"), text);
+        toast_later(ls.x_phone ? "lstoast_phone" : "lstoast_laptop", text);
         return;
     }
     if (!tk_strcmp(ph, "done") || !tk_strcmp(ph, "failed") || !tk_strcmp(ph, "cancelled") ||
@@ -817,15 +832,15 @@ static void ls_recv_moved(const ls_xfer *x) {
         if (ls.xfer && ls.xfer_recv) window_close(ls.xfer);
     if (!tk_strcmp(ph, "done")) {
         tk_snprintf(text, sizeof text, "%d file%s saved to Received", x->done, x->done == 1 ? "" : "s");
-        toast_icon(theme_art("usbtoast_ejected"), text);
+        toast_later("usbtoast_ejected", text);
     } else if (!tk_strcmp(ph, "failed"))
-        toast_icon(theme_art("bttoast_warn"), "Some files didn't arrive");
+        toast_later("bttoast_warn", "Some files didn't arrive");
     else if (!tk_strcmp(ph, "refused-room"))
-        toast_icon(theme_art("bttoast_warn"), "Not enough room on the SD card");
+        toast_later("bttoast_warn", "Not enough room on the SD card");
     else if (!tk_strcmp(ph, "refused-card"))
-        toast_icon(theme_art("bttoast_warn"), "No SD card");
+        toast_later("bttoast_warn", "No SD card");
     else if (!tk_strcmp(ph, "refused-hold"))
-        toast_icon(theme_art("bttoast_warn"), "The SD card is in use over USB");
+        toast_later("bttoast_warn", "The SD card is in use over USB");
 }
 
 static void ls_send_moved(const ls_xfer *x) {
@@ -837,13 +852,13 @@ static void ls_send_moved(const ls_xfer *x) {
     }
     if (ls.xfer && !ls.xfer_recv) window_close(ls.xfer);
     if (!tk_strcmp(ph, "done"))
-        tk_snprintf(text, sizeof text, "Sent to %s", alias), toast_icon(theme_art("usbtoast_ejected"), text);
+        tk_snprintf(text, sizeof text, "Sent to %s", alias), toast_later("usbtoast_ejected", text);
     else if (!tk_strcmp(ph, "declined"))
-        tk_snprintf(text, sizeof text, "%s declined", alias), toast_icon(theme_art("bttoast_warn"), text);
+        tk_snprintf(text, sizeof text, "%s declined", alias), toast_later("bttoast_warn", text);
     else if (!tk_strcmp(ph, "busy"))
-        tk_snprintf(text, sizeof text, "%s is busy", alias), toast_icon(theme_art("bttoast_warn"), text);
+        tk_snprintf(text, sizeof text, "%s is busy", alias), toast_later("bttoast_warn", text);
     else if (!tk_strcmp(ph, "failed"))
-        tk_snprintf(text, sizeof text, "Couldn't send to %s", alias), toast_icon(theme_art("bttoast_warn"), text);
+        tk_snprintf(text, sizeof text, "Couldn't send to %s", alias), toast_later("bttoast_warn", text);
 }
 
 /* power_poll, every LS_POLL_MS: the daemon kept running while it is needed and stopped once it is not, the card
