@@ -70,7 +70,7 @@ static int unpack_stock(void) {
 
 /* A line in the unified log (docs/internals.md#unified-log): stamped as ulog_line.h has it, source "player", on stderr,
  * which is demo's (S90play keeps it), where q2guard reads it. Async-signal-safe: crashed writes one too. */
-static void plog(char level, const char *msg, int n) {
+void plog(char level, const char *msg, int n) {
     struct timespec wall, up;
     char line[256];
     clock_gettime(CLOCK_REALTIME, &wall);

@@ -978,6 +978,23 @@ def test_stop_during_first_fill(player, songs, tmp):
     return f'stopstatus {t[0] - 3.0:.3f} s after the stop'
 
 
+def test_stop_right_after_a_next(player, songs, tmp):
+    """A stop 20 ms after a set-nexturl, before the player has taken the song it named (patch/catalogue.c np_stop, after
+    stock's player_start plays its queue again at a server song's press): nothing plays after it, and the stop is
+    answered. The device, 2026-11-18: the stop was lost, and the song playing started again from 0."""
+    s, pcm, names = play(player, songs, 'restart-stop', tmp/'restart-stop')
+    out, a1 = b''.join(pcm), reference(songs/'a1.flac')
+    got = len(out) // 4
+    assert out == a1[:len(out)], f'{got} frames: not a1 from its start alone (played again after the stop?)'
+    assert got < 4.5 * 44100, f'{got} frames played, {got / 44100:.1f} s: a1 went on past the stop at 4 s'
+    assert events(s) == ['{player-nextstatus\\exit}', '{player-stopstatus\\exit}'], events(s)
+    # each song handed over, and the stop, in the unified log
+    logged = re.findall(r' I player (q2player: .*)', (tmp/'restart-stop/player.log').read_text())
+    a1_path = f'{songs}/a1.flac'
+    assert logged == [f'q2player: set-songurl {a1_path}', f'q2player: set-nexturl {a1_path}', 'q2player: mcl-stop'], logged
+    return f'{got / 44100:.1f} s played, then stopped; {events(s)}'
+
+
 def qq_env(tmp):
     """The environment that has q2player load qmstub.c as libQMDecryption.so."""
     lib = tmp/'qmstub'/'libQMDecryption.so'
