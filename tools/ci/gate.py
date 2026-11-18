@@ -58,7 +58,7 @@ needs the state an earlier one left, so a failure there is fixed, not skipped.
 A plan (affected.py --json) that runs unit, fw and patch whole is the merge tier and the plan's own
 `other` suites beside it (a PLANNED suite its changes need, a test/X.py the branch changed), but not the
 optional smoke; any other plan runs
-what it names, each `other` path a suite of its own. --only keeps just those names: a plan's suite as the plan
+what it names, each `other` path a suite of its own (a test/X.py as SCRIPTS says, or skipped with its reason). --only keeps just those names: a plan's suite as the plan
 has it, one only a whole tier has (GATE_ONLY) whole, and any other name the plan lacks not at all; the
 name `build` builds even when no suite needs it. docs/building.md#gate.
 """
@@ -70,6 +70,7 @@ import json
 import os
 import pathlib
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -128,8 +129,14 @@ class Suite:
         self.seconds = 0.0
         self.retried: Any = None  # the kind of its first failure, once it is being run again
 
+    @staticmethod
+    def fill(arg, build):
+        if '{stockfs}' in arg:
+            arg = arg.replace('{stockfs}', stockfs(build))
+        return arg.replace('{qemu}', shutil.which('qemu-mipsel') or '').replace('{build}', build)
+
     def command(self, build):
-        argv = [build if a == '{build}' else a for a in self.argv]
+        argv = [self.fill(a, build) for a in self.argv]
         return ([str(HEAVY)] if self.heavy and HEAVY.exists() else []) + argv
 
 
@@ -162,26 +169,93 @@ def full_suite(name, py, logs):
     }.get(name)
 
 
-# test/*.py suites whose own parser takes no BUILD argument (the host suites compile what they test); every
-# other test/X.py is run as `python3 test/X.py BUILD`. tools/ci/affected.py runs them the same way.
-NO_BUILD_ARG = ('test/coverflow.py', 'test/peq.py')
+# How the gate (and affected.py --run) runs each test/X.py a plan can name, as each script's own parser
+# takes it: the argv after the script, in which `{build}` is the build, `{qemu}` qemu-mipsel and `{stockfs}` the
+# stock rootfs's module_driver/ and usr/data/ (extracted from the build's stock.squashfs, once per stock). A string
+# instead of a list is the reason the script cannot run here: it is skipped, with that reason printed.
+# tools/ci/test_ci.py checks that each script is in the table and that no row is for a script that is gone.
+SCRIPTS: dict[str, list[str] | str] = {
+    'test/adb.py': ['{build}'],
+    'test/aic.py': ['{stockfs}'],
+    'test/aic_build.py': ['{stockfs}'],  # no builds: it checks the guard, the module's ABI and its packaging
+    'test/alsa.py': ['{build}', '{qemu}'],
+    'test/bluealsa.py': ['{build}'],
+    'test/bluetoothd.py': ['{build}'],
+    'test/build.py': ['--build', '{build}'],
+    'test/chapters.py': [],  # --stock-root and --qemu go together and are optional: its parser refuses BUILD
+    'test/coda_rc_e2e.py': 'needs a q2-emu copy to boot (--emu DIR, a card with CARREMOTE=1) and a port; run it by hand',
+    'test/coverflow.py': [],
+    'test/coverflow_position.py': [],
+    'test/headset_io.py': ['{build}'],
+    'test/ldac.py': ['{build}'],
+    'test/library_scope.py': [],
+    'test/localsend_e2e.py': ['{build}'],  # takes a build and finds the CLI itself; without one it prints skip and passes
+    'test/m4b.py': ['{build}'],
+    'test/mcu_park.py': ['{stockfs}/usr/data/libmcu-bare.bin'],
+    'test/mcu_sleep.py': ['{stockfs}/usr/data/libmcu-bare.bin'],
+    'test/mcu_sleep_host.py': 'still running after 200 s when probed on 2026-11-18 and never timed to the end: its invocation (STOCKFS) is right, its cost is unknown',
+    'test/module_mips.py': 'a library the module tests import (test/rotator.py and others), with nothing to run',
+    'test/module_regions.py': 'a library the module tests import, with nothing to run',
+    'test/patch.py': ['{build}'],
+    'test/peq.py': [],
+    'test/playback.py': ['{build}'],
+    'test/pwm.py': ['{stockfs}'],
+    'test/pwm_build.py': ['{stockfs}'],
+    'test/pwm_mcu.py': ['{stockfs}'],
+    'test/q2_guest.py': [],
+    'test/q2eq.py': [],
+    'test/release.py': [],
+    'test/remote.py': [],
+    'test/rotator.py': ['{stockfs}/module_driver/soc_rotator.ko'],
+    'test/rotator_build.py': [],  # given builds it asserts those were built with the module options, which a --dev build was not
+    'test/server_catalogue.py': 'a generator of a catalogue file for a card (CARD_ROOT), not a test',
+    'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
+    'test/thirdparty.py': ['{build}', '{qemu}', '--offline'],  # its TLS checks need the network, which a gate does not
+}
+STOCKFS_CACHE = pathlib.Path(os.environ.get('Q2_STOCKFS', pathlib.Path.home()/'.cache/q2-stockfs'))
+STOCKFS_PATHS = ('module_driver', 'usr/data')
+
+
+def stockfs(build):
+    """The stock rootfs's files the module tests read, extracted from build's stock.squashfs: one directory per
+    stock image (by its hash), so every build of the same stock shares it."""
+    image = pathlib.Path(build)/'stock.squashfs'
+    out = STOCKFS_CACHE/hashlib.sha256(image.read_bytes()).hexdigest()[:16]
+    if not (out/'.done').exists():
+        shutil.rmtree(out, ignore_errors=True)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['unsquashfs', '-q', '-no-xattrs', '-d', str(out), str(image), *STOCKFS_PATHS], check=True)
+        (out/'.done').write_text('')
+    return str(out)
 
 
 def other_suite(path, py):
-    """A plan's `other` path, run as tools/ci/affected.py runs it."""
+    """A plan's `other` path, run as tools/ci/affected.py runs it; None for a script that cannot run here
+    (SCRIPTS says why)."""
     if path.startswith('tools/ci/test_'):
         return Suite(path, [py, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', path])
-    if path == 'test/build.py':
-        return Suite(path, [py, path, '--build', '{build}'], needs_build=True, heavy=True)
-    if path in NO_BUILD_ARG:
-        return Suite(path, [py, path], heavy=True)
-    return Suite(path, [py, path, '{build}'], needs_build=True, heavy=True)
+    args = SCRIPTS.get(path, ['{build}'])
+    if isinstance(args, str):
+        return None
+    if '{qemu}' in ' '.join(args) and not shutil.which('qemu-mipsel'):
+        return None
+    return Suite(path, [py, path, *args], needs_build=any('{build}' in a or '{stockfs}' in a for a in args), heavy=True)
+
+
+def skip_reason(path):
+    """Why other_suite(path) is None."""
+    args = SCRIPTS.get(path)
+    return args if isinstance(args, str) else 'it needs qemu-mipsel, which this machine lacks'
 
 
 def named_suite(name, py, logs):
-    """A suite by its name: one gate.py defines, else a plan's `other` path."""
+    """A suite by its name: one gate.py defines, else a plan's `other` path; None (and a printed reason) for a
+    script that cannot run here."""
     full = full_suite(name, py, logs)
-    return full() if full else other_suite(name, py)
+    suite = full() if full else other_suite(name, py)
+    if suite is None:
+        print(f'skipped {name}: {skip_reason(name)}', flush=True)
+    return suite
 
 
 def suites_for(plan, only, py, logs, tier=None):
@@ -209,6 +283,7 @@ def suites_for(plan, only, py, logs, tier=None):
         for o in plan['other']:
             if o not in OPTIONAL:
                 out[o] = named_suite(o, py, logs)
+    out = {n: s for n, s in out.items() if s}
     if only:
         # a plan's suite is cut to only; a suite no plan names (GATE_ONLY) runs whole; any other name the plan
         # lacks is left out, as nothing the plan's changes touch reaches it
