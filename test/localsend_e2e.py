@@ -4,10 +4,12 @@ this machine (host OpenSSL), run as a program with --run, --data and --recv in a
 LocalSend CLI driven through a pseudo-terminal as a user at its keyboard. This script stands in for demo: it reads
 q2send.state and q2send.ask and writes q2send.answer and q2send.cmd.
 
-usage: localsend_e2e.py CLI [--keep DIR]
+usage: localsend_e2e.py CLI [--keep DIR] [--q2send 'COMMAND']
 
 CLI is the LocalSend CLI program (LocalSend-CLI-1.18.2-linux-x86-64, its SHA-256 f5a986e0...2b08 the release's).
-Both bind multicast's 53317 beside each other and serve on ports of their own (Q2PORT, CLIPORT).
+--q2send runs that command for q2send instead of building it, for the build's own MIPS program under
+qemu-mipsel: --q2send 'qemu-mipsel -L ROOTFS ROOTFS/usr/bin/q2send' (ROOTFS holding at least the build's lib,
+usr/lib/libssl.so.1.1, usr/lib/libcrypto.so.1.1 and usr/bin/q2send). Both bind multicast's 53317 beside each other and serve on ports of their own (Q2PORT, CLIPORT).
 
 Checks, in order: each finds the other (the CLI's announcement answered by q2send's register, and q2send's
 announcement answered by the CLI's); the CLI sends a file, demo is asked and accepts, the file lands whole in
@@ -98,7 +100,7 @@ class Q2:
         self.run, self.data, self.recv = work / 'run', work / 'data', work / 'mmc/Received'
         self.run.mkdir()
         (work / 'mmc').mkdir()
-        self.p = subprocess.Popen([exe, '--run', str(self.run), '--data', str(self.data), '--recv', str(self.recv),
+        self.p = subprocess.Popen([*exe, '--run', str(self.run), '--data', str(self.data), '--recv', str(self.recv),
                                    '--port', str(Q2PORT), '--alias', 'Q2 Muse'])
 
     def f(self, name):
@@ -141,10 +143,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('cli')
     ap.add_argument('--keep')
+    ap.add_argument('--q2send')
     a = ap.parse_args()
     work = pathlib.Path(a.keep or tempfile.mkdtemp(prefix='localsend-e2e-'))
     work.mkdir(parents=True, exist_ok=True)
-    exe = build(work)
+    exe = a.q2send.split() if a.q2send else [str(build(work))]
     payload = work / 'to-q2.flac'
     payload.write_bytes(os.urandom(300_000))
     q2 = Q2(exe, work)
@@ -250,7 +253,7 @@ def restart_same(q2, exe, fp):
     code = q2.p.wait(5)
     check('SIGTERM ends q2send cleanly, its files gone', code == 0 and not q2.f('state').exists() and
           not q2.f('pid').exists(), f'exit {code}')
-    q2.p = subprocess.Popen([exe, '--run', str(q2.run), '--data', str(q2.data), '--recv', str(q2.recv),
+    q2.p = subprocess.Popen([*exe, '--run', str(q2.run), '--data', str(q2.data), '--recv', str(q2.recv),
                              '--port', str(Q2PORT)])
     st = until(lambda: q2.state().get('me'), 5)
     return bool(st) and st[0] == fp and len(fp) == 64 and fp == fp.upper()
