@@ -159,3 +159,53 @@ def test_cpu_in_percent_and_in_older_tenths_read_the_same():
     a, b = streams[0].samples
     assert (a.f['ba'], a.f['own'], b.f['ba'], b.f['own']) == (90, 1, 90, 1)
     assert (a.f['fcc'], a.f['done'], a.f['fly'], b.f['done']) == (0, 96, 5, None)
+
+
+# ---- the link's capacity: basic rate or EDR ----
+
+def test_the_slots_a_packet_takes_on_basic_rate_and_on_edr():
+    """An ACL packet is cut into baseband packets, each followed by the headset's slot: 790 bytes of aptX HD are DH5,
+    DH5 and DH3 on basic rate (16 slots) and 2-DH5 and 2-DH3 on EDR 2 Mbps (10)."""
+    assert q2bt.slots(790, q2bt.BASIC) == 16 and q2bt.slots(790, q2bt.EDR2) == 10
+    assert q2bt.slots(498, q2bt.BASIC) == 10 and q2bt.slots(498, q2bt.EDR2) == 6   # SBC's 260 kbps
+    assert q2bt.slots(20, q2bt.BASIC) == 2 and q2bt.slots(339, q2bt.BASIC) == 6 and q2bt.slots(340, q2bt.BASIC) == 8
+    assert q2bt.slots(0, q2bt.BASIC) == 0
+
+
+def sat(sec, done, fly=5, kbps=614, acl=96):
+    return (f'{t(sec)} up={1000 + sec} kbps={kbps} acl={acl} wq=7936 rssi=-20 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 '
+            f'cpu=20 ba=9.0 own=0.1 h=1 er=90 ew=2 fcc=0 done={done} fly={fly}\n')
+
+
+def capacity_of(done_values, fly=5):
+    log = [f'{t(0)} START h=1 mtu=1021 bufs=5 raw=ok\n', f'{t(0)} ENCODER ba-a2dp-aptx-hd\n']
+    log += [sat(i, 96, fly=1) for i in range(1, 20)] + [sat(20 + i, d, fly=fly) for i, d in enumerate(done_values)]
+    streams, _ = q2bt.parse(log)
+    return q2bt.capacity(streams[0])
+
+
+def test_a_saturated_controller_at_basic_rate_s_ceiling_is_basic_rate():
+    c = capacity_of([97, 99, 100, 98, 96, 101])
+    assert (c.seconds, c.median, c.ceiling_basic, c.ceiling_edr) == (6, 98.5, 100, 160) and c.verdict == 'basic rate'
+
+
+def test_one_well_over_it_is_edr():
+    assert capacity_of([140, 150, 155, 148, 152]).verdict == 'EDR 2 Mbps'
+
+
+def test_between_the_ceilings_or_too_few_seconds_says_so():
+    assert capacity_of([120, 125, 122, 124, 121]).verdict == 'undecided'
+    assert capacity_of([98, 99, 97]).verdict == 'too few saturated seconds'
+    assert capacity_of([98] * 6, fly=4).seconds == 0  # buffers not all full: the radio was not the limit
+    log = [f'{t(1)} up=5 kbps=600 acl=96 wq=0 rssi=-5 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=20 ba=90 own=1\n']
+    assert q2bt.capacity(q2bt.parse(log)[0][0]) is None  # an older log: no done, no fly
+
+
+def test_the_report_names_the_verdict_per_segment():
+    log = [f'{t(0)} START h=1 mtu=1021 bufs=5 raw=ok\n', f'{t(0)} ENCODER ba-a2dp-aptx-hd\n']
+    log += [sat(i, 96, fly=1) for i in range(1, 20)] + [sat(20 + i, 99) for i in range(6)]
+    out = io.StringIO()
+    streams, notes = q2bt.parse(log)
+    q2bt.report(streams, notes, out)
+    text = out.getvalue()
+    assert 'saturated: 6 s with all 5 ACL buffers full' in text and 'basic rate' in text and '100/s' in text
