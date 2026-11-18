@@ -1121,10 +1121,9 @@ class Heart:
         if bind:
             fw.fn('rate_bind', None, C.c_void_p)(self.win)
 
-    def badge(self):
-        """The badge's digit, or None while it's hidden."""
-        badge = [w for w in self.ui.kids[self.win] if self.ui.kind[w] == 'hscroll_label_create'][0]  # before the picker's
-        return None if badge in self.ui.hidden else self.ui.text[badge]
+    def stars(self):
+        """The playing track's rating as the rating page shows it (ratings.c rate_now): 0 to 5, -1 for none."""
+        return self.fw.fn('rate_now', C.c_int)()
 
     def hold(self):
         self.ui.handler(self.heart, EVT_POINTER_DOWN)()
@@ -1156,35 +1155,23 @@ def test_a_heart_without_stock_s_click_is_left_alone(fw, ui, song, mcl, handler,
     assert ui.kids[heart.win] == [heart.heart]  # no badge
 
 
-@pytest.mark.parametrize('kept, fav, badge', [(3, False, '3'), (0, False, None), (3, True, None), (1, False, '1')])
-def test_the_badge_shows_the_kept_hearts_on_an_empty_heart(fw, ui, song, mcl, kept, fav, badge):
-    heart = Heart(fw, ui, song, mcl, kept=kept, fav=fav)
-    assert heart.badge() == badge
-
-
-@pytest.mark.parametrize('image, badge', [('oled_np_fav', None), ('oled_np_unfav_d', '3'), ('tidal_fav_add', '3')])
-def test_the_badge_reads_a_themes_own_heart_as_stocks(fw, ui, song, mcl, image, badge):
-    """np_bar.c np_glyphs names OLED's hearts after stock's: a full one (ending "_fav") hides the badge, as play_fav."""
-    heart = Heart(fw, ui, song, mcl, kept=3, image=image)
-    assert heart.badge() == badge
-
-
-def test_the_badge_follows_a_rating_while_lit(fw, ui, song, mcl, st):
-    heart = Heart(fw, ui, song, mcl, kept=2)
-    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, listen_key(b'/m/now.flac'), 4)
-    assert ui.fire('rate_tick') == REPEAT and heart.badge() == '2'  # the screen is dark: nothing paints
+@pytest.mark.parametrize('kept, fav, stars', [(3, False, 3), (0, False, 0), (3, True, 5), (1, False, 1)])
+@pytest.mark.parametrize('image', ['play_unfav', 'oled_np_unfav_d', 'oled_np_fav'])
+def test_the_heart_has_no_badge_and_its_hearts_are_the_stars(fw, ui, song, mcl, kept, fav, stars, image):
+    """The heart is the favourite alone: nothing is added beside it, whatever its image, and nothing is written on it
+    as the tick runs. The kept 1-4 hearts are the rating page's stars one for one, My Fav its 5 (np_rate.c)."""
+    heart = Heart(fw, ui, song, mcl, kept=kept, fav=fav, image=image)
     fw.var('g_backlight_status', C.c_ubyte).value = 1
-    assert ui.fire('rate_tick') == REPEAT and heart.badge() == '4'
-    writes = len([c for c in fw.calls('widget_set_text_utf8')])
-    ui.fire('rate_tick')
-    assert len(fw.calls('widget_set_text_utf8')) == writes  # unchanged: not written again
+    assert ui.fire('rate_tick') == REPEAT
+    assert ui.kids[heart.win] == [heart.heart] and not fw.calls('widget_set_text_utf8')
+    assert heart.stars() == stars
 
 
-def test_a_streamed_track_has_no_badge(fw, ui, song, mcl):
+def test_a_streamed_track_has_no_stars(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=3, bind=False)
     mcl.type = 0x2000  # a stream's queue
     fw.fn('rate_bind', None, C.c_void_p)(heart.win)
-    assert heart.badge() is None
+    assert heart.stars() == -1 and ui.kids[heart.win] == [heart.heart]
 
 
 def test_holding_the_heart_asks_for_the_picker(fw, ui, song, mcl):
@@ -1204,12 +1191,12 @@ def test_a_short_press_opens_nothing(fw, ui, song, mcl):
     assert not fw.calls('navigator_to') and not fw.calls('pointer_event_init')
 
 
-@pytest.mark.parametrize('kept, badge', [(4, '4'), (1, '1'), (0, None)])
-def test_the_picked_rating_is_kept(fw, ui, song, mcl, kept, badge):
+@pytest.mark.parametrize('kept', [4, 1, 0])
+def test_the_picked_rating_is_kept(fw, ui, song, mcl, kept):
     heart = Heart(fw, ui, song, mcl, kept=3)
     heart.hold()
     heart.pick(kept)
-    assert heart.kept() == kept and heart.copy_due() and heart.badge() == badge
+    assert heart.kept() == kept and heart.copy_due() and heart.stars() == kept
 
 
 def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
@@ -1286,7 +1273,7 @@ def test_a_tap_is_stock_s_toggle_and_forgets_the_kept_hearts(fw, ui, song, mcl):
     event = C.create_string_buffer(0x40)
     ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
     assert list(log[:2]) == [Heart.CTX, C.addressof(event)]
-    assert heart.kept() == 0 and heart.copy_due() and heart.badge() is None
+    assert heart.kept() == 0 and heart.copy_due() and heart.stars() == 0
 
 
 @in_fork
@@ -1360,7 +1347,7 @@ def test_a_rating_that_cannot_be_written_says_so(fw, ui, song, mcl):
     heart.files.fail_rename = True
     heart.hold()
     heart.pick(3)
-    assert ui.toasts == ['Rating not saved'] and heart.kept() == 2 and heart.badge() == '2'
+    assert ui.toasts == ['Rating not saved'] and heart.kept() == 2 and heart.stars() == 2
 
 
 # An album's rating, from the queue menu of an artist's albums.

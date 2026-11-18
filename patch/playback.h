@@ -19,6 +19,10 @@ unsigned playback_queue_insert(void *queue, void *add, int next);
 unsigned playback_next_rows(unsigned *out, unsigned max); /* Up Next's Playing Next, in order */
 int playback_next_move(unsigned from, unsigned to); /* Playing Next's entry from goes to place to */
 int playback_next_clear(void); /* Up Next's Clear: Playing Next's tracks leave the queue */
+/* A radio of the song playing: the queue becomes that song then add's, with no load (1) */
+int playback_queue_rest(void *add);
+/* song_radio.c: a playlist session's first entry is the song playing, its app's radio of it (1) */
+int song_radio_keeps(const char *first);
 void playback_insert(unsigned at, unsigned n, int next); /* the advanced part alone */
 int playback_move(unsigned from); /* Up Next's hold: from plays next; its new index, else -1 */
 void playback_poll(void);

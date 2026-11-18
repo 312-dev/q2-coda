@@ -45,7 +45,7 @@ static struct {
     char pair_code[8]; /* the code the Dialog shows */
     char pair_name[32]; /* the phone asking, for the toast */
     int toast_what;
-    int hearts; /* the playing song's, as rate_car_hearts; read at hearts_at for hearts_id, hearts_gen */
+    int hearts; /* the playing song's, as rate_now; read at hearts_at for hearts_id, hearts_gen */
     unsigned hearts_at, hearts_id, hearts_gen;
     char note[96]; /* the toast shown last, for the car, until note_at + CR_NOTE_MS; note_n counts them */
     unsigned note_at, note_n;
@@ -154,7 +154,7 @@ static void cr_queue(void *q, unsigned pos) {
 static int cr_hearts(unsigned id) {
     unsigned now = time_now_ms(), gen = catalogue_fav_gen();
     if (!cr.hearts_at || id != cr.hearts_id || gen != cr.hearts_gen || now - cr.hearts_at >= CR_HEARTS_MS)
-        cr.hearts = rate_car_hearts(), cr.hearts_id = id, cr.hearts_gen = gen, cr.hearts_at = now | 1;
+        cr.hearts = rate_now(), cr.hearts_id = id, cr.hearts_gen = gen, cr.hearts_at = now | 1;
     return cr.hearts;
 }
 
@@ -426,7 +426,7 @@ static void cr_command(void) {
     } else if (verb && __isoc99_sscanf(verb, " rate %d %d", &v, &w) == 2) {
         unsigned at, n;
         void *r = queue_now(&at, &n);
-        int ok = r && I(r, REC_ID) == w ? rate_car(v) : -1;
+        int ok = r && I(r, REC_ID) == w ? rate_now_set(v) : -1;
         cr.hearts_at = 0; /* 1 to 4 hearts move no My Fav generation: read them now */
         cr_now();
         cr_ack(seq, ok < 0 ? 3 : !ok);

@@ -124,10 +124,10 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page,
- * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
- * wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's song
- * playing does too (guest_ui.c guest_ui_keeps_lit). */
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page (not the rating
+ * page), or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the
+ * lyrics wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's
+ * song playing does too (guest_ui.c guest_ui_keeps_lit). */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (now - st.keep_lit_at < 1000) return;
@@ -138,7 +138,7 @@ static void keep_lit_poll(void) {
     accent(); /* reads the settings */
     if (st.keep_lit && g_backlight_status &&
         (guest || (mclGetPlayStatus() == 2 &&
-                   ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
+                   ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0) == 1) ||
                     (top && (top == st.bc[2] || top == np_about_page()))))))
         reset_poweroptions_timer(1, 1, 1);
 }
@@ -194,6 +194,9 @@ static void np_full(int on) {
     st.lyric_held = 0, st.lyric_drag_y = I(st.np_lrc, SCROLL_Y);
 }
 
+/* np_rate.c: the column full screen for the rating page, or back */
+void np_full_set(int on) { np_full(on); }
+
 static void lyric_poll(void) {
     void *lrc = st.np_lrc, *wm = window_manager();
     unsigned song = lrc ? np_track() : st.lyric_song;
@@ -202,7 +205,9 @@ static void lyric_poll(void) {
         lyric_top(lrc);
     }
     int page = lrc && st.np_slide && widget_get_prop_int(st.np_slide, "value", 0) == 1;
-    if (st.np_full && !page) np_full(0); /* full-screen lyrics end off their page */
+    np_rate_poll(); /* the rating page's full screen, on it and off it (np_rate.c) */
+    if (st.np_full && !page && !np_rate_on())
+        np_full(0); /* full-screen lyrics end off their page */
     int touch = lrc && window_manager_get_top_window(wm) == st.np_win && pointer_down();
     int shown = page && lyrics_shown(),
         on = shown && widget_count_children(lrc) && mclGetLyricSize() > 0;
@@ -274,6 +279,7 @@ static void lyric_poll(void) {
      * second's change, lyrics_now). Else the follow, which only jumps, at stock's timer's pace on
      * whole seconds (lyrics_sec), so a dark or covered page reads the clock only that often. */
     int front = page && usable() && window_manager_get_top_window(wm) == st.np_win;
+    lyrics_ask_poll(front); /* none of the song's own: its app's server's, when it has some */
     unsigned now = (unsigned)time_now_ms();
     if (lyrics_on(lrc) && (front || now - st.lyric_follow_at >= LYRIC_FOLLOW_MS)) {
         st.lyric_follow_at = now;
@@ -433,6 +439,7 @@ static int np_centre(unsigned now) {
         np_single();
         return STOP;
     }
+    if (np_rate_centre()) return STOP; /* the rating page's target (np_rate.c) */
     if (!st.scrub && st.np_stage == NP_STAGE_REST && np_stream_error()) {
         np_stream_retry(); /* Retry, the selected one (np_stream.c) */
         return STOP;
@@ -502,6 +509,7 @@ static int np_gone(void *win, void *event) {
         st.genre_label = (void *)0;
         np_cancel();
         lyrics_gone(); /* the next page's rows may take its rows' place */
+        np_rate_gone();
     }
     return 0;
 }
@@ -608,6 +616,7 @@ int ringnav_playing(void *win, void *ctx) {
     st.np_lrc = widget_lookup(win, "scroll_lrc", 1);
     st.lyric_song = st.lyric_rows_song = np_track(); /* no song change at the start */
     lyric_init();                                    /* the rows stock's init built */
+    np_rate_bind(win);                               /* after np_slide and np_lrc */
     np_marq_reset();
     void *lyric = widget_lookup(win, "view_lyric", 1);
     static const unsigned touch[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };

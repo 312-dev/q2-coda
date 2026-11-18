@@ -988,7 +988,8 @@ def validate_assets(directory):
                                                            'slide_view_view', 'slider_play', 'img_repeata', 'img_repeatb', 'image_wait',
                                                            'img_playmode']
             assert root[3][0][2]['visible'] == 'false' and 'label_ipod_pos' not in named
-            assert [n[2]['name'] for n in named['slide_view'][3]] == ['view_album', 'view_lyric']
+            # the swipe's pages: the art, the lyrics, then the rating page (np_rate.c)
+            assert [n[2]['name'] for n in named['slide_view'][3]] == ['view_album', 'view_lyric', 'view_rate']
             assert named['img_return'][1][0] < 0 and [n[2].get('name') for n in named['view_buttons'][3]] == ['img_return']
             album = named['view_album'][3]
             assert [n[2]['name'] for n in album] == ['img_cover', 'img_playstate', 'scrlabel_title', 'scrlabel_artist', 'label_ipod_album',

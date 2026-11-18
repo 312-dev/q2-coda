@@ -825,8 +825,8 @@ int ringnav(void *ctx, void *event) {
     int np = top == st.np_win || (!st.scrub && vol_band(wm));
     if (!np || window_manager_is_animating(wm) || pointer_down())
         np_cancel();
-    else if (key != KEY_CENTER && np_lyrics(key))
-        return STOP;
+    else if (key != KEY_CENTER && (np_rate_key(key) || np_lyrics(key)))
+        return STOP; /* the rating page's target (np_rate.c), or the lyrics */
     else if (key == KEY_CENTER || st.scrub || st.np_stage)
         return np_key(st.np_win, key);
     /* A keyboard (T9's, every text box's) on top takes Centre as a listed page does: a single press

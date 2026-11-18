@@ -35,22 +35,35 @@ class Radio(Q2):
             if C.string_at(name) == b'playing_page':
                 self.loads.value += 1
         fw.mock('navigator_to_with_context', navigate)
+        # stock shuffle's pool, which an edit keeps: a deque of ints, deque_at a pointer to one, as libcstl's
+        self.pool, self.cells = ui.deques.new(), []
+        C.c_uint.from_address(O['MCL_POOL']).value = self.pool
+        fw.mock('fw__deque_push_back', lambda q, v, *_: ui.deques[q].append(self.cell(v) if q == self.pool else v))
+        fw.mock('fw_deque_pop_back', lambda q, *_: ui.deques[q].pop() and 0)
+
+    def cell(self, v):
+        self.cells.append(C.c_int(v))
+        return C.addressof(self.cells[-1])
 
     def ids(self, queue):
         return [C.c_int.from_address(r).value for r in queue]
+
+    def playing(self):
+        """The queue playing now: the one started mid-song is the same deque, the seed at its front."""
+        return self.ui.deques[self.fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value]
 
 
 def test_a_card_songs_radio_is_its_artist_then_its_genre(fw, ui, mcl, recs):
     q2 = Radio(fw, ui, recs)
     q2.sec = 42
     q2.tap(None)
-    (queue, at, cls), = ui.played
-    ids = q2.ids(queue)
-    assert ids[0] == 10 and at == 0 and cls == 0xf001  # the seed first
+    assert not ui.played  # the seed plays on: the songs after it are the radio's (test_..._mid_song)
+    ids = q2.ids(q2.playing())
+    assert ids[0] == 10  # the seed first
     assert sorted(ids[1:4]) == [11, 12, 13] and sorted(ids[4:]) == [20, 21]  # Ann's (any case), then Rock's; no Jazz
     assert q2.on() == 1  # the pill
     q2.radio_poll()
-    assert [a[0] for _, a in fw.calls('player_seek_time')] == [42]  # the seed plays on where it was
+    assert not fw.calls('player_seek_time')
 
 
 def test_the_pill_stops_the_radio_and_another_queue_ends_it(fw, ui, mcl, recs):
@@ -59,7 +72,7 @@ def test_the_pill_stops_the_radio_and_another_queue_ends_it(fw, ui, mcl, recs):
     q2.radio_poll()
     assert q2.on() == 1
     q2.tap(None)  # the pill
-    assert q2.on() == 0 and ui.toasts[-1] == 'Radio Off' and len(ui.played) == 1
+    assert q2.on() == 0 and ui.toasts[-1] == 'Radio Off' and not ui.played
     q2.tap(None)
     q2.radio_poll()
     assert q2.on() == 1
@@ -100,11 +113,8 @@ def test_a_radio_adds_songs_as_they_run_out_and_none_twice(fw, ui, mcl, recs):
     q2.songs += [recs(id_=100 + i, path=f'/mnt/mmc/m/a{i}.flac', name=f'a{i}.flac', title=f'A {i}', artist='Ann',
                       genre='Rock') for i in range(40)]
     q2.tap(None)
-    (queue, _, _), = ui.played
-    assert len(queue) == 26  # the seed and SR_BATCH
+    assert len(q2.playing()) == 26  # the seed and SR_BATCH
     played = fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint)
-    played.value = ui.deques.new(queue)  # the radio's queue, as playing_page loads it
-    C.c_uint.from_address(O['MCL_POOL']).value = ui.deques.new()  # stock shuffle's pool, which an insert keeps
     C.c_int.from_address(O['MCL_POS']).value = 10  # 15 left: nothing yet
     q2.radio_poll()
     assert len(ui.deques[played.value]) == 26
@@ -122,9 +132,8 @@ def test_the_seed_is_never_queued_again_whatever_its_record_id(fw, ui, mcl, recs
     seed = recs(id_=999, path='/mnt/mmc/m/10.flac', name='10.flac', title='Song 10', artist='Ann', genre='Rock')
     q2.fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = ui.deques.new([seed])
     q2.tap(None)
-    (queue, _, _), = ui.played
-    paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0) for r in queue]
-    assert paths.count(b'/mnt/mmc/m/10.flac') == 1 and len(queue) == 6
+    paths = [C.string_at(C.c_void_p.from_address(r + O['REC_PATH']).value or 0) for r in q2.playing()]
+    assert paths.count(b'/mnt/mmc/m/10.flac') == 1 and len(q2.playing()) == 6
 
 
 # A song the Subsonic app streams: its stream cache's file (stream_path.h), which no library record has (the player's
@@ -188,3 +197,34 @@ def test_a_stale_card_copy_never_asks_for_an_update_of_the_builtin_app(fw, ui, m
     q2, world = streaming(fw, ui, recs, b'name=Subsonic\n', builtin=b'name=Subsonic\nradio=1\n')
     q2.tap(None)
     assert ui.toasts == ['Starting Radio…'] and b'/tmp/q2-subsonic.radio' in world.files
+
+
+def splice_rig(fw, ui, q2, recs, rows, at):
+    """The queue playing rows (records of their own, not the library's: a splice moves the playing row's bytes),
+    rows[at] playing."""
+    played = fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint)
+    played.value = ui.deques.new(rows)
+    C.c_int.from_address(O['MCL_POS']).value = at
+    return played
+
+
+def test_a_radio_started_mid_song_leaves_the_song_playing(fw, ui, mcl, recs):
+    """The user's, 2026-11-17: Radio "jumped backwards": the radio's queue was loaded with the seed first, which
+    started again and was sought back to its place. The seed now plays on untouched: no queue loads, nothing is
+    sought or started, and only the songs after it are the radio's."""
+    q2 = Radio(fw, ui, recs)
+    rows = [recs(id_=i, path=f'/mnt/mmc/m/{i}.flac', name=f'{i}.flac', title=f'Song {i}', artist=a, genre=g)
+            for i, a, g in [(30, 'Cy', 'Jazz'), (10, 'Ann', 'Rock'), (21, 'Bob', 'Rock')]]
+    played = splice_rig(fw, ui, q2, recs, rows, 1)
+    seed = rows[1]
+    q2.sec = 42
+    q2.tap(None)
+    assert not ui.played and q2.loads.value == 0  # no load: the player plays on
+    ids = q2.ids(ui.deques[played.value])
+    assert ids[0] == 10 and C.c_int.from_address(O['MCL_POS']).value == 0  # the same song, still the one playing
+    assert ui.deques[played.value][0] in (seed, rows[0])  # its row, kept (moved to the front, not copied)
+    assert sorted(ids[1:4]) == [11, 12, 13] and sorted(ids[4:]) == [20, 21]  # Cy's Jazz before it is gone
+    assert q2.on() == 1
+    q2.ms += 1000
+    q2.radio_poll()
+    assert not fw.calls('player_seek_time') and not fw.calls('player_start_queue')

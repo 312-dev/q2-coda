@@ -1528,6 +1528,35 @@ int playback_next_clear(void) {
     playback_save();
     return w < size;
 }
+/* A radio of the song playing (song_radio.c, addon.c; docs/internals.md#radio): every row but the
+ * playing one leaves the queue, which then holds that song alone at place 0, and add's rows join
+ * after it. Nothing loads, so the player plays on untouched, at its place, with no new song sent:
+ * only a preload of the row after it closes. Stock's indices follow (stock_remap), advanced play's
+ * too (follow_queue), Playing Next empties, and a Shuffle Songs mode is put back as a new queue's
+ * load puts it back (ringnav_load). 0, nothing changed, when nothing plays. */
+int playback_queue_rest(void *add) {
+    void *q = queue();
+    unsigned size = q ? deque_size(q) : 0, pos = (unsigned)M(MCL_POS);
+    unsigned *map = pos < size ? calloc(size + 1, sizeof *map) : 0;
+    if (!map) return 0;
+    for (unsigned i = 0; i < size; ++i) map[i] = i == pos ? 0 : ~0u;
+    plain_follow();
+    s.npend = 0;
+    stock_unpreload();
+    if (pos) swap_rows(q, pos, 0);
+    M(MCL_POS) = 0;
+    stock_remap(map, size);
+    for (unsigned i = 1; i < size; ++i) deque_pop_back(q);
+    free(map);
+    follow_queue();
+    s.plain_size = 1;
+    s.next_valid = 0;
+    s.dirty = 1;
+    if (unshuffle && !s.restoring) config_playmode(playback_unshuffle(), 1);
+    if (add && deque_size(add)) playback_queue_insert(q, add, 0);
+    playback_save();
+    return 1;
+}
 
 /* Snapshot fields are little-endian uint32 on this MIPS target, no pointers. Version 3: after the
  * history comes the pending Play Next list, npend indices. Version 2 had one run of it, forced and

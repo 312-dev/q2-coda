@@ -133,8 +133,8 @@ static struct {
     int np_back;
     char np_cover[160]; /* its art: "file://" and the app's cover, or stock's placeholder */
     /* cat_row_of's last answer, on the UI thread: the path's fnv64, local_gen plus 1 when it was
-     * found, and the entry's index plus 1 (0 for none). Now Playing's badge asks for the playing
-     * copy twice a second (ratings.c rate_badge). */
+     * found, and the entry's index plus 1 (0 for none). Now Playing's heart asks for the playing
+     * copy twice a second (ratings.c rate_heart). */
     unsigned long long row_path;
     unsigned row_gen, row_at;
     /* catalogue_row_fav's last answer: the row asked (row_at), local_gen plus 1 and fav_gen when
@@ -1282,6 +1282,23 @@ int catalogue_copy_tags(void *r) {
     return ctx[1] != 0;
 }
 
+/* Whether paths a and b play one song: the same path, the same server row (its own path, or a
+ * Stream Cache copy of it, cat_copy_of), or two downloads of one server song (stream_path.h: the
+ * same app and sid), such as an app's radio naming the song playing again (song_radio.c). */
+int catalogue_same_song(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    if (!strcmp(a, b)) return 1;
+    const cat_ent *x = catalogue_path(a) ? cat_lookup(a) : cat_copy_of(a),
+                  *y = catalogue_path(b) ? cat_lookup(b) : cat_copy_of(b);
+    if (x && x == y) return 1;
+    const char *app[2], *sid[2];
+    int appn[2], sidn[2];
+    return stream_path_sid(a, &app[0], &appn[0], &sid[0], &sidn[0]) &&
+           stream_path_sid(b, &app[1], &appn[1], &sid[1], &sidn[1]) && appn[0] == appn[1] &&
+           sidn[0] == sidn[1] && !memcmp(app[0], app[1], (unsigned)appn[0]) &&
+           !memcmp(sid[0], sid[1], (unsigned)sidn[0]);
+}
+
 /* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
  * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover
  * /mnt/mmc/.<id>/covers/<album id>.jpg, into out, when it is there. 0 for any other path, or none
@@ -2226,7 +2243,7 @@ static int fav_found(void *ctx, int n, char **v, char **c) {
 /* Whether r, a server song's Stream Cache copy, is a favourite by its server row: the row's path
  * in stock's myfav, where five hearts from the server (ratings_in) or the queue menu on the
  * Library's row put it. Stock checks the copy's own path, which isn't there. -1 when r is
- * no copy. Now Playing asks twice a second (ratings.c rate_badge): the answer is kept until the
+ * no copy. Now Playing asks twice a second (ratings.c rate_heart): the answer is kept until the
  * row, the index or My Fav changes. */
 int catalogue_row_fav(void *r) {
     const cat_ent *e = cat_row_of(r);

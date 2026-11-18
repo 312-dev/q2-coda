@@ -490,6 +490,9 @@ int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
 int addon_radio_answer(unsigned seq);
 const char *addon_radio_missing(const char *path);
+/* addon.c: a song's lyrics asked of its app (lyrics.c); the answer to request seq, -1 none yet */
+int addon_lyrics_ask(const char *path, unsigned seq);
+int addon_lyrics_answer(unsigned seq, const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -552,6 +555,8 @@ int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
 /* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
 int catalogue_copy_tags(void *r);
+/* catalogue.c: whether two paths play one song (song_radio.c) */
+int catalogue_same_song(const char *a, const char *b);
 /* catalogue.c: Now Playing shows r, not yet the player's, at its place at of n (addon.c) */
 void catalogue_np_show(void *r, unsigned at, unsigned n);
 /* tags.c: a card app's song's record named before it plays, from its server row or its file */
@@ -593,11 +598,15 @@ typedef struct {
  * first), repainting it while page shows; lyrics_paint draws a row's line, lyrics_fade OLED's
  * faded edges over the view. */
 void lyrics_publish(const lrc_line *l, unsigned n, const lrc_mark *m);
+void lyrics_ask_poll(int front); /* a server song's lyrics asked of its app (addon_lyrics_ask) */
+int ringnav_lyric(void);
 int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_now(void),
     lyrics_row_h(void),
     lyrics_row_h(void),
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas), lyrics_gone(void);
+/* np_rate.c: rows y to y + n of w's from Now Playing's glow at alpha a; 0 when there is none */
+int np_glow_rows(void *w, void *canvas, int y, int n, unsigned a);
 unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column  */
 unsigned rgba(unsigned rgb, unsigned alpha);
 /* const and pure below: each one's result rests on its arguments (and pure's, memory) alone, so

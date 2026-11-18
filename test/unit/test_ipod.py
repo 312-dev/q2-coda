@@ -394,7 +394,30 @@ def test_playing_page_takes_the_details_out_of_the_swipe(page):
     info, box, slide = n['view_info'], n['slide_view_view'][1], n['slide_view'][1]
     assert root[3][0] is info and info[2]['visible'] == 'false' and 'self_layout' not in info[2]
     assert info[1] == [box[0] + slide[0], box[1] + slide[1], slide[2], slide[3]]
-    assert [c[2]['name'] for c in n['slide_view'][3]] == ['view_album', 'view_lrc', 'label_lyricmsg']
+    assert [c[2]['name'] for c in n['slide_view'][3]] == ['view_album', 'view_lrc', 'view_rate', 'label_lyricmsg']
+
+
+def test_playing_page_puts_the_rating_page_after_the_lyrics(page):
+    """The rating page (patch/np_rate.c) is an empty view the swipe reaches after the lyrics' page, the slide_view's
+    third: art, lyrics, rating. It fills the slide_view, whose size full screen sets at run time."""
+    _, n = page
+    pages = n['slide_view'][3]
+    rate = n['view_rate']
+    assert pages.index(rate) == pages.index(n['view_lrc']) + 1 == 2 and rate[0] == 'view' and rate[3] == []
+    assert rate[2]['self_layout'] == 'default(x=0,y=0,w=100%,h=100%)' and rate[1][2:] == n['slide_view'][1][2:]
+
+
+def test_the_rating_page_follows_a_lyrics_page_that_holds_its_list():
+    """Stock's own lyrics page is a view holding view_lrc (with label_lyricmsg): the rating page goes after that
+    page, not inside it."""
+    root = playing(STOCK_INFO)
+    named_ = named(root)
+    slide = named_['slide_view']
+    lrc = named_['view_lrc']
+    lyric = w('view_lyric', named_['label_lyricmsg'], lrc)
+    slide[3] = [named_['view_album'], lyric, named_['view_info']]
+    ipod.playing_page(root, OLED_SET)
+    assert [c[2]['name'] for c in slide[3]] == ['view_album', 'view_lyric', 'view_rate']
 
 
 def test_playing_page_wants_the_stock_children():
