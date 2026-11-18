@@ -78,7 +78,7 @@ typedef struct {
 
 typedef struct {
     char id[16];
-    int ratings;   /* q2app ratings=1 */
+    int ratings;   /* q2app ratings=: 1 the server's hearts in, 2 also stars and likes out */
     char dl[32];   /* q2app downloads=: the card folder it downloads songs to, "" for none */
     char seq[24];  /* the catalogue's seq taken last */
     long avail_at; /* catalogue.avail read this far */
@@ -1570,7 +1570,7 @@ static void cat_scan(void) {
         for (int i = 0; i < wasn; ++i)
             if (!strcmp(was[i].id, id)) *a = was[i];
         tk_snprintf(a->id, sizeof a->id, "%s", id);
-        a->ratings = number(raw, "ratings") == 1;
+        a->ratings = number(raw, "ratings");
         field(raw, "downloads", a->dl, sizeof a->dl);
         if (strstr(a->dl, "/") || a->dl[0] == '.') a->dl[0] = 0; /* one folder at the card's root */
     }
@@ -2143,18 +2143,20 @@ done:
 
 /* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */
 
-/* A song's hearts changed on the Q2: a line to each app with ratings=1. A server song playing
- * from its offline copy is its server row (catalogue_song_key): the row's key and sid. */
-void catalogue_rated(void *r, int hearts) {
+/* A song's stars or like changed on the Q2: a line ("stars=N" or "like=0|1") to each app with
+ * ratings=2. An app with ratings=1 takes one number, five for its star, so it can carry neither
+ * apart from the other and is sent nothing. A server song playing from its offline copy is its
+ * server row (catalogue_song_key): the row's key and sid. */
+static void rated_line(void *r, const char *what, int v) {
     const char *path = r ? P(r, REC_PATH) : 0;
     if (!path || !cat.napps) return;
     const cat_ent *row = cat_row_of(r), *e = row ? row : cat_lookup(path);
     unsigned key = row ? row_key(row) : listen_key(r);
     char line[1200], file[64];
     for (int i = 0; i < cat.napps; ++i) {
-        if (!cat.app[i].ratings) continue;
+        if (cat.app[i].ratings < 2) continue;
         const char *sid = e && e->app == i ? ix_str(&cat.ix, e->sid) : "";
-        int k = tk_snprintf(line, sizeof line, "%08x\t%s\t%d\t%u\n", key, sid, hearts,
+        int k = tk_snprintf(line, sizeof line, "%08x\t%s\t%s=%d\t%u\n", key, sid, what, v,
                             (unsigned)time(0));
         if (k <= 0 || (unsigned)k >= sizeof line) continue;
         tk_snprintf(file, sizeof file, "/mnt/mmc/.%s/ratings.out", cat.app[i].id);
@@ -2162,14 +2164,30 @@ void catalogue_rated(void *r, int hearts) {
         if (f) fwrite(line, 1, (unsigned)k, f), fclose(f);
     }
 }
+void catalogue_rated(void *r, int stars) { rated_line(r, "stars", stars); }
+void catalogue_liked(void *r, int on) { rated_line(r, "like", on != 0); }
 
-/* The newest time ratings.out holds for key (its first column), 0 for none. */
-static unsigned out_time(const char *out, const char *key) {
+/* A line's third column: 'l' for a like, 's' for stars, 'h' for an app's one number (ratings=1:
+ * five its star, else its stars and no star), 0 for none of them. */
+static char rated_kind(const char *v) {
+    return !strncmp(v, "like=", 5)    ? 'l'
+           : !strncmp(v, "stars=", 6) ? 's'
+           : *v >= '0' && *v <= '9'   ? 'h'
+                                      : 0;
+}
+/* The newest time ratings.out holds for key (its first column) changing kind, 0 for none; a line
+ * of one number changed both. */
+static unsigned out_time(const char *out, const char *key, char kind) {
     unsigned t = 0, k = strlen(key);
     for (const char *l = out; l && *l;) {
-        const char *e = strstr(l, "\n"), *tab = l;
-        for (int c = 0; c < 3 && tab; ++c) tab = strstr(tab, "\t") ? strstr(tab, "\t") + 1 : 0;
-        if (tab && !strncmp(l, key, k) && l[k] == '\t' && (unsigned)atoi(tab) > t)
+        const char *e = strstr(l, "\n"), *tab = l, *v = 0;
+        for (int c = 0; c < 3 && tab; ++c) {
+            tab = strstr(tab, "\t") ? strstr(tab, "\t") + 1 : 0;
+            if (c == 1) v = tab;
+        }
+        char was = v ? rated_kind(v) : 0;
+        if (tab && !strncmp(l, key, k) && l[k] == '\t' && (was == kind || was == 'h') &&
+            (unsigned)atoi(tab) > t)
             t = (unsigned)atoi(tab);
         l = e ? e + 1 : 0;
     }
@@ -2188,7 +2206,7 @@ static unsigned hex32(const char *s) {
  * synced files are not in the catalogue), in one pass over it for all of them. */
 typedef struct {
     unsigned key;
-    int hearts;
+    int stars, like;   /* -1: the line leaves it as it is */
     char *path, *copy; /* copy: a server row's Stream Cache copy, or 0 */
 } in_t;
 typedef struct {
@@ -2210,7 +2228,8 @@ static int key_row(void *ctx, int n, char **v, char **c) {
             lo = (lo + hi) / 2 + 1;
         else
             hi = (lo + hi) / 2;
-    if (lo < k->n && k->l[lo].key == key && !k->l[lo].path) k->l[lo].path = strdup(v[0]);
+    for (; lo < k->n && k->l[lo].key == key; ++lo) /* a song's like and stars: a line each */
+        if (!k->l[lo].path) k->l[lo].path = strdup(v[0]);
     return 0;
 }
 extern int rate_keep(int album, unsigned key, int n);
@@ -2276,11 +2295,13 @@ void catalogue_row_unfav(void *r) {
     if (e) fav_set(ix_str(&cat.ix, e->path), 0, 0), catalogue_fav_changed();
 }
 
-/* ratings.in's lines applied as a rating made here (rate_keep by the key, My Fav for five by the
- * path; a server row's Stream Cache copy out of My Fav whatever the hearts, so a heart given to the
- * copy here follows the server's), unless the Q2's own change to that song, still in ratings.out,
- * is newer. The file is renamed before it is read, so lines the app writes meanwhile go to a new
- * ratings.in, not lost. */
+/* ratings.in's lines applied as a change made here: "stars=N" kept by the key (rate_keep),
+ * "like=0|1" My Fav by the path (a server row's Stream Cache copy out of My Fav either way, so a
+ * heart given to the copy here follows the server's). An app with ratings=1 writes one number:
+ * five is its star, the like, with the stars left as they are; under five is that many stars and
+ * no like. A line is passed over when the Q2's own change of the same kind to that song, still in
+ * ratings.out, is newer. The file is renamed before it is read, so lines the app writes meanwhile
+ * go to a new ratings.in, not lost. */
 static void ratings_in(int slot) {
     char in[64], taking[72], outp[64];
     if (!cat.app[slot].ratings) return;
@@ -2298,11 +2319,17 @@ static void ratings_in(int slot) {
         char *f[4];
         if (tsv_split(l, f, 4) < 4) continue;
         unsigned key = hex32(f[0]);
-        int hearts = atoi(f[2]);
-        if (!key || hearts < 0 || hearts > 5) continue;
-        if (out && out_time(out, f[0]) > (unsigned)atoi(f[3])) continue;
+        char kind = rated_kind(f[2]);
+        int v = atoi(f[2] + (kind == 'l' ? 5 : kind == 's' ? 6 : 0));
+        if (!key || !kind || v < 0 || v > (kind == 'l' ? 1 : 5)) continue;
+        int stars = kind == 's' || (kind == 'h' && v < 5) ? v : -1;
+        int like = kind == 'l' ? v : kind == 'h' ? v == 5 : -1;
+        unsigned at = (unsigned)atoi(f[3]);
+        if (out && stars >= 0 && out_time(out, f[0], 's') > at) stars = -1;
+        if (out && like >= 0 && out_time(out, f[0], 'l') > at) like = -1;
+        if (stars < 0 && like < 0) continue;
         in_t *t = &k.l[k.n++];
-        t->key = key, t->hearts = hearts;
+        t->key = key, t->stars = stars, t->like = like;
         const cat_ent *x = *f[1] ? ix_sid(&cat.ix, slot, f[1]) : 0;
         if (x) t->path = strdup(ix_str(&cat.ix, x->path));
         if (x && !x->dup && x->local)
@@ -2317,9 +2344,9 @@ static void ratings_in(int slot) {
         sqlite3_close(db);
     }
     for (unsigned i = 0; i < k.n; ++i) {
-        rate_keep(0, k.l[i].key, k.l[i].hearts);
-        if (k.l[i].path)
-            fav_set(k.l[i].path, k.l[i].hearts == 5, k.l[i].copy), catalogue_fav_changed();
+        if (k.l[i].stars >= 0) rate_keep(0, k.l[i].key, k.l[i].stars);
+        if (k.l[i].like >= 0 && k.l[i].path)
+            fav_set(k.l[i].path, k.l[i].like, k.l[i].copy), catalogue_fav_changed();
         free(k.l[i].path), free(k.l[i].copy);
     }
     free(k.l), free(raw), free(out);

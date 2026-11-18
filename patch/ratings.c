@@ -1,28 +1,28 @@
-/* Ratings: a song's or album's hearts, Now Playing's heart and its picker, the Library's Ratings
- * lists, and the card's copy of the ratings. A song's hearts are the stars of Now Playing's rating
- * page (np_rate.c), one for one. */
+/* Ratings: a song's stars and an album's hearts, Now Playing's heart, the Library's Ratings lists,
+ * and the card's copy of the ratings. The heart is the like alone (stock's My Fav); a song's stars
+ * are set only on Now Playing's rating page (np_rate.c) and are kept here, apart from it. */
 #include "navigation.h"
 
-/* Ratings: the songs' 1-4 and albums' 1-5 heart tables (calloc'd on first use); Now Playing's
- * heart and the heart's stock click context, the hearts picked, the heart's hold timer (rate_held
- * once it fired), and the album rated (album_id, 0 for the playing track); the Ratings menu.
- * navigation.h's st has the windows and the list page. */
+/* Ratings: the songs' 1-5 star and albums' 1-5 heart tables (calloc'd on first use); Now Playing's
+ * heart and the heart's stock click context; the Ratings menu. navigation.h's st has the windows
+ * and the list page. */
 static struct {
     unsigned *rates, *album_rates;
     void *rate_fav, *rate_ctx;
-    unsigned rate_row;                  /* the copy's row key whose heart rate_row_heart filled */
-    unsigned rate_gen;                  /* catalogue_fav_gen when rate_row_heart last read My Fav */
-    int rate_pick, rate_was, rate_held; /* the hearts picked, those the picker opened on */
-    unsigned rate_hold, rate_tick, rate_album;
+    unsigned rate_row; /* the copy's row key whose heart rate_row_heart filled */
+    unsigned rate_gen; /* catalogue_fav_gen when rate_row_heart last read My Fav */
+    unsigned rate_tick;
     void *rt_menu;
 } ra __attribute__((section(".scratch")));
 
-/* Ratings (docs/internals.md#ratings): 0 to 5 hearts a song. 5 is stock's My Fav, so Now Playing's
- * heart, the queue menu's Favourites rows and Loved stay one; 1 to 4 are kept here by listen_key,
- * its low three bits holding the hearts, read once into a table calloc'd on first use. */
+/* Ratings (docs/internals.md#ratings): 0 to 5 stars a song, kept here by listen_key, its low three
+ * bits holding the stars, read once into a table calloc'd on first use. The like is stock's My Fav,
+ * so Now Playing's heart, the queue menu's Favourites rows and Loved stay one, and it says nothing
+ * of the stars. */
 #define RATINGS_FILE "/mnt/data/ringnav-ratings"
 /* Albums keep 1 to 5 hearts apart from their songs, by coverflow.c's album_id: 5 is the album's
- * favourite, there being no stock one, and puts its songs in My Fav (rate_album_favs). */
+ * favourite, there being no stock one, and puts its songs in My Fav (rate_album_favs). Only the
+ * favourite is set now; 1 to 4 kept before stay, and Ratings' Albums lists them. */
 #define ALBUM_RATINGS_FILE "/mnt/data/ringnav-album-ratings"
 /* Now Playing's heart click (playing_page_init binds it to img_fav with the window): stock's My
  * Fav toggled for the playing track (manage_myfav), and the heart's image with it. */
@@ -51,16 +51,17 @@ static int rate_slot(int album, unsigned key, int free) {
     return free ? empty : -1;
 }
 
-/* The hearts kept for key, 1 to 4 for a song or 5 for an album, else 0 (a malformed slot too). */
+/* The stars (a song's) or hearts (an album's) kept for key, 1 to 5, else 0 (a malformed slot
+ * too). */
 int rate_kept(int album, unsigned key) {
     int i = rate_slot(album, key, 0), n = i < 0 ? 0 : (int)(rates(album)[i] & 7);
-    return n <= 4 + album ? n : 0;
+    return n <= 5 ? n : 0;
 }
 
-/* Keeps n hearts for key: a song's 1 to 4, none for 0 and 5 (My Fav's); an album's 1 to 5. 1 when
- * saved, 0 when the table is full, -1 when the file was not written (the slot then as it was). */
+/* Keeps n for key, 1 to 5, or none for 0. 1 when saved, 0 when the table is full, -1 when the file
+ * was not written (the slot then as it was). */
 int rate_keep(int album, unsigned key, int n) {
-    int some = n > 0 && n < 5 + album, i = rate_slot(album, key, some);
+    int some = n > 0 && n <= 5, i = rate_slot(album, key, some);
     if (i < 0) return !some;
     unsigned *t = rates(album), old = t[i];
     t[i] = some ? (key & ~7u) | (unsigned)n : 0;
@@ -87,8 +88,8 @@ int fav_told(void *r, int on) {
     return 0;
 }
 
-/* Five hearts is a favourite, so an album's are its songs' too: the queue menu's album's tracks
- * into My Fav through batch-select's Add (0xf00a skips those already in it), or out.
+/* An album's favourite is its songs' like: the queue menu's album's tracks into My Fav through
+ * batch-select's Add (0xf00a skips those already in it), or out. Their stars stay as they were.
  * ponytail: taking an album out takes every song; nothing records which were favourites first. */
 void rate_album_favs(void *album, int on) {
     void *t = qm_collect(album);
@@ -105,20 +106,20 @@ void rate_album_favs(void *album, int on) {
         void *r = deque_at(t, i);
         int was = on || checkFavExist(r) != 0;
         if (!on) deleteMusicFromFav(r);
-        if (was) catalogue_rated(r, on ? 5 : 0);
+        if (was) catalogue_liked(r, on);
         if (was && told) told = fav_told(r, on);
     }
     deque_destroy(t);
     ratings_copy_due();
 }
 
-/* The key r's 1 to 4 hearts are kept under: its listen_key, or a server song's offline copy's
- * row's (catalogue_song_key), so hearts given while the copy plays are the song's on the server
- * and in the Library (docs/server-library.md#ratings-and-favorites). */
+/* The key r's stars are kept under: its listen_key, or a server song's offline copy's row's
+ * (catalogue_song_key), so stars given while the copy plays are the song's on the server and in
+ * the Library (docs/server-library.md#ratings-and-favorites). */
 unsigned rate_song_key(void *r) { return catalogue_song_key(r, listen_key(r)); }
 
-/* r's My Fav: stock's, by its own path, or a server song's Stream Cache copy's by its server row
- * (catalogue_row_fav), where five hearts from the server put it. */
+/* r's My Fav, its like: stock's, by its own path, or a server song's Stream Cache copy's by its
+ * server row (catalogue_row_fav), where a star from the server puts it. */
 int rate_fav(void *r) { return checkFavExist(r) || catalogue_row_fav(r) > 0; }
 
 /* The playing local track (the queue menu's types), or 0. */
@@ -128,17 +129,10 @@ static void *rate_track(void) {
     return queue_now(&at, &n);
 }
 
-/* "♥♥♥♡♡" for n hearts, in s (16 bytes). */
-const char *hearts_text(char *s, int n) {
-    char *p = s;
-    for (int i = 0; i < 5; i++) p += tk_snprintf(p, 4, i < n ? "\xe2\x99\xa5" : "\xe2\x99\xa1");
-    return s;
-}
-
-/* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav") */
+/* play_fav, or the theme's own full heart (np_bar.c np_glyphs: "<art>np_fav_d" or "_l") */
 static int heart_full(const char *image) {
     unsigned k = (unsigned)strlen(image);
-    return k >= 4 && !tk_strcmp(image + k - 4, "_fav");
+    return (k >= 4 && !tk_strcmp(image + k - 4, "_fav")) || strstr(image, "np_fav_") != 0;
 }
 static void heart_set(const char *image) {
     image_base_set_image(ra.rate_fav, image);
@@ -163,8 +157,8 @@ static void rate_row_heart(void *r) {
     else if (!row && heart_full(image) && (ra.rate_row || (changed && !checkFavExist(r))))
         heart_set("play_unfav"), ra.rate_row = 0;
 }
-/* The heart on Now Playing is the favourite alone: the playing track's server row fills or empties
- * it (rate_row_heart). Its 1-4 hearts are the rating page's stars (np_rate.c), not drawn here. */
+/* The heart on Now Playing is the like alone: the playing track's server row fills or empties it
+ * (rate_row_heart). The song's stars are the rating page's (np_rate.c), not drawn here. */
 static void rate_heart(void) {
     if (ra.rate_fav) rate_row_heart(rate_track());
 }
@@ -174,114 +168,30 @@ static int rate_tick(const void *unused) {
     return 8; /* RET_REPEAT */
 }
 
-static int rate_song(int n);
-/* Keeps rate_pick for the picker that was over win: an album (rate_album) if still Coverflow's
- * centre card, else the playing track, My Fav in or out through the heart's own click and the
- * rest kept here. */
-static void rate_save(void *win) {
-    int n = ra.rate_pick;
-    if (ra.rate_album) { /* the menu's album, still on its page */
-        void *a = window_manager_get_top_window(window_manager()) == win ? qm_record() : (void *)0;
-        if (!a || qm_album_id(a) != ra.rate_album) {
-            toast("Album changed");
-            return;
-        }
-        if (rate_saved(rate_keep(1, ra.rate_album, n)) && (n == 5 || ra.rate_was == 5))
-            rate_album_favs(a, n == 5);
-        return;
-    }
-    rate_song(n);
-}
-
-/* n hearts for the playing track, My Fav in or out with them: through the heart's own click while
- * Now Playing is open (ra.rate_ctx), so its heart follows, else as the queue menu's Favorites rows
- * do (navigation.c qm_run). 1 when kept, 0 when nothing plays that can be rated or it was not saved. */
+/* n stars for the playing track, 0 clearing them: kept by its key and told to the server
+ * (docs/server-library.md#ratings-and-favorites); its like, the heart, is left as it is. 1 when
+ * kept, 0 when nothing plays that can be rated or it was not saved. */
 static int rate_song(int n) {
     void *r = rate_track();
-    if (!r) return 0;
-    int fav = checkFavExist(r) != 0, row = catalogue_row_fav(r) > 0;
-    if (!rate_saved(rate_keep(0, rate_song_key(r), n))) return 0;
-    catalogue_rated(r, n); /* to the server too (docs/server-library.md#ratings-and-favorites) */
-    ra.rate_row = 0;
-    if (n != 5 && row) catalogue_row_unfav(r); /* a copy's row: stock's toggle would add the copy */
-    if (n == 5 ? !fav && !row : fav) {
-        if (ra.rate_ctx) {
-            FAV_CLICK(ra.rate_ctx, (void *)0);
-        } else if (n == 5) { /* batch-select's Add to My Fav on the queue's row, as the menu's */
-            unsigned at, size;
-            queue_now(&at, &size);
-            batch_init_selectrecord((int)size);
-            batch_set_selectitem((int)at);
-            batch_add_file(0xf001, 0xf00a, P(mcl_pdeqplaylist, 0), P(p_vector_select_record, 0), 0);
-        } else {
-            deleteMusicFromFav(r);
-        }
-    } else if (n != 5 && row && ra.rate_ctx) {
-        heart_set("play_unfav");
-    }
-    if ((n == 5) != (fav || row)) ratings_copy_due(), fav_told(r, n == 5);
-    rate_heart();
+    if (!r || !rate_saved(rate_keep(0, rate_song_key(r), n))) return 0;
+    catalogue_rated(r, n);
     return 1;
 }
 
-/* The playing track's rating, set (Now Playing's rating page, np_rate.c, and Car Remote's Rate,
- * coda_rc_shim.c: 1 kept) and read: 0 to 5, 5 for My Fav, -1 when nothing plays that can be rated
- * (a stream, a radio). */
+/* The playing track's stars, set (Now Playing's rating page, np_rate.c, and Car Remote's Rate,
+ * coda_rc_shim.c: 1 kept) and read: 0 to 5, -1 when nothing plays that can be rated (a stream, a
+ * radio). */
 int rate_now_set(int n) { return n >= 0 && n <= 5 && rate_song(n); }
 int rate_now(void) {
     void *r = rate_track();
-    return !r ? -1 : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
+    return r ? rate_kept(0, rate_song_key(r)) : -1;
 }
 
-/* The picker (docs/oled-design.md#menus): the menu sheet's, a row for each rating, the current one
- * checked; a pick keeps its row's rating and Return leaves the rating as it was. */
-static const char *const rate_rows[] = { "Unrated",  "1 Heart",  "2 Hearts",
-                                         "3 Hearts", "4 Hearts", "5 Hearts" };
-static void *rate_page __attribute__((section(".scratch")));
-static void rate_picked(int n) {
-    ra.rate_pick = n;
-    rate_save(rate_page);
-}
-/* The picker over win on pick hearts, for the queue menu's album album or, with 0, the playing
- * track. */
-int rate_show(void *win, int pick, unsigned album) {
-    if (!win) return 0;
-    ra.rate_pick = ra.rate_was = pick;
-    ra.rate_album = album;
-    rate_page = win;
-    return modal_pick((void *)0, rate_rows, 6, pick, rate_picked);
-}
-/* Now Playing's, on the playing track's rating. */
-int rate_open(void) {
-    void *r = rate_track();
-    return r && rate_show(st.rate_win, rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r)), 0);
-}
-
-/* Holding the heart RATE_HOLD_MS opens the picker; a tap is stock's, a full heart then keeping
- * nothing here, so taking it away leaves the song unrated. The picker aborts the press, so the
- * slide_view under the heart lets go of its grab and the picker takes the next touch. */
-static int rate_long(const void *unused) {
-    ra.rate_hold = 0;
-    if (!pointer_down() || !(ra.rate_held = rate_open())) return 0;
-    unsigned abort_event[12];
-    pointer_event_init(abort_event, EVT_POINTER_ABORT, st.rate_win, 0, 0);
-    widget_dispatch_event_to_target_recursive(st.rate_win, abort_event);
-    return 0;
-}
-static int rate_down(void *ctx, void *event) {
-    ra.rate_held = 0;
-    rearm(&ra.rate_hold, rate_long, RATE_HOLD_MS);
-    return 0;
-}
-/* Returns 0 as stock's does: a STOP skips the slide_view's own release, and it keeps its grab.
- * A card app's streamed song with an item has the app's heart instead (tidal.c app_fav), flipped
- * at once in stock's Tidal images, as stock's own click draws a 0xf1 track's. */
+/* The heart's click: the like toggled, the stars left alone. Returns 0 as stock's does: a STOP
+ * skips the slide_view's own release, and it keeps its grab. A card app's streamed song with an
+ * item has the app's heart instead (tidal.c app_fav), flipped at once in stock's Tidal images, as
+ * stock's own click draws a 0xf1 track's. */
 static int rate_fav_click(void *ctx, void *event) {
-    stop_timer(&ra.rate_hold);
-    if (ra.rate_held) {
-        ra.rate_held = 0;
-        return 0;
-    }
     int app = app_fav();
     if (app >= 0) image_base_set_image(ra.rate_fav, app ? "tidal_fav_add" : "tidal_fav_rm");
     if (app == -2) toast("Favorite not saved");
@@ -301,8 +211,8 @@ static int rate_fav_click(void *ctx, void *event) {
     if (r) {
         int fav = checkFavExist(r) != 0;
         if (row && !fav) catalogue_row_unfav(r);
-        rate_keep(0, rate_song_key(r), 0), fav_told(r, fav);
-        catalogue_rated(r, fav ? 5 : 0);
+        fav_told(r, fav);
+        catalogue_liked(r, fav);
     }
     rate_heart();
     return 0;
@@ -310,19 +220,17 @@ static int rate_fav_click(void *ctx, void *event) {
 
 static int rate_gone(void *win, void *event) {
     if (win != st.rate_win) return 0;
-    stop_timer(&ra.rate_hold);
     stop_timer(&ra.rate_tick);
     st.rate_win = ra.rate_fav = ra.rate_ctx = (void *)0;
-    ra.rate_held = 0;
     return 0;
 }
 
-/* Now Playing's heart (playing_page_init): stock's click is swapped for one that
- * tells a hold from a tap. */
+/* Now Playing's heart (playing_page_init): stock's click is swapped for rate_fav_click, which
+ * keeps a server row's like and tells the card app and the server. A press held on it is a tap:
+ * the heart has no hold of its own. */
 void rate_bind(void *win) {
     void *fav = widget_lookup(win, "img_fav", 1), *emitter = fav ? P(fav, W_EMITTER) : (void *)0;
     stop_timer(&ra.rate_tick);
-    stop_timer(&ra.rate_hold);
     ra.rate_ctx = (void *)0;
     for (void *item = emitter ? P(emitter, 0) : 0; item; item = P(item, EMIT_NEXT))
         if (I(item, EMIT_TYPE) == EVT_CLICK && P(item, 12) == (void *)FAV_CLICK &&
@@ -337,7 +245,6 @@ void rate_bind(void *win) {
     catalogue_fav_changed(); /* My Fav read again: stock's lists may have changed it meanwhile */
     widget_off_by_func(fav, EVT_CLICK, (void *)FAV_CLICK, ra.rate_ctx);
     widget_on(fav, EVT_CLICK, rate_fav_click, ra.rate_ctx);
-    widget_on(fav, EVT_POINTER_DOWN, rate_down, (void *)0);
     widget_on(win, EVT_DESTROY, rate_gone, win);
     ra.rate_tick = timer_add(rate_tick, (void *)0, 500);
     rate_heart();
@@ -364,8 +271,8 @@ static int rt_menu_closed(void *ctx, void *event) {
     return 0;
 }
 
-/* A rated key (its hearts in the low three bits) and its place in rate_all's order: My Fav's
- * songs first, then the kept slots in slot order. */
+/* A rated key and its place in rate_all's order: My Fav's songs first (their keys' low bits 7,
+ * the like), then the kept slots (their stars in the low three bits) in slot order. */
 typedef struct {
     unsigned key, at;
 } rated_t;
@@ -375,11 +282,12 @@ static int rated_order(const void *a, const void *b) {
     return x->at < y->at ? -1 : x->at > y->at;
 }
 
-/* Each of songs' hearts into h: 5 for My Fav's (a server song's Stream Cache copy, which stock's
- * heart on Now Playing puts there, counting as its server row), else the kept 1-4. The rated keys
- * are sorted once by key, then by place; a song's own run is found by binary search and read in
- * place order, each entry setting the hearts until they reach 5 (a damaged table's later slot of a
- * key wins). */
+#define RATE_LIKED 0x80 /* rate_all's mark of a song in My Fav, above its stars */
+/* Each of songs' stars into h, RATE_LIKED added for a song in My Fav (a server song's Stream Cache
+ * copy, which stock's heart on Now Playing puts there, counting as its server row). The keys are
+ * sorted once by key, then by place; a song's own run is found by binary search and read in place
+ * order, each kept slot's 1 to 5 setting the stars (a damaged table's later slot of a key wins; a
+ * malformed one, 0, 6 or 7, is passed over). */
 static void rate_all(void *songs, unsigned char *h) {
     int nf, kept = 0;
     void *favs = staged(fav_songs, 0, &nf);
@@ -400,32 +308,38 @@ static void rate_all(void *songs, unsigned char *h) {
             else
                 hi = mid;
         }
-        h[i] = 0;
-        for (unsigned j = lo; j < m && keys[j].key >> 3 == key && h[i] < 5; j++)
-            h[i] = keys[j].at < nfav ? 5 : (unsigned char)(keys[j].key & 7);
+        unsigned stars = 0, liked = 0;
+        for (unsigned j = lo; j < m && keys[j].key >> 3 == key; j++) {
+            unsigned v = keys[j].key & 7;
+            if (keys[j].at < nfav)
+                liked = RATE_LIKED;
+            else if (v && v <= 5)
+                stars = v;
+        }
+        h[i] = (unsigned char)(stars | liked);
     }
     free(keys);
     deque_destroy(favs);
 }
 
-/* OLED's Ratings rows: the hearts on the second line are Phosphor glyphs, filled
- * for the song's and outlined for the rest, in Text Secondary or white on the selection
- * (tools/art.py RATE_PX, oled_rate_on_* and oled_rate_off_*), drawn with the row from its
- * RATE_HEARTS; the line's words start after them. */
+/* OLED's Ratings rows: the stars on the second line are Phosphor glyphs, filled for the song's
+ * and outlined for the rest, in Text Primary or white on the selection (tools/art.py RATE_PX,
+ * oled_rate_on_* and oled_rate_off_*), drawn with the row from its RATE_STARS; the line's words
+ * start after them. An unrated song (Loved's) has none, its words where they are. */
 #define RATE_PX 14
 #define RATE_GAP 2
-#define RATE_ROOM (5 * RATE_PX + 4 * RATE_GAP + 6) /* the hearts and a space */
-#define RATE_HEARTS "_hearts"
+#define RATE_ROOM (5 * RATE_PX + 4 * RATE_GAP + 6) /* the stars and a space */
+#define RATE_STARS "_stars"
 static void rate_row(void *item, int n) {
-    void *label = widget_get_child(item, 1);
+    void *label = n ? widget_get_child(item, 1) : (void *)0;
     if (!label) return;
-    widget_set_prop_int(item, RATE_HEARTS, n);
+    widget_set_prop_int(item, RATE_STARS, n);
     widget_move_resize(label, I(label, W_X) + RATE_ROOM, I(label, W_Y), I(label, W_W) - RATE_ROOM,
                        I(label, W_H));
 }
-void rate_hearts_paint(void *w, void *canvas) {
+void rate_stars_paint(void *w, void *canvas) {
     if (!w) return; /* ringnav_paint calls it while st.rt_page is open */
-    int n = widget_get_prop_int(w, RATE_HEARTS, 0);
+    int n = widget_get_prop_int(w, RATE_STARS, 0);
     void *label = n ? widget_get_child(w, 1) : (void *)0;
     if (!label) return;
     const char *ink = st.sel_accent && painting_in(st.sel_accent) ? "w" : ipod_light() ? "l" : "d";
@@ -437,12 +351,14 @@ void rate_hearts_paint(void *w, void *canvas) {
     }
 }
 
-/* Top Rated (4-5 hearts), Loved (5), All Rated (1-5) and Disliked (1): most hearts first, then
- * the library's title order, each row's hearts under its title (OLED's as glyphs, rate_row). */
+/* Top Rated (4-5 stars), Loved (the liked songs, My Fav's, whatever their stars), All Rated (1-5)
+ * and Disliked (1): most stars first, then the library's title order, each row's stars under its
+ * title (OLED's as glyphs, rate_row). */
 static const char *const rt_names[] = { "Top Rated", "Loved", "All Rated", "Disliked" };
+#define RT_LOVED 1
 #define RT_ALBUMS 2 /* the Ratings menu's Albums row, after Loved */
 static int rated_open(void *ctx, void *event) {
-    static const unsigned char lo[] = { 4, 5, 1, 1 }, hi[] = { 5, 5, 5, 1 };
+    static const unsigned char lo[] = { 4, 0, 1, 1 }, hi[] = { 5, 5, 5, 1 };
     int k = (int)(long)ctx - ((int)(long)ctx > RT_ALBUMS), n;
     if (st.rt_page || !(st.rt_page = page_open("rated_page", rt_closed, page_keyup))) return 0;
     void *songs = staged(all_songs, (void *)LIBRARY_ALL, &n), *list = _create_deque("stSongInfo");
@@ -453,17 +369,20 @@ static int rated_open(void *ctx, void *event) {
         rate_all(songs, h);
         for (int v = hi[k]; v >= lo[k]; v--)
             for (unsigned i = 0; i < size; i++)
-                if (h[i] == v)
+                if ((h[i] & 7) == v && (k != RT_LOVED || h[i] & RATE_LIKED))
                     of[deque_size(list)] = (unsigned char)v,
                     _deque_push_back(list, deque_at(songs, i));
     }
     st.rt_list = list;
     deque_destroy(songs);
     int count = (int)deque_size(list);
-    static const empty_t none = { "star", "No Rated Songs Yet",
-                                  "Hold the heart on Now Playing to rate", 0 };
+    static const empty_t none = { "star", "No Rated Songs Yet", "Swipe to the stars on Now Playing",
+                                  0 },
+                         unloved = { "heart-slash", "No Loved Songs Yet",
+                                     "Tap the heart on Now Playing", 0 };
     void *view = count ? page_list(st.rt_page, st.rt_page, 0, rt_names[k], count, 64)
-                       : empty_list(st.rt_page, st.rt_page, rt_names[k], &none, 0);
+                       : empty_list(st.rt_page, st.rt_page, rt_names[k],
+                                    k == RT_LOVED ? &unloved : &none, 0);
     char name[512], detail[300];
     for (int i = 0; i < count; i++) {
         void *t = deque_at(list, (unsigned)i);
@@ -507,7 +426,8 @@ int ratings_menu(void *ctx, void *event) {
  * ponytail: every row against every rated one still to find (rc_take); a rating whose song or
  * album has left the library has no name to write, and stays out until it is back. */
 #define RC_FILE "/mnt/mmc/.ratings.tsv"
-#define RC_HEADER "#song\thearts\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n"
+#define RC_HEADER                                                                                  \
+    "#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n"
 #define RC_PAGE 64
 #define RC_WAIT_MS 5000 /* after a change, so a run of them writes once; between checks */
 #define RC_LINE 3200    /* the fields' limits below, and room */
@@ -515,7 +435,7 @@ int ratings_menu(void *ctx, void *event) {
 #define RC_QUIET_MS 1000 /* no pages this soon after input: a long walk stays off the wheel */
 static struct {
     void *db;
-    unsigned *song, *album; /* the rated still to find, their hearts in the low bits */
+    unsigned *song, *album; /* the rated still to find, their stars or hearts in the low bits */
     unsigned songs, albums, len, cap, at;
     char *out;
     int table, last, rows, oom;
@@ -528,7 +448,7 @@ void ratings_copy_due(void) {
     rc.at = time_now_ms();
 }
 
-/* key's hearts in the first n of t, its entry gone, or 0. */
+/* key's stars or hearts in the first n of t, its entry gone, or 0. */
 static int rc_take(unsigned *t, unsigned *n, unsigned key) {
     for (unsigned i = 0; i < *n; i++)
         if ((t[i] ^ key) < 8) {
@@ -539,8 +459,8 @@ static int rc_take(unsigned *t, unsigned *n, unsigned key) {
     return 0;
 }
 
-/* A line's start, its kind and hearts written, with room for RC_LINE more; 0 when there's no
- * memory. */
+/* A line's start, its kind and stars or hearts written, with room for RC_LINE more; 0 when there's
+ * no memory. */
 static char *rc_line(const char *kind, int hearts) {
     if (rc.cap - rc.len < RC_LINE) {
         char *out = realloc(rc.out, rc.cap + RC_GROW);
@@ -553,9 +473,10 @@ static char *rc_line(const char *kind, int hearts) {
     char *o = rc.out + rc.len;
     return o + tk_snprintf(o, 16, "%s\t%d\t", kind, hearts);
 }
-static void rc_song(const char *path, int hearts, int cue) {
-    char *o = rc_line("song", hearts);
+static void rc_song(const char *path, int stars, int liked, int cue) {
+    char *o = rc_line("song", stars);
     if (!o) return;
+    *o++ = (char)('0' + liked), *o++ = '\t';
     o = scrobble_tag(o, o + 1100, path);
     if (cue) o += tk_snprintf(o, 16, "%d", cue);
     *o++ = '\n';
@@ -579,13 +500,12 @@ static int rc_row(void *ctx, int n, char **v, char **c) {
     if (!v[1]) return 0;
     P(rec, REC_PATH) = v[1], P(rec, REC_ALBUM) = v[3], P(rec, REC_ALBUM_ARTIST) = v[4];
     int cue = I(rec, REC_CUE_START) = v[2] ? atoi(v[2]) : 0, hearts;
-    if (!rc.table) { /* My Fav's: 5, whatever is kept for it */
-        rc_take(rc.song, &rc.songs, listen_key(rec));
-        rc_song(v[1], 5, cue);
+    if (!rc.table) { /* My Fav's: liked, with any stars kept for it */
+        rc_song(v[1], rc_take(rc.song, &rc.songs, listen_key(rec)), 1, cue);
         return rc.oom;
     }
     if (rc.songs && (hearts = rc_take(rc.song, &rc.songs, listen_key(rec))))
-        rc_song(v[1], hearts, cue);
+        rc_song(v[1], hearts, 0, cue);
     if (rc.albums && (hearts = rc_take(rc.album, &rc.albums, album_id(rec))))
         rc_album(v[3], v[4], v[1], hearts);
     return rc.oom;
@@ -630,11 +550,11 @@ static void rc_write(void) {
     if (rename(RC_FILE ".tmp", RC_FILE)) unlink(RC_FILE ".tmp");
 }
 
-/* The rated of table album, valid hearts only, for rc_take. */
+/* The rated of table album, valid stars or hearts only (1 to 5), for rc_take. */
 static unsigned *rc_rated(int album, unsigned *n) {
     unsigned *t = rates(album), *c = t ? calloc(RATE_SLOTS, sizeof *c) : (unsigned *)0;
     for (unsigned i = 0; c && i < RATE_SLOTS; i++)
-        if ((t[i] & 7) && (t[i] & 7) <= 4u + (unsigned)album) c[(*n)++] = t[i];
+        if ((t[i] & 7) && (t[i] & 7) <= 5u) c[(*n)++] = t[i];
     return c;
 }
 

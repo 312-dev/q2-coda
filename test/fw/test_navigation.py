@@ -2107,10 +2107,12 @@ def test_a_rating_keeps_and_clears(ratings):
     assert keep(0, 0x12345678, 0) == 1  # nothing to forget
 
 
-def test_five_hearts_are_my_favs_for_a_song_but_an_albums_own(ratings):
+@pytest.mark.parametrize('album', [0, 1])
+def test_five_is_kept_for_a_song_s_stars_and_an_album_s_hearts(ratings, album):
+    """A song's five stars are no like (My Fav is the heart's alone), so the table keeps them as it keeps 1 to 4."""
     files, keep, kept = ratings
-    assert keep(0, 0x100, 5) == 1 and kept(0, 0x100) == 0
-    assert keep(1, 0x100, 5) == 1 and kept(1, 0x100) == 5
+    assert keep(album, 0x100, 5) == 1 and kept(album, 0x100) == 5 and kept(1 - album, 0x100) == 0
+    assert keep(album, 0x100, 6) == 1 and kept(album, 0x100) == 0  # past five: none
 
 
 def test_ratings_keep_songs_and_albums_apart(ratings):

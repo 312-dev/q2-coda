@@ -227,7 +227,7 @@ until the next one.
 | Long Songs for a server row | | not built: Long Songs reads `songtable` alone, so server songs are not in it |
 | Signed in: the app's card folder holds its `credentials` file (looked for, never opened); with Streaming Songs on such an app is started once at boot and when the setting turns on | `catalogue.c` (`catalogue_signed`, `cat_autostart`) | yes |
 | Setting: `[Q2POD] LIBRARYSOURCE`, 0 Local Only (default) or 1 Local + Server, the Streaming Songs switch on Settings > Playback > Library; apps read it from `/tmp/q2-addon.library` (caps word `libsource`) | `navigation.c` (`pod_keys` and the rows' tables beside it), `library_settings.c` | yes |
-| Ratings: `ratings.out` appended for every app with `ratings=1`; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Hearts given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's), and the Ratings lists read the server's songs beside every card song (`all_songs`'s `LIBRARY_ALL`) | `catalogue.c` (`catalogue_rated`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`, `rated_open`), `navigation.c` (`library_query`) | yes |
+| Ratings: `ratings.out` appended for every app with `ratings=2`, a `stars=` or `like=` line a change; `ratings.in` renamed to `ratings.in.taking`, applied, then deleted. Stars given on Now Playing while a server song plays from its Stream Cache copy are its server row's (kept under the row's key, the line with the row's sid, the copy's My Fav counted as the row's), and the Ratings lists read the server's songs beside every card song (`all_songs`'s `LIBRARY_ALL`) | `catalogue.c` (`catalogue_rated`, `catalogue_liked`, `catalogue_song_key`), `ratings.c` (`rate_song_key`, `rate_all`, `rated_open`), `navigation.c` (`library_query`) | yes |
 
 The server library adds 43,600 bytes to the payload: `patch_bytes` is 864,504 of the then 1 MB in this branch's `--dev` build against 820,904 at the commit it branched from, `catalogue.o` being 39,870 bytes of text and 1,236 of data (`llvm-size`). All catalogue data lives on the heap or the card.
 
@@ -450,52 +450,58 @@ full copy cheaply, and none uses the server's change hints to drive sync; the pl
 
 ## Ratings and favorites
 
-A song's hearts ([internals.md: Ratings](internals.md#ratings)) follow it to the server and back,
-for server rows and for synced card files alike, whenever the Q2 can reach the server.
+A song's stars and its like ([internals.md: Ratings](internals.md#ratings)) follow it to the server and back,
+apart from each other, for server rows and for synced card files alike, whenever the Q2 can reach the server.
 
-- **Mapping:** 1 to 5 hearts (Now Playing's rating page's stars, [ipod.md](ipod.md#rating-page)) is
-  OpenSubsonic's `userRating` 1 to 5, set with `setRating`; 0 hearts is `setRating` 0. Five hearts is also stock's My Fav, so five hearts stars the song (`star`), and
-  taking the fifth heart away unstars it. A song starred on the server with no rating arrives as five
-  hearts.
+- **Mapping:** 1 to 5 stars (Now Playing's rating page, [ipod.md](ipod.md#rating-page), the one place to rate)
+  is OpenSubsonic's `userRating` 1 to 5, set with `setRating`; 0 is `setRating` 0. The like (Now Playing's heart,
+  stock's My Fav) is `star` and `unstar`. Neither touches the other: liking sets no stars, and five stars star
+  nothing.
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
   when it downloaded it, so the app owns the path-to-sid table and the firmware never needs one. A
   server song playing from its Stream Cache copy (a file no Library row has, at a path that changes
-  with the stream's quality) is its server row: Now Playing's hearts are kept under the row's
-  `listen_key` and its line carries the row's sid; five hearts are stock's My Fav of the copy,
-  which the Ratings lists count as the row's, so they show the server song with its hearts. The
-  other way round, a song starred on the server puts the row in My Fav, so Now Playing fills the
-  copy's heart by the row (stock draws it from the copy's own path), the picker opens on five, and
-  taking the heart away takes the row out (stock's toggle would put the copy in instead).
-- **From the queue menu:** Add to and Remove from Favorites on a song send a line as Now Playing's
-  heart does (five hearts, or none) and clear its 1 to 4, for a Library row and for the playing
-  copy alike; Remove on a copy takes its row out of My Fav too.
-- **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out`
-  (`<listen_key>\t<sid or empty>\t<hearts>\t<unix time>`); the app sends it when the server answers
-  and removes the lines it sent. Offline changes wait there, as plays and stars already do.
-  `<listen_key>` is 8 lowercase hex digits: the FNV-1a 32 of the song's path (its bytes, then one
-  more multiply by the prime, never 0; a CUE track's start hashed in after), which the app computes
-  for its synced files to find their sids. `<sid>` is filled for a server row and for a card file
-  the duplicate rule linked to one. Lines go to every app that declared `ratings=1`. The app takes
-  the file by renaming it (to `ratings.out.taking`, whose lines it moves to `ratings.out.sending`
-  until they are sent), so the firmware only ever creates or appends to `ratings.out`, and the app
-  leaves out of `ratings.in` every song with a line still to send.
+  with the stream's quality) is its server row: its stars are kept under the row's `listen_key` and its
+  line carries the row's sid; a like given on Now Playing is stock's My Fav of the copy, which the Ratings
+  lists count as the row's. The other way round, a song starred on the server puts the row in My Fav, so
+  Now Playing fills the copy's heart by the row (stock draws it from the copy's own path), and taking the
+  heart away takes the row out (stock's toggle would put the copy in instead).
+- **From the queue menu:** Add to and Remove from Favorites on a song send a like line as Now Playing's
+  heart does, its stars left alone, for a Library row and for the playing copy alike; Remove on a copy
+  takes its row out of My Fav too. An album's Add to Favorites sends a like line for each of its songs.
+- **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out` as one line
+  (`<listen_key>\t<sid or empty>\t<value>\t<unix time>`), `<value>` being `stars=N` (0 to 5) or `like=1`
+  or `like=0`; the app sends it when the server answers and removes the lines it sent. Offline changes wait
+  there, as plays and stars already do. `<listen_key>` is 8 lowercase hex digits: the FNV-1a 32 of the song's
+  path (its bytes, then one more multiply by the prime, never 0; a CUE track's start hashed in after), which
+  the app computes for its synced files to find their sids. `<sid>` is filled for a server row and for a card
+  file the duplicate rule linked to one. Lines go to every app that declared `ratings=2`. An app that declared
+  `ratings=1` takes one number, five for its star, so it could carry a like or stars only by changing the
+  other: it is sent nothing until it declares `ratings=2`. The app takes the file by renaming it (to
+  `ratings.out.taking`, whose lines it moves to `ratings.out.sending` until they are sent), so the firmware
+  only ever creates or appends to `ratings.out`, and the app leaves out of `ratings.in` every song with a line
+  still to send.
 - **In:** on each connection the app reads `userRating` and `starred` from the walk it already makes
   (`search3` pages carry both) and writes the differences to `/mnt/mmc/.<id>/ratings.in`, whole
-  (temp and rename), in `ratings.out`'s columns: `<listen_key>\t<sid>\t<hearts>\t<unix time>`. The
-  firmware applies each line through the same path as a rating made on the device (the hearts by
-  `listen_key`; My Fav, for five, by the song's path: a server row's or a linked file's from its
-  sid, any other card file's found by its key in songtable), a server row's Stream Cache copy taken
-  out of My Fav whatever the hearts (a heart given to the copy on Now Playing is the copy's own
-  path, so a 4 or an unstar from the server would otherwise leave it full; five puts the row in
-  its place), skipping a song whose own
-  `ratings.out` line is newer, then deletes the file. It waits while an import runs or the app's
-  catalogue on the card is not yet imported (a boot's first poll), so a server row's path is in the
-  index when its line is read.
+  (temp and rename), in `ratings.out`'s columns, a line for the stars and one for the like. The firmware
+  applies `stars=N` by `listen_key` and `like=0|1` to My Fav by the song's path (a server row's or a linked
+  file's from its sid, any other card file's found by its key in songtable), a server row's Stream Cache copy
+  taken out of My Fav either way (a heart given to the copy on Now Playing is the copy's own path, so an unstar
+  from the server would otherwise leave it full; a star puts the row in its place). A `ratings=1` app's line
+  of one number is read too: five is its star, the like, the stars left as they are; under five is that many
+  stars and no like. A line is skipped when the song's own `ratings.out` line of the same kind is newer (a line
+  of one number counts as both). The file is then deleted. It waits while an import runs or the app's
+  catalogue on the card is not yet imported (a boot's first poll), so a server row's path is in the index when
+  its line is read.
 - **Conflicts:** the newer change wins, by the time the Q2 recorded it against the server's
   `starred` date where one exists; a rating has no server date, so a pending local change is sent
   before the server's value is read back.
-- **Capability:** the app declares `ratings=1` in its `q2app`, and the firmware adds `ratings` to its
-  capability line, as the catalogue does; without both, ratings stay on the device.
+- **Capability:** the app declares `ratings=2` in its `q2app` (`ratings=1`: ratings in only), and the
+  firmware adds `ratings` and `likes` to its capability line, as the catalogue does; without both, ratings
+  stay on the device.
+- **The app's side (q2-subsonic, not yet done):** `internal/catalogue/ratings.go` reads and writes one
+  number (`Out.Hearts`; `send` stars at five and unstars below it, `Song.Hearts` reads a star as five). It
+  needs the `stars=` and `like=` values: `setRating` for one, `star`/`unstar` for the other, `WriteIn` writing
+  the two apart, and `ratings=2` in its `q2app`.
 
 ## Scale
 

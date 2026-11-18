@@ -735,8 +735,9 @@ There is no on-screen transport row: the buttons play, pause and skip.
 OLED lays the page out on its own grid ([oled-design.md](oled-design.md#now-playing)): the
 150-pixel art at the 24-pixel text column under the status row, which shows the clock, its corners
 6 pixels; the title, artist and album 18 pixels right of it, ending on the 28-pixel right column,
-the artist and album in Inter's 18 in Text Secondary; More and the heart at the right end of the
-art's foot, on an 18-pixel line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
+the artist and album in Inter's 18 in Text Secondary, the album one line ending in an ellipsis; the
+heart, 34 pixels, in the gap under the album; More at the right end of the art's foot, on an 18-pixel
+line whose baseline is the art's bottom row; a 6-pixel bar from the text column to the right column at y 228,
 the times under its ends in Inter's tabular digits, and shuffle and repeat centered under them in the
 accent when on, gray when off, over the play mode button: a tap on shuffle turns it on or off and
 a tap on repeat steps Off, All, One, each keeping the other. The page dots
@@ -811,10 +812,9 @@ page. Ending without having moved the target does not seek. Paused, the track st
 plays from the target at Play. Center works as an iPod classic's
 (`np_centre`): a press starts scrubbing at once, and the next ends the scrub and puts a ring on
 Shuffle. The wheel then moves the ring across Shuffle, Repeat and the heart, changing nothing;
-Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One) and the
-ring stays, and on the heart opens the rating picker, whose Center saves and leaves the page at
-rest, the wheel back on the volume. While a radio plays the ring has only the heart; under a theme
-without the pair there is no ring and the scrub's press opens the picker. Return, a touch or 3
+Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One, the heart's
+like on or off) and the ring stays. While a radio plays the ring has only the heart; under a theme
+without the pair there is no ring and the scrub's press ends the cycle. Return, a touch or 3
 seconds without a key end the ring. A short hold (`NP_HOLD_MS`, 400 ms) turns the
 screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
@@ -855,13 +855,14 @@ while the page shows it; the page shows none until they arrive, then fills in
 
 <a id="rating-page"></a>**Rating page.** A swipe past the lyrics shows the song's rating: its title and artist, five
 stars and the page dots, full screen over a soft glow of the album art's colours (OLED's
-[Rating page](oled-design.md#rating-page) has the sizes). The stars are the song's hearts, 0 to 5, five being the
-favourite (the heart on the art's page); ratings given before the page existed show as they were. Turning the wheel
+[Rating page](oled-design.md#rating-page) has the sizes). The stars are the song's rating, 0 to 5, and nothing else:
+the heart on the art's page is a like, apart from them. Ratings of 1 to 4 given before show as they were; a song
+that was a favourite is still liked and has no stars until it is rated here. Turning the wheel
 moves a target star, drawn larger, from the rating's top; Center keeps it. A tap on a star keeps it at once. The
 star that is already the rating's top, tapped or kept by Center, clears the rating. With nothing turned, Center
 puts the target on the rating's top star. A stream or radio, which can't be rated, leaves the wheel on the volume.
-The heart on the art's page is the favourite alone; holding it still opens the rating picker, and the hold menu's
-**Rate** too. The glow is made once for each song's cover, not per frame, and is behind the lyrics page as well.
+This page is the one place to rate: the heart on the art's page only likes a song (a tap, or a press held however
+long), and the hold menus have no Rate row. The glow is made once for each song's cover, not per frame, and is behind the lyrics page as well.
 See [internals.md](internals.md#rating-page).
 
 ## Previous and Next

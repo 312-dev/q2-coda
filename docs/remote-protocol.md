@@ -166,7 +166,7 @@ The Q2 Muse's toasts ("Radio isn't available for this song", "Starting Radio…"
 
 The Library level lists two more nodes after Folders, each a flat list of songs that Play and Shuffle take whole:
 
-- **Favorites** (`favorites`, `CAP_FAVORITES`, `ICON_FAVORITES`): the hearted songs, stock's My Fav (five hearts, [Ratings](internals.md#ratings)), in the tracks' orders (Title first, then Artist, Album and Recently added), lettered past 120 as Tracks is. It can be empty.
+- **Favorites** (`favorites`, `CAP_FAVORITES`, `ICON_FAVORITES`): the liked songs, stock's My Fav (the heart, [Ratings](internals.md#ratings)), in the tracks' orders (Title first, then Artist, Album and Recently added), lettered past 120 as Tracks is. It can be empty.
 - **Recently Added** (`recent`, `CAP_RECENT`, `ICON_RECENT`): the 100 songs added to the library last, newest first, in that one order and never lettered.
 
 A Q2 without the bits answers either id `NOT_FOUND` and does not list it, so the app shows its Favorites tab only when `CAP_FAVORITES` is set. ponytail: Most Played is not served. Its counts are demo's (`/mnt/data/ringnav-plays`, keyed by `listen_key`, a hash of each path, `patch/navigation.c`); serving it means the daemon reading that record and hashing each song's path the same way.

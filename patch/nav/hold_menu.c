@@ -75,13 +75,12 @@ int np_goto(int album, int go) {
 /* Deferred so the dialog is never closed under its own click dispatch. */
 static int qm_open(const void *unused);
 
-/* A song's My Fav changed from the menu, kept as Now Playing's heart keeps it (ratings.c
- * rate_fav_click): its 1-4 hearts go, the card's copy of the ratings is due, and the server is told
- * (catalogue_rated, by the row's key and sid for a server song's Stream Cache copy). */
-static void qm_rated(void *r, int hearts) {
-    rate_keep(0, rate_song_key(r), 0);
+/* A song's My Fav, its like, changed from the menu, kept as Now Playing's heart keeps it
+ * (ratings.c rate_fav_click): its stars stay, the card's copy of the ratings is due, and the server
+ * is told (catalogue_liked, by the row's key and sid for a server song's Stream Cache copy). */
+static void qm_liked(void *r, int on) {
     ratings_copy_due();
-    catalogue_rated(r, hearts);
+    catalogue_liked(r, on);
 }
 
 static int qm_run(const void *unused) {
@@ -96,7 +95,7 @@ static int qm_run(const void *unused) {
     qm_close();
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
-    unsigned aid = r ? qm_album_id(r) : 0; /* an album's own Favourites and Rate */
+    unsigned aid = r ? qm_album_id(r) : 0; /* an album's own Favourites */
     if (r && a >= 100) {
         if (!playback_set(st.qm_choice - 1, a - 100)) toast("Queue unchanged");
         st.qm_choice = 0;
@@ -111,24 +110,20 @@ static int qm_run(const void *unused) {
             stock_dispatch_trampoline(more, pointer_event_init(click, EVT_CLICK, more, 0, 0));
     } else if (r && (a == QA_NEXT_GROUP || a == QA_PREV_GROUP)) {
         if (!playback_group_skip(a == QA_NEXT_GROUP)) toast("No other group");
-    } else if (aid && a == QA_RATE) {
-        rate_show(window_manager_get_top_window(window_manager()), rate_kept(1, aid), aid);
     } else if (aid && (a == QA_FAV || a == QA_UNFAV)) {
         if (rate_saved(rate_keep(1, aid, a == QA_FAV ? 5 : 0))) rate_album_favs(r, a == QA_FAV);
-    } else if (r && a == QA_RATE) {
-        rate_open();
     } else if (r && a >= QA_ADV_SHUFFLE && a <= QA_GROUP) {
         st.qm_choice = a - QA_ADV_SHUFFLE + 1;
         qm_open(0);
     } else if (r && a == QA_FAV) { /* tags a folder file as batch-select's Add to My Fav does */
         qm_select();
         batch_add_file(cls, 0xf00a, qm_list(), P(p_vector_select_record, 0), 0);
-        qm_rated(r, 5);
+        qm_liked(r, 1);
         if (fav_told(r, 1)) toast("Added to Favorites");
     } else if (r && a == QA_UNFAV) {
         deleteMusicFromFav(r);
         catalogue_row_unfav(r); /* a server song's Stream Cache copy: its row's too (rate_fav) */
-        qm_rated(r, 0);
+        qm_liked(r, 0);
         if (fav_told(r, 0)) toast("Removed from Favorites");
         if (cls == 0xf00a)
             g_delete_flag = 1; /* My Fav reloads, as Now Playing's heart (0x53cafc) */
@@ -333,9 +328,7 @@ static int qm_open(const void *unused) {
     unsigned char acts[24], n = 0;
     /* Shuffle Albums/Folders only: skipping the group comes first */
     int group_first = st.qm_kind == QM_PLAYING && playback_option(0) >= 3;
-    /* Rate (the heart's hold) follows Next/Previous album */
     if (group_first) acts[n++] = QA_NEXT_GROUP, acts[n++] = QA_PREV_GROUP;
-    if (group_first && st.rate_win) acts[n++] = QA_RATE;
     int at, off; /* a spoken CUE book's saved place, from any of its tracks */
     if (st.qm_kind == QM_SONG && book_place(qm_list(), r, &at, &off)) acts[n++] = QA_RESUME;
     /* the menu sheet's song (OLED's, docs/oled-design.md#playlists): Play Next, Play Last, Add to
@@ -353,10 +346,9 @@ static int qm_open(const void *unused) {
     if (!song) acts[n++] = QA_SHUFFLE;
     if (list) acts[n++] = QA_RENAME, acts[n++] = QA_DELETE;
     if (song) acts[n++] = rate_fav(r) ? QA_UNFAV : QA_FAV;
-    /* an album's own hearts, 5 its favourite */
+    /* an album's own favourite, its hearts' 5 (ratings.c rate_album_favs) */
     unsigned aid = song ? 0 : qm_album_id(r);
-    int album_hearts = aid ? rate_kept(1, aid) : 0;
-    if (aid) acts[n++] = album_hearts == 5 ? QA_UNFAV : QA_FAV, acts[n++] = QA_RATE;
+    if (aid) acts[n++] = rate_kept(1, aid) == 5 ? QA_UNFAV : QA_FAV;
     if (!own && (st.qm_kind < QM_COVERFLOW || st.qm_kind == QM_PLAYING)) acts[n++] = QA_PLAYLIST;
     /* a card app's song isn't in the Library: Go to only to the app's own page */
     int hidden = song && !addon_goes(P(r, REC_PATH));
@@ -373,7 +365,6 @@ static int qm_open(const void *unused) {
         acts[n++] = QA_ADV_SHUFFLE;
         acts[n++] = QA_REPEAT;
         acts[n++] = QA_GROUP;
-        if (!group_first && st.rate_win) acts[n++] = QA_RATE;
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
@@ -390,7 +381,6 @@ static int qm_open(const void *unused) {
                                         "Group by",
                                         "Next Album",
                                         "Previous Album",
-                                        "Rate",
                                         "Resume",
                                         "View Queue",
                                         "Go to Folder",
@@ -415,7 +405,6 @@ static int qm_open(const void *unused) {
                                          "stack",
                                          "skip-forward",
                                          "skip-back",
-                                         "heart-half",
                                          "clock-counter-clockwise",
                                          "list-numbers",
                                          "folder",
@@ -426,7 +415,6 @@ static int qm_open(const void *unused) {
                                          "pencil-simple",
                                          "trash",
                                          "trash" };
-    char rated[32];
     /* stock sortselect row styles; the menu sheet's rows */
     int pitch = MODAL_PITCH, width = modal_row_w();
     for (int i = 0; i < n; ++i) {
@@ -434,25 +422,18 @@ static int qm_open(const void *unused) {
         widget_use_style(item, "s_listitem_black");
         void *label = hscroll_label_create(item, 30, 0, 266, pitch);
         widget_use_style(label, "s_scrlabel_white24l");
-        if (acts[i] == QA_RATE) {
-            int h = aid ? album_hearts : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
-            const char *row = aid ? "Rate Album" : "Rate";
-            char hs[16];
-            tk_snprintf(rated, sizeof rated, h ? "%s  %s" : "%s", row, hearts_text(hs, h));
-        }
         /* a setting's value stands on its own on the modal's right column */
         int setting = acts[i] >= QA_ADV_SHUFFLE && acts[i] <= QA_GROUP;
-        widget_set_text_utf8(label,
-                             acts[i] == QA_RATE ? rated
-                             : acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
-                             : acts[i] == QA_PREV_GROUP && playback_option(2) ? "Previous Folder"
-                             /* the menu sheet writes US English */
-                             : acts[i] == QA_FAV && own      ? "Favorite"
-                             : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
-                             : acts[i] == QA_FAV             ? "Add to Favorites"
-                             : acts[i] == QA_UNFAV           ? "Remove from Favorites"
-                             : acts[i] == QA_REMOVE          ? qm_held.extra
-                                                             : rows[acts[i] - 1]);
+        widget_set_text_utf8(label, acts[i] == QA_NEXT_GROUP && playback_option(2) ? "Next Folder"
+                                    : acts[i] == QA_PREV_GROUP && playback_option(2)
+                                        ? "Previous Folder"
+                                    /* the menu sheet writes US English */
+                                    : acts[i] == QA_FAV && own      ? "Favorite"
+                                    : acts[i] == QA_PLAYLIST && own ? "Add to Playlist\xe2\x80\xa6"
+                                    : acts[i] == QA_FAV             ? "Add to Favorites"
+                                    : acts[i] == QA_UNFAV           ? "Remove from Favorites"
+                                    : acts[i] == QA_REMOVE          ? qm_held.extra
+                                                                    : rows[acts[i] - 1]);
         if (acts[i] == QA_REMOVE) /* red, as the card's losing verb */
             widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(RGB_NEGATIVE));
         int kind = acts[i] - QA_ADV_SHUFFLE;

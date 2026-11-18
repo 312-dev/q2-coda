@@ -698,7 +698,7 @@ int np_mode_shuffle(void),
 /* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, then a focus ring
  * the wheel moves across shuffle, repeat and the heart (nav/now_playing.c np_centre; np_bar.c
  * np_modes draws it) */
-enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_RATING };
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_HEART };
 void *np_heart(void); /* np_bar.c: the heart, while it shows on the art page, else 0 */
 /* np_rate.c: Now Playing's rating page (the slide_view's after the lyrics) and the art's glow */
 void np_rate_bind(void *win), np_rate_gone(void), np_rate_poll(void);
@@ -914,8 +914,7 @@ int shuffle_play(void *all);
 int tidal_downloads(void *ctx, void *event);
 
 /* ratings.c */
-const char *hearts_text(char *s, int n);
-void rate_hearts_paint(void *w, void *canvas); /* ratings.c: OLED's Ratings rows' hearts */
+void rate_stars_paint(void *w, void *canvas);  /* ratings.c: OLED's Ratings rows' stars */
 void stream_mark_paint(void *w, void *canvas); /* home.c: OLED's Streaming rows' marks */
 extern void *stream_mark_views[2];             /* home.c: the lists whose rows it marks */
 /* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
@@ -928,13 +927,11 @@ int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
-int rate_open(void);
-int rate_now_set(int n); /* n hearts (stars) for the playing track; 1 kept */
-int rate_now(void);      /* the playing track's 0-5 hearts, -1 when it can't be rated */
+int rate_now_set(int n);         /* n stars for the playing track; 1 kept */
+int rate_now(void);              /* the playing track's 0-5 stars, -1 when it can't be rated */
 int rate_saved(int k);
 void rate_album_favs(void *album, int on);
 int fav_told(void *r, int on); /* ratings: a My Fav change told to the song's card app */
-int rate_show(void *win, int pick, unsigned album);
 void rate_bind(void *win); /* ratings: Now Playing's heart */
 int rated_albums(void *ctx, void *event);
 int rt_closed(void *ctx, void *event);

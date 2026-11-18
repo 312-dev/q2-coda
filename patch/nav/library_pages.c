@@ -82,7 +82,6 @@ enum {
     QA_GROUP,
     QA_NEXT_GROUP,
     QA_PREV_GROUP,
-    QA_RATE,
     QA_RESUME,
     QA_QUEUE,
     QA_FOLDER,

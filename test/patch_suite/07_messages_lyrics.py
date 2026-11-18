@@ -860,7 +860,7 @@ def full_on(m): return m.full()[5]=='#000000'
 m=full_page(); settle(m)
 for kw in ({'dx':11,'abort':True},{'dy':10,'abort':True},{'dy':40},{'dx':-25}):
     assert tap_line(m,**kw)==[] and not full_on(m),kw
-assert tap_line(m,ms=O['RATE_HOLD_MS'])==[] and full_on(m); settle(m); passed()  # a long press is a tap
+assert tap_line(m,ms=500)==[] and full_on(m); settle(m); passed()  # a long press is a tap
 assert tap_line(m)==[] and not full_on(m); passed()  # on a line: the column back, no seek
 m.tap(); settle(m); assert full_on(m)
 assert tap_line(m,dy=10,abort=True)==[] and not full_on(m); passed()  # the lines' drag ends it
@@ -1202,7 +1202,7 @@ for found,want in (((('b.mp3','/p/b.mp3',2,1),('a.mp3','/p/a.mp3',1,2),('c.mp3',
     f,ctx=m.handler(m.nodes[view]['children'][0],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
     assert [n.rsplit('.',1)[0] if n.endswith(('.mp3','.flac')) else n for n in m.names(m.plays[-1][1]&0xffffffff)]==want; passed()
 
-COVER_ALBUM=['Play Next','Play Last','Shuffle','Add to Favorites','Rate Album']  # a cover's menu, Go to artist aside
+COVER_ALBUM=['Play Next','Play Last','Shuffle','Add to Favorites']  # a cover's menu, Go to artist aside
 # Album holds use the live carousel before tracks have ever been opened, and the same ordering.
 for action,want in ((0,['A','early','late','B','C']),(1,None)):
     m=CoverflowMachine(); m.found=[track(m,'late','/p/z',2,1),track(m,'early','/p/a',1,2)]
@@ -1232,7 +1232,7 @@ assert m.run(1)=='Playing Last' and m.names()==['A','B','C','T2'] and m.query[:3
 assert m.names(m.get(syms['tools_pdeq_directory']))==['staged'] and m.pool()==[0,1,2,3]; passed()
 
 # Go to artist uses the album record directly; an absent artist omits that action.
-m=CoverflowMachine(); m.open(); m.run(5)
+m=CoverflowMachine(); m.open(); m.run(4)
 assert m.opened[-1][:2]==('localmusic/artistinfo_page',O['CLASS_ALBUMS']); passed()
 m=CoverflowMachine(); m.word(m.albums[0]+O['REC_ARTIST'],0); m.open(); m.press(100); assert m.hold()==11
 assert m.labels()==COVER_ALBUM; passed()

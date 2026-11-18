@@ -957,7 +957,7 @@ int ringnav_paint(void *w, void *canvas) {
     paint_offline(w, canvas);
     paint_radio(w, canvas);
     paint_into(w, canvas);
-    if (st.rt_page) rate_hearts_paint(w, canvas);
+    if (st.rt_page) rate_stars_paint(w, canvas);
     if (w && P(w, W_PARENT) &&
         (P(w, W_PARENT) == stream_mark_views[0] || P(w, W_PARENT) == stream_mark_views[1]))
         stream_mark_paint(w, canvas);
