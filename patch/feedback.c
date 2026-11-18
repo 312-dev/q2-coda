@@ -596,8 +596,8 @@ void feedback_shuffled(const char *what, int songs) {
     widget_on(page, EVT_KEY_DOWN, conf_key, 0);
     widget_on(page, EVT_KEY_UP, conf_key, 0);
     page_title(page, "Now Playing", 1); /* the status row's, hidden here */
-    void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2, CONF_GLYPH,
-                               CONF_GLYPH);
+    void *glyph =
+        image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2, CONF_GLYPH, CONF_GLYPH);
     image_base_set_image(glyph, theme_art("confirm_shuffle"));
     conf_line(page, 200, 32, what, ROLE_NP, 0, tok(TOK_PRIMARY));
     char count[24];

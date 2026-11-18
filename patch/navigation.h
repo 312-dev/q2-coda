@@ -689,7 +689,8 @@ void np_tap_reset(void);
 int np_tap_lift(void *target, void *event);
 int np_goto(int album, int go);
 /* np_about.c: ⋯'s About, the track's details as a page; under OLED its info grid, painted
- * (np_about_paint) from the window's top, the wheel scrolling it (np_about_key), filled from the details' labels (np_about_fill) */
+ * (np_about_paint) from the window's top, the wheel scrolling it (np_about_key), filled from the
+ * details' labels (np_about_fill) */
 int np_about_open(void *ctx, void *event);
 void *np_about_page(void);
 void np_about_np_gone(void *win);

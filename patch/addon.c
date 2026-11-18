@@ -2108,11 +2108,12 @@ static void bar_icon(int x, int y, int h, const char *s, int code) {
 static void find_icon(int sort) {
     void *title = widget_get_child(pg.page, 0);
     int h = I(title, W_H), y = I(title, W_Y), end = sort ? TITLE_END : FIND_X;
-    widget_move_resize(title, 375 - end, y, 2 * end - 375, h); /* centred: 95 to 280, or 73 to 302 */
+    /* centred: 95 to 280, or 73 to 302 */
+    widget_move_resize(title, 375 - end, y, 2 * end - 375, h);
     /* stock's sort style draws its image from the box's top left (draw type 0), where the glass's
-     * centres it: a 50 px box centred on the title puts both at the same height. Made first: its box
-     * overlaps the glass's (302 to 315), and a tap goes to the last child made, so the glass keeps
-     * all of its own */
+     * centres it: a 50 px box centred on the title puts both at the same height. Made first: its
+     * box overlaps the glass's (302 to 315), and a tap goes to the last child made, so the glass
+     * keeps all of its own */
     if (sort) bar_icon(SORT_X, y + (h - 50) / 2, 50, "s_img_order_navbar", G_SORT);
     bar_icon(FIND_X, y, h, "s_img_search", G_FIND);
 }

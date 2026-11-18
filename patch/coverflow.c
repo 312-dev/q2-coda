@@ -2849,9 +2849,8 @@ static void load_albums(unsigned t0) {
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
     cf.offline = 0;
     if (cf.scoped != PLAYLISTS) cf.album = 0; /* the playlists' read again keep their place */
-    cf.body =
-        widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page), 375,
-                                     client_h());
+    cf.body = widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page),
+                                           375, client_h());
     int n = 0;
     unsigned gen = library_gen;
     if (cf.albums_gen != gen && !cf.scoped) drop_albums();
@@ -3080,8 +3079,7 @@ static int to_tracks(const void *unused) {
         cf.title = widget_get_child(cf.body, 0); /* page_title's label, for page_retitle */
         if (widget_get_visible(cf.title)) {      /* wider than the bar's box: hidden all the same */
             void *lv = P(view, W_PARENT);
-            int all = n * page_h(48), page = page_room(cf.body),
-                h = all < page ? all : page;
+            int all = n * page_h(48), page = page_room(cf.body), h = all < page ? all : page;
             widget_set_visible(cf.title, 0, 0);
             widget_move_resize(lv, 0, 0, I(lv, W_W), h);
             widget_move_resize(view, 0, 0, I(view, W_W), h);
@@ -3394,9 +3392,8 @@ int coverflow_goto_album(void *r) {
     cf.scoped = ALBUM_TRACKS;
     cf.covers = cf.slide = cf.name = cf.artist = 0;
     cf.album = 0;
-    cf.body =
-        widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page), 375,
-                                     client_h());
+    cf.body = widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page),
+                                           375, client_h());
     to_tracks(0);
     return 1;
 }

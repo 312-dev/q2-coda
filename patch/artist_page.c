@@ -12,12 +12,13 @@
  * (library_album.c).
  *
  * The header stands from screen y HERO_Y, above the status row's foot (V_BAR), where its view
- * starts: its monogram's top paints over the full-bleed window's rows under the status row. The pair is a pair of stops above the list (pair_key), as Songs' Shuffle
- * row is (navigation.c shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next
- * to the first row; a tick up from the first row comes back to Radio. A page with Shuffle alone
- * (a library artist's, library_artist.c) has one stop, the pair's width. While a stop is lit the
- * list's own bar is hidden (pair_holds). Centre or a tap on a panel presses its action. Each draws
- * in final colours, Light Mode's flip applied by ui_ink as for any payload text. */
+ * starts: its monogram's top paints over the full-bleed window's rows under the status row. The
+ * pair is a pair of stops above the list (pair_key), as Songs' Shuffle row is (navigation.c
+ * shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next to the first row; a tick
+ * up from the first row comes back to Radio. A page with Shuffle alone (a library artist's,
+ * library_artist.c) has one stop, the pair's width. While a stop is lit the list's own bar is
+ * hidden (pair_holds). Centre or a tap on a panel presses its action. Each draws in final colours,
+ * Light Mode's flip applied by ui_ink as for any payload text. */
 #include "navigation.h"
 
 #define HERO_Y 52    /* the header's top on screen: the monogram's */

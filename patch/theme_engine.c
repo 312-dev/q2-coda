@@ -126,7 +126,8 @@ int client_h(void) { return 320 - geom_val(V_BAR); }
  * (tools/build.py FULL_BLEED, docs/oled-design.md#full-bleed), and in a view at its top; 0 in a
  * view of it that starts at the row's foot. A layout that counts from the row's foot adds it. */
 int bar_foot(void *w) { return geom_val(V_BAR) - (w ? I(w, W_Y) : 0); }
-/* The rows of w under the status row: from bar_foot to w's own foot (client_h in a page's window). */
+/* The rows of w under the status row: from bar_foot to w's own foot (client_h in a page's window).
+ */
 int page_room(void *w) { return w ? I(w, W_H) - bar_foot(w) : client_h(); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&

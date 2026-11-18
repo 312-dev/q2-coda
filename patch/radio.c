@@ -470,8 +470,8 @@ static int np_heart(void *ctx, void *event) {
 static void np_open(void) {
     if (np.page || !(np.page = page_open("radionp_page", np_closed, np_keyup))) return;
     /* Spotify's view: the layout's rows from the status row's foot */
-    void *page = widget_factory_create_widget(widget_factory(), "view", np.page, 0, bar_foot(np.page),
-                                              375, page_room(np.page));
+    void *page = widget_factory_create_widget(widget_factory(), "view", np.page, 0,
+                                              bar_foot(np.page), 375, page_room(np.page));
     void *name = label(page, 16, 12, 200, 16, "s_scrlabel_white20l", 16, SPOT_GREY);
     widget_set_text_utf8(name, "Internet Radio");
     void *art = image_create(page, SPOT_ART_X, SPOT_ART_Y, SPOT_ART_PX, SPOT_ART_PX);

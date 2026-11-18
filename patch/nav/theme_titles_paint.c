@@ -623,9 +623,10 @@ int ringnav_paint_bg(void *w, void *canvas) {
     if (w == bar && P(canvas, CANVAS_LCD)) {
         unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         /* An overlay on a full-bleed page, which paints under it (tools/build.py FULL_BLEED,
-         * docs/oled-design.md#full-bleed): no ground of its own but Home's band. */
-        /* the page in sight: under OLED's toast, the page it is over, so Home's band stays its own */
-        coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR))); /* Split's ink ground */
+         * docs/oled-design.md#full-bleed): no ground of its own but Split's ink ground on Home's
+         * band. The page in sight is, under OLED's toast, the page it is over, so Home's band
+         * stays its own. */
+        coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR)));
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);
