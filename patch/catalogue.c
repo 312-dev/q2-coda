@@ -1282,6 +1282,23 @@ int catalogue_copy_tags(void *r) {
     return ctx[1] != 0;
 }
 
+/* Whether paths a and b play one song: the same path, the same server row (its own path, or a
+ * Stream Cache copy of it, cat_copy_of), or two downloads of one server song (stream_path.h: the
+ * same app and sid), such as an app's radio naming the song playing again (song_radio.c). */
+int catalogue_same_song(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    if (!strcmp(a, b)) return 1;
+    const cat_ent *x = catalogue_path(a) ? cat_lookup(a) : cat_copy_of(a),
+                  *y = catalogue_path(b) ? cat_lookup(b) : cat_copy_of(b);
+    if (x && x == y) return 1;
+    const char *app[2], *sid[2];
+    int appn[2], sidn[2];
+    return stream_path_sid(a, &app[0], &appn[0], &sid[0], &sidn[0]) &&
+           stream_path_sid(b, &app[1], &appn[1], &sid[1], &sidn[1]) && appn[0] == appn[1] &&
+           sidn[0] == sidn[1] && !memcmp(app[0], app[1], (unsigned)appn[0]) &&
+           !memcmp(sid[0], sid[1], (unsigned)sidn[0]);
+}
+
 /* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
  * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover
  * /mnt/mmc/.<id>/covers/<album id>.jpg, into out, when it is there. 0 for any other path, or none

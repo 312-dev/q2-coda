@@ -13,8 +13,10 @@
  * local radio plays in order (Now Playing's shuffle and repeat off, put back when it ends) and
  * ends when another queue loads.
  *
- * The seed plays on where it was: the radio's queue starts with it, and once that queue plays the
- * seed, it is sought to the place it had at the tap (sr.seek). */
+ * The song playing as the seed plays on untouched: the rows after it are replaced, nothing loads
+ * (playback.c playback_queue_rest; an app's radio through addon.c, song_radio_keeps). A radio
+ * whose queue loads with the seed first (an app's that names another song first) seeks the seed
+ * to the place it had at the tap once that queue plays it (sr.seek). */
 #include "navigation.h"
 #include "playback.h"
 
@@ -39,7 +41,7 @@ static struct {
     unsigned ask, ask_at;       /* an app's request waiting for its answer (its seq), and when */
     char path[512];             /* that request's seed, for the local radio when the app declines */
     unsigned id;                /* the seed's key */
-    int sec;                    /* its place at the tap (-1: from its start) */
+    int sec;                    /* its place at the tap (-1: from its start, or played on) */
     unsigned seek_at;    /* the seed sought once the radio's queue plays it, until SR_SEEK_MS */
     unsigned seek_loads; /* playback_loads at the tap: the radio's queue is a later one */
 } sr __attribute__((section(".scratch")));
@@ -120,20 +122,21 @@ static void local_end(void) {
     np_mode_set(sr.shuf, sr.rep);
 }
 
-/* A local radio of the song r (its fields copied first: the queue it is in goes), from its place
- * sec (-1: from its start). With nothing like it, the toast says so, or, when app is the name of
- * the app the song is a server song of and that app is too old to play radios, that it needs
- * updating: the library rarely holds a server song's artist, and "No similar songs" read as the
- * server having none. 1 when it plays. */
+/* A local radio of the song r, from its place sec (-1: from its start): the song playing (sec >= 0)
+ * plays on and its queue's other rows become the radio's; any other is played as the first of a new
+ * queue (its fields copied first: the queue it is in goes). With nothing like it, the toast says
+ * so, or, when app is the name of the app the song is a server song of and that app is too old to
+ * play radios, that it needs updating: the library rarely holds a server song's artist, and "No
+ * similar songs" read as the server having none. 1 when it plays. */
 static int local_start(void *r, int sec, const char *app) {
     sr.id = key(r);
     fold(sr.artist, sizeof sr.artist, P(r, REC_ARTIST));
     fold(sr.genre, sizeof sr.genre, P(r, REC_STYLE));
     heard(sr.id);
-    int n = 0;
+    int n = 0, keep = sec >= 0 && r == playing(); /* the seed plays on: the rows after it go */
     void *all = staged(songs_unsorted, (void *)1, &n), *dq = _create_deque("stSongInfo");
     deque_init(dq);
-    _deque_push_back(dq, r);
+    if (!keep) _deque_push_back(dq, r);
     unsigned got = picks(all, dq, SR_BATCH);
     if (!got && sr.nrecent > 1) { /* all of it played lately: a new radio may play it again */
         sr.nrecent = 0;
@@ -144,9 +147,13 @@ static int local_start(void *r, int sec, const char *app) {
     if (got) {
         if (!sr.local) sr.shuf = np_mode_shuffle(), sr.rep = np_mode_repeat();
         np_mode_set(0, 0); /* the radio picks the order */
-        sr.seek_loads = playback_loads, sr.seek_at = sec > 0 ? stamp(time_now_ms()) : 0,
-        sr.sec = sec;
-        play_folder(dq, 0, 0xf001);
+        sr.seek_loads = playback_loads, sr.seek_at = 0, sr.sec = -1;
+        if (keep) /* no load: no gap, no seek (out of memory: song_radio_poll's refill adds) */
+            playback_queue_rest(dq);
+        else {
+            sr.seek_at = sec > 0 ? stamp(time_now_ms()) : 0, sr.sec = sec;
+            play_folder(dq, 0, 0xf001);
+        }
         sr.local = 1, sr.loads = playback_loads, sr.retry_at = 0;
     }
     deque_destroy(dq);
@@ -175,6 +182,20 @@ static int start(void *r, int sec) {
         return 1;
     }
     return local_start(r, sec, addon_radio_missing(path));
+}
+
+/* addon.c's, as a playlist session's first entry, first, comes: whether that session is the app's
+ * radio of the song playing, asked for at the tap (sr.ask, or answered since and no queue loaded),
+ * and first is that song (catalogue_same_song: the same path, or the same server song). Then the
+ * session keeps the song playing and replaces only the songs after it (playback_queue_rest), so
+ * the seed is never sought: no seek waits for it any more. */
+int song_radio_keeps(const char *first) {
+    void *r = playing();
+    if (!r || sr.sec < 0 || (!sr.ask && !sr.seek_at) || playback_loads != sr.seek_loads ||
+        key(r) != sr.id || !catalogue_same_song(first, P(r, REC_PATH)))
+        return 0;
+    sr.seek_at = 0, sr.sec = -1;
+    return 1;
 }
 
 static void stop(void) {
