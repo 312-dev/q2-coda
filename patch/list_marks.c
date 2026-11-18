@@ -100,6 +100,44 @@ void spinner_painted(void *w, const rect_t *r) {
     if (!spin.timer) spin.timer = timer_add(spin_tick, (void *)0, MO_FRAME_MS);
 }
 
+/* The loading overlay's spinner (docs/oled-design.md#loading): the busy spinner's form
+ * (name_order.c spin_paint: a #1C1C1E square with 12 px corners, eight 7 px dots 15 px out, the lit
+ * one a step clockwise each frame and each before it dimmer) painted by the canvas over window w,
+ * turned by the shared timer above. Its centre is the screen's (375 x 320 with the status row), so
+ * its box is placed in screen rows and moved by w's own y: a window under the status row centred on
+ * its own height would sit half the bar's height low. */
+#define LOAD_SPIN_R 12
+#define LOAD_DOT 7
+#define LOAD_DOT_OUT 15
+#define LOAD_SPIN_X (375 / 2 - LOAD_SPIN_BOX / 2)
+#define LOAD_SPIN_Y (320 / 2 - LOAD_SPIN_BOX / 2)
+void load_spinner_paint(void *w, void *canvas) {
+    static const signed char dots[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 },  { 1, 1 },
+                                            { 0, 1 },  { -1, 1 }, { -1, 0 }, { -1, -1 } };
+    static const unsigned char lit[8] = { 255, 200, 160, 128, 100, 80, 64, 56 };
+    if (!w || !canvas || !P(canvas, CANVAS_LCD)) return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
+    int f = spinner_frame(), dy = I(w, W_Y), cx = LOAD_SPIN_X + LOAD_SPIN_BOX / 2,
+        cy = LOAD_SPIN_Y + LOAD_SPIN_BOX / 2 - dy;
+    rect_t box = { LOAD_SPIN_X, LOAD_SPIN_Y - dy, LOAD_SPIN_BOX, LOAD_SPIN_BOX };
+    fill_box(canvas, &box, RGBA(0x1c1c1e), LOAD_SPIN_R);
+    for (int k = 0; k < 8; ++k) {
+        /* 15 px out on the axes, 11 on the diagonals, as spin_paint's */
+        int out = dots[k][0] && dots[k][1] ? 11 : LOAD_DOT_OUT;
+        unsigned g = lit[(f - k) & 7];
+        rect_t d = { cx + dots[k][0] * out - LOAD_DOT / 2, cy + dots[k][1] * out - LOAD_DOT / 2,
+                     LOAD_DOT, LOAD_DOT };
+        fill_box(canvas, &d, RGBA(g << 16 | g << 8 | g), LOAD_DOT / 2);
+    }
+    ui_ink_raw(raw);
+    stock_canvas_set_fill_color(canvas, fill);
+    spinner_painted(w, &box);
+}
+int load_spinner_hit(int x, int y) {
+    return x >= LOAD_SPIN_X && x < LOAD_SPIN_X + LOAD_SPIN_BOX && y >= LOAD_SPIN_Y &&
+           y < LOAD_SPIN_Y + LOAD_SPIN_BOX;
+}
+
 /* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)
  * in its place, white. */
 void spinner_icon(void *w, void *canvas, int right, int y) {

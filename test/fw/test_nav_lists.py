@@ -12,7 +12,7 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, stock_prop_str, stock_start_with, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, claim, in_fork, stock_prop_str, stock_start_with, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
@@ -1679,6 +1679,69 @@ def test_a_full_sort_runs_on_its_own_thread_under_the_spinner(fw):
     assert min(rows) >= 375 + 187 - 32 and max(rows) < 375 + 187 + 32  # on the shown page, at its centre
     assert {i % 1280 // 4 for i in changed} <= set(range(128, 192))
     assert bytes(fb) == before and fw.calls('fw_munmap') and fw.calls('fw_pthread_join')
+
+
+def upright_box(changed, page, shown=1):
+    """The bounding box (x0, y0, x1, y1), half open, of changed framebuffer bytes as the screen shows them: upright
+    375 x 320, the portrait page turned counterclockwise (tools/q2remote.py framebuffer_png: x the page's row, y 319
+    less its column)."""
+    xs = {i // 1280 - shown * 375 for i in changed}
+    ys = {319 - i % 1280 // 4 for i in changed}
+    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
+
+
+def test_the_sort_spinner_is_centred_on_the_whole_screen(fw):
+    """The spinner's centre is the screen's, 375 x 320 with the status row, within a pixel either way: not the
+    centre of the room under the status row."""
+    s = Sorts(fw, NO_MIN)
+    page = 320 * 375 * 4
+    fb = (C.c_ubyte * (2 * page))(*bytes(range(256)) * (2 * page // 256))
+    before, seen, ticks, thread = bytes(fb), {}, [], {}
+
+    def ioctl(fd, request, out, *_):
+        if request == 0x4600:
+            C.memmove(out, struct.pack('<7I', 320, 375, 320, 750, 0, 375, 32), 28)
+        else:
+            fix = [0] * 17
+            fix[5], fix[11] = 2 * page, 1280
+            C.memmove(out, struct.pack('<17I', *fix), 68)
+        return 0
+
+    def usleep(us, *_):
+        ticks.append(us)
+        if len(ticks) == 20:
+            seen['during'] = bytes(fb)
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(thread['run'])(None)
+        return 0
+
+    def create(out, attr, run, arg, *_):
+        C.c_ulong.from_address(out).value, thread['run'] = 99, run
+        return 0
+    fw.mock('fw_open', lambda *_: 5)
+    fw.mock('fw_ioctl', ioctl)
+    fw.mock('fw_mmap', lambda *_: C.addressof(fb))
+    fw.mock('fw_usleep', usleep)
+    fw.mock('fw_pthread_create', create)
+    s.load()
+    x0, y0, x1, y1 = upright_box([i for i in range(2 * page) if seen['during'][i] != before[i]], page)
+    assert (x1 - x0, y1 - y0) == (64, 64)
+    assert abs((x0 + x1) / 2 - 375 / 2) <= 1 and abs((y0 + y1) / 2 - 320 / 2) <= 1
+
+
+def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
+    """Painted on a window under the status row (its y 40), the box's centre is the screen's (187.5, 160) within a
+    pixel: placed in screen rows less the window's y, not at the window's own centre."""
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: boxes.append(tuple((C.c_int * 4).from_address(r))) or 0)
+    win, canvas = block(fw, size=4096), block(fw, size=4096)
+    lcd = block(fw, size=4096)
+    C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
+    C.c_int.from_address(win + O['W_Y']).value = 40
+    fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)(win, canvas)
+    x, y, w, h = boxes[0]
+    assert (w, h) == (64, 64) and abs(x + w / 2 - 375 / 2) <= 1 and abs(y + 40 + h / 2 - 320 / 2) <= 1
+    for dx, dy, dw, dh in boxes[1:]:  # the dots inside it
+        assert x <= dx and dx + dw <= x + w and y <= dy and dy + dh <= y + h
 
 
 def test_no_framebuffer_no_spinner_and_no_thread_sorts_in_place(fw):
