@@ -205,6 +205,7 @@ def test_the_report_names_the_verdict_per_segment():
     log = [f'{t(0)} START h=1 mtu=1021 bufs=5 raw=ok\n', f'{t(0)} ENCODER ba-a2dp-aptx-hd\n']
     log += [sat(i, 96, fly=1) for i in range(1, 20)] + [sat(20 + i, 99) for i in range(6)]
     out = io.StringIO()
-    q2bt.report(*q2bt.parse(log), out)
+    streams, notes = q2bt.parse(log)
+    q2bt.report(streams, notes, out)
     text = out.getvalue()
     assert 'saturated: 6 s with all 5 ACL buffers full' in text and 'basic rate' in text and '100/s' in text
