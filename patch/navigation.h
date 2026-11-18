@@ -930,6 +930,13 @@ extern void *stream_mark_views[2];             /* home.c: the lists whose rows i
 int home_rest(void *view, int *foot);
 void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
                 int s1);
+void list_top_fade(void *canvas, int top); /* home.c: a list's rows above its top, faded */
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift); /* home.c */
+/* A list whose box starts at most this far down the screen runs on under the status row to the
+ * screen's top edge once scrolled (row_paint.c list_reach, docs/oled-design.md#list-edges) */
+#define REACH_TOP 90
+void list_reach_paint(void *bar, void *win, void *canvas); /* row_paint.c: the status row's band */
+void list_reach_due(void); /* row_paint.c: before a frame, the band again if its list moved */
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);

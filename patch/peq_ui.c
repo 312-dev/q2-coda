@@ -532,7 +532,8 @@ static void load_draft(peq_preset *p, const char *name, int length) {
     snprintf(ui.status, sizeof(ui.status), "Preset loaded; choose Apply to activate");
 }
 
-/* Search fits above T9's screen y=60 (page y=30), so opening the keyboard won't shift the page. */
+/* A text box on item at y, h high, on T9's keyboard, ending on its OK (the EQ page's sits in the
+ * title's place, 2 px under the status row's foot: render_rows). */
 void *edit_create(void *item, const char *input_type, int y, int h) {
     void *edit = widget_factory_create_widget(widget_factory(), "edit", item, 12, y, 351, h);
     static const char *const props[][2] = {{"keyboard", "kb_default_t9"}, {"input_type", 0}, {"action_text", "done"},
@@ -799,7 +800,8 @@ static int render_rows(const void *unused) {
         ui.view = ui.graph = ui.edit = 0;
         ui.rendered = -1;
         widget_destroy_children(ui.page);
-        e3.view = widget_factory_create_widget(widget_factory(), "view", ui.page, 0, 0, 375, e3.h);
+        e3.view = widget_factory_create_widget(widget_factory(), "view", ui.page, 0, bar_foot(ui.page),
+                                               375, e3.h);
         widget_on(e3.view, EVT_POINTER_DOWN, e3_touch, 0);
         ui.bar = bar(ui.page, 0, 375);
         e3_show();
@@ -807,7 +809,10 @@ static int render_rows(const void *unused) {
     }
     e3.view = 0;
     int selection = 0, offset = 0, kept = 0;
-    int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
+    /* foot: the status row's in the page's window, which takes the whole screen
+     * (docs/oled-design.md#full-bleed); every child starts there, and height is the rows under it. */
+    int foot = bar_foot(ui.page), height = page_room(ui.page),
+        graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
     /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
      * as its other lists do (list_end). rows, the list's box: on to the window's foot, its rows
@@ -846,7 +851,7 @@ static int render_rows(const void *unused) {
     widget_destroy_children(ui.page);
     /* No item_height: stock's layout (0x5fd484) would give the graph a row's height; the rows are
      * the theme's high themselves. */
-    void *list = list_view_create(ui.page, 0, 48, 375, rows);
+    void *list = list_view_create(ui.page, 0, foot + 48, 375, rows);
     /* The theme's default list_view is a light card; stock pages paint theirs black inline. */
     widget_set_prop_int(list, "style:normal:bg_color", (int)0xff000000u);
     widget_set_prop_int(list, "style:normal:border_color", 0);
@@ -978,15 +983,16 @@ static int render_rows(const void *unused) {
         snprintf(text, sizeof(text), "Presets");
     widget_set_text_utf8(title, text);
     /* The value or name in an edit over the title, after it so a tap reaches the edit, as the
-     * search fields': its bottom (page y 28) clears T9's top (page y 30), so the keyboard neither
-     * covers it nor moves the page. Under T9, as row 0, it showed nothing the user typed and lost
-     * the keys. Action text "done": stock edit_on_event acts on the keyboard's OK only for "done"
+     * search fields': 2 px under the status row's foot, clear of the row's glyphs. The letter
+     * strip's window starts at that foot (search_strip.c search_strip_box), so as it opens AWTK
+     * lifts the page by the edit's last 28 px, which puts the edit just under the glyphs; the
+     * strip types the text in its own Frequency, Q or Name row. Action text "done": stock edit_on_event acts on the keyboard's OK only for "done"
      * (close the keyboard, then EVT_VALUE_CHANGED) or "next". Text input: typed() validates on
      * Done, as stock's numeric edit rewrites unfinished decimals. */
     if (ui.screen == ADJUST || ui.screen == NAMING) {
         peq_band *b = &ui.draft.bands[ui.band];
         char s[256]; /* a whole name, as rename_preset reads it */
-        ui.edit = edit_create(ui.page, "text", 2, 26);
+        ui.edit = edit_create(ui.page, "text", foot + 2, 26);
         if (ui.screen == NAMING)
             snprintf(s, sizeof s, "%.*s", (int)strlen(deleting()) - 4, deleting());
         else
@@ -1174,7 +1180,7 @@ static int tab_touch(void *ctx, void *event) {
 
 /* The title label; the tabs' bar when the bar takes their taps. */
 static void *bar(void *page, int x, int w) {
-    void *title = label_create(page, x, 0, w, 48);
+    void *title = label_create(page, x, bar_foot(page), w, 48);
     widget_use_style(title, "s_label_white20c");
     widget_set_prop_int(title, "line_wrap", 1);
     if (w == 375) widget_on(title, EVT_POINTER_DOWN, tab_touch, 0);
@@ -1219,7 +1225,7 @@ int peq_page_init(void *page, void *context) {
     ui.tabs = 0;
     page_load();
     e3.focus = E3_LOW;
-    e3.h = widget_get_prop_int(page, "h", client_h());
+    e3.h = page_room(page); /* the sliders' view, under the row */
     widget_on(page, EVT_DESTROY, closed, 0);
     widget_on(page, EVT_KEY_UP, keyup, 0);
     widget_on(page, EVT_POINTER_MOVE_BEFORE, e3_touch, 0); /* a slider's drag */

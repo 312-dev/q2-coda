@@ -581,6 +581,7 @@ static void bar_title_fades(void *w, void *canvas, int begin) {
  * Home's art is also checked when Home is painted under another window. */
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
+    table_clip_begin(w, canvas); /* a virtual table's rows inside its box (row_paint.c) */
     bar_title_fades(w, canvas, 1);
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
@@ -625,8 +626,15 @@ int ringnav_paint_bg(void *w, void *canvas) {
         /* An overlay on a full-bleed page, which paints under it (tools/build.py FULL_BLEED,
          * docs/oled-design.md#full-bleed): no ground of its own but Split's ink ground on Home's
          * band. The page in sight is, under OLED's toast, the page it is over, so Home's band
-         * stays its own. */
+         * stays its own. Under the glyphs, the top window's scrolled list's rows run on into the
+         * band (row_paint.c list_reach_paint). */
+        void *under = (void *)0;
+        for (unsigned i = widget_count_children(wm); i-- && !under;) {
+            void *c = widget_get_child(wm, i);
+            if (c && !tk_strcmp(widget_get_type(c), "window")) under = c;
+        }
         coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR)));
+        list_reach_paint(w, under, canvas); /* the page's scrolled list under the glyphs */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);

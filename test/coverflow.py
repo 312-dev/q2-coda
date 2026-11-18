@@ -7083,7 +7083,7 @@ int main(void) {
     home_art = make(0, "image");
     frame_fail = 1; /* no pan frame: covers show still (as a 16-bit or too long one), the image named */
     int *geo = (int *)W(home_art)->raw, asset[4] = { 0, 0, 375, 290 }, /* W_X, W_Y, W_W, W_H */
-        split[4] = { HOME_SPLIT_W, 0, 375 - HOME_SPLIT_W, 290 };
+        split[4] = { HOME_SPLIT_W, 30, 375 - HOME_SPLIT_W, 290 }; /* from the 30 px bar's foot: Home's window is the screen */
     memcpy(geo, asset, sizeof asset);
     widget *win = make(0, "window");
     const char *art = W(home_art)->image, *player = "file://" PEQ_ROOT "/tmp/coverpic.jpg";
@@ -7115,16 +7115,16 @@ int main(void) {
     for (unsigned i = 0; i < 4; ++i) {
         art_w = covers[i][0], art_h = covers[i][1];
         *(volatile int *)MCL_POS = 1; coverflow_home_art(win); *(volatile int *)MCL_POS = 0; coverflow_home_art(win);
-        int want[4] = { HOME_SPLIT_W + (375 - HOME_SPLIT_W - covers[i][2]) / 2, (290 - covers[i][3]) / 2,
+        int want[4] = { HOME_SPLIT_W + (375 - HOME_SPLIT_W - covers[i][2]) / 2, 30 + (290 - covers[i][3]) / 2,
                         covers[i][2], covers[i][3] };
         for (int k = 0; k < 4; ++k) assert(geo[k] == want[k]);
     }
     art_w = art_h = 160;
-    /* The art's paint is clipped to the panel on screen (canvas origin at the art, window at y 30)
+    /* The art's paint is clipped to the panel on screen (canvas origin at the art, window at y 0)
        from the background hook to the border hook; other widgets keep the clip. */
     extern void coverflow_home_clip(void *, void *, int);
     static char lcd[0x100]; /* the canvas's LCD */
-    int canvas[32] = { geo[0], 30 + geo[1] }, full[4] = { 0, 0, 375, 320 }, want[4] = { HOME_SPLIT_W, 30, 375 - HOME_SPLIT_W, 290 };
+    int canvas[32] = { geo[0], geo[1] }, full[4] = { 0, 0, 375, 320 }, want[4] = { HOME_SPLIT_W, 30, 375 - HOME_SPLIT_W, 290 };
     *(void **)((char *)canvas + CANVAS_LCD) = lcd;
     coverflow_home_clip(home_art, canvas, 1);
     assert(!memcmp(clip_rect, want, sizeof want));
@@ -7198,7 +7198,7 @@ int main(void) {
     /* A 26 px bar: the art panel takes the 294 px client height (client_h). */
     stub_bar_h = 26;
     coverflow_home_layout();
-    static const int tall[4] = { HOME_SPLIT_W, 0, 375 - HOME_SPLIT_W, 294 };
+    static const int tall[4] = { HOME_SPLIT_W, 26, 375 - HOME_SPLIT_W, 294 };
     assert(!memcmp(geo, tall, sizeof tall));
     stub_bar_h = 30;
     coverflow_home_layout();

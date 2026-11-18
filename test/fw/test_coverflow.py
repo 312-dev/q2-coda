@@ -4021,7 +4021,8 @@ def test_full_fades_straight_across_from_the_rest_s_foot_and_under_the_top_once_
     alphas = [rows[y][0][2] for y in sorted(rows)]
     assert alphas == sorted(alphas) and alphas[-1] == 255 and max(rows) == 319  # into the ground by y 316
     rows = fades(fw, 32, top=58, split=0, list_y=58, cols=375, sel=8)
-    assert min(rows) == 58 and rows[58][0][2] > rows[70][0][2] > 0 and 72 not in rows  # the top's 14 rows
+    # the top's 14 rows, the last of a fade that runs on above them to y 8 (list_reach_paint paints those rows)
+    assert min(rows) == 58 and rows[58][0][2] > rows[64][0][2] > 0 and 72 not in rows
     rows = fades(fw, 64, top=58, split=0, list_y=58, cols=375, sel=8)
     assert max(rows) < 72  # scrolled to its end: nothing below to fade
 
