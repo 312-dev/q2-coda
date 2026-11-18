@@ -753,11 +753,11 @@ class Shared:
         return 0
 
 
-@pytest.mark.parametrize('status, mark', [(STOPPED, 'PRESS_FILE'), (PLAYING, 'MUTE_FILE'), (PAUSED, None)])
-def test_play_pause_marks_a_start_or_a_pause_for_the_audio_path(fw, mcl, status, mark):
+@pytest.mark.parametrize('status, mark', [(STOPPED, 'PRESS_FILE'), (PLAYING, None), (PAUSED, None)])
+def test_play_pause_marks_only_a_start_for_the_audio_path(fw, mcl, status, mark):
     """peq.h: demo writes now_ms, never 0, at a press that starts a track (PRESS_FILE, where hciplayer takes an odd word
-    for a press's) and just before a pause's mute (MUTE_FILE). From a stop stock starts a track; from playing it mutes,
-    then pauses; from a pause it plays on, and nothing is marked."""
+    for a press's). From a stop stock starts a track; from playing it mutes, then pauses; from a pause it plays on,
+    and nothing is marked."""
     Player(fw, status=status)
     mcl.type = 1  # a folder's queue, whose starts press_stamp marks
     shared = Shared(fw)
