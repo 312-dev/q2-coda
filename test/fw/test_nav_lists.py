@@ -2475,6 +2475,43 @@ def test_a_set_with_a_list_end_keeps_the_selected_row_above_it(fw, ui, st):
     assert max(bottoms) <= end and max(bottoms) > end - 2 * ROW_H  # it runs to the end, not past it
 
 
+@pytest.mark.parametrize('grower', ['caption', 'slider'])
+@pytest.mark.parametrize('name, rows', [('display_page', 7), ('power_page', 9), ('playset_page', 12)])
+def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, grower, name, rows):
+    """A settings page scrolled to its last row, which then grows in place: Display's Reduce Motion with its caption
+    under it (settings_pages.c cap_step) or a grabbed inline slider (inline_slider.c heights). The view scrolls by whole
+    rows until the grown row's foot is on or above OLED's list end, y 282, 38 px clear of the screen's edge. Kept only
+    inside the view's own height, which runs on to the screen's foot, it stood in the glass's bottom corners (the
+    device's Display page, 2026-11-18: Reduce Motion's caption down to y 303)."""
+    theme(fw)
+    bar, end, pitch = 58, 282, 32  # OLED's status row, list end and row pitch on the screen
+    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name=name)  # the client, under the status row
+    view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
+    view.byte(O['VIEW_VERTICAL'], 1)
+    items = [ui.widget('list_item', view, (0, pitch * i, 375, pitch)) for i in range(rows)]
+    view.int(O['VIEW_CONTENT_H'], pitch * rows)
+    view.int(SCROLL_Y, max(0, pitch * rows - (end - bar)))  # the wheel's end: the last row's foot on the list end
+    ui.top = win
+    last = items[-1]
+    if grower == 'caption':  # settings_pages.c's cap: view, item[8], text[8], cut[8][3], lines[8], open, closing
+        cap = C.addressof(fw.var('settings_pages__cap', C.c_char))
+        C.c_void_p.from_address(cap).value = view.at
+        C.c_void_p.from_address(cap + 8).value = last.at
+        C.c_ubyte.from_address(cap + 160).value = 1  # one line, measured
+        C.c_void_p.from_address(cap + 168).value = last.at  # opening, started long ago: grown whole
+        fw.fn('settings_pages__cap_step', C.c_int, C.c_void_p)(None)
+    else:  # inline_slider.c's is: view, item[8], sw[8], kind[8], open; its run never started: grown whole
+        sl = C.addressof(fw.var('inline_slider__is', C.c_char))
+        C.c_void_p.from_address(sl).value = view.at
+        C.c_void_p.from_address(sl + 8).value = last.at
+        C.c_void_p.from_address(sl + 144).value = last.at
+        fw.fn('inline_slider__heights', C.c_int)()
+    assert last.box[3] > pitch  # it grew
+    foot = bar + last.box[1] + last.box[3] - view.int(SCROLL_Y)
+    assert end - pitch < foot <= end  # by whole rows, as far as it overran and no further
+    assert view.int(SCROLL_Y) % pitch == 0
+
+
 # Painted helpers: the panel, the shadow, the boxes.
 
 

@@ -49,10 +49,19 @@ class Q2:
 
     def __init__(self, L, root, songs=SONGS, favs=(2, 3), server=(), cat=False):
         self.L, self.req = L, 0
-        (root / 'mnt/data').mkdir(parents=True)
-        (root / 'tmp').mkdir()
-        ctypes.create_string_buffer(str(root).encode())
+        self.files(root, songs, favs, server, cat)
         ctypes.memmove(ctypes.addressof(ctypes.c_char.in_dll(L, 'root')), str(root).encode() + b'\0', len(str(root)) + 1)
+        self.s = L.session(0)
+        self.out_n = ctypes.c_size_t.in_dll(L, 'out_n')
+        self.out = (ctypes.c_uint8 * (1 << 20)).in_dll(L, 'out')
+        self.root = root
+
+    @staticmethod
+    def files(root, songs=SONGS, favs=(2, 3), server=(), cat=False):
+        """The device's library under root: stock's database.db, and with server the card app's catalogue (serve).
+        test_coda_rc_daemon.py makes its daemon's with it too."""
+        (root / 'mnt/data').mkdir(parents=True, exist_ok=True)
+        (root / 'tmp').mkdir(exist_ok=True)
         db = sqlite3.connect(root / 'mnt/data/database.db')
         cols = ('id integer primary key, filename text, fileurl text, album text, songer text, style text, name text, '
                 'albumsonger text, year text, track integer, cd_num integer, time_create integer')
@@ -67,11 +76,7 @@ class Q2:
         db.commit()
         db.close()
         if server:
-            self.serve(root, server, cat)
-        self.s = L.session(0)
-        self.out_n = ctypes.c_size_t.in_dll(L, 'out_n')
-        self.out = (ctypes.c_uint8 * (1 << 20)).in_dll(L, 'out')
-        self.root = root
+            Q2.serve(root, server, cat)
 
     @staticmethod
     def serve(root, songs, cat=False):
@@ -360,3 +365,49 @@ def test_a_queued_stream_download_is_named_as_its_server_song(lib, tmp_path):
     # PlayQueueItem names a row by GetQueue's id: a download's server song is its record's 0 to the shim (cr_jump)
     assert [lib.lib_queue_rid(i, rid) for i, rid in ((1, 0x40000002), (1, 0x40000001), (0, 1), (2, 5))] == [
         0, 0x40000001, 1, 5]
+
+
+def test_a_server_album_with_no_cover_is_asked_of_its_app(lib, tmp_path):
+    """The car wants a server album's cover and the card has none (no covers/<album>.jpg at any size, no picture in a
+    streamed song of it): GetCover asks the album's app for it at the car's size (crc_cover_ask, coda_rc.c), and while
+    the daemon holds the answer nothing is sent; then lib_cover answers again, without asking, from the file the app
+    saved. A card album, a later piece and an album the card has a cover of ask nothing."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    asked, hold = ctypes.c_char.in_dll(lib, 'cover_asked'), ctypes.c_int.in_dll(lib, 'cover_hold')
+    def last():
+        got = ctypes.string_at(ctypes.addressof(asked)).decode()
+        ctypes.memset(ctypes.addressof(asked), 0, 1)
+        return got
+    hold.value = 0
+    assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 350)]) == 'NOT_FOUND'
+    assert last() == 'subsonic third 512'
+    assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 96)]) == 'NOT_FOUND'
+    assert last() == 'subsonic third 160'
+    assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 10), (3, 4096), (4, 350)]) == 'NOT_FOUND'
+    card = [i['art'] for i in q2.browse('albums')['items'] if i['title'] == 'First'][0]
+    assert q2.ask(T['GET_COVER'], [(1, card), (2, 0), (3, 4096), (4, 350)]) == 'NOT_FOUND'
+    assert last() == ''  # a later piece, a card album: not asked
+    song = tmp_path / STREAM.format('foxtrot', 's2').lstrip('/')
+    song.parent.mkdir(parents=True)
+    song.write_bytes(flac_with_picture(b'\xff\xd8pic\xff\xd9'))
+    t, _ = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 350)])
+    assert t == T['COVER'] and last() == ''  # a streamed song's picture: not asked
+    song.unlink()
+    hold.value = 1
+    q2.out_n.value = 0
+    p = client.encode([(1, 'sthird'), (2, 0), (3, 4096), (4, 350)])
+    assert lib.lib_request(q2.s, T['GET_COVER'], 9, p, len(p), 0, 0) == 0
+    assert q2.out_n.value == 0 and last() == 'subsonic third 512'  # held: the daemon answers later
+    big = b'\xff\xd8' + bytes(range(256)) * 3 + b'\xff\xd9'
+    f = tmp_path / 'mnt/mmc/.subsonic/covers/512/third.jpg'
+    f.parent.mkdir(parents=True)
+    f.write_bytes(big)
+    lib.lib_cover.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint,
+                              ctypes.c_uint, ctypes.c_int]
+    assert lib.lib_cover(q2.s, 9, b'sthird', 0, 4096, 350, 0) == 0
+    data = bytes(q2.out[:q2.out_n.value])
+    assert data[2] == T['COVER'] and struct.unpack('>H', data[4:6])[0] == 9
+    assert client.one(client.decode(data[6:]), 3) == big
+    t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 350)])
+    assert t == T['COVER'] and last() == ''  # there now: nothing asked
+    hold.value = 0

@@ -452,3 +452,17 @@ def test_no_toast_is_kept_while_car_remote_is_off(fw, ui, mcl, recs):
     fw.fn('coda_rc_toggle', None)()  # the switch on: Now Playing written from now
     q2.tick()
     assert (q2.now()['note'], q2.now()['noten']) == ('', '0')
+
+
+def test_the_daemons_wake_names_the_app_to_start(fw, ui, mcl, recs):
+    """The daemon asked a card app that doesn't run for a car's cover (coda_rc.c crc_cover_ask): /tmp/coda-rc.wake
+    names it, and the shim hands that to addon_cover_wake (test_addon.py's test_an_app_is_started_for_the_cars_cover)
+    and removes the file, so it is taken once."""
+    from test_addon import ap
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files['/tmp/coda-rc.wake'] = b'foo\n'
+    q2.tick()
+    assert '/tmp/coda-rc.wake' not in q2.files
+    a = ap(fw)
+    assert [bytes(a.a[i].id) for i in range(a.n)] == [b'foo']

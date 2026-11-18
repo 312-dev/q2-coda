@@ -180,6 +180,10 @@ A server song pressed (a Play from the car, Shuffle Songs included) is `NowPlayi
 
 A row of `playlists` has an `art_id` like any other: its first song's album's, so `GetCover` sends that album's cover. A server playlist (Library on Local + Server, the playlist one of the card app's catalogue) has its server's own cover instead once the app has fetched it (Navidrome makes one from the playlist's albums): its `art_id` is then `p<playlist id>`, and `GetCover` sends the app's file of it, a JPEG of at most 160 px a side. Until the app has it, the row keeps its first album's. Art ids stay opaque to the phone; a new cover for the same playlist answers with a new `Cover` version (field 5).
 
+## A server album's cover
+
+A server album's cover that the Q2 Muse doesn't have yet (its card app hasn't fetched it, and no download of its songs has a picture) is fetched for the car when it asks: `GetCover` at offset 0 for its `s<album>` art id asks the card app for it at the size the car asked for (512 px over 160, else 160), when the app offers it, and the answer waits for the app, at most 5 seconds, then is the cover or `NOT_FOUND`. Other requests are answered meanwhile, and their answers may come before it: a client matches answers by `req_id`. Whatever the answer, the cover is kept on the Q2 once the app has it, so a `GetCover` again later (the car drawing the row again) gets it. Each album is asked of the app once; one it has none for answers `NOT_FOUND` at once for a while. How the Q2 does it: [internals: A cover the card lacks](internals.md#car-remote-covers).
+
 ## Errors
 
 `Error{code, message}` answers a request that failed; codes are `ErrorCode` in the proto. `message` is English for logs, never for display. The device closes the session, after sending the error when it can, on:

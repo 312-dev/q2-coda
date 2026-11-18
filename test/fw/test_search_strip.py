@@ -1,7 +1,7 @@
 """search_strip.c: Search as an iPod classic's letter strip under the OLED theme (list.entry.ipod), and the names
 and text boxes that type on it (the user's mock-up keyboard-inscreen/strip.html): the wheel walks one loop, the set
-switcher, the set's characters and a space, the return key; one turn stops at the return key and a new one goes on
-round; Centre types, cycles the set or submits; Return jumps to the return key and held goes back; Previous and Next
+switcher, the set's characters and a space, the return key; one turn stops at the switcher or the return key and a new one goes
+on round; Centre types, cycles the set or submits; Return jumps to the return key and held goes back; Previous and Next
 move the cursor and Previous held erases, faster as it goes on; Play/Pause submits. Search's results filter live
 (songs, then artists, then albums), and tabs above them pick a group."""
 import ctypes as C
@@ -96,7 +96,7 @@ class Strip:
         return len(SETS[self.ss.set]) + 3
 
     def go(self, stop):
-        """The highlight walked on to stop, a turn a tick (never stopped at the return key)."""
+        """The highlight walked on to stop, a turn a tick (each a turn of its own, so never stopped at an end)."""
         self.key(*[KEY_NEXT] * ((stop - self.ss.stop) % self.stops()))
 
     def type(self, text):
@@ -188,10 +188,43 @@ def test_one_turn_stops_at_the_return_key_and_a_new_one_loops_to_the_switcher(fw
     assert s.ss.stop == 28 and s.ss.halted
     s.key(KEY_PREV, ms=GESTURE_MS - 10)  # the same turn back goes nowhere either
     assert s.ss.stop == 28
-    s.key(KEY_NEXT, ms=GESTURE_MS)  # a new turn: round to the switcher
-    assert s.ss.stop == 0 and not s.ss.halted
-    s.key(KEY_NEXT, KEY_NEXT, ms=10)
-    assert s.ss.stop == 2
+    s.key(KEY_NEXT, ms=GESTURE_MS)  # a new turn: round to the switcher, which stops it too
+    assert s.ss.stop == 0 and s.ss.halted
+    s.key(KEY_NEXT, KEY_NEXT, ms=GESTURE_MS)  # and the next turn leaves it, a tick each
+    assert s.ss.stop == 2 and not s.ss.halted
+
+
+def test_one_turn_stops_at_the_switcher_too_and_a_new_one_loops_to_the_return_key(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.key(*[KEY_PREV] * 2, ms=GESTURE_MS - 10)  # one turn: A is where it starts, so the switcher, and stopped there
+    assert s.ss.stop == 0 and s.ss.halted
+    s.key(KEY_PREV, KEY_PREV, ms=GESTURE_MS - 10)  # on in the same turn goes nowhere
+    assert s.ss.stop == 0
+    s.key(KEY_NEXT, ms=GESTURE_MS - 10)  # nor does the same turn back
+    assert s.ss.stop == 0
+    s.key(KEY_PREV, ms=GESTURE_MS)  # a new turn: round to the return key
+    assert s.ss.stop == 28 and s.ss.halted
+    s.key(KEY_NEXT, ms=GESTURE_MS)  # and on the same way round to the switcher, stopping there again
+    assert s.ss.stop == 0 and s.ss.halted
+    s.key(KEY_NEXT, KEY_NEXT, ms=GESTURE_MS)  # a new turn leaves it, each tick of its own
+    assert s.ss.stop == 2 and not s.ss.halted
+
+
+def test_a_fast_spin_stops_at_either_end_alike(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.key(*[KEY_PREV] * 40, ms=20)  # a long fast spin left: stopped on the switcher, never round
+    assert s.ss.stop == 0
+    s.key(KEY_NEXT, ms=GESTURE_MS)
+    s.go(27)
+    s.key(*[KEY_NEXT] * 40, ms=20)  # the same spin right: stopped on the return key
+    assert s.ss.stop == 28
+
+
+def test_a_drag_left_is_one_turn_and_stops_at_the_switcher(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.go(2)  # B
+    s.touch(100, STRIP_Y + 17, 100 + 5 * STEP, STRIP_Y + 17, moves=[(100 + k * STEP, STRIP_Y + 17) for k in range(1, 6)])
+    assert s.ss.stop == 0 and s.ss.text == b''
 
 
 def test_the_run_starts_at_its_first_character_and_scrolls_only_a_cell_from_an_edge(fw, ui, song):
@@ -600,7 +633,7 @@ def test_a_drag_along_the_strip_moves_the_highlight_pops_as_the_wheel_does_and_t
     assert p.ss.stop == 1 and p.ss.text == b''
 
 
-def test_a_drag_is_one_turn_and_stops_at_the_return_key(fw, ui, song):
+def test_a_drag_right_is_one_turn_and_stops_at_the_return_key(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.go(26)  # Z
     s.touch(300, STRIP_Y + 17, 300 - 5 * STEP, STRIP_Y + 17, moves=[(300 - k * STEP, STRIP_Y + 17) for k in range(1, 6)])

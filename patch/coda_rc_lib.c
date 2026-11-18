@@ -1134,6 +1134,7 @@ typedef struct {
     char path[400];
     long off, len;
     int png, px;
+    char app[17], album[48]; /* none found for a server album: its app (".<id>") and album id, to ask */
 } cover_t;
 
 static long file_len(const char *path) {
@@ -1249,7 +1250,10 @@ static int cover_find(const char *art, int max_px, cover_t *c) {
             long n = file_len(p);
             if (n > 0) { snprintf(c->path, sizeof c->path, "%s", p); c->len = n; return 1; }
         }
-        return stream_picture(art, app, appn, c);
+        if (stream_picture(art, app, appn, c)) return 1;
+        if (appn < sizeof c->app && an < sizeof c->album)
+            snprintf(c->app, sizeof c->app, "%.*s", (int)appn, app), snprintf(c->album, sizeof c->album, "%.*s", (int)an, a);
+        return 0;
     }
     static const char *names[] = {"cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png"};
     const char *slash = strrchr(url, '/');
@@ -1282,23 +1286,19 @@ static int pl_cover_find(const char *pid, cover_t *c) {
     return 1;
 }
 
-static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
-    pbr r = {p, p + n};
-    pbf f;
-    char art[48] = "";
-    unsigned offset = 0, limit = 4096, max_px = 0;
-    int k;
-    while ((k = pb_next(&r, &f)) > 0) {
-        if (f.field == 1) pb_cstr(&f, art, sizeof art);
-        if (f.field == 2 && f.wire == 0) offset = (unsigned)f.v;
-        if (f.field == 3 && f.wire == 0 && f.v) limit = (unsigned)f.v;
-        if (f.field == 4 && f.wire == 0) max_px = (unsigned)f.v;
-    }
-    if (k < 0 || limit > 4096 || !*art) return crc_error(s, req_id, E_BAD_REQUEST, "GetCover");
+/* GetCover's answer: the cover's piece from offset, or NOT_FOUND. With hold, a server album with no cover on the card
+ * (none of its app's covers, no picture in a streamed song of it) is first asked of its app (crc_cover_ask): when the
+ * daemon holds the answer for that, nothing is sent now, and the daemon answers through here again, without hold,
+ * once the app has answered or the hold is over. */
+int lib_cover(crc_session *s, unsigned req_id, const char *art, unsigned offset, unsigned limit, unsigned max_px,
+              int hold) {
     if (lib_open()) return crc_error(s, req_id, E_UNAVAILABLE, "no library");
     cover_t c;
     int found = art[0] == 'p' ? pl_cover_find(art + 1, &c) : cover_find(art, max_px ? (int)max_px : 160, &c);
     lib_close();
+    if (!found && hold && !offset && c.app[0] && art[0] != 'p' &&
+        crc_cover_ask(s, req_id, art, limit, max_px, c.app + 1, c.album, max_px > 160 ? 512 : 160))
+        return 0;
     if (!found) return crc_error(s, req_id, E_NOT_FOUND, "no cover");
     if (c.len > 16 * 1024 * 1024 || (long)offset > c.len) return crc_error(s, req_id, E_BAD_REQUEST, "offset");
     unsigned take = c.len - offset < limit ? c.len - offset : limit;
@@ -1324,6 +1324,22 @@ static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
     if (c.px) { pb_varint(&w, 6, c.px); pb_varint(&w, 7, c.px); }
     free(data);
     return crc_send(s, T_COVER, req_id, out, w.n);
+}
+
+static int cover(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
+    pbr r = {p, p + n};
+    pbf f;
+    char art[48] = "";
+    unsigned offset = 0, limit = 4096, max_px = 0;
+    int k;
+    while ((k = pb_next(&r, &f)) > 0) {
+        if (f.field == 1) pb_cstr(&f, art, sizeof art);
+        if (f.field == 2 && f.wire == 0) offset = (unsigned)f.v;
+        if (f.field == 3 && f.wire == 0 && f.v) limit = (unsigned)f.v;
+        if (f.field == 4 && f.wire == 0) max_px = (unsigned)f.v;
+    }
+    if (k < 0 || limit > 4096 || !*art) return crc_error(s, req_id, E_BAD_REQUEST, "GetCover");
+    return lib_cover(s, req_id, art, offset, limit, max_px, 1);
 }
 
 /* ---- StartRadio (CAP_RADIO): a song radio in demo (song_radio.c), through the shim ---- */
