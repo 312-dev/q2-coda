@@ -2,11 +2,11 @@
  * passes; here it waits in poll() on an eventfd instead of a plain sleep, so whatever brings the UI
  * work ends the wait at once: every event an input thread or another thread posts
  * (ringnav_queue_event, the one way into AWTK's queue, posts timers and idles from other threads
- * too), the wheel's raw travel (wheel_sample, for the thumb and the bar's lean, which post nothing),
- * a headset key (headset.c), BlueZ's volume signal (bt_vol_event.c) and a Cover Flow half loaded
- * (coverflow_loader.c). With that, the wait may run past ringnav_sleep's fixed idles when nothing
- * needs the loop sooner (loop_span). Without an eventfd (the kernel refused one) it is the plain
- * sleep it replaces, at the same length. */
+ * too), the wheel's raw travel (wheel_sample, for the thumb and the bar's lean, which post
+ * nothing), a headset key (headset.c), BlueZ's volume signal (bt_vol_event.c) and a Cover Flow half
+ * loaded (coverflow_loader.c). With that, the wait may run past ringnav_sleep's fixed idles when
+ * nothing needs the loop sooner (loop_span). Without an eventfd (the kernel refused one) it is the
+ * plain sleep it replaces, at the same length. */
 #include "navigation.h"
 
 #define SYS_EVENTFD2 4325 /* o32 */
@@ -71,13 +71,13 @@ static int lw_next_timer(unsigned now) {
     return next < 0 ? 0x7fffffff : (int)next;
 }
 
-/* How long ringnav_sleep's idle of base ms may run: base, or up to most when the loop has an eventfd
- * to wake it and nothing needs a pass sooner. Lit (timers set), not past the next AWTK timer due,
- * and not while a poll of this pass left something to paint, the screen's dirty rects being drawn
- * on the next pass. Either way not while a frame timer or an animator runs, while stock's key
- * lockout counts down (on_wm_timer_setup_state, 100 ms a step: the wheel's ticks wait on it), or
- * while an idle other than stock's repeating ones waits. Never less than base, so a timer already
- * due or a suspended one never makes the loop pass more often than its idle. */
+/* How long ringnav_sleep's idle of base ms may run: base, or up to most when the loop has an
+ * eventfd to wake it and nothing needs a pass sooner. Lit (timers set), not past the next AWTK
+ * timer due, and not while a poll of this pass left something to paint, the screen's dirty rects
+ * being drawn on the next pass. Either way not while a frame timer or an animator runs, while
+ * stock's key lockout counts down (on_wm_timer_setup_state, 100 ms a step: the wheel's ticks wait
+ * on it), or while an idle other than stock's repeating ones waits. Never less than base, so a
+ * timer already due or a suspended one never makes the loop pass more often than its idle. */
 unsigned loop_span(unsigned base, unsigned most, int timers) {
     if (lw_fd() < 0 || most <= base) return base;
     unsigned idles = idle_manager_count(idle_manager());
