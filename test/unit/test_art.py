@@ -168,6 +168,13 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
     btspin = [f'btspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SPIN_SPOKES)]
     guest = ['guestphone_a', 'pairing_phone', 'status_guest', 'status_relay_d', 'status_relay_l']  # guest_ui.c's, pair_prompt.c's, status_row.c's
+    # localsend_ui.c's: a device's glyph per row, on the transfer page, on the card and its toast; Send Logs' plane; the file line
+    lsend = {**{f'lsdev_{n}_{k}': (art.CR_PHONE_PX, c) for n in art.LS_DEVICES for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))},
+             **{f'lsbig_{n}_{k}': (art.LS_BIG_PX, c) for n in art.LS_DEVICES for k, c in (('d', 0xababab), ('l', 0x5c5c5c))},
+             **{f'lscard_{n}': (art.PAIR_GLYPH_PX, blue) for n in art.LS_DEVICES},
+             **{f'lstoast_{n}': (art.USB_TOAST_PX, 0xffffff) for n in art.LS_DEVICES},
+             'lssend_a': (art.LS_SEND_PX, blue), 'lssend_w': (art.LS_SEND_PX, 0xffffff),
+             'lsfile_d': (art.LS_FILE_PX, 0x858585), 'lsfile_l': (art.LS_FILE_PX, 0x6e6e6e)}
     bttoast = {**{f'bttoast_{n}': c for n, (_, c) in art.BT_TOASTS.items()},
                **{f'bttoast_{n}_off': 0xababab for n in art.BT_TOASTS if n != 'low'}}
     circles = {'circle_check_a': (art.CIRCLE_CHECK_PX, blue), 'circle_check_w': (art.CIRCLE_CHECK_PX, 0xffffff),
@@ -188,7 +195,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'np{n}_{k}' for n in ('cloud', 'cloudoff') for k in ('d', 'l')),
-                                              *btdev, *btspin, *bttoast, *guest)}
+                                              *btdev, *btspin, *bttoast, *guest, *lsend)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
                           ('play_d', art.STATE_PX, 0xffffff), ('play_l', art.STATE_PX, 0),
@@ -197,6 +204,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('folder_w', art.ROW_ICON_PX, 0xffffff), ('confirm_shuffle', art.CONFIRM_GLYPH_PX, blue),
                           ('crphone_d', art.CR_PHONE_PX, 0xababab), ('crphone_l', art.CR_PHONE_PX, 0x5c5c5c),
                           ('crphone_w', art.CR_PHONE_PX, 0xffffff),  # Car Remote's phone rows
+                          *((n, px, c) for n, (px, c) in lsend.items()),  # LocalSend's
                           ('chevron_td', art.CARET_PX, 0x858585), ('chevron_tl', art.CARET_PX, 0x6e6e6e),
                           ('check_a', art.CHECK_PX, blue), ('check_w', art.CHECK_PX, 0xffffff),
                           ('holdback', art.HOLD_BACK_PX, 0xffffff),  # search_strip.c's Return-held card
