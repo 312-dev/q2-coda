@@ -98,7 +98,7 @@ def test_a_message_keeps_to_one_line_and_is_cut_to_fit(L, tmp_path):
 def test_a_raw_line_gets_a_level_and_source_from_its_words(L, text, level, src):
     s = C.c_char_p()
     got = L.ulog_guess(text.encode(), len(text), C.byref(s))
-    assert (got.decode(), s.value.decode()) == (level, src)
+    assert (got.decode(), (s.value or b'').decode()) == (level, src)
 
 
 def test_a_ulog_line_passes_through_as_it_was_and_a_raw_one_is_stamped(L, tmp_path):

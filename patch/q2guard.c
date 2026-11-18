@@ -435,8 +435,28 @@ static void request(void) {
     if (n >= 0) flush_final(now_ms() + FINAL_MS), unlink(SNAP);
 }
 
+/* q2guard --dump (docs/adb.md): the running q2guard asked to write out what it holds (a "flush"
+ * request, answered within FINAL_MS twice over), then q2-log.3 to .0 on stdout, oldest first. */
+static int dump(void) {
+    char b[4096];
+    int fd = open(SNAP, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd >= 0) write(fd, "flush\n", 6), close(fd);
+    int pid = slurp(LOCK, b, 32) > 0 ? atoi(b) : 0;
+    if (pid > 1 && !kill(pid, SIGUSR1))
+        for (int waited = 0; waited < 2 * FINAL_MS && slurp(SNAP, b, 8) >= 0; waited += 100) usleep(100000);
+    unlink(SNAP);
+    for (int k = ULOG_FILES - 1; k >= 0; --k) {
+        snprintf(b, sizeof b, LOGS "/q2-log.%d", k);
+        if ((fd = open(b, O_RDONLY | O_CLOEXEC)) < 0) continue;
+        for (int n; (n = (int)read(fd, b, sizeof b)) > 0;) write(1, b, n);
+        close(fd);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     static struct guard g;
+    if (argc > 1 && !strcmp(argv[1], "--dump")) return dump();
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
