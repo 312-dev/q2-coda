@@ -635,8 +635,9 @@ static struct {
      * of it (Back); the list waits in lv[SPOT_DEPTH], its id the request's, never reused, so a
      * reply to a cancelled one matches nothing */
     char pend;
-    /* hold: the top level asked for again in place under the overlay (Retry, Playback Settings after
-     * a change), what it shows left as
+    /* hold: the top level asked for (again) in place under the overlay (the first open, with no page
+     * yet, over the window it was opened from, list_marks.c load_over; Retry; Playback Settings
+     * after a change), what it shows left as
      * it is until its rows or its error are there; 1 + the state a cancel puts back */
     char hold;
 } br __attribute__((section(".scratch")));
@@ -644,6 +645,8 @@ static struct {
 enum { P_PUSH = 1, P_POP };
 
 static void *browsing(void) { return br.page; }
+static int br_make(void);
+void *page_in_use(void); /* smart_wifi.c: the top window past toasts and the volume dialog */
 /* librespot killed: no socket for a while is it starting again, as after a sign-out. */
 static void spot_restarting(void) { br.until = time_now_ms() + SPOT_SIGNOUT_MS; }
 
@@ -787,6 +790,10 @@ static void show(void) {
     if (l->state == S_LOAD && !((wk.running || wk.done) && br.act == A_FETCH && wk.id == l->id))
         fetch(l);
     if (br.hold && (l->state == S_LOAD || l->state == S_WAIT)) return; /* under the overlay */
+    if (br.hold && !br.page) { /* the first answer: the page opens over the window it held */
+        if (!br_make()) return; /* none to be had: the overlay stays until Return */
+        load_over(0, 0);
+    }
     br.hold = 0;
     br.view = br.edit = 0;
     if (l->state == S_LOAD || l->state == S_WAIT) {
@@ -1281,20 +1288,33 @@ static int br_closed(void *ctx, void *event) {
     return 0;
 }
 
+/* The browser's window, its touches bound (br_touch). 0 when none could be made. */
+static int br_make(void) {
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    if (!(br.page = page_open("spotbrowse_page", br_closed, br_keyup))) return 0;
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(br.page, touches[t], br_touch, 0);
+    return 1;
+}
+
+/* The first open given up under the overlay (Return, a tap off the spinner, its window gone): no
+ * page was made, and librespot runs on. */
+static void spot_gone(void) { br_closed(0, 0); }
+
 /* Streaming's Spotify row (home.c ringnav_stream): librespot started if it is not, and the
- * browser; without librespot on the card, Now Playing says so. While Smart Wi-Fi brings the radio
- * back, librespot starts once the link is up (smart_hold), as it never retries a Connect login or
- * mDNS that failed at its start. */
+ * browser, opening once its first answer is there, the loading overlay over Streaming meanwhile
+ * (at once with no window to lay it over); without librespot on the card, Now Playing says so.
+ * While Smart Wi-Fi brings the radio back, librespot starts once the link is up (smart_hold), as it
+ * never retries a Connect login or mDNS that failed at its start. */
 int spot_open(void *ctx, void *event) {
     if (access(SPOT_BIN, 0) && !sp.launched) return spot_np(), 0;
     if (!sp.launched && smart_hold(spot_open, ctx, 0)) return 0;
     spot_launch();
-    if (br.page || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
-    if (!(br.page = page_open("spotbrowse_page", br_closed, br_keyup))) return free(br.lv), br.lv = 0, 0;
-    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
-                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
-    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
-        widget_on(br.page, touches[t], br_touch, 0);
+    void *from = page_in_use();
+    if (br.lv || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
+    if (!from && !br_make()) return free(br.lv), br.lv = 0, 0;
+    if (!br.page) br.hold = 1 + S_LOAD, load_over(from, spot_gone); /* the page once it answers */
     br.depth = 1;
     br.until = sp.launch_at + SPOT_OLD_MS;
     tk_snprintf(br.lv[0].op, sizeof br.lv[0].op, "account");
