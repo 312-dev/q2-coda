@@ -40,7 +40,8 @@ void bt_devinfo(const unsigned char *di, struct bt_counts *c);
 /* hci_conn_list_req's answer (HCIGETCONNLIST): the first ACL link's handle, -1 none */
 int bt_acl_handle(const unsigned char *req, int max);
 
-/* ---- what the controller says of one link: four commands on a raw HCI socket ---- */
+/* ---- what the controller says of one link: five commands on a raw HCI socket ---- */
+#define BT_OP_FCC 0x1401  /* Read Failed Contact Counter */
 #define BT_OP_LQ 0x1403   /* Read Link Quality */
 #define BT_OP_RSSI 0x1405 /* Read RSSI */
 #define BT_OP_AFH 0x1406  /* Read AFH Channel Map */
@@ -48,17 +49,39 @@ int bt_acl_handle(const unsigned char *req, int max);
 struct bt_link {
     int handle;
     int rssi, lq, tpl, afh; /* dB, 0-255, dBm, channels in use of 79; BT_UNSET not answered */
-    int answered;           /* how many of the four have */
+    int fcc;                /* the failed contact counter (flush timeouts in a row); BT_UNSET */
+    int answered;           /* how many of the five have */
 };
 int bt_cmd(unsigned char *out, int op, int handle); /* the command packet into out[8]; its length */
+/* listed (HCIGETCONNLIST's ACL handle, -1 none) taken as k's handle: 1 when it changed. A codec
+ * change reconnects the headset on a new handle while the stream runs on, so it is looked up each
+ * line. */
+int bt_handle_follow(struct bt_link *k, int listed);
 void bt_link_clear(struct bt_link *k, int handle);
-/* An event read from the raw socket (its type byte first): 1 when it answered one of the four */
+/* An event read from the raw socket (its type byte first): 1 when it answered one of the five */
 int bt_event(struct bt_link *k, const unsigned char *p, int n);
+/* Number Of Completed Packets (event 0x13): the packets the controller says it delivered on handle
+ */
+int bt_completed(const unsigned char *p, int n, int handle);
+/* Packets in the controller now: sent (acl_tx) less done (completions counted since the socket
+ * opened), from the least difference seen, as the count at the opening is not known (the buffers
+ * empty whenever the stream pauses or the link keeps up). Both counts modulo 2^32. */
+struct bt_fly {
+    int have, low;
+};
+int bt_fly_step(struct bt_fly *f, unsigned sent, unsigned done);
 
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
  * while the controller's ACL buffers are full), or -1 with no such table. */
 int bt_l2cap_wmem(const char *text);
+
+/* ---- bluealsa's encoder thread ----
+ * Named by bluealsa ("ba-a2dp-sbc", "ba-a2dp-aptx-hd", ...): 1 for such a comm. Its schedstat
+ * ("run_ns wait_ns slices": on a CPU, waiting for one) as whole ms, modulo 2^32; 0 when not that.
+ */
+int bt_encoder_thread(const char *comm);
+int bt_schedstat(const char *text, unsigned *run_ms, unsigned *wait_ms);
 
 /* ---- the codec, from bluealsa's GetPCMs as dbus-send prints it ----
  * The A2DP source PCM's Codec into codec (n bytes), Sampling in Hz and Delay in tenths of a ms; 0
@@ -76,8 +99,15 @@ struct bt_sample {
     int err;                /* transmit errors since the last line */
     int wtx, wrx;           /* wlan0 kB/s each way; -1 down */
     int cpu;                /* all cores' busy percent */
-    int ba,
-        own; /* bluealsa's and q2guard's own CPU, tenths of a percent of one core; -1 not read */
+    /* bluealsa's and q2guard's own CPU in tenths of a percent of one core (90 is 9.0%); -1 not read
+     */
+    int ba, own;
+    int h;      /* the ACL handle asked about; -1 none */
+    int er, ew; /* bluealsa's encoder thread, per second: ms on a CPU, ms waiting for one; -1 not
+                   read */
+    int fcc;    /* struct bt_link's; BT_UNSET none */
+    int done;   /* packets a second the controller delivered (Number Of Completed Packets); -1 */
+    int fly;    /* packets in the controller now (bt_fly_step); -1 */
 };
 int bt_line(char *out, int size, const struct bt_sample *s);
 /* per-second rates over ms: n counted in ms, as a whole count a second (no 64-bit division) */
