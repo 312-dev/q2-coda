@@ -1056,14 +1056,14 @@ for offset in (0, 24):
 c=Machine(); c.config.update(FLAT); cw,_=c.page_list(5,extent=1000); c.paint(cw)
 c.touch(); c.paint(cw); assert not c.drawn() and c.clip==(0,0,240,240)
 c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,48,240-2*inset,48); passed()  # OLED's lists keep no reading margin (reveal)
-# Status bar: a solid fill on the bar widget alone, no highlight, LCD fill restored.
+# Status bar: an overlay on full-bleed pages, no ground of its own and no highlight, LCD fill restored.
 s=Machine(); s.clock_minutes=True; title=s.node('hscroll_label','label_clock')
 def top_level(t,name,children=()):
     w=s.node(t,name,children); s.word(w+O['W_PARENT'],s.wm); return w
 bar=top_level('system_bar','system_bar',[title]); s.word(bar+O['W_W'],375); s.word(bar+O['W_H'],30)
 s.word(syms['system_bar'],bar)
 def bg(w): return s.call(address=HOOKS['widget_on_paint_background'][0],args=(w,s.canvas,0,0),gap=0)
-assert bg(bar)==0 and [b[:5] for b in s.bands]==[(0,0,375,30,color_t(O['BAR_COLOR']))]
+assert bg(bar)==0 and not s.bands
 assert s.lcd_colors()==LCD_COLORS; passed()
 # A pressed grid tile (the album grid's three 110 px buttons in a table_row) greys its selection
 # card inside the tile, square (pressed_pill); the row draws nothing, the tile no stock box.
