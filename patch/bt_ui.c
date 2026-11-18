@@ -621,8 +621,8 @@ static unsigned choice_kbps(int i) {
     return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
 }
 #define BT_AUTO_CAPTION ((const unsigned *)L"Steps with the signal, 330 to 990 kbps")
-#define BT_KBPS_W 90 /* a choice's rate, right-aligned before the check */
-#define BT_KBPS_GAP 24
+#define BT_KBPS_W 90 /* a choice's rate, right-aligned on the right column */
+#define BT_CHECK_GAP 24 /* ... and on the checked row before the check: its 12 px and the gap */
 
 /* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
  * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
@@ -635,6 +635,10 @@ static struct {
     unsigned text[2][48];
     int at;
 } auto_cap __attribute__((section(".scratch")));
+static struct {
+    void *view; /* the picker's list while it is open */
+    int coding; /* g_btcoding its rates were placed for */
+} quality __attribute__((section(".scratch")));
 static const unsigned *auto_caption(void) {
     const char *codec = bt_codec();
     char item[32] = "", s[48];
@@ -654,8 +658,31 @@ static const unsigned *auto_caption(void) {
     return cur;
 }
 
-/* After the layout: the picker's rows get their rates, Auto its caption. */
+/* Each rate's place: flush with the right column, the edge the switch and the check end on, as
+ * a Settings row's value; on the checked row (g_btcoding) just before the check. */
+static void quality_rates(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *b = row_button(widget_get_child(view, i)), *l = b ? widget_lookup(b, "_bt_kbps", 0) : (void *)0;
+        if (!l) continue;
+        int right = I(b, W_W) - geom_val(V_RIGHT_X) -
+                    (atoi(widget_get_prop_str(b, "name", "")) == g_btcoding ? BT_CHECK_GAP : 0);
+        widget_move_resize(l, right - BT_KBPS_W, 0, BT_KBPS_W, I(b, W_H));
+    }
+    quality.coding = g_btcoding;
+}
+static int quality_gone(void *ctx, void *event) {
+    (void)event;
+    if (quality.view == ctx) quality.view = (void *)0;
+    return 0;
+}
+
+/* After the layout: the picker's rows get their rates, Auto its caption. A pick moves the check
+ * with no layout (stock's click sets the images), so bt_ui_poll places the rates again. */
 static void quality_rows(void *view) {
+    if (quality.view != view) {
+        quality.view = view;
+        widget_on(view, EVT_DESTROY, quality_gone, view);
+    }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item), *title = (void *)0;
         if (!b || widget_lookup(b, "_bt_kbps", 0) || widget_get_prop_int(item, "_bt_step", 0))
@@ -668,13 +695,13 @@ static void quality_rows(void *view) {
         if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
         if (!kbps) continue;
         char s[16];
-        int right = I(b, W_W) - geom_val(V_RIGHT_X) - BT_KBPS_GAP;
-        void *l = small_label(b, right - BT_KBPS_W, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
+        void *l = small_label(b, 0, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
         widget_set_name(l, "_bt_kbps");
         widget_set_prop_str(l, "style:normal:text_align_h", "right");
         tk_snprintf(s, sizeof s, "%u kbps", kbps);
         widget_set_text_utf8(l, s);
     }
+    quality_rates(view);
 }
 
 /* ---- painting ---- */
@@ -911,6 +938,7 @@ static void codec_follow(void) {
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     codec_follow();
+    if (quality.view && quality.coding != g_btcoding) quality_rates(quality.view);
     if (bt.view) page_poll(now);
     guest_ui_poll();
     bt_detail_poll();

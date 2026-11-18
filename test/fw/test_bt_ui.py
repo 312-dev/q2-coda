@@ -553,6 +553,32 @@ def test_quality_is_one_flat_list_switch_then_codec_header_then_auto_first(fw):
     assert len(rows) == 10
 
 
+def test_quality_s_rates_end_on_the_switch_s_edge_and_before_the_check_on_the_checked_row(fw):
+    """A rate is a Settings row's value: flush with the right column, where the switch above ends; the checked
+    row's sits just before its check (12 px and the gap), and moves when a pick moves the check (no layout)."""
+    fw.mock('widget_move_resize', lambda w, *box: [setattr(C.c_int.from_address(w + 4 * i), 'value', v)
+                                                   for i, v in enumerate(box[:4])] and 0)
+    fw.var('g_btcoding', C.c_ubyte).value = 3  # aptX HD
+    ui, _, view = quality_page(fw)
+
+    def ends():
+        out = {}
+        for item in ui.kids[view]:
+            b = ui.kids[item][0] if ui.kids[item] else 0
+            l = ui.lookup(b, '_bt_kbps', 0) if b else 0
+            if l:
+                x, _, w, _ = geometry(l)
+                out[ui.name[b]] = geometry(b)[0] + x + w
+        return out
+    b, _ = step_row(ui, view)
+    sw = next(w for w in ui.subtree(b) if ui.name.get(w) == '_setting_switch')
+    edge = geometry(b)[0] + geometry(sw)[0] + geometry(sw)[2]
+    assert ends() == {'0': edge, '1': edge, '3': edge - 24, '4': edge}
+    fw.var('g_btcoding', C.c_ubyte).value = 0  # LDAC Best picked: stock moves the check, nothing lays out
+    fw.fn('bt_ui_poll', None)()
+    assert ends() == {'0': edge - 24, '1': edge, '3': edge, '4': edge}
+
+
 def test_the_adapt_to_signal_switch_toggles_and_saves(fw):
     ui, cfg, view = quality_page(fw)
     b, _ = step_row(ui, view)

@@ -1539,7 +1539,8 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   (off by default), its caption under it while selected: "On Auto or SBC, lowers quality to keep playing when the
   signal is weak". Then a "CODEC" header in 13 px Text Tertiary caps, a heading the wheel passes, and the choices:
   Auto, LDAC Best, LDAC Standard, aptX HD, aptX, AAC, SBC HQ and SBC, each with its bit rate in 15 px Text Tertiary
-  before the check where the codec fixes one (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384). Auto
+  where the codec fixes one, flush with the right column as a Settings row's value (the switch's edge), and just
+  before the check on the checked choice (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384). Auto
   is the default, and the page opens on the checked choice. Auto's caption, under it while selected, "Steps with
   the signal, 330 to 990 kbps", or with a headset connected on another codec the best it supports, "Best this
   headset supports: aptX HD, 576 kbps".
