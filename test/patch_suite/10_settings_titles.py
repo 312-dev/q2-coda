@@ -381,26 +381,25 @@ tadded=lambda: [x[:2] for x in tm.calls if x[:2]==('timer_add',tdue)]
 assert tpaint()=='Games' and tadded() and not tforced(); tm.advance(1,clear=True); assert tforced()
 assert tpaint()=='Games' and not tadded()  # no change, none forced
 tm.nodes[tl]['text']='Renamed'; assert tpaint()=='Renamed' and tadded(); tm.advance(1,clear=True); assert tforced(); passed()
-# The status row keeps the clock beside a title whatever Time in Title says (np_bar.c bar_title); Now Playing has no title
+# The status row keeps the clock beside a title (np_bar.c bar_title); Now Playing has no title
 # there, the clock alone (navigation.c bar_title_of), as a page with none. The clock is in the bar role's face
 # (theme.xml bar.title) and follows the minute.
-def tt_bar(timetitle):
-    ttm=Machine(); ttm.config['TIMETITLE']=timetitle; oled_set(ttm); ttm.clock_minutes=True
+def tt_bar():
+    ttm=Machine(); oled_set(ttm); ttm.clock_minutes=True
     ttt=ttm.node('hscroll_label','label_title'); ttc=ttm.node('hscroll_label','label_clock'); ttb=oled_bar(ttm,ttt,ttc)
     def show(win):
         ttm.top=win; ttm.word(win+O['W_PARENT'],ttm.wm)
         ttm.call(address=HOOKS['widget_on_paint_background'][0],args=(ttb,ttm.canvas,0,0),gap=0); ttm.advance(1)
         return ttm.nodes[ttt].get('text',''),ttm.nodes[ttc].get('text')
     return ttm,ttc,show
-for timetitle in ('1','0'):
-    ttm,ttc,show=tt_bar(timetitle)
-    assert show(ttm.node('window','playing_page'))==('','6:14') and show(ttm.node('window','bare_page'))==('','6:14'),timetitle
-    ttm.clock=(18,15); ttm.advance(61000); assert ttm.nodes[ttc]['text']=='6:15',timetitle
-    assert [(ttm.nodes[ttc][f'style:{s}:font_name'],ttm.nodes[ttc][f'style:{s}:font_size']) for s in STATES]==[(FACE_NAMES[OLT['font[ROLE_BAR]']],OLT['font_px[ROLE_BAR]'])]*3
+ttm,ttc,show=tt_bar()
+assert show(ttm.node('window','playing_page'))==('','6:14') and show(ttm.node('window','bare_page'))==('','6:14')
+ttm.clock=(18,15); ttm.advance(61000); assert ttm.nodes[ttc]['text']=='6:15'
+assert [(ttm.nodes[ttc][f'style:{s}:font_name'],ttm.nodes[ttc][f'style:{s}:font_size']) for s in STATES]==[(FACE_NAMES[OLT['font[ROLE_BAR]']],OLT['font_px[ROLE_BAR]'])]*3
 passed()
 # Home on the status row names none of its own lists' and shows the clock, whether or not music plays: no flip as music
 # starts or stops.
-hm=Machine(); hm.config['TIMETITLE']='0'; oled_set(hm); hm.clock_minutes=True; hm.handlers.pop(syms['mclGetPlayStatus'],None)
+hm=Machine(); oled_set(hm); hm.clock_minutes=True; hm.handlers.pop(syms['mclGetPlayStatus'],None)
 htt,hcl=hm.node('hscroll_label','label_title'),hm.node('hscroll_label','label_clock')
 hbar=oled_bar(hm,htt,hcl,hm.node('image','img_state',visible=0))
 hhome=hm.node('window','home_page'); hm.top=hhome; hm.word(hhome+O['W_PARENT'],hm.wm)
