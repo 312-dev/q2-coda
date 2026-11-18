@@ -39,7 +39,7 @@ class Br(C.Structure):
                 *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'playing')),
                 ('rows', C.c_int * 11), ('caps_checked', C.c_int), ('downloads', C.c_int), ('can_download', C.c_int),
                 ('selected', C.c_char * 6500), ('remove_kind', C.c_char * 16), ('remove_note', C.c_char * 128), ('term', C.c_char * 64),
-                ('lv', C.POINTER(Level))]
+                ('lv', C.POINTER(Level)), ('pend', C.c_byte)]
 
 
 class Wk(C.Structure):
@@ -584,6 +584,11 @@ class Browser:
     def top(self):
         return self.br.lv[self.br.depth - 1]
 
+    @property
+    def asked(self):
+        """The level a press asked for: the one under the loading overlay (spotify.c push) until its reply comes."""
+        return self.br.lv[SPOT_DEPTH] if self.br.pend else self.top
+
     def request(self):
         return C.string_at(self.wk.buf)[:self.wk.len]
 
@@ -653,7 +658,7 @@ def test_a_row_opens_its_list(fw):
     b = Browser(fw)
     b.menu()
     b.click(0)  # Liked Songs
-    assert b.br.depth == 2 and b.top.op == b'liked' and b.request().endswith(b'\tliked\n')
+    assert b.br.pend and b.asked.op == b'liked' and b.request().endswith(b'\tliked\n')
     b.answer(cursor=b'c1', rows=[track(1), track(2)])
     assert (b.top.state, b.top.n, b.top.f[3], b.drawn) == (S_READY, 2, b'c1', 3)  # the rows and More…
 
@@ -693,7 +698,7 @@ def test_an_album_opens_with_its_uri(fw):
     b.click(0)
     b.answer(rows=[album(1)])
     b.click(0)
-    assert b.top.op == b'album' and b.top.args == b'\tspotify:album:1' and b.top.title == b'Album 1'
+    assert b.asked.op == b'album' and b.asked.args == b'\tspotify:album:1' and b.asked.title == b'Album 1'
 
 
 def test_more_asks_the_same_list_at_its_cursor(fw):
@@ -762,9 +767,9 @@ def test_an_arg_too_long_for_its_level_sends_nothing(fw):
     b.click(0)
     b.answer(rows=[(b'album', b'u' * 319, b'T', b'S', b'', b''), (b'album', b'u' * 318, b'T', b'S', b'', b'')])
     b.click(0)
-    assert b.br.depth == 2
+    assert b.br.depth == 2 and not b.br.pend
     b.click(1)
-    assert b.br.depth == 3 and len(b.top.args) == 319
+    assert b.br.pend and len(b.asked.args) == 319
 
 
 def test_a_cursor_too_long_for_its_level_does_nothing(fw):
@@ -855,7 +860,7 @@ def test_settings_toggle(fw):
     b.sp.track, b.sp.state = b'x', b'playing'
     b.menu()
     b.click(7)  # Playback Settings
-    assert b.top.op == b'settings'
+    assert b.asked.op == b'settings'
     b.answer(rows=[(b'setting', b'shuffle', b'off', b'', b'', b''), (b'setting', b'repeat', b'context', b'', b'', b'')])
     b.click(0)
     assert b.request().endswith(b'\tshuffle\ton\n') and b.br.act == A_SET

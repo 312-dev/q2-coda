@@ -493,7 +493,9 @@ static void box(void *canvas, int x, int y, int w, int h, unsigned color, unsign
 
 /* ringnav_paint, every widget after stock painted it: the bar, as Now Playing's capsule (the
  * accent's light tone), and the play state in the top row. */
+static void br_paint(void *w, void *canvas);
 void spot_paint(void *w, void *canvas) {
+    br_paint(w, canvas);
     if (!ui.page || !w || !P(canvas, CANVAS_LCD) || (w != ui.bar && w != ui.glyph)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     unsigned tone = rgba(accent_tone(2), 255);
@@ -627,7 +629,12 @@ static struct {
     int depth, act, next, arg, playing, rows[11], caps_checked, downloads, can_download;
     char selected[6500], remove_kind[16], remove_note[128];
     char term[64];
-    level_t *lv; /* SPOT_DEPTH of them, calloc'd */
+    level_t *lv; /* SPOT_DEPTH of them, calloc'd, and one more: the list push() waits on (pend) */
+    /* pend: a pushed list's first reply awaited under the loading overlay
+     * (docs/oled-design.md#loading), the shown level and its rows left as they are; the list waits
+     * in lv[SPOT_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
+     * nothing */
+    char pend;
 } br __attribute__((section(".scratch")));
 
 static void *browsing(void) { return br.page; }
@@ -863,18 +870,10 @@ static void base(int state) {
     show();
 }
 
-/* A level over the top one, which keeps its selected row; the one SPOT_KEEP down lets its rows go. */
-static void push(int kind, const char *op, const char *args, const char *cursor, const char *title) {
+/* next over the top level, which keeps its selected row; the one SPOT_KEEP down lets its rows go.
+ */
+static void enter(const level_t *next) {
     level_t *l;
-    /* The arguments may point into the top level, including the slot reused at the depth limit. */
-    level_t next = { 0 };
-    next.kind = kind;
-    next.state = (kind == L_LIST || kind == L_SELECT) ? S_LOAD : S_READY;
-    tk_snprintf(next.op, sizeof next.op, "%s", op);
-    tk_snprintf(next.args, sizeof next.args, "%s", args);
-    tk_snprintf(next.cursor, sizeof next.cursor, "%s", cursor);
-    tk_snprintf(next.title, sizeof next.title, "%s", title);
-    if (br.view) top()->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
     if (br.depth == SPOT_DEPTH) { /* the oldest past the base forgotten */
         drop(&br.lv[1]);
         for (int i = 1; i < SPOT_DEPTH - 1; ++i) br.lv[i] = br.lv[i + 1];
@@ -887,7 +886,43 @@ static void push(int kind, const char *op, const char *args, const char *cursor,
         l->state = S_LOAD;
     }
     l = &br.lv[br.depth++];
-    *l = next;
+    *l = *next;
+}
+
+/* The loading overlay let go: its request's thread joined and its reply, if any, dropped, the page
+ * as it was (Return, or a tap off the spinner). */
+static void load_cancel(void) {
+    br.pend = 0;
+    fetch_cancel();
+    br.act = A_FETCH;
+    if (br.page) widget_invalidate_force(br.page, 0);
+}
+
+/* A level over the top one. A list over a level showing its rows is asked for under the loading
+ * overlay and entered once its reply comes (got); any other at once, a list's Loading… page
+ * meanwhile. */
+static void push(int kind, const char *op, const char *args, const char *cursor,
+                 const char *title) {
+    /* The arguments may point into the top level, including the slot reused at the depth limit. */
+    level_t next = { 0 };
+    next.kind = kind;
+    next.state = (kind == L_LIST || kind == L_SELECT) ? S_LOAD : S_READY;
+    tk_snprintf(next.op, sizeof next.op, "%s", op);
+    tk_snprintf(next.args, sizeof next.args, "%s", args);
+    tk_snprintf(next.cursor, sizeof next.cursor, "%s", cursor);
+    tk_snprintf(next.title, sizeof next.title, "%s", title);
+    if (br.view) top()->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
+    if (next.state == S_LOAD && top()->state == S_READY && br.view) {
+        level_t *w = &br.lv[SPOT_DEPTH];
+        unsigned shown = top()->id;
+        *w = next;
+        fetch(w);
+        top()->id = shown, w->id = wk.id; /* fetch() names the top level's: the staged one's */
+        br.pend = 1;
+        widget_invalidate_force(br.page, 0);
+        return;
+    }
+    enter(&next);
     show();
 }
 
@@ -903,6 +938,8 @@ static void pop(void) {
 /* The finished request: an action's outcome, or the top level's rows, error or pairing prompt. A
  * reply without the request's id, or for a level since left, is dropped. */
 static void got(void) {
+    if (br.pend && br.act == A_FETCH && wk.id == br.lv[SPOT_DEPTH].id) /* the overlay's: entered */
+        br.pend = 0, enter(&br.lv[SPOT_DEPTH]), widget_invalidate_force(br.page, 0);
     level_t *l = top();
     /* A shown level's refresh (Download Progress) is cut into head too, so a failed one leaves its
      * fields on the reply it shows. */
@@ -1035,6 +1072,7 @@ static int go(const void *unused) {
     int i = br.arg;
     char a[sizeof l->args] = "";
     br.go = 0;
+    if (br.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (br.next == G_SHOW)
         show();
     else if (br.next == G_SEARCH)
@@ -1164,7 +1202,10 @@ static int br_tick(const void *unused) {
 
 static int br_leave(const void *unused) {
     br.leave = 0;
-    if (br.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box */
+    if (br.pend) /* the load cancelled: the page stays */
+        load_cancel();
+    else if (br.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the
+                         box */
         widget_set_text_utf8(br.edit, ""), widget_set_focused(br.edit, 0);
     else if (br.depth > 1)
         pop();
@@ -1176,6 +1217,19 @@ static int br_leave(const void *unused) {
 /* Return: the search box shut, else a level back, the base back to Streaming. */
 static int br_keyup(void *ctx, void *event) {
     return return_key(event, &br.leave, br_leave);
+}
+
+/* The browser's loading overlay, over its rows while a list loads (spot_paint, ringnav_paint's). */
+static void br_paint(void *w, void *canvas) {
+    if (br.pend && w && w == br.page) load_spinner_paint(w, canvas);
+}
+
+/* The page's touches while the loading overlay shows: taken from its rows, a lift off the spinner
+ * cancelling the load (list_marks.c load_touch). */
+static int br_touch(void *ctx, void *event) {
+    return br.pend && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
+               ? load_touch(br.page, event, load_cancel)
+               : 0;
 }
 
 static int br_closed(void *ctx, void *event) {
@@ -1197,8 +1251,12 @@ int spot_open(void *ctx, void *event) {
     if (access(SPOT_BIN, 0) && !sp.launched) return spot_np(), 0;
     if (!sp.launched && smart_hold(spot_open, ctx, 0)) return 0;
     spot_launch();
-    if (br.page || !(br.lv = calloc(SPOT_DEPTH, sizeof *br.lv))) return 0;
+    if (br.page || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
     if (!(br.page = page_open("spotbrowse_page", br_closed, br_keyup))) return free(br.lv), br.lv = 0, 0;
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(br.page, touches[t], br_touch, 0);
     br.depth = 1;
     br.until = sp.launch_at + SPOT_OLD_MS;
     tk_snprintf(br.lv[0].op, sizeof br.lv[0].op, "account");

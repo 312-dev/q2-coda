@@ -59,7 +59,8 @@ class Fx(C.Structure):
 class Ui(C.Structure):
     _fields_ = [('page', C.c_void_p), ('view', C.c_void_p), ('edit', C.c_void_p), ('timer', C.c_uint), ('go', C.c_uint),
                 ('leave', C.c_uint), *((k, C.c_int) for k in 'level next arg want az note genre favs from'.split()),
-                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick', List), ('list', List), ('caption', C.c_char * 64)]
+                ('rows', C.c_int * 6), ('sel', C.c_int * 3), ('wifi', C.c_int), ('pick', List), ('list', List), ('caption', C.c_char * 64),
+                ('pend', C.c_byte)]
 
 
 class Np(C.Structure):
@@ -1153,7 +1154,7 @@ def test_top_stations_fetches_by_votes_over_verified_tls(fw):
     p = page(fw)
     curl = Curl(fw, m3u(('Zed', 'http://z.example/'), ('Abe', 'http://a.example/')))
     p.menu('Top Stations')
-    assert fx(fw).running == 1 and 'Loading…' in note(p)
+    assert fx(fw).running == 1 and ui(fw).pend == 1  # under the loading overlay
     fetched(fw, p, curl)
     assert curl.opts[10002] == f'{API}/m3u/stations/topvote/100?hidebroken=true'
     assert (curl.opts[10065], curl.opts[64], curl.opts[81], curl.opts[10018]) == ('/etc/scrobble-ca.pem', 1, 2, 'Q2Muse')
@@ -1225,6 +1226,62 @@ def test_a_body_over_256_kb_is_cut_off(fw):
     p.menu('Top Stations')
     fetched(fw, p, curl)
     assert curl.wrote == [64 << 10] * 3 + [0] and 'Directory unavailable' in note(p)
+
+
+# The loading overlay (docs/oled-design.md#loading): a fetch from a list on show leaves it on show, the spinner over
+# it, until the new list (or its error) is there.
+def overlay_fetch(fw, caption='Top Stations'):
+    p = page(fw)
+    curl = Curl(fw, m3u(('Zed', 'http://z.example/'), ('Abe', 'http://a.example/')))
+    menu, lists = p.menu_rows(), len(fw.calls('list_view_create'))
+    p.menu(caption)
+    return p, curl, menu, lists
+
+
+def radio_touch(p, kind, x, y):
+    e = C.create_string_buffer(0x40)
+    for field, v in (('EVENT_TYPE', O[kind]), ('EVENT_X', x), ('EVENT_Y', y)):
+        struct.pack_into('<i', e, O[field], v)
+    return p.handler(ui(p.fw).page, O[kind])(C.addressof(e))
+
+
+def test_a_directory_fetch_loads_under_the_overlay_over_the_menu(fw):
+    p, curl, menu, lists = overlay_fetch(fw)
+    assert fx(fw).running == 1 and 'Loading…' not in note(p) and ui(fw).note == 0 and ui(fw).level == MENU
+    assert p.menu_rows() == menu and len(fw.calls('list_view_create')) == lists and ui(fw).pend == 1
+    fetched(fw, p, curl)
+    assert ui(fw).pend == 0 and ui(fw).level == STATIONS and len(fw.calls('list_view_create')) == lists + 1
+
+
+def test_return_cancels_a_directory_fetch_and_keeps_the_menu(fw):
+    p, curl, menu, lists = overlay_fetch(fw)
+    p.key(ui(fw).page)
+    p.run('leave')
+    assert ui(fw).pend == 0 and fx(fw).cancel == 1 and fx(fw).running == 0 and ui(fw).level == MENU
+    assert p.menu_rows() == menu and len(fw.calls('list_view_create')) == lists and p.toasts == []
+
+
+def test_a_tap_off_the_spinner_cancels_a_directory_fetch(fw):
+    p, curl, menu, lists = overlay_fetch(fw)
+    assert radio_touch(p, 'EVT_POINTER_DOWN', 187, 160) == 11 and radio_touch(p, 'EVT_POINTER_UP_BEFORE', 187, 160) == 11
+    assert ui(fw).pend == 1
+    assert radio_touch(p, 'EVT_POINTER_UP_BEFORE', 40, 100) == 11
+    assert ui(fw).pend == 0 and fx(fw).running == 0 and ui(fw).level == MENU and p.menu_rows() == menu
+
+
+def test_a_row_pressed_while_the_directory_loads_does_nothing(fw):
+    p, curl, menu, lists = overlay_fetch(fw)
+    url = fx(fw).url
+    p.rows('menu_click')[menu.index('By Genre')]()
+    assert not p.live('go') or p.run('go') == 0
+    assert fx(fw).url == url and ui(fw).pend == 1 and len(p.threads) == 1
+
+
+def test_a_failed_fetch_under_the_overlay_opens_its_note(fw):
+    p, curl, menu, lists = overlay_fetch(fw)
+    curl.code = 503
+    fetched(fw, p, curl)
+    assert ui(fw).pend == 0 and ui(fw).note == 1 and 'Directory unavailable' in note(p)
 
 
 def test_the_tick_waits_for_the_worker(fw):
@@ -1669,23 +1726,25 @@ def test_return_from_a_search_selects_the_row_it_was_pulled_over(fw):
     assert ui(fw).level == MENU and selected(p) == 4
 
 
-def test_return_from_loading_selects_the_row_that_opened_it(fw):
+def test_return_from_loading_leaves_the_list_that_opened_it(fw):
+    """The menu stayed on show under the overlay, its row selected: Return builds nothing."""
     p = page(fw)
     Curl(fw)
     at(p, 2)  # Top Stations, the third row with no Now Playing
+    view, lists = ui(fw).view, len(fw.calls('list_view_create'))
     p.menu('Top Stations')
-    at(p, 0)
     p.key(ui(fw).page)
     p.run('leave')
-    assert ui(fw).level == MENU and selected(p) == 2
+    assert ui(fw).level == MENU and ui(fw).view == view and len(fw.calls('list_view_create')) == lists
 
 
 def test_return_while_a_search_loads_cancels_it(fw):
-    """The box went with the note over it: Return leaves the note, as for any fetch."""
+    """The box closed onto the list, the overlay over it: Return cancels, as for any fetch."""
     p = page(fw)
     Curl(fw)
     search(fw, p, 'jazz')
     p.run('go')
+    assert ui(fw).pend == 1 and ui(fw).edit is None and ui(fw).view  # the menu again, not a Loading… note
     p.key(ui(fw).page)
     p.run('leave')
     assert (fx(fw).cancel, ui(fw).note, ui(fw).level, ui(fw).edit) == (1, 0, MENU, None)
