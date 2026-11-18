@@ -56,9 +56,9 @@ class Shim:
         self.t = threading.Thread(target=self.answer, daemon=True)
         self.t.start()
 
-    def now(self, radio):
+    def now(self, radio, extra=''):
         self.seq += 1
-        put(self.root / 'tmp/coda-rc.now', NOW.format(seq=self.seq, radio=radio))
+        put(self.root / 'tmp/coda-rc.now', NOW.format(seq=self.seq, radio=radio) + extra)
 
     def answer(self):
         cmd = self.root / 'tmp/coda-rc.cmd'
@@ -141,6 +141,24 @@ def test_now_playing_says_radio(q2):
     else:
         raise AssertionError('no push with radio on')
     assert s.get_state()['now_playing']['radio'] is True
+
+
+def test_now_playing_carries_the_q2_muses_toast(q2):
+    """CAP_NOTICE: the car showed nothing when the Q2 Muse toasted that a radio could not start (2026-11-18 00:28);
+    Android Auto draws no toast. The shim's note and its count (coda_rc_shim.c coda_rc_note) go out as
+    NowPlaying.notice and notice_id at once, the same words again with a new id, and none once the shim clears it."""
+    s, shim = q2
+    assert s.info['caps'] & 32768
+    s.subscribe(position=False)
+    seen = []
+    for n, note in ((1, "Radio isn't available for this song"), (2, "Radio isn't available for this song"), (2, '')):
+        shim.now(radio=0, extra=f'noten={n}\nnote={note}\n')
+        for _ in range(20):
+            np = s.wait_push(5).get('now_playing', {})
+            if np and (np['notice_id'], np['notice']) == (n, note):
+                seen.append((n, note))
+                break
+    assert seen == [(1, "Radio isn't available for this song"), (2, "Radio isn't available for this song"), (2, '')]
 
 
 def sleeps(tid):
