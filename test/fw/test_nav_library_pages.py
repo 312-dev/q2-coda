@@ -3062,3 +3062,82 @@ def test_a_streaming_service_with_no_link_is_the_empty_state_and_its_row_opens_w
     assert ui.went == ['systemset/wifi_page']
     ui.close(page)
     assert call(fw, 'feedback_offline') == 1 and len(ui.windows) == 1  # closed: it opens again
+
+
+# Chapters under the loading overlay (docs/oled-design.md#loading): the page opens once ffmpeg's chapters are read, the
+# spinner over the window the menu was held on meanwhile (list_marks.c load_over), Return or a tap off it giving up.
+class Lo(C.Structure):
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+
+
+def gate(fw, type, a, b=0):
+    """An event as ringnav_input sees it: a key (a its code), or a touch at the portrait panel's a, b."""
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], type)
+    struct.pack_into('<ii', e, O['EVENT_X'], a, b)  # EVENT_KEY is EVENT_X
+    return fw.fn('load_over_input', C.c_int, C.c_void_p)(e)
+
+
+def held_chapters(fw, ui, song, mcl, sheet=False):
+    """Chapters chosen from the hold menu on a window: (the book, that window, the overlay's state)."""
+    book = Book(fw, ui, song, mcl, output=ffmetadata((0, b'One'), (754, b'Two')))
+    home = ui.new('window_create', 0, 0, 0, 0, 0)
+    if sheet:
+        ui.new('dialog', 0, 0, 0, 375, 320)  # the menu's sheet, still falling away
+    book.open()
+    return book, home, fw.var('list_marks__lo', Lo)
+
+
+@pytest.mark.parametrize('sheet', [False, True])
+def test_chapters_load_under_the_overlay_on_the_window_held(fw, ui, song, mcl, sheet):
+    book, home, lo = held_chapters(fw, ui, song, mcl, sheet)
+    assert ui.windows == [home] and lo.win == home  # no Loading chapters… page
+    assert [ms for _, ms in ui.pending('chapter_poll')] == [50]
+
+
+def test_chapters_open_once_read(fw, ui, song, mcl):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    assert ui.fire('chapter_poll') == 0 and lo.win is None and len(ui.windows) == 2
+    page = ui.top()
+    assert ui.name[page] == 'chapters_page' and ui.rows(page) == [('One', '0:00:00'), ('Two', '0:12:34')]
+    assert not ui.pending('chapter_poll')  # opened once
+
+
+def test_chapters_still_reading_keep_the_overlay(fw, ui, song, mcl):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    fw.mock('fw_read', lambda *_: (book.errno.__setattr__('value', 11), -1)[1])  # EAGAIN
+    fw.mock('fw_waitpid', lambda *_: 0)  # still running
+    assert ui.fire('chapter_poll') == REPEAT and ui.windows == [home] and lo.win == home
+
+
+def test_return_gives_chapters_up_and_nothing_opens_late(fw, ui, song, mcl, st):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    assert gate(fw, O['EVT_KEY_DOWN'], O['KEY_RETURN']) == 1 and lo.win == home
+    assert gate(fw, O['EVT_KEY_UP'], O['KEY_RETURN']) == 1 and lo.win is None
+    assert book.killed == [(123, 9)] and st('ch', C.c_void_p).value  # the poll reaps and frees it
+    assert ui.fire('chapter_poll') == 0 and ui.windows == [home] and not st('ch', C.c_void_p).value
+    book.open()
+    assert lo.win == home  # and they can be asked for again
+
+
+@pytest.mark.parametrize('type', ['EVT_KEY_DOWN', 'EVT_KEY_LONG', 'EVT_KEY_UP'])
+def test_centre_while_chapters_load_does_nothing(fw, ui, song, mcl, type):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    assert gate(fw, O[type], 218) == 1 and lo.win == home and not book.killed
+    book.open()
+    assert len(fw.calls('fw_fork')) == 1  # asked once
+
+
+def test_a_tap_off_the_spinner_gives_chapters_up(fw, ui, song, mcl):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    assert gate(fw, 0xff, 319 - 160, 187) == 1 and gate(fw, 0x103, 319 - 160, 187) == 1 and lo.win == home
+    assert gate(fw, 0xff, 319 - 100, 40) == 1 and gate(fw, 0x103, 319 - 100, 40) == 1 and lo.win is None
+    assert book.killed == [(123, 9)]
+    ui.fire('chapter_poll')
+    assert ui.windows == [home]
+
+
+def test_the_window_closing_gives_chapters_up(fw, ui, song, mcl):
+    book, home, lo = held_chapters(fw, ui, song, mcl)
+    ui.close(home)
+    assert lo.win is None and book.killed == [(123, 9)]
