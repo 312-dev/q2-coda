@@ -4,9 +4,12 @@ this machine (host OpenSSL), run as a program with --run, --data and --recv in a
 LocalSend CLI driven through a pseudo-terminal as a user at its keyboard. This script stands in for demo: it reads
 q2send.state and q2send.ask and writes q2send.answer and q2send.cmd.
 
-usage: localsend_e2e.py CLI [--keep DIR] [--q2send 'COMMAND']
+usage: localsend_e2e.py CLI|BUILD [--keep DIR] [--q2send 'COMMAND']
 
 CLI is the LocalSend CLI program (LocalSend-CLI-1.18.2-linux-x86-64, its SHA-256 f5a986e0...2b08 the release's).
+Given a build folder instead (how tools/ci/gate.py runs a test/ script), the CLI is $Q2_LOCALSEND_CLI, else
+~/.cache/q2-localsend/localsend-cli, the machine's copy; with neither the run says so and passes, as the CLI is not
+in the repository.
 --q2send runs that command for q2send instead of building it, for the build's own MIPS program under
 qemu-mipsel: --q2send 'qemu-mipsel -L ROOTFS ROOTFS/usr/bin/q2send' (ROOTFS holding at least the build's lib,
 usr/lib/libssl.so.1.1, usr/lib/libcrypto.so.1.1 and usr/bin/q2send). Both bind multicast's 53317 beside each other and serve on ports of their own (Q2PORT, CLIPORT).
@@ -153,6 +156,12 @@ def main():
     ap.add_argument('--keep')
     ap.add_argument('--q2send')
     a = ap.parse_args()
+    if (pathlib.Path(a.cli) / 'manifest.json').exists():  # a build: the machine's CLI
+        cli = pathlib.Path(os.environ.get('Q2_LOCALSEND_CLI', pathlib.Path.home() / '.cache/q2-localsend/localsend-cli'))
+        if not cli.is_file():
+            print(f'skip: no LocalSend CLI at {cli} (set Q2_LOCALSEND_CLI)')
+            return 0
+        a.cli = str(cli)
     work = pathlib.Path(a.keep or tempfile.mkdtemp(prefix='localsend-e2e-'))
     work.mkdir(parents=True, exist_ok=True)
     exe = a.q2send.split() if a.q2send else [str(build(work))]

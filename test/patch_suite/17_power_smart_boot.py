@@ -477,9 +477,8 @@ for hook,t,page,row in HELD:
 for row in '01':
     m,win=held_machine('netservice_page'); held_press(m,'netservice_row',win,row)
     assert held_runs(m,'netservice_row')==[m.nodes[held_row(m,win,row)]['children'][0]] and not m.timers and m.flag()==0; passed()
-m,win=held_machine('netservice_page'); a=payload_syms['localsend_open']; m.handlers[a]='localsend_open'
-m.u.hook_add(UC_HOOK_CODE,m.hook,begin=a,end=a); n=len(m.toasts); held_press(m,'netservice_row',win,'2')
-assert [c for c in m.calls if c[0]=='localsend_open'] and not held_runs(m,'netservice_row') and not m.timers and len(m.toasts)==n; passed()
+m,win=held_machine('netservice_page'); m.mock('window_create'); n=len(m.toasts); held_press(m,'netservice_row',win,'2')
+assert [c for c in m.calls if c[0]=='window_create'] and not held_runs(m,'netservice_row') and not m.timers and len(m.toasts)==n; passed()
 # A press from a page that is not the one expected (no page in use, say) is not held: stock's at once with a link,
 # and with none, the page saying so (feedback_offline), as an unheld Tidal press has it.
 for link in (1,0):
