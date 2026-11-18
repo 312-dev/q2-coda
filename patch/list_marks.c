@@ -120,7 +120,7 @@ void load_spinner_paint(void *w, void *canvas) {
     int f = spinner_frame(), dy = I(w, W_Y), cx = LOAD_SPIN_X + LOAD_SPIN_BOX / 2,
         cy = LOAD_SPIN_Y + LOAD_SPIN_BOX / 2 - dy;
     rect_t box = { LOAD_SPIN_X, LOAD_SPIN_Y - dy, LOAD_SPIN_BOX, LOAD_SPIN_BOX };
-    fill_box(canvas, &box, RGBA(0x1c1c1e), LOAD_SPIN_R);
+    fill_box(canvas, &box, RGBA(RGB_RAISED), LOAD_SPIN_R);
     for (int k = 0; k < 8; ++k) {
         /* 15 px out on the axes, 11 on the diagonals, as spin_paint's */
         int out = dots[k][0] && dots[k][1] ? 11 : LOAD_DOT_OUT;
