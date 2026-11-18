@@ -980,6 +980,35 @@ def test_a_drag_on_a_virtual_table_stops_at_its_ends(fw, ui, finger, top):
     assert table.client.int(O['TABLE_TOP']) == top
 
 
+def test_a_drag_on_a_tall_virtual_table_stops_on_the_list_end(fw, ui):
+    """A table whose box runs on past the set's list end (Library > Songs: to the screen's foot) takes a drag to
+    where the wheel ends, the last row's foot on y 282, not the box's foot (a drag to the end stopped near y 316, in
+    the rounded corners)."""
+    table = Table(fw, ui, 100)
+    table.client.int(O['W_H'], 294)  # the page's box runs to the screen's foot: y 30 + 294
+    paint(fw, table)
+    drag = fw.fn('ringnav_table_drag', C.c_int, C.c_void_p, C.c_int)
+    drag(table.client.at, ROW_H * 200)
+    top = table.client.int(O['TABLE_TOP'])
+    assert 30 + ROW_H * 100 - top == 282
+
+
+def test_a_fling_on_a_tall_virtual_table_clamps_to_the_list_end_not_the_boxs_foot(fw, ui):
+    """TABLE_SCROLL_CALLS: stock's release scrolls to the fling's target with table_client_scroll_to, which clamps it
+    to the rows less the client's height (the box's foot). ringnav_table_scroll runs it with the height cut at the
+    set's list end (y 282), so the fling ends with the last row's foot there, and puts the height back."""
+    table = Table(fw, ui, 100)
+    table.client.int(O['W_H'], 294)
+    seen = []
+
+    def stock(w, top, ms, *_):  # stock's clamp: the rows less the client's height now
+        seen.append(min(top, ROW_H * 100 - table.client.int(O['W_H'])))
+        return 0
+    fw.mock('table_client_scroll_to', stock)
+    fw.fn('ringnav_table_scroll', C.c_int, C.c_void_p, C.c_int, C.c_int)(table.client.at, ROW_H * 200, 300)
+    assert 30 + ROW_H * 100 - seen[0] == 282 and table.client.int(O['W_H']) == 294
+
+
 def test_a_list_takes_no_overscroll_once_bound(fw, ui):
     """AWTK lets a drag run half a view past a scroll view's end and springs it back: a list's is 0."""
     page = Page(ui, titles(30))

@@ -563,13 +563,28 @@ int ringnav_table_load(void *ctx, unsigned index, void *row) {
 }
 
 /* A drag on a virtual table (TABLE_DRAG_CALL, table_client's pointer move): stock's
- * table_client_set_yoffset with the finger's offset held from the first row's top to the end its
- * release scrolls to (table_client_scroll_to's: the rows less the client's height), so a drag stops
- * at the ends instead of running on and springing back (docs/internals.md#list-ends). */
+ * table_client_set_yoffset with the finger's offset held from the first row's top to the wheel's
+ * end (navigation.c scroll_end), the rows less the client's shown height (list_shown_h: its box
+ * cut at the set's list end, y 282), so a drag stops with the last row's foot on the list end, not
+ * on the box's foot at the screen's, in the glass's corners, and never runs on to spring back
+ * (docs/internals.md#list-ends). */
 int ringnav_table_drag(void *w, int y) {
-    int end = I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) - I(w, W_H);
+    int end = I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) - list_shown_h(w);
     if (y > end) y = end;
     return table_client_set_yoffset(w, y < 0 ? 0 : y);
+}
+
+/* A virtual table's release (TABLE_SCROLL_CALLS, table_client's pointer up: the fling's target, or
+ * where an over-drag settles): stock's table_client_scroll_to clamps its target to the rows less the
+ * client's height, the box's foot at the screen's, which a drag held to the list end
+ * (ringnav_table_drag) would be sent back down to. It runs with the client's height cut to the
+ * shown one, so the fling ends with the last row's foot on the list end too. */
+int ringnav_table_scroll(void *w, int y, int ms) {
+    int h = I(w, W_H), shown = list_shown_h(w);
+    I(w, W_H) = shown;
+    int ret = table_client_scroll_to(w, y, ms);
+    I(w, W_H) = h;
+    return ret;
 }
 
 /* Canvas text in the theme's list title face where it has the characters, else in its fallbacks as

@@ -58,7 +58,7 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
+  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
   the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
   scans): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
   no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
