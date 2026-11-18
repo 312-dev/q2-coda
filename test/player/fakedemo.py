@@ -477,7 +477,8 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), killa
                *(['--setenv', 'Q2EMU_PCM_BUFFER_MS', str(buffer_ms)] if buffer_ms else []),
                *(['--setenv', 'Q2EMU_RATE', str(rate)] if rate else []),
                '--setenv', 'LD_PRELOAD', '/lib/libq2emu.so', '--chdir', '/tmp', *run]
-        return subprocess.Popen([str(c) for c in cmd], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT)
+        return subprocess.Popen([str(c) for c in cmd], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT,
+                                env={k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'})  # q2-heavy's nodump.so makes bwrap fail its uid map
     return go
 
 
