@@ -21,7 +21,9 @@
  * LYRIC_TAG_MAX bytes, and none from an Ogg file whose comment header is over OGG_TAGS_MAX (xiph.h:
  * TagLib would hold it ~4 times over). The lines keep their milliseconds and A2 word stamps
  * ("<mm:ss.xx>" before a word, cut from the text) for iPod's lyrics page (lyrics.c), lose the
- * spaces at their ends, and blank ones go; a .lrc's synced lines replace stock's, read alike. */
+ * spaces at their ends, and blank ones go; a .lrc's synced lines replace stock's, read alike, and
+ * a .lrc stock kept no line of is read as plain text (a card app's,
+ * docs/internals.md#server-lyrics). */
 #define LYRIC_TAG_MAX 65536
 extern int stock_lyric_trampoline(void);
 
@@ -185,6 +187,44 @@ int ringnav_lrc_utf8(const char *path) {
     return ok;
 }
 
+/* Whether s, a line without the spaces at its ends, is an LRC tag such as "[ar:Name]": letters (or
+ * #) and a colon after its [, and ] at its end. */
+static int lrc_idtag(const char *s) {
+    const char *p = s + (*s == '[');
+    while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || *p == '#') ++p;
+    return *s == '[' && p > s + 1 && *p == ':' && s[strlen(s) - 1] == ']';
+}
+
+/* Lyrics from a card app's server (docs/internals.md#server-lyrics): the song on the card that the
+ * latest load found nothing for, and lyrics_ask_poll's request about it. Songs are told apart by
+ * their path's FNV-1a (la_key), a word, so the loader's thread writes none whole. */
+static struct {
+    unsigned none;  /* the song the latest load found nothing for, 0 when it found lyrics */
+    unsigned asked; /* the song asked about last: never twice in a row */
+    unsigned seq, at, polled;
+    int wait; /* a request waits for its answer */
+} la __attribute__((section(".scratch")));
+
+/* path's FNV-1a, never 0; 0 for no path. */
+static unsigned la_key(const char *path) {
+    unsigned h = 2166136261u;
+    if (!path) return 0;
+    while (*path) h = (h ^ (unsigned char)*path++) * 16777619u;
+    return h ? h : 1;
+}
+
+/* The playing record's card path: a local queue's song, REC_TYPE 8 with an absolute path; 0 for
+ * any other (a Tidal or app URL queue, 0xf1 and 0xf2, or none). */
+static const char *playing_file(void) {
+    void *q = P(mcl_pdeqplaylist, 0), *r;
+    unsigned pos = (unsigned)I(MCL_POS, 0);
+    if ((unsigned)(I(MCL_TYPE, 0) - 0xf1) < 2 || !q || pos >= deque_size(q) ||
+        !(r = deque_at(q, pos)) || I(r, REC_TYPE) != 8 || !P(r, REC_PATH) ||
+        *(char *)P(r, REC_PATH) != '/')
+        return 0;
+    return P(r, REC_PATH);
+}
+
 int ringnav_lyric(void) {
     free(lrc_file);
     lrc_file = 0;
@@ -201,6 +241,16 @@ int ringnav_lyric(void) {
             lrc_push(l, n, 1);
         else
             n = 0;
+    } else if (file) { /* stock kept no line of it: an unsynced .lrc, as a card app writes one */
+        n = lrc_parse(file + 3 * !memcmp(file, "\xef\xbb\xbf", 3), &l, &m);
+        int k = 0;
+        for (int i = 0; i < n; ++i) /* LRC's tags ("[ar:...]") are no lyrics */
+            if (!lrc_idtag(l[i].text)) l[k++] = l[i];
+        if ((n = k) > 0) {
+            lrc_push(l, n, l[0].time != LRC_FAR);
+            ret = 1;
+        } else
+            free(l), free(m), l = 0, m = 0;
     }
     unsigned pos = (unsigned)I(MCL_POS, 0);
     if (!(mclGetLyricSize() > 0 || (unsigned)(I(MCL_TYPE, 0) - 0xf1) < 2 || !q ||
@@ -234,6 +284,7 @@ int ringnav_lyric(void) {
     }
     /* every load sends its synced lines, or none (the rows hold unsynced ones): never the last's */
     lyrics_publish(l, n > 0 && l[0].time != LRC_FAR ? n : 0, m);
+    la.none = mclGetLyricSize() > 0 ? 0 : la_key(playing_file());
     if (v) ((void (*)(char **))(lib + TAGLIB_PROPERTY_FREE))(v);
     if (f) taglib_file_free(f);
     free(file);
@@ -242,6 +293,47 @@ int ringnav_lyric(void) {
     return ret;
 }
 
+
+/* Lyrics from a card app's server (docs/internals.md#server-lyrics). Every UI pass (navigation's
+ * lyric_poll), front when the lyrics page is in front and lit: once the latest load found nothing
+ * for the song playing, a song on the card (la.none), it is asked of its app (addon_lyrics_ask: the
+ * app whose folder holds it, when its q2app says lyrics=1), once, never twice in a row; the page
+ * shows it has none meanwhile. The answer is polled every LYRIC_ASK_POLL_MS for LYRIC_ASK_WAIT_MS
+ * at most, a state file read on tmpfs; nothing is read while no request waits. Answered with the
+ * .lrc beside the song (0) while it still plays with no lyrics, the load runs again, as stock's
+ * lyrics match does after its accept (0x535f24, also on this thread), and g_forcerefresh_flag has
+ * the page's refresh rebuild its rows from it (ringnav_lyric_rows). Any other answer leaves it. */
+#define LYRIC_ASK_POLL_MS 250
+#define LYRIC_ASK_WAIT_MS 30000
+void lyrics_ask_poll(int front) {
+    unsigned now = time_now_ms();
+    if (la.wait) {
+        if (now - la.polled < LYRIC_ASK_POLL_MS) return;
+        la.polled = now;
+        const char *p = playing_file();
+        if (la_key(p) != la.asked) { /* another song: the answer would load nothing */
+            la.wait = 0;
+            return;
+        }
+        int code = addon_lyrics_answer(la.seq, p);
+        if (code < 0) {
+            if (now - la.at >= LYRIC_ASK_WAIT_MS) la.wait = 0;
+            return;
+        }
+        la.wait = 0;
+        if (code == 0 && mclGetLyricSize() <= 0) {
+            ringnav_lyric();
+            g_forcerefresh_flag = 1;
+        }
+        return;
+    }
+    if (!front || !la.none || la.none == la.asked || mclGetLyricSize() > 0) return;
+    const char *p = playing_file();
+    if (la_key(p) != la.none) return; /* the playing song's load hasn't ended */
+    la.asked = la.none;
+    la.seq = la.seq + 1 ? la.seq + 1 : 1;
+    if (addon_lyrics_ask(p, la.seq)) la.wait = 1, la.at = la.polled = now;
+}
 
 /* Every line LYRIC_PX, as large as reads well in the page's width, as many rows as it takes up to
  * LYRIC_ROWS (the rest cut; so many still fit the page), LY_PITCH apart; its row on the page is
