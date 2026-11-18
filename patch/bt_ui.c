@@ -459,7 +459,7 @@ void bt_page(void *view, int on) {
 #define BT_STEP_TITLE "Lower quality when the signal is weak"
 #define BT_STEP_CAPTION                                                                            \
     ((const unsigned *)L"On LDAC Auto, aptX HD steps down to aptX, then SBC, while the signal is " \
-                        L"weak, and back once it is strong again")
+                       L"weak, and back once it is strong again")
 static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 1); }
 static int step_click(void *label, void *event) {
     int on = !step_on();

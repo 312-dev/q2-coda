@@ -5,9 +5,11 @@
  * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
  * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
  * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
- * the start, when its encoder thread changes and every BT_PCMS_MS. The one change to how the Q2
+ * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
- * allowing EDR, once to each of its handles while a stream runs. Every read that fails leaves its
+ * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
+ * step-down's setting on, a link the radio cannot keep up with is moved from aptX HD to aptX to SBC
+ * and back (bt_step), each switch q2bt-codec's SelectCodec. Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. */
 #include "q2bt.h"
@@ -22,7 +24,7 @@
 #define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */
 #define WLAN "/sys/class/net/wlan0/statistics/"
 #define CONFIG "/mnt/data/config.ini" /* LDAC Auto and the step-down's setting, read only */
-#define CODEC_FILE "/tmp/q2bt.codec"     /* q2bt-codec's answer to a switch */
+#define CODEC_FILE "/tmp/q2bt.codec"  /* q2bt-codec's answer to a switch */
 #define CODEC_PROG "/usr/bin/q2bt-codec"
 #define STEP_ASK_MS 3000 /* bluealsa asked for the codec this long after a switch is sent */
 
@@ -51,7 +53,7 @@ static struct {
                    */
     unsigned done, done_was; /* completions counted on the raw socket, and at the last line */
     struct bt_fly fly;
-    card_log *ulog;        /* the unified log: the EDR outcome, once */
+    card_log *ulog;        /* the unified log: the EDR outcome, once; each STEP */
     unsigned char sink[6]; /* the A2DP sink's address (bluealsa's a2dpsrc PCM), have_sink */
     int have_sink, sink_h; /* and its ACL handle at the last line, -1 none */
     struct bt_edr edr;
@@ -288,7 +290,7 @@ static void step_reap(unsigned now) {
     if (bt.codec_pid <= 0 || waitpid(bt.codec_pid, &status, WNOHANG) != bt.codec_pid) return;
     bt.codec_pid = 0;
     bt.pcms_at = now - BT_PCMS_MS; /* the codec it has now: asked at the next line */
-    if (!status) return; /* exited 0 */
+    if (!status) return;           /* exited 0 */
     char b[96] = "", line[128];
     int n = slurp(CODEC_FILE, b, sizeof b);
     for (int i = 0; i < n && i < (int)sizeof b; ++i)

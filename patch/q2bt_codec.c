@@ -35,7 +35,7 @@ int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
 int write(int, const void *, unsigned);
 unsigned strlen(const char *);
 #define DBUS_BUS_SYSTEM 1
-#define CALL_MS 10000 /* bluealsa answers once the headset has the new codec: an AVDTP reconfigure */
+#define CALL_MS 10000 /* bluealsa answers once the headset has the new codec */
 
 static void say(const char *s) {
     if (s) write(1, s, strlen(s));
@@ -49,10 +49,9 @@ int main(int argc, char **argv) {
     DBusError e;
     dbus_error_init(&e);
     DBusConnection *bus = dbus_bus_get(DBUS_BUS_SYSTEM, &e);
-    DBusMessage *m =
-        bus ? dbus_message_new_method_call("org.bluealsa", argv[1], "org.bluealsa.PCM1",
-                                           "SelectCodec")
-            : (DBusMessage *)0;
+    DBusMessage *m = bus ? dbus_message_new_method_call("org.bluealsa", argv[1],
+                                                        "org.bluealsa.PCM1", "SelectCodec")
+                         : (DBusMessage *)0;
     DBusMessage *r = (DBusMessage *)0;
     if (m) {
         DBusMessageIter it, props;

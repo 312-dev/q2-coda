@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: on **LDAC Auto**, a headset that gets aptX HD (such as a Bowers & Wilkins Px7) now steps down to aptX, and then SBC, when the signal gets too weak to keep up, instead of breaking up, and steps back up a minute after the signal is strong again (at most every 3 minutes). Each change is a short gap in the sound, about a second. Turn it off with the new **Lower quality when the signal is weak** switch at the end of Settings > Bluetooth > Quality (on by default).
   - Bluetooth: steadier aptX HD, fewer dropouts. When music starts to a headset, and after it reconnects (a Quality change), the Q2 now asks the Bluetooth radio to use its faster (EDR) packets for that headset. On a Bowers & Wilkins Px7 S3 the link had settled on slower packets that left aptX HD no room to spare; with the change a walk had 6 seconds with a dropout in 152 instead of 19 in 120. Phones and the Car Remote are not affected.
   - Streamed songs: before a server song starts playing, Now Playing's progress bar is empty at 0:00. Before, about a ninth of it was already filled while the song loaded. An AirPlay speaker is also told the server's length of a song still downloading (or none yet), not the short length it had so far.
   - Bluetooth: the link log keeps recording signal strength after you change Quality (it stopped at the first change), notes the codec within a second of a change instead of up to a minute later, and records how busy the encoder is, so a break-up can be told apart as the radio's, the encoder's or the player's.

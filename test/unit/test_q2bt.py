@@ -1,7 +1,8 @@
 """q2bt's core (patch/q2bt_core.c, docs/internals.md#bluetooth-link-monitor): when a stream counts as running, the
 kernel's hci_dev_info and connection list as laid out, the four HCI commands and their answers, the A2DP socket's
-queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, and the EDR
-packet-type command to the A2DP sink's link. Built for this machine
+queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, the EDR
+packet-type command to the A2DP sink's link, and the step-down from aptX HD (bt_step, the config it obeys and the
+PCM path SelectCodec goes to). Built for this machine
 with test/unit/q2guard_host.c."""
 import ctypes as C
 import subprocess

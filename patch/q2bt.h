@@ -1,7 +1,8 @@
 /* q2bt: the Bluetooth link monitor, a part of q2guard (docs/internals.md#bluetooth-link-monitor).
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
- * sent, what is waiting for it, what the controller says of the link, and what else was busy. The
- * one thing it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle. The
+ * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
+ * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
+ * under LDAC Auto, aptX HD is stepped down while the radio cannot keep up (bt_step). The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
 #ifndef Q2BT_H
@@ -119,7 +120,7 @@ struct bt_step {
 /* One line: allowed (bt_step_allowed), the codec's rank now, wq, fly (-1 not read) and the
  * controller's buffer count. The rank to select now, else 0. */
 int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs);
-#define BT_LDAC_AUTO 2          /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
+#define BT_LDAC_AUTO 2           /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
 #define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: the setting, on unless 0 (patch/bt_ui.c) */
 /* config.ini's text: 1 LDAC Auto with the setting on, 0 LDAC Auto with it off, -1 another choice
  * (or none saved) */
@@ -176,7 +177,7 @@ int bt_ticks_pct(unsigned ticks, unsigned ms);
 int bt_flush(card_log *l, const char *dir);
 
 /* ---- q2bt.c: the device's side ---- */
-void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log for the EDR outcome */
+void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log (EDR, STEP) */
 /* Sleep ms; while a stream runs, wake each second to sample it. A signal that sets guard_woke
  * (q2guard.c: a request, a SIGTERM) ends it early. */
 void bt_sleep(unsigned ms);
