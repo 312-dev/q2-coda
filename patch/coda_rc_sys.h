@@ -39,6 +39,8 @@ typedef unsigned socklen_t;
 #define O_CREAT 0x100
 #define O_TRUNC 0x200
 #define O_CLOEXEC 0x80000
+#define F_SETFD 2
+#define FD_CLOEXEC 1
 #define F_GETFL 3
 #define F_SETFL 4
 #define AF_INET 2

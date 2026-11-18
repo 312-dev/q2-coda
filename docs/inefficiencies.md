@@ -351,7 +351,7 @@ Measured as above (pool slot 4, `BLUETOOTH=0`, 60 s a state; a 25-minute test tr
 - **1, player polls dark** (`dark_slow`, `patch/nav/playback_power.c`; [internals](internals.md#battery), Player polls dark): 73 fewer wakeups a second dark while playing (a third of all), 74 dark while paused. They keep stock's pace for a track's last 10 s and 2 s after its end, while A-B Repeat loops, with Car Remote on, and for another player; a listen counts steps of up to 3 s. The lit states do not change, nor does dark idle (already slow).
 - **4, status-row `stat`s** (`rockbox_seen`, `home_folders`): the Rockbox binary's `stat` 6,001 a minute → 12 on Now Playing, 5,031 → 12 on a list, 1,296 → 8 on Home; the card root's `stat` on Home 649 → 9 (strace runs). No wakeups, as expected.
 - **6, `checkappprocess.sh`**: process starts 19 a minute → 1 (the one left is the log trim's `sleep 60`); S90play reboots when demo ends.
-- **9, coda-rc's timeout**: with Car Remote on, the daemon's wakeups 239 a minute → 60 dark and idle, → 120 dark while playing (the shim's Now Playing, renamed in once a second, ends a sleep). demo's command files stay: a socket from demo would need the phones' authentication or one of its own.
+- **9, coda-rc's timeout**: with Car Remote on, the daemon's wakeups 239 a minute → 60 dark and idle, → 120 dark while playing (the shim's Now Playing, renamed in once a second, ends a sleep). demo's command files stay, and the daemon now tells the shim of each over a pipe it is handed at its start ([9's other half built](#9s-other-half-built)).
 - **10, `guest_poll`**: the opens of `/tmp/q2-guest.state` with Guest Play off, 211 to 236 a minute → 0 in every state. `q2-guest`'s own 250 ms timeout (with Guest Play on) is left.
 
 ### 7 and 8 built
@@ -410,6 +410,18 @@ Covers come sooner, not later: from Next to Now Playing's cover parsed (`g_playc
 
 - Paused, each poll now asks once a second (the status thread's 172 are its waits for the two answers); playing, once as each second turns. q2player's audio thread (6,001 both sides, the emulator's 10 ms periods) is not a poll. Now Playing's time still steps each second (1:10 to 1:13 over four shots a second apart).
 - Dark is unchanged: `dark_slow` keeps its blind second, which the push could only match.
+
+### 9's other half built
+
+`perf/polling-rest` ([internals: Car remote](internals.md#car-remote-tell)): the daemon tells the shim of each file it writes or removes for it, one byte down a pipe whose write end the shim hands it at its start (`--tell-fd`), and the shim reads those files on the pass after, else every 5 s; the files stay the channel, and the pipe has no name for anything else to reach. Measured on pool slots 4 and 3 with Car Remote on (`CARREMOTE=1`), `BLUETOOTH=0`, `Q2EMU_STRACE=1`, Home lit and idle for 60 s, then 20 Transport (volume) commands from `tools/coda_rc_client.py` at random moments, each timed to its Ack; the branch's item 2 build against the same build with the shim's poll alone.
+
+| Measure                                             |  Before | After |
+| --------------------------------------------------- | ------: | ----: |
+| demo's opens of the shim's files a minute           |     323 |    36 |
+| demo's wakeups a minute                             |   2,456 | 2,368 |
+| Transport to its Ack, median (range), ms            | 347 (23 to 614) | 3 (2 to 19) |
+
+- The wakeups are the same, as the plan said (the shim's poll rides the UI pass); what goes is the failed opens, and the wait: a phone's button now acts at once instead of on the shim's next 500 ms look.
 
 ## Duplicated tables kept in step by hand
 

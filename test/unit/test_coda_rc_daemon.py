@@ -6,6 +6,7 @@ until the session ends. CAP_RADIO: StartRadio's commands to the shim and NowPlay
 (docs/remote-protocol.md#radio). A server album's cover the card lacks, asked of its card app while the answer is
 held (docs/internals.md#car-remote-covers)."""
 import ctypes
+import os
 import pathlib
 import socket
 import subprocess
@@ -50,6 +51,7 @@ class Shim:
     def __init__(self, root):
         self.root, self.seq, self.code, self.verbs = root, 0, 0, []
         self.loop: threading.Thread | None = None  # the daemon's loop, once started
+        self.tell_r = -1  # the read end of the pipe the daemon tells the shim on
         (root / 'tmp').mkdir()
         (root / 'mnt/data').mkdir(parents=True)
         self.now(radio=0)
@@ -79,7 +81,10 @@ def q2(daemon_bin, tmp_path_factory):
     with socket.socket() as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
-    args = [b'coda-rc', b'--root', str(tmp_path).encode(), b'--no-ble', b'--port', str(port).encode()]
+    shim.tell_r, tell_w = os.pipe()  # the shim's pipe (coda_rc_shim.c cr_start); the daemon runs in this process
+    os.set_blocking(shim.tell_r, False)
+    args = [b'coda-rc', b'--root', str(tmp_path).encode(), b'--no-ble', b'--port', str(port).encode(),
+            b'--tell-fd', str(tell_w).encode()]
     argv = (ctypes.c_char_p * len(args))(*args)
     loop = threading.Thread(target=daemon_bin.coda_main, args=(len(args), argv), daemon=True)
     loop.start()
@@ -196,6 +201,29 @@ def test_demos_files_end_the_loops_sleep(q2):
         start = time.monotonic()
         s.start_radio(stop=True)  # the shim answers within its 20 ms look
         assert time.monotonic() - start < 0.15
+
+
+def told(shim, wait=0.5):
+    """The bytes the daemon has told the shim since the last look, after waiting for them."""
+    WAIT(wait)
+    try:
+        return os.read(shim.tell_r, 4096)
+    except BlockingIOError:
+        return b''
+
+
+def test_the_shim_is_told_of_each_command_and_of_nothing_else(q2):
+    """docs/internals.md#car-remote-tell: a byte on --tell-fd after each write or removal of a file the shim reads
+    (.cmd here; .pair, .pair-end and .wake too), so the shim reads them then; Now Playing and the ack, which the
+    daemon reads, and its own files tell nothing."""
+    s, shim = q2
+    told(shim, 0)
+    s.subscribe(position=False)
+    shim.now(radio=1)
+    assert told(shim, 1.2) == b''  # Now Playing in, a push out, the second's tick: nothing for the shim
+    for _ in range(3):
+        s.start_radio(stop=True)
+        assert told(shim, 0.1) == b'1'  # the command's file, written before the shim's ack came
 
 
 # ---- covers the card lacks, asked of the card app (docs/internals.md#car-remote-covers) ----

@@ -14,10 +14,16 @@
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
  * Settings > Car Remote is carremote_page.c's, polled from here.
+ * The daemon tells the shim when it has written or removed one of those files, over a pipe whose write end it
+ * is handed at its start (--tell-fd): a byte, nothing else, so the files stay the one channel and nothing new is
+ * reachable by anyone else. A thread waits on the read end and wakes the UI loop, and the files are read on the
+ * pass after, else every CR_FILES_MS; without the pipe (a daemon this demo did not start, the pipe refused or
+ * closed) they are read every CR_POLL_MS (docs/internals.md#car-remote-tell).
  * Everything the protocol needs is in the daemon; here only a few words of state. */
 #include "navigation.h"
 
 #define CR_POLL_MS 500
+#define CR_FILES_MS 5000 /* with the daemon's pipe: the command files read at least this often */
 #define CR_RESTART_MS 30000 /* a daemon that died is started again at most this often */
 #define CR_SETTLE_MS 3000   /* a Pause or Play the player has not shown by then is refused (under coda_rc.c ACK_MS) */
 #define CR_DAEMON "/usr/bin/coda-rc"
@@ -51,6 +57,9 @@ static struct {
     unsigned hearts_at, hearts_id;
     char note[96]; /* the toast shown last, for the car, until note_at + CR_NOTE_MS; note_n counts them */
     unsigned note_at, note_n;
+    volatile int tell_live;   /* the tell thread waits on the daemon's pipe */
+    volatile unsigned told;   /* bytes the daemon sent, counted by that thread */
+    unsigned told_seen, files_at;
 } cr __attribute__((section(".scratch")));
 
 int coda_rc_enabled(void) {
@@ -76,9 +85,56 @@ static int cr_running(void) {
     return atoi(raw + 1) > 1 && !access(proc, 0);
 }
 
+/* The o32 syscall nr(a, b, c): its result, or -1 when the kernel reports an error ($a3). */
+#ifndef PEQ_HOST
+__asm__(".globl cr_syscall\ncr_syscall:\n.set push\n.set noreorder\nmove $v0, $a0\nmove $a0, $a1\n"
+        "move $a1, $a2\nmove $a2, $a3\nsyscall\nbnez $a3, 1f\nnop\njr $ra\nnop\n1:\njr $ra\n"
+        "li $v0, -1\n.set pop\n");
+extern int cr_syscall(int nr, long a, long b, long c);
+#else
+__attribute__((weak)) int cr_syscall(int nr, long a, long b, long c) { return -1; }
+#endif
+#define SYS_PIPE2 4328
+#define CR_CLOEXEC 0x80000 /* O_CLOEXEC on MIPS */
+
+/* The daemon's tells: each wakes the UI loop, whose next pass reads the files (coda_rc_poll). It ends when the
+ * daemon has gone (its write end closed) or the read fails. */
+static void *cr_tell(void *arg) {
+    int fd = (int)(long)arg;
+    char b[64];
+    while (read(fd, b, sizeof b) > 0) {
+        ++cr.told;
+        loop_wake();
+    }
+    cr.tell_live = 0;
+    close(fd);
+    return 0;
+}
+
+/* The daemon, handed the write end of a pipe whose read end cr_tell waits on. The write end is inheritable only
+ * for the system() that starts it; the read end never is. ponytail: another thread's fork in that moment would
+ * hold the write end too, and the read end then ends only with that child: tells still come, from the daemon. */
 static void cr_start(void) {
     cr.started_at = time_now_ms() | 1;
-    if (!cr_running()) system("( " CR_DAEMON " >/dev/null 2>&1 & )");
+    if (cr_running()) return;
+    int fds[2] = { 0, 0 };
+    unsigned long t;
+    if (!cr.tell_live && !cr_syscall(SYS_PIPE2, (long)fds, CR_CLOEXEC, 0) && fds[0] > 2 && fds[1] > 2) {
+        char cmd[96];
+        fcntl(fds[1], 2 /* F_SETFD */, 0);
+        tk_snprintf(cmd, sizeof cmd, "( " CR_DAEMON " --tell-fd %d >/dev/null 2>&1 & )", fds[1]);
+        system(cmd);
+        close(fds[1]);
+        cr.tell_live = 1;
+        if (pthread_create(&t, 0, cr_tell, (void *)(long)fds[0]) || !t) {
+            cr.tell_live = 0;
+            close(fds[0]);
+        } else {
+            pthread_detach(t);
+        }
+        return;
+    }
+    system("( " CR_DAEMON " >/dev/null 2>&1 & )");
 }
 
 static void cr_stop(void) {
@@ -521,7 +577,6 @@ static void cr_pairing(void) {
     }
 }
 
-/* Every UI pass (ringnav_sleep). */
 /* The daemon asked a card app that doesn't run for a cover the car wants (coda_rc.c crc_cover_ask): it is started
  * (addon_cover_wake, only an app whose q2app says covers=1). */
 static void cr_wake(void) {
@@ -533,15 +588,26 @@ static void cr_wake(void) {
     addon_cover_wake(raw + 1);
 }
 
+/* Every UI pass (ringnav_sleep): the daemon, Now Playing and the pages every CR_POLL_MS; the daemon's files then
+ * too, unless its pipe is live, when they are read on the pass after a tell, every CR_POLL_MS while a play waits
+ * for its timer or the pairing card is up (their next step is a poll's, not a tell's), else every CR_FILES_MS. */
 void coda_rc_poll(void) {
     unsigned now = time_now_ms();
-    if (cr.at && now - cr.at < CR_POLL_MS) return;
-    cr.at = now | !now;
-    carremote_poll(); /* Settings > Car Remote's pages while open */
-    if (!coda_rc_enabled()) return;
-    if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
-    cr_now();
-    cr_settle();
+    int told = cr.told != cr.told_seen;
+    if (!told && cr.at && now - cr.at < CR_POLL_MS) return;
+    if (!cr.at || now - cr.at >= CR_POLL_MS) {
+        cr.at = now | !now;
+        carremote_poll(); /* Settings > Car Remote's pages while open */
+        if (!coda_rc_enabled()) return;
+        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
+        cr_now();
+        cr_settle();
+        if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && now - cr.files_at < CR_FILES_MS) return;
+    } else if (!coda_rc_enabled()) {
+        return;
+    }
+    cr.told_seen = cr.told;
+    cr.files_at = now;
     cr_command();
     cr_wake();
     cr_pairing();

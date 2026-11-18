@@ -22,9 +22,9 @@
 __asm__(".globl pp_syscall\npp_syscall:\n.set push\n.set noreorder\nmove $v0, $a0\nmove $a0, $a1\n"
         "move $a1, $a2\nmove $a2, $a3\nsyscall\nbnez $a3, 1f\nnop\njr $ra\nnop\n1:\njr $ra\n"
         "li $v0, -1\n.set pop\n");
-extern int pp_syscall(int nr, int a, int b, int c);
+extern int pp_syscall(int nr, long a, long b, long c);
 #else
-__attribute__((weak)) int pp_syscall(int nr, int a, int b, int c) { return -1; }
+__attribute__((weak)) int pp_syscall(int nr, long a, long b, long c) { return -1; }
 #endif
 
 static struct {
@@ -43,7 +43,7 @@ static int pp_fd(void) {
         } a = { 1 /* AF_UNIX */, PUSH_PATH };
         int fd = socket(1, PUSH_SOCK, 0);
         if (fd > 0) unlink(PUSH_PATH);
-        if (fd > 0 && !pp_syscall(SYS_BIND, fd, (int)(long)&a, sizeof a)) {
+        if (fd > 0 && !pp_syscall(SYS_BIND, fd, (long)&a, sizeof a)) {
             pp.fd = fd + 1;
         } else {
             if (fd > 0) close(fd);
@@ -66,7 +66,7 @@ int player_push_wait(unsigned us) {
         int fd;
         short events, revents;
     } p = { fd, 1 /* POLLIN */, 0 };
-    int r = pp_syscall(SYS_POLL, (int)(long)&p, 1, DARK_POLL_US / 1000);
+    int r = pp_syscall(SYS_POLL, (long)&p, 1, DARK_POLL_US / 1000);
     if (r < 0) return usleep(us); /* a signal, or a poll the kernel refused: stock's wait */
     if (r > 0) {
         char b[16];
