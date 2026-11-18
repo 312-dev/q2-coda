@@ -578,7 +578,7 @@ static int conf_key(void *ctx, void *event) {
     return STOP;
 }
 static void *conf_line(void *page, int cy, int h, const char *s, int role, int px, unsigned ink) {
-    void *label = text(page, 0, cy - h / 2 - geom_val(V_BAR), 375, h);
+    void *label = text(page, 0, cy - h / 2, 375, h);
     widget_set_text_utf8(label, s);
     if (role >= 0) theme_font(label, role, FONT_ROW);
     if (px) widget_set_prop_int(label, "style:normal:font_size", px);
@@ -589,7 +589,6 @@ void feedback_shuffled(const char *what, int songs) {
     if (conf.page || songs <= 0) return;
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return;
-    client_window(page);
     conf.page = page;
     widget_set_name(page, "shuffle_confirm");
     widget_set_prop_int(page, "style:normal:bg_color", (int)RGBA(scheme()->paper));
@@ -597,8 +596,8 @@ void feedback_shuffled(const char *what, int songs) {
     widget_on(page, EVT_KEY_DOWN, conf_key, 0);
     widget_on(page, EVT_KEY_UP, conf_key, 0);
     page_title(page, "Now Playing", 1); /* the status row's, hidden here */
-    void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2 - geom_val(V_BAR),
-                               CONF_GLYPH, CONF_GLYPH);
+    void *glyph = image_create(page, (375 - CONF_GLYPH) / 2, 140 - CONF_GLYPH / 2, CONF_GLYPH,
+                               CONF_GLYPH);
     image_base_set_image(glyph, theme_art("confirm_shuffle"));
     conf_line(page, 200, 32, what, ROLE_NP, 0, tok(TOK_PRIMARY));
     char count[24];

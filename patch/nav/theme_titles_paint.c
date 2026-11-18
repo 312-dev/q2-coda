@@ -623,29 +623,9 @@ int ringnav_paint_bg(void *w, void *canvas) {
     if (w == bar && P(canvas, CANVAS_LCD)) {
         unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         /* An overlay on a full-bleed page, which paints under it (tools/build.py FULL_BLEED,
-         * docs/oled-design.md#full-bleed); flat black over a payload page under the row
-         * (theme_engine.c client_window), as nothing else paints there. While a page slides
-         * (page_parallax.c parallax_curr), each of the two pages' columns: the page under's left
-         * of open, the sliding page's from it. */
-        void *under = (void *)0, *prev;
-        float percent = 0;
-        int ww = I(w, W_W), open = ww;
-        for (unsigned i = widget_count_children(wm); i-- && !under;) {
-            void *c = widget_get_child(wm, i);
-            if (c && !tk_strcmp(widget_get_type(c), "window")) under = c;
-        }
-        stock_canvas_set_fill_color(canvas, ui_ink(RGBA(BAR_COLOR))); /* flat */
-        if ((prev = parallax_slide(&percent)) != (void *)0) {
-            open = ww - (int)(ww * percent + 0.5f);
-            if (I(prev, W_Y) > 0) canvas_fill_rect(canvas, 0, 0, open, I(w, W_H));
-        }
-        int from = prev ? open : 0;
-        if (!under || I(under, W_Y) > 0) canvas_fill_rect(canvas, from, 0, ww - from, I(w, W_H));
-        stock_canvas_set_fill_color(canvas, fill);
+         * docs/oled-design.md#full-bleed): no ground of its own but Home's band. */
         /* the page in sight: under OLED's toast, the page it is over, so Home's band stays its own */
         coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR))); /* Split's ink ground */
-        artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
-        np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
         st.paint_w = w;
         stock_canvas_set_fill_color(canvas, fill);

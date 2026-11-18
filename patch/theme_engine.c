@@ -122,18 +122,12 @@ _Static_assert(__builtin_offsetof(scheme_t, mode) == SCHEME_MODE_OFF, "test/patc
 /* A value of the theme's geometry set (tools/ipod.py Geometry) that is not an immediate: V_BAR, ... */
 int geom_val(int v) { return geom_vals[v]; }
 int client_h(void) { return 320 - geom_val(V_BAR); }
-/* A page the payload builds (coverflow.c page_open, the shuffle confirmation): every normal window
- * takes the whole screen (tools/build.py FULL_BLEED), and these lay their children out from the
- * status row's foot, so each goes back under the row, its box set once as the window manager sets
- * a window's (docs/oled-design.md#full-bleed). The bar fills black over a window placed so.
- * ponytail: these pages are not full-bleed yet; lifting it means laying each page_open caller and
- * the confirmation out from bar_foot (as slider_page.c does), then dropping this call. */
-void client_window(void *w) {
-    if (w) widget_move_resize(w, 0, geom_val(V_BAR), 375, client_h());
-}
-/* The row in window w where the status row ends: V_BAR on a full-bleed page, 0 on one
- * client_window put under the row. A layout that counts from the row's foot adds it. */
+/* The row in w where the status row ends: V_BAR in a page's window, which takes the whole screen
+ * (tools/build.py FULL_BLEED, docs/oled-design.md#full-bleed), and in a view at its top; 0 in a
+ * view of it that starts at the row's foot. A layout that counts from the row's foot adds it. */
 int bar_foot(void *w) { return geom_val(V_BAR) - (w ? I(w, W_Y) : 0); }
+/* The rows of w under the status row: from bar_foot to w's own foot (client_h in a page's window). */
+int page_room(void *w) { return w ? I(w, W_H) - bar_foot(w) : client_h(); }
 _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_ART_UP == V_SPLIT_ROW + SPLIT_ART_UP &&
                    V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,

@@ -12,9 +12,9 @@
  * (docs/oled-design.md#track-details): a header of the cover, title, artist and length, a quality
  * line (a Lossless, Hi-Res Lossless or DSD badge, then the format's spec), and a grid of small grey
  * names over white values, two a row, in AB_CELLS' order, a cell whose value is unknown left out
- * and the rest closing up, then Location across the row. The header's top stands above the window,
- * under the status row: np_about_cap draws it again in the status bar's background, as an artist's
- * monogram is (artist_page.c artist_cap). A read-only page has no selection: when it is taller
+ * and the rest closing up, then Location across the row. The header's top stands under the status
+ * row, on the full-bleed window, at the page's top; scrolled, the grid ends at the row's foot as a
+ * list does. A read-only page has no selection: when it is taller
  * than the screen the wheel scrolls it a row at a time (np_about_key), and a finger dragged up or
  * down moves it with the finger, between the same two ends (ab_touch). */
 #include "navigation.h"
@@ -57,7 +57,7 @@ static struct {
     int off, end, n, badge;   /* the scroll, the content's last row on screen, cells shown */
     int wide;                 /* the last cell is Location, across the row */
     int touch, ty, toff;      /* a finger on the grid: where it went down, the scroll then */
-    unsigned key, cap;        /* what was painted (hashed); the bar asked to repaint */
+    unsigned key;             /* what was painted (hashed) */
     struct {                  /* hashed whole: zeroed before each fill */
         char title[160], artist[160], len[12], spec[64], art[128];
         unsigned art_key;
@@ -111,9 +111,8 @@ int np_about_open(void *ctx, void *event) {
     page_title(ab.page, "About", 1);
     widget_remove_child(P(info, W_PARENT), info);
     widget_add_child(ab.page, info);
-    /* the grid, over the window; the details stay hidden, its source */
-    ab.body = widget_factory_create_widget(widget_factory(), "view", ab.page, 0, 0, 375,
-                                           320 - geom_val(V_BAR));
+    /* the grid, over the whole window; the details stay hidden, its source */
+    ab.body = widget_factory_create_widget(widget_factory(), "view", ab.page, 0, 0, 375, 320);
     widget_on(ab.body, EVT_POINTER_DOWN, ab_touch, 0);
     widget_on(ab.page, EVT_POINTER_MOVE_BEFORE, ab_touch, 0); /* peq_ui.c e3_touch's way */
     widget_on(ab.page, EVT_POINTER_UP_BEFORE, ab_touch, 0);
@@ -124,25 +123,6 @@ int np_about_open(void *ctx, void *event) {
 }
 
 /* ---- OLED's info grid ---- */
-
-/* The bar painted again once the page has come to rest (artist_page.c cap_due's way): asked from
- * a change, where an invalidate of the bar could be lost with the frame, so from the next pass on,
- * until the window manager has no slide running. */
-static int cap_due(const void *info) {
-    (void)info;
-    void *bar = *(void *const *)system_bar;
-    ab.cap = 0;
-    if (!ab.body) return 0;
-    if (window_manager_is_animating(window_manager())) {
-        ab.cap = 1;
-        return 8; /* RET_REPEAT */
-    }
-    if (bar) widget_invalidate_force(bar, (void *)0);
-    return 0;
-}
-static void cap_ask(void) {
-    if (!ab.cap) ab.cap = timer_add(cap_due, (void *)0, 0) | 1;
-}
 
 /* The scroll's furthest: the content's last row's bottom on the set's list end (list_fit_end), 0
  * when it fits. */
@@ -158,7 +138,6 @@ static void ab_scroll(int off) {
     if (off != ab.off) {
         ab.off = off;
         widget_invalidate_force(ab.body, (void *)0);
-        cap_ask(); /* the header's top in the bar shows only at the page's top */
     }
 }
 
@@ -370,7 +349,6 @@ void np_about_fill(void *win) {
     if (key == ab.key) return;
     ab.key = key;
     widget_invalidate_force(ab.body, (void *)0);
-    cap_ask();
 }
 
 /* The grid, its screen rows less oy (the canvas's top on screen, less the scroll). */
@@ -419,19 +397,18 @@ static void ab_draw(void *w, void *canvas, int oy) {
     }
 }
 
-/* ringnav_paint's, after stock painted w: the grid on its view. */
+/* ringnav_paint's, after stock painted w: the grid on its view. At the page's top the header stands
+ * under the status row; scrolled, the grid is clipped at the row's foot, as a list's rows are. */
 void np_about_paint(void *w, void *canvas) {
     if (!w || w != ab.body || !P(canvas, CANVAS_LCD)) return;
-    ab_draw(w, canvas, I(ab.page, W_Y) + I(w, W_Y) + ab.off);
-}
-
-/* The status bar's background (navigation.c ringnav_paint_bg): the header's top, which stands
- * above the window, while the page is on top and still, at its top: scrolled, the window clips
- * the grid at its own top. The bar's own paint clips it to the bar. */
-void np_about_cap(void *bar, void *canvas) {
-    void *wm = window_manager();
-    if (!ab.body || ab.off || !P(canvas, CANVAS_LCD) ||
-        window_manager_get_top_window(wm) != ab.page || window_manager_is_animating(wm))
-        return;
-    ab_draw(bar, canvas, I(bar, W_Y));
+    int was[4], oy = I(ab.page, W_Y) + I(w, W_Y);
+    canvas_get_clip_rect(canvas, was);
+    if (ab.off) {
+        int top = I(canvas, CANVAS_Y) + bar_foot(w), b = was[1] + was[3],
+            clip[4] = { was[0], top > was[1] ? top : was[1], was[2], 0 };
+        clip[3] = b > clip[1] ? b - clip[1] : 0;
+        canvas_set_clip_rect(canvas, clip);
+    }
+    ab_draw(w, canvas, oy + ab.off);
+    if (ab.off) canvas_set_clip_rect(canvas, was);
 }
