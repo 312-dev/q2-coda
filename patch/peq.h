@@ -443,6 +443,7 @@ int stream_reach(const char *path, int total);
 void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
+void radio_paint(void *w, void *canvas); /* radio.c: its loading overlay */
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
 void addon_forget(const char *dir), addon_quit(const char *dir);
 /* addon.c: a catalogue app started for a catplay (0 running, 1 started, -1 can't), and whether a
