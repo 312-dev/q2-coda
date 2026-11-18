@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The rebuilt third-party components (tools/thirdparty.py) in a build's root filesystem, run under
 qemu-mipsel in a bwrap chroot of it. Usage: test/thirdparty.py BUILD QEMU_MIPSEL [--offline]
+(QEMU_MIPSEL statically linked: the chroot has no host libraries)
 
 Each replaced program reports the version the manifest records; every stock program that links a
 replaced library still resolves all of its libraries; the curl tool built beside libcurl verifies

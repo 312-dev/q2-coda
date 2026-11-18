@@ -133,7 +133,7 @@ class Suite:
     def fill(arg, build):
         if '{stockfs}' in arg:
             arg = arg.replace('{stockfs}', stockfs(build))
-        return arg.replace('{qemu}', shutil.which('qemu-mipsel') or '').replace('{build}', build)
+        return arg.replace('{qemu_static}', static_qemu() or '').replace('{qemu}', shutil.which('qemu-mipsel') or '').replace('{build}', build)
 
     def command(self, build):
         argv = [self.fill(a, build) for a in self.argv]
@@ -169,8 +169,19 @@ def full_suite(name, py, logs):
     }.get(name)
 
 
+def static_qemu():
+    """A statically linked qemu-mipsel, which runs inside a chroot that holds no host libraries (test/thirdparty.py's
+    bwrap root): $Q2_QEMU_STATIC, qemu-mipsel-static on PATH, else the one the pool's copies carry (slot 2 is the
+    user's rig and is never read from)."""
+    found = os.environ.get('Q2_QEMU_STATIC') or shutil.which('qemu-mipsel-static')
+    for slot in (1, 3, 4):
+        if not found and (pathlib.Path.home()/f'q2-emu-pool{slot}/qemu-mipsel-static').is_file():
+            found = str(pathlib.Path.home()/f'q2-emu-pool{slot}/qemu-mipsel-static')
+    return found
+
+
 # How the gate (and affected.py --run) runs each test/X.py a plan can name, as each script's own parser
-# takes it: the argv after the script, in which `{build}` is the build, `{qemu}` qemu-mipsel and `{stockfs}` the
+# takes it: the argv after the script, in which `{build}` is the build, `{qemu}` qemu-mipsel, `{qemu_static}` a static one (`static_qemu`) and `{stockfs}` the
 # stock rootfs's module_driver/ and usr/data/ (extracted from the build's stock.squashfs, once per stock). A string
 # instead of a list is the reason the script cannot run here: it is skipped, with that reason printed.
 # tools/ci/test_ci.py checks that each script is in the table and that no row is for a script that is gone.
@@ -209,7 +220,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/rotator_build.py': [],  # given builds it asserts those were built with the module options, which a --dev build was not
     'test/server_catalogue.py': 'a generator of a catalogue file for a card (CARD_ROOT), not a test',
     'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
-    'test/thirdparty.py': ['{build}', '{qemu}', '--offline'],  # its TLS checks need the network, which a gate does not
+    'test/thirdparty.py': ['{build}', '{qemu_static}', '--offline'],  # its TLS checks need the network, which a gate does not
 }
 STOCKFS_CACHE = pathlib.Path(os.environ.get('Q2_STOCKFS', pathlib.Path.home()/'.cache/q2-stockfs'))
 STOCKFS_PATHS = ('module_driver', 'usr/data')
@@ -238,13 +249,17 @@ def other_suite(path, py):
         return None
     if '{qemu}' in ' '.join(args) and not shutil.which('qemu-mipsel'):
         return None
+    if '{qemu_static}' in ' '.join(args) and not static_qemu():
+        return None
     return Suite(path, [py, path, *args], needs_build=any('{build}' in a or '{stockfs}' in a for a in args), heavy=True)
 
 
 def skip_reason(path):
     """Why other_suite(path) is None."""
     args = SCRIPTS.get(path)
-    return args if isinstance(args, str) else 'it needs qemu-mipsel, which this machine lacks'
+    if isinstance(args, str):
+        return args
+    return 'it needs a static qemu-mipsel, which this machine lacks' if '{qemu_static}' in ' '.join(args) else 'it needs qemu-mipsel, which this machine lacks'
 
 
 def named_suite(name, py, logs):
