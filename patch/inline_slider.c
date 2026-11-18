@@ -154,12 +154,7 @@ static int heights(void) {
     if (!moved) return k < 1000;
     void *list = P(view, W_PARENT), *o = is.open;
     if (list) widget_layout(list);
-    if (o) {
-        int over = I(o, W_Y) + I(o, W_H) - I(view, SCROLL_Y) - list_shown_h(view);
-        if (over > 0)
-            scroll_view_set_offset(view, I(view, SCROLL_X),
-                                   I(view, SCROLL_Y) + (over + IS_PITCH - 1) / IS_PITCH * IS_PITCH);
-    }
+    if (o) list_grown_foot(view, o, IS_PITCH);
     widget_invalidate_force(view, (void *)0);
     return k < 1000;
 }

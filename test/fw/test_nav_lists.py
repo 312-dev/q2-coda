@@ -2482,7 +2482,9 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
     under it (settings_pages.c cap_step) or a grabbed inline slider (inline_slider.c heights). The view scrolls by whole
     rows until the grown row's foot is on or above OLED's list end, y 282, 38 px clear of the screen's edge. Kept only
     inside the view's own height, which runs on to the screen's foot, it stood in the glass's bottom corners (the
-    device's Display page, 2026-11-18: Reduce Motion's caption down to y 303)."""
+    device's Display page, 2026-11-18: Reduce Motion's caption down to y 303); and the content padded past the rows'
+    foot as list_fade pads it, since stock's relayout of the grown list takes that padding off and AWTK's offset stops
+    at the content's foot."""
     theme(fw)
     bar, end, pitch = 58, 282, 32  # OLED's status row, list end and row pitch on the screen
     win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name=name)  # the client, under the status row
@@ -2493,6 +2495,23 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
     view.int(SCROLL_Y, max(0, pitch * rows - (end - bar)))  # the wheel's end: the last row's foot on the list end
     ui.top = win
     last = items[-1]
+
+    def relayout(w, *_):
+        """Stock's layout of the list: the rows stacked by their heights, the content their foot, unpadded."""
+        y = 0
+        for item in items:
+            item.int(4, y)
+            y += item.box[3]
+        view.int(O['VIEW_CONTENT_H'], y)
+
+    def set_offset(w, x, y, *_):
+        """AWTK's scroll_view_set_offset, clamped to the content (seen on the emulator, 2026-11-18: Reduce Motion's
+        grown foot stayed on the screen's foot while the content ended there)."""
+        top = max(0, min(y, view.int(O['VIEW_CONTENT_H']) - view.box[3]))
+        view.int(SCROLL_X, x)
+        view.int(SCROLL_Y, top)
+    fw.mock('widget_layout', relayout)
+    fw.mock('scroll_view_set_offset', set_offset)
     if grower == 'caption':  # settings_pages.c's cap: view, item[8], text[8], cut[8][3], lines[8], open, closing
         cap = C.addressof(fw.var('settings_pages__cap', C.c_char))
         C.c_void_p.from_address(cap).value = view.at
@@ -2508,8 +2527,9 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
         fw.fn('inline_slider__heights', C.c_int)()
     assert last.box[3] > pitch  # it grew
     foot = bar + last.box[1] + last.box[3] - view.int(SCROLL_Y)
-    assert end - pitch < foot <= end  # by whole rows, as far as it overran and no further
-    assert view.int(SCROLL_Y) % pitch == 0
+    assert end - pitch < foot <= end  # by whole rows, as far as it overran, and no further than the wheel's end
+    assert view.int(SCROLL_Y) % pitch == 0 or foot == end
+    assert view.props.get(b'_list_top') == view.int(SCROLL_Y) + 1  # what list_fade puts back after a relayout
 
 
 # Painted helpers: the panel, the shadow, the boxes.

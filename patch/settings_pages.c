@@ -232,12 +232,7 @@ static int cap_step(const void *unused) {
     void *list = P(cap.view, W_PARENT);
     if (list) widget_layout(list);
     void *o = cap.open;
-    if (o) { /* its foot in sight, on or above the list end: the view scrolls by whole rows */
-        int over = I(o, W_Y) + I(o, W_H) - I(cap.view, SCROLL_Y) - list_shown_h(cap.view);
-        if (over > 0)
-            scroll_view_set_offset(cap.view, I(cap.view, SCROLL_X),
-                                   I(cap.view, SCROLL_Y) + (over + CAP_TOP - 1) / CAP_TOP * CAP_TOP);
-    }
+    if (o) list_grown_foot(cap.view, o, CAP_TOP); /* its foot on or above the list end */
     widget_invalidate_force(cap.view, (void *)0);
     if (k < 256) return 8; /* RET_REPEAT */
     cap.timer = 0, cap.closing = (void *)0;

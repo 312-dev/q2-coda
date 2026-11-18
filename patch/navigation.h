@@ -519,6 +519,7 @@ void caption_sel(void *view, void *item);
  * end on the screen; a row that grows in place scrolls its foot inside it (settings_pages.c
  * cap_step, inline_slider.c heights) */
 int list_shown_h(void *view);
+void list_grown_foot(void *view, void *row, int step); /* nav/row_paint.c: and scrolls it there */
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */
