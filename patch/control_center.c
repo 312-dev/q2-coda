@@ -25,9 +25,11 @@
  * QUICK_HOLD_MS, by a finger (navigation.c quick_hold) or by Centre (cc_keydown), opens its
  * settings page (cc_hold). Landing open, the blocks overshoot and settle (cc_spring). A toggle's
  * name is set glyph by glyph (ui_set) and, wider than its column, fades out at its edge (cc_label).
- * Everything is drawn inside the window, whose whole is invalidated on an input, inside the band
- * cc_land invalidates while the blocks spring, the Wi-Fi circle inside the box cc_wifi_poll
- * invalidates when the link changes, and the whole when a cable comes or goes (cc_wifi_poll too).
+ * Everything is drawn inside the window, whose whole is invalidated on an input but a Volume
+ * drag's move (the slider's box alone, cc_drag, which sets the volume at most once every
+ * CC_VOL_WRITE_MS), inside the band cc_land invalidates while the blocks spring, the Wi-Fi circle
+ * inside the box cc_wifi_poll invalidates when the link changes, and the whole when a cable comes
+ * or goes (cc_wifi_poll too).
  * ponytail: AirPlay opens its settings page (stock's receiver switch has no call this file can
  * make without its page), so its circle is lit only by AirPlay's flag; the Wi-Fi circle reads
  * "Wi-Fi", not the network's name, which only the Wi-Fi page reads. */
@@ -310,10 +312,19 @@ static void cc_usb_row(void *win, void *canvas, rect_t r, int ring) {
     paint_art(win, canvas, name, x1 - CC_USB_CHEV_X - CC_USB_CHEV / 2, cy - CC_USB_CHEV / 2);
 }
 
+/* A drag's level not yet set (cc_drag): want is it + 1, 0 none; at, when the drag last set one;
+ * timer, 1 while cc_vol_due is to run. */
+static struct {
+    unsigned at;
+    unsigned char want, timer;
+} ccv __attribute__((section(".scratch")));
+
 /* A slider's level as its fill draws it, 0 to 256: Brightness's stock slider, Volume's g_volume
- * of 100, each at its bar's eased level (levels.c). */
+ * of 100 (a drag's level while it waits to be set, so the fill keeps up with the finger), each at
+ * its bar's eased level (levels.c). */
 static int cc_level(void *win, int i) {
-    if (i == CC_VOLUME) return clamp_step(0, 256, level_shown(&vol_bar, g_volume) / 100);
+    if (i == CC_VOLUME)
+        return clamp_step(0, 256, level_shown(&vol_bar, ccv.want ? ccv.want - 1 : g_volume) / 100);
     void *s = widget_lookup(win, "slider_backlight", 1);
     int min = s ? widget_get_prop_int(s, "min", 0) : 0,
         max = s ? widget_get_prop_int(s, "max", 100) : 100;
@@ -474,6 +485,19 @@ static void cc_volume(int v) {
     write_int_config(v, "PLAYSET", mclGetOutputWay() == 1 ? "BT_VOLUME" : "VOLUME");
 }
 
+static void cc_vol_write(void) {
+    if (!ccv.want) return;
+    int v = ccv.want - 1;
+    ccv.want = 0;
+    ccv.at = (unsigned)time_now_ms();
+    cc_volume(v);
+}
+static int cc_vol_due(const void *unused) {
+    ccv.timer = 0;
+    cc_vol_write();
+    return 7; /* RET_REMOVE */
+}
+
 /* Stock's own widget under stop i, which its tap and its Centre click: Wi-Fi's, Bluetooth's, the
  * brightness slider. */
 static void *cc_stock(void *win, int i) {
@@ -575,13 +599,29 @@ static int cc_click(void *ctx, void *event) {
     if (win) cc_act(win, (int)(long)ctx);
     return 0;
 }
-/* A finger on the Volume slider sets it where it is, from its press through its drag. */
+/* A finger on the Volume slider sets it where it is, from its press through its drag, and its
+ * release sets where it stopped (docs/internals.md#control-center-volume-drag). The fill follows
+ * every move and only the slider's box (and its ring) is drawn again, as stock's Brightness slider
+ * draws its own; the volume itself is set at most once every CC_VOL_WRITE_MS, a move sooner than
+ * that held for cc_vol_due, which sets the latest. */
 static int cc_drag(void *track, void *event) {
+    if (I(event, EVENT_TYPE) == EVT_POINTER_UP_BEFORE) {
+        cc_vol_write();
+        return 0;
+    }
     int x = I(event, EVENT_X), w = I(track, W_W), at = x;
     for (void *p = track; p; p = P(p, W_PARENT)) at -= I(p, W_X);
     if (w > 0 && pointer_down()) {
-        cc_volume((at < 0 ? 0 : at > w ? w : at) * 100 / w);
-        widget_invalidate_force(window_of(track), (void *)0);
+        int v = (at < 0 ? 0 : at > w ? w : at) * 100 / w;
+        ccv.want = (unsigned char)((v > g_maxvolume ? g_maxvolume : v) + 1);
+        unsigned since = (unsigned)time_now_ms() - ccv.at;
+        if (since >= CC_VOL_WRITE_MS)
+            cc_vol_write();
+        else if (!ccv.timer)
+            ccv.timer = timer_add(cc_vol_due, (void *)0, CC_VOL_WRITE_MS - since) != 0;
+        rect_t r = cc_box(CC_VOLUME);
+        r.x -= CC_RING, r.y -= CC_RING, r.w += 2 * CC_RING, r.h += 2 * CC_RING;
+        widget_invalidate_force(window_of(track), &r);
     }
     return 0;
 }
@@ -639,6 +679,7 @@ void cc_open(void *win) {
         if (i == CC_VOLUME) {
             widget_on(button, EVT_POINTER_DOWN, cc_drag, button);
             widget_on(button, EVT_POINTER_MOVE_BEFORE, cc_drag, button);
+            widget_on(button, EVT_POINTER_UP_BEFORE, cc_drag, button);
         } else
             widget_on(button, EVT_CLICK, cc_click, (void *)(long)i);
         if (cc_paged(i)) quick_hold(button, QUICK_CC + i);
