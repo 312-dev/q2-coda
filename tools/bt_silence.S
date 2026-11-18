@@ -12,6 +12,9 @@
  * BUDGET samples of silence have gone since the last real PCM.
  * ponytail: one quiet/silent for every encoder thread, fine for one headset at a time; a second
  * stream, or a stream torn down mid-silence, shares or inherits up to BUDGET of silence.
+ *
+ * Also SBC's bitpool, lowered while the radio cannot keep up (sbc_bp below,
+ * docs/internals.md#bluetooth-link-monitor).
  */
 .set noreorder
 .set noat
@@ -93,3 +96,36 @@ read:
 .globl quiet
 quiet:  .word 0
 silent: .word 0
+
+/* 0x406580, in place of the SBC encoder thread's jal sbc_encode (its one call; a0 the thread's sbc_t,
+ * a1-a3 and the stack's two arguments left as they are). The bitpool is sbc_pool's, as q2guard
+ * wrote it, but never above the one the thread started with (its packets are sized for that one's
+ * frames), and that one for 0 or 1. libsbc's sbc_encode takes a new bitpool at its next frame (it
+ * compares the sbc_t's with its frame's and works out the new length): no renegotiation and no
+ * gap. The starting bitpool is kept in the sbc_t's padding byte (11, after endian), which
+ * sbc_init_a2dp cleared, and published in sbc_own; the one used goes to sbc_now. t0-t3 only. */
+.globl sbc_bp
+sbc_bp:
+    lbu   $8, 11($4)          /* the thread's own, 0 before its first frame */
+    lui   $10, %hi(sbc_pool)
+    bnez  $8, 7f
+    lbu   $9, 9($4)
+    sb    $9, 11($4)
+    move  $8, $9
+    sb    $9, %lo(sbc_own)($10)
+7:  lbu   $9, %lo(sbc_pool)($10)
+    sltiu $11, $9, 2
+    movn  $9, $8, $11         /* none asked: its own */
+    sltu  $11, $8, $9
+    movn  $9, $8, $11         /* never above its own */
+    sb    $9, 9($4)
+    j     0x4038e0            /* sbc_encode's stub, as stock called it */
+    sb    $9, %lo(sbc_now)($10)
+
+/* At BT_SILENCE + 0x200 (tools/build.py BT_SBC_POOL, patch/q2bt.h), where q2guard finds them. */
+.org 0x200
+.globl sbc_pool
+sbc_pool: .byte 0
+sbc_own:  .byte 0
+sbc_now:  .byte 0
+          .byte 0

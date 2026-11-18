@@ -51,6 +51,10 @@ def L(tmp_path_factory):
     lib.log_named.argtypes = [C.c_char_p, C.c_char_p, C.c_uint]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
     lib.bt_flush.argtypes = [C.c_void_p, C.c_char_p]
+    lib.bt_sbc_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
+    lib.bt_sbc_next.argtypes = [C.c_int, C.c_int, C.c_int]
+    lib.bt_sbc_allowed.argtypes = [C.c_char_p]
+    lib.flush_every.argtypes = [C.c_int, C.c_int]
     return lib
 
 
@@ -74,7 +78,7 @@ class Counts(C.Structure):
 class Sample(C.Structure):
     _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
         'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew',
-        'fcc', 'done', 'fly')]
+        'fcc', 'done', 'fly', 'bp')]
 
 
 # ---- is a stream running ----
@@ -281,7 +285,7 @@ def test_no_a2dp_pcm_or_no_codec_is_none(L):
 def line(L, **f):
     s = Sample(wall=1795464061, up=4242, **{k: f.get(k, -1) for k in (
         'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')},
-        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly')})
+        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly', 'bp')})
     out = C.create_string_buffer(256)
     n = L.bt_line(out, 256, C.byref(s))
     assert n == len(out.value)
@@ -290,15 +294,15 @@ def line(L, **f):
 
 def test_a_line_has_every_field(L):
     text = line(L, kbps=612, acl=95, wq=2730, rssi=-12, lq=255, tpl=4, afh=40, err=0, wtx=3, wrx=120, cpu=23,
-                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5)
+                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5, bp=29)
     assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 acl=95 wq=2730 rssi=-12 lq=255 tpl=4 afh=40 err=0 wtx=3 '
-                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5\n')
-    assert len(text) < 170  # about 6 minutes in the 64 KB ring
+                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5 bp=29\n')
+    assert len(text) < 176  # about 6 minutes in the 64 KB ring
 
 
 def test_a_field_not_read_is_a_dash(L):
     assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- acl=- wq=- rssi=- lq=- tpl=- afh=- err=- wtx=- wrx=- '
-                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=-\n')
+                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=- bp=-\n')
 
 
 def test_rates_and_shares(L):
@@ -309,19 +313,44 @@ def test_rates_and_shares(L):
     assert L.bt_ticks_pct(0, 1000) == 0 and L.bt_ticks_pct(3, 0) == 0
 
 
-def test_the_log_rotates_at_a_megabyte(L, tmp_path):
+def test_the_log_rotates_at_a_megabyte_through_four_files(L, tmp_path):
+    """q2-bt.0 moves on at 1 MB, .2 to .3 and .1 to .2 first (the old .3 goes): right after a move the card still
+    holds 3 MB, about six hours of lines at 1 Hz, and never more than 4 MB and a flush."""
     d = tmp_path / 'logs'
     log = L.log_named(str(d).encode(), b'q2-bt.0', 65536)
-    L.heat_add(log, b'2026-11-23T04:01:01Z START h=12\n')
     d.mkdir()
-    (d / 'q2-bt.0').write_bytes(b'x' * 1048576)
+    for k in range(4):
+        (d / f'q2-bt.{k}').write_bytes(bytes([0x30 + k]) * 1048576)
+    L.heat_add(log, b'2026-11-23T04:01:01Z START h=12\n')
     L.card(1)  # the writing child's flush: the card is up
     try:
         assert L.bt_flush(log, str(d).encode()) == 0
     finally:
         L.card(0)
-    assert (d / 'q2-bt.1').stat().st_size == 1048576
+    assert [(d / f'q2-bt.{k}').read_bytes()[:1] for k in (1, 2, 3)] == [b'0', b'1', b'2']
     assert (d / 'q2-bt.0').read_bytes() == b'2026-11-23T04:01:01Z START h=12\n'
+    assert sorted(f.name for f in d.iterdir()) == ['q2-bt.0', 'q2-bt.1', 'q2-bt.2', 'q2-bt.3']
+
+
+def test_a_log_under_a_megabyte_is_appended_to(L, tmp_path):
+    d = tmp_path / 'logs'
+    log = L.log_named(str(d).encode(), b'q2-bt.0', 65536)
+    d.mkdir()
+    (d / 'q2-bt.0').write_bytes(b'x' * 1048575)
+    L.heat_add(log, b'line\n')
+    L.card(1)
+    try:
+        assert L.bt_flush(log, str(d).encode()) == 0
+    finally:
+        L.card(0)
+    assert (d / 'q2-bt.0').stat().st_size == 1048580 and not (d / 'q2-bt.1').exists()
+
+
+def test_a_streams_lines_reach_the_card_within_half_a_minute(L):
+    """A sudden power loss loses what is in the RAM ring: at most FLUSH's period while a stream runs or the Q2 is
+    warm or busy (q2guard.c), so under a minute of a walk; five minutes of the 30 s heat lines when idle."""
+    assert L.flush_every(0, 1) == 30000 and L.flush_every(1, 0) == 30000 and L.flush_every(1, 1) == 30000
+    assert L.flush_every(0, 0) == 300000
 
 
 # ---- the link's handle, followed across a reconnect ----
@@ -630,3 +659,152 @@ def test_a_codec_not_known_yet_keeps_where_it_started(L):
     assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
     assert step(L, s, 100, 1, 0, 0, -1) == 0                # paused, resumed: not known yet
     assert next(t for t in range(101, 400) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD) == 182
+
+
+# ---- SBC's bitpool: lowered frame to frame while the radio is the limit (bt_sbc_step) ----
+
+class Sbc(C.Structure):
+    _fields_ = [('pool', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint),
+                ('up_ms', C.c_uint), ('raised', C.c_int), ('raised_at', C.c_uint)]
+
+
+NONE = -1  # bt_sbc_step's "no change"
+
+
+def sbc(L, s, t, wq, fly, own=33, allowed=1, rank=SBC, bufs=BUFS):
+    return L.bt_sbc_step(C.byref(s), int(t * 1000), allowed, rank, own, wq, fly, bufs)
+
+
+def test_the_bitpool_ladder_below_the_streams_own(L):
+    """Down from where it is to the next lower rung, never at or above the thread's own; up a rung, and 0 (the
+    thread's own) once the next rung would reach it."""
+    down = [L.bt_sbc_next(p, own, -1) for own, p in ((53, 0), (53, 45), (53, 35), (53, 29), (53, 23), (53, 19))]
+    assert down == [45, 35, 29, 23, 19, -1]
+    assert [L.bt_sbc_next(p, 33, -1) for p in (0, 29, 23, 19)] == [29, 23, 19, -1]
+    assert [L.bt_sbc_next(p, 33, 1) for p in (19, 23, 29, 0)] == [23, 29, 0, -1]
+    assert [L.bt_sbc_next(p, 51, 1) for p in (19, 35, 45)] == [23, 45, 0]
+    assert L.bt_sbc_next(0, 19, -1) == -1 and L.bt_sbc_next(0, 21, -1) == 19   # a low own: the floor only
+    assert L.bt_sbc_next(0, 0, -1) == -1                                         # own not known: nothing
+
+
+def test_sbc_steps_its_bitpool_down_while_queued_with_the_buffers_full(L):
+    s = Sbc()
+    assert sbc(L, s, 0, 0, 3) == NONE
+    assert sbc(L, s, 1, 6080, BUFS) == NONE                 # one second: not yet
+    assert sbc(L, s, 2, 6080, BUFS) == 29                   # two in a row: a rung down, no reconnect
+    assert sbc(L, s, 3, 9000, BUFS) == NONE                 # 2 s to drain at the new rate before counting again
+    assert sbc(L, s, 4, 9000, BUFS) == NONE
+    assert sbc(L, s, 5, 9000, BUFS) == NONE
+    assert sbc(L, s, 6, 9000, BUFS) == 23
+    assert [sbc(L, s, t, 9000, BUFS) for t in range(7, 11)] == [NONE, NONE, NONE, 19]
+    assert all(sbc(L, s, t, 9000, BUFS) == NONE for t in range(11, 60))   # the floor
+
+
+def test_a_queue_without_full_buffers_is_not_the_radio_for_sbc_either(L):
+    s = Sbc()
+    assert all(sbc(L, s, t, 9000, BUFS - 1) == NONE for t in range(10))     # the encoder or the player
+    assert all(sbc(L, s, t, 4096, BUFS) == NONE for t in range(10, 20))     # 4 kB is not over
+    assert all(sbc(L, s, t, 9000, -1) == NONE for t in range(20, 30))       # fly not read
+
+
+def test_sbc_climbs_back_a_rung_after_30_clean_seconds(L):
+    s = Sbc()
+    sbc(L, s, 0, 6080, BUFS)
+    assert sbc(L, s, 1, 6080, BUFS) == 29
+    ups = [(t, r) for t in range(2, 400) if (r := sbc(L, s, t, 0, 2)) != NONE]
+    # clean from t=4 (the 2 s settle first), but no sooner than a minute after the last change: then each 60 s
+    assert ups == [(61, 0)]
+    s = Sbc()
+    for t, wq in ((0, 6080), (1, 6080), (4, 6080), (5, 6080), (8, 6080), (9, 6080)):
+        sbc(L, s, t, wq, BUFS)
+    assert s.pool == 19
+    ups = [(t, r) for t in range(10, 400) if (r := sbc(L, s, t, 0, 2)) != NONE]
+    assert ups == [(69, 23), (129, 29), (189, 0)]
+
+
+def test_a_rung_up_that_stalls_again_doubles_the_wait(L):
+    """A link that carries 29 but not 33 would otherwise go up and down every minute."""
+    s = Sbc()
+    sbc(L, s, 0, 6080, BUFS)
+    assert sbc(L, s, 1, 6080, BUFS) == 29
+    assert next(t for t in range(2, 200) if sbc(L, s, t, 0, 2) != NONE) == 61     # up to 33 (0)
+    sbc(L, s, 70, 6080, BUFS)
+    assert sbc(L, s, 71, 6080, BUFS) == 29                                        # down again 10 s on
+    assert next(t for t in range(72, 400) if sbc(L, s, t, 0, 2) != NONE) == 191   # two minutes now
+    s.up_ms = 400000
+    assert sbc(L, s, 194, 6080, BUFS) == NONE and sbc(L, s, 195, 6080, BUFS) == 29
+    assert next(t for t in range(196, 900) if sbc(L, s, t, 0, 2) != NONE) == 195 + 480   # held at 8 minutes
+
+
+def test_another_codec_or_the_setting_off_puts_the_bitpool_back(L):
+    s = Sbc()
+    sbc(L, s, 0, 6080, BUFS)
+    assert sbc(L, s, 1, 6080, BUFS) == 29
+    assert sbc(L, s, 5, 0, 2, allowed=0) == 0               # turned off: the thread's own at once
+    assert sbc(L, s, 6, 0, 2, allowed=0) == NONE            # once
+    assert all(sbc(L, s, t, 9000, BUFS, allowed=0) == NONE for t in range(7, 20))
+    s = Sbc()
+    sbc(L, s, 0, 6080, BUFS)
+    sbc(L, s, 1, 6080, BUFS)
+    assert sbc(L, s, 9, 0, 2, rank=APTX) == 0               # stepped up to aptX: a later SBC stream starts full
+    assert all(sbc(L, s, t, 9000, BUFS, rank=APTX) == NONE for t in range(10, 20))   # aptX's is bt_step's
+    assert all(sbc(L, s, t, 9000, BUFS, allowed=-1) == NONE for t in range(20, 30))  # another Quality choice
+
+
+def test_an_own_bitpool_not_known_steps_nothing(L):
+    s = Sbc()
+    assert all(sbc(L, s, t, 9000, BUFS, own=0) == NONE for t in range(10))   # bluealsa unpatched or not read
+
+
+INI_SBC = b"""[SYSSET]\r\nBTCODING=%s\r\n[Q2POD]\r\n%s"""
+
+
+@pytest.mark.parametrize('coding, key, allowed', [
+    (b'2', b'', 1),                      # LDAC Auto: the switch on unless 0
+    (b'6', b'', 1),                      # SBC HQ chosen by hand
+    (b'7', b'BTSTEPDOWN=1\r\n', 1),      # SBC
+    (b'7', b'BTSTEPDOWN=0\r\n', 0),      # the switch off
+    (b'2', b'BTSTEPDOWN=0\r\n', 0),
+    (b'3', b'', -1),                     # aptX HD chosen: not SBC's to change
+    (b'5', b'', -1),                     # AAC
+    (b'0', b'', -1),                     # LDAC Best
+    (b'70', b'', -1),
+])
+def test_sbc_is_adapted_under_ldac_auto_or_sbc_with_the_switch_on(L, coding, key, allowed):
+    assert L.bt_sbc_allowed(INI_SBC % (coding, key)) == allowed
+    assert L.bt_sbc_allowed(b'') == -1
+
+
+def test_the_bitpool_byte_is_where_the_build_puts_it(L):
+    """q2bt.c writes bluealsa's byte at BT_SBC_POOL through /proc/PID/mem; tools/build.py links bt_silence.S's
+    sbc_pool there (BT_SBC_POOL), and the build checks its own side."""
+    import re
+    import sys
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import build
+    header = (ROOT / 'patch/q2bt.h').read_text()
+    m = re.search(r'#define BT_SBC_POOL (0x[0-9a-f]+)', header)
+    assert m and int(m[1], 16) == build.BT_SBC_POOL
+
+
+def commute(L):
+    """The 2026-11-18 commute (test/fixtures/q2bt-commute-20261118.log): SBC at 33 with the AFH map down to 20
+    channels, the controller's 6 buffers full and the socket queued. Each line fed to bt_sbc_step as q2bt.c would."""
+    import re
+    s, steps, pool = Sbc(), [], 0
+    for text in (ROOT / 'test/fixtures/q2bt-commute-20261118.log').read_text().splitlines():
+        m = re.match(r'\S+T(\d\d):(\d\d):(\d\d)Z up=\d+ .*\bwq=(\d+) .*\bh=(\S+) .*\bfly=(\S+)', text)
+        if not m or m[5] != '4':  # the SBC link, before the drop
+            continue
+        t = int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3])
+        r = sbc(L, s, t, int(m[4]), -1 if m[6] == '-' else int(m[6]), own=33, bufs=6)
+        if r != NONE:
+            steps.append((f'{m[1]}:{m[2]}:{m[3]}', pool or 33, r or 33))
+            pool = r
+    return steps
+
+
+def test_the_commute_replayed_steps_sbc_down_to_the_floor(L):
+    steps = commute(L)
+    assert steps[:3] == [('14:30:40', 33, 29), ('14:30:44', 29, 23), ('14:30:50', 23, 19)]
+    assert all(to <= 19 for _, _, to in steps[3:])    # held at the floor through the interference

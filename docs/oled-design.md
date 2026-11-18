@@ -685,9 +685,14 @@ Playing's own title line.
   target puts it on the rating's top star, the first when unrated. Nothing that can be rated (a stream, a
   radio) leaves the wheel on the volume.
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
-  times about its luma and dimmed to 45%, spread across the window and shaded by an ellipse centred at y 122
-  (radii 273 by 220 px) that is black from 80% of the way out, and faded in over the window's top 32 rows
-  at the screen's top, under the status row's glyphs. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
+  times about its luma and dimmed to 45%, spread across the whole screen and shaded by the mock-up's own wash
+  (the approved `apple` mock-up, 2026-11-18): an ellipse centred at x 187, y 112 (radii 273 by 220 px), its
+  brightness the mock-up's measured falloff (`patch/np_rate.c` `nr_fall`), so a cover at the cap reads as the
+  mock-up does: down x 60 about 17 at the top edge, 44 at its peak (y 100 to 120), 26 at y 200, black by
+  y 300; it is dark only at the screen's corners. It runs under the status row to the top edge on both
+  pages: full screen from the page itself, and on the lyrics page in its column from Now Playing's window
+  above and below the column (behind the progress bar and the state row), which draws the glow's rows over
+  the glow pages and moves them with a swipe, so there is no seam at the page's edges. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
   keeps WCAG's 4.5:1 over its brightest pixel, and the lyrics' edge fades go into the glow, not black. It is
   made once for each cover shown, never per frame; Light Mode has none.
 
@@ -1478,8 +1483,8 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
   "Steps with the signal, 330 to 990 kbps", or with a headset connected on another codec what it streams,
   "Streams aptX HD to this headset, 576 kbps". After the choices, a switch row, "Lower quality when the signal
-  is weak" (on by default), its caption under it while selected: "On LDAC Auto, aptX HD steps down to aptX, then
-  SBC, while the signal is weak, and back once it is strong again".
+  is weak" (on by default), its caption under it while selected: "On LDAC Auto or SBC, lowers the bit rate while
+  the signal is weak, and raises it once it is strong again".
 - **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
   name, the hint in 13 px under that.
 - **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5
