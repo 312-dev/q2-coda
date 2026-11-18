@@ -6,10 +6,12 @@ each stream with its codec, the seconds it fell behind, and what every signal di
     adb shell 'cd /mnt/mmc/.q2muse/logs; cat q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0 2>/dev/null' | python3 tools/q2bt.py -
     python3 tools/q2bt.py --all q2-bt.0                # every second, not only the stalls
 
-A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done= fly= bp=`,
+A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done= fly= bp= pl= pr= pd= pw= dk= gw=`,
 one a second while a stream runs (`ba` and `own` in percent of one core, written in tenths by older logs: 90 for 9.0; `er`
 and `ew` in ms a second; `done` packets a second the controller delivered, `fly` packets in it, so fly/done is how long
-one waits there; `bp` SBC's bitpool on the last frame); a note is `TIME WORD ...` (START, ENCODER, CODEC, LINK, STEP, STOP). The card store's `== N lines lost while the
+one waits there; `bp` SBC's bitpool on the last frame; `pl` the player's CPU as `ba`, `pr`, `pd` and `pw` its kB/s read,
+read from storage and written, `dk` the card's busy ms, `gw` 1 while the player waits for a song still arriving); a note
+is `TIME WORD ...` (START, ENCODER, CODEC, LINK, PLAY, STEP, STOP). The card store's `== N lines lost while the
 card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
 named for its codec, seen within a second of a change) or CODEC note that names another codec; a CODEC note can come up
 to a minute late (older logs have no ENCODER notes), so the seconds since the last gap in sending before it go to the
@@ -41,8 +43,8 @@ ENC_RUN = 800  # ms a second on a CPU: the encoder could not keep up
 ENC_WAIT = 100  # ms a second waiting for a CPU: the encoder was kept from one
 SWITCH_S = 3   # seconds before a codec change whose slow seconds are the reconnect
 SIGNALS = ('kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew', 'fcc',
-           'done', 'fly', 'bp')
-TENTHS = ('ba', 'own')  # percent of one core, held in tenths (older logs wrote the tenths: 90 for 9.0)
+           'done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')
+TENTHS = ('ba', 'own', 'pl')  # percent of one core, held in tenths (older logs wrote the tenths: 90 for 9.0)
 ENCODERS = {'sbc': 'SBC', 'aac': 'AAC', 'aptx': 'aptX', 'aptx-hd': 'aptX-HD', 'ldac': 'LDAC'}  # ba-a2dp-<name>
 
 

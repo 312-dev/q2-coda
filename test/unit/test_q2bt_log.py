@@ -209,3 +209,25 @@ def test_the_report_names_the_verdict_per_segment():
     q2bt.report(streams, notes, out)
     text = out.getvalue()
     assert 'saturated: 6 s with all 5 ACL buffers full' in text and 'basic rate' in text and '100/s' in text
+
+
+def test_a_source_stall_shows_the_player_s_side():
+    """The player's fields (pl, pr, pd, pw, dk, gw) are read, pl in tenths as ba, and a source stall's 10 s before
+    shows them; a line without them reads them as None."""
+    log = [f'{t(0)} START h=1 mtu=1021 bufs=5 raw=ok\n', f'{t(0)} CODEC aptX-HD 44100 Hz delay=202.1 ms\n',
+           f'{t(0)} PLAY /mnt/mmc/Music/one.flac\n']
+    for i in range(1, 31):
+        short = 20 <= i < 26
+        log.append(line(i, 340 if short else 567, er=50 if short else 80).rstrip('\n') +
+                   f' fcc=0 done=96 fly=2 bp=- pl={1.5 if short else 2.5} pr={100 if short else 176} pd=0 '
+                   f'pw={100 if short else 172} dk={950 if short else 20} gw=0\n')
+    streams, notes = q2bt.parse(log)
+    s = streams[0].samples[19]
+    assert (s.f['pl'], s.f['pr'], s.f['pd'], s.f['pw'], s.f['dk'], s.f['gw']) == (15, 100, 0, 100, 950, 0)
+    assert any('PLAY /mnt/mmc/Music/one.flac' in text for _, text in notes)
+    out = io.StringIO()
+    q2bt.report(streams, notes, out)
+    stall = [ln for ln in out.getvalue().splitlines() if 'SOURCE stall' in ln]
+    assert stall and 'pw 172->100' in stall[0] and 'dk 20->950' in stall[0]
+    old = q2bt.parse([line(1)])[0][0].samples[0]
+    assert old.f['pl'] is None and old.f['gw'] is None

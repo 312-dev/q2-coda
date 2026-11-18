@@ -4,7 +4,8 @@
  * commands on a raw socket bound only while the stream runs (to the ACL handle listed now: a codec
  * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
  * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
- * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
+ * thread's schedstat among them, and the player's CPU, I/O counters and open songs with the card's
+ * busy time beside them; bluealsa is asked for the codec (dbus-send, in the background) at
  * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
  * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
@@ -31,6 +32,12 @@
 #define CODEC_FILE "/tmp/q2bt.codec"  /* q2bt-codec's answer to a switch */
 #define CODEC_PROG "/usr/bin/q2bt-codec"
 #define STEP_ASK_MS 3000 /* bluealsa asked for the codec this long after a switch is sent */
+#define PLAYER "hciplayer\n" /* q2player, at stock's path and name (tools/build.py) */
+#ifndef CARD_DEV
+#define CARD_DEV "mmcblk4" /* the microSD (docs/hardware.md); a host test names its own disk */
+#endif
+#define GROW_WAIT "/tmp/q2player.wait" /* grow.c's, while a song still arriving is waited for */
+#define SONGS 4                         /* the player's open songs remembered: one and its preload */
 
 static struct {
     card_log *log;
@@ -70,6 +77,10 @@ static struct {
     struct bt_sbc sbc;   /* SBC's bitpool, afresh at each START */
     int sbc_allowed;     /* bt_sbc_allowed's, from config.ini */
     int sbc_failed;      /* bluealsa's byte would not take a write: none until the next START */
+    int pl;              /* the player's pid, 0 not found (looked for at pl_found_at) */
+    unsigned pl_found_at, pl_ticks, io_r, io_w, io_d, dk_ms;
+    int pl_ok, io_ok, dk_ok;  /* pl_ticks, io_* and dk_ms hold the last line's counters */
+    char songs[SONGS][128];   /* the card files the player held at the last line */
 } bt;
 
 static void note(const char *what) {
@@ -191,7 +202,7 @@ static unsigned ticks_of(const char *stat_path, int *ok) { /* utime + stime */
     *ok = 1;
     return f[11] + f[12]; /* fields 14 and 15 */
 }
-static int find_bluealsa(void) {
+static int find_comm(const char *name) { /* the first process whose comm is name ("x\n") */
     void *d = opendir("/proc");
     int pid = 0;
     if (!d) return 0;
@@ -199,11 +210,12 @@ static int find_bluealsa(void) {
         char p[40], comm[24];
         if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
         snprintf(p, sizeof p, "/proc/%s/comm", e->d_name);
-        if (slurp(p, comm, sizeof comm) > 0 && !strcmp(comm, "bluealsa\n")) pid = atoi(e->d_name);
+        if (slurp(p, comm, sizeof comm) > 0 && !strcmp(comm, name)) pid = atoi(e->d_name);
     }
     closedir(d);
     return pid;
 }
+static int find_bluealsa(void) { return find_comm("bluealsa\n"); }
 static unsigned ba_ticks(int *ok) {
     char p[40];
     *ok = 0;
@@ -262,6 +274,80 @@ static void enc_find(unsigned now) {
     snprintf(line, sizeof line, "ENCODER %s", comm);
     note(line);
     bt.pcms_at = now - BT_PCMS_MS; /* bluealsa asked for the codec at the next line */
+}
+
+/* ---- the player's side ----
+ * What fed the encoder: the player's CPU, what it read (rchar, and read_bytes from storage) and
+ * wrote (wchar, mostly its PCM into bluealsa's FIFO), the microSD's busy time, grow.c's wait for a
+ * song still arriving, and a PLAY note when the player opens a card file it did not hold at the
+ * last line (a song, or the next one preloaded under 6 s from the end). Reads only. */
+static void player_songs(void) {
+    char p[48], link[160], now_[SONGS][128];
+    int n = 0;
+    void *d;
+    snprintf(p, sizeof p, "/proc/%d/fd", bt.pl);
+    if (!(d = opendir(p))) return;
+    for (struct dirent *e; n < SONGS && (e = readdir(d));) {
+        char f[64];
+        if (e->d_name[0] < '0' || e->d_name[0] > '9') continue;
+        snprintf(f, sizeof f, "/proc/%d/fd/%s", bt.pl, e->d_name);
+        int k = (int)readlink(f, link, sizeof link - 1);
+        if (k <= 0) continue;
+        link[k] = 0;
+        if (!bt_song_path(link)) continue;
+        snprintf(now_[n++], sizeof now_[0], "%s", link);
+    }
+    closedir(d);
+    for (int i = 0; i < n; ++i) {
+        int seen = 0;
+        for (int j = 0; j < SONGS && !seen; ++j) seen = !strcmp(now_[i], bt.songs[j]);
+        if (seen) continue;
+        char line[160];
+        snprintf(line, sizeof line, "PLAY %s", now_[i]);
+        note(line);
+    }
+    memset(bt.songs, 0, sizeof bt.songs);
+    memcpy(bt.songs, now_, (size_t)n * sizeof now_[0]);
+}
+static void player_read(unsigned now, unsigned ms, struct bt_sample *s) {
+    char p[40], b[256];
+    int ok;
+    unsigned r, w, dr, t;
+    s->pl = s->pr = s->pd = s->pw = -1;
+    s->gw = bt.pl ? access(GROW_WAIT, F_OK) == 0 : -1;
+    if (!bt.pl && now - bt.pl_found_at >= FIND_MS) bt.pl = find_comm(PLAYER), bt.pl_found_at = now, bt.pl_ok = bt.io_ok = 0;
+    if (!bt.pl) return;
+    snprintf(p, sizeof p, "/proc/%d/stat", bt.pl);
+    t = ticks_of(p, &ok);
+    if (!ok) { /* the player ended (an idle exit) or was started again */
+        bt.pl = 0, bt.pl_ok = 0, bt.pl_found_at = now - FIND_MS;
+        memset(bt.songs, 0, sizeof bt.songs);
+        return;
+    }
+    s->pl = bt.pl_ok ? bt_ticks_pct(t - bt.pl_ticks, ms) : -1;
+    bt.pl_ticks = t, bt.pl_ok = 1;
+    snprintf(p, sizeof p, "/proc/%d/io", bt.pl);
+    if (slurp(p, b, sizeof b) > 0 && bt_proc_io(b, &r, &w, &dr)) {
+        if (bt.io_ok)
+            s->pr = bt_rate(r - bt.io_r, ms) / 1024, s->pw = bt_rate(w - bt.io_w, ms) / 1024,
+            s->pd = bt_rate(dr - bt.io_d, ms) / 1024;
+        bt.io_r = r, bt.io_w = w, bt.io_d = dr, bt.io_ok = 1;
+    } else {
+        bt.io_ok = 0;
+    }
+    player_songs();
+}
+static int card_busy(unsigned ms) { /* the microSD's busy ms in a second since the last line */
+    char b[8192];
+    unsigned v;
+    int r = -1;
+    if (slurp("/proc/diskstats", b, sizeof b) > 0 && bt_disk_busy(b, CARD_DEV, &v)) {
+        if (bt.dk_ok) r = bt_rate(v - bt.dk_ms, ms);
+        bt.dk_ms = v, bt.dk_ok = 1;
+    } else {
+        bt.dk_ok = 0;
+    }
+    return r;
 }
 
 /* ---- the codec ---- */
@@ -408,6 +494,9 @@ static void begin(unsigned now, const struct bt_counts *c) {
     memset(&bt.sbc, 0, sizeof bt.sbc), bt.sbc_failed = 0;
     allowed_read();
     enc_find(now);
+    bt.pl_ok = bt.io_ok = bt.dk_ok = 0; /* the player's and the card's first rates come a line on */
+    memset(bt.songs, 0, sizeof bt.songs);     /* each START notes what the player holds */
+    card_busy(1000);
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
              c->acl_pkts, bt.raw >= 0 ? "ok" : "none");
     note(line);
@@ -424,7 +513,7 @@ static void sample(unsigned now, const struct bt_counts *c) {
     struct bt_sample s;
     unsigned ms = now - bt.at, tx, rx, t;
     int ok, cores;
-    char b[4096], line[256];
+    char b[4096], line[288];
     s.wall = time(0), s.up = now / 1000;
     s.kbps = bt_rate(c->byte_tx - bt.was.byte_tx, ms) / 125; /* bytes to kbit */
     s.acl = bt_rate(c->acl_tx - bt.was.acl_tx, ms);
@@ -469,6 +558,8 @@ static void sample(unsigned now, const struct bt_counts *c) {
     unsigned char pb[3];
     int have = pool_read(pb);
     s.bp = have && !strcmp(bt.enc_name, "ba-a2dp-sbc") ? pb[2] : -1;
+    player_read(now, ms, &s);
+    s.dk = card_busy(ms);
     bt_line(line, sizeof line, &s);
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;

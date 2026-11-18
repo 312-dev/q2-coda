@@ -481,10 +481,10 @@ static int put_tenths(char *b, int at, int size, const char *key, int v) { /* 90
     return n < 0 ? at : at + n;
 }
 /* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done=
- * fly= bp=\n", "-" for not read, ba and own as percent of one core (9.0). The fields after own come
- * last, so a reader that knows only those before them reads a line too. */
+ * fly= bp= pl= pr= pd= pw= dk= gw=\n", "-" for not read, ba, own and pl as percent of one core (9.0).
+ * The fields after own come last, so a reader that knows only those before them reads a line too. */
 int bt_line(char *out, int size, const struct bt_sample *s) {
-    char b[220];
+    char b[260];
     int at = snprintf(b, sizeof b, "up=%u", s->up);
     at = put(b, at, sizeof b, "kbps", s->kbps, -1);
     at = put(b, at, sizeof b, "acl", s->acl, -1);
@@ -505,8 +505,59 @@ int bt_line(char *out, int size, const struct bt_sample *s) {
     at = put(b, at, sizeof b, "fcc", s->fcc, BT_UNSET);
     at = put(b, at, sizeof b, "done", s->done, -1);
     at = put(b, at, sizeof b, "fly", s->fly, -1);
-    put(b, at, sizeof b, "bp", s->bp, -1);
+    at = put(b, at, sizeof b, "bp", s->bp, -1);
+    at = put_tenths(b, at, sizeof b, "pl", s->pl);
+    at = put(b, at, sizeof b, "pr", s->pr, -1);
+    at = put(b, at, sizeof b, "pd", s->pd, -1);
+    at = put(b, at, sizeof b, "pw", s->pw, -1);
+    at = put(b, at, sizeof b, "dk", s->dk, -1);
+    put(b, at, sizeof b, "gw", s->gw, -1);
     return heat_note(out, size, s->wall, b);
+}
+
+/* ---- the player's side ---- */
+static const char *after_key(const char *text, const char *key) { /* the value after "key" at a line's start */
+    size_t n = strlen(key);
+    for (const char *p = text; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : 0)
+        if (!strncmp(p, key, n)) return p + n;
+    return 0;
+}
+static int number_at(const char *s, unsigned *v) {
+    while (s && *s == ' ') ++s;
+    if (!s || *s < '0' || *s > '9') return 0;
+    unsigned n = 0;
+    for (; *s >= '0' && *s <= '9'; ++s) n = n * 10 + (unsigned)(*s - '0');
+    *v = n;
+    return 1;
+}
+int bt_proc_io(const char *text, unsigned *rchar, unsigned *wchar, unsigned *read_bytes) {
+    return number_at(after_key(text, "rchar:"), rchar) && number_at(after_key(text, "wchar:"), wchar) &&
+           number_at(after_key(text, "read_bytes:"), read_bytes);
+}
+int bt_disk_busy(const char *text, const char *dev, unsigned *ms) {
+    size_t n = strlen(dev);
+    for (const char *p = text; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : 0) {
+        const char *s = p;
+        for (int i = 0; i < 2; ++i) { /* major, minor */
+            while (*s == ' ') ++s;
+            while (*s >= '0' && *s <= '9') ++s;
+        }
+        while (*s == ' ') ++s;
+        if (strncmp(s, dev, n) || s[n] != ' ') continue;
+        s += n;
+        unsigned v = 0;
+        for (int i = 0; i < 10; ++i) { /* io_ticks is the tenth number after the name */
+            while (*s == ' ') ++s;
+            if (!number_at(s, &v)) return 0;
+            while (*s >= '0' && *s <= '9') ++s;
+        }
+        *ms = v;
+        return 1;
+    }
+    return 0;
+}
+int bt_song_path(const char *path) {
+    return !strncmp(path, "/mnt/mmc/", 9) && strncmp(path, "/mnt/mmc/.q2muse/", 17);
 }
 
 int bt_flush(card_log *l, const char *dir) {
