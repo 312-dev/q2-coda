@@ -626,7 +626,7 @@ m2.word(O['MCL_POS'],0); m2.advance(500); assert m2.badge() is None; passed()
 # Hold Play/Pause on Now Playing: Rate last, with the hearts, and no Next/Previous album outside Shuffle Albums/Folders; its row opens the same picker.
 m2.word(O['MCL_POS'],1); m2.press(100)
 assert m2.hold()==11 and m2.labels()[-2:]==['Group by','Rate  ♥♥♡♡♡'] and m2.release()==0
-m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2,('DIAG',m2.labels() if m2.view in m2.nodes else None,m2.top==m2.np,m2.on(),m2.nodes[m2.top].get('name'),[m2.nodes[w].get('name') for w in m2.nodes[m2.wm]['children']]); back(m2); assert m2.picker() is None; passed()
+m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2,('DIAG',m2.labels() if m2.view in m2.nodes else None,m2.top==m2.np,m2.nodes.get(m2.top,{}).get('name'),m2.nodes.get(m2.top,{}).get('type')); back(m2); assert m2.picker() is None; passed()
 # More…: last, below Rate, while Now Playing has its img_more; its row clicks that as a tap would
 m3=RateMachine(); more=m3.node('image','img_more'); m3.nodes[m3.np]['children'].append(more); m3.word(more+O['W_PARENT'],m3.np)
 m3.press(100)
