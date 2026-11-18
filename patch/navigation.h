@@ -632,6 +632,11 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* vol_pill.c: the volume pill in the clock's place (docs/internals.md#volume-pill): a change to
+ * show (vol_show), whether it is up, its paint (status_slots_paint) */
+void vol_pill_show(void);
+int vol_pill_up(void);
+void vol_pill_paint(void *bar, void *canvas);
 /* ... and the Wi-Fi link as it reads it: stock's bars 1 to 4 while joined, else 0; joined with no
  * link up (Control Center's Wi-Fi circle, control_center.c cc_wifi) */
 int wifi_level(void), wifi_offline(void);
@@ -827,6 +832,8 @@ int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the whee
 int vol_wm_keyup(void *ctx, void *e);
 int vol_accel(void);     /* volume.c: a wheel tick's steps at its speed */
 void vol_show(int from); /* volume.c: a change not the wheel's, on screen */
+int vol_page(void *page);  /* volume.c: page's wheel is the volume (Now Playing and the rest) */
+int bt_vol_linked(void);   /* playback_power.c: Link Volume's headset level, 0-127, or -1 */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
 typedef struct {

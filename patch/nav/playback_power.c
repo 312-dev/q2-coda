@@ -366,6 +366,13 @@ static int bt_sync_volume(int left, int right) {
 }
 
 int headset_gain(void) { return bt_audio_ready() && btvol.ready && g_volume ? 100 : g_volume; }
+/* With Link Volume on a headset that took its absolute volume: its level, 0 to 127, as the Q2 last
+ * sent it or read it back (the volume pill shows it, vol_pill.c); else -1. */
+int bt_vol_linked(void) {
+    return bt_audio_ready() && btvol.ready && !btvol.failed && btvol.last >= 0 && btvol.last <= 127
+               ? btvol.last
+               : -1;
+}
 
 /* Absolute zero still needs software mute. Unsupported/failed writes retain stock gain. */
 int ringnav_btvol(int left, int right) {

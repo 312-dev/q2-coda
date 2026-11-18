@@ -1,0 +1,183 @@
+/* The volume pill (docs/oled-design.md#status-row, docs/internals.md#volume-pill): a volume change
+ * made off Now Playing (a headset's own keys or its AVRCP volume, the Car Remote) shows in the
+ * status row, in the clock's place: a Raised pill VP_H tall on the row's centre, a speaker, a thin
+ * track filled in Text Primary to the level, and the number in Text Secondary. It holds VP_HOLD_MS
+ * after the last change, then fades back to the clock over VP_FADE_MS (at once under Reduce
+ * Motion). Volume 0 is the mute: the muted speaker and an empty track. With Link Volume on a
+ * headset the level is the headset's, the AVRCP 0 to 127 the Q2 sends it (bt_vol_linked).
+ *
+ * It is drawn by the status row itself, from the bar's background (status_row.c
+ * status_slots_paint), so it goes wherever the bar is painted; the clock and the title under it are
+ * faded out by their opacity while it shows. A change repaints the pill's box alone, a fade frame
+ * the pill and the labels beside it (vp_dirty): never the page. Nothing shows on a volume page
+ * (volume.c vol_page: Now Playing has its own volume), over Control Center (its slider follows the
+ * volume) or a video. */
+#include "navigation.h"
+
+#define VP_W 199     /* the widest pill: odd, so it centres on x 187.5 exactly */
+#define VP_MIN_W 141 /* narrower, it leaves the centre and ends at the slots' edge */
+#define VP_H 30      /* rows 8 to 37 on the row's centre, 23 */
+#define VP_CLEAR 8   /* the ground left before the leftmost status slot, as the clock's */
+#define VP_PAD 12    /* from each end to the speaker and to the number's last digit */
+#define VP_SPK 14    /* the speaker's box (tools/art.py STATUS_PX), its ink 11 px tall */
+#define VP_SPK_GAP 8 /* speaker to track, track to number */
+#define VP_TRACK_H 4 /* the track, round-ended */
+#define VP_NUM_W 32  /* the number's column: three tabular digits at 15 px, "127" */
+#define VP_HOLD_MS 2000
+#define VP_FADE_MS 250
+#define VP_AVRCP_MAX 127
+
+static struct {
+    unsigned at;          /* time_now_ms of the last change */
+    unsigned fade_at;     /* ... and when the fade began */
+    unsigned timer;       /* the hold's timer */
+    unsigned char on;     /* shown or fading */
+    unsigned char fading; /* past its hold, fading */
+    unsigned char dim;    /* 255 less the labels' opacity as last set */
+    unsigned char alpha;  /* the pill's, as the last frame set it */
+} vp __attribute__((section(".scratch")));
+
+/* The pill's box in the bar's pixels: VP_W centred on the row when the slots leave it room,
+ * narrower and still centred down to VP_MIN_W, then VP_MIN_W ending VP_CLEAR short of the leftmost
+ * slot. */
+static rect_t vp_box(void) {
+    int edge = status_slots_left() - VP_CLEAR, w = 2 * edge - 375, x;
+    if (w > VP_W) w = VP_W;
+    if ((375 - w) & 1) --w;
+    if (w >= VP_MIN_W)
+        x = (375 - w) / 2;
+    else
+        w = VP_MIN_W, x = edge - w;
+    return (rect_t){ x, geom_val(V_STATUS_Y) - VP_H / 2, w, VP_H };
+}
+
+/* What a change repaints: the pill's box; with whole, from the screen's left to the leftmost slot
+ * in the pill's rows, where the clock and the title stand, as their opacity changes. */
+static void vp_dirty(int whole) {
+    void *bar = *(void *const *)system_bar;
+    if (!bar) return;
+    rect_t r = vp_box();
+    if (whole) r.w = status_slots_left() - (r.x = 0);
+    widget_invalidate_force(bar, &r);
+}
+
+/* The clock's and the title's opacity, 255 less dim; set only when it changes. */
+static void vp_labels(int dim) {
+    void *bar = *(void *const *)system_bar;
+    if (!bar || dim == vp.dim) return;
+    void *clock = widget_lookup(bar, "label_clock", 1);
+    vp.dim = (unsigned char)dim;
+    if (clock) widget_set_opacity(clock, 255u - (unsigned)dim);
+    if (st.bar_title) widget_set_opacity(st.bar_title, 255u - (unsigned)dim);
+}
+
+/* Gone: the labels back at once. */
+static void vp_end(void) {
+    vp.on = vp.fading = vp.alpha = 0;
+    vp_labels(0);
+}
+
+/* Where the pill has no place: a volume page in use (Now Playing's own volume), Control Center in
+ * front (its slider follows), a video playing. */
+static int vp_hidden(void) {
+    void *top = window_manager_get_top_window(window_manager());
+    return !g_backlight_status || video_on() || vol_page(page_in_use()) ||
+           (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "statusbar_dialog"));
+}
+
+/* The pill's alpha now: 255 while it holds; along the fade, cubic out, to 0. */
+static int vp_alpha_now(void) {
+    if (!vp.on) return 0;
+    if (!vp.fading) return 255;
+    int t = (int)((unsigned)time_now_ms() - vp.fade_at) * 1000 / VP_FADE_MS;
+    return t >= 1000 ? 0 : 255 - 255 * motion_ease(t, EASE_CUBIC_OUT) / 1000;
+}
+
+/* The shared loop's (ui_kit.c motion_loop) frame while the pill fades: the pill a step fainter and
+ * the labels a step back, their band repainted; dropped once the pill is gone, or shown again. */
+static int vp_frame(void) {
+    if (!vp.on || !vp.fading) return 0;
+    int a = vp_alpha_now();
+    vp.alpha = (unsigned char)a;
+    vp_labels(a); /* the labels at 255 less the pill's alpha */
+    vp_dirty(1);
+    if (a) return 1;
+    vp_end();
+    return 0;
+}
+
+/* VP_HOLD_MS after the last change (a later one puts it off): the fade, or under Reduce Motion the
+ * clock back at once. */
+static int vp_due(const void *info) {
+    (void)info;
+    vp.timer = 0;
+    if (!vp.on) return 0;
+    unsigned since = (unsigned)time_now_ms() - vp.at;
+    if (since < VP_HOLD_MS) {
+        vp.timer = timer_add(vp_due, (void *)0, VP_HOLD_MS - since);
+        return 0;
+    }
+    if (motion_reduced()) {
+        vp_end();
+        vp_dirty(1);
+        return 0;
+    }
+    vp.fade_at = (unsigned)time_now_ms(), vp.fading = 1;
+    motion_loop(vp_frame);
+    return 0;
+}
+
+/* A change to show (volume.c vol_show): the pill at full, the labels out, its hold started again.
+ * A pill already up repaints its box alone; a new one (or one fading) the labels' band too. */
+void vol_pill_show(void) {
+    if (vp_hidden()) return;
+    int fresh = !vp.on || vp.fading;
+    vp.at = (unsigned)time_now_ms();
+    vp.on = 1, vp.fading = 0, vp.alpha = 255;
+    vp_labels(255);
+    vp_dirty(fresh);
+    if (!vp.timer) vp.timer = timer_add(vp_due, (void *)0, VP_HOLD_MS);
+}
+
+/* Whether the pill is up (the status row's clock is out). */
+int vol_pill_up(void) { return vp.on; }
+
+/* The level shown and its top: the headset's under Link Volume, else the Q2's 0 to 100. */
+static int vp_level(int *top) {
+    int linked = bt_vol_linked();
+    if (linked >= 0) return *top = VP_AVRCP_MAX, linked;
+    return *top = 100, g_volume;
+}
+
+/* status_slots_paint, in final colours: the pill at its alpha, or nothing; where it has no place it
+ * ends here, so the labels painted after the bar's background are back in this frame. */
+void vol_pill_paint(void *bar, void *canvas) {
+    if (!vp.on) return;
+    if (vp_hidden()) {
+        vp_end();
+        return;
+    }
+    int a = vp.alpha, top, level = vp_level(&top);
+    if (!a) return;
+    rect_t box = vp_box();
+    int cy = box.y + VP_H / 2, x = box.x + VP_PAD, L = ipod_light();
+    canvas_set_global_alpha(canvas, (unsigned)a);
+    fill_box(canvas, &box, RGBA(tok(TOK_RAISED)), VP_H / 2);
+    paint_art(bar, canvas,
+              theme_art(level ? (L ? "status_vol_l" : "status_vol_d")
+                              : (L ? "status_mute_l" : "status_mute_d")),
+              x, cy - (VP_SPK + 1) / 2);
+    int tx = x + VP_SPK + VP_SPK_GAP, num = box.x + box.w - VP_PAD,
+        tw = num - VP_NUM_W - VP_SPK_GAP - tx;
+    rect_t track = { tx, cy - VP_TRACK_H / 2, tw, VP_TRACK_H };
+    fill_box(canvas, &track, RGBA(tok(TOK_TRACK)), VP_TRACK_H / 2);
+    int w = top > 0 ? tw * (level > top ? top : level) / top : 0;
+    if (w) { /* a pill, never a sliver: at least round */
+        rect_t on = { tx, track.y, w < VP_TRACK_H ? VP_TRACK_H : w, VP_TRACK_H };
+        fill_box(canvas, &on, RGBA(tok(TOK_PRIMARY)), VP_TRACK_H / 2);
+    }
+    char s[8];
+    tk_snprintf(s, sizeof s, "%d", level);
+    ui_text(canvas, s, 1, TYPE(15), tok(TOK_SECONDARY), 1, num, cy, VP_NUM_W, 3);
+    canvas_set_global_alpha(canvas, 0xff);
+}
