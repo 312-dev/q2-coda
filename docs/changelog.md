@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Music servers and card apps: tapping an artist, an album, a playlist, a folder, a search or More… no longer opens a blank Loading… page. The list you tapped stays on screen with a spinner in the middle until the next page is ready, then it opens. Press Return or tap anywhere off the spinner to cancel and stay where you were.
   - Touch: after a swipe back on a page that stays open (one whose first Return moves within the page, as the letter strip's results do), the page now still slides away when it later closes. Before, the swipe left it closing at once from then on.
   - Song lists: the song playing now stands out in every song list (Songs, an album's or artist's songs, folders, playlists, Search, Most Played, Long Songs and the Ratings lists): its title is in the accent colour, with four small bars on the right, beside its length, or in the length's place where there is no room or no length. On the wheel's highlight both turn white.
   - Song lists: choosing the song that is already playing no longer starts it again from the beginning. It opens Now Playing and the song plays on (a paused one resumes). Chosen from another list of the same kind, the songs after it in that list now play after it.

@@ -912,7 +912,31 @@ explains use it: the App Store's "No apps listed" under its Check for Updates ro
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
-- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
+  being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+
+### Loading
+
+A page whose content has to be fetched first opens only once it is there: until then the busy spinner is laid over the
+page that was pressed (`patch/addon.c` `push`, `patch/list_marks.c` `load_spinner_paint`), never a Loading… page of its
+own.
+
+- **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
+  15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
+- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status
+  row places it by its screen y, so it is never centered on the room under the bar.
+- **The page beneath** stays in sight, undimmed, with its status row and its selection: the overlay asks nothing, and
+  the 50% scrim is the [confirmation card](#confirmation-card)'s, for a question.
+- **While it loads** Return, or a tap anywhere off the spinner, cancels: the page stays as it was and the answer, when it
+  comes, is dropped. A tap on the spinner does nothing; the wheel's Centre and a tap on a row do nothing either, so
+  nothing is asked twice.
+- **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
+  Stop), after the app's 15 s at most.
+- **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
+  browse, the search results, Albums and the other rows of an artist's page, a sort, and More…. Not yet (`ponytail:`,
+  each keeps its Loading… page): Back to the level below, which is asked again; a list's next or previous window
+  (Next page); a sign-in field's text; a row pressed while a list's next page is on its way; Spotify's browser;
+  Internet Radio's directory; and Chapters.
 
 ### Menus
 
