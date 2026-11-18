@@ -525,7 +525,7 @@ def settings_page(hook,view_name,config={},stock_rows=2,bt=1,boot=False,cls=Queu
         return [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']
     m.entries=entries
     m.settings_view=view
-    def texts(kv=False):  # each row's label; kv: "title: value" where its value stands on the right column (list_value)
+    def texts(kv=True):  # each row's label, kv: "title: value" where its value stands on the right column (list_value)
         vals=[[m.nodes[c]['text'] for c in m.nodes[b]['children'] if m.nodes[c].get('name')=='_setting_value'] for b in buttons]
         return [m.nodes[l]['text']+(f': {v[0]}' if kv and v else '') for l,v in zip(labels,vals)]
     return m,rows,texts,icons,click
@@ -538,9 +538,9 @@ def switch_image(m,row):
 assert all(switch_image(m,rows[i])=='switch_off' for i in (2,3,4))  # Charge Limit, a key/value row on the theme's switches (pod_text)
 assert not [c for c in m.nodes[m.nodes[rows[1]]['children'][0]]['children'] if m.nodes[c].get('name')=='_setting_switch']
 assert len(rows)==7 and icons==['system_powermanager','usb_chargeswitch','usb_chargeswitch','wifiset_wifi','system_carmode','system_powermanager','system_powermanager'] and all(m.nodes[r]['style']=='s_listitem_black' for r in rows)
-assert texts(kv=True)==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
-assert click(1)==[(1,'Q2POD','CHARGELIMIT')] and texts(kv=True)[1]==f"Charge Limit: {O['CHARGE_STOP']}%"
-assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts(kv=True)==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']; passed()
+assert texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']
+assert click(1)==[(1,'Q2POD','CHARGELIMIT')] and texts()[1]==f"Charge Limit: {O['CHARGE_STOP']}%"
+assert click(1)==[(0,'Q2POD','CHARGELIMIT')] and texts()==['Standby Limit: Off','Charge Limit: Off','USB DAC Charging','Smart Wi-Fi','system_carmode','Battery History','Boot to: Rockbox']; passed()
 # In-Vehicle Mode, System's stock row before (0x4d34c0): its byte, its key, and the state byte cleared.
 m.byte(syms['g_carmode_state'],1)
 assert click(4)==[(1,'SYSSET','CARMODE')] and m.u.mem_read(syms['g_carmode'],1)==b'\1' and m.u.mem_read(syms['g_carmode_state'],1)==b'\0' and switch_image(m,rows[4])=='switch_on'
