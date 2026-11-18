@@ -1680,7 +1680,8 @@ def faded_rows(canvas):
 @pytest.mark.parametrize('scroll', [0, 40])
 def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
     """Every scrolling list (navigation.c list_fade) as Home (Full): its rows past the list end (y 282) peek through a
-    fade from 16 px above it to y 316, the ground below; scrolled, its top 14 px fade under the status row; and its
+    fade from 16 px above it to y 316, the ground below; scrolled, its top 14 px fade on into its rows under the
+    status row (list_reach_paint), so the box's own are near clear by then; and its
     content runs on by the box's rows past the end, so a drag stops where the wheel does."""
     rows, h = 12, THEMES[OLED]['page_detail']
     view, _, _ = detail_page(fw, st, rows=rows, scroll=scroll, touch=1)
@@ -1689,7 +1690,7 @@ def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
     end = GEOMETRY.bar + GEOMETRY.list_end
     bands = faded_rows(canvas)
     assert [y for y in bands if y >= 40] == list(range(end - 14, 320))  # the foot: from y 266, clear for its first rows
-    assert [y for y in bands if y < 40] == (list(range(26, 26 + 14)) if scroll else [])  # the top, once scrolled
+    assert [y for y in bands if y < 40] == (list(range(26, 26 + 13)) if scroll else [])  # the top, once scrolled: to clear 14 px in
     assert view.int_at(O['VIEW_CONTENT_H']).value == rows * h + (320 - end)
 
 
@@ -1763,6 +1764,118 @@ def test_a_list_cut_above_the_list_end_has_no_fade(fw, st):
     canvas = Canvas(fw)
     fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
     assert not faded_rows(canvas)
+
+
+class Reach:
+    """A full-bleed page's list, its box from screen row top, scrolled by scroll, under the status row (bar) that
+    paints its rows above that top into the row's band (row_paint.c list_reach_paint). widget_paint records the list as
+    the band's paint sees it: its box, its scroll and the clip, on the screen."""
+    def __init__(self, fw, st, scroll, top=58, table=False):
+        self.fw = fw
+        self.ui = ui = oled(fw, st)
+        self.win = ui.window('settings_page')
+        self.bar = ui.add('system_bar', ui.wm, (0, 0, 375, 58))
+        fw.var('fw_ctx_system_bar', C.c_void_p).value = self.bar.addr
+        holder = ui.add('table_view' if table else 'list_view', self.win, (0, top, 375, 320 - top))
+        self.view = ui.add('table_client' if table else 'scroll_view', holder, (0, 0, 375, 320 - top))
+        self.off = O['TABLE_TOP'] if table else O['SCROLL_Y']
+        if table:
+            self.view.int_at(O['ROW_HEIGHT']).value, self.view.int_at(O['TABLE_ROWS']).value = 32, 30
+        else:
+            self.view.byte_at(O['VIEW_VERTICAL']).value = 1
+            self.view.int_at(O['VIEW_CONTENT_H']).value = 30 * 32
+        self.view.int_at(self.off).value = scroll
+        self.canvas = Canvas(fw)
+        self.painted: list = []
+        self.moved = [0, 0]
+        fw.mock('canvas_translate', lambda c, x, y, *_: self.translate(i32(x), i32(y)))
+        fw.mock('widget_paint', lambda w, c, *_: self.painted.append(
+            (self.ui.nodes[w].box, self.view.int_at(self.off).value, tuple(self.canvas.clip), tuple(self.moved))) or 0)
+        self.invalidated: list = []
+        fw.mock('widget_invalidate_force', lambda w, r, *_: self.invalidated.append(
+            (w, struct.unpack('<4i', C.string_at(r, 16)) if r else None)) or 0)
+
+    def translate(self, x, y):
+        self.moved[0] += x
+        self.moved[1] += y
+        return 0
+
+    def paint(self):
+        self.fw.fn('list_reach_paint', None, C.c_void_p, C.c_void_p, C.c_void_p)(self.bar.addr, self.win.addr,
+                                                                               self.canvas.addr)
+
+    def due(self):
+        self.fw.fn('list_reach_due', None)()
+
+    def band(self):
+        """The fade's rows in the band: screen row -> the ground's alpha over it."""
+        return {y: color >> 24 for (x, y, w, h), color in self.canvas.rects if h == 1 and y < 58}
+
+
+@pytest.mark.parametrize('table', [False, True])
+def test_a_scrolled_list_runs_on_under_the_status_row_to_the_screen_s_top(fw, st, table):
+    """Full-bleed lists (docs/oled-design.md#list-edges): scrolled, a list's rows above its top paint into the status
+    row's band, the list's own paint moved up the band's height with its scroll, clipped to the band, and fade to the
+    ground at the screen's top edge, the glyphs over it legible: opaque to y 8, then less and less to the list's top.
+    Its box and scroll are its own again after, so taps, the selection and its scroll range are as they were."""
+    r = Reach(fw, st, scroll=100, table=table)
+    before = (r.view.box, r.view.int_at(r.off).value)
+    r.paint()
+    assert r.painted == [((0, -58, 375, 320), 42, (0, 0, 375, 58), (0, 58))]
+    assert (r.view.box, r.view.int_at(r.off).value) == before and r.moved == [0, 0]
+    alpha = r.band()
+    assert sorted(alpha) == list(range(58))
+    assert all(alpha[y] == 255 for y in range(9)) and 0 < alpha[57] < 64
+    assert all(alpha[y] >= alpha[y + 1] for y in range(57))
+    assert alpha[23] > 200  # under the glyphs' middle the rows show at a fifth at most
+
+
+def test_a_list_scrolled_less_than_the_band_paints_only_its_first_rows_there(fw, st):
+    r = Reach(fw, st, scroll=20)
+    r.paint()
+    assert r.painted == [((0, -20, 375, 282), 0, (0, 38, 375, 20), (0, 58))]
+    assert sorted(r.band()) == list(range(38, 58))
+
+
+@pytest.mark.parametrize('scroll, top', [(0, 58), (100, 106)])
+def test_a_list_at_its_top_or_low_on_the_screen_leaves_the_band_alone(fw, st, scroll, top):
+    """At rest no row lies above the list; a list lower down (EQ's, under its tabs) keeps its rows in its box."""
+    r = Reach(fw, st, scroll=scroll, top=top)
+    r.paint()
+    assert not r.painted and not r.band()
+
+
+def test_the_band_repaints_when_its_list_scrolls_and_not_otherwise(fw, st):
+    """The list's own invalidate keeps inside its box, so before a frame list_reach_due asks for the band once its list
+    has moved since the band last showed it, and once more when the list is back at its top, its rows gone from it."""
+    r = Reach(fw, st, scroll=100)
+    band = (r.bar.addr, (0, 0, 375, 58))
+    r.due()
+    assert r.invalidated == [band]
+    r.paint()
+    r.due()
+    assert r.invalidated == [band]  # nothing moved
+    r.view.int_at(r.off).value = 132
+    r.due()
+    r.paint()
+    r.view.int_at(r.off).value = 0
+    r.due()
+    assert r.invalidated == [band] * 3
+    r.due()
+    assert len(r.invalidated) == 3
+
+
+def test_a_virtual_table_paints_only_inside_its_box(fw, st):
+    """A table_client draws the row its scroll cuts at its top whole, above its box: under Songs' Shuffle row, and
+    twice under the status row with the band's paint. From its background to its border its paint keeps to its box,
+    and the clip it had comes back after."""
+    ui = oled(fw, st)
+    client = ui.add('table_client', ui.window('allmusic_page'), (0, 90, 375, 230))
+    canvas = Canvas(fw, x=0, y=90)
+    paint_bg(fw, client, canvas)
+    assert canvas.clip == [0, 90, 375, 230]
+    fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(client.addr, canvas.addr)
+    assert canvas.clip == [0, 0, 375, 320]
 
 
 def table(fw, st):

@@ -581,6 +581,7 @@ static void bar_title_fades(void *w, void *canvas, int begin) {
  * Home's art is also checked when Home is painted under another window. */
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
+    table_clip_begin(w, canvas); /* a virtual table's rows inside its box (row_paint.c) */
     bar_title_fades(w, canvas, 1);
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
@@ -644,6 +645,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         /* the page in sight: under OLED's toast, the page it is over, so Home's band stays its own */
         coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR))); /* Split's ink ground */
+        list_reach_paint(w, under, canvas); /* the page's scrolled list under the glyphs */
         artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
         np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
