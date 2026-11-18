@@ -75,7 +75,7 @@ those spots are under the glass. So:
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
   the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
-  scans): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
+  scans), or a caption closes under the wheel's move to the last row (Battery's In-Vehicle Mode, then Battery History): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
   no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
   or a grabbed inline slider, scrolls the list by whole rows until its grown foot is on or above y 282 as well, never
   only inside the list's box, which runs on to the screen's foot (`nav/lists.c` `list_shown_h`). A page with nothing to select (text) ends the
