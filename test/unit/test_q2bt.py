@@ -783,7 +783,8 @@ def test_the_bitpool_byte_is_where_the_build_puts_it(L):
     sys.path.insert(0, str(ROOT / 'tools'))
     import build
     header = (ROOT / 'patch/q2bt.h').read_text()
-    assert int(re.search(r'#define BT_SBC_POOL (0x[0-9a-f]+)', header)[1], 16) == build.BT_SBC_POOL
+    m = re.search(r'#define BT_SBC_POOL (0x[0-9a-f]+)', header)
+    assert m and int(m[1], 16) == build.BT_SBC_POOL
 
 
 def commute(L):
