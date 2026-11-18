@@ -48,6 +48,32 @@ def test_asan_run_reports_a_crashed_group_ahead_of_a_failed_one(tmp_path, monkey
     assert fw.run_asan(args, [], {}, 'lib.so', run=run, log=lambda *a, **k: None) == 0
 
 
+def test_asan_run_logs_why_a_group_died(tmp_path, monkeypatch):
+    """A sanitizer's report goes to pytest's capture of the test that tripped it and dies with the process:
+    the group's log gets it from log_path's file, and a signal by name (post tier, 2026-11-18)."""
+    for k in range(2):
+        (tmp_path/f'test_{k}.py').write_text('x' * (k + 1))
+    monkeypatch.setattr(fw, 'ROOT', tmp_path)
+    monkeypatch.setattr(fw, 'HEAVY', tmp_path/'none')
+    args = types.SimpleNamespace(paths=['.'], n=1, python='py', basetemp=str(tmp_path/'bt'))
+    envs = []
+
+    def run(cmd, env, **kw):
+        envs.append(env)
+        if cmd[-1].endswith('test_1.py'):  # an ASan abort: its report in log_path's file, the output cut short
+            path = dict(o.split('=', 1) for o in env['ASAN_OPTIONS'].split(':'))['log_path']
+            pathlib.Path(f'{path}.4242').write_text('ERROR: AddressSanitizer: stack-use-after-return\n')
+            return types.SimpleNamespace(returncode=1, stdout='....', stderr='')
+        return types.SimpleNamespace(returncode=-11, stdout='..', stderr='')
+    lines = []
+    assert fw.run_asan(args, [], {'ASAN_OPTIONS': 'detect_leaks=0'}, 'lib.so', run=run,
+                       log=lambda *a, **k: lines.append(' '.join(map(str, a)))) == -11
+    out = '\n'.join(lines)
+    assert 'ERROR: AddressSanitizer: stack-use-after-return' in out and 'SIGSEGV' in out
+    assert all(e['ASAN_OPTIONS'].startswith('detect_leaks=0:') for e in envs)  # the caller's options kept
+    assert not list(tmp_path.glob('**/*.4242'))  # the report's file removed once logged
+
+
 # --- gate.py: known failures, crashes, the second try, the record of passes ---
 
 import datetime  # noqa: E402

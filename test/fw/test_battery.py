@@ -471,10 +471,12 @@ def test_a_log_that_cannot_be_written_says_so_and_shares_nothing(fw, q2):
     q2.poll(99)
     page = Page(fw)
     q2.files.fail_rename = True
+    unlinked = []  # read while the call runs: the path is battery_log_write's stack buffer, gone once it returns
+    fw.mock('fw_unlink', lambda path, *_: unlinked.append(C.string_at(path).decode()) or q2.files.files.pop(unlinked[-1], None) and 0)
     page.open()
     page.key(KEY_CENTER)
     assert page.toasts == ["Couldn't write the log"] and LOG not in q2.files.files
-    assert [C.string_at(a[0]).decode() for _, a in fw.calls('fw_unlink')] == [LOG + '.tmp']
+    assert unlinked == [LOG + '.tmp']
     assert 'lsshare_page' not in shared(fw)
 
 

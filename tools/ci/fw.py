@@ -25,6 +25,7 @@ import concurrent.futures
 import importlib.util
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,29 @@ def test_files(paths, root):
     return out
 
 
+def sanitizer_log(env, folder):
+    """env with ASan's and UBSan's reports written to files in folder (<name>.<pid>) as well as stderr. A
+    report goes to stderr while pytest captures the test that tripped it, and the capture dies with the
+    process: the post tier's fw-asan of 2026-11-18 stopped at 89% of a group with nothing said."""
+    out = dict(env)
+    for name, file in (('ASAN_OPTIONS', 'asan'), ('UBSAN_OPTIONS', 'ubsan')):
+        out[name] = ':'.join(filter(None, [env.get(name, ''), f'log_path={folder/file}']))
+    return out
+
+
+def died(code, reports):
+    """Why a group's process ended with code: a signal by name, a sanitizer's report, or a plain failure."""
+    signo = -code if code < 0 else code - 128 if code > 128 else 0
+    if signo:
+        try:
+            return f'killed by {signal.Signals(signo).name}' + (', sanitizer report below' if reports else '')
+        except ValueError:
+            return f'killed by signal {signo}'
+    if reports:
+        return 'a sanitizer stopped it, report below'
+    return 'no signal and no sanitizer report: a test failed, or the process exited on its own'
+
+
 def run_asan(args, rest, env, library, run=subprocess.run, log=print):
     """test/fw under the sanitizers, a group of files to a process; returns the worst exit status."""
     groups = chunks(test_files(args.paths, ROOT), ASAN_CHUNKS)
@@ -84,12 +108,17 @@ def run_asan(args, rest, env, library, run=subprocess.run, log=print):
     def one(k):
         cmd = heavy + [args.python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--basetemp',
                        f'{args.basetemp}-{k}', *rest, *map(str, groups[k])]
-        p = run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+        with tempfile.TemporaryDirectory(prefix=f'q2-fw-san-{k}-', dir=pathlib.Path(args.basetemp).parent) as san:
+            p = run(cmd, cwd=ROOT, env=sanitizer_log(env, pathlib.Path(san)), capture_output=True, text=True)
+            reports = ''.join(f.read_text(errors='replace') for f in sorted(pathlib.Path(san).iterdir()))
         tail = (p.stdout.strip().splitlines() or ['no output'])[-1]
         log(f'fw group {k} ({len(groups[k])} files): {"ok" if p.returncode == 0 else f"FAILED (exit {p.returncode})"}: {tail}',
             flush=True)
         if p.returncode:
             log(p.stdout + p.stderr, flush=True)
+            log(f'fw group {k}: {died(p.returncode, reports)}', flush=True)
+            if reports:
+                log(reports, flush=True)
         return p.returncode
 
     with concurrent.futures.ThreadPoolExecutor(at_once) as pool:
