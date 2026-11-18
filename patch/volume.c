@@ -47,14 +47,15 @@ int vol_keyup(void *dialog, void *e) {
     return stock_vol_keyup_trampoline(dialog, e);
 }
 
-/* The volume moved from `from` by something other than the wheel (a headset's own keys,
- * bt_volume_poll): shown at once as a wheel's change shows, with the screen lit. The volume dialog
- * in front takes the new value and its 3 s start again (stock's count, VOL_DIALOG_COUNT, as its
- * keyup zeroes it); Control Center's slider eases to it; Playback's Volume page shows it itself
- * (xfade_volume_shown); over any other window stock's volume dialog opens on it, the panel or
- * Now Playing's band (vol_paint). Not over a video, which has its own volume, nor over another
- * dialog, whose keys the volume dialog would take for 3 s, nor where stock's on_wm_keyup_fun
- * opens none (the lock window, test mode, the first-boot guide, powering off). */
+/* The volume moved from `from` by something other than the wheel (a headset's own keys or its
+ * AVRCP volume, bt_volume_poll; the Car Remote, coda_rc_shim.c): shown at once as a wheel's change
+ * shows, with the screen lit. The volume dialog in front takes the new value and its 3 s start
+ * again (stock's count, VOL_DIALOG_COUNT, as its keyup zeroes it); Control Center's slider eases to
+ * it; Playback's Volume page shows it itself (xfade_volume_shown). On a volume page (vol_page: Now
+ * Playing and the rest) stock's volume dialog opens on it, Now Playing's band (vol_paint); on any
+ * other page the status row's pill shows it (vol_pill.c), which takes no keys, so over a dialog
+ * too. Not over a video, which has its own volume, nor where stock's on_wm_keyup_fun opens none
+ * (the lock window, test mode, the first-boot guide, powering off). */
 void vol_show(int from) {
     void *top = window_manager_get_top_window(window_manager());
     if (xfade_volume_shown(top) || !g_backlight_status || !top || video_on()) return;
@@ -66,8 +67,11 @@ void vol_show(int from) {
         *(volatile signed char *)VOL_DIALOG_COUNT = 0;
     } else if (!tk_strcmp(name, "statusbar_dialog"))
         level_follow(top);
-    else if (tk_strcmp(widget_get_type(top), "dialog") && !g_lockscreen_pageflag &&
-             !g_testmode_flag && !g_guideflag && !g_poweroff_state) /* stock's own exits */
+    else if (g_lockscreen_pageflag || g_testmode_flag || g_guideflag || g_poweroff_state)
+        ; /* stock's own exits */
+    else if (!vol_page(page_in_use()))
+        vol_pill_show();
+    else if (tk_strcmp(widget_get_type(top), "dialog"))
         navigator_to("dialog/volume_dialog");
 }
 
@@ -76,21 +80,24 @@ void vol_show(int from) {
  * Spotify's while it shows a track (spot_np_track). Videos (videos.c video_key), Control Center's
  * slider and Playback's Volume row (crossfade.c) set it themselves. */
 static const char *const vol_pages[] = { "playing_page", "airplay_page", "radionp_page" };
+/* Whether page (page_in_use's) is one of those, its wheel the volume. */
+int vol_page(void *page) {
+    const char *name = page ? widget_get_prop_str(page, "name", "") : "";
+    for (unsigned i = 0; i < sizeof vol_pages / sizeof *vol_pages; ++i)
+        if (!tk_strcmp(name, vol_pages[i])) return 1;
+    return page && spot_np_track(page);
+}
 /* on_wm_keyup_fun (HOOKS): the key-up no page took. Stock opens its volume dialog on any wheel tick
- * there, lit or dark; here only on a lit playback screen (vol_pages, under a toast), so a list's
+ * there, lit or dark; here only on a lit playback screen (vol_page, under a toast), so a list's
  * end, a page with nothing to scroll (an empty state's own page, Spotify's note) or a QR code take
  * the tick as nothing and Return still goes back (docs/internals.md#wheel-volume). A dropped tick
  * returns before stock clears its power-key flags, which the next Centre release clears. Every
  * other key, and the Centre releases the payload replays, are stock's. */
 int vol_wm_keyup(void *ctx, void *e) {
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;
-    if (key == KEY_NEXT || key == KEY_PREV) {
-        void *page = g_backlight_status ? page_in_use() : (void *)0;
-        const char *name = page ? widget_get_prop_str(page, "name", "") : "";
-        unsigned i = 0;
-        while (i < sizeof vol_pages / sizeof *vol_pages && tk_strcmp(name, vol_pages[i])) ++i;
-        if (i == sizeof vol_pages / sizeof *vol_pages && !(page && spot_np_track(page))) return 0;
-    }
+    if ((key == KEY_NEXT || key == KEY_PREV) &&
+        !vol_page(g_backlight_status ? page_in_use() : (void *)0))
+        return 0;
     return stock_wm_keyup_trampoline(ctx, e);
 }
 

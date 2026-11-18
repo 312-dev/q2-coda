@@ -248,6 +248,19 @@ All lists share one grid.
   colors, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
   the glyphs to its left move over for it.
+- **The volume pill.** A volume change made off Now Playing (a headset's own keys or its AVRCP volume, the Car
+  Remote) shows in the clock's place: a Raised (`#1C1C1E`) pill 30 px tall on the row's centre (rows 8 to 37) with
+  15 px round ends, 199 px wide and centred on x 187.5, narrower (still centred) where the glyph slots leave it less
+  room, down to 141 px, which then ends 8 px short of the leftmost slot. Inside, 12 px from each end: the speaker
+  (Phosphor `speaker-simple-high-fill`, 11 px tall as every status glyph, Text Primary), 8 px, a 4 px track in Track
+  with round ends filled in Text Primary to the level, 8 px, and the number (0 to 100) in the row's face, Inter
+  Medium 15 px, Text Secondary, ending at the pill's inner edge in a 32 px column of tabular digits, so the track
+  never moves. At 0, the mute, `speaker-simple-x-fill` and an empty track. The number and fill are the Q2's 0 to 100 in
+  every case: with Link Volume on a headset, its own level read back on that scale, as everywhere else. The clock and the title go out while it
+  shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
+  (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
+  Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
+  `mock.html` on 2026-11-18 ("status pill").
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).

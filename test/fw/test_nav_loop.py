@@ -1136,12 +1136,16 @@ def test_the_headsets_own_keys_move_the_q2s_volume_to_the_limit(fw, stock_bytes,
 
 
 class Front:
-    """The window in front for a headset's volume change: its name and AWTK type, and what was opened over it."""
-    TOP, SLIDER = 0x5100, 0x5200
+    """The window in front for a headset's volume change, the window manager's only one (page_in_use's too): its
+    name and AWTK type, and what was opened over it."""
+    WM, TOP, SLIDER = 0x5000, 0x5100, 0x5200
 
     def __init__(self, fw, name, kind=b'window', lit=1):
         self.name, self.kind, self.opened = C.create_string_buffer(name), C.create_string_buffer(kind), []
         fw.var('g_backlight_status', C.c_ubyte).value = lit
+        fw.mock('window_manager', lambda *_: self.WM)
+        fw.mock('widget_count_children', lambda w, *_: 1 if w == self.WM else 0)
+        fw.mock('widget_get_child', lambda w, i, *_: self.TOP if w == self.WM and i == 0 else 0)
         fw.mock('window_manager_get_top_window', lambda *_: self.TOP)
         fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(self.name) if w == self.TOP else default)
         fw.mock('widget_get_type', lambda w, *_: C.addressof(self.kind) if w == self.TOP else 0)
@@ -1168,23 +1172,29 @@ def test_the_volume_dialogs_slider_follows_the_headset_and_stays_open(fw, stock_
     assert front.opened == []
 
 
-@pytest.mark.parametrize('name', [b'playing_page', b'bluetooth_page', b'home_page'])
-def test_a_headsets_volume_change_opens_the_volume_on_the_lit_screen(fw, stock_bytes, name):
+@pytest.mark.parametrize('name, opened', [(b'playing_page', 1), (b'bluetooth_page', 0), (b'home_page', 0)])
+def test_a_headsets_volume_change_shows_on_the_lit_screen(fw, stock_bytes, name, opened):
+    """On Now Playing stock's volume dialog opens (its band over the progress bar); on any other page the status
+    row's pill shows it (test_vol_pill.py) and no dialog opens."""
     front = Front(fw, name)
     assert headset_step(fw, stock_bytes, front) == 20
-    assert front.opened == [b'dialog/volume_dialog'] and fw.var('g_volume', C.c_ubyte).value == 100
+    assert front.opened == [b'dialog/volume_dialog'] * opened and fw.var('g_volume', C.c_ubyte).value == 100
+    assert fw.fn('vol_pill_up', C.c_int)() == (not opened)
 
 
 @pytest.mark.parametrize('lit, video, kind, flag', [(0, 0, b'window', None), (1, 1, b'window', None), (1, 0, b'dialog', None),
                                                      *((1, 0, b'window', f) for f in ('g_lockscreen_pageflag', 'g_testmode_flag',
                                                                                       'g_guideflag', 'g_poweroff_state'))])
-def test_a_headsets_volume_change_opens_nothing_dark_over_a_video_a_dialog_or_where_stock_wont(fw, stock_bytes, lit, video, kind, flag):
+def test_a_headsets_volume_change_opens_no_dialog_dark_over_a_video_a_dialog_or_where_stock_wont(fw, stock_bytes, lit, video, kind, flag):
+    """Over another dialog (a confirmation card) the volume dialog would take its keys for 3 s: the status row's
+    pill shows it instead, as it takes none; dark, over a video or where stock opens nothing, neither shows."""
     front = Front(fw, b'confirm_dialog' if kind == b'dialog' else b'playing_page', kind, lit)
     fw.var('videos__vid', Vid).pid = 77 if video else 0
     if flag:
         fw.var(flag, C.c_ubyte).value = 1
     headset_step(fw, stock_bytes, front)
     assert front.opened == [] and fw.var('g_volume', C.c_ubyte).value == 100  # the volume follows all the same
+    assert fw.fn('vol_pill_up', C.c_int)() == (kind == b'dialog')
 
 
 def test_control_centers_slider_eases_to_a_headsets_change(fw, stock_bytes):
