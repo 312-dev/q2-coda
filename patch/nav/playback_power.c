@@ -442,10 +442,11 @@ static void bt_volume_poll(void) {
  * off, unless Wake's second press may be coming); stock then finds its 8 ms gone, sleeps 0 and
  * keeps its own bookkeeping. A dark wheel turn keeps stock's pace, DARK_TURN_MS on from each tick
  * (tick_gate): an idling pass dispatched every tick it had slept through at once, so a dark turn
- * clicked in bursts and stepped the volume in jumps (#303). ponytail: a turn's first ticks still
- * wait out one idle and arrive together, to one click (tone_dark). Ending the idle on a key
- * instead is select() on a datagram socket that ringnav_queue_event sends to, a send on every
- * input thread; build it if the first tick's wait ever shows. The first pass with it back on
+ * clicked in bursts and stepped the volume in jumps (#303). Every idle is loop_wait's poll(), which
+ * any queued event ends at once, so a turn's first tick no longer waits one out; and it may run
+ * past these lengths while nothing needs the loop sooner (loop_span, loop_wake.c; dark, only while
+ * the player polls are slow, no stream's network timer runs and input has been still IDLE_MS).
+ * The first pass with it back on
  * repaints every window once, so nothing drawn while dark, or only partly, stays on screen until
  * the next input; after a centre press woke it, it also restarts Wake's window for a dropped press
  * (woke_at). With the screen on, a pass idles IDLE_SLEEP_MS once input and window animations have

@@ -408,7 +408,7 @@ static inline int arc_out(int r, int y) {
 #define WAKE_MS 500 /* Wake: Double press, the screen-off double press; looser, done blind in a hand */
 #define SCRUB_MS 3000
 /* With the screen off the UI loop idles this long a turn instead of stock's 8 ms, about 10 turns a
- * second; screen-off keys (volume, play/pause, wake) wait at most this much longer. */
+ * second; a screen-off key (volume, play/pause, wake) ends the idle (loop_wake.c). */
 #define SCREEN_OFF_SLEEP_MS 100
 /* Stock's player status sync (5 a second) and player scheduling (ringnav_mainscheduling, 10) run at
  * least this far apart while ringnav_sleep finds the Q2 dark and nothing needs the position soon
@@ -421,8 +421,8 @@ static inline int arc_out(int r, int y) {
 #define DARK_END_LEAD_S 10
 /* Screen off, nothing playing (media_playing) and the DAC already off (check_dacoff_state, about 31
  * s after playback stops; g_dacoff_time -1): the turn idles DARK_IDLE_SLEEP_MS, about 4 turns a
- * second, so a Q2 left dark without Standby stops waking the CPU for nothing. The first key waits
- * at most that; Wake's second press is timed at the screen-off pace. */
+ * second (longer still: LOOP_DARK_MAX_MS), so a Q2 left dark without Standby stops waking the CPU
+ * for nothing. A key ends the idle; Wake's second press is timed at the screen-off pace. */
 #define DARK_IDLE_SLEEP_MS 250
 /* A wheel turn with the screen off idles neither for this long after a tick (ringnav_sleep). A
  * calibration knob: a turn slower than a tick in this long waits out a dark pass for each. */
@@ -439,8 +439,8 @@ static inline int arc_out(int r, int y) {
  * BT_VOLUME_FALLBACK_MS, lit or dark, for a stack or headset that sends none. */
 #define BT_VOLUME_EVENT_GAP_MS 400
 #define BT_VOLUME_FALLBACK_MS 5000
-/* Screen on, once IDLE_MS pass without input or a window animation, each turn idles IDLE_SLEEP_MS
- * (about 30 passes a second; the first input after waits at most that). */
+/* Screen on, once IDLE_MS pass without input or a window animation, each turn idles at least
+ * IDLE_SLEEP_MS (input ends it at once). */
 #define IDLE_MS 2000
 #define IDLE_SLEEP_MS 25
 /* Past those idles the loop waits longer when nothing needs it sooner (loop_wake.c loop_span): lit,
