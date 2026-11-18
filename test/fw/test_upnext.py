@@ -3,6 +3,8 @@ own outside advanced play), Playing Next under its heading and Clear, a row's ta
 tap on the arrow), lifting a queued row with Centre held, and the rows following the queue as it plays."""
 import ctypes as C
 import mmap
+import pathlib
+import re
 import struct
 
 import pytest
@@ -11,6 +13,9 @@ import host
 from conftest import O, Deques, libc, stock_prop_str
 from test_nav_hold import recs  # noqa: F401
 
+# navigation.h's: a handler's RET_STOP, and the travel a tap stays within (AWTK's drag threshold)
+NAV = dict(re.findall(r'^#define (STOP|TAP_PX) (\d+)', (pathlib.Path(__file__).resolve().parents[2]/'patch/navigation.h').read_text(), re.M))
+STOP, TAP_PX = int(NAV['STOP']), int(NAV['TAP_PX'])
 # Up Next's sheet, stock's sortselect dialog as a zeroed widget (no parent): OLED's title and toast checks read the
 # window on top
 _PAGE = C.create_string_buffer(0x400)
@@ -580,17 +585,40 @@ def test_the_header_s_level_bars_ride_the_shared_loop_and_repaint_only_their_box
     assert paint() == held
 
 
-def finger(page, at, to, scrolled=0):
-    """A finger down at at and up at to on the sheet (its window's pointer handlers, before its children's), the rows
-    scrolled down by scrolled, then what that asked of the next pass: 1 when the sheet was closed."""
+def finger(page, at, to, scrolled=0, aborts=None):
+    """A finger down at at, moving to to a sample every 4 px as the panel reports it, and up there, on the sheet (its
+    window's pointer handlers, before its children's), the rows scrolled down by scrolled; then what that asked of the
+    next pass: 1 when the sheet was closed. As stock's scroll_view does on the emulator, a move the window's handlers
+    let through once the finger is TAP_PX from where it came down is the rows' drag, and aborts the press through the
+    window (EVT_POINTER_ABORT); aborts, when given, collects the aborts the sheet sent its own children."""
     C.c_int.from_address(page.view + O['SCROLL_Y']).value = scrolled
     timers = len(page.timers)
-    for kind, (x, y) in ((O['EVT_POINTER_DOWN'], at), (O['EVT_POINTER_UP_BEFORE'], to)):
+    sent = []
+    page.fw.mock('pointer_event_init', lambda out, kind, *_: struct.pack_into('<i', (C.c_char * 4).from_address(out), 0,
+                                                                               kind) or out)
+    page.fw.mock('widget_dispatch_event_to_target_recursive',
+                 lambda w, e, *_: sent.append((w, C.c_int.from_address(e).value)) or 0)
+
+    def send(kind, x, y):
         ev = C.create_string_buffer(0x40)
         struct.pack_into('<i', ev, O['EVENT_TYPE'], kind)
         struct.pack_into('<ii', ev, O['EVENT_X'], x, y)
-        for fn, ctx in page.bound.get((PAGE, kind), []):
-            assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev)) == 0  # the rows keep it
+        return [C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev))
+                for fn, ctx in page.bound.get((PAGE, kind), [])]
+
+    assert send(O['EVT_POINTER_DOWN'], *at) == [0] * len(page.bound.get((PAGE, O['EVT_POINTER_DOWN']), []))
+    n = max(abs(to[0] - at[0]), abs(to[1] - at[1])) // 4
+    rows_drag = False
+    for i in range(1, n + 1):
+        x, y = at[0] + (to[0] - at[0]) * i // n, at[1] + (to[1] - at[1]) * i // n
+        if STOP in send(O['EVT_POINTER_MOVE_BEFORE'], x, y):
+            continue
+        if not rows_drag and max(abs(x - at[0]), abs(y - at[1])) >= TAP_PX:
+            rows_drag = True  # the rows' scroll takes the drag: the window hears the press aborted
+            send(O['EVT_POINTER_ABORT'], x, y)
+    send(O['EVT_POINTER_UP_BEFORE'], *to)
+    if aborts is not None:
+        aborts.extend(sent)
     for fn, _ in page.timers[timers:]:
         info = C.create_string_buffer(0x40)
         C.c_void_p.from_address(C.addressof(info) + O['TIMER_CTX']).value = PAGE
@@ -613,7 +641,9 @@ def test_a_drag_down_on_the_sheet_closes_it(fw, up):
     while they are at their top, lets the sheet fall away; a drag on rows scrolled down scrolls them."""
     _, page = up
     page.open()
-    assert finger(page, (187, 46), (190, 94)) == 1  # the grab bar, 48 px down
+    aborts: list = []
+    assert finger(page, (187, 46), (190, 94), aborts=aborts) == 1  # the grab bar, 48 px down
+    assert aborts == [(PAGE, O['EVT_POINTER_ABORT'])]  # claimed: the sheet's pressed widgets let go
 
 
 @pytest.mark.parametrize('at, to, scrolled', [
@@ -631,7 +661,13 @@ def test_what_does_not_close_the_sheet(fw, up, at, to, scrolled):
 
 
 def test_rows_at_their_top_drag_the_sheet_down(fw, up):
+    """The user's, 2026-11-18 05:08, on the device: a pull down from the grab bar left the sheet up. A finger that
+    lands on the rows (from y 50, a few px under the bar), at their top, is the rows' scroll's once it has moved
+    TAP_PX, and stock's scroll_view aborts the press through the window: the sheet claims the drag in the move
+    before that, so the rows never take it."""
     _, page = up
+    page.open()
+    assert finger(page, (187, 58), (187, 160)) == 1
     page.open()
     assert finger(page, (187, 150), (187, 260)) == 1
 

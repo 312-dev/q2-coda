@@ -689,10 +689,10 @@ as a menu's; a lit row's foot never passes y 282.
 - **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet
   (over y 40), or a drag down of 48 px or more, more down than across (the swipe up that opens it,
   reversed), that starts on the grab bar's strip or on the rows while they are at their top. The
-  sheet falls away as on Return ([Overlay motion](#overlay-motion)); a drag on rows scrolled down
-  scrolls them. ponytail: the sheet does not follow the finger while it drags; it falls once the
-  finger lifts past 48 px, and following it needs the drag's offset in the sheet's frame
-  (`menu_modal.c` `sheet_frame`).
+  sheet follows the finger down as it drags, the page behind coming forward as it goes; let go 48 px
+  or more down and it falls away from there as on Return ([Overlay motion](#overlay-motion)), short
+  of that it rises back. A drag on rows scrolled down scrolls them. Under Reduce Motion the sheet
+  stays put while the finger drags and the lift alone decides.
 
 ### Progress and sliders
 
@@ -1171,7 +1171,8 @@ the wheel walks:
   - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
     a card app's fields, Car Remote's phone name, and any field no caller names.
 
-One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
+One turn of the wheel stops on the switcher or the return key, whichever end it reaches; a new turn goes on
+round to the other. Play/Pause submits
 from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
 cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
 each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's

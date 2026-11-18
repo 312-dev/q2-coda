@@ -2075,6 +2075,47 @@ def test_a_song_off_the_library_comes_from_its_folder(saved):
     assert rows[8] in saved.deques[saved.handle]
 
 
+def test_a_restored_server_song_is_named_by_its_tags_not_its_download(saved):
+    """The device, 2026-11-18 05:07: a streamed album resumed at boot, and Up Next named the next song "life 4 a
+    life [4YqDxaz5...": q2-subsonic names a download by its title in lower case and the server's id, and a
+    stream folder is hidden, so the restore takes its song from the folder's listing, which reads no tags. Each
+    such song is named as a session names one it queues (tags.c card_record_tags); a card file is left as stock
+    lists it. Read back by its album artist, the record's one string field with nothing after it that the restore
+    reads (a host pointer is 8 bytes, the Q2's fields 4 apart)."""
+    at = 0x11000000  # a page under 4 GB: paths whose pointers leave the next field's half zero
+    assert libc.mmap(at, 0x1000, 3, 0x100022, -1, 0) == at  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+    try:
+        stream = b'/mnt/mmc/.subsonic/stream/acct/original/%c/song %d [s%d].flac'
+        paths = [stream % (97 + i, i, i) for i in range(3)] + [b'/mnt/mmc/m/x.flac']
+        rows = []
+        for k, path in enumerate(paths):
+            C.memmove(at + k * 128, path + b'\0', len(path) + 1)
+            record = (C.c_char * 0x60).from_address(saved.song(b''))
+            struct.pack_into('<Q', record, O['REC_PATH'], at + k * 128)
+            struct.pack_into('<Q', record, O['REC_ALBUM_ARTIST'], 0)
+            rows.append(C.addressof(record))
+        saved.load(rows, 1)
+        saved.mcl.type = LIBRARY
+        assert saved.set(1, ONE_PASS) == 1  # advanced play: a plain queue's hash reads REC_NAME too
+        saved.s.dirty = 1
+        saved.save()
+        folder = saved.deques.new(rows)
+        saved.fw.mock('toolsLoadDirectory', lambda path, *_: saved.fill(folder))
+
+        def tags(a, out, path, *_):
+            C.memmove(out + 0x580, b'Eagles\0', 7)  # MUSIC_INFO_ALBUM_ARTIST
+            return 1
+        saved.fw.mock('toolsGetMusicInfo', tags)
+        saved.fw.mock('tk_str_start_with', stock_start_with)
+        assert restore(saved) == 1
+        field = lambda r: struct.unpack_from('<Q', (C.c_char * 0x60).from_address(r), O['REC_ALBUM_ARTIST'])[0]
+        assert [field(r) and C.string_at(field(r)) for r in saved.deques[saved.handle]] == [b'Eagles'] * 3 + [0]
+        assert [C.string_at(a[2]) for _, a in saved.fw.calls('toolsGetMusicInfo')] == paths[:3]
+    finally:
+        saved.forget()
+        libc.munmap(C.c_void_p(at), C.c_size_t(0x1000))
+
+
 def snapshot_words(saved):
     full_queue(saved)
     saved.s.dirty = 1
