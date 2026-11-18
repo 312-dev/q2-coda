@@ -129,7 +129,7 @@ to Home. With OTG connected or no card in on entry, Folder keeps the storage sel
 Library’s Podcasts/Audiobooks shortcuts keep their usual Back navigation.
 The native stock handlers, translation keys, full-row tap targets and submenu animation remain intact.
 
-Home's rows are the geometry set's `home_row` (OLED's 32), directly below the status row in Full,
+Home's rows are the grid's `home_row` (OLED's 32), directly below the status row in Full,
 from y 40 in Split, into the status row's empty left, matching Library. The main menu rests on `HOME_REST` (7) rows, as many as every set's window fits, and
 scrolls the others as a list does: scrolled to its end, its last row sits where the seventh's does
 (`patch/home.c` `home_overflow`, `home_rest`; a hidden Now Playing row, restacked last, is not scrolled
@@ -148,7 +148,7 @@ window while sliding.
 
 Display settings offers **Home: Split / Full / Carousel**, stored as `IPOD/HOME` 0, 1 or 2; invalid or absent
 values mean Split. `coverflow_home_layout` moves the asset's widgets at runtime:
-Split narrows both menus to the geometry set's `split_row` (OLED's 204; `HOME_SPLIT_W`, 187, half the
+Split narrows both menus to the grid's `split_row` (OLED's 204; `HOME_SPLIT_W`, 187, half the
 screen, in the built-in set) and shows the cover itself in the panel right of them, from `split_art`
 (OLED's 196) to the screen's edge, and with OLED's `split_art_up` from the top edge, under the status
 row ([Theme](#theme)) (`img_homeart` is an `image` for this, fitted to the cover's proportions and
@@ -297,7 +297,7 @@ The battery's charging green and low red keep their own colors over the art, eac
 read against the glyph's most saturated pixel, and only its gray part (the dim outline as a
 lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
 draws off the screen, the art is painted under the glyphs as they are. With nothing
-playing, or a cover the frame cannot hold, the pane is the window's panel, as in a set without
+playing, or a cover the frame cannot hold, the pane is the window's panel, as it would be with no
 `split_art_up`.
 
 ## Status bar and clock
@@ -355,11 +355,10 @@ of the sleep timer (`img_switch`) and Startup volume (`img_bootswitch`, which `p
 the navbar; Crossfade reuses the page), whose fields hide while off:
 those two pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar's right-hand
 slot and the title runs up to it (225 pixels); the Home and Now Playing buttons are 0 wide, as the
-keys do what they did (`immediates` in `ipod.json`). A set with `toolbar` 0 (OLED's) hides those toolbars
+keys do what they did (`immediates` in `ipod.json`). The grid's `toolbar` 0 (OLED's) hides those toolbars
 too, Startup volume's aside: `navigation.c`'s `ringnav_sleeptimer` makes the Sleep Timer's switch a row whose click is
-`img_switch`'s, hidden with its toolbar, a loop pass later; its fields' panel (`view_sleep`) moves down a row under it and is cut to end with the window. The set's `stock_row`, `stock_body`,
-`stock_title_y` and `stock_title_h` re-pitch stock's own pages (`stock_rows` in `ipod.json`), which
-other sets get back byte for byte: Update Library and More as settings rows, Queue, Go to and
+`img_switch`'s, hidden with its toolbar, a loop pass later; its fields' panel (`view_sleep`) moves down a row under it and is cut to end with the window. The grid's `stock_row`, `stock_body`,
+`stock_title_y` and `stock_title_h` re-pitch stock's own pages (`stock_rows` in `ipod.json`): Update Library and More as settings rows, Queue, Go to and
 Special Folders through their row constructors' immediates. More's Speed row keeps 78 pixels: its
 four 42 x 61 buttons don't fit (`stock_more_speed`). Lists hold
 settings rows (see [Settings](#settings)); other panels move up 50 pixels and keep
@@ -380,11 +379,11 @@ list stays 272 pixels high, preserving scrolling and full-row tap targets; OLED'
 from its set (below). The `navbar_only` assets set their
 `list_view`'s `default_item_height` from 78 to 68, which no stock asset uses, and nothing else.
 Constants are `SET_*` in `patch/offsets.inc`.
-Under a geometry set (OLED's: 32-pixel rows from the top, no icons) the row height, top, row
-count and icon size come from the set (`set_row`, `set_top`, `set_rows`, `set_icon`); the payload
-reads `set_row` and `set_icon` from the set the build baked (`geom_vals`), hides the icon at 0 and starts the
-text where a row without an icon starts. Streaming's own row height is the set's `stream_row`, matched
-by the view's name (`scroll_view_streamsset`) at layout time; where it differs from `set_row` its rows keep their `SET_ICON` icons, on the art rows' columns. Under OLED (`stream_row` 32, its `set_row`) the logos give way to the theme's 20 px monochrome marks (`patch/home.c` `stream_marks`, [internals: Themes](internals.md#themes)), a card app's own icon to the same 20 px box and the Subsonic app's to its own mark. A payload picker's `select` or `unselect` (Key Lock)
+Under OLED's grid (32-pixel rows from the top, no icons) the row height, top, row
+count and icon size come from the grid (`set_row`, `set_top`, `set_rows`, `set_icon` 0); the payload
+reads `set_row` from the grid the build baked (`geom_vals`), hides the icon and starts the
+text where a row without an icon starts. Streaming's rows (`scroll_view_streamsset`, matched by the view's name at layout time) take `set_row` too
+(the grid's `stream_row` is the same 32). The logos give way to the theme's 20 px monochrome marks (`patch/home.c` `stream_marks`, [internals: Themes](internals.md#themes)), a card app's own icon to the same 20 px box and the Subsonic app's to its own mark. A payload picker's `select` or `unselect` (Key Lock)
 is not an icon: at 0 it stays, in the column of stock's own marks, and under a `set_text` theme
 (OLED) every picker opens on its mark when a tap opened it too, as a `CHOICE` picker does. Another list whose `default_item_height` equals the set's
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
@@ -1026,7 +1025,7 @@ Now Playing uses 24 px monochrome control glyphs on 28 px canvases inside the ex
 
 OLED is the one theme, built to [oled-design.md](oled-design.md): black, white sentence-case Inter, one
 blue, on its own layout. `assets/themes/oled/theme.xml` stands alone (it extends no other theme), states its
-own grid as the `oled` geometry set and is row 0 of the theme table, so Appearance has no Theme row and
+own grid (its `<geometry>`) and is row 0 of the theme table, so Appearance has no Theme row and
 there is no picker ([internals.md](internals.md#themes)).
 
 `IPOD/THEME` stays, always 3, the number OLED had among the four themes there were. A unit an older build

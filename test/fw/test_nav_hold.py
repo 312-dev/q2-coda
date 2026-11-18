@@ -940,7 +940,7 @@ class More:
         self.win = ui.window('playlistsmore_page')
         self.rows = []
         for i, name in enumerate(('rename', 'del')):
-            # from the top under a set without toolbars (tools/ipod.py), as OLED's
+            # from the top with no toolbars (the grid's toolbar 0, tools/ipod.py)
             item = ui.child(self.win, 'list_item', 0, i * pitch, 375, pitch)
             button = ui.child(item, 'button', 20, 0, 335, pitch)
             icon = ui.child(button, 'image', 10, 0, 52, pitch)
@@ -1010,7 +1010,7 @@ def test_more_of_no_page_is_stocks(fw, ui):
     assert fw.fn('ringnav_playlistsmore', C.c_int, C.c_void_p, C.c_void_p)(None, 1) == 7 and not ui.nodes[ui.wm].children
 
 
-# Playlists as rows under a set without toolbars, as OLED's (pl_*, ringnav_playlist).
+# Playlists as rows, with no toolbars (the grid's toolbar 0; pl_*, ringnav_playlist).
 class Playlists:
     """Stock's playlist_page as its init and every rebuild (stock_playlist_trampoline) leave it: the toolbar
     (view_navbar), its title and the buttons bound to stock's handlers; the list (scroll_view): Import and Export's

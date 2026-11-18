@@ -1875,7 +1875,7 @@ FUNCTIONS = {
  'widget_move_resize': ('int', 'void *, int, int, int, int'),
  # Swipe back (swipe_back.c): a page or Home's list moved with the finger, its children's layout kept
  'widget_move': ('int', 'void *, int, int'),
- # The artist page's toolbar (navigation.c artist_bar): its tabs move down under it
+ # A view's own layout set again (control_center.c)
  'widget_set_self_layout_params': ('int', 'void *, const char *, const char *, const char *, const char *'),
  'widget_layout': ('int', 'void *'),
  'tk_str_end_with': ('int', 'const char *, const char *'),

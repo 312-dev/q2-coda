@@ -533,6 +533,7 @@ class RateMachine(FileMocks,ShuffleMachine):
         self.fav=self.node('image','img_fav'); self.word(self.fav+O['W_X'],303); self.word(self.fav+O['W_Y'],176)
         self.word(self.fav+O['W_W'],50); self.word(self.fav+O['W_H'],50); self.nodes[self.fav]['image']='play_unfav'
         self.np=self.node('window','playing_page',[self.node('view','view_album',[self.fav])])
+        self.handlers[syms['navigator_to']]='q:navigator_to'  # the menu sheet's dialog, the picker's and the hold menu's
         self.word(self.np+O['W_W'],375); self.word(self.np+O['W_H'],320); self.word(self.np+O['W_PARENT'],self.wm)
         for w in self.nodes[self.np]['children']: self.word(self.fav+O['W_PARENT'],w); self.word(w+O['W_PARENT'],self.np)
         em=self.alloc(4); it=self.alloc(0x28); self.word(self.fav+O['W_EMITTER'],em); self.word(em,it)
@@ -565,12 +566,11 @@ class RateMachine(FileMocks,ShuffleMachine):
         return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
     def badge(self):
         w=self.nodes[self.get(self.fav+O['W_PARENT'])]['children'][-1]; return self.nodes[w].get('text') if self.nodes[w]['visible'] else None
-    def panel(self):
-        p=[w for w in self.nodes[self.np]['children'] if self.nodes[w]['type']=='hscroll_label']
-        return p[0] if p and self.nodes[p[0]]['visible'] else None
-    def hearts(self):
-        p=self.panel(); return [self.nodes[h]['image'] for h in self.nodes[p]['children'] if self.nodes[h]['type']=='image']
-    def caption(self): return self.nodes[self.nodes[self.panel()]['children'][0]]['text']
+    def picker(self):
+        """The rating picker's rows while the menu sheet's picker is up (ratings.c rate_show), else None."""
+        rows=self.labels() if self.top!=self.np and self.view in self.nodes else []
+        return rows if rows[:1]==['Unrated'] else None
+    def on(self): return self.selected(self.view)  # the picker's row: its rating
     def tap(self,press=True):  # a press, then its click
         if press: f,ctx=self.handler(self.fav,O['EVT_POINTER_DOWN']); self.call(address=f,args=(ctx,self.event,0,0),gap=0)
         f,ctx=self.handler(self.fav,O['EVT_CLICK']); return self.call(address=f,args=(ctx,self.event,0,0),gap=0)
@@ -581,7 +581,7 @@ class RateMachine(FileMocks,ShuffleMachine):
 def key_of(name): k=fnv('/p/'+name); return k|(k==0)
 m=RateMachine()
 # Bound: stock's click off img_fav, the payload's click and press on, the badge hidden; nothing read yet beyond the file.
-assert ('widget_off_by_func',m.fav,O['EVT_CLICK'],FAV_CLICK) in m.calls and m.badge() is None and m.panel() is None
+assert ('widget_off_by_func',m.fav,O['EVT_CLICK'],FAV_CLICK) in m.calls and m.badge() is None and m.picker() is None
 assert [t for t,f,ctx in m.nodes[m.fav]['handlers']]==[O['EVT_CLICK'],O['EVT_POINTER_DOWN']]
 assert m.nodes[m.nodes[m.get(m.fav+O['W_PARENT'])]['children'][-1]]['sensitive']==0; passed()  # the badge leaves the heart its taps
 # A tap is stock's heart: B (playing) into My Fav, nothing kept; again, out. Its click returns 0, as stock's:
@@ -590,50 +590,45 @@ assert m.tap()==0 and m.favs=={'B'} and m.nodes[m.fav]['image']=='play_fav' and 
 assert m.tap()==0 and m.favs==set(); passed()
 # A press shorter than the hold, then its click: still the tap.
 def aborts(): return [c for c in m.calls if c[0]=='widget_dispatch_event_to_target_recursive' and m.get(c[2])==O['EVT_POINTER_ABORT']]
-m.calls=[]; m.heart(O['RATE_HOLD_MS']-1); assert m.panel() is None and not aborts() and m.tap(press=False)==0 and m.favs=={'B'}; passed()
-# A hold opens the picker on 5 (My Fav), aborting the press so the slide_view drops its grab; its release's click does nothing.
-m.calls=[]; m.heart(); assert m.hearts()==['play_fav']*5 and m.caption()=='5 of 5' and [c[1] for c in aborts()]==[m.np]
+m.calls=[]; m.heart(O['RATE_HOLD_MS']-1); assert m.picker() is None and not aborts() and m.tap(press=False)==0 and m.favs=={'B'}; passed()
+# A hold opens the picker, the menu sheet's, a row for each rating, on 5 (My Fav), aborting the press so the slide_view
+# drops its grab; its release's click does nothing.
+RATE_ROWS=['Unrated','1 Heart','2 Hearts','3 Hearts','4 Hearts','5 Hearts']
+m.calls=[]; m.heart(); assert m.picker()==RATE_ROWS and m.on()==5 and [c[1] for c in aborts()]==[m.np]
 assert m.tap(press=False)==0 and m.favs=={'B'}; passed()
-# The wheel moves the rating within 0-5; Return leaves it as it was.
-m.top=m.np
-for k,want in ((O['KEY_NEXT'],5),(O['KEY_PREV'],4),(O['KEY_PREV'],3)): assert m.call(k)==11
-assert m.hearts()==['play_fav']*3+['play_unfav']*2 and m.caption()=='3 of 5' and m.favs=={'B'}
-assert m.call(O['KEY_RETURN'])==11 and m.panel() is None and m.favs=={'B'} and m.kept()==[]; passed()
+# The wheel moves the picker's row within 0-5; Return leaves the rating as it was.
+for k in (O['KEY_NEXT'],O['KEY_PREV'],O['KEY_PREV']): assert m.call(k)==11
+assert m.on()==3 and m.favs=={'B'}
+assert m.call(O['KEY_RETURN'])==11; m.advance(0); assert m.picker() is None and m.favs=={'B'} and m.kept()==[]; passed()
 # Centre saves 3: My Fav out through stock's own click, 3 kept, the badge on the empty heart.
 m.heart()
 for _ in range(2): m.call(O['KEY_PREV'])
-assert m.call(O['KEY_CENTER'])==11 and m.panel() is None and m.favs==set()
+assert m.call(O['KEY_CENTER'])==11; m.advance(0); assert m.picker() is None and m.favs==set()
 assert m.kept()==[(key_of('B')&~7)|3] and m.badge()=='3'; passed()
-# Down to 0 clears it; a tap on the third heart saves 3 again; a tap on the heart (into My Fav) leaves nothing kept.
+# Down to 0 clears it; a tap on the third rating's row saves 3 again; a tap on the heart (into My Fav) leaves nothing kept.
 m.heart()
 for _ in range(4): m.call(O['KEY_PREV'])
-assert m.caption()=='Unrated' and m.hearts()==['play_unfav']*5
-m.call(O['KEY_CENTER']); assert m.kept()==[] and m.badge() is None and m.favs==set()
-m.heart(); p=m.panel(); assert m.nodes[p]['sensitive']==1; heart=[h for h in m.nodes[p]['children'] if m.nodes[h]['type']=='image'][2]
-# The hold's own release lands on the picker, which opened under the finger: with no press on a heart, or one within
-# RATE_SETTLE_MS of the opening, it picks nothing (#303). A press after that and its click are the tap.
-f,ctx=m.handler(heart,O['EVT_CLICK']); d,dctx=m.handler(heart,O['EVT_POINTER_DOWN'])
-assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==11 and m.panel()==p and m.kept()==[]
-m.call(address=d,args=(dctx,m.event,0,0),gap=0); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==11 and m.panel()==p and m.kept()==[]
-m.now+=400; m.call(address=d,args=(dctx,m.event,0,0),gap=0); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-assert m.panel() is None and m.nodes[p]['sensitive']==0 and m.kept()==[(key_of('B')&~7)|3] and m.badge()=='3'
+assert m.on()==0
+m.call(O['KEY_CENTER']); m.advance(0); assert m.kept()==[] and m.badge() is None and m.favs==set()
+m.heart(); m.pick(3); m.advance(0)
+assert m.picker() is None and m.kept()==[(key_of('B')&~7)|3] and m.badge()=='3'
 assert m.tap()==0 and m.favs=={'B'} and m.kept()==[] and m.badge() is None; passed()
 # A tap or a saved rating makes the card's copy due, 5 s on; a picker left unsaved doesn't.
-rc_due=payload_syms['rc_due']; m.word(rc_due,0); m.heart(); m.call(O['KEY_RETURN']); assert not m.get(rc_due)
+rc_due=payload_syms['rc_due']; m.word(rc_due,0); m.heart(); m.call(O['KEY_RETURN']); m.advance(0); assert not m.get(rc_due)
 assert m.tap()==0 and m.get(rc_due)==1
-m.word(rc_due,0); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER']); assert m.get(rc_due)==1 and m.kept()==[(key_of('B')&~7)|1]
+m.word(rc_due,0); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER']); m.advance(0); assert m.get(rc_due)==1 and m.kept()==[(key_of('B')&~7)|1]
 assert m.tap()==0 and m.favs=={'B'} and m.kept()==[]; passed()
 # Kept across boots; the badge follows the playing track on the UI tick.
-assert m.tap()==0 and m.favs==set(); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER'])
+assert m.tap()==0 and m.favs==set(); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER']); m.advance(0)
 m2=RateMachine(m.files['/mnt/data/ringnav-ratings']); assert m2.badge()=='2'
 m2.word(O['MCL_POS'],0); m2.advance(500); assert m2.badge() is None; passed()
 # Hold Play/Pause on Now Playing: Rate last, with the hearts, and no Next/Previous album outside Shuffle Albums/Folders; its row opens the same picker.
-m2.word(O['MCL_POS'],1); m2.handlers[syms['navigator_to']]='q:navigator_to'; m2.press(100)
-assert m2.hold()==11 and m2.labels()[-2:]==['Group by: Album','Rate  ♥♥♡♡♡'] and m2.release()==0
-m2.pick(len(m2.labels())-1); m2.advance(0); m2.top=m2.np; assert m2.caption()=='2 of 5' and m2.call(O['KEY_RETURN'])==11; passed()
+m2.word(O['MCL_POS'],1); m2.press(100)
+assert m2.hold()==11 and m2.labels()[-2:]==['Group by','Rate  ♥♥♡♡♡'] and m2.release()==0
+m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2 and m2.call(O['KEY_RETURN'])==11; passed()
 # More…: last, below Rate, while Now Playing has its img_more; its row clicks that as a tap would
 m3=RateMachine(); more=m3.node('image','img_more'); m3.nodes[m3.np]['children'].append(more); m3.word(more+O['W_PARENT'],m3.np)
-m3.handlers[syms['navigator_to']]='q:navigator_to'; m3.press(100)
+m3.press(100)
 assert m3.hold()==11 and m3.labels()[-2:]==['Rate','More…'] and m3.release()==0
 m3.pick(len(m3.labels())-1); m3.advance(0)
 assert [m3.get(c[2]) for c in m3.dispatched() if c[1]==more]==[O['EVT_CLICK']]; passed()

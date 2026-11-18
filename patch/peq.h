@@ -731,7 +731,6 @@ int coverflow_playlist_queue(void); /* the queue a playlist's cover played, no l
 void *coverflow_playlist(void *page), *coverflow_playlists_close(void);
 void playlist_open(void *win, int cd_num);
 unsigned playlist_index(int cd_num);
-void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
 /* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */

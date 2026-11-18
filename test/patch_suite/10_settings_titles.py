@@ -121,7 +121,7 @@ item,button,icon,labels,images=speed_row(m,view)
 m.handlers[int(manifest['patch_symbols']['stock_playermore_trampoline'],16)]='stock_playermore'
 assert m.call(address=HOOKS['playermore_page_init'][0],args=(m.top,0,0,0),gap=0)==0; lay(m,view)
 assert geometry(m,ab)[3]==32 and geometry(m,plain)[3]==32 and geometry(m,item)[3]==78 and geometry(m,item)[1]==64
-OG=OLED['geoms']['oled']; TITLE_PX,META_PX=OLED['font_px[ROLE_TITLE]'],OLED['font_px[ROLE_META]']; SEL_IN=OLED['sel_inset']  # OLED's set and roles
+OG=OLED['geom']; TITLE_PX,META_PX=OLED['font_px[ROLE_TITLE]'],OLED['font_px[ROLE_META]']; SEL_IN=OLED['sel_inset']  # OLED's grid and roles
 assert geometry(m,ab_button)==(0,0,375,32) and geometry(m,label)[3]==32 and m.nodes[label]['style:normal:font_size']==TITLE_PX and geometry(m,sw)[3]==32
 assert geometry(m,button)==(20,0,335,70) and [geometry(m,i) for i in images]==[(x,9,42,61) for x in (120,177,231,283)] and all(m.nodes[i]['visible'] for i in images)
 sx=OG.text_x-20  # the set's text column, in the speed row's button at x 20 (navigation.c stock_more_speed)

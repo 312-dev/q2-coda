@@ -1081,7 +1081,7 @@ def validate_assets(directory):
     # and its rows fit.
     from theme import geometry
     from ipod import PAGE_KIND as page_kind, page_rows, fit_rows
-    # Under a set without toolbars the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
+    # With no toolbars (the grid's toolbar 0) the Playlists rows (pl_row) are the theme's page_detail high in a list pitched at
     # the set's playlist pitch (page_rows): one height.
     for t in builtins():
         g = geometry(t)

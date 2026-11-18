@@ -989,7 +989,7 @@ assert not m.rounded and not m.strokes and m.global_alpha==0
 # surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end's
 # corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
-OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geoms']['oled']  # its geometry set, baked into the build
+OLED_G=built_geometry(theme_builtins()); assert OLED_G==OLED_T['geom']  # its grid, baked into the build
 OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid

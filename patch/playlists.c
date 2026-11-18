@@ -1300,11 +1300,6 @@ void playlist_open(void *win, int cd_num) {
     coverflow_playlists_close();
 }
 
-/* A playlist cover's hold: New Playlist on this page, the covers closed over it. New is the
- * toolbar's or the row's target. */
-void playlists_new(void) {
-    if (coverflow_playlists_close()) pl_click((void *)PL_NEW, 0);
-}
 
 /* Stock leaves its mode set for a page gone in it (held Return, to Home); its art's builds stop. */
 static int pl_gone(void *win, void *event) {

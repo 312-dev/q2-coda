@@ -447,7 +447,7 @@ int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
-int modal_set(void) { return 0; } /* a geometry set without modal (the engine's default): the Type picker is the editor's own screen, not menu_modal.c's */
+/* menu_modal.c's sheet does not open here: the Type picker is the editor's own screen */
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) { (void)under, (void)names, (void)n, (void)current, (void)pick; return 0; }
 int eq_rows(void) { return 0; } /* a theme without settings.values.switch (the engine's default): peq_ui.c's own Simple tab, not slider_page.c's */
 int eq_list_end(void) { return 290; }

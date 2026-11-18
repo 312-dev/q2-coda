@@ -88,7 +88,6 @@ enum {
     QA_FOLDER,
     QA_CHAPTERS,
     QA_MORE,
-    QA_NEW_PLAYLIST,
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,

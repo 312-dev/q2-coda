@@ -75,17 +75,6 @@ int np_goto(int album, int go) {
 /* Deferred so the dialog is never closed under its own click dispatch. */
 static int qm_open(const void *unused);
 
-/* New Playlist runs once the dialog is destroyed, so the Playlists page is on top however its
- * close animates (playlists.c's click acts on the top page only), and from the pass after, so the
- * covers never close inside the dialog's destroy. */
-static int qm_edit_run(const void *unused) {
-    playlists_new();
-    return 0;
-}
-static int qm_edit_due(void *ctx, void *event) {
-    timer_add(qm_edit_run, 0, 0);
-    return 0;
-}
 /* A song's My Fav changed from the menu, kept as Now Playing's heart keeps it (ratings.c
  * rate_fav_click): its 1-4 hearts go, the card's copy of the ratings is due, and the server is told
  * (catalogue_rated, by the row's key and sid for a server song's Stream Cache copy). */
@@ -104,7 +93,6 @@ static int qm_run(const void *unused) {
         qm_values(st.qm_dialog);
         return 0;
     }
-    if (st.qm_action == QA_NEW_PLAYLIST) widget_on(st.qm_dialog, EVT_DESTROY, qm_edit_due, 0);
     qm_close();
     void *r = qm_record();
     int a = st.qm_action, cls = st.qm_kind == QM_COVERFLOW ? 0xf001 : (int)st.qm_cls;
@@ -116,10 +104,6 @@ static int qm_run(const void *unused) {
         chapters_open(r);
     } else if (r && a == QA_QUEUE) {
         np_queue(0);
-    } else if (a == QA_MORE && st.qm_kind == QM_PLAYLIST) {
-        if (r) navigator_to_with_context("localmusic/playlistsmore_page", (void *)(long)st.qm_idx);
-    } else if (a == QA_NEW_PLAYLIST) {
-        /* the page's own, not the playlist's: qm_edit_due */
     } else if (a == QA_MORE) {
         void *more = np_more(); /* clicked as a tap would, so stock's own handler opens it */
         char click[0x30];
@@ -392,9 +376,6 @@ static int qm_open(const void *unused) {
         if (!group_first && st.rate_win) acts[n++] = QA_RATE;
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
-    if (st.qm_kind == QM_PLAYLIST && !list) acts[n++] = QA_MORE; /* its dots' page */
-    /* the list's own New Playlist, which its covers hide */
-    if (st.qm_kind == QM_PLAYLIST && !list && coverflow_playlist(page)) acts[n++] = QA_NEW_PLAYLIST;
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
     static const char *const rows[] = { "Play Next",
                                         "Play Last",
@@ -415,7 +396,6 @@ static int qm_open(const void *unused) {
                                         "Go to Folder",
                                         "Chapters",
                                         "More…",
-                                        "New Playlist",
                                         "Add to On-The-Go",
                                         "Play",
                                         "Rename",
@@ -441,7 +421,6 @@ static int qm_open(const void *unused) {
                                          "folder",
                                          "bookmark-simple",
                                          "dots-three",
-                                         "plus",
                                          "sneaker-move",
                                          "play",
                                          "pencil-simple",

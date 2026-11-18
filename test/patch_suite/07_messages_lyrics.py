@@ -1249,7 +1249,7 @@ class PlaylistCoverMachine(CoverflowMachine):
     def __init__(self):
         super().__init__()
         self.handlers[syms['navigator_to_with_context']]='q:navigator_to_with_context'  # the More page's index
-        for n in ('playlist_art','playlist_art_refresh','playlist_art_stop','playlist_songs','playlists_new'):
+        for n in ('playlist_art','playlist_art_refresh','playlist_art_stop','playlist_songs'):
             if n in payload_syms: self.handlers[payload_syms[n]]='pl:'+n
         self.handlers[syms['getAllPlayList']]='pl:getAllPlayList'  # stock's headers, as the page reads them
         self.edits=[]; self.lists=[self.song(f'List {i}',4) for i in range(3)]; self.heads=self.lists
@@ -1262,7 +1262,6 @@ class PlaylistCoverMachine(CoverflowMachine):
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         if not name.startswith('pl:'): return super().hook(u,address,size,unused)
-        if name=='pl:playlists_new': self.edits.append(0)
         if name=='pl:getAllPlayList':
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',r) for r in self.heads]
             return self.returns(len(self.heads))
@@ -1316,24 +1315,6 @@ m=PlaylistCoverMachine(); m.word(m.slide+O['SLIDE_INDEX'],1); m.advance(0)
 new_one=m.song('Renamed',4); m.word(new_one+O['REC_TITLE'],m.string('Renamed')); m.word(new_one+O['REC_DISC'],11)
 m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
 m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']; passed()
-# New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
-# own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
-# (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
-def pl_new(covers=True):  # the Playlists page past the first system_bar load (PlaylistPageMachine)
-    class M(PlaylistPageMachine):
-        def hook(self,u,address,size,unused):
-            if address!=payload_syms['coverflow_playlists_close']: return super().hook(u,address,size,unused)
-            self.shut+=1; page=0
-            if self.covers in self.stack: self.stack.remove(self.covers); self.top=page=self.stack[-1]
-            self.returns(page)
-    m=M(); m.rebuild(); m.paint(m.view); m.shut=0; m.page=m.top; m.covers=m.node('window','coverflow_page')
-    if covers: m.stack.append(m.covers); m.top=m.covers
-    m.before=m.bar(); m.calls.clear()
-    m.call(address=payload_syms['playlists_new'],args=(0,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
-    return m
-m=pl_new(); opened=[c for c in m.calls if c[0]=='window_create']  # page_open's, the strip's page
-assert m.shut==1 and not m.dialogs and len(opened)==1 and m.navbar()==0,(m.dialogs,opened); passed()
-m=pl_new(covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
 # /mnt/data/ringnav-album-ratings by album_id, the low three bits its hearts, 5 its favourite and its songs My Fav's; songs'

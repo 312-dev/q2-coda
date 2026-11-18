@@ -2403,7 +2403,7 @@ def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st)
     assert quick.slider.parent.box == (188, 162, 167, 38) and quick.slider.box == (0, 0, 167, 38)
 
 
-# A page's switch as a row, under a set without stock's toolbars.
+# A page's switch as a row, with no stock toolbars (the grid's toolbar 0).
 def sleep_page(fw, st, image='switch_off'):
     theme(fw)
     ui = Ui(fw)

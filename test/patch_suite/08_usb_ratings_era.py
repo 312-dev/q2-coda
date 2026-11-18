@@ -24,32 +24,23 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def kept(self):
         data=self.files.get(ALBUM_RATES,b''); return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
     def aid(self,r): return self.call(address=payload_syms['album_id'],args=(r,0,0,0),gap=0)&0xffffffff
-    def panel(self):
-        p=[w for w in self.nodes[self.page]['children'] if self.nodes[w].get('name')=='rate_panel']
-        return p[0] if p and self.nodes[p[0]].get('visible',1) else None
-    def caption(self): return self.nodes[self.nodes[self.panel()]['children'][0]]['text']
-    def hearts(self): return [self.nodes[h]['image'] for h in self.nodes[self.panel()]['children'][1:]]
+    def picker(self):
+        """The rating picker's rows while the menu sheet's picker is up (ratings.c rate_show), else None."""
+        rows=self.labels() if self.top!=self.page and self.view in self.nodes else []
+        return rows if rows[:1]==['Unrated'] else None
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
         rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
-    def rate(self,want):  # Rate album, wheel down to 0 then up to want, Centre
+    def rate(self,want):  # Rate album, then the picker's row for want
         toasts=len(self.toasts)
-        assert self.run(4) is None and self.top==self.page and self.panel()
-        for k in [O['KEY_PREV']]*5+[O['KEY_NEXT']]*want: assert self.call(k)==11
-        assert self.call(O['KEY_CENTER'])==11 and self.panel() is None
+        assert self.run(4) is None and self.picker()
+        self.pick(want); self.advance(0); assert self.picker() is None
         return self.toasts[-1][3] if len(self.toasts)>toasts else None
 def song_side_effects(m):
     return '/mnt/data/ringnav-ratings' in m.files or any(c[0] in ('batch_add_file','deleteMusicFromFav') for c in m.calls)
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); a1=m.aid(m.albums[1])
 assert m.menu()==[*COVER_ALBUM,'Go to Artist'] and m.top==m.page; passed()
-# The rating picker is a panel on the page, with no widget over the page to take a tap outside it (rate_out): Enlarged
-# Album Art's countdown runs while it is up.
-def rate_poll(m,left=5):
-    m.byte(O['BC_IDLE'],left); m.handlers[HOOKS['main_loop_sleep_default'][0]+12]='stock_sleep'
-    m.call(address=HOOKS['main_loop_sleep_default'][0],args=(0x1234,0,0,0),gap=0); return m.u.mem_read(O['BC_IDLE'],1)[0]
-rm=AlbumRateMachine(); rm.open(); rm.word(rm.slide+O['SLIDE_INDEX'],1); assert rm.run(4) is None and rm.panel()
-assert not [w for w in rm.nodes[rm.page]['children'] if rm.nodes[w].get('name')=='rate_out'] and rate_poll(rm)==5; passed()
 # A hold menu's rows act on the page under it: every row, either Light Mode half, Cover Flow's cover and Library's Albums.
 def hold_pick(m,row):
     n=len(m.toasts); m.t=getattr(m,'t',7000)+1; m.press(m.t); assert m.hold()==11 and m.release()==0
@@ -62,14 +53,15 @@ def light_half(machine,light,**kw):  # LIGHT stored before the constructor reads
     fm.mock('strstr@GLIBC_2.0'); return fm
 for light in '01':
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1); a1=fm.aid(fm.albums[1])
-    assert hold_pick(fm,4) is None and fm.top==fm.page and fm.panel() and fm.nodes[fm.page]['name']=='coverflow_page'
+    assert hold_pick(fm,4) is None and fm.picker() and fm.nodes[fm.page]['name']=='coverflow_page'
     for k in [O['KEY_NEXT']]*3: assert fm.call(k)==11
-    assert fm.call(O['KEY_CENTER'])==11 and fm.panel() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm)  # the existing path: the album's table, no song touched
+    assert fm.call(O['KEY_CENTER'])==11; fm.advance(0)
+    assert fm.picker() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm)  # the album's table, no song touched
     assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5]  # Add to Favorites
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1)
     assert hold_pick(fm,0)=='Playing Next' and fm.top==fm.page and fm.query[:1]==('getMusicByAlbum',); passed()  # Play Next finds the cover's album
     fm=light_half(AlbumRateMachine,light,page='album_page',cls=O['CLASS_ALBUMS'],pos=2); fm.page=fm.top
-    assert hold_pick(fm,4) is None and fm.top==fm.page and fm.panel(); passed()
+    assert hold_pick(fm,4) is None and fm.picker(); passed()
 # A Play/Pause hold with no menu: stock has none, so its release plays or pauses.
 def bare_hold(m,row=None):
     if row is not None: m.word(m.row(row)+O['REC_TYPE'],9)
@@ -83,15 +75,15 @@ assert m.menu()[3:5]==['Remove from Favorites','Rate Album  ♥♥♥♥♥']
 assert m.run(3) is None and m.kept()==[] and fav_calls(m,'deleteMusicFromFav') and not fav_calls(m,'batch_add_file')
 m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3:5]==['Add to Favorites','Rate Album']
 m.word(m.slide+O['SLIDE_INDEX'],1); passed()
-# The picker over the covers, on the album's hearts; the wheel moves the rating, never the covers.
-assert m.run(4) is None and m.caption()=='Unrated' and m.hearts()==['play_unfav']*5
+# The picker over the covers, a row for each rating, on the album's own (Unrated); the wheel moves the picker's row,
+# never the covers.
+assert m.run(4) is None and m.picker()==['Unrated','1 Heart','2 Hearts','3 Hearts','4 Hearts','5 Hearts']
+sheet=m.view; assert m.selected(sheet)==0
 for _ in range(3): assert m.call()==11
-assert m.caption()=='3 of 5' and m.hearts()==['play_fav']*3+['play_unfav']*2 and m.get(m.slide+O['SLIDE_INDEX'])==1 and not m.slides
-# Hold Play/Pause meanwhile opens nothing, and its release does not toggle playback.
-m.press(9000); assert m.hold()==11 and m.top==m.page and m.release()==0 and m.panel(); passed()
-# Return leaves it as it was (taken before the page's own Return), and Coverflow stays; Centre saves, without opening
-# the cover.
-assert m.call(O['KEY_RETURN'])==11 and m.panel() is None and m.homes==0 and m.top==m.page and m.kept()==[]
+assert m.selected(sheet)==3 and m.get(m.slide+O['SLIDE_INDEX'])==1 and not m.slides; passed()
+# Return leaves it as it was, and Coverflow stays; a pick saves, without opening the cover.
+assert m.call(O['KEY_RETURN'])==11; m.advance(0)
+assert m.picker() is None and m.homes==0 and m.top==m.page and m.kept()==[]
 assert m.rate(3) is None and m.kept()==[(a1&~7)|3] and not song_side_effects(m)
 m.advance(500); assert not m.plays and m.find('scroll_view')==0 and m.nodes[m.get(m.slide+O['W_PARENT'])]['visible']; passed()
 # Every rating, each shown on the menu's row; 0 unrated, 5 the favourite.
@@ -105,20 +97,15 @@ m.rate(0); m.rate(4); assert not fav_calls(m,'batch_add_file') and not fav_calls
 for want,added,removed in ((5,1,0),(5,1,0),(3,0,1),(2,0,0)):
     m.rate(want); assert (len(fav_calls(m,'batch_add_file')),bool(fav_calls(m,'deleteMusicFromFav')))==(added,bool(removed)),want
 m.rate(0); passed()
-# A tap on a heart saves that many.
-assert m.run(4) is None; heart=m.nodes[m.panel()]['children'][2]; f,ctx=m.handler(heart,O['EVT_CLICK'])
-d,dctx=m.handler(heart,O['EVT_POINTER_DOWN']); m.call(address=d,args=(dctx,m.event,0,0),gap=0)  # its press, then its click
-m.call(address=f,args=(ctx,m.event,0,0),gap=0); assert m.panel() is None and m.kept()==[(a1&~7)|2]; passed()
+# A tap on a row saves that many.
+assert m.run(4) is None and m.picker(); m.pick(2); m.advance(0); assert m.picker() is None and m.kept()==[(a1&~7)|2]; passed()
 # Kept across boots, apart from the songs' table.
 m2=AlbumRateMachine(files={ALBUM_RATES:m.files[ALBUM_RATES]}); m2.open(); m2.word(m2.slide+O['SLIDE_INDEX'],1)
 assert m2.menu()[4]=='Rate Album  ♥♥♡♡♡' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
-# Another cover centred, or the page gone, before Centre: nothing is saved.
-assert m.run(4) is None; m.call(); m.word(m.slide+O['SLIDE_INDEX'],0)
-assert m.call(O['KEY_CENTER'])==11 and m.toasts[-1][3]=='Album changed' and m.kept()==[(a1&~7)|2]
-m.word(m.slide+O['SLIDE_INDEX'],1); assert m.run(4) is None and m.panel()
-for t,f,ctx in m.nodes[m.page]['handlers']:
-    if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-m.stack.remove(m.page); m.top=m.stack[-1]; m.open(); assert m.panel() is None and m.call()==11 and m.slides; passed()
+# Another cover centred before the pick: nothing is saved.
+assert m.run(4) is None and m.picker(); m.word(m.slide+O['SLIDE_INDEX'],0); m.pick(3); m.advance(0)
+assert m.toasts[-1][3]=='Album changed' and m.kept()==[(a1&~7)|2]
+m.word(m.slide+O['SLIDE_INDEX'],1); passed()
 # A full table and a failed write report it, the rating as it was.
 full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
@@ -185,7 +172,7 @@ assert m.call(address=payload_syms['coverflow_goto_album'],args=(m.albums[0],0,0
 m=AlbumRateMachine(); dq=m.deque(m.albums[:2]); m.top=m.node('window','artistinfo_page'); m.stack=[m.top]
 assert m.call(address=payload_syms['coverflow_artist'],args=(dq,0,0,0),gap=0)==1; m.page=m.top; m.slide=m.find('slide_menu')
 assert m.menu()==[*COVER_ALBUM,'Go to Artist'] and m.rate(5) is None and m.kept()==[(m.aid(m.albums[0])&~7)|5]
-assert m.run(4) is None and m.call(O['KEY_RETURN'])==11 and m.panel() is None and m.top==m.page; passed()
+assert m.run(4) is None and m.picker() and m.call(O['KEY_RETURN'])==11; m.advance(0); assert m.picker() is None and m.top==m.page; passed()
 # An artist's covers stop at both ends (All albums the last): a step past kicks the end and springs it back, never wrapping.
 w=m.slide; index=lambda: m.get(w+O['SLIDE_INDEX'])
 assert m.call(O['KEY_PREV'],gap=500)==11; _,kick,goal,_=slide(m,w); assert kick>0 and goal==0

@@ -891,9 +891,9 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   from the sheet's first whole paint, which keeps the page (480 KB) until the sheet closes.
 - ponytail: the name ends in an ellipsis where the design's marquee would scroll it.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's); Up Next opens in it by
+Built by `patch/menu_modal.c` (the grid's `modal`); Up Next opens in it by
 `modal_sheet`. Now Playing's More and a
-playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
+playlist's More are stock pages, which the build loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Artist page
 
@@ -1610,7 +1610,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - The color tokens and the type scale in one place: `tools/theme.py` `TOKENS` (to `patch/tokens.h` and
   `tools/art.py`'s inks), `tok()` and `TYPE()` in `patch/ui_kit.c` and `patch/ui_kit.h`.
 - OLED as the one built-in theme, standing alone: `assets/themes/oled/theme.xml`, index 0, extending
-  no other theme, its own `oled` geometry set. A unit left on another theme by an older build takes
+  no other theme, on its own grid (its `<geometry>`). A unit left on another theme by an older build takes
   OLED's preset once at boot ([ipod](ipod.md#theme)).
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
