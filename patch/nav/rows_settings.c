@@ -511,7 +511,7 @@ static void pod_text(int i) {
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_KEYTONE) { /* the Clicker, Key Tone's row */
-        widget_set_text_utf8(st.pod_label[i], clicker_text());
+        row_value_text(st.pod_label[i], clicker_text()); /* "Clicker" left, the value right */
         return;
     }
     if (i == POD_CF_SORT) { /* key/value on a set with a right column */
@@ -695,6 +695,7 @@ static const unsigned char playset_order[] = {
  * (home_sets_bind), the wheel is Q2 Muse's (tools/build.py WHEEL_MODE), Battery and Controls have
  * In-Vehicle's, Key tone's and Buttons lock's rows (pod_click, keylock_open), and the rows stock
  * moved to System are here, as they were (ringnav_systemset). */
+#define SYSSET_RESET 12 /* Reset's index as built; power_rows moves it past Shut Down */
 static const unsigned char sysset_order[] = {
     13 /* About */,
     11 /* Update */,

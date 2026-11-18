@@ -913,7 +913,32 @@ explains use it: the App Store's "No apps listed" under its Check for Updates ro
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 
-- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+- Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
+  being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+
+### Loading
+
+A page whose content has to be fetched first opens only once it is there: until then the busy spinner is laid over the
+page that was pressed (`patch/addon.c` `push`, `patch/list_marks.c` `load_spinner_paint`), never a Loading… page of its
+own.
+
+- **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
+  15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
+- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status
+  row places it by its screen y, so it is never centered on the room under the bar.
+- **The page beneath** stays in sight, undimmed, with its status row and its selection: the overlay asks nothing, and
+  the 50% scrim is the [confirmation card](#confirmation-card)'s, for a question.
+- **While it loads** Return, or a tap anywhere off the spinner, cancels: the page stays as it was and the answer, when it
+  comes, is dropped. A tap on the spinner does nothing; the wheel's Centre and a tap on a row do nothing either, so
+  nothing is asked twice. A slow load has no Stop row (a Loading… page's after 3 s): Return cancels it, and the app's
+  own menu keeps its Stop row.
+- **Once it is there** the new page opens as any page does, sliding in; one that failed opens on its error page (Retry,
+  Stop), after the app's 15 s at most.
+- **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
+  browse, the search results, Albums and the other rows of an artist's page, a sort, and More…. Not yet (`ponytail:`,
+  each keeps its Loading… page): Back to the level below, which is asked again; a list's next or previous window
+  (Next page); a sign-in field's text; a row pressed while a list's next page is on its way; Spotify's browser;
+  Internet Radio's directory; and Chapters.
 
 ### Menus
 
@@ -1701,7 +1726,7 @@ pattern.
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
-| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right; Reset Network Settings last |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right, the connected network one line with its check and "Connected" as a [caption](#list-row) under its bar while selected, a connecting one with "Connecting" in 13 px Text Tertiary under its name; Reset Network Settings last |
 | Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
 | A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
 | Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |

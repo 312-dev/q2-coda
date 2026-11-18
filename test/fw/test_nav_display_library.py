@@ -660,12 +660,16 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     ui = Ui(fw)
     Config(fw)
     page = Settings(fw, ui)
-    # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
+    # Settings' General, iOS's: About, maintenance and Network, then Restart and Shut Down after a gap, Reset Settings last
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
     assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
                                  'USB', 'system_time', 'App Store', 'stock_2',
-                                 'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
-                                 'stock_7', 'stock_8', 'Restart', 'Shut Down']
+                                 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
+                                 'stock_7', 'stock_8', 'Restart', 'Shut Down', 'system_reset']
+    # Reset Settings is the destructive row, last under Shut Down in Negative red (power_rows.c); Shut Down is not
+    reset, shut = rows[-1], rows[-2]
+    ink = lambda row: row.labels()[0].props.get('_final', 0) & 0xffffffff
+    assert ink(reset) == 0xff000000 | 0xff453a and ink(shut) != ink(reset)
     # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
     # In-Vehicle, General and System
     assert [item.name for item in page.view.children if not item.visible] == [
@@ -773,8 +777,16 @@ class Power:
         fw.fn('ringnav_powermanager', C.c_int, C.c_void_p, C.c_void_p)(self.win.addr, None)
 
     def boot(self):
-        labels = [i.labels()[0] for i in self.view.children if i.labels() and i.labels()[0].text.startswith('Boot to: ')]
+        labels = [i.labels()[0] for i in self.view.children if i.labels() and i.labels()[0].text == 'Boot to']
         return labels[0] if labels else None
+
+
+def said(label):
+    """The Boot to row as it reads: the label is the title alone, the value on the right column
+    (docs/oled-design.md#list-row, a key/value row)."""
+    value = next(c for c in label.parent.labels() if c.name == '_setting_value')
+    assert label.text == 'Boot to' and value.text
+    return f'{label.text}: {value.text}'
 
 
 @pytest.mark.parametrize('saved, shown', [
@@ -785,13 +797,13 @@ class Power:
 def test_boot_to_reads_what_the_boot_script_would(fw, saved, shown):
     ui = Ui(fw)
     page = Power(fw, ui, {} if saved is None else {BOOT: saved})
-    assert page.boot().text == f'Boot to: {shown}'
+    assert said(page.boot()) == f'Boot to: {shown}'
 
 
 def test_boot_to_a_file_that_fails_to_read_is_rockbox(fw):
     ui = Ui(fw)
     fw.mock('fw_ferror', lambda *_: 1)
-    assert Power(fw, ui, {BOOT: b'q2pod'}).boot().text == 'Boot to: Rockbox'
+    assert said(Power(fw, ui, {BOOT: b'q2pod'}).boot()) == 'Boot to: Rockbox'
 
 
 def test_no_rockbox_no_boot_row(fw):
@@ -804,9 +816,9 @@ def test_boot_to_flips_and_saves_through_a_temporary_file(fw):
     page = Power(fw, ui, {})
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Q2 Muse' and page.files.files.get(BOOT) == b'q2pod'
+    assert said(label) == 'Boot to: Q2 Muse' and page.files.files.get(BOOT) == b'q2pod'
     ui.click(label.parent)
-    assert label.text == 'Boot to: Rockbox' and page.files.files.get(BOOT) == b'rockbox'
+    assert said(label) == 'Boot to: Rockbox' and page.files.files.get(BOOT) == b'rockbox'
     assert {C.string_at(a[0]).decode() for _, a in fw.calls('fw_fopen')} >= {BOOT + '.tmp'}
 
 
@@ -816,7 +828,7 @@ def test_boot_to_not_saved_says_so_and_stays(fw):
     page.files.fail_rename = True
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Rockbox' and page.files.files[BOOT] == b'rockbox'
+    assert said(label) == 'Boot to: Rockbox' and page.files.files[BOOT] == b'rockbox'
     assert [p[3] for p in page.prompts.seen] == ['Could not save boot choice']
     assert [C.string_at(a[0]).decode() for _, a in fw.calls('fw_unlink')] == [BOOT + '.tmp']
 
@@ -827,7 +839,7 @@ def test_boot_to_after_rockbox_left_the_card(fw):
     page.card['card'] = False
     label = page.boot()
     ui.click(label.parent)
-    assert label.text == 'Boot to: Rockbox' and BOOT not in page.files.files
+    assert said(label) == 'Boot to: Rockbox' and BOOT not in page.files.files
     assert [p[3] for p in page.prompts.seen] == ['Rockbox is not on the card']
 
 

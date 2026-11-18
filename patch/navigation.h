@@ -490,6 +490,7 @@ void slider_page_dirty(void *page); /* its switch row, after a change of the hid
 int wifi_list(void *list);
 int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
+int wifi_connected_row(void *b); /* the row button b has stock's Connected line */
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
@@ -514,11 +515,13 @@ void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
                                                       *const reduce_motion_caption;
+void caption_prune(void *view); /* drops the captions of rows a rebuild removed from view */
 void caption_sel(void *view, void *item);
 /* nav/lists.c: how much of scroll view `view` a row may stand in, its height cut at the set's list
  * end on the screen; a row that grows in place scrolls its foot inside it (settings_pages.c
  * cap_step, inline_slider.c heights) */
 int list_shown_h(void *view);
+void list_grown_foot(void *view, void *row, int step); /* nav/row_paint.c: and scrolls it there */
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */
@@ -863,7 +866,7 @@ void ulog_end(const char *why);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
-void power_rows(void *view);
+void power_rows(void *view, void *reset); /* General's last rows; reset: the Reset Settings row, moved last */
 
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
 int ringnav_usb_charge(int on), usb_charge_held(void);
