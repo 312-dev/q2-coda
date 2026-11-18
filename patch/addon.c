@@ -64,7 +64,7 @@
 
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
- * pages its rows open, or an album's page (album_view), under a set with the menu sheet */
+ * pages its rows open, or an album's page (album_view) */
 enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
@@ -1787,8 +1787,7 @@ static void busy_row(int on) {
     pg.busy = on;
 }
 
-/* An artist's page (docs/oled-design.md#artist-page) from the app's reply, under a set with the
- * menu sheet (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
+/* An artist's page (docs/oled-design.md#artist-page) from the app's reply. A reply is an artist's when it has Shuffle
  * and Radio actions on an "artist:" context, as q2-subsonic's artist page does (Go to Artist's,
  * and its Artists rows'). Its other rows go where the design puts them: the album rows (list,
  * album) under an Albums row, Top Songs (list, top) as a row of its own, Add to Sync, Quality and
@@ -1897,8 +1896,7 @@ static int drill_lay(const char *uri) {
                                                         : 0;
 }
 
-/* An album's page (docs/oled-design.md#album-page) from the app's reply, under a set with the
- * menu sheet: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
+/* An album's page (docs/oled-design.md#album-page) from the app's reply: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
  * "album:<id>" and an info row "about", as q2-subsonic's album page has with "album" in the caps
  * (docs/librespot.md#album-rows). The header shows the level's title (the album), the about row's
  * title (its artist) and subtitle ("2015 · 18 songs · 1 hr 12 min") and the album's catalogue

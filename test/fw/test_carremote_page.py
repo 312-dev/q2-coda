@@ -278,7 +278,7 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
     nav/lists.c reveal scrolled it into view and fit_top took the list on to the row's top (reproduced on the
     emulator). The row reaches only as far as the ring, so its foot stays inside the list end and nothing scrolls."""
     from test_nav_hold import use_set
-    oled = use_set(st, 'oled')
+    oled = use_set(st)
     Car(fw, ui, recs)
     page = open_page(fw, ui)
     # the page's list at OLED's y (its switch at the status row's foot, 58), as on the Q2, and the page built again

@@ -1262,8 +1262,8 @@ static int pl_arts(void *win) {
 }
 
 /* Display's Playlist View: Cover Flow: the page, opened unseen, gets the playlists' covers over it
- * on the next pass (coverflow_playlists), then shows under them for their Return (navigation.c's
- * Artist View, cf_veil). The page pending them: */
+ * on the next pass (coverflow_playlists), then shows under them for their Return (cf_veil,
+ * library_pages.c). The page pending them: */
 static void *pl_cf_win __attribute__((section(".scratch")));
 static unsigned pl_cf_timer __attribute__((section(".scratch")));
 static int pl_cf_open(const void *unused) {

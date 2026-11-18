@@ -1803,7 +1803,7 @@ def test_more_opens_the_apps_page_while_its_queue_plays(hold, recs, ui, st):
 
 
 def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
-    """A modal set's rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
+    """The rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
     each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
     the picker, Return closes it with the rating as it was."""
     use_set(st)
@@ -1813,7 +1813,7 @@ def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
     key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
     kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
     fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
-    assert fw.fn('rate_open', C.c_int)() == 1 and not st('rate_on', C.c_void_p).value
+    assert fw.fn('rate_open', C.c_int)() == 1
     view = hold.view()
     assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
     assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
@@ -2233,12 +2233,6 @@ def test_another_key_held_is_stocks(hold, recs, fw):
     hold.now_playing([song(recs, i) for i in range(3)])
     fw.mock('stock_keylong_trampoline', lambda *_: 0x77)
     assert hold.hold(KEY_RETURN) == 0x77 and fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0x77
-
-
-def test_the_rating_pickers_hold_does_nothing(hold, recs, ui, st, fw):
-    hold.now_playing([song(recs, i) for i in range(3)])
-    st('rate_on', C.c_void_p).value = hold.page
-    assert hold.hold() == STOP and not ui.timers and st('qm_press', C.c_ulonglong).value == 0x51
 
 
 def test_a_menu_whose_record_went_before_it_opened_opens_nothing(hold, recs, ui, mcl):

@@ -689,7 +689,8 @@ def test_a_menu_sheets_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
     last = ui.add('list_item', view, (0, 0, 375, 32))
     fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
     assert last.box[1] - items[-1].box[1] == 32 + gap
-    assert view.props.get('virtual_h') == 32 * (rows + 1) + gap
+    # the rows' height, and the pad that runs them on past the list end to the sheet's foot (LIST_PAD)
+    assert view.props.get('virtual_h') - view.props.get('_list_pad') == 32 * (rows + 1) + gap
 
 
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade_under and marquee_fade): the text
@@ -1772,6 +1773,13 @@ def label_of(item):
     return next(c for c in item.walk() if c.kind == 'hscroll_label')
 
 
+def kv(ui, item):
+    """A row's "Title: value" as it reads: its title, and its value on the set's right column (row_value_text)."""
+    value = next((c for c in item.walk() if c.name == '_setting_value'), None)
+    title = ui.text(label_of(item))
+    return f'{title}: {ui.text(value)}' if value is not None and ui.text(value) else title
+
+
 def row(ui, view, text):
     return next(item for item in view.children if any(ui.text(c) == text for c in item.walk()))
 
@@ -1796,9 +1804,8 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
                      'system_powermanager']
-    standby, charge, *_, history = (ui.text(label_of(r)) for r in ours)
-    # Standby off; Charge Limit a key/value row on a set_switch theme, Off or where it stops (here off, and on a set
-    # with no right column, as written)
+    standby, charge, *_, history = (kv(ui, r) for r in ours)
+    # Standby off; Charge Limit a key/value row on a set_switch theme, Off or where it stops (here off)
     assert standby.endswith('Off') and charge == 'Charge Limit: Off'
 
     assert history == 'Battery History' and 'list_into' in [c.props.get('image') for c in ours[-1].walk()]  # opens a page
@@ -1820,7 +1827,7 @@ def test_standby_limit_cycles_its_four_choices_and_saves_each(fw):
     texts = []
     for _ in range(4):
         click(ui, standby)
-        texts.append(ui.text(label_of(standby)))
+        texts.append(kv(ui, standby))
     hours = [O[f'STANDBY_LIMIT_{k}'] for k in (1, 2, 3)]
     assert [re.findall(r'\d+', t) for t in texts] == [[str(h)] for h in hours] + [[]]  # each limit's hours, then none
     assert texts[-1].endswith('Off')
@@ -1834,9 +1841,9 @@ def test_charge_limit_switches_and_takes_effect_on_the_next_pass(fw, st):
     st('charge_at', C.c_uint).value = 12345
     click(ui, charge)
     on = f'Charge Limit: {O["CHARGE_STOP"]}%'  # where it stops: a set_switch theme's key/value row
-    assert ui.text(label_of(charge)) == on and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
+    assert kv(ui, charge) == on and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
     click(ui, charge)
-    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and settings.written[-1] == ('CHARGELIMIT', 0)
+    assert kv(ui, charge) == 'Charge Limit: Off' and settings.written[-1] == ('CHARGELIMIT', 0)
     assert switch(charge) is None
 
 
@@ -1909,7 +1916,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
     standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
-    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and switch(car) == 'switch_off'  # the other rows as they were
+    assert kv(ui, charge) == 'Charge Limit: Off' and switch(car) == 'switch_off'  # the other rows as they were
     assert g(fw, 'g_carmode') == car_mode
     click(ui, smart)
     assert switch(smart) == 'switch_off' and settings.written[-1] == ('SMARTWIFI', 0) and st('smart_wifi').value == 0
@@ -2056,7 +2063,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     click(ui, row(ui, view, 'Library'))
     name, title, library = pages[-1]
     assert name == b'playset/playset_page' and title == 'Library'
-    assert [ui.text(label_of(r)) for r in library.children] == [
+    assert [kv(ui, r) for r in library.children] == [
         'On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Album Artist', 'Artist View: Cover Flow', 'Playlists',
         'Folders', 'Scan Song Durations']
     click(ui, row(ui, library, 'Folders'))
@@ -2073,7 +2080,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     assert g(fw, 'g_foldercover_flag') == (not was) and switch(art) == ('switch_off' if was else 'switch_on')
     click(ui, row(ui, library, 'Playlists'))
     _, title, playlists = pages[-1]
-    assert title == 'Playlists' and [ui.text(label_of(r)) for r in playlists.children if r.kind == 'list_item'] == [
+    assert title == 'Playlists' and [kv(ui, r) for r in playlists.children if r.kind == 'list_item'] == [
         'Playlist View: List', 'Import Playlists', 'Export Playlists']  # the Playlists page's own rows (playlists.c)
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
@@ -2148,9 +2155,9 @@ def test_artists_toggles_stocks_artist_type(fw):
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
     fw.fn('pod_rows', None, C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_void_p)(win.addr, b'scroll_view_playset', 4, 1, (C.c_char_p * 1)(b'x'))
     artists = view.children[0]
-    assert ui.text(label_of(artists)) == 'Artists: Album Artist'
+    assert kv(ui, artists) == 'Artists: Album Artist'
     click(ui, artists)
-    assert fw.var('fw_ctx_artist_type', C.c_int).value == 0 and ui.text(label_of(artists)) == 'Artists: Artist'
+    assert fw.var('fw_ctx_artist_type', C.c_int).value == 0 and kv(ui, artists) == 'Artists: Artist'
     assert settings.written == [('ARTISTTYPE', 0)]
 
 
@@ -2168,12 +2175,12 @@ def test_cover_flow_sort_opens_its_picker_and_refresh_says_when(fw):
     assert POD['POD_CF_REFRESH'] == POD['POD_CF_SORT'] + 1  # one call builds both
     pod_rows(fw, win, 'scroll_view_display', POD['POD_CF_SORT'], 2)
     sort, refresh = view.children
-    first, action = ui.text(label_of(sort)), ui.text(label_of(refresh))
+    first, action = kv(ui, sort), kv(ui, refresh)
     assert first == 'Sort: Album' and 'list_into' in [c.props.get('image') for c in sort.walk()]
     click(ui, sort)
-    assert ui.text(label_of(sort)) == first and opened == [b'systemset/keylock_page'] and not toasts  # its picker
+    assert kv(ui, sort) == first and opened == [b'systemset/keylock_page'] and not toasts  # its picker
     click(ui, refresh)
-    assert ui.text(label_of(refresh)) == action and fw.calls('image_manager_unload_all')
+    assert kv(ui, refresh) == action and fw.calls('image_manager_unload_all')
     assert len(toasts) == 1 and toasts[0]  # nothing in view changes: a toast says when
 
 
@@ -2232,7 +2239,8 @@ def test_a_set_text_rows_title_and_value(fw, text, title, val):
     assert (ui.text(label), ui.text(v)) == (title, val)
     (lx, ly, lw, lh), (vx, vy, vw, vh), width = label.box, v.box, button.box[2]
     assert (lx, ly, lh) == (72, 0, 70) and (vy, vh) == (0, 70)  # the title where it was, both the row's height
-    assert lx + lw < vx and width // 2 < vx and vx + vw >= width  # the value trailing to the row's end, clear of the title
+    # the value ending on the set's right column (hscroll_label keeps 2 px), clear of the title
+    assert lx + lw < vx and width // 2 < vx and vx + vw == 374 - GEOMETRY.right_x - button.box[0]
     assert [c[1][:2] for c in fw.calls('hscroll_label_set_only_focus')] == [(v.addr, 1)]  # scrolls only focused
     assert [c[1][:2] for c in fw.calls('hscroll_label_set_ellipses')] == [(v.addr, 1)]
 

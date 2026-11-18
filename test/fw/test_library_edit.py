@@ -270,9 +270,9 @@ def test_the_rows_past_the_editors_end_fade_into_the_ground_by_its_foot(fw, ui, 
     """home.c list_fades with an editor's foot: clear down to 16 px above the list end, as every list's fade, and
     the ground's own colour, opaque, from LR_FOOT on; without one, the screen's foot's (y 316)."""
     from test_nav_painters import Canvas
-    use_set(st, 'oled')
+    use_set(st)
     fades = fw.fn('list_fades', None, C.c_void_p, *[C.c_int] * 8)
-    end = 58 + use_set(st, 'oled').list_end - LR['LR_ROOM']
+    end = 58 + use_set(st).list_end - LR['LR_ROOM']
 
     def alphas(foot):
         canvas = Canvas(fw)
@@ -290,7 +290,7 @@ def test_a_dragged_row_stays_inside_the_list_and_the_list_scrolls_under_it(fw, u
     hint, while the list scrolls on under it."""
     lib = Library(fw, ui, st)
     top = 58
-    end = top + use_set(st, 'oled').list_end - LR['LR_ROOM']  # the set's list end counts from the window's top
+    end = top + use_set(st).list_end - LR['LR_ROOM']  # the set's list end counts from the window's top
     down = C.create_string_buffer(0x40)
     struct.pack_into('<i', down, O['EVENT_TYPE'], EVT_DOWN)
     struct.pack_into('<2i', down, O['EVENT_X'], 370, top + PITCH * 2 + 10)  # Playlist's grip: taken at once

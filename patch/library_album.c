@@ -1,4 +1,4 @@
-/* A Library album's page under a set with the menu sheet (OLED's; docs/oled-design.md#album-page
+/* A Library album's page (docs/oled-design.md#album-page
  * and docs/internals.md#library-album-page): stock's two album pages, albuminfo_page (Library >
  * Albums, Search's albums) and playerjumpinfo_page (Now Playing's album and art taps, Look up
  * Album, Go to Album), keep their window, their list of tracks (song_rows.c draws them: number,

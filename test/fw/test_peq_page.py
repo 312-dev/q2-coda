@@ -1663,8 +1663,7 @@ def test_a_notch_s_q_goes_to_30_and_back_to_10_for_another_type(fw):
     assert p.ui.draft.bands[0].q == 10 and 'Gain +6.0 dB' in p.captions()  # the gain it had, kept
 
 
-def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw):
-    assert fw.fn('modal_set', C.c_int)()
+def test_type_opens_the_inset_modal_s_picker(fw):
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
     p.click('1  ')
     p.click('Type')

@@ -2592,23 +2592,23 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
-def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw):
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_in_the_status_row(fw):
     """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
-    covers read the artist under a status row, and other covers there no title, so the row shows the clock as
-    Home's does; anything else is Cover Flow."""
+    covers read the artist in the status row, and other covers no title, so the row shows the clock as Home's
+    does."""
     themed(fw)
     recs = [Rec(artist='Bob Dylan', path='/a')]
     deque_of(fw, recs)
-    title = fw.fn('coverflow_bar_title', C.c_char_p, C.c_int)
+    title = fw.fn('coverflow_bar_title', C.c_char_p)
     c = cf(fw)
     c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
-    assert title(1) is None
+    assert title() is None
     c.screen = COVERS
-    assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
+    assert title() == b'Bob Dylan'
     c.scoped = 0
-    assert title(1) == b'' and title(0) == b'Cover Flow'
+    assert title() == b''
     c.scoped, c.albums = ARTIST_ALBUMS, 0  # no albums read yet: no artist to name
-    assert title(1) == b''
+    assert title() == b''
 
 
 def test_the_live_album_is_the_centre_card_while_the_covers_show(fw):

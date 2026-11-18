@@ -148,10 +148,7 @@ typedef struct {
         charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
         smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
     void *pod_label[POD_COUNT];
-    void *art_cf_win, *art_cf_list; /* the artist page given its Coverflow, the albums pending */
-    void *art_cf_veil;              /* the artist page unseen until they show, and its anim_hint */
-    char art_cf_hint[64];
-    unsigned art_cf_timer;
+    char art_cf_hint[64]; /* the page cf_veil hides: its anim_hint */
     unsigned wake_at; /* Wake: Double press, the screen-off centre press a second one must follow */
     unsigned woke_at; /* the centre press that woke the screen, then its first lit loop pass */
     unsigned return_at;          /* chord_gate: Return's press while held, else 0 */
@@ -186,7 +183,7 @@ typedef struct {
      * top window title_win and, when a label holds it, title_lbl (both found once per window). */
     void *bar_bt, *bar_wifi, *bar_pct, *bar_slot, *bar_icon, *bar_idle, *bar_state, *bar_eq,
         *bar_title, *title_win, *title_lbl,
-        *action_view, /* Songs' action bar on title_win, under a set with action_row */
+        *action_view, /* Songs' action bar on title_win (the set's action_row) */
         /* a shuffle_row theme: the action bar the wheel's selection is on (else 0), the list under
          * it, and which of its stops: SHUFFLE_STOP or SORT_STOP (navigation.c shuffle_key) */
         *shuffle_on, *shuffle_list;

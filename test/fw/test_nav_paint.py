@@ -33,10 +33,6 @@ PAPER, INK = int(_paper[1], 16) & 255, int(_ink[1], 16) & 255
 # bitmap_t's formats (u16 @0xe) and where each keeps r, g, b and a (docs/internals.md#accent)
 AT = {1: (0, 1, 2, 3), 2: (3, 2, 1, 0), 3: (2, 1, 0, 3), 4: (1, 2, 3, 0)}
 OPAQUE, PREMULTI = 1, O['BITMAP_PREMULTI']
-# theme_t.font_px[]'s roles, in theme.h's order
-_roles = re.search(r'enum \{ (ROLE_\w+(?:, ROLE_\w+)*) \}', (host.ROOT/'patch/theme.h').read_text())
-assert _roles
-ROLE_BAR = _roles[1].split(', ').index('ROLE_BAR')
 # OLED's own geometry set, which the build bakes into stock's rows
 _set = re.search(r'<geometry name="oled" ([^>]*)/>', _OLED_XML)
 assert _set
@@ -1104,8 +1100,16 @@ def sync(fw, win):
     fw.fn('bar_title_sync', None, C.c_void_p)(win)
 
 
-@pytest.mark.parametrize('name, title', [('playing_page', 'Now Playing'),
-                                         ('coverflow_page', 'Cover Flow'), ('equalizer_page', 'EQ'),
+def test_now_playing_leaves_the_bar_to_the_clock(fw, world, st):
+    """The status row shows the clock over Now Playing (tools/ipod.py status_row): no title."""
+    label = bar_title(fw, world, st)
+    win = world.window('playing_page')
+    world.add(world.add(win, 'view_navbar'), 'label_name', 'hscroll_label', text='Its own label')
+    sync(fw, win)
+    assert not world[label].text
+
+
+@pytest.mark.parametrize('name, title', [('coverflow_page', 'Cover Flow'), ('equalizer_page', 'EQ'),
                                          ('spotify_page', 'Spotify'), ('radionp_page', 'Internet Radio'),
                                          ('usbmode_page', 'Transfer Files')])
 def test_a_page_known_by_name_titles_the_bar(fw, world, st, name, title):
@@ -1162,7 +1166,7 @@ def test_a_stock_page_s_navbar_title_titles_the_bar_and_is_followed(fw, world, s
     assert world[label].text == 'Album Artists' and len(world.timers) == 2
 
 
-@pytest.mark.parametrize('text, title', [('Channel Balance', 'Balance'), ('(null)', ''), ('', '')])
+@pytest.mark.parametrize('text, title', [('Channel Balance', 'Channel Balance'), ('(null)', ''), ('', '')])
 def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
     label = bar_title(fw, world, st)
     world.set_text(label, 'Before')
@@ -1352,10 +1356,11 @@ def test_the_window_going_drops_its_title_s_source(fw, world, st):
     assert world[label].text == 'Songs'
 
 
-def test_home_s_own_list_is_q2_pod(fw, world, st):
+def test_home_s_own_list_has_no_title(fw, world, st):
+    """The status row names none of Home's own lists, and shows the clock."""
     label = bar_title(fw, world, st)
     sync(fw, world.window('home_page'))
-    assert world[label].text == 'Q2 Muse'
+    assert not world[label].text
     win, _ = navbar_page(world)
     sync(fw, win)
     assert world[label].text == 'Albums'
@@ -1412,15 +1417,15 @@ def test_an_action_bar_without_sort_or_play(fw, world, st, n, moved):
     assert len(fw.calls('widget_move_resize')) == moved
 
 
-def test_a_bar_title_measures_on_the_bar_s_canvas(fw, world, st, theme_t):
+def test_any_bar_title_fits_the_status_row(fw, world, st):
+    """The status row's label ends a long title in an ellipsis, so any fits once the bar is found."""
     label = bar_title(fw, world, st)
     canvas = Canvas(fw)
     fw.mock('widget_get_canvas', lambda w, *_: canvas.p if w == label else 0)
     fits = fw.fn('bar_title_fits', C.c_int, C.c_void_p)
     page = world.window('x_page')
     short, long_ = world.add(page, 'a', 'label', text='Settings'), world.add(page, 'b', 'label', text='Playlists')
-    assert fits(short) == 1 and fits(long_) == 0  # 91 px less 2 px each side: 8 of these characters
-    assert canvas.font[1] == theme_t('font_px', C.c_ubyte, ROLE_BAR)  # at the bar's size
+    assert fits(short) == 1 and fits(long_) == 1
 
 
 def test_no_bar_title_fits_nothing(fw, world, st):
@@ -1475,7 +1480,7 @@ def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):
 
 def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_battery(fw, world, st):
     """Home's own list is like any page for the play state: the bar's paint shows it by the battery, as over a
-    page, and repaints the bar after it; 'Q2 Muse' stays shown."""
+    page, and repaints the bar after it; the status row's title stays empty there."""
     theme(fw)
     bar = system_bar(fw, world)
     title = world.add(bar, 'label_title', 'hscroll_label', box=(142, 0, 91, 26))
@@ -1492,13 +1497,13 @@ def test_home_keeps_its_title_while_music_plays_and_the_state_sits_by_the_batter
 
     home = world.window('home_page')
     on_home = shown()
-    assert on_home[:2] == ('Q2 Muse', 1) and on_home[2]
+    assert not on_home[0] and on_home[1:] == (1, on_home[2]) and on_home[2]
     assert st('bar_timer', C.c_uint).value  # mid-paint: the bar again after this frame
     navbar_page(world)
     assert shown() == ('Albums', 1, on_home[2])  # over a page: the same image in the same img_state
     world.top = home
     status[0] = 0  # stopped
-    assert shown() == ('Q2 Muse', 1, 0)
+    assert shown()[1:] == (1, 0) and not shown()[0]
 
 
 def inside(r, box):

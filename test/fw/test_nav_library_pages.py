@@ -1126,31 +1126,12 @@ class Heart:
         badge = [w for w in self.ui.kids[self.win] if self.ui.kind[w] == 'hscroll_label_create'][0]  # before the picker's
         return None if badge in self.ui.hidden else self.ui.text[badge]
 
-    def panel(self):
-        return self.ui.lookup(self.win, 'rate_panel', 0)
-
-    def picker(self):
-        """The picker's caption and its five hearts' images, or None while it's down."""
-        panel = self.panel()
-        if not panel or panel in self.ui.hidden:
-            return None
-        caption, *hearts = self.ui.kids[panel]
-        return self.ui.text[caption], [self.ui.image.get(h) for h in hearts]
-
     def hold(self):
         self.ui.handler(self.heart, EVT_POINTER_DOWN)()
         return self.ui.fire('rate_long')
 
-    def tap(self, w):
-        """A press and its release on a heart of the picker, or outside it."""
-        self.ui.handler(w, EVT_POINTER_DOWN)()
-        return self.ui.handler(w, EVT_CLICK)()
-
-    def key(self, key, top=None):
-        return self.fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(top or self.win, key)
-
     def pick(self, n):
-        """n hearts picked in OLED's rating picker, the menu sheet's (ratings.c rate_modal): its pick."""
+        """n hearts picked in the rating picker, the menu sheet's (ratings.c rate_show): its pick."""
         self.fw.fn('ratings__rate_picked', None, C.c_int)(n)
 
     def kept(self):
@@ -1206,25 +1187,21 @@ def test_a_streamed_track_has_no_badge(fw, ui, song, mcl):
     assert heart.badge() is None
 
 
-def test_holding_the_heart_opens_the_picker_and_lets_go_of_the_press(fw, ui, song, mcl):
+def test_holding_the_heart_asks_for_the_picker(fw, ui, song, mcl):
+    """RATE_HOLD_MS of the heart opens the menu sheet's picker (its rows: test_nav_hold's
+    test_oled_rates_in_the_inset_modal)."""
     heart = Heart(fw, ui, song, mcl, kept=3)
-    assert heart.picker() is None
     ui.handler(heart.heart, EVT_POINTER_DOWN)()
     assert [ms for _, ms in ui.pending('rate_long')] == [RATE_HOLD_MS]
     ui.fire('rate_long')
-    # the press is aborted, so the slide_view under the heart lets go of it
-    (_, (_, kind, target, *_)), = fw.calls('pointer_event_init')
-    assert kind == EVT_POINTER_ABORT and target == heart.win
-    assert [c[1][0] for c in fw.calls('widget_dispatch_event_to_target_recursive')] == [heart.win]
-    ui.handler(heart.heart, EVT_CLICK)()  # the hold's own release: stock's toggle never runs
-    assert heart.kept() == 3
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] == [b'dialog/sortselect_dialog']
 
 
 def test_a_short_press_opens_nothing(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=3)
     heart.pressed = 0
     heart.hold()
-    assert heart.picker() is None and not fw.calls('pointer_event_init')
+    assert not fw.calls('navigator_to') and not fw.calls('pointer_event_init')
 
 
 @pytest.mark.parametrize('kept, badge', [(4, '4'), (1, '1'), (0, None)])
@@ -1239,7 +1216,7 @@ def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
     heart = Heart(fw, ui, song, mcl, kept=1)
     heart.hold()
     ui.close(heart.win)
-    assert not st('rate_on', C.c_void_p).value and not st('rate_win', C.c_void_p).value
+    assert not st('rate_win', C.c_void_p).value
     assert not ui.pending('rate_tick') and not ui.pending('rate_long')
 
 
@@ -1247,7 +1224,7 @@ def test_a_window_closed_mid_hold_opens_nothing(fw, ui, song, mcl, st):
     heart = Heart(fw, ui, song, mcl, kept=1)
     ui.handler(heart.heart, EVT_POINTER_DOWN)()
     ui.close(heart.win)
-    assert not ui.pending('rate_long') and not st('rate_on', C.c_void_p).value
+    assert not ui.pending('rate_long')
 
 
 def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):

@@ -2575,27 +2575,6 @@ def test_qm_playlist_gone(fw, st):
     assert not st('qm_playlist', C.c_void_p).value
 
 
-def test_rate_panel_gone_with_its_window(fw, st):
-    gone = fw.fn('ratings__rate_panel_gone', C.c_int, C.c_void_p, C.c_void_p)
-    st('rate_on', C.c_void_p).value = 0x10
-    gone(0x20, None)
-    assert st('rate_on', C.c_void_p).value == 0x10
-    gone(0x10, None)
-    assert not st('rate_on', C.c_void_p).value
-
-
-def test_artist_cf_gone_clears_what_it_held(fw, st):
-    gone = fw.fn('navigation__artist_cf_gone', C.c_int, C.c_void_p, C.c_void_p)
-    win, veil = st('art_cf_win', C.c_void_p), st('art_cf_veil', C.c_void_p)
-    win.value, veil.value = 0x10, 0x20
-    gone(0x30, None)
-    assert (win.value, veil.value) == (0x10, 0x20)
-    gone(0x10, None)
-    assert not win.value and veil.value == 0x20
-    gone(0x20, None)
-    assert not veil.value
-
-
 def test_qm_restore_puts_back_what_a_go_to_overwrote(fw, st, scratch):
     saved = (C.c_ubyte * 912).from_address(C.addressof(fw.var('st', C.c_char)) + scratch['qm_classinfo'])
     saved[:912] = [i & 255 for i in range(912)]

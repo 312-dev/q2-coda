@@ -109,6 +109,12 @@ class W:
             out += ([c] if c.kind == 'hscroll_label' else []) + c.labels()
         return out
 
+    def said(self):
+        """A row as it reads, "Title: value": its title, and its value on the set's right column (row_value_text)."""
+        labels = self.labels()
+        value = next((c for c in labels if c.name == '_setting_value'), None)
+        return f'{labels[0].text}: {value.text}' if value is not None and value.text else labels[0].text
+
 
 class Ui:
     """AWTK's widgets as a tree of W: the constructors, lookups, props, visibility, boxes and texts the C
@@ -486,7 +492,7 @@ def test_cover_flow_page_holds_only_what_changes_cover_flow(fw):
     assert page.title() == 'Cover Flow'
     view = page.view()
     assert [item.kind for item in view.children] == ['list_item'] * 3 + ['label', 'list_item']
-    assert [item.labels()[0].text for item in view.children if item.kind == 'list_item'] == [
+    assert [item.said() for item in view.children if item.kind == 'list_item'] == [
         'Sort: Album', 'Fast Navigation', 'Position Bar', 'Refresh Cover Flow']
     assert view.children[3].box[3] == 12  # the gap
     into = [any(c.props.get('image') == b'list_into' for c in item.children[0].children)
@@ -534,7 +540,7 @@ class Pages(Display):
 
     def texts(self):
         """Each row's label as written ("Title: value"), a gap None."""
-        return [item.labels()[0].text if item.kind == 'list_item' and item.labels() else item.name or None
+        return [item.said() if item.kind == 'list_item' and item.labels() else item.name or None
                 for item in self.view().children]
 
 
@@ -590,7 +596,7 @@ def test_songs_picker_flips_the_current_order_and_takes_another_s_natural_direct
     ui.click(page.view().children[3].children[0])
     assert marks() == [('Title', b'unselect'), ('Artist', b'unselect'), ('Album', b'unselect'),
                        ('Recently Added \u2193', b'select')]  # the newest first
-    assert ('SORTSELECT', 3) in writes(fw) and sorting.children[0].labels()[0].text == 'Songs: Recently Added \u2193'
+    assert ('SORTSELECT', 3) in writes(fw) and sorting.children[0].said() == 'Songs: Recently Added \u2193'
     assert fw.var('g_sort_changeflag', C.c_ubyte).value == 1  # Songs reloads when it is on top again
 
 
@@ -609,7 +615,7 @@ def test_cover_flow_sort_opens_its_picker_and_a_pick_is_its_value(fw):
     ui.click(page.view().children[2].children[0])
     assert [item.children[0].children[0].props['image'] for item in page.view().children] == [b'unselect'] * 2 + [
         b'select'] + [b'unselect'] * 3
-    assert cover_flow.children[0].labels()[0].text == 'Sort: Year'
+    assert cover_flow.children[0].said() == 'Sort: Year'
 
 
 def test_buttons_lock_keeps_its_own_rows_after_a_picker_closed(fw):
@@ -1712,28 +1718,31 @@ ICON = ('image', (MARGIN, 10, 52, 52), 'img_icon')
 
 
 def test_a_rows_title_takes_the_width_its_siblings_leave(fw, st, geometry, default_layout):
+    """A one-line row (the set's pitch): the title's box is the row's less the margins, and less a shown sibling."""
     ui = Ui(fw)
     rows = Rows(fw, ui, st, geometry)
-    item = rows.row(72, ICON, ('hscroll_label', (66, 0, 200, 72), 'title'))
-    title = item.children[1]
+    pitch = rows.rows['geom_words'][rows.names['G_PITCH']]
+    item = rows.row(pitch, ('hscroll_label', (MARGIN, 0, 200, pitch), 'title'), ('label', (300, 0, 20, pitch), 'mark'))
+    title = item.children[0]
     assert rows(item) == 4 and list(default_layout) == [C.addressof(rows.lay), item.addr]  # then stock lays it out
-    assert title.box[2] == 375 - 2 * MARGIN - (52 + SPACING)
+    shown = title.box[2]
     assert fw.calls('hscroll_label_set_only_focus')[-1][1][:2] == (title.addr, 1)  # the ellipsis, not stock's scroll
-    item.children[0].visible = 0
+    item.children[1].visible = 0
     rows(item)
-    assert title.box[2] == 375 - 2 * MARGIN  # a hidden sibling leaves its width
+    assert title.box[2] == 375 - 2 * MARGIN and shown <= title.box[2] - (20 + SPACING)  # a hidden sibling leaves its width
 
 
 def test_a_drill_rows_title_ends_clear_of_the_chevron(fw, st, geometry, default_layout):
     ui = Ui(fw)
-    after_icon = ('hscroll_label', (MARGIN + 52 + SPACING, 0, 200, 72), 'title')  # where stock's layout puts it
     plain = Rows(fw, ui, st, geometry)
-    a = plain.row(72, ICON, after_icon)
+    pitch = plain.rows['geom_words'][plain.names['G_PITCH']]
+    title = ('hscroll_label', (MARGIN, 0, 200, pitch), 'title')
+    a = plain.row(pitch, title)
     plain(a)
     drill = Rows(fw, ui, st, geometry, window='home_page')  # DRILL: its rows open lists, with no stock list_into
-    b = drill.row(72, ICON, after_icon)
+    b = drill.row(pitch, title)
     drill(b)
-    right = [r.children[1].box[0] + r.children[1].box[2] for r in (a, b)]
+    right = [r.children[0].box[0] + r.children[0].box[2] for r in (a, b)]
     assert right[0] == 375 - MARGIN  # a plain row's title runs to the margin
     # a drill row's ends a spacing short of the drawn chevron, whose left edge is CHEVRON_W from the row's right
     # edge (docs/internals.md), as a title ends before a stock img_into
@@ -1958,7 +1967,7 @@ def test_mores_speed_row_keeps_stocks_height_its_labels_before_the_buttons(fw, s
 
 # The settings lists (docs/ipod.md#settings): stock's 78 px rows of a 335 x 70 button at x 20, mapped to the set's.
 SET_X, SET_W, STOCK_ROW, STOCK_BODY = O['SET_STOCK_X'], O['SET_STOCK_W'], O['SET_STOCK_ROW'], O['SET_STOCK_BODY']
-SET_EDGE, SET_TEXT_X, SET_ICON_X, SET_GAP = O['SET_EDGE'], O['SET_TEXT_X'], O['SET_ICON_X'], O['SET_GAP']
+SET_TEXT_X = O['SET_TEXT_X']
 
 
 class SettingsList:
@@ -1968,8 +1977,7 @@ class SettingsList:
                  item_height=None, row_height=0, window='wireless_page'):
         names, rows = geometry
         Config(fw, THEME=theme)
-        self.g = {n: rows['geom_vals'][names[n]] for n in ('V_SET_ROW', 'V_SET_ICON', 'V_STREAM_ROW', 'V_TEXT_X',
-                                                                          'V_RIGHT_X')}
+        self.g = {n: rows['geom_vals'][names[n]] for n in ('V_SET_ROW', 'V_TEXT_X', 'V_RIGHT_X')}
         self.ui, self.fw = ui, fw
         self.win = ui.window(window)
         self.list = ui.add('list_view', self.win, (0, 30, 375, 290))
@@ -2011,13 +2019,13 @@ def test_a_settings_row_takes_the_sets_height_icon_text_and_trailing_columns(fw,
     lst = SettingsList(fw, ui, st, geometry, stand_in)
     item = lst.row(STOCK_ICON, STOCK_LABEL, STOCK_INTO)
     assert lst() == 0
-    row_h, icon_px = lst.g['V_SET_ROW'], lst.g['V_SET_ICON']
+    row_h = lst.g['V_SET_ROW']
     button, (icon, label, into) = item.children[0], item.children[0].children
     assert item.box[3] == row_h and button.box == (0, 0, 375, row_h)  # the button spans the row
-    assert icon.box == (SET_ICON_X, (row_h - icon_px) // 2, icon_px, icon_px)
-    assert [a[1] for _, a in fw.calls('image_set_draw_type')] == [O['IMAGE_DRAW_SCALE_DOWN']]
-    assert label.box[0] == icon.box[0] + icon_px + SET_GAP and (label.box[1], label.box[3]) == (0, row_h)  # full height fills
-    assert into.box[0] + into.box[2] == 375 - SET_EDGE and centre(into.box) == row_h / 2  # shorter: its centre kept
+    assert not icon.visible  # the set has no settings icons (set_icon 0)
+    assert label.box[0] == lst.g['V_TEXT_X'] - 2 and (label.box[1], label.box[3]) == (0, row_h)  # full height fills
+    # shorter: its centre kept, its right edge on the set's right column
+    assert into.box[0] + into.box[2] == 375 - lst.g['V_RIGHT_X'] and centre(into.box) == row_h / 2
     assert label.box[0] + label.box[2] <= 375 - SET_TEXT_X
 
 
@@ -2071,14 +2079,13 @@ def test_a_detail_line_doubles_a_short_row(fw, st, geometry, stand_in):
 def test_oleds_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, stand_in):
     ui = Ui(fw)
     lst = SettingsList(fw, ui, st, geometry, stand_in)
-    assert lst.g['V_SET_ICON'] == 0
     plain = lst.row(STOCK_ICON, STOCK_LABEL, STOCK_INTO)
     device = lst.row(('image', (10, 10, 50, 50), 'device', b'bt_headset'), STOCK_LABEL)
     picker = lst.row(('image', (10, 9, 52, 52), 'mark', b'select'), STOCK_LABEL)
     lst()
     row = lst.g['V_SET_ROW']
-    # OLED's set has a right column: text starts on its text column less hscroll_label's 2 px, a trailing image
-    # ends on the right column (navigation.c set_text_x, set_edge)
+    # text starts on the set's text column less hscroll_label's 2 px, a trailing image ends on its right column
+    # (navigation.c set_text_x, set_edge)
     text_x, edge = lst.g['V_TEXT_X'] - 2, lst.g['V_RIGHT_X']
     icon, label, into = plain.children[0].children
     assert not icon.visible and label.box[0] == text_x and centre(into.box) == row / 2
@@ -2087,7 +2094,7 @@ def test_oleds_rows_drop_their_icons_and_keep_a_pickers_mark(fw, st, geometry, s
     assert mark.visible and mark.box == (375 - edge - 50, 0, 50, row)  # in the column of stock's own marks
 
 
-def test_an_icon_sized_image_goes_wherever_it_sits_in_a_set_without_icons(fw, st, geometry, stand_in):
+def test_an_icon_sized_image_goes_wherever_it_sits(fw, st, geometry, stand_in):
     ui = Ui(fw)
     lst = SettingsList(fw, ui, st, geometry, stand_in)
     item = lst.row(STOCK_LABEL, ('image', (200, 9, O['SET_STOCK_ICON'], 52), 'badge', b'bt_codec'))
@@ -2102,8 +2109,8 @@ def test_a_wide_trailing_image_sets_the_right_column(fw, st, geometry, stand_in)
     item = lst.row(STOCK_LABEL, ('image', (230, 10, 50, 50), 'switch', b'switch_on'), ('image', (290, 10, 50, 50), 'into', b'list_into'))
     lst()
     _, switch, into = item.children[0].children
-    # the rightmost trailing image ends SET_EDGE from the row's edge; the others move with it
-    assert into.box[0] + into.box[2] == 375 - SET_EDGE and into.box[0] - switch.box[0] == 290 - 230
+    # the rightmost trailing image ends on the set's right column; the others move with it
+    assert into.box[0] + into.box[2] == 375 - lst.g['V_RIGHT_X'] and into.box[0] - switch.box[0] == 290 - 230
 
 
 def test_another_list_is_stocks_alone(fw, st, geometry, stand_in):
@@ -2989,14 +2996,12 @@ def test_an_untagged_song_with_no_path_reads_its_name_as_stored(fw, records):
 
 
 def test_a_class_rows_icon_hides_on_oleds_one_line_rows(fw, st, geometry):
-    cls, shown = 0xf005, 0  # Composers', which a two-line row would show
     ui = Ui(fw)
     row = ui.add('list_item', ui.window('localclass_page'))
     icon = ui.add('image', row, name='img_icon')
-    C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = cls
-    fw.mock('class_icon', lambda *_: 8)
-    assert fw.fn('ringnav_class_icon', C.c_int, C.c_void_p, C.c_int)(row.addr, 2) == (8 if shown else 0)
-    assert icon.visible == shown and len(fw.calls('class_icon')) == shown
+    C.c_int.from_address(C.addressof(fw.var('fw_ctx_g_class_type', C.c_char))).value = 0xf005  # Composers'
+    assert fw.fn('ringnav_class_icon', C.c_int, C.c_void_p, C.c_int)(row.addr, 2) == 0
+    assert not icon.visible
 
 
 # An artist's page.
@@ -3039,6 +3044,7 @@ def queen(records):
 def test_an_artists_albums_tab_orders_its_albums_and_notes_their_ids(fw, st, stand_in, records):
     ui = Ui(fw)
     ArtistPage(fw, ui)
+    ui.window('sortselect_dialog')  # over the page as its tab loads: stock's grid, not the design's page
     rows, songs = queen(records)
     lib = artist(fw, stand_in, records, rows, songs, view=b'0')
     assert fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1) == 4
@@ -3058,6 +3064,7 @@ def test_an_artists_albums_tab_orders_its_albums_and_notes_their_ids(fw, st, sta
 def test_an_artists_songs_tab_keeps_no_keys(fw, st, stand_in, records):
     ui = Ui(fw)
     ArtistPage(fw, ui)
+    ui.window('sortselect_dialog')  # over the page as its tab loads: stock's grid, not the design's page
     rows, songs = queen(records)
     artist(fw, stand_in, records, rows, songs)
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
@@ -3077,75 +3084,7 @@ def test_an_artist_with_no_name_reads_unknown_artist(fw, stand_in, records):
     artist(fw, stand_in, records, [], [], title=b'(null)')
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
     assert C.string_at(O['ARTIST_TITLE']) == b'Unknown Artist'
-    assert [(C.string_at(a[0]), a[2]) for _, a in fw.calls('getFormatString')] == [(b'player_unknown', ARTIST_TITLE_SIZE)]
-
-
-def test_grid_gives_the_artist_page_its_toolbar_back(fw, stand_in, records):
-    ui = Ui(fw)
-    page = ArtistPage(fw, ui)
-    artist(fw, stand_in, records, [], [], view=b'0')
-    params = []
-    fw.mock('widget_set_self_layout_params', lambda w, *a: params.append((w, *(C.string_at(v) for v in a[:4]))))
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
-    assert page.nav.visible and page.tab.box == (0, 40, 375, 250)  # the tabs move down under it
-    assert params == [(page.pages.addr, b'0', b'50', b'100%', b'200')]
-    assert page.grid.box[3] == 200 and [a[0] for _, a in fw.calls('widget_layout')] == [page.tab.addr]
-
-
-@pytest.mark.parametrize('view, shown', [(b'1', 0), (b'0', 1)])
-def test_the_toolbar_stays_as_it_is_under_cover_flow_or_a_reload(fw, stand_in, records, view, shown):
-    ui = Ui(fw)
-    page = ArtistPage(fw, ui, nav_shown=shown)
-    artist(fw, stand_in, records, [], [], view=view)
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
-    assert page.tab.box == (0, 0, 375, 290) and not fw.calls('widget_layout')
-
-
-def test_cover_flow_view_opens_unseen_and_shows_the_page_again_if_it_cannot(fw, st, stand_in, records):
-    ui = Ui(fw)
-    page = ArtistPage(fw, ui)
-    rows, songs = queen(records)
-    artist(fw, stand_in, records, rows, songs)
-    timers = []
-    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append((fn, ms)) or 3)
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
-    # the page goes unseen and without its slide until the covers are up
-    assert page.win.props['anim_hint'] == b'' and [a[1] for _, a in fw.calls('widget_set_opacity')] == [0]
-    assert st('art_cf_veil', C.c_void_p).value == page.win.addr and st('art_cf_timer').value == 3
-    assert [ms for _, ms in timers] == [0]
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)  # a reload while it waits: once per page
-    assert len(timers) == 1
-    run(timers[0][0])  # no music albums for Cover Flow here: the page shows again with its slide back
-    assert page.win.props['anim_hint'] == b'htranslate' and [a[1] for _, a in fw.calls('widget_set_opacity')] == [0, 0xff]
-    assert not st('art_cf_win', C.c_void_p).value and not st('art_cf_veil', C.c_void_p).value
-    destroy = [(fn, ctx) for w, evt, fn, ctx in ui.handlers if evt == O['EVT_DESTROY']]
-    assert destroy == [(C.cast(fw.lib.navigation__artist_cf_gone, C.c_void_p).value, page.win.addr)]
-
-
-def test_a_closed_artist_page_is_forgotten(fw, st):
-    gone = fw.fn('navigation__artist_cf_gone', C.c_int, C.c_void_p, C.c_void_p)
-    st('art_cf_win', C.c_void_p).value, st('art_cf_veil', C.c_void_p).value = 0x10, 0x20
-    gone(0x30, None)
-    assert (st('art_cf_win', C.c_void_p).value, st('art_cf_veil', C.c_void_p).value) == (0x10, 0x20)
-    gone(0x10, None)
-    gone(0x20, None)
-    assert (st('art_cf_win', C.c_void_p).value, st('art_cf_veil', C.c_void_p).value) == (None, None)
-
-
-def test_cover_flow_for_a_page_no_longer_on_top_drops_its_albums(fw, st, stand_in, records):
-    ui = Ui(fw)
-    page = ArtistPage(fw, ui)
-    rows, songs = queen(records)
-    artist(fw, stand_in, records, rows, songs)
-    timers = []
-    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 3)
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
-    pending = st('art_cf_list', C.c_void_p).value
-    ui.window('playing_page')
-    destroyed = len(fw.calls('fw_deque_destroy'))
-    run(timers[0])
-    assert [a[0] & 0xffffffff for _, a in fw.calls('fw_deque_destroy')[destroyed:]] == [pending]
-    assert page.win.props['anim_hint'] == b'htranslate'
+    assert [(C.string_at(a[0]), a[2]) for _, a in fw.calls('getFormatString')][:1] == [(b'player_unknown', ARTIST_TITLE_SIZE)]
 
 
 def oled_artist(fw, st, stand_in, records, view=b'1'):
@@ -3182,7 +3121,7 @@ def test_under_oled_an_artists_page_is_drawn_as_the_design(fw, st, stand_in, rec
     assert len([w for w in made if '_ar_left' in w.props]) == 1  # Shuffle alone
     assert [(w.children[0].text, w.props.get('_ar_count')) for w in made if w.kind == 'list_item'] == \
         [('Albums', b'3'), ('All Songs', b'4')]
-    assert not st('art_cf_veil', C.c_void_p).value and not fw.calls('widget_set_opacity')
+    assert not fw.calls('widget_set_opacity')
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(0)  # the songs tab's load: the page stays as drawn
     assert list(texts(page.win)) == made
 
@@ -3199,15 +3138,6 @@ def test_a_lone_shuffle_is_one_stop_above_the_rows(fw, st, stand_in, records):
     assert key(page.win.addr, rows.addr, 1) == 1 and not holds(rows.addr)
     assert rows.props['_ringnav_index'] == 0  # down off Shuffle: the first row
     assert key(page.win.addr, rows.addr, -1) == 1 and holds(rows.addr)  # and up from it: Shuffle again
-
-
-def test_other_sets_keep_the_artist_pages_tabs(fw, st, stand_in, records):
-    ui = Ui(fw)
-    page = ArtistPage(fw, ui)
-    rows, songs = queen(records)
-    artist(fw, stand_in, records, rows, songs, view=b'0')
-    fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
-    assert page.tab.visible and not fw.fn('artist_local_on', C.c_int, C.c_void_p)(page.win.addr)
 
 
 def test_appearance_keeps_its_own_place_not_displays(fw):

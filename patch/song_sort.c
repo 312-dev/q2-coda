@@ -3,9 +3,8 @@
  * its alphabetical title order, 1 and 2 file name and format, 3 and 4 time added newest and oldest
  * first), which getAllMusic's query takes. Recently Added is the flag's 3 or 4; on the title order
  * (0) this keeps Title, Artist or Album as [IPOD] SONGSORT (SORT_*) and its direction as SONGDOWN
- * (1: descending) and, under a modal set, orders the loaded list (song_order): Artist and Album
- * stably over the title order, Title descending reversed. Other themes keep stock's picker and
- * stock's order. */
+ * (1: descending) and orders the loaded list (song_order): Artist and Album stably over the title
+ * order, Title descending reversed. */
 #include "navigation.h"
 
 static struct {

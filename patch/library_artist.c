@@ -1,4 +1,4 @@
-/* A Library artist's page under a set with the menu sheet (OLED's; docs/oled-design.md#artist-page
+/* A Library artist's page (docs/oled-design.md#artist-page
  * and docs/internals.md#library-artist-page): stock's artistinfo_page, whichever way it opened
  * (Library > Artists, Go to Artist, Now Playing's artist tap, Search), keeps its window and its
  * Return, but its tabs are hidden and the page is drawn as a card app's artist (artist_page.c):

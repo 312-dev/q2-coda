@@ -121,7 +121,7 @@ def es(ui, page):
 def test_with_no_songs_the_page_is_add_songs_over_the_compact_empty_state(fw, ui, pages, st, dest, name, hint):
     """docs/oled-design.md#empty-and-offline: no songs, the empty state under Add Songs in its compact form (a row
     above it: no glyph), no button of its own (Add Songs is the row above it), centred from that row's foot."""
-    use_set(st, 'oled')
+    use_set(st)
     pv = open_page(fw, dest, name)
     assert es(ui, pv.page) is None  # songs: none
     ui.close(ui.top())
