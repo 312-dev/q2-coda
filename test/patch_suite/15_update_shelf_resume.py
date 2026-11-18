@@ -525,7 +525,10 @@ def settings_page(hook,view_name,config={},stock_rows=2,bt=1,boot=False,cls=Queu
         return [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']
     m.entries=entries
     m.settings_view=view
-    return m,rows,lambda:[m.nodes[l]['text'] for l in labels],icons,click
+    def texts():  # each row's label, "title: value" where its value stands on the right column (list_value)
+        vals=[[m.nodes[c]['text'] for c in m.nodes[b]['children'] if m.nodes[c].get('name')=='_setting_value'] for b in buttons]
+        return [m.nodes[l]['text']+(f': {v[0]}' if v else '') for l,v in zip(labels,vals)]
+    return m,rows,texts,icons,click
 m,rows,texts,icons,click=settings_page('power','scroll_view_powermanager')
 def switch_image(m,row):
     button=m.nodes[row]['children'][0]
