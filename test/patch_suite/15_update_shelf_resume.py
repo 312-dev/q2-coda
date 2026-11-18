@@ -119,7 +119,7 @@ assert m.opts[10002]==LIST_URL and m.opts[10018]=='Q2Muse'  # the list, the chec
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and 20108 not in m.opts
 assert m.labels()[8]=='Update' and m.labels()[2]==BLANK and '/tmp/q2-shelf.json' not in m.files  # the pin's q2-v9.9 against the card's tag
 assert m.toasts[-1][3]=='1 app can be updated'; passed()  # the opening check's end, the page on top
-assert bytes(m.files[LIST]).startswith(b'serial 1\n') and b'DiamondBond/q2-librespot q2-v9.9 app.zip ' in bytes(m.files[LIST]) and b'signature' not in bytes(m.files[LIST]); passed()
+assert bytes(m.files[LIST]).startswith(b'serial %d\n' % next(int(x[7:]) for x in REPO_LIST.splitlines() if x.startswith(b'serial '))) and b'DiamondBond/q2-librespot q2-v9.9 app.zip ' in bytes(m.files[LIST]) and b'signature' not in bytes(m.files[LIST]); passed()
 m.row(0); assert m.toasts[-1][3]=='1 app can be updated' and len(m.threads)==1; passed()  # within SH_RECHECK_MS: no requests
 toasts=len(m.toasts); m.close(); m.now+=9*60*1000; apps_open(m); assert len(m.threads)==1 and m.labels()[8]=='Update' and len(m.toasts)==toasts; passed()  # still fresh: no requests
 m.row(3); assert m.labels()[8]=='Checking…' and len(m.threads)==2 and KILL in m.systems[-1]; m.row(3); assert m.labels()[8]=='Canceling…'
