@@ -5,10 +5,13 @@
  * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
  * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
  * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
- * the start, when its encoder thread changes and every BT_PCMS_MS. Nothing here changes how the Q2
- * streams. Every read that fails leaves its field "-", and with no Bluetooth socket at all (the
- * emulator) it tries again a minute later and does nothing else. */
+ * the start, when its encoder thread changes and every BT_PCMS_MS. The one change to how the Q2
+ * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
+ * allowing EDR, once to each of its handles while a stream runs. Every read that fails leaves its
+ * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
+ * does nothing else. */
 #include "q2bt.h"
+#include "q2log.h"
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
 #define PCMS_CMD                                                                                   \
@@ -44,6 +47,10 @@ static struct {
                    */
     unsigned done, done_was; /* completions counted on the raw socket, and at the last line */
     struct bt_fly fly;
+    card_log *ulog;        /* the unified log: the EDR outcome, once */
+    unsigned char sink[6]; /* the A2DP sink's address (bluealsa's a2dpsrc PCM), have_sink */
+    int have_sink, sink_h; /* and its ACL handle at the last line, -1 none */
+    struct bt_edr edr;
 } bt;
 
 static void note(const char *what) {
@@ -67,19 +74,23 @@ static int counts(struct bt_counts *c) {
     bt_devinfo((const unsigned char *)di, c);
     return 1;
 }
+/* the first ACL link's handle; the A2DP sink's into bt.sink_h (-1 none, or no sink known) */
 static int acl_handle(void) {
     unsigned req[1 + 4 * 4] = { 0 }; /* dev_id 0, room for four links */
     ((unsigned short *)req)[1] = 4;
+    bt.sink_h = -1;
     if (ioctl(bt.ctl, HCIGETCONNLIST, req)) return -1;
+    if (bt.have_sink) bt.sink_h = bt_acl_handle_of((const unsigned char *)req, 4, bt.sink);
     return bt_acl_handle((const unsigned char *)req, 4);
 }
-/* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, and Number Of
- * Completed Packets (0x13), the controller's account of each packet it delivered */
+/* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, Number Of Completed
+ * Packets (0x13), the controller's account of each packet it delivered, and for the EDR command
+ * Command Status (0x0f) and Connection Packet Type Changed (0x1d) */
 static void raw_open(void) {
     unsigned short addr[3] = { AF_BLUETOOTH, 0,
                                0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
-    /* hci_filter: event packets; events 0x0e and 0x13; any opcode */
-    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x13, 0, 0 };
+    /* hci_filter: event packets; events 0x0e, 0x0f, 0x13 and 0x1d; any opcode */
+    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x0f | 1u << 0x13 | 1u << 0x1d, 0, 0 };
     bt.raw = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
     if (bt.raw < 0) return;
     if (bind(bt.raw, addr, sizeof addr) ||
@@ -100,6 +111,12 @@ static int events(int ms, int until_answered) {
         if (n <= 0) return 0;
         bt.done += (unsigned)bt_completed(b, n, bt.link.handle);
         bt_event(&bt.link, b, n);
+        char line[48];
+        int said = bt_edr_event(&bt.edr, b, n, line, sizeof line);
+        if (said) note(line);
+        if (said == 2) /* a refusal or an unexpected mask warns */
+            ulog_add(bt.ulog, time(0), now_ms(),
+                     strstr(line, "ptype=0x0018 status=0x00") ? 'I' : 'W', "bt", line);
         if (until_answered && bt.link.answered >= 5) return 1;
     }
 }
@@ -113,6 +130,9 @@ static void link_read(void) {
         bt.fly.have = 0; /* a new link's packets: counted afresh */
     }
     bt_link_clear(&bt.link, h);
+    /* EDR, once to each of the sink's handles (bt_edr_step): a phone's link and LE are never sent
+     * it */
+    if (bt.raw >= 0 && bt_edr_step(&bt.edr, bt.sink_h, c)) write(bt.raw, c, 8);
     if (bt.raw < 0 || h < 0) return;
     events(0, 0); /* the second's completions, and last second's late answers */
     bt_link_clear(&bt.link, h);
@@ -231,7 +251,10 @@ static void pcms_reap(void) {
     bt.pcms_pid = 0;
     char b[4096], codec[24], line[96];
     unsigned hz, delay;
-    if (slurp(PCMS_FILE, b, sizeof b) <= 0 || !bt_pcms(b, codec, sizeof codec, &hz, &delay)) return;
+    if (slurp(PCMS_FILE, b, sizeof b) <= 0) return;
+    bt.have_sink =
+        bt_pcms_sink(b, bt.sink); /* the headset, for the EDR command from the next line */
+    if (!bt_pcms(b, codec, sizeof codec, &hz, &delay)) return;
     if (!strcmp(codec, bt.codec) && hz == bt.hz) return;
     memcpy(bt.codec, codec, sizeof codec), bt.hz = hz;
     snprintf(line, sizeof line, "CODEC %s %u Hz delay=%u.%u ms", codec, hz, delay / 10, delay % 10);
@@ -261,6 +284,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
 static void end(void) {
     note("STOP");
     bt.flush = 1;
+    bt_edr_reset(&bt.edr); /* a reconnect in the pause may bring the same handle number back */
     if (bt.raw >= 0) close(bt.raw), bt.raw = -1;
 }
 static void sample(unsigned now, const struct bt_counts *c) {
@@ -331,7 +355,10 @@ static void tick(unsigned now) {
     if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
 }
 
-void bt_init(card_log *l) { bt.log = l, bt.ctl = bt.raw = -1; }
+void bt_init(card_log *l, card_log *u) {
+    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = -1;
+    bt_edr_reset(&bt.edr);
+}
 int bt_streaming(void) { return bt.det.on; }
 int bt_flush_due(void) {
     int due = bt.flush;
@@ -351,7 +378,7 @@ void bt_sleep(unsigned ms) {
             step = due <= 0 ? 0 : due < left ? due : left;
         }
         if (step > 0) usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
-        if (guard_woke) return;                        /* a request to answer now (q2guard.c) */
+        if (guard_woke) return;                       /* a request to answer now (q2guard.c) */
         now = now_ms();
         if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }
