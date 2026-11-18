@@ -17,7 +17,7 @@ from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload'
 KEY_RETURN, KEY_CENTER, KEY_PREV, KEY_NEXT, KEY_PLAY, KEY_FWD_BTN, KEY_BACK_BTN = (
     O[k] for k in ('KEY_RETURN', 'KEY_CENTER', 'KEY_PREV', 'KEY_NEXT', 'KEY_PLAY', 'KEY_FWD_BTN', 'KEY_BACK_BTN'))
 LIBRARY = 0xf001
-ON_STRIP, ON_LIST, ON_TABS = 0, 1, 2
+ON_STRIP, ON_LIST, ON_TABS, ON_FIELD = 0, 1, 2, 3
 ALL, SONGS, ARTISTS, ALBUMS = 0, 1, 2, 3
 LOWER, UPPER, DIGITS, SYMBOLS = 0, 1, 2, 3
 SETS = ['abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '0123456789', '!@#$%&*-_.?/+=:;,\'"()[]{}<>^~`\\|']
@@ -46,7 +46,7 @@ class Ss(C.Structure):
                 ('fch', C.c_int), ('grab', C.c_ubyte), ('loupe', C.c_ubyte), ('nudge', C.c_byte), ('grab_x', C.c_short),
                 ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint), ('ret', C.c_int),
                 *((k, C.c_short) for k in 'mark word_a word_b tap_x'.split()), ('tap_at', C.c_uint), ('taps', C.c_ubyte),
-                ('drag', C.c_ubyte)]
+                ('drag', C.c_ubyte), ('fpress', C.c_ubyte)]
 
 
 @pytest.fixture
@@ -395,7 +395,9 @@ def test_results_go_back_to_the_strip_by_wheel_or_previous(fw, ui, song):
     s.enter()
     s.key(KEY_PREV)  # a turn up from the first result: the tabs
     assert s.ss.focus == ON_TABS
-    s.key(KEY_PREV)  # and up again: the strip
+    s.key(KEY_PREV)  # and up again: the query line, highlighted; Centre opens the strip
+    assert s.ss.focus == ON_FIELD and s.ss.text == b'lo'
+    s.key(KEY_CENTER)
     assert s.ss.focus == ON_STRIP and s.ss.text == b'lo'
     stop = s.ss.stop
     s.enter()
@@ -482,8 +484,10 @@ def test_the_wheel_moves_between_the_tabs_and_the_buttons_pick_and_the_tab_stays
     s.key(KEY_PREV, KEY_RETURN)  # the tabs, then back to the strip
     assert s.ss.focus == ON_STRIP and s.ss.tab == ALBUMS
     s.enter()
-    s.key(KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV)  # the tabs, up past All: the strip
-    assert s.ss.focus == ON_STRIP and s.ss.tab == ALL
+    s.key(KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV)  # the tabs, up past All: the query line
+    assert s.ss.focus == ON_FIELD and s.ss.tab == ALL
+    s.key(KEY_CENTER)  # and Centre: the strip
+    assert s.ss.focus == ON_STRIP
     s.erase(1)
     assert s.ss.text == b''
     s.type('s')
@@ -898,6 +902,66 @@ def test_add_songs_search_lists_songs_by_title_or_artist_and_centre_adds_in_plac
     s.key(KEY_PLAY, KEY_CENTER)
     assert added == [0] and ui.toasts[-1].startswith('Added to') and s.ss.nmatch == 2
     assert ui.backs == 0 and not ui.played
+
+
+def on_field(fw, ui, song):
+    """Search with 'lo' typed, submitted, and the wheel turned up through the tabs to the query line."""
+    s = Strip(fw, ui, library(song))
+    s.type('lo')
+    s.enter()
+    s.key(KEY_PREV, KEY_PREV)
+    assert s.ss.focus == ON_FIELD
+    return s
+
+
+def test_the_wheel_reaching_the_query_only_highlights_it_and_the_strip_stays_shut(fw, ui, song):
+    s = on_field(fw, ui, song)
+    assert s.ss.text == b'lo' and s.ss.tab == ALL and ui.backs == 0
+    c = painted(fw, s)
+    assert any(r == (16, 0, 343, 32) for r, _, _ in c.boxes)  # the selection bar's box on the query line
+    assert not [r for r, _ in c.rects if r[2:] == (2, 25)]  # no cursor: the strip has no wheel
+    s.key(KEY_PREV)  # nothing above it
+    assert s.ss.focus == ON_FIELD
+    s.key(KEY_NEXT)  # down to the tabs, no keyboard on the way
+    assert s.ss.focus == ON_TABS and s.ss.tab == ALL
+    s.key(KEY_PREV)
+    s.key(KEY_CENTER)  # Centre enters keyboard mode, the text and cursor kept
+    assert s.ss.focus == ON_STRIP and s.ss.text == b'lo' and s.ss.cur == 2
+    assert not any(r == (16, 0, 343, 32) for r, _, _ in painted(fw, s).boxes)
+
+
+def test_a_tap_on_the_highlighted_query_enters_keyboard_mode_at_the_nearest_boundary(fw, ui, song):
+    s = on_field(fw, ui, song)
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 4, 16)
+    assert s.ss.focus == ON_STRIP and s.ss.cur == 0 and not s.ss.loupe
+
+
+def test_a_drag_that_starts_on_the_query_is_a_scroll_not_a_tap(fw, ui, song):
+    s = on_field(fw, ui, song)
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 10, 16, QUERY_X0 + 10, 90, moves=[(QUERY_X0 + 10, 40), (QUERY_X0 + 10, 90)])
+    assert s.ss.focus == ON_FIELD and s.ss.cur == 2 and not s.ss.loupe and not s.ss.grab
+    s.touch(QUERY_X0 + 10, 16, QUERY_X0 + 60, 16, moves=[(QUERY_X0 + 60, 16)])  # sideways too
+    assert s.ss.focus == ON_FIELD and s.ss.cur == 2
+
+
+def test_the_wheel_up_from_add_songs_results_lands_on_the_query_line_too(fw, ui, song):
+    songs = library(song)
+    Config(fw)
+    Library(fw, ui, songs)
+    s = Strip.__new__(Strip)
+    s.attach(fw, ui)
+    fw.fn('add_songs_search', None)()
+    s.type('joy')
+    s.key(KEY_PLAY)
+    assert s.ss.focus == ON_LIST
+    s.key(KEY_PREV)
+    assert s.ss.focus == ON_FIELD
+    s.key(KEY_NEXT)
+    assert s.ss.focus == ON_LIST
+    s.key(KEY_PREV, KEY_CENTER)
+    assert s.ss.focus == ON_STRIP
 
 
 # Return held on any letter-strip page: a card shows from SHOW_MS and the page closes at HOLD_MS; let go before, and
