@@ -140,8 +140,8 @@ int stream_length(const char *path, unsigned *ms) {
 int stream_reach(const char *path, int total) {
     sline_t l;
     if (!arriving(path, &l)) return -1;
-    int sec = l.ms ? (int)(l.ms / 1000) : catalogue_copy_seconds(path),
-        len = sec > 0 ? sec : total, arrived = total;
+    int sec = l.ms ? (int)(l.ms / 1000) : catalogue_copy_seconds(path), len = sec > 0 ? sec : total,
+        arrived = total;
     if (l.total) { /* per mille, in 32 bits: the demo has no 64-bit division */
         unsigned have = l.have < l.total ? l.have : l.total, all = l.total;
         while (all >> 20) have >>= 1, all >>= 1;
