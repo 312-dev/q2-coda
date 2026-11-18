@@ -199,6 +199,47 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
     return 2;
 }
 
+/* ---- the step-down ---- */
+static const char *const codec_names[4] = { "", "SBC", "aptX", "aptX-HD" };
+int bt_codec_rank(const char *codec) {
+    for (int r = 1; r < 4; ++r)
+        if (!strcmp(codec, codec_names[r])) return r;
+    return 0;
+}
+const char *bt_codec_name(int rank) { return codec_names[rank > 0 && rank < 4 ? rank : 0]; }
+/* Congested: the socket queued past BT_STEP_WQ and the controller holding every buffer, so the
+ * radio, not the encoder or the player, is behind. Down at BT_STEP_STALL such seconds in a row;
+ * up one rank after BT_STEP_CLEAN clean ones and BT_STEP_UP_MS since the last switch. Off (not
+ * LDAC Auto, or the setting off) while stepped down: back to where it started, once. */
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs) {
+    if (!rank) {
+        s->stall = s->clean = 0;
+        return 0;
+    }
+    if (rank > s->top) s->top = rank;
+    if (!allowed) {
+        int back = rank < s->top ? s->top : 0;
+        s->top = rank, s->stall = s->clean = 0; /* asked once: the next line sees it as the top */
+        if (back) s->have = 1, s->last = now;
+        return back;
+    }
+    if (s->have && now - s->last < BT_STEP_SETTLE_MS) {
+        s->stall = s->clean = 0;
+        return 0;
+    }
+    int full = fly >= 0 && bufs > 0 && fly >= bufs;
+    s->stall = wq > BT_STEP_WQ && full ? s->stall + 1 : 0;
+    s->clean = wq == 0 && fly >= 0 && !full ? s->clean + 1 : 0;
+    int to = 0;
+    if (s->stall >= BT_STEP_STALL && rank > 1)
+        to = rank - 1;
+    else if (s->clean >= BT_STEP_CLEAN && rank < s->top &&
+             (!s->have || now - s->last >= BT_STEP_UP_MS))
+        to = rank + 1;
+    if (to) s->have = 1, s->last = now, s->stall = s->clean = 0;
+    return to;
+}
+
 /* ---- text ---- */
 static const char *find_in(const char *p, const char *end, const char *needle) {
     const char *f = strstr(p, needle);

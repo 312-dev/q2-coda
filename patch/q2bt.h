@@ -98,6 +98,28 @@ int bt_edr_step(struct bt_edr *e, int handle, unsigned char *out);
  * or one unlike the last it had), 1 for the q2-bt log only, 0 not an answer to it. */
 int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, int size);
 
+/* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
+ * Under LDAC Auto with Quality's "Lower quality when the signal is weak" on, a link the radio
+ * cannot keep up with is moved down a codec, aptX HD to aptX to SBC, and back up one at a time once
+ * clean. */
+#define BT_STEP_WQ 4096         /* bytes waiting in the A2DP socket over this, */
+#define BT_STEP_STALL 2         /* with the controller's buffers full, this many seconds in a row */
+#define BT_STEP_CLEAN 60        /* seconds in a row with nothing waiting before a step up */
+#define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconnect's gap, not counted either way */
+#define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch */
+/* "aptX-HD" 3, "aptX" 2, "SBC" 1, any other (LDAC, AAC, none) 0; and back */
+int bt_codec_rank(const char *codec);
+const char *bt_codec_name(int rank);
+struct bt_step {
+    int top;          /* the rank the stream was on before any step: never stepped above */
+    int stall, clean; /* seconds in a row congested, clean */
+    int have;         /* last is set */
+    unsigned last;    /* ms of the last switch */
+};
+/* One line: allowed (LDAC Auto and the setting on), the codec's rank now, wq, fly (-1 not read)
+ * and the controller's buffer count. The rank to select now, else 0. */
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs);
+
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
  * while the controller's ACL buffers are full), or -1 with no such table. */
