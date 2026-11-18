@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from conftest import O
+from conftest import O, STRIP_AUTO, STRIP_GO, STRIP_SAVE, STRIP_SEARCH
 from test_nav_library_pages import Config, Library, Songs, Ui, field
 from test_nav_display_library import use_set
 from test_nav_painters import scratch, st  # noqa: F401  (fixtures: the payload's state)
@@ -44,7 +44,7 @@ class Ss(C.Structure):
                 ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p),
                 ('edge', C.c_short * 65), ('nedge', C.c_short), ('fface', C.c_void_p), ('fpx', C.c_int),
                 ('fch', C.c_int), ('grab', C.c_ubyte), ('loupe', C.c_ubyte), ('nudge', C.c_byte), ('grab_x', C.c_short),
-                ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint)]
+                ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint), ('ret', C.c_int)]
 
 
 @pytest.fixture
@@ -1220,9 +1220,11 @@ def under_page(fw, ui, st, row_y=58 + 32, row_h=32):
     return page
 
 
-def text_on_strip(fw, ui, text, label=None, note=None, secret=False):
+def text_on_strip(fw, ui, text, label=None, note=None, secret=False, ret=None):
     done = DONE(lambda t: None)
     ui.done = done  # kept alive
+    if ret is not None:
+        fw.fn('search_strip_return', None, C.c_int)(ret)
     if note:
         fw.fn('search_strip_note', None, C.c_char_p)(note)
     if label:
@@ -1586,3 +1588,92 @@ def test_closing_the_page_mid_drag_stops_the_loupe_and_nudge(fw, ui, song):
     assert ui.pending('search_strip__ss_nudge_due') or ui.pending('search_strip__ss_loupe_due')
     ui.close(ui.top())
     assert not ui.pending('search_strip__ss_nudge_due') and not ui.pending('search_strip__ss_loupe_due')
+
+
+# The return key's mark (search_strip.c ss_ret_kind; the user's 22:14 ruling, returnkey context.html): a magnifier on
+# every search, a check where a name or a value is saved, the arrow on anything else, an unknown caller's included.
+
+
+def mark(fw, s):
+    """The return key's mark as painted: its image's name past search_return_ (the kind, then w white or a the
+    accent's), drawn 20 px square on the key's centre."""
+    from test_nav_painters import Canvas
+    c, asked = Canvas(fw), []
+
+    class Art(dict):
+        def get(self, name, default=None):
+            asked.append(name)
+            return (20, 20)
+    c.art = Art()
+    fw.fn('search_strip_paint', None, C.c_void_p, C.c_void_p)(s.ss.sheet, c.addr)
+    marks = [(n.split('search_return_')[1], d) for n, d in zip(asked, c.images) if 'search_return_' in n]
+    assert len(marks) == 1 and marks[0][1] == (RET_L + 7, STRIP_Y + 7, 20, 20)
+    return marks[0][0]
+
+
+@pytest.mark.parametrize('light', [0, 1])
+def test_search_s_return_key_is_a_magnifier_white_at_rest_the_accent_s_on_the_white_lit_key(fw, ui, song, st, light):
+    s = Strip(fw, ui, library(song))
+    st('light').value = light
+    assert s.ss.ret == STRIP_SEARCH and mark(fw, s) == 'search_w'
+    s.key(KEY_RETURN)
+    assert mark(fw, s) == 'search_a'
+
+
+def test_add_songs_search_s_return_key_is_a_magnifier(fw, ui, song):
+    Config(fw)
+    Library(fw, ui, library(song))
+    fw.fn('add_songs_search', None)()
+    assert mark(fw, attached(fw, ui)) == 'search_w'
+
+
+@pytest.mark.parametrize('light', [0, 1])
+def test_naming_a_playlist_s_return_key_is_a_check(fw, ui, st, light):
+    """Rename Playlist and New Playlist save a name: the check, in either half, white at rest and the accent's lit."""
+    st('light').value = light
+    s = renaming(fw, ui, b'Road')
+    assert mark(fw, s) == 'save_w'
+    s.key(KEY_RETURN)
+    assert mark(fw, s) == 'save_a'
+    ui.close(ui.top())
+    fw.fn('playlist_new_open', None)()
+    assert mark(fw, attached(fw, ui)) == 'save_w'
+
+
+@pytest.mark.parametrize('light', [0, 1])
+@pytest.mark.parametrize('window, name', [('kbwifipass_dialog', 'edit_passwd'), ('editwifi_dialog', 'edit')])
+def test_a_wi_fi_box_s_return_key_is_the_arrow(fw, ui, st, light, window, name):
+    """A network's password and Join Other Network's box: stock's, no kind given, in a field: the arrow."""
+    st('light').value = light
+    s = boxed(fw, ui, b'', name, window)
+    assert s.ss.ret == STRIP_AUTO and mark(fw, s) == 'go_w'
+    s.key(KEY_RETURN)
+    assert mark(fw, s) == 'go_a'
+
+
+def test_a_search_box_no_page_names_gets_the_magnifier_on_the_query_line(fw, ui):
+    """A stock search box (TIDAL's): no kind given, typed on the query line: the magnifier."""
+    s = boxed(fw, ui, b'', 'edit', 'tidal_page', tips='Search')
+    assert s.ss.form == 0 and mark(fw, s) == 'search_w'
+
+
+@pytest.mark.parametrize('kind, want', [(STRIP_SEARCH, 'search_w'), (STRIP_SAVE, 'save_w'), (STRIP_GO, 'go_w')])
+def test_a_box_s_own_kind_picks_its_mark_wherever_it_is_typed(fw, ui, kind, want):
+    """An edit's _strip_return (a card app's Search, an EQ preset's Name, a card app's field) over the layout."""
+    assert mark(fw, boxed(fw, ui, b'', 'edit', 'addon_page', tips='x', _strip_return=kind)) == want
+    ui.close(ui.top())
+    assert mark(fw, boxed(fw, ui, b'', 'edit', 'addon_page', _strip_label='Name', _strip_return=kind)) == want
+
+
+def test_an_unknown_caller_gets_the_arrow(fw, ui):
+    """A text of the payload's own with no kind, and a stock box its page names with none: the arrow."""
+    assert mark(fw, text_on_strip(fw, ui, b'Pixel', label=b'Rename')) == 'go_w'
+    ui.close(ui.top())
+    assert mark(fw, boxed(fw, ui, b'', 'edit', 'addon_page', _strip_label='Server')) == 'go_w'
+
+
+def test_search_strip_return_is_the_next_text_s_alone(fw, ui):
+    s = text_on_strip(fw, ui, b'Q2', label=b'Name', ret=STRIP_SAVE)
+    assert s.ss.ret == STRIP_SAVE and mark(fw, s) == 'save_w'
+    ui.close(ui.top())
+    assert mark(fw, text_on_strip(fw, ui, b'Q2', label=b'Name')) == 'go_w'

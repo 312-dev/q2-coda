@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Game, block, claim, high_halves, libc, text
+from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, strip_return, text
 from test_coverflow import png, scratch  # an icon's header; navigation.c's st by field
 from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh, sources as shelf_sources  # test_netupdate.py keeps netupdate.c's App Store mirror
 from test_radio import Rd  # test_radio.py keeps the mirror
@@ -5642,3 +5642,19 @@ def test_the_app_store_never_lists_a_builtin_app(fw, builtin, listed):
     updated or removed there (docs/internals.md#q2-shelf). A carried app without it stays listed."""
     carry(World(fw, {}, {b'/mnt/mmc': []}), 'subsonic', builtin=builtin)
     assert [a[2] for a in shelf_sources(fw, b'andsuor/q2-subsonic Subsonic\nme/q2-foo\n')] == listed
+
+
+def test_a_card_app_s_search_gets_the_strip_s_magnifier(fw):
+    """The letter strip's return key (search_strip.c ss_ret_kind): a search's magnifier, a field's arrow."""
+    p = Page(fw)
+    p.answer(rows=[SEARCH, item(0, b'list')])
+    tap_find(p)
+    assert strip_return(fw, p.pg.edit) == STRIP_SEARCH
+
+
+def test_a_card_app_s_field_gets_the_strip_s_arrow(fw):
+    p = Page(fw)
+    p.answer(rows=[USER])
+    box = edit_box(fw)
+    p.click(0)
+    assert p.pg.edit == box and strip_return(fw, box) == STRIP_GO

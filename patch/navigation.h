@@ -978,6 +978,7 @@ void search_strip_text(const char *title, const char *text, int max,
 void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
 void search_strip_secret(void);             /* ... the next one's text a password, as dots */
 void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
+void search_strip_return(int kind);         /* ... the next one's return mark, STRIP_* (peq.h) */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */

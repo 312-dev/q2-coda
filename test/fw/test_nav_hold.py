@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
+from conftest import O, STRIP_SEARCH, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
 
 W_X, W_PARENT, W_EMITTER = O['W_X'], O['W_PARENT'], O['W_EMITTER']
 EMIT_TYPE, EMIT_PENDING_REMOVE, EMIT_NEXT = O['EMIT_TYPE'], O['EMIT_PENDING_REMOVE'], O['EMIT_NEXT']
@@ -3309,3 +3309,11 @@ def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, s
     assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key) == 0
     if hearts == 0:  # the copy's row: out of My Fav with it (the Library row's own path is stock's to delete)
         assert myfav(rig) == ([] if where == 'playing' else [url('s1')])
+
+
+def test_the_song_search_box_gives_the_strip_its_magnifier(editor, ui):
+    """A playlist's song search: the letter strip's return key shows the magnifier (search_strip.c ss_ret_kind)."""
+    editor.pick('Add Songs')
+    editor.pick('Search')
+    edit = ui.lookup(editor.ple.page, 'search_edit', 1)
+    assert ui.nodes[edit].props.get('_strip_return') == STRIP_SEARCH

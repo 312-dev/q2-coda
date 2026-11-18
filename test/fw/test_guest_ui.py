@@ -5,6 +5,7 @@ import ctypes as C
 
 import pytest
 
+from conftest import STRIP_GO, STRIP_SAVE
 from test_guest import Rig
 from test_nav_library_pages import Config, Ui
 
@@ -183,3 +184,24 @@ def test_a_guest_playing_on_its_now_playing_keeps_the_screen_lit(g):
     assert lit(g.ui.windows[0]) == 0  # the page under it
     g.look(state='paused', enabled=1, guest="Alex's Pixel", title='Levitating')
     assert g.page('guestnp_page') == page and lit(page) == 0
+
+
+def strip_ret(g):
+    from test_search_strip import Ss
+    ss = g.fw.var('search_strip__ss', Ss)
+    return ss.ret if ss.page else None
+
+
+def test_guest_play_s_name_gets_the_strip_s_check(g):
+    """Naming Guest Play saves a name: the letter strip's return key shows the check (search_strip.c ss_ret_kind)."""
+    g.look(state='idle', enabled=1, allow='ask', leave='resume', hotspot=0)
+    g.fw.fn('guest_settings_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    page = g.page('guestset_page')
+    g.ui.click(page, g.ui.captions(page).index('Name'))
+    assert strip_ret(g) == STRIP_SAVE
+
+
+@pytest.mark.parametrize('row, want', [(1, STRIP_SAVE), (2, STRIP_GO)])
+def test_the_hotspot_s_name_gets_the_check_and_its_password_the_arrow(g, row, want):
+    g.fw.fn('guest_ui__hot_click', C.c_int, C.c_void_p, C.c_void_p)(row, None)
+    assert strip_ret(g) == want
