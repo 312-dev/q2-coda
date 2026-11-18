@@ -1,0 +1,145 @@
+2026-11-18T14:30:35Z up=3305 kbps=266 acl=59 wq=0 rssi=-28 lq=0 tpl=4 afh=31 err=0 wtx=2 wrx=1 cpu=14 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=61 fly=4
+2026-11-18T14:30:36Z up=3306 kbps=256 acl=55 wq=0 rssi=-30 lq=0 tpl=4 afh=31 err=0 wtx=16 wrx=323 cpu=30 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=53 fly=6
+2026-11-18T14:30:37Z up=3307 kbps=234 acl=50 wq=6080 rssi=-30 lq=0 tpl=4 afh=29 err=0 wtx=23 wrx=1537 cpu=29 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=50 fly=6
+2026-11-18T14:30:38Z up=3308 kbps=235 acl=49 wq=3648 rssi=-34 lq=0 tpl=4 afh=29 err=0 wtx=20 wrx=1717 cpu=29 ba=1.0 own=0.0 h=4 er=0 ew=- fcc=0 done=49 fly=6
+2026-11-18T14:30:39Z up=3309 kbps=154 acl=30 wq=6080 rssi=-30 lq=0 tpl=4 afh=29 err=0 wtx=21 wrx=2436 cpu=37 ba=1.0 own=1.0 h=4 er=20 ew=- fcc=0 done=30 fly=6
+2026-11-18T14:30:40Z up=3310 kbps=223 acl=43 wq=7296 rssi=-36 lq=0 tpl=4 afh=20 err=0 wtx=26 wrx=2719 cpu=40 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=43 fly=6
+2026-11-18T14:30:41Z up=3311 kbps=137 acl=26 wq=4864 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=19 wrx=2978 cpu=39 ba=1.0 own=0.0 h=4 er=0 ew=- fcc=0 done=26 fly=6
+2026-11-18T14:30:42Z up=3312 kbps=115 acl=22 wq=7296 rssi=-30 lq=0 tpl=4 afh=20 err=0 wtx=12 wrx=1641 cpu=28 ba=0.0 own=0.0 h=4 er=0 ew=- fcc=0 done=23 fly=5
+2026-11-18T14:30:43Z up=3313 kbps=200 acl=38 wq=4864 rssi=-28 lq=0 tpl=4 afh=27 err=0 wtx=9 wrx=1332 cpu=27 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=37 fly=6
+2026-11-18T14:30:44Z up=3314 kbps=137 acl=26 wq=7296 rssi=-28 lq=0 tpl=4 afh=27 err=0 wtx=12 wrx=1739 cpu=26 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=26 fly=6
+2026-11-18T14:30:45Z up=3315 kbps=272 acl=52 wq=3648 rssi=-26 lq=0 tpl=4 afh=27 err=0 wtx=24 wrx=2529 cpu=38 ba=1.0 own=2.0 h=4 er=10 ew=- fcc=0 done=52 fly=6
+2026-11-18T14:30:46Z up=3316 kbps=173 acl=33 wq=7296 rssi=-30 lq=0 tpl=4 afh=20 err=0 wtx=28 wrx=2833 cpu=36 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=33 fly=6
+2026-11-18T14:30:47Z up=3317 kbps=141 acl=26 wq=3648 rssi=-28 lq=0 tpl=4 afh=20 err=0 wtx=17 wrx=1852 cpu=27 ba=0.0 own=0.0 h=4 er=0 ew=- fcc=0 done=26 fly=6
+2026-11-18T14:30:48Z up=3318 kbps=63 acl=12 wq=3648 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=28 wrx=2404 cpu=32 ba=1.0 own=0.0 h=4 er=0 ew=- fcc=0 done=12 fly=6
+2026-11-18T14:30:49Z up=3319 kbps=74 acl=14 wq=6080 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=18 wrx=2485 cpu=33 ba=0.0 own=0.0 h=4 er=10 ew=- fcc=0 done=14 fly=6
+2026-11-18T14:30:50Z up=3320 kbps=79 acl=15 wq=7296 rssi=-36 lq=0 tpl=4 afh=20 err=0 wtx=7 wrx=977 cpu=26 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=15 fly=6
+2026-11-18T14:30:51Z up=3321 kbps=80 acl=15 wq=3648 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=9 ba=1.0 own=0.0 h=4 er=0 ew=- fcc=0 done=15 fly=6
+2026-11-18T14:30:52Z up=3322 kbps=42 acl=8 wq=3648 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=0.0 own=1.0 h=4 er=0 ew=- fcc=0 done=8 fly=6
+2026-11-18T14:30:53Z up=3323 kbps=152 acl=29 wq=7296 rssi=-26 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=0.0 own=0.0 h=4 er=10 ew=- fcc=0 done=29 fly=6
+2026-11-18T14:30:54Z up=3324 kbps=152 acl=28 wq=6080 rssi=-28 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=16 ba=0.9 own=0.0 h=4 er=9 ew=- fcc=0 done=28 fly=6
+2026-11-18T14:30:55Z up=3325 kbps=231 acl=44 wq=6080 rssi=-32 lq=0 tpl=4 afh=55 err=0 wtx=0 wrx=0 cpu=14 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=45 fly=5
+2026-11-18T14:30:56Z up=3326 kbps=283 acl=54 wq=3648 rssi=-32 lq=0 tpl=4 afh=55 err=0 wtx=0 wrx=0 cpu=12 ba=2.0 own=0.0 h=4 er=0 ew=- fcc=0 done=53 fly=6
+2026-11-18T14:30:57Z up=3327 kbps=251 acl=48 wq=3648 rssi=-32 lq=0 tpl=4 afh=55 err=0 wtx=0 wrx=0 cpu=18 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=48 fly=6
+2026-11-18T14:30:58Z up=3328 kbps=257 acl=49 wq=6080 rssi=-26 lq=0 tpl=4 afh=23 err=0 wtx=0 wrx=0 cpu=19 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=49 fly=6
+2026-11-18T14:30:59Z up=3329 kbps=335 acl=64 wq=7296 rssi=-24 lq=0 tpl=4 afh=23 err=0 wtx=0 wrx=0 cpu=18 ba=2.0 own=1.0 h=4 er=20 ew=- fcc=0 done=65 fly=5
+2026-11-18T14:31:00Z up=3330 kbps=261 acl=50 wq=4864 rssi=-34 lq=0 tpl=4 afh=23 err=0 wtx=0 wrx=0 cpu=19 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=49 fly=6
+2026-11-18T14:31:01Z up=3331 kbps=169 acl=32 wq=4864 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=1.0 own=0.0 h=4 er=0 ew=- fcc=0 done=32 fly=6
+2026-11-18T14:31:02Z up=3332 kbps=205 acl=39 wq=6080 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=14 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=39 fly=6
+2026-11-18T14:31:03Z up=3333 kbps=179 acl=34 wq=3648 rssi=-36 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=34 fly=6
+2026-11-18T14:31:04Z up=3334 kbps=158 acl=30 wq=6080 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=14 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=30 fly=6
+2026-11-18T14:31:05Z up=3335 kbps=103 acl=20 wq=6080 rssi=-30 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=1.0 own=1.0 h=4 er=0 ew=- fcc=0 done=20 fly=6
+2026-11-18T14:31:06Z up=3336 kbps=300 acl=57 wq=4864 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=57 fly=6
+2026-11-18T14:31:07Z up=3337 kbps=300 acl=57 wq=3648 rssi=-30 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=57 fly=6
+2026-11-18T14:31:08Z up=3338 kbps=426 acl=81 wq=7296 rssi=-30 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=18 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=82 fly=5
+2026-11-18T14:31:09Z up=3339 kbps=429 acl=82 wq=4864 rssi=-24 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=81 fly=6
+2026-11-18T14:31:10Z up=3340 kbps=382 acl=73 wq=3648 rssi=-28 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=2.0 own=1.0 h=4 er=20 ew=- fcc=0 done=74 fly=5
+2026-11-18T14:31:11Z up=3341 kbps=331 acl=63 wq=4864 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=14 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=62 fly=6
+2026-11-18T14:31:12Z up=3342 kbps=131 acl=25 wq=3648 rssi=-36 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=12 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=25 fly=6
+2026-11-18T14:31:13Z up=3343 kbps=68 acl=13 wq=7296 rssi=-38 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=0.0 own=0.0 h=4 er=10 ew=- fcc=0 done=13 fly=6
+2026-11-18T14:31:14Z up=3344 kbps=99 acl=19 wq=3648 rssi=-24 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=0.0 own=0.0 h=4 er=0 ew=- fcc=0 done=19 fly=6
+2026-11-18T14:31:15Z up=3345 kbps=111 acl=20 wq=7296 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=0.9 own=0.9 h=4 er=9 ew=- fcc=0 done=20 fly=6
+2026-11-18T14:31:16Z up=3346 kbps=257 acl=49 wq=6080 rssi=-32 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=49 fly=6
+2026-11-18T14:31:17Z up=3347 kbps=252 acl=48 wq=6080 rssi=-34 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=16 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=48 fly=6
+2026-11-18T14:31:18Z up=3348 kbps=203 acl=39 wq=7296 rssi=-36 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=15 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=39 fly=6
+2026-11-18T14:31:19Z up=3349 kbps=456 acl=87 wq=3648 rssi=-8 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=13 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=87 fly=6
+2026-11-18T14:31:20Z up=3350 kbps=414 acl=79 wq=4864 rssi=-10 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=16 ba=3.0 own=1.0 h=4 er=20 ew=- fcc=0 done=79 fly=6
+2026-11-18T14:31:21Z up=3351 kbps=416 acl=80 wq=4864 rssi=-18 lq=0 tpl=4 afh=20 err=0 wtx=0 wrx=0 cpu=36 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=81 fly=5
+2026-11-18T14:31:22Z up=3352 kbps=347 acl=75 wq=0 rssi=-26 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=40 ba=2.0 own=0.0 h=4 er=10 ew=- fcc=0 done=79 fly=1
+2026-11-18T14:31:23Z up=3353 kbps=259 acl=64 wq=0 rssi=-24 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=36 ba=2.0 own=0.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:24Z up=3354 kbps=259 acl=64 wq=0 rssi=-18 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=41 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:25Z up=3355 kbps=259 acl=64 wq=0 rssi=-24 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=36 ba=1.0 own=1.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:26Z up=3356 kbps=259 acl=64 wq=0 rssi=-20 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=39 ba=2.0 own=1.0 h=4 er=20 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:27Z up=3357 kbps=259 acl=64 wq=0 rssi=-14 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=36 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:28Z up=3358 kbps=259 acl=64 wq=0 rssi=-22 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=20 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=62 fly=3
+2026-11-18T14:31:29Z up=3359 kbps=259 acl=64 wq=0 rssi=-18 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=18 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=66 fly=1
+2026-11-18T14:31:30Z up=3360 kbps=260 acl=64 wq=0 rssi=-22 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=29 ba=1.0 own=1.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:31Z up=3361 kbps=259 acl=64 wq=0 rssi=-18 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=28 ba=2.0 own=0.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:32Z up=3362 kbps=259 acl=64 wq=0 rssi=-20 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=34 ba=1.0 own=0.0 h=4 er=20 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:33Z up=3363 kbps=260 acl=64 wq=0 rssi=-22 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=41 ba=1.0 own=0.0 h=4 er=10 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:34Z up=3364 kbps=259 acl=64 wq=0 rssi=-16 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=28 ba=2.0 own=0.0 h=4 er=20 ew=- fcc=0 done=64 fly=1
+2026-11-18T14:31:35Z up=3365 kbps=116 acl=34 wq=0 rssi=-22 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=21 ba=2.0 own=0.0 h=4 er=- ew=- fcc=0 done=34 fly=1
+2026-11-18T14:31:36Z up=3366 kbps=0 acl=0 wq=0 rssi=-16 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=1.0 h=4 er=- ew=- fcc=0 done=0 fly=1
+2026-11-18T14:31:37Z up=3367 kbps=0 acl=0 wq=0 rssi=-14 lq=0 tpl=4 afh=74 err=0 wtx=0 wrx=0 cpu=1 ba=0.0 own=0.0 h=4 er=- ew=- fcc=0 done=0 fly=1
+2026-11-18T14:31:38Z LINK h=0
+2026-11-18T14:31:38Z LINK ptype=- status=0x02 h=0
+2026-11-18T14:31:38Z up=3368 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=4 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:39Z up=3369 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=3 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:40Z up=3370 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=3 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:41Z up=3371 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=2 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:42Z up=3372 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=1 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:43Z LINK h=-1
+2026-11-18T14:31:43Z up=3373 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=0 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:44Z up=3374 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=0 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:45Z up=3375 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=22 ba=0.0 own=1.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:46Z up=3376 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=21 ba=0.0 own=1.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:47Z up=3377 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=13 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:48Z up=3378 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=10 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:49Z up=3379 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=10 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:50Z LINK h=0
+2026-11-18T14:31:50Z up=3380 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=30 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:51Z up=3381 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=7 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:52Z up=3382 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=6 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:53Z up=3383 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:54Z up=3384 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=1 ba=0.0 own=1.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:55Z up=3385 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=0.0 h=0 er=- ew=- fcc=- done=0 fly=0
+2026-11-18T14:31:56Z LINK h=-1
+2026-11-18T14:31:56Z up=3386 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:57Z up=3387 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=6 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:58Z up=3388 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=6 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:31:59Z up=3389 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:00Z up=3390 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=5 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:01Z up=3391 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=10 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:02Z up=3392 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=21 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:03Z LINK h=5
+2026-11-18T14:32:03Z up=3393 kbps=9 acl=20 wq=0 rssi=-16 lq=0 tpl=4 afh=0 err=0 wtx=0 wrx=0 cpu=23 ba=1.0 own=1.0 h=5 er=- ew=- fcc=0 done=21 fly=0
+2026-11-18T14:32:04Z ENCODER ba-a2dp-aptx-hd
+2026-11-18T14:32:04Z up=3394 kbps=366 acl=82 wq=0 rssi=-12 lq=0 tpl=4 afh=0 err=0 wtx=0 wrx=0 cpu=23 ba=6.0 own=0.0 h=5 er=- ew=- fcc=0 done=81 fly=1
+2026-11-18T14:32:05Z CODEC aptX-HD 48000 Hz delay=16.0 ms
+2026-11-18T14:32:05Z LINK ptype=0x0018 status=0x00 h=5
+2026-11-18T14:32:05Z up=3395 kbps=614 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=0 err=0 wtx=0 wrx=0 cpu=19 ba=9.0 own=0.0 h=5 er=80 ew=- fcc=0 done=95 fly=2
+2026-11-18T14:32:06Z up=3396 kbps=614 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=28 ba=8.9 own=0.0 h=5 er=89 ew=- fcc=0 done=97 fly=1
+2026-11-18T14:32:07Z up=3397 kbps=614 acl=96 wq=0 rssi=-16 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=26 ba=10.0 own=0.0 h=5 er=90 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:08Z up=3398 kbps=614 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=24 ba=9.0 own=1.0 h=5 er=100 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:09Z up=3399 kbps=614 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=21 ba=9.0 own=0.0 h=5 er=90 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:10Z up=3400 kbps=615 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=29 ba=9.0 own=0.0 h=5 er=100 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:11Z up=3401 kbps=614 acl=96 wq=0 rssi=-12 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=35 ba=9.0 own=0.0 h=5 er=80 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:12Z up=3402 kbps=614 acl=96 wq=0 rssi=-8 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=29 ba=9.0 own=0.0 h=5 er=100 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:13Z up=3403 kbps=602 acl=96 wq=0 rssi=-14 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=29 ba=9.0 own=0.0 h=5 er=90 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:14Z up=3404 kbps=614 acl=96 wq=0 rssi=-10 lq=0 tpl=4 afh=79 err=0 wtx=3 wrx=6 cpu=19 ba=9.0 own=1.0 h=5 er=80 ew=- fcc=0 done=96 fly=1
+2026-11-18T14:32:15Z up=3405 kbps=364 acl=57 wq=5696 rssi=-42 lq=0 tpl=4 afh=79 err=0 wtx=9 wrx=851 cpu=26 ba=6.0 own=0.0 h=5 er=60 ew=- fcc=0 done=52 fly=6
+2026-11-18T14:32:16Z up=3406 kbps=459 acl=72 wq=7936 rssi=-16 lq=0 tpl=4 afh=79 err=0 wtx=13 wrx=2198 cpu=27 ba=6.0 own=0.0 h=5 er=70 ew=- fcc=0 done=73 fly=5
+2026-11-18T14:32:16Z STEP aptX-HD -> aptX
+2026-11-18T14:32:17Z up=3407 kbps=131 acl=29 wq=0 rssi=-18 lq=0 tpl=4 afh=79 err=0 wtx=11 wrx=2093 cpu=26 ba=3.0 own=1.0 h=5 er=- ew=- fcc=0 done=33 fly=1
+2026-11-18T14:32:18Z CODEC aptX 48000 Hz delay=200.0 ms
+2026-11-18T14:32:18Z up=3408 kbps=0 acl=0 wq=0 rssi=-14 lq=0 tpl=4 afh=79 err=0 wtx=24 wrx=3288 cpu=32 ba=0.0 own=0.0 h=5 er=- ew=- fcc=0 done=0 fly=1
+2026-11-18T14:32:19Z up=3409 kbps=1 acl=1 wq=0 rssi=-6 lq=0 tpl=4 afh=79 err=0 wtx=32 wrx=3496 cpu=38 ba=1.0 own=0.0 h=5 er=- ew=- fcc=0 done=0 fly=2
+2026-11-18T14:32:20Z up=3410 kbps=2 acl=3 wq=0 rssi=-8 lq=0 tpl=4 afh=79 err=0 wtx=24 wrx=3372 cpu=42 ba=1.0 own=1.0 h=5 er=- ew=- fcc=0 done=4 fly=1
+2026-11-18T14:32:21Z up=3411 kbps=0 acl=0 wq=0 rssi=-8 lq=0 tpl=4 afh=79 err=0 wtx=28 wrx=3276 cpu=27 ba=0.0 own=0.0 h=5 er=- ew=- fcc=0 done=0 fly=1
+2026-11-18T14:32:22Z LINK h=-1
+2026-11-18T14:32:22Z up=3412 kbps=1 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=17 wrx=3141 cpu=38 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:23Z up=3413 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=29 wrx=3368 cpu=34 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:24Z up=3414 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=36 wrx=3644 cpu=34 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:25Z up=3415 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=20 wrx=2745 cpu=25 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:26Z up=3416 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=2 wrx=18 cpu=4 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:27Z up=3417 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=19 wrx=686 cpu=11 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:28Z up=3418 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=7 wrx=1091 cpu=17 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:29Z up=3419 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=20 wrx=2538 cpu=25 ba=0.0 own=1.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:30Z up=3420 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=17 wrx=1695 cpu=19 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:31Z up=3421 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=10 wrx=517 cpu=5 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:32Z up=3422 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=14 wrx=587 cpu=7 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:33Z up=3423 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=14 wrx=671 cpu=20 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:34Z up=3424 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=18 wrx=751 cpu=12 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:35Z up=3425 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=22 wrx=844 cpu=20 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:36Z up=3426 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=22 wrx=917 cpu=15 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:37Z up=3427 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=26 wrx=1069 cpu=27 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:38Z up=3428 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=29 wrx=1371 cpu=23 ba=0.0 own=1.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:39Z up=3429 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=37 wrx=1903 cpu=34 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:40Z up=3430 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=36 wrx=2574 cpu=36 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:41Z up=3431 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=27 wrx=3209 cpu=43 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:42Z up=3432 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=28 wrx=3206 cpu=53 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:43Z up=3433 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=24 wrx=3052 cpu=37 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:44Z up=3434 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=18 wrx=2980 cpu=38 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:45Z up=3435 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=0 wrx=0 cpu=26 ba=0.0 own=2.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:46Z up=3436 kbps=0 acl=0 wq=0 rssi=- lq=- tpl=- afh=- err=0 wtx=12 wrx=1057 cpu=22 ba=0.0 own=0.0 h=- er=- ew=- fcc=- done=- fly=-
+2026-11-18T14:32:47Z STOP

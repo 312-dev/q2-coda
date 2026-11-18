@@ -20,8 +20,6 @@
 #define LINE_MS 30000      /* a log line when nothing is warm, plugged in or busy */
 #define FAST_DC 450        /* warm: a line every tick */
 #define FAST_BUSY 50
-#define FLUSH_MS 300000 /* the RAM lines to the card: every 5 min, a minute while fast or streaming, and at once on an event */
-#define FLUSH_FAST_MS 60000
 #define LOGS "/mnt/mmc/.q2muse/logs"
 #define STATE "/tmp/q2guard.state"
 #define STATE_TMP "/tmp/q2guard.state.tmp"
@@ -578,7 +576,7 @@ int main(int argc, char **argv) {
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
         if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
             (warn_due && now - last_warn >= WARN_GAP_MS) ||
-            now - last_flush >= (fast || bt_streaming() ? FLUSH_FAST_MS : FLUSH_MS)) {
+            now - last_flush >= (unsigned)flush_every(fast, bt_streaming())) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
             flush_start();
             if (warn_due) last_warn = now, warn_due = 0;

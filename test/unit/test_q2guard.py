@@ -397,6 +397,19 @@ def test_a_full_file_moves_0_to_1_at_the_next_flush_and_never_splits_a_line(L, t
     assert (d / 'q2-heat.0').read_text() == one
 
 
+def test_the_heat_log_keeps_four_files(L, tmp_path):
+    """q2-heat.0 to .3 of 256 kB: after a move 768 kB stay, about four hours of a line every 5 s (warm, busy or
+    plugged in), as long as the Bluetooth log's six (docs/internals.md#overheat-guardian)."""
+    d = tmp_path / 'logs'
+    log = new_log(L, d)
+    d.mkdir()
+    for k in range(4):
+        (d / f'q2-heat.{k}').write_text(str(k) * FILE_MAX)
+    L.heat_add(log, b'new\n')
+    assert flush(L, log, d) == 0
+    assert [(d / f'q2-heat.{k}').read_text()[:1] for k in range(4)] == ['n', '0', '1', '2']
+
+
 def test_card_away_then_back_flushes_in_order(L, tmp_path):
     """Unmounted (USB Transfer Files, pulled, read-only): the lines wait in RAM; when the card is back they are
     written in order, after what the card already had."""

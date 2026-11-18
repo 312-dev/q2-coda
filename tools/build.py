@@ -555,7 +555,11 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 # Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded.
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
-                    (0x42d09c, 0x0041463c, None, 0x004147a0))
+                    (0x42d09c, 0x0041463c, None, 0x004147a0), (0x406580, 0x0c100e38, 'jal', 'sbc_bp'))
+# SBC's bitpool (docs/internals.md#bluetooth-link-monitor): the SBC encoder thread's one sbc_encode call
+# (0x406580, the last site above) goes through bt_silence.S's sbc_bp, which takes the bitpool from the byte at
+# BT_SBC_POOL, the lesser of it and the thread's own; q2guard writes it (patch/q2bt.h's BT_SBC_POOL, the same).
+BT_SBC_POOL = BT_SILENCE + 0x200
 # platform_init's crash watchdog, checkappprocess.sh, forked pgrep "/release/bin/demo" every 2 s and rebooted when it
 # found none: demo gone. S90play runs demo and waits for it (BOOT_HOOK), so it reboots there instead, and the script
 # platform_init still starts ends at once: no process starts every few seconds for the life of the Q2.
@@ -2432,6 +2436,7 @@ def patch_bluealsa(raw):
     check(len(words)*4 <= BT_SILENCE - BT_DROP_PAYLOAD, 'Bluetooth DROP payload too long')
     words += [0] * ((BT_SILENCE - BT_DROP_PAYLOAD) // 4 - len(words))
     code, sym = bt_silence()
+    check(sym['sbc_pool'] == BT_SBC_POOL, 'SBC bitpool bytes not at BT_SBC_POOL')
     payload = struct.pack(f'<{len(words)}I', *words) + code
     append_payload(image, payload, BT_DROP_PAYLOAD, len(payload), 'bluealsa')
     struct.pack_into('<2I', image, fileoff(raw, BT_DROP),
