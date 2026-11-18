@@ -110,28 +110,49 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
 int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size);
 
 /* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
- * Under LDAC Auto with Quality's "Lower quality when the signal is weak" on, a link the radio
- * cannot keep up with is moved down a codec, aptX HD to aptX to SBC, and back up one at a time once
- * clean. */
-#define BT_STEP_WQ 4096         /* bytes waiting in the A2DP socket over this, */
-#define BT_STEP_STALL 2         /* with the controller's buffers full, this many seconds in a row */
-#define BT_STEP_CLEAN 60        /* seconds in a row with nothing waiting before a step up */
+ * Under LDAC Auto with Quality's Adapt to Signal on, a link the radio cannot keep up with is moved
+ * from aptX HD or aptX straight to SBC, whose bitpool then adapts with no gap (bt_sbc_step), and
+ * back to where it started once the link is clean and the band clear. */
+#define BT_STEP_WQ 4096         /* bt_sbc_step: bytes waiting in the A2DP socket over this, */
+#define BT_STEP_SHORT 90        /* bt_step: a second short, delivered under this % of the rate, */
+#define BT_STEP_STALL 2         /* either with every ACL buffer held, this many seconds in a row */
+#define BT_STEP_QUIET 50        /* kbit/s: a second under it, no buffer held, counts neither way */
+#define BT_STEP_CLEAN 60        /* seconds in a row not short, the band clear, before a step up */
+#define BT_STEP_AFH 60          /* the band clear: at least this many channels in the AFH map */
 #define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconfigure's gap, not counted either way */
-#define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch */
+#define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch, */
+#define BT_STEP_UNDONE_MS 300000  /* doubled each time a step up is undone within this, */
+#define BT_STEP_UP_MAX_MS 1440000 /* to this */
 /* "aptX-HD" 3, "aptX" 2, "SBC" 1, any other (LDAC, AAC, none) 0; and back */
 int bt_codec_rank(const char *codec);
 const char *bt_codec_name(int rank);
+/* A rank's rate on the link in kbit/s, its headers in, as the q2-bt log's kbps shows it: aptX HD
+ * 614 and aptX 412 at 48 kHz, SBC by its frame at bitpool own (33 when 0); at hz (48 kHz when 0).
+ * 0 for another rank. */
+int bt_codec_kbps(int rank, unsigned hz, int own);
 struct bt_step {
     int top;          /* the rank the stream was on before any step: never stepped above */
-    int stall, clean; /* seconds in a row congested, clean */
+    int stall, clean; /* seconds in a row short, clean */
     int have;         /* last is set */
     unsigned last;    /* ms of the last switch */
+    unsigned up_ms;   /* the wait before a step up, 0 BT_STEP_UP_MS */
+    int raised;       /* the last switch was up, at raised_at (ms) */
+    unsigned raised_at;
 };
-/* One line: allowed (bt_step_allowed), the codec's rank now, wq, fly (-1 not read) and the
- * controller's buffer count. The rank to select now, else 0. */
-int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs);
+/* What bt_step reads of a line (bt_sample's, bufs START's), -1 not read */
+struct bt_step_line {
+    int kbps, acl, done; /* kbit/s handed to the controller, its packets, those it completed */
+    int wq, fly, bufs;   /* bytes waiting in the A2DP socket, packets in flight, its ACL buffers */
+    int afh;             /* channels in the AFH map */
+    int own;             /* SBC: the encoder thread's own bitpool, 0 not known */
+    int lowered;         /* SBC: its bitpool below its own (bt_sbc_step's) */
+    unsigned hz;         /* the codec's sampling rate, 0 not known */
+};
+/* One line: allowed (bt_step_allowed), the codec's rank now and the line. The rank to select now,
+ * else 0. */
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, const struct bt_step_line *l);
 #define BT_LDAC_AUTO 2           /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
-#define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: the setting, on unless 0 (patch/bt_ui.c) */
+#define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: Adapt to Signal, on only at 1 (patch/bt_ui.c) */
 /* config.ini's text: 1 LDAC Auto with the setting on, 0 LDAC Auto with it off, -1 another choice
  * (or none saved) */
 int bt_step_allowed(const char *ini);

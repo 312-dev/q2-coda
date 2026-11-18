@@ -221,12 +221,24 @@ int bt_codec_rank(const char *codec) {
     return 0;
 }
 const char *bt_codec_name(int rank) { return codec_names[rank > 0 && rank < 4 ? rank : 0]; }
-/* Congested: the socket queued past BT_STEP_WQ and the controller holding every buffer, so the
- * radio, not the encoder or the player, is behind. Down at BT_STEP_STALL such seconds in a row;
- * up one rank after BT_STEP_CLEAN clean ones and BT_STEP_UP_MS since the last switch. The setting
+int bt_codec_kbps(int rank, unsigned hz, int own) {
+    static const int at48[4] = { 0, 259, 412, 614 };
+    if (rank < 1 || rank > 3) return 0;
+    int k = at48[rank];
+    if (rank == 1 && own > 0) k = (k * (13 + 2 * own) + 39) / 79; /* frames of 13 + 2 x bitpool */
+    return hz && hz < 400000 ? (int)(((unsigned)k * hz + 24000) / 48000) : k; /* no 64-bit math */
+}
+/* Short: the controller holding every buffer, something waiting, and what it delivered (kbps by
+ * done of acl packets) under BT_STEP_SHORT % of the codec's rate, so the radio, not the encoder or
+ * the player, is behind and the codec does not fit; a backlog with the rate whole is not. Down to
+ * SBC at BT_STEP_STALL such seconds in a row (aptX is not worth a stop: where aptX HD fell short,
+ * aptX did too). Back to where it started after BT_STEP_CLEAN clean seconds in a row: not short,
+ * the AFH map at BT_STEP_AFH or more and SBC's bitpool at its own; and the wait since the last
+ * switch, BT_STEP_UP_MS, doubled up to BT_STEP_UP_MAX_MS each time a step up is undone within
+ * BT_STEP_UNDONE_MS. A quiet second (little handed, no buffer held) counts neither way. The setting
  * turned off while stepped down: back to where it started, once. Another Quality choice: left to
  * it (stock's change selects that codec), and where it started forgotten. */
-int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs) {
+int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, const struct bt_step_line *l) {
     if (!rank || allowed < 0) { /* no codec known yet, or not one of the three: nothing to count */
         if (allowed < 0) s->top = rank;
         s->stall = s->clean = 0;
@@ -236,22 +248,34 @@ int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int 
     if (!allowed) {
         int back = rank < s->top ? s->top : 0;
         s->top = rank, s->stall = s->clean = 0; /* asked once: the next line sees it as the top */
-        if (back) s->have = 1, s->last = now;
+        if (back) s->have = 1, s->last = now, s->raised = 0;
         return back;
     }
     if (s->have && now - s->last < BT_STEP_SETTLE_MS) {
         s->stall = s->clean = 0;
         return 0;
     }
-    int full = fly >= 0 && bufs > 0 && fly >= bufs;
-    s->stall = wq > BT_STEP_WQ && full ? s->stall + 1 : 0;
-    s->clean = wq == 0 && fly >= 0 && !full ? s->clean + 1 : 0;
+    if (!s->up_ms) s->up_ms = BT_STEP_UP_MS;
+    int full = l->fly >= 0 && l->bufs > 0 && l->fly >= l->bufs;
+    if (!full && l->kbps >= 0 && l->kbps < BT_STEP_QUIET) return 0;
+    /* delivered: kbps by done of acl packets, in 32 bits (each held under 65536) */
+    unsigned kb = l->kbps > 0 ? (l->kbps < 65535 ? (unsigned)l->kbps : 65535u) : 0;
+    unsigned done = l->done > 0 ? (l->done < 65535 ? (unsigned)l->done : 65535u) : 0;
+    unsigned sent = l->acl > 0 ? kb * done / (unsigned)l->acl : 0;
+    unsigned want = (unsigned)bt_codec_kbps(rank, l->hz, l->own) * BT_STEP_SHORT;
+    int starved = full && l->wq > 0 && sent <= want / 100 && sent * 100 < want;
+    s->stall = starved ? s->stall + 1 : 0;
+    s->clean = !starved && l->fly >= 0 && l->afh >= BT_STEP_AFH && !l->lowered ? s->clean + 1 : 0;
     int to = 0;
-    if (s->stall >= BT_STEP_STALL && rank > 1)
-        to = rank - 1;
-    else if (s->clean >= BT_STEP_CLEAN && rank < s->top &&
-             (!s->have || now - s->last >= BT_STEP_UP_MS))
-        to = rank + 1;
+    if (s->stall >= BT_STEP_STALL && rank > 1) {
+        to = 1;
+        if (s->raised && now - s->raised_at < BT_STEP_UNDONE_MS)
+            s->up_ms = s->up_ms * 2 > BT_STEP_UP_MAX_MS ? BT_STEP_UP_MAX_MS : s->up_ms * 2;
+        s->raised = 0;
+    } else if (s->clean >= BT_STEP_CLEAN && rank < s->top &&
+               (!s->have || now - s->last >= s->up_ms)) {
+        to = s->top, s->raised = 1, s->raised_at = now;
+    }
     if (to) s->have = 1, s->last = now, s->stall = s->clean = 0;
     return to;
 }
@@ -333,7 +357,7 @@ static int coding_in(const char *ini, const int *rows, int n, int *on) {
     if (!coding || coding[0] < '0' || coding[0] > '9' || (coding[1] >= '0' && coding[1] <= '9'))
         return -1;
     v = ini_value(ini, "Q2POD", BT_STEP_KEY);
-    *on = !v || v[0] != '0' || (v[1] >= '0' && v[1] <= '9');
+    *on = v && v[0] == '1' && !(v[1] >= '0' && v[1] <= '9'); /* off until turned on */
     for (int i = 0; i < n; ++i)
         if (coding[0] - '0' == rows[i]) return rows[i];
     return -1;

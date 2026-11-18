@@ -8,9 +8,10 @@
  * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
  * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
- * step-down's setting on, a link the radio cannot keep up with is moved from aptX HD to aptX to SBC
- * and back (bt_step), each switch q2bt-codec's SelectCodec; and on SBC (under LDAC Auto, or SBC
- * chosen, with the same setting on) its bitpool is lowered a rung at a time and raised again
+ * step-down's setting on (Adapt to Signal), a link the radio cannot keep up with is moved from aptX
+ * HD or aptX straight to SBC and back (bt_step), each switch q2bt-codec's SelectCodec; and on SBC
+ * (under LDAC Auto, or SBC chosen, with the same setting on) its bitpool is lowered a rung at a
+ * time and raised again
  * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
  * takes from the next frame. Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
@@ -369,13 +370,13 @@ static void sbc_step(unsigned now, int have, const unsigned char *pb, int wq, in
     bt.sbc_failed = 1;
 }
 
-static void step(unsigned now, int wq, int fly, int bufs) {
+static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
     char line[160];
     step_reap(now);
     int rank = bt_codec_rank(bt.codec);
-    /* SBC with its bitpool lowered: the bitpool climbs back before the codec does */
-    int to =
-        bt_step(&bt.step, now, bt.allowed, rank, wq, rank == 1 && bt.sbc.pool ? -1 : fly, bufs);
+    struct bt_step_line l = { ls->kbps, ls->acl, ls->done, ls->wq,  ls->fly,
+                              bufs,     ls->afh, own,      bt.sbc.pool != 0, bt.hz };
+    int to = bt_step(&bt.step, now, bt.allowed, rank, &l);
     if (!to || bt.codec_pid > 0 || bt.codec_failed || !bt.pcm[0]) return;
     snprintf(line, sizeof line, "STEP %s -> %s", bt.codec, bt_codec_name(to));
     say('I', line);
@@ -471,7 +472,7 @@ static void sample(unsigned now, const struct bt_counts *c) {
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;
     sbc_step(now, have, pb, s.wq, s.fly, c->acl_pkts);
-    step(now, s.wq, s.fly, c->acl_pkts);
+    step(now, &s, have ? pb[1] : 0, c->acl_pkts);
 }
 static void tick(unsigned now) {
     struct bt_counts c;
