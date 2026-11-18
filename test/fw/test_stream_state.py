@@ -163,3 +163,32 @@ def test_download_ahead_steps_off_one_two_three(fw):
     assert n() == 2
     assert [step() for _ in range(4)] == [3, 0, 1, 2]
     assert writes[0] == (3, b'Q2POD', b'AHEAD') and n() == 2
+
+
+CACHED = b'/mnt/mmc/.foo/stream/9f2c/original/0/hello [VcF5].mp3'
+
+
+def length(fw, path=CACHED, app=b'foo'):
+    ms = C.c_uint(0)
+    how = fw.fn('stream_length', C.c_int, C.c_char_p, C.c_void_p)(path, C.byref(ms))
+    return how, ms.value
+
+
+@pytest.mark.parametrize('state, ms, want', [(b'get', 0, (2, 0)), (b'stall', 0, (2, 0)), (b'wait', 0, (2, 0)),
+                                             (b'get', 215000, (1, 215000)), (b'stall', 215000, (1, 215000)),
+                                             (b'done', 0, (0, 0)), (b'done', 215000, (0, 0))])
+def test_the_length_of_a_song_arriving_is_the_servers_or_unknown_and_a_whole_one_the_players(fw, state, ms, want):
+    world = World(fw, now=NOW)
+    world.files[STREAM] = status((state, 700, 20000, ms, CACHED))
+    world.mtime[STREAM] = NOW
+    assert length(fw) == want
+
+
+def test_a_song_outside_a_stream_cache_or_with_no_line_is_the_players(fw):
+    world = World(fw, now=NOW)
+    world.files[STREAM] = status(('get', 700, 20000, 0, A))
+    world.mtime[STREAM] = NOW
+    assert length(fw, A) == (0, 0)  # a card file, not the app's stream cache
+    assert length(fw, CACHED) == (0, 0)  # no line for it
+    assert length(fw, b'/mnt/mmc/Music/a.mp3') == (0, 0)
+    assert length(fw, b'/mnt/mmc/.foo/cat/x.mp3') == (0, 0)  # a catalogue row: its server length is the library's
