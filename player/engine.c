@@ -290,7 +290,13 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
                 return ENDED;
             if (!paused) dac_unmute(way, dac_stamp(1)); /* paused, the resume unmutes */
             origin = offset = source_frames(s);
-            /* paused, the position shows the seek only once playing again, as stock's */
+            /* paused, the position shows the seek only once playing again, as stock's; playing, it shows the target
+             * at once, so a song still arriving shows it while the read waits for its bytes (grow.c) */
+            if (seek && !paused) {
+                pthread_mutex_lock(&c->mu);
+                c->position = target;
+                pthread_mutex_unlock(&c->mu);
+            }
         }
         if (want_scan != scan) stretch_speed(sx, (scan = want_scan) < 0 ? -scan / 100.0 : scan / 100.0);
         if (volume >= 0 && (way == 1 || way == 2)) output_volume(out, volume);

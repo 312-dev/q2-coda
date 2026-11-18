@@ -383,8 +383,9 @@ there is none ([internals](internals.md#streaming-configuration)).
 
 **The player** (q2player, `source.c`). Opening a file under `/mnt/mmc/.<id>/`, it reads
 `/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the
-bytes there are, it waits (polling `.stream` every 100 ms) rather than end, and so does a seek past
-them. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
+bytes there are, it waits (polling `.stream` every 100 ms) rather than end. A seek searches only the
+bytes there are, so one inside them plays from its target at once, and one past them waits there,
+its position the target's, and plays from it as its bytes come. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
 once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
 
 **What the firmware shows.** A server song is loading while it is the song Now Playing shows and

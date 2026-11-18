@@ -92,6 +92,7 @@ One line per outcome in `~/.cache/q2-queue/events.log`; the main thread keeps on
 | `TIP_RED suites`                              | the trunk fails on its own (a merge suite, or the post tier's `smoke`); only `--fixes-tip` branches are taken | main thread spawns one worker to fix it, first                                                                                           |
 | `INFRA suites`                                | suites crashed twice; no branch is blamed                                                                     | nobody, once; see `QUEUE_STOPPED`                                                                                                        |
 | `QUEUE_STOPPED why`                           | two batches in a row crashed, or `q2 stop-all`                                                                | main thread reads the last `batch.log`, tells the user, `merge_queue.py resume` when fixed                                               |
+| `RESUMED`                                     | the running queue saw `merge_queue.py resume` (a stop, a red tip's hold, the crash count cleared)             | nobody                                                                                                                                   |
 | `POST_OK` / `POST_RED suites`                 | the sanitizers, coverage, the emulator smoke test and the leak hunt on the tip                                | `POST_RED`: main thread adds a backlog item for it (a red `smoke` is also `TIP_RED`; a `leak-hunt` names the metric and loop in its log) |
 | `PUSHED` / `PUSH_FAILED`                      | the trunk on origin                                                                                           | `PUSH_FAILED`: main thread tells the user                                                                                                |
 
@@ -128,7 +129,7 @@ There is no "pause" that leaves things running. To stop everything:
 2. `q2 stop-all --yes`. It holds the queue (the `STOP` file: the running batch ends within seconds and its branches go back on the ready list), stops every `q2-heavy` job by its scope, then ends every remaining q2 process by id, and prints what survived. `q2 stop-all` alone lists what it would stop.
 3. `q2 status` shows nothing running. Emulator leases are left to expire or are returned with `emu_pool.py put N`; slot 2 is never touched.
 
-To resume: `python3 tools/ci/merge_queue.py resume`, then spawn workers from the backlog; each reads its worktree's `STATUS.md`. Nothing is lost by a stop: the ready list, the registry and every branch are on disk, and branches are on origin.
+To resume: `python3 tools/ci/merge_queue.py resume` (a running service picks it up within one turn and logs `RESUMED`; it needs no stop and start, and clears a `TIP_RED` hold as well), then spawn workers from the backlog; each reads its worktree's `STATUS.md`. Nothing is lost by a stop: the ready list, the registry and every branch are on disk, and branches are on origin.
 
 An interruption by the user is not a stop: a worker the interruption ended is spawned again from its `STATUS.md`.
 
