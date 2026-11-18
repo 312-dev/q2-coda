@@ -584,7 +584,7 @@ m.top=m.node('window','playing_page')
 assert run(m,'addon_goto',m.string(QSONG),m.string('The Band'),0)==1 and m.top!=old
 assert [c[2] for c in m.calls if c[0]=='window_manager_close_window_force']==[old]
 m.page=m.top; m.destroy(old); m.answer(*OK,[('info','','No albums','','','')])
-assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums'],(m.requests[-1],m.labels()); passed()
+assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums',''],(m.requests[-1],m.labels()); passed()  # the page's note, its hint hidden (page_empty)
 m=AppMachine(); assert run(m,'addon_goto',m.string('/mnt/mmc/.soulseek/a.flac'),m.string('A'),1)==0
 m=QobuzMachine()
 for path in ('/mnt/mmc/Music/a.flac','/mnt/mmc/.qobuz','/mnt/mmc/.Bad_Id/a.flac','/mnt/mmc/.waytoolongforanidxx/a.flac',
