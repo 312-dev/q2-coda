@@ -436,6 +436,10 @@ int stream_line(const char *id, const char *path, sline_t *l);
 int stream_startable(const char *id, const char *path);
 int stream_app_of(const char *path, char *id, unsigned size);
 int stream_player_waits(const char *path);
+/* How sure the length of path is: 0 the player's or the library's stands (not a song of an app's
+ * stream cache, no .stream line, or its line is done); 1 the server's own length is known, *ms
+ * (the line's, else the catalogue's); 2 the song is still arriving and no length is known. */
+int stream_length(const char *path, unsigned *ms);
 void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
@@ -505,7 +509,7 @@ void addon_q2app(const char *id, char *path, unsigned n);
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
-int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+int catalogue_seconds(const char *path), catalogue_copy_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 int catalogue_missing(const char *path);          /* the payload's own lists' check before a play */
 unsigned catalogue_song_key(void *r, unsigned key); /* plays and hearts: a copy is its row */

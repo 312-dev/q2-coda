@@ -771,7 +771,8 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
   (`np_bar.c` `glyph_framed`, `heart_ring`) draws only while `ui_focus_shown()`.
 - **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Center
   without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
-  boots shown.
+  boots shown. Control Center's wheel still counts as the wheel for the one record (`cc_wheel`), so a page its
+  Center opens (the USB picker) shows its selection.
 
 ### Empty and offline
 
@@ -1199,13 +1200,20 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 - **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
   `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
   fill is dark). Volume ends at y 248, the toggles block's foot.
+- <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
+  in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
+  `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
+  (Ask Every Time, Transfer Files, USB Audio, Charge Only, USB Debugging) in 15 px Text Secondary ending 30 px from its
+  end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
+  mock's: 2 px wide, 5 px out. Center or a tap opens the [USB picker](#usb). No cable, no row: the sheet as before.
 - **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
 - **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
   Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
   guest plays).
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
   Accent Blue. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
-  (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume. The ring is not there
+  (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume, the USB row (only while
+  a cable is in). The ring is not there
   when the page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the
   wheel is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it
   back on the same stop.
@@ -1227,13 +1235,22 @@ and the blocks, the block and the right column, Now Playing and the sliders, the
 
 The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `design/mockups/mock_usb_connect.py`):
 
+- <a id="usb-picker"></a>**Picker**, "USB" (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`): Settings >
+  General's USB row (after Storage, the remembered choice as its value) and Control Center's [USB row](#cc-usb-row)
+  open it. Ask Every Time, Transfer Files, USB Audio, Charge Only (and USB Debugging in a `--dev` build), the
+  remembered one with the [picker](#list-row)'s check; under the rows the checked choice's note, 13 px Text Tertiary
+  on the text column, its first line centered 19 px under the rows and the next 17 px lower ("Plug into a computer to
+  choose."; USB Debugging's "A computer gets adb on every cable." and "Stop on its page asks again next time."). A pick
+  is remembered at once, and with a cable in that cable takes it at once; leaving Transfer Files while the computer
+  has the card asks first on the [confirmation card](#confirmation-card), consequential: "Switch to USB Audio?", "Eject
+  the SD card on your computer first, or a copy in progress stops.", Cancel and Switch. Ask Every Time only forgets.
 - **Chooser**, "Use USB For": Charge Only, Transfer Files, USB Audio (and USB Debugging in a `--dev` build), each
   with its Phosphor symbol (regular, 19 px, Text Secondary, white on the selection) and its caption under it while
   selected, the row grown to hold it; then Always Do This, a switch row, after a gap.
 - **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
   white; the eject's a bold check on Positive green), the title, a line in Text Secondary and Stop, the gray
   [button](#buttons) (`MODE_BUTTON`), ringed under the [focus rule](#focus-ring); a wheel turn on the page
-  shows the ring. Stop forgets a choice Always Do This saved; Ejected has no Stop.
+  shows the ring. Stop forgets a choice Always Do This or the picker saved; Ejected has no Stop.
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
   USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and

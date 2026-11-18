@@ -204,3 +204,30 @@ def test_a_q2_powering_the_bus_as_otg_host_keeps_stocks_charger_off(fw, pref):
     q.detect()
     q.status()
     assert q.gpio == (0 if pref else 1)
+
+
+def test_dark_the_otg_hosts_charger_stays_off_while_the_battery_reads_slow(fw):
+    """With the screen off the battery's reads slow (system.c ringnav_batt_level); the cable read after them in
+    get_battery_capacity, and its guard, still run every second, so the OTG host's charger stays off."""
+    q = Charging(fw, pref=1, mode=2, cable=1)
+    otg = fw.var('g_last_otgid', C.c_ubyte)
+    now = [100000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    for name in ('toolsGetBatterycapacity', 'toolsGetBatteryVoltage', 'toolsGetChargeStatus'):
+        fw.mock(name, lambda *_: 60)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    reads = [fw.fn(n, C.c_int) for n in ('ringnav_batt_level', 'ringnav_batt_voltage', 'ringnav_batt_status')]
+    q.config()
+    q.detect()
+    otg.value, q.gpio = 1, 1
+    before, detects = len(q.writes), len(fw.calls('stock_usb_detect_trampoline'))
+    for _ in range(35):
+        for read in reads:
+            read()
+        fw.var('g_usbdet_value', C.c_ubyte).value = q.detect()  # get_battery_capacity's cable read
+        q.status()
+        q.charge(1)
+        assert q.gpio == 1
+        now[0] += 1000
+    assert set(q.writes[before:]) <= {1}
+    assert len(fw.calls('stock_usb_detect_trampoline')) - detects == 35

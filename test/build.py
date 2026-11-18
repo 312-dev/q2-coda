@@ -312,7 +312,7 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SLEEP_TIMER, UI_ASSETS,
                       STATUS_BAR, STATUS_ROW_RIGHT, corner_inset, corner_x, immediate_values,
@@ -647,9 +647,16 @@ def validate_assets(directory):
         off = fileoff(stock, address)
         assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
         assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
-    # Stock's status sync and cover pollers sleep through the dark usleeps (navigation.c).
-    for address, name in DARK_POLLS:
+    # Stock's status sync sleeps through the dark usleep (playback_power.c), its cover threads through
+    # cover_wake.c's waits.
+    for address, name in (*DARK_POLLS, *COVER_WAITS):
         off = fileoff(stock, address)
+        assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
+        assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
+    # get_battery_capacity's three reads go through system.c's dark pacing (ringnav_batt_level and its two).
+    for address, load, word, name in BATTERY_READS:
+        off = fileoff(stock, address)
+        assert struct.unpack_from('<I', stock, fileoff(stock, load))[0] == word
         assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
         assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
     # The encoder thread's ts_read call goes through ringnav_ts_read (playback.c wheel_sample).

@@ -371,7 +371,8 @@ PL_MARK_PX = 20
 # Wi-Fi circle's is the link's (cc_wifi): wifi-slash off, wifi-none on but not joined, wifi-low to wifi-high by the
 # status row's level (Phosphor's fill levels draw the whole fan and fill as much of it as the signal), wifi-x with no
 # internet. The toggles' glyphs are at CC_INK, their optical size: each ink's longer side 18 px, so the wide fan and
-# the tall Bluetooth rune read as one size.
+# the tall Bluetooth rune read as one size. The USB row (while a cable is in, design/usb-row mock_usb_row.py) has
+# Phosphor's usb at 20 px in Text Primary and a 13 px bold caret-right in the chevron's grey.
 CC_ICONS = {'wifi_slash': ('wifi-slash-fill', 22, 0xffffff), 'wifi_0': ('wifi-none-fill', 22, 0xffffff),
             'wifi_1': ('wifi-low-fill', 22, 0xffffff), 'wifi_2': ('wifi-medium-fill', 22, 0xffffff),
             'wifi_3': ('wifi-high-fill', 22, 0xffffff), 'wifi_x': ('wifi-x-fill', 22, 0xffffff),
@@ -380,12 +381,14 @@ CC_ICONS = {'wifi_slash': ('wifi-slash-fill', 22, 0xffffff), 'wifi_0': ('wifi-no
             'eq': ('equalizer-fill', 22, 0xffffff),
             'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
             'back': ('skip-back-fill', 22, 0xffffff), 'forward': ('skip-forward-fill', 22, 0xffffff),
-            'pause': ('pause-fill', 30, 0xffffff), 'play': ('play-fill', 30, 0xffffff)}
+            'pause': ('pause-fill', 30, 0xffffff), 'play': ('play-fill', 30, 0xffffff),
+            'usb': ('usb-fill', 20, 0xffffff), 'chev': ('caret-right-bold', 13, token('chevron'))}
 # Light Mode's (control_center.c cc_glyph, <name>_l): the art is final, so the light half has its own: a toggle
-# off and the transport in the light half's Text Primary on the light block, the sliders' sun and speaker white on
-# the fill that is dark there. A toggle on keeps the white on Accent Blue.
+# off, the transport and the USB glyph in the light half's Text Primary on the light block, the USB row's chevron in
+# its chevron grey, the sliders' sun and speaker white on the fill that is dark there. A toggle on keeps the white on
+# Accent Blue.
 CC_LIGHT = {**{n: token('primary', True) for n in CC_ICONS if n not in ('sun', 'speaker')},
-            'sun': 0xffffff, 'speaker': 0xffffff}
+            'sun': 0xffffff, 'speaker': 0xffffff, 'chev': token('chevron', True)}
 CC_INK = {n: 18.0 for n in ('wifi_slash', 'wifi_0', 'wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bluetooth', 'airplay',
                             'car', 'leaf', 'eq')}
 

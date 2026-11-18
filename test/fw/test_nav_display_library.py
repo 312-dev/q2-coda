@@ -664,7 +664,7 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
     assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
-                                 'system_time', 'App Store', 'stock_2',
+                                 'USB', 'system_time', 'App Store', 'stock_2',
                                  'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
                                  'stock_7', 'stock_8', 'Restart', 'Shut Down']
     # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
@@ -683,6 +683,21 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
+
+
+@pytest.mark.parametrize('pick, shown', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),
+                                         (3, 'USB Audio')])
+def test_general_s_usb_row_shows_the_remembered_choice_and_opens_its_picker(fw, pick, shown):
+    """Settings > General > USB, after Storage (usb_ui.c usb_ui_row): Q2POD USBPICK as its value, beside the chevron;
+    Centre opens the USB picker (usb_pick_open)."""
+    ui = Ui(fw)
+    Config(fw, USBPICK=str(pick).encode())
+    page = Settings(fw, ui)
+    button = button_of(page.view, 'USB')
+    assert button.find('_setting_value').text == shown
+    fw.mock('window_create', lambda *_: 0)
+    ui.click(button)
+    assert len(fw.calls('window_create')) == 1
 
 
 @pytest.mark.parametrize('keytone', [0, 1])

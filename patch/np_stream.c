@@ -116,6 +116,25 @@ int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms) {
     return on;
 }
 
+/* How sure the length of the song Now Playing shows is (stream_length: 0 the player's stands, 1
+ * *ms is the server's, 2 unknown), for the times row, the bar, About and the car remote. Read at
+ * most every NS_LEN_MS: each paint asks. */
+#define NS_LEN_MS 200
+int np_stream_length(unsigned *ms) {
+    static struct {
+        unsigned key, at, ms;
+        int how;
+    } c __attribute__((section(".scratch")));
+    const char *p = ns_path();
+    unsigned now = (unsigned)time_now_ms(), key = p ? fnv(FNV_SEED, (const unsigned char *)p) : 0;
+    if (!c.at || key != c.key || now - c.at >= NS_LEN_MS) {
+        c.key = key, c.at = now | !now, c.ms = 0;
+        c.how = p ? stream_length(p, &c.ms) : 0;
+    }
+    *ms = c.ms;
+    return c.how;
+}
+
 static int ns_tick(const void *unused) {
     (void)unused;
     void *win = st.np_win;

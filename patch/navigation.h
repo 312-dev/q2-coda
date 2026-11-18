@@ -575,6 +575,9 @@ unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel
 void np_modes(void *win, void *canvas);
 void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
 int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms); /* and for the car remote */
+/* np_stream.c: how sure the playing song's length is (stream_length in peq.h): 0 the player's
+ * stands, 1 *ms is the server's, 2 unknown (shown as --:--) */
+int np_stream_length(unsigned *ms);
 int np_stream_error(void); /* np_stream.c: a server song stuck with its server down */
 void np_stream_cta_paint(void *canvas, int cy), np_stream_retry(void), np_stream_cta_click(int x);
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
@@ -811,7 +814,8 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 
 /* system.c */
 void power_poll(void);
-void heatguard_poll(void); /* heatguard.c: q2guard's cards, from power_poll */
+void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
 void power_rows(void *view);
@@ -1059,16 +1063,25 @@ void song_radio_poll(void);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
-/* usb_ui.c */
+/* usb_ui.c: the USB pages and the USB picker (docs/internals.md#usb-pages) */
 void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui_ejected(void *win);
-void usb_ui_paint(void *w, void *canvas);
-const char *usb_ui_title(const char *name);
-int usb_ui_key(void *top, unsigned key);
+void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
+const char *usb_ui_title(const char *name), *usb_ui_value(void);
+int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+/* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
+void usb_event_start(void);
+int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);
+unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
+/* bt_vol_event.c: BlueZ's PropertiesChanged on MediaTransport1, counted by a thread, taken by
+ * bt_volume_poll (docs/internals.md#headset-controls-and-volume) */
+void bt_vol_event_start(void);
+int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void),
+    bt_vol_event_wait(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
