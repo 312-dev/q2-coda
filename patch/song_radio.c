@@ -266,6 +266,10 @@ void song_radio_poll(void) {
                 player_playtime_and_length(&sec, &total);
                 local_start(r, sec, 0); /* it plays on from where it is now */
             }
+        } else if (code == 3) { /* the app has no one signed in: no fallback, a local radio would
+                                   hide why the server's is missing */
+            sr.ask = 0;
+            toast("Sign in to use Radio");
         } else if (code > 1 || now - sr.ask_at >= SR_WAIT_MS) {
             sr.ask = 0;
             toast("Radio isn't available for this song");
