@@ -1950,7 +1950,7 @@ FUNCTIONS = {
  # a window animator of the payload's own (art_zoom.c): stock's factory and window_animator_t with its vtable
  'window_animator_factory': ('void *', 'void'), 'window_animator_factory_register': ('int', 'void *, const char *, void *'),
  'window_animator_create': ('void *', 'int, const void *'),
- 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'),
+ 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'), 'htranslate_draw_curr': ('int', 'void *'),
  'widget_paint': ('int', 'void *, void *'),  # a widget painted into another's canvas (coverflow.c coverflow_home_strip)
  # Cover Flow's flip paints the tracks panel to a bitmap as stock's window snapshots do (coverflow.c flip_capture)
  'canvas_offline_create': ('void *', 'unsigned, unsigned, unsigned'),
@@ -2082,7 +2082,7 @@ FUNCTIONS = {
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
     # stock's htranslate window animator's own (its vtable, HTRANSLATE_VT): page_parallax.c runs each after its change
-    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90,
+    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90, 'htranslate_draw_curr': 0x696c40,
     "playlist_delete_click": 0x4b62c8,
     'volume_dialog_on_keyup': HOOKS['volume_dialog_on_keyup'][0],
     'keylock_rows': HOOKS['keylock_rows'][0],
@@ -2232,7 +2232,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
@@ -2445,10 +2445,11 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
-# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent
-# and draw_prev_window at +0x14 and +0x18, each pointed at page_parallax.c's, which runs stock's with its change (docs/internals.md#page-parallax).
+# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent,
+# draw_prev_window and draw_curr_window at +0x14, +0x18 and +0x1c, each pointed at page_parallax.c's, which runs stock's
+# with its change (docs/internals.md#page-parallax).
 HTRANSLATE_VT = 0x93b234
-HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'))
+HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'), (0x696c40, 'parallax_curr'))
 
 PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
@@ -2711,7 +2712,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         patch_word(patched, address, branch(0x04110000, address, syms['toolsIconvConvert']),
                    jal(ps['ringnav_cue_text']), 'CUE text read as UTF-8, GBK or Windows-1252')
     for slot, (old, name) in enumerate(HTRANSLATE_SLOTS):  # page push and pop with parallax (page_parallax.c)
-        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: the page under drifts and dims')
+        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: parallax, the status row on top')
     patch_word(patched, DIALOG_CLOSE, branch(0x04110000, DIALOG_CLOSE, syms['idle_add']),
                jal(ps['ringnav_dialog_close']), "a modal dialog's close skips one already gone")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,

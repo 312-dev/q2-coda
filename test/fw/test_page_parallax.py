@@ -14,7 +14,7 @@ WA_PREV_WIN, WA_OPEN, WA_PERCENT, WA_CANVAS, WA_TIME = 0x14, 0xac, 0xb4, 0xb8, 0
 
 
 class Animator:
-    """A window_animator_t: the page under (prev_win), its canvas, open or close, percent and time; stock's three
+    """A window_animator_t: the page under (prev_win), its canvas, open or close, percent and time; stock's
     htranslate functions recorded."""
     def __init__(self, fw, ui, open_=1):
         self.fw, self.block = fw, C.create_string_buffer(0x100)
@@ -26,7 +26,7 @@ class Animator:
         struct.pack_into('<Q', self.block, WA_CANVAS, C.addressof(self.canvas))
         self.block[WA_OPEN] = open_
         self.calls, self.fills = [], []
-        for name in ('htranslate_update', 'htranslate_draw_prev'):
+        for name in ('htranslate_update', 'htranslate_draw_prev', 'htranslate_draw_curr'):
             fw.mock(name, lambda wa, *_, n=name: self.calls.append((n, self.percent, self.time)) or 0)
         fw.mock('canvas_set_fill_color', lambda c, color, *_: struct.pack_into('<I', self.lcd, O['LCD_FILL_COLOR'], color & 0xffffffff))
         fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
@@ -67,3 +67,25 @@ def test_a_pop_runs_its_time_220_over_200_as_fast_and_a_push_its_own(fw, ui, ope
     a.time = time
     a.run('parallax_update')
     assert a.calls[0][2] == pytest.approx(seen) and a.time == pytest.approx(seen)
+
+
+def test_the_status_row_paints_over_both_pages_after_the_new_one(fw, ui):
+    """Every page is the whole screen (docs/oled-design.md#full-bleed), so the snapshots cover the bar stock painted
+    first in the frame: parallax_curr paints it again after stock's draw of the new page, this frame's page under and
+    percent readable through parallax_slide for that paint alone."""
+    a = Animator(fw, ui)
+    a.percent = 0.25
+    bar = ui.widget('system_bar', ui.wm, (0, 0, W, 58))
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar.at
+    slide = fw.fn('parallax_slide', C.c_void_p, C.POINTER(C.c_float))
+    seen = []
+
+    def paint(w, c, *_):
+        p = C.c_float(-1)
+        seen.append((w, c, slide(C.byref(p)), p.value))
+        return 0
+    fw.mock('widget_paint', paint)
+    assert a.run('parallax_curr') == 0
+    assert [c[0] for c in a.calls] == ['htranslate_draw_curr']
+    assert seen == [(bar.at, C.addressof(a.canvas), a.under.at, 0.25)]
+    assert not slide(C.byref(C.c_float()))  # only while the bar paints
