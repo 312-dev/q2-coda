@@ -326,10 +326,14 @@ def run(plan, build, python, smoke=False):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))
-        elif other in gate.NO_BUILD_ARG:
-            go(other, [python, other], is_heavy=True)
-        elif other.endswith('.py') and build:
-            go(other, [python, other, build], is_heavy=True)
+        elif other.startswith('test/') and other.endswith('.py'):
+            suite = gate.other_suite(other, python)
+            if suite is None:
+                print(f'== {other}: skipped: {gate.skip_reason(other)}')
+            elif suite.needs_build and not build:
+                print(f'== {other}: needs a build: run --run BUILD')
+            else:
+                go(other, suite.command(build or ''), is_heavy=True)
         else:
             print(f'== {other}: run it by hand (docs/building.md#tests says what it needs)')
     return failed
