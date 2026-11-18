@@ -1243,7 +1243,7 @@ def test_next_on_a_radios_last_song_queued_moves_to_the_next_one_at_once(fw, mcl
     assert len(s.deques[s.queue]) == 3 and len(fw.calls('player_start_queue')) == 1  # once
 
 
-def tagged(out):
+def song_tags(out):
     """toolsGetMusicInfo's title and artist (nothing else, so both read back whole: record_field)."""
     for at, value in ((0x280, b'Take It Easy'), (0x100, b'Eagles')):
         C.memmove(out + at, value + b'\0', len(value) + 1)
@@ -1286,7 +1286,7 @@ def test_a_card_apps_song_not_yet_played_takes_its_files_tags(fw, low, case):
     struct.pack_into('<I', record, O['REC_PATH'], low(path))
     if case == 'album':
         struct.pack_into('<I', record, O['REC_ALBUM'], low(b'Mine'))
-    fw.mock('toolsGetMusicInfo', lambda a, out, p, *_: 0 if case == 'untagged' else tagged(out))
+    fw.mock('toolsGetMusicInfo', lambda a, out, p, *_: 0 if case == 'untagged' else song_tags(out))
     fw.fn('card_record_tags', None, C.c_void_p)(record)
     reads = [C.string_at(a[2]) for _, a in fw.calls('toolsGetMusicInfo')]
     field = lambda o: C.string_at(struct.unpack_from('<Q', record, o)[0]) if struct.unpack_from('<Q', record, o)[0] else None
