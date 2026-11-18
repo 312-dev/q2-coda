@@ -1354,7 +1354,7 @@ def test_hearts_picked_on_a_stream_copy_are_the_server_rows_and_go_to_the_server
     row = listen_key(url('s1'))
     assert kept(0, row) == 3 and kept(0, listen_key('/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac')) == 0
     assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t3\t1700000000\n'.encode()
-    assert heart.badge() == '3'
+    assert heart.stars() == 3
 
 
 @in_fork
@@ -1436,9 +1436,9 @@ def test_a_server_songs_five_hearts_from_the_server_are_its_my_fav(rig, fw, firs
 @in_fork
 def test_a_server_favourite_fills_the_heart_while_its_copy_plays(rig, fw, ui, song, mcl):
     """Five hearts from the server put the row's path in My Fav; stock draws Now Playing's heart from the copy's
-    own path, which isn't there, so the badge's tick fills it by the row (and hides the badge)."""
+    own path, which isn't there, so the heart's tick fills it by the row, and the rating page shows five stars."""
     heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
-    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
 
 
 @in_fork
@@ -1470,7 +1470,7 @@ def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui,
     heart.pick(3)
     row = listen_key(url('s1'))
     assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
-    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.badge() == '3'
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.stars() == 3
 
 
 @in_fork
@@ -1478,7 +1478,7 @@ def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui,
 def test_a_server_rating_under_five_takes_the_copy_out_of_my_fav_too(rig, fw, ui, song, mcl, hearts):
     """A copy hearted here (stock's toggle puts the copy's own path in myfav) and then rated 4, or unstarred, on
     the server: ratings_in takes the copy's path out with the row's, the tick empties the heart stock drew from
-    the copy, and the badge shows the server's 4."""
+    the copy, and the rating page shows the server's 4 stars."""
     copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
     rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
     rig.poll()
@@ -1493,14 +1493,14 @@ def test_a_server_rating_under_five_takes_the_copy_out_of_my_fav_too(rig, fw, ui
     fw.mock('checkFavExist', lambda *_: copy in myfav(rig))  # stock's, by the copy's own path
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')
-    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
     row = listen_key(url('s1'))
     rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{row:08x}\ts1\t{hearts}\t1700000000\n'.encode()
     rig.poll(3)
     assert myfav(rig) == []
     ui.fire('rate_tick')
     assert ui.image[heart.heart] == 'play_unfav'
-    assert heart.badge() == (str(hearts) if hearts else None)
+    assert heart.stars() == hearts
 
 
 @in_fork
@@ -1522,7 +1522,7 @@ def test_five_hearts_from_the_server_put_the_row_in_my_fav_in_place_of_its_copy(
     fw.mock('checkFavExist', lambda *_: copy in myfav(rig))
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')
-    assert ui.image[heart.heart] == 'play_fav' and heart.badge() is None
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
 
 
 # Streaming Songs (library_settings.c): [Q2POD] LIBRARYSOURCE, its state for card apps in /tmp/q2-addon.library, and the

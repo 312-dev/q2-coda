@@ -124,10 +124,10 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
     }
 }
 
-/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page (not the rating page),
- * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
- * wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's song
- * playing does too (guest_ui.c guest_ui_keeps_lit). */
+/* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page (not the rating
+ * page), or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the
+ * lyrics wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's
+ * song playing does too (guest_ui.c guest_ui_keeps_lit). */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     if (now - st.keep_lit_at < 1000) return;
@@ -206,7 +206,8 @@ static void lyric_poll(void) {
     }
     int page = lrc && st.np_slide && widget_get_prop_int(st.np_slide, "value", 0) == 1;
     np_rate_poll(); /* the rating page's full screen, on it and off it (np_rate.c) */
-    if (st.np_full && !page && !np_rate_on()) np_full(0); /* full-screen lyrics end off their page */
+    if (st.np_full && !page && !np_rate_on())
+        np_full(0); /* full-screen lyrics end off their page */
     int touch = lrc && window_manager_get_top_window(wm) == st.np_win && pointer_down();
     int shown = page && lyrics_shown(),
         on = shown && widget_count_children(lrc) && mclGetLyricSize() > 0;

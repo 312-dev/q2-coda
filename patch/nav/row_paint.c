@@ -987,11 +987,11 @@ int ringnav_paint(void *w, void *canvas) {
     home_np_paint(w, canvas);    /* Home's first row's glyph (home_np.c) */
     sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
-    /* the state row and the times row's spinner, but under the rating page at rest full screen
-     * (np_rate.c), whose column covers them */
+    /* the state row, and a server song loading's spinner in the times row (np_stream.c), but under
+     * the rating page at rest full screen (np_rate.c), whose column covers their rows */
     if (!w || w != st.np_win || !st.np_full || !np_rate_on()) {
         if (w && w == st.np_win) np_modes(w, canvas);
-        np_stream_paint(w, canvas); /* a server song loading: the times row's spinner (np_stream.c) */
+        np_stream_paint(w, canvas);
     }
     coverflow_home_clip(w, canvas, 0);
     bar_title_fades(w, canvas, 0);

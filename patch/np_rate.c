@@ -39,9 +39,9 @@
 #define NR_DOTS_Y 292
 #define NR_DOT 6
 #define NR_DOT_GAP 7
-#define NR_FAINT 77 /* 30% of 255: the outlined stars and the other pages' dots */
+#define NR_FAINT 77       /* 30% of 255: the outlined stars and the other pages' dots */
 #define NR_TARGET_MS 4000 /* the target goes back to rest this long after the last turn */
-#define NR_POLL_MS 500    /* the rating read again while the page shows (a change from the server) */
+#define NR_POLL_MS 500 /* the rating read again while the page shows (a change from the server) */
 /* The glow (the mock-up's radial wash): its centre's screen row and the ellipse's radii, in px;
  * where it reaches black, in 1/256 of them; the cover's grid; each cell's colour boost (1/256)
  * about its luma, its gain (1/256), and the channel cap. The status row's band above the window is
@@ -148,13 +148,14 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
         fy &= 255;
         unsigned *row = px + y * w;
         for (int x = 0; x < w; ++x) {
-            int u = (x - cx) * 256 / NR_GLOW_RX, t2 = (u * u + v * v) * 256 / (NR_GLOW_END * NR_GLOW_END);
+            int u = (x - cx) * 256 / NR_GLOW_RX,
+                t2 = (u * u + v * v) * 256 / (NR_GLOW_END * NR_GLOW_END);
             if (t2 >= 256 || !top) {
                 row[x] = 0xff000000u;
                 continue;
             }
-            int f = (256 - t2) * (256 - t2) >> 8, fx = nr_clamp((2 * x + 1) * NR_GRID * 128 / w - 128, 0,
-                                                                 (NR_GRID - 1) * 256),
+            int f = (256 - t2) * (256 - t2) >> 8,
+                fx = nr_clamp((2 * x + 1) * NR_GRID * 128 / w - 128, 0, (NR_GRID - 1) * 256),
                 x0 = fx >> 8, x1 = x0 + (x0 < NR_GRID - 1),
                 grain = (int)(((unsigned)x * 73856093u ^ (unsigned)y * 19349663u) >> 8) % 3 - 1;
             fx &= 255;
@@ -187,7 +188,8 @@ static void *nr_glow(void) {
     if (nr->glow && key == nr->glow_key && w == nr->glow_w && h == nr->glow_h) return nr->glow;
     unsigned g[NR_GRID * NR_GRID];
     nr->glow_key = key;
-    if (w <= 0 || h <= 0 || !nr_cover_grid(image, g)) return nr->glow; /* the last cover's, if any */
+    if (w <= 0 || h <= 0 || !nr_cover_grid(image, g))
+        return nr->glow; /* the last cover's, if any */
     if (!nr->glow || w != nr->glow_w || h != nr->glow_h) {
         if (nr->glow) bitmap_destroy(nr->glow);
         nr->glow = bitmap_create_ex((unsigned)w, (unsigned)h, (unsigned)w * 4, LCD_BGRA8888);

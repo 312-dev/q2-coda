@@ -585,7 +585,8 @@ int ringnav_paint_bg(void *w, void *canvas) {
         ;
     else if (!pressed_pill(w, canvas))
         result = stock_paint_bg_trampoline(w, canvas);
-    np_rate_bg(w, canvas); /* Now Playing's glow and rating page (np_rate.c), on their pages' ground */
+    /* Now Playing's glow and rating page (np_rate.c), on their pages' ground */
+    np_rate_bg(w, canvas);
     void *wm = window_manager(), *bar = *(void *const *)system_bar;
     feedback_confirm_bar(w, canvas);
     modal_paint(w, canvas);

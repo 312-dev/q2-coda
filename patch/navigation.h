@@ -686,7 +686,7 @@ int np_rate_on(void);                   /* the slide_view on the rating page */
 int np_rate_key(unsigned key);          /* a wheel tick on the page: 1 taken */
 int np_rate_centre(void);               /* Centre on the page: 1 taken */
 unsigned np_rate_builds(void);          /* glows made (tests) */
-void np_full_set(int on); /* now_playing.c np_full: the column full screen, or back */
+void np_full_set(int on);               /* now_playing.c np_full: the column full screen, or back */
 int np_mode_click(void *target, void *event);
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
