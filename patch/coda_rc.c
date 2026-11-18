@@ -2,7 +2,8 @@
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
  * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate, queue and
- * radio commands, the pairing code and the connected phones in.
+ * radio commands, the pairing code and the connected phones in, and a card app to start for a cover the car wants
+ * (crc_cover_ask, which asks the app itself through its /tmp files).
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
@@ -432,6 +433,159 @@ static void ack_poll(void) {
     if (crc_now_ms() - pend.at > ACK_MS) pend_answer(1);
 }
 
+/* ---- covers the card lacks, asked of their card app (docs/internals.md#car-remote-covers) ---- */
+
+/* A GetCover for a server album with no cover on the card (crc_cover_ask, from coda_rc_lib.c's lib_cover) asks the
+ * album's card app, when its q2app says covers=1: /tmp/q2-<id>.coverask holds a line per cover asked and not yet
+ * answered, "<seq> <px> <album>", and the app answers each in its state file, coverack=<seq> <code>, in seq order
+ * (q2-subsonic coverask.go). An app that doesn't run is started by demo's shim, which /tmp/coda-rc.wake names it to.
+ * The GetCover's answer is held meanwhile, without stopping the loop: once the app has answered, or after
+ * COVER_HOLD_MS, it goes out through lib_cover, the cover if the app saved it, else NOT_FOUND, which the car shows as
+ * its placeholder and asks again when it next draws the row. An album is asked once: answered without a cover, or
+ * not answered in COVER_ASK_MS, it is not asked again for COVER_AGAIN_MS (the app remembers its own failures too). */
+#define COVER_HOLD_MS 5000    /* under the phone's 8 s for any answer (q2-auto-remote CodaSession.TIMEOUT_MS), past
+                                 which it closes the session */
+#define COVER_ASK_MS 60000    /* an app that hasn't answered by then is taken as having none */
+#define COVER_AGAIN_MS 600000 /* an album answered without a cover is not asked again for this long */
+#define COVER_HOLDS 8
+#define COVER_ASKS 16
+
+static struct {
+    crc_session *s;
+    unsigned req_id, limit, max_px, seq;
+    uint32_t at;
+    char art[48];
+} holds[COVER_HOLDS];
+
+static struct {
+    int state; /* 0 free, 1 waiting for the app's answer, 2 answered (or given up) at at */
+    unsigned seq, px;
+    uint32_t at;
+    char id[16], album[48];
+} asks[COVER_ASKS];
+static unsigned ask_seq;
+
+static int after(unsigned a, unsigned b) { return (int)(a - b) > 0; }
+
+/* the card app's q2app says covers=1 */
+static int covers_app(const char *id) {
+    char path[64], b[1024];
+    snprintf(path, sizeof path, "/mnt/mmc/.%s/q2app", id);
+    int n = read_file(path, b, sizeof b - 1);
+    if (n <= 0) return 0;
+    b[n] = 0;
+    for (char *l = b; l; l = strchr(l, '\n'), l = l ? l + 1 : 0)
+        if (!strncmp(l, "covers=1", 8) && (l[8] == '\n' || l[8] == '\r' || !l[8])) return 1;
+    return 0;
+}
+
+/* /tmp/q2-<id>.coverask: the app's asks still waiting; none, no file */
+static void asks_write(const char *id) {
+    char path[48], b[COVER_ASKS * 72];
+    int n = 0;
+    for (int i = 0; i < COVER_ASKS; ++i)
+        if (asks[i].state == 1 && !strcmp(asks[i].id, id))
+            n += snprintf(b + n, sizeof b - n, "%u %u %s\n", asks[i].seq, asks[i].px, asks[i].album);
+    snprintf(path, sizeof path, "/tmp/q2-%s.coverask", id);
+    if (n) crc_write_file(path, b, n, 0644);
+    else unlink_at(path);
+}
+
+int crc_cover_ask(crc_session *s, unsigned req_id, const char *art, unsigned limit, unsigned max_px, const char *id,
+                  const char *album, unsigned px) {
+    uint32_t now = crc_now_ms();
+    int a = -1;
+    if (strlen(id) > 15 || strlen(album) > 47 || strlen(art) > 47 || strchr(album, ' ') || strchr(album, '\n'))
+        return 0;
+    for (const char *k = id; *k; ++k)
+        if (!((*k >= 'a' && *k <= 'z') || (*k >= '0' && *k <= '9') || *k == '-')) return 0;
+    for (int i = 0; i < COVER_ASKS && a < 0; ++i)
+        if (asks[i].state && asks[i].px == px && !strcmp(asks[i].id, id) && !strcmp(asks[i].album, album)) a = i;
+    if (a >= 0 && asks[a].state == 2) {
+        if (now - asks[a].at < COVER_AGAIN_MS) return 0; /* asked lately, and the app had none */
+        asks[a].state = 0;
+        a = -1;
+    }
+    if (a < 0) {
+        if (!covers_app(id)) return 0;
+        for (int i = 0; i < COVER_ASKS; ++i) /* a free one, else the answer kept longest, else the oldest ask */
+            if (a < 0 || !asks[i].state || (asks[a].state && (asks[i].state < asks[a].state ||
+                                                             (asks[i].state == asks[a].state && after(asks[a].at, asks[i].at)))))
+                a = i;
+        if (!ask_seq) ask_seq = now | 1; /* above any seq an earlier run of the daemon gave since boot */
+        asks[a].state = 1, asks[a].seq = ask_seq++, asks[a].px = px, asks[a].at = now;
+        snprintf(asks[a].id, sizeof asks[a].id, "%s", id);
+        snprintf(asks[a].album, sizeof asks[a].album, "%s", album);
+        asks_write(id);
+        char sock[48], p[256];
+        snprintf(sock, sizeof sock, "/tmp/q2-%s.browse.sock", id);
+        if (access(crc_path(p, sizeof p, sock), 0)) { /* not running: demo starts it */
+            char line[20];
+            crc_write_file("/tmp/coda-rc.wake", line, snprintf(line, sizeof line, "%s\n", id), 0644);
+        }
+        crc_log("cover: asked %s for %s at %u px", id, album, px);
+    }
+    for (int i = 0; i < COVER_HOLDS; ++i)
+        if (!holds[i].s) {
+            holds[i].s = s, holds[i].req_id = req_id, holds[i].limit = limit, holds[i].max_px = max_px;
+            holds[i].seq = asks[a].seq, holds[i].at = now;
+            snprintf(holds[i].art, sizeof holds[i].art, "%s", art);
+            return 1;
+        }
+    return 0; /* every hold in use: NOT_FOUND now, and the app fetches it all the same */
+}
+
+/* the app's answers: asks it has answered, or that waited COVER_ASK_MS, are done; then holds whose ask is done, or
+ * that waited COVER_HOLD_MS, are answered */
+static void cover_poll(void) {
+    uint32_t now = crc_now_ms();
+    for (int i = 0; i < COVER_ASKS; ++i) {
+        if (asks[i].state != 1) continue;
+        int j = 0;
+        while (j < i && !(asks[j].state == 1 && !strcmp(asks[j].id, asks[i].id))) ++j;
+        if (j < i) continue; /* this app's file was read for an earlier one */
+        char path[48], b[1600];
+        snprintf(path, sizeof path, "/tmp/q2-%s.state", asks[i].id);
+        int n = read_file(path, b, sizeof b - 1), changed = 0;
+        b[n > 0 ? n : 0] = 0;
+        char *v = strstr(b, "coverack=");
+        if (v && v != b && v[-1] != '\n') v = 0;
+        unsigned acked = v ? (unsigned)strtoul(v + 9, 0, 10) : 0;
+        for (int k = i; k < COVER_ASKS; ++k)
+            if (asks[k].state == 1 && !strcmp(asks[k].id, asks[i].id) &&
+                ((v && !after(asks[k].seq, acked)) || now - asks[k].at >= COVER_ASK_MS))
+                asks[k].state = 2, asks[k].at = now, changed = 1;
+        if (changed) asks_write(asks[i].id);
+    }
+    for (int i = 0; i < COVER_HOLDS; ++i) {
+        if (!holds[i].s) continue;
+        int waiting = 0;
+        for (int k = 0; k < COVER_ASKS; ++k) waiting |= asks[k].state == 1 && asks[k].seq == holds[i].seq;
+        if (waiting && now - holds[i].at < COVER_HOLD_MS) continue;
+        crc_session *s = holds[i].s;
+        holds[i].s = 0;
+        if (s->state == S_AUTHED) lib_cover(s, holds[i].req_id, holds[i].art, 0, holds[i].limit, holds[i].max_px, 0);
+    }
+}
+
+/* the soonest a hold is over: ms from now, 0xffffffff none */
+static uint32_t cover_due(uint32_t now) {
+    uint32_t w = 0xffffffffu;
+    for (int i = 0; i < COVER_HOLDS; ++i)
+        if (holds[i].s) {
+            uint32_t d = holds[i].at + COVER_HOLD_MS + 1 - now;
+            d = d >= 0x80000000u ? 0 : d;
+            if (d < w) w = d;
+        }
+    return w;
+}
+
+/* a session gone: its held answers with it */
+static void cover_drop(crc_session *s) {
+    for (int i = 0; i < COVER_HOLDS; ++i)
+        if (holds[i].s == s) holds[i].s = 0;
+}
+
 /* ---- transport ---- */
 
 static int transport(crc_session *s, unsigned req_id, const uint8_t *p, size_t n) {
@@ -549,6 +703,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
 
 static void conn_close(conn *c) {
     if (pend.s == &c->s) pend.s = 0;
+    cover_drop(&c->s);
     crc_close(&c->s);
     if (c->fd >= 0) close(c->fd);
     c->fd = -1;
@@ -658,6 +813,7 @@ static int wait_ms(uint32_t now, uint32_t last_tick) {
     if (np.state == 1 && position_wanted() && (d = until(pos_pushed + 1000, now)) < w) w = d;
     if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
     if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
+    if ((d = cover_due(now)) < w) w = d;
     return ble_pending() ? 0 : (int)w;
 }
 
@@ -832,6 +988,7 @@ int main(int argc, char **argv) {
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
         np_poll();
         ack_poll();
+        cover_poll();
         online_poll();
         uint32_t now = crc_now_ms();
         mdns_poll(now);

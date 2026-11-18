@@ -32,3 +32,10 @@ int crc_shim_command(crc_session *s, unsigned req_id, const char *verb) {
     snprintf(shim_verb, sizeof shim_verb, "%s", verb);
     return crc_send(s, T_ACK, req_id, 0, 0);
 }
+char cover_asked[128]; /* the last crc_cover_ask: "<app id> <album> <px>" */
+int cover_hold;        /* what it answers: 1 held, 0 not */
+int crc_cover_ask(crc_session *s, unsigned req_id, const char *art, unsigned limit, unsigned max_px, const char *id,
+                  const char *album, unsigned px) {
+    snprintf(cover_asked, sizeof cover_asked, "%s %s %u", id, album, px);
+    return cover_hold;
+}
