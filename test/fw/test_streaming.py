@@ -864,11 +864,40 @@ def test_settings_toggle(fw):
     b.answer(rows=[(b'setting', b'shuffle', b'off', b'', b'', b''), (b'setting', b'repeat', b'context', b'', b'', b'')])
     b.click(0)
     assert b.request().endswith(b'\tshuffle\ton\n') and b.br.act == A_SET
+    lists = len(fw.calls('scroll_view_create'))
     b.answer()
-    assert b.top.state == S_LOAD  # asked again, as it may have changed
+    assert b.top.state == S_LOAD and b.br.hold  # asked again, as it may have changed, under the overlay
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page: the rows stay
     b.answer(rows=[(b'setting', b'repeat', b'context', b'', b'', b'')])
+    assert not b.br.hold and b.top.state == S_READY and len(fw.calls('scroll_view_create')) == lists + 1
     b.click(0)
     assert b.request().endswith(b'\trepeat\ttrack\n')
+
+
+def settings_changed(fw):
+    b = Browser(fw)
+    b.sp.track, b.sp.state = b'x', b'playing'
+    b.menu()
+    b.click(7)  # Playback Settings
+    b.answer(rows=[(b'setting', b'shuffle', b'off', b'', b'', b''), (b'setting', b'repeat', b'context', b'', b'', b'')])
+    b.click(0)
+    b.answer()  # shuffle on: the settings asked again
+    return b, len(fw.calls('scroll_view_create')), b.wk.id
+
+
+def test_return_gives_the_settings_reload_up_and_its_rows_stay(fw):
+    b, lists, asked = settings_changed(fw)
+    b.back()
+    assert not b.br.hold and b.br.depth == 2 and b.top.state == S_READY and b.top.n == 2
+    assert b.wk.running == 0 and len(fw.calls('scroll_view_create')) == lists and not fw.calls('navigator_back')
+    b.click(1)  # the rows work again: repeat
+    assert b.request().endswith(b'\trepeat\ttrack\n')
+
+
+def test_centre_while_the_settings_reload_does_nothing(fw):
+    b, lists, asked = settings_changed(fw)
+    b.click(1)
+    assert b.wk.id == asked and b.br.hold and b.br.act != A_SET
 
 
 def test_a_held_play_queues_a_track_and_downloads_a_playlist(fw):

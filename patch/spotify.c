@@ -635,7 +635,8 @@ static struct {
      * in lv[SPOT_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
      * nothing */
     char pend;
-    /* hold: the top level asked for again in place under the overlay (Retry), what it shows left as
+    /* hold: the top level asked for again in place under the overlay (Retry, Playback Settings after
+     * a change), what it shows left as
      * it is until its rows or its error are there; 1 + the state a cancel puts back */
     char hold;
 } br __attribute__((section(".scratch")));
@@ -997,8 +998,8 @@ static void got(void) {
         if (ok && act == A_SIGNOUT) br.until = time_now_ms() + SPOT_SIGNOUT_MS;
         if (login || (ok && act == A_SIGNOUT))
             base(S_PAIR);
-        else if (ok && act == A_SET)
-            l->state = S_LOAD, show();
+        else if (ok && act == A_SET) /* asked again under the overlay, its rows meanwhile */
+            hold_load(l);
         else if (ok && act == A_PLAY) {
             sp.loading = 1; /* not a timed-out play's 2, which spot_started takes as any track */
             sp.loading = !spot_started();
