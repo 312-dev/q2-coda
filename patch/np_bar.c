@@ -516,11 +516,11 @@ void *np_heart(void) {
         if (!p || !widget_get_visible(p)) return (void *)0;
     return h;
 }
-/* The Centre cycle's ring round the heart, its Rating stop: as glyph_framed's, 2 px at
+/* The Centre cycle's ring round the heart, its last stop: as glyph_framed's, 2 px at
  * NP_FOCUS_PAD from the heart's ink, drawn over the page with no fill, so the heart (draw_type
  * center) shows through it. */
 static void heart_ring(void *win, void *canvas) {
-    void *h = st.np_stage == NP_STAGE_RATING && ui_focus_shown() ? np_heart() : (void *)0;
+    void *h = st.np_stage == NP_STAGE_HEART && ui_focus_shown() ? np_heart() : (void *)0;
     unsigned bitmap[64]; /* bitmap_t */
     if (!h || widget_load_image(win, widget_get_prop_str(h, "image", ""), bitmap)) return;
     int x = I(h, W_W) / 2, y = I(h, W_H) / 2, p = NP_FOCUS_PAD + 2;

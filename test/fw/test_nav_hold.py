@@ -456,18 +456,6 @@ def lists(fw, lists_fields):
     return lambda name, ctype=C.c_int: ctype.from_address(base + lists_fields[name])
 
 
-@pytest.fixture(scope='module')
-def rates_fields(library):
-    """ratings.c's own state, ra: its field offsets as this build lays it out."""
-    return host.offsets(library.parent/'ratings.o', 'ra')
-
-
-@pytest.fixture
-def rates(fw, rates_fields):
-    base = C.addressof(fw.var('ratings__ra', C.c_char))
-    return lambda name, ctype=C.c_int: ctype.from_address(base + rates_fields[name])
-
-
 @pytest.fixture
 def stock_globals():
     """Stock's add mode and Select All flag, at their fixed addresses in conftest's map: zeroed, put back after."""
@@ -1415,24 +1403,25 @@ def test_holding_play_on_now_playing_opens_its_menu(hold, recs, ui, st):
     assert st('qm_press', C.c_ulonglong).value == 0x51
 
 
-def test_now_playings_menu_offers_its_folder_rating_and_more(hold, recs, ui, st):
+def test_now_playings_menu_offers_its_folder_and_more_and_no_rate(hold, recs, ui, st):
+    """No Rate row: the rating page is the one place to rate (docs/oled-design.md#rating-page)."""
     hold.now_playing([song(recs, i) for i in range(3)])
     hold.folders.add('/mnt/mmc/Music')
     st('rate_win', C.c_void_p).value = hold.page
     st('np_win', C.c_void_p).value = hold.page
     ui.nodes[ui.child(hold.page, 'image')].name = 'img_more'
     hold.hold()
-    assert hold.menu() == PLAYING_ROWS[:7] + ['Go to Folder'] + PLAYING_ROWS[7:] + ['Rate', 'More…']
+    assert hold.menu() == PLAYING_ROWS[:7] + ['Go to Folder'] + PLAYING_ROWS[7:] + ['More…']
 
 
-def test_a_favourite_reads_remove_and_its_rating_full(hold, recs, ui, st):
+def test_a_favourite_reads_remove(hold, recs, ui, st):
     hold.now_playing([song(recs, i) for i in range(3)])
     st('rate_win', C.c_void_p).value = hold.page
     hold.fw.mock('checkFavExist', lambda *_: 1)
     hold.hold()
     rows = hold.menu()
     assert 'Remove from Favorites' in rows and 'Add to Favorites' not in rows
-    assert rows[-1] == 'Rate  ' + '♥' * 5
+    assert not [r for r in rows if r.startswith('Rate')]
 
 
 def test_go_to_is_left_out_where_its_page_is_open(hold, recs, ui):
@@ -1828,29 +1817,6 @@ def test_more_opens_the_apps_page_while_its_queue_plays(hold, recs, ui, st):
     assert ui.dispatched == [] and ui.nodes[ui.top()].name == 'addon_page'
 
 
-def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
-    """The rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
-    each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
-    the picker, Return closes it with the rating as it was."""
-    use_set(st)
-    songs = [song(recs, i) for i in range(3)]
-    hold.now_playing(songs)
-    st('rate_win', C.c_void_p).value = hold.page
-    key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
-    kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
-    fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
-    assert fw.fn('rate_open', C.c_int)() == 1
-    view = hold.view()
-    assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
-    assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
-    assert ui.prop(view, '_ringnav_index', -1) == 2
-    ui.click(ui.find(view, '4 Hearts'))
-    ui.due('pick_run')
-    assert kept() == 4 and hold.dialog not in ui.stack
-    fw.fn('rate_open', C.c_int)()
-    assert ui.key(hold.dialog, KEY_RETURN) == STOP and hold.dialog not in ui.stack and kept() == 4
-
-
 class Rect(C.Structure):
     _fields_ = [('x', C.c_int), ('y', C.c_int), ('w', C.c_int), ('h', C.c_int)]
 
@@ -2142,12 +2108,11 @@ def test_a_list_changed_under_the_menu_runs_nothing(hold, recs, ui, fw):
     assert not fw.calls('batch_add_file') and ui.toasts == ['Queue unchanged']
 
 
-def test_an_album_rows_menu_shuffles_rates_and_goes_to_its_artist(hold, recs, ui):
+def test_an_album_rows_menu_shuffles_and_goes_to_its_artist(hold, recs, ui):
     albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
     hold.songs_page('localclass_page', albums, sel=1, cls=0xf003)
     hold.hold()
-    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Favorites', 'Rate Album', 'Add to Playlist',
-                           'Go to Artist']
+    assert hold.menu() == ['Play Next', 'Play Last', 'Shuffle', 'Add to Favorites', 'Add to Playlist', 'Go to Artist']
     assert hold.title() == 'Revolver'
 
 
@@ -2160,28 +2125,7 @@ def test_an_albums_favourite_is_kept_for_its_next_menu(hold, recs, ui):
     assert not ui.toasts and '/mnt/data/ringnav-album-ratings' in hold.card.files
     hold.hold()
     rows = hold.menu()
-    assert 'Remove from Favorites' in rows and 'Rate Album  ' + '♥' * 5 in rows
-
-
-def test_rate_album_opens_the_picker_on_its_hearts_and_rates_that_album(hold, recs, ui, st, fw):
-    albums = [recs(album=a, artist='The Beatles', kind=4, id_=i + 1) for i, a in enumerate(('Help!', 'Revolver'))]
-    hold.songs_page('localclass_page', albums, sel=0, cls=0xf003)
-    hold.hold()
-    hold.menu()
-    hold.pick('Add to Favorites')  # Help!: five hearts
-    hold.hold()
-    hold.menu()
-    hold.pick('Rate Album  ' + '♥' * 5)
-    view = hold.view()  # the inset modal's picker, on the album's five hearts
-    assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', '', '', '', 'check']
-    ui.click(ui.find(view, '4 Hearts'))  # a heart less than it opened on, kept
-    ui.due('pick_run')
-    hold.hold()
-    assert 'Rate Album  ' + '♥' * 4 + '♡' in hold.menu()
-    ui.key(hold.dialog, KEY_RETURN)
-    fw.fn('ringnav_select', None, C.c_void_p, C.c_int, C.c_int)(hold.list, 1, 2)
-    hold.hold()
-    assert 'Rate Album' in hold.menu() and hold.title() == 'Revolver'  # its own: none
+    assert 'Remove from Favorites' in rows and not [r for r in rows if r.startswith('Rate')]
 
 
 @pytest.mark.parametrize('sel, opened', ((1, [2]), (0, [])))  # 2: DISPLAY_COVERFLOW
@@ -3277,13 +3221,14 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
     assert titles() == 'DBAC'
 
 
-@pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 5), ('library', 'Remove from Favorites', 0),
-                                                ('playing', 'Add to Favorites', 5), ('playing', 'Remove from Favorites', 0)])
+@pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 1), ('library', 'Remove from Favorites', 0),
+                                                ('playing', 'Add to Favorites', 1), ('playing', 'Remove from Favorites', 0)])
 def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, st, recs, mcl, tmp_path, row, hearts,
                                                                        where):
     """Add to and Remove from Favorites on a server song, its Library row or its Stream Cache copy on Now Playing,
-    write the song's ratings.out line as Now Playing's heart does: the row's key and sid, five hearts or none, and
-    its kept 1-4 cleared. Remove on the copy takes the row out of My Fav too, where a star from the server put it."""
+    write the song's ratings.out line as Now Playing's heart does: the row's key and sid, like=1 or like=0, its
+    kept stars left as they were. Remove on the copy takes the row out of My Fav too, where a star from the server
+    put it."""
     from test_catalogue import APP, Rig, listen_key, myfav, song_row, url
     copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
     rig = Rig(fw, tmp_path)
@@ -3291,7 +3236,7 @@ def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, s
     rig.poll()
     key = listen_key(url('s1'))
     if hearts == 0:  # starred on the server: the row in My Fav
-        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{key:08x}\ts1\t5\t1600000000\n'.encode()
+        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{key:08x}\ts1\tlike=1\t1600000000\n'.encode()
         rig.poll(3)
         assert myfav(rig) == [url('s1')]
     use_set(st)
@@ -3309,8 +3254,8 @@ def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, s
     hold.hold()
     assert row in hold.menu()
     hold.pick(row)
-    assert hold.card.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\t{hearts}\t1700000000\n'.encode()
-    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key) == 0
+    assert hold.card.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\tlike={hearts}\t1700000000\n'.encode()
+    assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key) == 3
     if hearts == 0:  # the copy's row: out of My Fav with it (the Library row's own path is stock's to delete)
         assert myfav(rig) == ([] if where == 'playing' else [url('s1')])
 

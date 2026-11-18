@@ -293,11 +293,10 @@ def test_rate_hearts_the_playing_song_and_now_playing_shows_them(fw, ui, mcl, re
     q2.tick()
     assert q2.files.pop(ACK) == b'30 0\n' and q2.now()['hearts'] == '3'
     assert not fw.calls('batch_add_file')
-    q2.files[CMD] = b'31 rate 5 12\n'  # Favorites: batch-select's Add on the queue's row, as the menu's
+    q2.files[CMD] = b'31 rate 5 12\n'  # five stars, kept as the others: no like (My Fav is the heart's alone)
     q2.tick()
-    assert q2.files.pop(ACK) == b'31 0\n'
-    (_, args), = fw.calls('batch_add_file')
-    assert args[:2] == (0xf001, 0xf00a) and [a[0] for _, a in fw.calls('batch_set_selectitem')] == [2]
+    assert q2.files.pop(ACK) == b'31 0\n' and q2.now()['hearts'] == '5'
+    assert not fw.calls('batch_add_file') and not fw.calls('deleteMusicFromFav')
     q2.files[CMD] = b'32 rate 4 11\n'  # not the playing song: NOT_FOUND, nothing kept
     q2.tick()
     assert q2.files.pop(ACK) == b'32 3\n'
@@ -361,7 +360,7 @@ def test_modes_follow_now_playings_buttons_both_ways(fw, ui, mcl, recs):
 
 def test_a_card_apps_streaming_song_can_be_rated(fw, ui, mcl, recs):
     """A card app's song streamed from its download (no library record: id 0) plays as a card list (0xf001), so it
-    has hearts and the picker's rate_song rates it (ratings.c, through its catalogue row); coda-rc names it by its
+    has stars and rate_song rates it (ratings.c, through its catalogue row); coda-rc names it by its
     server id and sends the record's id, 0, which is what the shim compares."""
     q2 = Q2(fw, ui, recs, songs=0)
     q2.songs = [recs(id_=0, path='/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].flac', name='hello [VcF5].flac',

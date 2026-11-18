@@ -32,7 +32,7 @@
 #define CR_ONLINE "/tmp/coda-rc.online" /* coda_rc.c online_poll, read by carremote_page.c */
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
 #define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
-#define CR_HEARTS_MS 5000 /* the playing song's hearts read again at least this often */
+#define CR_HEARTS_MS 5000 /* the playing song's stars read again at least this often */
 #define CR_NOTE_MS 4000   /* a toast stays in Now Playing for the car this long (NowPlaying.notice) */
 
 static struct {
@@ -45,8 +45,8 @@ static struct {
     char pair_code[8]; /* the code the Dialog shows */
     char pair_name[32]; /* the phone asking, for the toast */
     int toast_what;
-    int hearts; /* the playing song's, as rate_now; read at hearts_at for hearts_id, hearts_gen */
-    unsigned hearts_at, hearts_id, hearts_gen;
+    int hearts; /* the playing song's stars, as rate_now; read at hearts_at for hearts_id */
+    unsigned hearts_at, hearts_id;
     char note[96]; /* the toast shown last, for the car, until note_at + CR_NOTE_MS; note_n counts them */
     unsigned note_at, note_n;
 } cr __attribute__((section(".scratch")));
@@ -149,12 +149,13 @@ static void cr_queue(void *q, unsigned pos) {
     free(b);
 }
 
-/* The playing song's hearts: again on a new song, a My Fav change made here (catalogue_fav_gen) or
- * every CR_HEARTS_MS, as stock's own lists change My Fav without telling. */
+/* The playing song's stars (the protocol's hearts): again on a new song, after a Rate from here or
+ * every CR_HEARTS_MS, as the rating page and the server change them without telling. The heart, the
+ * like, is not the rating and is not sent. */
 static int cr_hearts(unsigned id) {
-    unsigned now = time_now_ms(), gen = catalogue_fav_gen();
-    if (!cr.hearts_at || id != cr.hearts_id || gen != cr.hearts_gen || now - cr.hearts_at >= CR_HEARTS_MS)
-        cr.hearts = rate_now(), cr.hearts_id = id, cr.hearts_gen = gen, cr.hearts_at = now | 1;
+    unsigned now = time_now_ms();
+    if (!cr.hearts_at || id != cr.hearts_id || now - cr.hearts_at >= CR_HEARTS_MS)
+        cr.hearts = rate_now(), cr.hearts_id = id, cr.hearts_at = now | 1;
     return cr.hearts;
 }
 
@@ -427,7 +428,7 @@ static void cr_command(void) {
         unsigned at, n;
         void *r = queue_now(&at, &n);
         int ok = r && I(r, REC_ID) == w ? rate_now_set(v) : -1;
-        cr.hearts_at = 0; /* 1 to 4 hearts move no My Fav generation: read them now */
+        cr.hearts_at = 0; /* the new stars: read them now */
         cr_now();
         cr_ack(seq, ok < 0 ? 3 : !ok);
     } else if (verb && __isoc99_sscanf(verb, " jump %d %d", &v, &w) == 2 && v >= 0) {

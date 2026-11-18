@@ -112,7 +112,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
     Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
-    Ratings rows' filled and outlined hearts, Now Playing's rating page's stars (filled and outlined, 44 px and the
+    Ratings rows' filled and outlined stars (14 px, and white on the bar), Now Playing's rating page's stars (filled and outlined, 44 px and the
     wheel's 52 px target) in Text Primary (each half's), and Streaming's service marks in the folder's inks, all from the vendored
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
@@ -201,7 +201,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           *((n, art.ROW_ICON_PX, 0 if n.endswith('_l') else 0xffffff) for n in wifi),
                           *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
                           *((n, art.ROW_ICON_PX, blue if n == 'np_fav' else rgb) for n, rgb in glyphs.items()),
-                          *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates),
+                          *((n, art.RATE_PX, {'d': 0xffffff, 'l': 0, 'w': 0xffffff}[n[-1]]) for n in rates),  # Text Primary
                           *((n, px, c) for n, (px, c) in stars.items()),
                           *((n, art.STREAM_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in marks),
                           *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus),
@@ -415,8 +415,8 @@ def test_the_return_key_s_marks_are_a_magnifier_an_arrow_and_a_check_white_and_t
             assert at(*p)[3] == 0, p
 
 
-def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
-    """A filled heart inks its middle, the outlined one leaves it clear."""
+def test_oleds_ratings_rows_stars_are_phosphors_filled_and_outlined_star():
+    """A Ratings row's filled star inks its middle, the outlined one leaves it clear."""
     got = art.images(theme.builtins()[0])
     mid = art.RATE_PX // 2
     for name, middle in (('oled_rate_on_d', True), ('oled_rate_off_d', False)):

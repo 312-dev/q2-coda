@@ -326,9 +326,10 @@ CIRCLE_LOCK_PX = 10
 CHECK_PX = 12  # a picker's current choice (settings.values.switch, navigation.c paint_radio): the accent, white on the bar
 # The confirmation's glyph after a shuffle (feedback.c feedback_shuffled): bold, the accent's top tone in both halves
 CONFIRM_GLYPH_PX = 56
-# A Ratings row's hearts (ratings.c rate_hearts_paint): heart-fill for the song's, heart for the rest, regular, in the
-# folder's inks (Text Secondary in each half, white on the bar)
+# A Ratings row's stars (ratings.c rate_stars_paint): star-fill for the song's, star for the rest, regular, in Text
+# Primary in each half and white on the bar (RATE_INKS), no colour
 RATE_PX = 14
+RATE_INKS = inks('primary', 'd', 'l', 'w')
 # Now Playing's rating page (np_rate.c NR_STAR, NR_STAR_BIG): star-fill up to the rating and star for the rest,
 # regular, Text Primary in each half (STATE_INKS); the payload draws the rest's outlines at 30% over the glow. The
 # wheel's target draws at NP_STAR_BIG_PX, 1.18 times as large (the approved mock-up's scale)
@@ -346,7 +347,7 @@ TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for
 # picker's check in the accent off the bar
 MENU_ICON_PX = 19
 MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
-              'vinyl-record', 'microphone-stage', 'folder', 'heart-half', 'clock-counter-clockwise', 'list-numbers',
+              'vinyl-record', 'microphone-stage', 'folder', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
               'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
@@ -769,10 +770,10 @@ def images(t):
     out |= {f'{prefix}_circle_lock_{k}': phosphor('lock-simple-fill', CIRCLE_LOCK_PX, c) for k, c in FOLDER_INKS.items() if k != 'w'}
     # Folder view's folder glyph (song_rows.c folder_row): Text Secondary, white on the selection
     out |= {f'{prefix}_folder_{k}': phosphor('folder', ROW_ICON_PX, c, ROW_INK) for k, c in FOLDER_INKS.items()}
-    # feedback.c's confirmation after a shuffle, a Ratings row's hearts and Streaming's service marks
+    # feedback.c's confirmation after a shuffle, a Ratings row's stars and Streaming's service marks
     out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, on)
-    out |= {f'{prefix}_rate_{state}_{k}': phosphor(glyph, RATE_PX, c) for state, glyph in (('on', 'heart-fill'), ('off', 'heart'))
-            for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_rate_{state}_{k}': phosphor(glyph, RATE_PX, c) for state, glyph in (('on', 'star-fill'), ('off', 'star'))
+            for k, c in RATE_INKS.items()}
     out |= {f'{prefix}_npstar_{state}{big}_{k}': phosphor(glyph, px, c) for state, glyph in (('on', 'star-fill'), ('off', 'star'))
             for big, px in (('', NP_STAR_PX), ('_big', NP_STAR_BIG_PX)) for k, c in STATE_INKS.items()}
     for k, c in FOLDER_INKS.items():

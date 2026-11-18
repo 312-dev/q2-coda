@@ -175,7 +175,7 @@ HOOKS = {
     'tidalPlaylistDetailThd': (0x48c178, 'ringnav_tidal_playlist', 'tidalplaylist'),
     'tidalAlbumDetailThd': (0x48c33c, 'ringnav_tidal_album', 'tidalalbum'),
     'tidalColTracksThd': (0x489074, 'ringnav_tidal_favs', 'tidalfavs'),
-    # Ratings (ratings.c rate_bind): Now Playing's heart, held, opens the picker
+    # Now Playing (nav/now_playing.c ringnav_playing): its heart, the like (ratings.c rate_bind), and its pages
     'playing_page_init': (0x53e334, 'ringnav_playing', 'playing'),
     # The Wi-Fi signal (system.c ringnav_wifi_signal): the driver's rx_signal instead of an ioctl
     # that takes the radio out of power save; the status bar and the network monitor (a bal) poll it

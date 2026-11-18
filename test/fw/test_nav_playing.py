@@ -1167,7 +1167,7 @@ def test_reopening_the_page_mid_wait_shows_the_target_again(fw, ui, mcl, st):
 # screen off.
 NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
                            for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
-REST, SHUFFLE, REPEAT, RATING = range(4)
+REST, SHUFFLE, REPEAT, HEART = range(4)
 
 
 def cpress(now, at, held=60):
@@ -1199,9 +1199,9 @@ def test_the_wheel_moves_the_ring_and_changes_nothing(fw, ui, mcl, st):
     now, modes, _ = ringed(fw, ui, mcl, st)
     assert now.key(KEY_NEXT) == STOP and st.np_stage == REPEAT and modes == []  # shuffle stays off
     now.key(KEY_NEXT)
-    assert st.np_stage == RATING and modes == []
+    assert st.np_stage == HEART and modes == []
     now.key(KEY_NEXT)  # the last stop: the ring stays
-    assert st.np_stage == RATING
+    assert st.np_stage == HEART
     now.key(KEY_PREV), now.key(KEY_PREV), now.key(KEY_PREV)
     assert st.np_stage == SHUFFLE and modes == []
     (t,) = ui.due('np_stage_end')  # each tick restarts the stage's timeout
@@ -1209,6 +1209,8 @@ def test_the_wheel_moves_the_ring_and_changes_nothing(fw, ui, mcl, st):
 
 
 def test_centre_works_the_ringed_control_and_the_ring_stays(fw, ui, mcl, st):
+    clicks = []
+    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: clicks.append(w) or 0)
     now, modes, releases = ringed(fw, ui, mcl, st)
     cpress(now, 201000)
     assert modes == [2] and st.np_stage == SHUFFLE  # shuffle on, the ring still on it
@@ -1217,8 +1219,11 @@ def test_centre_works_the_ringed_control_and_the_ring_stays(fw, ui, mcl, st):
     cpress(now, 202000)  # Repeat One
     assert modes == [2, 1] and st.np_stage == REPEAT
     now.key(KEY_NEXT)
-    cpress(now, 202500)  # the heart: its rating picker, the cycle at rest behind it
-    assert st.np_stage == REST and releases == [] and modes == [2, 1]
+    cpress(now, 202500)  # the heart: a tap on it, its like on or off (no rating picker: the rating page has the stars)
+    fav = ui.lookup(now.art_page, "img_fav", 1)
+    assert clicks == [fav] and st.np_stage == HEART and releases == [] and modes == [2, 1]
+    assert [a[1:3] for _, a in fw.calls('pointer_event_init')][-1:] == [(O['EVT_CLICK'], fav)]  # a click on the heart
+    assert not fw.calls('navigator_to')
 
 
 def test_without_the_heart_the_ring_ends_at_repeat(fw, ui, mcl, st):
