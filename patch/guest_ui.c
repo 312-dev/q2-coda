@@ -657,6 +657,7 @@ static int set_click(void *ctx, void *event) {
     case R_NAME:
         search_strip_note("Guests and AirPlay see this name");
         search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
+        search_strip_return(STRIP_SAVE);
         search_strip_text("Guest Play", play_name(s, sizeof s), GU_NAME_MAX, name_done);
         break;
     case R_CONNECT:
@@ -778,11 +779,13 @@ static int hot_click(void *ctx, void *event) {
     case 1: /* the hotspot is named as Guest Play is */
         search_strip_note("Guests and AirPlay see this name");
         search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
+        search_strip_return(STRIP_SAVE);
         search_strip_text("Guest Play", play_name(s, sizeof s), GU_NAME_MAX, name_done);
         break;
     case 2:
         search_strip_note("Guests type it to join the Q2's Wi-Fi");
         search_strip_secret(); /* dots on the strip, as every password's */
+        search_strip_return(STRIP_GO);
         search_strip_text("Hotspot", gv("hotspot_pass"), GU_PASS_MAX, pass_done);
         break;
     }

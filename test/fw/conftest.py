@@ -169,6 +169,16 @@ def text(value):
     return C.create_string_buffer(value if isinstance(value, bytes) else value.encode())
 
 
+# The letter strip's return key's marks (peq.h STRIP_*), which an edit's _strip_return picks (search_strip.c ss_ret_kind)
+STRIP_AUTO, STRIP_GO, STRIP_SEARCH, STRIP_SAVE = range(4)
+
+
+def strip_return(fw, edit):
+    """The return mark a caller gave its edit (widget_set_prop_int's calls, mocked or not), None if none."""
+    got = [a[2] for _, a in fw.calls('widget_set_prop_int') if a[0] == edit and a[1] and C.string_at(a[1]) == b'_strip_return']
+    return got[-1] if got else None
+
+
 # Fakes more than one test file uses.
 def block(fw, data=b'', size=None):
     """A heap block of data and a NUL, or of size bytes exactly, so ASan sees a byte past it."""

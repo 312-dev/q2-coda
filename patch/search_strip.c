@@ -92,7 +92,7 @@
 #define SS_VISIBLE ((SS_RUN_R - SS_RUN_L - SS_PAD) / SS_STEP) /* cells in the run: 10 */
 #define SS_FADE 22       /* the run's letters fade out over this at an edge with more past it */
 #define SS_FADE_SLICE 2  /* ... a slice of this many columns at a time */
-#define SS_RET_MARK 20   /* the return mark's image (tools/art.py RETURN_PX), centred on the key */
+#define SS_RET_MARK 20   /* the return marks' images (tools/art.py RETURN_PX), centred on the key */
 #define SS_TEXT_MAX 64   /* characters typed, at most (a WPA passphrase is 63) */
 #define SS_TITLE_W 233   /* a result's title, at most; the artist takes the rest */
 #define SS_ARTIST_MIN 40 /* an artist with less room than this is left out */
@@ -258,6 +258,7 @@ static struct {
     signed char nudge;         /* ... held at the edge the text is nudged toward, -1 or 1 */
     short grab_x;              /* ... where it is on the sheet */
     unsigned loupe_at, loupe_timer, nudge_timer; /* the loupe shown at; its timer; the nudge's */
+    int ret; /* the return key's mark its caller asked for, STRIP_* (peq.h; ss_ret_kind) */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -1193,12 +1194,19 @@ static void ss_run_letter(void *canvas, int e, int x, unsigned rgb, int fade_l, 
             ss_cell_ink, &c);
 }
 
+/* The return key's mark (docs/oled-design.md#text-entry), by what submitting does: the kind its
+ * caller asked for (a search's magnifier, a name's or a value's check, the arrow), else a magnifier
+ * on the query line (a search box no page names, as TIDAL's) and the arrow anywhere else. */
+static int ss_ret_kind(void) {
+    return ss.ret ? ss.ret : ss.form == SS_FORM_QUERY ? STRIP_SEARCH : STRIP_GO;
+}
+
 /* The strip (docs/oled-design.md#text-entry): a pill in the raised grey; the set switcher docked
  * at its left, its set's name on a #2C2C2E pill, the accent's while the wheel is on it; the
- * return key docked at its right, an accent circle with the return mark in white, turned to a
- * white circle (in either half) with the mark in the accent while the wheel is on it; between them
- * the run, a cell of each character in Text Primary from the first shown, the lit one on an accent
- * box (or under its pop). The highlights show while the strip has the wheel. */
+ * return key docked at its right, an accent circle with its mark (ss_ret_kind) in white, turned to
+ * a white circle (in either half) with the mark in the accent while the wheel is on it; between
+ * them the run, a cell of each character in Text Primary from the first shown, the lit one on an
+ * accent box (or under its pop). The highlights show while the strip has the wheel. */
 static void ss_strip_paint(void *canvas, unsigned primary, unsigned accent, int light) {
     int y0 = SS_STRIP_Y, on = !ss.focus;
     fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, SS_STRIP_RX - SS_STRIP_X, SS_STRIP_H },
@@ -1225,7 +1233,12 @@ static void ss_strip_paint(void *canvas, unsigned primary, unsigned accent, int 
     int ret = on && ss_on_ret();
     fill_box(canvas, &(rect_t){ SS_RET_L, y0, SS_STRIP_H, SS_STRIP_H },
              RGBA(ret ? 0xffffff : accent), SS_STRIP_R);
-    paint_art(ss.sheet, canvas, theme_art(ret ? "search_return_a" : "search_return_w"),
+    static const char *const marks[][2] = {
+        [STRIP_GO] = { "search_return_go_w", "search_return_go_a" },
+        [STRIP_SEARCH] = { "search_return_search_w", "search_return_search_a" },
+        [STRIP_SAVE] = { "search_return_save_w", "search_return_save_a" },
+    };
+    paint_art(ss.sheet, canvas, theme_art(marks[ss_ret_kind()][ret]),
               SS_RET_L + (SS_STRIP_H - SS_RET_MARK) / 2, y0 + (SS_STRIP_H - SS_RET_MARK) / 2);
     if (pop) ss_pop_paint(canvas);
 }
@@ -1584,6 +1597,7 @@ int library_search_open(void *ctx, void *event) {
     ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;
     if (!ss.kind) free(ss.match), ss.match = (void *)0;
     ss.set = SS_SET_UPPER, ss.stop = 1; /* on A (the user's mock-up) */
+    ss.ret = STRIP_SEARCH;
     ss.label = "Search your music";
     ss_sheet("Search");
     ss_place(0, SS_FORM_QUERY, 0);
@@ -1597,7 +1611,7 @@ void playlist_rename_open(int id, const char *name) {
     if (ss.page || id < 0 || id >= 100 ||
         !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
-    ss.rename = id + 1, ss.stop = 1;
+    ss.rename = id + 1, ss.stop = 1, ss.ret = STRIP_SAVE;
     tk_snprintf(ss.text, sizeof ss.text, "%s", name ? name : "");
     ss.cur = (int)strlen(ss.text);
     ss_sheet("Rename Playlist");
@@ -1608,7 +1622,7 @@ void playlist_rename_open(int id, const char *name) {
  * submitting makes the playlist (ringnav_playlist_create). */
 void playlist_new_open(void) {
     if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return;
-    ss.create = 1, ss.stop = 1;
+    ss.create = 1, ss.stop = 1, ss.ret = STRIP_SAVE;
     ss_sheet("New Playlist");
     ss_place(window_under(window_manager(), ss.page), SS_FORM_ROW, 0);
 }
@@ -1648,7 +1662,8 @@ static char ss_box_label[48] __attribute__((section(".scratch")));
  * Wi-Fi password or network name in a field under "Password" or "Network Name"; a box whose page
  * names its row (the edit's _strip_label: an EQ preset's Name, a band's Frequency, a card app's
  * field) in that row as a cell; any other box, a search's, on the query line, its tips the
- * placeholder. 1 when it opened. */
+ * placeholder. The edit's STRIP_RETURN picks the return key's mark (ss_ret_kind). 1 when it
+ * opened. */
 int search_strip_box(void *kb, void *edit, const char *title) {
     if (ss.page || !kb || !edit) return 0;
     int top = geom_val(V_BAR);
@@ -1659,6 +1674,7 @@ int search_strip_box(void *kb, void *edit, const char *title) {
     widget_set_prop_int(kb, "h", 320 - top);
     widget_on(kb, EVT_DESTROY, ss_closed, 0);
     ss.box = edit;
+    ss.ret = widget_get_prop_int(edit, STRIP_RETURN, STRIP_AUTO);
     ss.secret = ss_secret_box(edit);
     widget_get_text_utf8(edit, ss.text, sizeof ss.text);
     ss.cur = (int)strlen(ss.text);
@@ -1706,14 +1722,17 @@ void search_strip_secret(void) { strip_secret = 1; }
 /* The next search_strip_text's row's label (Bluetooth's "Name"): the text a cell after it. */
 static const char *strip_label __attribute__((section(".scratch")));
 void search_strip_label(const char *label) { strip_label = label; }
+/* The next search_strip_text's return key's mark, STRIP_* (ss_ret_kind; unset, the arrow). */
+static int strip_return __attribute__((section(".scratch")));
+void search_strip_return(int kind) { strip_return = kind; }
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *)) {
     const char *note = strip_note, *label = strip_label;
-    int secret = strip_secret;
-    strip_note = 0, strip_secret = 0, strip_label = 0;
+    int secret = strip_secret, ret = strip_return;
+    strip_note = 0, strip_secret = 0, strip_label = 0, strip_return = 0;
     if (ss.page || !done || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
-    ss.box = ss.page, ss.done = done, ss.note = note;
+    ss.box = ss.page, ss.done = done, ss.note = note, ss.ret = ret;
     ss.secret = secret ? SS_SECRET_PASS : SS_SECRET_NONE;
     ss.max = max > 0 && max < SS_TEXT_MAX ? max : SS_TEXT_MAX;
     tk_snprintf(ss.text, (unsigned)ss.max + 1, "%s", text ? text : "");

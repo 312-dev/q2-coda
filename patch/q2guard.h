@@ -58,6 +58,14 @@ char *strstr(const char *, const char *);
 int atoi(const char *);
 #define O_RDONLY 0
 #define O_RDWR 2
+#define O_NONBLOCK 0x80
+#define SEEK_SET 0
+/* q2log's: the unified log's feeds and demo's requests (q2guard.c) */
+int unlink(const char *), ftruncate(int, long), getpid(void), *__errno_location(void);
+void (*signal(int, void (*)(int)))(int);
+#define SIGTERM 15
+#define SIGUSR1 16 /* MIPS's numbers */
+#define EPIPE 32
 #define WNOHANG 1
 #define CLOCK_MONOTONIC 1
 #define RB_POWER_OFF 0x4321fedc
@@ -221,6 +229,9 @@ void heat_add(card_log *l, const char *line); /* one line, with its newline */
 int heat_flush(card_log *l, const char *dir);
 /* The same for any log: dir/name.0, rotated into name.1 once it has reached max bytes */
 int log_flush(card_log *l, const char *dir, const char *name, long max);
+
+/* set by q2guard.c's signal handler (demo's or S90play's request, a SIGTERM): bt_sleep returns early */
+extern volatile int guard_woke;
 
 /* q2guard.c's readers, which q2bt.c shares */
 int slurp(const char *path, char *buf, int size); /* the file's start, NUL-terminated: its length, -1 none */

@@ -1663,6 +1663,8 @@ class Stall:
         return len(data)
 
     def write(self, fd, data, n, *_):
+        if fd == 2:  # the unified log's line on stderr (ulog.c: usb_record.c's at a wake)
+            return n
         assert self.handles[fd][0] == STALL and self.record is not None
         self.record += C.string_at(data, n)
         return n

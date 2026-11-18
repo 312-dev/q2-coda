@@ -166,13 +166,15 @@ static void usb_mode(int audio) {
     g_usbmode = audio ? USB_MODE_DAC : USB_MODE_FILES;
 }
 
-/* A line in demo's log (/tmp/q2-demo.log in a --dev build): each plug and unplug, how it was seen and
- * how long after its edge, and a computer's answer to the probe (docs/internals.md#usb-cable-events). */
+/* A line in the unified log (ulog.c, docs/internals.md#unified-log): each plug and unplug, how it was
+ * seen and how long after its edge, and a computer's answer to the probe
+ * (docs/internals.md#usb-cable-events). */
 static void usb_log(const char *what, int ms) {
     char line[96];
-    int n = ms < 0 ? tk_snprintf(line, sizeof line, "q2 usb: %s\n", what)
-                   : tk_snprintf(line, sizeof line, "q2 usb: %s, %d ms\n", what, ms);
-    if (n > 0) write(2, line, (unsigned)n < sizeof line ? (unsigned)n : sizeof line - 1);
+    if (ms < 0)
+        ulog('I', "usb", what);
+    else if (tk_snprintf(line, sizeof line, "%s, %d ms", what, ms) > 0)
+        ulog('I', "usb", line);
 }
 
 /* The probe's storage gadget stopped, if it is running. */

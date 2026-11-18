@@ -7,7 +7,7 @@ import ctypes as C
 
 import pytest
 
-from conftest import O, Files
+from conftest import O, Files, STRIP_SEARCH, strip_return
 from test_streaming import (A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
                             L_LIST, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
 
@@ -1246,3 +1246,10 @@ def test_now_playing_from_the_menu_opens_its_page_over_the_browser(fw):
     b.click(0)  # Now Playing, first with a track
     ui = fw.var('spotify__ui', Ui)
     assert ui.page and ui.page != b.br.page and b.w.text[ui.title] == 'Title'
+
+
+def test_the_search_box_gives_the_strip_its_magnifier(fw):
+    b = Browser(fw)
+    b.menu()
+    b.click(SEARCH)
+    assert strip_return(fw, b.br.edit) == STRIP_SEARCH

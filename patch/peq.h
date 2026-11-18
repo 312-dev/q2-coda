@@ -635,6 +635,11 @@ int video_start(const char *file, int radio); /* videos.c */
  * keyboard is up. */
 #define EDIT_NAME "q2_edit"
 void *edit_create(void *item, const char *input_type, int y, int h);
+/* The letter strip's return key's mark (search_strip.c ss_ret_kind), by what submitting the text
+ * does: an edit's STRIP_RETURN int prop, or search_strip_return for search_strip_text. STRIP_AUTO
+ * (unset) leaves it to the strip: a magnifier on its query line, else the arrow. */
+#define STRIP_RETURN "_strip_return"
+enum { STRIP_AUTO, STRIP_GO, STRIP_SEARCH, STRIP_SAVE };
 const char *output_device(char *vol); /* videos.c */
 void dac_take(void);                  /* videos.c */
 /* navigation.c: the theme's font for role on w, or stock's; canvas text's face, 0: the system
