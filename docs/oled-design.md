@@ -55,8 +55,7 @@ the window is the whole screen and each lays its content out from `bar_foot`, or
 high, so it rests where it did; a header that stands above the row's foot (an artist's monogram, About's cover) is the
 page's own paint under the row. The row's background is clear in every state (the bar is a disabled widget, so AWTK
 paints its disable style) and it fills nothing over any page. A page slide draws both pages' full-screen snapshots and
-then the row over them (`page_parallax.c` `parallax_curr`). A press
-on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
+then the row over them (`page_parallax.c` `parallax_curr`). A press on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
 
 ### Corners
 
