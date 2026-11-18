@@ -742,8 +742,9 @@ def guard_run(monkeypatch, answers, stacks):
     monkeypatch.setattr(smoke, 'guard_files', files)
     e = smoke.Emulator.__new__(smoke.Emulator)
     e.pid, e.log = 1, lambda m: None
-    e.stack, e.settle = stack, lambda box=None: None
-    e.q2emu = lambda *a: keys.append(a)
+    monkeypatch.setattr(e, 'stack', stack)
+    monkeypatch.setattr(e, 'settle', lambda box=None: None)
+    monkeypatch.setattr(e, 'q2emu', lambda *a: keys.append(a))
     e.guard()
     return keys
 
