@@ -139,8 +139,8 @@ static int sheet_repaint(const void *unused) {
     return 0;
 }
 /* A sheet gone: its material goes with the last one. What it drew straight into the screen's buffer
- * goes too, cleared to black: a page under the status row's band (Edit Home's) paints nothing
- * there, so its pixels stayed; every window paints its own part again on the next pass. */
+ * goes too, cleared to black: a page that paints nothing at the status row (Edit Home's) leaves
+ * them there, so its pixels stayed; every window paints its own part again on the next pass. */
 static int modal_gone(void *win, void *event) {
     int open = 0;
     for (int i = 0; i < MODAL_MAX; ++i) {

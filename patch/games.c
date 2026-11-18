@@ -514,8 +514,8 @@ int snake_step(struct snake *s) {
 #define VORTEX_GAIN 100
 #define FRAME_MS 33
 #define SAVE_MS 2000 /* a move's save waits this long; a power-off loses at most this */
-#define OLED_CELL 24 /* Sudoku under OLED: the grid's 216 px in the content area's 224 */
-#define OLED_ROOM 224 /* ... the window's rows above y 282 on screen, under the 58 px status row */
+#define OLED_CELL 24 /* Sudoku under OLED: the grid's 216 px in the 224 between the rests */
+#define OLED_ROOM 224 /* ... the rows from y 58 (the status row's foot) to y 282 on screen */
 #define OLED_DIGIT_PX 19 /* the design's 16 px, AWTK's size */
 #define TURN (6.2831853f / 1024)
 #define POP_MS 240 /* Vortex: a broken brick's flash fading out */
@@ -1007,7 +1007,7 @@ static void paused_popup(void *canvas, int over) {
  * every cell holding the cursor's digit (the one being picked) dark on the tone. */
 static void sudoku_paint(void *canvas, unsigned tone) {
     const struct sudoku *s = &g->sud;
-    /* the grid in the content area, y 58 to 282 on screen (docs/oled-design.md#the-screen) */
+    /* the grid between the rests, y 58 to 282 on screen (docs/oled-design.md#the-screen) */
     int cell = OLED_CELL, x0 = (375 - 9 * cell) / 2, y0 = (OLED_ROOM - 9 * cell) / 2;
     int same = g->picking ? g->pick : s->cell[s->cur] & 15;
     char d[2] = { 0, 0 };

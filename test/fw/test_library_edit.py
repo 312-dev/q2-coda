@@ -99,9 +99,9 @@ class Library:
         ui = self.ui
         self.win, self.view = stock_page(ui, 'scroll_view_localmusic', *[(c, None, str(i)) for i, c in enumerate(LIBRARY_STOCK)])
         ui.name[self.win] = 'localmusic_page'
-        # as the device lays it out: the page's window under the status row, the view at its top
-        struct.pack_into('<4i', ui.blocks[self.win], 0, 0, 58, 375, 262)
-        struct.pack_into('<4i', ui.blocks[self.view], 0, 0, 0, 375, 262)
+        # the window the whole screen (full-bleed), its view at the status row's foot, y 58
+        struct.pack_into('<4i', ui.blocks[self.win], 0, 0, 0, 375, 320)
+        struct.pack_into('<4i', ui.blocks[self.view], 0, 0, 58, 375, 262)
         self.fw.fn('ringnav_localmusic', C.c_int, C.c_void_p, C.c_void_p)(self.win, None)
         self.layout(self.view)
 

@@ -767,8 +767,8 @@ void lyrics_paint(void *row, void *canvas) {
 void lyrics_fade(void *lrc, void *canvas) {
     void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
     if (!lcd || !lyrics_on(lrc)) return;
-    /* what shows of it: its ancestors clip it (the window starts under the status row, the slide
-     * ends above the progress bar), so the fades go at the edges of their boxes, in its rows */
+    /* what shows of it: its ancestors clip it (the slide ends above the progress bar; the
+     * window itself is the whole screen), so the fades go at the edges of their boxes, in its rows */
     int w = I(lrc, W_W), top = 0, h = I(lrc, W_H), at = 0;
     for (void *c = lrc, *p; (p = P(c, W_PARENT)); c = p) {
         at -= I(c, W_Y); /* p's top, from lrc's */
