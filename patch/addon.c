@@ -1782,10 +1782,11 @@ static struct {
      * lv[ADDON_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
      * nothing; pmoved: the way a level in the top's place slides in */
     char pend;
-    signed char pmoved;
-    /* hold: the top level asked for in place under the loading overlay, what is shown left as it is
-     * until its rows or its error are there: its first, with no page yet, over the window it was
-     * opened from (list_marks.c load_over), its page made then (page_make) */
+    signed char pmoved, psec; /* psec: the section a swipe's level is (P_SECTION) */
+    /* hold: the top level asked for (again) in place under the loading overlay, what is shown left
+     * as it is until its rows or its error are there, 1 + the state a cancel puts back (hold_load):
+     * its first, with no page yet, over the window it was opened from (list_marks.c load_over), its
+     * page made then (page_make); Retry; the reload after an action */
     char hold;
 } pg __attribute__((section(".scratch")));
 
@@ -2614,14 +2615,22 @@ static void enter(const lv_t *next) {
 static void load_cancel(void) {
     pg.pend = 0;
     req_cancel();
-    if (pg.hold) /* Retry given up: its error page, still shown, as it was */
-        pg.hold = 0, top()->state = K_ERROR;
+    if (pg.hold) /* the level as it was, still shown */
+        top()->state = pg.hold - 1, pg.hold = 0;
     if (pg.page) widget_invalidate_force(pg.page, 0);
 }
 
+/* The top level l asked for again in place under the loading overlay, the page as it shows until
+ * its answer is there (show); with nothing shown, its Loading… page. */
+static void hold_load(lv_t *l) {
+    if (pg.view) pg.hold = (char)(1 + l->state), widget_invalidate_force(pg.page, 0);
+    l->state = K_LOAD;
+    show();
+}
+
 /* How the loading overlay's level is taken once its reply comes (load_take): entered over the top
- * one (push), or in the top's place (page_to). */
-enum { P_PUSH = 1, P_PLACE };
+ * one (push), or in the top's place (page_to), or as the first level's section psec (sec_open). */
+enum { P_PUSH = 1, P_PLACE, P_SECTION };
 
 /* Whether the top level shows its rows, so a level can be asked for under the overlay over them. */
 static int stageable(void) { return top()->state == K_READY && pg.view; }
@@ -2650,8 +2659,10 @@ static void load_take(void) {
     pg.pend = 0;
     if (how == P_PUSH)
         enter(w);
-    else
+    else {
+        if (how == P_SECTION) keep_sel(), pg.sec[pg.cur].sel = top()->sel, pg.cur = pg.psec;
         drop(), *top() = *w, pg.moved = pg.pmoved;
+    }
     widget_invalidate_force(pg.page, 0);
 }
 
@@ -2696,18 +2707,24 @@ static void pop(void) {
 }
 
 /* Section i shown as the first level: its op asked, its list sliding in from dir's side (1 from the
- * right, as the next; -1 from the left; 0 in place), the one it replaces keeping its selected row.
- * With two or more the title has the position, Albums 2/3. */
+ * right, as the next; -1 from the left; 0 in place), the one it replaces keeping its selected row;
+ * a swipe's under the loading overlay over the one shown, which it replaces once its reply comes
+ * (load_take, P_SECTION). With two or more the title has the position, Albums 2/3. */
 static void sec_open(int i, int dir) {
-    lv_t *l = &pg.lv[0];
+    lv_t *l = &pg.lv[0], next = pg.sec[i]; /* K_LOAD */
+    if (pg.nsec > 1)
+        tk_snprintf(next.title, sizeof next.title, "%s %d/%d", pg.sec[i].title, i + 1, pg.nsec);
+    if (dir && stageable()) { /* a swipe: asked for under the overlay, the one shown staying */
+        pg.pmoved = (signed char)dir, pg.psec = (signed char)i;
+        stage(&next, P_SECTION, 0, 0);
+        return;
+    }
     req_cancel();
     keep_sel();
     pg.sec[pg.cur].sel = l->sel;
     drop();
     pg.cur = (signed char)i;
-    *l = pg.sec[i]; /* K_LOAD */
-    if (pg.nsec > 1)
-        tk_snprintf(l->title, sizeof l->title, "%s %d/%d", pg.sec[i].title, i + 1, pg.nsec);
+    *l = next;
     pg.moved = (signed char)dir;
     show();
 }
@@ -2803,7 +2820,7 @@ static void got(void) {
             keep_sel(), fetch(l); /* a live level stays shown, asked again now: no Loading… page */
             pg.qrnext = 1;        /* one press: a sign-in's row turned remote opens the QR page */
         } else
-            keep_sel(), l->state = K_LOAD, show(); /* the level as the action left it */
+            keep_sel(), hold_load(l); /* the level as the action left it */
     } else if (l->id != req.id) {
     } else if (pg.paging) { /* a next page appended, or the list ends at More… (rows kept) */
         int from = l->n;
@@ -3056,7 +3073,7 @@ static int go(const void *unused) {
             else if (!app()->launched || access(app()->pid, 0))
                 launch(app());
             /* asked again under the loading overlay, the error page left as it is meanwhile */
-            l->state = K_LOAD, pg.hold = 1, widget_invalidate_force(pg.page, 0), show();
+            hold_load(l);
         }
     } else if (l->state != K_READY) {
     } else if (i == l->n) { /* More…, as a level of its own; Loading… does nothing */
@@ -3194,7 +3211,7 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
     app_t *a = app();
     if (!missing && (!a->launched || access(a->pid, 0))) launch(a), pg.code = qr && a->qr;
     pg.depth = 1;
-    if (!pg.page) pg.hold = 1, load_over(from, held_cancel); /* the page once its answer is there */
+    if (!pg.page) pg.hold = 1 + K_LOAD, load_over(from, held_cancel); /* the page once it answers */
     lv_t *l = top();
     tk_snprintf(l->op, sizeof l->op, "%s", op);
     tk_snprintf(l->args, sizeof l->args, "%s", args);
