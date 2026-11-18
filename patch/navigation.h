@@ -358,6 +358,12 @@ extern int scrobble_ready(void), scrobble_start(void), scrobble_poll(int *sent),
     scrobble_flag(const char *key), scrobble_value(const char *key);
 extern const char *now_tag(void *r, int field);
 extern void *queue_now(unsigned *pos, unsigned *n);
+/* album_cover.c: an album's cover from its songs, as a file:// URL, and the fetches behind it
+ * (docs/internals.md#album-covers): album_cover_gen moves as one lands, album_cover_busy until */
+int album_cover_url(void *const *songs, unsigned n, char *url, unsigned size);
+unsigned album_cover_gen(void);
+int album_cover_busy(void);
+void now_cover_forget(void); /* coverflow.c: the player's cover files, from AWTK's cache */
 
 /* navigation.c */
 void pod_settings(void);

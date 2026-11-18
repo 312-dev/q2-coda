@@ -10,14 +10,10 @@
  * page opens) at its first paint with the page on top, and again when their count changes: the
  * album, its album artist (else the first song's artist), the first song's year (the library's
  * songtable, or a server song's catalogue row), the songs' count and their lengths' sum
- * (durations.c), a part left out when unknown. The cover is the server library's for a server
- * album, else Cover Flow's cached cover of it.
- * ponytail: an album Cover Flow has never drawn shows the placeholder, as stock's own cache
- * (.sldp) is keyed by an MD5 the payload doesn't compute; reading it would lift that. */
+ * (durations.c), a part left out when unknown. The cover is album_cover.c's: the server library's
+ * for a server album, else Cover Flow's cached cover of it, else the one Now Playing shows when
+ * the album plays, else one fetched from a copy of its songs on the card (lb_art_wait). */
 #include "navigation.h"
-
-extern unsigned album_key(void *r);
-extern char *art_path(char *out, unsigned key, const char *suffix);
 
 /* the page drawn now (the one on top of the dressed pages), its header and list; a dressed page
  * keeps its lit stop + 1 in LB_DRESSED while another is drawn */
@@ -26,6 +22,8 @@ extern char *art_path(char *out, unsigned key, const char *suffix);
 static struct {
     void *win, *head, *surface;
     unsigned n;       /* the songs the header's lines were read from; 0 not yet */
+    unsigned art;     /* album_cover_gen then */
+    unsigned wait;    /* lb_art_wait's timer while a cover is fetched */
     signed char stop; /* the lit pair stop (artist_page.c pair_key) */
 } lb __attribute__((section(".scratch")));
 
@@ -73,14 +71,28 @@ static int lb_year(void *r) {
     return year >= 1000 && year <= 9999 ? year : 0;
 }
 
-/* The header's lines and cover from the page's songs, when their count is not the one read. */
+/* While a cover of the page's album is fetched (album_cover.c): the header drawn again once it
+ * lands, so lb_fill takes it. */
+static int lb_art_wait(const void *unused) {
+    (void)unused;
+    if (!lb.win || !lb.head) return 0; /* the page went: lb_gone cleared lb.wait with the rest */
+    if (album_cover_busy()) return 8;  /* RET_REPEAT */
+    lb.wait = 0;
+    widget_invalidate_force(lb.head, (void *)0);
+    return 0;
+}
+
+/* The header's lines and cover from the page's songs, when their count is not the one read, or a
+ * fetched album cover landed since. */
 static void lb_fill(void) {
     void *list = P(p_deque_showlist, 0), *r;
     unsigned n = list ? deque_size(list) : 0, sec = 0;
     char sub[128], meta[96], part[32], url[520];
     const char *artist, *name;
-    if (!n || n == lb.n || window_manager_get_top_window(window_manager()) != lb.win) return;
-    lb.n = n;
+    if (!n || (n == lb.n && lb.art == album_cover_gen()) ||
+        window_manager_get_top_window(window_manager()) != lb.win)
+        return;
+    lb.n = n, lb.art = album_cover_gen();
     r = deque_at(list, 0);
     artist = P(r, REC_ALBUM_ARTIST);
     if (!artist || !*artist) artist = P(r, REC_ARTIST);
@@ -104,12 +116,12 @@ static void lb_fill(void) {
         tk_snprintf(meta + k, sizeof meta - (unsigned)k, "%u songs%s", n, part);
     name = P(r, REC_ALBUM);
     hero_text(lb.head, name && *name ? name : (const char *)0, sub, meta);
-    tk_snprintf(url, 8, "file://");
-    if (!catalogue_cover(P(r, REC_PATH), url + 7, sizeof url - 7)) {
-        art_path(url + 7, album_key(r), "");
-        if (file_size(url + 7) <= 0) url[0] = 0; /* Cover Flow's note of no art, or none yet */
-    }
+    void *songs[8];
+    unsigned k_songs = n < 8 ? n : 8;
+    for (unsigned i = 0; i < k_songs; ++i) songs[i] = deque_at(list, i);
+    album_cover_url(songs, k_songs, url, sizeof url); /* url empty: none yet */
     hero_cover(lb.head, url);
+    if (!url[0] && album_cover_busy() && !lb.wait) lb.wait = timer_add(lb_art_wait, 0, 500);
 }
 
 /* Play from the first track, or Shuffle, the page's songs. */
