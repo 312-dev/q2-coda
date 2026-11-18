@@ -2,7 +2,7 @@
 
 Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where to enter it, and the doc that explains it. [architecture.md](architecture.md) says how they fit together. Check the list against the tree with `git ls-files patch tools`.
 
-"UI" below is the payload inside `demo`, built from `NAVIGATION` (`tools/build.py`) and `UI_SOURCES` (`tools/peq.py`); "player" is the payload inside `hciplayer`.
+"UI" below is the payload inside `demo`, built from `NAVIGATION` (`tools/build.py`) and `UI_SOURCES` (`tools/peq.py`); "player" is `q2player` (`player/`), which compiles `patch/peq.c` in.
 
 ## patch/: the UI's core
 
@@ -15,7 +15,7 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 | `contexts.inc`   | The allowlist of top windows the wheel works on, each with its class (`RING`, `DRILL`, `BUTTONS`, `CHOICE`)      | one line a window                                                                                                                       | [internals](internals.md#supported-screens-and-panes)                                               |
 | `ipod.json`      | The audit: each rewritten UI asset's stock SHA-256 and each changed instruction's stock word                     | read by `tools/ipod.py` as `AUDIT`                                                                                                      | [ipod](ipod.md)                                                                                     |
 | `link.ld`        | The payload's layout: code at `0xb00000`, zero-filled state at `0xc80000`                                        |                                                                                                                                         | [architecture](architecture.md#the-payload)                                                         |
-| `peq.h`          | What `UI_SOURCES` and the player share: stock's types, the EQ's (`peq_types.h`), the taps between demo and hciplayer, `PEQ_HOST` | `page_list`, `toast`, `cast_tap`                                                                                                        | [architecture](architecture.md#two-host-builds-of-the-c)                                            |
+| `peq.h`          | What `UI_SOURCES` and the player share: stock's types, the EQ's (`peq_types.h`), the taps between demo and the player, `PEQ_HOST` | `page_list`, `toast`, `cast_tap`                                                                                                        | [architecture](architecture.md#two-host-builds-of-the-c)                                            |
 | `peq_types.h`    | The EQ's presets and state as stored (`peq_preset`, `eq_state`), which `peq.h` and `q2eq.c` share | `eq_state` | [internals](internals.md#3eq) |
 | `theme.h`        | The theme table's shape: `theme_t`, `scheme_t`, the font roles' enum                                             | `theme_t`                                                                                                                               | [internals](internals.md#themes), [oled-design](oled-design.md)                                    |
 | `tokens.h`       | The design's color tokens for C, written by `tools/theme.py` `write_tokens` from `TOKENS` | `TOK_*`, `RGB_*`, `UI_TOKENS` | [oled-design](oled-design.md#color) |
@@ -170,7 +170,7 @@ Every file in `patch/` and `tools/`, and `test/` by group: what it is for, where
 
 ## player/: the new player
 
-`q2player`, which is to replace `hciplayer` ([player-plan.md](player-plan.md)); a program of its own, not part of either payload. Built by `tools/player.py`, tested by `test/player/run.py`.
+`q2player`, the player, installed as `/usr/bin/hciplayer` ([player-plan.md](player-plan.md)); a program of its own, not part of the payload. Built by `tools/player.py`, tested by `test/player/run.py`.
 
 | File         | For                                                                                          | Doc                                             |
 | ------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
