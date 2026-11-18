@@ -167,6 +167,8 @@ static void go_back(void) {
     int window = layer == page;
     const char *close = "";
     if (window) {
+        /* NULL for a window never given a hint. Stock's widget_set_prop_str passes it to tk_str_copy
+         * (0x72c220), which blanks the field or leaves it NULL and never reads it, so the restore below is safe. */
         close = widget_get_prop_str(page, "close_anim_hint", "");
         widget_set_prop_str(page, "close_anim_hint", "");
     }
