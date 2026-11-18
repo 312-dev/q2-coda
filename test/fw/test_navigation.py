@@ -156,7 +156,7 @@ def test_clock_night_is_when_lights_are_dark(fw, clock, hour, night):
     assert fw.fn('clock_night', C.c_int)() == night
 
 
-def test_time_zones_list_west_to_east_ties_in_their_order(fw):
+def test_time_zones_list_the_saved_one_then_west_to_east_ties_in_their_order(fw):
     zones, order = host.tools_build.TIMEZONES, host.tools_build.TIMEZONE_ORDER
     names = [zone.encode() for _, zone in zones]
     rng = random.Random(0x7a)
@@ -168,9 +168,10 @@ def test_time_zones_list_west_to_east_ties_in_their_order(fw):
         return out
     fw.mock('fw_localtime_r', local)
     rows = (C.c_ubyte * len(zones))()
+    saved = fw.var('g_time_zone', C.c_ubyte).value = 9
     fw.fn('navigation__tz_now', None, C.c_void_p)(rows)
-    assert list(rows) == sorted(order, key=lambda z: offset[names[z]])
-    assert now['zone'] == names[fw.var('g_time_zone', C.c_ubyte).value]  # the saved zone is set again
+    assert list(rows) == [saved] + [z for z in sorted(order, key=lambda z: offset[names[z]]) if z != saved]
+    assert now['zone'] == names[saved]  # the saved zone is set again
 
 
 # Light Mode.

@@ -1173,9 +1173,9 @@ const unsigned long h_sizes[] = {{sizeof h_zones / sizeof *h_zones, sizeof h_cit
     cities = [s.decode() for s in array(ctypes.c_char_p, 'h_cities', cities)]
     assert len(cities) == len(build.TIMEZONES) and "St. John's" in cities
     assert all(re.fullmatch(rf'GMT[+-]\d+(:\d\d)? {re.escape(city)}', label) for (label, _), city in zip(build.TIMEZONES, cities))
-    # every saved index once, west to east by standard offset, then by label
+    # every saved index once, by city: the rows' tie order (navigation.c tz_now sorts by the offset now)
     order = array(ctypes.c_int, 'h_order', order)
-    rows = [(build.timezone_offset(build.TIMEZONES[i][0]), build.TIMEZONES[i][0]) for i in order]
+    rows = [build.TIMEZONES[i][0].split(' ', 1)[1] for i in order]
     assert sorted(order) == list(range(len(build.TIMEZONES))) and rows == sorted(rows)
     # named_in's list: NUL-separated names, an empty one last
     icons = (ctypes.c_char * icons).in_dll(lib, 'h_icons').raw

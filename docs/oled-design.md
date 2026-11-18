@@ -59,7 +59,9 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page). A row that grows in place, a captioned row showing its caption
+  the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
+  scans): the layout itself puts the padding and the scroll back (`row_paint.c` `list_relaid`), so
+  no frame shows the rows lower and no part of the screen keeps that frame. A row that grows in place, a captioned row showing its caption
   or a grabbed inline slider, scrolls the list by whole rows until its grown foot is on or above y 282 as well, never
   only inside the list's box, which runs on to the screen's foot (`nav/lists.c` `list_shown_h`). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
@@ -1732,7 +1734,7 @@ pattern.
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
 | Hold menu, More                     | [Menus](#menus)             | The menu sheet over the page                                                                               |
 | Settings and its pages              | Key/value and switch rows   |                                                                                                            |
-| Automatic Time Set (time zones)     | Switch rows, then a Picker  | Automatic Time Set's switch, then Automatic Time Zone's ([captioned](#list-row): "Sets the zone from your network's location"; on by default, [internals](internals.md#automatic-time-zone)), then the zones as a picker |
+| Automatic Time Set (time zones)     | Switch rows, then a Picker  | Automatic Time Set's switch, then Automatic Time Zone's ([captioned](#list-row): "Sets the zone from your network's location"; on by default, [internals](internals.md#automatic-time-zone)), then the zones as a picker: the saved one pinned first with its check, the rest west to east by the offset they have now, ties by city; each a key/value row, the city and its offset ("Chicago", "UTC-6", Text Secondary), the checked row's value clear of the check; no A-Z strip, as the order is by offset |
 | About                               | [Label/value rows](#labelvalue-rows) | Model, Firmware (V1.36), the product's version under its name, Capacity and Available with their unit ("779.72 GB"), Wi-Fi Address, IP Address ("Not connected" with no network); the wheel walks the rows and nothing opens; values in Text Secondary |
 | Pickers (Play mode, Sort, Language) | List row                    | The current choice carries a 12 px Accent Blue check on the right column                                   |
 | Storage                             | Storage bar                 | [Progress and sliders](#progress-and-sliders): the bar, its legend rows (Downloads and Stream Cache open pages) and two footers |
