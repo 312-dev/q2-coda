@@ -12,7 +12,9 @@ import pytest
 
 PASS_MS = 1000  # on_wm_idle_status runs check_otg_status about once a second
 # usb_otg.c's settle time, read from the source so the timings below follow it
-SETTLE = int(re.search(r'#define OTG_SETTLE_MS (\d+)', (pathlib.Path(__file__).parents[2]/'patch/usb_otg.c').read_text())[1])
+_SETTLE = re.search(r'#define OTG_SETTLE_MS (\d+)\n', (pathlib.Path(__file__).parents[2]/'patch/usb_otg.c').read_text())
+assert _SETTLE, 'usb_otg.c: OTG_SETTLE_MS is not a plain #define'
+SETTLE = int(_SETTLE[1])
 
 
 class Port:

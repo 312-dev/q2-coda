@@ -12,9 +12,9 @@
  */
 #include "navigation.h"
 
-#define OTG_SETTLE_MS                                                                              \
-    6000                /* the ID low and no VBUS this long before the Q2 powers the bus: the      \
-                         * empty port's pulses were 4.3 s at most (2026-11-17) */
+/* The ID low and no VBUS this long before the Q2 powers the bus: the empty port's pulses were 4.3 s
+ * at most (2026-11-17). */
+#define OTG_SETTLE_MS 6000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
 #define OTG_PULL_UP "/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1"
 
