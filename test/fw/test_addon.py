@@ -11,7 +11,7 @@ import pytest
 import host
 from conftest import O, Deques, Game, block, claim, high_halves, libc, text
 from test_coverflow import png, scratch  # an icon's header; navigation.c's st by field
-from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh  # test_netupdate.py keeps netupdate.c's App Store mirror
+from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh, sources as shelf_sources  # test_netupdate.py keeps netupdate.c's App Store mirror
 from test_radio import Rd  # test_radio.py keeps the mirror
 from test_tidal import Au, Queue, free_stubbed  # test_tidal.py keeps tidal.c's au mirror
 
@@ -306,11 +306,14 @@ def names(fw, fn):
 BUNDLED = b'/usr/lib/q2apps'
 
 
-def carry(world, name, version=b'q2-v0.9\n', manifest=b'name=Sub\n'):
-    """The firmware's own copy of app name (tools/build.py BUNDLED_APPS), its version file holding version."""
+def carry(world, name, version=b'q2-v0.9\n', manifest=b'name=Sub\n', builtin=False):
+    """The firmware's own copy of app name (tools/build.py BUNDLED_APPS), its version file holding version;
+    builtin: its builtin file, the firmware's copy the only one that runs."""
     d = BUNDLED + b'/' + name.encode()
     world.files.update({d + b'/q2app': manifest, d + b'/q2-' + name.encode(): b'ELF', d + b'/version': version,
                         d + b'/icon-40.png': png(40, 40)})
+    if builtin:
+        world.files[d + b'/builtin'] = b''
     world.dirs.setdefault(BUNDLED, []).append(name.encode())
     return world
 
@@ -371,6 +374,33 @@ def test_the_card_copy_runs_only_when_newer(fw, tag, carried):
     path = C.create_string_buffer(64)
     fw.fn('addon_q2app', None, C.c_char_p, C.c_void_p, C.c_uint)(b'subsonic', path, 64)
     assert path.value == (BUNDLED + b'/subsonic/q2app' if carried else b'/mnt/mmc/.subsonic/q2app')
+
+
+@pytest.mark.parametrize('tag', [b'q2-v9.9\n', b'q2-v0.7\n', None])  # newer, older, unzipped by hand
+def test_a_builtin_app_always_runs_the_firmwares_copy(fw, tag):
+    """Subsonic is the firmware's alone (tools/build.py BUNDLED_APPS' builtin): a card copy, tagged or not, is
+    ignored, its files left where they are, and the scan clears the App Store's tag and file list for it."""
+    world = carry(card(fw, subsonic=b'name=Card\n'), 'subsonic', builtin=True)
+    world.files[b'/mnt/mmc/.subsonic/catalogue.tsv'] = b'data'
+    world.files[b'/mnt/mmc/.q2/apps/subsonic.files'] = b'.subsonic/q2-subsonic\n'
+    if tag is not None:
+        tagged(world, b'subsonic', tag)
+    before = {k: v for k, v in world.files.items() if k.startswith(b'/mnt/mmc/.subsonic/')}
+    assert app_dir(fw, b'subsonic') == (1, BUNDLED + b'/subsonic')
+    assert fw.fn('addon_builtin', C.c_int, C.c_char_p)(b'subsonic') == 1
+    assert scan(fw) == 1
+    a = ap(fw).a[0]
+    assert (a.name, a.bin) == (b'Sub', BUNDLED + b'/subsonic/q2-subsonic')
+    assert {k: v for k, v in world.files.items() if k.startswith(b'/mnt/mmc/.subsonic/')} == before  # data and all
+    assert b'/mnt/mmc/.q2/apps/subsonic.tag' not in world.files
+    assert b'/mnt/mmc/.q2/apps/subsonic.files' not in world.files
+    assert not world.of('system')
+
+
+def test_only_a_carried_app_with_its_builtin_file_is_builtin(fw):
+    carry(card(fw, other=b'name=Other\n'), 'subsonic')
+    is_builtin = fw.fn('addon_builtin', C.c_int, C.c_char_p)
+    assert (is_builtin(b'subsonic'), is_builtin(b'other'), is_builtin(b'missing')) == (0, 0, 0)
 
 
 def test_the_carried_apps_data_folder_on_the_card_is_not_a_second_app(fw):
@@ -5603,3 +5633,12 @@ def test_an_app_without_radio_is_not_asked(fw):
     path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
     assert fw.fn('addon_radio_start', C.c_int, C.c_void_p, C.c_uint)(block(fw, path), 7) == 0
     assert b'/tmp/q2-foo.radio' not in p.world.files
+
+
+@pytest.mark.parametrize('builtin,listed', [(True, [b'foo']), (False, [b'subsonic', b'foo'])])
+def test_the_app_store_never_lists_a_builtin_app(fw, builtin, listed):
+    """An app the firmware carries as its own (tools/build.py BUNDLED_APPS' builtin) is not the App Store's: a list
+    naming it, the signed one or the card's copy of an older one, leaves it out, so it is never offered, installed,
+    updated or removed there (docs/internals.md#q2-shelf). A carried app without it stays listed."""
+    carry(World(fw, {}, {b'/mnt/mmc': []}), 'subsonic', builtin=builtin)
+    assert [a[2] for a in shelf_sources(fw, b'andsuor/q2-subsonic Subsonic\nme/q2-foo\n')] == listed

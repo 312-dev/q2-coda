@@ -4,18 +4,16 @@
 # the list, and the last line is the q2-coda release key's signature of everything before it: a Q2 takes no
 # list that fails it. Change it with tools/shelf.py (pin, digest, sign), never by hand alone; see
 # docs/internals.md#q2-shelf and docs/releasing.md#the-app-list.
-serial 1
+serial 2
 DiamondBond/q2-rockbox v3.17 rockbox.zip 14328522 8313555fbf716896282917b72d2aed6840b9bddc61a56589475c59e39dd4db59 Rockbox
 DiamondBond/q2-rockbox-themes v1.7 q2-rockbox-themes-1.7.zip 51317649 df12745accac8d1ec6f0ac70f8e68ee8d6d5bf37a04b3f8624bf65a98dbe53d4 Rockbox Themes
 DiamondBond/q2-librespot q2-v1.10 q2-librespot-v1.10-4775f9c.zip 7219289 f7890da5a8f3cdf98a165734bad5ee7dcc7aedeb6f70ca7d844dcff97b754efd Spotify
 group-a-study/q2-deezer q2-v3.5 q2-deezer-v3.5-982e40a.zip 2625474 32813c7fa2c5a67149d089489e849c5c46d5a3dabdb43226007de663745918fa Deezer
 group-a-study/q2-soulseek q2-v1.3 q2-soulseek-v1.3-c979d09.zip 2339008 4d857a978078a15a375b5bbf421f16d2d669aac253e92a932af638365740c889 Soulseek
 group-a-study/q2-filebrowser q2-v1.3 q2-filebrowser-v1.3-49bee6c.zip 2337523 d46e348b5a6db5d0f9f737f455e8cc60bea7829f922e6ef5e4316ff5f12c7cad File Browser
-andsuor/q2-subsonic q2-v0.7 q2-subsonic-v0.7-9d1e95a.zip 3479519 f52f7015e305697278248fd5850d609a656a496ee7a2ff1ba9a58c288813a964 Subsonic
 m-d-e-v/q2-podcasts q2-v1.6 q2-podcasts-v1.6-b661445.zip 2618947 593ee2739bfb9fcf9a7737566e046dedf1262361375d1449587e3df84c905f8e Podcasts
 harpmudd/q2-lma q2-v0.5.1 q2-lma-v0.5.1-5f75d7b.zip 3172598 f7b58e41e7306c612472efb7bf4567df99c4105cc55298596e5f991eb4eee20d Live Music Archive
 DiamondBond/q2-fidget v1.3.0 fidget.zip 48880 e850ec419cfe503fbb5c528cd1aaf0bfa3e5904f727136695c53d0ca71ebba85 Buddy
 DiamondBond/q2-groovebox v1.5 groovebox.zip 3192767 6df112aaaf39a6d599e700f78c75ecf8d431018cb4f11eca45131fd764d99fd2 Groovebox
 # group-a-study/q2-applemusic Apple Music
 group-a-study/q2-airplay q2-v1.6 q2-airplay-v1.6-077609b.zip 1371183 d12aba1a773979062d116df784c68569b79bb01de690bd6f8863b12c978d3d58 AirPlay
-signature ee8355ad840f325891ac47e72ece1fa7e7a63b31a6c0765fccaede3e766a63e1e1bb2eb6e222a798c413dc55e101ba5ed20306c5bf3e951504c5f4ae83817301

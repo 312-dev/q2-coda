@@ -127,7 +127,9 @@ static int parse_pin(const char **p, const char *end, shelf_app *a) {
 /* sources.list's lines, "owner/repo TAG ASSET SIZE SHA256 [Name]" ("#" a comment, "-" before it a
  * dropped app, which needs no pin), into out: at most max, each owner, repo and id checked (they go
  * into URLs and shell commands; the id as addon.c's, 1 to 15 of a-z0-9-), a line without its pin, or
- * with a bad or repeated id, skipped; "serial" and "signature" lines are no app's. The count. */
+ * with a bad or repeated id, skipped, as is an app the firmware carries as its own (addon_builtin):
+ * never offered, installed, updated or removed here; "serial" and "signature" lines are no app's.
+ * The count. */
 int shelf_sources(const char *text, shelf_app *out, int max) {
     int n = 0;
     for (const char *p = text, *e; p && *p && n < max; p = *e ? e + 1 : e) {
@@ -176,6 +178,7 @@ int shelf_sources(const char *text, shelf_app *out, int max) {
             a.keep = "";
         }
         for (int k = 0; k < n; ++k) bad |= !strcmp(out[k].id, a.id);
+        bad |= addon_builtin(a.id); /* the firmware's own: its updates are the firmware's */
         if (!bad) out[n++] = a;
     }
     return n;

@@ -17,6 +17,13 @@ import pytest
 import host
 from conftest import O, block
 
+
+@pytest.fixture(autouse=True)
+def nothing_carried(fw):
+    """No file the firmware carries (addon.c addon_builtin asks access, which unmocked says yes to everything), so
+    every listed app is the App Store's; test_addon.py's World says which are carried."""
+    fw.mock('fw_access', lambda *_: -1)
+
 # stock.h's Q2POD_TAG: tools/build.py's VERSION (host.py builds as a release, not --dev)
 TAG = host.tools_build.VERSION.encode()
 # the next single-digit tag (1.6.9 -> 1.7.0), as netupdate's strcmp orders them
@@ -208,6 +215,7 @@ def test_the_repo_ships_a_list_that_parses_pins_and_all(fw):
     lines = [x for x in LIST.read_bytes().splitlines() if x.strip() and not x.startswith((b'#', b'serial ', b'signature '))]
     table = sources(fw, LIST.read_bytes(), pin=False, raw=True)
     assert len(table) == len(lines) and all(a.latest and a.asset.endswith(b'.zip') and a.size and any(a.sha256) for a in table)
+    assert b'subsonic' not in [a.id for a in table]  # the firmware's own (tools/build.py BUNDLED_APPS, builtin)
 
 
 def test_hostile_sources(fw):

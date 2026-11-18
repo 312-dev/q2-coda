@@ -1374,9 +1374,9 @@ def app_zip(files):
     return out.getvalue()
 
 
-def pinned(monkeypatch, tmp_path, data, version='q2-v1.2'):
+def pinned(monkeypatch, tmp_path, data, version='q2-v1.2', builtin=False):
     (tmp_path/'demo.zip').write_bytes(data)
-    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', (version, 'demo.zip', len(data), hashlib.sha256(data).hexdigest()))
+    monkeypatch.setitem(build.BUNDLED_APPS, 'demo', (version, 'demo.zip', len(data), hashlib.sha256(data).hexdigest(), builtin))
 
 
 def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launcher(monkeypatch, tmp_path):
@@ -1388,10 +1388,26 @@ def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launc
     assert files['version'] == (b'q2-v1.2\n', False) and b'/usr/lib/q2apps/demo/q2-demo' in files['run'][0]
 
 
+def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatch, tmp_path):
+    files = {'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER}
+    pinned(monkeypatch, tmp_path, app_zip(files), builtin=True)
+    assert build.bundled_app('demo', tmp_path)['builtin'] == (b'', False)
+    pinned(monkeypatch, tmp_path, app_zip(files))
+    assert 'builtin' not in build.bundled_app('demo', tmp_path)
+    pinned(monkeypatch, tmp_path, app_zip({**files, '.demo/builtin': ''}))
+    with pytest.raises(ValueError, match='Unexpected files in demo.zip'):
+        build.bundled_app('demo', tmp_path)
+
+
+def test_subsonic_is_the_firmwares_alone():
+    """The user's, 2026-11-17: Subsonic is not the App Store's; the firmware runs and updates its own."""
+    assert build.BUNDLED_APPS['subsonic'][4] is True
+
+
 def test_a_carried_app_must_be_the_pinned_zip(monkeypatch, tmp_path):
     good = app_zip({'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER})
     with pytest.raises(ValueError, match='Missing .*demo.zip'):
-        monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1', 'demo.zip', 1, '0' * 64))
+        monkeypatch.setitem(build.BUNDLED_APPS, 'demo', ('q2-v1', 'demo.zip', 1, '0' * 64, False))
         build.bundled_app('demo', tmp_path)
     pinned(monkeypatch, tmp_path, good)
     (tmp_path/'demo.zip').write_bytes(good[:-1] + b'x')  # same size, other bytes
@@ -1408,7 +1424,8 @@ def test_a_carried_apps_zip_holds_its_app_and_nothing_nested(monkeypatch, tmp_pa
 
 
 def test_every_carried_apps_paths_fit_addon_cs_slots():
-    for app_id, (version, name, size, digest) in build.BUNDLED_APPS.items():
+    for app_id, (version, name, size, digest, builtin) in build.BUNDLED_APPS.items():
         assert len(f'/{build.BUNDLED_DIR}/{app_id}/q2-{app_id}') < 48 and len(f'/bin/sh /{build.BUNDLED_DIR}/{app_id}/run') < 48
         assert len(f'file:///{build.BUNDLED_DIR}/{app_id}/icon-40.png') < 56 and len(version) < 24
         assert re.fullmatch(r'[a-z0-9-]{1,15}', app_id) and size > 0 and re.fullmatch('[0-9a-f]{64}', digest)
+        assert isinstance(builtin, bool)

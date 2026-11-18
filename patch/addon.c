@@ -169,8 +169,20 @@ int addon_version_cmp(const char *x, const char *y) {
     return 0;
 }
 
+/* Whether the firmware carries app id as its own alone (tools/build.py BUNDLED_APPS' builtin, its
+ * BUNDLED/<id>/builtin file): only its copy runs, and the App Store never lists it (netupdate.c
+ * shelf_sources). A new version comes with a firmware update. */
+int addon_builtin(const char *id) {
+    char path[64];
+    tk_snprintf(path, sizeof path, BUNDLED "/%s/q2-%s", id, id);
+    if (access(path, 0)) return 0;
+    tk_snprintf(path, sizeof path, BUNDLED "/%s/builtin", id);
+    return !access(path, 0);
+}
+
 /* The folder of app id that runs, into dir (n bytes): the card's CARD/.<id> or the firmware's
- * BUNDLED/<id>; 1 for the firmware's. The card's runs when it holds the app (its q2-<id>) and either
+ * BUNDLED/<id>; 1 for the firmware's. A builtin app (addon_builtin) runs the firmware's whatever the
+ * card holds. Otherwise the card's runs when it holds the app (its q2-<id>) and either
  * the firmware carries none or the card's is newer: its App Store tag (TAGS/<id>.tag) against the
  * carried version file, by addon_version_cmp. A card copy with no tag was unzipped by hand, and
  * counts as newer: whoever put it there chose it. Anything else runs the firmware's, when it has
@@ -181,7 +193,7 @@ int addon_dir(const char *id, char *dir, unsigned n) {
     int carried = !access(path, 0);
     tk_snprintf(path, sizeof path, CARD "/.%s/q2-%s", id, id);
     int on_card = !access(path, 0);
-    if (carried && on_card) {
+    if (carried && on_card && !addon_builtin(id)) {
         tk_snprintf(path, sizeof path, TAGS "/%s.tag", id);
         if (state_read(path, card, sizeof card)) {
             tk_snprintf(path, sizeof path, BUNDLED "/%s/version", id);
@@ -239,6 +251,19 @@ static void scan_one(const char *id, const char *from) {
     }
 }
 
+/* A builtin app's App Store tag and file list (netupdate.c app_file), from an install before the
+ * firmware carried it, deleted: the App Store no longer has it. The card copy those name is left
+ * as it is, never run (addon_dir): its folder is the app's data folder too, and a firmware
+ * without the app still finds a working copy there. */
+static void builtin_untag(const char *id) {
+    static const char *const ext[2] = { ".tag", ".files" };
+    char path[64];
+    for (int i = 0; i < 2; ++i) {
+        tk_snprintf(path, sizeof path, TAGS "/%s%s", id, ext[i]);
+        if (!access(path, 0)) unlink(path);
+    }
+}
+
 /* Streaming's page (navigation.c): the apps on the card and those the firmware carries found again,
  * their names read; how many there are, by name for addon_name. A slot keeps its app (and its
  * running state) from scan to scan. */
@@ -257,6 +282,7 @@ int addon_scan(void) {
         if (!valid_id(e->d_name)) continue;
         tk_snprintf(dir, sizeof dir, BUNDLED "/%s", e->d_name);
         scan_one(e->d_name, dir);
+        if (addon_builtin(e->d_name)) builtin_untag(e->d_name);
     }
     if (d) closedir(d);
     ap.shown = ap.games = 0;
