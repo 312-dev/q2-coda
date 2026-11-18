@@ -1180,7 +1180,7 @@ def check_protocol(player, songs, tmp, fixture):
 def test_crash_count(player, songs, tmp):
     """player/main.c: a fatal signal is counted in /tmp/q2player.crashes (one more within 60 s of the start) and logged
     to the unified log, and the process dies of it, as demo then starts the player again."""
-    import signal, socket, time
+    import shutil, signal, socket, time
     d = tmp/'crashes'
     for n in (1, 2, 3):
         if n == 1: shutil.rmtree(d, ignore_errors=True); (d/'tmp').mkdir(parents=True)
