@@ -909,28 +909,30 @@ def capacity(first, last, bound):
     import re
     text = gzip.decompress((ROOT / 'test/fixtures/q2bt-replay-20261118.log.gz').read_bytes()).decode()
     text += (ROOT / 'test/fixtures/q2bt-commute-20261118.log').read_text()
-    out, codec, bufs = [], None, None
+    out: list[tuple[float, int]] = []
+    codec, bufs = 'SBC', 0
     for line in text.splitlines():
         stamp, _, rest = line.partition(' ')
         if rest.startswith('START'):
-            bufs = int(re.search(r'bufs=(\d+)', rest)[1])
+            m = re.search(r'bufs=(\d+)', rest)
+            bufs = int(m[1]) if m else 0
         elif rest.startswith(('CODEC', 'ENCODER')):
             word = rest.split()[1]
             codec = ENCODERS.get(word, codec) if rest.startswith('ENCODER') else word
         if not rest.startswith('up=') or not first <= stamp[11:19] <= last:
             continue
-        f = {k: (None if v == '-' else float(v)) for k, v in (kv.split('=', 1) for kv in rest.split())}
-        kbps, acl, done, fly, wq = (f.get(k) for k in ('kbps', 'acl', 'done', 'fly', 'wq'))
-        if kbps is None or acl is None:
+        f = {k: (-1.0 if v == '-' else float(v)) for k, v in (kv.split('=', 1) for kv in rest.split())}
+        kbps, acl, done, fly, wq = (f.get(k, -1.0) for k in ('kbps', 'acl', 'done', 'fly', 'wq'))
+        if kbps < 0 or acl < 0:
             continue
-        held = fly is not None and fly >= bufs and (wq or 0) > 0
+        held = fly >= 0 and fly >= bufs and wq > 0
         if kbps < 50 and not held:
             continue
         if held:
-            cap = kbps * done / acl if acl else 0
+            cap = kbps * done / acl if acl and done > 0 else 0.0
         else:
             cap = LOGGED[codec] if bound == 'lo' else 1e9
-        out.append((cap, -1 if f.get('afh') is None else int(f['afh'])))
+        out.append((cap, int(f.get('afh', -1.0))))
     return out
 
 

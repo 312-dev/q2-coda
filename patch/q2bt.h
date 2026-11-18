@@ -2,8 +2,8 @@
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
  * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
  * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
- * under LDAC Auto, aptX HD is stepped down while the radio cannot keep up (bt_step), and SBC's
- * bitpool lowered (bt_sbc_step). The
+ * under LDAC Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
+ * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
 #ifndef Q2BT_H
@@ -121,8 +121,9 @@ int bt_down_event(const unsigned char *p, int n, int handle, char *note, int siz
 #define BT_STEP_AFH 60          /* the band clear: at least this many channels in the AFH map */
 #define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconfigure's gap, not counted either way */
 #define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch, */
-#define BT_STEP_UNDONE_MS 300000  /* doubled each time a step up is undone within this, */
-#define BT_STEP_UP_MAX_MS 1440000 /* to this */
+/* doubled each time a step up is undone within BT_STEP_UNDONE_MS, to BT_STEP_UP_MAX_MS */
+#define BT_STEP_UNDONE_MS 300000
+#define BT_STEP_UP_MAX_MS 1440000
 /* "aptX-HD" 3, "aptX" 2, "SBC" 1, any other (LDAC, AAC, none) 0; and back */
 int bt_codec_rank(const char *codec);
 const char *bt_codec_name(int rank);

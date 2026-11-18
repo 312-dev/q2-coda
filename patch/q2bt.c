@@ -374,8 +374,9 @@ static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
     char line[160];
     step_reap(now);
     int rank = bt_codec_rank(bt.codec);
-    struct bt_step_line l = { ls->kbps, ls->acl, ls->done, ls->wq,  ls->fly,
-                              bufs,     ls->afh, own,      bt.sbc.pool != 0, bt.hz };
+    struct bt_step_line l = { ls->kbps, ls->acl, ls->done, ls->wq, ls->fly,
+                              bufs,     ls->afh, own,      0,      bt.hz };
+    l.lowered = bt.sbc.pool != 0;
     int to = bt_step(&bt.step, now, bt.allowed, rank, &l);
     if (!to || bt.codec_pid > 0 || bt.codec_failed || !bt.pcm[0]) return;
     snprintf(line, sizeof line, "STEP %s -> %s", bt.codec, bt_codec_name(to));
