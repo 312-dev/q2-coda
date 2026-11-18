@@ -397,6 +397,25 @@ def test_a_centred_clock_that_would_reach_the_slots_goes_beside_them(fw, row):
     assert clock.box[0] + clock.box[2] - 2 == edge
 
 
+def test_the_percentage_gives_way_to_the_icon_where_the_glyphs_would_squeeze_the_title_out(fw, st):
+    """batt_room: from the battery's end to the title's start, less the clock's widest and its two gaps. Percent alone
+    (42 px) and the play state's bars fit it; with Wi-Fi, a sync and the padlock too they do not, and the icon stays."""
+    row = Row(fw, st, 'A Title')
+    st('battery').value = 1
+    st('pct_digit').value = st('pct_sign').value = 10
+    fw.mock('canvas_measure_text', lambda *_: 200.0)  # the widest clock: a room of 375 - 62 - 7 - 12 + 2 - 200 - 22 = 74
+    sync = lambda: fw.fn('navigation__bar_sync', None, C.c_void_p)(row.bar.addr)
+    width = lambda: row.w['view_battery'].box[2]
+    sync()
+    percent = width()
+    assert percent > O['BATT_NUB_W'] + 10  # the digits: the bars alone leave room (16 px of 74)
+    row.wifi(3)
+    row.app(1)
+    fw.var('g_keylock_flag', C.c_ubyte).value = 1
+    sync()
+    assert width() > percent  # 42 + 79 px of glyphs: the icon, the set's body and its nub
+
+
 @pytest.mark.parametrize('raw, kind, permille', [(b'\nsync=check\n', 1, 0), (b'\nsync=down 1 4\n', 2, 250),
                                                  (b'\nsync=down 5000000000 10000000000\n', 2, 499), (b'\nsync=down 9 4\n', 2, 1000),
                                                  (b'\nsync=down\n', 2, 0), (b'\nhold=1\n', 0, 0), (b'\nsync=idle\n', 0, 0)])

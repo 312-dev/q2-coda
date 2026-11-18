@@ -169,9 +169,6 @@ static void clock_zone(void) {
  * the codec, else bar_bt or BT_GLYPH. A new badge shows CODEC_MS, then codec_fade fades it out and
  * BT_GLYPH in, and bar_sync keeps putting BT_GLYPH back over stock's badge before img_bt paints. */
 static const char *const codecs[] = BT_CODECS;
-static const int codec_reach[] = BT_CODEC_REACH;
-_Static_assert(sizeof codecs / sizeof *codecs == sizeof codec_reach / sizeof *codec_reach,
-               "one reach per codec");
 
 static int codec_fade(const void *info) {
     int n = ++st.codec_step, d = CODEC_STEPS - n;
@@ -251,8 +248,8 @@ int bar_repaint(const void *info) {
 /* The status bar's codec badge, then the Battery setting (docs/ipod.md#status-bar-and-clock):
  * view_battery paints the charge-level icon, the percentage, both, or the percentage inside, sized
  * to its ink so every gap is STATUS_GAP, and the icon wherever the group's ink would reach more
- * than BATT_ROOM (a wide badge while it shows). widget_set_visible does nothing for an unchanged
- * state and relayouts the view for a new one. */
+ * than batt_room allows. widget_set_visible does nothing for an unchanged state and relayouts the
+ * view for a new one. */
 static int slider_page(void *top);
 /* A status row's clock (tools/ipod.py status_row; docs/ipod.md#status-bar-and-clock): on a page
  * with no title, centred on the screen (x 187.5); else (a title on the left, or Home's Split with
@@ -272,18 +269,26 @@ static int clock_width(void *canvas, const unsigned *s) {
     canvas_set_font(canvas, theme_face(s, n, &px), px);
     return (int)(canvas_measure_text(canvas, s, (unsigned)n) + 0.5f);
 }
-static void clock_place(void *bar, void *top) {
+/* The widest clock, "00:00", as measured once in the bar's face (it holds until a restart); 0 before
+ * the title has a canvas to measure on. */
+static int clock_widest(void) {
     static const unsigned zeros[] = { '0', '0', ':', '0', '0', 0 };
+    static int widest;
+    void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
+    if (!widest && canvas) widest = clock_width(canvas, zeros);
+    return widest;
+}
+static void clock_place(void *bar, void *top) {
     static void *clock;
-    static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
-                                        * a read-back of the style's current state */
+    static int ink, set_color; /* set_color: the colour written last, compared in place of
+                                * a read-back of the style's current state */
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
     if (!st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
         ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
     }
-    if (!widest) widest = clock_width(canvas, zeros); /* the face holds until a restart */
+    int widest = clock_widest();
     const unsigned *text = widget_get_text(clock);
     int split = coverflow_home_split(top), edge = status_slots_left() - CLOCK_BESIDE,
         w = (text && *text ? clock_width(canvas, text) : widest) + 4,
@@ -337,6 +342,16 @@ static unsigned battery_now(void) {
         key |= BATT_KEY_CHARGING;
     return key | (unsigned)((icon && !tk_strcmp(icon, "bar_lowcharge")) || (held && level < 15));
 }
+/* The room the battery and the slots left of it have on OLED's status row: from the battery's end
+ * (STATUS_ROW_INSET in from the right edge) to where the title's box would end at its start, the
+ * clock's room, CLOCK_BESIDE and CLOCK_CLEAR (clock_place) taken, so the glyphs never squeeze
+ * the title out. Before the clock's widest is measured (no paint yet) there is no limit. */
+static int batt_room(void) {
+    int widest = clock_widest();
+    return widest ? 375 - STATUS_ROW_INSET - CLOCK_BESIDE - CLOCK_CLEAR + 2 - widest -
+                        I(st.bar_title, W_X)
+                  : 375;
+}
 static void bar_sync(void *bar) {
     if (bar_state_sync(bar) && !st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
     if (!st.bar_bt || !st.bar_wifi || !st.bar_pct || !st.bar_slot || !st.bar_icon) return;
@@ -365,12 +380,7 @@ static void bar_sync(void *bar) {
         int reach = mode == 1   ? BATT_PCT_W
                     : mode == 3 ? inside + BATT_NUB_W
                                 : body + BATT_NUB_W + BATT_GAP + BATT_PCT_W;
-        if (widget_get_visible(st.bar_wifi)) reach += I(st.bar_wifi, W_W) + STATUS_GAP;
-        if (shown)
-            reach +=
-                STATUS_GAP +
-                (st.codec && st.codec_step < CODEC_STEPS ? codec_reach[st.codec - 1] : BT_REACH);
-        if (reach > BATT_ROOM) mode = 0;
+        if (reach + status_slots_reach() > batt_room()) mode = 0;
     }
     widget_set_visible(st.bar_icon, 0, 0);
     widget_set_visible(st.bar_pct, 0, 0);

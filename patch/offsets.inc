@@ -204,11 +204,9 @@ static inline int arc_out(int r, int y) {
 #define BATT_CHARGE_RGB 0x34c759
 #define BATT_LOW_RGB 0xff453a /* under BATT_LOW_PCT (navigation.h), the slim battery's red */
 #define BATT_WEAK_RGB 0xff9f0a /* a charger too weak to charge (charging.c charge_weak) */
-#define BATT_ROOM 94
 /* Plain Bluetooth ink and codec reaches from the right edge of their stock canvases. */
 #define BT_REACH 10
 #define BT_CODECS { "bar_sbc", "bar_aac", "bar_aptx", "bar_aptxhd", "bar_ldac" }
-#define BT_CODEC_REACH { 22, 12, 27, 41, 36 }
 #define BT_GLYPH "bar_btcon" /* the white Bluetooth glyph; stock's bar_bt is the grey one */
 /* A new codec badge shows CODEC_MS, then fades out and the glyph in, CODEC_STEPS steps of
  * CODEC_STEP_MS each way. */

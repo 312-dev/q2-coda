@@ -154,7 +154,8 @@ HOME_REST = inc('HOME_REST')
 HOME_TEXT_X = inc('HOME_DOT_X') + inc('HOME_DOT') + inc('HOME_DOT_GAP')  # labels after the selection dot
 HOME_LABEL_END = inc('HOME_LABEL_END')  # clear of the chevron's box, and so of the lower-right glass
 HOME_LIST_W = 375
-# iPod Now Playing (Rockbox iVideo): a 40px top row, the art band below it, then the progress bar
+# iPod Now Playing (Rockbox iVideo), the grid the Spotify and Radio pages mirror (the SPOT_* checks below;
+# playing_page lays out OLED's own, np_grid): a 40px top row, the art band below it, then the progress bar
 # with the times under its ends. Stock draws the 3x10 A-B markers at y 250; the 4px line sits at
 # 253; their x follows NP_BAR through the np_bar_* immediates in ipod.json. The window starts
 # at screen y Geometry.bar; the top and bottom rows take their insets from the corners. The bar
@@ -166,8 +167,6 @@ NP_ICON = 50                     # the stock 50px control icons, centred in the 
 NP_ICON_PAD = inc('NP_ICON_PAD')  # play_fav/play_order: 28px, centred, glyph ends 4px above
 NP_MARGIN = 16
 NP_TEXT_W = 165
-NP_TITLE_PX = inc('NP_TITLE_PX')  # the title over the NP_META_PX artist and album, as Apple's hierarchy
-NP_META_PX = inc('NP_META_PX')
 NP_ART = 375 - 2 * NP_MARGIN - 12 - NP_TEXT_W
 NP_SLIDE_H = 186                 # the swipeable art and lyrics pages; the dots sit below
 NP_DOTS_Y = NP_SLIDE_H - 4       # above the seek bar's NP_TOUCH target
@@ -216,7 +215,6 @@ check(set(vars(IPOD)) == {'BOTTOM', 'PITCH', 'BODY', 'ART', 'ART_INSET', 'NP_ICO
 check([NP_MARGIN, NP_ART, NP_TEXT_X, NP_TEXT_W, *NP_BAR[::2], NP_TIMES_Y, NP_TIME_X] ==  # Spotify's and Radio's
       [inc('SPOT_' + n) for n in 'ART_X ART_PX TEXT_X TEXT_W BAR_X BAR_W TIMES_Y TIME_X'.split()], 'SPOT_* != NP_*')
 check(inc('NP_ART_TOP') == NP_TOP + NP_ART_Y, 'NP_ART_TOP != NP_TOP + NP_ART_Y')
-NP_GREY = '#AAAAAA'              # stock secondary text (s_scrlabel_gray24l)
 # The track is TRACK_COLOR until np_theme writes a theme's own; the fill is Graphite's light tone until ringnav_playing sets the
 # accent's (3.3:1 or more on the track for every preset).
 NP_TRACK = f'#{inc("TRACK_COLOR"):06x}'
@@ -574,7 +572,6 @@ def np_buttons(named):
 
 
 def playing_page(root, g):
-    geo = with_geometry(g)
     named = {n[2].get('name'): n for n in walk(root)}
     check([n[2].get('name') for n in root[3]] == [
         'view_buttons', 'scrlabel_title', 'scrlabel_artist', 'label_playtime', 'label_playlen',
@@ -588,38 +585,13 @@ def playing_page(root, g):
         n[2] = {k: v for k, v in n[2].items() if not k.endswith(('_offset', 'text_align_h'))}
         if 'image' in n[2]:
             n[2]['draw_type'] = 'center'
-    named['img_more'][1] = [geo.NP_ICONS_END - NP_ICON, 0, NP_ICON, NP_TOP]
-
-    art_y, art = (NP_ART_Y, NP_ART)
-    text_x = NP_MARGIN + art + 12
-    text_w = 375 - NP_MARGIN - text_x
-    # Favourite centres beneath More; leave 6px between its target and shuffle/order. The row ends
-    # with the art, clear of the dots: the 28px glyphs, centred, end 15px above their frame's bottom.
-    icons_y = art_y + art - NP_ICON + NP_ICON_PAD
-    fav_x = named['img_more'][1][0]
-    for name, x in (('img_playmode', fav_x - NP_ICON - 6), ('img_fav', fav_x)):
+    for name in ('img_playmode', 'img_fav'):
         buttons[3].remove(named[name])
-        named[name][1] = [x, icons_y, NP_ICON, NP_ICON]
-    top = art_y + (icons_y - NP_ICON_PAD - art_y - (28 + 6 + 22 + 6 + 22)) // 2
-    title[1] = [text_x, top, text_w, 28]
-    # every state: the labels are disabled (enable false), so a lone normal size would not apply
-    title[2].update({'style': 's_scrlabel_white20l', **{f'style:{s}:font_size': str(NP_TITLE_PX) for s in ('normal', 'disable', 'focused')}})
-    artist[1] = [text_x, top + 34, text_w, 22]
+    title[2]['style'] = 's_scrlabel_white20l'
     for key in artist[2]:
-        if key.endswith(':font_size'): artist[2][key] = str(NP_META_PX)
-        if key.endswith(':text_color'): artist[2][key] = NP_GREY
         if key.endswith(':text_align_h'): artist[2][key] = 'left'
     album = copy.deepcopy(artist)
-    album[1] = [text_x, top + 62, text_w, 22]
     album[2].update(name='label_ipod_album', text='')
-    for key in album[2]:
-        if key.endswith(':text_color'): album[2][key] = f'#{inc("NP_ALBUM_RGB"):06X}'
-    for key in artist[2]:
-        if key.endswith(':text_color'): artist[2][key] = f'#{inc("NP_ARTIST_RGB"):06X}'
-    for n, px in ((title, NP_TITLE_PX), (artist, NP_META_PX), (album, NP_META_PX)):
-        check({v for k, v in n[2].items() if k.endswith(':font_size')} == {str(px)}, 'Now Playing text keeps a state size')
-    named['img_cover'][1] = [NP_MARGIN, art_y, art, art]
-    named['img_playstate'][1] = [NP_MARGIN + (art - 120) // 2, art_y + (art - 120) // 2, 120, 120]
     named['img_playstate'][2]['opacity'] = '0'  # retain stock gesture target without a transport glyph
     named['view_album'][3] += [title, artist, album, named['img_playmode'], named['img_fav']]
     column = (375 - 225) // 2
@@ -634,38 +606,21 @@ def playing_page(root, g):
     lrc['children_layout'] = f'list_view(x=0,y={inc("LYRIC_SLOT")},s=0)'
     # its y set as laid out too, so a read before the first layout finds where the lyrics start
     named['view_lrc'][1][1] = 0
-    named['view_lrc'][2]['self_layout'] = 'default(x=0,y=0,w=375,h=178)'
     for n in named['view_info'][3]:
         n[1][0] += column
-    slide_h = max(NP_SLIDE_H, art_y + art)
-    named['slide_view_view'][1] = [0, NP_TOP, 375, max(NP_DOTS_Y + 10, slide_h)]
-    named['slide_view'][1] = [0, 0, 375, slide_h]
     dots = named['slide_indicator1']
     for key in dots[2]:
         if key.endswith(':selected_fg_color'): dots[2][key] = '#eeeeee'
         elif key.endswith(':fg_color'): dots[2][key] = '#555555'
-    dots[1][1] = NP_DOTS_Y
-    dots[2]['self_layout'] = f'default(x=0,y={NP_DOTS_Y},w=100%,h=10)'
     # Without an anchor, stock's indicator centres its dots on the slide_view as widget_to_screen places it,
     # which takes away the view's own xoffset, a swipe's drag: dots laid out mid-swipe (any relayout lays them
     # out) slid with the page until the next layout. The same point as the indicator's own anchor: the
     # slide_view's centre, and above the indicator's middle, which puts the dots on its top edge.
     dots[2].update(anchor_x=f'{375 // 2}px', anchor_y='0px')
-    named['image_wait'][1] = [NP_MARGIN + (art - 54) // 2, NP_TOP + art_y + (art - 54) // 2, 54, 54]
-
-    x, y, w, h = geo.NP_BAR
-    np_slider(named['slider_play'], x, y + h // 2, w, h)
-    for name in ('img_repeata', 'img_repeatb'):
-        named[name][1][0] = x
     total = named['label_playlen']
     remain = copy.deepcopy(total)
-    remain[1] = [375 - geo.NP_TIME_X - 80, NP_TIMES_Y, 80, 16]
     remain[2].update(name='label_ipod_remain', text='')
     total[2]['visible'] = 'false'
-    named['label_playtime'][1] = [geo.NP_TIME_X, NP_TIMES_Y, 80, 16]
-    for n in (named['label_playtime'], remain):
-        for key in n[2]:
-            if key.endswith(':text_color'): n[2][key] = NP_GREY
     root[3][1:3] = []
     root[3].insert(3, remain)
     np_grid(root, named, g, title, artist, album, remain)
@@ -732,7 +687,7 @@ NP_GRID_MARGIN = 2  # hscroll_label's own margin each side of its text (stock's 
 
 
 def np_grid(root, named, g, title, artist, album, remain):
-    """playing_page's boxes moved to g's grid (NP_GRID_* above); every name the payload binds keeps its widget."""
+    """playing_page's widgets placed on g's grid (NP_GRID_*), the only layout the page has; every name the payload binds keeps its widget."""
     a, tx, right = g.np_art, g.text_x + g.np_art + NP_GRID_GAP, 375 - g.right_x
     bar_y, page = g.np_bar_y - g.bar, named['view_album'][3]
     named['img_cover'][1] = [g.text_x, 0, a, a]
@@ -741,6 +696,9 @@ def np_grid(root, named, g, title, artist, album, remain):
     for n, top, px in zip((title, artist, album), NP_GRID_LINES, (NP_GRID_TITLE_PX, NP_GRID_META_PX, NP_GRID_META_PX)):
         # the box takes the margins, so the text's column is tx to the right column, which clips it
         n[1] = [tx - NP_GRID_MARGIN, top, right - tx + 2 * NP_GRID_MARGIN, px]
+        if n is title:  # every state: the labels are disabled (enable false), so a lone normal size would not apply
+            n[2].update({f'style:{s}:font_size': str(px) for s in ('normal', 'disable', 'focused')})
+            check({v for k, v in n[2].items() if k.endswith(':font_size')} == {str(px)}, 'Now Playing text keeps a state size')
         for key in n[2]:
             if key.endswith(':font_size'): n[2][key] = str(px)
             if n is not title and key.endswith(':text_color'): n[2][key] = NP_GRID_SECONDARY
