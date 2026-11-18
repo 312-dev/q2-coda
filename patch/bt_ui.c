@@ -448,9 +448,43 @@ void bt_page(void *view, int on) {
     class_fetch();
 }
 
+/* ---- Quality's last row: the step-down's switch ----
+ * "Lower quality when the signal is weak", [Q2POD] BTSTEPDOWN, on unless 0: under LDAC Auto,
+ * q2guard moves a link the radio cannot keep up with from aptX HD to aptX, then SBC, and back once
+ * it is clean (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself.
+ * Added before the picker's first layout, after stock's eight choices, and found again by its
+ * item's _bt_step on every later one; no state of its own. */
+#define BT_STEP_KEY "BTSTEPDOWN"
+#define BT_STEP_TITLE "Lower quality when the signal is weak"
+#define BT_STEP_CAPTION                                                                            \
+    ((const unsigned *)L"On LDAC Auto, aptX HD steps down to aptX, then SBC, while the signal is " \
+                        L"weak, and back once it is strong again")
+static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 1); }
+static int step_click(void *label, void *event) {
+    int on = !step_on();
+    toolsWriteConfig("/mnt/data/config.ini", "Q2POD", BT_STEP_KEY, on ? "1" : "0");
+    list_toggle(label, BT_STEP_TITLE, on);
+    return 0;
+}
+static void step_row(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i)
+        if (widget_get_prop_int(widget_get_child(view, i), "_bt_step", 0)) return;
+    void *label = list_row(view, 0, 0, 0), *b = P(label, W_PARENT);
+    widget_set_prop_int(P(b, W_PARENT), "_bt_step", 1);
+    widget_on(b, EVT_CLICK, step_click, label);
+    list_toggle(label, BT_STEP_TITLE, step_on());
+    caption_row(label, BT_STEP_CAPTION);
+}
+
 /* Before stock's layout: each device row's height, the connected one two lines (navigation.c maps
- * the others to the set's row as stock's settings rows). */
+ * the others to the set's row as stock's settings rows); on Quality's picker, the step-down's row.
+ */
 void bt_rows_pre(void *view) {
+    void *win = window_of(view);
+    if (win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "btquality_page")) {
+        step_row(view);
+        return;
+    }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item);
         if (widget_get_prop_int(item, "_bt_head", 0) && I(item, W_H) != BT_NOTE_H)
@@ -585,7 +619,8 @@ static const unsigned *auto_caption(void) {
 static void quality_rows(void *view) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item), *title = (void *)0;
-        if (!b || widget_lookup(b, "_bt_kbps", 0)) continue;
+        if (!b || widget_lookup(b, "_bt_kbps", 0) || widget_get_prop_int(item, "_bt_step", 0))
+            continue;
         int choice = atoi(widget_get_prop_str(b, "name", ""));
         for (unsigned j = 0, k = widget_count_children(b); j < k && !title; ++j)
             if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
