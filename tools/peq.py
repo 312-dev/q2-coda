@@ -194,6 +194,7 @@ LIBC = {
     'clock_gettime': ('int', 'int, void *'),
     'sinf': ('float', 'float'), 'cosf': ('float', 'float'),
     'write': ('int', 'int, const void *, unsigned'),
+    'kill': ('int', 'int, int'),  # ulog.c: q2guard's request signal
 }
 
 # The payload's C beside navigation.c (build.py compile_payload), in link order; test/fw builds the same set.

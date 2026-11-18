@@ -9,8 +9,12 @@
  * the cards it is told about in /tmp/q2guard.state and answers in /tmp/q2guard.ack (heatguard.c).
  * Between ticks it sleeps in q2bt.c's bt_sleep, which samples the Bluetooth link each second while
  * an A2DP stream runs, into a q2-bt log beside the heat log (docs/internals.md#bluetooth-link-monitor).
+ * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
+ * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
+ * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
 #include "q2bt.h"
+#include "q2log.h"
 
 #define GUARD_TICK_MS 5000 /* a sample; 1 s while powering off */
 #define LINE_MS 30000      /* a log line when nothing is warm, plugged in or busy */
@@ -22,7 +26,13 @@
 #define STATE "/tmp/q2guard.state"
 #define STATE_TMP "/tmp/q2guard.state.tmp"
 #define ACK "/tmp/q2guard.ack"
-#define LOCK "/tmp/q2guard.lock" /* one q2guard at a time: S90play's loop starts another only once it ended */
+#define LOCK "/tmp/q2guard.lock" /* one q2guard at a time: S90play's loop starts another only once it ended; holds its pid */
+#define SNAP "/tmp/q2guard.snap" /* a request: why, or "flush"; removed once answered (ulog.c, S90play) */
+#define DEMO_ERR "/tmp/q2-demo.err" /* demo's stderr (tools/build.py BOOT_HOOK) */
+#define DEMO_LOG "/tmp/q2-demo.log" /* --dev: demo's stdout and stderr (tools/build.py LOG_HOOK) */
+#define KMSG "/dev/kmsg"
+#define KMSG_MAX 64 /* records read in one tick; the rest wait for the next */
+#define WARN_GAP_MS 30000 /* an E or W line flushes at once; more of them, at most this often */
 #define SENSOR_HOOK "/tmp/q2guard.sensor" /* --dev only: a temperature in tenths of a degree, or "none" */
 #define PS "/sys/class/power_supply/"
 #define PMIC_DEV "/dev/i2c-6" /* the AXP2101's bus on the Q2 (axp20x-i2c owns 0x34, so I2C_SLAVE_FORCE) */
@@ -295,12 +305,12 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, 
  * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
  * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
  * card_log_flush appends the rings to the files; the watcher then drops what the child was given. */
-static card_log heat, btlog; /* q2-heat and q2bt.c's q2-bt */
+static card_log heat, btlog, ulog; /* q2-heat, q2bt.c's q2-bt and the unified q2-log */
 static int in_writer;        /* true in the child */
 int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    unsigned len, dropped, bt_len, bt_dropped; /* what the child was given of each */
+    unsigned len, dropped, bt_len, bt_dropped, u_len, u_dropped; /* what the child was given of each */
     int done; /* the last flush ended (written, failed or given up) */
 } fl;
 static void flush_start(void) {
@@ -311,8 +321,11 @@ static void flush_start(void) {
     }
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
+    fl.u_len = ulog.len, fl.u_dropped = ulog.dropped;
     pid_t pid = fork();
-    if (!pid) in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0));
+    if (!pid)
+        in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0) |
+                             (ulog_flush(&ulog, LOGS, "q2-log", ULOG_FILE_MAX, ULOG_FILES) ? 4 : 0));
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
 }
@@ -327,9 +340,10 @@ static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
-    int failed = status & 0x7f ? 3 : status >> 8 & 0xff; /* killed: neither; else its exit's bits */
+    int failed = status & 0x7f ? 7 : status >> 8 & 0xff; /* killed: none; else its exit's bits */
     if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
     if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
+    if (!(failed & 4)) written(&ulog, fl.u_len, fl.u_dropped);
 }
 
 /* ---- demo ---- */
@@ -366,10 +380,59 @@ static void flush_final(unsigned deadline) {
     while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap();
 }
 
-static void note(const char *what) { /* a line of its own in the log */
+/* A line of its own in the heat log, and in the unified log as the guardian's: W for what warns or
+ * goes wrong (WARN, LOADWARN, POWEROFF, NOANSWER, a sensor or card lost, a refused power-off). */
+static void note(const char *what) {
     char b[200];
     heat_note(b, sizeof b, time(0), what);
     heat_add(&heat, b);
+    int warn = !strncmp(what, "WARN", 4) || !strncmp(what, "LOADWARN 60", 11) || !strncmp(what, "POWEROFF", 8) ||
+               !strncmp(what, "NOANSWER", 8) || !strncmp(what, "SENSOR none", 11) || !strncmp(what, "CARD", 4) ||
+               !strcmp(what, "POWER off refused, trying again");
+    ulog_add(&ulog, time(0), now_ms(), warn ? 'W' : 'I', "guard", what);
+}
+
+/* ---- the unified log's feeds ---- */
+volatile int guard_woke;
+static volatile int termed;
+static void on_signal(int sig) {
+    guard_woke = 1;
+    if (sig == SIGTERM) termed = 1;
+}
+static struct ulog_tail err;
+static int kmsg = -1;
+/* What demo's stderr file and the kernel gained since the last tick: 2 when a line was E or W. */
+static int feeds(void) {
+    long wall = time(0);
+    int got = ulog_tail(&err, &ulog, wall, now_ms());
+    char rec[1024];
+    for (int k = 0; kmsg >= 0 && k < KMSG_MAX; ++k) {
+        int n = (int)read(kmsg, rec, sizeof rec - 1);
+        if (n < 0 && *__errno_location() == EPIPE) continue; /* overwritten before it was read: the next one */
+        if (n <= 0) break;                                     /* none left (EAGAIN) */
+        char level = ulog_kmsg(&ulog, wall, rec, n);
+        if (level == 'E' || level == 'W') got |= 2;
+    }
+    return got & 2;
+}
+static char line[512]; /* the last heat line, which a snapshot repeats */
+/* A snapshot (q2log_core.c ulog_snapshot): why, and what the Q2 was doing. */
+static void snapshot(const char *why, char level) {
+    static char mem[1024];
+    char load[64];
+    slurp("/proc/meminfo", mem, sizeof mem);
+    slurp("/proc/loadavg", load, sizeof load);
+    ulog_snapshot(&ulog, time(0), now_ms(), level, why, mem[0] ? mem : 0, load[0] ? load : 0, line[0] ? line : 0);
+}
+
+/* demo's or S90play's request in SNAP, after a SIGUSR1: its snapshot (none for "flush"), the logs written
+ * out in at most FINAL_MS, then SNAP removed, which is the answer they wait for. */
+static void request(void) {
+    char why[96];
+    int n = slurp(SNAP, why, sizeof why);
+    while (n > 0 && (why[n - 1] == '\n' || why[n - 1] == ' ')) why[--n] = 0;
+    if (n > 0 && strcmp(why, "flush")) snapshot(why, strncmp(why, "crash", 5) ? 'I' : 'E');
+    if (n >= 0) flush_final(now_ms() + FINAL_MS), unlink(SNAP);
 }
 
 int main(int argc, char **argv) {
@@ -377,23 +440,38 @@ int main(int argc, char **argv) {
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
+    char b[160];
+    if (lock >= 0) ftruncate(lock, 0), write(lock, b, snprintf(b, sizeof b, "%d\n", getpid()));
+    signal(SIGUSR1, on_signal), signal(SIGTERM, on_signal);
     card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
+    card_log_at(&ulog, LOGS "/q2-log.0", ULOG_RAM);
     bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM));
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
-    char b[160];
     snprintf(b, sizeof b, "BOOT build=%s last=%s", build, last);
     note(b);
+    /* the unified log's boot marker: was the last shutdown clean (S90play's word, BOOT_HOOK) */
+    int again = !strcmp(last, "respawn");
+    snprintf(b, sizeof b, "boot build=%s last=%s", build, last);
+    ulog_add(&ulog, time(0), now_ms(), again || !strcmp(last, "clean") ? 'I' : 'W', "guard", b);
+    /* a q2guard started again reads only what is new: the one before it read the rest */
+    ulog_tail_at(&err, dev_build ? DEMO_LOG : DEMO_ERR, again);
+    kmsg = open(KMSG, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (kmsg < 0)
+        ulog_add(&ulog, time(0), now_ms(), 'I', "guard", "kernel log: " KMSG " does not open");
+    else if (again)
+        lseek(kmsg, 0, SEEK_END);
+    int warn_due = 0; /* an E or W line waits for its flush */
     int seq = 0, cores = 1, raw, temp, busy, line_due = 1;
     const char *card = "none";
     unsigned beat = 0, start = now_ms(), last_line = start, last_flush = start, off_seq = 0;
-    unsigned load_end = 0, window_ms = 0;
+    unsigned load_end = 0, window_ms = 0, last_warn = start - WARN_GAP_MS;
     int cancel_seen = -1;
     busy_since(&cpu5, &cores);
     busy_since(&cpu_line, &cores);
     struct heat_sample s = { 0 };
-    char line[512];
+    const char *snap_why = 0; /* a heat event's snapshot, taken once this tick's heat line is made */
     s.cable = -1;
     pmic_open();
     flush_start();
@@ -403,6 +481,17 @@ int main(int argc, char **argv) {
         bt_sleep(g.off ? 1000 : GUARD_TICK_MS - (window_ms < GUARD_TICK_MS ? window_ms : 0));
         unsigned now = now_ms();
         flush_reap();
+        if (feeds()) warn_due = 1;
+        if (guard_woke) {
+            guard_woke = 0;
+            if (termed) { /* the system is going down (busybox init's SIGTERM, a second before its SIGKILL) */
+                snapshot("shutdown signal", 'I');
+                flush_final(now_ms() + FINAL_MS);
+                _exit(0);
+            }
+            request();
+            continue;
+        }
         /* the die: not while powering off (its window would hold up the 1 s ticks, and nothing reads it) */
         int adc = -1, die = g.off ? GUARD_NONE : pmic_sample(&bus, &pmic, &adc);
         window_ms = now_ms() - now;
@@ -428,7 +517,7 @@ int main(int argc, char **argv) {
         guard_step(&g, &in, &o);
         int was_off = g.off && o.event == EV_OFF;
         switch (o.event) {
-        case EV_WARN: card = "warn", ++seq, note("WARN hot"); break;
+        case EV_WARN: card = "warn", ++seq, note("WARN hot"), snap_why = "heat warn"; break;
         case EV_SENSOR_DOWN:
             card = "nosensor", ++seq;
             snprintf(b, sizeof b, "SENSOR none usable: %s", guard_why(&g));
@@ -437,11 +526,13 @@ int main(int argc, char **argv) {
         case EV_SENSOR_OK: card = "none", ++seq, note("SENSOR ok"); break;
         case EV_LOAD_WARN:
             card = "loadwarn", ++seq, load_end = now + GUARD_LOAD_MS, note("LOADWARN 60 s");
+            snap_why = "heat loadwarn";
             break;
         case EV_LOAD_CANCELLED: card = "none", ++seq, note("LOADWARN cancelled"); break;
         case EV_OFF:
             card = "off", off_seq = ++seq;
             note(g.off_why == 'L' ? "POWEROFF load with no sensor" : "POWEROFF hot");
+            snap_why = "heat poweroff";
             break;
         }
         if (o.event != EV_NONE || was_off) line_due = 1;
@@ -462,11 +553,14 @@ int main(int argc, char **argv) {
             heat_add(&heat, line);
             last_line = now;
         }
+        if (snap_why) snapshot(snap_why, 'W'), snap_why = 0;
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
         if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
+            (warn_due && now - last_warn >= WARN_GAP_MS) ||
             now - last_flush >= (fast || bt_streaming() ? FLUSH_FAST_MS : FLUSH_MS)) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
             flush_start();
+            if (warn_due) last_warn = now, warn_due = 0;
             last_flush = now;
         }
         line_due = 0;

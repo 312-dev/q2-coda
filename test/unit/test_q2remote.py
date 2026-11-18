@@ -1267,7 +1267,7 @@ def test_main_sh_empty(world):
     (['pull', 'a', 'b'], ('pull', ('a', 'b'), {})),
     (['reboot'], ('reboot', (False,), {})),
     (['reboot', '--wait'], ('reboot', (True,), {})),
-    (['log', '--clear'], ('shell', (': >/tmp/q2-demo.log',), {})),
+    (['log', '--clear'], ('shell', (': >/tmp/q2-demo.log; rm -f /tmp/q2-demo.log.1',), {})),
 ])
 def test_main_dispatch(world, argv, expected, capsys):
     assert q.main(argv) == 0
@@ -1325,7 +1325,8 @@ def test_main_install(world, capsys):
 def test_main_log_tail(world, capsys):
     assert q.main(['log']) == 3
     assert q.main(['log', '5']) == 3
-    assert [c[1] for c in world.calls] == [('tail -n 100 /tmp/q2-demo.log',), ('tail -n 5 /tmp/q2-demo.log',)]
+    assert [c[1] for c in world.calls] == [('cat /tmp/q2-demo.log.1 /tmp/q2-demo.log 2>/dev/null | tail -n 100',),
+                                           ('cat /tmp/q2-demo.log.1 /tmp/q2-demo.log 2>/dev/null | tail -n 5',)]
     assert capsys.readouterr().out == 'outout'
 
 

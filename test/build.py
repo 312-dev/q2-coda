@@ -52,8 +52,13 @@ def boot_check():
             assert script.count(loop) == 1
             start = script.index(loop)
             script = script[:start] + f'echo "guard $e" >> {r}/guard' + script[script.index('\n', start):]
-            # demo's stderr file, and its cap's minute: one pass here while {r}/minute exists
+            # demo's stderr file, and its roll's minute: one pass here while {r}/minute exists
             script = script.replace('/tmp/q2-demo.err', f'{r}/tmp/q2-demo.err')
+            # the crash's request to q2guard (docs/internals.md#unified-log): a stand-in on PATH takes the signal,
+            # keeps the request it found and answers (removes it)
+            script = script.replace('/tmp/q2guard.', f'{r}/tmp/q2guard.')
+            assert script.count('kill -USR1 "$(cat ') == 1
+            script = script.replace('kill -USR1 "$(cat ', 'usr1 "$(cat ')
             assert script.count('while sleep 60; do') == 1
             script = script.replace('while sleep 60; do', f'while [ -f {r}/minute ] && rm -f {r}/minute; do')
         # This script runs under the PC's own sh: the real killall -9 and ifconfig would take down the PC's network,
@@ -206,7 +211,8 @@ def boot_check():
             out, cp = logged(137, False)
             assert f'== {last}' not in out and f'== {name}\n' not in out
         # demo's stderr (build.py BOOT_HOOK): kept in RAM across its runs, its last 60 lines end the crash log; the
-        # once-a-minute cap (one pass here while {r}/minute exists) empties it past 512 KB and leaves a smaller one alone
+        # once-a-minute roll (one pass here while {r}/minute exists) copies it to .1 and empties it past 256 KB and
+        # leaves a smaller one alone
         err, minute, noise = r/'tmp/q2-demo.err', r/'minute', ''.join(f'err {i}\n' for i in range(1, 71))
         exe('release/bin/demo', 'i=0; while [ $i -lt 70 ]; do i=$((i+1)); echo "err $i" >&2; done; ' + demo)
         err.unlink(missing_ok=True); out, cp = logged(137, False)
@@ -214,12 +220,32 @@ def boot_check():
         assert len(lines) == 60 and lines[0] == 'err 11' and lines[-1] == 'err 70' and err.read_text() == noise
         out, cp = logged(137, False)
         assert err.read_text() == noise * 2 and out.split('== stderr\n')[1].splitlines() == lines  # appended across demo's runs
-        err.write_bytes(b'x' * 524289); minute.write_text(''); boot(True, False, status=0)
-        assert not minute.exists() and err.read_text() == noise  # past the cap: emptied before demo ran again
-        err.write_bytes(b'x' * 524288); minute.write_text(''); boot(True, False, status=0)
-        assert not minute.exists() and err.read_bytes() == b'x' * 524288 + noise.encode()  # at the cap: kept
+        err1 = r/'tmp/q2-demo.err.1'
+        err.write_bytes(b'x' * 262145); minute.write_text(''); boot(True, False, status=0)
+        assert not minute.exists() and err.read_text() == noise  # past the cap: rolled before demo ran again
+        assert err1.read_bytes() == b'x' * 262145  # moved whole to .1, not lost
+        err1.unlink()
+        err.write_bytes(b'x' * 262144); minute.write_text(''); boot(True, False, status=0)
+        assert not minute.exists() and err.read_bytes() == b'x' * 262144 + noise.encode()  # at the cap: kept
+
         exe('release/bin/demo', demo); err.unlink(); out, cp = logged(137, False)
         assert out.endswith('== stderr\n') and err.read_text() == ''  # the shell makes the file as demo starts: an empty section says so
+        # a crash just after a roll: the crash log's tail reads across .1 and the new file
+        err1.write_text(''.join(f'old {i}\n' for i in range(1, 71))); err.write_text('new 1\nnew 2\n')
+        out, cp = logged(137, False)
+        assert out.split('== stderr\n')[1].splitlines() == [f'old {i}' for i in range(13, 71)] + ['new 1', 'new 2']
+        err1.unlink()
+        # a crash asks q2guard (the pid in /tmp/q2guard.lock) for the unified log's snapshot, and waits for its answer
+        snap, requests = r/'tmp/q2guard.snap', r/'requests'
+        (r/'tmp/q2guard.lock').write_text('4242\n')
+        exe('bin/usr1', f'echo "$1 $(cat {snap})" >> {requests}; rm -f {snap}')
+        logged(139, False)
+        assert requests.read_text() == '4242 crash demo exit 139\n' and not snap.exists()
+        requests.unlink(); boot(True, False, status=0)
+        assert not requests.exists() and not snap.exists()  # a clean end: demo's own request (ulog.c), none here
+        (r/'bin/usr1').unlink(); exe('bin/usr1', 'exit 1')  # no q2guard: nothing waits, nothing is left
+        logged(137, False); assert not snap.exists()
+        (r/'bin/usr1').unlink(); (r/'tmp/q2guard.lock').unlink()
         err.unlink()
         # an OOM kill (5.10's wording) whose task dump is longer than the 200-line tail: its own lines, from all of
         # dmesg (a stand-in on PATH) go ahead of the tail
