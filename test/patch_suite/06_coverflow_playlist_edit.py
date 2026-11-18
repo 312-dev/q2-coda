@@ -23,7 +23,7 @@ class CoverflowMachine(QueueMachine):
             kind,parent,h={'window_create':('window',0,0),'widget_factory_create_widget':(self.text(b),c,self.get(sp+24))}.get(
                 name,(name.removesuffix('_create'),a,self.get(sp+16)))
             ret=self.node(kind)
-            if kind=='window': self.top=ret; self.stack.append(ret)
+            if kind=='window': self.top=ret; self.stack.append(ret); self.word(ret+O['W_W'],375); self.word(ret+O['W_H'],320)  # full-bleed (FULL_BLEED)
             else: self.nodes[parent]['children'].append(ret); self.word(ret+O['W_PARENT'],parent); self.word(ret+O['W_H'],h)
             if name=='widget_factory_create_widget':  # x in a3; y, w on the stack
                 for off,v in (('W_X',d),('W_Y',self.get(sp+16)),('W_W',self.get(sp+20))): self.word(ret+O[off],v)
