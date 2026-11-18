@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Wi-Fi: the connected network no longer has a second line that read like another network's name. Its check mark already says it is connected; the word **Connected** now shows as a small caption under the row only while the row is selected, as Reduce Motion's caption does. A network that is connecting keeps its line, as a small grey caption under the name.
   - Settings: three rows that wrote their value into the label (**Clicker: Both** on Controls, **Boot to: Rockbox** on Battery, **AirPlay: Kitchen** on Now Playing's more page) now show the label on the left and the value on the right in the secondary grey, like the other settings rows. Center still cycles them as before.
   - Settings > General: **Reset Settings** is now the last row, directly under Shut Down, in red like the other rows that lose something. It still opens the same three choices, each behind its confirmation.
   - Touch: after a swipe back on a page that stays open (one whose first Return moves within the page, as the letter strip's results do), the page now still slides away when it later closes. Before, the swipe left it closing at once from then on.

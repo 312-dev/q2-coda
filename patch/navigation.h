@@ -490,6 +490,7 @@ void slider_page_dirty(void *page); /* its switch row, after a change of the hid
 int wifi_list(void *list);
 int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
+int wifi_connected_row(void *b); /* the row button b has stock's Connected line */
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
 void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
@@ -514,6 +515,7 @@ void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
                                                       *const reduce_motion_caption;
+void caption_prune(void *view); /* drops the captions of rows a rebuild removed from view */
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
