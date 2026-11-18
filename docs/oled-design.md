@@ -15,7 +15,9 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 1. **Music first.** Every screen answers "what is playing" or "what can I play". Chrome
    (status, titles, chevrons) is quieter than content.
 2. **Black is the surface.** The background is `#000000`. Panels, cards, gradients and
-   glows are not used to separate things; spacing and gray levels are.
+   glows are not used to separate things; spacing and gray levels are. One glow is used, as
+   atmosphere and not to separate: the album art's, behind Now Playing's lyrics and
+   [rating](#rating-page) pages, fading to black.
 3. **One accent.** Accent Blue marks the one thing that is selected, playing or on. If two
    blue things compete on a screen, one of them is wrong.
 4. **Type does the work.** Hierarchy comes from size, weight and gray level, in that order.
@@ -543,7 +545,8 @@ clock, centered.
 | Remaining      | right on 347, centered on y 250 | 16 px, Text Primary, with a leading minus; a tap shows the length instead (Track Time)     |
 | State row      | centered on y 286, x 53 to 322  | Shuffle, radio, repeat, Up Next: Phosphor bold 22 px, even gaps (below)                    |
 
-No page title, no background art blur, no reflection.
+No page title, no reflection, and no background art blur on the art's page (the lyrics and
+[rating](#rating-page) pages have the art's glow).
 
 Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) with the theme's
 `playing.art.radius`, `playing.artist.font`, `playing.scrubber.height` and `playing.modes.icons`.
@@ -554,8 +557,9 @@ has no place for keeps a place of its own:
   art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
   More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
   Accent Blue while the song is a favorite.
-- **The page dots** are hidden: the state row's on dots sit where they were. The lyrics are the
-  swipe's other page, ending 5 px above the bar. Now Playing shows no place in the
+- **The page dots** are hidden: the state row's on dots sit where they were. The lyrics and the
+  [rating page](#rating-page) are the swipe's other pages, in that order; the lyrics end 5 px above
+  the bar, and the rating page, which draws its own dots, rests full screen. Now Playing shows no place in the
   queue ("1 of 10").
 - **The track's details** are not a page of the swipe: ⋯'s **About** row, last before Delete Song,
   opens them as a page titled About, an [info grid](#track-details), and Return goes back to ⋯.
@@ -572,7 +576,16 @@ has no place for keeps a place of its own:
   cycle, as the radio picks the order. A tap on the antenna starts a radio of the playing song
   ([internals: Radio](internals.md#radio)) and "Starting Radio…" while its app is asked; a tap on
   the pill stops it ("Radio Off"). The queue button, and a swipe up on the
-  art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
+  art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too. The swipe up
+  counts only when it comes down on the art's page, above the bar: never on the times or the state
+  row, so a tap on Radio that rolls up as it lifts is no swipe (the user's, 2026-11-18).
+- **The state row's touch** (the user's, 2026-11-18): a tap goes to the button nearest it across
+  the row's target (x 53 to 322, y 264 to 308). The outer two reach further, touch only: shuffle's
+  from the screen's left edge and Up Next's to its right, each from the row's top (y 264) down to the
+  screen's foot, and across as far as their share of the row reaches, the midpoint with radio for
+  shuffle and with repeat for Up Next, so neither reaches Radio, its pill or the swipe up. On
+  screen, radio off: shuffle x 0 to 105, Up Next 270 to 374; radio on: shuffle 0 to 111, Up Next 282
+  to 374 (the pill is 112 to 204). Their glyphs, press squares and focus ring stay where they are.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
   the Center cycle's ring outlines the control the wheel has moved it to (Shuffle, Repeat or the heart) in today's 2 px Text Primary stroke, 9 px corners, no fill;
   a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
@@ -603,6 +616,36 @@ has no place for keeps a place of its own:
   across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
   about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
   the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
+
+### Rating page
+
+Now Playing's third page, a swipe past the lyrics (approved by the user on 2026-11-18, "stars looks good,
+ship it": the `apple` mock-up), `patch/np_rate.c`. At rest it is full screen, the bar, times and state
+row gone; while a swipe moves it, it slides in the pages' column. Nothing on it but these, centred:
+
+| Element    | Position (x, y) and size                    | Notes                                                                                   |
+| ---------- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Title      | centred, line top 64                        | Inter Medium 19 px (AWTK 23), Text Primary, one line, an ellipsis when long              |
+| Artist     | centred, 3 px under the title               | Inter 15 px (AWTK 18), Text Secondary                                                    |
+| Stars      | five 44 px, 14 px apart, centred, top 128   | Phosphor `star-fill` in Text Primary up to the rating, `star` outlines at 30% for the rest |
+| Target     | 52 px (1.18 times) on its star's centre      | the wheel's: filled if within the rating, else a full Text Primary outline              |
+| Page dots  | 6 px, 7 px apart, centred, top 292          | one a page, this one Text Primary, the others at 30%                                    |
+
+No words under the stars, no hint, no progress bar, and no colour but the glow's. The mock-up has the title at
+46; the window starts under the status row's band at 58, so the title stands on Now Playing's own title line.
+
+- **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), the song's hearts one for one: 5 is the
+  favourite, the heart on the art's page. The wheel moves the target from the rating's top (a tick from 3 is 4 or
+  2), within the five, and it goes back to rest after 4 s without a turn; Centre keeps it. A tap keeps a star at
+  once. The rating's own top star, tapped or kept by Centre, clears it (unrated): the page's "0". Centre with no
+  target puts it on the rating's top star, the first when unrated. Nothing that can be rated (a stream, a
+  radio) leaves the wheel on the volume.
+- **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
+  times about its luma and dimmed to 45%, spread across the window and shaded by an ellipse centred at y 122
+  (radii 273 by 220 px) that is black from 80% of the way out, and faded in over the window's top 32 rows
+  under the status row's band. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
+  keeps WCAG's 4.5:1 over its brightest pixel, and the lyrics' edge fades go into the glow, not black. It is
+  made once for each cover shown, never per frame; Light Mode has none.
 
 ### Up Next
 
@@ -638,6 +681,13 @@ as a menu's; a lit row's foot never passes y 282.
   back where it was.
 - Nothing toasts. Center on a song plays it and closes Up Next at once; Return lets the sheet fall
   away. The list follows the queue as songs end, the header with it.
+- **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet
+  (over y 40), or a drag down of 48 px or more, more down than across (the swipe up that opens it,
+  reversed), that starts on the grab bar's strip or on the rows while they are at their top. The
+  sheet falls away as on Return ([Overlay motion](#overlay-motion)); a drag on rows scrolled down
+  scrolls them. ponytail: the sheet does not follow the finger while it drags; it falls once the
+  finger lifts past 48 px, and following it needs the drag's offset in the sheet's frame
+  (`menu_modal.c` `sheet_frame`).
 
 ### Progress and sliders
 

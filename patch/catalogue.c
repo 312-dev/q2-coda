@@ -133,8 +133,8 @@ static struct {
     int np_back;
     char np_cover[160]; /* its art: "file://" and the app's cover, or stock's placeholder */
     /* cat_row_of's last answer, on the UI thread: the path's fnv64, local_gen plus 1 when it was
-     * found, and the entry's index plus 1 (0 for none). Now Playing's badge asks for the playing
-     * copy twice a second (ratings.c rate_badge). */
+     * found, and the entry's index plus 1 (0 for none). Now Playing's heart asks for the playing
+     * copy twice a second (ratings.c rate_heart). */
     unsigned long long row_path;
     unsigned row_gen, row_at;
     /* catalogue_row_fav's last answer: the row asked (row_at), local_gen plus 1 and fav_gen when
@@ -2249,7 +2249,7 @@ static int fav_found(void *ctx, int n, char **v, char **c) {
 /* Whether r, a server song's Stream Cache copy, is a favourite by its server row: the row's path
  * in stock's myfav, where five hearts from the server (ratings_in) or the queue menu on the
  * Library's row put it. Stock checks the copy's own path, which isn't there. -1 when r is
- * no copy. Now Playing asks twice a second (ratings.c rate_badge): the answer is kept until the
+ * no copy. Now Playing asks twice a second (ratings.c rate_heart): the answer is kept until the
  * row, the index or My Fav changes. */
 int catalogue_row_fav(void *r) {
     const cat_ent *e = cat_row_of(r);

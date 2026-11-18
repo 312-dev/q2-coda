@@ -358,6 +358,12 @@ extern int scrobble_ready(void), scrobble_start(void), scrobble_poll(int *sent),
     scrobble_flag(const char *key), scrobble_value(const char *key);
 extern const char *now_tag(void *r, int field);
 extern void *queue_now(unsigned *pos, unsigned *n);
+/* album_cover.c: an album's cover from its songs, as a file:// URL, and the fetches behind it
+ * (docs/internals.md#album-covers): album_cover_gen moves as one lands, album_cover_busy until */
+int album_cover_url(void *const *songs, unsigned n, char *url, unsigned size);
+unsigned album_cover_gen(void);
+int album_cover_busy(void);
+void now_cover_forget(void); /* coverflow.c: the player's cover files, from AWTK's cache */
 
 /* navigation.c */
 void pod_settings(void);
@@ -679,7 +685,16 @@ int np_mode_shuffle(void),
  * np_modes draws it) */
 enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_RATING };
 void *np_heart(void); /* np_bar.c: the heart, while it shows on the art page, else 0 */
+/* np_rate.c: Now Playing's rating page (the slide_view's after the lyrics) and the art's glow */
+void np_rate_bind(void *win), np_rate_gone(void), np_rate_poll(void);
+void np_rate_bg(void *w, void *canvas); /* ringnav_paint_bg: the glow, and the rating page */
+int np_rate_on(void);                   /* the slide_view on the rating page */
+int np_rate_key(unsigned key);          /* a wheel tick on the page: 1 taken */
+int np_rate_centre(void);               /* Centre on the page: 1 taken */
+unsigned np_rate_builds(void);          /* glows made (tests) */
+void np_full_set(int on);               /* now_playing.c np_full: the column full screen, or back */
 int np_mode_click(void *target, void *event);
+void np_corner_tap(int x0, int y0, int x, int y); /* np_bar.c: np_tap's tap past the row */
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
 int song_list(void *w);
@@ -895,8 +910,8 @@ int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
 int rate_open(void);
-int rate_car(int n);       /* Car Remote's Rate: n hearts for the playing track; 1 kept */
-int rate_car_hearts(void); /* the playing track's 0-5 hearts, -1 when it can't be rated */
+int rate_now_set(int n); /* n hearts (stars) for the playing track; 1 kept */
+int rate_now(void);      /* the playing track's 0-5 hearts, -1 when it can't be rated */
 int rate_saved(int k);
 void rate_album_favs(void *album, int on);
 int fav_told(void *r, int on); /* ratings: a My Fav change told to the song's card app */

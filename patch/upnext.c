@@ -15,7 +15,8 @@
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
  * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts. Return lets the
- * sheet fall away (un_back, menu_modal.c modal_close).
+ * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
+ * down on it (menu_modal.c modal_touch_close).
  *
  * The rows are taken again whenever the queue moves on (un_poll, once a second: the song playing,
  * the queue's size and loads, Playing Next), so songs ending leave the list as they play.
@@ -51,10 +52,8 @@
 
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 void *modal_sheet(int (*back)(void *, void *), int (*gone)(void *, void *));
-void modal_head_bars(void), modal_close(void *win),
+void modal_head_bars(void), modal_close(void *win), modal_touch_close(void *win),
     modal_corners(void *canvas, const rect_t *r, int R);
-extern unsigned album_key(void *r);
-extern char *art_path(char *out, unsigned key, const char *suffix);
 
 static struct {
     void *page, *view;        /* the sheet and its rows' scroll view, 0 when closed */
@@ -83,27 +82,25 @@ void un_source_take(void *q, int at, int type) {
         widget_get_text_utf8(st.bar_title, un.source, sizeof un.source);
 }
 
-/* The rows' signature: the song playing, the queue's size and loads, the mode, Playing Next. */
+/* The rows' signature: the song playing, the queue's size and loads, the mode, Playing Next, the
+ * album covers fetched. */
 static unsigned un_sig(void) {
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned pend[64],
         k = playback_next_rows(pend, 64),
         v[] = { (unsigned)MCL(MCL_POS),  q ? deque_size(q) : 0,        playback_loads,
-                (unsigned)MCL(MCL_MODE), (unsigned)playback_option(0), k };
+                (unsigned)MCL(MCL_MODE), (unsigned)playback_option(0), k,
+                album_cover_gen() };
     return hash_bytes(fnv(FNV_SEED, (const unsigned char *)""), (const unsigned char *)v,
                       sizeof v) ^
            hash_bytes(FNV_SEED, (const unsigned char *)pend, k * sizeof *pend);
 }
 
-/* a row's cover as a file:// URL in url (520 bytes), or 0 for the placeholder (library_artist.c's)
- */
+/* a row's cover as a file:// URL in url (520 bytes), or 0 for the placeholder (library_artist.c's):
+ * its album's (album_cover.c: Subsonic's, Cover Flow's, the one Now Playing shows, or one fetched
+ * from a copy on the card, which un_sig's album_cover_gen then shows) */
 static const char *un_cover(void *r, char *url) {
-    const char *path = P(r, REC_PATH);
-    if (!path) return (const char *)0; /* nothing to find it by */
-    tk_snprintf(url, 8, "file://");
-    if (catalogue_cover(path, url + 7, 513)) return url;
-    art_path(url + 7, album_key(r), "");
-    return file_size(url + 7) > 0 ? url : (const char *)0;
+    return album_cover_url(&r, 1, url, 520) ? url : (const char *)0;
 }
 
 static void *un_record(unsigned at) {
@@ -111,9 +108,11 @@ static void *un_record(unsigned at) {
     return q && at < deque_size(q) ? deque_at(q, at) : (void *)0;
 }
 
-/* The covers the rows loaded, let go of */
+/* The covers the rows loaded, let go of; the player's cover files too, which a row of the playing
+ * song's album shows and the next song's cover overwrites */
 static void un_unload(void) {
     char url[520];
+    now_cover_forget();
     for (unsigned i = 0; i < un.n; ++i) {
         void *r = un_record(un.idx[i]);
         if (r && un_cover(r, url)) image_manager_unload_bitmap_by_name(image_manager(), url);
@@ -423,6 +422,7 @@ void up_next(void) {
     if (un.page || !(un.page = modal_sheet(un_back, un_closed))) return;
     widget_set_name(un.page, "upnext_page");
     widget_set_prop_int(un.page, "_mm_own", 1); /* menu_modal.c MM_OWN: the rows' own heights */
+    modal_touch_close(un.page); /* a tap above the sheet, or a drag down on it, closes it too */
     if (!(un.view = widget_lookup(un.page, "scroll_view", 1))) {
         window_close(un.page);
         return;

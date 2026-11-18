@@ -1739,6 +1739,32 @@ def test_a_swipe_or_a_drag_goes_nowhere(taps, ui, to, moves):
     assert not ui.went and not ui.pending()
 
 
+def swiped_up(taps, ui, at, to):
+    """A touch down at at, lifted at to: 1 when it asked for Up Next (np_queue on the next pass)."""
+    for kind, xy in ((O['EVT_POINTER_DOWN'], at), (EVT_POINTER_UP_BEFORE, to)):
+        taps.touch(kind, *xy)
+    asked = ui.pending().count(ui.fn('np_queue'))
+    ui.timers.clear()
+    return asked
+
+
+def test_a_swipe_up_on_the_arts_page_opens_up_next(taps, ui):
+    assert swiped_up(taps, ui, (100, 200), (104, 140)) == 1  # the art: 60 px up, 4 across
+    assert swiped_up(taps, ui, (100, 200), (100, 160)) == 0  # 40 px: short of SWIPE_UP_PX
+    assert swiped_up(taps, ui, (100, 200), (160, 140)) == 0  # as much across as up: the slide_view's
+
+
+@pytest.mark.parametrize('at', [(158, 286), (146, 270), (311, 300), (200, 250)],
+                         ids=['radio-pill', 'antenna', 'up-next', 'times'])
+def test_a_swipe_up_that_came_down_under_the_arts_page_opens_nothing(taps, ui, at):
+    """The user's, 2026-11-18 00:05: a tap on Radio opened Up Next. np_mode_click gives every x of the pill to Radio
+    (test_nav_painters.py); the window's swipe up took any touch, so a press on the state row that rolled 48 px up as
+    it lifted opened the queue, its lift off the row so Radio got no click. Only the art's page (the slide_view, above
+    the bar) starts it."""
+    x, y = at
+    assert swiped_up(taps, ui, at, (x, y - 60)) == 0
+
+
 def test_off_the_art_page_or_with_lyrics_full_screen_nothing_is_a_link(taps, ui, st):
     ui.nodes[taps.slide].props['value'] = 1  # the lyrics page in front
     taps.tap(250, 100)

@@ -670,6 +670,7 @@ def playing_page(root, g):
     root[3].insert(3, remain)
     np_grid(root, named, g, title, artist, album, remain)
     np_info_out(root, named)
+    np_rate_page(named)
 
 
 def np_info_out(root, named):
@@ -683,6 +684,16 @@ def np_info_out(root, named):
     # first, under the rest: stock's AWTK hands a touch to a hidden widget too, and last it took every one on the page
     # (the swipe, More, the bar: measured in the emulator); first, the slide_view_view over it takes them
     root[3].insert(0, info)
+
+
+def np_rate_page(named):
+    """The rating page (patch/np_rate.c): an empty view, the slide_view's page after the lyrics, so a swipe from them
+    reaches it and the slide_view's value is 2 on it. The payload paints it whole: the album art's glow, the title,
+    the artist, five stars and the page dots, full screen while it rests there."""
+    slide = named['slide_view']
+    lyrics = next(i for i, page in enumerate(slide[3]) if any(n is named['view_lrc'] for n in walk(page)))
+    rate = ['view', [0, 0, slide[1][2], slide[1][3]], {'self_layout': 'default(x=0,y=0,w=100%,h=100%)', 'name': 'view_rate'}, []]
+    slide[3].insert(lyrics + 1, rate)
 
 
 # Now Playing on the grid (Geometry.np_art: docs/oled-design.md#now-playing), in window rows from the grid's
