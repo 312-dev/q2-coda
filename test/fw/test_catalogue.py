@@ -12,6 +12,7 @@ import pytest
 from conftest import FNV_SEED, O, Files, Rows, in_fork, stock_start_with
 from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
 from test_nav_painters import low, scratch, st  # noqa: F401  navigation.c's st by field; strings under 4 GB
+from test_nav_hold import recs  # noqa: F401  records whose fields all read as strings
 
 APP = 'subsonic'
 CARD_DB = b'/mnt/mmc/.q2pod/'
@@ -1169,6 +1170,47 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     assert shown()
     rig.now += 1000
     assert not shown()
+
+
+def test_the_car_remote_names_a_pressed_server_song_at_the_press_not_once_it_plays(rig, fw, recs):
+    """The device and the car, 2026-11-18 00:24: Shuffle Songs from the car pressed a server song still to download;
+    the Q2 Muse's Now Playing named it at once (catalogue_np_now) but the car's NowPlaying (coda_rc_shim.c's
+    /tmp/coda-rc.now) kept the queue's song until the player started it, 2 to 3 s later, after its buffering. The
+    shim writes the pressed song from the press: its id, title, artist, album, path (the daemon's art id) and its
+    server length, at 0, unrated while it is not the player's; then the player's song again."""
+    rig.online = True
+    rig.write(1, [song_row('s2', 'Streamed', 'Band', 'Album', 2, 100, 2, album_id='al2')])
+    rig.poll()
+    status = [2]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    fw.mock('mclStop', lambda *_: status.__setitem__(0, 1))
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: 1)
+    config = rig.config
+    fw.mock('toolsReadConfig', lambda path, section, key, out, default, *_: C.memmove(out, b'1\0', 2)
+            if C.string_at(key) == b'CARREMOTE' else config(path, section, key, out, default))
+    poll = fw.fn('coda_rc_poll', None)
+
+    def now():
+        rig.now += 600
+        poll()
+        return dict(line.split('=', 1) for line in rig.files.files['/tmp/coda-rc.now'].decode().splitlines())
+
+    assert now()['title'] == ''  # nothing playing
+    pressed = rig.record(url('s2', 'al2'))
+    C.c_int.from_address(pressed + O['REC_ID']).value = 0x40000002
+    assert load(rig, rig.rows.rows([pressed]), 0)[0] == 2
+    at, n = C.c_uint(), C.c_uint()
+    shown = fw.fn('catalogue_np_now', C.c_void_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint))(C.byref(at), C.byref(n))
+    # its path and tags on the shown copy as test_nav_hold's Records lay them out (a 64-bit P() reads each field
+    # with the next as its high half)
+    named = recs(id_=0x40000002, path=url('s2', 'al2'), name='s2.flac', title='Streamed', artist='Band', album='Album')
+    C.memmove(shown + O['REC_NAME'], named + O['REC_NAME'], 0x2c + 4 - O['REC_NAME'])
+    np = now()
+    assert (np['id'], np['title'], np['artist'], np['album'], np['path']) == (
+        str(0x40000002), 'Streamed', 'Band', 'Album', url('s2', 'al2'))
+    assert (np['pos'], np['len'], np['hearts']) == ('0', '100', '-1')
+    fw.var('id3_parses', C.c_uint).value += 1  # the player parsed a song: its own again
+    assert now()['title'] == ''
 
 
 def test_the_players_title_comes_back_after_a_pressed_song_though_stocks_flag_is_taken(rig, fw, mcl):

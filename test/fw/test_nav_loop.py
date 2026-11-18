@@ -3411,8 +3411,10 @@ def test_a_lit_pass_stays_awake_while_something_moves(fw, stock_bytes, st):
 # The UI loop's wait (loop_wake.c): a poll() on an eventfd, its timeout the next AWTK timer due.
 class Wait:
     """The loop's eventfd (fd 9) and its polls, and stock's timer list, animator manager and native
-    window laid out at a low address as the Q2's 32-bit pointers have them."""
-    FD, BASE = 9, 0x5e000000
+    window laid out at a low address as the Q2's 32-bit pointers have them. claim() leaves the page
+    mapped for the session, so BASE is one no other file maps (test_e2e_network.py's strings take
+    0x5e000000 up, with MAP_FIXED_NOREPLACE)."""
+    FD, BASE = 9, 0x5d000000
 
     def __init__(self, fw, loop):
         self.fw, self.loop, self.polls, self.during = fw, loop, [], None

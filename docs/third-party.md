@@ -167,7 +167,7 @@ What is left of the rebuilt components is in releases nothing newer replaces wit
 - **FFmpeg 4.2.11** is the last 4.2 release; the 4.2 branch is unmaintained, and most findings are 2026 advisories fixed only in maintained branches. A maintained FFmpeg has new sonames (`libavcodec.so.61` and up) and a changed command line, so it means adding its libraries beside or in place of 4.2's, rechecking every command line the payload runs (`patch/video.c`, `coverflow.c`, `playlist_art.c`, `chapters.c`, `system.c`, `tidal.c`, Internet Radio) and making room in the rootfs.
 - **libpng 1.2.59** is the last 1.2 release; libpng 1.6 has another ABI (`libpng16.so.16`) that demo does not link.
 - **BusyBox 1.38.0, SQLite 3.54.1** are the newest releases; their findings have no release with a fix yet. **wpa_supplicant**'s one (`CVE-2024-5290`) is in a distribution's D-Bus policy, which this build does not have.
-- **mbedTLS 3.6.7** is not visible to the scan (libcurl links it statically and keeps no version string, and so does `q2player` with `--new-player`). It is the newest 3.6 long-term-support release; check its advisories when bumping curl.
+- **mbedTLS 3.6.7** is not visible to the scan (libcurl links it statically and keeps no version string, and so does `q2player`). It is the newest 3.6 long-term-support release; check its advisories when bumping curl.
 
 ## Bumping a version
 

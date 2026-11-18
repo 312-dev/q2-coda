@@ -6,7 +6,7 @@
     python3 tools/ci/gate.py --tier post              # what runs on the trunk after a landing
     python3 tools/ci/gate.py --only fw-asan,unit      # some of it
     python3 tools/ci/gate.py --plan-json plan.json    # what an affected.py plan names (merge_batch.py's runs)
-    python3 tools/ci/gate.py -- --dev                 # rebuild.py's options (default: --dev -- --new-player)
+    python3 tools/ci/gate.py -- --dev                 # rebuild.py's options (default: --dev)
 
 Run it with a python that has pytest, pytest-xdist, coverage, mypy, unicorn and fontTools (the main
 checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
@@ -397,7 +397,7 @@ def main():
     ap.add_argument('--python', default=sys.executable)
     args, rest = ap.parse_known_args()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so run() ends its suites
-    build_args = [a for a in rest] or ['--dev', '--', '--new-player']
+    build_args = [a for a in rest] or ['--dev']
     if build_args and build_args[0] == '--':
         build_args = build_args[1:]
     plan = None

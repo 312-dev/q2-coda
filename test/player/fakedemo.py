@@ -83,6 +83,10 @@ def scenarios(m):
         'pause-seek': boot + [(1.0, song('set-songurl', a1)), (3.0, '{mcl-pause\\null}'), (4.0, '{mcl-seek\\10}'), (6.0, '{mcl-play\\null}'), (8.0, '{mcl-stop\\null}'), (10.0, None)],
         # set-songurl while a song plays, which demo sends only when it believes nothing is playing
         'replace': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-songurl', b1)), (7.0, '{mcl-stop\\null}'), (9.0, None)],
+        # a press of a server song while one plays (patch/catalogue.c np_stop): stock's player_start plays the queue
+        # it has again (set-nexturl), and demo's stop follows 20 ms on, before the player has taken that song. Stock
+        # answers nextstatus, then stopstatus, and plays nothing (captured under qemu, 2026-11-18)
+        'restart-stop': boot + [(1.0, song('set-songurl', a1)), (4.0, song('set-nexturl', a1)), (4.02, '{mcl-stop\\null}'), (7.0, None)],
         # other formats: what media-info names them and how the PCM is opened
         'formats': boot + [(1.0, song('set-songurl', c96)), (4.0, song('set-nexturl', m4a)), (7.0, song('set-nexturl', ogg)), (10.0, '{mcl-stop\\null}'), (12.0, None)],
         # a whole 24-bit 96 kHz song
@@ -443,7 +447,7 @@ def launch_host(player, music, speed=1, env=None):
 def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock=None, switch=False, killall=None, buffer_ms=None, rate=None):
     """binary inside a bwrap sandbox of emu/rootfs under qemu, as run.sh starts demo; /tmp is the session's.
     For q2player's fallback (player/main.c): stock is a player to put, xz-compressed as tools/build.py installs it, at
-    /usr/lib/hciplayer-stock/hciplayer.xz (q2player unpacks it to the session's /tmp), switch makes /mnt/data/q2player,
+    /usr/lib/hciplayer-stock/hciplayer.xz (q2player unpacks it to the session's /tmp), switch makes /mnt/data/stock-player,
     and killall is when, in seconds, a shell in the sandbox runs demo's `killall -9 hciplayer`, after writing each
     process's name and command line to ps.txt. buffer_ms has the shim play the
     capture as a card with that much buffer (Q2EMU_PCM_BUFFER_MS: a delay, and a rewind that takes frames back). rate has
@@ -454,7 +458,7 @@ def launch_emu(emu, binary, music, name='hciplayer', args=('-ao', 'alsa'), stock
         for f in (s.out / 'pcm').glob('*'): f.unlink()
         data = s.out / 'mnt/data'
         shutil.rmtree(data, ignore_errors=True); data.mkdir(parents=True)
-        if switch: (data / 'q2player').touch()
+        if switch: (data / 'stock-player').write_text('1')
         extra = ['--bind', data, '/mnt/data']
         if (emu / 'rootfs/etc/ssl/certs/ca-certificates.crt').exists():  # the test CA as the bundle HTTPS is checked against
             extra += ['--ro-bind', s.ca, '/etc/ssl/certs/ca-certificates.crt']
@@ -490,7 +494,7 @@ def main():
     ap.add_argument('--emu', help='an emulator directory (rootfs/, state/, shim/, qemu-mipsel-static)')
     ap.add_argument('--hciplayer', help='with --emu: the MIPS player binary to run as /usr/bin/hciplayer')
     ap.add_argument('--stock', help='with --emu: the player q2player falls back to, installed xz-compressed at /usr/lib/hciplayer-stock/hciplayer.xz')
-    ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/q2player, which turns q2player on')
+    ap.add_argument('--switch', action='store_true', help='with --emu: make /mnt/data/stock-player, which has q2player run the stock player (Settings > General > Player: Stock)')
     ap.add_argument('--killall', type=float, help="with --emu: run demo's killall -9 hciplayer this many seconds in")
     ap.add_argument('--buffer-ms', type=int, help='with --emu: the capture plays as a card with this much buffer')
     ap.add_argument('--rate', type=int, help="with --emu: every PCM takes this rate, as bluealsa's transport does")

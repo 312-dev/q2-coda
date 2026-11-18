@@ -66,9 +66,25 @@ static void reply(const char *fmt, ...) {
     ipc_send(b);
 }
 
+/* Each song demo hands over, and each stop, in the unified log: what the player was asked to play, beside what demo
+ * showed (the device, 2026-11-18: a lost stop left one song playing under another's title). A URL's query is left
+ * out, as it carries the app's token. */
+static void log_command(const char *name, const char *arg) {
+    char line[200];
+    int n;
+    if (!strcmp(name, "mcl-stop"))
+        n = snprintf(line, sizeof line, "q2player: mcl-stop");
+    else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl") || !strcmp(name, "set-gapless"))
+        n = snprintf(line, sizeof line, "q2player: %s %.*s", name, (int)strcspn(arg, strncmp(arg, "http", 4) ? "|" : "|?"), arg);
+    else
+        return;
+    plog('I', line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+}
+
 static void command(const char *name, const char *arg) {
     struct ctl *c = &ctl;
     int wake = 0;
+    log_command(name, arg);
     pthread_mutex_lock(&c->mu);
     if (!strcmp(name, "player-status")) {
         if (!strcmp(arg, "request")) reply(c->state == PLAYING ? "{player-status\\playing}" : "{player-status\\ready}");
@@ -90,7 +106,7 @@ static void command(const char *name, const char *arg) {
         reply("{mcl-pcmstate\\0}");
     } else if (!strcmp(name, "set-songurl") || !strcmp(name, "set-nexturl")) {
         parse_song(arg, &c->play_song, 1);
-        c->play = 1;
+        c->play = 1, c->stop = 0; /* a stop before this song is not this song's (engine.c engine_thread) */
         c->preload = c->close_preload = 0;
         if (name[4] == 'n') c->next = 1, c->cut = 1;
         wake = 1;

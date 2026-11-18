@@ -664,7 +664,7 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
     assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
-                                 'USB', 'system_time', 'App Store', 'stock_2',
+                                 'USB', 'Player', 'system_time', 'App Store', 'stock_2',
                                  'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
                                  'stock_7', 'stock_8', 'Restart', 'Shut Down']
     # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
@@ -683,6 +683,43 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
+
+
+# General's Player row (player_choice.c): the file player/main.c looks for at each start of the player
+STOCK_PLAYER = '/mnt/data/stock-player'
+
+
+@pytest.mark.parametrize('fell_back', [False, True])
+def test_general_s_player_row_switches_players_at_the_next_start(fw, fell_back):
+    """Settings > General > Player, after USB: New (q2player) without /mnt/data/stock-player, Stock with it; Centre
+    writes or removes the file, and the caption says when it applies, or that the crash-loop guard has Stock playing."""
+    ui = Ui(fw)
+    Config(fw)
+    files = Files(fw, {'/tmp/q2player.fallback': b''} if fell_back else {})
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in files.files else -1)
+    page = Settings(fw, ui)
+    button = button_of(page.view, 'Player')
+    assert button.find('_setting_value').text == 'New'
+    assert captions(fw, page.view)['Player'] == ('The new player kept crashing: Stock plays until a restart' if fell_back
+                                                 else 'Applies after a restart')
+    ui.click(button)
+    assert button.find('_setting_value').text == 'Stock' and files.files[STOCK_PLAYER] == b'1'
+    ui.click(button)
+    assert button.find('_setting_value').text == 'New' and STOCK_PLAYER not in files.files
+
+
+def test_general_s_player_row_says_so_when_it_cannot_save(fw):
+    ui = Ui(fw)
+    Config(fw)
+    files = Files(fw)
+    files.fail_rename = True
+    fw.mock('fw_access', lambda path, *_: 0 if C.string_at(path).decode() in files.files else -1)
+    prompts = Prompts(fw)
+    page = Settings(fw, ui)
+    button = button_of(page.view, 'Player')
+    ui.click(button)
+    assert button.find('_setting_value').text == 'New' and STOCK_PLAYER not in files.files
+    assert [p[3] for p in prompts.seen] == ['Could not save the player choice']
 
 
 @pytest.mark.parametrize('pick, shown', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),

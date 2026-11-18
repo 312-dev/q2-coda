@@ -258,12 +258,21 @@ def test_check_layout_payload_may_reach_its_scratch_page(size, refused):
 @pytest.mark.parametrize('end,refused', [(build.SCRATCH + 0x20000, False), (build.SCRATCH + 0x20001, True)])
 def test_check_layout_scratch_state_may_fill_128_kb(end, refused):
     # Scratch state of exactly 128 KB is accepted, one byte more refused
+    assert build.SCRATCH_SIZE == 0x20000
     ps = {'__scratch_start': build.SCRATCH, '__scratch_end': end}
     if refused:
         with pytest.raises(ValueError, match='^Scratch state exceeds its 128 KB$'):
             build.check_layout(b'', ps)
     else:
-        build.check_layout(b'', ps)
+        assert build.check_layout(b'', ps) == 0
+
+
+def test_check_layout_reports_the_bytes_free(capsys):
+    # The build prints both rooms' headroom and returns the scratch state's (manifest scratch_free_bytes)
+    ps = {'__scratch_start': build.SCRATCH, '__scratch_end': build.SCRATCH + 0x20000 - 17_268}
+    assert build.check_layout(bytes(1000), ps) == 17_268
+    assert capsys.readouterr().out == ('payload room: code and constants 1,571,864 bytes free of 1,572,864; '
+                                       'scratch state 17,268 bytes free of 131,072\n')
 
 
 def test_check_layout_wants_the_scratch_state_at_its_page():
@@ -1342,7 +1351,7 @@ def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
     build.rootfs_fits(50_688_001)  # past stock's own image, which was the limit before
     with pytest.raises(ValueError, match=r'^Repacked rootfs is 75,497,473 bytes, 1 over the 75,497,472 mtd2 holds$'):
         build.rootfs_fits(build.ROOTFS_ROOM + 1)
-    with pytest.raises(ValueError, match=r'--new-player adds q2player'):
+    with pytest.raises(ValueError, match=r'q2player ships beside the stock player'):
         build.rootfs_fits(80 << 20, new_player=True)
 
 

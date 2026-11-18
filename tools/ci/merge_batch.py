@@ -219,7 +219,7 @@ class Real:
         self.shas = {}
         self.runs = 0  # numbers each test's log directory
         self.round_plan: dict | None = None  # the last whole run's plan: what the tip and the bisection runs widen to
-        self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
+        self.build_args = ['--dev'] if dev else []  # gate.py's default
 
     def wt(self, level):
         path = CACHE/'wt'/f'{self.target.replace("/", "_")}-L{level}'
