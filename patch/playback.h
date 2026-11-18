@@ -40,9 +40,8 @@ extern unsigned playback_loads;
 extern unsigned playback_picks;
 void playback_pick(void);
 /* addon.c: a user's Next on the last song queued of a card app's playlist whose next song is still
- * downloading waits for it (1), and that song plays once it lands */
+ * downloading moves Now Playing to that song at once (1), and it plays once it can */
 int addon_next_waits(void);
-int ringnav_change(int next);
 #define WHEEL_PCT_MIN 10 /* the slowest: 140 units a tick, 0.7 of a turn */
 int wheel_pct(void); /* Wheel sensitivity, WHEEL_PCT_MIN-200%, 50 unless set */
 void wheel_set_pct(int n);

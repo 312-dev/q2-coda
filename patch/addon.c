@@ -484,7 +484,8 @@ static void *m3u_songs(void) {
         for (unsigned i = 0, n = deque_size(songs); !found && i < n; ++i) {
             void *r = deque_at(songs, i);
             const char *p = P(r, REC_PATH);
-            if ((found = p && !strcmp(p, line))) _deque_push_back(out, r);
+            if ((found = p && !strcmp(p, line)))
+                card_record_tags(r), _deque_push_back(out, r); /* named by its tags (tags.c) */
         }
         if (!found && !fresh) { /* landed since the listing an earlier entry took: listed again */
             sm.more = 1;
@@ -660,15 +661,31 @@ static int urls_start(const void *unused) {
 }
 
 static void *stream_queue(void);
+#define toolsFreeStSongInfo ((void (*)(void *))0x5d2e10u) /* build.py APP_URL_CALLS */
 /* A user's Next on the last song queued of a playlist session that waits for its next song
- * (sm.want, still downloading): 1, and stream_poll plays that song once it lands and joins the
- * queue, unless the user moves to another song meanwhile. Stock's Next on a queue's last song
- * would wrap to its first: a radio's seed, played again while the radio's next song downloads. */
+ * (sm.want, still to come or still arriving): 1, and Now Playing moves to that song at once (its
+ * title, artist and cover from its server row or its file, card_record_tags; the song playing
+ * stopped and the spinner turning while it loads: catalogue_np_show, as for a pressed server song),
+ * and stream_poll plays it once m3u_songs queues it, unless the user moves to another song
+ * meanwhile. That is once the app's download of it is whole for stock's player, which skips or
+ * hangs on a file still arriving, and once START_MS of it is there with q2player, which waits at
+ * the end of the bytes there are (stream_state.c stream_startable). Stock's Next on a queue's last
+ * song would wrap to its first: a radio's seed, played again while the radio's next song
+ * downloads. The record shown is kept here until the next such Next: stock's deque copies it. */
 int addon_next_waits(void) {
+    static unsigned rec[0x58 / 4] __attribute__((section(".scratch"))); /* stSongInfo */
     void *q = sm.state == S_PLAY && sm.m3u && sm.want[0] ? stream_queue() : 0;
-    if (!q || (unsigned)I(MCL_POS, 0) + 1 != deque_size(q)) return 0;
+    unsigned n = q ? deque_size(q) : 0;
+    if (!q || (unsigned)I(MCL_POS, 0) + 1 != n) return 0;
     sm.skip = playback_picks;
-    toast("Next song is loading");
+    if (P(rec, REC_PATH)) toolsFreeStSongInfo(rec);
+    memset(rec, 0, sizeof rec);
+    const char *slash = strrchr(sm.want, '/');
+    P(rec, REC_NAME) = strdup(slash ? slash + 1 : sm.want); /* before the path: the order fw tests read */
+    P(rec, REC_PATH) = strdup(sm.want);
+    I(rec, REC_TYPE) = 8;
+    card_record_tags(rec);
+    catalogue_np_show(rec, n, n + 1);
     return 1;
 }
 
@@ -751,7 +768,7 @@ static void stream_poll(app_t *a) {
             /* a Next waited for this: on to the first song that joined, unless the user moved since */
             unsigned pos = (unsigned)I(MCL_POS, 0);
             if (sm.skip && sm.skip == playback_picks && pos + 1 < deque_size(q))
-                sm.skip = 0, ringnav_change(1);
+                sm.skip = 0, playback_pick(), player_start_queue((int)pos + 1);
             else if (sm.skip != playback_picks)
                 sm.skip = 0;
         }

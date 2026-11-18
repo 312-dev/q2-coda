@@ -1189,8 +1189,9 @@ static int change_music(int next) {
     if (!press_natural && restart_refused(next, place_held() && change_restarts(next)))
         return 0; /* the caller toasts -1 (no storage) and -5 */
     playback_pick();
-    /* a playlist session's next song still to land: the Next plays it once it does (addon.c), not
-     * stock's wrap to the queue's first song, the one playing (the device, 2026-11-17: a radio) */
+    /* a playlist session's next song still to land: the Next shows it at once and plays it once it
+     * can (addon.c), not stock's wrap to the queue's first song, the one playing (the device,
+     * 2026-11-17: a radio) */
     if (next && !press_natural && addon_next_waits()) return 0;
     if (!s.active) {
         if (!next || !list_end()) return stock_change_trampoline(next);
