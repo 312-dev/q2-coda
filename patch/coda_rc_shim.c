@@ -3,8 +3,9 @@
  * is on, it:
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
  *   goes off: nothing listens while it is off;
- * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays), and the queue's song ids
- *   to /tmp/coda-rc.queue;
+ * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays; a pressed server song from the
+ *   press on, as Now Playing shows it), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
+ *   path, title and artist beside its id 0);
  * - takes its commands from /tmp/coda-rc.cmd: play a list of song ids from one of them, or shuffled (ids in
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
@@ -91,20 +92,47 @@ static void put_int(char *b, unsigned cap, unsigned *n, const char *key, int v) 
     put(b, cap, n, key, s);
 }
 
-/* The playing queue as song ids, when it changes: "gen pos total" then an id a line. */
+/* A queue line's text field: no tab or line break, which separate the fields and the lines. */
+static unsigned q_text(char *b, unsigned cap, const char *v) {
+    unsigned n = 0;
+    for (const char *s = v ? v : ""; *s && n + 1 < cap; ++s) b[n++] = *s == '\t' || *s == '\n' || *s == '\r' ? ' ' : *s;
+    return n;
+}
+
+static unsigned q_len(const char *v) { return v ? (unsigned)strlen(v) : 0; }
+
+/* The playing queue, when it changes: "gen pos total" then a line a song, its library id; a song with no
+ * library record (id 0: a card app's stream download, as its playlist sessions and radios queue them) also
+ * its path, title and artist after tabs, as its record has them (tags.c card_record_tags: its server row's),
+ * so the daemon names it rather than calling it gone from the library. */
 static void cr_queue(void *q, unsigned pos) {
     unsigned n = q ? deque_size(q) : 0, h = hash_bytes(FNV_SEED, (const unsigned char *)&q, sizeof q);
     h = hash_bytes(h, (const unsigned char *)&n, sizeof n);
     h = hash_bytes(h, (const unsigned char *)&playback_loads, sizeof playback_loads);
     if (h == cr.q_hash) return;
     unsigned listed = n < CR_QUEUE_MAX ? n : CR_QUEUE_MAX, len = 0, cap = 40 + listed * 12;
+    for (unsigned i = 0; i < listed; ++i) {
+        void *r = deque_at(q, i);
+        if (I(r, REC_ID) <= 0) cap += 3 + q_len(P(r, REC_PATH)) + q_len(P(r, REC_TITLE)) + q_len(P(r, REC_NAME)) +
+                                      q_len(P(r, REC_ARTIST));
+    }
     char *b = calloc(1, cap);
     if (!b) return;
     cr.q_hash = h;
     ++cr.q_gen;
     len = (unsigned)snprintf(b, cap, "%u %u %u\n", cr.q_gen, pos, n);
-    for (unsigned i = 0; i < listed; ++i)
-        len += (unsigned)snprintf(b + len, cap - len, "%d\n", I(deque_at(q, i), REC_ID));
+    for (unsigned i = 0; i < listed; ++i) {
+        void *r = deque_at(q, i);
+        int id = I(r, REC_ID);
+        len += (unsigned)snprintf(b + len, cap - len, "%d", id);
+        if (id <= 0 && P(r, REC_PATH)) {
+            const char *title = P(r, REC_TITLE);
+            if (!title || !*title) title = P(r, REC_NAME);
+            const char *field[] = { P(r, REC_PATH), title, P(r, REC_ARTIST) };
+            for (unsigned k = 0; k < 3; ++k) b[len++] = '\t', len += q_text(b + len, cap - len, field[k]);
+        }
+        b[len++] = '\n';
+    }
     blob_io(CR_QUEUE, CR_QUEUE ".tmp", b, len, 1);
     free(b);
 }
@@ -131,13 +159,28 @@ static void cr_modes(int *shuf, int *rep) {
     }
 }
 
+/* The length of a song shown before the player has it, in seconds: its server row's (a pressed catalogue row, or
+ * the download a Next waits for), 0 unknown. */
+static int cr_pressed_len(const char *path) {
+    int s = path ? catalogue_seconds(path) : -1;
+    if (s <= 0 && path) s = catalogue_copy_seconds(path);
+    return s > 0 ? s : 0;
+}
+
+/* Now Playing as the Q2 Muse's own page shows it: a server song pressed (or a Next waiting for its download) from
+ * the moment it is pressed, while it loads and before the player has it (catalogue_np_now, as np_bar.c shows it),
+ * else the queue's song at MCL_POS. A pressed song is at 0 with no hearts until it plays, as the Q2's rating
+ * works only on the song playing. */
 static void cr_now(void) {
     void *q = P(mcl_pdeqplaylist, 0), *r = 0;
-    unsigned pos = (unsigned)I(MCL_POS, 0);
+    unsigned pos = (unsigned)I(MCL_POS, 0), pat, pn;
     if (q && pos < deque_size(q)) r = deque_at(q, pos);
     cr_queue(q, pos);
+    void *pressed = catalogue_np_now(&pat, &pn);
+    if (pressed) r = pressed;
     int status = mclGetPlayStatus(), sec = -1, total = 0;
     player_playtime_and_length(&sec, &total);
+    if (pressed) sec = 0, total = cr_pressed_len(P(pressed, REC_PATH));
     /* the hold menu's extended play while it runs, else Now Playing's own pair (cr_modes) */
     int shuf, rep;
     cr_modes(&shuf, &rep);
@@ -156,7 +199,7 @@ static void cr_now(void) {
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
     put_int(b, sizeof b, &n, "repeat", rep);
     put_int(b, sizeof b, &n, "volume", g_volume);
-    put_int(b, sizeof b, &n, "hearts", cr_hearts(r ? (unsigned)I(r, REC_ID) : 0));
+    put_int(b, sizeof b, &n, "hearts", pressed ? -1 : cr_hearts(r ? (unsigned)I(r, REC_ID) : 0));
     put_int(b, sizeof b, &n, "qpos", (int)pos);
     put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);

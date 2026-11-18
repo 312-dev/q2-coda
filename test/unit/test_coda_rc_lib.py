@@ -318,3 +318,31 @@ def test_an_artists_radio_is_one_of_its_songs(lib, tmp_path):
     assert ctypes.string_at(ctypes.addressof(shim_verb)).decode() == 'radio stop'
     assert q2.ask(T['START_RADIO'], [(1, 'album:x')]) == 'BAD_REQUEST'
     assert q2.ask(T['START_RADIO'], [(1, 'artist:nobody')]) == 'NOT_FOUND'
+
+
+def test_a_queued_stream_download_is_named_as_its_server_song(lib, tmp_path):
+    """The car, 2026-11-18 00:24: every server song in the Q2 Muse queue read "[Not in the library]". A card app's
+    playlist session queues its stream downloads, which have no library id: the shim's queue line is 0 and, after
+    tabs, the download's path, title and artist (coda_rc_shim.c cr_queue). The sid in the path's brackets names the
+    catalogue's song, as for NowPlaying (lib_stream_song): its id, title, artist, cover and length; a download the
+    catalogue has not is the shim's title and artist, not playable by id; a library id that is gone is still said so."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    (tmp_path / 'tmp/coda-rc.queue').write_text(
+        '3 1 5\n1\n'
+        f'0\t{STREAM.format("foxtrot", "s2")}\tfoxtrot\t\n'
+        f'0\t{STREAM.format("hotel", "s9")}\tHotel\tHank\n'
+        '77\n'
+        '0\n')
+    t, m = q2.ask(T['GET_QUEUE'], [(1, 0), (2, 10)])
+    assert t == T['QUEUE_RESP'] and (client.one(m, 1), client.one(m, 2), client.one(m, 3)) == (3, 1, 5)
+    items = [client.item(x) for x in m.get(5, [])]
+    assert [(i['id'], i['title'], i.get('subtitle'), i.get('art')) for i in items] == [
+        ('song:t1', 'Alpha', 'Ann', items[0].get('art')),
+        (f'song:c{0x40000002}', 'Foxtrot', 'Eve', 'sthird'),
+        ('', 'Hotel', 'Hank', None),
+        ('', '[Not in the library]', None, None),
+        ('', '[Not in the library]', None, None)]
+    assert items[1]['duration_ms'] == 200000 and items[1]['playable'] and not items[2]['playable']
+    # PlayQueueItem names a row by GetQueue's id: a download's server song is its record's 0 to the shim (cr_jump)
+    assert [lib.lib_queue_rid(i, rid) for i, rid in ((1, 0x40000002), (1, 0x40000001), (0, 1), (2, 5))] == [
+        0, 0x40000001, 1, 5]

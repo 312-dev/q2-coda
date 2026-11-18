@@ -139,6 +139,7 @@ typedef struct {
 int lib_stream_song(const char *path, lib_song_t *o);
 int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
+int lib_queue_rid(unsigned at, int rid); /* PlayQueueItem: 0 for a queued stream download of server song rid */
 /* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
 int ble_start(void);
 int ble_events(void);

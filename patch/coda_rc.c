@@ -509,7 +509,8 @@ static int queue_item(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
     if (fields(p, n, v, id, sizeof id, 2) < 0) return crc_error(s, req_id, E_BAD_REQUEST, "PlayQueueItem");
     int rid = lib_song_rid(id);
     if (!rid || v[1] >= (unsigned)np.qlen) return crc_error(s, req_id, E_NOT_FOUND, "not in the queue");
-    snprintf(verb, sizeof verb, "jump %u %d", v[1], rid);
+    /* a stream download, named by its server song (GetQueue), is its record's 0 to the shim */
+    snprintf(verb, sizeof verb, "jump %u %d", v[1], lib_queue_rid(v[1], rid));
     return crc_shim_command(s, req_id, verb);
 }
 

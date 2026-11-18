@@ -1006,6 +1006,7 @@ static int play(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int
 
 /* ---- the queue: the shim's /tmp/coda-rc.queue, demo's queue as song ids (coda_rc_shim.c) ---- */
 
+#define QUEUE_FILE_MAX (1024 * 1024) /* the shim's queue file read at most: 5000 songs, downloads' paths beside theirs */
 static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, int qgen, int qpos) {
     pbr r = {p, p + n};
     pbf f;
@@ -1018,17 +1019,18 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
     if (k < 0 || limit > 100) return crc_error(s, req_id, E_BAD_REQUEST, "GetQueue");
     char path[256];
     int fd = open(crc_path(path, sizeof path, "/tmp/coda-rc.queue"), O_RDONLY | O_CLOEXEC);
-    char *b = malloc(256 * 1024 + 1);
+    char *b = malloc(QUEUE_FILE_MAX + 1);
     int len = 0;
-    while (fd >= 0 && b && len < 256 * 1024) {
-        int got = (int)read(fd, b + len, 256 * 1024 - len);
+    while (fd >= 0 && b && len < QUEUE_FILE_MAX) {
+        int got = (int)read(fd, b + len, QUEUE_FILE_MAX - len);
         if (got <= 0) break;
         len += got;
     }
     if (fd >= 0) close(fd);
     if (!b) return crc_error(s, req_id, E_INTERNAL, "memory");
     b[len] = 0;
-    /* "gen pos total\n" then a song id per line */
+    /* "gen pos total\n" then a song id per line; a song with no library id (0) has its path, title and artist after
+     * tabs (coda_rc_shim.c cr_queue) */
     unsigned gen = 0, pos = 0, total = 0;
     char *line = strchr(b, '\n');
     if (len) {
@@ -1044,29 +1046,84 @@ static int queue(crc_session *s, unsigned req_id, const uint8_t *p, size_t n, in
     pb_varint(&w, 3, total);
     pb_varint(&w, 4, offset);
     if (line && offset < total && !lib_open()) {
-        sqlite3_stmt *st;
+        sqlite3_stmt *st, *dl = 0;
+        /* a stream download's server song, by the sid in its name (as lib_stream_song) */
+        if (cat_on)
+            sqlite3_prepare_v2(db, "select " TRACK_ITEM " from s2 where url = (select fileurl from cat.servermeta "
+                                   "where sid = ?1 and fileurl like ?2 limit 1)", -1, &dl, 0);
         if (sqlite3_prepare_v2(db, "select " TRACK_ITEM " from s2 where rid = ?1", -1, &st, 0) == SQLITE_OK) {
             unsigned i = 0;
             for (char *c = line + 1; *c && i < offset + limit; ++i) {
                 char *end = strchr(c, '\n');
+                if (end) *end = 0;
                 if (i >= offset) {
-                    sqlite3_bind_int(st, 1, atoi(c));
-                    if (put_rows(&w, 5, st, 0) == 0) {  /* gone from the library since it was queued */
+                    char *f[4] = {c, 0, 0, 0}; /* id, then a download's path, title, artist */
+                    for (int k = 1; k < 4 && f[k - 1]; ++k)
+                        if ((f[k] = strchr(f[k - 1], '\t'))) *f[k]++ = 0;
+                    int n = -1;
+                    char app[64], sid[64], like[80];
+                    if (atoi(c) <= 0 && f[1] && dl && stream_sid(f[1], app, sizeof app, sid, sizeof sid)) {
+                        snprintf(like, sizeof like, "/mnt/mmc/%s/%%", app);
+                        sqlite3_bind_text(dl, 1, sid, -1, SQLITE_TRANSIENT);
+                        sqlite3_bind_text(dl, 2, like, -1, SQLITE_TRANSIENT);
+                        n = put_rows(&w, 5, dl, 0);
+                        sqlite3_reset(dl);
+                    }
+                    if (n <= 0 && f[2] && *f[2]) { /* a download the catalogue has not: its record's tags */
+                        item_t it = {"", f[2], f[3] ? f[3] : "", 0, 0, 0, 0, 0, 0, 0};
+                        put_item(&w, 5, &it);
+                        n = 1;
+                    } else if (n < 0) {
+                        sqlite3_bind_int(st, 1, atoi(c));
+                        n = put_rows(&w, 5, st, 0);
+                        sqlite3_reset(st);
+                    }
+                    if (n == 0) {  /* gone from the library since it was queued */
                         item_t it = {"", "[Not in the library]", 0, 0, 0, 0, 0, 0, 0, 0};
                         put_item(&w, 5, &it);
                     }
-                    sqlite3_reset(st);
                 }
                 if (!end) break;
                 c = end + 1;
             }
             sqlite3_finalize(st);
         }
+        sqlite3_finalize(dl);
         lib_close();
     }
     free(b);
     if (w.over) return crc_error(s, req_id, E_TOO_LARGE, "ask for fewer items");
     return crc_send(s, T_QUEUE_RESP, req_id, out, w.n);
+}
+
+/* The record id the shim knows the queue's song at index at by, for PlayQueueItem's rid: 0 when that line is a
+ * stream download (cr_queue's "0\t<path>...") whose server song is rid, as GetQueue named it; else rid. */
+int lib_queue_rid(unsigned at, int rid) {
+    char p[256], *b = malloc(QUEUE_FILE_MAX + 1);
+    int fd = open(crc_path(p, sizeof p, "/tmp/coda-rc.queue"), O_RDONLY | O_CLOEXEC), len = 0, out = rid;
+    while (fd >= 0 && b && len < QUEUE_FILE_MAX) {
+        int got = (int)read(fd, b + len, QUEUE_FILE_MAX - len);
+        if (got <= 0) break;
+        len += got;
+    }
+    if (fd >= 0) close(fd);
+    if (!b) return rid;
+    b[len] = 0;
+    char *c = strchr(b, '\n');
+    for (unsigned i = 0; c && i <= at; ++i) {
+        c = c + 1;
+        char *end = strchr(c, '\n');
+        if (end) *end = 0;
+        if (i == at && !strncmp(c, "0\t", 2)) {
+            char *tab = strchr(c + 2, '\t');
+            if (tab) *tab = 0;
+            lib_song_t ls;
+            if (lib_stream_song(c + 2, &ls) && ls.id == rid) out = 0;
+        }
+        c = end;
+    }
+    free(b);
+    return out;
 }
 
 /* ---- covers ---- */

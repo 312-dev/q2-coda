@@ -402,3 +402,22 @@ def test_a_streaming_song_the_player_waits_for_is_buffering(fw, ui, mcl, recs):
     del q2.files['/tmp/q2player.wait']
     q2.tick()
     assert (q2.now()['buf'], q2.now()['bhave']) == ('0', '0')
+
+
+def test_a_queued_stream_download_carries_its_path_title_and_artist(fw, ui, mcl, recs):
+    """The car, 2026-11-18 00:24: Shuffle Songs over server songs, and the car's queue listed every one as "[Not in
+    the library]". The app's playlist session queues its stream downloads, records with no library id (0), named by
+    their server rows' tags (tags.c card_record_tags); the queue file had only the 0. Such a line carries the
+    record's path, title and artist after tabs, a tab or line break in them made a space; a library song keeps
+    its id alone."""
+    q2 = Q2(fw, ui, recs, songs=1)
+    song = '/mnt/mmc/.subsonic/stream/9f2c/original/0/make it with you [VcF5].flac'
+    q2.songs += [recs(id_=0, path=song, name='make it with you [VcF5].flac', title='Make It\twith You', artist='Bread',
+                      album='Manna'),
+                 recs(id_=0, path='/mnt/mmc/.subsonic/stream/9f2c/original/0/x [Q1].flac', name='x [Q1].flac',
+                      title='', artist='', album='')]
+    q2.queue(at=1)
+    q2.tick()
+    assert q2.files[QUEUE].decode().split('\n') == [
+        '1 1 3', '10', f'0\t{song}\tMake It with You\tBread',
+        '0\t/mnt/mmc/.subsonic/stream/9f2c/original/0/x [Q1].flac\tx [Q1].flac\t', '']
