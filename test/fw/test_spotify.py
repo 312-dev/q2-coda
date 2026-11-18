@@ -409,7 +409,8 @@ class Np:
         return self.fw.fn('spot_key', C.c_int, C.c_void_p, C.c_uint)(self.ui.page, key)
 
     def keyup(self, key):
-        return handler(self.fw, self.ui.page, EVT_KEY_UP)(C.addressof(key_event(key)))
+        event = key_event(key)  # held through the call: a temporary's buffer is freed before C reads it
+        return handler(self.fw, self.ui.page, EVT_KEY_UP)(C.addressof(event))
 
     def paint(self, w, canvas):
         self.fw.fn('spot_paint', None, C.c_void_p, C.c_void_p)(w, canvas.address)
@@ -859,7 +860,8 @@ class Browser:
         handler(self.fw, w, event)()
 
     def key(self, key):
-        return handler(self.fw, self.br.page, EVT_KEY_UP)(C.addressof(key_event(key)))
+        event = key_event(key)  # held through the call: a temporary's buffer is freed before C reads it
+        return handler(self.fw, self.br.page, EVT_KEY_UP)(C.addressof(event))
 
     def back(self):
         assert self.key(KEY_RETURN) == RET_STOP
