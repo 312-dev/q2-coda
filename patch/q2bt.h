@@ -106,7 +106,7 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
 #define BT_STEP_WQ 4096         /* bytes waiting in the A2DP socket over this, */
 #define BT_STEP_STALL 2         /* with the controller's buffers full, this many seconds in a row */
 #define BT_STEP_CLEAN 60        /* seconds in a row with nothing waiting before a step up */
-#define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconnect's gap, not counted either way */
+#define BT_STEP_SETTLE_MS 10000 /* after a switch: the reconfigure's gap, not counted either way */
 #define BT_STEP_UP_MS 180000    /* a step up no sooner than this after the last switch */
 /* "aptX-HD" 3, "aptX" 2, "SBC" 1, any other (LDAC, AAC, none) 0; and back */
 int bt_codec_rank(const char *codec);

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: when the Q2 lowers the headset's quality because the signal is weak ("Lower quality when the signal is weak", under LDAC Auto), the music picks up again on the new codec after a short gap. Before, it went silent at the switch and stayed silent.
   - Pages (OLED): the status row no longer sits on a black band. Each page now fills the whole screen, so its background, Home's art and the Rating page's glow run up behind the clock and the battery; everything below the row stays where it was. A page slide keeps the row on top, and a swipe back that starts on the row is left to the row.
   - Library lists (OLED): dragging Songs, Albums, Artists or another long Library list to its end with a finger now stops with the last row on the line the wheel stops at, clear of the rounded bottom corners, and a flick does the same. Before, the last row came to rest low, in the corners.
   - Streamed songs: picking a server song (from Search or any list) while another song is paused no longer plays a short blip of the paused song first. The paused song now just stops while the new one loads.
