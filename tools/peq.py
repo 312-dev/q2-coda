@@ -143,6 +143,7 @@ LIBC = {
     'deque_at': ('void *', 'const void *, unsigned'), '_deque_push_back': ('void', 'void *, ...'),
     'deque_assign': ('void', 'void *, const void *'), 'deque_clear': ('void', 'void *'),
     'deque_pop_back': ('void', 'void *'),
+    'list_size': ('unsigned', 'const void *'),  # cover_wake.c: the album cover thread's task list
     'deque_destroy': ('void', 'void *'), 'send': ('int', 'int, const void *, unsigned, int'),
     # stock's name sort, run by name_order.c as toolsQueryDbTable runs it (iterators by value, cstl_iter)
     'deque_begin': ('cstl_iter', 'const void *'), 'deque_end': ('cstl_iter', 'const void *'),

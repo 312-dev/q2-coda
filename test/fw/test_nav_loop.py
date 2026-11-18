@@ -1239,14 +1239,6 @@ def test_a_slow_dark_wait_stretches_to_the_dark_poll(fw):
     assert [c[1][0] for c in fw.calls('fw_usleep')] == [10000, 999999, 1000000, 3000000, dark, dark, dark, 3000000]
 
 
-def test_the_cover_pollers_slow_whenever_the_screen_is_off(fw):
-    sleep = fw.fn('ringnav_dark_cover_usleep', C.c_int, C.c_uint)
-    sleep(50000)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    sleep(50000)
-    assert [c[1][0] for c in fw.calls('fw_usleep')] == [O['DARK_POLL_US'], 50000]
-
-
 class Scheduling:
     """ringnav_mainscheduling: the player's position as stock's cache has it, the clock as the test moves it."""
     def __init__(self, fw, status=2, sec=10, total=200):
@@ -3230,6 +3222,16 @@ class Loop:
 
     def dark_quiet(self):
         return C.c_int.in_dll(self.fw.lib, 'navigation__dark_quiet').value
+
+
+def test_each_pass_wakes_the_parked_album_cover_thread_for_a_request(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    fw.var('fw_ctx_plist_albumtasklist', C.c_ulong).value = 0x5000
+    fw.var('fw_ctx_albumcover_taskstate', C.c_int).value = 1
+    fw.mock('fw_list_size', lambda *_: 3)  # a page's rows queued (cover_wake.c)
+    fw.var('cover_wake__cover_parked', C.c_int * 2)[0] = 1
+    loop()
+    assert [c[1][1:3] for c in fw.calls('cover_futex')] == [(129, 1)]  # FUTEX_WAKE_PRIVATE, one waiter
 
 
 def test_dark_and_quiet_the_loop_idles_long(fw, stock_bytes, st):

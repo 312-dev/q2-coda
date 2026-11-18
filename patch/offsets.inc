@@ -412,8 +412,7 @@ static inline int arc_out(int r, int y) {
 #define SCREEN_OFF_SLEEP_MS 100
 /* Stock's player status sync (5 a second) and player scheduling (ringnav_mainscheduling, 10) run at
  * least this far apart while ringnav_sleep finds the Q2 dark and nothing needs the position soon
- * (dark_slow: ringnav_dark_usleep), its cover pollers (20 and 10) whenever it is dark
- * (ringnav_dark_cover_usleep); DARK_POLLS in tools/build.py. */
+ * (dark_slow: ringnav_dark_usleep); DARK_POLLS in tools/build.py. */
 #define DARK_POLL_US 1000000
 /* Dark and playing, the player polls keep stock's pace from this many seconds before the track's
  * end (as the status cache has it): mclAutoChange's Gapless preload (under 6 s), plus a slow poll's
