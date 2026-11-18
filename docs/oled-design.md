@@ -232,8 +232,12 @@ All lists share one grid.
   keep up), and a 1.5x4.4 nub with 0.8 px corners in `#6E6E6E`.
 - Charging, Phosphor's `lightning` (fill, 7 px, Text Primary) sits on the body's center with a
   1 px gap in the Canvas cut round it where it crosses the fill, and no outline; a weak charger's
-  `warning` (fill) takes its place the same way. Full or held at Charge Limit, the fill is green
-  with no glyph. Picked as I2 from `mock_batt_inside.py` on 2026-11-15.
+  `warning` (fill) takes its place the same way. Picked as I2 from `mock_batt_inside.py` on
+  2026-11-15. Full or held at Charge Limit with the cable in, the fill is green with an upright plug
+  in the bolt's place, drawn on whole pixels (5x7 ink, panel rows 19 to 25, columns 295 to 299: two
+  1 px prongs with a 1 px slot, a 5 px body with rounded lower corners, a 1 px cord) over the same
+  1 px Canvas gap; the two differ only by level, and a tap's toast names which. Picked as option A
+  from `mock_plugged_full.py` on 2026-11-17. On battery there is no glyph.
 - With Battery on Percent, the level and "%" in BATT_PX type stand in the battery's place, in its
   colors, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so

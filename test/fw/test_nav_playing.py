@@ -498,33 +498,47 @@ def test_the_fill_is_white_red_green_or_orange(fw, level, bits, tone):
 
 
 @pytest.mark.parametrize('bits, light, glyph', [(KEY_CHARGING, 0, b'battbolt_d'), (KEY_CHARGING, 1, b'battbolt_l'),
-                                                (KEY_WEAK, 0, b'battwarn_d'), (KEY_PLUGGED, 0, None), (0, 0, None)])
-def test_charging_puts_the_bolt_inside_and_a_weak_charger_the_warning(fw, st, ui, bits, light, glyph):
+                                                (KEY_WEAK, 0, b'battwarn_d'), (KEY_PLUGGED, 0, b'battplug_d'),
+                                                (KEY_PLUGGED, 1, b'battplug_l'), (0, 0, None), (0, 1, None)])
+def test_charging_puts_the_bolt_inside_full_or_held_the_plug_and_a_weak_charger_the_warning(fw, st, ui, bits, light, glyph):
+    """Full or held at Charge Limit, with the cable in, is the plug (docs/oled-design.md#status-row); on battery,
+    no glyph."""
     theme(fw, st, light=light)
     name = fw.fn('list_marks__battery_glyph', C.c_char_p, C.c_uint)(50 << 4 | bits)
     assert (name and name.split(b'_', 1)[1]) == glyph
 
 
-def bar_key(fw, st, ui, text, icon, state=0, held=0, dac=1):
-    """battery_now's key for stock's label and icon, g_power_chargestate and Charge Limit's hold."""
+def bar_key(fw, st, ui, text, icon, state=0, held=0, dac=1, cable=1):
+    """battery_now's key for stock's label and icon, g_power_chargestate, the cable (g_usbdet_value) and Charge
+    Limit's hold."""
     from test_usb_charge import Charging
     theme(fw, st, BATTERY=0)
     bar = Bar(fw, ui)
-    Charging(fw, pref=dac, mode=1, cable=1).config()
+    Charging(fw, pref=dac, mode=1, cable=cable).config()
     fw.var('fw_ctx_g_power_chargestate', C.c_int).value = state
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
     st.charge_held = held
     bar.level(text, icon)
     bar.sync()
     return fw.fn('navigation__battery_now', C.c_uint)()
 
 
-@pytest.mark.parametrize('text, icon, state, held, dac, key', [
-    ('62%', b'bar_charge', 1, 0, 1, 62 << 4 | KEY_CHARGING), ('100%', b'bar_charge', 2, 0, 1, 100 << 4 | KEY_PLUGGED),
-    ('62%', b'bar_battery', 0, 0, 1, 62 << 4), ('80%', b'bar_charge', 1, 1, 0, 80 << 4 | KEY_PLUGGED),
-    ('50%', b'bar_charge', 1, 0, 0, 50 << 4)])
-def test_the_key_says_charging_full_or_held(fw, st, ui, text, icon, state, held, dac, key):
-    """Charge Limit's hold is green with no glyph, USB DAC charging Off's is white: neither charges."""
-    assert bar_key(fw, st, ui, text, icon, state, held, dac) == key
+# Stock's icon is bar_charge for a cable only while the AXP2101 says it is not Full (systembar_showface,
+# 0x541e2c: g_power_chargestate 2 picks bar_battery), and the plain icon with USB DAC charging Off over a DAC link;
+# so the cable is g_usbdet_value, and Full is the charger's word, not the icon's.
+@pytest.mark.parametrize('text, icon, state, held, dac, cable, key', [
+    ('62%', b'bar_charge', 1, 0, 1, 1, 62 << 4 | KEY_CHARGING),
+    ('100%', b'bar_battery', 2, 0, 1, 1, 100 << 4 | KEY_PLUGGED),  # Full, cable in: stock's plain icon
+    ('100%', b'bar_battery', 2, 0, 1, 0, 100 << 4),  # Full left in g_power_chargestate after an unplug
+    ('62%', b'bar_battery', 0, 0, 1, 0, 62 << 4),
+    ('80%', b'bar_charge', 1, 1, 0, 1, 80 << 4 | KEY_PLUGGED),  # held at Charge Limit
+    ('80%', b'bar_battery', 0, 1, 0, 1, 80 << 4 | KEY_PLUGGED),  # held, the AXP2101's status neither 1 nor 2
+    ('50%', b'bar_charge', 1, 0, 0, 1, 50 << 4),  # USB DAC charging Off: held, not charging
+    ('50%', b'bar_battery', 0, 0, 0, 1, 50 << 4)])  # the same over a DAC link: stock's plain icon
+def test_the_key_says_charging_full_or_held(fw, st, ui, text, icon, state, held, dac, cable, key):
+    """Full or held at Charge Limit with the cable in is green with the plug, USB DAC charging Off's hold is white:
+    neither charges."""
+    assert bar_key(fw, st, ui, text, icon, state, held, dac, cable) == key
 
 
 def test_with_a_bar_widget_missing_nothing_moves(fw, st, ui):
