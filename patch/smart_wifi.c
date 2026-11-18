@@ -1,4 +1,5 @@
-/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it. */
+/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it; and the scan
+ * hold, wpa_supplicant's rescans held off while A2DP streams. */
 #include "navigation.h"
 
 /* Smart Wi-Fi (docs/internals.md#smart-wi-fi): with Power's row on and the user's Wi-Fi switch on,

@@ -3,8 +3,8 @@
  * link change, ringnav_btrows), the page is the switch, Name, then My Devices (the paired ones),
  * Other Devices (the found ones) and an Audio group: Quality, Headset Volume, Resume on Connect and
  * Link Volume. Stock's Scan now row goes: the page scans by itself while it is open (bt_ui_poll),
- * a spinner beside Other Devices while it runs. With Bluetooth off, the switch, Name and a line
- * saying what turning it on gives.
+ * a spinner beside Other Devices while it runs, and stops a scan when a connect starts. With
+ * Bluetooth off, the switch, Name and a line saying what turning it on gives.
  *
  * A device row keeps stock's button, its name over its index in pdeq_btshowlist, and stock's state
  * label (msg_connected, msg_connecting, msg_paired, which tools/build.py LABELS words "Connected",
