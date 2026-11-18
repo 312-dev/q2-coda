@@ -626,12 +626,12 @@ m2.word(O['MCL_POS'],0); m2.advance(500); assert m2.badge() is None; passed()
 # Hold Play/Pause on Now Playing: Rate last, with the hearts, and no Next/Previous album outside Shuffle Albums/Folders; its row opens the same picker.
 m2.word(O['MCL_POS'],1); m2.press(100)
 assert m2.hold()==11 and m2.labels()[-2:]==['Group by','Rate  ♥♥♡♡♡'] and m2.release()==0
-m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2,('DIAG',m2.labels() if m2.view in m2.nodes else None,m2.top==m2.np,m2.nodes.get(m2.top,{}).get('name'),m2.nodes.get(m2.top,{}).get('type')); back(m2); assert m2.picker() is None; passed()
+m2.pick(m2.labels()[-1]); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2; back(m2); assert m2.picker() is None; passed()  # Rate by its words: the sheet's header and gaps are children too
 # More…: last, below Rate, while Now Playing has its img_more; its row clicks that as a tap would
 m3=RateMachine(); more=m3.node('image','img_more'); m3.nodes[m3.np]['children'].append(more); m3.word(more+O['W_PARENT'],m3.np)
 m3.press(100)
 assert m3.hold()==11 and m3.labels()[-2:]==['Rate','More…'] and m3.release()==0
-m3.pick(len(m3.labels())-1); m3.advance(0)
+m3.pick(m3.labels()[-1]); m3.advance(0)
 assert [m3.get(c[2]) for c in m3.dispatched() if c[1]==more]==[O['EVT_CLICK']]; passed()
 # Ratings: Top Rated (4-5), Loved (5), All Rated and Disliked (1), most hearts first, then title order. Each row's
 # hearts are OLED's glyphs, painted before its detail (ratings.c rate_row: the count in the row's "_hearts", the detail
