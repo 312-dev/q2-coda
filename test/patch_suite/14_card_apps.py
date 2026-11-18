@@ -173,7 +173,7 @@ SLABELS=['Soulseek','Phone Remote','192.168.1.23:8080','Search','Online as alice
 # page_push moves nothing. The next level's rows, Return's and a refresh show at x 0 at once, no animator made.
 m=SlskMachine(); m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
 m.open(); m.answer('ok','refresh','',SMENU); assert m.x_pushes()==[]
-m.pick(2); assert m.labels()==['Loading…'] and m.x_pushes()==[]
+m.pick(2); assert m.labels()==SLABELS and m.x_pushes()==[]  # its level asked for under the loading overlay: the menu stays
 m.answer('ok','','',[('info','','No downloads yet','','','')]); assert m.x_pushes()==[],m.x_pushes()
 lv=m.get(m.find('scroll_view',m.page)+O['W_PARENT']); assert signed(m.get(lv+O['W_X']))==0
 m.back(); assert m.labels()==['Loading…'] and m.x_pushes()==[]
