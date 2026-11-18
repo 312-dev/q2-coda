@@ -1643,7 +1643,7 @@ def fileoff(b, a):
 
 # Every saved g_time_zone index, in stock's order (0-26) then the additions: its label and TZ. Labels
 # are literal, short enough for the 246 px row at 24 px; the offset is the standard one. The
-# rows show the one in effect now instead, daylight saving included (ringnav_timezone_row). POSIX rules stand in where the rootfs tzdata is out of date: Mexico City
+# rows show the city and the offset in effect now, daylight saving included (ringnav_timezone_row). POSIX rules stand in where the rootfs tzdata is out of date: Mexico City
 # and Tehran dropped DST in 2022, Fiji suspended it. Stock's GMT-12 row was Kwajalein, which is +12;
 # its +6 Almaty is +5 since 2024, so that row is Dhaka.
 TIMEZONES = (
@@ -1664,7 +1664,7 @@ TIMEZONES = (
     ('GMT-9:30 Marquesas', 'Pacific/Marquesas'), ('GMT-2 South Georgia', 'Atlantic/South_Georgia'),
     ('GMT+5:30 Colombo', 'Asia/Colombo'), ('GMT+5:45 Kathmandu', 'Asia/Kathmandu'),
     ('GMT+6:30 Yangon', 'Asia/Yangon'), ('GMT+8:45 Eucla', 'Australia/Eucla'),
-    ('GMT+10:30 L. Howe', 'Australia/Lord_Howe'), ('GMT+11 Noumea', 'Pacific/Noumea'),
+    ('GMT+10:30 Lord Howe', 'Australia/Lord_Howe'), ('GMT+11 Noumea', 'Pacific/Noumea'),
     ('GMT+12:45 Chatham', 'Pacific/Chatham'), ('GMT+13 Tongatapu', 'Pacific/Tongatapu'),
     ('GMT+14 Kiritimati', 'Pacific/Kiritimati'),
     ('GMT-6 Chicago', 'America/Chicago'), ('GMT-7 Phoenix', 'America/Phoenix'),
@@ -1681,8 +1681,8 @@ LOGO_HOOK = (b'   \tdisplay_logo /release/assets/default/raw/images/xx/logo.jpg\
 def timezone_offset(label):
     sign, h, m = need(re.match(r'GMT([+-])(\d+)(?::(\d+))?', label), f'Unexpected time zone {label}').groups()
     return (1 if sign == '+' else -1) * (int(h) * 60 + int(m or 0))
-# The rows, west to east: the saved index each row shows.
-TIMEZONE_ORDER = sorted(range(len(TIMEZONES)), key=lambda i: (timezone_offset(TIMEZONES[i][0]), TIMEZONES[i][0]))
+# The rows' tie order: by city (navigation.c tz_now sorts by the offset each zone has now, stable on this).
+TIMEZONE_ORDER = sorted(range(len(TIMEZONES)), key=lambda i: TIMEZONES[i][0].split(' ', 1)[1])
 
 def patch_timezones(demo):
     # Keep the stock indices so saved zones survive; fit the extra rows in the existing table.
