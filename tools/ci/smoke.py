@@ -56,6 +56,10 @@ TOAST_S, TOAST_MOST_S = 3, 15  # s with no toast before the first key; s at most
 GUARD_S = 40
 GUARD_DIALOG = 'sortselect_dialog'
 GUARD_CARDS = {'nosensor': 'No Temperature Sensor', 'norun': "Overheat protection isn't running"}
+# demo opens a card before it writes the card's name to its answer file (heatguard.c's hg_info: hg_card, then
+# hg_answer), a few ms apart in a boot loop on 2026-11-18. A GUARD_DIALOG no answer names yet is looked at again
+# for up to ANSWER_S before it fails, or a look that falls in that gap fails a good boot.
+ANSWER_S = 1.0
 AVOID = (2,)         # the user's own slot (docs/orchestration.md: never touched)
 W, H = 320, 375      # the framebuffer's page (portrait), BGRA
 CHANGED_PX = 1500    # pixels that must differ for "the screen changed"
@@ -231,14 +235,22 @@ class Emulator:
     def guard(self):
         """Wait for q2guard's verdict on its sensor and confirm the card it brings (GUARD_CARDS); any other
         dialog over Home fails."""
-        end, confirmed = time.monotonic() + GUARD_S, set()
+        end, confirmed, unnamed = time.monotonic() + GUARD_S, set(), None
         while True:
             files = guard_files(self.pid)
             if files is None:
                 return  # a build without the guardian
             state, answers = files
             card = answers.get('card')
-            rule = boot_rule(self.stack(), card)
+            stack = self.stack()
+            rule = boot_rule(stack, card)
+            if rule == 'fail' and top(stack) == GUARD_DIALOG:  # a card demo may not have named yet (ANSWER_S)
+                unnamed = unnamed or time.monotonic() + ANSWER_S
+                if time.monotonic() < unnamed:
+                    time.sleep(.05)
+                    continue
+            else:
+                unnamed = None
             if rule == 'fail':
                 raise Failed(f'boot: a dialog over Home: windows are {[n for _, n in self.stack()]}, card {card}')
             if rule == 'confirm':

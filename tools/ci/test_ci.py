@@ -162,7 +162,7 @@ def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
 
 
 def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
-    # test/coverflow.py is in no gate tier, so only a change to the file itself used to plan it.
+    # test/coverflow.py builds these on the host, so a change to any of them plans it, not only one to the script.
     for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
                  'patch/page_parallax.c', 'patch/playlist_art.c'):
         assert 'test/coverflow.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
@@ -410,6 +410,32 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     only = gate.suites_for(docs, ['fw-asan', 'unit', 'patch'], 'py', tmp_path)
     assert list(only) == ['fw-asan', 'unit']
     assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'
+
+
+def test_an_everything_plan_runs_every_suite_a_narrower_plan_could(tmp_path):
+    """fix/full-bleed-windows (d553a94b) changed patch/page_parallax.c and enough else that its plan ran unit, fw
+    and patch whole: the gate ran the merge tier for it and dropped the plan's test/coverflow.py, which that
+    change broke, and the trunk was red unseen until the next coverflow change (TIP_RED 2026-11-18 12:51)."""
+    root = pathlib.Path(affected.__file__).resolve().parents[2]
+    changes = {'patch/page_parallax.c': {1}, 'tools/build.py': {1}, 'tools/stock_map.tsv': {1}}  # three of its 44
+    plan = json.loads(affected.plan_for(changes, root).to_json())
+    assert gate.everything(plan) and 'test/coverflow.py' in plan['other']
+    assert 'test/coverflow.py' in gate.suites_for(plan, [], 'py', tmp_path)
+    # and so for every suite a rule plans: each narrower plan's own suites are in what an everything plan runs
+    narrow = {'patch/coverflow.c': {1}, 'player/main.c': {1}, 'tools/ci/gate.py': {1}, 'test/patch_suite/00_machine.py': set(),
+              'tools/build.py': {1}, 'pyproject.toml': set(), 'test/fw/test_home.py': {1}}
+    names: set = set()
+    for path, lines in narrow.items():
+        names |= set(gate.suites_for(json.loads(affected.plan_for({path: lines}, root).to_json()), [], 'py', tmp_path))
+    every = affected.Plan()
+    every.everything('test')
+    for full in (gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path), gate.suites_for(None, [], 'py', tmp_path)):
+        assert names <= set(full), sorted(names - set(full))
+    assert 'test/player/run.py' not in gate.MERGE  # longer than the whole tier: a batch runs it when planned
+    # a suite only its own change plans (test/X.py: itself) rides along with an everything plan too
+    plan = json.loads(affected.plan_for({'Makefile.new': set(), 'test/chapters.py': {1}}, root).to_json())
+    assert gate.everything(plan) and 'test/chapters.py' in gate.suites_for(plan, [], 'py', tmp_path)
+    assert 'smoke' not in gate.suites_for(plan, [], 'py', tmp_path)  # still the post tier's on a batch
 
 
 def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
@@ -694,6 +720,51 @@ def test_smoke_turns_bluetooth_off_and_keeps_the_rest_of_the_config():
     assert smoke.bluetooth_off('[A]\nBLUETOOTH=1\nX=2\n') == '[A]\nBLUETOOTH=0\nX=2\n'
     assert smoke.bluetooth_off('[SYSSET]\nX=2\n') == '[SYSSET]\nBLUETOOTH=0\nX=2\n'
     assert smoke.bluetooth_off('[A]\nX=2\n') == '[A]\nX=2\n[SYSSET]\nBLUETOOTH=0\n'
+
+
+def guard_run(monkeypatch, answers, stacks):
+    """smoke's Emulator.guard() over q2guard answers and window stacks given in turn (the last of each repeats);
+    the keys it pressed."""
+    keys = []
+    state = {'state': 'done', 'card': 'nosensor', 'seq': '1'}
+    feed = iter(answers)
+    last: list = [None]
+
+    def files(pid):
+        last[0] = next(feed, last[0])
+        return state, dict(last[0])
+    shown = iter(stacks)
+    top: list = [None]
+
+    def stack():
+        top[0] = next(shown, top[0])
+        return [('normal', 'system_bar'), ('normal', 'home_page')] + ([('dialog', top[0])] if top[0] else [])
+    monkeypatch.setattr(smoke, 'guard_files', files)
+    e = smoke.Emulator.__new__(smoke.Emulator)
+    e.pid, e.log = 1, lambda m: None
+    monkeypatch.setattr(e, 'stack', stack)
+    monkeypatch.setattr(e, 'settle', lambda box=None: None)
+    monkeypatch.setattr(e, 'q2emu', lambda *a: keys.append(a))
+    e.guard()
+    return keys
+
+
+def test_smoke_waits_for_demo_to_name_a_card_it_has_just_shown(monkeypatch):
+    """demo puts the guardian's card in its window stack a few ms before it writes `card nosensor` to its answer
+    file (hg_info: the card, then hg_answer). A boot step that read the file just before the card came up and the
+    stack just after saw an unnamed sortselect_dialog and failed: smoke's first-run flake on 2026-11-18 (02:46,
+    03:05, 12:42), which a boot loop with a 20 ms poll hit on 8 boots of 10, and on none of 10 with this wait."""
+    keys = guard_run(monkeypatch, [{}, {'card': 'nosensor'}, {'card': '-'}],
+                     ['sortselect_dialog', 'sortselect_dialog', None])
+    assert keys == [('key', 'centre')]
+    # a card demo never names is still a failure, once demo has had the time to name it
+    monkeypatch.setattr(smoke, 'ANSWER_S', .2)
+    try:
+        guard_run(monkeypatch, [{'card': '-'}], ['sortselect_dialog'])
+    except smoke.Failed as why:
+        assert 'a dialog over Home' in str(why)
+    else:
+        raise AssertionError('an unnamed confirm card passed')
 
 
 def test_smoke_confirms_only_the_guardian_cards_demo_vouches_for_at_boot():

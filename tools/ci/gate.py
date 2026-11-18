@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The gate: one build, then every suite at once, as memory allows, with a table at the end.
 
-    python3 tools/ci/gate.py                          # a release's gate: the merge and post tiers, everything
+    python3 tools/ci/gate.py                          # a release's gate: the merge, planned and post suites, everything
     python3 tools/ci/gate.py --tier merge             # what a batch must pass before it lands
     python3 tools/ci/gate.py --tier post              # what runs on the trunk after a landing
     python3 tools/ci/gate.py --only fw-asan,unit      # some of it
@@ -20,6 +20,9 @@ checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
             test/headset_io.py test/headset_io.py BUILD
             mypy-tools         mypy tools test/unit
             mypy-fw            mypy test/fw
+    planned test/coverflow.py, test/player/run.py, tools/ci/test_ci.py, tools/ci/test_orch.py (PLANNED): what
+                               affected.py's rules plan for a change no merge suite covers; run when a plan
+                               names them (an everything plan names all), and in a release's gate
     post    fw-asan            tools/ci/fw.py --asan: the sanitizers, a group of files to a process
             unit-cov           test/unit under coverage, then `coverage report` (the floor in pyproject.toml)
             smoke              tools/ci/smoke.py BUILD: the build on a pooled emulator, walked as a user would
@@ -52,8 +55,10 @@ deselects them, so they block nothing until the entry's date. A line past its da
 rules refuse, fails the gate as the suite `known-failures`. test/patch.py has no such list: a later test
 needs the state an earlier one left, so a failure there is fixed, not skipped.
 
-A plan (affected.py --json) that runs unit, fw and patch whole is the merge tier; any other plan runs what
-it names, each `other` path a suite of its own. --only keeps just those names: a plan's suite as the plan
+A plan (affected.py --json) that runs unit, fw and patch whole is the merge tier and the plan's own
+`other` suites beside it (a PLANNED suite its changes need, a test/X.py the branch changed), but not the
+optional smoke; any other plan runs
+what it names, each `other` path a suite of its own. --only keeps just those names: a plan's suite as the plan
 has it, one only a whole tier has (GATE_ONLY) whole, and any other name the plan lacks not at all; the
 name `build` builds even when no suite needs it. docs/building.md#gate.
 """
@@ -75,16 +80,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
-# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16: the
-# order they start in and what each needs free.
+# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (PLANNED's
+# from their own runs on 2026-11-18, each under 0.25 GB): the order they start in and what each needs free.
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
-          'smoke': 1.0, 'leak-hunt': 1.0}
+          'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
+          'tools/ci/test_orch.py': 0.5}
 SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
-           'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5}
+           'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
+           'test/coverflow.py': 20, 'test/player/run.py': 800, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15}
+# The suites a rule of affected.py plans for a change no merge-tier suite covers (patch/coverflow*.c, player/,
+# tools/ci/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
+# them when its diff needs them, and the gate runs a plan's `other` suites beside the tier. A plan that runs
+# everything (affected.Plan.everything) and a release's gate run them all. tools/ci/test_ci.py checks that
+# what an everything plan runs holds each rule's suites.
+PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
-MERGE = tuple(n for n in SECONDS if n not in POST)
-FULL = MERGE + POST
+MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
+FULL = MERGE + PLANNED + POST
 TIERS = {'merge': MERGE, 'post': POST, 'release': FULL}
 # in a whole tier, and in no narrower plan or only by chance: --only runs these whole when the plan lacks them
 GATE_ONLY = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt', 'mypy-tools', 'mypy-fw', 'test/peq.py', 'test/playback.py',
@@ -165,12 +178,21 @@ def other_suite(path, py):
     return Suite(path, [py, path, '{build}'], needs_build=True, heavy=True)
 
 
+def named_suite(name, py, logs):
+    """A suite by its name: one gate.py defines, else a plan's `other` path."""
+    full = full_suite(name, py, logs)
+    return full() if full else other_suite(name, py)
+
+
 def suites_for(plan, only, py, logs, tier=None):
     """The suites to run: a whole tier for an everything plan (a release's with no plan, the merge tier
-    with one), else the plan's, cut to only."""
+    with one) and the plan's own `other` suites with it, else the plan's, cut to only."""
     out = {}
     if everything(plan):
-        out = {n: full_suite(n, py, logs)() for n in TIERS[tier or ('release' if plan is None else 'merge')]}
+        out = {n: named_suite(n, py, logs) for n in TIERS[tier or ('release' if plan is None else 'merge')]}
+        for o in plan['other'] if plan else ():  # a test/X.py the branch changed runs itself, whatever else
+            if o not in out and o not in OPTIONAL:
+                out[o] = named_suite(o, py, logs)
     else:
         if plan['unit']:
             files = ['test/unit'] if plan['unit'] == 'all' else [f'test/unit/{f}' for f in plan['unit']]
@@ -186,11 +208,11 @@ def suites_for(plan, only, py, logs, tier=None):
                                                ','.join(plan['patch'])], needs_build=True)
         for o in plan['other']:
             if o not in OPTIONAL:
-                out[o] = full_suite(o, py, logs)() if o in FULL else other_suite(o, py)
+                out[o] = named_suite(o, py, logs)
     if only:
         # a plan's suite is cut to only; a suite no plan names (GATE_ONLY) runs whole; any other name the plan
         # lacks is left out, as nothing the plan's changes touch reaches it
-        out = {n: out[n] if n in out else full_suite(n, py, logs)() for n in only if n in out or n in GATE_ONLY}
+        out = {n: out[n] if n in out else named_suite(n, py, logs) for n in only if n in out or n in GATE_ONLY}
     return out
 
 
