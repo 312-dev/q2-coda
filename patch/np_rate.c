@@ -14,11 +14,12 @@
  *
  * The glow (the lyrics page's too) is the cover's colours washed across the window: the cover
  * averaged on an NR_GRID square grid, each cell's colour raised, dimmed and held under
- * NR_GLOW_MAX, spread bilinearly over the window and shaded by an ellipse round NR_GLOW_CY that
- * fades to black. It is a window-sized opaque bitmap made once for each cover Now Playing shows
+ * NR_GLOW_MAX, spread bilinearly over the window and shaded by the mock-up's falloff (nr_fall)
+ * round NR_GLOW_CY. It is a window-sized opaque bitmap made once for each cover Now Playing shows
  * (nr_glow_key: the art's key and the image's name), when a page that shows it first paints, and
- * drawn a row at a time after that (stock's image copy); never per frame. Leaving Now Playing
- * frees it. Light Mode has none: the page's paper. NR_GLOW_MAX keeps every channel at or under 60,
+ * drawn a row at a time after that (stock's image copy); never per frame. Above the column, under
+ * the status row, the window's ground takes the glow's rows over the glow pages (nr_band), so the
+ * wash reaches the screen's top edge. Leaving Now Playing frees it. Light Mode has none: the page's paper. NR_GLOW_MAX keeps every channel at or under 60,
  * so Text Secondary lyrics over it keep WCAG's 4.5:1 (docs/oled-design.md#rating-page). */
 #include "navigation.h"
 
@@ -41,30 +42,31 @@
 #define NR_FAINT 77       /* 30% of 255: the outlined stars and the other pages' dots */
 #define NR_TARGET_MS 4000 /* the target goes back to rest this long after the last turn */
 #define NR_POLL_MS 500 /* the rating read again while the page shows (a change from the server) */
-/* The glow (the mock-up's radial wash): its centre's screen row and the ellipse's radii, in px;
- * where it reaches black, in 1/256 of them; the cover's grid; each cell's colour boost (1/256)
- * about its luma, its gain (1/256), and the channel cap. The window is the whole screen and the
- * status row an overlay on it, so a page full screen has the glow to the screen's top edge; a page
- * whose top is the status row's foot (the column) has Now Playing's black above it, so its glow
- * fades in over its first NR_TOP_FADE rows rather than meeting the black with an edge (nr_top_fade). */
-#define NR_GLOW_CY 122
+/* The glow (the mock-up's radial wash, at 50% 38% of its 455 x 400 box round the screen, 60% by
+ * 55% of it): its centre's screen row and the ellipse's radii, in px; the cover's grid; each cell's
+ * colour boost (1/256) about its luma, its gain (1/256), and the channel cap. The window is the
+ * whole screen and the status row an overlay on it. */
+#define NR_GLOW_CY 112
 #define NR_GLOW_RX 273
 #define NR_GLOW_RY 220
-#define NR_GLOW_END 205
 #define NR_GRID 4
 #define NR_GLOW_SAT 358
 #define NR_GLOW_GAIN 115
 #define NR_GLOW_MAX 60
-#define NR_TOP_FADE 32
+/* The falloff: the mock-up's brightest channel (its gradient blurred 30 px), measured on its PNG at
+ * each sixteenth of the ellipse's r squared, in 1/256 of NR_GLOW_MAX, so a cover at the cap washes
+ * the screen as the mock-up does; black from r squared 15/16, the screen's corners. */
+static const unsigned char nr_fall[17] = { 230, 226, 213, 201, 171, 145, 115, 85, 64,
+                                           45,  30,  21,  13,  7,   2,   0,   0 };
 
 /* The page's state, on the heap (the scratch arena is full): the page and the lyrics page that
- * show the glow, the glow and the cover it was made for, how many were made (a test's count), the
- * rating shown (-1: nothing that can be rated plays) and when it was read, the target (0 none) and
- * its timeout, where the last touch on the page came down, and whether the column is full screen
- * for the page. */
+ * show the glow, the glow and the cover it was made for, how many were made (a test's count), what
+ * the band over the column was last asked for (nr_band_poll), the rating shown (-1: nothing that
+ * can be rated plays) and when it was read, the target (0 none) and its timeout, where the last
+ * touch on the page came down, and whether the column is full screen for the page. */
 typedef struct {
     void *page, *lyric, *glow;
-    unsigned glow_key, builds, read_at, timer;
+    unsigned glow_key, builds, band, read_at, timer;
     int glow_w, glow_h, rating, target, tap_x, tap_y, full;
 } np_rate_t;
 static np_rate_t *nr __attribute__((section(".scratch")));
@@ -134,6 +136,12 @@ static void nr_cell(unsigned rgb, int *c) {
     for (int k = 0; k < 3; ++k) c[k] = top > NR_GLOW_MAX ? v[k] * NR_GLOW_MAX / top : v[k];
 }
 
+/* nr_fall at r squared q (1/256 of the ellipse's), in 1/256 of NR_GLOW_MAX */
+static int nr_falloff(int q) {
+    int i = q >> 4, f = q & 15;
+    return i >= 16 ? 0 : (nr_fall[i] * (16 - f) + nr_fall[i + 1] * f) >> 4;
+}
+
 /* The glow for the cover's grid g, into px (w x h, BGRA8888 rows of w), the window's top at screen
  * row wy */
 static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g) {
@@ -147,14 +155,12 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
         fy &= 255;
         unsigned *row = px + y * w;
         for (int x = 0; x < w; ++x) {
-            int u = (x - cx) * 256 / NR_GLOW_RX,
-                t2 = (u * u + v * v) * 256 / (NR_GLOW_END * NR_GLOW_END);
-            if (t2 >= 256) {
+            int u = (x - cx) * 256 / NR_GLOW_RX, f = nr_falloff((u * u + v * v) >> 8);
+            if (!f) {
                 row[x] = 0xff000000u;
                 continue;
             }
-            int f = (256 - t2) * (256 - t2) >> 8,
-                fx = nr_clamp((2 * x + 1) * NR_GRID * 128 / w - 128, 0, (NR_GRID - 1) * 256),
+            int fx = nr_clamp((2 * x + 1) * NR_GRID * 128 / w - 128, 0, (NR_GRID - 1) * 256),
                 x0 = fx >> 8, x1 = x0 + (x0 < NR_GRID - 1),
                 grain = (int)(((unsigned)x * 73856093u ^ (unsigned)y * 19349663u) >> 8) % 3 - 1;
             fx &= 255;
@@ -268,25 +274,66 @@ static void nr_page_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* The glow's fade in over w's first NR_TOP_FADE rows, black over it from opaque to clear, when w's
- * top stands at or under the status row's foot (the column, not full screen). */
-static void nr_top_fade(void *w, void *canvas) {
-    int x0, y0;
-    nr_in_window(w, &x0, &y0);
-    if (y0 < bar_foot(st.np_win)) return;
-    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
-    for (int y = 0; y < NR_TOP_FADE; ++y) {
-        stock_canvas_set_fill_color(canvas, (unsigned)(255 - y * 255 / NR_TOP_FADE) << 24);
-        canvas_fill_rect(canvas, 0, y, I(w, W_W), 1);
-    }
-    stock_canvas_set_fill_color(canvas, fill);
+/* The window's ground round the column, above it under the status row and below it behind the
+ * progress bar and the state row: the slide_view's box in the window (x, y, w, h), its page
+ * and its drag (AWTK's slide_view draws its pages at -xoffset); 0 when there is none: no
+ * column, or the column full screen. */
+static int nr_band_at(int *b, int *value, int *off) {
+    if (!st.np_slide || !st.np_win || st.np_full) return 0;
+    nr_in_window(st.np_slide, &b[0], &b[1]);
+    b[2] = I(st.np_slide, W_W), b[3] = I(st.np_slide, W_H);
+    *value = widget_get_prop_int(st.np_slide, "value", 0);
+    *off = widget_get_prop_int(st.np_slide, "xoffset", 0);
+    return b[2] > 0 && (b[1] > 0 || b[1] + b[3] < I(st.np_win, W_H));
 }
 
-/* ringnav_paint_bg, after stock's: the glow behind the lyrics page and the rating page, and the
- * rating page itself */
+/* The window's ground round the column: the glow's rows above and below the slide_view over each
+ * glow page it shows (the page, or it and the one its drag brings in), where that page stands
+ * across, so the wash runs on past the page's top and foot to the screen's edges with no seam, and
+ * moves with a swipe. */
+static void nr_band(void *canvas) {
+    int b[4], value, off;
+    if (!nr_band_at(b, &value, &off)) return;
+    void *glow = (void *)0;
+    int x = b[0], w = b[2], n = (int)widget_count_children(st.np_slide);
+    for (int d = -1; d <= 1; ++d) {
+        void *p = value + d >= 0 && value + d < n ? widget_get_child(st.np_slide, value + d) : 0;
+        if (!p || (p != nr->page && p != nr->lyric)) continue;
+        int at = x + d * w - off, l = at > x ? at : x, r = at < x ? at + w : x + w;
+        if (r <= l || (!glow && !(glow = nr_glow()))) continue;
+        int rows[2][2] = { { 0, b[1] }, { b[1] + b[3], nr->glow_h } }; /* above, below */
+        for (int i = 0; i < 2; ++i) {
+            int top = nr_clamp(rows[i][0], 0, nr->glow_h), h = nr_clamp(rows[i][1], 0, nr->glow_h) - top;
+            if (h <= 0) continue;
+            rect_t src = { l - at + x, top, r - l, h }, dst = { l, top, r - l, h };
+            canvas_draw_image(canvas, glow, &src, &dst);
+        }
+    }
+}
+
+/* Each lit pass: the window round the column asked for again when what it shows changed (the
+ * slide_view's page or drag, a new glow), as nothing else repaints it */
+static void nr_band_poll(void) {
+    int b[4], value, off;
+    if (!nr_band_at(b, &value, &off)) {
+        nr->band = 0;
+        return;
+    }
+    unsigned key = (((unsigned)value << 16 ^ ((unsigned)off & 0xffffu)) * 2654435761u ^ nr->builds << 1) | 1;
+    if (key == nr->band) return;
+    nr->band = key;
+    rect_t above = { b[0], 0, b[2], b[1] }, below = { b[0], b[1] + b[3], b[2], I(st.np_win, W_H) - b[1] - b[3] };
+    if (above.h > 0) widget_invalidate_force(st.np_win, &above);
+    if (below.h > 0) widget_invalidate_force(st.np_win, &below);
+}
+
+/* ringnav_paint_bg, after stock's: the glow behind the lyrics page and the rating page, and round
+ * the column on Now Playing's window, and the rating page itself */
 void np_rate_bg(void *w, void *canvas) {
-    if (!nr || !w || (w != nr->page && w != nr->lyric) || !P(canvas, CANVAS_LCD)) return;
-    if (np_glow_rows(w, canvas, 0, I(w, W_H), 0xff)) nr_top_fade(w, canvas);
+    if (!nr || !w || !P(canvas, CANVAS_LCD)) return;
+    if (w == st.np_win) nr_band(canvas);
+    if (w != nr->page && w != nr->lyric) return;
+    np_glow_rows(w, canvas, 0, I(w, W_H), 0xff);
     if (w == nr->page) nr_page_paint(w, canvas);
 }
 
@@ -301,7 +348,8 @@ static void nr_read(int now) {
 }
 /* Each lit pass (now_playing.c lyric_poll): the column full screen once the slide_view rests on the
  * page, untouched and no window sliding; back as it leaves it (a swipe drags the pages full height,
- * the column going back where they land); the rating read while the page shows. */
+ * the column going back where they land); the rating read while the page shows; the band over the
+ * column asked for when it changed (nr_band_poll). */
 void np_rate_poll(void) {
     if (!nr) return;
     int on = np_rate_on();
@@ -312,6 +360,7 @@ void np_rate_poll(void) {
     else if (!on && nr->full)
         np_full_set(0), nr->full = 0;
     if (nr_shown()) nr_read(0);
+    nr_band_poll();
 }
 
 static int nr_target_end(const void *unused) {
@@ -415,7 +464,7 @@ void np_rate_gone(void) {
     nr->target = nr->full = 0;
     if (nr->glow) bitmap_destroy(nr->glow);
     nr->glow = (void *)0;
-    nr->glow_key = 0;
+    nr->glow_key = nr->band = 0;
 }
 
 /* The slide_view on the rating page (now_playing.c lyric_poll rests it full screen) */

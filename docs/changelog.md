@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): the album-colour glow behind the lyrics and the Rating page now washes the whole screen as the approved design does: brighter (up to about the design's own level), centred a little higher, fading softly to the top edge under the clock and battery and dark only in the corners. On the lyrics page the glow now runs up above the lyrics too, instead of stopping in a dark band under the status row, and it slides with the page when you swipe. Light Mode still has no glow.
   - Pages (OLED): the status row no longer sits on a black band. Each page now fills the whole screen, so its background, Home's art and the Rating page's glow run up behind the clock and the battery; everything below the row stays where it was. A page slide keeps the row on top, and a swipe back that starts on the row is left to the row.
   - Library lists (OLED): dragging Songs, Albums, Artists or another long Library list to its end with a finger now stops with the last row on the line the wheel stops at, clear of the rounded bottom corners, and a flick does the same. Before, the last row came to rest low, in the corners.
   - Streamed songs: picking a server song (from Search or any list) while another song is paused no longer plays a short blip of the paused song first. The paused song now just stops while the new one loads.

@@ -394,31 +394,101 @@ def test_the_lyrics_fade_into_the_glow_not_black(fw, ui, mcl, st):
     assert cover.alphas == [a for step in steps for a in (step, 0xff) * 2]  # the top's and the foot's, each put back
 
 
-def y_in(w, top):
-    """w's y in top's rows: its own and each parent's up to top."""
-    y = 0
-    while w and w != top:
-        y += struct.unpack_from('<i', (C.c_char * 8).from_address(w), 4)[0]
-        w = C.c_void_p.from_address(w + O['W_PARENT']).value or 0
-    return y
+# The approved mock-up's wash (rating page, 2026-11-18: a CSS radial gradient at 50% 38% of the screen, blurred
+# 30 px), its brightest channel down x 60 as measured on its PNG: row: level.
+MOCK_X60 = {0: 17, 30: 28, 58: 37, 80: 42, 100: 44, 120: 44, 160: 39, 200: 26, 240: 11, 280: 2, 310: 0}
 
 
-@pytest.mark.parametrize('column', [False, True])
-def test_the_glow_fades_in_under_the_status_row_only_on_the_column(fw, ui, mcl, st, column):
-    """Full screen the glow runs to the top edge, nothing over it; a page whose top is the status row's foot (the
-    column) has Now Playing's black above it, so black is laid over its first NR_TOP_FADE rows, opaque to clear."""
+def level(c):
+    return max(c >> 16 & 255, c >> 8 & 255, c & 255)
+
+
+def test_the_glow_follows_the_mock_up_s_wash_down_the_screen(fw, ui, mcl, st):
+    """A cover bright enough to meet the cap washes the screen as the mock-up does: down x 60 each row within 6 levels
+    of the mock-up's, its peak too, the top row lit under the status row and the foot dark."""
     rate = Rate(fw, ui, mcl, st)
     ui.set_str(rate.cover, b'image', b'art')
-    if column:  # the view's top on the status row's foot
-        foot = fw.fn('bar_foot', C.c_int, C.c_void_p)(st.np_win)
-        own = struct.unpack_from('<i', (C.c_char * 8).from_address(rate.rate), 4)[0]
-        struct.pack_into('<i', (C.c_char * 8).from_address(rate.rate), 4, foot - (y_in(rate.rate, st.np_win) - own))
-        assert y_in(rate.rate, st.np_win) == foot
-    canvas = bg(fw, rate.rate, Cover(fw, 0xffffff))
-    fade = [r for r in canvas.rects if r[0] == 0 and r[3] == 1 and r[2] > 200]
-    if not column:
-        assert fade == []
-        return
-    assert [r[1] for r in fade] == list(range(NR['NR_TOP_FADE']))
-    alphas = [r[4] >> 24 for r in fade]
-    assert alphas[0] == 255 and alphas == sorted(alphas, reverse=True) and alphas[-1] < 255 // NR['NR_TOP_FADE'] * 2
+    cover = Cover(fw, 0xffffff)
+    bg(fw, rate.rate, cover)
+    px = cover.pixels()
+    assert cover.size == (375, 320)  # the whole screen
+    column = [level(row[60]) for row in px]
+    assert {y: column[y] for y in MOCK_X60} == pytest.approx(MOCK_X60, abs=6)
+    assert abs(max(column) - max(MOCK_X60.values())) <= 6
+    assert column[0] >= 10 and level(px[0][187]) >= 30  # the top edge: the wash, not black
+
+
+def test_the_glow_runs_round_the_column_to_the_screen_s_edges(fw, ui, mcl, st):
+    """On the lyrics page in its column the window's own ground above it (under the status row) and below it (behind
+    the progress bar and the state row) is the glow's rows over the page's columns, so the wash reaches the screen's
+    top and foot with no seam at the page's edges."""
+    rate = Rate(fw, ui, mcl, st, page=1)
+    ui.set_str(rate.cover, b'image', b'art')
+    cover = Cover(fw, 0xffffff)
+    bg(fw, rate.win, cover)
+    glow = C.addressof(cover.glow)
+    assert [d[1:] for d in cover.drawn if d[0] == glow] == [((80, 0, 225, 22),) * 2, ((80, 220, 225, 100),) * 2]
+    cover.drawn.clear()
+    bg(fw, rate.lyric, cover)
+    assert [d[1] for d in cover.drawn if d[0] == glow] == [(80, 22, 225, 198)]  # the page's rows, from where the band ends
+    assert fw.fn('np_rate_builds', C.c_uint)() == 1
+
+
+@pytest.mark.parametrize('value, offset, src, dst', [
+    (0, 0, None, None),  # the art's page at rest: no glow round it
+    (0, 100, (80, 100), (205, 100)),  # the art dragged left: the lyrics come in from the right
+    (1, -100, (80, 125), (180, 125)),  # the lyrics dragged right: the art's part is bare
+    (1, 60, (140, 165), (80, 165)),  # the lyrics dragged left, the rating page coming in
+])
+def test_the_band_s_glow_moves_with_the_page_s_drag(fw, ui, mcl, st, value, offset, src, dst):
+    """src and dst: the columns (x, width) the glow's rows above and below the column are drawn from and to."""
+    rate = Rate(fw, ui, mcl, st, page=value)
+    ui.ints[rate.slide, b'xoffset'] = offset  # AWTK's slide_view: the drag, its pages at -xoffset
+    ui.set_str(rate.cover, b'image', b'art')
+    cover = Cover(fw, 0xffffff)
+    bg(fw, rate.win, cover)
+    drawn = [d[1:] for d in cover.drawn if d[0] == C.addressof(cover.glow)]
+
+    def strips(src, dst):
+        return [((src[0], y, src[1], h), (dst[0], y, dst[1], h)) for y, h in ((0, 22), (220, 100))]
+    if src is None:
+        assert drawn == [] and fw.fn('np_rate_builds', C.c_uint)() == 0
+    elif value == 1 and offset > 0:  # both glow pages show: the lyrics' part, then the rating page's
+        assert drawn == strips(src, dst) + strips((80, 60), (245, 60))
+    else:
+        assert drawn == strips(src, dst)
+
+
+def test_full_screen_and_light_mode_put_no_glow_over_the_window(fw, ui, mcl, st):
+    rate = Rate(fw, ui, mcl, st, page=1)
+    ui.set_str(rate.cover, b'image', b'art')
+    st.np_full = 1  # the column the whole window: its own glow from the top
+    cover = Cover(fw, 0xffffff)
+    bg(fw, rate.win, cover)
+    assert cover.drawn == []
+    st.np_full = 0
+    theme(fw, st, light=1)
+    bg(fw, rate.win, cover)
+    assert cover.drawn == []
+
+
+def test_the_band_is_painted_again_as_the_drag_or_the_glow_changes(fw, ui, mcl, st):
+    """Nothing else repaints the window round the column, so each lit pass asks for it when the slide_view's page, its
+    drag or the glow changed, and only then."""
+    rate = Rate(fw, ui, mcl, st, page=1)
+    ui.set_str(rate.cover, b'image', b'art')
+    band = (rate.win, (80, 220, 225, 100))  # below the column (above it too)
+    rate.poll(1)
+    ui.dirty.clear()
+    rate.poll(3)
+    assert band not in ui.dirty
+    ui.ints[rate.slide, b'xoffset'] = 40
+    rate.poll(1)
+    assert ui.dirty.count(band) == 1 and ui.dirty.count((rate.win, (80, 0, 225, 22))) == 1
+    ui.dirty.clear()
+    bg(fw, rate.lyric, Cover(fw, 0x3060c0))  # a glow made
+    rate.poll(2)
+    assert ui.dirty.count(band) == 1
+
+
+
