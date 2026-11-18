@@ -620,7 +620,7 @@ print(f'Coverflow depth on MIPS: {rest_cost} instructions for the first paint (d
 # moves by fractions of a pixel at a sharpness that hardly changes with the phase. Each axis is a
 # linear ping-pong of its own period across the zoom's margin, from the unzoomed crop. One timer
 # runs it while Home is on top, lit and still; a step repaints only the panel.
-PX=OLED_G.split_art; PW,CH=375-PX,320-OLED_G.bar; PH=CH+OLED_G.split_art_up  # OLED's pane: its client and its rows in the bar (pane_h)
+PX=OLED_G.split_art; PW,CH=375-PX,320-OLED_G.bar; PH=CH+OLED_G.split_art_up  # OLED's pane: its rows under the row's foot and its rows under the row (pane_h), all on Home's full-bleed window
 X,Y,TICK=O['DRIFT_X_MS'],O['DRIFT_Y_MS'],O['DRIFT_TICK_MS']
 m=DepthMachine(); pan_counter=m.u.hook_add(UC_HOOK_BLOCK,count_block,begin=BASE,end=SCRATCH-1)  # before any code is cached
 m.budget=80_000_000  # filtering and sharpening a 2112 px cover passes 50 million
@@ -667,7 +667,7 @@ def framed(c,t):  # the panel at phase t, as home_render filters it: across each
     wx,wy=bspline(u&255),bspline(v&255); i=(v>>8)*ts+(u>>8)  # texel -1, -1 from u, v
     rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+(PH+3)*ts,ts)]
     out=[vig(tap4(*k,wy),VIG(y)) for y in range(PH) for k in zip(*rows[y:y+4])]
-    return struct.pack(f'<{len(out)}I',*out)[4*PW*(PH-CH):]  # the window's rows (home_paint); the bar paints those above
+    return struct.pack(f'<{len(out)}I',*out)  # every row: Home's window is the whole screen (home_paint)
 # Split's vignette (coverflow.c vig_k, vig): the frame's rows darkened at its top and bottom edges, in 256ths, by the
 # tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 320 - PH.
 VIG_T={n:[int(v) for v in re.search(rf'{n}\[VIG_\w+\] = {{([^}}]*)}}',(ROOT/'patch/coverflow.c').read_text()).group(1).split(',')]
@@ -677,18 +677,18 @@ def VIG(y):
 def vig(c,k): return c if k>=256 else c&0xff000000|((c&0xff00ff)*k>>8&0xff00ff)|((c&0xff00)*k>>8&0xff00)
 def drawn():
     n=len(m.draws); m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0)
-    assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,CH) and m.draws[-1][4]&1,m.draws[n:]
+    assert len(m.draws)==n+1 and m.draws[-1][3]==(0,0,PW,PH) and m.draws[-1][4]&1,m.draws[n:]
     return m.draws[-1][5]
 # 352 square: fits the pane's PH (320) and zooms to 352, a texel a pixel; 704 square: each texel 2 x 2 averaged;
 # 2112 square: 6 x 6 sampled 3 x 3.
 m.art_size=(352,352); m.pixels.clear(); paint_home(); c=tex_of(352,352)
-assert m.nodes[m.art]['image']=='' and [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,CH]
+assert m.nodes[m.art]['image']=='' and [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,PH]
 INS=352*OLED_G.split_inset//100; assert 0<INS<16  # the inset leaves the 32 texel margin some pan
 assert (c['u0'],c['v0'],c['rx'],c['ry'])==((PH-PW)//2,INS,32,32-2*INS) and not drifts()
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) in [x[:1] for x in m.calls]
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) not in [x[:1] for x in m.calls]  # unmoved: not rendered again
 paint_home(); m.advance(0); assert len(drifts())==1  # it arms on the next paint
-m.calls.clear(); m.advance(TICK); assert set(invalidated())=={(m.home,(PX,0,PW,CH))},invalidated()
+m.calls.clear(); m.advance(TICK); assert set(invalidated())=={(m.home,(PX,0,PW,PH))},invalidated()
 assert drawn()==framed(c,TICK)!=framed(c,0)  # a tick moves it by a fraction of a pixel
 m.advance(1000-TICK); assert drawn()==framed(c,1000) and len(drifts())==1; passed()
 m.advance(TICK); instructions[0]=0; assert drawn()==framed(c,1000+TICK); frame_cost=instructions[0]
@@ -1278,7 +1278,9 @@ def home_bounds(full):
     for name,sub in (('list_view_home',full),('list_view_homeset',True)):
         x0,end,row=OLED['home_text_x'],OLED[f'home_label_end[{int(sub)}]'],OLED['home_full_row'] if sub else split
         menu=named(m,home,name)
-        top=SPLIT_TOP-OLED_G.bar if name=='list_view_home' and not full else OLED['home_top']  # Split's menu rises into the status row
+        # Home's window is the whole screen (full-bleed): Split's menu rises into the status row, the others start home_top
+        # under its foot
+        top=SPLIT_TOP if name=='list_view_home' and not full else OLED['home_top']+OLED_G.bar
         assert m.get(menu+O['W_W'])==(375 if sub else split) and signed(m.get(menu+O['W_Y']))==top,name
         for r in m.nodes[m.nodes[menu]['children'][0]]['children']:
             label=m.nodes[r]['children'][0]
@@ -1286,7 +1288,7 @@ def home_bounds(full):
             e=min(end,right) if m.nodes[label].get('name')=='label_shuffle_songs' else end
             assert x==x0 and width>0 and x+width==row-e and m.get(r+O['W_W'])==row,(name,x,width,row)
     assert m.nodes[art]['visible']==(not full)
-    assert tuple(signed(m.get(art+O[k])) for k in ('W_X','W_Y','W_W','W_H'))==(OLED_G.split_art,0,375-OLED_G.split_art,320-OLED_G.bar)
+    assert tuple(signed(m.get(art+O[k])) for k in ('W_X','W_Y','W_W','W_H'))==(OLED_G.split_art,0,375-OLED_G.split_art,320)  # the pane, up under the status row (coverflow.c pane_y)
 def carousel(on):
     """Home: Carousel: stock's carousel and arrows in the lists' place, the art hidden; else the
     main list, the carousel hidden, neither taking taps while hidden."""
