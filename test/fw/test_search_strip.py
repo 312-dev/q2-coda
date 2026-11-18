@@ -771,7 +771,7 @@ def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song, st):
     on sheet y 35) and the strip (196 on the sheet), no tiles."""
     s = Strip(fw, ui, library(song))
     use_set(st)  # its bar ends at 58: nothing above the page, so the whole form, its glyph
-    struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page under the status row
+    struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page's rest, the status row's foot
     s.type('zz')
     c = painted(fw, s)
     assert not [b for b, _, r in c.boxes if r == 9]  # the tiles are gone

@@ -766,7 +766,7 @@ static inline int arc_out(int r, int y) {
 #define CF_ARTIST_H 28
 #define CF_GREY 0xffaaaaaa /* color_t #AAAAAA */
 /* Coverflow depth (docs/internals.md#coverflow-depth): the covers are drawn in software into one
- * CF_VIEW_W x CF_VIEW_H frame, the top of the client area. The selected cover is ART_SIZE (160)
+ * CF_VIEW_W x CF_VIEW_H frame, the top of the page. The selected cover is ART_SIZE (160)
  * square with its top CF_TOP from the frame's; where the side covers stand and how far they turn
  * is the theme's (coverflow.shelf in OLED's theme.xml, after #329's Parameter Lab). Brightness (of
  * 256) is 256 at the centre, CF_BRIGHT1
