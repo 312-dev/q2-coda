@@ -709,6 +709,10 @@ BT_PARAMS = (0x4fe1e4, 0x0411f5ef)  # config_bt_init's reset moves before the co
 # openBluetooth's jalr btctl_device_status_callback(0x4fc180) registers headset_bt_status instead, and
 # autoLinkBluetooth's bal checkPairDev also skips while the link list holds a connected link.
 BT_STATUS = (0x4fa700, 0x0320f809)
+# Quality's click (0x4c54f4) reads bt_linkstatus to choose between its dialog and reconnect and its tail for no link:
+# `lbu $2, 0($22)` and `andi $2, $2, 0xff` become jal bt_quality_site with `move $4, $16`, the choice, in its delay
+# slot (patch/bt_ui.c bt_quality_linked; docs/internals.md#bluetooth-link-monitor, The switch and the link).
+BT_QUALITY = ((0x4c556c, 0x92c20000), (0x4c5570, 0x304200ff))
 BT_AUTOLINK = (0x4fbf2c, 0x0411fd04)
 # on_wm_idle_status's two "Bluetooth abnormal" toasts, each before its device_reboot (bal navigator_to_with_context
 # at 0x4f4278 and 0x4f448c, the name loaded in the delay slot), become jal bt_stopped_toast: Bluetooth Stopped's
@@ -2175,6 +2179,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'g_pressdown_y': 4,  # the touch's start, the window manager's pointer-down writes it
                 'g_dropdown_menu_state': 4,  # Quick Settings: 1, 2 while it slides or follows a swipe, 3 open
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
+                'a2dp_eventstate': 4,  # bluealsa's last status event: the codec of a SetConfiguration (bt_ui.c codec_follow)
+                'bt_a2dp_direction': 4,  # checkBluetoothStatus is setting a link up: 1 to a headset, 2 from a phone
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
                 'wifi_showlist': 4,  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
                 # Settings > Wi-Fi's flows (wifi_flows.c): stock's monitor's last STATUS (wpa_state @0xd8), the network
@@ -2273,7 +2279,7 @@ def compile_payload(out):  # pragma: no mutate block
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
-        '--undefined=headset_status_register', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
+        '--undefined=headset_status_register', '--undefined=bt_quality_site', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
         *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
         '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -2709,6 +2715,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           (0x8f99fc1c, 0x0320f809, 0x2484c180), 'Bluetooth status: expected btctl_device_status_callback(0x4fc180)')
     patch_word(patched, *BT_STATUS, jal(ps['headset_status_register']), 'Bluetooth: incoming link during a connect')
     patch_word(patched, *BT_AUTOLINK, jal(ps['headset_bt_autolink']), 'Bluetooth: auto-link keeps an incoming link')
+    check(struct.unpack_from('<III', raw_demo, fileoff(raw_demo, BT_QUALITY[1][0] + 4)) ==
+          (0x1040007c, 0x8f93b05c, 0x8e620000), 'Quality click: expected beqz to the tail for no link, then bt_showcoding')
+    patch_word(patched, *BT_QUALITY[0], jal(ps['bt_quality_site']), 'Quality: a codec pick on a live link')
+    patch_word(patched, *BT_QUALITY[1], 0x02002025, 'Quality: the choice to bt_quality_linked')  # move $4, $16
     for site, stock in BT_ABNORMAL_TOASTS:
         patch_word(patched, site, stock, jal(ps['bt_stopped_toast']), 'Bluetooth Stopped: its page, not the toast')
     patch_word(patched, *SCAN_REFRESH, jal(ps['ringnav_scan_refresh']), 'folder scan refreshes existing tags')
