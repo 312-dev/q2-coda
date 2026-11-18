@@ -301,7 +301,7 @@ eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']
 O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
 BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
 ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])  # a frame's rects at most (engine.c eng_dirty)
-BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,135_000,200_000,270_000,1_450_000  # measured: 2,093, 116,530, 173,215, 233,009 and 1,245,213
+BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,250_000,200_000,270_000,1_450_000  # measured on OLED's 262 px sheet: 2,157, 216,412 (a frame's play can break a brick, move the paddle and score at once), 174,268, 233,143 and 1,177,926
 pick(4); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
 assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
