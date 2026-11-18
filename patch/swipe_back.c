@@ -161,15 +161,17 @@ static void glide(int off) {
     sb.at = (unsigned)time_now_ms() | 1;
 }
 
-/* Return, as its button gives it, with the layer at the right edge. */
+/* Return, as its button gives it, with the layer at the right edge. The window's close_anim_hint is
+ * emptied for Return and put back after, from a copy: stock's widget_get_prop_str answers the
+ * window's own field (window_base_get_prop), and the clear's tk_str_copy reallocs that block to one
+ * byte, so the pointer read would be "" or freed by then (test/patch.py, 02_navigation_pull).
+ * A hint too long for the copy is left in place: the window slides out once more. */
 static void go_back(void) {
-    void *page = sb.page, *layer = sb.layer, *wm = window_manager();
-    int window = layer == page;
-    const char *close = "";
-    if (window) {
-        close = widget_get_prop_str(page, "close_anim_hint", "");
-        widget_set_prop_str(page, "close_anim_hint", "");
-    }
+    void *page = sb.page, *wm = window_manager();
+    char close[64];
+    const char *hint = sb.layer == page ? widget_get_prop_str(page, "close_anim_hint", "") : (void *)0;
+    int cleared = hint && *hint && tk_snprintf(close, sizeof close, "%s", hint) < (int)sizeof close;
+    if (cleared) widget_set_prop_str(page, "close_anim_hint", "");
     unsigned e[16] = { 0 };
     e[0] = EVT_KEY_DOWN;
     e[EVENT_KEY / 4] = KEY_RETURN;
@@ -179,7 +181,7 @@ static void go_back(void) {
     e[EVENT_TIME / 4] = (unsigned)time_now_ms();
     ringnav_input(wm, e);
     if (!sb.page) return; /* destroyed with the window it closed */
-    if (window) widget_set_prop_str(page, "close_anim_hint", close);
+    if (cleared) widget_set_prop_str(page, "close_anim_hint", close);
     place(0); /* closed, it is off the stack; staying, it is back in its place */
     reset();
 }
