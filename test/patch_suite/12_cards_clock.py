@@ -263,8 +263,9 @@ else:
         return r,[(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
     def epaint(rect):  # stock paints one changed rect: the canvas clipped to it
         m.clip=rect; n[0]=0; paint(); return n[0]
-    whole=epaint((0,0,375,320)); assert pixel(187,246)==0xffffffff and pixel(5,100)==0xff000000 and pixel(187,70)==0xff2160d8
-    assert pixel(187,300)==0  # the sheet ends at its height: nothing below it
+    SH=320-OLED_G.bar  # the sheet's height, the window's (games.c: client_h)
+    whole=epaint((0,0,375,320)); assert pixel(187,SH-44)==0xffffffff and pixel(5,100)==0xff000000 and pixel(187,70)==0xff2160d8  # the paddle D_PAD_UP above the end, the ball
+    assert pixel(187,SH+4)==0  # the sheet ends at its height: nothing below it
     r,rects,cost=eframe(); assert r==8 and rects==[(180,63,15,15),(182,65,15,15)],rects
     before=bytes(m.u.mem_read(FB,375*320*4)); part=[epaint(x) for x in rects]; after=bytes(m.u.mem_read(FB,375*320*4))
     changed={(k//4%375,k//4//375) for k in range(0,len(after),4) if after[k:k+4]!=before[k:k+4]}
