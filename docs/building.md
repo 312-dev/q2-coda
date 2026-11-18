@@ -38,10 +38,10 @@ The build carries the Subsonic card app in the root filesystem ([internals](inte
 
 ```sh
 contrib/shanlingq2/build.sh /tmp/q2-subsonic                 # in q2-subsonic: Go 1.22 or later
-mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-4627eeb.zip ~/.cache/q2-apps/
+mkdir -p ~/.cache/q2-apps && mv /tmp/q2-subsonic/q2-subsonic-v1.0-117ede2.zip ~/.cache/q2-apps/
 ```
 
-Subsonic's entry is `builtin`: the firmware's copy is the only one that runs and the App Store does not list it, so a new Subsonic reaches Q2s only in a firmware update. A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`, and release the firmware ([releasing](releasing.md#the-app-list)). The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 added 3,190,784 bytes to the compressed root filesystem; q2-v1.0 (an 8,064,479-byte binary) adds about 20 KB more; its CPU fix (commit 9aef2f9) changes the zip by 3 KB and its server lyrics (commit 4627eeb) by 11 KB more (2,873,133 bytes): a `--dev` build of p32 with the 9aef2f9 zip was 53,215,232 of the 75,497,472 `rootfs_fits` allows, 22.3 MB to spare.
+Subsonic's entry is `builtin`: the firmware's copy is the only one that runs and the App Store does not list it, so a new Subsonic reaches Q2s only in a firmware update. A new version is a new pin: build its zip, then set its version, name, size and SHA-256 in `BUNDLED_APPS`, and release the firmware ([releasing](releasing.md#the-app-list)). The source hash covers the pin, so a build made with the old zip counts as stale. q2-subsonic v0.9 added 3,190,784 bytes to the compressed root filesystem; q2-v1.0 (an 8,064,479-byte binary) adds about 20 KB more; its CPU fix (commit 9aef2f9) changes the zip by 3 KB and its server lyrics (commit 4627eeb) by 11 KB more, and its Radio fix (commit 117ede2) by 2 KB more (2,874,848 bytes): a `--dev` build of p32 with the 9aef2f9 zip was 53,215,232 of the 75,497,472 `rootfs_fits` allows, 22.3 MB to spare.
 
 ### What the rootfs drops
 
