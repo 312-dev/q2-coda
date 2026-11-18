@@ -13,7 +13,7 @@ files in place of ALSA.
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
-import array, concurrent.futures, math, pathlib, re, struct, subprocess, sys, tempfile
+import array, concurrent.futures, math, pathlib, re, shutil, struct, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -1158,6 +1158,68 @@ def check_protocol(player, songs, tmp, fixture):
         near = [q for u, q in got_pos if t - 1.6 < u < t + 0.5]
         assert not near or min(abs(q - p) for q in near) <= 2, f'{name}: at {t} s position {near}, fixture {p}'
     return f'{len(b)} events, {len(ib)} media-info answers, {len(want_pos)} positions'
+
+
+def test_fallback(player, songs, tmp):
+    """player/main.c: the stock player (a script here, xz-compressed where the build puts hciplayer) runs in q2player's
+    process when the Settings row's file is there, or after three crashes in a row (a fatal signal) this boot, the third
+    logged and FALLBACK_FILE made; q2player plays otherwise. A crash before demo has the socket starts q2player again
+    in the same process, since nothing else would."""
+    import lzma, signal, socket, time
+    d = tmp/'fallback'
+
+    def session(switch=False, crashes=None, listen=True):
+        shutil.rmtree(d, ignore_errors=True)
+        (d/'usr/lib/hciplayer-stock').mkdir(parents=True); (d/'tmp').mkdir(); (d/'mnt/data').mkdir(parents=True)
+        stock = b'#!/bin/sh\necho "$0 $*" > stock-ran\nexec sleep 30\n'
+        (d/'usr/lib/hciplayer-stock/hciplayer.xz').write_bytes(lzma.compress(stock, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32))
+        if switch: (d/'mnt/data/stock-player').write_text('1')
+        if crashes is not None: (d/'tmp/q2player.crashes').write_text(str(crashes))
+        srv = None
+        if listen:
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); srv.bind(str(d/'tmp/sock_play')); srv.listen(1); srv.settimeout(5)
+        p = subprocess.Popen([player, '-ao', 'alsa'], cwd=d, stdout=open(d/'player.log', 'w'), stderr=subprocess.STDOUT,
+                             env={'PATH': '/usr/bin:/bin', 'Q2PLAYER_SOCK': str(d/'tmp/sock_play'), 'Q2PLAYER_PCM': str(d)})
+        return p, srv
+
+    def until(cond, what, s=5):
+        end = time.monotonic() + s
+        while not cond():
+            assert time.monotonic() < end, what
+            time.sleep(0.02)
+
+    def stock_ran(p):
+        until(lambda: (d/'stock-ran').exists() and (d/'stock-ran').read_text().endswith('\n'), 'the stock player did not run')
+        line = (d/'stock-ran').read_text().split()
+        assert p.poll() is None and line == ['./tmp/hciplayer-stock/hciplayer', '-ao', 'alsa'], (p.poll(), line)
+        assert (d/'tmp/hciplayer-stock/hciplayer').read_bytes().startswith(b'#!/bin/sh'), 'not the bytes the build compressed'
+        p.kill(); p.wait()
+
+    # nothing chosen: q2player connects and plays
+    p, srv = session(); conn, _ = srv.accept(); time.sleep(0.3)
+    assert p.poll() is None and not (d/'stock-ran').exists(), 'q2player did not stay the player'
+    p.kill(); p.wait(); conn.close(); srv.close()
+    # chosen in Settings: the stock player in the same process, with q2player's arguments
+    p, srv = session(switch=True); stock_ran(p); srv.close()
+    assert not (d/'tmp/q2player.fallback').exists(), 'a choice is not a fallback'
+    # a crash after connecting: counted and logged, the process dies of it (demo starts the player again)
+    for n in (1, 2, 3):
+        p, srv = session(crashes=None if n == 1 else n - 1); conn, _ = srv.accept(); time.sleep(0.2)
+        p.send_signal(signal.SIGSEGV); assert p.wait(5) == -signal.SIGSEGV, p.returncode
+        conn.close(); srv.close()
+        assert (d/'tmp/q2player.crashes').read_text() == str(n), (d/'tmp/q2player.crashes').read_text()
+        assert f'q2player: crashed, signal 11, crash {n} of 3 in a row' in (d/'player.log').read_text(), (d/'player.log').read_text()
+    # the next start after the third: the stock player, logged once, FALLBACK_FILE made
+    p, srv = session(crashes=3); stock_ran(p); srv.close()
+    assert 'q2player: crashed 3 times in a row; the stock player plays until the next restart' in (d/'player.log').read_text()
+    assert (d/'tmp/q2player.fallback').exists()
+    # crashes before demo has the socket: each starts q2player again in the same process, the third gives the stock player
+    p, _ = session(listen=False)
+    for n in (1, 2, 3):
+        time.sleep(0.3); p.send_signal(signal.SIGABRT)
+        until(lambda: (d/'tmp/q2player.crashes').exists() and (d/'tmp/q2player.crashes').read_text() == str(n), f'crash {n} not counted')
+    stock_ran(p)
+    return 'Settings choice, three crashes after connecting and three before, each the stock player in the same process'
 
 
 def main():

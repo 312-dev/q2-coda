@@ -406,8 +406,8 @@ def validate_assets(directory):
     def read(image, rel):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
     def patched_hciplayer():
-        """The patched stock hciplayer the image ships. A --new-player build puts q2player at usr/bin/hciplayer and
-        this one xz-compressed under PLAYER_STOCK_DIR (player/main.c's STOCK_XZ)."""
+        """The patched stock hciplayer the image ships: xz-compressed under PLAYER_STOCK_DIR (player/main.c's STOCK_XZ)
+        with q2player at usr/bin/hciplayer, as every build but a --stock-player one has it."""
         from build import PLAYER_STOCK_DIR
         player = read('rootfs.squashfs', 'usr/bin/hciplayer')
         if 'q2player_sha256' not in manifest:
