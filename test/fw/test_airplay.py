@@ -157,6 +157,33 @@ def test_the_playing_song_s_tags_go_to_the_app_once_a_song(fw, mcl, records):
     assert files.files[TRACK].startswith(b'path=/m/b.flac\ntitle=Three\n') and tap.t.track == 3
 
 
+
+def test_a_song_still_arriving_tells_the_app_the_server_s_length_and_again_when_it_changes(fw, mcl, records):
+    """A server song written in place reads short to the player (stream_state.c stream_length): the speaker is told
+    the server's length, 0 while there is none, and told again as that changes; whole, the player's."""
+    from test_addon import World
+    song = b'/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].mp3'
+    stream = b'/tmp/q2-subsonic.stream'
+    tap = Tap(fw)
+    world = World(fw, now=1000)
+    world.files[PID] = b'1\n'
+    fw.mock('time_now_ms', lambda *_: tap.ms)
+    fw.mock('fw_clock_gettime', lambda which, ts, *_: struct.pack_into('<qq', (C.c_char * 16).from_address(ts), 0, CLOCK_S, 0))
+    Queue(fw, mcl, [records.song(song, title=b'Hello')])
+    fw.mock('player_playtime_and_length', lambda sec, total, *_: C.memmove(total, struct.pack('<i', 61), 4) and 0)
+    tap.app(state=CAST_CONNECTING)
+
+    def line(state, ms):
+        world.files[stream] = f'#Q2STREAM/1\tseq=1\n{state}\t900000\t4000000\t{ms}\t{song.decode()}\n'.encode()
+        world.mtime[stream] = world.now
+        tap.poll(), tap.poll()
+        return world.files[TRACK.encode()].split(b'length=')[1]
+
+    assert line('get', 0) == b'0\n'  # unknown, not the player's 61 s of bytes so far
+    assert line('get', 300000) == b'300\n' and tap.t.track == 2
+    assert line('done', 300000) == b'61\n'  # whole: the player's length stands
+
+
 # The volume: a speaker's is its own, the earphones' and their limit wait in RAM.
 @pytest.mark.parametrize('end', ['stopped', 'the app gone'])
 def test_a_speaker_takes_its_own_volume_and_the_earphones_level_and_limit_come_back(fw, end):

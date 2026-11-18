@@ -466,7 +466,7 @@ int main(int argc, char **argv) {
     signal(SIGUSR1, on_signal), signal(SIGTERM, on_signal);
     card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
     card_log_at(&ulog, LOGS "/q2-log.0", ULOG_RAM);
-    bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM));
+    bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM), &ulog);
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
