@@ -26,10 +26,15 @@ Every outcome is one line in ~/.cache/q2-queue/events.log (q2ci.event), which th
     POST_OK / POST_RED              the post tier (sanitizers, coverage, the emulator smoke test) on the trunk's tip
     PUSHED / PUSH_FAILED            the trunk on origin
     QUEUE_STOPPED / QUEUE_STARTED / QUEUE_ERROR
+    QUEUE_RESUMED                   `resume` ran (written by it)
+    RESUMED                         the running service saw the RESUME flag `resume` leaves and dropped its holds
 
 and its state is ~/.cache/q2-queue/status.json. It stops itself (the STOP file) after two batches in a row
 that only crashed, since a third would crash too; `q2 stop-all` stops it the same way, and `resume`
-clears the stop, the crash count and a red tip's hold.
+clears the stop, the crash count and a red tip's hold. `resume` also leaves a RESUME flag file in the queue's
+directory; the loop looks for it at the top of every turn, drops the same holds from its memory (it would
+otherwise keep, and save back over state.json, the hold `resume` just cleared there) and logs RESUMED, so
+`resume` works on a running service within one turn, with no stop and start.
 
 When nothing is ready and the tip has not had it, the post tier runs on the tip: a failure there is
 reported (POST_RED) against a commit that has already landed and is fixed by the next branch, as any bug.
@@ -103,6 +108,16 @@ class Queue:
 
     def stopped(self):
         return (self.dir/'STOP').exists()
+
+    def resumed(self):
+        """Take a RESUME flag (see resume()): forget the red tip and the crash count held in memory. True if there was one."""
+        flag = self.dir/'RESUME'
+        if not flag.exists():
+            return False
+        flag.unlink(missing_ok=True)
+        self.state.update(tip_red=[], crashes=0)
+        self.event('RESUMED')
+        return True
 
     def stop(self, why):
         (self.dir/'STOP').write_text(why + '\n')
@@ -196,6 +211,7 @@ class Queue:
 
     def turn(self):
         """Do the next thing; returns what it did: 'stopped', 'error', 'batch', 'post' or 'idle'."""
+        self.resumed()
         if self.stopped():
             self.save('stopped', why=(self.dir/'STOP').read_text().strip())
             return 'stopped'
@@ -306,8 +322,12 @@ class Queue:
 
 
 def resume(directory):
-    """Clear a stop, the crash count and a red tip's hold: the next turn takes everything again."""
+    """Clear a stop, the crash count and a red tip's hold: the next turn takes everything again.
+
+    A running queue holds the last two in memory, so the RESUME flag tells it to drop them at its next turn."""
     d = pathlib.Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    (d/'RESUME').write_text(time.strftime('%Y-%m-%dT%H:%M:%S') + '\n')
     (d/'STOP').unlink(missing_ok=True)
     state = d/'state.json'
     if state.exists():

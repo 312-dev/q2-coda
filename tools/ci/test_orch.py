@@ -523,6 +523,33 @@ def test_two_batches_that_only_crash_stop_the_queue_and_keep_the_branches(tmp_pa
     assert q2.state['crashes'] == 0 and q2.turn() == 'batch' and 'LANDED feat/a' in q2.events()
 
 
+def test_resume_reaches_a_running_queue_within_one_turn(tmp_path):
+    def red(names):
+        return {'tip_red': ['patch'], 'status': 2,
+                'skipped': {n: 'not landed: the integration tip fails the same suites' for n in names}}
+    q = FakeQueue(tmp_path, [red, land], post=False)  # one object throughout: a service that is never restarted
+    merge_batch.append_ready(q.ready, [('feat/a', 'a1')])
+    q.turn()
+    assert q.state['tip_red'] == ['patch'] and q.turn() == 'idle' and len(q.batches) == 1
+    q2queue.resume(q.dir)
+    assert q.turn() == 'batch' and q.batches[-1] == ['feat/a'] and q.state['tip_red'] == []
+    assert 'RESUMED' in q.events() and not (q.dir/'RESUME').exists()
+    assert json.loads((q.dir/'state.json').read_text())['tip_red'] == []  # what the loop saves is not the old hold
+    assert q.turn() == 'idle' and q.events().count('RESUMED') == 1  # one resume, one line
+
+
+def test_resume_reaches_a_running_queue_that_stopped_itself(tmp_path):
+    def crash(names):
+        return {'infra': ['patch'], 'status': 2, 'skipped': {n: 'not landed: patch crashed (the harness or the machine)' for n in names}}
+    q = FakeQueue(tmp_path, [crash, crash, land], post=False)
+    merge_batch.append_ready(q.ready, [('feat/a', 'a1')])
+    q.turn()
+    q.turn()
+    assert q.turn() == 'stopped' and q.state['crashes'] == 2
+    q2queue.resume(q.dir)
+    assert q.turn() == 'batch' and q.state['crashes'] == 0 and 'RESUMED' in q.events()
+
+
 def test_a_batch_that_dies_without_a_result_loses_no_branch(tmp_path):
     q = FakeQueue(tmp_path, [lambda names: None, land], post=False)
     merge_batch.append_ready(q.ready, [('feat/a', 'a1'), ('fix/t', 't1', True)])
