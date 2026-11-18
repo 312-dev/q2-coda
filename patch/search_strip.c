@@ -164,7 +164,7 @@ enum {
 #define SS_LOUPE_GAP 10
 #define SS_LOUPE_IN 4
 #define SS_LOUPE_PAD 4
-#define SS_LOUPE_LINE 0x6e6e6e
+#define SS_LOUPE_LINE RGB_TERTIARY_L /* the mock-up's #6E6E6E, in either half */
 #define SS_LOUPE_GROW_MS 100
 #define SS_LOUPE_STEP_MS 33
 #define SS_ZOOM(v) (((v) * 8 + 2) / 5)
