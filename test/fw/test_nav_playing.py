@@ -2297,3 +2297,12 @@ def test_the_bar_has_no_fill_while_the_length_is_unknown_and_scales_to_the_serve
     assert track == w and w * 50 // 400 <= fill <= w * 51 // 400  # 50 s of 400 s, not of the player's 200
     arriving.line('done', 400000)
     assert w not in drawn(fw, now)  # stock's own bar again: no track of ours, only the glide's fill
+
+
+def test_a_bar_with_no_length_yet_is_empty(fw, ui, now):
+    """A pressed server song before the player has it (the user's device, 2026-11-17, q2player): stock's slider at
+    max 0 and value 0 still draws a fill about a ninth of the bar long (emulator: 38 of 323 px), so the track is
+    drawn over it."""
+    ui.ints[now.slider, b'max'], ui.ints[now.slider, b'value'] = 0, 0
+    now.status = 1  # stopped (catalogue.c np_stop)
+    assert drawn(fw, now) == [ui.box(now.slider)[2]]  # the track, the whole width, and no fill

@@ -179,10 +179,13 @@ void paint_scrubber(void *w, void *canvas) {
     int cert = np_stream_length(&lms), lo = widget_get_prop_int(w, "min", 0), bw = I(w, W_W),
         h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
     /* a streamed song still arriving: stock's bar runs to the length the player has so far, which
-     * grows, so the track is drawn over it and the fill from the server's length, or none */
+     * grows, so the track is drawn over it and the fill from the server's length, or none. With no
+     * length at all (max at min: a pressed server song before the player has it) stock still
+     * fills about a ninth of the bar, so the track goes over that too: empty at 0:00. */
     int n = widget_get_prop_int(w, "max", 100) - lo;
     if (cert) n = cert == 1 ? (int)(lms / 1000) - lo : 0;
-    if (cert) {
+    int own = cert || n <= 0; /* the track ours, and the fill only what is drawn below */
+    if (own) {
         rect_t track = { 0, (I(w, W_H) - h) / 2, bw, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         fill_box(canvas, &track, RGBA(theme()->np_track_rgb), (unsigned)h / 2);
@@ -192,7 +195,7 @@ void paint_scrubber(void *w, void *canvas) {
     int playing = !st.scrub && n > 0 && v < n && mclGetPlayStatus() == 2,
         fill = n > 0 ? (bw * v + bw * glide_ms(v, playing) / 1000) / n : 0;
     if (fill > bw) fill = bw;
-    if (n > 0 && fill > (cert ? 0 : bw * v / n)) {
+    if (n > 0 && fill > (own ? 0 : bw * v / n)) {
         rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
