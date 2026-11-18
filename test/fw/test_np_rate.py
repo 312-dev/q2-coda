@@ -261,7 +261,9 @@ class Cover:
             for x in range(w):
                 c = rgb(x, y) if callable(rgb) else rgb
                 self.px[(y * w + x) * 4:(y * w + x) * 4 + 4] = [c >> 16 & 255, c >> 8 & 255, c & 255, 255]
-        self.fw, self.glow, self.glow_px = fw, C.create_string_buffer(0x40), None
+        self.fw, self.glow = fw, C.create_string_buffer(0x40)
+        self.glow_px = (C.c_uint * 1)()  # the glow's pixels once the C makes it (create)
+        self.size = (0, 0)
         self.mocks()
 
     def mocks(self):
