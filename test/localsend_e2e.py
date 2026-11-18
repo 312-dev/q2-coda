@@ -14,7 +14,9 @@ usr/lib/libssl.so.1.1, usr/lib/libcrypto.so.1.1 and usr/bin/q2send). Both bind m
 Checks, in order: each finds the other (the CLI's announcement answered by q2send's register, and q2send's
 announcement answered by the CLI's); the CLI sends a file, demo is asked and accepts, the file lands whole in
 Received and is listed in q2send.received; the CLI sends again and demo declines (the CLI is refused, nothing
-lands); with q2send.hold present a request is refused without asking; q2send sends two files to the CLI, whose
+lands); with q2send.hold present a request is refused without asking; accepted with "Always accept", the CLI is
+listed as trusted by its certificate's fingerprint and its next request lands without asking, while the same name
+with a new certificate is asked again, and untrust takes it off the list; q2send sends two files to the CLI, whose
 user accepts, and both land whole there; the same send declined at the CLI ends "declined"; SIGTERM ends q2send
 with its state, ask and pid files gone. The exit status is the number of failures."""
 import argparse
@@ -59,10 +61,10 @@ def until(fn, secs, step=0.1, pump=None):
 class Cli:
     """The reference CLI in a 120x40 pseudo-terminal; out is all it has drawn."""
 
-    def __init__(self, exe, work, files=()):
+    def __init__(self, exe, work, files=(), config='cli-config'):
         self.dest = work / 'cli-received'
         self.dest.mkdir(exist_ok=True)
-        env = dict(os.environ, XDG_CONFIG_HOME=str(work / 'cli-config'), HOME=str(work), TERM='xterm')
+        env = dict(os.environ, XDG_CONFIG_HOME=str(work / config), HOME=str(work), TERM='xterm')
         args = [exe, '--alias', 'Reference CLI', '--port', str(CLIPORT), '--destination', str(self.dest)]
         for f in files:
             args += ['-f', str(f)]
@@ -127,6 +129,12 @@ class Q2:
                 out['me'] = w[1:]
         return out
 
+    def trusted(self):
+        try:
+            return [ln.split('\t')[1:] for ln in self.f('state').read_text().splitlines() if ln.startswith('trusted\t')]
+        except OSError:
+            return []
+
     def phase(self, which):
         return self.state().get(which, ['?'])[0]
 
@@ -178,7 +186,7 @@ def main():
               q2.f('received').read_text().strip() == str(got))
         check('no .part file is left', not list(q2.recv.rglob('*.part')))
         rs = q2.state().get('recv', [])
-        check('state: done, 1 of 1, every byte', rs[:5] == ['done', '1', '1', str(payload.stat().st_size),
+        check('state: done, 1 of 1, every byte, not trusted', rs[-1:] == ['0'] and rs[:5] == ['done', '1', '1', str(payload.stat().st_size),
                                                            str(payload.stat().st_size)], str(rs))
         cli.stop()
 
@@ -210,6 +218,41 @@ def main():
               q2.phase('recv'))
         q2.f('hold').unlink()
         cli.stop()
+
+        # trusted: accepted with "Always accept", the next request from that certificate is not asked about
+        def send_from_cli(files, config='cli-config'):
+            c = Cli(a.cli, work, files=files, config=config)
+            q2.put('cmd', 'scan\n')
+            c.pump(4)
+            c.key('\r')
+            return c
+        cli = send_from_cli([payload2])
+        ask = until(lambda: q2.f('ask').exists() and q2.f('ask').read_text(), 10, pump=cli.pump)
+        check('an untrusted sender gets the card', bool(ask))
+        q2.put('answer', f"{ask.split(chr(9))[0] if ask else 'x'} 1 trust\n")
+        until(lambda: q2.phase('recv') == 'done', 10, pump=cli.pump)
+        check('accepted with trust: the sender is listed by its fingerprint', until(
+            lambda: [t for t in q2.trusted() if t == [clifp, 'Reference CLI']], 3), str(q2.trusted()))
+        cli.stop()
+        (q2.recv / payload2.name).unlink()
+        cli = send_from_cli([payload2])
+        landed = until(lambda: (q2.recv / payload2.name).exists() and q2.state().get('recv', [''])[-1:] == ['1'] and
+                       q2.phase('recv') == 'done', 10, pump=cli.pump)
+        rs = q2.state().get('recv', [])
+        check('a trusted sender is not asked, and its file lands', bool(landed) and not q2.f('ask').exists() and
+              (q2.recv / payload2.name).read_text() == payload2.read_text(), str(rs))
+        check('and the state says trusted, so demo can show "Receiving from"', rs[-1:] == ['1'], str(rs))
+        cli.stop()
+        # the same name with another certificate: asked again
+        cli = send_from_cli([payload2], config='cli-config-other')
+        ask = until(lambda: q2.f('ask').exists() and q2.f('ask').read_text(), 10, pump=cli.pump)
+        check('a trusted name with a different fingerprint gets the card', bool(ask) and
+              ask.split('\t')[1] == 'Reference CLI', repr(ask))
+        q2.put('answer', f"{ask.split(chr(9))[0] if ask else 'x'} 0\n")
+        until(lambda: q2.phase('recv') == 'declined', 5, pump=cli.pump)
+        cli.stop()
+        q2.put('cmd', f'untrust\t{clifp}\n')
+        check('untrust removes it', until(lambda: not q2.trusted(), 3), str(q2.trusted()))
 
         # q2send sends two files to the CLI, whose user accepts
         cli = Cli(a.cli, work)

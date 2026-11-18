@@ -12,13 +12,16 @@
  * demo talks to it through files in --run (default /tmp), each written whole and renamed into place:
  *   q2send.state     written here: "me", then a "peer" line per device, "recv" and "send" for the transfers
  *   q2send.ask       written here while an incoming request waits: id, alias, model, type, files, bytes
- *   q2send.answer    demo's: "<id> 1" accepts, "<id> 0" declines
- *   q2send.cmd       demo's: "scan", "cancel", "stop", or "send\t<fingerprint>" and a path a line
+ *   q2send.answer    demo's: "<id> 1" accepts, "<id> 1 trust" accepts and trusts the sender, "<id> 0" declines
+ *   q2send.cmd       demo's: "scan", "cancel", "stop", "untrust\t<fingerprint>", "untrust-all", or
+ *                    "send\t<fingerprint>" and a path a line
  *   q2send.hold      present: refuse every incoming request (the card is a computer's over USB)
  *   q2send.received  appended here: each file received whole, a path a line, for the library scan
  *   q2send.pid, q2send.log
+ * --data also keeps the trusted devices (data/trusted): a sender whose client certificate is one of them is
+ * not asked about; the space, name and one-session checks still apply.
  * State lines are tab-separated: "peer fp ip port type alias model", "recv|send phase files_done files bytes_done
- * bytes alias current", phase one of idle ask wait run done declined busy failed cancelled refused-room
+ * bytes alias current" (recv adds 1 when its sender is trusted), "trusted fp alias", phase one of idle ask wait run done declined busy failed cancelled refused-room
  * refused-card refused-hold. */
 #include "localsend_sys.h"
 #include "localsend.h"
@@ -45,7 +48,7 @@ static struct {
     /* the incoming session: phase, demo's answer (1 yes, 2 no), its uploads running, what is done */
     ls_session rs;
     char r_phase[16], r_name[LS_PATH];
-    int r_answer, r_uploads, r_files;
+    int r_answer, r_uploads, r_files, r_trusted;
     long long r_done;
     /* the outgoing one */
     ls_session ss;
@@ -343,7 +346,65 @@ static int ask_answer(void) {
     if (!sp || sp - b >= (int)sizeof id) return 0;
     memcpy(id, b, sp - b);
     id[sp - b] = 0;
-    return strcmp(id, g.rs.id) ? 0 : sp[1] == '1' ? 1 : 2;
+    return strcmp(id, g.rs.id) ? 0 : sp[1] == '1' ? (strstr(sp, "trust") ? 3 : 1) : 2;
+}
+
+/* ---- trusted devices: data/trusted, "fingerprint\talias" a line. A sender is trusted by its client
+ * certificate's fingerprint alone, never by the name or the fingerprint its body claims, which anyone can set. */
+#define TRUST_MAX 32
+static int trust_read(char fps[][LS_FP], char names[][LS_ALIAS]) {
+    char p[256], b[TRUST_MAX * (LS_FP + LS_ALIAS + 2) + 1];
+    snprintf(p, sizeof p, "%s/trusted", g.data);
+    int n = 0;
+    if (get_file(p, b, sizeof b) <= 0) return 0;
+    for (char *line = b, *nl; *line && n < TRUST_MAX; line = nl + 1) {
+        nl = strchr(line, '\n');
+        if (!nl) nl = line + strlen(line);
+        char *tab = memchr(line, '\t', nl - line);
+        if (tab && tab - line == 64) {
+            memcpy(fps[n], line, 64), fps[n][64] = 0;
+            int an = (int)(nl - tab - 1) < LS_ALIAS - 1 ? (int)(nl - tab - 1) : LS_ALIAS - 1;
+            memcpy(names[n], tab + 1, an), names[n][an] = 0;
+            ++n;
+        }
+        if (!*nl) break;
+    }
+    return n;
+}
+
+static void trust_write(char fps[][LS_FP], char names[][LS_ALIAS], int n) {
+    char p[256], b[TRUST_MAX * (LS_FP + LS_ALIAS + 2) + 1];
+    int k = 0;
+    for (int i = 0; i < n; ++i) k += snprintf(b + k, sizeof b - k, "%s\t%s\n", fps[i], names[i]);
+    snprintf(p, sizeof p, "%s/trusted", g.data);
+    if (!n) unlink(p);
+    else if (put_file(p, b, k)) lg("trusted devices not saved");
+    g.dirty = 1;
+}
+
+static int trusted(const char *fp) {
+    char fps[TRUST_MAX][LS_FP], names[TRUST_MAX][LS_ALIAS];
+    int n = trust_read(fps, names);
+    for (int i = 0; fp[0] && i < n; ++i)
+        if (!strcmp(fps[i], fp)) return 1;
+    return 0;
+}
+
+/* fp added (alias its name, the newest kept when full), or taken out (alias 0); fp 0 takes out every one */
+static void trust_set(const char *fp, const char *alias) {
+    char fps[TRUST_MAX][LS_FP], names[TRUST_MAX][LS_ALIAS];
+    int n = fp ? trust_read(fps, names) : 0, o = 0;
+    for (int i = 0; i < n; ++i)
+        if (strcmp(fps[i], fp)) memcpy(fps[o], fps[i], LS_FP), memcpy(names[o], names[i], LS_ALIAS), ++o;
+    if (fp && alias) {
+        if (o == TRUST_MAX) memmove(fps, fps + 1, --o * LS_FP), memmove(names, names + 1, o * LS_ALIAS);
+        snprintf(fps[o], LS_FP, "%s", fp);
+        snprintf(names[o], LS_ALIAS, "%s", alias);
+        for (char *t = names[o]; *t; ++t)
+            if (*t == '\t' || *t == '\n') *t = ' ';
+        ++o;
+    }
+    trust_write(fps, names, o);
 }
 
 /* Free bytes where the Received folder is or would be; -1 when the card is not there. */
@@ -391,14 +452,25 @@ static void on_prepare(conn *c, const ls_http *h) {
     ls_session_free(&g.rs);
     g.rs = s;
     g.r_done = 0, g.r_files = 0, g.r_answer = 0, g.r_name[0] = 0;
+    g.r_trusted = c->fp[0] && trusted(c->fp); /* the certificate's, not the body's */
     if (refused || !s.want) {
         phase(g.r_phase, refused ? refused : "done");
         pthread_mutex_unlock(&g.mu);
         lg("prepare-upload from %s: %s", s.from.alias, refused ? refused : "nothing to take");
         return reply(c, refused ? 403 : 204, 0);
     }
-    phase(g.r_phase, "ask");
     char ask[512], p[256];
+    if (g.r_trusted) { /* no card: demo shows "Receiving from <name>" instead (the recv line's trusted flag) */
+        char *body = malloc(g.rs.n * 160 + 128);
+        int ok = body && ls_prepare_reply(&g.rs, body, g.rs.n * 160 + 128) > 0;
+        phase(g.r_phase, ok ? "run" : "failed");
+        pthread_mutex_unlock(&g.mu);
+        lg("prepare-upload from trusted %s (%s): %d files, %lld bytes", s.from.alias, c->ip, s.want, s.total);
+        reply(c, ok ? 200 : 500, ok ? body : 0);
+        free(body);
+        return;
+    }
+    phase(g.r_phase, "ask");
     int n = snprintf(ask, sizeof ask, "%s\t%s\t%s\t%s\t%d\t%lld\n", s.id, s.from.alias, s.from.model, s.from.type, s.want,
                      s.total);
     path(p, sizeof p, "ask");
@@ -418,7 +490,8 @@ static void on_prepare(conn *c, const ls_http *h) {
     pthread_mutex_lock(&g.mu);
     unlink(p);
     char *body = 0;
-    if (answer == 1 && !strcmp(g.r_phase, "ask")) {
+    if ((answer == 1 || answer == 3) && !strcmp(g.r_phase, "ask")) {
+        if (answer == 3 && c->fp[0]) trust_set(c->fp, g.rs.from.alias); /* "Always accept from this device" */
         body = malloc(g.rs.n * 160 + 128);
         if (body && ls_prepare_reply(&g.rs, body, g.rs.n * 160 + 128) > 0)
             phase(g.r_phase, "run");
@@ -862,8 +935,11 @@ static void write_state(void) {
     for (int i = 0; i < g.npeers && n < (int)sizeof b - 300; ++i)
         n += snprintf(b + n, sizeof b - n, "peer\t%s\t%s\t%d\t%s\t%s\t%s\n", g.peers[i].info.fp, g.peers[i].ip,
                       g.peers[i].info.port, g.peers[i].info.type, g.peers[i].info.alias, g.peers[i].info.model);
-    n += snprintf(b + n, sizeof b - n, "recv\t%s\t%d\t%d\t%lld\t%lld\t%s\t%s\n", g.r_phase[0] ? g.r_phase : "idle",
-                  g.r_files, g.rs.want, g.r_done, g.rs.total, g.rs.from.alias, g.r_name);
+    n += snprintf(b + n, sizeof b - n, "recv\t%s\t%d\t%d\t%lld\t%lld\t%s\t%s\t%d\n", g.r_phase[0] ? g.r_phase : "idle",
+                  g.r_files, g.rs.want, g.r_done, g.rs.total, g.rs.from.alias, g.r_name, g.r_trusted);
+    char fps[TRUST_MAX][LS_FP], names[TRUST_MAX][LS_ALIAS];
+    for (int i = 0, t = trust_read(fps, names); i < t && n < (int)sizeof b - 200; ++i)
+        n += snprintf(b + n, sizeof b - n, "trusted\t%s\t%s\n", fps[i], names[i]);
     n += snprintf(b + n, sizeof b - n, "send\t%s\t%d\t%d\t%lld\t%lld\t%s\t%s\n", g.s_phase[0] ? g.s_phase : "idle",
                   g.s_files, g.ss.n, g.s_done, g.ss.total, g.s_alias, g.s_name);
     path(p, sizeof p, "state");
@@ -880,7 +956,17 @@ static void command(int udp, uint32_t *burst) {
     if (!strncmp(b, "scan", 4)) burst[0] = now_ms(), burst[1] = 1;
     else if (!strncmp(b, "stop", 4))
         g.stop = 1;
-    else if (!strncmp(b, "cancel", 6)) {
+    else if (!strncmp(b, "untrust-all", 11)) {
+        pthread_mutex_lock(&g.mu);
+        trust_set(0, 0);
+        pthread_mutex_unlock(&g.mu);
+    } else if (!strncmp(b, "untrust\t", 8)) {
+        char *nl = strchr(b, '\n');
+        if (nl) *nl = 0;
+        pthread_mutex_lock(&g.mu);
+        if (strlen(b + 8) == 64) trust_set(b + 8, 0);
+        pthread_mutex_unlock(&g.mu);
+    } else if (!strncmp(b, "cancel", 6)) {
         pthread_mutex_lock(&g.mu);
         g.s_cancel = 1;
         if (!strcmp(g.r_phase, "ask") || !strcmp(g.r_phase, "run")) phase(g.r_phase, "cancelled");
