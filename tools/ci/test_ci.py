@@ -392,7 +392,7 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
     assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
-    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke'}
+    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke', 'leak-hunt'}
     assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
@@ -462,6 +462,9 @@ def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(t
     # the queue runs it on the tip after landing (the post tier), not in the batch
     assert 'smoke' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path)
     assert gate.suites_for(None, [], 'py', tmp_path, 'post')['smoke'].argv[1:] == [str(gate.ROOT/'tools/ci/smoke.py'), '{build}']
+    # the leak hunt is a post-tier suite and never a batch's, and never holds the tip (merge_queue.TIP_SUITES)
+    assert 'leak-hunt' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path) and 'leak-hunt' not in gate.MERGE
+    assert gate.suites_for(None, [], 'py', tmp_path, 'post')['leak-hunt'].argv[1:] == [str(gate.ROOT/'tools/ci/leak_hunt.py'), '{build}']
     # a worker runs it only when asked
     import subprocess
     ran: list = []

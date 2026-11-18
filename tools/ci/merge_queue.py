@@ -23,7 +23,7 @@ Every outcome is one line in ~/.cache/q2-queue/events.log (q2ci.event), which th
     REQUEUED branch                 not its fault (a crash, a red tip, an undecided failure): it runs again
     TIP_RED suites                  the trunk fails on its own: only `--mark-ready --fixes-tip` branches are taken
     INFRA suites                    suites crashed twice: the harness or the machine, no branch
-    POST_OK / POST_RED              the post tier (sanitizers, coverage, the emulator smoke test) on the trunk's tip
+    POST_OK / POST_RED              the post tier (sanitizers, coverage, the emulator smoke test, the leak hunt) on the trunk's tip
     PUSHED / PUSH_FAILED            the trunk on origin
     QUEUE_STOPPED / QUEUE_STARTED / QUEUE_ERROR
 
@@ -35,7 +35,7 @@ When nothing is ready and the tip has not had it, the post tier runs on the tip:
 reported (POST_RED) against a commit that has already landed and is fixed by the next branch, as any bug.
 A failed smoke test (TIP_SUITES: the build crashes or loses its way on an emulator) is more than that: the
 tip goes TIP_RED as well, so only a `--fixes-tip` branch lands until one makes it pass. smoke.py's exit 3 (no
-emulator came free) is no verdict and holds nothing.
+emulator came free) is no verdict and holds nothing, and a leak found by leak_hunt.py is POST_RED alone.
 A branch whose batch failed with no culprit found (a flaky test) is tried once more, then rejected.
 """
 import argparse

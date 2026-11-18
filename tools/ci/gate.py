@@ -24,6 +24,8 @@ checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
             unit-cov           test/unit under coverage, then `coverage report` (the floor in pyproject.toml)
             smoke              tools/ci/smoke.py BUILD: the build on a pooled emulator, walked as a user would
                                (merge_queue.py makes the tip TIP_RED when it fails; exit 3, no emulator, is not)
+            leak-hunt          tools/ci/leak_hunt.py BUILD: the same UI tour looped on a pooled emulator, failing on
+                               growth in windows, widgets, timers or memory (POST_RED only: never the tip's hold)
 
 The build (tools/ci/rebuild.py: this worktree's reused build) starts at once, beside the suites that need
 none; the rest start when it is done. The longest suites start first. A suite starts only when
@@ -77,15 +79,15 @@ RAMP = 30    # s: a suite this young may not have reached its peak yet, so its e
 # order they start in and what each needs free.
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
-          'smoke': 1.0}
-SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'test/playback.py': 80, 'fw': 50,
+          'smoke': 1.0, 'leak-hunt': 1.0}
+SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
            'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5}
-POST = ('fw-asan', 'unit-cov', 'smoke')
+POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST)
 FULL = MERGE + POST
 TIERS = {'merge': MERGE, 'post': POST, 'release': FULL}
 # in a whole tier, and in no narrower plan or only by chance: --only runs these whole when the plan lacks them
-GATE_ONLY = ('fw-asan', 'unit-cov', 'smoke', 'mypy-tools', 'mypy-fw', 'test/peq.py', 'test/playback.py',
+GATE_ONLY = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt', 'mypy-tools', 'mypy-fw', 'test/peq.py', 'test/playback.py',
              'test/headset_io.py')
 # post-tier suites an affected.py plan names for a worker to run if it likes (affected.py --run --smoke): a merge
 # batch's plan leaves them out, as the queue runs them on the tip after it lands
@@ -142,6 +144,8 @@ def full_suite(name, py, logs):
                                        heavy=True),
         'test/peq.py': lambda: Suite('test/peq.py', [py, 'test/peq.py'], heavy=True),
         'smoke': lambda: Suite('smoke', [py, str(ROOT/'tools/ci/smoke.py'), '{build}'], needs_build=True, heavy=True),
+        'leak-hunt': lambda: Suite('leak-hunt', [py, str(ROOT/'tools/ci/leak_hunt.py'), '{build}'], needs_build=True,
+                                   heavy=True),
     }.get(name)
 
 
