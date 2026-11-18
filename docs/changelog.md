@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streamed songs: after a restart, Up Next names a server song by its title and artist again. A streamed queue picked up where it left off showed the next song by its download's file name, in lower case with the server's id after it.
   - Now Playing (OLED): the A-B repeat markers sit on the progress bar, as before at their points along it, instead of at the old bar's height, where the ones near either end were partly under the rounded glass.
   - Card apps (OLED): a page of only an info row that has more results keeps its More... row, so the rest can be loaded; before, it showed the empty-page note and no way on.
   - Status row (OLED): the Percent battery no longer swaps to the icon while a Bluetooth headset's codec badge (off this row) is up; it gives way only where the battery and the glyphs beside it would leave the title no room.
