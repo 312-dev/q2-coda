@@ -679,7 +679,8 @@ int ringnav_row_selected(void *row) {
 }
 
 static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback);
-/* A row that can't play now (catalogue.c) takes its text colour last, over the theme's. */
+/* A row that can't play now (catalogue.c), a hidden one and the playing song's title take their
+ * text colour last, over the theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     style_color(color, style, name, fallback);
     if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color")) {
@@ -688,6 +689,9 @@ unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, un
             *color = (*color & 0xff000000u) | (scheme()->muted & 0xffffff);
         if (np_tap_lit(st.paint_w)) /* Now Playing's artist or album held (np_taps.c) */
             *color = (*color & 0xff000000u) | (RGBA(np_tap_ink()) & 0xffffff);
+        /* the playing song's title, off the selection (song_rows.c; oled-design.md#song-rows) */
+        if (playing_title_is(st.paint_w) && !(st.sel_accent && painting_in(st.sel_accent)))
+            *color = (*color & 0xff000000u) | (RGBA(scheme()->tones[0]) & 0xffffff);
     }
     return color;
 }

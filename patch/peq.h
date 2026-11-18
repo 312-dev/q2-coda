@@ -437,8 +437,8 @@ int stream_player_waits(const char *path);
  * (the line's, else the catalogue's); 2 the song is still arriving and no length is known. */
 int stream_length(const char *path, unsigned *ms);
 /* The last second of path a seek may go to while it arrives: what is on the card of it, at most the
- * player's length total (seconds); -1 when it is not arriving (stream_length 0). Not called yet:
- * the seeks wait on q2player's seek in a growing file (docs/backlog.md). */
+ * player's length total (seconds); -1 when it is not arriving (stream_length 0). Not called: a seek
+ * past the bytes there are waits for them in q2player (docs/internals.md#streaming-configuration). */
 int stream_reach(const char *path, int total);
 void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
@@ -513,6 +513,8 @@ void addon_q2app(const char *id, char *path, unsigned n);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+/* catalogue.c: the server row (its fileurl) record r's Stream Cache copy plays, or 0 */
+const char *catalogue_row_path(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_copy_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */

@@ -400,6 +400,8 @@ static struct {
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
     unsigned skip;   /* playback_picks after a Next that waits for sm.want (addon_next_waits) */
     int keep;        /* its first entry is the song playing, which plays on (song_radio_keeps) */
+    unsigned skip_at; /* ... the queue's place that song joins at, which then plays */
+    int jump;         /* it is an Up Next pending row's: .playing names it (addon_pending_play) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
 /* The app whose .play started the queue playing, and playback_loads after that queue's load: the
@@ -684,6 +686,21 @@ static int urls_start(const void *unused) {
 
 static void *stream_queue(void);
 #define toolsFreeStSongInfo ((void (*)(void *))0x5d2e10u) /* build.py APP_URL_CALLS */
+/* Now Playing on sm.want, the song a Next or an Up Next pick waits for, at its place at (of at + 1),
+ * and that song played once it joins the queue there (stream_poll), unless the user moves again.
+ * The record shown is kept here until the next: stock's deque copies it. */
+static void want_show(unsigned at) {
+    static unsigned rec[0x58 / 4] __attribute__((section(".scratch"))); /* stSongInfo */
+    sm.skip = playback_picks, sm.skip_at = at;
+    if (P(rec, REC_PATH)) toolsFreeStSongInfo(rec);
+    memset(rec, 0, sizeof rec);
+    const char *slash = strrchr(sm.want, '/');
+    P(rec, REC_NAME) = strdup(slash ? slash + 1 : sm.want); /* before the path: fw tests read it */
+    P(rec, REC_PATH) = strdup(sm.want);
+    I(rec, REC_TYPE) = 8;
+    card_record_tags(rec);
+    catalogue_np_show(rec, at, at + 1);
+}
 /* A user's Next on the last song queued of a playlist session that waits for its next song
  * (sm.want, still to come or still arriving): 1, and Now Playing moves to that song at once (its
  * title, artist and cover from its server row or its file, card_record_tags; the song playing
@@ -693,21 +710,13 @@ static void *stream_queue(void);
  * hangs on a file still arriving, and once START_MS of it is there with q2player, which waits at
  * the end of the bytes there are (stream_state.c stream_startable). Stock's Next on a queue's last
  * song would wrap to its first: a radio's seed, played again while the radio's next song
- * downloads. The record shown is kept here until the next such Next: stock's deque copies it. */
+ * downloads. */
 int addon_next_waits(void) {
-    static unsigned rec[0x58 / 4] __attribute__((section(".scratch"))); /* stSongInfo */
     void *q = sm.state == S_PLAY && sm.m3u && sm.want[0] ? stream_queue() : 0;
     unsigned n = q ? deque_size(q) : 0;
     if (!q || (unsigned)I(MCL_POS, 0) + 1 != n) return 0;
-    sm.skip = playback_picks;
-    if (P(rec, REC_PATH)) toolsFreeStSongInfo(rec);
-    memset(rec, 0, sizeof rec);
-    const char *slash = strrchr(sm.want, '/');
-    P(rec, REC_NAME) = strdup(slash ? slash + 1 : sm.want); /* before the path: the order fw tests read */
-    P(rec, REC_PATH) = strdup(sm.want);
-    I(rec, REC_TYPE) = 8;
-    card_record_tags(rec);
-    catalogue_np_show(rec, n, n + 1);
+    sm.jump = 0;
+    want_show(n);
     return 1;
 }
 
@@ -720,6 +729,106 @@ static void *stream_queue(void) {
                         : tk_str_start_with(p, sm.dir) && p[strlen(sm.dir)] == '/')
                ? q
                : 0;
+}
+
+/* ---- Up Next's pending rows (upnext.c, docs/internals.md#pending-rows): a playlist session's
+ * songs not yet queued, so Up Next shows the whole list, not only the songs fetched ahead. */
+
+/* The playlist's entries from sm.next on that m3u_songs would queue (card paths that fit sm.want),
+ * in order, each with its entry number, to each, until it returns 0. Lines are read as m3u_songs
+ * reads them. */
+static void pending_walk(int (*each)(void *ctx, const char *path, int entry), void *ctx) {
+    char *raw = calloc(1, M3U_MAX + 3), *line, *end;
+    if (raw && state_read(sm.dir, raw, M3U_MAX + 3) > M3U_MAX) strrchr(raw, '\n')[1] = 0;
+    int entry = 0;
+    for (line = raw ? raw + 1 : 0; line && *line; line = end) {
+        if ((end = strstr(line, "\n"))) *end++ = 0;
+        if (tk_str_start_with(line, "\xEF\xBB\xBF")) line += 3;
+        unsigned k = strlen(line);
+        if (k && line[k - 1] == '\r') line[--k] = 0;
+        if (!k || line[0] == '#' || entry++ < sm.next) continue;
+        if (card_path(line) && k < sizeof sm.want && !each(ctx, line, entry - 1)) break;
+    }
+    free(raw);
+}
+
+/* A record of path, a song not yet the player's, named as m3u_songs names one (card_record_tags:
+ * its server row's title, artist and album, so a song not downloaded yet is named too), on the heap
+ * (addon_pending_free). */
+static void *pending_record(const char *path) {
+    void *r = calloc(1, REC_SIZE);
+    const char *slash = strrchr(path, '/');
+    if (!r) return 0;
+    P(r, REC_NAME) = strdup(slash ? slash + 1 : path);
+    P(r, REC_PATH) = strdup(path);
+    I(r, REC_TYPE) = 8;
+    card_record_tags(r);
+    return r;
+}
+void addon_pending_free(void **rows, unsigned n) {
+    for (unsigned i = 0; rows && i < n; ++i)
+        if (rows[i]) toolsFreeStSongInfo(rows[i]), free(rows[i]); /* its strings, then it */
+    free(rows);
+}
+
+typedef struct {
+    void **rows;
+    unsigned n, max;
+} pending_t;
+static int pending_add(void *ctx, const char *path, int entry) {
+    pending_t *p = ctx;
+    (void)entry;
+    if (p->n == p->max) return 0;
+    if ((p->rows[p->n] = pending_record(path))) ++p->n;
+    return 1;
+}
+/* While the queue playing is a playlist session's: its songs not yet queued, at most max, as
+ * records (addon_pending_free), *n of them; 0 for none. */
+void **addon_pending(unsigned max, unsigned *n) {
+    pending_t p = { 0, 0, max };
+    *n = 0;
+    if (sm.state != S_PLAY || !sm.m3u || !max || !stream_queue() ||
+        !(p.rows = calloc(max, sizeof *p.rows)))
+        return 0;
+    pending_walk(pending_add, &p);
+    if (!p.n) return free(p.rows), (void **)0;
+    *n = p.n;
+    return p.rows;
+}
+/* What addon_pending's rows were taken from: the session, its entries passed, its playlist file's
+ * size and time (o32 stat: st_size word 12, st_mtime word 16). */
+unsigned addon_pending_sig(void) {
+    unsigned st[36] = { 0 }, v[4] = { (unsigned)sm.state, (unsigned)sm.next, 0, 0 };
+    if (sm.m3u && sm.state == S_PLAY && !__xstat(3, sm.dir, st)) v[2] = st[12], v[3] = st[16];
+    return hash_bytes(FNV_SEED, (const unsigned char *)v, sizeof v);
+}
+
+typedef struct {
+    const char *path;
+    int entry;
+} pending_at_t;
+static int pending_find(void *ctx, const char *path, int entry) {
+    pending_at_t *f = ctx;
+    if (strcmp(path, f->path)) return 1;
+    f->entry = entry;
+    return 0;
+}
+
+/* Up Next's pending row of path tapped (upnext.c): as a Next to it (want_show), the session's songs
+ * before it passed over (sm.next) and the songs queued after the one playing with them, so it is
+ * the next to join the queue, at its end, and plays then; meanwhile .playing names it, so the app
+ * fetches it first (stream_poll). 1 when path is one of the session's pending songs. */
+int addon_pending_play(const char *path) {
+    void *q = sm.state == S_PLAY && sm.m3u ? stream_queue() : 0;
+    pending_at_t f = { path, -1 };
+    if (!q || !path || strlen(path) >= sizeof sm.want) return 0;
+    pending_walk(pending_find, &f);
+    if (f.entry < 0) return 0;
+    playback_pick(); /* the user moved: a Next waiting, or a session's first song, is let go */
+    sm.next = f.entry, sm.more = 0, sm.jump = 1;
+    tk_snprintf(sm.want, sizeof sm.want, "%s", path);
+    want_show(deque_size(q));
+    return 1;
 }
 
 static void stream_poll(app_t *a) {
@@ -748,7 +857,7 @@ static void stream_poll(app_t *a) {
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = sm.keep = 0, sm.first[0] = sm.want[0] = 0;
-        sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = 0;
+        sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = sm.jump = 0;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
@@ -787,12 +896,11 @@ static void stream_poll(app_t *a) {
             void *add = m3u_songs();
             if (deque_size(add)) playback_queue_insert(q, add, 0);
             deque_destroy(add);
-            /* a Next waited for this: on to the first song that joined, unless the user moved since */
-            unsigned pos = (unsigned)I(MCL_POS, 0);
-            if (sm.skip && sm.skip == playback_picks && pos + 1 < deque_size(q))
-                sm.skip = 0, playback_pick(), player_start_queue((int)pos + 1);
+            /* a Next or an Up Next pick waited for this: it plays, unless the user moved since */
+            if (sm.skip && sm.skip == playback_picks && sm.skip_at < deque_size(q))
+                sm.skip = sm.jump = 0, playback_pick(), player_start_queue((int)sm.skip_at);
             else if (sm.skip != playback_picks)
-                sm.skip = 0;
+                sm.skip = sm.jump = 0;
         }
         ahead_poll(a->id, sm.seq, q); /* Download Ahead: the songs after the one playing */
     } else if (!scan && stream_newer(sm.dir, sm.last)) {
@@ -812,6 +920,7 @@ static void stream_poll(app_t *a) {
     }
     unsigned pos = (unsigned)I(MCL_POS, 0);
     const char *now = pos < deque_size(q) ? P(deque_at(q, pos), REC_PATH) : 0;
+    if (sm.jump && sm.skip == playback_picks) now = sm.want; /* an Up Next pick: the app's first */
     /* a path sm.playing can't hold is no use to the app cut, and tk_snprintf's count would pass
      * line's end */
     if (now && strlen(now) < sizeof sm.playing && strcmp(now, sm.playing)) {

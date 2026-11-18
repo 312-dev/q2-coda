@@ -391,7 +391,11 @@ int source_seek(struct source *s, int seconds) {
     int64_t target = (int64_t)seconds * s->out.rate;
     int64_t ts = av_rescale_q(target, (AVRational){1, s->out.rate}, st->time_base);
     if (st->start_time != AV_NOPTS_VALUE) ts += st->start_time;
-    if (av_seek_frame(s->fmt, s->stream, ts, AVSEEK_FLAG_BACKWARD) < 0) return -1;
+    /* a song still arriving: the search sees only the bytes there are, and a target past them is read up to (grow.c) */
+    if (s->grow) grow_seeking(s->grow, 1);
+    int r = av_seek_frame(s->fmt, s->stream, ts, AVSEEK_FLAG_BACKWARD);
+    if (s->grow) grow_seeking(s->grow, 0);
+    if (r < 0) return -1;
     avcodec_flush_buffers(s->dec);
     av_packet_unref(s->ahead);
     s->draining = s->done = s->have_ahead = 0;

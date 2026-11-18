@@ -399,7 +399,7 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
     assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
-    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke'}
+    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke', 'leak-hunt'}
     assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
@@ -445,6 +445,7 @@ def test_a_reserved_lease_is_never_reclaimed_or_handed_on(tmp_path, monkeypatch)
     monkeypatch.setattr(emu_pool, 'K', 2)
     monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': 'running', 'stderr': ''})())
     monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    monkeypatch.setattr(emu_pool, 'reset_card', lambda k: None)
     past = 1.0
     (tmp_path/'leases.json').write_text(json.dumps({'1': {'name': 'aa-dhu', 'build': '/b', 'since': 0, 'until': past, 'reserved': True},
                                                     '2': {'name': 'old', 'build': '/b', 'since': 0, 'until': past}}))
@@ -461,6 +462,91 @@ def test_a_reserved_lease_is_never_reclaimed_or_handed_on(tmp_path, monkeypatch)
     assert emu_pool.get('/c', 'other', 1, wait=False) == 1  # unreserved and expired: reclaimed
 
 
+def card_tree(root, files):
+    for rel, text in files.items():
+        (root/rel).parent.mkdir(parents=True, exist_ok=True)
+        (root/rel).write_text(text)
+
+
+def test_each_lease_starts_with_the_card_as_the_fixture_hardlinked(tmp_path, monkeypatch):
+    """A worker left a measured-lengths file on slot 3's card and others added .subsonic folders and switched
+    files (2026-11-18); the next smoke run found no songs and exited 3. A lease now rebuilds its card from one fixture."""
+    pool = tmp_path/'pool'
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'HOME', pool)
+    monkeypatch.delenv('Q2_EMU_CARD', raising=False)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    source = tmp_path/'source'
+    card_tree(source, {'Music/A/B/01 one.flac': 'one', 'Music/A/B/02 two.flac': 'two', 'Test/t.flac': 'tt'})
+    (source/'Empty').mkdir()
+    fx = emu_pool.make_fixture(source)
+    assert fx == tmp_path/'state/card' and (fx/'Empty').is_dir()
+    card = emu_pool.copy_dir(1)/'state/mmc'
+    card_tree(card, {'Music/A/B/01 one.flac': 'DIRTY', 'Music/A/B/03 added.flac': 'x', '.subsonic/log.txt': 'x',
+                     'lengths.cache': 'x', 'Test/t.flac': 'switched'})
+    data = emu_pool.copy_dir(1)/'state/data'
+    card_tree(data, {'config.ini': '[SYSSET]\nBLUETOOTH=0\n'})
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+
+    def tree(root):
+        return sorted(str(p.relative_to(root)) for p in root.rglob('*'))
+    assert tree(card) == tree(fx)                                       # the extra files and folders are gone
+    for rel in ('Music/A/B/01 one.flac', 'Music/A/B/02 two.flac', 'Test/t.flac'):
+        assert (card/rel).stat().st_ino == (fx/rel).stat().st_ino       # hardlinks: no data copied
+        assert (card/rel).stat().st_nlink >= 3                          # the source's, the fixture's and the card's
+    assert (card/'Music/A/B/01 one.flac').read_text() == 'one' and (card/'Empty').is_dir()
+    assert (data/'config.ini').read_text() == '[SYSSET]\nBLUETOOTH=0\n'  # /mnt/data is left alone
+    assert emu_pool.card_songs(1) == 3
+    assert not os.access(fx/'Test/t.flac', os.W_OK) or os.geteuid() == 0  # a write in place fails rather than reach every card
+
+
+def test_a_card_is_not_reset_when_a_lease_is_reused_or_reserved_and_a_missing_fixture_is_said(tmp_path, monkeypatch):
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'HOME', tmp_path/'pool')
+    monkeypatch.delenv('Q2_EMU_CARD', raising=False)
+    state = {'out': 'running'}
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': state['out'], 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    for k in (1, 2):
+        card_tree(emu_pool.copy_dir(k)/'state/mmc', {'mine.txt': 'keep'})
+    b = str(pathlib.Path('/b').resolve())
+    (tmp_path/'state').mkdir()
+    (tmp_path/'state/leases.json').write_text(json.dumps({
+        '1': {'name': 'w', 'build': b, 'since': 0, 'until': time.time() + 99},
+        '2': {'name': 'user', 'build': b, 'since': 0, 'until': 1.0, 'reserved': True}}))
+    assert emu_pool.get('/b', 'w', 1, wait=False) == 1                  # reused, running: the worker's card stays
+    assert (emu_pool.copy_dir(1)/'state/mmc/mine.txt').exists()
+    state['out'] = ''
+    assert emu_pool.get('/b', 'user', 1, wait=False) == 2               # the user's rig, restarted: its card stays too
+    assert (emu_pool.copy_dir(2)/'state/mmc/mine.txt').exists()
+    emu_pool.put(1)                                                     # no fixture: said, and no lease left
+    try:
+        emu_pool.get('/c', 'w2', 1, wait=False)
+    except SystemExit as e:
+        assert 'no card fixture' in str(e)
+    else:
+        raise AssertionError('a lease booted on a card nothing reset')
+    assert '1' not in json.loads((tmp_path/'state/leases.json').read_text())
+
+
+def test_smoke_says_a_card_with_no_songs_apart_from_no_emulator(tmp_path, monkeypatch, capsys):
+    build = tmp_path/'build'
+    build.mkdir()
+    (build/'rootfs.squashfs').write_text('')
+    monkeypatch.setattr(emu_pool, 'HOME', tmp_path)
+    card_tree(emu_pool.copy_dir(3)/'state/mmc', {'.subsonic/log.txt': 'x'})
+    monkeypatch.setattr(smoke, 'lease', lambda *a: 3)
+    monkeypatch.setattr(emu_pool, 'put', lambda k: None)
+    assert smoke.main([str(build), '--logs', str(tmp_path/'logs')]) == 3
+    out = capsys.readouterr().out
+    assert 'the card on slot 3 has no songs' in out and 'no pool emulator' not in out and 'no emulator' not in out
+
+
 def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(tmp_path, monkeypatch):
     root = tree(tmp_path, {'patch/seek.c': 'int seek_step(int x) {\n  return x;\n}\n'})
     plan = affected.plan_for({'patch/seek.c': {2}}, root)
@@ -469,6 +555,9 @@ def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(t
     # the queue runs it on the tip after landing (the post tier), not in the batch
     assert 'smoke' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path)
     assert gate.suites_for(None, [], 'py', tmp_path, 'post')['smoke'].argv[1:] == [str(gate.ROOT/'tools/ci/smoke.py'), '{build}']
+    # the leak hunt is a post-tier suite and never a batch's, and never holds the tip (merge_queue.TIP_SUITES)
+    assert 'leak-hunt' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path) and 'leak-hunt' not in gate.MERGE
+    assert gate.suites_for(None, [], 'py', tmp_path, 'post')['leak-hunt'].argv[1:] == [str(gate.ROOT/'tools/ci/leak_hunt.py'), '{build}']
     # a worker runs it only when asked
     import subprocess
     ran: list = []
@@ -486,6 +575,7 @@ def test_a_lease_can_keep_off_a_slot_and_prepare_the_copy_before_its_boot(tmp_pa
     calls: list = []
     monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: calls.append(a) or type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
     monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    monkeypatch.setattr(emu_pool, 'reset_card', lambda k: None)
     (tmp_path/'leases.json').write_text(json.dumps({'1': {'name': 'x', 'build': '/b', 'since': 0, 'until': time.time() + 99}}))
     k = emu_pool.get('/b', 'smoke-1', 1, wait=False, avoid=(2,), prepare=lambda k: calls.append(('prepare', k)))
     assert k == 3 and calls[-2:] == [('prepare', 3), (3, 'start', str(pathlib.Path('/b').resolve()))]
