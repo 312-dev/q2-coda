@@ -392,7 +392,9 @@ def test_gate_skips_what_needs_a_failed_build(tmp_path, monkeypatch):
     suites = {'p': fake_suite('p', 0, needs_build=True), 'u': fake_suite('u', 0, rc=1)}
     results = gate.run(suites, [], tmp_path/'logs', sys.executable, log=lambda m: None, mem=lambda: 12.0, poll=0.02)
     assert results['build']['rc'] == 3 and results['p']['rc'] == 'no build' and results['u']['rc'] == 1
-    assert 'FAILED: build, u, p' in gate.table(results, 1) or 'FAILED: build, p, u' in gate.table(results, 1)
+    # the table lists suites as they finished, and u (rc 1) races the build (rc 3): the set is what is fixed
+    failed = gate.table(results, 1).rsplit('FAILED: ', 1)[1].split(', ')
+    assert sorted(failed) == ['build', 'p', 'u']
 
 
 def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
