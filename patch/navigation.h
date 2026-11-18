@@ -820,7 +820,8 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 
 /* system.c */
 void power_poll(void);
-void heatguard_poll(void); /* heatguard.c: q2guard's cards, from power_poll */
+void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
 void power_rows(void *view);

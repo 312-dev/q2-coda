@@ -215,6 +215,8 @@ HOOKS = {
     'dmrActionSetPlayURI': (0x51005c, 'guest_dlna_uri', 'dlna_uri'),
     'dmrActionPlay': (0x50fd50, 'guest_dlna_play', 'dlna_play'),
     'dmrActionStop': (0x50fe4c, 'guest_dlna_stop', 'dlna_stop'),
+    # Now Playing's cover asked for: player_parsecover_thd is woken for it (cover_wake.c cover_set_info)
+    'player_set_coverinfo': (0x51d7fc, 'cover_set_info', 'set_coverinfo'),
 }
 # The payload's stock_<name>_trampoline, the hooks' third element, resumes each hook past its 3-word PIC
 # prologue.
@@ -821,16 +823,18 @@ APP_URL_CALLS = {'mclSetPause': 0x5bd7c4, 'tidal_playurl': 0x5bc914, 'curl_stop_
                  'toolsFreeStSongInfo': 0x5d2e10, 'player_set_coverinfo': 0x51d7fc}
 # The jalr usleep (lw $t9,-0x4e4($gp)) of mclSyncPlayerStatus' 200 ms loop becomes jal ringnav_dark_usleep
 # (its argument set in the delay slot): at least DARK_POLL_US while ringnav_sleep finds the Q2 dark, quiet and
-# the DAC off, else stock's. parse_albumcovertask_thd's 50 ms and player_parsecover_thd's 100 ms waits become
-# jal ringnav_dark_cover_usleep: at least DARK_POLL_US whenever the screen is off, playing or not.
+# the DAC off, else stock's.
+DARK_POLLS = ((0x5bbc3c, 'ringnav_dark_usleep'),)
+# parse_albumcovertask_thd's usleep(50000) and player_parsecover_thd's usleep(100000), each its loop's only
+# sleep, become jal to cover_wake.c's waits: stock's pace while the thread has work, else parked until a
+# request wakes it (docs/internals.md#cover-threads).
+COVER_WAITS = ((0x4f8300, 'ringnav_album_cover_wait'), (0x51dc5c, 'ringnav_play_cover_wait'))
 # get_battery_capacity's three reads, each a jalr through the GOT word loaded a few words before (lw $25, off($gp)):
 # toolsGetBatterycapacity, toolsGetBatteryVoltage and toolsGetChargeStatus become jal to system.c's ringnav_batt_level,
 # ringnav_batt_voltage and ringnav_batt_status, which read them at most every BATT_DARK_MS with the screen off on
 # battery (docs/internals.md#battery). Each entry: the jalr, the GOT load's address and word, the payload function.
 BATTERY_READS = ((0x4ff278, 0x4ff268, 0x8f99b84c, 'ringnav_batt_level'), (0x4ff298, 0x4ff294, 0x8f99b850, 'ringnav_batt_voltage'),
                  (0x4ff2b4, 0x4ff2b0, 0x8f99b854, 'ringnav_batt_status'))
-DARK_POLLS = ((0x5bbc3c, 'ringnav_dark_usleep'), (0x4f8300, 'ringnav_dark_cover_usleep'),
-              (0x51dc5c, 'ringnav_dark_cover_usleep'))
 # Download Cover & Lyrics' accept (0x535f24) snprintfs cp -rf /tmp/oslyric_N "/mnt/mmc/.downpic/<name>" for
 # system(); that jalr snprintf becomes jal ringnav_lyric_save (onlinematch.c), which writes the lyrics beside
 # the song instead. The word before it, addiu $a2,$a2,0x67f0 (the format at 0x7867f0), is pinned.
@@ -2109,6 +2113,9 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 # the battery level (0-100) and the charger's state (1, 2 charging), get_battery_capacity's
                 'artist_type': 4, 'g_power_capacity': 4, 'g_power_chargestate': 4,
                 'pdeq_albumcoverlist': 4, 'aclist_mutex': 24,
+                # the album cover thread's tasks, their lock and its state (2 paused, 3-6 a cache to clear),
+                # and the player cover thread's request (its first byte the start flag): cover_wake.c
+                'plist_albumtasklist': 4, 'actasklist_mutex': 24, 'albumcover_taskstate': 4, 'g_play_cover_info': 1544,
                 'tidalStreamingLevelNow': 4,  # the quality the Tidal URL thread asked for
                 'stTidalTracks': 16,  # a Tidal track list: total, limit, offset, its deque
                 'g_pressdown_y': 4,  # the touch's start, the window manager's pointer-down writes it
@@ -2173,18 +2180,18 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_x', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
-                 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text', 'ringnav_dark_cover_usleep',
+                 'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
                  'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
-                 'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_scan_dir',
+                 'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
                  'ringnav_table_load', 'stock_row_style', 'stock_row_text', 'stock_set_row_layout']
 
@@ -2686,6 +2693,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, COVERINFO_CALL[0], 0x0320f809, jal(ps[COVERINFO_CALL[2]]), "a card app's cover by URL")
     for address, name in DARK_POLLS:
         patch_word(patched, address, 0x0320f809, jal(ps[name]), 'stock polls idle while dark')
+    for address, name in COVER_WAITS:
+        patch_word(patched, address, 0x0320f809, jal(ps[name]), 'cover threads wait for a request')
     for address, load, word, name in BATTERY_READS:
         check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, load))[0] == word, f'{address:#x}: expected the battery read import')
         patch_word(patched, address, 0x0320f809, jal(ps[name]), "the battery's reads slow while dark")
