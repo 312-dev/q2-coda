@@ -3692,7 +3692,7 @@ static void qr_text(void *canvas, const char *s, int y, const char *face, unsign
     ui_ink_raw(raw);
 }
 
-/* The page as qr_refresh read it, on qp.view (the page's coordinates). */
+/* The page as qr_refresh read it, on qp.view (its rows count from the status row's foot). */
 static void qr_paint(void *w, void *canvas) {
     unsigned ink = tok(TOK_PRIMARY), ter = tok(TOK_TERTIARY);
     if (qp.code && !qp.step[0]) {

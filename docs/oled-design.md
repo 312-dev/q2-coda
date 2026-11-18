@@ -50,10 +50,12 @@ its art run to the top and bottom edges. The layout insets are rest positions fo
 first row rests at y 58 and its last at y 282. Stock's pages move their content down the 58 px the row takes
 (`tools/ipod.py` `full_bleed`), so each rests where it did; payload code that lays such a page out from the row's foot
 adds the window's `bar_foot` (`patch/theme_engine.c`), and a list end or a settings row is measured on the screen
-(`list_fit_end`). The row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable
-style). The pages the payload builds (`page_open`, the shuffle confirmation) still start under the row
-(`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it. A page
-slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
+(`list_fit_end`). The pages the payload builds (`patch/coverflow.c` `page_open`, the shuffle confirmation) are the same:
+the window is the whole screen and each lays its content out from `bar_foot`, or in a view placed there `page_room`
+high, so it rests where it did; a header that stands above the row's foot (an artist's monogram, About's cover) is the
+page's own paint under the row. The row's background is clear in every state (the bar is a disabled widget, so AWTK
+paints its disable style) and it fills nothing over any page. A page slide draws both pages' full-screen snapshots and
+then the row over them (`page_parallax.c` `parallax_curr`). A press
 on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
 
 ### Corners

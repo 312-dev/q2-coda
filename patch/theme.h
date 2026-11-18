@@ -148,7 +148,7 @@ typedef struct {
 } theme_t;
 const theme_t *theme(void);       /* accent(); return themes; (THEME_N is 1) */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
-int client_h(void); /* the window under the theme's bar (theme_engine.c) */
+int client_h(void); /* the screen's rows under the theme's bar (theme_engine.c) */
 int bar_foot(void *w);  /* the row in w where the status row ends (theme_engine.c) */
 int page_room(void *w); /* w's rows under the status row (theme_engine.c) */
 /* Home's Split under the theme's set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
