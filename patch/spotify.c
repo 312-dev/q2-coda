@@ -630,16 +630,18 @@ static struct {
     char selected[6500], remove_kind[16], remove_note[128];
     char term[64];
     level_t *lv; /* SPOT_DEPTH of them, calloc'd, and one more: the list push() waits on (pend) */
-    /* pend: a pushed list's first reply awaited under the loading overlay
-     * (docs/oled-design.md#loading), the shown level and its rows left as they are; the list waits
-     * in lv[SPOT_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
-     * nothing */
+    /* pend: a list's first reply awaited under the loading overlay (docs/oled-design.md#loading),
+     * the shown level and its rows left as they are, P_PUSH entered over the top or P_POP in place
+     * of it (Back); the list waits in lv[SPOT_DEPTH], its id the request's, never reused, so a
+     * reply to a cancelled one matches nothing */
     char pend;
     /* hold: the top level asked for again in place under the overlay (Retry, Playback Settings after
      * a change), what it shows left as
      * it is until its rows or its error are there; 1 + the state a cancel puts back */
     char hold;
 } br __attribute__((section(".scratch")));
+
+enum { P_PUSH = 1, P_POP };
 
 static void *browsing(void) { return br.page; }
 /* librespot killed: no socket for a while is it starting again, as after a sign-out. */
@@ -934,7 +936,7 @@ static void push(int kind, const char *op, const char *args, const char *cursor,
         *w = next;
         fetch(w);
         top()->id = shown, w->id = wk.id; /* fetch() names the top level's: the staged one's */
-        br.pend = 1;
+        br.pend = P_PUSH;
         widget_invalidate_force(br.page, 0);
         return;
     }
@@ -942,8 +944,22 @@ static void push(int kind, const char *op, const char *args, const char *cursor,
     show();
 }
 
-/* Back a level; its fetch, if in flight, dropped. */
+/* Back a level; its fetch, if in flight, dropped. A list below that let its rows go (enter) is
+ * asked for again under the loading overlay over the page shown, which it takes the place of once
+ * its reply comes (got, P_POP); with nothing shown, its Loading… page. */
 static void pop(void) {
+    level_t *below = &br.lv[br.depth - 2];
+    if (below->state == S_LOAD && br.view) {
+        level_t *w = &br.lv[SPOT_DEPTH];
+        unsigned shown = top()->id;
+        top()->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
+        *w = *below;
+        fetch(w);
+        top()->id = shown, w->id = wk.id; /* fetch() names the top level's: the staged one's */
+        br.pend = P_POP;
+        widget_invalidate_force(br.page, 0);
+        return;
+    }
     fetch_cancel();
     br.act = A_FETCH;
     drop(top());
@@ -954,8 +970,14 @@ static void pop(void) {
 /* The finished request: an action's outcome, or the top level's rows, error or pairing prompt. A
  * reply without the request's id, or for a level since left, is dropped. */
 static void got(void) {
-    if (br.pend && br.act == A_FETCH && wk.id == br.lv[SPOT_DEPTH].id) /* the overlay's: entered */
-        br.pend = 0, enter(&br.lv[SPOT_DEPTH]), widget_invalidate_force(br.page, 0);
+    if (br.pend && br.act == A_FETCH && wk.id == br.lv[SPOT_DEPTH].id) { /* the overlay's */
+        if (br.pend == P_POP) /* Back: the top let go, the list below asked again in its place */
+            drop(top()), --br.depth, br.lv[br.depth - 1] = br.lv[SPOT_DEPTH];
+        else
+            enter(&br.lv[SPOT_DEPTH]);
+        br.pend = 0;
+        widget_invalidate_force(br.page, 0);
+    }
     level_t *l = top();
     /* A shown level's refresh (Download Progress) is cut into head too, so a failed one leaves its
      * fields on the reply it shows. */

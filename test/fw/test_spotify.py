@@ -8,7 +8,7 @@ import ctypes as C
 import pytest
 
 from conftest import O, Files, STRIP_SEARCH, strip_return
-from test_streaming import (SPOT_DEPTH, S_ERROR, S_READY, A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
+from test_streaming import (SPOT_DEPTH, S_ERROR, S_LOAD, S_READY, A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
                             L_LIST, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
 
 STATE, DOWNLOAD, LOG, OUT = '/tmp/q2-librespot.state', '/tmp/q2-librespot.download', '/mnt/mmc/.spotify/spot.log', '/tmp/q2-librespot.out'
@@ -1344,3 +1344,50 @@ def test_centre_on_spotify_s_retry_while_it_loads_sends_nothing_again(fw):
     b, writes, asked = retrying(fw)
     b.click(0)
     assert b.wk.id == asked + 1 and b.br.hold
+
+
+# Back to a list that let its rows go (SPOT_KEEP levels up): asked again under the overlay over the page shown.
+def evicted(fw):
+    b = Browser(fw)
+    b.menu()
+    b.click(PLAYLISTS)
+    b.answer(rows=[(b'playlist', b'spotify:playlist:9', b'Road Trip', b'', b'', b'')])
+    b.click(0)
+    b.answer(rows=[(b'album', b'spotify:album:1', b'An Album', b'', b'', b''), track(2)])
+    b.click(0)
+    b.answer(rows=[(b'album', b'spotify:album:2', b'Another', b'', b'', b'')])
+    b.click(0)
+    b.answer(rows=[track(3)])
+    assert b.br.depth == 5 and b.br.lv[1].state == S_LOAD and not b.br.lv[1].buf  # Playlists let its rows go
+    b.back(), b.back()
+    assert b.br.depth == 3 and b.top.op == b'playlist' and not b.br.pend  # kept: at once
+    return b, b.captions(), b.wk.id
+
+
+def test_back_to_a_list_that_let_its_rows_go_loads_under_the_overlay(fw):
+    b, shown, asked = evicted(fw)
+    b.back()
+    assert b.br.pend and b.br.depth == 3 and b.captions() == shown  # the page stays, no Loading… page
+    assert b.wk.id == asked + 1 and b.request().endswith(b'\tplaylists\n')
+    b.answer(rows=[(b'playlist', b'spotify:playlist:9', b'Road Trip', b'', b'', b''), track(4)])
+    assert not b.br.pend and b.br.depth == 2 and b.top.op == b'playlists' and b.top.n == 2
+    assert b.captions()[:2] == ['Road Trip', 'Song 4']
+    b.back()
+    assert b.br.depth == 1  # and on to the menu
+
+
+def test_return_gives_back_s_load_up_and_the_page_stays(fw):
+    b, shown, asked = evicted(fw)
+    b.back()
+    b.back()
+    assert not b.br.pend and b.br.depth == 3 and b.top.op == b'playlist' and b.captions() == shown
+    assert b.wk.running == 0 and not b.wk.buf
+    b.tick()
+    assert b.br.depth == 3 and b.captions() == shown  # nothing opens late
+
+
+def test_centre_while_back_s_load_waits_sends_nothing(fw):
+    b, shown, asked = evicted(fw)
+    b.back()
+    b.click(0)
+    assert b.wk.id == asked + 1 and b.br.pend and b.br.depth == 3

@@ -820,7 +820,9 @@ def test_levels_well_below_the_top_let_their_rows_go_and_fetch_them_back(fw):
     b.back()
     assert b.top.state == S_READY and b.top.f[6] == b'Album 1'
     b.back()
-    assert b.top.state == S_LOAD and b.request().endswith(b'\tliked\n')
+    assert b.br.pend and b.br.lv[SPOT_DEPTH].op == b'liked' and b.request().endswith(b'\tliked\n')  # under the overlay
+    b.answer(rows=[album(0)])
+    assert not b.br.pend and b.br.depth == 2 and b.top.state == S_READY and b.top.op == b'liked'
 
 
 def test_a_refreshing_level_keeps_its_rows_when_the_refresh_fails(fw):
