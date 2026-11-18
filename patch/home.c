@@ -424,13 +424,25 @@ static int lip(int x) {
 #define FULL_TOP_GROUND 8
 #define FULL_FOOT_CLEAR 16 /* Full: clear this far above the rest's foot, the ground by y 316 */
 #define FULL_FOOT_GROUND 316
+/* A list under the status row (navigation.c list_reach, its box's top at most REACH_TOP) shows its
+ * rows above its top up to the screen's top edge, so once scrolled they fade from clear
+ * FULL_TOP_CLEAR under its top to the ground at y EDGE_GROUND, under the status row's glyphs: the
+ * vignette of docs/oled-design.md#list-edges. A list lower on the screen keeps its rows inside its
+ * box and fades them to the ground FULL_TOP_GROUND above its top. */
+#define EDGE_GROUND 8
+
+/* How much of a scrolled list's row at screen row y shows, 256 all, when its list's top is top */
+static int top_fade(int top, int y) {
+    int clear = top + FULL_TOP_CLEAR, ground = top <= REACH_TOP ? EDGE_GROUND : top - FULL_TOP_GROUND;
+    return 256 - smooth(clear - y, clear - ground);
+}
 
 /* Every other scrolling list's fades (navigation.c list_fade), Home (Full)'s on a list whose box
  * runs on below the set's list end: rows top to bottom on the screen, the list's top and box's foot;
  * end, the list end (y 282 on OLED), past which rows peek through a fade into the ground from
  * FULL_FOOT_CLEAR above it to foot, or FULL_FOOT_GROUND when foot is 0 (an editor's hint's band,
- * library_edit.c lr_edit_foot); above (scrolled) fades its first FULL_TOP_CLEAR px from
- * FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on the
+ * library_edit.c lr_edit_foot); above (scrolled) fades its first FULL_TOP_CLEAR px (top_fade),
+ * below (rows past end) the foot; s0 to s1, the selected row on the
  * screen, is never faded. Inside the canvas's clip. */
 void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
                 int s1) {
@@ -440,17 +452,31 @@ void list_fades(void *canvas, int top, int bottom, int end, int foot, int above,
     int y0 = clip[1] > top ? clip[1] : top, y1 = clip[1] + clip[3] < bottom ? clip[1] + clip[3] : bottom;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
              ground = ui_ink(RGBA(0)) & 0xffffffu;
-    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR,
+    int from = end - FULL_FOOT_CLEAR,
         ground_y = foot ? foot : FULL_FOOT_GROUND;
     for (int y = y0; y < y1; ++y) {
         if (y >= s0 && y < s1) continue;
-        int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
+        int k = above ? top_fade(top, y) : 256;
         if (below) {
             int b = 256 - smooth(y - from, ground_y - from);
             if (b < k) k = b;
         }
         fade_row(canvas, ox, oy, ground, k, clip[0], y, clip[2]);
     }
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
+/* The rows of a scrolled list whose top is at screen row top that list_reach paints above it,
+ * under the status row: faded as its own top rows are (top_fade), the selected row too, inside the
+ * canvas's clip. */
+void list_top_fade(void *canvas, int top) {
+    if (!P(canvas, CANVAS_LCD)) return;
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), clip[4];
+    canvas_get_clip_rect(canvas, clip);
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             ground = ui_ink(RGBA(0)) & 0xffffffu;
+    for (int y = clip[1]; y < clip[1] + clip[3]; ++y)
+        fade_row(canvas, ox, oy, ground, top_fade(top, y), clip[0], y, clip[2]);
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -485,11 +511,10 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split, int s
     int dip[GLASS_R / FADE_COL + 1]; /* each run of columns' lip, then the straight part's 0 */
     for (int i = 0; i <= GLASS_R / FADE_COL; ++i) dip[i] = lip(i * FADE_COL + FADE_COL / 2);
     for (int y = y0; y < y1; ++y) {
-        /* not the selected row; in Full, only its window's rows */
-        if ((y >= s0 && y < s1) || (!split && y < list_y)) continue;
+        if (y >= s0 && y < s1) continue; /* not the selected row */
         if (!split) {
-            int clear = list_y + FULL_TOP_CLEAR, end = list_y + rest - FULL_FOOT_CLEAR;
-            int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
+            int end = list_y + rest - FULL_FOOT_CLEAR;
+            int k = above ? top_fade(list_y, y) : 256;
             if (below) { /* into Edit Home's hint's band while it is open */
                 int b = 256 - smooth(y - end, (foot_y ? foot_y : FULL_FOOT_GROUND) - end);
                 if (b < k) k = b;

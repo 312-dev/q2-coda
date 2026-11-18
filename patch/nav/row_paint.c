@@ -913,10 +913,32 @@ static void paint_scrollbar(void *canvas, void *bar, int table) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+static int reach_painting; /* list_reach_paint is painting a list's rows under the status row */
+
+/* A virtual table (Songs' and the other Library tables) draws the row its scroll cuts at its top
+ * whole, above its box: under Songs' Shuffle row, and twice under the status row with the band's
+ * (list_reach_paint). Its paint keeps to its box (from ringnav_paint_bg to ringnav_paint). */
+static void *table_clip_w;
+static int table_clip_old[4];
+static void table_clip_begin(void *w, void *canvas) {
+    int clip[4];
+    if (table_clip_w || reach_painting || !w || kind(w) != 2) return;
+    clip_within(canvas, table_clip_old, clip, I(canvas, CANVAS_X), I(canvas, CANVAS_Y), I(w, W_W),
+                I(w, W_H));
+    canvas_set_clip_rect(canvas, clip);
+    table_clip_w = w;
+}
+static void table_clip_end(void *w, void *canvas) {
+    if (!w || w != table_clip_w) return;
+    canvas_set_clip_rect(canvas, table_clip_old);
+    table_clip_w = (void *)0;
+}
+
 /* Stock paints children first and calls this with the surface's canvas origin restored. */
 int ringnav_paint(void *w, void *canvas) {
     if (st.pull_page && !pull_live()) pull_cancel();
     int result = stock_paint_trampoline(w, canvas);
+    table_clip_end(w, canvas);
     night_paint(canvas);
     coverflow_paint(w, canvas);
     keylock_paint(w, canvas);
@@ -932,7 +954,7 @@ int ringnav_paint(void *w, void *canvas) {
     }
     edit_paint(w, canvas);
     spot_paint(w, canvas);
-    if (theme()->sb_w) {
+    if (theme()->sb_w && !reach_painting) {
         int table = 0;
         void *bar = w ? list_bar(w, &table) : (void *)0;
         if (bar) paint_scrollbar(canvas, bar, table);
@@ -1070,7 +1092,7 @@ void list_grown_foot(void *view, void *row, int step) {
 }
 static void list_fade(void *w, void *canvas) {
     int k = w && P(canvas, CANVAS_LCD) ? kind(w) : 0;
-    if ((k != 1 && k != 2) || home_rest(w, (int *)0) || modal_rows_of(w) ||
+    if ((k != 1 && k != 2) || reach_painting || home_rest(w, (int *)0) || modal_rows_of(w) ||
         window_manager_is_animating(window_manager()))
         return;
     int y = 0;
@@ -1090,3 +1112,109 @@ static void list_fade(void *w, void *canvas) {
     list_fades(canvas, y, bottom, end, lr_edit_foot(w), off > 0, y + content - off > end, s0, s1);
 }
 
+
+/* Lists under the status row (docs/oled-design.md#list-edges). A list whose box starts at most
+ * REACH_TOP down the screen keeps its box, so taps, the selection and its scroll range are as
+ * they were and a press on the status row stays the row's; once scrolled, the status row's paint
+ * draws the list's rows above its top into the row's band, the list's own paint shifted up by as
+ * much (list_reach_paint), fading to the ground at the screen's top edge under the glyphs
+ * (home.c list_top_fade, home_fades). A menu sheet's rows stay in the sheet (menu_modal.c). The
+ * band repaints when the list's scroll or rows change (list_reach_due), as the list's own
+ * invalidate stays inside its box. ponytail: a row in the band that changes on its own (a playing
+ * row's level bars) shows its change at the next scroll. */
+static struct {
+    void *view; /* the list the band showed at the last paint, 0 none */
+    int off, rows;
+} reach;
+
+/* win's list that runs under the status row: the first visible vertical list in UI order, outside
+ * any other scrolling view, with its screen column in *x and row in *y. */
+static void *reach_walk(void *w, int x, int y, int depth, int *budget, int *ox, int *oy) {
+    if (!w || !widget_get_visible(w) || depth > 8 || --*budget < 0) return (void *)0;
+    x += I(w, W_X), y += I(w, W_Y);
+    int k = kind(w);
+    if (k == 1 || k == 2) {
+        *ox = x, *oy = y;
+        return w;
+    }
+    const char *t = widget_get_type(w);
+    if (!tk_strcmp(t, "scroll_view") || !tk_strcmp(t, "slide_view")) return (void *)0;
+    for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
+        void *found = reach_walk(widget_get_child(w, i), x, y, depth + 1, budget, ox, oy);
+        if (found) return found;
+    }
+    return (void *)0;
+}
+/* The list of window win that shows rows under the status row now: scrolled, its box's top on the
+ * screen (*y) below the screen's top and at most REACH_TOP; *x its column, *off its scroll. */
+static void *reach_find(void *win, int *x, int *y, int *off) {
+    int budget = 96;
+    void *v = win ? reach_walk(win, 0, 0, 0, &budget, x, y) : (void *)0;
+    if (!v || modal_rows_of(v) || *y <= 0 || *y > REACH_TOP) return (void *)0;
+    *off = kind(v) == 2 ? I(v, TABLE_TOP) : I(v, SCROLL_Y);
+    return *off > 0 ? v : (void *)0;
+}
+static int reach_rows(void *v) {
+    return kind(v) == 2 ? I(v, TABLE_ROWS) : I(v, VIEW_CONTENT_H);
+}
+/* The page in front: the wm's topmost window (a dialog over it paints after the status row) */
+static void *reach_page(void) {
+    void *wm = window_manager();
+    for (unsigned i = widget_count_children(wm); i--;) {
+        void *c = widget_get_child(wm, i);
+        if (c && !tk_strcmp(widget_get_type(c), "window")) return c;
+    }
+    return (void *)0;
+}
+static int reach_still(void) {
+    float percent = 0;
+    return !window_manager_is_animating(window_manager()) && !parallax_slide(&percent);
+}
+
+/* From the status row's background paint (bar, canvas at the screen's origin), under its glyphs:
+ * page win's scrolled list's rows above its top, in the band, faded to the screen's top edge. */
+void list_reach_paint(void *bar, void *win, void *canvas) {
+    int x, y, off, old[4], clip[4];
+    void *v = reach_still() && P(canvas, CANVAS_LCD) ? reach_find(win, &x, &y, &off) : (void *)0;
+    reach.view = (void *)0;
+    if (!v) return;
+    reach.view = v, reach.off = off, reach.rows = reach_rows(v);
+    int d = y < off ? y : off, foot = I(bar, W_H) < y ? I(bar, W_H) : y; /* no row above the first */
+    if (!clip_within(canvas, old, clip, x, y - d, I(v, W_W), foot - (y - d))) return;
+    int table = kind(v) == 2;
+    /* the selection's record, which the shifted paint would move (paint_selection) */
+    void *sw = st.sel_w, *sa = st.sel_accent;
+    int sr = st.sel_row, sy = st.sel_y, sh = st.sel_h;
+    canvas_set_clip_rect(canvas, clip);
+    int px = x - I(v, W_X), py = y - I(v, W_Y); /* the list's parent on the screen */
+    canvas_translate(canvas, px, py);
+    reach_painting = 1;
+    I(v, W_Y) -= d, I(v, W_H) += d;
+    if (table) I(v, TABLE_TOP) -= d;
+    else I(v, SCROLL_Y) -= d;
+    widget_paint(v, canvas);
+    I(v, W_Y) += d, I(v, W_H) -= d;
+    if (table) I(v, TABLE_TOP) += d;
+    else I(v, SCROLL_Y) += d;
+    reach_painting = 0;
+    canvas_translate(canvas, -px, -py);
+    st.sel_w = sw, st.sel_accent = sa, st.sel_row = sr, st.sel_y = sy, st.sel_h = sh;
+    if (v == coverflow_home_view()) /* Home's own: Split's follow the glass */
+        home_fades(canvas, P(v, W_PARENT), y, x + I(v, W_W), coverflow_home_split(win), 0);
+    else
+        list_top_fade(canvas, y);
+    canvas_set_clip_rect(canvas, old);
+}
+
+/* Before a frame (input.c ringnav_wm_paint): the status row's band again when the page's list
+ * under it has moved or changed since the band last showed it, or no longer shows rows there. */
+void list_reach_due(void) {
+    void *bar = *(void *const *)system_bar;
+    int x, y, off;
+    if (!bar || !reach_still()) return;
+    void *v = reach_find(reach_page(), &x, &y, &off);
+    if (v == reach.view && (!v || (off == reach.off && reach_rows(v) == reach.rows))) return;
+    int band[4] = { 0, 0, I(bar, W_W), I(bar, W_H) };
+    reach.view = v, reach.off = v ? off : 0, reach.rows = v ? reach_rows(v) : 0;
+    widget_invalidate_force(bar, band);
+}
