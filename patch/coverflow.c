@@ -113,8 +113,8 @@ void *coverflow_tracks(void *page) {
     return page == cf.page && cf.screen == TRACKS ? cf.tracks : 0;
 }
 
-/* The live cover at the centre, an album's or a playlist's: never a Sort or All albums card, nor
- * with a screen change due */
+/* The live cover at the centre, an album's or a playlist's: never a Sort card, nor with a screen
+ * change due */
 static void *centred(void *page, int playlists) {
     if (page != cf.page || cf.screen != COVERS || !cf.slide || cf.timer ||
         (cf.scoped == PLAYLISTS) != playlists)
@@ -1305,7 +1305,7 @@ void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
 /* The peq_ui.c page: a title bar (*title, unless 0: its caller writes it again, so it stays on
  * show) over n item_h rows (page_h) in body, down to the page's bottom (the last row's selection
  * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
- * under a list_fit set its rows past the list end fade (navigation.c list_fade). Shared (peq.h). */
+ * its rows past the list end fade (navigation.c list_fade). Shared (peq.h). */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
     int h = widget_get_prop_int(page, "h", client_h());
     item_h = page_h(item_h);
@@ -2235,11 +2235,9 @@ int visual(void *s, int n, int *c, int *frac) { /* shared with coverflow_positio
     return stride;
 }
 
-/* An artist's albums and the playlists stop at both ends (home_step bounces there): a ring of one
- * or two would otherwise repeat round the shelf. */
-int coverflow_bounded(void *w) {
-    return w && w == cf.slide && (cf.scoped == ARTIST_ALBUMS || cf.scoped == PLAYLISTS);
-}
+/* The playlists stop at both ends (home_step bounces there): a ring of one or two would otherwise
+ * repeat round the shelf. */
+int coverflow_bounded(void *w) { return w && w == cf.slide && cf.scoped == PLAYLISTS; }
 int coverflow_slide(void *w) { return w && w == cf.slide; }
 
 static int retitle(const void *unused);
@@ -2252,7 +2250,7 @@ static void fx_ring(int c, int n, const unsigned **ring) {
         fx.drawn = 0;
     }
     fx_window(c, n, ring);
-    if (coverflow_bounded(cf.slide)) /* no wrap: only the artist's real neighbours, never repeats */
+    if (coverflow_bounded(cf.slide)) /* no wrap: only the real neighbours, never repeats */
         for (int j = -fx_reach(); j <= fx_reach(); ++j)
             if ((unsigned)(c + j) >= (unsigned)n) ring[j + CF_REACH] = 0;
 }
@@ -2417,7 +2415,7 @@ static int round_stride(int off, int stride) {
     return floor_div(2 * off + stride, 2 * stride) * stride;
 }
 
-/* An artist's albums give past an end as iOS's rubber band, x * 0.55 / (1 + x * 0.55 / D) with
+/* The playlists give past an end as iOS's rubber band, x * 0.55 / (1 + x * 0.55 / D) with
  * D 2/5 of a stride, so the centre never reaches past half a cover (visual() would wrap there);
  * not rubber: they stop at the end. */
 static int bound(int off, int stride, int rubber) {
@@ -2624,9 +2622,7 @@ void titles(unsigned c) {
     char songs[24];
     if (r && cf.scoped == PLAYLISTS)
         name = P(r, REC_TITLE), by = songs_text(songs, playlist_songs(I(r, REC_DISC)));
-    widget_set_text_utf8(cf.name, r                            ? name ?: ""
-                                  : cf.scoped == ARTIST_ALBUMS ? "All albums"
-                                                               : sort_names[cf.sort]);
+    widget_set_text_utf8(cf.name, r ? name ?: "" : sort_names[cf.sort]);
     widget_set_text_utf8(cf.artist, by); /* NULL leaves the old one */
     /* Stock draws even a centred caption at -xoffset: a long one's scroll would shift the next
      * left. */
@@ -2660,16 +2656,8 @@ static int retitle(const void *unused) {
  * the theme's stride in px; the children stay empty under the frame. The flat fallback is the
  * stock images, 160 px, as before. ponytail: one child per album; if large libraries lag,
  * virtualize to a recycled window of children. */
-static void covers(int dir) {
+static void covers(void) {
     cf.screen = COVERS;
-    if (cf.text_albums) {
-        unsigned n = deque_size(cf.albums);
-        void *view = list("Albums", (int)n);
-        for (unsigned i = 0; i < n; ++i)
-            page_row_into(view, (int)i, P(deque_at(cf.albums, i), REC_ALBUM), pick);
-        page_push(view, dir);
-        return;
-    }
     widget_set_visible(cf.body, 0, 0);
     if (!cf.covers) {
         coverflow_position_reset();
@@ -2713,15 +2701,11 @@ static unsigned pl_again __attribute__((section(".scratch"))); /* playlists_agai
 static int song_tracks(void) { return !theme()->page_title_h; }
 
 /* The bar's title on Cover Flow's page (navigation.c bar_title_of): 0 on song_tracks' tracks, whose
- * hidden caption names the album; in the status row an artist's covers by the artist's name, as
- * the artist page under them, and the other covers none, so the row shows the clock as Home's
- * does; else, and over no albums (cf_empty.c's empty state), "Cover Flow". */
+ * hidden caption names the album; none over the covers, so the status row shows the clock as
+ * Home's does; else, and over no albums (cf_empty.c's empty state), "Cover Flow". */
 const char *coverflow_bar_title(void) {
     if (cf.screen == TRACKS && song_tracks()) return (const char *)0;
-    if (cf.screen == COVERS && !empty_shown(cf.body)) /* no albums: the page's name */
-        return cf.scoped == ARTIST_ALBUMS && cf.albums && deque_size(cf.albums)
-                   ? cover_artist(deque_at(cf.albums, 0))
-                   : "";
+    if (cf.screen == COVERS && !empty_shown(cf.body)) return ""; /* no albums: the page's name */
     return "Cover Flow";
 }
 
@@ -2734,7 +2718,7 @@ static void retitle_bar(void) {
 static int to_covers(const void *unused) {
     cf.timer = 0;
     stop();
-    covers(-1); /* the text list's only way back here is from its tracks */
+    covers();
     retitle_bar();
     if (cf.scoped == PLAYLISTS) rearm(&pl_again, playlists_again, 0); /* edits from the panel */
     return 0;
@@ -2898,8 +2882,8 @@ static void load_albums(unsigned t0) {
         return;
     }
     unsigned count = deque_size(cf.albums);
-    if (cf.text_albums || cf.scoped == PLAYLISTS) {
-        covers(0); /* a text list needs no art; playlist_art.c builds a playlist's */
+    if (cf.scoped == PLAYLISTS) {
+        covers(); /* playlist_art.c builds a playlist's art */
         return;
     }
     char path[512];
@@ -3111,7 +3095,7 @@ static int to_tracks(const void *unused) {
             hscroll_label_set_ellipses(label, 1);
         }
         retitle_bar();
-        page_push(view, cf.text_albums && cf.scoped == ARTIST_ALBUMS);
+        page_push(view, 0);
         return 0;
     }
     void *view = timed ? page_list(cf.page, cf.body, &cf.title, title, n, 64) : list(title, n);
@@ -3128,27 +3112,7 @@ static int to_tracks(const void *unused) {
         if (centred && timed)
             widget_set_prop_str(widget_get_child(row, 1), "style:normal:text_align_h", "center");
     }
-    page_push(view, cf.text_albums && cf.scoped == ARTIST_ALBUMS); /* from a list, not the covers */
-    return 0;
-}
-
-/* The All albums card: every album's tracks, the covers' order and each album's in album order,
- * from the first, as a library queue (0xff10 would resume one album of the name). ponytail: a
- * query per album; one artist query split back into albums if a large artist drags. */
-static int play_all(const void *unused) {
-    cf.timer = 0;
-    void *all = _create_deque("stSongInfo");
-    deque_init(all);
-    for (unsigned i = 0; i < deque_size(cf.albums); ++i) {
-        void *t = coverflow_album_tracks(deque_at(cf.albums, i));
-        for (unsigned j = 0; j < deque_size(t); ++j) _deque_push_back(all, deque_at(t, j));
-        deque_destroy(t);
-    }
-    if (deque_size(all) && !catalogue_missing(P(deque_at(all, 0), REC_PATH)))
-        play_folder(all, 0, 0xf001);
-    else
-        widget_set_text_utf8(cf.name, "Storage unavailable");
-    deque_destroy(all);
+    page_push(view, 0);
     return 0;
 }
 
@@ -3221,9 +3185,7 @@ static int resort(const void *unused) {
 /* Clicks only schedule: a screen change never destroys the widget whose click is running. */
 static int pick(void *ctx, void *event) {
     int i = (int)(long)ctx, n = (int)deque_size(cf.albums);
-    if (i == n && cf.scoped == ARTIST_ALBUMS)
-        rearm(&cf.timer, play_all, 0);
-    else if (i == n)
+    if (i == n)
         rearm(&cf.timer, resort, 0);
     else {
         cf.album = i;
@@ -3232,20 +3194,13 @@ static int pick(void *ctx, void *event) {
     return 0;
 }
 
-/* The page right under an artist's covers or the playlists', the artist's or Playlists, which they
- * close with them (keyup, coverflow_artist, coverflow_playlists), or 0. An artist's page drawn as
- * the design (library_artist.c) is not: the covers are its Albums row's, and Return comes back to
- * it. */
-extern int artist_local_on(void *win);
+/* The page right under the playlists' covers, Playlists, which they close with them (keyup,
+ * coverflow_playlists), or 0. */
 static void *page_under(void) {
     void *wm = window_manager(), *under = 0;
-    int mine = cf.scoped == ARTIST_ALBUMS || cf.scoped == PLAYLISTS;
-    for (unsigned i = 1, n = mine ? widget_count_children(wm) : 0; i < n; ++i)
+    for (unsigned i = 1, n = cf.scoped == PLAYLISTS ? widget_count_children(wm) : 0; i < n; ++i)
         if (widget_get_child(wm, i) == cf.page) under = widget_get_child(wm, i - 1);
-    if (under && (tk_strcmp(widget_get_prop_str(under, "name", ""),
-                            cf.scoped == PLAYLISTS ? "playlist_page" : "artistinfo_page") ||
-                  artist_local_on(under)))
-        under = 0;
+    if (under && tk_strcmp(widget_get_prop_str(under, "name", ""), "playlist_page")) under = 0;
     return under;
 }
 
@@ -3256,9 +3211,9 @@ static int keyup(void *ctx, void *event) {
     if ((cf.screen == TRACKS && cf.scoped != ALBUM_TRACKS) || cf.screen == PREPARING)
         rearm(&cf.timer, to_covers, 0);
     else if (cf.scoped) {
-        /* An artist's covers: the unseen artist page under them closes first, unanimated (its
-         * own Return is navigator_back too; its cleanup runs on EVT_WINDOW_CLOSE), so Return
-         * lands on the Artists list; the playlists' on Library, with Playlists. */
+        /* The playlists' covers: the unseen Playlists page under them closes first, unanimated
+         * (its own Return is navigator_back too; its cleanup runs on EVT_WINDOW_CLOSE), so Return
+         * lands on Library. */
         void *under = page_under();
         if (under) window_manager_close_window_force(window_manager(), under);
         navigator_back();
@@ -3301,7 +3256,6 @@ static int closed(void *ctx, void *event) {
     if (cf.scoped) cf.albums = cf.all_albums;
     if (cf.scoped == PLAYLISTS && playlist_art_ready == playlist_ready) playlist_art_ready = 0;
     cf.scoped = 0;
-    cf.text_albums = 0;
     return 0;
 }
 
@@ -3405,9 +3359,8 @@ static int coverflow_open(void *ctx, void *event) {
     return open_step(0);
 }
 
-/* A scoped page: a Coverflow already open (played from, under Now Playing's Go to Artist, issue
- * #73) closes once the new one is up, with an artist page under it: there is one page's state.
- * ponytail: Return then skips it; stack the state if that is missed. */
+/* A scoped page: a Coverflow already open (played from, under Now Playing, issue #73) closes once
+ * the new one is up, with the page under it (page_under): there is one page's state. ponytail: Return then skips it; stack the state if that is missed. */
 static int scoped_open(void) {
     void *old = cf.page, *under = page_under(), *page = open_page();
     if (!page) return 0; /* the old page and its state stay */
@@ -3417,28 +3370,6 @@ static int scoped_open(void) {
         if (under) window_manager_close_window_force(window_manager(), under);
     }
     cf.page = page;
-    return 1;
-}
-
-/* Display settings' Artist albums: Coverflow (navigation.c): albums, coverflow_split's, as the
- * covers, which the page owns; 0 when there are none, and albums is the caller's. */
-int coverflow_artist(void *albums) {
-    if (!deque_size(albums)) return 0;
-    void *music = _create_deque("stSongInfo");
-    deque_init_copy(music, albums);
-    music = music_albums(music);
-    if (!deque_size(music) || !scoped_open()) {
-        deque_destroy(music);
-        return 0;
-    }
-    deque_destroy(albums);
-    albums = music;
-    cf.all_albums = cf.albums;
-    cf.albums = albums;
-    cf.scoped = ARTIST_ALBUMS;
-    extern int ringnav_artist_view(void);
-    cf.text_albums = ringnav_artist_view() == 2;
-    load();
     return 1;
 }
 

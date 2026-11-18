@@ -24,7 +24,7 @@ _G = host.tools_theme.built_geometry(host.tools_theme.builtins())
 PANE_W, PANE_H = 375 - _G.split_art, 320 - _G.bar + _G.split_art_up
 TEX_H = PANE_H * 11 // 10
 PREPARING, COVERS, TRACKS = range(3)
-ARTIST_ALBUMS, RATED_ALBUMS = 1, 2
+RATED_ALBUMS, PLAYLISTS = 1, 3  # coverflow.h's cf.scoped
 CF_REACH, CF_WIDE_REACH = 3, 7  # the ring's slots either side of the centre: fx_ring's, and its callers' window
 SORT_ALBUM, SORT_ARTIST, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_RATING, SORT_YEAR = range(7)
 FNV = 2166136261
@@ -1286,8 +1286,9 @@ def test_covers_live_needs_the_covers_with_no_change_pending(fw, slide, screen, 
 
 
 class Shelf:
-    """An artist's slide_menu: its index, offset and animator in plain memory, n albums, stride 110."""
-    def __init__(self, fw, n=4, index=1, offset=0, scoped=ARTIST_ALBUMS):
+    """The playlists' slide_menu, which stops at its ends: its index, offset and animator in plain memory, n covers,
+    stride 110."""
+    def __init__(self, fw, n=4, index=1, offset=0, scoped=PLAYLISTS):
         self.fw, self.g, self.raw, self.anim = fw, api(fw), C.create_string_buffer(0x200), C.create_string_buffer(0x100)
         self.p = C.addressof(self.raw)
         self.set(0x78, index)
@@ -2419,7 +2420,7 @@ def test_sort_next_in_the_page_s_own_orders(fw):
     assert g.sort_next(1) == SORT_ADDED and g.sort_next(0) == SORT_YEAR
     c.sort = SORT_RATING  # not one of the library's
     assert g.sort_next(1) == SORT_ALBUM
-    c.scoped = 2
+    c.scoped = RATED_ALBUMS
     assert g.sort_next(0) == SORT_RATING and g.sort_next(1) == SORT_ALBUM
     c.sort = SORT_PLAYED
     assert g.sort_next(1) == SORT_RATING  # the rated orders wrap
@@ -2592,22 +2593,19 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
-def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_in_the_status_row(fw):
-    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
-    covers read the artist in the status row, and other covers no title, so the row shows the clock as Home's
-    does."""
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_no_covers(fw):
+    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); over the covers
+    the status row has no title, so it shows the clock as Home's does."""
     themed(fw)
     recs = [Rec(artist='Bob Dylan', path='/a')]
     deque_of(fw, recs)
     title = fw.fn('coverflow_bar_title', C.c_char_p)
     c = cf(fw)
-    c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
+    c.albums, c.scoped, c.screen = 0x5000, RATED_ALBUMS, TRACKS
     assert title() is None
     c.screen = COVERS
-    assert title() == b'Bob Dylan'
-    c.scoped = 0
     assert title() == b''
-    c.scoped, c.albums = ARTIST_ALBUMS, 0  # no albums read yet: no artist to name
+    c.scoped = 0
     assert title() == b''
 
 
@@ -2652,9 +2650,9 @@ def test_which_slide_menu_is_the_covers_and_which_stops_at_its_ends(fw):
     assert not slide(None) and not bounded(None)
     c.slide = 0x6000
     assert slide(0x6000) and not slide(0x6001) and not bounded(0x6000)  # the library's wrap round
-    c.scoped = ARTIST_ALBUMS
+    c.scoped = PLAYLISTS
     assert bounded(0x6000) and not bounded(0x6001)
-    c.scoped = 2  # the rated albums wrap like the library's
+    c.scoped = RATED_ALBUMS  # the rated albums wrap like the library's
     assert not bounded(0x6000)
 
 
@@ -2781,8 +2779,8 @@ def test_without_a_third_cover_the_second_fades_out_over_the_next_step(fw, style
         last = b
 
 
-@pytest.mark.parametrize('scoped', (ARTIST_ALBUMS, 0))
-def test_an_artist_s_shelf_shows_no_cover_past_its_ends(fw, scoped):
+@pytest.mark.parametrize('scoped', (PLAYLISTS, 0))
+def test_a_bounded_shelf_shows_no_cover_past_its_ends(fw, scoped):
     t = themed(fw)
     frame = C.create_string_buffer(0x40)
     fw.mock('bitmap_create_ex', lambda *_: C.addressof(frame))
@@ -2798,7 +2796,7 @@ def test_an_artist_s_shelf_shows_no_cover_past_its_ends(fw, scoped):
     fw.fn('coverflow__fx_ring', None, C.c_int, C.c_int, C.c_void_p)(0, n, ring)
     reach = CF_WIDE_REACH if t['cf.thumb'] else CF_REACH  # a thumb theme's row reaches further
     js = range(-CF_WIDE_REACH, CF_WIDE_REACH + 1)  # each slot's place from the centre album, the first
-    # an artist's shelf: its three albums alone; the library's small shelf repeats round its wrap
+    # the playlists' shelf: its three covers alone; the library's small shelf repeats round its wrap
     assert [int(bool(p)) for p in wide] == [int(abs(j) <= reach and (not scoped or 0 <= j < n)) for j in js]
     fw.fn('coverflow__fx_close', None)()
 
@@ -3105,8 +3103,8 @@ def test_home_binds_its_cards_and_lists(fw):
     assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
 
 
-def test_a_page_list_on_a_list_fit_set_runs_on_to_the_screen_s_foot(fw, library):
-    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows run on to the
+def test_a_page_list_runs_on_to_the_screen_s_foot(fw, library):
+    """page_list under OLED's grid (list end 224 under a 58 px bar): twelve 32 px rows run on to the
     screen's foot, the rows past y 282 fading there (navigation.c list_fade), as Home's do."""
     themed(fw)
     split_inset_set(fw, library, 2)  # OLED's set
@@ -3974,7 +3972,7 @@ def test_the_captions_name_the_centre_album_and_its_artist(fw):
     assert 'style:normal:font_name' not in ui[c.name].props  # the captions keep the style's face
 
 
-@pytest.mark.parametrize('scoped, card', ((ARTIST_ALBUMS, 'All albums'), (2, 'Sort: Rating')))
+@pytest.mark.parametrize('scoped, card', ((RATED_ALBUMS, 'Sort: Rating'),))
 def test_the_card_after_the_albums_is_named_for_what_it_does(fw, scoped, card):
     _, ui, c, titles = captions(fw, scoped)
     c.sort = SORT_RATING
