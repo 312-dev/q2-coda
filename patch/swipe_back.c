@@ -170,7 +170,8 @@ static void glide(int off) {
 static void go_back(void) {
     void *page = sb.page, *wm = window_manager();
     char close[64];
-    const char *hint = sb.layer == page ? widget_get_prop_str(page, "close_anim_hint", "") : (void *)0;
+    const char *hint =
+        sb.layer == page ? widget_get_prop_str(page, "close_anim_hint", "") : (void *)0;
     int cleared = hint && *hint && tk_snprintf(close, sizeof close, "%s", hint) < (int)sizeof close;
     if (cleared) widget_set_prop_str(page, "close_anim_hint", "");
     unsigned e[16] = { 0 };
