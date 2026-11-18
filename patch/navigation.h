@@ -838,6 +838,7 @@ int ringnav_otg_status(void), stock_otg_status_trampoline(void);
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),

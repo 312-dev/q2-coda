@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Read the USB record (patch/usb_record.c, docs/internals.md#usb-record) back, and flag what matters for the OTG
 back-feed: the Q2 powering the bus (PC20) with a computer's VBUS or a computer's answer seen, power to a port with
-nothing enumerated on it, a plug that never enumerated, and a link a wake from Standby dropped.
+nothing enumerated on it, a plug that never enumerated, a link a wake from Standby dropped, and the ID pin's pull-up found off.
 
     python3 tools/q2usb.py q2-usb.1.log q2-usb.log        # oldest file first, from the card's .q2pod folder
     adb shell cat /mnt/mmc/.q2pod/q2-usb.1.log /mnt/mmc/.q2pod/q2-usb.log | python3 tools/q2usb.py -
 
 A line is `WALL MS EVENT PD18=.. PD17=.. PD19=.. PC20=.. PE22=.. otg=.. id=.. mode=.. conn=.. vbus=.. udc=.. hostdev=..`:
-WALL is time()'s seconds, MS demo's millisecond clock, EVENT in, out, in+5s, out+5s, otg-on, otg-off, standby, wake or
-wake+5s.
+WALL is time()'s seconds, MS demo's millisecond clock, EVENT boot, in, out, in+5s, out+5s, otg-on, otg-off, standby,
+wake or wake+5s; boot and wake+5s end with `pull=` (cmd_gpio get_func PD18), and read boot-pull-off or wake+5s-pull-off
+when the ID pin's pull-up was found off (and was set again).
 Other lines (the card store's `== N lines lost` note) are skipped. Exit 1 when anything is flagged."""
 import argparse
 import datetime
@@ -52,6 +53,8 @@ def flags(rows):
     on = None  # the otg-on row while the Q2 powers the bus
     standby = None  # the last standby row
     for i, r in enumerate(rows):
+        if r.event.endswith('-pull-off'):
+            out.append((r, f'PULLOFF the ID pin\'s pull-up was off at {r.event[:-9]} ({r.f.get("pull")}), set again'))
         if r.f.get('PC20') == '1' and r.computer():
             out.append((r, f'BACKFEED bus power on with a computer seen ({r.event}: vbus={r.f.get("vbus")} '
                            f'udc={r.f.get("udc")})'))
@@ -91,7 +94,7 @@ def main(argv=None):
     rows = parse(lines)
     found = flags(rows)
     plugs = sum(r.event == 'in' for r in rows)
-    print(f'{len(rows)} lines, {plugs} plugs, {sum(r.event == "otg-on" for r in rows)} times the Q2 powered the bus')
+    print(f'{sum(r.event.startswith("boot") for r in rows)} boots, {len(rows)} lines, {plugs} plugs, {sum(r.event == "otg-on" for r in rows)} times the Q2 powered the bus')
     for r, text in found:
         print(f'{r.when()}  {text}')
     if not found:

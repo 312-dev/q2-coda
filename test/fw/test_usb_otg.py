@@ -10,6 +10,9 @@ import re
 
 import pytest
 
+PULL_UP = '/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1'
+PULL_FUNC = b'/tmp/q2-pd18.func'
+PULL_CHECK = '/usr/bin/cmd_gpio get_func PD18 >/tmp/q2-pd18.func 2>&1'
 PASS_MS = 1000  # on_wm_idle_status runs check_otg_status about once a second
 # usb_otg.c's settle time, read from the source so the timings below follow it
 _SETTLE = re.search(r'#define OTG_SETTLE_MS (\d+)\n', (pathlib.Path(__file__).parents[2]/'patch/usb_otg.c').read_text())
@@ -33,7 +36,15 @@ class Port:
         fw.mock('toolsGpioGetValue', self.read)
         fw.mock('stock_otg_status_trampoline', self.stock)
         self.commands = []
+        self.func = b'input pull_up\n'  # what cmd_gpio get_func PD18 answers into PULL_FUNC
         fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()))
+        fw.mock('fw_fopen', lambda path, *_: 9 if C.string_at(path) == PULL_FUNC else 0)
+        fw.mock('fw_fread', self.fread)
+
+    def fread(self, buf, size, n, f, *_):
+        data = self.func[:size * n]
+        C.memmove(buf, data, len(data))
+        return len(data) // size
 
     def records(self):
         """What usb_record.c wrote, by its event word: the third argument of its line's tk_snprintf."""
@@ -181,7 +192,20 @@ def test_a_wake_sets_the_pull_up_again_and_records_the_pins_then_and_5_s_on(fw):
     p.now += 1000
     poll()
     poll()
-    assert p.records() == ['wake', 'wake+5s']
+    assert p.records() == ['wake', 'wake+5s'] and p.commands == [PULL_UP, PULL_CHECK]
+
+
+@pytest.mark.parametrize('func,word,commands', [(b'input pull_up\n', 'boot', [PULL_CHECK]),
+                                                (b'input pull_hiz\n', 'boot-pull-off', [PULL_CHECK, PULL_UP])])
+def test_the_records_first_line_follows_stocks_pin_setup_with_the_id_pins_pull(fw, func, word, commands):
+    """platform_init's hook: stock's run first (it sets PD18 input pull_up, tools/build.py ID_PULL_UP), then the line,
+    with the pull cmd_gpio reports; a pull that is not the pull-up is set again and the line says it was off."""
+    p = Port(fw)
+    p.func = func
+    order = []
+    fw.mock('stock_platform_init_trampoline', lambda *_: order.append('stock') or 5)
+    assert fw.fn('ringnav_platform_init', C.c_int)() == 5
+    assert order == ['stock'] and p.records() == [word] and p.commands == commands
 
 
 def test_the_record_has_each_change_of_bus_power(fw):

@@ -39,6 +39,8 @@ HOOKS = {
     'check_usb_status': (0x4f3744, 'ringnav_usb_status', 'usb_status'),
     # OTG host power (PC20) only after the ID pin settles low with no VBUS on the port (usb_otg.c)
     'check_otg_status': (0x4f3408, 'ringnav_otg_status', 'otg_status'),
+    # The USB record's first line once stock has set the USB pins up, with PD18's pull (usb_record.c)
+    'platform_init': (0x51cd94, 'ringnav_platform_init', 'platform_init'),
     'createPlayListItem': (0x517fdc, 'ringnav_playlist_create', None),
     'playlist_delete_click': (0x4b62c8, 'ringnav_playlist_delete', None),
     'localmusic_playlistsmore_page_init': (0x4b6614, 'ringnav_playlistsmore', 'playlistsmore'),
@@ -620,6 +622,11 @@ STANDBY_WAKE = (0x5024b4, 0x0411ff26, 0x24020001)
 # sb stores $zero (the bar shown) and WHEELMODE's movz $v0, $zero, $v1 becomes li $v0, 1, whatever the keys hold. Neither
 # key is written, and stock's two rows are not offered (navigation.c ringnav_display, ringnav_systemset).
 NAV_SHOWN = (0x504b5c, 0xa0620000, 0xa0600000)
+# platform_init sets the USB cable sense and ID pins up as inputs, toolsGpioInput(name, pull): 0 is pull_hiz, 1 pull_down,
+# 2 pull_up. PD18, the ID pin, was given 0 and floated, and a floating ID made demo power the bus into a computer
+# (docs/internals.md#otg-host-power); S12usbcharge's pull_up before demo did not last past this call. Its move $a1, $zero
+# becomes li $a1, 2: stock's own call sets it input pull_up.
+ID_PULL_UP = (0x51d33c, 0x00002825, 0x24050002)
 WHEEL_MODE = (0x504ba4, 0x0003100a, 0x24020001)
 # V1.36's home_page_init binds a key-up of its own on Home (0x534a74: Return opens Now Playing and stops there; its wheel and
 # Centre act only outside Volume Mode). Home's keys are ringnav's and on_wm_keyup_fun's, as they were: the widget_on call goes.
@@ -2613,6 +2620,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *KEY_ABORTED, 'A press the window changed under stays ended until its release')
     patch_word(patched, *STANDBY_WAKE, 'Standby resume stays dark')
     patch_word(patched, *NAV_SHOWN, "stock's navigation bar stays shown")
+    patch_word(patched, *ID_PULL_UP, "platform_init sets the USB ID pin's pull-up")
     patch_word(patched, *WHEEL_MODE, "stock's wheel stays in Volume Mode")
     patch_word(patched, *HOME_KEYUP, 'Home binds no key-up of its own')
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")

@@ -4,7 +4,8 @@
  * (PE22 high) at once. PD18 has no pull of its own (stock leaves its pad at pull_hiz), so after an
  * unplug it drifted low for seconds with no cable in, and a cable put into a computer then found
  * the Q2 driving 5 V into the computer's port. S12usbcharge (patch/usb_charge.sh) turns PD18's
- * pull-up on at boot, which ends that drift; an OTG adapter's grounded ID still reads low. The
+ * pull-up on at boot and stock's platform_init sets it again (tools/build.py ID_PULL_UP), which
+ * ends that drift; an OTG adapter's grounded ID still reads low. The
  * board still pulls the line low by itself with nothing attached, in pulses of 2 to 4 s (most
  * likely the USB-C port's role logic), so a low ID reaches stock only once it has read low, with
  * the cable sense PD17 showing no VBUS, on every pass for OTG_SETTLE_MS, longer than those pulses;
