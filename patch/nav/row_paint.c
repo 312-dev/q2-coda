@@ -998,7 +998,7 @@ int ringnav_paint(void *w, void *canvas) {
     return result;
 }
 
-/* A list_fit set's scrolling list whose box runs on below the set's list end (y 282 on OLED): its
+/* A scrolling list whose box runs on below the set's list end (y 282; the set's list_fit): its
  * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
  * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners). In
  * Edit Library its end is a row higher and its rows fade into the hint's band (library_edit.c
@@ -1017,7 +1017,7 @@ static int list_pad(void *w) {
                : 0;
 }
 static void list_fade(void *w, void *canvas) {
-    int k = w && geom_val(V_LIST_FIT) && P(canvas, CANVAS_LCD) ? kind(w) : 0;
+    int k = w && P(canvas, CANVAS_LCD) ? kind(w) : 0;
     if ((k != 1 && k != 2) || home_rest(w, (int *)0) || modal_rows_of(w) ||
         window_manager_is_animating(window_manager()))
         return;

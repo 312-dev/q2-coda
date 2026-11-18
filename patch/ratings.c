@@ -13,8 +13,6 @@ static struct {
     unsigned rate_row;                  /* the copy's row key whose heart rate_row_heart filled */
     unsigned rate_gen;                  /* catalogue_fav_gen when rate_row_heart last read My Fav */
     int rate_pick, rate_was, rate_held; /* the hearts picked, those the picker opened on */
-    int rate_armed;                     /* a press came down on the picker: its release is a tap */
-    unsigned rate_at;                   /* when a hold opened the picker (never 0), else 0 */
     unsigned rate_hold, rate_tick, rate_album;
     void *rt_menu;
 } ra __attribute__((section(".scratch")));
@@ -187,60 +185,7 @@ static int rate_tick(const void *unused) {
     return 8; /* RET_REPEAT */
 }
 
-static int rate_tap(void *ctx, void *event);
-static int rate_press(void *ctx, void *event);
-/* The picker goes down with its page or panel (Coverflow's load destroys the page's children). */
-static int rate_panel_gone(void *win, void *event) {
-    if (win == st.rate_on) st.rate_on = (void *)0;
-    return 0;
-}
-/* The picker on win, made on first use: a dark rounded panel, its caption, then five of the
- * heart's own images. */
-static void *rate_panel(void *win) {
-    void *panel = widget_lookup(win, "rate_panel", 0);
-    if (panel) return panel;
-    int h = 110, w = 5 * 56 + 24;
-    panel = text(win, (I(win, W_W) - w) / 2, (I(win, W_H) - h) / 2, w, h);
-    widget_set_name(panel, "rate_panel");
-    widget_set_prop_int(panel, "style:normal:bg_color", (int)(0xff000000u | FILL_RGB)); /* opaque */
-    widget_set_prop_int(panel, "style:normal:round_radius", LETTER_RADIUS);
-    text(panel, 0, 8, w, 28);
-    for (int i = 0; i < 5; i++) {
-        void *heart = image_create(panel, 12 + i * 56, 44, 56, 56);
-        image_set_draw_type(heart, IMAGE_DRAW_CENTER);
-        widget_set_prop_str(heart, "clickable", "true");
-        widget_on(heart, EVT_CLICK, rate_tap, (void *)(long)(i + 1));
-        widget_on(heart, EVT_POINTER_DOWN, rate_press, (void *)0);
-    }
-    widget_on(panel, EVT_DESTROY, rate_panel_gone, win);
-    widget_on(win, EVT_DESTROY, rate_panel_gone, win);
-    return panel;
-}
-
-/* The picker's hearts and caption for rate_pick. */
-static void rate_paint(void) {
-    void *panel = rate_panel(st.rate_on);
-    char t[24] = "Unrated";
-    for (int i = 0; i < 5; i++)
-        image_base_set_image(widget_get_child(panel, (unsigned)i + 1),
-                             i < ra.rate_pick ? "play_fav" : "play_unfav");
-    if (ra.rate_pick) tk_snprintf(t, sizeof t, "%d of 5", ra.rate_pick);
-    widget_set_text_utf8(widget_get_child(panel, 0), t);
-}
-
-static void rate_save(void *win);
 static int rate_song(int n);
-/* Closes the picker, and with save keeps rate_pick (rate_save). */
-static void rate_close(int save) {
-    void *win = st.rate_on;
-    if (!win) return;
-    st.rate_on = (void *)0;
-    void *panel = rate_panel(win);
-    widget_set_visible(panel, 0, 0);
-    widget_set_sensitive(panel, 0); /* stock's hit test skips only the insensitive, hidden or not */
-    if (save) rate_save(win);
-}
-
 /* Keeps rate_pick for the picker that was over win: an album (rate_album) if still Coverflow's
  * centre card, else the playing track, My Fav in or out through the heart's own click and the
  * rest kept here. */
@@ -298,34 +243,8 @@ int rate_car_hearts(void) {
     return !r ? -1 : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
 }
 
-/* A tap on the picker is a press that came down on it. The hold that opened it is still down
- * where the picker now is, the last heart on the stock page and the first on the centred one, and
- * its release chose that heart (#303): it never came down here, so it chooses nothing, and neither
- * does a press within RATE_SETTLE_MS of the opening, the same finger settling. ponytail: why
- * stock clicks a heart that saw no press is not traced (the abort in rate_long was meant to stop
- * it); a finger that lifts and comes down again later than that is a tap. */
-#define RATE_SETTLE_MS 400
-static int rate_press(void *ctx, void *event) {
-    ra.rate_armed = !ra.rate_at || (unsigned)time_now_ms() - ra.rate_at >= RATE_SETTLE_MS;
-    return 0;
-}
-static int rate_tapped(void) {
-    int armed = ra.rate_armed;
-    ra.rate_armed = 0;
-    return armed;
-}
-/* The heart the picker opened on, tapped again, takes the rating away. */
-static int rate_tap(void *ctx, void *event) {
-    if (!rate_tapped()) return STOP;
-    int n = (int)(long)ctx;
-    ra.rate_pick = n == ra.rate_was ? 0 : n;
-    rate_close(1);
-    return STOP;
-}
-
-/* A modal set's picker (docs/oled-design.md#menus): the menu sheet's, a row for each rating, the
- * current one checked; a pick keeps its row's rating, as Centre on the hearts does, and Return
- * leaves the rating as it was. */
+/* The picker (docs/oled-design.md#menus): the menu sheet's, a row for each rating, the current one
+ * checked; a pick keeps its row's rating and Return leaves the rating as it was. */
 static const char *const rate_rows[] = { "Unrated",  "1 Heart",  "2 Hearts",
                                          "3 Hearts", "4 Hearts", "5 Hearts" };
 static void *rate_page __attribute__((section(".scratch")));
@@ -333,47 +252,19 @@ static void rate_picked(int n) {
     ra.rate_pick = n;
     rate_save(rate_page);
 }
-static int rate_modal(void *win, int pick, unsigned album) {
+/* The picker over win on pick hearts, for the queue menu's album album or, with 0, the playing
+ * track. */
+int rate_show(void *win, int pick, unsigned album) {
+    if (!win) return 0;
     ra.rate_pick = ra.rate_was = pick;
     ra.rate_album = album;
     rate_page = win;
     return modal_pick((void *)0, rate_rows, 6, pick, rate_picked);
 }
-
-/* The picker over win on pick hearts, for the queue menu's album album or, with 0, the playing
- * track: the wheel moves the rating, Centre saves it and Return leaves it as it was; a tap on a
- * heart saves that many, or none on the one it opened on. */
-int rate_show(void *win, int pick, unsigned album) {
-    if (!win || st.rate_on) return 0;
-    if (modal_set()) return rate_modal(win, pick, album);
-    st.rate_on = win;
-    ra.rate_pick = ra.rate_was = pick;
-    ra.rate_album = album;
-    ra.rate_armed = 0, ra.rate_at = 0;
-    rate_paint();
-    void *panel = rate_panel(win);
-    widget_set_visible(panel, 1, 0);
-    widget_set_sensitive(panel, 1);
-    return 1;
-}
 /* Now Playing's, on the playing track's rating. */
 int rate_open(void) {
     void *r = rate_track();
     return r && rate_show(st.rate_win, rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r)), 0);
-}
-
-/* The wheel, Centre and Return while the picker is up. */
-int rate_key(void *top, unsigned key) {
-    if (!st.rate_on || top != st.rate_on) return 0;
-    if (key == KEY_NEXT || key == KEY_PREV) {
-        ra.rate_pick = clamp_step(ra.rate_pick, 5, key == KEY_NEXT ? 1 : -1);
-        rate_paint();
-    } else if (key == KEY_CENTER || key == KEY_RETURN)
-        rate_close(key == KEY_CENTER);
-    else
-        return 0;
-    drop_input();
-    return 1;
 }
 
 /* Holding the heart RATE_HOLD_MS opens the picker; a tap is stock's, a full heart then keeping
@@ -382,7 +273,6 @@ int rate_key(void *top, unsigned key) {
 static int rate_long(const void *unused) {
     ra.rate_hold = 0;
     if (!pointer_down() || !(ra.rate_held = rate_open())) return 0;
-    ra.rate_at = (unsigned)time_now_ms() | 1;
     unsigned abort_event[12];
     pointer_event_init(abort_event, EVT_POINTER_ABORT, st.rate_win, 0, 0);
     widget_dispatch_event_to_target_recursive(st.rate_win, abort_event);
@@ -398,7 +288,7 @@ static int rate_down(void *ctx, void *event) {
  * at once in stock's Tidal images, as stock's own click draws a 0xf1 track's. */
 static int rate_fav_click(void *ctx, void *event) {
     stop_timer(&ra.rate_hold);
-    if (ra.rate_held || st.rate_on) {
+    if (ra.rate_held) {
         ra.rate_held = 0;
         return 0;
     }

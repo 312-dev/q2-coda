@@ -2206,7 +2206,7 @@ def boot(fw, st):
 def test_the_library_s_rows_in_their_order(fw, ui, st):
     boot(fw, st)
     win, view = library(fw, ui)
-    # the menu review's order (2026-11-15), Search there as OLED's set has no Library icons (lib_art 0: library_search);
+    # the menu review's order (2026-11-15), Search there (home.c ringnav_localmusic);
     # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs; Shuffle,
     # Hi-Res and Long Songs hidden too, in their places
     hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs')
@@ -2241,7 +2241,6 @@ def test_a_library_that_is_not_stock_s_is_left(fw, ui):
 
 def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
     boot(fw, st)
-    assert fw.fn('library_search', C.c_int)() == 1  # OLED's set has no Library icons (lib_art 0)
     win, view = library(fw, ui)
     assert ('Search', True) in page_rows(ui, view) and ('Shuffle', False) in page_rows(ui, view)
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']

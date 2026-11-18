@@ -586,14 +586,12 @@ static int empty_class(const void *unused) {
     return 0;
 }
 
-/* Library Artists rows have no head picture, so the name gets its width (compact_row_layout skips
- * hidden siblings). Composers and Genres share the rows, which are rebound, so they show theirs
- * again, and a one-line row (one_line) shows none. */
+/* Artists, Composers and Genres rows have no picture: the rows are one line (one_line, the set's
+ * text_art 0), so the name gets the width (compact_row_layout skips hidden siblings). */
 int ringnav_class_icon(void *row, int i) {
-    int artists = I(g_class_type, 0) == 0xf004;
-    int shown = !artists && geom(G_TEXT_ART); /* no class icon on a one-line row */
-    widget_set_visible(widget_lookup(row, "img_icon", 1), shown, 0);
-    return shown ? class_icon(row, i) : 0;
+    (void)i;
+    widget_set_visible(widget_lookup(row, "img_icon", 1), 0, 0);
+    return 0;
 }
 
 /* load_localclass_list: stock fills p_deque_showlist and returns its size (Playlists and Baidu:

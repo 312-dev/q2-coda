@@ -174,7 +174,7 @@ static void ns_badge_paint(void *w, void *canvas) {
 }
 
 void np_stream_paint(void *w, void *canvas) {
-    if (!w || !st.np_win || !geom_val(V_STATUS_Y) || !P(canvas, CANVAS_LCD)) return;
+    if (!w || !st.np_win || !P(canvas, CANVAS_LCD)) return;
     if (st.np_cover && w == P(st.np_cover, W_PARENT)) {
         if (ns.badge && ns.label[0]) ns_badge_paint(w, canvas);
         return;

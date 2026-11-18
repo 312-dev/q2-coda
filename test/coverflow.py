@@ -322,7 +322,6 @@ static int home_mode, alt, light; /* home_mode: HOME, 0 Split, 1 Full, 2 Carouse
 int ipod_home(void) { return home_mode; }
 int home_lib_on(void) { return 1; }
 int row_preview_on(void) { return 1; }
-int library_search(void) { return 1; }
 int slide_pick(char *url, int take) { return 0; } /* slideshow.c: no library cover */
 int mclGetPlayStatus(void) { return 2; } /* playing: Split shows the playing cover */
 int media_status(void) { return 2; } /* playing too: Home lists Now Playing's row */

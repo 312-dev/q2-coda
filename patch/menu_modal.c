@@ -126,8 +126,6 @@ static void sheet_run(int fall) {
     if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
 }
 
-int modal_set(void) { return geom_val(V_MODAL); }
-
 /* The rows span the screen; their text and symbols stand on the house list grid. */
 int modal_row_w(void) { return SH_W; }
 static int text_x(void) { return geom_val(V_TEXT_X); }
@@ -381,7 +379,7 @@ void modal_frame(void *win, void *list) {
         y += h;
     }
     if (list) {
-        int end = list_fit_end(), content = y + (end > 0 && end < SH_H ? SH_H - end : 0);
+        int end = list_fit_end(), content = y + (end < SH_H ? SH_H - end : 0);
         widget_set_prop_int(view, "virtual_h", content);
         widget_set_prop_int(view, "_list_pad", content - y); /* navigation.c LIST_PAD */
         widget_set_prop_int(view, "_list_padded", content);

@@ -110,7 +110,7 @@ The pixel-scroll fallback is a pane without clickable rows, which scrolls `RING_
 
 Wheel movement cancels existing momentum and uses the stock `scroll_view_set_offset` / `table_client_set_yoffset` setters immediately, reloading table row references after synchronous rebinding. Each wheel step then dispatches `EVT_SCROLL_END` (`0x14f`), which touch momentum sends when it settles: the setters send only `0x14e`, which the album page takes as pause, and stock lists queue their visible covers on scroll end (album page `0x4a5db8`). Remembered-position restoration retains its separate glide. This follows the row-based approach of Rockbox's [H2/Eros Q wheel mapping](https://github.com/Rockbox/rockbox/blob/master/apps/keymaps/keymap-erosq.c) and [list implementation](https://github.com/Rockbox/rockbox/blob/master/apps/gui/list.c).
 
-Selected and restored rows use a `SCROLL_MARGIN` of 12 pixels above and below, reduced to half the spare viewport height in tight lists and clamped at content boundaries. Reaching the first row also shows whatever heads the list above it (the EQ page's graph) when both fit. Rows taller than the viewport align their top edge when selected or restored, keeping their title visible.
+A selected or restored row is brought in whole with no margin, so a list scrolls a row at a time (the set's `list_fit`, `lists.c` `reveal`), clamped at content boundaries. Reaching the first row also shows whatever heads the list above it (the EQ page's graph) when both fit. Rows taller than the viewport align their top edge when selected or restored, keeping their title visible.
 
 ## Wheel volume
 

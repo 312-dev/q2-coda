@@ -1949,7 +1949,6 @@ static int album_view(lv_t *l) {
 static int artist_view(lv_t *l) {
     int n = 0;
     char url[96], year[8];
-    if (!modal_set()) return l->lay = LAY_PLAIN, 0;
     if ((!l->lay || l->lay == LAY_ALBUM) && (n = album_view(l))) return n;
     if (l->lay == LAY_ALBUMS) {
         int k = 0, *order = calloc((unsigned)l->n + 1, sizeof *order);
@@ -2074,7 +2073,7 @@ static int artist_hold(lv_t *l) {
  * the toggle left out, as an action over nothing (audit2 F1). 1 when it is one. */
 static int empty_view(lv_t *l) {
     int info = -1;
-    if (!modal_set() || l->lay) return 0;
+    if (l->lay) return 0;
     for (int i = 0; i < l->n; ++i) {
         if (!strcmp(cell(i, 0), "info") && strcmp(cell(i, 1), "about")) {
             if (info < 0) info = i;

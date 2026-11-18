@@ -85,30 +85,17 @@ int np_time_tap(void *ctx, void *event) {
 void bar_title(void *bar, void *top) {
     static const unsigned
         now_playing[] = { 'N', 'o', 'w', ' ', 'P', 'l', 'a', 'y', 'i', 'n', 'g', 0 },
-        cover_flow[] = { 'C', 'o', 'v', 'e', 'r', ' ', 'F', 'l', 'o', 'w', 0 }, none = 0;
-    if (st.bar_title) { /* this bar names the page in its own label: off, the clock makes way */
+        cover_flow[] = { 'C', 'o', 'v', 'e', 'r', ' ', 'F', 'l', 'o', 'w', 0 };
+    if (st.bar_title) { /* this bar names the page in its own label */
         const unsigned *own = widget_get_text(st.bar_title);
-        /* a status row (tools/ipod.py status_row): the title where the page has one, the clock
-         * either way */
-        int titled = (!st.time_title || geom_val(V_STATUS_Y)) && own && *own;
+        /* the status row (tools/ipod.py status_row): the title where the page has one, the clock
+         * beside it either way (navigation.c clock_place places both) */
+        int titled = own && *own;
         void *clock = titled != st.bar_titled ? widget_lookup(bar, "label_clock", 1) : (void *)0;
         if (!clock) return;
         st.bar_titled = titled;
         st.clock_key = 0;
-        /* a status row keeps the clock beside a title (navigation.c clock_place places both) */
-        if (titled && !geom_val(V_STATUS_Y))
-            widget_set_text(clock, &none);
-        else
-            rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
-        /* the title takes the clock's room while it makes way, up to EQ's box, parked where the
-         * right group's room starts (tools/ipod.py) */
-        static int title_w;
-        if (!title_w) title_w = I(st.bar_title, W_W);
-        void *eq = st.bar_eq ? P(st.bar_eq, W_PARENT) : (void *)0;
-        int wide = eq ? I(eq, W_X) + I(st.bar_eq, W_X) - I(st.bar_title, W_X) : title_w;
-        if (!geom_val(V_STATUS_Y)) /* a status row's: clock_place */
-            widget_resize(st.bar_title, titled && wide > title_w ? wide : title_w,
-                          I(st.bar_title, W_H));
+        rearm(&st.clock_timer, clock_due, 0); /* clock_show writes it again */
         if (!st.bar_timer) st.bar_timer = timer_add(bar_repaint, (void *)0, 0);
         return;
     }
@@ -185,10 +172,8 @@ void slider_fill(void *slider, unsigned color) {
 }
 void np_fill(int scrub) {
     if (!st.np_slider) return;
-    /* a status row's set (OLED's) keeps the accent and marks the scrub with paint_scrubber's knob
-     */
-    slider_fill(st.np_slider,
-                scrub && !geom_val(V_STATUS_Y) ? 0xffffffff : RGBA(accent_tone(TONE_LIGHT)));
+    /* the status row's set keeps the accent and marks the scrub with paint_scrubber's knob */
+    slider_fill(st.np_slider, RGBA(accent_tone(TONE_LIGHT)));
     /* a theme whose fill is near white already marks the scrub with a thicker line */
     const theme_t *T = theme();
     if (T->np_scrub != T->np_bar)
@@ -243,7 +228,7 @@ void paint_scrubber(void *w, void *canvas) {
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
         stock_canvas_set_fill_color(canvas, saved);
     }
-    if (st.scrub && n > 0 && geom_val(V_STATUS_Y)) { /* the scrub's knob, as a slider's (np_fill) */
+    if (st.scrub && n > 0) { /* the scrub's knob, as a slider's (np_fill) */
         int x = fill < NP_KNOB / 2        ? NP_KNOB / 2
                 : fill > bw - NP_KNOB / 2 ? bw - NP_KNOB / 2
                                           : fill;

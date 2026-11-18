@@ -130,10 +130,9 @@ typedef struct {
 #define SVC_PROP "ringnav_svc"
     void *sc_check[SVC_MAX]; /* the Configuration pages' switch labels, by service, while shown */
     int svc_n;               /* the card apps Streaming listed at its last build */
-    /* Ratings (ratings.c keeps the rest): Now Playing's window and the window the picker is up on
-     * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
-     */
-    void *rate_win, *rate_on;
+    /* Ratings (ratings.c keeps the rest): Now Playing's window; the page a Ratings list or Long
+     * Songs opened, with its tracks (page_tracks). */
+    void *rate_win;
     int empty_kind; /* the empty Library list empty_class closes and opens the empty state for */
     void *rt_page, *rt_list;
     int dark; /* 1: the backlight was off at the last UI loop pass; 2: a centre press woke it */
@@ -865,7 +864,6 @@ int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
-int rate_key(void *top, unsigned key);
 int rate_open(void);
 int rate_car(int n);       /* Car Remote's Rate: n hearts for the playing track; 1 kept */
 int rate_car_hearts(void); /* the playing track's 0-5 hearts, -1 when it can't be rated */
@@ -998,7 +996,6 @@ void clicker_step(void);
 int clicker_route(int listening);
 /* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
-int modal_set(void);
 int modal_row_w(void);
 void *modal_gap(void *view);
 void modal_row(void *row, void *label, const char *icon, const char *value, int how);

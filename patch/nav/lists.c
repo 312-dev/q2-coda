@@ -352,7 +352,7 @@ static int sel_height(menu_t *m) {
      * list end, which crosses the card's answers, the second answer would scroll the first under
      * the bar and the wheel could never light it (feedback.c confirm) */
     if (confirm_surface(m->w)) return m->height;
-    if (!end || m->kind == 3 || m->kind == 4) return m->height;
+    if (m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
     for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     end -= lr_edit_room(m->w); /* an editor's list ends higher, over its hint (library_edit.c) */
@@ -448,7 +448,7 @@ void forget_rows(void *list) {
     if (load_rows(&m, view)) wheel_offset(&m, 0);
 }
 
-/* A list_fit set's list holds whole rows, so a view stops with a row's top at its own: want, or
+/* A list holds whole rows (the set's list_fit), so a view stops with a row's top at its own: want, or
  * where want would cut a row, the first row's top past it. A row of another pitch (Power's 12 px
  * gap before Restart) can put the end, the content less the view, inside a row, which would show
  * cut at the top; there the content grows to that row's top plus the view, as lyric_pad's does, so
@@ -457,7 +457,7 @@ static int fit_top(menu_t *m, int want) {
     int top = view_top(m), best = -1, cut = 0;
     /* a menu sheet's rows pass under its top fade, so its last row ends on the list end
      * (menu_modal.c) */
-    if (m->kind != 1 || !geom_val(V_LIST_FIT) || modal_rows_of(m->w)) return want;
+    if (m->kind != 1 || modal_rows_of(m->w)) return want;
     for (int i = 0; i < m->n; ++i) {
         rect_t r = bounds(m, i);
         int y = r.y + top;
@@ -470,7 +470,7 @@ static int fit_top(menu_t *m, int want) {
     return best;
 }
 
-/* Least viewport move that reveals logical row id with a small reading margin.
+/* Least viewport move that reveals logical row id, whole.
  * Remembered-position restoration keeps its glide; wheel steps are immediate. */
 void reveal(menu_t *m, int id, int immediate) {
     int top = view_top(m);
@@ -485,17 +485,14 @@ void reveal(menu_t *m, int id, int immediate) {
         y = r.y + top;
         h = r.h;
     }
-    /* A tall row cannot fit: show its title consistently instead of alternating edges. A list_fit
-     * set's list holds whole rows and keeps them whole: no margin, so it scrolls a row at a
-     * time. */
-    int height = sel_height(m),
-        margin = geom_val(V_LIST_FIT) ? 0 : clamp_step((height - h) / 2, SCROLL_MARGIN, 0);
-    int want = h > height || y - top < margin  ? y - margin
-               : y - top > height - h - margin ? y - (height - h - margin)
-                                               : top;
+    /* A tall row cannot fit: show its title consistently instead of alternating edges. The list
+     * holds whole rows and keeps them whole (the set's list_fit): no margin, so it scrolls a row at
+     * a time. */
+    int height = sel_height(m);
+    int want = h > height || y < top ? y : y - top > height - h ? y - (height - h) : top;
     /* The first row brings in whatever heads the list above it (the EQ page's graph) when both
-     * fit, rather than stopping a margin into it. Kind 1's ids are its row order. */
-    if (m->kind == 1 && id == 0 && y + h + margin <= height) want = 0;
+     * fit. Kind 1's ids are its row order. */
+    if (m->kind == 1 && id == 0 && y + h <= height) want = 0;
     want = fit_top(m, clamp_step(want, max_top(m), 0));
     int glide = motion_ms(theme()->recall_ms, MO_SPATIAL);
     if (immediate || !glide) {

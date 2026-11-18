@@ -54,8 +54,8 @@ void list_toggle(void *label, const char *title, int on) {
     void *button = P(label, W_PARENT);
     void *image = widget_lookup(button, "_setting_switch", 0);
     if (!image) {
-        /* on the set's right column, else stock's x 302 */
-        int right = geom_val(V_RIGHT_X), x = (right ? 375 - right - 50 : 302) - I(button, W_X);
+        /* on the set's right column */
+        int x = 375 - geom_val(V_RIGHT_X) - 50 - I(button, W_X);
         image = image_create(button, x, 0, 50, I(button, W_H));
         widget_set_name(image, "_setting_switch");
         image_set_draw_type(image, IMAGE_DRAW_CENTER);
@@ -68,7 +68,7 @@ void list_toggle(void *label, const char *title, int on) {
 /* A set_text theme's settings rows: the title left and the value right-aligned in the
  * trailing column, the title ending short of it. Switches read On or Off as values, except on a
  * set_switch theme (list_toggle). */
-/* On a set with a right column: the value's box ends on it, or VALUE_CHEVRON_GAP short of it on a
+/* The value's box ends on the set's right column, or VALUE_CHEVRON_GAP short of it on a
  * row that opens a page (its chevron is there), and the title and value split the row as a
  * label/value row does (kv_row); unmeasured (no canvas yet), the boxes stay as made. */
 static void value_fit(void *label, void *text) {
@@ -88,9 +88,8 @@ void list_value(void *label, const char *title, const char *value) {
     void *button = P(label, W_PARENT);
     void *text = widget_lookup(button, "_setting_value", 0);
     if (!text) {
-        /* its text's right end on the set's right column (hscroll_label keeps 2 px), else 356 */
-        int right = geom_val(V_RIGHT_X),
-            x = (right ? 374 - right - 134 : 302 - 80) - I(button, W_X);
+        /* its text's right end on the set's right column (hscroll_label keeps 2 px) */
+        int x = 374 - geom_val(V_RIGHT_X) - 134 - I(button, W_X);
         text = hscroll_label_create(button, x, 0, 134, I(button, W_H));
         widget_set_name(text, "_setting_value");
         widget_use_style(text, "s_scrlabel_white20r");
@@ -104,10 +103,10 @@ void list_value(void *label, const char *title, const char *value) {
     /* a theme's value grey, final in each half (text_ink); the selection's sel_text still wins */
     unsigned ink = theme()->set_value_ink[ipod_light()];
     if (ink) text_ink(text, 0xff000000u | ink, INK_LABEL);
-    if (geom_val(V_RIGHT_X)) value_fit(label, text);
+    value_fit(label, text);
 }
 
-/* Under a set without stock's toolbars (toolbar 0) the Sleep Timer's switch is a row: stock's
+/* Without stock's toolbars (the set's toolbar 0) the Sleep Timer's switch is a row: stock's
  * img_switch stays, hidden with its toolbar, for stock's callbacks to find by name, and the row's
  * click is its click, on the next loop pass. The page is list-less, so the row is over its fields,
  * tools/ipod.py moving them down. The row reads what the image shows. */
@@ -136,7 +135,7 @@ static int switch_click(void *ctx, void *event) {
 extern int stock_sleeptimer_trampoline(void *win, void *ctx);
 int ringnav_sleeptimer(void *win, void *ctx) {
     int result = stock_sleeptimer_trampoline(win, ctx);
-    if (win && !geom_val(V_TOOLBAR)) {
+    if (win) {
         int h = geom_val(V_SET_ROW);
         void *button = button_create(win, 0, 0, 375, h);
         widget_use_style(button, "s_btn_listitem");
@@ -154,13 +153,13 @@ int ringnav_sleeptimer(void *win, void *ctx) {
 /* A settings row's "Title: value" text; a set_text theme shows it as list_value, its bare text
  * (Accent's name) under Accent. */
 static void row_label(void *label, const char *text);
-/* A feature's settings row's "Title: value" (Crossfade, Resume Songs, Library & Folders' rows): on
- * a set with a right column the title alone with the value on that column, as a key/value row
- * (row_label), else as written. */
+/* A feature's settings row's "Title: value" (Crossfade, Resume Songs, Library & Folders' rows): the
+ * title alone with the value on the set's right column, as a key/value row (row_label), else, with
+ * no ": " or under a theme without set_text, as written. */
 void row_value_text(void *label, const char *text) {
     const char *v = text;
     while (*v && !(v[0] == ':' && v[1] == ' ')) ++v;
-    if (geom_val(V_RIGHT_X) && *v && theme()->set_text)
+    if (*v && theme()->set_text)
         row_label(label, text);
     else
         widget_set_text_utf8(label, text);

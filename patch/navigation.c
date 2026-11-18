@@ -183,7 +183,7 @@ int ringnav_content_query(const char *db, const char *sql, void *row, void *arg,
     return library_query(1, db, sql, row, arg, sort);
 }
 extern void *coverflow_tracks(void *page);
-extern const char *coverflow_bar_title(int status);
+extern const char *coverflow_bar_title(void);
 extern int coverflow_jump(void *w, int from, int dir, unsigned *letter), coverflow_bounded(void *w),
     coverflow_slide(void *w);
 extern void coverflow_lost_touch(void), coverflow_wheel_land(void);
@@ -235,7 +235,6 @@ void *staged_music(int (*query)(void *), void *arg, int *count) {
 }
 
 extern int album_only(void *, void *, int), coverflow_split(void *);
-#define SCROLL_MARGIN 12
 #define HOME_FAST_WINDOW_MS 200
 #define WHEEL_RUN_MS 140
 #define WHEEL_RAMP_MS 100 /* scrub and the pixel fallback: one step for this long, then */

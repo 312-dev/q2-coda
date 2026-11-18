@@ -130,14 +130,13 @@ void vol_paint(void *top, void *canvas) {
     if (n < 2 || !vol) return;
     int np = widget_get_child(wm, n - 2) == st.np_win && st.np_slider && st.np_elapsed;
     rect_t area, bar, text, lo;
-    int ends = np && geom_val(V_STATUS_Y); /* OLED's: speakers at the bar's ends */
     if (np) {
         void *slider = st.np_slider, *times = st.np_elapsed;
         int dy = I(st.np_win, W_Y) - I(top, W_Y), y = dy + I(slider, W_Y),
             bh = widget_get_prop_int(slider, "bar_size", 8), ty = dy + I(times, W_Y);
         bar = (rect_t){ I(slider, W_X), y + (I(slider, W_H) - bh) / 2, I(slider, W_W), bh };
         lo = bar; /* the progress bar's own ends, which the speakers keep */
-        if (ends) bar.x += VOL_SPK_INSET, bar.w -= 2 * VOL_SPK_INSET;
+        bar.x += VOL_SPK_INSET, bar.w -= 2 * VOL_SPK_INSET;
         text = (rect_t){ 0, ty, I(st.np_win, W_W), I(times, W_H) };
         area = (rect_t){ 0, y, text.w, ty + text.h - y };
     } else {
@@ -156,8 +155,7 @@ void vol_paint(void *top, void *canvas) {
     vd.vol_dialog = top;
     vd.vol_drawn = level;
     if (!vd.vol_timer) vd.vol_timer = timer_add(vol_poll, (void *)0, VOL_POLL_MS);
-    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), s[12] = { 'V', 'o', 'l', 'u', 'm', 'e', ' ' },
-             k = np ? 7 : 0;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), s[12];
     int w = max > 0 ? bar.w * eased / (max << 8) : 0;
     if (np) {
         canvas_set_fill_color(canvas, RGBA(0));
@@ -169,10 +167,10 @@ void vol_paint(void *top, void *canvas) {
     /* Pills, like the progress capsule: a non-zero fill is at least round, never a sliver. */
     fill_box(canvas, &bar, RGBA(np ? theme()->np_track_rgb : VOL_PANEL_TRACK), bar.h / 2);
     rect_t on = { bar.x, bar.y, w < bar.h ? bar.h : w, bar.h };
-    /* Over Now Playing it is the progress bar's own: the accent's fill; white between speakers */
-    if (w) fill_box(canvas, &on, RGBA(np && !ends ? accent_tone(TONE_LIGHT) : 0xffffff), bar.h / 2);
+    /* white: over Now Playing on the progress bar, between its speakers */
+    if (w) fill_box(canvas, &on, RGBA(0xffffff), bar.h / 2);
     stock_canvas_set_fill_color(canvas, fill);
-    if (ends) { /* no number: a VOL_SPK_PX speaker VOL_SPK_X in from each end of the progress bar */
+    if (np) { /* no number: a VOL_SPK_PX speaker VOL_SPK_X in from each end of the progress bar */
         int cy = bar.y + bar.h / 2, L = ipod_light();
         paint_art(top, canvas, theme_art(L ? "vol_lo_l" : "vol_lo_d"),
                   lo.x + VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
@@ -180,6 +178,6 @@ void vol_paint(void *top, void *canvas) {
                   lo.x + lo.w - VOL_SPK_X - VOL_SPK_PX / 2, cy - VOL_SPK_PX / 2);
         return;
     }
-    k += put_num(s + k, (unsigned)clamp_step(0, 999, level));
-    draw_centred(canvas, s, k, &text, np ? NP_TIMES_PX : VOL_PANEL_PX, 0xffffffff);
+    unsigned k = put_num(s, (unsigned)clamp_step(0, 999, level));
+    draw_centred(canvas, s, k, &text, VOL_PANEL_PX, 0xffffffff);
 }

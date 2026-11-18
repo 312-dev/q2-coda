@@ -641,11 +641,11 @@ static int action(void *ctx, void *event) {
     }
     else if (id == PER_OUTPUT) ringnav_eq_output_toggle();
     else if (id == ENABLE) b->enabled = !b->enabled;
-    /* The Type picker: the menu sheet's under a modal set (docs/oled-design.md#menus), else a
-     * screen of the types; either opens on the band's own. Under the modal the band's list is
-     * left as it is, no render, so a pick or Return finds it on the Type row. */
+    /* The Type picker: the menu sheet's (docs/oled-design.md#menus), else, when the sheet can't
+     * open, a screen of the types; either opens on the band's own. Under the sheet the band's list
+     * is left as it is, no render, so a pick or Return finds it on the Type row. */
     else if (id == TYPE) {
-        if (modal_set() && modal_pick((void *)0, types, PEQ_TYPES, b->type, type_picked)) return 0;
+        if (modal_pick((void *)0, types, PEQ_TYPES, b->type, type_picked)) return 0;
         ui.screen = TYPES;
     }
     else if (id == CHANNEL && b->enabled) b->enabled = b->enabled % 3 + 1; /* both, left, right */
@@ -810,11 +810,10 @@ static int render_rows(const void *unused) {
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
     /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
-     * as its other lists do (list_end). rows, the list's box: shown, or under a list_fit set on to
-     * the window's foot, its rows past the list end fading into it (navigation.c list_fade), where
-     * the wheel's end leaves the last row on the last whole row above the end (fit_top). */
-    int shown = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh,
-        rows = list_fit_end() ? height - 48 : shown;
+     * as its other lists do (list_end). rows, the list's box: on to the window's foot (the set's
+     * list_fit), its rows past the list end fading into it (navigation.c list_fade), where the
+     * wheel's end leaves the last row on the last whole row above the end (fit_top). */
+    int shown = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh, rows = height - 48;
     if (ui.view && ui.rendered != ui.screen && (ui.rendered == HOME || ui.rendered == BAND)) {
         ui.kept[ui.rendered][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;
         ui.kept[ui.rendered][1] = widget_get_prop_int(ui.view, "yoffset", 0);
