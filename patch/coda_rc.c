@@ -2,7 +2,8 @@
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
  * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate, queue and
- * radio commands, the pairing code and the connected phones in.
+ * radio commands, the pairing code and the connected phones in, and a card app to start for a cover the car wants
+ * (crc_cover_ask, which asks the app itself through its /tmp files).
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if

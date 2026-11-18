@@ -3,7 +3,8 @@ library whose main runs on a thread of this process (no program is executed: con
 temporary folder, --no-ble and a free port, driven over TCP by tools/coda_rc_client.py as a phone would; the test
 stands in for demo's shim (/tmp/coda-rc.now in, /tmp/coda-rc.cmd out, /tmp/coda-rc.ack back). The daemon's loop runs
 until the session ends. CAP_RADIO: StartRadio's commands to the shim and NowPlaying.radio
-(docs/remote-protocol.md#radio)."""
+(docs/remote-protocol.md#radio). A server album's cover the card lacks, asked of its card app while the answer is
+held (docs/internals.md#car-remote-covers)."""
 import ctypes
 import pathlib
 import socket
