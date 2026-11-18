@@ -289,45 +289,132 @@ def test_bad_preload(player, songs, tmp):
     return 'played to the end, then exit, error and /tmp/notsupport'
 
 
-def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
-    """A card app's song still arriving in place (player/grow.c): a fifth of a1 is there and its .stream says get;
-    the player plays what is there, waits at its end (naming the song in /tmp/q2player.wait) rather than ending,
-    and once the rest lands and the line says done plays it to its end: the whole song, frame for frame."""
-    out = tmp/'grow'
+def crc8(b):
+    c = 0
+    for x in b:
+        c ^= x
+        for _ in range(8): c = (c << 1 ^ 0x07 if c & 0x80 else c << 1) & 0xff
+    return c
+
+
+def with_seektable(flac, every=44100):
+    """flac (fixed blocks, as FFmpeg writes them) with a SEEKTABLE after its STREAMINFO, a point about every `every`
+    samples, as the flac tool writes one and as server songs have (FFmpeg writes none)."""
+    block = int.from_bytes(flac[8:10], 'big')
+    at, last = 4, False
+    while not last:
+        last, size = flac[at] & 0x80, int.from_bytes(flac[at + 1:at + 4], 'big')
+        at += 4 + size
+    audio, points, i = at, [], at
+    while (i := flac.find(b'\xff\xf8', i)) >= 0:
+        n, j = flac[i + 4], i + 5  # the frame number, UTF-8 coded
+        k = 0 if n < 0x80 else 1 if n < 0xe0 else 2 if n < 0xf0 else 3
+        num = n & (0x7f >> k if k else 0x7f)
+        for c in flac[j:j + k]: num = num << 6 | c & 0x3f
+        j += k
+        j += {6: 1, 7: 2}.get(flac[i + 2] >> 4, 0) + {12: 1, 13: 2, 14: 2}.get(flac[i + 2] & 15, 0)
+        if crc8(flac[i:j]) == flac[j] and (not points or num * block >= points[-1][0] + every):
+            points.append((num * block, i - audio))
+        i += 2
+    table = b''.join(struct.pack('>QQH', smp, off, block) for smp, off in points)
+    si = bytes([flac[4] & 0x7f]) + flac[5:42]  # STREAMINFO, no longer the last block
+    return flac[:4] + si + bytes([3]) + len(table).to_bytes(3, 'big') + table + flac[42:]
+
+
+def grow(player, songs, out, head, land_at, extra=(), seektable=False, part=None):
+    """a1 arriving in place as a card app writes it (player/grow.c): head bytes of it on the card and its .stream saying
+    get, the rest landing at land_at (the line then done); extra are more steps (a seek); seektable, a1 with one; part, (time, bytes): more of it landing earlier. Returns the session, the PCM,
+    and the beats' reads of /tmp/q2player.wait (False when there is none)."""
     card, status = out/'mnt/mmc/.foo', out/'tmp/q2-foo.stream'
     card.mkdir(parents=True, exist_ok=True)
     whole, path = (songs/'a1.flac').read_bytes(), card/'grow.flac'
-    head = len(whole) // 5
+    if seektable: whole = with_seektable(whole)
     path.write_bytes(whole[:head])
-    seen = []
+    seen, have = [], [head]
 
-    def line(state, have):
-        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{have}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
+    def line(state, n):
+        status.write_text(f'#Q2STREAM/1\tseq=1\n{state}\t{n}\t{len(whole)}\t20000\t/mnt/mmc/.foo/grow.flac\n')
 
     def beat(s):  # the app rewrites its line twice a second while the song arrives
-        line('get', head)
+        if have[0] < len(whole): line('get', have[0])
         seen.append((out/'tmp/q2player.wait').exists() and (out/'tmp/q2player.wait').read_text())
 
-    def land(s):
-        with open(path, 'ab') as f: f.write(whole[head:])
-        line('done', len(whole))
+    def land(s, n=None):
+        n = n or len(whole)
+        with open(path, 'ab') as f: f.write(whole[have[0]:n])
+        have[0] = n
+        line('done' if n == len(whole) else 'get', n)
 
     boot = [(0.0, '{mcl-dsdmode\\0}'), (0.0, '{mcl-replaygain\\0}'), (0.1, '{mcl-setoutputway\\0}'), (0.1, '{mcl-setvol\\60}')]
-    steps = boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 32)] + [(16.0, land), (40.0, None)]
+    steps = sorted(boot + [(1.0, fakedemo.song('set-songurl', str(path)))] + [(t / 2, beat) for t in range(4, 2 * int(land_at) + 2)]
+                   + [(land_at, land), *extra] + ([(part[0], lambda s: land(s, part[1]))] if part else []), key=lambda st: st[0]) + [(land_at + 24.0, None)]
     s = fakedemo.Session(out)  # it empties out/tmp: the line after it
     s.music = songs
     line('get', head)
     s.run(steps, fakedemo.launch_host(player, str(songs), 4), 4)
-    got = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    pcm = b''.join(p.read_bytes() for p in sorted((out/'pcm').glob('*.raw')))
+    assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
+    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
+    assert exits == ['{player-status\\exit}'], f'the song ended other than once, at its end: {exits}'
+    return s, pcm, seen
+
+
+def test_grow_plays_a_song_as_it_arrives(player, songs, tmp):
+    """A card app's song still arriving in place (player/grow.c): a fifth of a1 is there and its .stream says get;
+    the player plays what is there, waits at its end (naming the song in /tmp/q2player.wait) rather than ending,
+    and once the rest lands and the line says done plays it to its end: the whole song, frame for frame."""
+    whole = (songs/'a1.flac').read_bytes()
+    s, got, seen = grow(player, songs, tmp/'grow', len(whole) // 5, 16.0)
     want = reference(songs/'a1.flac')
     at = first_difference(got, want)
     assert at is None, f'{len(got) // 4} frames, reference {len(want) // 4}; first difference at frame {(at or 0) // 4}'
     assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'the wait was never named: {seen}'
-    assert not (out/'tmp/q2player.wait').exists(), 'q2player.wait left after the song'
-    exits = [l.split()[-1] for l in s.lines if 'exit}' in l or 'error}' in l]
-    assert exits == ['{player-status\\exit}'], exits
     waited = seen.count('/mnt/mmc/.foo/grow.flac\n')
     return f'{len(got) // 4} frames equal to the reference; the wait named in {waited} of {len(seen)} beats'
+
+
+def test_grow_seek_inside(player, songs, tmp):
+    """A seek inside the part of a growing FLAC on the card, with no SEEKTABLE (FFmpeg then searches the file for the
+    target) and with one (server songs have it): the song plays from the target at once, without waiting for the rest,
+    and on to its end once the rest lands."""
+    ref, said = reference(songs/'a1.flac'), []
+    for table in (False, True):
+        whole = (songs/'a1.flac').read_bytes()
+        seek = [(2.0, '{mcl-seek\\9}')]  # nine tenths of a1 are there (past 16 s); the rest lands 6 s after the seek
+        s, got, seen = grow(player, songs, tmp/f'grow-inside{int(table)}', len(whole) * 9 // 10, 8.0, seek, table)
+        tail, kind = ref[9 * 44100 * 4:], 'with a SEEKTABLE' if table else 'without a SEEKTABLE'
+        assert got.endswith(tail), f'{kind}: the PCM does not end with the reference from 9 s ({len(got) // 4} frames)'
+        head = got[:len(got) - len(tail)]
+        assert ref.startswith(head), f'{kind}: {len(head) // 4} frames before the seek are not the reference start'
+        # what plays from 9 s before the rest lands (6 s after the seek: 4 s of it at the least)
+        after = [p for t, p in s.positions if 2.0 < t < 8.0]
+        assert after and max(after) >= 12, f'{kind}: the seek waited for the rest of the song: positions {after}'
+        assert '/mnt/mmc/.foo/grow.flac\n' not in seen, f'{kind}: the player waited although the target was on the card'
+        said.append(f'{kind} at {max(after)} s before the rest landed')
+    return 'from 9 s at once, ' + '; '.join(said)
+
+
+def test_grow_seek_beyond(player, songs, tmp):
+    """A seek past the part of a growing FLAC on the card, with no SEEKTABLE and with one: the player waits there
+    (naming the song for the spinner, its position the target's) rather than ending the song, and plays from the
+    target as soon as its bytes land, not once the whole song has: the reference from 15 s to the end."""
+    ref, said = reference(songs/'a1.flac'), []
+    for table in (False, True):
+        whole = (songs/'a1.flac').read_bytes()
+        # a fifth of a1 is there (4 s); nine tenths of it 3 s after the seek (past 16 s), the rest 10 s after it
+        seek = [(2.0, '{mcl-seek\\15}')]
+        s, got, seen = grow(player, songs, tmp/f'grow-beyond{int(table)}', len(whole) // 5, 12.0, seek, table, (5.0, len(whole) * 9 // 10))
+        tail, kind = ref[15 * 44100 * 4:], 'with a SEEKTABLE' if table else 'without a SEEKTABLE'
+        assert got.endswith(tail), f'{kind}: the PCM does not end with the reference from 15 s ({len(got) // 4} frames)'
+        head = got[:len(got) - len(tail)]
+        assert ref.startswith(head), f'{kind}: {len(head) // 4} frames before the seek are not the reference start'
+        assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'{kind}: the wait was never named: {seen}'
+        waiting = [p for t, p in s.positions if 2.6 < t < 4.9]  # the target's bytes not there: the bar shows it
+        assert waiting and set(waiting) == {15}, f'{kind}: the position while the player waits is not the target: {waiting}'
+        after = [p for t, p in s.positions if 2.0 < t < 12.0]
+        assert after and max(after) >= 16, f'{kind}: the target was not played when its bytes came: positions {after}'
+        said.append(f'{kind} {len(head) // 4} frames before, at {max(after)} s before the rest landed')
+    return 'a wait, then the reference from 15 s to the end; ' + '; '.join(said)
 
 
 def check_not_played(player, songs, tmp, scenario):

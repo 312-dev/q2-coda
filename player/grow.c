@@ -8,6 +8,10 @@
  * instead of ending the song, and so does a read after a seek past them. It ends at the file's end once the line
  * says done or fail, the line is gone, the file has not been rewritten for STALE_S (the app is gone), or a stop or
  * a skip (ctl.cut) gives the song up.
+ * A seek (grow_seeking, around source_seek's av_seek_frame) searches only the bytes there are: the file's size is
+ * theirs and a read at their end ends at once, so FFmpeg's FLAC search, which reads the last frame's timestamp at
+ * the file's end, no longer waits there for the whole song (docs/internals.md#streaming-configuration). A target
+ * past them is reached by reading on from the last frame there, the read waiting as above until it arrives.
  * ponytail: a pause or a seek asked while the read waits is taken once the bytes come; the engine reads between
  * requests. A demuxer that reads the file's end while it opens would wait there for the whole
  * song and start it only then, as before; measured for FLAC (test/player/run.py grow), not yet for MP3, whose demuxer
@@ -33,7 +37,7 @@ struct grow {
     char status[96]; /* the app's .stream */
     char path[URL_MAX]; /* the card path its lines name: the url from "/mnt/mmc/." on */
     int64_t pos, total;
-    int waiting;
+    int waiting, seeking;
 };
 
 /* The .stream file for url, into out, and the card path in url; NULL when url is not under an app's folder. */
@@ -117,7 +121,7 @@ static int grow_read(void *opaque, uint8_t *to, int n) {
             return (int)got;
         }
         clearerr(g->f);
-        if (!arriving(g->status, g->path, &g->total)) {
+        if (g->seeking || !arriving(g->status, g->path, &g->total)) {
             wait_mark(g, 0);
             return AVERROR_EOF;
         }
@@ -132,10 +136,10 @@ static int grow_read(void *opaque, uint8_t *to, int n) {
 
 static int64_t grow_seek(void *opaque, int64_t offset, int whence) {
     struct grow *g = opaque;
-    if (whence & AVSEEK_SIZE) { /* the whole song's, as the app says it, while it arrives */
+    if (whence & AVSEEK_SIZE) { /* the whole song's, as the app says it, while it arrives; a seek's, the bytes there */
         struct stat st;
         int64_t now = fstat(fileno(g->f), &st) ? -1 : st.st_size;
-        return g->total > now ? g->total : now;
+        return g->total > now && !g->seeking ? g->total : now;
     }
     whence &= ~AVSEEK_FORCE;
     if (whence == SEEK_CUR) offset += g->pos;
@@ -169,6 +173,8 @@ fail:
 }
 
 struct AVIOContext *grow_avio(struct grow *g) { return g->io; }
+
+void grow_seeking(struct grow *g, int on) { g->seeking = on; }
 
 void grow_close(struct grow *g) {
     if (!g) return;
