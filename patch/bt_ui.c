@@ -796,8 +796,84 @@ static void link_poll(unsigned now) {
     }
 }
 
+/* ---- Quality on a live link: the codec switched in place ---- */
+
+/* Stock's Quality click (0x4c54f4), on a choice other than the saved one with a headset linked
+ * (bt_linkstatus, a codec in bt_showcoding), asks to reconnect (msg_btreconnect), stops the player,
+ * forgets the link and runs bluetoothLink(2): btDisconnect, then connectBtDevice, as the codec
+ * priority switchBtPriority gives bluetoothd is read only when a link is set up. The headset is
+ * dropped for some seconds and comes back on a new ACL handle, or does not when its page fails.
+ * bt_quality_linked stands in for the click's read of bt_linkstatus (BT_QUALITY, tools/build.py),
+ * given the choice: what it returns is that byte to stock, so 0 sends the click down its tail for
+ * no link (switchBtPriority, BTCODING saved, the checks redrawn) and anything else to its dialog.
+ *
+ * A choice of another codec than the one streaming is switched on the link as it is: bluealsa's
+ * SelectCodec (q2bt-codec, as the link monitor's step-down), which closes the AVDTP stream and
+ * opens one on the other codec's endpoint with the ACL link, AVRCP and the pairing untouched; the
+ * player opens the PCM again when it is back (player/output.c bt_reopen). The codecs are tried in
+ * the order bluetoothd would take them at a connect (a2dp_find_eps: the choice's, then LDAC, aptX
+ * HD, aptX, AAC, SBC), so a headset without the choice's gets what a reconnect would have given it;
+ * bluealsa refuses one the headset has not before it touches the stream, and takes the one already
+ * streaming as done. A choice of the codec streaming: aptX HD, aptX and AAC have one rate, so
+ * nothing is done; LDAC's three and SBC's two differ in a rate bluealsa reads as the encoder
+ * starts, so those keep stock's reconnect. */
+#define BT_PICK_FILE "/tmp/q2bt.pick" /* what the switch said: each refusal, then the codec taken */
+static int row_codec(int row) { /* a choice's codec, as stock numbers them (bt_showcoding) */
+    return row < 0 ? 0 : row <= 2 ? 4 : row == 3 ? 13 : row == 4 ? 3 : row == 5 ? 2 : row <= 7;
+}
+int bt_quality_linked(int row) {
+    static const struct {
+        signed char codec;
+        const char *order;
+    } pick[] = { { 4, "LDAC aptX-HD aptX AAC SBC" },
+                 { 13, "aptX-HD LDAC aptX AAC SBC" },
+                 { 3, "aptX LDAC aptX-HD AAC SBC" },
+                 { 2, "AAC LDAC aptX-HD aptX SBC" },
+                 { 1, "SBC" } };
+    int now = I(bt_showcoding, 0), want = row_codec(row);
+    char cmd[512];
+    if (!bt_linkstatus || now <= 0 || !want) return 0;
+    if (want == now) return want == 4 || want == 1;
+    for (unsigned i = 0; i < sizeof pick / sizeof *pick; ++i) {
+        if (pick[i].codec != want) continue;
+        /* the PCM's object path through a pattern of what one holds, as it goes to the shell */
+        tk_snprintf(cmd, sizeof cmd,
+                    "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
+                    "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
+                    "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_/]*/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
+                    "|\\1|p' | head -n 1); [ -n \"$p\" ] && for c in %s; do q2bt-codec \"$p\" $c && "
+                    "echo $c && break; done) >" BT_PICK_FILE " 2>&1 &",
+                    pick[i].order);
+        system(cmd);
+        tk_snprintf(cmd, sizeof cmd, "Quality: %s asked for on the live link", pick[i].order);
+        ulog('I', "bt", cmd);
+        return 0;
+    }
+    return 1;
+}
+/* BT_QUALITY's call: the choice is in the click's $s0 (the site's delay slot hands it over), and
+ * the click reads $gp next without loading it again, which the calls above have changed: back from
+ * the click's own frame, where its prologue saved it (0x10($sp)). */
+__asm__(".set push\n.set noreorder\n.globl bt_quality_site\nbt_quality_site:\n"
+        "addiu $sp, $sp, -24\nsw $ra, 20($sp)\njal bt_quality_linked\nnop\n"
+        "lw $ra, 20($sp)\naddiu $sp, $sp, 24\njr $ra\nlw $gp, 16($sp)\n.set pop\n");
+
+/* bluealsa names the codec at each SetConfiguration in its status event, which stock keeps in
+ * a2dp_eventstate (1 SBC, 2 AAC, 3 aptX, 4 LDAC, 13 aptX HD; 0x65 a refused configuration, which
+ * makes stock reconnect). checkBluetoothStatus moves it to bt_showcoding only while it sets a link
+ * up (bt_a2dp_direction), so after a switch in place (the pick above, the link monitor's step) the
+ * badge, the connected row and Quality's caption kept the codec the link began on. The event is
+ * left as it is: stock's own paths read and clear it. */
+static void codec_follow(void) {
+    int event = I(a2dp_eventstate, 0), shown = I(bt_showcoding, 0);
+    if (!bt_linkstatus || shown <= 0 || shown == event || I(bt_a2dp_direction, 0)) return;
+    if (event == 1 || event == 2 || event == 3 || event == 4 || event == 13)
+        *(volatile int *)bt_showcoding = event;
+}
+
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
+    codec_follow();
     if (bt.view) page_poll(now);
     guest_ui_poll();
     bt_detail_poll();

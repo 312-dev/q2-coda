@@ -36,6 +36,8 @@ void *pair_prompt(const char *phone, const char *code, const char *body, const c
                     timeout_row,
                     answer,
                     ctx,
-                    PAIR_GLYPH };
+                    PAIR_GLYPH,
+                    0,
+                    0 };
     return confirm(&c) ? confirm_dialog() : (void *)0;
 }

@@ -59,6 +59,7 @@ static struct {
     card_log *ulog;        /* the unified log: the EDR outcome, once; each STEP */
     unsigned char sink[6]; /* the A2DP sink's address (bluealsa's a2dpsrc PCM), have_sink */
     int have_sink, sink_h; /* and its ACL handle at the last line, -1 none */
+    int down_h;            /* the link whose end is to be noted (bt_down_event), -1 none */
     struct bt_edr edr;
     struct bt_step step; /* the step-down, kept through a pause; afresh for another headset */
     int allowed;         /* bt_step_allowed's, from config.ini */
@@ -101,13 +102,15 @@ static int acl_handle(void) {
     return bt_acl_handle((const unsigned char *)req, 4);
 }
 /* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, Number Of Completed
- * Packets (0x13), the controller's account of each packet it delivered, and for the EDR command
- * Command Status (0x0f) and Connection Packet Type Changed (0x1d) */
+ * Packets (0x13), the controller's account of each packet it delivered, for the EDR command
+ * Command Status (0x0f) and Connection Packet Type Changed (0x1d), and Disconnection Complete
+ * (0x05), which says which side ended the link */
 static void raw_open(void) {
     unsigned short addr[3] = { AF_BLUETOOTH, 0,
                                0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
-    /* hci_filter: event packets; events 0x0e, 0x0f, 0x13 and 0x1d; any opcode */
-    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x0f | 1u << 0x13 | 1u << 0x1d, 0, 0 };
+    /* hci_filter: event packets; events 0x05, 0x0e, 0x0f, 0x13 and 0x1d; any opcode */
+    unsigned filter[4] = { 1u << 4,
+                           1u << 0x05 | 1u << 0x0e | 1u << 0x0f | 1u << 0x13 | 1u << 0x1d, 0, 0 };
     bt.raw = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
     if (bt.raw < 0) return;
     if (bind(bt.raw, addr, sizeof addr) ||
@@ -134,6 +137,11 @@ static int events(int ms, int until_answered) {
         if (said == 2) /* a refusal or an unexpected mask warns */
             ulog_add(bt.ulog, time(0), now_ms(),
                      strstr(line, "ptype=0x0018 status=0x00") ? 'I' : 'W', "bt", line);
+        if (bt_down_event(b, n, bt.down_h, line, sizeof line)) {
+            note(line);
+            ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
+            bt.down_h = -1;
+        }
         if (until_answered && bt.link.answered >= 5) return 1;
     }
 }
@@ -142,6 +150,10 @@ static void link_read(void) {
     unsigned char c[8];
     char line[32];
     int h = acl_handle(); /* each line: a reconnect (a codec change) brings a new handle */
+    /* the link followed until now ended: its Disconnection Complete is waiting, read before the
+     * handle is let go */
+    if (bt.raw >= 0 && bt.down_h >= 0 && h != bt.down_h) events(0, 0);
+    if (h >= 0) bt.down_h = h;
     if (bt_handle_follow(&bt.link, h)) {
         snprintf(line, sizeof line, "LINK h=%d", h), note(line);
         bt.fly.have = 0; /* a new link's packets: counted afresh */
@@ -481,7 +493,7 @@ static void tick(unsigned now) {
 }
 
 void bt_init(card_log *l, card_log *u) {
-    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = -1;
+    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = bt.down_h = -1;
     bt_edr_reset(&bt.edr);
 }
 int bt_streaming(void) { return bt.det.on; }

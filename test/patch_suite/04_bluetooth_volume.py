@@ -67,6 +67,36 @@ for links,paired,want in (([],True,1),([],False,0),([(b_mac,3)],True,0),([(b_mac
     link=BtLinkMachine(links,paired)
     assert link.call(address=payload_syms['headset_bt_autolink'],args=(link.string(a_mac),0,0,0),gap=0)==want
     passed()
+# Quality's click on a live link (BT_QUALITY): stock's own two patched instructions run, from the read of
+# bt_linkstatus to the branch that takes its answer, with the choice in $s0 as the click holds it. A choice of
+# another codec starts the switch in place and answers 0, stock's tail for no link (no dialog, no btDisconnect);
+# LDAC to LDAC answers the link, stock's reconnect. $gp comes back as the click's frame saved it, whatever the
+# calls on the way left in it: the click's next instruction reads bt_showcoding through it.
+from build import BT_QUALITY
+assert struct.unpack_from('<II',demo,fileoff(demo,BT_QUALITY[0][0]))==(jal(payload_syms['bt_quality_site']),0x02002025)
+class QualityMachine(Machine):
+    def __init__(self,linked,codec):
+        super().__init__(); self.commands=[]
+        self.byte(syms['bt_linkstatus'],linked); self.word(syms['bt_showcoding'],codec)
+        self.handlers[syms['system@GLIBC_2.0']]='system'
+    def hook(self,u,addr,size,_):
+        if self.handlers.get(addr)!='system': return super().hook(u,addr,size,_)
+        self.commands.append(self.text(u.reg_read(REGS[0]))); u.reg_write(UC_MIPS_REG_GP,0x5a5a5a5a)  # libc's own $gp
+        self.returns(0,clobber=True)
+    def pick(self,row):
+        u=self.u; u.reg_write(UC_MIPS_REG_SP,0x7000f000); self.word(0x7000f010,0xa3aae0)  # the click's saved $gp
+        u.reg_write(UC_MIPS_REG_GP,0x11111111); u.reg_write(UC_MIPS_REG_S0,row)
+        u.emu_start(BT_QUALITY[0][0],BT_QUALITY[1][0]+4,count=self.budget)
+        assert u.reg_read(UC_MIPS_REG_PC)==BT_QUALITY[1][0]+4 and u.reg_read(UC_MIPS_REG_SP)==0x7000f000
+        assert u.reg_read(UC_MIPS_REG_GP)==0xa3aae0 and u.reg_read(UC_MIPS_REG_S0)==row
+        return u.reg_read(UC_MIPS_REG_V0)
+for linked,codec,row,answer,order in ((1,13,4,0,'aptX LDAC aptX-HD AAC SBC'),(1,13,7,0,'SBC'),(1,1,3,0,'aptX-HD LDAC aptX AAC SBC'),
+                                      (1,13,3,0,None),(1,4,0,1,None),(1,1,6,1,None),(0,13,4,0,None),(1,0,4,0,None)):
+    q=QualityMachine(linked,codec)
+    assert q.pick(row)==answer
+    assert [c for c in q.commands if 'q2bt-codec' in c]==([] if order is None else [c for c in q.commands if f'for c in {order}; do q2bt-codec "$p" $c' in c])
+    assert len(q.commands)==(order is not None)
+    passed()
 # Bluetooth volume runs through the shared hook. Mock only headset I/O
 # and stock gain; device_set_volume itself executes its native output routing.
 class OutputVolumeMachine(Machine):

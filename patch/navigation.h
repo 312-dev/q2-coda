@@ -636,6 +636,7 @@ void status_touch(unsigned type, int x, int y);
  * show (vol_show), whether it is up, its paint (status_slots_paint) */
 void vol_pill_show(void);
 int vol_pill_up(void);
+void status_pill_show(const char *glyph, const char *text); /* a message in its place (adb's allowed) */
 void vol_pill_paint(void *bar, void *canvas);
 #if Q2POD_DEV
 void vol_pill_fake(void); /* --dev: STATUS_FAKE's volume=N, as a headset's */
@@ -689,14 +690,13 @@ void np_tap_reset(void);
 int np_tap_lift(void *target, void *event);
 int np_goto(int album, int go);
 /* np_about.c: ⋯'s About, the track's details as a page; under OLED its info grid, painted
- * (np_about_paint), its header's top over the status bar (np_about_cap), the wheel scrolling it
- * (np_about_key), filled from the details' labels (np_about_fill) */
+ * (np_about_paint) from the window's top, the wheel scrolling it (np_about_key), filled from the
+ * details' labels (np_about_fill) */
 int np_about_open(void *ctx, void *event);
 void *np_about_page(void);
 void np_about_np_gone(void *win);
 void np_about_fill(void *win);
 void np_about_paint(void *w, void *canvas);
-void np_about_cap(void *bar, void *canvas);
 int np_about_key(void *top, unsigned key);
 int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
@@ -1105,10 +1105,9 @@ void modal_corners(void *canvas, const rect_t *r, int R);
 void album_local_load(void *win);
 int album_local_on(void *win);
 void album_local_paint(void *w, void *canvas);
-/* artist_page.c: an artist's page's pair of stops and its monogram over the status bar */
+/* artist_page.c: an artist's page's pair of stops */
 int pair_key(void *top, void *w, int dir);
 int pair_holds(void *w);
-void artist_cap(void *bar, void *canvas);
 /* library_artist.c: a Library artist's page under the menu sheet's set (artistinfo_page) */
 int artist_local(void);
 int artist_local_on(void *win);
@@ -1135,6 +1134,7 @@ int coda_rc_enabled(void);
 void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice) */
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
+const char *day_or_date(char *out, unsigned n, unsigned when); /* Today, Yesterday, Nov 12 */
 void carremote_poll(void), carremote_paired(const char *name),
     carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
@@ -1148,6 +1148,13 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
 const char *usb_ui_title(const char *name), *usb_ui_value(void);
 int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+#if Q2POD_DEV
+/* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
+ * usb_ui.c; Settings > General > Developer Options and Trusted Computers */
+void usb_ui_auth_answer(const char *a);
+int adb_prompt_open(const char *line), adb_dev_open(void *ctx, void *event);
+void adb_prompt_close(void), adb_trust_paint(void *w, void *canvas);
+#endif
 /* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
 void usb_event_start(void);
 int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);

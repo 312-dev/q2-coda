@@ -186,6 +186,14 @@ def block(fw, data=b'', size=None):
     C.memmove(p, data, len(data))
     return p
 
+def page_block(fw):
+    """A page's window as page_open makes it: the whole 375x320 screen (docs/oled-design.md#full-bleed), its
+    other fields zero."""
+    p = block(fw, size=4096)
+    for field, value in (('W_W', 375), ('W_H', 320)):
+        C.c_int.from_address(p + O[field]).value = value
+    return p
+
 def claim(address):
     """A page at one of stock's fixed addresses, mapped if free, made writable and executable (a test's
     stand-in code goes there) if conftest's own map holds it."""

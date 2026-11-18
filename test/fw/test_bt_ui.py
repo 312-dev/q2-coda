@@ -674,3 +674,117 @@ def test_a_connecting_row_s_spinner_turns_the_whole_connect(fw, scanning):
     turns = [f for f in shown if f]
     assert len({f[0] for f in turns}) == 8  # every spoke
     assert len([1 for a, b in zip(turns, turns[1:]) if a != b]) >= 9  # a second: ten steps
+
+
+PICK_FILE = '/tmp/q2bt.pick'
+
+
+def quality_pick(fw, row, codec, linked=1):
+    """Stock's Quality click for choice `row` with stock's codec number `codec` streaming: bt_quality_linked's answer
+    (stock reconnects on anything but 0) and the switch it started, if any."""
+    p = Page(fw, DEVICES)
+    fw.var('bt_linkstatus', C.c_ubyte).value = linked
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = codec
+    p.commands.clear()
+    r = fw.fn('bt_quality_linked', C.c_int, C.c_int)(row)
+    return r, [c for c in p.commands if PICK_FILE in c]
+
+
+@pytest.mark.parametrize('row, codec, order', [
+    (4, 13, 'aptX LDAC aptX-HD AAC SBC'),  # aptX HD streaming, aptX picked
+    (7, 13, 'SBC'),                        # SBC every headset has
+    (6, 3, 'SBC'),
+    (3, 1, 'aptX-HD LDAC aptX AAC SBC'),   # back up from SBC
+    (5, 4, 'AAC LDAC aptX-HD aptX SBC'),
+    (2, 3, 'LDAC aptX-HD aptX AAC SBC'),   # LDAC Auto on a headset without LDAC: the best it has, as bluetoothd picks
+])
+def test_a_quality_pick_on_a_live_link_switches_the_codec_in_place(fw, row, codec, order):
+    """Stock asks to reconnect and drops the headset (btDisconnect, then connectBtDevice: a new ACL handle at each of
+    the commute's three picks). A pick that changes the codec asks bluealsa for it on the link as it is, the choice's
+    codec first and then bluetoothd's own order for a headset without it, and tells stock nothing is linked, so its
+    tail saves the choice and sets the priority for the next connect with no dialog and no disconnect."""
+    r, switches = quality_pick(fw, row, codec)
+    assert r == 0 and len(switches) == 1
+    assert f'for c in {order}; do' in switches[0] and 'q2bt-codec "$p" $c' in switches[0]
+    assert switches[0].rstrip().endswith('&')
+
+
+@pytest.mark.parametrize('row, codec', [(3, 13), (4, 3), (5, 2)])
+def test_a_pick_of_the_codec_already_streaming_changes_nothing(fw, row, codec):
+    """aptX HD, aptX and AAC have one rate each: the headset already has what was picked, so neither a switch nor
+    stock's reconnect."""
+    assert quality_pick(fw, row, codec) == (0, [])
+
+
+@pytest.mark.parametrize('row, codec', [(0, 4), (1, 4), (2, 4), (6, 1), (7, 1)])
+def test_a_pick_within_ldac_or_sbc_is_still_stock_s_reconnect(fw, row, codec):
+    """LDAC's three choices and SBC's two differ in a rate bluealsa reads when the encoder starts, which only a new
+    transport brings: stock's dialog and reconnect stay."""
+    r, switches = quality_pick(fw, row, codec)
+    assert r != 0 and not switches
+
+
+def test_a_pick_with_nothing_linked_is_stock_s(fw):
+    assert quality_pick(fw, 4, 13, linked=0) == (0, [])
+    assert quality_pick(fw, 4, 0) == (0, [])  # linked, no codec yet: stock's own second test
+
+
+def test_the_switch_under_sh_takes_the_first_codec_the_headset_has(fw, tmp_path):
+    """The command as sh runs it: bluealsa's A2DP source PCM from GetPCMs, then q2bt-codec for each codec in order
+    until one is taken. A Px7 has no LDAC: bluealsa refuses it at once and aptX HD is next."""
+    _, switches = quality_pick(fw, 2, 3)
+    bin_ = tmp_path / 'bin'
+    bin_.mkdir()
+    (bin_ / 'dbus-send').write_text(
+        '#!/bin/sh\ncat <<E\n   array [\n      dict entry(\n'
+        '         object path "/org/bluealsa/hci0/dev_EC_66_D1_CF_59_3F/hfpag/source"\n      )\n      dict entry(\n'
+        '         object path "/org/bluealsa/hci0/dev_EC_66_D1_CF_59_3F/a2dpsrc/sink"\n      )\n   ]\nE\n')
+    calls = tmp_path / 'calls'
+    (bin_ / 'q2bt-codec').write_text(
+        f'#!/bin/sh\necho "$1 $2" >>{calls}\n[ "$2" = LDAC ] && {{ echo "org.freedesktop.DBus.Error.Failed SEP codec '
+        'not available"; exit 1; }\nexit 0\n')
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    out = tmp_path / 'pick'
+    command = switches[0].replace(PICK_FILE, str(out)).rstrip().removesuffix('&')
+    subprocess.run(['sh', '-c', command], check=True, env={**os.environ, 'PATH': f'{bin_}:{os.environ["PATH"]}'})
+    pcm = '/org/bluealsa/hci0/dev_EC_66_D1_CF_59_3F/a2dpsrc/sink'
+    assert calls.read_text() == f'{pcm} LDAC\n{pcm} aptX-HD\n'
+    assert out.read_text().splitlines()[-1] == 'aptX-HD'
+
+
+def test_the_switch_under_sh_does_nothing_without_an_a2dp_source_pcm(fw, tmp_path):
+    _, switches = quality_pick(fw, 7, 13)
+    bin_ = tmp_path / 'bin'
+    bin_.mkdir()
+    (bin_ / 'dbus-send').write_text('#!/bin/sh\necho "   array [\n   ]"\n')
+    calls = tmp_path / 'calls'
+    (bin_ / 'q2bt-codec').write_text(f'#!/bin/sh\necho "$@" >>{calls}\n')
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    out = tmp_path / 'pick'
+    command = switches[0].replace(PICK_FILE, str(out)).rstrip().removesuffix('&')
+    subprocess.run(['sh', '-c', command], check=False, env={**os.environ, 'PATH': f'{bin_}:{os.environ["PATH"]}'})
+    assert not calls.exists() and out.read_text() == ''
+
+
+@pytest.mark.parametrize('event, shown, direction, after', [
+    (3, 13, 0, 3),    # stepped or picked down to aptX on the live link
+    (1, 3, 0, 1),
+    (13, 1, 0, 13),
+    (3, 13, 1, 13),   # a link being set up: stock's checkBluetoothStatus takes the event itself
+    (0x65, 13, 0, 13),  # bluealsa's refused configuration, stock's reconnect: not a codec
+    (3, 0, 0, 0),     # no codec shown: nothing linked
+])
+def test_the_codec_shown_follows_a_switch_on_a_live_link(fw, event, shown, direction, after):
+    """bluealsa names the new codec in its status event (a2dp_eventstate) at each SetConfiguration; stock's
+    checkBluetoothStatus reads it only while it sets a link up (bt_a2dp_direction), so after a switch in place the
+    badge and the connected row kept the codec the link began on."""
+    p = Page(fw, DEVICES)
+    fw.var('bt_linkstatus', C.c_ubyte).value = 1
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = shown
+    fw.var('fw_ctx_a2dp_eventstate', C.c_int).value = event
+    fw.var('fw_ctx_bt_a2dp_direction', C.c_int).value = direction
+    p.poll()
+    assert fw.var('fw_ctx_bt_showcoding', C.c_int).value == after
+    assert fw.var('fw_ctx_a2dp_eventstate', C.c_int).value == event  # left for stock

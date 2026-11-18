@@ -419,6 +419,10 @@ USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
 PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
+# adb's Allow this computer? (usb_ui.c auth_open): Phosphor laptop, regular, Text Primary per half, beside the card's
+# title (feedback.c AC_GLYPH) and in the status pill after Allow (vol_pill.c VP_MSG_GLYPH)
+ADB_CARD_PX = 24
+ADB_PILL_PX = 15
 # Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
 # Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
 # and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
@@ -819,6 +823,8 @@ def images(t):
     # and the status row's relay mark (phone › car) in Text Secondary per half
     out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
     out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    out |= {f'{prefix}_adb{n}_{k}': phosphor('laptop', px, c) for n, px in (('card', ADB_CARD_PX), ('pill', ADB_PILL_PX))
+            for k, c in inks('primary', 'd', 'l').items()}
     out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
     out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}

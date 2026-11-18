@@ -1255,7 +1255,7 @@ def test_oled_about_keeps_the_details_hidden_and_paints_the_grid(fw, st, geometr
     g = Grid(fw, st, geometry)
     assert g.details.parent is g.page and g.details.visible == 0
     texts = g.paint()  # screen rows
-    page_y = g.page.box[1]  # the page sits under the status row (theme_engine.c client_window)
+    page_y = g.page.box[1]  # the page's window: full-bleed, from the screen's top
     assert [t for t, _ in texts] == [
         'Omen', 'Disclosure', '3:57', 'Lossless', 'FLAC · 16-bit / 44.1 kHz',
         'Album', 'Caracal (Deluxe)', 'Year', '2015', 'Genre', 'Electronic', 'Bit Rate', '1,001 kbps', 'Size', '38.3 MB',

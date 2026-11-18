@@ -168,6 +168,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     btdev = {f'btdev_{n}_{k}': c for n in art.BT_ROW_GLYPHS for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))}
     btspin = [f'btspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SPIN_SPOKES)]
     guest = ['guestphone_a', 'pairing_phone', 'status_guest', 'status_relay_d', 'status_relay_l']  # guest_ui.c's, pair_prompt.c's, status_row.c's
+    guest += [f'adb{n}_{k}' for n in ('card', 'pill') for k in 'dl']  # usb_ui.c's Allow this computer? and its pill
     # localsend_ui.c's: a device's glyph per row, on the transfer page, on the card and its toast; Send Logs' plane; the file line
     lsend = {**{f'lsdev_{n}_{k}': (art.CR_PHONE_PX, c) for n in art.LS_DEVICES for k, c in (('d', 0xababab), ('l', 0x5c5c5c), ('w', 0xffffff))},
              **{f'lsbig_{n}_{k}': (art.LS_BIG_PX, c) for n in art.LS_DEVICES for k, c in (('d', 0xababab), ('l', 0x5c5c5c))},

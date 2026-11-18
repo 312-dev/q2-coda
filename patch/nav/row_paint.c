@@ -1004,6 +1004,9 @@ int ringnav_paint(void *w, void *canvas) {
     if (w && w == slider_page_win) slider_page_paint(w, canvas);
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
+#if Q2POD_DEV
+    adb_trust_paint(w, canvas); /* Trusted Computers' captions (adb_trust.c) */
+#endif
     carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
     localsend_paint(w, canvas); /* Settings > Network > LocalSend's pages (localsend_ui.c) */
     bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */

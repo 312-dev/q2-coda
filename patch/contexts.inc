@@ -55,6 +55,8 @@
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */
 { "usbpick_page", CTX_FIXED, CHOICE },  /* runtime window (patch/usb_ui.c): the USB picker */
+{ "devopts_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/adb_trust.c): Developer Options */
+{ "adbtrust_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/adb_trust.c): Trusted Computers */
 { "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
 { "albuminfo_page", CTX_LOCAL, 0 },

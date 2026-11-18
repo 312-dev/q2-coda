@@ -1454,13 +1454,15 @@ def system_bar(fw, world, **props):
     return bar
 
 
-@pytest.mark.parametrize('light, color', [('0', 0x000000), ('1', PAPER * 0x010101)])
-def test_the_bar_is_black_or_its_light_half_s_paper(fw, world, light, color):
+@pytest.mark.parametrize('light', ['0', '1'])
+def test_the_bar_lays_no_ground_of_its_own(fw, world, light):
+    """Every page's window is full-bleed (docs/oled-design.md#full-bleed): its own ground, black or Light Mode's paper,
+    runs under the bar, which fills nothing, and the canvas's fill colour is left as it was."""
     theme(fw, LIGHT=light)
     bar = system_bar(fw, world)
     canvas = Canvas(fw)
     paint_bg(fw, bar, canvas)
-    assert canvas.fills[0] == (0, 0, 375, 26, rgba(color)) and canvas.fill == 0xff123456
+    assert canvas.fills == [] and canvas.fill == 0xff123456
 
 
 def test_painting_the_bar_keeps_its_clock_and_title_current(fw, world, st):

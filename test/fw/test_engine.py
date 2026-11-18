@@ -402,7 +402,7 @@ class DemoPage(Page):
 
 
 def demo(fw, files=None):
-    p = DemoPage(fw, files)
+    p = DemoPage(fw, files, room=290)  # the sheet's height these numbers were measured on
     p.e = api(fw)
     p.rects = []
     fw.mock('widget_invalidate_force', lambda w, r, *_: p.rects.append(tuple((C.c_int * 4).from_address(r)) if r else None))

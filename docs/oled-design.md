@@ -50,11 +50,14 @@ its art run to the top and bottom edges. The layout insets are rest positions fo
 first row rests at y 58 and its last at y 282. Stock's pages move their content down the 58 px the row takes
 (`tools/ipod.py` `full_bleed`), so each rests where it did; payload code that lays such a page out from the row's foot
 adds the window's `bar_foot` (`patch/theme_engine.c`), and a list end or a settings row is measured on the screen
-(`list_fit_end`). The row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable
-style). The pages the payload builds (`page_open`, the shuffle confirmation) still start under the row
-(`patch/theme_engine.c` `client_window`), and the row fills black over them; their lists run under it all the same
-([List edges](#list-edges)). A page slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
-on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
+(`list_fit_end`). The pages the payload builds (`patch/coverflow.c` `page_open`, the shuffle confirmation) are the same:
+the window is the whole screen and each lays its content out from `bar_foot`, or in a view placed there `page_room`
+high, so it rests where it did; a header that stands above the row's foot (an artist's monogram, About's cover) is the
+page's own paint under the row, and their lists run under the row as any list does ([List edges](#list-edges)). The
+row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable style) and it fills
+nothing over any page. A page slide draws both pages' full-screen snapshots and then the row over them
+(`page_parallax.c` `parallax_curr`). A press on the row is the row's, as before: Control Center's pull and the row's own
+taps, never a page's swipe back.
 
 ### List edges
 
@@ -299,7 +302,10 @@ All lists share one grid.
   shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
   (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
   Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
-  `mock.html` on 2026-11-18 ("status pill").
+  `mock.html` on 2026-11-18 ("status pill"). The same pill says a short thing that happened, a glyph (15 px) and
+  words in 15 px Text Primary, as wide as they are, centred, or where the slots leave too little ending 8 px short of
+  them and no nearer the left than x 24 (`vol_pill.c` `status_pill_show`): [adb](#adb)'s "MacBook-Pro allowed". It
+  shows on Now Playing too, as it is no volume.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
@@ -880,8 +886,16 @@ as its callers move onto it.
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
+- **Wide form** (`.across`, approved for [adb](#adb) on 2026-11-18): 339 px wide at x 18 with 26 px corners, hugging
+  its content, centered on y 168: 16 px of padding, 18 px at the sides; the glyph (24 px) and 10 px before a leading
+  title on one 24 px line; 6 px down the body, left-aligned 15 px on 19 px lines, the `name` (its `%s`) in Text Primary
+  and the rest in Text Secondary; 2 px down a `.note` in 13 px Text Tertiary; 10 px down the switch row (34 px, 16 px
+  words 4 px in from the text column); 10 px down the two answers side by side as 40 px buttons with round ends,
+  10 px apart, 16 px words: the selected one the accent, the other Raised 2. It shows no countdown for its timeout.
+  The answers are rows stacked inside the buttons' band (the list lays its rows one under another), and two buttons
+  over the band, its left and right halves, take a tap.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph, .note, .across })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
 ### Pairing
@@ -1476,6 +1490,25 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
+
+### adb
+
+A `--dev` build's adb prompt and its settings ([adb](adb.md#authorization), `patch/adb_trust.c`; approved from the
+mock of 2026-11-18, "card hugs its content", US spelling):
+
+- **Allow this computer?** over whatever is on screen, the [confirmation card](#confirmation-card)'s wide form:
+  Phosphor `laptop` (regular, Text Primary), "grayson@MacBook-Pro wants developer access over USB." (the name from the
+  key's comment), "Key 3F:9A:1C:E0 … 7B:C2", the switch **Always allow this computer** (on), **Deny** and **Allow**,
+  Allow lit. Return or 30 s answer Deny. ponytail: the mock's fingerprint is monospaced; the build ships no mono face,
+  so it is Inter.
+- **After Allow:** the [status row's pill](#status-row) "MacBook-Pro allowed" with the laptop (15 px) for 2 s.
+- **Developer Options** (Settings > General, before Restart): Trusted Computers and their count.
+- **Trusted Computers:** a row a computer, its name and the day it was added on the right column ("Today", "Nov 13"),
+  then "Center to remove a computer" (13 px Text Tertiary), **Remove All** in Negative red, and "A computer you
+  remove asks again / the next time it connects." Centre on a computer or Remove All asks on the card, destructive,
+  Cancel first. With none, "No trusted computers". The mock's caption ("Ask Before Allowing stays on. Developer Options
+  turns developer access off entirely.") named a switch the build does not have, so the caption says what removing
+  does instead.
 
 ### Bluetooth
 

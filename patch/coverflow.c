@@ -1250,11 +1250,11 @@ void *text(void *parent, int x, int y, int w, int h) {
 }
 
 /* A black page named name, with its destroy (given the page) and Return handlers; 0 when none.
- * Shared (peq.h). */
+ * Full-bleed, the whole screen as every page's window (docs/oled-design.md#full-bleed): its
+ * content rests from bar_foot(page), under the status row. Shared (peq.h). */
 void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(void *, void *)) {
     void *page = window_create(0, 0, 0, 0, 0);
     if (!page) return 0;
-    client_window(page);
     widget_set_name(page, name);
     widget_set_prop_int(page, "style:normal:bg_color", (int)0xff000000u);
     widget_on(page, EVT_DESTROY, closed, page);
@@ -1272,8 +1272,8 @@ void *page_open(const char *name, int (*closed)(void *, void *), int (*keyup)(vo
  * Shared (peq.h). */
 void *page_title(void *body, const char *caption, int n) {
     const theme_t *T = theme();
-    int x = T->page_x, w = 375 - 2 * x;
-    void *title = text(body, x, 0, w, T->page_title_h);
+    int x = T->page_x, w = 375 - 2 * x, top = bar_foot(body);
+    void *title = text(body, x, top, w, T->page_title_h);
     widget_set_text_utf8(title, caption);
     if (T->page_title_h) return title;
     widget_set_name(title, PAGE_TITLE);
@@ -1281,7 +1281,7 @@ void *page_title(void *body, const char *caption, int n) {
         widget_set_visible(title, 0, 0);
     } else {
         widget_use_style(title, "s_scrlabel_white20l");
-        widget_move_resize(title, x, 0, w, T->page_row);
+        widget_move_resize(title, x, top, w, T->page_row);
         theme_font(title, ROLE_TITLE, FONT_ROW);
     }
     return title;
@@ -1308,13 +1308,13 @@ void *rows_view(void *parent, int y, int w, int h, int n, int item_h) {
  * meets the screen's edge) or shrunk so the list's white background never shows below a short list;
  * its rows past the list end fade (navigation.c list_fade). Shared (peq.h). */
 void *page_list(void *page, void *body, void **title, const char *caption, int n, int item_h) {
-    int h = widget_get_prop_int(page, "h", client_h());
+    int h = page_room(body);
     item_h = page_h(item_h);
     widget_destroy_children(body);
     widget_set_visible(body, 1, 0);
     void *t = page_title(body, caption, title ? TITLE_ON_SHOW : n);
     if (title) *title = t;
-    void *view = rows_view(body, I(t, W_H), 375, h - I(t, W_H), n, item_h);
+    void *view = rows_view(body, I(t, W_Y) + I(t, W_H), 375, h - I(t, W_H), n, item_h);
     if (!theme()->page_title_h) bar_title_sync(page);
     widget_invalidate_force(page, 0);
     return view;
@@ -2664,7 +2664,8 @@ static void covers(void) {
         coverflow_position_reset();
         void *f = widget_factory();
         int depth = fx_open();
-        cf.covers = widget_factory_create_widget(f, "view", cf.page, 0, 0, 375, client_h());
+        cf.covers =
+            widget_factory_create_widget(f, "view", cf.page, 0, bar_foot(cf.page), 375, client_h());
         cf.slide = widget_factory_create_widget(f, "slide_menu", cf.covers, 0, depth ? 0 : 24, 375,
                                                 depth ? cfs.view_h : ART_SIZE);
         if (depth) slide_menu_set_spacer(cf.slide, cfs.stride - cfs.view_h);
@@ -2848,8 +2849,8 @@ static void load_albums(unsigned t0) {
     cf.covers = cf.slide = cf.name = cf.artist = 0; /* destroyed with the page's children */
     cf.offline = 0;
     if (cf.scoped != PLAYLISTS) cf.album = 0; /* the playlists' read again keep their place */
-    cf.body =
-        widget_factory_create_widget(widget_factory(), "view", cf.page, 0, 0, 375, client_h());
+    cf.body = widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page),
+                                           375, client_h());
     int n = 0;
     unsigned gen = library_gen;
     if (cf.albums_gen != gen && !cf.scoped) drop_albums();
@@ -3078,8 +3079,7 @@ static int to_tracks(const void *unused) {
         cf.title = widget_get_child(cf.body, 0); /* page_title's label, for page_retitle */
         if (widget_get_visible(cf.title)) {      /* wider than the bar's box: hidden all the same */
             void *lv = P(view, W_PARENT);
-            int all = n * page_h(48), page = widget_get_prop_int(cf.page, "h", client_h()),
-                h = all < page ? all : page;
+            int all = n * page_h(48), page = page_room(cf.body), h = all < page ? all : page;
             widget_set_visible(cf.title, 0, 0);
             widget_move_resize(lv, 0, 0, I(lv, W_W), h);
             widget_move_resize(view, 0, 0, I(view, W_W), h);
@@ -3392,8 +3392,8 @@ int coverflow_goto_album(void *r) {
     cf.scoped = ALBUM_TRACKS;
     cf.covers = cf.slide = cf.name = cf.artist = 0;
     cf.album = 0;
-    cf.body =
-        widget_factory_create_widget(widget_factory(), "view", cf.page, 0, 0, 375, client_h());
+    cf.body = widget_factory_create_widget(widget_factory(), "view", cf.page, 0, bar_foot(cf.page),
+                                           375, client_h());
     to_tracks(0);
     return 1;
 }

@@ -40,6 +40,7 @@ def L(tmp_path_factory):
     lib.bt_edr_reset.argtypes = [C.c_void_p]
     lib.bt_edr_step.argtypes = [C.c_void_p, C.c_int, C.c_void_p]
     lib.bt_edr_event.argtypes = [C.c_void_p, C.c_char_p, C.c_int, C.c_void_p, C.c_int]
+    lib.bt_down_event.argtypes = [C.c_char_p, C.c_int, C.c_int, C.c_void_p, C.c_int]
     lib.bt_pcms_sink.argtypes = [C.c_char_p, C.c_void_p]
     lib.bt_acl_handle_of.argtypes = [C.c_char_p, C.c_int, C.c_char_p]
     lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
@@ -808,3 +809,36 @@ def test_the_commute_replayed_steps_sbc_down_to_the_floor(L):
     steps = commute(L)
     assert steps[:3] == [('14:30:40', 33, 29), ('14:30:44', 29, 23), ('14:30:50', 23, 19)]
     assert all(to <= 19 for _, _, to in steps[3:])    # held at the floor through the interference
+
+
+def down_event(L, ev, handle):
+    note = C.create_string_buffer(64)
+    r = L.bt_down_event(ev, len(ev), handle, note, 64)
+    return r, note.value.decode()
+
+
+def disconnected(status, handle, reason):
+    return bytes([4, 0x05, 4, status, handle & 0xff, handle >> 8, reason])
+
+
+def test_a_dropped_link_is_noted_with_who_ended_it(L):
+    """The commute's link went 6 s after a codec switch (14:32:22Z, handle 5) and the log could not say which side
+    ended it. Disconnection Complete carries the reason: the headset's own (0x13, and 0x14 and 0x15 for its low
+    resources and power off), the Q2's host (0x16: bluetoothd, or stock's reconnect), or the radio (0x08 the
+    supervision timeout, 0x22 an LMP answer that never came)."""
+    assert down_event(L, disconnected(0, 5, 0x13), 5) == (1, 'LINK down h=5 reason=0x13 headset')
+    assert down_event(L, disconnected(0, 5, 0x15), 5) == (1, 'LINK down h=5 reason=0x15 headset')
+    assert down_event(L, disconnected(0, 5, 0x16), 5) == (1, 'LINK down h=5 reason=0x16 q2')
+    assert down_event(L, disconnected(0, 5, 0x08), 5) == (1, 'LINK down h=5 reason=0x08 timeout')
+    assert down_event(L, disconnected(0, 5, 0x22), 5) == (1, 'LINK down h=5 reason=0x22 timeout')
+    assert down_event(L, disconnected(0, 5, 0x3d), 5) == (1, 'LINK down h=5 reason=0x3d other')
+
+
+def test_only_the_followed_links_end_is_noted(L):
+    """Another link's end (a phone, the Car Remote's LE link) is not the headset's; a Disconnection Complete with a
+    status is a disconnect that did not happen; a short packet and another event are not one."""
+    assert down_event(L, disconnected(0, 64, 0x13), 5)[0] == 0
+    assert down_event(L, disconnected(0, 5, 0x13), -1)[0] == 0
+    assert down_event(L, disconnected(0x0c, 5, 0x13), 5)[0] == 0
+    assert down_event(L, disconnected(0, 5, 0x13)[:6], 5)[0] == 0
+    assert down_event(L, ptype_changed(0, 5, 0x0018), 5)[0] == 0

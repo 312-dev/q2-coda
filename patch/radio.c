@@ -469,7 +469,9 @@ static int np_heart(void *ctx, void *event) {
  * wheel and Centre stay stock's: the volume, and the screen. */
 static void np_open(void) {
     if (np.page || !(np.page = page_open("radionp_page", np_closed, np_keyup))) return;
-    void *page = np.page;
+    /* Spotify's view: the layout's rows from the status row's foot */
+    void *page = widget_factory_create_widget(widget_factory(), "view", np.page, 0,
+                                              bar_foot(np.page), 375, page_room(np.page));
     void *name = label(page, 16, 12, 200, 16, "s_scrlabel_white20l", 16, SPOT_GREY);
     widget_set_text_utf8(name, "Internet Radio");
     void *art = image_create(page, SPOT_ART_X, SPOT_ART_Y, SPOT_ART_PX, SPOT_ART_PX);
@@ -528,7 +530,7 @@ void radio_search(void) {
     if (!ui.page || ui.note || ui.edit || ui.pend) return;
     if (ui.view) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
     widget_destroy_children(ui.page), ui.view = 0; /* the box alone: the keyboard leaves no room for the rows */
-    ui.edit = edit_create(ui.page, "text", 2, 26);
+    ui.edit = edit_create(ui.page, "text", bar_foot(ui.page) + 2, 26);
     widget_set_prop_str(ui.edit, "tips", "Search stations");
     widget_set_prop_int(ui.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */
     widget_on(ui.edit, EVT_VALUE_CHANGED, searched, 0);

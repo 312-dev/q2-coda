@@ -189,6 +189,8 @@ demo	0x4c23f4	0x4	systemset_timezone_row_on_click	`addiu $2, $zero, 0x1c`, after
 demo	0x4c3f94	0x4	btmenu_rows	the load of $25 for the only call to widget_move_resize, after "list_view_bluetooth"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4c44b8	0x4	btmenu_item_on_click	the load of $25 for the only call to handleBluetoothPair, after "dialog/confirminfo_dialog"; patch/bt_detail.c forget
 demo	0x4c45b4	0x4	btmenu_item_on_click	`move $4, $17`, the delay slot of the only call to btmenu_rows, after "dialog/msginfo_dialog"; patch/bt_detail.c forget
+demo	0x4c556c	0x4	btquality_item_on_click	`lbu $2, 0x0($22), forming bt_linkstatus`; tools/build.py BT_QUALITY
+demo	0x4c5570	0x4	btquality_item_on_click	`andi $2, $2, 0xff`; tools/build.py BT_QUALITY
 demo	0x4c5cb0	0x4	systemset_btquality_page_init	the load of $25 for the only call to widget_move_resize, after "list_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4c6220	0x4	systemset_datetime_row_build	the load of $25 for the only call to widget_move_resize, after "list_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4c7508	0x4	systemset_display_page_init	the load of $25 for the only call to widget_move_resize, after "list_view_display"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)

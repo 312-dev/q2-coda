@@ -101,6 +101,13 @@ int bt_edr_step(struct bt_edr *e, int handle, unsigned char *out);
  * ptype "-" for a refusal) into note: 2 when the unified log should have it too (the first outcome,
  * or one unlike the last it had), 1 for the q2-bt log only, 0 not an answer to it. */
 int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, int size);
+/* An event read from the raw socket: Disconnection Complete (0x05) for handle, the link followed.
+ * Its note into note, "LINK down h=5 reason=0x13 headset": the reason as the controller gave it
+ * and the side it names, headset (0x13 to 0x15: it ended the link, or ran low or switched off), q2
+ * (0x16: this host, so bluetoothd, the kernel or stock's own reconnect), timeout (0x08 the
+ * supervision timeout, 0x22 an LMP answer that never came: the radio) or other. 1 when it was one,
+ * 0 for any other event, another handle's, or one whose status says the link stayed. */
+int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size);
 
 /* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
  * Under LDAC Auto with Quality's "Lower quality when the signal is weak" on, a link the radio

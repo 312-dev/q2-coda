@@ -12,7 +12,7 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, claim, in_fork, stock_prop_str, stock_start_with, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, claim, in_fork, page_block, stock_prop_str, stock_start_with, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
@@ -457,8 +457,8 @@ def test_a_page_with_no_rows_just_past_the_list_end_scrolls_as_far_as_a_drag(fw,
     content's foot on the list end (the user's, 2026-11-16, About on b4: the wheel showed the bar and stayed)."""
     theme(fw)
     bar, end = 58, 282  # OLED's status row and list end on screen
-    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name='about_page')  # ponytail: the window under the status row, as client_window places a code-built page (item 5); a stock page's is the whole screen (Page)
-    view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
+    win = ui.widget('window', ui.wm, (0, 0, 375, 320), name='about_page')  # full-bleed, as every page's window
+    view = ui.widget('scroll_view', win, (0, bar, 375, 320 - bar))  # from the status row's foot
     view.byte(O['VIEW_VERTICAL'], 1)
     content, pad = end - bar + over, 320 - end
     ui.widget('label', view, (0, 0, 375, content), text='A long text')
@@ -1784,17 +1784,21 @@ def test_the_sort_spinner_is_centred_on_the_whole_screen(fw):
 
 
 def test_the_overlays_spinner_is_centred_on_the_whole_screen(fw):
-    """Painted on a window under the status row (its y 40), the box's centre is the screen's (187.5, 160) within a
-    pixel: placed in screen rows less the window's y, not at the window's own centre."""
+    """Painted over a page the payload builds (page_open's, full-bleed: the whole screen), the box's centre is the
+    screen's (187.5, 160) within a pixel, not the rows' under the status row."""
     boxes = []
     fw.mock('canvas_fill_rounded_rect', lambda canvas, r, *_: boxes.append(tuple((C.c_int * 4).from_address(r))) or 0)
-    win, canvas = block(fw, size=4096), block(fw, size=4096)
-    lcd = block(fw, size=4096)
+    page = page_block(fw)
+    fw.mock('window_create', lambda *_: page)
+    fw.mock('widget_move_resize', lambda w, *box: struct.pack_into('<4i', (C.c_char * 16).from_address(w + O['W_X']), 0, *box[:4]))
+    win = fw.fn('page_open', C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(b'radio_page', None, None)
+    canvas, lcd = block(fw, size=4096), block(fw, size=4096)
     C.c_void_p.from_address(canvas + O['CANVAS_LCD']).value = lcd
-    C.c_int.from_address(win + O['W_Y']).value = 40
     fw.fn('load_spinner_paint', None, C.c_void_p, C.c_void_p)(win, canvas)
     x, y, w, h = boxes[0]
-    assert (w, h) == (64, 64) and abs(x + w / 2 - 375 / 2) <= 1 and abs(y + 40 + h / 2 - 320 / 2) <= 1
+    wy = C.c_int.from_address(win + O['W_Y']).value
+    assert wy == 0  # the window from the screen's top
+    assert (w, h) == (64, 64) and abs(x + w / 2 - 375 / 2) <= 1 and abs(wy + y + h / 2 - 320 / 2) <= 1
     for dx, dy, dw, dh in boxes[1:]:  # the dots inside it
         assert x <= dx and dx + dw <= x + w and y <= dy and dy + dh <= y + h
 
@@ -2605,8 +2609,8 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
     at the content's foot."""
     theme(fw)
     bar, end, pitch = 58, 282, 32  # OLED's status row, list end and row pitch on the screen
-    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name=name)  # ponytail: the window under the status row, as client_window places a code-built page (item 5); a stock page's is the whole screen (Page)
-    view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
+    win = ui.widget('window', ui.wm, (0, 0, 375, 320), name=name)  # full-bleed, as every page's window
+    view = ui.widget('scroll_view', win, (0, bar, 375, 320 - bar))  # from the status row's foot
     view.byte(O['VIEW_VERTICAL'], 1)
     items = [ui.widget('list_item', view, (0, pitch * i, 375, pitch)) for i in range(rows)]
     view.int(O['VIEW_CONTENT_H'], pitch * rows)
