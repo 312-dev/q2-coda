@@ -454,7 +454,7 @@ m.answer(*OK,[track('spotify:track:cached','Cached')])
 m.row(0); assert m.asked()==('playdownload','spotify:track:cached')
 m.answer(*OK,[]); assert m.nodes[m.top]['name']=='spotify_page'; m.destroy(m.top); m.top=m.page; m.back(); passed()
 # Loading, an error with Retry (offline, throttled, error, or no answer), one without, and empty.
-m.row(0); assert m.labels()==['Loading…'] and m.asked()==('liked',)
+m.row(0); assert m.labels()==MENU and m.asked()==('liked',)  # under the loading overlay: the menu stays
 m.answer('offline',"Spotify can't be reached",'',[]); assert m.labels()==["Spotify can't be reached",'Retry']
 m.row(0); assert m.labels()==['Loading…']; m.answer('premium','Spotify Premium is needed','',[]); assert m.labels()==['Spotify Premium is needed']
 m.back(); m.row(0); m.answer(*OK,[]); assert m.labels()==['Nothing here']
@@ -490,8 +490,8 @@ assert len(m.toasts)==n and m.nodes[m.top]['name']=='spotify_page'; m.destroy(m.
 m.back(); assert m.labels()[:2]==['Playlists','Mix A'] and m.nodes[m.find('scroll_view')]['_ringnav_index']==1
 m.pick(2); assert m.asked()==('playlists','next%09page'); m.answer(*OK,[('playlist','spotify:playlist:c','Mix C','carol','','')])
 m.back(); assert m.nodes[m.find('scroll_view')]['_ringnav_index']==2; passed()
-# Back while loading stays usable: the fetch is dropped, and a late answer touches nothing.
-m.pick(0); assert m.labels()==['Loading…']; t=len(m.threads); m.back(); assert m.labels()[:2]==['Playlists','Mix A']
+# Return while a list loads under the overlay cancels it: the fetch is dropped, the list stays.
+m.pick(0); assert m.labels()[:2]==['Playlists','Mix A']; t=len(m.threads); m.back(); assert m.labels()[:2]==['Playlists','Mix A']
 assert len(m.threads)==t and ('pthread_join' in [c[0] for c in m.calls]); passed()
 # Artists open an artist: top tracks, then albums; an album opens its tracks. The history keeps the
 # top SPOT_KEEP levels' rows; Back to an older one fetches it again.

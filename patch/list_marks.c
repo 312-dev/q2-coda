@@ -138,6 +138,20 @@ int load_spinner_hit(int x, int y) {
            y < LOAD_SPIN_Y + LOAD_SPIN_BOX;
 }
 
+/* A touch on window page while its loading overlay shows (any but the abort): taken from the rows
+ * under it; at the lift a row it pressed is let go, unclicked, and a lift off the spinner calls
+ * cancel. RET_STOP. */
+int load_touch(void *page, void *event, void (*cancel)(void)) {
+    if (I(event, EVENT_TYPE) == EVT_POINTER_UP_BEFORE) {
+        unsigned abort_event[12];
+        pointer_event_init(abort_event, EVT_POINTER_ABORT, page, I(event, EVENT_X),
+                           I(event, EVENT_Y));
+        widget_dispatch_event_to_target_recursive(page, abort_event);
+        if (!load_spinner_hit(I(event, EVENT_X), I(event, EVENT_Y))) cancel();
+    }
+    return 11; /* RET_STOP */
+}
+
 /* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)
  * in its place, white. */
 void spinner_icon(void *w, void *canvas, int right, int y) {

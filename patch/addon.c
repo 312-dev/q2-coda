@@ -2901,16 +2901,8 @@ static int search_left(void *ctx, void *event) {
 static int swipe(void *ctx, void *event) {
     (void)ctx;
     int type = I(event, EVENT_TYPE);
-    if (pg.pend && type != EVT_POINTER_ABORT) { /* the overlay takes every touch */
-        if (type == EVT_POINTER_UP_BEFORE) {
-            unsigned abort_event[12]; /* a row pressed under it is let go, unclicked */
-            pointer_event_init(abort_event, EVT_POINTER_ABORT, pg.page, I(event, EVENT_X),
-                               I(event, EVENT_Y));
-            widget_dispatch_event_to_target_recursive(pg.page, abort_event);
-            if (!load_spinner_hit(I(event, EVENT_X), I(event, EVENT_Y))) load_cancel();
-        }
-        return 11; /* RET_STOP */
-    }
+    if (pg.pend && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
+        return load_touch(pg.page, event, load_cancel);
     if (type == EVT_POINTER_ABORT || pg.nsec < 2 || pg.depth != 1 || pg.edit) {
         pg.sdown = pg.sclaim = 0;
         return 0;
