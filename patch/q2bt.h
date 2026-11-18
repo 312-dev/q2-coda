@@ -1,20 +1,24 @@
-/* q2bt: the Bluetooth link monitor, a part of q2guard (docs/internals.md#bluetooth-link-monitor). While
- * an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was sent,
- * what is waiting for it, what the controller says of the link, and what else was busy; it changes
- * nothing. The decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on
- * this machine by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
+/* q2bt: the Bluetooth link monitor, a part of q2guard (docs/internals.md#bluetooth-link-monitor).
+ * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
+ * sent, what is waiting for it, what the controller says of the link, and what else was busy; it
+ * changes nothing. The decisions, parsers and the line, with no reads of the device: q2bt_core.c,
+ * tested on this machine by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py
+ * reads the log. */
 #ifndef Q2BT_H
 #define Q2BT_H
 
 #include "q2guard.h"
 
-#define BT_TICK_MS 1000      /* a sample while a stream runs */
-#define BT_START_BPS 4000    /* bytes a second handed to the controller that make a stream (SBC's least is ~25000) */
-#define BT_QUIET_MS 30000    /* under BT_START_BPS this long: the stream ended (a stall is sampled through) */
-#define BT_PCMS_MS 60000     /* bluealsa asked for the codec again this often while a stream runs */
-#define BT_RAM 65536         /* the log's RAM ring while the card is away (about 9 minutes of lines) */
-#define BT_FILE_MAX 1048576  /* q2-bt.0 moved to .1 at this size: the two hold about 4 hours of streaming */
-#define BT_UNSET (-1000)     /* a signed reading not taken */
+#define BT_TICK_MS 1000 /* a sample while a stream runs */
+#define BT_START_BPS                                                                               \
+    4000 /* bytes a second handed to the controller that make a stream (SBC's least is ~25000) */
+#define BT_QUIET_MS                                                                                \
+    30000 /* under BT_START_BPS this long: the stream ended (a stall is sampled through) */
+#define BT_PCMS_MS 60000 /* bluealsa asked for the codec again this often while a stream runs */
+#define BT_RAM 65536     /* the log's RAM ring while the card is away (about 9 minutes of lines) */
+#define BT_FILE_MAX                                                                                \
+    1048576 /* q2-bt.0 moved to .1 at this size: the two hold about 4 hours of streaming */
+#define BT_UNSET (-1000) /* a signed reading not taken */
 
 /* ---- is a stream running ----
  * From the controller's byte counter (hci_dev_info's stat.byte_tx), read at each call. */
@@ -52,27 +56,28 @@ void bt_link_clear(struct bt_link *k, int handle);
 int bt_event(struct bt_link *k, const unsigned char *p, int n);
 
 /* ---- the A2DP socket's queue ----
- * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only while
- * the controller's ACL buffers are full), or -1 with no such table. */
+ * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only
+ * while the controller's ACL buffers are full), or -1 with no such table. */
 int bt_l2cap_wmem(const char *text);
 
 /* ---- the codec, from bluealsa's GetPCMs as dbus-send prints it ----
- * The A2DP source PCM's Codec into codec (n bytes), Sampling in Hz and Delay in tenths of a ms; 0 for
- * none. */
+ * The A2DP source PCM's Codec into codec (n bytes), Sampling in Hz and Delay in tenths of a ms; 0
+ * for none. */
 int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay);
 
 /* ---- the log line ---- */
 struct bt_sample {
-    long wall;        /* seconds since 1970 */
-    unsigned up;      /* seconds since boot */
-    int kbps;         /* kbit/s handed to the controller; -1 not read */
-    int acl;          /* ACL packets a second handed to it */
-    int wq;           /* bytes waiting in the A2DP socket */
+    long wall;              /* seconds since 1970 */
+    unsigned up;            /* seconds since boot */
+    int kbps;               /* kbit/s handed to the controller; -1 not read */
+    int acl;                /* ACL packets a second handed to it */
+    int wq;                 /* bytes waiting in the A2DP socket */
     int rssi, lq, tpl, afh; /* struct bt_link's; BT_UNSET none */
-    int err;          /* transmit errors since the last line */
-    int wtx, wrx;     /* wlan0 kB/s each way; -1 down */
-    int cpu;          /* all cores' busy percent */
-    int ba, own;      /* bluealsa's and q2guard's own CPU, tenths of a percent of one core; -1 not read */
+    int err;                /* transmit errors since the last line */
+    int wtx, wrx;           /* wlan0 kB/s each way; -1 down */
+    int cpu;                /* all cores' busy percent */
+    int ba,
+        own; /* bluealsa's and q2guard's own CPU, tenths of a percent of one core; -1 not read */
 };
 int bt_line(char *out, int size, const struct bt_sample *s);
 /* per-second rates over ms: n counted in ms, as a whole count a second (no 64-bit division) */
@@ -88,5 +93,6 @@ void bt_init(card_log *l);
 /* Sleep ms; while a stream runs, wake each second to sample it. */
 void bt_sleep(unsigned ms);
 int bt_streaming(void);
+int bt_flush_due(void); /* once after a stream's START or STOP: its lines to the card at once */
 
 #endif

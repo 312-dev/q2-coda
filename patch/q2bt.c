@@ -9,30 +9,31 @@
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
 #define PCMS_CMD                                                                                   \
-    "dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "                         \
+    "dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "                          \
     "org.bluealsa.Manager1.GetPCMs > " PCMS_FILE " 2>/dev/null"
-#define ANSWER_MS 150   /* the four answers are waited for this long at most */
-#define RETRY_MS 60000  /* a Bluetooth socket that would not open is tried again after this */
-#define FIND_MS 10000   /* bluealsa looked for again, while not found, after this */
+#define ANSWER_MS 150  /* the four answers are waited for this long at most */
+#define RETRY_MS 60000 /* a Bluetooth socket that would not open is tried again after this */
+#define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */
 #define WLAN "/sys/class/net/wlan0/statistics/"
 
 static struct {
     card_log *log;
-    int ctl, raw;        /* the HCI socket the ioctls use; the raw one, bound while a stream runs */
-    int tried;           /* ctl has been tried; failed_at its last failure */
+    int ctl, raw; /* the HCI socket the ioctls use; the raw one, bound while a stream runs */
+    int tried;    /* ctl has been tried; failed_at its last failure */
     unsigned failed_at;
     struct bt_detect det;
     struct bt_counts was; /* the counts at the last line, and when (ms) */
     unsigned at;
     struct bt_link link;
-    int ba;              /* bluealsa's pid, 0 not found (looked for at found_at) */
+    int ba; /* bluealsa's pid, 0 not found (looked for at found_at) */
     unsigned found_at, ba_ticks, own_ticks, wtx, wrx;
-    int wlan;            /* wtx and wrx were read */
+    int wlan; /* wtx and wrx were read */
     struct cpu cpu;
     int pcms_pid;
     unsigned pcms_at;
     char codec[24];
     unsigned hz;
+    int flush; /* a stream started or ended: the log to the card now */
 } bt;
 
 static void note(const char *what) {
@@ -64,11 +65,14 @@ static int acl_handle(void) {
 }
 /* bound to hci0's raw channel, Command Complete events only */
 static void raw_open(void) {
-    unsigned short addr[3] = { AF_BLUETOOTH, 0, 0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
-    unsigned filter[4] = { 1u << 4, 1u << 0x0e, 0, 0 }; /* hci_filter: event packets; event 0x0e; any opcode */
+    unsigned short addr[3] = { AF_BLUETOOTH, 0,
+                               0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
+    unsigned filter[4] = { 1u << 4, 1u << 0x0e, 0,
+                           0 }; /* hci_filter: event packets; event 0x0e; any opcode */
     bt.raw = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
     if (bt.raw < 0) return;
-    if (bind(bt.raw, addr, sizeof addr) || setsockopt(bt.raw, 0 /* SOL_HCI */, 2 /* HCI_FILTER */, filter, 14))
+    if (bind(bt.raw, addr, sizeof addr) ||
+        setsockopt(bt.raw, 0 /* SOL_HCI */, 2 /* HCI_FILTER */, filter, 14))
         close(bt.raw), bt.raw = -1;
 }
 static int answers(int ms) { /* events until the four have answered or ms is up */
@@ -188,13 +192,15 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.wlan = wlan(&bt.wtx, &bt.wrx);
     busy_since(&bt.cpu, &cores);
     bt.codec[0] = 0, bt.hz = 0;
-    snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu, c->acl_pkts,
-             bt.raw >= 0 ? "ok" : "none");
+    snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
+             c->acl_pkts, bt.raw >= 0 ? "ok" : "none");
     note(line);
     pcms_start(now);
+    bt.flush = 1;
 }
 static void end(void) {
     note("STOP");
+    bt.flush = 1;
     if (bt.raw >= 0) close(bt.raw), bt.raw = -1;
 }
 static void sample(unsigned now, const struct bt_counts *c) {
@@ -211,7 +217,8 @@ static void sample(unsigned now, const struct bt_counts *c) {
     s.rssi = bt.link.rssi, s.lq = bt.link.lq, s.tpl = bt.link.tpl, s.afh = bt.link.afh;
     s.wtx = s.wrx = -1;
     if (wlan(&tx, &rx)) {
-        if (bt.wlan) s.wtx = bt_rate(tx - bt.wtx, ms) / 1024, s.wrx = bt_rate(rx - bt.wrx, ms) / 1024;
+        if (bt.wlan)
+            s.wtx = bt_rate(tx - bt.wtx, ms) / 1024, s.wrx = bt_rate(rx - bt.wrx, ms) / 1024;
         bt.wtx = tx, bt.wrx = rx, bt.wlan = 1;
     } else {
         bt.wlan = 0;
@@ -248,10 +255,13 @@ static void tick(unsigned now) {
     if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
 }
 
-void bt_init(card_log *l) {
-    bt.log = l, bt.ctl = bt.raw = -1;
-}
+void bt_init(card_log *l) { bt.log = l, bt.ctl = bt.raw = -1; }
 int bt_streaming(void) { return bt.det.on; }
+int bt_flush_due(void) {
+    int due = bt.flush;
+    bt.flush = 0;
+    return due;
+}
 
 void bt_sleep(unsigned ms) {
     unsigned end_at = now_ms() + ms;

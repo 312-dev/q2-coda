@@ -1,5 +1,5 @@
-/* q2bt's decisions, parsers and log line (docs/internals.md#bluetooth-link-monitor). No reads of the
- * device here: q2bt.c reads, these turn what it read into a line. */
+/* q2bt's decisions, parsers and log line (docs/internals.md#bluetooth-link-monitor). No reads of
+ * the device here: q2bt.c reads, these turn what it read into a line. */
 #include "q2bt.h"
 
 /* n counted over ms, a second's worth. A count over 4000000 is divided first: no 64-bit division
@@ -39,7 +39,8 @@ int bt_detect_step(struct bt_detect *d, unsigned now, unsigned byte_tx) {
 /* ---- hci_dev_info and hci_conn_info ----
  * include/net/bluetooth/hci_sock.h: dev_id, name[8], bdaddr[6], flags, type, features[8], pkt_type,
  * link_policy, link_mode, acl_mtu (44), acl_pkts (46), sco_mtu, sco_pkts, then hci_dev_stats (52):
- * err_rx, err_tx (56), cmd_tx, evt_rx, acl_tx (68), acl_rx, sco_tx, sco_rx, byte_rx, byte_tx (88). */
+ * err_rx, err_tx (56), cmd_tx, evt_rx, acl_tx (68), acl_rx, sco_tx, sco_rx, byte_rx, byte_tx (88).
+ */
 static unsigned u32_at(const unsigned char *p) {
     unsigned v;
     memcpy(&v, p, 4);
@@ -131,7 +132,8 @@ int bt_l2cap_wmem(const char *t) {
     int col = -1, i = 0, best = -1;
     const char *p = skip_space(t);
     while (*p && *p != '\n') {
-        if (!strncmp(p, "Wmem", 4) && (p[4] == ' ' || p[4] == '\t' || p[4] == '\n' || !p[4])) col = i;
+        if (!strncmp(p, "Wmem", 4) && (p[4] == ' ' || p[4] == '\t' || p[4] == '\n' || !p[4]))
+            col = i;
         p = skip_space(skip_word(p)), ++i;
     }
     if (col < 0) return -1;
@@ -146,8 +148,9 @@ int bt_l2cap_wmem(const char *t) {
     return best < 0 ? 0 : best;
 }
 
-/* dbus-send --print-reply: each PCM an `object path "/org/bluealsa/hci0/dev_.../a2dpsrc/sink"`, then its
- * properties as dict entries, `string "Codec"` and on the next line `variant string "aptX-HD"`. */
+/* dbus-send --print-reply: each PCM an `object path "/org/bluealsa/hci0/dev_.../a2dpsrc/sink"`,
+ * then its properties as dict entries, `string "Codec"` and on the next line `variant string
+ * "aptX-HD"`. */
 int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay) {
     const char *pcm = strstr(text, "/a2dpsrc");
     if (!pcm || n < 1) return 0;
@@ -158,8 +161,10 @@ int bt_pcms(const char *text, char *codec, int n, unsigned *hz, unsigned *delay)
         for (v += 8; *v && *v != '"' && i < n - 1; ++v) codec[i++] = *v;
         codec[i] = 0;
     }
-    if ((v = find_in(pcm, end, "\"Sampling\"")) && (v = find_in(v, end, "uint32 "))) *hz = digits(v + 7);
-    if ((v = find_in(pcm, end, "\"Delay\"")) && (v = find_in(v, end, "uint16 "))) *delay = digits(v + 7);
+    if ((v = find_in(pcm, end, "\"Sampling\"")) && (v = find_in(v, end, "uint32 ")))
+        *hz = digits(v + 7);
+    if ((v = find_in(pcm, end, "\"Delay\"")) && (v = find_in(v, end, "uint16 ")))
+        *delay = digits(v + 7);
     return codec[0] != 0;
 }
 
@@ -170,7 +175,8 @@ static int put(char *b, int at, int size, const char *key, int v, int unset) {
                        : snprintf(b + at, (size_t)(size - at), " %s=%d", key, v);
     return n < 0 ? at : at + n;
 }
-/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own=\n", "-" for not read */
+/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own=\n", "-" for not read
+ */
 int bt_line(char *out, int size, const struct bt_sample *s) {
     char b[200];
     int at = snprintf(b, sizeof b, "up=%u", s->up);

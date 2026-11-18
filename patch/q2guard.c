@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
             last_line = now;
         }
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
-        if (o.flush || (line_due && o.event != EV_NONE) ||
+        if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
             now - last_flush >= (fast || bt_streaming() ? FLUSH_FAST_MS : FLUSH_MS)) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
             flush_start();
