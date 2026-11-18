@@ -320,7 +320,10 @@ m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','
 m.pick(1); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requests[-1]==('search','aphex%09twin','50'),m.requests[-1]
 # More… again: the list's own arguments and the newest cursor alone, Q2SPOT/1's last argument (to 1.4.1 each
 # cursor followed the ones before, "search aphex 50 100", which q2-deezer read as the second page again).
-m.pick(1); m.answer('ok','','',[]); assert m.requests[-1]==('search','aphex%09twin','100'),m.requests[-1]
+def more_row(m):  # the More… row's place among the rows, by its words
+    def texts(w): return [m.nodes[w].get('text'),*(t for c in m.nodes[w]['children'] for t in texts(c))]
+    return next(i for i,r in enumerate(m.rows()) if 'More…' in texts(r))
+m.pick(more_row(m)); m.answer('ok','','',[]); assert m.requests[-1]==('search','aphex%09twin','100'),m.requests[-1]
 m.back(); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requests[-1]==('search','aphex%09twin','50'); passed()
 # Full lists (addon.c page_next): a reply whose message is "pages" (the app opts in) and that has a cursor is
 # followed by its next pages, each asked with the list's own arguments and the newest cursor (as More… asks),
