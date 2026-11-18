@@ -49,7 +49,8 @@ INPUT_GAP_S = .3     # s after an input before looking for its effect
 TOAST_S, TOAST_MOST_S = 3, 15  # s with no toast before the first key; s at most to wait for that
 # q2guard's must-confirm cards (patch/heatguard.c, docs/internals.md#overheat-guardian): a confirm card
 # (GUARD_DIALOG) that demo says, in its answer file's "card" line, is one of these. q2guard decides on its
-# sensor within GUARD_S of its start before demo (three empty readings 5 s apart on the emulator), and the card
+# sensor within GUARD_S of its start before demo (three empty readings 5 s apart on the emulator, which has no
+# PMIC to read), and the card
 # follows: boot waits for that verdict, confirms such a card with OK, and fails on any other dialog over Home.
 GUARD_S = 40
 GUARD_DIALOG = 'sortselect_dialog'

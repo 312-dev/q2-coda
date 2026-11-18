@@ -75,9 +75,9 @@ class Rig:
                            'answer': ANSWER(card.answer), 'ctx': card.ctx})
         return 1
 
-    def state(self, seq, card, left=0, state='ok', beat=None):
+    def state(self, seq, card, left=0, state='ok', beat=None, t=-1):
         self.beat = beat if beat is not None else getattr(self, 'beat', 0) + 1
-        self.files[STATE] = f'seq={seq} card={card} left={left} state={state} t=-1 beat={self.beat}\n'.encode()
+        self.files[STATE] = f'seq={seq} card={card} left={left} state={state} t={t} beat={self.beat}\n'.encode()
 
     def poll(self, ms=500):
         self.ms += ms
@@ -118,6 +118,30 @@ def test_sensor_down_is_a_card_with_one_ok_that_waits_its_turn(rig):
     assert rig.written[ACK].endswith('card nosensor\n')  # what smoke.py confirms at boot
     rig.answer(0)
     assert rig.written[ACK].endswith('card -\n')
+
+
+def test_a_die_temperature_reading_raises_no_card(rig):
+    """The Q2's PMIC die read and trusted (q2guard_pmic.c): q2guard goes from pending to ok with no card, so demo
+    shows nothing, for minutes, whatever the temperature as long as it is under the warning."""
+    rig.state(0, 'none', state='pending')
+    rig.poll()
+    for i in range(360):  # 3 minutes of 500 ms polls, a new beat each
+        rig.state(1, 'none', state='ok', t=381 + i % 3)
+        rig.poll()
+    assert rig.cards == [] and rig.toasts == []
+    assert 'card -' in rig.written.get(ACK, 'card -')
+
+
+def test_a_die_sensor_that_fails_later_brings_the_card_once(rig):
+    """The die read for a while, then the PMIC reader turned off (q2guard logs why): the card once, CPU load from
+    then on."""
+    for _ in range(10):
+        rig.state(1, 'none', state='ok', t=381)
+        rig.poll()
+    for _ in range(10):
+        rig.state(2, 'nosensor', state='nosensor')
+        rig.poll()
+    assert [c['title'] for c in rig.cards] == ['No Temperature Sensor']
 
 
 def test_the_load_warning_counts_down_and_its_cancel_is_answered(rig):
