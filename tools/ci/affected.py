@@ -242,8 +242,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
             else:
                 p.add('unit', ALL, f'{path}: unit infrastructure')
         elif parts[0] == 'test' and len(parts) == 2 and suffix in ('.py', '.sh'):
-            p.other.add(path)
-            p.why.append(f'{path}: itself')
+            if (root/path).exists():  # one the branch deleted is not there to run
+                p.other.add(path)
+                p.why.append(f'{path}: itself')
         elif parts[:2] == ('test', 'player') or parts[0] == 'player':
             p.other.add('test/player/run.py')
             p.why.append(f'{path}: the new player')
