@@ -114,6 +114,7 @@ __attribute__((noinline)) static int ld_step(void) {
                                           __ATOMIC_RELAXED));
     fx.ld[s].ok = half_load(fx.ld[s].key, fx.stage + s * HALF_TEXELS);
     __atomic_store_n(&fx.ld[s].state, LD_READY, __ATOMIC_RELEASE);
+    loop_wake(); /* the next frame copies it (loop_wake.c) */
     return 1;
 }
 

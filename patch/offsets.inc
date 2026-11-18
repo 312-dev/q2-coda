@@ -443,6 +443,13 @@ static inline int arc_out(int r, int y) {
  * (about 30 passes a second; the first input after waits at most that). */
 #define IDLE_MS 2000
 #define IDLE_SLEEP_MS 25
+/* Past those idles the loop waits longer when nothing needs it sooner (loop_wake.c loop_span): lit,
+ * until the next AWTK timer is due, at most LOOP_LIT_MAX_MS; dark and slow (dark_slow), at most
+ * LOOP_DARK_MAX_MS, stock's timers riding the pass as they ride the dark idle. A timer of
+ * LOOP_ANIM_MS or less (a frame) keeps the idle above. Input and a worker's result end the wait. */
+#define LOOP_LIT_MAX_MS 250
+#define LOOP_DARK_MAX_MS 1000
+#define LOOP_ANIM_MS 50
 /* Charge limit: the charger stops at CHARGE_STOP percent and starts again at CHARGE_RESUME,
  * checked every CHARGE_POLL_MS. */
 #define CHARGE_STOP 80
@@ -562,6 +569,20 @@ static inline int arc_out(int r, int y) {
 #define LOOP_QUEUE 0x38
 #define LOOP_POST 0x18 /* main_loop_t's queue_event slot (playback.c ringnav_queue_event) */
 #define WHEEL_QUEUE_FREE 8
+/* The UI loop's wait (loop_wake.c): stock AWTK's timer_manager_t keeps its timers in an slist at
+ * TM_LIST (node: next at 0, data at SLIST_DATA); a timer_info_t has its ctx at TIMER_CTX, its start
+ * (u64 ms) at TIMER_START, its period at TIMER_DURATION and a suspended byte at TIMER_SUSPEND
+ * (timer_info_create, timer_manager_next_time). idle_manager_t's slist is at 0. The widget animator
+ * manager's first animator is at AM_FIRST (widget_animator_manager_add), and native_window_t's
+ * dirty rect count at NW_DIRTY (native_window_invalidate). */
+#define TM_LIST 0x14
+#define SLIST_DATA 4
+#define TIMER_CTX 0x20
+#define TIMER_START 0x38
+#define TIMER_DURATION 0x40
+#define TIMER_SUSPEND 0x4c
+#define AM_FIRST 0x10
+#define NW_DIRTY 0x38
 /* main_loop_simple's pressed byte: the touch thread sets it as it posts a down and clears it as it
  * posts the release (input_dispatch_to_main_loop), whether or not the queue kept them. */
 #define LOOP_PRESSED 0x44

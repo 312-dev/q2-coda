@@ -609,6 +609,9 @@ void spot_yield(void), spot_stop(void), radio_stop(void);
 void headset_volume_reset(void);
 int vol_next(unsigned key); /* volume.c: the volume a wheel tick moves to, at the wheel's speed */
 void headset_poll(void), headset_eq_poll(void), headset_manual(void);
+/* loop_wake.c: any thread ends the UI loop's idle (docs/internals.md#the-ui-loops-wait); the touch
+ * thread's per-sample form only while it idles */
+void loop_wake(void), loop_wake_touch(void);
 /* guest.c: Guest Play's side in demo (docs/internals.md#guest-play) */
 int guest_send(const char *line), guest_active(void), guest_key(int code);
 unsigned guest_seq(void);

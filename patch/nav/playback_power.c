@@ -523,6 +523,13 @@ static void thumb_poll(void) {
     if (r & THUMB_CLICK) buzzeer_switch(1);
 }
 
+/* A stock stream queue (Tidal's), whose network state stock's 500 ms timer follows
+ * (on_wm_timer_networkstatus): the dark wait stays short for it. */
+static int playing_stream(void) {
+    unsigned type = (unsigned)mclGetPlayType();
+    return type - 2 < 2 || type - 0xf1 < 2;
+}
+
 int ringnav_sleep(void *loop) {
     splash_poll();
     usb_ui_poll(); /* USB and charging toasts, adbd's questions (usb_ui.c) */
@@ -561,8 +568,13 @@ int ringnav_sleep(void *loop) {
                     time_now_ms() - st.wake_at >= WAKE_MS;
         dark_quiet = quiet;
         dark_slow = dark_slow_ok(quiet);
-        if ((unsigned)time_now_ms() - st.tick_at >= DARK_TURN_MS)
-            sleep_ms(quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS);
+        unsigned now = (unsigned)time_now_ms();
+        if (now - st.tick_at >= DARK_TURN_MS) {
+            unsigned ms = quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS;
+            if (dark_slow && now - st.last_input >= IDLE_MS && !playing_stream())
+                ms = loop_span(ms, LOOP_DARK_MAX_MS, 0);
+            loop_wait(ms);
+        }
     } else if (st.dark) {
         dark_quiet = dark_slow = 0;
         if (st.dark & 2) st.woke_at = (unsigned)time_now_ms();
@@ -571,7 +583,7 @@ int ringnav_sleep(void *loop) {
         widget_invalidate_force(window_manager(), (void *)0);
     } else if (time_now_ms() - st.last_input >= IDLE_MS &&
                !window_manager_is_animating(window_manager()) && !np_animating())
-        sleep_ms(np_glide_wait(np_marq_wait(IDLE_SLEEP_MS))); /* by the next frame due */
+        loop_wait(np_glide_wait(np_marq_wait(loop_span(IDLE_SLEEP_MS, LOOP_LIT_MAX_MS, 1))));
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
     return stock_sleep_trampoline(loop);
 }
