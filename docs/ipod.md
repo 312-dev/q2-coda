@@ -135,7 +135,8 @@ scrolls the others as a list does: scrolled to its end, its last row sits where 
 (`patch/home.c` `home_overflow`, `home_rest`; a hidden Now Playing row, restacked last, is not scrolled
 to). The menu runs on to the screen's bottom, and the rows below the seventh show through a fade
 into the black: in Full a straight one from 16 px above the seventh's foot (y 266) to y 316, and
-once the menu has scrolled another over its first row's top 14 px; in Split both follow the glass's
+once the menu has scrolled its rows run on under the status row, fading to black at the screen's top
+edge ([oled-design: List edges](oled-design.md#list-edges)); in Split both follow the glass's
 rounded edge, 34 px from its top edge and 56 px from its bottom one (`home_fades`, from the list's
 paint). A fade is drawn only while rows lie past it, and never over the selected
 row. The labels start at `home.rows.text_x` (OLED's 24) in the theme's Home face (Inter at 24 here,

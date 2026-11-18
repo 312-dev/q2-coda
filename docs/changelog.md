@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Lists (OLED): a scrolled list now runs on under the status row to the top of the screen and fades to black there, as it already did at the bottom, so the rows above the first one you see show dimly behind the clock and the battery instead of being cut off under the row. Where a list rests is unchanged: its first row still starts under the status row and, scrolled to the end, its last row stops on the same line. A tap on the status row is still the status row's. Songs' Shuffle row no longer shows a sliver of the row scrolled behind it. Menus and Up Next keep their rows inside their sheet.
   - Pages (OLED): the status row no longer sits on a black band. Each page now fills the whole screen, so its background, Home's art and the Rating page's glow run up behind the clock and the battery; everything below the row stays where it was. A page slide keeps the row on top, and a swipe back that starts on the row is left to the row.
   - Library lists (OLED): dragging Songs, Albums, Artists or another long Library list to its end with a finger now stops with the last row on the line the wheel stops at, clear of the rounded bottom corners, and a flick does the same. Before, the last row came to rest low, in the corners.
   - Streamed songs: picking a server song (from Search or any list) while another song is paused no longer plays a short blip of the paused song first. The paused song now just stops while the new one loads.

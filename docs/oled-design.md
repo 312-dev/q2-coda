@@ -52,9 +52,32 @@ first row rests at y 58 and its last at y 282. Stock's pages move their content 
 adds the window's `bar_foot` (`patch/theme_engine.c`), and a list end or a settings row is measured on the screen
 (`list_fit_end`). The row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable
 style). The pages the payload builds (`page_open`, the shuffle confirmation) still start under the row
-(`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it. A page
-slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
+(`patch/theme_engine.c` `client_window`), and the row fills black over them; their lists run under it all the same
+([List edges](#list-edges)). A page slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
 on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
+
+### List edges
+
+A scrolling list runs edge to edge (the user, 2026-11-18: "vignette edges to the screen's edge"): at rest its first
+row is on y 58 and, scrolled to its end, its last row's foot on y 282, as [Corners](#corners) says; in between its
+rows run on under the status row to the screen's top edge and past the list end to its foot, and fade to black at
+both edges. At the top the rows above the list's top fade from clear 14 px under that top to black at y 8, so the
+status row's glyphs, which stand over them, stay legible: under the glyphs' middle (y 23) a row shows at about a
+seventh of its brightness. At the foot the rows fade as Corners says, into black by y 316.
+
+- **Which lists.** Every vertical list whose box starts at most 90 px down the screen (`REACH_TOP`): the
+  settings pages, the Library's lists and tables (Songs, a playlist's songs), Home's lists and Edit Home, and the
+  pages the payload builds (Recently Added, card apps' lists). A list lower down, under a page's own header or tabs (EQ's), keeps its
+  rows in its box. Songs' Shuffle row stays where it is: the rows pass behind it and show again above it, under the
+  status row; a table's rows never draw over it.
+- **A menu sheet's rows** (the menus, Up Next) stay in the sheet: the sheet's top is their edge, and they fade under
+  y 50 as [Menus](#menus) says.
+- **Taps** on the band are the status row's, as on any page ([Full-bleed](#full-bleed)): a row shown under the
+  status row is not tappable there; scroll it down to tap it. Its box, its selection, the wheel and a drag are as
+  they were, so a selected row never stops under the status row.
+- Built as a paint of the list's rows into the status row's band, under its glyphs (`patch/nav/row_paint.c`
+  `list_reach_paint`, the fade `patch/home.c` `list_top_fade`; Home's Split fades follow the glass's corners as
+  before, `home_fades`).
 
 ### Corners
 
@@ -71,7 +94,8 @@ those spots are under the glass. So:
 - Every scrolling list ends as Home (Full)'s does (the user's, 2026-11-15): its box runs on to the
   screen's foot and the rows past the list end, y 282 (the 32 px slots from y 58 are y 58, 90, ...,
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
-  list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
+  list has scrolled, its rows run on under the status row to the screen's top edge, fading to black
+  there ([List edges](#list-edges)). A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`; a virtual table's, Songs and the other Library tables, by `lyrics_status_bar.c` `ringnav_table_drag` and `ringnav_table_scroll`, a drag and a fling alike), also after
   the page comes back on top (Return from a row's page) or its list is rebuilt (Bluetooth's, as it
@@ -1764,7 +1788,7 @@ pattern.
 
 | Q2 Muse screen                       | Pattern                     | Notes                                                                                                      |
 | ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centered. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled the top row's first 14 px too; scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
+| Home (Full)                         | List row                    | Home uses the Full layout in this theme: the concept's menu is a full-width list. No page title: the clock, centered. Seven rows from y 58, all at rest; a list with more (Settings' eight) fades the rows below into black from y 266 to 316, and once scrolled runs on under the status row to the screen's top edge ([List edges](#list-edges)); scrolled to the end the last row's foot is at y 282: every list's ending ([Corners](#corners)) |
 | Home (Split)                        | List row beside art         | Rows from y 40 (into the status row's empty left, the clock at its right) to x 204 (bar 16 to 188, chevrons 176); the art from x 196 and the top edge to the edges: the playing cover panning slowly while a song plays, else the library's covers in turn, each zooming and drifting and cross-fading into the next; the art's top 50 px and bottom 40 px darkened toward 25% brightness (a vignette, approved as V4 on 2026-11-15); the status row's clock, play state and battery over it at the right, each glyph white or black by contrast with the darkened art under it. Seven rows, all at rest (the last's foot at y 264); a list with more (Settings' eight) fades the rows past them into black within 56 px of the glass's bottom edge and, once scrolled, the row above y 40 within 34 px of its top edge, both following its rounded corners |
 | Now Playing                         | [Now Playing](#now-playing) |                                                                                                            |
 | Now Playing's About                 | [Track details](#track-details) | Header, quality line, then a grid of name over value                                                   |
