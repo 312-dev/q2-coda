@@ -5,7 +5,7 @@
     python3 tools/ci/emu_pool.py put SLOT                             # stop it, end the lease
     python3 tools/ci/emu_pool.py renew SLOT [--hours H]
     python3 tools/ci/emu_pool.py status
-    python3 tools/ci/emu_pool.py fixture DIR                          # (re)make the card fixture from DIR's files, hardlinked
+    python3 tools/ci/emu_pool.py fixture DIR [--library DB]           # (re)make the card fixture from DIR's files, hardlinked
     python3 tools/ci/emu_pool.py reserve SLOT [--off]                 # its lease never expires to another agent
 
 `get` prints the slot, its folder and its viewer's URL; drive it with that folder's own q2emu
@@ -14,7 +14,10 @@ lasts --hours (2) and is renewed with `renew`; an expired one is stopped and han
 A lease asked for a build a copy already runs, by the same NAME, reuses it without a reboot.
 Every lease's card (state/mmc, /mnt/mmc) starts as the fixture, ~/.cache/q2-emu-pool/card (Q2_EMU_CARD): `get` removes
 whatever the last lease left there and hardlinks the fixture's tree in, so no data is copied and a changed card never
-outlives its lease. A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card.
+outlives its lease. With the library the fixture was scanned into (`fixture DIR --library DB`, kept as card.db beside
+it), `get` copies that over the copy's state/data/database.db too, so Library > Songs lists the card's songs and no
+other; a new fixture without one drops the old library, and the copy's database.db is then left as it was.
+A lease that is reused (same NAME and build, emulator running) and a lease already reserved keep their card and library.
 A reserved lease (`get --reserve`, or `reserve SLOT` on a held one: the user's own rig) is never
 reclaimed when it expires and never handed to another NAME; only `put` or `reserve --off` frees it.
 
@@ -155,9 +158,17 @@ def link_tree(src, dst):
                                  f'must share a filesystem; nothing is copied instead)') from None
 
 
-def make_fixture(src):
+def library_fixture():
+    """Stock's library (/mnt/data/database.db) as a scan of the card fixture left it: card.db beside the card."""
+    fx = fixture_dir()
+    return fx.with_name(fx.name + '.db')
+
+
+def make_fixture(src, library=None):
     """The card fixture as hardlinks of src's tree, its files read-only so that a lease writing a file in place
-    fails instead of changing every card; the tree it replaces is unlinked, never written to."""
+    fails instead of changing every card; the tree it replaces is unlinked, never written to. library: a
+    database.db that lists src's songs (Scan Music Now on a lease of it), kept as library_fixture(); without one
+    the old library goes, as it lists another card."""
     fx = fixture_dir()
     src = pathlib.Path(src)
     if not src.is_dir():
@@ -175,6 +186,12 @@ def make_fixture(src):
     if fx.exists():
         shutil.rmtree(fx)
     new.rename(fx)
+    lib = library_fixture()
+    if library:
+        shutil.copyfile(library, lib.with_name(lib.name + '.new'))
+        lib.with_name(lib.name + '.new').rename(lib)
+    else:
+        lib.unlink(missing_ok=True)
     return fx
 
 
@@ -185,7 +202,9 @@ def card_songs(k):
 
 def reset_card(k):
     """Copy k's card (state/mmc) put back to the fixture: whatever the last lease added, switched or removed is
-    unlinked and the fixture's tree hardlinked in. Called for a copy this lease holds, its emulator stopped:
+    unlinked and the fixture's tree hardlinked in, and its library (state/data/database.db) a copy of the
+    fixture's, when there is one: stock's database.db is not rescanned at boot, so one left by another card lists
+    songs this card does not hold. Called for a copy this lease holds, its emulator stopped; the rest of
     state/data (/mnt/data) is not touched."""
     fx = fixture_dir()
     if not fx.is_dir() or not any(fx.iterdir()):
@@ -198,6 +217,12 @@ def reset_card(k):
         shutil.rmtree(card)
     card.parent.mkdir(parents=True, exist_ok=True)
     link_tree(fx, card)
+    lib = library_fixture()
+    if lib.is_file():  # copied, not linked: stock writes its library (play counts, Recent, rescans)
+        db = copy_dir(k)/'state/data/database.db'
+        db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(lib, db.with_name(db.name + '.new'))
+        db.with_name(db.name + '.new').rename(db)
 
 
 def q2emu(k, *args):
@@ -324,6 +349,7 @@ def main():
     v.add_argument('--off', action='store_true')
     f = sub.add_parser('fixture', help='make the card every lease starts from, hardlinked from DIR')
     f.add_argument('dir')
+    f.add_argument('--library', help="a database.db that lists DIR's songs, copied to each lease's state/data")
     sub.add_parser('status')
     args = ap.parse_args()
     if args.cmd == 'get':
@@ -333,7 +359,8 @@ def main():
     elif args.cmd == 'reserve':
         reserve(args.slot, not args.off)
     elif args.cmd == 'fixture':
-        print(f'card fixture {make_fixture(args.dir)}: {sum(len(f) for _, _, f in os.walk(fixture_dir()))} files, hardlinked from {args.dir}')
+        print(f'card fixture {make_fixture(args.dir, args.library)}: {sum(len(f) for _, _, f in os.walk(fixture_dir()))} files, '
+              f'hardlinked from {args.dir}; library {library_fixture() if args.library else "none"}')
     elif args.cmd == 'renew':
         renew(args.slot, args.hours)
     else:
