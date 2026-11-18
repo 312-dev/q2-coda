@@ -34,12 +34,12 @@ int feed(struct guard *g, unsigned now, int temp, int busy, int cancel, int acke
 int line(char *out, int size, int empty) {
     struct heat_sample s = { 0 };
     if (empty) {
-        s.wall = 0, s.temp = s.raw_temp = GUARD_NONE;
+        s.wall = 0, s.temp = s.raw_temp = s.die = GUARD_NONE, s.adc = -1;
         s.level = s.mv = s.cable = s.screen = s.bright = s.wifi = s.bt = s.mhz = s.busy = -1;
         s.demo_threads = s.procs = -1;
         return heat_line(out, size, &s);
     }
-    struct heat_sample f = { 1795442585, 1234, 415, 27, 87, 4105, "Charging", 1, "configured", "adb", 1, 80,
+    struct heat_sample f = { 1795442585, 1234, 415, 27, 415, 6884, 87, 4105, "Charging", 1, "configured", "adb", 1, 80,
                              1, 0, -1, 23, { { "hciplayer", 123 }, { "demo", 80 }, { "adbd", 3 } }, 27, 63, "ok" };
     return heat_line(out, size, &f);
 }

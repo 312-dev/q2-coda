@@ -499,6 +499,8 @@ int addon_fav(const char *id, const char *kind, const char *key, int on);
 int addon_fav_path(const char *path, int on);
 /* addon.c: which copy of a card app runs, the card's or the firmware's (docs/internals.md#bundled-apps) */
 int addon_dir(const char *id, char *dir, unsigned n), addon_version_cmp(const char *x, const char *y);
+/* addon.c: whether the firmware carries app id as its own alone, never the App Store's (netupdate.c) */
+int addon_builtin(const char *id);
 void addon_q2app(const char *id, char *path, unsigned n);
 /* catalogue.c: the server library (docs/internals.md#server-library). catalogue_on: Local + Server;
  * catalogue_path: a server row's path; catalogue_unavailable: a record that can't play now;
