@@ -323,7 +323,8 @@ assert m.names()==m.before_queue; passed()
 def ple_search(m,text,event='EVT_IM_ACTION'):
     m.choose(0)
     edit=m.find('edit'); assert m.nodes[edit]['name']=='search_edit' and m.nodes[edit]['focused']==1
-    assert m.get(edit+O['W_Y'])+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')
+    y=m.get(edit+O['W_Y'])-OLED_G.bar  # the full-bleed page's rows from the status row's foot (bar_foot)
+    assert 0<=y and y+m.get(edit+O['W_H'])<=30 and not m.find('scroll_view')
     m.nodes[edit]['text']=text; f,ctx=m.handler(edit,O[event])
     assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0; m.advance(0)
     m.view=m.find('scroll_view')
