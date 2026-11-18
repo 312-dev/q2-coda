@@ -7,46 +7,16 @@
  * a log line (q2guard.h heat_line) goes to RAM every LINE_MS, every GUARD_TICK_MS while warm,
  * plugged in or busy, and the lines go to the card's /mnt/mmc/.q2muse/logs in batches. demo draws
  * the cards it is told about in /tmp/q2guard.state and answers in /tmp/q2guard.ack (heatguard.c).
+ * Between ticks it sleeps in q2bt.c's bt_sleep, which samples the Bluetooth link each second while
+ * an A2DP stream runs, into a q2-bt log beside the heat log (docs/internals.md#bluetooth-link-monitor).
  * It writes nothing to /mnt/data. No MIPS sysroot: glibc 2.28's declarations, as boot.c. */
-#include "q2guard.h"
-
-#ifndef Q2GUARD_HOST
-struct timespec {
-    long tv_sec, tv_nsec;
-};
-struct dirent { /* glibc's, MIPS o32, no LFS */
-    unsigned d_ino;
-    long d_off;
-    unsigned short d_reclen;
-    unsigned char d_type;
-    char d_name[256];
-};
-typedef int pid_t;
-ssize_t read(int, void *, size_t);
-int clock_gettime(int, struct timespec *), usleep(unsigned), kill(int, int), reboot(int);
-pid_t fork(void), waitpid(pid_t, int *, int);
-void _exit(int), sync(void);
-long time(long *);
-void *opendir(const char *);
-struct dirent *readdir(void *);
-int flock(int, int), closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
-char *strstr(const char *, const char *);
-int atoi(const char *);
-int ioctl(int, unsigned long, ...);
-#define O_RDONLY 0
-#define O_RDWR 2
-#define WNOHANG 1
-#define CLOCK_MONOTONIC 1
-#define RB_POWER_OFF 0x4321fedc
-#define LOCK_EX 2
-#define LOCK_NB 4
-#endif
+#include "q2bt.h"
 
 #define GUARD_TICK_MS 5000 /* a sample; 1 s while powering off */
 #define LINE_MS 30000      /* a log line when nothing is warm, plugged in or busy */
 #define FAST_DC 450        /* warm: a line every tick */
 #define FAST_BUSY 50
-#define FLUSH_MS 300000 /* the RAM lines to the card: every 5 min, a minute while fast, and at once on an event */
+#define FLUSH_MS 300000 /* the RAM lines to the card: every 5 min, a minute while fast or streaming, and at once on an event */
 #define FLUSH_FAST_MS 60000
 #define LOGS "/mnt/mmc/.q2muse/logs"
 #define STATE "/tmp/q2guard.state"
@@ -58,7 +28,7 @@ int ioctl(int, unsigned long, ...);
 #define PMIC_DEV "/dev/i2c-6" /* the AXP2101's bus on the Q2 (axp20x-i2c owns 0x34, so I2C_SLAVE_FORCE) */
 #define PMIC_ADDR 0x34
 
-static int slurp(const char *path, char *buf, int size) { /* the file's start, NUL-terminated */
+int slurp(const char *path, char *buf, int size) { /* the file's start, NUL-terminated */
     int fd = open(path, O_RDONLY | O_CLOEXEC), n = 0, got;
     if (fd < 0) return buf[0] = 0, -1;
     while (n < size - 1 && (got = (int)read(fd, buf + n, size - 1 - n)) > 0) n += got;
@@ -66,7 +36,7 @@ static int slurp(const char *path, char *buf, int size) { /* the file's start, N
     buf[n] = 0;
     return n;
 }
-static int read_int(const char *path, int *v) {
+int read_int(const char *path, int *v) {
     char b[32];
     if (slurp(path, b, sizeof b) <= 0 || ((b[0] < '0' || b[0] > '9') && b[0] != '-')) return -1;
     *v = atoi(b);
@@ -79,7 +49,7 @@ static void word(const char *path, char *out, int size) { /* the first word, or 
     while (b[i] && b[i] != '\n' && b[i] != ' ' && i < size - 1) out[i] = b[i], ++i;
     out[i] = 0;
 }
-static unsigned now_ms(void) {
+unsigned now_ms(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (unsigned)t.tv_sec * 1000u + (unsigned)(t.tv_nsec / 1000000);
@@ -108,7 +78,14 @@ static int bus_wr(void *ctx, int reg, int v) {
     unsigned char d[34] = { (unsigned char)v };
     return smbus(0, reg, d) < 0 ? -1 : 0;
 }
-static void bus_sleep(void *ctx, int ms) { usleep((unsigned)ms * 1000u); }
+/* The window's wait sleeps in bt_sleep, so a stream's lines go on through it (a sample there only
+ * lengthens the wait); the first window's short polls sleep plainly, as their sum is the time logged. */
+static void bus_sleep(void *ctx, int ms) {
+    if (ms >= PMIC_WINDOW_MS)
+        bt_sleep((unsigned)ms);
+    else
+        usleep((unsigned)ms * 1000u);
+}
 static const struct pmic_bus bus = { bus_rd, bus_wr, bus_sleep, 0 };
 static struct pmic pmic;
 static void pmic_open(void) {
@@ -157,10 +134,7 @@ static int cpu_ticks(unsigned long long *all, unsigned long long *idle) {
     for (const char *p = b; (p = strstr(p, "\ncpu")); ++p) cores += p[4] >= '0' && p[4] <= '9';
     return cores ? cores : 1;
 }
-struct cpu {
-    unsigned long long all, idle;
-};
-static int busy_since(struct cpu *c, int *cores) { /* percent since the last call, -1 the first */
+int busy_since(struct cpu *c, int *cores) { /* percent since the last call, -1 the first */
     unsigned long long all = 0, idle = 0;
     int n = cpu_ticks(&all, &idle);
     if (!n) return -1;
@@ -320,14 +294,14 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, 
 /* ---- the log's writer: a child, so a card that hangs never stops the watching ----
  * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
  * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
- * card_log_flush appends the ring to the file; the watcher then drops what the child was given. */
-static card_log heat;
-static int in_writer; /* true in the child */
+ * card_log_flush appends the rings to the files; the watcher then drops what the child was given. */
+static card_log heat, btlog; /* q2-heat and q2bt.c's q2-bt */
+static int in_writer;        /* true in the child */
 int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    unsigned len, dropped; /* what the child was given */
-    int done;              /* the last flush ended (written, failed or given up) */
+    unsigned len, dropped, bt_len, bt_dropped; /* what the child was given of each */
+    int done; /* the last flush ended (written, failed or given up) */
 } fl;
 static void flush_start(void) {
     if (fl.pid > 0) return;
@@ -336,20 +310,26 @@ static void flush_start(void) {
         return;
     }
     fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
+    fl.bt_len = btlog.len, fl.bt_dropped = btlog.dropped;
     pid_t pid = fork();
-    if (!pid) in_writer = 1, _exit(heat_flush(&heat, LOGS) ? 1 : 0);
+    if (!pid) in_writer = 1, _exit((heat_flush(&heat, LOGS) ? 1 : 0) | (bt_flush(&btlog, LOGS) ? 2 : 0));
     fl.pid = pid;
     if (pid < 0) fl.pid = 0, fl.done = 1;
+}
+/* what the child wrote of l dropped from its ring: not if the ring moved since (twice beats lost) */
+static void written(card_log *l, unsigned len, unsigned dropped) {
+    if (l->dropped != dropped) return;
+    memmove(l->ring, l->ring + len, l->len - len);
+    l->len -= len;
+    l->dropped = 0;
 }
 static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
-    if (!status && heat.dropped == fl.dropped) { /* if the ring moved since, keep it (twice beats lost) */
-        memmove(heat.ring, heat.ring + fl.len, heat.len - fl.len);
-        heat.len -= fl.len;
-        heat.dropped = 0;
-    }
+    int failed = status & 0x7f ? 3 : status >> 8 & 0xff; /* killed: neither; else its exit's bits */
+    if (!(failed & 1)) written(&heat, fl.len, fl.dropped);
+    if (!(failed & 2)) written(&btlog, fl.bt_len, fl.bt_dropped);
 }
 
 /* ---- demo ---- */
@@ -398,6 +378,7 @@ int main(int argc, char **argv) {
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
     card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
+    bt_init(card_log_at(&btlog, LOGS "/q2-bt.0", BT_RAM));
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
@@ -417,8 +398,9 @@ int main(int argc, char **argv) {
     pmic_open();
     flush_start();
     for (;;) {
-        /* a tick every GUARD_TICK_MS, the PMIC's window included */
-        usleep(g.off ? 1000000 : (GUARD_TICK_MS - (window_ms < GUARD_TICK_MS ? window_ms : 0)) * 1000);
+        /* a tick every GUARD_TICK_MS, the PMIC's window included; the Bluetooth link sampled each second
+         * through both while it streams (bt_sleep) */
+        bt_sleep(g.off ? 1000 : GUARD_TICK_MS - (window_ms < GUARD_TICK_MS ? window_ms : 0));
         unsigned now = now_ms();
         flush_reap();
         /* the die: not while powering off (its window would hold up the 1 s ticks, and nothing reads it) */
@@ -481,8 +463,8 @@ int main(int argc, char **argv) {
             last_line = now;
         }
         if (o.kill_player) note("NOANSWER demo: player stopped"), kill_players();
-        if (o.flush || (line_due && o.event != EV_NONE) ||
-            now - last_flush >= (fast ? FLUSH_FAST_MS : FLUSH_MS)) {
+        if (o.flush || (line_due && o.event != EV_NONE) || bt_flush_due() ||
+            now - last_flush >= (fast || bt_streaming() ? FLUSH_FAST_MS : FLUSH_MS)) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
             flush_start();
             last_flush = now;
