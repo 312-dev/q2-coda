@@ -40,12 +40,16 @@
 { "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/carremote_page.c) */
 { "carphone_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
 { "carhowto_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
-{ "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
+{ "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
+{ "guestset_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/guest_ui.c) */
+{ "guesttrust_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/guest_ui.c) */
+{ "hotspot_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/guest_ui.c) */
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */
+{ "usbpick_page", CTX_FIXED, CHOICE },  /* runtime window (patch/usb_ui.c): the USB picker */
 { "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
 { "albuminfo_page", CTX_LOCAL, 0 },

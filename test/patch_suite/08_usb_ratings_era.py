@@ -590,6 +590,8 @@ class RolloverMachine(CoverflowMachine):
                      'toolsGetMusicInfo','toolsGetFileSize','toolsGetAlbumCover','toolsGetExternCover',
                      'access@GLIBC_2.0','remove@GLIBC_2.0','usleep@GLIBC_2.0','fork@GLIBC_2.0'):
             self.handlers[syms[name]]='r:'+name.split('@')[0]
+        # the thread's sleep between rounds (COVER_WAITS: cover_wake.c's futex wait), where artwork() ends a round
+        self.handlers[payload_syms['ringnav_play_cover_wait']]='r:usleep'
         self.mock('pthread_mutex_lock@GLIBC_2.0','pthread_mutex_unlock@GLIBC_2.0','toolsFreeStSongInfo',
                   'mclLoadExLyric','sendBtHeadsetPlayStatus','notifyPlayInfo','notifyPlayStatus','notifyRefreshLyric',
                   'dmrNotifyPlayStatus','dlnaRenderSaveUrlMetadata','reset_repeatinfo','initializeDmrQCurrentInfo',

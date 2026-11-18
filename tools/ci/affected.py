@@ -15,14 +15,24 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
   plus every test that names a changed def or class, through patch_shards.py --lines (the joined suite's
   lines); an edit to the runner (test/patch.py, test/suite_source.py) runs all of it;
 - patch/X.c runs the test/fw files that name X.c, its X__ statics, or a function X.c defines, and the
-  end-to-end files; a source no fw file names runs all of test/fw;
+  end-to-end files; a source no fw file names runs all of test/fw; and the test/unit files that name X.c
+  (they read or compile it);
+- a file in a folder a test/unit file checks whole (`SCANNERS`: test_theme.py's and test_art.py's rules
+  over patch/, test_docs.py's citations in patch/, tools/ and test/) runs that test too;
 - tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
   test/patch.py and test/fw;
-- a test file runs itself.
+- a test file runs itself;
+- a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
+  pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
+  rejected there. They are run as gate.py defines them (`gate.full_suite`);
+- a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
+  --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
+  on the trunk's tip after landing, where a failure turns the tip red.
 
 Documented in docs/building.md#fast-test-runs; tools/ci/test_ci.py checks the rules.
 """
 import argparse
+import fnmatch
 import ast
 import json
 import os
@@ -33,6 +43,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'tools'/'ci'))
+import gate  # noqa: E402
 import patch_shards  # noqa: E402
 import q2ci  # noqa: E402
 
@@ -40,7 +51,27 @@ ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
+# test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
+# page_parallax.c and playlist_art.c. It is in no gate tier, so a change to any of these plans it (in `other`).
+COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parallax.c', 'patch/playlist_art.c')
+# gate.py's type-check suites, planned in `other`: a .py under tools/ or test/unit/ (or the mypy config)
+# needs mypy-tools, one under test/fw/ needs mypy-fw. A merge batch runs them, so a branch that skips them
+# here is rejected there.
+MYPY_TOOLS, MYPY_FW = 'mypy-tools', 'mypy-fw'
+MYPY_SUITES = (MYPY_TOOLS, MYPY_FW)
+MYPY_CONFIG = 'pyproject.toml'
+SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
+# test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
+# A change there runs the test whatever else the file maps to. tools/ci/test_ci.py checks that each folder a
+# test/unit file globs is here.
+SCANNERS = (
+    ('patch/', ('.c', '.h', '.inc'), 'test_theme.py'),  # colours and type sizes named by token, not restated
+    ('patch/', ('.c',), 'test_art.py'),                  # corner radii in the table, empty-state glyphs drawn
+    ('patch/', None, 'test_docs.py'),                    # every doc anchor a source cites resolves
+    ('tools/', None, 'test_docs.py'),
+    ('test/', None, 'test_docs.py'),
+)
 
 
 class Plan:
@@ -54,7 +85,7 @@ class Plan:
 
     def everything(self, why):
         self.unit, self.fw, self.patch = ALL, ALL, ALL
-        self.other.add('test/build.py')
+        self.other.update({'test/build.py', SMOKE, *MYPY_SUITES})
         self.why.append(why)
 
     def add(self, suite, parts, why):
@@ -103,6 +134,11 @@ def fw_files_for(source, root=ROOT):
     return hits | {p.name for p in (root/'test/fw').glob('test_e2e_*.py')}
 
 
+def unit_files_for(name, root=ROOT):
+    """The test/unit files that name patch/<name>: those that read or compile it."""
+    return {p.name for p in sorted((root/'test/unit').glob('test_*.py')) if name in p.read_text(errors='replace')}
+
+
 def patch_tests_for(changed_lines, source):
     """Joined-suite line ranges (A:B) holding the tests a change to those lines (of the new suite) touches."""
     stmts = patch_shards.analyse(source)
@@ -140,12 +176,24 @@ def suite_starts(root):
     return out
 
 
+def mypy_argv(name, python):
+    """The command gate.py runs for the type-check suite `name`."""
+    return gate.full_suite(name, python, pathlib.Path('.'))().argv
+
+
 def plan_for(changes, root=ROOT, patch_source=None):
     """A Plan for changes: {path: set of changed line numbers in the new file (empty if deleted or unknown)}."""
     p = Plan()
     for path, lines in sorted(changes.items()):
         parts = pathlib.PurePath(path).parts
         name, stem, suffix = parts[-1], pathlib.PurePath(path).stem, pathlib.PurePath(path).suffix
+        if suffix == '.py' and (path.startswith(('tools/', 'test/unit/')) or path == MYPY_CONFIG):
+            p.add('other', {MYPY_TOOLS}, f'{path}: type-checked by {MYPY_TOOLS}')
+        if suffix == '.py' and path.startswith('test/fw/') or path == MYPY_CONFIG:
+            p.add('other', {MYPY_FW}, f'{path}: type-checked by {MYPY_FW}')
+        for folder, suffixes, test in SCANNERS:
+            if path.startswith(folder) and (suffixes is None or suffix in suffixes):
+                p.add('unit', {test}, f'{path}: {test} checks every file of {folder}')
         if path.startswith('test/patch_suite/') and suffix == '.py':  # one file of the suite: its lines, joined
             starts = suite_starts(root)
             if patch_source is None:
@@ -163,7 +211,12 @@ def plan_for(changes, root=ROOT, patch_source=None):
             p.add('patch', ALL, f'{path}: the payload')
             fw = fw_files_for(name, root) if suffix == '.c' and len(parts) == 2 else ALL
             p.add('fw', fw, f'{path}: test/fw ' + ('all' if fw == ALL else ', '.join(sorted(fw))))
-            p.other.add('test/build.py')
+            p.other.update({'test/build.py', SMOKE})
+            if any(fnmatch.fnmatchcase(path, g) for g in COVERFLOW_SOURCES):
+                p.other.add('test/coverflow.py')
+                p.why.append(f'{path}: test/coverflow.py')
+            if len(parts) == 2 and (named := unit_files_for(name, root)):
+                p.add('unit', named, f'{path}: test/unit ' + ', '.join(sorted(named)))
         elif parts[0] == 'tools' and len(parts) == 2:
             unit = root/'test/unit'/f'test_{stem}.py'
             p.add('unit', {unit.name} if unit.exists() else ALL, f'{path}: its unit tests')
@@ -233,8 +286,8 @@ def changed(base, head='HEAD', root=ROOT):
     return out
 
 
-def run(plan, build, python):
-    """Run the plan; returns the number of suites that failed."""
+def run(plan, build, python, smoke=False):
+    """Run the plan; returns the number of suites that failed. smoke: run a planned smoke test too."""
     failed = 0
     q2heavy = os.environ.get('Q2_HEAVY', str(pathlib.Path.home()/'.local/bin/q2-heavy'))
     heavy = [q2heavy] if pathlib.Path(q2heavy).exists() else []
@@ -258,10 +311,19 @@ def run(plan, build, python):
         else:
             go('patch', [python, str(ROOT/'tools/ci/patch_shards.py'), build, '--lines', ','.join(d['patch'])])
     for other in d['other']:
-        if other.startswith('tools/ci/test_'):
+        if other == SMOKE:
+            if smoke and build:
+                go(other, [python, str(ROOT/'tools/ci/smoke.py'), build], is_heavy=True)
+            else:
+                print(f'== {other}: optional; --run BUILD --smoke walks the build on a pooled emulator (about 2 min)')
+        elif other in MYPY_SUITES:
+            go(other, mypy_argv(other, python))
+        elif other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':
             go(other, [python, other] + (['--build', build] if build else []))
+        elif other in gate.NO_BUILD_ARG:
+            go(other, [python, other], is_heavy=True)
         elif other.endswith('.py') and build:
             go(other, [python, other, build], is_heavy=True)
         else:
@@ -276,6 +338,7 @@ def main():
     ap.add_argument('--all', action='store_true', help='everything, as an integration branch runs')
     ap.add_argument('--json', action='store_true')
     ap.add_argument('--run', metavar='BUILD', nargs='?', const='', help='run the plan; BUILD for the suites that need one')
+    ap.add_argument('--smoke', action='store_true', help='with --run, also run a planned smoke test (tools/ci/smoke.py)')
     ap.add_argument('--python', default=sys.executable)
     ap.add_argument('--plan-json', metavar='FILE', help='take the plan from FILE (- for stdin), as merge_batch.py and merge_train.py hand it')
     args = ap.parse_args()
@@ -298,7 +361,7 @@ def main():
         for why in d['why']:
             print(f'  {why}')
     if args.run is not None:
-        return 1 if run(plan, args.run or None, args.python) else 0
+        return 1 if run(plan, args.run or None, args.python, args.smoke) else 0
     return 0
 
 

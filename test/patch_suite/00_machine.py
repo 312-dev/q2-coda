@@ -32,6 +32,9 @@ def color_t(rgb): return 0xff000000|(rgb&255)<<16|(rgb>>8&255)<<8|rgb>>16
 O_GLYPH=re.search(r'#define BT_GLYPH "(\w+)"',INC)[1]  # the plain Bluetooth glyph a codec badge fades into
 CONFIG={}  # config.ini [IPOD] keys a new Machine starts with; the payload reads them on first use
 SEED={}  # values a Machine reads for a missing key in place of the payload's default
+# Reduce Motion's flat selection bar, for the checks that pin the bar's shape and place: the bar's rest lift and press
+# (tilt.c, docs/internals.md#row-press) widen it and cast a shadow, and test/fw/test_tilt.py pins those.
+FLAT={'REDUCEMOTION':'1'}
 SETUP=[]  # functions a new Machine runs before anything can read config (QueueMachine's constructor does)
 FILL,RADIUS=(0x40<<24)|O['FILL_RGB'],9  # the stock rounded-rect checks' translucent fill and radius
 LCD_COLORS=(0x9abcdef0,0x12345678)
@@ -158,6 +161,7 @@ class Machine:
             self.handlers[payload_syms['press_stamp']]='stock_press_stamp'
             self.handlers[payload_syms['mute_stamp']]='stock_mute_stamp'
         for name in FUNCTIONS: self.handlers[syms[name]]=name
+        self.handlers[syms['strstr@GLIBC_2.0']]='strstr@GLIBC_2.0'  # libc's, which the payload's state-file reads call
         # canvas_get_vgcanvas runs stock, down to the mocked lcd_get_vgcanvas, as the rounded wrappers need
         for name in ('slide_menu_item_width','slide_menu_on_scroll_done','canvas_get_vgcanvas',
                      'widget_animator_scroll_set_params','slide_menu_set_value','toolsTimeItoa','on_wm_keyup_fun','table_client_get_virtual_h',
@@ -169,6 +173,7 @@ class Machine:
             for name in ('paint','dispatch','paint_bg'):
                 self.handlers[int(manifest['patch_symbols']['stock_'+name+'_trampoline'],16)]='stock_'+name
         self.mock('pthread_create@GLIBC_2.2','pthread_detach@GLIBC_2.0','pthread_self@GLIBC_2.0')  # pthread_self: playback_poll's UI thread
+        self.mock('mkdir@GLIBC_2.0')  # card_store.c's folder on the card
         self.mock('reset_poweroptions_timer','screen_action','enable_fb','usleep@GLIBC_2.0','sprintf@GLIBC_2.0',
                   'airplayGetFlag','playpause_quick_click','time@GLIBC_2.0','localtime@GLIBC_2.0','tzset@GLIBC_2.0',
                   'strlen@GLIBC_2.0','strncpy@GLIBC_2.0','strrchr@GLIBC_2.0','strcasecmp@GLIBC_2.0','strncasecmp@GLIBC_2.0','strncmp@GLIBC_2.0',
@@ -327,7 +332,7 @@ class Machine:
         if name=='memcpy': self.u.mem_write(a,bytes(self.u.mem_read(b,c))); ret=a
         elif name=='strncpy@GLIBC_2.0': self.u.mem_write(a,self.raw(b)[:c].ljust(c,b'\0')); ret=a
         elif name=='memset': self.u.mem_write(a,bytes([b&255])*c); ret=a
-        elif name=='thread:run': self.nested(c,d); ret=0
+        elif name=='thread:run': self.word(a,77); self.nested(c,d); ret=0  # its id written, as pthread_create does
         elif name in ('table_row_create', 'list_item_create', 'button_create', 'image_create', 'view_create',
                        'hscroll_label_create', 'gif_image_create', 'label_create'):
             kind = {'gif_image_create': 'gif'}.get(name, name.removesuffix('_create'))
@@ -489,7 +494,7 @@ class Machine:
                     found=lookup(child) if c else (child if self.nodes[child].get('name')==self.text(b) else 0)
                     if found: return found
                 return 0
-            ret=lookup(a) if a else 0
+            ret=lookup(a) if a in self.nodes else 0  # the window manager (self.wm) is no node: nothing found in it
         elif name=='scroll_bar_cast': ret=a
         elif name=='scroll_bar_is_mobile': ret=n.get('type')=='scroll_bar_m'
         elif name=='widget_set_opacity': self.byte(a+0x34,b); ret=0
@@ -974,7 +979,7 @@ assert m.call()==11 and m.moved()[0][0]=='scroll_view_set_offset' and m.moved()[
 assert m.get(w+O['SCROLL_Y'])==148 and m.get(w+O['VIEW_ANIMATOR'])==0; passed()
 
 # Painting establishes selection without a sacrificial button press or native focus.
-m=Machine(); w,entries=m.page_list(5,extent=1000)
+m=Machine(); m.config.update(FLAT); w,entries=m.page_list(5,extent=1000)
 assert m.paint(w)==0 and m.selected(w)==0
 # The bar is painted behind the rows: every band precedes the border hook, which draws nothing.
 names=[c[0] for c in m.calls]
@@ -982,25 +987,36 @@ bg,border=names.index('stock_paint_bg'),names.index('stock_paint')
 assert all(bg<i<border for i,n in enumerate(names) if n=='canvas_fill_rect')
 assert not m.rounded and not m.strokes and m.global_alpha==0
 # OLED's bar (paint_selection, gradient): the accent's one tone, its list.selection.inset in from each side of the
-# surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end
-# circle's chord sampled at the band's centre in 1/16 px, a partly covered edge pixel at that coverage's alpha.
+# surface, its ends list.selection.radius (under the row's half height, pill_radius), in one-pixel bands; each end's
+# corner pixels the band's colour at their coverage (corner_cover.c, tools/art.py corner_cover) as alpha.
 OLED_T=theme_builtins()[0]  # assets/themes/oled/theme.xml, the one theme
 OLED_SCHEME=OLED_T['schemes'][next(o['def'] for o in OLED_T['opts'] if o['setting']=='SETTING_ACCENT')]  # Accent's default, oled-blue
 OLED_TONES=OLED_SCHEME['tones']
 assert len(set(OLED_TONES))==1  # Accent Blue, one value for every tone: the bar is solid
 OLED_BLUE,inset,radius=color_t(OLED_TONES[0]),OLED_T['sel_inset'],OLED_T['sel_radius']
-def chord(j,h,D=None):  # the band's inset in whole pixels and its 1/16 px remainder, for end circles D across (a pill's: h)
-    D=h if D is None else D; d=abs(2*j+1-h)-(h-D)
-    out=8*D-math.isqrt((D*D-d*d)*64) if d>0 else 0
-    return (out+15)//16, out&15
+def corner_mask_bands(x,y,w,h,R,color):
+    """corner_mask's fills (nav/row_paint.c) rounding the box x, y, w, h by R into color (a color_t, opaque): each
+    corner row's clear pixels in one fill, then each part pixel at the alpha the arc leaves; corners in the order top
+    left, bottom left, top right, bottom right."""
+    from art import corner_cover
+    cover,want=corner_cover(R),[]
+    for i in range(R):
+        row=cover[i*R:(i+1)*R]; n=next((k for k,c in enumerate(row) if c),R)
+        for c in range(4):
+            yy=y+(h-1-i if c&1 else i); right=c&2
+            if n: want.append((x+w-n if right else x,yy,n,1,color))
+            want+=[(x+w-1-k if right else x+k,yy,1,1,(color&0xffffff)|(255-row[k])<<24) for k in range(n,R) if row[k]<255]
+    return want
 def bar_bands(x,y,w,h,radius,color=OLED_BLUE):
+    from art import corner_cover
+    cover=corner_cover(radius) if radius else b''
     want=[]
     for j in range(h):
-        n,frac=chord(j,h,2*radius) if radius else (0,0)
+        cr=j if j<radius else h-1-j if j>=h-radius else -1
+        row=cover[cr*radius:(cr+1)*radius] if cr>=0 else b''
+        n=next((k for k,c in enumerate(row) if c==255),len(row))
         want.append((x+n,y+j,w-2*n,1,color))
-        if frac:
-            edge=(color&0xffffff)|((16-frac)*17<<24)
-            want.extend([(x+n-1,y+j,1,1,edge),(x+w-n,y+j,1,1,edge)])
+        want.extend(e for k in range(n) if row[k] for e in ((x+k,y+j,1,1,(color&0xffffff)|row[k]<<24),(x+w-1-k,y+j,1,1,(color&0xffffff)|row[k]<<24)))
     return want
 assert [b[:5] for b in m.bands]==bar_bands(inset,0,240-2*inset,48,radius) and radius<48//2
 assert all(b[5]==(0,0,240,96) for b in m.bands)
@@ -1011,7 +1027,7 @@ assert m.clip==(0,0,240,240) and m.lcd_colors()==LCD_COLORS
 assert not any(m.get(e+O['W_FOCUS'])&0x80 for e in entries); passed()
 # A left image the round end would cut shrinks the radius (pill_radius); hidden (Folder's multi-select check) it doesn't.
 for visible,want in ((1,2),(0,radius)):
-    k=Machine(); kw,es=k.page_list(5,extent=1000)
+    k=Machine(); k.config.update(FLAT); kw,es=k.page_list(5,extent=1000)
     check=k.node('image','img_choice',visible=visible); k.nodes[es[0]]['children']=[check]
     for o,v in zip(('W_X','W_Y','W_W','W_H'),(inset,0,50,48)): k.word(check+O[o],v)
     k.paint(kw); assert [b[:5] for b in k.bands]==bar_bands(inset,0,240-2*inset,48,want),visible
@@ -1034,7 +1050,7 @@ for offset in (0, 24):
         assert g.rounded[-1]['radius']==0
         assert g.rounded[-1]['color']==OLED_BLUE; passed()
 # Touch mode draws nothing; the wheel brings the bar back.
-c=Machine(); cw,_=c.page_list(5,extent=1000); c.paint(cw)
+c=Machine(); c.config.update(FLAT); cw,_=c.page_list(5,extent=1000); c.paint(cw)
 c.touch(); c.paint(cw); assert not c.drawn() and c.clip==(0,0,240,240)
 c.call(); c.paint(cw); assert c.selected(cw)==1 and c.sel()==(inset,36,240-2*inset,48); passed()
 # Status bar: a solid fill on the bar widget alone, no highlight, LCD fill restored.
@@ -1759,13 +1775,13 @@ m.word(w+O['TABLE_ROWS'],1); m.word(w+O['TABLE_TOP'],0); m.bind(rows); m.paint(w
 assert m.selected(w)==0; passed()
 
 # A recreated page recalls the last selected row and reveals it without a sacrificial press.
-def walk(n,steps,texts=(),extent=1000,**kw):
-    """Paint a fresh labelled list of n entries, then wheel down steps rows."""
-    m=Machine(); w,es=m.page_list(n,extent=extent,**kw); m.label(es,texts); m.paint(w)
+def walk(n,steps,texts=(),extent=1000,flat=False,**kw):
+    """Paint a fresh labelled list of n entries, then wheel down steps rows; flat: its bar FLAT's."""
+    m=Machine(); flat and m.config.update(FLAT); w,es=m.page_list(n,extent=extent,**kw); m.label(es,texts); m.paint(w)
     for _ in range(steps): assert m.call()==11
     assert m.selected(w)==steps
     return m,w,es
-m,w,es=walk(10,5); assert m.get(w+O['SCROLL_Y'])==204
+m,w,es=walk(10,5,flat=True); assert m.get(w+O['SCROLL_Y'])==204
 w2,es2=m.page_list(10,extent=1000)
 assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
 assert m.sel()==(inset,36,240-2*inset,48)
@@ -1909,6 +1925,9 @@ passed()
 def long_view(h,top=100):
     lm=Machine(); lw,les=lm.page_list(500,height=266,extent=500*h); lm.word(lw+O['W_W'],375)
     for i,e in enumerate(les): lm.word(e+O['W_Y'],i*h); lm.word(e+O['W_H'],h)
+    # each corner radius's coverage table is made once a boot, at its first paint (corner_cover.c): made first, so this
+    # counts the paint alone
+    for r in range(1,17): lm.call(address=payload_syms['corner_cover'],args=(r,0,0,0),gap=0)
     lm.word(lw+O['SCROLL_Y'],top*h); count=[0]; hook=lm.u.hook_add(UC_HOOK_CODE,lambda *a: count.__setitem__(0,count[0]+1))
     lm.call(address=HOOKS['widget_on_paint_background'][0],args=(lw,lm.canvas,0,0),gap=0); lm.u.hook_del(hook)
     print(f'OLED scroll view of 500 {h} px rows from row {top}: {count[0]} instructions for its first paint')

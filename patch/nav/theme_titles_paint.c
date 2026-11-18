@@ -178,8 +178,8 @@ static int usb_poll(const void *info) {
     if (f) fclose(f);
     if (n > 0) st.usb_lun = 1;
     if (n || !st.usb_lun) return 8; /* RET_REPEAT */
-    usb_ui_ejected(win); /* the mode page says OK to Disconnect */
-    return 7; /* RET_REMOVE */
+    usb_ui_ejected(win);            /* the mode page says OK to Disconnect */
+    return 7;                       /* RET_REMOVE */
 }
 
 void *ringnav_ui_load(const char *name, void *parent) {
@@ -193,9 +193,9 @@ void *ringnav_ui_load(const char *name, void *parent) {
     int np = name && !tk_strcmp(name, "playing_page");
     void *root = stock_ui_load_trampoline(ui_redirect(name, path), parent);
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
-    if (root) msg_open(root); /* the scan page (scan_page.c oled_scan) */
-    if (root) usb_ui_mode_load(root); /* USB's page as a mode page (usb_ui.c) */
-    if (root) bt_recv_load(root);     /* the Bluetooth receiver's (bt_recv.c) */
+    if (root) msg_open(root);                         /* the scan page (scan_page.c oled_scan) */
+    if (root) usb_ui_mode_load(root);                 /* USB's page as a mode page (usb_ui.c) */
+    if (root) bt_recv_load(root);                     /* the Bluetooth receiver's (bt_recv.c) */
     if (root && g_usbmode != 1 && !tk_strcmp(widget_get_prop_str(root, "name", ""), "usbmode_page"))
         st.usb_lun = 0, widget_add_timer(root, usb_poll, 500);
     if (root) album_local_load(root); /* OLED's album page on stock's (library_album.c) */
@@ -389,11 +389,15 @@ static const char *bar_title_of(void *win, void **label) {
     if (!tk_strcmp(name, "radionp_page")) return "Internet Radio";
     if (usb_ui_title(name)) return usb_ui_title(name);   /* the USB mode pages (usb_ui.c) */
     if (bt_recv_title(name)) return bt_recv_title(name); /* Bluetooth receiver mode (bt_recv.c) */
-    if (sw_update_title(name)) return sw_update_title(name); /* SD Card Update's (sw_update.c) */
+    if (bt_detail_title(name)) return bt_detail_title(name);   /* a Bluetooth device's page */
+    if (bt_stopped_title(name)) return bt_stopped_title(name); /* Bluetooth Stopped */
+    if (guest_ui_title(name)) return guest_ui_title(name);     /* Guest Play's pages */
+    if (sw_update_title(name)) return sw_update_title(name);   /* SD Card Update's (sw_update.c) */
     if (msg_title(name)) return msg_title(name); /* the library scan's (scan_page.c) */
     if (!tk_strcmp(name, "qrcode_page")) return addon_qr_title(win); /* the card app's name */
     if (!tk_strcmp(name, "search_dialog")) return "Search"; /* stock's toolbar has no label */
-    if (!tk_strcmp(name, "statusbar_dialog")) return ""; /* Control Center: the clock centred, as Home's */
+    if (!tk_strcmp(name, "statusbar_dialog"))
+        return "";                       /* Control Center: the clock centred, as Home's */
     if (artist_local_on(win)) return ""; /* the design's artist page: the header names it */
     void *nav = widget_lookup(win, "view_navbar", 1);
     if (nav) {
@@ -608,6 +612,34 @@ int bar_title_fits(void *label) {
     return canvas_measure_text(canvas, s, n) <= I(st.bar_title, W_W) - 4;
 }
 
+/* The title's clip before a slide's fade (bar_title_fades), and whether one is on */
+static struct {
+    int on, clip[4];
+} title_fade __attribute__((section(".scratch")));
+/* Under a window's slide over Home's band in Split (coverflow_home_slide), the bar's title is the
+ * sliding page's: it shows only over that page, faded as far as the page is out, so Home's band
+ * beside it keeps no title. It stays in place, clear of the status row's glyphs. Begun in the
+ * title's background paint (begin 1) and ended in its border paint. */
+static void bar_title_fades(void *w, void *canvas, int begin) {
+    int open, clip[4];
+    float percent;
+    if (!w || w != st.bar_title) return;
+    if (!begin) {
+        if (title_fade.on) {
+            canvas_set_global_alpha(canvas, 0xff);
+            canvas_set_clip_rect(canvas, title_fade.clip);
+        }
+        title_fade.on = 0;
+        return;
+    }
+    title_fade.on = 0;
+    if (!coverflow_home_slide(&open) || !parallax_slide(&percent)) return;
+    clip_within(canvas, title_fade.clip, clip, open, 0, 375 - open, 320);
+    canvas_set_clip_rect(canvas, clip);
+    canvas_set_global_alpha(canvas, (unsigned)(0xff * percent + 0.5f));
+    title_fade.on = 1;
+}
+
 /* Stock paints a widget's background before its children, so the bar sits behind the rows.
  * The selection work for the surface happens here, once per frame, instead of in the border hook;
  * a BUTTONS dialog is itself top-level. Home's art is clipped to its panel until the border hook.
@@ -616,6 +648,7 @@ int bar_title_fits(void *label) {
  * Home's art is also checked when Home is painted under another window. */
 int ringnav_paint_bg(void *w, void *canvas) {
     st.paint_w = w;
+    bar_title_fades(w, canvas, 1);
     np_settle_begin(w, canvas); /* the art settled smaller: stock paints none of it */
     np_skip_begin(w, canvas);   /* a new song's lines: the old copied first (np_skip.c) */
     swipe_back_paint(w, canvas); /* the page under a swipe back, left of the page */
@@ -661,6 +694,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         void *page = feedback_top();
         coverflow_home_bar(canvas, page);   /* OLED's art in the bar */
         coverflow_home_strip(canvas, page); /* and Split's list */
+        coverflow_home_dim(canvas, page);   /* both darkened as Home under a slide */
         artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
         np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
@@ -682,7 +716,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         clock_place(bar, feedback_top()); /* beside Split's art under a toast too */
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */
-        feedback_folder(top); /* an empty folder level's note */
+        feedback_folder(top);                /* an empty folder level's note */
         np_sync(top);
         if (w == top) vol_paint(top, canvas);
         /* Boot may paint Home before the screen is usable, so nothing chose or drew its first
@@ -811,15 +845,17 @@ static int settings_icon(const char *name) { return named_in(SETTINGS_ICON_NAMES
  * BUTTON_IMAGE*'s label) is a surface and takes the light tone, which keeps the white legible; red
  * marks on their own keep the red tone. bitmap_t: w @0, h @4, format @0xe; the 32-bit formats 1-4
  * hold r, g, b at these byte offsets. */
-/* Clamp straight alpha to the arc coverage: reusing an already rounded bitmap is harmless. */
+/* Clamp straight alpha to the arc's coverage (corner_cover.c): reusing an already rounded bitmap
+ * is harmless. */
 static void round_corners(unsigned char *px, int w, int h, int stride, int alpha) {
     /* a theme's list.art.radius is on screen, at the set's art size: the bitmap's own scale */
     int side = w < h ? w : h, art = geom(G_ART), radius = theme()->art_radius;
     int r = radius && art ? (side * radius + art / 2) / art : side * NP_ART_RADIUS / 166;
-    for (int y = 0; y < r; ++y) {
-        int out = arc_out(r, y);
-        for (int x = 0; x <= out / 16; ++x) {
-            unsigned coverage = x < out / 16 ? 0 : (unsigned)(16 - (out & 15)) * 255 / 16;
+    if (2 * r > side) r = side / 2;
+    const unsigned char *cover = corner_cover(r);
+    for (int y = 0; cover && y < r; ++y) {
+        for (int x = 0; x < r && cover[y * r + x] < 255; ++x) {
+            unsigned coverage = cover[y * r + x];
             for (int c = 0; c < 4; ++c) {
                 unsigned char *a =
                     px + (c & 1 ? h - 1 - y : y) * stride + (c & 2 ? w - 1 - x : x) * 4 + alpha;

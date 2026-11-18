@@ -45,7 +45,7 @@ A worker **must**:
 - Queue with `python3 tools/ci/merge_batch.py --mark-ready` (`--fixes-tip` only for a branch whose purpose is to repair a failure the trunk has).
 - End with `q2 agent end NAME --state READY|BLOCKED|HANDOFF` as its last command, then one final message that starts with that word. `q2 agent end` is refused while a heavy job or a process of the worktree is still running, and for `READY` while there are uncommitted changes or unpushed commits: stop or finish them, then end.
 
-A worker **may**: read anything in the repositories; build and test in its own worktree; borrow one emulator; ask the user a question by ending `BLOCKED` with the question in its final message and in `QUESTIONS.md` in its worktree.
+A worker **may**: read anything in the repositories; build and test in its own worktree; borrow one emulator; run the smoke test its plan names for a `patch/` change (`affected.py --run "$B" --smoke`, about two minutes on a pooled emulator; optional, as the queue runs it on the tip after landing and a failure there holds the trunk); ask the user a question by ending `BLOCKED` with the question in its final message and in `QUESTIONS.md` in its worktree.
 
 A worker **must not**: commit, merge or push to the trunk or to another worker's branch; wait for its branch to land; spawn agents; start a background task that outlives its turn; run `tools/ci/patch_shards.py` on the whole suite; touch emulator slot 2, `~/q2-emu-server` or port 2309; use `pkill`, `killall`, `git stash` or `pytest -n auto`; fix a failure it has not reproduced.
 
@@ -81,19 +81,19 @@ Workers get an explicit `model:` (never the main thread's by inheritance), and a
 
 One line per outcome in `~/.cache/q2-queue/events.log`; the main thread keeps one Monitor on it (`tail -n 0 -F ~/.cache/q2-queue/events.log`) and nothing else polls.
 
-| Event                                         | Means                                                                   | Who acts                                                                                   |
-| --------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `READY branch`                                | a worker queued it                                                      | nobody                                                                                     |
-| `BATCH n branches`                            | a batch started                                                         | nobody                                                                                     |
-| `LANDED branch`                               | it is in the trunk                                                      | main thread closes the item                                                                |
-| `REJECTED branch suite=... first=... log=...` | the batch failed because of this branch; the others landed              | main thread resumes or respawns the owner with this line                                   |
-| `CONFLICT branch`                             | it no longer merges with the trunk                                      | the same: merge the trunk in, test, queue again                                            |
-| `REQUEUED branch`                             | not its fault (a crash, a red tip, an undecided failure); it runs again | nobody                                                                                     |
-| `TIP_RED suites`                              | the trunk fails on its own; only `--fixes-tip` branches are taken       | main thread spawns one worker to fix it, first                                             |
-| `INFRA suites`                                | suites crashed twice; no branch is blamed                               | nobody, once; see `QUEUE_STOPPED`                                                          |
-| `QUEUE_STOPPED why`                           | two batches in a row crashed, or `q2 stop-all`                          | main thread reads the last `batch.log`, tells the user, `merge_queue.py resume` when fixed |
-| `POST_OK` / `POST_RED suites`                 | the sanitizers and coverage on the tip                                  | `POST_RED`: main thread adds a backlog item for it                                         |
-| `PUSHED` / `PUSH_FAILED`                      | the trunk on origin                                                     | `PUSH_FAILED`: main thread tells the user                                                  |
+| Event                                         | Means                                                                                                         | Who acts                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `READY branch`                                | a worker queued it                                                                                            | nobody                                                                                     |
+| `BATCH n branches`                            | a batch started                                                                                               | nobody                                                                                     |
+| `LANDED branch`                               | it is in the trunk                                                                                            | main thread closes the item                                                                |
+| `REJECTED branch suite=... first=... log=...` | the batch failed because of this branch; the others landed                                                    | main thread resumes or respawns the owner with this line                                   |
+| `CONFLICT branch`                             | it no longer merges with the trunk                                                                            | the same: merge the trunk in, test, queue again                                            |
+| `REQUEUED branch`                             | not its fault (a crash, a red tip, an undecided failure); it runs again                                       | nobody                                                                                     |
+| `TIP_RED suites`                              | the trunk fails on its own (a merge suite, or the post tier's `smoke`); only `--fixes-tip` branches are taken | main thread spawns one worker to fix it, first                                             |
+| `INFRA suites`                                | suites crashed twice; no branch is blamed                                                                     | nobody, once; see `QUEUE_STOPPED`                                                          |
+| `QUEUE_STOPPED why`                           | two batches in a row crashed, or `q2 stop-all`                                                                | main thread reads the last `batch.log`, tells the user, `merge_queue.py resume` when fixed |
+| `POST_OK` / `POST_RED suites`                 | the sanitizers, coverage and the emulator smoke test on the tip                                               | `POST_RED`: main thread adds a backlog item for it (a red `smoke` is also `TIP_RED`)       |
+| `PUSHED` / `PUSH_FAILED`                      | the trunk on origin                                                                                           | `PUSH_FAILED`: main thread tells the user                                                  |
 
 What blocks a branch: a conflict with the trunk, or a failure the bisection pins on it. What does not: another branch's failure, a harness crash, a test on `test/known_failures.tsv`, the post tier, a flaky test that passes on its second try.
 

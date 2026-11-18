@@ -141,7 +141,9 @@ def reclaimable(lease):
     return expired(lease) and not lease.get('reserved')
 
 
-def get(build, name, hours, wait, reserve=False):
+def get(build, name, hours, wait, reserve=False, avoid=(), prepare=None):
+    """Lease a copy and boot build on it; its slot. avoid: slots never taken (tools/ci/smoke.py keeps off the
+    user's slot 2 even when it is free). prepare(slot): called before the boot, on the copy's state."""
     build = str(pathlib.Path(build).resolve())
     said = False
     while True:
@@ -150,8 +152,8 @@ def get(build, name, hours, wait, reserve=False):
                 if k in t.leases and reclaimable(t.leases[k]):
                     q2emu(int(k), 'stop')
                     del t.leases[k]
-            mine = [k for k, v in t.leases.items() if v['name'] == name and v['build'] == build]
-            free = [k for k in map(str, range(1, K + 1)) if k not in t.leases]
+            mine = [k for k, v in t.leases.items() if v['name'] == name and v['build'] == build and int(k) not in avoid]
+            free = [k for k in map(str, range(1, K + 1)) if k not in t.leases and int(k) not in avoid]
             k = (mine or free or [None])[0]
             if k is not None:
                 t.leases[k] = {'name': name, 'build': build, 'since': time.time(), 'until': time.time() + hours * 3600,
@@ -166,7 +168,15 @@ def get(build, name, hours, wait, reserve=False):
     k = int(k)
     make_copy(k)
     if not (mine and q2emu(k, 'status').stdout.strip() == 'running'):
-        p = q2emu(k, 'start', build)
+        try:
+            if prepare:
+                prepare(k)
+            p = q2emu(k, 'start', build)
+        except BaseException:  # a signal mid-boot too: nothing left running unleased
+            q2emu(k, 'stop')
+            with Locked() as t:
+                t.leases.pop(str(k), None)
+            raise
         if p.returncode:
             with Locked() as t:
                 t.leases.pop(str(k), None)

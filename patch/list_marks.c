@@ -36,26 +36,81 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
         canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
 }
 
-/* ... or, on the selected row while Cover Flow opens, the spinner's frame (1-8, coverflow.c
- * coverflow_spinner) in its place, white (tools/art.py spinner). */
+/* The activity spinner (tools/art.py spinner: eight spokes, the bright one a step clockwise each
+ * SPIN_FRAME_MS), one for every list that shows one: Home's Cover Flow row while it opens, and
+ * Settings > Bluetooth's connecting row and Other Devices' scan. Its frame is the clock's, so no
+ * painter keeps a count, and a painter says where it drew it (spinner_painted): one timer,
+ * every MO_FRAME_MS while any spinner shows, repaints those boxes as the frame changes, and stops
+ * once none was painted for two frames. A box is its widget's and goes with it (EVT_DESTROY).
+ * spinner_turn is the timer's work, for a caller that holds the UI thread and paints itself
+ * (coverflow.c open_step). */
+#define SPIN_FRAME_MS 100
+#define SPIN_BOXES 4
 static struct {
-    void *w;  /* the list it was last painted on, 0 once it is done */
-    int x, y; /* its centre there */
+    struct {
+        void *w;           /* the widget it was painted on, 0 a free slot */
+        rect_t r;          /* the box in w; w's whole when r.w is 0 */
+        unsigned frame;    /* the clock's frame it was last painted at */
+        unsigned char ask; /* its repaint asked for since */
+    } at[SPIN_BOXES];
+    unsigned timer;
 } spin __attribute__((section(".scratch")));
-void spinner_icon(void *w, void *canvas, int right, int y, int frame) {
+static unsigned spin_clock(void) { return (unsigned)time_now_ms() / SPIN_FRAME_MS; }
+int spinner_frame(void) { return (int)(spin_clock() % 8); }
+static int spin_gone(void *ctx, void *event) {
+    (void)event;
+    for (int i = 0; i < SPIN_BOXES; ++i)
+        if (spin.at[i].w == ctx) spin.at[i].w = (void *)0;
+    return 0;
+}
+/* Each box whose frame is due asked to repaint: 2 when one was, 1 when a spinner shows and none is
+ * due yet, 0 when none shows. */
+int spinner_turn(void) {
+    unsigned now = spin_clock();
+    int live = 0;
+    for (int i = 0; i < SPIN_BOXES; ++i) {
+        __typeof__(spin.at[0]) *b = &spin.at[i];
+        if (!b->w || now - b->frame > 2) continue; /* not painted lately: not shown */
+        if (!live) live = 1;
+        if (b->ask || now == b->frame) continue;
+        b->ask = 1, live = 2;
+        widget_invalidate_force(b->w, b->r.w ? &b->r : (rect_t *)0);
+    }
+    return live;
+}
+static int spin_tick(const void *info) {
+    (void)info;
+    if (spinner_turn()) return 8; /* RET_REPEAT */
+    spin.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+void spinner_painted(void *w, const rect_t *r) {
+    int k = -1;
+    unsigned now = spin_clock();
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i)
+        if (spin.at[i].w == w) k = i;
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i)
+        if (!spin.at[i].w) k = i;
+    for (int i = 0; i < SPIN_BOXES && k < 0; ++i) /* full: the one painted longest ago */
+        if (now - spin.at[i].frame > 2) k = i;
+    if (k < 0) return;
+    if (spin.at[k].w != w) widget_on(w, EVT_DESTROY, spin_gone, w);
+    spin.at[k].w = w, spin.at[k].frame = now, spin.at[k].ask = 0;
+    spin.at[k].r = r ? *r : (rect_t){ 0, 0, 0, 0 };
+    if (!spin.timer) spin.timer = timer_add(spin_tick, (void *)0, MO_FRAME_MS);
+}
+
+/* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)
+ * in its place, white. */
+void spinner_icon(void *w, void *canvas, int right, int y) {
     unsigned bitmap[64]; /* bitmap_t */
     char name[8];
-    tk_snprintf(name, sizeof name, "spin_%d", frame - 1);
-    spin.w = w, spin.x = right - CHEV_SHIFT, spin.y = y;
+    rect_t r = { right - CHEV_SHIFT - SPIN_BOX / 2, y - SPIN_BOX / 2, SPIN_BOX, SPIN_BOX };
+    tk_snprintf(name, sizeof name, "spin_%d", spinner_frame());
     if (!widget_load_image(w, theme_art(name), bitmap))
-        canvas_draw_icon(canvas, bitmap, spin.x, spin.y);
+        canvas_draw_icon(canvas, bitmap, right - CHEV_SHIFT, y);
+    spinner_painted(w, &r);
 }
-/* The spinner's next frame: its box on its list repainted, or win's whole until it has painted. */
-void spinner_dirty(void *win) {
-    rect_t r = { spin.x - SPIN_BOX / 2, spin.y - SPIN_BOX / 2, SPIN_BOX, SPIN_BOX };
-    widget_invalidate_force(spin.w ? spin.w : win, spin.w ? &r : (void *)0);
-}
-void spinner_done(void) { spin.w = 0; }
 
 /* ... and a disabled row's (stock's list_intodown, docs/oled-design.md Chevrons and disabled rows),
  * in the half's Text Tertiary, selected or not: the wheel never selects such a row. */
@@ -76,11 +131,13 @@ void chevron_muted(void *w, void *canvas, int right, int y) {
  * text's own coverage times the ramp over the real background. A label at rest on stock's ellipsis
  * (stopped, ellipses set) keeps it. The column is the one stock clips the text to: inside the
  * label's margin_left and margin_right (2 px unless its style says), and only where the frame's
- * clip lets it paint; a canvas whose buffer is not 32-bit draws the text clipped, unfaded. */
+ * clip lets it paint; a canvas whose buffer is not 32-bit draws the text clipped, unfaded. The
+ * same fade serves text a painter draws itself into a column too narrow for it (Control Center's
+ * labels, control_center.c cc_label): text_fade_under before it, text_fade after. */
 #define MARQUEE_FADE_PX 12
 #define MARQUEE_FADE_ROWS 64 /* a label's rows the copy holds; a taller label fades its first */
 static struct {
-    void *label;
+    void *label;    /* the label whose ends are copied, or &mf for text_fade's */
     int x[2], y, h; /* each end's first column (-1 none) and the rows, in the buffer */
     unsigned px[2][MARQUEE_FADE_ROWS][MARQUEE_FADE_PX];
 } mf __attribute__((section(".scratch")));
@@ -97,27 +154,26 @@ static unsigned *fade_fb(void *canvas, int *pitch, int *fw, int *fh) {
 /* Which ends of w fade this frame, its column's ends in *x0, *x1 (w's coordinates); 0 none. */
 static int fade_ends(void *w, int *x0, int *x1) {
     if (tk_strcmp(widget_get_type(w), "hscroll_label")) return 0;
-    int loop = np_marq_owns(w); /* Now Playing's lines: their copy follows, so the right fades on */
     void *style = P(w, W_ASTYLE);
     *x0 = style_get_int(style, "margin_left", 2),
     *x1 = I(w, W_W) - style_get_int(style, "margin_right", 2);
     int off = I(w, HSCROLL_XOFFSET), over = I(w, HSCROLL_TEXT_W) - (*x1 - *x0);
-    if (over <= 0 || (!loop && B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return 0;
-    return (off > 0) | (loop || off < over) << 1;
+    if (over <= 0 || (B(w, HSCROLL_ELLIPSES) && !I(w, HSCROLL_TIMER))) return 0;
+    return (off > 0) | (off < over) << 1;
 }
 
-/* Before stock paints w's text: what stands behind its fading ends, out of the buffer. */
-void marquee_fade_under(void *w, void *canvas) {
-    int x0, x1, pitch, fw, fh, ends;
+/* Before text is drawn in the columns x0 to x1 (the canvas's coordinates), rows y to y + h: what
+ * stands behind its fading ends (ends: 1 the left, 2 the right, 3 both), out of the buffer; 1 when
+ * text_fade has something to blend. The column must hold MARQUEE_FADE_PX at a fading end. */
+int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends) {
+    int pitch, fw, fh, clip[4];
     mf.label = (void *)0;
-    if (!w || !canvas || !theme()->marquee_fade || !(ends = fade_ends(w, &x0, &x1))) return;
-    unsigned *fb = fade_fb(canvas, &pitch, &fw, &fh);
-    if (!fb) return;
-    int clip[4];
+    unsigned *fb = canvas && ends ? fade_fb(canvas, &pitch, &fw, &fh) : (unsigned *)0;
+    if (!fb) return 0;
     canvas_get_clip_rect(canvas, clip);
-    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), h = I(w, W_H);
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
     if (h > MARQUEE_FADE_ROWS) h = MARQUEE_FADE_ROWS;
-    mf.y = oy, mf.h = h;
+    mf.y = oy + y, mf.h = h;
     for (int e = 0; e < 2; ++e) {
         int x = ox + (e ? x1 - MARQUEE_FADE_PX : x0);
         mf.x[e] = ends >> e & 1 && x >= clip[0] && x + MARQUEE_FADE_PX <= clip[0] + clip[2] &&
@@ -126,19 +182,17 @@ void marquee_fade_under(void *w, void *canvas) {
                       : -1;
     }
     for (int r = 0; r < h; ++r) {
-        int y = oy + r;
-        if (y < 0 || y >= fh || y < clip[1] || y >= clip[1] + clip[3]) continue;
+        int yy = mf.y + r;
+        if (yy < 0 || yy >= fh || yy < clip[1] || yy >= clip[1] + clip[3]) continue;
         for (int e = 0; e < 2; ++e)
-            if (mf.x[e] >= 0) memcpy(mf.px[e][r], fb + y * pitch + mf.x[e], sizeof mf.px[e][r]);
+            if (mf.x[e] >= 0) memcpy(mf.px[e][r], fb + yy * pitch + mf.x[e], sizeof mf.px[e][r]);
     }
-    mf.label = w;
+    mf.label = &mf;
+    return 1;
 }
 
-/* After stock painted w (ringnav_paint): its ends blended back toward what was behind them. */
-void marquee_fade(void *w, void *canvas) {
-    if (w && np_marq_owns(w)) np_marq_kick(w);
-    if (!w || !canvas || w != mf.label) return;
-    mf.label = (void *)0;
+/* text_fade_under's ends blended back toward what was behind them. */
+static void fade_blend(void *canvas) {
     int pitch, fw, fh, clip[4];
     unsigned *fb = fade_fb(canvas, &pitch, &fw, &fh);
     if (!fb) return;
@@ -161,6 +215,29 @@ void marquee_fade(void *w, void *canvas) {
             }
         }
     }
+}
+
+/* After the text text_fade_under was called for: its ends faded. */
+void text_fade(void *canvas) {
+    if (!canvas || mf.label != &mf) return;
+    mf.label = (void *)0;
+    fade_blend(canvas);
+}
+
+/* Before stock paints w's text: what stands behind its fading ends, out of the buffer. */
+void marquee_fade_under(void *w, void *canvas) {
+    int x0, x1, ends;
+    mf.label = (void *)0;
+    if (!w || !canvas || !theme()->marquee_fade || !(ends = fade_ends(w, &x0, &x1))) return;
+    if (text_fade_under(canvas, x0, x1, 0, I(w, W_H), ends)) mf.label = w;
+}
+
+/* After stock painted w (ringnav_paint): its ends blended back toward what was behind them. */
+void marquee_fade(void *w, void *canvas) {
+    if (w && np_marq_owns(w)) np_marq_kick(w);
+    if (!w || !canvas || w != mf.label) return;
+    mf.label = (void *)0;
+    fade_blend(canvas);
 }
 
 /* The indicator's column on the top window, repainted as it fades. */

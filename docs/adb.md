@@ -7,7 +7,7 @@ A `--dev` build ([building.md](building.md)) runs `adbd`, Android's debug daemon
 1. Install a `--dev` update on the Q2.
 2. On the PC, unpack Google's [SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) (it holds `adb.exe`) and open a terminal in that folder. No driver: the Q2 tells Windows to use its own WinUSB driver.
 3. Run `adb devices` once: it makes the PC's key, `%USERPROFILE%\.android\adbkey.pub` (`~/.android/adbkey.pub` elsewhere).
-4. Authorize the PC: plug the Q2 in (it shows **USB Connected**, the card on the PC as a drive), copy `adbkey.pub` to the card's root as `adb_keys` (more than one computer: one line each), and eject the card on the PC. The Q2's own **Allow USB Debugging?** prompt, which will make this step a press on the Q2, is not built yet ([Authorization](#authorization)).
+4. Authorize the PC: plug the Q2 in (it shows **USB Connected**, the card on the PC as a drive), copy `adbkey.pub` to the card's root as `adb_keys` (more than one computer: one line each), and eject the card on the PC. Or skip the file: with the PC's adb running, the Q2 asks **Allow USB Debugging?** and a press there lets that computer in ([Authorization](#authorization)).
 5. Press **Return** on the Q2. Its card is mounted again, the UI is usable, and the PC now sees "Q2 (ADB)".
 6. `adb devices` lists `Q2CODA  device`, and `adb shell id` prints `uid=0(root) gid=0(root)`.
 
@@ -21,8 +21,11 @@ adb shell 'cat /proc/meminfo'              # one command (through a terminal: li
 adb exec-out 'cat /mnt/data/config.ini'    # bytes exactly as written, no terminal; stderr comes with them
 adb push song.flac /mnt/mmc/Music/         # and adb pull
 adb reboot
+adb exec-out 'cat /mnt/mmc/.q2muse/logs/q2-heat.1 /mnt/mmc/.q2muse/logs/q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -   # the heat log, oldest file first
 python3 tools/q2remote.py shot --adb out.png   # the screen as an upright PNG, over adb exec-out
 ```
+
+The heat log (`q2guard`, [internals](internals.md#overheat-guardian)) is read back with the last line of that block: `.1` then `.0` so the lines come out in order, `2>/dev/null` inside the quotes because `exec-out` passes the Q2's stderr through (a Q2 whose first log hasn't filled has no `.1`), and `tools/q2heat.py` turns them into a timeline with the fastest rise and the processes using the CPU then. The card has to be mounted on the Q2: with it lent to a computer (USB Transfer Files) the files are not there to read, and the lines wait in RAM.
 
 `q2remote.py shot --adb` runs `q2remote --shot` on the Q2 through `adb exec-out` and turns the framebuffer the same way `shot` does over Wi-Fi; `--settle` works too. By hand: `adb exec-out "q2remote --shot 2>/dev/null | gzip -1" > shot.gz` gives the raw page (`Q2FB` header, then 320 × 375 BGRA rows, [remote.md](remote.md#protocol)).
 
@@ -55,7 +58,7 @@ Edits go to the editor's draft, as on the Q2: the Advanced tab's **Apply changes
 | Simple: Presets (a stock preset, playing at once)        | `simple preset NAME`                                                                    |
 | Advanced: Apply changes                                  | `apply` (or `--now` on any edit)                                                        |
 | Advanced: Reset to defaults                              | `reset`                                                                                 |
-| Advanced: Enabled                                        | `on`, `off` (`off` turns Simple's 3EQ off too, as Control Center's EQ tile does)        |
+| Advanced: Enabled                                        | `on`, `off` (`off` turns Simple's 3EQ off too, as Control Center's EQ circle does)        |
 | Advanced: EQ per Output                                  | `per-output on`, `per-output off`                                                       |
 | Advanced: Balance                                        | `balance DB`                                                                            |
 | Advanced: Preamp, and its Auto row                       | `preamp DB`, `preamp auto` (Auto's cut is `auto_preamp`)                                |

@@ -8,7 +8,7 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, high_halves, stock_prop_str, stock_start_with
 
 W_PARENT, EVT_CLICK, EVENT_TYPE, EVENT_KEY, EVENT_X = O['W_PARENT'], O['EVT_CLICK'], O['EVENT_TYPE'], O['EVENT_KEY'], O['EVENT_X']
 STOP = 11
@@ -178,11 +178,10 @@ class Ui:
         name = C.string_at(name).decode()
         widget = self.at.get(w)
         if widget is None:
-            return default
-        if name == 'name':
-            return self.cstr(widget.name) if widget.name else default
-        value = widget.props.get(name)
-        return self.cstr(value) if isinstance(value, (bytes, str)) else default
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (widget.name or None) if name == 'name' else widget.props.get(name)  # '' is a widget never named
+        value = stock_prop_str(widget.kind.encode(), name.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.cstr(value) if isinstance(value, bytes) else value
 
     def get_text(self, w, out, n, *_):
         s = self.at[w].text.encode()[:n - 1]
@@ -659,7 +658,7 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
     assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
-                                 'system_time', 'App Store', 'stock_2',
+                                 'USB', 'system_time', 'App Store', 'stock_2',
                                  'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
                                  'stock_7', 'stock_8', 'Restart', 'Shut Down']
     # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
@@ -678,6 +677,21 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     assert len(fw.calls('check_updatefw_exist')) == 1 and len(opened) == 3  # the card's check, not stock's page
     ui.click(button_of(page.view, 'Storage'))
     assert fw.calls('window_create')
+
+
+@pytest.mark.parametrize('pick, shown', [(0, 'Ask Every Time'), (1, 'Charge Only'), (2, 'Transfer Files'),
+                                         (3, 'USB Audio')])
+def test_general_s_usb_row_shows_the_remembered_choice_and_opens_its_picker(fw, pick, shown):
+    """Settings > General > USB, after Storage (usb_ui.c usb_ui_row): Q2POD USBPICK as its value, beside the chevron;
+    Centre opens the USB picker (usb_pick_open)."""
+    ui = Ui(fw)
+    Config(fw, USBPICK=str(pick).encode())
+    page = Settings(fw, ui)
+    button = button_of(page.view, 'USB')
+    assert button.find('_setting_value').text == shown
+    fw.mock('window_create', lambda *_: 0)
+    ui.click(button)
+    assert len(fw.calls('window_create')) == 1
 
 
 @pytest.mark.parametrize('keytone', [0, 1])
@@ -841,7 +855,7 @@ class Info:
         self.timers = []
         fw.mock('np_info', lambda *_: 7)
         fw.mock('getFormatString', lambda key, out, n, *_: C.memmove(out, location + b'\0', len(location) + 1))
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append((fn, ms)) or len(self.timers))
         self.fill = fw.fn('ringnav_np_info', C.c_int, C.c_void_p)
 
@@ -1691,7 +1705,7 @@ class Rows:
         self.names = names
         Config(fw, THEME=b'%d' % OLED)
         st('geom').value = names[geom]
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         self.ui, self.fw = ui, fw
         self.view = ui.add('scroll_view', ui.window(window), (0, 30, 375, 290))
         self.lay = layout()
@@ -2956,7 +2970,7 @@ def test_songs_load_straight_into_the_showlist(fw, records):
 
 def test_a_playlist_hides_its_spoken_songs(fw, records):
     lib = Library(fw)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     rows = [records.song(title=b'song', path=b'/mnt/mmc/Music/a.flac'), records.song(title=b'book', path=b'/mnt/mmc/x.m4b'),
             records.song(title=b'episode', path=b'/mnt/mmc/Podcasts/e.mp3'), records.song(title=b'chapter', path=b'/mnt/mmc/Audiobooks/c.mp3'),
             records.song(title=b'folder', path=b'/mnt/mmc/Podcasts', kind=4)]

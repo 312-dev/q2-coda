@@ -60,24 +60,26 @@ for owner in (1,2,3,4):
     m.ears(1); m.fn('headset_manual'); m.ears(3); assert not m.playing
     passed()
 
-for absolute,limit,want in ((127,40,40),(0,100,0),(64,100,50),(1,100,1),(126,100,99)):
+# The headset's level reads as the Q2 volume nearest on bt_vol_curve (docs/internals.md#headset-controls-and-volume);
+# past the limit the headset is pulled back to the limit's level (40 is 13), else its own level stays.
+for absolute,limit,want,level in ((127,40,40,13),(0,100,0,0),(64,100,85,64),(1,100,1,1),(126,100,100,126)):
     b=BtVolumeMachine(); b.poll(); b.byte(syms['g_maxvolume'],limit)
     b.absolute=absolute; b.poll()
     assert b.u.mem_read(syms['g_volume'],1)[0]==want
-    assert b.absolute==(want*127+50)//100
+    assert b.absolute==level
     b.poll(); assert not b.writes()
     passed()
-# A headset step that already reads as the Q2 volume stays: 2 is volume 2, never rewritten to 3.
+# A headset step that already reads as the Q2 volume stays: 2 is volume 4 (the lowest of 4 to 7), never rewritten.
 b=BtVolumeMachine(); b.poll(); b.absolute=2; b.poll()
-assert b.u.mem_read(syms['g_volume'],1)[0]==2 and not b.writes() and b.absolute==2
-assert b.volume(2,2)==[(100,100)] and not b.writes(); b.poll(); assert not b.writes(); passed()
+assert b.u.mem_read(syms['g_volume'],1)[0]==4 and not b.writes() and b.absolute==2
+assert b.volume(4,4)==[(100,100)] and not b.writes(); b.poll(); assert not b.writes(); passed()
 print('M4B recognition/resume and headset routing, ear masks, manual cancellation, malformed packets and volume limits passed.')
 
 # Real helper APIs: explicit pause/resume is observable and repeatable, with shared gain changes.
 def endpoint(m,name,value=0):
     return m.call(address=payload_syms[name],args=(value,0,0,0),gap=0,clear=False)
 def ready_gain(m,ready,volume):
-    m.way=1; m.config['BTVOLLINK']='1'; m.word(payload_syms['bt_vol_link'],1)  # Control Device Volume on, read or not
+    m.way=1; m.config['BTVOLLINK']='1'; m.word(payload_syms['bt_vol_link'],1)  # Link Volume on, read or not
     for name in ('g_bluetoothflag','bt_linkstatus'): m.byte(syms[name],1)
     m.word(syms['bt_showcoding'],1); m.byte(syms['g_volume'],volume)
     m.word(payload_syms['btvol']+4 if 'btvol' in payload_syms else payload_syms['btvol.1'],ready)  # clang may split scalar fields
@@ -109,13 +111,13 @@ m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][
 conf=m.nodes[m.nodes[view]['children'][5]]['children'][0]; icon,label=m.nodes[conf]['children'][:2]
 assert m.nodes[icon]['image']=='stream_config' and m.nodes[label]['text']=='Configuration'
 m.click(conf); m.page=m.top; assert m.nodes[m.page]['name']=='streamconf_page'
-assert m.labels()[:8]==['Configuration','Stop Streaming Services','Services','TIDAL','Spotify','Show in Streaming','Internet Radio','AirPlay']
-conf=m.page; m.row(2); m.page=m.top; assert m.nodes[m.page]['name']=='streamsvc_page'  # TIDAL's page
+assert m.labels()[:9]==['Configuration','Stop Streaming Services','Download Ahead','Services','TIDAL','Spotify','Show in Streaming','Internet Radio','AirPlay']
+conf=m.page; m.row(3); m.page=m.top; assert m.nodes[m.page]['name']=='streamsvc_page'  # TIDAL's page
 assert m.labels()==['TIDAL','Show in Streaming','Show Downloads','Cache','2 GB']
 m.row(2); assert m.files[TCAP]==b'4096M' and m.labels()[-1]=='4 GB' and endpoint(m,'stream_cache',0)==3
 m.row(2); m.row(2); assert m.files[TCAP]==b'512M' and m.labels()[-1]=='512 MB'
 f,ctx=m.handler(m.page,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
-m.page=conf; m.row(3); m.page=m.top  # Spotify's page
+m.page=conf; m.row(4); m.page=m.top  # Spotify's page
 m.row(1); assert m.files[SCAP]==b'4096M' and '4 GB' in m.labels() and endpoint(m,'stream_cache',1)==3
 m.files[SCAP]=bytearray(b'9G'); assert endpoint(m,'stream_cache',1)==2  # not a choice: 2 GB
 m.word(O['MCL_TYPE'],5); m.play=2; m.waited=m.forked
@@ -129,7 +131,7 @@ assert endpoint(m,'radio_status')==0 and endpoint(m,'spot_status')==0 and m.key(
 # while it runs says to wait.
 def conf_open(m):
     m.top=m.node('window','home_page'); m.stream(); view=m.nodes[m.top]['children'][0]
-    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(3); m.page=m.top  # Spotify's page
+    m.click(m.nodes[m.nodes[view]['children'][5]]['children'][0]); m.page=m.top; m.row(4); m.page=m.top  # Spotify's page
 def erase_answer(m,row): m.call(address=payload_syms['sc_erase_answer'],args=(0,row,0,0),gap=0,clear=False)
 m=ShelfMachine({SCAP:bytearray(b'4096M')}); conf_open(m)
 assert m.labels()==['Spotify','Show in Streaming','Cache','Erase Spotify Data','4 GB']
@@ -142,11 +144,12 @@ assert 'rm -rf /mnt/mmc/.spotify/cache /mnt/mmc/.spotify/.cache-size /mnt/mmc/.s
 assert m.toasts[-1][3]=="Spotify's login and cache erased" and KILL in m.systems[-1]
 assert m.labels()[2:]==['Cache','Erase Spotify Data','2 GB']; passed()
 # The wheel drives only allowlisted windows (patch/contexts.inc), so every runtime list page needs an
-# entry; the two streaming Now Playing pages, a card app's QR code page and Now Playing's About (np_about.c, its
-# Return its own), none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its
+# entry; the two streaming Now Playing pages, a card app's QR code page, Now Playing's About (np_about.c, its
+# Return its own), Guest Play's Now Playing, failure and connect pages (guest_ui.c) and Bluetooth Stopped (bt_stopped.c),
+# none with a list, handle their own keys. The empty state's own page (feedback.c empty_open, its
 # window a caller's) is in the list for its one row.
 pages=set(re.findall(r'page_open\("(\w+)"',''.join(p.read_text() for p in (ROOT/'patch').glob('*.c'))))
-assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','npabout_page'} and '"empty_page"' in (ROOT/'patch/contexts.inc').read_text(); passed()
+assert pages-set(re.findall(r'"(\w+)"',(ROOT/'patch/contexts.inc').read_text()))=={'radionp_page','spotify_page','qrcode_page','npabout_page','guestnp_page','guestfail_page','guestconnect_page','btstopped_page'} and '"empty_page"' in (ROOT/'patch/contexts.inc').read_text(); passed()
 m=CardMachine({},{}); vid=payload_syms['vid']; m.word(vid+12,4242); m.word(vid+16,7)
 for playing,command in ((0,'a'),(1,'r')):
     m.sent=[]; endpoint(m,'video_set_playing',playing); endpoint(m,'video_set_playing',playing)
@@ -354,7 +357,7 @@ folder='SD:/Music/'+'\u97f3\u697d'*150; label=m.node('label','label_location',te
 m.call(address=payload_syms['ringnav_np_info'],args=(m.node('window','playing_page',[label]),0,0,0),gap=0)
 assert m.nodes[label]['text']=='Location: '+folder; passed()
 # on_wm_idle_status's player_mainscheduling (its status round trip) runs every MAINSCHEDULING_MS, a second
-# while dark with nothing playing.
+# while dark_slow (dark, and nothing follows the position: playback_power.c dark_slow_ok).
 from build import MAINSCHEDULING_CALL
 assert struct.unpack_from('<I',demo,fileoff(demo,MAINSCHEDULING_CALL[0]))[0]==jal(payload_syms['ringnav_mainscheduling'])
 m=Machine()
@@ -362,8 +365,8 @@ def scheduled(): return sum(c[0]=='player_mainscheduling' for c in m.calls)
 def schedule(): m.call(address=payload_syms['ringnav_mainscheduling'],args=(0,0,0,0),gap=0,clear=False)
 for wait,runs in ((0,1),(50,0),(50,1),(99,0),(1,1)):
     m.now+=wait; m.calls=[]; schedule(); assert scheduled()==runs,(wait,runs)
-m.word(payload_syms['dark_quiet'],1); m.now+=100; m.calls=[]; schedule(); assert scheduled()==0
-m.now+=900; schedule(); assert scheduled()==1; m.word(payload_syms['dark_quiet'],0)
+m.word(payload_syms['dark_slow'],1); m.now+=100; m.calls=[]; schedule(); assert scheduled()==0
+m.now+=900; schedule(); assert scheduled()==1; m.word(payload_syms['dark_slow'],0)
 # Playing, from a second before the track's end (player_playtime_and_length: 225 s) until
 # MAINSCHEDULING_END_MS after, every pass: a change without Gapless starts as soon as stock's did.
 # Paused there, it stays paced.

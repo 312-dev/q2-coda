@@ -10,8 +10,9 @@ import struct
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, ui_name
+from conftest import FNV_PRIME, O, Deques, Files, claim, favdir_card, fnv1a, high_halves, in_fork, libc, stock_prop_str, ui_name
 from conftest import Rows as HeldRows  # Rows here is Folder view's list
+
 from test_navigation import Sa  # test_navigation.py keeps the mirror
 from test_tidal import HEARTS, urls_play
 
@@ -24,7 +25,7 @@ PLAYS_SLOTS, RATE_SLOTS, RESUME_SLOTS = O['PLAYS_SLOTS'], O['RATE_SLOTS'], O['RE
 LONG_SONG_S, RATE_HOLD_MS = O['LONG_SONG_S'], O['RATE_HOLD_MS']
 LIBRARY, FOLDER = 0xf001, 1
 STOP, REPEAT = 11, 8  # a handler's RET_STOP; a timer's RET_REPEAT
-PLAYS_FILE, RESUME_FILE = '/mnt/data/ringnav-plays', '/mnt/data/ringnav-resume'
+PLAYS_FILE, RESUME_FILE = '/mnt/mmc/.q2pod/ringnav-plays', '/mnt/mmc/.q2pod/ringnav-resume'  # card_store.c
 RATINGS, ALBUM_RATINGS, LENGTHS = '/mnt/data/ringnav-ratings', '/mnt/data/ringnav-album-ratings', '/mnt/data/ringnav-durations-v1'
 FAV_CLICK = 0x53c968  # Now Playing's heart: stock's My Fav toggle
 TIDAL_DIR, SPOT_DIR = '/mnt/mmc/.tidal', '/mnt/mmc/.spotify'
@@ -113,11 +114,15 @@ class Ui:
         return 0
 
     def prop_str(self, w, key, default, *_):
+        if w not in self.kind:
+            return default  # stock: widget_get_prop fails on a NULL widget
         key = C.string_at(key).decode()
         value = {'name': self.name, 'image': self.image}.get(key, {}).get(w)
         if value is None:
             value = self.props.get((w, key))
-        return self.cstr(value) if isinstance(value, str) else default
+        kind = TYPES.get(self.kind[w], self.kind[w]).encode()
+        value = stock_prop_str(kind, key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.cstr(value.decode()) if isinstance(value, bytes) else value
 
     def lookup(self, w, name, deep):
         for k in self.kids.get(w, ()):
@@ -492,7 +497,7 @@ def plays(*counts):
 
 def test_most_played_lists_the_counted_songs_most_played_first(fw, ui, song):
     a, b, c, d = (song(b'/m/%c.flac' % x, b'Song %c' % x, artist) for x, artist in zip(b'abcd', (b'X', b'', b'Y', b'Z')))
-    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 1), (b'/m/c.flac', 5), (b'/m/a.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 1), (b'/m/c.flac', 5), (b'/m/a.flac', 1))}, card=True)  # card_store.c
     Library(fw, ui, [a, b, c, d])
     call(fw, 'most_played')
     page = ui.top()
@@ -513,7 +518,7 @@ def test_most_played_with_no_plays_says_so(fw, ui, song):
 
 def test_most_played_ranks_its_kept_songs_again_without_the_library(fw, ui, song, st):
     a, b = song(b'/m/a.flac', b'A'), song(b'/m/b.flac', b'B')
-    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))}, card=True)  # card_store.c
     library = Library(fw, ui, [a, b])
     call(fw, 'most_played')
     ui.close(ui.top())
@@ -524,7 +529,7 @@ def test_most_played_ranks_its_kept_songs_again_without_the_library(fw, ui, song
 
 def test_most_played_reads_the_library_again_after_it_changed(fw, ui, song):
     a, b = song(b'/m/a.flac', b'A'), song(b'/m/b.flac', b'B')
-    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a.flac', 2), (b'/m/b.flac', 1))}, card=True)  # card_store.c
     library = Library(fw, ui, [a])
     call(fw, 'most_played')
     ui.close(ui.top())
@@ -544,7 +549,7 @@ def test_most_played_opens_once(fw, ui, song):
 
 def test_most_played_finds_a_kept_song(fw, ui, song):
     a, b = song(b'/m/a.flac'), song(b'/m/b.flac')
-    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 4), (b'/m/a.flac', 1))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/b.flac', 4), (b'/m/a.flac', 1))}, card=True)  # card_store.c
     Library(fw, ui, [a, b])
     find = fw.fn('library_lists__mp_find', C.c_int, C.c_uint)
     assert find(listen_key(b'/m/a.flac')) == -1  # nothing kept before the page opens
@@ -554,7 +559,7 @@ def test_most_played_finds_a_kept_song(fw, ui, song):
 
 def test_album_plays_sums_each_album_s_listens(fw, ui, song):
     a1, a2, b1, other = (song(b'/m/%s.flac' % n) for n in (b'a1', b'a2', b'b1', b'x'))
-    Files(fw, {PLAYS_FILE: plays((b'/m/a1.flac', 3), (b'/m/b1.flac', 2), (b'/m/a2.flac', 4))})
+    Files(fw, {PLAYS_FILE: plays((b'/m/a1.flac', 3), (b'/m/b1.flac', 2), (b'/m/a2.flac', 4))}, card=True)  # card_store.c
     Library(fw, ui, [a1, a2, b1, other])
     album = {a1: 0, a2: 0, b1: 1, other: -1}
     of = C.CFUNCTYPE(C.c_int, C.c_void_p)(lambda r: album[r])
@@ -1325,7 +1330,9 @@ def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):
 
 
 def stock_stub(address, result, log):
-    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork."""
+    """x86-64 at a fixed stock address: its first three arguments logged, result returned. Only ever in a fork.
+    The code holds log's address, not log: the caller keeps log alive while the stub can run, or the stub
+    writes into whatever Python object took its memory."""
     claim(address)
     code = (b'\x48\xb8' + struct.pack('<Q', C.addressof(log)) + bytes.fromhex('488938 48897008 48895010') +
             b'\xb8' + struct.pack('<I', result) + b'\xc3')
@@ -1360,11 +1367,13 @@ def test_fewer_hearts_on_a_my_fav_take_it_out(fw, ui, song, mcl):
 def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, key, told):
     path = b'/mnt/mmc/Jellyfin/A/now.flac'
     heart = Heart(fw, ui, song, mcl, fav=fav, path=path, table=ratings((listen_key(path), kept)) if kept else None)
-    stock_stub(FAV_CLICK, 0, (C.c_long * 3)())
+    log = (C.c_long * 3)()
+    stock_stub(FAV_CLICK, 0, log)
     favdir_card(fw, heart.files.files)
     heart.hold()
     heart.key(key)
     heart.key(KEY_CENTER)
+    assert log[0] == Heart.CTX  # My Fav in or out through stock's toggle
     assert heart.files.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + told + b'\t' + path + b'\n'
 
 
@@ -1941,7 +1950,7 @@ def configuration(fw, ui, files=None, hide=None):
 
 def provider(fw, ui, page, sp):
     """TIDAL's (sp 0) or Spotify's page, opened from its row on Configuration."""
-    ui.click(page, 2 + sp)
+    ui.click(page, 3 + sp)
     return ui.top()
 
 
@@ -1959,11 +1968,11 @@ def test_configuration_is_stop_the_providers_then_the_lone_switches(fw, ui):
     page, *_ = configuration(fw, ui, hide=b'RADIO,SPOTIFY')
     assert ui.name[page] == 'streamconf_page'
     # the headers are whole rows, so the list scrolls in whole rows (audit2 E1)
-    assert ui.rows(page)[:5] == [('Stop Streaming Services', None), ('Services', None), ('TIDAL', 'Shown'),
-                                 ('Spotify', 'Hidden'), ('Show in Streaming', None)]
+    assert ui.rows(page)[:6] == [('Stop Streaming Services', None), ('Download Ahead', '2 Songs'), ('Services', None),
+                                 ('TIDAL', 'Shown'), ('Spotify', 'Hidden'), ('Show in Streaming', None)]
     rows = ui.kids[ui.view(page)]
-    assert all(any(ui.image.get(k) == 'list_into' for k in ui.kids[rows[r]]) for r in (2, 3))  # each opens a page
-    assert switches(ui, page, 5) == [('Internet Radio', False), ('AirPlay', True)]  # Tidal Downloads is TIDAL's
+    assert all(any(ui.image.get(k) == 'list_into' for k in ui.kids[rows[r]]) for r in (3, 4))  # each opens a page
+    assert switches(ui, page, 6) == [('Internet Radio', False), ('AirPlay', True)]  # Tidal Downloads is TIDAL's
     call(fw, 'stream_config')
     assert ui.windows == [page]
 
@@ -2065,14 +2074,32 @@ def test_stop_streaming_ends_streams_and_leaves_local_music(fw, ui, mcl, kind, s
     assert fw.calls('fw_system')  # librespot's loop ended whatever played
 
 
+@pytest.mark.parametrize('saved, shown', [(None, '2 Songs'), (b'0', 'Off'), (b'1', '1 Song'), (b'3', '3 Songs'), (b'7', '2 Songs')])
+def test_download_ahead_reads_back(fw, ui, saved, shown):
+    Disk(fw)
+    Config(fw, **({} if saved is None else {'AHEAD': saved}))
+    call(fw, 'stream_config')
+    assert ui.rows(ui.top())[1] == ('Download Ahead', shown)
+
+
+def test_download_ahead_steps_off_one_two_three_and_keeps_it(fw, ui):
+    page, *_ = configuration(fw, ui)
+    kept = []
+    fw.mock('write_int_config', lambda v, section, key, *_: kept.append((C.string_at(section), C.string_at(key), v)))
+    for shown in ('3 Songs', 'Off', '1 Song', '2 Songs'):
+        ui.click(page, 1)
+        assert ui.rows(page)[1] == ('Download Ahead', shown)
+    assert kept == [(b'Q2POD', b'AHEAD', n) for n in (3, 0, 1, 2)]
+
+
 def test_a_service_row_hides_it(fw, ui):
     page, _, config, written = configuration(fw, ui, hide=b'TIDAL')
-    ui.click(page, 5)
-    assert written == [b'TIDAL,RADIO'] and switches(ui, page, 5)[0] == ('Internet Radio', False)
+    ui.click(page, 6)
+    assert written == [b'TIDAL,RADIO'] and switches(ui, page, 6)[0] == ('Internet Radio', False)
     sub = provider(fw, ui, page, 0)
     ui.click(sub, 0)  # TIDAL's Show in Streaming: shown again, and its row on Configuration says so
     assert written[-1] == b'RADIO' and switches(ui, sub)[0] == ('Show in Streaming', True)
-    assert ui.rows(page)[2] == ('TIDAL', 'Shown')
+    assert ui.rows(page)[3] == ('TIDAL', 'Shown')
 
 
 # Stock's pages the payload rearranges: Streaming, the Library and About.
@@ -2220,11 +2247,11 @@ def test_a_service_hidden_on_configuration_goes_from_streaming_at_once(fw, ui):
     ui.handler(button, EVT_CLICK)()  # Configuration
     config = ui.top()
     assert ui.name[config] == 'streamconf_page'
-    ui.click(config, 5)  # Internet Radio's switch
+    ui.click(config, 6)  # Internet Radio's switch
     assert dict(page_rows(ui, view))['Internet Radio'] is False
-    ui.click(config, 5)
+    ui.click(config, 6)
     assert dict(page_rows(ui, view))['Internet Radio'] is True
-    ui.click(config, 2)  # stock's own TIDAL row too, from TIDAL's page
+    ui.click(config, 3)  # stock's own TIDAL row too, from TIDAL's page
     ui.click(ui.top(), 0)
     assert dict(page_rows(ui, view))['TIDAL'] is False
 
@@ -2798,7 +2825,7 @@ def spots(*places, slots=RESUME_SLOTS):
 
 
 def book_place(fw, song, files, path=b'/mnt/mmc/Audiobooks/b.flac'):
-    Files(fw, files)
+    Files(fw, files, card=True)  # places are on it (card_store.c)
     fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
     deques = Deques(fw)
     tracks = [song(path, b'A', cue=0, end=600), song(path, b'B', cue=600, end=1200), song(path, b'C', cue=1200)]
@@ -2964,6 +2991,65 @@ def rated_albums(fw, ui, song, hearts=0):
     call(fw, 'rated_albums')
     return files
 
+
+
+def test_a_cold_cover_flow_open_turns_its_spinner_through_a_long_query(fw, ui, song):
+    """Device report (p32, 2026-11-17): Home's Cover Flow row stopped its spinner while a cold open queried the
+    library. getAllAlbum takes 1.2 s here; each step runs on a thread of its own, and the UI thread paints the
+    spinner's box at each spoke (100 ms) through it, then opens the page."""
+    Files(fw)
+    clock, thread, paints, dirty = [1000], [], [], []
+    fw.mock('time_now_ms', lambda *_: clock[0])
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    home = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[home] = 'home_page'
+    rows = [song(b'/m/a/1.flac', album=b'A', id_=1), song(b'/m/b/1.flac', album=b'B', id_=2)]
+    put = lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(rows) or 2  # noqa: E731
+
+    def all_albums(*_):
+        if not thread:  # on the UI thread: it holds it for the query's time
+            clock[0] += 1200
+        return put()
+    fw.mock('getAllAlbum', all_albums)
+    fw.mock('toolsQueryDbTable', put)
+
+    def create(out, attr, run, arg, *_):  # a step's thread: getAllAlbum's 1.2 s, the others at once
+        C.c_ulong.from_address(out).value = 99
+        thread.append([run, arg, clock[0], 1200 if not thread else 0])
+        return 0
+
+    def usleep(us, *_):
+        clock[0] += us // 1000
+        run, arg, at, ms = thread[-1]
+        if run and clock[0] - at >= ms:
+            thread[-1][0] = None
+            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(arg)
+        return 0
+    fw.mock('fw_pthread_create', create)
+    fw.mock('fw_usleep', usleep)
+    fw.mock('widget_invalidate_force', lambda w, *_: dirty.append(w) or 0)
+    fw.mock('widget_load_image', lambda *_: 1)
+
+    def paint(wm):  # Home's paint: its Cover Flow row draws the spinner in its chevron's place
+        if dirty and fw.fn('coverflow_spinner', C.c_int)():
+            paints.append(clock[0])
+            fw.fn('spinner_icon', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(home, None, 355, 100)
+        dirty.clear()
+        return 0
+    painter = C.CFUNCTYPE(C.c_int, C.c_void_p)(paint)
+    wm, vt = C.create_string_buffer(0x100), C.create_string_buffer(0x40)
+    C.c_void_p.from_address(C.addressof(vt) + 0xc).value = C.cast(painter, C.c_void_p).value
+    C.c_void_p.from_address(C.addressof(wm) + 0x94).value = C.addressof(vt)
+    fw.mock('window_manager', lambda *_: C.addressof(wm))
+    fw.fn('coverflow__coverflow_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    for _ in range(10):  # the main loop's passes between steps
+        for t, (fn, ctx, _ms) in list(ui.timers.items()):
+            if fn == C.cast(fw.lib.coverflow__open_step, C.c_void_p).value:
+                del ui.timers[t]
+                TICK(fn)(ctx)
+    during = [t for t in paints if t <= 1000 + 1200]
+    assert len({t // 100 for t in during}) >= 10  # a spoke every 100 ms through the query, each painted
+    assert ui.name[ui.top()] == 'coverflow_page' and not fw.fn('coverflow_spinner', C.c_int)()
 
 def test_albums_none_of_them_rated_says_so(fw, ui, song):
     rated_albums(fw, ui, song)

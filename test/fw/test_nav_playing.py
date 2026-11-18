@@ -993,6 +993,42 @@ def test_a_page_stock_refused_binds_nothing(fw, ui, mcl, st):
     assert st.np_win == 0 and ui.handlers == []
 
 
+def stack_with(fw, ui, *names):
+    """Windows under the one Now opens, bottom first; a forced close takes one off the stack, as AWTK's does."""
+    under = [ui.widget(ui.wm, name, kind='window') for name in names]
+    fw.mock('window_manager_close_window_force', lambda wm, w, *_: ui.kids[ui.wm].remove(w))
+    return under
+
+
+def test_a_new_now_playing_closes_the_one_it_was_opened_over(fw, ui, mcl, st):
+    """Stock's navigator opens a playing_page over whatever is in front, so Shuffle on the artist page Now
+    Playing's artist tap opened left the first Now Playing under it: covered, it kept the song it last showed,
+    and Return came back to it before Home (the emulator, 2026-11-17: Song 1 at 1:01 while Song 2 played). The
+    new page closes the older one as it opens; the pages between stay, so Return goes to the artist and Home."""
+    theme(fw, st)
+    home, old, artist = stack_with(fw, ui, 'home_page', 'playing_page', 'artistinfo_page')
+    now = Now(fw, ui, mcl, st)
+    assert [a[1] for _, a in fw.calls('window_manager_close_window_force')] == [old]
+    assert ui.kids[ui.wm] == [home, artist, now.win] and st.np_win == now.win
+
+
+def test_the_only_now_playing_closes_nothing(fw, ui, mcl, st):
+    theme(fw, st)
+    stack_with(fw, ui, 'home_page', 'allmusic_page')
+    Now(fw, ui, mcl, st)
+    assert not fw.calls('window_manager_close_window_force')
+
+
+def test_a_now_playing_stock_refused_leaves_the_one_under_it(fw, ui, mcl, st):
+    """Headphones required with none to play to: stock closes the new page itself, and the one the user had stays."""
+    theme(fw, st)
+    stack_with(fw, ui, 'home_page', 'playing_page', 'artistinfo_page')
+    now = Now(fw, ui, mcl, st, opened=False)
+    fw.mock('stock_playing_trampoline', lambda w, ctx, *_: 11)
+    assert now.open() == 11
+    assert not fw.calls('window_manager_close_window_force')
+
+
 # Scrub: a Centre press starts it, the wheel previews, one press commits.
 def press(now, at):
     now.ui.now = at
@@ -1164,11 +1200,12 @@ def test_reopening_the_page_mid_wait_shows_the_target_again(fw, ui, mcl, st):
     assert third.value() == now.sec and st.held_sec == 0
 
 
-# Centre cycles the controls the wheel sets, as an iPod classic's: scrubber, shuffle, repeat, rating, rest. A short
-# hold turns the screen off.
+# Centre, after an iPod classic's: a press scrubs, the next puts a focus ring on shuffle; the wheel moves the ring across
+# shuffle, repeat and the heart and changes nothing, and Centre works the ringed control. A short hold turns the
+# screen off.
 NP_HOLD_MS, NP_STAGE_MS = (int(re.findall(rf'#define {n} (\w+)', NAVIGATION_SOURCE)[0].replace('SCRUB_MS', str(O['SCRUB_MS'])))
                            for n in ('NP_HOLD_MS', 'NP_STAGE_MS'))
-REST, SHUFFLE, REPEAT = range(3)
+REST, SHUFFLE, REPEAT, RATING = range(4)
 
 
 def cpress(now, at, held=60):
@@ -1177,26 +1214,55 @@ def cpress(now, at, held=60):
     return press(now, at)
 
 
-def test_centre_cycles_scrubber_shuffle_repeat_and_rating(fw, ui, mcl, st):
+def ringed(fw, ui, mcl, st, heart=True):
+    """Now Playing under OLED, with the heart on the art page when heart, the play mode Order, scrubbed and
+    then a Centre press on: the ring on shuffle. The modes stock is asked for go to the list returned."""
     theme(fw, st)
     releases, modes = [], []
     fw.mock('on_wm_keyup_fun', lambda w, event, *_: releases.append(1))
     fw.mock('config_playmode', lambda m, notify, *_: modes.append(m) or setattr(mcl, 'mode', m) or 0)
-    now = Now(fw, ui, mcl, st)
+    now = Now(fw, ui, mcl, st, opened=False)
+    if heart:
+        fav = ui.widget(now.art_page, 'img_fav', 180, 150, 40, 40)
+        ui.set_str(fav, b'image', b'play_unfav')
+    assert now.open() == 41
     mcl.mode = 0
     assert cpress(now, 200000) == STOP and st.scrub == 1
-    cpress(now, 200500)  # the scrub ends, shuffle's turn
+    cpress(now, 200500)  # the scrub ends, the ring on shuffle
     assert st.scrub == 0 and st.np_stage == SHUFFLE
-    assert now.key(KEY_NEXT) == STOP and modes == [2]  # the wheel turns shuffle on
+    return now, modes, releases
+
+
+def test_the_wheel_moves_the_ring_and_changes_nothing(fw, ui, mcl, st):
+    now, modes, _ = ringed(fw, ui, mcl, st)
+    assert now.key(KEY_NEXT) == STOP and st.np_stage == REPEAT and modes == []  # shuffle stays off
+    now.key(KEY_NEXT)
+    assert st.np_stage == RATING and modes == []
+    now.key(KEY_NEXT)  # the last stop: the ring stays
+    assert st.np_stage == RATING
+    now.key(KEY_PREV), now.key(KEY_PREV), now.key(KEY_PREV)
+    assert st.np_stage == SHUFFLE and modes == []
+    (t,) = ui.due('np_stage_end')  # each tick restarts the stage's timeout
+    assert ui.timers[t][2] == NP_STAGE_MS
+
+
+def test_centre_works_the_ringed_control_and_the_ring_stays(fw, ui, mcl, st):
+    now, modes, releases = ringed(fw, ui, mcl, st)
     cpress(now, 201000)
-    assert st.np_stage == REPEAT
-    now.key(KEY_NEXT)  # repeat All under shuffle: the mode stays Shuffle
-    now.key(KEY_NEXT)  # Repeat One
-    assert modes == [2, 1]
-    now.key(KEY_PREV)  # back to All
-    assert modes == [2, 1, 2]
-    cpress(now, 201500)  # the rating picker's turn: the cycle rests behind it
-    assert st.np_stage == REST and releases == []
+    assert modes == [2] and st.np_stage == SHUFFLE  # shuffle on, the ring still on it
+    now.key(KEY_NEXT)
+    cpress(now, 201500)  # repeat All under shuffle: the mode stays Shuffle
+    cpress(now, 202000)  # Repeat One
+    assert modes == [2, 1] and st.np_stage == REPEAT
+    now.key(KEY_NEXT)
+    cpress(now, 202500)  # the heart: its rating picker, the cycle at rest behind it
+    assert st.np_stage == REST and releases == [] and modes == [2, 1]
+
+
+def test_without_the_heart_the_ring_ends_at_repeat(fw, ui, mcl, st):
+    now, modes, _ = ringed(fw, ui, mcl, st, heart=False)
+    now.key(KEY_NEXT), now.key(KEY_NEXT)
+    assert st.np_stage == REPEAT and modes == []
 
 
 def test_a_stage_ends_by_itself_and_return_ends_it(fw, ui, mcl, st):
@@ -1960,7 +2026,7 @@ def set_values(g):
 
 @pytest.fixture
 def code():
-    """stock's code words at the boot sites, which conftest's map keeps past a test: put back after."""
+    """stock's code words at the boot sites, which conftest's map keeps past a load: put back after."""
     saved = [(a, C.c_uint.from_address(a).value) for a, _ in SITES]
     yield {a: C.c_uint.from_address(a) for a, _ in SITES}
     for a, v in saved:
@@ -2160,10 +2226,10 @@ def test_song_fit_keeps_the_title_and_drops_a_squeezed_artist(fw, place, room, t
     assert (got, shown.value) == fit
 
 
-# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides its text and the gap
-# in the same time, a frame a pixel, and lands back at rest.
-NPM_GAP, NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0])
-                               for n in ('NPM_GAP', 'NPM_HOLD_MS', 'NPM_PX_S'))
+# Now Playing's lines as one marquee (np_marquee.c): hold, then every overflowing line slides what overflows in the
+# same time, a frame a pixel, holds at its end and goes back to rest; no line ever leaves its column empty.
+NPM_HOLD, NPM_PX_S = (int(re.findall(rf'#define {n} (\d+)', NAVIGATION_SOURCE)[0]) for n in ('NPM_HOLD_MS', 'NPM_PX_S'))
+NPM_END = O['MARQUEE_HOLD_MS']
 
 
 class Marquee:
@@ -2176,7 +2242,8 @@ class Marquee:
         fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_XOFFSET']), 0, x))
         for w, tw in ((self.now.title, text_w), (self.now.album, album_w)):
             struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_TEXT_W']), 0, tw)
-        self.pass_ms = (text_w + NPM_GAP) * 1000 // NPM_PX_S if text_w > 160 else (album_w + NPM_GAP) * 1000 // NPM_PX_S
+        self.over = {self.now.title: max(text_w - 160, 0), self.now.album: max(album_w - 160, 0)}
+        self.pass_ms = max(self.over.values()) * 1000 // NPM_PX_S
 
     def off(self, w):
         return C.c_int.from_address(w + O['HSCROLL_XOFFSET']).value
@@ -2191,21 +2258,36 @@ class Marquee:
         self.ui.run(t)
 
 
-def test_the_lines_hold_then_slide_together_and_land_back_at_rest(fw, ui, mcl, st):
+def test_the_lines_hold_slide_what_overflows_hold_at_the_end_and_go_back_to_rest(fw, ui, mcl, st):
     m = Marquee(fw, ui, mcl, st)
     m.kick()
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.now.album) == 0  # at rest first
-    m.step(NPM_HOLD + m.pass_ms // 2)
     half = m.pass_ms // 2
-    assert m.off(m.now.title) == (300 + NPM_GAP) * half // m.pass_ms  # each its own span in the same time
-    assert m.off(m.now.album) == (200 + NPM_GAP) * half // m.pass_ms
+    m.step(NPM_HOLD + half)
+    assert m.off(m.now.title) == 140 * half // m.pass_ms  # each what overflows in the same time
+    assert m.off(m.now.album) == 40 * half // m.pass_ms
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] <= 1000 // NPM_PX_S + 1  # the longest line's next pixel
-    m.step(m.pass_ms - half)  # landed: at rest together, the next hold
+    m.step(m.pass_ms - half)  # each line's end at its column's end, held there
+    assert (m.off(m.now.title), m.off(m.now.album)) == (140, 40)
+    (t,) = ui.due('npm_tick')
+    assert ui.timers[t][2] == NPM_END
+    m.step(NPM_END)  # back at rest together, the next hold
     assert m.off(m.now.title) == m.off(m.now.album) == 0
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_HOLD
+
+
+def test_no_line_ever_scrolls_past_its_end(fw, ui, mcl, st):
+    # a line slid further than it overflows leaves its column empty (V1.36's hscroll_label draws no copy behind it):
+    # on a Q2 the title was blank for over a second each pass
+    m = Marquee(fw, ui, mcl, st)
+    m.kick()
+    for _ in range(400):
+        (t,) = ui.due('npm_tick')
+        m.step(ui.timers[t][2])
+        assert all(0 <= m.off(w) <= over for w, over in m.over.items()), [m.off(w) for w in m.over]
 
 
 def test_every_frame_moves_the_longest_line_one_pixel(fw, ui, mcl, st):
@@ -2283,3 +2365,65 @@ def test_a_touch_off_the_time_changes_nothing(fw, ui, mcl, st):
     time_tap(ui, now, up=(200, 250))  # down on the time, lifted off it
     time_tap(ui, now, x=200)  # the elapsed side of the row
     assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')
+
+
+# A streamed song still arriving (np_stream.c np_stream_length, stream_state.c stream_length): the player's length grows
+# with the bytes, so Now Playing shows the server's length, or --:-- when there is none, until the song is whole.
+STREAMED = '/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].mp3'
+
+
+class Arriving:
+    """Now's third track as a Stream Cache song with a .stream line: state and the server's length in ms (0: none)."""
+    def __init__(self, fw, now):
+        from test_addon import World
+        self.world, self.now = World(fw, now=1000), now
+        self.path = C.create_string_buffer(STREAMED.encode())
+        struct.pack_into('<Q', now.recs[2], O['REC_PATH'], C.addressof(self.path))
+        self.world.mtime[b'/tmp/q2-subsonic.stream'] = 1000
+
+    def line(self, state, ms):
+        self.world.ms += 300  # np_stream_length reads a line at most every 200 ms
+        self.world.files[b'/tmp/q2-subsonic.stream'] = f'#Q2STREAM/1\tseq=1\n{state}\t900000\t4000000\t{ms}\t{STREAMED}\n'.encode()
+
+
+@pytest.fixture
+def arriving(fw, now):
+    return Arriving(fw, now)
+
+
+def test_the_right_hand_time_is_unknown_until_the_song_is_whole(fw, ui, now, arriving):
+    sync = fw.fn('np_sync', C.c_int, C.c_void_p)
+    now.total = 61  # what the player makes of the bytes so far
+    ui.ints[now.slider, b'max'], ui.ints[now.slider, b'value'] = 61, 50
+    arriving.line('get', 0)
+    assert sync(now.win) == 1
+    assert ui.text(now.remain) == '--:--'
+    arriving.line('get', 300000)  # the server's duration: certain, so it, not the player's 61 s
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-4:10'
+    arriving.line('done', 300000)  # whole: the player's length stands
+    ui.ints[now.slider, b'max'] = 300
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-4:10'
+    ui.ints[now.slider, b'max'] = 200
+    arriving.line('done', 0)
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-2:30'
+
+
+def drawn(fw, now):
+    """The rects canvas_fill_rounded_rect fills over stock's bar in one paint: (x, y, w, h) each."""
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        struct.unpack_from('<4i', (C.c_char * 16).from_address(r))) or 0)
+    scrubber(fw, now.slider, Canvas(fw))
+    return [b[2] for b in boxes]
+
+
+def test_the_bar_has_no_fill_while_the_length_is_unknown_and_scales_to_the_servers_when_it_is_known(fw, ui, now, arriving):
+    w = ui.box(now.slider)[2]
+    arriving.line('get', 0)
+    assert drawn(fw, now) == [w]  # the track over stock's fill, and no fill of its own
+    arriving.line('get', 400000)
+    ui.now += 1000
+    track, fill = drawn(fw, now)
+    assert track == w and w * 50 // 400 <= fill <= w * 51 // 400  # 50 s of 400 s, not of the player's 200
+    arriving.line('done', 400000)
+    assert w not in drawn(fw, now)  # stock's own bar again: no track of ours, only the glide's fill

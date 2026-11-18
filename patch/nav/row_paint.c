@@ -20,35 +20,26 @@ static int pill_radius(void *row, int h, int inset) {
 }
 
 /* A vertical gradient in one-pixel bands, then a one-pixel top highlight; equal ends give a solid
- * fill. r.h is at least 2. A pill (radius, at most r.h / 2) insets the bands at either end to that
- * radius's circle; 0 is square. Plain fills keep this off the stock gradient_t ABI, which is not
- * audited. */
+ * fill. r.h is at least 2. A pill (radius, at most r.h / 2) rounds the bands at either end to that
+ * radius's corners, each corner pixel the band's colour at its coverage (corner_cover.c); 0 is
+ * square. Plain fills keep this off the stock gradient_t ABI, which is not audited. */
 static void gradient(void *canvas, rect_t r, unsigned top, unsigned bottom, unsigned hi,
                      int radius) {
+    const unsigned char *cover = radius > 0 ? corner_cover(radius) : (const unsigned char *)0;
     for (int j = 0; j < r.h; ++j) {
-        int out = 0, D = 2 * radius, d = 2 * j + 1 - r.h;
-        d = (d < 0 ? -d : d) - (r.h - D); /* half pixels past the end circle's centre */
-        if (radius && d > 0) {            /* 1/16-pixel chord, sampled at the band's centre. */
-            int v = (D * D - d * d) * 64, k = 0;
-            int end = 8 * D;
-            while (k < end) {
-                int mid = (k + end + 1) / 2;
-                if (mid * mid <= v)
-                    k = mid;
-                else
-                    end = mid - 1;
-            }
-            out = 8 * D - k;
-        }
-        int in = (out + 15) / 16;
+        int row = j < radius ? j : j >= r.h - radius ? r.h - 1 - j : -1, in = 0;
+        const unsigned char *c =
+            cover && row >= 0 ? cover + row * radius : (const unsigned char *)0;
+        while (c && in < radius && c[in] < 255)
+            ++in; /* the part and clear pixels in from each end */
         unsigned color = RGBA(j ? mix(top, bottom, j, r.h - 1) : hi);
         canvas_set_fill_color(canvas, color);
         canvas_fill_rect(canvas, r.x + in, r.y + j, r.w - 2 * in, 1);
-        if (out & 15) {
-            canvas_set_fill_color(canvas,
-                                  (color & 0xffffff) | (unsigned)(16 - (out & 15)) * 17 << 24);
-            canvas_fill_rect(canvas, r.x + in - 1, r.y + j, 1, 1);
-            canvas_fill_rect(canvas, r.x + r.w - in, r.y + j, 1, 1);
+        for (int k = 0; k < in; ++k) {
+            if (!c[k]) continue;
+            canvas_set_fill_color(canvas, (color & 0xffffff) | (unsigned)c[k] << 24);
+            canvas_fill_rect(canvas, r.x + k, r.y + j, 1, 1);
+            canvas_fill_rect(canvas, r.x + r.w - 1 - k, r.y + j, 1, 1);
         }
     }
 }
@@ -57,13 +48,9 @@ static void gradient(void *canvas, rect_t r, unsigned top, unsigned bottom, unsi
 int round_inset(int R, int i, int h) {
     return i < R ? arc_out(R, i) >> 4 : i >= h - R ? arc_out(R, h - 1 - i) >> 4 : 0;
 }
-/* R's corner pixels' coverage out of 255, by radius (tools/art.py CORNERS); a radius outside the
- * table takes a hard corner. */
-static const unsigned char *const round_cover[] = ROUND_COVER;
-static const unsigned char *cover_of(int R) {
-    return (unsigned)R < sizeof round_cover / sizeof *round_cover ? round_cover[R]
-                                                                  : (const unsigned char *)0;
-}
+/* R's corner pixels' coverage out of 255 (corner_cover.c), at any radius; only a failed heap
+ * gives none, and a hard corner. */
+static const unsigned char *cover_of(int R) { return corner_cover(R); }
 /* The corner's row r's row i falls in, -1 between the corners. */
 static int corner_row(const rect_t *r, int R, int i) {
     return i < R ? i : i >= r->h - R ? r->h - 1 - i : -1;
@@ -88,7 +75,7 @@ void round_row(void *canvas, const rect_t *r, int R, int i, unsigned c) {
     round_row_ends(canvas, r, R, i, c, ROUND_LEFT | ROUND_RIGHT);
 }
 /* A ring a pixel wide just inside r: what R's corners cover and R - 1's, a pixel in, don't. With
- * either out of the table, hard corners. */
+ * either table missing (a failed heap), hard corners. */
 void round_ring(void *canvas, const rect_t *r, int R, unsigned c) {
     const unsigned char *out = cover_of(R), *in = cover_of(R - 1);
     for (int i = 0; i < r->h; ++i) {
@@ -107,6 +94,28 @@ void round_ring(void *canvas, const rect_t *r, int R, unsigned c) {
                 scrub_row(canvas, ink, r->x + n, r->y + i, 1);
                 scrub_row(canvas, ink, r->x + r->w - 1 - n, r->y + i, 1);
             }
+        }
+    }
+}
+/* What lies outside r's corners, radius R, painted over in behind (a final 0xRRGGBB), each pixel
+ * at the share of it the arc leaves: rounds what is already drawn in r, a square cover, into what
+ * stands behind it, anti-aliased (docs/internals.md#rounded-corners). Each corner row is one fill
+ * of the pixels wholly outside, then one fill a part pixel. */
+void corner_mask(void *canvas, const rect_t *r, int R, unsigned behind) {
+    behind &= 0xffffffu;
+    if (2 * R > r->w) R = r->w / 2;
+    if (2 * R > r->h) R = r->h / 2;
+    const unsigned char *cover = cover_of(R);
+    for (int i = 0; cover && i < R; ++i) {
+        const unsigned char *row = cover + i * R;
+        int n = 0;
+        while (n < R && !row[n]) ++n;
+        for (int c = 0; c < 4; ++c) {
+            int y = r->y + (c & 1 ? r->h - 1 - i : i), right = c & 2;
+            if (n) scrub_row(canvas, 0xff000000u | behind, right ? r->x + r->w - n : r->x, y, n);
+            for (int k = n; k < R && row[k] < 255; ++k)
+                scrub_row(canvas, (unsigned)(255 - row[k]) << 24 | behind,
+                          right ? r->x + r->w - 1 - k : r->x + k, y, 1);
         }
     }
 }
@@ -161,13 +170,21 @@ void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, un
     const char *face = theme_face(s, (int)n, &fpx);
     draw_in_face(canvas, face, s, n, r, (unsigned)fpx, color);
 }
-/* A rounded box in color, or a square one when the canvas declines to round it (no vgcanvas, or a
- * radius under 3, which stock zeroes and then fails). */
+/* A rounded box in color (a color_t). Where the canvas declines to round it (no vgcanvas, or a
+ * radius under 3, which stock zeroes and then fails), its rows with corner_cover.c's anti-aliased
+ * corners from a radius of 2 (round_row, in the colour as Light Mode inks it); a radius of 0 or 1,
+ * or one too large for the box, is square. */
 void fill_box(void *canvas, rect_t *r, unsigned color, unsigned radius) {
-    if (canvas_fill_rounded_rect(canvas, r, (void *)0, &color, radius)) {
-        canvas_set_fill_color(canvas, color);
-        canvas_fill_rect(canvas, r->x, r->y, r->w, r->h);
+    if (!canvas_fill_rounded_rect(canvas, r, (void *)0, &color, radius)) return;
+    if (radius >= 2 && 2 * (int)radius <= r->w && 2 * (int)radius <= r->h) {
+        unsigned c = ui_ink(color);
+        c = (c & 0xff000000u) | (c & 255) << 16 | (c & 0xff00u) | (c >> 16 & 255);
+        for (int i = 0; i < r->h; ++i) round_row(canvas, r, (int)radius, i, c);
+        canvas_set_fill_color(canvas, color); /* left set, as the square box leaves it */
+        return;
     }
+    canvas_set_fill_color(canvas, color);
+    canvas_fill_rect(canvas, r->x, r->y, r->w, r->h);
 }
 
 /* A two-pixel frame in color, two concentric one-pixel rounded strokes, or a square one when the
@@ -237,7 +254,7 @@ static void paint_chevrons(void *w, void *canvas) {
         int sel = st.sel_w == w && i == st.sel_row,
             spin = home && sel && cover_flow_row(g_menu.at[i]) ? coverflow_spinner() : 0;
         if (spin)
-            spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, spin);
+            spinner_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2);
         else
             chevron_icon(w, canvas, I(w, W_W) - az_right(w), r.y + r.h / 2, sel);
     }
@@ -454,16 +471,9 @@ static void paint_cover(void *w, void *canvas) {
     ww = I(w, W_W), h = I(w, W_H);
     if (w == st.np_cover) own = own * box[2] / ww, ww = box[2], h = box[3];
     int r = own ? own : (ww < h ? ww : h) * NP_ART_RADIUS / 166;
-    for (int i = 0; i < r; ++i) {
-        int out = arc_out(r, i), n = out >> 4;
-        for (int c = 0; c < 4; ++c) {
-            int y = c & 1 ? h - 1 - i : i, left = !(c & 2);
-            canvas_set_fill_color(canvas, RGBA(0));
-            canvas_fill_rect(canvas, x + (left ? 0 : ww - n), y0 + y, n, 1);
-            canvas_set_fill_color(canvas, (unsigned)(out & 15) * 17 << 24);
-            canvas_fill_rect(canvas, x + (left ? n : ww - n - 1), y0 + y, 1, 1);
-        }
-    }
+    unsigned page = ui_ink(RGBA(0)); /* the page's black as drawn, back to 0xRRGGBB */
+    rect_t art = { x, y0, ww, h };
+    corner_mask(canvas, &art, r, (page & 255) << 16 | (page & 0xff00) | (page >> 16 & 255));
     stock_canvas_set_fill_color(canvas, fill);
 }
 
@@ -729,12 +739,13 @@ static void paint_selection(void *w, void *canvas) {
         int in = tile ? 0 : T->sel_inset, radius = tile ? 0 : pill_radius(g_menu.at[i], r.h, in);
         if (radius > T->sel_radius) radius = T->sel_radius;
         bar.x += in, bar.w -= 2 * in + (tile ? 0 : az_bar_in(g_menu.w)); /* az_index.c */
-        int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip);
-        if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* toward the next tick */
+        int surface_clip[4], leaning = !tile && tilt_clip(canvas, surface_clip, &old.x);
+        if (!tile) tilt_bar(w, canvas, &bar, S->tones[0], radius); /* its press, or its lean */
         if (modal_is_red(g_menu.at[i])) /* a menu's destructive row (menu_modal.c modal_red) */
             fill_box(canvas, &bar, RGBA(MODAL_RED), (unsigned)radius);
         else
-            gradient(canvas, bar, S->tones[0], S->tones[1], S->tones[4], radius);
+            gradient(canvas, bar, tilt_tone(S->tones[0]), tilt_tone(S->tones[1]),
+                     tilt_tone(S->tones[4]), radius); /* brighter while pressed (tilt.c) */
         if (!tile) tilt_gleam(canvas, &bar, radius);
         if (leaning) canvas_set_clip_rect(canvas, surface_clip); /* the rows' own clip again */
         if (!tile) caption_paint(w, P(g_menu.at[i], W_PARENT), canvas, &bar);
@@ -767,7 +778,6 @@ static void paint_selection(void *w, void *canvas) {
     stock_canvas_set_stroke_color(canvas, stroke_color);
     canvas_set_clip_rect(canvas, &old);
 }
-
 
 static void edit_paint(void *w, void *canvas);
 
@@ -970,11 +980,17 @@ int ringnav_paint(void *w, void *canvas) {
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
     carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
-    bt_recv_paint(w, canvas);   /* Bluetooth receiver mode (bt_recv.c) */
-    sw_update_paint(w, canvas); /* SD Card Update's pages (sw_update.c) */
+    bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
+    bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
+    bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
+    guest_ui_paint(w, canvas);   /* Guest Play's pages (guest_ui.c) */
+    home_np_paint(w, canvas);    /* Home's first row's glyph (home_np.c) */
+    sw_update_paint(w, canvas);  /* SD Card Update's pages (sw_update.c) */
     np_skip_end(w, canvas); /* a track change's old and new art and lines (np_skip.c) */
     if (w && w == st.np_win) np_modes(w, canvas);
+    np_stream_paint(w, canvas); /* a server song loading: the times row's spinner (np_stream.c) */
     coverflow_home_clip(w, canvas, 0);
+    bar_title_fades(w, canvas, 0);
     modal_after(w, canvas); /* a menu sheet's header and fades (menu_modal.c) */
     list_fade(w, canvas);
     charge_paint(w, canvas); /* the plug-in screen (charging.c): last, over the page's own paints */
@@ -984,8 +1000,9 @@ int ringnav_paint(void *w, void *canvas) {
 
 /* A list_fit set's scrolling list whose box runs on below the set's list end (y 282 on OLED): its
  * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
- * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners).
- * Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
+ * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners). In
+ * Edit Library its end is a row higher and its rows fade into the hint's band (library_edit.c
+ * lr_edit_room, lr_edit_foot). Scrolled to its end by the wheel its last row's foot is on the list end (scroll_end, sel_height):
  * so a drag stops there too, its content runs on by the box's rows past the end (LIST_PAD, set
  * again at each paint, as a relayout puts stock's height back; LIST_PADDED the padded height, so a
  * reset shows; LIST_TOP the scroll the paint saw, plus 1, which a reset's clamp gets back). Home
@@ -1007,7 +1024,7 @@ static void list_fade(void *w, void *canvas) {
     int y = 0;
     void *wm = window_manager();
     for (void *p = w; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
-    int end = list_fit_end(), bottom = y + I(w, W_H);
+    int end = list_fit_end() - lr_edit_room(w), bottom = y + I(w, W_H);
     if (bottom <= end) return; /* a box cut above the end */
     int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
         content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
@@ -1026,6 +1043,6 @@ static void list_fade(void *w, void *canvas) {
     }
     int s0 = 1, s1 = 0; /* the selected row, on the screen */
     if (st.sel_w == w) s0 = y + st.sel_y - st.sel_h / 2, s1 = s0 + st.sel_h;
-    list_fades(canvas, y, bottom, end, off > 0, y + content - off > end, s0, s1);
+    list_fades(canvas, y, bottom, end, lr_edit_foot(w), off > 0, y + content - off > end, s0, s1);
 }
 

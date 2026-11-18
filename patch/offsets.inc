@@ -162,6 +162,10 @@ static inline int arc_out(int r, int y) {
 }
 #define PLACEHOLDER "default_album_flow" /* Cover Flow's and Spotify's missing art */
 #define VOL_POLL_MS 16 /* how often the volume indicator checks for a change, and eases its bar */
+/* Stock's volume dialog's close count, a byte: its timer (on_volume_tsup_fun's, 0x4a3248) adds 1 a
+ * tick and closes the dialog at 31; dialog_volume_dialog_init and volume_dialog_on_keyup zero it.
+ * volume.c vol_show zeroes it too, so a headset's change keeps the dialog up as a wheel tick does. */
+#define VOL_DIALOG_COUNT 0xa3b0d0
 /* A level bar's ease, the volume's and the brightness's (levels.c level_ease): a first-order
  * follow with this time constant, so 95% of a step in 3 x VOL_EASE_MS. A choice, not a
  * measurement: no source times an iPod's bar. */
@@ -406,10 +410,14 @@ static inline int arc_out(int r, int y) {
 /* With the screen off the UI loop idles this long a turn instead of stock's 8 ms, about 10 turns a
  * second; screen-off keys (volume, play/pause, wake) wait at most this much longer. */
 #define SCREEN_OFF_SLEEP_MS 100
-/* Stock's player status sync (5 a second) and Tidal's stream poll sleep at least this long a turn
- * while ringnav_sleep finds the Q2 dark and quiet (ringnav_dark_usleep), its cover pollers (20 and
- * 10) whenever it is dark (ringnav_dark_cover_usleep); DARK_POLLS in tools/build.py. */
+/* Stock's player status sync (5 a second) and player scheduling (ringnav_mainscheduling, 10) run at
+ * least this far apart while ringnav_sleep finds the Q2 dark and nothing needs the position soon
+ * (dark_slow: ringnav_dark_usleep); DARK_POLLS in tools/build.py. */
 #define DARK_POLL_US 1000000
+/* Dark and playing, the player polls keep stock's pace from this many seconds before the track's
+ * end (as the status cache has it): mclAutoChange's Gapless preload (under 6 s), plus a slow poll's
+ * age and the status thread's last long sleep. */
+#define DARK_END_LEAD_S 10
 /* Screen off, nothing playing (media_playing) and the DAC already off (check_dacoff_state, about 31
  * s after playback stops; g_dacoff_time -1): the turn idles DARK_IDLE_SLEEP_MS, about 4 turns a
  * second, so a Q2 left dark without Standby stops waking the CPU for nothing. The first key waits
@@ -418,11 +426,18 @@ static inline int arc_out(int r, int y) {
 /* A wheel turn with the screen off idles neither for this long after a tick (ringnav_sleep). A
  * calibration knob: a turn slower than a tick in this long waits out a dark pass for each. */
 #define DARK_TURN_MS 500
-/* Bluetooth absolute volume is read back this often with the screen off and no volume limit to
- * hold, or after the headset refused it (bt_volume_poll); 400 ms otherwise. A headset's own volume
- * keys show on the Q2 that late. */
+/* Without BlueZ's volume signal (below), Bluetooth absolute volume is read back this often with the
+ * screen off and no volume limit to hold (BT_VOLUME_LIMIT_MS with one), and 400 ms lit, so a
+ * headset's own volume keys show on the Q2 that late; after the headset refused it, this often
+ * whatever the screen or the signal (bt_volume_poll). */
 #define BT_VOLUME_SLOW_MS 2000
 #define BT_VOLUME_LIMIT_MS 1000
+/* While BlueZ's volume signal is subscribed (bt_vol_event.c), a signal reads the level on the next
+ * UI pass, at most one read every BT_VOLUME_EVENT_GAP_MS (a burst, the wheel's own writes echoed,
+ * coalesces at the timed pace above), and with no signal it is still read every
+ * BT_VOLUME_FALLBACK_MS, lit or dark, for a stack or headset that sends none. */
+#define BT_VOLUME_EVENT_GAP_MS 400
+#define BT_VOLUME_FALLBACK_MS 5000
 /* Screen on, once IDLE_MS pass without input or a window animation, each turn idles IDLE_SLEEP_MS
  * (about 30 passes a second; the first input after waits at most that). */
 #define IDLE_MS 2000
@@ -432,6 +447,9 @@ static inline int arc_out(int r, int y) {
 #define CHARGE_STOP 80
 #define CHARGE_RESUME 75
 #define CHARGE_POLL_MS 5000
+/* The card's Rockbox and Groovebox binaries, and Home's Folders rule, are looked at again at most
+ * this often, sooner on a library scan's end (theme_engine.c card_bins, home.c home_folders). */
+#define CARD_RECHECK_MS 5000
 /* Hardware watchdog (docs/internals.md#watchdog): the UI loop feeds it every pass, so a loop or a
  * kernel stalled WDT_MS reboots. Well above any ordinary pass (a 65k-song list, a cover decode:
  * seconds). The known long ones on the UI thread, an import's tag reads and a folder add's directory
@@ -464,6 +482,11 @@ static inline int arc_out(int r, int y) {
 /* The Wi-Fi signal (ringnav_wifi_signal) is read from the driver again at most every
  * WIFI_SIGNAL_MS; its two pollers each ask about once a second. */
 #define WIFI_SIGNAL_MS 1000
+/* The battery's level, voltage and charge status (get_battery_capacity, from the status bar's
+ * one-second timer) are read at most every BATT_DARK_MS with the screen off, on battery, at a level
+ * of BATT_DARK_FLOOR or more (ringnav_batt_level); stock's second otherwise. */
+#define BATT_DARK_MS 30000
+#define BATT_DARK_FLOOR 20
 /* Resume (docs/internals.md#resume): tracks of Q2POD RESUMEMIN minutes or longer (crossfade.c
  * resume_min) keep their place in the RESUME_SLOTS most recent; a place within RESUME_EDGE_S of
  * either end is forgotten. Saved on a track change, a pause and every RESUME_SAVE_S of play;
@@ -564,6 +587,9 @@ static inline int arc_out(int r, int y) {
  * on_wm_keyup_before_fun (ringnav's hook) clears it. A key ringnav takes before stock's key-up body
  * clears it itself, or every later press is silent (docs/internals.md#ipod-row-clicks). */
 #define KEY_TONE_LATCH 0xa4bc00
+/* no symbol: what stock's editwifi_dialog types, its init's ctx (sw at 0x49a698): nonzero Add Network's password
+ * (hint keyboard_password, 0x49a6b4), 0 its network name; kbwifiadd's two rows open it with 1 and 0 (0x49ae08, 0x49abb8) */
+#define EDITWIFI_PASSWORD 0xa3b070
 #define RETURN_RELEASE_LATCH 0xa4bbfa /* stock long Return arms it; the key-up filter consumes it */
 #define NAME_SORT_FLAG 0xa5011d /* no symbol: toolsQueryDbTable's name sort uses comparator 0x5cd188 when set, the pinyin 0x5cc870 when clear */
 
@@ -677,6 +703,10 @@ static inline int arc_out(int r, int y) {
 #define MCL_JUMPFOLDER 0xa5002b /* byte: Folder Skip, read only for class 1 queues */
 #define MCL_GAPLESS 0xa5002c    /* byte: stock's Gapless setting (mclGetGaplessMode); mclAutoChange preloads only with it */
 #define MCL_FD 0xa5008c         /* player socket, -1 none */
+/* g_repeatinfo, A-B Repeat's state: byte on, then words A and B (seconds) and 2 once both are set;
+ * check_abrepeatmode (0x51d3d0) seeks back to A each idle pass that finds the position past B. */
+#define REPEAT_INFO 0xa551fc
+#define REPEAT_AB_STATE 0xc
 #define INITCONFIG_MODE_RET 0x51e0d0 /* player_initconfig's mclSetPlayMode call (jalr 0x51e0c8) returns here */
 /* mclUsbAudioSetVol (0x5bec64): the USB DAC's volume control, -1 before the first set, -2 when it
  * has none and hciplayer's soft volume (mcl-softvolflag) applies instead (0x5bab48 opens hw:1). */

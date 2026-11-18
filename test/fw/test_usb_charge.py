@@ -182,3 +182,52 @@ def test_a_saved_off_marked_the_users_stays_off_and_inhibits_before_config_and_i
     q.detect()
     q.status()
     assert q.at_dispatch == 1 and q.gpio == 1
+
+
+@pytest.mark.parametrize('pref', [0, 1])
+def test_a_q2_powering_the_bus_as_otg_host_keeps_stocks_charger_off(fw, pref):
+    """check_otg_status (0x4f3408), with the ID pin low, sets g_last_otgid, turns the bus power on
+    (PC20) and the charger off (PE22 high) by toolsGpioSetValue directly, not through
+    switch_charge_enable. Neither the USB pass's readback nor Charge Limit's hand-back turns it on."""
+    q = Charging(fw, pref=pref, mode=2, cable=1)
+    otg = fw.var('g_last_otgid', C.c_ubyte)
+    q.config()
+    q.detect()
+    otg.value, q.gpio = 1, 1  # stock's OTG host: PE22 high, written past the guard
+    before = len(q.writes)
+    for _ in range(3):
+        q.status()  # check_usb_status, every second
+        q.charge(1)  # Charge Limit's hand-back (system.c charge_poll)
+        assert q.gpio == 1
+    assert set(q.writes[before:]) <= {1}
+    otg.value, q.gpio = 0, 0  # the device unplugged: stock's PE22 low again
+    q.detect()
+    q.status()
+    assert q.gpio == (0 if pref else 1)
+
+
+def test_dark_the_otg_hosts_charger_stays_off_while_the_battery_reads_slow(fw):
+    """With the screen off the battery's reads slow (system.c ringnav_batt_level); the cable read after them in
+    get_battery_capacity, and its guard, still run every second, so the OTG host's charger stays off."""
+    q = Charging(fw, pref=1, mode=2, cable=1)
+    otg = fw.var('g_last_otgid', C.c_ubyte)
+    now = [100000]
+    fw.mock('time_now_ms', lambda *_: now[0])
+    for name in ('toolsGetBatterycapacity', 'toolsGetBatteryVoltage', 'toolsGetChargeStatus'):
+        fw.mock(name, lambda *_: 60)
+    fw.var('g_backlight_status', C.c_ubyte).value = 0
+    reads = [fw.fn(n, C.c_int) for n in ('ringnav_batt_level', 'ringnav_batt_voltage', 'ringnav_batt_status')]
+    q.config()
+    q.detect()
+    otg.value, q.gpio = 1, 1
+    before, detects = len(q.writes), len(fw.calls('stock_usb_detect_trampoline'))
+    for _ in range(35):
+        for read in reads:
+            read()
+        fw.var('g_usbdet_value', C.c_ubyte).value = q.detect()  # get_battery_capacity's cable read
+        q.status()
+        q.charge(1)
+        assert q.gpio == 1
+        now[0] += 1000
+    assert set(q.writes[before:]) <= {1}
+    assert len(fw.calls('stock_usb_detect_trampoline')) - detects == 35

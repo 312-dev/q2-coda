@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import host
-from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork
+from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_fork, stock_prop_str
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
@@ -927,6 +927,64 @@ def test_a_toast_over_home_leaves_the_split_rows_in_the_bar(fw, library, toast):
     assert home.list in painted
 
 
+def test_a_slide_over_home_paints_its_band_drifting_with_home(fw, library):
+    """A page sliding over Home in Split (a push, or a Return back to Home): stock paints the bar before each frame's
+    percent, so page_parallax.c's draw of the page under paints it again, and the bar draws Home's band, the list's
+    rows above Home's window, drifted with Home's snapshot, left of the sliding page and darkened as the snapshot is;
+    the title shows only over the sliding page, faded as far as it is out (user, 2026-11-17: Control Center > hold
+    Bluetooth > Return, or Library > Return, ran a flat band across the top for the whole slide, Home's raised top row
+    cut, the closing page's title over it)."""
+    ui = Ui(fw)
+    split_inset_set(fw, library, 2)
+    home = fw.var('coverflow__home', Home)
+    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
+    home.art = ui.make(win, 'image', 196, 0, 179, 262)
+    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
+    title = ui.make(bar, 'hscroll_label', 64, 0, 120, 58, name='label_title')
+    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
+    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='localmusic_page')  # the sliding page
+    ui.animating = 1
+    canvas = Canvas(fw)
+    clips, moves, painted, alphas = [], [], [], []
+    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
+    fw.mock('canvas_translate', lambda c, x, y, *_: moves.append((C.c_int(x).value, C.c_int(y).value)))
+    fw.mock('canvas_set_global_alpha', lambda c, a, *_: alphas.append(a))
+    paint_bg = fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)
+    paint_border = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
+
+    def paint(w, c, *_):  # stock's widget_paint of the bar: its background, then the title's
+        painted.append(w)
+        if w == bar:
+            paint_bg(bar, c)
+            paint_bg(title, c)
+            paint_border(title, c)
+    fw.mock('widget_paint', paint)
+    # stock's own paint of the bar, before the frame's percent: no band
+    paint_bg(bar, canvas.p)
+    assert home.list not in painted
+    wa = C.create_string_buffer(0x100)
+    struct.pack_into('<QQ', wa, 0x14, win, ui.top)  # prev_win, curr_win
+    struct.pack_into('<Q', wa, 0xb8, canvas.p)
+    struct.pack_into('<f', wa, 0xb4, 0.5)  # the new page half in
+    fw.mock('htranslate_draw_prev', lambda *_: 0)
+    clips.clear(), moves.clear(), canvas.rects.clear()
+    assert fw.fn('parallax_prev', C.c_int, C.c_void_p)(C.addressof(wa)) == 0
+    dx, open_ = round(375 * 0.5 * 0.3), 375 - round(375 * 0.5)  # Home drifts 56 px; the page covers from 187
+    assert painted[:2] == [bar, home.list]
+    assert (0 - dx, 58) in moves and (dx, -58) in moves  # the list at Home's drifted place
+    assert (0, 0, 196 - dx, 58) in clips  # its columns left of the art, all left of the page
+    assert (0x20000000, 0, 0, open_, 58) in canvas.rects  # the band darkened as Home's snapshot below it
+    assert (open_, 0, 375 - open_, 320) in clips and alphas == [128, 255]  # the title over the page alone, faded
+    # the frame painted: the bar's next paint is stock's again, no band
+    painted.clear()
+    paint_bg(bar, canvas.p)
+    assert home.list not in painted
+    ui.animating = 0
+
+
 def test_a_split_inset_keeps_the_pan_off_the_cover_s_edges(fw, library):
     row, client = split_inset_set(fw, library, 2)  # OLED's
     pw, ph = 375 - row['split_art'], client + row['split_art_up']
@@ -972,7 +1030,8 @@ def test_slide_load_a_cover_it_won_t_pan_stays_still(fw, w, h, format):
     assert tex(b'x') == 0 and home.sl[0].tw == 0 and not home.sl[0].tex and fw.calls('widget_unload_image')
 
 
-# The status row over Split's art: each glyph in one ink, white or black by WCAG contrast over its mean
+# The status row over Split's art: the clock and every glyph in one ink, white or black by WCAG contrast over the mean
+# of the art under them all
 
 GAP = 4  # INK_GAP: empty columns that part two glyphs
 BLACK, WHITE = 0xff000000, 0xffffffff
@@ -1019,40 +1078,47 @@ def apart(cells, ground):
 
 @pytest.mark.parametrize('ground, glyph', ((BLACK, WHITE), (WHITE, BLACK)))  # dark, Light Mode
 def test_home_ink_shows_the_art_where_no_glyph_is_and_inks_a_glyph_by_contrast(fw, ground, glyph):
-    screen, at = apart([glyph] * 3, ground)
-    tones = [(250, 250, 250), (20, 24, 30), (120, 190, 220)]
-    art = [art_px(120, 190, 220)] * len(screen)
-    for i, t in zip(at, tones):
-        art[i] = art_px(*t)
-    got, _ = ink(fw, screen, art, ground)
-    assert got[1] == screen_px(120, 190, 220)  # the art, in the screen's order
-    assert [got[i] for i in at] == [screen_px(0, 0, 0), screen_px(255, 255, 255), screen_px(0, 0, 0)]  # white: black; dark: white; light blue: black
+    screen = [glyph, ground]
+    for tone, want in (((250, 250, 250), (0, 0, 0)), ((20, 24, 30), (255, 255, 255)), ((120, 190, 220), (0, 0, 0))):
+        got, _ = ink(fw, screen, [art_px(*tone), art_px(120, 190, 220)], ground)  # white: black; dark: white; light blue: black
+        assert got == [screen_px(*want), screen_px(120, 190, 220)]  # the art, in the screen's order, where no glyph is
+
+
+def test_home_ink_gives_the_whole_row_one_ink(fw):
+    """iOS's one style for the bar (the device's dark bars beside a light clock, 2026-11-16): a clock over dark art,
+    the bars over light grey art and a battery over dark grey art come out in one ink, the one for their mean, and
+    the row's ink is held in every column. Inked a glyph at a time, the light grey art's glyph would have been
+    black."""
+    dark, light, mid = art_px(10, 10, 10), art_px(150, 150, 150), art_px(40, 40, 40)
+    screen, at = apart([WHITE] * 3, BLACK)
+    art = [mid] * len(screen)
+    art[at[0]], art[at[1]] = dark, light
+    got, held = ink(fw, screen, art, BLACK)
+    assert [got[i] for i in at] == [WHITE] * 3 and held == [1] * len(screen)
+    assert ink(fw, [WHITE], [light], BLACK)[0] == [BLACK]  # alone, the light grey art's glyph is black
+    art[at[0]] = art[at[2]] = light  # all light grey: all black
+    got, held = ink(fw, screen, art, BLACK)
+    assert [got[i] for i in at] == [BLACK] * 3 and held == [2] * len(screen)
 
 
 def test_home_ink_blends_an_edge_by_its_coverage(fw):
     half = screen_px(128, 128, 128)  # a glyph's edge, half on the black ground
-    screen, at = apart([half, half], BLACK)
-    art = [art_px(0, 0, 0)] * len(screen)
-    art[at[0]] = art_px(255, 255, 255)
-    got, _ = ink(fw, screen, art, BLACK)
-    assert abs((got[at[0]] & 255) - 127) <= 1 and abs((got[at[1]] & 255) - 128) <= 1  # white art half black, black half white
+    got, _ = ink(fw, [half], [art_px(255, 255, 255)], BLACK)
+    assert abs((got[0] & 255) - 127) <= 1  # white art: half black
+    got, _ = ink(fw, [half], [art_px(0, 0, 0)], BLACK)
+    assert abs((got[0] & 255) - 128) <= 1  # black art: half white
     dim = screen_px(0x6e, 0x6e, 0x6e)  # the slim battery's outline: its tone is its share
     assert abs((ink(fw, [dim], [art_px(255, 255, 255)], BLACK)[0][0] & 255) - (255 - 0x6e)) <= 1
 
 
 def test_home_ink_picks_as_wcag_does(fw):
     rnd = random.Random(7)
-    pixels = [(v, v, v) for v in range(256)] + [tuple(rnd.randrange(256) for _ in range(3)) for _ in range(4000)]
-    screen, at = apart([WHITE] * len(pixels), BLACK)
-    art = [art_px(0, 0, 0)] * len(screen)
-    for i, p in zip(at, pixels):
-        art[i] = art_px(*p)
-    got, held = ink(fw, screen, art, BLACK)
-    for i, p in zip(at, pixels):
+    pixels = [(v, v, v) for v in range(256)] + [tuple(rnd.randrange(256) for _ in range(3)) for _ in range(1500)]
+    for p in pixels:
+        got, held = ink(fw, [WHITE], [art_px(*p)], BLACK)
         white, margin = wcag_white(*p)
         if margin > 1e-5:  # a tie within the table's rounding either way
-            assert got[i] == (WHITE if white else BLACK), p
-            assert held[i] == (1 if white else 2), p
+            assert got == [WHITE if white else BLACK] and held == [1 if white else 2], p
 
 
 def test_home_ink_gives_a_glyph_on_speckled_art_one_ink(fw):
@@ -1078,14 +1144,13 @@ def test_home_ink_weighs_the_art_by_the_glyph_s_coverage(fw):
     assert got[0] == WHITE
 
 
-def test_home_ink_parts_glyphs_at_its_gap(fw):
-    """A pause's bars, a column apart, are one glyph; GAP empty columns part two."""
-    dark, light = art_px(0, 0, 0), art_px(255, 255, 255)
-    got, _ = ink(fw, [WHITE, BLACK, WHITE], [dark, light, light], BLACK)  # one glyph: one ink
-    assert got[0] == got[2]
-    screen = [WHITE] + [BLACK] * GAP + [WHITE]
-    got, _ = ink(fw, screen, [dark] + [dark] * GAP + [light], BLACK)
-    assert (got[0], got[-1]) == (WHITE, BLACK)
+def test_home_ink_finds_a_status_colour_in_its_own_glyph(fw):
+    """GAP empty columns part two glyphs, each with its own status colour: the charging green keeps its hue and
+    the grey glyph beside it takes the row's ink."""
+    green = screen_px(0x34, 0xc7, 0x59)
+    light = art_px(255, 255, 255)
+    got, _ = ink(fw, [WHITE] + [BLACK] * GAP + [green], [light] * (GAP + 2), BLACK)
+    assert (got[0], got[-1]) == (BLACK, green)
 
 
 def grey(L):
@@ -1096,20 +1161,25 @@ def grey(L):
 @pytest.mark.parametrize('L, was, want', (
     (0.19, 0, BLACK), (0.19, 1, WHITE), (0.215, 1, BLACK),    # past the bound; held white within 0.03; past it
     (0.17, 0, WHITE), (0.17, 2, BLACK), (0.145, 2, WHITE)))   # and the other way
-def test_home_ink_keeps_a_glyph_s_ink_near_the_bound(fw, L, was, want):
+def test_home_ink_keeps_the_row_s_ink_near_the_bound(fw, L, was, want):
     v = grey(L)
-    got, held = ink(fw, [WHITE, WHITE], [art_px(v, v, v)] * 2, BLACK, held=[0, was])
-    assert got == [want] * 2 and held == [1 if want == WHITE else 2] * 2
+    got, held = ink(fw, [WHITE, BLACK, WHITE], [art_px(v, v, v)] * 3, BLACK, held=[0, 0, was])
+    assert (got[0], got[2]) == (want, want) and held == [1 if want == WHITE else 2] * 3
 
 
-@pytest.mark.parametrize('cut, at, want', ((1, 0, WHITE), (2, -1, WHITE), (4, 0, WHITE), (4, -1, WHITE), (2, 0, BLACK), (0, -1, BLACK)))
-def test_home_ink_keeps_the_ink_of_a_glyph_its_clip_cuts(fw, cut, at, want):
-    """Part of the battery repainted, on light art its whole would not be inked by: a glyph at an edge the clip cut
-    (INK_CUT_LEFT 1, RIGHT 2, ROWS 4) keeps its white; one clear of a cut takes its part's own ink."""
+@pytest.mark.parametrize('cut', (1, 2, 4, 7))
+def test_home_ink_keeps_the_row_s_ink_where_its_clip_cuts_it(fw, cut):
+    """Part of the row repainted (the play state's frames, a battery's level) on light art the whole row was white
+    over: INK_CUT_LEFT 1, RIGHT 2 or ROWS 4 keep the held white; uncut, the row is picked again. Nothing held, a cut
+    part picks its own."""
     light = art_px(240, 240, 240)
     screen = [WHITE] + [BLACK] * GAP + [WHITE]
     got, held = ink(fw, screen, [light] * len(screen), BLACK, held=[1] * len(screen), cut=cut)
-    assert got[at] == want and held[at] == (1 if want == WHITE else 2)
+    assert (got[0], got[-1]) == (WHITE, WHITE) and held == [1] * len(screen)
+    got, held = ink(fw, screen, [light] * len(screen), BLACK, held=[1] * len(screen))
+    assert (got[0], got[-1]) == (BLACK, BLACK) and held == [2] * len(screen)
+    got, _ = ink(fw, screen, [light] * len(screen), BLACK, cut=cut)
+    assert (got[0], got[-1]) == (BLACK, BLACK)
 
 
 @pytest.mark.parametrize('ground', (BLACK, WHITE))
@@ -2897,9 +2967,13 @@ class Ui:
         return 0
 
     def prop_str(self, w, k, d, *_):
-        k = self.str(k)
-        value = self[w].image if k == 'image' else self[w].name if k == 'name' else self[w].props.get(k)
-        return self.cstr(value) if value is not None else d
+        if not w or w not in self.w:
+            return d  # stock: widget_get_prop fails on a NULL widget
+        k, widget = self.str(k), self[w]
+        # '' is a name, style or image never set
+        value = (getattr(widget, k) or None) if k in ('name', 'style', 'image') else widget.props.get(k)
+        value = stock_prop_str(widget.type.encode(), k.encode(), value.encode() if isinstance(value, str) else value, d)
+        return 0 if value is None else self.cstr(value.decode()) if isinstance(value, bytes) else value
 
     def add_timer(self, fn, ctx, ms, *_):
         self.ids += 1
@@ -4040,7 +4114,7 @@ def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()
         ui[view].props['_ringnav_index'] = sel
     canvas = Canvas(fw)
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
-    fw.fn('home_fades', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int)(canvas.p, home.list, list_y, cols, split)
+    fw.fn('home_fades', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(canvas.p, home.list, list_y, cols, split, 0)
     rows = {}
     for colour, x, y, w, h in canvas.rects:
         assert h == 1 and colour & 0xffffff == 0  # one row of the black ground

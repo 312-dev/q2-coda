@@ -562,31 +562,31 @@ for clock,hooked in (((22,0),True),((6,59),True),((7,0),False),('localtime',Fals
     m,fb,end=tint_machine({'NIGHTSHIFT':'2'},clock=clock); m.call(address=payload_syms['night_paint'],args=(m.canvas,0,0,0),gap=0)
     assert (m.get(m.lcd+0x7c)==payload_syms['night_end'])==hooked,clock
 passed()
-# Bluetooth's list (btmenu_rows, rebuilt on every search) gains Resume on connect and Control Device Volume
-# with Bluetooth on, right after its fourth row, Bluetooth Headset Volume Control, as stock's rows: no icon,
-# 78 high. Both off unless Q2POD RESUME / BTVOLLINK is 1 (docs/internals.md#resume-on-connect,
+# Bluetooth's list (btmenu_rows, rebuilt on every search) gains Resume on connect and Link Volume with Bluetooth
+# on, last in bt_ui.c's Audio group (docs/internals.md#bluetooth-page), as stock's rows: no icon, 78 high. Both off unless Q2POD RESUME / BTVOLLINK is 1 (docs/internals.md#resume-on-connect,
 # #headset-controls-and-volume); off, the Q2's volume is its own gain and the device keeps its own volume.
 # Stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place, the name its value, as high as stock's
 # row (docs/internals.md#bluetooth-name).
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
-assert len(rows)==3 and icons==[None,None,None] and texts()==['Resume on Connect','Control Device Volume','Name']
+assert len(rows)==4 and icons==[None]*4 and texts()==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c)
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
 assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
-assert 'Q2' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
+assert 'Q2 Muse' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
 rows=rows[:2]
 for k,row in enumerate(rows):
     kids=m.nodes[m.nodes[row]['children'][0]]['children']  # the label and its switch
     assert len(kids)==2 and m.get(kids[0]+O['W_X'])==10 and m.get(row+O['W_H'])==78 and switch_image(m,row)=='switch_off'
-    assert m.nodes[named(m,m.top,'scroll_view_bluetooth')]['children'].index(row)==4+k
+    kids=m.nodes[named(m,m.top,'scroll_view_bluetooth')]['children']
+    assert kids.index(row)==len(kids)-2+k
 assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Control Device Volume','Name']; passed()
+assert texts()==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
-m,rows,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # just the switch
-assert rows==[]; passed()
+m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # off: the switch, Name and a line (bt_ui.c)
+assert texts()==['Name']; passed()
 
 def oled_set(m):  # the first system_bar load: theme_boot writes OLED's set (st.geom), as on a unit
     m.record_syscalls(lambda page:False); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
@@ -620,7 +620,7 @@ def screen_box(m,w):
         if p==m.top or p==m.wm: break
         x,y=x+signed(m.get(p+O['W_X'])),y+signed(m.get(p+O['W_Y']))
     return x,y,ww,h
-# A corner painter with no table for its radius takes a hard corner: a ring whose radius, or its radius less one, has none (and 0, its less-one off the table's front).
+# A ring at any radius has antialiased corners (corner_cover.c), its sides mirrored; at radius 0, square.
 def paint_canvas():  # a machine, Light on, to paint on
     SETUP[:]=[lambda k:(k.config.update(LIGHT='1'),k)]
     try: return QueueMachine()
@@ -629,10 +629,12 @@ def ring(R):
     lk=paint_canvas(); r=lk.alloc(16)
     for i,v in enumerate((20,40,60,30)): lk.word(r+4*i,v)
     blank(lk); lk.call(address=payload_syms['round_ring'],args=(lk.canvas,r,R,0xff112233),gap=0); return lk
-for R in (14,5,0):  # 14 has no table; 5 has, 4 hasn't
+for R in (14,5,4,0):  # 14 and 4 had no table before corner_cover.c, 5 had
     rows={}; [rows.setdefault(b[1],[]).append(b) for b in ring(R).bands]; assert sorted(rows)==list(range(40,70))
-    for y in range(41,69): assert len(rows[y])==2 and rows[y][0][0]<=rows[y][1][0] and rows[y][0][0]-20==20+60-1-rows[y][1][0],(R,y)  # its sides, mirrored
-    assert rows[55][0][0]==20 and rows[55][1][0]==79 and (R in (0,5) or rows[42][0][0]>20)  # 5's arc is in by row 2 less than a pixel
+    for y in range(41,69):
+        xs=sorted(b[0] for b in rows[y]); assert xs==sorted(20+(20+60-1)-x for x in xs),(R,y)  # its sides, mirrored about the ring's centre
+    assert sorted(b[0] for b in rows[55])==[20,79]  # the straight sides, a pixel each
+    assert (R==0)==all(b[4]>>24==0xff for y in range(40,44) for b in rows[y]),R  # part pixels round a corner
 passed()
 # Every Search row site holds the set's value once OLED's set is written (theme.xml's search_* geometry), and stock's before.
 SEARCH_SITES={0x49d470:52,0x49e7b0:52,0x49f320:52,0x49d4a8:52,0x49e7e8:52,0x49f35c:52,0x49f6fc:52,0x49cdd8:52,0x49cec4:52,0x49d62c:52,0x49e970:52,0x49f164:52,0x49cde0:0,0x49d67c:4,0x49e9c0:4,0x49d670:28,0x49e9b4:28,0x49d724:31,0x49ea28:31,0x49d718:20,0x49ea1c:20}

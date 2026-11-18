@@ -5,6 +5,7 @@
 int ble_start(void) { return -1; }
 int ble_events(void) { return 0; }
 void ble_handle(void) {}
+int ble_pending(void) { return 0; }
 int ble_write(const uint8_t *p, size_t n) { (void)p, (void)n; return -1; }
 void ble_disconnect(void) {}
 void ble_stop(void) {}

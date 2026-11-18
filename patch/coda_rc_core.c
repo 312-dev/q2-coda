@@ -459,3 +459,11 @@ void crc_close(crc_session *s) {
     crypto_wipe(s->kd, sizeof s->kd);
     crypto_wipe(s->scalar, sizeof s->scalar);
 }
+
+uint32_t crc_buffered_ms(uint32_t have, uint32_t total, uint32_t ms) {
+    if (!total || !ms) return 0;
+    if (have >= total) return ms;
+    while (total > 65535) total >>= 1, have >>= 1; /* so (ms % total) * have stays within 32 bits */
+    if (!total) return 0;
+    return ms / total * have + ms % total * have / total;
+}

@@ -278,6 +278,65 @@ def test_mark_ready_refuses_a_branch_that_conflicts_with_the_trunk(tmp_path, mon
     assert 'READY feat/clean' in (tmp_path/'q/events.log').read_text()
 
 
+# Stand-ins for a worktree's tools/ci/affected.py and gate.py: a file's plan is PLANS[name]; the unit suite
+# fails when its plan reaches test_theme.py and theme.c holds BREAK.
+STUB_AFFECTED = '''import json, subprocess, sys
+PLANS = {'a.txt': ['test_a.py'], 'theme.c': ['test_art.py'], 'stream.py': 'all'}
+base = sys.argv[sys.argv.index('--base') + 1]
+unit = []
+for f in subprocess.run(['git', 'diff', '--name-only', base], capture_output=True, text=True).stdout.split():
+    p = PLANS.get(f, [])
+    unit = 'all' if 'all' in (p, unit) else sorted(set(unit) | set(p))
+print(json.dumps({'unit': unit, 'fw': [], 'patch': [], 'other': [], 'why': []}))
+'''
+STUB_GATE = '''import json, os, pathlib, sys
+a = sys.argv
+plan = json.loads(pathlib.Path(a[a.index('--plan-json') + 1]).read_text())
+logs, only = pathlib.Path(a[a.index('--logs') + 1]), a[a.index('--only') + 1].split(',') if '--only' in a else None
+res = {}
+if plan['unit'] and (only is None or 'unit' in only):
+    reaches = plan['unit'] == 'all' or 'test_theme.py' in plan['unit']
+    rc = int(reaches and os.path.exists('theme.c') and 'BREAK' in open('theme.c').read())
+    (logs/'unit.log').write_text('FAILED test/unit/test_theme.py::test_tokens\\n' if rc else 'ok\\n')
+    res['unit'] = {'rc': rc, 'log': str(logs/'unit.log')}
+pathlib.Path(a[a.index('--results') + 1]).write_text(json.dumps(res))
+(logs/'summary.txt').write_text(json.dumps(res))
+'''
+
+
+def test_bisection_blames_the_branch_that_breaks_a_test_only_a_later_branchs_plan_runs(tmp_path, monkeypatch):
+    """Batch 20261116-232912's shape: row-press broke test_theme but its own plan ran only test_art, and
+    streaming's plan ran all of test/unit. Every level runs the batch's plan, so row-press is the culprit."""
+    for k in ('AUTHOR', 'COMMITTER'):
+        monkeypatch.setenv(f'GIT_{k}_NAME', 't')
+        monkeypatch.setenv(f'GIT_{k}_EMAIL', 't@t')
+    repo = Repo(tmp_path/'r')
+    repo.write('tools/ci/affected.py', STUB_AFFECTED, 'stub affected')
+    repo.write('tools/ci/gate.py', STUB_GATE, 'stub gate')
+    tip = repo.git('rev-parse', 'HEAD').stdout.strip()
+    shas = {'fix/cta': repo.branch('fix/cta', 'a.txt', 'a\n'),
+            'feat/row-press': repo.branch('feat/row-press', 'theme.c', 'BREAK\n'),
+            'feat/streaming': repo.branch('feat/streaming', 'stream.py', 's\n')}
+    git = merge_batch.git
+    monkeypatch.setattr(merge_batch, 'git', lambda *a, cwd=repo.path, check=True: git(*a, cwd=cwd, check=check))
+    monkeypatch.setattr(merge_batch, 'CACHE', tmp_path/'cache')
+    (tmp_path/'logs').mkdir()
+    real = merge_batch.Real(repo.trunk, tip, tmp_path/'logs', log=lambda m: None)
+    real.shas = shas
+    r = merge_batch.integrate(real, tip, list(shas), log=lambda m: None)
+    assert list(r.culprits) == ['feat/row-press'] and r.culprits['feat/row-press'].keys() == {'unit'}
+    assert sorted(r.landed) == ['feat/streaming', 'fix/cta']
+
+
+def test_widen_joins_a_heads_plan_to_the_rounds_and_keeps_what_the_head_has():
+    whole = {'unit': ['test_theme.py', 'test_gone.py'], 'fw': [], 'patch': ['3:9'], 'other': ['test/x.py'], 'why': []}
+    own = {'unit': ['test_art.py'], 'fw': ['test_seek.py'], 'patch': [], 'other': [], 'why': []}
+    w = merge_batch.widen(own, whole, lambda f: 'gone' not in f)
+    assert w['unit'] == ['test_art.py', 'test_theme.py'] and w['fw'] == ['test_seek.py']
+    assert w['patch'] == 'all' and w['other'] == ['test/x.py']  # the joined suite's lines differ by head
+    assert merge_batch.widen(None, dict(whole, unit='all'), lambda f: True)['unit'] == 'all'  # the tip's check
+
+
 def test_the_trunk_name_comes_from_the_environment_then_the_config_file(tmp_path, monkeypatch):
     monkeypatch.setenv('Q2_CONFIG', str(tmp_path))
     monkeypatch.delenv('Q2_TRUNK', raising=False)
@@ -340,6 +399,7 @@ class FakeQueue(q2queue.Queue):
         self.lines = []
         super().__init__(self.repo.path, self.repo.trunk, tmp_path/'q', tmp_path/'ready.txt', log=self.lines.append, **kw)
         self.outcomes, self.batches, self.posts = list(outcomes), [], 0
+        self.post_results: list = []  # what each post tier returns, (rc, failed, red); a pass once they run out
 
     def run_batch(self, batch, ready):
         names = [b for b, _ in merge_batch.take_ready(ready, batch/'ready.taken')]
@@ -353,7 +413,7 @@ class FakeQueue(q2queue.Queue):
 
     def run_post(self, logs):
         self.posts += 1
-        return 0, []
+        return self.post_results.pop(0) if self.post_results else (0, [], [])
 
     def events(self):
         return [' '.join(line.split()[1:3]) for line in (self.dir/'events.log').read_text().splitlines()]
@@ -401,6 +461,51 @@ def test_a_red_tip_holds_everything_but_its_fix(tmp_path):
     merge_batch.append_ready(q.ready, [('fix/tip', 'f1', True)])
     assert q.turn() == 'batch' and q.batches[-1] == ['fix/tip'] and q.state['tip_red'] == []
     assert q.turn() == 'batch' and q.batches[-1] == ['feat/a', 'feat/b']
+
+
+def test_a_smoke_test_that_fails_after_a_landing_turns_the_tip_red(tmp_path):
+    # 2026-11-17: a crash on every Now Playing open passed every merge suite and sat on the trunk for 1.5 h
+    q = FakeQueue(tmp_path, [land, land, land])
+    q.post_results = [(1, ['smoke'], ['smoke'])]
+    merge_batch.append_ready(q.ready, [('feat/np', 'a1')])
+    assert q.turn() == 'batch' and q.turn() == 'post'
+    assert q.events()[-2:] == ['POST_RED smoke', 'TIP_RED smoke'] and q.state['tip_red'] == ['smoke']
+    merge_batch.append_ready(q.ready, [('feat/b', 'b1')])
+    assert q.turn() == 'idle' and q.batches == [['feat/np']]  # held: the tip is red
+    merge_batch.append_ready(q.ready, [('fix/np', 'f1', True)])
+    assert q.turn() == 'batch' and q.batches[-1] == ['fix/np'] and q.state['tip_red'] == []
+    q.repo.write('np.txt', 'fixed\n', 'fixed')  # the tip's tree moves, so the post tier runs on it again
+    assert q.turn() == 'batch' and q.batches[-1] == ['feat/b']
+    assert q.turn() == 'post' and q.events()[-1].startswith('POST_OK') and q.posts == 2
+
+
+def test_a_post_failure_that_is_no_smoke_verdict_leaves_the_tip_alone(tmp_path):
+    q = FakeQueue(tmp_path, [land, land])
+    q.post_results = [(1, ['fw-asan', 'smoke'], [])]  # an ASan finding; smoke found no emulator (exit 3)
+    merge_batch.append_ready(q.ready, [('feat/a', 'a1')])
+    assert q.turn() == 'batch' and q.turn() == 'post'
+    assert q.events()[-1] == 'POST_RED fw-asan,smoke' and q.state['tip_red'] == []
+    merge_batch.append_ready(q.ready, [('feat/b', 'b1')])
+    assert q.turn() == 'batch' and q.batches[-1] == ['feat/b']
+
+
+def test_run_post_reads_which_failures_make_the_tip_red(tmp_path, monkeypatch):
+    repo = Repo(tmp_path/'r')
+    q = q2queue.Queue(repo.path, repo.trunk, tmp_path/'q', tmp_path/'ready.txt', log=lambda m: None)
+    logs = tmp_path/'post'
+
+    def gate(results):
+        def wait(child):
+            child.wait()
+            (logs/'results.json').write_text(json.dumps(results))
+            return 1 if any(r['rc'] for r in results.values()) else 0
+        return wait
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 1}, 'unit-cov': {'rc': 0}}))
+    assert q.run_post(logs) == (1, ['smoke'], ['smoke'])
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 3}, 'fw-asan': {'rc': 1}}))
+    assert q.run_post(logs) == (1, ['fw-asan', 'smoke'], [])
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 'no build'}}))
+    assert q.run_post(logs) == (1, ['smoke'], [])
 
 
 def test_two_batches_that_only_crash_stop_the_queue_and_keep_the_branches(tmp_path):

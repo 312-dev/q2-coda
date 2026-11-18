@@ -396,6 +396,12 @@ void xfade_set(int on, int seconds) {
 }
 
 int xfade_page(void *top) { return xf.page && top == xf.page; }
+/* The volume set elsewhere (a headset's own keys, volume.c vol_show), already played and saved:
+ * Playback's Volume row and, open, its page follow it. 1 when top is that page, which shows it. */
+int xfade_volume_shown(void *top) {
+    refresh(0);
+    return xf.page && top == xf.page && xf.ctx == 4;
+}
 /* The open page is Night Shift's: its row a key/value row (Off, On, Auto) that Centre cycles, in
  * place of a switch, as every setting with three named choices (docs/oled-design.md List row). */
 int night_page(void *top) { return xfade_page(top) && xf.ctx == 3; }

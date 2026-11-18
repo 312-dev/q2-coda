@@ -262,12 +262,12 @@ static int slider_page(void *top);
  * slot (status_row.c status_slots_left: the battery's body, or the level bars, Wi-Fi, a sync, a
  * headset or Buttons Lock's padlock left of it); a centred clock that would reach that edge goes
  * there too.
- * Over Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole
- * as one glyph. The title's box ends CLOCK_CLEAR short of the widest clock, "00:00", so its
- * ellipsis does. The box is sized to the text as measured in the bar's
- * face, with hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in
- * the bar's background paint, before the clock draws; a move repaints the bar after. */
-#define CLOCK_BESIDE 6
+ * Over Split's art it is in Text Primary, so the art's ink (coverflow.c home_ink) covers it whole,
+ * one ink with the slots. The title's box ends CLOCK_CLEAR short of the widest clock, "00:00", so
+ * its ellipsis does. The box is sized to the text as measured in the bar's face, with
+ * hscroll_label's 2 px margins, so the label's own alignment plays no part. Runs in the bar's
+ * background paint, before the clock draws; a move repaints the bar after. */
+#define CLOCK_BESIDE 7 /* the text's box: 8 px of ground between the digits' ink and the slot */
 #define CLOCK_CLEAR 12
 static int clock_width(void *canvas, const unsigned *s) {
     int n = (int)wide_len(s), px = theme()->font_px[ROLE_BAR];
@@ -320,7 +320,8 @@ static int bar_charging(void) {
 static unsigned battery_now(void) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0, charging = bar_charging(), cable = icon && !tk_strcmp(icon, "bar_charge");
+    int level = 0, charging = bar_charging() || status_fake('c') > 0,
+        cable = icon && !tk_strcmp(icon, "bar_charge");
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
     int held = cable && !charging, weak = charging && charge_weak();
     int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
@@ -350,8 +351,8 @@ static void bar_sync(void *bar) {
     } else if (c && st.codec_step >= CODEC_STEPS)
         image_base_set_image(st.bar_bt, BT_GLYPH);
     accent(); /* reads the settings */
-    if (st.home_rockbox != rockbox_available() ||
-        (shortcut() == SHORTCUT_GROOVEBOX && st.home_groovebox != groovebox_available()))
+    if (st.home_rockbox != rockbox_seen() ||
+        (shortcut() == SHORTCUT_GROOVEBOX && st.home_groovebox != groovebox_seen()))
         coverflow_home_layout();
     coverflow_home_np(); /* Now Playing's row, there while something is loaded */
     /* the slim battery (list_marks.c): the set's body */
@@ -411,11 +412,14 @@ int ringnav_showface(void *bar) {
     return result;
 }
 
-/* A battery body bh rows high: its top in the slot w. Centred on the row's height, as the icons
- * beside it are, not on w's, which is the bar's. Beside the percentage it rises BATT_PCT_DY, to
- * the digits' ink. */
+/* A battery body (or the percentage alone) bh rows high: its top in the slot w. Centred on the
+ * row's height, not on w's, which is the bar's. The slim body rises BATT_BODY_RISE, so its 12 rows
+ * (16 to 27) hold the clock's digits' 11 (17 to 27) and stand a row past their top, as iOS's
+ * battery does; beside the percentage it rises BATT_PCT_DY, to the digits' ink. */
+#define BATT_BODY_RISE 1
 static int batt_top(void *w, int bh) {
-    return (I(P(w, W_PARENT), W_H) + 1 - bh) / 2 - BATT_PCT_DY * (st.batt_mode == 2);
+    int rise = st.batt_mode == 2 ? BATT_PCT_DY : st.batt_mode != 1 ? BATT_BODY_RISE : 0;
+    return (I(P(w, W_PARENT), W_H) + 1 - bh) / 2 - rise;
 }
 /* Mode 1 is the percentage alone; every other the slim battery (list_marks.c), the set's body from
  * column 0. Restore canvas state. */

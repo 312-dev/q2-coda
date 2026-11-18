@@ -5,6 +5,8 @@ demo	0x4847c8	0x17c	tidal_playlist_track_request	A Tidal playlist's tracks added
 demo	0x48713c	0xa54	tidal_stream_url_thread	Tidal stream-URL thread: waits for the track flag, fetches playbackinfo for the song id, decodes the manifest, starts the player
 demo	0x499548	0x4c	checkfw_update_from_mmc	Starts the firmware update from /mnt/mmc/update.tar and stores its result in the check-firmware state.
 demo	0x499b9c	0xcc	confirminfo_dialog_on_keyup	Key-up handler of the confirm dialog, which dialog_confirminfo_dialog_init binds: with the backlight on, Return quits the dialog with code 4, the wheel keys stop there, and Centre clicks the focused widget and stops.
+demo	0x49ab34	0xd4	kbwifiadd_name_row_on_click	Add Network's network-name row (dialog_editwifi_dialog_init's handler): reads edit_wifiname, opens dialog/editwifi_dialog with context 0 (the name, EDITWIFI_PASSWORD clear), writes the text back.
+demo	0x49ad30	0x11c	kbwifiadd_password_row_on_click	Add Network's password row (dialog_editwifi_dialog_init's handler): reads edit_passwd, opens dialog/editwifi_dialog with context 1 (the password, EDITWIFI_PASSWORD set), writes the text back.
 demo	0x49b5f0	0x8c	msginfo_dialog_on_foreground	Window-to-foreground handler: if no timer id is stored under timer_idex (or it is -1), quits the dialog.
 demo	0x49b67c	0x38	msginfo_dialog_on_timer	One-shot timer of the msginfo dialog: calls dialog_quit on the dialog and returns 7 (remove).
 demo	0x49b6b4	0xdc	msginfo_dialog_timer_stop	Removes the dialog's timer if one is stored and resets timer_idex to -1.
@@ -275,6 +277,8 @@ demo	0x4d3a80	0xc8	systemset_sysset_timer_start	Adds the 500 ms page timer once,
 demo	0x4d3b48	0x60	systemset_sysset_page_on_foreground	Page handler for window to foreground: shows the play gif, sets the wheel-mode focus keys, starts the page timer.
 demo	0x4d418c	0xb8	systemset_system_item_on_click	New in V1.34. System row click: opens systemset/fwupdate_page, reset_page or about_page by the row's name.
 demo	0x4d5950	0x82c	wifimenu_rows_build	Rebuilds the Wi-Fi page list: switch row, scan results with signal icons, add network.
+demo	0x4d61e0	0xf8	wifimenu_switch_row	The Wi-Fi page's switch and Scanning rows' click, by the row's name: wifi_switch, or wifi_scan.
+demo	0x4d62d8	0x210	wifimenu_network_row	A Wi-Fi network row's click: check_wifinextaction's Forget, Disconnect, join, or the password entry.
 demo	0x4d9b34	0x14c	testmode_test_key_play_wav	Test-key page action: in output mode 4 stops playback and closes the page, else loads /mnt/mmc and plays test1.wav.
 demo	0x4da594	0x290	btrecv_info_labels_update	Fills label_title and label_artist from the Bluetooth receive info and lyric buffer, with the play time.
 demo	0x4e0a1c	0x36c	tidal_albuminfo_bind_widget	Tidal album page's per-widget visitor: binds the bar's buttons by name (img_return, img_home, btn_allplay, img_fav, img_search) and sizes list_view_tidalalbum.
@@ -455,6 +459,7 @@ demo	0x627c6c	0x328	image_on_paint_self	Paints an image widget: loads the bitmap
 demo	0x629650	0x1bc	label_get_prop	Label property getter: answers a property name by its first letter and returns the value, or not found.
 demo	0x62bac0	0x300	progress_bar_on_paint_self	Progress bar paint: fills background and foreground rects with round_radius and bg_image styles.
 demo	0x62d7c4	0x420	slider_on_event	Slider event handler: casts the widget and handles pointer and key events.
+demo	0x62dbe4	0x49c	slider_paint_bar	Slider track and fill, called twice by slider_on_paint_self: fg/bg image or colour, rounded by round_radius (from 4; under that a plain canvas_fill_rect), clipped to the vgcanvas.
 demo	0x62e080	0x2e8	slider_on_paint_self	Slider paint: draws the track and knob, filling the knob in border_color.
 demo	0x6357b0	0x258	main_loop_start_input_thread	main_loop_init's per-device starter: picks the thread by the input's name (mouse, btinput, slidebar, encoderknob, else tslib or input) and appends the one it started.
 demo	0x6386d0	0x8c	slidebar_post_event	Posts a wheel tick: formats slidebar[name], sends it to the callback and clears the slot.

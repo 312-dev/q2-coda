@@ -113,3 +113,55 @@ def test_a_sound_file_is_left_alone(fw):
     q = Config(fw, good)
     q('Q2POD', 'MONO', '1')
     assert q.renames == 0 and q.data == good.replace(b'x\n', b'x\nMONO=1\n')
+
+
+# Settled writes (docs/internals.md#where-q2-muse-writes): a key the wheel steps is written once it settles.
+class Settle:
+    def __init__(self, fw, way=0):
+        self.fw, self.ms, self.saved = fw, 1000, []
+        fw.mock('time_now_ms', lambda *_: self.ms)
+        fw.mock('mclGetOutputWay', lambda *_: way)
+        fw.mock('stock_write_config_trampoline', lambda v, s, k, *_: self.saved.append(
+            (C.c_int(v).value, C.string_at(s).decode(), C.string_at(k).decode())) and 0)
+        self.write = fw.fn('ringnav_write_config', C.c_int, C.c_int, C.c_char_p, C.c_char_p)
+        self.settle = fw.fn('config_settle', None, C.c_int)
+
+    def step(self, value, section=b'PLAYSET', key=b'VOLUME', ms=100):
+        self.ms += ms
+        self.write(value, section, key)
+        self.settle(0)  # power_poll's pass after it
+
+
+def test_a_turn_of_volume_steps_is_one_write_once_it_settles(fw):
+    q2 = Settle(fw)
+    for v in range(40, 50):
+        q2.step(v)
+    assert q2.saved == []  # ten steps 100 ms apart: nothing on the flash yet
+    q2.ms += 2999
+    q2.settle(0)
+    assert q2.saved == []
+    q2.ms += 1
+    q2.settle(0)
+    assert q2.saved == [(49, 'PLAYSET', 'VOLUME')]  # the last step's value, once
+    q2.ms += 10000
+    q2.settle(0)
+    assert q2.saved == [(49, 'PLAYSET', 'VOLUME')]
+
+
+def test_bluetooth_holds_its_own_key_and_a_toggle_is_written_at_once(fw):
+    q2 = Settle(fw, way=1)
+    q2.step(30)
+    q2.step(1, b'SYSSET', b'CARMODE')  # a setting's one write per change is not held
+    assert q2.saved == [(1, 'SYSSET', 'CARMODE')]
+    q2.settle(1)  # a clean end, Standby, or a read of it
+    assert q2.saved[1:] == [(30, 'PLAYSET', 'BT_VOLUME')]
+
+
+def test_a_read_through_config_value_sees_the_held_value(fw):
+    q2 = Settle(fw)
+    files = {INI: b'[PLAYSET]\nVOLUME=10\n'}
+    fw.mock('toolsReadConfig', lambda path, s, k, out, d, *_: C.memmove(out, read(files[INI], C.string_at(s).decode(), C.string_at(k).decode()).encode() + b'\0', 3) and 0)
+    fw.mock('stock_write_config_trampoline', lambda v, s, k, *_: files.__setitem__(INI, stock_write(
+        files[INI], C.string_at(s), C.string_at(k), b'%d' % C.c_int(v).value)) or 0)
+    q2.step(55)
+    assert fw.fn('config_value', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)(b'PLAYSET', b'VOLUME', 101, 0) == 55

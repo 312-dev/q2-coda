@@ -47,6 +47,11 @@ def boot_check():
                         '/tmp/q2-scan-file', '/tmp/q2-scan.log', '/tmp/q2-art-file', '/tmp/q2-art.log', '/release/assets/'):
                 script = script.replace(old, f'{r}{old}')
             script = script.replace('usleep 200000\n', ':\n').replace('usleep 500000', ':')
+            # q2guard's respawn loop (build.py GUARD) never ends, and & is stripped above: it logs its start instead
+            loop = '(while :; do nice -n -5 /usr/bin/q2guard'
+            assert script.count(loop) == 1
+            start = script.index(loop)
+            script = script[:start] + f'echo "guard $e" >> {r}/guard' + script[script.index('\n', start):]
             # demo's stderr file, and its cap's minute: one pass here while {r}/minute exists
             script = script.replace('/tmp/q2-demo.err', f'{r}/tmp/q2-demo.err')
             assert script.count('while sleep 60; do') == 1
@@ -61,7 +66,12 @@ def boot_check():
             script = script.replace('usleep 300000', f'echo settle >> {r}/order')
             assert 'usleep 2000000' in script and '\n            rockbox\n            kill $! 2>/dev/null\n' in script  # called off once Rockbox is gone
             script = script.replace('usleep 2000000', f'echo late >> {r}/order')  # runs in line here: & is stripped above
+            # nor the PC's own reboot: demo's last end logs it, and the clean end's 10 s wait before it
+            assert script.count('\n        [ "$s" ] || sleep 10\n        reboot\n') == 1
+            script = script.replace('\n        [ "$s" ] || sleep 10\n        reboot\n',
+                                    f'\n        [ "$s" ] || echo sleep10 >> {r}/end\n        echo reboot >> {r}/end\n')
             for real in ('killall -9', 'ifconfig', 'wlan0', 'wpa_supplicant', 'udhcpc', 'wifi_connect'): assert real not in script, real
+            assert not re.search(r'(?m)^\s*(reboot|sleep 10)\b', script)
             return script
         script = host(BOOT_HOOK[1])
         for d in ('proc', 'mnt/data', 'mnt/mmc/.rockbox', 'tmp', 'usr/bin', 'release/bin', 'bin'): (r/d).mkdir(parents=True)
@@ -81,7 +91,7 @@ def boot_check():
             exe('usr/bin/q2boot', 'exit ' + ('0' if held else '1'))
             if card: exe('mnt/mmc/.rockbox/rockbox', f'pwd >> {r}/ran; echo rockbox >> {r}/order; exit {code}')
             else: rb.unlink(missing_ok=True)
-            (r/'ran').write_text(''); (r/'order').write_text('')
+            (r/'ran').write_text(''); (r/'order').write_text(''); (r/'end').write_text('')
             subprocess.run(['sh', '-c', script], check=True, env=dict(os.environ, PATH=f'{r}/bin:' + os.environ['PATH']))
             return (r/'ran').read_text().split(), target.exists() and target.read_text().strip()
         (r/'proc/mounts').write_text('')
@@ -130,6 +140,14 @@ def boot_check():
         assert order(True, False, 81, 1) == ['demo', *handover, 'demo']  # nor when the row is taken
         assert order(True, True) == ['demo']                    # Play/Pause held
         target.write_text('q2pod'); assert order(False, True) == ['demo']; target.unlink()
+        # demo's end, other than for Rockbox, reboots, as stock's watchdog (checkappprocess.sh) did when its pgrep found
+        # no demo: at once once a crash's log is synced; after a clean end only if the Q2 is still up 10 s on
+        def ended(status, shortcut=0): boot(True, False, shortcut=shortcut, status=status); return (r/'end').read_text().split()
+        assert ended(137) == ['reboot'] and ended(139) == ['reboot']
+        assert ended(0) == ['sleep10', 'reboot'] and ended(143) == ['sleep10', 'reboot']
+        assert ended([137, 139], 1) == ['reboot']  # the Rockbox hand-over's kill doesn't end the loop: one reboot, after
+        (r/'keep').write_text(''); assert ended(0) == ['reboot']; (r/'keep').unlink(); (r/'mnt/data/q2-state').unlink()  # no clean end
+        for f in (r/'mnt/data/q2-crash.log', r/'mnt/mmc/q2-crash.log'): f.unlink(missing_ok=True)
         # an abnormal end of demo leaves its status on /mnt/data, which the next boot copies to a mounted card;
         # 0, 143 and the Rockbox hand-over leave nothing
         crash, copy, mounts = r/'mnt/data/q2-crash.log', r/'mnt/mmc/q2-crash.log', r/'proc/mounts'
@@ -294,7 +312,7 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_SLEEP, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, BOTTOM, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
@@ -494,6 +512,7 @@ def validate_assets(directory):
     guest = read('rootfs.squashfs', GUEST)
     assert sha(guest) == manifest['q2_guest_sha256'] and guest[:4] == b'\x7fELF' and guest[36:40] == helper[36:40]
     assert read('rootfs.squashfs', GUEST_DBUS) == (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()
+    assert read('rootfs.squashfs', GUARD)[:4] == b'\x7fELF'  # q2guard, which S90play starts (build.py BOOT_HOOK)
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)
@@ -502,7 +521,7 @@ def validate_assets(directory):
         q2eq = read('rootfs.squashfs', Q2EQ)  # docs/adb.md#q2eq
         assert sha(q2eq) == manifest['q2eq_sha256'] and q2eq[:4] == b'\x7fELF' and q2eq[36:40] == helper[36:40]
         assert b'Q2EQR01' in demo
-        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK)
+        expected_start = expected_start.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK)
         assert b'q2-wheel.log' in demo
         # adbd (docs/adb.md): an ELF with the stock binaries' ABI flags and glibc alone, its gadget script, stock's USB
         # scripts wrapped and kept beside the wrappers
@@ -557,7 +576,7 @@ def validate_assets(directory):
     assert read('rootfs.squashfs', BT_MAIN) == read('stock.squashfs', BT_MAIN).replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL)
     assert b'\nExperimental = true\n' in read('rootfs.squashfs', BT_MAIN)
     assert b'\nDiscoverableTimeout = 180\n' in read('rootfs.squashfs', BT_MAIN)
-    assert b'\nName = Q2\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
+    assert b'\nName = Q2 Muse\n' in read('rootfs.squashfs', BT_MAIN) and b'Shanling' not in read('rootfs.squashfs', BT_MAIN)
     # The boot deletes Baidu Netdisk's saved sign-in.
     assert expected_start.count(b'\n        rm -f /mnt/data/baidu_token.conf\n') == 1
     # bluealsa: AAC capability, the two DROP jumps, the silence sites, and one appended LOAD payload.
@@ -613,9 +632,10 @@ def validate_assets(directory):
     assert abs(g[empty].xMin - g[full].xMin) <= 1 and abs(g[empty].xMax - g[full].xMax) <= 1
     assert abs(g[empty].yMin - g[full].yMin) <= 1 and abs(g[empty].yMax - g[full].yMax) <= 1
     assert all(new.reader[t] == old.reader[t] for t in old.reader.keys() if t not in ('cmap', 'head', 'glyf', 'loca', 'hmtx'))
-    # The crash watchdog only sleeps longer; check_mem_thd returns on entry, so it never drops caches.
+    # The crash watchdog ends at once, as S90play reboots when demo ends (boot_check); what it did is still stock's:
+    # reboot when no /release/bin/demo runs. check_mem_thd returns on entry, so it never drops caches.
     old, new = read('stock.squashfs', WATCHDOG), read('rootfs.squashfs', WATCHDOG)
-    assert new == old.replace(*WATCHDOG_SLEEP) and new != old
+    assert b'pgrep "/release/bin/demo"' in old and b'reboot' in old and new == WATCHDOG_STUB
     for address, word, patched in DROP_CACHES:
         off = fileoff(stock, address)
         assert struct.unpack_from('<I', stock, off)[0] == word and struct.unpack_from('<I', demo, off)[0] == patched
@@ -624,9 +644,16 @@ def validate_assets(directory):
         off = fileoff(stock, address)
         assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
         assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
-    # Stock's status sync and cover pollers sleep through the dark usleeps (navigation.c).
-    for address, name in DARK_POLLS:
+    # Stock's status sync sleeps through the dark usleep (playback_power.c), its cover threads through
+    # cover_wake.c's waits.
+    for address, name in (*DARK_POLLS, *COVER_WAITS):
         off = fileoff(stock, address)
+        assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
+        assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
+    # get_battery_capacity's three reads go through system.c's dark pacing (ringnav_batt_level and its two).
+    for address, load, word, name in BATTERY_READS:
+        off = fileoff(stock, address)
+        assert struct.unpack_from('<I', stock, fileoff(stock, load))[0] == word
         assert struct.unpack_from('<I', stock, off)[0] == 0x0320f809
         assert struct.unpack_from('<I', demo, off)[0] == jal(symbols(directory/'patch.elf')[name])
     # The encoder thread's ts_read call goes through ringnav_ts_read (playback.c wheel_sample).

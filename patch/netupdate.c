@@ -62,7 +62,7 @@ static const struct {
       ".spotify/librespot" },
 };
 /* The firmware's own card folders, never a card app's: a remove deletes .<id> whole. */
-static const char *const reserved[] = { "coverflow", "downpic", "q2", "q2pod", "sldp", "tidal" };
+static const char *const reserved[] = { "coverflow", "downpic", "q2", "q2muse", "q2pod", "sldp", "tidal" };
 
 /* Whether id is a special[] app's, which a remove never deletes whole. */
 static int special_id(const char *id) {
@@ -897,7 +897,8 @@ static int sh_wait(const void *unused) {
     sh.job = 0;
     /* its files replaced or gone: an update that failed or was cancelled before it stopped its app leaves it running, still tracked,
      * and a remove cut off by USB storage leaves it marked to start again with the card */
-    if (r == SH_OK && (job == JOB_REMOVE || job == JOB_INSTALL)) addon_forget(apps[i].dir);
+    if (r == SH_OK && (job == JOB_REMOVE || job == JOB_INSTALL))
+        addon_forget(apps[i].dir), card_bins_changed(); /* Home's Shortcut: Rockbox, Groovebox */
     if (job == JOB_CHECK) /* the rows built again: the list may have changed */
         memcpy(apps, sh.next, sizeof apps), shelf_n = sh.n, sh.rows = -1;
     if (job == JOB_ERASE || (job != JOB_CHECK && is(i, "spotify")))

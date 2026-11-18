@@ -892,7 +892,7 @@ def test_rockbox_leaves_its_flag_and_ends_demo(fw, power):
     fw.fn('rockbox_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert host.tools_build.ROCKBOX_FLAG in card.files  # S90play runs Rockbox on it
     cmd = C.string_at(fw.calls('fw_system')[-1][1][0])
-    assert cmd.endswith(b'kill -9 $PPID') and b'checkappprocess.sh' in cmd and b'hciplayer' in cmd
+    assert cmd.endswith(b'kill -9 $PPID') and b'hciplayer' in cmd and b'checkappprocess' not in cmd  # S90play reboots, not a watchdog
     assert fw.calls('save_memoryplay_info')  # the queue kept as power-off keeps it
     assert power('ended').value == 1 and (6, WDT_STOP) in [(c[1][0], c[1][1] & 0xffffffff) for c in fw.calls('fw_ioctl')]
     assert STATE.encode() in [C.string_at(c[1][0]) for c in fw.calls('fw_unlink')]  # a clean end, nothing to report
@@ -906,6 +906,19 @@ def test_rockbox_gets_charging_back(fw, st, held, enabled):
     assert [c[1][0] for c in fw.calls('switch_charge_enable')] == enabled
 
 
+def curve(v):
+    """The headset level (0-127) for Q2 volume v (0-100), as docs/internals.md#headset-controls-and-volume gives it:
+    a 40 dB curve, 127 x 10^(-40 (100 - v) / 100 / 20), never below 127 v / 400 (a level every three steps where
+    the curve's levels crowd), at least 1 above 0."""
+    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def reads_as(level):
+    """The Q2 volume (0-100) a headset level (0-127) shows as: the one whose curve level is nearest, the lowest of
+    those that share it."""
+    return min(range(101), key=lambda v: (abs(curve(v) - level), v))
+
+
 def bt_link(fw, link=b'1', codec=1, way=1):
     Config(fw, BTVOLLINK=link)
     fw.var('g_bluetoothflag', C.c_ubyte).value = 1
@@ -914,7 +927,7 @@ def bt_link(fw, link=b'1', codec=1, way=1):
     fw.mock('mclGetOutputWay', lambda *_: way)
 
 
-@pytest.mark.parametrize('limit, level', [(100, 127), (60, 76), (150, 127), (0, 0)])
+@pytest.mark.parametrize('limit, level', [(100, 127), (60, curve(60)), (150, 127), (0, 0)])
 def test_rockbox_opens_the_headsets_volume_to_the_limit(fw, st, limit, level):
     rockbox(fw)
     bt_link(fw)
@@ -935,7 +948,7 @@ def test_rockbox_leaves_a_headset_without_absolute_volume(fw, st, link, current)
 
 # Bluetooth's absolute volume (docs/internals.md#headset-controls-and-volume).
 class Btvol(C.Structure):
-    _fields_ = [('checked', C.c_uint), *((k, C.c_int) for k in 'ready last failed'.split())]
+    _fields_ = [('checked', C.c_uint), *((k, C.c_int) for k in 'ready last failed pending'.split())]
 
 
 class Headset:
@@ -955,27 +968,42 @@ class Headset:
         return 0
 
 
-def reads_as(level):
-    """The Q2 volume (0-100) a headset level (0-127) shows as: the nearest (127 is odd, so no level is
-    half way between two)."""
-    return round(level * 100 / 127)
-
-
 @pytest.mark.parametrize('left, right, gains', [(40, 20, (100, 50)), (20, 40, (50, 100)), (70, 70, (100, 100)), (55, 0, (100, 0))])
 def test_the_headset_takes_the_volume_and_the_q2_keeps_only_the_balance(fw, left, right, gains):
     bt_link(fw)
     headset = Headset(fw)
     headset.btvol(left, right)
-    assert reads_as(headset.level) == max(left, right) and headset.gains == [gains]
+    assert headset.level == curve(max(left, right)) and headset.gains == [gains]
 
 
-def test_every_volume_reads_back_as_itself(fw):
+def test_the_volume_curve_keeps_its_ends_and_rises_evenly_in_db(fw):
+    avrcp = fw.fn('navigation__bt_vol_avrcp', C.c_uint, C.c_int)
+    table = [avrcp(v) for v in range(101)]
+    assert table == [curve(v) for v in range(101)]
+    assert (table[0], table[1], table[100]) == (0, 1, 127) and table == sorted(table)
+    assert (avrcp(-5), avrcp(150)) == (0, 127)
+    # the top half no longer sits in the headset's last 6 dB: half volume is a sixth of its level, 80 two fifths
+    assert (table[50], table[80]) == (16, 51)
+    # no Q2 step is more than two from a change
+    assert max(sum(1 for w in table if w == level) for level in set(table)) <= 4
+
+
+def test_every_headset_level_reads_as_its_nearest_volume_and_back(fw):
+    q2 = fw.fn('navigation__bt_vol_q2', C.c_int, C.c_uint)
+    for level in range(128):
+        assert q2(level) == reads_as(level)
+    for v in range(101):
+        assert curve(q2(curve(v))) == curve(v)  # a level the Q2 wrote reads back as a volume that writes it again
+
+
+def test_every_volume_reaches_the_headset_on_the_curve(fw):
     bt_link(fw)
     headset = Headset(fw)
     for v in range(101):
         headset.btvol(v, v)
-        assert reads_as(headset.level) == v
-    assert len(fw.calls('btctl_transport_set_volume')) == 100  # one write per new level: 0 it showed already
+        assert headset.level == curve(v)
+    writes = [c[1][0] for c in fw.calls('btctl_transport_set_volume')]
+    assert writes == sorted(set(curve(v) for v in range(1, 101)))  # one write per new level: 0 it showed already
 
 
 def test_a_level_the_headset_already_shows_is_kept(fw):
@@ -985,6 +1013,37 @@ def test_a_level_the_headset_already_shows_is_kept(fw):
         headset.btvol(reads_as(level), 0)
         assert headset.level == level  # its own steps hold
     assert not fw.calls('btctl_transport_set_volume')
+
+
+# Link Volume unset: on for headphones and headsets (their Class), off for anything else; a choice saved wins.
+CLASSES = {'headphones': 0x240418, 'headset': 0x240404, 'speaker': 0x240414, 'car': 0x240420, 'unknown': 0}
+PX7 = 'AA:BB:CC:DD:EE:07'
+
+
+def linked_device(fw, kind, link=None):
+    """bt_link's link with the device connected now of kind (its Class, as the battery loop's file gives it), and
+    Link Volume as saved (None: never chosen)."""
+    bt_link(fw)
+    Config(fw, **({} if link is None else {'BTVOLLINK': link}))
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    def item(i, status, mac, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(mac, PX7.encode() + b'\0', len(PX7) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)  # the battery loop's start
+    Files(fw, {'/tmp/q2-btbatt': f'{PX7} 80 48000 {CLASSES[kind]} Px7\n'.encode()})
+
+
+@pytest.mark.parametrize('kind, link, synced', [('headphones', None, True), ('headset', None, True), ('speaker', None, False),
+                                                ('car', None, False), ('unknown', None, False), ('headphones', b'0', False),
+                                                ('speaker', b'1', True)])
+def test_link_volume_unset_follows_headphones_and_a_choice_wins(fw, kind, link, synced):
+    linked_device(fw, kind, link)
+    headset = Headset(fw, 30)
+    headset.btvol(40, 20)
+    assert (headset.level == curve(40)) == synced
+    assert headset.gains == ([(100, 50)] if synced else [(40, 20)])
 
 
 @pytest.mark.parametrize('kind', ['unlinked', 'no codec', 'jack', 'receiver', 'off', 'down'])
@@ -1067,16 +1126,74 @@ def test_the_headsets_own_keys_move_the_q2s_volume_to_the_limit(fw, stock_bytes,
     assert [(c[1][0], C.string_at(c[1][1]), C.string_at(c[1][2])) for c in fw.calls('write_int_config')] == [(want, b'PLAYSET', b'VOLUME')]
 
 
-def test_the_volume_dialogs_slider_follows_the_headset(fw, stock_bytes):
+class Front:
+    """The window in front for a headset's volume change: its name and AWTK type, and what was opened over it."""
+    TOP, SLIDER = 0x5100, 0x5200
+
+    def __init__(self, fw, name, kind=b'window', lit=1):
+        self.name, self.kind, self.opened = C.create_string_buffer(name), C.create_string_buffer(kind), []
+        fw.var('g_backlight_status', C.c_ubyte).value = lit
+        fw.mock('window_manager_get_top_window', lambda *_: self.TOP)
+        fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(self.name) if w == self.TOP else default)
+        fw.mock('widget_get_type', lambda w, *_: C.addressof(self.kind) if w == self.TOP else 0)
+        fw.mock('widget_lookup', lambda w, key, *_: self.SLIDER if C.string_at(key) == b'slider_vol' else 0)
+        fw.mock('navigator_to', lambda path, *_: self.opened.append(C.string_at(path)) or 0)
+
+
+def headset_step(fw, stock_bytes, front, level=127, volume=40):
+    """The headset's own keys take it to level while front is in front; the dialog's close count, stock's, set
+    part way first."""
     stock_bytes(0xa4cbb5, 1)
-    vol = VolPoll(fw, volume=40)
-    name = C.create_string_buffer(b'volume_dialog')
-    fw.mock('window_manager_get_top_window', lambda *_: 0x5100)
-    fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(name) if w == 0x5100 else default)
-    fw.mock('widget_lookup', lambda w, key, *_: 0x5200 if C.string_at(key) == b'slider_vol' else 0)
-    vol.headset.level = 127
+    count = stock_bytes(O['VOL_DIALOG_COUNT'], 1)
+    C.c_byte.from_address(count).value = 20
+    vol = VolPoll(fw, volume=volume)
+    vol.headset.level = level
     vol.poll()
-    assert [(c[1][0], C.string_at(c[1][1]), c[1][2]) for c in fw.calls('widget_set_prop_int')] == [(0x5200, b'value', 100)]
+    return C.c_byte.from_address(count).value
+
+
+def test_the_volume_dialogs_slider_follows_the_headset_and_stays_open(fw, stock_bytes):
+    front = Front(fw, b'volume_dialog', b'dialog')
+    assert headset_step(fw, stock_bytes, front) == 0  # its 3 s start again, as a wheel tick's do
+    assert [(c[1][0], C.string_at(c[1][1]), c[1][2]) for c in fw.calls('widget_set_prop_int')] == [(Front.SLIDER, b'value', 100)]
+    assert front.opened == []
+
+
+@pytest.mark.parametrize('name', [b'playing_page', b'bluetooth_page', b'home_page'])
+def test_a_headsets_volume_change_opens_the_volume_on_the_lit_screen(fw, stock_bytes, name):
+    front = Front(fw, name)
+    assert headset_step(fw, stock_bytes, front) == 20
+    assert front.opened == [b'dialog/volume_dialog'] and fw.var('g_volume', C.c_ubyte).value == 100
+
+
+@pytest.mark.parametrize('lit, video, kind, flag', [(0, 0, b'window', None), (1, 1, b'window', None), (1, 0, b'dialog', None),
+                                                     *((1, 0, b'window', f) for f in ('g_lockscreen_pageflag', 'g_testmode_flag',
+                                                                                      'g_guideflag', 'g_poweroff_state'))])
+def test_a_headsets_volume_change_opens_nothing_dark_over_a_video_a_dialog_or_where_stock_wont(fw, stock_bytes, lit, video, kind, flag):
+    front = Front(fw, b'confirm_dialog' if kind == b'dialog' else b'playing_page', kind, lit)
+    fw.var('videos__vid', Vid).pid = 77 if video else 0
+    if flag:
+        fw.var(flag, C.c_ubyte).value = 1
+    headset_step(fw, stock_bytes, front)
+    assert front.opened == [] and fw.var('g_volume', C.c_ubyte).value == 100  # the volume follows all the same
+
+
+def test_control_centers_slider_eases_to_a_headsets_change(fw, stock_bytes):
+    front = Front(fw, b'statusbar_dialog', b'dialog')
+    timers = []
+    fw.mock('widget_add_timer', lambda w, f, ms, *_: timers.append((w, ms)) or 1)
+    headset_step(fw, stock_bytes, front, volume=40)
+    assert front.opened == [] and timers == [(Front.TOP, O['VOL_POLL_MS'])]
+    bar = fw.var('vol_bar', C.c_int * 3)
+    assert (bar[0], bar[1]) == (40 << 8, 1)  # easing, from where it was
+
+
+def test_a_q2_volume_step_opens_nothing(fw, stock_bytes):
+    front = Front(fw, b'playing_page')
+    vol = VolPoll(fw, volume=40)
+    vol.headset.btvol(60, 60)
+    vol.poll()
+    assert front.opened == []
 
 
 def test_an_unmoved_headset_changes_nothing(fw):
@@ -1111,23 +1228,15 @@ def test_a_dropped_link_clears_the_state(fw):
 
 
 # The UI loop's pacing.
-def test_a_dark_and_quiet_wait_stretches_to_the_dark_poll(fw):
+def test_a_slow_dark_wait_stretches_to_the_dark_poll(fw):
     sleep = fw.fn('ringnav_dark_usleep', C.c_int, C.c_uint)
     for us in (10000, 999999, 1000000, 3000000):
         sleep(us)
-    C.c_int.in_dll(fw.lib, 'navigation__dark_quiet').value = 1
+    C.c_int.in_dll(fw.lib, 'navigation__dark_slow').value = 1
     for us in (10000, 999999, 1000000, 3000000):
         sleep(us)
     dark = O['DARK_POLL_US']
     assert [c[1][0] for c in fw.calls('fw_usleep')] == [10000, 999999, 1000000, 3000000, dark, dark, dark, 3000000]
-
-
-def test_the_cover_pollers_slow_whenever_the_screen_is_off(fw):
-    sleep = fw.fn('ringnav_dark_cover_usleep', C.c_int, C.c_uint)
-    sleep(50000)
-    fw.var('g_backlight_status', C.c_ubyte).value = 1
-    sleep(50000)
-    assert [c[1][0] for c in fw.calls('fw_usleep')] == [O['DARK_POLL_US'], 50000]
 
 
 class Scheduling:
@@ -1156,9 +1265,9 @@ def test_mainscheduling_runs_every_100_ms(fw):
     assert Scheduling(fw).at(0, 50, 99, 100, 150, 200) == [True, False, False, True, False, True]
 
 
-def test_dark_and_quiet_it_runs_every_dark_poll(fw):
+def test_dark_and_slow_it_runs_every_dark_poll(fw):
     sched = Scheduling(fw)
-    C.c_int.in_dll(fw.lib, 'navigation__dark_quiet').value = 1
+    C.c_int.in_dll(fw.lib, 'navigation__dark_slow').value = 1
     poll = O['DARK_POLL_US'] // 1000
     assert sched.at(0, 100, poll - 1, poll) == [True, False, False, True]
 
@@ -1179,6 +1288,98 @@ def test_mainscheduling_at_a_zero_clock_still_paces(fw):
     sched = Scheduling(fw)
     sched.clock.now = 0
     assert sched.at(0, 50, 101) == [True, False, True]  # its stamp is 1, never 0 (a ms late)
+
+
+# Dark while playing: the player polls (mclSyncPlayerStatus' wait, ringnav_mainscheduling) slow down
+# unless something follows the position (docs/internals.md#battery).
+class DarkPlay:
+    """A dark loop pass with the local player playing at sec of total, scheduling run before it as on_wm_idle_status does."""
+    def __init__(self, fw, stock_bytes, sec=60, total=240, status=2, car=b'0'):
+        self.ab = stock_bytes(O['REPEAT_INFO'], 16)
+        self.loop = Loop(fw, stock_bytes, lit=False)
+        self.fw, self.sec, self.total, self.status = fw, sec, total, status
+        Config(fw, CARREMOTE=car)
+        fw.mock('mclGetPlayStatus', lambda *_: self.status)
+        fw.mock('player_playtime_and_length', self.position)
+        fw.mock('player_mainscheduling', lambda *_: 5)
+        self.schedule = fw.fn('ringnav_mainscheduling', C.c_int)
+        self.usleep = fw.fn('ringnav_dark_usleep', C.c_int, C.c_uint)
+
+    def position(self, sec, total, *_):
+        C.c_int.from_address(sec).value, C.c_int.from_address(total).value = self.sec, self.total
+        return 0 if self.sec >= 0 else -1
+
+    def __call__(self, after=100):
+        """A pass: whether stock's scheduling ran, and how long the status thread's 200 ms wait now sleeps."""
+        self.loop.clock.now += after
+        ran = self.schedule() == 5
+        self.loop()
+        calls = len(self.fw.calls('fw_usleep'))
+        self.usleep(200000)
+        return ran, self.fw.calls('fw_usleep')[calls][1][0]
+
+
+def test_dark_and_playing_the_status_polls_run_at_the_dark_poll(fw, stock_bytes):
+    play, poll = DarkPlay(fw, stock_bytes), O['DARK_POLL_US']
+    assert play(0) == (True, poll)  # the first dark pass: the scheduling ran before the pass slowed it
+    assert [play(100) for _ in range(9)] == [(False, poll)] * 9
+    assert play(100) == (True, poll)  # a second on
+    fw.var('g_backlight_status', C.c_ubyte).value = 1  # lit: the status thread's next wait is stock's
+    assert play(100) == (False, 200000)
+    assert play(100) == (True, 200000)  # and the scheduling's next pass
+
+
+def test_dark_the_tracks_last_seconds_keep_stocks_pace(fw, stock_bytes):
+    """mclAutoChange's Gapless preload (under 6 s from the end) and a change without Gapless see what they did lit."""
+    play, lead = DarkPlay(fw, stock_bytes, sec=200, total=240), O['DARK_END_LEAD_S']
+    play(0), play(100)
+    play.sec = 240 - lead - 1
+    assert play(100)[1] == O['DARK_POLL_US']
+    play.sec = 240 - lead
+    play(1000)
+    assert [play(100) for _ in range(3)] == [(True, 200000)] * 3
+    play.sec, play.total = 240, 240  # its end, then the next track's first seconds
+    play(100)
+    play.sec, play.total = 0, 180
+    assert play(1900) == (True, 200000)
+    play(100)
+    assert play(100)[1] == O['DARK_POLL_US']  # MAINSCHEDULING_END_MS on: slow again
+
+
+@pytest.mark.parametrize('sec, total', [(-1, 0), (30, 0)])
+def test_dark_with_no_position_or_length_to_go_by_it_keeps_stocks_pace(fw, stock_bytes, sec, total):
+    play = DarkPlay(fw, stock_bytes, sec=sec, total=total)
+    play(0)
+    assert play(100) == (True, 200000)
+
+
+def test_dark_and_paused_the_polls_slow_before_the_dac_is_off(fw, stock_bytes):
+    play = DarkPlay(fw, stock_bytes, sec=230, total=240, status=3)  # paused near the end: nothing moves
+    fw.var('fw_ctx_g_dacoff_time', C.c_int).value = 30
+    play(0)
+    assert play(100) == (False, O['DARK_POLL_US'])
+
+
+@pytest.mark.parametrize('why', ['a-b', 'car', 'airplay', 'receiver'])
+def test_dark_what_follows_the_position_keeps_stocks_pace(fw, stock_bytes, why):
+    play = DarkPlay(fw, stock_bytes, car=b'1' if why == 'car' else b'0')
+    if why == 'a-b':  # check_abrepeatmode seeks back to A from the cached position
+        C.c_ubyte.from_address(play.ab).value = 1
+        C.c_int.from_address(play.ab + O['REPEAT_AB_STATE']).value = 2
+    elif why == 'airplay':
+        fw.mock('airplayGetFlag', lambda *_: 2)
+    elif why == 'receiver':
+        fw.var('bt__recv_pageflag', C.c_ubyte).value = 2
+    play(0)
+    assert play(100) == (True, 200000)
+
+
+def test_a_b_repeat_with_only_a_set_lets_the_polls_slow(fw, stock_bytes):
+    play = DarkPlay(fw, stock_bytes)
+    C.c_ubyte.from_address(play.ab).value = 1
+    C.c_int.from_address(play.ab + O['REPEAT_AB_STATE']).value = 1  # A marked, B not yet: nothing loops
+    play(0)
+    assert play(100)[1] == O['DARK_POLL_US']
 
 
 def now_playing_top(fw, name=b'playing_page'):
@@ -1491,10 +1692,11 @@ class Ui:
         self.handlers.append((w, kind, fn, ctx))
         return len(self.handlers)
 
-    def emit(self, w, kind):
-        """Run w's handlers for kind, as stock's emitter would."""
+    def emit(self, w, kind, x=0, y=0):
+        """Run w's handlers for kind, as stock's emitter would; a pointer event's place x, y."""
         e = C.create_string_buffer(0x40)
         struct.pack_into('<i', e, EVENT_TYPE, kind)
+        struct.pack_into('<ii', e, O['EVENT_X'], x, y)
         for hw, hk, fn, ctx in list(self.handlers):
             if hw == w.p and hk == kind:
                 HANDLER(fn)(ctx, C.addressof(e))
@@ -2224,8 +2426,14 @@ def quick_window(ui, value=50, lo=10, hi=100, visible=1, ring=100000):
     return slider
 
 
-# control_center.c's stops: four toggles, the Now Playing block, the sliders, five tiles
-CC_NOW, CC_BRIGHT, CC_VOLUME, CC_LOCK, CC_SLEEP, CC_NIGHT, CC_EQ, CC_SMART, CC_STOPS = 4, 5, 6, 7, 8, 9, 10, 11, 12
+# control_center.c's stops in the wheel's order: the six toggles by rows, the Now Playing block, the two sliders, the
+# USB row (while a cable is in)
+CC_AIRPLAY, CC_CAR, CC_SMART, CC_EQ, CC_NOW, CC_BRIGHT, CC_VOLUME, CC_USB, CC_STOPS = 2, 3, 4, 5, 6, 7, 8, 9, 10
+
+
+def smart_written(fw):
+    """Smart Wi-Fi's setting as Control Center wrote it (control_center.c cc_act): each value, in order."""
+    return [c[1][0] for c in fw.calls('write_int_config') if C.string_at(c[1][2]) == b'SMARTWIFI']
 
 
 @pytest.mark.parametrize('value, key, want', [(50, KEY_NEXT, 51), (50, KEY_PREV, 49), (100, KEY_NEXT, 100), (10, KEY_PREV, 10)])
@@ -2258,20 +2466,23 @@ def cc_window(fw, ui, ring=100000):
     return slider.parent, slider
 
 
+@pytest.mark.parametrize('cable', [0, 1])
 @pytest.mark.parametrize('status', [0, 2, 3])
-def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status):
-    """The toggles, Now Playing's block, the two sliders and the five tiles in reading order; the ends hold. With
-    nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by."""
+def test_control_center_s_wheel_walks_its_stops_and_stops_at_the_ends(fw, keys, status, cable):
+    """The six toggles by rows, Now Playing's block, then Brightness and Volume under it, then the USB row while a
+    cable is in; the ends hold. With nothing loaded (status 0), as Home's Now Playing row goes, the block is passed by;
+    with no cable there is no USB row to stop on."""
     fw.mock('mclGetPlayStatus', lambda *_: status)
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
     ui = Ui(fw)
     top, slider = cc_window(fw, ui)
     stops = []
     for key in [KEY_NEXT] * CC_STOPS + [KEY_PREV] * CC_STOPS:
         assert keys(key) == STOP
         stops.append(top.ints[b'_cc_focus'])
-    walk = [i for i in range(CC_STOPS) if status or i != CC_NOW]
-    ends = CC_STOPS - len(walk)  # the ticks the block's pass leaves at each end
-    assert stops == [*walk[1:], *[CC_STOPS - 1] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
+    walk = [i for i in range(CC_STOPS) if (status or i != CC_NOW) and (cable or i != CC_USB)]
+    ends = CC_STOPS - len(walk)  # the ticks the passes leave at each end
+    assert stops == [*walk[1:], *[walk[-1]] * (ends + 1), *walk[-2::-1], *[0] * (ends + 1)]
     assert slider.ints[b'value'] == 50
 
 
@@ -2309,14 +2520,95 @@ def test_centre_on_wi_fi_or_bluetooth_clicks_stock_s_button(fw, keys, stop, clic
     assert ui.clicks == clicked and not fw.calls('dialog_quit')
 
 
-def test_centre_on_the_lock_tile_turns_buttons_lock_on_and_off(fw, keys):
+@pytest.mark.parametrize('joining, ended', [(1, [b'disconnect']), (0, [])])
+def test_the_wi_fi_circle_ends_a_join_that_is_trying_before_stock_s_click(fw, keys, joining, ended):
+    """Stock's click on Wi-Fi's switch returns at once while a join is trying (wifi_connectstatus 1); the circle ends
+    the join first (wifi_flows.c wifi_flows_cancel_join, as Settings > Wi-Fi's switch does), then stock's click
+    turns Wi-Fi off."""
+    seen = []
+    fw.mock('networkDisconnect', lambda *_: seen.append(b'disconnect') or 0)
+    fw.var('g_wififlag', C.c_ubyte).value = 1
+    fw.var('wifi_initstatus', C.c_ubyte).value = 0
+    fw.var('wifi_connectstatus', C.c_ubyte).value = joining
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    flag, mode = fw.var('g_keylock_flag', C.c_ubyte), fw.var('g_keylock_mode', C.c_ubyte)
-    flag.value, mode.value = 0, 3  # off, an earlier version's Everything last
-    assert keys(KEY_CENTER) == STOP and (flag.value, mode.value) == (1, 2)  # On: the buttons
-    assert keys(KEY_CENTER) == STOP and flag.value == 0
+    top.ints[b'_cc_focus'] = 0
+    assert keys(KEY_CENTER) == STOP
+    assert seen == ended and fw.var('wifi_connectstatus', C.c_ubyte).value == 0
+    assert ui.clicks == [(b'img_wifiswitch', EVT_CLICK)]
+
+
+def test_centre_on_smart_wi_fi_turns_it_on_and_off(fw, keys):
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_CENTER) == STOP and keys(KEY_CENTER) == STOP
+    assert smart_written(fw) == [1, 0] and not fw.calls('dialog_quit')
+
+
+def cc_names(fw, top, widths):
+    """The toggles' names' scrollers cc_open makes (cc_name0 to 5), each its text's width as cc_paint stored it; the
+    scrollers stock's start and stop were called for, in order, and each xoffset set."""
+    names = [top.add(W(top.ui, 'hscroll_label', f'cc_name{i}', w=72, h=16)) for i in range(6)]
+    for name, w in zip(names, widths):
+        name.int(O['HSCROLL_TEXT_W'], w)
+    for fn in ('hscroll_label_start', 'hscroll_label_stop'):
+        fw.mock(fn, lambda w, *_: 0)
+    fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: top.ui.by[w].int(O['HSCROLL_XOFFSET'], x) or 0)
+    return names
+
+
+def test_a_name_wider_than_its_column_scrolls_while_the_wheel_is_on_its_circle(fw, keys):
+    """control_center.c cc_marq: the wheel onto a name wider than its 76 px room (90 px here) starts its scroller, the house
+    marquee (ringnav_hscroll_start's hold and pace, the lull's loop); off it, the scroller stops and is back at its
+    start. A name that fits (EQ) never scrolls."""
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    names = cc_names(fw, top, [33, 61, 42, 22, 90, 18])
+    top.ints[b'_cc_focus'] = CC_CAR
+    started = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_start')]  # noqa: E731
+    stopped = lambda: [ui.by[c[1][0]] for c in fw.calls('hscroll_label_stop')]  # noqa: E731
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_SMART
+    assert started() == [names[CC_SMART]] and names[CC_SMART].block[O['HSCROLL_LOOP']] == b'\x01'
+    names[CC_SMART].int(O['HSCROLL_XOFFSET'], 5)  # stock's timer moved it
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_EQ
+    assert stopped() == [names[CC_SMART]] and names[CC_SMART].int(O['HSCROLL_XOFFSET']) == 0
+    assert names[CC_SMART].block[O['HSCROLL_LOOP']] == b'\x00' and started() == [names[CC_SMART]]
+
+
+def test_a_scrolling_name_stops_when_the_ring_goes_or_a_slider_takes_the_wheel(fw, keys):
+    """No ring, no selection: CC_RING_MS after the last input the scroller stops at its start, as it does while the
+    wheel is a slider's."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui, ring=None)
+    names = cc_names(fw, top, [33, 61, 42, 22, 90, 18])
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_NEXT) == STOP and [c[1][0] for c in fw.calls('hscroll_label_start')] == [names[CC_SMART].p]
+    ring = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == 5000]
+    keys.clock.now += 5000
+    timers.fire(ring[-1])
+    assert [c[1][0] for c in fw.calls('hscroll_label_stop')] == [names[CC_SMART].p]
+
+
+def test_the_wi_fi_circle_is_drawn_again_when_the_link_changes_while_open(fw, keys):
+    """control_center.c cc_wifi_poll, every CC_WIFI_POLL_MS from cc_open: nothing while the glyph the circle shows
+    (_cc_wifi, as cc_glyph drew it) is still right; Wi-Fi turned off under the open page, its circle's box, ring and
+    all (43, 45, 46 x 46), drawn again, and only that."""
+    timers = WidgetTimers(fw)
+    ui = Ui(fw)
+    top, _ = cc_opened(fw, ui)
+    poll = [i for i, (_, w, ms) in enumerate(timers.added) if w == top.p and ms == 1000]
+    assert len(poll) == 1
+    dirty = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: dirty.append(struct.unpack('<4i', C.string_at(r, 16)) if r else None))
+    flag = fw.var('g_wififlag', C.c_ubyte)
+    flag.value = 1
+    top.ints[b'_cc_wifi'] = 0 + 2  # drawn on, not joined (stock's bars: none)
+    assert timers.fire(poll[0]) == 8 and dirty == []
+    flag.value = 0
+    assert timers.fire(poll[0]) == 8 and dirty == [(43, 45, 46, 46)] and top.ints[b'_cc_wifi'] == -1 + 2
+    assert timers.fire(poll[0]) == 8 and dirty == [(43, 45, 46, 46)]
 
 
 def test_quick_settings_wheel_as_volume_is_stocks(fw, keys):
@@ -2347,18 +2639,17 @@ def test_control_center_opens_with_no_ring_and_the_first_tick_only_brings_it_up(
     it, and Centre then does not act; the next tick steps."""
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=None)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_LOCK and top.ints[b'_cc_seen'] == 100001
-    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_LOCK + 1
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_NEXT) == STOP and top.ints[b'_cc_focus'] == CC_SMART and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_NEXT, 100) == STOP and top.ints[b'_cc_focus'] == CC_SMART + 1
 
 
 def test_centre_with_no_ring_only_brings_it_up(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=None)
-    flag = fw.var('g_keylock_flag', C.c_ubyte)
-    top.ints[b'_cc_focus'] = CC_LOCK
-    assert keys(KEY_CENTER) == STOP and flag.value == 0 and top.ints[b'_cc_seen'] == 100001
-    assert keys(KEY_CENTER, 600) == STOP and flag.value == 1  # with the ring up, Centre acts
+    top.ints[b'_cc_focus'] = CC_SMART
+    assert keys(KEY_CENTER) == STOP and smart_written(fw) == [] and top.ints[b'_cc_seen'] == 100001
+    assert keys(KEY_CENTER, 600) == STOP and smart_written(fw) == [1]  # with the ring up, Centre acts
 
 
 def test_the_ring_goes_5_s_after_the_last_input_and_comes_back_where_it_was(fw, keys):
@@ -2504,6 +2795,31 @@ def test_centre_on_the_now_playing_block_opens_now_playing(fw, keys, status, ope
     assert not fw.calls('player_play_pause')  # what plays stays as it is
 
 
+@pytest.mark.parametrize('ring', [None, 100000])
+def test_control_center_s_wheel_is_the_wheel_for_the_focus_rule(fw, keys, st, ring):
+    """Control Center is pulled down by a finger, so the one record says touch; a wheel tick there, the one that only
+    brings the ring up too, is the wheel's input as a list's is (docs/oled-design.md#focus-ring). The emulator,
+    2026-11-17: the USB picker opened from the USB row showed no selection, the turns that reached the row having left
+    touch mode on."""
+    ui = Ui(fw)
+    cc_window(fw, ui, ring=ring)
+    st('touch_mode').value = 1
+    assert keys(KEY_NEXT) == STOP and st('touch_mode').value == 0
+
+
+@pytest.mark.parametrize('cable', [1, 0])
+def test_centre_on_the_usb_row_opens_the_usb_picker(fw, keys, cable):
+    """Centre on the USB row closes Control Center and opens the USB picker Settings > General > USB opens
+    (usb_ui.c usb_pick_open); a cable gone since the wheel reached it leaves the row with nothing to do."""
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
+    fw.mock('window_create', lambda *_: 0)
+    ui = Ui(fw)
+    top, _ = cc_window(fw, ui)
+    top.ints[b'_cc_focus'] = CC_USB
+    assert keys(KEY_CENTER) == STOP
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] * cable and len(fw.calls('window_create')) == cable
+
+
 def cc_opened(fw, ui):
     """Control Center laid out (cc_open) over the window cc_window gives: its clear buttons by stop."""
     top, slider = cc_window(fw, ui)
@@ -2512,7 +2828,7 @@ def cc_opened(fw, ui):
     fw.mock('button_create', lambda win, x, y, w, h, *_: buttons.append(ui.by[win].add(W(ui, 'button', x=x, y=y, w=w, h=h)))
             or buttons[-1].p)
     fw.fn('cc_open', None, C.c_void_p)(top.p)
-    stops = [i for i in range(2, CC_STOPS + 3) if i != CC_BRIGHT]  # CC_AIRPLAY to the transport's Next
+    stops = [i for i in range(CC_STOPS + 3) if i != CC_BRIGHT]  # Wi-Fi to the transport's Next
     return top, dict(zip(stops, buttons))
 
 
@@ -2531,8 +2847,7 @@ def test_a_tap_on_the_now_playing_block_opens_now_playing_and_the_transport_keep
 
 
 HOLDS = [(0, b'systemset/wifi_page'), (1, b'systemset/bluetooth_page'), (2, b'systemset/netservice_page'),
-         (3, None), (CC_LOCK, b'systemset/keylock_page'), (CC_SLEEP, b'systemset/sleepshutdown_page'),
-         (CC_NIGHT, b'playset/bootvol_page'), (CC_EQ, b'playset/equalizer_page'), (CC_SMART, b'systemset/wifi_page')]
+         (CC_CAR, None), (CC_SMART, b'systemset/wifi_page'), (CC_EQ, b'playset/equalizer_page')]
 
 
 def opened(fw):
@@ -2543,9 +2858,9 @@ def opened(fw):
     return [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] + fw.cc_windows
 
 
-@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[0] > 1])
-def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
-    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle or tile
+@pytest.mark.parametrize('stop, page', HOLDS)
+def test_a_finger_held_on_a_toggle_opens_its_settings_page_and_a_tap_still_acts(fw, keys, stop, page):
+    """Held QUICK_HOLD_MS (navigation.c quick_long, as Wi-Fi's and Bluetooth's stock buttons are), a toggle
     closes Control Center and opens its page; its release does not click it."""
     ui = Ui(fw)
     top, buttons = cc_opened(fw, ui)
@@ -2563,17 +2878,77 @@ def test_a_finger_held_on_a_tile_opens_its_settings_page_and_a_tap_still_acts(fw
     assert fw.fn('ringnav_dispatch', C.c_int, C.c_void_p, C.c_void_p)(button.p, event) == STOP
 
 
-def test_a_tap_on_a_tile_acts_and_opens_nothing(fw, keys):
+@pytest.mark.parametrize('stop, page', [h for h in HOLDS if h[1]])
+def test_a_hold_over_its_own_open_page_opens_no_second(fw, keys, stop, page):
+    """Control Center pulled down on Settings > Wi-Fi and Wi-Fi held: Control Center closes on the Wi-Fi page there
+    is, and no second one stacks on it (the emulator, 2026-11-17: two wifi_page, two Returns to leave Wi-Fi)."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    window = page.split(b'/')[-1]
+    fw.mock('navigator_window_is_exist', lambda n, *_: C.string_at(n) == window)
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(buttons[stop], O['EVT_POINTER_DOWN'])
+    ui.fire(ui_name(fw.lib, 'quick_long'))
+    assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p] and opened(fw) == []
+
+
+CC_PREV, CC_PLAY, CC_NEXT = CC_STOPS, CC_STOPS + 1, CC_STOPS + 2
+
+
+def test_every_stop_has_a_button_over_it_above_stock_s_widgets(fw, keys):
+    """cc_open: a clear button over each circle (Wi-Fi's and Bluetooth's too), the Now Playing block, the Volume
+    slider and each transport glyph, made after stock's view_menu so a touch finds it first: stock's hidden label_wifi
+    and label_bt lie over those two switches inside view_menu and took their taps (the device, 2026-11-17: tapping
+    Wi-Fi or Bluetooth did nothing)."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    boxes = {stop: (b.int(W_X), b.int(W_X + 4), b.int(W_X + 8), b.int(W_X + 12)) for stop, b in buttons.items()}
+    assert boxes[0] == (46, 48, 40, 40) and boxes[1] == (112, 48, 40, 40) and boxes[CC_EQ] == (112, 180, 40, 40)
+    assert boxes[CC_NOW] == (188, 38, 167, 114) and boxes[CC_VOLUME] == (188, 210, 167, 38)
+    assert boxes[CC_USB] == (20, 258, 335, 38)  # under the cluster, its full width, the sliders' height
+    assert boxes[CC_PLAY] == (271 - 21, 125 - 21, 42, 42) and boxes[CC_PREV][0] + 46 == boxes[CC_NEXT][0] - 46
+    assert all(b.opacity == 0 for b in buttons.values())
+
+
+@pytest.mark.parametrize('stop, clicked', [(0, b'img_wifiswitch'), (1, b'img_btswitch')])
+def test_a_tap_on_wi_fi_or_bluetooth_clicks_stock_s_switch_as_centre_does(fw, keys, stop, clicked):
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    ui.emit(buttons[stop], EVT_CLICK)
+    assert ui.clicks == [(clicked, EVT_CLICK)] and not fw.calls('dialog_quit') and not fw.calls('navigator_to')
+
+
+@pytest.mark.parametrize('stop, fn', [(CC_PREV, 'prev_quick_click'), (CC_PLAY, 'player_play_pause'),
+                                      (CC_NEXT, 'next_quick_click')])
+def test_a_tap_on_the_transport_skips_or_plays(fw, keys, stop, fn):
     ui = Ui(fw)
     _, buttons = cc_opened(fw, ui)
-    flag = fw.var('g_keylock_flag', C.c_ubyte)
-    ui.emit(buttons[CC_LOCK], EVT_CLICK)
-    assert flag.value == 1 and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
+    ui.emit(buttons[stop], EVT_CLICK)
+    assert len(fw.calls(fn)) == 1 and not fw.calls('dialog_quit')
+
+
+@pytest.mark.parametrize('x, want', [(188 + 83, 83 * 100 // 167), (188, 0), (188 + 167, 100), (400, 100)])
+def test_a_finger_on_the_volume_slider_sets_the_volume_where_it_is(fw, keys, x, want):
+    """cc_drag: from the press, the volume is where the finger is along the slider (up to Volume Limit)."""
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 30, 100
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(buttons[CC_VOLUME], O['EVT_POINTER_DOWN'], x=x, y=229)
+    assert vol.value == want and [c[1][0] for c in fw.calls('device_set_volume')] == [want]
+
+
+def test_a_tap_on_a_toggle_acts_and_opens_nothing(fw, keys):
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    ui.emit(buttons[CC_SMART], EVT_CLICK)
+    assert smart_written(fw) == [1] and not fw.calls('navigator_to') and not fw.calls('dialog_quit')
 
 
 @pytest.mark.parametrize('stop, page', HOLDS)
-def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop, page):
-    """Centre held QUICK_HOLD_MS with the ring on a toggle or tile: Control Center closes, its page opens, and the
+def test_centre_held_on_a_toggle_opens_its_settings_page(fw, keys, stop, page):
+    """Centre held QUICK_HOLD_MS with the ring on a toggle: Control Center closes, its page opens, and the
     release does nothing more (no toggle, no click on the page now in front)."""
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
@@ -2587,20 +2962,20 @@ def test_centre_held_on_a_toggle_or_tile_opens_its_settings_page(fw, keys, stop,
     assert [c[1][0] for c in fw.calls('dialog_quit')] == [top.p]
     assert opened(fw) == [page]
     seen = top.ints[b'_cc_seen']
-    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and fw.var('g_keylock_flag', C.c_ubyte).value == 0
+    assert keys(KEY_CENTER, 600) == STOP and not ui.clicks and smart_written(fw) == []
     assert len(fw.calls('dialog_quit')) == 1 and top.ints[b'_cc_seen'] == seen  # the release reached nothing
 
 
-def test_a_short_centre_on_a_tile_acts_and_drops_its_hold(fw, keys):
+def test_a_short_centre_on_a_toggle_acts_and_drops_its_hold(fw, keys):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui)
-    top.ints[b'_cc_focus'] = CC_LOCK
+    top.ints[b'_cc_focus'] = CC_SMART
     keys.press(KEY_CENTER)
-    assert keys(KEY_CENTER, 200) == STOP and fw.var('g_keylock_flag', C.c_ubyte).value == 1
+    assert keys(KEY_CENTER, 200) == STOP and smart_written(fw) == [1]
     assert not ui.due(ui_name(fw.lib, 'cc_hold_due')) and not fw.calls('navigator_to')
 
 
-@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_LOCK, False)])
+@pytest.mark.parametrize('stop, ring', [(CC_VOLUME, True), (CC_NOW, True), (CC_SMART, False)])
 def test_centre_held_on_a_slider_the_block_or_with_no_ring_holds_nothing(fw, keys, stop, ring):
     ui = Ui(fw)
     top, _ = cc_window(fw, ui, ring=100000 if ring else None)
@@ -2877,6 +3252,16 @@ class Loop:
 
     def dark_quiet(self):
         return C.c_int.in_dll(self.fw.lib, 'navigation__dark_quiet').value
+
+
+def test_each_pass_wakes_the_parked_album_cover_thread_for_a_request(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    fw.var('fw_ctx_plist_albumtasklist', C.c_ulong).value = 0x5000
+    fw.var('fw_ctx_albumcover_taskstate', C.c_int).value = 1
+    fw.mock('fw_list_size', lambda *_: 3)  # a page's rows queued (cover_wake.c)
+    fw.var('cover_wake__cover_parked', C.c_int * 2)[0] = 1
+    loop()
+    assert [c[1][1:3] for c in fw.calls('cover_futex')] == [(129, 1)]  # FUTEX_WAKE_PRIVATE, one waiter
 
 
 def test_dark_and_quiet_the_loop_idles_long(fw, stock_bytes, st):

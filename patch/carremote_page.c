@@ -1,7 +1,8 @@
 /* Settings > Car Remote (docs/internals.md#car-remote, docs/oled-design.md#car-remote): the switch, then, while it
  * is on, Pair a Phone and a row per paired phone, each opening the phone's page (Status, Paired, Last Connected,
  * Rename, Forget Phone); with none paired, the empty state with Pair a Phone as its button. Pair a Phone opens a
- * page that says how a phone pairs (the phone starts it, so the Q2 Muse can only wait) and gives the address.
+ * page that says how a phone pairs (the phone starts it, so the Q2 Muse can only wait), step by step over the link
+ * a phone can find it on now: Bluetooth while the daemon advertises, else Wi-Fi with the address to type.
  *
  * What it shows comes from the daemon's files (patch/coda_rc.c): the peers file (a phone's id, key, name and when
  * it paired), /tmp/coda-rc.online (the connected phones and their links) and the seen file (when each was last
@@ -19,7 +20,7 @@
 #define CR_SEEN_REC 12
 #define CR_ONLINE_REC 9
 #define CR_PEERS_MAX 8
-#define CR_PORT 7720 /* coda_rc.h CRC_TCP_PORT */
+#define CR_BLE "/tmp/coda-rc.ble"       /* coda_rc.c crc_ble_advertising: while a phone's Bluetooth scan can find it */
 
 /* The rows' geometry (docs/oled-design.md#car-remote, design/carremote-page mock_carremote.py) */
 #define CR_ROW 32       /* a one-line row */
@@ -37,11 +38,11 @@
 #define CR_DOT 7        /* the Positive dot before "Connected" */
 #define CR_DOT_GAP 5
 #define CR_VALUE_PX TYPE(20)
-/* The capsule's row reaches this far past it, its focus ring's 2 px CTA_RING_OFF out (ui_kit.c cta_capsule) and no
+/* The capsule's row reaches this far past it, its focus ring's CTA_RING_W px CTA_RING_OFF out (ui_kit.c cta_capsule) and no
  * further: under the switch the row's foot then stays above the set's list end (y 282 on OLED), so the wheel moving
  * on to it scrolls nothing. A foot past the list end, by a pixel even, has the list scroll the capsule to its top
  * (nav/lists.c reveal, then fit_top's whole rows), the switch gone. */
-#define CR_CTA_OUT (CTA_RING_OFF + 2)
+#define CR_CTA_OUT (CTA_RING_OFF + CTA_RING_W)
 #define CR_STEP_PX TYPE(15)
 #define CR_ROW_KIND "_cr_kind"
 #define CR_VALUE "_cr_value"
@@ -59,6 +60,7 @@ static struct {
     void *page, *view;       /* Settings > Car Remote and its list */
     void *phone, *phone_view; /* a phone's page */
     void *howto;             /* Pair a Phone */
+    unsigned howto_shown;    /* what it shows (cr_howto_mode and the address, hashed) */
     unsigned char phone_id[8]; /* whose page */
     unsigned shown, phone_shown; /* what each shows (cr_read's sum) */
     int sel;                 /* 0 while the switch's bar shows (it is laid out tall), else -1 */
@@ -233,6 +235,8 @@ static int cr_selected(void *view) { return view ? widget_get_prop_int(view, "_r
 
 /* ---- Pair a Phone: how a phone pairs ---- */
 
+static unsigned cr_howto_sum(void);
+
 static int cr_howto_closed(void *ctx, void *event) {
     if (cp.howto == ctx) cp.howto = 0;
     return 0;
@@ -240,37 +244,78 @@ static int cr_howto_closed(void *ctx, void *event) {
 
 static int cr_howto_open(void *ctx, void *event) {
     if (cp.howto || !(cp.howto = page_open("carhowto_page", cr_howto_closed, page_keyup))) return 0;
+    cp.howto_shown = cr_howto_sum();
     page_list(cp.howto, cp.howto, 0, "Pair a Phone", 1, 48); /* the title; no rows */
     widget_invalidate_force(cp.howto, 0);
     return 0;
 }
 
-/* Its steps, then the Q2 Muse's addresses: Wi-Fi's (port CR_PORT) while joined, Bluetooth's name, and that it
- * waits. ponytail: no QR code until Q2 Muse Remote can scan one (design/carremote-page NOTES.md, question 2). */
+/* How a phone can find this Q2 Muse now, the address into addr with Wi-Fi: CR_BY_BLE while the daemon advertises
+ * (Bluetooth on and bluetoothd took the GATT application, docs/remote-protocol.md#bluetooth-le-primary), else
+ * CR_BY_WIFI while Wi-Fi has an address (Q2 Muse Remote's Wi-Fi address tab), else CR_BY_NONE. Q2 Muse Remote's
+ * Bluetooth tab finds a Q2 Muse by its advertisement only, and its Wi-Fi tab lists the ones the daemon announces
+ * over mDNS (docs/remote-protocol.md#discovery) or takes an address typed, so the page gives the steps of the one
+ * that can work and never the other's. */
+enum { CR_BY_NONE, CR_BY_WIFI, CR_BY_BLE };
+static int cr_howto_mode(char *addr, unsigned n) {
+    int wifi = cr_address(addr, n) != 0;
+    if (!wifi) *addr = 0;
+    if (g_bluetoothflag && !access(CR_BLE, 0)) return CR_BY_BLE; /* the flag: a killed daemon's file says nothing */
+    return wifi ? CR_BY_WIFI : CR_BY_NONE;
+}
+
+static unsigned cr_howto_sum(void) {
+    char addr[20];
+    int mode = cr_howto_mode(addr, sizeof addr);
+    return hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&mode, sizeof mode), (const unsigned char *)addr,
+                      strlen(addr));
+}
+
+/* Its steps in Q2 Muse Remote's own words (its Pair a Q2 Muse screen, its Bluetooth and Wi-Fi address tabs, Next),
+ * then what they need: the address, for a phone that does not list it (the app's port, 7720, is coda-rc's), and
+ * that it waits. The Wi-Fi tab lists this Q2 Muse by its Bluetooth name (the mDNS instance), so its step names
+ * that; the Bluetooth tab's advertisement is always "Q2 Muse" (coda_rc_ble.c). With neither
+ * link, the steps join a Wi-Fi network first; the page turns to the Wi-Fi steps once it has (carremote_poll). Each
+ * line fits the 297 px beside its number at CR_STEP_PX. ponytail: no QR code until Q2 Muse Remote can scan one
+ * (design/carremote-page NOTES.md, question 2). */
 static void cr_howto_paint(void *w, void *canvas) {
-    static const char *const steps[] = { "Open Q2 Muse Remote on your phone", "Tap Add a Q2 Muse",
-                                         "Type the code this Q2 Muse shows" };
-    int light = ipod_light(), y = 66 - cr_screen_y(w);
-    unsigned primary = flip_if(light, 0xffffff), muted = tok(TOK_TERTIARY);
-    for (int i = 0; i < 3; ++i, y += 28) {
+    static const char *const steps[3][4] = {
+        [CR_BY_NONE] = { "Open Settings > Wi-Fi", "Join the Wi-Fi your phone is on", "Come back here to pair", 0 },
+        [CR_BY_WIFI] = { "Open the Q2 Muse Remote app", "Pair a Q2 Muse > Wi-Fi address",
+                         0 /* "Pick <name>, then tap Next" */, "Type the code shown here" },
+        [CR_BY_BLE] = { "Open the Q2 Muse Remote app", "Pair a Q2 Muse > Bluetooth", "Pick Q2 Muse, then tap Next",
+                        "Type the code shown here" },
+    };
+    char addr[20], line[64], name[40], pick[64];
+    int mode = cr_howto_mode(addr, sizeof addr), y = 66 - cr_screen_y(w);
+    tk_snprintf(pick, sizeof pick, "Pick %s, then tap Next", bt_name(name, sizeof name));
+    /* Text Primary as the dark theme's: ui_text's ink turns it for Light Mode, as the muted lines'. The digits sit
+     * on Raised 2's disc, which fill_box leaves dark in either mode, so theirs is white in both (turned twice). */
+    unsigned primary = 0xffffff, digit_ink = flip_if(ipod_light(), 0xffffff), muted = tok(TOK_TERTIARY);
+    for (int i = 0; i < 4 && (steps[mode][i] || mode == CR_BY_WIFI); ++i, y += 28) {
         rect_t disc = { 24, y - 10, 20, 20 };
         char digit[4];
         fill_box(canvas, &disc, RGBA(tok(TOK_RAISED_2)), 10);
         tk_snprintf(digit, sizeof digit, "%d", i + 1);
-        ui_text(canvas, digit, 1, TYPE(13), primary, 0, 34, y, 20, 1);
-        ui_text(canvas, steps[i], 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
+        ui_text(canvas, digit, 1, TYPE(13), digit_ink, 0, 34, y, 20, 1);
+        ui_text(canvas, steps[mode][i] ? steps[mode][i] : pick, 0, CR_STEP_PX, primary, 0, 54, y, 375 - 54 - 24, 2);
     }
-    char addr[20], line[64], bt[40];
-    y = 170 - cr_screen_y(w);
+    y = 190 - cr_screen_y(w);
     ui_text(canvas, "Q2 Muse", 1, TYPE(17), primary, 0, 24, y, 327, 2);
-    if (cr_address(addr, sizeof addr))
-        tk_snprintf(line, sizeof line, "Wi-Fi  %s : %d", addr, CR_PORT);
-    else
-        tk_snprintf(line, sizeof line, "Wi-Fi  off");
-    ui_text(canvas, line, 0, TYPE(14), muted, 0, 24, y + 24, 327, 2);
-    tk_snprintf(line, sizeof line, "Bluetooth  %s", bt_name(bt, sizeof bt));
-    ui_text(canvas, line, 0, TYPE(14), muted, 0, 24, y + 44, 327, 2);
-    ui_text(canvas, "Waiting for a phone\xe2\x80\xa6", 0, TYPE(14), tok(TOK_SECONDARY), 0, 24, y + 64, 327, 2);
+    if (mode == CR_BY_NONE) {
+        ui_text(canvas, "Wi-Fi  not connected", 0, TYPE(14), muted, 0, 24, y + 24, 327, 2);
+        return; /* no phone can reach it yet: nothing to wait for */
+    }
+    if (mode == CR_BY_WIFI) {
+        tk_snprintf(line, sizeof line, "Address  %s", addr);
+        ui_text(canvas, line, 0, TYPE(14), muted, 0, 24, y + 24, 327, 2);
+        ui_text(canvas, "Phone and Q2 Muse on one Wi-Fi", 0, TYPE(14), muted, 0, 24, y + 44, 327, 2);
+    } else if (*addr) {
+        tk_snprintf(line, sizeof line, "Or Wi-Fi address  %s", addr);
+        ui_text(canvas, line, 0, TYPE(14), muted, 0, 24, y + 24, 327, 2);
+    }
+    ui_text(canvas, "Waiting for a phone\xe2\x80\xa6", 0, TYPE(14), tok(TOK_SECONDARY), 0, 24,
+            y + (mode == CR_BY_WIFI ? 64 : *addr ? 44 : 24), 327, 2);
 }
 
 /* ---- a phone's page ---- */
@@ -310,6 +355,7 @@ static int cr_phone_click(void *ctx, void *event) {
     int n = cr_read(p, 0), i = cr_find(p, n, cp.phone_id);
     if (i < 0) return 0;
     if (k == 3) {
+        search_strip_label("Rename"); /* typed in its row, after the label (search_strip.c) */
         search_strip_text("Rename Phone", p[i].name, 31, cr_rename_done);
     } else if (k == 4) {
         static const char *const rows[] = { "Cancel", "Forget Phone" };
@@ -516,6 +562,11 @@ void carremote_paint(void *w, void *canvas) {
 /* Every poll while a page is open: built again when what it shows has changed. Not under a confirmation card,
  * whose answer acts first; the change is seen at the first poll after. */
 void carremote_poll(void) {
+    if (cp.howto) { /* Pair a Phone: painted again when Bluetooth or Wi-Fi changes what a phone can find */
+        unsigned h = cr_howto_sum();
+        if (h != cp.howto_shown) widget_invalidate_force(cp.howto, 0);
+        cp.howto_shown = h;
+    }
     if ((!cp.page && !cp.phone) || confirm_up()) return;
     unsigned sum;
     cr_peer p[CR_PEERS_MAX];

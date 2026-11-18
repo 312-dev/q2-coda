@@ -126,16 +126,20 @@ static void lyric_follow(void *lrc, int ms, int front, int shown) {
 
 /* Smart Awake (#57): Now Playing lit in front, a song playing, on its lyrics page,
  * or its full-screen art or ⋯'s About (np_about.c) in front, holds the screen on as the lyrics
- * wheel does; paused, it times out as usual. */
+ * wheel does; paused, it times out as usual. A guest's Now Playing in front with the guest's song
+ * playing does too (guest_ui.c guest_ui_keeps_lit). */
 static void keep_lit_poll(void) {
     unsigned now = (unsigned)time_now_ms();
-    if (!st.np_slide || now - st.keep_lit_at < 1000) return;
+    if (now - st.keep_lit_at < 1000) return;
+    void *top = window_manager_get_top_window(window_manager());
+    int guest = guest_ui_keeps_lit(top);
+    if (!st.np_slide && !guest) return;
     st.keep_lit_at = now;
     accent(); /* reads the settings */
-    void *top = window_manager_get_top_window(window_manager());
-    if (st.keep_lit && g_backlight_status && mclGetPlayStatus() == 2 &&
-        ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
-         (top && (top == st.bc[2] || top == np_about_page()))))
+    if (st.keep_lit && g_backlight_status &&
+        (guest || (mclGetPlayStatus() == 2 &&
+                   ((top == st.np_win && widget_get_prop_int(st.np_slide, "value", 0)) ||
+                    (top && (top == st.bc[2] || top == np_about_page()))))))
         reset_poweroptions_timer(1, 1, 1);
 }
 
@@ -377,8 +381,8 @@ static void scrub_start(void) {
     rearm(&st.scrub_timer, scrub_expire, SCRUB_MS);
 }
 
-/* The Centre cycle's shuffle or repeat stage (NP_STAGE_*), or rest: np_modes rings the control
- * the wheel sets, and NP_STAGE_MS without a key ends it. */
+/* The Centre cycle's ring on shuffle, repeat or the heart (NP_STAGE_*), or rest: np_modes draws
+ * it, and NP_STAGE_MS without a key ends it. */
 #define NP_STAGE_MS SCRUB_MS
 static int np_stage_end(const void *info) {
     st.np_stage_timer = 0;
@@ -392,18 +396,34 @@ static void np_stage(unsigned stage) {
         stop_timer(&st.np_stage_timer);
     if (st.np_stage == stage) return;
     st.np_stage = stage;
-    void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
+    void *mode = st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0,
+         *heart = np_heart();
     if (mode) widget_invalidate_force(mode, (void *)0);
+    if (heart) widget_invalidate_force(heart, (void *)0);
+}
+/* 1 when the ring can stand on stage: shuffle and repeat under a theme with the pair and no radio
+ * (whose order is the app's), the heart under such a theme while it shows (np_bar.c np_heart). */
+static int np_stop_ok(unsigned stage) {
+    if (!theme()->np_modes) return 0;
+    if (stage == NP_STAGE_RATING) return np_heart() != 0;
+    return (stage == NP_STAGE_SHUFFLE || stage == NP_STAGE_REPEAT) && !np_radio_on();
+}
+/* The stop dir (1 or -1) from stage that the ring can stand on, stage itself at an end; from
+ * NP_STAGE_REST the first, or NP_STAGE_REST when there is none. */
+static unsigned np_stop_next(unsigned stage, int dir) {
+    for (int s = (int)stage + dir; s >= NP_STAGE_SHUFFLE && s <= NP_STAGE_RATING; s += dir)
+        if (np_stop_ok((unsigned)s)) return (unsigned)s;
+    return stage;
 }
 
-/* Now Playing's Centre, an iPod classic's: each press shows the next control the wheel sets,
- * scrubber, shuffle, repeat, rating, then back to rest, where the wheel is the volume's (Apple's
- * iPod classic guide: scrubber, Genius, shuffle, rating, lyrics). The scrub's own press ends it
- * (scrub_end seeks) and goes on to shuffle; the rating picker's Centre saves and closes it
- * (rate_key; a modal set's picker, ratings.c rate_modal), back at rest. Shuffle and repeat have no
- * picker of their own: the theme's pair rings the one the wheel steps (np_modes); under a theme
- * without the pair the cycle skips them. A press held NP_HOLD_MS or longer, short of stock's long
- * press (Shut Down), turns the screen off instead, as stock's release does. */
+/* Now Playing's Centre, after an iPod classic's: at rest a press starts scrubbing; the scrub's
+ * own press ends it (scrub_end seeks) and puts a focus ring on the first of shuffle, repeat and
+ * the heart. The wheel moves the ring, never changing a control; Centre works the ringed one as a
+ * tap does: shuffle on or off, repeat a step Off, All, One, the ring staying, or the heart's
+ * rating picker (its Centre saves and closes it, ratings.c rate_key), the cycle back at rest.
+ * Under a theme without the pair there is no ring and the scrub's press opens the picker. A press
+ * held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
+ * instead, as stock's release does. */
 #define NP_HOLD_MS 400
 static int np_centre(unsigned now) {
     int held = st.center_down_at && now - st.center_down_at >= NP_HOLD_MS;
@@ -413,33 +433,41 @@ static int np_centre(unsigned now) {
         np_single();
         return STOP;
     }
+    if (!st.scrub && st.np_stage == NP_STAGE_REST && np_stream_error()) {
+        np_stream_retry(); /* Retry, the selected one (np_stream.c) */
+        return STOP;
+    }
+    unsigned stage = st.np_stage;
     if (st.scrub) {
         scrub_end();
-        if (theme()->np_modes && !np_radio_on()) /* a radio's order is the app's: no stops */
-            np_stage(NP_STAGE_SHUFFLE);
+        unsigned first = np_stop_next(NP_STAGE_REST, 1);
+        if (first != NP_STAGE_REST)
+            np_stage(first);
         else if (!rate_open())
             np_stage(NP_STAGE_REST);
-    } else if (st.np_stage == NP_STAGE_SHUFFLE)
-        np_stage(NP_STAGE_REPEAT);
-    else if (st.np_stage == NP_STAGE_REPEAT) {
-        np_stage(NP_STAGE_REST);
-        rate_open();
-    } else
+    } else if (stage == NP_STAGE_REST)
         scrub_start();
+    else if (stage == NP_STAGE_RATING || !np_stop_ok(stage)) {
+        np_stage(NP_STAGE_REST);
+        if (stage == NP_STAGE_RATING) rate_open();
+    } else {
+        np_mode_step(stage == NP_STAGE_REPEAT, 1);
+        np_stage(stage); /* its timeout from this press */
+    }
     return STOP;
 }
 
 /* Centre (np_centre) and, while scrubbing or in the Centre cycle, the wheel on the top Now Playing
  * page. While scrubbing the wheel moves the target SCRUB_STEP seconds times the
  * WHEEL_RAMP_MS ramp, within the track; a playing track follows it, at most a seek every
- * SCRUB_SEEK_MS (seek.c seek_scrub), a paused one only at the end. In the cycle's shuffle or
- * repeat stage a tick steps that control. Neither the volume nor its dialog sees the wheel. */
+ * SCRUB_SEEK_MS (seek.c seek_scrub), a paused one only at the end. In the cycle a tick moves the
+ * ring to the next or previous stop, staying at the ends. Neither the volume nor its dialog sees
+ * the wheel. */
 static int np_key(void *top, unsigned key) {
     unsigned now = (unsigned)time_now_ms();
     if (key == KEY_CENTER) { return np_centre(now); }
     if (st.np_stage != NP_STAGE_REST && !st.scrub) {
-        np_mode_step(st.np_stage == NP_STAGE_REPEAT, key == KEY_NEXT ? 1 : -1);
-        np_stage(st.np_stage); /* its timeout from this tick */
+        np_stage(np_stop_next(st.np_stage, key == KEY_NEXT ? 1 : -1)); /* its timeout from here */
         return STOP;
     }
     if (np_track() != st.scrub_track) { /* a new track: scrub_end drops the last one's target */
@@ -535,9 +563,25 @@ static int np_lyric_touch(void *ctx, void *event) {
     return 0;
 }
 
+/* Now Playing is one page. Stock's navigator opens a playing_page over whatever is in front, so a
+ * song played from a page Now Playing opened (its artist or album tap, the ⋯ page's Look up, then
+ * Shuffle or a song there) left the first one under it: covered, its 250 ms timer stopped, it kept
+ * the song it last showed, and Return came back to it before Home (the emulator, 2026-11-17: Song
+ * 1 at 1:01 while Song 2 played). Every older one closes as win opens; the pages between stay.
+ * coverflow.c play_folder also closes one in front before it opens, so that open slides from the
+ * page under it. */
+static void np_only(void *win) {
+    void *wm = window_manager();
+    for (int i = (int)widget_count_children(wm) - 1; i >= 0; --i) {
+        void *w = widget_get_child(wm, i);
+        if (w && w != win && !tk_strcmp(widget_get_prop_str(w, "name", ""), "playing_page"))
+            window_manager_close_window_force(wm, w);
+    }
+}
+
 /* playing_page_init: stock builds the page and starts its 250 ms timer, then the iPod labels bind.
  * Headphones required with none to play to: stock toasts, closes the window it was given and
- * returns STOP before it builds anything (0x53e4b4), so nothing binds. */
+ * returns STOP before it builds anything (0x53e4b4), so nothing binds and the page under stays. */
 int ringnav_playing(void *win, void *ctx) {
     if (st.np_full)
         np_full(0); /* another Now Playing: the last one's lyrics back in their column */
@@ -545,6 +589,7 @@ int ringnav_playing(void *win, void *ctx) {
     st.lyric_held = 0;
     int result = stock_playing_trampoline(win, ctx);
     if (!win || result == STOP) return result;
+    np_only(win); /* before st.np_win is win: an older page's np_gone still clears its own */
     rate_bind(win);
     np_glyphs_bind(win);
     /* np_gone leaves a replaced page's state alone: its Genre line is that page's. */
@@ -699,4 +744,3 @@ static void bc_fit(void *win) {
         return;
     }
 }
-

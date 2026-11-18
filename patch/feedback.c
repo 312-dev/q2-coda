@@ -611,7 +611,7 @@ void feedback_shuffled(const char *what, int songs) {
 }
 
 /* A mode page (docs/oled-design.md#usb, U2-U6; the sign-in steps, SD Card Update, Bluetooth's
- * receiver): the stack, circle, title, line and the optional Stop pill, centred as one
+ * receiver): the stack, circle, title, line and the optional pill or button, centred as one
  * between the status row's foot (MODE_TOP) and the screen's bottom. */
 #define MODE_TOP 40
 #define MODE_STACK 158
@@ -626,21 +626,24 @@ void feedback_shuffled(const char *what, int songs) {
 #define MODE_PILL_PX TYPE(17) /* Inter Medium 17 */
 
 /* A mode page in w's coordinates (dy its y on screen): m's glyph on its solid circle (none for
- * MODE_BARE: a spinner), the title, the line and the optional pill. Returns the stack's top in w's
- * coordinates. */
+ * MODE_BARE: a spinner), the title, the line and the optional pill, or a button centred where the
+ * pill would be (MODE_BUTTON). Returns the stack's top in w's coordinates. */
 int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
     const char *pill = m->pill;
     unsigned raw = ui_ink_raw(1); /* final colours, each half's */
     int stack = pill ? MODE_STACK_PILL : MODE_STACK, px = m->glyph_px ? m->glyph_px : MODE_GLYPH;
     int top = MODE_TOP + (320 - MODE_TOP - stack) / 2 - dy, cx = 375 / 2;
     rect_t circle = { cx - MODE_R, top, 2 * MODE_R, 2 * MODE_R };
-    if (m->ring != MODE_BARE) fill_box(canvas, &circle, RGBA(m->ring), MODE_R);
+    unsigned ring = m->ring & ~MODE_BUTTON;
+    if (ring != MODE_BARE) fill_box(canvas, &circle, RGBA(ring), MODE_R);
     if (m->glyph) paint_art(w, canvas, theme_art(m->glyph), cx - px / 2, top + MODE_R - px / 2);
     ui_line(canvas, m->title, 0, 375, top + MODE_TITLE_Y, 1, "inter-medium", MODE_TITLE_PX,
             tok(TOK_PRIMARY));
     ui_line(canvas, m->line, 0, 375, top + MODE_LINE_Y, 1, "inter", MODE_LINE_PX,
             tok(TOK_SECONDARY));
-    if (pill) {
+    if (pill && (m->ring & MODE_BUTTON)) {
+        ui_button(canvas, cx, top + MODE_PILL_Y + MODE_PILL_H / 2, pill, 0, 1, 0);
+    } else if (pill) {
         int pw = ui_measure(canvas, pill, "inter-medium", MODE_PILL_PX) + 2 * MODE_PILL_PAD;
         rect_t r = { cx - pw / 2, top + MODE_PILL_Y, pw, MODE_PILL_H };
         fill_box(canvas, &r, RGBA(tok(TOK_RAISED_2)), MODE_PILL_H / 2);
@@ -655,10 +658,11 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
  * menu sheet's pickers use it (menu_modal.c modal_list), its list the card's answers and the rest
  * painted here. The scrim dims the page and the status row (confirm_bar_dim); the card is
  * CARD_W wide at CARD_X, its stack centred on CARD_CY and kept within CARD_TOP..CARD_FOOT: 18 px
- * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, 19 px lines, 4 px under
- * the title), the code (Inter Medium 30), then 14 px down the switch row and the answers, 32 px
- * each, a destructive answer 12 px after the rest, and 8 px of padding. The answers' bar is 8 px in
- * from the card's sides; a destructive one is red (Negative), its bar too when lit. */
+ * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, wrapped to the column on
+ * 19 px lines, 4 px under the title), the code (Inter Medium 30), then 14 px down the switch row
+ * and the answers, 32 px each, a destructive answer 12 px after the rest, and 8 px of padding. The
+ * answers' bar is 8 px in from the card's sides; a destructive one is red (Negative), its bar too
+ * when lit. */
 #define CARD_X 42
 #define CARD_W 291
 #define CARD_R 16
@@ -671,6 +675,7 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_TITLE_H 24
 #define CARD_BODY_GAP 4
 #define CARD_BODY_LINE 19
+#define CARD_BODY_LINES 4 /* the body wraps to as many lines as it needs, this many at most */
 #define CARD_CODE_GAP 6
 #define CARD_CODE_H 40
 #define CARD_ROWS_GAP 14
@@ -680,6 +685,16 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_SCRIM 0x80000000u /* black at 50% */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
 #define CARD_COUNT_PX TYPE(15)
+#define CARD_GLYPH 28    /* tools/art.py PAIR_GLYPH_PX: a glyph over the title */
+#define CARD_GLYPH_GAP 6 /* its foot to the title's box */
+/* A title wider than the text column scrolls: the house marquee (docs/oled-design.md#motion),
+ * held CARD_MARQ_HOLD_MS at its start, then CARD_MARQ_PX px a second, a copy CARD_MARQ_GAP px
+ * behind, its ends faded CARD_MARQ_FADE px into the card. */
+#define CARD_MARQ_HOLD_MS 2750
+#define CARD_MARQ_PX 35
+#define CARD_MARQ_GAP 40
+#define CARD_MARQ_FADE 12
+#define CARD_MARQ_MS 33
 /* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
  * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity, which
  * ovm_bind hands to the frame timer: stock never paints a dialog at opacity 0); an
@@ -693,11 +708,12 @@ static struct {
     void *dialog, *view, *cell[2], *check; /* a dressed stock confirm's answers and its switch */
     int stock;                             /* the dialog is stock's confirminfo_dialog */
     confirm_t c;
-    char title[96], body[2][64], code[16], row[2][24], toggle[48];
+    char title[96], body[CARD_BODY_LINES][64], code[16], row[2][24], toggle[48];
     const char *rows[2];
     int lines, toggle_on, top, rows_y, h, chosen;
-    unsigned timer, answer_timer, until;
-    ovm_t mo; /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
+    unsigned timer, answer_timer, until, marq_timer, marq_at;
+    int title_w; /* the title's width, measured at its first paint; 0 until then */
+    ovm_t mo;    /* the card's enter and exit (CARD_IN_MS, CARD_OUT_MS) */
 } cf __attribute__((section(".scratch")));
 
 int confirm_up(void) { return cf.dialog != (void *)0; }
@@ -708,15 +724,22 @@ static int card_destructive(int row) {
     return cf.c.kind == CONFIRM_DESTRUCTIVE && cf.c.n_rows > 1 && row == cf.c.n_rows - 1;
 }
 
-/* The card's height and top, and where its switch row and answers start (screen y). */
-static void card_body(const char *s);
+/* The card's height and top, and where its switch row and answers start (screen y). A glyph
+ * that would take the card past CARD_TOP to CARD_FOOT goes (a guest's pairing: two body lines,
+ * the code and three answers), so the card shows whole. */
+static void card_body(void *w, const char *s);
 static void card_layout(void) {
-    int h = CARD_PAD_TOP + CARD_TITLE_H;
-    if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
-    if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
-    int rows = h + CARD_ROWS_GAP;
-    h = rows + card_items() * CARD_ROW + (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) +
-        CARD_PAD_FOOT;
+    int h = 0, rows = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        h = CARD_PAD_TOP + CARD_TITLE_H + (cf.c.glyph ? CARD_GLYPH + CARD_GLYPH_GAP : 0);
+        if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
+        if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
+        rows = h + CARD_ROWS_GAP;
+        h = rows + card_items() * CARD_ROW +
+            (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) + CARD_PAD_FOOT;
+        if (h <= CARD_FOOT - CARD_TOP || !cf.c.glyph) break;
+        cf.c.glyph = (const char *)0;
+    }
     int top = CARD_CY - h / 2;
     if (top + h > CARD_FOOT) top = CARD_FOOT - h;
     if (top < CARD_TOP) top = CARD_TOP;
@@ -728,8 +751,10 @@ void confirm_close(void) {
     void *d = cf.dialog;
     cf.dialog = cf.view = (void *)0;
     if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+    if (cf.marq_timer) timer_remove(cf.marq_timer), cf.marq_timer = 0;
     if (d) window_close(d);
 }
+void *confirm_dialog(void) { return cf.dialog; }
 
 static int card_answer(const void *unused) {
     cf.answer_timer = 0;
@@ -771,10 +796,71 @@ static int card_gone(void *dialog, void *event) {
         cf.dialog = cf.view = (void *)0;
         cf.stock = 0;
         if (cf.timer) timer_remove(cf.timer), cf.timer = 0;
+        if (cf.marq_timer) timer_remove(cf.marq_timer), cf.marq_timer = 0;
     }
     return 0;
 }
-/* The timeout's tick: a repaint for its seconds and bar, the answer at the end. */
+/* s's width in the title's face (Inter Medium 20, a fallback face for a character Inter lacks). */
+static int card_text_w(void *canvas, const char *s) {
+    unsigned buf[96], n = ui_wide(s, buf, sizeof buf / sizeof *buf);
+    int px = TYPE(20);
+    const char *face = theme_face(buf, (int)n, &px);
+    if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    canvas_set_font(canvas, face, (unsigned)px);
+    return (int)(canvas_measure_text(canvas, buf, n) + 0.5f);
+}
+/* A column of h px from (x, y) in c, its alpha c's top byte. */
+static void scrub_col(void *canvas, unsigned c, int x, int y, int h) {
+    stock_canvas_set_fill_color(canvas, (RGBA(c & 0xffffffu) & 0xffffffu) | (c & 0xff000000u));
+    canvas_fill_rect(canvas, x, y, 1, h);
+}
+/* The scrolling title's frame: a repaint, and the next frame (RET_REPEAT: AWTK drops a timer that
+ * answers anything else). */
+static int card_marq(const void *unused) {
+    if (!cf.dialog) return cf.marq_timer = 0, 0;
+    widget_invalidate_force(cf.dialog, (void *)0);
+    return 8; /* RET_REPEAT */
+}
+/* The title's offset now, px from its start: the hold, then a run of its width and the gap. */
+static int card_marq_off(void) {
+    unsigned t = (unsigned)time_now_ms() - cf.marq_at, run = (unsigned)(cf.title_w + CARD_MARQ_GAP),
+             run_ms = run * 1000 / CARD_MARQ_PX, cycle = CARD_MARQ_HOLD_MS + run_ms;
+    t %= cycle;
+    return t < CARD_MARQ_HOLD_MS ? 0 : (int)((t - CARD_MARQ_HOLD_MS) * CARD_MARQ_PX / 1000);
+}
+/* The title: centred when it fits, else scrolling in the text column with its ends faded into
+ * the card (fill, its colour). */
+static void card_title(void *canvas, int cx, int y, int tw, unsigned fill) {
+    if (!cf.title_w) cf.title_w = card_text_w(canvas, cf.title);
+    if (cf.title_w <= tw) {
+        ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+        return;
+    }
+    if (!cf.marq_timer) {
+        cf.marq_at = (unsigned)time_now_ms();
+        cf.marq_timer = timer_add(card_marq, (void *)0, CARD_MARQ_MS);
+    }
+    int x0 = cx - tw / 2, off = card_marq_off(), was[4];
+    canvas_get_clip_rect(canvas, was);
+    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
+    rect_t col = { x0 + ox, y - CARD_TITLE_H / 2 + oy, tw, CARD_TITLE_H }, in = col;
+    if (in.x < was[0]) in.w -= was[0] - in.x, in.x = was[0];
+    if (in.y < was[1]) in.h -= was[1] - in.y, in.y = was[1];
+    if (in.x + in.w > was[0] + was[2]) in.w = was[0] + was[2] - in.x;
+    if (in.y + in.h > was[1] + was[3]) in.h = was[1] + was[3] - in.y;
+    if (in.w <= 0 || in.h <= 0) return;
+    canvas_set_clip_rect(canvas, &in);
+    for (int k = 0; k < 2; ++k)
+        ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1,
+                x0 - off + k * (cf.title_w + CARD_MARQ_GAP), y, cf.title_w + 8, 2);
+    for (int i = 0; i < CARD_MARQ_FADE; ++i) { /* the ends into the card */
+        unsigned a = (unsigned)(255 - 255 * i / CARD_MARQ_FADE) << 24 | (fill & 0xffffffu);
+        if (off) scrub_col(canvas, a, x0 + i, y - CARD_TITLE_H / 2, CARD_TITLE_H);
+        scrub_col(canvas, a, x0 + tw - 1 - i, y - CARD_TITLE_H / 2, CARD_TITLE_H);
+    }
+    canvas_set_clip_rect(canvas, (rect_t *)was);
+}
+/* The timeout's tick: a repaint for its seconds and bar, repeating, the answer at the end. */
 static int card_tick(const void *unused) {
     if (!cf.dialog) return cf.timer = 0, 0;
     if ((int)(cf.until - (unsigned)time_now_ms()) <= 0) {
@@ -783,7 +869,7 @@ static int card_tick(const void *unused) {
         return 0;
     }
     widget_invalidate_force(cf.dialog, (void *)0);
-    return 1;
+    return 8; /* RET_REPEAT */
 }
 
 int confirm(const confirm_t *c) {
@@ -800,7 +886,7 @@ int confirm(const confirm_t *c) {
     cf.c = *c;
     cf.toggle_on = c->toggle_on;
     tk_snprintf(cf.title, sizeof cf.title, c->title ? c->title : "", c->name ? c->name : "");
-    card_body(c->body);
+    card_body(dialog, c->body);
     tk_snprintf(cf.code, sizeof cf.code, "%s", c->code ? c->code : "");
     card_layout();
     void *back = widget_lookup(dialog, "img_return", 1),
@@ -851,13 +937,33 @@ int confirm(const confirm_t *c) {
     return 1;
 }
 
-/* The body's lines from s, '\n' between them, two at most. */
-static void card_body(const char *s) {
-    for (; s && *s && cf.lines < 2; ++cf.lines) {
-        unsigned n = 0;
+/* The body's lines from s, '\n' between its paragraphs, each wrapped at spaces to the text
+ * column in w's canvas (a word wider than the column ends its line there, cut), CARD_BODY_LINES at
+ * most. With no canvas each paragraph is a line. */
+static void card_body(void *w, const char *s) {
+    void *canvas = w ? widget_get_canvas(w) : (void *)0;
+    while (s && *s && cf.lines < CARD_BODY_LINES) {
+        unsigned n = 0, take;
         while (s[n] && s[n] != '\n') ++n;
-        tk_snprintf(cf.body[cf.lines], sizeof cf.body[0], "%.*s", (int)n, s);
-        s += n + (s[n] == '\n');
+        take = n;
+        if (canvas) {
+            char line[sizeof cf.body[0]];
+            unsigned end = 0;
+            take = 0;
+            while (end < n) {
+                unsigned e = end + 1;
+                while (e < n && s[e] != ' ') ++e;
+                tk_snprintf(line, sizeof line, "%.*s", (int)e, s);
+                if (take && ui_text_w(canvas, line, 0, TYPE(15)) > CARD_W - 2 * CARD_IN) break;
+                take = end = e;
+            }
+        }
+        tk_snprintf(cf.body[cf.lines++], sizeof cf.body[0], "%.*s", (int)take, s);
+        s += take;
+        if (take < n)
+            while (*s == ' ') ++s;
+        else if (*s == '\n')
+            ++s;
     }
 }
 static int card_toggle_on(void) {
@@ -943,7 +1049,7 @@ int feedback_confirm_dress(void *w) {
         if (!strncmp(verb, losing[k], strlen(losing[k]))) cf.c.kind = CONFIRM_DESTRUCTIVE;
     for (unsigned k = 0; k < sizeof mild / sizeof *mild; ++k)
         if (!tk_strcmp(verb, mild[k])) cf.c.kind = CONFIRM_NEUTRAL;
-    card_body(body);
+    card_body(w, body);
     cf.check = widget_lookup(w, "msg_delcheckbutton", 0);
     if (cf.check) { /* the switch row: its words painted (confirm_rows_paint), the check a stop */
         widget_get_text_utf8(cf.check, cf.toggle, sizeof cf.toggle);
@@ -993,7 +1099,11 @@ void confirm_paint(void *w, void *canvas) {
     rect_t card = { CARD_X, top, CARD_W, cf.h };
     fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
     int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
-    ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, cx, y, tw, 1);
+    if (cf.c.glyph) {
+        paint_art(w, canvas, theme_art(cf.c.glyph), cx - CARD_GLYPH / 2, top + CARD_PAD_TOP);
+        y += CARD_GLYPH + CARD_GLYPH_GAP;
+    }
+    card_title(canvas, cx, y, tw, ipod_light() ? 0xffffff : RGB_RAISED);
     y += CARD_TITLE_H / 2;
     if (cf.lines) y += CARD_BODY_GAP;
     for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE)

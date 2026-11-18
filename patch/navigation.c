@@ -1,5 +1,6 @@
 /* Logical menu selection is independent of native touch focus. Stock code owns gestures. */
 #include "navigation.h"
+#include "card_store.h"
 #include "playlist_art.h"
 extern int stock_sorted_query_trampoline(const char *, const char *, void *, int);
 extern int stock_seek_time_trampoline(int);
@@ -209,6 +210,8 @@ extern int coverflow_home_back(void *top), coverflow_home_owns(void *w);
 extern const char *coverflow_home_title(void);
 extern int coverflow_home_sub(void), coverflow_home_split(void *top);
 extern void coverflow_home_strip(void *canvas, void *top);
+extern void coverflow_home_dim(void *canvas, void *top);
+extern int coverflow_home_slide(int *open);
 extern void coverflow_home_painted(void);
 extern void coverflow_home_row(void *surface, void *row, int id, int painting);
 extern void coverflow_paint(void *w, void *canvas), video_poll(void);
@@ -449,6 +452,7 @@ void drop_input(void) {
 }
 
 /* The rest of the UI, by area (tools/ci/split_sources.py): one translation unit with the above. */
+static void bar_title_fades(void *w, void *canvas, int begin); /* theme_titles_paint.c */
 #include "nav/home_carousel.c"
 #include "nav/lists.c"
 #include "nav/pull.c"

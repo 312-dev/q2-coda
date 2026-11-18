@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, ui_name
+from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
 
 W_X, W_PARENT, W_EMITTER = O['W_X'], O['W_PARENT'], O['W_EMITTER']
 EMIT_TYPE, EMIT_PENDING_REMOVE, EMIT_NEXT = O['EMIT_TYPE'], O['EMIT_PENDING_REMOVE'], O['EMIT_NEXT']
@@ -270,8 +270,11 @@ class Ui:
 
     def prop_str(self, w, name, default):
         node = self.nodes.get(w)
-        value = None if node is None else node.name if name == 'name' else node.image if name == 'image' else node.props.get(name)
-        return self.c(w, value) if isinstance(value, str) and value else default
+        if node is None:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (node.name or None) if name == 'name' else (node.image or None) if name == 'image' else node.props.get(name)
+        value = stock_prop_str(node.kind.encode(), name.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.c(w, value.decode()) if isinstance(value, bytes) else value
 
     def set(self, w, name, value):
         if w in self.nodes:
@@ -1287,7 +1290,7 @@ def test_a_go_to_that_opened_nothing_keeps_no_restore(fw, ui, st, recs):
 class Card(Files):
     """Files, appends too ("ab" keeps what the file held), with access() and fputs."""
     def __init__(self, fw, files=None):
-        super().__init__(fw, files)
+        super().__init__(fw, files, card=True)  # places and counts are on it (card_store.c)
         fw.mock('fw_access', lambda path, *_: 0 if cstr(path) in self.files else -1)
         fw.mock('fw_fputs', lambda s, f, *_: self.fwrite(s, 1, len(C.string_at(s)), f) and 0)
 
@@ -2364,7 +2367,7 @@ def test_a_pull_down_moving_or_held_is_left(fw, ui, state, idex, pressed):
 
 
 # Resume: a long track's place, kept each second by the UI loop (resume_poll), and a spoken book's.
-RESUME_FILE, PLAYS_FILE = '/mnt/data/ringnav-resume', '/mnt/data/ringnav-plays'
+RESUME_FILE, PLAYS_FILE = '/mnt/mmc/.q2pod/ringnav-resume', '/mnt/mmc/.q2pod/ringnav-plays'  # card_store.c
 EDGE, SAVE_S = O['RESUME_EDGE_S'], O['RESUME_SAVE_S']
 
 
@@ -2666,6 +2669,16 @@ def test_only_a_listen_the_card_takes_counts_for_an_upload(fw, player, recs, tak
     assert fw.var('scrobble_ui__sa', C.c_uint).value == takes  # pending, the struct's first field
 
 
+def test_reads_3_s_apart_still_count_as_heard(player, recs):
+    """Dark, stock's status cache is up to DARK_POLL_US old, so two reads a second apart can be 3 s apart."""
+    player.play([recs(path='/mnt/mmc/Music/a.flac', artist='A')], total=200)
+    for s in range(0, 103, 3):  # heard from the second poll (3 s) on: 99 s
+        player.poll(s)
+    assert PLAYS_FILE not in player.card.files
+    player.poll(105)
+    assert plays(player.card.files[PLAYS_FILE]) == [(key_of('/mnt/mmc/Music/a.flac'), 1)]
+
+
 def test_a_seek_is_not_heard(player, recs):
     player.play([recs(path='/mnt/mmc/Music/a.flac', artist='A')], total=200)
     player.poll(0), player.poll(1), player.poll(150), player.poll(151)
@@ -2931,6 +2944,114 @@ def test_the_battery_is_read_once_each_poll_period(fw, ui, st):
     assert battery.switches() == [0]
 
 
+# get_battery_capacity's three reads (system.c ringnav_batt_level, ringnav_batt_voltage, ringnav_batt_status): at most
+# every BATT_DARK_MS with the screen off on battery, stock's second otherwise.
+BATT_DARK_MS, BATT_DARK_FLOOR = O['BATT_DARK_MS'], O['BATT_DARK_FLOOR']
+
+
+class Gauge:
+    """The CW2015's level and voltage and the AXP2101's status as sysfs has them, and stock's get_battery_capacity
+    (0x4ff258) around the three payload calls: a level under 101 stored, a voltage not negative stored, a status under 3
+    stored, then the cable read (usb_detect, through ringnav_usb_detect's hook) into g_usbdet_value. tick() is one of
+    the status bar's seconds."""
+    def __init__(self, fw, level=60, mv=3900, status=0, cable=0, lit=0):
+        self.fw, self.now, self.level, self.mv, self.status, self.cable = fw, 100000, level, mv, status, cable
+        self.reads = 0
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('toolsGetBatterycapacity', self.read_level)
+        fw.mock('toolsGetBatteryVoltage', lambda *_: self.mv)
+        fw.mock('toolsGetChargeStatus', lambda *_: self.status)
+        fw.mock('stock_usb_detect_trampoline', lambda *_: self.cable)
+        fw.mock('toolsGpioGetValue', lambda *_: 0)
+        self.lit = fw.var('g_backlight_status', C.c_ubyte)
+        self.lit.value = lit
+        self.stored = [fw.var('fw_ctx_g_power_capacity', C.c_int), fw.var('fw_ctx_g_power_chargestate', C.c_int)]
+        self.det = fw.var('g_usbdet_value', C.c_ubyte)
+        self.fns = [fw.fn(n, C.c_int) for n in ('ringnav_batt_level', 'ringnav_batt_voltage', 'ringnav_batt_status')]
+        self.detect = fw.fn('ringnav_usb_detect', C.c_int)
+
+    def read_level(self, *_):
+        self.reads += 1
+        return self.level
+
+    def tick(self, seconds=1):
+        level, mv, status = (f() for f in self.fns)
+        if 0 <= level < 101:
+            self.stored[0].value = level
+        if mv >= 0:
+            self.voltage = mv
+        if 0 <= status < 3:
+            self.stored[1].value = status
+        self.det.value = self.detect()
+        self.now += seconds * 1000
+        return level, mv, status
+
+
+def test_the_battery_is_read_every_second_while_lit(fw):
+    g = Gauge(fw, lit=1)
+    for _ in range(5):
+        g.tick()
+    assert g.reads == 5
+
+
+def test_dark_on_battery_the_battery_is_read_every_thirty_seconds_and_stock_keeps_the_last_values(fw):
+    g = Gauge(fw, level=60, mv=3900)
+    assert g.tick() == (60, 3900, 0)  # the first pass reads
+    g.level, g.mv = 59, 3880
+    seen = [g.tick() for _ in range(BATT_DARK_MS // 1000 - 1)]
+    assert g.reads == 1 and set(seen) == {(60, 3900, 0)} and g.stored[0].value == 60
+    assert g.tick() == (59, 3880, 0) and g.reads == 2  # BATT_DARK_MS after the last read
+    assert len(fw.calls('stock_usb_detect_trampoline')) == BATT_DARK_MS // 1000 + 1  # the cable: every second
+
+
+def test_lit_again_the_next_second_reads(fw):
+    g = Gauge(fw)
+    g.tick(), g.tick()
+    g.lit.value = 1
+    g.level = 55
+    assert g.tick()[0] == 55 and g.reads == 2
+
+
+@pytest.mark.parametrize('cable, status, level', [(1, 1, 60), (1, 2, 100), (1, 0, 80), (0, 1, 60), (0, 2, 100),
+                                                  (0, 0, BATT_DARK_FLOOR - 1)])
+def test_dark_the_battery_keeps_stocks_second_plugged_charging_full_or_low(fw, cable, status, level):
+    g = Gauge(fw, level=level, status=status, cable=cable)
+    for _ in range(5):
+        g.tick()
+    assert g.reads == 5
+
+
+def test_dark_a_plug_and_an_unplug_are_read_the_second_after(fw):
+    g = Gauge(fw, level=60)
+    g.tick(), g.tick()
+    g.cable, g.status = 1, 1  # plugged in: get_battery_capacity's cable read sees it after its battery reads
+    g.tick()
+    assert g.reads == 1
+    assert g.tick()[2] == 1 and g.reads == 2  # the next second: charging, read
+    g.cable, g.status = 0, 0  # out
+    g.tick()  # the cable still read as in when the battery was
+    assert g.tick()[2] == 0 and g.reads == 4  # the flag fell since that read: read once more
+    g.tick()
+    assert g.reads == 4  # on battery again: the slow pace
+
+
+def test_charge_limit_stops_charging_dark_on_the_poll_after_the_level_reaches_it(fw, ui, st):
+    """Dark and plugged in, the battery keeps stock's second, so charge_poll's next pass sees the limit."""
+    g = Gauge(fw, level=STOP_AT - 2, status=1, cable=1)
+    st('charge_limit').value = 1
+    poll = fw.fn('system__charge_poll', None)
+    first = None
+    for second in range(40):
+        if second % 10 == 9:
+            g.level += 1  # a level every 10 s, a fast charge
+        g.tick()
+        poll()
+        if first is None and fw.calls('switch_charge_enable'):
+            first = g.stored[0].value
+    assert first == STOP_AT and fw.calls('switch_charge_enable')[0][1][0] == 0  # stopped at the limit, not past it
+    assert g.reads == 40
+
+
 # The hardware watchdog (wdt_*), started by the first loop pass and fed by every one after.
 WDT_MS, WDT_LONG_MS = O['WDT_MS'], O['WDT_LONG_MS']
 WDT_START, WDT_STOP, WDT_FEED = 0x8004570d, 0x2000570e, 0x2000570f
@@ -2996,21 +3117,27 @@ def test_a_clean_end_stops_the_watchdog_and_removes_the_state_record(fw, ui):
     end(), end()
     wdt.poll()
     fw.fn('system__state_poll', None)()
-    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files == {}
+    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files.keys() <= {'/proc/mounts'}
 
 
-# The state record (state_poll): /mnt/data/q2-state, one line rewritten whenever it changes.
+# The state record (state_poll): /mnt/data/q2-state, one line rewritten when it changes, a burst's latest
+# STATE_SETTLE_MS (5 s) after its first change; a run's first line and the power field at once.
 class State:
     def __init__(self, fw, ui):
-        self.fw, self.card = fw, Card(fw)
+        self.fw, self.card, self.ms = fw, Card(fw), 1000
         self.status, self.out = 2, 0
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('mclGetOutputWay', lambda *_: self.out)
+        fw.mock('time_now_ms', lambda *_: self.ms)
         self.poll_fn = fw.fn('system__state_poll', None)
 
-    def poll(self):
+    def poll(self, ms=0):
+        self.ms += ms
         self.poll_fn()
         return self.card.files.get('/mnt/data/q2-state', b'').decode()
+
+    def writes(self):
+        return len([a for _, a in self.fw.calls('fw_fopen') if C.string_at(a[0]) == b'/mnt/data/q2-state'])
 
 
 def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
@@ -3020,7 +3147,8 @@ def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     fw.var('g_usbdet_value', C.c_ubyte).value = 1
     state.status, state.out = 3, 1
-    assert state.poll() == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
+    state.poll()  # the change seen; written once it has settled
+    assert state.poll(5000) == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
 
 
 @pytest.mark.parametrize('level, status, out, line', [
@@ -3036,11 +3164,40 @@ def test_the_state_records_odd_readings(fw, ui, level, status, out, line):
 
 def test_the_state_record_is_written_only_when_it_changes(fw, ui):
     state = State(fw, ui)
-    state.poll(), state.poll()
-    assert len(fw.calls('fw_fopen')) == 1 and len(fw.calls('fw_fsync')) == 1
+    state.poll()  # a run's first line: at once, the forced-restart mark
+    assert state.writes() == 1 and len(fw.calls('fw_fsync')) == 1
+    for _ in range(20):
+        state.poll(1000)  # nothing changed: nothing written, however long
+    assert state.writes() == 1
     state.status = 3
+    state.poll(), state.poll(4999)
+    assert state.writes() == 1  # a change waits for the burst
+    assert 'play:paused' in state.poll(1) and state.writes() == 2
+
+
+def test_a_burst_of_changes_is_one_write_of_the_latest_line(fw, ui):
+    state = State(fw, ui)
     state.poll()
-    assert len(fw.calls('fw_fopen')) == 2
+    for level in range(90, 80, -1):  # ten changes, 400 ms apart: battery, screen, playback
+        fw.var('fw_ctx_g_power_capacity', C.c_int).value = level
+        fw.var('g_backlight_status', C.c_ubyte).value = level % 2
+        state.status = 2 + level % 2
+        state.poll(400)
+    assert state.writes() == 1
+    line = state.poll(1400)  # 5 s after the burst's first change
+    assert state.writes() == 2 and line == 'screen:on power:running cable:out battery:81 play:paused out:jack\n'
+    state.poll(5000)
+    assert state.writes() == 2
+
+
+def test_a_change_undone_within_the_burst_writes_nothing(fw, ui):
+    state = State(fw, ui)
+    state.poll()
+    state.status = 3
+    state.poll(1000)
+    state.status = 2
+    state.poll(1000), state.poll(5000)
+    assert state.writes() == 1
 
 
 def test_a_record_that_cant_be_written_is_tried_again(fw, ui):
@@ -3055,8 +3212,12 @@ def test_standby_records_the_suspend_it_may_never_wake_from(fw, ui, power):
     state = State(fw, ui)
     seen = []
     fw.mock('stock_standby_trampoline', lambda *_: seen.append(state.card.files['/mnt/data/q2-state'].decode()) or 0)
-    fw.fn('ringnav_standby', C.c_int)()
-    assert 'power:suspending' in seen[0] and power('suspended').value == 0
+    state.poll()
+    state.status = 3
+    state.poll(100)  # a change waiting out its burst
+    fw.fn('ringnav_standby', C.c_int)()  # 100 ms after the last write: the suspend is not held back
+    assert 'power:suspending' in seen[0] and 'play:paused' in seen[0] and power('suspended').value == 0
+    assert 'power:running' in state.poll(100)  # and the resume, at once too
 
 
 # The RTC's clock (rtc_now), as Standby's limit reads it.

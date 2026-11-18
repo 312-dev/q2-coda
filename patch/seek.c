@@ -109,9 +109,9 @@ int seek_target(int to, int dir, int step, int total) {
 
 /* Whether a hold here scans. The track must be a local one (a folder or the library: no stream,
  * Spotify, radio or video owns the buttons) playing or paused, and the buttons must not be another
- * page's: a game's, the playlist editor's, a time field's, or a dialog's (the restart toast's among
- * them) other than the volume's. With the screen off the buttons work as stock lets them, so not
- * under a Buttons lock that holds them (modes 2 and 3). */
+ * page's: a game's, the playlist editor's, a time field's, the letter strip's, or a dialog's (the
+ * restart toast's among them) other than the volume's. With the screen off the buttons work as
+ * stock lets them, so not under a Buttons lock that holds them (modes 2 and 3). */
 static int seek_allowed(void) {
     static const char *const own[] = { "games_page", "playlistedit_page", "manualtime_page",
                                        "sleepshutdown_page" };
@@ -127,6 +127,7 @@ static int seek_allowed(void) {
     const char *name = top ? widget_get_prop_str(top, "name", "") : "";
     if (!top || (!tk_strcmp(widget_get_type(top), "dialog") && tk_strcmp(name, "volume_dialog")))
         return 0;
+    if (search_strip_owns(top)) return 0; /* the letter strip's: Previous held erases there */
     for (unsigned i = 0; i < sizeof own / sizeof *own; ++i)
         if (!tk_strcmp(name, own[i])) return 0;
     return 1;

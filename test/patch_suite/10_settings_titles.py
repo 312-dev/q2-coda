@@ -15,7 +15,7 @@ def rockbox(card):
 m,names=rockbox(True)
 texts={c[0]:m.text(c[1]) for c in m.calls if c[0] in ('fopen','system')}
 assert texts=={'fopen':'/tmp/q2pod-rockbox',
-               'system':'killall checkappprocess.sh; killall -9 hciplayer; kill -9 $(cat /tmp/q2-librespot); '
+               'system':'killall -9 hciplayer; kill -9 $(cat /tmp/q2-librespot); '
                          'killall -9 librespot aplay; rm -f /tmp/q2-librespot /tmp/q2-librespot.state /tmp/q2-librespot.out /tmp/q2-librespot.download; sync; kill -9 $PPID'}
 assert [n for n in names if n in ('fclose','save_memoryplay_info','player_stop','system')]==['fclose','save_memoryplay_info','player_stop','system']; passed()
 m,names=rockbox(False)
@@ -60,8 +60,8 @@ class SettingsMachine(Machine):
         return super().hook(u,address,size,x)
 SET={k:O['SET_'+k] for k in ('ROW','TOP','ROWS','ICON','ICON_X','GAP','TEXT_X','EDGE','STOCK_ROW')}
 def geometry(m,w): return tuple(signed(m.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
-def settings(builder,default=SET['ROW'],sub=0,boot=None):
-    m=SettingsMachine(); m.layouts=0; boot and boot(m)
+def settings(builder,default=SET['ROW'],sub=0,boot=None,flat=False):
+    m=SettingsMachine(); flat and m.config.update(FLAT); m.layouts=0; boot and boot(m)
     m.mock('list_item_create','button_create','image_create','hscroll_label_create','label_create','widget_use_style',
            'widget_set_name','image_set_draw_type','image_base_set_image','set_hscroll_label_attribute','widget_on',
            'widget_set_text_utf8','widget_set_visible','widget_move_resize')
@@ -95,7 +95,7 @@ def tree(m,view):
 # goes, its labels take the second-line role, in boxes that hold them, and its buttons stay stock's. With no set booted (SET0's code) More isn't a settings list: the row keeps
 # stock's shape. A switch row's click stays stock's button's.
 def stock_list(boot,default):
-    m=SettingsMachine(); m.layouts=0; boot(m); m.handlers[O['LIST_VIEW_LAYOUT']]='stock_list_layout'
+    m=SettingsMachine(); m.config.update(FLAT); m.layouts=0; boot(m); m.handlers[O['LIST_VIEW_LAYOUT']]='stock_list_layout'
     m.mock('widget_move_resize','image_set_draw_type')
     view=m.node('scroll_view','scroll_view_more'); lst=m.node('list_view','list_view_more',[view]); m.top=m.node('window','playermore_page',[lst])
     m.word(view+O['W_PARENT'],lst); m.word(lst+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm); m.nodes[m.wm]={'type':'window_manager','children':[m.top]}
@@ -353,7 +353,7 @@ m.nodes[view]['children'].append(odd); lay(m,view)
 assert geometry(m,odd)[3]==78 and geometry(m,other)==(8,0,359,70); passed()
 # The wheel walks the laid-out rows, OLED's flat bar spans the whole 68px row less the selection's inset each side
 # (oled/theme.xml list.selection), the list scrolls to keep the row in view, and Centre and a tap reach the same button.
-m,view=settings(0x4d3594); lay(m,view); items=m.nodes[view]['children']
+m,view=settings(0x4d3594,flat=True); lay(m,view); items=m.nodes[view]['children']
 buttons=[m.nodes[i]['children'][0] for i in items]
 m.paint(view); assert m.selected(view)==0
 for k in range(1,len(items)):
@@ -775,7 +775,7 @@ assert got==[1,2,2] and m.confirm()==11 and m.dispatched()[0][1]==buttons[2]; pa
 # list.selection).
 SI=OLT['sel_inset']
 def ring(name='playlist_page'):
-    m=Machine(); w,es=m.page_list(6,height=96,extent=288,name=name); m.paint(w)
+    m=Machine(); m.config.update(FLAT); w,es=m.page_list(6,height=96,extent=288,name=name); m.paint(w)
     assert turn(m,w,(1000,)*5)==[1,2,3,4,5]
     return m,w,es
 m,w,es=ring()

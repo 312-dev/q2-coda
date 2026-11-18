@@ -5,6 +5,7 @@ small made-up files and a fake repository.
 """
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -15,6 +16,7 @@ import gate  # noqa: E402
 import merge_batch  # noqa: E402
 import json  # noqa: E402
 import patch_shards  # noqa: E402
+import smoke  # noqa: E402
 
 ALL = affected.ALL
 
@@ -83,9 +85,84 @@ def test_unknown_file_runs_everything(tmp_path):
 def test_tool_maps_to_its_unit_test_and_a_build_input_to_the_payload(tmp_path):
     root = tree(tmp_path, {'test/unit/test_shelf.py': '', 'test/unit/test_theme.py': ''})
     p = affected.plan_for({'tools/shelf.py': {1}}, root).as_dict()
-    assert p['unit'] == ['test_shelf.py'] and not p['patch'] and not p['fw']
+    assert p['unit'] == ['test_docs.py', 'test_shelf.py'] and not p['patch'] and not p['fw']  # docs: its citations
     p = affected.plan_for({'tools/theme.py': {1}}, root).as_dict()
-    assert p['unit'] == ['test_theme.py'] and p['patch'] == ALL and p['fw'] == ALL
+    assert p['unit'] == ['test_docs.py', 'test_theme.py'] and p['patch'] == ALL and p['fw'] == ALL
+
+
+def test_payload_change_runs_the_unit_rules_over_every_patch_file(tmp_path):
+    """feat/row-press changed patch/tilt.c and its plan left out test_theme.py, whose rule (no literal colour
+    where a token exists) covers every patch/*.c: the queue's batch caught it, and blamed another branch."""
+    root = tree(tmp_path, {'patch/tilt.c': 'int tilt_now(void) {\n  return 0;\n}\n', 'test/fw/test_x.py': '',
+                           'test/unit/test_xiph.py': "src = ROOT/'patch/xiph.c'\n"})
+    assert affected.plan_for({'patch/tilt.c': {1}}, root).as_dict()['unit'] == ['test_art.py', 'test_docs.py',
+                                                                              'test_theme.py']
+    assert affected.plan_for({'patch/theme.h': {1}}, root).as_dict()['unit'] == ['test_docs.py', 'test_theme.py']
+    assert affected.plan_for({'patch/xiph.c': {1}}, root).as_dict()['unit'] == ['test_art.py', 'test_docs.py',
+                                                                              'test_theme.py', 'test_xiph.py']
+
+
+def test_a_python_change_plans_the_mypy_suite_that_checks_it(tmp_path):
+    root = tree(tmp_path, {'test/unit/test_art.py': '', 'test/unit/test_shelf.py': ''})
+    other = lambda path: affected.plan_for({path: {1}}, root).as_dict()['other']  # noqa: E731
+    assert 'mypy-tools' in other('test/unit/test_art.py') and 'mypy-fw' not in other('test/unit/test_art.py')
+    assert 'mypy-tools' in other('tools/shelf.py') and 'mypy-tools' in other('tools/ci/gate.py')
+    assert 'mypy-fw' in other('test/fw/test_art_zoom.py') and 'mypy-tools' not in other('test/fw/test_art_zoom.py')
+    assert 'mypy-fw' in other('test/fw/helpers.py')
+    assert {'mypy-tools', 'mypy-fw'} <= set(other('pyproject.toml'))  # the mypy config; also an everything plan
+    for path in ('patch/seek.c', 'docs/ipod.md', 'tools/pwm.c', 'test/fw/fixture.json'):
+        assert not {'mypy-tools', 'mypy-fw'} & set(other(path)), path
+
+
+def test_mypy_suites_run_as_the_gate_runs_them(tmp_path):
+    for name in ('mypy-tools', 'mypy-fw'):
+        assert affected.mypy_argv(name, 'py') == gate.full_suite(name, 'py', tmp_path)().argv
+    every = affected.Plan()
+    every.everything('x')
+    assert {'mypy-tools', 'mypy-fw'} <= every.other
+
+
+def test_a_bisection_run_keeps_the_mypy_suites():
+    whole = {'unit': [], 'fw': [], 'patch': [], 'other': ['mypy-fw', 'test/gone.py'], 'why': []}
+    assert merge_batch.widen(None, whole, lambda f: False)['other'] == ['mypy-fw']
+
+
+def test_every_folder_a_unit_test_globs_is_in_scanners():
+    """A test/unit file that reads every file of patch/, tools/ or test/ must be in affected.SCANNERS for that
+    folder, or a change there would skip its rule."""
+    root = pathlib.Path(affected.__file__).resolve().parents[2]
+    pattern = re.compile(r"(?:ROOT|parents\[2\])\s*/\s*'(patch|tools|test)'\)\s*\.r?glob\(")
+    found = {(m[1] + '/', f.name) for f in (root/'test/unit').glob('test_*.py') for m in pattern.finditer(f.read_text())}
+    assert ('patch/', 'test_theme.py') in found  # the pattern still sees the rule that was missed
+    assert found <= {(folder, test) for folder, _, test in affected.SCANNERS}
+
+
+def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
+    # test/coverflow.py compiles its own host build and takes no BUILD; the plan once handed it one and argparse
+    # refused it, so the suite had not run for a day when anyone noticed.
+    import subprocess
+    root = pathlib.Path(__file__).resolve().parents[2]
+    real_run, ran = subprocess.run, []
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    plan = affected.Plan()
+    plan.other.add('test/coverflow.py')
+    assert affected.run(plan, '/some/build', 'python3') == 0
+    assert ran[-1][-1:] == ['test/coverflow.py']  # nothing after the script
+    assert gate.other_suite('test/coverflow.py', 'python3').argv[-1:] == ['test/coverflow.py']
+    # and the suite does refuse an extra argument, so the line above is the one that matters
+    refused = real_run([sys.executable, str(root/'test/coverflow.py'), '/some/build'], capture_output=True, text=True)
+    assert refused.returncode == 2 and 'unrecognized arguments' in refused.stderr
+
+
+def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
+    # test/coverflow.py is in no gate tier, so only a change to the file itself used to plan it.
+    for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
+                 'patch/page_parallax.c', 'patch/playlist_art.c'):
+        assert 'test/coverflow.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
+
+
+def test_an_unrelated_payload_file_does_not_plan_the_coverflow_suite(tmp_path):
+    assert 'test/coverflow.py' not in affected.plan_for({'patch/volume.c': {1}}, tmp_path).as_dict()['other']
 
 
 def test_docs_only_run_the_anchor_check(tmp_path):
@@ -315,7 +392,7 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     every = {'unit': 'all', 'fw': 'all', 'patch': 'all', 'other': ['test/build.py'], 'why': []}
     assert set(gate.suites_for(every, [], 'py', tmp_path)) == set(gate.MERGE)
     assert set(gate.suites_for(None, [], 'py', tmp_path)) == set(gate.FULL)  # no plan: a release's gate
-    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov'}
+    assert set(gate.suites_for(None, [], 'py', tmp_path, 'post')) == {'fw-asan', 'unit-cov', 'smoke'}
     assert gate.suites_for(every, [], 'py', tmp_path)['patch'].argv == ['py', 'test/patch.py', '{build}']
     docs = {'unit': ['test_docs.py'], 'fw': [], 'patch': [], 'other': [], 'why': []}
     assert list(gate.suites_for(docs, [], 'py', tmp_path)) == ['unit']
@@ -375,3 +452,88 @@ def test_a_reserved_lease_is_never_reclaimed_or_handed_on(tmp_path, monkeypatch)
         raise AssertionError('a reserved copy was handed on')
     emu_pool.reserve(1, on=False)
     assert emu_pool.get('/c', 'other', 1, wait=False) == 1  # unreserved and expired: reclaimed
+
+
+def test_a_payload_change_plans_the_smoke_test_and_a_merge_batch_leaves_it_out(tmp_path, monkeypatch):
+    root = tree(tmp_path, {'patch/seek.c': 'int seek_step(int x) {\n  return x;\n}\n'})
+    plan = affected.plan_for({'patch/seek.c': {2}}, root)
+    assert 'smoke' in plan.other
+    assert 'smoke' not in affected.plan_for({'docs/ipod.md': {1}}, root).other
+    # the queue runs it on the tip after landing (the post tier), not in the batch
+    assert 'smoke' not in gate.suites_for(json.loads(plan.to_json()), [], 'py', tmp_path)
+    assert gate.suites_for(None, [], 'py', tmp_path, 'post')['smoke'].argv[1:] == [str(gate.ROOT/'tools/ci/smoke.py'), '{build}']
+    # a worker runs it only when asked
+    import subprocess
+    ran: list = []
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    only = affected.Plan()
+    only.other.add('smoke')
+    assert affected.run(only, '/b', 'py') == 0 and ran == []
+    assert affected.run(only, '/b', 'py', smoke=True) == 0 and ran[-1][-2:] == [str(affected.ROOT/'tools/ci/smoke.py'), '/b']
+
+
+def test_a_lease_can_keep_off_a_slot_and_prepare_the_copy_before_its_boot(tmp_path, monkeypatch):
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path)
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 3)
+    calls: list = []
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: calls.append(a) or type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    (tmp_path/'leases.json').write_text(json.dumps({'1': {'name': 'x', 'build': '/b', 'since': 0, 'until': time.time() + 99}}))
+    k = emu_pool.get('/b', 'smoke-1', 1, wait=False, avoid=(2,), prepare=lambda k: calls.append(('prepare', k)))
+    assert k == 3 and calls[-2:] == [('prepare', 3), (3, 'start', str(pathlib.Path('/b').resolve()))]
+    try:
+        emu_pool.get('/b', 'smoke-2', 1, wait=False, avoid=(2,))  # 2 is free, but avoided
+    except SystemExit as e:
+        assert 'leased' in str(e)
+    else:
+        raise AssertionError('an avoided slot was leased')
+
+    def boom(k):
+        raise RuntimeError('no config')
+    emu_pool.put(3)
+    try:
+        emu_pool.get('/b', 'smoke-3', 1, wait=False, avoid=(2,), prepare=boom)
+    except RuntimeError:
+        pass
+    assert '3' not in json.loads((tmp_path/'leases.json').read_text())  # a failed prepare leaves no lease
+
+
+def test_smoke_compares_the_screen_in_upright_boxes():
+    blank = bytes(smoke.W * smoke.H * 4)
+
+    def lit(x, y):  # upright (x, y) set, as q2remote.framebuffer_png turns the page
+        page = bytearray(blank)
+        i = (x * smoke.W + smoke.W - 1 - y) * 4
+        page[i:i + 3] = b'\xff\xff\xff'
+        return bytes(page)
+    assert smoke.differ(blank, lit(100, 200)) == 1
+    assert smoke.differ(blank, lit(100, 10)) == 0                     # the status row's clock: not counted
+    assert smoke.differ(blank, lit(300, 200), smoke.HOME_LIST) == 0   # Home's art beside its list
+    assert smoke.differ(blank, lit(100, 200), smoke.HOME_LIST) == 1
+
+
+def test_smoke_looks_past_the_status_bar_and_a_toast():
+    assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'msginfo_dialog')]) == 'home_page'
+    assert smoke.top([('system_bar', 'system_bar'), ('window', 'home_page'), ('dialog', 'statusbar_dialog')]) == 'statusbar_dialog'
+    assert smoke.top([('system_bar', 'system_bar')]) is None and smoke.top(None) is None
+
+
+def test_smoke_turns_bluetooth_off_and_keeps_the_rest_of_the_config():
+    assert smoke.bluetooth_off('[A]\nBLUETOOTH=1\nX=2\n') == '[A]\nBLUETOOTH=0\nX=2\n'
+    assert smoke.bluetooth_off('[SYSSET]\nX=2\n') == '[SYSSET]\nBLUETOOTH=0\nX=2\n'
+    assert smoke.bluetooth_off('[A]\nX=2\n') == '[A]\nX=2\n[SYSSET]\nBLUETOOTH=0\n'
+
+
+def test_smoke_confirms_only_the_guardian_cards_demo_vouches_for_at_boot():
+    """smoke.py's boot step (boot_rule): Home on top goes on; a confirm card demo's answer file names as one of
+    q2guard's must-confirm cards is confirmed; the same dialog without that word, or any other window, fails."""
+    home = [('normal', 'system_bar'), ('normal', 'home_page')]
+    card = home + [('dialog', 'sortselect_dialog')]
+    assert smoke.boot_rule(home, None) is None
+    assert smoke.boot_rule(home + [('dialog', 'msginfo_dialog')], None) is None  # a toast passes over
+    assert smoke.boot_rule(card, 'nosensor') == 'confirm'
+    assert smoke.boot_rule(card, 'norun') == 'confirm'
+    assert smoke.boot_rule(card, '-') == 'fail'                                 # a confirm card of another kind
+    assert smoke.boot_rule(card, None) == 'fail'
+    assert smoke.boot_rule(home + [('dialog', 'confirminfo_dialog')], 'nosensor') == 'fail'

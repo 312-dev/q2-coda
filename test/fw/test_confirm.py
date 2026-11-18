@@ -1,12 +1,13 @@
 """patch/feedback.c confirm(): the confirmation card over the dimmed page (docs/oled-design.md#confirmation-card), its
 layout, default row, Return, answers, switch row and timeout."""
 import ctypes as C
+import struct
 
 import pytest
 
 from conftest import O
 from test_nav_hold import Ui, ui  # noqa: F401 (fixtures)
-from test_nav_painters import Canvas, scratch, st, theme  # noqa: F401 (fixtures)
+from test_nav_painters import OLED_SET, SETS, Canvas, scratch, st, theme  # noqa: F401 (fixtures)
 
 KEY_RETURN, KEY_PLAY, EVT_KEY_UP = O['KEY_RETURN'], O['KEY_PLAY'], O['EVT_KEY_UP']
 NEUTRAL, DESTRUCTIVE, CONSEQUENTIAL, INFO = range(4)
@@ -17,7 +18,7 @@ class Confirm(C.Structure):
     _fields_ = [('title', C.c_char_p), ('name', C.c_char_p), ('body', C.c_char_p), ('code', C.c_char_p),
                 ('rows', C.POINTER(C.c_char_p)), ('n_rows', C.c_int), ('kind', C.c_int), ('back', C.c_int),
                 ('toggle', C.c_char_p), ('toggle_on', C.c_int), ('timeout_ms', C.c_int), ('timeout_row', C.c_int),
-                ('answer', ANSWER), ('ctx', C.c_void_p)]
+                ('answer', ANSWER), ('ctx', C.c_void_p), ('glyph', C.c_char_p)]
 
 
 class Card:
@@ -60,6 +61,16 @@ class Card:
         canvas = Canvas(self.fw, char_w=5)  # the body fits its 251 px
         self.fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(self.dialog, canvas.addr)
         return canvas
+
+
+def repeat(ui, name):
+    """One pass of name's timer, kept as stock keeps it while it answers RET_REPEAT (8); its answers."""
+    kept = {t: v for t, v in ui.timers.items() if v[0] == ui.fn(name)}
+    answers = ui.due(name)
+    for (t, v), answer in zip(kept.items(), answers):
+        if answer == 8:
+            ui.timers[t] = v
+    return answers
 
 
 def rect(ui, w):
@@ -118,8 +129,10 @@ def test_a_timeout_answers_its_row_by_itself_counting_down_on_it(fw, ui, st):
     canvas = Canvas(fw)
     fw.fn('confirm_rows_paint', None, C.c_void_p, C.c_void_p)(card.view, canvas.addr)
     assert '30 s' in [t[0] for t in canvas.texts]
-    now[0] += 30000
-    ui.due('feedback__card_tick')
+    now[0] += 1000
+    assert repeat(ui, 'feedback__card_tick') == [8]  # RET_REPEAT: AWTK drops a timer that answers anything else
+    now[0] += 29000
+    assert repeat(ui, 'feedback__card_tick') == [0]
     ui.due()
     assert card.answers == [(2, 0)]
 
@@ -131,6 +144,56 @@ def test_only_one_card_at_a_time(fw, ui, st):
     assert not card.ask('Shut Down?', ['Cancel', 'Shut Down'], kind=CONSEQUENTIAL)
     fw.fn('confirm_close', None)()
     assert card.dialog in ui.closed and not fw.fn('confirm_up', C.c_int)() and not card.answers
+
+
+# pair_prompt.c: one pairing presentation over the card, Car Remote's and Guest Play's (docs/oled-design.md#pairing).
+def pair(fw, card, phone, code=b'242610', body=b'Enter this code in Q2 Muse Remote', timeout=120000):
+    rows = (C.c_char_p * 1)(b'Cancel')
+    card.rows = rows
+    return fw.fn('pair_prompt', C.c_void_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int, C.c_int,
+                 C.c_int, C.c_int, ANSWER, C.c_void_p)(phone, code, body, rows, 1, 0, timeout, 0, card.answer, None)
+
+
+def test_a_pairing_names_the_phone_over_its_code_with_the_phone_glyph(fw, ui, st):
+    """The card's title names the phone, a 28 px phone glyph over it (6 px gap), the six digits in two groups, the
+    body saying where to enter them, Cancel lit, and the pairing's time as the foot's bar."""
+    theme(fw)
+    card = Card(fw, ui)
+    assert pair(fw, card, b'Pixel 10 Pro') == card.dialog
+    assert card.selected == 0
+    canvas = card.paint()
+    assert [t[0] for t in canvas.texts] == ['Pair with Pixel 10 Pro?', 'Enter this code in Q2 Muse Remote', '242 610']
+    h = 18 + 28 + 6 + 24 + 4 + 19 + 6 + 40 + 14 + 32 + 8
+    assert [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291] == [(42, 168 - h // 2, 291, h)]
+    assert any(b[0][3] == 2 for b in canvas.boxes)  # the timeout's track along the foot
+
+
+def test_a_long_phone_name_scrolls_in_the_title_never_cut(fw, ui, st):
+    """A title wider than the 251 px column is drawn twice, the copy 40 px behind, clipped to the column, and a
+    frame timer moves it; a short one is drawn once, centred."""
+    theme(fw)
+    card = Card(fw, ui)
+    pair(fw, card, b'Pixel 10 Pro XL of the Whole Family')  # 46 characters: 460 px at 10 px each
+    canvas = Canvas(fw)
+    fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
+    titles = [t for t in canvas.texts if t[0].startswith('Pair with')]
+    assert len(titles) == 2 and ui.fn('feedback__card_marq') in ui.pending()
+
+
+def test_a_guests_pairing_drops_the_glyph_rather_than_run_past_the_screen(fw, ui, st):
+    """A guest's pairing (two body lines, the code, three answers) is 282 px with the glyph, past the 258 px between
+    the status row and the glass's foot (y 44 to 302): the glyph goes, so the card (248 px) shows whole."""
+    theme(fw)
+    card = Card(fw, ui)
+    rows = (C.c_char_p * 3)(b'Allow Once', b'Always Allow', b'Decline')
+    card.rows = rows
+    fw.fn('pair_prompt', C.c_void_p, C.c_char_p, C.c_char_p, C.c_char_p, C.c_void_p, C.c_int, C.c_int, C.c_int,
+          C.c_int, ANSWER, C.c_void_p)(b"Alex's Pixel", b'482913', b"Wants to play music.\nCheck it's on Alex's phone.",
+                                       rows, 3, 2, 30000, 2, card.answer, None)
+    canvas = card.paint()
+    h = 18 + 24 + 4 + 2 * 19 + 6 + 40 + 14 + 3 * 32 + 8
+    (box,) = [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291]
+    assert box[3] == h and 44 <= box[1] and box[1] + box[3] <= 302
 
 
 def test_a_two_line_body_stands_on_19_px_lines_under_the_title(fw, ui, st):
@@ -204,3 +267,66 @@ def test_the_card_fades_in_over_200_ms_and_out_over_120_before_its_answer(fw, ui
     assert opacity() == 127 and not card.answers
     ui.due('feedback__card_answer')
     assert card.answers == [(0, 0)]
+
+
+def wheel(fw, card, code):
+    """One wheel detent through the firmware's key filter (ringnav), well after the last, on a lit Q2."""
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    card.now[0] += 1000
+    event = C.create_string_buffer(0x40)
+    C.c_int.from_address(C.addressof(event) + O['EVENT_KEY']).value = code
+    return fw.fn('ringnav', C.c_int, C.c_void_p, C.c_void_p)(None, event)
+
+
+def test_the_wheel_moves_between_the_answers_and_the_list_never_scrolls(fw, ui, st):
+    """Software Update's Install card: the answers' list sits across the set's list end (y 224 on the OLED set), and a
+    list cut there scrolled Cancel under the bar as the second answer took it, so the wheel seemed stuck on Cancel
+    (p31, 2026-11-16). The answers stand whole: the wheel lights each in turn and the list stays put."""
+    theme(fw)
+    st('geom').value = OLED_SET
+    card = Card(fw, ui)
+    assert card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Q2 Muse Dev · V0RHi',
+                    body='58.5 MB, over V0RHi. Takes about 2 min;\nyour music and settings stay.')
+    rows = rect(ui, card.list)
+    view = ui.nodes[card.view]
+    struct.pack_into('<2i', view.block, O['W_W'], rows[2], rows[3])  # AWTK lays the view out over the list
+    C.c_ubyte.from_address(card.view + O['VIEW_VERTICAL']).value = 1
+    C.c_int.from_address(card.view + O['VIEW_CONTENT_H']).value = rows[3]
+    assert rows[1] + rows[3] > SETS[OLED_SET].list_end and card.selected == 0
+    wheel(fw, card, O['KEY_NEXT'])
+    assert card.selected == 1 and not [a for _, a in fw.calls('scroll_view_set_offset') if a[2]]
+    wheel(fw, card, O['KEY_NEXT'])
+    assert card.selected == 1
+    wheel(fw, card, O['KEY_PREV'])
+    assert card.selected == 0
+
+
+def test_a_long_body_wraps_at_words_and_the_card_grows(fw, ui, st):
+    """A body line wider than the 251 px column wraps at its words onto as many 19 px lines as it needs, never cut;
+    the card grows by each line."""
+    theme(fw)
+    canvas = Canvas(fw, char_w=8)  # 31 characters to the column
+    fw.mock('widget_get_canvas', lambda *_: canvas.addr)
+    card = Card(fw, ui)
+    assert card.ask('Install Q2 Muse?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL,
+                    body='58.5 MB, over V0RHi. Takes about 2 min;\nyour music and settings stay.')
+    fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
+    body = [t[0] for t in canvas.texts if t[0] != 'Install Q2 Muse?']
+    assert body == ['58.5 MB, over V0RHi. Takes', 'about 2 min;', 'your music and settings stay.']
+    h = 18 + 24 + 4 + 3 * 19 + 14 + 2 * 32 + 8
+    assert [b[0] for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291] == [(42, 168 - h // 2, 291, h)]
+
+
+def test_the_install_cards_long_title_scrolls_never_cut(fw, ui, st):
+    """Software Update's 'Install Q2 Muse Dev · V0RHi?' is wider than the column: it scrolls, drawn twice, never cut
+    with an ellipsis."""
+    theme(fw)
+    card = Card(fw, ui)
+    card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Q2 Muse Dev · V0RHi')
+    canvas = Canvas(fw)
+    fw.fn('confirm_paint', None, C.c_void_p, C.c_void_p)(card.dialog, canvas.addr)
+    titles = [t[0] for t in canvas.texts if t[0].startswith('Install')]
+    assert titles == ['Install Q2 Muse Dev · V0RHi?'] * 2 and ui.fn('feedback__card_marq') in ui.pending()
+    for _ in range(3):  # every frame repaints and asks for the next
+        card.now[0] += 33
+        assert repeat(ui, 'feedback__card_marq') == [8]

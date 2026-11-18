@@ -31,7 +31,7 @@ int np_sync(void *top) {
     /* a pressed server song while it loads (catalogue.c), else the playing one */
     void *pressed = catalogue_np_now(&at, &n), *r = pressed ? pressed : queue_now(&at, &n);
     const char *album = pressed ? P(pressed, REC_ALBUM) : now_tag(r, REC_ALBUM);
-    if (pressed) catalogue_np_text(top);
+    catalogue_np_text(top);      /* the pressed song's lines, or the player's back after it */
     unsigned pos[2] = { at, n }; /* a new song of the same album restarts its marquee too */
     unsigned h = hash_bytes(fnv(FNV_SEED, (const unsigned char *)album), (const unsigned char *)pos,
                             sizeof pos);
@@ -42,10 +42,20 @@ int np_sync(void *top) {
     int max = widget_get_prop_int(st.np_slider, "max", 0),
         left = max - widget_get_prop_int(st.np_slider, "value", 0);
     if (left < 0) left = 0;
-    int total = np_time_total(), shown = total ? max : left, key = shown << 1 | total;
+    unsigned ms = 0;
+    int cert = np_stream_length(&ms); /* a streamed song still arriving: not the player's length */
+    if (cert == 1)
+        max = (int)(ms / 1000), left = max - widget_get_prop_int(st.np_slider, "value", 0);
+    if (left < 0) left = 0;
+    int total = np_time_total(), shown = total ? max : left;
+    if (cert == 2) shown = 0;
+    int key = shown << 3 | cert << 1 | total;
     if (key == st.np_left) return 0;
     st.np_left = key;
-    clock_text(st.np_remain, !total, shown);
+    if (cert == 2)
+        widget_set_text_utf8(st.np_remain, "--:--");
+    else
+        clock_text(st.np_remain, !total, shown);
     return 1;
 }
 
@@ -230,14 +240,24 @@ static int glide_ms(int v, int playing) {
 #define NP_KNOB 14
 void paint_scrubber(void *w, void *canvas) {
     if (!w || w != st.np_slider || !P(canvas, CANVAS_LCD)) return;
-    int bw = I(w, W_W), lo = widget_get_prop_int(w, "min", 0),
-        n = widget_get_prop_int(w, "max", 100) - lo,
-        v = clamp_step(0, n, widget_get_prop_int(w, "value", 0) - lo);
+    unsigned lms = 0;
+    int cert = np_stream_length(&lms), lo = widget_get_prop_int(w, "min", 0), bw = I(w, W_W),
+        h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
+    /* a streamed song still arriving: stock's bar runs to the length the player has so far, which
+     * grows, so the track is drawn over it and the fill from the server's length, or none */
+    int n = widget_get_prop_int(w, "max", 100) - lo;
+    if (cert) n = cert == 1 ? (int)(lms / 1000) - lo : 0;
+    if (cert) {
+        rect_t track = { 0, (I(w, W_H) - h) / 2, bw, h };
+        unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        fill_box(canvas, &track, RGBA(theme()->np_track_rgb), (unsigned)h / 2);
+        stock_canvas_set_fill_color(canvas, saved);
+    }
+    int v = clamp_step(0, n, widget_get_prop_int(w, "value", 0) - lo);
     int playing = !st.scrub && n > 0 && v < n && mclGetPlayStatus() == 2,
         fill = n > 0 ? (bw * v + bw * glide_ms(v, playing) / 1000) / n : 0;
     if (fill > bw) fill = bw;
-    if (n > 0 && fill > bw * v / n) {
-        int h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
+    if (n > 0 && fill > (cert ? 0 : bw * v / n)) {
         rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
@@ -354,11 +374,11 @@ void np_mode_step(int repeat, int dir) {
  * accent pill holding the antenna and "Radio": turning on, the pill grows from the glyph's width
  * over NP_GROW_MS and the gaps shrink with it, the word fading in over the last part (back the same
  * way off; at once under Reduce Motion). While radio is on, shuffle and repeat are NP_DIM and
- * ignore taps and the Centre cycle: the radio picks the order. The one the Centre cycle's wheel
- * sets (np_stage) stands in a Text Primary outline, and a tapped one on a #2C2C2E square that fades
- * out over NP_PRESS_MS (docs/oled-design.md#now-playing, approved as 22 v4 on 2026-11-16): each
- * fits what is drawn, the glyph's ink and, while it shows, the on dot, padded NP_FOCUS_PAD to the
- * outline's inner edge or NP_PRESS_PAD to the square's. */
+ * ignore taps and the Centre cycle: the radio picks the order. The one the Centre cycle's ring
+ * is on (np_stage) stands in a Text Primary outline (the heart's: heart_ring), and a tapped one on
+ * a #2C2C2E square that fades out over NP_PRESS_MS (docs/oled-design.md#now-playing, approved as 22
+ * v4 on 2026-11-16): each fits what is drawn, the glyph's ink and, while it shows, the on dot,
+ * padded NP_FOCUS_PAD to the outline's inner edge or NP_PRESS_PAD to the square's. */
 #define NP_BTN 22  /* a glyph, and a button's width in the row */
 #define NP_PILL 92 /* the radio's pill, on */
 #define NP_PILL_H 34
@@ -376,6 +396,7 @@ void np_mode_step(int repeat, int dir) {
 #define NP_PRESS_INK RGB_RAISED_2
 #define NP_INK_ALPHA 64 /* a glyph's pixel this opaque or more is its ink */
 enum { NB_SHUFFLE, NB_RADIO, NB_REPEAT, NB_QUEUE, NB_N };
+static void *glyph_fav __attribute__((section(".scratch"))); /* np_glyphs_bind's heart */
 
 static void *np_row_widget(void) {
     return st.np_win ? widget_lookup(st.np_win, "img_playmode", 1) : (void *)0;
@@ -465,12 +486,12 @@ static void glyph_framed(void *win, void *canvas, const char *name, int x, int y
         rect_t sq = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p };
         fill_box(canvas, &sq, RGBA(blend(NP_PRESS_INK, 0, press)), NP_FRAME_R);
     }
-    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD */
+    if (focus) { /* 2 px: the ink to its inner edge NP_FOCUS_PAD; fill_box's canvas inks Light Mode */
         int p = NP_FOCUS_PAD + 2;
         rect_t ring = { ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p },
                in = { ring.x + 2, ring.y + 2, ring.w - 4, ring.h - 4 };
-        fill_box(canvas, &ring, ui_ink(RGBA(0xffffff)), NP_FRAME_R);
-        fill_box(canvas, &in, ui_ink(RGBA(0)), NP_FRAME_R - 2);
+        fill_box(canvas, &ring, RGBA(0xffffff), NP_FRAME_R);
+        fill_box(canvas, &in, RGBA(0), NP_FRAME_R - 2);
     }
     canvas_draw_icon(canvas, bitmap, x, y);
     if (dot) fill_box(canvas, &d, RGBA(accent_tone(TONE_LIGHT)), NP_DOT / 2);
@@ -486,12 +507,16 @@ static int press_share(int k) {
 }
 
 /* A tap on the row (the play mode's target): the button nearest it. Shuffle and repeat step as
- * the Centre cycle's wheel does, unless radio is on; radio starts a radio of the playing song, or
+ * Centre on their ring does, unless radio is on; radio starts a radio of the playing song, or
  * the pill stops it (song_radio.c song_radio_tap); Up Next opens the queue (navigation.c np_queue).
  * 1 when it took the tap, stock's step through the one mode never. */
 int np_mode_click(void *target, void *event) {
     if (!target || target != np_row_widget() || !theme()->np_modes) /* the theme last */
         return 0;
+    if (np_stream_error()) { /* Retry or Skip (np_stream.c): the screen's x */
+        np_stream_cta_click(I(event, EVENT_X));
+        return 1;
+    }
     int x = I(event, EVENT_X), word, cx[NB_N], k = 0;
     for (void *p = target; p && p != window_manager(); p = P(p, W_PARENT)) x -= I(p, W_X);
     row_x(0, I(target, W_W), pill_w(&word), cx);
@@ -508,10 +533,41 @@ int np_mode_click(void *target, void *event) {
     return 1;
 }
 
+/* The heart while it shows: Now Playing's, bound (np_glyphs_bind), visible with every parent, on
+ * the art page at rest (the slide_view on its first page, the lyrics not full screen). */
+void *np_heart(void) {
+    void *h = glyph_fav;
+    if (!h || !st.np_win || !st.np_slide || st.np_full ||
+        widget_get_prop_int(st.np_slide, "value", 0))
+        return (void *)0;
+    for (void *p = h; p != st.np_win; p = P(p, W_PARENT))
+        if (!p || !widget_get_visible(p)) return (void *)0;
+    return h;
+}
+/* The Centre cycle's ring round the heart, its Rating stop: as glyph_framed's, 2 px at
+ * NP_FOCUS_PAD from the heart's ink, drawn over the page with no fill, so the heart (draw_type
+ * center) shows through it. */
+static void heart_ring(void *win, void *canvas) {
+    void *h = st.np_stage == NP_STAGE_RATING && ui_focus_shown() ? np_heart() : (void *)0;
+    unsigned bitmap[64]; /* bitmap_t */
+    if (!h || widget_load_image(win, widget_get_prop_str(h, "image", ""), bitmap)) return;
+    int x = I(h, W_W) / 2, y = I(h, W_H) / 2, p = NP_FOCUS_PAD + 2;
+    for (void *q = h; q && q != win; q = P(q, W_PARENT)) x += I(q, W_X), y += I(q, W_Y);
+    rect_t ink, ring;
+    glyph_ink(bitmap, x, y, &ink);
+    ring = (rect_t){ ink.x - p, ink.y - p, ink.w + 2 * p, ink.h + 2 * p };
+    for (int i = 0; i < 2; ++i, ++ring.x, ++ring.y, ring.w -= 2, ring.h -= 2)
+        round_ring(canvas, &ring, NP_FRAME_R - i, ui_ink(RGBA(0xffffff)));
+}
+
 void np_modes(void *win, void *canvas) {
     void *mode = theme()->np_modes && P(canvas, CANVAS_LCD) ? widget_lookup(win, "img_playmode", 0)
                                                             : (void *)0;
     if (!mode) return;
+    if (np_stream_error()) { /* Retry and Skip in the row's place (np_stream.c) */
+        np_stream_cta_paint(canvas, I(mode, W_Y) + I(mode, W_H) / 2);
+        return;
+    }
     int m = *(volatile int *)MCL_MODE, cy = I(mode, W_Y) + I(mode, W_H) / 2, rep = np_repeat_of(m),
         word, w = pill_w(&word), cx[NB_N];
     row_x(I(mode, W_X), I(mode, W_W), w, cx);
@@ -527,8 +583,8 @@ void np_modes(void *win, void *canvas) {
                     : i && rep == NP_REPEAT_ONE ? "1_on"
                     : lit[i]                    ? "_on"
                                                 : off);
-        /* on: the accent's dot under it; the wheel's stage: the outline round it, while the wheel
-         * is the modality (ui_focus_shown) */
+        /* on: the accent's dot under it; the Centre cycle's ring on it: the outline round it,
+         * while the wheel is the modality (ui_focus_shown) */
         glyph_framed(win, canvas, name, x, cy, lit[i] && !rad.on,
                      st.np_stage == (unsigned)(NP_STAGE_SHUFFLE + i) && ui_focus_shown(),
                      rad.on ? 0 : press_share(k));
@@ -545,6 +601,7 @@ void np_modes(void *win, void *canvas) {
                      0, 0, press_share(NB_RADIO));
     glyph_framed(win, canvas, ipod_light() ? "mode_queue_l" : "mode_queue_d", cx[NB_QUEUE], cy, 0,
                  0, press_share(NB_QUEUE));
+    heart_ring(win, canvas);
     stock_canvas_set_fill_color(canvas, saved);
 }
 
@@ -556,7 +613,6 @@ int np_radio_on(void) { return rad.on; }
  * to play_fav or play_unfav, so each paint of the window (ringnav_paint_bg, before the buttons
  * paint) turns either into the theme's, and an empty heart or More drawn for the other half into
  * this one's. An app's heart (tidal_fav_*) stays stock's. ringnav_playing binds the two buttons. */
-static void *glyph_fav __attribute__((section(".scratch")));
 static void *glyph_more __attribute__((section(".scratch")));
 static int glyph_half __attribute__((section(".scratch"))); /* More's: 0 none, else 'd' or 'l' */
 void np_glyphs_bind(void *win) {

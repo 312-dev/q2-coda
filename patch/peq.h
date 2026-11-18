@@ -370,7 +370,7 @@ int mono_on(void);   /* crossfade.c: Mono Audio's setting */
 #define NS_STEP 100
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
-void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ tile */
+void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
 void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */
@@ -423,6 +423,24 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 #define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
+/* stream_state.c: Download Ahead and a card app's .stream
+ * (docs/server-library.md#download-ahead-and-the-streaming-state) */
+enum { SL_NONE, SL_WAIT, SL_GET, SL_STALL, SL_DONE, SL_FAIL };
+typedef struct {
+    int state;               /* SL_* */
+    unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
+} sline_t;
+int ahead_n(void), ahead_step(void);
+const char *ahead_caps(void);
+int stream_line(const char *id, const char *path, sline_t *l);
+int stream_startable(const char *id, const char *path);
+int stream_app_of(const char *path, char *id, unsigned size);
+int stream_player_waits(const char *path);
+/* How sure the length of path is: 0 the player's or the library's stands (not a song of an app's
+ * stream cache, no .stream line, or its line is done); 1 the server's own length is known, *ms
+ * (the line's, else the catalogue's); 2 the song is still arriving and no length is known. */
+int stream_length(const char *path, unsigned *ms);
+void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
@@ -467,6 +485,7 @@ int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
 /* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
 int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
 int addon_radio_answer(unsigned seq);
+const char *addon_radio_missing(const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -490,7 +509,7 @@ void addon_q2app(const char *id, char *path, unsigned n);
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
-int catalogue_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
+int catalogue_seconds(const char *path), catalogue_copy_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */
 int catalogue_missing(const char *path);          /* the payload's own lists' check before a play */
 unsigned catalogue_song_key(void *r, unsigned key); /* plays and hearts: a copy is its row */
@@ -637,6 +656,7 @@ void slider_page_dirty(
     void *page); /* slider_page.c: its switch row, after the hidden switch changes */
 void stock_more_speed(void *win);
 int xfade_page(void *top);                       /* crossfade.c */
+int xfade_volume_shown(void *top);               /* crossfade.c */
 int night_page(void *top);                       /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
@@ -665,6 +685,9 @@ int title_gone(void *w, void *event); /* ... and looks for its source again at t
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);                 /* theme_engine.c: Light Mode */
 unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's flip turns into v */
+/* corner_cover.c: a radius r corner's anti-aliased coverage, r rows of r from the outermost, out
+ * of 255; 0 for r < 1 (docs/internals.md#rounded-corners) */
+const unsigned char *corner_cover(int r);
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
@@ -715,6 +738,9 @@ unsigned playlist_index(int cd_num);
 void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
+/* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */
+int rockbox_seen(void), groovebox_seen(void);
+void card_bins_changed(void);
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */

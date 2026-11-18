@@ -147,7 +147,10 @@ static void cr_now(void) {
     if (r && (!title || !*title)) title = P(r, REC_NAME);
     put_int(b, sizeof b, &n, "state", status == 2 ? 1 : status == 3 ? 2 : 0);
     put_int(b, sizeof b, &n, "pos", sec > 0 ? sec * 1000 : 0);
-    put_int(b, sizeof b, &n, "len", total > 0 ? total : 0);
+    unsigned lms = 0;
+    int cert = np_stream_length(&lms); /* a streamed song still arriving: the server's length, or 0 */
+    put_int(b, sizeof b, &n, "len",
+            cert == 1 ? (int)(lms / 1000) : cert == 2 ? 0 : total > 0 ? total : 0);
     put_int(b, sizeof b, &n, "id", r ? I(r, REC_ID) : 0);
     put_int(b, sizeof b, &n, "shuffle", shuf);
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
@@ -157,6 +160,11 @@ static void cr_now(void) {
     put_int(b, sizeof b, &n, "qpos", (int)pos);
     put_int(b, sizeof b, &n, "qlen", q ? (int)deque_size(q) : 0);
     put_int(b, sizeof b, &n, "qgen", (int)cr.q_gen);
+    unsigned have, btotal, bms; /* a server song loading (np_stream.c), NowPlaying.buffering */
+    put_int(b, sizeof b, &n, "buf", np_stream_loading(&have, &btotal, &bms));
+    put_int(b, sizeof b, &n, "bhave", (int)have);
+    put_int(b, sizeof b, &n, "btotal", (int)btotal);
+    put_int(b, sizeof b, &n, "bms", (int)bms);
     put_int(b, sizeof b, &n, "radio", song_radio_on());
     put(b, sizeof b, &n, "path", r ? P(r, REC_PATH) : "");
     put(b, sizeof b, &n, "title", title);
@@ -315,7 +323,7 @@ static int cr_jump(unsigned at, int id) {
         return 0;
     }
     if (check_forbid_play_no_headset(0)) return 1;
-    press_stamp();
+    playback_pick();
     player_start_queue((int)at);
     return 0;
 }
@@ -403,27 +411,22 @@ static int pair_cancel(void *ctx, void *event) {
     return 0;
 }
 
-static int pair_keyup(void *ctx, void *event) {
-    if (I(event, EVENT_KEY) != KEY_RETURN) return page_keyup(ctx, event);
-    pair_cancel(ctx, event);
-    return STOP;
+/* The card's Cancel, Return, or its timeout (the daemon's CRC_PAIR_TIMEOUT_MS): the card is
+ * closing itself. */
+static void pair_answer(void *ctx, int row, int toggle_on) {
+    cr.pair_page = 0;
+    pair_cancel(ctx, 0);
 }
 
-/* The Dialog: the question as its title, the code in two groups of three as Wi-Fi transfer's PIN, a hint,
- * and Cancel (docs/remote-protocol.md#pairing-on-the-q2). */
+/* The pairing card (pair_prompt.c, docs/oled-design.md#pairing): the phone named in its title, the
+ * code in two groups of three, where to enter it, Cancel, and the pairing's 120 s as its bar
+ * (docs/remote-protocol.md#pairing-on-the-q2). */
 static void pair_show(const char *code, const char *name) {
-    char title[64], digits[8];
-    snprintf(title, sizeof title, "Pair with \"%s\"?", name);
-    snprintf(digits, sizeof digits, "%.3s %.3s", code, code + 3);
+    static const char *const rows[] = { "Cancel" };
     reset_poweroptions_timer(1, 1, 1); /* the screen on and kept on, as a key press would */
-    if (!(cr.pair_page = page_open("carpair_page", pair_closed, pair_keyup))) return;
-    void *view = page_list(cr.pair_page, cr.pair_page, 0, title, 1, 48);
-    page_row_detail(view, 0, "Cancel", 0, pair_cancel);
-    ringnav_select(view, 0, 1);
-    const scheme_t *c = scheme();
-    widget_set_text_utf8(label(cr.pair_page, 0, 120, 375, 64, "s_scrlabel_white20c", 56, 0xff000000u | c->ink), digits);
-    widget_set_text_utf8(label(cr.pair_page, 0, 196, 375, 24, "s_scrlabel_white20c", 16, 0xff000000u | c->muted),
-                         "Enter this code in Q2 Muse Remote");
+    cr.pair_page = pair_prompt(name, code, "Enter this code in Q2 Muse Remote", rows, 1, 0,
+                               120000, 0, pair_answer, 0);
+    if (cr.pair_page) widget_on(cr.pair_page, EVT_DESTROY, pair_closed, 0);
 }
 
 static void cr_pairing(void) {

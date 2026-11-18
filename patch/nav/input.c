@@ -211,6 +211,10 @@ int ringnav_input(void *wm, void *e) {
         return 0;
     }
     if (addon_game_input(e)) return 0;
+    /* the selection bar's press (tilt.c): past the gates that drop a press with its release, and
+     * the video and the card game that own every key */
+    if (key == KEY_CENTER && (type == EVT_KEY_DOWN || type == EVT_KEY_UP))
+        tilt_press(type == EVT_KEY_DOWN);
     if (e && seek_input(e)) return 0; /* a held Previous or Next's repeats: seek.c */
     if (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) { /* a finger (stale_heal) */
         st.touch_at = st.last_input;
@@ -327,8 +331,8 @@ int ringnav_keydown(void *ctx, void *event) {
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
-    cc_keydown(key);      /* ... on a Control Center stop: its page (control_center.c) */
-    un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
+    cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
+    un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -420,7 +424,8 @@ static int edit_single(const void *info) {
         char click[0x30];
         if (sw && widget_get_visible(sw)) {
             stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
-            widget_invalidate_force(top, (void *)0); /* the hidden switch's change repaints no row */
+            widget_invalidate_force(top,
+                                    (void *)0); /* the hidden switch's change repaints no row */
         } else if (slider_page(top))
             navigator_back();
     } else if (f < n)
@@ -696,7 +701,8 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
-    if (usb_ui_key(window_manager_get_top_window(window_manager()), key)) return STOP; /* USB's Stop */
+    if (usb_ui_key(window_manager_get_top_window(window_manager()), key))
+        return STOP; /* USB's Stop */
     if (search_key(key)) return STOP;
     int result = usb_prompt() ? 0 : stock_keyup_trampoline(ctx, event);
     if (key == KEY_PLAY && play_hold_released()) return STOP;
@@ -755,7 +761,8 @@ int ringnav(void *ctx, void *event) {
                 select(&g_menu, 0);
                 reveal(&g_menu, 0, 1);
                 widget_invalidate_force(w, (void *)0);
-            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing"))
+            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing") &&
+                       !guest_home_np()) /* the row reads Guest Play: the guest's (guest_ui.c) */
                 compact_now_playing();
             return STOP;
         }

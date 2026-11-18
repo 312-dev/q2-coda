@@ -12,7 +12,8 @@ static struct {
     int card_quiet; /* a Standby resumed at card_at: its card toasts are dropped (ringnav_cardmount)
                      */
     unsigned card_at;
-    char state[96]; /* the state record last written (state_poll) */
+    char state[96];     /* the state record last written (state_poll) */
+    unsigned state_due; /* time_now_ms of the first change not yet written; 0 none */
     /* the boot logo's poll: last check, card seen mounted, its sync thread, its failure to toast */
     unsigned logo_at;
     int logo_mounted;
@@ -99,6 +100,47 @@ int ringnav_wifi_signal(void) {
     wifi.dbm = s ? pct - 100 : 0;
     wifi.at = now | !now; /* never 0, not read yet */
     return wifi.dbm;
+}
+
+/* The battery's reads (docs/internals.md#battery), get_battery_capacity's three calls, each a jal
+ * here: the CW2015 gauge's level and voltage and the AXP2101's status, three sysfs files read once
+ * a second by the status bar's timer, lit or dark. The gauge announces nothing and the level moves
+ * about 1% a minute at most, so with the screen off, on battery, the three are read at most every
+ * BATT_DARK_MS and stock is handed the last values in between, which it stores again unchanged.
+ * Stock's second is kept lit (the status bar shows them), whenever the cable is in or the charger
+ * reports charging or full (Charge Limit's charge_poll and the charger-off rule follow the level
+ * closely), on the first pass after the cable flag (g_usbdet_value, which get_battery_capacity's
+ * usb_detect sets after these reads) changed, and below BATT_DARK_FLOOR, where
+ * check_lowbattery_state counts the voltage towards its power-off. The cable's own read stays
+ * stock's, every second; a caller that reads the cable at its edge (usb_ui.c's
+ * get_battery_capacity on a usb_event.c edge) gets the battery read on the pass after, by the same
+ * flag change. Charging stays a read, not an event: the AXP2101 driver's interrupt handlers that call
+ * power_supply_changed are not requested by the stock kernel, so no uevent is known to come at a
+ * charge start or end. ponytail: dark on battery, a new level reaches Battery History up to
+ * BATT_DARK_MS late, and a wake shows a level that old for its first second; a device check of the
+ * uevent (docs/internals.md#battery) would let the charge status come by event. */
+static struct {
+    unsigned at; /* the last read; 0 none yet */
+    int skip;    /* this pass hands stock the last values */
+    int level, mv, status, cable;
+} batt __attribute__((section(".scratch")));
+
+int ringnav_batt_level(void) {
+    unsigned now = time_now_ms();
+    int cable = g_usbdet_value;
+    batt.skip = batt.at && !g_backlight_status && !cable && cable == batt.cable &&
+                (unsigned)I(g_power_chargestate, 0) - 1 >= 2 &&
+                I(g_power_capacity, 0) >= BATT_DARK_FLOOR && now - batt.at < BATT_DARK_MS;
+    if (batt.skip) return batt.level;
+    batt.at = now | !now; /* never 0 */
+    batt.cable = cable;
+    return batt.level = toolsGetBatterycapacity();
+}
+int ringnav_batt_voltage(void) {
+    return batt.skip ? batt.mv : (batt.mv = toolsGetBatteryVoltage());
+}
+int ringnav_batt_status(void) {
+    return batt.skip ? batt.status : (batt.status = toolsGetChargeStatus());
 }
 
 /* Hardware watchdog (docs/internals.md#watchdog). Stock loads soc_watchdog.ko and never starts it,
@@ -248,10 +290,15 @@ static void wdt_poll(void) {
     if (pw.wdt > 0 && !pthread_create(&tid, 0, stall_watch, 0)) pthread_detach(tid);
 }
 /* The state record (docs/internals.md#watchdog): /mnt/data/q2-state says what the Q2 is doing, one
- * line rewritten and synced whenever it changes: the screen, Standby's suspend, the cable, the
- * battery, playback and its output. A clean end removes it; one still there at boot means a
- * forced restart (or the battery), and S90play puts it in q2-crash.log (docs/boot.md). */
+ * line: the screen, Standby's suspend, the cable, the battery, playback and its output. A clean end
+ * removes it; one still there at boot means a forced restart (or the battery), and S90play puts it
+ * in q2-crash.log (docs/boot.md). Rewritten and synced only when the line changes, and a change of
+ * the screen, cable, battery, playback or output waits STATE_SETTLE_MS from the first one unwritten,
+ * so a burst is one write of the latest line. What the boot check rests on is written at once: the
+ * first line of a run (the file's being there is the forced-restart mark) and the power field
+ * (Standby's suspend, and its resume). */
 #define STATE_FILE "/mnt/data/q2-state"
+#define STATE_SETTLE_MS 5000
 static char *put(char *p, const char *s) {
     while (*s) *p++ = *s++;
     return p;
@@ -277,7 +324,19 @@ static void state_poll(void) {
     p = put(p, out[ow < 3 ? ow : 0]);
     p = put(p, "\n");
     *p = 0;
-    if (!tk_strcmp(s, pw.state)) return;
+    if (!tk_strcmp(s, pw.state)) {
+        pw.state_due = 0; /* back to what is written: nothing due */
+        return;
+    }
+    /* " power:" sits at the same offset in both lines: after "screen:on" or "screen:off" */
+    const char *was = strstr(pw.state, " power:"), *is = strstr(s, " power:");
+    int urgent = !pw.state[0] || !was || memcmp(was, is, 9);
+    unsigned now = (unsigned)time_now_ms();
+    if (!urgent) {
+        if (!pw.state_due) pw.state_due = now | !now;
+        if (now - pw.state_due < STATE_SETTLE_MS) return;
+    }
+    pw.state_due = 0;
     void *f = fopen(STATE_FILE, "w");
     if (!f) return;
     fwrite(s, 1, p - s, f);
@@ -292,6 +351,7 @@ void ringnav_clean_end(void) {
     if (pw.ended) return;
     pw.ended = 1;
     wdt_set(0);
+    config_settle(1);
     durations_shutdown(1);
     unlink(STATE_FILE);
     unlink(STALL_FILE); /* one the thread hadn't removed yet: S90play's next demo never would */
@@ -358,7 +418,8 @@ int ringnav_standby(void) {
     unsigned alarm = start + hours[st.standby_limit] * 3600;
     int armed = start && rtc_alarm(0) && rtc_alarm(alarm);
     pw.suspended = 1;
-    state_poll(); /* the record a resume that never comes leaves behind */
+    config_settle(1); /* a suspend may end in a power-off */
+    state_poll();     /* the record a resume that never comes leaves behind */
     wdt_set(0);   /* it would count through the suspend */
     int result = stock_standby_trampoline();
     wdt_set(1);
@@ -500,6 +561,8 @@ void power_poll(void) {
     ratings_copy_poll();
     wdt_poll();
     state_poll();
+    heatguard_poll(); /* q2guard's cards (heatguard.c) */
     smart_poll();
     wifi_transfer_poll();
+    config_settle(0);
 }

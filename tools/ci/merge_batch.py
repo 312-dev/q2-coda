@@ -21,7 +21,9 @@ between runs, each with its one reused build (tools/ci/rebuild.py, ~/.cache/q2-b
 3. Green: the integration branch is fast-forwarded to the batch's tip (merge commits only; no branch is
    rebased) and the landed branches are listed.
 4. Red: the batch is split in halves and only the failing suites run on each, on top of what has passed
-   so far, down to the branch each failure needs; a half known to fail (its sibling passed) is not tested
+   so far, down to the branch each failure needs. Each of those runs, and the tip's check below, runs
+   the failing suites as the batch's run planned them (its tests, not only those the half's own diff
+   maps to), so a branch that breaks a test only another branch's plan reaches is the one blamed; a half known to fail (its sibling passed) is not tested
    again. The culprits are left out, the remainder is tested again in full (what its own diff needs),
    and lands when that is green. Before any of that, the failing suites run on the tip alone: when the tip
    fails them too, nothing lands, as every branch would look guilty.
@@ -85,6 +87,24 @@ def restrict(plan, suites):
 
 def suites_of(plan):
     return [k for k in SUITES if plan[k]] + list(plan['other'])
+
+
+def widen(own, whole, exists):
+    """The plan a bisection run (or the tip's check) uses: whole, the plan of the round's run of everything
+    that failed, joined with own, the run's head's plan (None for the tip), keeping only the files exists()
+    finds at that head (the mypy suites are no files and stay). A head's own plan can be narrower than
+    whole's: a branch whose own plan skipped a suite part it breaks would pass its level, and the next
+    branch whose plan reaches that part would be blamed for it. test/patch.py runs whole: the plans'
+    joined-suite line numbers differ from head to head."""
+    out = {'why': whole.get('why', [])}
+    for k in ('unit', 'fw'):
+        parts = [whole[k]] + ([own[k]] if own else [])
+        out[k] = 'all' if 'all' in parts else sorted(f for f in set().union(*map(set, parts))
+                                                     if exists(f'test/{k}/{f}'))
+    out['patch'] = 'all' if whole['patch'] or (own and own['patch']) else []
+    names = set(whole['other']) | set(own['other'] if own else ())
+    out['other'] = sorted(o for o in names if exists(o) or o.startswith('mypy-'))
+    return out
 
 
 def integrate(ops, tip, branches, log=print):
@@ -198,7 +218,7 @@ class Real:
         self.target, self.tip, self.logs, self.dev, self.log = target, tip, logs, dev, log
         self.shas = {}
         self.runs = 0  # numbers each test's log directory
-        self.batch_plan: dict | None = None  # the first plan made, the whole batch's: what the tip alone is checked with
+        self.round_plan: dict | None = None  # the last whole run's plan: what the tip and the bisection runs widen to
         self.build_args = ['--dev', '--', '--new-player'] if dev else ['--', '--new-player']  # gate.py's default
 
     def wt(self, level):
@@ -242,8 +262,8 @@ class Real:
 
     def test(self, level, head, suites, tag):
         """head's tests through the worktree's tools/ci/gate.py: the plan affected.py makes for head against the
-        tip (the whole gate when that plan is everything), cut to suites when given (gate.py --only: a suite
-        the plan lacks is skipped, as head's changes cannot reach it)."""
+        tip (the whole gate when that plan is everything); when suites are given, that plan widened to the
+        round's whole run (widen) and cut to suites (gate.py --only)."""
         wt = self.wt(level)
         if git('rev-parse', 'HEAD', cwd=wt).stdout.strip() != head:
             git('checkout', '-q', '--detach', '-f', head, cwd=wt)
@@ -251,19 +271,13 @@ class Real:
         self.runs += 1
         out = self.logs/f'{self.runs:02d}-{re.sub(r"[^\w.-]+", "_", tag)[:60]}'
         out.mkdir(parents=True, exist_ok=True)
-        if head == self.tip:
-            # the tip's own diff is empty: check it with the batch's plan, as far as the tip has those files
-            # (the joined suite's line numbers are the batch's, so test/patch.py runs whole)
-            assert self.batch_plan is not None  # the batch itself is always tested before the tip
-            plan = dict(self.batch_plan, patch='all' if self.batch_plan['patch'] else [])
-            for k in ('unit', 'fw'):
-                if plan[k] != 'all':
-                    plan[k] = [f for f in plan[k] if (wt/'test'/k/f).exists()]
-            plan['other'] = [o for o in plan['other'] if (wt/o).exists()]
+        own = None if head == self.tip else self.plan(wt)  # the tip's own diff is empty
+        if suites is None:
+            plan = self.round_plan = own
         else:
-            plan = self.plan(wt)
-            if self.batch_plan is None:
-                self.batch_plan = plan
+            # the tip and every bisection level run the failing suites as the round's whole run planned them
+            assert self.round_plan is not None  # a round always tests everything first
+            plan = widen(own, self.round_plan, lambda f: (wt/f).exists())
         (out/'plan.json').write_text(json.dumps(plan))
         cmd = [sys.executable, str(wt/'tools/ci/gate.py'), '--plan-json', str(out/'plan.json'), '--logs', str(out),
                '--results', str(out/'results.json'), *(['--only', ','.join(suites)] if suites else []),

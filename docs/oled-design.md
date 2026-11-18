@@ -73,6 +73,10 @@ The tokens live once, in `tools/theme.py` `TOKENS`, written to `patch/tokens.h` 
 `patch/ui_kit.c` picks the half; `RGB_<NAME>` and `RGB_<NAME>_L` are each half) and read by `tools/art.py` for
 its glyphs' inks. A test fails on a color literal equal to a token anywhere else in `patch/`.
 
+The tokens live once, in `tools/theme.py` `TOKENS`, written to `patch/tokens.h` for the payload (`tok()` in
+`patch/ui_kit.c` picks the half; `RGB_<NAME>` and `RGB_<NAME>_L` are each half) and read by `tools/art.py` for
+its glyphs' inks. A test fails on a colour literal equal to a token anywhere else in `patch/`.
+
 | Token          | Hex       | Use                                                                          | Concept measurement                                        |
 | -------------- | --------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Canvas         | `#000000` | Every background                                                             | `#000000` on all grid screens                              |
@@ -148,6 +152,11 @@ Rules:
   20 is 24, 22 is 27. The payload writes `TYPE(px)` (`patch/ui_kit.h`), never the AWTK number.
 - **Truncate, then scroll.** A long title ends in an ellipsis; the selected row's title scrolls.
   Never shrink type to fit.
+- **Set text for small labels the payload draws itself.** AWTK places each glyph on its advance rounded to a
+  whole pixel and carries the error on, and draws a space about 3 px wider than Inter's, so at 13 px a label's
+  gaps run uneven ("Smart  Wi-Fi"). `ui_set` (`patch/ui_kit.c`) sets each glyph from Inter's own advances
+  (`FONT_ADV`, written into `stock.h` by `tools/build.py` `face_advances`), each rounded on its own, with no
+  added tracking (`TRACK_CAPTION` 0). Control Center's names are set this way.
 
 ## Spacing
 
@@ -172,32 +181,51 @@ All lists share one grid.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
   ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
   row of its own, so the list keeps its place.
-- The clock, in the same face, size and color, right-aligned 6 px left of the leftmost glyph
-  (the battery's body when it is alone). Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
+- The clock, in the same face, size and color, its digits' ink 8 px left of the leftmost glyph
+  (the battery's body when it is alone); its figures stand on rows 17 to 27, and every glyph beside them is
+  their height. Home, Now Playing and Cover Flow's covers (but an artist's, titled by the
   artist) have no title, and there the clock is centered across the row (x 187.5) instead, unless centered it would
   reach the glyphs; Home in
-  Split keeps it at the right, over the art, inked white or black as one glyph with the other glyphs
-  and battery (approved from `mock_clock_center.py` and `mock_clock_right.py` on 2026-11-15).
+  Split keeps it at the right, over the art (approved from `mock_clock_center.py` and `mock_clock_right.py` on
+  2026-11-15), where the clock and every glyph take one ink, white or black, picked once for the row from the art's
+  mean lightness under all of them, as iOS's status bar takes one style; the battery's green, red and orange keep
+  their hue (`mock_status_icons.py`, the user's, 2026-11-16). Under Split's vignette the top of the art is darkened
+  toward 25%, so that ink is white over almost any cover.
 - Right, right to left: the battery, its nub's end 62 px from the right edge (x 313), then the glyph
   slots, each shown only while it has something to say, nothing in the row ever wrapping (`status_row.c`;
   [internals](internals.md#status-row-slots)):
-  - **Play state**, 4 px left of the battery's body: three level bars as Up Next's, 2 px wide and 4 px apart,
-    standing 6 px below the row's center, 3 to 11 px tall and moving on offset sines (a 1.25 s loop) in Text
-    Primary while playing; paused, frozen at their last heights in Text Secondary; stopped, nothing. Only their
-    10 px box repaints as they move. A tap on them opens Now Playing (`mock_status_bars.py`, the user's, 2026-11-15).
-  - **Wi-Fi**, 5 px left of the bars: Phosphor `wifi-high` (bold) lit by the signal, one, two or three arcs in Text
-    Primary and the rest in `#3A3A3C` so the shape keeps its width; `wifi-x` (bold) connected with no internet;
-    nothing with Wi-Fi off or not connected (`mock_wifi_status.py`).
-  - **Sync**, 4 px left of the glyph before it: while a card app checks its server or its metadata, Phosphor
+  - **Play state**, left of the battery's body, a 10 x 11 px box in Text Primary playing or paused, as every
+    glyph: playing, three level bars as Up Next's, 2 px wide with round ends and 4 px apart, standing on the
+    digits' baseline, 3 to 11 px tall, moving as every [level bar](#level-bars); paused, the pause, two 3 px bars
+    11 px tall with 0.9 px corners at 0.5 and 6.5 px into the same box; stopped, nothing. On pause the bars stop and
+    cross-dissolve into the pause over 250 ms, `cubic_out`, and back on play, the bars moving again once it ends;
+    the dissolve stays in the 10 x 11 box, so nothing else in the row moves; Reduce Motion swaps them at once (the
+    user's, 2026-11-16 21:52). Only the box repaints as
+    the bars move. A tap on it opens Now Playing (`mock_status_bars.py`, 2026-11-15; `mock_status_icons.py`,
+    2026-11-16). On Home, while its first row is in sight, they lead that row instead ([Home's first
+    row](#homes-first-row)).
+  - **Wi-Fi**, left of the play state: iOS's fan, a 90 degree sector 11 px in radius from an apex on the digits'
+    baseline (15.6 x 11 px), cut into a dot (radius 3.6) and two bands (5.0 to 7.3, 8.7 to 11) with 1.4 px gaps;
+    the signal lights the dot, then the bands, in Text Primary and the rest is `#3A3A3C` (`#C7C7CC` in Light
+    Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
+    off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
+  - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
     `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
-  - **Headset battery**, 5 px left: a connected Bluetooth headset's level, Phosphor `bluetooth` (bold) then the
-    level and "%" in the battery's percentage type, Text Primary.
-  - **Buttons Lock**, 5 px left: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
-- The new glyphs are 14 px boxes at the padlock's optical size, 11 px of ink ([Icons](#icons)), centered on the
-  row; every gap is at least 4 columns of black, so Split inks each glyph by itself.
-- Battery, in iOS's proportions: a 25x12 body with 4 px corners and a 1 px `#6E6E6E` outline,
+  - **Bluetooth** (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is connected; Phosphor
+    `bluetooth` (bold) in Text Tertiary while a device connects and in Text Primary once one is connected; a
+    headset that reports its level, `headphones` (bold) and a 15x8 battery 2 px after it, filled to the level as
+    the status battery's (red under 20%); a car, `car-profile` (bold, 18.5 px wide at 11 tall). While a guest plays
+    ([Guest Play](#guest-play)), `device-mobile` (fill) in the accent, and while it is relayed to the Q2's
+    Bluetooth device a `›` (8 px, Text Secondary) and that device's glyph.
+  - **Buttons Lock**: the padlock (Phosphor `lock-simple`, fill, 13 px, Text Primary).
+- Every glyph is 11 px tall, the clock's digits' height, on their rows (17 to 27): the Phosphor ones sized by
+  their ink's height, not its longer side, so a wide one (`wifi-x`, the car) is as tall as the rest; strokes come
+  out about 2 px (the fan's bands 2.3, the bars 2, the pause 3). 6 px of black part two glyphs, 8 px the clock
+  from the first, as iOS spaces them (`mock_status_icons.py`, the user's, 2026-11-16).
+- Battery, in iOS's proportions: a 25x12 body on rows 16 to 27 (a row past the digits' top, as iOS's stands)
+  with 4 px corners and a 1 px `#6E6E6E` outline,
   the charge a solid fill 2 px inside it with 2.2 px corners to the level, charging or not, in
   Text Primary (under 20 % `#FF453A`, the only red on any screen; `#34C759` green on a cable that
   charges it, holds it full or holds it at Charge Limit; `#FF9F0A` orange on a charger too weak to
@@ -214,9 +242,35 @@ All lists share one grid.
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
 
+### Level bars
+
+The playing song's three level bars (the status row's play state, Home's first row, Up Next's header) are one
+motion wherever they show (`ui_kit.h` `lvl_*`): each bar passes through its column of the status row's ten approved
+frames (`mock_status_bars.py`: offset sines, a 1.25 s loop) every 125 ms, on a smooth curve between them, repainted
+30 times a second, so it rises and falls continuously instead of stepping between a few heights (the user's,
+2026-11-17 08:35: "smoother fps"). A height between two pixels shows its top row part-lit. Each screen keeps its own
+size (the status row's 2 px bars 3 to 11 px, Home's and Up Next's 3 px bars 5 to 12 px). Only the bars' own box
+repaints. Paused, they hold where they stopped and go on from there; under Reduce Motion they stand still.
+
+### Home's first row
+
+Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`):
+
+- Stock's Now Playing row reads **Playing** while something plays, **Paused** while it is paused and **Guest Play**
+  while a guest plays (its click opens the guest's Now Playing); with nothing queued and no guest it is not there.
+  Edit Home lists it as Playing.
+- It leads with the play state at the text column (x 28 in Split), moved out of the status row while the row is in
+  sight: Up Next's [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px) in the accent while
+  playing, a pause glyph (Phosphor `pause`'s proportions: two 4 x 12 px bars, 2 px apart) in Text Secondary while
+  paused, either white on the selection bar; a guest's by the guest's state. Only this row's words move, 18 px on
+  (x 46); the other rows keep theirs. The bars stand still under Reduce Motion.
+- Between playing and paused the glyph morphs over 250 ms, cubic out: the bars freeze, the middle one narrows and
+  fades, the outer two widen and rise into the pause's bars, the accent turning Text Secondary; on resume the same
+  backwards, then the bars move again. The words cross-fade in the same 250 ms. Under Reduce Motion both are a cut.
+
 ### Selection bar
 
-- Accent Blue, flat, the full row pitch tall, inset 16 px each side on every row, 8 px corners,
+- Accent Blue, flat (raised at rest, see Press below), the full row pitch tall, inset 16 px each side on every row, 8 px corners,
   (`list.selection.inset`, `list.selection.radius`).
 - Text and chevron on it are On Accent, the second line too. Nothing else on the row changes (no
   bold, no indent).
@@ -233,6 +287,10 @@ All lists share one grid.
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
   The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
   black band and down into the fade.
+- **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
+  sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
+  blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
+  press during a tug wins; the lean goes. Reduce Motion: the brighter blue only, no scale and no shadow.
 - A list left by Return opens at its top when it is chosen again; Return lands on the row the
   page behind was left at (`list.reopen.top`).
 - Exactly one per screen. A dialog over a list takes the selection; the list's bar is hidden
@@ -336,8 +394,12 @@ Home's list.
   listed, each row's chevron gives way to a grip (three 18x2 px bars 5 px apart, centered where the
   chevron was) in Text Tertiary, On Accent on the selection, and a hint, "Drag ≡ to move ·
   Play/Pause shows or hides", Inter Regular 13 px in Text Tertiary, is centered 14 px above the
-  screen's foot (its middle at y 298), the grip drawn as its glyph. Home in Split is laid out as
-  Full while the editor is open.
+  screen's foot (its middle at y 298), the grip drawn as its glyph. The list ends a row higher
+  than other lists, on y 250, so the hint has the room under the rows that a list has above the
+  screen's foot: the rows past that end peek through the same fade, into the ground by y 284, and a
+  scrolled list's top row fades as every list's does, circles and grips with their rows (the user,
+  2026-11-16: no row against an edge, and the fade at whichever end has more to scroll). Six rows
+  show, so Edit Home's seven scroll. Home in Split is laid out as Full while the editor is open.
 - **Check circles:** a 16 px circle centered on x 34 left of each row, its words moved to x 52. A
   row that shows has the accent's disc with a white 11 px bold check; a hidden row an empty 1.5 px
   ring in Text Tertiary, its words dimmed to Text Tertiary. On the selection the disc is white with
@@ -350,15 +412,18 @@ Home's list.
   only while something is loaded), and in the editor an Auto row shows how it stands now. The first
   toggle makes it the user's, Shown or Hidden, and that sticks (Folders shown on an empty card,
   hidden with folders).
-- **The wheel:** Center lifts the selected row: it grows 8% about its middle (the bar's box, so
-  x 2 to 372 and 34 px tall), its words in Inter Medium 22 px, white, with a white grip and its
-  circle as the selection's, on a raised `#2C2C2E` card with 9 px corners, a 1 px `#141414` ring and
-  a soft black shadow 6 px down. The wheel moves it a row a click, stopping at either end; Center
+- **The wheel:** Center lifts the selected row: nothing of it moves (the user, 2026-11-16: no
+  layout shift entering or leaving the drag), only its look changes. Its words in Inter Medium at
+  the row's 20 px, white, with a white grip and its circle as the selection's, each where it stood,
+  on a raised `#2C2C2E` card in the selection bar's box (x 16 to 359, inside the side margins) and
+  34 px tall about the row's middle, with 9 px corners, a 1 px `#141414` ring and a soft black
+  shadow 6 px down. The wheel moves it a row a click, stopping at either end; Center
   puts it down and saves. Return while it is lifted puts it back exactly where it was, still in the
   editor.
 - **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
-  the hold. The row follows the finger on its card; the rows it passes slide aside over 150 ms
-  (cubic out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
+  the hold. The row follows the finger on its card, held inside the list (from y 58 to the list's
+  end), never over the status row or the hint; the rows it passes slide aside over 150 ms (cubic
+  out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
   its place and saves. A tap selects a row and opens nothing.
 - **The order** is kept through a restart and a power cut. A row the editor doesn't list (the
   Library's My Fav and Frequent, a media row without its folder) keeps its place; a row a later
@@ -493,12 +558,27 @@ has no place for keeps a place of its own:
   the pill stops it ("Radio Off"). The queue button, and a swipe up on the
   art's page, open [Up Next](#up-next); the hold menu's View Queue opens it too.
 - **A state button's focus and press** (approved as 22 v4 on 2026-11-16, `audit2/proposed/v2/22v4-L5-np-state-row.png`):
-  the Center cycle's wheel outlines the control it sets in today's 2 px Text Primary stroke, 9 px corners, no fill;
+  the Center cycle's ring outlines the control the wheel has moved it to (Shuffle, Repeat or the heart) in today's 2 px Text Primary stroke, 9 px corners, no fill;
   a tap puts a `#2C2C2E` square, 9 px corners, under the button and fades it out over 250 ms; the wheel never
   shows the square. Both fit what is drawn: the glyph's ink alone with no dot showing (Up Next, radio, and
   shuffle or repeat while off), the glyph and its on dot together while it shows, padded 6 px to the outline's
   inner edge (8 px to its outer) or 8 px to the square's edge on every side; an outline grows by the dot when its
   control turns on. The radio's pill is its own press.
+- **A server song loading** (approved as streaming-v3's variant D, `design/streaming-states/`): while the song waits
+  to start, or playback has caught up with its download, a 14 px 12-spoke spinner (Text Secondary, a turn a second,
+  turning under Reduce Motion too, as it reports progress) and "7.0 of 20 MB" (Inter 13 px, Text Secondary) sit
+  centred in the times row, 6 px apart, between the elapsed and the remaining, which both stay. Nothing dims, the bar
+  does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
+- **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
+  art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
+  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
+  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
+  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
+  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
+  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+  wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
@@ -519,8 +599,8 @@ Tertiary), 46 px right of the text column. The list runs edge to edge to the foo
 as a menu's; a lit row's foot never passes y 282.
 
 - **The playing song** is the sheet's header and takes no selection: its cover, its title with
-  three Accent Blue level bars (3 px wide, 4.5 px apart, up to 12 px high) 7 px after it, moving
-  about 8 times a second while it plays and still while paused, and its artist and album
+  three Accent Blue [level bars](#level-bars) (3 px wide, 4.5 px apart, 5 to 12 px high) 7 px after it, moving
+  while it plays and still while paused, and its artist and album
   ("Pink Floyd · The Dark Side of the Moon").
 - **Playing Next** (Inter Medium 13 px, Text Secondary) heads the songs queued with Play Next, Play
   Last and the bump, with a **Clear** pill on its right, 22 px high, ending at x 359 with the
@@ -641,8 +721,10 @@ as its callers move onto it.
 - **Surface:** the whole screen, status row too, under black at 50%; the card `#1C1C1E` (white in Light Mode), 291 px
   wide at x 42 with 16 px corners, its stack centered on y 168 and kept inside y 44 to 302.
 - **Content**, 20 px in from each side: 18 px of padding; the title in Inter Medium 20, Text Primary, centered, naming
-  the object ("Forget WH-1000XM5?", never "Are you sure"), an ellipsis ending a long one; at most two body lines in
-  15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence case; a code (a pairing's "482
+  the object ("Forget WH-1000XM5?", never "Are you sure"), a long one scrolling in the text column (the house
+  marquee: held 2.75 s, then 35 px/s, a copy 40 px behind, its ends faded 12 px into the card), an optional 28 px
+  glyph 6 px over it; the body in 15 px Text Secondary on 19 px lines, 4 px under it, one consequence in sentence
+  case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
 - **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
@@ -654,8 +736,25 @@ as its callers move onto it.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
+
+### Pairing
+
+A phone pairing with the Q2 asks in one form, whoever asks: Car Remote's app or a Guest Play guest
+(`patch/pair_prompt.c` `pair_prompt`, the confirmation card's consequential kind; the user's ruling, 2026-11-16).
+
+- The phone glyph (Phosphor `device-mobile`, 28 px, the accent) over the title "Pair with Pixel 10 Pro?", the phone
+  as it names itself, scrolling when long; never cut short in the status row. A card the glyph would take past the
+  glass's foot (y 44 to 302: a guest's, with two body lines and three answers) goes without it and shows whole.
+- What to do with the code, in the body: Car Remote's "Enter this code in Q2 Muse Remote"; a guest's "Wants to play
+  music. Check it's on Alex's phone."
+- The code large, Inter Medium 30, as two groups of three ("242 610").
+- The answers: Car Remote's Cancel alone; a guest's Allow Once, Always Allow, Decline. It opens on the first.
+- The pairing's time as the card's timeout: Car Remote's 2 minutes, a guest's 30 s, a bar along its foot.
+- Its end, Car Remote's: the icon toast "Pixel 10 Pro paired" (Positive's check-circle) or "Pairing failed" (`carremote_page.c` `carremote_paired`).
+- ponytail: the digits are Inter's own, proportional; tabular digits need Inter's `tnum`, which the text drawing does
+  not apply.
 
 ### Focus ring
 
@@ -668,11 +767,12 @@ states' buttons, a card's answers) and any other mark that shows where the wheel
   record of that, `st.touch_mode` (`patch/navigation.c`: a touch sets it, the wheel clears it), read through
   `ui_focus_shown()` (`patch/ui_kit.c`); nothing keeps a second.
 - **Center with no ring** still does the screen's default: the primary button, a card's default answer.
-- **Now Playing's Center cycle** follows it too: the Shuffle or Repeat stage keeps its place, but its outline
-  (`np_bar.c` `glyph_framed`) draws only while `ui_focus_shown()`.
+- **Now Playing's Center cycle** follows it too: the ring on Shuffle, Repeat or the heart keeps its place, but its outline
+  (`np_bar.c` `glyph_framed`, `heart_ring`) draws only while `ui_focus_shown()`.
 - **Not under this rule:** Control Center's ring keeps its own form (it wakes on the first wheel tick or Center
   without acting, and goes 5 s after the last, `control_center.c` `cc_ring_on`), and the lists' selection bar, which
-  boots shown.
+  boots shown. Control Center's wheel still counts as the wheel for the one record (`cc_wheel`), so a page its
+  Center opens (the USB picker) shows its selection.
 
 ### Empty and offline
 
@@ -730,7 +830,7 @@ the gray one.
 | Chapters | `list-numbers` | No Chapters | This file has no chapter marks (or: This file's chapters couldn't be read) | |
 
 Not in this form, by design: Now Playing is reachable only while something is loaded, so it has no empty screen;
-the Wi-Fi page always holds its switch, Search Again and Add Network rows; the EQ's Presets page always holds its
+the Wi-Fi page always holds its switch, Search Again, Add Network and Reset Network Settings rows; the EQ's Presets page always holds its
 four action rows (no presets is a toast); and Upload Scrobbles with nothing to send is a toast after the press.
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
@@ -928,9 +1028,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   rows. An empty list shows the [empty state](#empty-and-offline) under its rows, "No Playlists", "Make one with New
   Playlist".
 - **A playlist's hold menu** ([Menus](#menus)): Play, Shuffle, Rename, then Delete after a gap,
-  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry)
-  with its field off, titled Rename Playlist, the name prefilled over it with the cursor at its end:
-  Next at the name's end saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
+  which asks "Delete playlist “name”?" with Cancel first. Rename is the [letter strip](#text-entry),
+  titled Rename Playlist, the name prefilled over it with the cursor at its end: submitting (Play/Pause,
+  or Center on the return key) saves it, and a held Return leaves the name as it was. No More menu, no Edit Playlist: reordering is the server's or the phone's.
 - **A playlist's page**: Shuffle (Songs' Shuffle row: the accent's glyph, 18 px, at x 26 and the
   label at x 54), Add Songs (`plus-circle`) and its songs, each one line, the artist on the right
   column in 15 px Text Tertiary; no Shuffle row over nothing. Center plays the list from the song;
@@ -974,39 +1074,63 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
 ### Text entry
 
 One letter strip for every text the wheel types (approved as 05b and 05c from the audit2 mock-ups on
-2026-11-16; `patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners,
-its letters in equal 19 px cells about a fixed accent key, the run's ends fading into the pill's own gray.
-It has two forms, in the same place, width and corners:
+2026-11-16, redesigned from the user's `keyboard-inscreen/strip.html`, approved 2026-11-17;
+`patch/search_strip.c`): a `#1C1C1E` pill from x 40 to 335 and y 254 to 288 with 17 px corners, one loop
+the wheel walks:
 
-- **Field on** (Search, Add Songs' Search): the typed text in a black box at the pill's left with its
-  cursor, the letters from x 148; the results above the strip, and with nothing typed the
-  [empty note](#empty-and-offline) in their place, "Search your music" over "Artists, albums and songs";
-  with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer letters".
-- **Field off** (New Playlist, Rename Playlist): the letters across the whole pill, the lit key centered,
-  and the name written large in the middle of the screen, Inter Medium 22 white centered on y 140 with a
-  steady cursor, over its hint in 15 px Text Tertiary on y 180, "Press Next to create" or "Press Next to
-  save". Next confirms only with the cursor at the name's end; elsewhere Previous and Next move the
-  cursor, as on Search's text.
+- **The set switcher**, docked at the pill's left: a `#2C2C2E` pill to x 96 (the accent while the wheel is
+  on it) naming the set in Inter Medium 16 white, abc, ABC, 123 or #+= (all 32 printable ASCII symbols, the
+  most used in passwords first). Center cycles the set and the highlight stays on the switcher.
+- **The run**: the set's characters and a space, 17 px Inter Text Primary in equal 19 px cells from x 106,
+  ten in view, the lit one white on an 18 px accent key 5 px in. It starts at its first character and moves
+  only when the highlight comes within a cell of an edge. Where more of the set lies past an edge the letters
+  fade out toward it over 22 px: the text's own alpha, never a band painted over it.
+- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with the
+  return mark in white (a stem down the right, a slightly rounded corner, a bar to the left ending in an open
+  arrowhead, 2.2 px round strokes), inverted, a white circle with the mark in the accent, while the wheel is
+  on it. Center on it submits.
 
-- **A text box** (the Wi-Fi password, an EQ preset's name, a Bluetooth device's name, a search box: every
-  box stock's keyboard served; the user's P1 from `mock_strip_password.py`, 2026-11-17): field off, a set
-  chip at the pill's left (a `#2C2C2E` pill to x 96, its name in Inter Medium 16 white: abc, ABC, 123 or
-  #+=), the run after it, its lit key at x 192; Play/Pause steps to the next set, each ending in the space
-  and delete. The status row names the page the box is on, and the text shows as a name's does, "Press
-  Next when done" under it; a box holding a number opens on 123. A password reads "Password" (15 px Text
-  Tertiary, y 84) over dots (y 128), the character just typed shown for a second, all of it in plain text
-  while Play/Pause is held, and "Hold Play/Pause to show · Next at the end to join" (13 px, y 176). Next
-  at the text's end is the box's own OK, as the keyboard's Enter was: the box takes the text and acts. Settings > Bluetooth's Name (`bt_name.c`) is this form on a page of its own (`search_strip_text`), the status row reading Bluetooth: Next at the end saves the name.
+One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
+from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
+cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
+each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
+pop bubble rises over the lit character as the wheel lands on it.
 
-On every form, the wheel walks the letters and Center types the lit one. A Return press erases the character
-before the cursor; held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into
-the hold the page dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized
-to its line with 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent
-fills clockwise from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it,
-"Keep holding to go back" in Inter Medium 16 white; at 800 ms the page closes. Let go before that and nothing
-happens: a hold never erases. The dim covers the status row too, as Buttons Lock's card's does: both
-draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): one first seen gives its window to the strip
-(`patch/keyboard.c` `kb_strip_due`).
+Where the text shows (the user's `keyboard-inscreen/strip.html` and `all-inputs.png`, 2026-11-17): where the
+value lives, never in a box of the strip's own, and with no keyboard hints on the screen. The text is 20 px Text
+Primary (a field's Inter Medium 22) with a 2 px cursor after the characters before it, blinking 530 ms on and
+530 ms off while the strip has the wheel (lit again at each key, steady under Reduce Motion). A text wider than
+its field scrolls by as little as keeps the cursor 10 px in from either edge, and an edge that cuts it fades the
+text out over 16 px inside the field, in the text's own alpha, never a band painted over it; a text that fits is
+left-aligned (right-aligned in a cell). By form:
+
+- **Search** (and Add Songs' Search, and every search box: Internet Radio's, a card app's, a playlist's song
+  search): the query on the page's first line after a magnifier, "Search your music" (a box's own tips, else
+  "Search") in Text Tertiary while empty, a 1 px rule under it; on Search, the results between it and the
+  strip, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
+  letters".
+- **A row** (New Playlist, Rename Playlist): the page under as it was, and over the row the wheel was on, in its
+  place, a box from x 16 to 359 in the raised grey with 8 px corners and a 2 px accent line, the text from x 24.
+- **A cell** (Bluetooth's Name, Guest Play's Name, a device's or a phone's Rename, an EQ preset's Name, a card
+  app's field): the same box, the row's label from x 24 in Text Secondary and the text after it, right-aligned to
+  the right column. Who sees the text ("Phones and cars see this name") is 13 px Text Tertiary centered 24 px
+  under the box, the page under showing only down to the box.
+- **A field** (a Wi-Fi password, Add Network's name, the Guest Play hotspot's password, and a row or cell whose
+  row is not in sight or would sit under the strip: an EQ band's Frequency or Q, a card app's field on its
+  own page): its label in 15 px Text Tertiary from x 40 on y 92 over a raised pill from x 40 to 335 and y 106
+  to 150 with 12 px corners, the text 16 px in from either end.
+
+A password is dots, the character just typed shown for a second, in whichever form. A box holding a number opens
+on 123. Submitting a box is its own OK, as the keyboard's Enter was: the box takes the text and acts.
+
+Held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200 ms into the hold the page
+dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized to its line with
+24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent fills clockwise
+from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it, "Keep holding to go
+back" in Inter Medium 16 white; at 600 ms the page closes. Let go before that and the highlight is on the
+return key. The dim covers the status row too, as Buttons Lock's card's does: both draw it the same way
+(`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): each one that opens gives
+its window to the strip (`patch/keyboard.c` `kb_strip_due`).
 
 ### Icons
 
@@ -1019,9 +1143,9 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   `heart-slash.svg` for Favorites' empty state: Phosphor's regular heart cut as its outline `bell-slash`
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
-- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's Wi-Fi, sync and Bluetooth, Now
+- Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync and Bluetooth, Now
   Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
-  heart and More. Sizes are the design's: 13 px padlock and 14 px status glyphs, 15 px chevron, 20 px row symbols,
+  heart and More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,
@@ -1034,44 +1158,75 @@ draw it the same way (`feedback.c` `overlay_scrim`). No box keeps stock's [keybo
   is scaled about its ink's center until its ink's longer side is a set length, centered in the box, so a wide glyph
   (Wi-Fi's signal) and a tall one (the lock, the trash) read as one size. The 20 px symbols (rows', Streaming's marks,
   Now Playing's heart and More) have 15.5 px of ink (`tools/art.py` `ROW_INK`, `glyph_png`). Wi-Fi's row glyphs end
-  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`).
+  on the right column, the connected row's trash (Forget) last, selected or not (`wifi_rows.c`). The status row is
+  the exception: there every glyph is sized by its ink's height, 11 px, the clock's digits' (`tools/art.py`
+  `status_fit`), since beside a row of figures a wide glyph sized by its width came out short (Wi-Fi at 8 px).
 - No colored app tiles: the concept's tinted "For You" squares are for content the Q2 does
   not have.
 
 ### Control Center
 
-The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `design/mockups/mock_cc3.py`
-`cc3(True)`; `patch/control_center.c`), under the status row, whose clock is centered:
+The pull-down, drawn as iOS's Control Center (v4, "A, tightened", approved on 2026-11-16 from
+`design/control-center-v4` `mock_cc4_tight.py`; `patch/control_center.c`), under the status row, whose clock is
+centered, in two columns. **One spacing token, 10 px,** between every two parts: the status row's glyphs (foot y 28)
+and the blocks, the block and the right column, Now Playing and the sliders, the two sliders, and round the toggles inside their block.
 
-- **Blocks** from y 38, `#1C1C1E` with 22 px corners: connectivity, 138 x 124 from x 20; Now Playing, 8 px
-  right of it to x 355.
-- **Toggles**: Wi-Fi, Bluetooth, AirPlay and Car Remote, 40 px circles two by two in the connectivity block
-  (centers x 55 and 123, y 66 and 126), Accent Blue when on, `#3A3A3C` off, a 22 px white glyph, the name 9 px
-  under in Inter Medium 13, white when on, Text Secondary off.
-- **Now Playing**: the cover, 52 px with 9 px corners, 12 px in; the title (Inter Medium 16) and artist (Inter
-  13, Text Secondary) beside it; Previous, Play/Pause (30 px) and Next on y 132, 52 px apart.
-- **Sliders**: Brightness and Volume side by side from y 170, 38 px tall, fully round, `#3A3A3C` with a
-  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start.
-- **Tiles**: Lock, Sleep, Night Shift, EQ and Smart Wi-Fi, 44 px squares with 12 px corners on y 238, 12 px
-  in from the blocks' ends and evenly apart, named under them as the toggles are.
-- **Grab bar**: 36 x 5, `#5A5A5E`, at y 304, where the swipe up that closes the page starts.
+- **Toggles block**: 158 x 210 from (20, 38), `#1C1C1E` with 22 px corners. Six 40 px circles two by three,
+  26 px apart both ways (centers x 66 and 132, y 68, 134 and 200): Wi-Fi, Bluetooth / AirPlay, Car Remote /
+  Smart Wi-Fi, EQ. Accent Blue when on, `#3A3A3C` off.
+- **Glyphs**: Phosphor fill, each at one optical size, its ink's longer side 18 px (`tools/art.py` `CC_INK`):
+  Bluetooth `bluetooth`, AirPlay `airplay`, Car Remote `car-profile`, Smart Wi-Fi `leaf`, EQ `equalizer`. White on
+  a lit circle; in Light Mode a circle that is off takes Text Primary (`CC_LIGHT`).
+- **The Wi-Fi circle is the link**, as the status row reads it (`status_row.c` `wifi_level`, `wifi_offline`):
+  `wifi-slash` off, `wifi-none` on but not joined, `wifi-low`, `wifi-medium` and `wifi-high` by stock's bars (1, 2,
+  then 3 and 4), `wifi-x` joined with no link up. Phosphor's fill levels draw the whole fan and fill as much of it
+  as the signal, so the glyph keeps one footprint. Joined, it is lit even where the radio's switch reads off, so it
+  and the status row never disagree. It is drawn again when that changes while the page is open
+  (`cc_wifi_poll`, every second, the circle's box alone). Its name stays "Wi-Fi", the tile's function, not the
+  network's.
+- **Names**: each circle's, its line 1 px under the circle, Inter Medium 13, white when on, Text Secondary off, set
+  glyph by glyph at Inter's own advances (see [Type](#type)), centered on the circle in 76 px of room, 8 px from the
+  block's edge (the mock's 10 px assumed a 13 px em; the house 13 px is an em of 13.2, which makes "Smart Wi-Fi"
+  75 px). A name wider than its room is never shrunk or cut with an ellipsis: it starts at the room's left and its
+  last 12 px fade out, the text itself going transparent onto the block (the marquee's fade, no painted band), and
+  while the wheel is on its circle it scrolls as the selected row's title does ([Motion](#motion)), both ends
+  fading while it is away from its start, back at its start when the wheel leaves or the ring goes. The six names
+  all fit.
+- **Now Playing**: 167 x 114 from (188, 38): 12 px in, the cover, 52 px with 9 px corners, the one Home's art pane
+  shows (`song_cover_url`), a `#3A3A3C` square for none; the title (Inter Medium 16) and artist (Inter 13, Text
+  Secondary) 10 px right of it, 10 px above and below its middle; under them, 8 px down, the transport's 30 px row,
+  Previous, Play/Pause (30 px) and Next 46 px apart; 12 px under it the block's foot. Light Mode inks the transport
+  Text Primary.
+- **Sliders**: Brightness at y 162 and Volume at y 210, each 167 x 38 from x 188, fully round, `#3A3A3C` with a
+  `#E5E5EA` fill to the level and an 18 px `#1C1C1E` sun or speaker at their start (white in Light Mode, where the
+  fill is dark). Volume ends at y 248, the toggles block's foot.
+- <a id="cc-usb-row"></a>**USB row** (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`), only while a cable is
+  in: 335 x 38 from (20, 258), 10 px under the blocks, fully round as the sliders, in the block's color: Phosphor's
+  `usb` (fill, 20 px, Text Primary) centered 22 px in, "USB" in Inter Medium 15 from 40 px in, the remembered choice
+  (Ask Every Time, Transfer Files, USB Audio, Charge Only, USB Debugging) in 15 px Text Secondary ending 30 px from its
+  end, and a 13 px bold `caret-right` in the chevron's gray centered 18 px from it. The wheel's ring round it is the
+  mock's: 2 px wide, 5 px out. Center or a tap opens the [USB picker](#usb). No cable, no row: the sheet as before.
+- **Grab bar**: 36 x 5, `#5A5A5E`, centered, along the sheet's foot (the screen's, y 320): at y 309, 6 px off the edge, the gap the page sheets keep off their top. It is not part of the 10 px spacing; it stays on the foot whatever the blocks' height. It is where the swipe up that closes the page starts.
+- **Not here**: Buttons Lock keeps its hardware hold (Settings > Controls), Night Shift its row in Display, the
+  Sleep Timer its row in Playback, and Guest Play its row in Bluetooth (Home's first row reads Guest Play while a
+  guest plays).
 - **The wheel** rings the stop it is on in white (2 px, 1 px out); a slider that has the wheel is ringed in
-  Accent Blue. The stops, in reading order: the four toggles, the Now Playing block (only while something is
-  playing or paused, as Home's Now Playing row), the two sliders, the five tiles. The ring is not there when the
-  page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the wheel
-  is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it back
-  on the same stop.
+  Accent Blue. The stops, in order: Wi-Fi, Bluetooth, AirPlay, Car Remote, Smart Wi-Fi, EQ, the Now Playing block
+  (only while something is playing or paused, as Home's Now Playing row), Brightness, Volume, the USB row (only while
+  a cable is in). The ring is not there
+  when the page is pulled down, and touch never brings it: the first wheel tick (or Center) shows it on the stop the
+  wheel is on, without moving or acting, and it goes 5 s after the last wheel tick or key; the next tick brings it
+  back on the same stop.
 - **Sliders and the wheel**: Volume steps exactly as Now Playing's volume does (1 a tick turned slowly, up to 10
   a tick on a fast spin, `vol_next`), and Brightness by the same curve over its own range, identically here and
   on Settings > Display > Brightness (`bright_wheel`); each fill eases to its level at Now Playing's bar's speed
   (`VOL_EASE_MS`).
 - **Now Playing block**: a tap anywhere on it but the transport, or Center on it, closes the page and opens Now
   Playing; Previous, Play/Pause and Next keep their own taps. With nothing loaded it does nothing.
-- **Holds**: a toggle or tile held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes
-  the page and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings >
-  Bluetooth; AirPlay: the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Lock:
-  Buttons Lock; Sleep: Sleep Timer; Night Shift: its slider page (Display's Night Shift row); EQ: the EQ page;
-  Smart Wi-Fi: Settings > Wi-Fi. The sliders and the Now Playing block have no hold.
+- **Holds**: a toggle held 550 ms (`QUICK_HOLD_MS`), by a finger or by Center with the ring on it, closes the page
+  and opens its settings; a tap still toggles. Wi-Fi: Settings > Wi-Fi; Bluetooth: Settings > Bluetooth; AirPlay:
+  the Network service page (its receiver switch); Car Remote: Settings > Car Remote; Smart Wi-Fi: Settings >
+  Wi-Fi; EQ: the EQ page. The sliders and the Now Playing block have no hold.
 - **Landing**: as the page comes to rest open, however it was opened, the blocks under the status row overshoot
   8 px down and spring back through rest to 2 px short, still after 280 ms (a damped sine, ease-out, as iOS's
   sheet settles). Only on opening; the status row stays put. The one exception to Motion's no bounce.
@@ -1080,22 +1235,104 @@ The pull-down, drawn as iOS's Control Center (approved as V3a on 2026-11-15, `de
 
 The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `design/mockups/mock_usb_connect.py`):
 
+- <a id="usb-picker"></a>**Picker**, "USB" (approved 2026-11-17 from `design/usb-row` `mock_usb_row.py`): Settings >
+  General's USB row (after Storage, the remembered choice as its value) and Control Center's [USB row](#cc-usb-row)
+  open it. Ask Every Time, Transfer Files, USB Audio, Charge Only (and USB Debugging in a `--dev` build), the
+  remembered one with the [picker](#list-row)'s check; under the rows the checked choice's note, 13 px Text Tertiary
+  on the text column, its first line centered 19 px under the rows and the next 17 px lower ("Plug into a computer to
+  choose."; USB Debugging's "A computer gets adb on every cable." and "Stop on its page asks again next time."). A pick
+  is remembered at once, and with a cable in that cable takes it at once; leaving Transfer Files while the computer
+  has the card asks first on the [confirmation card](#confirmation-card), consequential: "Switch to USB Audio?", "Eject
+  the SD card on your computer first, or a copy in progress stops.", Cancel and Switch. Ask Every Time only forgets.
 - **Chooser**, "Use USB For": Charge Only, Transfer Files, USB Audio (and USB Debugging in a `--dev` build), each
   with its Phosphor symbol (regular, 19 px, Text Secondary, white on the selection) and its caption under it while
   selected, the row grown to hold it; then Always Do This, a switch row, after a gap.
 - **Mode page** (Transfer Files, USB Audio, USB Debugging, Ejected): a solid circle with its glyph (fill, 44 px,
-  white; the eject's a bold check on Positive green), the title, a line in Text Secondary and a Stop pill.
+  white; the eject's a bold check on Positive green), the title, a line in Text Secondary and Stop, the gray
+  [button](#buttons) (`MODE_BUTTON`), ringed under the [focus rule](#focus-ring); a wheel turn on the page
+  shows the ring. Stop forgets a choice Always Do This or the picker saved; Ejected has no Stop.
 - **Toasts** with a 15 px glyph beside the words: Unplugged (Text Secondary), OK to Disconnect (Positive green),
   USB Audio Ready (white); and charging's: a charger in with the screen on, the battery's state as a tap on it
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
+
+### Bluetooth
+
+Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `patch/bt_ui.c`, `patch/bt_detail.c`,
+`patch/bt_stopped.c`; approved from `design/bt-redesign`, its `NOTES.md` and sheets, on 2026-11-16):
+
+- **Devices before settings.** The switch, Name (the name as its value), then My Devices (the paired ones) and
+  Other Devices (the found ones), each a section header in 15 px Text Tertiary a whole row high, then Audio:
+  Quality (its choice as the value), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
+  switch, Name and a line in 13 px Text Tertiary: "Turn on to play to headphones, a car or a speaker."
+- **Scanning is automatic** while the page is open, the list's spinner (Text Tertiary) beside "Other Devices"
+  while a scan runs: one as the page opens, then again each time one ends while nothing is connected. No Scan
+  row.
+- **Device rows** lead with the device's kind (Phosphor `headphones`, `car-profile`, `speaker-hifi`,
+  `device-mobile`, else `bluetooth`; regular, 20 px, Text Secondary, white on the selection) centred on x 33, the
+  name at x 52. The connected one is a two-line row: the name over "Connected · LDAC · 72%" (what is known: the
+  codec, the headset's battery) after the Positive dot, with a chevron. Another paired one says "Not Connected"
+  as a value before its chevron; one connecting, "Connecting…" with the activity spinner on the right column.
+- **Centre** on a paired row connects it; on the connected one it opens the device's page; Play/Pause held on
+  any paired row opens its page.
+- **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
+  line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
+  fixes it), then Battery (when reported), Disconnect (Connect when not connected), Rename and Forget This
+  Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
+  again to use it.", Cancel first and Forget Device in red. Rename is the letter strip, "Shows on this Q2"
+  under the name.
+- **Quality**: each choice with its bit rate in 15 px Text Tertiary before the check where the codec fixes one
+  (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
+  "Steps with the signal, 330 to 990 kbps".
+- **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
+  name, the hint in 13 px under that.
+- **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5
+  disconnected" (the glyph in Text Secondary), "BMW 6R81 connected · resuming" with Resume on Connect on,
+  "Headphones low · 10%" (battery-warning, red) once at 20% and once at 10% each connection.
+- **Bluetooth Stopped**: when the radio never answers, a mode page, the warning glyph on an orange (Warning)
+  circle, "Bluetooth Stopped", "Restarting the Q2 to fix it in 9 s" counting down, and a Not Now pill (Centre,
+  Return or a tap), instead of a toast and an unannounced restart.
+
+### Guest Play
+
+A guest's phone plays through the Q2 to what the Q2 plays to ([internals](internals.md#guest-play-screens),
+`patch/guest_ui.c`, on q2-guest's [contract](internals.md#contract); approved from `design/bt-redesign`'s
+`bt-guest-flow.png`, G1 to G12, and N8 to N13):
+
+- **Asking** (G3, G4): the [confirmation card](#confirmation-card): the guest's name, "wants to play music" (or "on
+  Spotify", "over AirPlay"), on a first pairing the phone's code large ("482 913") with "Check that Alex's phone
+  shows this code"; Allow Once (selected: one Centre answers), Always Allow, Decline, and the daemon's 30 s
+  counting down to Decline. Return declines. A second guest while one plays (G6): "Replace Alex's Pixel?", "Sam's
+  iPhone wants to play music", Keep Alex's Pixel (selected) and Replace, counting down to Keep.
+- **The guest's Now Playing** (G5, G12): the art's place, the guest's title and artist, the phone glyph in the
+  accent with "Playing from Alex's Pixel", "Your music is paused" (or "Paused on Alex's phone"), the path "Alex's
+  Pixel → Q2 → BMW 6R81" (17 px) and each leg's codec line (14 px Text Tertiary), and one selected thing, Stop
+  Guest Play: Centre stops at once, no confirm. Play/Pause, Next and Previous go to the guest's phone. It opens as
+  a phone's guest starts.
+- **Toasts** (G7, G8, G11): "Alex left. Resuming your music", "Lost Alex. Resuming your music" (warning, orange),
+  "Declined Alex's Pixel" (no answer too), "Sam iPhone isn't a trusted guest", "Turned away Sam iPhone"
+  (prohibit, Text Secondary). A failed pairing (G10) is a mode page: the warning on orange, "Couldn't Connect",
+  "Try again from Alex's phone" and Try Again, which opens the window again.
+- **Settings > Bluetooth > Guest Play** (N10, N11): the switch, Name (the strip, "Guests and AirPlay see this
+  name"), Let a Guest Connect, then Allow (Ask Every Time, Trusted Guests Only), When a Guest Leaves (Resume My
+  Music, Stay Paused), each choice checked, Trusted Guests (each its page: Rename, Ask Before Playing, Forget on
+  the card) and Hotspot. Switched off, the switch and a line saying what it gives. The Bluetooth page's Audio group
+  leads with its row, the value Ask, Trusted or Off.
+- **Let a Guest Connect** (G2): "On your phone, connect to", the name in 30 px, "in Bluetooth settings"; the
+  window's two minutes as an accent ring emptying round m:ss; while the hotspot runs, its join QR code with
+  "AirPlay or Spotify?"; Done (Centre, a tap, Return) closes the window.
+- **Hotspot** (N13): its switch, Name (Guest Play's) and Password (the strip), and while it runs its join QR code,
+  "Scan to join".
+- **Home**: while a guest plays, its first row reads Guest Play and opens the guest's Now Playing
+  ([Home's first row](#homes-first-row)).
 
 ### Streaming Configuration
 
 <a id="streaming-configuration"></a>Streaming's Configuration (approved as 25 v3 B on 2026-11-16,
 `patch/stream_config.c`) is two levels of [list rows](#list-row), values on the right.
 
-- **Configuration:** Stop Streaming Services; a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
+- **Configuration:** Stop Streaming Services; Download Ahead, its value "2 Songs" (Off, 1 Song, 2 or 3 Songs, stepped
+  in place by Center); a "Services" header; **TIDAL** and **Spotify**, each with a chevron and
   its value, Shown or Hidden (what this page controls; a "Signed in" value would need each app's sign-in state), and
   the caption "Its cache, downloads and place in Streaming" (Spotify: "Its cache, sign-in and place in Streaming");
   a "Show in Streaming" header; then one switch per service that has only a switch (the card apps, Internet Radio,
@@ -1218,9 +1455,11 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 - **A phone's page:** [label/value rows](#labelvalue-rows) Status ("Connected · Wi-Fi"), Paired ("Nov 12"), Last
   Connected ("Now", "Friday"), Rename (the name and a chevron: the letter strip), then Forget Phone in Negative red after
   a 12 px gap, which asks on the [confirmation card](#confirmation-card), Cancel first. It opens on Rename.
-- **Pair a Phone** (the row and the button): three numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart from
-  y 66), then "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, its Wi-Fi address and port and its Bluetooth name,
-  then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
+- **Pair a Phone** (the row and the button): up to four numbered steps (20 px Raised 2 discs, 15 px lines 28 px apart
+  from y 66) for the link a phone can find it on now, Bluetooth or Wi-Fi ([internals: Car remote](internals.md#car-remote)),
+  then from y 190 "Q2 Muse" in Inter Medium 17 and, in 14 px Text Tertiary, the address for a phone that does not list it ("Address
+  192.168.1.30", "Phone and Q2 Muse on one Wi-Fi"; "Or Wi-Fi address …" under the Bluetooth steps; "Wi-Fi  not
+  connected" with neither), then "Waiting for a phone…". The Q2 Muse cannot start a pairing; the phone does. ponytail: the mock-up's QR code waits
   for Q2 Muse Remote to scan one.
 - **Pairing:** the code's Dialog over whatever shows, then the icon toast "Pixel 10 Pro paired" (Positive
   `check-circle`). ponytail: the card form with the 120 s countdown on Cancel's row is the shared pairing card's, not on
@@ -1261,12 +1500,19 @@ interruptible: a turn mid-run starts from where it is.
 
 - **Page push and pop with parallax**, as UINavigationController's: the new page slides in from the right over
   220 ms, `cubic_out`, while the page under drifts 30% of the width left and darkens to a quarter black; a pop is
-  the reverse over 200 ms. The status row stays put; its title is the new page's at once (`PAGE_SLIDE_MS`, stock's
+  the reverse over 200 ms. The status row stays put; its title is the new page's at once, and over Home in Split
+  shows only over the sliding page, fading as it goes, while Home's raised rows and art drift and darken with Home
+  in the row beside it (`PAGE_SLIDE_MS`, stock's
   window animator, `page_parallax.c`; [internals](internals.md#page-parallax)). Home's Settings and Streaming lists slide
   in over the same 220 ms.
 - **Now Playing's art settles on pause**, as Apple Music's: paused, it shrinks to 88% about its center over 280 ms,
   `cubic_out`; played, it grows back over 320 ms, no overshoot. A turn mid-way starts from where it is; a page opened
   on a paused song shows it small at once. The play/pause glyph is the cue, so Reduce Motion keeps the art its size
+  ([internals](internals.md#now-playing-motion)).
+- **The cover grows into Now Playing**: opened from Home (its art pane) or an album page (its header), Now
+  Playing's art flies from that cover's place to its own over 300 ms, `cubic_out`, while the page fades out over
+  the first half and Now Playing fades in from 40%; Return runs it back over 240 ms to the cover it came from.
+  Opened from anywhere else Now Playing opens at once, as before. Reduce Motion cross-fades both ways over 150 ms
   ([internals](internals.md#now-playing-motion)).
 - **Now Playing's track change**: on Next, Previous, a song ending or a headset's skip the old art and lines slide 16 px
   the way the queue moved (left for Next) and fade out over 120 ms, `cubic_in`, while the new ones come in from 16 px
@@ -1280,14 +1526,14 @@ interruptible: a turn mid-run starts from where it is.
 - **One helper** (`patch/ui_kit.h`, Motion): every animation takes its duration, curve and frames from it. A
   motion has a kind: *spatial* (a slide, a scale, a spring, a lean), *decor* (a loop that says nothing new: the
   charging sweep, Up Next's level bars) or *feedback* (a finger followed, a value or progress: swipe back, the volume
-  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window,
-  and it stops itself after the last one ends.
+  bar's ease, the progress fill, the marquee, spinners). While any runs, one shared 16 ms timer repaints the top window
+  (and the status row's play box, through `motion_hook`), and it stops itself after the last one ends.
 - **Reduce Motion** (Settings > Display, the last row: a switch captioned "Fades in place of slides, zooms and
   bounces", `IPOD REDUCEMOTION`, off unless chosen; it applies from the next animation, no restart). On: a page's
   push and pop is a 150 ms cross-fade (AWTK's `fade` window animator); Home's sub-list swap and a folder level in
   place change at once; Control Center lands still; tug to tilt is off (the bar steps without leaning); Cover Flow
   stops at its end with no bounce; the remembered-row recall, the captioned row's grow, Edit Library's slide-aside,
-  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause and a track change cross-fades in place; the charging sweep stands at the level and Up
+  the radio pill's grow and the switches' knob are at their end at once; Now Playing's art keeps its size on pause, and a track change and the cover into Now Playing cross-fade in place; the status row's bars and pause swap at once; the charging sweep stands at the level and Up
   Next's level bars stand still; a toast and the confirmation card fade only (150 ms in, 120 ms out). Kept: swipe
   back's finger tracking and its finish (the page under it still and undimmed), the selection bar, wheel scroll, Cover Flow's and the carousel's wheel step
   (the scroll itself), the volume, brightness and progress bars, the marquee and its fades, the scroll indicator's and
@@ -1307,8 +1553,8 @@ interruptible: a turn mid-run starts from where it is.
   wait on their parent's focus (a Wi-Fi network's name, user 2026-11-16: they clipped).
 - **Now Playing's lines** move as one marquee: the title, artist and album that overflow hold at
   rest 2.75 s, slide left together at 35 px a second (the longest line's pace; the others take the
-  same time), and land back at rest together, each followed by its own copy 40 px behind, so
-  nothing snaps back. The progress bar's fill moves a pixel at a time between the player's
+  same time) until each line's end meets its column's end, hold there 1.5 s, and go back to rest
+  together. A line slides only what overflows, so part of it always shows: none goes blank. The progress bar's fill moves a pixel at a time between the player's
   seconds rather than a second's width at once.
 
 ## Screens
@@ -1344,15 +1590,18 @@ pattern.
 | Storage > Downloads                 | Key/value rows              | Limit (its picker the menu sheet's), then each item: Phosphor `arrow-circle-down` (18 px, Accent Blue) for one the user picked or `arrows-clockwise` (Text Secondary) for one the app keeps itself, white on the selection, centered on x 33, its name at x 52, size and chevron; a footer (the mock's second line, "Auto items refill on the next Sync.", waits for the app to keep items on its own) |
 | Slider settings                     | Slider page                 | [Progress and sliders](#progress-and-sliders)                                                              |
 | Equalizer (Simple)                  | Vertical slider             | Its [tabs](#tabs), then rows: the switch, Presets, Reset                                                   |
-| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right                      |
-| Bluetooth                           | Two-line row                | Second line "Connected" with the Positive dot; Name a key/value row opening the letter strip               |
+| Wi-Fi                               | Switch row, then a section  | Search Again row; "Networks" after 12 px, "Searching..." on its line; glyphs at right; Reset Network Settings last |
+| Bluetooth                           | [Bluetooth](#bluetooth)     | Devices first under My Devices and Other Devices, the connected one two lines ("Connected · LDAC · 72%" after the Positive dot); then Audio |
+| A Bluetooth device                  | [Bluetooth](#bluetooth)     | The path and its codec line, then Battery, Disconnect, Rename and Forget This Device                      |
+| Bluetooth Stopped                   | [USB](#usb)'s mode page     | The warning on an orange circle, the restart's countdown and Not Now (`bt_stopped.c`)                      |
+| Guest Play and its pages            | [Guest Play](#guest-play)   | The prompts on the confirmation card, the guest's Now Playing, the settings, Let a Guest Connect, Hotspot  |
 | Bluetooth receiver (a phone playing to the Q2) | [USB](#usb)'s mode page | The accent circle with the Bluetooth glyph, the phone's title over its artist ("Playing from Phone" over "Wheel sets the volume" before it names one), the codec in the pill (`bt_recv.c`) |
 | Update Local Music                  | Progress                    | Counts as key/value rows under the status row                                                              |
 | Shuffle, Repeat changes             | Confirmation                | New in this theme                                                                                          |
 | SD Card Update                      | [Software Update](#software-update) | A spinner while it checks, the confirm, then mode pages                                         |
 | Quick Settings                      | [Control Center](#control-center) | The status row's clock centered, no title                                                        |
-| Search                              | [Text entry](#text-entry)   | The letter strip's field on, under six single-line results ([ipod](ipod.md#search))                         |
-| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip's field off, the name large over it ([ipod](ipod.md#name-strip))                          |
+| Search                              | [Text entry](#text-entry)   | The query on the first line, four single-line results, the letter strip ([ipod](ipod.md#search))            |
+| New Playlist, Rename Playlist       | [Text entry](#text-entry)   | The letter strip, the name large over it ([ipod](ipod.md#name-strip))                                       |
 | Keyboard                            | [Text entry](#text-entry)   | None shows: a text box is the letter strip's ([ipod](ipod.md#keyboard))                                    |
 | Buttons locked                      | Own                         | A padlock leftmost in the status row while Buttons Lock is on; a blocked press shows a #1C1C1E card over the page dimmed to 45%: a 56 px padlock, "Buttons Locked" 16 px Medium and the hint 13 px Secondary, for 1.5 s |
 | A card app's QR page (sign-in)      | Own                         | The status row names the app. The code on a white plate (166 px, radius 12) centered under it, the app's note ("Scan with your phone to sign in") 17 px Medium white and "or open ADDR · PIN 482 913" 15 px Text Tertiary under it. Once the app reports a step, a mode page: one solid 92 px circle (Accent for phone and check, #34C759 done, #FF453A fail and error) with a 44 px white Phosphor fill glyph (`device-mobile`, `arrows-clockwise`, `check` bold, `cloud-slash`, `x` bold), the title 22 px Medium and one line 15 px Text Secondary, the stack centered between the status row and the bottom; the wheel does nothing |
@@ -1404,10 +1653,11 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   Phosphor symbols as the theme's own art.
 - Home's Split on the grid: the set's `split_row`, `split_art`, `split_art_up` and `split_inset` (the art from
   x 196 and the top edge to the edges, its top 58 rows painted by the bar with the status row's clock, glyphs
-  and battery over them, each glyph in one ink, white or black, whichever has the higher WCAG contrast against the
-  art's mean luminance under it, weighted by the glyph's coverage and held 0.03 past the bound against flicker; the
-  charging green and low red keep their colors (`home_ink`, approved from `mock_split_top.py` on 2026-11-14, one
-  ink a glyph from the same day, as each pixel's own pick speckled over lettering), the playing cover panning slowly
+  and battery over them, all in one ink, white or black, whichever has the higher WCAG contrast against the art's
+  mean luminance under them, weighted by each glyph's coverage and held 0.03 past the bound against flicker; the
+  charging green and low red keep their colors (`home_ink`, approved from `mock_split_top.py` on 2026-11-14; one
+  ink for the row from `mock_status_icons.py` on 2026-11-16, as one ink a glyph put dark bars beside a white
+  clock), the playing cover panning slowly
   across its 110 % zoom with an eased turn at each end and 2 % of the zoom kept clear of the pane at each edge, so a
   cover's own border never shows, on Now Playing's row (there only while something is playing or paused), and with no
   cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every

@@ -21,7 +21,7 @@ from conftest import NAVIGATION_SOURCE, FNV_PRIME, O, Deques, fnv1a, high_halves
 libc.munmap.argtypes = [C.c_void_p, C.c_size_t]
 FIXED = 0x100022  # MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
 STRINGS = 'name path title album artist genre composer album_artist cover'.split()  # REC_NAME on, a word apart
-RESUME_FILE, XFADE_FILE = '/mnt/data/ringnav-resume', '/tmp/q2xfade'
+RESUME_FILE, XFADE_FILE = '/mnt/mmc/.q2pod/ringnav-resume', '/tmp/q2xfade'  # card_store.c
 SONGS, ALBUMS, ALBUM = 0xf001, 0xf003, 0xff10  # stock's list classes: all songs, all albums, an album's songs
 STOPPED, PLAYING, PAUSED = 1, 2, 3
 LIST_PLAY, REPEAT_ONE, SHUFFLE, REPEAT_ALL = range(4)  # stock's play modes (MCL_MODE)
@@ -108,6 +108,7 @@ class Disk:
     folder listing over them. A restart hands the same files to the next firmware."""
     def __init__(self, fw, files):
         self.files = files
+        self.files.setdefault('/proc/mounts', b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')  # the card in (card_store.c)
         self.handles, self.dirs, self.fds, self.shared = {}, {}, {}, {}
         self.errno, self.n = C.c_int(2), 0x2000
         for name in ('fopen', 'fread', 'fwrite', 'fseek', 'ftell', 'fclose', 'rename', 'unlink', 'access', '__xstat',

@@ -49,7 +49,8 @@ class Ap(C.Structure):
 class Sm(C.Structure):
     _fields_ = [('app', C.c_void_p), ('dir', C.c_char * 160), ('last', C.c_char * 192), ('playing', C.c_char * 512), ('state', C.c_int),
                 ('timer', C.c_uint), ('seen', C.c_long), ('m3u', C.c_int), ('urls', C.c_int), ('next', C.c_int), ('more', C.c_int), ('first', C.c_char * 512),
-                ('want', C.c_char * 512), ('loads', C.c_uint), ('seq', C.c_char * 24)]
+                ('want', C.c_char * 512), ('loads', C.c_uint),
+                ('picks', C.c_uint), ('seq', C.c_char * 24)]
 
 
 class Sl(C.Structure):
@@ -482,7 +483,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin libsource radio\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings artist album playlists storage signin libsource radio ahead\n'
     # Streaming Songs' state goes first (library_settings.c), so an app that reads libsource in the caps finds it
     assert world.of('rename') == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
                                   (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
@@ -1104,6 +1105,65 @@ def test_a_queue_the_user_plays_before_a_playlists_first_song_ends_its_session(f
     s.step()
     s.step()
     assert s.loads == [] and sm(fw).state == S_DONE
+
+
+@pytest.mark.parametrize('timer', [0, 1])
+@pytest.mark.parametrize('nxt', [1, 0])
+def test_a_song_the_user_skips_to_before_a_playlists_first_song_lands_ends_its_session(fw, mcl, songs, timer,
+                                                                                         nxt):
+    """The device, 2026-11-17: Shuffle's first song A still downloading, Next played B of the queue before; A
+    landed half way through B and played over it. Next or Previous in the queue playing loads no queue, so
+    playback_loads stays; the session must end all the same, A left on the card."""
+    s = playlist(fw, mcl, songs, A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    fw.mock('stock_change_trampoline', lambda *_: 0)
+    if timer:  # A there, its start's timer set, and the user's Next before it fires
+        s.land(A)
+        s.poll()
+        fw.fn('ringnav_change', C.c_int, C.c_int)(nxt)
+        s.fire()
+    else:
+        s.step()
+        fw.fn('ringnav_change', C.c_int, C.c_int)(nxt)
+        s.step()
+        s.land(A)
+    s.step()
+    s.step()
+    assert s.loads == [] and sm(fw).state == S_DONE
+
+
+@pytest.mark.parametrize('top', [b'playing_page', b'allmusic_page'])
+def test_a_session_starting_over_now_playing_replaces_it(fw, mcl, songs, top):
+    """The device, 2026-11-17: Now Playing showed the pressed server song, and the app's first song opened a second
+    one over it. Both pages' timers ran stock's update, whose title waits for a song change's flag, which the one
+    under took: Next changed the art and the times, never the title, and Return had to be pressed twice. Now
+    Playing on top is closed as the new one opens; any other page stays under it."""
+    s = playlist(fw, mcl, songs, A)
+    page, order, named = 0x7000, [], C.create_string_buffer(top)
+    fw.mock('window_manager_get_top_window', lambda *_: page)
+    fw.mock('widget_get_prop_str', lambda w, key, default, *_: C.addressof(named)
+            if w == page and C.string_at(key) == b'name' else default)
+    fw.mock('window_manager_close_window_force', lambda wm, w, *_: order.append(('close', w)))
+    navigate = s.navigate
+    fw.mock('navigator_to_with_context', lambda name, ctx, *_: order.append(('open', C.string_at(name))) or
+            navigate(name, ctx))
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    opened = [('open', b'playing_page')]
+    assert order == ([('close', page)] if top == b'playing_page' else []) + opened and s.queued() == [A]
+
+
+def test_a_song_the_player_moves_on_to_by_itself_leaves_a_playlist_session_waiting(fw, mcl, songs):
+    s = playlist(fw, mcl, songs, A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    fw.mock('stock_next_trampoline', lambda *_: 0)
+    fw.fn('ringnav_next', C.c_int, C.c_int)(1)  # the song before ends by itself: nobody chose another
+    s.land(A)
+    s.step()
+    s.step()
+    assert s.loads == [(LIBRARY, 1)] and s.queued() == [A]
 
 
 def test_the_users_own_play_of_the_same_song_ends_a_playlist_session(fw, mcl, songs):
@@ -3004,6 +3064,24 @@ def test_a_field_row_sends_its_text_and_takes_the_reply_in_the_levels_place(fw):
     p.answer(rows=[item(0, b'info'), USER, (b'field', b'login', b'Password:', b'*****', b'pw', b'')])
     assert p.top.state == K_READY and p.top.n == 3 and p.cell(2, 3) == b'*****' and p.pg.depth == 1
     assert b'Username:' in texts and not [t for t in texts if SECRET in t]  # nothing on screen holds it
+
+
+@pytest.mark.parametrize('row, secret', [
+    (PASSWORD, True), (USER, False),
+    ((b'field', b'pin', b'Passcode', b'', b'', b''), True),  # titled as one, empty yet
+    ((b'field', b'key', b'API key', b'****', b'', b''), True),  # the app's mask
+    ((b'field', b'host', b'Server', b'', b'', b''), False),
+])
+def test_a_password_field_s_box_is_marked_for_the_strip_s_dots(fw, row, secret):
+    """The letter strip shows a box marked _secret as dots (search_strip.c ss_secret_box); Q2SPOT/1 has no word for a
+    password, so a field titled as one or showing the app's asterisks is one."""
+    p = Page(fw)
+    marks = []
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: C.string_at(k) == b'_secret' and marks.append((w, v)))
+    p.answer(rows=[row])
+    box = edit_box(fw)
+    p.click(0)
+    assert marks == ([(box, 1)] if secret else [])
 
 
 def test_a_field_text_of_63_bytes_is_sent_whole(fw):

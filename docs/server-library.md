@@ -92,7 +92,8 @@ i	<pid>	<sid>	<card path or empty>
   whenever it has one: the cover of an album the catalogue has `s` rows of, a baseline JPEG of at
   most 160 px a side (Cover Flow's texture; the Library's rows and grids are smaller). The
   firmware finds it by the album id in a server row's path, or in the path of that row's offline
-  copy, and uses it where it would use a card album's cover: the Library's album rows and grids
+  copy, or of a song's download in the app's stream cache (`.../stream/.../<title> [<sid>].<suffix>`,
+  which no `catalogue.avail` line names: the sid in its name is the row's, `patch/stream_path.h`), and uses it where it would use a card album's cover: the Library's album rows and grids
   (`grid_cover`, through stock's thumbnailer), Cover Flow's carousel (its art cache, built from
   it), Now Playing (`coverflow_player_cover`, after the file's own art and folder images), and
   under OLED the app's own artist page's Albums, Singles & EPs, Top Songs and All Songs
@@ -262,7 +263,9 @@ shows the pressed song at once: its title, artist and album from the row, its pl
 one). The song that was playing stops, so its time and sound don't run on under the new title.
 Now Playing goes back to the player's song as soon as the player parses one (the pressed
 song once it plays, or another the user picked), when nothing of the list could play, or after
-60 s with neither (`CATPLAY_SHOW_MS`).
+60 s with neither (`CATPLAY_SHOW_MS`). A Next or Previous while the pressed song is still to come
+plays the song it moves to, and the pressed song, once it lands, stays on the card without
+playing (`addon.c` `moved_on`).
 
 ### Compatibility
 
@@ -290,6 +293,110 @@ under 1 GB free. Albums are taken in the Library's order (by name), so the top o
 first. An album the server has none for (error 70, a 404, or a picture over 160 px) is noted in
 `covers/.none` and not asked again; Show in Library off and Sign Out delete the folder. Measured
 on the developer's Navidrome: a 160 px baseline JPEG of 3 to 6 KB, 50 to 350 ms each.
+
+## Download Ahead and the streaming state
+
+Status: built (p32): the app's half in q2-subsonic `feat/p32-prefetch`; here `patch/stream_state.c`, `patch/np_stream.c` and q2player's `player/grow.c`. A streamed song today is handed to the player only once it is
+whole (`.part`, sync, rename; `m3u_songs` waits at a line until its file exists), the app fetches a
+fixed two songs ahead in list order (`streamWindow`), and nothing tells the firmware how far a
+download has got. Three files, all on tmpfs and written whole (temp and rename), and two
+capability words close that. An app or firmware without them behaves as today.
+
+**Capability words** (`/tmp/q2-addon.caps`): `ahead`, the firmware writes `.ahead` and reads
+`.stream`; `grow`, the player plays a file that is still arriving (q2player only: written while
+q2player is the player, never with stock's hciplayer, which would end the song at the bytes it
+found).
+
+**Download Ahead** is the firmware's setting: Streaming > Configuration, **Download Ahead**, Off, 1,
+2 or 3 songs, 2 by default (`[Q2POD] AHEAD`, `streamconf_page`).
+
+**`/tmp/q2-<id>.ahead`** (firmware to app). Written while the queue playing is that app's `.play`
+m3u: at the queue's start, and whenever the songs after the one playing change in play order (a
+skip, a jump in Up Next, shuffle or repeat changed, a song added or removed, the setting changed).
+Not rewritten for position or pause.
+
+```text
+#Q2AHEAD/1	seq=<the .play's seq>	n=<0..3>
+<card path>
+```
+
+One line a song: the songs the firmware's queue holds after the one playing, in its play order
+(shuffle, repeat and Play Next applied, `playback_upcoming`), at most `n`, and only that app's own
+lines. Its queue holds the m3u's lines up to the first one not there yet (or under `START`, below),
+so it may name fewer than `n`: the rest are the m3u's songs after the one playing that are not
+whole yet, in list order, the ones it queues next, which the app takes itself. `n=0` is Off: the
+app fetches only the song playing. The song playing is not listed: it is `.playing`, as today. A
+seq that is not the app's latest `.play` is ignored. With no `.ahead` (older firmware) the app keeps
+two ahead in list order.
+
+**What the app does with it.** Its plan is the song playing, then the `.ahead` lines in order:
+one download at a time, each started once the one before it is whole. A song whose file is already
+whole (synced, or in the Stream Cache) is skipped over. When `.ahead` or `.playing` changes, a
+download whose song is no longer in the plan is cancelled and its partial file deleted, and the
+plan starts again from its first song not yet whole. Fetching needs the server reachable over the
+Q2's Wi-Fi (its only link); Download Ahead never wakes Smart Wi-Fi's radio, which stays up while the
+app runs (`addon_running`) as today. Space comes from the Stream Cache under its limit as now
+(`trim`: played longest ago first), and the planned songs are protected (`protect`): never the song
+playing or the next `n`.
+
+**`/tmp/q2-<id>.stream`** (app to firmware and player). Written while a stream runs: at once on
+each change of a song's state, and every 500 ms while a line is `get` (2 a second at most); not at
+all while nothing moves. A file left with a `get` line and no write for 3 s is stale (the app died
+or stopped): its `get` lines read as `fail`.
+
+```text
+#Q2STREAM/1	seq=<the .play's seq>
+<state>	<bytes on the card>	<total bytes, 0 unknown>	<length ms, 0 unknown>	<card path>
+```
+
+One line for the song playing and one for each planned song, in plan order (tab-separated, the
+card-app channel's escapes, path last). States: `wait` (planned, no byte yet), `get` (arriving),
+`stall` (arriving, but no byte for 2 s), `done` (whole at its path), `fail` (given up; `server=down`
+in `.state` says why when the server is gone). Total is the response's Content-Length, else the
+server's size; length is the server's duration.
+
+**Where the bytes are.** With `grow` the app writes a song in place, at the path its m3u line
+names, so the player can open it while it arrives; without it, at `<path>.part`, renamed when
+whole, as today (the `.stream` lines still count its bytes, for the display). An in-place file is
+listed in `.subsonic/stream/.growing` while it is written, and the app deletes any file listed
+there when it starts, so a file cut by a crash or a pulled card is never taken for a whole one.
+
+**Starting before the end** (firmware, `m3u_songs`, with `grow`). A line whose file exists but whose
+`.stream` line is `wait` or `get` with fewer than `START` bytes is waited for as a missing file is
+today; `START` is 8 s of the song (total x 8000 / length), at least 256 KB, or the whole file when
+total or length is unknown. A `stall` line waits the same. Then it is queued as any card file.
+Gapless and the FLAC paths are unchanged: the next song is a file in the queue, whole or arriving.
+ponytail: the stock player reads a file's length from its header (FLAC STREAMINFO, an MP3's Xing
+frame); a CBR MP3 without one reads short while it arrives, so while a `.stream` line is not `done`
+the firmware shows the server's length (the line's length, else the catalogue's), or `--:--` when
+there is none ([internals](internals.md#streaming-configuration)).
+
+**The player** (q2player, `source.c`). Opening a file under `/mnt/mmc/.<id>/`, it reads
+`/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the
+bytes there are, it waits (polling `.stream` every 100 ms) rather than end, and so does a seek past
+them. While it waits it writes `/tmp/q2player.wait`, the path and a newline, and removes the file
+once it plays again. `done`, `fail`, a stale file or no line: the end of the bytes is the song's end.
+
+**What the firmware shows.** A server song is loading while it is the song Now Playing shows and
+either it has not started (the pressed song, `catalogue_np_now`: the app's first `.stream` line) or
+`/tmp/q2player.wait` names it (`np_stream.c`). ponytail: a queued song still short of `START` after
+the one before it ended shows the ended song, not a spinner; the pressed song reads whatever
+`.stream` holds, an older run's until the app's new run writes it.
+Then Now Playing's times row shows the spinner and `<bytes> of <total> MB` from its `.stream` line,
+and the car remote's NowPlaying says buffering (below). Read at Now Playing's 500 ms tick, and only
+while a stream's `.stream` exists.
+
+**Retry** (firmware to app): while a server song can't go on because the app says `server=down`
+(the pressed song, or one q2player waits for), Now Playing shows "Can't reach the server" and Retry
+and Skip (`np_stream.c`). Retry writes `/tmp/q2-<id>.retry` (`1` and a newline); the app's stream
+run takes it by deleting it and tries every song still to fetch at once, its backoff or a lost
+server's wait cut short (`takeRetry`). Skip is Next. An app without it leaves the file, and the
+next Retry writes it again.
+
+**The car remote** (`remote/coda-rc.proto`, `CAP_BUFFERING` = 8192): NowPlaying gains `buffering` (13, the
+loading state above), `buffered_bytes` (14) and `total_bytes` (15) (the `.stream` line's, 0 when
+not streaming) and `buffered_ms` (16) (bytes over total times length, 0 when unknown), sent when they change,
+at most twice a second.
 
 ## Keeping in step with the server
 

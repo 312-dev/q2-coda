@@ -143,6 +143,7 @@ LIBC = {
     'deque_at': ('void *', 'const void *, unsigned'), '_deque_push_back': ('void', 'void *, ...'),
     'deque_assign': ('void', 'void *, const void *'), 'deque_clear': ('void', 'void *'),
     'deque_pop_back': ('void', 'void *'),
+    'list_size': ('unsigned', 'const void *'),  # cover_wake.c: the album cover thread's task list
     'deque_destroy': ('void', 'void *'), 'send': ('int', 'int, const void *, unsigned, int'),
     # stock's name sort, run by name_order.c as toolsQueryDbTable runs it (iterators by value, cstl_iter)
     'deque_begin': ('cstl_iter', 'const void *'), 'deque_end': ('cstl_iter', 'const void *'),
@@ -180,6 +181,7 @@ LIBC = {
     'waitpid': ('int', 'int, int *, int'), '__errno_location': ('int *', 'void'), 'socket': ('int', 'int, int, int'), 'close': ('int', 'int'),
     'connect': ('int', 'int, const void *, unsigned'),
     'recv': ('int', 'int, void *, unsigned, int'),
+    'getuid': ('unsigned', 'void'),  # bt_vol_event.c's bus login (SASL EXTERNAL)
     'select': ('int', 'int, void *, void *, void *, void *'),
     'getsockopt': ('int', 'int, int, int, void *, unsigned *'),
     'fcntl': ('int', 'int, int, ...'), 'ioctl': ('int', 'int, unsigned, ...'),
@@ -195,8 +197,8 @@ LIBC = {
 }
 
 # The payload's C beside navigation.c (build.py compile_payload), in link order; test/fw builds the same set.
-UI_SOURCES = ['peq.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c',
-              'release_sig.c', 'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
+UI_SOURCES = ['peq.c', 'card_store.c', 'peq_ui.c', 'coverflow.c', 'coverflow_thumb.c', 'coverflow_letters.c', 'coverflow_loader.c', 'playlist_art.c', 'slideshow.c', 'library_scope.c', 'scrobble.c', 'videos.c', 'games.c', 'playback.c', 'spotify.c', 'addon.c', 'addon_library.c', 'radio.c', 'tidal.c', 'netupdate.c', 'onlinematch.c', 'crossfade.c', 'nightshift.c', 'headset.c', 'guest.c', 'chapters.c', 'lyrics.c', 'xiph.c', 'airplay.c', 'stock_tls.c', 'splash_hold.c',
+              'release_sig.c', 'corner_cover.c', 'monocypher/monocypher.c', 'monocypher/monocypher-ed25519.c']
 # The UI_SOURCES tools/format.sh leaves alone: upstream's files written before the formatter was adopted, kept
 # as upstream writes them so merges of them stay clean, and the vendored monocypher, never reformatted. A new
 # file is formatted unless it is added here.

@@ -8,7 +8,7 @@ import struct
 import time
 
 from conftest import O, mcl  # noqa: F401
-from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, peer
+from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, card_route, peer
 from test_nav_library_pages import call, empty_state, signed, ui  # noqa: F401
 from test_nav_hold import recs, scratch, st  # noqa: F401
 
@@ -166,9 +166,10 @@ def test_pair_a_phone_says_how_and_closes_when_one_pairs(fw, ui, mcl, recs):
     howto = ui.top()
     assert ui.name[howto] == 'carhowto_page'
     q2.files[PAIR] = b'852219\nGalaxy S24\n'
+    card_route(fw, ui)
     q2.tick()
-    assert ui.name[ui.top()] == 'carpair_page'
-    assert {'Pair with "Galaxy S24"?', '852 219', 'Enter this code in Q2 Muse Remote'} <= set(ui.shown(ui.top()))
+    assert ui.name[ui.top()] == 'sortselect_dialog'  # the pairing card (pair_prompt.c)
+    assert C.string_at(C.addressof(C.c_char.in_dll(fw.lib, 'pair_prompt__pair_name'))) == b'Galaxy S24'
     del q2.files[PAIR]
     q2.files[PAIR_END] = b'1\n'
     q2.tick()
@@ -293,3 +294,84 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
     foot = top + geometry(ui, switch)[3] + geometry(ui, gap)[3] + geometry(ui, cta)[3]
     assert foot <= oled.bar + oled.list_end
     assert geometry(ui, cta)[3] == 38 + 2 * 5  # the ring's 2 px, 3 px out, and no more
+
+
+BLE = '/tmp/coda-rc.ble'
+WIFI_STEPS = ['1', 'Open the Q2 Muse Remote app', '2', 'Pair a Q2 Muse > Wi-Fi address', '3',
+              'Pick Q2 Muse, then tap Next', '4', 'Type the code shown here']
+
+
+def howto_texts(fw, ui, howto):
+    """What Pair a Phone paints, in order."""
+    lcd, canvas = C.create_string_buffer(0x200), C.create_string_buffer(0x200)
+    C.c_void_p.from_address(C.addressof(canvas) + O['CANVAS_LCD']).value = C.addressof(lcd)
+    texts = []
+    fw.mock('canvas_draw_text_in_rect', lambda c, s, n, *_: texts.append(''.join(map(chr, (C.c_uint * n).from_address(s)))) or 0)
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: 5.0 * n)
+    fw.fn('carremote_paint', None, C.c_void_p, C.c_void_p)(howto, C.addressof(canvas))
+    return texts
+
+
+def open_howto(fw, ui, recs, bluetooth=0, advertising=False, wifi=True):
+    q2 = Car(fw, ui, recs)
+    fw.var('g_bluetoothflag', C.c_ubyte).value = bluetooth
+    if advertising:
+        q2.files[BLE] = b'1\n'
+    if not wifi:
+        fw.mock('fw_ioctl', lambda *_: -1)
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()  # the empty state's Pair a Phone
+    assert ui.name[ui.top()] == 'carhowto_page'
+    return q2, ui.top()
+
+
+def test_pair_a_phone_with_bluetooth_off_gives_the_wi_fi_steps_and_the_address(fw, ui, mcl, recs):
+    _, howto = open_howto(fw, ui, recs)
+    assert howto_texts(fw, ui, howto) == WIFI_STEPS + ['Q2 Muse', 'Address  192.168.1.30', 'Phone and Q2 Muse on one Wi-Fi',
+                                                       'Waiting for a phone…']
+
+
+def test_wi_fi_steps_pick_the_q2_by_its_bluetooth_name(fw, ui, mcl, recs):
+    """Q2 Muse Remote's Wi-Fi tab lists the Q2 under its mDNS instance, the Bluetooth name (coda_rc_mdns.c)."""
+    def read(path, section, key, out, default, *_):
+        v = b'Car Q2' if C.string_at(key) == b'BTNAME' else C.string_at(default)
+        C.memmove(out, v + b'\0', len(v) + 1)
+    _, howto = open_howto(fw, ui, recs)
+    fw.mock('toolsReadConfig', read)
+    assert howto_texts(fw, ui, howto)[5] == 'Pick Car Q2, then tap Next'
+
+
+def test_bluetooth_on_but_not_advertising_is_still_the_wi_fi_steps(fw, ui, mcl, recs):
+    """A real Q2's bluetoothd without GattManager1 (2026-11-17): the app's Bluetooth tab could not find it."""
+    _, howto = open_howto(fw, ui, recs, bluetooth=1)
+    assert howto_texts(fw, ui, howto)[:8] == WIFI_STEPS
+
+
+def test_advertising_gives_the_bluetooth_steps_and_the_address_besides(fw, ui, mcl, recs):
+    _, howto = open_howto(fw, ui, recs, bluetooth=1, advertising=True)
+    assert howto_texts(fw, ui, howto) == [
+        '1', 'Open the Q2 Muse Remote app', '2', 'Pair a Q2 Muse > Bluetooth', '3', 'Pick Q2 Muse, then tap Next', '4',
+        'Type the code shown here', 'Q2 Muse', 'Or Wi-Fi address  192.168.1.30', 'Waiting for a phone…']
+
+
+def test_a_stale_advertising_file_with_bluetooth_off_is_not_believed(fw, ui, mcl, recs):
+    _, howto = open_howto(fw, ui, recs, bluetooth=0, advertising=True)
+    assert howto_texts(fw, ui, howto)[:8] == WIFI_STEPS
+
+
+def test_with_no_link_it_says_to_join_wi_fi_first_and_waits_for_nothing(fw, ui, mcl, recs):
+    _, howto = open_howto(fw, ui, recs, wifi=False)
+    assert howto_texts(fw, ui, howto) == ['1', 'Open Settings > Wi-Fi', '2', 'Join the Wi-Fi your phone is on', '3',
+                                          'Come back here to pair', 'Q2 Muse', 'Wi-Fi  not connected']
+
+
+def test_pair_a_phone_follows_bluetooth_coming_on(fw, ui, mcl, recs):
+    q2, howto = open_howto(fw, ui, recs, bluetooth=1)
+    painted = []
+    fw.mock('widget_invalidate_force', lambda w, *_: painted.append(w) or 0)
+    q2.tick()
+    assert howto not in painted  # nothing changed
+    q2.files[BLE] = b'1\n'  # bluetoothd took the GATT application
+    q2.tick()
+    assert howto in painted
+    assert howto_texts(fw, ui, howto)[3] == 'Pair a Q2 Muse > Bluetooth'

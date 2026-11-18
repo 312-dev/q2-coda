@@ -63,6 +63,9 @@ static theme_t t = { .cf = { %s } };
 int client_h(void) { return 290; }
 const theme_t *theme(void) { return &t; }
 #include <stdio.h>
+#undef calloc /* the shim's name for the payload's calloc (corner_cover.c's tables): libc's here */
+void *calloc(size_t, size_t);
+void *shim_calloc(size_t n, size_t size) { return calloc(n, size); }
 void coverflow_render(unsigned *, int, int, const unsigned *const[7]);
 int ipod_light(void) { return %d; }
 int ipod_square_art(void) { return 0; }
@@ -1293,7 +1296,7 @@ assert did(m,'image_manager_unload_all') and m.nodes[refresh_label]['text']=='Re
 for card,first in ((True,'Rockbox'),(False,'Favorites')):
     CONFIG.clear(); d=Machine(); d.rockbox_mode=0o100755 if card else 0
     assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))==first
-d.rockbox_mode=0o100755  # a card mounted after the first read: the default follows it
+d.rockbox_mode=0o100755; d.now+=O['CARD_RECHECK_MS']  # a card mounted after the first read: the default follows it, once looked at again
 assert d.text(d.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Rockbox'
 passed()
 # Shortcut: Playlists (7) opens the Library's Playlists list, as stock's Home does (context 0: not Add to Playlist).
