@@ -1347,8 +1347,9 @@ ORDER = host.tools_build.TIMEZONE_ORDER
 class Zones:
     """Stock's time zone rows as stock builds them, row 0 first, then its caption, then the rest: each
     a list item whose last child is its button, holding an hscroll_label and a plain label. Each
-    zone's offset now, in seconds, is offsets' (its label's standard one unless given)."""
-    def __init__(self, fw, ui, offsets=None):
+    zone's offset now, in seconds, is offsets' (its label's standard one unless given); saved, the
+    zone saved (g_time_zone)."""
+    def __init__(self, fw, ui, offsets=None, saved=22):
         self.fw, self.ui, self.zone = fw, ui, ''
         self.offsets = {zone: 60 * host.tools_build.timezone_offset(label) for label, zone in ZONES}
         self.offsets.update(offsets or {})
@@ -1358,6 +1359,11 @@ class Zones:
         fw.mock('stock_timezone_row_trampoline', lambda item, i, *_: self.stock.append(i))
         fw.mock('hscroll_label_set_only_focus', lambda label, on, *_: self.focus.append((label, on)))
         fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
+        # the value label list_value adds beside the key (named _setting_value)
+        fw.mock('hscroll_label_create', lambda parent, x, y, w, h, *_: ui.widget('hscroll_label', ui.by[parent], (x, y, w, h)).at)
+        fw.mock('widget_set_name', lambda w, name, *_: ui.by[w].props.__setitem__(b'name', C.string_at(name)) if w in ui.by else None)
+        fw.var('g_time_zone', C.c_ubyte).value = saved
+        self.saved = saved
         self.list = ui.widget('list_view')
         self.caption_label = ui.widget('hscroll_label')  # stock adds it after row 0
         self.rows = []
@@ -1374,40 +1380,57 @@ class Zones:
         scroll, plain = self.ui.widget('hscroll_label', button), self.ui.widget('label', button)
         self.fw.fn('ringnav_timezone_row', None, C.c_void_p, C.c_int)(item.at, i)
         self.rows.append((scroll, plain))
-        return self.texts.get(scroll.at), plain
+        value = next((w for w in button.children if w.kind == b'hscroll_label' and w is not scroll), None)
+        return self.texts.get(scroll.at), self.texts.get(value.at) if value else None
 
 
-def caption(offset, city):
+def utc(offset):
     m = abs(offset) // 60
-    return f'GMT{"-" if offset < 0 else "+"}{m // 60}{f":{m % 60:02d}" if m % 60 else ""} {city}'
+    return f'UTC{"-" if offset < 0 else "+"}{m // 60}{f":{m % 60:02d}" if m % 60 else ""}'
 
 
-def test_each_zone_row_reads_its_offset_now_west_to_east(fw, ui):
+def test_each_zone_row_reads_its_city_and_offset_now_the_saved_one_first_then_west_to_east(fw, ui):
     zones = Zones(fw, ui, {'America/New_York': -4 * 3600, 'Europe/London': 3600})  # summer time
-    shown = [zones.build(i)[0] for i in range(len(ZONES) + 1)]
+    shown = [zones.build(i) for i in range(len(ZONES) + 1)]
     names = [zone for _, zone in ZONES]
-    rows = sorted(range(len(ZONES)), key=lambda z: (zones.offsets[names[z]], ORDER.index(z)))
     cities = [label.split(' ', 1)[1] for label, _ in ZONES]
-    assert shown[0] is None and zones.stock[0] == 0  # stock's own first row
+    rest = sorted((z for z in range(len(ZONES)) if z != zones.saved), key=lambda z: (zones.offsets[names[z]], cities[z]))
+    rows = [zones.saved] + rest
+    assert shown[0] == (None, None) and zones.stock[0] == 0  # stock's own first row
     assert zones.stock[1:] == [z + 1 for z in rows]  # stock names and clicks the zone by its index
-    assert shown[1:] == [caption(zones.offsets[names[z]], cities[z]) for z in rows]
-    assert 'GMT-4 New York' in shown and 'GMT+1 London' in shown and 'GMT+5:45 Kathmandu' in shown
-    assert 'GMT-3:30 St. John\'s' in shown
+    assert shown[1:] == [(cities[z], utc(zones.offsets[names[z]])) for z in rows]
+    assert shown[1] == ('Shanghai', 'UTC+8')  # the saved zone, pinned
+    assert ('New York', 'UTC-4') in shown and ('London', 'UTC+1') in shown and ('Kathmandu', 'UTC+5:45') in shown
+    assert ('St. John\'s', 'UTC-3:30') in shown and ('Lord Howe', 'UTC+10:30') in shown
+    chicago, mexico = shown.index(('Chicago', 'UTC-6')), shown.index(('Mexico City', 'UTC-6'))
+    assert chicago < mexico  # ties by city
+
+
+def test_the_saved_zones_value_stops_short_of_its_check(fw, ui):
+    """The picker's check sits on the right column: the pinned row's value ends 24 px before the others'."""
+    zones = Zones(fw, ui)
+    fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.by[w].block, 0, x, y, ww, h) if w in ui.by else None)
+    for i in range(3):
+        zones.build(i)
+    values = [w for w in ui.by.values() if w.kind == b'hscroll_label' and w.props.get(b'name') == b'_setting_value']
+    ends = [w.box[0] + w.box[2] for w in values]
+    assert len(ends) == 2 and ends[0] == ends[1] - 24
 
 
 def test_zone_rows_keep_their_ellipsis_until_focused(fw, ui):
     zones = Zones(fw, ui)
     for i in range(3):
         zones.build(i)
-    assert zones.focus == [(scroll.at, 1) for scroll, _ in zones.rows]
+    assert [f for f in zones.focus if f[0] in [scroll.at for scroll, _ in zones.rows]] == \
+        [(scroll.at, 1) for scroll, _ in zones.rows]
     assert not any(plain.at in zones.texts for _, plain in zones.rows)
 
 
 def test_a_row_past_the_zones_is_stocks(fw, ui):
     zones = Zones(fw, ui)
     for i in range(len(ZONES) + 2):
-        text = zones.build(i)[0]
-    assert zones.stock[-1] == len(ZONES) + 1 and text is None
+        text = zones.build(i)
+    assert zones.stock[-1] == len(ZONES) + 1 and text == (None, None)
 
 
 # Music loads leave out spoken tracks.

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Date & Time (OLED): the time zone list puts your current zone at the top with its check, then lists the rest from west to east, each as the city with its offset from UTC at the right ("Chicago  UTC-6"), in grey, as other settings show a value. Lord Howe is spelled out.
   - Date & Time: the time zone now sets itself, as on a phone. With **Automatic Time Zone** on (Settings > General > Date & Time > Automatic Time Set, under the automatic time switch; on by default), the Q2 looks up its time zone from the Wi-Fi network's location when Wi-Fi connects, at most once a day, and the clock follows. It asks ipinfo.io (ipapi.co if that fails), which sees your network's public address; turned off, nothing is sent. Picking a city by hand turns it off. A new install starts on UTC until the lookup runs, instead of China time (GMT+8 Shanghai), which every new Q2 started on before.
   - Streamed songs: after a restart, Up Next names a server song by its title and artist again. A streamed queue picked up where it left off showed the next song by its download's file name, in lower case with the server's id after it.
   - Text entry (OLED): the left end of the letter strip is as sticky as the right. Turning the wheel to the set switcher stops there, as it does on the return key, and a further turn in the same motion stays put; only a new turn (a pause of a quarter second) goes on round to the return key. A fast spin stops at either end alike.
