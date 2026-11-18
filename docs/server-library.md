@@ -267,6 +267,10 @@ song once it plays, or another the user picked), when nothing of the list could 
 plays the song it moves to, and the pressed song, once it lands, stays on the card without
 playing (`addon.c` `moved_on`).
 
+Next on the last song queued while the app's next song is still downloading (a radio's first
+minutes) waits for that song and plays it once it lands, saying "Next song is loading"; the
+song playing plays on meanwhile (`addon.c` `addon_next_waits`).
+
 ### Compatibility
 
 - **Local only** runs no union, no gray test and no import, and ignores catalogue files.

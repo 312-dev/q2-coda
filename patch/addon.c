@@ -389,6 +389,7 @@ static struct {
     unsigned loads;  /* playback_loads at its start, then once its queue was loaded */
     unsigned picks;  /* playback_picks at its start: a song the user moved to since ends its wait */
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
+    unsigned skip;   /* playback_picks after a Next that waits for sm.want (addon_next_waits) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
 /* The app whose .play started the queue playing, and playback_loads after that queue's load: the
@@ -658,6 +659,19 @@ static int urls_start(const void *unused) {
     return 0;
 }
 
+static void *stream_queue(void);
+/* A user's Next on the last song queued of a playlist session that waits for its next song
+ * (sm.want, still downloading): 1, and stream_poll plays that song once it lands and joins the
+ * queue, unless the user moves to another song meanwhile. Stock's Next on a queue's last song
+ * would wrap to its first: a radio's seed, played again while the radio's next song downloads. */
+int addon_next_waits(void) {
+    void *q = sm.state == S_PLAY && sm.m3u && sm.want[0] ? stream_queue() : 0;
+    if (!q || (unsigned)I(MCL_POS, 0) + 1 != deque_size(q)) return 0;
+    sm.skip = playback_picks;
+    toast("Next song is loading");
+    return 1;
+}
+
 /* Whether the queue playing is the session's: its first song in its folder; or a playlist's first
  * song, and no queue loaded since its own (a Library play of the same album is the user's). */
 static void *stream_queue(void) {
@@ -695,7 +709,7 @@ static void stream_poll(app_t *a) {
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = 0, sm.first[0] = sm.want[0] = 0;
-        sm.loads = playback_loads, sm.picks = playback_picks;
+        sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = 0;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
@@ -734,6 +748,12 @@ static void stream_poll(app_t *a) {
             void *add = m3u_songs();
             if (deque_size(add)) playback_queue_insert(q, add, 0);
             deque_destroy(add);
+            /* a Next waited for this: on to the first song that joined, unless the user moved since */
+            unsigned pos = (unsigned)I(MCL_POS, 0);
+            if (sm.skip && sm.skip == playback_picks && pos + 1 < deque_size(q))
+                sm.skip = 0, ringnav_change(1);
+            else if (sm.skip != playback_picks)
+                sm.skip = 0;
         }
         ahead_poll(a->id, sm.seq, q); /* Download Ahead: the songs after the one playing */
     } else if (!scan && stream_newer(sm.dir, sm.last)) {
