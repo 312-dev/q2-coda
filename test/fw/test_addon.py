@@ -37,7 +37,9 @@ LIBRARY = 0xf001  # stock's library class, which a local queue plays under
 class App(C.Structure):
     _fields_ = [('id', C.c_char * 16), ('name', C.c_char * 32), ('tips', C.c_char * 32), ('bin', C.c_char * 48), ('run', C.c_char * 48),
                 ('pid', C.c_char * 32), ('state', C.c_char * 40), ('browse', C.c_char * 48), ('icon', C.c_char * 56), ('more', C.c_char * 48),
-                *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio', 'sync', 'sync_pm')),
+                *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio',
+                                         'lyrics')),
+                ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
 
 
@@ -5680,6 +5682,82 @@ def test_an_app_without_radio_is_not_asked(fw):
     path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
     assert fw.fn('addon_radio_start', C.c_int, C.c_void_p, C.c_uint)(block(fw, path), 7) == 0
     assert b'/tmp/q2-foo.radio' not in p.world.files
+
+
+def test_a_songs_lyrics_are_asked_of_its_app(fw):
+    """A song of a card app with lyrics=1 (its streamed one, in its folder) has its lyrics asked of that app, in
+    /tmp/q2-<id>.lrcask once its socket is there; its state file's lyricsack answers (docs/internals.md#server-lyrics)."""
+    p = Page(fw, b'name=Foo\nlyrics=1\n', opens=False)
+    ask = fw.fn('addon_lyrics_ask', C.c_int, C.c_void_p, C.c_uint)
+    answer = fw.fn('addon_lyrics_answer', C.c_int, C.c_uint)
+    path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
+    assert ask(block(fw, path), 7) == 1
+    assert b'/tmp/q2-foo.lrcask' not in p.world.files  # no socket yet: the app reads a request at its start as answered
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    assert answer(7) == -1
+    assert p.world.files[b'/tmp/q2-foo.lrcask'] == b'7 ' + path + b'\n'
+    p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nlyricsack=7 2\n'
+    assert answer(7) == 2 and answer(8) == -1
+
+
+@pytest.mark.parametrize('path,asked', [
+    (b'/mnt/mmc/Sub Songs/Art/1999 - Alb/01 - a.flac', True),  # its downloads folder: a synced song
+    (b'/mnt/mmc/Sub Songsx/a.flac', False), (b'/mnt/mmc/Music/a.flac', False), (b'/mnt/mmc/Sub Songs', False),
+])
+def test_a_synced_songs_lyrics_are_asked_of_the_app_whose_downloads_hold_it(fw, path, asked):
+    p = Page(fw, b'name=Foo\nlyrics=1\ndownloads=Sub Songs\r\n', opens=False)
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    assert fw.fn('addon_lyrics_ask', C.c_int, C.c_void_p, C.c_uint)(block(fw, path), 3) == asked
+    assert (b'/tmp/q2-foo.lrcask' in p.world.files) == asked
+
+
+@pytest.mark.parametrize('manifest', [b'name=Foo\n', b'name=Foo\nlyrics=0\ndownloads=Music\n'])
+def test_an_app_without_lyrics_is_not_asked(fw, manifest):
+    p = Page(fw, manifest, opens=False)
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    ask = fw.fn('addon_lyrics_ask', C.c_int, C.c_void_p, C.c_uint)
+    for path in (b'/mnt/mmc/.foo/stream/a [s1].flac', b'/mnt/mmc/Music/a.flac'):
+        assert ask(block(fw, path), 7) == 0
+    assert b'/tmp/q2-foo.lrcask' not in p.world.files
+
+
+def test_a_server_songs_lyrics_load_again_once_its_app_answers(fw, mcl):
+    """lyrics.c lyrics_ask_poll: once a load found nothing for a song of a lyrics=1 app, the lyrics page in front asks
+    the app, once; its answer 0 (the .lrc beside the song) loads the lyrics again and has the page's refresh rebuild
+    its rows (g_forcerefresh_flag). Nothing is asked off the page, again for the same song, or before a load ends."""
+    p = Page(fw, b'name=Foo\nlyrics=1\n', opens=False)
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
+    deques, record, chars = Deques(fw), C.create_string_buffer(0x60), C.create_string_buffer(path)
+    queue = deques.new()
+    struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(chars))
+    struct.pack_into('<i', record, O['REC_TYPE'], 8)
+    deques[queue][:] = [C.addressof(record)]
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = queue
+    mcl.pos, mcl.type = 0, 0xf001
+    loads = []
+    fw.mock('mclGetLyricSize', lambda *_: 0)
+    fw.mock('stock_lyric_trampoline', lambda *_: loads.append(1) and 0)
+    fw.mock('taglib_file_new', lambda *_: 0)  # no tags
+    refresh = fw.var('g_forcerefresh_flag', C.c_ubyte)
+    refresh.value = 0
+    poll = fw.fn('lyrics_ask_poll', None, C.c_int)
+    poll(1)
+    assert b'/tmp/q2-foo.lrcask' not in p.world.files  # no load has found nothing yet
+    fw.fn('ringnav_lyric', C.c_int)()
+    poll(0)
+    assert b'/tmp/q2-foo.lrcask' not in p.world.files  # the page not in front
+    poll(1)
+    assert p.world.files.pop(b'/tmp/q2-foo.lrcask') == b'1 ' + path + b'\n'
+    poll(1)
+    assert len(loads) == 1 and not refresh.value  # no answer yet
+    p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nlyricsack=1 0\n'
+    p.world.ms += 250
+    poll(1)
+    assert len(loads) == 2 and refresh.value == 1
+    p.world.ms += 250
+    poll(1)
+    assert b'/tmp/q2-foo.lrcask' not in p.world.files and len(loads) == 2  # the same song: not asked twice
 
 
 @pytest.mark.parametrize('builtin,listed', [(True, [b'foo']), (False, [b'subsonic', b'foo'])])
