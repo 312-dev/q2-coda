@@ -559,19 +559,20 @@ button=m.add_on_row(); assert m.flag()==1  # stream_page_init woke it
 m.windows('stream_page'); m.click(button)
 assert m.toasts[-1][3]==SW_WAIT and not m.systems and m.top!=None and m.nodes[m.top]['name']!='spotbrowse_page'
 m.advance(500); assert not m.systems
-m.link=1; m.advance(500); assert m.systems==['/bin/sh /mnt/mmc/.spotify/run'] and m.nodes[m.top]['name']=='spotbrowse_page'
+m.link=1; m.advance(500); assert m.systems==['/bin/sh /mnt/mmc/.spotify/run'] and m.nodes[m.top]['name']=='stream_page'  # under the loading overlay
+m.answer(*ME); assert m.nodes[m.top]['name']=='spotbrowse_page'  # the browser, once it answers
 m.link=0; m.windows('home_page'); m.poll(SW_IDLE); m.poll(SW_IDLE); assert not m.switch() and m.flag()==1; passed()
 # Without a link SMART_CONNECT_MS on, it starts anyway, as Spotify's row would.
 m=SmartBrowse(); m.poll(1); m.poll(SW_IDLE); button=m.add_on_row(); m.windows('stream_page'); m.click(button)
 m.advance(SW_CONNECT-500); assert not m.systems
 m.advance(500); assert m.systems==['/bin/sh /mnt/mmc/.spotify/run']; passed()
-# Internet Radio: a directory list waits for the link ("Connecting to Wi-Fi…"), then fetches; a station
+# Internet Radio: a directory list waits for the link under the loading overlay (a "Connecting to Wi-Fi…" toast), then fetches; a station
 # started meanwhile waits for it too before q2video runs, the local track stopped at the press.
 m=SmartRadio(); m.poll(1); m.poll(SW_IDLE); assert m.flag()==0
 page=radio_open(m); assert m.flag()==1
-m.row(2); assert m.labels()==['Internet Radio','Connecting to Wi-Fi…',''] and not m.threads  # the page's note, its hint hidden (page_empty)
-m.advance(250); assert m.labels()[1]=='Connecting to Wi-Fi…' and not m.threads
-m.link=1; m.advance(250); assert m.labels()==['Internet Radio','Loading…',''] and len(m.threads)==1; passed()
+menu=m.labels(); m.row(2); assert m.labels()==menu and m.toasts[-1][3]==SW_WAIT and not m.threads  # the menu under the overlay
+m.advance(250); assert m.labels()==menu and not m.threads
+m.link=1; m.advance(250); assert m.labels()==menu and len(m.threads)==1; passed()
 m=SmartRadio(); m.poll(1); m.poll(SW_IDLE); page=radio_open(m); m.row(1); m.forked=4343
 m.row(1); np=m.top; assert m.nodes[np]['name']=='radionp_page' and 'fork' not in [c[0] for c in m.calls]
 assert 'player_stop' in [c[0] for c in m.calls]  # the local track stops now, not once the station starts
