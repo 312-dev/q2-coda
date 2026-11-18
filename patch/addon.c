@@ -6,8 +6,10 @@
  *            (0: its songs stay out of the scrobble log, addon_scrobbles), stop (0: its page has no
  *            Stop row, and an error page's second row is Cancel) more (an op, then a space and
  *            a title: Now Playing's ⋯ opens its page there while its queue plays, addon_more),
- *            favdir (a card folder whose songs' hearts it is told of, addon_fav_path) and hidden
- *            (1: no Streaming row, its page opened by id: addon_open_id, as AirPlay's is);
+ *            favdir (a card folder whose songs' hearts it is told of, addon_fav_path), lyrics
+ *            (1: a song of its folder or its downloads folder, downloads=, has its lyrics asked of
+ *            it, addon_lyrics_ask) and hidden (1: no Streaming row, its page opened by id:
+ *            addon_open_id, as AirPlay's is);
  *   run      its launcher, which copies the app to /tmp and runs it there in a restart loop, so
  *            the card is never kept busy, leaving the loop's pid in /tmp/q2-<id>;
  *   q2-<id>  the app;
@@ -112,6 +114,8 @@ typedef struct {
     int qr, game, audio, hidden, present, launched, hold, relaunch, restart;
     int nostop; /* q2app's stop=0: no Stop row on its page */
     int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
+    int lyrics; /* q2app's lyrics=1: it fetches a song's lyrics (addon_lyrics_ask) */
+    char dl[32]; /* q2app's downloads=: the card folder its synced songs are in, "" for none */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
 } app_t;
@@ -232,6 +236,11 @@ static void scan_one(const char *id, const char *from) {
     field(raw, "stop", stop, sizeof stop);
     a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
     a->radio = number(raw, "radio") == 1;
+    a->lyrics = number(raw, "lyrics") == 1;
+    field(raw, "downloads", a->dl, sizeof a->dl);
+    for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
+        if (*c == '\r' || *c == '/') *c = 0;
+    if (!strcmp(a->dl, ".") || !strcmp(a->dl, "..")) a->dl[0] = 0;
     field(raw, "more", a->more, sizeof a->more);
     unsigned k = strlen(a->more);
     if (k && a->more[k - 1] == '\r') a->more[k - 1] = 0; /* a Windows editor's line end */
@@ -2935,6 +2944,71 @@ const char *addon_radio_missing(const char *path) {
     app_t *a = path && card_id(path, id) ? slot(id) : 0;
     if (a && !a->present) addon_scan();
     return a && a->present && !a->radio && a->name[0] ? a->name : 0;
+}
+
+/* A song's lyrics asked of the app whose song it is (lyrics.c lyrics_ask_poll,
+ * docs/internals.md#server-lyrics): the app whose folder (CARD/.<id>/, its streamed and cached
+ * songs) or downloads= folder (CARD/<downloads>/, its synced songs) holds path, when its q2app says
+ * lyrics=1. Its request is /tmp/q2-<id>.lrcask, one line, "<seq> <path>", written only once the
+ * app's socket is there (it takes a request already there at its start as answered); it answers in
+ * its state file, lyricsack=<seq> <code>: 0 the .lrc is beside the song, 1 not its song, 2 its
+ * server has none, 3 no answer. One request at a time; the caller passes the path again while it
+ * waits for the socket, so none is kept here. */
+static struct {
+    app_t *app;   /* the app asked last */
+    unsigned seq; /* its request's */
+    int pending;  /* not written yet: its socket isn't there */
+    int scanned;  /* addon_scan run once for a path no app listed so far held */
+} lq __attribute__((section(".scratch")));
+
+static void lyrics_send(const char *path) {
+    char file[48], line[600];
+    if (!lq.pending || !lq.app || !path || !addon_ready(lq.app->id)) return;
+    unsigned n = (unsigned)tk_snprintf(line, sizeof line, "%u %s\n", lq.seq, path);
+    tk_snprintf(file, sizeof file, "/tmp/q2-%s.lrcask", lq.app->id);
+    if (n < sizeof line) blob_io(file, "/tmp/q2-lrcask.tmp", line, n, 1);
+    lq.pending = 0;
+}
+
+/* The app with lyrics=1 whose folder or downloads folder holds path; 0 for none. */
+static app_t *lyrics_app(const char *path) {
+    char id[APP_ID];
+    for (int pass = 0; pass < 2; ++pass) {
+        app_t *a = card_id(path, id) ? slot(id) : 0;
+        if (a && !a->present) a = 0; /* not read yet, or gone from the card */
+        for (int i = 0; !a && i < ap.n; ++i) {
+            unsigned k = strlen(ap.a[i].dl);
+            if (ap.a[i].present && k && !strncmp(path, CARD "/", sizeof CARD) &&
+                !strncmp(path + sizeof CARD, ap.a[i].dl, k) && path[sizeof CARD + k] == '/')
+                a = &ap.a[i];
+        }
+        if (a) return a->lyrics ? a : 0;
+        if (lq.scanned) break; /* no app's: the user's own song */
+        lq.scanned = 1;
+        addon_scan(); /* apps not listed since boot: their folders read once */
+    }
+    return 0;
+}
+
+/* 1 when an app takes the request for path's lyrics (seq names its answer), started for it when it
+ * doesn't run; 0 when no app fetches lyrics for it, or path is too long to name in one line. */
+int addon_lyrics_ask(const char *path, unsigned seq) {
+    app_t *a = path && strlen(path) < 580 ? lyrics_app(path) : 0;
+    if (!a || addon_wake(a->id) < 0) return 0;
+    lq.app = a, lq.seq = seq, lq.pending = 1;
+    lyrics_send(path);
+    return 1;
+}
+
+/* The app's answer to lyrics request seq, about path: its code, or -1 while there is none. Polled by
+ * lyrics.c, which writes the request here once the app's socket is there. */
+int addon_lyrics_answer(unsigned seq, const char *path) {
+    char raw[QR_RAW], v[24], want[16];
+    lyrics_send(path);
+    if (!lq.app || lq.pending || !state_read(lq.app->state, raw, sizeof raw)) return -1;
+    field(raw, "lyricsack", v, sizeof v);
+    unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
+    return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
 }
 
 /* The playing queue's app's radio stopped; 1 when asked. */

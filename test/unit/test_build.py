@@ -1351,7 +1351,7 @@ def test_a_rootfs_over_72_mib_is_refused_and_one_at_it_fits():
     build.rootfs_fits(50_688_001)  # past stock's own image, which was the limit before
     with pytest.raises(ValueError, match=r'^Repacked rootfs is 75,497,473 bytes, 1 over the 75,497,472 mtd2 holds$'):
         build.rootfs_fits(build.ROOTFS_ROOM + 1)
-    with pytest.raises(ValueError, match=r'--new-player adds q2player'):
+    with pytest.raises(ValueError, match=r'q2player ships beside the stock player'):
         build.rootfs_fits(80 << 20, new_player=True)
 
 

@@ -278,7 +278,7 @@ GUEST = 'usr/bin/q2-guest'
 GUEST_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
 GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
-PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
+PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # the fallback hciplayer.xz's place, player/main.c's STOCK_XZ
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
@@ -287,8 +287,8 @@ PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's pl
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-9aef2f9.zip', 2861732,
-                 '1b14b3e8299667bad92e6c66d9b2ac14a96fe0c882e6bc3a2d0c397a009cd448', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-4627eeb.zip', 2873133,
+                 'd1f6752c1bfc4406abc6c7428adbb512cee66e37ee8cf46381b5517d059e6d57', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -1607,7 +1607,7 @@ def bundled_app(app_id, apps_dir):
 def rootfs_fits(size, new_player=False):
     """Refuse a repacked rootfs of size bytes that leaves mtd2 less than its bad-block spare."""
     check(size <= ROOTFS_ROOM, f'Repacked rootfs is {size:,} bytes, {size - ROOTFS_ROOM:,} over the {ROOTFS_ROOM:,} mtd2 holds'
-          + (' (--new-player adds q2player beside hciplayer: make room or build without it)' if new_player else ''))
+          + (' (q2player ships beside the stock player: make room, or build with --stock-player)' if new_player else ''))
 
 
 def segments(b):
@@ -2213,7 +2213,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'player_choice.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2481,7 +2481,7 @@ def signing_key(path, dev):
     check(path.is_file(), f'{path}: no release public key (docs/releasing.md#signing-a-release)')
     return public_key(path.read_bytes())
 
-def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=False, apps_dir=APPS_DIR):  # pragma: no mutate block
+def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotator_lazy_clock=False, pwm_idle_clock=False, mcu_idle_sleep=False, flac_experiments='sync,lpc,output', signing_pub=None, new_player=True, apps_dir=APPS_DIR):  # pragma: no mutate block
     from flac import selection
     flac_experiments = selection(flac_experiments)
     # Kernel-module experiments: no measured saving (docs/clock-gating.md, pwm-clock-gating.md,
@@ -2490,8 +2490,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(not rotator_lazy_clock or dev, '--rotator-lazy-clock requires --dev')
     check(not pwm_idle_clock or dev, '--pwm-idle-clock requires --dev')
     check(not mcu_idle_sleep or (dev and pwm_idle_clock), '--mcu-idle-sleep requires --dev --pwm-idle-clock')
-    # The new player (docs/player-plan.md): in a --dev build only until it replaces hciplayer
-    check(not new_player or dev, '--new-player requires --dev')
     check(dev or version_ok(VERSION, BETA), f'VERSION must be three single digits (x.y.z) and BETA 0-9: {VERSION}, {BETA}')
     version = TAG
     check(re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9._-]+', repo), f'{repo}: not a GitHub owner/name')  # a C string
@@ -2881,8 +2879,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                        and jpeg_size(anim[LOGO_BLACK]) == (320, 375)), 'Boot animation must be 320x375 like the stock splash')
     q2player, player_added = None, []
     if new_player:
-        # q2player at /usr/bin/hciplayer, and the patched hciplayer, which it runs while /mnt/data/q2player is
-        # absent, xz-compressed at STOCK_XZ (player/main.c), which unpacks it to /tmp/hciplayer-stock/hciplayer: a
+        # q2player at /usr/bin/hciplayer, and the patched hciplayer, the stock player it runs when Settings chose it
+        # or q2player keeps crashing, xz-compressed at STOCK_XZ (player/main.c), which unpacks it to /tmp/hciplayer-stock/hciplayer: a
         # directory of its own, so its file and process name stay "hciplayer" for demo's killall. Compressed, it takes
         # 1.27 MB less of the root filesystem, the room q2player and its TLS need (docs/player-plan.md#risks); the
         # check is CRC32, which every xz decoder takes. q2player is linked against this image's own libasound.
@@ -3107,7 +3105,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
         **({'adbd': adbd_record(out)} if dev else {}),
-        **({'q2player_sha256': sha(q2player.read_bytes()), 'rootfs_bytes': size} if q2player else {}),
+        **({'q2player_sha256': sha(q2player.read_bytes())} if q2player else {}),
         bundled_apps=bundled, rootfs_squashfs_bytes=len(blobs['recovery-update/rootfs.squashfs']),
         **({'pwm_clock': pwm} if pwm else {}),
         patch_symbols={n:hex(v) for n,v in ps.items() if n.startswith('stock_')},
@@ -3137,13 +3135,15 @@ if __name__ == '__main__':
     ap.add_argument('--rotator-lazy-clock', action='store_true',
                     help='experimental: defer the rotator clock until its first conversion (requires --dev)')
     ap.add_argument('--new-player', action='store_true',
-                    help='install q2player as /usr/bin/hciplayer, falling back to hciplayer unless /mnt/data/q2player exists (requires --dev)')
+                    help='q2player as /usr/bin/hciplayer, the patched hciplayer its fallback: the default, so this changes nothing')
+    ap.add_argument('--stock-player', action='store_true',
+                    help='no q2player: the patched hciplayer is /usr/bin/hciplayer')
     ap.add_argument('--apps', type=pathlib.Path, default=APPS_DIR, metavar='DIR',
                     help=f'where the pinned zips of the card apps the firmware carries are (default {APPS_DIR})')
     ap.add_argument('--pwm-idle-clock', action='store_true',
                     help='experimental: cooperative Linux/MCU PWM clock gating (requires --dev)')
     a=ap.parse_args()
     try:
-        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,a.new_player,a.apps)
+        build(a.zip,a.out.resolve(),a.logo,a.dev,a.update_repo,a.aic_idle_wait,a.rotator_lazy_clock,a.pwm_idle_clock,a.mcu_idle_sleep,a.flac_experiments,a.signing_key,not a.stock_player,a.apps)
     except (OSError, ValueError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         ap.error(str(exc))

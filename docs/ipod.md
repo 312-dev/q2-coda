@@ -379,7 +379,7 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
 review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
-(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Player (New or Stock, from the next restart, [internals](internals.md#player-choice)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
 page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
@@ -846,7 +846,9 @@ finger stays and springing back when it lets go, still following, so a stray tou
 Lyrics moved by the wheel or a finger stay where they are, while the bar and the
 highlight go on, a swipe to another page and back included, until Now Playing closes or another
 song starts at the top. A tap shows them full screen, and another brings the
-page back. See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
+page back. A song from a card app's server (Subsonic's) with no lyrics of its own has them asked of its app
+while the page shows it; the page shows none until they arrive, then fills in
+([Lyrics from a card app's server](internals.md#server-lyrics)). See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
 
 ## Previous and Next
 
