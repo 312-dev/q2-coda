@@ -158,6 +158,7 @@ license (`docs/ipod.md`).
 | glibc          | 55 (7, 22)                      | 55 (7, 22), not replaced          |
 | thttpd         | 1 (0, 0)                        | 1 (0, 0), not replaced            |
 | All            | 294 (28 critical, 136 high)     | 171 (12 critical, 83 high)        |
+| Subsonic app's Go standard library | not in stock | 0, built with Go 1.27.4 (77 with Go 1.22.2) |
 
 A release build of the branch that retired stock's player (`tools/scan.py --only firmware`, 2026-11-18, grype's database of that day) names no FFmpeg 3.0 and no OpenSSL 1.0.1: syft finds FFmpeg 4.2.11 (`libavcodec.so.58`, the payload's `ffmpeg` command) and no other FFmpeg, the probes find OpenSSL 1.1.1w, and `usr/bin/hciplayer` is `q2player`, whose FFmpeg 7.1.5 and mbedTLS 3.6.7 are static and name no version string, so the scan cannot see them. It matched 348 vulnerabilities (17 critical, 147 high). The table above predates the change and counts what the database held then: the same components now match more (FFmpeg 4.2.11 154, from 55), and the Subsonic card app's Go 1.22.2 standard library (78: 5 critical, 36 high) is listed too, which that table does not carry.
 
