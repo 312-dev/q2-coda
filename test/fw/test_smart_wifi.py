@@ -60,8 +60,11 @@ class Scans(Q2):
     def __init__(self, fw, st, **config):
         super().__init__(fw, st, **config)
         st('smart_wifi').value = 0  # the hold runs whether Smart Wi-Fi's row is on or not
-        self.sock, self.pages, self.sent, self.playing, self.out = 7, [], [], 2, 1
-        self.names = {}
+        self.sock: int | None = 7
+        self.pages: list[str] = []
+        self.sent: list[str] = []
+        self.playing, self.out = 2, 1
+        self.names: dict[int, C.Array[C.c_char]] = {}
         fw.mock('fw___xstat', self.stat)
         fw.mock('fw_system', lambda cmd, *_: self.sent.append(C.string_at(cmd).decode()) or 0)
         fw.mock('mclGetPlayStatus', lambda *_: self.playing)
