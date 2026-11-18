@@ -38,7 +38,7 @@ class App(C.Structure):
     _fields_ = [('id', C.c_char * 16), ('name', C.c_char * 32), ('tips', C.c_char * 32), ('bin', C.c_char * 48), ('run', C.c_char * 48),
                 ('pid', C.c_char * 32), ('state', C.c_char * 40), ('browse', C.c_char * 48), ('icon', C.c_char * 56), ('more', C.c_char * 48),
                 *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio',
-                                         'lyrics')),
+                                         'lyrics', 'covers')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
 
@@ -82,7 +82,7 @@ class Pg(C.Structure):
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
-                ('sort', C.c_char_p * 6), ('field', C.c_int)]
+                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte)]
 
 
 class Qp(C.Structure):
@@ -2108,6 +2108,12 @@ class Page:
     def top(self):
         return self.pg.lv[self.pg.depth - 1]
 
+    @property
+    def pending(self):
+        """The level asked for under the loading overlay (addon.c push), entered once its reply comes."""
+        assert self.pg.pend
+        return self.pg.lv[ADDON_DEPTH]
+
     def request(self):
         return C.string_at(self.req.buf)[:self.req.len]
 
@@ -2160,16 +2166,73 @@ def test_a_list_row_opens_its_level_with_its_context(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list', b'c ctx')])
     p.click(0)
+    assert p.pending.op == b'op1' and p.pending.args == b'\tc ctx' and p.request().endswith(b'\top1\tc ctx\n')
+    p.answer(rows=[item(2)])
     assert p.pg.depth == 2 and p.top.op == b'op1' and p.top.args == b'\tc ctx' and p.top.title == b'Row 1'
-    assert p.request().endswith(b'\top1\tc ctx\n')
+
+
+# The loading overlay (docs/oled-design.md#loading): a list row's level is asked for over the shown rows.
+def overlay(fw):
+    p = Page(fw)
+    p.answer(rows=[item(1, b'list', b'c ctx'), item(2, b'list')])
+    lists = len(fw.calls('scroll_view_create'))
+    p.click(0)
+    return p, lists
+
+
+def test_a_list_rows_level_loads_under_the_overlay_not_a_new_page(fw):
+    p, lists = overlay(fw)
+    assert p.pg.pend == 1 and p.pg.depth == 1 and p.top.state == K_READY and p.top.n == 2  # the rows stay
+    assert p.request().endswith(b'\top1\tc ctx\n') and len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+    assert p.pg.buf[0]  # the shown reply kept
+
+
+def test_a_loaded_level_opens_once_its_reply_comes(fw):
+    p, lists = overlay(fw)
+    p.answer(rows=[item(3)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.op == b'op1' and p.top.title == b'Row 1'
+    assert p.top.state == K_READY and p.top.n == 1 and p.pg.lv[0].state == K_LOAD
+    p.tick(), p.tick()
+    assert p.pg.depth == 2 and len(fw.calls('scroll_view_create')) == lists + 1  # opened once
+
+
+def test_return_cancels_the_load_and_stays(fw):
+    p, lists = overlay(fw)
+    cancelled = p.req.id
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.n == 2 and p.backs == 0
+    assert p.req.running == 0 and p.req.done == 0 and not p.req.buf  # its thread joined, its buffer freed
+    p.tick()
+    assert p.pg.depth == 1 and p.top.state == K_READY
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(3)], id=cancelled)  # a late reply to it: nothing opens
+    assert p.pg.depth == 1 and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+
+
+def test_a_tap_off_the_spinner_cancels_the_load_and_clicks_nothing(fw):
+    p, lists = overlay(fw)
+    down, up = 'EVT_POINTER_DOWN', 'EVT_POINTER_UP_BEFORE'
+    assert touch(p, down, 187, 160) == 11 and touch(p, up, 187, 160) == 11
+    assert p.pg.pend == 1  # on the spinner: still loading
+    assert touch(p, down, 40, 100) == 11 and touch(p, up, 40, 100) == 11  # RET_STOP: no row under it clicked
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.n == 2 and p.req.running == 0
+    p.tick()
+    assert p.pg.depth == 1 and len(fw.calls('scroll_view_create')) == lists
+
+
+def test_centre_while_loading_sends_nothing_again(fw):
+    p, lists = overlay(fw)
+    sent = p.req.id
+    p.click(1), p.click(0)
+    assert p.req.id == sent and p.pg.pend == 1 and p.pg.depth == 1
 
 
 def test_a_level_under_another_lets_its_reply_go_and_asks_again_on_back(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list')])
     p.click(0)
-    assert p.pg.lv[0].state == K_LOAD and p.pg.lv[0].n == 0 and p.pg.pages == 0
     p.answer(rows=[item(2)])
+    assert p.pg.lv[0].state == K_LOAD and p.pg.lv[0].n == 0 and p.pg.pages == 1  # the pages are the new level's
     p.back()
     assert p.pg.depth == 1 and p.top.state == K_LOAD and p.request().endswith(b'\tmenu\n')
 
@@ -2258,12 +2321,12 @@ def test_a_second_action_press_while_one_is_in_flight_sends_nothing(fw):
 
 
 def test_a_list_row_while_an_action_is_in_flight_opens_as_before(fw):
-    """Only action rows wait: a list row opens its level at once, its request in the action's place."""
+    """Only action rows wait: a list row asks for its level at once, its request in the action's place."""
     p = Page(fw)
     p.answer(rows=[item(1), item(2, b'list')])
     p.click(0)
     p.click(1)
-    assert p.pg.depth == 2 and p.pg.act == 0 and p.request().endswith(b'\top2\n')
+    assert p.pending.op == b'op2' and p.pg.act == 0 and p.request().endswith(b'\top2\n')
 
 
 def test_a_held_play_pause_while_an_action_is_in_flight_sends_its_op_as_before(fw):
@@ -2374,9 +2437,9 @@ def test_an_arg_too_long_for_its_level_opens_nothing(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list', b'c' * 399), item(2, b'list', b'c' * 398)])
     p.click(0)
-    assert p.pg.depth == 1
+    assert p.pg.depth == 1 and not p.pg.pend
     p.click(1)
-    assert p.pg.depth == 2 and len(p.top.args) == 399
+    assert len(p.pending.args) == 399
 
 
 def test_a_request_too_long_is_never_sent(fw):
@@ -2653,6 +2716,8 @@ def test_a_more_row_under_a_section_is_named_for_the_section(fw):
     p.answer(rows=[item(0)], cursor=b'c1')
     assert p.top.title == b'S0 1/3'
     p.click(1)
+    assert p.pending.title == b'S0'
+    p.answer(rows=[item(1)])
     assert p.top.title == b'S0' and p.pg.depth == 2
 
 
@@ -2795,10 +2860,11 @@ def test_more_is_a_level_of_its_own_at_the_newest_cursor(fw):
     p.click(0)
     p.answer(cursor=b'c1', rows=[item(2)])
     p.click(1)
-    assert p.pg.depth == 3 and p.top.op == b'op1' and p.top.args == b'\tx\tc1' and p.top.base == 2
+    assert p.pending.op == b'op1' and p.pending.args == b'\tx\tc1' and p.pending.base == 2
     p.answer(cursor=b'c2', rows=[item(3)])
+    assert p.pg.depth == 3 and p.top.args == b'\tx\tc1'
     p.click(1)
-    assert p.top.args == b'\tx\tc2'
+    assert p.pending.args == b'\tx\tc2'
 
 
 def rows_of(start, count):
@@ -3404,7 +3470,7 @@ def test_a_sort_row_left_as_a_row_is_a_list_row(fw):
     p.answer(rows=[SORT, item(0)])
     assert fw.fn('addon__opens', C.c_int, C.c_int)(0) == 1
     p.click(0)
-    assert p.pg.depth == 2 and p.top.op == b'sorts' and p.top.args == b'\tby' and p.top.title == b'Sort'
+    assert p.pending.op == b'sorts' and p.pending.args == b'\tby' and p.pending.title == b'Sort'
 
 
 def test_levels_past_the_depth_forget_the_oldest(fw):
@@ -3435,10 +3501,11 @@ def test_a_cursor_too_long_for_its_level_opens_nothing(fw):
     p = Page(fw)
     p.answer(cursor=b'c' * 395, rows=[item(1)])
     p.click(1)
-    assert p.pg.depth == 2                # fits: the base is empty
+    assert p.pg.pend                      # fits: the base is empty
     p.answer(cursor=b'c' * 399, rows=[item(1)])
+    assert p.pg.depth == 2
     p.click(1)
-    assert p.pg.depth == 2                # doesn't
+    assert p.pg.depth == 2 and not p.pg.pend  # doesn't
 
 
 def test_top_app_cell_and_put(fw):
@@ -5551,19 +5618,20 @@ def test_albums_asks_the_artist_again_and_lists_its_albums_newest_first(fw, nav_
     p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows())
     p.click(AR_ALBUMS)
-    assert p.pg.depth == 2 and p.top.lay == LAY_ALBUMS and p.top.title == b'Albums'
+    assert p.pending.lay == LAY_ALBUMS and p.pending.title == b'Albums'
     assert p.request().endswith(b'\tmenu\n')  # the level's own op and arguments again
     p.answer(rows=artist_rows())
+    assert p.pg.depth == 2 and p.top.lay == LAY_ALBUMS
     assert p.drawn == 4 and props_set(fw, b'_ar_row')[-4:] == [6, 8, 5, 7]  # 2023, 2020, 2013, then the undated
     p.click(8)
-    assert p.pg.depth == 3 and p.top.op == b'album' and p.top.args == b'\talbum:al3'
+    assert p.pending.op == b'album' and p.pending.args == b'\talbum:al3'
 
 
 def test_top_songs_opens_as_a_list_of_cover_rows(fw, nav_st):
     p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows())
     p.click(4)
-    assert p.pg.depth == 2 and p.top.op == b'top' and p.top.lay == LAY_TOP
+    assert p.pending.op == b'top' and p.pending.lay == LAY_TOP
     p.answer(rows=[(b'action', b'play', b'Song %d' % i, b'Foo', b'song:t%d top:ar1 %d' % (i, i), b'toggle') for i in range(3)])
     assert p.drawn == 3 and props_set(fw, b'_ar_row')[-3:] == [0, 1, 2]
     p.back()
@@ -5631,16 +5699,16 @@ def test_the_artist_rows_open_their_pages(fw, nav_st, row, op, lay):
     p = oled_page(fw, nav_st)
     p.answer(rows=explore_rows())
     p.click(row)
-    assert p.pg.depth == 2 and p.top.op == op and p.top.lay == lay and p.top.args == b'\tartist:ar1'
+    assert p.pending.op == op and p.pending.lay == lay and p.pending.args == b'\tartist:ar1'
     if op != b'similar':
         return
     p.answer(rows=[(b'list', b'artist', b'Duke Dumont', b'3 albums', b'artist:ar2', b'toggle'),
                    (b'list', b'artist', b'Kaytranada', b'1 album', b'artist:ar3', b'toggle')])
     assert p.drawn == 2 and props_set(fw, b'_ar_disc')[-2:] == [1, 1]
     p.click(1)
-    assert p.pg.depth == 3 and p.top.op == b'artist' and p.top.args == b'\tartist:ar3' and p.top.title == b'Kaytranada'
+    assert p.pending.op == b'artist' and p.pending.args == b'\tartist:ar3' and p.pending.title == b'Kaytranada'
     p.answer(rows=explore_rows())
-    assert p.top.lay == LAY_ARTIST
+    assert p.pg.depth == 3 and p.top.lay == LAY_ARTIST
 
 
 def song_row(i, sub, ctx_album=b' album:al1'):
@@ -5978,3 +6046,18 @@ def pending_jump(fw, mcl, songs):
     s.land(later[3])
     s.step()
     assert s.queued() == [A, B, later[2], later[3]] and len(fw.calls('player_start_queue')) == 1 and not pending(fw)
+
+
+@pytest.mark.parametrize('manifest, started', [(b'name=Foo\ncovers=1\n', True), (b'name=Foo\nlyrics=1\n', False)])
+def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, started):
+    """Car Remote's daemon names a card app that doesn't run in /tmp/coda-rc.wake when it asks it for a cover the car
+    wants (coda_rc.c crc_cover_ask, docs/internals.md#car-remote-covers): demo starts it, only when its q2app says
+    covers=1; a name that is no app's starts nothing."""
+    p = Page(fw, manifest, opens=False)
+    del p.world.files[b'/tmp/q2-foo']  # not running
+    wake = fw.fn('addon_cover_wake', None, C.c_char_p)
+    for name in (b'../foo', b'bar', b'foo-and-a-very-long-name'):
+        wake(name)
+    assert p.world.of('system') == []
+    wake(b'foo')
+    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started

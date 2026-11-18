@@ -7,7 +7,10 @@
  * each network a row whose right column holds its signal (stock's wifi_sig1..4 image, its art
  * emptied by the image hook) and, before it, a lock when the network asks for a password (its
  * scan record's flags name WPA or WEP), and the Accent check when it is the connected one (stock's
- * second line reads Connected); Add Network after the networks, as stock has it (Reset Network
+ * second line reads Connected: the check already says so, so the row is one line high and says it
+ * as a caption, under its bar only while it is selected, as Reduce Motion's does, settings_pages.c
+ * caption_row); a row's other second line (Connecting) is a 13 px Text Tertiary caption under its
+ * name, always shown, as nothing else marks that state; Add Network after the networks, as stock has it (Reset Network
  * Settings, wifi_flows.c, after it). Laid out from ipod_list_layout (wifi_rows_pre before stock's
  * layout stacks the rows, wifi_rows_post after set_row has mapped them) and drawn by wifi_mark from
  * paint_into. ponytail: the emulator has no radio, so the connected row and a real scan were seen
@@ -97,6 +100,26 @@ void wifi_busy_show(void *win) {
 }
 
 static int connected(void *b);
+/* ipod_list_layout: the connected row is one line high, its Connected a selection's caption */
+int wifi_connected_row(void *b) { return connected(b); }
+static const unsigned *const connected_caption = (const unsigned *)L"Connected";
+#define WIFI_LINE_PX TYPE(13) /* a second line's size: the caption's (docs/oled-design.md Type) */
+
+/* The row button b's name (its first hscroll_label) and its second line (stock's next label,
+ * whichever kind), 0 when it has none. */
+static void *second_line(void *b, void **name) {
+    void *line = (void *)0;
+    *name = (void *)0;
+    for (unsigned i = 0, n = widget_count_children(b); i < n && !line; ++i) {
+        void *c = widget_get_child(b, i);
+        const char *type = widget_get_type(c);
+        if (!*name && !tk_strcmp(type, "hscroll_label"))
+            *name = c;
+        else if (*name && (!tk_strcmp(type, "label") || !tk_strcmp(type, "hscroll_label")))
+            line = c;
+    }
+    return line;
+}
 
 /* After set_row: each network's signal image (which set_child hides as a leading icon) shown
  * again, across the right column's glyphs, for wifi_mark to draw in: on the connected row the
@@ -104,9 +127,19 @@ static int connected(void *b);
  * with no art of its own, so the trash wifi_mark draws ends on the right column like every row's
  * signal, selected or not (docs/oled-design.md Screens: Wi-Fi). */
 void wifi_rows_post(void *view) {
+    caption_prune(view); /* the last build's rows are gone */
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i),
-             *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+             *b = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0,
+             *name = (void *)0, *line = b ? second_line(b, &name) : (void *)0;
+        if (line && connected(b)) { /* a one-line row, its Connected under the bar when selected */
+            widget_set_visible(line, 0, 0);
+            widget_move_resize(name, I(name, W_X), 0, I(name, W_W), I(b, W_H));
+            caption_row(name, connected_caption);
+        } else if (line) { /* Connecting and the like: a caption under the name */
+            face_font(line, theme()->font[ROLE_META], WIFI_LINE_PX, FONT_ROW);
+            text_ink(line, 0xff000000u | tok(TOK_TERTIARY), INK_LABEL);
+        }
         for (unsigned j = 0, k = b ? widget_count_children(b) : 0; j < k; ++j) {
             void *c = widget_get_child(b, j);
             const char *image = widget_get_prop_str(c, "image", "");

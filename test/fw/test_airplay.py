@@ -295,7 +295,8 @@ def test_the_row_names_the_speaker_while_one_plays(fw):
     tap.app(state=CAST_OFF)
     tap.poll()
     more.open()  # stopped: the name stays in the file
-    assert more.texts == ['AirPlay', 'AirPlay', 'AirPlay: Kitchen', 'AirPlay']
+    # the speaker is the row's value, on the right column (row_value_text), never part of the label
+    assert more.texts == ['AirPlay', 'AirPlay', 'AirPlay', 'Kitchen', 'AirPlay']
 
 
 def test_the_row_pressed_without_the_app_on_the_card_says_where_to_install_it(fw):

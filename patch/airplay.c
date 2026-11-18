@@ -203,6 +203,6 @@ void airplay_more(void *view) {
     void *label = list_row(view, "airplay", air_open, 0);
     widget_resize(label, 253, I(label, W_H));
     if (air.on && air.t->speaker[0]) snprintf(text, sizeof text, "AirPlay: %.60s", air.t->speaker);
-    widget_set_text_utf8(label, text);
+    row_value_text(label, text); /* a speaker joined: its name as the value, on the right */
     widget_restack(P(P(label, W_PARENT), W_PARENT), 0);
 }

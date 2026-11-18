@@ -2321,10 +2321,43 @@ def test_the_clicker_row_cycles_and_saves(fw, tone, clicker, now, then, written)
     g(fw, 'g_keytone_flag', tone)
     pod_rows(fw, win, 'scroll_view_controls', POD['POD_KEYTONE'], 1)
     row = view.children[0]
-    assert ui.text(label_of(row)) == f'Clicker: {now}'
+    assert kv(ui, row) == f'Clicker: {now}'
     click(ui, row)
-    assert ui.text(label_of(row)) == f'Clicker: {then}' and g(fw, 'g_keytone_flag') == (then != 'Off')
+    assert kv(ui, row) == f'Clicker: {then}' and g(fw, 'g_keytone_flag') == (then != 'Off')
     assert settings.written == written
+
+
+def split_row(ui, button, label, value, text):
+    """A key/value row (docs/oled-design.md#list-row): the label has no value in it, the value widget is
+    right-aligned on the right column and clear of the label, with no chevron."""
+    v = next(c for c in button.walk() if c.name == '_setting_value')
+    assert ui.text(label) == text and ': ' not in ui.text(label) and ui.text(v)
+    (lx, _, lw, _), (vx, _, vw, _) = label.box, v.box
+    assert vx + vw == 374 - GEOMETRY.right_x - button.box[0] and lx + lw < vx  # KV_GAP itself is kv_fit's (unmeasured here)
+    assert 'list_into' not in [c.props.get('image') for c in button.walk()]
+    return v
+
+
+def test_the_clicker_row_is_a_key_value_row_with_the_value_on_the_right(fw):
+    ui, win, view, settings, _ = settings_page(fw, 'controls_page', 'scroll_view_controls', CLICKER=b'0')
+    g(fw, 'g_keytone_flag', 1)
+    pod_rows(fw, win, 'scroll_view_controls', POD['POD_KEYTONE'], 1)
+    row = view.children[0]
+    v = split_row(ui, row.children[0], label_of(row), None, 'Clicker')
+    assert ui.text(v) == 'Both'
+    click(ui, row)  # Center still cycles it
+    assert (ui.text(label_of(row)), ui.text(v)) == ('Clicker', 'Off')
+
+
+@pytest.mark.parametrize('first, view_name', [(POD['POD_CHARGE'], 'scroll_view_powermanager'),
+                                             (POD['POD_WAKE'], 'scroll_view_display'),
+                                             (POD['POD_HOLD_HOME'], 'scroll_view_display'),
+                                             (POD['POD_KEYTONE'], 'scroll_view_display')])
+def test_no_pod_row_carries_its_value_in_the_label(fw, first, view_name):
+    ui, win, view, settings, _ = settings_page(fw, 'display_page', view_name)
+    pod_rows(fw, win, view_name, first, 1)
+    for row in view.children:
+        assert ': ' not in ui.text(label_of(row))
 
 
 @pytest.mark.parametrize('on', [1, 0])

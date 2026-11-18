@@ -547,7 +547,7 @@ int ipod_list_layout(void *layout, void *view) {
     for (unsigned i = 0; i < n; ++i) {
         void *item = widget_get_child(view, i);
         void *button = I(item, W_H) == SET_STOCK_ROW ? set_button(item) : (void *)0;
-        if (button) I(item, W_H) = set_row_h(button, row);
+        if (button) I(item, W_H) = wifi && wifi_connected_row(button) ? row : set_row_h(button, row);
     }
     int forced = list ? I(list, ROW_HEIGHT) : 0, grid = 0; /* list_view's item_height */
     for (unsigned i = 0, k = forced ? widget_count_children(view) : 0; i < k && !grid; ++i) {

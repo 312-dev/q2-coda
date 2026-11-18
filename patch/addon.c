@@ -8,7 +8,8 @@
  *            a title: Now Playing's ⋯ opens its page there while its queue plays, addon_more),
  *            favdir (a card folder whose songs' hearts it is told of, addon_fav_path), lyrics
  *            (1: a song of its folder or its downloads folder, downloads=, has its lyrics asked of
- *            it, addon_lyrics_ask) and hidden (1: no Streaming row, its page opened by id:
+ *            it, addon_lyrics_ask), covers (1: it is started for a cover the car asks it for,
+ *            addon_cover_wake) and hidden (1: no Streaming row, its page opened by id:
  *            addon_open_id, as AirPlay's is);
  *   run      its launcher, which copies the app to /tmp and runs it there in a restart loop, so
  *            the card is never kept busy, leaving the loop's pid in /tmp/q2-<id>;
@@ -115,6 +116,7 @@ typedef struct {
     int nostop; /* q2app's stop=0: no Stop row on its page */
     int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
     int lyrics; /* q2app's lyrics=1: it fetches a song's lyrics (addon_lyrics_ask) */
+    int covers; /* q2app's covers=1: it fetches a cover the car asks for (addon_cover_wake) */
     char dl[32]; /* q2app's downloads=: the card folder its synced songs are in, "" for none */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
@@ -237,6 +239,7 @@ static void scan_one(const char *id, const char *from) {
     a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
     a->radio = number(raw, "radio") == 1;
     a->lyrics = number(raw, "lyrics") == 1;
+    a->covers = number(raw, "covers") == 1;
     field(raw, "downloads", a->dl, sizeof a->dl);
     for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
         if (*c == '\r' || *c == '/') *c = 0;
@@ -1543,7 +1546,7 @@ static struct {
     int qrnext; /* an action's refresh in flight: a remote row under the cursor opens its page */
     unsigned acted; /* when the action was sent */
     char term[64], aop[16];
-    lv_t *lv; /* ADDON_DEPTH of them, calloc'd */
+    lv_t *lv; /* ADDON_DEPTH of them, calloc'd, and one more: the level push() waits on (pend) */
     /* The shown reply, the top level's (no other keeps one): pages replies, each realloc'd to its
      * size, their fields in f (calloc'd with lv), every page's rows in turn; paging: a next page in
      * flight (page_next). */
@@ -1558,6 +1561,10 @@ static struct {
     int art_lo, art_hi; /* the rows whose covers may be decoded, half open (art_window) */
     char *sort[6];      /* the sort icon's row (take_sort), its fields in the shown reply */
     int field;          /* the box open is field row field - 1's; 0, a search's */
+    /* pend: a pushed level's first reply awaited under the loading overlay, the shown level and its
+     * rows left as they are (docs/oled-design.md#loading); the level waits in lv[ADDON_DEPTH], its
+     * id the request's, never reused, so a reply to a cancelled one matches nothing */
+    char pend;
 } pg __attribute__((section(".scratch")));
 
 static void qr_open(const char *state, const char *title);
@@ -2337,14 +2344,8 @@ static void keep_sel(void) {
         top()->sel = widget_get_prop_int(pg.view, "_ringnav_index", 0);
 }
 
-/* A level over the top one, which lets its reply go (Back asks for it again); base: args' bytes
- * that name its list, before a More…'s cursor. */
-static void push(const char *op, const char *args, unsigned base, const char *title) {
-    lv_t next = { 0 };
-    tk_snprintf(next.op, sizeof next.op, "%s", op);
-    tk_snprintf(next.args, sizeof next.args, "%s", args);
-    tk_snprintf(next.title, sizeof next.title, "%s", title);
-    next.base = base < sizeof next.args ? base : 0;
+/* next over the top level, which lets its reply go (Back asks for it again). */
+static void enter(const lv_t *next) {
     keep_sel();
     if (pg.depth == ADDON_DEPTH) { /* the oldest past the base forgotten */
         for (int i = 1; i < ADDON_DEPTH - 1; ++i) pg.lv[i] = pg.lv[i + 1];
@@ -2353,9 +2354,43 @@ static void push(const char *op, const char *args, unsigned base, const char *ti
     lv_t *l = top();
     drop();
     l->n = 0, l->state = K_LOAD;
-    pg.lv[pg.depth++] = next;
+    pg.lv[pg.depth++] = *next;
     pg.moved = 1;
+}
+
+/* The loading overlay let go: its request's thread joined and its reply, if any, dropped, the page
+ * as it was (Return, or a tap off the spinner). */
+static void load_cancel(void) {
+    pg.pend = 0;
+    req_cancel();
+    if (pg.page) widget_invalidate_force(pg.page, 0);
+}
+
+/* A level over the top one; base: args' bytes that name its list, before a More…'s cursor. Over a
+ * level showing its rows, it is asked for under the loading overlay and entered once its reply
+ * comes (got); else at once, its Loading… page meanwhile. The level, to set its layout. */
+static lv_t *push(const char *op, const char *args, unsigned base, const char *title) {
+    lv_t next = { 0 };
+    tk_snprintf(next.op, sizeof next.op, "%s", op);
+    tk_snprintf(next.args, sizeof next.args, "%s", args);
+    tk_snprintf(next.title, sizeof next.title, "%s", title);
+    next.base = base < sizeof next.args ? base : 0;
+    /* ponytail: a next page in flight (paging) keeps the Loading… page, as the overlay's cancel
+     * would leave its Loading… row with nothing asking for it */
+    if (top()->state == K_READY && pg.view && !pg.paging) {
+        lv_t *w = &pg.lv[ADDON_DEPTH];
+        if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
+        *w = next;
+        req_send(app()->browse, w->op, w->args);
+        pg.act = 0;
+        w->id = req.id;
+        pg.pend = 1;
+        widget_invalidate_force(pg.page, 0);
+        return w;
+    }
+    enter(&next);
     show();
+    return top();
 }
 
 /* ponytail: Back pages the level below again from its first page, where keeping a paged level's
@@ -2428,6 +2463,8 @@ static int sec_take(char **g, int n) {
 
 /* The finished request: an action's toast, or the top level's rows. */
 static void got(void) {
+    if (pg.pend && !pg.act && req.id == pg.lv[ADDON_DEPTH].id) /* the overlay's level: entered */
+        pg.pend = 0, enter(&pg.lv[ADDON_DEPTH]), widget_invalidate_force(pg.page, 0);
     lv_t *l = top();
     char id[12], *head[4], *g[4 + 6 * ADDON_ROWS], *reply = req.buf, *fit;
     /* its own size, before spot_reply points into it: a full list keeps ADDON_PAGES of them */
@@ -2578,6 +2615,16 @@ static int search_left(void *ctx, void *event) {
 static int swipe(void *ctx, void *event) {
     (void)ctx;
     int type = I(event, EVENT_TYPE);
+    if (pg.pend && type != EVT_POINTER_ABORT) { /* the overlay takes every touch */
+        if (type == EVT_POINTER_UP_BEFORE) {
+            unsigned abort_event[12]; /* a row pressed under it is let go, unclicked */
+            pointer_event_init(abort_event, EVT_POINTER_ABORT, pg.page, I(event, EVENT_X),
+                               I(event, EVENT_Y));
+            widget_dispatch_event_to_target_recursive(pg.page, abort_event);
+            if (!load_spinner_hit(I(event, EVENT_X), I(event, EVENT_Y))) load_cancel();
+        }
+        return 11; /* RET_STOP */
+    }
     if (type == EVT_POINTER_ABORT || pg.nsec < 2 || pg.depth != 1 || pg.edit) {
         pg.sdown = pg.sclaim = 0;
         return 0;
@@ -2650,9 +2697,9 @@ static int bar_tapped(void *ctx, void *event) {
 
 /* A list row's press, or the sort icon's tap: level uri over the top one, its context the
  * argument, titled title. */
-static void open_list(const char *uri, const char *ctx, const char *title) {
+static lv_t *open_list(const char *uri, const char *ctx, const char *title) {
     char a[sizeof top()->args] = "";
-    if (!ctx[0] || put(a, sizeof a, ctx)) push(uri, a, strlen(a), title);
+    return !ctx[0] || put(a, sizeof a, ctx) ? push(uri, a, strlen(a), title) : (lv_t *)0;
 }
 
 /* A field row's text, typed in its box: sent to the row's uri after its context, and the reply
@@ -2687,6 +2734,7 @@ static int go(const void *unused) {
     int i = pg.arg;
     char a[sizeof l->args] = "";
     pg.go = 0;
+    if (pg.pend) return 0; /* the wheel's Centre, a row or an icon while the overlay waits */
     if (pg.next == G_SHOW)
         show();
     else if (pg.next == G_SECTION) { /* a swipe: the next or previous section, none past the ends */
@@ -2721,15 +2769,14 @@ static int go(const void *unused) {
         if (!pg.paging && cursor_args(l, a, sizeof a, pg.f[3]))
             push(l->op, a, l->base, pg.depth == 1 && pg.nsec ? pg.sec[pg.cur].title : l->title);
     } else if (i == AR_ALBUMS && l->lay == LAY_ARTIST) { /* the artist's page again, its albums */
-        push(l->op, l->args, l->base, "Albums");
-        top()->lay = LAY_ALBUMS;
+        push(l->op, l->args, l->base, "Albums")->lay = LAY_ALBUMS;
     } else if (i < 0 || i >= l->n) {
     } else {
         const char *kind = cell(i, 0), *uri = cell(i, 1), *ctx = cell(i, 4);
         int lay = l->lay == LAY_ARTIST && !strcmp(kind, "list") ? drill_lay(uri) : 0;
         if (!strcmp(kind, "list") || !strcmp(kind, "sort")) { /* with remote and a folder: opens() */
-            open_list(uri, ctx, cell(i, 2)); /* its push frees the reply kind points into */
-            if (lay && top() != l) top()->lay = (signed char)lay;
+            lv_t *to = open_list(uri, ctx, cell(i, 2)); /* may free the reply kind points into */
+            if (lay && to && to != l) to->lay = (signed char)lay;
         } else if (!strcmp(kind, "page"))
             page_to(l, ctx, strcmp(uri, "prev") ? 1 : -1);
         else if (!strcmp(kind, "action") && !pg.act) /* one in flight: this press does nothing */
@@ -2773,7 +2820,9 @@ static int tick(const void *unused) {
 static int leave(const void *unused) {
     (void)unused;
     pg.leave = 0;
-    if (pg.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box
+    if (pg.pend) /* the load cancelled: the page stays */
+        load_cancel();
+    else if (pg.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box
                   */
         widget_set_text_utf8(pg.edit, ""), widget_set_focused(pg.edit, 0);
     else if (pg.depth > 1)
@@ -2814,7 +2863,7 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
     if (busy && !strcmp(busy + 1, b->id) &&
         (shelf_moving() || !b->launched || access(b->pid, 0)))
         return toast("Wait until the App Store finishes"), 1;
-    if (pg.page || !(pg.lv = calloc(ADDON_DEPTH, sizeof *pg.lv))) return 0;
+    if (pg.page || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
     if (!(pg.f = calloc(4 + 6 * ADDON_ROWS * ADDON_PAGES, sizeof *pg.f)) ||
         !(pg.page = page_open("addon_page", closed, keyup)))
         return free(pg.lv), free(pg.f), pg.lv = 0, pg.f = 0, 0;
@@ -3121,6 +3170,17 @@ int addon_lyrics_answer(unsigned seq, const char *path) {
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
 }
 
+/* Car Remote's daemon asked app id for a cover the car wants (coda_rc.c crc_cover_ask,
+ * docs/internals.md#car-remote-covers): the app is started if it doesn't run, when its q2app says covers=1.
+ * The daemon writes the request itself; an app reads one there at its start. */
+void addon_cover_wake(const char *id) {
+    char k[APP_ID];
+    tk_snprintf(k, sizeof k, "%s", id);
+    app_t *a = valid_id(k) ? slot(k) : 0;
+    if (a && !a->present) addon_scan();
+    if (a && a->present && a->covers) addon_wake(k);
+}
+
 /* The playing queue's app's radio stopped; 1 when asked. */
 int addon_radio_stop(unsigned seq) {
     app_t *a = qa.app && playback_loads == qa.loads && qa.app->radio ? qa.app : 0;
@@ -3365,6 +3425,7 @@ void addon_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         return;
     }
+    if (pg.pend && w == pg.page) load_spinner_paint(w, canvas); /* over the page's rows */
     if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     qr_paint(w, canvas);
