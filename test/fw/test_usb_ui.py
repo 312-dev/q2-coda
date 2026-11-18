@@ -468,7 +468,9 @@ def test_an_edge_runs_stock_s_cable_read_and_the_usb_check_in_the_same_pass(fw):
     u.poll()
     assert u.link.value == 3 and u.commands == ['storage_config.sh start /dev/null >/dev/null 2>&1']
     # a unified log line (ulog.c) on stderr: the time, the uptime in ms, the level and the source
-    assert logged == [(2, '2026-11-17T14:35:02Z 1009 I usb cable in, seen after its edge, 9 ms\n')]
+    # (usb_record.c's line of the edge, its pins, comes first, through the same ulog)
+    assert logged[0][1].startswith('2026-11-17T14:35:02Z 1009 I usb in PD18=')
+    assert logged[1:] == [(2, '2026-11-17T14:35:02Z 1009 I usb cable in, seen after its edge, 9 ms\n')]
 
 
 def test_the_waiting_probe_reads_the_computer_s_answer_every_tenth_of_a_second(fw):
