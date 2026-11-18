@@ -989,6 +989,90 @@ def test_the_radio_tap_starts_a_radio_of_the_playing_song(fw, st, mcl):
     assert timers[-1] == C.cast(fw.lib.song_radio_tap, C.c_void_p).value
 
 
+@pytest.mark.parametrize('radio', [False, True], ids=['antenna', 'pill'])
+def test_no_x_on_the_radio_button_or_its_pill_is_up_next(fw, st, mcl, radio):
+    """The user's, 2026-11-18: a tap on Radio seemed to open Up Next. Every x from the antenna's or the pill's left
+    edge to its right (on screen, the pill 112 to 204 while radio is on) is Radio's: np_mode_click asks for
+    song_radio_tap and never for np_queue."""
+    m = Modes(fw, st, mcl, 0)
+    fw.var('song_radio__sr', C.c_int).value = int(radio)  # sr.local: a local radio plays
+    timers: list = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 1)
+    radio_tap, queue = (C.cast(getattr(fw.lib, n), C.c_void_p).value for n in ('song_radio_tap', 'np_queue'))
+    for x in range(112, 205) if radio else range(135, 158):
+        timers.clear()
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, O['EVT_CLICK'])
+        struct.pack_into('<ii', event, O['EVENT_X'], x, 286)
+        assert fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(m.button.addr, C.addressof(event)) == 1
+        assert radio_tap in timers and queue not in timers, x
+
+
+class Corners(Row):
+    """Row's page with its window handler's touches (np_taps.c np_tap): a touch down at one point and up at
+    another, through np_tap, then np_mode_click on the row's target when both were on it (AWTK's click)."""
+    def __init__(self, fw, st, mcl, radio=False):
+        super().__init__(fw, st, mcl)
+        fw.var('song_radio__sr', C.c_int).value = int(radio)  # sr.local: a local radio plays
+        self.timers: list = []
+        fw.mock('timer_add', lambda fn, ctx, ms, *_: self.timers.append(fn) or 1)
+        self.np_tap = fw.fn('np_tap', C.c_int, C.c_void_p, C.c_void_p)
+        self.sent: list = []
+        fw.mock('config_playmode', lambda m, notify, *_: self.sent.append(i32(m)) or setattr(mcl, 'mode', i32(m)) or 0)
+
+    def touch(self, kind, x, y):
+        event = C.create_string_buffer(0x40)
+        struct.pack_into('<i', event, 0, kind)
+        struct.pack_into('<ii', event, O['EVENT_X'], x, y)
+        return self.np_tap(None, C.addressof(event))
+
+    def press(self, x, y, to=None):
+        """What the touch did: 'shuffle' (stock's mode sent), 'radio', 'queue' or None."""
+        self.timers.clear()
+        self.sent.clear()
+        to = to or (x, y)
+        assert self.touch(O['EVT_POINTER_DOWN'], x, y) == 0
+        assert self.touch(O['EVT_POINTER_UP_BEFORE'], *to) == 0
+        on = lambda px, py: 53 <= px < 322 and 264 <= py < 308
+        if on(x, y) and on(*to):
+            self.tap(to[0])
+        lib = self.fw.lib
+        if C.cast(lib.np_queue, C.c_void_p).value in self.timers:
+            return 'queue'
+        if C.cast(lib.song_radio_tap, C.c_void_p).value in self.timers:
+            return 'radio'
+        return 'shuffle' if self.sent else None
+
+
+# The outer buttons' touch past the target (the user's, 2026-11-18 00:07): shuffle's to the screen's left edge, Up
+# Next's to its right, each down to its foot, from the row's top; across, each as far as the target gives it. On
+# screen, radio off: shuffle x 0 to 105, Up Next 270 to 374; radio on (the pill 112 to 204): shuffle 0 to 111, Up
+# Next 282 to 374; both y 264 to 319. The drawn row, its press and its ring stay where they are.
+CORNERS = {False: ((0, 105), (270, 374)), True: ((0, 111), (282, 374))}
+
+
+@pytest.mark.parametrize('radio', [False, True], ids=['radio-off', 'radio-on'])
+def test_the_outer_buttons_take_a_tap_out_to_the_screens_edges_and_foot(fw, st, mcl, radio):
+    row = Corners(fw, st, mcl, radio)
+    (s0, s1), (q0, q1) = CORNERS[radio]
+    for x, y in ((s0, 319), (s0, 264), (s1, 319), (20, 300), (40, 312)):
+        assert row.press(x, y) == (None if radio else 'shuffle'), (x, y)  # radio on: shuffle ignores taps
+    for x, y in ((q1, 319), (q1, 264), (q0, 319), (350, 290), (330, 315)):
+        assert row.press(x, y) == 'queue', (x, y)
+    # past each corner: nothing new, the neighbours' and the times' own
+    assert row.press(s1 + 1, 315) is None and row.press(q0 - 1, 315) is None
+    assert row.press(10, 263) is None and row.press(360, 263) is None  # the times' row above
+    assert row.press(158 if radio else 146, 316) is None  # under Radio: still no Up Next
+    assert row.press(20, 300, to=(60, 300)) is None  # a drag is no tap
+
+
+def test_the_corners_draw_nothing_new(fw, st, mcl):
+    """Touch only (the user's, 00:07): a corner's tap shows the press square where a tap on the glyph does."""
+    row = Corners(fw, st, mcl)
+    row.press(370, 318)
+    assert row.paint() == [(*ink_box(311, 8), 0x2c2c2e)]
+
+
 def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
     m = Modes(fw, st, mcl, 3)  # repeat All
     m.tap('shuffle')

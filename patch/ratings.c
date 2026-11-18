@@ -1,15 +1,15 @@
 /* Ratings: a song's or album's hearts, Now Playing's heart and its picker, the Library's Ratings
- * lists, and the card's copy of the ratings. */
+ * lists, and the card's copy of the ratings. A song's hearts are the stars of Now Playing's rating
+ * page (np_rate.c), one for one. */
 #include "navigation.h"
 
 /* Ratings: the songs' 1-4 and albums' 1-5 heart tables (calloc'd on first use); Now Playing's
- * heart and the heart's stock click context, the 1-4 badge, the hearts picked, the heart's hold
- * timer (rate_held once it fired), and the album rated (album_id, 0 for the playing track); the
- * Ratings menu. navigation.h's st has the windows and the list page. */
+ * heart and the heart's stock click context, the hearts picked, the heart's hold timer (rate_held
+ * once it fired), and the album rated (album_id, 0 for the playing track); the Ratings menu.
+ * navigation.h's st has the windows and the list page. */
 static struct {
     unsigned *rates, *album_rates;
-    void *rate_fav, *rate_ctx, *rate_badge;
-    int rate_shown;                     /* the badge's hearts plus 1, 0 for a new badge */
+    void *rate_fav, *rate_ctx;
     unsigned rate_row;                  /* the copy's row key whose heart rate_row_heart filled */
     unsigned rate_gen;                  /* catalogue_fav_gen when rate_row_heart last read My Fav */
     int rate_pick, rate_was, rate_held; /* the hearts picked, those the picker opened on */
@@ -163,25 +163,14 @@ static void rate_row_heart(void *r) {
     else if (!row && heart_full(image) && (ra.rate_row || (changed && !checkFavExist(r))))
         heart_set("play_unfav"), ra.rate_row = 0;
 }
-/* The badge on an empty heart: the playing track's 1-4 hearts, hidden for none and on a full heart
- * (My Fav, whatever was kept before). */
-static void rate_badge(void) {
-    if (!ra.rate_badge) return;
-    void *r = rate_track();
-    rate_row_heart(r);
-    int n = r ? rate_kept(0, rate_song_key(r)) : 0;
-    if (n && heart_full(widget_get_prop_str(ra.rate_fav, "image", ""))) n = 0;
-    /* each set repaints the badge, and this runs every 500 ms: only a change (AWTK's "text" is
-     * a wide string widget_get_prop_str doesn't read) */
-    if (ra.rate_shown == n + 1) return;
-    ra.rate_shown = n + 1;
-    char s[4] = { (char)('0' + n) };
-    widget_set_text_utf8(ra.rate_badge, s);
-    widget_set_visible(ra.rate_badge, n != 0, 0);
+/* The heart on Now Playing is the favourite alone: the playing track's server row fills or empties
+ * it (rate_row_heart). Its 1-4 hearts are the rating page's stars (np_rate.c), not drawn here. */
+static void rate_heart(void) {
+    if (ra.rate_fav) rate_row_heart(rate_track());
 }
 
 static int rate_tick(const void *unused) {
-    if (g_backlight_status) rate_badge();
+    if (g_backlight_status) rate_heart();
     return 8; /* RET_REPEAT */
 }
 
@@ -231,14 +220,15 @@ static int rate_song(int n) {
         heart_set("play_unfav");
     }
     if ((n == 5) != (fav || row)) ratings_copy_due(), fav_told(r, n == 5);
-    rate_badge();
+    rate_heart();
     return 1;
 }
 
-/* Car Remote (coda_rc_shim.c): Rate from the phone, and the playing track's hearts for its Now
- * Playing, 5 for My Fav, -1 when nothing plays that can be rated (a stream, a radio). */
-int rate_car(int n) { return n >= 0 && n <= 5 && rate_song(n); }
-int rate_car_hearts(void) {
+/* The playing track's rating, set (Now Playing's rating page, np_rate.c, and Car Remote's Rate,
+ * coda_rc_shim.c: 1 kept) and read: 0 to 5, 5 for My Fav, -1 when nothing plays that can be rated
+ * (a stream, a radio). */
+int rate_now_set(int n) { return n >= 0 && n <= 5 && rate_song(n); }
+int rate_now(void) {
     void *r = rate_track();
     return !r ? -1 : rate_fav(r) ? 5 : rate_kept(0, rate_song_key(r));
 }
@@ -314,7 +304,7 @@ static int rate_fav_click(void *ctx, void *event) {
         rate_keep(0, rate_song_key(r), 0), fav_told(r, fav);
         catalogue_rated(r, fav ? 5 : 0);
     }
-    rate_badge();
+    rate_heart();
     return 0;
 }
 
@@ -322,13 +312,13 @@ static int rate_gone(void *win, void *event) {
     if (win != st.rate_win) return 0;
     stop_timer(&ra.rate_hold);
     stop_timer(&ra.rate_tick);
-    st.rate_win = ra.rate_fav = ra.rate_ctx = ra.rate_badge = (void *)0;
+    st.rate_win = ra.rate_fav = ra.rate_ctx = (void *)0;
     ra.rate_held = 0;
     return 0;
 }
 
 /* Now Playing's heart (playing_page_init): stock's click is swapped for one that
- * tells a hold from a tap, and the badge sits on the heart's top right. */
+ * tells a hold from a tap. */
 void rate_bind(void *win) {
     void *fav = widget_lookup(win, "img_fav", 1), *emitter = fav ? P(fav, W_EMITTER) : (void *)0;
     stop_timer(&ra.rate_tick);
@@ -348,13 +338,9 @@ void rate_bind(void *win) {
     widget_off_by_func(fav, EVT_CLICK, (void *)FAV_CLICK, ra.rate_ctx);
     widget_on(fav, EVT_CLICK, rate_fav_click, ra.rate_ctx);
     widget_on(fav, EVT_POINTER_DOWN, rate_down, (void *)0);
-    ra.rate_badge = label(P(fav, W_PARENT), I(fav, W_X) + I(fav, W_W) - 18, I(fav, W_Y) + 6, 16, 16,
-                          "s_scrlabel_white20c", 12, 0xffffffffu);
-    widget_set_sensitive(ra.rate_badge, 0); /* the heart's corner stays the heart's */
-    ra.rate_shown = 0;
     widget_on(win, EVT_DESTROY, rate_gone, win);
     ra.rate_tick = timer_add(rate_tick, (void *)0, 500);
-    rate_badge();
+    rate_heart();
 }
 
 /* The Library's Ratings row: its menu, then a page of one list's songs, as Most Played's. */

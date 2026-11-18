@@ -451,8 +451,8 @@ full copy cheaply, and none uses the server's change hints to drive sync; the pl
 A song's hearts ([internals.md: Ratings](internals.md#ratings)) follow it to the server and back,
 for server rows and for synced card files alike, whenever the Q2 can reach the server.
 
-- **Mapping:** 1 to 5 hearts is OpenSubsonic's `userRating` 1 to 5, set with `setRating`; 0 hearts
-  is `setRating` 0. Five hearts is also stock's My Fav, so five hearts stars the song (`star`), and
+- **Mapping:** 1 to 5 hearts (Now Playing's rating page's stars, [ipod.md](ipod.md#rating-page)) is
+  OpenSubsonic's `userRating` 1 to 5, set with `setRating`; 0 hearts is `setRating` 0. Five hearts is also stock's My Fav, so five hearts stars the song (`star`), and
   taking the fifth heart away unstars it. A song starred on the server with no rating arrives as five
   hearts.
 - **Which songs:** server rows by their sid; a synced card file by the sid the Subsonic app recorded
