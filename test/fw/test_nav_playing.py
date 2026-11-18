@@ -2007,6 +2007,25 @@ def test_an_ab_marker_keeps_its_share_of_a_fitted_bar(fw, ui, mcl, st):
     assert ab_x(2) == 0  # no point to mark
 
 
+# A-B markers on a bar laid out off the immediates' place (ringnav_ab_move): centered on the bar, not at stock's y 250.
+def test_an_ab_marker_is_centered_on_the_bar(fw, ui, mcl, st):
+    theme(fw, st)
+    moves = []
+    fw.mock('widget_move', lambda w, x, y, *_: moves.append((w, x, y)))
+    ab_move = fw.fn('ringnav_ab_move', C.c_int, C.c_void_p, C.c_int, C.c_int)
+    marker = ui.widget(ui.wm, 'img_repeata', 0, 250, 3, 10)
+    ab_move(marker, 77, 250)
+    assert moves == [(marker, 77, 250)]  # no Now Playing: stock's
+    now = Now(fw, ui, mcl, st, sec=10, total=4000)
+    marker = ui.widget(now.win, 'img_repeata', 0, 250, 3, 10)
+    struct.pack_into('<ii', (C.c_char * 8).from_address(now.slider + 4), 0, 300, 20)  # the bar elsewhere than stock's
+    _, y, _, h = ui.box(now.slider)
+    assert y + h // 2 != 255
+    moves.clear()
+    ab_move(marker, 77, 250)
+    assert moves == [(marker, 77, y + h // 2 - 5)]
+
+
 @pytest.mark.parametrize('value, part', [(0, 0), (50, 102), (100, 204), (25, 51)])
 def test_the_sliders_part_is_its_share_of_the_width(fw, ui, value, part):
     s = ui.widget(ui.wm, 'slider')

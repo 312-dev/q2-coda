@@ -593,6 +593,9 @@ NP_INFO_CALL = 0x53d308
 # Now Playing's A-B markers (0x53baa4): its three calls of their x (0x53b9d8), each a bal, become jal ringnav_ab_x,
 # which keeps them on the slider wherever the page has moved it from the build's place.
 AB_X_CALLS = (0x53bb78, 0x53bbf4, 0x53bc04)
+# The same function's two widget_move calls (jalr t9, the marker, its x and y 250): each becomes jal ringnav_ab_move,
+# which sets the y on the slider's centre.
+AB_MOVE_CALLS = (0x53bb94, 0x53bc20)
 # Songs' row bind (0x4ab208): a record with no artist gets stock's "Unknown Artist" through this getFormatString jalr,
 # which becomes jal ringnav_song_unknown.
 SONG_UNKNOWN_CALL = 0x4ab424
@@ -2217,7 +2220,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
@@ -2754,6 +2757,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for site in AB_X_CALLS:
         patch_word(patched, site, branch(0x04110000, site, PRIVATE_FUNCTIONS['ab_x']),
                    jal(ps['ringnav_ab_x']), "A-B markers on the slider")
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GP - 0x5240))[0] == syms['widget_move'],
+          "A-B markers: expected widget_move's GOT slot")  # lw t9, -0x5240(gp)
+    for site in AB_MOVE_CALLS:
+        patch_word(patched, site, 0x0320f809, jal(ps['ringnav_ab_move']), "A-B markers centered on the bar")
     for address, old, new in LDAC_HQ:
         patch_word(patched, address, old, new, 'LDAC HQ sends 990 kbps')
     patch_word(patched, WHEEL_TS_READ[0], WHEEL_TS_READ[1], jal(ps['ringnav_ts_read']), 'wheel ticks')

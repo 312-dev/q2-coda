@@ -355,8 +355,10 @@ demo	0x53b838	0x4	playing_page_lyrics_rebuild_rows	`addiu $2, $zero, 0x14`, befo
 demo	0x53ba88	0x4	ab_x	`addiu $2, $zero, 0x122`; patch/ipod.json immediates np_bar_w (Now Playing A-B markers span the iPod progress bar (x = start + t * width / length))
 demo	0x53baa0	0x4	ab_x	`addiu $2, $2, 0x32`; patch/ipod.json immediates np_bar_x (Now Playing A-B markers start at the iPod progress bar's left end)
 demo	0x53bb78	0x4	playing_page_update_ab_markers	1st of 3 calls to ab_x, after "img_repeatb"; tools/build.py AB_X_CALLS
+demo	0x53bb94	0x4	playing_page_update_ab_markers	`jalr $t9` (widget_move) after "img_repeata"'s x, 1st of 2; tools/build.py AB_MOVE_CALLS
 demo	0x53bbf4	0x4	playing_page_update_ab_markers	2nd of 3 calls to ab_x, after "img_repeatb"; tools/build.py AB_X_CALLS
 demo	0x53bc04	0x4	playing_page_update_ab_markers	3rd of 3 calls to ab_x, after "img_repeatb"; tools/build.py AB_X_CALLS
+demo	0x53bc20	0x4	playing_page_update_ab_markers	`jalr $t9` (widget_move) after "img_repeatb"'s x, 2nd of 2; tools/build.py AB_MOVE_CALLS
 demo	0x53cafc	0x4	playing_page_fav_on_click	`lw $2, GOT[a page]` (3rd of 3 such), before the only call to manage_myfav, after "play_fav"; patch/nav/hold_menu.c qm_run
 demo	0x53d0e8	0x4	playing_page_update	`lw $5, -0x30($2)`, the delay slot of 2nd of 2 calls to hscroll_label_set_speed, after "scrlabel_artist"; patch/offsets.inc HSCROLL_PACE
 demo	0x53d10c	0x4	playing_page_update	the only call to playing_page_lyrics_rebuild_rows, after "scrlabel_artist"; tools/build.py LYRIC_ROWS
