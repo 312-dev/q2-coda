@@ -224,12 +224,18 @@ void top_three(struct top_table *prev, int n, const int *pid, const char (*name)
 /* The log: lines held in card_store.c's RAM ring and written to the card in batches. */
 #define HEAT_RAM 65536          /* the ring's bytes while the card is away; the oldest lines go first */
 #define HEAT_FILE_MAX 262144    /* a file is moved on when a flush finds it this big */
+#define HEAT_FILES 4            /* q2-heat.0 to .3: about four hours of 5 s lines after a move */
 void heat_add(card_log *l, const char *line); /* one line, with its newline */
-/* Rotate dir/q2-heat.0 into .1 if it is full, then append the ring to it in order (card_log_flush,
- * which also notes lines dropped for room). 0 when nothing is left held, -1 when the card refused. */
+/* Rotate dir/q2-heat.0 on if it is full, then append the ring to it in order (card_log_flush, which
+ * also notes lines dropped for room). 0 when nothing is left held, -1 when the card refused. */
 int heat_flush(card_log *l, const char *dir);
-/* The same for any log: dir/name.0, rotated into name.1 once it has reached max bytes */
-int log_flush(card_log *l, const char *dir, const char *name, long max);
+/* The same for any log: dir/name.0, moved on once it has reached max bytes, .1 to .2 and so on up to
+ * name.(files-1), the oldest dropped */
+int log_flush(card_log *l, const char *dir, const char *name, long max, int files);
+/* How often q2guard.c sends the RAM lines to the card: what a sudden power loss can lose */
+#define FLUSH_MS 300000     /* idle: the heat log's 30 s lines, ten at most */
+#define FLUSH_FAST_MS 30000 /* a stream running, or warm, busy or plugged in */
+int flush_every(int fast, int streaming);
 
 /* set by q2guard.c's signal handler (demo's or S90play's request, a SIGTERM): bt_sleep returns early */
 extern volatile int guard_woke;

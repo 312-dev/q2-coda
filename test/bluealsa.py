@@ -7,7 +7,7 @@ import pathlib, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from build import (BLUEALSA, BT_DROP, BT_DROP_HANDLER, BT_PCM_CALLERS, BT_SILENCE_SAMPLES, bt_silence,
+from build import (BLUEALSA, BT_DROP, BT_DROP_HANDLER, BT_PCM_CALLERS, BT_SBC_POOL, BT_SILENCE_SAMPLES, bt_silence,
                    machine, read, word)
 
 
@@ -162,6 +162,77 @@ def check_silence(stock, raw):
     assert call(0, timeout=100) == 0 and log['drained'] and log['timeout_after'] == -1, 'no budget: drain as stock'
 
 
+def sbc_machine(raw):
+    """The SBC encoder thread's sbc_encode call (0x406578 to 0x406588) under Unicorn, on an sbc_t from the
+    shipped libsbc's sbc_init_a2dp (48 kHz joint stereo, 16 blocks, 8 subbands, loudness, bitpool 2 to 53) with
+    the thread's starting bitpool 33 (SBC's medium quality at 48 kHz): frame(pool) sets BT_SBC_POOL's byte and
+    encodes one frame, returning its bitpool, its length and BT_SBC_POOL's own and now bytes."""
+    u = machine(raw, 0x1000000)
+    u.mem_map(0x2000000, 0x100000)  # the heap
+    try:
+        u.mem_map(BT_SBC_POOL & ~0xfff, 0x1000)  # stock has no payload there: its byte is never read
+    except Exception:
+        pass
+    heap = [0x2000000]
+    def hook(u, address, size, _):
+        a0, a1, a2 = (u.reg_read(r) for r in (UC_MIPS_REG_A0, UC_MIPS_REG_A1, UC_MIPS_REG_A2))
+        if address == 0x4300e0:  # memset
+            u.mem_write(a0, bytes([a1 & 0xff]) * a2)
+            result = a0
+        elif address == 0x430670:  # malloc
+            result = heap[0] = (heap[0] + 63) & ~63
+            heap[0] += a0
+        elif 0x42fcc0 <= address < 0x430c00:
+            raise AssertionError(f'libc call {address:#x} not expected')
+        else:
+            return
+        u.reg_write(UC_MIPS_REG_V0, result)
+        u.reg_write(UC_MIPS_REG_PC, u.reg_read(UC_MIPS_REG_RA))
+    u.hook_add(UC_HOOK_CODE, hook)
+    sp, conf, pcm, out, stop = 0x1004000, 0x1000100, 0x1001000, 0x1002000, 0x100ff00
+    sbc = sp + 0x280
+    u.mem_write(sbc, b'\xee' * 20)
+    u.mem_write(conf, bytes([0x11, 0x15, 2, 53]))
+    for register, value in ((UC_MIPS_REG_A0, sbc), (UC_MIPS_REG_A1, 0), (UC_MIPS_REG_A2, conf), (UC_MIPS_REG_A3, 4),
+                            (UC_MIPS_REG_T9, 0x421c2c), (UC_MIPS_REG_SP, 0x100f000), (UC_MIPS_REG_RA, stop)):
+        u.reg_write(register, value)
+    u.emu_start(0x421c2c, stop, count=100000)
+    assert u.reg_read(UC_MIPS_REG_V0) == 0 and u.mem_read(sbc + 11, 1) == b'\0', 'sbc_init_a2dp clears the sbc_t'
+    u.mem_write(sbc + 9, bytes([33]))  # 0x406294: the thread's bitpool, sbc_a2dp_get_bitpool's
+    u.mem_write(pcm, bytes(range(256)) * 2)
+    def frame(pool):
+        u.mem_write(BT_SBC_POOL, bytes([pool]))
+        u.mem_write(out, bytes(256))
+        word(u, sp + 0x10, 256)  # out_len
+        for register, value in ((UC_MIPS_REG_SP, sp), (UC_MIPS_REG_V0, sp + 0x2b4), (UC_MIPS_REG_FP, pcm),
+                                (UC_MIPS_REG_A2, 512), (UC_MIPS_REG_A3, out)):
+            u.reg_write(register, value)
+        u.emu_start(0x406578, 0x406588, count=200000)
+        assert u.reg_read(UC_MIPS_REG_PC) == 0x406588 and u.reg_read(UC_MIPS_REG_V0) == 512, 'one frame of PCM'
+        head = bytes(u.mem_read(out, 3))
+        assert head[0] == 0x9c, 'an SBC frame'
+        own, now = bytes(u.mem_read(BT_SBC_POOL + 1, 2))
+        return head[2], read(u, sp + 0x2b4), own, now
+    return frame
+
+
+def sbc_length(bitpool):  # joint stereo, 8 subbands, 16 blocks: header, scale factors, join bits and samples
+    return 4 + 8 + (8 + 16 * bitpool + 7) // 8
+
+
+def check_sbc_bitpool(stock, raw):
+    """The encoder's bitpool follows BT_SBC_POOL's byte from the next frame, never above the thread's own; stock
+    ignores it."""
+    frame = sbc_machine(stock)
+    assert [frame(p)[:2] for p in (0, 19, 29)] == [(33, sbc_length(33))] * 3, 'stock: the bitpool stays'
+    frame = sbc_machine(raw)
+    assert frame(0) == (33, 79, 33, 33), 'none asked: its own, published'
+    assert frame(29) == (29, 71, 33, 29), 'a rung down, the next frame, 8 bytes shorter'
+    assert frame(19) == (19, sbc_length(19), 33, 19) and sbc_length(19) == 51, 'the floor'
+    assert frame(45)[:2] == (33, 79), 'never above its own: its packets are sized for it'
+    assert frame(1)[:2] == (33, 79) and frame(0)[:2] == (33, 79), 'back to its own'
+
+
 def check(directory):
     directory = pathlib.Path(directory)
     def extract(name):
@@ -198,7 +269,9 @@ def check(directory):
         assert not check_drop(stock, 4096, caller)
         assert check_drop(patched, 4096, caller), f'DROP retained partial PCM for {caller[0]:x}'
     check_silence(stock, patched)
+    check_sbc_bitpool(stock, patched)
     print("Bluetooth silence: Drain's or PAUSE's 100 ms timeout fills silence until real PCM or the budget ends; stock sends nothing.")
+    print('SBC bitpool: the encoder follows BT_SBC_POOL from the next frame, never above its own; stock ignores it.')
     print('Bluetooth DROP: delayed encoder signal preserves new PCM, flushes all old PCM and resets pacing; stock reproduces the fault.')
 
 
