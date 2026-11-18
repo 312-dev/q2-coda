@@ -590,7 +590,7 @@ POP_CHARS = ('abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' '01234567
 # context.html) on a 24-unit grid, round capped and joined, scaled to a RETURN_PX box: the mock-up draws them 22 px on
 # its 38 px key, the strip's key is 34 px, so 20. White on the accent's circle, the accent on white.
 RETURN_PX, RETURN_GRID = 20, 24
-RETURN_MARKS = {
+RETURN_MARKS: 'dict[str, tuple[float, list[list[tuple[float, float]]]]]' = {
     'search': (2.4, [[(10.5 + 5.5 * math.cos(a * math.pi / 24), 10.5 + 5.5 * math.sin(a * math.pi / 24)) for a in range(49)],
                      [(14.6, 14.6), (19, 19)]]),
     'go': (2.4, [[(5, 12), (19, 12)], [(13.5, 6.5), (19, 12), (13.5, 17.5)]]),
