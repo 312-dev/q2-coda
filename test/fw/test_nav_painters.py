@@ -1072,6 +1072,43 @@ def test_each_row_button_takes_a_tap_out_to_its_hit_rect(fw, st, mcl, radio):
     assert row.press(HITS[radio]['radio'][1], 315, to=(HITS[radio]['repeat'][0] + 1, 315)) is None
 
 
+def test_mores_touch_reaches_right_and_down_to_the_bar_on_the_art_page(fw, st, mcl):
+    """More's reach (np_bar.c more_reach, the user's, 2026-11-18 05:10): a tap down and up in x 292 to 374, y 172 to the
+    progress bar's target top (214 here) clicks More, as its glyph does; outside it, half in it, on the glyph itself (the
+    glyph's own click) or off the art's page (the lyrics shown, or full screen) the reach does nothing."""
+    ui = Ui(fw)
+    theme(fw)
+    win = ui.window('playing_page')
+    slide = ui.add('slide_view', win, (0, 0, 375, 209), 'slide_view', value=0)
+    ui.add('image', slide, (182, 142, 56, 42), 'img_fav', image='oled_np_unfav_d')
+    more = ui.add('image', slide, (327, 138, 34, 34), 'img_more')
+    ui.add('slider', win, (24, 214, 327, 22), 'slider_play')
+    st('np_win', C.c_void_p).value = win.addr
+    st('np_slide', C.c_void_p).value = slide.addr
+    st('np_full', C.c_int).value = 0
+    fw.fn('np_glyphs_bind', None, C.c_void_p)(win.addr)
+    clicks: list = []
+    fw.mock('stock_dispatch_trampoline', lambda w, e, *_: clicks.append(w) or 0)
+    tap = fw.fn('np_corner_tap', None, C.c_int, C.c_int, C.c_int, C.c_int)
+
+    def more_clicked(x, y, to=None):
+        clicks.clear()
+        tap(x, y, *(to or (x, y)))
+        return clicks == [more.addr]
+    for x, y in ((292, 172), (374, 172), (292, 213), (374, 213), (300, 190), (360, 200)):
+        assert more_clicked(x, y), (x, y)
+    for x, y in ((291, 190), (300, 171), (300, 214), (360, 230), (340, 150), (210, 160)):
+        assert not more_clicked(x, y) and clicks == [], (x, y)  # left of it, above, the bar, the glyph, the heart
+    assert not more_clicked(300, 190, to=(280, 190))  # down in the reach, up out of it
+    slide.props['value'] = 1  # the lyrics' page
+    assert not more_clicked(300, 190)
+    slide.props['value'] = 0
+    st('np_full', C.c_int).value = 1  # the lyrics full screen
+    assert not more_clicked(300, 190)
+    st('np_full', C.c_int).value = 0
+    assert more_clicked(300, 190)
+
+
 def test_the_corners_draw_nothing_new(fw, st, mcl):
     """Touch only (the user's, 00:07): a corner's tap shows the press square where a tap on the glyph does."""
     row = Corners(fw, st, mcl)
