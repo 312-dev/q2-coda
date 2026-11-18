@@ -108,14 +108,14 @@ assert called('config_playmode')==[(2,1)] and called('stock_playback_shuffle') a
 assert called('getAllMusic')==[(3,1)] and m.get(payload_syms['library_music'])==0
 assert m.names(m.get(syms['tools_pdeq_directory']))==['staged'] and not m.toasts; confirmed('Shuffled Songs'); passed()
 # The note: centred at the page's foot, 28 px up from the window's (library_lists.c shuffle_menu: OLED's set has no title
-# row, so client_h() - 28, 234 under its 58 px bar), its text in the info role's face at 16 px, the muted grey. The set's
+# row, so bar_foot + client_h() - 28, 292 in the full-bleed window, where it rested 234 under its 58 px bar), its text in the info role's face at 16 px, the muted grey. The set's
 # Library's Shuffle row (hidden until Edit Library shows it, home.c ringnav_localmusic) opens the menu.
 nm=oled_set(ShuffleMachine()); view=nm.node('scroll_view','scroll_view_localmusic',[nm.node('list_item') for _ in range(11)]); nm.top=nm.node('window','localmusic_page',[view])
 assert nm.call(address=HOOKS['localmusic_page_init'][0],args=(nm.top,5,0,0),gap=0)==0
 shuffle_row,=[r for r in nm.nodes[view]['children'] if nm.nodes[r]['children'] and 'Shuffle' in [nm.nodes[k].get('text') for k in nm.nodes[nm.nodes[r]['children'][0]]['children']]]
 f_,ctx_=nm.handler(nm.nodes[shuffle_row]['children'][0],O['EVT_CLICK']); assert nm.call(address=f_,args=(ctx_,nm.event,0,0),gap=0)==0
 note=nm.nodes[nm.top]['children'][-1]; assert nm.nodes[note]['text']=='Albums and folders take a moment to shuffle'
-x,y,w,h=[nm.get(note+O[k]) for k in ('W_X','W_Y','W_W','W_H')]; assert (x,y,w,h)==(46,320-OLG.bar-28,283,24)==(46,234,283,24) and x+w/2==375/2
+x,y,w,h=[nm.get(note+O[k]) for k in ('W_X','W_Y','W_W','W_H')]; assert (x,y,w,h)==(46,320-28,283,24)==(46,OLG.bar+234,283,24) and x+w/2==375/2
 assert (nm.nodes[note]['style:normal:font_name'],nm.nodes[note]['style:normal:font_size'],nm.nodes[note]['style:normal:text_color'])==(FACE_NAMES[OLT['font[ROLE_INFO]']],16,-0x555556); passed()
 m.found=[]; m.plays=[]; m.calls=[]
 assert m.call(address=f0,args=(ctx0,m.event,0,0),gap=0)==0
