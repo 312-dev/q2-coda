@@ -52,11 +52,60 @@ char ulog_guess(const char *s, int n, const char **src) {
 
 /* ---- into the ring ---- */
 
-static void add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src,
-                     const char *s, int n) {
+/* A run of the same line (a driver that fails ten times a second) is one line and a count: the
+ * first goes in, the rest are counted, and a "last line repeated N more times" line, at the last
+ * one's time, goes in when another line comes or ulog_repeats is called. One run is kept, for the
+ * last ring a line went to. */
+static struct {
+    card_log *l;
+    unsigned hash, n;
+    long wall;
+    unsigned up_ms;
+    char level, src[12];
+} rep;
+
+static unsigned fnv(const char *s, int n, unsigned h) {
+    for (int i = 0; i < n; ++i) h = (h ^ (unsigned char)s[i]) * 16777619u;
+    return h;
+}
+
+static void stamp(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                  const char *s, int n) {
     char line[ULOG_PART + 64];
     int len = ulog_line(line, sizeof line, wall, up_ms, level, src, s, n);
     card_log_append(l, line, (unsigned)len);
+}
+
+void ulog_repeats(card_log *l) {
+    if (rep.l != l || !rep.n) return;
+    char b[64];
+    int n = snprintf(b, sizeof b, "last line repeated %u more times", rep.n);
+    stamp(l, rep.wall, rep.up_ms, rep.level, rep.src, b, n);
+    rep.n = 0; /* the run goes on being counted from here */
+}
+
+/* 1 when this line repeats the last one: counted, not added */
+static int repeated(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                    const char *msg, int n) {
+    unsigned h = fnv(msg, n, fnv(src, (int)strlen(src), 2166136261u ^ (unsigned char)level));
+    if (rep.l == l && rep.hash == h) {
+        ++rep.n, rep.wall = wall, rep.up_ms = up_ms;
+        return 1;
+    }
+    if (rep.l) ulog_repeats(rep.l);
+    rep.l = l, rep.hash = h, rep.n = 0, rep.level = level;
+    int k = 0;
+    while (src[k] && k < (int)sizeof rep.src - 1) rep.src[k] = src[k], ++k;
+    rep.src[k] = 0;
+    return 0;
+}
+
+/* 1 when the line went in, 0 when it was a repeat, counted */
+static int add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                    const char *s, int n) {
+    if (repeated(l, wall, up_ms, level, src, s, n)) return 0;
+    stamp(l, wall, up_ms, level, src, s, n);
+    return 1;
 }
 
 void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *src,
@@ -70,18 +119,27 @@ char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) 
     while (start < n && (s[start] == ' ' || s[start] == '\t')) ++start;
     if (start == n) return 0;
     if (ulog_is_line(s, n)) {
-        char line[ULOG_PART + 2];
         if (n > ULOG_PART) n = ULOG_PART;
+        int i = 21; /* past the time and its space: the uptime, then the level and the source */
+        while (s[i] != ' ') ++i;
+        char level = s[i + 1], src[12];
+        int k = 0, m = i + 3;
+        while (m < n && s[m] != ' ' && k < (int)sizeof src - 1) src[k++] = s[m++];
+        src[k] = 0;
+        /* a repeat of demo's: its uptime is in the line, its wall time the run's */
+        unsigned up = 0;
+        for (int d = 21; d < i; ++d) up = up * 10 + (unsigned)(s[d] - '0');
+        if (repeated(l, wall, up, level, src, s + m, n - m)) return 0;
+        char line[ULOG_PART + 2];
         memcpy(line, s, n);
         line[n] = '\n';
         card_log_append(l, line, (unsigned)n + 1);
-        int i = 21; /* past the time and its space: the uptime, then the level */
-        while (s[i] != ' ') ++i;
-        return s[i + 1];
+        return level;
     }
     const char *src;
     char level = ulog_guess(s + start, n - start, &src);
-    add_line(l, wall, up_ms, level, src, s + start, n - start);
+    if (repeated(l, wall, up_ms, level, src, s + start, n - start)) return 0;
+    stamp(l, wall, up_ms, level, src, s + start, n - start);
     return level;
 }
 
@@ -171,8 +229,7 @@ char ulog_kmsg(card_log *l, long wall, const char *rec, int n) {
     int start = ++i;
     while (i < n && rec[i] != '\n') ++i; /* the continuation lines ( KEY=value) are left out */
     char level = (pri & 7) <= 3 ? 'E' : 'W';
-    add_line(l, wall, ms, level, "kernel", rec + start, i - start);
-    return level;
+    return add_line(l, wall, ms, level, "kernel", rec + start, i - start) ? level : 0;
 }
 
 /* ---- the card ---- */

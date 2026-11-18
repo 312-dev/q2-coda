@@ -22,10 +22,14 @@
  * ui. */
 char ulog_guess(const char *s, int n, const char **src);
 /* One line into the ring: s (n bytes) kept as it is when it is already a ulog line, else stamped
- * with wall and up_ms and guessed. Its level; 0 for a blank line, which is dropped. */
+ * with wall and up_ms and guessed. Its level; 0 for a blank line, which is dropped, or a repeat of
+ * the line before, which is counted (ulog_repeats). */
 char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n);
 /* One line of q2guard's own (src "guard", or any other) into the ring, stamped. */
 void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *src, const char *msg);
+/* A run of one line repeated is that line once and then a count (every add above): the count
+ * written now, for a flush or a snapshot to carry it. */
+void ulog_repeats(card_log *l);
 
 /* A file another process appends to (demo's stderr), read from where the last call stopped. The
  * shell's roll (tools/build.py BOOT_HOOK) copies it to path.1 and empties it: a file found shorter
@@ -44,7 +48,7 @@ int ulog_tail(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms);
 
 /* One /dev/kmsg record ("PRI,SEQ,USEC,FLAGS;message\n" and its continuation lines): a kernel line
  * of warning or worse into l, stamped with the record's own uptime. Its level, or 0 for one not
- * kept (info, debug, or a program's line written to /dev/kmsg). */
+ * kept (info, debug, a program's line written to /dev/kmsg, or a repeat, counted). */
 char ulog_kmsg(card_log *l, long wall, const char *rec, int n);
 
 /* dir/name.0 rotated once it has reached max (.0 to .1 and so on, the oldest of files dropped),

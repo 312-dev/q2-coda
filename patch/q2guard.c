@@ -315,6 +315,7 @@ static struct {
 } fl;
 static void flush_start(void) {
     if (fl.pid > 0) return;
+    ulog_repeats(&ulog); /* a run of one line still being counted: its count goes too */
     if (!card_ready()) {
         fl.done = 1;
         return;

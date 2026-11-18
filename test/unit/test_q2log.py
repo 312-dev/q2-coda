@@ -36,6 +36,7 @@ def L(tmp_path_factory):
     lib.ulog_kmsg.argtypes = [C.c_void_p, C.c_long, C.c_char_p, C.c_int]
     lib.ulog_kmsg.restype = C.c_char
     lib.ulog_flush.argtypes = [C.c_void_p, C.c_char_p, C.c_char_p, C.c_long, C.c_int]
+    lib.ulog_repeats.argtypes = [C.c_void_p]
     lib.ulog_snapshot.argtypes = [C.c_void_p, C.c_long, C.c_uint, C.c_char, C.c_char_p, C.c_char_p, C.c_char_p,
                                   C.c_char_p]
     return lib
@@ -111,6 +112,34 @@ def test_a_ulog_line_passes_through_as_it_was_and_a_raw_one_is_stamped(L, tmp_pa
     assert log.ram() == mine + f'{TIME} 777 E bt rtk_hciattach: Failed to read local version\n'
 
 
+def test_a_run_of_one_line_is_that_line_once_and_a_count(L, tmp_path):
+    """The emulator's demo printed `gpio: failed to open device` seven times a second: 2171 of 2400 lines in 5
+    minutes. A run is the line once, then `last line repeated N more times` at the last one's time, when another
+    line comes or ulog_repeats is called (before a flush); a repeat is not an E line to flush for."""
+    log = Log(L, tmp_path)
+    spam = b'gpio: failed to open device, No such file or directory\n'
+    assert L.ulog_add_raw(log.log, WALL, 100, spam, len(spam)) == b'E'
+    for up in range(101, 106):
+        assert L.ulog_add_raw(log.log, WALL, up, spam, len(spam)) == b'\x00'  # counted, nothing to flush for
+    log.add('I', 'usb', 'cable in', up=200)
+    for up in (300, 301):
+        L.ulog_add_raw(log.log, WALL, up, spam, len(spam))
+    L.ulog_repeats(log.log)  # a flush: the open run's count goes with it
+    L.ulog_repeats(log.log)  # nothing more counted: nothing more said
+    mine = '2026-11-17T14:00:00Z 42 W usb plug\n'
+    for _ in range(3):
+        L.ulog_add_raw(log.log, WALL, 999, mine.encode(), len(mine))  # demo's stamped lines repeat the same way
+    L.ulog_repeats(log.log)
+    assert [l.split(' ', 1)[1] for l in log.ram().splitlines()] == [
+        '100 E ui gpio: failed to open device, No such file or directory',
+        '105 E ui last line repeated 5 more times',
+        '200 I usb cable in',
+        '300 E ui gpio: failed to open device, No such file or directory',
+        '301 E ui last line repeated 1 more times',
+        '42 W usb plug',
+        '42 W usb last line repeated 2 more times']
+
+
 def tail(L, path, from_end=False):
     t = Tail()
     L.ulog_tail_at(C.byref(t), str(path).encode(), int(from_end))
@@ -177,7 +206,7 @@ def test_kernel_records_of_warning_and_worse_are_kept_at_their_own_uptime(L, tmp
 def test_the_log_rolls_through_four_files_and_drops_the_oldest(L, tmp_path):
     d = tmp_path / 'logs'
     log = Log(L, d)
-    one = 'z' * 1023
+    one = 'z' * 1020
     names = [d / f'q2-log.{k}' for k in range(4)]
     firsts = []
     for gen in range(5):
@@ -185,8 +214,8 @@ def test_the_log_rolls_through_four_files_and_drops_the_oldest(L, tmp_path):
         firsts.append(log.ram())
         assert log.flush() == 0
         while (d / 'q2-log.0').stat().st_size < FILE_MAX:  # fill .0: a ring's worth at a time
-            for _ in range(60):
-                log.add('I', 'ui', one)
+            for k in range(60):
+                log.add('I', 'ui', f'{k:02} {one}')  # each its own: a repeat would be counted, not written
             assert log.flush() == 0
     log.add('I', 'ui', 'last')
     assert log.flush() == 0
