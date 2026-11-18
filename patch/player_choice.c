@@ -1,13 +1,13 @@
 /* The Player row (docs/internals.md#player-choice): Settings > General > "Player", New (q2player,
  * the default) or Stock (Q2 Muse's patched hciplayer, which the image keeps xz-compressed as the
  * fallback). The choice is a file player/main.c looks for each time the player starts, so it takes
- * effect at the next start of the player: the next boot, General's Restart a row below. Switching
+ * effect at the next start of the player: the next boot, as General's Restart makes. Switching
  * players mid-song would cut the song and demo's state of it. Under the row a caption says so, or,
- * once q2player has crashed three times in a row this boot (FALLBACK_FILE), that Stock plays until a
- * restart whatever the row says. */
+ * once q2player has crashed three times in a row this boot (FALLBACK_FILE), that Stock plays until
+ * a restart whatever the row says. */
 #include "navigation.h"
 
-#define STOCK_SWITCH "/mnt/data/stock-player" /* player/main.c SWITCH_FILE: there, Stock plays */
+#define STOCK_SWITCH "/mnt/data/stock-player"  /* player/main.c SWITCH_FILE: there, Stock plays */
 #define FALLBACK_FILE "/tmp/q2player.fallback" /* player/main.c: the crash-loop guard tripped */
 #define W(s) ((const unsigned *)L##s)
 

@@ -295,7 +295,7 @@ A held Previous or Next scans the track (`patch/seek.c`, [internals: Scan](inter
 - every log line has the monotonic time in ms; the DAC's ioctls are logged with their argument, and `snd_pcm_pause`, `snd_pcm_drop`, `snd_pcm_drain` and `snd_pcm_prepare` with their order among them;
 - `readdir` and `scandir` are rebuilt on `readdir64`: under qemu-user the host hands out 64-bit directory offsets, which the guest's 32-bit `readdir` cannot hold, so on ext4 every directory read as empty after its first entry (demo's Folder page, its library scan, ALSA's `alsa.conf.d`); and a stand-in `nice` runs demo's `nice -n -5 hciplayer` at the priority the sandbox has.
 
-`fakedemo.py --emu` also tries the fallback ([player-plan.md](player-plan.md#architecture)): `--stock` puts a player, xz-compressed as the build installs it, at `/usr/lib/hciplayer-stock/hciplayer.xz`, `--switch` makes `/mnt/data/q2player`, and `--killall N` has a shell in the sandbox list each process's name and command line in `ps.txt` and run demo's `killall -9 hciplayer` N seconds in.
+`fakedemo.py --emu` also tries the fallback ([player-plan.md](player-plan.md#architecture)): `--stock` puts a player, xz-compressed as the build installs it, at `/usr/lib/hciplayer-stock/hciplayer.xz`, `--switch` makes `/mnt/data/stock-player` (Settings' Player: Stock), and `--killall N` has a shell in the sandbox list each process's name and command line in `ps.txt` and run demo's `killall -9 hciplayer` N seconds in.
 
 ```sh
 python3 test/player/music.py MUSIC
@@ -304,7 +304,7 @@ python3 test/player/fakedemo.py --emu EMULATOR --hciplayer STOCKFS/usr/bin/hcipl
 
 `EMULATOR` holds `rootfs/` (a build's unpacked root filesystem), `qemu-mipsel-static`, `shim/libq2emu.so` and `state/` with the unit record. The same command with `--hciplayer player/build/mips/q2player` runs the new player in the same sandbox, against the same ALSA library.
 
-demo itself was run under the emulator with the shim logging both programs' `send` and `recv`: at boot it sends `{mcl-dsdmode\0}` and `{mcl-replaygain\0}`, two `send`s the player reads in one `recv`. Once the shim rebuilt `readdir` (above), Folder lists the card and demo plays from it: with a `--dev --new-player` build and `/mnt/data/q2player`, a Folder pick sends `set-songurl` (cache -1 from that queue), Gapless sends `set-gapless` about 5 s before the end, Next sends `set-nexturl`, and Play pauses with demo's own `mclSetMute(2)` and then `mcl-pause` ([player-plan.md: Phase 2 results](player-plan.md#phase-2-results)). The transcripts in `test/player/fixtures/` are still from `fakedemo.py`, sending what demo's code sends, since they need fixed times.
+demo itself was run under the emulator with the shim logging both programs' `send` and `recv`: at boot it sends `{mcl-dsdmode\0}` and `{mcl-replaygain\0}`, two `send`s the player reads in one `recv`. Once the shim rebuilt `readdir` (above), Folder lists the card and demo plays from it: with a build carrying `q2player` and no `/mnt/data/stock-player`, a Folder pick sends `set-songurl` (cache -1 from that queue), Gapless sends `set-gapless` about 5 s before the end, Next sends `set-nexturl`, and Play pauses with demo's own `mclSetMute(2)` and then `mcl-pause` ([player-plan.md: Phase 2 results](player-plan.md#phase-2-results)). The transcripts in `test/player/fixtures/` are still from `fakedemo.py`, sending what demo's code sends, since they need fixed times.
 
 ## Open questions
 
