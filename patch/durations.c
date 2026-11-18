@@ -75,17 +75,26 @@ int duration_seconds(void *song) {
     const char *path = P(song, REC_PATH);
     if (!path) return -1;
     if (catalogue_path(path)) return catalogue_seconds(path); /* a server row: no file to measure */
+    unsigned ms;
+    int how = stream_length(path, &ms); /* a song still arriving: the server's length or none */
+    if (how) return how == 1 ? (int)(ms / 1000) : -1;
     duration_read();
     rec_t *entry = duration_find(duration_key(path));
     /* ponytail: two paths sharing a 64-bit key (~1e-10 at 47k songs) share the first's length */
     return !entry ? -1 : entry->sec > start ? entry->sec - start : 0;
 }
 /* toolsTimeItoa's 3:45, 1:02:05 from an hour, as Now Playing's (tools/ipod.py rewrites stock's
- * padded formats; size: at least 9); empty, not 0:00, for an unknown or unreadable file. */
+ * padded formats; size: at least 9); empty, not 0:00, for an unknown or unreadable file, and --:--
+ * for a streamed song still arriving whose server gave no length. */
 const char *duration_text(char *text, unsigned size, void *song) {
     int sec = duration_seconds(song);
+    unsigned ms;
+    const char *path = song ? P(song, REC_PATH) : 0;
     if (size) text[0] = 0;
-    if (sec > 0) toolsTimeItoa(text, sec);
+    if (sec > 0)
+        toolsTimeItoa(text, sec);
+    else if (size > 6 && path && stream_length(path, &ms) == 2)
+        memcpy(text, "--:--", 6);
     return text;
 }
 

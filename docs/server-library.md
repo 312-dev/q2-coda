@@ -366,8 +366,10 @@ there when it starts, so a file cut by a crash or a pulled card is never taken f
 today; `START` is 8 s of the song (total x 8000 / length), at least 256 KB, or the whole file when
 total or length is unknown. A `stall` line waits the same. Then it is queued as any card file.
 Gapless and the FLAC paths are unchanged: the next song is a file in the queue, whole or arriving.
-ponytail: the stock scanner reads a file's length from its header (FLAC STREAMINFO, an MP3's Xing
-frame); a CBR MP3 without one reads short while it arrives.
+ponytail: the stock player reads a file's length from its header (FLAC STREAMINFO, an MP3's Xing
+frame); a CBR MP3 without one reads short while it arrives, so while a `.stream` line is not `done`
+the firmware shows the server's length (the line's length, else the catalogue's), or `--:--` when
+there is none ([internals](internals.md#streaming-configuration)).
 
 **The player** (q2player, `source.c`). Opening a file under `/mnt/mmc/.<id>/`, it reads
 `/tmp/q2-<id>.stream` for its path. A `get` or `stall` line wraps the file in a growing read: at the

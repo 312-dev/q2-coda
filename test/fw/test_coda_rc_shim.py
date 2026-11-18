@@ -393,6 +393,12 @@ def test_a_streaming_song_the_player_waits_for_is_buffering(fw, ui, mcl, recs):
     q2.tick()
     now = q2.now()
     assert (now['buf'], now['bhave'], now['btotal'], now['bms']) == ('1', '7000000', '20000000', '780000')
+    assert now['len'] == '780'  # still arriving: the server's length, not the player's (the bytes so far)
+    q2.files['/tmp/q2-subsonic.stream'] = q2.files['/tmp/q2-subsonic.stream'].replace(b'780000', b'0')
+    q2.tick()
+    assert q2.now()['len'] == '0'  # no server length: unknown, not the player's
+    q2.files['/tmp/q2-subsonic.stream'] = q2.files['/tmp/q2-subsonic.stream'].replace(b'\t0\t/', b'\t780000\t/')
+    q2.tick()
     del q2.files['/tmp/q2player.wait']
     q2.tick()
     assert (q2.now()['buf'], q2.now()['bhave']) == ('0', '0')

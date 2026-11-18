@@ -147,7 +147,10 @@ static void cr_now(void) {
     if (r && (!title || !*title)) title = P(r, REC_NAME);
     put_int(b, sizeof b, &n, "state", status == 2 ? 1 : status == 3 ? 2 : 0);
     put_int(b, sizeof b, &n, "pos", sec > 0 ? sec * 1000 : 0);
-    put_int(b, sizeof b, &n, "len", total > 0 ? total : 0);
+    unsigned lms = 0;
+    int cert = np_stream_length(&lms); /* a streamed song still arriving: the server's length, or 0 */
+    put_int(b, sizeof b, &n, "len",
+            cert == 1 ? (int)(lms / 1000) : cert == 2 ? 0 : total > 0 ? total : 0);
     put_int(b, sizeof b, &n, "id", r ? I(r, REC_ID) : 0);
     put_int(b, sizeof b, &n, "shuffle", shuf);
     /* playback.c: 3 repeats the song, 4 and 5 wrap the queue (4 within an album or folder) */
