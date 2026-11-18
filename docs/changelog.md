@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Status row: with the cable in and the battery full, or held at Charge Limit, the battery now shows a small plug inside it, on a green fill. Before, a full battery on the cable looked exactly as it does unplugged (white, no sign of the cable), so the Q2 seemed not to be connected. Charging keeps its lightning bolt, and on battery there is no sign.
   - Subsonic is now part of the firmware: the App Store no longer lists it, and new versions arrive with firmware updates. The built-in Subsonic always runs, even with an older Subsonic installed on the card, so Radio no longer says "Update Subsonic to use Radio". Your sign-in, settings and downloads on the card are kept; the old copy's program files are left on the card, unused.
   - Bluetooth: under **LDAC Auto** in Quality, a headset without LDAC is now named for what it really gets, such as "Streams aptX HD to this headset, 576 kbps" (Bowers & Wilkins Px7), instead of LDAC's 330 to 990 kbps range. LDAC Auto offers aptX HD, aptX, AAC and SBC too, and those run at their own fixed or set rate.
   - Bluetooth: while music plays to a headset, the Q2 now keeps a link log on the SD card (`.q2muse/logs/q2-bt.0` and `.1`, up to about 2 MB), a line a second: the rate actually sent, how much is waiting for the radio, the signal strength and transmit power, how many channels the link still hops on, Wi-Fi traffic and CPU use. It changes nothing about playback; it is there so break-ups in a pocket or across a room can be traced, and later avoided.
