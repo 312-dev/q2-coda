@@ -150,7 +150,7 @@ def home_settings(full):
         m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
         lst,sets,art=(named(m,m.top,n) for n in ('list_view_home','list_view_homeset','img_homeart'))
         sview=named(m,m.top,'scroll_view_homeset'); assert not m.nodes[sets]['visible']
-        assert m.get(lst+O['W_Y'])==m.get(sets+O['W_Y'])==OLT['home_top']  # home.rows top
+        assert signed(m.get(lst+O['W_Y']))==(OLT['home_top'] if full else SPLIT_TOP-OLED_G.bar) and m.get(sets+O['W_Y'])==OLT['home_top']  # home.rows top; Split's menu rises into the status row (09's SPLIT_TOP)
         assert m.nodes[sets].get('sensitive')==0  # hidden rows take no taps on the top level
         for img in (named(m,m.top,'img_playset'),named(m,m.top,'img_sysset')): click_target(m,img)
         m.paint(view)

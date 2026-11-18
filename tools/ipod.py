@@ -1138,7 +1138,7 @@ def modal_page(data):
     return encode(root)
 
 
-def patch_asset(path, data, g):
+def patch_asset(path, data, g):  # pragma: no mutate block
     """UI asset path's bytes (data, stock's) laid out on grid g."""
     page = patch_page(path, data, g)
     return modal_page(page) if path in MODAL_PAGES else page

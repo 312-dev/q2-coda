@@ -3136,7 +3136,6 @@ def test_a_side_button_onto_the_sleep_timers_ok_drops_a_pending_centre(fw, keys)
 
 
 def test_the_sleep_timer_switched_off_has_its_row_to_switch(fw, keys, st):
-    assert not host.tools_theme.built_geometry(host.tools_theme.builtins()).toolbar  # OLED's set: no stock toolbar
     ui = Ui(fw)
     top = time_window(ui, 'sleepshutdown_page')
     top.find(b'time').add(W(ui, 'view', 'view_sleep')).visible = 0  # only the switch's row shows

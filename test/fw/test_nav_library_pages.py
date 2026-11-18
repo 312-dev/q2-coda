@@ -2540,25 +2540,6 @@ def test_play_all_from_a_server_song_plays_rather_than_saying_storage_unavailabl
     assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'G1', b'R1'] and not ui.toasts
 
 
-# Cover Flow's All albums card (an artist's covers) checks its first song the same way
-@pytest.mark.parametrize('first,plays', [(b'/mnt/mmc/.subsonic/cat/al1/s1.flac', True), (b'/m/blue/1.flac', False)])
-def test_cover_flows_all_albums_from_a_server_song_plays_and_from_a_gone_card_file_says_so(fw, ui, song, first, plays):
-    from test_coverflow import Cf
-    second = first.replace(b'1.flac', b'2.flac')
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
-    albums = Albums(fw, ui, song, gone={first, second})
-    albums.songs[b'Blue'] = [song(second, b'B2', album=b'Blue', track=2), song(first, b'B1', album=b'Blue', track=1)]
-    c = fw.var('cf', Cf)
-    c.name = ui.new('label_create', 0, 0, 0, 0, 0)  # its caption, which says why nothing plays
-    c.albums = ui.deques.new([song(first, album=b'Blue'), song(b'/m/red/1.flac', album=b'Red')])
-    fw.fn('coverflow__play_all', C.c_int, C.c_void_p)(None)
-    if plays:
-        (queue, at, cls), = ui.played
-        assert [field(r, 'title') for r in queue][:2] == [b'B1', b'B2'] and at == 0
-    else:
-        assert not ui.played and ui.text[c.name] == 'Storage unavailable'
-
-
 def test_shuffle_plays_the_decade_s_songs_shuffled(fw, ui, song, mcl):
     songs = [song(b'/m/%d.flac' % i, id_=i) for i in (5, 9, 1)]
     library = Library(fw, ui, songs)

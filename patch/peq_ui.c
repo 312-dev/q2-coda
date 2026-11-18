@@ -810,8 +810,9 @@ static int render_rows(const void *unused) {
     int height = widget_get_prop_int(ui.page, "h", 320), graph = ui.screen == HOME || ui.screen == BAND;
     int head = graph * graph_head(), rh = page_h(48);
     /* shown: the whole rows in view, a set_switch theme's ending above the bottom corners' glass,
-     * as its other lists do (list_end). rows, the list's box: on to the window's foot, its rows past the list end fading into it (navigation.c list_fade), where the
-     * wheel's end leaves the last row on the last whole row above the end (fit_top). */
+     * as its other lists do (list_end). rows, the list's box: on to the window's foot, its rows
+     * past the list end fading into it (navigation.c list_fade), where the wheel's end leaves the
+     * last row on the last whole row above the end (fit_top). */
     int shown = ((eq_rows() ? eq_list_end() : height) - 48) / rh * rh, rows = height - 48;
     if (ui.view && ui.rendered != ui.screen && (ui.rendered == HOME || ui.rendered == BAND)) {
         ui.kept[ui.rendered][0] = widget_get_prop_int(ui.view, "_ringnav_index", 0) + 1;

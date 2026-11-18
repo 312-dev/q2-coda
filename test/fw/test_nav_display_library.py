@@ -3095,6 +3095,7 @@ def test_an_artists_songs_tab_keeps_no_keys(fw, st, stand_in, records):
 def test_an_artist_with_no_name_reads_unknown_artist(fw, stand_in, records):
     ui = Ui(fw)
     ArtistPage(fw, ui)
+    ui.window('x_page')  # over the page as its tabs load: stock's tabs, not the design's page (artist_local)
     fw.mock('getFormatString', lambda key, out, n, *_: C.memmove(out, b'Unknown Artist\0', 15) and 0)
     artist(fw, stand_in, records, [], [], title=b'(null)')
     fw.fn('ringnav_artist_list', C.c_int, C.c_int)(1)
