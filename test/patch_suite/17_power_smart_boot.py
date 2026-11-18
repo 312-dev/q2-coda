@@ -225,6 +225,9 @@ class SmartMixin:
     def __init__(self,*a,smart='1',**k):
         super().__init__(*a,**k)
         if smart: self.config['SMARTWIFI']=smart
+        # Automatic Time Zone off: its lookup at a new link (autozone.c) is a use of the link of its own, kept
+        # out of these idle counts (test/fw/test_autozone.py has it)
+        self.config['AUTOZONE']='0'
         self.handlers.pop(syms['write_int_config'],None)  # the payload's hook runs; the write past it is recorded
         self.handlers[HOOKS['write_int_config'][0]+12]='w:write'
         self.mock('remove@GLIBC_2.0','stop_wifisynclink','networkStart','networkStop')

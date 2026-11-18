@@ -563,6 +563,7 @@ WATCHDOG = 'usr/bin/checkappprocess.sh'
 WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
                  b'exit 0\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
+# Its TIMEZONE is UTC (DEFAULT_TIMEZONE), not stock's 22, Shanghai.
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
 # Q2 Muse is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
@@ -575,6 +576,8 @@ def default_config(config):
     for key in DEFAULT_CONFIG_OFF:
         check(config.count(b'\n%s=1\n' % key) == 1, 'Unexpected default config.ini')
         config = config.replace(b'\n%s=1\n' % key, b'\n%s=0\n' % key)
+    check(config.count(b'\nTIMEZONE=22\n') == 1, 'Unexpected default config.ini')
+    config = config.replace(b'\nTIMEZONE=22\n', b'\nTIMEZONE=%d\n' % DEFAULT_TIMEZONE)
     check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config and b'[IPOD]' not in config,
           'Unexpected default config.ini')
     config = config.replace(b'[SYSSET]\n', b'[SYSSET]\n' + DEFAULT_LANGUAGE)
@@ -1666,8 +1669,12 @@ TIMEZONES = (
     ('GMT+14 Kiritimati', 'Pacific/Kiritimati'),
     ('GMT-6 Chicago', 'America/Chicago'), ('GMT-7 Phoenix', 'America/Phoenix'),
     ('GMT+5:30 Kolkata', 'Asia/Kolkata'), ('GMT+10 Brisbane', 'Australia/Brisbane'),
-    ('GMT+12 Auckland', 'Pacific/Auckland'),
+    ('GMT+12 Auckland', 'Pacific/Auckland'), ('GMT+0 UTC', 'UTC'),
 )
+# A fresh install's zone: UTC, until Automatic Time Zone (patch/autozone.c) finds the network's. Stock's
+# default config.ini says 22, Shanghai, which put every new Q2 on China time (docs/internals.md#clock).
+DEFAULT_TIMEZONE = len(TIMEZONES) - 1
+assert TIMEZONES[DEFAULT_TIMEZONE][1] == 'UTC'
 LOGO_HOOK = (b'   \tdisplay_logo /release/assets/default/raw/images/xx/logo.jpg\n',
              b'   \tl=/mnt/data/boot-logo.jpg; [ -f $l ] || { l=/%s; [ -f /%s ] && display_logo /%s && /usr/bin/q2splash /%s && l=; }; [ -z "$l" ] || display_logo $l\n'
              % (LOGO.encode(), LOGO_ANIM.encode(), LOGO_BLACK.encode(), LOGO_ANIM.encode()))
@@ -2215,7 +2222,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its

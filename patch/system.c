@@ -566,6 +566,7 @@ void power_poll(void) {
     state_poll();
     heatguard_poll(); /* q2guard's cards (heatguard.c) */
     smart_poll();
+    autozone_poll(); /* after smart_poll: a lookup running keeps the link (smart_needed) */
     wifi_transfer_poll();
     config_settle(0);
 }

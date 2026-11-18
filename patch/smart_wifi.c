@@ -93,15 +93,15 @@ static int net_page_open(void) {
  * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
  * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
  * or mDNS that failed), a station playing, a card app running, a scrobble upload, Network Update's
- * download or an Apps job, Get Album Lyrics, a Tidal download or an action held for the link
- * (smart_hold); a time sync pending on a link; or a page above. */
+ * download or an Apps job, Get Album Lyrics, a Tidal download, a time zone lookup (autozone.c) or
+ * an action held for the link (smart_hold); a time sync pending on a link; or a page above. */
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();
     return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_enabled() ||
            g_synclinkflag == 2 || g_syncLink_status || g_wifitransport_flag ||
            airplayGetFlag() == 2 || type - 2 < 2 || type - 0xf1 < 2 || spot_running() ||
            radio_status() == 2 || addon_running() || scrobble_busy() || netupdate_busy() ||
-           album_lyrics_busy() || tidal_busy() || sw.hold_timer ||
+           album_lyrics_busy() || tidal_busy() || autozone_busy() || sw.hold_timer ||
            (g_syncnettime_flag && networkGetConnectStatus() > 0) || net_page_open();
 }
 
