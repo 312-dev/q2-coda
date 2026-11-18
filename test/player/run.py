@@ -396,8 +396,8 @@ def test_grow_seek_inside(player, songs, tmp):
 
 def test_grow_seek_beyond(player, songs, tmp):
     """A seek past the part of a growing FLAC on the card, with no SEEKTABLE and with one: the player waits there
-    (naming the song for the spinner) rather than ending the song, and plays from the target as soon as its bytes
-    land, not once the whole song has: the reference from 15 s to the end."""
+    (naming the song for the spinner, its position the target's) rather than ending the song, and plays from the
+    target as soon as its bytes land, not once the whole song has: the reference from 15 s to the end."""
     ref, said = reference(songs/'a1.flac'), []
     for table in (False, True):
         whole = (songs/'a1.flac').read_bytes()
@@ -409,6 +409,8 @@ def test_grow_seek_beyond(player, songs, tmp):
         head = got[:len(got) - len(tail)]
         assert ref.startswith(head), f'{kind}: {len(head) // 4} frames before the seek are not the reference start'
         assert '/mnt/mmc/.foo/grow.flac\n' in seen, f'{kind}: the wait was never named: {seen}'
+        waiting = [p for t, p in s.positions if 2.6 < t < 4.9]  # the target's bytes not there: the bar shows it
+        assert waiting and set(waiting) == {15}, f'{kind}: the position while the player waits is not the target: {waiting}'
         after = [p for t, p in s.positions if 2.0 < t < 12.0]
         assert after and max(after) >= 16, f'{kind}: the target was not played when its bytes came: positions {after}'
         said.append(f'{kind} {len(head) // 4} frames before, at {max(after)} s before the rest landed')
