@@ -31,8 +31,9 @@ its rules. Where the concept contradicts itself, this file picks one answer and 
 | ------------- | ---------------------------- | --------------------------------------------------------------------------------------- |
 | Panel         | 375x320, upright             | The concept's screens are near square; the Q2 is wider, so layouts gain width, not rows |
 | Glass corners | 80 px radius (`GLASS_R`)     | Hides up to 46 px at each end of a row 8 px from an edge; see [Corners](#corners)       |
-| Status row    | glyphs centered on y 23       | No band and no rule: the bar is 58 px of the page's black; ends 62 px in from each side |
-| Content area  | 375x262 from y 58            | Seven 32 px rows, y 58 to 282                                                           |
+| Status row    | glyphs centered on y 23       | An overlay on the page: no band, no rule, no fill; ends 62 px in from each side         |
+| Page          | 375x320, the whole screen     | [Full-bleed](#full-bleed): backgrounds and art reach both edges under the status row    |
+| List rest     | rows from y 58 to 282        | Seven 32 px rows; where content rests, not where it is clipped                          |
 | Panel type    | LCD (`lcd_h0209s`), not OLED | Black is a color here, not "off": keep large areas black anyway, it is the look        |
 
 The geometry below (the status row, the 58 px list top, the 16 px selection inset, the 28 px right column and
@@ -40,6 +41,20 @@ the scroll indicator) is what the user chose from mock-ups on 2026-11-13 (mock-u
 follow-up), in place of a first draft that stepped the selection bar in at the corners and drew the scroll
 track along the glass. The status row's height and ends are the user's from `mock_status_up.py` on 2026-11-15
 ("do 62 and '...' any title thats too long"): up from y 37 into the glass's top curve, the list's top unchanged.
+
+### Full-bleed
+
+Every page is full-bleed: its window is the whole 375x320 screen (`tools/build.py` `FULL_BLEED`), and the status
+row is an overlay painted after it, its glyphs on top with nothing behind them, so a page's background, the glow and
+its art run to the top and bottom edges. The layout insets are rest positions for content, not clip edges: a list's
+first row rests at y 58 and its last at y 282. Stock's pages move their content down the 58 px the row takes
+(`tools/ipod.py` `full_bleed`), so each rests where it did; payload code that lays such a page out from the row's foot
+adds the window's `bar_foot` (`patch/theme_engine.c`), and a list end or a settings row is measured on the screen
+(`list_fit_end`). The row's background is clear in every state (the bar is a disabled widget, so AWTK paints its disable
+style). The pages the payload builds (`page_open`, the shuffle confirmation) still start under the row
+(`patch/theme_engine.c` `client_window`), and the row fills black over them, until their lists run under it. A page
+slide draws both pages' full-screen snapshots and then the row over them (`page_parallax.c` `parallax_curr`). A press
+on the row is the row's, as before: Control Center's pull and the row's own taps, never a page's swipe back.
 
 ### Corners
 
@@ -183,7 +198,7 @@ All lists share one grid.
 
 ### Status row
 
-- No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs center on y 23.
+- No band: the status row is an overlay on the page's own ground, with no fill or rule, over the 58 px where content does not rest. Its glyphs center on y 23.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
   ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
   row of its own, so the list keeps its place.
@@ -308,8 +323,8 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 - **A list's end is its end** (approved on 2026-11-16): the wheel stops on the first and last rows, never wrapping
   to the other end and never bouncing. Turning on past an end, the bar's tug holds full against it, the
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
-  The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
-  black band and down into the fade.
+  The lean is never cut at the list's edge: on the first or last row it reaches up under the status row's
+  glyphs and down into the fade.
 - **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
   sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
   blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
@@ -444,7 +459,7 @@ Home's list.
   puts it down and saves. Return while it is lifted puts it back exactly where it was, still in the
   editor.
 - **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
-  the hold. The row follows the finger on its card, held inside the list (from y 58 to the list's
+  the hold. The row follows the finger on its card, held inside the list (its rest, y 58 to the list's
   end), never over the status row or the hint; the rows it passes slide aside over 150 ms (cubic
   out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
   its place and saves. A tap selects a row and opens nothing.
@@ -657,8 +672,9 @@ row gone; while a swipe moves it, it slides in the pages' column. Nothing on it 
 | Target     | 52 px (1.18 times) on its star's centre      | the wheel's: filled if within the rating, else a full Text Primary outline              |
 | Page dots  | 6 px, 7 px apart, centred, top 292          | one a page, this one Text Primary, the others at 30%                                    |
 
-No words under the stars, no hint, no progress bar, and no colour but the glow's. The mock-up has the title at
-46; the window starts under the status row's band at 58, so the title stands on Now Playing's own title line.
+No words under the stars, no hint, no progress bar, and no colour but the glow's. The page is [full-bleed](#full-bleed):
+the glow runs to the screen's top edge under the status row. The mock-up has the title at 46; it stays at 64, on Now
+Playing's own title line.
 
 - **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), apart from the like: the heart on the
   art's page sets no stars and five stars like nothing. This page is the one place to rate (the user, 2026-11-18:
@@ -670,7 +686,7 @@ No words under the stars, no hint, no progress bar, and no colour but the glow's
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
   times about its luma and dimmed to 45%, spread across the window and shaded by an ellipse centred at y 122
   (radii 273 by 220 px) that is black from 80% of the way out, and faded in over the window's top 32 rows
-  under the status row's band. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
+  at the screen's top, under the status row's glyphs. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
   keeps WCAG's 4.5:1 over its brightest pixel, and the lyrics' edge fades go into the glow, not black. It is
   made once for each cover shown, never per frame; Light Mode has none.
 
@@ -1122,7 +1138,7 @@ on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details sto
 - **Scrolling:** inert, no selection, as an iOS info page. When the grid ends past the list's end
   (y 282) the wheel scrolls it a row a tick, as far as its last row, and back, and a finger dragged up
   or down moves it with the finger between the same two ends, stopping where it lifts (no momentum,
-  so a flick never overshoots); the window clips it under the status row, where the header's top shows only at the page's top.
+  so a flick never overshoots); the list runs under the status row and fades there (the header's top shows only at the page's top).
 
 ### Album page
 
@@ -1603,8 +1619,8 @@ the status row "Software Update" over mode pages as USB's:
 <a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16 and laid out again from the user's
 mock-up of 2026-11-18, `patch/battery.c`) is a graph over the whole page, under the status row titled "Battery History".
 The three parts stand as one block from y 57 to the list end (y 282), so nothing reaches the glass's bottom corners. Each
-y here is on the screen; the page's window starts under the status row, so the code takes them from the canvas's origin,
-not the view's own y:
+y here is on the screen; the page's window is the whole screen but the view starts at y 58, so the code takes them from
+the canvas's origin, not the view's own y:
 
 - **Readout**, centered at y 66 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
   (the status bar's 12- or 24-hour form; "+1:23 · 51%" with the clock never set).
@@ -1847,7 +1863,7 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
   cover to show (a song without art) the placeholder tile the same way, from the top edge under the status row; on every
   other row the library's covers in turn as an iPod classic's menu shows them, cross-fading from the frame as it
   stands as the wheel moves between the two, each zooming between 1 and 0.9 of the cover and drifting once over its 9 s, 1.5 s cross-fades between covers
-  and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows painted by the bar (`coverflow_home_strip`, approved from
+  and on a track change (docs/ipod.md#home, `slideshow.c`)), the main menu from y 40, its top rows under the status row (approved from
   `mock_overflow.py` on 2026-11-15), and the lists Home's rows open as full-width pages with the art hidden
   (`home.lists.full`).
 - Settings > Storage and its Downloads (`patch/storage.c` `storage_paint`): the storage bar and its legend, the

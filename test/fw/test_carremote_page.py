@@ -283,8 +283,9 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
     page = open_page(fw, ui)
     # the page's list at OLED's y (its switch at the status row's foot, 58), as on the Q2, and the page built again
     view = lists(ui, page)[-1]
-    struct.pack_into('<i', ui.blocks[page], 4, oled.bar - (fw.fn('feedback_below', C.c_int, C.c_void_p)(view)
-                                                           - geometry(ui, view)[3]))
+    # moved by what its list's top is off (page_open has placed it under the row: theme_engine.c client_window)
+    struct.pack_into('<i', ui.blocks[page], 4, geometry(ui, page)[1] + oled.bar - (
+        fw.fn('feedback_below', C.c_int, C.c_void_p)(view) - geometry(ui, view)[3]))
     fw.fn('carremote_page__cr_page_show', C.c_int, C.c_void_p)(1)
     view = lists(ui, page)[-1]
     top = fw.fn('feedback_below', C.c_int, C.c_void_p)(view) - geometry(ui, view)[3]

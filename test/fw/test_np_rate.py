@@ -349,7 +349,8 @@ def luminance(c):
 @pytest.mark.parametrize('rgb', [0xffffff, 0xff2020, 0x20ff20, 0xffff00])
 def test_the_glow_keeps_text_secondary_lyrics_at_four_and_a_half_to_one(fw, ui, mcl, st, rgb):
     """The brightest cover still leaves every glow pixel dark enough that Text Secondary (#ABABAB, the unsung lyric
-    lines) reads at WCAG's 4.5:1 over it, and the glow fades to black at the window's edges."""
+    lines) reads at WCAG's 4.5:1 over it, runs to the screen's top edge under the status row (full-bleed), and fades
+    to black at the foot's corners."""
     rate = Rate(fw, ui, mcl, st)
     ui.set_str(rate.cover, b'image', b'art')
     cover = Cover(fw, rgb)
@@ -358,7 +359,7 @@ def test_the_glow_keeps_text_secondary_lyrics_at_four_and_a_half_to_one(fw, ui, 
     brightest = max(luminance(c) for row in px for c in row)
     assert brightest > 0.005  # there is a glow
     assert (luminance(0xababab) + 0.05) / (brightest + 0.05) >= 4.5
-    assert all(c & 0xffffff == 0 for c in px[0])  # the top row: black under the status row's band
+    assert any(c & 0xffffff for c in px[0])  # the top row: the glow, under the status row's glyphs
     assert px[-1][0] & 0xffffff == 0 and px[-1][-1] & 0xffffff == 0  # the corners at the foot: black
 
 
@@ -391,3 +392,33 @@ def test_the_lyrics_fade_into_the_glow_not_black(fw, ui, mcl, st):
     assert len(rows) == 2 * fade and all(d[1][3] == 1 for d in rows) and canvas.rects == []  # no fill of black
     steps = [255 * (fade - i) // fade for i in range(1, fade)]  # the edge row opaque, then clearer inward
     assert cover.alphas == [a for step in steps for a in (step, 0xff) * 2]  # the top's and the foot's, each put back
+
+
+def y_in(w, top):
+    """w's y in top's rows: its own and each parent's up to top."""
+    y = 0
+    while w and w != top:
+        y += struct.unpack_from('<i', (C.c_char * 8).from_address(w), 4)[0]
+        w = C.c_void_p.from_address(w + O['W_PARENT']).value or 0
+    return y
+
+
+@pytest.mark.parametrize('column', [False, True])
+def test_the_glow_fades_in_under_the_status_row_only_on_the_column(fw, ui, mcl, st, column):
+    """Full screen the glow runs to the top edge, nothing over it; a page whose top is the status row's foot (the
+    column) has Now Playing's black above it, so black is laid over its first NR_TOP_FADE rows, opaque to clear."""
+    rate = Rate(fw, ui, mcl, st)
+    ui.set_str(rate.cover, b'image', b'art')
+    if column:  # the view's top on the status row's foot
+        foot = fw.fn('bar_foot', C.c_int, C.c_void_p)(st.np_win)
+        own = struct.unpack_from('<i', (C.c_char * 8).from_address(rate.rate), 4)[0]
+        struct.pack_into('<i', (C.c_char * 8).from_address(rate.rate), 4, foot - (y_in(rate.rate, st.np_win) - own))
+        assert y_in(rate.rate, st.np_win) == foot
+    canvas = bg(fw, rate.rate, Cover(fw, 0xffffff))
+    fade = [r for r in canvas.rects if r[0] == 0 and r[3] == 1 and r[2] > 200]
+    if not column:
+        assert fade == []
+        return
+    assert [r[1] for r in fade] == list(range(NR['NR_TOP_FADE']))
+    alphas = [r[4] >> 24 for r in fade]
+    assert alphas[0] == 255 and alphas == sorted(alphas, reverse=True) and alphas[-1] < 255 // NR['NR_TOP_FADE'] * 2

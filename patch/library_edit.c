@@ -349,20 +349,14 @@ static void *lr_view_of(void *top, int *list) {
     return coverflow_home_edit_view(top);
 }
 
-/* The view's top on screen and the height its rows show in: to the set's list end, where a
- * selected row stops (docs/oled-design.md#corners), LR_ROOM higher in the editor, which counts
- * from the view's window (the Library's starts under the status row), as navigation.c sel_height
- * reads it. */
+/* The view's top on screen and the height its rows show in: to the set's list end on the screen
+ * (list_fit_end), where a selected row stops (docs/oled-design.md#corners), LR_ROOM higher in the
+ * editor, as navigation.c sel_height reads it. */
 static int lr_box(void *view, int *h) {
-    int y = 0, win = 0, end = geom_val(V_LIST_END);
-    if (end) end -= lr_edit_room(view);
-    for (void *p = view, *wm = window_manager(); p && p != wm; p = P(p, W_PARENT))
-        if (P(p, W_PARENT) == wm)
-            win = I(p, W_Y);
-        else
-            y += I(p, W_Y);
+    int y = 0, end = geom_val(V_LIST_END) ? list_fit_end() - lr_edit_room(view) : 0;
+    for (void *p = view, *wm = window_manager(); p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     *h = end && end - y < I(view, W_H) ? end - y : I(view, W_H);
-    return win + y;
+    return y;
 }
 
 /* w's x on screen. */

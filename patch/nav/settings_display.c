@@ -39,11 +39,13 @@ static int settings_list(void *w) {
            I(w, LIST_DEFAULT_ITEM_HEIGHT) == geom_val(V_SET_ROW);
 }
 
-/* Cached pages behind Display must take the new inset before their return transition. */
+/* Cached pages behind Display must take the new inset before their return transition. The set's
+ * set_top counts from the status row's foot: in a window, from its bar_foot. */
 static void settings_layout(void *w) {
     if (!w) return;
     if (settings_list(w)) {
-        int y = theme()->set_top;
+        void *p = P(w, W_PARENT);
+        int y = theme()->set_top + (p && P(p, W_PARENT) == window_manager() ? bar_foot(p) : 0);
         if (I(w, W_Y) != y) widget_move_resize(w, I(w, W_X), y, I(w, W_W), I(w, W_H));
         return;
     }

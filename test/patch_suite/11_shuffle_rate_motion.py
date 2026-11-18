@@ -150,7 +150,7 @@ def home_settings(full):
         m.mock('widget_animator_prop_create','widget_animator_prop_set_params','widget_animator_start')
         lst,sets,art=(named(m,m.top,n) for n in ('list_view_home','list_view_homeset','img_homeart'))
         sview=named(m,m.top,'scroll_view_homeset'); assert not m.nodes[sets]['visible']
-        assert signed(m.get(lst+O['W_Y']))==(OLT['home_top'] if full else SPLIT_TOP-OLED_G.bar) and m.get(sets+O['W_Y'])==OLT['home_top']  # home.rows top; Split's menu rises into the status row (09's SPLIT_TOP)
+        assert signed(m.get(lst+O['W_Y']))==(OLT['home_top']+OLED_G.bar if full else SPLIT_TOP) and m.get(sets+O['W_Y'])==OLT['home_top']+OLED_G.bar  # home.rows top under the row's foot; Split's menu rises into the status row (09's SPLIT_TOP); Home's window is the screen
         assert m.nodes[sets].get('sensitive')==0  # hidden rows take no taps on the top level
         for img in (named(m,m.top,'img_playset'),named(m,m.top,'img_sysset')): click_target(m,img)
         m.paint(view)
@@ -267,7 +267,7 @@ def prow(pm,view,i,caption,detail=None,into=False):
     return pm.call(address=f,args=(view,i,pm.string(caption),pm.string(detail) if detail is not None else 0),stack=(0,),gap=0)&0xffffffff
 def box(pm,w): return [signed(pm.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H')]
 def page_kids(pm,kind): return [c for c in pm.nodes[pm.top]['children'] if pm.nodes[c]['type']==kind]
-def under_bar(pm,name):  # a window as the device has it, under the status row
+def under_bar(pm,name):  # a window as client_window puts a code-built page, under the status row (item 5, fix/full-bleed-code-pages, makes it full-bleed)
     w=pm.node('window',name); pm.word(w+O['W_Y'],OLG.bar); pm.word(w+O['W_PARENT'],pm.wm); return w
 PX,PW=OLT['page_x'],375-2*OLT['page_x']
 pm=CoverflowMachine(); assert oled_client(pm)==320-OLG.bar; pbar=oled_page_bar(pm)

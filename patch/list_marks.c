@@ -103,9 +103,10 @@ void spinner_painted(void *w, const rect_t *r) {
 /* The loading overlay's spinner (docs/oled-design.md#loading): the busy spinner's form
  * (name_order.c spin_paint: a #1C1C1E square with 12 px corners, eight 7 px dots 15 px out, the lit
  * one a step clockwise each frame and each before it dimmer) painted by the canvas over window w,
- * turned by the shared timer above. Its centre is the screen's (375 x 320 with the status row), so
- * its box is placed in screen rows and moved by w's own y: a window under the status row centred on
- * its own height would sit half the bar's height low. */
+ * turned by the shared timer above. Its centre is the screen's (375 x 320, the status row over it),
+ * so its box is placed in screen rows less w's own y: 0 on a full-bleed page, the bar's height on a
+ * page the payload builds (theme_engine.c client_window), which centred on its own height would sit
+ * half the bar's height low. */
 #define LOAD_SPIN_R 12
 #define LOAD_DOT 7
 #define LOAD_DOT_OUT 15

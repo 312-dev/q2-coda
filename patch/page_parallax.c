@@ -14,10 +14,12 @@
  * - parallax_update: a close's time runs PAGE_SLIDE_MS / PAGE_POP_MS as fast, so the animator
  *   ends sooner (its end is the time's, read after this);
  * - parallax_prev: the page under drawn at PX_UNDER_PCT of stock's offset, then darkened where the
- *   new page does not yet cover it, in proportion to how far the new one is in. With Home in
- *   Split under, it then paints the system bar again: Home's band, the rows above its window, is
- *   the bar's to draw (coverflow.c coverflow_home_bar), and stock's own paint of the bar comes
- *   before this frame's percent (parallax_slide).
+ *   new page does not yet cover it, in proportion to how far the new one is in;
+ * - parallax_curr: the new page as stock draws it, then the system bar again over both. Every page
+ *   is the whole screen (docs/oled-design.md#full-bleed), so the snapshots cover the bar stock
+ *   painted first in the frame (window_animator_begin_frame); this paint, with this frame's
+ *   percent readable (parallax_slide), keeps the status row on top, its title over the sliding page
+ *   alone where Home in Split is under (theme_titles_paint.c bar_title_fades).
  * Under Reduce Motion the hint is a fade (ui_kit.c motion_row), so none of this runs. Every window
  * that slides takes it: pages, Now Playing's close, Cover Flow.
  */
@@ -37,16 +39,15 @@
 
 #define F(p, off) (*(float *)((char *)(p) + (off)))
 
-/* The page under the slide and how far the new page is in, while parallax_prev paints the bar */
+/* The page under the slide and how far the new page is in, while parallax_curr paints the bar */
 static struct {
     void *under;
     float percent;
     int painting;
 } px __attribute__((section(".scratch")));
-extern int coverflow_home_slide(int *open); /* coverflow.c */
 
 /* The page under the window sliding now, and in *percent how far the sliding one is in (0..1),
- * while parallax_prev paints the system bar over the frame it just drew; else 0. Stock paints
+ * while parallax_curr paints the system bar over the frame it just drew; else 0. Stock paints
  * the bar first in each frame (window_animator_begin_frame), before update_percent, so a paint
  * there would see the frame before. */
 void *parallax_slide(float *percent) {
@@ -73,7 +74,7 @@ int parallax_update(void *wa) {
 
 int parallax_prev(void *wa) {
     float percent = F(wa, WA_PERCENT);
-    void *win = P(wa, WA_PREV_WIN), *c = P(wa, WA_CANVAS), *bar = *(void *const *)system_bar;
+    void *win = P(wa, WA_PREV_WIN), *c = P(wa, WA_CANVAS);
     F(wa, WA_PERCENT) = percent * PX_UNDER_PCT / 100;
     int r = htranslate_draw_prev(wa);
     F(wa, WA_PERCENT) = percent;
@@ -87,9 +88,15 @@ int parallax_prev(void *wa) {
         canvas_fill_rect(c, 0, I(win, W_Y), open, I(win, W_H));
         stock_canvas_set_fill_color(c, fill);
     }
-    /* Home in Split under the slide: the bar again, this frame's, its band drifting with Home */
-    px.under = win, px.percent = percent, px.painting = 1;
-    if (bar && coverflow_home_slide(&open)) widget_paint(bar, c);
+    return r;
+}
+
+int parallax_curr(void *wa) {
+    int r = htranslate_draw_curr(wa);
+    void *c = P(wa, WA_CANVAS), *bar = *(void *const *)system_bar;
+    if (r || !c || !P(c, CANVAS_LCD) || !bar) return r;
+    px.under = P(wa, WA_PREV_WIN), px.percent = F(wa, WA_PERCENT), px.painting = 1;
+    widget_paint(bar, c);
     px.painting = 0;
     return r;
 }

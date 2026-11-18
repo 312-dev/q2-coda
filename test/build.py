@@ -355,13 +355,13 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, FULL_BLEED, HTRANSLATE_VT, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SLEEP_TIMER, UI_ASSETS,
                       STATUS_BAR, STATUS_ROW_RIGHT, corner_inset, corner_x, immediate_values,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
                       patch_asset, patch_code, patch_style, style_props, SLIDE, STOCK_ROWS, MODAL_PAGES, KEEP_TOOLBAR,
-                      STATUS_ROW_GAP, STATUS_ROW_LINE)
+                      STATUS_ROW_GAP, STATUS_ROW_LINE, full_bleed)
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
     demo = (directory/'demo').read_bytes()
@@ -411,6 +411,14 @@ def validate_assets(directory):
     # Stock's lock screen stays off: config_init stores 0 in g_screensaver_mode whatever SYSSET SCREENSAVER says.
     off = fileoff(stock, SAVER_OFF[0])
     assert struct.unpack_from('<I', stock, off)[0] == SAVER_OFF[1] and struct.unpack_from('<I', demo, off)[0] == SAVER_OFF[2]
+    # Every page window is the whole screen (docs/oled-design.md#full-bleed): window_manager_default_layout_child's
+    # branch to the client rect under the system bar is a nop, and the status row paints over both pages of a slide,
+    # htranslate's draw_curr slot (+0x1c) page_parallax.c's parallax_curr.
+    off = fileoff(stock, FULL_BLEED[0])
+    assert struct.unpack_from('<I', stock, off)[0] == FULL_BLEED[1] and struct.unpack_from('<I', demo, off)[0] == FULL_BLEED[2]
+    off = fileoff(stock, HTRANSLATE_VT + 0x1c)
+    assert struct.unpack_from('<I', stock, off)[0] == 0x696c40
+    assert struct.unpack_from('<I', demo, off)[0] == symbols(directory/'patch.elf')['parallax_curr']
     # The slide hint names a stock animator and gives it a duration (a missing one means stock's 500 ms).
     assert re.fullmatch(r'htranslate\(duration=\d+\)', SLIDE) and b'\0htranslate\0' in stock
     # The animated lookup pages need synchronous unwind.
@@ -437,15 +445,18 @@ def validate_assets(directory):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
     # Every stock UI asset with Chinese text is given in English (english_ui), the edited ones after their edit.
     ui = 'release/assets/default/raw/ui/'
-    chinese = {l.removeprefix('squashfs-root/'+ui) for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
+    # Every stock UI asset the image keeps (the stock EQ pages and STOCK_PAGES go): the build writes each one full-bleed
+    # (tools/ipod.py full_bleed), so each is a changed asset.
+    kept_ui = {l.removeprefix('squashfs-root/'+ui) for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
                if l.startswith('squashfs-root/'+ui) and l.endswith('.bin') and l.removeprefix('squashfs-root/') not in STOCK_EQ + STOCK_PAGES}
-    chinese = {rel for rel in chinese if CJK.search(read('stock.squashfs', ui+rel).decode('utf-8', 'replace'))}
+    chinese = {rel for rel in kept_ui if CJK.search(read('stock.squashfs', ui+rel).decode('utf-8', 'replace'))}
     assert chinese and {'testmode/test_key.bin', 'kb_default_t9.bin', 'dialog/search_dialog.bin'} <= chinese
     from theme import builtins, built_geometry
     GEOM = built_geometry(builtins())  # the set the build bakes: OLED's
     # every UI asset, and the stock list pages OLED's set changes (tools/ipod.py ui_pages)
     patched_ui = set(UI_ASSETS) | {p for p in STOCK_ROWS if patch_asset(p, stock_ui := read('stock.squashfs', ui+p), g=GEOM) != stock_ui}
-    assert set(changed) == {ui+p for p in patched_ui | chinese} | {
+    assert patched_ui | chinese <= kept_ui
+    assert set(changed) == {ui+p for p in kept_ui} | {
         'release/assets/default/raw/styles/'+p for p in AUDIT['styles']} | {
         xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C, *WEB} | {
         'usr/share/web/cgi-bin/%s.cgi' % n for n in ('create', 'delete', 'list', 'download', 'upload')} | {
@@ -793,6 +804,7 @@ def validate_assets(directory):
                 slots[id(c)] = (cx, 0, c[1][2], h)
                 cx += c[1][2] + gap
         for c in children: corners(short, c, x, y, window, slots.get(id(c)))
+    full_bleed_windows = 0
     for rel in paths:
         if rel in STOCK_EQ + STOCK_PAGES: continue
         original, new = read('stock.squashfs', rel), read('rootfs.squashfs', rel)
@@ -834,7 +846,16 @@ def validate_assets(directory):
             continue
         short = rel.split('/raw/ui/')[1]
         edited = patch_asset(short, original, g=GEOM) if short in patched_ui else original
-        assert new == (english_ui(short, edited) if short in chinese else edited), short
+        before_bleed = english_ui(short, edited) if short in chinese else edited
+        assert new == full_bleed(before_bleed, GEOM.bar), short
+        # Full-bleed (docs/oled-design.md#full-bleed): a window's top-level children sit bar px lower, so they stay on
+        # the screen rows they had under the status row; anything else (dialogs, the keyboard) is as it was.
+        built, pre = decode(new), decode(before_bleed)
+        if pre[0] == 'window':
+            assert [c[1][1] for c in built[3]] == [c[1][1] + GEOM.bar for c in pre[3]], short
+            full_bleed_windows += 1
+        else:
+            assert new == before_bleed, short
         if short not in UI_ASSETS:
             continue
         # The checks below are of the transform under OLED's grid; the grid's own measurements, of the pages as built,
@@ -1039,11 +1060,23 @@ def validate_assets(directory):
                 if 'font' in key or key == 'style': assert node[2][key] == value
         if short in ('folder_page.bin', 'localmusic_page.bin', 'localmusic/localclass_page.bin', 'localmusic/playlist_page.bin'):
             surface = next(n for n in root[3] if n[0] in ('list_view', 'table_view'))
-            assert surface[1][1:] == [0, 375, 320 - GEOM.bar], 'Lists must fill the client area'
+            assert surface[1][1:] == [0, 375, 320 - GEOM.bar], 'Lists must fill the page from the status row'
         # Corrupt inputs must be rejected, never silently patched.
         try: patch_asset(short, original[:-1]+b'x', GEOM)
         except ValueError: pass
         else: raise AssertionError('Accepted a changed asset')
+    # every window the image ships went through the shift above (a skipped asset would lower the count); the two stock
+    # windows patch_asset makes dialogs (MODAL_PAGES) keep their boxes
+    assert full_bleed_windows == sum(decode(read('rootfs.squashfs', ui+p))[0] == 'window' for p in kept_ui) > 0, full_bleed_windows
+
+    def built_page(short):
+        """A built UI asset in the rows of a window under the status row: the full-bleed shift (proven exact above)
+        taken off its top-level children, so the measurements below read as the grid defines them."""
+        root = decode(read('rootfs.squashfs', ui + short))
+        if root[0] == 'window':
+            for child in root[3]:
+                child[1][1] -= GEOM.bar
+        return root
     # The built list windows take the row height of the geometry set's pitch immediates (art pages take art_pitch),
     # and its rows fit.
     from theme import geometry
@@ -1074,7 +1107,7 @@ def validate_assets(directory):
         # Playlists' toolbar hides, stock's widgets alive for its rows' clicks, its list takes the bar's room with rows of
         # their own heights (no item_height forces them); More's rows start at the top.
         for short in ('localmusic/playlist_page.bin', 'localmusic/playlistsmore_page.bin'):
-            new = decode(read('rootfs.squashfs', ui + short))
+            new = built_page(short)
             nav = next(n for n in new[3] if n[2].get('name') == 'view_navbar')
             assert nav[2]['visible'] == 'false' and nav[2]['enable'] == 'false', short
             if short == 'localmusic/playlist_page.bin':
@@ -1084,10 +1117,10 @@ def validate_assets(directory):
                 assert [n[1][1] for n in new[3] if n[0] == 'list_item'] == [0, g.pitch]
         assert g.set_top + g.set_rows*g.set_row <= 320 - g.bar, g.name
         # Home's rows are the set's and fit.
-        listed = {n[2].get('name'): n for n in walk(decode(read('rootfs.squashfs', ui + HOME_PAGE)))}['list_view_home']
+        listed = {n[2].get('name'): n for n in walk(built_page(HOME_PAGE))}['list_view_home']
         assert listed[2]['item_height'] == str(g.home_row) and HOME_TOP + 7*g.home_row <= 320 - g.bar, g.name
         for rel in UI_ASSETS:
-            for n in walk(decode(read('rootfs.squashfs', ui + rel))):
+            for n in walk(built_page(rel)):
                 if n[0] != 'list_view' or n[2].get('default_item_height') != str(g.set_row): continue
                 if rel in NAVBAR_ONLY:  # settings lists: the grid's rows from its top, on to the window's foot
                     assert n[1] == [0, g.set_top, 375, fit_rows(g, g.set_top, g.set_row)] and 'item_height' not in n[2], (g.name, rel)
@@ -1100,7 +1133,7 @@ def validate_assets(directory):
         for rel in UI_ASSETS:  # every list box the transform resizes ends at the window's end
             if rel in NAVBAR_ONLY: continue
             was = {n[2].get('name'): n[1] for n in decode(read('stock.squashfs', ui + rel))[3]}
-            for n in decode(read('rootfs.squashfs', ui + rel))[3]:
+            for n in built_page(rel)[3]:
                 old = was.get(n[2].get('name'))
                 if n[0] in ('list_view', 'table_view') and old and old[1] in (50, 100) and n[1] != old:
                     ends[rel] = n[1][1] + n[1][3], n[1][3], page_rows(g, page_kind.get(rel, 'text'))[0]

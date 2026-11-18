@@ -673,6 +673,11 @@ KEYLOCK_LIT = (0x4f2728, 0x10400010, 0x10000010)
 # config_init stores SYSSET SCREENSAVER's 0 or 1 in g_screensaver_mode (sb $2); it stores 0 (sb $zero) whatever
 # the file says, so stock's wake never opens its lock window (docs/internals.md#screen-off-and-wake).
 SAVER_OFF = (0x504c78, 0xa0620000, 0xa0600000)
+# Full-bleed pages: window_manager_default_layout_child (0x699908) gives a normal window the screen when it is
+# "fullscreen" and the client rect under the system bar otherwise. Its branch to the client rect goes, so every page
+# takes the whole 375x320 screen without the fullscreen property, which paint_normal (0x69d538) reads to leave the bar
+# out: the bar still paints after the pages and before the dialogs, an overlay on the page (docs/oled-design.md#full-bleed).
+FULL_BLEED = (0x69997c, 0x1040001b, 0)
 # V1.36's volume_dialog_on_keyup leaves at once with the screen off (beqz g_backlight_status), so a dark wheel tick over the
 # volume dialog falls through to on_wm_keyup_fun, which opens "dialog/volume_dialog" again: navigator_to looks an open window
 # up by that path, never its name "volume_dialog", so every tick stacked one more dialog and none changed the volume. Each
@@ -1953,7 +1958,7 @@ FUNCTIONS = {
  # a window animator of the payload's own (art_zoom.c): stock's factory and window_animator_t with its vtable
  'window_animator_factory': ('void *', 'void'), 'window_animator_factory_register': ('int', 'void *, const char *, void *'),
  'window_animator_create': ('void *', 'int, const void *'),
- 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'),
+ 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'), 'htranslate_draw_curr': ('int', 'void *'),
  'widget_paint': ('int', 'void *, void *'),  # a widget painted into another's canvas (coverflow.c coverflow_home_strip)
  # Cover Flow's flip paints the tracks panel to a bitmap as stock's window snapshots do (coverflow.c flip_capture)
  'canvas_offline_create': ('void *', 'unsigned, unsigned, unsigned'),
@@ -2085,7 +2090,7 @@ FUNCTIONS = {
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
     # stock's htranslate window animator's own (its vtable, HTRANSLATE_VT): page_parallax.c runs each after its change
-    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90,
+    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90, 'htranslate_draw_curr': 0x696c40,
     "playlist_delete_click": 0x4b62c8,
     'volume_dialog_on_keyup': HOOKS['volume_dialog_on_keyup'][0],
     'keylock_rows': HOOKS['keylock_rows'][0],
@@ -2235,7 +2240,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
@@ -2449,10 +2454,11 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
-# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent
-# and draw_prev_window at +0x14 and +0x18, each pointed at page_parallax.c's, which runs stock's with its change (docs/internals.md#page-parallax).
+# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent,
+# draw_prev_window and draw_curr_window at +0x14, +0x18 and +0x1c, each pointed at page_parallax.c's, which runs stock's
+# with its change (docs/internals.md#page-parallax).
 HTRANSLATE_VT = 0x93b234
-HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'))
+HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'), (0x696c40, 'parallax_curr'))
 
 PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
@@ -2537,14 +2543,15 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # a prefix-trimmed typo cannot silently disable a screen this way.
     from ipod import (AUDIT, ARTIST_ALBUMS, SETTINGS_ICONS, inc, ui_pages,
                       QUIET_ICONS, quiet_icon, imagemagick, patch_code, CLOSE_LOAD, DUMMY_LOAD, patch_style, patch_word, branch, settings_icon,
-                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art)
+                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art, full_bleed)
     contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
     check(contexts, 'No navigation contexts audited')
-    windows, chinese = set(), set()  # chinese: the UI assets english_ui rewrites
+    windows, chinese, ui_bins = set(), set(), set()  # chinese: the UI assets english_ui rewrites; ui_bins: every one
     for line in run('unsquashfs', '-l', sq).splitlines():
         found = re.search(r'/raw/ui/(.+)\.bin$', line)
         if not found: continue
         rel = found.group(1)
+        ui_bins.add(rel + '.bin')  # each page is written full-bleed (full_bleed)
         data = cat('release/assets/default/raw/ui/'+rel+'.bin')
         if CJK.search(data.decode('utf-8', 'replace')) and 'release/assets/default/raw/ui/'+rel+'.bin' not in STOCK_EQ + STOCK_PAGES:
             chinese.add(rel + '.bin')  # the stock EQ pages go, and the pages not offered
@@ -2646,6 +2653,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
     patch_word(patched, *KEYLOCK_LIT, 'Buttons lock acts only with the screen off')
     patch_word(patched, *SAVER_OFF, "stock's lock screen stays off")
+    patch_word(patched, *FULL_BLEED, 'every page window takes the whole screen')
     patch_word(patched, *PREV_RESTART, 'Previous restarts the track from 3 s in')
     patch_word(patched, *VOL_DARK, 'The volume dialog steps with the screen off')
     for site in MORE_ARTIST_CLOSE:
@@ -2713,7 +2721,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         patch_word(patched, address, branch(0x04110000, address, syms['toolsIconvConvert']),
                    jal(ps['ringnav_cue_text']), 'CUE text read as UTF-8, GBK or Windows-1252')
     for slot, (old, name) in enumerate(HTRANSLATE_SLOTS):  # page push and pop with parallax (page_parallax.c)
-        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: the page under drifts and dims')
+        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: parallax, the status row on top')
     patch_word(patched, DIALOG_CLOSE, branch(0x04110000, DIALOG_CLOSE, syms['idle_add']),
                jal(ps['ringnav_dialog_close']), "a modal dialog's close skips one already gone")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,
@@ -3054,7 +3062,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     pages = ui_pages(cat, geom)
     patched_ui = list(pages)
     check(chinese, 'No Chinese UI text found')
-    assets = ['ui/'+rel for rel in patched_ui + sorted(chinese - set(patched_ui))] + ['strings/en_US.bin']
+    assets = ['ui/'+rel for rel in patched_ui + sorted(ui_bins - set(patched_ui))] + ['strings/en_US.bin']
     assets += ['styles/'+rel for rel in AUDIT['styles']]
     # images changed in place, so each keeps its inode metadata: settings icons pre-sized to the rows'
     # SET_ICON and the art placeholders
@@ -3062,6 +3070,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for rel in assets:
         kind, name = rel.split('/', 1)
         path = 'release/assets/default/raw/' + ('images/xx/'+name if kind == 'images' else rel)
+        if kind == 'ui' and name not in patched_ui and name not in chinese and not inode(p, path.encode()):
+            continue  # a page the build took out of the image (STOCK_PAGES)
         original = cat(path)
         data = (relabel(original) if kind == 'strings' else
                 patch_style(original, AUDIT['styles'][name]) if kind == 'styles' else
@@ -3070,6 +3080,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                 pages[name] if name in pages else original)
         if kind == 'ui' and name in chinese:
             data = english_ui(name, data)
+        if kind == 'ui':
+            data = full_bleed(data, geom.bar)
         target = out/rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
