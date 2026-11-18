@@ -364,7 +364,7 @@ class Page:
         self.widgets = {n: PAGE + 0x100 + 0x10 * i for i, n in enumerate(self.NAMES) if n not in missing}
         self.title = PAGE + 0x200
         self.rows, self.text, self.images, self.hidden, self.enabled, self.bound = {}, {}, {}, set(), set(), []
-        self.shows, self.moved = 0, []
+        self.shows, self.moved, self.values, self.kept = 0, [], {}, []
         self.name = C.create_string_buffer(name)
         fw.mock('window_manager', lambda *_: WM)
         fw.mock('window_manager_get_top_window', lambda *_: self.top)
@@ -383,11 +383,28 @@ class Page:
 
     def lookup(self, parent, name, *_):
         name = C.string_at(name).decode()
+        if name == '_setting_value' and parent in self.values:  # a key/value row's value (list_value)
+            return self.values[parent]
         return self.widgets.get(name, 0) if parent == PAGE else self.rows.get(name, 0) if parent == WM else 0
 
-    def row_text(self, maker, label=0x7400):
-        self.fw.fn(maker, None, C.c_void_p)(label)
-        return self.text[label]
+    def make(self, maker):
+        """A settings row's label in its button, written by maker: the label."""
+        label, button = C.create_string_buffer(0x60), C.create_string_buffer(0x60)
+        struct.pack_into('<Q', label, O['W_PARENT'], C.addressof(button))
+        value = C.create_string_buffer(0x60)
+        self.kept += [label, button, value]
+        self.values[C.addressof(button)] = C.addressof(value)
+        self.fw.fn(maker, None, C.c_void_p)(C.addressof(label))
+        return C.addressof(label)
+
+    def row(self, label):
+        """What the row reads: its title, then the value OLED's key/value row shows on the right column."""
+        button = struct.unpack_from('<Q', (C.c_char * 0x60).from_address(label), O['W_PARENT'])[0]
+        value = self.text.get(self.values[button])
+        return self.text[label] + (f': {value}' if value is not None else '')
+
+    def row_text(self, maker):
+        return self.row(self.make(maker))
 
     def open(self, mode=0):
         return self.fw.fn('xfade_open', C.c_int, C.c_void_p, C.c_void_p)(mode, None)
@@ -531,14 +548,12 @@ def test_the_slider_moves_only_to_a_new_value_and_its_own_move_is_no_release(fw)
 
 def test_the_rows_follow_the_page(fw):
     page = Page(fw, {'XFADE': 1, 'XFADESEC': 5})
-    rows = {maker: 0x7300 + 0x10 * i for i, maker in enumerate(('xfade_row', 'wheel_row', 'resume_row', 'night_row'))}
-    for maker, label in rows.items():
-        page.row_text(maker, label)
-    before = {label: page.text[label] for label in rows.values()}
+    rows = {maker: page.make(maker) for maker in ('xfade_row', 'wheel_row', 'resume_row', 'night_row')}
+    before = {label: page.row(label) for label in rows.values()}
     assert page.open() == 0
     page.fire('img_add', CLICK)
-    assert '6' in page.text[rows['xfade_row']] and page.text[rows['xfade_row']] != before[rows['xfade_row']]
-    assert all(page.text[rows[m]] == before[rows[m]] for m in ('wheel_row', 'resume_row', 'night_row'))
+    assert '6' in page.row(rows['xfade_row']) and page.row(rows['xfade_row']) != before[rows['xfade_row']]
+    assert all(page.row(rows[m]) == before[rows[m]] for m in ('wheel_row', 'resume_row', 'night_row'))
 
 
 def test_the_wheel_sets_the_sensitivity_a_ten_a_tick(fw):

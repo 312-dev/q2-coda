@@ -7,7 +7,7 @@ import ctypes as C
 import struct
 import time
 
-from conftest import O, mcl  # noqa: F401
+from conftest import O, STRIP_GO, mcl  # noqa: F401
 from test_coda_rc_shim import ONLINE, PAIR, PAIR_END, PEERS, Q2, card_route, peer
 from test_nav_library_pages import call, empty_state, signed, ui  # noqa: F401
 from test_nav_hold import recs, scratch, st  # noqa: F401
@@ -278,7 +278,7 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
     nav/lists.c reveal scrolled it into view and fit_top took the list on to the row's top (reproduced on the
     emulator). The row reaches only as far as the ring, so its foot stays inside the list end and nothing scrolls."""
     from test_nav_hold import use_set
-    oled = use_set(st, 'oled')
+    oled = use_set(st)
     Car(fw, ui, recs)
     page = open_page(fw, ui)
     # the page's list at OLED's y (its switch at the status row's foot, 58), as on the Q2, and the page built again
@@ -375,3 +375,13 @@ def test_pair_a_phone_follows_bluetooth_coming_on(fw, ui, mcl, recs):
     q2.tick()
     assert howto in painted
     assert howto_texts(fw, ui, howto)[3] == 'Pair a Q2 Muse > Bluetooth'
+
+
+def test_renaming_a_phone_gets_the_strip_s_arrow(fw, ui, mcl, recs):
+    """Car Remote's Rename Phone: the letter strip's return key is the arrow (the user's 22:14 ruling)."""
+    from test_search_strip import Ss
+    Car(fw, ui, recs, phones=paired('Pixel 10 Pro', A), online=A + b'\x00')
+    click(ui, open_page(fw, ui), 3)
+    click(ui, ui.top(), 3)  # Rename
+    ss = fw.var('search_strip__ss', Ss)
+    assert ss.page and ss.ret == STRIP_GO

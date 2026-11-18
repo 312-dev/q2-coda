@@ -14,12 +14,11 @@
 #include "playback.h"
 #include "xiph.h"
 
-enum { ARTIST_ALBUMS = 1, RATED_ALBUMS, ALBUM_TRACKS, PLAYLISTS }; /* cf.scoped */
-/* after the albums: an artist's All albums (two or more), the rated albums' Sort; none after the
- * library's, whose Sort and Refresh are Display settings' Coverflow Sort and Refresh Coverflow
- * (coverflow_sort_set, coverflow_refresh_art), nor after the playlists */
-#define CARDS                                                                                      \
-    (cf.scoped == ARTIST_ALBUMS ? deque_size(cf.albums) > 1 : cf.scoped && cf.scoped != PLAYLISTS)
+enum { RATED_ALBUMS = 1, ALBUM_TRACKS, PLAYLISTS }; /* cf.scoped */
+/* after the albums: the rated albums' Sort; none after the library's, whose Sort and Refresh are
+ * Display settings' Coverflow Sort and Refresh Coverflow (coverflow_sort_set,
+ * coverflow_refresh_art), nor after the playlists */
+#define CARDS (cf.scoped && cf.scoped != PLAYLISTS)
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
 typedef struct {
@@ -41,14 +40,13 @@ typedef struct {
     int titled;                  /* the album the captions name, + 1 */
     int offline;                 /* that album can't play now: its captions greyed (caption_mark) */
     unsigned saved_album, albums_gen; /* albums_gen: library_gen when albums was queried */
-    int screen, album, running, text_albums;
+    int screen, album, running;
     volatile int done, total, cancel;
-    /* Scoped (ARTIST_ALBUMS, RATED_ALBUMS, ALBUM_TRACKS or PLAYLISTS, else 0): an artist's albums
-     * (coverflow_artist), albums holding them, the rated ones (coverflow_rated), stock holding them
-     * in the library's order and sort their own order, one album's tracks alone
-     * (coverflow_goto_album), or the playlists, albums holding their containers
-     * (coverflow_playlists); all_albums, all_stock and all_sort the library's, back on close.
-     * No saved album; hearts gives a rated album's. */
+    /* Scoped (RATED_ALBUMS, ALBUM_TRACKS or PLAYLISTS, else 0): the rated albums
+     * (coverflow_rated), stock holding them in the library's order and sort their own order, one
+     * album's tracks alone (coverflow_goto_album), or the playlists, albums holding their
+     * containers (coverflow_playlists); all_albums, all_stock and all_sort the library's, back on
+     * close. No saved album; hearts gives a rated album's. */
     int scoped, all_sort;
     void *all_albums, *all_stock;
     int (*hearts)(void *);

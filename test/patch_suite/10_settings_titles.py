@@ -92,8 +92,7 @@ def tree(m,view):
             for i in m.nodes[view]['children']]
 # Stock's own lists under OLED's set take its settings rows, the same rule as any page of 78 px rows: Update Library's three, More's, each 32 px, its labels holding the
 # title role's font, the selection on the row. More's speed row keeps 78 px: its four 42 x 61 buttons don't fit, and set_child would hide them as leading images. Its icon
-# goes, its labels take the second-line role, in boxes that hold them, and its buttons stay stock's. With no set booted (SET0's code) More isn't a settings list: the row keeps
-# stock's shape. A switch row's click stays stock's button's.
+# goes, its labels take the second-line role, in boxes that hold them, and its buttons stay stock's. A switch row's click stays stock's button's.
 def stock_list(boot,default):
     m=SettingsMachine(); m.config.update(FLAT); m.layouts=0; boot(m); m.handlers[O['LIST_VIEW_LAYOUT']]='stock_list_layout'
     m.mock('widget_move_resize','image_set_draw_type')
@@ -122,7 +121,7 @@ item,button,icon,labels,images=speed_row(m,view)
 m.handlers[int(manifest['patch_symbols']['stock_playermore_trampoline'],16)]='stock_playermore'
 assert m.call(address=HOOKS['playermore_page_init'][0],args=(m.top,0,0,0),gap=0)==0; lay(m,view)
 assert geometry(m,ab)[3]==32 and geometry(m,plain)[3]==32 and geometry(m,item)[3]==78 and geometry(m,item)[1]==64
-OG=OLED['geoms']['oled']; TITLE_PX,META_PX=OLED['font_px[ROLE_TITLE]'],OLED['font_px[ROLE_META]']; SEL_IN=OLED['sel_inset']  # OLED's set and roles
+OG=OLED['geom']; TITLE_PX,META_PX=OLED['font_px[ROLE_TITLE]'],OLED['font_px[ROLE_META]']; SEL_IN=OLED['sel_inset']  # OLED's grid and roles
 assert geometry(m,ab_button)==(0,0,375,32) and geometry(m,label)[3]==32 and m.nodes[label]['style:normal:font_size']==TITLE_PX and geometry(m,sw)[3]==32
 assert geometry(m,button)==(20,0,335,70) and [geometry(m,i) for i in images]==[(x,9,42,61) for x in (120,177,231,283)] and all(m.nodes[i]['visible'] for i in images)
 sx=OG.text_x-20  # the set's text column, in the speed row's button at x 20 (navigation.c stock_more_speed)
@@ -185,45 +184,37 @@ for stock,want,keys in (('(null)','Unknown Artist',['player_unknown']),('Barones
     m=TitleMachine(page='artistinfo_page',cls=0xff01,rows=2); m.keys=[]; m.word(syms['g_local_classinfo_save'],0xff01)
     m.split=[m.song('Baroness')]; m.word(m.split[0]+O['REC_ALBUM_ARTIST'],m.string('Baroness'))
     m.u.mem_write(O['ARTIST_TITLE'],stock.encode()+b'\0')
+    m.top=m.node('window','x_page')  # over the page as its tabs load: stock's tabs, not the design's page (artist_local)
     for tab in (1,0): m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0)
     assert m.text(O['ARTIST_TITLE'])==want and m.keys==keys,(stock,m.text(O['ARTIST_TITLE']),m.keys)
 passed()
-m,view=stock_list(lambda _:None,78); item,button,icon,labels,images=speed_row(m,view)
-m.handlers[int(manifest['patch_symbols']['stock_playermore_trampoline'],16)]='stock_playermore'
-assert m.call(address=HOOKS['playermore_page_init'][0],args=(m.top,0,0,0),gap=0)==0; lay(m,view)
-assert m.nodes[icon]['visible'] and geometry(m,labels[0])==(72,12,40,20) and 'style:normal:font_size' not in m.nodes[labels[0]]; passed()
 # The selection reaches Queue's table rows at OLED's pitch; the chevrons of a list of one-line rows stay off it.
 qm=oled_on(Machine()); qw,qr,qe=qm.table_page(name='playerqueue_page'); qm.word(qw+O['ROW_HEIGHT'],32); qm.word(qw+O['W_W'],375)
 for i,(r,e) in enumerate(zip(qr,qe)): qm.word(r+O['W_Y'],i*32); qm.word(r+O['W_H'],32); qm.word(e+O['W_H'],32)
 qm.paint(qw); assert qm.selected(qw)==0 and qm.sel()[1::2]==(0,32) and not qm.icons; passed()
 # Stock's own table rows: Queue's, Go to's and Special Folders' titles find their face as they're bound, a CJK title in stock's, under OLED's set; Queue's alone goes to the
-# text column (the set's text_x, in its button at 20), its right edge kept. With no set booted (SET0's code) the bind is stock's and nothing else. A row's layout is the
-# compact one under OLED's set, stock's under SET0.
-for boot,booted_set in ((oled_on,True),(lambda _:None,False)):
-    m=Machine(); boot(m); m.mock('widget_set_text_utf8','widget_move_resize','widget_set_children_layout')
-    q=box(m,'hscroll_label','scrlabel_name',10,0,315,28); folder=box(m,'hscroll_label','listsscrlabel',128,0,140,28)
-    bind=lambda w,t: m.call(address=payload_syms['stock_row_text'],args=(w,m.string(t),0,0),gap=0)
-    assert bind(q,'Billie Jean')==0 and bind(folder,'Music')==0
-    assert m.nodes[q]['text']=='Billie Jean'
-    if booted_set:
-        sx=OG.text_x-20
-        assert geometry(m,q)==(sx,0,325-sx,28) and geometry(m,folder)==(128,0,140,28) and m.nodes[q]['style:normal:font_name']=='inter' and m.nodes[q]['style:normal:font_size']==TITLE_PX
-        m.nodes[q]['text']=''; bind(q,'\u5468\u6770\u502b'); assert m.nodes[q]['style:normal:font_name']=='default'
-    else: assert geometry(m,q)==(10,0,315,28) and 'style:normal:font_name' not in m.nodes[q]
-    row=m.node('button'); m.call(address=payload_syms['stock_set_row_layout'],args=(row,m.string('default(r=1,c=0,s=14)'),0,0),gap=0)
-    vtable=m.get(m.get(row+O['W_CHILDREN_LAYOUT'])+O['CHILDREN_LAYOUT_VTABLE'])
-    assert m.get(vtable+8)==payload_syms['compact_row_layout'] if booted_set else vtable==O['DEFAULT_LAYOUT_VTABLE']
+# text column (the set's text_x, in its button at 20), its right edge kept. A row's layout is the compact one.
+m=oled_on(Machine()); m.mock('widget_set_text_utf8','widget_move_resize','widget_set_children_layout')
+q=box(m,'hscroll_label','scrlabel_name',10,0,315,28); folder=box(m,'hscroll_label','listsscrlabel',128,0,140,28)
+bind=lambda w,t: m.call(address=payload_syms['stock_row_text'],args=(w,m.string(t),0,0),gap=0)
+assert bind(q,'Billie Jean')==0 and bind(folder,'Music')==0
+assert m.nodes[q]['text']=='Billie Jean'
+sx=OG.text_x-20
+assert geometry(m,q)==(sx,0,325-sx,28) and geometry(m,folder)==(128,0,140,28) and m.nodes[q]['style:normal:font_name']=='inter' and m.nodes[q]['style:normal:font_size']==TITLE_PX
+m.nodes[q]['text']=''; bind(q,'\u5468\u6770\u502b'); assert m.nodes[q]['style:normal:font_name']=='default'
+row=m.node('button'); m.call(address=payload_syms['stock_set_row_layout'],args=(row,m.string('default(r=1,c=0,s=14)'),0,0),gap=0)
+vtable=m.get(m.get(row+O['W_CHILDREN_LAYOUT'])+O['CHILDREN_LAYOUT_VTABLE'])
+assert m.get(vtable+8)==payload_syms['compact_row_layout']
 passed()
 # Queue's playing row: the build makes the red style white, so under a re-pitched set (OLED's) the row says so inline, red for the playing row, white (the ink) on any
-# other, each bind; stock's use_style call comes here. The style hook then treats it as any stock red. With no set booted (SET0) stock's call stays, no inline colour.
+# other, each bind; stock's use_style call comes here. The style hook then treats it as any stock red.
 assert struct.unpack_from('<I',demo,fileoff(demo,0x53aeac))[0]==0x0c000000|payload_syms['stock_row_style']>>2
-for boot,booted_set in ((oled_on,True),(lambda _:None,False)):
-    m=Machine(); boot(m); q=box(m,'hscroll_label','scrlabel_name',10,0,315,28); use=lambda n: m.call(address=payload_syms['stock_row_style'],args=(q,m.string(n),0,0),gap=0)
-    use('s_scrlabel_red24l'); on=m.nodes[q].get('style:normal:text_color'); use('s_scrlabel_white24l'); off=m.nodes[q].get('style:normal:text_color')
-    assert m.nodes[q]['style']=='s_scrlabel_white24l'
-    assert (on&0xffffffff,off&0xffffffff)==(color_t(O['STOCK_RED']),0xffffffff) if booted_set else (on,off)==(None,None)
+m=oled_on(Machine()); q=box(m,'hscroll_label','scrlabel_name',10,0,315,28); use=lambda n: m.call(address=payload_syms['stock_row_style'],args=(q,m.string(n),0,0),gap=0)
+use('s_scrlabel_red24l'); on=m.nodes[q].get('style:normal:text_color'); use('s_scrlabel_white24l'); off=m.nodes[q].get('style:normal:text_color')
+assert m.nodes[q]['style']=='s_scrlabel_white24l'
+assert (on&0xffffffff,off&0xffffffff)==(color_t(O['STOCK_RED']),0xffffffff)
 passed()
-# The playlist More page under a set without settings icons (OLED's): no 50 px icons on its 28 px rows, the text at the column, in the row's face. SET0 keeps them.
+# The playlist More page under a set without settings icons (OLED's): no 50 px icons on its 28 px rows, the text at the column, in the row's face.
 def pl_more(boot):
     m=Machine(); boot(m); m.handlers[int(manifest['patch_symbols']['stock_playlistsmore_trampoline'],16)]='stock_playlistsmore'
     b=[(box(m,'image',i,10,0,52,28),box(m,'hscroll_label',l,72,0,253,28)) for i,l in (('img_rename','label_rename'),('img_del','label_del'))]
@@ -233,49 +224,19 @@ def pl_more(boot):
 m,win,pl=pl_more(oled_on)
 for img,lab in pl: assert m.nodes[img]['visible']==0 and geometry(m,lab)[0]==OG.text_x-O['SET_STOCK_X'] and m.nodes[lab]['style:normal:font_size']==TITLE_PX
 passed()
-m,win,pl=pl_more(lambda _:None)
-for img,lab in pl: assert m.nodes[img].get('visible',1) and geometry(m,lab)[0]==72
-passed()
-# Rows at the top and bottom of the four visible slots: text bands, icons and the trailing
-# bitmaps' ink (switch_off/on span 0..50 x 13..38 of their 50px square; list_into and ticks fit
-# inside) stay clear of the rounded glass, and nothing overlaps.
-def check_row(m,item,slot):
-    top=30+m.get(m.get(m.get(item+O['W_PARENT'])+O['W_PARENT'])+O['W_Y'])+slot*SET['ROW']
-    for b in m.nodes[item]['children']:
-        bx,by,bw,bh=geometry(m,b)
-        assert (bx,by,bw,bh)==(0,0,375,geometry(m,item)[3])
-        icon=label=trail=None
-        for c in m.nodes[b]['children']:
-            x,y,w,h=geometry(m,c); kind=m.nodes[c]['type']
-            if kind=='image' and w==SET['ICON']:
-                icon=(x,y,w,h); box=(x,top+y,w,h)
-                assert (x,h)==(SET['ICON_X'],SET['ICON']) and y*2+h==bh and m.nodes[c]['draw_type']==O['IMAGE_DRAW_SCALE_DOWN']
-            elif kind=='image':
-                assert w==50 and x+w==375-SET['EDGE'], (x,w); trail=x; box=(x,top+y+(h-50)//2+13,50,25)
-            else:
-                label=(x,w); size=20 if h<30 else 24
-                box=(x,top+y+(h-size)//2,w,size)
-            x,y,w,h=box; inset=max(corner_inset(y),corner_inset(y+h))
-            assert inset<=x and x+w<=375-inset, (m.nodes[c]['type'],box,inset)
-        if icon and label: assert label[0]==icon[0]+icon[2]+SET['GAP']
-        elif label: assert label[0]==SET['TEXT_X']
-        if label and not trail: assert label[0]+label[1]==375-SET['TEXT_X']
-        if label and trail: assert label[0]+label[1]<=trail+30  # the chevron's glyph starts 20px in
 # A picker opened by a tap: its first paint comes with the pointer still down, which keeps other lists from recalling, but a
-# picker (Language, its stored row's select image) arrives on its option all the same, its set booted or not, so a Centre
+# picker (Language, its stored row's select image) arrives on its option all the same, so a Centre
 # there does not take the first row; another list starts at the top. Appearance's rows, settings rows of a set without
 # settings icons, hide their leading image.
 m=oled_on(Machine()); m.pressed=1; w,es=m.page_list(4,name='language_page'); m.nodes[es[2]]['children']=[m.node('image',image='select')]
 m.paint(w); assert m.selected(w)==2,m.selected(w)
 m=oled_on(Machine()); m.pressed=1; w,es=m.page_list(4,name='display_page'); m.paint(w); assert m.selected(w)==0,m.selected(w)
-m=Machine(); m.pressed=1; w,es=m.page_list(4,name='language_page'); m.nodes[es[2]]['children']=[m.node('image',image='select')]
-m.paint(w); assert m.selected(w)==2,m.selected(w)
 m,view=settings('display',default=32,sub=1,boot=oled_on); lay(m,view)
 assert not any(m.nodes[m.nodes[m.nodes[r]['children'][0]]['children'][0]]['visible'] for r in m.nodes[view]['children'])
 passed()
 # A stock row with a second text line under its title (Bluetooth's Quality, 0x4c39e8: the title at y 12, the
 # detail at y 44 of its 70 px body), under a set whose row is too short for both (OLED's 32), takes two rows, so
-# nothing overlaps the next row. Its one-line neighbours keep the set's row, and a row at SET0's height stays.
+# nothing overlaps the next row. Its one-line neighbours keep the set's row.
 def stacked_row(m,view):
     title,detail=m.node('hscroll_label'),m.node('hscroll_label')
     for c,box in ((title,(10,12,266,20)),(detail,(10,44,266,16))):
@@ -289,8 +250,7 @@ rows=[i for i in m.nodes[view]['children'] if m.nodes[i]['visible']]; hs=[geomet
 assert hs[1]==64 and set(hs[:1]+hs[2:])=={32},hs
 ys=[geometry(m,i)[1] for i in rows]; assert all(y+h==ny for y,h,ny in zip(ys,hs,ys[1:])),(ys,hs)
 _,ty,_,th=geometry(m,title); _,dy,_,dh=geometry(m,detail); assert 0<=ty and ty+th<=dy and dy+dh<=64,(ty,th,dy,dh)
-after=tree(m,view); assert lay(m,view)==0 and tree(m,view)==after  # a later layout changes nothing
-m,view=settings(0x4c617c); item,*_=stacked_row(m,view); assert lay(m,view)==0 and geometry(m,item)[3]==SET['ROW']; passed()
+after=tree(m,view); assert lay(m,view)==0 and tree(m,view)==after; passed()  # a later layout changes nothing
 # Its stock icon goes under OLED's set: 64 px is no Streaming row (52), the only one with an icon there. The text starts on
 # the set's text column less hscroll_label's 2 px margin, as a set with a right column has it (navigation.c set_text_x).
 assert OG.right_x; OLED_SET_TEXT=OG.text_x-2
@@ -309,30 +269,18 @@ for c in (title,detail): m.word(c+O['W_X'],52)
 m.nodes[b]['children'][:0]=[lead]; m.nodes[b]['children'].append(trail); assert lay(m,view)==0
 assert not m.nodes[lead]['visible'] and m.nodes[trail]['visible'] and geometry(m,item)[3]==64
 assert geometry(m,title)[0]==geometry(m,detail)[0]==OLED_SET_TEXT,(geometry(m,title),OLED_SET_TEXT); passed()
-# SET0's settings rows (no set booted): language, Date and Time, System settings, Wi-Fi and Display's lists stack SET_ROW rows, the
-# list at OLED's settings.rows top (theme_t.set_top, 0: navigation.c settings_layout).
-for builder in (0x4ca914, 0x4c617c, 0x4d3594, 0x4d5950, 'display'):  # language, Date and Time, System settings, Wi-Fi, Display
-    m,view=settings(builder); items=[i for i in m.nodes[view]['children'] if m.nodes[i]['visible']]
-    before=tree(m,view); assert lay(m,view)==0 and m.layouts==1
-    assert m.get(m.get(view+O['W_PARENT'])+O['W_Y'])==OLED['set_top']
-    assert [geometry(m,i)[1] for i in items]==[SET['ROW']*k for k in range(len(items))], builder  # 78px items too
-    assert all(geometry(m,i)[3]==SET['ROW'] for i in items)
-    for item in items: check_row(m,item,0); check_row(m,item,SET['ROWS']-1)
-    after=tree(m,view); assert after!=before
-    assert lay(m,view)==0 and tree(m,view)==after, builder  # a later layout changes nothing
-    passed()
-# A list whose default_item_height is not SET_ROW (local pages, Home) keeps its rows as built.
+# A list whose default_item_height is no settings row (local pages, Home) keeps its rows as built.
 m,view=settings(0x4d3594,default=72); before=tree(m,view); lay(m,view); after=tree(m,view)
 assert [r[1] for r in after]==[r[1] for r in before] and all(r[0][3]==72 for r in after); passed()
-# OLED's own set (oled/theme.xml geometry: tools/theme.py geometry_sets), written by the first system_bar load as
-# theme_boot does on a unit; THEME 3 stored, as on any unit past its migration, so no preset is applied.
-OLT=theme_builtins()[0]; OLG=next(g for g in geometry_sets(theme_builtins()) if g.name=='oled')
-def oled_set(m,fail=lambda page:False):  # fail(page): the RWX mprotects that answer EACCES
-    m.config.setdefault('THEME','3'); m.record_syscalls(fail); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+# OLED's own set (oled/theme.xml geometry, the one the build bakes: tools/theme.py built_geometry). oled_set: the first
+# system_bar load, as on a unit, with THEME 3 stored, as on any unit past its migration, so no preset is applied.
+OLT=theme_builtins()[0]; OLG=OLED_G
+def oled_set(m):
+    m.config.setdefault('THEME','3'); m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0); return m
 # OLED's settings rows: set_row from the list's top (set_top 0; its list is found by the set's row), stock's icons hidden
-# (set_icon 0), the text's box at text_x less hscroll_label's 2 px margin (navigation.c set_text_x); a SET0 68 px list
-# is not a settings list on that set.
+# (set_icon 0), the text's box at text_x less hscroll_label's 2 px margin (navigation.c set_text_x); a list of stock's
+# 68 px settings rows (SET_ROW) is not a settings list on that set.
 for builder in (0x4ca914, 0x4d3594, 'display'):  # language, System settings, Display
     CONFIG.clear(); m,view=settings(builder,default=OLG.set_row,boot=oled_set); items=[i for i in m.nodes[view]['children'] if m.nodes[i]['visible']]
     assert lay(m,view)==0 and m.get(m.get(view+O['W_PARENT'])+O['W_Y'])==OLG.set_top
@@ -346,21 +294,21 @@ passed()
 CONFIG.clear(); m,view=settings(0x4d3594,boot=oled_set); before=tree(m,view); lay(m,view)
 after=tree(m,view); assert [r[1] for r in after]==[r[1] for r in before] and all(r[0][3]==SET['ROW'] for r in after); passed()  # rows as built, stacked at the list's 68
 # A 78px item some other builder made (no stock settings button) keeps its height and children.
-m,view=settings(0x4d3594); odd=m.node('list_item'); other=m.node('button')
+CONFIG.clear(); m,view=settings(0x4d3594,default=OLG.set_row,boot=oled_set); odd=m.node('list_item'); other=m.node('button')
 m.nodes[odd]['children']=[other]; m.word(odd+O['W_H'],78); m.word(odd+O['W_W'],0)
 for k,v in (('W_X',8),('W_Y',0),('W_W',359),('W_H',70)): m.word(other+O[k],v)
 m.nodes[view]['children'].append(odd); lay(m,view)
 assert geometry(m,odd)[3]==78 and geometry(m,other)==(8,0,359,70); passed()
-# The wheel walks the laid-out rows, OLED's flat bar spans the whole 68px row less the selection's inset each side
+# The wheel walks the laid-out rows, OLED's flat bar spans the whole set_row row less the selection's inset each side
 # (oled/theme.xml list.selection), the list scrolls to keep the row in view, and Centre and a tap reach the same button.
-m,view=settings(0x4d3594,flat=True); lay(m,view); items=m.nodes[view]['children']
+CONFIG.clear(); m,view=settings(0x4d3594,default=OLG.set_row,boot=oled_set,flat=True); lay(m,view); items=m.nodes[view]['children']
 buttons=[m.nodes[i]['children'][0] for i in items]
 m.paint(view); assert m.selected(view)==0
 for k in range(1,len(items)):
     m.call(); m.paint(view); i=k; assert m.selected(view)==i
     y=geometry(m,items[i])[1]-signed(m.get(view+O['SCROLL_Y']))
-    assert 0<=y and y+SET['ROW']<=SET['ROWS']*SET['ROW'], (k,y)
-    assert m.bands and m.sel()[2:]==(375-2*OLT['sel_inset'],SET['ROW'])
+    assert 0<=y and y+OLG.set_row<=SET['ROWS']*SET['ROW'], (k,y)
+    assert m.bands and m.sel()[2:]==(375-2*OLT['sel_inset'],OLG.set_row)
 assert m.confirm()==11 and m.dispatched()[0][1]==buttons[-1]; passed()
 m.click(buttons[2]); assert m.selected(view)==2; passed()
 
@@ -410,17 +358,16 @@ am.word(al+O['W_H'],50); am.call(address=HOOKS['widget_on_paint_background'][0],
 am=oled_set(Machine()); al,ap,asort,abar=action_page(am,sorts=False)
 assert boxof(al)==(OLG.text_x+28,0,280,OLG.action_row) and boxof(ap)==(0,0,300,OLG.action_row); passed()  # Recently Added's has no Sort
 # On OLED's set the selection's scroll stops where list_end says, a row of the client under the bar (below it the glass
-# hides a row's text), and a list_fit view stops with a row's top at its own (navigation.c sel_height, fit_top): the
-# wheel's last row ends there, past stock's own end. A list lower in its window stops at the same screen row. Unbooted
-# (SET0, no list_end), stock's end.
-for boot,ly in ((1,0),(1,32),(0,0),(0,32)):
-    lm=Machine(); boot and oled_set(lm)
+# hides a row's text), and a view stops with a row's top at its own (navigation.c sel_height, fit_top): the
+# wheel's last row ends there, past stock's own end. A list lower in its window stops at the same screen row.
+for ly in (0,32):
+    lm=oled_set(Machine())
     lw,les=lm.page_list(14,height=294-ly,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.word(lw+O['W_Y'],ly); lm.paint(lw)
     tops=[]
     for _ in range(16):
         lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
-    lend=-(-(672-(OLG.list_end-ly))//48)*48 if boot else 672-294+ly  # the first 48 px row's top at or past the end
-    assert max(tops)==lend,(boot,ly,max(tops),lend)
+    lend=-(-(672-(OLG.list_end-ly))//48)*48  # the first 48 px row's top at or past the end
+    assert max(tops)==lend,(ly,max(tops),lend)
 passed()
 # The status row names a payload page by its 48 px caption, the first in any of the window's children (Games' list follows
 # its empty sheet). An app's page rebuilds its caption under the live window; the bar's new text is forced on to the panel
@@ -479,15 +426,14 @@ for fname in ('list_folder','list_song'):
 fa=ftile('file:///mnt/mmc/.downpic/fd1.jpg'); assert fa(0,0)==0 and fa(51,26)==fa(26,0)==255
 for fname in ('list_tf','list_album'): fa=ftile(fname); assert fa(0,0)==fa(51,26)==255,fname
 passed()
-# With no row to select the wheel scrolls the view itself: to its own end, or on OLED's set (list_fit) until the
-# content's foot is on the list end, y 282, as a drag stops (navigation.c max_top).
-for boot in (1,0):
-    lm=Machine(); boot and oled_set(lm)
-    lw,les=lm.page_list(14,height=294,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.nodes[lw]['children']=[]; lm.paint(lw)
-    tops=[]
-    for _ in range(40):
-        lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
-    assert max(tops)==(672-OLG.list_end if boot else 672-294),(boot,max(tops))
+# With no row to select the wheel scrolls the view itself, on OLED's grid until the content's foot is on the
+# list end, as a drag stops (navigation.c max_top).
+lm=oled_set(Machine())
+lw,les=lm.page_list(14,height=294,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.nodes[lw]['children']=[]; lm.paint(lw)
+tops=[]
+for _ in range(40):
+    lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
+assert max(tops)==672-OLG.list_end,max(tops)
 passed()
 # Text on the bar is sel_text, white, whatever the row's own ink.
 sk=Machine(); sw,srows=sk.page_list(3); slabels=[]
@@ -575,18 +521,17 @@ def font_row(setup,text):
     assert k.call(address=0x4a7f44,args=(w,0,0,0))==0
     button,=[n for n,v in k.nodes.items() if v['type']=='button']
     native_row_layout(k,button)
-    kids=k.nodes[button]['children']  # the title as compact_row_layout finds it (check_title_bounds' rule)
+    kids=k.nodes[button]['children']  # the title as compact_row_layout finds it: the first hscroll_label, or the view holding one
     text=next(c for c in kids if k.nodes[c]['type']=='hscroll_label' or any(k.nodes[t]['type']=='hscroll_label' for t in k.nodes[c]['children']))
     return k,button,next((c for c in k.nodes[text]['children'] if k.nodes[c]['type']=='hscroll_label'),text)
 TFACE,TPX=FACE_NAMES[OLT['font[ROLE_TITLE]']],OLT['font_px[ROLE_TITLE]']
 INTER_PCT=FACES[TFACE].fallback_pct; CJK=('default',(TPX*INTER_PCT+50)//100)
-for setup in (None,oled_set):
-    fk,fb,ft=font_row(setup,'Title')
-    assert [(fk.nodes[ft][f'style:{s}:font_name'],fk.nodes[ft][f'style:{s}:font_size']) for s in STATES]==[(TFACE,TPX)]*3
-    fk.calls=[]; native_row_layout(fk,fb); assert not [c for c in fk.calls if c[0]=='widget_set_prop_str']
-    for text in ('Навстречу ветру','Moscow Москва'):
-        fk,fb,ft=font_row(setup,text); assert [(fk.nodes[ft][f'style:{s}:font_name'],fk.nodes[ft][f'style:{s}:font_size']) for s in STATES]==[(TFACE,TPX)]*3,text
-    fk,fb,ft=font_row(setup,'日本語 Title'); assert (fk.nodes[ft]['style:normal:font_name'],fk.nodes[ft]['style:normal:font_size'])==CJK  # one face a label: its Latin letters too
+fk,fb,ft=font_row(oled_set,'Title')
+assert [(fk.nodes[ft][f'style:{s}:font_name'],fk.nodes[ft][f'style:{s}:font_size']) for s in STATES]==[(TFACE,TPX)]*3
+fk.calls=[]; native_row_layout(fk,fb); assert not [c for c in fk.calls if c[0]=='widget_set_prop_str']
+for text in ('Навстречу ветру','Moscow Москва'):
+    fk,fb,ft=font_row(oled_set,text); assert [(fk.nodes[ft][f'style:{s}:font_name'],fk.nodes[ft][f'style:{s}:font_size']) for s in STATES]==[(TFACE,TPX)]*3,text
+fk,fb,ft=font_row(oled_set,'日本語 Title'); assert (fk.nodes[ft]['style:normal:font_name'],fk.nodes[ft]['style:normal:font_size'])==CJK  # one face a label: its Latin letters too
 # One label from Latin to CJK and back: the answer changes with the text, so nothing stale stays.
 fw=fk.node('hscroll_label',text='Songs'); fl=lambda t,want: (fk.nodes[fw].__setitem__('text',t),fk.call(address=payload_syms['theme_font'],args=(fw,0,-2,0),gap=0),[(fk.nodes[fw][f'style:{s}:font_name'],fk.nodes[fw][f'style:{s}:font_size']) for s in STATES]==[want]*3)[-1]
 assert fl('Songs',(TFACE,TPX)) and fl('歌',CJK) and fl('Песни',(TFACE,TPX)) and fl('Songs',(TFACE,TPX)); passed()
@@ -624,17 +569,17 @@ hk=QueueMachine(); home=asset_tree(hk,HOME_PAGE)
 hk.call(address=HOOKS['home_page_init'][0],args=(home,0,0,0),gap=0)
 labels=[n for n,v in hk.nodes.items() if v['type']=='hscroll_label' and v.get('style:normal:font_name')]
 assert labels and {(hk.nodes[l]['style:normal:font_name'],hk.nodes[l]['style:normal:font_size']) for l in labels}=={(FACE_NAMES[OLT['font[ROLE_HOME]']],OLT['font_px[ROLE_HOME]'])}; passed()
-# The fast-scroll letter (draw_centred) takes the list title face (theme_face), on OLED's set or not.
-for boot in (0,1):
-    lm=Machine(); boot and oled_set(lm); lm.word(lm.canvas+O['CANVAS_ALIGN_V'],2); lm.word(lm.canvas+O['CANVAS_ALIGN_H'],3)
-    lw,les=lm.page_list(40,extent=40*48,name='allmusic_page')
-    for e in les: lm.nodes[e]['text']='row'
-    lm.paint(lw,gap=0)
-    for _ in range(4): lm.call(gap=100)
-    lm.paint(lw,gap=0); assert [l['font'][0] for l in lm.letters]==[TFACE],(boot,lm.letters)
+# The fast-scroll letter (draw_centred) takes the list title face (theme_face).
+lm=oled_set(Machine()); lm.word(lm.canvas+O['CANVAS_ALIGN_V'],2); lm.word(lm.canvas+O['CANVAS_ALIGN_H'],3)
+lw,les=lm.page_list(40,extent=40*48,name='allmusic_page')
+for e in les: lm.nodes[e]['text']='row'
+lm.paint(lw,gap=0)
+for _ in range(4): lm.call(gap=100)
+lm.paint(lw,gap=0); assert [l['font'][0] for l in lm.letters]==[TFACE],lm.letters
 passed()
-# The scrubber's fill is OLED's accent whatever ACCENT, a key OLED does not read, holds; a scrub's press (Centre, one
-# press) takes it off and the next puts it back; a touch keeps it in every state, and no state gets a knob.
+# The scrubber's fill is OLED's accent whatever ACCENT, a key OLED does not read, holds; a scrub (Centre, one press, the
+# next ends it) keeps it, the status row's grid marking the scrub with paint_scrubber's knob (np_bar.c np_fill); a touch
+# keeps it in every state, and no state gets a knob.
 CONFIG.clear(); CONFIG.update(ACCENT='3'); m=scrub_page()
 assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); passed()
 CONFIG.clear(); m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
@@ -642,13 +587,13 @@ m.slider=m.node('slider','slider_play',max=225,value=100)
 m.win=m.top=m.node('window','playing_page',[m.slider,m.node('label','label_playtime')]); m.word(m.win+O['W_PARENT'],m.wm)
 m.call(address=playing,args=(m.win,7,0,0),gap=0)
 assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); assert m.call(O['KEY_CENTER'],gap=1000)==11
-assert m.nodes[m.slider][FG]==-1; assert m.call(O['KEY_CENTER'],gap=1000)==11; assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2]))
+assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); assert m.call(O['KEY_CENTER'],gap=1000)==11; assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2]))
 assert {m.nodes[m.slider][f'style:{s}:fg_color'] for s in ('normal','pressed','over','focused')}=={m.nodes[m.slider][FG]}; passed()  # a touch keeps the accent
 assert all(m.nodes[m.slider][f'style:{s}:icon']==0 for s in ('normal','pressed','over','focused','disable')); passed()  # no knob: stock's default slider style would supply rounded_n/_o/_p
 
-# Home at init: Split gives the menu HOME_SPLIT_W (unbooted, SET0's split_row) and shows the art; Full widens the list to
-# the screen and its rows' tap targets to the theme's home.rows full_row, and hides it.
-for config,listw,roww,shown in (({'HOME':'1'},375,OLT['home_full_row'],0),({},O['HOME_SPLIT_W'],O['HOME_SPLIT_W'],1)):
+# Home at init: Split gives the menu the set's split_row and shows the art; Full widens the list to the screen and its
+# rows' tap targets to the theme's home.rows full_row, and hides it.
+for config,listw,roww,shown in (({'HOME':'1'},375,OLT['home_full_row'],0),({},OLG.split_row,OLG.split_row,1)):
     CONFIG.clear(); CONFIG.update(config); m=CoverflowMachine(); m.open()
     rowsw=[m.get(w+O['W_W']) for w in [m.list,*m.imgs]]
     assert rowsw==[listw]+[roww]*len(HOME_ROWS) and m.nodes[m.art].get('visible',1)==shown,(config,rowsw); passed()
@@ -870,7 +815,7 @@ def stock(keys,**flags):
     return out
 m=audible(Machine()); m.page('playing_page')
 assert [tick(m,key) for key in (NEXT,PREV,NEXT)]==stock((NEXT,PREV,NEXT))==[1,1,1] and m.ret==0; passed()
-m=audible(scrub_page()); assert m.call(O['KEY_CENTER'],gap=1000)==11 and m.nodes[m.slider][FG]==-1; debounced(m)  # one press scrubs; the press's stock wheel lockout runs out
+m=audible(scrub_page()); assert m.call(O['KEY_CENTER'],gap=1000)==11; debounced(m)  # one press scrubs (the ticks below move the value); the press's stock wheel lockout runs out
 assert [tick(m,gap=100) for _ in range(3)]==stock((NEXT,)*3)==[1,1,1] and m.nodes[m.slider]['value']==130; passed()
 m=audible(CoverflowMachine()); m.open()
 assert [tick(m,gap=20) for _ in range(2)]==[1,1] and slide(m,m.slide)[3]==120; passed()

@@ -2553,7 +2553,8 @@ def test_a_reboot_for_bluetooth_abnormal_leaves_a_crash_log(fw, tmp_path):
     caller, rest = cmd[len(head):].split('"', 1)
     assert re.fullmatch(r'[0-9a-f]+', caller)
     assert rest == ('; echo "== dmesg"; dmesg | tail -n 200; '
-                    '[ -f /tmp/q2-demo.err ] && { echo "== stderr"; tail -n 60 /tmp/q2-demo.err; }; } '
+                    '[ -f /tmp/q2-demo.err ] && { echo "== stderr"; '
+                    'cat /tmp/q2-demo.err.1 /tmp/q2-demo.err 2>/dev/null | tail -n 60; }; } '
                     '> /mnt/data/q2-crash.log.tmp 2>&1; mv /mnt/data/q2-crash.log.tmp /mnt/data/q2-crash.log; sync')
     # the command under sh: dmesg a stand-in of 250 lines, the paths moved here
     bin, err, uptime, log = tmp_path/'bin', tmp_path/'q2-demo.err', tmp_path/'uptime', tmp_path/'q2-crash.log'

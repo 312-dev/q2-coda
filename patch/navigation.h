@@ -130,10 +130,9 @@ typedef struct {
 #define SVC_PROP "ringnav_svc"
     void *sc_check[SVC_MAX]; /* the Configuration pages' switch labels, by service, while shown */
     int svc_n;               /* the card apps Streaming listed at its last build */
-    /* Ratings (ratings.c keeps the rest): Now Playing's window and the window the picker is up on
-     * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
-     */
-    void *rate_win, *rate_on;
+    /* Ratings (ratings.c keeps the rest): Now Playing's window; the page a Ratings list or Long
+     * Songs opened, with its tracks (page_tracks). */
+    void *rate_win;
     int empty_kind; /* the empty Library list empty_class closes and opens the empty state for */
     void *rt_page, *rt_list;
     int dark; /* 1: the backlight was off at the last UI loop pass; 2: a centre press woke it */
@@ -149,10 +148,7 @@ typedef struct {
         charge_held, artist_cf, year_old, resume, artist_az, hold_home, standby_limit, eq_output,
         smart_wifi, big_library, playlist_cf, scan_durations, cf_position;
     void *pod_label[POD_COUNT];
-    void *art_cf_win, *art_cf_list; /* the artist page given its Coverflow, the albums pending */
-    void *art_cf_veil;              /* the artist page unseen until they show, and its anim_hint */
-    char art_cf_hint[64];
-    unsigned art_cf_timer;
+    char art_cf_hint[64]; /* the page cf_veil hides: its anim_hint */
     unsigned wake_at; /* Wake: Double press, the screen-off centre press a second one must follow */
     unsigned woke_at; /* the centre press that woke the screen, then its first lit loop pass */
     unsigned return_at;          /* chord_gate: Return's press while held, else 0 */
@@ -187,7 +183,7 @@ typedef struct {
      * top window title_win and, when a label holds it, title_lbl (both found once per window). */
     void *bar_bt, *bar_wifi, *bar_pct, *bar_slot, *bar_icon, *bar_idle, *bar_state, *bar_eq,
         *bar_title, *title_win, *title_lbl,
-        *action_view, /* Songs' action bar on title_win, under a set with action_row */
+        *action_view, /* Songs' action bar on title_win (the set's action_row) */
         /* a shuffle_row theme: the action bar the wheel's selection is on (else 0), the list under
          * it, and which of its stops: SHUFFLE_STOP or SORT_STOP (navigation.c shuffle_key) */
         *shuffle_on, *shuffle_list;
@@ -268,8 +264,7 @@ typedef struct {
         reduce_motion,   /* Reduce Motion, IPOD REDUCEMOTION (ui_kit.c motion_reduced) */
         clicker,         /* the Clicker's output (clicker.c), IPOD CLICKER */
         theme_booted,    /* theme_boot ran (ringnav_ui_load) */
-        raw_ink,         /* a final colour's draw: ui_ink leaves it alone */
-        geom;            /* the geometry set theme_boot wrote; 0, SET0, until then */
+        raw_ink;         /* a final colour's draw: ui_ink leaves it alone */
     int own[THEME_KEYS]; /* the theme's own keys' values (theme_keys[], tools/theme.py), read after
                             the payload's */
     unsigned keep_lit_at;
@@ -379,7 +374,6 @@ unsigned put_num(unsigned *s, unsigned v);
 int clock_due(const void *info);
 int bar_repaint(const void *info);
 void clock_text(void *label, int negative, int t);
-void label_font(void *w);
 void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into);
@@ -592,7 +586,7 @@ void wheel_sb_arm(void *list);
 unsigned wheel_sb_alpha(void *list);
 /* The status battery's key (navigation.c battery_now): the level from bit 4, then what the cable
  * does. CHARGING: green, the bolt inside; PLUGGED: on a cable, full or held at Charge Limit, green
- * with no glyph; WEAK: the charger too weak (charging.c charge_weak), orange, the warning inside;
+ * with the plug inside; WEAK: the charger too weak (charging.c charge_weak), orange, the warning inside;
  * LOW: stock's low icon (the painters' red is the level under BATT_LOW_PCT). */
 #define BATT_KEY_LOW 1u
 #define BATT_KEY_CHARGING 2u
@@ -701,7 +695,7 @@ void paint_art(void *w, void *canvas, const char *name, int x, int y); /* naviga
 
 /* np_bar.c */
 int np_sync(void *top);
-void bar_title(void *bar, void *top);
+void bar_title(void *bar);
 void slider_fill(void *slider, unsigned color);
 void slider_knobless(void *slider);
 void np_theme(void);
@@ -821,6 +815,10 @@ int battery_key(void *top, unsigned key); /* the wheel along the readings, Centr
 /* system.c */
 void power_poll(void);
 void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
+/* ulog.c: a line in the unified log through demo's stderr (docs/internals.md#unified-log): level E, W or
+ * I, src ui, player, usb, bt or wifi; and a clean end's snapshot, waited for (power-off, restart, update) */
+void ulog(char level, const char *src, const char *msg);
+void ulog_end(const char *why);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
@@ -835,9 +833,11 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
+int ringnav_platform_init(void), stock_platform_init_trampoline(void);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
@@ -876,7 +876,6 @@ int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
 unsigned rate_song_key(void *r); /* a server song's offline copy: its row's */
 int rate_fav(void *r);           /* My Fav, a server song's offline copy by its row */
-int rate_key(void *top, unsigned key);
 int rate_open(void);
 int rate_car(int n);       /* Car Remote's Rate: n hearts for the playing track; 1 kept */
 int rate_car_hearts(void); /* the playing track's 0-5 hearts, -1 when it can't be rated */
@@ -981,6 +980,7 @@ void search_strip_text(const char *title, const char *text, int max,
 void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
 void search_strip_secret(void);             /* ... the next one's text a password, as dots */
 void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
+void search_strip_return(int kind);         /* ... the next one's return mark, STRIP_* (peq.h) */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
 int playlist_query(void *dest); /* dest's songs in its own order, for staged */
@@ -1009,7 +1009,6 @@ void clicker_step(void);
 int clicker_route(int listening);
 /* menu_modal.c: the menu sheet (docs/oled-design.md#menus) */
 enum { MM_ACTION, MM_SETTING, MM_CHOICE, MM_SWITCH }; /* modal_row's how */
-int modal_set(void);
 int modal_row_w(void);
 void *modal_gap(void *view);
 void modal_row(void *row, void *label, const char *icon, const char *value, int how);

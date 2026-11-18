@@ -1,5 +1,5 @@
 <!-- Theme: OLED (docs/ipod.md#theme), built to docs/oled-design.md: the one built-in theme. A black screen, white
-     Inter in sentence case, one blue accent. It states its own grid as the oled geometry set and draws its own art
+     Inter in sentence case, one blue accent. It states its own grid (its <geometry>) and draws its own art
      (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which scales a face so that its ascent less its
      descent is the size: Inter's line is 1.21 em, so the design's 20 px type is 24 here, its 15 px 18, its 22 px 27.
      Its numbers that track patch/offsets.inc (Home's Full label end, the scheme colours, Cover Flow's CF_* and the
@@ -8,7 +8,7 @@
   <!-- The grid (oled-design.md Corners and Spacing): a status row centred on y 23 in a 58 px bar drawn black, so
        no band shows; the page's title from x 62, the play state and battery ending 62 px from the right edge, inside
        the glass's top curve (STATUS_ROW_INSET, patch/offsets.inc). Then
-       32 px rows from y 58, the text at x 24, seven of them: list_end and list_fit end the list at y 282, the
+       32 px rows from y 58, the text at x 24, seven of them: list_end ends the list at y 282, the
        strip below stays black and the selection never lands there; a list scrolls a row at a time. Songs and Folder's
        rows are one 32 px line; Albums, Playlists and Search are two lines at 52 px, four to a page (a list box holds whole rows): 40 px
        art at x 24, the text at 72 (list.art below). Text y puts each line where the design's baselines are. Home in
@@ -18,19 +18,18 @@
        under the status row's play state and battery (each of their pixels inked white or black, whichever stands
        out more against the art under it: coverflow.c home_ink), the glass rounding its corners, panning slowly across its 110 % zoom with 2 % of the zoom kept clear at each edge, so a
        cover's own border never shows (coverflow.c drift_axis). -->
-  <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
+  <geometry bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
             count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
             song_meta_y="8" playlist_pitch="52" set_row="32" set_top="0" set_rows="7"
             set_icon="0" stream_row="32" bar_px="18" batt_w="25" batt_h="12"
-            text_x="24" list_end="224" list_fit="1" status_y="23" right_x="28"
+            text_x="24" list_end="224" status_y="23" right_x="28"
             action_row="32" home_row="32" home_lib="0"
-            stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32" toolbar="0"
+            stock_row="32" stock_body="32" stock_title_y="0" stock_title_h="32"
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
-            split_row="204" split_art="196" split_art_up="58" split_inset="2" modal="1"/>
-  <geometry set="oled"/>
+            split_row="204" split_art="196" split_art_up="58" split_inset="2"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
        turns muted); the light half on white paper with black ink. -->

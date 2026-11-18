@@ -392,64 +392,19 @@ def invalidated(q2):
     return [args[:2] for _, args in q2.fw.calls('widget_invalidate_force')]
 
 
-# The boot and the theme (docs/internals.md#themes): OLED boots on its own geometry set, theme_boot writing it into
-# stock's text once, from the first window's load.
+# The boot and the theme (docs/internals.md#themes): theme_boot, from the first window's load, migrates a unit an older
+# build left on a retired theme.
 
-class Site(C.Structure):
-    _fields_ = [('addr', C.c_uint), ('group', C.c_ubyte)]
-
-
-def geometry(fw):
-    """The sets' names, each set's value per group, and the immediates (boot_sites) theme_boot writes them to."""
-    sets = fw.sizes['geom_names'] // C.sizeof(C.c_void_p)
-    names = [n.decode() for n in fw.var('geom_names', C.c_char_p * sets)]
-    values = fw.var('boot_values', (C.c_ushort * (fw.sizes['boot_values'] // 2 // sets)) * sets)
-    sites = fw.var('boot_sites', Site * (fw.sizes['boot_sites'] // C.sizeof(Site)))
-    return names, values, sites
-
-
-HIGH = 0x2405  # an immediate's other half (addiu's opcode and registers), which no set touches
-
-
-def boot(q2, refuse=0):
-    """Power-on up to the first window: stock's text as built, each site holding SET0's value (tools/ipod.py bakes
-    SET0 into the rows), then application_init's first window, the status bar, loads (ringnav_ui_load). refuse:
-    which RWX mprotect fails, 1 the first."""
-    names, values, sites = geometry(q2.fw)
-    for s in sites:
-        C.c_uint.from_address(s.addr).value = HIGH << 16 | values[0][s.group]
-    q2.protect = []
-    def mprotect(addr, n, prot, *_):
-        q2.protect.append((addr, n, prot))
-        return 1 if prot == 7 and [p for _, _, p in q2.protect].count(7) == refuse else 0
-    q2.fw.mock('theme_mprotect', mprotect)
+def boot(q2):
+    """Power-on up to the first window: application_init's first window, the status bar, loads (ringnav_ui_load)."""
     q2.fw.fn('ringnav_ui_load', C.c_void_p, C.c_char_p, C.c_void_p)(b'system_bar', 0)
-    return names, values, sites
-
-
-def written(q2, g):
-    """Every immediate holds set g's value, and only the pages that differ from SET0 were opened, written, flushed
-    and closed, each once."""
-    names, values, sites = geometry(q2.fw)
-    assert all(C.c_uint.from_address(s.addr).value == HIGH << 16 | values[g][s.group] for s in sites)
-    pages = sorted({s.addr & ~0xfff for s in sites if values[g][s.group] != values[0][s.group]})
-    assert [a for a, _, p in q2.protect if p == 7] == pages and [a for a, _, p in q2.protect if p == 5] == pages
-    assert all(n == 4096 for _, n, _ in q2.protect)
-    assert [args[0] for _, args in q2.fw.calls('theme_cacheflush')] == pages
-    return pages
-
-
-def client(q2):
-    """The app window's height under the status bar, which the payload's own pages fill (client_h)."""
-    return q2.fw.fn('client_h', C.c_int)()
 
 
 @in_fork
-def test_a_unit_left_on_another_theme_boots_oleds_set_and_preset_once(fw, library, tmp_path):
+def test_a_unit_left_on_another_theme_takes_oleds_preset_once(fw, library, tmp_path):
     """theme_boot's migration: THEME 1 (Classic, an older build's) takes OLED's preset and THEME 3, then boots."""
     q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='1', IPOD_LIGHT='1', IPOD_HOME='1'))
-    names, values, sites = boot(q2)
-    assert written(q2, names.index('oled'))  # OLED's own set, not SET0
+    boot(q2)
     assert q2.flash.get('IPOD', 'THEME') == '3'
     # OLED's preset (its theme.xml): Light Mode off, Home Split
     assert q2.flash.get('IPOD', 'LIGHT') == '0' and q2.flash.get('IPOD', 'HOME') == '0'
@@ -459,30 +414,9 @@ def test_a_unit_left_on_another_theme_boots_oleds_set_and_preset_once(fw, librar
     assert q2.flash.get('IPOD', 'LIGHT') == '1'
     q2.power_on()
     boot(q2)
-    written(q2, names.index('oled'))
     appearance(q2)
     assert q2.screen.row('Light Mode') == 'Light Mode: On'  # the preset was the migration's alone
     assert q2.flash.get('IPOD', 'THEME') == '3'
-    q2.close()
-
-
-@in_fork
-def test_a_set_the_boot_cant_write_runs_set0_until_the_next_boot(fw, library, tmp_path):
-    q2 = Q2(fw, library, tmp_path, Flash(IPOD_THEME='3'))
-    names, values, sites = geometry(q2.fw)
-    g = names.index('oled')
-    assert len({s.addr & ~0xfff for s in sites if values[g][s.group] != values[0][s.group]}) > 1
-    set0 = client(q2)  # before any boot: SET0's, what stock's text holds
-    boot(q2, refuse=2)  # the second page refused
-    opened = [a for a, _, p in q2.protect if p == 7]
-    assert len(opened) == 2 and [a for a, _, p in q2.protect if p == 5] == opened[:1]  # the first put back
-    assert all(C.c_uint.from_address(s.addr).value == HIGH << 16 | values[0][s.group] for s in sites)
-    assert client(q2) == set0  # the pages fit stock's windows, which kept SET0
-    assert q2.flash.get('IPOD', 'THEME') == '3'
-    q2.power_on()
-    boot(q2)
-    written(q2, g)
-    assert client(q2) != set0
     q2.close()
 
 

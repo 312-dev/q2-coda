@@ -263,8 +263,9 @@ else:
         return r,[(x0,y0,x1-x0,y1-y0) for x0,y0,x1,y1 in map(box,range(len(made)))],n[0]
     def epaint(rect):  # stock paints one changed rect: the canvas clipped to it
         m.clip=rect; n[0]=0; paint(); return n[0]
-    whole=epaint((0,0,375,320)); assert pixel(187,246)==0xffffffff and pixel(5,100)==0xff000000 and pixel(187,70)==0xff2160d8
-    assert pixel(187,300)==0  # the sheet ends at its height: nothing below it
+    SH=320-OLED_G.bar  # the sheet's height, the window's (games.c: client_h)
+    whole=epaint((0,0,375,320)); assert pixel(187,SH-44)==0xffffffff and pixel(5,100)==0xff000000 and pixel(187,70)==0xff2160d8  # the paddle D_PAD_UP above the end, the ball
+    assert pixel(187,SH+4)==0  # the sheet ends at its height: nothing below it
     r,rects,cost=eframe(); assert r==8 and rects==[(180,63,15,15),(182,65,15,15)],rects
     before=bytes(m.u.mem_read(FB,375*320*4)); part=[epaint(x) for x in rects]; after=bytes(m.u.mem_read(FB,375*320*4))
     changed={(k//4%375,k//4//375) for k in range(0,len(after),4) if after[k:k+4]!=before[k:k+4]}
@@ -299,7 +300,8 @@ sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scr
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
 BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
-BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,135_000,200_000,270_000,1_450_000  # measured: 2,093, 116,530, 173,215, 233,009 and 1,245,213
+ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])  # a frame's rects at most (engine.c eng_dirty)
+BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,250_000,200_000,270_000,1_450_000  # measured on OLED's 262 px sheet: 2,157, 216,412 (a frame's play can break a brick, move the paddle and score at once), 174,268, 233,143 and 1,177,926
 pick(4); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
 assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
 FB=0x30000000; m.u.mem_map(FB,0x80000); m.word(m.canvas+O['CANVAS_LCD'],m.lcd)
@@ -325,7 +327,7 @@ key(O['KEY_CENTER']); eframe(); assert m.get(BR+BR_MODE)==1  # the press reaches
 worst=step_worst=0; broke=cells()
 for k in range(60):
     m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
-    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=4,rects
+    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects  # the frame cost bounds below hold whatever their number
     worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
 # The keystone with all six neighbours: the ball under it, rising at top speed.
 m.u.mem_write(BR+BR_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112)))
@@ -360,7 +362,7 @@ m=CardMachine(tree,{})
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
 button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']
-assert m.nodes[icon]['image']=='local_videos' and m.nodes[label]['text']=='Videos' and len(m.nodes[view]['children'])==18
+assert m.nodes[icon]['image']=='local_videos' and m.nodes[label]['text']=='Videos' and len(m.nodes[view]['children'])==19
 f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']; m.page=m.node('window','folder_page'); passed()
 # Folder view's video (video_click) starts the same q2video, with no Videos page open; anything else is left to stock.
@@ -560,15 +562,14 @@ assert zone_labels.index('GMT-4 New York')<zone_labels.index("GMT-3:30 St. John'
 assert 'GMT-5 Chicago' not in zone_labels and 'GMT-6 Chicago' in zone_labels
 passed()
 # Stock's caption, in the row-high item between row 0 and row 1, sits at y 20 of it, over row 1, and the row hook leaves
-# it there, on OLED's set or not, as it leaves row 0 with no caption (Automatic off).
-def zone_caption(boot,text=1):
-    z=ZoneRowMachine(); boot and oled_set(z)
+# it there, as it leaves row 0 with no caption (Automatic off).
+def zone_caption(text=1):
+    z=ZoneRowMachine(); oled_set(z)
     z.mock('image_create','hscroll_label_create','widget_use_style','widget_set_name','toolsSetTimeZone','image_set_draw_type','image_base_set_image','set_hscroll_label_attribute','widget_set_tr_text','widget_on','tk_snprintf')
     cap=z.node('hscroll_label','',text='Time Zone Selection') if text else z.node('button','0'); first=z.node('list_item'); capitem=z.node('list_item','',[cap]); item=z.node('list_item')
     sv=z.node('scroll_view','scroll_view',[first,capitem,item]); parents(z,sv); place(z,cap,0,20,375,20)
     z.call(address=HOOKS['timezone_row'][0],args=(item,1,0,0),gap=0); return z,cap
-z,zc=zone_caption(1); assert wbox(z,zc)==(0,20,375,20)
-z,zc=zone_caption(1,0); assert wbox(z,zc)==(0,20,375,20)
+z,zc=zone_caption(); assert wbox(z,zc)==(0,20,375,20)
 z,zc=zone_caption(0); assert wbox(z,zc)==(0,20,375,20); passed()
 def stream_rows(m):
     """Streaming's page over stock's one Tidal row: the hook's rows' buttons by their labels, in order."""

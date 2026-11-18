@@ -1056,6 +1056,7 @@ static int go(const void *unused) {
             widget_destroy_children(br.page), br.view = 0; /* the box alone: the keyboard leaves no room for the rows */
             br.edit = edit_create(br.page, "text", 2, 26);
             widget_set_prop_str(br.edit, "tips", "Search Spotify");
+            widget_set_prop_int(br.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */
             widget_on(br.edit, EVT_VALUE_CHANGED, searched, 0);
             widget_on(br.edit, EVT_IM_ACTION, searched, 0);
             widget_on(br.edit, EVT_BLUR, search_left, 0);

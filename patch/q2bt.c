@@ -1,17 +1,20 @@
 /* q2bt's device side (docs/internals.md#bluetooth-link-monitor): q2guard sleeps in bt_sleep, which
  * reads the controller's byte counter at each of q2guard's ticks and, while an A2DP stream runs,
- * wakes every BT_TICK_MS to write a line to the q2-bt log. Each line costs one ioctl, four HCI
- * commands on a raw socket bound only while the stream runs, and a few small /proc and /sys reads;
- * bluealsa is asked for the codec (dbus-send, in the background) at the start and every BT_PCMS_MS.
- * Nothing here changes how the Q2 streams. Every read that fails leaves its field "-", and with no
- * Bluetooth socket at all (the emulator) it tries again a minute later and does nothing else. */
+ * wakes every BT_TICK_MS to write a line to the q2-bt log. Each line costs two ioctls, five HCI
+ * commands on a raw socket bound only while the stream runs (to the ACL handle listed now: a codec
+ * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
+ * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
+ * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
+ * the start, when its encoder thread changes and every BT_PCMS_MS. Nothing here changes how the Q2
+ * streams. Every read that fails leaves its field "-", and with no Bluetooth socket at all (the
+ * emulator) it tries again a minute later and does nothing else. */
 #include "q2bt.h"
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
 #define PCMS_CMD                                                                                   \
     "dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "                          \
     "org.bluealsa.Manager1.GetPCMs > " PCMS_FILE " 2>/dev/null"
-#define ANSWER_MS 150  /* the four answers are waited for this long at most */
+#define ANSWER_MS 150  /* the five answers are waited for this long at most */
 #define RETRY_MS 60000 /* a Bluetooth socket that would not open is tried again after this */
 #define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */
 #define WLAN "/sys/class/net/wlan0/statistics/"
@@ -34,6 +37,13 @@ static struct {
     char codec[24];
     unsigned hz;
     int flush; /* a stream started or ended: the log to the card now */
+    int enc; /* bluealsa's encoder thread (its tid), 0 none; its name, and its last run and wait */
+    char enc_name[24];
+    unsigned enc_run, enc_wait;
+    int enc_stat; /* 1 its schedstat read, 2 only its ticks (no schedstat in this kernel), 0 neither
+                   */
+    unsigned done, done_was; /* completions counted on the raw socket, and at the last line */
+    struct bt_fly fly;
 } bt;
 
 static void note(const char *what) {
@@ -63,19 +73,22 @@ static int acl_handle(void) {
     if (ioctl(bt.ctl, HCIGETCONNLIST, req)) return -1;
     return bt_acl_handle((const unsigned char *)req, 4);
 }
-/* bound to hci0's raw channel, Command Complete events only */
+/* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, and Number Of
+ * Completed Packets (0x13), the controller's account of each packet it delivered */
 static void raw_open(void) {
     unsigned short addr[3] = { AF_BLUETOOTH, 0,
                                0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
-    unsigned filter[4] = { 1u << 4, 1u << 0x0e, 0,
-                           0 }; /* hci_filter: event packets; event 0x0e; any opcode */
+    /* hci_filter: event packets; events 0x0e and 0x13; any opcode */
+    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x13, 0, 0 };
     bt.raw = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
     if (bt.raw < 0) return;
     if (bind(bt.raw, addr, sizeof addr) ||
         setsockopt(bt.raw, 0 /* SOL_HCI */, 2 /* HCI_FILTER */, filter, 14))
         close(bt.raw), bt.raw = -1;
 }
-static int answers(int ms) { /* events until the four have answered or ms is up */
+/* Events until the five have answered or ms is up (0: only what is waiting, all of it), completions
+ * counted on the way. 1 when the five answered. */
+static int events(int ms, int until_answered) {
     unsigned char b[64];
     unsigned end = now_ms() + (unsigned)ms;
     for (;;) {
@@ -85,21 +98,26 @@ static int answers(int ms) { /* events until the four have answered or ms is up 
         if (poll(&p, 1, left) <= 0) return 0;
         int n = (int)read(bt.raw, b, sizeof b);
         if (n <= 0) return 0;
+        bt.done += (unsigned)bt_completed(b, n, bt.link.handle);
         bt_event(&bt.link, b, n);
-        if (bt.link.answered >= 4) return 1;
+        if (until_answered && bt.link.answered >= 5) return 1;
     }
 }
 static void link_read(void) {
-    static const int ops[4] = { BT_OP_RSSI, BT_OP_LQ, BT_OP_TPL, BT_OP_AFH };
+    static const int ops[5] = { BT_OP_RSSI, BT_OP_LQ, BT_OP_TPL, BT_OP_AFH, BT_OP_FCC };
     unsigned char c[8];
-    if (bt.link.handle < 0) bt.link.handle = acl_handle();
-    int h = bt.link.handle;
+    char line[32];
+    int h = acl_handle(); /* each line: a reconnect (a codec change) brings a new handle */
+    if (bt_handle_follow(&bt.link, h)) {
+        snprintf(line, sizeof line, "LINK h=%d", h), note(line);
+        bt.fly.have = 0; /* a new link's packets: counted afresh */
+    }
     bt_link_clear(&bt.link, h);
     if (bt.raw < 0 || h < 0) return;
-    answers(0); /* last second's late answers */
+    events(0, 0); /* the second's completions, and last second's late answers */
     bt_link_clear(&bt.link, h);
-    for (int i = 0; i < 4; ++i) write(bt.raw, c, (size_t)bt_cmd(c, ops[i], h));
-    answers(ANSWER_MS);
+    for (int i = 0; i < 5; ++i) write(bt.raw, c, (size_t)bt_cmd(c, ops[i], h));
+    events(ANSWER_MS, 1);
 }
 
 /* ---- processes and Wi-Fi ---- */
@@ -155,6 +173,47 @@ static int wlan(unsigned *tx, unsigned *rx) {
     return counter(WLAN "tx_bytes", tx) && counter(WLAN "rx_bytes", rx);
 }
 
+/* ---- bluealsa's encoder thread ----
+ * Its run and run-queue wait (schedstat, in ns) tell an encoder that cannot keep up (on a CPU most
+ * of the second) or is kept from one (waiting for it) from one that sleeps, waiting for PCM or for
+ * room in the socket. Found by its name, ba-a2dp-<codec>; looked for again when its files go (the
+ * thread ends at a codec change), which is also noted, as it names the new codec at once. */
+static int enc_read(unsigned *run, unsigned *wait) { /* 1 schedstat, 2 ticks (run only), 0 none */
+    char p[64], b[96];
+    int ok;
+    if (!bt.ba || !bt.enc) return 0;
+    snprintf(p, sizeof p, "/proc/%d/task/%d/schedstat", bt.ba, bt.enc);
+    if (slurp(p, b, sizeof b) > 0 && bt_schedstat(b, run, wait)) return 1;
+    snprintf(p, sizeof p, "/proc/%d/task/%d/stat", bt.ba, bt.enc);
+    *run = ticks_of(p, &ok) * 10u, *wait = 0;
+    return ok ? 2 : 0;
+}
+static void enc_find(unsigned now) {
+    char p[48], comm[24];
+    void *d;
+    bt.enc = 0;
+    if (!bt.ba) return;
+    snprintf(p, sizeof p, "/proc/%d/task", bt.ba);
+    if (!(d = opendir(p))) return;
+    for (struct dirent *e; !bt.enc && (e = readdir(d));) {
+        char c[64];
+        if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+        snprintf(c, sizeof c, "/proc/%d/task/%s/comm", bt.ba, e->d_name);
+        if (slurp(c, comm, sizeof comm) > 0 && bt_encoder_thread(comm)) bt.enc = atoi(e->d_name);
+    }
+    closedir(d);
+    if (!bt.enc) return;
+    for (char *s = comm; *s; ++s)
+        if (*s == '\n') *s = 0;
+    bt.enc_stat = enc_read(&bt.enc_run, &bt.enc_wait);
+    if (!strcmp(comm, bt.enc_name)) return;
+    char line[48];
+    memcpy(bt.enc_name, comm, sizeof comm);
+    snprintf(line, sizeof line, "ENCODER %s", comm);
+    note(line);
+    bt.pcms_at = now - BT_PCMS_MS; /* bluealsa asked for the codec at the next line */
+}
+
 /* ---- the codec ---- */
 static void pcms_start(unsigned now) {
     if (bt.pcms_pid > 0) return;
@@ -191,7 +250,8 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.own_ticks = ticks_of("/proc/self/stat", &ok);
     bt.wlan = wlan(&bt.wtx, &bt.wrx);
     busy_since(&bt.cpu, &cores);
-    bt.codec[0] = 0, bt.hz = 0;
+    bt.codec[0] = 0, bt.hz = 0, bt.enc_name[0] = 0, bt.fly.have = 0;
+    enc_find(now);
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
              c->acl_pkts, bt.raw >= 0 ? "ok" : "none");
     note(line);
@@ -233,6 +293,22 @@ static void sample(unsigned now, const struct bt_counts *c) {
     t = ticks_of("/proc/self/stat", &ok);
     s.own = ok ? bt_ticks_pct(t - bt.own_ticks, ms) : -1;
     bt.own_ticks = t;
+    s.h = bt.link.handle;
+    s.fcc = bt.link.fcc;
+    s.done = s.fly = -1;
+    if (bt.raw >= 0 && s.h >= 0) {
+        s.done = bt_rate(bt.done - bt.done_was, ms);
+        s.fly = bt_fly_step(&bt.fly, c->acl_tx, bt.done);
+    }
+    bt.done_was = bt.done;
+    unsigned run, wait;
+    int got = enc_read(&run, &wait);
+    if (!got)
+        enc_find(now),
+            got = 0; /* gone: a codec change, or not found yet; read from the next line */
+    s.er = got && got == bt.enc_stat ? bt_rate(run - bt.enc_run, ms) : -1;
+    s.ew = got == 1 && bt.enc_stat == 1 ? bt_rate(wait - bt.enc_wait, ms) : -1;
+    if (got) bt.enc_run = run, bt.enc_wait = wait, bt.enc_stat = got;
     bt_line(line, sizeof line, &s);
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;
@@ -266,6 +342,7 @@ int bt_flush_due(void) {
 void bt_sleep(unsigned ms) {
     unsigned end_at = now_ms() + ms;
     for (;;) {
+        if (guard_woke) return; /* a request that came while q2guard was busy: answered now */
         unsigned now = now_ms();
         int left = (int)(end_at - now), step = left;
         if (left <= 0) return;
@@ -273,7 +350,8 @@ void bt_sleep(unsigned ms) {
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
-        if (step > 0) usleep((unsigned)step * 1000u);
+        if (step > 0) usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
+        if (guard_woke) return;                        /* a request to answer now (q2guard.c) */
         now = now_ms();
         if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }

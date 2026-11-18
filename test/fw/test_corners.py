@@ -10,7 +10,7 @@ import pytest
 import host
 from test_coverflow import ART, CX, TOP, VIEW_H, VIEW_W, Ring, api, exact, libc, style  # noqa: F401 (fixture)
 from test_nav_paint import (  # noqa: F401 (fixtures)
-    ART_RADIUS, GEOMETRY, WHITE, Canvas, bitmaps, boot_set, fill, image_add, layout, st, theme)
+    ART_RADIUS, GEOMETRY, WHITE, Canvas, bitmaps, fill, image_add, layout, theme)
 
 sys.path.insert(0, str(host.ROOT/'tools'))
 import art  # noqa: E402
@@ -102,10 +102,9 @@ def test_a_selection_pill_is_antialiased_round_its_ends(fw, r):
         assert abs((got[y][x] & 255) - want) <= 1, (r, x, y)
 
 
-def test_a_list_thumbnail_s_alpha_is_its_corner_s_coverage(fw, st, bitmaps):
+def test_a_list_thumbnail_s_alpha_is_its_corner_s_coverage(fw, bitmaps):
     """round_corners on a decoded thumbnail: each corner pixel's alpha its coverage, the shallow part too."""
     theme(fw)
-    boot_set(fw, st)
     bm = bitmaps(fw, fill(166, 166, WHITE))
     image_add(fw, b'file:///mnt/mmc/.sldp/1f3a.jpg', bm)
     r = (166 * ART_RADIUS + GEOMETRY['art'] // 2) // GEOMETRY['art']  # round_corners'

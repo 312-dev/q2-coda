@@ -225,7 +225,9 @@ class PlaylistEditMachine(CoverflowMachine):
             self.nested(*self.handler(self.page,O['EVT_DESTROY']),self.event)
             self.stack.remove(self.page); self.top=self.stack[-1]
         self.returns(ret,clobber=True)
-    def open_editor(self,h=72,inner=68):
+    def open_editor(self,h=OLED_G.pitch,inner=OLED_G.body):
+        # Edit Playlist's row (playlists.c ringnav_playlistsmore) under OLED's grid: no toolbar, so the third row from the
+        # top, h high; no settings icons (set_icon 0), so its icon hidden, the button the row's width, the label at text_x.
         more=self.node('window','playlistsmore_page'); self.word(more+O['W_PARENT'],self.wm)
         self.top=more; self.stack.append(more)
         deleted=self.node('hscroll_label',name='label_del')
@@ -234,14 +236,14 @@ class PlaylistEditMachine(CoverflowMachine):
         assert self.nodes[deleted]['text']=='Delete Playlist'
         row=self.nodes[more]['children'][-1]; button=self.nodes[row]['children'][0]
         image,label=self.nodes[button]['children']
-        y=10+2*h
-        assert [self.get(row+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,y,375,h]
+        assert OLED_G.set_icon==0
+        assert [self.get(row+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,2*h,375,h]
         assert self.nodes[row]['style']=='s_listitem_black'
-        assert [self.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,inner]
+        assert [self.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,0,375,h]
         assert self.nodes[button]['style']=='s_btn_listitem'
-        assert [self.get(image+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[10,0,52,inner]
+        assert [self.get(image+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[10,0,52,inner] and not self.nodes[image]['visible']
         assert self.nodes[image]['image']=='rename' and self.nodes[image]['draw_type']==O['IMAGE_DRAW_CENTER']
-        assert [self.get(label+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[72,0,253,inner]
+        assert [self.get(label+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[OLED_G.text_x,0,253,inner]
         assert self.nodes[label]['style']=='s_scrlabel_white20l' and self.nodes[label]['text']=='Edit Playlist'
         f,ctx=self.handler(button,O['EVT_CLICK'])
         self.call(address=f,args=(ctx,self.event,0,0),gap=0)
@@ -412,11 +414,10 @@ assert m.db.execute('select id from playlist where id=101').fetchall()==[(101,)]
 m=PlaylistLifecycleMachine(); m.answer=0; before=m.db.execute('select * from playlist').fetchall(); m.delete()
 assert m.db.execute('select * from playlist').fetchall()==before and not m.backs and not m.reload_pending(); passed()
 
-# Holding Play/Pause on a playlist row opens its menu: Play Next, Add to Queue and Shuffle take its
-# songs (getMusicByPlayList of its cd_num, spoken ones and folders left out as its opened list shows
-# them); More… opens the same More page as its trailing dots. The Add to Playlist picker shares
-# playlist_page's name and keeps stock's hold. The playlist is the index in the dots' name: row
-# positions also count Import/Export.
+# Holding Play/Pause on a playlist row opens its menu sheet: Play, Shuffle, Rename and Delete (hold_menu.c's
+# playlist). Play plays its songs (getMusicByPlayList of its cd_num, spoken ones and folders left out as its
+# opened list shows them) as its own list (0xff13). The Add to Playlist picker shares playlist_page's name and
+# keeps stock's hold. The playlist is the index in the dots' name: row positions also count Import/Export.
 def playlist_hold(steps=2):
     m=QueueMachine(page='playlist_page',rows=3); m.word(O['PLAYLIST_ADD_MODE'],0)
     for i,e in enumerate(m.nodes[r]['children'][0] for r in m.nodes[m.surface]['children']):
@@ -429,15 +430,10 @@ def playlist_hold(steps=2):
     return m
 m=playlist_hold(0); m.press(7000); assert m.hold()!=11 and not m.opened  # Import: no dots, stock keeps the hold
 m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0  # the locked hold's release never toggles playback
-assert m.labels()==['Play Next','Play Last','Shuffle','More…'] and m.nodes[m.title]['text']=='List 1'
-m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1) and m.names()==['A','B','C']; passed()
-for row,want in ((0,['A','T1','T2','B','C']),(1,None)):
-    m=playlist_hold(); assert m.run(row)==('Playing Next','Playing Last')[row] and m.names()==(want or played_last(m,['T1','T2'])) and m.query[:2]==('getMusicByPlayList',8)
-    assert not m.playback(); passed()
-m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run(0)=='Queue unchanged' and m.names()==['A','B','C']; passed()
-m=playlist_hold(); m.press(7100); assert m.hold()==11 and m.release()==0
-m.word(syms['p_deque_playlist'],m.deque([m.song('Other',4)])); m.pick(3); m.advance(0)
-assert not [o for o in m.opened if o[0]=='localmusic/playlistsmore_page']; passed()  # the list changed: nothing
+assert m.labels()==['Play','Shuffle','Rename','Delete'] and m.nodes[m.title]['text']=='List 1'; passed()
+m=playlist_hold(); assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',8)
+assert m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2) and m.get(syms['g_local_classinfo_save']+4)==8; passed()
+m=playlist_hold(1); m.found=[m.song('dir',4)]; assert m.run('Play')=='Queue unchanged' and m.names()==['A','B','C']; passed()
 m=playlist_hold(1); m.nodes[m.top]['_pl_mode']=1; m.press(7300)  # the page's own mode, not the global
 assert m.hold()!=11 and not [o for o in m.opened if o[0]=='localmusic/playlistsmore_page']; passed()
 for count in (0,1):
@@ -537,7 +533,7 @@ assert m.sql.endswith('order by id asc') and m.results==[(101,0),(102,0),(103,0)
 CONFIG.clear(); m=CoverflowMachine(); m.open(); m.top=m.home
 bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar)
 for w in (bar,m.home): m.word(w+O['W_PARENT'],m.wm)
-SPLIT=O['HOME_SPLIT_W']; PW=375-SPLIT
+SPLIT,PX=OLED_G.split_row,OLED_G.split_art; PW,BAR=375-PX,OLED_G.bar; CH=320-BAR  # OLED's Split: the list's width, the art's pane, its client
 def art_image(w):  # no time passes, so the cover's pan (DRIFT_*) holds its phase until advanced
     m.call(address=HOOKS['widget_on_paint_background'][0],args=(w,m.canvas,0,0),gap=0)
     return m.nodes[m.art].get('image')
@@ -561,23 +557,24 @@ def cover(w,h):
     m.u.mem_write(syms['g_lastcover_url'],b'/p/other\0'); art_image(m.home)
     m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0'); art_image(m.home)
     return geometry()
-def fit(w=290,h=290): return [SPLIT+int((PW-w)/2),int((290-h)/2),w,h]
-for (w,h),want in (((300,300),fit()),((2*PW,580),fit(PW)),((600,400),fit(435)),((100,400),fit(PW,4*PW))):
+def fit(w=CH,h=CH): return [PX+int((PW-w)/2),int((CH-h)/2),w,h]
+for (w,h),want in (((300,300),fit()),((2*PW,2*CH),fit(PW)),((600,400),fit(CH*3//2)),((100,400),fit(PW,4*PW))):
     assert cover(w,h)==want,((w,h),geometry(),want)
 passed()
-m.clip=(0,0,375,320); m.word(m.canvas+O['CANVAS_X'],want[0]); m.word(m.canvas+O['CANVAS_Y'],30+want[1])
+m.clip=(0,0,375,320); m.word(m.canvas+O['CANVAS_X'],want[0]); m.word(m.canvas+O['CANVAS_Y'],BAR+want[1])
 m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.art,m.canvas,0,0),gap=0)
-assert m.clip==(SPLIT,30,PW,290),m.clip
+assert m.clip==(PX,BAR,PW,CH),m.clip
 m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0); assert m.clip==(0,0,375,320)
-# The list paints only left of the panel, its box run on to the window's foot (home.c home_overflow: OLED's Home
-# rows past the rest fade into the ground), clipped at the screen's bottom; the placeholder (no size) fills the panel.
-m.word(m.canvas+O['CANVAS_X'],0); m.word(m.canvas+O['CANVAS_Y'],30+HOME_TOP)
+# The list paints only left of the panel, raised to screen row HOME_SPLIT_TOP (coverflow.c: 40, beside a pane that
+# runs up under the bar) and its box run on to the window's foot (home.c home_overflow: OLED's Home rows past the rest
+# fade into the ground), clipped at the screen's bottom; the placeholder (no size) fills the panel.
+TOP=40; m.word(m.canvas+O['CANVAS_X'],0); m.word(m.canvas+O['CANVAS_Y'],TOP)
 m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.list,m.canvas,0,0),gap=0)
-assert m.get(m.list+O['W_H'])==290 and m.clip==(0,30+HOME_TOP,SPLIT,320-(30+HOME_TOP)),m.clip
+assert signed(m.get(m.list+O['W_Y']))==TOP-BAR and m.get(m.list+O['W_H'])==320-TOP and m.clip==(0,TOP,PX,320-TOP),m.clip  # short of the pane
 m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.list,m.canvas,0,0),gap=0,count=50_000_000); assert m.clip==(0,0,375,320)  # OLED's fades: past the call budget
 m.image_size=None
 m.u.mem_write(syms['g_lastcover_url'],b'/p/none\0')
-art_image(m.home); assert m.nodes[m.art]['image']=='default_album_home' and geometry()==[SPLIT,0,PW,290]; passed()
+art_image(m.home); assert m.nodes[m.art]['image']=='default_album_home' and geometry()==[PX,0,PW,CH]; passed()
 # Neither a still cover nor the placeholder pans (the pan itself: after DepthMachine).
 def drifts(): return [t for t in m.timers.values() if t[1]==payload_syms['home_drift']]
 m.advance(O['DRIFT_TICK_MS']); art_image(m.home); assert not drifts()
@@ -588,7 +585,7 @@ CONFIG.clear(); CONFIG.update(HOME='1'); m=CoverflowMachine(); m.open(); m.top=m
 m.image_size=(300,300); m.byte(syms['g_playcover_type'],1); m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0')
 for _ in range(3): m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.home,m.canvas,0,0))
 assert not [t for t in m.timers.values() if t[1]==payload_syms['home_drift']] and not m.nodes[m.art]['visible']
-assert [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[SPLIT,0,PW,290]; passed()
+assert [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,CH]; passed()
 
 # Now Playing: stock init runs first, then the album and "-remaining" (slider max less value, in
 # seconds) fill in, and no place in the queue ("2 of 3"): a label of that name stays as it was; later
@@ -728,7 +725,7 @@ b.nodes[img]['image']='default_bigcover'; assert fit()==bc_mv and geo(img)==sq; 
 OLED=theme_builtins()[0]; bh=OLED['np_bar']
 m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
 m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'  # the first system_bar load
-m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # puts up OLED's geometry set, its status row (theme_boot)
+m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # as on a unit (accent, theme_boot)
 slider,elapsed,remain=m.node('slider','slider_play',max=225,value=100,bar_size=4),m.node('label','label_playtime'),m.node('label','label_ipod_remain')
 win=m.node('window','playing_page',[slider,elapsed,remain]); m.word(win+O['W_PARENT'],m.wm); m.top=win
 def put(w,*g):

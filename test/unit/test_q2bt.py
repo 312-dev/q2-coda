@@ -30,6 +30,11 @@ def L(tmp_path_factory):
     lib.bt_acl_handle.argtypes = [C.c_char_p, C.c_int]
     lib.bt_line.argtypes = [C.c_void_p, C.c_int, C.c_void_p]
     lib.bt_rate.argtypes = lib.bt_ticks_pct.argtypes = [C.c_uint, C.c_uint]
+    lib.bt_handle_follow.argtypes = [C.c_void_p, C.c_int]
+    lib.bt_schedstat.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+    lib.bt_encoder_thread.argtypes = [C.c_char_p]
+    lib.bt_completed.argtypes = [C.c_char_p, C.c_int, C.c_int]
+    lib.bt_fly_step.argtypes = [C.c_void_p, C.c_uint, C.c_uint]
     lib.log_named.restype = C.c_void_p
     lib.log_named.argtypes = [C.c_char_p, C.c_char_p, C.c_uint]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -42,7 +47,11 @@ class Detect(C.Structure):
 
 
 class Link(C.Structure):
-    _fields_ = [(n, C.c_int) for n in ('handle', 'rssi', 'lq', 'tpl', 'afh', 'answered')]
+    _fields_ = [(n, C.c_int) for n in ('handle', 'rssi', 'lq', 'tpl', 'afh', 'fcc', 'answered')]
+
+
+class Fly(C.Structure):
+    _fields_ = [('have', C.c_int), ('low', C.c_int)]
 
 
 class Counts(C.Structure):
@@ -52,7 +61,8 @@ class Counts(C.Structure):
 
 class Sample(C.Structure):
     _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
-        'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own')]
+        'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew',
+        'fcc', 'done', 'fly')]
 
 
 # ---- is a stream running ----
@@ -145,6 +155,7 @@ def test_the_commands_are_the_spec_s_bytes(L):
     assert cmd(L, 0x1403, 0x0e0c) == bytes([1, 0x03, 0x14, 2, 0x0c, 0x0e])     # Read Link Quality, 12 bits
     assert cmd(L, 0x0c2d, 0x000c) == bytes([1, 0x2d, 0x0c, 3, 0x0c, 0, 0])     # Read Transmit Power Level, current
     assert cmd(L, 0x1406, 0x000c) == bytes([1, 0x06, 0x14, 2, 0x0c, 0])        # Read AFH Channel Map
+    assert cmd(L, 0x1401, 0x000c) == bytes([1, 0x01, 0x14, 2, 0x0c, 0])        # Read Failed Contact Counter
 
 
 def complete(op, params):
@@ -157,9 +168,10 @@ def test_the_answers_fill_the_link(L):
     L.bt_link_clear(C.byref(k), 0x0c)
     afh = [0xff] * 5 + [0] * 4 + [0x80]  # channels 0-39 in use; bit 79 is not a channel
     for ev in (complete(0x1405, [0, 0x0c, 0, 0xf4]), complete(0x1403, [0, 0x0c, 0, 0xff]),
-               complete(0x0c2d, [0, 0x0c, 0, 4]), complete(0x1406, [0, 0x0c, 0, 1] + afh)):
+               complete(0x0c2d, [0, 0x0c, 0, 4]), complete(0x1406, [0, 0x0c, 0, 1] + afh),
+               complete(0x1401, [0, 0x0c, 0, 0x2c, 0x01])):
         assert L.bt_event(C.byref(k), ev, len(ev)) == 1
-    assert (k.rssi, k.lq, k.tpl, k.afh, k.answered) == (-12, 255, 4, 40, 4)
+    assert (k.rssi, k.lq, k.tpl, k.afh, k.fcc, k.answered) == (-12, 255, 4, 40, 300, 5)
 
 
 def test_other_events_handles_and_refusals(L):
@@ -256,8 +268,8 @@ def test_no_a2dp_pcm_or_no_codec_is_none(L):
 
 def line(L, **f):
     s = Sample(wall=1795464061, up=4242, **{k: f.get(k, -1) for k in (
-        'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own')},
-        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh')})
+        'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')},
+        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly')})
     out = C.create_string_buffer(256)
     n = L.bt_line(out, 256, C.byref(s))
     assert n == len(out.value)
@@ -266,15 +278,15 @@ def line(L, **f):
 
 def test_a_line_has_every_field(L):
     text = line(L, kbps=612, acl=95, wq=2730, rssi=-12, lq=255, tpl=4, afh=40, err=0, wtx=3, wrx=120, cpu=23,
-                ba=81, own=4)
+                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5)
     assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 acl=95 wq=2730 rssi=-12 lq=255 tpl=4 afh=40 err=0 wtx=3 '
-                    'wrx=120 cpu=23 ba=81 own=4\n')
-    assert len(text) < 140  # about 9 minutes in the 64 KB ring
+                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5\n')
+    assert len(text) < 170  # about 6 minutes in the 64 KB ring
 
 
 def test_a_field_not_read_is_a_dash(L):
     assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- acl=- wq=- rssi=- lq=- tpl=- afh=- err=- wtx=- wrx=- '
-                       'cpu=- ba=- own=-\n')
+                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=-\n')
 
 
 def test_rates_and_shares(L):
@@ -298,3 +310,72 @@ def test_the_log_rotates_at_a_megabyte(L, tmp_path):
         L.card(0)
     assert (d / 'q2-bt.1').stat().st_size == 1048576
     assert (d / 'q2-bt.0').read_bytes() == b'2026-11-23T04:01:01Z START h=12\n'
+
+
+# ---- the link's handle, followed across a reconnect ----
+
+def test_a_new_handle_is_followed_and_reported_once(L):
+    """A codec change reconnects the headset: the ACL link comes back on a new handle while the stream runs on (2 s
+    with nothing sent is no STOP). The walk of 2026-11-18 read nothing from 04:47:13 on, asking for handle 1."""
+    k = Link()
+    L.bt_link_clear(C.byref(k), 1)
+    assert L.bt_handle_follow(C.byref(k), 1) == 0 and k.handle == 1
+    assert L.bt_handle_follow(C.byref(k), 2) == 1 and k.handle == 2
+    assert L.bt_handle_follow(C.byref(k), 2) == 0
+    assert L.bt_handle_follow(C.byref(k), -1) == 1 and k.handle == -1  # gone for now: nothing asked
+    assert L.bt_handle_follow(C.byref(k), 3) == 1 and k.handle == 3
+
+
+# ---- the encoder thread ----
+
+def schedstat(L, text):
+    run, wait = C.c_uint(), C.c_uint()
+    ok = L.bt_schedstat(text, C.byref(run), C.byref(wait))
+    return ok, run.value, wait.value
+
+
+def test_schedstat_s_nanoseconds_as_milliseconds(L):
+    """/proc/PID/task/TID/schedstat: time on a CPU, time waiting for one (both ns, past 32 bits), timeslices."""
+    assert schedstat(L, b'98765432109 1234567890 4321\n') == (1, 98765, 1234)
+    assert schedstat(L, b'999999 5 7\n') == (1, 0, 0)
+    assert schedstat(L, b'18446744073709551615 0 1\n')[0] == 1  # u64's largest: wraps, as a delta allows
+    assert schedstat(L, b'')[0] == 0 and schedstat(L, b'x y z')[0] == 0 and schedstat(L, b'12')[0] == 0
+
+
+def test_bluealsa_s_encoder_threads_by_name(L):
+    for name in (b'ba-a2dp-sbc\n', b'ba-a2dp-aptx-hd\n', b'ba-a2dp-aac', b'ba-a2dp-ldac\n'):
+        assert L.bt_encoder_thread(name) == 1
+    for name in (b'bluealsa\n', b'ba-th-manager\n', b'ba-rfcomm\n', b'ba-sco-enc\n', b''):
+        assert L.bt_encoder_thread(name) == 0
+
+
+# ---- the controller's buffers: Number Of Completed Packets ----
+
+def nocp(*pairs):
+    body = bytes([len(pairs)]) + b''.join(bytes([h & 0xff, h >> 8, n & 0xff, n >> 8]) for h, n in pairs)
+    return bytes([4, 0x13, len(body)]) + body
+
+
+def test_completed_packets_for_the_link(L):
+    ev = nocp((0x0c, 3), (0x0d, 9))
+    assert L.bt_completed(ev, len(ev), 0x0c) == 3 and L.bt_completed(ev, len(ev), 0x0d) == 9
+    assert L.bt_completed(ev, len(ev), 0x0e) == 0
+    assert L.bt_completed(ev[:-2], len(ev) - 2, 0x0d) == 0  # cut short: none counted
+    ev = complete(0x1405, [0, 0x0c, 0, 0xf4])
+    assert L.bt_completed(ev, len(ev), 0x0c) == 0
+
+
+def test_in_flight_is_sent_less_completed_from_the_least_seen(L):
+    """The count at the socket's opening is not known (0 to the controller's buffers): the least difference seen is
+    taken as empty, as the buffers drain whenever the stream pauses or the link keeps up."""
+    f = Fly()
+    assert L.bt_fly_step(C.byref(f), 1000, 0) == 0     # the first: the baseline
+    assert L.bt_fly_step(C.byref(f), 1100, 96) == 4    # 100 sent, 96 done: 4 in the controller
+    assert L.bt_fly_step(C.byref(f), 1190, 186) == 4   # 90 and 90
+    assert L.bt_fly_step(C.byref(f), 1286, 286) == 0   # it caught up past the baseline: that is empty
+    assert L.bt_fly_step(C.byref(f), 1291, 286) == 5   # five handed over, none done: full
+    assert L.bt_fly_step(C.byref(f), 0x10, (0x10 - 1004) & 0xffffffff) == 4  # sent wrapped past 2^32, done not yet
+
+
+def test_cpu_shares_are_written_as_percent(L):
+    assert ' ba=9.0 own=0.0 ' in line(L, ba=90, own=0) and ' ba=12.3 ' in line(L, ba=123)

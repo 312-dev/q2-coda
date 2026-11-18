@@ -346,8 +346,7 @@ def test_up_next_opens_in_the_menu_sheet_its_rows_at_their_own_heights(fw, plain
     named as its page was, the list from y 50 to the screen's foot, headed by the sheet's 72 px header space (the
     playing song, not a stop), then Playing Next's 24 px heading, its 46 px rows, "From ..." at 26 px and the rest.
     Until its first whole paint starts the rise the list waits the sheet's height (280 px) lower."""
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    st('settings_read').value = 1
     queue, page = plain
     queue.queue(7, 1)
     page.open()

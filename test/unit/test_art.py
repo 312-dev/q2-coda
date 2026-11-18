@@ -1,6 +1,5 @@
 """tools/art.py: the theme images it draws, from the shipped theme's values."""
 import ast
-import dataclasses
 import math
 import pathlib
 import re
@@ -179,7 +178,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
                                               'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
-                                              'search_pop', 'search_pop_letters', 'search_return_w', 'search_return_a', 'holdback',
+                                              'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
@@ -274,7 +273,7 @@ def test_the_status_rows_wifi_is_a_fan_of_a_dot_and_two_bands_with_gaps():
 
 @pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])
 def test_the_status_batterys_glyph_is_inside_a_gap_in_the_canvas(half, ink, gap):
-    """list_marks.c battery_slim's bolt and warning: BATT_GLYPH_BOX, the glyph solid round its centre in Text Primary, a
+    """list_marks.c battery_slim's bolt, plug and warning: BATT_GLYPH_BOX, the glyph solid round its centre in Text Primary, a
     ring of the Canvas round its edge (the gap), and the box's corners clear."""
     got = art.images(theme.builtins()[0])
     for n in art.BATT_GLYPHS:
@@ -286,6 +285,20 @@ def test_the_status_batterys_glyph_is_inside_a_gap_in_the_canvas(half, ink, gap)
         ring = [(x, y) for y in range(h) for x in range(w) if at(x, y)[:3] == gap and at(x, y)[3] > 100]
         assert ring and all(abs(x - cx) >= 2 or abs(y - cy) >= 2 for x, y in ring), f'{n}: no gap round the glyph'
         assert all(at(x, 0)[3] < 128 for x in range(w))  # the 7 px glyph and its 1 px gap end inside the box
+
+
+@pytest.mark.parametrize('half, ink, gap', [('d', (255, 255, 255), (0, 0, 0)), ('l', (0, 0, 0), (255, 255, 255))])
+def test_the_status_batterys_plug_is_5_by_7_on_whole_pixels(half, ink, gap):
+    """Full or held at Charge Limit (list_marks.c battery_glyph): the plug's ink is box columns 2 to 6 and rows 2 to 8
+    (panel 295 to 299, 19 to 25 at the box's 293, 17), its prongs solid in columns 3 and 5 with the slot between them
+    the gap, and its cord the one column under the body's centre."""
+    w, h, at = pixels(art.images(theme.builtins()[0])[f'oled_battplug_{half}'])
+    near = lambda c, to: sum(abs(a - b) for a, b in zip(c[:3], to)) < 3 * 64 and c[3] >= 128  # noqa: E731
+    inked = {(x, y) for y in range(h) for x in range(w) if near(at(x, y), ink)}  # the prongs' round tops: most of a pixel
+    assert (min(x for x, _ in inked), max(x for x, _ in inked), min(y for _, y in inked), max(y for _, y in inked)) == (2, 6, 2, 8)
+    assert {(3, 3), (5, 3), (3, 4), (5, 4)} <= inked and near(at(4, 3), gap)  # two prongs, a slot between
+    assert {x for x, y in inked if y == 8} == {4}  # the cord
+    assert {x for x, y in inked if y == 5} == {2, 3, 4, 5, 6}  # the body's full width
 
 
 def test_oleds_spinner_turns_its_bright_spoke_clockwise_a_frame_at_a_time():
@@ -377,15 +390,25 @@ def test_the_pop_s_characters_are_the_strip_s_sets_in_order():
     assert len(sets) == 4 and ''.join(sets) == art.POP_CHARS and len(set(art.POP_CHARS)) == 94
 
 
-def test_the_return_key_s_mark_is_white_and_the_accent_s_in_a_20_px_box():
+# each return mark's pixels it inks and those it leaves clear (20 px, the mock-up's 24-unit grid at 20/24)
+RETURN_INKED = {'search': ((8, 4), (14, 14)), 'go': ((6, 9), (11, 5)), 'save': ((8, 13), (12, 9))}
+RETURN_CLEAR = {'search': ((8, 8), (6, 9)), 'go': ((8, 4), (8, 13)), 'save': ((8, 4), (6, 9), (11, 5))}
+
+
+@pytest.mark.parametrize('kind', ['search', 'go', 'save'])
+def test_the_return_key_s_marks_are_a_magnifier_an_arrow_and_a_check_white_and_the_accent_s_in_20_px(kind):
+    """The user's mock-up (returnkey context.html): the magnifier a ring, hollow, its handle to the bottom right; the
+    arrow a bar at the middle with its head to the right; the check's vertex low left of centre."""
     t = theme.builtins()[0]
     got = art.images(t)
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     for name, rgb in (('w', 0xffffff), ('a', blue)):
-        w, h, at = pixels(got[f'oled_search_return_{name}'])
-        assert (w, h) == (20, 20) and at(17, 4) == (*rgb.to_bytes(3, 'big'), 255)  # the stem
-        assert at(3, 12)[3] == 255 and at(10, 12)[3] == 255 and at(6, 9)[3] == 255  # the bar, to the arrowhead
-        assert at(10, 4)[3] == 0 and at(0, 0)[3] == 0  # clear above the bar, left of the stem
+        w, h, at = pixels(got[f'oled_search_return_{kind}_{name}'])
+        assert (w, h) == (20, 20)
+        for p in RETURN_INKED[kind]:
+            assert at(*p) == (*rgb.to_bytes(3, 'big'), 255), p
+        for p in RETURN_CLEAR[kind] + ((0, 0), (19, 19)):
+            assert at(*p)[3] == 0, p
 
 
 def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
@@ -430,13 +453,12 @@ def test_a_row_symbol_is_drawn_at_its_optical_size(name):
 
 def test_a_theme_draws_only_the_images_its_keys_ask_for():
     """Each optional group is its key's: a theme without Now Playing's own glyphs, the Shuffle row, the switch rows,
-    the menu sheet or iPod text entry draws none of their images, and keeps the rest."""
+    or iPod text entry draws none of their images, and keeps the rest."""
     oled = theme.builtins()[0]
-    bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0,
-            'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
+    bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0}
     full, got = set(art.images(oled)), set(art.images(bare))
-    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
-              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_search_return', 'oled_holdback', 'oled_bump_')
+    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_',
+              'oled_search_pop', 'oled_search_return', 'oled_holdback')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
 
 

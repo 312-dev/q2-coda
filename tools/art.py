@@ -471,7 +471,28 @@ BATT_GLYPH_PX = 7
 BATT_GLYPH_GAP = 1
 BATT_GLYPH_BOX = (9, 10)
 BATT_GLYPH_AT = (4.5, 5.0)
-BATT_GLYPHS = {'bolt': 'lightning-fill', 'warn': 'warning-fill'}
+# Full or held at Charge Limit on the cable, an upright plug in the bolt's place, drawn on whole pixels in the box
+# (Phosphor's plug is diagonal, and turned upright at 7 px its prongs merge into a blob): two prongs 1 x 2.5 at x 3
+# and 5, their tops rounded 0.5; the body 5 x 3.5 at x 2, y 4, its lower corners rounded 1.5; the cord 1 x 2 at x 4,
+# y 7. Its ink is 5 x 7, centred on the box's 4.5 column, so on the body's centre (approved option A,
+# ~/q2-emu/design/plugged-full/NOTES.md).
+
+
+def plug_glyph(x, y):
+    """1 where box point (x, y), in box px, is inside the plug."""
+    def rounded(x0, y0, x1, y1, r, top):
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            return False
+        cy = y0 + r if top else y1 - r
+        if (y >= cy) if top else (y <= cy):
+            return True
+        cx = min(max(x, x0 + r), x1 - r)
+        return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+    return (rounded(3, 2, 4, 4.5, 0.5, True) or rounded(5, 2, 6, 4.5, 0.5, True)
+            or rounded(2, 4, 7, 7.5, 1.5, False) or (4 <= x <= 5 and 7 <= y <= 9))
+
+
+BATT_GLYPHS = {'bolt': 'lightning-fill', 'warn': 'warning-fill', 'plug': plug_glyph}
 BATT_GLYPH_INKS = {'d': (0xffffff, 0x000000), 'l': (0x000000, 0xffffff)}  # (glyph, gap) per half
 # Charging's toasts (charging.c): their 15 px glyph beside the words, fill, each in its colour; the battery's own in
 # Text Primary per half.
@@ -486,12 +507,16 @@ PL_MARKS = {'in': ('check-circle-fill', inks('secondary', 'd', 'l')), 'add': ('p
 
 def inset_glyph(name, ink, gap):
     """Phosphor's icon name at BATT_GLYPH_PX in ink, centred BATT_GLYPH_AT in a BATT_GLYPH_BOX PNG, over a gap in
-    gap round it, BATT_GLYPH_GAP px: the glyph's shape grown that far, measured on an 8x finer grid."""
+    gap round it, BATT_GLYPH_GAP px: the glyph's shape grown that far, measured on an 8x finer grid. name may instead
+    be a shape drawn in the box itself, (x, y) in box px -> inside or not (plug_glyph)."""
     k, (w, h), (cx, cy) = 8, BATT_GLYPH_BOX, BATT_GLYPH_AT
-    svg = (PHOSPHOR/f'{name}.svg').read_text()
-    scale, x0, y0 = BATT_GLYPH_PX * k / 256, (cx - BATT_GLYPH_PX / 2) * k, (cy - BATT_GLYPH_PX / 2) * k
-    polys = [[(x0 + x * scale, y0 + y * scale) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
-    fine = coverage_nonzero(polys, (0, 0, w * k, h * k))
+    if callable(name):
+        fine = [float(name((i % (w * k) + 0.5) / k, (i // (w * k) + 0.5) / k)) for i in range(w * k * h * k)]
+    else:
+        svg = (PHOSPHOR/f'{name}.svg').read_text()
+        scale, x0, y0 = BATT_GLYPH_PX * k / 256, (cx - BATT_GLYPH_PX / 2) * k, (cy - BATT_GLYPH_PX / 2) * k
+        polys = [[(x0 + x * scale, y0 + y * scale) for x, y in poly] for d in re.findall(r'\sd="([^"]+)"', svg) for poly in path(d)]
+        fine = coverage_nonzero(polys, (0, 0, w * k, h * k))
     r = BATT_GLYPH_GAP * k
     disc = [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1) if dx * dx + dy * dy <= r * r]
     inside = {(i % (w * k), i // (w * k)) for i, c in enumerate(fine) if c >= 0.5}
@@ -585,19 +610,24 @@ POP_LETTER_PX, POP_LETTER_DY = 24, 2  # the big character's ink centred on the h
 # every character of the strip's sets but the space, in their order (search_strip.c ss_sets): abc, ABC, 123, #+=
 POP_CHARS = ('abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' '0123456789'
              '!@#$%&*-_.?/+=:;,\'"()[]{}<>^~`\\|')
-# the strip's return key's mark (search_strip.c SS_RET_MARK): the keyboard's return symbol, a stem down the right, a
-# slightly rounded corner, a bar to the left ending in an open arrowhead, round capped and joined; centred in a
-# RETURN_PX box, its strokes RETURN_STROKE wide, in white on the accent's circle and in the accent on white
-RETURN_PX, RETURN_STROKE, RETURN_CORNER = 20, 2.2, 2.5
+# the strip's return key's marks (search_strip.c SS_RET_MARK, ss_ret_kind), by the field it submits: a magnifier for a
+# search, a check for a name or value saved, an arrow right for anything else. The user's mock-up's glyphs (returnkey
+# context.html) on a 24-unit grid, round capped and joined, scaled to a RETURN_PX box: the mock-up draws them 22 px on
+# its 38 px key, the strip's key is 34 px, so 20. White on the accent's circle, the accent on white.
+RETURN_PX, RETURN_GRID = 20, 24
+RETURN_MARKS: 'dict[str, tuple[float, list[list[tuple[float, float]]]]]' = {
+    'search': (2.4, [[(10.5 + 5.5 * math.cos(a * math.pi / 24), 10.5 + 5.5 * math.sin(a * math.pi / 24)) for a in range(49)],
+                     [(14.6, 14.6), (19, 19)]]),
+    'go': (2.4, [[(5, 12), (19, 12)], [(13.5, 6.5), (19, 12), (13.5, 17.5)]]),
+    'save': (2.6, [[(5.5, 12.5), (9.7, 16.7), (18.5, 7.8)]]),
+}
 
 
-def return_mark(rgb):
-    """The return key's mark as a RETURN_PX square PNG in rgb."""
-    c, r = RETURN_PX / 2, RETURN_CORNER
-    bend = [(c + 7 - r + r * math.cos(a * math.pi / 16), c + 3 - r + r * math.sin(a * math.pi / 16)) for a in range(9)]
-    stem = [(c + 7, c - 7), *bend, (c - 7, c + 3)]
-    head = [(c - 3, c - 1), (c - 7, c + 3), (c - 3, c + 7)]
-    polys = stroke([stem, head], RETURN_STROKE)
+def return_mark(kind, rgb):
+    """The return key's mark for kind (RETURN_MARKS) as a RETURN_PX square PNG in rgb."""
+    width, lines = RETURN_MARKS[kind]
+    k = RETURN_PX / RETURN_GRID
+    polys = stroke([[(x * k, y * k) for x, y in line] for line in lines], width * k)
     return png(RETURN_PX, RETURN_PX, laid(RETURN_PX, RETURN_PX, [(coverage_nonzero(polys, (0, 0, RETURN_PX, RETURN_PX)), lambda x, y: (rgb, 1))]))
 
 
@@ -633,7 +663,7 @@ def ink_polys(ch, px, cx, cy=None, baseline=None, face='Medium'):
 
 def pop_images(accent):
     """{name: PNG}: the bubble in the accent, a strip of the characters in POP_CHARS' order, white, one head's box each
-    (one image, not one a character: a third of the bytes), and the return key's mark in white and in the accent."""
+    (one image, not one a character: a third of the bytes), and the return key's marks in white and in the accent."""
     n, out = len(POP_CHARS), {}
     out['search_pop'] = png(POP_HEAD_W, POP_H, laid(POP_HEAD_W, POP_H, [
         (coverage_nonzero(path(pop_bubble_d()), (0, 0, POP_HEAD_W, POP_H)), lambda x, y: (accent, 1))]))
@@ -641,8 +671,7 @@ def pop_images(accent):
              for p in ink_polys(ch, POP_LETTER_PX, POP_HEAD_W * i + POP_HEAD_W / 2, cy=POP_HEAD_H / 2 + POP_LETTER_DY)]
     out['search_pop_letters'] = png(POP_HEAD_W * n, POP_HEAD_H, laid(POP_HEAD_W * n, POP_HEAD_H, [
         (coverage_nonzero(polys, (0, 0, POP_HEAD_W * n, POP_HEAD_H)), lambda x, y: (0xffffff, 1))]))
-    out['search_return_w'] = return_mark(0xffffff)
-    out['search_return_a'] = return_mark(accent)
+    out |= {f'search_return_{kind}_{k}': return_mark(kind, c) for kind in RETURN_MARKS for k, c in {'w': 0xffffff, 'a': accent}.items()}
     return out
 
 
@@ -712,20 +741,20 @@ def images(t):
         for name, glyph in (('wifi_3', 'wifi-high'), ('wifi_2', 'wifi-medium'), ('wifi_1', 'wifi-low'), ('lock', 'lock-simple'),
                             ('trash', 'trash')):
             out |= {f'{prefix}_{name}_{k}': phosphor(glyph, ROW_ICON_PX, c, ROW_INK) for k, c in STATE_INKS.items()}
-    if any(g.modal for g in t['geoms'].values()):  # the menu sheet's symbols (menu_modal.c)
-        out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
-        out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
-        # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
-        out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
-        out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}
-        # Up Next's bump arrow on a queued song (upnext.c): Text Tertiary per half, white on the selection
-        out |= {f'{prefix}_bump_{k}': phosphor('arrow-up', BUMP_PX, c) for k, c in BUMP_INKS.items()}
-        # the playlist pages' tiles, action glyphs and Add Songs' marks
-        out |= {f'{prefix}_pltile_{n}_{k}': phosphor(g, TILE_PX, c) for n, g in TILE_GLYPHS.items() for k, c in TILE_INKS.items()}
-        out |= {f'{prefix}_plact_{n}_{k}': phosphor(g, PL_ACTION_PX, c) for n, g in PL_ACTIONS.items()
-                for k, c in {'a': on, 'w': 0xffffff}.items()}
-        out |= {f'{prefix}_plmark_{n}_{k}': phosphor(g, PL_MARK_PX, c) for n, (g, inks) in PL_MARKS.items()
-                for k, c in {**inks, 'w': 0xffffff}.items()}
+    # the menu sheet's symbols (menu_modal.c)
+    out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
+    out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
+    # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
+    out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
+    out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}
+    # Up Next's bump arrow on a queued song (upnext.c): Text Tertiary per half, white on the selection
+    out |= {f'{prefix}_bump_{k}': phosphor('arrow-up', BUMP_PX, c) for k, c in BUMP_INKS.items()}
+    # the playlist pages' tiles, action glyphs and Add Songs' marks
+    out |= {f'{prefix}_pltile_{n}_{k}': phosphor(g, TILE_PX, c) for n, g in TILE_GLYPHS.items() for k, c in TILE_INKS.items()}
+    out |= {f'{prefix}_plact_{n}_{k}': phosphor(g, PL_ACTION_PX, c) for n, g in PL_ACTIONS.items()
+            for k, c in {'a': on, 'w': 0xffffff}.items()}
+    out |= {f'{prefix}_plmark_{n}_{k}': phosphor(g, PL_MARK_PX, c) for n, (g, inks) in PL_MARKS.items()
+            for k, c in {**inks, 'w': 0xffffff}.items()}
     if t['entry_ipod']:  # Search's key pop (search_strip.c): the accent's top tone, as the lit key's
         out |= {f'{prefix}_{n}': d for n, d in pop_images(on).items()}
         out[f'{prefix}_holdback'] = phosphor('arrow-u-up-left-bold', HOLD_BACK_PX, 0xffffff)  # Return held's card

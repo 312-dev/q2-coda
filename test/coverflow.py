@@ -133,7 +133,6 @@ TEST = r"""
 #undef sem_post
 #undef memcpy
 int coverflow_home(void *, void *), coverflow_player_cover(const char *, const char *, int, int);
-int coverflow_artist(void *albums);
 const char *track_name(char *, unsigned, void *);
 
 /* Cache boundary: the duration service has its own tests, test/fw/test_durations.py. */
@@ -322,7 +321,6 @@ static int home_mode, alt, light; /* home_mode: HOME, 0 Split, 1 Full, 2 Carouse
 int ipod_home(void) { return home_mode; }
 int home_lib_on(void) { return 1; }
 int row_preview_on(void) { return 1; }
-int library_search(void) { return 1; }
 int slide_pick(char *url, int take) { return 0; } /* slideshow.c: no library cover */
 int mclGetPlayStatus(void) { return 2; } /* playing: Split shows the playing cover */
 int media_status(void) { return 2; } /* playing too: Home lists Now Playing's row */
@@ -420,8 +418,8 @@ const scheme_t *scheme(void) { /* light is only asked of it in its light half */
     return &s;
 }
 int client_h(void) { return 320 - stub_bar_h; }
-int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* the built-in set's */
-int list_fit_end(void) { return 0; } /* the built-in set fits no list */
+int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* stock's grid's (STOCK_GRID) */
+int list_fit_end(void) { return 0; } /* unread by these sources */
 int theme_font(void *w, int role, int was) { return was; } /* the font only: no geometry */
 /* Each fill in the colour last set, the centred text's. */
 static int fills;
@@ -708,8 +706,6 @@ int ringnav_year_old(void) { return year_old; }
 /* navigation.c's Fast Navigation: letters, years and half copies; main turns it on for their tests */
 static int big_library;
 int ringnav_big_library(void) { return big_library; }
-static int artist_view;
-int ringnav_artist_view(void) { return artist_view; }
 int ringnav_artist_az(void) { return 0; }
 /* Stock's row maker for a ranking query (split_row's first four columns): the album named by v[1]
    as a row of its own, added to the staged deque. */
@@ -1742,20 +1738,6 @@ static void depth(void) {
             close_page();
         }
         assert(at[0] == 6 && at[1] == 6 && at[2] == 6 && at[3] == 2 && at[4] == 1);
-        /* A scoped page (an artist's albums) opens where it does with nothing queued, whichever of
-           its albums plays. */
-        for (int k = 0; k < 2; ++k) {
-            deque *theirs = _create_deque(0);
-            theirs->at[theirs->n++] = records[6], theirs->at[theirs->n++] = records[8];
-            playing.at[0] = records[8];
-            shim_queue = k ? &playing : 0;
-            page = &w[nw + 1];
-            assert(coverflow_artist(theirs));
-            run();
-            at[k] = *(int *)(slide()->raw + SLIDE_INDEX);
-            close_page();
-        }
-        assert(at[0] == 0 && at[1] == 0); /* B; Tight, the one playing, is 1 */
         shim_queue = 0;
         munmap(pos, 4096);
     }
@@ -1910,69 +1892,6 @@ static void sorting(void) {
     rescan();
 }
 
-/* Artist albums: Coverflow (navigation.c): an artist's albums alone, in their order, then All
-   albums, no Sort or Refresh card; the library's list is back once the page closes. */
-static void artist_only(void) {
-    rescan();
-    open_page();
-    int all = slide()->nkids;
-    close_page();
-    deque *d = _create_deque(0);
-    d->at[d->n++] = records[6], d->at[d->n++] = records[8];
-    page = &w[nw + 1];
-    assert(coverflow_artist(d));
-    run();
-    assert(slide()->nkids == 3);
-    order_is((const char *const[]){ "B", "Tight", 0 });
-    /* Past either end an artist's shelf gives, never half a cover (it would wrap to the other end),
-       and lifting springs back to the end. */
-    widget *s = slide();
-    int stride = slide_menu_item_width(s) + *(int *)(s->raw + SLIDE_SPACER);
-    for (int dir = -1; dir <= 1; dir += 2) {
-        int i0 = *(int *)(s->raw + SLIDE_INDEX), end = (dir > 0 ? i0 : i0 - 2) * stride; /* first or last card */
-        touch_at(EVT_POINTER_DOWN, 187, 100, 0);
-        for (int k = 1; k <= 40; ++k) touch_at(EVT_POINTER_MOVE_BEFORE, 187 + dir * 20 * k, 100, 10 * k);
-        int over = (offset(s) - end) * dir;
-        assert(over > 0 && over < stride / 2);
-        touch_at(EVT_POINTER_UP_BEFORE, 187 + dir * 800, 100, 405);
-        assert(glide_goal == end);
-        glide_end(s);
-    }
-    deque *again = _create_deque(0);
-    again->at[again->n++] = records[0];
-    page = &w[nw + 1];
-    assert(coverflow_artist(again)); /* a scoped page replaces the open one (#73) and owns the list */
-    run();
-    order_is((const char *const[]){ "Cover", 0 });
-    close_page();
-    open_page();
-    assert(slide()->nkids == all);
-    order_is((const char *const[]){ "Cover", "Folder", 0 });
-    close_page();
-    deque *none = _create_deque(0);
-    assert(!coverflow_artist(none));
-    free(none);
-    assert(loads == unloads);
-    artist_view = 2;
-    d = _create_deque(0);
-    d->at[d->n++] = records[6], d->at[d->n++] = records[8];
-    page = &w[nw + 1];
-    int before = loads;
-    assert(coverflow_artist(d));
-    run();
-    assert(loads == before); /* text mode never decodes artwork */
-    widget *row = 0;
-    for (int i = (int)(page - w); i <= nw; ++i)
-        if (!strcmp(w[i].type, "list_item") && w[i].click) { row = &w[i]; break; }
-    assert(row);
-    row->click(row->ctx, 0); run();
-    assert(!strcmp(title(), "B"));
-    key(KEY_RETURN); /* tracks return to the text list */
-    assert(!strcmp(title(), "Albums") && loads == before);
-    close_page();
-    artist_view = 0;
-}
-
 /* The Unknown Album card shows only when its press would find a song: getAllAlbum appends it even
    when every song carries an album tag. It stays last whatever the Sort. */
 static void unknown_card(void) {
@@ -2108,11 +2027,6 @@ static void audiobooks(void) {
     open_page();
     assert(slide()->nkids == music);
     close_page();
-    deque *artist = _create_deque(0);
-    artist->at[artist->n++] = records[music + 1];
-    artist->at[artist->n++] = records[music + 4];
-    assert(!coverflow_artist(artist) && artist->n == 2);
-    free(artist);
     assert(coverflow_rated(five_hearts));
     run();
     assert(slide()->nkids == music + 1);
@@ -2685,34 +2599,6 @@ static void thumb_wheel(void) {
     top_window = 0;
     th_pass(0, 17);
     assert(!wheel_raw && !coverflow_wheel_live());
-
-    /* An artist's albums stop at their ends: the first push past kicks the covers out by a fifth of
-       a stride, once, they spring back, and the thumb never wraps to the other end. */
-    deque *d = _create_deque(0);
-    d->at[d->n++] = records[6], d->at[d->n++] = records[8];
-    page = &w[nw + 1];
-    assert(coverflow_artist(d));
-    run();
-    s = slide(), top_window = page;
-    index = (int *)(s->raw + SLIDE_INDEX), n = s->nkids;
-    for (int dir = 1; dir >= -1; dir -= 2) {
-        int end = dir > 0 ? n - 1 : 0;
-        float past = 0;
-        wheel_held = 1, wheel_travel = 0;
-        th_pass(0, 50); th_pass(0, 50);
-        for (int i = 0; i < 300; ++i) {
-            th_pass(-dir * 3, 17);
-            float e = (float)(end - *index);
-            past = (th[T_POS] - e) * (float)dir > past ? (th[T_POS] - e) * (float)dir : past;
-            assert(th[T_ON] ? th[T_GOAL] * (float)dir <= e * (float)dir : 1);
-        }
-        assert(past > .1f && past <= .21f);
-        th_rest();
-        assert(*index == end && !*(int *)(s->raw + SLIDE_OFFSET));
-    }
-    close_page();
-    top_window = 0;
-    th_pass(0, 17);
 
     /* OLED as shipped (its theme.xml): its covers are the thumb's too, and give the wheel back as
        the fixture's do. */
@@ -4100,45 +3986,15 @@ static int rated_sort(void) {
     if (f) assert(fread(&v, sizeof v, 1, f) == 1), fclose(f);
     return v;
 }
-/* An artist's All albums card plays every album of theirs, in the covers' order, as one library queue; Return closes
-   the artist page under the covers too. The rated albums' Sort card steps their own order, saved apart from the
-   library's, and stays on the card. Go to Album's page is the album's tracks alone. */
+/* The rated albums' Sort card steps their own order, saved apart from the library's, and stays on the card. Go to
+   Album's page is the album's tracks alone. */
 static void scoped_pages(void) {
     rescan();
-    deque *d = _create_deque(0);
-    d->at[d->n++] = records[6], d->at[d->n++] = records[8];
-    page = &w[nw + 1];
-    assert(coverflow_artist(d));
-    run();
-    widget *s = slide(), *cv = &w[s->parent];
-    assert(s->nkids == 3);
-    navs = 0;
-    w[s->kids[2]].click(w[s->kids[2]].ctx, 0);
-    run();
-    assert(navs == 1 && !strcmp(nav_to, "playing_page") && nav_ctx.cls == 0xf001 && !nav_ctx.idx && nav_ctx.mode == 2);
-    assert(nav_n == 2 && nav_queue[0] == records[6] && nav_queue[1] == records[8]);
-    char away[620];
-    snprintf(away, sizeof away, "%.600s.away", paths[6]);
-    rename(paths[6], away);
-    w[s->kids[2]].click(w[s->kids[2]].ctx, 0);
-    run();
-    assert(navs == 1 && !strcmp(album_caption(cv), "Storage unavailable"));
-    rename(away, paths[6]);
-    widget *artist_page = make(0, "artistinfo_page");
-    wm_stack[0] = artist_page, wm_stack[1] = page, wm_n = 2;
-    backs = force_closes = 0;
-    key(KEY_RETURN);
-    assert(force_closes == 1 && force_closed == artist_page && backs == 1);
-    snprintf(artist_page->type, sizeof artist_page->type, "home_page"); /* not an artist's: it stays */
-    key(KEY_RETURN);
-    assert(force_closes == 1 && backs == 2);
-    wm_n = 0;
-    close_page();
     assert(!coverflow_rated(no_hearts)); /* nothing rated: no page */
     page = &w[nw + 1];
     assert(coverflow_rated(five_hearts));
     run();
-    s = slide();
+    widget *s = slide();
     int n = s->nkids - 1, lib = saved_sort();
     unlink(PEQ_ROOT "/mnt/data/ringnav-ratedsort");
     static const char *const steps[] = { "Sort: Album", "Sort: Artist" };
@@ -6819,6 +6675,25 @@ static void playlist_covers(void) {
     for (int t = 0; t < 2500; t += 17) th_spin(150, 17);
     assert(letters == letters0);
     th_rest();
+    /* The playlists stop at their ends (coverflow_bounded): the first push past kicks the covers out
+       by a fifth of a stride, once, they spring back, and the thumb never wraps to the other end. */
+    int *index = (int *)(s->raw + SLIDE_INDEX), n = s->nkids;
+    for (int dir = 1; dir >= -1; dir -= 2) {
+        int end = dir > 0 ? n - 1 : 0;
+        float past = 0;
+        wheel_held = 1, wheel_travel = 0;
+        th_pass(0, 50); th_pass(0, 50);
+        for (int i = 0; i < 300; ++i) {
+            th_pass(-dir * 3, 17);
+            float e = (float)(end - *index);
+            past = (th[T_POS] - e) * (float)dir > past ? (th[T_POS] - e) * (float)dir : past;
+            assert(th[T_ON] ? th[T_GOAL] * (float)dir <= e * (float)dir : 1);
+        }
+        assert(past > .1f && past <= .21f);
+        th_rest();
+        assert(*index == end && !*(int *)(s->raw + SLIDE_OFFSET));
+    }
+    wheel_held = 0;
     close_page();
     top_window = 0;
     th_pass(0, 17);
@@ -7164,7 +7039,6 @@ int main(void) {
     open_page();
     while (saved_sort() != 0) press_sort();
     close_page();
-    artist_only();
     unknown_card();
     same_name();
     slow_open();
@@ -7505,7 +7379,7 @@ def main():
     print('Coverflow: art order, ffmpeg fallback, locks, markers, resume, cancel, Refresh, album list reuse, low space and empty library passed;'
           ' depth renderer (exact centre, clipping, symmetry, reflection, continuity),'
           ' its texture window, centre click, small libraries and flat fallback passed;'
-          ' Sort by artist, year, recently added, most played and random, kept across opens, passed; an artist\'s albums alone passed;'
+          ' Sort by artist, year, recently added, most played and random, kept across opens, passed;'
           ' Home art sources, fit, clip, cache and Split/Full layout passed;'
           ' playlist art (own picture, 2x2, bad picture, songs changed mid-build, card full or gone) passed; playlists as covers (captions, art filling in, no letters, Centre, Return) passed;'
           ' the scoped pages\' cards, Go to Album, the Cancel row and the Unknown Album card\'s resume after a restart passed.')
