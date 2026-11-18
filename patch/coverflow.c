@@ -3527,13 +3527,16 @@ const char *now_tag(void *r, int field) {
 }
 
 /* Split's art pane (docs/ipod.md#home): from the set's split_art to the screen's right edge, from
- * split_art_up rows above Home's window (the bar paints those, coverflow_home_bar) to its bottom.
- * HOME_PW is the widest, as no set's split_art is left of HOME_SPLIT_W (tools/theme.py). */
+ * split_art_up rows above the status row's foot, under the row, to the screen's bottom. Home's
+ * window is the whole screen (docs/oled-design.md#full-bleed), so pane_y is the pane's top in it
+ * and on the screen alike. HOME_PW is the widest, as no set's split_art is left of HOME_SPLIT_W
+ * (tools/theme.py). */
 #define HOME_PW (375 - HOME_SPLIT_W)
 static int pane_x(void) { return split_geom(SPLIT_ART); }
 static int pane_w(void) { return 375 - pane_x(); }
 static int pane_up(void) { return split_geom(SPLIT_ART_UP); }
 static int pane_h(void) { return client_h() + pane_up(); }
+static int pane_y(void) { return 320 - pane_h(); }
 /* One cover in Split's pane (docs/ipod.md#home): tex its zoomed copy inside a border (slide_load),
  * tw x th texels, the border's not counted (tw 0: none); lib 0 the playing track's, which pans
  * from the old crop u0 v0 across ranges rx ry, an eased ping-pong (drift_at) for as long as it
@@ -3580,11 +3583,6 @@ static struct {
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
-    /* coverflow_home_strip's repaint after the list's own, and whether it is painting; this
-     * frame's columns of the bar's band (x, end) the list painted in its window (strip_need) and
-     * the bar painted whole (strip_done), end 0: none */
-    unsigned strip_timer;
-    int stripping, strip_need[2], strip_done[2];
     /* np: Now Playing's row shows (np_loaded); np_stop: when play was first seen stopped, | 1, 0
      * while something is loaded; np_timer: np_due's; folders: Folders' rule at the last layout */
     int np, folders;
@@ -3725,12 +3723,8 @@ static unsigned frame_stamp(void) {
 
 /* A step repaints only the panel, once the pan has moved; coverflow_home_clip draws it. */
 static void pane_invalidate(void) {
-    int pane[4] = { pane_x(), 0, pane_w(), client_h() }; /* rect_t, in the parent */
+    int pane[4] = { pane_x(), pane_y(), pane_w(), pane_h() }; /* rect_t, in the parent */
     widget_invalidate_force(P(home.art, W_PARENT), pane);
-    /* and the pane's rows in the bar, which paints them (coverflow_home_bar) */
-    void *bar = *(void *const *)system_bar;
-    int up = pane_up(), rows[4] = { pane[0], 320 - client_h() - up, pane[2], up };
-    if (up && bar) widget_invalidate_force(bar, rows);
 }
 static void drift_place(void) {
     if (frame_stamp() != home.drawn) pane_invalidate();
@@ -4071,9 +4065,9 @@ static int home_frame(void) {
     return 1;
 }
 
-/* The frame over the art (its image is empty): the rows in Home's window. */
+/* The frame over the art (its image is empty), the whole pane. */
 static void home_paint(void *canvas) {
-    int src[4] = { 0, pane_up(), pane_w(), client_h() }, dst[4] = { 0, 0, src[2], src[3] };
+    int src[4] = { 0, 0, pane_w(), pane_h() }, dst[4] = { 0, 0, src[2], src[3] };
     if (home_frame()) canvas_draw_image(canvas, home.frame, src, dst);
 }
 
@@ -4104,7 +4098,7 @@ void coverflow_home_row(void *surface, void *row, int id, int painting) {
 /* The pane as the frame (its image empty, home_paint draws it), at the panel's size. */
 static void art_frame(void) {
     image_base_set_image(home.art, "");
-    widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
+    widget_move_resize(home.art, pane_x(), pane_y(), pane_w(), pane_h());
     rearm(&home.repaint, home_repaint, 0);
 }
 /* No slide: the still stock image or the theme's pane shows. */
@@ -4221,12 +4215,12 @@ void coverflow_home_art(void *top) {
     if (moves > 0) return;
     slides_drop();
     int shown = moves == 0 && image_show(home.art, src, size);
-    /* still, sized to the image's fit and centred, so the native fill draws it whole and the clip
-     * crops it evenly */
+    /* still, sized to the image's fit and centred under the status row, so the native fill draws it
+     * whole and the clip crops it evenly */
     if (!shown && !image_show(home.art, HOME_PLACEHOLDER, size))
         image_base_set_image(home.art, HOME_PLACEHOLDER);
     home_fit(size[0], size[1], ch, &fw, &fh);
-    widget_move_resize(home.art, pane_x() + (pane_w() - fw) / 2, (ch - fh) / 2, fw, fh);
+    widget_move_resize(home.art, pane_x() + (pane_w() - fw) / 2, 320 - ch + (ch - fh) / 2, fw, fh);
     rearm(&home.repaint, home_repaint, 0);
 }
 
@@ -4398,8 +4392,8 @@ static unsigned *screen_fb(void *canvas) {
 
 /* The pane's rows in the bar that canvas's clip lets through, x y w h on screen; 0 for none. */
 static int bar_rows(void *canvas, int *r) {
-    int old[4], up = pane_up();
-    return clip_within(canvas, old, r, pane_x(), 320 - client_h() - up, pane_w(), up);
+    int old[4];
+    return clip_within(canvas, old, r, pane_x(), pane_y(), pane_w(), pane_up());
 }
 
 /* Whether top is Home in Split, its art beside the list (1), and 2 when the art runs up under the
@@ -4411,161 +4405,50 @@ int coverflow_home_split(void *top) {
     return pane_up() && home.sl[0].tw ? 2 : 1;
 }
 
-/* page_parallax.c: the page under a window's slide, its drift and dimming */
+/* page_parallax.c: the page under a window's slide */
 extern void *parallax_slide(float *percent);
-extern int parallax_under_x(int w, float percent);
-extern unsigned parallax_dim(float percent);
 
-/* The page whose band the bar paints: top while nothing slides; under a window's slide Home, when
- * it is the page under (page_parallax.c), else 0. With Home under, *dx is how far its snapshot
- * has drifted left and *open the columns from the left that the sliding page does not cover yet;
- * otherwise 0 and the screen's width. */
-static void *band_page(void *top, int *dx, int *open) {
-    float percent = 0;
-    *dx = 0, *open = 375;
-    if (!window_manager_is_animating(window_manager())) return top;
-    void *under = parallax_slide(&percent);
-    if (!under || under != home.win) return (void *)0;
-    int w = I(under, W_W);
-    *dx = parallax_under_x(w, percent);
-    *open = w - (int)(w * percent + 0.5f);
-    return *open > 0 ? under : (void *)0;
-}
-
-/* Whether Home in Split is the page under a window's slide, its band the bar's to draw beside the
- * sliding page; *open as band_page's. The bar's title then shows only over the sliding page
- * (theme_titles_paint.c bar_title_fades). */
+/* Whether Home in Split is the page under a window's slide (page_parallax.c), its band, the rows
+ * under the status row, in sight left of the sliding page: *open the columns from the left that
+ * the sliding page does not cover yet, else the screen's width. The bar's title then shows only
+ * over the sliding page (theme_titles_paint.c bar_title_fades). */
 int coverflow_home_slide(int *open) {
-    int dx;
-    void *page = band_page((void *)0, &dx, open); /* still: no top, so 0 */
-    return page && coverflow_home_split(page);
-}
-
-/* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
- * window, the cover's top, as Home's own paint draws none outside its window. A set with no
- * split_art_up draws nothing. Where the canvas draws on the screen itself the rows keep the bar's
- * flat ground for now: the bar's glyphs paint on it, and its border paint (coverflow_home_clip)
- * puts the art there with them inked (home_ink). Elsewhere the art is drawn here, under the glyphs
- * as they are. Under a window's slide with Home under it (band_page), the rows drift with Home's
- * snapshot, drawn here on any canvas and only where the sliding page leaves them in sight
- * (ponytail: the glyphs keep the bar's ink, not home_ink's, until Home settles). */
-void coverflow_home_bar(void *canvas, void *top) {
-    int r[4], old[4], dx, open;
-    home.ink_bar = 0;
-    void *page = band_page(top, &dx, &open);
-    if (coverflow_home_split(page) != 2 || !home_frame()) return;
-    int up = pane_up();
-    unsigned *fb = page == top ? screen_fb(canvas) : (unsigned *)0;
-    if (fb) {
-        if (bar_rows(canvas, r)) {
-            home.ground = fb[r[1] * 375 + r[0]]; /* the background just painted, no glyph yet */
-            home.ink_bar = *(void *const *)system_bar;
-        }
-        return;
-    }
-    int src[4] = { 0, 0, pane_w(), up }, dst[4] = { pane_x() - dx, 320 - client_h() - up, src[2], up };
-    if (page == top) {
-        canvas_draw_image(canvas, home.frame, src, dst);
-    } else if (clip_within(canvas, old, r, 0, dst[1], open, up)) {
-        canvas_set_clip_rect(canvas, r);
-        canvas_draw_image(canvas, home.frame, src, dst);
-        canvas_set_clip_rect(canvas, old);
-    }
-}
-
-/* Home's main list and its scroll view d px taller upward, their rows where they were: the row
- * above the list's top paints in coverflow_home_strip, and a paint later, d's negative undoes it.
- * Only the fields: nothing lays out between. */
-static void list_reach(void *l, int d) {
-    void *view = widget_get_child(l, 0);
-    I(l, W_Y) -= d;
-    I(l, W_H) += d;
-    I(view, W_H) += d;
-    I(view, SCROLL_Y) -= d;
-}
-/* The rows coverflow_home_strip paints, top and h on the screen: from the screen's top, for the row
- * above a scrolled list and its fade (home.c home_fades), to the window's. */
-static int strip_rows(void *l, int *h) {
-    int wy = I(home.win, W_Y), top = 0;
-    *h = wy - top;
-    return top;
-}
-
-/* The bar's background, after coverflow_home_bar: Home's main menu where Split raises it above
- * the window (home_width, HOME_SPLIT_TOP), the rows between its top and the window's that Home's
- * own paint clips away, and under OLED's pages the row above it once it has scrolled, faded. The
- * list paints into the bar's canvas at its place on the screen, left of the pane; taps there reach
- * the bar. Under a window's slide with Home under it (band_page) the rows drift with Home's
- * snapshot, left of the sliding page. The caller puts navigation.c's paint_w back after. */
-void coverflow_home_strip(void *canvas, void *top) {
-    void *l = home.list;
-    int old[4], clip[4], h, dx, open, wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
-    void *page = band_page(top, &dx, &open);
-    if (!l || !page || page != home.win || I(l, W_Y) >= 0 || !widget_get_visible(l) ||
-        !widget_count_children(l))
-        return;
-    int from = strip_rows(l, &h), cols = pane_x() - dx < open ? pane_x() - dx : open;
-    if (!clip_within(canvas, old, clip, 0, from, cols, h)) return;
-    int y = wy + I(l, W_Y), reach = I(widget_get_child(l, 0), SCROLL_Y) > 0 ? y : 0;
-    canvas_set_clip_rect(canvas, clip);
-    canvas_translate(canvas, wx - dx, wy);
-    home.stripping = 1;
-    if (reach) list_reach(l, reach);
-    widget_paint(l, canvas);
-    if (reach) list_reach(l, -reach);
-    home.stripping = 0;
-    canvas_translate(canvas, dx - wx, -wy);
-    home_fades(canvas, l, y, pane_x(), 1, dx);
-    canvas_set_clip_rect(canvas, old);
-    /* the band's rows whole: these columns need no repaint */
-    if (page == top && clip[1] == from && clip[3] == h)
-        home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
-}
-
-/* After the bar's band painters: under a window's slide with Home in Split under it, the band
- * darkened as page_parallax.c darkens Home's snapshot below it, left of the sliding page. */
-void coverflow_home_dim(void *canvas, void *top) {
-    int old[4], clip[4], dx, open;
     float percent = 0;
-    void *page = band_page(top, &dx, &open), *lcd = P(canvas, CANVAS_LCD);
-    if (!page || page == top || !coverflow_home_split(page) || !lcd) return;
-    parallax_slide(&percent);
-    unsigned a = parallax_dim(percent), fill = (unsigned)I(lcd, LCD_FILL_COLOR);
-    if (!a || !clip_within(canvas, old, clip, 0, 0, open, I(page, W_Y))) return;
-    stock_canvas_set_fill_color(canvas, a << 24); /* black in both halves, as the page's */
-    canvas_fill_rect(canvas, clip[0] - I(canvas, CANVAS_X), clip[1] - I(canvas, CANVAS_Y), clip[2],
-                     clip[3]);
-    stock_canvas_set_fill_color(canvas, fill);
+    *open = 375;
+    void *under = window_manager_is_animating(window_manager()) ? parallax_slide(&percent) : 0;
+    if (!under || under != home.win) return 0;
+    int w = I(under, W_W);
+    *open = w - (int)(w * percent + 0.5f);
+    return *open > 0 && coverflow_home_split(under);
 }
 
-/* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
- * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
- * the old ones, and an invalidate made mid-paint is lost. */
-static int strip_due(const void *unused) {
-    void *bar = *(void *const *)system_bar, *l = home.list;
-    home.strip_timer = 0;
-    if (bar && l && I(l, W_Y) < 0) {
-        int rows[4] = { 0, 0, pane_x(), 0 };
-        rows[1] = strip_rows(l, &rows[3]);
-        widget_invalidate_force(bar, rows);
-    }
-    return 0; /* RET_REMOVE */
-}
-/* A frame painted (navigation.c ringnav_wm_paint): strip_due once the list painted columns of the
- * band that the bar's paint of it did not cover. AWTK widens each invalidate by a few pixels, so
- * strip_due's own frame paints the list's top rows in the window too, but the bar paints the
- * band whole in that frame: without that test each strip would ask for the next, every frame. */
-void coverflow_home_painted(void) {
-    int *need = home.strip_need, *done = home.strip_done;
-    if (need[1] && (!done[1] || need[0] < done[0] || need[1] > done[1]))
-        rearm(&home.strip_timer, strip_due, 0);
-    need[0] = need[1] = done[0] = done[1] = 0;
+/* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows under the
+ * status row, which Home's own paint has drawn, laid with the bar's flat ground (BGRA) again
+ * where the canvas draws on the screen itself, so the bar's glyphs paint on a known ground and its
+ * border paint (coverflow_home_clip) puts the art back there with them inked by contrast
+ * (home_ink). A set with no split_art_up has no such rows. Elsewhere, under a window's slide too,
+ * the art stays as Home painted it (ponytail: the glyphs keep the bar's ink, not home_ink's, until
+ * Home settles). */
+void coverflow_home_bar(void *canvas, void *top, unsigned ground) {
+    int r[4];
+    void *lcd = P(canvas, CANVAS_LCD);
+    home.ink_bar = 0;
+    if (top != home.win || window_manager_is_animating(window_manager()) || !lcd ||
+        coverflow_home_split(top) != 2 || !home_frame())
+        return;
+    unsigned *fb = screen_fb(canvas), fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    if (!fb || !bar_rows(canvas, r)) return;
+    stock_canvas_set_fill_color(canvas, ground);
+    canvas_fill_rect(canvas, r[0] - I(canvas, CANVAS_X), r[1] - I(canvas, CANVAS_Y), r[2], r[3]);
+    stock_canvas_set_fill_color(canvas, fill);
+    home.ground = fb[r[1] * 375 + r[0]]; /* as the screen holds it, no glyph yet */
+    home.ink_bar = *(void *const *)system_bar;
 }
 
 /* The bar's border paint, its glyphs drawn: the art into the rows coverflow_home_bar left, the
  * glyphs over it inked by contrast. Only the pixels inside the clip, at most the pane's rows. */
 static void home_ink_bar(void *canvas) {
-    int r[4], top = 320 - client_h() - pane_up(), pw = pane_w();
+    int r[4], top = pane_y(), pw = pane_w();
     unsigned *fb = screen_fb(canvas);
     home.ink_bar = 0;
     if (!fb || !bar_rows(canvas, r)) return;
@@ -4592,7 +4475,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         return;
     if (!begin) {
         if (w == home.art && home.sl[0].tw) home_paint(canvas);
-        if (w == home.list && !home.stripping) {
+        if (w == home.list) {
             int split = widget_get_visible(home.art);
             home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split, 0);
         }
@@ -4602,15 +4485,9 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
     }
     if (w == home.list && widget_count_children(w)) home_pad(widget_get_child(w, 0));
     int clip[4], art = w == home.art, x = pane_x(), pane = widget_get_visible(home.art) ? x : 375;
-    if (w == home.list && !home.stripping && I(w, W_Y) < 0 &&
-        clip_within(canvas, home.clip, clip, 0, 0, x, 320)) { /* the band's columns it paints */
-        int *need = home.strip_need, end = clip[0] + clip[2];
-        need[0] = need[1] && need[0] < clip[0] ? need[0] : clip[0];
-        need[1] = need[1] > end ? need[1] : end;
-    }
     clip_within(canvas, home.clip, clip, I(canvas, CANVAS_X) - I(w, W_X) + (art ? x : 0),
-                I(canvas, CANVAS_Y) - I(w, W_Y) + (art ? 0 : I(w, W_Y)), art ? 375 - x : pane,
-                art ? client_h() : I(w, W_H));
+                I(canvas, CANVAS_Y) - I(w, W_Y) + (art ? pane_y() : I(w, W_Y)), art ? 375 - x : pane,
+                art ? pane_h() : I(w, W_H));
     canvas_set_clip_rect(canvas, clip);
     home.clipped = 1;
 }
@@ -4659,15 +4536,14 @@ static void art_beside(void *shown) {
  * before the row's edge. */
 /* Split's list top on the screen where the art runs up under the status row (a split_art_up):
  * the status row's left side holds nothing there (navigation.c clock_place puts the clock at the
- * right), so the list rises into it, above Home's window; the bar paints those rows
- * (coverflow_home_strip). */
+ * right), so the list rises into it, its top rows under the row's overlay. */
 #define HOME_SPLIT_TOP 40
 /* w, one of Home's lists, and its rows: outer wide, the rows inner, their labels from x to end
- * short of the row; the list at home.rows.top in its window, Split's main menu at HOME_SPLIT_TOP
- * on the screen. */
+ * short of the row; the list home.rows.top under the status row's foot, Split's main menu at
+ * HOME_SPLIT_TOP. Home's window is the screen (docs/oled-design.md#full-bleed). */
 static void home_width(void *w, int outer, int inner, int x, int end, int depth) {
-    int top = w == home.list && pane_up() && !ipod_home() ? HOME_SPLIT_TOP - (320 - client_h())
-                                                          : theme()->home_top;
+    int top = w == home.list && pane_up() && !ipod_home() ? HOME_SPLIT_TOP
+                                                          : 320 - client_h() + theme()->home_top;
     widget_move_resize(w, I(w, W_X), depth ? I(w, W_Y) : top, depth < 2 ? outer : inner, I(w, W_H));
     for (unsigned i = 0, n = widget_count_children(w); i < n; ++i) {
         void *child = widget_get_child(w, i);
@@ -4746,11 +4622,11 @@ void coverflow_home_layout(void) {
         inner = !full ? split : T->home_full_row, x = T->home_text_x, end = T->home_label_end[full];
     home_width(home.list, outer, inner, x, end, 0);
     lr_edit_labels(coverflow_home_view(), lr_home_editing()); /* Edit Home's words, past circles */
-    home_overflow(home.list, client_h());
+    home_overflow(home.list, 320);
     if (home.sets)
         home_width(home.sets, sub_full() ? 375 : outer, sub_full() ? T->home_full_row : inner, x,
                    T->home_label_end[full || sub_full()], 0);
-    widget_move_resize(home.art, pane_x(), 0, pane_w(), client_h());
+    widget_move_resize(home.art, pane_x(), pane_y(), pane_w(), pane_h());
     widget_set_visible(home.art, !mode && !(sub_full() && home_open()), 0);
     for (int i = 0; mode && i < 2; ++i) { /* Split's alone */
         void *open = i ? home.stream : home.lib;

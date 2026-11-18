@@ -455,11 +455,11 @@ BATT_H_W = inc('BATT_BODY_W') + inc('BATT_NUB_W') + inc('BATT_GAP') + BATT_PCT_W
 
 def status_bar(root, g):
     left, right = root[3]
-    root[2]['style:normal:bg_color'] = '#00000000'
-    # Clear: the bar is an overlay on a full-bleed page (docs/oled-design.md#full-bleed); the payload fills it black only
-    # over a page that starts under it (navigation.c ringnav_paint_bg). Its border clear too: AWTK draws the border over the
-    # bar, and Light Mode flips black to paper.
-    root[2].update({f'style:{s}:border_color': '#00000000' for s in ('normal', 'disable', 'focused')})
+    # Clear in every state (the bar is disabled, so AWTK paints its disable style): the bar is an overlay on a full-bleed
+    # page (docs/oled-design.md#full-bleed); the payload fills it black only over a page that starts under it
+    # (theme_titles_paint.c ringnav_paint_bg). Its border clear too: AWTK draws the border over the bar, and Light Mode
+    # flips black to paper.
+    root[2].update({f'style:{s}:{k}': '#00000000' for s in ('normal', 'disable', 'focused') for k in ('bg_color', 'border_color')})
     check([left[2].get('name'), right[2].get('name')] == ['view_left', 'view_right'], 'Unexpected status bar')
     check(root[1][3] == left[1][3] == right[1][3] == 30, 'Unexpected status bar height')
     root[1][3] = left[1][3] = right[1][3] = g.bar

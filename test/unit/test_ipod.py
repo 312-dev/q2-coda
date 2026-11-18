@@ -145,7 +145,8 @@ def bar():
 def test_status_bar_colours():
     root = bar()
     ipod.status_bar(root, OLED_SET)
-    assert root[2]['style:normal:bg_color'] == '#00000000' and clear_borders(root[2])
+    # every state: the bar is disabled, so AWTK paints its disable style (a black one was the band over full-bleed pages)
+    assert all(root[2][f'style:{s}:bg_color'] == '#00000000' for s in STATES) and clear_borders(root[2])
 
 
 def test_status_bar_widgets():

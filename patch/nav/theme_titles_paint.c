@@ -624,20 +624,21 @@ int ringnav_paint_bg(void *w, void *canvas) {
         unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         /* An overlay on a full-bleed page, which paints under it (tools/build.py FULL_BLEED,
          * docs/oled-design.md#full-bleed); flat black over a payload page under the row
-         * (theme_engine.c client_window), as nothing else paints there. */
+         * (theme_engine.c client_window), as nothing else paints there, but for Home's band left
+         * of such a page sliding in over Home in Split (coverflow_home_slide). */
         void *under = (void *)0;
+        int open = 0;
         for (unsigned i = widget_count_children(wm); i-- && !under;) {
             void *c = widget_get_child(wm, i);
             if (c && !tk_strcmp(widget_get_type(c), "window")) under = c;
         }
+        if (!coverflow_home_slide(&open)) open = 0;
         stock_canvas_set_fill_color(canvas, ui_ink(RGBA(BAR_COLOR))); /* flat */
-        if (!under || I(under, W_Y) > 0) canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+        if (!under || I(under, W_Y) > 0)
+            canvas_fill_rect(canvas, open, 0, I(w, W_W) - open, I(w, W_H));
         stock_canvas_set_fill_color(canvas, fill);
         /* the page in sight: under OLED's toast, the page it is over, so Home's band stays its own */
-        void *page = feedback_top();
-        coverflow_home_bar(canvas, page);   /* OLED's art in the bar */
-        coverflow_home_strip(canvas, page); /* and Split's list */
-        coverflow_home_dim(canvas, page);   /* both darkened as Home under a slide */
+        coverflow_home_bar(canvas, feedback_top(), ui_ink(RGBA(BAR_COLOR))); /* Split's ink ground */
         artist_cap(w, canvas);         /* an artist's monogram, its top over the bar */
         np_about_cap(w, canvas);       /* About's header, its top over the bar */
         status_slots_paint(w, canvas); /* the status row's glyphs but the battery (status_row.c) */
