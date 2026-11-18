@@ -1236,10 +1236,11 @@ int games_open(void *ctx, void *event) {
         return 0;
     }
     void *f = widget_factory();
-    g->h = widget_get_prop_int(page, "h", client_h());
-    /* The sheet first, under the list: hidden, it still took the chooser's taps above it. */
-    g->sheet = widget_factory_create_widget(f, "view", page, 0, 0, 375, g->h);
-    g->list = widget_factory_create_widget(f, "view", page, 0, 0, 375, g->h);
+    g->h = page_room(page);
+    /* The sheet first, under the list: hidden, it still took the chooser's taps above it. Both
+     * from the status row's foot. */
+    g->sheet = widget_factory_create_widget(f, "view", page, 0, bar_foot(page), 375, g->h);
+    g->list = widget_factory_create_widget(f, "view", page, 0, bar_foot(page), 375, g->h);
     widget_set_visible(g->sheet, 0, 0);
     int cards = addon_games(); /* then the card's games (addon.c), by name */
     g->engines = eng_count(); /* then the engine's (engine.c), before the card's */

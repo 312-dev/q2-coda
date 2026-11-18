@@ -1,10 +1,10 @@
 """games.c on its device path: Sudoku's rules, Vortex's physics, Klondike's legality, Snake, keys and saves."""
 import ctypes as C
-import itertools
 import math
 import mmap
 import random
 import re
+import struct
 from types import SimpleNamespace
 
 import pytest
@@ -1124,23 +1124,25 @@ class Card:
 # the top window's parent (feedback.c top_named) as page_list opens the page.
 _PAGE_MEM = C.create_string_buffer(0x400)
 PAGE, LATCH = C.addressof(_PAGE_MEM), 0xa4bbfa
+BAR = 58  # OLED's status row, over the page's window
 
 
 class Page:
     """The Games page open on stubs: a clock, a timer list and the card."""
-    def __init__(self, fw, files=None):
+    def __init__(self, fw, files=None, room=320 - BAR):
+        """room: the rows under the status row, the page's sheet's height (the Q2's by default)."""
+        struct.pack_into('<ii', _PAGE_MEM, O['W_W'], 375, BAR + room)  # full-bleed, from the screen's top
         self.fw, self.g, self.card = fw, api(fw), Card(fw, files)
         self.now, self.timers, self.toasts = 1000, [], []
         fw.mock('window_create', lambda *_: PAGE)
-        fw.mock('widget_get_prop_int', lambda w, k, d, *_: 290 if C.string_at(k) == b'h' else d)
         fw.mock('timer_add', self.timer)
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('window_manager_get_top_window', lambda *_: PAGE)
         fw.var('g_backlight_status', C.c_ubyte).value = 1
         self.view = C.create_string_buffer(0x400)  # ringnav_select reads the list's fields
         fw.mock('scroll_view_create', lambda *_: C.addressof(self.view))
-        widgets = itertools.count(0x7300)  # the sheet, then the chooser's list, each open
-        fw.mock('widget_factory_create_widget', lambda *_: next(widgets))
+        self.widgets = []  # the sheet, then the chooser's list, each open: zeroed widgets at their boxes' tops
+        fw.mock('widget_factory_create_widget', self.widget)
         fw.mock('list_item_create', lambda *_: 0x7100)
         fw.mock('widget_get_child', lambda *_: 0x7200)
         fw.mock('fw_fflush', lambda *_: 0)
@@ -1152,6 +1154,11 @@ class Page:
     def timer(self, fn, ctx, ms, *_):
         self.timers.append((fn, ms))
         return len(self.timers)
+
+    def widget(self, factory, kind, parent, x, y, *_):
+        self.widgets.append(C.create_string_buffer(0x400))
+        struct.pack_into('<ii', self.widgets[-1], O['W_X'], x, y)
+        return C.addressof(self.widgets[-1])
 
     @property
     def s(self):
@@ -1919,7 +1926,7 @@ def test_a_game_on_screen_takes_no_tap_for_the_chooser_hidden_under_it(fw):
     sensitive = {}
     fw.mock('widget_set_sensitive', lambda w, on, *_: sensitive.update({w: on}))
     p = Page(fw, files)
-    rows, chooser = handlers(fw, EVT_CLICK), 0x7301  # the sheet is 0x7300
+    rows, chooser = handlers(fw, EVT_CLICK), C.addressof(p.widgets[1])  # the sheet is the first
     fw.mock('fw_fork', lambda *_: 4242)
     fw.mock('fw_access', lambda *_: 0)
     p.go(SUDOKU)
@@ -2527,7 +2534,7 @@ def test_solitaire_paint_the_top_row_shows_each_pile_s_top_card_and_a_column_all
 
 
 def test_solitaire_paint_a_deep_column_closes_its_fan_up_the_outer_ones_shorter(fw):
-    p = Page(fw)
+    p = Page(fw, room=290)  # a sheet whose height the fan's steps divide closely
     p.go(SOLITAIRE)
     s = p.s
     game_table(s)

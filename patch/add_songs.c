@@ -469,12 +469,12 @@ void add_songs(int dest, const char *name) {
     for (unsigned i = 0; songs && as.was && as.now && i < deque_size(songs) && i < AS_MAX_KEYS; ++i)
         as.was[as.nwas++] = as.now[as.nnow++] = as_key(deque_at(songs, i));
     if (songs) deque_destroy(songs);
-    void *title = text(as.page, 0, 0, 375, 28); /* what the status row reads */
+    void *title = text(as.page, 0, bar_foot(as.page), 375, 28); /* what the status row reads */
     widget_set_name(title, PAGE_TITLE);
     widget_set_visible(title, 0, 0);
     as_title();
-    as.sheet = widget_factory_create_widget(widget_factory(), "view", as.page, 0, 0, 375,
-                                            widget_get_prop_int(as.page, "h", client_h()));
+    as.sheet = widget_factory_create_widget(widget_factory(), "view", as.page, 0, bar_foot(as.page),
+                                            375, page_room(as.page));
     widget_on(as.sheet, EVT_POINTER_DOWN, as_touch, 0);
     widget_on(as.page, EVT_POINTER_MOVE_BEFORE, as_touch, 0);
     widget_on(as.page, EVT_POINTER_UP_BEFORE, as_touch, 0);

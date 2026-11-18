@@ -280,13 +280,11 @@ def test_the_wheel_moves_onto_pair_a_phone_without_scrolling_the_page(fw, ui, mc
     from test_nav_hold import use_set
     oled = use_set(st)
     Car(fw, ui, recs)
+    # the status row holds the caption, as on the Q2 (bar_title_fits), so the switch is at its foot, 58
+    bar_title = C.create_string_buffer(0x400)
+    st('bar_title', C.c_void_p).value = C.addressof(bar_title)
+    fw.mock('widget_get_canvas', lambda *_: 1)
     page = open_page(fw, ui)
-    # the page's list at OLED's y (its switch at the status row's foot, 58), as on the Q2, and the page built again
-    view = lists(ui, page)[-1]
-    # moved by what its list's top is off (page_open has placed it under the row: theme_engine.c client_window)
-    struct.pack_into('<i', ui.blocks[page], 4, geometry(ui, page)[1] + oled.bar - (
-        fw.fn('feedback_below', C.c_int, C.c_void_p)(view) - geometry(ui, view)[3]))
-    fw.fn('carremote_page__cr_page_show', C.c_int, C.c_void_p)(1)
     view = lists(ui, page)[-1]
     top = fw.fn('feedback_below', C.c_int, C.c_void_p)(view) - geometry(ui, view)[3]
     switch, gap, cta = ui.kids[view]

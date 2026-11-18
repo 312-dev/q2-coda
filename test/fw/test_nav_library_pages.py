@@ -417,10 +417,10 @@ def test_shuffle_opens_one_page_of_three_picks(fw, ui, st):
     page = ui.top()
     assert ui.name[page] == 'shuffle_page' and ui.captions(page) == ['Shuffle Songs', 'Shuffle Albums', 'Shuffle Folders']
     assert 'Albums and folders take a moment to shuffle' in ui.shown(page)
-    # the note at the page's foot, inside the window under the bar (OLED's is 262 px), 4 px clear of its end
+    # the note at the page's foot, in the full-bleed window's rows (the screen's), 4 px clear of its end
     note = next(w for w in ui.subtree(page) if ui.text.get(w) == 'Albums and folders take a moment to shuffle')
     y, h = (C.c_int.from_address(note + k).value for k in (4, 12))
-    assert (y, h) == (fw.fn('client_h', C.c_int)() - 28, 24) and y + h <= fw.fn('client_h', C.c_int)() - 4
+    assert (y, h) == (320 - 28, 24) and y + h <= 320 - 4
     call(fw, 'shuffle_menu')  # pressed again while it is open: the same page
     assert ui.windows == [page]
 

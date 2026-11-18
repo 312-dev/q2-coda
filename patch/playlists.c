@@ -316,7 +316,7 @@ static int ple_searched(void *ctx, void *event) {
 static void ple_search_show(void) {
     widget_destroy_children(ple.page);
     ple.view = 0;
-    ple.edit = edit_create(ple.page, "text", 2, 26);
+    ple.edit = edit_create(ple.page, "text", bar_foot(ple.page) + 2, 26);
     widget_set_name(ple.edit, "search_edit");
     widget_set_prop_str(ple.edit, "tips", "Search songs");
     widget_set_prop_int(ple.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */

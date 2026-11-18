@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, strip_return, text
+from conftest import O, STRIP_GO, STRIP_SEARCH, Deques, Game, block, claim, high_halves, libc, page_block, strip_return, text
 from test_coverflow import png, scratch  # an icon's header; navigation.c's st by field
 from test_netupdate import JOB_INSTALL, JOB_REMOVE, SH_CANCELLED, SH_CARD, SH_NET, SH_OK, Sh, sources as shelf_sources  # test_netupdate.py keeps netupdate.c's App Store mirror
 from test_radio import Rd  # test_radio.py keeps the mirror
@@ -2075,7 +2075,7 @@ class Page:
         self.made: list = []  # widgets the widget factory and button_create made (oled_page's mocks)
         self.world = card(fw, foo=manifest)
         self.world.files[b'/tmp/q2-foo'] = b'1'
-        self.page, self.view = block(fw, size=4096), block(fw, size=4096)  # widgets' bytes, all zero
+        self.page, self.view = page_block(fw), block(fw, size=4096)  # the page's window full-bleed, the view zero
         self.ap, self.pg, self.req = ap(fw), fw.var('addon__pg', Pg), fw.var('addon__req', Req)
         def timer(*_):
             self.timers += 1
@@ -4563,7 +4563,8 @@ class Qr:
         def widget(*_):
             self.ids[0] += 8
             return self.ids[0]
-        fw.mock('window_create', lambda *_: 99)
+        page = page_block(fw)
+        fw.mock('window_create', lambda *_: page)
         fw.mock('widget_factory_create_widget', widget)
         self.qp = fw.var('addon__qp', Qp)
         fw.fn('addon__qr_open', None, C.c_char_p, C.c_char_p)(b'/tmp/q2-a.state', b'Title')

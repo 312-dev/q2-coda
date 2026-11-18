@@ -558,9 +558,9 @@ void *label(void *parent, int x, int y, int w, int h, const char *style, int px,
 static void spot_np(void) {
     if (ui.page || !(ui.page = page_open("spotify_page", closed, keyup))) return;
     void *f = widget_factory(), *page = ui.page;
-    int h = widget_get_prop_int(page, "h", client_h());
-    ui.info = widget_factory_create_widget(f, "view", page, 0, 0, 375, h);
-    ui.msg = widget_factory_create_widget(f, "view", page, 0, 0, 375, h);
+    int h = page_room(page), top = bar_foot(page); /* each view from the status row's foot */
+    ui.info = widget_factory_create_widget(f, "view", page, 0, top, 375, h);
+    ui.msg = widget_factory_create_widget(f, "view", page, 0, top, 375, h);
     void *name = label(ui.info, 16, 12, 200, 16, "s_scrlabel_white20l", 16, SPOT_GREY);
     widget_set_text_utf8(name, "Spotify");
     ui.glyph = widget_factory_create_widget(f, "view", ui.info, 337, 13, 14, 14); /* NP's top row */
@@ -1137,7 +1137,7 @@ static int go(const void *unused) {
         else { /* peq_ui.c's T9 edit over the title, its keyboard open */
             l->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
             widget_destroy_children(br.page), br.view = 0; /* the box alone: the keyboard leaves no room for the rows */
-            br.edit = edit_create(br.page, "text", 2, 26);
+            br.edit = edit_create(br.page, "text", bar_foot(br.page) + 2, 26);
             widget_set_prop_str(br.edit, "tips", "Search Spotify");
             widget_set_prop_int(br.edit, STRIP_RETURN, STRIP_SEARCH); /* the letter strip's magnifier */
             widget_on(br.edit, EVT_VALUE_CHANGED, searched, 0);
