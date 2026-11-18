@@ -1174,6 +1174,12 @@ static const cat_ent *cat_copy_of(const char *path) {
     memcpy(key, sid, (unsigned)sidn), key[sidn] = 0;
     return ix_sid(&cat.ix, slot, key);
 }
+/* The server's length of the song a Stream Cache copy plays, in seconds; -1 when no row names it
+ * or the server gave none. */
+int catalogue_copy_seconds(const char *path) {
+    const cat_ent *e = cat_copy_of(path);
+    return e && e->sec > 0 ? e->sec : -1;
+}
 /* The server row r plays as: r's own path is a Stream Cache copy of it (not a linked card file's
  * row, which plays from the card). 0 for any other record. On the UI thread only (stock's cover
  * thread asks cat_copy_of itself): the answer is kept for the last path until an import or a

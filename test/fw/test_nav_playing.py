@@ -2365,3 +2365,65 @@ def test_a_touch_off_the_time_changes_nothing(fw, ui, mcl, st):
     time_tap(ui, now, up=(200, 250))  # down on the time, lifted off it
     time_tap(ui, now, x=200)  # the elapsed side of the row
     assert ui.text(now.remain) == '-2:30' and not fw.calls('write_int_config')
+
+
+# A streamed song still arriving (np_stream.c np_stream_length, stream_state.c stream_length): the player's length grows
+# with the bytes, so Now Playing shows the server's length, or --:-- when there is none, until the song is whole.
+STREAMED = '/mnt/mmc/.subsonic/stream/9f2c/original/0/hello [VcF5].mp3'
+
+
+class Arriving:
+    """Now's third track as a Stream Cache song with a .stream line: state and the server's length in ms (0: none)."""
+    def __init__(self, fw, now):
+        from test_addon import World
+        self.world, self.now = World(fw, now=1000), now
+        self.path = C.create_string_buffer(STREAMED.encode())
+        struct.pack_into('<Q', now.recs[2], O['REC_PATH'], C.addressof(self.path))
+        self.world.mtime[b'/tmp/q2-subsonic.stream'] = 1000
+
+    def line(self, state, ms):
+        self.world.ms += 300  # np_stream_length reads a line at most every 200 ms
+        self.world.files[b'/tmp/q2-subsonic.stream'] = f'#Q2STREAM/1\tseq=1\n{state}\t900000\t4000000\t{ms}\t{STREAMED}\n'.encode()
+
+
+@pytest.fixture
+def arriving(fw, now):
+    return Arriving(fw, now)
+
+
+def test_the_right_hand_time_is_unknown_until_the_song_is_whole(fw, ui, now, arriving):
+    sync = fw.fn('np_sync', C.c_int, C.c_void_p)
+    now.total = 61  # what the player makes of the bytes so far
+    ui.ints[now.slider, b'max'], ui.ints[now.slider, b'value'] = 61, 50
+    arriving.line('get', 0)
+    assert sync(now.win) == 1
+    assert ui.text(now.remain) == '--:--'
+    arriving.line('get', 300000)  # the server's duration: certain, so it, not the player's 61 s
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-4:10'
+    arriving.line('done', 300000)  # whole: the player's length stands
+    ui.ints[now.slider, b'max'] = 300
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-4:10'
+    ui.ints[now.slider, b'max'] = 200
+    arriving.line('done', 0)
+    assert sync(now.win) == 1 and ui.text(now.remain) == '-2:30'
+
+
+def drawn(fw, now):
+    """The rects canvas_fill_rounded_rect fills over stock's bar in one paint: (x, y, w, h) each."""
+    boxes = []
+    fw.mock('canvas_fill_rounded_rect', lambda c, r, sr, color, radius, *_: boxes.append(
+        struct.unpack_from('<4i', (C.c_char * 16).from_address(r))) or 0)
+    scrubber(fw, now.slider, Canvas(fw))
+    return [b[2] for b in boxes]
+
+
+def test_the_bar_has_no_fill_while_the_length_is_unknown_and_scales_to_the_servers_when_it_is_known(fw, ui, now, arriving):
+    w = ui.box(now.slider)[2]
+    arriving.line('get', 0)
+    assert drawn(fw, now) == [w]  # the track over stock's fill, and no fill of its own
+    arriving.line('get', 400000)
+    ui.now += 1000
+    track, fill = drawn(fw, now)
+    assert track == w and w * 50 // 400 <= fill <= w * 51 // 400  # 50 s of 400 s, not of the player's 200
+    arriving.line('done', 400000)
+    assert w not in drawn(fw, now)  # stock's own bar again: no track of ours, only the glide's fill

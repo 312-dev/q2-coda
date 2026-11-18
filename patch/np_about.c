@@ -322,7 +322,13 @@ void np_about_fill(void *win) {
     if (st.np_title) widget_get_text_utf8(st.np_title, ab.t.title, sizeof ab.t.title);
     if (st.np_artist) widget_get_text_utf8(st.np_artist, ab.t.artist, sizeof ab.t.artist);
     int len = st.np_slider ? widget_get_prop_int(st.np_slider, "max", 0) : 0;
-    if (len > 0) ab_clock(len, ab.t.len, sizeof ab.t.len);
+    unsigned ms = 0;
+    int cert = np_stream_length(&ms); /* a streamed song still arriving (np_stream.c) */
+    if (cert == 1) len = (int)(ms / 1000);
+    if (cert == 2)
+        tk_snprintf(ab.t.len, sizeof ab.t.len, "--:--");
+    else if (len > 0)
+        ab_clock(len, ab.t.len, sizeof ab.t.len);
     if (st.np_cover)
         tk_snprintf(ab.t.art, sizeof ab.t.art, "%s", widget_get_prop_str(st.np_cover, "image", ""));
     ab.t.art_key = st.np_art; /* the player writes each track's cover to the same file */

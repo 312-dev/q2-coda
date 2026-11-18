@@ -592,3 +592,16 @@ def test_a_clean_end_waits_about_five_seconds_for_a_wedged_file(fw):
     state.running, state.thread = 1, 0x78
     fw.fn('ringnav_clean_end', None)()
     assert len(fw.calls('fw_usleep')) == 500 and not fw.calls('fw_pthread_join') and state.running
+
+
+@pytest.mark.parametrize('state, ms, want', [(b'get', 0, b'--:--'), (b'get', 225000, b'03:45'), (b'done', 0, b'')])
+def test_a_streamed_song_still_arriving_is_unknown_or_the_servers_length_in_a_list(fw, song, stock_clock, state, ms, want):
+    from test_addon import World
+    path = b'/mnt/mmc/.foo/stream/9f2c/original/0/hello [VcF5].mp3'
+    world = World(fw, now=1000)
+    world.files[b'/tmp/q2-foo.stream'] = b'#Q2STREAM/1\tseq=1\n%s\t700\t20000\t%d\t%s\n' % (state, ms, path)
+    world.mtime[b'/tmp/q2-foo.stream'] = 1000
+    world.files[LENGTHS] = lengths()
+    out = C.create_string_buffer(b'junk', 24)
+    fw.fn('duration_text', C.c_char_p, C.c_char_p, C.c_uint, C.c_void_p)(out, len(out), song(path))
+    assert out.value == want

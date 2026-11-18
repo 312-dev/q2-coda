@@ -581,6 +581,9 @@ unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel
 void np_modes(void *win, void *canvas);
 void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
 int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms); /* and for the car remote */
+/* np_stream.c: how sure the playing song's length is (stream_length in peq.h): 0 the player's
+ * stands, 1 *ms is the server's, 2 unknown (shown as --:--) */
+int np_stream_length(unsigned *ms);
 int np_stream_error(void); /* np_stream.c: a server song stuck with its server down */
 void np_stream_cta_paint(void *canvas, int cy), np_stream_retry(void), np_stream_cta_click(int x);
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */

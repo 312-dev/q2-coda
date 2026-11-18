@@ -42,10 +42,20 @@ int np_sync(void *top) {
     int max = widget_get_prop_int(st.np_slider, "max", 0),
         left = max - widget_get_prop_int(st.np_slider, "value", 0);
     if (left < 0) left = 0;
-    int total = np_time_total(), shown = total ? max : left, key = shown << 1 | total;
+    unsigned ms = 0;
+    int cert = np_stream_length(&ms); /* a streamed song still arriving: not the player's length */
+    if (cert == 1)
+        max = (int)(ms / 1000), left = max - widget_get_prop_int(st.np_slider, "value", 0);
+    if (left < 0) left = 0;
+    int total = np_time_total(), shown = total ? max : left;
+    if (cert == 2) shown = 0;
+    int key = shown << 3 | cert << 1 | total;
     if (key == st.np_left) return 0;
     st.np_left = key;
-    clock_text(st.np_remain, !total, shown);
+    if (cert == 2)
+        widget_set_text_utf8(st.np_remain, "--:--");
+    else
+        clock_text(st.np_remain, !total, shown);
     return 1;
 }
 
@@ -230,14 +240,24 @@ static int glide_ms(int v, int playing) {
 #define NP_KNOB 14
 void paint_scrubber(void *w, void *canvas) {
     if (!w || w != st.np_slider || !P(canvas, CANVAS_LCD)) return;
-    int bw = I(w, W_W), lo = widget_get_prop_int(w, "min", 0),
-        n = widget_get_prop_int(w, "max", 100) - lo,
-        v = clamp_step(0, n, widget_get_prop_int(w, "value", 0) - lo);
+    unsigned lms = 0;
+    int cert = np_stream_length(&lms), lo = widget_get_prop_int(w, "min", 0), bw = I(w, W_W),
+        h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
+    /* a streamed song still arriving: stock's bar runs to the length the player has so far, which
+     * grows, so the track is drawn over it and the fill from the server's length, or none */
+    int n = widget_get_prop_int(w, "max", 100) - lo;
+    if (cert) n = cert == 1 ? (int)(lms / 1000) - lo : 0;
+    if (cert) {
+        rect_t track = { 0, (I(w, W_H) - h) / 2, bw, h };
+        unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+        fill_box(canvas, &track, RGBA(theme()->np_track_rgb), (unsigned)h / 2);
+        stock_canvas_set_fill_color(canvas, saved);
+    }
+    int v = clamp_step(0, n, widget_get_prop_int(w, "value", 0) - lo);
     int playing = !st.scrub && n > 0 && v < n && mclGetPlayStatus() == 2,
         fill = n > 0 ? (bw * v + bw * glide_ms(v, playing) / 1000) / n : 0;
     if (fill > bw) fill = bw;
-    if (n > 0 && fill > bw * v / n) {
-        int h = widget_get_prop_int(w, "bar_size", theme()->np_bar);
+    if (n > 0 && fill > (cert ? 0 : bw * v / n)) {
         rect_t r = { 0, (I(w, W_H) - h) / 2, fill, h };
         unsigned saved = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
         fill_box(canvas, &r, RGBA(accent_tone(TONE_LIGHT)), (unsigned)h / 2);
