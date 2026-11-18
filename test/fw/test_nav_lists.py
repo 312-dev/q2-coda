@@ -2595,6 +2595,111 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
     assert view.props.get(b'_list_top') == view.int(SCROLL_Y) + 1  # what list_fade puts back after a relayout
 
 
+class Settings:
+    """A settings page scrolled to its end under OLED, as the wheel and the paints leave it, with captioned row
+    `cap` (settings_pages.c's table, its caption one line, measured): the status row's client, the rows 32 px
+    apart, the content padded by the box's rows past the list end (list_fade). widget_layout is stock's: the rows
+    stacked by their heights, the content their foot, unpadded, the scroll clamped to it, then ipod_list_layout's
+    own tail (row_paint.c list_relaid)."""
+    bar, end, pitch = 58, 282, 32
+
+    def __init__(self, fw, ui, rows, cap, name='playset_page'):
+        self.fw, self.ui, self.cap = fw, ui, cap
+        theme(fw)
+        win = ui.widget('window', ui.wm, (0, self.bar, 375, 320 - self.bar), name=name)
+        self.view = ui.widget('scroll_view', win, (0, 0, 375, 320 - self.bar))
+        self.view.byte(O['VIEW_VERTICAL'], 1)
+        self.items = [ui.widget('list_item', self.view, (0, self.pitch * i, 375, self.pitch))
+                      for i in range(rows)]
+        for i, item in enumerate(self.items):  # stock's row: a list_item holding a tappable button of labels
+            button = ui.widget('button', item, (0, 0, 375, self.pitch), click=True)
+            ui.widget('label', button, (10, 0, 300, 20), text=f'Row {i}')
+        ui.top = win
+        pad = 320 - self.end
+        self.view.int(O['VIEW_CONTENT_H'], self.pitch * rows + pad)
+        self.view.int(SCROLL_Y, self.pitch * rows + pad - (320 - self.bar))  # the wheel's end
+        self.view.props.update({b'_list_pad': pad, b'_list_padded': self.pitch * rows + pad,
+                                b'_list_top': self.view.int(SCROLL_Y) + 1})
+        fw.mock('widget_layout', self.relayout)
+        fw.mock('scroll_view_set_offset', self.set_offset)
+        cap_at = C.addressof(fw.var('settings_pages__cap', C.c_char))  # view, item[8], text[8], cut[8][3], lines[8], open
+        C.c_void_p.from_address(cap_at).value = self.view.at
+        C.c_void_p.from_address(cap_at + 8).value = self.items[cap].at
+        C.c_ubyte.from_address(cap_at + 160).value = 1
+        self.cap_at = cap_at
+        self.paint()
+        while self.view.props.get(SEL, -1) < rows - 1:
+            key(fw, ui, KEY_NEXT, ui.now + SLOW)
+
+    def relayout(self, w, *_):
+        y = 0
+        for item in self.items:
+            item.int(4, y)
+            y += item.box[3]
+        self.view.int(O['VIEW_CONTENT_H'], y)
+        self.view.int(SCROLL_Y, max(0, min(self.view.int(SCROLL_Y), y - self.view.box[3])))
+        self.fw.fn('navigation__list_relaid', None, C.c_void_p)(self.view.at)
+
+    def set_offset(self, w, x, y, *_):
+        self.view.int(SCROLL_X, x)
+        self.view.int(SCROLL_Y, max(0, min(y, self.view.int(O['VIEW_CONTENT_H']) - self.view.box[3])))
+
+    def paint(self):
+        """The list's paint with its fades (list_fade pads the content and notes the scroll it saw)."""
+        canvas = Canvas(self.fw)
+        paint(self.fw, self, canvas.at)
+        self.fw.fn('navigation__list_fade', None, C.c_void_p, C.c_void_p)(self.view.at, canvas.at)
+
+    def foot(self, i):
+        """Row i's foot on the screen."""
+        return self.bar + self.items[i].box[1] + self.items[i].box[3] - self.view.int(SCROLL_Y)
+
+    def select(self, i):
+        """The wheel to row i, the paint, and the captions' growth and shrink run out."""
+        while self.view.props[SEL] != i:
+            self.ui.now += 1000
+            key(self.fw, self.ui, KEY_NEXT if i > self.view.props[SEL] else KEY_PREV, self.ui.now)
+            self.paint()
+        self.paint()
+        for _ in range(2):  # the change's timer, the second tick after its time is up
+            self.ui.now += 1000
+            self.fw.fn('settings_pages__cap_step', C.c_int, C.c_void_p)(None)
+            self.paint()
+
+
+ROWS = 9
+
+
+def test_the_last_row_after_a_captioned_row_ends_on_the_list_end(fw, ui):
+    """Settings > Battery's end (seen on the emulator, 2026-11-18: Battery History's bar 21 px below y 282): the wheel
+    from In-Vehicle Mode, whose caption is open, to the last row. The reveal scrolls for the grown list, one row
+    further than the list will end once the caption closes; the relayout that shrinks it clamps the scroll to stock's
+    height, and the padding put back could not take the scroll the paint saw, which lay past the new end, so the
+    last row stood on the screen's foot or below y 282 instead of on it."""
+    s = Settings(fw, ui, ROWS, ROWS - 2)
+    assert s.foot(ROWS - 1) == s.end
+    s.select(ROWS - 2)
+    s.select(ROWS - 1)
+    assert s.foot(ROWS - 1) == s.end
+
+
+@pytest.mark.parametrize('cap', range(ROWS))
+def test_a_captioned_row_grows_down_from_its_own_top(fw, ui, st, cap):
+    """Each captioned row of a page scrolled to its end, the wheel on it from the row above and from below: its
+    bar, grown, starts at its own top and clears the row above's foot, whatever scrolling the growth took (settings
+    pages: Display's Enlarged Album Art over Cover Flow, on the device 2026-11-18)."""
+    s = Settings(fw, ui, ROWS, cap)
+    for step in (cap, min(cap + 1, ROWS - 1), cap):
+        s.select(step)
+        if step != cap:
+            continue
+        above = s.items[cap - 1].box[1] + s.items[cap - 1].box[3] if cap else 0
+        top = st('sel_y').value - st('sel_h').value // 2 + s.view.int(SCROLL_Y)  # the bar's, in the view's rows
+        assert s.items[cap].box[3] > s.pitch
+        assert top == s.items[cap].box[1] and top >= above, (cap, top, above)
+        assert st('sel_h').value == s.items[cap].box[3]
+
+
 # Painted helpers: the panel, the shadow, the boxes.
 
 
