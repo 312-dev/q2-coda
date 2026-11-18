@@ -619,6 +619,7 @@ void charging_poll(void);
  * or -1 */
 enum { SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_N };
 int status_slots_left(void);
+int status_slots_reach(void);
 void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);

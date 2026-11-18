@@ -333,8 +333,10 @@ The playback, Bluetooth and Wi-Fi glyphs share smooth edges, rounded ends and a 
 
 In Icon and Icon + Percent, charging fills the icon solid green (`BATT_CHARGE_RGB`); low battery always uses
 `BATT_LOW_RGB` (`#FF1448`) under every accent; OLED's slim battery fills green while charging and
-red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone wherever the
-group's ink would reach past `BATT_ROOM` (94 pixels from the margin), as a wide codec badge does until it fades.
+red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone where the
+battery and the status row's glyphs would squeeze the title out: `batt_room` (navigation.c) is the span from the battery's end
+(`STATUS_ROW_INSET`) to the title's start, less the clock's widest, `CLOCK_BESIDE` and `CLOCK_CLEAR`, and the group is the
+battery's form and `status_slots_reach`.
 
 The navbar is hidden, as on the local pages, on the settings pages
 (`systemset/*`, `playset/*`), `audiosetting_page` and `stream_page`, listed in

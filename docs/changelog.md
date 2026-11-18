@@ -1,6 +1,10 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Now Playing (OLED): the A-B repeat markers sit on the progress bar, as before at their points along it, instead of at the old bar's height, where the ones near either end were partly under the rounded glass.
+  - Card apps (OLED): a page of only an info row that has more results keeps its More... row, so the rest can be loaded; before, it showed the empty-page note and no way on.
+  - Status row (OLED): the Percent battery no longer swaps to the icon while a Bluetooth headset's codec badge (off this row) is up; it gives way only where the battery and the glyphs beside it would leave the title no room.
+  - Settings: the unused Time in Title setting is gone. OLED never offered it and the clock always stands beside the title.
   - Song lists: the song playing now stands out in every song list (Songs, an album's or artist's songs, folders, playlists, Search, Most Played, Long Songs and the Ratings lists): its title is in the accent colour, with four small bars on the right, beside its length, or in the length's place where there is no room or no length. On the wheel's highlight both turn white.
   - Song lists: choosing the song that is already playing no longer starts it again from the beginning. It opens Now Playing and the song plays on (a paused one resumes). Chosen from another list of the same kind, the songs after it in that list now play after it.
   - Streamed songs: moving to a later point in a server song that is still downloading works. Tapping the progress bar inside the part already downloaded plays from there at once; before, the Q2 sat on the loading spinner until the whole song had downloaded. Tapping past it shows the spinner at the point you chose and plays from there as soon as that part arrives, instead of jumping back on the bar.
