@@ -339,11 +339,11 @@ static int view_top(menu_t *m) {
     return m->kind == 2 ? I(m->w, TABLE_TOP) : m->kind == 1 ? I(m->w, SCROLL_Y) : 0;
 }
 
-/* The height a selected row scrolls in: the surface's, cut at the set's list_end, a row of the
- * client under the bar (W_Y summed up to the window), where the rows below draw on to the glass but
- * a selected one's text would not show. */
+/* The height a selected row scrolls in: the surface's, cut at the set's list end on the screen
+ * (list_fit_end; W_Y summed up to the window manager), where the rows below draw on to the glass
+ * but a selected one's text would not show. */
 static int sel_height(menu_t *m) {
-    int y = 0, end = geom_val(V_LIST_END), rest = home_rest(m->w, (int *)0);
+    int y = 0, end = list_fit_end(), rest = home_rest(m->w, (int *)0);
     /* Home's main list rests on its rows' height, whatever runs on below (home.c home_rest) */
     if (rest) return rest < m->height ? rest : m->height;
     /* a menu sheet's rows end on the list end, the screen's top theirs (menu_modal.c) */
@@ -354,7 +354,7 @@ static int sel_height(menu_t *m) {
     if (confirm_surface(m->w)) return m->height;
     if (m->kind == 3 || m->kind == 4) return m->height;
     void *wm = window_manager();
-    for (void *p = m->w; p && P(p, W_PARENT) != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
+    for (void *p = m->w; p && p != wm; p = P(p, W_PARENT)) y += I(p, W_Y);
     end -= lr_edit_room(m->w); /* an editor's list ends higher, over its hint (library_edit.c) */
     return end - y < m->height ? end - y : m->height;
 }

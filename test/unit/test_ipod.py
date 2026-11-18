@@ -145,7 +145,8 @@ def bar():
 def test_status_bar_colours():
     root = bar()
     ipod.status_bar(root, OLED_SET)
-    assert root[2]['style:normal:bg_color'] == '#000000' and clear_borders(root[2])
+    # every state: the bar is disabled, so AWTK paints its disable style (a black one was the band over full-bleed pages)
+    assert all(root[2][f'style:{s}:bg_color'] == '#00000000' for s in STATES) and clear_borders(root[2])
 
 
 def test_status_bar_widgets():
@@ -1518,3 +1519,19 @@ def test_status_row_refuses_an_inset_under_the_glass():
 def test_fit_rows_runs_a_list_on_to_the_window_s_foot(pitch, top):
     g = dataclasses.replace(ipod.STOCK_GRID, list_end=224)
     assert ipod.fit_rows(g, top, pitch) == 320 - g.bar - top  # whatever the pitch: the rows past list_end fade
+
+
+def test_full_bleed_moves_a_window_content_under_the_status_row():
+    """Every page is full-bleed (tools/build.py FULL_BLEED): its top-level children move down the bar, so each rests
+    where it did when the window started under the status row; self_layout ones in their params."""
+    page = ['window', [0, 0, 375, 262], {'name': 'p'}, [
+        ['view', [0, 0, 375, 100], {'name': 'a'}, [['label', [4, 6, 10, 10], {'name': 'inner'}, []]]],
+        ['image', [0, 0, 100, 100], {'name': 'b', 'self_layout': 'default(x=0,y=0,w=100%,h=100%)'}, []],
+        ['label', [0, 60, 260, 32], {'name': 'c', 'self_layout': 'default(x=c,y=60,w=260,h=32)'}, []]]]
+    out = ipod.decode(ipod.full_bleed(ipod.encode(page), 58))
+    a, b, c = out[3]
+    assert a[1] == [0, 58, 375, 100] and a[3][0][1] == [4, 6, 10, 10]  # only the window's own children move
+    assert b[2]['self_layout'] == 'default(x=0,y=58,w=100%,h=-58)'
+    assert c[2]['self_layout'] == 'default(x=c,y=118,w=260,h=32)'
+    dialog = ['dialog', [0, 0, 375, 320], {'name': 'd'}, [['view', [0, 0, 10, 10], {}, []]]]
+    assert ipod.full_bleed(ipod.encode(dialog), 58) == ipod.encode(dialog)

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Pages (OLED): the status row no longer sits on a black band. Each page now fills the whole screen, so its background, Home's art and the Rating page's glow run up behind the clock and the battery; everything below the row stays where it was. A page slide keeps the row on top, and a swipe back that starts on the row is left to the row.
   - Library lists (OLED): dragging Songs, Albums, Artists or another long Library list to its end with a finger now stops with the last row on the line the wheel stops at, clear of the rounded bottom corners, and a flick does the same. Before, the last row came to rest low, in the corners.
   - Streamed songs: picking a server song (from Search or any list) while another song is paused no longer plays a short blip of the paused song first. The paused song now just stops while the new one loads.
   - Volume (OLED): a change made away from Now Playing, by a Bluetooth headset's own buttons or volume or by the Car Remote, now shows as a small pill at the top of the screen in place of the clock: a speaker, a bar and the number. It follows the change as it happens and fades back to the clock 2 seconds after the last (at once with Reduce Motion). At 0 the speaker is crossed out and the bar empty; the number is the Q2's 0 to 100, as everywhere else, with a linked headset too. Before, a big volume panel opened over the page and took the wheel for 3 seconds. Now Playing keeps its own volume bar and Control Center its slider.

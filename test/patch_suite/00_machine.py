@@ -783,7 +783,8 @@ class Machine:
             self.call(O['KEY_CENTER'],address=syms['on_wm_keyup_fun'],gap=0,clear=False)
         return ret
     def page(self,name='sysset_page',t='scroll_view'):
-        child=self.node(t)
+        # full-bleed (tools/ipod.py full_bleed): the window is the whole screen, its child starts under the status row
+        child=self.node(t); self.word(child+O['W_Y'],58)
         self.top=self.node('window',name,[child]); self.word(self.wm+O['W_KEY_TARGET'],self.top)  # opened: its keys' target
         if t=='slide_menu':
             self.word(child+O['SLIDE_INDEX'],0)

@@ -260,13 +260,16 @@ static int sb_event(void *page, void *event) {
 }
 
 /* navigation.c's touch hook, on a press stock and the A-Z index left alone: one near the left edge
- * of a page Return leaves becomes a candidate. allowed is 0 where Return stays on the page
- * (full-screen lyrics, the rating picker). */
+ * of a page Return leaves, under the status row, becomes a candidate. A press on the row is the
+ * row's, as when it was a window of its own over the page's top (docs/oled-design.md#full-bleed).
+ * allowed is 0 where Return stays on the page (full-screen lyrics, the rating picker). */
 void swipe_back_down(void *event, int allowed) {
     /* stock's move-before comes through the same hook: only a press starts anything */
     if (!event || I(event, EVENT_TYPE) != EVT_POINTER_DOWN || sb.at) return;
     if (sb.page) reset(); /* a press after a lift that never came */
-    if (!allowed || I(event, EVENT_X) >= SB_EDGE_PX || !usable()) return;
+    if (!allowed || I(event, EVENT_X) >= SB_EDGE_PX || I(event, EVENT_Y) < 320 - client_h() ||
+        !usable())
+        return;
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (!top || window_manager_is_animating(wm) || tk_strcmp(widget_get_type(top), "window"))
         return;

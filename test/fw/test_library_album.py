@@ -44,7 +44,7 @@ def test_under_oled_an_album_page_is_dressed_as_it_loads(fw, st, name):
     ui, win, nav, row, lv, rows = album_page(fw, st, name)
     fw.fn('album_local_load', None, C.c_void_p)(win.addr)
     assert not nav.visible and (row is None or not row.visible)
-    assert lv.box == (0, 168 - 58, 375, 320 - 168)
+    assert lv.box == (0, 168, 375, 320 - 168)  # the window is the whole screen (full-bleed): its rows are the screen's
     head = [w for w in made(win) if '_ar_name' in w.props]
     assert [(w.props['_ar_name'], w.props.get('_ar_square')) for w in head] == [(b'Caracal', 1)]
     assert [w.props['_ar_left'] for w in made(win) if '_ar_left' in w.props] == [b'Play', b'Shuffle']

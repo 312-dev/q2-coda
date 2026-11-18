@@ -56,7 +56,6 @@ class Home(C.Structure):
                 ('row', C.c_void_p), ('kind', C.c_int), ('pane_timer', C.c_uint),
                 ('ring', (C.c_uint * HOME_PW) * 4), ('clip', C.c_int * 4), ('clipped', C.c_int),
                 ('ink_bar', C.c_void_p), ('ground', C.c_uint), ('held', C.c_ubyte * HOME_PW),
-                ('strip_timer', C.c_uint), ('stripping', C.c_int), ('strip_need', C.c_int * 2), ('strip_done', C.c_int * 2),
                 ('np', C.c_int), ('np_stop', C.c_uint), ('np_timer', C.c_uint)]
 
 
@@ -803,157 +802,78 @@ def split_inset_set(fw, library, inset):
 
 
 def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_row(fw, library):
-    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's and the
-    other lists stay at the theme's home.rows.top, in the window."""
+    """Under OLED's set (split_art_up) Split's main menu starts at y 40, its top rows under the status row's overlay
+    (Home's window is the whole screen, docs/oled-design.md#full-bleed); Full's and the other lists stay at the theme's
+    home.rows.top under the row's foot."""
     ui = Ui(fw)
     lst = ui.make(0, 'list_view', 0, 0, 375, 224)
     fw.var('coverflow__home', Home).list = lst  # the main menu; its Settings and other lists are full pages here
     width = fw.fn('coverflow__home_width', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int)
     row, client = split_inset_set(fw, library, 2)  # OLED's
     width(lst, 196, 196, 24, 44, 0)
-    assert rect(lst)[:2] == (0, 40 - (320 - client)) and 320 - client == 58
+    assert rect(lst)[:2] == (0, 40) and 320 - client == 58
     fw.fn('ipod_home', C.c_int)()  # the settings read once
     home_mode = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + host.offsets(library.parent/'navigation.o', 'scratch_t')['home'])
     home_mode.value = 1  # Full
     width(lst, 375, 375, 24, 44, 0)
     full_top = rect(lst)[1]
     home_mode.value = 0
-    assert full_top >= 0  # the theme's home.rows.top, inside the window
+    assert full_top >= 58  # the theme's home.rows.top, under the status row's foot
     other = ui.make(0, 'list_view', 0, 0, 375, 64)
     width(other, 375, 375, 24, 44, 0)
     assert rect(other)[1] == full_top
 
 
-def test_the_bar_paints_the_rows_split_raises_above_home_s_window(fw, library):
-    """coverflow_home_strip, from the bar's background: the list painted at its place on the screen (the canvas moved
-    to Home's window and back), clipped to the band above the window from the screen's top (OLED's pages: the row
-    above the list too, once it has scrolled) and left of the pane, the clip put back."""
+def full_bleed_home(fw, library):
+    """Home in Split under OLED's set as FULL_BLEED lays it out: its window the whole screen, the main menu from y 40
+    and the art pane from the top, under the status row's overlay (docs/oled-design.md#full-bleed)."""
     ui = Ui(fw)
     split_inset_set(fw, library, 2)
     home = fw.var('coverflow__home', Home)
-    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
-    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
+    win = ui.make(ui.wm, 'window', 0, 0, 375, 320)
+    home.win, home.list = win, ui.make(win, 'list_view', 0, 40, 196, 280)
     ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
-    home.art = ui.make(win, 'image', 196, 0, 179, 262)
-    ui.top = win
-    clips, moves, painted = [], [], []
-    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
-    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
-    fw.mock('canvas_translate', lambda c, x, y, *_: moves.append((C.c_int(x).value, C.c_int(y).value)))
-    fw.mock('widget_paint', lambda w, c, *_: painted.append(w))
-    strip = fw.fn('coverflow_home_strip', None, C.c_void_p, C.c_void_p)
-    strip(0x40, win)
-    assert painted == [home.list] and moves == [(0, 58), (0, -58)]
-    assert clips == [(0, 0, 196, 58), (0, 0, 375, 320)]
-    painted.clear()
-    ui.animating = 1  # Home is a snapshot while a window slides
-    strip(0x40, win)
-    ui.animating = 0
-    assert not painted
-    # the list's own paint in the window (a new selection): its rows in the bar again, after the frame
-    bar = ui.make(ui.wm, 'window', 0, 0, 375, 58)
+    home.art = ui.make(win, 'image', 196, 0, 179, 320)
+    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
     fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
-    canvas = C.create_string_buffer(0x100)
-    paint = fw.fn('coverflow_home_clip', None, C.c_void_p, C.c_void_p, C.c_int)
-
-    painted_frame = fw.fn('coverflow_home_painted', None)
-    painted_frame()  # the end of the frame the bar's paints above were in
-    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # the bar painted the band whole: nothing due
-    screen: list[C.c_int | int] = [0, 0, 375, 320]  # the canvas clip canvas_get_clip_rect reads
-    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), screen))
-
-    def clip(w):  # the list's paint begins
-        paint(w, C.addressof(canvas), 1)
-    clip(home.list)
-    assert not ui.timer(address(fw, 'coverflow__strip_due'))  # once the frame is over
-    painted_frame()
-    i, ms = ui.timer(address(fw, 'coverflow__strip_due'))
-    assert ms == 0 and not ui.dirty
-    ui.fire(i)
-    assert ui.dirty == [(bar, (0, 0, 196, 58))]
-    home.stripping = 1  # the bar's own paint of it: no repaint after
-    clip(home.list)
-    painted_frame()
-    assert not ui.timer(address(fw, 'coverflow__strip_due'))
-    home.stripping = 0
-    # strip_due's frame: AWTK widens the band (rows 0 to 58, the screen's top to the window's) to 0, 0, 201, 62, so
-    # the list paints its top rows in the window too, and the bar paints the band whole: nothing more is due, or each
-    # strip would ask for the next
-    screen[:] = [0, 0, 201, 62]
-    clip(home.list)
-    strip(0x40, win)
-    painted_frame()
-    assert not ui.timer(address(fw, 'coverflow__strip_due'))
-    # a pan step's frame, the pane's column: the bar paints the band's columns the list painted, no more is due
-    screen[:] = [192, 0, 183, 320]
-    clip(home.list)
-    strip(0x40, win)
-    painted_frame()
-    assert not ui.timer(address(fw, 'coverflow__strip_due'))
-    # the bar's band only in part (its rows cut short): the list's columns are due again
-    screen[:] = [0, 50, 196, 100]
-    clip(home.list)
-    strip(0x40, win)
-    painted_frame()
-    assert ui.timer(address(fw, 'coverflow__strip_due'))
-    ui.fire(ui.timer(address(fw, 'coverflow__strip_due'))[0])
-    screen[:] = [0, 0, 375, 320]
-    painted.clear()
-    C.c_int.from_address(home.list + 4).value = 0  # a list in its window: nothing above it
-    strip(0x40, win)
-    clip(home.list)
-    painted_frame()
-    assert not painted and not ui.timer(address(fw, 'coverflow__strip_due'))
+    return ui, home, win, bar
 
 
 @pytest.mark.parametrize('toast', (False, True))
-def test_a_toast_over_home_leaves_the_split_rows_in_the_bar(fw, library, toast):
-    """OLED's toast (msginfo_dialog) over Home in Split: the bar still paints the list's rows Split raises above Home's
-    window, as with nothing over Home (user, 2026-11-16: "Unplugged" and toasts like it ran a black bar across the
-    top, the first row cut, as the bar painted for the toast as if it were the page)."""
-    ui = Ui(fw)
-    split_inset_set(fw, library, 2)
-    home = fw.var('coverflow__home', Home)
-    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
-    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
-    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
-    home.art = ui.make(win, 'image', 196, 0, 179, 262)
-    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
-    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
+def test_a_toast_over_home_leaves_the_rows_under_the_status_row_home_s(fw, library, toast):
+    """OLED's toast (msginfo_dialog) over Home in Split: the bar lays no flat ground over the rows under it, which
+    Home's own paint holds, as with nothing over Home (user, 2026-11-16: "Unplugged" and toasts like it ran a black bar
+    across the top, the first row cut, as the bar painted for the toast as if it were the page). A payload page under
+    the row (theme_engine.c client_window) gets the flat ground across the whole bar."""
+    ui, home, win, bar = full_bleed_home(fw, library)
     ui.top = ui.make(ui.wm, 'dialog', 0, 0, 375, 320, name='msginfo_dialog') if toast else win
-    painted: list[int] = []
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
     fw.mock('canvas_set_clip_rect', lambda *_: None)
-    fw.mock('canvas_translate', lambda *_: None)
-    fw.mock('widget_paint', lambda w, c, *_: painted.append(w))
-    fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)(bar, Canvas(fw).p)
-    assert home.list in painted
+    paint_bg = fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)
+    canvas = Canvas(fw)
+    paint_bg(bar, canvas.p)
+    assert not [r for r in canvas.rects if r[1] < 196 and r[2] < 58]  # nothing over the list's columns in the band
+    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='queue_page')
+    canvas.rects.clear()
+    paint_bg(bar, canvas.p)
+    assert [r[1:] for r in canvas.rects][:1] == [(0, 0, 375, 58)]
 
 
-def test_a_slide_over_home_paints_its_band_drifting_with_home(fw, library):
-    """A page sliding over Home in Split (a push, or a Return back to Home): stock paints the bar before each frame's
-    percent, so page_parallax.c's draw of the page under paints it again, and the bar draws Home's band, the list's
-    rows above Home's window, drifted with Home's snapshot, left of the sliding page and darkened as the snapshot is;
-    the title shows only over the sliding page, faded as far as it is out (user, 2026-11-17: Control Center > hold
-    Bluetooth > Return, or Library > Return, ran a flat band across the top for the whole slide, Home's raised top row
-    cut, the closing page's title over it)."""
-    ui = Ui(fw)
-    split_inset_set(fw, library, 2)
-    home = fw.var('coverflow__home', Home)
-    win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
-    home.win, home.list = win, ui.make(win, 'list_view', 0, -18, 196, 280)
-    ui.make(home.list, 'scroll_view', 0, 0, 196, 280)
-    home.art = ui.make(win, 'image', 196, 0, 179, 262)
-    bar = ui.make(ui.wm, 'system_bar', 0, 0, 375, 58)
+def test_a_slide_over_home_leaves_its_band_to_home_s_snapshot(fw, library):
+    """A payload page under the row sliding over Home in Split (a push, or a Return back to Home): stock paints the bar
+    before each frame's percent, so page_parallax.c's draw of the new page paints it again. Home's band, its rows
+    under the status row, is in Home's own snapshot, drifted and darkened with it, so the bar lays its flat ground only
+    over the sliding page's columns; the title shows only over the sliding page, faded as far as it is out (user,
+    2026-11-17: Control Center > hold Bluetooth > Return, or Library > Return, ran a flat band across the top for the
+    whole slide, Home's raised top row cut, the closing page's title over it)."""
+    ui, home, win, bar = full_bleed_home(fw, library)
     title = ui.make(bar, 'hscroll_label', 64, 0, 120, 58, name='label_title')
-    fw.var('fw_ctx_system_bar', C.c_void_p).value = bar
-    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='localmusic_page')  # the sliding page
+    ui.top = ui.make(ui.wm, 'window', 0, 58, 375, 262, name='queue_page')  # the sliding page, under the row
     ui.animating = 1
     canvas = Canvas(fw)
-    clips, moves, painted, alphas = [], [], [], []
+    clips, painted, alphas = [], [], []
     fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(slice(0, 4), [0, 0, 375, 320]))
     fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
-    fw.mock('canvas_translate', lambda c, x, y, *_: moves.append((C.c_int(x).value, C.c_int(y).value)))
     fw.mock('canvas_set_global_alpha', lambda c, a, *_: alphas.append(a))
     paint_bg = fw.fn('ringnav_paint_bg', C.c_int, C.c_void_p, C.c_void_p)
     paint_border = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
@@ -965,26 +885,24 @@ def test_a_slide_over_home_paints_its_band_drifting_with_home(fw, library):
             paint_bg(title, c)
             paint_border(title, c)
     fw.mock('widget_paint', paint)
-    # stock's own paint of the bar, before the frame's percent: no band
+    # stock's own paint of the bar, before the frame's percent: the page's ground across the bar
     paint_bg(bar, canvas.p)
-    assert home.list not in painted
+    assert [r[1:] for r in canvas.rects][:1] == [(0, 0, 375, 58)]
     wa = C.create_string_buffer(0x100)
     struct.pack_into('<QQ', wa, 0x14, win, ui.top)  # prev_win, curr_win
     struct.pack_into('<Q', wa, 0xb8, canvas.p)
     struct.pack_into('<f', wa, 0xb4, 0.5)  # the new page half in
     fw.mock('htranslate_draw_prev', lambda *_: 0)
-    clips.clear(), moves.clear(), canvas.rects.clear()
+    fw.mock('htranslate_draw_curr', lambda *_: 0)
+    clips.clear(), canvas.rects.clear()
     assert fw.fn('parallax_prev', C.c_int, C.c_void_p)(C.addressof(wa)) == 0
-    dx, open_ = round(375 * 0.5 * 0.3), 375 - round(375 * 0.5)  # Home drifts 56 px; the page covers from 187
-    assert painted[:2] == [bar, home.list]
-    assert (0 - dx, 58) in moves and (dx, -58) in moves  # the list at Home's drifted place
-    assert (0, 0, 196 - dx, 58) in clips  # its columns left of the art, all left of the page
-    assert (0x20000000, 0, 0, open_, 58) in canvas.rects  # the band darkened as Home's snapshot below it
+    assert fw.fn('parallax_curr', C.c_int, C.c_void_p)(C.addressof(wa)) == 0  # the bar over both pages
+    open_ = 375 - round(375 * 0.5)  # the page covers from 187
+    assert painted[:1] == [bar] and home.list not in painted  # the band is Home's snapshot's, not the bar's
+    assert (0x20000000, 0, 0, open_, 320) in canvas.rects  # Home's snapshot darkened, its band with it
+    assert (open_, 0, 375 - open_, 58) in [r[1:] for r in canvas.rects]  # the page's ground, its columns alone
+    assert not [r for r in canvas.rects if r[0] != 0x20000000 and r[1] < open_ and r[2] < 58]
     assert (open_, 0, 375 - open_, 320) in clips and alphas == [128, 255]  # the title over the page alone, faded
-    # the frame painted: the bar's next paint is stock's again, no band
-    painted.clear()
-    paint_bg(bar, canvas.p)
-    assert home.list not in painted
     ui.animating = 0
 
 
@@ -3317,8 +3235,12 @@ def home_row(fw, surface, row, id=0, painting=0):
 
 
 def pane_rect(fw, h):
-    x = fw.fn('coverflow__pane_x', C.c_int)()
-    return h.win, (x, 0, 375 - x, fw.fn('client_h', C.c_int)())
+    """The pane's box in Home's window, the whole screen (docs/oled-design.md#full-bleed): split_art_up rows above
+    the status row's foot to the screen's bottom."""
+    names = host.tools_theme.GEOM_VALS
+    row = dict(zip(names, (C.c_short * len(names)).in_dll(fw.lib, 'theme_engine__geom_vals')))
+    x, ph = fw.fn('coverflow__pane_x', C.c_int)(), fw.fn('client_h', C.c_int)() + row['split_art_up']
+    return h.win, (x, 320 - ph, 375 - x, ph)
 
 
 @pytest.mark.parametrize('name', ('img_library', 'img_cover_flow', 'img_folder', 'img_services', 'img_settings',
@@ -3997,39 +3919,12 @@ def test_the_captions_catch_up_with_the_frame_after_the_paint(fw, state):
 
 # Home's overflow (home.c): nine rows resting on seven, OLED's fades
 
-def test_once_scrolled_the_bar_paints_the_row_above_oled_s_split_list_and_its_fade(fw, library):
-    """Under OLED's pages the strip runs from the screen's top: a scrolled list paints there 40 px taller upward, its
-    rows where they were, put back after, and the top's fade goes over it."""
-    ui, home, view = overflow_rig(fw)
-    split_inset_set(fw, library, 2)
-    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
-    home.art = ui.make(home.win, 'image', 196, 0, 179, 262)
-    ui.top = home.win
-    canvas = Canvas(fw)
-    clips, seen = [], []
-    fw.mock('canvas_get_clip_rect', lambda c, r, *_: (C.c_int * 4).from_address(r).__setitem__(
-        slice(0, 4), list(clips[-1]) if clips else [0, 0, 375, 320]))
-    fw.mock('canvas_set_clip_rect', lambda c, r, *_: clips.append(tuple((C.c_int * 4).from_address(r))))
-    fw.mock('canvas_translate', lambda *_: 0)
-    fw.mock('widget_paint', lambda w, c, *_: seen.append((rect(w), rect(view), offset(view))))
-    strip = fw.fn('coverflow_home_strip', None, C.c_void_p, C.c_void_p)
-    strip(canvas.p, home.win)
-    assert seen == [((0, -18, 204, 280), (0, 0, 204, 280), 0)] and clips[0] == (0, 0, 196, 58)
-    assert not canvas.rects  # at its top: no fade
-    seen.clear()
-    offset(view, 32)
-    strip(canvas.p, home.win)
-    assert seen == [((0, -58, 204, 320), (0, 0, 204, 320), -8)]  # the row above at y 8
-    assert rect(home.list) == (0, -18, 204, 280) and rect(view) == (0, 0, 204, 280) and offset(view) == 32
-    assert canvas.rects and all(r[2] < 58 for r in canvas.rects)  # the top's band, inside the strip's clip
-
-
-def overflow_rig(fw, rows=9, top=-18, hidden=()):
+def overflow_rig(fw, rows=9, top=40, hidden=()):
     """Home's main list as coverflow_home_layout leaves it before home.c sizes it: the rest's box, rows 32 px."""
     themed(fw)
     ui = Ui(fw)
     home = fw.var('coverflow__home', Home)
-    home.win = ui.make(ui.wm, 'window', 0, 58, 375, 262)
+    home.win = ui.make(ui.wm, 'window', 0, 0, 375, 320)  # the whole screen (docs/oled-design.md#full-bleed)
     home.list = ui.make(home.win, 'list_view', 0, top, 204, 224)
     view = ui.make(home.list, 'scroll_view', 0, 0, 204, 224)
     for i in range(rows):
@@ -4059,7 +3954,7 @@ def test_home_rests_on_seven_rows_and_scrolls_the_rest(fw):
     assert rest(view, C.byref(foot)) == 7 * 32 and foot.value == 9 * 32
     assert rest(ui.make(0, 'scroll_view'), None) == 0  # another list
     offset(view, 100)
-    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 320)
     assert rect(home.list)[3] == rect(view)[3] == box  # both: a resize lays out neither
     assert content(view) - box == 2 * 32 and offset(view) == 2 * 32
 
@@ -4071,7 +3966,7 @@ def test_home_scrolled_to_its_end_keeps_its_scroll_through_stock_s_relayout(fw):
     no relayout, stays."""
     ui, home, view = overflow_rig(fw)
     pad = fw.fn('home_pad', None, C.c_void_p)
-    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 320)
     offset(view, 2 * 32)  # the wheel at Settings: as far as the rest goes
     pad(view)
     C.c_int.from_address(view + O['VIEW_CONTENT_H']).value = 9 * 32  # Return: stock's relayout
@@ -4103,11 +3998,11 @@ def test_a_hidden_row_restacked_last_is_not_scrolled_to(fw):
     assert content(view) == 8 * 32  # the box is the rest's: the content is the shown rows'
 
 
-def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()):
+def fades(fw, scroll, sel=None, top=40, split=1, list_y=40, cols=196, hidden=()):
     """home_fades over the rig's list, on a canvas at the screen's origin: {screen row: [(x, w, alpha)]}. The theme
     is read once a test."""
     ui, home, view = overflow_rig(fw, top=top, hidden=hidden)
-    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 262)
+    fw.fn('home_overflow', None, C.c_void_p, C.c_int)(home.list, 320)
     offset(view, scroll)
     if sel is not None:
         ui[view].props['_ringnav_index'] = sel
@@ -4122,13 +4017,13 @@ def fades(fw, scroll, sel=None, top=-18, split=1, list_y=40, cols=196, hidden=()
 
 
 def test_full_fades_straight_across_from_the_rest_s_foot_and_under_the_top_once_scrolled(fw):
-    rows = fades(fw, 0, top=0, split=0, list_y=58, cols=375)
+    rows = fades(fw, 0, top=58, split=0, list_y=58, cols=375)
     assert 58 + 224 - 16 < min(rows) < 58 + 224 - 12 and all(r == [(0, 375, r[0][2])] for r in rows.values())
     alphas = [rows[y][0][2] for y in sorted(rows)]
     assert alphas == sorted(alphas) and alphas[-1] == 255 and max(rows) == 319  # into the ground by y 316
-    rows = fades(fw, 32, top=0, split=0, list_y=58, cols=375, sel=8)
+    rows = fades(fw, 32, top=58, split=0, list_y=58, cols=375, sel=8)
     assert min(rows) == 58 and rows[58][0][2] > rows[70][0][2] > 0 and 72 not in rows  # the top's 14 rows
-    rows = fades(fw, 64, top=0, split=0, list_y=58, cols=375, sel=8)
+    rows = fades(fw, 64, top=58, split=0, list_y=58, cols=375, sel=8)
     assert max(rows) < 72  # scrolled to its end: nothing below to fade
 
 

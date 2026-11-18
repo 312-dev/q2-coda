@@ -557,24 +557,24 @@ def cover(w,h):
     m.u.mem_write(syms['g_lastcover_url'],b'/p/other\0'); art_image(m.home)
     m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0'); art_image(m.home)
     return geometry()
-def fit(w=CH,h=CH): return [PX+int((PW-w)/2),int((CH-h)/2),w,h]
+def fit(w=CH,h=CH): return [PX+int((PW-w)/2),BAR+int((CH-h)/2),w,h]  # Home's window is the screen (full-bleed)
 for (w,h),want in (((300,300),fit()),((2*PW,2*CH),fit(PW)),((600,400),fit(CH*3//2)),((100,400),fit(PW,4*PW))):
     assert cover(w,h)==want,((w,h),geometry(),want)
 passed()
-m.clip=(0,0,375,320); m.word(m.canvas+O['CANVAS_X'],want[0]); m.word(m.canvas+O['CANVAS_Y'],BAR+want[1])
+m.clip=(0,0,375,320); m.word(m.canvas+O['CANVAS_X'],want[0]); m.word(m.canvas+O['CANVAS_Y'],want[1])
 m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.art,m.canvas,0,0),gap=0)
-assert m.clip==(PX,BAR,PW,CH),m.clip
+assert m.clip==(PX,0,PW,320),m.clip  # the pane, up under the status row (coverflow.c pane_y): the cover inside it
 m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.art,m.canvas,0,0),gap=0); assert m.clip==(0,0,375,320)
 # The list paints only left of the panel, raised to screen row HOME_SPLIT_TOP (coverflow.c: 40, beside a pane that
 # runs up under the bar) and its box run on to the window's foot (home.c home_overflow: OLED's Home rows past the rest
 # fade into the ground), clipped at the screen's bottom; the placeholder (no size) fills the panel.
 TOP=40; m.word(m.canvas+O['CANVAS_X'],0); m.word(m.canvas+O['CANVAS_Y'],TOP)
 m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.list,m.canvas,0,0),gap=0)
-assert signed(m.get(m.list+O['W_Y']))==TOP-BAR and m.get(m.list+O['W_H'])==320-TOP and m.clip==(0,TOP,PX,320-TOP),m.clip  # short of the pane
+assert signed(m.get(m.list+O['W_Y']))==TOP and m.get(m.list+O['W_H'])==320-TOP and m.clip==(0,TOP,PX,320-TOP),m.clip  # short of the pane
 m.call(address=HOOKS['widget_on_paint_border'][0],args=(m.list,m.canvas,0,0),gap=0,count=50_000_000); assert m.clip==(0,0,375,320)  # OLED's fades: past the call budget
 m.image_size=None
 m.u.mem_write(syms['g_lastcover_url'],b'/p/none\0')
-art_image(m.home); assert m.nodes[m.art]['image']=='default_album_home' and geometry()==[PX,0,PW,CH]; passed()
+art_image(m.home); assert m.nodes[m.art]['image']=='default_album_home' and geometry()==[PX,BAR,PW,CH]; passed()  # the screen's rows (Home is full-bleed)
 # Neither a still cover nor the placeholder pans (the pan itself: after DepthMachine).
 def drifts(): return [t for t in m.timers.values() if t[1]==payload_syms['home_drift']]
 m.advance(O['DRIFT_TICK_MS']); art_image(m.home); assert not drifts()
@@ -585,7 +585,7 @@ CONFIG.clear(); CONFIG.update(HOME='1'); m=CoverflowMachine(); m.open(); m.top=m
 m.image_size=(300,300); m.byte(syms['g_playcover_type'],1); m.u.mem_write(syms['g_lastcover_url'],b'/p/A\0')
 for _ in range(3): m.call(address=HOOKS['widget_on_paint_background'][0],args=(m.home,m.canvas,0,0))
 assert not [t for t in m.timers.values() if t[1]==payload_syms['home_drift']] and not m.nodes[m.art]['visible']
-assert [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,CH]; passed()
+assert [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,320]; passed()  # hidden, on the pane's box (coverflow.c pane_y)
 
 # Now Playing: stock init runs first, then the album and "-remaining" (slider max less value, in
 # seconds) fill in, and no place in the queue ("2 of 3"): a label of that name stays as it was; later

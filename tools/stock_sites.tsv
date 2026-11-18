@@ -464,6 +464,7 @@ demo	0x675d34	0x4	widget_on_keydown	`addiu $3, $zero, 0x110`; patch/offsets.inc 
 demo	0x6766e0	0x4	widget_on_pointer_down	`addiu $2, $zero, 0x100`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
 demo	0x676b68	0x4	widget_on_pointer_move	`addiu $2, $zero, 0x102`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
 demo	0x676df8	0x4	widget_on_pointer_up	`addiu $2, $zero, 0x104`, before the only call to emitter_dispatch; patch/ipod.json event_abi_words
+demo	0x69997c	0x4	window_manager_default_layout_child	`beqz $2, +27 words`, after the call to widget_is_fullscreen_window; tools/build.py FULL_BLEED
 demo	0x69d218	0x4	window_manager_default_close_window	`lw $5, GOT[a page]` (1st of 2 such), before 1st of 2 calls to widget_get_prop_int; patch/offsets.inc WINDOW_STAGE_OPENED
 demo	0x69f19c	0x4	input_method_default_on_win_close	`sw $zero, 0xc($16)`, the delay slot of the only call to sub_69efdc; patch/offsets.inc IM_KEYBOARD
 demo	0x6b3514	0x4	input_device_status_handle_event	`sb $zero, 0xc($17)` (2nd of 2 such), after "double clicked"; patch/nav/hold_menu.c STALE_NOTES

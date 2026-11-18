@@ -24,8 +24,7 @@
 
 /* The design's place on screen (the approved mock-up, 2026-11-18): the title's and artist's line
  * tops and px, the stars' top, size and gap, the target's size, the dots' top, size and gap. The
- * window starts under the status row's band, at y 58 (tools/ipod.py np_grid's g.bar), so the title
- * stands on Now Playing's own title line, y 64, where the mock-up has 46. */
+ * title stands on Now Playing's own title line, y 64, where the mock-up has 46. */
 #define NR_TITLE_Y 64
 #define NR_TITLE_PX 19
 #define NR_ARTIST_GAP 3
@@ -44,9 +43,10 @@
 #define NR_POLL_MS 500 /* the rating read again while the page shows (a change from the server) */
 /* The glow (the mock-up's radial wash): its centre's screen row and the ellipse's radii, in px;
  * where it reaches black, in 1/256 of them; the cover's grid; each cell's colour boost (1/256)
- * about its luma, its gain (1/256), and the channel cap. The status row's band above the window is
- * flat black (navigation.c ringnav_paint_bg), so the glow fades in over the window's first
- * NR_TOP_FADE rows rather than meeting it with an edge. */
+ * about its luma, its gain (1/256), and the channel cap. The window is the whole screen and the
+ * status row an overlay on it, so a page full screen has the glow to the screen's top edge; a page
+ * whose top is the status row's foot (the column) has Now Playing's black above it, so its glow
+ * fades in over its first NR_TOP_FADE rows rather than meeting the black with an edge (nr_top_fade). */
 #define NR_GLOW_CY 122
 #define NR_GLOW_RX 273
 #define NR_GLOW_RY 220
@@ -143,14 +143,13 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
     for (int y = 0; y < h; ++y) {
         /* the grid's rows about cell centres, in 1/256 of a cell */
         int fy = nr_clamp((2 * y + 1) * NR_GRID * 128 / h - 128, 0, (NR_GRID - 1) * 256),
-            y0 = fy >> 8, y1 = y0 + (y0 < NR_GRID - 1), v = (y - cy) * 256 / NR_GLOW_RY,
-            top = y >= NR_TOP_FADE ? 256 : y * 256 / NR_TOP_FADE;
+            y0 = fy >> 8, y1 = y0 + (y0 < NR_GRID - 1), v = (y - cy) * 256 / NR_GLOW_RY;
         fy &= 255;
         unsigned *row = px + y * w;
         for (int x = 0; x < w; ++x) {
             int u = (x - cx) * 256 / NR_GLOW_RX,
                 t2 = (u * u + v * v) * 256 / (NR_GLOW_END * NR_GLOW_END);
-            if (t2 >= 256 || !top) {
+            if (t2 >= 256) {
                 row[x] = 0xff000000u;
                 continue;
             }
@@ -159,7 +158,6 @@ static void nr_glow_paint(unsigned *px, int w, int h, int wy, const unsigned *g)
                 x0 = fx >> 8, x1 = x0 + (x0 < NR_GRID - 1),
                 grain = (int)(((unsigned)x * 73856093u ^ (unsigned)y * 19349663u) >> 8) % 3 - 1;
             fx &= 255;
-            f = f * top >> 8;
             unsigned out = 0xff000000u;
             for (int k = 0; k < 3; ++k) {
                 int a = cell[y0 * NR_GRID + x0][k] * (256 - fx) + cell[y0 * NR_GRID + x1][k] * fx,
@@ -270,11 +268,25 @@ static void nr_page_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* The glow's fade in over w's first NR_TOP_FADE rows, black over it from opaque to clear, when w's
+ * top stands at or under the status row's foot (the column, not full screen). */
+static void nr_top_fade(void *w, void *canvas) {
+    int x0, y0;
+    nr_in_window(w, &x0, &y0);
+    if (y0 < bar_foot(st.np_win)) return;
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
+    for (int y = 0; y < NR_TOP_FADE; ++y) {
+        stock_canvas_set_fill_color(canvas, (unsigned)(255 - y * 255 / NR_TOP_FADE) << 24);
+        canvas_fill_rect(canvas, 0, y, I(w, W_W), 1);
+    }
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
 /* ringnav_paint_bg, after stock's: the glow behind the lyrics page and the rating page, and the
  * rating page itself */
 void np_rate_bg(void *w, void *canvas) {
     if (!nr || !w || (w != nr->page && w != nr->lyric) || !P(canvas, CANVAS_LCD)) return;
-    np_glow_rows(w, canvas, 0, I(w, W_H), 0xff);
+    if (np_glow_rows(w, canvas, 0, I(w, W_H), 0xff)) nr_top_fade(w, canvas);
     if (w == nr->page) nr_page_paint(w, canvas);
 }
 

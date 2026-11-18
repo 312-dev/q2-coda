@@ -455,9 +455,11 @@ BATT_H_W = inc('BATT_BODY_W') + inc('BATT_NUB_W') + inc('BATT_GAP') + BATT_PCT_W
 
 def status_bar(root, g):
     left, right = root[3]
-    root[2]['style:normal:bg_color'] = '#000000'
-    # Clear, not black: AWTK draws the border over the bar's fill, and Light Mode flips black to paper.
-    root[2].update({f'style:{s}:border_color': '#00000000' for s in ('normal', 'disable', 'focused')})
+    # Clear in every state (the bar is disabled, so AWTK paints its disable style): the bar is an overlay on a full-bleed
+    # page (docs/oled-design.md#full-bleed); the payload fills it black only over a page that starts under it
+    # (theme_titles_paint.c ringnav_paint_bg). Its border clear too: AWTK draws the border over the bar, and Light Mode
+    # flips black to paper.
+    root[2].update({f'style:{s}:{k}': '#00000000' for s in ('normal', 'disable', 'focused') for k in ('bg_color', 'border_color')})
     check([left[2].get('name'), right[2].get('name')] == ['view_left', 'view_right'], 'Unexpected status bar')
     check(root[1][3] == left[1][3] == right[1][3] == 30, 'Unexpected status bar height')
     root[1][3] = left[1][3] = right[1][3] = g.bar
@@ -1118,6 +1120,31 @@ def patch_asset(path, data, g):  # pragma: no mutate block
     """UI asset path's bytes (data, stock's) laid out on grid g."""
     page = patch_page(path, data, g)
     return modal_page(page) if path in MODAL_PAGES else page
+
+
+def full_bleed(data, bar):
+    """A UI asset as a full-bleed page: every normal window takes the whole screen (tools/build.py FULL_BLEED), the
+    status row an overlay on it, so a window's top-level children move down bar px and rest where they did when the
+    window started under the row (docs/oled-design.md#full-bleed). A child placed by self_layout moves in its params,
+    which AWTK lays out again on each relayout: a px y gains bar, a 100% height loses it (AWTK's negative h is the
+    parent's less that). Dialogs, the keyboard and the system bar keep their own boxes."""
+    root = decode(data)
+    if root[0] != 'window':
+        return data
+    for child in root[3]:
+        layout = child[2].get('self_layout')
+        if layout is None:
+            child[1][1] += bar
+            continue
+        found = need(re.fullmatch(r'default\((.*)\)', layout), f'Unexpected self_layout {layout}')
+        params = dict(kv.split('=', 1) for kv in found[1].split(','))
+        if re.fullmatch(r'-?\d+', params.get('y', '0')):
+            params['y'] = str(int(params.get('y', '0')) + bar)
+        if params.get('h') == '100%':
+            params['h'] = str(-bar)
+        child[2]['self_layout'] = 'default(' + ','.join(f'{k}={v}' for k, v in params.items()) + ')'
+        child[1][1] += bar
+    return encode(root)
 
 
 def patch_page(path, data, g):  # pragma: no mutate block

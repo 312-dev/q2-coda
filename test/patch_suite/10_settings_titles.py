@@ -283,7 +283,8 @@ def oled_set(m):
 # 68 px settings rows (SET_ROW) is not a settings list on that set.
 for builder in (0x4ca914, 0x4d3594, 'display'):  # language, System settings, Display
     CONFIG.clear(); m,view=settings(builder,default=OLG.set_row,boot=oled_set); items=[i for i in m.nodes[view]['children'] if m.nodes[i]['visible']]
-    assert lay(m,view)==0 and m.get(m.get(view+O['W_PARENT'])+O['W_Y'])==OLG.set_top
+    # set_top counts from the status row's foot: in the full-bleed window (at 0), the bar's height down (settings_layout)
+    assert lay(m,view)==0 and m.get(m.get(view+O['W_PARENT'])+O['W_Y'])==OLG.set_top+OLG.bar
     assert [geometry(m,i)[1] for i in items]==[OLG.set_row*k for k in range(len(items))] and {geometry(m,i)[3] for i in items}=={OLG.set_row},builder
     for i in items:
         for c in m.nodes[m.nodes[i]['children'][0]]['children']:
@@ -308,6 +309,8 @@ for k in range(1,len(items)):
     m.call(); m.paint(view); i=k; assert m.selected(view)==i
     y=geometry(m,items[i])[1]-signed(m.get(view+O['SCROLL_Y']))
     assert 0<=y and y+OLG.set_row<=SET['ROWS']*SET['ROW'], (k,y)
+    # the list's box runs past the list end (282 on the screen, as on the Q2), so list_fade's black rows follow the bar's
+    m.bands=[b for b in m.bands if b[4]&0xffffff]
     assert m.bands and m.sel()[2:]==(375-2*OLT['sel_inset'],OLG.set_row)
 assert m.confirm()==11 and m.dispatched()[0][1]==buttons[-1]; passed()
 m.click(buttons[2]); assert m.selected(view)==2; passed()
@@ -362,7 +365,7 @@ assert boxof(al)==(OLG.text_x+28,0,280,OLG.action_row) and boxof(ap)==(0,0,300,O
 # wheel's last row ends there, past stock's own end. A list lower in its window stops at the same screen row.
 for ly in (0,32):
     lm=oled_set(Machine())
-    lw,les=lm.page_list(14,height=294-ly,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.word(lw+O['W_Y'],ly); lm.paint(lw)
+    lw,les=lm.page_list(14,height=294-ly,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.word(lw+O['W_Y'],OLG.bar+ly); lm.paint(lw)  # ly under the row's foot (full-bleed)
     tops=[]
     for _ in range(16):
         lm.call(); lm.paint(lw); tops.append(lm.get(lw+O['SCROLL_Y']))
