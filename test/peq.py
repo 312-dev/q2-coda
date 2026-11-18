@@ -445,6 +445,8 @@ static int stock_eq_calls;
 int stock_eq_trampoline(int mode) { ++stock_eq_calls; return mode; }
 int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
+/* theme_engine.c's bar_foot is V_BAR less the window's y: 0 here, the page a window under the status row (290 high) */
+int bar_foot(void *w) { (void)w; return 0; }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
 /* menu_modal.c's sheet does not open here: the Type picker is the editor's own screen */
