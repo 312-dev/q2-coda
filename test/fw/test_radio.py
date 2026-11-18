@@ -2097,3 +2097,43 @@ def test_the_search_box_gives_the_strip_its_magnifier(fw):
     page(fw)
     fw.fn('radio_search', None)()
     assert strip_return(fw, ui(fw).edit) == STRIP_SEARCH
+
+
+# A fetch while Smart Wi-Fi brings the radio back waits for the link under the overlay too, the list on show.
+def wifi_waiting(fw):
+    p = page(fw)
+    Curl(fw, m3u(('A', 'http://a.example/')))
+    sw = fw.var('smart_wifi__sw', C.c_uint * 8)  # at, busy_at, woke_at, hold_timer, off, ...
+    sw[4] = 1  # off: the radio coming back
+    menu, lists = p.menu_rows(), len(fw.calls('list_view_create'))
+    p.menu('Top Stations')
+    return p, sw, menu, lists
+
+
+def test_a_fetch_waiting_for_wi_fi_waits_under_the_overlay(fw):
+    p, sw, menu, lists = wifi_waiting(fw)
+    assert ui(fw).pend == 1 and ui(fw).wifi == 1 and ui(fw).note == 0 and not p.threads
+    assert p.menu_rows() == menu and len(fw.calls('list_view_create')) == lists  # no Connecting… or Loading… page
+    assert p.toasts == ['Connecting to Wi-Fi…']
+    sw[4] = sw[2] = 0  # the link up
+    p.run('tick')
+    assert len(p.threads) == 1 and fx(fw).running == 1 and ui(fw).pend == 1 and ui(fw).note == 0
+    assert len(fw.calls('list_view_create')) == lists
+
+
+def test_return_gives_a_fetch_waiting_for_wi_fi_up(fw):
+    p, sw, menu, lists = wifi_waiting(fw)
+    p.key(ui(fw).page)
+    p.run('leave')
+    assert ui(fw).pend == 0 and ui(fw).wifi == 0 and p.menu_rows() == menu
+    sw[4] = sw[2] = 0
+    p.run('tick')
+    assert not p.threads and ui(fw).level == MENU  # nothing fetched or opened late
+
+
+def test_a_row_pressed_while_waiting_for_wi_fi_does_nothing(fw):
+    p, sw, menu, lists = wifi_waiting(fw)
+    url = fx(fw).url
+    p.rows('menu_click')[menu.index('By Genre')]()
+    assert not p.live('go') or p.run('go') == 0
+    assert fx(fw).url == url and ui(fw).pend == 1

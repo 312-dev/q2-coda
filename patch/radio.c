@@ -597,22 +597,25 @@ static void fetch_cancel(void) {
 }
 
 static void fetch_run(void);
-/* RADIO_API path for level want, A-Z when az; while Smart Wi-Fi brings the radio back, "Connecting
- * to Wi-Fi…" until the tick finds its link up (smart_wifi_wait). */
+/* RADIO_API path for level want, A-Z when az; while Smart Wi-Fi brings the radio back, it waits
+ * for the tick to find its link up (smart_wifi_wait), under the loading overlay from a list on show
+ * (a "Connecting to Wi-Fi…" toast saying why), else on that note. */
 static void fetch(const char *path, int want, int az) {
     fetch_cancel();
     ui.want = want;
     ui.az = az;
     ui.sel[want] = 0;
     tk_snprintf(fx.url, sizeof fx.url, RADIO_API "%s", path);
-    if ((ui.wifi = smart_wifi_wait()))
+    if ((ui.wifi = smart_wifi_wait()) && ui.view && !ui.note)
+        ui.pend = 1, widget_invalidate_force(ui.page, 0), toast("Connecting to Wi-Fi…");
+    else if (ui.wifi)
         note("Connecting to Wi-Fi…");
     else
         fetch_run();
 }
 
-/* fx.url fetched on fx's pthread: from a list on show under the loading overlay, else (a fetch
- * Smart Wi-Fi held back, its note on show) "Loading…" meanwhile. */
+/* fx.url fetched on fx's pthread: from a list on show under the loading overlay (kept from the
+ * wait for Smart Wi-Fi's link), else (that wait's note on show) "Loading…" meanwhile. */
 static void fetch_run(void) {
     fx.n = 0;
     fx.cancel = fx.done = 0;
@@ -622,7 +625,7 @@ static void fetch_run(void) {
     if (fx.running && ui.view && !ui.note)
         ui.pend = 1, widget_invalidate_force(ui.page, 0);
     else
-        note(fx.running ? "Loading…" : get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
+        ui.pend = 0, note(fx.running ? "Loading…" : get_wifisignal() > 0 ? "Directory unavailable" : "No Wi-Fi");
 }
 
 /* The loading overlay let go: the transfer stopped and joined, the list as it was (Return, or a
