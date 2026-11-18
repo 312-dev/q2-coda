@@ -1,5 +1,5 @@
 <!-- Theme: OLED (docs/ipod.md#theme), built to docs/oled-design.md: the one built-in theme. A black screen, white
-     Inter in sentence case, one blue accent. It states its own grid as the oled geometry set and draws its own art
+     Inter in sentence case, one blue accent. It states its own grid (its <geometry>) and draws its own art
      (tools/art.py oled_*: Phosphor's glyphs). Sizes here are AWTK's, which scales a face so that its ascent less its
      descent is the size: Inter's line is 1.21 em, so the design's 20 px type is 24 here, its 15 px 18, its 22 px 27.
      Its numbers that track patch/offsets.inc (Home's Full label end, the scheme colours, Cover Flow's CF_* and the
@@ -18,7 +18,7 @@
        under the status row's play state and battery (each of their pixels inked white or black, whichever stands
        out more against the art under it: coverflow.c home_ink), the glass rounding its corners, panning slowly across its 110 % zoom with 2 % of the zoom kept clear at each edge, so a
        cover's own border never shows (coverflow.c drift_axis). -->
-  <geometry name="oled" bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
+  <geometry bar="58" pitch="32" body="32" art="40" art_inset="6" art_pitch="52"
             art_body="52" text_art="0" text_art_inset="0" lib_pitch="32" lib_body="32" lib_inset="0"
             lib_art="0" title24_y="4" title_y="6" meta_y="8"
             count_y="8" art_title24_y="6" art_meta_y="33" folder_pitch="32" folder_body="32" song_pitch="32" song_body="32" song_title24_y="4"
@@ -30,7 +30,6 @@
             search_row="52" search_body="52" search_art="0" search_title_y="4" search_title24_y="4" search_title_h="28"
             search_meta_y="31" search_meta_h="20" np_art="150" np_bar_y="228"
             split_row="204" split_art="196" split_art_up="58" split_inset="2" modal="1"/>
-  <geometry set="oled"/>
   <!-- Colour (oled-design.md Colour): Accent Blue, one value for the bar, the progress fill and every mapped red, as
        its own scheme's five tones; white text on it in both halves; second lines in Text Tertiary (stock's #aaaaaa secondary text
        turns muted); the light half on white paper with black ink. -->

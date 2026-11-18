@@ -36,7 +36,8 @@ class Geometry:
     icon at set_icon (0 hides it); payload rows are built 70 px high (SET_STOCK_BODY), stock's shape,
     and mapped like stock's.
     stream_row: Streaming's settings rows, which follow Row Art; taller than set_row, they have SET_ICON's icon.
-    SET0 is the built-in set; a theme declares its others in its theme.xml (<geometry name>, tools/theme.py)."""
+    STOCK_GRID is stock's own grid, its pages' measurements: the theme's <geometry> (its theme.xml, tools/theme.py)
+    states the build's grid over it."""
     name: str = 'ipod'
     bar: int = 30
     pitch: int = 72
@@ -117,7 +118,7 @@ class Geometry:
     modal: int = 0
 
 
-SET0 = Geometry()
+STOCK_GRID = Geometry()
 MARGIN = 8
 # The 375x320 panel's glass has rounded corners that hide whatever is drawn in them. CORNER_R is
 # the device calibration knob: the corner radius in pixels, fitted to device photos (V5.4I cut
@@ -163,7 +164,7 @@ CLOCK_TEXT = 70
 # calibration knob.
 SLIDE = f'htranslate(duration={inc("PAGE_SLIDE_MS")})'
 HOME_TOP = inc('HOME_TOP')
-HOME_ROW = SET0.home_row
+HOME_ROW = STOCK_GRID.home_row
 HOME_REST = inc('HOME_REST')
 HOME_TEXT_X = inc('HOME_DOT_X') + inc('HOME_DOT') + inc('HOME_DOT_GAP')  # labels after the selection dot
 HOME_LABEL_END = inc('HOME_LABEL_END')  # clear of the chevron's box, and so of the lower-right glass
@@ -202,7 +203,7 @@ def with_geometry(g):
         NP_TIME_X=max(MARGIN, corner_x(g.bar + NP_TIMES_Y + 1, 14)))
 
 
-GEOM_VALS = ('bar', 'set_row', 'set_icon', 'batt_w', 'batt_h', 'text_x', 'lib_art', 'list_end', 'action_row', 'stream_row', 'stock_row', 'toolbar', 'status_y', 'right_x', 'list_fit', 'split_row', 'split_art', 'split_art_up', 'split_inset', 'modal')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
+GEOM_VALS = ('bar', 'set_row', 'batt_w', 'batt_h', 'text_x', 'list_end', 'action_row', 'status_y', 'right_x', 'split_row', 'split_art', 'split_art_up', 'split_inset')  # Geometry fields the payload reads at run time (themes.inc geom_vals), not immediates
 
 
 def folder_pitch(g):
@@ -214,7 +215,7 @@ def folder_body(g):
     return g.folder_body or g.art_body
 
 
-def immediate_values(g=SET0):
+def immediate_values(g=STOCK_GRID):
     """{value name: word} for the named ipod.json immediates under geometry g."""
     geo = with_geometry(g)
     values = {k: v for k, v in dataclasses.asdict(g).items() if k in VALUE_NAMES}
@@ -222,7 +223,7 @@ def immediate_values(g=SET0):
                      'scroll': geo.BOTTOM - (g.action_row or 50), 'np_bar_x': geo.NP_BAR[0], 'np_bar_w': geo.NP_BAR[2]}
 
 
-IPOD = with_geometry(SET0)
+IPOD = with_geometry(STOCK_GRID)
 BOTTOM, PITCH, BODY, ART, ART_INSET = IPOD.BOTTOM, IPOD.PITCH, IPOD.BODY, IPOD.ART, IPOD.ART_INSET
 NP_ICONS_END, NP_BAR_X, NP_BAR, NP_TIME_X = IPOD.NP_ICONS_END, IPOD.NP_BAR_X, IPOD.NP_BAR, IPOD.NP_TIME_X
 check(set(vars(IPOD)) == {'BOTTOM', 'PITCH', 'BODY', 'ART', 'ART_INSET', 'NP_ICONS_END', 'NP_BAR_X', 'NP_BAR', 'NP_TIME_X'},
@@ -402,7 +403,7 @@ def home_list(name, rows, g, extra=None, view_name=None):
             {'name': 'list_view_' + name, 'item_height': str(g.home_row), **LIST_CLEAR, **(extra or {})}, [view]]
 
 
-def ipod_home(root, g=SET0):
+def ipod_home(root, g=STOCK_GRID):
     geo = with_geometry(g)
     check([n[0] for n in root[3]] == ['slide_menu', 'image', 'image'], 'Unexpected home carousel')
     check([n[2]['name'] for n in root[3][0][3]] == ['btn_' + r for r in
@@ -475,7 +476,7 @@ BATT_H_W = inc('BATT_BODY_W') + inc('BATT_NUB_W') + inc('BATT_GAP') + BATT_PCT_W
 CLOCK_GAP = 4
 
 
-def status_bar(root, g=SET0):
+def status_bar(root, g=STOCK_GRID):
     left, right = root[3]
     root[2]['style:normal:bg_color'] = '#000000'
     # Clear, not black: AWTK draws the border over the bar's fill, and Light Mode flips black to paper.
@@ -619,7 +620,7 @@ def np_buttons(named):
         named[name][2].pop('self_layout', None)
 
 
-def playing_page(root, g=SET0):
+def playing_page(root, g=STOCK_GRID):
     geo = with_geometry(g)
     named = {n[2].get('name'): n for n in walk(root)}
     check([n[2].get('name') for n in root[3]] == [
@@ -1187,14 +1188,14 @@ def modal_page(data):
     return encode(root)
 
 
-def patch_asset(path, data, g=SET0):  # pragma: no mutate block
+def patch_asset(path, data, g=STOCK_GRID):  # pragma: no mutate block
     if g.modal and path in MODAL_PAGES:
         return modal_page(patch_asset(path, data, dataclasses.replace(g, modal=0)))
     geo = with_geometry(g)
     pitch, body, inset = page_rows(g, PAGE_KIND.get(path, 'text'))
     stock = path in STOCK_ROWS
     check(sha(data) == (STOCK_ROWS if stock else UI_ASSETS)[path], f'{path}: unaudited UI asset')
-    if stock and g.toolbar and g.stock_row == SET0.stock_row:
+    if stock and g.toolbar and g.stock_row == STOCK_GRID.stock_row:
         return data
     if stock:
         pitch, body = g.stock_row, g.stock_body

@@ -419,8 +419,8 @@ const scheme_t *scheme(void) { /* light is only asked of it in its light half */
     return &s;
 }
 int client_h(void) { return 320 - stub_bar_h; }
-int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* the built-in set's */
-int list_fit_end(void) { return 0; } /* the built-in set fits no list */
+int split_geom(int k) { return k == SPLIT_ROW || k == SPLIT_ART ? HOME_SPLIT_W : 0; } /* stock's grid's (STOCK_GRID) */
+int list_fit_end(void) { return 0; } /* unread by these sources */
 int theme_font(void *w, int role, int was) { return was; } /* the font only: no geometry */
 /* Each fill in the colour last set, the centred text's. */
 static int fills;

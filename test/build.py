@@ -317,7 +317,7 @@ def validate_assets(directory):
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, PITCH, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SET_ROW, SET_ROWS, SET_TOP, UI_ASSETS,
                       NP_BAR, NP_TOUCH, NP_MARGIN, NP_TOP, STATUS_BAR, STATUS_HIDDEN, STATUS_LEFT, STATUS_MARGIN, STATUS_RIGHT, CLOCK_MIN, CLOCK_TEXT, corner_inset, corner_x,
                       STATUS_ICONS, status_icon, QUIET_ICONS, quiet_icon, SET_ICON, SET_STOCK_ICON, SETTINGS_ICONS, SETTINGS_SLIDERS, decode, slider_plain, imagemagick, inc, png_header, settings_icon, walk,
-                      patch_asset, patch_code, patch_style, style_props, SLIDE, SET0, STOCK_ROWS,
+                      patch_asset, patch_code, patch_style, style_props, SLIDE, STOCK_GRID, STOCK_ROWS,
                       STATUS_ROW_GAP, STATUS_ROW_LINE)
     manifest = json.loads((directory/'manifest.json').read_text())
     stock = (directory/'stock-demo').read_bytes()
@@ -822,7 +822,7 @@ def validate_assets(directory):
         assert new == (english_ui(short, edited) if short in chinese else edited), short
         if short not in UI_ASSETS:
             continue
-        # The checks below are of the transform on SET0, the defaults OLED's set extends; the set's own checks, of the
+        # The checks below are of the transform on STOCK_GRID, the defaults OLED's set extends; the set's own checks, of the
         # pages as built, follow this loop.
         new = patch_asset(short, original)
         if short in chinese:
@@ -867,8 +867,8 @@ def validate_assets(directory):
         slides = short not in (HOME_PAGE, STATUS_BAR, PLAYING_PAGE, QUICK_SETTINGS, CONFIRM, BIGCOVER)
         assert root[2].get('anim_hint') == (SLIDE if slides else None), short
         # screen coordinates: the bar, full-screen dialogs (quick settings slides down from -320), windows
-        origin, window = {STATUS_BAR: (0, (0, SET0.bar)), QUICK_SETTINGS: (320, (0, 320)), CONFIRM: (0, (0, 320)),
-                          BIGCOVER: (0, (0, 320))}.get(short, (SET0.bar, (SET0.bar, 320)))
+        origin, window = {STATUS_BAR: (0, (0, STOCK_GRID.bar)), QUICK_SETTINGS: (320, (0, 320)), CONFIRM: (0, (0, 320)),
+                          BIGCOVER: (0, (0, 320))}.get(short, (STOCK_GRID.bar, (STOCK_GRID.bar, 320)))
         corners(short, root, 0, origin, window)
         if short == QUICK_SETTINGS:  # iPod only: the stock 4x2 grid, even label areas, a slim brightness track
             menu, light = root[3]
@@ -945,8 +945,8 @@ def validate_assets(directory):
             dot = inc('HOME_DOT_X'), inc('HOME_DOT')
             assert HOME_TEXT_X == sum(dot) + inc('HOME_DOT_GAP')
             # The dot and the labels clear the bottom row's corner.
-            assert dot[0] >= corner_x(SET0.bar + HOME_TOP + 6*HOME_ROW + (HOME_ROW - dot[1])//2, dot[1])
-            assert HOME_TEXT_X >= corner_x(SET0.bar + HOME_TOP + 6*HOME_ROW + 9, 20)
+            assert dot[0] >= corner_x(STOCK_GRID.bar + HOME_TOP + 6*HOME_ROW + (HOME_ROW - dot[1])//2, dot[1])
+            assert HOME_TEXT_X >= corner_x(STOCK_GRID.bar + HOME_TOP + 6*HOME_ROW + 9, 20)
             # Split (coverflow_home_layout) gives the menu half the screen, the art the rest;
             # Split's glyph ends 13px before the art, as in the Home concept.
             assert inc('HOME_SPLIT_W') == 375 // 2
@@ -959,11 +959,11 @@ def validate_assets(directory):
             assert title[0] == 'hscroll_label' and title[2]['name'] == 'label_clock'
             x, _, w, _ = title[1]
             assert x + w/2 == 375/2 and w >= CLOCK_MIN  # centred on the screen, clear of both groups (corners below)
-            assert inc('CLOCK_EDGE') >= corner_x((SET0.bar - 20) // 2, 20) and x >= inc('CLOCK_EDGE')
+            assert inc('CLOCK_EDGE') >= corner_x((STOCK_GRID.bar - 20) // 2, 20) and x >= inc('CLOCK_EDGE')
             assert title[2]['style:normal:font_size'] == '16'
             assert all(v[2]['children_layout'].endswith(f'xm={STATUS_MARGIN},s={inc("STATUS_GAP")})') for v in (left, right))
             idle = rest.pop()
-            assert idle[1] == [STATUS_MARGIN, 0, 28, SET0.bar] and idle[2]['text'] == 'Q2' and idle[2]['visible'] == 'false'
+            assert idle[1] == [STATUS_MARGIN, 0, 28, STOCK_GRID.bar] and idle[2]['text'] == 'Q2' and idle[2]['visible'] == 'false'
             assert idle[2]['style:normal:font_size'] == '18' and STATUS_MARGIN >= corner_x(6, 18)
             assert STATUS_MARGIN + 28 < x
             assert [n[2]['name'] for n in rest] == STATUS_HIDDEN and all(n[1][0] + n[1][2] < 0 for n in rest)
@@ -1012,7 +1012,7 @@ def validate_assets(directory):
             assert named['view_lrc'][2]['self_layout'] == 'default(x=0,y=0,w=375,h=178)' and 3 * slot <= 178 < 4 * slot
             assert lrc['self_layout'] == 'default(x=0,y=0,w=100%,h=100%)' and lrc['children_layout'] == f'list_view(x=0,y={slot},s=0)'
             lyric_x = int(re.search(r'^#define LYRIC_OLED_X (\d+)', (ROOT/'patch/lyrics.c').read_text(), re.M)[1])
-            assert lyric_x >= NP_MARGIN >= corner_x(SET0.bar + NP_TOP, 178)
+            assert lyric_x >= NP_MARGIN >= corner_x(STOCK_GRID.bar + NP_TOP, 178)
             slider = named['slider_play']
             assert slider[1] == [NP_BAR[0], 233, NP_BAR[2], NP_TOUCH] and NP_TOUCH >= 44
             assert slider[2]['bar_size'] == '4' and slider[2]['slide_with_bar'] == 'true'
@@ -1053,7 +1053,7 @@ def validate_assets(directory):
         if short == 'localmusic/playlist_page.bin':
             old_nav = next(n for n in decode(original)[3] if n[2].get('name') == 'view_navbar')
             gif, old = (next(n for n in p[3] if n[2].get('name') == 'gif_returnplay') for p in (nav, old_nav))
-            assert gif[1] == [375 - corner_x(SET0.bar, old[1][3]) - old[1][2], *old[1][1:]]
+            assert gif[1] == [375 - corner_x(STOCK_GRID.bar, old[1][3]) - old[1][2], *old[1][1:]]
             assert nav[2].get('visible') != 'false' and nav[2].get('enable') != 'false'
             gif[1][0] = old[1][0]
             assert nav == old_nav, 'only the right button keeps clear of the glass'

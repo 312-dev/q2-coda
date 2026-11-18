@@ -9,7 +9,7 @@ import pytest
 import art
 import ipod
 import theme
-from ipod import Geometry, O, SET0
+from ipod import Geometry, O, STOCK_GRID
 from theme import ThemeError
 
 
@@ -134,10 +134,10 @@ MOTION_TODAY = {**{f'motion.{k}.{a}': 0 for k in ('page', 'playing', 'coverflow'
 CF_LO = '<view name="coverflow">' + ''.join(
     f'<element name="{e}" ' + ' '.join(f'{k.path.rpartition(".")[2]}="{41 if k.path.endswith(".eye") else k.lo}"' for k in theme.SCHEMA.values()
                                        if k.path.startswith(f'coverflow.{e}.')) + '/>' for e in ('shelf', 'caption')) + '</view>'
-# The engine's tests' base: a synthetic theme with no base of its own that offers every ACCENTS row, on a set of its
+# The engine's tests' base: a synthetic theme with no base of its own that offers every ACCENTS row, on a grid of its
 # own with a right column (the chevrons and song rows stand on it) and the wheel's scroll indicator, which every
 # theme draws (theme.validate).
-BASE_GEOM = '<geometry name="base" right_x="28"/><geometry set="base"/>'
+BASE_GEOM = '<geometry right_x="28"/>'
 BASE_SB = '<view name="list"><element name="scrollbar" w="4" right="5" top="134" bottom="206" min="8" thumb="#e5e5e5"/></view>'
 A = '<option setting="accent" key="ACCENT"/>'
 BASE_BODY = BASE_GEOM + '<option setting="light" preset="off" keep="auto"/>' + A + BASE_SB + CF_LO
@@ -375,9 +375,8 @@ def test_emit(tmp_path):
 
 
 def on_oleds_set(t):
-    """t on OLED's geometry set: the build bakes one set, so themes emitted together share it."""
-    o = oled()
-    return dict(t, geoms=o['geoms'], geom_set=o['geom_set'])
+    """t on OLED's grid: the build bakes one, so themes emitted together share it."""
+    return dict(t, geom=oled()['geom'])
 
 
 def test_emit_both(tmp_path):
@@ -400,7 +399,7 @@ def test_emit_both(tmp_path):
 
 def test_view_attr():
     assert theme.view_attr('list.selection.radius') and theme.view_attr('home.rows.top')
-    assert not theme.view_attr('geometry.set') and not theme.view_attr('scheme.muted')
+    assert not theme.view_attr('scheme.muted')
     assert not theme.view_attr('scheme.sel.text')  # a scheme role has two dots too
 
 
@@ -497,9 +496,8 @@ def test_coverflow_swing_near_edge_clears_the_eye_mid_step():
         theme.validate({**oled(), 'cf.swing': 1, 'cf.eye': 81, 'cf.z1': 0, 'cf.tilt': 90}, 't.xml')
 
 
-def test_coverflow_caption_follows_the_bar(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'tall', Geometry(name='tall', bar=34, right_x=28))
-    t = {**oled(), 'geom_set': 'tall'}
+def test_coverflow_caption_follows_the_bar():
+    t = {**oled(), 'geom': Geometry(name='tall', bar=34, right_x=28)}
     with pytest.raises(theme.ThemeError, match='text_y \\+ 55 = 287 exceeds the client height 286'):
         theme.validate({**t, 'cf.text_y': 232}, 't.xml')
     theme.validate({**t, 'cf.text_y': 231}, 't.xml')
@@ -522,7 +520,7 @@ def test_oled_shelf():  # its side covers' geometry from its keys; the frame hol
         assert abs(outer(n)[0] - x) <= 1 and (h is None or abs(outer(n)[1] - h) <= 1)
     assert (t['cf.horizon'], t['cf.swing'], t['cf.lift'], t['cf.eye_turn']) == (64, 2, 0, 0)  # straight out, as #329's lab
     assert t['cf.reflect_top'] == 0  # no reflection floor: the reflection's top at 0 of its cover's brightness
-    assert t['cf.top'] + 160 + t['cf.reflect'] <= t['cf.view_h'] <= 320 - t['geoms'][t['geom_set']].bar
+    assert t['cf.top'] + 160 + t['cf.reflect'] <= t['cf.view_h'] <= 320 - t['geom'].bar
 
 
 def test_oled_caption_tails_end_on_the_list_end():
@@ -542,7 +540,7 @@ def test_oled_caption_tails_end_on_the_list_end():
     top = t['cf.text_y'] + t['cf.artist_y'] + (O['CF_ARTIST_H'] - t['cf.artist_px']) // 2
     baseline = math.floor(top + font['hhea'].ascent * scale)
     tail = baseline + max(depth(ch) for ch in 'pygqj') * scale
-    assert tail <= t['geoms'][t['geom_set']].list_end  # window rows: the screen's y 282 under the 58 px status row
+    assert tail <= t['geom'].list_end  # window rows: the screen's y 282 under the 58 px status row
 
 
 def test_emit_cf(tmp_path):
@@ -587,14 +585,6 @@ def test_emit_page_rows(tmp_path):
     assert all(text.count(f'.{k} = {v},') == 1 for k, v in (('page_row', 32), ('page_detail', 52), ('page_title_h', 0), ('page_cap_y', 4)))
 
 
-TEST = Geometry(name='test', pitch=28)
-
-
-@pytest.fixture
-def test_set(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'test', TEST)
-
-
 def oled_with(geometry):
     text = (THEMES/'oled/theme.xml').read_text()
     text = re.sub(r'(<theme\b[^>]*>)', r'\1' + geometry, text, count=1)
@@ -604,31 +594,30 @@ def oled_with(geometry):
     return t
 
 
-def test_oled_is_on_its_own_set():
+def test_oled_is_on_its_own_grid():
     o = oled()
-    assert theme.geometry(o) == theme.sets(o)['oled'] and theme.built_geometry([o]) == theme.geometry(o)
-    assert bare(oled_with('')) == bare(o)
+    assert theme.geometry(o) == o['geom'] != STOCK_GRID and theme.built_geometry([o]) == theme.geometry(o)
 
 
 @pytest.mark.parametrize('geometry, message', [
-    ('<geometry set="other"/>', 'unknown geometry set "other"'),
-    ('<geometry set="ipod" bar="26"/>', 'unknown key geometry.bar')])
+    ('<geometry bar="26"/>', 'one <geometry> per theme'),
+    ('<geometry set="oled"/>', 'unknown key geometry.set')])
 def test_geometry_rejects(geometry, message):
     with pytest.raises(theme.ThemeError, match=message):
         oled_with(geometry)
 
 
-def test_built_geometry_is_the_themes_one_set(test_set):
+def test_built_geometry_is_the_themes_one_grid():
     o = oled()
-    assert theme.built_geometry([dict(o, geom_set='test')]) == TEST
-    with pytest.raises(ValueError, match='2 geometry sets: the build bakes one'):
-        theme.built_geometry([o, dict(o, geom_set='test')])
+    test = Geometry(name='test', pitch=28)
+    assert theme.built_geometry([dict(o, geom=test)]) == test
+    with pytest.raises(ValueError, match='2 grids: the build bakes one'):
+        theme.built_geometry([o, dict(o, geom=test)])
 
 
-def test_built_geometry_refuses_a_wide_value(monkeypatch):
-    monkeypatch.setitem(theme.GEOMETRIES, 'wide', Geometry(name='wide', pitch=0x8000))
+def test_built_geometry_refuses_a_wide_value():
     with pytest.raises(ValueError, match='wide: pitch 32768 does not fit an immediate'):
-        theme.built_geometry([dict(oled(), geom_set='wide')])
+        theme.built_geometry([dict(oled(), geom=Geometry(name='wide', pitch=0x8000))])
 
 
 def test_a_nameless_scheme_is_every_scheme():
@@ -922,75 +911,53 @@ def test_emit_own_options(tmp_path):
     assert '#define OWN_OLED_ACCENT 0\n#define OWN_SONGARTIST 1\n#define OWN_SONGLENGTH 2\n#define OWN_NPTIME 3\n' in inc
 
 
-def test_oled_sets_from_its_theme_file():
-    """OLED's set is its theme.xml's: it states every Geometry field but a few SET0 already holds as OLED wants
-    them. No tool names it."""
+def test_oled_grid_from_its_theme_file():
+    """OLED's grid is its theme.xml's <geometry>: it states every Geometry field but a few STOCK_GRID already holds as
+    OLED wants them. No tool names it."""
     o = oled()
     g = theme.geometry(o)
-    assert theme.sets(o) == {'ipod': SET0, 'oled': g} and o['geoms'] == {'oled': g}
-    decl = {e.attrs['name']: e.attrs for e in theme.load(THEMES/'oled'/'theme.xml').children
-            if e.tag == 'geometry' and 'name' in e.attrs}
-    unstated = {f.name for f in dataclasses.fields(Geometry)} - {'name'} - set(decl['oled'])
-    assert all(getattr(g, f) == getattr(SET0, f) for f in unstated)
+    decl, = [e.attrs for e in theme.load(THEMES/'oled'/'theme.xml').children if e.tag == 'geometry']
+    unstated = {f.name for f in dataclasses.fields(Geometry)} - {'name'} - set(decl)
+    assert all(getattr(g, f) == getattr(STOCK_GRID, f) for f in unstated) and g.name == 'oled'
     assert not hasattr(ipod, 'OLED')
 
 
 def test_geometry_declared():
-    # An omitted field is SET0's, or its extends= set's; <geometry set> names a declared set; an extending
-    # theme inherits its base's sets.
-    t = resolved('<geometry name="pico" bar="26"/><geometry name="pico-2" extends="pico" text_x="20"/>'
-                 '<geometry set="pico-2"/>')
-    pico = dataclasses.replace(SET0, name='pico', bar=26)
-    assert t['geoms'] == {'base': dataclasses.replace(SET0, name='base', right_x=28), 'pico': pico, 'pico-2': dataclasses.replace(pico, name='pico-2', text_x=20)}
-    assert theme.geometry(t) == t['geoms']['pico-2'] and theme.built_geometry([t]) == t['geoms']['pico-2']
+    # An omitted field is the extended theme's, or STOCK_GRID's for a theme that extends none; an extending theme
+    # that states none keeps its base's.
+    t = resolved('<geometry bar="26" text_x="20"/>')
+    assert theme.geometry(t) == dataclasses.replace(STOCK_GRID, name='t', right_x=28, bar=26, text_x=20)
+    assert theme.built_geometry([t]) == theme.geometry(t)
     u = resolved('', 'id="u" name="U" index="3" extends="oled"')
-    assert theme.sets(u) == theme.sets(oled()) and theme.geometry(u) == theme.geometry(oled())
+    assert theme.geometry(u) == theme.geometry(oled())
 
 
 def test_geometry_ranges():
-    """Every Geometry field has a range, so a task that adds a field adds one; SET0 and OLED's set lie inside."""
+    """Every Geometry field has a range, so a task that adds a field adds one; STOCK_GRID and OLED's grid lie inside."""
     assert set(theme.GEOM_RANGES) == {f.name for f in dataclasses.fields(Geometry)} - {'name'}
-    assert [theme.check_set(g) for g in (SET0, theme.geometry(oled()))] == [None, None]
-    assert theme.check_set(dataclasses.replace(SET0, name='x', set_rows=5)) == 'geometry.set_rows: 5 outside 1..4'
+    assert [theme.check_set(g) for g in (STOCK_GRID, theme.geometry(oled()))] == [None, None]
+    assert theme.check_set(dataclasses.replace(STOCK_GRID, name='x', set_rows=5)) == 'geometry.set_rows: 5 outside 1..4'
 
 
 @pytest.mark.parametrize('body, message', [
-    ('<geometry name="Pico"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="pico-text-and-much-much-more"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="n"/>', 'geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n'),
-    ('<geometry name="ipod"/>', 'geometry set ipod declared twice'),
-    ('<geometry name="base"/>', 'geometry set base declared twice'),  # its base's
-    ('<geometry name="pico"/><geometry name="pico"/>', 'geometry set pico declared twice'),
-    ('<geometry name="pico" tint="1"/>', 'unknown key geometry.tint'),
-    ('<geometry name="pico" set="ipod"/>', 'unknown key geometry.set'),
-    ('<geometry name="pico" pitch="2x"/>', 'geometry.pitch: expected an integer'),
-    ('<geometry name="pico" bar="24"/>', 'geometry.bar: 24 outside 26..40'),
-    ('<geometry name="pico" pitch="28"/>', 'geometry.body: 68 outside 24..28'),
-    ('<geometry name="pico" art_inset="9"/>', 'geometry.art_inset: 9 outside 0..8'),
-    ('<geometry name="pico" pitch="28" body="28"/>', 'geometry.text_art: 52 outside 0..28'),
-    ('<geometry name="pico" home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
-    ('<geometry name="pico" split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
-    ('<geometry name="pico" split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
-    ('<geometry name="pico" split_art_up="31"/>', 'geometry.split_art_up: 31 outside 0..30'),
-    ('<geometry name="pico" np_art="201"/>', 'geometry.np_art: 201 outside 0..200'),
-    ('<geometry name="pico" extends="flat"/>', 'unknown geometry set "flat"'),
-    ('<geometry set="pico"/><geometry name="pico" bar="26"/>', 'unknown geometry set "pico"'),
+    ('<geometry/><geometry/>', 'one <geometry> per theme'),
+    ('<geometry name="pico"/>', 'unknown key geometry.name'),
+    ('<geometry extends="base"/>', 'unknown key geometry.extends'),
+    ('<geometry set="ipod"/>', 'unknown key geometry.set'),
+    ('<geometry tint="1"/>', 'unknown key geometry.tint'),
+    ('<geometry pitch="2x"/>', 'geometry.pitch: expected an integer'),
+    ('<geometry bar="24"/>', 'geometry.bar: 24 outside 26..40'),
+    ('<geometry pitch="28"/>', 'geometry.body: 68 outside 24..28'),
+    ('<geometry art_inset="9"/>', 'geometry.art_inset: 9 outside 0..8'),
+    ('<geometry pitch="28" body="28"/>', 'geometry.text_art: 52 outside 0..28'),
+    ('<geometry home_row="41"/>', 'geometry.home_row: 41 outside 28..40'),
+    ('<geometry split_art="186"/>', 'geometry.split_art: 186 outside 187..260'),
+    ('<geometry split_row="204"/>', 'geometry.split_row: 204 outside 120..203'),
+    ('<geometry split_art_up="31"/>', 'geometry.split_art_up: 31 outside 0..30'),
+    ('<geometry np_art="201"/>', 'geometry.np_art: 201 outside 0..200'),
 ])
 def test_geometry_declare_rejects(body, message):
     assert error(resolved, body) == f't.xml:1: {message}'
-
-
-def test_builtins_rejects_a_shared_set_name(tmp_path):
-    """A set name names one set: the themes that declare it declare it alike."""
-    def put(folder, index, bar):
-        (tmp_path/folder).mkdir(exist_ok=True)
-        (tmp_path/folder/'theme.xml').write_text(
-            f'<theme format="1" id="{folder}" name="{folder}" index="{index}">{BASE_BODY}'
-            f'<geometry name="pico" extends="base" bar="{bar}"/><geometry set="pico"/></theme>')
-    put('a', 0, 26); put('b', 1, 26)
-    assert [theme.geometry(t).name for t in theme.builtins(tmp_path)] == ['pico', 'pico']
-    put('b', 1, 28)
-    assert error(theme.builtins, tmp_path) == "b/theme.xml:1: geometry set pico is a's, with other values"
 
 
 def geom_inc(tmp_path, themes):
@@ -999,12 +966,13 @@ def geom_inc(tmp_path, themes):
 
 
 def test_emit_geom_words(tmp_path):
-    inc = geom_inc(tmp_path, [resolved('<geometry set="ipod"/>')])
+    t = resolved('')  # the test base's grid: STOCK_GRID's, with a right column
+    inc = geom_inc(tmp_path, [t])
     names = ipod.VALUE_NAMES
     assert 'enum { ' + ', '.join(f'G_{n.upper()}' for n in names) + ', G_N };' in inc
-    row = ', '.join(str(ipod.immediate_values(SET0)[n]) for n in names)
+    row = ', '.join(str(ipod.immediate_values(STOCK_GRID)[n]) for n in names)
     assert f'const volatile unsigned short geom_words[G_N] = {{{row}}};' in inc
-    assert all(s in inc for s in geom_vals_text(SET0))
+    assert all(s in inc for s in geom_vals_text(theme.geometry(t)))
     assert '#define THEME_MOTION_OFF 4\n#define SCHEME_MODE_OFF 4' in inc
     for gone in ('GEOM_N', 'boot_sites', 'boot_values', 'geom_names', 'ui_redirects', '.geom = '):
         assert gone not in inc
@@ -1019,16 +987,16 @@ def test_emit_geom_vals(tmp_path):
     inc = geom_inc(tmp_path, theme.builtins())
     g = theme.geometry(oled())
     assert all(s in inc for s in geom_vals_text(g))
-    assert ipod.GEOM_VALS[:3] == ('bar', 'set_row', 'set_icon')
-    assert [getattr(g, n) for n in ipod.GEOM_VALS[:3]] == [58, 32, 0]
+    assert ipod.GEOM_VALS[:3] == ('bar', 'set_row', 'batt_w')
+    assert [getattr(g, n) for n in ipod.GEOM_VALS[:3]] == [58, 32, 25]
     words = ', '.join(str(ipod.immediate_values(g)[n]) for n in ipod.VALUE_NAMES)
     assert f'geom_words[G_N] = {{{words}}};' in inc  # OLED's, which patch_code bakes
 
 
-def test_emit_refuses_a_second_set(tmp_path, test_set):
-    t = resolved('<geometry set="ipod"/>')
-    with pytest.raises(ValueError, match='2 geometry sets: the build bakes one'):
-        geom_inc(tmp_path, [t, dict(t, id='u', index=1, geom_set='test')])
+def test_emit_refuses_a_second_grid(tmp_path):
+    t = resolved('')
+    with pytest.raises(ValueError, match='2 grids: the build bakes one'):
+        geom_inc(tmp_path, [t, dict(t, id='u', index=1, geom=Geometry(name='test', pitch=28))])
 
 
 def test_easings_are_awtk():
@@ -1090,12 +1058,12 @@ def test_motion_rejects(element, message):
         resolved(f'<view name="motion">{element}</view>')
 
 
-def test_bar_font_size_is_the_sets_bar_px(tmp_path):
-    """The bar's label is laid out at its set's bar_px (tools/ipod.py status_row): its text size must match."""
+def test_bar_font_size_is_the_grids_bar_px(tmp_path):
+    """The bar's label is laid out at its grid's bar_px (tools/ipod.py status_row): its text size must match."""
     xml = (THEMES/'oled/theme.xml').read_text()
     assert xml.count('font="inter-medium" font_size="18"') == 1
     (tmp_path/'oled').mkdir(); (tmp_path/'oled'/'theme.xml').write_text(xml.replace('font="inter-medium" font_size="18"', 'font="inter-medium" font_size="24"'))
-    with pytest.raises(theme.ThemeError, match=r"bar.title.font_size 24 is not set oled's bar_px 18$"):
+    with pytest.raises(theme.ThemeError, match=r"bar.title.font_size 24 is not the geometry's bar_px 18$"):
         theme.builtins(tmp_path)
 
 
@@ -1171,7 +1139,7 @@ def test_resolve_rejects_an_unknown_art():
 
 
 @pytest.mark.parametrize('body, message', [
-    ('<geometry set="ipod"/>', "the chevrons and song rows need the set's right_x"),
+    ('<geometry right_x="0"/>', "the chevrons and song rows need the grid's right_x"),
     ('<view name="list"><element name="scrollbar" w="0"/></view>', "list.scrollbar: the wheel's indicator needs w, top and bottom")])
 def test_every_theme_has_what_the_marks_draw_with(body, message):
     assert error(theme.validate, resolved(body), 't.xml') == f't.xml:1: {message}'

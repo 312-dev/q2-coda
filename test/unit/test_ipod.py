@@ -697,19 +697,19 @@ def test_sized_art(monkeypatch):
                      (('png:-', '-filter', 'Lanczos', '-resize', '100x100!', '-background', 'black', '-gravity', 'center', '-extent', '140x100', *ipod.PNG_OUT), b'in')]
 
 
-SET0_VALUES = dict(BOTTOM=290, PITCH=72, BODY=68, ART=52, ART_INSET=8, NP_ICONS_END=353,
+STOCK_GRID_VALUES = dict(BOTTOM=290, PITCH=72, BODY=68, ART=52, ART_INSET=8, NP_ICONS_END=353,
                    NP_BAR_X=21, NP_BAR=[21, 253, 333, 4], NP_TIME_X=46)
 
 
-def test_with_geometry_set0_matches_module():
-    assert vars(ipod.with_geometry(ipod.SET0)) == SET0_VALUES
-    assert {n: getattr(ipod, n) for n in SET0_VALUES} == SET0_VALUES   # today's names still import
-    assert ipod.SET0 == ipod.Geometry() and vars(ipod.IPOD) == SET0_VALUES and ipod.SET0.name == 'ipod'
+def test_with_geometry_stock_grid_matches_module():
+    assert vars(ipod.with_geometry(ipod.STOCK_GRID)) == STOCK_GRID_VALUES
+    assert {n: getattr(ipod, n) for n in STOCK_GRID_VALUES} == STOCK_GRID_VALUES   # today's names still import
+    assert ipod.STOCK_GRID == ipod.Geometry() and vars(ipod.IPOD) == STOCK_GRID_VALUES and ipod.STOCK_GRID.name == 'ipod'
 
 
 def test_with_geometry_follows_the_bar():
     assert vars(ipod.with_geometry(ipod.Geometry(name='t', bar=26))) == dict(
-        SET0_VALUES, BOTTOM=294, NP_ICONS_END=350, NP_BAR_X=18, NP_BAR=[18, 253, 339, 4], NP_TIME_X=39)
+        STOCK_GRID_VALUES, BOTTOM=294, NP_ICONS_END=350, NP_BAR_X=18, NP_BAR=[18, 253, 339, 4], NP_TIME_X=39)
 
 
 def test_with_geometry_takes_the_row_sizes():
@@ -759,7 +759,7 @@ def test_cut_lists_names_a_list_ending_on_a_row_above_the_list_end(h, y, cut):
     black band, unfaded (navigation.c list_fade leaves such a box alone); one running past it is the fade's."""
     data = ipod.encode(cut_page(h, y=y))
     assert ipod.cut_lists('a_page.bin', data, OLED_SET) == (['list_view'] if cut else [])
-    assert ipod.cut_lists('a_page.bin', data, ipod.SET0) == []  # no list_fit: stock's ends
+    assert ipod.cut_lists('a_page.bin', data, ipod.STOCK_GRID) == []  # no list_fit: stock's ends
 
 
 def test_cut_lists_skips_lists_it_cannot_see_end():
@@ -776,7 +776,7 @@ def test_cut_lists_skips_lists_it_cannot_see_end():
 def test_ui_pages_refuses_a_list_fit_set_s_list_cut_above_the_list_end(monkeypatch):
     monkeypatch.setattr(ipod, 'UI_ASSETS', {'a_page.bin': ''})
     monkeypatch.setattr(ipod, 'STOCK_ROWS', {})
-    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data)
+    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.STOCK_GRID: data)
     for h, ok in ((224, False), (262, True)):
         cat = lambda p, h=h: ipod.encode(cut_page(h))
         if ok:
@@ -832,14 +832,14 @@ def test_patch_asset_rows_and_lists_follow_the_geometry(monkeypatch):
     assert n['list_view'][1] == [0, 0, 375, 290] and n['row'][1][3] == 72 and n['art'][1][1] == 8
 
 
-# Streaming's rows are the set's stream_row: OLED's 32 px, SET0's settings rows as before. The list keeps the settings
+# Streaming's rows are the set's stream_row: OLED's 32 px, STOCK_GRID's settings rows as before. The list keeps the settings
 # lists' box: a set with list_end's and list_fit holds whole rows down to list_end.
 def test_stream_page_rows_per_set(monkeypatch):
     page = w('stream_page', w('view_navbar', at=[0, 0, 370, 50]),
              w('list_view', kind='list_view', at=[0, 50, 375, 240], default_item_height=str(ipod.SET_STOCK_ROW)), kind='window')
     data = ipod.encode(page)
     monkeypatch.setitem(ipod.UI_ASSETS, 'stream_page.bin', ipod.sha(data))
-    for g, row, h in ((ipod.SET0, ipod.SET_ROW, ipod.SET_ROWS * ipod.SET_ROW), (OLED_SET, 32, 320 - 58)):  # OLED's runs on to the window's foot, its rows past list_end fading
+    for g, row, h in ((ipod.STOCK_GRID, ipod.SET_ROW, ipod.SET_ROWS * ipod.SET_ROW), (OLED_SET, 32, 320 - 58)):  # OLED's runs on to the window's foot, its rows past list_end fading
         assert g.stream_row == row
         n = named(ipod.decode(ipod.patch_asset('stream_page.bin', data, g=g)))
         assert n['list_view'][2]['default_item_height'] == str(row) and n['list_view'][1][3] == h, g.name
@@ -861,7 +861,7 @@ def list_page(name):
                                         ('folder_page.bin', 'folder')])
 def test_patch_asset_rows_by_page_kind(monkeypatch, path, kind):
     # A text page's rows take pitch/body, an art page's art_pitch/art_body, Folder's art_pitch/art_body while the
-    # set gives no folder_pitch; each moves its text to the set's y. SET0 builds what it did.
+    # set gives no folder_pitch; each moves its text to the set's y. STOCK_GRID builds what it did.
     data = ipod.encode(list_page(path))
     monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
     pitch, body, inset = (28, 26, 5) if kind == 'text' else (52, 50, 3)
@@ -888,11 +888,11 @@ def test_songs_rows_are_their_own_kind():
 
 
 def test_text_y():
-    assert [ipod.text_y(ipod.SET0, y) for y in (11, 14, 21, 40, 41)] == [10, 13, 20, 39, 40]
+    assert [ipod.text_y(ipod.STOCK_GRID, y) for y in (11, 14, 21, 40, 41)] == [10, 13, 20, 39, 40]
     assert [ipod.text_y(PAGE_T, y) for y in (11, 14, 40, 41)] == [4, 2, 6, 6]
 
 
-SET0_WORDS = {'lib_body': 68, 'lib_inset': 8, 'pitch': 72, 'body': 68, 'art': 52, 'art_inset': 8, 'text_art': 52, 'text_art_inset': 8, 'scroll': 240,
+STOCK_GRID_WORDS = {'lib_body': 68, 'lib_inset': 8, 'pitch': 72, 'body': 68, 'art': 52, 'art_inset': 8, 'text_art': 52, 'text_art_inset': 8, 'scroll': 240,
               'title24_y': 13, 'title_y': 10, 'meta_y': 39, 'count_y': 40}
 SPLIT = ('pitch', 'body', 'title24_y', 'title_y', 'meta_y', 'count_y')
 
@@ -902,14 +902,14 @@ def test_immediates_every_site_once():
     assert len(sites) == 100 and len(set(sites)) == 100
 
 
-def test_immediate_values_set0_are_the_baked_values():
-    values = ipod.immediate_values(ipod.SET0)
+def test_immediate_values_stock_grid_are_the_baked_values():
+    values = ipod.immediate_values(ipod.STOCK_GRID)
     assert set(values) == set(ipod.VALUE_NAMES)
     assert (values['np_bar_x'], values['np_bar_w']) == (ipod.NP_BAR[0], ipod.NP_BAR[2])
     assert ipod.VALUE_NAMES[0] == 'pitch'
     for name in ipod.VALUE_NAMES:
         if not name.startswith(('np_bar', 'stock_', 'search_')):
-            assert values[name] == SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')], name
+            assert values[name] == STOCK_GRID_WORDS[name if name in STOCK_GRID_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')], name
 
 
 def test_only_split_names_take_the_art_prefix():
@@ -939,7 +939,7 @@ UI = 'release/assets/default/raw/ui/'
 def fake_assets(monkeypatch):
     monkeypatch.setattr(ipod, 'UI_ASSETS', {'system_bar.bin': '', 'dialog/volume_dialog.bin': '', 'home_page.bin': ''})
     monkeypatch.setattr(ipod, 'STOCK_ROWS', {'list_page.bin': '', 'clock_page.bin': ''})  # a stock page the set leaves as it is is not written
-    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.SET0: data + (b'!' if g.bar != 30 and rel not in ('home_page.bin', 'clock_page.bin') else b''))
+    monkeypatch.setattr(ipod, 'patch_asset', lambda rel, data, g=ipod.STOCK_GRID: data + (b'!' if g.bar != 30 and rel not in ('home_page.bin', 'clock_page.bin') else b''))
 
 
 def test_ui_pages_are_every_ui_asset_and_the_stock_rows_the_set_changes(fake_assets):
@@ -950,10 +950,10 @@ def test_ui_pages_are_every_ui_asset_and_the_stock_rows_the_set_changes(fake_ass
 
 
 
-# A set without home_lib (SET0's, OLED's) keeps stock's bindings: Home's Library and Streaming rows are stock's own,
+# A set without home_lib (STOCK_GRID's, OLED's) keeps stock's bindings: Home's Library and Streaming rows are stock's own,
 # and no hidden list of the Library's or Streaming's rows is built.
 def test_home_lists_keep_stock_bindings():
-    for g in (ipod.SET0, OLED_SET):
+    for g in (ipod.STOCK_GRID, OLED_SET):
         assert g.home_lib == 0
         root = home(); ipod.ipod_home(root, g=g); rows = named(root[3][1])
         assert 'list_view_homelib' not in named(root) and 'img_library' not in rows and 'img_localmusic' in rows
@@ -969,23 +969,23 @@ def test_songs_action_row(monkeypatch):
     data = ipod.encode(page); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
     n = named(ipod.decode(ipod.patch_asset(path, data, g=OLED_SET)))
     assert n['view_navbar_allplay'][1] == [0, 0, 375, 32] and n['table_view'][1] == [0, 32, 375, 230] and n['view'][1][1] == 32  # on to the window's foot (fit_rows)
-    assert ipod.immediate_values(OLED_SET)['scroll'] == 230 and ipod.immediate_values(ipod.SET0)['scroll'] == 240
+    assert ipod.immediate_values(OLED_SET)['scroll'] == 230 and ipod.immediate_values(ipod.STOCK_GRID)['scroll'] == 240
     n = named(ipod.decode(ipod.patch_asset(path, data)))
     assert n['view_navbar_allplay'][1] == [0, 0, 375, 50]
 
 
 def test_settings_lists_follow_the_set(monkeypatch):
-    # Settings lists hold the set's rows from its top: SET0 four 68 px rows from 8, OLED's seven 32 px rows from 0, down to its list_end.
+    # Settings lists hold the set's rows from its top: STOCK_GRID four 68 px rows from 8, OLED's seven 32 px rows from 0, down to its list_end.
     path = 'systemset/sysset_page.bin'
     page = w('sysset_page', w('view_navbar', at=[0, 0, 375, 50]),
              w('list_view', kind='list_view', at=[0, 50, 375, 240], default_item_height='78'), kind='window')
     data = ipod.encode(page); monkeypatch.setitem(ipod.UI_ASSETS, path, ipod.sha(data))
-    for g, box, row in ((ipod.SET0, [0, 8, 375, 272], '68'), (OLED_SET, [0, 0, 375, 262], '32')):
+    for g, box, row in ((ipod.STOCK_GRID, [0, 8, 375, 272], '68'), (OLED_SET, [0, 0, 375, 262], '32')):
         n = named(ipod.decode(ipod.patch_asset(path, data, g=g)))
         assert n['list_view'][1] == box and n['list_view'][2]['default_item_height'] == row and 'item_height' not in n['list_view'][2]
 
 
-# Stock's own list pages, each as its bin has it, under OLED: the rows of 78 take the approved pitch, by the one rule (stock_row), and the toolbars go. SET0 gets the bin back, byte for byte.
+# Stock's own list pages, each as its bin has it, under OLED: the rows of 78 take the approved pitch, by the one rule (stock_row), and the toolbars go. STOCK_GRID gets the bin back, byte for byte.
 STOCK_ROW_REVERSED = dataclasses.replace(OLED_SET, stock_row=78, stock_body=70, stock_title_y=11, stock_title_h=20)
 
 
@@ -1038,7 +1038,7 @@ def test_stock_tables_keep_their_toolbar_and_boxes(monkeypatch, path):
 
 
 def test_toolbar_switch_pages(monkeypatch):
-    # The Sleep Timer's panel makes room for the row its switch becomes, and ends with the window. Crossfade's page keeps its toolbar. SET0's keep theirs.
+    # The Sleep Timer's panel makes room for the row its switch becomes, and ends with the window. Crossfade's page keeps its toolbar. STOCK_GRID's keep theirs.
     sleep, boot = 'systemset/sleepshutdown_page.bin', 'playset/bootvol_page.bin'
     pages = {sleep: w('sleepshutdown_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_sleep', at=[0, 50, 375, 240]), kind='window'),
              boot: w('bootvol_page', w('view_navbar', at=[0, 0, 375, 50]), w('view_bootvol', at=[0, 50, 375, 240]),
@@ -1055,8 +1055,8 @@ def test_toolbar_switch_pages(monkeypatch):
         assert 'visible' not in n['view_navbar'][2] and n[{sleep: 'view_sleep', boot: 'view_bootvol'}[path]][1][1] == 50
 
 
-def test_search_rows_are_stocks_under_set0():
-    values, want = ipod.immediate_values(ipod.SET0), {'search_row': 78, 'search_body': 70, 'search_art': 50, 'search_title_y': 11, 'search_title24_y': 14, 'search_title_h': 24, 'search_meta_y': 41, 'search_meta_h': 16}
+def test_search_rows_are_stocks_under_stock_grid():
+    values, want = ipod.immediate_values(ipod.STOCK_GRID), {'search_row': 78, 'search_body': 70, 'search_art': 50, 'search_title_y': 11, 'search_title24_y': 14, 'search_title_h': 24, 'search_meta_y': 41, 'search_meta_h': 16}
     assert {n: values[n] for n in want} == want
     for group in ipod.AUDIT['immediates']:
         if group['value'] in want:
@@ -1065,9 +1065,9 @@ def test_search_rows_are_stocks_under_set0():
     assert OLED_SET.search_title_y + OLED_SET.search_title_h <= OLED_SET.search_body and OLED_SET.search_meta_y + OLED_SET.search_meta_h <= OLED_SET.search_body
 
 
-def test_stock_rows_are_stocks_under_set0():
-    values = ipod.immediate_values(ipod.SET0)
-    assert (values['stock_row'], values['stock_body'], values['stock_title_y'], values['stock_title_h']) == (78, 70, 11, 20) and ipod.SET0.toolbar == 1
+def test_stock_rows_are_stocks_under_stock_grid():
+    values = ipod.immediate_values(ipod.STOCK_GRID)
+    assert (values['stock_row'], values['stock_body'], values['stock_title_y'], values['stock_title_h']) == (78, 70, 11, 20) and ipod.STOCK_GRID.toolbar == 1
     for group in ipod.AUDIT['immediates']:
         if group['value'] in ('stock_row', 'stock_body', 'stock_title_y', 'stock_title_h'):
             assert all(int(word, 16) & 0xffff == values[group['value']] for _, word in group['sites'])
@@ -1112,9 +1112,9 @@ def elf(size):
 
 SYMBOLS = {'compact_set_row_layout': 0x40a000, 'ipod_list_layout': 0x40b000, 'ringnav_boot': 0x40c000,
            'stock_set_row_layout': 0x40d000, 'stock_row_text': 0x40e000, 'stock_row_style': 0x40f000}
-# SET0's word for each named immediate, as test_immediate_values_set0_are_the_baked_values reads SET0_WORDS.
-# The stock_ and search_ rows' words are SET0's fields, as immediate_values gives them; that test leaves them out too.
-IMMEDIATES = ipod.immediate_values(ipod.SET0) | {name: SET0_WORDS[name if name in SET0_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')]
+# STOCK_GRID's word for each named immediate, as test_immediate_values_stock_grid_are_the_baked_values reads STOCK_GRID_WORDS.
+# The stock_ and search_ rows' words are STOCK_GRID's fields, as immediate_values gives them; that test leaves them out too.
+IMMEDIATES = ipod.immediate_values(ipod.STOCK_GRID) | {name: STOCK_GRID_WORDS[name if name in STOCK_GRID_WORDS else name.removeprefix('art_').removeprefix('song_').removeprefix('folder_')]
               for name in ipod.VALUE_NAMES if not name.startswith(('np_bar', 'stock_', 'search_'))} | {'np_bar_x': ipod.NP_BAR[0], 'np_bar_w': ipod.NP_BAR[2]}
 
 
@@ -1151,7 +1151,7 @@ def test_patch_code():
     data = elf(0x540000)
     for at, old, _, _ in patches:
         struct.pack_into('<I', data, at - 0x3ff000, old)
-    assert ipod.patch_code(data, dict(SYMBOLS), ipod.SET0) == [{'address': hex(at), 'original': hex(old), 'patched': hex(new), 'purpose': why}
+    assert ipod.patch_code(data, dict(SYMBOLS), ipod.STOCK_GRID) == [{'address': hex(at), 'original': hex(old), 'patched': hex(new), 'purpose': why}
                                                      for at, old, new, why in patches]
     assert [struct.unpack_from('<I', data, at - 0x3ff000)[0] for at, *_ in patches] == [new for _, _, new, _ in patches]
 
@@ -1570,7 +1570,7 @@ def test_status_row_names_the_page_inside_the_glass_s_top_curve():
     STATUS_ROW_INSET in, in Text Secondary at bar_px, centred on status_y; the battery ending STATUS_ROW_INSET from the
     edge, not on the list's columns (the payload's slots left of it, status_row.c); the play state, Bluetooth, Wi-Fi
     and EQ off-screen, still there for stock."""
-    g = dataclasses.replace(ipod.SET0, bar=58, status_y=23, text_x=24, right_x=28, bar_px=18)
+    g = dataclasses.replace(ipod.STOCK_GRID, bar=58, status_y=23, text_x=24, right_x=28, bar_px=18)
     root = bar()
     ipod.status_bar(root, g)
     n = named(root)
@@ -1588,12 +1588,12 @@ def test_status_row_names_the_page_inside_the_glass_s_top_curve():
 
 def test_status_row_refuses_an_inset_under_the_glass():
     """Its ends clear the glass at the line box's top: a row so high that the curve reaches past the inset fails."""
-    g = dataclasses.replace(ipod.SET0, bar=58, status_y=8, text_x=24, right_x=28, bar_px=18)
+    g = dataclasses.replace(ipod.STOCK_GRID, bar=58, status_y=8, text_x=24, right_x=28, bar_px=18)
     with pytest.raises(Exception, match='Status row inset 62 is under the glass at y -4'):
         ipod.status_bar(bar(), g)
 
 
 @pytest.mark.parametrize('pitch, top', [(32, 0), (52, 0), (32, 50)])
 def test_fit_rows_runs_a_list_on_to_the_window_s_foot(pitch, top):
-    g = dataclasses.replace(ipod.SET0, list_end=224, list_fit=1)
+    g = dataclasses.replace(ipod.STOCK_GRID, list_end=224, list_fit=1)
     assert ipod.fit_rows(g, top, pitch) == 320 - g.bar - top  # whatever the pitch: the rows past list_end fade

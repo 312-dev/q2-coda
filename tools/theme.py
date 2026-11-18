@@ -7,7 +7,7 @@ import math
 import re
 from typing import NoReturn
 from build import FACES, ROOT, check, need
-from ipod import GEOM_VALS, INC, O, SET0, SLIDE, VALUE_NAMES, Geometry, corner_inset, immediate_values
+from ipod import GEOM_VALS, INC, O, STOCK_GRID, SLIDE, VALUE_NAMES, Geometry, corner_inset, immediate_values
 
 
 ACCENTS_BLOCK = need(re.search(r'#define ACCENTS (?:.*\\\n)*.*', INC), 'Missing ACCENTS')[0]
@@ -60,7 +60,7 @@ class Key:
     lo: int
     hi: int
     default: object
-    cls: str  # 'live' | 'open' | 'boot'
+    cls: str  # 'live' | 'open'
     final: bool = False  # drawn as stated: each half its own value (light.<key>, dark.<key>)
 
 
@@ -152,7 +152,6 @@ SCHEMA = {k.path: k for k in (
     Key('page.rows.title_h', 'page_cap_h', 'int', 16, 48, 32, 'open'),
     Key('page.rows.detail_y', 'page_det_y', 'int', 16, 60, 36, 'open'),
     Key('page.rows.detail_h', 'page_det_h', 'int', 12, 40, 24, 'open'),
-    Key('geometry.set', 'geom_set', 'set', 0, 0, 'ipod', 'boot'),
     *(Key(f'motion.{k}.{a}', f'motion.{k}.{a}', t, 0, hi, 0, 'motion')
       for k in (*MOTION_WINDOW, *MOTION_WIDGET) for a, t, hi in (('ms', 'int', 2000), ('easing', 'easing', len(EASINGS) - 1))),
     *(Key(f'motion.{k}.anim', f'motion.{k}.anim', 'anim', 0, len(ANIMS) - 1, 0, 'motion') for k in MOTION_WINDOW),
@@ -191,8 +190,6 @@ ROLE_MACROS = {
              **MOTION_ROLES},
 }
 
-GEOMETRIES = {SET0.name: SET0}  # the built-in set; a theme declares its others (t['geoms'])
-GEOM_NAME = re.compile('(?!n$)[a-z][a-z0-9-]{0,23}')  # GEOM_<NAME> stays one C name per set, never GEOM_N
 # Geometry field -> its inclusive (lo, hi), each an int or a function of the finished set.
 GEOM_RANGES = {
     # 26: Home's scratch frame (DRIFT_TEXELS, 4 x 188 x 294) holds a client of 294 at most; 40: an eighth of the screen,
@@ -267,11 +264,6 @@ THEME_MOTION_OFF = 4  # offsetof(theme_t, motion), right after three flags; asse
 SCHEME_MODE_OFF = 4  # offsetof(scheme_t, mode) on MIPS, right after tones; asserted in theme_engine.c; test/patch.py pokes it
 
 
-def sets(t):
-    """The sets theme t can name: the built-in ipod and those it declares or inherits."""
-    return {**GEOMETRIES, **t['geoms']}
-
-
 def check_set(g):
     """The first field of g, in Geometry order, outside its range: its message; else None."""
     for f in dataclasses.fields(Geometry)[1:]:
@@ -282,27 +274,18 @@ def check_set(g):
     return None
 
 
-def declare(node, known):
-    """One <geometry name> over its extends= set (default ipod), checked, as a Geometry; known: the sets it can name."""
+def declare(node, base, name):
+    """A theme's <geometry>: its fields over base's (the extended theme's grid, or STOCK_GRID, stock's), checked, as a
+    Geometry named name."""
     def err(message): fail(node.file, node.line, message)
-    name = node.attrs['name']
-    if not GEOM_NAME.fullmatch(name):
-        err('geometry.name: expected [a-z][a-z0-9-]*, 1..24 bytes, not n')
-    if name in known:
-        err(f'geometry set {name} declared twice')
     ints = {}
     for k, text in node.attrs.items():
-        if k in ('name', 'extends'):
-            continue
         if k not in GEOM_RANGES:
             err(f'unknown key geometry.{k}')
         if not re.fullmatch('-?[0-9]+', text):
             err(f'geometry.{k}: expected an integer')
         ints[k] = int(text)
-    base = node.attrs.get('extends', SET0.name)
-    if base not in known:
-        err(f'unknown geometry set "{base}"')
-    g = dataclasses.replace(known[base], name=name, **ints)
+    g = dataclasses.replace(base, name=name, **ints)
     message = check_set(g)
     if message:
         err(message)
@@ -310,14 +293,14 @@ def declare(node, known):
 
 
 def geometry(t):
-    """The set t names in its <geometry set>: the one tools/ipod.py bakes into the build."""
-    return sets(t)[t['geom_set']]
+    """Theme t's grid, its <geometry>: the one tools/ipod.py bakes into the build."""
+    return t['geom']
 
 
 def built_geometry(themes):
-    """The geometry set the build bakes into stock's immediates and pages: the themes' one set."""
+    """The grid the build bakes into stock's immediates and pages: the themes' one grid."""
     found = {geometry(t) for t in themes}
-    check(len(found) == 1, f'{len(found)} geometry sets: the build bakes one')
+    check(len(found) == 1, f'{len(found)} grids: the build bakes one')
     g = found.pop()
     for n, x in immediate_values(g).items():
         check(0 <= x < 0x8000, f'{g.name}: {n} {x} does not fit an immediate')
@@ -661,7 +644,7 @@ def resolve(root, by_id, seen=()):
             err(root, f'extends unknown theme {a["extends"]}')
         t = resolve(by_id[a['extends']], by_id, seen + (tid,))  # a fresh dict: ours to change
     else:
-        t = {'accents': ALL_ACCENTS, 'accent_key': None, 'schemes': [zero_scheme() for _ in ACCENT_NAMES], 'opts': [], 'geoms': {},
+        t = {'accents': ALL_ACCENTS, 'accent_key': None, 'schemes': [zero_scheme() for _ in ACCENT_NAMES], 'opts': [], 'geom': STOCK_GRID,
              **{k.field: k.default for k in SCHEMA.values() if not k.path.startswith('scheme.')}, 'light': {}}
     t.update(id=tid, name=a['name'], index=int(a['index']), line=root.line)
     # art: the theme whose generated images (tools/art.py <art_id>_*) this one draws, as the payload loads them by name
@@ -669,7 +652,7 @@ def resolve(root, by_id, seen=()):
         err(root, f'art: unknown theme {a["art"]}')
     t['art_id'] = a.get('art', tid)
     macros = ROLE_MACROS.get(tid, {})
-    opts = None
+    opts, geom_seen = None, False
     named = []
     for c in root.children:
         if c.tag == 'colorSchemes':
@@ -730,16 +713,10 @@ def resolve(root, by_id, seen=()):
                 for s in targets:
                     (s['light'] if h == 'light' and f.final else s)[f.field] = x
         elif c.tag == 'geometry':
-            if 'name' in c.attrs:
-                g = declare(c, sets(t))
-                t['geoms'][g.name] = g
-                continue
-            for k, text in c.attrs.items():
-                if k != 'set':
-                    err(c, f'unknown key geometry.{k}')
-                if text not in sets(t):
-                    err(c, f'unknown geometry set "{text}"')
-                t['geom_set'] = text
+            if geom_seen:
+                err(c, 'one <geometry> per theme')
+            geom_seen = True
+            t['geom'] = declare(c, t['geom'], tid)
         elif c.tag == 'option':
             if opts is None:
                 opts = t['opts'] = []  # this file's options replace the inherited list
@@ -846,13 +823,13 @@ def validate(t, name):
         err(f"{len(t['schemes'])} accents, at most 10")
     # the chevrons and song rows' marks stand on the set's right column; the wheel's indicator draws sb_w wide between
     # sb_top and sb_bottom
-    if not sets(t)[t['geom_set']].right_x:
-        err('the chevrons and song rows need the set\'s right_x')
+    if not geometry(t).right_x:
+        err('the chevrons and song rows need the grid\'s right_x')
     if not (t['sb_w'] and t['sb_bottom'] > t['sb_top']):
         err('list.scrollbar: the wheel\'s indicator needs w, top and bottom')
     g = geometry(t)  # the bar's own label is laid out at bar_px (tools/ipod.py status_row), its text drawn at font_size
     if g.bar_px and t['font_px[ROLE_BAR]'] != g.bar_px:
-        err(f"bar.title.font_size {t['font_px[ROLE_BAR]']} is not set {g.name}'s bar_px {g.bar_px}")
+        err(f"bar.title.font_size {t['font_px[ROLE_BAR]']} is not the geometry's bar_px {g.bar_px}")
     for o in t['opts']:
         if o.get('setting') != 'SETTING_ACCENT' and not o.get('key') and o['def'] >= 0 and not o.get('values'):
             err(f"{o['setting']}: default has no effect without values (settings_read holds a stock setting's default)")
@@ -976,12 +953,6 @@ def builtins(root=ROOT/'assets/themes'):
             fail(n.file, n.line, f'id {t["id"]} is not its folder name')
         found.append((t['index'], n, t))
     found.sort(key=lambda f: f[0])
-    owners = {}  # a set name names one set: the themes that declare it declare it alike
-    for _, n, t in found:
-        for name, g in t['geoms'].items():
-            owner, first = owners.setdefault(name, (t['id'], g))
-            if g != first:
-                fail(n.file, n.line, f"geometry set {name} is {owner}'s, with other values")
     # An own key is one stored value too: its values and default alike; its preset is each theme's (as LIGHT's).
     def shape(e): return e[:2] + ({k: v for k, v in e[2].items() if k not in ('preset', 'keep')} if e[2] else None,)
     owners = {}

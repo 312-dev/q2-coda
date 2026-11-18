@@ -1,6 +1,5 @@
 """tools/art.py: the theme images it draws, from the shipped theme's values."""
 import ast
-import dataclasses
 import math
 import pathlib
 import re
@@ -430,13 +429,12 @@ def test_a_row_symbol_is_drawn_at_its_optical_size(name):
 
 def test_a_theme_draws_only_the_images_its_keys_ask_for():
     """Each optional group is its key's: a theme without Now Playing's own glyphs, the Shuffle row, the switch rows,
-    the menu sheet or iPod text entry draws none of their images, and keeps the rest."""
+    or iPod text entry draws none of their images, and keeps the rest."""
     oled = theme.builtins()[0]
-    bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0,
-            'geoms': {n: dataclasses.replace(g, modal=0) for n, g in oled['geoms'].items()}}
+    bare = {**oled, 'np_modes': 0, 'shuffle_row': 0, 'set_switch': 0, 'entry_ipod': 0}
     full, got = set(art.images(oled)), set(art.images(bare))
-    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_', 'oled_menu_',
-              'oled_pair_', 'oled_quality_', 'oled_pltile_', 'oled_plact_', 'oled_plmark_', 'oled_search_pop', 'oled_search_return', 'oled_holdback', 'oled_bump_')
+    groups = ('oled_mode_', 'oled_np_', 'oled_vol_', 'oled_shuffle_', 'oled_check_', 'oled_wifi_', 'oled_lock_', 'oled_trash_',
+              'oled_search_pop', 'oled_search_return', 'oled_holdback')
     assert got == {n for n in full if not n.startswith(groups)} and all(any(n.startswith(p) for n in full) for p in groups)
 
 
