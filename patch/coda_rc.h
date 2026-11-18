@@ -132,6 +132,14 @@ int lib_request(crc_session *s, int type, unsigned req_id, const uint8_t *p, siz
 void lib_played(int ok, int qgen);
 void lib_now(int qgen, int id);
 void lib_art_of(const char *path, char *art, size_t cap); /* a song path's album art id */
+/* GetCover's answer (coda_rc_lib.c); hold: a server album with no cover on the card may be asked of its app first */
+int lib_cover(crc_session *s, unsigned req_id, const char *art, unsigned offset, unsigned limit, unsigned max_px,
+              int hold);
+/* A car's cover the card lacks, asked of card app id (coda_rc.c, docs/internals.md#car-remote-covers): album's cover at
+ * px (512 or 160). 1 when the daemon holds the GetCover's answer (it answers through lib_cover once the app has
+ * answered, or after COVER_HOLD_MS); 0 when it doesn't, and NOT_FOUND goes now. */
+int crc_cover_ask(crc_session *s, unsigned req_id, const char *art, unsigned limit, unsigned max_px, const char *id,
+                  const char *album, unsigned px);
 /* A streaming song's file (/mnt/mmc/.<app>/stream/.../<title> [<sid>].<suffix>) as the catalogue's server song */
 typedef struct {
     int id, secs, track;
