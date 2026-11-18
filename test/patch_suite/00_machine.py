@@ -160,6 +160,9 @@ class Machine:
         if patched:  # a file and a clock; test/playback.py tests them
             self.handlers[payload_syms['press_stamp']]='stock_press_stamp'
             self.handlers[payload_syms['lw_syscall']]='stock_lw_syscall'  # 0: no eventfd, so the UI loop idles in sleep_ms (loop_wake.c)
+            # 0 from each: no inotify (card_watch.c), no pipe's descriptors (coda_rc_shim.c), and the push socket's
+            # socket() already refused (player_push.c), so each keeps its clock
+            for name in ('cw_syscall', 'cr_syscall', 'pp_syscall'): self.handlers[payload_syms[name]]='stock_'+name
         for name in FUNCTIONS: self.handlers[syms[name]]=name
         self.handlers[syms['strstr@GLIBC_2.0']]='strstr@GLIBC_2.0'  # libc's, which the payload's state-file reads call
         # canvas_get_vgcanvas runs stock, down to the mocked lcd_get_vgcanvas, as the rounded wrappers need

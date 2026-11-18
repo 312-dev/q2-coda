@@ -388,13 +388,15 @@ class Session:
             if self.playing and now >= next_poll:
                 for p in POLL: self.send(p, quiet=True)
                 next_poll = now + 0.2 / self.speed
-            r, _, _ = select.select([self.conn, self.push], [], [], min(0.02 / self.speed, until - now))
-            if self.push in r:
-                while True:
-                    try: self.push.recv(16)
-                    except BlockingIOError: break
-                    self.pushes.append(self.now())
-            if self.conn not in r: continue
+            r, _, _ = select.select([self.conn], [], [], min(0.02 / self.speed, until - now))
+            # pushes are taken on the loop's own passes, never waking it: the poll's timing, which the protocol
+            # fixtures' once-a-second positions are sampled from, stays what it was without them; a push sent
+            # before an answer is taken before that answer
+            while True:
+                try: self.push.recv(16)
+                except BlockingIOError: break
+                self.pushes.append(self.now())
+            if not r: continue
             data = self.conn.recv(4096)
             if not data:
                 self.note('<', '(closed)'); self.playing = False; time.sleep(0.05); continue
