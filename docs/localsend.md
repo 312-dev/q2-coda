@@ -50,7 +50,8 @@ the app wins:
   `sessionId` and a token per accepted file, 403 when declined, 409 when another session is running. Then one
   `POST /upload?sessionId&fileId&token` per file, the body the bytes (422 on a `sha256` mismatch), and
   `POST /cancel?sessionId` from either side's cancel. A folder sent arrives as files whose `fileName` carries the
-  relative path (`Album/CD1/01.flac`).
+  relative path (`Album/CD1/01.flac`). The CLI sends each upload's body **chunked** (`Transfer-Encoding: chunked`,
+  no `Content-Length`), so the server's parser takes both.
 - **Send.** The same three calls, made by the Q2 to the peer.
 - Not used: the PIN (the Q2 asks on its screen instead), the download API (`prepare-download`, served to browsers
   over plain HTTP), v3.
@@ -81,10 +82,13 @@ across restarts; Reset Settings removes it. Validity is written as strings (`197
 `40960101000000Z`, `ASN1_TIME_set_string`), so the Q2's unset clock and 32-bit `time_t` don't matter. Peer dates
 are not checked (the Q2's clock may be unset); a peer is trusted by its fingerprint, as the app does.
 
-Key type: P-256 ECDSA is made in milliseconds; RSA-2048 is what the app makes and could take seconds on the
-Q2's core with OpenSSL built without assembly. P-256 if the reference CLI and the phone apps accept it (rustls
-does), RSA-2048 otherwise; the protocol tests settle it. ChaCha20-Poly1305 is preferred over AES-GCM, as the CPU
-has no AES instructions.
+Key type: **P-256 ECDSA**, made in milliseconds where RSA-2048 (the app's own) could take seconds on the Q2's
+core with OpenSSL built without assembly. Checked on 2026-11-18 against the reference CLI 1.18.2 with a Python
+stand-in for the Q2 (scratch `probe/peer.py`): with a P-256 identity, and again with RSA-2048, the CLI heard the
+announcement, registered over HTTPS, sent a file through prepare-upload and upload, and accepted a file sent to it
+with the identity as client certificate; a request without one was refused in the handshake (TLS 1.3
+`certificate_required`). The phone apps of the same release use the same Rust core; an older app is untested.
+ChaCha20-Poly1305 is preferred over AES-GCM, as the CPU has no AES instructions.
 
 ### When it listens
 
