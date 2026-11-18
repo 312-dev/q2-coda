@@ -1,4 +1,5 @@
-/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it. */
+/* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it; and the scan
+ * hold, wpa_supplicant's rescans held off while A2DP streams. */
 #include "navigation.h"
 
 /* Smart Wi-Fi (docs/internals.md#smart-wi-fi): with Power's row on and the user's Wi-Fi switch on,
@@ -105,13 +106,56 @@ static int smart_needed(void) {
            (g_syncnettime_flag && networkGetConnectStatus() > 0) || net_page_open();
 }
 
+/* Background scans held while A2DP streams (docs/internals.md#scan-hold): the RTL8733BS is one
+ * radio for Wi-Fi and Bluetooth, and a scan's off-channel dwells are air time the headset's link
+ * loses. The scan that runs on its own is wpa_supplicant's: with saved networks and none joined it
+ * scans again scan_interval (5 s) after each scan that found none, for as long as the radio is on
+ * (the shipped config has no bgscan or autoscan; demo scans only from the Wi-Fi page, its switch
+ * and a join). So while music plays to a headset (or a phone streams to the Q2), Wi-Fi is on and
+ * nothing needs the network, scan_interval is SCAN_HOLD_S; otherwise wpa_supplicant's own 5 s.
+ * smart_needed includes the Wi-Fi page and its dialogs, so the page scans as stock's does whatever
+ * plays, and a change of scan_interval moves the rescan already due (scan.c's
+ * wpa_supplicant_update_scan_int), so the hold and its end take effect at once. Nothing joined or
+ * a join's own scans are touched. held: the value wpa_supplicant was last given, 1 for the hold;
+ * sock: its control socket's inode then, so a new wpa_supplicant (the switch, Smart Wi-Fi's wake)
+ * or a new demo beside an old one is told again; tried: the last failed try, retried after
+ * SCAN_RETRY_MS. */
+#define WPA_SOCK "/var/run/wpa_supplicant/wlan0"
+#define SCAN_HOLD_S "3600"
+#define SCAN_RETRY_MS 10000
+static struct {
+    unsigned sock, tried;
+    int held;
+} sh __attribute__((section(".scratch")));
+static void scan_hold_poll(unsigned now) {
+    unsigned info[36] = { 0 };
+    if (!g_wififlag || __xstat(3, WPA_SOCK, info)) {
+        sh.sock = 0; /* no wpa_supplicant: the next one starts at 5 s */
+        return;
+    }
+    int a2dp = (media_playing() && mclGetOutputWay() == 1) || (signed char)bt__recv_pageflag == 2;
+    int hold = a2dp && wifi_connectstatus != 1 && !smart_needed();
+    if (sh.sock == info[4] && sh.held == hold) return;
+    if (sh.tried && now - sh.tried < SCAN_RETRY_MS) return;
+    if (system(hold ? "wpa_cli -i wlan0 scan_interval " SCAN_HOLD_S " >/dev/null 2>&1"
+                    : "wpa_cli -i wlan0 scan_interval 5 >/dev/null 2>&1")) {
+        sh.tried = now | !now;
+        return;
+    }
+    sh.tried = 0;
+    sh.sock = info[4];
+    sh.held = hold;
+}
+
 /* power_poll, every SMART_POLL_MS. The row off, or the user's Wi-Fi off: stock's, and a radio Smart
  * Wi-Fi had off comes back. Otherwise a use or a new link restarts the count, a use wakes the
- * radio, and SMART_IDLE_MS without one, associated or not, turns it off. */
+ * radio, and SMART_IDLE_MS without one, associated or not, turns it off. The scan hold is kept
+ * first, whether the row is on or not. */
 void smart_poll(void) {
     unsigned now = time_now_ms();
     if (sw.at && now - sw.at < SMART_POLL_MS) return;
     sw.at = now | !now;
+    scan_hold_poll(now);
     /* ponytail: while stock refuses its switch (smart_ready), a waiter that asks after this expiry
      * starts another SMART_CONNECT_MS: one more 15 s at most; keep each waiter's own start if it
      * bites. */
