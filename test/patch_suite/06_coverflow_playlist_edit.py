@@ -226,7 +226,7 @@ class PlaylistEditMachine(CoverflowMachine):
             self.stack.remove(self.page); self.top=self.stack[-1]
         self.returns(ret,clobber=True)
     def open_editor(self,h=OLED_G.pitch,inner=OLED_G.body):
-        # Edit Playlist's row (playlists.c ringnav_playlistsmore) under OLED's set: no toolbar, so the third row from the
+        # Edit Playlist's row (playlists.c ringnav_playlistsmore) under OLED's grid: no toolbar, so the third row from the
         # top, h high; no settings icons (set_icon 0), so its icon hidden, the button the row's width, the label at text_x.
         more=self.node('window','playlistsmore_page'); self.word(more+O['W_PARENT'],self.wm)
         self.top=more; self.stack.append(more)
@@ -236,7 +236,7 @@ class PlaylistEditMachine(CoverflowMachine):
         assert self.nodes[deleted]['text']=='Delete Playlist'
         row=self.nodes[more]['children'][-1]; button=self.nodes[row]['children'][0]
         image,label=self.nodes[button]['children']
-        assert OLED_G.toolbar==0 and OLED_G.set_icon==0
+        assert OLED_G.set_icon==0
         assert [self.get(row+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,2*h,375,h]
         assert self.nodes[row]['style']=='s_listitem_black'
         assert [self.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[0,0,375,h]

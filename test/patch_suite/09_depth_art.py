@@ -648,7 +648,12 @@ def tex_of(w,h):  # the last cover loaded (opaque) as slide_load leaves it, and 
     cols=[sharpen([rows[y][x] for y in range(th)]) for x in range(tw)]
     rows=[[c_[y] for c_ in cols[:1]+cols+cols[-1:]*2] for y in range(th)]  # the edges a texel left and above, two right and below
     rows=rows[:1]+rows+rows[-1:]*2
-    return dict(px=[p for r in rows for p in r],ts=tw+3,u0=(fw-PW)//2,v0=(fh-PH)//2,rx=tw-fw,ry=th-fh)
+    (u0,rx),(v0,ry)=drift_axis(fw,tw,PW),drift_axis(fh,th,PH)
+    return dict(px=[p for r in rows for p in r],ts=tw+3,u0=u0,v0=v0,rx=rx,ry=ry)
+def drift_axis(f,t,p):  # drift_axis: from the old crop across the zoom's margin, split_inset percent of t clear at each edge
+    ins=t*OLED_G.split_inset//100; lo=max((f-p)//2,ins); hi=min((f-p)//2+t-f,t-p-ins)
+    if hi<lo: lo=hi=(t-p)//2
+    return lo,hi-lo
 def at(r,period,t):  # drift_at: smoothstep ping-pong, s in 1/65536
     t%=2*period; s=((t if t<period else 2*period-t)<<16)//period; return r*256*((s*s*(3*65536-2*s))>>24)>>24
 def bspline(t):  # bspline_w: the cubic B-spline's 4 weights at phase t/256, in 1/256
@@ -678,7 +683,8 @@ def drawn():
 # 2112 square: 6 x 6 sampled 3 x 3.
 m.art_size=(352,352); m.pixels.clear(); paint_home(); c=tex_of(352,352)
 assert m.nodes[m.art]['image']=='' and [signed(m.get(m.art+O[k])) for k in ('W_X','W_Y','W_W','W_H')]==[PX,0,PW,CH]
-assert (c['u0'],c['v0'],c['rx'],c['ry'])==((PH-PW)//2,0,32,32) and not drifts()
+INS=352*OLED_G.split_inset//100; assert 0<INS<16  # the inset leaves the 32 texel margin some pan
+assert (c['u0'],c['v0'],c['rx'],c['ry'])==((PH-PW)//2,INS,32,32-2*INS) and not drifts()
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) in [x[:1] for x in m.calls]
 assert drawn()==framed(c,0) and ('bitmap_lock_buffer_for_write',) not in [x[:1] for x in m.calls]  # unmoved: not rendered again
 paint_home(); m.advance(0); assert len(drifts())==1  # it arms on the next paint
@@ -1234,8 +1240,8 @@ m=settings_m
 # Cover Flow's Sort and Refresh Cover Flow (coverflow.c), the library Coverflow's Sort and Refresh cards before: no
 # saved order is Album; Refresh empties the art cache for the next open, and stock's Library covers with AWTK's cached
 # bitmaps, with a toast.
-sort_label,refresh_label=(m.nodes[m.nodes[r]['children'][0]]['children'][1] for r in (cf_sort,cf_refresh))
-assert m.nodes[sort_label]['text']=='Sort: Album' and m.nodes[refresh_label]['text']=='Refresh Cover Flow'
+refresh_label=m.nodes[m.nodes[cf_refresh]['children'][0]]['children'][1]
+assert row_text(cf_sort)=='Sort: Album' and m.nodes[refresh_label]['text']=='Refresh Cover Flow'  # Sort's value on the right column (list_value)
 f,ctx=m.handler(m.nodes[cf_refresh]['children'][0],O['EVT_CLICK']); m.mock('opendir@GLIBC_2.0'); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.toasts[-1][3]=='Cover Flow rebuilds artwork next time'
 assert [m.text(c[1]) for c in m.calls if c[0]=='opendir@GLIBC_2.0']==['/mnt/mmc/.coverflow','/mnt/mmc/.sldp']
@@ -1266,12 +1272,15 @@ art=named(m,home,'img_homeart')
 # is the set's split_row wide, its art from split_art; Full widens the menu and its rows to full_row. Home's other lists are full
 # width in either (home.lists full), on full_row rows with Full's label end. Shuffle Songs, which opens nothing and has
 # no chevron, takes the chevron's room to the set's right column (home.c home_in_place).
+# Split's main menu (coverflow.c home_width): its top HOME_SPLIT_TOP on the screen, under the art's split_art_up
+SPLIT_TOP=int(re.search(r'^#define HOME_SPLIT_TOP (\d+)',(ROOT/'patch/coverflow.c').read_text(),re.M)[1]); assert OLED_G.split_art_up
 def home_bounds(full):
     split,right=OLED_G.split_row,OLED_G.right_x
     for name,sub in (('list_view_home',full),('list_view_homeset',True)):
         x0,end,row=OLED['home_text_x'],OLED[f'home_label_end[{int(sub)}]'],OLED['home_full_row'] if sub else split
         menu=named(m,home,name)
-        assert m.get(menu+O['W_W'])==(375 if sub else split) and m.get(menu+O['W_Y'])==OLED['home_top'],name
+        top=SPLIT_TOP-OLED_G.bar if name=='list_view_home' and not full else OLED['home_top']  # Split's menu rises into the status row
+        assert m.get(menu+O['W_W'])==(375 if sub else split) and signed(m.get(menu+O['W_Y']))==top,name
         for r in m.nodes[m.nodes[menu]['children'][0]]['children']:
             label=m.nodes[r]['children'][0]
             x,y,width,height=cf_geometry(m,label)
