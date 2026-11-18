@@ -1,10 +1,11 @@
 /* demo's lines in the unified log (docs/internals.md#unified-log). demo never writes the card log
  * itself: ulog puts a whole line, stamped as ulog_line.h has it, on its stderr, which S90play keeps
  * in /tmp/q2-demo.err (/tmp/q2-demo.log in a --dev build), and q2guard, the log's one writer, reads
- * it from there each tick. ulog_end is a clean end's last word: it asks q2guard for a snapshot and a
- * flush now (/tmp/q2guard.snap, then a SIGUSR1 to the pid in /tmp/q2guard.lock) and waits for the
- * answer, the request's removal, at most ULOG_END_MS, so the lines are on the card before the
- * power-off, Restart or update takes the Q2 down. */
+ * it from there each tick. ulog_end is a clean end's last word: it asks q2guard for a snapshot and
+ * a flush now (/tmp/q2guard.snap, then a SIGUSR1 to the pid in /tmp/q2guard.lock, through the
+ * shell's kill: demo imports no kill of its own) and waits for the answer, the request's removal,
+ * at most ULOG_END_MS, so the lines are on the card before the power-off, Restart or update takes
+ * the Q2 down. */
 #include "navigation.h"
 #include "ulog_line.h"
 
@@ -12,7 +13,6 @@
 #define ULOG_LOCK "/tmp/q2guard.lock"
 #define ULOG_END_MS 2000 /* the most a power-off waits for q2guard's flush */
 #define ULOG_POLL_MS 50
-#define ULOG_SIGUSR1 16 /* MIPS's */
 
 static int ulog_ended __attribute__((section(".scratch"))); /* ulog_end ran: once a run */
 
@@ -41,7 +41,9 @@ void ulog_end(const char *why) {
     fd = open(ULOG_LOCK, 0x80000); /* O_RDONLY | O_CLOEXEC */
     if (fd >= 0) read(fd, pid, sizeof pid - 1), close(fd);
     int p = atoi(pid);
-    if (p <= 1 || kill(p, ULOG_SIGUSR1)) { /* no q2guard to answer: no request left behind */
+    char cmd[48];
+    tk_snprintf(cmd, sizeof cmd, "kill -USR1 %d 2>/dev/null", p);
+    if (p <= 1 || system(cmd)) { /* no q2guard to answer: no request left behind */
         unlink(ULOG_SNAP);
         return;
     }

@@ -1,7 +1,7 @@
-/* The unified log's parsers, guesses, rotation and snapshot (docs/internals.md#unified-log): no reads
- * of the device but the files it is handed, so test/unit/test_q2log.py runs it on this machine.
- * q2guard.c reads the feeds and calls these; the lines wait in card_store.c's RAM ring until its
- * writing child appends them (q2guard_core.c's heat log works the same way). */
+/* The unified log's parsers, guesses, rotation and snapshot (docs/internals.md#unified-log): no
+ * reads of the device but the files it is handed, so test/unit/test_q2log.py runs it on this
+ * machine. q2guard.c reads the feeds and calls these; the lines wait in card_store.c's RAM ring
+ * until its writing child appends them (q2guard_core.c's heat log works the same way). */
 #include "q2log.h"
 
 /* ---- a line's level and source ---- */
@@ -9,7 +9,7 @@
 static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 static int alnum(int c) { return (c >= '0' && c <= '9') || (lower(c) >= 'a' && lower(c) <= 'z'); }
 
-/* w (lower case) in s, any case; whole: only as a word of its own, not inside one ("bt" in "subtitle") */
+/* w (lower case) in s, any case; whole: only as a word of its own ("bt" not in "subtitle") */
 static int has(const char *s, int n, const char *w, int whole) {
     int k = (int)strlen(w);
     for (int i = 0; i + k <= n; ++i) {
@@ -34,8 +34,9 @@ static const struct {
     { "wi-fi", "wifi", 0 },      { "udhcpc", "wifi", 0 },      { "8733bs", "wifi", 0 },
     { "usb", "usb", 0 },         { "gadget", "usb", 0 },       { "udc", "usb", 1 },
 };
-static const char *const errors[] = { "error", "fail", "fatal", "panic", "cannot", "can't", "unable",
-                                      "denied", "refused", "timed out", "timeout", "abort", "segfault" };
+static const char *const errors[] = { "error",   "fail",   "fatal",   "panic",   "cannot",
+                                      "can't",   "unable", "denied",  "refused", "timed out",
+                                      "timeout", "abort",  "segfault" };
 
 char ulog_guess(const char *s, int n, const char **src) {
     *src = "ui"; /* demo itself, and stock's lines that name nothing */
@@ -51,13 +52,15 @@ char ulog_guess(const char *s, int n, const char **src) {
 
 /* ---- into the ring ---- */
 
-static void add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src, const char *s, int n) {
+static void add_line(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+                     const char *s, int n) {
     char line[ULOG_PART + 64];
     int len = ulog_line(line, sizeof line, wall, up_ms, level, src, s, n);
     card_log_append(l, line, (unsigned)len);
 }
 
-void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *src, const char *msg) {
+void ulog_add(card_log *l, long wall, unsigned up_ms, char level, const char *src,
+              const char *msg) {
     add_line(l, wall, up_ms, level, src, msg, (int)strlen(msg));
 }
 
@@ -95,14 +98,16 @@ void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end) {
 }
 
 /* buf's lines into l, after the start held from the last read; a start with no end yet is held */
-static int take(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms, const char *buf, int n) {
+static int take(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms, const char *buf,
+                int n) {
     int got = 0;
     for (int i = 0; i < n; ++i) {
         if (buf[i] != '\n') {
             if (t->plen < ULOG_PART) t->part[t->plen++] = buf[i];
             if (t->plen < ULOG_PART) continue;
         }
-        char level = ulog_add_raw(l, wall, up_ms, t->part, t->plen); /* an end, or a start cut at ULOG_PART */
+        /* a line's end, or its start cut at ULOG_PART */
+        char level = ulog_add_raw(l, wall, up_ms, t->part, t->plen);
         t->plen = 0;
         if (level) got |= 1 | (level == 'E' || level == 'W' ? 2 : 0);
         if (buf[i] != '\n') /* the cut line goes on: skip to its end */
@@ -112,8 +117,8 @@ static int take(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms, con
 }
 
 /* path from off to its end (max bytes at most) into l; the new offset, or -1 for no file */
-static long read_from(struct ulog_tail *t, const char *path, long off, int max, card_log *l, long wall,
-                      unsigned up_ms, int *got, long *size) {
+static long read_from(struct ulog_tail *t, const char *path, long off, int max, card_log *l,
+                      long wall, unsigned up_ms, int *got, long *size) {
     static char buf[ULOG_READ_MAX];
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
@@ -152,7 +157,8 @@ char ulog_kmsg(card_log *l, long wall, const char *rec, int n) {
     int i = 0, pri = 0;
     while (i < n && rec[i] >= '0' && rec[i] <= '9') pri = pri * 10 + (rec[i++] - '0');
     if (i == 0 || i >= n || rec[i] != ',') return 0;
-    if (pri >> 3 || (pri & 7) > 4) return 0; /* not the kernel's (a program's, facility 1 and up), or under warning */
+    /* not the kernel's (a program's, facility 1 and up), or under warning */
+    if (pri >> 3 || (pri & 7) > 4) return 0;
     ++i;
     while (i < n && rec[i] != ',') ++i; /* the sequence number */
     int usec = ++i, digits = 0;
@@ -205,14 +211,15 @@ static long mem_kb(const char *m, const char *key) {
     return v;
 }
 
-void ulog_snapshot(card_log *l, long wall, unsigned up_ms, char level, const char *why, const char *meminfo,
-                   const char *loadavg, const char *state) {
+void ulog_snapshot(card_log *l, long wall, unsigned up_ms, char level, const char *why,
+                   const char *meminfo, const char *loadavg, const char *state) {
     char b[ULOG_PART];
     snprintf(b, sizeof b, "snapshot %s", why);
     ulog_add(l, wall, up_ms, level, "guard", b);
     if (meminfo) {
-        snprintf(b, sizeof b, "mem total=%ld free=%ld available=%ld cached=%ld kB", mem_kb(meminfo, "MemTotal:"),
-                 mem_kb(meminfo, "MemFree:"), mem_kb(meminfo, "MemAvailable:"), mem_kb(meminfo, "Cached:"));
+        snprintf(b, sizeof b, "mem total=%ld free=%ld available=%ld cached=%ld kB",
+                 mem_kb(meminfo, "MemTotal:"), mem_kb(meminfo, "MemFree:"),
+                 mem_kb(meminfo, "MemAvailable:"), mem_kb(meminfo, "Cached:"));
         ulog_add(l, wall, up_ms, 'I', "guard", b);
     }
     if (loadavg) {
@@ -222,7 +229,8 @@ void ulog_snapshot(card_log *l, long wall, unsigned up_ms, char level, const cha
         ulog_add(l, wall, up_ms, 'I', "guard", b);
     }
     if (state) {
-        const char *s = strstr(state, " up="); /* the heat line from its uptime on: its time is the line's */
+        /* the heat line from its uptime on: its time is the snapshot line's */
+        const char *s = strstr(state, " up=");
         snprintf(b, sizeof b, "state%s", s ? s : state);
         ulog_add(l, wall, up_ms, 'I', "guard", b);
     }
