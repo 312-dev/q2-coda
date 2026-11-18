@@ -184,6 +184,7 @@ for stock,want,keys in (('(null)','Unknown Artist',['player_unknown']),('Barones
     m=TitleMachine(page='artistinfo_page',cls=0xff01,rows=2); m.keys=[]; m.word(syms['g_local_classinfo_save'],0xff01)
     m.split=[m.song('Baroness')]; m.word(m.split[0]+O['REC_ALBUM_ARTIST'],m.string('Baroness'))
     m.u.mem_write(O['ARTIST_TITLE'],stock.encode()+b'\0')
+    m.top=m.node('window','x_page')  # over the page as its tabs load: stock's tabs, not the design's page (artist_local)
     for tab in (1,0): m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0)
     assert m.text(O['ARTIST_TITLE'])==want and m.keys==keys,(stock,m.text(O['ARTIST_TITLE']),m.keys)
 passed()

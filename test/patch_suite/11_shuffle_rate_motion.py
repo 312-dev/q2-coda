@@ -599,33 +599,33 @@ assert m.tap(press=False)==0 and m.favs=={'B'}; passed()
 # The wheel moves the picker's row within 0-5; Return leaves the rating as it was.
 for k in (O['KEY_NEXT'],O['KEY_PREV'],O['KEY_PREV']): assert m.call(k)==11
 assert m.on()==3 and m.favs=={'B'}
-assert m.call(O['KEY_RETURN'])==11; m.advance(0); assert m.picker() is None and m.favs=={'B'} and m.kept()==[]; passed()
+back(m); assert m.picker() is None and m.favs=={'B'} and m.kept()==[]; passed()
 # Centre saves 3: My Fav out through stock's own click, 3 kept, the badge on the empty heart.
 m.heart()
 for _ in range(2): m.call(O['KEY_PREV'])
-assert m.call(O['KEY_CENTER'])==11; m.advance(0); assert m.picker() is None and m.favs==set()
+assert m.on()==3; m.pick(3); m.advance(0); assert m.picker() is None and m.favs==set()  # Centre's click on the lit row
 assert m.kept()==[(key_of('B')&~7)|3] and m.badge()=='3'; passed()
 # Down to 0 clears it; a tap on the third rating's row saves 3 again; a tap on the heart (into My Fav) leaves nothing kept.
 m.heart()
 for _ in range(4): m.call(O['KEY_PREV'])
 assert m.on()==0
-m.call(O['KEY_CENTER']); m.advance(0); assert m.kept()==[] and m.badge() is None and m.favs==set()
+m.pick(0); m.advance(0); assert m.kept()==[] and m.badge() is None and m.favs==set()
 m.heart(); m.pick(3); m.advance(0)
 assert m.picker() is None and m.kept()==[(key_of('B')&~7)|3] and m.badge()=='3'
 assert m.tap()==0 and m.favs=={'B'} and m.kept()==[] and m.badge() is None; passed()
 # A tap or a saved rating makes the card's copy due, 5 s on; a picker left unsaved doesn't.
-rc_due=payload_syms['rc_due']; m.word(rc_due,0); m.heart(); m.call(O['KEY_RETURN']); m.advance(0); assert not m.get(rc_due)
+rc_due=payload_syms['rc_due']; m.word(rc_due,0); m.heart(); back(m); assert not m.get(rc_due)
 assert m.tap()==0 and m.get(rc_due)==1
-m.word(rc_due,0); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER']); m.advance(0); assert m.get(rc_due)==1 and m.kept()==[(key_of('B')&~7)|1]
+m.word(rc_due,0); m.heart(); m.pick(1); m.advance(0); assert m.get(rc_due)==1 and m.kept()==[(key_of('B')&~7)|1]
 assert m.tap()==0 and m.favs=={'B'} and m.kept()==[]; passed()
 # Kept across boots; the badge follows the playing track on the UI tick.
-assert m.tap()==0 and m.favs==set(); m.heart(); m.call(O['KEY_NEXT']); m.call(O['KEY_NEXT']); m.call(O['KEY_CENTER']); m.advance(0)
+assert m.tap()==0 and m.favs==set(); m.heart(); m.pick(2); m.advance(0)
 m2=RateMachine(m.files['/mnt/data/ringnav-ratings']); assert m2.badge()=='2'
 m2.word(O['MCL_POS'],0); m2.advance(500); assert m2.badge() is None; passed()
 # Hold Play/Pause on Now Playing: Rate last, with the hearts, and no Next/Previous album outside Shuffle Albums/Folders; its row opens the same picker.
 m2.word(O['MCL_POS'],1); m2.press(100)
 assert m2.hold()==11 and m2.labels()[-2:]==['Group by','Rate  ♥♥♡♡♡'] and m2.release()==0
-m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2 and m2.call(O['KEY_RETURN'])==11; passed()
+m2.pick(len(m2.labels())-1); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2; back(m2); assert m2.picker() is None; passed()
 # More…: last, below Rate, while Now Playing has its img_more; its row clicks that as a tap would
 m3=RateMachine(); more=m3.node('image','img_more'); m3.nodes[m3.np]['children'].append(more); m3.word(more+O['W_PARENT'],m3.np)
 m3.press(100)

@@ -38,7 +38,7 @@ class DepthMachine(CoverflowMachine):
         elif name=='canvas_draw_image':
             src,dst=[tuple(signed(self.get(r+4*i)) for i in range(4)) for r in (c,d)]
             line=self.get(b+8); data=self.get(b+0x14)
-            frame=b''.join(bytes(self.u.mem_read(data+y*line,4*dst[2])) for y in range(dst[3]))
+            frame=b''.join(bytes(self.u.mem_read(data+(src[1]+y)*line+4*src[0],4*dst[2])) for y in range(dst[3]))  # src's rows
             self.draws.append((a,b,src,dst,struct.unpack_from('<H',bytes(self.u.mem_read(b+0xc,2)))[0],frame)); ret=0
         else: return super().hook(u,address,size,unused)
         self.calls.append((name,a,b,c))
@@ -662,7 +662,7 @@ def framed(c,t):  # the panel at phase t, as home_render filters it: across each
     wx,wy=bspline(u&255),bspline(v&255); i=(v>>8)*ts+(u>>8)  # texel -1, -1 from u, v
     rows=[[tap4(*px[j+x:j+x+4],wx) for x in range(PW)] for j in range(i,i+(PH+3)*ts,ts)]
     out=[vig(tap4(*k,wy),VIG(y)) for y in range(PH) for k in zip(*rows[y:y+4])]
-    return struct.pack(f'<{len(out)}I',*out)
+    return struct.pack(f'<{len(out)}I',*out)[4*PW*(PH-CH):]  # the window's rows (home_paint); the bar paints those above
 # Split's vignette (coverflow.c vig_k, vig): the frame's rows darkened at its top and bottom edges, in 256ths, by the
 # tables the C holds (read from the source, which states how they were made); the frame's row y is the screen's y + 320 - PH.
 VIG_T={n:[int(v) for v in re.search(rf'{n}\[VIG_\w+\] = {{([^}}]*)}}',(ROOT/'patch/coverflow.c').read_text()).group(1).split(',')]
