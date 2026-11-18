@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Touch: after a swipe back on a page that stays open (one whose first Return moves within the page, as the letter strip's results do), the page now still slides away when it later closes. Before, the swipe left it closing at once from then on.
   - Song lists: the song playing now stands out in every song list (Songs, an album's or artist's songs, folders, playlists, Search, Most Played, Long Songs and the Ratings lists): its title is in the accent colour, with four small bars on the right, beside its length, or in the length's place where there is no room or no length. On the wheel's highlight both turn white.
   - Song lists: choosing the song that is already playing no longer starts it again from the beginning. It opens Now Playing and the song plays on (a paused one resumes). Chosen from another list of the same kind, the songs after it in that list now play after it.
   - Streamed songs: moving to a later point in a server song that is still downloading works. Tapping the progress bar inside the part already downloaded plays from there at once; before, the Q2 sat on the loading spinner until the whole song had downloaded. Tapping past it shows the spinner at the point you chose and plays from there as soon as that part arrives, instead of jumping back on the bar.
