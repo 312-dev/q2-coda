@@ -159,7 +159,9 @@ int bt_acl_handle_of(const unsigned char *req, int max, const unsigned char *bda
     int n = u16_at(req + 2);
     for (int i = 0; i < n && i < max; ++i) {
         const unsigned char *c = req + 4 + 16 * i;
-        if (c[8] == 1 && !memcmp(c + 2, bdaddr, 6)) return u16_at(c) & 0x0fff;
+        int same = c[8] == 1; /* ACL_LINK */
+        for (int j = 0; j < 6; ++j) same &= c[2 + j] == bdaddr[j];
+        if (same) return u16_at(c) & 0x0fff;
     }
     return -1;
 }
