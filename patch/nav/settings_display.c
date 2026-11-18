@@ -26,7 +26,7 @@ static void setting_text(int i) {
         return;
     }
     static const char *const toggles[] = { "Smart Awake", 0 /* 6: the Clicker's, no row */,
-                                           "Time in Title", "Reduce Motion" };
+                                           "Reduce Motion" };
     if (i >= SETTING_KEEPLIT) {
         list_toggle(st.setting_label[i], toggles[i - SETTING_KEEPLIT], *setting_values[i]);
         return;

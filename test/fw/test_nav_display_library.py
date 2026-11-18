@@ -334,8 +334,7 @@ def appearance(fw, ui, **config):
 # The payload's Appearance rows (setting_text, setting_keys[]): a setting's title and its stored key. A theme's own
 # option brings its own label and key, its accent the theme's key.
 PAYLOAD = {'SETTING_LIGHT': ('Light Mode', 'LIGHT'), 'SETTING_ACCENT': ('Accent', None), 'SETTING_HOME': ('Home', 'HOME'),
-           'SETTING_SHORTCUT': ('Shortcut', 'SHORTCUT'), 'SETTING_BATTERY': ('Battery', 'BATTERY'),
-           'SETTING_TIMETITLE': ('Time in Title', 'TIMETITLE')}
+           'SETTING_SHORTCUT': ('Shortcut', 'SHORTCUT'), 'SETTING_BATTERY': ('Battery', 'BATTERY')}
 
 
 def appearance_titles(t):

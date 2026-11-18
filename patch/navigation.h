@@ -231,11 +231,11 @@ typedef struct {
     void *genre_label;
     int genre_off;
     unsigned genre_timer;
-    /* The selected row's marquee (marq_moved); Time in Title off (bar_title). */
+    /* The selected row's marquee (marq_moved); the bar's title (bar_title). */
     void *marq_row, *marq_label;
     unsigned marq_timer;
     int marq_id, marq_passes;
-    int time_title, bar_titled;
+    int bar_titled;
     /* Scrub: scrub_to is the target second, scrub_moved set once the wheel changed it. */
     unsigned scrub_timer, scrub_track, settle_timer;
     /* Now Playing's Centre cycle (np_centre): its stage (NP_STAGE_*), the stage's timeout, and when
@@ -270,7 +270,7 @@ typedef struct {
     unsigned keep_lit_at;
     void *sel_accent; /* the row on a coloured selection, for Light Mode's ink */
     int style_depth;  /* nested style hooks (a mutable style's fallback) map nothing */
-    void *setting_label[9 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
+    void *setting_label[8 + THEME_KEYS]; /* SETTING_OWN + THEME_KEYS */
     unsigned tone_key;  /* the wheel key whose press ringnav_keydown silenced, 0 when none */
     unsigned tick_drop; /* tick_gate: the wheel keys whose press it dropped, bits */
     unsigned tick_at;   /* tick_gate: the last tick it passed (ringnav_sleep's dark turn) */
@@ -621,6 +621,7 @@ void charging_poll(void);
  * or -1 */
 enum { SLOT_BATTERY, SLOT_PLAY, SLOT_WIFI, SLOT_SYNC, SLOT_HEADSET, SLOT_LOCK, SLOT_N };
 int status_slots_left(void);
+int status_slots_reach(void);
 void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
@@ -775,7 +776,6 @@ enum {
     SETTING_KEEPLIT,
     SETTING_CLICKER, /* the Clicker's output: stored here, its row Controls' Key Tone row
                         (clicker.c) */
-    SETTING_TIMETITLE,
     SETTING_REDUCEMOTION, /* Reduce Motion (ui_kit.c motion_reduced), Display's last row */
     SETTING_OWN
 };
