@@ -1026,7 +1026,9 @@ static int list_pad(void *w) {
 /* w's content padded by pad past the rows' foot. A relayout (a page back on top, a list rebuilt
  * whole, as Settings > Bluetooth's on each scan result) puts stock's height back, unpadded, and
  * AWTK clamps the scroll to it, which put a list scrolled to its end down until its last row sat on
- * the screen's foot: the scroll the last paint saw goes back while it fits. */
+ * the screen's foot: the scroll the last paint saw goes back, held to the wheel's end (a caption that
+ * closes took the content's foot a row's part up since, as Settings > Battery's last row after
+ * In-Vehicle Mode: its scroll, made for the grown list, lay past the new end). */
 static void list_pad_to(void *w, int pad) {
     int content = I(w, VIEW_CONTENT_H) - list_pad(w), h = I(w, W_H), off = I(w, SCROLL_Y),
         kept = widget_get_prop_int(w, LIST_TOP, 0) - 1;
@@ -1034,8 +1036,9 @@ static void list_pad_to(void *w, int pad) {
     widget_set_prop_int(w, LIST_PAD, pad);
     I(w, VIEW_CONTENT_H) = content + pad;
     widget_set_prop_int(w, LIST_PADDED, content + pad);
-    if (relaid && kept > off && kept <= content + pad - h)
-        scroll_view_set_offset(w, I(w, SCROLL_X), kept);
+    int last = content + pad - h; /* the wheel's end: the content's foot on the list end */
+    if (relaid && kept > off && last > off)
+        scroll_view_set_offset(w, I(w, SCROLL_X), kept < last ? kept : last);
 }
 /* After stock's list layout (ipod_list_layout): a list list_fade padded gets its pad and its scroll
  * back at once, before a frame draws it. Left to list_fade, at the end of the next paint, that
