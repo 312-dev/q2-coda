@@ -65,6 +65,7 @@ static struct {
     unsigned poll_at, class_hash, class_seen;
     int scans;          /* scans started for this view */
     int scan_shown;     /* Other Devices' spinner shown at the last poll */
+    int linking;        /* a device connecting or connected at the last poll; -1 not yet looked */
     char link[24];      /* the device connected at the last look, "" none */
     char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
@@ -399,7 +400,7 @@ void bt_page(void *view, int on) {
     bt_name_row(view);
     unsigned n = widget_count_children(view);
     if (bt.view != view) {
-        bt.view = view, bt.scans = 0;
+        bt.view = view, bt.scans = 0, bt.linking = -1;
         widget_on(view, EVT_DESTROY, view_gone, view);
     }
     if (!on) {
@@ -715,7 +716,11 @@ static int busy(void) {
 
 /* While the page is in front with Bluetooth on: a scan when none runs, the first as it opens and
  * then again each time one ends while nothing is connected (a scan beside a stream costs its air
- * time); the spinner's frames; the classes as the fetch answers. */
+ * time); the spinner's frames; the classes as the fetch answers. A connect that starts while a scan
+ * runs stops it as stock's row click does first (btmenu_item_on_click's btStopSearch), with the
+ * results so far read as its timer reads them at the scan's end: the headset reconnecting by
+ * itself, headset.c's or the boot's connect, which go by no click. The opening scan beside a
+ * device already connected runs on, so Other Devices fills (docs/internals.md#bluetooth-page). */
 static void page_poll(unsigned now) {
     void *win = bt.view ? window_of(bt.view) : (void *)0;
     if (!win || win != window_manager_get_top_window(window_manager())) return;
@@ -726,6 +731,13 @@ static void page_poll(unsigned now) {
     if (now - bt.poll_at < BT_POLL_MS) return;
     bt.poll_at = now;
     if (class_read()) widget_invalidate_force(win, (void *)0);
+    int linking = I(bt_connectstatus, 0) == 1 || busy();
+    if (bt_searchtime > 1 && linking && !bt.linking) {
+        btStopSearch();
+        getSearchResult();
+        g_btsetting_flag = 1;
+    }
+    bt.linking = linking;
     if (!g_bluetoothflag || bt_searchtime || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1)
         return;
     if (bt.scans && busy()) return;

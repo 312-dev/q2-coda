@@ -303,6 +303,48 @@ def test_scans_rebuilding_the_list_leave_one_of_each_header(fw):
         assert sum(bool(s.p.ui.lookup(r, '_bt_headspin', 0)) for r in s.p.rows()) == 1
 
 
+class Stops(Scan):
+    """Scan, with stock's btStopSearch and getSearchResult recorded: the stop zeroes bt_searchtime as stock's does."""
+    def __init__(self, fw, devices=DEVICES[1:2]):
+        super().__init__(fw, devices)
+        self.calls = []
+        fw.mock('btStopSearch', self.stop)
+        fw.mock('getSearchResult', lambda *_: self.calls.append('results') or 0)
+
+    def stop(self, *_):
+        self.calls.append('stop')
+        self.fw.var('bt_searchtime', C.c_ubyte).value = 0
+        return 0
+
+
+@pytest.mark.parametrize('how', ['link thread', 'row'])
+def test_a_connect_starting_while_the_page_scans_stops_the_scan(fw, how):
+    """A link the row's click did not start (the headset reconnecting, headset.c's or the boot's connect): stock's
+    click stops the scan first (btmenu_item_on_click, 0x4c4430), these did not, and an inquiry beside a page and
+    then a stream takes their air time for the rest of its 10 s."""
+    s = Stops(fw, DEVICES[1:2] if how == 'link thread' else [(CAR, 'BMW 6R81', 'paired')])
+    s.p.poll()
+    assert s.started == 1 and s.calls == []
+    fw.var('bt_searchtime', C.c_ubyte).value = 40
+    if how == 'link thread':
+        fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1
+    else:
+        s.p.devices[0] = (CAR, 'BMW 6R81', 'connected')
+        s.p.rebuild()
+    s.p.poll()
+    assert s.calls == ['stop', 'results'] and fw.var('g_btsetting_flag', C.c_ubyte).value == 1
+
+
+def test_the_opening_scan_runs_on_beside_a_device_already_connected(fw):
+    """Other Devices fills while a headset streams, as stock's page does: only a connect that starts stops a scan."""
+    s = Stops(fw, DEVICES)
+    s.p.poll()
+    fw.var('bt_searchtime', C.c_ubyte).value = 40
+    s.p.poll()
+    s.p.poll()
+    assert s.calls == []
+
+
 def test_the_page_gone_stops_its_scans(fw):
     s = Scan(fw)
     s.p.ui.destroy(s.p.win)
