@@ -742,7 +742,7 @@ sit under those, and the swipe's other pages stop above the bar. Each line that 
 the end it runs past (Display's [Theme](#theme)).
 
 The art, title, artist and album are the slide_view's first page, so a swipe replaces all of them
-with the lyrics page; two page dots. The track's details are not a page of
+with the lyrics page, and another with the [rating page](#rating-page); three page dots. The track's details are not a page of
 the swipe: ⋯'s last row, **About** (under OLED last before Delete Song), opens them as a page of their own, titled
 About, and Return goes back to ⋯ (under OLED its panel, over Now Playing), as from ⋯'s other
 rows' pages. The build takes stock's info page out of the slide_view and leaves it hidden in Now
@@ -848,7 +848,19 @@ highlight go on, a swipe to another page and back included, until Now Playing cl
 song starts at the top. A tap shows them full screen, and another brings the
 page back. A song from a card app's server (Subsonic's) with no lyrics of its own has them asked of its app
 while the page shows it; the page shows none until they arrive, then fills in
-([Lyrics from a card app's server](internals.md#server-lyrics)). See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
+([Lyrics from a card app's server](internals.md#server-lyrics)). Under OLED the album art's glow is behind them
+([Rating page](#rating-page)). See [internals.md](internals.md#scrub-ipod) and [Word-timed lyrics](internals.md#word-timed-lyrics).
+
+<a id="rating-page"></a>**Rating page.** A swipe past the lyrics shows the song's rating: its title and artist, five
+stars and the page dots, full screen over a soft glow of the album art's colours (OLED's
+[Rating page](oled-design.md#rating-page) has the sizes). The stars are the song's hearts, 0 to 5, five being the
+favourite (the heart on the art's page); ratings given before the page existed show as they were. Turning the wheel
+moves a target star, drawn larger, from the rating's top; Center keeps it. A tap on a star keeps it at once. The
+star that is already the rating's top, tapped or kept by Center, clears the rating. With nothing turned, Center
+puts the target on the rating's top star. A stream or radio, which can't be rated, leaves the wheel on the volume.
+The heart on the art's page is the favourite alone; holding it still opens the rating picker, and the hold menu's
+**Rate** too. The glow is made once for each song's cover, not per frame, and is behind the lyrics page as well.
+See [internals.md](internals.md#rating-page).
 
 ## Previous and Next
 
