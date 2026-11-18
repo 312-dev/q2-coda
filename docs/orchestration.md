@@ -57,13 +57,27 @@ The three endings:
 | `BLOCKED <question>`   | needs a decision only the user can make                   | asks the user, one question at a time, then resumes the worker with the answer              |
 | `HANDOFF`              | out of turns or context; `STATUS.md` says where it stands | spawns a successor in the same worktree with `q2 agent start ... --takeover`                |
 
+### Worker hygiene
+
+Each rule was broken on 2026-11-17 or 18 with other workers' runs lost or killed. A brief names this section; it does not retype it.
+
+1. **Scratch files go in your own subfolder** of the session scratchpad, named for your `NAME`, and never in another worker's: a shared folder is overwritten without a word.
+2. **One wait monitor at a time.** Cancel it when the run it waits on reports, and leave none after `q2 agent end`: a forgotten monitor keeps watching, and fires into a later turn.
+3. **Run commands only from your own worktree.** A shell whose cwd drifted into another worker's worktree ran other agents' commands there and had their `q2-wait` processes killed. Check `pwd` after any `cd`; use absolute paths.
+4. **Kill only your own processes, by PID.** Never match a `q2-wait` or any process in a worktree to its owner by guesswork; never `pkill`, never `pkill -f`. If you cannot say whose a process is, leave it and report it.
+5. **Suites run through `affected.py --run` or `q2-heavy`.** Never a bare `pytest` over `test/fw`, never `-n auto`: they ignore the CPU and memory budget the queue is sized by.
+6. **Write `STATUS.md` as you go**, even where it is gitignored: a `HANDOFF` is resumed from it, and a file written at the end is not there when the context runs out first.
+7. **Emulators come from the pool only** (`emu_pool.py get` and `put`): never slot 2, `~/q2-emu-server` or port 2309. A lease resets the card from the fixture (`infra/pool-card-drift`), so nothing you left on the card survives it; return the lease when done.
+8. **Report the static bytes you add.** The scratch state is 128 KB and `.bss` counts in it; the build prints `payload room:`. Put the figure before and after in the commit message or `STATUS.md`, so the queue's `scratch_free_bytes` has no surprise.
+9. **Know the flaky tests.** The `0x5e000000` mmap clash between `test_nav_loop.py` and `test_e2e_network.py` was fixed on 2026-11-18 by moving the `Wait` helper's page to `0x5d000000`; a clash of that kind is no longer a flake, so reproduce it before calling it one. Still open: the post tier's `smoke` and the `fw` suite's occasional first-run failure, both recorded in `~/.cache/q2-queue/flakes.jsonl`, cause not yet pinned; `test/known_failures.tsv` is empty. A failure on your branch that passes alone is not yours to fix, but name it in your final message.
+
 ## The brief
 
 A brief has four parts and nothing else; the standing rules are in this page and in the hooks, not retyped each time.
 
 ```text
-You are a worker on Q2 Muse. Read docs/orchestration.md (The worker's contract) before anything else and
-follow it exactly; AGENTS.md is the index to the code.
+You are a worker on Q2 Muse. Read docs/orchestration.md (The worker's contract and Worker hygiene) before
+anything else and follow it exactly; AGENTS.md is the index to the code.
 
 ITEM: <one backlog item, one or two sentences: what the user should see when it is done>
 WORKTREE: <absolute path>   BRANCH: <name, off the trunk's tip>   NAME: <short name for q2 agent start>
