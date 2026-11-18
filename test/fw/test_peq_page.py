@@ -206,7 +206,7 @@ class Page:
                 if C.string_at(name) == b'dialog/msginfo_dialog' else None)
         fw.mock('write_int_config', lambda v, s, k, *_: self.config.append((C.string_at(s).decode(), C.string_at(k).decode(), i32(v))))
         self.page = self.new(0, 0, 0, 375, 320)
-        self.props[(self.page, 'h')] = 290  # under the status bar
+        self.props[(self.page, 'h')] = 320  # the whole screen, the status row over it (docs/oled-design.md#full-bleed)
         data = card.files.get(ACTIVE, b'')
         on = data[:8] == b'Q2PEQ03\0' and EqState.from_buffer_copy(data, 8).mode != EQ_OFF
         fw.var('g_equalizer_flag', C.c_ubyte).value = on  # as peq_stock_eq left it at boot
@@ -433,6 +433,38 @@ def test_opening_changes_nothing_and_shows_simple_s_sliders(fw):
     assert list(p.e3.gain) == [3, 0, -2] and p.e3.focus == E3_LOW
     assert {evt for w, evt in p.on if w == p.page} == {
         EVT_DESTROY, EVT_KEY_UP, EVT_POINTER_MOVE_BEFORE, EVT_POINTER_UP_BEFORE}
+
+
+def bar_foot(fw):
+    """The status row's foot, the screen row a full-bleed page's content starts on (theme_engine.c bar_foot)."""
+    names = host.tools_theme.GEOM_VALS
+    return fw.var('theme_engine__geom_vals', C.c_short * len(names))[names.index('bar')]
+
+
+@pytest.mark.parametrize('screen', ('Simple', 'Advanced', 'Frequency', 'Rename'))
+def test_every_screen_starts_under_the_status_row(fw, screen):
+    """The page's window takes the whole screen with the status row painted over its top (docs/oled-design.md#full-bleed):
+    the tab bar, the list and an edit over the title all start at the row's foot, never under its glyphs."""
+    files = {f'{FOLDER}/Rock.txt': b'x'}
+    p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6)), files)
+    if screen == 'Simple':
+        p.open()
+    else:
+        p.advanced()
+    if screen == 'Frequency':
+        p.click('1  ')
+        p.click('Frequency')
+    elif screen == 'Rename':
+        p.click('Presets')
+        p.click('Rename a preset')
+        p.click('Rock.txt')
+    foot = bar_foot(fw)
+    assert foot > 0, 'the geometry set has no status row'
+    top = lambda w: struct.unpack_from('<i', p.blocks[w], 4)[0]
+    tops = [(p.kind[w] or 'label', top(w)) for w in p.children(p.page)]
+    assert tops and all(y >= foot for _, y in tops), tops
+    if screen in ('Frequency', 'Rename'):
+        assert top(p.edit()) == foot + 2  # in the title's place, clear of T9's top
 
 
 def test_no_page_is_refused(fw):
@@ -840,8 +872,8 @@ def test_a_scrolling_list_runs_on_to_the_page_s_foot(fw, pick):
     view = p.ui.view
     lv = p.parent[view]
     box = lambda w: struct.unpack_from('<4i', p.blocks[w], 0)
-    foot = p.props[(p.page, 'h')]
-    assert box(lv)[1] == 48 and box(lv)[1] + box(lv)[3] == foot and box(view)[3] == foot - 48
+    foot, top = p.props[(p.page, 'h')], bar_foot(fw) + 48  # under the tab bar, itself under the status row
+    assert box(lv)[1] == top and box(lv)[1] + box(lv)[3] == foot and box(view)[3] == foot - top
     assert (lv, 'resized') not in p.props  # it scrolls: never shrunk to its rows
 
 

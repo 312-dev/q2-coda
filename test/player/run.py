@@ -849,7 +849,17 @@ def test_alsa_sw_params(player, songs, tmp):
         assert lines[k] == f'{k} {v}', lines[k]
     bt = lines['dry-bt'].split()
     assert bt[1:7] == ['r', '0', 'forward', '-1', 'avail_reads', '0'], lines['dry-bt']
-    return 'start 1378, stop and silence at the boundary on ways 0-2; a dry PCM forwarded by deficit + period, not on Bluetooth'
+    # bluealsa's PCM gone under the stream (SelectCodec's new transport, docs/internals.md#bluetooth-link-monitor):
+    # Bluetooth opens it again and writes on, waiting between looks; off Bluetooth, or with no PCM coming back, -1.
+    # 'last' is the frames the last write handed the device: 100 unresampled, what the 48 kHz resampler gave else.
+    gone = {'bt-gone': 'r 0 0 opens 5 writes 3 sleeps 3 last +', 'bt-gone-xrun': 'r 0 0 opens 2 writes 3 sleeps 0 last +',
+            'bt-gone-44k': 'r 0 0 opens 2 writes 3 sleeps 0 last 100', 'bt-lost': 'r -1 -1 opens 51 writes 1 sleeps 49 last -1',
+            'dac-gone': 'r -1 0 opens 1 writes 2 sleeps 0 last 100'}
+    for k, v in gone.items():
+        got, want = lines[k].split()[1:], v.split()
+        assert got[:-1] == want[:-1] and (int(got[-1]) > 0 if want[-1] == '+' else got[-1] == want[-1]), lines[k]
+    return ('start 1378, stop and silence at the boundary on ways 0-2; a dry PCM forwarded by deficit + period, not on Bluetooth; '
+            "bluealsa's PCM gone: reopened on Bluetooth, an error elsewhere")
 
 
 def test_usb_formats(player, songs, tmp):
