@@ -1,6 +1,6 @@
 """q2guard's core (patch/q2guard_core.c, docs/internals.md#overheat-guardian): the sensor's verdict, the warning and
-the protective power-off, the CPU-load fallback with no sensor, the log line, the top three, and the log's ring on
-the card with RAM while it is away. Built for this machine with test/unit/q2guard_host.c."""
+the protective power-off, the CPU-load fallback with no sensor, the log line, the top three, and the log's rotation
+over card_store.c's RAM ring, which holds the lines while the card is away. Built for this machine with test/unit/q2guard_host.c."""
 import ctypes as C
 import datetime
 import os
@@ -19,15 +19,17 @@ FILE_MAX, RAM = 262144, 65536
 def L(tmp_path_factory):
     out = tmp_path_factory.mktemp('q2guard') / 'q2guard.so'
     subprocess.run(['clang', '-shared', '-fPIC', '-O1', '-DQ2GUARD_HOST', '-Wall', '-Werror', '-Wno-unused-parameter',
-                    ROOT / 'patch/q2guard_core.c', ROOT / 'test/unit/q2guard_host.c', '-o', out], check=True)
+                    f'-DPEQ_ROOT="{out.parent}"', ROOT / 'patch/q2guard_core.c', ROOT / 'patch/card_store.c',
+                    ROOT / 'test/unit/q2guard_host.c', '-o', out], check=True)
     lib = C.CDLL(str(out))
     for name in ('guard_new', 'log_new', 'table_new', 'log_ram'):
         getattr(lib, name).restype = C.c_void_p
     lib.log_ram.argtypes = lib.log_used.argtypes = lib.guard_load.argtypes = [C.c_void_p]
     lib.feed.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int)]
+    lib.log_new.argtypes = [C.c_char_p]
+    lib.log_dropped.argtypes = [C.c_void_p]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
-    lib.heat_flush.argtypes = [C.c_void_p, C.c_char_p, C.c_long]
-    lib.heat_card_away.argtypes = [C.c_void_p, C.c_long]
+    lib.heat_flush.argtypes = [C.c_void_p, C.c_char_p]
     lib.guard_state.argtypes = [C.c_void_p]
     lib.guard_state.restype = C.c_char_p
     return lib
@@ -273,13 +275,24 @@ def test_the_top_three_are_the_largest_deltas_since_the_last_pass(L):
 
 # ---- the log ----
 
-def flush(L, log, d, now=1000):
-    return L.heat_flush(log, str(d).encode(), now)
+def new_log(L, d):
+    """A log writing to dir d, with the card away (as the watching process sees it)."""
+    L.card(0)
+    return L.log_new(str(d).encode())
+
+
+def flush(L, log, d):
+    """What the writing child does: the card is up for it."""
+    L.card(1)
+    try:
+        return L.heat_flush(log, str(d).encode())
+    finally:
+        L.card(0)
 
 
 def test_lines_are_held_until_a_flush_writes_them_in_one_go(L, tmp_path):
-    log = L.log_new()
     d = tmp_path / '.q2muse/logs'
+    log = new_log(L, d)
     for i in range(3):
         L.heat_add(log, f'line {i}\n'.encode())
     assert not d.exists()
@@ -287,43 +300,46 @@ def test_lines_are_held_until_a_flush_writes_them_in_one_go(L, tmp_path):
     assert (d / 'q2-heat.0').read_text() == 'line 0\nline 1\nline 2\n'
 
 
-def test_the_ring_moves_0_to_1_and_never_splits_a_line(L, tmp_path):
-    log = L.log_new()
+def test_a_full_file_moves_0_to_1_at_the_next_flush_and_never_splits_a_line(L, tmp_path):
     d = tmp_path / 'logs'
-    one = ('x' * 199 + '\n')
-    for _ in range(FILE_MAX // 200 - 1):
+    log = new_log(L, d)
+    one = 'x' * 199 + '\n'
+    for _ in range(FILE_MAX // 200 + 1):  # a flush at a time, as the ring holds a few hundred lines
         L.heat_add(log, one.encode())
         if L.log_used(log) > RAM - 400:
             assert flush(L, log, d) == 0
-    flush(L, log, d)
+    assert flush(L, log, d) == 0 and not (d / 'q2-heat.1').exists()
     first = (d / 'q2-heat.0').read_text()
-    assert len(first) == (FILE_MAX // 200 - 1) * 200 and not (d / 'q2-heat.1').exists()
-    for _ in range(3):
-        L.heat_add(log, one.encode())
+    assert len(first) == (FILE_MAX // 200 + 1) * 200 >= FILE_MAX
+    L.heat_add(log, one.encode())
     assert flush(L, log, d) == 0
-    assert (d / 'q2-heat.1').read_text() == first + one       # filled to the line that fits
-    assert (d / 'q2-heat.0').read_text() == one * 2
-    assert os.path.getsize(d / 'q2-heat.1') <= FILE_MAX
+    assert (d / 'q2-heat.1').read_text() == first  # moved whole
+    assert (d / 'q2-heat.0').read_text() == one
 
 
-def test_card_away_then_back_flushes_in_order_after_a_gap_marker(L, tmp_path):
+def test_card_away_then_back_flushes_in_order(L, tmp_path):
     """Unmounted (USB Transfer Files, pulled, read-only): the lines wait in RAM; when the card is back they are
-    written in order after a GAP line saying since when and how many."""
-    log = L.log_new()
+    written in order, after what the card already had."""
     d = tmp_path / 'logs'
+    log = new_log(L, d)
     L.heat_add(log, b'before\n')
     assert flush(L, log, d) == 0
-    L.heat_card_away(log, 0)
     for i in range(3):
         L.heat_add(log, f'away {i}\n'.encode())
-    assert flush(L, log, d, 600) == 0
-    assert (d / 'q2-heat.0').read_text() == ('before\n1970-01-01T00:10:00Z GAP card away since 1970-01-01T00:00:00Z '
-                                            'held=3 dropped=0\naway 0\naway 1\naway 2\n')
+    assert flush_away(L, log, d) == -1 and L.log_used(log) == 21  # held, nothing lost
+    assert (d / 'q2-heat.0').read_text() == 'before\n'
+    assert flush(L, log, d) == 0
+    assert (d / 'q2-heat.0').read_text() == 'before\naway 0\naway 1\naway 2\n'
+
+
+def flush_away(L, log, d):
+    L.card(0)
+    return L.heat_flush(log, str(d).encode())
 
 
 def test_a_card_that_refuses_the_write_keeps_the_lines(L, tmp_path):
-    log = L.log_new()
     d = tmp_path / 'logs'
+    log = new_log(L, d)
     d.mkdir()
     d.chmod(0o500)
     try:
@@ -331,16 +347,17 @@ def test_a_card_that_refuses_the_write_keeps_the_lines(L, tmp_path):
         assert flush(L, log, d) == -1 and L.log_used(log) == 5
     finally:
         d.chmod(0o700)
-    assert flush(L, log, d, 60) == 0
-    assert (d / 'q2-heat.0').read_text().splitlines()[1:] == ['kept']
+    assert flush(L, log, d) == 0
+    assert (d / 'q2-heat.0').read_text() == 'kept\n'
 
 
 def test_ram_is_bounded_the_oldest_lines_go_and_are_counted(L, tmp_path):
-    log = L.log_new()
+    d = tmp_path / 'logs'
+    log = new_log(L, d)
     one = 'y' * 99 + '\n'
     for _ in range(RAM // 100 + 10):
         L.heat_add(log, one.encode())
-    assert L.log_used(log) <= RAM
-    assert flush(L, log, tmp_path / 'logs') == 0
-    head = (tmp_path / 'logs/q2-heat.0').read_text().splitlines()[0]
-    assert head.endswith('dropped=10')
+    assert L.log_used(log) <= RAM and L.log_dropped(log) >= 10
+    assert flush(L, log, d) == 0
+    head = (d / 'q2-heat.0').read_text().splitlines()[0]
+    assert head.startswith('== ') and head.endswith('lines lost while the card was away')

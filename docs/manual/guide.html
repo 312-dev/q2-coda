@@ -960,6 +960,7 @@ http://stream.radioparadise.com/mp3-128</pre>
       <tr><td>Boot to</td><td>Shown with Rockbox on the card: what the Q2 starts at power-on, Rockbox or Q2 Muse.</td></tr>
     </tbody>
   </table>
+  <p id="heat"><b>Heat.</b> A small watchdog of its own keeps an eye on the Q2 even if the screen or the player hangs. Near 50&nbsp;&deg;C it says <b>Q2 is getting hot</b>; much hotter, it pauses the music, shows <b>Q2 is too hot</b> for 10 seconds and shuts down to cool off. It never changes charging. The Q2 has no temperature sensor Q2 Muse can read, so right after start-up you see <b>No Temperature Sensor</b> once (<b>OK</b> closes it): it means the Q2 can’t detect overheating itself and watches how hard the processor works instead. Two minutes of near-constant work bring up <b>Q2 has been working hard</b>; <b>Cancel</b> keeps it running, and with no answer for 60 seconds the Q2 shuts down. After a Cancel the warning comes back only once the load has stayed low for a minute. The watchdog keeps a log on the SD card, <code>.q2muse/logs/q2-heat.0</code> and <code>q2-heat.1</code> (the older half), a line every 30 seconds, and every 5 while the Q2 is warm, plugged in or busy, so a hot Q2 can be traced afterwards. While the card is with a computer (USB Transfer Files) or out, the lines wait in memory and are written once it is back, so a log from a long time with no card can have a gap. Nothing is written to the Q2’s own storage.</p>
 
   </div>
   <div class="sec">

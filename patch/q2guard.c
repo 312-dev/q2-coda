@@ -276,36 +276,38 @@ static void sample(struct heat_sample *s, int busy, int temp, int raw, const cha
     s->state = state;
 }
 
-/* ---- the log's writer: a child, so a card that hangs never stops the watching ---- */
-static struct heat_log heat;
+/* ---- the log's writer: a child, so a card that hangs never stops the watching ----
+ * The watching process keeps every line in card_store.c's ring: card_mounted is false there, so
+ * card_log_append only holds. The child is forked when card_ready and says the card is up, so its
+ * card_log_flush appends the ring to the file; the watcher then drops what the child was given. */
+static card_log heat;
+static int in_writer; /* true in the child */
+int card_mounted(void) { return in_writer; }
 static struct {
     pid_t pid;
-    int used, dropped; /* what the child was given */
-    int done;          /* the last flush ended (written, failed or given up) */
+    unsigned len, dropped; /* what the child was given */
+    int done;              /* the last flush ended (written, failed or given up) */
 } fl;
-static void flush_start(long wall) {
+static void flush_start(void) {
     if (fl.pid > 0) return;
     if (!card_ready()) {
-        heat_card_away(&heat, wall);
         fl.done = 1;
         return;
     }
-    fl.used = heat.used, fl.dropped = heat.dropped, fl.done = 0;
+    fl.len = heat.len, fl.dropped = heat.dropped, fl.done = 0;
     pid_t pid = fork();
-    if (!pid) _exit(heat_flush(&heat, LOGS, wall) ? 1 : 0);
+    if (!pid) in_writer = 1, _exit(heat_flush(&heat, LOGS) ? 1 : 0);
     fl.pid = pid;
-    if (pid < 0) fl.pid = 0, fl.done = 1, heat_card_away(&heat, wall);
+    if (pid < 0) fl.pid = 0, fl.done = 1;
 }
-static void flush_reap(long wall) {
+static void flush_reap(void) {
     int status = 0;
     if (fl.pid <= 0 || waitpid(fl.pid, &status, WNOHANG) != fl.pid) return;
     fl.pid = 0, fl.done = 1;
-    if (status) {
-        heat_card_away(&heat, wall);
-    } else if (heat.dropped == fl.dropped) { /* the RAM moved since: keep it (twice beats lost) */
-        memmove(heat.ram, heat.ram + fl.used, heat.used - fl.used);
-        heat.used -= fl.used;
-        heat.away = 0, heat.dropped = 0;
+    if (!status && heat.dropped == fl.dropped) { /* if the ring moved since, keep it (twice beats lost) */
+        memmove(heat.ring, heat.ring + fl.len, heat.len - fl.len);
+        heat.len -= fl.len;
+        heat.dropped = 0;
     }
 }
 
@@ -336,12 +338,11 @@ static void answers(int *ack, int *cancel) { /* "ack N" and "cancel N" lines, th
  * before the deadline, at most FINAL_MS, then the power-off goes ahead whatever the card does. */
 #define FINAL_MS 3000
 static void flush_final(unsigned deadline) {
-    long wall = time(0);
-    while (fl.pid > 0 && (int)(deadline - now_ms()) > 0) usleep(100000), flush_reap(wall);
-    flush_start(wall);
+    while (fl.pid > 0 && (int)(deadline - now_ms()) > 0) usleep(100000), flush_reap();
+    flush_start();
     unsigned end = now_ms() + FINAL_MS;
     if ((int)(end - deadline) > 0) end = deadline;
-    while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap(wall);
+    while (fl.pid > 0 && (int)(end - now_ms()) > 0) usleep(100000), flush_reap();
 }
 
 static void note(const char *what) { /* a line of its own in the log */
@@ -355,6 +356,7 @@ int main(int argc, char **argv) {
     struct cpu cpu5 = { 0, 0 }, cpu_line = { 0, 0 };
     int lock = open(LOCK, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
     if (lock >= 0 && flock(lock, LOCK_EX | LOCK_NB)) return 1; /* another is watching */
+    card_log_at(&heat, LOGS "/q2-heat.0", HEAT_RAM);
     dev_build = argc > 1 && !strcmp(argv[1], "--dev");
     argv += dev_build, argc -= dev_build;
     const char *build = argc > 1 ? argv[1] : "?", *last = argc > 2 ? argv[2] : "?";
@@ -371,12 +373,11 @@ int main(int argc, char **argv) {
     struct heat_sample s = { 0 };
     char line[512];
     s.cable = -1;
-    flush_start(time(0));
+    flush_start();
     for (;;) {
         usleep(g.off ? 1000000 : GUARD_TICK_MS * 1000);
         unsigned now = now_ms();
-        long wall = time(0);
-        flush_reap(wall);
+        flush_reap();
         temp = read_temp(&raw);
         busy = g.off ? -1 : busy_since(&cpu5, &cores);
         int ack, cancel;
@@ -424,7 +425,7 @@ int main(int argc, char **argv) {
         if (o.flush || (line_due && o.event != EV_NONE) ||
             now - last_flush >= (fast ? FLUSH_FAST_MS : FLUSH_MS)) {
             if (g.off && !card_ready()) note("CARD not mounted: log in RAM only");
-            flush_start(wall);
+            flush_start();
             last_flush = now;
         }
         line_due = 0;

@@ -1,6 +1,6 @@
 /* Card-backed records (docs/internals.md#where-q2-muse-writes): files written often enough to wear the
  * flash live on the card, in CARD_STORE_DIR, and the Q2 works on without a card in the meantime. Only
- * stdio, rename, mkdir and the heap: a separate program can link this file too.
+ * stdio, rename, mkdir and the heap: a separate program can link this file too (q2guard: q2guard_card.c).
  *
  * A blob is a file written whole (blob_io's temp, sync and rename). With the card away, a write keeps
  * the newest copy in RAM (bounded by the blob's cap) and reads return it; card_blob_flush writes it once
@@ -10,7 +10,11 @@
  * A log is appended to. With the card away, lines go to a RAM ring of cap bytes, the oldest whole lines
  * dropped to fit; card_log_flush appends the ring, in order, before the next line, and notes how many
  * lines were dropped. */
+#if defined(Q2GUARD_HOST) || defined(Q2GUARD_DEVICE)
+#include "q2guard.h" /* q2guard links this file: libc's declarations from there, not peq.h's */
+#else
 #include "peq.h"
+#endif
 #include "card_store.h"
 
 static void cs_dir(void) { mkdir(CARD_STORE_DIR, 0755); /* EEXIST once made */ }
