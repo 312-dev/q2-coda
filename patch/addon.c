@@ -9,8 +9,9 @@
  *            favdir (a card folder whose songs' hearts it is told of, addon_fav_path), lyrics
  *            (1: a song of its folder or its downloads folder, downloads=, has its lyrics asked of
  *            it, addon_lyrics_ask), covers (1: it is started for a cover the car asks it for,
- *            addon_cover_wake) and hidden (1: no Streaming row, its page opened by id:
- *            addon_open_id, as AirPlay's is);
+ *            addon_cover_wake), resume (1: a stream of its songs restored after a restart is
+ *            asked of it, addon_resume_ask) and hidden (1: no Streaming row, its page opened by
+ *            id: addon_open_id, as AirPlay's is);
  *   run      its launcher, which copies the app to /tmp and runs it there in a restart loop, so
  *            the card is never kept busy, leaving the loop's pid in /tmp/q2-<id>;
  *   q2-<id>  the app;
@@ -117,6 +118,7 @@ typedef struct {
     int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
     int lyrics; /* q2app's lyrics=1: it fetches a song's lyrics (addon_lyrics_ask) */
     int covers; /* q2app's covers=1: it fetches a cover the car asks for (addon_cover_wake) */
+    int resume; /* q2app's resume=1: it resumes a restored stream (addon_resume_ask) */
     char dl[32]; /* q2app's downloads=: the card folder its synced songs are in, "" for none */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
@@ -240,6 +242,7 @@ static void scan_one(const char *id, const char *from) {
     a->radio = number(raw, "radio") == 1;
     a->lyrics = number(raw, "lyrics") == 1;
     a->covers = number(raw, "covers") == 1;
+    a->resume = number(raw, "resume") == 1;
     field(raw, "downloads", a->dl, sizeof a->dl);
     for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
         if (*c == '\r' || *c == '/') *c = 0;
@@ -405,6 +408,8 @@ static struct {
     int keep;        /* its first entry is the song playing, which plays on (song_radio_keeps) */
     unsigned skip_at; /* ... the queue's place that song joins at, which then plays */
     int jump;         /* it is an Up Next pending row's: .playing names it (addon_pending_play) */
+    int hold;   /* a resumed stream's song, paused: .playing waits for Play (addon_resume_ask) */
+    int resume; /* its .play answers the resume request (rs.seq): its first song is kept */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
 /* The app whose .play started the queue playing, and playback_loads after that queue's load: the
@@ -413,6 +418,154 @@ static struct {
     app_t *app;
     unsigned loads;
 } qa;
+
+/* ---- A streamed queue resumed after a restart (playback.c ringnav_memory,
+ * docs/internals.md#memory-playback-and-a-streamed-queue). Memory Playback restores only the songs
+ * whose files are on the card; a stream's others, not downloaded yet, are asked of their app (q2app
+ * resume=1), which plays the queue on from the song restored: /tmp/q2-<id>.resume, written whole
+ * once the app's socket is there (it takes a request there at its start as answered), "<seq>
+ * <index> <seconds> paused|playing" and then every saved song's path a line, the queue's order,
+ * index counting them from 0. Its answer is resumeack=<seq> <code> in its state file (0 resumed, 1
+ * not its songs, 2 can't) and a .play named by that seq whose queue file starts with the song
+ * restored, which is kept as a radio's seed is (no load, so paused stays paused). Meanwhile Up Next
+ * lists the saved songs not restored as pending rows. Declined, unanswered, or another queue
+ * played: the songs on the card are the queue, as before, and the log says why. */
+#define RESUME_START_MS 30000 /* the app listening this long after the restore, else no resume */
+#define RESUME_WAIT_MS 30000  /* its queue this long after the request, else no resume */
+enum { R_NONE, R_ASK, R_SENT };
+static struct {
+    app_t *app;
+    char *req;  /* the request, on the heap until it is written */
+    char *rows; /* the saved songs after the current one not restored, each with its NUL */
+    unsigned nrows, size; /* their count; the request's bytes */
+    unsigned seq, at, loads; /* the request's seq; the restore's or request's time; its queue's */
+    int state, woke;
+    unsigned dead; /* a resume let go: its seq, whose .play never plays */
+} rs __attribute__((section(".scratch")));
+extern void ulog(char level, const char *src, const char *msg); /* ulog.c */
+static int card_id(const char *path, char *id);
+
+static void resume_end(const char *why) {
+    char line[160];
+    if (rs.state && why) {
+        tk_snprintf(line, sizeof line, "%s: %s; the restored songs on the card play as they are",
+                    rs.app->name, why);
+        ulog('W', "resume", line);
+        rs.dead = rs.seq;
+    } else if (rs.state) {
+        tk_snprintf(line, sizeof line, "%s resumed the stream, %u songs to come", rs.app->name,
+                    rs.nrows);
+        ulog('I', "resume", line);
+    }
+    free(rs.req), free(rs.rows);
+    rs.req = rs.rows = 0, rs.nrows = rs.size = 0, rs.state = R_NONE;
+}
+
+/* A restored queue (ringnav_memory): paths, n of them, the saved queue's songs in order and then
+ * the stream's songs not yet queued; in[i] whether path i was restored; at the index of the song
+ * the restore made current, sec its seconds, playing whether it plays (car mode) or waits paused.
+ * Its app is asked when one with resume=1 owns a saved song and a song after the current one wasn't
+ * restored. 1 when asked (seq names the answer). */
+int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned n, unsigned at,
+                     int sec, int playing, unsigned seq) {
+    app_t *a = 0;
+    unsigned bytes = 64, rows = 0, missing = 0;
+    int scanned = 0;
+    resume_end("another restore");
+    for (unsigned i = 0; i < n; ++i) {
+        char id[APP_ID];
+        if (strstr(paths[i], "\n") || strstr(paths[i], "\r")) return 0; /* a line each */
+        unsigned k = strlen(paths[i]) + 1;
+        bytes += k;
+        if (i > at && !in[i]) ++missing, rows += k;
+        app_t *b = a || !card_id(paths[i], id) ? 0 : slot(id);
+        if (b && !b->present && !scanned) scanned = 1, addon_scan();
+        if (b && b->present && b->resume) a = b;
+    }
+    if (!a || !missing || at >= n) return 0;
+    if (!(rs.req = calloc(1, bytes)) || !(rs.rows = calloc(1, rows))) {
+        free(rs.req);
+        rs.req = 0;
+        return 0;
+    }
+    unsigned k = (unsigned)tk_snprintf(rs.req, 64, "%u %u %d %s\n", seq, at, sec,
+                                       playing ? "playing" : "paused"),
+             r = 0;
+    for (unsigned i = 0; i < n; ++i) {
+        unsigned len = strlen(paths[i]);
+        memcpy(rs.req + k, paths[i], len);
+        k += len, rs.req[k++] = '\n';
+        if (i > at && !in[i]) memcpy(rs.rows + r, paths[i], len + 1), r += len + 1;
+    }
+    rs.app = a, rs.size = k, rs.nrows = missing, rs.seq = seq, rs.at = time_now_ms();
+    rs.loads = playback_loads, rs.state = R_ASK, rs.woke = 0;
+    char line[96];
+    tk_snprintf(line, sizeof line, "asking %s to resume %u songs, %u not on the card", a->name, n,
+                missing);
+    ulog('I', "resume", line);
+    return 1;
+}
+/* The restored queue loaded again by Now Playing's start (playback.c ringnav_load): still it. */
+void addon_resume_follow(void) {
+    if (rs.state) rs.loads = playback_loads;
+}
+/* addon_poll's: the app started, the request written once it listens, its answer read. */
+static void resume_poll(void) {
+    unsigned now = time_now_ms();
+    if (!rs.state) return;
+    if (playback_loads != rs.loads) {
+        resume_end("another queue played");
+        return;
+    }
+    if (rs.state == R_ASK) {
+        if (!rs.woke && (rs.woke = 1) && addon_wake(rs.app->id) < 0) {
+            resume_end("the app can't start");
+            return;
+        }
+        if (addon_ready(rs.app->id)) {
+            char path[48];
+            tk_snprintf(path, sizeof path, "/tmp/q2-%s.resume", rs.app->id);
+            if (!blob_io(path, "/tmp/q2-resume.tmp", rs.req, rs.size, 1)) {
+                resume_end("the request couldn't be written");
+                return;
+            }
+            free(rs.req);
+            rs.req = 0, rs.state = R_SENT, rs.at = now;
+        } else if (now - rs.at >= RESUME_START_MS)
+            resume_end("the app didn't start");
+        return;
+    }
+    char raw[QR_RAW], v[24], want[16], why[40];
+    unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", rs.seq);
+    if (state_read(rs.app->state, raw, sizeof raw)) {
+        field(raw, "resumeack", v, sizeof v);
+        if (!strncmp(v, want, k) && v[k] >= '1' && v[k] <= '9') {
+            char code[2] = { v[k], 0 };
+            tk_snprintf(why, sizeof why, "the app declined (%s)", code);
+            resume_end(why);
+            return;
+        }
+    }
+    if (now - rs.at >= RESUME_WAIT_MS) resume_end("no queue from the app");
+}
+/* Whether the session's .play is named seq (sm.seq, as the app wrote it). */
+static int seq_named(unsigned seq) {
+    char s[16];
+    tk_snprintf(s, sizeof s, "%u", seq);
+    return seq && !strcmp(s, sm.seq);
+}
+/* m3u_songs', the resume's queue file's first song, first: whether it is the song restored, which
+ * then plays on as it is (paused, at its place), the songs after it the app's. */
+static int resume_keeps(const char *first) {
+    void *q = P(mcl_pdeqplaylist, 0);
+    unsigned pos = (unsigned)I(MCL_POS, 0);
+    if (!sm.resume || rs.state != R_SENT || !seq_named(rs.seq) || playback_loads != rs.loads ||
+        !q || pos >= deque_size(q) || !catalogue_same_song(first, P(deque_at(q, pos), REC_PATH)))
+        return 0;
+    resume_end(0);
+    sm.hold = 1;
+    return 1;
+}
 
 /* Whether path changed since the last look that came well after its change.
  * ponytail: only once it changes (o32 stat, st_mtime word 16), not a scan every poll; a scan in the
@@ -474,7 +627,8 @@ static void *m3u_songs(void) {
         unsigned k = strlen(line);
         if (k && line[k - 1] == '\r') line[--k] = 0;
         if (!k || line[0] == '#' || entry++ < sm.next) continue;
-        if (!sm.next && sm.state == S_WAIT && song_radio_keeps(line)) { /* plays now: passed over */
+        if (!sm.next && sm.state == S_WAIT && (song_radio_keeps(line) || resume_keeps(line))) {
+            /* plays now, or a resumed stream's song restored: passed over */
             sm.keep = 1, ++sm.next;
             continue;
         }
@@ -550,7 +704,11 @@ static int stream_start(const void *unused) {
     }
     void *songs = sm.m3u ? m3u_songs() : app_album_songs(sm.dir);
     unsigned n = deque_size(songs);
-    if (sm.keep) { /* an app's radio of the song playing: it plays on, the rows after it replaced */
+    if (sm.resume && !sm.keep) { /* a resume's queue not from the song restored: never played */
+        sm.state = S_DONE;
+        resume_end("its queue starts at another song");
+    } else if (sm.keep) { /* an app's radio of the song playing (or a resume's song restored): it
+                           * plays on, the rows after it replaced */
         void *q = P(mcl_pdeqplaylist, 0);
         sm.state = S_DONE;
         if (playback_queue_rest(songs)) {
@@ -790,6 +948,14 @@ static int pending_add(void *ctx, const char *path, int entry) {
 void **addon_pending(unsigned max, unsigned *n) {
     pending_t p = { 0, 0, max };
     *n = 0;
+    if (rs.state && playback_loads == rs.loads && max) { /* a resume asked: those not restored */
+        if (!(p.rows = calloc(max, sizeof *p.rows))) return 0;
+        const char *r = rs.rows;
+        for (unsigned i = 0; i < rs.nrows && pending_add(&p, r, (int)i); ++i) r += strlen(r) + 1;
+        if (!p.n) return free(p.rows), (void **)0;
+        *n = p.n;
+        return p.rows;
+    }
     if (sm.state != S_PLAY || !sm.m3u || !max || !stream_queue() ||
         !(p.rows = calloc(max, sizeof *p.rows)))
         return 0;
@@ -799,11 +965,44 @@ void **addon_pending(unsigned max, unsigned *n) {
     return p.rows;
 }
 /* What addon_pending's rows were taken from: the session, its entries passed, its playlist file's
- * size and time (o32 stat: st_size word 12, st_mtime word 16). */
+ * size and time (o32 stat: st_size word 12, st_mtime word 16), and a resume's. */
 unsigned addon_pending_sig(void) {
-    unsigned st[36] = { 0 }, v[4] = { (unsigned)sm.state, (unsigned)sm.next, 0, 0 };
+    unsigned st[36] = { 0 },
+             v[6] = { (unsigned)sm.state, (unsigned)sm.next, 0, 0, (unsigned)rs.state, rs.seq };
     if (sm.m3u && sm.state == S_PLAY && !__xstat(3, sm.dir, st)) v[2] = st[12], v[3] = st[16];
     return hash_bytes(FNV_SEED, (const unsigned char *)v, sizeof v);
+}
+
+typedef struct {
+    char *out;
+    unsigned n, max, bytes, cap; /* cap: out's bytes, a file grown since its count stops short */
+} paths_t;
+static int paths_add(void *ctx, const char *path, int entry) {
+    paths_t *p = ctx;
+    unsigned k = strlen(path) + 1;
+    (void)entry;
+    if (p->n == p->max || (p->out && p->bytes + k > p->cap)) return 0;
+    if (p->out) memcpy(p->out + p->bytes, path, k);
+    ++p->n, p->bytes += k;
+    return 1;
+}
+/* Up Next's pending songs (addon_pending's) as paths, for the snapshot (playback.c save_tail): at
+ * most max, each with its NUL, in one heap block of *bytes the caller frees; *n of them, 0 for
+ * none. */
+char *addon_pending_paths(unsigned max, unsigned *n, unsigned *bytes) {
+    paths_t p = { 0, 0, max, 0, 0 };
+    *n = *bytes = 0;
+    if (rs.state && playback_loads == rs.loads) {
+        const char *r = rs.rows;
+        for (unsigned i = 0; i < rs.nrows && paths_add(&p, r, 0); ++i) r += strlen(r) + 1;
+        if (p.n && (p.out = calloc(1, p.bytes))) memcpy(p.out, rs.rows, p.cap = p.bytes);
+    } else if (sm.state == S_PLAY && sm.m3u && max && stream_queue()) {
+        pending_walk(paths_add, &p); /* counted, then copied */
+        if (p.n && (p.out = calloc(1, p.bytes)))
+            p.cap = p.bytes, p.n = p.bytes = 0, pending_walk(paths_add, &p);
+    }
+    if (p.out) *n = p.n, *bytes = p.bytes;
+    return p.out;
 }
 
 typedef struct {
@@ -861,12 +1060,15 @@ static void stream_poll(app_t *a) {
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = sm.keep = 0, sm.first[0] = sm.want[0] = 0;
         sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = sm.jump = 0;
+        sm.hold = 0;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
                            (sm.urls || tk_str_start_with(sm.dir, sm.m3u ? CARD "/" : CARD "/."))
                        ? S_WAIT
                        : S_DONE;
+        sm.resume = rs.state == R_SENT && seq_named(rs.seq);
+        if (!sm.resume && seq_named(rs.dead)) sm.state = S_DONE; /* a resume let go: not played */
         stop_timer(&sm.timer);
     }
     if (sm.app != a) return;
@@ -924,6 +1126,9 @@ static void stream_poll(app_t *a) {
     unsigned pos = (unsigned)I(MCL_POS, 0);
     const char *now = pos < deque_size(q) ? P(deque_at(q, pos), REC_PATH) : 0;
     if (sm.jump && sm.skip == playback_picks) now = sm.want; /* an Up Next pick: the app's first */
+    /* a resumed song waiting paused is not told as playing (the app reports what .playing names) */
+    if (sm.hold && (mclGetPlayStatus() == 2 || !now || strcmp(now, sm.first))) sm.hold = 0;
+    if (sm.hold) return;
     /* a path sm.playing can't hold is no use to the app cut, and tk_snprintf's count would pass
      * line's end */
     if (now && strlen(now) < sizeof sm.playing && strcmp(now, sm.playing)) {
@@ -1319,6 +1524,7 @@ int addon_running(void) {
 void addon_poll(void) {
     if (!nw.swept) now_sweep();
     game_poll();
+    resume_poll(); /* first: a resume let go before its app's .play is read */
     for (int i = 0; i < ap.n; ++i) poll_one(&ap.a[i]);
     sleep_check();
     now_poll();

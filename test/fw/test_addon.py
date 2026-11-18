@@ -38,7 +38,7 @@ class App(C.Structure):
     _fields_ = [('id', C.c_char * 16), ('name', C.c_char * 32), ('tips', C.c_char * 32), ('bin', C.c_char * 48), ('run', C.c_char * 48),
                 ('pid', C.c_char * 32), ('state', C.c_char * 40), ('browse', C.c_char * 48), ('icon', C.c_char * 56), ('more', C.c_char * 48),
                 *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio',
-                                         'lyrics', 'covers')),
+                                         'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
 
@@ -53,7 +53,7 @@ class Sm(C.Structure):
                 ('timer', C.c_uint), ('seen', C.c_long), ('m3u', C.c_int), ('urls', C.c_int), ('next', C.c_int), ('more', C.c_int), ('first', C.c_char * 512),
                 ('want', C.c_char * 512), ('loads', C.c_uint),
                 ('picks', C.c_uint), ('seq', C.c_char * 24), ('skip', C.c_uint), ('keep', C.c_int),
-                ('skip_at', C.c_uint), ('jump', C.c_int)]
+                ('skip_at', C.c_uint), ('jump', C.c_int), ('hold', C.c_int), ('resume', C.c_int)]
 
 
 class Sl(C.Structure):

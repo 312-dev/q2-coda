@@ -404,6 +404,14 @@ run takes it by deleting it and tries every song still to fetch at once, its bac
 server's wait cut short (`takeRetry`). Skip is Next. An app without it leaves the file, and the
 next Retry writes it again.
 
+**After a restart** (firmware to app, q2app `resume=1`): Memory Playback restores only the songs
+on the card, so a restored stream's others are asked of its app in `/tmp/q2-<id>.resume`,
+`<seq> <index> <seconds> paused|playing` and then every saved song's card path a line. The app
+answers `resumeack=<seq> <code>` in its state file and a `.play` of that seq whose queue file starts
+with the song restored, which stays paused where it was while the songs after it download ahead;
+Up Next lists every saved song meanwhile. An app without the word, or one that declines, leaves the
+songs on the card ([internals.md](internals.md#memory-playback-and-a-streamed-queue)).
+
 **The car remote** (`remote/coda-rc.proto`, `CAP_BUFFERING` = 8192): NowPlaying gains `buffering` (13, the
 loading state above), `buffered_bytes` (14) and `total_bytes` (15) (the `.stream` line's, 0 when
 not streaming) and `buffered_ms` (16) (bytes over total times length, 0 when unknown), sent when they change,
