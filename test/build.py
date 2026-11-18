@@ -563,6 +563,9 @@ def validate_assets(directory):
     assert sha(guest) == manifest['q2_guest_sha256'] and guest[:4] == b'\x7fELF' and guest[36:40] == helper[36:40]
     assert read('rootfs.squashfs', GUEST_DBUS) == (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()
     assert read('rootfs.squashfs', GUARD)[:4] == b'\x7fELF'  # q2guard, which S90play starts (build.py BOOT_HOOK)
+    from build import BT_CODEC  # the link monitor's codec switch, which q2guard runs (docs/internals.md#bluetooth-link-monitor)
+    codec = read('rootfs.squashfs', BT_CODEC)
+    assert codec[:4] == b'\x7fELF' and codec[36:40] == helper[36:40] and b'libdbus-1.so' in codec
     expected_start = read('stock.squashfs', S90PLAY).replace(*BOOT_HOOK)
     if manifest['dev']:
         remote = read('rootfs.squashfs', REMOTE)

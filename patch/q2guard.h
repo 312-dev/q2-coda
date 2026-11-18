@@ -27,6 +27,7 @@ int fclose(void *), fflush(void *), fseek(void *, long, int), fileno(void *);
 long ftell(void *);
 void free(void *);
 void *memcpy(void *, const void *, size_t), *memmove(void *, const void *, size_t);
+void *memset(void *, int, size_t);
 size_t strlen(const char *);
 #define O_WRONLY 1
 #define O_APPEND 0x8
@@ -54,7 +55,7 @@ long time(long *);
 void *opendir(const char *);
 struct dirent *readdir(void *);
 int flock(int, int), closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
-char *strstr(const char *, const char *);
+char *strstr(const char *, const char *), *strchr(const char *, int);
 int atoi(const char *);
 #define O_RDONLY 0
 #define O_RDWR 2

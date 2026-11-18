@@ -116,9 +116,17 @@ struct bt_step {
     int have;         /* last is set */
     unsigned last;    /* ms of the last switch */
 };
-/* One line: allowed (LDAC Auto and the setting on), the codec's rank now, wq, fly (-1 not read)
- * and the controller's buffer count. The rank to select now, else 0. */
+/* One line: allowed (bt_step_allowed), the codec's rank now, wq, fly (-1 not read) and the
+ * controller's buffer count. The rank to select now, else 0. */
 int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int fly, int bufs);
+#define BT_LDAC_AUTO 2          /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
+#define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: the setting, on unless 0 (patch/bt_ui.c) */
+/* config.ini's text: 1 LDAC Auto with the setting on, 0 LDAC Auto with it off, -1 another choice
+ * (or none saved) */
+int bt_step_allowed(const char *ini);
+/* GetPCMs (as bt_pcms reads it): the A2DP source PCM's object path, which SelectCodec is sent to,
+ * into path (n bytes); 0 none, or one holding anything but letters, digits, _ and / */
+int bt_pcms_path(const char *text, char *path, int n);
 
 /* ---- the A2DP socket's queue ----
  * /proc/net/l2cap's largest Wmem (bytes an L2CAP socket has waiting: the kernel holds them only

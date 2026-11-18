@@ -44,6 +44,8 @@ def L(tmp_path_factory):
     lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
     lib.bt_codec_rank.argtypes = [C.c_char_p]
     lib.bt_codec_name.restype = C.c_void_p
+    lib.bt_step_allowed.argtypes = [C.c_char_p]
+    lib.bt_pcms_path.argtypes = [C.c_char_p, C.c_char_p, C.c_int]
     lib.log_named.restype = C.c_void_p
     lib.log_named.argtypes = [C.c_char_p, C.c_char_p, C.c_uint]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -562,9 +564,10 @@ def test_never_above_where_it_started(L):
 
 
 def test_only_under_ldac_auto_with_the_setting_on(L):
-    s = Step()
-    for t in range(10):
-        assert step(L, s, t, 0, APTX_HD, 9000, BUFS) == 0   # another choice, or the setting off: never
+    for allowed in (0, -1):                                 # the setting off, or another choice: never
+        s = Step()
+        for t in range(10):
+            assert step(L, s, t, allowed, APTX_HD, 9000, BUFS) == 0
     s = Step()
     step(L, s, 0, 1, APTX_HD, 0, 0)
     step(L, s, 1, 1, APTX_HD, 9000, BUFS)
@@ -577,3 +580,52 @@ def test_ldac_aac_or_no_codec_is_left_alone(L):
     s = Step()
     for t in range(10):
         assert step(L, s, t, 1, 0, 9000, BUFS) == 0
+
+
+def test_another_choice_while_stepped_down_is_left_alone(L):
+    """Quality changed from LDAC Auto to a fixed choice: stock selects that codec, and nothing is put back over it;
+    Auto chosen again starts from what it streams then."""
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    for t in range(20, 30):
+        assert step(L, s, t, -1, APTX, 0, 1) == 0
+    for t in range(300, 700):
+        assert step(L, s, t, 1, APTX, 0, 1) == 0             # aptX is where Auto now started
+
+
+INI = b"""[SYSSET]\r\nLANG=1\r\nBTCODING=2\r\n[PLAYSET]\r\nBTSTEPDOWN=0\r\n[Q2POD]\r\nBTNAME=Q2\r\n%s"""
+
+
+@pytest.mark.parametrize('ini, allowed', [
+    (INI % b'', 1),                                          # LDAC Auto, the setting never chosen: on
+    (INI % b'BTSTEPDOWN=1\r\n', 1),
+    (INI % b'BTSTEPDOWN=0\r\n', 0),                          # off; PLAYSET's key of that name is not it
+    (INI.replace(b'BTCODING=2', b'BTCODING=3') % b'', -1),   # aptX HD chosen
+    (INI.replace(b'BTCODING=2', b'BTCODING=21') % b'', -1),
+    (INI.replace(b'BTCODING=2', b'BTCODINGX=2') % b'', -1),
+    (b'', -1),                                               # no config.ini read
+])
+def test_allowed_is_ldac_auto_and_the_setting(L, ini, allowed):
+    assert L.bt_step_allowed(ini) == allowed
+
+
+def test_the_a2dp_source_pcm_s_path_for_select_codec(L):
+    out = C.create_string_buffer(96)
+    assert L.bt_pcms_path(PCMS, out, 96) == 1
+    assert out.value == b'/org/bluealsa/hci0/dev_00_11_22_33_44_55/a2dpsrc/sink'
+    assert L.bt_pcms_path(PCMS, out, 40) == 0                               # no room
+    assert L.bt_pcms_path(PCMS.split(b'a2dpsrc')[0], out, 96) == 0          # no A2DP source
+    assert L.bt_pcms_path(PCMS.replace(b'dev_00', b"dev_0'"), out, 96) == 0  # never a quote to the shell
+
+
+def test_a_codec_not_known_yet_keeps_where_it_started(L):
+    """A stream's START asks bluealsa for the codec again: until it answers, the rank is 0, and a stream that comes
+    back from a pause on aptX still climbs back to the aptX HD it started on."""
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, 0, 0)
+    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
+    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    assert step(L, s, 100, 1, 0, 0, -1) == 0                # paused, resumed: not known yet
+    assert next(t for t in range(101, 400) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD) == 182
