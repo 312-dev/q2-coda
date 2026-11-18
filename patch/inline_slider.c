@@ -137,7 +137,8 @@ static void repaint(void *item) {
 }
 
 /* The rows' heights for the change's progress, the list laid out again when they moved and the
- * grabbed row's foot kept in sight, the view moved by whole rows; 1 while the change runs. */
+ * grabbed row's foot kept in sight on or above the list end (nav/lists.c list_shown_h), the view
+ * moved by whole rows; 1 while the change runs. */
 static int heights(void) {
     void *view = is.view;
     int k = anim_at(&is.run), moved = 0;
@@ -154,7 +155,7 @@ static int heights(void) {
     void *list = P(view, W_PARENT), *o = is.open;
     if (list) widget_layout(list);
     if (o) {
-        int over = I(o, W_Y) + I(o, W_H) - I(view, SCROLL_Y) - I(view, W_H);
+        int over = I(o, W_Y) + I(o, W_H) - I(view, SCROLL_Y) - list_shown_h(view);
         if (over > 0)
             scroll_view_set_offset(view, I(view, SCROLL_X),
                                    I(view, SCROLL_Y) + (over + IS_PITCH - 1) / IS_PITCH * IS_PITCH);

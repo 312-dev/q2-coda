@@ -59,7 +59,9 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page). A page with nothing to select (text) ends the
+  the page comes back on top (Return from a row's page). A row that grows in place, a captioned row showing its caption
+  or a grabbed inline slider, scrolls the list by whole rows until its grown foot is on or above y 282 as well, never
+  only inside the list's box, which runs on to the screen's foot (`nav/lists.c` `list_shown_h`). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
   48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
   ends on the last whole row above y 282. The build refuses a list box that stops at or above y 282
@@ -338,7 +340,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   the caption shows only under the selected row. That row grows over 150 ms, its title and switch where
   they were, to hold the caption under them inside the bar: Inter 13 px in `#D6E2FA`, 17 px lines from the
   title's column, wrapped at words to the right column, 5 px under the last; every other captioned row is one
-  row high. The list scrolls by whole rows to keep the grown row's foot in sight (`patch/settings_pages.c`).
+  row high. The list scrolls by whole rows to keep the grown row's foot on or above the list end, y 282 (`patch/settings_pages.c`).
   Every caption but Smart Wi-Fi's is one line there, under 327 px of Inter 13 (the bar's 343 less its 8 px insets).
 - **Disabled row** (Set Time Manually while the time is set automatically): label, value and
   chevron in Text Tertiary, and the wheel passes over it.
