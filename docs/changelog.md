@@ -1,7 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
-  - Subsonic: covers fetched on demand for the car; stars and likes sync separately.
+  - Subsonic: covers fetched on demand for the car; stars and likes sync separately; a queue you were playing comes back in full after a restart.
   - Streamed songs: after a restart, Up Next names a server song by its title and artist again. A streamed queue picked up where it left off showed the next song by its download's file name, in lower case with the server's id after it.
   - Text entry (OLED): the left end of the letter strip is as sticky as the right. Turning the wheel to the set switcher stops there, as it does on the return key, and a further turn in the same motion stays put; only a new turn (a pause of a quarter second) goes on round to the return key. A fast spin stops at either end alike.
   - Battery History: the page sits higher and fills the screen better. The reading is just under the status bar, the graph is taller (142 px in place of 100), and Export Log is lifted clear of the rounded bottom corners. Before, everything sat 58 px too low, with an empty band at the top and the button 6 px from the screen's edge.

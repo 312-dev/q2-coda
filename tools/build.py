@@ -286,8 +286,8 @@ GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-pla
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-1217d0e.zip', 3648383,
-                 'b9d68e09fdf6286a1b65c654cbb74ae1fb65185fa70d0f7ca21399a01eaef2f1', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6d9cd2c.zip', 3652276,
+                 '7ab43b2b0b684887682a211be0c41fcc1a82bf77cbba73c5873eb8e9ee3ea594', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
