@@ -345,6 +345,8 @@ static int bt_vol_link __attribute__((section(".scratch")));
 /* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
  * to On-The-Go; on unless the key says 0. */
 static int otg_on __attribute__((section(".scratch")));
+/* Date & Time's Automatic Time Zone (autozone.c): on unless the key says 0. */
+static int autozone_on __attribute__((section(".scratch")));
 #define STR_(x) #x
 #define STR(x) STR_(x)
 static int *const pod_values[] = { &st.charge_limit,
@@ -370,7 +372,8 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.scan_durations,
                                    &st.cf_position,
                                    &catalogue_source,
-                                   &otg_on };
+                                   &otg_on,
+                                   &autozone_on };
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
 static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "WAKEDOUBLE",
@@ -395,19 +398,21 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "SCANDURATIONS",
                                         "CFPOSITION",
                                         "LIBRARYSOURCE",
-                                        "OTG" };
+                                        "OTG",
+                                        "AUTOZONE" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
 /* a row's choices: Artist View three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
 void pod_settings(void) {
     if (st.pod_read) return;
     for (unsigned i = 0; i < sizeof pod_keys / sizeof *pod_keys; ++i)
-        if (pod_keys[i]) /* Artist View defaults to Cover Flow, On-The-Go to on; Link Volume
-                          * never chosen is -1 (bt_link) */
-            *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
-                                          i == POD_BT_LINK                     ? -1
-                                          : i == POD_ARTIST_CF || i == POD_OTG ? 1
-                                                                               : 0);
+        if (pod_keys[i]) /* Artist View defaults to Cover Flow, On-The-Go and Set Time Zone
+                          * Automatically to on; Link Volume never chosen is -1 (bt_link) */
+            *pod_values[i] =
+                config_value("Q2POD", pod_keys[i], pod_choices(i),
+                             i == POD_BT_LINK                                          ? -1
+                             : i == POD_ARTIST_CF || i == POD_OTG || i == POD_AUTOZONE ? 1
+                                                                                       : 0);
     st.pod_read = 1;
 }
 int ringnav_year_old(void) {
@@ -425,6 +430,18 @@ int ringnav_artist_view(void) {
 int ringnav_otg(void) {
     pod_settings();
     return otg_on;
+}
+int autozone_enabled(void) {
+    pod_settings();
+    return autozone_on;
+}
+/* A zone picked by hand (autozone.c autozone_config): the switch off, saved, and its row redrawn.
+ */
+void autozone_off(void) {
+    pod_settings();
+    autozone_on = 0;
+    write_int_config(0, "Q2POD", "AUTOZONE");
+    pod_text_again(POD_AUTOZONE);
 }
 int ringnav_playlist_coverflow(void) {
     pod_settings();
@@ -508,6 +525,7 @@ static void pod_text(int i) {
         { 0 }, /* Position Bar: a switch */
         { 0 }, /* Streaming Songs: a switch */
         { 0 }, /* On-The-Go: a switch */
+        { 0 }, /* Automatic Time Zone: a switch */
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_KEYTONE) { /* the Clicker, Key Tone's row */
@@ -539,6 +557,7 @@ static void pod_text(int i) {
                          : i == POD_CF_POSITION    ? "Position Bar"
                          : i == POD_OTG            ? "On-The-Go"
                          : i == POD_LIBRARY_SOURCE ? "Streaming Songs"
+                         : i == POD_AUTOZONE       ? "Automatic Time Zone"
                                                    : 0;
     if (toggle)
         list_toggle(st.pod_label[i], toggle, v);
@@ -591,6 +610,7 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
+        if (i == POD_AUTOZONE && *value) autozone_due(); /* looked up at once, link allowing */
         st.charge_at = 0;
         /* Link Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
@@ -609,6 +629,17 @@ void pod_rows(void *win, const char *view_name, int first, int n, const char *co
         pod_text(first + i);
         caption_row(st.pod_label[first + i], pod_caption(first + i)); /* settings_pages.c */
     }
+}
+
+/* Row i (a switch) into view as its child at: Automatic Time Zone under the time zone
+ * page's Automatic Time Set switch (navigation.c ringnav_timezone_row). */
+void pod_row_at(void *view, int i, const char *icon, unsigned at) {
+    pod_settings();
+    st.pod_label[i] = list_row(view, icon, pod_click, (void *)(long)i);
+    pod_text(i);
+    caption_row(st.pod_label[i], pod_caption(i));
+    unsigned n = widget_count_children(view);
+    if (n && at < n) widget_restack(widget_get_child(view, n - 1), at);
 }
 
 /* systemset_powermanager_page_init and playset_playset_page_init: stock builds its rows, then

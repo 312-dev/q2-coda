@@ -62,6 +62,9 @@ void ringnav_timezone_row(void *item, int i) {
     if (i == 1) tz_now(rows); /* stock builds rows 0, 1, 2, ... */
     int zone = i > 0 && i <= (int)TZ_COUNT ? rows[i - 1] : -1;
     stock_timezone_row_trampoline(item, zone < 0 ? i : zone + 1);
+    void *view = P(item, W_PARENT);
+    if (i == (int)TZ_COUNT && view) /* the last: Automatic Time Zone under row 0's switch */
+        pod_row_at(view, POD_AUTOZONE, "system_time", 1);
     void *row = widget_get_child(item, widget_count_children(item) - 1); /* stock's button */
     for (unsigned c = 0; row && c < widget_count_children(row); ++c) {
         void *label = widget_get_child(row, c);
