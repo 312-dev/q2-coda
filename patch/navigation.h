@@ -1080,6 +1080,11 @@ int usb_ui_key(void *top, unsigned key);
 int bt_headset_battery(void);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
+/* bt_vol_event.c: BlueZ's PropertiesChanged on MediaTransport1, counted by a thread, taken by
+ * bt_volume_poll (docs/internals.md#headset-controls-and-volume) */
+void bt_vol_event_start(void);
+int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void),
+    bt_vol_event_wait(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);

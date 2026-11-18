@@ -180,6 +180,7 @@ LIBC = {
     'waitpid': ('int', 'int, int *, int'), '__errno_location': ('int *', 'void'), 'socket': ('int', 'int, int, int'), 'close': ('int', 'int'),
     'connect': ('int', 'int, const void *, unsigned'),
     'recv': ('int', 'int, void *, unsigned, int'),
+    'getuid': ('unsigned', 'void'),  # bt_vol_event.c's bus login (SASL EXTERNAL)
     'select': ('int', 'int, void *, void *, void *, void *'),
     'getsockopt': ('int', 'int, int, int, void *, unsigned *'),
     'fcntl': ('int', 'int, int, ...'), 'ioctl': ('int', 'int, unsigned, ...'),

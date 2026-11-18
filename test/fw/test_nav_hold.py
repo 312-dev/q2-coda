@@ -2944,6 +2944,114 @@ def test_the_battery_is_read_once_each_poll_period(fw, ui, st):
     assert battery.switches() == [0]
 
 
+# get_battery_capacity's three reads (system.c ringnav_batt_level, ringnav_batt_voltage, ringnav_batt_status): at most
+# every BATT_DARK_MS with the screen off on battery, stock's second otherwise.
+BATT_DARK_MS, BATT_DARK_FLOOR = O['BATT_DARK_MS'], O['BATT_DARK_FLOOR']
+
+
+class Gauge:
+    """The CW2015's level and voltage and the AXP2101's status as sysfs has them, and stock's get_battery_capacity
+    (0x4ff258) around the three payload calls: a level under 101 stored, a voltage not negative stored, a status under 3
+    stored, then the cable read (usb_detect, through ringnav_usb_detect's hook) into g_usbdet_value. tick() is one of
+    the status bar's seconds."""
+    def __init__(self, fw, level=60, mv=3900, status=0, cable=0, lit=0):
+        self.fw, self.now, self.level, self.mv, self.status, self.cable = fw, 100000, level, mv, status, cable
+        self.reads = 0
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('toolsGetBatterycapacity', self.read_level)
+        fw.mock('toolsGetBatteryVoltage', lambda *_: self.mv)
+        fw.mock('toolsGetChargeStatus', lambda *_: self.status)
+        fw.mock('stock_usb_detect_trampoline', lambda *_: self.cable)
+        fw.mock('toolsGpioGetValue', lambda *_: 0)
+        self.lit = fw.var('g_backlight_status', C.c_ubyte)
+        self.lit.value = lit
+        self.stored = [fw.var('fw_ctx_g_power_capacity', C.c_int), fw.var('fw_ctx_g_power_chargestate', C.c_int)]
+        self.det = fw.var('g_usbdet_value', C.c_ubyte)
+        self.fns = [fw.fn(n, C.c_int) for n in ('ringnav_batt_level', 'ringnav_batt_voltage', 'ringnav_batt_status')]
+        self.detect = fw.fn('ringnav_usb_detect', C.c_int)
+
+    def read_level(self, *_):
+        self.reads += 1
+        return self.level
+
+    def tick(self, seconds=1):
+        level, mv, status = (f() for f in self.fns)
+        if 0 <= level < 101:
+            self.stored[0].value = level
+        if mv >= 0:
+            self.voltage = mv
+        if 0 <= status < 3:
+            self.stored[1].value = status
+        self.det.value = self.detect()
+        self.now += seconds * 1000
+        return level, mv, status
+
+
+def test_the_battery_is_read_every_second_while_lit(fw):
+    g = Gauge(fw, lit=1)
+    for _ in range(5):
+        g.tick()
+    assert g.reads == 5
+
+
+def test_dark_on_battery_the_battery_is_read_every_thirty_seconds_and_stock_keeps_the_last_values(fw):
+    g = Gauge(fw, level=60, mv=3900)
+    assert g.tick() == (60, 3900, 0)  # the first pass reads
+    g.level, g.mv = 59, 3880
+    seen = [g.tick() for _ in range(BATT_DARK_MS // 1000 - 1)]
+    assert g.reads == 1 and set(seen) == {(60, 3900, 0)} and g.stored[0].value == 60
+    assert g.tick() == (59, 3880, 0) and g.reads == 2  # BATT_DARK_MS after the last read
+    assert len(fw.calls('stock_usb_detect_trampoline')) == BATT_DARK_MS // 1000 + 1  # the cable: every second
+
+
+def test_lit_again_the_next_second_reads(fw):
+    g = Gauge(fw)
+    g.tick(), g.tick()
+    g.lit.value = 1
+    g.level = 55
+    assert g.tick()[0] == 55 and g.reads == 2
+
+
+@pytest.mark.parametrize('cable, status, level', [(1, 1, 60), (1, 2, 100), (1, 0, 80), (0, 1, 60), (0, 2, 100),
+                                                  (0, 0, BATT_DARK_FLOOR - 1)])
+def test_dark_the_battery_keeps_stocks_second_plugged_charging_full_or_low(fw, cable, status, level):
+    g = Gauge(fw, level=level, status=status, cable=cable)
+    for _ in range(5):
+        g.tick()
+    assert g.reads == 5
+
+
+def test_dark_a_plug_and_an_unplug_are_read_the_second_after(fw):
+    g = Gauge(fw, level=60)
+    g.tick(), g.tick()
+    g.cable, g.status = 1, 1  # plugged in: get_battery_capacity's cable read sees it after its battery reads
+    g.tick()
+    assert g.reads == 1
+    assert g.tick()[2] == 1 and g.reads == 2  # the next second: charging, read
+    g.cable, g.status = 0, 0  # out
+    g.tick()  # the cable still read as in when the battery was
+    assert g.tick()[2] == 0 and g.reads == 4  # the flag fell since that read: read once more
+    g.tick()
+    assert g.reads == 4  # on battery again: the slow pace
+
+
+def test_charge_limit_stops_charging_dark_on_the_poll_after_the_level_reaches_it(fw, ui, st):
+    """Dark and plugged in, the battery keeps stock's second, so charge_poll's next pass sees the limit."""
+    g = Gauge(fw, level=STOP_AT - 2, status=1, cable=1)
+    st('charge_limit').value = 1
+    poll = fw.fn('system__charge_poll', None)
+    first = None
+    for second in range(40):
+        if second % 10 == 9:
+            g.level += 1  # a level every 10 s, a fast charge
+        g.tick()
+        poll()
+        if first is None and fw.calls('switch_charge_enable'):
+            first = g.stored[0].value
+    assert first == STOP_AT and fw.calls('switch_charge_enable')[0][1][0] == 0  # stopped at the limit, not past it
+    assert g.reads == 40
+
+
 # The hardware watchdog (wdt_*), started by the first loop pass and fed by every one after.
 WDT_MS, WDT_LONG_MS = O['WDT_MS'], O['WDT_LONG_MS']
 WDT_START, WDT_STOP, WDT_FEED = 0x8004570d, 0x2000570e, 0x2000570f

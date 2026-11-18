@@ -895,7 +895,8 @@ def test_a_link_without_ear_reports_pauses_nothing(fw):
 
 
 class BtVol(C.Structure):  # navigation.c btvol: the headset's volume sync
-    _fields_ = [('checked', C.c_uint), ('ready', C.c_int), ('last', C.c_int), ('failed', C.c_int)]
+    _fields_ = [('checked', C.c_uint), ('ready', C.c_int), ('last', C.c_int), ('failed', C.c_int),
+                ('pending', C.c_int)]
 
 
 @pytest.mark.parametrize('before, after', [(0, 1), (1, 0)])

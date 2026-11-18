@@ -102,6 +102,47 @@ int ringnav_wifi_signal(void) {
     return wifi.dbm;
 }
 
+/* The battery's reads (docs/internals.md#battery), get_battery_capacity's three calls, each a jal
+ * here: the CW2015 gauge's level and voltage and the AXP2101's status, three sysfs files read once
+ * a second by the status bar's timer, lit or dark. The gauge announces nothing and the level moves
+ * about 1% a minute at most, so with the screen off, on battery, the three are read at most every
+ * BATT_DARK_MS and stock is handed the last values in between, which it stores again unchanged.
+ * Stock's second is kept lit (the status bar shows them), whenever the cable is in or the charger
+ * reports charging or full (Charge Limit's charge_poll and the charger-off rule follow the level
+ * closely), on the first pass after the cable flag (g_usbdet_value, which get_battery_capacity's
+ * usb_detect sets after these reads) changed, and below BATT_DARK_FLOOR, where
+ * check_lowbattery_state counts the voltage towards its power-off. The cable's own read stays
+ * stock's, every second; a caller that reads the cable at its edge (fix/usb-replug's
+ * get_battery_capacity) gets the battery read on the pass after, by the same flag change. Charging
+ * stays a read, not an event: the AXP2101 driver's interrupt handlers that call
+ * power_supply_changed are not requested by the stock kernel, so no uevent is known to come at a
+ * charge start or end. ponytail: dark on battery, a new level reaches Battery History up to
+ * BATT_DARK_MS late, and a wake shows a level that old for its first second; a device check of the
+ * uevent (docs/internals.md#battery) would let the charge status come by event. */
+static struct {
+    unsigned at; /* the last read; 0 none yet */
+    int skip;    /* this pass hands stock the last values */
+    int level, mv, status, cable;
+} batt __attribute__((section(".scratch")));
+
+int ringnav_batt_level(void) {
+    unsigned now = time_now_ms();
+    int cable = g_usbdet_value;
+    batt.skip = batt.at && !g_backlight_status && !cable && cable == batt.cable &&
+                (unsigned)I(g_power_chargestate, 0) - 1 >= 2 &&
+                I(g_power_capacity, 0) >= BATT_DARK_FLOOR && now - batt.at < BATT_DARK_MS;
+    if (batt.skip) return batt.level;
+    batt.at = now | !now; /* never 0 */
+    batt.cable = cable;
+    return batt.level = toolsGetBatterycapacity();
+}
+int ringnav_batt_voltage(void) {
+    return batt.skip ? batt.mv : (batt.mv = toolsGetBatteryVoltage());
+}
+int ringnav_batt_status(void) {
+    return batt.skip ? batt.status : (batt.status = toolsGetChargeStatus());
+}
+
 /* Hardware watchdog (docs/internals.md#watchdog). Stock loads soc_watchdog.ko and never starts it,
  * so a Q2 whose UI loop or kernel stalls stays dark, every button dead, until a 15 s Centre hold
  * cuts the power. The first UI loop pass starts it counting WDT_MS and every pass feeds it, so a
