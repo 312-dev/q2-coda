@@ -16,7 +16,10 @@
  *   drawn here as a mode page: one solid circle and its glyph, a title, a line and a Stop button
  *   (Centre, as Return, leaves the mode). Charge Only stops the probe. USB Debugging stops it too,
  *   which in a --dev build hands the controller back to the ADB gadget (docs/adb.md), and opens
- *   its own mode page, whose Stop parks the ADB gadget.
+ *   its own mode page, whose Stop parks the ADB gadget. A --dev build whose ADB gadget is already
+ *   on the controller probes with it (usb_adb_bound): no storage gadget, nothing to stop.
+ * - The cable is seen in the UI pass after its edge (usb_event.c, usb_ui_poll), and a cable out
+ *   stops the probe's gadget, answered or not (docs/internals.md#usb-cable-events).
  * - A remembered choice skips the chooser, Transfer Files and USB Audio in their own mode for the
  *   cable, and holds until a mode page's Stop forgets it (back to asking, so the next cable gets
  *   the chooser) or the USB picker changes it.
@@ -32,7 +35,9 @@
 #include "navigation.h"
 
 #define USB_PROBE_MS 3000 /* a computer configures a gadget within a second or two */
+#define USB_PROBE_LOOK_MS 100 /* how often the waiting probe reads the UDC's state */
 #define USB_UDC "/sys/class/udc/13500000.otg/state"
+#define USB_ADB_UDC "/sys/kernel/config/usb_gadget/q2adb/UDC" /* --dev: the ADB gadget's controller */
 #define USB_PICK_KEY "USBPICK" /* [Q2POD]: the remembered choice, USB_* */
 enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_LINK_HELD 3 /* g_usblink_status: stock leaves the cable to us until it is out */
@@ -60,8 +65,10 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 static struct {
     int view_ready;
     int det_known; /* a pass has read the cable: one in at boot is no plug-in */
-    int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
-    unsigned probe_at;
+    int det, probing, probe_up /* the probe's storage gadget is running */, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
+    unsigned probe_at, probe_look_at, plug_at;
+    int by_event;                    /* this pass's cable change came from usb_event.c's edge */
+    unsigned long long edge_ns;      /* ... and that edge */
     void *chooser, *view, *always, *debug, *mode;
     /* the USB picker, its footer, General's row's label, and a pick the confirmation card is asking about */
     void *pick, *pick_view, *pick_foot, *row;
@@ -79,6 +86,18 @@ static int usb_host(void) {
     fread(s, 1, sizeof s - 1, f);
     fclose(f);
     return !memcmp(s, "configured", 10);
+}
+
+/* --dev builds: the ADB gadget is on the controller (patch/adb_gadget.sh bind), so a computer at the
+ * cable sees it at once and its answer is the probe's: no storage gadget swapped in and out. */
+static int usb_adb_bound(void) {
+    if (!Q2POD_DEV) return 0;
+    char s[8] = { 0 };
+    void *f = fopen(USB_ADB_UDC, "rb");
+    if (!f) return 0;
+    fread(s, 1, sizeof s - 1, f);
+    fclose(f);
+    return s[0] > ' ';
 }
 
 /* A toast, shown by the next loop pass (feedback.c toast_later): never inside stock's USB pass,
@@ -147,6 +166,21 @@ static void usb_mode(int audio) {
     g_usbmode = audio ? USB_MODE_DAC : USB_MODE_FILES;
 }
 
+/* A line in demo's log (/tmp/q2-demo.log in a --dev build): each plug and unplug, how it was seen and
+ * how long after its edge, and a computer's answer to the probe (docs/internals.md#usb-cable-events). */
+static void usb_log(const char *what, int ms) {
+    char line[96];
+    int n = ms < 0 ? tk_snprintf(line, sizeof line, "q2 usb: %s\n", what)
+                   : tk_snprintf(line, sizeof line, "q2 usb: %s, %d ms\n", what, ms);
+    if (n > 0) write(2, line, (unsigned)n < sizeof line ? (unsigned)n : sizeof line - 1);
+}
+
+/* The probe's storage gadget stopped, if it is running. */
+static void usb_probe_stop(void) {
+    if (u.probe_up) system("storage_config.sh stop >/dev/null 2>&1");
+    u.probe_up = 0;
+}
+
 static void usb_page_close(void **page) {
     void *p = *page;
     *page = (void *)0;
@@ -159,7 +193,7 @@ static int usb_debug_open(void);
  * always remembers it too. */
 static void usb_apply(int pick, int always) {
     u.choice = pick;
-    if (u.probing || u.chosen) system("storage_config.sh stop >/dev/null 2>&1");
+    usb_probe_stop();
     u.probing = 0;
     if (always) usb_remember(pick);
     if (pick == USB_FILES || pick == USB_AUDIO) {
@@ -542,13 +576,40 @@ void usb_ui_paint(void *w, void *canvas) {
 
 /* ---- the plug, from check_usb_status (usb_charge.c ringnav_usb_status) ---- */
 
+/* The probe's answer: a computer that configured its gadget gets the chooser; none within
+ * USB_PROBE_MS is a charger. From each USB pass, and every USB_PROBE_LOOK_MS from usb_ui_poll while
+ * the probe waits, so the chooser follows the computer's answer, not stock's next second. */
+static void usb_probe_look(void) {
+    if (!u.probing || !u.det) return;
+    unsigned now = (unsigned)time_now_ms();
+    u.probe_look_at = now;
+    if (usb_host()) {
+        u.probing = 0, u.chosen = 0;
+        usb_log("a computer answered the probe after the plug", (int)(now - u.plug_at));
+        usb_chooser_open();
+    } else if (now - u.probe_at > USB_PROBE_MS) {
+        u.probing = 0;
+        usb_probe_stop();
+        usb_log("no computer answered: a charger", -1);
+        usb_charger_in();
+    }
+}
+
 /* Before stock's pass: a cable in or out, and the probe's answer. */
 void usb_ui_status(void) {
     int det = g_usbdet_value == 1;
+    if (det != u.det && u.det_known) {
+        if (u.by_event)
+            usb_log(det ? "cable in, seen after its edge" : "cable out, seen after its edge",
+                    (int)((usb_event_now_ns() - u.edge_ns) / 1000000));
+        else
+            usb_log(det ? "cable in (stock's once-a-second read)" : "cable out (stock's once-a-second read)", -1);
+    }
     if (det && !u.det && u.det_known) charge_plugged(); /* charging.c: a dark Q2 lights for it */
     u.det_known = 1;
     if (det && !u.det && g_usblink_status == 0) {
         u.choice = USB_ASK, u.chosen = 0;
+        u.plug_at = (unsigned)time_now_ms();
         int pick = usb_remembered();
         if (pick == USB_FILES || pick == USB_AUDIO) {
             u.choice = pick; /* stock's own path, in the choice's mode for this cable */
@@ -556,7 +617,9 @@ void usb_ui_status(void) {
         } else {
             g_usblink_status = USB_LINK_HELD;
             if (pick == USB_ASK) {
-                system("storage_config.sh start /dev/null >/dev/null 2>&1"); /* no medium: a probe */
+                /* no medium: a probe; in a --dev build the ADB gadget already there is one */
+                u.probe_up = !usb_adb_bound();
+                if (u.probe_up) system("storage_config.sh start /dev/null >/dev/null 2>&1");
                 u.probing = 1, u.probe_at = (unsigned)time_now_ms();
             } else {
                 u.choice = pick;
@@ -564,7 +627,11 @@ void usb_ui_status(void) {
             }
         }
     } else if (!det && u.det) {
+        /* The probe's gadget goes with the cable, whether it still waited or its chooser was up
+         * unanswered: left running, it kept configfs mounted and the ADB gadget parked, and the
+         * next cable's probe could not start (docs/internals.md#usb-cable-events). */
         u.probing = 0;
+        usb_probe_stop();
         usb_page_close(&u.chooser);
         usb_page_close(&u.debug);
         if (u.mode_saved) g_usbmode = (unsigned char)(u.mode_saved - 1);
@@ -572,16 +639,7 @@ void usb_ui_status(void) {
         usb_toast("usbtoast_unplugged", "Unplugged");
     }
     u.det = det;
-    if (u.probing && det) {
-        if (usb_host()) {
-            u.probing = 0, u.chosen = 0;
-            usb_chooser_open();
-        } else if ((unsigned)time_now_ms() - u.probe_at > USB_PROBE_MS) {
-            u.probing = 0;
-            system("storage_config.sh stop >/dev/null 2>&1");
-            usb_charger_in();
-        }
-    }
+    usb_probe_look();
     if (det && u.choice == USB_DEBUG && !u.debug && !u.chooser && usb_host() && !u.chosen) {
         u.chosen = 1;
         usb_debug_open(); /* remembered: once a computer is there */
@@ -689,8 +747,20 @@ static void auth_poll(void) {
 static void auth_poll(void) {}
 #endif
 
-/* ringnav_sleep: charging's poll, a toast USB or charging left, and adbd's questions. */
+/* ringnav_sleep: the cable's edges, the probe's answer, charging's poll, a toast USB or charging left,
+ * and adbd's questions. An edge runs stock's cable read (get_battery_capacity, which sets
+ * g_usbdet_value as its one-second timer would) and its USB check (check_usb_status, hooked as
+ * ringnav_usb_status, which runs usb_ui_status first) now, in this pass. */
 void usb_ui_poll(void) {
+    usb_event_start(); /* once */
+    unsigned long long edge;
+    if (usb_event_take(&edge)) {
+        u.by_event = 1, u.edge_ns = edge;
+        get_battery_capacity();
+        ringnav_usb_status();
+        u.by_event = 0;
+    }
+    if (u.probing && (unsigned)time_now_ms() - u.probe_look_at >= USB_PROBE_LOOK_MS) usb_probe_look();
     charging_poll();    /* charging.c's plug-in screen and weak charger */
     toast_later_poll(); /* a toast USB or charging left */
     auth_poll();

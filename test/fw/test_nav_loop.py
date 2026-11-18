@@ -3439,7 +3439,7 @@ def test_every_pass_feeds_the_watchdog(fw, stock_bytes, power):
     loop = Loop(fw, stock_bytes)
     power('wdt').value = 7
     loop(), loop(10)
-    assert [c[1][:2] for c in fw.calls('fw_ioctl')] == [(7, WDT_FEED)] * 2
+    assert [c[1][:2] for c in fw.calls('fw_ioctl') if c[1][0] == 7] == [(7, WDT_FEED)] * 2  # usb_event.c asks for its line too
 
 
 class Input:

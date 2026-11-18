@@ -1079,6 +1079,10 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
 const char *usb_ui_title(const char *name), *usb_ui_value(void);
 int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+/* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
+void usb_event_start(void);
+int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);
+unsigned long long usb_event_now_ns(void);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
