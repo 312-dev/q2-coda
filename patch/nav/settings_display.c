@@ -456,6 +456,10 @@ int ringnav_systemset(void *win, void *ctx) {
                       ? widget_get_child(view, SYSSET_RESET)
                       : (void *)0;
     reorder(view, sysset_order, sizeof sysset_order);
+#if Q2POD_DEV
+    /* Developer Options (adb_trust.c): Trusted Computers, the computers adb lets in */
+    if (view) widget_set_text_utf8(list_row_into(view, "playset_folderjump", adb_dev_open, 0), "Developer Options");
+#endif
     power_rows(view, reset); /* Restart, Shut Down and Reset Settings, last */
     return result;
 }

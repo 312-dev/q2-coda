@@ -1,6 +1,5 @@
 """The USB pages (patch/usb_ui.c, docs/internals.md#usb-pages): a cable's probe and the chooser, Always Do This and the
 remembered choice, the mode pages and their toasts, and in a --dev build USB Debugging and adbd's question (U5)."""
-import base64
 import ctypes as C
 import hashlib
 
@@ -368,8 +367,8 @@ def test_stop_on_a_remembered_usb_debugging_forgets_it_and_the_next_cable_asks(f
 
 
 def adb_question(fw_dev):
-    """adbd's question on its socket: Allow USB Debugging? asked on the confirmation card (feedback.c confirm, which
-    opens stock's sortselect_dialog; this harness opens none, so the card's answer is called as feedback.c would)."""
+    """adbd's question on its socket: Allow this computer? asked on the confirmation card (adb_trust.c, feedback.c
+    confirm, which opens stock's sortselect_dialog; this harness opens none)."""
     u = Usb(fw_dev)
     u.socket = True
     u.poll()  # connects
@@ -388,30 +387,11 @@ def test_adbd_s_socket_is_a_mips_stream_socket(fw_dev):
     assert u.sockets == [(1, 2)]
 
 
-def card_answer(fw_dev, row, always):
-    fw_dev.fn('usb_ui__auth_card_answer', None, C.c_void_p, C.c_int, C.c_int)(None, row, always)
-
-
-def test_adbd_s_question_asks_on_the_card_with_the_key_s_fingerprint(fw_dev):
-    """docs/adb.md#authorization: "PK" and the key from adbd's socket ask Allow USB Debugging? on the card, its body the
-    key's fingerprint (the MD5 of the decoded key's first eight bytes) and what allowing gives; with no card shown (one
-    already up, as here) it answers NO, so the computer asks again."""
+def test_adbd_s_question_asks_on_the_card_and_no_card_shown_answers_no(fw_dev):
+    """docs/adb.md#authorization: "PK" and the key from adbd's socket ask on adb_trust.c's card (its answers are
+    test_adb_trust.py's); with no card shown (one already up, as here) it answers NO, so the computer asks again."""
     u = adb_question(fw_dev)
-    fingerprint = ':'.join(f'{b:02X}' for b in hashlib.md5(base64.b64decode(KEY)).digest()[:8])
-    body = C.string_at(C.addressof(fw_dev.var('usb_ui__auth_body', C.c_char * 64))).decode()
-    assert body == f'Key {fingerprint}\nIt gets full control of the Q2.' and u.sent == ['NO']
-
-
-@pytest.mark.parametrize('row, always, answer, kept', [(0, 0, 'NO', None), (1, 0, 'OK', None), (1, 1, 'OK', KEY),
-                                                       (0, 1, 'NO', None)])
-def test_the_card_answers_adbd_and_always_allow_keeps_the_key(fw_dev, row, always, answer, kept):
-    """Cancel (or Return, its back row) answers NO; Allow answers OK; Allow with Always Allow on first appends the key's
-    line to /mnt/data/adb_keys, which adbd reads before it lets the computer in."""
-    u = adb_question(fw_dev)
-    u.sent.clear()
-    card_answer(fw_dev, row, always)
-    assert u.sent == [answer]
-    assert u.files.files.get('/mnt/data/adb_keys') == (None if kept is None else f'{kept} user@host\n'.encode())
+    assert u.sent == ['NO']
 
 
 def test_adbd_going_away_answers_nothing_more(fw_dev):
