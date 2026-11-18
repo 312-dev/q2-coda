@@ -181,3 +181,20 @@ void vol_pill_paint(void *bar, void *canvas) {
     ui_text(canvas, s, 1, TYPE(15), tok(TOK_SECONDARY), 1, num, cy, VP_NUM_W, 3);
     canvas_set_global_alpha(canvas, 0xff);
 }
+
+#if Q2POD_DEV
+/* --dev builds only, for the emulator, which has no headset: STATUS_FAKE's "volume=N"
+ * (status_row.c status_fake) moves the volume to N as a headset's own keys would (bt_volume_poll),
+ * once for each new N, so the pill can be shown and shot there. status_row_sync, each second and
+ * each bar paint. */
+void vol_pill_fake(void) {
+    static int seen __attribute__((section(".scratch"))); /* the last N + 1, 0 none */
+    int v = status_fake('v');
+    if (v < 0 || v > 100 || v + 1 == seen) return;
+    int from = g_volume;
+    seen = v + 1;
+    g_volume = (unsigned char)v;
+    device_set_volume(v, 1);
+    vol_show(from);
+}
+#endif

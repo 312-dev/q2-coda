@@ -637,6 +637,9 @@ void status_touch(unsigned type, int x, int y);
 void vol_pill_show(void);
 int vol_pill_up(void);
 void vol_pill_paint(void *bar, void *canvas);
+#if Q2POD_DEV
+void vol_pill_fake(void); /* --dev: STATUS_FAKE's volume=N, as a headset's */
+#endif
 /* ... and the Wi-Fi link as it reads it: stock's bars 1 to 4 while joined, else 0; joined with no
  * link up (Control Center's Wi-Fi circle, control_center.c cc_wifi) */
 int wifi_level(void), wifi_offline(void);

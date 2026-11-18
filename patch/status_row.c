@@ -511,6 +511,9 @@ static void play_xfade_sync(void) {
  * ring to the 50th, the Bluetooth slot's kind and the headset's level, the lock), so the bar
  * repaints whole after the frame and the clock moves beside the new leftmost slot. */
 int status_row_sync(void) {
+#if Q2POD_DEV
+    vol_pill_fake(); /* the emulator's stand-in for a headset's volume (vol_pill.c) */
+#endif
     play_xfade_sync();
     if (!sr.timer && g_backlight_status && moving())
         sr.timer = timer_add(sr_tick, (void *)0, SR_FRAME_MS);
