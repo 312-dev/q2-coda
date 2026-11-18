@@ -267,21 +267,21 @@ def prow(pm,view,i,caption,detail=None,into=False):
     return pm.call(address=f,args=(view,i,pm.string(caption),pm.string(detail) if detail is not None else 0),stack=(0,),gap=0)&0xffffffff
 def box(pm,w): return [signed(pm.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H')]
 def page_kids(pm,kind): return [c for c in pm.nodes[pm.top]['children'] if pm.nodes[c]['type']==kind]
-def under_bar(pm,name):  # a window as the device has it, under the status row
-    w=pm.node('window',name); pm.word(w+O['W_Y'],OLG.bar); pm.word(w+O['W_PARENT'],pm.wm); return w
+def full_page(pm,name):  # a page's window as the device has it: the whole screen (full-bleed), under the status row
+    w=pm.node('window',name); pm.word(w+O['W_W'],375); pm.word(w+O['W_H'],320); pm.word(w+O['W_PARENT'],pm.wm); return w
 PX,PW=OLT['page_x'],375-2*OLT['page_x']
 pm=CoverflowMachine(); assert oled_client(pm)==320-OLG.bar; pbar=oled_page_bar(pm)
 # An empty page: its message in OLED's empty note (feedback.c feedback_empty), its box holding the font; the bar keeps
 # the page's name.
-pm.top=under_bar(pm,'tidal_downloads'); plist(pm,'No downloads yet',0,48)
+pm.top=full_page(pm,'tidal_downloads'); plist(pm,'No downloads yet',0,48)
 pm.call(address=payload_syms['page_empty'],args=(pm.top,pm.string('Tidal Downloads'),0,0),gap=0)
 pe_msg=[c for c in pm.nodes[pm.top]['children'] if pm.nodes[c]['type']=='hscroll_label' and pm.nodes[c]['visible']]
 assert [pm.nodes[c]['text'] for c in pe_msg]==['No downloads yet'] and box(pm,pe_msg[0])[3]>=pm.nodes[pe_msg[0]]['style:normal:font_size'] and pm.nodes[pe_msg[0]].get('name','')=='_empty'
 assert pm.nodes[pbar]['text']=='Tidal Downloads',pm.nodes[pbar]['text']; passed()
-pm.top=under_bar(pm,'shuffle_page'); pm.calls=[]
+pm.top=full_page(pm,'shuffle_page'); pm.calls=[]
 view=plist(pm,'Shuffle',20,48)
 lv,=page_kids(pm,'list_view'); title,=page_kids(pm,'hscroll_label')
-assert [c[:4] for c in pm.calls if c[0]=='list_view_create']==[('list_view_create',pm.top,0,0)]
+assert [c[:4] for c in pm.calls if c[0]=='list_view_create']==[('list_view_create',pm.top,0,OLG.bar)]  # from the row's foot (bar_foot)
 assert signed(pm.get(lv+O['W_H']))==320-OLG.bar and pm.nodes[lv]['item_height']==OLT['page_row'] and pm.nodes[view]['virtual_h']==20*OLT['page_row']  # to the window's foot: rows past the list end fade (list_fade)
 assert pm.nodes[title]['text']=='Shuffle' and pm.nodes[title]['visible']==0 and box(pm,title)[3]==0 and pm.nodes[pbar]['text']=='Shuffle'
 row=prow(pm,view,3,'Shuffle Songs'); assert box(pm,row)==[0,3*OLT['page_row'],375,OLT['page_row']]
@@ -289,7 +289,7 @@ cap=pm.nodes[row]['children'][0]; assert box(pm,cap)==[PX,0,PW,OLT['page_row']]
 assert (pm.nodes[cap]['style:normal:font_name'],pm.nodes[cap]['style:normal:font_size'])==(TFACE,TPX)
 # A detail row: the caption in the tall title role, the detail in the meta role, in the theme's boxes (page.rows title_y,
 # title_h, detail_y, detail_h).
-pm.top=under_bar(pm,'mostplayed_page'); dview=plist(pm,'Played',4,64); d=prow(pm,dview,1,'Song','12 plays')
+pm.top=full_page(pm,'mostplayed_page'); dview=plist(pm,'Played',4,64); d=prow(pm,dview,1,'Song','12 plays')
 cap,det=pm.nodes[d]['children'][:2]; DH=OLT['page_detail']
 assert box(pm,d)==[0,DH,375,DH] and box(pm,cap)==[PX,OLT['page_cap_y'],PW,OLT['page_cap_h']] and box(pm,det)==[PX,OLT['page_det_y'],PW,OLT['page_det_h']] and pm.nodes[dview]['virtual_h']==4*DH
 assert (pm.nodes[cap]['style:normal:font_name'],pm.nodes[cap]['style:normal:font_size'])==TALL and (pm.nodes[det]['style:normal:font_name'],pm.nodes[det]['style:normal:font_size'])==(FACE_NAMES[OLT['font[ROLE_META]']],OLT['font_px[ROLE_META]'])
@@ -303,16 +303,16 @@ passed()
 # rows (n 0) or a title its caller keeps and writes again.
 pl=CoverflowMachine(); oled_client(pl); plbar=oled_page_bar(pl)
 for caption,n,keep,shown in (('Remove Downloads?',3,False,False),('Exactly90',3,False,False),('No plays',0,False,True),('Cover',3,True,True)):
-    pl.top=under_bar(pl,'prompt_page'); plist(pl,caption,n,64,keep)
+    pl.top=full_page(pl,'prompt_page'); plist(pl,caption,n,64,keep)
     pt,=page_kids(pl,'hscroll_label'); ll,=page_kids(pl,'list_view')
     assert pl.nodes[pt]['text']==caption and pl.nodes[pt]['visible']==shown,caption
     top=next(c[3] for c in pl.calls if c[0]=='list_view_create')
     if shown:
-        assert box(pl,pt)==[PX,0,PW,OLT['page_row']] and top==OLT['page_row'] and pl.nodes[pt]['style:normal:font_size']==TPX,caption
+        assert box(pl,pt)==[PX,OLG.bar,PW,OLT['page_row']] and top==OLG.bar+OLT['page_row'] and pl.nodes[pt]['style:normal:font_size']==TPX,caption
         assert box(pl,ll)[3]==min(n*DH,(OLG.list_end-OLT['page_row'])//DH*DH)
-    else: assert top==0
+    else: assert top==OLG.bar  # the full-bleed page's rows from the status row's foot
 # page_retitle writes the caption and the bar's.
-pl.top=under_bar(pl,'measure_page'); plist(pl,'Measuring',1,48,True); mt,=page_kids(pl,'hscroll_label')
+pl.top=full_page(pl,'measure_page'); plist(pl,'Measuring',1,48,True); mt,=page_kids(pl,'hscroll_label')
 pl.call(address=payload_syms['page_retitle'],args=(pl.top,mt,pl.string('Measured 1/2'),0),gap=0)
 assert pl.nodes[mt]['text']=='Measured 1/2' and pl.nodes[plbar]['text']=='Measured 1/2'; passed()
 # The bar names the page from a hidden caption. A page of two lists, a level and one opened over it: the level's, then,
