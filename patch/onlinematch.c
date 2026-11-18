@@ -609,14 +609,13 @@ static void more_rows(void *win) {
     al.label = label;
     al_show();
 }
-int modal_set(void);           /* menu_modal.c */
-void modal_more(void *win);
-/* ... and under a modal set (OLED's), the page is a dialog over Now Playing, drawn as the inset
- * modal (menu_modal.c modal_more). */
+void modal_more(void *win); /* menu_modal.c */
+/* ... and the page is a dialog over Now Playing, drawn as the inset modal (menu_modal.c
+ * modal_more). */
 int ringnav_playermore(void *win, void *ctx) {
     int result = stock_playermore_trampoline(win, ctx);
     more_rows(win);
-    if (win && modal_set()) modal_more(win);
+    if (win) modal_more(win);
     return result;
 }
 

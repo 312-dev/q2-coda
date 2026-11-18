@@ -730,7 +730,7 @@ def test_no_match_is_the_empty_state_centred_above_the_strip(fw, ui, song, st):
     glyph, "No Matches" and "Try fewer letters", centred between the query (the page at screen y 58, its rule
     on sheet y 35) and the strip (196 on the sheet), no tiles."""
     s = Strip(fw, ui, library(song))
-    use_set(st, 'oled')  # its bar ends at 58: nothing above the page, so the whole form, its glyph
+    use_set(st)  # its bar ends at 58: nothing above the page, so the whole form, its glyph
     struct.pack_into('<i', (C.c_char * 8).from_address(s.ss.page), 4, 58)  # the page under the status row
     s.type('zz')
     c = painted(fw, s)

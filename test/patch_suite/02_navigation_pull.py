@@ -151,14 +151,13 @@ for page_name in ('folder_page','localmusic_page','allmusic_page','radio_page'):
             assert not m.prompt(page)['visible']
             passed()
 
-# Home's own list takes no pull, under OLED's set (home_lib 0: no Library list on Home's window) or before one is written.
+# Home's own list takes no pull under OLED's set (home_lib 0: no Library list on Home's window).
 assert OLED_G.home_lib==0
-for boot,view,want in ((oled_boot,'scroll_view_home',0),(lambda k:None,'scroll_view_home',0)):
-    m=PullMachine(); boot(m); w,es=m.page_list(5,name='home_page'); m.nodes[w]['name']=view; page=m.top
-    m.start_pull(page,w); m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],y=120)
-    assert bool(m.prompt(page)['visible'])==bool(want),(view,want)
-    m.emit(page,O['EVT_POINTER_UP_BEFORE'],y=120)
-    assert len(m.searches())==want and not m.prompt(page)['visible']
+m=PullMachine(); oled_boot(m); w,es=m.page_list(5,name='home_page'); m.nodes[w]['name']='scroll_view_home'; page=m.top
+m.start_pull(page,w); m.emit(page,O['EVT_POINTER_MOVE_BEFORE'],y=120)
+assert not m.prompt(page)['visible']
+m.emit(page,O['EVT_POINTER_UP_BEFORE'],y=120)
+assert not m.searches() and not m.prompt(page)['visible']
 passed()
 # A failed registration leaves no partial page callbacks; retry binds each event once.
 for fail in ('EVT_WINDOW_BACKGROUND','EVT_POINTER_UP_BEFORE'):

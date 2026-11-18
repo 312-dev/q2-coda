@@ -28,9 +28,7 @@ CANVAS_X, CANVAS_Y, CANVAS_LCD = O['CANVAS_X'], O['CANVAS_Y'], O['CANVAS_LCD']
 LCD_FILL, LCD_STROKE = O['LCD_FILL_COLOR'], O['LCD_STROKE_COLOR']
 THEMES = host.tools_theme.builtins()
 OLED = next(i for i, t in enumerate(THEMES) if t['name'] == 'OLED')  # the one theme
-SETS = host.tools_theme.geometry_sets(THEMES)  # boot_values' rows: st.geom indexes them
-SET0 = SETS[0]  # the set st.geom 0 reads: theme_boot's before it writes one
-OLED_SET = next(i for i, s in enumerate(SETS) if s.name == 'oled')  # the set theme_boot writes
+GEOMETRY = host.tools_theme.built_geometry(THEMES)  # the one set the build bakes: OLED's
 
 
 def i32(v):
@@ -141,7 +139,6 @@ class Ui:
         m('widget_move_resize', lambda w, x, y, ww, h, *_: self.nodes[w].move(i32(x), i32(y), i32(ww), i32(h)))
         m('widget_resize', lambda w, ww, h, *_: self.nodes[w].move(*self.nodes[w].box[:2], i32(ww), i32(h)))
         m('widget_get_text', self.get_text)
-        m('widget_set_text', self.set_wide)
         m('widget_set_text_utf8', lambda w, s, *_: self.set_text(self.nodes[w], C.string_at(s).decode()))
         m('image_base_set_image', lambda w, s, *_: self.nodes[w].props.__setitem__('image', C.string_at(s).decode()))
         m('widget_set_name', lambda w, s, *_: setattr(self.nodes[w], 'name', C.string_at(s).decode()))
@@ -201,12 +198,6 @@ class Ui:
     def get_text(self, w, *_):
         node = self.nodes.get(w)
         return C.addressof(node.wide) if node is not None and node.wide is not None else 0
-
-    def set_wide(self, w, s, *_):
-        chars = []
-        while s and (ch := C.c_uint.from_address(s + 4 * len(chars)).value):
-            chars.append(ch)
-        self.set_text(self.nodes[w], ''.join(map(chr, chars)))
 
     def destroy(self, w, *_):
         node = self.nodes[w]
@@ -691,7 +682,8 @@ def test_a_menu_sheets_gap_stays_only_while_nothing_scrolls(fw, st, rows, gap):
     last = ui.add('list_item', view, (0, 0, 375, 32))
     fw.fn('modal_frame', None, C.c_void_p, C.c_void_p)(win.addr, lv.addr)
     assert last.box[1] - items[-1].box[1] == 32 + gap
-    assert view.props.get('virtual_h') == 32 * (rows + 1) + gap
+    # the rows' height, and the pad that runs them on past the list end to the sheet's foot (LIST_PAD)
+    assert view.props.get('virtual_h') - view.props.get('_list_pad') == 32 * (rows + 1) + gap
 
 
 # A scrolling text's faded ends (list.marquee.fade, OLED's; list_marks.c marquee_fade_under and marquee_fade): the text
@@ -1521,9 +1513,8 @@ def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, 
 
 # No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.
 def oled(fw, st, **config):
-    """OLED on its own set, as theme_boot leaves it, on a lit, usable screen."""
+    """OLED on its own set on a lit, usable screen."""
     theme(fw, **config)
-    st('geom').value = OLED_SET
     for flag, value in (('g_backlight_status', 1), ('g_usblink_status', 0)):
         g(fw, flag, value)
     return Ui(fw)
@@ -1568,7 +1559,7 @@ def test_a_list_past_the_list_end_fades_as_home_s_does(fw, st, scroll):
     view, _, _ = detail_page(fw, st, rows=rows, scroll=scroll, touch=1)
     canvas = Canvas(fw)
     fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, canvas.addr)
-    end = SETS[OLED_SET].bar + SETS[OLED_SET].list_end
+    end = GEOMETRY.bar + GEOMETRY.list_end
     bands = faded_rows(canvas)
     assert [y for y in bands if y >= 40] == list(range(end - 14, 320))  # the foot: from y 266, clear for its first rows
     assert [y for y in bands if y < 40] == (list(range(26, 26 + 14)) if scroll else [])  # the top, once scrolled
@@ -1615,7 +1606,7 @@ def table(fw, st):
     ui = oled(fw, st)
     win = ui.window('allmusic_page')
     client = ui.add('table_client', win, (0, 26, 375, 294))
-    row_h = SETS[OLED_SET].pitch + 20
+    row_h = GEOMETRY.pitch + 20
     client.int_at(O['ROW_HEIGHT']).value, client.int_at(O['TABLE_ROWS']).value = row_h, 4
     for i in range(4):
         row = ui.add('table_row', client, (0, i * row_h, 375, row_h)).clickable()
@@ -1775,6 +1766,13 @@ def label_of(item):
     return next(c for c in item.walk() if c.kind == 'hscroll_label')
 
 
+def kv(ui, item):
+    """A row's "Title: value" as it reads: its title, and its value on the set's right column (row_value_text)."""
+    value = next((c for c in item.walk() if c.name == '_setting_value'), None)
+    title = ui.text(label_of(item))
+    return f'{title}: {ui.text(value)}' if value is not None and ui.text(value) else title
+
+
 def row(ui, view, text):
     return next(item for item in view.children if any(ui.text(c) == text for c in item.walk()))
 
@@ -1799,9 +1797,8 @@ def test_power_adds_standby_charge_and_in_vehicle_rows_after_stocks(fw):
     # Standby, Charge, USB DAC Charging, Smart Wi-Fi, In-Vehicle, Battery History
     assert icons == ['system_powermanager', 'usb_chargeswitch', 'usb_chargeswitch', 'wifiset_wifi', 'system_carmode',
                      'system_powermanager']
-    standby, charge, *_, history = (ui.text(label_of(r)) for r in ours)
-    # Standby off; Charge Limit a key/value row on a set_switch theme, Off or where it stops (here off, and on a set
-    # with no right column, as written)
+    standby, charge, *_, history = (kv(ui, r) for r in ours)
+    # Standby off; Charge Limit a key/value row on a set_switch theme, Off or where it stops (here off)
     assert standby.endswith('Off') and charge == 'Charge Limit: Off'
 
     assert history == 'Battery History' and 'list_into' in [c.props.get('image') for c in ours[-1].walk()]  # opens a page
@@ -1823,7 +1820,7 @@ def test_standby_limit_cycles_its_four_choices_and_saves_each(fw):
     texts = []
     for _ in range(4):
         click(ui, standby)
-        texts.append(ui.text(label_of(standby)))
+        texts.append(kv(ui, standby))
     hours = [O[f'STANDBY_LIMIT_{k}'] for k in (1, 2, 3)]
     assert [re.findall(r'\d+', t) for t in texts] == [[str(h)] for h in hours] + [[]]  # each limit's hours, then none
     assert texts[-1].endswith('Off')
@@ -1837,9 +1834,9 @@ def test_charge_limit_switches_and_takes_effect_on_the_next_pass(fw, st):
     st('charge_at', C.c_uint).value = 12345
     click(ui, charge)
     on = f'Charge Limit: {O["CHARGE_STOP"]}%'  # where it stops: a set_switch theme's key/value row
-    assert ui.text(label_of(charge)) == on and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
+    assert kv(ui, charge) == on and settings.written == [('CHARGELIMIT', 1)] and st('charge_at', C.c_uint).value == 0
     click(ui, charge)
-    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and settings.written[-1] == ('CHARGELIMIT', 0)
+    assert kv(ui, charge) == 'Charge Limit: Off' and settings.written[-1] == ('CHARGELIMIT', 0)
     assert switch(charge) is None
 
 
@@ -1912,7 +1909,7 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
     standby, charge, dac, smart, car, history = view.children[:6]  # then the gap, Restart and Shut Down
     click(ui, smart)
     assert switch(smart) == 'switch_on' and settings.written == [('SMARTWIFI', 1)] and st('smart_wifi').value == 1
-    assert ui.text(label_of(charge)) == 'Charge Limit: Off' and switch(car) == 'switch_off'  # the other rows as they were
+    assert kv(ui, charge) == 'Charge Limit: Off' and switch(car) == 'switch_off'  # the other rows as they were
     assert g(fw, 'g_carmode') == car_mode
     click(ui, smart)
     assert switch(smart) == 'switch_off' and settings.written[-1] == ('SMARTWIFI', 0) and st('smart_wifi').value == 0
@@ -2059,7 +2056,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     click(ui, row(ui, view, 'Library'))
     name, title, library = pages[-1]
     assert name == b'playset/playset_page' and title == 'Library'
-    assert [ui.text(label_of(r)) for r in library.children] == [
+    assert [kv(ui, r) for r in library.children] == [
         'On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Album Artist', 'Artist View: Cover Flow', 'Playlists',
         'Folders', 'Scan Song Durations']
     click(ui, row(ui, library, 'Folders'))
@@ -2076,7 +2073,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     assert g(fw, 'g_foldercover_flag') == (not was) and switch(art) == ('switch_off' if was else 'switch_on')
     click(ui, row(ui, library, 'Playlists'))
     _, title, playlists = pages[-1]
-    assert title == 'Playlists' and [ui.text(label_of(r)) for r in playlists.children if r.kind == 'list_item'] == [
+    assert title == 'Playlists' and [kv(ui, r) for r in playlists.children if r.kind == 'list_item'] == [
         'Playlist View: List', 'Import Playlists', 'Export Playlists']  # the Playlists page's own rows (playlists.c)
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
@@ -2151,9 +2148,9 @@ def test_artists_toggles_stocks_artist_type(fw):
     fw.var('fw_ctx_artist_type', C.c_int).value = 1
     fw.fn('pod_rows', None, C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_void_p)(win.addr, b'scroll_view_playset', 4, 1, (C.c_char_p * 1)(b'x'))
     artists = view.children[0]
-    assert ui.text(label_of(artists)) == 'Artists: Album Artist'
+    assert kv(ui, artists) == 'Artists: Album Artist'
     click(ui, artists)
-    assert fw.var('fw_ctx_artist_type', C.c_int).value == 0 and ui.text(label_of(artists)) == 'Artists: Artist'
+    assert fw.var('fw_ctx_artist_type', C.c_int).value == 0 and kv(ui, artists) == 'Artists: Artist'
     assert settings.written == [('ARTISTTYPE', 0)]
 
 
@@ -2171,12 +2168,12 @@ def test_cover_flow_sort_opens_its_picker_and_refresh_says_when(fw):
     assert POD['POD_CF_REFRESH'] == POD['POD_CF_SORT'] + 1  # one call builds both
     pod_rows(fw, win, 'scroll_view_display', POD['POD_CF_SORT'], 2)
     sort, refresh = view.children
-    first, action = ui.text(label_of(sort)), ui.text(label_of(refresh))
+    first, action = kv(ui, sort), kv(ui, refresh)
     assert first == 'Sort: Album' and 'list_into' in [c.props.get('image') for c in sort.walk()]
     click(ui, sort)
-    assert ui.text(label_of(sort)) == first and opened == [b'systemset/keylock_page'] and not toasts  # its picker
+    assert kv(ui, sort) == first and opened == [b'systemset/keylock_page'] and not toasts  # its picker
     click(ui, refresh)
-    assert ui.text(label_of(refresh)) == action and fw.calls('image_manager_unload_all')
+    assert kv(ui, refresh) == action and fw.calls('image_manager_unload_all')
     assert len(toasts) == 1 and toasts[0]  # nothing in view changes: a toast says when
 
 
@@ -2235,7 +2232,8 @@ def test_a_set_text_rows_title_and_value(fw, text, title, val):
     assert (ui.text(label), ui.text(v)) == (title, val)
     (lx, ly, lw, lh), (vx, vy, vw, vh), width = label.box, v.box, button.box[2]
     assert (lx, ly, lh) == (72, 0, 70) and (vy, vh) == (0, 70)  # the title where it was, both the row's height
-    assert lx + lw < vx and width // 2 < vx and vx + vw >= width  # the value trailing to the row's end, clear of the title
+    # the value ending on the set's right column (hscroll_label keeps 2 px), clear of the title
+    assert lx + lw < vx and width // 2 < vx and vx + vw == 374 - GEOMETRY.right_x - button.box[0]
     assert [c[1][:2] for c in fw.calls('hscroll_label_set_only_focus')] == [(v.addr, 1)]  # scrolls only focused
     assert [c[1][:2] for c in fw.calls('hscroll_label_set_ellipses')] == [(v.addr, 1)]
 
@@ -2247,7 +2245,7 @@ def test_a_long_title_is_cut_and_keeps_its_value(fw):
 
 
 def test_the_librarys_rows_take_its_constructors_live_words(fw):
-    """Under the Library's own list the row's body and icon x are the ipod.json words theme_boot wrote."""
+    """Under the Library's own list the row's body and icon x are the ipod.json words the build baked."""
     body, icon_x = O['LIBRARY_ROW_BODY'], O['LIBRARY_ROW_ICON_X']
     saved = C.c_ushort.from_address(body).value, C.c_ushort.from_address(icon_x).value
     try:
@@ -2398,10 +2396,9 @@ def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st)
     assert quick.slider.parent.box == (188, 162, 167, 38) and quick.slider.box == (0, 0, 167, 38)
 
 
-# A page's switch as a row, under a set without stock's toolbars.
-def sleep_page(fw, st, image='switch_off', geom=OLED_SET):
+# A page's switch as a row, with no stock toolbars (the grid's toolbar 0).
+def sleep_page(fw, st, image='switch_off'):
     theme(fw)
-    st('geom').value = geom
     ui = Ui(fw)
     win = ui.window('sleeptimer_page')
     toolbar = ui.add('view', win, (0, 270, 375, 50), 'view_toolbar')
@@ -2417,7 +2414,7 @@ def test_the_sleep_timers_switch_is_its_first_row_reading_the_switch(fw, st):
     ui, win, sw, timers = sleep_page(fw, st)
     label = win.child('_switch_row')
     button = label.parent
-    s = SETS[OLED_SET]
+    s = GEOMETRY
     assert button.box == (0, 0, 375, s.set_row) and button.props['style'] == 's_btn_listitem'
     assert label.box[0] == s.text_x and ui.text(label) == 'Sleep Timer' and switch(button) == 'switch_off'
 
@@ -2431,11 +2428,6 @@ def test_the_rows_click_is_the_switchs_on_the_next_pass(fw, st):
     C.CFUNCTYPE(C.c_int, C.c_void_p)(timers[-1])(None)
     assert [c[1][0] for c in fw.calls('stock_dispatch_trampoline')] == [sw.addr]
     assert switch(button) == 'switch_on'
-
-
-def test_a_set_with_toolbars_keeps_stocks_switch(fw, st):
-    ui, win, sw, timers = sleep_page(fw, st, geom=0)
-    assert not any(c.name == '_switch_row' for c in win.walk())
 
 
 # The library scan's refresh of a row it already holds.
@@ -2969,7 +2961,6 @@ INK_ROW = 0xffababab
 class StatusRow(Bar):
     def __init__(self, fw, st, title=''):
         theme(fw)
-        st('geom').value = OLED_SET
         super().__init__(fw, 2)
         self.ui.window('home_page' if not title else 'albums_page')
         self.w['view_battery'].move(322, 25, 30, 24)  # the slot's x on the bar: the battery's body starts there
@@ -3107,7 +3098,6 @@ def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_
     song_row gives a title is the last word: catalogue_fit, which runs first, never widens it again, so the rows
     settle instead of resizing on every paint."""
     page = Page(fw, rows=3, pitch=32, sel=None, name='allmusic_page')
-    st('geom').value = OLED_SET
     songs = [('Ten Thousand Weight', 'The Head and the Heart'),  # the shot's row: the artist ran under the mark
              ('A Title That Runs All The Way Across', 'Some Artist'),
              ('Ten Thousand Weight', 'The Head and the Heart')]  # the same, playable
@@ -3245,8 +3235,7 @@ def sheet(fw, st, rows=10, risen=True, reduce=False):
     the page white above y 160 and blue below. Its first whole paint (the material, the rise from the page) is made at
     the clock's 10 s; risen, the rise is run to its end and the buffer the page again. Returns (ui, win, view, canvas,
     buf); the clock is fw.sheet_clock. reduce: under Reduce Motion (IPOD REDUCEMOTION)."""
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    st('geom').value, st('settings_read').value = [g.name for g in sets].index('oled'), 1
+    st('settings_read').value = 1
     fw.mock('window_manager_is_animating', lambda *_: 0)
     ui = Ui(fw)
     theme(fw)

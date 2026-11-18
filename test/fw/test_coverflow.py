@@ -17,9 +17,14 @@ from conftest import O, Deques, Externpic, Files, ask_cover, high_halves, in_for
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CX, TOP, ART, ONE, MISS = 187, 13, 160, 65536, 99
 VIEW_W, VIEW_H = 375, 220
-HOME_PW, HOME_H = 188, 290
+HOME_PW = 188  # coverflow.c HOME_PW: the widest pane, home.ring's and home.held's rows
+# Split's art pane as home_render fills it under the geometry set the build bakes (coverflow.c pane_w, pane_h), and a
+# cover zoomed 110% to cover it (slide_load)
+_G = host.tools_theme.built_geometry(host.tools_theme.builtins())
+PANE_W, PANE_H = 375 - _G.split_art, 320 - _G.bar + _G.split_art_up
+TEX_H = PANE_H * 11 // 10
 PREPARING, COVERS, TRACKS = range(3)
-ARTIST_ALBUMS, RATED_ALBUMS = 1, 2
+RATED_ALBUMS, PLAYLISTS = 1, 3  # coverflow.h's cf.scoped
 CF_REACH, CF_WIDE_REACH = 3, 7  # the ring's slots either side of the centre: fx_ring's, and its callers' window
 SORT_ALBUM, SORT_ARTIST, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_RATING, SORT_YEAR = range(7)
 FNV = 2166136261
@@ -31,7 +36,7 @@ class Cf(C.Structure):
                 *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
                 ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
-                *((k, C.c_int) for k in 'screen album running text_albums done total cancel scoped all_sort'.split()),
+                *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
                 *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split())]
 
 
@@ -283,7 +288,7 @@ def test_the_vignette_darkens_the_pane_s_top_50_and_bottom_40_screen_rows(fw):
     """V4: 0.25 + 0.75 t^1.6 of a row's brightness, t its distance from the edge over 50 px at the top and 40 at the
     bottom, in 256ths; the rows between untouched; alpha kept, each channel scaled."""
     k = fw.fn('coverflow__vig_k', C.c_uint, C.c_int)
-    up = 320 - HOME_H  # the frame's row 0 on the screen
+    up = 320 - fw.fn('coverflow__pane_h', C.c_int)()  # the frame's row 0 on the screen
     def screen(y):
         return k(y - up)
     assert [screen(y) for y in (0, 25, 49, 50, 160, 279, 280, 300, 319)] == [64, 127, 250, 256, 256, 256, 248, 122, 64]
@@ -297,11 +302,11 @@ def test_the_vignette_darkens_the_pane_s_top_50_and_bottom_40_screen_rows(fw):
 
 def test_a_flat_cover_renders_flat_at_any_phase(fw):
     g = api(fw)
-    tex = slide_tex(fw, 206, 319, lambda x, y: 0xff123456)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, TEX_H, lambda x, y: 0xff123456)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     for u, v in ((0, 0), (128, 128), (257, 3), (1111, 2222), (18 * 256, 29 * 256)):
-        render(fw, d, HOME_PW, u, v)
-        assert all(d[i] == vigged(fw, 0xff123456, i // HOME_PW) for i in range(0, len(d), 7)), (u, v)
+        render(fw, d, PANE_W, u, v)
+        assert all(d[i] == vigged(fw, 0xff123456, i // PANE_W) for i in range(0, len(d), 7)), (u, v)
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -309,12 +314,12 @@ def test_a_flat_cover_renders_flat_at_any_phase(fw):
 def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
     """A cubic B-spline reproduces straight lines: the output of a ramp reads the position sampled."""
     g = api(fw)
-    tex = slide_tex(fw, 206, 200 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, PANE_H + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     for u, v in ((0, 0), (64, 0), (128, 128), (1000, 192), (16 * 256 + 37, 0)):
-        render(fw, d, HOME_PW, u, v)
-        for py, px in ((60, 0), (100, 50), (150, 187), (163, 100)):  # rows clear of the vignette
-            c = d[py * HOME_PW + px]
+        render(fw, d, PANE_W, u, v)
+        for py, px in ((60, 0), (100, 50), (150, PANE_W - 1), (163, 100)):  # rows clear of the vignette
+            c = d[py * PANE_W + px]
             assert abs((c & 255) - (u / 256 + px + 1)) <= 1, (u, v, px)
             assert abs((c >> 8 & 255) - (v / 256 + py + 1)) <= 1, (u, v, py)
             assert c >> 16 == 0xff40
@@ -324,10 +329,10 @@ def test_a_ramp_comes_out_at_the_sub_pixel_position(fw):
 
 def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
     g = api(fw)
-    tw, th = 206, 319
+    tw, th = 206, TEX_H
     tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
-    render(fw, d, HOME_PW, (tw - HOME_PW) * 256, (th - HOME_H) * 256)  # an overrun is the sanitizer's
+    d = exact(C.c_uint, PANE_W * PANE_H)
+    render(fw, d, PANE_W, (tw - PANE_W) * 256, (th - PANE_H) * 256)  # an overrun is the sanitizer's
     assert d[-1] == 0xff000000
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -335,12 +340,12 @@ def test_render_at_the_pan_s_far_corner_stays_inside_the_border(fw):
 
 def test_render_honours_the_bitmap_s_pitch(fw):
     g = api(fw)
-    tex = slide_tex(fw, 206, 319, lambda x, y: 0xffffffff)
-    pitch = HOME_PW + 12
-    d = exact(C.c_uint, pitch * HOME_H)
+    tex = slide_tex(fw, 206, TEX_H, lambda x, y: 0xffffffff)
+    pitch = PANE_W + 12
+    d = exact(C.c_uint, pitch * PANE_H)
     render(fw, d, pitch, 300, 300)
-    assert all(d[y * pitch + HOME_PW - 1] == vigged(fw, 0xffffffff, y) and d[y * pitch + HOME_PW] == 0
-               for y in range(0, HOME_H, 7))
+    assert all(d[y * pitch + PANE_W - 1] == vigged(fw, 0xffffffff, y) and d[y * pitch + PANE_W] == 0
+               for y in range(0, PANE_H, 7))
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
 
@@ -349,13 +354,13 @@ def test_render_honours_the_bitmap_s_pitch(fw):
 
 def fit(fw, w, h):
     a, b = C.c_int(), C.c_int()
-    api(fw).home_fit(w, h, HOME_H, r(a), r(b))  # the panel's height, as the caller passes it
+    api(fw).home_fit(w, h, PANE_H, r(a), r(b))  # the panel's height, as the caller passes it
     return a.value, b.value
 
 
 @pytest.mark.parametrize('w, h', ((0, 0), (0, 100), (100, 0), (8193, 100), (100, 8193), (2**31, 2**31)))
 def test_home_fit_unknown_sizes_fill_the_panel(fw, w, h):
-    assert fit(fw, w, h) == (HOME_PW, HOME_H)
+    assert fit(fw, w, h) == (PANE_W, PANE_H)
 
 
 def test_home_fit_just_covers_the_panel_at_its_proportions(fw):
@@ -363,17 +368,18 @@ def test_home_fit_just_covers_the_panel_at_its_proportions(fw):
     for _ in range(500):
         w, h = rng.randint(1, 8192), rng.randint(1, 8192)
         fw_, fh = fit(fw, w, h)
-        assert fw_ >= HOME_PW and fh >= HOME_H
-        assert fw_ == HOME_PW or fh == HOME_H  # one side exact: just covering
-        if fw_ == HOME_PW:
-            assert fh == math.ceil(HOME_PW * h / w)
+        assert fw_ >= PANE_W and fh >= PANE_H
+        assert fw_ == PANE_W or fh == PANE_H  # one side exact: just covering
+        if fw_ == PANE_W:
+            assert fh == math.ceil(PANE_W * h / w)
         else:
-            assert fw_ == math.ceil(HOME_H * w / h)
+            assert fw_ == math.ceil(PANE_H * w / h)
 
 
-@pytest.mark.parametrize('w, h, want', (
-    (188, 290, (188, 290)), (376, 580, (188, 290)), (500, 500, (290, 290)), (1000, 100, (2900, 290)), (100, 1000, (188, 1880)),
-    (8192, 8192, (290, 290)), (8192, 1, (2375680, 290)), (1, 8192, (188, 1540096))))
+@pytest.mark.parametrize('w, h, want', (  # a pane taller than wide (OLED's 179 x 320)
+    (PANE_W, PANE_H, (PANE_W, PANE_H)), (2 * PANE_W, 2 * PANE_H, (PANE_W, PANE_H)), (500, 500, (PANE_H, PANE_H)),
+    (1000, 100, (10 * PANE_H, PANE_H)), (100, 1000, (PANE_W, 10 * PANE_W)), (8192, 8192, (PANE_H, PANE_H)),
+    (8192, 1, (8192 * PANE_H, PANE_H)), (1, 8192, (PANE_W, 8192 * PANE_W))))
 def test_home_fit_exact_cases(fw, w, h, want):
     assert fit(fw, w, h) == want
 
@@ -779,26 +785,26 @@ def test_slide_load_zooms_a_cover_by_a_tenth_with_its_pan_s_margin(fw):
     tex, home, frame = tex_rig(fw, 300, 300, pixels)
     assert tex(b'x') == 1
     s = home.sl[0]
-    assert (s.tw, s.th, s.rx, s.ry, s.lib) == (319, 319, 29, 29, 0)  # the fit, 290 square, plus 10%
-    assert (s.u0, s.v0) == ((290 - 188) // 2, 0)  # the old crop
+    # the fit to OLED's PANE_W x PANE_H pane, PANE_H square, plus 10%; the pan's ends keep split_inset's 2% of it
+    # (7 texels) clear of each edge (drift_axis)
+    fit, t, ins = PANE_H, PANE_H * 11 // 10, PANE_H * 11 // 10 * 2 // 100
+    assert (s.tw, s.th, s.lib) == (t, t, 0)
+    assert (s.u0, s.rx) == ((fit - PANE_W) // 2, t - fit)  # the old crop, the whole zoom's room
+    assert (s.v0, s.ry) == (ins, t - PANE_H - ins - ins)  # no crop: the inset at each end
     assert struct.unpack_from('<H', frame, 0xc)[0] & 1  # opaque
 
 
 def split_inset_set(fw, library, inset):
-    """st.geom on the first geometry set whose split_inset is inset; its client and pane as the C reads them."""
+    """The geometry set's values as the C reads them, its split_inset inset (OLED's 2), and its client."""
     names = host.tools_theme.GEOM_VALS
-    table = (C.c_short * (fw.sizes['theme_engine__geom_vals'] // 2)).in_dll(fw.lib, 'theme_engine__geom_vals')
-    sets = [table[g * len(names):(g + 1) * len(names)] for g in range(len(table) // len(names))]
-    g = next(i for i, row in enumerate(sets) if row[names.index('split_inset')] == inset)
-    st = host.offsets(library.parent/'navigation.o', 'scratch_t')['geom']
-    C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + st).value = g
-    row = dict(zip(names, sets[g]))
+    row = dict(zip(names, (C.c_short * len(names)).in_dll(fw.lib, 'theme_engine__geom_vals')))
+    assert row['split_inset'] == inset
     return row, 320 - row['bar']
 
 
 def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_row(fw, library):
-    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's, a set
-    with no art up and the other lists stay at the theme's home.rows.top, in the window."""
+    """Under OLED's set (split_art_up) Split's main menu starts at y 40, 18 rows above Home's window; Full's and the
+    other lists stay at the theme's home.rows.top, in the window."""
     ui = Ui(fw)
     lst = ui.make(0, 'list_view', 0, 0, 375, 224)
     fw.var('coverflow__home', Home).list = lst  # the main menu; its Settings and other lists are full pages here
@@ -812,10 +818,7 @@ def test_split_raises_home_s_list_to_y_40_where_the_art_runs_under_the_status_ro
     width(lst, 375, 375, 24, 44, 0)
     full_top = rect(lst)[1]
     home_mode.value = 0
-    split_inset_set(fw, library, 0)  # a set whose art starts under the bar
-    width(lst, 187, 187, 24, 44, 0)
-    assert rect(lst)[1] == full_top >= 0  # both the theme's home.rows.top, inside the window
-    split_inset_set(fw, library, 2)
+    assert full_top >= 0  # the theme's home.rows.top, inside the window
     other = ui.make(0, 'list_view', 0, 0, 375, 64)
     width(other, 375, 375, 24, 44, 0)
     assert rect(other)[1] == full_top
@@ -1283,8 +1286,9 @@ def test_covers_live_needs_the_covers_with_no_change_pending(fw, slide, screen, 
 
 
 class Shelf:
-    """An artist's slide_menu: its index, offset and animator in plain memory, n albums, stride 110."""
-    def __init__(self, fw, n=4, index=1, offset=0, scoped=ARTIST_ALBUMS):
+    """The playlists' slide_menu, which stops at its ends: its index, offset and animator in plain memory, n covers,
+    stride 110."""
+    def __init__(self, fw, n=4, index=1, offset=0, scoped=PLAYLISTS):
         self.fw, self.g, self.raw, self.anim = fw, api(fw), C.create_string_buffer(0x200), C.create_string_buffer(0x100)
         self.p = C.addressof(self.raw)
         self.set(0x78, index)
@@ -2416,7 +2420,7 @@ def test_sort_next_in_the_page_s_own_orders(fw):
     assert g.sort_next(1) == SORT_ADDED and g.sort_next(0) == SORT_YEAR
     c.sort = SORT_RATING  # not one of the library's
     assert g.sort_next(1) == SORT_ALBUM
-    c.scoped = 2
+    c.scoped = RATED_ALBUMS
     assert g.sort_next(0) == SORT_RATING and g.sort_next(1) == SORT_ALBUM
     c.sort = SORT_PLAYED
     assert g.sort_next(1) == SORT_RATING  # the rated orders wrap
@@ -2589,23 +2593,20 @@ def deque_of(fw, recs):
     fw.mock('fw_deque_at', lambda d, i, *_: recs[i].p if i < len(recs) else 0)
 
 
-def test_the_bar_names_an_album_s_tracks_under_song_rows_and_an_artist_s_covers_under_a_status_row(fw):
-    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); an artist's
-    covers read the artist under a status row, and other covers there no title, so the row shows the clock as
-    Home's does; anything else is Cover Flow."""
+def test_the_bar_names_an_album_s_tracks_under_song_rows_and_no_covers(fw):
+    """OLED's one-line song rows take the album's name from the tracks' hidden caption (0: read it); over the covers
+    the status row has no title, so it shows the clock as Home's does."""
     themed(fw)
     recs = [Rec(artist='Bob Dylan', path='/a')]
     deque_of(fw, recs)
-    title = fw.fn('coverflow_bar_title', C.c_char_p, C.c_int)
+    title = fw.fn('coverflow_bar_title', C.c_char_p)
     c = cf(fw)
-    c.albums, c.scoped, c.screen = 0x5000, ARTIST_ALBUMS, TRACKS
-    assert title(1) is None
+    c.albums, c.scoped, c.screen = 0x5000, RATED_ALBUMS, TRACKS
+    assert title() is None
     c.screen = COVERS
-    assert title(1) == b'Bob Dylan' and title(0) == b'Cover Flow'
+    assert title() == b''
     c.scoped = 0
-    assert title(1) == b'' and title(0) == b'Cover Flow'
-    c.scoped, c.albums = ARTIST_ALBUMS, 0  # no albums read yet: no artist to name
-    assert title(1) == b''
+    assert title() == b''
 
 
 def test_the_live_album_is_the_centre_card_while_the_covers_show(fw):
@@ -2649,9 +2650,9 @@ def test_which_slide_menu_is_the_covers_and_which_stops_at_its_ends(fw):
     assert not slide(None) and not bounded(None)
     c.slide = 0x6000
     assert slide(0x6000) and not slide(0x6001) and not bounded(0x6000)  # the library's wrap round
-    c.scoped = ARTIST_ALBUMS
+    c.scoped = PLAYLISTS
     assert bounded(0x6000) and not bounded(0x6001)
-    c.scoped = 2  # the rated albums wrap like the library's
+    c.scoped = RATED_ALBUMS  # the rated albums wrap like the library's
     assert not bounded(0x6000)
 
 
@@ -2778,8 +2779,8 @@ def test_without_a_third_cover_the_second_fades_out_over_the_next_step(fw, style
         last = b
 
 
-@pytest.mark.parametrize('scoped', (ARTIST_ALBUMS, 0))
-def test_an_artist_s_shelf_shows_no_cover_past_its_ends(fw, scoped):
+@pytest.mark.parametrize('scoped', (PLAYLISTS, 0))
+def test_a_bounded_shelf_shows_no_cover_past_its_ends(fw, scoped):
     t = themed(fw)
     frame = C.create_string_buffer(0x40)
     fw.mock('bitmap_create_ex', lambda *_: C.addressof(frame))
@@ -2795,7 +2796,7 @@ def test_an_artist_s_shelf_shows_no_cover_past_its_ends(fw, scoped):
     fw.fn('coverflow__fx_ring', None, C.c_int, C.c_int, C.c_void_p)(0, n, ring)
     reach = CF_WIDE_REACH if t['cf.thumb'] else CF_REACH  # a thumb theme's row reaches further
     js = range(-CF_WIDE_REACH, CF_WIDE_REACH + 1)  # each slot's place from the centre album, the first
-    # an artist's shelf: its three albums alone; the library's small shelf repeats round its wrap
+    # the playlists' shelf: its three covers alone; the library's small shelf repeats round its wrap
     assert [int(bool(p)) for p in wide] == [int(abs(j) <= reach and (not scoped or 0 <= j < n)) for j in js]
     fw.fn('coverflow__fx_close', None)()
 
@@ -3102,8 +3103,8 @@ def test_home_binds_its_cards_and_lists(fw):
     assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
 
 
-def test_a_page_list_on_a_list_fit_set_runs_on_to_the_screen_s_foot(fw, library):
-    """page_list under OLED's set (list_fit, list end 224 under a 58 px bar): twelve 32 px rows run on to the
+def test_a_page_list_runs_on_to_the_screen_s_foot(fw, library):
+    """page_list under OLED's grid (list end 224 under a 58 px bar): twelve 32 px rows run on to the
     screen's foot, the rows past y 282 fading there (navigation.c list_fade), as Home's do."""
     themed(fw)
     split_inset_set(fw, library, 2)  # OLED's set
@@ -3478,13 +3479,13 @@ def test_a_library_slides_ends_stay_inside_the_inset_one_zoomed_in_one_not(fw, l
 
 def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
     """A ramp through the zoom: each pixel reads the texel at u + x k, v + y k."""
-    tex = slide_tex(fw, 206, 290 + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    tex = slide_tex(fw, 206, PANE_H + 90, lambda x, y: 0xff400000 | x | min(y, 255) << 8)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     k = O['KB_NEAR']
     for u, v in ((0, 0), (3 * 256 + 77, 5 * 256 + 3)):
-        render(fw, d, HOME_PW, u, v, k)
-        for py, px in ((60, 0), (100, 50), (150, 187), (200, 100)):  # rows clear of the vignette
-            c = d[py * HOME_PW + px]
+        render(fw, d, PANE_W, u, v, k)
+        for py, px in ((60, 0), (100, 50), (150, PANE_W - 1), (200, 100)):  # rows clear of the vignette
+            c = d[py * PANE_W + px]
             assert abs((c & 255) - (u / 256 + px * k / 65536 + 1)) <= 1, (u, px)
             assert abs((c >> 8 & 255) - (v / 256 + py * k / 65536 + 1)) <= 1, (v, py)
     libc.free(C.addressof(d))
@@ -3492,11 +3493,11 @@ def test_a_zoomed_window_samples_the_cover_at_its_scale(fw):
 
 
 def test_a_zoomed_out_window_at_the_far_corner_stays_inside_the_border(fw):
-    tw, th = 206, 319
+    tw, th = 206, TEX_H
     tex = slide_tex(fw, tw, th, lambda x, y: 0xff000000)
-    d = exact(C.c_uint, HOME_PW * HOME_H)
+    d = exact(C.c_uint, PANE_W * PANE_H)
     k = 65536 * 109 // 100  # wider than any slide's window
-    render(fw, d, HOME_PW, tw * 256 - HOME_PW * k // 256, th * 256 - HOME_H * k // 256, k)  # an overrun is the sanitizer's
+    render(fw, d, PANE_W, tw * 256 - PANE_W * k // 256, th * 256 - PANE_H * k // 256, k)  # an overrun is the sanitizer's
     assert d[-1] == 0xff000000
     libc.free(C.addressof(d))
     libc.free(C.addressof(tex))
@@ -3504,15 +3505,15 @@ def test_a_zoomed_out_window_at_the_far_corner_stays_inside_the_border(fw):
 
 def test_the_incoming_slide_is_laid_over_the_frame_by_its_share(fw):
     home = fw.var('coverflow__home', Home)
-    first = slide_tex(fw, 206, 319, lambda x, y: 0xff000000)
-    second = exact(C.c_uint, 209 * 322)
-    for i in range(209 * 322):
+    first = slide_tex(fw, 206, TEX_H, lambda x, y: 0xff000000)
+    second = exact(C.c_uint, 209 * (TEX_H + 3))
+    for i in range(209 * (TEX_H + 3)):
         second[i] = 0xffc8641e
-    home.sl[1].tex, home.sl[1].tw, home.sl[1].th = C.addressof(second), 206, 319
-    d = exact(C.c_uint, HOME_PW * HOME_H)
-    render(fw, d, HOME_PW, 0, 0)
-    render(fw, d, HOME_PW, 0, 0, blend=64, slide=1)
-    middle = d[60 * HOME_PW:(HOME_H - 50) * HOME_PW]  # rows clear of the vignette
+    home.sl[1].tex, home.sl[1].tw, home.sl[1].th = C.addressof(second), 206, TEX_H
+    d = exact(C.c_uint, PANE_W * PANE_H)
+    render(fw, d, PANE_W, 0, 0)
+    render(fw, d, PANE_W, 0, 0, blend=64, slide=1)
+    middle = d[60 * PANE_W:(PANE_H - 50) * PANE_W]  # rows clear of the vignette
     assert set(middle) == {0xff000000 | (0xc8 * 64 + 128) >> 8 << 16 | (0x64 * 64 + 128) >> 8 << 8 | (0x1e * 64 + 128) >> 8}
     for b in (first, second, d):
         libc.free(C.addressof(b))
@@ -3589,7 +3590,7 @@ def test_play_starting_mid_library_fade_fades_from_the_frame_as_it_stands(fw):
     assert frame()
     after = pixels_of(b, home.frame)
     for y in range(len(before)):
-        for x in range(HOME_PW):
+        for x in range(PANE_W):
             p, q = before[y][x], after[y][x]
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
     home.fade = O['SLIDE_FADE_MS'] - 1
@@ -3648,7 +3649,7 @@ def test_under_oled_the_wheel_off_now_playing_mid_fade_fades_the_show_in_over_th
     assert frame()
     after = pixels_of(b, home.frame)
     for y in range(len(before)):
-        for x in range(HOME_PW):
+        for x in range(PANE_W):
             p, q = before[y][x], after[y][x]
             assert all(abs((p >> s & 255) - (q >> s & 255)) <= 1 for s in (0, 8, 16)), (x, y, hex(p), hex(q))
 
@@ -3819,8 +3820,6 @@ def test_a_status_row_ends_a_long_caption_in_an_ellipsis_and_keeps_the_rows_wher
     """OLED's status row holds a caption too wide for its box too (its label ends it in an ellipsis), so a page's rows
     start under the status row whatever the caption's length; a page with no rows still says it as its first line."""
     t = themed(fw)
-    geom = C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['geom'])
-    geom.value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # theme_boot's set, OLED's
     ui = Ui(fw)
     bar_title(fw, ui, scratch, 40)  # 'Albums' measures 60 px: too wide
     title = page_title(fw, ui.make(0, 'view'), b'Albums', rows)
@@ -3973,7 +3972,7 @@ def test_the_captions_name_the_centre_album_and_its_artist(fw):
     assert 'style:normal:font_name' not in ui[c.name].props  # the captions keep the style's face
 
 
-@pytest.mark.parametrize('scoped, card', ((ARTIST_ALBUMS, 'All albums'), (2, 'Sort: Rating')))
+@pytest.mark.parametrize('scoped, card', ((RATED_ALBUMS, 'Sort: Rating'),))
 def test_the_card_after_the_albums_is_named_for_what_it_does(fw, scoped, card):
     _, ui, c, titles = captions(fw, scoped)
     c.sort = SORT_RATING

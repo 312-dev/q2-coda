@@ -448,7 +448,7 @@
     ]
   },
   "stock_row_layout_calls": {
-    "purpose": "stock's own table rows fit their title on a relayout under a set that re-pitches them",
+    "purpose": "stock's own table rows fit their title on a relayout, as the set re-pitches them",
     "sites": [
       ["0x538e04", "0x0320f809"],
       ["0x540348", "0x0320f809"],
@@ -459,7 +459,7 @@
     ]
   },
   "stock_row_style_calls": {
-    "purpose": "Queue's rows: the playing row's mark, and its colour under a set that re-pitches them",
+    "purpose": "Queue's rows: the playing row's mark, and its colour, as the set re-pitches them",
     "sites": [
       ["0x53aeac", "0x0320f809"]
     ]

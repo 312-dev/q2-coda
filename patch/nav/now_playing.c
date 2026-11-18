@@ -420,7 +420,7 @@ static unsigned np_stop_next(unsigned stage, int dir) {
  * own press ends it (scrub_end seeks) and puts a focus ring on the first of shuffle, repeat and
  * the heart. The wheel moves the ring, never changing a control; Centre works the ringed one as a
  * tap does: shuffle on or off, repeat a step Off, All, One, the ring staying, or the heart's
- * rating picker (its Centre saves and closes it, ratings.c rate_key), the cycle back at rest.
+ * rating picker (the menu sheet's, ratings.c rate_show), the cycle back at rest.
  * Under a theme without the pair there is no ring and the scrub's press opens the picker. A press
  * held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
  * instead, as stock's release does. */

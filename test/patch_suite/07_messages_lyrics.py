@@ -1,4 +1,4 @@
-# An A-B marker's x, stock's on the boot set's bar (np_bar_x and np_bar_w), is the same share of the slider
+# An A-B marker's x, stock's on the built bar (np_bar_x and np_bar_w), is the same share of the slider
 # where the page has it (ringnav_ab_x); a point left of the bar, and 0 (no point to mark), stay as they are.
 class ABMachine(QueueMachine):
     ab=0
@@ -7,7 +7,7 @@ class ABMachine(QueueMachine):
         self.calls.append(('ab_x',u.reg_read(UC_MIPS_REG_A0))); self.returns(self.ab,clobber=True)
 m=ABMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'; m.handlers[0x53b9d8]='ab:x'
 m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
-m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # OLED's set (theme_boot)
+m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)  # the first system_bar load, as on a unit (accent, theme_boot)
 slider=m.node('slider','slider_play',max=225,value=100); win=m.node('window','playing_page',[slider]); m.word(win+O['W_PARENT'],m.wm); m.top=win
 def geo(w): return tuple(signed(m.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H'))
 assert m.call(address=playing,args=(win,7,0,0),gap=0)==0
@@ -17,7 +17,7 @@ from build import AB_X_CALLS  # the placement's three calls of the x go through 
 assert [struct.unpack_from('<I',demo,fileoff(demo,a))[0] for a in AB_X_CALLS]==[jal(payload_syms['ringnav_ab_x'])]*3
 def ab_x(x): m.ab=x; m.calls=[]; r=signed(m.call(address=payload_syms['ringnav_ab_x'],args=(77,0,0,0),gap=0)); assert m.calls[0]==('ab_x',77); return r
 for k,v in zip(('W_X','W_Y','W_W','W_H'),(BX,233,BW,44)): m.word(slider+O[k],v)
-assert BW>0 and [ab_x(x) for x in (BX,BX+89,BX+BW-1,0)]==[BX,BX+89,BX+BW-1,0]; passed()  # on the boot set's bar: stock's own
+assert BW>0 and [ab_x(x) for x in (BX,BX+89,BX+BW-1,0)]==[BX,BX+89,BX+BW-1,0]; passed()  # on the built bar: stock's own
 for k,v in zip(('W_X','W_W'),(87,201)): m.word(slider+O[k],v)
 assert [ab_x(x) for x in (BX,BX+89,BX+BW-1,BX-1,0)]==[87,87+89*201//BW,87+(BW-1)*201//BW,BX-1,0]; passed()
 
@@ -169,7 +169,7 @@ def centre(m,gap=1000):  # a double press
     assert m.call(O['KEY_CENTER'],gap=gap)==11 and not did(m,'playing_timer_clear')
     assert m.call(O['KEY_CENTER'],gap=100,clear=False)==11
     m.advance(DC,clear=False); keep(m); assert not m.screens  # no single press left behind
-def oled_scrub(**kw):  # Now Playing once the first system_bar load has put up OLED's set and its status row (theme_boot)
+def oled_scrub(**kw):  # Now Playing past the first system_bar load, as on a unit (accent, theme_boot)
     m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
@@ -1241,17 +1241,15 @@ m=CoverflowMachine(); m.open(); m.press(100)
 assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_KEY_LONG'],gap=0)==11
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
-# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): under OLED's set (the menu sheet, which the first
-# system_bar load writes) the playlist's own menu, Play, Shuffle, Rename and Delete; before it, the list's menu
-# (playlist_hold) with More… and New Playlist (stock's toolbar page edits from its toolbar). The playlist is found in the
-# live list by its cd_num, as New, Rename and Delete read that list again under the covers after they copied it: More…
-# opens the More page at its index there, and a playlist gone from it holds nothing.
+# Hold Play/Pause on a playlist's cover (navigation.c qm_hold): the menu sheet's playlist menu, Play, Shuffle, Rename
+# and Delete. The playlist is found in the live list by its cd_num, as Rename and Delete read that list again under
+# the covers after they copied it, and a playlist gone from it holds nothing.
 PL_COVER_MENU=['Play','Shuffle','Rename','Delete']
 class PlaylistCoverMachine(CoverflowMachine):
     def __init__(self):
         super().__init__()
         self.handlers[syms['navigator_to_with_context']]='q:navigator_to_with_context'  # the More page's index
-        for n in ('playlist_art','playlist_art_refresh','playlist_art_stop','playlist_songs','playlists_new'):
+        for n in ('playlist_art','playlist_art_refresh','playlist_art_stop','playlist_songs'):
             if n in payload_syms: self.handlers[payload_syms[n]]='pl:'+n
         self.handlers[syms['getAllPlayList']]='pl:getAllPlayList'  # stock's headers, as the page reads them
         self.edits=[]; self.lists=[self.song(f'List {i}',4) for i in range(3)]; self.heads=self.lists
@@ -1264,41 +1262,21 @@ class PlaylistCoverMachine(CoverflowMachine):
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,'')
         if not name.startswith('pl:'): return super().hook(u,address,size,unused)
-        if name=='pl:playlists_new': self.edits.append(0)
         if name=='pl:getAllPlayList':
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',r) for r in self.heads]
             return self.returns(len(self.heads))
         self.returns(0)
-def geom_boot(m):  # the first system_bar load (ringnav_ui_load's theme_boot) writes the theme's geometry set
+def bar_load(m):  # the first system_bar load, as on a unit (ringnav_ui_load: accent, theme_boot)
     m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0)
-m=PlaylistCoverMachine(); geom_boot(m)
+m=PlaylistCoverMachine(); bar_load(m)
 m.word(m.slide+O['SLIDE_INDEX'],1); m.press(100); assert m.hold()==11 and m.release()==0
 rows=[m.nodes[m.nodes[i]['children'][0]]['text'] for i in m.nodes[m.view]['children'] if m.nodes[i]['type']=='list_item']
 assert rows==PL_COVER_MENU and m.nodes[m.title]['text']=='List 1',rows; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # read again, reordered
-m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'
-m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',2); passed()
-for row in (0,1):  # its songs, by cd_num 10's query
-    m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))
-    assert m.run(row)==('Playing Next','Playing Last')[row] and m.query[:2]==('getMusicByPlayList',10) and len(m.names())==5; passed()
-# ... each runs once the menu's dialog is destroyed (its close may still be animating, the dialog on top, and the
-# Playlists page's own click acts only on the top page), and from the pass after: the covers never close inside the
-# dialog's destroy.
-class ClosingCoverMachine(PlaylistCoverMachine):  # window_close animates: the dialog stays on top until destroyed
-    def hook(self,u,address,size,unused):
-        if address!=syms['window_close']: return super().hook(u,address,size,unused)
-        self.closing.append(u.reg_read(REGS[0])); self.returns(0,clobber=True)
-def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in order
-    if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
-    for t,f,ctx in list(m.nodes[w].get('handlers',())):
-        if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-m=ClosingCoverMachine()  # New Playlist, before the set is written
-m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
-m.pick(4); m.advance(0,clear=False); m.advance(0,clear=False)
-assert m.closing==[dlg] and m.top==dlg and not m.edits,(m.closing,m.edits)
-destroyed(m,dlg); assert not m.edits; m.advance(0,clear=False)
-assert m.edits==[0] and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.edits,m.opened); passed()
+m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'; passed()
+m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # Play: its songs, by cd_num 10's query
+assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',10) and m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2); passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[1:]))  # List 0 deleted under the covers
 m.press(100); assert m.hold()!=11 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 # More's Rename or Delete over the covers: as the covers come back to the front the playlists are read again
@@ -1315,30 +1293,11 @@ assert len(m.nodes[s]['children'])==2 and m.get(s+O['SLIDE_INDEX'])==0 and cover
 m.heads=[]; closes=sum(c[0]=='window_manager_close_window_force' for c in m.calls); pl_front(m)
 assert sum(c[0]=='window_manager_close_window_force' for c in m.calls)==closes+1; passed()
 # A Rename under the covers: the covers show the new name and so does the hold's title, from the cover's own record, the
-# live list (p_deque_playlist) keeping the old name until the page is on top; More… still goes by its index there.
+# live list (p_deque_playlist) keeping the old name until the page is on top.
 m=PlaylistCoverMachine(); m.word(m.slide+O['SLIDE_INDEX'],1); m.advance(0)
 new_one=m.song('Renamed',4); m.word(new_one+O['REC_TITLE'],m.string('Renamed')); m.word(new_one+O['REC_DISC'],11)
 m.heads=[m.lists[0],new_one,m.lists[2]]; pl_front(m); assert cover_cd(m)==11
-m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']
-m.pick(3); m.advance(0); assert m.opened[-1]==('localmusic/playlistsmore_page',1); passed()
-# New Playlist (playlists.c playlists_new): the covers close (coverflow_playlists_close) and New runs as the page's
-# own: its row's target (OLED's set has no toolbar), which under list.entry.ipod is the letter strip's New Playlist
-# (search_strip.c playlist_new_open) in place of stock's dialog. With no covers up, nothing.
-def pl_new(covers=True):  # the Playlists page booted (PlaylistPageMachine's default: OLED's set written)
-    class M(PlaylistPageMachine):
-        def hook(self,u,address,size,unused):
-            if address!=payload_syms['coverflow_playlists_close']: return super().hook(u,address,size,unused)
-            self.shut+=1; page=0
-            if self.covers in self.stack: self.stack.remove(self.covers); self.top=page=self.stack[-1]
-            self.returns(page)
-    m=M(); m.rebuild(); m.paint(m.view); m.shut=0; m.page=m.top; m.covers=m.node('window','coverflow_page')
-    if covers: m.stack.append(m.covers); m.top=m.covers
-    m.before=m.bar(); m.calls.clear()
-    m.call(address=payload_syms['playlists_new'],args=(0,0,0,0),gap=0,clear=False); m.advance(0,clear=False); m.stack_rows()
-    return m
-m=pl_new(); opened=[c for c in m.calls if c[0]=='window_create']  # page_open's, the strip's page
-assert m.shut==1 and not m.dialogs and len(opened)==1 and m.navbar()==0,(m.dialogs,opened); passed()
-m=pl_new(covers=False); assert m.shut==1 and m.top==m.page and not m.dialogs and m.navbar()==0; passed()
+m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text']=='Renamed',m.nodes[m.title]['text']; passed()
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
 # /mnt/data/ringnav-album-ratings by album_id, the low three bits its hearts, 5 its favourite and its songs My Fav's; songs'

@@ -64,7 +64,7 @@
 
 #define ADDON_POLL_MS 500
 /* A level's drawing (artist_view): the rows as the app sent them, or an artist's page and the
- * pages its rows open, or an album's page (album_view), under a set with the menu sheet */
+ * pages its rows open, or an album's page (album_view) */
 enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 #define ADDON_START_MS 10000 /* no socket this long after the start: it isn't running */
 #define ADDON_LIVE_MS 2000   /* a level whose reply says "refresh" is asked again this often */
@@ -389,6 +389,7 @@ static struct {
     unsigned loads;  /* playback_loads at its start, then once its queue was loaded */
     unsigned picks;  /* playback_picks at its start: a song the user moved to since ends its wait */
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
+    unsigned skip;   /* playback_picks after a Next that waits for sm.want (addon_next_waits) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
 /* The app whose .play started the queue playing, and playback_loads after that queue's load: the
@@ -658,6 +659,19 @@ static int urls_start(const void *unused) {
     return 0;
 }
 
+static void *stream_queue(void);
+/* A user's Next on the last song queued of a playlist session that waits for its next song
+ * (sm.want, still downloading): 1, and stream_poll plays that song once it lands and joins the
+ * queue, unless the user moves to another song meanwhile. Stock's Next on a queue's last song
+ * would wrap to its first: a radio's seed, played again while the radio's next song downloads. */
+int addon_next_waits(void) {
+    void *q = sm.state == S_PLAY && sm.m3u && sm.want[0] ? stream_queue() : 0;
+    if (!q || (unsigned)I(MCL_POS, 0) + 1 != deque_size(q)) return 0;
+    sm.skip = playback_picks;
+    toast("Next song is loading");
+    return 1;
+}
+
 /* Whether the queue playing is the session's: its first song in its folder; or a playlist's first
  * song, and no queue loaded since its own (a Library play of the same album is the user's). */
 static void *stream_queue(void) {
@@ -695,7 +709,7 @@ static void stream_poll(app_t *a) {
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = 0, sm.first[0] = sm.want[0] = 0;
-        sm.loads = playback_loads, sm.picks = playback_picks;
+        sm.loads = playback_loads, sm.picks = playback_picks, sm.skip = 0;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
@@ -734,6 +748,12 @@ static void stream_poll(app_t *a) {
             void *add = m3u_songs();
             if (deque_size(add)) playback_queue_insert(q, add, 0);
             deque_destroy(add);
+            /* a Next waited for this: on to the first song that joined, unless the user moved since */
+            unsigned pos = (unsigned)I(MCL_POS, 0);
+            if (sm.skip && sm.skip == playback_picks && pos + 1 < deque_size(q))
+                sm.skip = 0, ringnav_change(1);
+            else if (sm.skip != playback_picks)
+                sm.skip = 0;
         }
         ahead_poll(a->id, sm.seq, q); /* Download Ahead: the songs after the one playing */
     } else if (!scan && stream_newer(sm.dir, sm.last)) {
@@ -1811,8 +1831,7 @@ static void busy_row(int on) {
     pg.busy = on;
 }
 
-/* An artist's page (docs/oled-design.md#artist-page) from the app's reply, under a set with the
- * menu sheet (OLED's); other sets keep the plain rows. A reply is an artist's when it has Shuffle
+/* An artist's page (docs/oled-design.md#artist-page) from the app's reply. A reply is an artist's when it has Shuffle
  * and Radio actions on an "artist:" context, as q2-subsonic's artist page does (Go to Artist's,
  * and its Artists rows'). Its other rows go where the design puts them: the album rows (list,
  * album) under an Albums row, Top Songs (list, top) as a row of its own, Add to Sync, Quality and
@@ -1921,8 +1940,7 @@ static int drill_lay(const char *uri) {
                                                         : 0;
 }
 
-/* An album's page (docs/oled-design.md#album-page) from the app's reply, under a set with the
- * menu sheet: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
+/* An album's page (docs/oled-design.md#album-page) from the app's reply: a reply is an album's when it has a Play action on "album:<id> 0", a Shuffle on
  * "album:<id>" and an info row "about", as q2-subsonic's album page has with "album" in the caps
  * (docs/librespot.md#album-rows). The header shows the level's title (the album), the about row's
  * title (its artist) and subtitle ("2015 · 18 songs · 1 hr 12 min") and the album's catalogue
@@ -1973,7 +1991,6 @@ static int album_view(lv_t *l) {
 static int artist_view(lv_t *l) {
     int n = 0;
     char url[96], year[8];
-    if (!modal_set()) return l->lay = LAY_PLAIN, 0;
     if ((!l->lay || l->lay == LAY_ALBUM) && (n = album_view(l))) return n;
     if (l->lay == LAY_ALBUMS) {
         int k = 0, *order = calloc((unsigned)l->n + 1, sizeof *order);
@@ -2098,7 +2115,7 @@ static int artist_hold(lv_t *l) {
  * the toggle left out, as an action over nothing (audit2 F1). 1 when it is one. */
 static int empty_view(lv_t *l) {
     int info = -1;
-    if (!modal_set() || l->lay) return 0;
+    if (l->lay) return 0;
     for (int i = 0; i < l->n; ++i) {
         if (!strcmp(cell(i, 0), "info") && strcmp(cell(i, 1), "about")) {
             if (info < 0) info = i;

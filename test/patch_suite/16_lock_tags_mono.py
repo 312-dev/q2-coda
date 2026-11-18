@@ -324,7 +324,7 @@ assert stacked(m,'scroll_view_playset')==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0
 assert all(r in m.entries+rows for r in m.nodes[m.settings_view]['children'])  # no headings
 for i in (2,5,6,11):  # Resume Songs, Sleep Timer, Volume and Library open pages; the switches and sliders don't
     button=m.nodes[rows[i]]['children'][0]
-    assert m.nodes[m.nodes[button]['children'][-1]]['image']=='list_into'
+    assert 'list_into' in [m.nodes[c].get('image') for c in m.nodes[button]['children']]  # a value row's _setting_value follows it
 passed()
 # Swap L/R uses its own persistent flag, immediately below Mono Audio.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=MonoMachine)
@@ -568,7 +568,7 @@ passed()
 # Stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place, the name its value, as high as stock's
 # row (docs/internals.md#bluetooth-name).
 m,rows,texts,icons,click=settings_page('btrows','scroll_view_bluetooth',stock_rows=7)  # 5 rows, 2 devices
-assert len(rows)==4 and icons==[None]*4 and texts()==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c)
+assert len(rows)==4 and icons==[None]*4 and texts(kv=False)==['Resume on Connect','Link Volume','Name','Guest Play']  # Guest Play's row (guest_ui.c); Name's value the device's name
 view=named(m,m.top,'scroll_view_bluetooth'); name_row=rows[2]
 assert m.nodes[view]['children'].index(name_row)==1 and m.get(name_row+O['W_H'])==m.get(m.entries[1]+O['W_H']) and m.entries[1] not in m.nodes[view]['children']
 assert 'Q2 Muse' in [m.nodes[c].get('text') for c in m.nodes[m.nodes[name_row]['children'][0]]['children']]
@@ -582,14 +582,14 @@ assert click(0)==[(1,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_on'
 assert click(0)==[(0,'Q2POD','RESUME')] and switch_image(m,rows[0])=='switch_off'
 assert click(1)==[(1,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_on'
 assert click(1)==[(0,'Q2POD','BTVOLLINK')] and switch_image(m,rows[1])=='switch_off'
-assert texts()==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
+assert texts(kv=False)==['Resume on Connect','Link Volume','Name','Guest Play']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',{'RESUME':'1','BTVOLLINK':'1'},stock_rows=7)
 assert [switch_image(m,r) for r in rows[:2]]==['switch_on','switch_on']; passed()
 m,rows,texts,*_=settings_page('btrows','scroll_view_bluetooth',stock_rows=1,bt=0)  # off: the switch, Name and a line (bt_ui.c)
-assert texts()==['Name']; passed()
+assert texts(kv=False)==['Name']; passed()
 
-def oled_set(m):  # the first system_bar load: theme_boot writes OLED's set (st.geom), as on a unit
-    m.record_syscalls(lambda page:False); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
+def oled_set(m):  # the first system_bar load, as on a unit (accent, theme_boot); the calls it made cleared
+    m.record_syscalls(); m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
     m.call(address=HOOKS['ui_loader_load_widget_with_parent'][0],args=(m.string('system_bar'),0,0,0),gap=0); m.calls=[]
     return m
 # The sleep timer has no list: the row sits over its fields, set_row (32) high, its title at text_x in the row's
@@ -636,10 +636,8 @@ for R in (14,5,4,0):  # 14 and 4 had no table before corner_cover.c, 5 had
     assert sorted(b[0] for b in rows[55])==[20,79]  # the straight sides, a pixel each
     assert (R==0)==all(b[4]>>24==0xff for y in range(40,44) for b in rows[y]),R  # part pixels round a corner
 passed()
-# Every Search row site holds the set's value once OLED's set is written (theme.xml's search_* geometry), and stock's before.
+# Every Search row site holds OLED's set's value (theme.xml's search_* geometry), as the build bakes it.
 SEARCH_SITES={0x49d470:52,0x49e7b0:52,0x49f320:52,0x49d4a8:52,0x49e7e8:52,0x49f35c:52,0x49f6fc:52,0x49cdd8:52,0x49cec4:52,0x49d62c:52,0x49e970:52,0x49f164:52,0x49cde0:0,0x49d67c:4,0x49e9c0:4,0x49d670:28,0x49e9b4:28,0x49d724:31,0x49ea28:31,0x49d718:20,0x49ea1c:20}
-STOCK_SITES={0x49d470:78,0x49e7b0:78,0x49f320:78,0x49d4a8:70,0x49e7e8:70,0x49f35c:70,0x49f6fc:70,0x49cdd8:70,0x49cec4:70,0x49d62c:70,0x49e970:70,0x49f164:70,0x49cde0:50,0x49d67c:11,0x49e9c0:14,0x49d670:24,0x49e9b4:24,0x49d724:41,0x49ea28:41,0x49d718:16,0x49ea1c:16}
 imm=lambda m,a: m.get(a)&0xffff
-k=oled_set(Machine()); assert {a:imm(k,a) for a in SEARCH_SITES}==SEARCH_SITES
-k=Machine(); assert {a:imm(k,a) for a in STOCK_SITES}==STOCK_SITES; passed()
+k=Machine(); assert {a:imm(k,a) for a in SEARCH_SITES}==SEARCH_SITES; passed()
 

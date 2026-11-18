@@ -36,7 +36,6 @@ typedef struct {
     const char *key;           /* the IPOD key; a theme-owned accent key's too */
     const char *label;         /* the row's title; 0: an accent key (its row is Accent's) */
     const char *const *names;  /* [n] the values' labels */
-    const unsigned char *sets; /* [n] the GEOM_* set each value boots; null for a plain choice */
     unsigned char n, def;      /* value count; the value a missing or unreadable key reads */
 } theme_key_t;
 typedef struct {
@@ -66,14 +65,6 @@ typedef struct {
     short arch_at, arch_full, arch_span, arch_in, arch_out, arch_tau;
     short name_px, artist_px, text_y, artist_y;
 } cf_style_t;
-typedef struct {
-    unsigned addr;
-    unsigned char group;
-} boot_site_t; /* one ipod.json immediate */
-typedef struct {
-    const char *name;
-    unsigned char sets;
-} ui_redirect_t; /* sets with <set>_<name>.bin */
 enum {
     MOTION_PAGE,
     MOTION_PLAYING,
@@ -93,7 +84,6 @@ typedef struct {
     unsigned char easing; /* widget kinds: AWTK easing_type_t */
 } motion_t;
 typedef struct {
-    unsigned char geom; /* first: THEME_GEOM_OFF (0) never moves */
     /* a list left by Return forgets its row, so choosing it again opens it at the top
      * (navigation.c forget_left); Songs' action row reads Shuffle with the theme's own glyph and
      * the wheel selects it above the first song (navigation.c shuffle_key); in Split, the lists
@@ -157,16 +147,15 @@ typedef struct {
     const char *art; /* its own images' prefix (tools/art.py, its art attribute's id): "oled_" */
 } theme_t;
 const theme_t *theme(void);       /* accent(); return themes; (THEME_N is 1) */
-int theme_geom(const theme_t *T); /* navigation.c: the set T boots with its stored values */
 const scheme_t *scheme(void);     /* theme()'s scheme accent(), in the half Light Mode picks */
-int client_h(void); /* the window under the bar of the set theme_boot wrote (theme_engine.c) */
-/* Home's Split under the same set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
+int client_h(void); /* the window under the theme's bar (theme_engine.c) */
+/* Home's Split under the theme's set (its split_* fields, tools/ipod.py Geometry): SPLIT_ROW the
  * menu's width, SPLIT_ART the art pane's left edge, SPLIT_ART_UP the pane's rows above the window,
  * SPLIT_INSET the percent of the zoomed cover the pan keeps clear at each edge (coverflow.c
  * drift_axis) */
 enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
-int list_fit_end(void); /* theme_engine.c: a list_fit set's lists' last screen row, 0: none */
+int list_fit_end(void); /* theme_engine.c: the lists' last screen row (the grid's list_end) */
 /* 0xRRGGBB to an opaque color_t, whose bytes are r, g, b, a. */
 static inline unsigned RGBA(unsigned c) {
     return 0xff000000u | (c & 255) << 16 | (c & 0xff00) | c >> 16;

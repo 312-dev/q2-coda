@@ -3,9 +3,8 @@
  * its alphabetical title order, 1 and 2 file name and format, 3 and 4 time added newest and oldest
  * first), which getAllMusic's query takes. Recently Added is the flag's 3 or 4; on the title order
  * (0) this keeps Title, Artist or Album as [IPOD] SONGSORT (SORT_*) and its direction as SONGDOWN
- * (1: descending) and, under a modal set, orders the loaded list (song_order): Artist and Album
- * stably over the title order, Title descending reversed. Other themes keep stock's picker and
- * stock's order. */
+ * (1: descending) and orders the loaded list (song_order): Artist and Album stably over the title
+ * order, Title descending reversed. */
 #include "navigation.h"
 
 static struct {
@@ -53,9 +52,9 @@ int song_sort_commit(void) {
     return due;
 }
 
-/* Rows the fast-scroll letter can't follow: a modal set's order other than the title's ascending
- * (stock's time added the caller knows). */
-int song_sort_own(void) { return modal_set() && (song_sort() != SORT_TITLE || song_down()); }
+/* Rows the fast-scroll letter can't follow: an order other than the title's ascending (stock's time
+ * added the caller knows). */
+int song_sort_own(void) { return song_sort() != SORT_TITLE || song_down(); }
 
 /* a before b (below 0) or after it in the order: an untagged name after the rest either way, the
  * direction on the name alone, so an album keeps its discs and tracks in their own order */
@@ -76,7 +75,7 @@ static int rec_cmp(void *a, void *b, int sort, int down) {
 void song_order(void *list) {
     unsigned n = list ? deque_size(list) : 0;
     int sort = song_sort(), down = song_down();
-    if (n < 2 || !modal_set() || I(g_sort_flag, 0) || (sort == SORT_TITLE && !down)) return;
+    if (n < 2 || I(g_sort_flag, 0) || (sort == SORT_TITLE && !down)) return;
     unsigned *at = calloc(2 * n, sizeof *at), *tmp;
     if (!at) return;
     tmp = at + n;
