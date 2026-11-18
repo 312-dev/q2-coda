@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot a build on a pooled emulator and walk the UI's main paths: the test that sees a crash on screen.
 
-    python3 tools/ci/smoke.py BUILD                 # exit 0 passed, 1 failed, 3 could not run (no emulator)
+    python3 tools/ci/smoke.py BUILD                 # exit 0 passed, 1 failed, 3 could not run (no emulator, or a card with no songs)
     python3 tools/ci/smoke.py BUILD --logs DIR      # where a failure's screenshot and demo.log tail go
 
 No other suite runs the real demo with its real AWTK: test/fw links the payload's C against stand-ins for
@@ -26,7 +26,8 @@ none in time is exit 3, which the merge queue does not count against the tip.
 The emulator is leased from tools/ci/emu_pool.py under the name smoke-PID, never slot 2 (the user's own),
 with BLUETOOTH=0 in the copy's config.ini for the run (a Bluetooth stack that is not there would only add
 a scan to every boot); the file is put back as it was and the lease returned whatever happens, a signal
-included. docs/building.md#smoke-test.
+included. Its card is the pool's fixture (emu_pool.reset_card); one that holds no songs is exit 3 too, said
+as such ("the card has no songs"), not as a missing emulator. docs/building.md#smoke-test.
 """
 import argparse
 import os
@@ -495,6 +496,10 @@ def main(argv=None):
             slot = lease(args.build, args.wait, prepare, log)
         except Unavailable as why:
             log(f'smoke: could not run: {why}')
+            return 3
+        if not emu_pool.card_songs(slot):
+            log(f'smoke: could not run: the card on slot {slot} has no songs ({emu_pool.copy_dir(slot)/"state/mmc"}; '
+                f'the pool resets it to {emu_pool.fixture_dir()} at each lease), so Library > Songs has nothing to open')
             return 3
         e = Emulator(slot, log)
         e.log_at = log_at.get(slot, 0)
