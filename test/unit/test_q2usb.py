@@ -53,3 +53,11 @@ def test_main_exits_1_when_anything_is_flagged(tmp_path, capsys):
     assert q2usb.main([str(f)]) == 1 and 'BACKFEED' in capsys.readouterr().out
     f.write_text(line(1000, 'in', vbus=1))
     assert q2usb.main([str(f)]) == 0
+
+
+def test_a_wake_that_drops_the_link_is_flagged_and_one_that_keeps_it_is_not():
+    up = dict(vbus=1, udc='configured')
+    kept = [line(1000, 'standby', **up), line(90000, 'wake', **up), line(95000, 'wake+5s', **up)]
+    dropped = [line(1000, 'standby', **up), line(90000, 'wake', vbus=1, udc='not_attached', pd18=0),
+               line(95000, 'wake+5s', vbus=1, udc='default')]
+    assert kinds(kept) == [] and kinds(dropped) == ['WAKEDROP', 'WAKEDROP']

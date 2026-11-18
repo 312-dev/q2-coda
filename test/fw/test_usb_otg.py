@@ -165,9 +165,23 @@ def test_a_standby_between_passes_restarts_the_wait(fw):
     assert p.pins['PC20'] == 0
     p.run(SETTLE)
     assert p.pins['PC20'] == 1
-    # PD18's pull-up set again after the resume (patch/usb_charge.sh sets it at boot), and the record says so
+    assert p.records() == ['otg-on'] and p.commands == []
+
+
+def test_a_wake_sets_the_pull_up_again_and_records_the_pins_then_and_5_s_on(fw):
+    """usb_record_wake, from system.c's ringnav_standby as toolsIntoStandby returns, and usb_ui_poll's later line."""
+    p = Port(fw, cable=True)
+    wake, poll = fw.fn('usb_record_wake', None), fw.fn('usb_record_poll', None)
+    wake()
     assert p.commands == ['/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1']
-    assert p.records() == ['resume', 'otg-on']
+    assert p.records() == ['wake']
+    p.now += 4000
+    poll()
+    assert p.records() == ['wake']
+    p.now += 1000
+    poll()
+    poll()
+    assert p.records() == ['wake', 'wake+5s']
 
 
 def test_the_record_has_each_change_of_bus_power(fw):

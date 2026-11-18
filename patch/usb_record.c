@@ -1,5 +1,5 @@
 /* The USB record (docs/internals.md#usb-record): a line on the card for each cable edge, the same
- * pins USB_RECORD_LATER_MS after it, and each change of OTG host power, so ordinary use shows
+ * pins USB_RECORD_LATER_MS after it, each change of OTG host power and each Standby and wake, so ordinary use shows
  * whether the Q2 ever powers the bus with a computer on it, and whether a plug enumerated.
  * tools/q2usb.py reads it and flags both. The lines are held in RAM while the card is away
  * (card_store.c's log).
@@ -12,6 +12,8 @@
 #define USB_RECORD_MAX 131072 /* moved to .1 at this size: some 700 lines */
 #define USB_RECORD_RAM 4096   /* the RAM ring while the card is away */
 #define USB_RECORD_LATER_MS 5000
+#define USB_PULL_UP                                                                                \
+    "/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1" /* as S12usbcharge */
 /* the vendor dwc2's read-only id_status, dwc2_mode and connected */
 #define USB_OTG "/sys/bus/platform/devices/13500000.otg/"
 #define USB_HOST_DEV "/sys/bus/usb/devices/1-1/idVendor" /* a device on the Q2's host port */
@@ -21,7 +23,7 @@
 static struct {
     card_log log;
     unsigned later_at;
-    int later; /* 1: a plug's second line is due, 2: an unplug's */
+    int later; /* the second line due: 1 a plug's, 2 an unplug's, 3 a wake's */
 } rec __attribute__((section(".scratch")));
 
 /* path's first line, its newline cut and spaces as _, into out; "?" when it can't be read */
@@ -77,10 +79,22 @@ void usb_record_edge(int in) {
     rec.later_at = (unsigned)time_now_ms();
 }
 
+/* Back from Standby (system.c ringnav_standby, as toolsIntoStandby returns). The GPIO driver's
+ * sleep setting for PD18 is a pull-up too (the device tree's gpio-sleep-pullup), and a wake kept
+ * the boot's pull-up on 2026-11-17, but what it restores is the driver's, so the pull-up is set
+ * again; then the pins now and USB_RECORD_LATER_MS on, where a cable's link dropping at a wake
+ * shows. */
+void usb_record_wake(void) {
+    system(USB_PULL_UP);
+    usb_record("wake");
+    rec.later = 3;
+    rec.later_at = (unsigned)time_now_ms();
+}
+
 /* From usb_ui_poll, every UI pass. */
 void usb_record_poll(void) {
     if (rec.later && (unsigned)time_now_ms() - rec.later_at >= USB_RECORD_LATER_MS) {
-        usb_record(rec.later == 1 ? "in+5s" : "out+5s");
+        usb_record(rec.later == 1 ? "in+5s" : rec.later == 2 ? "out+5s" : "wake+5s");
         rec.later = 0;
     }
 }

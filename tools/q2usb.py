@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Read the USB record (patch/usb_record.c, docs/internals.md#usb-record) back, and flag what matters for the OTG
 back-feed: the Q2 powering the bus (PC20) with a computer's VBUS or a computer's answer seen, power to a port with
-nothing enumerated on it, and a plug that never enumerated.
+nothing enumerated on it, a plug that never enumerated, and a link a wake from Standby dropped.
 
     python3 tools/q2usb.py q2-usb.1.log q2-usb.log        # oldest file first, from the card's .q2pod folder
     adb shell cat /mnt/mmc/.q2pod/q2-usb.1.log /mnt/mmc/.q2pod/q2-usb.log | python3 tools/q2usb.py -
 
 A line is `WALL MS EVENT PD18=.. PD17=.. PD19=.. PC20=.. PE22=.. otg=.. id=.. mode=.. conn=.. vbus=.. udc=.. hostdev=..`:
-WALL is time()'s seconds, MS demo's millisecond clock, EVENT in, out, in+5s, out+5s, otg-on, otg-off or resume.
+WALL is time()'s seconds, MS demo's millisecond clock, EVENT in, out, in+5s, out+5s, otg-on, otg-off, standby, wake or
+wake+5s.
 Other lines (the card store's `== N lines lost` note) are skipped. Exit 1 when anything is flagged."""
 import argparse
 import datetime
@@ -49,6 +50,7 @@ def flags(rows):
     """[(row, text)] for each thing worth a look, in order."""
     out = []
     on = None  # the otg-on row while the Q2 powers the bus
+    standby = None  # the last standby row
     for i, r in enumerate(rows):
         if r.f.get('PC20') == '1' and r.computer():
             out.append((r, f'BACKFEED bus power on with a computer seen ({r.event}: vbus={r.f.get("vbus")} '
@@ -69,6 +71,13 @@ def flags(rows):
                            f'a charger, or a plug that failed'))
         elif r.event == 'out+5s' and r.f.get('PD18') == '0':
             out.append((r, 'IDLOW the ID pin low 5s after an unplug'))
+        elif r.event == 'standby':
+            standby = r
+        elif r.event == 'wake' and r.f.get('id') == 'host' and r.f.get('PD17') == '0':
+            out.append((r, f'WAKEDROP woke in host role with VBUS on the cable (PD18={r.f.get("PD18")})'))
+        elif r.event == 'wake+5s' and standby is not None and standby.f.get('udc') == 'configured' \
+                and r.f.get('udc') != 'configured':
+            out.append((r, f'WAKEDROP the link up before Standby is {r.f.get("udc")} 5s after the wake'))
     return out
 
 

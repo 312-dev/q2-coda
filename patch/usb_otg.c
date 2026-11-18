@@ -16,7 +16,6 @@
  * at most (2026-11-17). */
 #define OTG_SETTLE_MS 6000
 #define OTG_GAP_MS 5000 /* passes further apart than this (a Standby) start the wait again */
-#define OTG_PULL_UP "/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1"
 
 static struct {
     unsigned since, last; /* time_now_ms the wait started, and of the last pass */
@@ -37,13 +36,6 @@ int ringnav_otg_status(void) {
     int gap = otg.have_last && now - otg.last > OTG_GAP_MS;
     otg.last = now;
     otg.have_last = 1;
-    /* Back from Standby: the GPIO driver's sleep setting for PD18 is a pull-up too (the device
-     * tree's gpio-sleep-pullup), but what it restores on resume is not known, so the pull-up is set
-     * again; the record's next lines show PD18 after it. */
-    if (gap) {
-        system(OTG_PULL_UP);
-        usb_record("resume");
-    }
     /* Host already: PD17 reads the Q2's own bus power now, so it tells nothing. Stock turns the
      * bus power off in this same pass once PD18 reads high, the dwc2 controller's switch back to
      * device. ponytail: a computer plugged in while the Q2 powers the bus is not seen until then;
