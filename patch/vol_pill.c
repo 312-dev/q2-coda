@@ -3,8 +3,9 @@
  * status row, in the clock's place: a Raised pill VP_H tall on the row's centre, a speaker, a thin
  * track filled in Text Primary to the level, and the number in Text Secondary. It holds VP_HOLD_MS
  * after the last change, then fades back to the clock over VP_FADE_MS (at once under Reduce
- * Motion). Volume 0 is the mute: the muted speaker and an empty track. With Link Volume on a
- * headset the level is the headset's, the AVRCP 0 to 127 the Q2 sends it (bt_vol_linked).
+ * Motion). Volume 0 is the mute: the muted speaker and an empty track. The level is the Q2's 0 to
+ * 100 in every case: with Link Volume on a headset, its 0 to 127 as bt_volume_poll reads it back
+ * (bt_vol_q2, within the volume limit), so a number here means what it means everywhere else.
  *
  * It is drawn by the status row itself, from the bar's background (status_row.c
  * status_slots_paint), so it goes wherever the bar is painted; the clock and the title under it are
@@ -22,10 +23,9 @@
 #define VP_SPK 14    /* the speaker's box (tools/art.py STATUS_PX), its ink 11 px tall */
 #define VP_SPK_GAP 8 /* speaker to track, track to number */
 #define VP_TRACK_H 4 /* the track, round-ended */
-#define VP_NUM_W 32  /* the number's column: three tabular digits at 15 px, "127" */
+#define VP_NUM_W 32  /* the number's column: three tabular digits at 15 px, "100" */
 #define VP_HOLD_MS 2000
 #define VP_FADE_MS 250
-#define VP_AVRCP_MAX 127
 
 static struct {
     unsigned at;          /* time_now_ms of the last change */
@@ -142,13 +142,6 @@ void vol_pill_show(void) {
 /* Whether the pill is up (the status row's clock is out). */
 int vol_pill_up(void) { return vp.on; }
 
-/* The level shown and its top: the headset's under Link Volume, else the Q2's 0 to 100. */
-static int vp_level(int *top) {
-    int linked = bt_vol_linked();
-    if (linked >= 0) return *top = VP_AVRCP_MAX, linked;
-    return *top = 100, g_volume;
-}
-
 /* status_slots_paint, in final colours: the pill at its alpha, or nothing; where it has no place it
  * ends here, so the labels painted after the bar's background are back in this frame. */
 void vol_pill_paint(void *bar, void *canvas) {
@@ -157,7 +150,7 @@ void vol_pill_paint(void *bar, void *canvas) {
         vp_end();
         return;
     }
-    int a = vp.alpha, top, level = vp_level(&top);
+    int a = vp.alpha, level = g_volume > 100 ? 100 : g_volume;
     if (!a) return;
     rect_t box = vp_box();
     int cy = box.y + VP_H / 2, x = box.x + VP_PAD, L = ipod_light();
@@ -171,7 +164,7 @@ void vol_pill_paint(void *bar, void *canvas) {
         tw = num - VP_NUM_W - VP_SPK_GAP - tx;
     rect_t track = { tx, cy - VP_TRACK_H / 2, tw, VP_TRACK_H };
     fill_box(canvas, &track, RGBA(tok(TOK_TRACK)), VP_TRACK_H / 2);
-    int w = top > 0 ? tw * (level > top ? top : level) / top : 0;
+    int w = tw * level / 100;
     if (w) { /* a pill, never a sliver: at least round */
         rect_t on = { tx, track.y, w < VP_TRACK_H ? VP_TRACK_H : w, VP_TRACK_H };
         fill_box(canvas, &on, RGBA(tok(TOK_PRIMARY)), VP_TRACK_H / 2);

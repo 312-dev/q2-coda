@@ -1,6 +1,6 @@
 """patch/vol_pill.c: the status row's volume pill, in the clock's place, for a volume change made off Now Playing
 (a headset's own keys or AVRCP volume, the Car Remote): shown, updated, faded back to the clock, never on Now
-Playing, the mute, Link Volume's level, and the box it repaints."""
+Playing, the mute, a linked headset's level on the Q2's scale, and the box it repaints."""
 import ctypes as C
 
 import pytest
@@ -153,14 +153,17 @@ def test_the_mute_is_the_muted_speaker_and_an_empty_track(fw, pill):
     assert texts[0][0] == '0'
 
 
-def test_with_link_volume_it_shows_the_headsets_own_level(fw, pill):
-    """Link Volume on a headset that took its absolute volume: the level the Q2 sends it, 0 to 127."""
-    from test_nav_loop import Btvol, Headset, bt_link
-    bt_link(fw)
-    Headset(fw).btvol(50, 50)  # the Q2's 50 sent: btvol ready, its level the curve's
-    sent = fw.var('navigation__btvol', Btvol).last
+def test_with_link_volume_it_shows_the_headsets_level_on_the_q2s_scale(fw, pill):
+    """Link Volume on a headset that took its absolute volume: its own keys take it to 80 of AVRCP's 127, which the
+    pill shows as the Q2's 0 to 100 reads it everywhere else (bt_vol_q2: 90), never as 80."""
+    from test_nav_loop import VolPoll, reads_as
+    vol = VolPoll(fw, volume=50)
+    vol.headset.level = 80
+    vol.poll()
+    want = reads_as(80)
+    assert want != 80 and fw.var('g_volume', C.c_ubyte).value == want
     _, rest, texts, _ = pill.pill()
-    assert texts[0][0] == str(sent) and rest[1][0][2] == rest[0][0][2] * sent // 127
+    assert texts[0][0] == str(want) and rest[1][0][2] == rest[0][0][2] * want // 100
 
 
 def test_the_car_remotes_volume_shows_the_pill(fw, ui, mcl, recs):

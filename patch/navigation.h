@@ -836,7 +836,6 @@ int vol_wm_keyup(void *ctx, void *e);
 int vol_accel(void);     /* volume.c: a wheel tick's steps at its speed */
 void vol_show(int from); /* volume.c: a change not the wheel's, on screen */
 int vol_page(void *page);  /* volume.c: page's wheel is the volume (Now Playing and the rest) */
-int bt_vol_linked(void);   /* playback_power.c: Link Volume's headset level, 0-127, or -1 */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
 typedef struct {

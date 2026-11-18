@@ -255,8 +255,8 @@ All lists share one grid.
   (Phosphor `speaker-simple-high-fill`, 11 px tall as every status glyph, Text Primary), 8 px, a 4 px track in Track
   with round ends filled in Text Primary to the level, 8 px, and the number (0 to 100) in the row's face, Inter
   Medium 15 px, Text Secondary, ending at the pill's inner edge in a 32 px column of tabular digits, so the track
-  never moves. At 0, the mute, `speaker-simple-x-fill` and an empty track. With Link Volume on a headset the number
-  and fill are the headset's own level, 0 to 127, the value the Q2 sends it. The clock and the title go out while it
+  never moves. At 0, the mute, `speaker-simple-x-fill` and an empty track. The number and fill are the Q2's 0 to 100 in
+  every case: with Link Volume on a headset, its own level read back on that scale, as everywhere else. The clock and the title go out while it
   shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
   (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
   Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
