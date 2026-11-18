@@ -38,7 +38,7 @@ class App(C.Structure):
     _fields_ = [('id', C.c_char * 16), ('name', C.c_char * 32), ('tips', C.c_char * 32), ('bin', C.c_char * 48), ('run', C.c_char * 48),
                 ('pid', C.c_char * 32), ('state', C.c_char * 40), ('browse', C.c_char * 48), ('icon', C.c_char * 56), ('more', C.c_char * 48),
                 *((n, C.c_int) for n in ('qr', 'game', 'audio', 'hidden', 'present', 'launched', 'hold', 'relaunch', 'restart', 'nostop', 'radio',
-                                         'lyrics', 'resume')),
+                                         'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play'))]
 
@@ -5978,3 +5978,18 @@ def pending_jump(fw, mcl, songs):
     s.land(later[3])
     s.step()
     assert s.queued() == [A, B, later[2], later[3]] and len(fw.calls('player_start_queue')) == 1 and not pending(fw)
+
+
+@pytest.mark.parametrize('manifest, started', [(b'name=Foo\ncovers=1\n', True), (b'name=Foo\nlyrics=1\n', False)])
+def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, started):
+    """Car Remote's daemon names a card app that doesn't run in /tmp/coda-rc.wake when it asks it for a cover the car
+    wants (coda_rc.c crc_cover_ask, docs/internals.md#car-remote-covers): demo starts it, only when its q2app says
+    covers=1; a name that is no app's starts nothing."""
+    p = Page(fw, manifest, opens=False)
+    del p.world.files[b'/tmp/q2-foo']  # not running
+    wake = fw.fn('addon_cover_wake', None, C.c_char_p)
+    for name in (b'../foo', b'bar', b'foo-and-a-very-long-name'):
+        wake(name)
+    assert p.world.of('system') == []
+    wake(b'foo')
+    assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started

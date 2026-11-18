@@ -147,6 +147,22 @@ void caption_row(void *label, const unsigned *text) {
             return;
         }
 }
+/* The Wi-Fi page rebuilds its rows whole, so the table's rows of the last build are gone: entries
+ * for items no longer in view are dropped (their pointers only compared, never read). */
+void caption_prune(void *view) {
+    if (!cap.view || view != cap.view) return;
+    for (int i = 0; i < CAP_MAX; ++i) {
+        void *item = cap.item[i];
+        int here = 0;
+        for (unsigned k = 0, n = widget_count_children(view); item && k < n && !here; ++k)
+            here = widget_get_child(view, k) == item;
+        if (!item || here) continue;
+        if (cap.open == item) cap.open = (void *)0;
+        if (cap.closing == item) cap.closing = (void *)0;
+        cap.item[i] = (void *)0, cap.text[i] = (const unsigned *)0, cap.lines[i] = 0;
+        memset(cap.cut[i], 0, CAP_LINES);
+    }
+}
 #define STR_(x) #x
 #define STR(x) STR_(x)
 #define W(s) ((const unsigned *)L##s)
@@ -232,12 +248,7 @@ static int cap_step(const void *unused) {
     void *list = P(cap.view, W_PARENT);
     if (list) widget_layout(list);
     void *o = cap.open;
-    if (o) { /* its foot in sight, on or above the list end: the view scrolls by whole rows */
-        int over = I(o, W_Y) + I(o, W_H) - I(cap.view, SCROLL_Y) - list_shown_h(cap.view);
-        if (over > 0)
-            scroll_view_set_offset(cap.view, I(cap.view, SCROLL_X),
-                                   I(cap.view, SCROLL_Y) + (over + CAP_TOP - 1) / CAP_TOP * CAP_TOP);
-    }
+    if (o) list_grown_foot(cap.view, o, CAP_TOP); /* its foot on or above the list end */
     widget_invalidate_force(cap.view, (void *)0);
     if (k < 256) return 8; /* RET_REPEAT */
     cap.timer = 0, cap.closing = (void *)0;

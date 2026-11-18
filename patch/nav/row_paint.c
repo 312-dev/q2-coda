@@ -1021,6 +1021,28 @@ static int list_pad(void *w) {
                ? widget_get_prop_int(w, LIST_PAD, 0)
                : 0;
 }
+/* A row of scroll view `view` grown in place (settings_pages.c cap_step, inline_slider.c heights),
+ * after the list's relayout: the view scrolls by whole `step` rows until the row's foot is on or
+ * above the list end (list_shown_h), and no further than the wheel's end, the content's foot on the
+ * list end. The relayout puts stock's height back, the rows' foot, and clamps the scroll to it, so
+ * the content is padded first by the box's rows past the end, as list_fade pads it, and the scroll
+ * is left in LIST_TOP, which list_fade puts back after the next relayout (seen on the emulator,
+ * 2026-11-18: each step's relayout took Reduce Motion's scroll back to the rows' foot). */
+void list_grown_foot(void *view, void *row, int step) {
+    int shown = list_shown_h(view), h = I(view, W_H),
+        over = I(row, W_Y) + I(row, W_H) - I(view, SCROLL_Y) - shown;
+    if (over <= 0 || step <= 0) return;
+    int top = I(view, SCROLL_Y) + (over + step - 1) / step * step;
+    if (shown < h) {
+        int content = I(view, VIEW_CONTENT_H) - list_pad(view), pad = h - shown;
+        if (top > content + pad - h) top = content + pad - h;
+        widget_set_prop_int(view, LIST_PAD, pad);
+        I(view, VIEW_CONTENT_H) = content + pad;
+        widget_set_prop_int(view, LIST_PADDED, content + pad);
+        widget_set_prop_int(view, LIST_TOP, top + 1);
+    }
+    scroll_view_set_offset(view, I(view, SCROLL_X), top);
+}
 static void list_fade(void *w, void *canvas) {
     int k = w && P(canvas, CANVAS_LCD) ? kind(w) : 0;
     if ((k != 1 && k != 2) || home_rest(w, (int *)0) || modal_rows_of(w) ||

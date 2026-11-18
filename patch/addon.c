@@ -8,9 +8,10 @@
  *            a title: Now Playing's ⋯ opens its page there while its queue plays, addon_more),
  *            favdir (a card folder whose songs' hearts it is told of, addon_fav_path), lyrics
  *            (1: a song of its folder or its downloads folder, downloads=, has its lyrics asked of
- *            it, addon_lyrics_ask), resume (1: a stream of its songs restored after a restart
- *            is asked of it, addon_resume_ask) and hidden (1: no Streaming row, its page opened
- *            by id: addon_open_id, as AirPlay's is);
+ *            it, addon_lyrics_ask), covers (1: it is started for a cover the car asks it for,
+ *            addon_cover_wake), resume (1: a stream of its songs restored after a restart is
+ *            asked of it, addon_resume_ask) and hidden (1: no Streaming row, its page opened by
+ *            id: addon_open_id, as AirPlay's is);
  *   run      its launcher, which copies the app to /tmp and runs it there in a restart loop, so
  *            the card is never kept busy, leaving the loop's pid in /tmp/q2-<id>;
  *   q2-<id>  the app;
@@ -116,6 +117,7 @@ typedef struct {
     int nostop; /* q2app's stop=0: no Stop row on its page */
     int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
     int lyrics; /* q2app's lyrics=1: it fetches a song's lyrics (addon_lyrics_ask) */
+    int covers; /* q2app's covers=1: it fetches a cover the car asks for (addon_cover_wake) */
     int resume; /* q2app's resume=1: it resumes a restored stream (addon_resume_ask) */
     char dl[32]; /* q2app's downloads=: the card folder its synced songs are in, "" for none */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
@@ -239,6 +241,7 @@ static void scan_one(const char *id, const char *from) {
     a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
     a->radio = number(raw, "radio") == 1;
     a->lyrics = number(raw, "lyrics") == 1;
+    a->covers = number(raw, "covers") == 1;
     a->resume = number(raw, "resume") == 1;
     field(raw, "downloads", a->dl, sizeof a->dl);
     for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
@@ -3325,6 +3328,17 @@ int addon_lyrics_answer(unsigned seq, const char *path) {
     field(raw, "lyricsack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
+}
+
+/* Car Remote's daemon asked app id for a cover the car wants (coda_rc.c crc_cover_ask,
+ * docs/internals.md#car-remote-covers): the app is started if it doesn't run, when its q2app says covers=1.
+ * The daemon writes the request itself; an app reads one there at its start. */
+void addon_cover_wake(const char *id) {
+    char k[APP_ID];
+    tk_snprintf(k, sizeof k, "%s", id);
+    app_t *a = valid_id(k) ? slot(k) : 0;
+    if (a && !a->present) addon_scan();
+    if (a && a->present && a->covers) addon_wake(k);
 }
 
 /* The playing queue's app's radio stopped; 1 when asked. */

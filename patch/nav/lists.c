@@ -362,7 +362,7 @@ static int sel_height(menu_t *m) {
 /* sel_height's cut for a row that grows in place (settings_pages.c cap_step, inline_slider.c
  * heights): view's height, cut at the set's list end on the screen. The view itself runs on to the
  * screen's foot under OLED, so a grown row kept inside its whole height stood in the glass's
- * bottom corners. */
+ * bottom corners. row_paint.c list_grown_foot scrolls a grown row inside it. */
 int list_shown_h(void *view) {
     int y = 0, h = I(view, W_H), end = list_fit_end() - lr_edit_room(view);
     void *wm = window_manager();

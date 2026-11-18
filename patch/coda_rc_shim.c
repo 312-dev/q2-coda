@@ -10,6 +10,7 @@
  *   /tmp/coda-rc.list), Play, Pause, Play/Pause, Next, Previous, seek, set the volume, set shuffle and
  *   repeat, rate the playing song, play a song of the queue, start or stop a radio (song_radio.c); and
  *   answers each in /tmp/coda-rc.ack, a Pause or Play once the player shows it;
+ * - starts a card app the daemon named in /tmp/coda-rc.wake, for a cover the car asked for (addon_cover_wake);
  * - shows the pairing code while /tmp/coda-rc.pair exists, and writes /tmp/coda-rc.pair-cancel when the
  *   user closes it.
  * Settings > Car Remote is carremote_page.c's, polled from here.
@@ -30,6 +31,7 @@
 #define CR_PAIR_END "/tmp/coda-rc.pair-end"
 #define CR_PAIR_CANCEL "/tmp/coda-rc.pair-cancel"
 #define CR_ONLINE "/tmp/coda-rc.online" /* coda_rc.c online_poll, read by carremote_page.c */
+#define CR_WAKE "/tmp/coda-rc.wake"     /* coda_rc.c crc_cover_ask: a card app to start for a car's cover */
 #define CR_QUEUE_MAX 5000 /* ponytail: a longer queue lists its first 5000 to the phone */
 #define CR_LIST_MAX 20000 /* coda_rc_lib.c PLAY_MAX */
 #define CR_HEARTS_MS 5000 /* the playing song's hearts read again at least this often */
@@ -517,6 +519,17 @@ static void cr_pairing(void) {
 }
 
 /* Every UI pass (ringnav_sleep). */
+/* The daemon asked a card app that doesn't run for a cover the car wants (coda_rc.c crc_cover_ask): it is started
+ * (addon_cover_wake, only an app whose q2app says covers=1). */
+static void cr_wake(void) {
+    char raw[24];
+    if (!state_read(CR_WAKE, raw, sizeof raw)) return;
+    unlink(CR_WAKE);
+    for (char *c = raw + 1; *c; ++c)
+        if (*c == '\n') *c = 0;
+    addon_cover_wake(raw + 1);
+}
+
 void coda_rc_poll(void) {
     unsigned now = time_now_ms();
     if (cr.at && now - cr.at < CR_POLL_MS) return;
@@ -527,6 +540,7 @@ void coda_rc_poll(void) {
     cr_now();
     cr_settle();
     cr_command();
+    cr_wake();
     cr_pairing();
 }
 

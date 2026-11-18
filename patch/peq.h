@@ -496,6 +496,7 @@ int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned
                      int sec, int playing, unsigned seq);
 void addon_resume_follow(void);
 char *addon_pending_paths(unsigned max, unsigned *n, unsigned *bytes);
+void addon_cover_wake(const char *id); /* addon.c: a card app with covers=1 started for the car's cover */
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
