@@ -516,6 +516,10 @@ const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
                                                       *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
+/* nav/lists.c: how much of scroll view `view` a row may stand in, its height cut at the set's list
+ * end on the screen; a row that grows in place scrolls its foot inside it (settings_pages.c
+ * cap_step, inline_slider.c heights) */
+int list_shown_h(void *view);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
 /* inline_slider.c: Settings' one-value rows that change in place
  * (docs/oled-design.md#inline-sliders) */

@@ -141,18 +141,19 @@ static void bh_export(void) {
         toast("Saved to battery-log.txt");
 }
 
-/* The page (33 v3, docs/oled-design.md#battery-history): under the status row the reading the
- * wheel is on, "Nov 16, 03:10 · 51%", then the graph, 100% to 0% from BH_TOP to BH_BOT on screen,
- * then Export Log, the shared grey button. The wheel moves along the readings (Centre and a tap on
+/* The page (33 v3, laid out again as the user's mock-up of 2026-11-18, docs/oled-design.md#battery-history):
+ * under the status row the reading the wheel is on, "Nov 16, 03:10 · 51%", then the graph, 100% to
+ * 0% from BH_TOP to BH_BOT on screen, then Export Log, the shared grey button, its foot on the list
+ * end (y 282) clear of the glass's corners. The wheel moves along the readings (Centre and a tap on
  * the button export), so the button is the page's only action and never wears the focus ring.
  * The toasts show in the button's place: it gives way while one is up. */
-#define BH_READ_CY 70
-#define BH_TOP 99
-#define BH_BOT 199
+#define BH_READ_CY 66
+#define BH_TOP 84
+#define BH_BOT 226
 #define BH_LABEL_W 48 /* the axis labels' column, right-aligned, from page_x */
 #define BH_GAP 8      /* between the labels and the plot */
 #define BH_DOT 10     /* the reading's dot, white */
-#define BH_BTN_CY 237
+#define BH_BTN_CY 263 /* y 244 to 282 */
 
 /* The reading the wheel is on. */
 static unsigned bh_cur(void) {
@@ -236,14 +237,15 @@ static int bh_x(unsigned i, int x0, int w, unsigned now, int forward) {
 /* The page (ringnav_paint, on the graph's view): the readout, faint lines at 100% and 50% and the
  * axis at 0%, labelled in 15 px Text Tertiary, the level as steps from the start to now, a 2 px
  * line in the accent's light tone over a faint fill, as peq_ui.c's curve, the reading's line and
- * dot, and Export Log unless a toast is up. Positions are the screen's, less the view's y. */
+ * dot, and Export Log unless a toast is up. Positions are the screen's, less the canvas's origin
+ * on the screen: the view's y counts from its window, which stands under the status row. */
 void battery_paint(void *w, void *canvas) {
     if (!w || w != bh.graph || !P(canvas, CANVAS_LCD) || !bh.rec.n) return;
     static const char *const labels[] = { "100%", "50%", "0%" };
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
              tone = accent_tone(TONE_LIGHT), raw = st.raw_ink, cur = bh_cur();
     long long wall = wall_time();
-    int dy = I(w, W_Y), x0 = page_x() + BH_LABEL_W + BH_GAP, plot = 375 - page_x() - x0,
+    int dy = I(canvas, CANVAS_Y), x0 = page_x() + BH_LABEL_W + BH_GAP, plot = 375 - page_x() - x0,
         top = BH_TOP - dy, h = BH_BOT - BH_TOP;
     char s[64];
     st.raw_ink = 1;
