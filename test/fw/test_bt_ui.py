@@ -457,6 +457,37 @@ def test_quality_s_auto_caption_is_one_entry_however_often_the_picker_lays_out(f
     assert C.wstring_at(table[9]) == 'Steps with the signal, 330 to 990 kbps'
 
 
+@pytest.mark.parametrize('codec, status, caption', [
+    (13, 3, 'Streams aptX HD to this headset, 576 kbps'),  # a B&W Px7 on LDAC Auto: no LDAC, aptX HD at 48 kHz
+    (2, 3, 'Streams AAC to this headset'),                 # no fixed rate to name
+    (4, 3, 'Steps with the signal, 330 to 990 kbps'),      # LDAC: Auto is what it says
+    (13, 2, 'Steps with the signal, 330 to 990 kbps'),     # not connected: the setting, not a headset
+    (0, 3, 'Steps with the signal, 330 to 990 kbps'),      # codec not known yet
+])
+def test_quality_s_auto_caption_names_what_the_connected_headset_streams(fw, codec, status, caption):
+    """LDAC Auto offers aptX HD, aptX, AAC and SBC beside LDAC; a headset without LDAC gets one of those at its own
+    rate, so the caption names it instead of LDAC's range (docs/internals.md#bluetooth-page)."""
+    p = Page(fw, DEVICES, files={BATT_FILE: f'{HEAD} 72 48000\n'.encode()})
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = codec
+    p.links = [(HEAD, status)]
+    fw.fn('bt_headset_battery', C.c_int)()
+    p.now += 6000
+    ui = p.ui
+    win = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[win] = 'btquality_page'
+    lv = ui.new('list_view_create', win, 0, 26, 375, 294)
+    view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto']):
+        item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
+        b = ui.new('button_create', item, 0, 0, 375, 32)
+        ui.name[b] = str(i)
+        ui.text[ui.new('hscroll_label_create', b, 22, 0, 266, 32)] = n
+    fw.fn('bt_rows_post', None, C.c_void_p)(view)
+    table = fw.var('settings_pages__cap', C.c_void_p * 17)
+    assert table[0] == view and table[1] == ui.kids[view][2]
+    assert C.wstring_at(table[9]) == caption
+
+
 def test_a_device_the_list_has_not_read_is_named_by_blue_z(fw):
     """Away from the Bluetooth page stock's list may be empty: the battery loop's Alias names it, and its drop."""
     p = Links(fw, devices=())

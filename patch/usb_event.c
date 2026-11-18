@@ -6,9 +6,8 @@
  * character device (a line event request on gpiochip3, GPD, line 17, both edges) and counts each
  * settled burst of them; usb_ui_poll, every UI pass, sees the count change and runs stock's read
  * and check at once (usb_event_take). Stock's own once-a-second read stays, so a failed request
- * leaves the old behaviour. ponytail: with the screen dark the UI loop sleeps up to
- * DARK_IDLE_SLEEP_MS between passes, so a plug-in there waits that long; waking the loop from the
- * thread would lift it. */
+ * leaves the old behaviour. Each count also ends the UI loop's idle (loop_wake), so a plug-in is
+ * seen on the pass it starts, dark or lit. */
 #include "navigation.h"
 
 #define USB_GPIOCHIP "/dev/gpiochip3" /* GPD: base 96, 32 lines (/sys/class/gpio/gpiochip96) */
@@ -60,6 +59,7 @@ int usb_event_wait(int fd) {
     ue.edge_ns = first;
     __sync_synchronize(); /* edge_ns before the count the UI thread reads */
     ++ue.seq;
+    loop_wake(); /* the UI loop's idle ends: usb_ui_poll takes the count now (loop_wake.c) */
     return 1;
 }
 

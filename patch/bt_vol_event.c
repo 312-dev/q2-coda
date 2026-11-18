@@ -142,6 +142,7 @@ static void bve_frames(void) {
                 if (!memcmp(m + i, member, sizeof member)) {
                     __sync_synchronize();
                     ++bve.seq;
+                    loop_wake(); /* bt_volume_poll reads it on the pass this starts */
                     break;
                 }
         bve.len -= whole;

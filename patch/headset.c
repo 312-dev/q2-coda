@@ -262,6 +262,7 @@ static void *headset_worker(void *arg) {
                         hs.keys[hs.head % 16] = ev[i].code;
                         __sync_synchronize();
                         ++hs.head;
+                        loop_wake(); /* headset_poll takes it on the pass this starts */
                     }
         }
         ++tries;

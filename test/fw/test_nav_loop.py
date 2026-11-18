@@ -3416,6 +3416,163 @@ def test_a_lit_pass_stays_awake_while_something_moves(fw, stock_bytes, st):
     assert loop(O['IDLE_MS']) == []
 
 
+# The UI loop's wait (loop_wake.c): a poll() on an eventfd, its timeout the next AWTK timer due.
+class Wait:
+    """The loop's eventfd (fd 9) and its polls, and stock's timer list, animator manager and native
+    window laid out at a low address as the Q2's 32-bit pointers have them."""
+    FD, BASE = 9, 0x5e000000
+
+    def __init__(self, fw, loop):
+        self.fw, self.loop, self.polls, self.during = fw, loop, [], None
+        loop.clock.now += O['IDLE_MS']  # input still long enough for the idle
+        claim(self.BASE)
+        self.mem = (C.c_ubyte * 0x2000).from_address(self.BASE)
+        C.memset(self.BASE, 0, 0x2000)
+        self.tm, self.am, self.nw, self.timers = self.BASE, self.BASE + 0x800, self.BASE + 0x900, 0
+
+        def syscall(nr, a, b, c, *_):
+            if nr == 4325:  # eventfd2
+                return self.FD
+            assert nr == 4188 and b == 1  # poll, one fd
+            self.polls.append(c)
+            if self.during:
+                self.during()
+            return 0
+        fw.mock('lw_syscall', syscall)
+        fw.mock('timer_manager', lambda *_: self.tm)
+        fw.mock('widget_animator_manager', lambda *_: self.am)
+        fw.mock('widget_get_native_window', lambda w, *_: self.nw if w == loop.page.p else 0)  # a window's, not the wm's
+        fw.mock('idle_manager_count', lambda *_: 1)
+
+    def u32(self, at, v):
+        struct.pack_into('<I', self.mem, at - self.BASE, v)
+
+    def timer(self, period, started, ctx=0, suspended=0):
+        """A timer of period ms started `started` ms before the loop's clock."""
+        node, t = self.BASE + 0x100 + self.timers * 0x10, self.BASE + 0x200 + self.timers * 0x60
+        self.u32(node, 0)
+        self.u32(node + 4, t)
+        last = self.tm + O['TM_LIST']  # appended: the list's last next
+        while struct.unpack_from('<I', self.mem, last - self.BASE)[0]:
+            last = struct.unpack_from('<I', self.mem, last - self.BASE)[0]
+        self.u32(last, node)
+        self.u32(t + O['TIMER_CTX'], ctx)
+        self.u32(t + O['TIMER_START'], (self.loop.clock.now - started) & 0xffffffff)
+        self.u32(t + O['TIMER_DURATION'], period)
+        self.mem[t + O['TIMER_SUSPEND'] - self.BASE] = suspended
+        self.timers += 1
+
+    def writes(self):
+        return [c[1][0] for c in self.fw.calls('fw_write')]
+
+
+def test_lit_and_idle_the_loop_waits_for_the_next_timer_due(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    wait.timer(200, 30)
+    wait.timer(100, 30)  # stock's on_wm_timer_setup_state: due in 70 ms
+    assert loop() == [] and wait.polls == [70]
+
+
+def test_lit_the_wait_is_capped_and_never_shorter_than_the_idle(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    wait.timer(1000, 0)
+    loop()
+    wait.timer(100, 90)  # due in 10 ms: no more passes than the plain idle
+    loop()
+    wait.timer(100, 500, suspended=1)  # long overdue but suspended: waits for nothing
+    loop()
+    assert wait.polls == [O['LOOP_LIT_MAX_MS'], O['IDLE_SLEEP_MS'], O['IDLE_SLEEP_MS']]
+
+
+@pytest.mark.parametrize('why', ['frame', 'animator', 'dirty', 'idle', 'lockout'])
+def test_a_running_animation_keeps_the_idle_as_it_was(fw, stock_bytes, why):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    wait.timer(1000, 0)
+    wait.timer(8, 0, ctx=wait.am)  # the animator manager's own timer: nothing while it animates nothing
+    loop()
+    if why == 'frame':
+        wait.timer(33, 0)  # ui_kit's motion loop, the level bars
+    elif why == 'animator':
+        wait.u32(wait.am + O['AM_FIRST'], wait.BASE + 0xa00)
+    elif why == 'dirty':
+        wait.u32(wait.nw + O['NW_DIRTY'], 1)  # a poll changed a label after this pass painted
+    elif why == 'idle':
+        fw.mock('idle_manager_count', lambda *_: 2)  # an idle_add of this pass, on top of stock's own
+    else:
+        C.c_byte.from_address(stock_bytes(O['KEY_LOCKOUT'], 1)).value = 3  # Centre's, counting down
+    loop()
+    assert wait.polls == [O['LOOP_LIT_MAX_MS'], O['IDLE_SLEEP_MS']]
+
+
+def test_without_an_eventfd_the_loop_sleeps_as_before(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    wait.timer(1000, 0)
+    fw.mock('lw_syscall', lambda *_: -1)
+    assert loop() == [O['IDLE_SLEEP_MS']] and wait.polls == []
+
+
+def test_dark_and_slow_the_loop_waits_up_to_its_dark_most(fw, stock_bytes, st):
+    loop = Loop(fw, stock_bytes, lit=False)
+    wait = Wait(fw, loop)
+    wait.timer(100, 0)  # stock's timers ride the dark pass, as they ride its idle
+    assert loop() == [] and wait.polls == [O['LOOP_DARK_MAX_MS']]
+    st('last_input', C.c_uint).value = loop.clock.now  # a dark key: stock's pace for a while
+    loop()
+    assert wait.polls[-1] == O['DARK_IDLE_SLEEP_MS']
+
+
+@pytest.mark.parametrize('why', ['other player', 'stream'])
+def test_dark_while_the_player_is_followed_closely_the_loop_keeps_its_pace(fw, stock_bytes, why):
+    loop = Loop(fw, stock_bytes, lit=False)
+    wait = Wait(fw, loop)
+    fw.mock('mclGetPlayStatus', lambda *_: 2)  # playing: not quiet
+    if why == 'stream':  # the local player, so dark_slow, but a stream's network status is stock's 500 ms timer
+        fw.mock('mclGetPlayType', lambda *_: 0xf1)
+    else:
+        fw.mock('airplayGetFlag', lambda *_: 2)  # AirPlay plays: stock's pace for its polls
+    loop()
+    assert wait.polls == [O['SCREEN_OFF_SLEEP_MS']]
+
+
+def test_dark_and_slow_playing_the_loop_waits_long(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes, lit=False)
+    wait = Wait(fw, loop)
+    fw.mock('mclGetPlayStatus', lambda *_: 2)  # the local player, its position followed slowly dark
+    loop()
+    assert wait.polls == [O['LOOP_DARK_MAX_MS']]
+
+
+def test_a_posted_event_wakes_the_loop(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    loop()
+    poster = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(lambda *_: 0)
+    target = (C.c_ubyte * 0x40)()
+    struct.pack_into('<Q', target, O['LOOP_POST'], C.cast(poster, C.c_void_p).value)
+    event = (C.c_uint * 16)(1)  # any real event; type 0 is the touch thread's empty one, not queued
+    post = fw.fn('ringnav_queue_event', C.c_int, C.c_void_p, C.c_void_p)
+    post(C.addressof(target), event)
+    assert wait.writes() == [Wait.FD]
+    post(C.addressof(target), (C.c_uint * 16)(0))
+    assert wait.writes() == [Wait.FD]
+
+
+def test_wheel_travel_wakes_the_loop_only_while_it_idles(fw, stock_bytes):
+    loop = Loop(fw, stock_bytes)
+    wait = Wait(fw, loop)
+    sample = fw.fn('wheel_sample', None, C.POINTER(C.c_int), C.c_int, C.c_void_p)
+    finger = (C.c_int * 5)(120, 120, 255, 0, 0)  # x, y, pressure: a finger on the wheel
+    wait.during = lambda: sample(finger, 1, None)
+    loop()
+    assert wait.writes() == [Wait.FD]
+    sample(finger, 1, None)  # the loop running: no write a sample
+    assert wait.writes() == [Wait.FD]
+
+
 def test_the_big_art_stays_up_off_the_art_page(fw, stock_bytes, st):
     loop = Loop(fw, stock_bytes)
     slide = loop.page.add(W(loop.ui, 'slide_view', 'np_slide', value=1))

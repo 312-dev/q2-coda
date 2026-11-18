@@ -442,10 +442,11 @@ static void bt_volume_poll(void) {
  * off, unless Wake's second press may be coming); stock then finds its 8 ms gone, sleeps 0 and
  * keeps its own bookkeeping. A dark wheel turn keeps stock's pace, DARK_TURN_MS on from each tick
  * (tick_gate): an idling pass dispatched every tick it had slept through at once, so a dark turn
- * clicked in bursts and stepped the volume in jumps (#303). ponytail: a turn's first ticks still
- * wait out one idle and arrive together, to one click (tone_dark). Ending the idle on a key
- * instead is select() on a datagram socket that ringnav_queue_event sends to, a send on every
- * input thread; build it if the first tick's wait ever shows. The first pass with it back on
+ * clicked in bursts and stepped the volume in jumps (#303). Every idle is loop_wait's poll(), which
+ * any queued event ends at once, so a turn's first tick no longer waits one out; and it may run
+ * past these lengths while nothing needs the loop sooner (loop_span, loop_wake.c; dark, only while
+ * the player polls are slow, no stream's network timer runs and input has been still IDLE_MS).
+ * The first pass with it back on
  * repaints every window once, so nothing drawn while dark, or only partly, stays on screen until
  * the next input; after a centre press woke it, it also restarts Wake's window for a dropped press
  * (woke_at). With the screen on, a pass idles IDLE_SLEEP_MS once input and window animations have
@@ -518,6 +519,13 @@ static void thumb_poll(void) {
     if (r & THUMB_CLICK) buzzeer_switch(1);
 }
 
+/* A stock stream queue (Tidal's), whose network state stock's 500 ms timer follows
+ * (on_wm_timer_networkstatus): the dark wait stays short for it. */
+static int playing_stream(void) {
+    unsigned type = (unsigned)mclGetPlayType();
+    return type - 2 < 2 || type - 0xf1 < 2;
+}
+
 int ringnav_sleep(void *loop) {
     cover_wake_poll(); /* stock's album cover thread, woken for a request (cover_wake.c) */
     splash_poll();
@@ -557,8 +565,13 @@ int ringnav_sleep(void *loop) {
                     time_now_ms() - st.wake_at >= WAKE_MS;
         dark_quiet = quiet;
         dark_slow = dark_slow_ok(quiet);
-        if ((unsigned)time_now_ms() - st.tick_at >= DARK_TURN_MS)
-            sleep_ms(quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS);
+        unsigned now = (unsigned)time_now_ms();
+        if (now - st.tick_at >= DARK_TURN_MS) {
+            unsigned ms = quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS;
+            if (dark_slow && now - st.last_input >= IDLE_MS && !playing_stream())
+                ms = loop_span(ms, LOOP_DARK_MAX_MS, 0);
+            loop_wait(ms);
+        }
     } else if (st.dark) {
         dark_quiet = dark_slow = 0;
         if (st.dark & 2) st.woke_at = (unsigned)time_now_ms();
@@ -567,7 +580,7 @@ int ringnav_sleep(void *loop) {
         widget_invalidate_force(window_manager(), (void *)0);
     } else if (time_now_ms() - st.last_input >= IDLE_MS &&
                !window_manager_is_animating(window_manager()) && !np_animating())
-        sleep_ms(np_glide_wait(np_marq_wait(IDLE_SLEEP_MS))); /* by the next frame due */
+        loop_wait(np_glide_wait(np_marq_wait(loop_span(IDLE_SLEEP_MS, LOOP_LIT_MAX_MS, 1))));
     tone_dark = 0; /* after the polls: a click of theirs is this pass's too */
     return stock_sleep_trampoline(loop);
 }

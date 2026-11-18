@@ -552,6 +552,35 @@ static unsigned choice_kbps(int i) {
 #define BT_KBPS_W 90 /* a choice's rate, right-aligned before the check */
 #define BT_KBPS_GAP 24
 
+/* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
+ * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
+ * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it. On LDAC, with
+ * no device connected (stock's rule, as bt_dev_state: the link list's last item at status 3) or no
+ * codec known, it says what LDAC Auto does. caption_row measures a caption again only for another
+ * pointer, so a changed text goes to the other of two buffers. */
+static struct {
+    unsigned text[2][48];
+    int at;
+} auto_cap __attribute__((section(".scratch")));
+static const unsigned *auto_caption(void) {
+    const char *codec = bt_codec();
+    char item[32] = "", s[48];
+    int status = 0, n = getBtLinkSize();
+    if (n > 0) getBtLinkItem(n - 1, &status, item);
+    if (!codec || status != 3 || !tk_strcmp(codec, "LDAC")) return BT_AUTO_CAPTION;
+    unsigned kbps = bt_kbps(codec, bt_headset_rate()),
+             k = (unsigned)tk_snprintf(s, sizeof s, "Streams %s to this headset", codec);
+    if (kbps && k < sizeof s) tk_snprintf(s + k, sizeof s - k, ", %u kbps", kbps);
+    unsigned *cur = auto_cap.text[auto_cap.at], i = 0;
+    while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
+    if (s[i] || cur[i]) {
+        cur = auto_cap.text[auto_cap.at ^= 1];
+        for (i = 0; s[i] && i < 47; ++i) cur[i] = (unsigned char)s[i];
+        cur[i] = 0;
+    }
+    return cur;
+}
+
 /* After the layout: the picker's rows get their rates, Auto its caption. */
 static void quality_rows(void *view) {
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
@@ -562,7 +591,7 @@ static void quality_rows(void *view) {
             if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
                 title = widget_get_child(b, j);
         unsigned kbps = choice_kbps(choice);
-        if (choice == BT_AUTO && title) { caption_row(title, BT_AUTO_CAPTION); }
+        if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
         if (!kbps) continue;
         char s[16];
         int right = I(b, W_W) - geom_val(V_RIGHT_X) - BT_KBPS_GAP;
