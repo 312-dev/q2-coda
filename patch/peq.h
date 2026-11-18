@@ -441,7 +441,8 @@ int stream_player_waits(const char *path);
  * (the line's, else the catalogue's); 2 the song is still arriving and no length is known. */
 int stream_length(const char *path, unsigned *ms);
 /* The last second of path a seek may go to while it arrives: what is on the card of it, at most the
- * player's length total (seconds); -1 when it is not arriving (stream_length 0). */
+ * player's length total (seconds); -1 when it is not arriving (stream_length 0). Not called yet:
+ * the seeks wait on q2player's seek in a growing file (docs/backlog.md). */
 int stream_reach(const char *path, int total);
 void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
