@@ -73,6 +73,10 @@ def shelf_list(body=REPO_LIST,**tags):
             words=line.split(' ',5); words[1:5]=[tags[repo],'app.zip',str(len(ZIP)),hashlib.sha256(ZIP).hexdigest()]; line=' '.join(words)
         lines.append(line)
     return sign_list(''.join(lines).encode())
+USB_RECORD_READS=tuple('/sys/bus/platform/devices/13500000.otg/'+n for n in ('id_status','dwc2_mode','connected'))+(
+    '/sys/class/power_supply/usb/online','/sys/class/udc/13500000.otg/state','/sys/bus/usb/devices/1-1/idVendor',
+    '/mnt/mmc/.q2pod/q2-usb.log')  # and its own file, on the card
+
 class ShelfMachine(RadioMachine):
     """RadioMachine with busybox's side scripted: unzip -l prints listing, unzip -o stages staged
     ((path, bytes), in find's order), find lists them; statfs has free bytes; renames kept in order;
@@ -209,7 +213,8 @@ class ResumeMachine(QueueMachine):
             path,mode=self.text(a),self.text(b)
             # the boot logo's lit-only mount poll, and Guest Play's state read (guest.c guest_poll, each GUEST_READ_MS
             # from the headset poll whether or not a guest plays); dark, any other open counts
-            self.opens+=path not in (RECORD,'/tmp/q2-guest.state') and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
+            # and the USB record at a Standby (usb_record.c): the controller's state, and its line on the card, not the flash
+            self.opens+=path not in (RECORD,'/tmp/q2-guest.state',*USB_RECORD_READS) and (path!='/proc/mounts' or not self.u.mem_read(syms['g_backlight_status'],1)[0])
             if mode=='rb' and path not in self.files: ret=0
             else: ret=0x2000000+len(self.calls); self.open[ret]=[path,mode,0,b'' if mode=='wb' else self.files.get(path,b'')]
         elif name=='fread':
