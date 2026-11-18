@@ -1184,29 +1184,118 @@ def test_a_session_starting_over_now_playing_replaces_it(fw, mcl, songs, top):
     assert order == ([('close', page)] if top == b'playing_page' else []) + opened and s.queued() == [A]
 
 
-def test_next_on_a_playlists_last_song_queued_waits_for_the_next_one_to_land(fw, mcl, songs):
+def record_field(record, offset):
+    """A field C wrote into a record: on this host each is 8 bytes, so a field written after the one before it
+    leaves that one's high half overwritten; read only the last one written, or one with nothing written after."""
+    return C.string_at(C.c_uint64.from_address(record + offset).value)
+
+
+def shown(fw):
+    at, n = C.c_uint(), C.c_uint()
+    r = fw.fn('catalogue_np_now', C.c_void_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint))(C.byref(at), C.byref(n))
+    return r, at.value, n.value
+
+
+@pytest.mark.parametrize('player', ['stock', 'q2player'])
+def test_next_on_a_radios_last_song_queued_moves_to_the_next_one_at_once(fw, mcl, songs, player):
     """The device, 2026-11-17 22:38: Radio on a server song, then Next. The radio's next song was still
-    downloading, so the queue held the seed alone, and stock's Next on a one-song queue played the seed again
-    (the demo log's `=====next=====` named it), then stopped: 0:00 / 0:00, the radio's songs never played. The
-    Next waits for the song the playlist is waiting for, and plays it once it lands."""
+    downloading, so the queue held the seed alone, and stock's Next on a one-song queue played the seed again.
+    Then (23:56) Next said "Next song is loading" and stayed on the song playing; the user: "why doesn't it go to
+    next song and show it buffering? it shouldn't reject". The Next goes to the song the playlist waits for at
+    once: Now Playing shows it (the song playing stops, its spinner turns), with no toast, and it plays once it
+    can: with stock's player once its download is whole (the app renames it into place), with q2player once
+    START_MS of it is there, as it plays a file still arriving."""
     s = playlist(fw, mcl, songs, A, B, C3)
+    if player == 'q2player':  # "grow" in the caps: B arrives in place, a little of it there
+        s.world.files[b'/tmp/q2clicks'] = b''
+        fw.fn('ahead_caps', C.c_void_p)()
+        s.world.files[B] = b''
+        s.world.files[b'/tmp/q2-foo.stream'] = b'#Q2STREAM/1\tseq=1\nget\t70000\t20000000\t240000\t%s\n' % B
+        s.world.mtime[b'/tmp/q2-foo.stream'] = s.world.now
     s.land(A)
     s.play(b'1 ' + PLAYLIST + b'\n')
     s.step()
     s.step()
     assert s.queued() == [A] and mcl.pos == 0
-    changes = []
+    changes, toasts = [], []
     fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    pages = lambda name, ctx, *_: s.navigate(name, ctx) if C.string_at(name) == b'playing_page' else toasts.append(name)
+    fw.mock('navigator_to_with_context', pages)  # a toast opens its own window
     fw.fn('ringnav_change', C.c_int, C.c_int)(1)
-    assert changes == []  # not the seed again
+    r, at, n = shown(fw)
+    assert changes == [] and toasts == []  # not the seed again, and no "Next song is loading"
+    assert r and (at, n) == (1, 2)  # Now Playing shows B, the queue's second song
+    assert record_field(r, O['REC_PATH']) == B
+    # named by its tags when the part there can be read (card_record_tags; the stub has none), else its file
+    assert [C.string_at(a[2]) for _, a in fw.calls('toolsGetMusicInfo')] == [A] + ([B] if player == 'q2player' else [])
+    s.fire()
+    assert len(fw.calls('mclStop')) == 1  # the seed stops under B's name
     s.step()
-    assert changes == []  # B is not there yet
+    assert fw.calls('player_start_queue') == []  # B can't play yet
+    if player == 'q2player':  # START_MS of it there
+        s.world.files[b'/tmp/q2-foo.stream'] = b'#Q2STREAM/1\tseq=1\nget\t900000\t20000000\t240000\t%s\n' % B
+        s.world.mtime[b'/tmp/q2-foo.stream'] = s.world.now
     s.land(B)
     s.step()
-    assert s.queued() == [A, B] and changes == [1]  # B joined, and the Next goes on to it
+    assert len(s.deques[s.queue]) == 2 and [a[0] for _, a in fw.calls('player_start_queue')] == [1]  # B plays
     s.land(C3)
     s.step()
-    assert s.queued() == [A, B, C3] and changes == [1]  # once
+    assert len(s.deques[s.queue]) == 3 and len(fw.calls('player_start_queue')) == 1  # once
+
+
+def tagged(out):
+    """toolsGetMusicInfo's title and artist (nothing else, so both read back whole: record_field)."""
+    for at, value in ((0x280, b'Take It Easy'), (0x100, b'Eagles')):
+        C.memmove(out + at, value + b'\0', len(value) + 1)
+    return 1
+
+
+def test_a_streamed_song_is_named_as_a_session_queues_it(fw, mcl, songs):
+    """The device, 2026-11-17 23:51: a radio's Up Next read "tonight's the night (gonna be alr..." and "take it
+    easy (2013 remaster) [I...", with no artist: q2-subsonic names its downloads by the title in lower case and
+    the server's id, and a playlist session's records were its folder's listing's, which reads no tags. Each song
+    a session queues from a card app's folder has its tags read as it joins (card_record_tags, below)."""
+    s = playlist(fw, mcl, songs, A, b'/mnt/mmc/Music/x.flac')
+    s.land(A, b'/mnt/mmc/Music/x.flac')
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    assert len(s.queued()) == 2 and [C.string_at(a[2]) for _, a in fw.calls('toolsGetMusicInfo')] == [A]
+
+
+@pytest.fixture
+def low():
+    """A page under 4 GB: strings whose addresses fit the Q2's 4-byte record fields."""
+    at = 0x10000000
+    used = [at]
+
+    def string(s):
+        here = used[0]
+        C.memmove(here, s + b'\0', len(s) + 1)
+        used[0] += (len(s) + 16) & ~7
+        return here
+    assert libc.mmap(at, 0x10000, 3, 0x100022, -1, 0) == at
+    yield string
+    libc.munmap(C.c_void_p(at), C.c_size_t(0x10000))
+
+
+@pytest.mark.parametrize('case', ['tagged', 'untagged', 'album', 'not there', 'not an apps'])
+def test_a_card_apps_song_not_yet_played_takes_its_files_tags(fw, low, case):
+    path = b'/mnt/mmc/Music/x.flac' if case == 'not an apps' else A
+    World(fw, files={} if case == 'not there' else {path: b''})
+    record = C.create_string_buffer(0x60)
+    struct.pack_into('<I', record, O['REC_PATH'], low(path))
+    if case == 'album':
+        struct.pack_into('<I', record, O['REC_ALBUM'], low(b'Mine'))
+    fw.mock('toolsGetMusicInfo', lambda a, out, p, *_: 0 if case == 'untagged' else tagged(out))
+    fw.fn('card_record_tags', None, C.c_void_p)(record)
+    reads = [C.string_at(a[2]) for _, a in fw.calls('toolsGetMusicInfo')]
+    field = lambda o: C.string_at(struct.unpack_from('<Q', record, o)[0]) if struct.unpack_from('<Q', record, o)[0] else None
+    if case == 'tagged':
+        assert reads == [A] and field(O['REC_ARTIST']) == b'Eagles' and field(O['REC_TITLE']) == b'Take It Easy'
+    elif case == 'untagged':
+        assert reads == [A] and field(O['REC_ARTIST']) is None  # its file's name, as before
+    else:
+        assert reads == []  # tagged already (an album), nothing there to read yet, or the user's own file
 
 
 def test_a_next_waiting_for_a_song_gives_way_to_another_choice(fw, mcl, songs):

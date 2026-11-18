@@ -100,34 +100,52 @@ int ringnav_music_info(int a, char *info, const char *path) {
 }
 /* A card app's song (its folder's listing, or an .m3u, reads no tags) in a library queue: stock
  * parses only a folder play's file (player_get_id3info, MCL_TYPE 1) and copies any other queue's
- * record, so its title was its file's name and its artist Unknown. As it starts, the playing
- * record and the parsed tags take its file's, read as the library scan reads them
- * (toolsGetMusicInfo): title, artist, album, album artist, track and disc. A record with an album
- * is left, so a card app's song is read once a queue (a card song without an album tag, played from
- * a list, at each start, as stock reads every folder play's); one without tags keeps its record's,
- * and a CUE track its sheet's (ringnav_id3_path). ponytail: Up Next and an app's lists show the
- * songs not yet played by their file names, and an app's list has no Go to rows (Now Playing's
- * has). */
-static void card_tags(char *id3, const char *path) {
-    static const unsigned from[] = { 0x280, 0x100, 0, MUSIC_INFO_ALBUM_ARTIST };
-    static const unsigned to[] = { REC_TITLE, REC_ARTIST, REC_ALBUM, REC_ALBUM_ARTIST };
-    unsigned pos, n;
-    void *r = queue_now(&pos, &n);
-    const char *album = r ? P(r, REC_ALBUM) : 0;
+ * record, so its title was its file's name and its artist Unknown. Its record takes its file's
+ * tags, read as the library scan reads them (toolsGetMusicInfo): title, artist, album, album
+ * artist, track and disc, each into id3's parsed copy too when id3 is given. 1 when the file had
+ * tags. */
+static const unsigned tag_from[] = { 0x280, 0x100, 0, MUSIC_INFO_ALBUM_ARTIST };
+static const unsigned tag_to[] = { REC_TITLE, REC_ARTIST, REC_ALBUM, REC_ALBUM_ARTIST };
+static int rec_file_tags(void *r, char *id3, const char *path) {
     char info[0x698] = { 0 };
-    if (I(MCL_TYPE, 0) == 1 || mclGetCueFlag() || !r || !P(r, REC_PATH) ||
-        strcmp(P(r, REC_PATH), path) || (album && *album) ||
-        !tk_str_start_with(path, "/mnt/mmc/") || toolsGetMusicInfo(0, info, path) != 1)
-        return;
-    for (unsigned k = 0; k < sizeof to / sizeof *to; k++) {
-        char *t, **field = (char **)((char *)r + to[k]);
-        info[from[k] + 0xff] = 0;
-        if (!info[from[k]] || !(t = strdup(info + from[k]))) continue;
+    if (toolsGetMusicInfo(0, info, path) != 1) return 0;
+    for (unsigned k = 0; k < sizeof tag_to / sizeof *tag_to; k++) {
+        char *t, **field = (char **)((char *)r + tag_to[k]);
+        info[tag_from[k] + 0xff] = 0;
+        if (!info[tag_from[k]] || !(t = strdup(info + tag_from[k]))) continue;
         free(*field), *field = t;
-        tk_snprintf(id3 + ID3_ALBUM + from[k], 0x100, "%s", t);
+        if (id3) tk_snprintf(id3 + ID3_ALBUM + tag_from[k], 0x100, "%s", t);
     }
     if (I(info, 0x684) > 0) I(r, REC_TRACK) = I(info, 0x684);
     if (I(info, 0x688) > 0) I(r, REC_DISC) = I(info, 0x688);
+    return 1;
+}
+/* As the playing record starts: its file's tags, into it and the parsed tags. A record with an
+ * album is left, so a card app's song is read once a queue (a card song without an album tag,
+ * played from a list, at each start, as stock reads every folder play's); one without tags keeps
+ * its record's, and a CUE track its sheet's (ringnav_id3_path). ponytail: an app's list has no Go
+ * to rows (Now Playing's has). */
+static void card_tags(char *id3, const char *path) {
+    unsigned pos, n;
+    void *r = queue_now(&pos, &n);
+    const char *album = r ? P(r, REC_ALBUM) : 0;
+    if (I(MCL_TYPE, 0) == 1 || mclGetCueFlag() || !r || !P(r, REC_PATH) ||
+        strcmp(P(r, REC_PATH), path) || (album && *album) ||
+        !tk_str_start_with(path, "/mnt/mmc/"))
+        return;
+    rec_file_tags(r, id3, path);
+}
+/* A card app's stream download as a playlist session queues it (addon.c m3u_songs), or the song a
+ * Next waits for (addon_next_waits): the record's title, artist and album before it plays, so Up
+ * Next and Now Playing name it as its tags do, not by its file's name (q2-subsonic's is the title
+ * in lower case and the server's id: the device, 2026-11-17, a radio's Up Next). The server row's
+ * tags when the catalogue knows the download (catalogue_copy_tags: no file read, and a file not
+ * there yet is named), else the file's when it is there; a record with an album is left, as
+ * card_tags leaves one. */
+void card_record_tags(void *r) {
+    const char *path = r ? P(r, REC_PATH) : 0, *album = r ? P(r, REC_ALBUM) : 0;
+    if (!path || (album && *album) || !tk_str_start_with(path, "/mnt/mmc/.")) return;
+    if (!catalogue_copy_tags(r) && !access(path, 0)) rec_file_tags(r, 0, path);
 }
 /* player_get_id3info's copy of the parsed path (ID3_PATH in tools/build.py), after the tags and
  * before Now Playing's lines. A CUE track's tags are its record's, the stock parser's TITLE and

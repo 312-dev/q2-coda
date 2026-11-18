@@ -97,8 +97,10 @@ static int ns_loading(sline_t *l) {
     char id[16];
     unsigned at, n;
     void *pressed = catalogue_np_now(&at, &n);
-    if (pressed) /* not yet the player's: the app's first song */
-        return stream_app_of(P(pressed, REC_PATH), id, sizeof id) && stream_line(id, 0, l) &&
+    if (pressed) /* not yet the player's: its own line (a Next waiting, addon.c), else the app's
+                  * first song (a pressed catalogue row, whose path is not the download's) */
+        return stream_app_of(P(pressed, REC_PATH), id, sizeof id) &&
+               (stream_line(id, P(pressed, REC_PATH), l) || stream_line(id, 0, l)) &&
                (l->state == SL_WAIT || l->state == SL_GET || l->state == SL_STALL);
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned pos = (unsigned)I(MCL_POS, 0);

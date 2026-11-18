@@ -546,6 +546,12 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+/* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
+int catalogue_copy_tags(void *r);
+/* catalogue.c: Now Playing shows r, not yet the player's, at its place at of n (addon.c) */
+void catalogue_np_show(void *r, unsigned at, unsigned n);
+/* tags.c: a card app's song's record named before it plays, from its server row or its file */
+void card_record_tags(void *r);
 /* Now Playing while a pressed server song loads: the record it shows, its title and artist, its art
  */
 void *catalogue_np_now(unsigned *at, unsigned *n);
