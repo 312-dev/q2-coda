@@ -1683,7 +1683,8 @@ class Low:
         return at
 
     def below_4g(self, data):
-        return self.map(0x5e000000 + len(self.maps) * 0x1000, data)
+        # not test_nav_loop.py's Wait.BASE (0x5e000000), which stays claimed in an xdist worker that ran it first
+        return self.map(0x5c000000 + len(self.maps) * 0x1000, data)
 
     def zero_low_half(self, data):
         return self.map(self.HIGHS[len(self.maps)] << 32, data)
