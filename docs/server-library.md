@@ -271,7 +271,9 @@ Next on the last song queued while the app's next song is still downloading (a r
 minutes) moves Now Playing to that song at once, named and with its cover, the song playing
 stopped and the spinner turning while it loads; it plays once the download is whole with stock's
 player, or once enough of it is there with q2player, which plays a song still arriving
-(`addon.c` `addon_next_waits`). Songs streamed into the queue take their server row's tags, or
+(`addon.c` `addon_next_waits`). Up Next lists the whole queue file, the songs not downloaded yet
+dimmed with a cloud, and Center on one moves there the same way, `.playing` naming it so the app
+fetches it first (`addon_pending_play`). Songs streamed into the queue take their server row's tags, or
 their file's, as they join, so Up Next names them as the Library does (`tags.c`
 `card_record_tags`).
 

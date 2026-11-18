@@ -52,7 +52,8 @@ class Sm(C.Structure):
     _fields_ = [('app', C.c_void_p), ('dir', C.c_char * 160), ('last', C.c_char * 192), ('playing', C.c_char * 512), ('state', C.c_int),
                 ('timer', C.c_uint), ('seen', C.c_long), ('m3u', C.c_int), ('urls', C.c_int), ('next', C.c_int), ('more', C.c_int), ('first', C.c_char * 512),
                 ('want', C.c_char * 512), ('loads', C.c_uint),
-                ('picks', C.c_uint), ('seq', C.c_char * 24), ('skip', C.c_uint)]
+                ('picks', C.c_uint), ('seq', C.c_char * 24), ('skip', C.c_uint), ('keep', C.c_int),
+                ('skip_at', C.c_uint), ('jump', C.c_int)]
 
 
 class Sl(C.Structure):
@@ -5914,3 +5915,56 @@ def test_an_apps_radio_of_the_song_playing_leaves_that_song_playing(fw, mcl, son
     s.land(radio[1])
     s.step()
     assert s.queued() == [SEED, *radio] and s.loads == []  # the session goes on into the same queue
+
+
+def pending(fw):
+    """addon_pending's rows: each record's path, then freed."""
+    n = C.c_uint()
+    rows = fw.fn('addon_pending', C.c_void_p, C.c_uint, C.POINTER(C.c_uint))(50, C.byref(n))
+    out = [record_field(C.c_void_p.from_address(rows + 8 * i).value, O['REC_PATH']) for i in range(n.value)]
+    fw.fn('addon_pending_free', None, C.c_void_p, C.c_uint)(rows, n.value)
+    return out
+
+
+def test_up_next_lists_a_radios_songs_not_yet_downloaded_and_one_moves_there(fw, mcl, songs):
+    """The user's, 2026-11-17: a radio's Up Next stopped at about two songs, the ones Download Ahead had fetched,
+    though the radio had many more. The session's songs not yet queued are Up Next's pending rows (addon_pending),
+    named before their download. Tapping one (addon_pending_play) moves to it as Next does: Now Playing shows it at
+    once, the app is told it plays (.playing), so it is fetched first, and it plays once it lands, the songs before
+    it passed over."""
+    # toolsFreeStSongInfo at its stock address (addon.c's define): a ret there for the test, put back after
+    free_rec = int(re.findall(r'toolsFreeStSongInfo \(\(void \(\*\)\(void \*\)\)(0x[0-9a-f]+)u\)',
+                              (host.ROOT/'patch/addon.c').read_text())[0], 16)
+    claim(free_rec)
+    saved = C.string_at(free_rec, 1)
+    C.memmove(free_rec, b'\xc3', 1)
+    try:
+        pending_jump(fw, mcl, songs)
+    finally:
+        C.memmove(free_rec, saved, 1)
+
+
+def pending_jump(fw, mcl, songs):
+    later = [b'/mnt/mmc/.foo/A/%d.flac' % k for k in range(4, 8)]
+    s = playlist(fw, mcl, songs, A, B, *later)
+    s.land(A, B)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [A, B] and mcl.pos == 0
+    assert pending(fw) == later  # the rest of the list, in its order
+    ok = fw.fn('addon_pending_play', C.c_int, C.c_char_p)(later[2])
+    r, at, n = shown(fw)
+    assert ok == 1 and r and (at, n) == (2, 3) and record_field(r, O['REC_PATH']) == later[2]
+    s.step()
+    assert s.playing() == later[2] + b'\n'  # the app fetches it first
+    assert pending(fw) == later[2:]  # the songs before it passed over
+    s.land(later[0])  # one passed over lands: not queued, nothing plays
+    s.step()
+    assert s.queued() == [A, B] and fw.calls('player_start_queue') == []
+    s.land(later[2])
+    s.step()
+    assert s.queued() == [A, B, later[2]] and [a[0] for _, a in fw.calls('player_start_queue')] == [2]
+    s.land(later[3])
+    s.step()
+    assert s.queued() == [A, B, later[2], later[3]] and len(fw.calls('player_start_queue')) == 1 and not pending(fw)

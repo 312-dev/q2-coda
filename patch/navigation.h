@@ -364,6 +364,12 @@ int album_cover_url(void *const *songs, unsigned n, char *url, unsigned size);
 unsigned album_cover_gen(void);
 int album_cover_busy(void);
 void now_cover_forget(void); /* coverflow.c: the player's cover files, from AWTK's cache */
+/* addon.c: a card app's playlist session's songs not yet queued, Up Next's pending rows (records,
+ * freed by addon_pending_free; 0 none), what they were taken from, and one of them tapped */
+void **addon_pending(unsigned max, unsigned *n);
+void addon_pending_free(void **rows, unsigned n);
+unsigned addon_pending_sig(void);
+int addon_pending_play(const char *path);
 
 /* navigation.c */
 void pod_settings(void);
