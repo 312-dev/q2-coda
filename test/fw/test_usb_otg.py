@@ -5,10 +5,16 @@ Stock's check_otg_status (0x4f3408, V1.36), as disassembled: id = toolsGpioGetVa
 g_last_otgid differs from host it writes PC20 = host (bus power) and PE22 = host (charger off), then g_last_otgid =
 host. Nothing else in demo writes PC20 high (into_poweroff, device_reboot and device_standby write it 0)."""
 import ctypes as C
+import pathlib
+import re
 
 import pytest
 
 PASS_MS = 1000  # on_wm_idle_status runs check_otg_status about once a second
+# usb_otg.c's settle time, read from the source so the timings below follow it
+_SETTLE = re.search(r'#define OTG_SETTLE_MS (\d+)\n', (pathlib.Path(__file__).parents[2]/'patch/usb_otg.c').read_text())
+assert _SETTLE, 'usb_otg.c: OTG_SETTLE_MS is not a plain #define'
+SETTLE = int(_SETTLE[1])
 
 
 class Port:
@@ -26,6 +32,13 @@ class Port:
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('toolsGpioGetValue', self.read)
         fw.mock('stock_otg_status_trampoline', self.stock)
+        self.commands = []
+        fw.mock('fw_system', lambda cmd, *_: self.commands.append(C.string_at(cmd).decode()))
+
+    def records(self):
+        """What usb_record.c wrote, by its event word: the third argument of its line's tk_snprintf."""
+        return [C.string_at(a[5]).decode() for _, a in self.fw.calls('tk_snprintf')
+                if C.string_at(a[2]).startswith(b'%u %u %s PD18=')]
 
     def read(self, name, *_):
         pin = C.string_at(name).decode()
@@ -33,7 +46,7 @@ class Port:
             return self.id
         if pin == 'PD17':
             return 0 if self.cable or self.pins['PC20'] else 1
-        return self.pins[pin]
+        return self.pins.get(pin, 1)  # PD19: an input with a pull-up
 
     def stock(self, *_):
         host = int(self.id == 0)
@@ -102,9 +115,9 @@ def test_an_otg_adapter_gets_bus_power_once_the_id_pin_has_settled(fw):
     p = Port(fw)
     p.run(3000)
     p.id = 0
-    p.run(2000)
+    p.run(SETTLE)  # the wait starts at the first low pass: SETTLE - 1000 of it so far
     assert p.pins['PC20'] == 0 and p.otgid.value == 0
-    p.run(2000)
+    p.run(PASS_MS)
     assert p.pins == {'PC20': 1, 'PE22': 1} and p.otgid.value == 1
     p.run(20000)
     assert p.pins['PC20'] == 1
@@ -115,15 +128,15 @@ def test_an_otg_adapter_gets_bus_power_once_the_id_pin_has_settled(fw):
 
 def test_an_otg_adapter_in_at_boot_gets_bus_power(fw):
     p = Port(fw, id_pin=0)
-    p.run(4000)
+    p.run(SETTLE + PASS_MS)
     assert p.pins['PC20'] == 1 and p.otgid.value == 1
 
 
-def test_an_id_glitch_shorter_than_the_settle_time_never_powers_the_bus(fw):
+def test_an_id_low_shorter_than_the_settle_time_never_powers_the_bus(fw):
     p = Port(fw)
     for _ in range(5):
         p.id = 0
-        p.run(2000)
+        p.run(SETTLE)
         p.id = 1
         p.run(1000)
     assert p.powered == [] and p.otgid.value == 0
@@ -133,22 +146,87 @@ def test_vbus_on_the_port_restarts_the_wait(fw):
     """A charger or computer seen during the wait means the Q2 is not a host: the full settle time again once it is out."""
     p = Port(fw)
     p.id = 0
-    p.run(2000)
+    p.run(SETTLE - 1000)
     p.cable = True
     p.run(1000)
     p.cable = False
-    p.run(2000)
+    p.run(SETTLE)
     assert p.pins['PC20'] == 0
-    p.run(2000)
+    p.run(PASS_MS)
     assert p.pins['PC20'] == 1
 
 
 def test_a_standby_between_passes_restarts_the_wait(fw):
     p = Port(fw)
     p.id = 0
-    p.run(2000)
+    p.run(SETTLE - 1000)
     p.now += 60000  # suspended to RAM: no passes
-    p.run(2000)
+    p.run(2000)  # the first pass after it starts again, the second starts the wait
     assert p.pins['PC20'] == 0
-    p.run(3000)
+    p.run(SETTLE)
     assert p.pins['PC20'] == 1
+    assert p.records() == ['otg-on'] and p.commands == []
+
+
+def test_a_wake_sets_the_pull_up_again_and_records_the_pins_then_and_5_s_on(fw):
+    """usb_record_wake, from system.c's ringnav_standby as toolsIntoStandby returns, and usb_ui_poll's later line."""
+    p = Port(fw, cable=True)
+    wake, poll = fw.fn('usb_record_wake', None), fw.fn('usb_record_poll', None)
+    wake()
+    assert p.commands == ['/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1']
+    assert p.records() == ['wake']
+    p.now += 4000
+    poll()
+    assert p.records() == ['wake']
+    p.now += 1000
+    poll()
+    poll()
+    assert p.records() == ['wake', 'wake+5s']
+
+
+def test_the_record_has_each_change_of_bus_power(fw):
+    p = Port(fw)
+    p.id = 0
+    p.run(SETTLE + PASS_MS)
+    p.id = 1
+    p.run(2000)
+    assert p.records() == ['otg-on', 'otg-off'] and p.commands == []
+
+
+ms = lambda a, b: int(round((b - a) * 1000))
+
+
+def unplugged_low(fw, low_ms):
+    """A cable out of a computer, then the ID low for low_ms with nothing attached, then the cable back in."""
+    p = Port(fw, cable=True)
+    p.run(3000)
+    p.cable = False
+    p.run(1000)
+    p.id = 0
+    p.run(low_ms)
+    p.id = 1
+    p.run(2000)
+    p.cable = True
+    p.run(3000)
+    assert p.backfeed == []
+    return p
+
+
+# The device's pin log of 2026-11-17 20:35 (q2-otg-state-fixbuild.log, build 8fd0ddcd, PD18 floating, no pull): after
+# each unplug PD18 read low with no VBUS and nothing attached, and a 3 s settle let stock power the bus twice.
+FLOATING = [ms(168.00, 176.56), ms(190.93, 196.30), ms(197.37, 202.16)]
+# 21:0x (q2-pull-state.log, PD18's pull-up on, nothing attached): the line is still pulled low by the board, in pulses
+# of 2 to 4 s some 6 to 7 s apart. The first ran 3.2 s and stock then powered the bus for a pass, so its end is taken
+# where the ID read high again, 4.3 s on.
+PULLED = [ms(1102.36, 1106.65), ms(1112.02, 1114.17), ms(1128.14, 1130.29)]
+
+
+@pytest.mark.parametrize('low_ms', PULLED)
+def test_with_the_pull_up_the_id_pulses_of_an_empty_port_never_power_the_bus(fw, low_ms):
+    assert unplugged_low(fw, low_ms).powered == []
+
+
+def test_a_floating_id_outlasts_any_settle_time_the_pull_up_is_what_ends_it(fw):
+    """The settle alone: 4.8 and 5.4 s lows are held off, the 8.6 s one is not; the pull-up removes that kind of low."""
+    powered = [unplugged_low(fw, low).powered != [] for low in FLOATING]
+    assert powered == [True, False, False]

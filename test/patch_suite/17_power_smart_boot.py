@@ -82,6 +82,8 @@ class StandbyMachine(PowerMachine):
         self.rtc,self.key,self.readable,self.refuse,self.alarm,self.events=rtc,key,readable,refuse,0,[]
         self.handlers[int(manifest['patch_symbols']['stock_standby_trampoline'],16)]='stock_standby'
         self.handlers.pop(syms['mclGetPlayStatus'],None); self.word(0xa50084,3)
+        # the USB record's lines either side of the suspend (usb_record.c): the pins' reads, and PD18's pull-up again
+        self.mock('toolsGpioGetValue','system@GLIBC_2.0')
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a=u.reg_read(REGS[0])
         if name=='stock_standby':  # asleep until the key (seconds in) or the alarm, whichever is first
@@ -102,7 +104,9 @@ class StandbyMachine(PowerMachine):
     def off(self):  # the next UI loop pass powers off
         self.opened=[]; self.pass_(1); return [p for p,*_ in self.opened]==['poweroff_page']
 start=1792363806
-m=StandbyMachine(key=600); assert m.standby()==['suspend'] and not m.opens and not m.off(); passed()
+m=StandbyMachine(key=600); m.calls=[]; assert m.standby()==['suspend'] and not m.opens
+assert [m.text(c[1]) for c in m.calls if c[0]=='system@GLIBC_2.0']==['/usr/bin/cmd_gpio set_func PD18 input pull_up >/dev/null 2>&1']
+assert not m.off(); passed()
 for i in (1,2,3):
     alarm=start+O[f'STANDBY_LIMIT_{i}']*3600; m=StandbyMachine({'STANDBYLIMIT':str(i)})
     assert m.standby()==[('alarm',0),('alarm',alarm),'suspend',('alarm',0)] and m.rtc==alarm

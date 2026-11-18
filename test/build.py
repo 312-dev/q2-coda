@@ -278,6 +278,23 @@ def boot_check():
     print('Dual boot: Rockbox by default, one-session Q2 Muse, stale choice ignored, card fallback, Home Rockbox row and Wi-Fi off before Rockbox passed.')
 boot_check()
 
+
+def usb_charge_check():
+    """S12usbcharge (patch/usb_charge.sh) under the host sh, cmd_gpio a stand-in that logs its arguments: the charge
+    inhibit, then PD18's pull-up (docs/internals.md#otg-host-power), each once, and nothing for stop."""
+    import subprocess, tempfile, pathlib
+    with tempfile.TemporaryDirectory(prefix='q2-s12-') as tmp:
+        r = pathlib.Path(tmp)
+        script = (ROOT/'patch/usb_charge.sh').read_text()
+        assert script.count('/usr/bin/cmd_gpio') == 2
+        (r/'s12').write_text(script.replace('/usr/bin/cmd_gpio', f'echo >> {r}/log'))
+        for arg in ('start', 'stop'):
+            subprocess.run(['sh', str(r/'s12'), arg], check=True)
+        assert (r/'log').read_text().splitlines() == ['set_func PE22 output1', 'set_func PD18 input pull_up']
+    print('S12usbcharge: charge inhibit and the ID pin pull-up passed.')
+
+usb_charge_check()
+
 def logo_check():
     """S11logo_display_shell's splash choice (build.py LOGO_HOOK) under the host sh: the card's logo, else the
     boot animation, else the built-in still, in Light Mode as in dark (docs/boot.md#light-mode)."""
