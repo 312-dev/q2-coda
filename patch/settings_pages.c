@@ -205,7 +205,9 @@ int reset_list(void *list) {
  * (compact_now_playing); Fast Navigation's year letters and their hold (coverflow.c lettered,
  * coverflow_thumb.c coverflow_wheel_poll); Scan Song Durations' (durations.c durations_scanned);
  * the Position Bar (coverflow_position.c); Enlarged Album Art's countdown (offsets.inc BC_IDLE);
- * On-The-Go's rows (playlists.c pl_dress, navigation.c qm_open). Volume Guard has none. */
+ * On-The-Go's rows (playlists.c pl_dress, navigation.c qm_open); Automatic Time Zone's
+ * lookup (autozone.c), which sends the network's address to the service only while on. Volume Guard
+ * has none. */
 const unsigned *pod_caption(int i) {
     static const unsigned *const text[POD_COUNT] = {
         [POD_CARMODE] = W("Plays at power-on, shuts down when unplugged"),
@@ -219,6 +221,7 @@ const unsigned *pod_caption(int i) {
         [POD_CF_POSITION] = W("Shows your place in the covers while you browse"),
         [POD_COVERMODE] = W("Shows the art full screen after 10s on Now Playing"),
         [POD_OTG] = W("Shows On-The-Go in Playlists and hold menus"),
+        [POD_AUTOZONE] = W("Sets the zone from your network's location"),
     };
     return i >= 0 && i < POD_COUNT ? text[i] : (const unsigned *)0;
 }

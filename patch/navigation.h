@@ -48,6 +48,7 @@ enum {
     POD_CF_POSITION,
     POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
     POD_OTG,            /* Library's On-The-Go (playlist_pages.c), on unless chosen */
+    POD_AUTOZONE,       /* Automatic Time Zone (autozone.c), on unless chosen */
     POD_COUNT
 };
 
@@ -882,6 +883,13 @@ void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at d
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);
 int ringnav_platform_init(void), stock_platform_init_trampoline(void);
+
+/* autozone.c: Automatic Time Zone, the zone from the network's location */
+int ringnav_timezone(void); /* navigation.c: g_time_zone's TZ set, the clock redrawn */
+void autozone_poll(void), autozone_due(void), autozone_off(void),
+    autozone_config(const char *section, const char *key);
+int autozone_busy(void), autozone_match(const char *zone), autozone_enabled(void);
+void pod_row_at(void *view, int i, const char *icon, unsigned at);
 
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),

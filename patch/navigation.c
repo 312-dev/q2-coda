@@ -62,6 +62,10 @@ void ringnav_timezone_row(void *item, int i) {
     if (i == 1) tz_now(rows); /* stock builds rows 0, 1, 2, ... */
     int zone = i > 0 && i <= (int)TZ_COUNT ? rows[i - 1] : -1;
     stock_timezone_row_trampoline(item, zone < 0 ? i : zone + 1);
+    /* the last: Automatic Time Zone under row 0's switch, on the page's own list */
+    void *view = i == (int)TZ_COUNT ? P(item, W_PARENT) : (void *)0, *win = window_of(view);
+    if (win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "autotime_page"))
+        pod_row_at(view, POD_AUTOZONE, "system_time", 1);
     void *row = widget_get_child(item, widget_count_children(item) - 1); /* stock's button */
     for (unsigned c = 0; row && c < widget_count_children(row); ++c) {
         void *label = widget_get_child(row, c);

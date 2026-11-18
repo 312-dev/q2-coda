@@ -70,6 +70,7 @@ static void ini_heal(const char *path) {
 /* toolsWriteConfig's hook: stock's every write and the payload's, the file healed before it. */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value) {
     ini_heal(path);
+    autozone_config(section, key); /* a zone picked by hand turns Automatic Time Zone off */
     return stock_ini_write_trampoline(path, section, key, value);
 }
 
