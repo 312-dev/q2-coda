@@ -162,7 +162,7 @@ def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
 
 
 def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
-    # test/coverflow.py is in no gate tier, so only a change to the file itself used to plan it.
+    # test/coverflow.py builds these on the host, so a change to any of them plans it, not only one to the script.
     for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
                  'patch/page_parallax.c', 'patch/playlist_art.c'):
         assert 'test/coverflow.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
@@ -431,6 +431,7 @@ def test_an_everything_plan_runs_every_suite_a_narrower_plan_could(tmp_path):
     every.everything('test')
     for full in (gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path), gate.suites_for(None, [], 'py', tmp_path)):
         assert names <= set(full), sorted(names - set(full))
+    assert 'test/player/run.py' not in gate.MERGE  # longer than the whole tier: a batch runs it when planned
     # a suite only its own change plans (test/X.py: itself) rides along with an everything plan too
     plan = json.loads(affected.plan_for({'Makefile.new': set(), 'test/chapters.py': {1}}, root).to_json())
     assert gate.everything(plan) and 'test/chapters.py' in gate.suites_for(plan, [], 'py', tmp_path)
