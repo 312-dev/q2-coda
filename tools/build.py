@@ -273,13 +273,15 @@ GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
 GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
 PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's place, player/main.c's STOCK_XZ
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
-# SHA-256), each the zip its release ships for the App Store, read from --apps (APPS_DIR). Its .<id>/ files go
+# SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
-# app's, so the app keeps its data in the card's .<id>. A new pin is a new zip: the source hash covers the pin.
+# app's, so the app keeps its data in the card's .<id>. builtin: the firmware's copy is the only one that runs
+# and the App Store never lists the app (a builtin file holding 1 beside it, patch/addon.c addon_builtin), so its
+# updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
     'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6bdfe61.zip', 2859355,
-                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10'),
+                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -1564,7 +1566,7 @@ def bundled_launcher(app_id, text):
 
 def bundled_app(app_id, apps_dir):
     """BUNDLED_APPS[app_id]'s files, name -> (bytes, executable), from its pinned zip in apps_dir."""
-    version, name, size, digest = BUNDLED_APPS[app_id]
+    version, name, size, digest, builtin = BUNDLED_APPS[app_id]
     path = pathlib.Path(apps_dir)/name
     check(path.is_file(), f'Missing {path}: build {app_id}\'s {version} (docs/building.md#bundled-apps)')
     data = path.read_bytes()
@@ -1576,6 +1578,9 @@ def bundled_app(app_id, apps_dir):
     check(need_files <= set(files) and all('/' not in n for n in files), f'Unexpected files in {name}')
     files['run'] = bundled_launcher(app_id, files['run'].decode()).encode()
     files['version'] = version.encode() + b'\n'
+    check('builtin' not in files, f'Unexpected files in {name}')
+    if builtin:
+        files['builtin'] = b'1\n'
     return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
 
 
@@ -2890,8 +2895,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
             src.write_bytes(data)
             p += path + b' F ' + b' '.join(like.groups()) + b' cat ' + shlex.quote(str(src)).encode() + b'\n'
             player_added.append([path, b'R', *like.groups()])
-        app_version, zip_name, _, digest = BUNDLED_APPS[app_id]
-        bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest,
+        app_version, zip_name, _, digest, builtin = BUNDLED_APPS[app_id]
+        bundled[app_id] = dict(version=app_version, zip=zip_name, sha256=digest, builtin=builtin,
                                bytes=sum(len(d) for d, _ in files.values()))
     for path, src in ((b'release/bin/demo', out/'demo'), (b'usr/bin/hciplayer', q2player or out/'peq/hciplayer'),
                       (BLUEALSA.encode(), out/'bluealsa'), (BLUETOOTHD.encode(), out/'bluetoothd'), (WATCHDOG.encode(), out/'watchdog'),

@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Subsonic is now part of the firmware: the App Store no longer lists it, and new versions arrive with firmware updates. The built-in Subsonic always runs, even with an older Subsonic installed on the card, so Radio no longer says "Update Subsonic to use Radio". Your sign-in, settings and downloads on the card are kept; the old copy's program files are left on the card, unused.
   - USB safety: unplugging the Q2 and plugging it straight back into a computer no longer makes it send its own 5 V into the computer's USB port. For several seconds after an unplug the Q2 could mistake the next cable for a USB adapter and power the port, which heated it up and made the computer show nothing. It now powers a USB DAC or drive on an adapter only after the adapter has been in for 3 seconds with no power coming from the cable, so a DAC or drive on an adapter starts about 3 seconds later than before.
   - USB: plugging in or unplugging the cable is noticed at once instead of up to two seconds later, and every plug-in counts, even straight after an unplug. Unplugging while **Use USB For** was still asking no longer left the Q2 deaf to the next few plug-ins.
   - Battery: with the screen on, the Q2 wakes about 30 times a second less often. Shanling's two album-art helpers checked for work 10 and 20 times a second even with no cover to load; they now sleep until a cover is asked for, and a new song's cover appears a little sooner.

@@ -2988,6 +2988,7 @@ int main(void) {
 SHELF_SHIM = r"""
 #include <stdio.h>
 #include <stdlib.h>
+int addon_builtin(const char *id) { (void)id; return 0; } /* addon.c's: no app carried */
 void *read_all(const char *path, unsigned max, unsigned *size) { /* scrobble.c's */
     FILE *f = fopen(path, "rb");
     char *p = 0;

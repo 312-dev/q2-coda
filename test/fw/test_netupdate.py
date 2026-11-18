@@ -208,6 +208,7 @@ def test_the_repo_ships_a_list_that_parses_pins_and_all(fw):
     lines = [x for x in LIST.read_bytes().splitlines() if x.strip() and not x.startswith((b'#', b'serial ', b'signature '))]
     table = sources(fw, LIST.read_bytes(), pin=False, raw=True)
     assert len(table) == len(lines) and all(a.latest and a.asset.endswith(b'.zip') and a.size and any(a.sha256) for a in table)
+    assert b'subsonic' not in [a.id for a in table]  # the firmware's own (tools/build.py BUNDLED_APPS, builtin)
 
 
 def test_hostile_sources(fw):

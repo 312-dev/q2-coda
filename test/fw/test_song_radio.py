@@ -10,7 +10,7 @@ from conftest import O, mcl  # noqa: F401
 from test_coda_rc_shim import ACK, CMD, Q2
 from test_nav_library_pages import ui  # noqa: F401
 from test_nav_hold import recs  # noqa: F401
-from test_addon import card, scan
+from test_addon import card, carry, scan
 
 SONGS = [  # (id, artist, genre)
     (10, 'Ann', 'Rock'),  # the seed
@@ -132,11 +132,14 @@ def test_the_seed_is_never_queued_again_whatever_its_record_id(fw, ui, mcl, recs
 STREAMED = '/mnt/mmc/.subsonic/stream/5f3a/original/0/Wasteland [tr-77].flac'
 
 
-def streaming(fw, ui, recs, q2app):
-    """The Radio rig playing STREAMED, with the Subsonic app on the card (its q2app's text), running."""
+def streaming(fw, ui, recs, q2app, builtin=None):
+    """The Radio rig playing STREAMED, with the Subsonic app on the card (its q2app's text), running; builtin: the
+    firmware's own copy's q2app as well, the one that runs (tools/build.py BUNDLED_APPS)."""
     q2 = Radio(fw, ui, recs)
     q2.songs = q2.songs[-1:]  # the card's library: Cy's Jazz, nothing like the seed
     world = card(fw, subsonic=q2app)  # the card's files from here on, and the clock
+    if builtin is not None:
+        carry(world, 'subsonic', b'q2-v1.0\n', builtin, builtin=True)
     fw.mock('fw_fclose', lambda *_: 0)  # Q2's Files' close and tell, of files World opened
     fw.mock('fw_ftell', lambda f, *_: world.at[f])
     world.files.update({b'/tmp/q2-subsonic': b'1', b'/tmp/q2-subsonic.browse.sock': b''})
@@ -177,3 +180,11 @@ def test_an_app_too_old_for_radio_says_so(fw, ui, mcl, recs):
     q2.tap(None)
     assert b'/tmp/q2-subsonic.radio' not in world.files and not ui.played
     assert ui.toasts == ['Update Subsonic to use Radio']
+
+
+def test_a_stale_card_copy_never_asks_for_an_update_of_the_builtin_app(fw, ui, mcl, recs):
+    """The user's, 2026-11-17: "Update Subsonic to use Radio" with an old Subsonic on the card. The firmware's own
+    q2-v1.0 runs whatever the card holds, and it plays radios: its radio is asked, no update is."""
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\n', builtin=b'name=Subsonic\nradio=1\n')
+    q2.tap(None)
+    assert ui.toasts == ['Starting Radio…'] and b'/tmp/q2-subsonic.radio' in world.files
