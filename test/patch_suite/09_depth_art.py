@@ -863,7 +863,7 @@ passed()
 
 m=Machine(); style_color(m,red)
 # config_value passes its default in decimal: SHORTCUT's SETTING_N_SHORTCUT (12) is out of range, so no shortcut
-assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','TIMETITLE','1'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
+assert m.config_reads==[('/mnt/data/config.ini','IPOD',key,'0') for key in ('ACCENT','HOME','BATTERY')]+[('/mnt/data/config.ini','IPOD','SHORTCUT','12'),('/mnt/data/config.ini','IPOD','LIGHT','0'),('/mnt/data/config.ini','IPOD','KEEPLIT','1'),('/mnt/data/config.ini','IPOD','CLICKER','0'),('/mnt/data/config.ini','IPOD','REDUCEMOTION','0')]+[('/mnt/data/config.ini','IPOD',key,str(d)) for key,(_,d,_) in theme_keys(theme_builtins()).items()]; passed()  # the theme's own, in table order
 # theme()/scheme(): OLED, the one built-in (themes[0]), and its Blue scheme, settings read on first use; THEME is no
 # setting the engine reads. Light Mode's On picks the light half's row (oled_light), Auto by the clock, Off the dark
 # one; both point at oled_tones and derive their half (SCHEME_DERIVE, scheme_t.mode @4).
@@ -1170,8 +1170,7 @@ f,ctx=m.handler(m.nodes[keep_lit]['children'][0],O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and not did(m,'image_manager_unload_all')
 assert [(c[1],m.text(c[2]),m.text(c[3])) for c in m.calls if c[0]=='write_int_config']==[(0,'IPOD','KEEPLIT')]
 m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-# Time in Title has no row: OLED does not declare it (its own theme's undeclared TIMETITLE), and its clock stays in
-# the title.
+# Time in Title has no row and no key: the status row keeps its clock beside the title (np_bar.c bar_title).
 assert not [r for r in kids if row_text(r).startswith('Time in Title')]
 # The window loader loads each window by the name asked.
 load=HOOKS['ui_loader_load_widget_with_parent'][0]; m.handlers[int(manifest['patch_symbols']['stock_ui_load_trampoline'],16)]='stock_ui_load'
