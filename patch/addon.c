@@ -1767,10 +1767,12 @@ static struct {
     int art_lo, art_hi; /* the rows whose covers may be decoded, half open (art_window) */
     char *sort[6];      /* the sort icon's row (take_sort), its fields in the shown reply */
     int field;          /* the box open is field row field - 1's; 0, a search's */
-    /* pend: a pushed level's first reply awaited under the loading overlay, the shown level and its
-     * rows left as they are (docs/oled-design.md#loading); the level waits in lv[ADDON_DEPTH], its
-     * id the request's, never reused, so a reply to a cancelled one matches nothing */
+    /* pend: a level's first reply awaited under the loading overlay (P_*: how it is taken), the
+     * shown level and its rows left as they are (docs/oled-design.md#loading); the level waits in
+     * lv[ADDON_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
+     * nothing; pmoved: the way a level in the top's place slides in */
     char pend;
+    signed char pmoved;
 } pg __attribute__((section(".scratch")));
 
 static void qr_open(const char *state, const char *title);
@@ -2572,6 +2574,42 @@ static void load_cancel(void) {
     if (pg.page) widget_invalidate_force(pg.page, 0);
 }
 
+/* How the loading overlay's level is taken once its reply comes (load_take): entered over the top
+ * one (push), or in the top's place (page_to). */
+enum { P_PUSH = 1, P_PLACE };
+
+/* Whether the top level shows its rows, so a level can be asked for under the overlay over them.
+ * ponytail: a next page in flight (paging) keeps the Loading… page, as the overlay's cancel would
+ * leave its Loading… row with nothing asking for it */
+static int stageable(void) { return top()->state == K_READY && pg.view && !pg.paging; }
+
+/* next asked for under the loading overlay, to be taken how (P_*) once its reply comes (got); the
+ * staged level, its id the request's. */
+static lv_t *stage(const lv_t *next, int how) {
+    lv_t *w = &pg.lv[ADDON_DEPTH];
+    if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
+    *w = *next;
+    req_send(app()->browse, w->op, w->args);
+    pg.act = 0;
+    w->id = req.id;
+    pg.pend = (char)how;
+    widget_invalidate_force(pg.page, 0);
+    return w;
+}
+
+/* The overlay's level, its reply come: entered, or in the top's place sliding in from pmoved's
+ * side; got() then takes the reply as its own. */
+static void load_take(void) {
+    lv_t *w = &pg.lv[ADDON_DEPTH];
+    int how = pg.pend;
+    pg.pend = 0;
+    if (how == P_PUSH)
+        enter(w);
+    else
+        drop(), *top() = *w, pg.moved = pg.pmoved;
+    widget_invalidate_force(pg.page, 0);
+}
+
 /* A level over the top one; base: args' bytes that name its list, before a More…'s cursor. Over a
  * level showing its rows, it is asked for under the loading overlay and entered once its reply
  * comes (got); else at once, its Loading… page meanwhile. The level, to set its layout. */
@@ -2581,19 +2619,7 @@ static lv_t *push(const char *op, const char *args, unsigned base, const char *t
     tk_snprintf(next.args, sizeof next.args, "%s", args);
     tk_snprintf(next.title, sizeof next.title, "%s", title);
     next.base = base < sizeof next.args ? base : 0;
-    /* ponytail: a next page in flight (paging) keeps the Loading… page, as the overlay's cancel
-     * would leave its Loading… row with nothing asking for it */
-    if (top()->state == K_READY && pg.view && !pg.paging) {
-        lv_t *w = &pg.lv[ADDON_DEPTH];
-        if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
-        *w = next;
-        req_send(app()->browse, w->op, w->args);
-        pg.act = 0;
-        w->id = req.id;
-        pg.pend = 1;
-        widget_invalidate_force(pg.page, 0);
-        return w;
-    }
+    if (stageable()) return stage(&next, P_PUSH);
     enter(&next);
     show();
     return top();
@@ -2628,7 +2654,8 @@ static void sec_open(int i, int dir) {
 }
 
 /* A page row's press: the top level's list from cursor c, in the level's place, so Back leaves the
- * list instead of stepping back through its pages; dir: 1 a later page, -1 an earlier one. */
+ * list instead of stepping back through its pages; dir: 1 a later page, -1 an earlier one. Asked
+ * for under the loading overlay, the window on show staying until the new one comes (load_take). */
 static void page_to(lv_t *l, const char *c, int dir) {
     char a[sizeof l->args] = "";
     if (!cursor_args(l, a, sizeof a, c)) return;
@@ -2636,6 +2663,15 @@ static void page_to(lv_t *l, const char *c, int dir) {
     int first = !strcmp(cell(0, 0), "search");
     first += first < l->n && !strcmp(cell(first, 0), "sort");
     ++first;
+    if (stageable()) {
+        lv_t next = *l;
+        memcpy(next.args, a, sizeof a);
+        next.n = 0, next.state = K_LOAD;
+        next.sel = dir > 0 ? first : 1 << 20; /* show() clamps it to the last row */
+        pg.pmoved = (signed char)dir;
+        stage(&next, P_PLACE);
+        return;
+    }
     req_cancel();
     drop();
     memcpy(l->args, a, sizeof a);
@@ -2669,8 +2705,7 @@ static int sec_take(char **g, int n) {
 
 /* The finished request: an action's toast, or the top level's rows. */
 static void got(void) {
-    if (pg.pend && !pg.act && req.id == pg.lv[ADDON_DEPTH].id) /* the overlay's level: entered */
-        pg.pend = 0, enter(&pg.lv[ADDON_DEPTH]), widget_invalidate_force(pg.page, 0);
+    if (pg.pend && !pg.act && req.id == pg.lv[ADDON_DEPTH].id) load_take(); /* the overlay's */
     lv_t *l = top();
     char id[12], *head[4], *g[4 + 6 * ADDON_ROWS], *reply = req.buf, *fit;
     /* its own size, before spot_reply points into it: a full list keeps ADDON_PAGES of them */

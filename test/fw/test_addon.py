@@ -82,7 +82,7 @@ class Pg(C.Structure):
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
-                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte)]
+                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte)]
 
 
 class Qp(C.Structure):
@@ -2728,7 +2728,7 @@ def test_a_next_window_selects_the_first_content_row(fw, kind, sel):
     p = Page(fw)
     p.answer(rows=[(kind, b'op', b'Row', b'', b'', b'')])
     fw.fn('addon__page_to', None, C.c_void_p, C.c_char_p, C.c_int)(C.addressof(p.top), b'c', 1)
-    assert p.top.sel == sel
+    assert p.pending.sel == sel
 
 
 def test_a_claimed_swipe_stops_the_lists_fling(fw):
@@ -2816,6 +2816,54 @@ def test_a_reload_asks_for_the_window_on_show(fw):
     p.answer(rows=[item(4)])
     p.back()
     assert p.top.state == K_LOAD and p.request().endswith(b'\top1\tctx\tc200\n')
+
+
+# The loading overlay (docs/oled-design.md#loading) over a window's page rows: the window on show stays until the
+# next one comes, then that one takes its place.
+def windowing(fw, uri=b'next'):
+    p = windowed(fw)
+    p.answer(rows=[item(2), item(3), (b'page', uri, b'Page', b'', b'c200', b'')])
+    lists = len(fw.calls('scroll_view_create'))
+    p.click(2)
+    return p, lists
+
+
+@pytest.mark.parametrize('uri', [b'next', b'prev'])
+def test_a_page_row_loads_under_the_overlay_not_a_loading_page(fw, uri):
+    p, lists = windowing(fw, uri)
+    assert p.pg.pend and p.pg.depth == 2 and p.top.state == K_READY and p.top.n == 3 and p.pg.buf[0]  # rows kept
+    assert p.top.args == b'\tctx' and p.request().endswith(b'\top1\tctx\tc200\n')
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+
+
+@pytest.mark.parametrize('uri, sel', [(b'next', 1), (b'prev', 2)])
+def test_a_page_rows_window_takes_the_levels_place_once_it_comes(fw, uri, sel):
+    p, lists = windowing(fw, uri)
+    sel_set = selects(fw)
+    p.answer(rows=[(b'page', b'prev', b'Previous page', b'', b'', b''), item(5), item(6)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.args == b'\tctx\tc200' and p.top.n == 3
+    assert len(fw.calls('scroll_view_create')) == lists + 1 and sel_set[-1] == sel
+    p.tick(), p.tick()
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # opened once
+
+
+def test_return_cancels_a_page_rows_load_and_its_late_reply_changes_nothing(fw):
+    p, lists = windowing(fw)
+    cancelled = p.req.id
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.args == b'\tctx' and p.top.n == 3 and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(5)], id=cancelled)
+    assert p.top.args == b'\tctx' and p.top.n == 3 and len(fw.calls('scroll_view_create')) == lists
+    p.click(2)  # pressed again: asked for again
+    assert p.pg.pend and p.req.id == cancelled + 1
+
+
+def test_centre_on_a_page_row_while_it_loads_sends_nothing_again(fw):
+    p, _ = windowing(fw)
+    sent = p.req.id
+    p.click(2), p.click(0)
+    assert p.req.id == sent and p.pg.pend
 
 
 def test_a_press_with_a_page_in_flight_asks_for_the_window(fw):
@@ -3461,7 +3509,7 @@ def test_without_a_title_bar_a_next_window_selects_past_a_search_and_a_sort_row(
     p = Page(fw)
     p.answer(rows=[SEARCH, SORT, item(0)])
     fw.fn('addon__page_to', None, C.c_void_p, C.c_char_p, C.c_int)(C.addressof(p.top), b'c', 1)
-    assert p.top.sel == 3
+    assert p.pending.sel == 3
 
 
 def test_a_sort_row_left_as_a_row_is_a_list_row(fw):
