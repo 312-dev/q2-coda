@@ -288,6 +288,21 @@ def test_no_scan_while_covered_off_linking_or_starting(fw, blocker):
     assert s.started == 0
 
 
+def test_scans_rebuilding_the_list_leave_one_of_each_header(fw):
+    """Each scan result rebuilds the list whole (stock's btmenu_rows empties it first): however many cycles, one
+    Other Devices header with the one spinner, one Audio header. The doubled header seen on V18Ri was a frame drawn at
+    a clamped scroll (test_nav_painters.py, row_paint.c list_relaid), not a row left behind."""
+    s = Scan(fw, DEVICES)
+    for _ in range(4):
+        s.p.poll()
+        fw.var('bt_searchtime', C.c_ubyte).value = 0
+        s.p.rebuild()
+        s.p.layout()
+        names = s.p.names()
+        assert names.count('Other Devices') == 1 and names.count('Audio') == 1
+        assert sum(bool(s.p.ui.lookup(r, '_bt_headspin', 0)) for r in s.p.rows()) == 1
+
+
 def test_the_page_gone_stops_its_scans(fw):
     s = Scan(fw)
     s.p.ui.destroy(s.p.win)

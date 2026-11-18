@@ -558,6 +558,7 @@ int ipod_list_layout(void *layout, void *view) {
     if (grid) I(list, ROW_HEIGHT) = 0; /* this layout only: settings_list reads it */
     int ret = ((int (*)(void *, void *))LIST_VIEW_LAYOUT)(layout, view);
     if (grid) I(list, ROW_HEIGHT) = forced;
+    list_relaid(view); /* row_paint.c: its end padding and scroll back before a frame draws it */
     /* Stock neither places nor sizes a hidden row (no keep_invisible): mapped at 0x0 its button
      * would stay empty once shown (Display's Accent), so it is mapped after its first layout. */
     for (unsigned i = 0; i < n; ++i) {
