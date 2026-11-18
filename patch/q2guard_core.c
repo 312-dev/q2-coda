@@ -3,16 +3,25 @@
 #include "q2guard.h"
 
 /* ---- the sensor's verdict ----
- * A reading counts only inside GUARD_MIN_DC..GUARD_MAX_DC. GUARD_ERRORS bad or missing readings in a
- * row put the sensor down; one that has read a single value for GUARD_VARY readings is a constant
- * (a placeholder, no thermistor) and is down too. It is trusted once two readings differ, and
- * again after it went down as soon as it reads, and varies, again. */
-static void sensor_read(struct guard *g, int t, struct guard_out *o) {
-    if (t == GUARD_NONE || t < GUARD_MIN_DC || t > GUARD_MAX_DC) {
-        if (++g->errors < GUARD_ERRORS) return;
-        g->seen = 0;
-        if (g->sensor != SENSOR_DOWN) g->sensor = SENSOR_DOWN, o->event = EV_SENSOR_DOWN;
-        return;
+ * A reading counts only inside GUARD_MIN_DC..GUARD_MAX_DC and within GUARD_JUMP_DC of the last one that
+ * counted (the die's ADC moves a few tenths a sample; a jump is a misread). GUARD_ERRORS bad or missing
+ * readings in a row put the sensor down. One that has read a single value for GUARD_VARY readings is a
+ * constant (a placeholder, no thermistor) and is down too: before it was trusted, whatever the load;
+ * after, when the CPU load swung GUARD_SWING points or more meanwhile, which moves a real die. It is
+ * trusted once two readings differ, and again after it went down as soon as it reads, and varies,
+ * again. 1 when this reading counts. */
+static void down(struct guard *g, int why, struct guard_out *o) {
+    g->seen = g->same = 0;
+    if (g->sensor != SENSOR_DOWN) g->sensor = SENSOR_DOWN, g->why = why, o->event = EV_SENSOR_DOWN;
+}
+static int sensor_read(struct guard *g, int t, int busy, struct guard_out *o) {
+    int bad = t == GUARD_NONE                             ? GUARD_WHY_NONE
+              : t < GUARD_MIN_DC || t > GUARD_MAX_DC      ? GUARD_WHY_RANGE
+              : g->seen && (t - g->last > GUARD_JUMP_DC || g->last - t > GUARD_JUMP_DC) ? GUARD_WHY_JUMP
+                                                          : 0;
+    if (bad) {
+        if (++g->errors >= GUARD_ERRORS) down(g, bad, o);
+        return 0;
     }
     g->errors = 0;
     if (!g->seen++)
@@ -21,11 +30,23 @@ static void sensor_read(struct guard *g, int t, struct guard_out *o) {
         g->lo = t;
     else if (t > g->hi)
         g->hi = t;
+    if (g->seen == 1 || t != g->last) g->same = 0, g->busy_lo = 101, g->busy_hi = -1;
+    g->last = t, ++g->same;
+    if (busy >= 0) {
+        if (busy < g->busy_lo) g->busy_lo = busy;
+        if (busy > g->busy_hi) g->busy_hi = busy;
+    }
+    if (g->sensor == SENSOR_OK && g->same >= GUARD_VARY && g->busy_hi - g->busy_lo >= GUARD_SWING) {
+        down(g, GUARD_WHY_STUCK, o);
+        return 0;
+    }
     if (g->hi != g->lo) {
         if (g->sensor != SENSOR_OK) g->sensor = SENSOR_OK, o->event = EV_SENSOR_OK;
     } else if (g->seen >= GUARD_VARY && g->sensor == SENSOR_PENDING) {
-        g->sensor = SENSOR_DOWN, o->event = EV_SENSOR_DOWN;
+        down(g, GUARD_WHY_CONST, o);
+        return 0;
     }
+    return 1;
 }
 
 static void begin_off(struct guard *g, unsigned now, int why, struct guard_out *o) {
@@ -77,11 +98,12 @@ void guard_step(struct guard *g, const struct guard_in *in, struct guard_out *o)
         if (due && !g->powered) g->powered = 1, o->power_off = 1;
         return;
     }
-    sensor_read(g, in->temp, o);
+    int counts = sensor_read(g, in->temp, in->busy, o);
     if (g->sensor == SENSOR_OK) {
         if (g->load == LOAD_COUNTING) o->event = EV_LOAD_CANCELLED;
         if (g->load != LOAD_ARMED) load_reset(g);
-        int t = in->temp; /* valid: the sensor read it */
+        if (!counts) return; /* a misread neither counts towards a threshold nor breaks a run */
+        int t = in->temp;
         g->shut_n = t >= GUARD_SHUT_DC ? g->shut_n + 1 : 0;
         g->warn_n = t >= GUARD_WARN_DC ? g->warn_n + 1 : 0;
         if (t < GUARD_REARM_DC) g->warned = 0;
@@ -103,6 +125,17 @@ const char *guard_state(const struct guard *g) {
     if (g->sensor == SENSOR_DOWN) return "nosensor";
     if (g->sensor == SENSOR_PENDING) return "pending";
     return g->warned ? "warm" : "ok";
+}
+
+const char *guard_why(const struct guard *g) {
+    switch (g->why) {
+    case GUARD_WHY_NONE: return "none read";
+    case GUARD_WHY_RANGE: return "out of range";
+    case GUARD_WHY_JUMP: return "jumps";
+    case GUARD_WHY_CONST: return "constant";
+    case GUARD_WHY_STUCK: return "stuck while the load changed";
+    }
+    return "-";
 }
 
 /* ---- the line ---- */
@@ -162,6 +195,12 @@ int heat_line(char *out, int size, const struct heat_sample *s) {
         puts_(&b, "-");
     else
         tenths(&b, s->temp);
+    puts_(&b, " die=");
+    if (s->die == GUARD_NONE)
+        puts_(&b, "-");
+    else
+        tenths(&b, s->die);
+    field(&b, "adc", s->adc);
     field(&b, "raw", s->raw_temp == GUARD_NONE ? -1 : s->raw_temp);
     field(&b, "lv", s->level), field(&b, "mv", s->mv);
     puts_(&b, " st="), puts_(&b, s->status[0] ? s->status : "-");
