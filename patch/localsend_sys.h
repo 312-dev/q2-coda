@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
@@ -184,6 +185,7 @@ long SSL_CTX_ctrl(SSL_CTX *, int, long, void *);
 unsigned long SSL_CTX_set_options(SSL_CTX *, unsigned long);
 int SSL_CTX_use_certificate(SSL_CTX *, X509 *), SSL_CTX_use_PrivateKey(SSL_CTX *, EVP_PKEY *);
 void SSL_CTX_set_verify(SSL_CTX *, int, int (*)(int, X509_STORE_CTX *));
+int SSL_CTX_set_session_id_context(SSL_CTX *, const unsigned char *, unsigned);
 int SSL_CTX_set_cipher_list(SSL_CTX *, const char *), SSL_CTX_set_ciphersuites(SSL_CTX *, const char *);
 SSL *SSL_new(SSL_CTX *);
 void SSL_free(SSL *);
