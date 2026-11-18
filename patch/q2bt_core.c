@@ -75,6 +75,11 @@ int bt_cmd(unsigned char *out, int op, int handle) {
     out[6] = 0; /* Read Transmit Power Level's type: the current level */
     return 4 + plen;
 }
+int bt_handle_follow(struct bt_link *k, int listed) {
+    if (listed == k->handle) return 0;
+    k->handle = listed;
+    return 1;
+}
 void bt_link_clear(struct bt_link *k, int handle) {
     k->handle = handle, k->answered = 0;
     k->rssi = k->lq = k->tpl = k->afh = BT_UNSET;
@@ -148,6 +153,25 @@ int bt_l2cap_wmem(const char *t) {
     return best < 0 ? 0 : best;
 }
 
+int bt_encoder_thread(const char *comm) { return !strncmp(comm, "ba-a2dp-", 8); }
+
+/* A field of decimal nanoseconds as whole ms modulo 2^32: its last six digits dropped, no 64-bit
+ * arithmetic. 0 when the field has no digits. */
+static int ns_ms(const char **p, unsigned *ms) {
+    const char *s = skip_space(*p), *e = s;
+    while (*e >= '0' && *e <= '9') ++e;
+    if (e == s) return 0;
+    unsigned v = 0;
+    for (const char *d = s; d < e - 6; ++d) v = v * 10 + (unsigned)(*d - '0');
+    *ms = v, *p = e;
+    return 1;
+}
+int bt_schedstat(const char *text, unsigned *run_ms, unsigned *wait_ms) {
+    const char *p = text;
+    return ns_ms(&p, run_ms) && ns_ms(&p, wait_ms) && *skip_space(p) >= '0' &&
+           *skip_space(p) <= '9';
+}
+
 /* dbus-send --print-reply: each PCM an `object path "/org/bluealsa/hci0/dev_.../a2dpsrc/sink"`,
  * then its properties as dict entries, `string "Codec"` and on the next line `variant string
  * "aptX-HD"`. */
@@ -175,8 +199,9 @@ static int put(char *b, int at, int size, const char *key, int v, int unset) {
                        : snprintf(b + at, (size_t)(size - at), " %s=%d", key, v);
     return n < 0 ? at : at + n;
 }
-/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own=\n", "-" for not read
- */
+/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew=\n", "-" for
+ * not read. h, er and ew come last, so a reader that knows only the fields before them reads it
+ * too. */
 int bt_line(char *out, int size, const struct bt_sample *s) {
     char b[200];
     int at = snprintf(b, sizeof b, "up=%u", s->up);
@@ -192,7 +217,10 @@ int bt_line(char *out, int size, const struct bt_sample *s) {
     at = put(b, at, sizeof b, "wrx", s->wrx, -1);
     at = put(b, at, sizeof b, "cpu", s->cpu, -1);
     at = put(b, at, sizeof b, "ba", s->ba, -1);
-    put(b, at, sizeof b, "own", s->own, -1);
+    at = put(b, at, sizeof b, "own", s->own, -1);
+    at = put(b, at, sizeof b, "h", s->h, -1);
+    at = put(b, at, sizeof b, "er", s->er, -1);
+    put(b, at, sizeof b, "ew", s->ew, -1);
     return heat_note(out, size, s->wall, b);
 }
 

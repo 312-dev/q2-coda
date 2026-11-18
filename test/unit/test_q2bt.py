@@ -30,6 +30,9 @@ def L(tmp_path_factory):
     lib.bt_acl_handle.argtypes = [C.c_char_p, C.c_int]
     lib.bt_line.argtypes = [C.c_void_p, C.c_int, C.c_void_p]
     lib.bt_rate.argtypes = lib.bt_ticks_pct.argtypes = [C.c_uint, C.c_uint]
+    lib.bt_handle_follow.argtypes = [C.c_void_p, C.c_int]
+    lib.bt_schedstat.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+    lib.bt_encoder_thread.argtypes = [C.c_char_p]
     lib.log_named.restype = C.c_void_p
     lib.log_named.argtypes = [C.c_char_p, C.c_char_p, C.c_uint]
     lib.heat_add.argtypes = [C.c_void_p, C.c_char_p]
@@ -52,7 +55,7 @@ class Counts(C.Structure):
 
 class Sample(C.Structure):
     _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
-        'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own')]
+        'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')]
 
 
 # ---- is a stream running ----
@@ -256,7 +259,7 @@ def test_no_a2dp_pcm_or_no_codec_is_none(L):
 
 def line(L, **f):
     s = Sample(wall=1795464061, up=4242, **{k: f.get(k, -1) for k in (
-        'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own')},
+        'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')},
         **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh')})
     out = C.create_string_buffer(256)
     n = L.bt_line(out, 256, C.byref(s))
@@ -266,15 +269,15 @@ def line(L, **f):
 
 def test_a_line_has_every_field(L):
     text = line(L, kbps=612, acl=95, wq=2730, rssi=-12, lq=255, tpl=4, afh=40, err=0, wtx=3, wrx=120, cpu=23,
-                ba=81, own=4)
+                ba=81, own=4, h=2, er=88, ew=3)
     assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 acl=95 wq=2730 rssi=-12 lq=255 tpl=4 afh=40 err=0 wtx=3 '
-                    'wrx=120 cpu=23 ba=81 own=4\n')
+                    'wrx=120 cpu=23 ba=81 own=4 h=2 er=88 ew=3\n')
     assert len(text) < 140  # about 9 minutes in the 64 KB ring
 
 
 def test_a_field_not_read_is_a_dash(L):
     assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- acl=- wq=- rssi=- lq=- tpl=- afh=- err=- wtx=- wrx=- '
-                       'cpu=- ba=- own=-\n')
+                       'cpu=- ba=- own=- h=- er=- ew=-\n')
 
 
 def test_rates_and_shares(L):
@@ -298,3 +301,40 @@ def test_the_log_rotates_at_a_megabyte(L, tmp_path):
         L.card(0)
     assert (d / 'q2-bt.1').stat().st_size == 1048576
     assert (d / 'q2-bt.0').read_bytes() == b'2026-11-23T04:01:01Z START h=12\n'
+
+
+# ---- the link's handle, followed across a reconnect ----
+
+def test_a_new_handle_is_followed_and_reported_once(L):
+    """A codec change reconnects the headset: the ACL link comes back on a new handle while the stream runs on (2 s
+    with nothing sent is no STOP). The walk of 2026-11-18 read nothing from 04:47:13 on, asking for handle 1."""
+    k = Link()
+    L.bt_link_clear(C.byref(k), 1)
+    assert L.bt_handle_follow(C.byref(k), 1) == 0 and k.handle == 1
+    assert L.bt_handle_follow(C.byref(k), 2) == 1 and k.handle == 2
+    assert L.bt_handle_follow(C.byref(k), 2) == 0
+    assert L.bt_handle_follow(C.byref(k), -1) == 1 and k.handle == -1  # gone for now: nothing asked
+    assert L.bt_handle_follow(C.byref(k), 3) == 1 and k.handle == 3
+
+
+# ---- the encoder thread ----
+
+def schedstat(L, text):
+    run, wait = C.c_uint(), C.c_uint()
+    ok = L.bt_schedstat(text, C.byref(run), C.byref(wait))
+    return ok, run.value, wait.value
+
+
+def test_schedstat_s_nanoseconds_as_milliseconds(L):
+    """/proc/PID/task/TID/schedstat: time on a CPU, time waiting for one (both ns, past 32 bits), timeslices."""
+    assert schedstat(L, b'98765432109 1234567890 4321\n') == (1, 98765, 1234)
+    assert schedstat(L, b'999999 5 7\n') == (1, 0, 0)
+    assert schedstat(L, b'18446744073709551615 0 1\n')[0] == 1  # u64's largest: wraps, as a delta allows
+    assert schedstat(L, b'')[0] == 0 and schedstat(L, b'x y z')[0] == 0 and schedstat(L, b'12')[0] == 0
+
+
+def test_bluealsa_s_encoder_threads_by_name(L):
+    for name in (b'ba-a2dp-sbc\n', b'ba-a2dp-aptx-hd\n', b'ba-a2dp-aac', b'ba-a2dp-ldac\n'):
+        assert L.bt_encoder_thread(name) == 1
+    for name in (b'bluealsa\n', b'ba-th-manager\n', b'ba-rfcomm\n', b'ba-sco-enc\n', b''):
+        assert L.bt_encoder_thread(name) == 0
