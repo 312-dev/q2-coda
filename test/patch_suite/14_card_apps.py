@@ -240,7 +240,7 @@ gone=[*SMENU[:2],('list','downloads','Downloads','','',''),*SMENU[3:]]; m.advanc
 assert m.rows()!=rows and 'None yet' not in m.labels() and '1 downloading' not in m.labels(),m.labels(); passed()
 # A list row opens its level; Back asks for the menu again, the row kept.
 m.pick(2); m.answer('ok','refresh','',[('info','','No downloads yet','Search, then press a file','','')])
-assert m.requests[-1]==('downloads',) and m.labels()==['Downloads','No downloads yet','Search, then press a file']; asked=len(m.threads); m.row(0); assert len(m.threads)==asked
+assert m.requests[-1]==('downloads',) and m.labels()==['Downloads','No downloads yet','Search, then press a file'] and not m.rows()  # OLED's empty state: no row to press
 m.back(); m.answer('ok','refresh','',changed)
 assert m.requests[-1]==('menu',) and m.nodes[m.find('scroll_view')]['_ringnav_index']==2,(m.requests[-1],m.nodes[m.find('scroll_view')].get('_ringnav_index'))
 # An action row sends its op with its context, toasts the reply's message and asks for the level again.
