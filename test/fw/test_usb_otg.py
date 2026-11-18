@@ -1,0 +1,154 @@
+"""OTG host power (usb_otg.c, docs/internals.md#otg-host-power): run the real ringnav_otg_status over a model of
+stock's check_otg_status and the Q2's USB pins, and replay the pin log of 2026-11-17's back-feed.
+
+Stock's check_otg_status (0x4f3408, V1.36), as disassembled: id = toolsGpioGetValue("PD18"); host = id == 0; when
+g_last_otgid differs from host it writes PC20 = host (bus power) and PE22 = host (charger off), then g_last_otgid =
+host. Nothing else in demo writes PC20 high (into_poweroff, device_reboot and device_standby write it 0)."""
+import ctypes as C
+
+import pytest
+
+PASS_MS = 1000  # on_wm_idle_status runs check_otg_status about once a second
+
+
+class Port:
+    """The pins as the Q2 reads them. PD17 (cable sense, 0 = VBUS on the port) reads low for a computer's or a
+    charger's VBUS and for the Q2's own bus power alike, as the log shows (vbus=1, PD17=0 from the pass PC20 went 1)."""
+    def __init__(self, fw, id_pin=1, cable=False):
+        self.fw, self.id, self.cable = fw, id_pin, cable
+        self.pins = {'PC20': 0, 'PE22': 0}
+        self.now = 100000
+        self.backfeed = []  # times the Q2 powered the bus while a computer's VBUS was on it
+        self.powered = []  # times the Q2 powered the bus at all
+        self.otgid = fw.var('g_last_otgid', C.c_byte)
+        self.otgid.value = 0
+        self.guard = fw.fn('ringnav_otg_status', C.c_int)
+        fw.mock('time_now_ms', lambda *_: self.now)
+        fw.mock('toolsGpioGetValue', self.read)
+        fw.mock('stock_otg_status_trampoline', self.stock)
+
+    def read(self, name, *_):
+        pin = C.string_at(name).decode()
+        if pin == 'PD18':
+            return self.id
+        if pin == 'PD17':
+            return 0 if self.cable or self.pins['PC20'] else 1
+        return self.pins[pin]
+
+    def stock(self, *_):
+        host = int(self.id == 0)
+        if self.otgid.value != host:
+            self.pins['PC20'] = self.pins['PE22'] = host
+            self.otgid.value = host
+        return 0
+
+    def run(self, ms):
+        """Status passes for ms, as on_wm_idle_status calls check_otg_status."""
+        end = self.now + ms
+        while self.now < end:
+            self.now += PASS_MS
+            self.guard()
+            if self.pins['PC20']:
+                self.powered.append(self.now)
+                if self.cable:
+                    self.backfeed.append(self.now)
+
+
+# From the device's pin log of 2026-11-17 (q2-replug2-state.log, build p32b, one sample each 0.5 s): each unplug, when
+# PD18 read low, the first sample that read VBUS again, and when PD18 read high. Stock had turned PC20 on by that VBUS
+# sample, and its own power masks a cable, so the log cannot say when the cable went back in; the replay puts it there,
+# about a second after the ID went low.
+LOGGED = [  # (unplugged, PD18 low, VBUS back, PD18 high) in seconds of uptime
+    (607.90, 608.97, 610.02, 614.28),
+    (622.25, 623.32, 623.85, 642.40),
+    (642.94, 644.53, 645.06, 654.60),
+    (655.13, 658.31, 658.84, 664.14),
+    (665.20, 665.73, 666.26, 672.09),
+]
+
+
+@pytest.mark.parametrize('unplug,low,back,high', LOGGED)
+def test_a_replug_into_a_computer_while_the_id_pin_reads_low_never_powers_the_bus(fw, unplug, low, back, high):
+    p = Port(fw, cable=True)
+    p.run(5000)  # plugged in, a USB device
+    ms = lambda a, b: int(round((b - a) * 1000))
+    p.cable = False
+    p.run(ms(unplug, low))
+    p.id = 0  # the ID pin's low after an unplug, no cable in
+    p.run(ms(low, back))
+    p.cable = True  # back into the computer
+    p.run(ms(back, high))
+    p.id = 1
+    p.run(3000)
+    assert p.backfeed == [] and p.powered == [] and p.otgid.value == 0
+
+
+def test_the_logged_replugs_back_feed_under_stocks_own_pass(fw):
+    """The model is the log's: stock alone, the same sequence powers the bus into the computer."""
+    p = Port(fw, cable=True)
+    p.guard = lambda: p.stock()
+    p.cable = False
+    p.run(1000)
+    p.id = 0
+    p.run(1000)
+    p.cable = True
+    p.run(4000)
+    assert p.backfeed and p.pins['PC20'] == 1
+
+
+def test_an_otg_adapter_gets_bus_power_once_the_id_pin_has_settled(fw):
+    """A DAC or a drive on an OTG adapter: ID grounded, no VBUS on the port. The bus power comes on after
+    OTG_SETTLE_MS, stays on through PD17 reading the Q2's own power, and goes off in the pass the ID reads high."""
+    p = Port(fw)
+    p.run(3000)
+    p.id = 0
+    p.run(2000)
+    assert p.pins['PC20'] == 0 and p.otgid.value == 0
+    p.run(2000)
+    assert p.pins == {'PC20': 1, 'PE22': 1} and p.otgid.value == 1
+    p.run(20000)
+    assert p.pins['PC20'] == 1
+    p.id = 1  # the adapter out
+    p.run(PASS_MS)
+    assert p.pins == {'PC20': 0, 'PE22': 0} and p.otgid.value == 0
+
+
+def test_an_otg_adapter_in_at_boot_gets_bus_power(fw):
+    p = Port(fw, id_pin=0)
+    p.run(4000)
+    assert p.pins['PC20'] == 1 and p.otgid.value == 1
+
+
+def test_an_id_glitch_shorter_than_the_settle_time_never_powers_the_bus(fw):
+    p = Port(fw)
+    for _ in range(5):
+        p.id = 0
+        p.run(2000)
+        p.id = 1
+        p.run(1000)
+    assert p.powered == [] and p.otgid.value == 0
+
+
+def test_vbus_on_the_port_restarts_the_wait(fw):
+    """A charger or computer seen during the wait means the Q2 is not a host: the full settle time again once it is out."""
+    p = Port(fw)
+    p.id = 0
+    p.run(2000)
+    p.cable = True
+    p.run(1000)
+    p.cable = False
+    p.run(2000)
+    assert p.pins['PC20'] == 0
+    p.run(2000)
+    assert p.pins['PC20'] == 1
+
+
+def test_a_standby_between_passes_restarts_the_wait(fw):
+    p = Port(fw)
+    p.id = 0
+    p.run(2000)
+    p.now += 60000  # suspended to RAM: no passes
+    p.run(2000)
+    assert p.pins['PC20'] == 0
+    p.run(3000)
+    assert p.pins['PC20'] == 1
