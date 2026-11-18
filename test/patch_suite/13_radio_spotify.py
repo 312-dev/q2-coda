@@ -123,7 +123,9 @@ assert m.execs==[('/usr/bin/q2video','/usr/bin/q2video','-r','plughw:0,0',('http
 m.forked=4343; m.row(2); np=m.top; assert m.nodes[np]['name']=='radionp_page' and m.files[RDIR+'/.last']==b'#EXTM3U\n#EXTINF:-1,Three\nhttps://three/c?x=1\n'
 m.advance(500); assert m.labels(np)==['Internet Radio','Three','','','Connecting…','']
 # The heart, at local Now Playing's place: Three is no favourite.
-heart=next(w for w in m.nodes[np]['children'] if m.nodes[w].get('image') in ('play_fav','play_unfav'))
+np_body=lambda np: next(c for c in m.nodes[np]['children'] if m.nodes[c]['type']=='view')  # Spotify's view, from the status row's foot (bar_foot)
+assert m.get(np_body(np)+O['W_Y'])==OLED_G.bar
+heart=next(w for w in m.nodes[np_body(np)]['children'] if m.nodes[w].get('image') in ('play_fav','play_unfav'))
 heart_y=O['NP_ART_TOP']+O['SPOT_ART_PX']-50+O['NP_ICON_PAD']
 from ipod import NP_ICONS_END, NP_ICON
 heart_x=NP_ICONS_END-NP_ICON
@@ -169,7 +171,7 @@ playing=last().encode(); before=bytes(m.files[RDIR+'/favourites.m3u']); assert p
 assert m.hold()==11 and m.toasts[-1][3]=='Removed from Favorites' and playing not in m.files[RDIR+'/favourites.m3u']
 m.press(77); assert m.hold()==11 and m.toasts[-1][3]=='Added to Favorites' and m.files[RDIR+'/favourites.m3u'].endswith(playing+b'\n')
 # Tapping the heart toggles it too, and the heart follows the file.
-heart=next(w for w in m.nodes[np]['children'] if m.nodes[w].get('image') in ('play_fav','play_unfav'))
+heart=next(w for w in m.nodes[np_body(np)]['children'] if m.nodes[w].get('image') in ('play_fav','play_unfav'))
 m.advance(500); assert m.nodes[heart]['image']=='play_fav'
 f,ctx=m.handler(heart,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
 assert m.toasts[-1][3]=='Removed from Favorites' and playing not in m.files[RDIR+'/favourites.m3u']
