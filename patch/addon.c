@@ -471,7 +471,7 @@ int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned
     resume_end("another restore");
     for (unsigned i = 0; i < n; ++i) {
         char id[APP_ID];
-        if (strchr(paths[i], '\n') || strchr(paths[i], '\r')) return 0; /* a line each */
+        if (strstr(paths[i], "\n") || strstr(paths[i], "\r")) return 0; /* a line each */
         unsigned k = strlen(paths[i]) + 1;
         bytes += k;
         if (i > at && !in[i]) ++missing, rows += k;
@@ -480,7 +480,7 @@ int addon_resume_ask(const char *const *paths, const unsigned char *in, unsigned
         if (b && b->present && b->resume) a = b;
     }
     if (!a || !missing || at >= n) return 0;
-    if (!(rs.req = malloc(bytes)) || !(rs.rows = malloc(rows))) {
+    if (!(rs.req = calloc(1, bytes)) || !(rs.rows = calloc(1, rows))) {
         free(rs.req);
         rs.req = 0;
         return 0;
@@ -992,10 +992,10 @@ char *addon_pending_paths(unsigned max, unsigned *n, unsigned *bytes) {
     if (rs.state && playback_loads == rs.loads) {
         const char *r = rs.rows;
         for (unsigned i = 0; i < rs.nrows && paths_add(&p, r, 0); ++i) r += strlen(r) + 1;
-        if (p.n && (p.out = malloc(p.bytes))) memcpy(p.out, rs.rows, p.cap = p.bytes);
+        if (p.n && (p.out = calloc(1, p.bytes))) memcpy(p.out, rs.rows, p.cap = p.bytes);
     } else if (sm.state == S_PLAY && sm.m3u && max && stream_queue()) {
         pending_walk(paths_add, &p); /* counted, then copied */
-        if (p.n && (p.out = malloc(p.bytes)))
+        if (p.n && (p.out = calloc(1, p.bytes)))
             p.cap = p.bytes, p.n = p.bytes = 0, pending_walk(paths_add, &p);
     }
     if (p.out) *n = p.n, *bytes = p.bytes;

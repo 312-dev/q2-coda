@@ -1617,7 +1617,7 @@ static int save_elapsed(int sec) {
 static void save_tail(unsigned sum, unsigned n) {
     unsigned k = 0, bytes = 0;
     char *paths = addon_pending_paths(SAVE_LIMIT - n, &k, &bytes);
-    unsigned *buf = paths ? malloc(16 + bytes) : 0;
+    unsigned *buf = paths ? calloc(1, 16 + bytes) : 0;
     if (!buf) {
         free(paths);
         if (tail_kept) card_blob_drop(TAIL_STORE), tail_kept = 0;
@@ -1632,7 +1632,7 @@ static void save_tail(unsigned sum, unsigned n) {
 /* The tail of the snapshot whose checksum is sum, on the heap (the caller frees it), its paths from
  * byte 16, *n of them; 0 when there is none, or it is another snapshot's or damaged. */
 static unsigned *read_tail(unsigned sum, unsigned *n) {
-    unsigned *buf = malloc(QUEUE_HELD_MAX);
+    unsigned *buf = calloc(1, QUEUE_HELD_MAX);
     int got = buf ? card_blob_read(TAIL_STORE, buf, QUEUE_HELD_MAX) : -1;
     *n = 0;
     if (got < 16 || buf[0] != TAIL_MAGIC || buf[2] != sum || buf[3] > SAVE_LIMIT ||

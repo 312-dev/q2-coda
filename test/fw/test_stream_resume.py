@@ -59,6 +59,7 @@ class Resume(Stream):
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('mclGetPlayTime', lambda sec, total, *_: C.c_int.from_address(sec).__setattr__('value', 42))
         fw.mock('fw_deque_pop_back', lambda q, *_: self.deques[q].pop() and 0)
+        fw.mock('fw_fclose', lambda *_: 0)  # the snapshot's reader checks it
         fw.mock('fw_write', lambda fd, data, n, *_: self.logged.append(C.string_at(data, n).decode()) or n)
         fw.var('g_memory_play', C.c_ubyte).value = 2  # Location: the place in the song too
         m3u = STREAM + b'/queue-1.m3u'
@@ -78,9 +79,13 @@ class Resume(Stream):
         for i in range(ap(self.fw).n):
             ap(self.fw).a[i].launched = 0
         self.fw.var('addon__sm', Sm).state = S_DONE
-        self.fw.fn('playback_clear', None)()
+        card = dict(self.world.files)
+        self.fw.fn('playback_clear', None)()  # which drops the snapshot: the card's files as they were before it
+        self.world.files.clear()
+        self.world.files.update(card)
         self.deques[self.queue][:] = []
         self.mcl.pos = 0
+        self.loads.clear()  # Now Playing's opens before the restart
         directory = self.fw.var('fw_ctx_tools_pdeq_directory', C.c_uint)
         self.fw.mock('getAllMusic', lambda *_: self.deques[directory.value].clear() or 0)  # no song in the Library
         self.fw.mock('stock_memory_trampoline', lambda *_: -7)
@@ -92,7 +97,9 @@ class Resume(Stream):
         self.mcl.pos, self.mcl.type = at, kind
 
     def asked(self):
-        """The request, once the app's socket is there: its first line's words, and its paths."""
+        """The request, once the app, started for it (which removes a socket a killed run left), listens: its first
+        line's words, and its paths."""
+        self.step()
         self.world.files[SOCK] = b''
         self.step()
         lines = self.world.files[REQUEST].split(b'\n')
