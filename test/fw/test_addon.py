@@ -82,7 +82,8 @@ class Pg(C.Structure):
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
-                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte)]
+                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte), ('psec', C.c_byte),
+                ('hold', C.c_byte)]
 
 
 class Qp(C.Structure):
@@ -2067,7 +2068,7 @@ def test_the_app_a_path_is_in(fw, path, found):
 class Page:
     """A card app's page driven as the UI drives it. The worker never runs: answer() puts its reply
     where the pthread would and the page's tick takes it."""
-    def __init__(self, fw, manifest=b'name=Foo\n', opens=True):
+    def __init__(self, fw, manifest=b'name=Foo\n', opens=True, home=False):
         self.fw, self.sel, self.y, self.timers, self.drawn, self.toasts, self.backs = fw, 0, 0, 0, 0, [], 0
         self.aborts: list = []  # sections()' swipe aborts
         self.tips: list = []  # field()'s box hints
@@ -2100,6 +2101,12 @@ class Page:
         fw.mock('navigator_to_with_context', toast)
         fw.mock('navigator_back', lambda *_: setattr(self, 'backs', self.backs + 1))
         fw.mock('widget_get_prop_int', prop)
+        self.home = 0
+        if home:  # the window the page is opened from: the window manager's one (smart_wifi.c page_in_use)
+            self.home = block(fw, size=4096)
+            fw.mock('widget_count_children', lambda w, *_: 1 if not w else 0)
+            fw.mock('widget_get_child', lambda w, i, *_: self.home if not w else self.view)
+            fw.mock('widget_get_prop_str', lambda w, k, d, *_: d)
         scan(fw)
         if opens:
             fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)
@@ -2225,6 +2232,144 @@ def test_centre_while_loading_sends_nothing_again(fw):
     sent = p.req.id
     p.click(1), p.click(0)
     assert p.req.id == sent and p.pg.pend == 1 and p.pg.depth == 1
+
+
+# The first open (docs/oled-design.md#loading): the page opens once the app's first answer is there, the overlay over
+# the window it was opened from meanwhile (list_marks.c load_over), fed input by ringnav_input (load_over_input).
+class Lo(C.Structure):
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+
+
+def first_open(fw):
+    p = Page(fw, home=True)
+    return p, fw.var('list_marks__lo', Lo)
+
+
+def gate(p, type, a, b=0):
+    """An event as ringnav_input sees it: a key (a its code), or a touch at the portrait panel's a, b."""
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], type)
+    struct.pack_into('<ii', e, O['EVENT_X'], a, b)  # EVENT_KEY is EVENT_X
+    return p.fw.fn('load_over_input', C.c_int, C.c_void_p)(e)
+
+
+def test_a_first_open_loads_over_the_window_it_was_opened_from(fw):
+    p, lo = first_open(fw)
+    assert p.pg.hold == 1 and not p.pg.page and lo.win == p.home  # no page yet: the overlay over Streaming
+    assert not fw.calls('window_create') and not fw.calls('scroll_view_create')  # no Loading… page
+    assert p.request() == b'Q2SPOT/1\n1\tmenu\n' and p.ap.a[0].launched == 1
+
+
+def test_a_first_open_opens_once_its_answer_comes(fw):
+    p, lo = first_open(fw)
+    p.answer(rows=[item(1), item(2)])
+    assert p.pg.hold == 0 and p.pg.page == p.page and lo.win is None and p.top.state == K_READY
+    assert len(fw.calls('window_create')) == 1 and len(fw.calls('scroll_view_create')) == 1  # its rows at once
+    p.tick(), p.tick()
+    assert len(fw.calls('window_create')) == 1  # opened once
+
+
+def test_a_first_open_waits_through_the_apps_start_under_the_overlay(fw):
+    p, lo = first_open(fw)
+    p.answer(fail=REQ_NOSOCK)  # no socket yet: the app starting
+    assert p.top.state == K_WAIT and p.pg.hold == 1 and lo.win == p.home and not fw.calls('window_create')
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(1)])
+    assert p.pg.page == p.page and p.top.state == K_READY and lo.win is None
+
+
+def test_a_first_open_that_fails_opens_on_its_error_page(fw):
+    p, lo = first_open(fw)
+    p.answer(status=b'error', msg=b'Sign in first')
+    assert p.pg.page == p.page and p.top.state == K_ERROR and p.top.note == b'Sign in first' and lo.win is None
+
+
+def test_return_gives_a_first_open_up_and_nothing_opens_late(fw):
+    p, lo = first_open(fw)
+    assert gate(p, KEY_DOWN, RETURN) == 1 and p.pg.hold == 1  # the press goes nowhere
+    assert gate(p, KEY_UP, RETURN) == 1  # its release gives it up
+    assert lo.win is None and not p.pg.lv and not p.pg.timer and p.req.running == 0 and not p.req.buf
+    assert p.ap.a[0].launched == 1 and not p.world.of('system')[1:]  # the app runs on: nothing stopped
+    assert gate(p, KEY_UP, RETURN) == 0  # Return is the window's again
+    assert fw.calls('timer_remove') and not fw.calls('window_create')  # no tick left to take a late reply
+
+
+@pytest.mark.parametrize('type', [KEY_DOWN, KEY_LONG, KEY_UP])
+def test_centre_while_a_first_open_loads_does_nothing(fw, type):
+    p, lo = first_open(fw)
+    sent = p.req.id
+    assert gate(p, type, CENTRE) == 1 and lo.win == p.home and p.req.id == sent
+    fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)  # the row again, however it came
+    assert p.req.id == sent and p.pg.hold == 1 and not fw.calls('window_create')
+    assert gate(p, KEY_UP, O['KEY_PLAY']) == 0  # Play and the wheel stay the window's
+
+
+def test_a_tap_off_the_spinner_gives_a_first_open_up_and_one_on_it_does_nothing(fw):
+    p, lo = first_open(fw)
+    down, up = 0xff, 0x103  # the panel's own: screen x is its y, screen y 319 less its x
+    assert gate(p, down, 319 - 160, 187) == 1 and gate(p, up, 319 - 160, 187) == 1 and lo.win == p.home
+    assert gate(p, down, 319 - 100, 40) == 1 and gate(p, 0x101, 319 - 100, 40) == 1 and lo.win == p.home
+    assert gate(p, up, 319 - 100, 40) == 1 and lo.win is None and not p.pg.lv and not fw.calls('window_create')
+
+
+def test_the_window_going_away_gives_a_first_open_up(fw):
+    p, lo = first_open(fw)
+    fw.fn('list_marks__lo_gone', C.c_int, C.c_void_p, C.c_void_p)(p.home, None)
+    assert lo.win is None and not p.pg.lv and p.req.running == 0
+
+
+def test_another_apps_page_over_a_first_open_lets_it_go(fw):
+    p, lo = first_open(fw)
+    p.world.files[b'/tmp/q2-foo'] = b'1'
+    fw.fn('addon_open_at', C.c_int, C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p)(b'foo', b'menu', b'', None)
+    assert p.pg.hold == 1 and lo.win == p.home and p.req.id == 2  # the first let go, this one held in its place
+
+
+# Retry on an error page: asked again under the overlay, the error page left as it is until the answer is there.
+def retrying(fw):
+    p = Page(fw)
+    p.answer(rows=[item(1)])
+    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+    p.answer(status=b'error', msg=b'Sign in first')
+    assert p.top.state == K_ERROR and p.top.retry == 1
+    lists, asked = len(fw.calls('scroll_view_create')), p.req.id
+    p.click(0)  # Retry
+    return p, lists, asked
+
+
+def test_retry_asks_again_under_the_overlay_over_its_error_page(fw):
+    p, lists, asked = retrying(fw)
+    assert p.pg.hold and p.top.state == K_LOAD and p.req.id == asked + 1 and p.request().endswith(b'\tmenu\n')
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page: the error page stays
+    p.answer(rows=[item(1), item(2)])
+    assert p.pg.hold == 0 and p.top.state == K_READY and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_retry_failing_again_shows_its_error_once_it_is_there(fw):
+    p, lists, _ = retrying(fw)
+    p.answer(status=b'error', msg=b'Still not')
+    assert p.pg.hold == 0 and p.top.state == K_ERROR and p.top.note == b'Still not'
+
+
+def test_return_gives_retry_up_and_its_error_page_stays(fw):
+    p, lists, asked = retrying(fw)
+    p.back()
+    assert p.pg.hold == 0 and p.top.state == K_ERROR and p.backs == 0 and p.req.running == 0 and not p.req.buf
+    assert len(fw.calls('scroll_view_create')) == lists
+    p.tick()
+    assert p.top.state == K_ERROR and len(fw.calls('scroll_view_create')) == lists  # nothing opens late
+
+
+def test_centre_on_retry_while_it_loads_sends_nothing_again(fw):
+    p, lists, asked = retrying(fw)
+    p.click(0), p.click(1)
+    assert p.req.id == asked + 1 and p.pg.hold
+
+
+def test_a_tap_off_the_spinner_gives_retry_up(fw):
+    p, lists, asked = retrying(fw)
+    assert touch(p, 'EVT_POINTER_DOWN', 40, 100) == 11 and touch(p, 'EVT_POINTER_UP_BEFORE', 40, 100) == 11
+    assert p.pg.hold == 0 and p.top.state == K_ERROR
 
 
 def test_a_level_under_another_keeps_its_reply_and_asks_again_on_back(fw):
@@ -2830,13 +2975,12 @@ def test_a_swipe_redecides_covers_for_the_section_it_opens(fw):
     assert p.top.art == 1
     del names[:]
     swipe(p, -100)
-    assert p.pg.cur == 1 and p.top.art == 0 and names == [url]
+    assert p.pg.pend and p.pg.cur == 0 and names == []  # under the overlay: the section shown stays
     p.answer(rows=[item(1)])  # no cover in this one
-    assert p.top.art == 0
+    assert p.pg.cur == 1 and p.top.art == 0 and names == [url]
     swipe(p, 100)
-    assert p.pg.cur == 0 and p.top.art == 0
     p.answer(rows=[item(0)])  # back to the covered one, decided again
-    assert p.top.art == 1
+    assert p.pg.cur == 0 and p.top.art == 1
 
 
 NEXT = (b'page', b'next', b'Next page', b'', b'c200', b'')
@@ -3852,12 +3996,75 @@ def test_a_section_keeps_its_selection_context_and_title(fw):
     assert p.pg.cur == 1 and p.top.sel == 0
     p.sel = 4
     swipe(p, 100)
-    assert p.pg.cur == 0 and p.top.sel == 2
+    assert p.pg.cur == 1 and p.pending.sel == 2
     p.answer(rows=[item(i) for i in range(3)])
-    assert p.top.sel == 2
+    assert p.pg.cur == 0 and p.top.sel == 2
     p.sel = 2
     swipe(p, -100)
+    p.answer(rows=[item(i) for i in range(5)])
     assert p.top.sel == 4
+
+
+# A swipe to another section loads under the overlay over the one shown (docs/oled-design.md#loading).
+def swiped(fw):
+    p = sections(fw)
+    p.answer(rows=[item(0), item(1)])
+    lists = len(fw.calls('scroll_view_create'))
+    swipe(p, -100)
+    return p, lists
+
+
+def test_a_swipe_s_section_loads_under_the_overlay(fw):
+    p, lists = swiped(fw)
+    assert p.pg.pend and p.pg.cur == 0 and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+    assert p.pending.op == b'sec1' and p.pending.title == b'S1 2/3' and p.request().endswith(b'\tsec1\n')
+    p.answer(rows=[item(5)])
+    assert not p.pg.pend and p.pg.cur == 1 and p.pg.depth == 1 and p.top.op == b'sec1' and p.cell(0, 1) == b'op5'
+    assert len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_return_gives_a_swipe_s_section_up_and_the_one_shown_stays(fw):
+    p, lists = swiped(fw)
+    p.back()
+    assert not p.pg.pend and p.pg.cur == 0 and p.top.op == b'sec0' and p.top.n == 2 and p.backs == 0
+    p.tick()
+    assert p.pg.cur == 0 and len(fw.calls('scroll_view_create')) == lists
+
+
+def test_a_swipe_while_a_section_loads_is_the_overlay_s_and_lifts_off_the_spinner(fw):
+    p, lists = swiped(fw)
+    asked = p.req.id
+    assert touch(p, 'EVT_POINTER_DOWN', 200, 100) == 11 and touch(p, 'EVT_POINTER_MOVE_BEFORE', 150, 100) == 11
+    assert p.pending.op == b'sec1' and not p.pg.sclaim
+    assert touch(p, 'EVT_POINTER_UP_BEFORE', 100, 100) == 11  # off the spinner: given up
+    assert not p.pg.pend and p.pg.cur == 0 and p.req.id == asked and not p.pg.go
+
+
+# The reload after an action on a level that isn't live: asked again under the overlay, its rows meanwhile.
+def acted(fw):
+    p = Page(fw)
+    p.answer(rows=[item(1), item(2)])
+    p.click(0)
+    assert p.pg.act == 1 and p.request().endswith(b'\top1\t\n') or p.request().endswith(b'\top1\n')
+    lists = len(fw.calls('scroll_view_create'))
+    p.answer(msg=b'Done')
+    return p, lists
+
+
+def test_the_reload_after_an_action_waits_under_the_overlay(fw):
+    p, lists = acted(fw)
+    assert p.pg.hold and p.top.state == K_LOAD and p.request().endswith(b'\tmenu\n') and p.toasts == [b'Done']
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+    p.answer(rows=[item(1), item(3)])
+    assert not p.pg.hold and p.top.state == K_READY and p.cell(1, 1) == b'op3'
+
+
+def test_return_gives_the_reload_after_an_action_up_and_its_rows_stay(fw):
+    p, lists = acted(fw)
+    p.back()
+    assert not p.pg.hold and p.top.state == K_READY and p.top.n == 2 and p.backs == 0 and p.req.running == 0
+    p.click(1)  # its rows work again
+    assert p.pg.act == 1
 
 
 def test_one_section_has_no_position(fw):

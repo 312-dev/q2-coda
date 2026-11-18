@@ -630,14 +630,23 @@ static struct {
     char selected[6500], remove_kind[16], remove_note[128];
     char term[64];
     level_t *lv; /* SPOT_DEPTH of them, calloc'd, and one more: the list push() waits on (pend) */
-    /* pend: a pushed list's first reply awaited under the loading overlay
-     * (docs/oled-design.md#loading), the shown level and its rows left as they are; the list waits
-     * in lv[SPOT_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
-     * nothing */
+    /* pend: a list's first reply awaited under the loading overlay (docs/oled-design.md#loading),
+     * the shown level and its rows left as they are, P_PUSH entered over the top or P_POP in place
+     * of it (Back); the list waits in lv[SPOT_DEPTH], its id the request's, never reused, so a
+     * reply to a cancelled one matches nothing */
     char pend;
+    /* hold: the top level asked for (again) in place under the overlay (the first open, with no page
+     * yet, over the window it was opened from, list_marks.c load_over; Retry; Playback Settings
+     * after a change), what it shows left as
+     * it is until its rows or its error are there; 1 + the state a cancel puts back */
+    char hold;
 } br __attribute__((section(".scratch")));
 
+enum { P_PUSH = 1, P_POP };
+
 static void *browsing(void) { return br.page; }
+static int br_make(void);
+void *page_in_use(void); /* smart_wifi.c: the top window past toasts and the volume dialog */
 /* librespot killed: no socket for a while is it starting again, as after a sign-out. */
 static void spot_restarting(void) { br.until = time_now_ms() + SPOT_SIGNOUT_MS; }
 
@@ -778,9 +787,15 @@ static void *into(int i, const char *caption, const char *detail) {
 static void show(void) {
     level_t *l = top();
     int n = 0;
-    br.view = br.edit = 0;
     if (l->state == S_LOAD && !((wk.running || wk.done) && br.act == A_FETCH && wk.id == l->id))
         fetch(l);
+    if (br.hold && (l->state == S_LOAD || l->state == S_WAIT)) return; /* under the overlay */
+    if (br.hold && !br.page) { /* the first answer: the page opens over the window it held */
+        if (!br_make()) return; /* none to be had: the overlay stays until Return */
+        load_over(0, 0);
+    }
+    br.hold = 0;
+    br.view = br.edit = 0;
     if (l->state == S_LOAD || l->state == S_WAIT) {
         page_list(br.page, br.page, 0, "Loading…", 0, 48);
         return;
@@ -895,7 +910,17 @@ static void load_cancel(void) {
     br.pend = 0;
     fetch_cancel();
     br.act = A_FETCH;
+    if (br.hold) /* the level as it was, still shown */
+        top()->state = br.hold - 1, br.hold = 0;
     if (br.page) widget_invalidate_force(br.page, 0);
+}
+
+/* The top level l asked for again in place under the loading overlay, what the page shows staying
+ * until its answer is there (show); with nothing shown, its Loading… page. */
+static void hold_load(level_t *l) {
+    if (br.view) br.hold = (char)(1 + l->state), widget_invalidate_force(br.page, 0);
+    l->state = S_LOAD;
+    show();
 }
 
 /* A level over the top one. A list over a level showing its rows is asked for under the loading
@@ -918,7 +943,7 @@ static void push(int kind, const char *op, const char *args, const char *cursor,
         *w = next;
         fetch(w);
         top()->id = shown, w->id = wk.id; /* fetch() names the top level's: the staged one's */
-        br.pend = 1;
+        br.pend = P_PUSH;
         widget_invalidate_force(br.page, 0);
         return;
     }
@@ -926,8 +951,22 @@ static void push(int kind, const char *op, const char *args, const char *cursor,
     show();
 }
 
-/* Back a level; its fetch, if in flight, dropped. */
+/* Back a level; its fetch, if in flight, dropped. A list below that let its rows go (enter) is
+ * asked for again under the loading overlay over the page shown, which it takes the place of once
+ * its reply comes (got, P_POP); with nothing shown, its Loading… page. */
 static void pop(void) {
+    level_t *below = &br.lv[br.depth - 2];
+    if (below->state == S_LOAD && br.view) {
+        level_t *w = &br.lv[SPOT_DEPTH];
+        unsigned shown = top()->id;
+        top()->sel = widget_get_prop_int(br.view, "_ringnav_index", 0);
+        *w = *below;
+        fetch(w);
+        top()->id = shown, w->id = wk.id; /* fetch() names the top level's: the staged one's */
+        br.pend = P_POP;
+        widget_invalidate_force(br.page, 0);
+        return;
+    }
     fetch_cancel();
     br.act = A_FETCH;
     drop(top());
@@ -938,8 +977,14 @@ static void pop(void) {
 /* The finished request: an action's outcome, or the top level's rows, error or pairing prompt. A
  * reply without the request's id, or for a level since left, is dropped. */
 static void got(void) {
-    if (br.pend && br.act == A_FETCH && wk.id == br.lv[SPOT_DEPTH].id) /* the overlay's: entered */
-        br.pend = 0, enter(&br.lv[SPOT_DEPTH]), widget_invalidate_force(br.page, 0);
+    if (br.pend && br.act == A_FETCH && wk.id == br.lv[SPOT_DEPTH].id) { /* the overlay's */
+        if (br.pend == P_POP) /* Back: the top let go, the list below asked again in its place */
+            drop(top()), --br.depth, br.lv[br.depth - 1] = br.lv[SPOT_DEPTH];
+        else
+            enter(&br.lv[SPOT_DEPTH]);
+        br.pend = 0;
+        widget_invalidate_force(br.page, 0);
+    }
     level_t *l = top();
     /* A shown level's refresh (Download Progress) is cut into head too, so a failed one leaves its
      * fields on the reply it shows. */
@@ -982,8 +1027,8 @@ static void got(void) {
         if (ok && act == A_SIGNOUT) br.until = time_now_ms() + SPOT_SIGNOUT_MS;
         if (login || (ok && act == A_SIGNOUT))
             base(S_PAIR);
-        else if (ok && act == A_SET)
-            l->state = S_LOAD, show();
+        else if (ok && act == A_SET) /* asked again under the overlay, its rows meanwhile */
+            hold_load(l);
         else if (ok && act == A_PLAY) {
             sp.loading = 1; /* not a timed-out play's 2, which spot_started takes as any track */
             sp.loading = !spot_started();
@@ -1072,13 +1117,13 @@ static int go(const void *unused) {
     int i = br.arg;
     char a[sizeof l->args] = "";
     br.go = 0;
-    if (br.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
+    if (br.pend || br.hold) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (br.next == G_SHOW)
         show();
     else if (br.next == G_SEARCH)
         push(L_CATS, "", "", "", br.term);
-    else if (l->state == S_ERROR) /* Retry */
-        l->state = S_LOAD, show();
+    else if (l->state == S_ERROR) /* Retry, under the overlay over the error page */
+        hold_load(l);
     else if (l->state == S_OLD || l->state == S_PAIR) {
         if (l->state == S_OLD && !i) spot_np();
     } else if (l->kind == L_BASE) {
@@ -1202,7 +1247,7 @@ static int br_tick(const void *unused) {
 
 static int br_leave(const void *unused) {
     br.leave = 0;
-    if (br.pend) /* the load cancelled: the page stays */
+    if (br.pend || br.hold) /* the load cancelled: the page stays */
         load_cancel();
     else if (br.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the
                          box */
@@ -1221,13 +1266,13 @@ static int br_keyup(void *ctx, void *event) {
 
 /* The browser's loading overlay, over its rows while a list loads (spot_paint, ringnav_paint's). */
 static void br_paint(void *w, void *canvas) {
-    if (br.pend && w && w == br.page) load_spinner_paint(w, canvas);
+    if ((br.pend || br.hold) && w && w == br.page) load_spinner_paint(w, canvas);
 }
 
 /* The page's touches while the loading overlay shows: taken from its rows, a lift off the spinner
  * cancelling the load (list_marks.c load_touch). */
 static int br_touch(void *ctx, void *event) {
-    return br.pend && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
+    return (br.pend || br.hold) && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
                ? load_touch(br.page, event, load_cancel)
                : 0;
 }
@@ -1243,20 +1288,33 @@ static int br_closed(void *ctx, void *event) {
     return 0;
 }
 
+/* The browser's window, its touches bound (br_touch). 0 when none could be made. */
+static int br_make(void) {
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    if (!(br.page = page_open("spotbrowse_page", br_closed, br_keyup))) return 0;
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(br.page, touches[t], br_touch, 0);
+    return 1;
+}
+
+/* The first open given up under the overlay (Return, a tap off the spinner, its window gone): no
+ * page was made, and librespot runs on. */
+static void spot_gone(void) { br_closed(0, 0); }
+
 /* Streaming's Spotify row (home.c ringnav_stream): librespot started if it is not, and the
- * browser; without librespot on the card, Now Playing says so. While Smart Wi-Fi brings the radio
- * back, librespot starts once the link is up (smart_hold), as it never retries a Connect login or
- * mDNS that failed at its start. */
+ * browser, opening once its first answer is there, the loading overlay over Streaming meanwhile
+ * (at once with no window to lay it over); without librespot on the card, Now Playing says so.
+ * While Smart Wi-Fi brings the radio back, librespot starts once the link is up (smart_hold), as it
+ * never retries a Connect login or mDNS that failed at its start. */
 int spot_open(void *ctx, void *event) {
     if (access(SPOT_BIN, 0) && !sp.launched) return spot_np(), 0;
     if (!sp.launched && smart_hold(spot_open, ctx, 0)) return 0;
     spot_launch();
-    if (br.page || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
-    if (!(br.page = page_open("spotbrowse_page", br_closed, br_keyup))) return free(br.lv), br.lv = 0, 0;
-    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
-                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
-    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
-        widget_on(br.page, touches[t], br_touch, 0);
+    void *from = page_in_use();
+    if (br.lv || !(br.lv = calloc(SPOT_DEPTH + 1, sizeof *br.lv))) return 0;
+    if (!from && !br_make()) return free(br.lv), br.lv = 0, 0;
+    if (!br.page) br.hold = 1 + S_LOAD, load_over(from, spot_gone); /* the page once it answers */
     br.depth = 1;
     br.until = sp.launch_at + SPOT_OLD_MS;
     tk_snprintf(br.lv[0].op, sizeof br.lv[0].op, "account");
