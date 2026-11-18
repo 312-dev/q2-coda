@@ -1169,7 +1169,8 @@ the wheel walks:
   - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
     a card app's fields, Car Remote's phone name, and any field no caller names.
 
-One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
+One turn of the wheel stops on the switcher or the return key, whichever end it reaches; a new turn goes on
+round to the other. Play/Pause submits
 from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
 cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
 each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
