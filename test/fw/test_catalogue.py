@@ -1733,3 +1733,28 @@ def test_streaming_songs_off_and_on_again_starts_the_app_again(rig, fw):
     assert toggle() == 1
     rig.poll(1)
     assert started == [f'/bin/sh /mnt/mmc/.{APP}/run'.encode()] * 2
+
+
+def test_a_server_songs_row_is_the_playing_one_by_its_path(rig, fw, mcl, low):
+    """docs/oled-design.md#song-rows: a song list names a server song by its row (its fileurl), the queue by the
+    Stream Cache copy that plays it; song_playing maps the copy back to its row, by path. Another row of the same
+    title is not the playing one, nor is anything while stopped."""
+    copy = '/mnt/mmc/.subsonic/stream/s1.flac'
+    rig.write(1, [song_row('s1', 'Same Title', 'B', 'A', 1, 100, 1, local=copy),
+                  song_row('s2', 'Same Title', 'B', 'A', 2, 100, 2)])
+    rig.poll()
+    deques, keep = Rows(fw), []
+
+    def record(path):
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        struct.pack_into('<I', r, O['REC_PATH'], low(path.encode()))
+        keep.append(r)
+        return C.addressof(r)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = deques.new([record(copy)])
+    mcl.pos = 0
+    status = [2]
+    fw.mock('mclGetPlayStatus', lambda *_: status[0])
+    playing = fw.fn('song_playing', C.c_int, C.c_void_p)
+    assert [playing(record(p)) for p in (url('s1'), url('s2'), copy, '/mnt/mmc/Music/s1.flac')] == [1, 0, 1, 0]
+    status[0] = 1
+    assert playing(record(url('s1'))) == 0

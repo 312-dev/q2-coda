@@ -40,7 +40,7 @@ extern int album_before(const void *, const void *), folder_cmp(void *, void *),
     album_only(void *, void *, int);
 extern unsigned queue_hash(void *); /* navigation.c */
 extern int resume_held(void);       /* navigation.c */
-extern void resume_return(void), resume_restart(void);
+extern void resume_restart(void);
 extern void un_source_take(void *q, int at, int type); /* upnext.c */
 
 typedef struct {
@@ -960,10 +960,11 @@ static void commit(unsigned next) {
 }
 /* player_start_queue: stock's View Queue row (and its queue delete, DLNA and URL plays) start queue
  * index at. View Queue's row of the song playing or paused opens Now Playing, the song never sent
- * again (song_rows.c song_playing, as ringnav_player_start's picks). In advanced play the pick is committed first: a shuffle's through Play Next's path, so
- * the order carries on after it and it neither plays again later in the pass nor drops the tracks
- * it jumped; an ordered queue's in place, so the tracks after it follow. A pick inside a pending
- * Play Next takes only its entry off the list, the rest stay pending. */
+ * again (song_rows.c song_playing, as ringnav_player_start's picks). In advanced play the pick is
+ * committed first: a shuffle's through Play Next's path, so the order carries on after it and it
+ * neither plays again later in the pass nor drops the tracks it jumped; an ordered queue's in
+ * place, so the tracks after it follow. A pick inside a pending Play Next takes only its entry off
+ * the list, the rest stay pending. */
 #define VIEW_QUEUE_RET 0x53acf8 /* playerqueue_row_on_click: View Queue's row, past its checks */
 int ringnav_start_queue(int at) {
     unsigned x = (unsigned)at;
@@ -1264,9 +1265,9 @@ void playback_np(void) {
 #define ALBUMINFO_PLAY_RET 0x4ac008 /* a song list's Play All (localmusic_songs_play_all) */
 /* A pick of the song playing or paused (song_rows.c song_playing: its path and CUE start, a server
  * row by its fileurl) never loads it again, from any row of any list (the user's report: a tap on
- * the playing song's row restarted it; docs/oled-design.md#song-rows): the same row of the same list
- * changes nothing, another list's of the same class (a queue's class is stock's: a folder's, an
- * album's, a playlist's) puts that list's songs after it, as a radio of it does
+ * the playing song's row restarted it; docs/oled-design.md#song-rows): the same row of the same
+ * list changes nothing, another list's of the same class (a queue's class is stock's: a folder's,
+ * an album's, a playlist's) puts that list's songs after it, as a radio of it does
  * (playback_queue_rest), and the queue stays as it is for any other, or when a server row is in
  * the list (the firmware plays none after it). A page that stays (an album's play, Play All) opens
  * Now Playing; Now Playing's own pick plays a paused song on. SyncLink's (0x5264c4, 0x5266b4), off

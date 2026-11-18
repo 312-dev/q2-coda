@@ -2545,16 +2545,6 @@ def test_resume_held_says_whether_starting_over_loses_a_place(player, recs, fw):
     assert held() == 1
 
 
-def test_resume_return_comes_back_to_this_second(player, recs, fw, st):
-    player.play([recs(path=LONG)])
-    player.poll(0), player.poll(1), player.poll(400)
-    fw.fn('resume_return', None)()
-    assert (st('rs_go').value, st('rs_go_key', C.c_uint).value) == (400, key_of(LONG))
-    player.total = 0
-    fw.fn('resume_return', None)()
-    assert st('rs_go').value == 400  # stopped: the place it stopped at
-
-
 BOOK = '/mnt/mmc/Audiobooks/book.m4b'
 CHAPTERS = [(0, 600), (600, 1200), (1200, 0)]
 

@@ -1276,9 +1276,17 @@ void search_strip_paint(void *w, void *canvas) {
                    : kind == SS_ALBUM ? catalogue_album_unavailable(r)
                                       : catalogue_unavailable(r),
             right = grey ? SS_MARK_X - CAT_MARK_W / 2 - SS_MARK_GAP : SS_RIGHT;
+        /* the playing song's: its title in the accent and its bars on the right column
+         * (song_rows.c, docs/oled-design.md#song-rows) */
+        int playing = kind == SS_SONG && !grey && song_playing(r);
         unsigned ink = on ? (grey ? 0xb3ffffffu : 0xffffffffu)
                           : 0xff000000u | (grey ? 0x666666 : primary),
                  note = grey || on ? ink : 0xff000000u | tertiary;
+        if (playing) {
+            playing_bars(canvas, right + 1, y + SS_PITCH / 2, on);
+            right -= PLAY_BARS_W + SONG_COL_GAP;
+            if (!on) ink = 0xff000000u | (scheme()->tones[0] & 0xffffff);
+        }
         int tw = ss_text(canvas, 0, title, 24, y, SS_PITCH,
                          SS_TITLE_W < right - 24 ? SS_TITLE_W : right - 24, SS_PX_ROW, ink);
         /* beside it, what the row is, as an iPod's result icons say: "Artist", "Album" and its

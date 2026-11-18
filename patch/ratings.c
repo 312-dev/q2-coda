@@ -485,8 +485,9 @@ static int rated_open(void *ctx, void *event) {
         /* a space for no artist: an empty detail would centre the title alone */
         tk_snprintf(detail, sizeof detail, artist && *artist ? "· %s" : " ",
                     artist && *artist ? artist : "");
-        rate_row(page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play),
-                 of[i]);
+        void *item = page_row_detail(view, i, track_name(name, sizeof name, t), detail, rt_play);
+        playing_mark(item, t, 0);
+        rate_row(item, of[i]);
     }
     free(h);
     free(of);

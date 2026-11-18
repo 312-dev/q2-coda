@@ -9,7 +9,7 @@ import struct
 import pytest
 
 from conftest import O, Deques, high_halves
-from test_nav_painters import Page, Scheme, layout, low, mapped, rgba, scratch, st, text_ink  # noqa: F401  (fixtures)
+from test_nav_painters import Canvas, Page, Scheme, layout, low, mapped, oled, rgba, scratch, st, text_ink  # noqa: F401
 
 TITLE_HIGHS = high_halves(3)  # each row's title
 
@@ -165,3 +165,37 @@ def test_nothing_is_marked_while_stopped(fw, st, mcl, low, titles, accent):
     fw.mock('mclGetPlayStatus', lambda *_: 1)
     songs.paint()
     assert not songs.ink(1, accent()) and sorted(songs.lengths()) == [0, 1, 2]
+
+
+def test_a_payload_lists_playing_row_has_its_bars_and_gives_its_title_back(fw, st, mcl, low, accent):
+    """Most Played's, Long Songs', the Ratings lists' and the card's rows (page_row_detail, marked by
+    playing_mark): after the row paints, the playing one's bars stand on the right column in place of nothing (A),
+    its title in the accent narrowed to end SONG_COL_GAP before them; once another song plays, the title's width
+    comes back and nothing is drawn."""
+    ui = oled(fw, st)
+    view = ui.add('scroll_view', ui.window('mostplayed_page'), (0, 26, 375, 294))
+    item = ui.add('list_item', view, (0, 0, 375, 64))
+    label = ui.add('hscroll_label', item, (24, 0, 327, 40), 'title')
+    deques, keep = Deques(fw), []
+
+    def record(path):
+        r = C.create_string_buffer(O['REC_SIZE'] + 8)
+        struct.pack_into('<I', r, O['REC_PATH'], low(path))
+        keep.append(r)
+        return C.addressof(r)
+    fw.fn('playing_mark', None, C.c_void_p, C.c_void_p, C.c_int)(item.addr, record(b'/mnt/mmc/a.flac'), 0)
+    queue = fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint)
+    queue.value = deques.new([record(b'/mnt/mmc/a.flac')])
+    mcl.pos = 0
+    fw.mock('mclGetPlayStatus', lambda *_: PLAYING)
+    canvas = Canvas(fw)
+    paint = fw.fn('playing_rows_paint', None, C.c_void_p, C.c_void_p)
+    paint(item.addr, canvas.addr)
+    bars = sorted({x for (x, y), c in canvas.px.items() if c == accent()})
+    assert bars and max(bars) - min(bars) + 1 == BARS_W
+    assert label.box[0] + label.box[2] + GAP == min(bars)
+    assert text_ink(fw, st, label) == accent()
+    queue.value = deques.new([record(b'/mnt/mmc/b.flac')])
+    canvas.px.clear()
+    paint(item.addr, canvas.addr)
+    assert not canvas.px and label.box[2] == 327 and text_ink(fw, st, label) == 0xffffffff

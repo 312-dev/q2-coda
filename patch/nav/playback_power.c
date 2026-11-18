@@ -114,14 +114,6 @@ int resume_held(void) {
     return sec >= RESUME_EDGE_S && sec < st.rs_total - RESUME_EDGE_S;
 }
 
-/* A load of the file playing, from another list: back to this second once it starts over. */
-void resume_return(void) {
-    int sec, total;
-    st.rs_go = player_playtime_and_length(&sec, &total) < 0 ? st.rs_sec : sec;
-    st.rs_go_key = st.rs_key;
-    st.rs_go_at = (unsigned)time_now_ms();
-}
-
 /* A confirmed restart: a stop before it doesn't send it back to the place. */
 void resume_restart(void) { st.rs_stopped = 0; }
 
