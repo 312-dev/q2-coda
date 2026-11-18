@@ -526,10 +526,11 @@ for index, (_, name) in enumerate(TIMEZONES):
     assert [zones.text(c[1]) for c in zones.calls if c[0]=='toolsSetTimeZone']==[name]
     assert len([c for c in zones.calls if c[0]=='tzset@GLIBC_2.0'])==1
 passed()
-# autotime_page's zone rows show the offset each zone has now and run west to east by it, ties in
-# TIMEZONE_ORDER; each is built, ticked and named (image_choice) by its saved index, then the saved
-# zone is set again. Here New York and Halifax are on daylight saving. A label too long for the row keeps its ellipsis rather than scrolling once.
-assert [timezone_offset(TIMEZONES[i][0]) for i in TIMEZONE_ORDER]==sorted(timezone_offset(l) for l,_ in TIMEZONES)
+# autotime_page's zone rows show each zone's city and, as its value, the offset it has now: the saved zone first,
+# then the rest west to east by it, ties in TIMEZONE_ORDER (by city); each is built, ticked and named (image_choice)
+# by its saved index, then the saved zone is set again. Here New York and Halifax are on daylight saving. A label too
+# long for the row keeps its ellipsis rather than scrolling once.
+assert [TIMEZONES[i][0].split(' ',1)[1] for i in TIMEZONE_ORDER]==sorted(l.split(' ',1)[1] for l,_ in TIMEZONES)
 SUMMER={'America/New_York','America/Halifax'}
 class ZoneRowMachine(TimezoneMachine):
     tz=TIMEZONES[0][1]
@@ -546,20 +547,22 @@ zones.mock('image_create','hscroll_label_create','widget_use_style','widget_set_
 zone_now={i:timezone_offset(l)+60*(z in SUMMER) for i,(l,z) in enumerate(TIMEZONES)}
 zone_rows=sorted(TIMEZONE_ORDER,key=lambda i:zone_now[i])
 def zone_label(i):
-    m=abs(zone_now[i]); return f"GMT{'-' if zone_now[i]<0 else '+'}{m//60}{f':{m%60:02d}' if m%60 else ''} {TIMEZONES[i][0].split(' ',1)[1]}"
+    m=abs(zone_now[i]); return TIMEZONES[i][0].split(' ',1)[1],f"UTC{'-' if zone_now[i]<0 else '+'}{m//60}{f':{m%60:02d}' if m%60 else ''}"
 saved=zone_rows[5]; zones.byte(syms['g_time_zone'],saved)
+zone_rows=[saved]+[i for i in zone_rows if i!=saved]  # pinned at the top
 for row in range(1,len(TIMEZONES)+1):
     item=zones.node('list_item'); zones.calls=[]; zones.call(address=HOOKS['timezone_row'][0],args=(item,row,0,0),gap=0)
     if row==1:
         assert len([c for c in zones.calls if c[0]=='tzset@GLIBC_2.0'])==len(TIMEZONES)+1
         assert [zones.text(c[1]) for c in zones.calls if c[0]=='toolsSetTimeZone']==[z for _,z in TIMEZONES]+[TIMEZONES[saved][1]]
-    index=zone_rows[row-1]; button,=zones.nodes[item]['children']; label,image=zones.nodes[button]['children']
+    index=zone_rows[row-1]; button,=zones.nodes[item]['children']; label,image,value=zones.nodes[button]['children']
     assert zones.nodes[button]['name']==str(index+1)  # the click handler's atoi, less one, is the saved index
-    assert zones.nodes[label]['text']==zone_label(index) and zones.nodes[label]['hscroll_label_set_only_focus']==1
+    assert (zones.nodes[label]['text'],zones.nodes[value]['text'])==zone_label(index)
+    assert zones.nodes[label]['hscroll_label_set_only_focus']==1 and zones.nodes[value]['name']=='_setting_value'
     assert zones.nodes[image]['name']==f'image_choice{index}' and zones.nodes[image]['image']==('select' if index==saved else 'unselect')
 zone_labels=[zone_label(i) for i in zone_rows]
-assert zone_labels.index('GMT-4 New York')<zone_labels.index("GMT-3:30 St. John's")<zone_labels.index('GMT-3 Halifax')<zone_labels.index('GMT-3 Buenos Aires')
-assert 'GMT-5 Chicago' not in zone_labels and 'GMT-6 Chicago' in zone_labels
+assert zone_labels.index(('New York','UTC-4'))<zone_labels.index(("St. John's",'UTC-3:30'))<zone_labels.index(('Buenos Aires','UTC-3'))<zone_labels.index(('Halifax','UTC-3'))
+assert ('Chicago','UTC-5') not in zone_labels and ('Chicago','UTC-6') in zone_labels
 passed()
 # Stock's caption, in the row-high item between row 0 and row 1, sits at y 20 of it, over row 1, and the row hook leaves
 # it there, as it leaves row 0 with no caption (Automatic off).

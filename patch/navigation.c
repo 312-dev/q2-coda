@@ -12,6 +12,7 @@ extern void stock_timezone_row_trampoline(void *, int);
 
 static const char *const tz_names[] = TIMEZONE_NAMES;
 #define TZ_COUNT (sizeof tz_names / sizeof *tz_names)
+#define TZ_CHECK_GAP 24 /* the picker's 12 px check and its gap, at the right column */
 
 static void clock_zone(void);
 int ringnav_timezone(void) {
@@ -30,9 +31,9 @@ long clock_back(long long wall) {
 }
 
 /* Each zone's offset from UTC now, in seconds, daylight saving included: localtime's, with each
- * zone's TZ set in turn; then the saved zone is set again. rows gets the zones west to east by it,
- * ties in TIMEZONE_ORDER (standard offset, then name). ponytail: another thread's localtime in that
- * moment may read one of these zones. */
+ * zone's TZ set in turn; then the saved zone is set again. rows gets the saved zone first, then the
+ * rest west to east by it, ties in TIMEZONE_ORDER (by city). ponytail: another thread's localtime
+ * in that moment may read one of these zones. */
 static long tz_offset[TZ_COUNT];
 static void tz_now(unsigned char *rows) {
     static const unsigned char order[] = TIMEZONE_ORDER;
@@ -50,12 +51,17 @@ static void tz_now(unsigned char *rows) {
         for (; j && tz_offset[rows[j - 1]] > tz_offset[order[i]]; --j) rows[j] = rows[j - 1];
         rows[j] = order[i];
     }
+    unsigned saved = g_time_zone, i = 0; /* pinned at the top, with its check */
+    while (i < TZ_COUNT && rows[i] != saved) ++i;
+    for (; i < TZ_COUNT && i; --i) rows[i] = rows[i - 1];
+    if (saved < TZ_COUNT) rows[0] = (unsigned char)saved;
 }
 
-/* Row i > 0 shows zone rows[i - 1] as "GMT-4 New York", the offset it has now, so a zone on
- * daylight saving reads as its clocks do; stock names, ticks and clicks by the index it is given.
- * Focus-only, a label too long for the row keeps its ellipsis instead of scrolling once as the
- * page opens. */
+/* Row i > 0 shows zone rows[i - 1] as a key/value row, "New York" and "UTC-4", the offset it has
+ * now, so a zone on daylight saving reads as its clocks do (docs/oled-design.md#screens); stock
+ * names, ticks and clicks by the index it is given. The checked row's value stops short of its
+ * check. Focus-only, a label too long for the row keeps its ellipsis instead of scrolling once as
+ * the page opens. */
 void ringnav_timezone_row(void *item, int i) {
     static const char *const cities[] = TIMEZONE_CITIES;
     static unsigned char rows[TZ_COUNT];
@@ -74,13 +80,15 @@ void ringnav_timezone_row(void *item, int i) {
         if (zone < 0) continue;
         long off = tz_offset[zone];
         int m = (int)((off < 0 ? -off : off) / 60);
-        char s[32];
+        char s[16];
         if (m % 60)
-            tk_snprintf(s, sizeof s, "GMT%s%d:%02d %s", off < 0 ? "-" : "+", m / 60, m % 60,
-                        cities[zone]);
+            tk_snprintf(s, sizeof s, "UTC%s%d:%02d", off < 0 ? "-" : "+", m / 60, m % 60);
         else
-            tk_snprintf(s, sizeof s, "GMT%s%d %s", off < 0 ? "-" : "+", m / 60, cities[zone]);
-        widget_set_text_utf8(label, s);
+            tk_snprintf(s, sizeof s, "UTC%s%d", off < 0 ? "-" : "+", m / 60);
+        list_value(label, cities[zone], s);
+        void *v = zone == g_time_zone ? widget_lookup(row, "_setting_value", 0) : (void *)0;
+        if (v) widget_move_resize(v, I(v, W_X) - TZ_CHECK_GAP, I(v, W_Y), I(v, W_W), I(v, W_H));
+        break; /* the value is a label too */
     }
 }
 /* A load's songtable reads (library_query): 0 stock's own; 1 music (LIBRARY_MUSIC): spoken

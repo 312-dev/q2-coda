@@ -517,7 +517,7 @@ def zone_rows(q2):
     """System settings → Date and Time → Time Zone (autotime_page): stock builds its rows in order, row 0 the
     automatic switch, each through its row builder, hooked (ringnav_timezone_row), which hands stock the index it
     names, ticks and clicks the row by (row k: zone k - 1, as stock's table); stock's row is a button holding a
-    label. [(the label's text, stock's index)] top to bottom."""
+    label, and the hook adds its value. [(the label's text, the value's, stock's index)] top to bottom."""
     given: list[int] = []
     def stock_row(item, index, *_):
         given.append(index)
@@ -529,13 +529,14 @@ def zone_rows(q2):
     for i in range(len(TIMEZONES) + 1):
         item = q2.screen.new(view, 'list_item', 0, 0, 375, 70)
         build(item, i)
-        label, = [w for w in q2.screen.subtree(item) if q2.screen.types[w] == 'hscroll_label']
-        rows.append((q2.screen.texts.get(label, ''), given[-1]))  # '': stock's text, which the model leaves out
+        label, *value = [w for w in q2.screen.subtree(item) if q2.screen.types[w] == 'hscroll_label']
+        # '': stock's text, which the model leaves out
+        rows.append((q2.screen.texts.get(label, ''), q2.screen.texts.get(value[0], '') if value else '', given[-1]))
     return rows
 
 
-@pytest.mark.parametrize('daylight, york, clock', [(set(), 'GMT-5 New York', '07:00'),
-                                                   ({'America/New_York'}, 'GMT-4 New York', '08:00')],
+@pytest.mark.parametrize('daylight, york, clock', [(set(), ('New York', 'UTC-5'), '07:00'),
+                                                   ({'America/New_York'}, ('New York', 'UTC-4'), '08:00')],
                          ids=['standard', 'daylight-saving'])
 def test_a_time_zone_picked_from_its_list_moves_the_clock_at_once_and_is_set_again_at_boot(q2, daylight, york,
                                                                                             clock):
@@ -546,16 +547,17 @@ def test_a_time_zone_picked_from_its_list_moves_the_clock_at_once_and_is_set_aga
     bar = status_bar(q2)
     assert q2.screen.texts[bar] == '12:00'
     rows = zone_rows(q2)
-    assert rows[0] == ('', 0)  # the switch: stock's own
+    assert rows[0] == ('', '', 0)  # the switch: stock's own
     # the list read each zone's offset now; the saved zone is set again
     assert q2.zone == 'Europe/London' and q2.screen.texts[bar] == '12:00'
     listed = rows[1:]
-    offsets = [host.tools_build.timezone_offset(label) for label, _ in listed]
-    assert offsets == sorted(offsets)  # west to east, by the offset each has now
-    assert sorted(index for _, index in listed) == list(range(1, len(TIMEZONES) + 1))  # each zone once
+    assert listed[0] == ('London', 'UTC+0', zones.index('Europe/London') + 1)  # the saved zone, pinned first
+    offsets = [host.tools_build.timezone_offset('GMT' + value[3:]) for _, value, _ in listed[1:]]
+    assert offsets == sorted(offsets)  # then west to east, by the offset each has now
+    assert sorted(index for *_, index in listed) == list(range(1, len(TIMEZONES) + 1))  # each zone once
     # each row clicks the zone it names: its city is its index's
-    assert all(label.split(' ', 1)[1] == TIMEZONES[index - 1][0].split(' ', 1)[1] for label, index in listed)
-    picked, = [index for label, index in listed if label == york]
+    assert all(city == TIMEZONES[index - 1][0].split(' ', 1)[1] for city, _, index in listed)
+    picked, = [index for city, value, index in listed if (city, value) == york]
     assert picked - 1 == zones.index('America/New_York')
     tzsets = len(q2.fw.calls('fw_tzset'))
     select_timezone(q2, picked - 1)  # stock's click on that row
