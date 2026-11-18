@@ -659,6 +659,10 @@ as a menu's; a lit row's foot never passes y 282.
 - A row's title and artist are the song's tags; a song streamed from a server, not yet played, has
   its server's title and artist (or its download's tags), not its download's file name
   ([internals: Card apps](internals.md#card-apps), Tags).
+- **A song still to download** (a radio's, or an album streamed, past the songs Download Ahead has
+  fetched) follows the queue's songs: its title in Text Secondary and the server row's cloud on the
+  right column (white on the selection). Center on it moves to it as Next does: Now Playing shows it
+  with the loading spinner and it plays once enough of it is there; nothing refuses.
 - **The bump arrow**, Phosphor `arrow-up` (regular, 16 px, Text Tertiary; white on the selection),
   stands on the right column of each queued song but the first. A tap on it, or Play/Pause held on
   the row, moves the song to the top of Playing Next, where a 3 px Accent Blue edge marks it for

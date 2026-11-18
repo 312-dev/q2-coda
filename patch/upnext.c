@@ -18,8 +18,15 @@
  * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
  * down on it (menu_modal.c modal_touch_close).
  *
+ * A card app's playlist session (a Subsonic radio, an album streamed) shows its songs not yet
+ * queued after the queue's, as pending rows (addon_pending: named and with covers from the
+ * server's rows, not their downloads): the title dimmed and a cloud on the right while each waits
+ * to download. Centre on one moves to it as Next does (addon_pending_play): Now Playing shows it
+ * buffering at once and it plays once enough of it is there.
+ *
  * The rows are taken again whenever the queue moves on (un_poll, once a second: the song playing,
- * the queue's size and loads, Playing Next), so songs ending leave the list as they play.
+ * the queue's size and loads, Playing Next, the session's list), so songs ending leave the list as
+ * they play and a radio's new songs join it.
  * ponytail: UN_ROWS rows at most, under ringnav's MAX_ENTRIES (512) stops; a table_client page for
  * more. A touch can't drag a lifted row (Centre and the wheel only). */
 #include "navigation.h"
@@ -47,8 +54,11 @@
 #define UN_HOLD_MS 550  /* Centre held this long on a queued row lifts it */
 #define UN_FRESH_MS 700 /* a bumped row's accent edge */
 #define UN_LIFT_RGB RGB_RAISED_2
-#define UN_LIFT_ART RGB_OFF /* a placeholder cover on the lifted card */
-#define UN_BUMP_ZONE 64     /* a tap this near the screen's right edge is on a row's arrow */
+#define UN_LIFT_ART RGB_OFF     /* a placeholder cover on the lifted card */
+#define UN_BUMP_ZONE 64         /* a tap this near the screen's right edge is on a row's arrow */
+#define UN_CLOUD_PX 18          /* a pending row's cloud (catalogue.c CAT_ART_PX) */
+#define UN_PENDING 40           /* a session's pending rows shown at most */
+#define UN_PEND_ROW 0x80000000u /* un.idx's mark of a pending row: un.pend's index under it */
 
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 void *modal_sheet(int (*back)(void *, void *), int (*gone)(void *, void *));
@@ -68,6 +78,8 @@ static struct {
     lvl_clock_t clock; /* the level bars' time along their loop */
     rect_t bars_at;    /* their box at the last paint, on screen (w 0: none painted) */
     char source[128];  /* the queue's source (un_source_take) */
+    void **pend;       /* the session's pending songs (addon_pending), npend of them */
+    unsigned npend;
 } un __attribute__((section(".scratch")));
 
 /* A pick that loads a queue (playback.c ringnav_load): where it came from, for "From ...": an
@@ -83,14 +95,14 @@ void un_source_take(void *q, int at, int type) {
 }
 
 /* The rows' signature: the song playing, the queue's size and loads, the mode, Playing Next, the
- * album covers fetched. */
+ * album covers fetched, the session's pending songs. */
 static unsigned un_sig(void) {
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned pend[64],
         k = playback_next_rows(pend, 64),
         v[] = { (unsigned)MCL(MCL_POS),  q ? deque_size(q) : 0,        playback_loads,
                 (unsigned)MCL(MCL_MODE), (unsigned)playback_option(0), k,
-                album_cover_gen() };
+                album_cover_gen(),       addon_pending_sig() };
     return hash_bytes(fnv(FNV_SEED, (const unsigned char *)""), (const unsigned char *)v,
                       sizeof v) ^
            hash_bytes(FNV_SEED, (const unsigned char *)pend, k * sizeof *pend);
@@ -105,6 +117,7 @@ static const char *un_cover(void *r, char *url) {
 
 static void *un_record(unsigned at) {
     void *q = P(mcl_pdeqplaylist, 0);
+    if (at & UN_PEND_ROW) return (at &= ~UN_PEND_ROW) < un.npend ? un.pend[at] : (void *)0;
     return q && at < deque_size(q) ? deque_at(q, at) : (void *)0;
 }
 
@@ -154,6 +167,9 @@ static void un_fill(int sel) {
     for (unsigned i = 0; i < npn; ++i) un.idx[i] = pend[i];
     un.n = npn;
     for (unsigned i = k; i < n && un.n < UN_ROWS; ++i) un.idx[un.n++] = up[i];
+    addon_pending_free(un.pend, un.npend); /* the old rows' covers went with un_unload */
+    un.pend = addon_pending(UN_ROWS - un.n < UN_PENDING ? UN_ROWS - un.n : UN_PENDING, &un.npend);
+    for (unsigned i = 0; i < un.npend; ++i) un.idx[un.n++] = UN_PEND_ROW | i;
     un.npn = npn < UN_ROWS ? npn : UN_ROWS;
     un.sig = un_sig();
     void *view = un.view;
@@ -231,6 +247,12 @@ static int un_click(void *ctx, void *event) {
         return un_bump(k), 0;
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned at = un.idx[k];
+    if (at & UN_PEND_ROW) { /* a song still to download: Now Playing moves to it, as a Next */
+        void *r = un_record(at);
+        if (r && !check_forbid_play_no_headset(0)) addon_pending_play(P(r, REC_PATH));
+        navigator_back();
+        return 0;
+    }
     int keeps = q && playback_keeps(q, (int)at);
     if (!keeps && q && at < deque_size(q) && !check_forbid_play_no_headset(0))
         playback_pick(), player_start_queue((int)at);
@@ -401,6 +423,8 @@ static void un_bars_sync(void) {
 static int un_closed(void *ctx, void *event) {
     (void)ctx, (void)event;
     un_unload();
+    addon_pending_free(un.pend, un.npend);
+    un.pend = (void **)0, un.npend = 0;
     stop_timer(&un.poll);
     stop_timer(&un.hold);
     stop_timer(&un.fresh_timer);
@@ -497,13 +521,20 @@ void upnext_paint(void *w, void *canvas) {
         const char *title = now_tag(r, REC_TITLE), *artist = P(r, REC_ARTIST);
         if (!title || !*title) title = track_name(name, sizeof name, r);
         int queued = k >= 0 && (unsigned)k < un.npn, right = un.lifted && queued ? 30 : 0;
-        if (!right && queued && k > 0) right = 30; /* the arrow's room */
-        ui_text(canvas, title, lifted, lifted ? TYPE(18) : TYPE(17), 0xffffff, on, tx, UN_TITLE_Y,
-                end - right - tx, 2);
+        int pending = (un.idx[k] & UN_PEND_ROW) != 0;
+        if (!right && ((queued && k > 0) || pending)) right = 30; /* the arrow's or cloud's room */
+        ui_text(canvas, title, lifted, lifted ? TYPE(18) : TYPE(17),
+                pending && !on ? RGB_SECONDARY : 0xffffff, on, tx, UN_TITLE_Y, end - right - tx, 2);
         if (artist && *artist)
             ui_text(canvas, artist, 0, TYPE(13), on || lifted ? 0xffffff : RGB_TERTIARY, on, tx,
                     UN_ARTIST_Y, end - right - tx, 2);
-        if (un.lifted && queued)
+        if (pending) /* waiting to download: the cloud a server song's row has */
+            paint_art(w, canvas,
+                      theme_art(on             ? "mark_cloud_w"
+                                : ipod_light() ? "mark_cloud_l"
+                                               : "mark_cloud_d"),
+                      end - 8 - UN_CLOUD_PX / 2, h / 2 - UN_CLOUD_PX / 2);
+        else if (un.lifted && queued)
             grip_mark(canvas, 375 - geom_val(V_RIGHT_X) - UN_GRIP_X - I(canvas, CANVAS_X), h / 2,
                       lifted || on ? 0xffffff : tok(TOK_TERTIARY), 100); /* list_marks.c's */
         else if (queued && k > 0) {
