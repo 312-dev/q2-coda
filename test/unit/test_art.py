@@ -111,8 +111,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     half's) and white for the selection, a disabled row's caret in Text Tertiary (each half's), the pickers' check
     (bold) in Accent Blue and white for the selection, the Wi-Fi page's signal and lock (regular) in Text Primary
     (each half's), the shuffle confirmation's glyph (bold) in Accent Blue, Now Playing's heart and More (regular) in
-    Text Primary (each half's), More pressed in Text Secondary and the full heart (fill) in Accent Blue, and the
-    Ratings rows' filled and outlined hearts, Now Playing's rating page's stars (filled and outlined, 44 px and the
+    Text Primary (each half's), the heart 34 px and its full one (fill) in Text Primary too, More pressed in Text Secondary, and the
+    Ratings rows' filled and outlined stars (14 px, and white on the bar), Now Playing's rating page's stars (filled and outlined, 44 px and the
     wheel's 52 px target) in Text Primary (each half's), and Streaming's service marks in the folder's inks, all from the vendored
     Phosphor SVGs but TIDAL's mark, drawn in art.py, and Subsonic's, q2-coda's own SVG, and the menu sheet's symbols
     (regular, 19 px) in Text Secondary (each half's) and white for the selection and the picker's check in Accent Blue,
@@ -134,7 +134,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock', 'trash') for k in ('d', 'l')]
-    glyphs = {'np_fav': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0, 'np_more_d': 0xffffff, 'np_more_l': 0,
+    hearts = {'np_fav_d': 0xffffff, 'np_fav_l': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0}  # Text Primary, no colour
+    glyphs = {'np_more_d': 0xffffff, 'np_more_l': 0,
               'np_moredown_d': 0xababab, 'np_moredown_l': 0x5c5c5c}
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
     stars = {f'npstar_{on}{big}_{k}': (px, 0xffffff if k == 'd' else 0) for on in ('on', 'off')
@@ -179,7 +180,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *hearts, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
@@ -200,8 +201,9 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                           ('holdback', art.HOLD_BACK_PX, 0xffffff),  # search_strip.c's Return-held card
                           *((n, art.ROW_ICON_PX, 0 if n.endswith('_l') else 0xffffff) for n in wifi),
                           *((n, 22, {'d': 0xababab, 'l': 0x5c5c5c, 'on': blue}[n.rsplit('_', 1)[1]]) for n in modes),
-                          *((n, art.ROW_ICON_PX, blue if n == 'np_fav' else rgb) for n, rgb in glyphs.items()),
-                          *((n, art.RATE_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in rates),
+                          *((n, art.ROW_ICON_PX, rgb) for n, rgb in glyphs.items()),
+                          *((n, art.NP_HEART_PX, rgb) for n, rgb in hearts.items()),
+                          *((n, art.RATE_PX, {'d': 0xffffff, 'l': 0, 'w': 0xffffff}[n[-1]]) for n in rates),  # Text Primary
                           *((n, px, c) for n, (px, c) in stars.items()),
                           *((n, art.STREAM_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff}[n[-1]]) for n in marks),
                           *((n, art.MENU_ICON_PX, {'d': 0xababab, 'l': 0x5c5c5c, 'w': 0xffffff, 'a': blue}[n.rsplit('_', 1)[1]]) for n in menus),
@@ -415,8 +417,8 @@ def test_the_return_key_s_marks_are_a_magnifier_an_arrow_and_a_check_white_and_t
             assert at(*p)[3] == 0, p
 
 
-def test_oleds_rating_hearts_are_phosphors_filled_and_outlined_heart():
-    """A filled heart inks its middle, the outlined one leaves it clear."""
+def test_oleds_ratings_rows_stars_are_phosphors_filled_and_outlined_star():
+    """A Ratings row's filled star inks its middle, the outlined one leaves it clear."""
     got = art.images(theme.builtins()[0])
     mid = art.RATE_PX // 2
     for name, middle in (('oled_rate_on_d', True), ('oled_rate_off_d', False)):
@@ -441,10 +443,10 @@ def test_oleds_subsonic_mark_is_q2_codas_submarine():
     assert all(at(x, y)[3] == 0 for x, y in ((3, 5), (16, 5), (10, 10), (10, 17)))
 
 
-@pytest.mark.parametrize('name', ['wifi_3_d', 'lock_d', 'trash_d', 'folder_d', 'shuffle_w', 'np_more_d', 'np_fav',
+@pytest.mark.parametrize('name', ['wifi_3_d', 'lock_d', 'trash_d', 'folder_d', 'shuffle_w', 'np_more_d',
                                   'stream_spotify_d', 'stream_tidal_d'])
 def test_a_row_symbol_is_drawn_at_its_optical_size(name):
-    """Every 20 px symbol (rows, Now Playing's heart and More, Streaming's marks) is scaled about its ink's centre
+    """Every 20 px symbol (rows, Now Playing's More, Streaming's marks) is scaled about its ink's centre
     until the ink's longer side is ROW_INK (15.5 px), centred in its box, so a wide glyph and a tall one read as one
     size (docs/oled-design.md Icons)."""
     w, h, at = pixels(art.images(theme.builtins()[0])['oled_' + name])

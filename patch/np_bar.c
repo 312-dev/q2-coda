@@ -477,50 +477,75 @@ int np_mode_click(void *target, void *event) {
     return 1;
 }
 
-/* The outer buttons' touch past the target (the user's, 2026-11-18;
- * docs/oled-design.md#now-playing): shuffle's from the window's left edge, Up Next's to its right,
- * each from the row's top down to the window's foot, and across as far as np_mode_click's share for
- * it reaches: shuffle's to the midpoint with radio, Up Next's from the midpoint with repeat, so
- * they never reach Radio or its pill. Only where the target is not: a tap on it is its click. The
- * button (NB_SHUFFLE or NB_QUEUE) whose corner holds the screen's (x, y), else -1. Touch only: what
- * is drawn, its press and its ring stay the glyph's. */
+/* Each button's touch past the target (the user's, 2026-11-18; docs/oled-design.md#now-playing):
+ * from the row's top down to the window's foot, and across as far as np_mode_click's share for it
+ * reaches (the midpoints with its neighbours), shuffle's from the window's left edge and Up Next's
+ * to its right; Radio's and Repeat's are below the target, their shares of it. Only where the
+ * target is not: a tap on it is its click. The button (NB_*) whose area holds the screen's (x, y),
+ * else -1. Touch only: what is drawn, its press and its ring stay the glyph's. */
 static int row_corner(int x, int y) {
     void *mode = np_row_widget();
     if (!mode || !st.np_win || np_stream_error() || !theme()->np_modes) return -1;
-    int mx = 0, my = 0, word, cx[NB_N];
+    int mx = 0, my = 0, word, cx[NB_N], k = 0;
     for (void *p = mode; p && p != window_manager(); p = P(p, W_PARENT))
         mx += I(p, W_X), my += I(p, W_Y);
     if (x < 0 || x >= I(st.np_win, W_W) || y < my || y >= I(st.np_win, W_H) || np_hit(mode, x, y))
         return -1;
     row_x(mx, I(mode, W_W), pill_w(&word), cx);
-    return x <= (cx[NB_SHUFFLE] + cx[NB_RADIO]) / 2 ? NB_SHUFFLE
-           : x > (cx[NB_REPEAT] + cx[NB_QUEUE]) / 2 ? NB_QUEUE
-                                                    : -1;
+    for (int i = 1; i < NB_N; ++i)
+        if (x > (cx[i - 1] + cx[i]) / 2) k = i;
+    return k;
+}
+
+/* More's touch past its glyph's box (the user's, 2026-11-18): right to the window's edge and down
+ * to the progress bar's target, from NP_MORE_REACH_X and NP_MORE_REACH_Y on screen, where the box
+ * is not. 1 when the screen's (x, y) is in it. */
+#define NP_MORE_REACH_X 292
+#define NP_MORE_REACH_Y 172
+static void *glyph_more_of(void);
+/* The art's page at rest: the slide_view on its first page, the lyrics not full screen */
+static int np_heart_page(void) {
+    return st.np_win && st.np_slide && !st.np_full && !widget_get_prop_int(st.np_slide, "value", 0);
+}
+static int more_reach(int x, int y) {
+    void *more = glyph_more_of(), *bar = st.np_win ? widget_lookup(st.np_win, "slider_play", 1) : 0;
+    if (!more || !np_heart_page() || np_hit(more, x, y)) return 0;
+    int foot = I(st.np_win, W_H);
+    if (bar) {
+        foot = I(bar, W_Y);
+        for (void *p = P(bar, W_PARENT); p && p != window_manager(); p = P(p, W_PARENT))
+            foot += I(p, W_Y);
+    }
+    return x >= NP_MORE_REACH_X && x < 375 && y >= NP_MORE_REACH_Y && y < foot;
 }
 
 /* np_taps.c np_tap: a tap that came down at (x0, y0) and lifted at (x, y), within TAP_PX, presses
- * the corner's button when both are in the same one. */
+ * the row button whose area holds both, or clicks More when both are in its reach. */
 void np_corner_tap(int x0, int y0, int x, int y) {
     int k = row_corner(x0, y0);
-    if (k >= 0 && row_corner(x, y) == k) row_press(k);
+    if (k >= 0 && row_corner(x, y) == k) {
+        row_press(k);
+    } else if (more_reach(x0, y0) && more_reach(x, y)) {
+        void *more = glyph_more_of();
+        char click[0x30];
+        stock_dispatch_trampoline(more, pointer_event_init(click, EVT_CLICK, more, 0, 0));
+    }
 }
 
 /* The heart while it shows: Now Playing's, bound (np_glyphs_bind), visible with every parent, on
  * the art page at rest (the slide_view on its first page, the lyrics not full screen). */
 void *np_heart(void) {
     void *h = glyph_fav;
-    if (!h || !st.np_win || !st.np_slide || st.np_full ||
-        widget_get_prop_int(st.np_slide, "value", 0))
-        return (void *)0;
+    if (!h || !np_heart_page()) return (void *)0;
     for (void *p = h; p != st.np_win; p = P(p, W_PARENT))
         if (!p || !widget_get_visible(p)) return (void *)0;
     return h;
 }
-/* The Centre cycle's ring round the heart, its Rating stop: as glyph_framed's, 2 px at
+/* The Centre cycle's ring round the heart, its last stop: as glyph_framed's, 2 px at
  * NP_FOCUS_PAD from the heart's ink, drawn over the page with no fill, so the heart (draw_type
  * center) shows through it. */
 static void heart_ring(void *win, void *canvas) {
-    void *h = st.np_stage == NP_STAGE_RATING && ui_focus_shown() ? np_heart() : (void *)0;
+    void *h = st.np_stage == NP_STAGE_HEART && ui_focus_shown() ? np_heart() : (void *)0;
     unsigned bitmap[64]; /* bitmap_t */
     if (!h || widget_load_image(win, widget_get_prop_str(h, "image", ""), bitmap)) return;
     int x = I(h, W_W) / 2, y = I(h, W_H) / 2, p = NP_FOCUS_PAD + 2;
@@ -580,13 +605,19 @@ void np_modes(void *win, void *canvas) {
 /* 1 while radio is on: shuffle and repeat are the app's (np_mode_click, navigation.c np_centre) */
 int np_radio_on(void) { return rad.on; }
 
-/* playing.modes.icons: the theme's own heart and More as well (tools/art.py np_fav, np_unfav_*,
+/* playing.modes.icons: the theme's own heart and More as well (tools/art.py np_fav_*, np_unfav_*,
  * np_more_*, np_moredown_*). Stock's update and click, and rate_fav_click, keep setting the heart
  * to play_fav or play_unfav, so each paint of the window (ringnav_paint_bg, before the buttons
  * paint) turns either into the theme's, and an empty heart or More drawn for the other half into
  * this one's. An app's heart (tidal_fav_*) stays stock's. ringnav_playing binds the two buttons. */
 static void *glyph_more __attribute__((section(".scratch")));
 static int glyph_half __attribute__((section(".scratch"))); /* More's: 0 none, else 'd' or 'l' */
+/* More while it shows: bound, visible with every parent */
+static void *glyph_more_of(void) {
+    for (void *p = glyph_more; p && p != st.np_win; p = P(p, W_PARENT))
+        if (!widget_get_visible(p)) return (void *)0;
+    return st.np_win ? glyph_more : (void *)0;
+}
 void np_glyphs_bind(void *win) {
     glyph_fav = widget_lookup(win, "img_fav", 1);
     glyph_more = widget_lookup(win, "img_more", 1);
@@ -603,9 +634,9 @@ void np_glyphs(void *win) {
     tk_snprintf(own, sizeof own, "%s", theme_art("np_"));
     unsigned n = (unsigned)strlen(own);
     int mine = !strncmp(now, own, n),
-        on = !tk_strcmp(now, "play_fav") || (mine && !tk_strcmp(now + n, "fav")),
+        on = !tk_strcmp(now, "play_fav") || (mine && !strncmp(now + n, "fav_", 4)),
         off = !tk_strcmp(now, "play_unfav") || (mine && !strncmp(now + n, "unfav_", 6));
-    tk_snprintf(name, sizeof name, on ? "%sfav" : "%sunfav_%c", own, half);
+    tk_snprintf(name, sizeof name, on ? "%sfav_%c" : "%sunfav_%c", own, half);
     if ((on || off) && tk_strcmp(now, name)) {
         image_base_set_image(glyph_fav, name);
         widget_invalidate_force(glyph_fav, (void *)0);

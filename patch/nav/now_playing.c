@@ -411,13 +411,13 @@ static void np_stage(unsigned stage) {
  * (whose order is the app's), the heart under such a theme while it shows (np_bar.c np_heart). */
 static int np_stop_ok(unsigned stage) {
     if (!theme()->np_modes) return 0;
-    if (stage == NP_STAGE_RATING) return np_heart() != 0;
+    if (stage == NP_STAGE_HEART) return np_heart() != 0;
     return (stage == NP_STAGE_SHUFFLE || stage == NP_STAGE_REPEAT) && !np_radio_on();
 }
 /* The stop dir (1 or -1) from stage that the ring can stand on, stage itself at an end; from
  * NP_STAGE_REST the first, or NP_STAGE_REST when there is none. */
 static unsigned np_stop_next(unsigned stage, int dir) {
-    for (int s = (int)stage + dir; s >= NP_STAGE_SHUFFLE && s <= NP_STAGE_RATING; s += dir)
+    for (int s = (int)stage + dir; s >= NP_STAGE_SHUFFLE && s <= NP_STAGE_HEART; s += dir)
         if (np_stop_ok((unsigned)s)) return (unsigned)s;
     return stage;
 }
@@ -425,9 +425,9 @@ static unsigned np_stop_next(unsigned stage, int dir) {
 /* Now Playing's Centre, after an iPod classic's: at rest a press starts scrubbing; the scrub's
  * own press ends it (scrub_end seeks) and puts a focus ring on the first of shuffle, repeat and
  * the heart. The wheel moves the ring, never changing a control; Centre works the ringed one as a
- * tap does: shuffle on or off, repeat a step Off, All, One, the ring staying, or the heart's
- * rating picker (the menu sheet's, ratings.c rate_show), the cycle back at rest.
- * Under a theme without the pair there is no ring and the scrub's press opens the picker. A press
+ * tap does, the ring staying: shuffle on or off, repeat a step Off, All, One, or the heart's like
+ * on or off (its click, ratings.c rate_fav_click). The song's stars are the rating page's alone.
+ * Under a theme without the pair there is no ring and the scrub's press ends the cycle. A press
  * held NP_HOLD_MS or longer, short of stock's long press (Shut Down), turns the screen off
  * instead, as stock's release does. */
 #define NP_HOLD_MS 400
@@ -447,16 +447,16 @@ static int np_centre(unsigned now) {
     unsigned stage = st.np_stage;
     if (st.scrub) {
         scrub_end();
-        unsigned first = np_stop_next(NP_STAGE_REST, 1);
-        if (first != NP_STAGE_REST)
-            np_stage(first);
-        else if (!rate_open())
-            np_stage(NP_STAGE_REST);
+        np_stage(np_stop_next(NP_STAGE_REST, 1));
     } else if (stage == NP_STAGE_REST)
         scrub_start();
-    else if (stage == NP_STAGE_RATING || !np_stop_ok(stage)) {
+    else if (!np_stop_ok(stage)) {
         np_stage(NP_STAGE_REST);
-        if (stage == NP_STAGE_RATING) rate_open();
+    } else if (stage == NP_STAGE_HEART) {
+        void *heart = np_heart();
+        char click[0x30];
+        stock_dispatch_trampoline(heart, pointer_event_init(click, EVT_CLICK, heart, 0, 0));
+        np_stage(stage); /* its timeout from this press */
     } else {
         np_mode_step(stage == NP_STAGE_REPEAT, 1);
         np_stage(stage); /* its timeout from this press */

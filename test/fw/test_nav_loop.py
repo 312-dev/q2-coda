@@ -561,7 +561,7 @@ def test_card_mounted_reads_proc_mounts(fw, mounts, mounted):
 
 # The card's copy of the ratings (docs/internals.md#ratings).
 RC_FILE = '/mnt/mmc/.ratings.tsv'
-RC_HEADER = b'#song\thearts\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
+RC_HEADER = b'#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
 MOUNTED = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
 
 
@@ -661,9 +661,18 @@ def test_the_card_copy_names_each_rated_song_and_album(fw, st):
     lib.rate(b'/mnt/mmc/A/2.flac', 3)
     lib.rate_album(b'Album', b'Artist', b'/mnt/mmc/A/1.flac', 4)
     assert lib.run()
-    assert lib.copy() == RC_HEADER + (b'song\t5\t/mnt/mmc/Fav/f.flac\t\n'  # My Fav: 5 hearts
+    assert lib.copy() == RC_HEADER + (b'song\t0\t1\t/mnt/mmc/Fav/f.flac\t\n'  # My Fav: liked, no stars
                                       b'album\t4\tAlbum\tArtist\t\n'        # the album, at its first song
-                                      b'song\t3\t/mnt/mmc/A/2.flac\t\n')
+                                      b'song\t3\t0\t/mnt/mmc/A/2.flac\t\n')
+
+
+def test_a_liked_song_with_stars_is_one_line_with_both(fw, st):
+    """A like is no rating: the song's stars and its like are columns of their own, on its one line."""
+    lib = Library(fw)
+    lib.song(b'/mnt/mmc/f.flac', table=lib.myfav)
+    lib.song(b'/mnt/mmc/f.flac')
+    lib.rate(b'/mnt/mmc/f.flac', 5)
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t5\t1\t/mnt/mmc/f.flac\t\n'
 
 
 def test_a_cue_track_keeps_its_start(fw, st):
@@ -671,7 +680,7 @@ def test_a_cue_track_keeps_its_start(fw, st):
     lib.song(b'/mnt/mmc/live.flac', cue=0)
     lib.song(b'/mnt/mmc/live.flac', cue=245)
     lib.rate(b'/mnt/mmc/live.flac', 2, cue=245)
-    assert lib.run() and lib.copy() == RC_HEADER + b'song\t2\t/mnt/mmc/live.flac\t245\n'
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t2\t0\t/mnt/mmc/live.flac\t245\n'
 
 
 def test_an_album_without_its_artist_is_named_by_its_folder(fw, st):
@@ -694,7 +703,7 @@ def test_tabs_and_newlines_in_a_name_become_spaces(fw, st):
     lib.rate(b'/mnt/mmc/a\tb\nc.flac', 1)
     lib.rate_album(b'X\tY', b'Z\r', b'/mnt/mmc/a\tb\nc.flac', 3)
     assert lib.run()
-    assert lib.copy() == RC_HEADER + b'song\t1\t/mnt/mmc/a b c.flac\t\nalbum\t3\tX Y\tZ \t\n'
+    assert lib.copy() == RC_HEADER + b'song\t1\t0\t/mnt/mmc/a b c.flac\t\nalbum\t3\tX Y\tZ \t\n'
 
 
 def test_a_rating_whose_song_left_the_library_stays_out(fw, st):
@@ -702,7 +711,7 @@ def test_a_rating_whose_song_left_the_library_stays_out(fw, st):
     lib.song(b'/mnt/mmc/here.flac')
     lib.rate(b'/mnt/mmc/here.flac', 4)
     lib.rate(b'/mnt/mmc/gone.flac', 2)
-    assert lib.run() and lib.copy() == RC_HEADER + b'song\t4\t/mnt/mmc/here.flac\t\n'
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t4\t0\t/mnt/mmc/here.flac\t\n'
 
 
 def test_before_the_first_scan_my_fav_alone(fw, st):
@@ -710,7 +719,7 @@ def test_before_the_first_scan_my_fav_alone(fw, st):
     lib.scanned = False
     lib.song(b'/mnt/mmc/f.flac', table=lib.myfav)
     lib.rate(b'/mnt/mmc/r.flac', 3)
-    assert lib.run() and lib.copy() == RC_HEADER + b'song\t5\t/mnt/mmc/f.flac\t\n'
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t0\t1\t/mnt/mmc/f.flac\t\n'
     assert not [q for q in lib.sql if 'from songtable where' in q]
 
 
@@ -722,7 +731,7 @@ def test_pages_of_64_rows_walk_the_whole_library(fw, st):
     assert lib.run()
     pages = [q for q in lib.sql if 'from songtable where' in q]
     assert [int(q.split('id>')[1].split()[0]) for q in pages] == [0, 64, 128, 192]
-    assert lib.copy() == RC_HEADER + b'song\t2\t/mnt/mmc/199.flac\t\n'
+    assert lib.copy() == RC_HEADER + b'song\t2\t0\t/mnt/mmc/199.flac\t\n'
 
 
 def test_the_pass_stops_paging_once_every_rating_is_found(fw, st):
@@ -745,12 +754,12 @@ def test_an_unchanged_copy_is_not_written_again(fw, st):
 
 
 def test_a_shorter_copy_keeps_the_longer_one_as_dot_1(fw, st):
-    longer = RC_HEADER + b'song\t1\t/a\t\nsong\t2\t/b\t\n'
+    longer = RC_HEADER + b'song\t1\t0\t/a\t\nsong\t2\t0\t/b\t\n'
     lib = Library(fw, {RC_FILE: longer})
     lib.song(b'/mnt/mmc/a.flac')
     lib.rate(b'/mnt/mmc/a.flac', 3)
     assert lib.run()
-    assert lib.card.files[RC_FILE + '.1'] == longer and lib.copy() == RC_HEADER + b'song\t3\t/mnt/mmc/a.flac\t\n'
+    assert lib.card.files[RC_FILE + '.1'] == longer and lib.copy() == RC_HEADER + b'song\t3\t0\t/mnt/mmc/a.flac\t\n'
 
 
 def test_a_dot_1_with_more_lines_still_is_kept(fw, st):
@@ -759,7 +768,7 @@ def test_a_dot_1_with_more_lines_still_is_kept(fw, st):
     lib.song(b'/mnt/mmc/a.flac')
     lib.rate(b'/mnt/mmc/a.flac', 3)
     assert lib.run() and lib.card.files[RC_FILE + '.1'] == longest
-    assert lib.copy() == RC_HEADER + b'song\t3\t/mnt/mmc/a.flac\t\n'
+    assert lib.copy() == RC_HEADER + b'song\t3\t0\t/mnt/mmc/a.flac\t\n'
 
 
 def test_a_longer_copy_replaces_without_a_dot_1(fw, st):
@@ -787,7 +796,7 @@ def test_a_card_gone_by_the_end_makes_the_copy_due_again(fw, st):
     lib.card.files['/proc/mounts'] = b''  # shared over USB meanwhile
     assert lib.run() and lib.copy() is None and C.c_int.in_dll(fw.lib, 'ratings__rc_due').value == 1
     lib.card.files['/proc/mounts'] = MOUNTED
-    assert lib.run(20) and lib.copy() == RC_HEADER + b'song\t3\t/mnt/mmc/a.flac\t\n'
+    assert lib.run(20) and lib.copy() == RC_HEADER + b'song\t3\t0\t/mnt/mmc/a.flac\t\n'
 
 
 def test_no_card_no_pass(fw, st):
@@ -831,7 +840,7 @@ def test_the_boot_pass_starts_unasked(fw, st):
     lib = Library(fw)
     lib.song(b'/mnt/mmc/f.flac', table=lib.myfav)
     lib.poll()  # the first pass marks it due
-    assert lib.run() and lib.copy() == RC_HEADER + b'song\t5\t/mnt/mmc/f.flac\t\n'
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t0\t1\t/mnt/mmc/f.flac\t\n'
 
 
 def test_a_scan_ends_the_pass_and_the_new_library_starts_another(fw, st, stock_bytes):
@@ -851,7 +860,7 @@ def test_a_scan_ends_the_pass_and_the_new_library_starts_another(fw, st, stock_b
     assert not lib.rc().db  # no pass while it runs
     C.c_int.from_address(done).value = 1
     C.c_uint.in_dll(fw.lib, 'library_gen').value += 1
-    assert lib.run() and lib.copy() == RC_HEADER + b'song\t3\t/mnt/mmc/a.flac\t\n'
+    assert lib.run() and lib.copy() == RC_HEADER + b'song\t3\t0\t/mnt/mmc/a.flac\t\n'
 
 
 def test_a_failed_query_ends_the_pass_unwritten(fw, st):

@@ -527,7 +527,8 @@ unsigned catalogue_fav_gen(void);
 char *catalogue_union(const char *sql), *catalogue_search(const char *sql);
 const char *catalogue_rows(void); /* library_query's union, "" without one */
 void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_poll(void);
-void catalogue_changed(void), catalogue_card_away(void), catalogue_rated(void *r, int hearts);
+void catalogue_changed(void), catalogue_card_away(void);
+void catalogue_rated(void *r, int stars), catalogue_liked(void *r, int on);
 int catalogue_kept(void); /* a catalogue app's catalogue.tsv is on the card */
 int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
 /* cf_empty.c: Cover Flow's page with no albums, by what is missing; 0 under a theme without it */

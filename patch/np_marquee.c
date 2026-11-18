@@ -1,5 +1,5 @@
 /* Now Playing's lines as one marquee (docs/oled-design.md#motion), under a theme whose scrolling
- * text fades (list.marquee.fade, OLED's): the title, artist and album that overflow their column
+ * text fades (list.marquee.fade, OLED's): the title and artist that overflow their column
  * hold at rest NPM_HOLD_MS, then slide left together until each one's end meets its column's end,
  * hold there MARQUEE_HOLD_MS, and go back to rest together. Each slides only what overflows, so
  * some of every line is always in view: V1.36's hscroll_label draws no copy behind the text (its
@@ -23,12 +23,14 @@ static struct {
     unsigned timer, start, due; /* the frame timer, the cycle's start, and when the timer runs */
 } npm __attribute__((section(".scratch")));
 
-static void *npm_line(int i) { return i == 0 ? st.np_title : i == 1 ? st.np_artist : st.np_album; }
+/* The album is not one of them: it stays one line with stock's ellipsis (tools/ipod.py np_grid's
+ * only_focus and ellipses), so the heart under it keeps its place. */
+#define NPM_LINES 2
+static void *npm_line(int i) { return i == 0 ? st.np_title : st.np_artist; }
 
 /* 1 when w is one of the lines this drives */
 int np_marq_owns(void *w) {
-    return w && st.np_win && theme()->marquee_fade &&
-           (w == st.np_title || w == st.np_artist || w == st.np_album);
+    return w && st.np_win && theme()->marquee_fade && (w == st.np_title || w == st.np_artist);
 }
 
 /* px w's text runs past its column, 0 when it fits */
@@ -41,7 +43,7 @@ static int npm_over(void *w) {
 }
 
 static void npm_rest(void) {
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < NPM_LINES; ++i) {
         void *w = npm_line(i);
         if (w && I(w, HSCROLL_XOFFSET)) hscroll_label_set_xoffset(w, 0);
     }
@@ -67,7 +69,7 @@ static int npm_tick(const void *info) {
         return 0;
     }
     int span[3], longest = 0;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < NPM_LINES; ++i) {
         void *w = npm_line(i);
         span[i] = w && widget_get_visible(w) ? npm_over(w) : 0;
         if (span[i] > longest) longest = span[i];
@@ -86,14 +88,14 @@ static int npm_tick(const void *info) {
     }
     t -= NPM_HOLD_MS;
     if (t >= pass) { /* at the end, each line's end at its column's */
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < NPM_LINES; ++i) {
             void *w = npm_line(i);
             if (w && I(w, HSCROLL_XOFFSET) != span[i]) hscroll_label_set_xoffset(w, span[i]);
         }
         npm_arm(now, pass + NPM_END_MS - t);
         return 0;
     }
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < NPM_LINES; ++i) {
         void *w = npm_line(i);
         int off = span[i] ? (int)((unsigned)span[i] * t / pass) : 0;
         if (w && I(w, HSCROLL_XOFFSET) != off) hscroll_label_set_xoffset(w, off);
@@ -122,10 +124,12 @@ void np_marq_kick(void *w) {
 void np_marq_reset(void) {
     stop_timer(&npm.timer);
     npm.start = 0;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < NPM_LINES; ++i) {
         void *w = npm_line(i);
         if (np_marq_owns(w) && I(w, HSCROLL_TIMER)) hscroll_label_stop(w);
     }
+    if (st.np_album && theme()->marquee_fade && I(st.np_album, HSCROLL_TIMER))
+        hscroll_label_stop(st.np_album); /* one line, its ellipsis: never scrolled */
     npm_rest();
 }
 

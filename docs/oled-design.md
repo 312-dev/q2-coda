@@ -516,8 +516,9 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   offline mark goes. A server song that can't play now keeps the grayed row and `cloud-slash`
   ([server-library.md](server-library.md#grayed-rows)). The length and the title end 12 px short of a mark, as they
   do of the offline mark.
-- Ratings' lists show a song's hearts as five Phosphor glyphs at 14 px at the start of its second line, `heart-fill`
-  for its hearts and `heart` for the rest, in Text Secondary (white on the selection), then "· Artist".
+- Ratings' lists show a song's stars as five Phosphor glyphs at 14 px at the start of its second line, `star-fill`
+  for its stars and `star` for the rest, in Text Primary (white on the selection), no colour, then "· Artist".
+  A song with no stars (one only liked, in Loved) has none, and its words start where the line does.
 - **The playing song's row**, as the user approved from its mock-up on 2026-11-18 ("B. A where constrained"),
   in every song list (Songs and a genre's, an artist's, an album's tracks and Cover Flow's, Folder view, a playlist's
   songs, Search's results, Most Played, Long Songs, the Ratings lists, the card's songs; Up Next already heads with
@@ -552,13 +553,22 @@ No page title, no reflection, and no background art blur on the art's page (the 
 
 Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) with the theme's
 `playing.art.radius`, `playing.artist.font`, `playing.scrubber.height` and `playing.modes.icons`.
-The album is one line that scrolls, as the title and artist do, rather than two. What the design
+The album is one line ending in an ellipsis (the title and artist scroll), rather than two, so the heart under it keeps its place. What the design
 has no place for keeps a place of its own:
 
-- **More and the heart** stand at the right end of the art's bottom line (baseline 208), on the
-  art's page, so a swipe takes them away with it: Phosphor `dots-three` and `heart` (regular, 20 px, Text Primary;
-  More pressed in Text Secondary), the dots' ink ending on the right column, the heart `fill` in
-  Accent Blue while the song is a favorite.
+- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up): Phosphor `heart`,
+  34 px, at x 193 to 227 and y 146 to 180, outlined, or `heart-fill` while the song is liked, both Text Primary, no
+  colour. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
+  one line ending in an ellipsis, never scrolled, so the heart's place never moves.
+- **More** stands at the right end of the art's bottom line (baseline 208), on the art's page, so a swipe takes it
+  away with it: Phosphor `dots-three` (regular, 20 px, Text Primary; pressed in Text Secondary), its ink ending on
+  the right column. Its touch reaches right to the screen's edge and down to the progress bar's target: x 292 to
+  374, y 172 to 219. The badge row keeps the quality badge on the left and More on the right.
+- **Touch areas** stay off the progress bar's target (y 220 to 242), the times' row and each other: the state row's
+  buttons each reach to the midpoints with their neighbours and down to the screen's foot, Shuffle and Up Next
+  from the row's top (x 0 to 105 and 270 to 374), Radio and Repeat under the row (x 106 to 187 and 188 to 269,
+  y 308 to 319; radio on: 112 to 205 and 206 to 281). What is drawn, its press square and its focus ring stay the
+  glyph's.
 - **The page dots** are hidden: the state row's on dots sit where they were. The lyrics and the
   [rating page](#rating-page) are the swipe's other pages, in that order; the lyrics end 5 px above
   the bar, and the rating page, which draws its own dots, rests full screen. Now Playing shows no place in the
@@ -635,10 +645,11 @@ row gone; while a swipe moves it, it slides in the pages' column. Nothing on it 
 No words under the stars, no hint, no progress bar, and no colour but the glow's. The mock-up has the title at
 46; the window starts under the status row's band at 58, so the title stands on Now Playing's own title line.
 
-- **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), the song's hearts one for one: 5 is the
-  favourite, the heart on the art's page. The wheel moves the target from the rating's top (a tick from 3 is 4 or
-  2), within the five, and it goes back to rest after 4 s without a turn; Centre keeps it. A tap keeps a star at
-  once. The rating's own top star, tapped or kept by Centre, clears it (unrated): the page's "0". Centre with no
+- **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), apart from the like: the heart on the
+  art's page sets no stars and five stars like nothing. This page is the one place to rate (the user, 2026-11-18:
+  "the screen serves as the ratings screen. heart is only for liking a song"). The wheel moves the target from
+  the rating's top (a tick from 3 is 4 or 2), within the five, and it goes back to rest after 4 s without a
+  turn; Centre keeps it. A tap keeps a star at once. The rating's own top star, tapped or kept by Centre, clears it (unrated): the page's "0". Centre with no
   target puts it on the rating's top star, the first when unrated. Nothing that can be rated (a stream, a
   radio) leaves the wheel on the volume.
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
@@ -891,7 +902,8 @@ the gray one.
 | Recently Added | `sparkle` | No Songs Added Yet | New music on the card shows up here | |
 | Long Songs | `timer` | No Long Songs | None over 10 minutes | |
 | Years (Era) | `calendar-blank` | No Dated Albums Yet | Albums need a year tag | |
-| Ratings' song lists | `star` | No Rated Songs Yet | Hold the heart on Now Playing to rate | |
+| Ratings' song lists | `star` | No Rated Songs Yet | Swipe to the stars on Now Playing | |
+| Ratings' Loved | `heart-slash` | No Loved Songs Yet | Tap the heart on Now Playing | |
 | Add Songs (a playlist's), a search matching nothing | none (compact) | No Matches | Try fewer letters | none: under the Search row, which opens the box again |
 | A playlist with no songs | none (compact) | No Songs Yet | Choose Add Songs to fill it | none: under Add Songs, the row that fills it |
 | On-The-Go with no songs | none (compact) | No Songs Yet | Hold Play/Pause on a song to add it | none: under Add Songs |
@@ -971,8 +983,8 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   After Album, Off, Song, Album, All (Folder in place of Album when grouped by folder); Group by
   Album or Folder. Group by, two choices, flips in place on Center; the others open a picker in the
   sheet, the current choice with the accent's check before its label.
-- **Rating** (Now Playing's Center cycle, a menu's Rate) is a picker in a sheet: Unrated, 1 Heart
-  to 5 Hearts, the current one checked; Center keeps a row's rating and closes, Return closes.
+- **Rating** is no menu's: no hold menu has a Rate row and the heart has no hold, so the
+  [rating page](#rating-page) is the one place to rate.
 - **Destructive rows** (Delete Song, Delete, Delete Playlist, Remove from Playlist): red `#FF3B30`
   at rest, white on a red bar when lit, as the confirm card's. Such a row comes last, 12 px below
   the actions, and asks before it acts. Space, never a rule. A sheet whose rows are more than six

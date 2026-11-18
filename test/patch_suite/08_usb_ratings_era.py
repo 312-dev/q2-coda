@@ -24,23 +24,10 @@ class AlbumRateMachine(FileMocks,CoverflowMachine):
     def kept(self):
         data=self.files.get(ALBUM_RATES,b''); return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
     def aid(self,r): return self.call(address=payload_syms['album_id'],args=(r,0,0,0),gap=0)&0xffffffff
-    def picker(self):
-        """The rating picker's rows while the menu sheet's picker is up (ratings.c rate_show), else None."""
-        rows=self.labels() if self.top!=self.page and self.view in self.nodes else []
-        return rows if rows[:1]==['Unrated'] else None
     def menu(self):  # the hold's rows, then Return closes the dialog
         self.t=getattr(self,'t',7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
         rows=self.labels(); f,ctx=self.handler(self.dlg_return,O['EVT_CLICK']); self.call(O['KEY_RETURN'],address=f,args=(ctx,self.event,0,0),gap=0)
         return rows
-    def rate(self,want):  # Rate album, then the picker's row for want
-        toasts=len(self.toasts)
-        assert self.run(4) is None and self.picker()
-        self.pick(want); self.advance(0); assert self.picker() is None
-        return self.toasts[-1][3] if len(self.toasts)>toasts else None
-def back(m):  # Return on the menu sheet's picker: its img_return's click, as the sheet binds Return (menu_modal.c modal_sheet)
-    f,ctx=m.handler(m.dlg_return,O['EVT_CLICK']); m.call(O['KEY_RETURN'],address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
-def song_side_effects(m):
-    return '/mnt/data/ringnav-ratings' in m.files or any(c[0] in ('batch_add_file','deleteMusicFromFav') for c in m.calls)
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); a1=m.aid(m.albums[1])
 assert m.menu()==[*COVER_ALBUM,'Go to Artist'] and m.top==m.page; passed()
 # A hold menu's rows act on the page under it: every row, either Light Mode half, Cover Flow's cover and Library's Albums.
@@ -53,17 +40,13 @@ def light_half(machine,light,**kw):  # LIGHT stored before the constructor reads
     try: fm=machine(**kw)
     finally: SETUP.clear()
     fm.mock('strstr@GLIBC_2.0'); return fm
+# An album's menu has no Rate Album (the rating page is the one place to rate); its Add to Favorites likes it, the
+# album's own table keeping 5 and no song's stars touched, in either Light Mode half.
 for light in '01':
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1); a1=fm.aid(fm.albums[1])
-    assert hold_pick(fm,4) is None and fm.picker() and fm.nodes[fm.page]['name']=='coverflow_page'
-    for k in [O['KEY_NEXT']]*3: assert fm.call(k)==11
-    assert fm.selected(fm.view)==3; fm.pick(3); fm.advance(0)  # Centre's click on the lit row, as a tap's
-    assert fm.picker() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm)  # the album's table, no song touched
-    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5]  # Add to Favorites
+    assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5] and '/mnt/data/ringnav-ratings' not in fm.files  # Add to Favorites
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1)
     assert hold_pick(fm,0)=='Playing Next' and fm.top==fm.page and fm.query[:1]==('getMusicByAlbum',); passed()  # Play Next finds the cover's album
-    fm=light_half(AlbumRateMachine,light,page='album_page',cls=O['CLASS_ALBUMS'],pos=2); fm.page=fm.top
-    assert hold_pick(fm,4) is None and fm.picker(); passed()
 # A Play/Pause hold with no menu: stock has none, so its release plays or pauses.
 def bare_hold(m,row=None):
     if row is not None: m.word(m.row(row)+O['REC_TYPE'],9)
@@ -73,51 +56,24 @@ assert bare_hold(QueueMachine(page='folder_page'),0)==(0,1); passed()  # a row n
 # Add, then Remove from Favorites: 5 hearts, then none; the other covers stay unrated.
 def fav_calls(m,name): return [c for c in m.calls if c[0]==name]
 assert m.run(3) is None and m.kept()==[(a1&~7)|5] and [c[2] for c in fav_calls(m,'batch_add_file')]==[0xf00a] and not fav_calls(m,'deleteMusicFromFav')
-assert m.menu()[3:5]==['Remove from Favorites','Rate Album  ♥♥♥♥♥']
+assert m.menu()[3]=='Remove from Favorites'
 assert m.run(3) is None and m.kept()==[] and fav_calls(m,'deleteMusicFromFav') and not fav_calls(m,'batch_add_file')
-m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3:5]==['Add to Favorites','Rate Album']
+m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3]=='Add to Favorites'
 m.word(m.slide+O['SLIDE_INDEX'],1); passed()
-# The picker over the covers, a row for each rating, on the album's own (Unrated); the wheel moves the picker's row,
-# never the covers.
-assert m.run(4) is None and m.picker()==['Unrated','1 Heart','2 Hearts','3 Hearts','4 Hearts','5 Hearts']
-sheet=m.view; assert m.selected(sheet)==0
-for _ in range(3): assert m.call()==11
-assert m.selected(sheet)==3 and m.get(m.slide+O['SLIDE_INDEX'])==1 and not m.slides; passed()
-# Return leaves it as it was, and Coverflow stays; a pick saves, without opening the cover.
-back(m)
-assert m.picker() is None and m.homes==0 and m.top==m.page and m.kept()==[]
-assert m.rate(3) is None and m.kept()==[(a1&~7)|3] and not song_side_effects(m)
-m.advance(500); assert not m.plays and m.find('scroll_view')==0 and m.nodes[m.get(m.slide+O['W_PARENT'])]['visible']; passed()
-# Every rating, each shown on the menu's row; 0 unrated, 5 the favourite.
-for want in range(6):
-    m.rate(want); assert m.kept()==([(a1&~7)|want] if want else [])
-    rows=m.menu(); assert rows[4]==('Rate Album  '+'♥'*want+'♡'*(5-want) if want else 'Rate Album')
-    assert rows[3]==('Remove from Favorites' if want==5 else 'Add to Favorites')
-passed()
-# Five is its favourite by the picker too: its songs in on reaching it, again on saving it again, out on leaving it.
-m.rate(0); m.rate(4); assert not fav_calls(m,'batch_add_file') and not fav_calls(m,'deleteMusicFromFav')
-for want,added,removed in ((5,1,0),(5,1,0),(3,0,1),(2,0,0)):
-    m.rate(want); assert (len(fav_calls(m,'batch_add_file')),bool(fav_calls(m,'deleteMusicFromFav')))==(added,bool(removed)),want
-m.rate(0); passed()
-# A tap on a row saves that many.
-assert m.run(4) is None and m.picker(); m.pick(2); m.advance(0); assert m.picker() is None and m.kept()==[(a1&~7)|2]; passed()
 # Kept across boots, apart from the songs' table.
+assert m.run(3) is None
 m2=AlbumRateMachine(files={ALBUM_RATES:m.files[ALBUM_RATES]}); m2.open(); m2.word(m2.slide+O['SLIDE_INDEX'],1)
-assert m2.menu()[4]=='Rate Album  ♥♥♡♡♡' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
-# Another cover centred before the pick: nothing is saved.
-assert m.run(4) is None and m.picker(); m.word(m.slide+O['SLIDE_INDEX'],0); m.pick(3); m.advance(0)
-assert m.toasts[-1][3]=='Album changed' and m.kept()==[(a1&~7)|2]
-m.word(m.slide+O['SLIDE_INDEX'],1); passed()
-# A full table and a failed write report it, the rating as it was.
+assert m2.menu()[3]=='Remove from Favorites' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
+# A full table and a failed write report it, the album as it was.
 full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
-assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full and m.rate(4)=='Ratings are full'; passed()
+assert m.run(3)=='Ratings are full' and m.files[ALBUM_RATES]==full; passed()
 m=AlbumRateMachine(); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1); m.fail_write=True
-assert m.run(3)=='Rating not saved' and m.menu()[3:5]==['Add to Favorites','Rate Album'] and ALBUM_RATES not in m.files; passed()
-# A malformed slot (6 or 7 hearts) reads unrated; a truncated file reads empty.
+assert m.run(3)=='Rating not saved' and m.menu()[3]=='Add to Favorites' and ALBUM_RATES not in m.files; passed()
+# A malformed slot (6 or 7) reads as none; a truncated file reads empty.
 for data in (struct.pack('<I',(a1&~7)|7).ljust(4*O['RATE_SLOTS'],b'\0'),b'\x05\0'):
     m=AlbumRateMachine(files={ALBUM_RATES:data}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
-    assert m.menu()[3:5]==['Add to Favorites','Rate Album']; passed()
+    assert m.menu()[3]=='Add to Favorites'; passed()
 # An album is album_cmp's: its name and album artist, else its folder (disc folders as one), ASCII case aside but
 # the folder's; the song artist never counts, so a compilation is one album. The Unknown card is one album.
 def rec(album='Album',aa=None,path='/m/A/1.mp3',artist='Artist',rid=1):
@@ -188,14 +144,10 @@ for cf_open,view,found,want in ((True,'0',True,'coverflow_page'),(False,'1',True
     if not found: m.found=[]
     page=m.top; assert m.run('Go to Album',steps=2) is None and m.top!=page
     assert m.nodes[m.top].get('name')==want or m.opened[-1][0]==want; passed()
-# Library Albums rows rate as covers do, their album split as Coverflow's.
+# Library Albums rows like as covers do, their album split as Coverflow's.
 m=AlbumRateMachine(page='album_page',cls=O['CLASS_ALBUMS']); m.page=m.top; a0=m.aid(m.row(0))
 assert m.menu()==[*COVER_ALBUM,'Add to Playlist','Go to Artist']
-assert m.rate(4) is None and m.kept()==[(a0&~7)|4] and not song_side_effects(m)
 assert m.run(3) is None and m.kept()==[(a0&~7)|5]; passed()
-# A browse change under the picker saves nothing.
-assert m.run(4) is None; m.u.mem_write(syms['g_folder_path'],b'/elsewhere\0')
-m.pick(m.selected(m.view)); m.advance(0); assert m.toasts[-1][3]=='Album changed' and m.kept()==[(a0&~7)|5]; passed()
 # Library > Years (Era's page): a row per decade with dated music, oldest first, its albums counted (an album's year its tracks'
 # latest); undated albums, audiobooks, podcasts and M4B left out. A decade's page: Play All, Shuffle, then its
 # albums by year, each "Artist • year".
@@ -244,7 +196,7 @@ for failure in ('open','PRAGMA','select'):
     m=EraMachine(SONGS); m.fail=failure; top=m.top; m.open_era()
     assert m.top==top and m.toasts[-1][3]=='Years unavailable' and m.closed_db==1; passed()
 # The ratings' copy on the card (ratings.c rc_*): the tables' hashes named again from the library, a page a poll.
-RC_FILE='/mnt/mmc/.ratings.tsv'; RC_HEAD='#song\thearts\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
+RC_FILE='/mnt/mmc/.ratings.tsv'; RC_HEAD='#song\tstars\tliked\tpath\tcue_start\n#album\thearts\tname\talbum_artist\tfolder\n'
 class RatingsCopyMachine(FileMocks,EraMachine):
     def __init__(self,songs,favs=()):
         super().__init__(); self.budget=2_000_000; self.file_mocks('rc:',{'/proc/mounts':b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'}); self.writes=0
@@ -261,7 +213,7 @@ class RatingsCopyMachine(FileMocks,EraMachine):
         r=self.record((1,0,path,cue,0,'x')); self.word(r+O['REC_ALBUM'],self.string(album) if album is not None else 0)
         self.word(r+O['REC_ALBUM_ARTIST'],self.string(artist) if artist is not None else 0); return r
     def key(self,f,*a,**k): return self.call(address=payload_syms[f],args=(self.rec(*a,**k),0,0,0),gap=0)&0xffffffff
-    def rate(self,songs=(),albums=()):  # (key, hearts) each, as the tables keep them
+    def rate(self,songs=(),albums=()):  # (key, stars or hearts) each, as the tables keep them
         for path,rows in (('/mnt/data/ringnav-ratings',songs),('/mnt/data/ringnav-album-ratings',albums)):
             self.files[path]=b''.join(struct.pack('<I',(k&~7)|h) for k,h in rows).ljust(4*O['RATE_SLOTS'],b'\0')
     def poll(self,ms=5000):  # that long on, then pages until the pass ends
@@ -277,12 +229,12 @@ aa=m.key('album_id','/mnt/mmc/m/a.flac',album='Alpha',artist='Band'); ab=m.key('
 unknown=m.rec('/x'); m.word(unknown+O['REC_ID'],0xffffffff); au=m.call(address=payload_syms['album_id'],args=(unknown,0,0,0),gap=0)&0xffffffff
 m.rate([(m.key('listen_key','/mnt/mmc/m/cue.flac',cue=30),3),(m.key('listen_key','/mnt/mmc/m/t\tab.flac'),1),
         (m.key('listen_key','/mnt/mmc/m/fav.flac'),2),(m.key('listen_key','/mnt/mmc/gone.flac'),4)],[(aa,5),(ab,2),(au,1)])
-# Five seconds after boot: My Fav's as 5 whatever is kept, the songs with a CUE start, an album once, the folder only where
-# no album artist tells it apart, tabs and newlines as spaces, a song no longer in the library left out.
+# Five seconds after boot: My Fav's liked with any stars kept for them, the songs with a CUE start, an album once, the
+# folder only where no album artist tells it apart, tabs and newlines as spaces, a song no longer in the library left out.
 m.poll(0); assert RC_FILE not in m.files; m.poll(4999); assert RC_FILE not in m.files
 m.poll(1); text=m.copy_text()
-assert text==RC_HEAD+'album\t1\tUnknown Album\t\t\nsong\t5\t/mnt/mmc/m/fav.flac\t\nalbum\t5\tAlpha\tBand\t\nsong\t3\t/mnt/mmc/m/cue.flac\t30\n' \
-    'album\t2\tSolo\t\t/mnt/mmc\nsong\t1\t/mnt/mmc/m/t ab.flac\t\n',text
+assert text==RC_HEAD+'album\t1\tUnknown Album\t\t\nsong\t2\t1\t/mnt/mmc/m/fav.flac\t\nalbum\t5\tAlpha\tBand\t\nsong\t3\t0\t/mnt/mmc/m/cue.flac\t30\n' \
+    'album\t2\tSolo\t\t/mnt/mmc\nsong\t1\t0\t/mnt/mmc/m/t ab.flac\t\n',text
 assert m.writes==1 and m.closed_db==1 and not m.get(payload_syms['rc']+4) and '/mnt/mmc/.ratings.tsv.tmp' not in m.files; passed()
 # Nothing due, nothing read; the same copy again isn't written; a change is, 5 s after the last of a run.
 sql=len(m.sql); m.poll(); m.poll(); assert len(m.sql)==sql
@@ -292,7 +244,7 @@ m.call(address=due,args=(0,0,0,0),gap=0); m.poll(4999); assert m.writes==1; m.po
 # The card away (USB storage): it waits, then writes.
 m.db.execute("insert into myfav(fileurl,time) values('/mnt/mmc/m/a.flac',0)"); mounts=m.files['/proc/mounts']; m.files['/proc/mounts']=b'none /mnt/data ubifs rw 0 0\n'
 sql=len(m.sql); m.call(address=due,args=(0,0,0,0),gap=0); m.poll(); assert len(m.sql)==sql and m.writes==2
-m.files['/proc/mounts']=mounts; m.poll(); assert m.writes==3 and 'song\t5\t/mnt/mmc/m/a.flac\t\n' in m.copy_text(); passed()
+m.files['/proc/mounts']=mounts; m.poll(); assert m.writes==3 and 'song\t0\t1\t/mnt/mmc/m/a.flac\t\n' in m.copy_text(); passed()
 # USB storage taking the card during a pass: nothing written, and due again once it's back.
 m.db.execute("insert into myfav(fileurl,time) values('/mnt/mmc/m/u.flac',0)"); m.call(address=due,args=(0,0,0,0),gap=0); m.now+=5000
 f=payload_syms['ratings_copy_poll']; m.call(address=f,args=(0,0,0,0),gap=0); assert m.get(payload_syms['rc'])
@@ -307,7 +259,7 @@ f=payload_syms['ratings_copy_poll']; m.word(O['SCAN_THREAD'],0); m.now+=5000; m.
 m.word(O['SCAN_THREAD'],1); m.word(O['SCAN_DONE'],0); m.now+=1000; m.call(address=f,args=(0,0,0,0),gap=0); assert not m.get(payload_syms['rc']) and m.writes==writes
 m.word(O['SCAN_DONE'],1); m.word(payload_syms['library_gen'],m.get(payload_syms['library_gen'])+1); m.poll(); assert m.writes==writes+1; passed()
 # Fewer lines than the card's copy: the old one is kept as .1, so a lost table can't take the only copy.
-kept=m.files[RC_FILE+'.1'].decode(); assert kept.count('\n')>m.copy_text().count('\n') and 'song\t5\t/mnt/mmc/m/a.flac' in kept; passed()
+kept=m.files[RC_FILE+'.1'].decode(); assert kept.count('\n')>m.copy_text().count('\n') and 'song\t0\t1\t/mnt/mmc/m/a.flac' in kept; passed()
 # Input holds pages back; the pass then goes on.
 m.call(address=due,args=(0,0,0,0),gap=0); m.db.execute("insert into myfav(fileurl,time) values('/mnt/mmc/m/q.flac',0)"); m.now+=5000
 f=payload_syms['ratings_copy_poll']; m.call(address=f,args=(0,0,0,0),gap=0); assert m.get(payload_syms['rc'])
@@ -340,11 +292,11 @@ m=RatingsCopyMachine(SONGS_RC,long); m.poll(0); m.files[RC_FILE]=b'kept\n'; m.fa
 m.fail_realloc=False; m.call(address=payload_syms['ratings_copy_due'],args=(0,0,0,0),gap=0); m.poll(); assert m.copy_text().count('\n')==82; passed()
 # No scan yet, so no songtable: My Fav's alone still get their copy.
 m=RatingsCopyMachine([],FAV_RC); m.db.execute('drop table songtable'); m.poll(0); m.poll()
-assert m.copy_text()==RC_HEAD+'song\t5\t/mnt/mmc/m/fav.flac\t\n' and m.closed_db==1; passed()
+assert m.copy_text()==RC_HEAD+'song\t0\t1\t/mnt/mmc/m/fav.flac\t\n' and m.closed_db==1; passed()
 # A library past a page: every page is read, and a pass stops at the last rated found.
 many=[(f'/mnt/mmc/l/{i}.flac',0,'','') for i in range(200)]
 m=RatingsCopyMachine(many); m.rate([(m.key('listen_key','/mnt/mmc/l/100.flac'),4)]); m.poll(0); m.poll()
-assert m.copy_text()==RC_HEAD+'song\t4\t/mnt/mmc/l/100.flac\t\n' and not [q for q in m.sql if 'id>128' in q]; passed()
+assert m.copy_text()==RC_HEAD+'song\t4\t0\t/mnt/mmc/l/100.flac\t\n' and not [q for q in m.sql if 'id>128' in q]; passed()
 # Full-date tags belong to their year; normalize each track before picking the album's latest.
 dates=[('Dates','Artist','','/mnt/mmc/music/d1.flac',20220510),
        ('Dates','Artist','','/mnt/mmc/music/d2.flac',2023),
@@ -395,7 +347,7 @@ m=AlbumRateMachine(files={ALBUM_RATES:data}); menu_page=ratings_albums(m)
 m.page=m.top; m.slide=m.find('slide_menu'); assert m.page!=menu_page and m.nodes[m.page]['name']=='coverflow_page'
 def shown(m,i): m.word(m.slide+O['SLIDE_INDEX'],i); f,ctx=m.handler(m.slide,O['EVT_VALUE_CHANGED']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); return m.texts()[0]
 assert len(m.nodes[m.slide]['children'])==3 and [shown(m,i) for i in range(3)]==['Album 2','Album 0','Sort: Rating']
-shown(m,0); assert m.menu()[3:5]==['Remove from Favorites','Rate Album  ♥♥♥♥♥']  # the cover's menu, as Coverflow's
+shown(m,0); rows=m.menu(); assert rows[3]=='Remove from Favorites' and not [r for r in rows if r.startswith('Rate')]  # the cover's menu, as Coverflow's
 f,ctx=m.handler(m.nodes[m.slide]['children'][2],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
 m.slide=m.find('slide_menu'); assert [shown(m,i) for i in range(3)]==['Album 0','Album 2','Sort: Album']
 assert [v for k,v in m.files.items() if k.endswith('ringnav-ratedsort')]==[struct.pack('<i',0)]; passed()

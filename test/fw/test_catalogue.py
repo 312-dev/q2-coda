@@ -65,7 +65,7 @@ class Rig:
         self.lib.sqlite3_close.argtypes = [C.c_void_p]
         self.sqls = []
         self.files = Files(fw, {
-            f'/mnt/mmc/.{APP}/q2app': b'name=Subsonic\ncatalogue=1\nratings=1\n',
+            f'/mnt/mmc/.{APP}/q2app': b'name=Subsonic\ncatalogue=1\nratings=2\n',  # likes and stars apart
             '/proc/mounts': b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'})
         db = sqlite3.connect(tmp_path/'database.db')
         db.executescript(f'{SONGTABLE};{PLAYLIST};{MYFAV}')
@@ -332,7 +332,7 @@ def test_each_layer_hides_a_server_song_that_is_a_card_file(rig, layer):
     assert not rig.unavailable('/mnt/mmc/Music/x.flac')
     rig.fw.fn('catalogue_rated', None, C.c_void_p, C.c_int)(rig.record('/mnt/mmc/Music/x.flac'), 4)
     key = listen_key('/mnt/mmc/Music/x.flac')
-    assert rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\t4\t1700000000\n'.encode()
+    assert rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{key:08x}\ts1\tstars=4\t1700000000\n'.encode()
 
 
 @pytest.mark.parametrize('case', ['other mbid', 'live take', 'longer', 'unreadable length'])
@@ -592,6 +592,8 @@ def test_a_listen_of_a_server_songs_offline_copy_counts_as_its_server_row(rig, f
 
 
 def test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer(rig, fw):
+    """An app with ratings=1 writes one number: five its star (the like, a's stars left as they were), under five
+    that many stars and no like. A line of one number in ratings.out is newer for both."""
     rig.card_song('/mnt/mmc/Music/a.flac', 'A', 'B', 'C', 1, 100, 1)
     rig.card_song('/mnt/mmc/Music/b.flac', 'B', 'B', 'C', 2, 100, 1)
     rig.write(1, [song_row('s1', 'Server', 'B', 'A', 1, 100, 1)])
@@ -601,14 +603,39 @@ def test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer(rig, fw):
     rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = (f'{ka:08x}\t\t5\t1700000000\n'
                                                       f'{kb:08x}\t\t5\t1700000000\n'
                                                       f'{ks:08x}\ts1\t3\t0\n').encode()
-    rig.files.files['/mnt/data/ringnav-ratings'] = b''
+    rig.files.files['/mnt/data/ringnav-ratings'] = struct.pack('<I', ka & ~7 | 2).ljust(O['RATE_SLOTS'] * 4, b'\0')
     rig.poll()
     assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
     assert f'/mnt/mmc/.{APP}/ratings.in.taking' not in rig.files.files
     db = sqlite3.connect(rig.tmp/'database.db')
     assert db.execute('select fileurl from myfav').fetchall() == [('/mnt/mmc/Music/a.flac',)]
     rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
-    assert rate(0, ks) == 3 and rate(0, kb) == 0  # b's newer change on the Q2 kept
+    assert rate(0, ka) == 2 and rate(0, ks) == 3 and rate(0, kb) == 0  # b's newer change on the Q2 kept
+
+
+def test_likes_and_stars_from_the_server_are_applied_apart(rig, fw):
+    """ratings=2's lines: like= puts a song in or out of My Fav and nothing else, stars= keeps its stars and
+    nothing else, and a newer change of the Q2's holds back only a line of its own kind."""
+    rig.card_song('/mnt/mmc/Music/a.flac', 'A', 'B', 'C', 1, 100, 1)
+    rig.card_song('/mnt/mmc/Music/b.flac', 'B', 'B', 'C', 2, 100, 1)
+    rig.write(1, [song_row('s1', 'Server', 'B', 'A', 1, 100, 1)])
+    rig.poll()
+    ka, kb, ks = (listen_key(p) for p in ('/mnt/mmc/Music/a.flac', '/mnt/mmc/Music/b.flac', url('s1')))
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.out'] = f'{kb:08x}\t\tlike=0\t1700000100\n'.encode()
+    rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = (f'{ka:08x}\t\tlike=1\t1700000000\n'
+                                                      f'{ka:08x}\t\tstars=4\t1700000000\n'
+                                                      f'{kb:08x}\t\tlike=1\t1700000000\n'
+                                                      f'{kb:08x}\t\tstars=3\t1700000000\n'
+                                                      f'{ks:08x}\ts1\tstars=5\t0\n'
+                                                      f'{ks:08x}\ts1\tlike=2\t0\n'  # no such like: passed over
+                                                      f'{ks:08x}\ts1\tfoo=1\t0\n').encode()
+    rig.files.files['/mnt/data/ringnav-ratings'] = b''
+    rig.poll()
+    assert f'/mnt/mmc/.{APP}/ratings.in' not in rig.files.files
+    db = sqlite3.connect(rig.tmp/'database.db')
+    assert db.execute('select fileurl from myfav').fetchall() == [('/mnt/mmc/Music/a.flac',)]  # five stars: no like
+    rate = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
+    assert rate(0, ka) == 4 and rate(0, kb) == 3 and rate(0, ks) == 5
 
 
 def test_a_scan_that_ends_while_a_job_runs_is_matched_after_it(rig, fw):
@@ -1374,8 +1401,8 @@ def heart_on_copy(rig, fw, ui, song, mcl, server_fav=False, **kw):
     copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
     rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
     rig.poll()
-    if server_fav:  # five hearts from the server: the row's path in myfav (ratings_in), not the copy's
-        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{listen_key(url("s1")):08x}\ts1\t5\t1700000000\n'.encode()
+    if server_fav:  # starred on the server: the row's path in myfav (ratings_in), not the copy's
+        rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{listen_key(url("s1")):08x}\ts1\tlike=1\t1700000000\n'.encode()
         rig.poll(3)
         assert myfav(rig) == [url('s1')]
     heart = Heart(fw, ui, song, mcl, path=copy.encode(), **kw)
@@ -1385,26 +1412,37 @@ def heart_on_copy(rig, fw, ui, song, mcl, server_fav=False, **kw):
 
 
 @in_fork
-def test_hearts_picked_on_a_stream_copy_are_the_server_rows_and_go_to_the_server(rig, fw, ui, song, mcl):
-    """Three hearts picked on Now Playing while the copy plays are kept under the server row's key (its
-    fileurl's listen_key, as play counts are), and its ratings.out line names the row's sid, so the app sends
-    them and the Library's row has them; the copy's own path keys nothing."""
+def test_stars_set_on_a_stream_copy_are_the_server_rows_and_go_to_the_server(rig, fw, ui, song, mcl):
+    """Three stars set on the rating page while the copy plays are kept under the server row's key (its
+    fileurl's listen_key, as play counts are), and its ratings.out line (stars=) names the row's sid, so the app
+    sends them and the Library's row has them; the copy's own path keys nothing."""
     heart = heart_on_copy(rig, fw, ui, song, mcl)
-    heart.hold()
-    heart.pick(3)
+    assert heart.rate(3) == 1
     kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
     row = listen_key(url('s1'))
     assert kept(0, row) == 3 and kept(0, listen_key('/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac')) == 0
-    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t3\t1700000000\n'.encode()
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\tstars=3\t1700000000\n'.encode()
     assert heart.stars() == 3
+
+
+@in_fork
+def test_an_app_that_takes_one_number_is_sent_nothing(rig, fw, ui, song, mcl):
+    """ratings=1 (one number, five its star) can carry a like or stars only by changing the other: the Q2 writes it
+    no line, and its ratings.in is still read (test_ratings_in_are_applied_unless_the_q2_s_own_change_is_newer)."""
+    rig.files.files[f'/mnt/mmc/.{APP}/q2app'] = b'name=Subsonic\ncatalogue=1\nratings=1\n'
+    heart = heart_on_copy(rig, fw, ui, song, mcl)
+    heart.rate(3)
+    heart.fav = True
+    ui.handler(heart.heart, EVT_CLICK)(C.addressof(C.create_string_buffer(0x40)))
+    assert f'/mnt/mmc/.{APP}/ratings.out' not in heart.files.files
 
 
 @in_fork
 def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, ui, song, mcl):
     """A tap is stock's My Fav toggle, which puts the copy's path in myfav (the Favorites list shows the song
-    once, as before): its line carries the row's sid, five hearts and then none, and the Ratings lists count
-    the copy's My Fav as the row's."""
-    from test_nav_library_pages import rate_all
+    once, as before): its line carries the row's sid, like=1 and then like=0, and the Ratings lists count the
+    copy's My Fav as the row's like."""
+    from test_nav_library_pages import LIKED, rate_all
     heart = heart_on_copy(rig, fw, ui, song, mcl)
     path = C.c_void_p.from_address(heart.track + O['REC_PATH']).value
     assert path
@@ -1415,15 +1453,15 @@ def test_a_heart_tapped_on_a_stream_copy_is_the_server_rows_favourite(rig, fw, u
     heart.fav = False
     ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
     row = listen_key(url('s1'))
-    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == (f'{row:08x}\ts1\t5\t1700000000\n'
-                                                                  f'{row:08x}\ts1\t0\t1700000000\n').encode()
-    assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [5, 0]
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == (f'{row:08x}\ts1\tlike=1\t1700000000\n'
+                                                                  f'{row:08x}\ts1\tlike=0\t1700000000\n').encode()
+    assert rate_all(fw, ui, [rig.record(url('s1')), rig.record(url('s2'))], favs=[rig.record(copy)]) == [LIKED, 0]
 
 
 def test_the_ratings_lists_have_rated_server_songs_with_local_and_server(rig, fw, ui, song):
     """A Ratings list reads every card song (spoken ones too: getAllMusic(0)'s SQL, no music filter) and, with
     Local + Server, the server's songs beside them, so a server song rated here or on the server is listed with
-    its hearts; with Local only it is not."""
+    its stars; with Local only it is not."""
     from test_nav_library_pages import RATINGS, Library, call, ratings
     rig.card_song('/mnt/mmc/audiobooks/b.m4b', 'Book', 'Reader', 'Tales', 1, 900, 1)
     rig.write(1, [song_row('s1', 'Streamed', 'Server Band', 'Server Only', 1, 100, 1),
@@ -1477,16 +1515,16 @@ def test_a_server_songs_five_hearts_from_the_server_are_its_my_fav(rig, fw, firs
 
 @in_fork
 def test_a_server_favourite_fills_the_heart_while_its_copy_plays(rig, fw, ui, song, mcl):
-    """Five hearts from the server put the row's path in My Fav; stock draws Now Playing's heart from the copy's
-    own path, which isn't there, so the heart's tick fills it by the row, and the rating page shows five stars."""
+    """A star from the server puts the row's path in My Fav; stock draws Now Playing's heart from the copy's own
+    path, which isn't there, so the heart's tick fills it by the row. The like is no rating: no stars."""
     heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
-    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 0
 
 
 @in_fork
 def test_a_tap_on_a_server_favourite_s_heart_takes_the_row_out(rig, fw, ui, song, mcl):
     """The heart filled by the row is emptied by a tap: the row leaves My Fav, the copy never goes in (stock's
-    toggle isn't run, so the Favorites list doesn't get the copy), and the server is told none."""
+    toggle isn't run, so the Favorites list doesn't get the copy), and the server is told like=0."""
     from test_nav_library_pages import FAV_CLICK, stock_stub
     heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
     log = (C.c_long * 3)()
@@ -1494,24 +1532,23 @@ def test_a_tap_on_a_server_favourite_s_heart_takes_the_row_out(rig, fw, ui, song
     ui.handler(heart.heart, EVT_CLICK)(C.addressof(C.create_string_buffer(0x40)))
     assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
     row = listen_key(url('s1'))
-    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\t0\t1700000000\n'.encode()
+    assert heart.files.files[f'/mnt/mmc/.{APP}/ratings.out'] == f'{row:08x}\ts1\tlike=0\t1700000000\n'.encode()
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')  # the row out: the tick leaves it empty
     assert ui.image[heart.heart] == 'play_unfav'
 
 
 @in_fork
-def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui, song, mcl):
-    """Three hearts picked on the row's favourite keep three under the row's key and take the row out of My Fav
-    without stock's toggle, which would put the copy in."""
+def test_stars_on_a_server_favourite_leave_it_liked(rig, fw, ui, song, mcl):
+    """Three stars set on the row's favourite keep three under the row's key; the row stays in My Fav and the
+    heart full, stock's toggle never run."""
     from test_nav_library_pages import FAV_CLICK, stock_stub
     heart = heart_on_copy(rig, fw, ui, song, mcl, server_fav=True)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
-    heart.hold()
-    heart.pick(3)
+    assert heart.rate(3) == 1
     row = listen_key(url('s1'))
-    assert list(log) == [0, 0, 0] and myfav(rig) == [] and ui.image[heart.heart] == 'play_unfav'
+    assert list(log) == [0, 0, 0] and myfav(rig) == [url('s1')] and ui.image[heart.heart] == 'play_fav'
     assert fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, row) == 3 and heart.stars() == 3
 
 
@@ -1519,8 +1556,9 @@ def test_fewer_hearts_picked_on_a_server_favourite_take_the_row_out(rig, fw, ui,
 @pytest.mark.parametrize('hearts', [4, 0])
 def test_a_server_rating_under_five_takes_the_copy_out_of_my_fav_too(rig, fw, ui, song, mcl, hearts):
     """A copy hearted here (stock's toggle puts the copy's own path in myfav) and then rated 4, or unstarred, on
-    the server: ratings_in takes the copy's path out with the row's, the tick empties the heart stock drew from
-    the copy, and the rating page shows the server's 4 stars."""
+    the server by an app with one number (ratings=1: under five is no star): ratings_in takes the copy's path out
+    with the row's, the tick empties the heart stock drew from the copy, and the rating page shows the server's 4
+    stars."""
     copy = '/mnt/mmc/.subsonic/stream/acct/orig/o/One [s1].flac'
     rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, local=copy)])
     rig.poll()
@@ -1535,7 +1573,7 @@ def test_a_server_rating_under_five_takes_the_copy_out_of_my_fav_too(rig, fw, ui
     fw.mock('checkFavExist', lambda *_: copy in myfav(rig))  # stock's, by the copy's own path
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')
-    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 0
     row = listen_key(url('s1'))
     rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{row:08x}\ts1\t{hearts}\t1700000000\n'.encode()
     rig.poll(3)
@@ -1564,7 +1602,7 @@ def test_five_hearts_from_the_server_put_the_row_in_my_fav_in_place_of_its_copy(
     fw.mock('checkFavExist', lambda *_: copy in myfav(rig))
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     ui.fire('rate_tick')
-    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 5
+    assert ui.image[heart.heart] == 'play_fav' and heart.stars() == 0
 
 
 # Streaming Songs (library_settings.c): [Q2POD] LIBRARYSOURCE, its state for card apps in /tmp/q2-addon.library, and the

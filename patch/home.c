@@ -77,7 +77,7 @@ int ringnav_localmusic(void *win, void *ctx) {
     lr_auto_hide(stock[L_HIRES]);
     /* Years: browsing by a tag, as Genre */
     lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Years", 1));
-    /* My Fav is Ratings' Loved, its row kept hidden in its place */
+    /* My Fav, the liked songs, is Ratings' Loved, its row kept hidden in its place */
     lr_put(rows, 'r', library_row(view, "local_fav", ratings_menu, 0, "Ratings", 1));
     lr_retire(stock[L_FAV]);
     lr_put(rows, 'm', library_row(view, "local_frequentplay", most_played, 0, "Most Played", 1));

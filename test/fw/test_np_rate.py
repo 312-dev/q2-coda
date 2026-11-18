@@ -133,11 +133,13 @@ def test_the_rating_page_holds_no_screen_awake(fw, ui, mcl, st):
     assert len(resets) == 1
 
 
-# The stars: the song's hearts one for one, the wheel's target, Centre, a tap.
+# The stars: the song's kept rating, the wheel's target, Centre, a tap.
 
-@pytest.mark.parametrize('kept, fav, stars', [(0, False, 0), (1, False, 1), (3, False, 3), (4, False, 4), (2, True, 5)])
-def test_kept_hearts_are_the_stars_and_my_fav_is_five(fw, ui, mcl, st, kept, fav, stars):
-    """The ratings file is read as it is: 1-4 hearts are 1-4 stars, My Fav (the old five hearts) five; no migration."""
+@pytest.mark.parametrize('kept, fav, stars', [(0, False, 0), (1, False, 1), (3, False, 3), (4, False, 4), (5, False, 5),
+                                              (2, True, 2), (0, True, 0)])
+def test_the_kept_rating_is_the_stars_and_my_fav_adds_none(fw, ui, mcl, st, kept, fav, stars):
+    """The ratings file is read as it is: its 1-4 (all it held before) are 1-4 stars, five now too; a liked song (My
+    Fav, the heart) has only its own stars, none for the like."""
     rate = Rate(fw, ui, mcl, st, kept=kept, fav=fav)
     assert rate.stars() == stars
     drawn, _, _ = painted_stars(fw, rate)
@@ -204,7 +206,8 @@ def test_centre_on_an_unrated_song_starts_on_the_first_star(fw, ui, mcl, st):
     assert rate.kept() == 1
 
 
-@pytest.mark.parametrize('kept, star, after', [(0, 4, 4), (2, 5 - 1, 4), (4, 1, 1), (3, 3, 0), (1, 1, 0)])
+@pytest.mark.parametrize('kept, star, after', [(0, 4, 4), (2, 5 - 1, 4), (4, 1, 1), (3, 3, 0), (1, 1, 0), (0, 5, 5),
+                                               (5, 5, 0)])
 def test_a_tap_on_a_star_keeps_it_at_once_and_the_rating_s_own_top_clears_it(fw, ui, mcl, st, kept, star, after):
     rate = Rate(fw, ui, mcl, st, kept=kept)
     assert rate.tap(star_x(star - 1) + 20, STAR_Y - 25) == [0]  # never a STOP: the slide_view keeps its grab
@@ -238,7 +241,7 @@ def test_a_song_nothing_can_rate_leaves_the_wheel_to_the_volume(fw, ui, mcl, st)
 
 
 def test_a_rating_changed_elsewhere_shows_within_the_poll(fw, ui, mcl, st):
-    """A rating from the server (ratings_in) or the hold menu's picker reaches the page on its next read."""
+    """A rating from the server (ratings_in) or Car Remote reaches the page on its next read."""
     rate = Rate(fw, ui, mcl, st, kept=1)
     rate.poll()
     fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, listen_key(PATH), 4)

@@ -5,9 +5,9 @@
  * view_rate), reached by the same swipe. At rest on it the column goes full screen, as a tap makes
  * the lyrics (now_playing.c np_full), and back once the slide_view is on another page
  * (np_rate_poll); this paints it whole from its background hook: the glow, the song's
- * title and artist centred, five stars and the page dots. The stars are the song's hearts
- * (ratings.c rate_now: 0 to 5, 5 its My Fav), filled in Text Primary up to the rating, the rest
- * outlined at NR_FAINT. The wheel moves a target star, drawn NR_STAR_BIG (an outline in full
+ * title and artist centred, five stars and the page dots. The stars are the song's rating
+ * (ratings.c rate_now: 0 to 5, apart from the heart's like), filled in Text Primary up to it, the
+ * rest outlined at NR_FAINT. The wheel moves a target star, drawn NR_STAR_BIG (an outline in full
  * Text Primary past the rating), and Centre keeps it; a tap on a star keeps it at once. The star
  * that is already the rating's top, tapped or kept by Centre, clears the rating: the page's "0".
  * Centre with no target puts it on the rating's top star (the first when unrated).

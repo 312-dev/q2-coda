@@ -344,9 +344,14 @@ def test_playing_page_oled_grid():
     page = n['view_album'][3]
     assert 'label_ipod_pos' not in n and n['img_more'] in page and n['img_fav'] in page and n['img_playmode'] not in page
     more, fav = n['img_more'][1], n['img_fav'][1]
-    assert more[0] + more[2] // 2 == right - ipod.NP_GRID_MORE_INSET and fav[0] + fav[2] == more[0] and fav[1] == more[1]
+    assert more[0] + more[2] // 2 == right - ipod.NP_GRID_MORE_INSET
     assert more[1] + more[3] // 2 == 150 - ipod.NP_GRID_ROW_ASCENT + ipod.NP_GRID_ROW_PX // 2  # on the art's bottom row
-    assert fav[0] >= tx + 60 and more[1] + more[3] <= n["slider_play"][1][1]  # clear of the bar's target
+    assert more[1] + more[3] <= n["slider_play"][1][1]  # clear of the bar's target
+    # the heart under the album (the user's mock-up, 2026-11-18): its target x 182 to 238, y 142 to 184 on screen,
+    # the 34 px glyph centred, x 193 to 227, y 146 to 180, clear of More's target and the bar's
+    assert [fav[0], g.bar + fav[1], fav[0] + fav[2], g.bar + fav[1] + fav[3]] == [182, 142, 238, 184]
+    assert fav[0] + fav[2] <= more[0] and fav[1] + fav[3] <= n['slider_play'][1][1]
+    assert fav[1] == n['label_ipod_album'][1][1] + n['label_ipod_album'][1][3]  # on the album line's foot
     bar_y = g.np_bar_y - g.bar
     slider = n['slider_play']
     assert slider[1] == [24, bar_y + 3 - ipod.NP_GRID_TOUCH // 2, right - 24, ipod.NP_GRID_TOUCH] and slider[2]['bar_size'] == '6'

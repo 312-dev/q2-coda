@@ -516,10 +516,10 @@ m.pick(m.labels().index('View Queue')); m.advance(0); m.page=m.top
 assert m.nodes[m.page]['name']=='upnext_page' and m.nodes[m.page]['type']=='dialog' and any(n.get('name')=='_mm_head' for n in m.nodes.values())
 m.close(); passed()
 
-# Ratings (ratings.c rate_*): 5 hearts are stock's My Fav, 1-4 kept in /mnt/data/ringnav-ratings by listen_key with
-# the hearts in its low three bits. Now Playing's heart: stock's click (0x53c968, bound to img_fav with the window) is
-# swapped for one telling a tap, stock's toggle that leaves nothing kept, from a RATE_HOLD_MS hold, which opens the
-# picker: five of the heart's images on a dark panel, the wheel moving the rating, Centre saving and Return leaving it.
+# Ratings (ratings.c rate_*): a song's 1-5 stars are kept in /mnt/data/ringnav-ratings by listen_key with the stars in
+# its low three bits, set on Now Playing's rating page (rate_now_set); the heart is stock's My Fav, the like alone.
+# Now Playing's heart: stock's click (0x53c968, bound to img_fav with the window) is swapped for one that toggles the
+# like through it and leaves the stars as they are; a press held on it is a tap, and there is no rating picker.
 FAV_CLICK=0x53c968
 class RateMachine(FileMocks,ShuffleMachine):
     def __init__(self,saved=b''):
@@ -567,75 +567,48 @@ class RateMachine(FileMocks,ShuffleMachine):
         return sorted(v for v in struct.unpack(f'<{len(data)//4}I',data) if v)
     def alone(self):  # the heart is the favourite alone: nothing added beside it (the rating page has the stars)
         return self.nodes[self.get(self.fav+O['W_PARENT'])]['children']==[self.fav]
-    def picker(self):
-        """The rating picker's rows while the menu sheet's picker is up (ratings.c rate_show), else None."""
-        rows=self.labels() if self.top!=self.np and self.view in self.nodes else []
-        return rows if rows[:1]==['Unrated'] else None
-    def on(self): return self.selected(self.view)  # the picker's row: its rating
-    def tap(self,press=True):  # a press, then its click
-        if press: f,ctx=self.handler(self.fav,O['EVT_POINTER_DOWN']); self.call(address=f,args=(ctx,self.event,0,0),gap=0)
+    def tap(self):  # the heart's click
         f,ctx=self.handler(self.fav,O['EVT_CLICK']); return self.call(address=f,args=(ctx,self.event,0,0),gap=0)
-    def heart(self,ms=O['RATE_HOLD_MS']):  # a press held ms on the heart
-        self.touch()  # the finger's down reaches the window manager first (pointer_down)
-        f,ctx=self.handler(self.fav,O['EVT_POINTER_DOWN']); self.call(address=f,args=(ctx,self.event,0,0),gap=0)
-        self.pressed=1; self.advance(ms,clear=False); self.pressed=0
+    def held(self,ms=1000):  # a press held ms on the heart, then its click
+        self.touch(); self.pressed=1; self.advance(ms,clear=False); self.pressed=0; return self.tap()
+    def rate(self,n):  # n stars from the rating page (np_rate.c nr_keep): 1 kept
+        return self.call(address=payload_syms['rate_now_set'],args=(n,0,0,0),gap=0)
 def key_of(name): k=fnv('/p/'+name); return k|(k==0)
 m=RateMachine()
-# Bound: stock's click off img_fav, the payload's click and press on, no badge beside it; nothing read yet beyond the file.
-assert ('widget_off_by_func',m.fav,O['EVT_CLICK'],FAV_CLICK) in m.calls and m.alone() and m.picker() is None
-assert [t for t,f,ctx in m.nodes[m.fav]['handlers']]==[O['EVT_CLICK'],O['EVT_POINTER_DOWN']]; passed()
+# Bound: stock's click off img_fav, the payload's click on and nothing else (no hold), no badge beside it.
+assert ('widget_off_by_func',m.fav,O['EVT_CLICK'],FAV_CLICK) in m.calls and m.alone()
+assert [t for t,f,ctx in m.nodes[m.fav]['handlers']]==[O['EVT_CLICK']]; passed()
 # A tap is stock's heart: B (playing) into My Fav, nothing kept; again, out. Its click returns 0, as stock's:
 # a STOP would skip the slide_view's own release and leave its grab on the window.
 assert m.tap()==0 and m.favs=={'B'} and m.nodes[m.fav]['image']=='play_fav' and m.kept()==[]
 assert m.tap()==0 and m.favs==set(); passed()
-# A press shorter than the hold, then its click: still the tap.
-def aborts(): return [c for c in m.calls if c[0]=='widget_dispatch_event_to_target_recursive' and m.get(c[2])==O['EVT_POINTER_ABORT']]
-m.calls=[]; m.heart(O['RATE_HOLD_MS']-1); assert m.picker() is None and not aborts() and m.tap(press=False)==0 and m.favs=={'B'}; passed()
-# A hold opens the picker, the menu sheet's, a row for each rating, on 5 (My Fav), aborting the press so the slide_view
-# drops its grab; its release's click does nothing.
-RATE_ROWS=['Unrated','1 Heart','2 Hearts','3 Hearts','4 Hearts','5 Hearts']
-m.calls=[]; m.heart(); assert m.picker()==RATE_ROWS and m.on()==5 and [c[1] for c in aborts()]==[m.np]
-assert m.tap(press=False)==0 and m.favs=={'B'}; passed()
-# The wheel moves the picker's row within 0-5; Return leaves the rating as it was.
-for k in (O['KEY_NEXT'],O['KEY_PREV'],O['KEY_PREV']): assert m.call(k)==11
-assert m.on()==3 and m.favs=={'B'}
-back(m); assert m.picker() is None and m.favs=={'B'} and m.kept()==[]; passed()
-# Centre saves 3: My Fav out through stock's own click, 3 kept, nothing drawn on the empty heart.
-m.heart()
-for _ in range(2): m.call(O['KEY_PREV'])
-assert m.on()==3; m.pick(3); m.advance(0); assert m.picker() is None and m.favs==set()  # Centre's click on the lit row
-assert m.kept()==[(key_of('B')&~7)|3] and m.alone(); passed()
-# Down to 0 clears it; a tap on the third rating's row saves 3 again; a tap on the heart (into My Fav) leaves nothing kept.
-m.heart()
-for _ in range(4): m.call(O['KEY_PREV'])
-assert m.on()==0
-m.pick(0); m.advance(0); assert m.kept()==[] and m.favs==set()
-m.heart(); m.pick(3); m.advance(0)
-assert m.picker() is None and m.kept()==[(key_of('B')&~7)|3]
-assert m.tap()==0 and m.favs=={'B'} and m.kept()==[] and m.alone(); passed()
-# A tap or a saved rating makes the card's copy due, 5 s on; a picker left unsaved doesn't.
-rc_due=payload_syms['rc_due']; m.word(rc_due,0); m.heart(); back(m); assert not m.get(rc_due)
-assert m.tap()==0 and m.get(rc_due)==1
-m.word(rc_due,0); m.heart(); m.pick(1); m.advance(0); assert m.get(rc_due)==1 and m.kept()==[(key_of('B')&~7)|1]
-assert m.tap()==0 and m.favs=={'B'} and m.kept()==[]; passed()
+# A press held a second is still the tap: no sheet, no picker.
+m.calls=[]; assert m.held()==0 and m.favs=={'B'} and not [c for c in m.calls if c[0]=='navigator_to']; passed()
+# Stars are kept apart from the like: five stars leave B liked, none leave it liked; a tap takes the like away and
+# keeps the stars. Each makes the card's copy due.
+rc_due=payload_syms['rc_due']; m.word(rc_due,0)
+assert m.rate(5)==1 and m.favs=={'B'} and m.kept()==[(key_of('B')&~7)|5] and m.get(rc_due)==1
+m.word(rc_due,0); assert m.tap()==0 and m.favs==set() and m.kept()==[(key_of('B')&~7)|5] and m.get(rc_due)==1
+assert m.rate(0)==1 and m.kept()==[] and m.favs==set()
+assert m.rate(2)==1 and m.alone(); passed()
 # Kept across boots, the heart's UI tick adding nothing beside it.
-assert m.tap()==0 and m.favs==set(); m.heart(); m.pick(2); m.advance(0)
 m2=RateMachine(m.files['/mnt/data/ringnav-ratings']); assert m2.kept()==[(key_of('B')&~7)|2]
 m2.word(O['MCL_POS'],0); m2.advance(500); assert m2.alone(); passed()
-# Hold Play/Pause on Now Playing: Rate last, with the hearts, and no Next/Previous album outside Shuffle Albums/Folders; its row opens the same picker.
+# Hold Play/Pause on Now Playing: no Rate row (the rating page is the one place to rate), and no Next/Previous album
+# outside Shuffle Albums/Folders.
 m2.word(O['MCL_POS'],1); m2.press(100)
-assert m2.hold()==11 and m2.labels()[-2:]==['Group by','Rate  ♥♥♡♡♡'] and m2.release()==0
-m2.pick(m2.labels()[-1]); m2.advance(0); assert m2.picker()==RATE_ROWS and m2.on()==2; back(m2); assert m2.picker() is None; passed()  # Rate by its words: the sheet's header and gaps are children too
-# More…: last, below Rate, while Now Playing has its img_more; its row clicks that as a tap would
+assert m2.hold()==11 and m2.labels()[-1]=='Group by' and not [l for l in m2.labels() if l.startswith('Rate')] and m2.release()==0; passed()
+# More…: last, while Now Playing has its img_more; its row clicks that as a tap would
 m3=RateMachine(); more=m3.node('image','img_more'); m3.nodes[m3.np]['children'].append(more); m3.word(more+O['W_PARENT'],m3.np)
 m3.press(100)
-assert m3.hold()==11 and m3.labels()[-2:]==['Rate','More…'] and m3.release()==0
+assert m3.hold()==11 and m3.labels()[-2:]==['Group by','More…'] and m3.release()==0
 m3.pick(m3.labels()[-1]); m3.advance(0)
 assert [m3.get(c[2]) for c in m3.dispatched() if c[1]==more]==[O['EVT_CLICK']]; passed()
-# Ratings: Top Rated (4-5), Loved (5), All Rated and Disliked (1), most hearts first, then title order. Each row's
-# hearts are OLED's glyphs, painted before its detail (ratings.c rate_row: the count in the row's "_hearts", the detail
-# moved RATE_ROOM, 5 x 14 px glyphs 2 px apart and a 6 px space, to the right).
-m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))).ljust(4*O['RATE_SLOTS'],b'\0'))
+# Ratings: Top Rated (4-5 stars), Loved (the liked songs, My Fav), All Rated and Disliked (1), most stars first, then
+# title order. Each row's stars are OLED's glyphs, painted before its detail (ratings.c rate_row: the count in the
+# row's "_stars", the detail moved RATE_ROOM, 5 x 14 px glyphs 2 px apart and a 6 px space, to the right); a liked
+# song with no stars has none, its detail where it was.
+m=RateMachine(b''.join(struct.pack('<I',(fnv(path)&~7)|h) for path,h in (('/p/A',1),('/p/B',5),('/mnt/mmc/Audiobooks/C.m4b',4),('/mnt/mmc/Podcasts/E.mp3',2))).ljust(4*O['RATE_SLOTS'],b'\0'))
 m.found=[m.song(n) for n in ('A','B','C','D','E')]; m.fav_songs=[m.song('D')]
 m.word(m.found[2]+O['REC_PATH'],m.string('/mnt/mmc/Audiobooks/C.m4b'))
 m.word(m.found[4]+O['REC_PATH'],m.string('/mnt/mmc/Podcasts/E.mp3'))
@@ -646,8 +619,8 @@ def lib_row(m,view,text):  # the Library's added row by its words (home.c ringna
 f,ctx=m.handler(m.nodes[lib_row(m,view,'Ratings')]['children'][0],O['EVT_CLICK'])
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0; menu=m.top; m.page=menu
 assert m.nodes[menu]['name']=='ratings_page' and m.texts()==['Ratings','Top Rated','Loved','Albums','All Rated','Disliked']
-want={0:['D','C'],1:['D'],2:['D','C','E','A'],3:['A']}
-hearts={'D':5,'C':4,'E':2,'A':1}
+want={0:['B','C'],1:['D'],2:['B','C','E','A'],3:['A']}
+stars={'B':5,'C':4,'E':2,'A':1}
 for i,names in want.items():
     row=m.nodes[m.find('scroll_view',menu)]['children'][i+(i>=2)]; g,c=m.handler(row,O['EVT_CLICK'])  # Albums aside
     assert m.call(address=g,args=(c,m.event,0,0),gap=0,count=50_000_000)==0; m.page=m.top
@@ -655,8 +628,8 @@ for i,names in want.items():
     assert [c for c in m.calls if c[0]=='getAllMusic'][-1][1:]==(0,2)  # LIBRARY_ALL (navigation.h): every card song, and the server's
     assert m.texts()==[('Top Rated','Loved','All Rated','Disliked')[i]]+[x for n in names for x in (n,'· Artist')],m.texts()
     rrows=m.nodes[m.find('scroll_view')]['children']
-    assert [m.nodes[r].get('_hearts') for r in rrows]==[hearts[n] for n in names]
-    assert {m.get(m.nodes[r]['children'][1]+O['W_X']) for r in rrows}=={OLT['page_x']+5*14+4*2+6}
+    assert [m.nodes[r].get('_stars') for r in rrows]==[stars.get(n) for n in names]
+    assert [m.get(m.nodes[r]['children'][1]+O['W_X']) for r in rrows]==[OLT['page_x']+(5*14+4*2+6 if n in stars else 0) for n in names]
     if i==2:  # a row plays the list from there, as a library queue
         r=m.nodes[m.find('scroll_view')]['children'][1]; g,c=m.handler(r,O['EVT_CLICK'])
         assert m.call(address=g,args=(c,m.event,0,0),gap=0)==0 and m.queued==names and m.plays[-1][2:]==(1,0xf001,2)

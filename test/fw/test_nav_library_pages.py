@@ -22,7 +22,7 @@ EVT_CLICK, EVT_DESTROY, EVT_KEY_UP, EVT_POINTER_DOWN, EVT_POINTER_ABORT = (
 W_PARENT, W_EMITTER, EVENT_KEY = O['W_PARENT'], O['W_EMITTER'], O['EVENT_KEY']
 REC_ID, REC_TYPE, REC_CUE_START = O['REC_ID'], O['REC_TYPE'], O['REC_CUE_START']
 PLAYS_SLOTS, RATE_SLOTS, RESUME_SLOTS = O['PLAYS_SLOTS'], O['RATE_SLOTS'], O['RESUME_SLOTS']
-LONG_SONG_S, RATE_HOLD_MS = O['LONG_SONG_S'], O['RATE_HOLD_MS']
+LONG_SONG_S = O['LONG_SONG_S']
 LIBRARY, FOLDER = 0xf001, 1
 STOP, REPEAT = 11, 8  # a handler's RET_STOP; a timer's RET_REPEAT
 PLAYS_FILE, RESUME_FILE = '/mnt/mmc/.q2pod/ringnav-plays', '/mnt/mmc/.q2pod/ringnav-resume'  # card_store.c
@@ -570,7 +570,7 @@ def test_album_plays_sums_each_album_s_listens(fw, ui, song):
 
 # Ratings' lists.
 def ratings(*kept):
-    """ringnav-ratings: (key, hearts) slots, the rest free."""
+    """ringnav-ratings: (key, stars) slots, the rest free."""
     data = b''.join(struct.pack('<I', key & ~7 | n) for key, n in kept)
     return data + b'\0' * (RATE_SLOTS * 4 - len(data))
 
@@ -585,51 +585,63 @@ def test_ratings_menu_lists_its_five_lists(fw, ui):
 
 
 class Rated:
-    """A library of five songs: a My Fav, one each of 4, 3 and 1 kept hearts, one unrated."""
+    """A library of six songs: a My Fav with no stars, one each of 5, 4, 3 and 1 kept stars, one unrated."""
     def __init__(self, fw, ui, song):
-        self.fav, self.four, self.three, self.one, self.none = (
+        self.fav, self.five, self.four, self.three, self.one, self.none = (
             song(b'/m/%s.flac' % n, n.title(), artist) for n, artist in
-            ((b'fav', b'F'), (b'four', b''), (b'three', b'T'), (b'one', b'O'), (b'none', b'N')))
-        self.library = Library(fw, ui, [self.one, self.fav, self.three, self.none, self.four])
-        Files(fw, {RATINGS: ratings((listen_key(b'/m/four.flac'), 4), (listen_key(b'/m/three.flac'), 3),
-                                    (listen_key(b'/m/one.flac'), 1))})
+            ((b'fav', b'F'), (b'five', b'V'), (b'four', b''), (b'three', b'T'), (b'one', b'O'), (b'none', b'N')))
+        self.library = Library(fw, ui, [self.one, self.fav, self.three, self.none, self.four, self.five])
+        Files(fw, {RATINGS: ratings((listen_key(b'/m/five.flac'), 5), (listen_key(b'/m/four.flac'), 4),
+                                    (listen_key(b'/m/three.flac'), 3), (listen_key(b'/m/one.flac'), 1))})
         stock_fav = song(b'/m/fav.flac')  # stock's own myfav row of the same file
         fw.mock('getAllFav', lambda *_: self.library.deques[self.library.directory()].append(stock_fav) or 1)
 
 
-# Each row's second line its artist after a dot (a space for none); its hearts are glyphs drawn before the words
-# (RATE_HEARTS, test_oled_draws_a_ratings_rows_hearts_as_glyphs)
+# Each row's second line its artist after a dot (a space for none); its stars are glyphs drawn before the words
+# (RATE_STARS, test_oled_draws_a_ratings_rows_stars_as_glyphs). A like is no rating: the My Fav song is in Loved
+# alone, with no stars.
 @pytest.mark.parametrize('row, title, want', [
-    (0, 'Top Rated', [('Fav', f'{DOT} F', 5), ('Four', ' ', 4)]),
-    (1, 'Loved', [('Fav', f'{DOT} F', 5)]),
-    (3, 'All Rated', [('Fav', f'{DOT} F', 5), ('Four', ' ', 4), ('Three', f'{DOT} T', 3), ('One', f'{DOT} O', 1)]),
+    (0, 'Top Rated', [('Five', f'{DOT} V', 5), ('Four', ' ', 4)]),
+    (1, 'Loved', [('Fav', f'{DOT} F', None)]),
+    (3, 'All Rated', [('Five', f'{DOT} V', 5), ('Four', ' ', 4), ('Three', f'{DOT} T', 3), ('One', f'{DOT} O', 1)]),
     (4, 'Disliked', [('One', f'{DOT} O', 1)]),
 ])
-def test_a_ratings_list_is_its_hearts_most_first(fw, ui, song, row, title, want):
+def test_a_ratings_list_is_its_stars_most_first(fw, ui, song, row, title, want):
     Rated(fw, ui, song)
     call(fw, 'ratings_menu')
     ui.click(ui.top(), row)
     page = ui.top()
     assert ui.name[page] == 'rated_page' and title in ui.shown(page) and ui.rows(page) == [w[:2] for w in want]
-    assert [ui.props.get((item, '_hearts')) for item in ui.kids[ui.view(page)]] == [w[2] for w in want]
+    assert [ui.props.get((item, '_stars')) for item in ui.kids[ui.view(page)]] == [w[2] for w in want]
 
 
-def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
-    """OLED's second line (docs/oled-design.md): Phosphor's filled hearts for the song's, outlined for the rest, in
-    Text Secondary or white on the selection, the words after them."""
+def test_loved_is_the_liked_songs_with_their_own_stars_most_first(fw, ui, song):
+    a, b, c = (song(b'/m/%c.flac' % x, b'%c' % x) for x in b'abc')
+    library = Library(fw, ui, [a, b, c])
+    Files(fw, {RATINGS: ratings((listen_key(b'/m/b.flac'), 2), (listen_key(b'/m/c.flac'), 4))})
+    fw.mock('getAllFav', lambda *_: library.deques[library.directory()].extend([song(b'/m/a.flac'), song(b'/m/b.flac')]) or 2)
+    call(fw, 'rated_open', 1)
+    page = ui.top()
+    assert ui.captions(page) == ['b', 'a']  # c, rated but not liked, is not Loved
+    assert [ui.props.get((item, '_stars')) for item in ui.kids[ui.view(page)]] == [2, None]
+
+
+def test_oled_draws_a_ratings_rows_stars_as_glyphs(fw, ui, song, st):
+    """OLED's second line (docs/oled-design.md): Phosphor's filled stars for the song's, outlined for the rest, in
+    Text Primary or white on the selection, the words after them."""
     from test_nav_hold import use_set
     use_set(st)
     Rated(fw, ui, song)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     call(fw, 'rated_open', 3)
     page = ui.top()
-    assert ui.rows(page) == [('Fav', f'{DOT} F'), ('Four', ' '), ('Three', f'{DOT} T'), ('One', f'{DOT} O')]
+    assert ui.rows(page) == [('Five', f'{DOT} V'), ('Four', ' '), ('Three', f'{DOT} T'), ('One', f'{DOT} O')]
     drawn: list = []  # image names, each followed by where it was drawn
     canvas = C.create_string_buffer(0x100)
     fw.mock('widget_load_image', lambda w, name, bitmap, *_: drawn.append(C.string_at(name).decode()) or 0)
     fw.mock('canvas_draw_image', lambda canvas, bitmap, src, dst, *_: drawn.append(struct.unpack_from('<2i', C.string_at(dst, 8))) or 0)
     three = ui.kids[ui.view(page)][2]
-    paint = fw.fn('rate_hearts_paint', None, C.c_void_p, C.c_void_p)
+    paint = fw.fn('rate_stars_paint', None, C.c_void_p, C.c_void_p)
     paint(three, C.addressof(canvas))
     names, at = drawn[0::2], drawn[1::2]
     assert names == ['oled_rate_on_d'] * 3 + ['oled_rate_off_d'] * 2
@@ -645,7 +657,7 @@ def test_a_ratings_list_plays_from_its_row(fw, ui, song):
     rated = Rated(fw, ui, song)
     call(fw, 'rated_open', 3)
     ui.click(ui.top(), 2)
-    assert ui.played == [([rated.fav, rated.four, rated.three, rated.one], 2, LIBRARY)]
+    assert ui.played == [([rated.five, rated.four, rated.three, rated.one], 2, LIBRARY)]
 
 
 def test_a_ratings_list_in_library_order_among_equal_hearts(fw, ui, song):
@@ -661,8 +673,16 @@ def test_an_empty_ratings_list_says_how_to_rate(fw, ui, song):
     Library(fw, ui, [song(b'/m/a.flac', b'A')])
     Files(fw)
     call(fw, 'rated_open', 0)
-    assert empty_state(ui, ui.top()) == ('star', 'No Rated Songs Yet', 'Hold the heart on Now Playing to rate', None)
+    assert empty_state(ui, ui.top()) == ('star', 'No Rated Songs Yet', 'Swipe to the stars on Now Playing', None)
     assert ui.rows(ui.top()) == []  # no fake row, nothing to play
+
+
+def test_an_empty_loved_says_how_to_love_a_song(fw, ui, song):
+    Library(fw, ui, [song(b'/m/a.flac', b'A')])
+    Files(fw, {RATINGS: ratings((listen_key(b'/m/a.flac'), 5))})  # five stars are no like
+    fw.mock('getAllFav', lambda *_: 0)
+    call(fw, 'rated_open', 1)
+    assert empty_state(ui, ui.top()) == ('heart-slash', 'No Loved Songs Yet', 'Tap the heart on Now Playing', None)
 
 
 def test_a_ratings_list_reads_every_song(fw, ui, song):
@@ -682,10 +702,13 @@ def test_a_ratings_list_closes_with_its_page(fw, ui, song, st):
     assert 'Loved' in ui.shown(ui.top())
 
 
-# rate_all's hearts, case by case and against a model of the rule.
+# rate_all's stars and likes, case by case and against a model of the rule.
+LIKED = 0x80  # ratings.c RATE_LIKED
+
+
 def rate_all(fw, ui, records, favs=(), slots=()):
-    """rate_all's hearts for records, with favs (records) in My Fav and slots (raw words) in the kept table. Once a
-    test: the table is read on first use."""
+    """rate_all's stars for records, LIKED added for those in My Fav, with favs (records) in My Fav and slots (raw
+    words) in the kept table. Once a test: the table is read on first use."""
     fw.mock('getAllFav', lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(favs) or len(favs))
     Files(fw, {RATINGS: b''.join(struct.pack('<I', s) for s in slots) + b'\0' * (RATE_SLOTS - len(slots)) * 4})
     h = (C.c_ubyte * (len(records) + 1))()
@@ -693,50 +716,53 @@ def rate_all(fw, ui, records, favs=(), slots=()):
     return list(h[:len(records)])
 
 
-def hearts_model(keys, favs, slots):
-    """The rule: favourites (5) then the kept slots in slot order, each entry that matches the song's key above
-    its low three bits setting the hearts, until they are 5 or more."""
-    entries = [(f | 7, 5) for f in favs] + [(s, s & 7) for s in slots if s]
+def stars_model(keys, favs, slots):
+    """The rule: a song is liked when a favourite's key matches it above the low three bits; its stars are the last
+    kept slot in slot order that matches and holds 1 to 5, others passed over."""
     out = []
     for key in keys:
-        h = 0
-        for e, v in entries:
-            if h >= 5:
-                break
-            if (e ^ key) < 8:
-                h = v
-        out.append(h)
+        liked = any((f ^ key) >> 3 == 0 for f in favs)
+        stars = 0
+        for s in slots:
+            if s and (s ^ key) < 8 and 1 <= s & 7 <= 5:
+                stars = s & 7
+        out.append(stars | (LIKED if liked else 0))
     return out
 
 
-def test_a_favourite_also_kept_is_five_hearts(fw, ui, song):
-    a = song(b'/m/a.flac')
-    assert rate_all(fw, ui, [a], favs=[song(b'/m/a.flac')], slots=[listen_key(b'/m/a.flac') & ~7 | 2]) == [5]
+def test_a_favourite_keeps_its_own_stars(fw, ui, song):
+    a, b = song(b'/m/a.flac'), song(b'/m/b.flac')
+    favs = [song(b'/m/a.flac'), song(b'/m/b.flac')]
+    assert rate_all(fw, ui, [a, b], favs=favs, slots=[listen_key(b'/m/a.flac') & ~7 | 2]) == [LIKED | 2, LIKED]
 
 
-def test_a_kept_song_is_its_hearts(fw, ui, song):
+def test_a_kept_song_is_its_stars(fw, ui, song):
     a, b = song(b'/m/a.flac'), song(b'/m/b.flac')
     assert rate_all(fw, ui, [a, b], slots=[0, listen_key(b'/m/b.flac') & ~7 | 3]) == [0, 3]
 
 
-def test_keys_alike_below_bit_3_keep_their_own_hearts(fw, ui, song):
+def test_five_stars_are_kept_and_no_like(fw, ui, song):
+    assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[listen_key(b'/m/a.flac') & ~7 | 5]) == [5]
+
+
+def test_keys_alike_below_bit_3_keep_their_own_stars(fw, ui, song):
     paths = [b'/m/%d.flac' % i for i in range(64)]
     p, q = next((p, q) for p in paths for q in paths if p < q and listen_key(p) & 7 == listen_key(q) & 7)
     assert listen_key(p) >> 3 != listen_key(q) >> 3
     assert rate_all(fw, ui, [song(p), song(q)], slots=[listen_key(p) & ~7 | 1, listen_key(q) & ~7 | 4]) == [1, 4]
 
 
-@pytest.mark.parametrize('slots, want', [((2, None, 4), 4), ((4, 2), 2)])  # None: a free slot between
+@pytest.mark.parametrize('slots, want', [((2, None, 4), 4), ((4, 2), 2), ((2, 5), 5), ((5, 2), 2)])  # None: free
 def test_two_slots_of_one_key_read_the_later(fw, ui, song, slots, want):
     k = listen_key(b'/m/a.flac') & ~7
     assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[0 if n is None else k | n for n in slots]) == [want]
 
 
-@pytest.mark.parametrize('low', [5, 6, 7])
+@pytest.mark.parametrize('bad', [0, 6, 7])
 @pytest.mark.parametrize('before', [(), (2,)])
-def test_a_slot_of_five_or_more_ends_the_scan(fw, ui, song, low, before):
+def test_a_malformed_slot_is_passed_over(fw, ui, song, bad, before):
     k = listen_key(b'/m/a.flac') & ~7
-    assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[k | n for n in (*before, low, 3)]) == [low]
+    assert rate_all(fw, ui, [song(b'/m/a.flac')], slots=[k | n for n in (*before, bad)]) == [2 if before else 0]
 
 
 def test_a_large_library_reads_as_the_model(fw, ui, song):
@@ -748,9 +774,9 @@ def test_a_large_library_reads_as_the_model(fw, ui, song):
     favs = rng.sample(paths, 40) + [b'/x/0.flac']
     slots = [0] * 600
     for key in rng.sample(keys, 120) + rng.sample(keys, 30) + gone:  # some songs twice: a damaged table
-        slots[rng.randrange(len(slots))] = key & ~7 | rng.choice([0, 1, 2, 3, 4, 4, 5, 6, 7])
-    want = hearts_model(keys, [listen_key(p) for p in favs], slots)
-    assert {0, 5} < set(want) and len(set(want)) >= 6  # the cases are all there
+        slots[rng.randrange(len(slots))] = key & ~7 | rng.choice([0, 1, 2, 3, 4, 5, 5, 6, 7])
+    want = stars_model(keys, [listen_key(p) for p in favs], slots)
+    assert {0, 5, LIKED} < set(want) and len(set(want)) >= 8  # the cases are all there
     assert rate_all(fw, ui, [song(p) for p in paths], favs=[song(p) for p in favs], slots=slots) == want
 
 
@@ -1089,7 +1115,7 @@ def test_the_automatic_upload_starts_on_its_own(fw, ui):
 # Now Playing's heart and the rating picker.
 class Heart:
     """Now Playing's window with stock's heart (img_fav, its click stock's My Fav toggle) and a playing library
-    track, rated or not; rate_bind as playing_page_init runs it."""
+    track, rated (kept stars) or not; rate_bind as playing_page_init runs it."""
     CTX = 0x5eed
     log: object = None  # a caller's stock_stub argument log, kept alive with the heart (test_catalogue.py)
 
@@ -1125,13 +1151,9 @@ class Heart:
         """The playing track's rating as the rating page shows it (ratings.c rate_now): 0 to 5, -1 for none."""
         return self.fw.fn('rate_now', C.c_int)()
 
-    def hold(self):
-        self.ui.handler(self.heart, EVT_POINTER_DOWN)()
-        return self.ui.fire('rate_long')
-
-    def pick(self, n):
-        """n hearts picked in the rating picker, the menu sheet's (ratings.c rate_show): its pick."""
-        self.fw.fn('ratings__rate_picked', None, C.c_int)(n)
+    def rate(self, n):
+        """n stars kept on the rating page (np_rate.c nr_keep): 1 when kept."""
+        return self.fw.fn('rate_now_set', C.c_int, C.c_int)(n)
 
     def kept(self):
         return self.fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, listen_key(b'/m/now.flac'))
@@ -1140,11 +1162,12 @@ class Heart:
         return self.fw.var('ratings__rc_due', C.c_int).value
 
 
-def test_the_heart_s_click_is_swapped_for_one_that_tells_a_hold(fw, ui, song, mcl):
+def test_the_heart_s_click_is_swapped_and_it_has_no_hold(fw, ui, song, mcl):
+    """A press held on the heart is a tap: nothing but the click is bound, no hold timer."""
     heart = Heart(fw, ui, song, mcl)
     assert ui.offs == [(heart.heart, EVT_CLICK, FAV_CLICK, Heart.CTX)]  # stock's own click comes off
     on = {(e, fn, ctx) for w, e, fn, ctx in ui.handlers if w == heart.heart}
-    assert on == {(EVT_CLICK, ui.fn('rate_fav_click'), Heart.CTX), (EVT_POINTER_DOWN, ui.fn('rate_down'), 0)}
+    assert on == {(EVT_CLICK, ui.fn('rate_fav_click'), Heart.CTX)}
     assert [ms for _, ms in ui.pending('rate_tick')] == [500]
 
 
@@ -1155,11 +1178,12 @@ def test_a_heart_without_stock_s_click_is_left_alone(fw, ui, song, mcl, handler,
     assert ui.kids[heart.win] == [heart.heart]  # no badge
 
 
-@pytest.mark.parametrize('kept, fav, stars', [(3, False, 3), (0, False, 0), (3, True, 5), (1, False, 1)])
-@pytest.mark.parametrize('image', ['play_unfav', 'oled_np_unfav_d', 'oled_np_fav'])
-def test_the_heart_has_no_badge_and_its_hearts_are_the_stars(fw, ui, song, mcl, kept, fav, stars, image):
-    """The heart is the favourite alone: nothing is added beside it, whatever its image, and nothing is written on it
-    as the tick runs. The kept 1-4 hearts are the rating page's stars one for one, My Fav its 5 (np_rate.c)."""
+@pytest.mark.parametrize('kept, fav, stars', [(3, False, 3), (0, False, 0), (3, True, 3), (0, True, 0), (5, False, 5),
+                                              (5, True, 5)])
+@pytest.mark.parametrize('image', ['play_unfav', 'oled_np_unfav_d', 'oled_np_fav_d'])
+def test_the_heart_has_no_badge_and_the_stars_are_the_kept_rating_alone(fw, ui, song, mcl, kept, fav, stars, image):
+    """The heart is the like alone: nothing is added beside it, whatever its image, and nothing is written on it as
+    the tick runs. The rating page's stars are the kept ones, whether the song is liked or not (np_rate.c)."""
     heart = Heart(fw, ui, song, mcl, kept=kept, fav=fav, image=image)
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     assert ui.fire('rate_tick') == REPEAT
@@ -1174,44 +1198,17 @@ def test_a_streamed_track_has_no_stars(fw, ui, song, mcl):
     assert heart.stars() == -1 and ui.kids[heart.win] == [heart.heart]
 
 
-def test_holding_the_heart_asks_for_the_picker(fw, ui, song, mcl):
-    """RATE_HOLD_MS of the heart opens the menu sheet's picker (its rows: test_nav_hold's
-    test_oled_rates_in_the_inset_modal)."""
+@pytest.mark.parametrize('kept', [5, 4, 1, 0])
+def test_the_stars_set_are_kept(fw, ui, song, mcl, kept):
     heart = Heart(fw, ui, song, mcl, kept=3)
-    ui.handler(heart.heart, EVT_POINTER_DOWN)()
-    assert [ms for _, ms in ui.pending('rate_long')] == [RATE_HOLD_MS]
-    ui.fire('rate_long')
-    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] == [b'dialog/sortselect_dialog']
-
-
-def test_a_short_press_opens_nothing(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.pressed = 0
-    heart.hold()
-    assert not fw.calls('navigator_to') and not fw.calls('pointer_event_init')
-
-
-@pytest.mark.parametrize('kept', [4, 1, 0])
-def test_the_picked_rating_is_kept(fw, ui, song, mcl, kept):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.hold()
-    heart.pick(kept)
+    assert heart.rate(kept) == 1
     assert heart.kept() == kept and heart.copy_due() and heart.stars() == kept
 
 
-def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
+def test_the_tick_goes_with_its_window(fw, ui, song, mcl, st):
     heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
     ui.close(heart.win)
-    assert not st('rate_win', C.c_void_p).value
-    assert not ui.pending('rate_tick') and not ui.pending('rate_long')
-
-
-def test_a_window_closed_mid_hold_opens_nothing(fw, ui, song, mcl, st):
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    ui.handler(heart.heart, EVT_POINTER_DOWN)()
-    ui.close(heart.win)
-    assert not ui.pending('rate_long')
+    assert not st('rate_win', C.c_void_p).value and not ui.pending('rate_tick')
 
 
 def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):
@@ -1231,49 +1228,39 @@ def stock_stub(address, result, log):
 
 
 @in_fork
-def test_five_hearts_are_a_my_fav_through_the_heart_s_own_click(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=4)
+@pytest.mark.parametrize('fav', [False, True])
+@pytest.mark.parametrize('n', [5, 4, 0])
+def test_stars_leave_the_like_as_it_is(fw, ui, song, mcl, fav, n):
+    """Five stars are no like and fewer take none away: the heart's toggle never runs, My Fav is not written."""
+    heart = Heart(fw, ui, song, mcl, kept=3, fav=fav)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
-    heart.hold()
-    heart.pick(5)
-    assert list(log[:2]) == [Heart.CTX, 0]  # stock's toggle, with its own context
-    assert heart.kept() == 0 and heart.copy_due()  # 5 is My Fav's, not kept here
+    assert heart.rate(n) == 1
+    assert not log[0] and not fw.calls('batch_add_file') and not fw.calls('deleteMusicFromFav')
+    assert heart.kept() == n and ui.image[heart.heart] == ('play_fav' if fav else 'play_unfav')
 
 
 @in_fork
-def test_fewer_hearts_on_a_my_fav_take_it_out(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, fav=True)
-    log = (C.c_long * 3)()
-    stock_stub(FAV_CLICK, 0, log)
-    heart.hold()
-    heart.pick(4)
-    assert log[0] == Heart.CTX and heart.kept() == 4
-
-
-@in_fork
-@pytest.mark.parametrize('fav, kept, pick, told', [(False, 4, 5, b'1'), (True, 0, 4, b'0')])
-def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, pick, told):
+def test_stars_on_an_app_synced_song_tell_its_app_nothing(fw, ui, song, mcl):
+    """The card app's fav.log is the like's (test_the_heart_on_a_song_an_app_synced_is_stock_s_and_told_to_the_app)."""
     path = b'/mnt/mmc/Jellyfin/A/now.flac'
-    heart = Heart(fw, ui, song, mcl, fav=fav, path=path, table=ratings((listen_key(path), kept)) if kept else None)
+    heart = Heart(fw, ui, song, mcl, path=path)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     favdir_card(fw, heart.files.files)
-    heart.hold()
-    heart.pick(pick)
-    assert log[0] == Heart.CTX  # My Fav in or out through stock's toggle
-    assert heart.files.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + told + b'\t' + path + b'\n'
+    assert heart.rate(5) == 1 and not log[0]
+    assert '/mnt/mmc/.jf/fav.log' not in heart.files.files
 
 
 @in_fork
-def test_a_tap_is_stock_s_toggle_and_forgets_the_kept_hearts(fw, ui, song, mcl):
+def test_a_tap_is_stock_s_toggle_and_keeps_the_stars(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=3)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     event = C.create_string_buffer(0x40)
     ui.handler(heart.heart, EVT_CLICK)(C.addressof(event))
     assert list(log[:2]) == [Heart.CTX, C.addressof(event)]
-    assert heart.kept() == 0 and heart.copy_due() and heart.stars() == 0
+    assert heart.kept() == 3 and heart.copy_due() and heart.stars() == 3
 
 
 @in_fork
@@ -1337,62 +1324,15 @@ def test_the_heart_on_a_song_an_app_synced_is_stock_s_and_told_to_the_app(fw, ui
 
 def test_a_full_ratings_table_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, table=b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(RATE_SLOTS)))
-    heart.hold()
-    heart.pick(1)
+    assert heart.rate(1) == 0
     assert ui.toasts == ['Ratings are full'] and heart.kept() == 0
 
 
 def test_a_rating_that_cannot_be_written_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=2)
     heart.files.fail_rename = True
-    heart.hold()
-    heart.pick(3)
+    assert heart.rate(3) == 0
     assert ui.toasts == ['Rating not saved'] and heart.kept() == 2 and heart.stars() == 2
-
-
-# An album's rating, from the queue menu of an artist's albums.
-QM_ALBUM, CLASS_ARTIST_ALBUMS = 2, O['CLASS_ARTIST_ALBUMS']
-
-
-def album_menu(fw, ui, song, st, album_id=0xa1b0):
-    """The queue menu on row 1 of an artist's albums tab, that row's album_id album_id."""
-    rows = [song(b'/m/x.flac', album=b'X'), song(b'/m/y.flac', album=b'Y')]
-    fw.var('fw_ctx_p_deque_showlist', C.c_uint).value = ui.deques.new(rows)
-    ids = (C.c_uint * 2)(0x77, album_id)
-    st('qm_kind').value, st('qm_cls', C.c_uint).value = QM_ALBUM, CLASS_ARTIST_ALBUMS
-    st('qm_rows', C.c_uint).value, st('qm_idx', C.c_uint).value = 2, 1
-    st('qm_hash', C.c_uint).value = fw.fn('navigation__rec_hash', C.c_uint, C.c_void_p)(rows[1])
-    st('qm_browse', C.c_uint).value = fw.fn('navigation__browse_hash', C.c_uint)()
-    st('art_ids', C.c_void_p).value, st('art_n', C.c_uint).value = C.addressof(ids), 2
-    win = ui.new('window_create', 0, 0, 0, 0, 0)
-    return win, ids  # the caller holds ids while st.art_ids points into it
-
-
-def test_an_album_s_rating_is_kept_apart_from_its_songs(fw, ui, song, st):
-    files = Files(fw)
-    win, ids = album_menu(fw, ui, song, st)
-    fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
-    fw.fn('ratings__rate_picked', None, C.c_int)(5)
-    kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
-    assert kept(1, 0xa1b0) == 5 and kept(0, 0xa1b0) == 0 and RATINGS not in files.files
-    assert ALBUM_RATINGS in files.files
-
-
-def test_an_album_no_longer_under_the_picker_is_not_rated(fw, ui, song, st):
-    files = Files(fw)
-    win, ids = album_menu(fw, ui, song, st)
-    fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
-    ui.new('window_create', 0, 0, 0, 0, 0)  # another page over it
-    fw.fn('ratings__rate_picked', None, C.c_int)(4)
-    assert ui.toasts == ['Album changed'] and not files.files
-
-
-def test_an_album_whose_row_changed_is_not_rated(fw, ui, song, st):
-    files = Files(fw)
-    win, ids = album_menu(fw, ui, song, st, album_id=0xb2c0)  # the row now holds another album
-    fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
-    fw.fn('ratings__rate_picked', None, C.c_int)(4)
-    assert ui.toasts == ['Album changed'] and not files.files
 
 
 # Chapters.
