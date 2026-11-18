@@ -831,7 +831,7 @@ def test_a_render_lets_t9_go_before_replacing_its_edit(fw):
 
 @pytest.mark.parametrize('pick', (None, 'Balance'))
 def test_a_scrolling_list_runs_on_to_the_page_s_foot(fw, pick):
-    """Under a list_fit set (OLED's) Advanced's list and a picker's run from under the tab bar on to the page's foot,
+    """Under OLED's grid Advanced's list and a picker's run from under the tab bar on to the page's foot,
     so their rows past the list end peek through its fade (navigation.c list_fade) as every list's do, rather than
     stopping on a whole row above it over a black band."""
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()

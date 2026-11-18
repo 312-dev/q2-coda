@@ -765,7 +765,7 @@ void qm_playlist_bind(void *w, int depth, int (*pick)(void *, void *)) {
         qm_playlist_bind(widget_get_child(w, i), depth + 1, pick);
 }
 
-/* Playlists without toolbars (the set's toolbar 0): the page is rows, as Songs'. Stock
+/* Playlists without toolbars (tools/ipod.py patch_asset): the page is rows, as Songs'. Stock
  * still builds everything: its toolbar, hidden (tools/ipod.py), and its Import and Export tile row,
  * hidden, stay as the click targets; the rows stock can't have are added after each rebuild and
  * click those hidden widgets, so its mode, marks, dialogs and reload stay its own. Stock's own

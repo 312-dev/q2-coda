@@ -155,7 +155,7 @@ int client_h(void); /* the window under the theme's bar (theme_engine.c) */
  * drift_axis) */
 enum { SPLIT_ROW, SPLIT_ART, SPLIT_ART_UP, SPLIT_INSET };
 int split_geom(int k);
-int list_fit_end(void); /* theme_engine.c: the lists' last screen row (the set's list_fit) */
+int list_fit_end(void); /* theme_engine.c: the lists' last screen row (the grid's list_end) */
 /* 0xRRGGBB to an opaque color_t, whose bytes are r, g, b, a. */
 static inline unsigned RGBA(unsigned c) {
     return 0xff000000u | (c & 255) << 16 | (c & 0xff00) | c >> 16;

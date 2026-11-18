@@ -127,7 +127,7 @@ _Static_assert(V_SPLIT_ART == V_SPLIT_ROW + SPLIT_ART &&
                    V_SPLIT_INSET == V_SPLIT_ROW + SPLIT_INSET,
                "tools/ipod.py GEOM_VALS keeps split_* in SPLIT_* order");
 int split_geom(int k) { return geom_val(V_SPLIT_ROW + k); }
-/* The lists end their whole rows by this screen row (282: the set's list_fit). */
+/* The lists end their whole rows by this screen row (282: the grid's bar and list_end). */
 int list_fit_end(void) { return geom_val(V_BAR) + geom_val(V_LIST_END); }
 /* The Display rows' settings, by ringnav_display's index: 0 Accent, 1 Home (0 Split, 1 Full,
  * 2 Carousel), 2 Battery, 3 Shortcut, 4 Light Mode, 5 Smart Awake, 6 the Clicker's output (no row

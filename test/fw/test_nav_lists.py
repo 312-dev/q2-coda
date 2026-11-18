@@ -283,7 +283,7 @@ def test_a_fresh_list_takes_its_first_whole_row_then_the_tick_moves_on(fw, ui):
     paint(fw, page)
     assert page.selected == 4
     key(fw, ui, KEY_NEXT)
-    assert page.selected == 5 and page.offset == ROW_H * 4  # OLED's whole rows (list_fit): row 4 lands on the top
+    assert page.selected == 5 and page.offset == ROW_H * 4  # OLED's whole rows: row 4 lands on the top
 
 
 def test_ticks_scroll_only_as_far_as_the_row_needs(fw, ui):
@@ -309,7 +309,7 @@ def test_a_tick_up_from_the_top_row_of_a_scrolled_list_brings_it_in(fw, ui):
     paint(fw, page)
     assert page.selected == 10
     key(fw, ui, KEY_PREV, ui.now + SLOW)
-    assert page.selected == 9 and page.shows(9) and page.screen_y(9) == 0  # whole on the top: OLED's list_fit keeps no margin
+    assert page.selected == 9 and page.shows(9) and page.screen_y(9) == 0  # whole on the top: OLED's whole rows keep no margin
 
 
 def test_a_spin_steps_by_the_documented_ramp(fw, ui):
@@ -433,8 +433,8 @@ def gapped(ui, n=10, at=8, gap=12, height=210):
     return page
 
 
-def test_a_list_fit_list_with_a_gap_ends_on_a_whole_row(fw, ui, st):
-    """OLED's whole rows (list_fit): the view's end would cut a row at the top, so it stops on the next row's top
+def test_a_whole_row_list_with_a_gap_ends_on_a_whole_row(fw, ui, st):
+    """OLED's whole rows: the view's end would cut a row at the top, so it stops on the next row's top
     and the content grows to allow it."""
     end, content = 4 * ROW_H, 4 * ROW_H + 210
     theme(fw)

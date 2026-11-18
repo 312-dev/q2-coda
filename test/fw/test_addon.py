@@ -5336,7 +5336,7 @@ def nav_st(fw, scratch):
 
 
 def oled_page(fw, nav_st):
-    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as a list_fit set fits
+    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as OLED's lists fit
     page_list's box to whole rows."""
     from test_nav_hold import use_set
     p = Page(fw)

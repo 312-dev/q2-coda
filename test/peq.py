@@ -451,7 +451,7 @@ int card_mounted(void) { return !shim_unmounted; }
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) { (void)under, (void)names, (void)n, (void)current, (void)pick; return 0; }
 int eq_rows(void) { return 0; } /* a theme without settings.values.switch (the engine's default): peq_ui.c's own Simple tab, not slider_page.c's */
 int eq_list_end(void) { return 290; }
-int list_fit_end(void) { return 0; } /* no list_fit set: the list ends on its whole rows */
+int list_fit_end(void) { return 0; } /* no list end: the list ends on its whole rows */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus) { (void)w, (void)canvas, (void)simple, (void)focus; }
 static char shim_said[160]; /* the last toast's text, until shim_told reads it */

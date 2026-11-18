@@ -998,7 +998,7 @@ int ringnav_paint(void *w, void *canvas) {
     return result;
 }
 
-/* A scrolling list whose box runs on below the set's list end (y 282; the set's list_fit): its
+/* A scrolling list whose box runs on below the set's list end (y 282): its
  * rows past it peek through a fade into the page's ground, and once scrolled its top rows fade
  * under the status row, as Home (Full)'s do (home.c list_fades; docs/oled-design.md#corners). In
  * Edit Library its end is a row higher and its rows fade into the hint's band (library_edit.c

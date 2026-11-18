@@ -448,7 +448,7 @@ void forget_rows(void *list) {
     if (load_rows(&m, view)) wheel_offset(&m, 0);
 }
 
-/* A list holds whole rows (the set's list_fit), so a view stops with a row's top at its own: want, or
+/* A list holds whole rows (OLED's lists), so a view stops with a row's top at its own: want, or
  * where want would cut a row, the first row's top past it. A row of another pitch (Power's 12 px
  * gap before Restart) can put the end, the content less the view, inside a row, which would show
  * cut at the top; there the content grows to that row's top plus the view, as lyric_pad's does, so
@@ -486,7 +486,7 @@ void reveal(menu_t *m, int id, int immediate) {
         h = r.h;
     }
     /* A tall row cannot fit: show its title consistently instead of alternating edges. The list
-     * holds whole rows and keeps them whole (the set's list_fit): no margin, so it scrolls a row at
+     * holds whole rows and keeps them whole: no margin, so it scrolls a row at
      * a time. */
     int height = sel_height(m);
     int want = h > height || y < top ? y : y - top > height - h ? y - (height - h) : top;

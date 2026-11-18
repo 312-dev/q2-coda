@@ -362,7 +362,7 @@ am.word(al+O['W_H'],50); am.call(address=HOOKS['widget_on_paint_background'][0],
 am=oled_set(Machine()); al,ap,asort,abar=action_page(am,sorts=False)
 assert boxof(al)==(OLG.text_x+28,0,280,OLG.action_row) and boxof(ap)==(0,0,300,OLG.action_row); passed()  # Recently Added's has no Sort
 # On OLED's set the selection's scroll stops where list_end says, a row of the client under the bar (below it the glass
-# hides a row's text), and a list_fit view stops with a row's top at its own (navigation.c sel_height, fit_top): the
+# hides a row's text), and a view stops with a row's top at its own (navigation.c sel_height, fit_top): the
 # wheel's last row ends there, past stock's own end. A list lower in its window stops at the same screen row.
 for ly in (0,32):
     lm=oled_set(Machine())
@@ -430,7 +430,7 @@ for fname in ('list_folder','list_song'):
 fa=ftile('file:///mnt/mmc/.downpic/fd1.jpg'); assert fa(0,0)==0 and fa(51,26)==fa(26,0)==255
 for fname in ('list_tf','list_album'): fa=ftile(fname); assert fa(0,0)==fa(51,26)==255,fname
 passed()
-# With no row to select the wheel scrolls the view itself, on OLED's set (list_fit) until the content's foot is on the
+# With no row to select the wheel scrolls the view itself, on OLED's grid until the content's foot is on the
 # list end, as a drag stops (navigation.c max_top).
 lm=oled_set(Machine())
 lw,les=lm.page_list(14,height=294,extent=672,name='playlist_page'); window(lm,'playlist_page',lw); lm.nodes[lw]['children']=[]; lm.paint(lw)

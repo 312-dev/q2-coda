@@ -671,7 +671,7 @@ typedef struct {
 } eq_rows_t;
 int eq_rows(void);
 int eq_list_end(void); /* the page's rows end here (the set's list_end) */
-int list_fit_end(void); /* theme_engine.c: the lists' end on the screen (the set's list_fit) */
+int list_fit_end(void); /* theme_engine.c: the lists' end on the screen (the grid's list_end) */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 /* slider_page.c: an iOS segmented control of n segments, w by h from x, y; open is lit */

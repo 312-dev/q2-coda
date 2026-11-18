@@ -306,21 +306,12 @@ playing, or a cover the frame cannot hold, the pane is the window's panel, as it
 timer) finds each status bar widget with a recursive `widget_lookup` from the bar,
 so parents and order are free to change. Every tick it re-shows the volume,
 EQ, Bluetooth, SyncLink and Wi-Fi widgets and sets their images and text, but
-never their geometry. The built-in set's `system_bar.bin` (iPod) therefore keeps the play state
-and EQ in `view_left`, as stock does, and puts Bluetooth/codec, Wi-Fi and the
-battery in `view_right`, and the layout below is that set's; OLED's set has its own copy, a status
-row with the title on the left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row slots](internals.md#status-row-slots)). EQ uses an explicit 16 px font and a 28 px cell: its text is 24 px wide in the shipped font, so stock's 20 px cell clips it. A 16 px `Q2` label at the left inset appears only when both playback state and EQ are hidden. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the centered clock. The volume icon and number and SyncLink move to `x = -200`, where they
-draw off-screen. Both groups sit 54 pixels
-from the edges (`STATUS_MARGIN`): the 50 where the 16-pixel icons clear the top corners
-([Rounded corners](#rounded-corners)) plus 2 (`STATUS_PAD`) so they don't crowd the glass. A new
-`label_clock` (`s_scrlabel_white20c`, overridden to 16 px) is centered on the screen. It has the width left in the
-narrowest case, 109 pixels at x 133, clear of either group with every icon shown (left 94
-pixels, right 133); the build fails if that would be under `CLOCK_MIN` (105). The payload paints
-the bar and writes the time into `label_clock` (see
-[internals.md](internals.md#status-bar-ipod)); the widest text, `12:59 PM`, is 69 pixels in the
-stock font at 16 pixels.
+never their geometry. `system_bar.bin` is therefore OLED's status row (`tools/ipod.py` `status_row`): the title on the
+left and the clock, the payload's glyph slots and the battery on the right ([Theme](#theme), [Status row
+slots](internals.md#status-row-slots)), every other widget stock updates kept off-screen at `x = -200`. Stock's tick also hides `img_state` whenever its own player is stopped, as it is under Spotify, radio or a video; `ringnav_showface` runs `bar_state_sync`, the play state and the `Q2` label alone, straight after the tick, so the payload's play state is back before any paint, dark or not (no file reads; a relayout waits for the paint); the codec badge, accent and Rockbox check wait for paint (`bar_sync`). A new battery level or charge state repaints the bar from the tick while lit ([Status bar](internals.md#status-bar-ipod)). Correcting it at paint time instead relaid the row twice a second, and EQ was drawn for a frame in the play icon's place. When `bar_sync` changes `img_state` while another window paints (Now Playing paints every 250 ms, so it usually sees a Play/Pause first), it arms a 0 ms timer that runs `widget_invalidate_force` on the bar after the frame: an invalidate made mid-paint is dropped with that frame's dirty rects, and `img_state` keeps its dirty flag (`+0x24` bit `0x200`), which makes stock `widget_invalidate` return early, so the 1 s tick's own invalidates skipped it until something else repainted the bar (#116). `bar_sync` updates its visibility without moving the clock. The payload paints the bar and writes the time into
+`label_clock` (see [internals.md](internals.md#status-bar-ipod)).
 
-**Time in Title.** `IPOD TIMETITLE` (on unless chosen) is a theme option (`<option setting="time_title">`) that OLED does not offer, so Appearance has no row for it: OLED's status row names the page in a title of its own and keeps the clock beside it, whatever the key holds (`bar_title`). On a bar with no status row, the switch off has the bar name the page: in its own title label where the bar has one, the clock making way, else in `label_clock` instead of the time, as an iPod's title bar does: "Now Playing" or "Cover Flow", else stock's title in the page's hidden navbar (`scrlabel_title`, or a settings page's unnamed first child). Home, a page showing its navbar and a page with no title keep the clock, and a pop-up or keyboard leaves the bar as it is. A title past the clock's width ends in an ellipsis. ponytail: the payload's other pages (Games) have no navbar, so that bar stays on the clock there, most with a heading on the page; naming them means reading each page's caption.
+**Time in Title.** `IPOD TIMETITLE` (on unless chosen) is a theme option (`<option setting="time_title">`) that OLED does not offer, so Appearance has no row for it: the status row names the page in a title of its own and keeps the clock beside it, whatever the key holds (`bar_title`). ponytail: the theme engine still reads the key into `st.time_title`, which nothing reads; it goes with the option.
 
 **Codec.** The Bluetooth images are 42-pixel canvases with their ink at the right: the glyph takes
 10 pixels, while stock's codec badges take up to 40 (aptX HD). A new badge shows for a second
@@ -342,9 +333,8 @@ The playback, Bluetooth and Wi-Fi glyphs share smooth edges, rounded ends and a 
 
 In Icon and Icon + Percent, charging fills the icon solid green (`BATT_CHARGE_RGB`); low battery always uses
 `BATT_LOW_RGB` (`#FF1448`) under every accent; OLED's slim battery fills green while charging and
-red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. Every mode fits with ordinary Bluetooth and Wi-Fi, with at least
-4 pixels (`CLOCK_GAP`) before the widest clock text (`BATT_ROOM`, 94 pixels from the margin).
-Wide codec badges temporarily show the icon alone until they fade.
+red (`#FF453A`) under 20 %. The bar is black, or Light Mode's paper. The payload shows the icon alone wherever the
+group's ink would reach past `BATT_ROOM` (94 pixels from the margin), as a wide codec badge does until it fades.
 
 The navbar is hidden, as on the local pages, on the settings pages
 (`systemset/*`, `playset/*`), `audiosetting_page` and `stream_page`, listed in
@@ -355,7 +345,7 @@ of the sleep timer (`img_switch`) and Startup volume (`img_bootswitch`, which `p
 the navbar; Crossfade reuses the page), whose fields hide while off:
 those two pages (`TOOLBAR_SWITCHES`) keep it. There the switch takes the toolbar's right-hand
 slot and the title runs up to it (225 pixels); the Home and Now Playing buttons are 0 wide, as the
-keys do what they did (`immediates` in `ipod.json`). The grid's `toolbar` 0 (OLED's) hides those toolbars
+keys do what they did (`immediates` in `ipod.json`). `patch_asset` hides those toolbars
 too, Startup volume's aside: `navigation.c`'s `ringnav_sleeptimer` makes the Sleep Timer's switch a row whose click is
 `img_switch`'s, hidden with its toolbar, a loop pass later; its fields' panel (`view_sleep`) moves down a row under it and is cut to end with the window. The grid's `stock_row`, `stock_body`,
 `stock_title_y` and `stock_title_h` re-pitch stock's own pages (`stock_rows` in `ipod.json`): Update Library and More as settings rows, Queue, Go to and
@@ -366,10 +356,8 @@ their size. The settings inits never move or resize
 these widgets. Left out: `wifitransport_page` (its image starts above the
 navbar's bottom edge), `fwdownload_page` (no navbar), the PEQ page (it replaces
 all children) and every Tidal page, whose navbars hold the search and sort
-buttons. A page with a visible navbar keeps its own title. The artist page shows its stock
-navbar (multi-select, the Album Artist switch) again at run time when Artist View is Grid, its
-tabs 50 pixels lower ([internals.md](internals.md#artist-albums-in-coverflow)); under OLED the page is the
-design's artist page instead, with no tabs or navbar ([internals.md](internals.md#library-artist-page)).
+buttons. A page with a visible navbar keeps its own title. The artist page is the design's
+artist page, with no tabs or navbar ([internals.md](internals.md#library-artist-page)).
 
 ## Settings
 
@@ -408,8 +396,8 @@ rows dropped, each page's own built; each keeps its own place in position memory
   Library, grayed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
   streaming songs?" (Cancel, Turn Off, a footer saying Show in Library pauses), while a card app has a catalogue on
   the card; then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
-  Flow" (`Q2POD ARTISTCF`, the default; Grid and List; Cover Flow ends with an All albums card, see
-  [internals.md](internals.md#artist-albums-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
+  Flow" (`Q2POD ARTISTCF`, the default; Grid and List; on Cover Flow or List, Go to Album opens the album's tracks in
+  Cover Flow, see [internals.md](internals.md#artist-view-and-go-to-album-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
 - Sorting: **Songs**, a picker of Title, Artist, Album and Recently Added (`song_sort.c`), the current one's direction
   as an arrow, Center on it again flipping it and another taking its natural one (A to Z, the newest first); "Artist's
@@ -554,22 +542,19 @@ Center on a cover opens the album's tracks as a list in the page, the covers hid
 The panel's glass rounds its corners and hides what is drawn under them. `CORNER_R` in
 `tools/ipod.py` (80 pixels) is the calibration knob: the radius, fitted to V5.4I photos and
 to stock's 50-pixel status bar margins. `corner_inset(y)` gives the width hidden at each end of
-screen row `y`, and `corner_x` adds `CORNER_SLACK` (4). The status bar groups, the Home labels
-and Now Playing's top and bottom rows take their insets from it; settings notes moved under the
-hidden navbar end their text clear of the top-right corner. With the defaults: status bar 52
-pixels plus `STATUS_PAD` (2), the clock at least 57, Home dot 25 and text 39, Now Playing icons
-ending at 353, the bar 21 and the times 46 pixels from the edges. The runtime layouts' values
+screen row `y`, and `corner_x` adds `CORNER_SLACK` (4). The status row's ends (`STATUS_ROW_INSET`) and
+the Home labels are checked against it; settings notes moved under the hidden navbar end their text clear of the
+top-right corner. The runtime layouts' values
 (`SET_*`, `CF_*`, `CLOCK_EDGE` in `patch/offsets.inc`) are checked against the
 same calibration by the tests.
 
 `test/build.py` fails a build when any fixed text or icon in a changed asset reaches
-under the glass (screen coordinates: the bar at y 0 to 30, windows at 30 to 320, the quick settings
+under the glass (screen coordinates: the bar at y 0 to 58, windows at 58 to 320, the quick settings
 and confirm pop-ups at 0 to 320): a label's font-high band, an image drawn centered at its size, a
 slider's bar, else the widget. Backgrounds, tap targets and list rows, which scroll, are not
 checked there; `test/patch.py` checks the settings rows in the first and last visible slots,
 Cover Flow's labels and lowest track row, and the status bar clock against every combination of
-icons. Raising `CORNER_R` until the clock drops
-under `CLOCK_MIN` fails the build.
+icons.
 
 ## Hold Return
 
@@ -784,8 +769,7 @@ The asset holds Graphite's; `ringnav_playing` sets the current accent's. The vol
 is stock's label; the remaining time replaces stock's total. Sizes are `NP_*` constants in
 `tools/ipod.py`; see [internals.md](internals.md#now-playing-ipod).
 
-**Links.** On the art page, a tap on the artist opens that artist, as ⋯'s Look up Artist does (in
-Cover Flow under Artist View: Cover Flow), and a tap on the album or the art opens that album's
+**Links.** On the art page, a tap on the artist opens that artist, as ⋯'s Look up Artist does, and a tap on the album or the art opens that album's
 songs, as ⋯'s Look up Album does: stock's album page, never a carousel. Return comes back to Now
 Playing. Where the hold menu offers no Go to row (a stream, AirPlay, a song with no album or artist
 tag, its page already open) the tap does nothing. While the finger is down the artist or album
@@ -1057,7 +1041,7 @@ painted it white, which drew the box at rest.
   would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black with
   the others, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
-  the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
+  the bottom corners, and the strip below it stays black (`list_end`, `fit_rows`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
   take it; Albums and stock's search results are two lines at 52 px, four to a page, the covers with 4 px corners. A row that
   opens a page and shows a value (Crossfade, Resume Songs) has the value just left of its chevron. The status row

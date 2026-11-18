@@ -1,5 +1,5 @@
 /* The menu sheet (docs/oled-design.md#menus): the hold menus, Now Playing's More, a playlist's More
- * and the pickers in them (the set's Geometry.modal), as a frosted page sheet over
+ * and the pickers in them (tools/ipod.py MODAL_PAGES), as a frosted page sheet over
  * the page they act on (the user's C3, 2026-11-16). The page under it recedes: drawn at SH_SHRINK
  * of its size about the screen's centre and dimmed (half way to black; Light Mode SH_DIM_L), it
  * shows above the sheet, whose top is SH_TOP with SH_R corners and a grab bar. The sheet's material
@@ -947,7 +947,7 @@ int modal_actions(const char *const *names, const char *const *icons, int n, voi
     return modal_list((void *)0, names, icons, n, 0, pick);
 }
 
-/* Now Playing's More (onlinematch.c ringnav_playermore): a dialog (the set's modal, tools/ipod.py
+/* Now Playing's More (onlinematch.c ringnav_playermore): a dialog (tools/ipod.py
  * modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
  * the sheet's, each with its symbol: stock's by their kind (PLAYMORE_ROWS, the button's name its
  * index), AirPlay's, Get Album Lyrics' and About's by their images; stock's Download Cover & Lyrics

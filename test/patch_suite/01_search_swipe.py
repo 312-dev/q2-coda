@@ -320,7 +320,7 @@ assert m.paint(w3)==0 and m.selected(w3)==5; passed()
 # A wheel detent after recreation interrupts recall and sets the offset immediately.
 m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.glide=False
 assert m.call()==11 and m.selected(w2)==6
-assert m.moved()[-1][0]=='scroll_view_set_offset' and m.moved()[-1][3]==240; passed()  # whole rows (OLED's list_fit)
+assert m.moved()[-1][0]=='scroll_view_set_offset' and m.moved()[-1][3]==240; passed()  # whole rows (OLED's whole rows)
 
 # A live list whose row count changes resets the selection without re-reading the table.
 m,w,es=walk(10,5)
@@ -331,7 +331,7 @@ m.paint(w); assert m.selected(w)==0; passed()
 m=Machine(); w,_,entries=m.table_page()
 m.paint(w)
 for _ in range(2): assert m.call()==11
-assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # a whole row under the top (OLED's list_fit)
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # a whole row under the top (OLED's whole rows)
 m.rebind=None
 w2,_,entries2=m.table_page()
 m.paint(w2); assert m.selected(w2)==2 and m.get(w2+O['TABLE_TOP'])==48
@@ -800,7 +800,7 @@ passed()
 # Wheel selection is immediate even when restoration animations would still be running.
 m=Machine(); w,es=m.page_list(6)
 m.paint(w); m.glide=False
-m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48  # whole rows (OLED's list_fit)
+m.call(); m.call(); assert m.selected(w)==2 and m.get(w+O['SCROLL_Y'])==48  # whole rows (OLED's whole rows)
 m.paint(w); assert m.selected(w)==2
 assert m.confirm()==11 and m.dispatched()[0][1]==es[2]
 m.call(); assert m.selected(w)==3
@@ -1038,7 +1038,7 @@ for virtual in (False,True):
     assert not m.clicks and not m.moved() and m.get(w+off)==0
     assert m.nodes[w]==before, 'rejected confirmation changed live selection properties'
     m.paint(w)
-    assert m.selected(w)==12 and m.get(w+off)==528  # a whole row under the top (OLED's list_fit)
+    assert m.selected(w)==12 and m.get(w+off)==528  # a whole row under the top (OLED's whole rows)
     passed()
 
 # Touch mode survives settling, unsupported pages, recreation and native clicks anywhere.
@@ -1099,7 +1099,7 @@ def replace_pool(a,offset):
 m.rebind=replace_pool
 m.word(w+O['TABLE_ANIMATOR'],0x1234)
 m.call(); m.call()
-assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's list_fit)
+assert m.selected(w)==2 and m.get(w+O['TABLE_TOP'])==48  # whole rows (OLED's whole rows)
 assert m.get(w+O['TABLE_ANIMATOR'])==0
 m.confirm(); assert m.clicks==[es[1]] and m.clicks[0] not in old
 passed()

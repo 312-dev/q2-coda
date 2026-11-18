@@ -106,7 +106,7 @@ void list_value(void *label, const char *title, const char *value) {
     value_fit(label, text);
 }
 
-/* Without stock's toolbars (the set's toolbar 0) the Sleep Timer's switch is a row: stock's
+/* Without stock's toolbars (tools/ipod.py patch_asset) the Sleep Timer's switch is a row: stock's
  * img_switch stays, hidden with its toolbar, for stock's callbacks to find by name, and the row's
  * click is its click, on the next loop pass. The page is list-less, so the row is over its fields,
  * tools/ipod.py moving them down. The row reads what the image shows. */
@@ -326,8 +326,8 @@ int ringnav_quick_settings(void *win, void *ctx) {
 }
 
 /* Power's Charge limit and Wake (docs/internals.md#charge-limit, #wake), Q2POD CHARGELIMIT and
- * WAKEDOUBLE in config.ini, Display's Artist albums
- * (ARTISTCF), Playback's Year order (YEAROLD, coverflow.c's year ranks) and Artists, which
+ * WAKEDOUBLE in config.ini, the Library's Artist View
+ * (ARTISTCF, read by Go to Album: hold_menu.c qm_goto), Playback's Year order (YEAROLD, coverflow.c's year ranks) and Artists, which
  * is stock's own PLAYSET ARTISTTYPE (artist_type, the artist page's switch;
  * docs/internals.md#album-artists), and Bluetooth's Resume on connect (RESUME, so a missing key
  * holds playback; docs/internals.md#resume-on-connect), and Playback's Artist album order
@@ -397,12 +397,12 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "LIBRARYSOURCE",
                                         "OTG" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
-/* a row's choices: Artist albums three, Standby limit four, every other row two */
+/* a row's choices: Artist View three, Standby limit four, every other row two */
 static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_STANDBY ? 4 : 2; }
 void pod_settings(void) {
     if (st.pod_read) return;
     for (unsigned i = 0; i < sizeof pod_keys / sizeof *pod_keys; ++i)
-        if (pod_keys[i]) /* Artist albums defaults to Coverflow, On-The-Go to on; Link Volume
+        if (pod_keys[i]) /* Artist View defaults to Cover Flow, On-The-Go to on; Link Volume
                           * never chosen is -1 (bt_link) */
             *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
                                           i == POD_BT_LINK                     ? -1

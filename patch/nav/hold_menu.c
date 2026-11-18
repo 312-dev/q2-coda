@@ -7,8 +7,8 @@ static int qm_restore(void *page, void *event) {
 
 /* Now Playing's More rows, for this record: Album info (0x5397cc) fills the album query and opens
  * playerjumpinfo_page; Artist info opens artistinfo_page with {class, record}. A song played in
- * Coverflow, or with Artist albums: Coverflow, goes to the album's tracks in Coverflow instead, as
- * Go to Artist reaches its covers; album QM_LOOKUP_ALBUM (Now Playing's album and art taps,
+ * Coverflow, or with Artist View on Cover Flow or List, goes to the album's tracks in Coverflow
+ * instead; album QM_LOOKUP_ALBUM (Now Playing's album and art taps,
  * np_goto) keeps to playerjumpinfo_page, as the ⋯ page's Look up Album does. A card app's song goes
  * to the app's page when it offers one (addon.c addon_goto). */
 #define QM_LOOKUP_ALBUM 2
@@ -52,8 +52,8 @@ static int qm_goes(void *r, int album) {
 }
 
 /* Now Playing's taps on its album or art (album) and artist (np_taps.c): the playing song's album
- * as the ⋯ page's Look up Album opens it (QM_LOOKUP_ALBUM), or Go to Artist (its Cover Flow under
- * Artist View, as Look up Artist), where the hold menu would offer that row (qm_hold's and
+ * as the ⋯ page's Look up Album opens it (QM_LOOKUP_ALBUM), or Go to Artist (the artist's page, as
+ * Look up Artist), where the hold menu would offer that row (qm_hold's and
  * qm_open's gates: a local or Library queue, not AirPlay, a card app's song only to its app's
  * page), so a stream goes nowhere. With go 0, only whether it would; 1 when it went or would. This
  * is the hold menu's code: its record checks and qm_goto live here. */
