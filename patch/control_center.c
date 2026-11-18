@@ -4,8 +4,10 @@
  * block of six round toggles, two by three, each named under it: Wi-Fi (its glyph the link's,
  * cc_wifi), Bluetooth, AirPlay, Car Remote, Smart Wi-Fi and EQ. On the right Now Playing, the
  * song's cover beside its title and artist over Previous, Play/Pause and Next; under it a
- * Brightness slider and under that a Volume slider, ending level with the block; and a grab bar
- * along the sheet's foot, where the swipe up that closes it starts. Buttons Lock keeps its hardware hold,
+ * Brightness slider and under that a Volume slider, ending level with the block; while a cable is
+ * in, the USB row under both, the cluster's width, with the remembered choice (usb_ui.c
+ * usb_ui_value), whose Centre opens the USB picker; and a grab bar along the sheet's foot, where the
+ * swipe up that closes it starts. Buttons Lock keeps its hardware hold,
  * Night Shift and Sleep Timer their Settings rows, Guest Play its Bluetooth row.
  *
  * Stock's widgets stay for what stock does: its Wi-Fi and Bluetooth switches, at opacity 0 under
@@ -13,7 +15,7 @@
  * opacity 0 over the Brightness slider, takes the drags. Every circle, the Now Playing block, its
  * transport and the Volume slider are clear buttons of this file's (cc_click, cc_drag).
  * The wheel walks CC_STOPS, the toggles by rows, the Now Playing block (while something is
- * loaded) and the two sliders, a white ring round the one it is on; Centre acts on it, and on a
+ * loaded), the two sliders and the USB row (while a cable is in), a white ring round the one it is on; Centre acts on it, and on a
  * slider gives it the wheel (an accent ring) until Centre or Return gives it back.
  * Return on a stop closes the page. The ring is not there when the page is pulled down, nor under
  * touch: the first wheel tick or Centre brings it up on the stop the wheel is on, without stepping
@@ -24,8 +26,8 @@
  * settings page (cc_hold). Landing open, the blocks overshoot and settle (cc_spring). A toggle's
  * name is set glyph by glyph (ui_set) and, wider than its column, fades out at its edge (cc_label).
  * Everything is drawn inside the window, whose whole is invalidated on an input, inside the band
- * cc_land invalidates while the blocks spring, and the Wi-Fi circle inside the box cc_wifi_poll
- * invalidates when the link changes.
+ * cc_land invalidates while the blocks spring, the Wi-Fi circle inside the box cc_wifi_poll
+ * invalidates when the link changes, and the whole when a cable comes or goes (cc_wifi_poll too).
  * ponytail: AirPlay opens its settings page (stock's receiver switch has no call this file can
  * make without its page), so its circle is lit only by AirPlay's flag; the Wi-Fi circle reads
  * "Wi-Fi", not the network's name, which only the Wi-Fi page reads. */
@@ -79,6 +81,20 @@ extern unsigned now_cover_written(const char *file);                           /
 #define CC_GRAB_INSET 6 /* its gap to the sheet's edge, as the page sheets' from their top */
 #define CC_GRAB_Y (CC_H - CC_GRAB_INSET - CC_GRAB_H)
 #define CC_WIFI_SEEN "_cc_wifi" /* the Wi-Fi circle's glyph as last drawn (cc_wifi), + 2 */
+#define CC_CABLE_SEEN "_cc_cable" /* a cable in as last drawn (the USB row), + 1 */
+/* The USB row (design/usb-row mock_usb_row.py cc()): CC_GAP under the cluster, its width, the sliders'
+ * height and form; the glyph centred CC_USB_ICON_X in, "USB" from CC_USB_TEXT_X, the value ending
+ * CC_USB_VALUE_END from its end and the chevron centred CC_USB_CHEV_X from it; its ring 2 px wide
+ * CC_USB_RING out. */
+#define CC_USB_Y (CC_Y0 + CC_BLOCK_H + CC_GAP)
+#define CC_USB_ICON 20
+#define CC_USB_ICON_X 22
+#define CC_USB_TEXT_X 40
+#define CC_USB_VALUE_END 30
+#define CC_USB_CHEV 13
+#define CC_USB_CHEV_X 18
+#define CC_USB_PX TYPE(15)
+#define CC_USB_RING 5
 #define CC_WIFI_POLL_MS 1000    /* stock updates the link about once a second */
 #define CC_RING 3               /* the focus ring's outer edge past the control, 2 px wide */
 #define CC_BLOCK RGB_RAISED
@@ -104,6 +120,7 @@ enum {
     CC_NOW,
     CC_BRIGHT,
     CC_VOLUME,
+    CC_USB,
     CC_STOPS,
     CC_PREV = CC_STOPS,
     CC_PLAY,
@@ -111,12 +128,13 @@ enum {
     CC_BUTTONS
 };
 static const char *const cc_labels[CC_STOPS] = {
-    "Wi-Fi", "Bluetooth", "AirPlay", "Car", "Smart Wi-Fi", "EQ", 0, 0, 0
+    "Wi-Fi", "Bluetooth", "AirPlay", "Car", "Smart Wi-Fi", "EQ", 0, 0, 0, 0
 };
 /* Each stop's glyph (tools/art.py CC_ICONS): <art>cc_<name>; Wi-Fi's is the link's (cc_wifi) */
 static const char *const cc_glyphs[CC_BUTTONS] = { 0,         "bluetooth", "airplay", "car",
                                                    "leaf",    "eq",        0,         "sun",
-                                                   "speaker", "back",      "pause",   "forward" };
+                                                   "speaker", "usb",       "back",    "pause",
+                                                   "forward" };
 /* The landing's offset of the blocks from rest, in quarter pixels every CC_SPRING_STEP ms from
  * the moment the page comes to rest: a damped sine, 8 px past rest at about 50 ms, back through it
  * at 140, 2 px short at about 190 and still at CC_SPRING_MS (amplitude 14.6 px, decay ln 4 per
@@ -125,8 +143,8 @@ static const signed char cc_springs[CC_SPRING_MS / CC_SPRING_STEP + 1] = { 0,  2
                                                                            17, 8,  0,  -5, -8,
                                                                            -8, -6, -4, -2, 0 };
 
-/* Stop i's box on the window: a circle's square, the Now Playing block, a slider's track, a
- * transport glyph's. */
+/* Stop i's box on the window: a circle's square, the Now Playing block, a slider's track, the USB
+ * row, a transport glyph's. */
 static rect_t cc_box(int i) {
     if (i <= CC_EQ) {
         int cx = CC_X0 + CC_BLOCK_W / 2 - CC_PITCH / 2 + (i % 2) * CC_PITCH,
@@ -137,6 +155,7 @@ static rect_t cc_box(int i) {
     if (i == CC_BRIGHT || i == CC_VOLUME)
         return (rect_t){ CC_RIGHT_X, CC_SLIDER_Y + (i - CC_BRIGHT) * (CC_SLIDER_H + CC_GAP),
                          CC_RIGHT_W, CC_SLIDER_H };
+    if (i == CC_USB) return (rect_t){ CC_X0, CC_USB_Y, CC_X1 - CC_X0, CC_SLIDER_H };
     int cx = CC_RIGHT_X + CC_RIGHT_W / 2 + (i - CC_PLAY) * CC_TRANSPORT_DX,
         cy = CC_Y0 + CC_TRANSPORT_Y, s = i == CC_PLAY ? 30 : CC_ICON;
     return (rect_t){ cx - s / 2 - 6, cy - s / 2 - 6, s + 12, s + 12 }; /* a 6 px reach */
@@ -151,10 +170,17 @@ static int cc_wifi(void) {
     return level ? (wifi_offline() ? 4 : level > 3 ? 3 : level) : g_wififlag ? 0 : -1;
 }
 /* Every CC_WIFI_POLL_MS while the page is open: the Wi-Fi circle drawn again when its glyph
- * changes. Its box, ring and all: nothing else moves with it. */
+ * changes, its box, ring and all, nothing else moving with it; and the page when a cable comes or
+ * goes, the USB row with it (the wheel back on Volume if it was on the row). */
 static int cc_wifi_poll(const void *info) {
     void *win = P(info, TIMER_CTX);
-    int now = cc_wifi() + 2;
+    int now = cc_wifi() + 2, cable = usb_ui_cable() + 1;
+    if (cable != widget_get_prop_int(win, CC_CABLE_SEEN, 0)) {
+        widget_set_prop_int(win, CC_CABLE_SEEN, cable);
+        if (cable == 1 && widget_get_prop_int(win, CC_FOCUS, 0) == CC_USB)
+            widget_set_prop_int(win, CC_FOCUS, CC_VOLUME);
+        widget_invalidate_force(win, (void *)0);
+    }
     if (now != widget_get_prop_int(win, CC_WIFI_SEEN, 0)) {
         rect_t r = cc_box(CC_WIFI);
         rect_t o = { r.x - CC_RING, r.y - CC_RING, r.w + 2 * CC_RING, r.h + 2 * CC_RING };
@@ -265,6 +291,25 @@ static void cc_glyph(void *w, void *canvas, int i, int cx, int cy, int px) {
     paint_art(w, canvas, name, cx - px / 2, cy - px / 2);
 }
 
+/* The USB row in r, ringed as the mock rings it when the wheel is on it: the glyph, "USB", the
+ * remembered choice in Text Secondary and the chevron. */
+static void cc_usb_row(void *win, void *canvas, rect_t r, int ring) {
+    char name[40];
+    int cy = r.y + r.h / 2, x1 = r.x + r.w;
+    if (ring) {
+        rect_t o = { r.x - CC_USB_RING, r.y - CC_USB_RING, r.w + 2 * CC_USB_RING, r.h + 2 * CC_USB_RING },
+               g = { o.x + 2, o.y + 2, o.w - 4, o.h - 4 };
+        fill_box(canvas, &o, RGBA(0xffffff), (unsigned)(o.h / 2));
+        fill_box(canvas, &g, RGBA(0), (unsigned)(g.h / 2));
+    }
+    fill_box(canvas, &r, RGBA(CC_BLOCK), (unsigned)(r.h / 2));
+    cc_glyph(win, canvas, CC_USB, r.x + CC_USB_ICON_X, cy, CC_USB_ICON);
+    ui_text(canvas, "USB", 1, CC_USB_PX, 0xffffff, 0, r.x + CC_USB_TEXT_X, cy, 120, 2);
+    ui_text(canvas, usb_ui_value(), 0, CC_USB_PX, RGB_SECONDARY, 0, x1 - CC_USB_VALUE_END, cy, 200, 3);
+    tk_snprintf(name, sizeof name, "%scc_chev%s", theme()->art, ipod_light() ? "_l" : "");
+    paint_art(win, canvas, name, x1 - CC_USB_CHEV_X - CC_USB_CHEV / 2, cy - CC_USB_CHEV / 2);
+}
+
 /* A slider's level as its fill draws it, 0 to 256: Brightness's stock slider, Volume's g_volume
  * of 100, each at its bar's eased level (levels.c). */
 static int cc_level(void *win, int i) {
@@ -360,6 +405,11 @@ void cc_paint(void *win, void *canvas) {
         int lit = cc_lit(i),
             ring = i == focus && shown ? 1 + (adjust && (i == CC_BRIGHT || i == CC_VOLUME)) : 0;
         if (i == CC_NOW) continue; /* drawn under the rest, above */
+        if (i == CC_USB) { /* recorded for cc_wifi_poll */
+            widget_set_prop_int(win, CC_CABLE_SEEN, usb_ui_cable() + 1);
+            if (usb_ui_cable()) cc_usb_row(win, canvas, r, ring);
+            continue;
+        }
         if (i == CC_BRIGHT || i == CC_VOLUME) {
             cc_shape(canvas, r, r.h / 2, CC_OFF, ring, 0);
             int k = cc_level(win, i), fw = r.w * k / 256;
@@ -496,6 +546,11 @@ static int cc_act(void *win, int i) {
         st.smart_wifi = !st.smart_wifi;
         write_int_config(st.smart_wifi, "Q2POD", "SMARTWIFI");
         break;
+    case CC_USB: /* the USB picker, as Settings > General > USB opens it; only with a cable in */
+        if (!usb_ui_cable()) break;
+        dialog_quit(win, 0);
+        usb_pick_open((void *)0, (void *)0);
+        return 1;
     case CC_NOW: /* as Home's Now Playing row: only while something is loaded */
         if (!cc_np_loaded()) break;
         dialog_quit(win, 0);
@@ -589,15 +644,20 @@ void cc_open(void *win) {
         if (cc_paged(i)) quick_hold(button, QUICK_CC + i);
     }
     vol_bar.easing = bright_bar.easing = 0; /* the sliders open on their levels */
+    widget_set_prop_int(win, CC_CABLE_SEEN, usb_ui_cable() + 1); /* as it will be drawn */
     widget_add_timer(win, cc_land, VOL_POLL_MS);
     widget_add_timer(win, cc_wifi_poll, CC_WIFI_POLL_MS);
 }
 
 /* The wheel on the page: from stop to stop, ends kept, past the Now Playing block while nothing is
- * loaded; or a slider's level while it has it, Volume's as Now Playing's wheel sets it (vol_next)
- * and Brightness's as the Brightness page's (bright_wheel). A tick with no ring showing only
- * brings it up. */
+ * loaded and short of the USB row while no cable is in; or a slider's level while it has it,
+ * Volume's as Now Playing's wheel sets it (vol_next) and Brightness's as the Brightness page's
+ * (bright_wheel). A tick with no ring showing only
+ * brings it up. Any tick is the wheel's input for the focus rule's one record (st.touch_mode,
+ * docs/oled-design.md#focus-ring), as a list's is: a page Centre opens from here (the USB
+ * picker) shows its selection. */
 void cc_wheel(void *win, int dir) {
+    st.touch_mode = 0;
     if (cc_ring_wake(win)) {
         cc_marq(win);
         return;
@@ -614,6 +674,7 @@ void cc_wheel(void *win, int dir) {
     } else {
         int next = focus + dir;
         if (next == CC_NOW && !cc_np_loaded()) next += dir;
+        if (next == CC_USB && !usb_ui_cable()) return; /* no row: Volume is the end */
         if (next < 0 || next >= CC_STOPS) return;
         widget_set_prop_int(win, CC_FOCUS, next);
     }

@@ -19,7 +19,12 @@
  *   its own mode page, whose Stop parks the ADB gadget.
  * - A remembered choice skips the chooser, Transfer Files and USB Audio in their own mode for the
  *   cable, and holds until a mode page's Stop forgets it (back to asking, so the next cable gets
- *   the chooser): Control Center shows no USB tile to change it.
+ *   the chooser) or the USB picker changes it.
+ * - The USB picker, "USB" (usb_pick_open: Settings > General's USB row, usb_ui_row, and Control
+ *   Center's while a cable is in): Ask Every Time, Transfer Files, USB Audio, Charge Only and, in a
+ *   --dev build, USB Debugging, the remembered one checked and what it does under the list. A pick
+ *   is remembered; with a cable in it is that cable's mode at once (usb_switch), but leaving
+ *   Transfer Files while the computer has the card asks first.
  * - Toasts: Unplugged, OK to Disconnect (the computer's eject while USB mode is not on top) and
  *   USB Audio Ready (the DAC mode reached without the chooser).
  * - --dev builds: adbd's question about an unknown computer (docs/adb.md#authorization), "Allow USB
@@ -58,6 +63,9 @@ static struct {
     int det, probing, choice, mode_saved /* g_usbmode + 1 for this cable's, 0 none */, ejected, ejected_told, chosen, row_sel;
     unsigned probe_at;
     void *chooser, *view, *always, *debug, *mode;
+    /* the USB picker, its footer, General's row's label, and a pick the confirmation card is asking about */
+    void *pick, *pick_view, *pick_foot, *row;
+    int pending;
     /* the ADB prompt */
     int fd, asking; /* asking: the card is up for adbd's question */
     unsigned auth_at;
@@ -86,10 +94,51 @@ static int usb_remembered(void) {
     return pick <= USB_ASK || (pick == USB_DEBUG && !Q2POD_DEV) ? USB_ASK : pick;
 }
 
-/* A mode page's Stop: the remembered choice back to asking, so the next cable gets the chooser. */
+static const char *const usb_pick_names[USB_CHOICES] = { "Ask Every Time", "Charge Only", "Transfer Files",
+                                                         "USB Audio", "USB Debugging" };
+/* The remembered choice's name: General's USB row's value and Control Center's USB row's. */
+const char *usb_ui_value(void) { return usb_pick_names[usb_remembered()]; }
+/* A cable in, as stock's pass reads it: Control Center's USB row shows only then. */
+int usb_ui_cable(void) { return g_usbdet_value == 1; }
+
+/* General's USB row (nav/settings_display.c ringnav_systemset): its value, the remembered choice,
+ * written again by every change while the row is there. */
+static void usb_row_text(void) {
+    if (u.row) list_value(u.row, "USB", usb_ui_value());
+}
+static int usb_row_gone(void *label, void *event) {
+    if (u.row == label) u.row = (void *)0;
+    return 0;
+}
+void usb_ui_row(void *label) {
+    u.row = label;
+    widget_on(label, EVT_DESTROY, usb_row_gone, label);
+    usb_row_text();
+}
+
+/* A mode page's Stop, or Ask Every Time picked: the remembered choice back to asking, so the next
+ * cable gets the chooser. */
 static void usb_forget(void) {
     if (config_value("Q2POD", USB_PICK_KEY, USB_CHOICES, USB_ASK) != USB_ASK)
         write_int_config(USB_ASK, "Q2POD", USB_PICK_KEY);
+    usb_row_text();
+}
+
+/* pick remembered for every cable (Always Do This, or the USB picker): Transfer Files and USB Audio
+ * with stock's own mode (SYSSET USBMODE), as its USB setting saved it, so no cable's mode is put
+ * back when this one is out. */
+static void usb_remember(int pick) {
+    if (pick == USB_ASK) {
+        usb_forget();
+        return;
+    }
+    write_int_config(pick, "Q2POD", USB_PICK_KEY);
+    if (pick == USB_FILES || pick == USB_AUDIO) {
+        g_usbmode = pick == USB_AUDIO ? USB_MODE_DAC : USB_MODE_FILES;
+        write_int_config(g_usbmode, "SYSSET", "USBMODE"); /* stock's own */
+        u.mode_saved = 0;
+    }
+    usb_row_text();
 }
 
 /* g_usbmode for this cable; stock's saved one comes back when it is out. */
@@ -106,19 +155,13 @@ static void usb_page_close(void **page) {
 
 static int usb_debug_open(void);
 
-/* A choice made (from the chooser or remembered); always saves it. */
+/* A choice made for the cable that is in (the chooser's, a remembered one's, the USB picker's);
+ * always remembers it too. */
 static void usb_apply(int pick, int always) {
     u.choice = pick;
     if (u.probing || u.chosen) system("storage_config.sh stop >/dev/null 2>&1");
     u.probing = 0;
-    if (always) {
-        write_int_config(pick, "Q2POD", USB_PICK_KEY);
-        if (pick == USB_FILES || pick == USB_AUDIO) {
-            g_usbmode = pick == USB_AUDIO ? USB_MODE_DAC : USB_MODE_FILES;
-            write_int_config(g_usbmode, "SYSSET", "USBMODE"); /* stock's own */
-            u.mode_saved = 0;
-        }
-    }
+    if (always) usb_remember(pick);
     if (pick == USB_FILES || pick == USB_AUDIO) {
         if (!always) usb_mode(pick == USB_AUDIO);
         g_usblink_status = 0; /* stock's next pass starts its gadget and opens usbmode_page */
@@ -129,7 +172,7 @@ static void usb_apply(int pick, int always) {
 
 /* ---- the chooser ---- */
 
-static const char *const usb_names[] = { "Charge Only", "Transfer Files", "USB Audio", "USB Debugging" };
+static const char *const *const usb_names = usb_pick_names + USB_CHARGE; /* its rows' order */
 static const char *const usb_caps[] = { "Keep listening while it charges", "Your computer opens the SD card",
                                         "Play your computer's sound here", "Developer builds only" };
 static const char *const usb_glyphs[] = { "usb_charge", "usb_files", "usb_audio", "usb_debug" };
@@ -232,8 +275,10 @@ static int usb_debug_open(void) {
     return 0;
 }
 
+/* stock's usbmode_page gone: its exit (usbmode_exit, on EVT_WINDOW_CLOSE) has stopped the gadget and
+ * holds the cable (g_usblink_status 3) until it is out, so it only charges now. */
 static int usb_mode_gone(void *ctx, void *event) {
-    if (ctx == u.mode) u.mode = (void *)0;
+    if (ctx == u.mode) u.mode = (void *)0, u.choice = USB_CHARGE;
     return 0;
 }
 
@@ -295,6 +340,151 @@ int usb_ui_key(void *top, unsigned key) {
     return 1;
 }
 
+/* ---- the USB picker ---- */
+
+/* Its rows' choices, top down, and the note under the list for the checked one (two lines at most,
+ * USB_FOOT_DY and USB_FOOT_LINE: design/usb-row mock_usb_row.py, 13 px Text Tertiary). */
+static const unsigned char usb_pick_order[] = { USB_ASK, USB_FILES, USB_AUDIO, USB_CHARGE, USB_DEBUG };
+#define USB_PICK_ROWS (Q2POD_DEV ? 5 : 4)
+#define USB_PICK_TICK "_usb_tick" /* a row's check image: stock's select, painted as the theme's check */
+#define USB_TICK_W 24
+#define USB_FOOT_H 48
+#define USB_FOOT_DY 19   /* the first line's centre under the rows */
+#define USB_FOOT_LINE 17 /* and the next one's under it */
+#define USB_FOOT_PX TYPE(13)
+static const char *const usb_notes[USB_CHOICES][2] = {
+    { "Plug into a computer to choose.", 0 },
+    { "Every cable only charges, a computer's too.", 0 },
+    { "A computer opens the SD card on every cable.", "Stop on its page asks again next time." },
+    { "A computer plays its sound here on every cable.", "Stop on its page asks again next time." },
+    { "A computer gets adb on every cable.", "Stop on its page asks again next time." },
+};
+
+/* The cable's mode now: stock's mode page's, USB Debugging's page's, else the choice it got. */
+static int usb_now(void) {
+    if (u.mode) return g_usbmode == USB_MODE_DAC ? USB_AUDIO : USB_FILES;
+    return u.debug ? USB_DEBUG : u.choice;
+}
+
+/* The cable that is in, switched to pick and pick remembered. What it had is let go first: stock's
+ * mode by closing its page, whose EVT_WINDOW_CLOSE runs stock's usbmode_exit (the gadget stopped,
+ * the card mounted again, g_usblink_status 3; demo 0x542ad0); stock's gadget still waiting for a
+ * computer by holding the link and stopping it; USB Debugging's page closed, its gadget parked for
+ * Charge Only. USB Debugging unparks its gadget, which a stop of stock's gadget may have left parked
+ * (patch/adb_gadget.sh). */
+static void usb_switch(int pick) {
+    int now = usb_now();
+    if (pick == now) {
+        usb_remember(pick);
+        return;
+    }
+    if (u.chooser) {
+        u.chosen = 1; /* answered: its Return's Charge Only does not follow */
+        usb_page_close(&u.chooser);
+    }
+    if (u.mode) {
+        usb_page_close(&u.mode);
+    } else if ((now == USB_FILES || now == USB_AUDIO) && g_usblink_status != USB_LINK_HELD) {
+        g_usblink_status = USB_LINK_HELD;
+        system(now == USB_AUDIO ? "uac_device_config.sh stop >/dev/null 2>&1"
+                                : "storage_config.sh stop >/dev/null 2>&1");
+    }
+    usb_page_close(&u.debug);
+    usb_apply(pick, 1);
+    if (now == USB_DEBUG && pick == USB_CHARGE)
+        system("/usr/bin/q2adb-gadget park >/dev/null 2>&1");
+    else if (pick == USB_DEBUG)
+        system("/usr/bin/q2adb-gadget unpark >/dev/null 2>&1");
+}
+
+/* Each row's check, the remembered choice's, and its note under the list. */
+static void usb_pick_marks(void) {
+    int now = usb_remembered();
+    for (int i = 0; u.pick_view && i < USB_PICK_ROWS; ++i) {
+        void *item = widget_get_child(u.pick_view, i);
+        void *tick = item ? widget_lookup(item, USB_PICK_TICK, 0) : (void *)0;
+        if (tick) image_base_set_image(tick, usb_pick_order[i] == now ? "select" : "unselect");
+    }
+    if (u.pick_foot) widget_invalidate_force(u.pick_foot, (void *)0);
+}
+
+/* pick remembered and, with a cable in, that cable's mode now; Ask Every Time only forgets. */
+static void usb_pick_set(int pick) {
+    if (pick == USB_ASK || !usb_ui_cable())
+        usb_remember(pick);
+    else
+        usb_switch(pick);
+    usb_pick_marks();
+}
+
+/* The confirmation card's answer: Switch (row 1) makes the pick it asked about. */
+static void usb_pick_answer(void *ctx, int row, int toggle_on) {
+    int pick = u.pending;
+    u.pending = 0;
+    if (row == 1 && pick) usb_pick_set(pick);
+}
+
+/* A row's Centre or tap. Leaving Transfer Files while the computer has the card (its mode page up,
+ * not ejected) asks first, so a copy in progress is not cut off unasked. */
+static int usb_pick_click(void *ctx, void *event) {
+    static const char *const rows[] = { "Cancel", "Switch" };
+    int i = (int)(long)ctx, pick = i >= 0 && i < USB_PICK_ROWS ? usb_pick_order[i] : -1;
+    if (pick < 0) return 0;
+    int cable = usb_ui_cable() && pick != USB_ASK, now = cable ? usb_now() : -1;
+    if (pick == usb_remembered() && (!cable || pick == now)) return 0;
+    if (cable && pick != now && u.mode && g_usbmode != USB_MODE_DAC && !u.ejected) {
+        u.pending = pick; /* read only by this card's answer; another card up shows none */
+        confirm(&(confirm_t){ .title = "Switch to %s?",
+                              .name = usb_pick_names[pick],
+                              .body = "Eject the SD card on your computer first,\nor a copy in progress stops.",
+                              .rows = rows,
+                              .n_rows = 2,
+                              .kind = CONFIRM_CONSEQUENTIAL,
+                              .back = -1,
+                              .answer = usb_pick_answer });
+        return 0;
+    }
+    usb_pick_set(pick);
+    return 0;
+}
+
+static int usb_pick_closed(void *ctx, void *event) {
+    if (u.pick == ctx) u.pick = u.pick_view = u.pick_foot = (void *)0;
+    return 0;
+}
+
+/* The USB picker (General's USB row, Control Center's): one row a choice, the check on the right
+ * column, the footer view under the rows. It opens on the checked row (contexts.inc CHOICE) and
+ * stays after a pick, as the other pickers do. */
+int usb_pick_open(void *ctx, void *event) {
+    if (u.pick || !(u.pick = page_open("usbpick_page", usb_pick_closed, page_keyup))) return 0;
+    void *view = u.pick_view = page_list(u.pick, u.pick, 0, "USB", USB_PICK_ROWS, 48);
+    int right = 375 - geom_val(V_RIGHT_X);
+    for (int i = 0; i < USB_PICK_ROWS; ++i) {
+        void *item = page_row_detail(view, i, usb_pick_names[usb_pick_order[i]], 0, usb_pick_click);
+        void *label = widget_get_child(item, 0);
+        int h = I(item, W_H);
+        if (label) widget_move_resize(label, I(label, W_X), 0, right - USB_TICK_W - 8 - I(label, W_X), h);
+        void *tick = image_create(item, right - USB_TICK_W, 0, USB_TICK_W, h);
+        widget_set_name(tick, USB_PICK_TICK);
+    }
+    void *list = P(view, W_PARENT);
+    u.pick_foot = widget_factory_create_widget(widget_factory(), "view", u.pick, 0,
+                                               I(list, W_Y) + I(list, W_H), 375, USB_FOOT_H);
+    widget_set_name(u.pick_foot, "_usb_pick_foot");
+    usb_pick_marks();
+    return 0;
+}
+
+/* The footer: the checked choice's note, on the text column. */
+static void usb_pick_paint(void *canvas) {
+    const char *const *note = usb_notes[usb_remembered()];
+    int x = geom_val(V_TEXT_X), w = 375 - x - geom_val(V_RIGHT_X);
+    for (int k = 0; k < 2 && note[k]; ++k)
+        ui_line(canvas, note[k], x - I(canvas, CANVAS_X), w, USB_FOOT_DY + k * USB_FOOT_LINE, 2, "inter",
+                USB_FOOT_PX, scheme()->muted);
+}
+
 /* A page opened from a poll, not from a key: once it is on top and settled, the wheel's list is
  * loaded on it (ringnav_select), so the first Centre presses its row. */
 static void usb_ready(void *page, void *view, int *ready, int rows) {
@@ -304,11 +494,11 @@ static void usb_ready(void *page, void *view, int *ready, int rows) {
     ringnav_select(view, widget_get_prop_int(view, "_ringnav_index", 0), rows);
 }
 
-/* ringnav_paint, after w's children: the chooser's glyphs and caption, the mode pages, the ADB
- * prompt's key and note. */
+/* ringnav_paint, after w's children: the chooser's glyphs and caption, the mode pages, the USB
+ * picker's footer. */
 void usb_ui_paint(void *w, void *canvas) {
     void *lcd = w ? P(canvas, CANVAS_LCD) : (void *)0;
-    if (!lcd || (!u.chooser && !u.debug && !u.mode)) return;
+    if (!lcd || (!u.chooser && !u.debug && !u.mode && !u.pick_foot)) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR), raw = st.raw_ink;
     void *parent = P(w, W_PARENT);
     unsigned accent = scheme()->tones[0] & 0xffffffu;
@@ -326,6 +516,8 @@ void usb_ui_paint(void *w, void *canvas) {
         else
             mode_page_paint(w, canvas, I(w, W_Y),
                             &(mode_page_t){ accent | MODE_BUTTON, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
+    } else if (w == u.pick_foot) {
+        usb_pick_paint(canvas);
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
                         &(mode_page_t){ accent | MODE_BUTTON, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
