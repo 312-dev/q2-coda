@@ -247,6 +247,20 @@ def test_a_streamed_albums_cover_is_its_stream_files_picture(lib, tmp_path):
     assert q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)]) == 'NOT_FOUND'
 
 
+@pytest.mark.parametrize('shard, quality', [('a', 'original'), ('0', 'mp3-320'), ('f', 'original')])
+def test_a_streamed_albums_cover_is_found_in_any_of_the_caches_folders(lib, tmp_path, shard, quality):
+    """q2-subsonic keeps a stream at .subsonic/stream/<account>/<quality>/<x>/<title> [<sid>].<ext>, x one hex digit
+    of the sid's hash (its cache.go cachePath: 16 folders); the cover's look-up searched only original/0/, so the
+    picture in 15 of 16 downloads went unseen and the car showed no cover (2026-11-18 00:24)."""
+    q2 = Q2(lib, tmp_path, server=SERVER, cat=True)
+    image = b'\xff\xd8' + bytes(range(256)) * 2 + b'\xff\xd9'
+    f = tmp_path / f'mnt/mmc/.subsonic/stream/9f2c/{quality}/{shard}/foxtrot [s2].flac'
+    f.parent.mkdir(parents=True)
+    f.write_bytes(flac_with_picture(image))
+    t, m = q2.ask(T['GET_COVER'], [(1, 'sthird'), (2, 0), (3, 4096), (4, 160)])
+    assert t == T['COVER'] and client.one(m, 3) == image
+
+
 def test_a_server_playlist_s_art_is_its_server_cover(lib, tmp_path):
     """A server playlist (cat.serverlists) shows its server's cover, the app's covers/pl-<pid>.jpg (Navidrome's
     collage), once the app has it; until then, and for a card playlist always, its first song's album's

@@ -1,5 +1,5 @@
 /* A card app's streaming song plays from its temporary download, the app's stream cache:
- * /mnt/mmc/.<app>/stream/<hash>/original/0/<title> [<sid>].<suffix>, a file no library record has
+ * /mnt/mmc/.<app>/stream/<account>/<quality>/<x>/<title> [<sid>].<suffix>, a file no library record has
  * (the player's id 0) and catalogue.avail need not name. Its server id is between the name's last
  * brackets. Shared by the payload's catalogue.c (cat_copy_of: the UI's covers, play counts and
  * hearts) and coda-rc's coda_rc_lib.c (lib_stream_song), so both read the same paths alike

@@ -1184,7 +1184,7 @@ static int flac_picture(const char *path, cover_t *c) {
 }
 
 /* A server album with no covers/<album>.jpg: the picture in a song of it streamed lately, from the app's stream cache
- * (stream_sid's files), the one the Q2 Muse shows while it plays. */
+ * (stream_sid's files, in any account, quality and shard folder), the one the Q2 Muse shows while it plays. */
 static int stream_picture(const char *art, const char *app, size_t appn, cover_t *c) {
     sqlite3_stmt *st;
     int found = 0;
@@ -1199,7 +1199,8 @@ static int stream_picture(const char *art, const char *app, size_t appn, cover_t
         int plain = sid && *sid; /* a glob pattern's own characters, or a path's, would widen it */
         for (const char *k = sid; plain && *k; ++k) plain = !strchr("*?[]\\/", *k);
         if (!plain) continue;
-        snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/stream/*/original/0/*\\[%s\\].*", (int)appn, app, sid);
+        /* stream/<account>/<quality>/<x>/<title> [<sid>].<ext>, x a hex digit of the sid's hash (q2-subsonic cache.go) */
+        snprintf(rel, sizeof rel, "/mnt/mmc/%.*s/stream/*/*/*/*\\[%s\\].*", (int)appn, app, sid);
         if (glob(crc_path(p, sizeof p, rel), 0, 0, &g)) continue;
         for (size_t i = 0; i < g.gl_pathc && !found; ++i)
             if (flac_picture(g.gl_pathv[i], c)) snprintf(c->path, sizeof c->path, "%s", g.gl_pathv[i]), found = 1;
