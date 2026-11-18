@@ -3339,7 +3339,51 @@ def test_the_search_box_opens_a_level_for_its_text(fw):
     fw.mock('widget_get_text_utf8', typed)
     fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     fw.fn('addon__go', C.c_int, C.c_void_p)(None)
-    assert p.top.op == b'search' and p.top.args == b'\ta b' and p.top.title == b'a b' and p.top.base == 4
+    assert p.pending.op == b'search' and p.pending.args == b'\ta b' and p.pending.title == b'a b' and p.pending.base == 4
+
+
+# The loading overlay over a text typed in the box (a search, a field's): the box closes onto the level's rows, and
+# the spinner waits over them.
+def test_a_search_loads_under_the_overlay_over_its_levels_rows(fw):
+    p = Page(fw)
+    p.answer(rows=[SEARCH, item(0, b'list'), item(1)])
+    tap_find(p)
+    lists = len(fw.calls('scroll_view_create'))
+    fw.mock('widget_get_text_utf8', lambda w, out, n, *_: C.memmove(out, b'abc\0', 4) and 0)
+    fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.pg.pend and p.pg.edit is None and p.pg.view and p.top.state == K_READY and p.pg.depth == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # the rows again, not a Loading… page
+    fw.fn('addon__search_left', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # the box's blur after its OK
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.pg.pend and len(fw.calls('scroll_view_create')) == lists + 1
+    p.answer(rows=[item(4)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.op == b'search' and p.top.n == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 2
+
+
+def test_a_field_s_text_loads_under_the_overlay_over_its_levels_rows(fw):
+    p = Page(fw)
+    p.answer(rows=[item(0, b'info'), USER, PASSWORD])
+    lists = len(fw.calls('scroll_view_create'))
+    field(p, 2)
+    assert p.pg.pend and p.pg.edit is None and p.top.state == K_READY and p.top.n == 3 and p.pg.depth == 1
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # the rows again, not a Loading… page
+    p.answer(rows=[item(7)])
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.n == 1 and p.top.op == b'menu'
+    assert len(fw.calls('scroll_view_create')) == lists + 2
+
+
+def test_return_cancels_a_field_s_load_and_its_text_goes_nowhere(fw):
+    p = Page(fw)
+    p.answer(rows=[USER, PASSWORD])
+    field(p, 1)
+    cancelled, lists = p.req.id, len(fw.calls('scroll_view_create'))
+    p.back()
+    assert p.pg.pend == 0 and p.top.state == K_READY and p.top.n == 2 and not p.req.buf and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(7)], id=cancelled)
+    assert p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
 
 
 def test_an_empty_search_goes_back_to_the_menu(fw):
@@ -3378,9 +3422,9 @@ def test_a_field_row_sends_its_text_and_takes_the_reply_in_the_levels_place(fw):
     p.sel = 2
     field(p, 2)
     assert p.tips == [b'Password:']
-    assert p.request().endswith(b'\tlogin\tpw\ts3cr%25t\n') and p.pg.act == 0
-    assert p.pg.depth == 1 and p.top.op == b'menu' and p.top.args == b'' and p.top.title == b'Foo'
-    assert p.top.state == K_LOAD and p.top.id == p.req.id and p.top.sel == 2
+    assert p.request().endswith(b'\tlogin\tpw\ts3cr%25t\n') and p.pg.act == 0 and p.req.field == 1
+    assert p.pg.depth == 1 and p.pending.op == b'menu' and p.pending.args == b'' and p.pending.title == b'Foo'
+    assert p.pending.id == p.req.id and p.pending.sel == 2
     assert p.pg.term == b'' and p.pg.field == 0
     p.answer(rows=[item(0, b'info'), USER, (b'field', b'login', b'Password:', b'*****', b'pw', b'')])
     assert p.top.state == K_READY and p.top.n == 3 and p.cell(2, 3) == b'*****' and p.pg.depth == 1
@@ -3900,6 +3944,8 @@ def test_the_search_boxs_blur_after_its_ok_keeps_the_search(fw):
     fw.fn('addon__searched', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     fw.fn('addon__search_left', C.c_int, C.c_void_p, C.c_void_p)(None, None)  # the keyboard's close blurs it
     fire(p)
+    assert p.pending.op == b'search' and p.pending.args == b'\tabc'
+    p.answer(rows=[item(2)])
     assert p.pg.depth == 2 and p.top.op == b'search' and p.top.args == b'\tabc'
 
 

@@ -2581,15 +2581,15 @@ enum { P_PUSH = 1, P_PLACE };
 /* Whether the top level shows its rows, so a level can be asked for under the overlay over them. */
 static int stageable(void) { return top()->state == K_READY && pg.view; }
 
-/* next asked for under the loading overlay, to be taken how (P_*) once its reply comes (got); the
- * staged level, its id the request's. */
-static lv_t *stage(const lv_t *next, int how) {
+/* next asked for under the loading overlay, to be taken how (P_*) once its reply comes (got): op
+ * and args sent (0: next's own); the staged level, its id the request's. */
+static lv_t *stage(const lv_t *next, int how, const char *op, const char *args) {
     lv_t *w = &pg.lv[ADDON_DEPTH];
     if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
     if (pg.paging) /* the next page let go: its Loading… row More… again, at the cursor it asked */
         pg.paging = 0, append(top(), top()->n);
     *w = *next;
-    req_send(app()->browse, w->op, w->args);
+    req_send(app()->browse, op ? op : w->op, op ? args : w->args);
     pg.act = 0;
     w->id = req.id;
     pg.pend = (char)how;
@@ -2619,7 +2619,7 @@ static lv_t *push(const char *op, const char *args, unsigned base, const char *t
     tk_snprintf(next.args, sizeof next.args, "%s", args);
     tk_snprintf(next.title, sizeof next.title, "%s", title);
     next.base = base < sizeof next.args ? base : 0;
-    if (stageable()) return stage(&next, P_PUSH);
+    if (stageable()) return stage(&next, P_PUSH, 0, 0);
     enter(&next);
     show();
     return top();
@@ -2669,7 +2669,7 @@ static void page_to(lv_t *l, const char *c, int dir) {
         next.n = 0, next.state = K_LOAD;
         next.sel = dir > 0 ? first : 1 << 20; /* show() clamps it to the last row */
         pg.pmoved = (signed char)dir;
-        stage(&next, P_PLACE);
+        stage(&next, P_PLACE, 0, 0);
         return;
     }
     req_cancel();
@@ -2945,7 +2945,8 @@ static lv_t *open_list(const char *uri, const char *ctx, const char *title) {
 
 /* A field row's text, typed in its box: sent to the row's uri after its context, and the reply
  * taken as the level's own (got), in its place: no level pushed, nothing titled with the text, the
- * level's Loading… page meanwhile and its selected row kept. A failure is the level's error page,
+ * box closed onto the level's rows with the loading overlay over them meanwhile (P_PLACE), and its
+ * selected row kept. A failure is the level's error page,
  * whose Retry asks for the level's own op, so the text is never sent again. The text is cleared
  * once it is in the request, which the worker clears once it is sent: a password goes to no title,
  * log or cache. A row no longer a field (a reply landed under the box) sends nothing. */
@@ -2956,16 +2957,16 @@ static void field_sent(lv_t *l) {
     if (l->state == K_READY && i >= 0 && i < l->n && !strcmp(cell(i, 0), "field") &&
         cell(i, 1)[0] && (!cell(i, 4)[0] || put(a, sizeof a, cell(i, 4))) &&
         put(a, sizeof a, pg.term)) {
-        req_send(app()->browse, cell(i, 1), a);
+        lv_t next = *l;
+        next.n = 0, next.state = K_LOAD;
+        show(); /* the box closed onto the rows, which keep the reply the uri points into */
+        pg.pmoved = 0;
+        stage(&next, P_PLACE, cell(i, 1), a);
         req.field = 1;
-        pg.act = 0;
-        l->id = req.id;
-        drop(); /* after: the uri was the shown reply's */
-        l->n = 0, l->state = K_LOAD;
-    }
+    } else
+        show();
     memset(pg.term, 0, sizeof pg.term);
     memset(a, 0, sizeof a);
-    show();
 }
 
 /* A row's choice, on a timer: a row's click may not rebuild the list it is in. */
@@ -2985,8 +2986,8 @@ static int go(const void *unused) {
         if (l->state == K_READY && l->find) search_box(0);
     } else if (pg.next == G_SORT) { /* the sort icon, opening as its row would */
         if (l->state == K_READY && l->sort) open_list(pg.sort[1], pg.sort[4], pg.sort[2]);
-    } else if (pg.next == G_SEARCH) {
-        if (put(a, sizeof a, pg.term)) push("search", a, strlen(a), pg.term);
+    } else if (pg.next == G_SEARCH) { /* the box closed onto the rows, the search over them */
+        if (put(a, sizeof a, pg.term)) show(), push("search", a, strlen(a), pg.term);
     } else if (pg.next == G_FIELD)
         field_sent(l);
     else if (l->state == K_ERROR && i == 1 && app()->nostop) { /* Cancel, as Return */

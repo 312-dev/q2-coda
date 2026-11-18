@@ -950,8 +950,9 @@ own.
   browse, the search results, Albums and the other rows of an artist's page, a sort, More…, and a list's Next page and
   Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
   page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.
-  Not yet (`ponytail:`, each keeps its Loading… page): Back to the level below, which is asked again; a sign-in field's
-  text; Spotify's browser; Internet Radio's directory; and Chapters.
+  A search or a sign-in field's text, once typed, closes the box onto the list it was opened from, the spinner over it.
+  Not yet (`ponytail:`, each keeps its Loading… page): Back to the level below, which is asked again; Spotify's browser;
+  Internet Radio's directory; and Chapters.
 
 ### Menus
 
