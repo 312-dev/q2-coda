@@ -17,6 +17,9 @@ What it adds to tools/build.py, which it runs:
 - the stock files every build writes unchanged (stock.squashfs, stock-demo, libc-2.28.so) hardlinked to
   one copy in ~/.cache/q2-builds/stock/, and root.pseudo, the build's 108 MB scratch, dropped.
 
+tools/build.py's own output is shown only when it fails, but for its `payload room:` line, the bytes
+free below SCRATCH and in the scratch state (docs/architecture.md#the-payload).
+
 A release does not use this: tools/release.py's two reproducibility builds run tools/build.py bare, with
 no caches (docs/building.md#fast-test-runs).
 """
@@ -119,6 +122,9 @@ def main():
     tmp.replace(link)
     for old_build in [b for b in place.glob('b*') if b not in (new, cur)]:
         shutil.rmtree(old_build)  # all but this build and the one before it
+    for line in p.stdout.splitlines():
+        if line.startswith('payload room: '):  # tools/build.py check_layout's headroom
+            print(line, file=sys.stderr)
     print(f'built in {time.perf_counter() - t:.0f} s; {saved / 1e6:.0f} MB shared or dropped', file=sys.stderr)
     print(new)
     return 0
