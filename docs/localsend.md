@@ -128,11 +128,11 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 
 ## Costs
 
-Estimates until built; the build's figures replace them.
+Measured where it says so; the rest are estimates until the demo side is built.
 
 | | Cost |
 | --- | --- |
-| Flash | `q2send` about 60 to 90 KB; the demo side about 12 KB of payload. Less q2cgi (20 KB), `q2cgi-root` and the web patch. TLS: 0 (rootfs OpenSSL) |
+| Flash | `q2send` 43,524 bytes (measured, 2026-11-18); the demo side about 12 KB of payload (estimate). Less q2cgi (20 KB), `q2cgi-root` and the web patch. TLS: 0 (rootfs OpenSSL) |
 | Payload scratch | under 2 KB: the page's device list (8 devices), the transfer's numbers |
 | RAM, only while running | `q2send` about 1.5 to 2.5 MB RSS: libssl and libcrypto's pages are shared with demo, which maps libcrypto already; 64 KB file buffer per upload, at most two at once |
 | CPU | one TLS handshake per request; ChaCha20 at Wi-Fi speed is expected to leave the player its headroom (to be measured on the device) |
@@ -140,6 +140,15 @@ Estimates until built; the build's figures replace them.
 
 ## Status
 
-- Design: this page. Mock-up: drawn (`mock_localsend.py`, 14 screens), waiting for the user's approval; no UI code
-  before it.
-- Protocol core: see `STATUS.md` on the branch while in progress.
+- Design and mock-up: approved by the user on 2026-11-18 as drawn (`mock_localsend.py`, 14 screens).
+- Protocol core and daemon: built. `patch/localsend_core.c` (JSON, info, peers, HTTP heads, chunked bodies, safe
+  names, the session; 13.4 KB of MIPS code) and `patch/localsend.c` (`q2send`, 43.5 KB linked, installed at
+  `/usr/bin/q2send`). `test/unit/test_localsend.py` checks the core with the texts the reference app sent;
+  `test/localsend_e2e.py CLI` runs `q2send` beside the reference CLI 1.18.2 and passes its 19 checks both with a host
+  build and with the build's own MIPS program under qemu-mipsel against the rootfs's OpenSSL 1.1.1w: each finds the
+  other, a file received after Accept, refused after Decline and while held, two files sent and accepted, one
+  declined, the identity kept across a restart. A peer resumes its TLS session on each request, which OpenSSL refuses
+  with a client certificate asked for until the server context has a session id context (found by the run: the
+  uploads' handshakes failed until it was set).
+- Not built yet: the demo side (`patch/localsend_ui.c`), the Network row, Battery History's Share Log, and the
+  removal of Wi-Fi Transfer.
