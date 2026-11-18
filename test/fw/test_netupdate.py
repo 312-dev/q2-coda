@@ -17,13 +17,6 @@ import pytest
 import host
 from conftest import O, block
 
-
-@pytest.fixture(autouse=True)
-def nothing_carried(fw):
-    """No file the firmware carries (addon.c addon_builtin asks access, which unmocked says yes to everything), so
-    every listed app is the App Store's; test_addon.py's World says which are carried."""
-    fw.mock('fw_access', lambda *_: -1)
-
 # stock.h's Q2POD_TAG: tools/build.py's VERSION (host.py builds as a release, not --dev)
 TAG = host.tools_build.VERSION.encode()
 # the next single-digit tag (1.6.9 -> 1.7.0), as netupdate's strcmp orders them

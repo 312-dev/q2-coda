@@ -170,14 +170,12 @@ int addon_version_cmp(const char *x, const char *y) {
 }
 
 /* Whether the firmware carries app id as its own alone (tools/build.py BUNDLED_APPS' builtin, its
- * BUNDLED/<id>/builtin file): only its copy runs, and the App Store never lists it (netupdate.c
- * shelf_sources). A new version comes with a firmware update. */
+ * BUNDLED/<id>/builtin file, which holds "1"): only its copy runs, and the App Store never lists it
+ * (netupdate.c shelf_sources). A new version comes with a firmware update. */
 int addon_builtin(const char *id) {
-    char path[64];
-    tk_snprintf(path, sizeof path, BUNDLED "/%s/q2-%s", id, id);
-    if (access(path, 0)) return 0;
+    char path[64], raw[8];
     tk_snprintf(path, sizeof path, BUNDLED "/%s/builtin", id);
-    return !access(path, 0);
+    return state_read(path, raw, sizeof raw) && raw[1] == '1';
 }
 
 /* The folder of app id that runs, into dir (n bytes): the card's CARD/.<id> or the firmware's

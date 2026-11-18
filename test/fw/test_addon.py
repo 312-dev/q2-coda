@@ -313,7 +313,7 @@ def carry(world, name, version=b'q2-v0.9\n', manifest=b'name=Sub\n', builtin=Fal
     world.files.update({d + b'/q2app': manifest, d + b'/q2-' + name.encode(): b'ELF', d + b'/version': version,
                         d + b'/icon-40.png': png(40, 40)})
     if builtin:
-        world.files[d + b'/builtin'] = b''
+        world.files[d + b'/builtin'] = b'1\n'
     world.dirs.setdefault(BUNDLED, []).append(name.encode())
     return world
 

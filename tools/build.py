@@ -272,7 +272,7 @@ PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's pl
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
 # app's, so the app keeps its data in the card's .<id>. builtin: the firmware's copy is the only one that runs
-# and the App Store never lists the app (a builtin file beside it, patch/addon.c addon_builtin), so its
+# and the App Store never lists the app (a builtin file holding 1 beside it, patch/addon.c addon_builtin), so its
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
@@ -1568,7 +1568,7 @@ def bundled_app(app_id, apps_dir):
     files['version'] = version.encode() + b'\n'
     check('builtin' not in files, f'Unexpected files in {name}')
     if builtin:
-        files['builtin'] = b''
+        files['builtin'] = b'1\n'
     return {n: (b, n in (f'q2-{app_id}', 'run')) for n, b in sorted(files.items())}
 
 

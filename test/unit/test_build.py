@@ -1391,7 +1391,7 @@ def test_a_carried_app_is_its_pinned_zips_files_with_a_version_and_the_new_launc
 def test_a_builtin_app_carries_its_builtin_file_and_no_zip_brings_one(monkeypatch, tmp_path):
     files = {'.demo/q2app': '', '.demo/q2-demo': b'ELF', '.demo/run': LAUNCHER}
     pinned(monkeypatch, tmp_path, app_zip(files), builtin=True)
-    assert build.bundled_app('demo', tmp_path)['builtin'] == (b'', False)
+    assert build.bundled_app('demo', tmp_path)['builtin'] == (b'1\n', False)
     pinned(monkeypatch, tmp_path, app_zip(files))
     assert 'builtin' not in build.bundled_app('demo', tmp_path)
     pinned(monkeypatch, tmp_path, app_zip({**files, '.demo/builtin': ''}))
