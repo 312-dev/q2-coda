@@ -2872,7 +2872,7 @@ def test_a_press_with_a_page_in_flight_asks_for_the_window(fw):
     p.answer(msg=b'pages', cursor=b'c1', rows=[item(2), NEXT])
     assert p.pg.paging == 1 and p.request().endswith(b'\top1\tctx\tc1\n')
     p.click(1)
-    assert p.pg.paging == 0 and p.request().endswith(b'\top1\tctx\tc200\n') and p.top.id == p.req.id
+    assert p.pg.paging == 0 and p.request().endswith(b'\top1\tctx\tc200\n') and p.pending.id == p.req.id
     p.answer(rows=[item(3), item(4)])
     assert p.top.state == K_READY and p.top.n == 2 and p.cell(0, 2) == b'Row 3'
 
@@ -2942,6 +2942,38 @@ def test_loading_does_nothing_and_a_press_on_it_is_dropped(fw):
     p.answer(msg=b'pages', cursor=b'c0', rows=rows_of(0, 2))
     p.press(2)
     assert p.pg.go == 0
+
+
+# The loading overlay over a list whose next page is on its way: that page is let go and its Loading… row is More…
+# again, at the cursor it was asking for, so a cancel leaves a way on.
+def paging_press(fw):
+    p = Page(fw)
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])
+    assert p.pg.paging == 1
+    lists = len(fw.calls('scroll_view_create'))
+    p.click(0)
+    return p, lists
+
+
+def test_a_row_pressed_while_the_next_page_comes_loads_under_the_overlay(fw):
+    p, lists = paging_press(fw)
+    assert p.pg.pend and p.pending.op == b'op0' and p.request().endswith(b'\top0\n')
+    assert p.pg.depth == 1 and p.top.n == 2 and p.pg.paging == 0 and p.pg.f[3] == b'c0'  # More… at the page asked for
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page
+    p.answer(rows=[item(5)])
+    assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.n == 1 and len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_a_cancelled_row_pressed_while_the_next_page_came_leaves_more(fw):
+    p, lists = paging_press(fw)
+    cancelled = p.req.id
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.pg.paging == 0 and p.req.running == 0
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(msg=b'pages', cursor=b'c1', rows=[item(2)], id=cancelled)  # late: nothing opens or appends
+    assert p.pg.depth == 1 and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+    p.click(2)  # More…: the rest, as a level of its own
+    assert p.pending.args == b'\tc0'
 
 
 def test_a_list_without_pages_keeps_more(fw):

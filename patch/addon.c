@@ -2578,16 +2578,16 @@ static void load_cancel(void) {
  * one (push), or in the top's place (page_to). */
 enum { P_PUSH = 1, P_PLACE };
 
-/* Whether the top level shows its rows, so a level can be asked for under the overlay over them.
- * ponytail: a next page in flight (paging) keeps the Loading… page, as the overlay's cancel would
- * leave its Loading… row with nothing asking for it */
-static int stageable(void) { return top()->state == K_READY && pg.view && !pg.paging; }
+/* Whether the top level shows its rows, so a level can be asked for under the overlay over them. */
+static int stageable(void) { return top()->state == K_READY && pg.view; }
 
 /* next asked for under the loading overlay, to be taken how (P_*) once its reply comes (got); the
  * staged level, its id the request's. */
 static lv_t *stage(const lv_t *next, int how) {
     lv_t *w = &pg.lv[ADDON_DEPTH];
     if (pg.act) busy_row(0); /* the action's reply dropped by this request: its row as it was */
+    if (pg.paging) /* the next page let go: its Loading… row More… again, at the cursor it asked */
+        pg.paging = 0, append(top(), top()->n);
     *w = *next;
     req_send(app()->browse, w->op, w->args);
     pg.act = 0;

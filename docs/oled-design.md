@@ -948,9 +948,10 @@ own.
   Stop), after the app's 15 s at most.
 - **Where:** a card app's (a music server's) list rows: an artist, an album, a playlist, a folder of the server's
   browse, the search results, Albums and the other rows of an artist's page, a sort, More…, and a list's Next page and
-  Previous page rows, the new window taking the old one's place once it is there. Not yet (`ponytail:`, each keeps its
-  Loading… page): Back to the level below, which is asked again; a sign-in field's text; a row pressed while a list's next page is on its way; Spotify's browser;
-  Internet Radio's directory; and Chapters.
+  Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
+  page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.
+  Not yet (`ponytail:`, each keeps its Loading… page): Back to the level below, which is asked again; a sign-in field's
+  text; Spotify's browser; Internet Radio's directory; and Chapters.
 
 ### Menus
 
