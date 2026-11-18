@@ -52,7 +52,8 @@ ALL = 'all'
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
 # test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
-# page_parallax.c and playlist_art.c. It is in no gate tier, so a change to any of these plans it (in `other`).
+# page_parallax.c and playlist_art.c, so a change to any of these plans it (in `other`). It is in the gate's
+# merge tier as well (gate.PLANNED), which a plan that runs unit, fw and patch whole gets.
 COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parallax.c', 'patch/playlist_art.c')
 # gate.py's type-check suites, planned in `other`: a .py under tools/ or test/unit/ (or the mypy config)
 # needs mypy-tools, one under test/fw/ needs mypy-fw. A merge batch runs them, so a branch that skips them
@@ -84,8 +85,10 @@ class Plan:
         self.why: list = []
 
     def everything(self, why):
+        """unit, fw and patch whole, and every other suite of the gate's merge tier and smoke: what the
+        merge queue runs for such a plan, so --run here passes only where the queue would."""
         self.unit, self.fw, self.patch = ALL, ALL, ALL
-        self.other.update({'test/build.py', SMOKE, *MYPY_SUITES})
+        self.other.update({*gate.MERGE} - {'unit', 'fw', 'patch'}, {SMOKE})
         self.why.append(why)
 
     def add(self, suite, parts, why):

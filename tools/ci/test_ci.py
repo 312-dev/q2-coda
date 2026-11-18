@@ -412,6 +412,31 @@ def test_gate_plan_that_runs_everything_is_the_merge_tier(tmp_path):
     assert only['fw-asan'].argv[-1] == '--asan' and only['unit'].argv[-1] == 'test/unit/test_docs.py'
 
 
+def test_an_everything_plan_runs_every_suite_a_narrower_plan_could(tmp_path):
+    """fix/full-bleed-windows (d553a94b) changed patch/page_parallax.c and enough else that its plan ran unit, fw
+    and patch whole: the gate ran the merge tier for it and dropped the plan's test/coverflow.py, which that
+    change broke, and the trunk was red unseen until the next coverflow change (TIP_RED 2026-11-18 12:51)."""
+    root = pathlib.Path(affected.__file__).resolve().parents[2]
+    changes = {'patch/page_parallax.c': {1}, 'tools/build.py': {1}, 'tools/stock_map.tsv': {1}}  # three of its 44
+    plan = json.loads(affected.plan_for(changes, root).to_json())
+    assert gate.everything(plan) and 'test/coverflow.py' in plan['other']
+    assert 'test/coverflow.py' in gate.suites_for(plan, [], 'py', tmp_path)
+    # and so for every suite a rule plans: each narrower plan's own suites are in what an everything plan runs
+    narrow = {'patch/coverflow.c': {1}, 'player/main.c': {1}, 'tools/ci/gate.py': {1}, 'test/patch_suite/00_machine.py': set(),
+              'tools/build.py': {1}, 'pyproject.toml': set(), 'test/fw/test_home.py': {1}}
+    names: set = set()
+    for path, lines in narrow.items():
+        names |= set(gate.suites_for(json.loads(affected.plan_for({path: lines}, root).to_json()), [], 'py', tmp_path))
+    every = affected.Plan()
+    every.everything('test')
+    for full in (gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path), gate.suites_for(None, [], 'py', tmp_path)):
+        assert names <= set(full), sorted(names - set(full))
+    # a suite only its own change plans (test/X.py: itself) rides along with an everything plan too
+    plan = json.loads(affected.plan_for({'Makefile.new': set(), 'test/chapters.py': {1}}, root).to_json())
+    assert gate.everything(plan) and 'test/chapters.py' in gate.suites_for(plan, [], 'py', tmp_path)
+    assert 'smoke' not in gate.suites_for(plan, [], 'py', tmp_path)  # still the post tier's on a batch
+
+
 def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
     pidfile = tmp_path/'grandchild'
     s = gate.Suite('s', ['bash', '-c', f'sleep 30 & echo $! > {pidfile}; wait'])

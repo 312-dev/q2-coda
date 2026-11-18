@@ -81,7 +81,13 @@ MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-f
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0}
 SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
-           'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5}
+           'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
+           'test/coverflow.py': 60, 'test/player/run.py': 60, 'tools/ci/test_ci.py': 10, 'tools/ci/test_orch.py': 30}
+# Suites a rule of affected.py plans for some change (test/coverflow.py for patch/coverflow*.c, test/player/run.py
+# for player/, the CI tools' own tests for tools/ci/): in the merge tier, so a plan that runs everything runs
+# them too, as a narrower plan with the same change would. tools/ci/test_ci.py checks that no rule plans a
+# suite outside a tier.
+PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST)
 FULL = MERGE + POST
@@ -165,12 +171,21 @@ def other_suite(path, py):
     return Suite(path, [py, path, '{build}'], needs_build=True, heavy=True)
 
 
+def named_suite(name, py, logs):
+    """A suite by its name: one gate.py defines, else a plan's `other` path."""
+    full = full_suite(name, py, logs)
+    return full() if full else other_suite(name, py)
+
+
 def suites_for(plan, only, py, logs, tier=None):
     """The suites to run: a whole tier for an everything plan (a release's with no plan, the merge tier
-    with one), else the plan's, cut to only."""
+    with one) and the plan's own `other` suites with it, else the plan's, cut to only."""
     out = {}
     if everything(plan):
-        out = {n: full_suite(n, py, logs)() for n in TIERS[tier or ('release' if plan is None else 'merge')]}
+        out = {n: named_suite(n, py, logs) for n in TIERS[tier or ('release' if plan is None else 'merge')]}
+        for o in plan['other'] if plan else ():  # a test/X.py the branch changed runs itself, whatever else
+            if o not in out and o not in OPTIONAL:
+                out[o] = named_suite(o, py, logs)
     else:
         if plan['unit']:
             files = ['test/unit'] if plan['unit'] == 'all' else [f'test/unit/{f}' for f in plan['unit']]
@@ -186,11 +201,11 @@ def suites_for(plan, only, py, logs, tier=None):
                                                ','.join(plan['patch'])], needs_build=True)
         for o in plan['other']:
             if o not in OPTIONAL:
-                out[o] = full_suite(o, py, logs)() if o in FULL else other_suite(o, py)
+                out[o] = named_suite(o, py, logs)
     if only:
         # a plan's suite is cut to only; a suite no plan names (GATE_ONLY) runs whole; any other name the plan
         # lacks is left out, as nothing the plan's changes touch reaches it
-        out = {n: out[n] if n in out else full_suite(n, py, logs)() for n in only if n in out or n in GATE_ONLY}
+        out = {n: out[n] if n in out else named_suite(n, py, logs) for n in only if n in out or n in GATE_ONLY}
     return out
 
 
