@@ -67,3 +67,8 @@ def test_the_pull_up_found_off_at_boot_or_a_wake_is_flagged():
     log = [line(500, 'boot').replace('\n', ' pull=input_pull_up\n'),
            line(900000, 'wake+5s-pull-off').replace('\n', ' pull=input_pull_hiz\n')]
     assert kinds(log) == ['PULLOFF'] and q2usb.parse(log)[0].f['pull'] == 'input_pull_up'
+
+
+def test_a_trial_that_ends_with_nothing_enumerated_is_an_empty_port():
+    log = [line(1000, 'otg-on', pc20=1, pd18=0), line(9000, 'otg-trial-off', pd18=0)]
+    assert kinds(log) == ['EMPTY']

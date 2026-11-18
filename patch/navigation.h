@@ -835,6 +835,7 @@ int stock_usb_status_trampoline(void);
 
 /* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
 int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+void otg_hold(void); /* the PHY's ID pull-up on, the controller's role held at device */
 
 /* usb_record.c: the USB record on the card, a line per cable edge and OTG power change */
 void usb_record(const char *what), usb_record_edge(int in), usb_record_wake(void), usb_record_poll(void);

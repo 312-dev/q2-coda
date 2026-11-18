@@ -96,6 +96,7 @@ static void pull_check(const char *what, const char *off) {
  * pull-up held. */
 int ringnav_platform_init(void) {
     int result = stock_platform_init_trampoline();
+    otg_hold(); /* usb_otg.c: the PHY's ID pull-up, the controller held at device */
     pull_check("boot", "boot-pull-off");
     return result;
 }
@@ -114,6 +115,7 @@ void usb_record_edge(int in) {
  * dropping at a wake shows. */
 void usb_record_wake(void) {
     system(USB_PULL_UP);
+    otg_hold(); /* the PHY's init at the resume writes USBPCR again (usb_otg.c) */
     usb_record("wake");
     rec.later = 3;
     rec.later_at = (unsigned)time_now_ms();

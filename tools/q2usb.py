@@ -7,7 +7,7 @@ nothing enumerated on it, a plug that never enumerated, a link a wake from Stand
     adb shell cat /mnt/mmc/.q2pod/q2-usb.1.log /mnt/mmc/.q2pod/q2-usb.log | python3 tools/q2usb.py -
 
 A line is `WALL MS EVENT PD18=.. PD17=.. PD19=.. PC20=.. PE22=.. otg=.. id=.. mode=.. conn=.. vbus=.. udc=.. hostdev=..`:
-WALL is time()'s seconds, MS demo's millisecond clock, EVENT boot, in, out, in+5s, out+5s, otg-on, otg-off, standby,
+WALL is time()'s seconds, MS demo's millisecond clock, EVENT boot, in, out, in+5s, out+5s, otg-on, otg-off, otg-trial-off, standby,
 wake or wake+5s; boot and wake+5s end with `pull=` (cmd_gpio get_func PD18), and read boot-pull-off or wake+5s-pull-off
 when the ID pin's pull-up was found off (and was set again).
 Other lines (the card store's `== N lines lost` note) are skipped. Exit 1 when anything is flagged."""
@@ -60,7 +60,7 @@ def flags(rows):
                            f'udc={r.f.get("udc")})'))
         if r.event == 'otg-on':
             on = r
-        elif r.event == 'otg-off' and on is not None:
+        elif r.event in ('otg-off', 'otg-trial-off') and on is not None:
             held = (r.ms - on.ms) / 1000
             later = [x for x in rows[i + 1:] if 0 <= x.ms - r.ms <= COMPUTER_MS]
             if any(x.computer() or x.event == 'in' for x in later):
