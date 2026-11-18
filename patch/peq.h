@@ -440,6 +440,10 @@ int stream_player_waits(const char *path);
  * stream cache, no .stream line, or its line is done); 1 the server's own length is known, *ms
  * (the line's, else the catalogue's); 2 the song is still arriving and no length is known. */
 int stream_length(const char *path, unsigned *ms);
+/* The last second of path a seek may go to while it arrives: what is on the card of it, at most the
+ * player's length total (seconds); -1 when it is not arriving (stream_length 0). Not called yet:
+ * the seeks wait on q2player's seek in a growing file (docs/backlog.md). */
+int stream_reach(const char *path, int total);
 void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
@@ -549,6 +553,12 @@ void catalogue_row_mark(void *w, void *canvas, void *row, int x, int y);
 void catalogue_fit(void *entry, void *surface, int limit);
 int catalogue_np_info(const char *path, char *genre, int *year);
 int catalogue_cover(const char *path, char *out, unsigned size);
+/* catalogue.c: a Stream Cache copy's record takes its server row's title, artist and album (1) */
+int catalogue_copy_tags(void *r);
+/* catalogue.c: Now Playing shows r, not yet the player's, at its place at of n (addon.c) */
+void catalogue_np_show(void *r, unsigned at, unsigned n);
+/* tags.c: a card app's song's record named before it plays, from its server row or its file */
+void card_record_tags(void *r);
 /* Now Playing while a pressed server song loads: the record it shows, its title and artist, its art
  */
 void *catalogue_np_now(unsigned *at, unsigned *n);
