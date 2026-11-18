@@ -983,6 +983,7 @@ int ringnav_paint(void *w, void *canvas) {
     storage_paint(w, canvas);
     usb_ui_paint(w, canvas);
     carremote_paint(w, canvas); /* Settings > Car Remote's pages (carremote_page.c) */
+    localsend_paint(w, canvas); /* Settings > Network > LocalSend's pages (localsend_ui.c) */
     bt_recv_paint(w, canvas);    /* Bluetooth receiver mode (bt_recv.c) */
     bt_ui_paint(w, canvas);      /* Settings > Bluetooth's marks (bt_ui.c) */
     bt_stopped_paint(w, canvas); /* Bluetooth Stopped (bt_stopped.c) */
