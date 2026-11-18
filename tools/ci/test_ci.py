@@ -161,6 +161,59 @@ def test_coverflow_suite_is_run_with_an_argv_it_accepts(monkeypatch):
     assert refused.returncode == 2 and 'unrecognized arguments' in refused.stderr
 
 
+def test_every_host_script_has_a_declared_invocation():
+    """A plan can name any test/X.py: each is either run with an argv its parser takes, or skipped with a reason."""
+    root = pathlib.Path(affected.__file__).resolve().parents[2]
+    scripts = {f'test/{p.name}' for p in (root/'test').glob('*.py')}
+    assert scripts <= set(gate.SCRIPTS), sorted(scripts - set(gate.SCRIPTS))
+    assert set(gate.SCRIPTS) <= scripts, 'a table row for a script that is gone'
+    for name, script in (('patch', 'test/patch.py'), ('test/playback.py',) * 2, ('test/build.py',) * 2,
+                         ('test/peq.py',) * 2, ('test/headset_io.py',) * 2):
+        # a suite gate.py defines whole is run with the same argv when a plan names its script
+        assert gate.full_suite(name, 'py', pathlib.Path('/x'))().argv == gate.other_suite(script, 'py').argv, name
+
+
+def test_scripts_are_run_the_way_their_parsers_take_them():
+    py = 'python3'
+    assert gate.other_suite('test/chapters.py', py).argv == [py, 'test/chapters.py']  # argparse refuses BUILD
+    assert gate.other_suite('test/bluealsa.py', py).argv == [py, 'test/bluealsa.py', '{build}']
+    aic = gate.other_suite('test/aic.py', py)
+    assert aic.argv == [py, 'test/aic.py', '{stockfs}'] and aic.needs_build
+    assert gate.other_suite('test/rotator.py', py).argv[-1] == '{stockfs}/module_driver/soc_rotator.ko'
+
+
+def test_a_script_the_gate_cannot_run_is_skipped_with_its_reason(capsys, monkeypatch):
+    for path in ('test/coda_rc_e2e.py', 'test/server_catalogue.py', 'test/suite_source.py', 'test/module_mips.py'):
+        assert gate.other_suite(path, 'python3') is None, path
+        assert gate.SCRIPTS[path], path  # the reason
+    plan = affected.Plan()
+    plan.other.add('test/coda_rc_e2e.py')
+    ran = []
+    import subprocess
+    monkeypatch.setattr(affected.subprocess, 'run', lambda cmd, **kw: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    assert affected.run(plan, '/b', 'python3') == 0
+    assert ran == [] and 'skipped' in capsys.readouterr().out
+    assert gate.suites_for({'unit': [], 'fw': [], 'patch': [], 'other': ['test/coda_rc_e2e.py']}, None, 'python3',
+                           pathlib.Path('/nowhere')) == {}
+    assert 'test/coda_rc_e2e.py' in capsys.readouterr().out
+
+
+def test_a_stock_script_is_run_on_the_builds_stock_files(monkeypatch, tmp_path):
+    calls = []
+    def fake_unsquashfs(cmd, **kw):
+        calls.append(cmd)
+        pathlib.Path(cmd[cmd.index('-d') + 1]).mkdir(parents=True)
+        return gate.subprocess.CompletedProcess(cmd, 0)
+    monkeypatch.setattr(gate.subprocess, 'run', fake_unsquashfs)
+    monkeypatch.setattr(gate, 'STOCKFS_CACHE', tmp_path)
+    build = tmp_path/'b'
+    build.mkdir()
+    (build/'stock.squashfs').write_bytes(b'x')
+    cmd = gate.other_suite('test/pwm.py', 'python3').command(str(build))
+    assert cmd[-1].startswith(str(tmp_path)) and '{' not in cmd[-1]
+    assert calls[0][0] == 'unsquashfs' and str(build/'stock.squashfs') in calls[0]
+
+
 def test_a_coverflow_source_plans_the_coverflow_suite(tmp_path):
     # test/coverflow.py builds these on the host, so a change to any of them plans it, not only one to the script.
     for path in ('patch/coverflow.c', 'patch/coverflow_loader.c', 'patch/coverflow.h', 'patch/home.c',
