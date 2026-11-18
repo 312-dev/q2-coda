@@ -1165,7 +1165,8 @@ the wheel walks:
   - a **magnifier** (a ring and a handle to the bottom right, 2.4 units) on every search: Search, Add Songs'
     Search, a playlist's song search, Internet Radio's, Spotify's, TIDAL's and a card app's;
   - a **check** (2.6 units) where a name or a value is saved: New Playlist, Rename Playlist, the Bluetooth name,
-    Guest Play's name, an EQ preset's name, a band's frequency and Q;
+    Guest Play's name, a paired device's Rename, a trusted guest's Rename, an EQ preset's name, a band's frequency
+    and Q;
   - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
     a card app's fields, Car Remote's phone name, and any field no caller names.
 

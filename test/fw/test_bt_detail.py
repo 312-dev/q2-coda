@@ -155,3 +155,13 @@ def test_the_page_follows_the_link(fw):
     d.poll()
     assert d.detail_rows()[1] == 'Disconnect'
     assert CAR  # the car's row stays as it was
+
+
+def test_rename_s_return_key_is_a_check(fw):
+    """Renaming a device saves a name: the strip's return key shows the check (search_strip.c ss_ret_kind)."""
+    from conftest import STRIP_SAVE
+    from test_search_strip import Ss
+    d = Detail(fw)
+    d.click_row('d0')
+    d.ui.click(d.page, 2)
+    assert fw.var('search_strip__ss', Ss).ret == STRIP_SAVE
