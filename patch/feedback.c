@@ -695,6 +695,35 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_MARQ_GAP 40
 #define CARD_MARQ_FADE 12
 #define CARD_MARQ_MS 33
+/* The wide form (confirm_t across, adb's Allow this computer?, from the approved mock of
+ * 2026-11-18): AC_W wide at AC_X with AC_R corners, AC_PAD of padding above and below and AC_IN at
+ * the sides; the AC_GLYPH glyph and AC_GLYPH_GAP before the title on one AC_HEAD_H line; the body
+ * AC_BODY_GAP under it (15 px on CARD_BODY_LINE lines, left-aligned); the note AC_NOTE_GAP under
+ * that (13 px Text Tertiary); AC_GAP down the switch row (AC_SWITCH_H, 16 px words AC_ROW_IN in
+ * from the text column); AC_GAP down the two answers, AC_BTN_H buttons AC_GAP apart with round
+ * ends, 16 px words, the lit one the accent and the other Raised 2. */
+#define AC_X 18
+#define AC_W 339
+#define AC_R 26
+#define AC_PAD 16
+#define AC_IN 18
+#define AC_GLYPH 24 /* tools/art.py ADB_CARD_PX */
+#define AC_GLYPH_GAP 10
+#define AC_HEAD_H 24
+#define AC_BODY_GAP 6
+#define AC_NOTE_GAP 2
+#define AC_NOTE_H 17
+#define AC_NOTE_PX TYPE(13)
+#define AC_GAP 10
+#define AC_SWITCH_H 34
+#define AC_ROW_IN 4
+#define AC_ROW_PX TYPE(16)
+#define AC_BTN_H 40
+/* The answers' list holds the switch row, an AC_GAP gap and the two answers stacked AC_BTN_H / 2
+ * tall each inside the buttons' band, as the list lays its rows one under another: the wheel and
+ * Centre move over them as rows, and two buttons over the band (left and right halves) take a tap,
+ * so no tap in the band reaches a row under it. */
+#define AC_ANS_H (AC_BTN_H / 2)
 /* The card's motion (docs/oled-design.md#overlay-motion), through ui_kit.h's ovm_t: in over
  * CARD_IN_MS cubic out, the scrim and the card fading up together (the dialog's opacity, which
  * ovm_bind hands to the frame timer: stock never paints a dialog at opacity 0); an
@@ -709,6 +738,7 @@ static struct {
     int stock;                             /* the dialog is stock's confirminfo_dialog */
     confirm_t c;
     char title[96], body[CARD_BODY_LINES][64], code[16], row[2][24], toggle[48];
+    int lead; /* across: the body's first characters in Text Primary, the name's */
     const char *rows[2];
     int lines, toggle_on, top, rows_y, h, chosen;
     unsigned timer, answer_timer, until, marq_timer, marq_at;
@@ -730,6 +760,16 @@ static int card_destructive(int row) {
 static void card_body(void *w, const char *s);
 static void card_layout(void) {
     int h = 0, rows = 0;
+    if (cf.c.across) {
+        rows = AC_PAD + AC_HEAD_H + (cf.lines ? AC_BODY_GAP + cf.lines * CARD_BODY_LINE : 0) +
+               (cf.c.note ? AC_NOTE_GAP + AC_NOTE_H : 0) + AC_GAP;
+        h = rows + (cf.c.toggle ? AC_SWITCH_H + AC_GAP : 0) + AC_BTN_H + AC_PAD;
+        int top = CARD_CY - h / 2;
+        if (top + h > CARD_FOOT) top = CARD_FOOT - h;
+        if (top < CARD_TOP) top = CARD_TOP;
+        cf.top = top, cf.h = h, cf.rows_y = top + rows;
+        return;
+    }
     for (int pass = 0; pass < 2; ++pass) {
         h = CARD_PAD_TOP + CARD_TITLE_H + (cf.c.glyph ? CARD_GLYPH + CARD_GLYPH_GAP : 0);
         if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
@@ -886,7 +926,14 @@ int confirm(const confirm_t *c) {
     cf.c = *c;
     cf.toggle_on = c->toggle_on;
     tk_snprintf(cf.title, sizeof cf.title, c->title ? c->title : "", c->name ? c->name : "");
-    card_body(dialog, c->body);
+    if (c->across) { /* the name in the body, where its %s is, and in Text Primary there */
+        char body[160];
+        const char *at = c->body ? strstr(c->body, "%s") : (const char *)0;
+        tk_snprintf(body, sizeof body, c->body ? c->body : "", c->name ? c->name : "");
+        cf.lead = at == c->body && c->name ? (int)strlen(c->name) : 0;
+        card_body(dialog, body);
+    } else
+        card_body(dialog, c->body);
     tk_snprintf(cf.code, sizeof cf.code, "%s", c->code ? c->code : "");
     card_layout();
     void *back = widget_lookup(dialog, "img_return", 1),
@@ -903,8 +950,22 @@ int confirm(const confirm_t *c) {
     widget_set_prop_int(dialog, "style:normal:bg_color", 0);
     widget_set_prop_int(dialog, "style:normal:border_color", 0);
     widget_destroy_children(view);
-    int out = theme()->sel_inset - CARD_BAR_IN, w = CARD_W + 2 * out, y = 0;
+    int out = theme()->sel_inset - CARD_BAR_IN, cx = c->across ? AC_X : CARD_X,
+        w = (c->across ? AC_W : CARD_W) + 2 * out, y = 0;
     for (int k = c->toggle ? -1 : 0; k < c->n_rows; ++k) {
+        if (c->across && k == 0 && c->toggle) {
+            void *gap = label_create(view, 0, y, w, AC_GAP);
+            widget_set_text_utf8(gap, "");
+            y += AC_GAP;
+        }
+        if (c->across) {
+            void *item = list_item_create(view, 0, y, w, k < 0 ? AC_SWITCH_H : AC_ANS_H);
+            widget_use_style(item, "s_listitem_black");
+            widget_set_prop_int(item, "style:normal:bg_color", 0);
+            widget_on(item, EVT_CLICK, card_click, (void *)(long)k);
+            y += k < 0 ? AC_SWITCH_H : AC_ANS_H;
+            continue;
+        }
         if (card_destructive(k)) {
             void *gap = label_create(view, 0, y, w, CARD_DEST_GAP);
             widget_set_text_utf8(gap, "");
@@ -920,9 +981,17 @@ int confirm(const confirm_t *c) {
         I(list, ROW_HEIGHT) = 0;
         I(list, LIST_DEFAULT_ITEM_HEIGHT) = 0;
         widget_set_prop_int(list, "style:normal:bg_color", 0);
-        widget_move_resize(list, CARD_X - out, cf.rows_y - I(dialog, W_Y), w, y);
+        widget_move_resize(list, cx - out, cf.rows_y - I(dialog, W_Y), w, y);
         widget_set_prop_int(view, "virtual_h", y);
         widget_set_prop_str(view, "self_layout", "default(x=0,y=0,w=100%,h=100%)");
+    }
+    if (c->across && c->n_rows == 2) { /* the band's taps: its left half the first answer */
+        int band = cf.rows_y + (c->toggle ? AC_SWITCH_H + AC_GAP : 0) - I(dialog, W_Y);
+        for (int k = 0; k < 2; ++k) {
+            void *b = button_create(dialog, cx - out + k * (w / 2), band, k ? w - w / 2 : w / 2, AC_BTN_H);
+            widget_use_style(b, "s_btn_listitem"); /* a tap's click; confirm_rows_paint draws it */
+            widget_on(b, EVT_CLICK, card_click, (void *)(long)k);
+        }
     }
     cf.dialog = dialog, cf.view = view;
     ovm_enter(&cf.mo, CARD_IN_MS, EASE_CUBIC_OUT);
@@ -954,7 +1023,9 @@ static void card_body(void *w, const char *s) {
                 unsigned e = end + 1;
                 while (e < n && s[e] != ' ') ++e;
                 tk_snprintf(line, sizeof line, "%.*s", (int)e, s);
-                if (take && ui_text_w(canvas, line, 0, TYPE(15)) > CARD_W - 2 * CARD_IN) break;
+                if (take && ui_text_w(canvas, line, 0, TYPE(15)) >
+                                (cf.c.across ? AC_W - 2 * AC_IN : CARD_W - 2 * CARD_IN))
+                    break;
                 take = end = e;
             }
         }
@@ -1087,6 +1158,33 @@ void confirm_bar_dim(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
+/* The wide form's card (confirm_t across): the glyph and the title on one line, the body with the
+ * name's characters (cf.lead) in Text Primary, the note. top: the card's top in w. */
+static void card_across_paint(void *w, void *canvas, int top) {
+    int x = AC_X + AC_IN, tw = AC_W - 2 * AC_IN, y = top + AC_PAD, tx = x, lead = cf.lead;
+    rect_t card = { AC_X, top, AC_W, cf.h };
+    fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), AC_R);
+    if (cf.c.glyph) {
+        paint_art(w, canvas, theme_art(cf.c.glyph), x, y + (AC_HEAD_H - AC_GLYPH) / 2);
+        tx += AC_GLYPH + AC_GLYPH_GAP;
+    }
+    ui_text(canvas, cf.title, 1, TYPE(20), tok(TOK_PRIMARY), 1, tx, y + AC_HEAD_H / 2, x + tw - tx, 2);
+    y += AC_HEAD_H + AC_BODY_GAP;
+    for (int i = 0; i < cf.lines; ++i, y += CARD_BODY_LINE) {
+        const char *line = cf.body[i];
+        int n = (int)strlen(line), lit = lead < n ? lead : n, cy = y + CARD_BODY_LINE / 2, at = x;
+        if (lit) { /* the name's part of this line, then the rest after it */
+            char part[sizeof cf.body[0]];
+            tk_snprintf(part, sizeof part, "%.*s", lit, line);
+            at += ui_text(canvas, part, 0, TYPE(15), tok(TOK_PRIMARY), 1, x, cy, tw, 2);
+            lead -= lit;
+        }
+        if (line[lit]) ui_text(canvas, line + lit, 0, TYPE(15), tok(TOK_SECONDARY), 1, at, cy, x + tw - at, 2);
+    }
+    if (cf.c.note)
+        ui_text(canvas, cf.c.note, 0, AC_NOTE_PX, tok(TOK_TERTIARY), 1, x, y + AC_NOTE_GAP + AC_NOTE_H / 2, tw, 2);
+}
+
 /* Under the dialog's rows: the scrim over the page, the card, its title, body, code and the
  * timeout's bar along its foot. */
 void confirm_paint(void *w, void *canvas) {
@@ -1096,6 +1194,12 @@ void confirm_paint(void *w, void *canvas) {
     int dy = I(w, W_Y), top = cf.top - dy, cx = CARD_X + CARD_W / 2, tw = CARD_W - 2 * CARD_IN;
     stock_canvas_set_fill_color(canvas, CARD_SCRIM);
     canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    if (cf.c.across) {
+        card_across_paint(w, canvas, top);
+        stock_canvas_set_fill_color(canvas, fill);
+        ui_ink_raw(raw);
+        return;
+    }
     rect_t card = { CARD_X, top, CARD_W, cf.h };
     fill_box(canvas, &card, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), CARD_R);
     int y = top + CARD_PAD_TOP + CARD_TITLE_H / 2;
@@ -1124,6 +1228,32 @@ void confirm_paint(void *w, void *canvas) {
     ui_ink_raw(raw);
 }
 
+/* The wide form's row k (confirm_t across) in the answers' list, its card's left at left: the switch
+ * row's words and switch, or an answer's button. The first answer's paint first covers the band
+ * with the card, the selection's bar under it too (the answers are rows AC_ANS_H tall), so the two
+ * buttons stand on the card as drawn; the selected answer's is the accent, lit or not, so the card
+ * always shows which one Centre gives. */
+static void card_across_row(void *canvas, void *item, int k, int left, int lit) {
+    int y = I(item, W_Y), tw = AC_W - 2 * AC_IN, x = left + AC_IN;
+    if (k < 0) {
+        int cy = y + AC_SWITCH_H / 2;
+        ui_text(canvas, cf.c.toggle, 0, AC_ROW_PX, lit ? 0xffffff : tok(TOK_PRIMARY), 1, x + AC_ROW_IN, cy,
+                tw - 2 * AC_ROW_IN - 50, 2); /* clear of the 40 px switch */
+        switch_mark(canvas, x + tw - AC_ROW_IN, cy, card_toggle_on(), lit);
+        return;
+    }
+    int top = y - k * AC_ANS_H, half = (tw - AC_GAP) / 2;
+    if (k == 0) {
+        rect_t band = { I(item, W_X), top, I(item, W_W), AC_BTN_H };
+        fill_box(canvas, &band, RGBA(ipod_light() ? 0xffffff : RGB_RAISED), 0);
+    }
+    rect_t b = { k ? x + half + AC_GAP : x, top, k ? tw - half - AC_GAP : half, AC_BTN_H };
+    int on = ringnav_row_selected(item);
+    fill_box(canvas, &b, RGBA(on ? scheme()->tones[0] & 0xffffffu : tok(TOK_RAISED_2)), AC_BTN_H / 2);
+    ui_text(canvas, cf.c.rows[k], 0, AC_ROW_PX, on ? 0xffffff : tok(TOK_PRIMARY), 1, b.x + b.w / 2,
+            top + AC_BTN_H / 2, b.w - 16, 1);
+}
+
 /* Over the answers' list after the selection's bar: each row's words centred (a destructive one
  * red, its lit bar red), the switch row's label and switch, the timeout's seconds. */
 void confirm_rows_paint(void *w, void *canvas) {
@@ -1146,6 +1276,10 @@ void confirm_rows_paint(void *w, void *canvas) {
         int x = I(item, W_X), y = I(item, W_Y) + CARD_ROW / 2, cx = x + I(item, W_W) / 2,
             out = theme()->sel_inset - CARD_BAR_IN,
             lit = ringnav_row_selected(item) && ui_focus_shown();
+        if (cf.c.across) {
+            card_across_row(canvas, item, k, x + out, lit);
+            continue;
+        }
         if (k < 0) {
             ui_text(canvas, cf.c.toggle, 0, TYPE(20), lit ? 0xffffff : primary, 1,
                     x + out + CARD_IN, y, CARD_W - 2 * CARD_IN - 50,

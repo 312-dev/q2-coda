@@ -365,33 +365,6 @@ def test_patch_timezones_wants_stock_code(address):
         build.patch_timezones(demo)
 
 
-@pytest.mark.parametrize('path', sorted(build.WEB))
-def test_patch_web(path):
-    text = 'head\n' + '\n'.join(old for old, _ in build.WEB[path]) + '\ntail'
-    out = build.patch_web(path, text.encode()).decode()
-    assert out == 'head\n' + '\n'.join(new for _, new in build.WEB[path]) + '\ntail' or all(new in out for _, new in build.WEB[path])
-    assert out.startswith('head\n') and out.endswith('\ntail')
-
-
-def test_patch_web_replaces_every_occurrence(monkeypatch):
-    monkeypatch.setitem(build.WEB, 'x', [('a', 'b')])
-    assert build.patch_web('x', b'a a') == b'b b'
-
-
-def test_patch_web_wants_every_string(monkeypatch):
-    monkeypatch.setitem(build.WEB, 'x', [('a', 'b'), ('expected text in this page and far more than the message keeps', 'c')])
-    with pytest.raises(ValueError) as e:
-        build.patch_web('x', b'a')
-    assert str(e.value) == f"Unexpected x: {'expected text in this page and far more than the message keeps'[:40]!r}"
-
-
-def test_patch_web_leaves_no_chinese(monkeypatch):
-    monkeypatch.setitem(build.WEB, 'x', [('a', 'b')])
-    for text in ('a 中'.encode(), 'a 　'.encode(), 'a ＀'.encode(), 'a ￯'.encode(), 'a 鿿'.encode()):
-        with pytest.raises(ValueError, match='^Chinese left in x$'):
-            build.patch_web('x', text)
-
-
 def ui(*children, name='root', **props):
     return ['window', [0, 0, 375, 320], {'name': name, **props}, list(children)]
 

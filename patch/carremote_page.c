@@ -160,6 +160,21 @@ static const char *cr_date(char *out, unsigned n, unsigned when) {
     return out;
 }
 
+/* when as the day it was: Today, Yesterday, else the date ("Nov 12"); 0 for a clock never set. Settings >
+ * Developer Options > Trusted Computers' added dates (adb_trust.c). */
+const char *day_or_date(char *out, unsigned n, unsigned when) {
+    int a[11], b[11];
+    long t = clock_back(when), now = clock_back(wall_time());
+    const int *tm = when >= CLOCK_SET ? localtime_r(&t, a) : (const int *)0, *tn = localtime_r(&now, b);
+    if (!tm || !tn) return 0;
+    long ago = cr_day(tn, now) - cr_day(tm, t);
+    if (ago == 0 || ago == 1) {
+        tk_snprintf(out, n, "%s", ago ? "Yesterday" : "Today");
+        return out;
+    }
+    return cr_date(out, n, when);
+}
+
 /* when as a day: Today, Yesterday, the weekday within the week, else the date; lower makes the first letter
  * small, for "last seen friday"'s place in a line. 0 for a clock never set. */
 static const char *cr_when(char *out, unsigned n, unsigned when, int lower) {

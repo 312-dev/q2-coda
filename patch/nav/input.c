@@ -809,6 +809,7 @@ int ringnav(void *ctx, void *event) {
     if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
     if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
     if (sw_update_key(top, key)) return STOP; /* Software Update's button and the line under it */
+    if (localsend_key(top, key)) return STOP;  /* LocalSend's transfer page: Center is Cancel */
     if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */

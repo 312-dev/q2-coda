@@ -30,8 +30,8 @@
  *   Transfer Files while the computer has the card asks first.
  * - Toasts: Unplugged, OK to Disconnect (the computer's eject while USB mode is not on top) and
  *   USB Audio Ready (the DAC mode reached without the chooser).
- * - --dev builds: adbd's question about an unknown computer (docs/adb.md#authorization), "Allow USB
- *   Debugging?", with the key's fingerprint, Cancel, Allow and Always Allow This Computer. */
+ * - --dev builds: adbd's question about an unknown computer (docs/adb.md#authorization) from its
+ *   socket, asked on adb_trust.c's card, "Allow this computer?", and its answer sent back. */
 #include "navigation.h"
 
 #define USB_PROBE_MS 3000 /* a computer configures a gadget within a second or two */
@@ -57,9 +57,8 @@ enum { USB_ASK, USB_CHARGE, USB_FILES, USB_AUDIO, USB_DEBUG, USB_CHOICES };
 #define USB_CAP_PX TYPE(15) /* Inter Regular 15 */
 #define USB_CAP_RGB RGB_CAPTION_ON_ACCENT
 
-/* The ADB prompt (U5): adbd's socket, the keys file and a key's longest. */
+/* The ADB prompt (U5): adbd's socket and a key's longest; the card is adb_trust.c's. */
 #define AUTH_SOCKET "/tmp/q2adb-ui" /* tools/adbd.patch adb_auth_client.c ADB_UI_SOCKET */
-#define AUTH_KEYS "/mnt/data/adb_keys"
 #define AUTH_KEY_MAX 1024
 
 static struct {
@@ -74,9 +73,9 @@ static struct {
     void *pick, *pick_view, *pick_foot, *row;
     int pending;
     /* the ADB prompt */
-    int fd, asking; /* asking: the card is up for adbd's question */
+    int fd;
     unsigned auth_at;
-    char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX], fp[32];
+    char in[AUTH_KEY_MAX + 8], key[AUTH_KEY_MAX];
 } u __attribute__((section(".scratch")));
 
 static int usb_host(void) {
@@ -653,62 +652,9 @@ void usb_ui_status(void) {
 /* ---- the ADB prompt (--dev builds) ---- */
 
 #if Q2POD_DEV
-static int b64(int c) {
-    return c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
-           : c == '+' ? 62 : c == '/' ? 63 : -1;
-}
-/* The key's fingerprint as Android shows it, the MD5 of the decoded key, its first eight bytes. */
-static void auth_fingerprint(void) {
-    unsigned char raw[600], md[16];
-    unsigned n = 0, acc = 0, bits = 0;
-    for (const char *p = u.key; *p && *p != ' ' && n < sizeof raw; ++p) {
-        int v = b64((unsigned char)*p);
-        if (v < 0) continue;
-        acc = acc << 6 | (unsigned)v, bits += 6;
-        if (bits >= 8) raw[n++] = (unsigned char)(acc >> (bits -= 8));
-    }
-    unsigned ctx[24];
-    MD5_Init(ctx);
-    MD5_Update(ctx, raw, n);
-    MD5_Final(md, ctx);
-    for (int i = 0; i < 8; ++i) tk_snprintf(u.fp + 3 * i, 4, i < 7 ? "%02X:" : "%02X", md[i]);
-}
-
-static void auth_answer(const char *a) {
-    if (u.fd >= 0) send(u.fd, a, 2, 0);
-}
-/* Allow USB Debugging? on the confirmation card (docs/oled-design.md#confirmation-card): the key's
- * fingerprint and what allowing gives as the body, Cancel first, Always Allow the switch row. Allow
- * (row 1) with the switch on writes the key where adbd reads it before it lets the computer in;
- * Return is Cancel. */
-static void auth_card_answer(void *ctx, int row, int always) {
-    u.asking = 0;
-    if (row == 1 && always) {
-        void *f = fopen(AUTH_KEYS, "ab");
-        if (f) {
-            fwrite(u.key, 1, strlen(u.key), f);
-            fwrite("\n", 1, 1, f);
-            fclose(f);
-        }
-    }
-    auth_answer(row == 1 ? "OK" : "NO");
-}
-static char auth_body[64] __attribute__((section(".scratch"))); /* the card's: the key */
-static void auth_open(void) {
-    static const char *const rows[] = { "Cancel", "Allow" };
-    if (u.asking) confirm_close();
-    awake_screen();
-    auth_fingerprint();
-    tk_snprintf(auth_body, sizeof auth_body, "Key %s\nIt gets full control of the Q2.", u.fp);
-    u.asking = confirm(&(confirm_t){ .title = "Allow USB Debugging?",
-                                     .body = auth_body,
-                                     .rows = rows,
-                                     .n_rows = 2,
-                                     .kind = CONFIRM_CONSEQUENTIAL,
-                                     .back = -1,
-                                     .toggle = "Always Allow",
-                                     .answer = auth_card_answer });
-    if (!u.asking) auth_answer("NO"); /* another card is up: this computer asks again */
+/* adbd's question answered (adb_trust.c's card): "OK" lets the computer in, "NO" leaves it out. */
+void usb_ui_auth_answer(const char *a) {
+    if (u.fd > 0) send(u.fd, a, 2, 0);
 }
 
 /* adbd's UI socket, connected once a second until it is there, and its questions. */
@@ -737,13 +683,15 @@ static void auth_poll(void) {
     if (n == 0 || (n < 0 && *__errno_location() != 11 /* EAGAIN */)) {
         close(u.fd);
         u.fd = 0;
-        if (u.asking) u.asking = 0, confirm_close(); /* adbd went: nothing to answer */
+        adb_prompt_close(); /* adbd went: nothing to answer */
         return;
     }
     if (n < 3 || u.in[0] != 'P' || u.in[1] != 'K') return;
     u.in[n] = 0;
     tk_snprintf(u.key, sizeof u.key, "%s", u.in + 2);
-    auth_open();
+    /* the card (adb_trust.c), over whatever shows; another card up answers NO, and the computer
+     * asks again */
+    if (!adb_prompt_open(u.key)) usb_ui_auth_answer("NO");
 }
 #else
 static void auth_poll(void) {}

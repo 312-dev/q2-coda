@@ -302,7 +302,10 @@ All lists share one grid.
   shows; it follows every change, holds 2 s after the last, then fades out over 250 ms (cubic out) as they fade back
   (a cut under Reduce Motion). Not on Now Playing, the AirPlay or radio player (their own volume band), over Control
   Center (its slider follows) or a video. A change repaints the pill's box alone. Picked as option A from the user's
-  `mock.html` on 2026-11-18 ("status pill").
+  `mock.html` on 2026-11-18 ("status pill"). The same pill says a short thing that happened, a glyph (15 px) and
+  words in 15 px Text Primary, as wide as they are, centred, or where the slots leave too little ending 8 px short of
+  them and no nearer the left than x 24 (`vol_pill.c` `status_pill_show`): [adb](#adb)'s "MacBook-Pro allowed". It
+  shows on Now Playing too, as it is no volume.
 - A tap on the battery (a 44 x 40 px target round its body, or round the percentage on Percent, so
   at least 40 px round it; where it meets the level bars' target the nearer center has it) toasts
   its state; see [Dialogs and toasts](#dialogs-and-toasts).
@@ -883,8 +886,16 @@ as its callers move onto it.
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
+- **Wide form** (`.across`, approved for [adb](#adb) on 2026-11-18): 339 px wide at x 18 with 26 px corners, hugging
+  its content, centered on y 168: 16 px of padding, 18 px at the sides; the glyph (24 px) and 10 px before a leading
+  title on one 24 px line; 6 px down the body, left-aligned 15 px on 19 px lines, the `name` (its `%s`) in Text Primary
+  and the rest in Text Secondary; 2 px down a `.note` in 13 px Text Tertiary; 10 px down the switch row (34 px, 16 px
+  words 4 px in from the text column); 10 px down the two answers side by side as 40 px buttons with round ends,
+  10 px apart, 16 px words: the selected one the accent, the other Raised 2. It shows no countdown for its timeout.
+  The answers are rows stacked inside the buttons' band (the list lays its rows one under another), and two buttons
+  over the band, its left and right halves, take a tap.
 - **For code:** `confirm(&(confirm_t){ .title, .name, .body, .code, .rows, .n_rows, .kind, .back, .toggle,
-  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
+  .toggle_on, .timeout_ms, .timeout_row, .answer, .ctx, .glyph, .note, .across })` (`patch/ui_kit.h`, so every payload file reaches it); `answer(ctx, row, toggle_on)` runs
   once after the card has closed. One card at a time: `confirm` answers 0 while one is up.
 
 ### Pairing
@@ -1480,6 +1491,25 @@ The USB pages ([internals](internals.md#usb-pages), `patch/usb_ui.c`, from `desi
   says ("Charging · 62%", lightning, green), Charged to 80% when Charge Limit stops it (battery-full, green), and
   Charger too weak (warning, orange).
 
+### adb
+
+A `--dev` build's adb prompt and its settings ([adb](adb.md#authorization), `patch/adb_trust.c`; approved from the
+mock of 2026-11-18, "card hugs its content", US spelling):
+
+- **Allow this computer?** over whatever is on screen, the [confirmation card](#confirmation-card)'s wide form:
+  Phosphor `laptop` (regular, Text Primary), "grayson@MacBook-Pro wants developer access over USB." (the name from the
+  key's comment), "Key 3F:9A:1C:E0 … 7B:C2", the switch **Always allow this computer** (on), **Deny** and **Allow**,
+  Allow lit. Return or 30 s answer Deny. ponytail: the mock's fingerprint is monospaced; the build ships no mono face,
+  so it is Inter.
+- **After Allow:** the [status row's pill](#status-row) "MacBook-Pro allowed" with the laptop (15 px) for 2 s.
+- **Developer Options** (Settings > General, before Restart): Trusted Computers and their count.
+- **Trusted Computers:** a row a computer, its name and the day it was added on the right column ("Today", "Nov 13"),
+  then "Center to remove a computer" (13 px Text Tertiary), **Remove All** in Negative red, and "A computer you
+  remove asks again / the next time it connects." Centre on a computer or Remove All asks on the card, destructive,
+  Cancel first. With none, "No trusted computers". The mock's caption ("Ask Before Allowing stays on. Developer Options
+  turns developer access off entirely.") named a switch the build does not have, so the caption says what removing
+  does instead.
+
 ### Bluetooth
 
 Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `patch/bt_ui.c`, `patch/bt_detail.c`,
@@ -1659,12 +1689,13 @@ the canvas's origin, not the view's own y:
 - **Graph**, 100% at y 84 to 0% at y 226 (142 px): faint lines at 100% and 50%, the axis at 0%, their
   labels right-aligned in 15 px Text Tertiary; the level as steps in the accent's light tone over a faint fill; the
   reading's 1 px hairline in Text Secondary from 100% to 0% and a 10 px white dot on its level.
-- **Export Log**, the shared gray [button](#buttons) centered at y 263 (y 244 to 282, 38 px above the screen's edge). The
-  wheel always moves the reading (clockwise to the newer) and Center always exports, so the button is the page's only
-  action and no frame draws the focus ring.
-- **Results** are the house toasts in the button's place ("Saved to battery-log.txt", "The card is in use over USB",
-  "Storage unavailable", "The card is full", "Couldn't save"): the button gives way while one shows.
-- ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs
+- **Share Log**, the shared gray [button](#buttons) centered at y 263 (y 244 to 282, 38 px above the screen's edge). The
+  wheel always moves the reading (clockwise to the newer) and Center always shares, so the button is the page's only
+  action and no frame draws the focus ring. It writes the log to `/tmp/battery-log.txt` and opens LocalSend's share
+  sheet ([localsend](localsend.md#sending)).
+- **Results** are the house toasts in the button's place ("Couldn't write the log"; the share sheet's own after a
+  send): the button gives way while one shows.
+- ponytail: the button has no pressed frame under Center (the share runs on the key's press); a press frame needs
   the key's down and up told apart in `battery_key`.
 
 ### Car Remote

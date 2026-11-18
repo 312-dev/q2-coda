@@ -40,11 +40,6 @@ jobs:
         run: |
           export PATH="$PWD/test/coverage:$PATH"
           for t in library_scope peq coverflow coverflow_position chapters remote build rotator_build; do python3 "test/$t.py"; done
-      - name: Wi-Fi transfer's file manager  # assets/web/q2cgi under the runner's busybox ash (the Q2's is 1.31.1); root only mounts the tmpfs it runs on
-        run: |
-          sudo mkdir -p /mnt/mmc
-          sudo mount -t tmpfs -o "uid=$(id -u),gid=$(id -g)" tmpfs /mnt/mmc
-          bash test/wifi_transfer_cgi.sh
       - name: C coverage  # of the plain runs; navigation.c's UI is mostly test/patch.py's, which needs a stock build
         if: ${{ !cancelled() }}
         run: >-

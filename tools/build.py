@@ -60,9 +60,8 @@ HOOKS = {
     'select_timezone': (0x503b40, 'ringnav_timezone', 'timezone'),
     'timezone_row': (0x4c1aac, 'ringnav_timezone_row', 'timezone_row'),  # autotime_page's row i (0: the switch)
     'home_page_init': (0x534b6c, 'coverflow_home', 'home'),
-    # Wi-Fi transfer's PIN (wifi_transfer.c): the server's switch, and the page that shows the PIN
+    # Wi-Fi File Transfer's server switch (localsend_ui.c): thttpd never starts; LocalSend has its row
     'switch_wifitransport': (0x519b30, 'ringnav_wifi_transfer', 'wifi_transfer'),
-    'systemset_wifitransport_page_init': (0x4d797c, 'ringnav_wifi_transfer_page', 'wifi_transfer_page'),
     'localmusic_page_init': (0x535334, 'ringnav_localmusic', 'localmusic'),
     # Library lists: an Unknown row with no songs is dropped
     'load_localclass_list': (0x51357c, 'ringnav_localclass', 'localclass'),
@@ -278,6 +277,11 @@ GUEST = 'usr/bin/q2-guest'
 GUEST_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 GUEST_DBUS = 'etc/dbus-1/system.d/bluealsa-sink.conf'
 GUEST_HOTSPOT = 'usr/bin/q2-hotspot'  # its hotspot (docs/internals.md#guest-play-hotspot), a shell script q2-guest runs
+# LocalSend's daemon (docs/localsend.md): demo starts it while the LocalSend page or the share sheet is open
+# (patch/localsend_ui.c); its TLS is the rootfs's OpenSSL 1.1.1 (docs/third-party.md#openssl)
+Q2SEND = 'usr/bin/q2send'
+Q2SEND_SOURCES = ['localsend', 'localsend_core']
+Q2SEND_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libssl.so.1.1', 'usr/lib/libcrypto.so.1.1']
 # Card apps the firmware carries (docs/internals.md#bundled-apps): id -> (version, release zip, its size, its
 # SHA-256, builtin), each the zip its release ships, read from --apps (APPS_DIR). Its .<id>/ files go
 # to BUNDLED_DIR/<id> (patch/addon.c BUNDLED) with a version file and bundled_launcher's run in place of the
@@ -502,15 +506,6 @@ BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2 Muse\n')
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).
 BT_EXPERIMENTAL = (b'\n#Experimental = false\n', b'\nExperimental = true\n')
-# Wi-Fi transfer's server (docs/internals.md#wi-fi-transfer-root). thttpd drops to www-data once it has bound :8888, so its
-# own request parsing, which runs before the PIN check, is not root's; stock's conf kept it root. Only root may write
-# the card, so each of the six CGIs is patch/cgi_root.c, set-uid root (CGI_MODE), which runs Q2CGI as root.
-THTTPD_CONF = 'etc/thttpd.conf'
-THTTPD_USER = (b'\nuser=root\n', b'\nuser=www-data\n')
-WWW_DATA = b'\nwww-data:x:33:33:'  # stock's /etc/passwd line: cgi_root.c WWW_UID
-Q2CGI = 'usr/bin/q2cgi'
-CGIS = ('create', 'delete', 'list', 'download', 'upload', 'auth')  # cgi-bin/<name>.cgi; auth is Q2 Muse's own
-CGI_MODE = (b'775', b'4755')  # stock's mode for a CGI, then set-uid root and no group write
 # Every V1.36 unit has the same root password hash, and init runs a login on the board's serial pad (ttyS3).
 # Nothing on the Q2 logs in (q2remote, --dev only, runs /bin/sh itself), so root is locked and the getty goes;
 # the kernel's and init's messages still reach the console.
@@ -955,7 +950,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('small_playset', 'Playback Setting', 'Playback'), ('small_sysset', 'System Setting', 'General'),
     ('system_wifiset', 'Wireless Setting', 'Wireless'), ('system_display', 'Display setting', 'Display'),
     ('system_netservice', 'Network Service', 'Network'), ('system_time', 'Date and time', 'Date & Time'),
-    ('netservice_wifitrans', 'Wi-Fi file transfer', 'Wi-Fi File Transfer'),
+    ('netservice_wifitrans', 'Wi-Fi file transfer', 'LocalSend'),
     ('system_keylock', 'Buttons lock', 'Buttons Lock'), ('system_keytone', 'Key tone', 'Key Tone'),
     ('system_carmode', 'In-Vehicle mode', 'In-Vehicle Mode'), ('system_reset', 'Reset settings', 'Reset Settings'),
     ('reset_initset', 'Reset only settings', 'Reset Settings Only'),
@@ -991,241 +986,6 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     *((f'lighttime_{n}s', f'{n}s', f'{n} seconds') for n in (15, 30)),
     *((f'{page}_{n}min', f'{n}min', f'{n} minute' + 's' * (n > 1)) for page, choices in (
         ('lighttime', (1, 2, 5, 30)), ('standbyoff', (1, 3, 5, 10))) for n in choices)))
-
-# Wi-Fi transfer's web page (stock thttpd on :8888): in English, an Upload Folder button, and a folder,
-# picked or dropped, keeps its tree: each file's folders are made with stock's create (a plain mkdir) before
-# it goes, as stock's upload only moves a file into an existing folder. The formats Q2 Muse's pages read are allowed too.
-MKDIR_JS = r'''// Each folder of a folder upload is made once per batch, parents first; one that exists is no
-// error, and a folder that really couldn't be made shows as its files' upload errors.
-var _made = {};
-function _mkdir(path, base) {
-  if (path == base)
-    return $.Deferred().resolve();
-  if (!_made[path]) {
-    var made = $.Deferred();
-    _mkdir(path.replace(/[^\/]*\/$/, ""), base).always(function() {
-      $.ajax({url: 'create', type: 'POST', data: {path: path.slice(0, -1)}, dataType: 'json'})
-        .always(function() { made.resolve(); });
-    });
-    _made[path] = made;
-  }
-  return _made[path];
-}
-
-function _showError('''
-# The breadcrumb is built as HTML: _esc puts each folder's name into it as text, as a folder named like
-# markup would otherwise run as script in the page (docs/internals.md#wi-fi-transfer).
-ESC_JS = r'''// A file or folder name as HTML text, quotes included, for markup built from strings.
-function _esc(s) {
-  return $("<div>").text(s).html().replace(/"/g, "&quot;");
-}
-
-function _reload(path) {'''
-# Wi-Fi transfer's PIN (docs/internals.md#wi-fi-transfer-pin): every CGI answers 401 until the page has
-# sent the PIN the Q2 shows to cgi-bin/auth.cgi, which sets the session cookie; the browser then sends it
-# with each request. Any 401 opens the PIN box, so a page left open across a restart of transfer asks for
-# the new PIN.
-PIN_JS = r'''// The PIN the Q2 shows on its Wi-Fi File Transfer screen, asked for once; the server answers it
-// with a session cookie the browser sends with every request after.
-var _pinFor = null;
-function _askPin(path) {
-  _pinFor = path;
-  if ($("#pin-modal").hasClass("in"))
-    return;
-  $("#pin-error").text("");
-  $("#pin-input").val("");
-  $("#pin-modal").modal("show");
-}
-function _sendPin() {
-  var pin = $("#pin-input").val().replace(/\s/g, "");
-  if (!/^[0-9]{6}$/.test(pin)) {
-    $("#pin-error").text("The PIN is six digits.");
-    return false;
-  }
-  $.ajax({url: 'cgi-bin/auth.cgi', type: 'POST', data: {pin: pin}, dataType: 'json'})
-    .done(function() {
-      $("#pin-modal").modal("hide");
-      _reload(_pinFor || _home);
-    })
-    .fail(function(jqXHR) {
-      var r = {};
-      try { r = $.parseJSON(jqXHR.responseText) || {}; } catch (e) {}
-      $("#pin-error").text(r.error == "locked" ? "Too many wrong PINs. On the Q2, go back, then open Wi-Fi File Transfer again for a new PIN."
-        : r.error == "off" ? "Wi-Fi transfer is off on the Q2."
-        : "Wrong PIN" + (r.left != null ? " (" + r.left + (r.left == 1 ? " try" : " tries") + " left)." : "."));
-      $("#pin-input").val("").focus();
-    });
-  return false;
-}
-
-// A file or folder name as HTML text, quotes included, for markup built from strings.'''
-PIN_HTML = '''<div class="modal fade" id="pin-modal" tabindex="-1" data-backdrop="static" data-keyboard="false">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h4 class="modal-title">Enter the PIN</h4>
-          </div>
-          <div class="modal-body">
-            <p>The Q2 shows a six-digit PIN on its Wi-Fi File Transfer screen, above the address.</p>
-            <form id="pin-form">
-              <input type="text" class="form-control" id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="7">
-            </form>
-            <p class="text-danger" id="pin-error"></p>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-primary" id="pin-ok">OK</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal fade" id="create-modal" tabindex="-1">'''
-WEB = {
-  'usr/share/web/index.html': [
-    ('山灵音乐', 'Shanling Q2'),
-    ('支持音频格式:ISO,DFF,DSF,APE,FLAC,AIF,AIFF,WAV,M4A,AAC,MP2,AC3,DTS,MP3,OGG,WMA,CUE,M3U,M3U8<br/>图片格式:PNG,JPG,JPEG<br/>歌词格式:LRC<br/>固件升级包:BIN',
-     'Audio: ISO, DFF, DSF, APE, FLAC, AIF, AIFF, WAV, M4A, M4B, AAC, MP2, AC3, DTS, MP3, OGG, WMA, CUE, M3U, M3U8<br/>'
-     'Pictures: PNG, JPG, JPEG<br/>Lyrics: LRC<br/>Videos: MP4, M4V, MKV, AVI, MOV, MPG<br/>EQ presets: TXT<br/>Firmware: BIN'),
-    ('''上传文件
-          <input id="fileupload" type="file" name="files[]" multiple>
-        </button>''', '''Upload Files
-          <input id="fileupload" type="file" name="files[]" multiple>
-        </button>
-        <button type="button" class="btn btn-primary fileinput-button" id="upload-folder">
-          <span class="glyphicon glyphicon-folder-open"></span> Upload Folder
-          <input id="folderupload" type="file" name="files[]" multiple webkitdirectory>
-        </button>'''),
-    ('<div class="modal fade" id="create-modal" tabindex="-1">', PIN_HTML),
-    ('创建文件夹', 'New Folder'), ('返回上一级', 'Up'), ('正在进行文件上传', 'Uploading'), ('新建文件夹', 'New Folder'),
-    ('请输入要创建的文件夹的名称:', 'Folder name:'), ('取消', 'Cancel'), ('移动项目', 'Move'), ('请输入此项的新位置:', 'New location:')],
-  'usr/share/web/js/index.js': [
-    ('"LRC","BIN"];', '"LRC","BIN","M4B","MP4","M4V","MKV","AVI","MOV","MPG","TXT"];'),
-    ('function _showError(', MKDIR_JS),
-    ('function _reload(path) {', ESC_JS),
-    ('// A file or folder name as HTML text, quotes included, for markup built from strings.', PIN_JS),
-    ('''    url: 'list',
-    type: 'GET',
-    data: {path: path},
-    dataType: 'json'
-  }).fail(function(jqXHR, textStatus, errorThrown) {
-''', '''    url: 'list',
-    type: 'GET',
-    data: {path: path},
-    dataType: 'json'
-  }).fail(function(jqXHR, textStatus, errorThrown) {
-    if (jqXHR.status == 401)
-      return;  // the PIN box (_askPin) takes it
-'''),
-    ('''          $("#path").append('<li data-path="' + subpath + '"><a style="cursor:pointer">' + components[i] + '</a></li>');''',
-     '''          $("#path").append('<li data-path="' + _esc(subpath) + '"><a style="cursor:pointer">' + _esc(components[i]) + '</a></li>');'''),
-    ('''        $("#path").append('<li class="active">' + components[components.length - 1] + '</li>');''',
-     '''        $("#path").append('<li class="active">' + _esc(components[components.length - 1]) + '</li>');'''),
-    ('''
-  _reload(_home);
-
-});''', '''
-  $("#pin-ok").click(_sendPin);
-  $("#pin-form").submit(_sendPin);
-  $("#pin-modal").on("shown.bs.modal", function() {
-    $("#pin-input").focus();
-  });
-  $(document).ajaxError(function(event, jqXHR) {
-    if (jqXHR.status == 401)
-      _askPin(_path || _home);
-  });
-
-  _reload(_home);
-
-});'''),
-    ('''  $("#upload-file").click(function(event) {
-    $("#fileupload").click();
-  });
-''', '''  $("#upload-file").click(function(event) {
-    $("#fileupload").click();
-  });
-  $("#upload-folder").click(function(event) {
-    $("#folderupload").click();
-  });
-'''),
-    ('$("#fileupload").click(function(event) {', '$("#fileupload, #folderupload").click(function(event) {'),
-    ('    dropZone: $(document),', '    fileInput: $("#fileupload, #folderupload"),\n    dropZone: $(document),'),
-    ('''      $(".uploading").hide();''', '''      if (!$("#uploads").children().length) {  // rows still waiting on their folders keep it up
-        $(".uploading").hide();
-        _made = {};
-      }'''),
-    ('''      var file = data.files[0];
-      if(_isValidFileType(file.name)) {
-        data.formData = {
-          path: _path
-        };
-        data.context = $(tmpl("template-uploads", {
-          path: _path + file.name
-        })).appendTo("#uploads");
-        var jqXHR = data.submit();
-        data.context.find("button").click(function(event) {
-          jqXHR.abort();
-        });''', '''      var file = data.files[0];
-      // a dropped folder's files carry relativePath ("Album/CD1/"), a picked one's webkitRelativePath ("Album/CD1/01.flac")
-      var dir = _path + (file.relativePath || (file.webkitRelativePath || "").replace(/[^\\/]*$/, ""));
-      if (dir != _path && file.name.charAt(0) == ".")
-        return;  // .DS_Store, macOS's ._ copies
-      if(_isValidFileType(file.name)) {
-        data.formData = {
-          path: dir
-        };
-        data.context = $(tmpl("template-uploads", {
-          path: dir + file.name
-        })).appendTo("#uploads");
-        $(".uploading").show();  // before its upload starts: it may wait on its folders
-        var jqXHR = null;
-        _mkdir(dir, _path).always(function() {
-          if (data.context.parent().length)  // not cancelled while its folder was made
-            jqXHR = data.submit();
-        });
-        data.context.find("button").click(function(event) {
-          if (jqXHR) jqXHR.abort(); else data.context.remove();
-        });'''),
-    ('"无法获取列表内容 - \\""', '"Can\'t list \\""'),
-    ('"无法创建\\"" + name + "\\"到\\""', '"Can\'t create \\"" + name + "\\" in \\""'), ('"无法移动\\""', '"Can\'t move \\""'), ('"\\"到\\""', '"\\" to \\""'),
-    ('"无效的命名 - \'\'"', '"Invalid name - \'\'"'), ('"你确定要删除吗?"', '"Delete this item?"'),
-    ('"没有权限删除\\""', '"Not allowed to delete \\""'), ('"无法删除\\""', '"Can\'t delete \\""'),
-    ('"没有权限上传内容到\\""', '"Not allowed to upload to \\""'), ('"不支持上传此类型文件 - \\""', '"Unsupported file type - \\""'),
-    ('"上传文件失败 \\"" + file.name + "\\" to \\"" + _path', '"Can\'t upload \\"" + file.name + "\\" to \\"" + data.formData.path'),
-    ('"没有权限添加内容到\\""', '"Not allowed to add to \\""'), ('"新建文件夹"', '"New Folder"'),
-    ('"没有权限移动内容到此目录 - \\""', '"Not allowed to move to \\""'), ('"当前已是顶级目录"', '"Already at the top folder"'),
-    ('//去掉后面的/', '// drop the trailing /'), ('//得到上一级目录，/结束', '// the parent folder, ending in /')],
-  # A dropped folder's entries: Chromium's readEntries gives at most 100 a call, so read until it gives none.
-  'usr/share/web/js/jquery.fileupload.js': [
-    ('''                dirReader.readEntries(function (entries) {
-                    that._handleFileTreeEntries(
-                        entries,
-                        path + entry.name + '/'
-                    ).done(function (files) {
-                        dfd.resolve(files);
-                    }).fail(errorHandler);
-                }, errorHandler);''', '''                var all = [], readEntries = function () {
-                    dirReader.readEntries(function (entries) {
-                        if (entries.length) {
-                            all = all.concat(Array.prototype.slice.call(entries));
-                            return readEntries();
-                        }
-                        that._handleFileTreeEntries(
-                            all,
-                            path + entry.name + '/'
-                        ).done(function (files) {
-                            dfd.resolve(files);
-                        }).fail(errorHandler);
-                    }, errorHandler);
-                };
-                readEntries();''')]}
-
-def patch_web(path, data):
-    text = data.decode()
-    for old, new in WEB[path]:
-        check(old in text, f'Unexpected {path}: {old[:40]!r}')
-        text = text.replace(old, new)
-    check(not re.search('[　-鿿＀-￯]', text), f'Chinese left in {path}')
-    return text.encode()
 
 # Stock's UI assets carry Chinese text (docs/internals.md#english), most of it designers' placeholders that
 # stock replaces, but some shows through in every language (Search's tabs, Now Playing's info labels, Folder's
@@ -2190,8 +1950,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
-                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'artistrows_page',
-                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'usbpick_page',
+                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'artistrows_page', 'localsend_page', 'lssend_page', 'lsshare_page', 'lstrust_page', 'lsxfer_page',
+                   'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page', 'usbpick_page', 'devopts_page', 'adbtrust_page',
                    'swupdate_page', 'empty_page', 'btdevice_page', 'btstopped_page',
                    'guestnp_page', 'guestset_page', 'guesttrust_page', 'hotspot_page', 'guestconnect_page', 'guestfail_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
@@ -2241,7 +2001,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2639,11 +2399,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     bt_main = cat(BT_MAIN)
     check(all(bt_main.count(old) == 1 for old, _ in (BT_DISCOVERABLE, BT_NAME, BT_EXPERIMENTAL)), 'Unexpected Bluetooth main.conf')
     (out/'main.conf').write_bytes(bt_main.replace(*BT_DISCOVERABLE).replace(*BT_NAME).replace(*BT_EXPERIMENTAL))
-    thttpd_conf = cat(THTTPD_CONF)
-    check(thttpd_conf.count(THTTPD_USER[0]) == 1 and b'user=' not in thttpd_conf.replace(THTTPD_USER[0], b''),
-          'Unexpected thttpd.conf')
-    check(WWW_DATA in b'\n' + cat('etc/passwd'), 'No www-data:33 in /etc/passwd')
-    (out/'thttpd.conf').write_bytes(thttpd_conf.replace(*THTTPD_USER))
     for address, old, new in ARTIST_ALBUMS:
         patch_word(patched, address, old, new, 'artist detail opens on Albums')
     patch_word(patched, *SHUFFLE_CALL, jal(ps['ringnav_shuffle']),
@@ -2950,7 +2705,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     p = swap_inode(p, SHADOW.encode(), out/'shadow')
     p = swap_inode(p, INITTAB.encode(), out/'inittab')
     p = swap_inode(p, BT_MAIN.encode(), out/'main.conf')
-    p = swap_inode(p, THTTPD_CONF.encode(), out/'thttpd.conf')
     aic_notifier = None
     if aic_idle_wait:
         from aic import MODULE_PATH, PATCH_POLICY, STOCK_SHA256, patch_module
@@ -2999,7 +2753,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         icons[f'stream_{n}.png'] = (like, row_icon(data, sharp=True))
     icons['default_album_home.png'] = ('default_album_big.png', art)
     icons['default_album_flow.png'] = ('default_album_big.png', sized_art(art, 160))
-    cgi_root = compile_helper(out, cat, 'cgi_root', 'q2cgi-root', HELPER_LIBS[:1])
     added = list(player_added)
     removed = []
     changed_assets = {}
@@ -3010,9 +2763,6 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
                                STOCK_CA: ('etc/hosts', mozilla_ca()),
-                               # Wi-Fi transfer's PIN check (q2cgi auth), a CGI stock has no inode for; CGI_MODE below
-                               'usr/share/web/cgi-bin/auth.cgi': ('usr/share/web/cgi-bin/list.cgi', cgi_root),
-                               Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
                                GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
@@ -3020,6 +2770,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
+                               Q2SEND: (HELPER_LIKE, compile_helper(out, cat, Q2SEND_SOURCES, 'q2send', Q2SEND_LIBS)),
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
                                **{path: (FONT, data) for path, (data, _) in fonts.items()},
@@ -3029,7 +2780,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                    Q2EQ: (HELPER_LIKE, compile_helper(out, cat, 'q2eq', 'q2eq', HELPER_LIBS[:1]))} if dev else {})}.items():
         stock = need(inode(p, like.encode()), f'Missing stock inode for {path}')
         name = path.rsplit('/', 1)[-1]
-        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
+        if path not in (HELPER, BOOT, SPLASH, REMOTE, Q2EQ, CODA_RC, GUEST, Q2SEND): (out/name).write_bytes(data)  # package the hashed bytes, as the logo
         if inode(p, path.encode()):  # stock has a file of that name (V1.36's own menu_coverflow*.png): ours takes its inode
             changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(data))
             p = swap_inode(p, path.encode(), out/name)
@@ -3042,33 +2793,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
         p = p[:line.start()]+p[line.end():]
-    for path, fix, name in ((TAG_C, patch_m4b_cover, 'libtag_c.so.2.0.1'), (FONT, font_quotes, 'default.ttf'),
-                            *((p, lambda d, p=p: patch_web(p, d), p.rsplit('/', 1)[-1]) for p in WEB)):
+    for path, fix, name in ((TAG_C, patch_m4b_cover, 'libtag_c.so.2.0.1'), (FONT, font_quotes, 'default.ttf')):
         original = cat(path)
         data = fix(original)
         (out/name).write_bytes(data)
         p = swap_inode(p, path.encode(), out/name)
         changed_assets[path] = dict(original_sha256=sha(original), sha256=sha(data))
-    # Wi-Fi transfer file manager (docs/internals.md#wi-fi-transfer): the stock CGIs are CGIC programs
-    # that build shell commands from the request (mkdir "%s", rm -rf "%s", mv "%s" "%s") and pass the
-    # path/filename straight to system(), so a name with $(...) or a backtick runs as root, and they
-    # read paths outside the card. q2cgi (Q2CGI, added above) replaces all five, doing each operation
-    # with argv (never a shell command built from input) and validating every path stays under
-    # /mnt/mmc. Every cgi-bin/*.cgi inode is cgi_root, which runs it as root for thttpd's www-data, so
-    # both /name and /cgi-bin/name.cgi reach it with no bypass; so is cgi-bin/auth.cgi (added above),
-    # the PIN check every other route requires.
-    for n in CGIS[:-1]:
-        path = 'usr/share/web/cgi-bin/%s.cgi' % n
-        changed_assets[path] = dict(original_sha256=sha(cat(path)), sha256=sha(cgi_root))
-        p = swap_inode(p, path.encode(), out/'q2cgi-root')
-    for n in CGIS:
-        path = b'usr/share/web/cgi-bin/%s.cgi' % n.encode()
-        line = need(re.search(rb'^' + re.escape(path) + rb' F (\d+) ' + CGI_MODE[0] + rb' 0 0 ', p, re.M), f'Unexpected {path.decode()} mode')
-        p = p[:line.start()] + path + b' F ' + line[1] + b' ' + CGI_MODE[1] + b' 0 0 ' + p[line.end():]
-        stock = [path, b'R', line[1], CGI_MODE[0], b'0', b'0']  # auth.cgi's is in added, the others in stock's image
-        if stock in added: added.remove(stock)
-        else: removed.append(stock)
-        added.append([path, b'R', line[1], CGI_MODE[1], b'0', b'0'])
     pages = ui_pages(cat, geom)
     patched_ui = list(pages)
     check(chinese, 'No Chinese UI text found')

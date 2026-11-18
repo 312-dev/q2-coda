@@ -1,5 +1,5 @@
 /* Battery History: the level's falls since the charger was last unplugged, kept on the card, and
- * Power's page that graphs them, reads one out under the wheel and exports them to the card. */
+ * Power's page that graphs them, reads one out under the wheel and shares them over LocalSend. */
 #include "navigation.h"
 #include "card_store.h"
 
@@ -16,7 +16,6 @@
  * history, its rows below the last one's level again. */
 #define BH_FLASH PEQ_ROOT "/mnt/data/q2-battery" /* before Q2 Muse kept it on the card */
 #define BH_FILE CARD_STORE_DIR "/q2-battery"
-#define BH_LOG PEQ_ROOT "/mnt/mmc/battery-log.txt"
 #define BH_MAGIC 0x31484251u /* "QBH1" */
 #define BH_ROWS 100
 #define BH_REBOUND 3
@@ -30,7 +29,7 @@ static struct {
     int read, cable; /* cable: in at the last tick */
     int cur;         /* the reading the wheel is on, its row; -1 the newest, following new ones */
     void *page, *graph;
-    rect_t button; /* Export Log's, on screen, as last painted (0 wide: not drawn) */
+    rect_t button; /* Share Log's, on screen, as last painted (0 wide: not drawn) */
     card_blob store;
 } bh __attribute__((section(".scratch")));
 #define BH_STORE card_blob_at(&bh.store, BH_FILE, BH_FLASH, sizeof bh.rec)
@@ -125,27 +124,29 @@ unsigned battery_log(char *out, unsigned size) {
     return strlen(out);
 }
 
-/* Export Log: the log written whole to the card's root, temp and rename; not while a computer has
- * the card (USB storage) or without a megabyte free. Each result is a toast. */
-static void bh_export(void) {
-    char out[BH_ROWS * 64 + 64];
-    if (navigator_window_is_exist("usbmode_page"))
-        toast("The card is in use over USB");
-    else if (!card_mounted())
-        toast("Storage unavailable");
-    else if (!card_room(PEQ_ROOT "/mnt/mmc", 1, 0))
-        toast("The card is full");
-    else if (!blob_io(BH_LOG, BH_LOG ".tmp", out, battery_log(out, sizeof out), 1))
-        unlink(BH_LOG ".tmp"), toast("Couldn't save");
+/* The log written whole to path (temp and rename): its bytes, or -1. LocalSend sends it (localsend_ui.c). */
+int battery_log_write(const char *path) {
+    char out[BH_ROWS * 64 + 64], tmp[64];
+    bh_load();
+    unsigned n = battery_log(out, sizeof out);
+    tk_snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!blob_io(path, tmp, out, n, 1)) return unlink(tmp), -1;
+    return (int)n;
+}
+
+/* Share Log: the log in /tmp, then LocalSend's share sheet with it (docs/localsend.md#sending). */
+static void bh_share(void) {
+    if (battery_log_write(PEQ_ROOT "/tmp/battery-log.txt") < 0)
+        toast("Couldn't write the log");
     else
-        toast("Saved to battery-log.txt");
+        localsend_share(PEQ_ROOT "/tmp/battery-log.txt", "Share Log");
 }
 
 /* The page (33 v3, laid out again as the user's mock-up of 2026-11-18, docs/oled-design.md#battery-history):
  * under the status row the reading the wheel is on, "Nov 16, 03:10 · 51%", then the graph, 100% to
- * 0% from BH_TOP to BH_BOT on screen, then Export Log, the shared grey button, its foot on the list
+ * 0% from BH_TOP to BH_BOT on screen, then Share Log, the shared grey button, its foot on the list
  * end (y 282) clear of the glass's corners. The wheel moves along the readings (Centre and a tap on
- * the button export), so the button is the page's only action and never wears the focus ring.
+ * the button share), so the button is the page's only action and never wears the focus ring.
  * The toasts show in the button's place: it gives way while one is up. */
 #define BH_READ_CY 66
 #define BH_TOP 84
@@ -184,7 +185,7 @@ static int bh_closed(void *ctx, void *event) {
     bh.button.w = 0;
     return 0;
 }
-/* ringnav, before the lists: the wheel along the readings (clockwise to the newer), Centre exports. */
+/* ringnav, before the lists: the wheel along the readings (clockwise to the newer), Centre shares the log. */
 int battery_key(void *top, unsigned key) {
     if (!bh.page || top != bh.page || !bh.rec.n) return 0;
     if (key == KEY_NEXT || key == KEY_PREV) {
@@ -194,14 +195,14 @@ int battery_key(void *top, unsigned key) {
         return 1;
     }
     if (key != KEY_CENTER) return 0;
-    bh_export();
+    bh_share();
     return 1;
 }
-/* A tap on the button exports. */
+/* A tap on the button shares the log. */
 static int bh_touch(void *ctx, void *event) {
     int x = I(event, EVENT_X), y = I(event, EVENT_Y);
     rect_t *b = &bh.button;
-    if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) bh_export();
+    if (b->w && x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) bh_share();
     return 0;
 }
 /* Power's Battery History row. No history: "Unplug to start". Else the status row's title (a row
@@ -237,7 +238,7 @@ static int bh_x(unsigned i, int x0, int w, unsigned now, int forward) {
 /* The page (ringnav_paint, on the graph's view): the readout, faint lines at 100% and 50% and the
  * axis at 0%, labelled in 15 px Text Tertiary, the level as steps from the start to now, a 2 px
  * line in the accent's light tone over a faint fill, as peq_ui.c's curve, the reading's line and
- * dot, and Export Log unless a toast is up. Positions are the screen's, less the canvas's origin
+ * dot, and Share Log unless a toast is up. Positions are the screen's, less the canvas's origin
  * on the screen: the view's y counts from its window, and the view rests at y 58, the status row's foot. */
 void battery_paint(void *w, void *canvas) {
     if (!w || w != bh.graph || !P(canvas, CANVAS_LCD) || !bh.rec.n) return;
@@ -284,7 +285,7 @@ void battery_paint(void *w, void *canvas) {
     fill_box(canvas, &dot, RGBA(0xffffff), BH_DOT / 2);
     bh.button.w = 0;
     if (window_manager_get_top_window(window_manager()) == bh.page) {
-        int bw = ui_button(canvas, 375 / 2, BH_BTN_CY - dy, "Export Log", 0, 0, 0);
+        int bw = ui_button(canvas, 375 / 2, BH_BTN_CY - dy, "Share Log", 0, 0, 0);
         bh.button = (rect_t){ 375 / 2 - bw / 2, BH_BTN_CY - CTA_H / 2, bw, CTA_H };
     }
     st.raw_ink = raw;

@@ -636,6 +636,7 @@ void status_touch(unsigned type, int x, int y);
  * show (vol_show), whether it is up, its paint (status_slots_paint) */
 void vol_pill_show(void);
 int vol_pill_up(void);
+void status_pill_show(const char *glyph, const char *text); /* a message in its place (adb's allowed) */
 void vol_pill_paint(void *bar, void *canvas);
 #if Q2POD_DEV
 void vol_pill_fake(void); /* --dev: STATUS_FAKE's volume=N, as a headset's */
@@ -852,18 +853,18 @@ int smart_config(const char *section, const char *key);
 void smart_poll(void);
 void *page_in_use(void); /* the top window past toasts and the volume dialog */
 
-/* wifi_transfer.c */
-int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on);
-int ringnav_wifi_transfer_page(void *win, void *ctx),
-    stock_wifi_transfer_page_trampoline(void *win, void *ctx);
-void wifi_transfer_poll(void);
+/* localsend_ui.c: Settings > Network > LocalSend, the share sheet, the Accept card (docs/localsend.md) */
+int localsend_open(void *ctx, void *event), localsend_running(void), localsend_key(void *top, unsigned key);
+void localsend_share(const char *path, const char *title), localsend_poll(void), localsend_paint(void *w, void *canvas);
+int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on); /* stock's server kept off */
 
 /* battery.c */
 void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
+int battery_log_write(const char *path); /* the log's text to path, whole: its bytes, or -1 */
 int battery_history(void *ctx, void *event);
 void battery_paint(void *w, void *canvas);
-int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre exports */
+int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre shares the log */
 
 /* system.c */
 void power_poll(void);
@@ -872,6 +873,7 @@ void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
  * I, src ui, player, usb, bt or wifi; and a clean end's snapshot, waited for (power-off, restart, update) */
 void ulog(char level, const char *src, const char *msg);
 void ulog_end(const char *why);
+void ulog_flush(void); /* q2guard's logs on the card now, as they are (LocalSend's Send Logs) */
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
@@ -1132,6 +1134,7 @@ int coda_rc_enabled(void);
 void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice) */
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
+const char *day_or_date(char *out, unsigned n, unsigned when); /* Today, Yesterday, Nov 12 */
 void carremote_poll(void), carremote_paired(const char *name),
     carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
@@ -1145,6 +1148,13 @@ void usb_ui_status(void), usb_ui_poll(void), usb_ui_mode_load(void *win), usb_ui
 void usb_ui_paint(void *w, void *canvas), usb_ui_row(void *label);
 const char *usb_ui_title(const char *name), *usb_ui_value(void);
 int usb_ui_key(void *top, unsigned key), usb_ui_cable(void), usb_pick_open(void *ctx, void *event);
+#if Q2POD_DEV
+/* adb_trust.c (docs/adb.md#authorization): adbd's question on the card, its answer back through
+ * usb_ui.c; Settings > General > Developer Options and Trusted Computers */
+void usb_ui_auth_answer(const char *a);
+int adb_prompt_open(const char *line), adb_dev_open(void *ctx, void *event);
+void adb_prompt_close(void), adb_trust_paint(void *w, void *canvas);
+#endif
 /* usb_event.c: the USB cable's edges (PD17) from the kernel's GPIO character device, taken by usb_ui_poll */
 void usb_event_start(void);
 int usb_event_take(unsigned long long *edge_ns), usb_event_live(void), usb_event_wait(int fd);

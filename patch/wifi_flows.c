@@ -227,7 +227,7 @@ int wifi_flows_hold(void *top) {
     tk_snprintf(wf.forget, sizeof wf.forget, "%s", ssid);
     static const char *const rows[] = { "Cancel", "Forget Network" };
     confirm(&(confirm_t){ "Forget %s?", wf.forget, "You'll need its password to join again.", 0,
-                          rows, 2, CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forget_answer, 0, 0 });
+                          rows, 2, CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, forget_answer, 0, 0, 0, 0 });
     return 1;
 }
 
@@ -256,7 +256,7 @@ static int reset_click(void *ctx, void *event) {
     (void)ctx, (void)event;
     static const char *const rows[] = { "Cancel", "Reset" };
     confirm(&(confirm_t){ "Reset Network Settings?", 0, "Forgets every saved Wi-Fi network.", 0,
-                          rows, 2, CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, reset_answer, 0, 0 });
+                          rows, 2, CONFIRM_DESTRUCTIVE, -1, 0, 0, 0, 0, reset_answer, 0, 0, 0, 0 });
     return 0;
 }
 

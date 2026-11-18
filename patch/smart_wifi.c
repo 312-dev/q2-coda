@@ -67,13 +67,13 @@ int ringnav_wifi_page(void *win, void *ctx) {
 
 /* A page that uses the network, open anywhere in the window stack: Streaming and its services'
  * pages (Spotify's, Internet Radio's, a card app's and its QR code, Tidal's but Tidal Downloads),
- * System settings' Apps, AirPlay's, Network service, the Wi-Fi page, Wi-Fi transfer and
- * their dialogs, and the online lyrics and cover search. */
+ * System settings' Apps, AirPlay's, Network service, the Wi-Fi page, LocalSend's page
+ * (localsend_ui.c), the Wi-Fi page's dialogs, and the online lyrics and cover search. */
 static int net_page_open(void) {
     static const char *const pages[] = {
         "stream_page",     "spotify_page",     "spotbrowse_page",   "radio_page",
         "radionp_page",    "addon_page",       "qrcode_page",       "apps_page",
-        "airplay_page",    "netservice_page",  "wifi_page",         "wifitransport_page",
+        "airplay_page",    "netservice_page",  "wifi_page",         "localsend_",
         "editwifi_dialog", "kbwifiadd_dialog", "kbwifipass_dialog", "onlinematching_page",
         "tidal_"
     };
@@ -89,7 +89,7 @@ static int net_page_open(void) {
 
 /* Something needs the network: a USB cable in; AirPlay or DLNA on (Network service); Car Remote on
  * (coda_rc_shim.c: its phone connects over Wi-Fi when the car starts, so the radio is up before);
- * SyncLink over Wi-Fi or a SyncLink session, Wi-Fi transfer; a stock stream queue (Tidal's: the
+ * SyncLink over Wi-Fi or a SyncLink session, LocalSend's daemon (a transfer runs on past its page); a stock stream queue (Tidal's: the
  * types on_wm_timer_networkstatus stops once offline, whatever it is doing, as Play must fetch its
  * URL at once), Spotify's librespot running or waiting to start (it never retries a Connect login
  * or mDNS that failed), a station playing, a card app running, a scrobble upload, Network Update's
@@ -98,7 +98,7 @@ static int net_page_open(void) {
 static int smart_needed(void) {
     unsigned type = (unsigned)mclGetPlayType();
     return g_usbdet_value || g_airplayflag || g_dlnaflag || coda_rc_enabled() ||
-           g_synclinkflag == 2 || g_syncLink_status || g_wifitransport_flag ||
+           g_synclinkflag == 2 || g_syncLink_status || localsend_running() ||
            airplayGetFlag() == 2 || type - 2 < 2 || type - 0xf1 < 2 || spot_running() ||
            radio_status() == 2 || addon_running() || scrobble_busy() || netupdate_busy() ||
            album_lyrics_busy() || tidal_busy() || autozone_busy() || sw.hold_timer ||
@@ -223,8 +223,8 @@ int need_link(int (*fn)(void *, void *), void *ctx) {
 }
 
 /* Stock actions that check the link once (networkGetConnectStatus) and say msg_notnetwork without
- * it, held the same way: Streaming's Tidal row, Network service's Wi-Fi transfer and Now Playing
- * More's online lyrics and cover match. None reads its event, and the rows are found again by name
+ * it, held the same way: Streaming's Tidal row and Now Playing More's online lyrics and cover
+ * match. None reads its event, and the rows are found again by name
  * (stock names each row's list_item and button by its index and reads only that name), so nothing
  * pressed is kept but the page. */
 static int row_of(void *button) {
@@ -240,10 +240,6 @@ static int stream_row_again(void *ctx, void *unused) {
      */
     void *row = held_row(widget_lookup(sw.hold_win, "scroll_view_streamsset", 1), ctx);
     return row ? stock_stream_row_trampoline(row, (void *)0) : 0;
-}
-static int netservice_row_again(void *ctx, void *unused) {
-    void *row = held_row(sw.hold_win, ctx);
-    return row ? stock_netservice_row_trampoline(row, (void *)0) : 0;
 }
 static int online_match_again(void *win, void *unused) {
     return stock_online_match_trampoline(win);
@@ -263,11 +259,11 @@ int ringnav_stream_row(void *button, void *event) {
 }
 
 /* Network service's rows (0x4cce64): DLNA (0) and AirPlay (1) switch at once (stock starts their
- * services once the link is up); Wi-Fi transfer (2) opens its page with the link. */
+ * services once the link is up); the third, stock's Wi-Fi File Transfer, is LocalSend's
+ * (docs/localsend.md#what-it-replaces), whose page wakes the radio itself (net_page_open) and says
+ * when Wi-Fi is off. */
 int ringnav_netservice_row(void *button, void *event) {
-    return row_of(button) == 2 && smart_hold(netservice_row_again, (void *)2, "netservice_page")
-               ? 0
-               : stock_netservice_row_trampoline(button, event);
+    return row_of(button) == 2 ? localsend_open(0, 0) : stock_netservice_row_trampoline(button, event);
 }
 
 /* Now Playing More's Download Cover & Lyrics (0x539614, its row's case, given More's window): More

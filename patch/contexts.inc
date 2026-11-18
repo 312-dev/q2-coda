@@ -40,6 +40,11 @@
 { "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/carremote_page.c) */
 { "carphone_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
 { "carhowto_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
+{ "localsend_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/localsend_ui.c) */
+{ "lssend_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/localsend_ui.c) */
+{ "lsshare_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/localsend_ui.c) */
+{ "lstrust_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/localsend_ui.c) */
+{ "lsxfer_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/localsend_ui.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
 { "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
@@ -50,6 +55,8 @@
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */
 { "usbpick_page", CTX_FIXED, CHOICE },  /* runtime window (patch/usb_ui.c): the USB picker */
+{ "devopts_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/adb_trust.c): Developer Options */
+{ "adbtrust_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/adb_trust.c): Trusted Computers */
 { "swupdate_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/sw_update.c) */
 { "album_page", CTX_LOCAL, 0 },
 { "albuminfo_page", CTX_LOCAL, 0 },

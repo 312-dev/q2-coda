@@ -18,7 +18,8 @@ class Confirm(C.Structure):
     _fields_ = [('title', C.c_char_p), ('name', C.c_char_p), ('body', C.c_char_p), ('code', C.c_char_p),
                 ('rows', C.POINTER(C.c_char_p)), ('n_rows', C.c_int), ('kind', C.c_int), ('back', C.c_int),
                 ('toggle', C.c_char_p), ('toggle_on', C.c_int), ('timeout_ms', C.c_int), ('timeout_row', C.c_int),
-                ('answer', ANSWER), ('ctx', C.c_void_p), ('glyph', C.c_char_p)]
+                ('answer', ANSWER), ('ctx', C.c_void_p), ('glyph', C.c_char_p), ('note', C.c_char_p),
+                ('across', C.c_int)]
 
 
 class Card:
