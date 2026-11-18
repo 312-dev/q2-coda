@@ -2052,14 +2052,14 @@ def test_a_scan_window_lower_down_keeps_its_stack_s_place_on_the_screen(fw, worl
 USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
 
 
-CC_SMART, CC_NOW, CC_BRIGHT, CC_VOLUME = 4, 6, 7, 8  # control_center.c's stops
+CC_SMART, CC_NOW, CC_BRIGHT, CC_VOLUME, CC_USB = 4, 6, 7, 8, 9  # control_center.c's stops
 
 
-def control_center(fw, world, focus=0, adjust=0, ring=True, light=False):
+def control_center(fw, world, focus=0, adjust=0, ring=True, light=False, **config):
     """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, nothing playing, the brightness at
     half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock at 0) or the page
-    just pulled down; Light Mode on or off. The canvas."""
-    theme(fw, **({'LIGHT': '1'} if light else {}))
+    just pulled down; Light Mode on or off; config.ini's other keys. The canvas."""
+    theme(fw, **({'LIGHT': '1'} if light else {}), **config)
     fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
     win, _, _ = quick_window(world)
     world[win].props.update(_cc_focus=focus, _cc_adjust=adjust, **({'_cc_seen': 1} if ring else {}))
@@ -2106,6 +2106,39 @@ def test_the_grab_bar_stands_on_the_sheet_s_foot_as_the_page_sheets_stand_off_th
     that moved: the blocks stay where the layout test puts them."""
     grabs = [(r, c) for r, c, radius in control_center(fw, world, light=light).rounded if r[2:] == (36, 5)]
     assert [r for r, _ in grabs] == [(375 // 2 - 18, 309, 36, 5)] and 320 - (309 + 5) == 6
+
+
+USB_ROW = (20, 258, 335, 38)  # under the cluster (its foot y 248, 10 px), its width, the sliders' 38 px
+
+
+@pytest.mark.parametrize('light', [False, True])
+@pytest.mark.parametrize('cable', [0, 1])
+def test_a_cable_in_adds_the_usb_row_under_the_cluster(fw, world, cable, light):
+    """design/usb-row mock_usb_row.py cc(): with a cable in, a full-width row in the block's colour, fully round as the
+    sliders: the USB glyph centred 22 px in, "USB" from 40 px in, the remembered choice in Text Secondary ending 30 px
+    from its end and the chevron centred 18 px from it. No cable, no row: the sheet as it shipped."""
+    fw.var('g_usbdet_value', C.c_ubyte).value = cable
+    canvas = control_center(fw, world, light=light, USBPICK='1')
+    rows = [(r, c, radius) for r, c, radius in canvas.rounded if r == USB_ROW]
+    assert rows == ([(USB_ROW, rgba(0xe3e3e1 if light else 0x1c1c1e), 19)] if cable else [])
+    words = [(t, box, c) for t, box, c, _ in canvas.texts if box[1] <= 277 <= box[1] + box[3]]
+    arts = [(n, dst) for n, dst in canvas.arts if 258 <= dst[1] <= 296]
+    if not cable:
+        assert not words and not arts
+        return
+    (usb, ubox, uink), (value, vbox, vink) = sorted(words, key=lambda w: w[1][0])
+    assert (usb, ubox[0], value, vbox[0] + vbox[2] - 1) == ('USB', 60, 'Charge Only', 325)  # ui_text's box: ink + 1
+    assert vink == rgba(0x545454 if light else 0xababab) and uink == rgba(0 if light else 0xffffff)
+    tail = '_l' if light else ''
+    assert [(n.split('_cc_')[1], dst[0]) for n, dst in sorted(arts, key=lambda a: a[1][0])] == [
+        ('usb' + tail, 42 - 10), ('chev' + tail, 337 - 6)]
+
+
+def test_the_wheel_on_the_usb_row_rings_it_as_the_mock(fw, world):
+    """The ring the mock draws for the row: 2 px, 5 px out, so its outer box is 10 px bigger each way."""
+    fw.var('g_usbdet_value', C.c_ubyte).value = 1
+    canvas = control_center(fw, world, focus=CC_USB)
+    assert [c for r, c, _ in canvas.rounded if r == (15, 253, 345, 48)] == [rgba(0xffffff)]
 
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):

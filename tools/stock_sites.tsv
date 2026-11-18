@@ -237,7 +237,7 @@ demo	0x4f79b8	0x4	albumcoverinfo_init	the load of $25 for the only call to _dequ
 demo	0x4f79c4	0x4	albumcoverinfo_init	the only call to _deque_push_back; patch/nav/library_pages.c ringnav_cover_push, tools/build.py COVER_PUSH
 demo	0x4f7b64	0x4	foldercoverinfo_init	the load of $25 for the only call to _deque_push_back; tools/build.py COVER_PUSH
 demo	0x4f7b6c	0x4	foldercoverinfo_init	the only call to _deque_push_back; patch/nav/library_pages.c ringnav_cover_push, tools/build.py COVER_PUSH
-demo	0x4f8300	0x4	parse_albumcovertask_thd	the only call to usleep, after "/mnt/mmc/.downpic/fd_%s.jpg"; tools/build.py DARK_POLLS
+demo	0x4f8300	0x4	parse_albumcovertask_thd	the only call to usleep, after "/mnt/mmc/.downpic/fd_%s.jpg"; tools/build.py COVER_WAITS
 demo	0x4f84bc	0x4	parse_albumcovertask_thd	`lw $25, GOT[set_albumcover_flag]` (14th of 187 such), before 1st of 2 calls to set_albumcover_flag, after "/mnt/mmc/.sldp/%s0.jpg"; tools/build.py build
 demo	0x4f84c0	0x4	parse_albumcovertask_thd	1st of 2 calls to set_albumcover_flag, after "/mnt/mmc/.sldp/%s0.jpg"; tools/build.py build
 demo	0x4f8638	0x4	parse_albumcovertask_thd	the load of $25 for 1st of 4 calls to toolsGetAlbumCover, after "/mnt/mmc/.sldp/%s1.jpg"; tools/build.py GRID_COVER
@@ -257,6 +257,12 @@ demo	0x4faa80	0x4	switchBtPriority	`addiu $4, $zero, 0x16`, before 1st of 4 call
 demo	0x4fbf2c	0x4	autoLinkBluetooth	the only call to checkPairDev; tools/build.py BT_AUTOLINK
 demo	0x4fdcbc	0x4	checkBluetoothStatus	1st of 3 calls to player_save_start, after "[%s]"; tools/build.py BT_CONNECT_START
 demo	0x4fe1e4	0x4	config_bt_init	the only call to initBluetoothParam; tools/build.py BT_PARAMS
+demo	0x4ff268	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetBatterycapacity; tools/build.py BATTERY_READS
+demo	0x4ff278	0x4	get_battery_capacity	the only call to toolsGetBatterycapacity; tools/build.py BATTERY_READS
+demo	0x4ff294	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetBatteryVoltage; tools/build.py BATTERY_READS
+demo	0x4ff298	0x4	get_battery_capacity	the only call to toolsGetBatteryVoltage; tools/build.py BATTERY_READS
+demo	0x4ff2b0	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetChargeStatus; tools/build.py BATTERY_READS
+demo	0x4ff2b4	0x4	get_battery_capacity	the only call to toolsGetChargeStatus; tools/build.py BATTERY_READS
 demo	0x5000f0	0x4	remove_file	the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
 demo	0x5000f4	0x4	remove_file	`addiu $6, $6, 0x2ff8, forming "rm -rf "%s""`, the delay slot of the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
 demo	0x5024b4	0x4	device_standby	the only call to awake_screen, after "rmmod soc_msc"; tools/build.py STANDBY_WAKE
@@ -276,7 +282,7 @@ demo	0x51cd04	0x4	check_mem_thd	`addiu $gp, $gp, -0x2220`; tools/build.py DROP_C
 demo	0x51d248	0x4	platform_init	the only call to btctl_create_daemon_thread, after "int"; tools/build.py BT_INIT
 demo	0x51db14	0x4	player_parsecover_thd	2nd of 3 calls to snprintf, after "/mnt/mmc/.downpic/%s.jpg"; tools/build.py COVER_PICK_CALL, COVER_PICK_FMT
 demo	0x51db18	0x4	player_parsecover_thd	`addiu $6, $6, 0x2974, forming "cp -f "%s" '%s'"`, the delay slot of 2nd of 3 calls to snprintf, after "/mnt/mmc/.downpic/%s.jpg"; tools/build.py COVER_PICK_CALL, COVER_PICK_FMT
-demo	0x51dc5c	0x4	player_parsecover_thd	the only call to usleep, after "/tmp/airplaypic.png"; tools/build.py DARK_POLLS
+demo	0x51dc5c	0x4	player_parsecover_thd	the only call to usleep, after "/tmp/airplaypic.png"; tools/build.py COVER_WAITS
 demo	0x51dcbc	0x4	player_parsecover_thd	the load of $25 for the only call to toolsGetExternCover, after "/tmp/airplaypic.png"; tools/build.py PLAYER_COVER, tools/build.py build
 demo	0x51dccc	0x4	player_parsecover_thd	the only call to toolsGetExternCover, after "/tmp/airplaypic.png"; tools/build.py PLAYER_COVER
 demo	0x51e04c	0x4	player_initconfig	`lw $gp, 0x10($sp)` (1st of 9 such), before the only call to set_equalizer_value; patch/playback.c ringnav_speed
