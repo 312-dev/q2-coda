@@ -23,8 +23,8 @@ adb push song.flac /mnt/mmc/Music/         # and adb pull
 adb reboot
 adb exec-out q2guard --dump > q2.log                                                  # the unified log, in order, RAM's lines too
 python3 tools/q2log.py --adb                                                         # it, the heat and Bluetooth logs as one timeline
-adb exec-out 'cat /mnt/mmc/.q2muse/logs/q2-heat.1 /mnt/mmc/.q2muse/logs/q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -   # the heat log, oldest file first
-adb exec-out 'cat /mnt/mmc/.q2muse/logs/q2-bt.1 /mnt/mmc/.q2muse/logs/q2-bt.0 2>/dev/null' | python3 tools/q2bt.py -   # the Bluetooth link log
+adb exec-out 'cd /mnt/mmc/.q2muse/logs; cat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 2>/dev/null' | python3 tools/q2heat.py -   # the heat log, oldest file first
+adb exec-out 'cd /mnt/mmc/.q2muse/logs; cat q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0 2>/dev/null' | python3 tools/q2bt.py -   # the Bluetooth link log
 python3 tools/q2remote.py shot --adb out.png   # the screen as an upright PNG, over adb exec-out
 ```
 

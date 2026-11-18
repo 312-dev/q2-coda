@@ -55,8 +55,8 @@ def test_a_level_or_source_keeps_only_those_unified_lines():
 def test_adb_dumps_through_q2guard_and_reads_the_others_oldest_file_first(monkeypatch, capsys):
     asked = []
     answers = {'q2guard --dump 2>/dev/null': LOG,
-               f'cat {q2log.LOGS}/q2-heat.1 {q2log.LOGS}/q2-heat.0 2>/dev/null': HEAT,
-               f'cat {q2log.LOGS}/q2-bt.1 {q2log.LOGS}/q2-bt.0 2>/dev/null': BT}
+               f'cd {q2log.LOGS}; cat q2-heat.3 q2-heat.2 q2-heat.1 q2-heat.0 2>/dev/null': HEAT,
+               f'cd {q2log.LOGS}; cat q2-bt.3 q2-bt.2 q2-bt.1 q2-bt.0 2>/dev/null': BT}
     monkeypatch.setattr(q2log, 'adb', lambda command, serial=None: asked.append((command, serial)) or answers[command])
     assert q2log.main(['--adb', '-s', 'Q2CODA', '--level', 'E']) == 0
     assert [c for c, _ in asked] == list(answers) and {s for _, s in asked} == {'Q2CODA'}

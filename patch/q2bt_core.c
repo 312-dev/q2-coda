@@ -242,6 +242,58 @@ int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, int wq, int 
     return to;
 }
 
+/* ---- SBC's bitpool ----
+ * The rungs: at 48 kHz joint stereo, 8 subbands and 16 blocks, 45 is about 309 kbit/s, 35 245, 29
+ * 213, 23 177 and 19 153 (SBC's own; the link adds its headers). */
+static const unsigned char sbc_rungs[] = { 45, 35, 29, 23, BT_SBC_FLOOR };
+#define SBC_RUNGS ((int)sizeof sbc_rungs)
+int bt_sbc_next(int pool, int own, int dir) {
+    if (own <= 0) return -1;
+    if (dir < 0) {
+        int at = pool ? pool : own;
+        for (int i = 0; i < SBC_RUNGS; ++i)
+            if (sbc_rungs[i] < at) return sbc_rungs[i];
+        return -1;
+    }
+    if (!pool) return -1;
+    for (int i = SBC_RUNGS - 1; i >= 0; --i)
+        if (sbc_rungs[i] > pool) return sbc_rungs[i] < own ? sbc_rungs[i] : 0;
+    return 0;
+}
+/* bt_step's trigger and its clean seconds, a rung at a time each way: down after BT_STEP_STALL
+ * congested seconds, BT_SBC_SETTLE_MS after a change for the queue to drain at the new rate; up
+ * after BT_SBC_CLEAN clean ones and s->up_ms since the last change. A rung up undone within that
+ * wait doubles it, so a link that carries one rung and not the next settles below. */
+int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, int wq, int fly,
+                int bufs) {
+    if (allowed <= 0 || rank != 1) { /* another codec, or not SBC's to change: its own, once */
+        int back = s->pool ? 0 : -1;
+        s->pool = s->stall = s->clean = 0;
+        return back;
+    }
+    if (own <= 0 || (s->have && now - s->last <= BT_SBC_SETTLE_MS)) {
+        s->stall = s->clean = 0;
+        return -1;
+    }
+    if (!s->up_ms) s->up_ms = BT_SBC_UP_MS;
+    int full = fly >= 0 && bufs > 0 && fly >= bufs;
+    s->stall = wq > BT_STEP_WQ && full ? s->stall + 1 : 0;
+    s->clean = wq == 0 && fly >= 0 && !full ? s->clean + 1 : 0;
+    int to = -1;
+    if (s->stall >= BT_STEP_STALL && (to = bt_sbc_next(s->pool, own, -1)) >= 0) {
+        if (s->raised && now - s->raised_at < s->up_ms)
+            s->up_ms = s->up_ms * 2 > BT_SBC_UP_MAX_MS ? BT_SBC_UP_MAX_MS : s->up_ms * 2;
+        s->raised = 0;
+    } else if (s->clean >= BT_SBC_CLEAN && (!s->have || now - s->last >= s->up_ms) &&
+               (to = bt_sbc_next(s->pool, own, 1)) >= 0) {
+        s->raised = 1, s->raised_at = now;
+    } else {
+        return -1;
+    }
+    s->pool = to, s->have = 1, s->last = now, s->stall = s->clean = 0;
+    return to;
+}
+
 /* config.ini's [section] key's value (up to its line's end), 0 when it has none */
 static const char *ini_value(const char *ini, const char *section, const char *key) {
     int in = 0, k = (int)strlen(key), n = (int)strlen(section);
@@ -261,12 +313,26 @@ static const char *ini_value(const char *ini, const char *section, const char *k
     }
     return 0;
 }
-int bt_step_allowed(const char *ini) {
-    const char *coding = ini_value(ini, "SYSSET", "BTCODING"), *on;
-    if (!coding || coding[0] != '0' + BT_LDAC_AUTO || (coding[1] >= '0' && coding[1] <= '9'))
+/* BTCODING's row when it is one of rows (n of them), else -1; BT_STEP_KEY's switch into *on */
+static int coding_in(const char *ini, const int *rows, int n, int *on) {
+    const char *coding = ini_value(ini, "SYSSET", "BTCODING"), *v;
+    if (!coding || coding[0] < '0' || coding[0] > '9' || (coding[1] >= '0' && coding[1] <= '9'))
         return -1;
-    on = ini_value(ini, "Q2POD", BT_STEP_KEY);
-    return !on || on[0] != '0' || (on[1] >= '0' && on[1] <= '9');
+    v = ini_value(ini, "Q2POD", BT_STEP_KEY);
+    *on = !v || v[0] != '0' || (v[1] >= '0' && v[1] <= '9');
+    for (int i = 0; i < n; ++i)
+        if (coding[0] - '0' == rows[i]) return rows[i];
+    return -1;
+}
+int bt_step_allowed(const char *ini) {
+    static const int rows[] = { BT_LDAC_AUTO };
+    int on;
+    return coding_in(ini, rows, 1, &on) < 0 ? -1 : on;
+}
+int bt_sbc_allowed(const char *ini) {
+    static const int rows[] = { BT_LDAC_AUTO, BT_SBC_HQ, BT_SBC_ROW };
+    int on;
+    return coding_in(ini, rows, 3, &on) < 0 ? -1 : on;
 }
 int bt_pcms_path(const char *text, char *path, int n) {
     const char *src = strstr(text, "/a2dpsrc"), *a = src, *b = src;
@@ -377,10 +443,10 @@ static int put_tenths(char *b, int at, int size, const char *key, int v) { /* 90
     return n < 0 ? at : at + n;
 }
 /* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done=
- * fly=\n", "-" for not read, ba and own as percent of one core (9.0). The fields after own come
+ * fly= bp=\n", "-" for not read, ba and own as percent of one core (9.0). The fields after own come
  * last, so a reader that knows only those before them reads a line too. */
 int bt_line(char *out, int size, const struct bt_sample *s) {
-    char b[200];
+    char b[220];
     int at = snprintf(b, sizeof b, "up=%u", s->up);
     at = put(b, at, sizeof b, "kbps", s->kbps, -1);
     at = put(b, at, sizeof b, "acl", s->acl, -1);
@@ -400,8 +466,11 @@ int bt_line(char *out, int size, const struct bt_sample *s) {
     at = put(b, at, sizeof b, "ew", s->ew, -1);
     at = put(b, at, sizeof b, "fcc", s->fcc, BT_UNSET);
     at = put(b, at, sizeof b, "done", s->done, -1);
-    put(b, at, sizeof b, "fly", s->fly, -1);
+    at = put(b, at, sizeof b, "fly", s->fly, -1);
+    put(b, at, sizeof b, "bp", s->bp, -1);
     return heat_note(out, size, s->wall, b);
 }
 
-int bt_flush(card_log *l, const char *dir) { return log_flush(l, dir, "q2-bt", BT_FILE_MAX); }
+int bt_flush(card_log *l, const char *dir) {
+    return log_flush(l, dir, "q2-bt", BT_FILE_MAX, BT_FILES);
+}

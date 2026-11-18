@@ -1477,8 +1477,8 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
   "Steps with the signal, 330 to 990 kbps", or with a headset connected on another codec what it streams,
   "Streams aptX HD to this headset, 576 kbps". After the choices, a switch row, "Lower quality when the signal
-  is weak" (on by default), its caption under it while selected: "On LDAC Auto, aptX HD steps down to aptX, then
-  SBC, while the signal is weak, and back once it is strong again".
+  is weak" (on by default), its caption under it while selected: "On LDAC Auto or SBC, lowers the bit rate while
+  the signal is weak, and raises it once it is strong again".
 - **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
   name, the hint in 13 px under that.
 - **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5
