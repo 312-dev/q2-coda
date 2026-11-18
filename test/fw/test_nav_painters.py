@@ -3650,7 +3650,7 @@ def test_a_destructive_rows_words_are_red_and_white_on_its_bar(fw, st):
 
 def test_a_closed_sheet_leaves_nothing_on_the_screen(fw, st):
     """What the sheet drew straight into the screen's buffer goes when the last sheet closes: cleared to black and
-    the whole screen painted again on the next pass, so a page that paints nothing under the status row (Edit Home)
+    the whole screen painted again on the next pass, so a page that paints nothing at the status row (Edit Home)
     never shows the receding page or the sheet's top."""
     ui, win, view, canvas, buf = sheet(fw, st)
     timers = []

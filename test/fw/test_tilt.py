@@ -186,7 +186,7 @@ def test_the_widened_clip_stays_inside_this_pass_s_clip(fw, frame):
 
 
 def test_the_bar_never_rises_past_its_windows_top(fw):
-    """The first row's bar leaning up grows down instead of being cut under the status row's window."""
+    """The first row's bar leaning up grows down instead of being cut at its window's top."""
     bar = Bar(fw, win_y=58, list_y=0)
     bar.paint(y=0)
     bar.turn(-1 + 1 / UNITS)
@@ -196,8 +196,8 @@ def test_the_bar_never_rises_past_its_windows_top(fw):
 
 @pytest.mark.parametrize('share', (-1 + 1 / UNITS, -.5, .5, 1 - 1 / UNITS))
 def test_a_row_raised_above_its_window_leans_from_where_it_rests(fw, share):
-    """Home's Split list starts 18 px above its window (split_art_up), its first row's top in the status row's band,
-    which the bar paints. That row's leaning bar moves by its lean (TILT_LIFT and the growth) from where it rests, not
+    """Home's Split list starts 18 px above its window (split_art_up), its first row's top at the status row's glyphs,
+    where the bar paints. That row's leaning bar moves by its lean (TILT_LIFT and the growth) from where it rests, not
     down to the window's top: that put it up to 18 px below its words on every tug, a blue slice lagging off the row
     (user, 2026-11-16, on the Q2: Home's selected text flickering, "a lagging blue slice"). All it paints, its
     shadow too, stays inside the box tilt_poll paints again."""

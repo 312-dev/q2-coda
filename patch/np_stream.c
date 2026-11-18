@@ -22,8 +22,8 @@
 #define NS_SPIN 14      /* tools/art.py NP_SPIN_PX */
 #define NS_GAP 6        /* between the spinner and the amount */
 /* The times row's centre on the screen (docs/oled-design.md Now Playing). Now Playing's window
- * starts under the status row (y 58), and its paint's coordinates are its own: drawn at NS_Y less
- * the window's y. */
+ * is the whole screen, and a view's paint coordinates are its own: drawn at NS_Y less
+ * the view's y. */
 #define NS_Y 250
 #define NS_PX 13
 #define NB_H 20 /* the badge (np_about.c's quality badge): 20 px high, 6 px corners */

@@ -28,7 +28,7 @@ inc = O.__getitem__
 
 @dataclasses.dataclass(frozen=True)
 class Geometry:
-    """The app window is the 375x320 screen minus the 30px status bar, so a 290px list holds four
+    """The app window is the 375x320 screen, its rows resting below the 30px status bar (an overlay), so a 290px list holds four
     72px rows. The stock 52px artwork is drawn 1:1 (no rescaling) with an 8px inset inside the
     68px row body. Rows keep the row layout's eight-pixel left margin for the artwork.
     text_art, text_art_inset: the text pages' artwork and its inset (0 hides it, a text-only row).

@@ -457,7 +457,7 @@ def test_a_page_with_no_rows_just_past_the_list_end_scrolls_as_far_as_a_drag(fw,
     content's foot on the list end (the user's, 2026-11-16, About on b4: the wheel showed the bar and stayed)."""
     theme(fw)
     bar, end = 58, 282  # OLED's status row and list end on screen
-    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name='about_page')  # the client, under the status row
+    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name='about_page')  # ponytail: the window under the status row, as client_window places a code-built page (item 5); a stock page's is the whole screen (Page)
     view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
     view.byte(O['VIEW_VERTICAL'], 1)
     content, pad = end - bar + over, 320 - end
@@ -2605,7 +2605,7 @@ def test_a_last_row_grown_in_place_scrolls_its_foot_up_to_the_list_end(fw, ui, g
     at the content's foot."""
     theme(fw)
     bar, end, pitch = 58, 282, 32  # OLED's status row, list end and row pitch on the screen
-    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name=name)  # the client, under the status row
+    win = ui.widget('window', ui.wm, (0, bar, 375, 320 - bar), name=name)  # ponytail: the window under the status row, as client_window places a code-built page (item 5); a stock page's is the whole screen (Page)
     view = ui.widget('scroll_view', win, (0, 0, 375, 320 - bar))
     view.byte(O['VIEW_VERTICAL'], 1)
     items = [ui.widget('list_item', view, (0, pitch * i, 375, pitch)) for i in range(rows)]
