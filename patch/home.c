@@ -511,7 +511,9 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split, int s
     int dip[GLASS_R / FADE_COL + 1]; /* each run of columns' lip, then the straight part's 0 */
     for (int i = 0; i <= GLASS_R / FADE_COL; ++i) dip[i] = lip(i * FADE_COL + FADE_COL / 2);
     for (int y = y0; y < y1; ++y) {
-        if (y >= s0 && y < s1) continue; /* not the selected row */
+        /* not the selected row; in Full, only the list's own rows (list_reach_paint fades the
+         * ones it paints above them) */
+        if ((y >= s0 && y < s1) || (!split && y < list_y)) continue;
         if (!split) {
             int end = list_y + rest - FULL_FOOT_CLEAR;
             int k = above ? top_fade(list_y, y) : 256;

@@ -1118,7 +1118,7 @@ static void list_fade(void *w, void *canvas) {
  * they were and a press on the status row stays the row's; once scrolled, the status row's paint
  * draws the list's rows above its top into the row's band, the list's own paint shifted up by as
  * much (list_reach_paint), fading to the ground at the screen's top edge under the glyphs
- * (home.c list_top_fade, home_fades). A menu sheet's rows stay in the sheet (menu_modal.c). The
+ * (home.c list_top_fade; Home's Split, home_fades). A menu sheet's rows stay in the sheet (menu_modal.c). The
  * band repaints when the list's scroll or rows change (list_reach_due), as the list's own
  * invalidate stays inside its box. ponytail: a row in the band that changes on its own (a playing
  * row's level bars) shows its change at the next scroll. */
@@ -1199,8 +1199,8 @@ void list_reach_paint(void *bar, void *win, void *canvas) {
     reach_painting = 0;
     canvas_translate(canvas, -px, -py);
     st.sel_w = sw, st.sel_accent = sa, st.sel_row = sr, st.sel_y = sy, st.sel_h = sh;
-    if (v == coverflow_home_view()) /* Home's own: Split's follow the glass */
-        home_fades(canvas, P(v, W_PARENT), y, x + I(v, W_W), coverflow_home_split(win), 0);
+    if (v == coverflow_home_view() && coverflow_home_split(win)) /* Split's follow the glass */
+        home_fades(canvas, P(v, W_PARENT), y, x + I(v, W_W), 1, 0);
     else
         list_top_fade(canvas, y);
     canvas_set_clip_rect(canvas, old);
