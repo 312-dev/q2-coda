@@ -29,7 +29,7 @@ class Row:
     f: dict = field(default_factory=dict)
 
     def when(self):
-        if self.wall < 1600000000:  # a clock never set (patch/peq.h CLOCK_SET)
+        if not 1600000000 <= self.wall < 0xffffffff:  # a clock never set (patch/peq.h CLOCK_SET), or time() failed
             return f'+{self.ms / 1000:.1f}s'
         return datetime.datetime.fromtimestamp(self.wall, datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')
 

@@ -62,9 +62,9 @@ void usb_record(const char *what) {
      * case it is the Type-C chip's (docs/internals.md#otg-host-power) */
     int n =
         tk_snprintf(line, sizeof line,
-                    "%lld %u %s PD18=%d PD17=%d PD19=%d PC20=%d PE22=%d otg=%d id=%s mode=%s "
+                    "%u %u %s PD18=%d PD17=%d PD19=%d PC20=%d PE22=%d otg=%d id=%s mode=%s "
                     "conn=%s vbus=%s udc=%s hostdev=%s\n",
-                    wall_time(), (unsigned)time_now_ms(), what, toolsGpioGetValue("PD18"),
+                    (unsigned)wall_time(), (unsigned)time_now_ms(), what, toolsGpioGetValue("PD18"),
                     toolsGpioGetValue("PD17"), toolsGpioGetValue("PD19"), toolsGpioGetValue("PC20"),
                     toolsGpioGetValue("PE22"), g_last_otgid, id, mode, conn, online, udc, dev);
     if (n <= 0 || n >= (int)sizeof line) return;

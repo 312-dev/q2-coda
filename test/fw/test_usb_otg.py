@@ -38,7 +38,7 @@ class Port:
     def records(self):
         """What usb_record.c wrote, by its event word: the third argument of its line's tk_snprintf."""
         return [C.string_at(a[5]).decode() for _, a in self.fw.calls('tk_snprintf')
-                if C.string_at(a[2]).startswith(b'%lld %u %s PD18=')]
+                if C.string_at(a[2]).startswith(b'%u %u %s PD18=')]
 
     def read(self, name, *_):
         pin = C.string_at(name).decode()
