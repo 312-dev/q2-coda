@@ -111,20 +111,45 @@ int stream_startable(const char *id, const char *path) {
     return 1;
 }
 
+/* The .stream line of path, a song of an app's stream cache (its /stream/ folder) still arriving:
+ * 1 and *l while the line is there and not done. */
+static int arriving(const char *path, sline_t *l) {
+    char id[16];
+    return stream_app_of(path, id, sizeof id) &&
+           tk_str_start_with(path + 10 + strlen(id), "/stream/") && stream_line(id, path, l) &&
+           l->state != SL_DONE;
+}
+
 /* How sure the length of path is (peq.h stream_length). A song arriving in place reads short to the
  * player, a constant-bitrate MP3 without a Xing frame by its bytes so far, so its length is only
  * the server's: the line's own, else the catalogue's duration for that song. */
 int stream_length(const char *path, unsigned *ms) {
-    char id[16];
     sline_t l;
-    if (!stream_app_of(path, id, sizeof id) ||
-        !tk_str_start_with(path + 10 + strlen(id), "/stream/") || !stream_line(id, path, &l) ||
-        l.state == SL_DONE)
-        return 0;
+    if (!arriving(path, &l)) return 0;
     int sec = l.ms ? 0 : catalogue_copy_seconds(path);
     if (!l.ms && sec <= 0) return 2;
     *ms = l.ms ? l.ms : (unsigned)sec * 1000u;
     return 1;
+}
+
+/* The last second of path a seek may go to while it arrives (peq.h stream_reach), -1 when it is
+ * not arriving. total is the player's length of it, seconds. With the line's total bytes, the
+ * share of them on the card of the song's length (the server's, else the player's); without, the
+ * player's length, which is then measured on the bytes there are. Never past the player's length.
+ */
+int stream_reach(const char *path, int total) {
+    sline_t l;
+    if (!arriving(path, &l)) return -1;
+    int sec = l.ms ? (int)(l.ms / 1000) : catalogue_copy_seconds(path),
+        len = sec > 0 ? sec : total, arrived = total;
+    if (l.total) { /* per mille, in 32 bits: the demo has no 64-bit division */
+        unsigned have = l.have < l.total ? l.have : l.total, all = l.total;
+        while (all >> 20) have >>= 1, all >>= 1;
+        unsigned pm = all ? have * 1000u / all : 0;
+        arrived = (int)((unsigned)len * pm / 1000u);
+    }
+    if (total > 0 && arrived > total) arrived = total;
+    return arrived > 0 ? arrived - 1 : 0;
 }
 
 /* The card app's id in a path under its folder (/mnt/mmc/.<id>/...), into id; 0 for another path.
