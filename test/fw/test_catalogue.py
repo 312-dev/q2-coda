@@ -11,7 +11,7 @@ import pytest
 
 from conftest import FNV_SEED, O, Files, Rows, in_fork, stock_start_with
 from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
-from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
+from test_nav_painters import low, scratch, st  # noqa: F401  navigation.c's st by field; strings under 4 GB
 
 APP = 'subsonic'
 CARD_DB = b'/mnt/mmc/.q2pod/'
@@ -875,6 +875,32 @@ def test_now_playings_info_page_has_the_catalogues_genre_and_year_for_a_server_s
     assert ask(url('s1')) == ('Rock', 2001)
     assert ask('/mnt/mmc/Music/a.flac') is None
     assert ask(copy) == ('Rock', 2001)  # asked again: the kept answer
+    rig.lib.sqlite3_close(slot)
+    slot.value = 0
+
+
+def test_a_streamed_song_not_yet_played_is_named_by_its_server_row(rig, fw, low):
+    """The device, 2026-11-17 23:51: a radio's Up Next named its songs by their downloads' file names, the title
+    in lower case and the server's id. A song's download that the catalogue knows takes its server row's title,
+    album, artist and album artist before it plays (catalogue_copy_tags), with no read of a file that may not be
+    whole yet; a song the catalogue doesn't know is left to its file."""
+    copy = '/mnt/mmc/.subsonic/stream/acct/original/ab/take it easy [s1].flac'
+    rig.write(1, [song_row('s1', 'Take It Easy', 'Eagles', 'Eagles', 1, 100, 1, album_artist='The Eagles', local=copy)])
+    rig.poll()
+    slot = C.c_void_p.from_address(STOCK_SLOT)
+    rig.lib.sqlite3_open(str(rig.tmp/'database.db').encode(), C.byref(slot))
+    fw.fn('catalogue_attach', None, C.c_void_p)(STOCK_SLOT)
+    tags = fw.fn('catalogue_copy_tags', C.c_int, C.c_void_p)
+
+    def named(path):
+        record = C.create_string_buffer(0x60)
+        struct.pack_into('<I', record, O['REC_PATH'], low(path.encode()))
+        found = tags(record)
+        field = lambda o: C.string_at(struct.unpack_from('<Q', record, o)[0])  # the artist, the album artist: no
+        return found, (field(O['REC_ARTIST']), field(O['REC_ALBUM_ARTIST'])) if found else None  # field after them
+    assert named(copy) == (1, (b'Eagles', b'The Eagles'))
+    assert named('/mnt/mmc/.subsonic/stream/acct/original/ab/other [s9].flac') == (0, None)
+    assert rig.sqls[-1].startswith(b'select name,album,songer,albumsonger from cat.serverall where fileurl=')
     rig.lib.sqlite3_close(slot)
     slot.value = 0
 

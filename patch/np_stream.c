@@ -2,19 +2,18 @@
  * (docs/server-library.md#download-ahead-and-the-streaming-state; the approved design is
  * streaming-v3's variant D): the 12-spoke spinner and "7.0 of 20 MB" centred in the times row,
  * between the elapsed and the remaining time, which both stay. Loading is the pressed song before
- * the player has it (catalogue_np_now: the app's first .stream line), or the song playing while
- * q2player waits for more of it
- * (/tmp/q2player.wait). It goes once the song plays on. Under OLED only (the status row's set).
- * Nothing dims, no "Buffering…". The spinner reports progress, so it turns under Reduce Motion too
- * (motion_ms, MO_FEEDBACK).
- * A server song (a card app's stream download, or the pressed catalogue row) also has a format
- * badge at the art's bottom line, on the art's page so a swipe takes it with the heart and More:
- * the file's format beside a cloud, or the crossed-out cloud while the app says server=down.
- * A server song that can't go on while the server is down (pressed and not yet the player's, or
- * one the player waits for) shows "Can't reach the server" in the times row in the spinner's place
- * and Retry (selected) and Skip, the empty states' capsule pair, in the state row's place: Retry
- * (a tap, or Centre at rest) asks the app to try again now (/tmp/q2-<id>.retry), Skip plays the
- * next song as Next does. The wheel stays the volume's. */
+ * the player has it (catalogue_np_now: its own .stream line, else the app's first), or the song
+ * playing while q2player waits for more of it (/tmp/q2player.wait). It goes once the song plays on.
+ * Under OLED only (the status row's set). Nothing dims, no "Buffering…". The spinner reports
+ * progress, so it turns under Reduce Motion too (motion_ms, MO_FEEDBACK). A server song (a card
+ * app's stream download, or the pressed catalogue row) also has a format badge at the art's bottom
+ * line, on the art's page so a swipe takes it with the heart and More: the file's format beside a
+ * cloud, or the crossed-out cloud while the app says server=down. A server song that can't go on
+ * while the server is down (pressed and not yet the player's, or one the player waits for) shows
+ * "Can't reach the server" in the times row in the spinner's place and Retry (selected) and Skip,
+ * the empty states' capsule pair, in the state row's place: Retry (a tap, or Centre at rest) asks
+ * the app to try again now (/tmp/q2-<id>.retry), Skip plays the next song as Next does. The wheel
+ * stays the volume's. */
 #include "navigation.h"
 #include "ui_kit.h"
 
@@ -97,8 +96,10 @@ static int ns_loading(sline_t *l) {
     char id[16];
     unsigned at, n;
     void *pressed = catalogue_np_now(&at, &n);
-    if (pressed) /* not yet the player's: the app's first song */
-        return stream_app_of(P(pressed, REC_PATH), id, sizeof id) && stream_line(id, 0, l) &&
+    if (pressed) /* not yet the player's: its own line (a Next waiting, addon.c), else the app's
+                  * first song (a pressed catalogue row, whose path is not the download's) */
+        return stream_app_of(P(pressed, REC_PATH), id, sizeof id) &&
+               (stream_line(id, P(pressed, REC_PATH), l) || stream_line(id, 0, l)) &&
                (l->state == SL_WAIT || l->state == SL_GET || l->state == SL_STALL);
     void *q = P(mcl_pdeqplaylist, 0);
     unsigned pos = (unsigned)I(MCL_POS, 0);
