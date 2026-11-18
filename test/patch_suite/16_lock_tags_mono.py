@@ -324,7 +324,7 @@ assert stacked(m,'scroll_view_playset')==[2,24,3,7,13,14,6,15,8,18,19,20,21,22,0
 assert all(r in m.entries+rows for r in m.nodes[m.settings_view]['children'])  # no headings
 for i in (2,5,6,11):  # Resume Songs, Sleep Timer, Volume and Library open pages; the switches and sliders don't
     button=m.nodes[rows[i]]['children'][0]
-    assert m.nodes[m.nodes[button]['children'][-1]]['image']=='list_into'
+    assert 'list_into' in [m.nodes[c].get('image') for c in m.nodes[button]['children']]  # a value row's _setting_value follows it
 passed()
 # Swap L/R uses its own persistent flag, immediately below Mono Audio.
 m,rows,texts,icons,click=settings_page('audioset','scroll_view_playset',stock_rows=13,cls=MonoMachine)
