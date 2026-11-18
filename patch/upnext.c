@@ -15,7 +15,8 @@
  * does (library_edit.c): the wheel carries it among Playing Next's rows, each showing a grip,
  * Centre puts it down there and Return puts it back. The rest of the queue is the queue's own
  * order: no arrow, no lift, and Play/Pause does nothing on it. Nothing toasts. Return lets the
- * sheet fall away (un_back, menu_modal.c modal_close).
+ * sheet fall away (un_back, menu_modal.c modal_close), as do a tap on the page above it and a drag
+ * down on it (menu_modal.c modal_touch_close).
  *
  * The rows are taken again whenever the queue moves on (un_poll, once a second: the song playing,
  * the queue's size and loads, Playing Next), so songs ending leave the list as they play.
@@ -51,7 +52,7 @@
 
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 void *modal_sheet(int (*back)(void *, void *), int (*gone)(void *, void *));
-void modal_head_bars(void), modal_close(void *win),
+void modal_head_bars(void), modal_close(void *win), modal_touch_close(void *win),
     modal_corners(void *canvas, const rect_t *r, int R);
 
 static struct {
@@ -421,6 +422,7 @@ void up_next(void) {
     if (un.page || !(un.page = modal_sheet(un_back, un_closed))) return;
     widget_set_name(un.page, "upnext_page");
     widget_set_prop_int(un.page, "_mm_own", 1); /* menu_modal.c MM_OWN: the rows' own heights */
+    modal_touch_close(un.page); /* a tap above the sheet, or a drag down on it, closes it too */
     if (!(un.view = widget_lookup(un.page, "scroll_view", 1))) {
         window_close(un.page);
         return;

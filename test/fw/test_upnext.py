@@ -580,6 +580,62 @@ def test_the_header_s_level_bars_ride_the_shared_loop_and_repaint_only_their_box
     assert paint() == held
 
 
+def finger(page, at, to, scrolled=0):
+    """A finger down at at and up at to on the sheet (its window's pointer handlers, before its children's), the rows
+    scrolled down by scrolled, then what that asked of the next pass: 1 when the sheet was closed."""
+    C.c_int.from_address(page.view + O['SCROLL_Y']).value = scrolled
+    timers = len(page.timers)
+    for kind, (x, y) in ((O['EVT_POINTER_DOWN'], at), (O['EVT_POINTER_UP_BEFORE'], to)):
+        ev = C.create_string_buffer(0x40)
+        struct.pack_into('<i', ev, O['EVENT_TYPE'], kind)
+        struct.pack_into('<ii', ev, O['EVENT_X'], x, y)
+        for fn, ctx in page.bound.get((PAGE, kind), []):
+            assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(ev)) == 0  # the rows keep it
+    for fn, _ in page.timers[timers:]:
+        info = C.create_string_buffer(0x40)
+        C.c_void_p.from_address(C.addressof(info) + O['TIMER_CTX']).value = PAGE
+        C.CFUNCTYPE(C.c_int, C.c_void_p)(fn)(C.addressof(info))
+    return int(PAGE in page.closed)
+
+
+@pytest.mark.parametrize('at, to', [((180, 20), (184, 24)), ((30, 5), (30, 5)), ((360, 38), (352, 32))],
+                         ids=['scrim', 'status-row', 'scrim-wobble'])
+def test_a_tap_on_the_dimmed_page_above_the_sheet_closes_it(fw, up, at, to):
+    """The user's, 2026-11-18 00:06: only Return closed Up Next. A tap above the sheet's top (y 40), on the page
+    receding behind it, lets it fall away as Return does (menu_modal.c modal_close)."""
+    _, page = up
+    page.open()
+    assert finger(page, at, to) == 1
+
+
+def test_a_drag_down_on_the_sheet_closes_it(fw, up):
+    """A drag down of 48 px or more, more down than across, that came down on the grab bar's strip or on the rows
+    while they are at their top, lets the sheet fall away; a drag on rows scrolled down scrolls them."""
+    _, page = up
+    page.open()
+    assert finger(page, (187, 46), (190, 94)) == 1  # the grab bar, 48 px down
+
+
+@pytest.mark.parametrize('at, to, scrolled', [
+    ((187, 120), (187, 160), 0),   # 40 px: short of it
+    ((187, 120), (260, 180), 0),   # as much across as down
+    ((187, 180), (187, 120), 0),   # up: the rows scroll
+    ((187, 120), (187, 220), 92),  # the rows scrolled down: they scroll back
+    ((180, 20), (180, 80), 0),     # from above the sheet: no tap, no drag on it
+    ((187, 200), (187, 205), 0),   # a tap on a row: the row's
+], ids=['short', 'sideways', 'up', 'scrolled', 'from-scrim', 'row-tap'])
+def test_what_does_not_close_the_sheet(fw, up, at, to, scrolled):
+    _, page = up
+    page.open()
+    assert finger(page, at, to, scrolled) == 0
+
+
+def test_rows_at_their_top_drag_the_sheet_down(fw, up):
+    _, page = up
+    page.open()
+    assert finger(page, (187, 150), (187, 260)) == 1
+
+
 def test_a_row_of_the_playing_songs_album_takes_the_cover_now_playing_shows(fw, mcl, recs):
     """The user's, 2026-11-17: Up Next's rows of "Idle Moments" were grey: their album had no cover saved by
     Subsonic and none in Cover Flow's cache, though Now Playing showed the song's own art. A row of the playing
