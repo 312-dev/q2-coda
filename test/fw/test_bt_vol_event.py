@@ -274,8 +274,14 @@ emit('org.bluez.Device1'); emit('org.bluez.MediaTransport1'); bus.flush()
 '''
 
 
-@pytest.mark.skipif(not shutil.which('dbus-daemon') or subprocess.run(['/usr/bin/python3', '-c', 'import dbus'],
-                    capture_output=True).returncode, reason='needs dbus-daemon and dbus-python')
+def real_bus() -> bool:
+    """dbus-daemon here, and a system python with dbus-python to own org.bluez on it."""
+    if not shutil.which('dbus-daemon') or not os.path.exists('/usr/bin/python3'):
+        return False
+    return subprocess.run(['/usr/bin/python3', '-c', 'import dbus'], capture_output=True).returncode == 0
+
+
+@pytest.mark.skipif(not real_bus(), reason='needs dbus-daemon and dbus-python')
 def test_a_real_bus_takes_the_login_and_the_match_and_delivers_the_signal(fw, tmp_path):
     path = tmp_path/'bus'
     daemon = subprocess.Popen(['dbus-daemon', '--session', '--nofork', '--nopidfile', f'--address=unix:path={path}'],
