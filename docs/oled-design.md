@@ -59,7 +59,9 @@ those spots are under the glass. So:
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
   foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
-  the page comes back on top (Return from a row's page). A page with nothing to select (text) ends the
+  the page comes back on top (Return from a row's page). A row that grows in place, a captioned row showing its caption
+  or a grabbed inline slider, scrolls the list by whole rows until its grown foot is on or above y 282 as well, never
+  only inside the list's box, which runs on to the screen's foot (`nav/lists.c` `list_shown_h`). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
   48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
   ends on the last whole row above y 282. The build refuses a list box that stops at or above y 282
@@ -338,7 +340,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
   the caption shows only under the selected row. That row grows over 150 ms, its title and switch where
   they were, to hold the caption under them inside the bar: Inter 13 px in `#D6E2FA`, 17 px lines from the
   title's column, wrapped at words to the right column, 5 px under the last; every other captioned row is one
-  row high. The list scrolls by whole rows to keep the grown row's foot in sight (`patch/settings_pages.c`).
+  row high. The list scrolls by whole rows to keep the grown row's foot on or above the list end, y 282 (`patch/settings_pages.c`).
   Every caption but Smart Wi-Fi's is one line there, under 327 px of Inter 13 (the bar's 343 less its 8 px insets).
 - **Disabled row** (Set Time Manually while the time is set automatically): label, value and
   chevron in Text Tertiary, and the wheel passes over it.
@@ -687,10 +689,10 @@ as a menu's; a lit row's foot never passes y 282.
 - **A finger closes it too** (the user's, 2026-11-18): a tap on the dimmed page above the sheet
   (over y 40), or a drag down of 48 px or more, more down than across (the swipe up that opens it,
   reversed), that starts on the grab bar's strip or on the rows while they are at their top. The
-  sheet falls away as on Return ([Overlay motion](#overlay-motion)); a drag on rows scrolled down
-  scrolls them. ponytail: the sheet does not follow the finger while it drags; it falls once the
-  finger lifts past 48 px, and following it needs the drag's offset in the sheet's frame
-  (`menu_modal.c` `sheet_frame`).
+  sheet follows the finger down as it drags, the page behind coming forward as it goes; let go 48 px
+  or more down and it falls away from there as on Return ([Overlay motion](#overlay-motion)), short
+  of that it rises back. A drag on rows scrolled down scrolls them. Under Reduce Motion the sheet
+  stays put while the finger drags and the lift alone decides.
 
 ### Progress and sliders
 
@@ -1169,7 +1171,8 @@ the wheel walks:
   - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
     a card app's fields, Car Remote's phone name, and any field no caller names.
 
-One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
+One turn of the wheel stops on the switcher or the return key, whichever end it reaches; a new turn goes on
+round to the other. Play/Pause submits
 from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
 cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
 each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
@@ -1525,16 +1528,20 @@ the status row "Software Update" over mode pages as USB's:
 
 ### Battery History
 
-<a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16, `patch/battery.c`) is a graph
-over the whole page, under the status row titled "Battery History":
+<a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16 and laid out again from the user's
+mock-up of 2026-11-18, `patch/battery.c`) is a graph over the whole page, under the status row titled "Battery History".
+The three parts stand as one block from y 57 to the list end (y 282), so nothing reaches the glass's bottom corners. Each
+y here is on the screen; the page's window starts under the status row, so the code takes them from the canvas's origin,
+not the view's own y:
 
-- **Readout**, centered at y 70 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
+- **Readout**, centered at y 66 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
   (the status bar's 12- or 24-hour form; "+1:23 · 51%" with the clock never set).
-- **Graph**, 100% at y 99 to 0% at y 199 (a pixel a percent): faint lines at 100% and 50%, the axis at 0%, their
+- **Graph**, 100% at y 84 to 0% at y 226 (142 px): faint lines at 100% and 50%, the axis at 0%, their
   labels right-aligned in 15 px Text Tertiary; the level as steps in the accent's light tone over a faint fill; the
   reading's 1 px hairline in Text Secondary from 100% to 0% and a 10 px white dot on its level.
-- **Export Log**, the shared gray [button](#buttons) centered at y 237. The wheel always moves the reading (clockwise to
-  the newer) and Center always exports, so the button is the page's only action and no frame draws the focus ring.
+- **Export Log**, the shared gray [button](#buttons) centered at y 263 (y 244 to 282, 38 px above the screen's edge). The
+  wheel always moves the reading (clockwise to the newer) and Center always exports, so the button is the page's only
+  action and no frame draws the focus ring.
 - **Results** are the house toasts in the button's place ("Saved to battery-log.txt", "The card is in use over USB",
   "Storage unavailable", "The card is full", "Couldn't save"): the button gives way while one shows.
 - ponytail: the button has no pressed frame under Center (the export runs on the key's press); a press frame needs

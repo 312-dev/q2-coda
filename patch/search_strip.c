@@ -12,7 +12,8 @@
  * return key docked at its right, a circle as tall as the strip. The run of characters starts at
  * its first and scrolls only when the highlight comes within a cell of an edge, its letters
  * fading out where more of the set lies past that edge. One turn of the wheel (ticks closer than
- * SS_GESTURE_MS) stops at the return key; a new turn goes on round to the switcher.
+ * SS_GESTURE_MS) stops at either end, the switcher or the return key; a new turn goes on round to
+ * the other.
  *
  * Keys on the strip: Centre types the character at the text's cursor, cycles the set on the
  * switcher (the highlight stays there), and submits on the return key; Play/Pause submits from
@@ -209,7 +210,7 @@ enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 #define SS_POP_MS 300           /* the pop goes this long after the wheel's last step */
 #define SS_POP_FAST_MS                                                                             \
     125 /* steps closer than this, 8 a second, are a spin: no pop until it stops */
-/* ticks of the wheel closer than this are one turn, which stops at the return key */
+/* ticks of the wheel closer than this are one turn, which stops at the switcher or the return key */
 #define SS_GESTURE_MS 250
 /* songs, artists and albums listed at most on All (docs/ipod.md#search): the wheel moves its bar a
  * row a tick, 7 ticks a turn at the default Wheel Sensitivity, so the artists are under five turns
@@ -247,7 +248,7 @@ static struct {
     const char *note;                  /* ... and who sees the text, under it (search_strip_note) */
     int secret, set;            /* the text is a password, SS_SECRET_*; the strip's set, SS_SET_* */
     unsigned typed_at, turn_at; /* the last character typed (shown a moment); the last tick */
-    unsigned char halted;       /* this turn stopped on the return key */
+    unsigned char halted;       /* this turn stopped on the switcher or the return key */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
@@ -302,6 +303,8 @@ static const char *const ss_set_names[SS_SETS] = { "abc", "ABC", "123", "#+=" };
 static int ss_run(void) { return (int)strlen(ss_sets[ss.set]) + 1; }
 static int ss_stops(void) { return ss_run() + 2; }
 static int ss_on_ret(void) { return ss.stop == ss_stops() - 1; }
+/* An end of the loop, the switcher or the return key: a turn stops on either (ss_turn). */
+static int ss_on_end(void) { return !ss.stop || ss_on_ret(); }
 static int ss_in_run(void) { return ss.stop > 0 && !ss_on_ret(); }
 /* The run's entry e as text: the set's character, or the space. */
 static unsigned ss_char(int e) {
@@ -799,12 +802,13 @@ static void ss_submit(void) {
 }
 
 /* The highlight a stop on round the loop, dir 1 or -1. A tick of the turn that stopped on the
- * return key (closer than SS_GESTURE_MS to the one before) goes nowhere; a new turn goes on. */
+ * switcher or the return key (closer than SS_GESTURE_MS to the one before) goes nowhere; a new
+ * turn goes on. */
 static void ss_turn(int dir, int cont) {
     if (ss.halted && cont) return;
     ss.halted = 0;
     ss.stop = ((ss.stop + dir) % ss_stops() + ss_stops()) % ss_stops();
-    ss.halted = (unsigned char)ss_on_ret();
+    ss.halted = (unsigned char)ss_on_end();
     ss_follow();
     if (ss_in_run()) ss_pop_step();
 }
@@ -1447,8 +1451,8 @@ void search_strip_paint(void *w, void *canvas) {
 #define SS_TAP 8 /* a touch that moves less than this is a tap */
 static int ss_dist(int d) { return d < 0 ? -d : d; }
 
-/* The highlight moved n stops by a drag, as the wheel's turn: a drag is one turn, stopping at the
- * return key. */
+/* The highlight moved n stops by a drag, as the wheel's turn: a drag is one turn, stopping at
+ * either end. */
 static void ss_slide(int n) {
     for (int i = 0; i < (n < 0 ? -n : n); ++i) ss_turn(n < 0 ? -1 : 1, ss.swiped || i);
 }
@@ -1645,7 +1649,7 @@ static int ss_touch(void *ctx, void *event) {
         if (!tap || x < SS_STRIP_X || x >= SS_STRIP_RX) {
             /* a drag, or off the pill */
         } else if (x < SS_CHIP_R) { /* the switcher: the next set */
-            ss.stop = 0;
+            ss.stop = 0, ss.halted = 1;
             ss_centre();
         } else if (x >= SS_RET_L) { /* the return key: submitted */
             ss.stop = ss_stops() - 1, ss.halted = 1;
