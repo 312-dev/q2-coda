@@ -76,6 +76,12 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m);
 void load_spinner_paint(void *w, void *canvas);
 int load_spinner_hit(int x, int y);
 int load_touch(void *page, void *event, void (*cancel)(void));
+/* ... and the same overlay over a window another module owns, until a page opens from it
+ * (load_over: win 0 ends it), its paint and its input gate (nav/row_paint.c, nav/input.c). */
+void load_over(void *win, void (*cancel)(void));
+int load_over_for(void (*cancel)(void));
+void load_over_paint(void *w, void *canvas);
+int load_over_input(void *e);
 
 /* The focus ring's rule (docs/oled-design.md#focus-ring), for every screen with one or two buttons
  * and the confirmation card: shown while the last navigation input was the wheel (a turn, or

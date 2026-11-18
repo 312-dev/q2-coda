@@ -82,7 +82,8 @@ class Pg(C.Structure):
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
-                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte)]
+                ('sort', C.c_char_p * 6), ('field', C.c_int), ('pend', C.c_byte), ('pmoved', C.c_byte),
+                ('hold', C.c_byte)]
 
 
 class Qp(C.Structure):
@@ -2067,7 +2068,7 @@ def test_the_app_a_path_is_in(fw, path, found):
 class Page:
     """A card app's page driven as the UI drives it. The worker never runs: answer() puts its reply
     where the pthread would and the page's tick takes it."""
-    def __init__(self, fw, manifest=b'name=Foo\n', opens=True):
+    def __init__(self, fw, manifest=b'name=Foo\n', opens=True, home=False):
         self.fw, self.sel, self.y, self.timers, self.drawn, self.toasts, self.backs = fw, 0, 0, 0, 0, [], 0
         self.aborts: list = []  # sections()' swipe aborts
         self.tips: list = []  # field()'s box hints
@@ -2100,6 +2101,12 @@ class Page:
         fw.mock('navigator_to_with_context', toast)
         fw.mock('navigator_back', lambda *_: setattr(self, 'backs', self.backs + 1))
         fw.mock('widget_get_prop_int', prop)
+        self.home = 0
+        if home:  # the window the page is opened from: the window manager's one (smart_wifi.c page_in_use)
+            self.home = block(fw, size=4096)
+            fw.mock('widget_count_children', lambda w, *_: 1 if not w else 0)
+            fw.mock('widget_get_child', lambda w, i, *_: self.home if not w else self.view)
+            fw.mock('widget_get_prop_str', lambda w, k, d, *_: d)
         scan(fw)
         if opens:
             fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)
@@ -2225,6 +2232,97 @@ def test_centre_while_loading_sends_nothing_again(fw):
     sent = p.req.id
     p.click(1), p.click(0)
     assert p.req.id == sent and p.pg.pend == 1 and p.pg.depth == 1
+
+
+# The first open (docs/oled-design.md#loading): the page opens once the app's first answer is there, the overlay over
+# the window it was opened from meanwhile (list_marks.c load_over), fed input by ringnav_input (load_over_input).
+class Lo(C.Structure):
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+
+
+def first_open(fw):
+    p = Page(fw, home=True)
+    return p, fw.var('list_marks__lo', Lo)
+
+
+def gate(p, type, a, b=0):
+    """An event as ringnav_input sees it: a key (a its code), or a touch at the portrait panel's a, b."""
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], type)
+    struct.pack_into('<ii', e, O['EVENT_X'], a, b)  # EVENT_KEY is EVENT_X
+    return p.fw.fn('load_over_input', C.c_int, C.c_void_p)(e)
+
+
+def test_a_first_open_loads_over_the_window_it_was_opened_from(fw):
+    p, lo = first_open(fw)
+    assert p.pg.hold == 1 and not p.pg.page and lo.win == p.home  # no page yet: the overlay over Streaming
+    assert not fw.calls('window_create') and not fw.calls('scroll_view_create')  # no Loading… page
+    assert p.request() == b'Q2SPOT/1\n1\tmenu\n' and p.ap.a[0].launched == 1
+
+
+def test_a_first_open_opens_once_its_answer_comes(fw):
+    p, lo = first_open(fw)
+    p.answer(rows=[item(1), item(2)])
+    assert p.pg.hold == 0 and p.pg.page == p.page and lo.win is None and p.top.state == K_READY
+    assert len(fw.calls('window_create')) == 1 and len(fw.calls('scroll_view_create')) == 1  # its rows at once
+    p.tick(), p.tick()
+    assert len(fw.calls('window_create')) == 1  # opened once
+
+
+def test_a_first_open_waits_through_the_apps_start_under_the_overlay(fw):
+    p, lo = first_open(fw)
+    p.answer(fail=REQ_NOSOCK)  # no socket yet: the app starting
+    assert p.top.state == K_WAIT and p.pg.hold == 1 and lo.win == p.home and not fw.calls('window_create')
+    p.req.buf = fw.fn('calloc', C.c_void_p, C.c_size_t, C.c_size_t)(1, 4096)
+    p.answer(rows=[item(1)])
+    assert p.pg.page == p.page and p.top.state == K_READY and lo.win is None
+
+
+def test_a_first_open_that_fails_opens_on_its_error_page(fw):
+    p, lo = first_open(fw)
+    p.answer(status=b'error', msg=b'Sign in first')
+    assert p.pg.page == p.page and p.top.state == K_ERROR and p.top.note == b'Sign in first' and lo.win is None
+
+
+def test_return_gives_a_first_open_up_and_nothing_opens_late(fw):
+    p, lo = first_open(fw)
+    assert gate(p, KEY_DOWN, RETURN) == 1 and p.pg.hold == 1  # the press goes nowhere
+    assert gate(p, KEY_UP, RETURN) == 1  # its release gives it up
+    assert lo.win is None and not p.pg.lv and not p.pg.timer and p.req.running == 0 and not p.req.buf
+    assert p.ap.a[0].launched == 1 and not p.world.of('system')[1:]  # the app runs on: nothing stopped
+    assert gate(p, KEY_UP, RETURN) == 0  # Return is the window's again
+    assert fw.calls('timer_remove') and not fw.calls('window_create')  # no tick left to take a late reply
+
+
+@pytest.mark.parametrize('type', [KEY_DOWN, KEY_LONG, KEY_UP])
+def test_centre_while_a_first_open_loads_does_nothing(fw, type):
+    p, lo = first_open(fw)
+    sent = p.req.id
+    assert gate(p, type, CENTRE) == 1 and lo.win == p.home and p.req.id == sent
+    fw.fn('addon_open', C.c_int, C.c_void_p, C.c_void_p)(0, None)  # the row again, however it came
+    assert p.req.id == sent and p.pg.hold == 1 and not fw.calls('window_create')
+    assert gate(p, KEY_UP, O['KEY_PLAY']) == 0  # Play and the wheel stay the window's
+
+
+def test_a_tap_off_the_spinner_gives_a_first_open_up_and_one_on_it_does_nothing(fw):
+    p, lo = first_open(fw)
+    down, up = 0xff, 0x103  # the panel's own: screen x is its y, screen y 319 less its x
+    assert gate(p, down, 319 - 160, 187) == 1 and gate(p, up, 319 - 160, 187) == 1 and lo.win == p.home
+    assert gate(p, down, 319 - 100, 40) == 1 and gate(p, 0x101, 319 - 100, 40) == 1 and lo.win == p.home
+    assert gate(p, up, 319 - 100, 40) == 1 and lo.win is None and not p.pg.lv and not fw.calls('window_create')
+
+
+def test_the_window_going_away_gives_a_first_open_up(fw):
+    p, lo = first_open(fw)
+    fw.fn('list_marks__lo_gone', C.c_int, C.c_void_p, C.c_void_p)(p.home, None)
+    assert lo.win is None and not p.pg.lv and p.req.running == 0
+
+
+def test_another_apps_page_over_a_first_open_lets_it_go(fw):
+    p, lo = first_open(fw)
+    p.world.files[b'/tmp/q2-foo'] = b'1'
+    fw.fn('addon_open_at', C.c_int, C.c_char_p, C.c_char_p, C.c_char_p, C.c_char_p)(b'foo', b'menu', b'', None)
+    assert p.pg.hold == 1 and lo.win == p.home and p.req.id == 2  # the first let go, this one held in its place
 
 
 def test_a_level_under_another_keeps_its_reply_and_asks_again_on_back(fw):

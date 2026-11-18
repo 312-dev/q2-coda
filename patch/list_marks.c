@@ -152,6 +152,68 @@ int load_touch(void *page, void *event, void (*cancel)(void)) {
     return 11; /* RET_STOP */
 }
 
+/* The loading overlay over a window another module owns (docs/oled-design.md#loading): a page
+ * that opens only once its content is there (a card app's first, Chapters) holds the window it
+ * was opened from, win, under the spinner until then, as Cover Flow's open holds Home
+ * (coverflow.c coverflow_wait_input). Painted by ringnav_paint (load_over_paint) and fed every
+ * input first by ringnav_input (load_over_input): the wheel's Centre and Return go nowhere, nor do
+ * touches; Return's release, or a lift off the spinner, gives the load up (cancel). So does win
+ * going away (EVT_DESTROY). One at a time: a second takes the first's place, the first cancelled.
+ */
+static struct {
+    void *win;
+    void (*cancel)(void);
+} lo __attribute__((section(".scratch")));
+static int lo_gone(void *ctx, void *event);
+static void lo_end(void) {
+    if (!lo.win) return;
+    widget_off_by_func(lo.win, EVT_DESTROY, (void *)lo_gone, lo.win);
+    widget_invalidate_force(lo.win, 0);
+    lo.win = 0, lo.cancel = 0;
+}
+/* The overlay given up: ended, then its cancel called. */
+static void lo_cancel(void) {
+    void (*cancel)(void) = lo.cancel;
+    lo_end();
+    if (cancel) cancel();
+}
+static int lo_gone(void *ctx, void *event) {
+    (void)event;
+    if (ctx == lo.win) lo_cancel();
+    return 0;
+}
+/* The overlay over win, cancel called if it is given up; win 0 ends it, cancelling nothing (the
+ * load done). */
+void load_over(void *win, void (*cancel)(void)) {
+    if (lo.win && win) lo_cancel();
+    lo_end();
+    if (!win) return;
+    lo.win = win, lo.cancel = cancel;
+    widget_on(win, EVT_DESTROY, lo_gone, win);
+    widget_invalidate_force(win, 0);
+}
+/* Whether the overlay shows for the load whose cancel is cancel. */
+int load_over_for(void (*cancel)(void)) { return lo.win && lo.cancel == cancel; }
+void load_over_paint(void *w, void *canvas) {
+    if (lo.win && w == lo.win) load_spinner_paint(w, canvas);
+}
+/* ringnav_input, every event first: 1 when e goes nowhere while the overlay shows. Pointer events
+ * here are the panel's own (portrait: the screen's x is its y, the screen's y 319 less its x). */
+int load_over_input(void *e) {
+    if (!lo.win || !e) return 0;
+    unsigned type = (unsigned)I(e, EVENT_TYPE), key = (unsigned)I(e, EVENT_KEY);
+    if (type == EVT_KEY_DOWN || type == EVT_KEY_LONG || type == EVT_KEY_UP) {
+        if (key != KEY_RETURN && key != KEY_CENTER) return 0; /* the wheel and Play stay theirs */
+        if (key == KEY_RETURN && type == EVT_KEY_UP) lo_cancel();
+        return 1;
+    }
+    if (type < EVT_POINTER_FIRST || type >= EVT_POINTER_ABORT) return 0;
+    if (type == EVT_POINTER_UP_BEFORE - 1 && /* the lift */
+        !load_spinner_hit(I(e, EVENT_Y), 319 - I(e, EVENT_X)))
+        lo_cancel();
+    return 1;
+}
+
 /* ... or, on the selected row while Cover Flow opens, the spinner (coverflow.c coverflow_spinner)
  * in its place, white. */
 void spinner_icon(void *w, void *canvas, int right, int y) {

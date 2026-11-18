@@ -1783,9 +1783,15 @@ static struct {
      * nothing; pmoved: the way a level in the top's place slides in */
     char pend;
     signed char pmoved;
+    /* hold: the top level asked for in place under the loading overlay, what is shown left as it is
+     * until its rows or its error are there: its first, with no page yet, over the window it was
+     * opened from (list_marks.c load_over), its page made then (page_make) */
+    char hold;
 } pg __attribute__((section(".scratch")));
 
 static void qr_open(const char *state, const char *title);
+static int page_make(void);
+void *page_in_use(void); /* smart_wifi.c: the top window past toasts and the volume dialog */
 static app_t *app(void) { return &ap.a[pg.a]; }
 static lv_t *top(void) { return &pg.lv[pg.depth - 1]; }
 static const char *cell(int i, int k) { return pg.f[4 + 6 * i + k]; }
@@ -2511,9 +2517,15 @@ static void show(void) {
      * page that append() rebuilds drops it too, row kept or not; match the row by identity in go()
      * if that is ever pressed for. */
     if (pg.next == G_ROW) stop_timer(&pg.go);
+    if (l->state == K_LOAD && !((req.running || req.done) && !pg.act && req.id == l->id)) fetch(l);
+    if (pg.hold && (l->state == K_LOAD || l->state == K_WAIT)) return; /* under the overlay */
+    if (pg.hold && !pg.page) { /* its first answer: the page opens over the window it held */
+        if (!page_make()) return; /* none to be had: the overlay stays until Return */
+        load_over(0, 0);
+    }
+    pg.hold = 0;
     pg.view = pg.edit = 0;
     pg.busy = 0; /* new rows, their own texts: the tick says Working… again */
-    if (l->state == K_LOAD && !((req.running || req.done) && !pg.act && req.id == l->id)) fetch(l);
     if (l->state == K_LOAD || l->state == K_WAIT) {
         char t[48];
         tk_snprintf(t, sizeof t, "Starting %s…", app()->name);
@@ -3133,9 +3145,34 @@ static int closed(void *ctx, void *event) {
     return 0;
 }
 
+/* The page's window, its touches bound (swipe). 0 when none could be made. */
+static int page_make(void) {
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    if (!(pg.page = page_open("addon_page", closed, keyup))) return 0;
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(pg.page, touches[t], swipe, 0);
+    return 1;
+}
+
+/* The first open given up under the overlay (Return, a tap off the spinner, its window gone): no
+ * page was made, and the app started for it runs on. */
+static void held_cancel(void) { closed(0, 0); }
+
+/* The page, or its first open under the overlay, let go: its state with it. */
+static void page_drop(void) {
+    void *old = pg.page;
+    if (old)
+        closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    else if (pg.lv)
+        load_over(0, 0), closed(0, 0);
+}
+
 /* Slot k's page, its first level op (args: "\t" and escaped each) titled title: the app started if
  * it isn't (its QR code shown at the first answer when qr); gone from the card, the page says so.
- * 1 when it opened or said why not. */
+ * The page opens once the app's first answer (its rows or its error) is there, the loading overlay
+ * over the window it was opened from meanwhile, through the app's start (pg.hold); at once with no
+ * such window. 1 when it opened, is on its way, or said why not. */
 static int page_at(int k, const char *op, const char *args, const char *title, int qr) {
     const char *busy = shelf_busy(); /* a job on this app's folder */
     app_t *b = &ap.a[k];
@@ -3144,20 +3181,17 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
     if (busy && !strcmp(busy + 1, b->id) &&
         (shelf_moving() || !b->launched || access(b->pid, 0)))
         return toast("Wait until the App Store finishes"), 1;
-    if (pg.page || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
+    void *from = page_in_use();
+    if (pg.lv || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
+    int missing = access(b->bin, 0);
     if (!(pg.f = calloc(4 + 6 * ADDON_ROWS * ADDON_PAGES, sizeof *pg.f)) ||
-        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) ||
-        !(pg.page = page_open("addon_page", closed, keyup)))
+        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) || ((missing || !from) && !page_make()))
         return free(pg.lv), free(pg.f), free(pg.kept), pg.lv = 0, pg.f = 0, pg.kept = 0, 0;
     pg.a = k;
     app_t *a = app();
-    int missing = access(a->bin, 0);
     if (!missing && (!a->launched || access(a->pid, 0))) launch(a), pg.code = qr && a->qr;
     pg.depth = 1;
-    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
-                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
-    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
-        widget_on(pg.page, touches[t], swipe, 0);
+    if (!pg.page) pg.hold = 1, load_over(from, held_cancel); /* the page once its answer is there */
     lv_t *l = top();
     tk_snprintf(l->op, sizeof l->op, "%s", op);
     tk_snprintf(l->args, sizeof l->args, "%s", args);
@@ -3191,8 +3225,7 @@ int addon_open_at(const char *id, const char *op, const char *arg, const char *t
     for (int i = 0; i < ap.n; ++i)
         if (ap.a[i].present && !strcmp(ap.a[i].id, id)) {
             if (*arg && !put(args, sizeof args, arg)) return 0;
-            void *old = pg.page;
-            if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+            page_drop();
             return page_at(i, op, args, title && *title ? title : ap.a[i].name,
                            !strcmp(op, "menu"));
         }
@@ -3293,8 +3326,7 @@ int addon_goto(const char *path, const char *title, int album) {
     app_t *a = goto_app(path);
     if (!a || !put(args, sizeof args, album ? "album" : "artist") || !put(args, sizeof args, path))
         return 0;
-    void *old = pg.page;
-    if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    page_drop();
     return page_at((int)(a - ap.a), "goto", args, title && *title ? title : a->name, 0);
 }
 
@@ -3313,8 +3345,7 @@ int addon_more(void) {
     unsigned k = title ? (unsigned)(title - a->more) : strlen(a->more);
     if (!k || k >= sizeof op) return 0; /* no op, or one too long for a level */
     tk_snprintf(op, k + 1, "%s", a->more);
-    void *old = pg.page;
-    if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    page_drop();
     return page_at((int)(a - ap.a), op, "", title && title[1] ? title + 1 : a->name, 0);
 }
 

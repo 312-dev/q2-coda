@@ -203,6 +203,7 @@ int ringnav_input(void *wm, void *e) {
     if (e && keylock_gate(e, remote_match(e, 0))) return 0; /* keylock.c */
     if (e && charge_gate(e)) return 0;                      /* the plug-in screen (charging.c) */
     if (e && coverflow_wait_input(e)) return 0; /* Cover Flow opening: Return gives it up */
+    if (load_over_input(e)) return 0; /* a page loading over this one (list_marks.c load_over) */
     st.last_input = time_now_ms();
     unsigned type = e ? (unsigned)I(e, EVENT_TYPE) : 0;
     unsigned key = e ? (unsigned)I(e, EVENT_KEY) : 0;

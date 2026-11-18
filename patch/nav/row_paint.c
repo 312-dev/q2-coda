@@ -939,6 +939,7 @@ int ringnav_paint(void *w, void *canvas) {
     }
     addon_paint(w, canvas);
     radio_paint(w, canvas); /* Internet Radio's loading overlay */
+    load_over_paint(w, canvas); /* a page loading over another module's window (list_marks.c) */
     artist_local_paint(w, canvas);
     np_about_paint(w, canvas);
     peq_paint(w, canvas);
