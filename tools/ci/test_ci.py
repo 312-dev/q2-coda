@@ -503,6 +503,36 @@ def test_each_lease_starts_with_the_card_as_the_fixture_hardlinked(tmp_path, mon
     assert not os.access(fx/'Test/t.flac', os.W_OK) or os.geteuid() == 0  # a write in place fails rather than reach every card
 
 
+def test_each_lease_starts_with_the_library_that_lists_the_fixtures_songs(tmp_path, monkeypatch):
+    """Slot 4's database.db still listed Test Artist's Song 1 and Song 2 after the card was reset from the 13-file
+    fixture (2026-11-18): Library > Songs > Song 1 > Centre said File Not Found and opened no Now Playing, read as
+    a firmware regression. A lease now starts with the library the fixture was scanned into, a copy stock may write."""
+    monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
+    monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
+    monkeypatch.setattr(emu_pool, 'K', 2)
+    monkeypatch.setattr(emu_pool, 'HOME', tmp_path/'pool')
+    monkeypatch.delenv('Q2_EMU_CARD', raising=False)
+    monkeypatch.setattr(emu_pool, 'q2emu', lambda *a: type('P', (), {'returncode': 0, 'stdout': '', 'stderr': ''})())
+    monkeypatch.setattr(emu_pool, 'make_copy', lambda k: None)
+    source = tmp_path/'source'
+    card_tree(source, {'Music/A/B/01 one.flac': 'one'})
+    (tmp_path/'scanned.db').write_text('songtable: one')
+    emu_pool.make_fixture(source, library=tmp_path/'scanned.db')
+    assert emu_pool.library_fixture().read_text() == 'songtable: one'
+    data = emu_pool.copy_dir(1)/'state/data'
+    card_tree(data, {'database.db': 'songtable: Song 1, Song 2', 'config.ini': 'ini'})
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    db = data/'database.db'
+    assert db.read_text() == 'songtable: one' and (data/'config.ini').read_text() == 'ini'
+    assert db.stat().st_ino != emu_pool.library_fixture().stat().st_ino and os.access(db, os.W_OK)  # a copy: stock writes it
+    emu_pool.put(1)
+    emu_pool.make_fixture(source)                                       # a new card with no library: none that lists the old one
+    assert not emu_pool.library_fixture().exists()
+    db.write_text('the last lease')
+    assert emu_pool.get('/b', 'w', 1, wait=False, avoid=(2,)) == 1
+    assert db.read_text() == 'the last lease'                           # nothing to put back: left as it is
+
+
 def test_a_card_is_not_reset_when_a_lease_is_reused_or_reserved_and_a_missing_fixture_is_said(tmp_path, monkeypatch):
     monkeypatch.setattr(emu_pool, 'STATE', tmp_path/'state')
     monkeypatch.setattr(emu_pool, 'LEASES', tmp_path/'state/leases.json')
