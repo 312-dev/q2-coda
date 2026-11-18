@@ -355,7 +355,7 @@ logo_check()
 
 def validate_assets(directory):
     import functools, json, re, struct, subprocess
-    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
+    from build import sha, run, fileoff, symbols, BLUEALSA, AAC_44K1, GRADIENT_LEAF, WM_PAINT_LEAF, QUEUE_LEAF, HELPER, HELPER_LIKE, BOOT, SPLASH, LOGO_ANIM, LOGO_BLACK, BOOT_HOOK, GUARD, GUARD_DEV_HOOK, REMOTE, Q2EQ, REMOTE_HOOK, LOG_HOOK, WHEEL_LOG_HOOK, S90PLAY, S11LOGO, LOGO_HOOK, BLUEALSA2, BT_KEEPALIVE, RTC_WRITE, WIFI_LPS, HOOKS, SAVER_OFF, FULL_BLEED, HTRANSLATE_VT, WATCHDOG, WATCHDOG_STUB, DROP_CACHES, STREAM_POLL_CALLS, DARK_POLLS, COVER_WAITS, BATTERY_READS, WHEEL_TS_READ, PDR
     from ipod import (ART_PLACEHOLDERS, sized_art, AUDIT, TOOLBAR_SWITCHES, CONFIRM, VOLUME, BIGCOVER, BC_ART, BC_TITLE_PAD, QUICK_SETTINGS, QS_TOP, QS_LABEL_GAP, QS_LABEL_H,
                       QS_LABEL_W, QS_ROW_GAP, QS_PITCH, QS_BAR, QS_TOUCH, QS_EDGE, QS_SUN, HOME_LABEL_END, HOME_LIST_W, HOME_TEXT_X, HOME_TOP, ARTIST_PAGE, HOME_OURS, HOME_PAGE, HOME_ROWS, HOME_SETS, NAVBAR_ONLY, PLAYING_PAGE, SLEEP_TIMER, UI_ASSETS,
                       STATUS_BAR, STATUS_ROW_RIGHT, corner_inset, corner_x, immediate_values,
@@ -411,6 +411,14 @@ def validate_assets(directory):
     # Stock's lock screen stays off: config_init stores 0 in g_screensaver_mode whatever SYSSET SCREENSAVER says.
     off = fileoff(stock, SAVER_OFF[0])
     assert struct.unpack_from('<I', stock, off)[0] == SAVER_OFF[1] and struct.unpack_from('<I', demo, off)[0] == SAVER_OFF[2]
+    # Every page window is the whole screen (docs/oled-design.md#full-bleed): window_manager_default_layout_child's
+    # branch to the client rect under the system bar is a nop, and the status row paints over both pages of a slide,
+    # htranslate's draw_curr slot (+0x1c) page_parallax.c's parallax_curr.
+    off = fileoff(stock, FULL_BLEED[0])
+    assert struct.unpack_from('<I', stock, off)[0] == FULL_BLEED[1] and struct.unpack_from('<I', demo, off)[0] == FULL_BLEED[2]
+    off = fileoff(stock, HTRANSLATE_VT + 0x1c)
+    assert struct.unpack_from('<I', stock, off)[0] == 0x696c40
+    assert struct.unpack_from('<I', demo, off)[0] == symbols(directory/'patch.elf')['parallax_curr']
     # The slide hint names a stock animator and gives it a duration (a missing one means stock's 500 ms).
     assert re.fullmatch(r'htranslate\(duration=\d+\)', SLIDE) and b'\0htranslate\0' in stock
     # The animated lookup pages need synchronous unwind.
