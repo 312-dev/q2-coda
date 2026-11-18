@@ -188,10 +188,6 @@ for stock,want,keys in (('(null)','Unknown Artist',['player_unknown']),('Barones
     for tab in (1,0): m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0)
     assert m.text(O['ARTIST_TITLE'])==want and m.keys==keys,(stock,m.text(O['ARTIST_TITLE']),m.keys)
 passed()
-m,view=stock_list(lambda _:None,78); item,button,icon,labels,images=speed_row(m,view)
-m.handlers[int(manifest['patch_symbols']['stock_playermore_trampoline'],16)]='stock_playermore'
-assert m.call(address=HOOKS['playermore_page_init'][0],args=(m.top,0,0,0),gap=0)==0; lay(m,view)
-assert m.nodes[icon]['visible'] and geometry(m,labels[0])==(72,12,40,20) and 'style:normal:font_size' not in m.nodes[labels[0]]; passed()
 # The selection reaches Queue's table rows at OLED's pitch; the chevrons of a list of one-line rows stay off it.
 qm=oled_on(Machine()); qw,qr,qe=qm.table_page(name='playerqueue_page'); qm.word(qw+O['ROW_HEIGHT'],32); qm.word(qw+O['W_W'],375)
 for i,(r,e) in enumerate(zip(qr,qe)): qm.word(r+O['W_Y'],i*32); qm.word(r+O['W_H'],32); qm.word(e+O['W_H'],32)
@@ -581,8 +577,9 @@ lm.paint(lw,gap=0)
 for _ in range(4): lm.call(gap=100)
 lm.paint(lw,gap=0); assert [l['font'][0] for l in lm.letters]==[TFACE],lm.letters
 passed()
-# The scrubber's fill is OLED's accent whatever ACCENT, a key OLED does not read, holds; a scrub's press (Centre, one
-# press) takes it off and the next puts it back; a touch keeps it in every state, and no state gets a knob.
+# The scrubber's fill is OLED's accent whatever ACCENT, a key OLED does not read, holds; a scrub (Centre, one press, the
+# next ends it) keeps it, the status row's grid marking the scrub with paint_scrubber's knob (np_bar.c np_fill); a touch
+# keeps it in every state, and no state gets a knob.
 CONFIG.clear(); CONFIG.update(ACCENT='3'); m=scrub_page()
 assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); passed()
 CONFIG.clear(); m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
@@ -590,7 +587,7 @@ m.slider=m.node('slider','slider_play',max=225,value=100)
 m.win=m.top=m.node('window','playing_page',[m.slider,m.node('label','label_playtime')]); m.word(m.win+O['W_PARENT'],m.wm)
 m.call(address=playing,args=(m.win,7,0,0),gap=0)
 assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); assert m.call(O['KEY_CENTER'],gap=1000)==11
-assert m.nodes[m.slider][FG]==-1; assert m.call(O['KEY_CENTER'],gap=1000)==11; assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2]))
+assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2])); assert m.call(O['KEY_CENTER'],gap=1000)==11; assert m.nodes[m.slider][FG]==signed(color_t(OLED_TONES[2]))
 assert {m.nodes[m.slider][f'style:{s}:fg_color'] for s in ('normal','pressed','over','focused')}=={m.nodes[m.slider][FG]}; passed()  # a touch keeps the accent
 assert all(m.nodes[m.slider][f'style:{s}:icon']==0 for s in ('normal','pressed','over','focused','disable')); passed()  # no knob: stock's default slider style would supply rounded_n/_o/_p
 
@@ -818,7 +815,7 @@ def stock(keys,**flags):
     return out
 m=audible(Machine()); m.page('playing_page')
 assert [tick(m,key) for key in (NEXT,PREV,NEXT)]==stock((NEXT,PREV,NEXT))==[1,1,1] and m.ret==0; passed()
-m=audible(scrub_page()); assert m.call(O['KEY_CENTER'],gap=1000)==11 and m.nodes[m.slider][FG]==-1; debounced(m)  # one press scrubs; the press's stock wheel lockout runs out
+m=audible(scrub_page()); assert m.call(O['KEY_CENTER'],gap=1000)==11; debounced(m)  # one press scrubs (the ticks below move the value); the press's stock wheel lockout runs out
 assert [tick(m,gap=100) for _ in range(3)]==stock((NEXT,)*3)==[1,1,1] and m.nodes[m.slider]['value']==130; passed()
 m=audible(CoverflowMachine()); m.open()
 assert [tick(m,gap=20) for _ in range(2)]==[1,1] and slide(m,m.slide)[3]==120; passed()

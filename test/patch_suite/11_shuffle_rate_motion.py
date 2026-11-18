@@ -39,16 +39,17 @@ view=m.node('scroll_view','scroll_view_localmusic',stock); m.top=m.node('window'
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0)==0
 assert m.calls[0][:3]==('stock_localmusic',m.top,5)
 # Library order: the rows in library_edit.c's lr_default order (its one table), each row known by its letter: stock's
-# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon. No card media folders here
-# and no scrobbles, so no Search (OLED has lib_art 0, but this page's set does not lead with it), Podcasts and the rest.
+# by get_localmusic_showinfo index (home.c's stocks table), the added ones by their icon, Search (no icon) by its label.
+# No card media folders here and no scrobbles, so no Podcasts and the rest.
 LR_DEFAULT=re.search(r'lr_default\[\] = "(\w+)"',(ROOT/'patch/library_edit.c').read_text()).group(1)
 STOCK_LETTER={'u':0,'s':1,'l':2,'a':3,'g':4,'i':5,'f':6,'q':7,'c':8,'n':9,'p':10}  # home.c L_* by letter
 ADDED_LETTER={'local_shuffle':'h','local_era':'e','local_fav':'r','local_frequentplay':'m','local_longsongs':'L','local_games':'G'}
 def letter_of(k):
     if k in stock: return next(c for c,i in STOCK_LETTER.items() if stock[i]==k)
-    return ADDED_LETTER[m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][0]]['image']]
+    first=m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][0]]
+    return 'S' if first.get('text')=='Search' else ADDED_LETTER[first['image']]
 kids=m.nodes[view]['children']; letters=''.join(letter_of(k) for k in kids)
-assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==17,letters
+assert letters==''.join(c for c in LR_DEFAULT if c in letters) and len(set(letters))==len(kids)==18,letters
 by=dict(zip(letters,kids)); row,era,rated,top,long=by['h'],by['e'],by['r'],by['m'],by['L']
 assert m.nodes[row]['style']=='s_listitem_black'
 icon,label,into=m.nodes[m.nodes[era]['children'][0]]['children']
@@ -66,11 +67,11 @@ assert m.nodes[icon]['image']=='local_fav' and m.nodes[label]['text']=='Ratings'
 # The Shuffle row: the local_shuffle icon, its label and stock's list_into trailing image, as the
 # stock Local Music categories place them. Its button has no name, so stock's row click ignores it.
 button=m.nodes[row]['children'][0]; icon,label,into=m.nodes[button]['children']
-# Compare with the shipped constructor, whose iPod body and icon x differ from stock's.
+# Compare with the shipped constructor, whose body and icon x are OLED's grid's (lib_body, lib_inset), the icon stock's.
 demo=(B/'demo').read_bytes()
 library_body,library_icon_w,library_icon_x,library_draw_type=[struct.unpack_from('<I',demo,fileoff(demo,a))[0]&0xffff
                                                            for a in (0x535540,0x53566c,0x535678,0x5356a4)]
-assert (library_body,library_icon_w,library_icon_x,library_draw_type)==(68,52,8,1)
+assert (library_body,library_icon_w,library_icon_x,library_draw_type)==(OLED_G.lib_body,52,OLED_G.lib_inset,1)
 assert m.nodes[button]['style']=='s_btn_listitem' and [m.get(button+O[k]) for k in ('W_X','W_Y','W_W','W_H')]==[20,0,335,library_body]
 assert m.nodes[icon]['image']=='local_shuffle'
 def library_geometry(m,k):
