@@ -75,7 +75,7 @@ def has(runs, text):
 
 
 PTRS = set('''bar_bt bar_wifi bar_pct bar_slot bar_icon bar_idle bar_state bar_eq bar_title np_win
-    np_album np_slider np_remain np_elapsed np_cover np_title np_slide np_lrc genre_label'''.split())
+    np_album np_slider np_remain np_elapsed np_cover np_title np_artist np_slide np_lrc genre_label'''.split())
 UNSIGNED = set('''codec_timer batt_key bar_timer np_hash np_art scrub_timer scrub_track settle_timer lyric_push_at
     lyric_at lyric_follow_at lyric_song lyric_rows_song bc_timer bc_track bc_repaint bc_key bc_box bc_shape bc_url
     clock_key clock_timer keep_lit_at genre_timer last_input'''.split())
@@ -2120,16 +2120,19 @@ NPM_END = O['MARQUEE_HOLD_MS']
 
 
 class Marquee:
-    """OLED's Now Playing with a title text_w px wide and an album album_w, each 160 px of column."""
-    def __init__(self, fw, ui, mcl, st, text_w=300, album_w=200):
+    """OLED's Now Playing with a title text_w px wide and an artist artist_w, each 160 px of column. The album is one
+    line with an ellipsis, never scrolled (np_marquee.c npm_line: the title and the artist)."""
+    def __init__(self, fw, ui, mcl, st, text_w=300, artist_w=200):
         theme(fw, st)
         self.now = Now(fw, ui, mcl, st)
+        self.artist = ui.widget(self.now.win, 'scrlabel_artist', 206, 70, 160, 22, text='John Coltrane')
+        st.np_artist = self.artist
         self.fw, self.ui = fw, ui
         fw.mock('style_get_int', lambda s, name, d, *_: 0)
         fw.mock('hscroll_label_set_xoffset', lambda w, x, *_: struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_XOFFSET']), 0, x))
-        for w, tw in ((self.now.title, text_w), (self.now.album, album_w)):
+        for w, tw in ((self.now.title, text_w), (self.artist, artist_w)):
             struct.pack_into('<i', (C.c_char * 4).from_address(w + O['HSCROLL_TEXT_W']), 0, tw)
-        self.over = {self.now.title: max(text_w - 160, 0), self.now.album: max(album_w - 160, 0)}
+        self.over = {self.now.title: max(text_w - 160, 0), self.artist: max(artist_w - 160, 0)}
         self.pass_ms = max(self.over.values()) * 1000 // NPM_PX_S
 
     def off(self, w):
@@ -2149,19 +2152,20 @@ def test_the_lines_hold_slide_what_overflows_hold_at_the_end_and_go_back_to_rest
     m = Marquee(fw, ui, mcl, st)
     m.kick()
     (t,) = ui.due('npm_tick')
-    assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.now.album) == 0  # at rest first
+    assert ui.timers[t][2] == NPM_HOLD and m.off(m.now.title) == m.off(m.artist) == 0  # at rest first
     half = m.pass_ms // 2
     m.step(NPM_HOLD + half)
     assert m.off(m.now.title) == 140 * half // m.pass_ms  # each what overflows in the same time
-    assert m.off(m.now.album) == 40 * half // m.pass_ms
+    assert m.off(m.artist) == 40 * half // m.pass_ms
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] <= 1000 // NPM_PX_S + 1  # the longest line's next pixel
     m.step(m.pass_ms - half)  # each line's end at its column's end, held there
-    assert (m.off(m.now.title), m.off(m.now.album)) == (140, 40)
+    assert (m.off(m.now.title), m.off(m.artist)) == (140, 40)
+    assert m.off(m.now.album) == 0  # one line, its ellipsis
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_END
     m.step(NPM_END)  # back at rest together, the next hold
-    assert m.off(m.now.title) == m.off(m.now.album) == 0
+    assert m.off(m.now.title) == m.off(m.artist) == 0
     (t,) = ui.due('npm_tick')
     assert ui.timers[t][2] == NPM_HOLD
 
@@ -2201,7 +2205,7 @@ def test_the_page_opening_stops_stocks_own_timer_on_the_lines(fw, ui, mcl, st):
 
 
 def test_lines_that_fit_never_move_and_nothing_runs(fw, ui, mcl, st):
-    m = Marquee(fw, ui, mcl, st, text_w=100, album_w=150)
+    m = Marquee(fw, ui, mcl, st, text_w=100, artist_w=150)
     m.kick()
     assert not ui.due('npm_tick') and m.off(m.now.title) == 0
 
