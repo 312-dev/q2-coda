@@ -987,7 +987,8 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Center or a tap
-changes it in place.
+changes it in place; on a `set_text` theme (OLED) the label is the title alone and the value stands
+on the right column (`row_value_text`), as with the Clicker, Boot to and AirPlay's "Speaker" rows.
 The build also appends **Boot to: Rockbox / Q2 Muse** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
 General ends with **Restart**, **Shut Down** and **Reset Settings** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
 the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, drawn as the confirmation card

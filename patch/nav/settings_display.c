@@ -379,7 +379,7 @@ void home_sets_bind(void *win) {
 #define BOOT_TARGET "/mnt/data/boot-target"
 static int boot_rockbox __attribute__((section(".scratch")));
 static void boot_text(void *label) {
-    widget_set_text_utf8(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Q2 Muse");
+    row_value_text(label, boot_rockbox ? "Boot to: Rockbox" : "Boot to: Q2 Muse");
 }
 static int boot_click(void *label, void *event) {
     if (!rockbox_available()) {

@@ -511,7 +511,7 @@ static void pod_text(int i) {
     };
     _Static_assert(sizeof names / sizeof *names == POD_COUNT, "a names entry per row");
     if (i == POD_KEYTONE) { /* the Clicker, Key Tone's row */
-        widget_set_text_utf8(st.pod_label[i], clicker_text());
+        row_value_text(st.pod_label[i], clicker_text()); /* "Clicker" left, the value right */
         return;
     }
     if (i == POD_CF_SORT) { /* key/value on a set with a right column */
