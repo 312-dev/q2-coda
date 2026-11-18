@@ -78,7 +78,7 @@ AR_ALBUMS = 1 << 20  # addon.c's Albums row's click context
 class Pg(C.Structure):
     _fields_ = [*((n, C.c_void_p) for n in ('page', 'view', 'edit')), *((n, C.c_uint) for n in ('timer', 'go', 'leave', 'again')),
                 *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'a', 'code', 'arow', 'busy', 'qrnext')), ('acted', C.c_uint),
-                ('term', C.c_char * 64), ('aop', C.c_char * 16), ('lv', C.POINTER(Lv)), ('buf', C.c_void_p * ADDON_PAGES),
+                ('term', C.c_char * 64), ('aop', C.c_char * 16), ('lv', C.POINTER(Lv)), ('kept', C.c_void_p), ('buf', C.c_void_p * ADDON_PAGES),
                 ('f', C.POINTER(C.c_char_p)), ('pages', C.c_int), ('paging', C.c_int), ('moved', C.c_byte),
                 ('sec', C.c_void_p), ('nsec', C.c_byte), ('cur', C.c_byte), ('sx', C.c_int), ('sy', C.c_int),
                 *((n, C.c_byte) for n in ('sdown', 'sclaim')), ('art_lo', C.c_int), ('art_hi', C.c_int),
@@ -2191,7 +2191,7 @@ def test_a_loaded_level_opens_once_its_reply_comes(fw):
     p, lists = overlay(fw)
     p.answer(rows=[item(3)])
     assert p.pg.pend == 0 and p.pg.depth == 2 and p.top.op == b'op1' and p.top.title == b'Row 1'
-    assert p.top.state == K_READY and p.top.n == 1 and p.pg.lv[0].state == K_LOAD
+    assert p.top.state == K_READY and p.top.n == 1 and p.pg.lv[0].state == K_READY  # kept for Back
     p.tick(), p.tick()
     assert p.pg.depth == 2 and len(fw.calls('scroll_view_create')) == lists + 1  # opened once
 
@@ -2227,14 +2227,85 @@ def test_centre_while_loading_sends_nothing_again(fw):
     assert p.req.id == sent and p.pg.pend == 1 and p.pg.depth == 1
 
 
-def test_a_level_under_another_lets_its_reply_go_and_asks_again_on_back(fw):
+def test_a_level_under_another_keeps_its_reply_and_asks_again_on_back(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list')])
     p.click(0)
     p.answer(rows=[item(2)])
-    assert p.pg.lv[0].state == K_LOAD and p.pg.lv[0].n == 0 and p.pg.pages == 1  # the pages are the new level's
+    assert p.pg.lv[0].state == K_READY and p.pg.lv[0].n == 1 and p.pg.pages == 1  # the pages are the new level's
     p.back()
-    assert p.pg.depth == 1 and p.top.state == K_LOAD and p.request().endswith(b'\tmenu\n')
+    assert p.pg.depth == 1 and p.top.state == K_READY and p.request().endswith(b'\tmenu\n')
+
+
+# Back (docs/oled-design.md#loading): the level below is shown at once from the reply it kept, and asked again, its
+# rows written anew in place only when the answer differs. Nothing waits, so there is no overlay to cancel.
+def deeper(fw, depth=2):
+    p = Page(fw)
+    p.answer(rows=[item(1, b'list'), item(2)])
+    for d in range(1, depth):
+        p.sel = 1
+        p.click(0)
+        p.answer(rows=[item(10 * d + 1, b'list'), item(10 * d + 2), item(10 * d + 3)])
+    return p
+
+
+def test_back_shows_the_level_below_at_once_from_its_kept_rows(fw):
+    p = deeper(fw)
+    lists = len(fw.calls('scroll_view_create'))
+    sel = selects(fw)
+    p.sel = 0  # ringnav's prop only writes a change
+    p.back()
+    assert p.pg.pend == 0 and p.pg.depth == 1 and p.top.state == K_READY and p.top.n == 2
+    assert p.cell(0, 2) == b'Row 1' and p.cell(1, 1) == b'op2' and sel[-1] == 1  # its rows and its selection
+    assert len(fw.calls('scroll_view_create')) == lists + 1  # drawn at once: no Loading… page
+    assert p.req.running and p.request().endswith(b'\tmenu\n') and p.top.id == p.req.id  # asked again
+
+
+def test_back_s_answer_the_same_redraws_nothing(fw):
+    p = deeper(fw)
+    p.back()
+    lists = len(fw.calls('scroll_view_create'))
+    p.answer(rows=[item(1, b'list'), item(2)])
+    assert p.top.state == K_READY and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists
+
+
+def test_back_s_answer_changed_is_drawn_in_its_place(fw):
+    p = deeper(fw)
+    p.back()
+    lists = len(fw.calls('scroll_view_create'))
+    p.answer(rows=[item(1, b'list'), item(2), item(3)])
+    assert p.pg.depth == 1 and p.top.n == 3 and p.cell(2, 1) == b'op3'
+    assert len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_back_twice_shows_each_level_from_its_kept_rows(fw):
+    p = deeper(fw, 3)
+    p.back()
+    assert p.pg.depth == 2 and p.top.state == K_READY and p.top.n == 3 and p.cell(0, 1) == b'op11'
+    p.back()
+    assert p.pg.depth == 1 and p.top.state == K_READY and p.top.n == 2 and p.cell(0, 1) == b'op1'
+
+
+def test_a_row_pressed_before_back_s_answer_loads_under_the_overlay(fw):
+    p = deeper(fw)
+    p.back()
+    refresh = p.req.id
+    p.click(0)
+    assert p.pg.pend and p.pending.op == b'op1' and p.req.id == refresh + 1  # the refresh let go
+    assert p.pg.depth == 1 and p.top.n == 2
+
+
+def test_a_paged_level_below_comes_back_with_every_page(fw):
+    p = Page(fw)
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])
+    p.answer(msg=b'pages', rows=[item(2), item(3)])  # its last page
+    assert p.top.n == 4 and p.pg.pages == 2
+    p.click(0)
+    p.answer(rows=[item(5)])
+    p.back()
+    assert p.top.n == 4 and p.pg.pages == 2 and p.cell(3, 1) == b'op3'
+    p.answer(msg=b'pages', cursor=b'c0', rows=[item(0, b'list'), item(1)])  # the first page as before
+    assert p.top.n == 4 and p.pg.paging == 0  # kept: not paged again
 
 
 def test_an_action_sends_its_context_toasts_and_asks_again(fw):
@@ -2815,7 +2886,7 @@ def test_a_reload_asks_for_the_window_on_show(fw):
     p.click(0)
     p.answer(rows=[item(4)])
     p.back()
-    assert p.top.state == K_LOAD and p.request().endswith(b'\top1\tctx\tc200\n')
+    assert p.top.state == K_READY and p.request().endswith(b'\top1\tctx\tc200\n')
 
 
 # The loading overlay (docs/oled-design.md#loading) over a window's page rows: the window on show stays until the

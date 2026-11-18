@@ -951,8 +951,10 @@ own.
   Previous page rows, the new window taking the old one's place once it is there. A row pressed while a list's next
   page is on its way lets that page go, the list's Loading… row More… again, so a cancel leaves the rest a press away.
   A search or a sign-in field's text, once typed, closes the box onto the list it was opened from, the spinner over it.
-  Not yet (`ponytail:`, each keeps its Loading… page): Back to the level below, which is asked again; Spotify's browser;
-  Internet Radio's directory; and Chapters.
+  Not yet (`ponytail:`, each keeps its Loading… page): Spotify's browser; Internet Radio's directory; and Chapters.
+- **Back** in a card app waits on nothing, so it has no overlay: the level below comes back at once, as it was left,
+  its selected row and every page of it, and is asked again behind the scenes; its rows change only if the answer
+  differs.
 
 ### Menus
 

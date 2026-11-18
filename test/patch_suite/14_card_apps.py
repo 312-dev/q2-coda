@@ -176,7 +176,7 @@ m.open(); m.answer('ok','refresh','',SMENU); assert m.x_pushes()==[]
 m.pick(2); assert m.labels()==SLABELS and m.x_pushes()==[]  # its level asked for under the loading overlay: the menu stays
 m.answer('ok','','',[('info','','No downloads yet','','','')]); assert m.x_pushes()==[],m.x_pushes()
 lv=m.get(m.find('scroll_view',m.page)+O['W_PARENT']); assert signed(m.get(lv+O['W_X']))==0
-m.back(); assert m.labels()==['Loading…'] and m.x_pushes()==[]
+m.back(); assert m.labels()==SLABELS and m.requests[-1]==('menu',) and m.x_pushes()==[]  # the menu it kept, asked again
 m.answer('ok','refresh','',SMENU); assert m.x_pushes()==[]
 m.advance(2000); m.answer('ok','refresh','',[*SMENU[:2],('list','downloads','Downloads','1 downloading','',''),*SMENU[3:]])
 assert '1 downloading' in m.labels() and m.x_pushes()==[]; passed()
@@ -362,8 +362,10 @@ s.top=s.page; s.status=s.alloc(0x200); s.nodes[view]['_ringnav_index']=70; s.pre
 s.answer('ok','Playing Artist 070','',[]); assert s.requests[-1]==('playartist','ar-70'),s.requests[-1]
 s.answer('ok','pages','c1',arts(0)); view=s.find('scroll_view'); assert s.nodes[view]['_ringnav_index']==50
 s.answer('ok','pages','c2',arts(1)); assert s.nodes[view]['_ringnav_index']==70; s.answer('ok','pages','',arts(2,20))
-s.pick(105); s.answer('ok','','',[]); s.back(); s.answer('ok','pages','c1',arts(0)); s.answer('ok','pages','c2',arts(1)); s.answer('ok','pages','',arts(2,20))
-assert s.requests[-3:]==[('downloads',),('downloads','c1'),('downloads','c2')] and s.nodes[s.find('scroll_view')]['_ringnav_index']==105; passed()
+s.pick(105); s.answer('ok','','',[]); s.back()  # every page it kept, at once, its row selected, the first page asked again
+assert len(s.rows())==120 and s.requests[-1]==('downloads',) and s.nodes[s.find('scroll_view')]['_ringnav_index']==105
+rows=s.rows(); t=len(s.threads); s.answer('ok','pages','c1',arts(0))  # as it was: nothing redrawn or paged again
+assert s.rows()==rows and len(s.threads)==t and s.nodes[s.find('scroll_view')]['_ringnav_index']==105; passed()
 # Without "pages" (every app before it: q2-deezer, q2-soulseek, q2-filebrowser) a reply with a cursor keeps
 # More… and nothing more is asked; a later page without it ends the list at More… as well.
 s.back(); s.answer('ok','refresh','',SMENU); s.pick(2); t=len(s.threads); s.answer('ok','','c1',arts(0))
@@ -385,11 +387,11 @@ t=len(s.threads); s.advance(2000); assert len(s.threads)==t; passed()
 s=SlskMachine(); s.open(); s.answer('ok','refresh','',SMENU); s.pick(2)
 s.answer('ok','pages','c1',arts(0)); s.answer('ok','','',[*arts(1,49),('page','next','Next page','','c200','')])
 assert len(s.rows())==100 and s.labels()[-1:]==['Next page'],s.labels()[-2:]  # a plain row, its subtitle empty: one line
-s.pick(99); assert s.labels()==['Loading…'],s.labels()
+s.pick(99); assert len(s.rows())==100 and s.labels()[-1:]==['Next page'],s.labels()  # under the loading overlay
 s.answer('ok','pages','c250',[('page','prev','Previous page','','c0',''),*arts(4,49)]); assert s.requests[-1]==('downloads','c200'),s.requests[-1]
 assert s.labels()[:4]==['Downloads','Previous page','Artist 200','Artist 201'] and s.nodes[s.find('scroll_view')]['_ringnav_index']==1,(s.labels()[:4],s.nodes[s.find('scroll_view')]['_ringnav_index'])
 s.answer('ok','','',arts(5,10)); assert s.requests[-1]==('downloads','c250') and len(s.rows())==60
-s.pick(0); assert s.labels()==['Loading…']
+s.pick(0); assert len(s.rows())==60 and s.labels()[1]=='Previous page'
 s.answer('ok','pages','c1',arts(0)); assert s.requests[-1]==('downloads','c0'),s.requests[-1]; s.answer('ok','','',[*arts(1,49),('page','next','Next page','','c200','')])
 assert s.nodes[s.find('scroll_view')]['_ringnav_index']==99,s.nodes[s.find('scroll_view')]['_ringnav_index']
 s.back(); s.answer('ok','refresh','',SMENU); assert s.requests[-1]==('menu',) and s.labels()==SLABELS; passed()

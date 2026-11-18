@@ -1693,8 +1693,9 @@ static int req_done(void) {
 }
 
 /* The page: addon_page, for app slot pg.a, one page_list rebuilt per level.
- * A level is an op and its arguments; only the top one keeps its reply, cut in place by spot_reply
- * into the header's 4 fields and 6 a row; Back asks again for the one below. A row's kind: list
+ * A level is an op and its arguments; the top one's reply is the shown one, cut in place by
+ * spot_reply into the header's 4 fields and 6 a row, and each level under it keeps its own (kept)
+ * so Back shows it at once and asks for it again. A row's kind: list
  * opens the level uri (its context the argument), action sends uri with the context and toasts the
  * reply's message, search opens the T9 box (OK opens "search" for the text; a list's first one is
  * the title bar's search icon instead, take_find), sort opens as list does (caps word "sort"; one
@@ -1742,6 +1743,14 @@ typedef struct {
                          rows' */
 } lv_t;
 
+/* A level under the top one's reply, kept for Back (pop): its pages, their fields (calloc'd, 4 + 6
+ * a row) and its sort icon's row. f 0: none kept. */
+typedef struct {
+    char *buf[ADDON_PAGES], **f;
+    int pages;
+    char *sort[6];
+} kept_t;
+
 static struct {
     void *page, *view, *edit;
     unsigned timer, go, leave, again; /* again: when a waiting or live level asks again */
@@ -1753,6 +1762,7 @@ static struct {
     unsigned acted; /* when the action was sent */
     char term[64], aop[16];
     lv_t *lv; /* ADDON_DEPTH of them, calloc'd, and one more: the level push() waits on (pend) */
+    kept_t *kept; /* ADDON_DEPTH, calloc'd with lv: kept[i] level i's reply while one is over it */
     /* The shown reply, the top level's (no other keeps one): pages replies, each realloc'd to its
      * size, their fields in f (calloc'd with lv), every page's rows in turn; paging: a next page in
      * flight (page_next). */
@@ -2552,16 +2562,37 @@ static void keep_sel(void) {
         top()->sel = widget_get_prop_int(pg.view, "_ringnav_index", 0);
 }
 
-/* next over the top level, which lets its reply go (Back asks for it again). */
+static void kept_free(kept_t *k) {
+    while (k->pages) free(k->buf[--k->pages]);
+    free(k->f);
+    k->f = 0;
+}
+
+/* next over the top level, which keeps its reply for Back (kept; pop shows it at once and asks
+ * again) when it shows its rows, else lets it go (Back asks for it again, its Loading… page
+ * meanwhile). ponytail: every level under the top keeps its pages, up to ADDON_DEPTH - 1 of them
+ * of ADDON_PAGES replies each, where letting the lower ones go would bound it at one level's. */
 static void enter(const lv_t *next) {
     keep_sel();
     if (pg.depth == ADDON_DEPTH) { /* the oldest past the base forgotten */
-        for (int i = 1; i < ADDON_DEPTH - 1; ++i) pg.lv[i] = pg.lv[i + 1];
+        kept_free(&pg.kept[1]);
+        for (int i = 1; i < ADDON_DEPTH - 1; ++i)
+            pg.lv[i] = pg.lv[i + 1], pg.kept[i] = pg.kept[i + 1];
+        memset(&pg.kept[ADDON_DEPTH - 1], 0, sizeof *pg.kept);
         --pg.depth;
     }
     lv_t *l = top();
+    kept_t *k = &pg.kept[pg.depth - 1];
+    unsigned n = 4 + 6 * (unsigned)l->n;
+    kept_free(k);
+    if (l->state == K_READY && pg.pages && (k->f = calloc(n, sizeof *k->f))) {
+        memcpy(k->f, pg.f, n * sizeof *k->f);
+        memcpy(k->buf, pg.buf, sizeof k->buf);
+        memcpy(k->sort, pg.sort, sizeof k->sort);
+        k->pages = pg.pages, pg.pages = 0; /* drop() frees none of them */
+    }
     drop();
-    l->n = 0, l->state = K_LOAD;
+    if (!k->f) l->n = 0, l->state = K_LOAD;
     pg.lv[pg.depth++] = *next;
     pg.moved = 1;
 }
@@ -2625,15 +2656,29 @@ static lv_t *push(const char *op, const char *args, unsigned base, const char *t
     return top();
 }
 
-/* ponytail: Back pages the level below again from its first page, where keeping a paged level's
- * replies under a pushed one would spare it. */
+/* Back: the level below shown at once from the reply it kept (enter), every page of it, and asked
+ * again, its rows written anew only when the answer differs (got, as a live level's); one that
+ * kept none is asked again under its Loading… page. ponytail: only the first page is compared, so
+ * a later page that changed shows as it was until the level is asked again whole. */
 static void pop(void) {
     req_cancel();
     drop();
     --pg.depth;
-    top()->state = K_LOAD;
+    lv_t *l = top();
+    kept_t *k = &pg.kept[pg.depth - 1];
     pg.moved = -1;
+    if (!k->f) {
+        l->state = K_LOAD;
+        show();
+        return;
+    }
+    memcpy(pg.buf, k->buf, sizeof pg.buf);
+    memcpy(pg.f, k->f, (4 + 6 * (unsigned)l->n) * sizeof *pg.f);
+    memcpy(pg.sort, k->sort, sizeof pg.sort);
+    pg.pages = k->pages, k->pages = 0;
+    kept_free(k);
     show();
+    fetch(l);
 }
 
 /* Section i shown as the first level: its op asked, its list sliding in from dir's side (1 from the
@@ -3087,6 +3132,8 @@ static int closed(void *ctx, void *event) {
     stop_timer(&pg.go);
     stop_timer(&pg.leave);
     drop();
+    for (int i = 0; pg.kept && i < ADDON_DEPTH; ++i) kept_free(&pg.kept[i]);
+    free(pg.kept);
     free(pg.lv);
     free(pg.f);
     free(pg.sec);
@@ -3107,8 +3154,9 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
         return toast("Wait until the App Store finishes"), 1;
     if (pg.page || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
     if (!(pg.f = calloc(4 + 6 * ADDON_ROWS * ADDON_PAGES, sizeof *pg.f)) ||
+        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) ||
         !(pg.page = page_open("addon_page", closed, keyup)))
-        return free(pg.lv), free(pg.f), pg.lv = 0, pg.f = 0, 0;
+        return free(pg.lv), free(pg.f), free(pg.kept), pg.lv = 0, pg.f = 0, pg.kept = 0, 0;
     pg.a = k;
     app_t *a = app();
     int missing = access(a->bin, 0);
