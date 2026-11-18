@@ -196,6 +196,10 @@ static int library_safe(void) {
     return 1;
 }
 
+/* A library scan may start now: library_safe, and no song paused under a lit screen, which the scan's dialog
+ * would stop (a paused song's place is kept otherwise). LocalSend's receive asks it too (localsend_ui.c). */
+int library_quiet(void) { return library_safe() && !(mclGetPlayStatus() == 3 && g_backlight_status); }
+
 /* The last seq taken from app id. */
 static char *taken(const char *id) {
     for (int i = 0; i < APPS_MAX; ++i) {
@@ -260,8 +264,7 @@ static void library_step(void) {
     const char *id;
     for (int k = 0; libup.state == L_IDLE && (id = addon_id(k)); ++k) library_take(id);
     if (libup.state == L_WAIT) {
-        /* the scan's dialog stops the player: a song paused under a lit screen keeps its place */
-        if (!library_safe() || (mclGetPlayStatus() == 3 && g_backlight_status)) return;
+        if (!library_quiet()) return;
         /* first: the dialog runs a loop of its own, whose polls look for the scan (library_poll) */
         libup.state = L_SCAN, libup.seen = 0;
         int ctx[4] = { 0 };

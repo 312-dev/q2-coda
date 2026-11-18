@@ -313,8 +313,8 @@ m.windows('stream_page'); m.pass_(SW_IDLE); m.pass_(SW_IDLE); assert not m.switc
 # Off by default: nothing, however long.
 m=SmartMachine(smart=''); m.pass_(1); m.pass_(SW_IDLE); assert not m.switch(); m.pass_(SW_IDLE); assert not m.switch() and m.flag()==1; passed()
 # What keeps it on (or, for a few, what doesn't): USB in, AirPlay or DLNA on, SyncLink over Wi-Fi or a
-# SyncLink session (not SyncLink over Bluetooth), Wi-Fi transfer; a stream queue (Tidal's: the types
-# stock stops offline), paused or stopped, but not a local one; a network page; a time sync pending on
+# SyncLink session (not SyncLink over Bluetooth); a stream queue (Tidal's: the types
+# stock stops offline), paused or stopped, but not a local one; a network page (LocalSend's too); a time sync pending on
 # a link (not without one); and stock's own gates on its switch.
 def stream_queue(kind,status):
     def setup(m):
@@ -323,7 +323,7 @@ def stream_queue(kind,status):
 def setb(name,value): return lambda m: m.byte(syms[name],value)
 CASES=[('usb',setb('g_usbdet_value',1),True),('airplay',setb('g_airplayflag',1),True),('dlna',setb('g_dlnaflag',1),True),
        ('synclink wifi',setb('g_synclinkflag',2),True),('synclink session',setb('g_syncLink_status',1),True),
-       ('synclink bt',setb('g_synclinkflag',1),False),('wifi transfer',setb('g_wifitransport_flag',1),True),
+       ('synclink bt',setb('g_synclinkflag',1),False),('localsend',lambda m: m.windows('localsend_page'),True),
        ('paused tidal',stream_queue(0xf1,3),True),('stopped stream',stream_queue(2,1),True),
        ('paused local',stream_queue(0xf001,3),False),('streaming page',lambda m: m.windows('home_page','stream_page'),True),
        ('tidal page',lambda m: m.windows('tidal_main_page'),True),('wifi page',lambda m: m.windows('wifi_page'),True),
@@ -391,13 +391,11 @@ m=SmartScrobble(on=False); m.pass_(1); m.pass_(SW_IDLE); sa_due(m); auto(m,0); a
 m=SmartScrobble(); m.config.pop('SMARTWIFI'); m.byte(syms['g_wififlag'],0); m.pass_(1); sa_due(m); auto(m,0); assert not m.flags; passed()
 
 # Actions that check the link once, held while Smart Wi-Fi brings the radio back (smart_hold): stock's
-# Streaming's Tidal row, Network service's Wi-Fi transfer and Now Playing More's Download Cover &
-# Lyrics. A press toasts and wakes the radio; stock's own action runs once from a timer when the link is
+# Streaming's Tidal row and Now Playing More's Download Cover & Lyrics. A press toasts and wakes the radio; stock's own action runs once from a timer when the link is
 # up, or SMART_CONNECT_MS on, and only while its page is still the one in use (toasts and the volume
 # overlay aside).
 class SmartRadio(SmartMixin,RadioMachine): pass
-HELD=[('stream_row','stream_row','stream_page','0'),('netservice_row','netservice_row','netservice_page','2'),
-      ('playermore_online','online_match','playermore_page',None)]
+HELD=[('stream_row','stream_row','stream_page','0'),('playermore_online','online_match','playermore_page',None)]
 def held_machine(page,smart='1',mock=True):
     """Smart Wi-Fi's radio off, and page on top with stock's rows: a list_item per index holding a button
     of the same name, both named at +0x10 as stock's widget_set_name leaves them."""
@@ -474,10 +472,13 @@ for hook,t,page,row in HELD:
         assert empty_titles(m)==(['Not Connected'] if offline else []),(hook,smart,link)
         passed()
 # Network service's DLNA and AirPlay switches never wait, nor wake the radio: stock starts their
-# services once there is a link. Stock gets the pressed button.
+# services once there is a link. Stock gets the pressed button. Its third row, stock's Wi-Fi File
+# Transfer, opens LocalSend (localsend_ui.c), never stock's page, and holds nothing.
 for row in '01':
     m,win=held_machine('netservice_page'); held_press(m,'netservice_row',win,row)
     assert held_runs(m,'netservice_row')==[m.nodes[held_row(m,win,row)]['children'][0]] and not m.timers and m.flag()==0; passed()
+m,win=held_machine('netservice_page'); m.mock('window_create'); n=len(m.toasts); held_press(m,'netservice_row',win,'2')
+assert [c for c in m.calls if c[0]=='window_create'] and not held_runs(m,'netservice_row') and not m.timers and len(m.toasts)==n; passed()
 # A press from a page that is not the one expected (no page in use, say) is not held: stock's at once with a link,
 # and with none, the page saying so (feedback_offline), as an unheld Tidal press has it.
 for link in (1,0):
@@ -498,7 +499,7 @@ assert m.toasts[-1][3]==SW_WAIT and not held_runs(m,'stream_row') and len(m.time
 m.link=1; m.advance(500,clear=False); assert held_runs(m,'stream_row')==[tidal] and not m.timers; passed()
 # Stock's own code after the wait (the trampolines unmocked), given the row's list_item: Streaming's
 # Tidal row opens its login page with the link, and after SMART_CONNECT_MS without one, stock's
-# msg_notnetwork; Network service's Wi-Fi transfer switches to its page.
+# msg_notnetwork.
 m,win=held_machine('stream_page',mock=False); m.mock('widget_get_window','navigator_switch_to')
 held_press(m,'stream_row',win,'0'); m.link=1; m.advance(500)
 assert [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['tidal/tidal_login_page']; passed()
@@ -506,9 +507,6 @@ m,win=held_machine('stream_page',mock=False); m.mock('widget_get_window'); held_
 n=len(m.toasts); m.advance(SW_CONNECT)
 assert [m.text(c[1]) for c in m.calls if c[0]=='getFormatString']==['msg_notnetwork'] and m.toasts[n:]==[('dialog/msginfo_dialog',1,2000,'')]
 assert not [c for c in m.calls if c[0]=='navigator_to']; passed()
-m,win=held_machine('netservice_page',mock=False); m.mock('widget_get_window','navigator_switch_to')
-held_press(m,'netservice_row',win,'2'); m.link=1; m.advance(500)
-assert [(m.text(c[1]),c[2]) for c in m.calls if c[0]=='navigator_switch_to']==[('systemset/wifitransport_page',0)]; passed()
 # The payload's own presses wait the same way: Upload Scrobbles (Library's row), from its page.
 m=SmartRadio(); m.config['TOKEN']='t'; m.poll(1); m.poll(SW_IDLE); assert m.flag()==0
 m.windows('localmusic_page'); m.calls=[]

@@ -853,18 +853,18 @@ int smart_config(const char *section, const char *key);
 void smart_poll(void);
 void *page_in_use(void); /* the top window past toasts and the volume dialog */
 
-/* wifi_transfer.c */
-int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on);
-int ringnav_wifi_transfer_page(void *win, void *ctx),
-    stock_wifi_transfer_page_trampoline(void *win, void *ctx);
-void wifi_transfer_poll(void);
+/* localsend_ui.c: Settings > Network > LocalSend, the share sheet, the Accept card (docs/localsend.md) */
+int localsend_open(void *ctx, void *event), localsend_running(void), localsend_key(void *top, unsigned key);
+void localsend_share(const char *path, const char *title), localsend_poll(void), localsend_paint(void *w, void *canvas);
+int ringnav_wifi_transfer(int on), stock_wifi_transfer_trampoline(int on); /* stock's server kept off */
 
 /* battery.c */
 void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
+int battery_log_write(const char *path); /* the log's text to path, whole: its bytes, or -1 */
 int battery_history(void *ctx, void *event);
 void battery_paint(void *w, void *canvas);
-int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre exports */
+int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre shares the log */
 
 /* system.c */
 void power_poll(void);
@@ -873,6 +873,7 @@ void heatguard_poll(void);  /* heatguard.c: q2guard's cards, from power_poll */
  * I, src ui, player, usb, bt or wifi; and a clean end's snapshot, waited for (power-off, restart, update) */
 void ulog(char level, const char *src, const char *msg);
 void ulog_end(const char *why);
+void ulog_flush(void); /* q2guard's logs on the card now, as they are (LocalSend's Send Logs) */
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */

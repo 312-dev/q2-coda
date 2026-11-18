@@ -5,13 +5,14 @@
  * a flush now (/tmp/q2guard.snap, then a SIGUSR1 to the pid in /tmp/q2guard.lock, through the
  * shell's kill: demo imports no kill of its own) and waits for the answer, the request's removal,
  * at most ULOG_END_MS, so the lines are on the card before the power-off, Restart or update takes
- * the Q2 down. */
+ * the Q2 down. ulog_flush asks for the flush alone, before LocalSend sends the logs. */
 #include "navigation.h"
 #include "ulog_line.h"
 
 #define ULOG_SNAP "/tmp/q2guard.snap"
 #define ULOG_LOCK "/tmp/q2guard.lock"
 #define ULOG_END_MS 2000 /* the most a power-off waits for q2guard's flush */
+#define ULOG_FLUSH_MS 1000 /* the most Send Logs waits for it */
 #define ULOG_POLL_MS 50
 
 static int ulog_ended __attribute__((section(".scratch"))); /* ulog_end ran: once a run */
@@ -27,12 +28,8 @@ void ulog(char level, const char *src, const char *msg) {
     if (n > 0) write(2, line, (unsigned)n);
 }
 
-void ulog_end(const char *why) {
-    if (ulog_ended) return;
-    ulog_ended = 1;
-    char b[96];
-    tk_snprintf(b, sizeof b, "shutdown: %s", why);
-    ulog('I', "ui", b);
+/* q2guard's snapshot and flush for why ("flush": the flush alone), waited for at most ms. */
+static void ulog_ask(const char *why, int ms) {
     int fd = open(ULOG_SNAP, 0x80301, 0644); /* O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC */
     if (fd < 0) return;
     write(fd, why, strlen(why));
@@ -47,6 +44,19 @@ void ulog_end(const char *why) {
         unlink(ULOG_SNAP);
         return;
     }
-    for (int waited = 0; waited < ULOG_END_MS && !access(ULOG_SNAP, 0); waited += ULOG_POLL_MS)
+    for (int waited = 0; waited < ms && !access(ULOG_SNAP, 0); waited += ULOG_POLL_MS)
         usleep(ULOG_POLL_MS * 1000);
 }
+
+void ulog_end(const char *why) {
+    if (ulog_ended) return;
+    ulog_ended = 1;
+    char b[96];
+    tk_snprintf(b, sizeof b, "shutdown: %s", why);
+    ulog('I', "ui", b);
+    ulog_ask(why, ULOG_END_MS);
+}
+
+/* LocalSend's Send Logs: the logs on the card as they are now, before they are sent; the UI waits for it at most
+ * ULOG_FLUSH_MS (q2guard answers on its next tick). */
+void ulog_flush(void) { ulog_ask("flush", ULOG_FLUSH_MS); }

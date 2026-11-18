@@ -437,6 +437,14 @@ BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-f
 # Settings > Car Remote's phone rows (carremote_page.c): Phosphor device-mobile, regular, Text Secondary per half,
 # white on the selection
 CR_PHONE_PX = 20
+# Settings > Network > LocalSend (localsend_ui.c, docs/localsend.md): Send Logs' paper plane (fill, the accent, white on
+# the selection) as Pair a Phone's plus; a device's laptop or phone (regular, Text Secondary per half, white on the
+# selection) at CR_PHONE_PX on its row and LS_BIG_PX on a transfer's page; the Accept card's at PAIR_GLYPH_PX in the
+# accent; its toast's (fill, white, USB_TOAST_PX); the share sheet's file line (file-text, Text Tertiary per half).
+LS_DEVICES = {'laptop': 'laptop', 'phone': 'device-mobile'}
+LS_BIG_PX = 48
+LS_SEND_PX = 18
+LS_FILE_PX = 15
 # The software update's check (sw_update.c, docs/oled-design.md Software Update): iOS's twelve-spoke spinner in the
 # half's Text Primary (_d white, _l black) on no circle, 48 px across (its results' glyphs are MODE_GLYPHS).
 SW_SPIN_SPOKES = 12
@@ -474,7 +482,7 @@ EMPTY_PX = 60
 EMPTY_GLYPHS = {g: g for g in (
     'cards', 'music-notes', 'vinyl-record', 'microphone-stage', 'music-notes-simple', 'guitar', 'folder', 'playlist',
     'clock-counter-clockwise', 'chart-bar', 'sparkle', 'timer', 'calendar-blank', 'star', 'magnifying-glass',
-    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile')} | {'sd-card': 'memory',
+    'radio', 'cloud-slash', 'download-simple', 'list-numbers', 'car-profile', 'broadcast', 'wifi-slash')} | {'sd-card': 'memory',
     'heart-slash': 'q2coda/heart-slash'}
 USB_TOASTS = {'unplugged': ('plug-fill', token('secondary')), 'ejected': ('check-circle-fill', token('positive')), 'audio': ('speaker-hifi-fill', 0xffffff)}
 # The status row's battery (list_marks.c battery_slim): charging, Phosphor's lightning, too weak a charger its warning,
@@ -796,6 +804,13 @@ def images(t):
     out |= {f'{prefix}_cc_{n}_l': phosphor(g, px, CC_LIGHT[n], CC_INK.get(n, 0.0)) for n, (g, px, _) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_lsdev_{n}_{k}': phosphor(g, CR_PHONE_PX, c) for n, g in LS_DEVICES.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_lsbig_{n}_{k}': phosphor(g, LS_BIG_PX, c) for n, g in LS_DEVICES.items()
+            for k, c in inks('secondary', 'd', 'l').items()}
+    out |= {f'{prefix}_lscard_{n}': phosphor(g, PAIR_GLYPH_PX, on) for n, g in LS_DEVICES.items()}
+    out |= {f'{prefix}_lssend_{k}': phosphor('paper-plane-tilt-fill', LS_SEND_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
+    out |= {f'{prefix}_lstoast_{n}': phosphor(f'{g}-fill', USB_TOAST_PX, 0xffffff) for n, g in LS_DEVICES.items()}
+    out |= {f'{prefix}_lsfile_{k}': phosphor('file-text', LS_FILE_PX, c) for k, c in inks('tertiary', 'd', 'l').items()}
     # the buttons' focus ring's ends (ui_kit.c cta_capsule), Text Primary per half
     out |= {f'{prefix}_ctaring_{s}_{k}': cta_ring_end(s == 'r', c) for s in 'lr' for k, c in CTA_RING_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}

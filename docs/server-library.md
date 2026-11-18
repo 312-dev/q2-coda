@@ -112,7 +112,7 @@ i	<pid>	<sid>	<card path or empty>
 ### Duplicates
 
 The catalogue leaves out only the songs the app synced. A song that reached the card another way
-(copied over USB, sent by Wi-Fi transfer, synced before the app kept track) and is also on the
+(copied over USB, sent over LocalSend, synced before the app kept track) and is also on the
 server would show twice, so the firmware matches each server song against the card's songtable,
 strongest evidence first:
 
@@ -131,7 +131,7 @@ the song plays from the card, and ratings sync by that sid. Layer 3 never matche
 stronger layer disagrees: both sides have MusicBrainz ids and they differ. A duration the firmware cannot read (taglib finds no length) fails layers 2 and 3.
 
 The match runs at each import and again whenever the card's library changes (Update Local Music, a
-scan after files arrive over USB or Wi-Fi transfer: each moves `library_gen`), from the songs kept
+scan after files arrive over USB or LocalSend: each moves `library_gen`), from the songs kept
 in `serverall`, so a song copied to the card later leaves the server rows without a new catalogue.
 Card files are read (their size, and their MusicBrainz id and length) only where a server song has
 the same normalised title, or, for a card file with no title tag, the same size, so a large card is
@@ -210,7 +210,7 @@ until the next one.
 |---|---|---|
 | Import: `catalogue.tsv` read on a pthread when its `seq` changes, a line at a time, into a new `catalogue.db` (`serverall` with `songtable`'s own columns, `servermeta` beside it), in one transaction on the job's own SQLite connection; the header's `rows=` checked against the rows read; answered in `.catalogue.done`; the library generation bumped so open lists query again | `catalogue.c` (`cat_worker`, `import_file`), polled from `addon_poll` | yes |
 | Each server row's identity: `fileurl` = `/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>`, a hidden folder the scan skips, stable across imports, so playlists, ratings, favorites and play counts key on it as on a card path; `filename` the title alone, which stock's Search lists a song by | `catalogue.c` (`imp_song`) | yes |
-| Duplicates: the three layers, again whenever `library_gen` moves (Update Local Music, the scans after USB storage and Wi-Fi transfer), including a scan that ends while a job runs | `catalogue.c` (`cat_match`, `cat_same`, `cat_poll`) | yes |
+| Duplicates: the three layers, again whenever `library_gen` moves (Update Local Music, the scans after USB storage and LocalSend), including a scan that ends while a job runs | `catalogue.c` (`cat_match`, `cat_same`, `cat_poll`) | yes |
 | Merge: `union all select * from servertable` inside `library_query`'s music loads and in Era's SQL, only in Local + Server and while the file is attached | `navigation.c` (`library_query`), `library_lists.c` (`era_sql`) | yes |
 | Search: stock's Search (Library > Search, pull-to-search) runs `SearchMusicByName` and its kin, `... from songtable where <field> like '%<text>%'`, through `toolsQueryDbTable`, which is `library_query`, outside a music load; with Local + Server such a query reads the union, so server songs are found (Songs, Artists, Albums and Genres tabs). Pressing a result is stock's `search_track_row_on_click`, one of the `CATALOGUE_ACCESS` sites, so the offline rule holds; each tab's rows (one per record of `p_deque_searchshowlist`) are grayed as the rows below are: a song that can't play, an artist, album or genre none of whose songs can | `navigation.c` (`library_query`, three lines; `grey_rows`, `ringnav_search_rows`), `catalogue.c` (`catalogue_search`) | yes |
 | Availability: an in-memory index of the server rows and linked card files (by path, and by sid), with each offline copy, from `servermeta.local` and `catalogue.avail`; online is `networkGetConnectStatus()` and no app's `server=down`, read once a second | `catalogue.c` | yes |

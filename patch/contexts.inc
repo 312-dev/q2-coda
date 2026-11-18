@@ -40,6 +40,11 @@
 { "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/carremote_page.c) */
 { "carphone_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
 { "carhowto_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
+{ "localsend_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/localsend_ui.c) */
+{ "lssend_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/localsend_ui.c) */
+{ "lsshare_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/localsend_ui.c) */
+{ "lstrust_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/localsend_ui.c) */
+{ "lsxfer_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/localsend_ui.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
 { "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
