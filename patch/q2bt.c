@@ -5,10 +5,15 @@
  * change reconnects on a new one), which also carries the controller's Number Of Completed Packets
  * for each delivered packet, and a few small /proc and /sys reads, bluealsa's encoder
  * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
- * the start, when its encoder thread changes and every BT_PCMS_MS. Nothing here changes how the Q2
- * streams. Every read that fails leaves its field "-", and with no Bluetooth socket at all (the
- * emulator) it tries again a minute later and does nothing else. */
+ * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
+ * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
+ * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
+ * step-down's setting on, a link the radio cannot keep up with is moved from aptX HD to aptX to SBC
+ * and back (bt_step), each switch q2bt-codec's SelectCodec. Every read that fails leaves its
+ * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
+ * does nothing else. */
 #include "q2bt.h"
+#include "q2log.h"
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
 #define PCMS_CMD                                                                                   \
@@ -18,6 +23,10 @@
 #define RETRY_MS 60000 /* a Bluetooth socket that would not open is tried again after this */
 #define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */
 #define WLAN "/sys/class/net/wlan0/statistics/"
+#define CONFIG "/mnt/data/config.ini" /* LDAC Auto and the step-down's setting, read only */
+#define CODEC_FILE "/tmp/q2bt.codec"  /* q2bt-codec's answer to a switch */
+#define CODEC_PROG "/usr/bin/q2bt-codec"
+#define STEP_ASK_MS 3000 /* bluealsa asked for the codec this long after a switch is sent */
 
 static struct {
     card_log *log;
@@ -44,6 +53,15 @@ static struct {
                    */
     unsigned done, done_was; /* completions counted on the raw socket, and at the last line */
     struct bt_fly fly;
+    card_log *ulog;        /* the unified log: the EDR outcome, once; each STEP */
+    unsigned char sink[6]; /* the A2DP sink's address (bluealsa's a2dpsrc PCM), have_sink */
+    int have_sink, sink_h; /* and its ACL handle at the last line, -1 none */
+    struct bt_edr edr;
+    struct bt_step step; /* the step-down, kept through a pause; afresh for another headset */
+    int allowed;         /* bt_step_allowed's, from config.ini */
+    char pcm[96];        /* the A2DP source PCM's object path, "" none */
+    int codec_pid;       /* q2bt-codec running a switch, 0 none */
+    int codec_failed;    /* a switch failed in this stream: no more until the next */
 } bt;
 
 static void note(const char *what) {
@@ -67,19 +85,23 @@ static int counts(struct bt_counts *c) {
     bt_devinfo((const unsigned char *)di, c);
     return 1;
 }
+/* the first ACL link's handle; the A2DP sink's into bt.sink_h (-1 none, or no sink known) */
 static int acl_handle(void) {
     unsigned req[1 + 4 * 4] = { 0 }; /* dev_id 0, room for four links */
     ((unsigned short *)req)[1] = 4;
+    bt.sink_h = -1;
     if (ioctl(bt.ctl, HCIGETCONNLIST, req)) return -1;
+    if (bt.have_sink) bt.sink_h = bt_acl_handle_of((const unsigned char *)req, 4, bt.sink);
     return bt_acl_handle((const unsigned char *)req, 4);
 }
-/* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, and Number Of
- * Completed Packets (0x13), the controller's account of each packet it delivered */
+/* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, Number Of Completed
+ * Packets (0x13), the controller's account of each packet it delivered, and for the EDR command
+ * Command Status (0x0f) and Connection Packet Type Changed (0x1d) */
 static void raw_open(void) {
     unsigned short addr[3] = { AF_BLUETOOTH, 0,
                                0 }; /* sockaddr_hci: family, hci0, HCI_CHANNEL_RAW */
-    /* hci_filter: event packets; events 0x0e and 0x13; any opcode */
-    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x13, 0, 0 };
+    /* hci_filter: event packets; events 0x0e, 0x0f, 0x13 and 0x1d; any opcode */
+    unsigned filter[4] = { 1u << 4, 1u << 0x0e | 1u << 0x0f | 1u << 0x13 | 1u << 0x1d, 0, 0 };
     bt.raw = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
     if (bt.raw < 0) return;
     if (bind(bt.raw, addr, sizeof addr) ||
@@ -100,6 +122,12 @@ static int events(int ms, int until_answered) {
         if (n <= 0) return 0;
         bt.done += (unsigned)bt_completed(b, n, bt.link.handle);
         bt_event(&bt.link, b, n);
+        char line[48];
+        int said = bt_edr_event(&bt.edr, b, n, line, sizeof line);
+        if (said) note(line);
+        if (said == 2) /* a refusal or an unexpected mask warns */
+            ulog_add(bt.ulog, time(0), now_ms(),
+                     strstr(line, "ptype=0x0018 status=0x00") ? 'I' : 'W', "bt", line);
         if (until_answered && bt.link.answered >= 5) return 1;
     }
 }
@@ -113,6 +141,9 @@ static void link_read(void) {
         bt.fly.have = 0; /* a new link's packets: counted afresh */
     }
     bt_link_clear(&bt.link, h);
+    /* EDR, once to each of the sink's handles (bt_edr_step): a phone's link and LE are never sent
+     * it */
+    if (bt.raw >= 0 && bt_edr_step(&bt.edr, bt.sink_h, c)) write(bt.raw, c, 8);
     if (bt.raw < 0 || h < 0) return;
     events(0, 0); /* the second's completions, and last second's late answers */
     bt_link_clear(&bt.link, h);
@@ -215,6 +246,10 @@ static void enc_find(unsigned now) {
 }
 
 /* ---- the codec ---- */
+static void allowed_read(void) {
+    char b[8192];
+    bt.allowed = slurp(CONFIG, b, sizeof b) > 0 ? bt_step_allowed(b) : -1;
+}
 static void pcms_start(unsigned now) {
     if (bt.pcms_pid > 0) return;
     bt.pcms_at = now;
@@ -231,11 +266,57 @@ static void pcms_reap(void) {
     bt.pcms_pid = 0;
     char b[4096], codec[24], line[96];
     unsigned hz, delay;
-    if (slurp(PCMS_FILE, b, sizeof b) <= 0 || !bt_pcms(b, codec, sizeof codec, &hz, &delay)) return;
+    if (slurp(PCMS_FILE, b, sizeof b) <= 0) return;
+    unsigned char was[6];
+    int had = bt.have_sink, same = 1;
+    memcpy(was, bt.sink, 6);
+    bt.have_sink =
+        bt_pcms_sink(b, bt.sink); /* the headset, for the EDR command from the next line */
+    for (int i = 0; i < 6; ++i) same &= was[i] == bt.sink[i];
+    if (!had || !bt.have_sink || !same) /* another headset: where it started is its own */
+        memset(&bt.step, 0, sizeof bt.step);
+    if (!bt_pcms_path(b, bt.pcm, sizeof bt.pcm)) bt.pcm[0] = 0;
+    allowed_read();
+    if (!bt_pcms(b, codec, sizeof codec, &hz, &delay)) return;
     if (!strcmp(codec, bt.codec) && hz == bt.hz) return;
     memcpy(bt.codec, codec, sizeof codec), bt.hz = hz;
     snprintf(line, sizeof line, "CODEC %s %u Hz delay=%u.%u ms", codec, hz, delay / 10, delay % 10);
     note(line);
+}
+
+/* ---- the step-down (bt_step): a switch is q2bt-codec, in the background ---- */
+static void step_reap(unsigned now) {
+    int status = 0;
+    if (bt.codec_pid <= 0 || waitpid(bt.codec_pid, &status, WNOHANG) != bt.codec_pid) return;
+    bt.codec_pid = 0;
+    bt.pcms_at = now - BT_PCMS_MS; /* the codec it has now: asked at the next line */
+    if (!status) return;           /* exited 0 */
+    char b[96] = "", line[128];
+    int n = slurp(CODEC_FILE, b, sizeof b);
+    for (int i = 0; i < n && i < (int)sizeof b; ++i)
+        if (b[i] == '\n') b[i] = 0;
+    snprintf(line, sizeof line, "STEP failed %s", n > 0 ? b : "-");
+    note(line);
+    ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
+    bt.codec_failed = 1;
+}
+static void step(unsigned now, int wq, int fly, int bufs) {
+    char line[160];
+    step_reap(now);
+    int to = bt_step(&bt.step, now, bt.allowed, bt_codec_rank(bt.codec), wq, fly, bufs);
+    if (!to || bt.codec_pid > 0 || bt.codec_failed || !bt.pcm[0]) return;
+    snprintf(line, sizeof line, "STEP %s -> %s", bt.codec, bt_codec_name(to));
+    note(line);
+    ulog_add(bt.ulog, time(0), now_ms(), 'I', "bt", line);
+    snprintf(line, sizeof line, CODEC_PROG " %s %s > " CODEC_FILE " 2>&1", bt.pcm,
+             bt_codec_name(to)); /* bt_pcms_path lets no shell character through */
+    int pid = fork();
+    if (!pid) {
+        execl("/bin/sh", "sh", "-c", line, (char *)0);
+        _exit(127);
+    }
+    bt.codec_pid = pid > 0 ? pid : 0;
+    bt.pcms_at = now - BT_PCMS_MS + STEP_ASK_MS;
 }
 
 /* ---- a stream ---- */
@@ -250,7 +331,8 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.own_ticks = ticks_of("/proc/self/stat", &ok);
     bt.wlan = wlan(&bt.wtx, &bt.wrx);
     busy_since(&bt.cpu, &cores);
-    bt.codec[0] = 0, bt.hz = 0, bt.enc_name[0] = 0, bt.fly.have = 0;
+    bt.codec[0] = 0, bt.hz = 0, bt.enc_name[0] = 0, bt.fly.have = 0, bt.codec_failed = 0;
+    allowed_read();
     enc_find(now);
     snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
              c->acl_pkts, bt.raw >= 0 ? "ok" : "none");
@@ -261,6 +343,7 @@ static void begin(unsigned now, const struct bt_counts *c) {
 static void end(void) {
     note("STOP");
     bt.flush = 1;
+    bt_edr_reset(&bt.edr); /* a reconnect in the pause may bring the same handle number back */
     if (bt.raw >= 0) close(bt.raw), bt.raw = -1;
 }
 static void sample(unsigned now, const struct bt_counts *c) {
@@ -312,10 +395,12 @@ static void sample(unsigned now, const struct bt_counts *c) {
     bt_line(line, sizeof line, &s);
     heat_add(bt.log, line);
     bt.was = *c, bt.at = now;
+    step(now, s.wq, s.fly, c->acl_pkts);
 }
 static void tick(unsigned now) {
     struct bt_counts c;
     pcms_reap();
+    step_reap(now); /* a switch that outlived its stream, too */
     if (!ctl_ok(now) || !counts(&c)) return;
     int ev = bt_detect_step(&bt.det, now, c.byte_tx);
     if (ev == BT_EV_START) {
@@ -331,7 +416,10 @@ static void tick(unsigned now) {
     if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
 }
 
-void bt_init(card_log *l) { bt.log = l, bt.ctl = bt.raw = -1; }
+void bt_init(card_log *l, card_log *u) {
+    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = -1;
+    bt_edr_reset(&bt.edr);
+}
 int bt_streaming(void) { return bt.det.on; }
 int bt_flush_due(void) {
     int due = bt.flush;
@@ -351,7 +439,7 @@ void bt_sleep(unsigned ms) {
             step = due <= 0 ? 0 : due < left ? due : left;
         }
         if (step > 0) usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
-        if (guard_woke) return;                        /* a request to answer now (q2guard.c) */
+        if (guard_woke) return;                       /* a request to answer now (q2guard.c) */
         now = now_ms();
         if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }

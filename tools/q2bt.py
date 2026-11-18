@@ -9,7 +9,7 @@ each stream with its codec, the seconds it fell behind, and what every signal di
 A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done= fly=`, one
 a second while a stream runs (`ba` and `own` in percent of one core, written in tenths by older logs: 90 for 9.0; `er`
 and `ew` in ms a second; `done` packets a second the controller delivered, `fly` packets in it, so fly/done is how long
-one waits there); a note is `TIME WORD ...` (START, ENCODER, CODEC, LINK, STOP). The card store's `== N lines lost while the
+one waits there); a note is `TIME WORD ...` (START, ENCODER, CODEC, LINK, STEP, STOP). The card store's `== N lines lost while the
 card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
 named for its codec, seen within a second of a change) or CODEC note that names another codec; a CODEC note can come up
 to a minute late (older logs have no ENCODER notes), so the seconds since the last gap in sending before it go to the

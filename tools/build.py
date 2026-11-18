@@ -30,6 +30,7 @@ def dev_tag(number):
     return 'V' + digits + 'i'
 BASE = 0xb00000
 SCRATCH = 0xc80000  # 1.5 MB of payload text below it; demo's heap starts after the scratch state
+SCRATCH_SIZE = 0x20000  # the scratch state's room (docs/architecture.md#the-payload)
 RING_STEP = 48
 HOOKS = {
     # USB charging is inhibited before insertion and guarded through enumeration/disconnect.
@@ -254,6 +255,10 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 BOOT = 'usr/bin/q2boot'
 # The heat log and overheat guardian (docs/internals.md#overheat-guardian, patch/q2guard.c): BOOT_HOOK starts it.
 GUARD = 'usr/bin/q2guard'
+# The link monitor's codec switch (docs/internals.md#bluetooth-link-monitor, patch/q2bt_codec.c): q2guard runs it to
+# step a weak link down from aptX HD; libdbus sends bluealsa the SelectCodec dbus-send cannot.
+BT_CODEC = 'usr/bin/q2bt-codec'
+BT_CODEC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libdbus-1.so.3.19.15']
 # --dev only: q2guard takes a temperature from /tmp/q2guard.sensor, so the emulator can play an overheat.
 GUARD_DEV_HOOK = (b' /usr/bin/q2guard ', b' /usr/bin/q2guard --dev ')
 # The boot animation's player (docs/boot.md#boot-animation, patch/splash.c): S11logo_display_shell runs it.
@@ -2256,10 +2261,15 @@ def compile_payload(out):  # pragma: no mutate block
     return symbols(out/'patch.elf')
 
 def check_layout(payload, ps):
-    """The payload at BASE ends by SCRATCH, and its scratch state starts there and fills at most 128 KB."""
+    """The payload at BASE ends by SCRATCH, and its scratch state starts there and fills at most 128 KB
+    (SCRATCH_SIZE). Prints the bytes free in each and returns the scratch state's."""
     check(len(payload) <= SCRATCH-BASE, 'Payload overlaps its scratch page')
     check(ps['__scratch_start'] == SCRATCH, 'Scratch state moved')
-    check(ps['__scratch_end'] <= SCRATCH + 0x20000, 'Scratch state exceeds its 128 KB')
+    check(ps['__scratch_end'] <= SCRATCH + SCRATCH_SIZE, 'Scratch state exceeds its 128 KB')
+    free = SCRATCH + SCRATCH_SIZE - ps['__scratch_end']
+    print(f'payload room: code and constants {SCRATCH-BASE-len(payload):,} bytes free of {SCRATCH-BASE:,}; '
+          f'scratch state {free:,} bytes free of {SCRATCH_SIZE:,}', flush=True)
+    return free
 
 def compile_helper(out, cat, src, name, rels):
     """Link patch/{src}.c (or each of a list of sources under patch/) and start.c as name against the stock
@@ -2554,7 +2564,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     emit(themes, out)
     ps = compile_payload(out)
     payload = (out/'patch.bin').read_bytes()
-    check_layout(payload, ps)
+    scratch_free = check_layout(payload, ps)
     patched = bytearray(raw_demo)
     patch_timezones(patched)
     def jump(off, name): patched[off:off+8] = struct.pack('<II', j(ps[name]), 0)
@@ -2987,6 +2997,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
+                               BT_CODEC: (HELPER_LIKE, compile_helper(out, cat, 'q2bt_codec', 'q2bt-codec', BT_CODEC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
                                GUEST_DBUS: ('etc/dbus-1/system.d/bluealsa.conf', (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()),
                                GUEST_HOTSPOT: (HELPER_LIKE, (ROOT/'patch/q2_hotspot.sh').read_bytes()),
@@ -3091,7 +3102,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         demo_sha256=sha(patched), patch_sha256=sha(payload), update_sha256=sha((out/'update.tar').read_bytes()),
         rootfs_sha256=sha(newsq.read_bytes()), kernel_sha256=sha(blobs['recovery-update/xImage']),
         **({'aic_notifier': aic_notifier} if aic_notifier else {}),
-        patch_bytes=len(payload), ring_step_pixels=RING_STEP,
+        patch_bytes=len(payload), scratch_free_bytes=scratch_free, ring_step_pixels=RING_STEP,
         audio_extension_calls=[dict(address=hex(a), original='0x0320f809', replacement=hex(jal(ps['ringnav_audio_extension']))) for a in AUDIO_EXTENSION_CALLS],
         version=version, dev=dev, update_repo=repo, signing_key=key.hex(), peq=audio, bluealsa_sha256=sha(bluealsa), bluetoothd_sha256=sha(bluetoothd), q2video_sha256=sha((out/'q2video').read_bytes()), q2boot_sha256=sha((out/'q2boot').read_bytes()), q2splash_sha256=sha((out/'q2splash').read_bytes()), coda_rc_sha256=sha((out/'coda-rc').read_bytes()), coda_rc_bytes=len((out/'coda-rc').read_bytes()), q2_guest_sha256=sha((out/'q2-guest').read_bytes()), **({'q2remote_sha256': sha((out/'q2remote').read_bytes()), 'q2eq_sha256': sha((out/'q2eq').read_bytes())} if dev else {}), compact_code=code_changes, changed_assets=changed_assets, thirdparty=thirdparty, logo_sha256=sha(logo_data),
         **({'rotator_clock': rotator} if rotator else {}),
@@ -3103,7 +3114,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         tools={t:run(t,'--version').splitlines()[0] for t in ['clang','ld.lld','llvm-objcopy']} |
               {'imagemagick': imagemagick('-version', data=b'').decode().splitlines()[0]})
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','version']},indent=2))
+    print(json.dumps({k:manifest[k] for k in ['update_sha256','patch_bytes','scratch_free_bytes','version']},indent=2))
 
 if __name__ == '__main__':
     ap=argparse.ArgumentParser(description=__doc__)

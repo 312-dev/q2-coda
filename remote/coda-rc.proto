@@ -86,6 +86,7 @@ enum Capability {
   CAP_RECENT = 4096;     // the library's "recent" node: the 100 songs added last, newest first
   CAP_BUFFERING = 8192;  // NowPlaying.buffering and its bytes: a server song loading
   CAP_RADIO = 16384;     // StartRadio, and NowPlaying.radio
+  CAP_NOTICE = 32768;    // NowPlaying.notice and notice_id: the Q2 Muse's toasts
 }
 
 // type 0x03. Asks the Q2 to show a 6-digit code. Refused with BUSY while another phone pairs,
@@ -186,6 +187,10 @@ message NowPlaying {
   uint32 total_bytes = 15;     // the whole song, 0 unknown
   uint32 buffered_ms = 16;     // buffered_bytes as a share of the song's length, 0 unknown
   bool radio = 17;       // CAP_RADIO: a radio plays (the Q2's blue Radio pill): it picks the order and adds songs
+  // CAP_NOTICE: the toast the Q2 Muse showed last ("Radio isn't available for this song"), for its 4 s; empty
+  // otherwise. notice_id is new for each toast, so the same words twice are two notices.
+  string notice = 18;
+  uint32 notice_id = 19;
 }
 
 enum PlayState {
