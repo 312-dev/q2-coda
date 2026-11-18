@@ -382,7 +382,7 @@ Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Displ
 review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
 (`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
-Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
+Transfer), then Restart and Shut Down after a 12 px gap and Reset Settings last, directly under Shut Down, in Negative red as a destructive row (`power_rows`); Battery is stock's Power
 page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
@@ -989,13 +989,15 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
 
 All are among the [settings icons](#settings-icons) the build pre-sizes. A value row has its value
 in the label (260 pixels wide, to where the chevron ends) and no chevron, since Center or a tap
-changes it in place.
+changes it in place; on a `set_text` theme (OLED) the label is the title alone and the value stands
+on the right column (`row_value_text`), as with the Clicker, Boot to and AirPlay's "Speaker" rows.
 The build also appends **Boot to: Rockbox / Q2 Muse** to Battery when Rockbox is present; see [Boot](boot.md#rockbox).
-General ends with **Restart** and **Shut Down** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
+General ends with **Restart**, **Shut Down** and **Reset Settings** (`patch/power_rows.c`), 12 px below the rows above them (an empty `label`, which
 the wheel passes) and with no chevron. Each asks first in stock's `confirminfo_dialog`, drawn as the confirmation card
 ("Restart?" or "Shut Down?" as the title, then Cancel, selected, and the verb); Cancel or Return leaves the page as it was.
 Restart reboots (`ringnav_reboot`: the queue saved, then stock's `device_reboot`), with no message first. Shut Down asks stock's own `msg_poweroff` and opens stock's `poweroff_page`, as the power key's Shut Down? and Auto
 power-off do; its `into_poweroff` saves the queue.
+Reset Settings, the last row and the one that loses settings, is drawn in Negative red and keeps its chevron, as it opens stock's reset page; Shut Down is not red, as it loses nothing (the confirm card's consequential kind).
 The page is `CTX_FIXED`, so the wheel walks onto them like the stock rows.
 
 A change is saved at once with the stock `write_int_config(value, "IPOD", key)` (`0x4fe67c`):
