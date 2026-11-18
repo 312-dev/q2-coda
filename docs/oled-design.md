@@ -614,10 +614,9 @@ has no place for keeps a place of its own:
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
   `speaker-simple-none` and `speaker-simple-high` (fill, 16 px, Text Secondary) centered at x 32
   and 339 on its center line, and no number; the times' row stays blank meanwhile. The scrub is
-  a 14 px white knob on the fill's end. The A-B markers follow the bar
-  across but keep stock's row, y 308 on screen, under the page dots. ponytail: a marker within
-  about 14 px of either end of the bar falls under the bottom corners' glass; moving them onto
-  the bar needs the y that stock's placement (`0x53baa4`) writes made per set.
+  a 14 px white knob on the fill's end. The A-B markers sit on the bar,
+  centered on it (`ringnav_ab_move`, which stock's placement (`0x53baa4`) calls for its y in place
+  of widget_move), at the same share of its width as the point is of the song (`ringnav_ab_x`).
 
 ### Rating page
 
@@ -910,7 +909,7 @@ four action rows (no presets is a toast); and Upload Scrobbles with nothing to s
 
 The older note (`feedback_empty`): one line of 16 px Text Secondary centered in the free area below a page's rows,
 down to y 282, with an optional hint in 15 px Text Tertiary 24 px lower. Pages whose list keeps rows the note
-explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, its subtitle
+explains use it: the App Store's "No apps listed" under its Check for Updates row, a card app's page with nothing in it (an empty Subsonic artist: its "No albums" info row's words, drawn only while there is no next page: an info row with More… after it stays a list, its subtitle
 the hint, with no Add to Sync over nothing and no selectable info row, audit2 F1), the confirm note under Reset
 Settings, and a payload list's other messages (Internet Radio's "Loading…", Battery History's "Unplug to start").
 

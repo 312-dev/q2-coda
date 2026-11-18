@@ -2260,10 +2260,11 @@ static int artist_hold(lv_t *l) {
 /* A reply with nothing in it (an empty artist or album: its info row, "No albums", and the sync
  * toggle over nothing) under the menu sheet: no rows, the house empty note instead
  * (docs/oled-design.md#empty-and-offline), the info row's title over its subtitle as the hint, and
- * the toggle left out, as an action over nothing (audit2 F1). 1 when it is one. */
+ * the toggle left out, as an action over nothing (audit2 F1). A reply with a next page (a cursor) is
+ * not nothing: its rows stay, the More… row after them. 1 when it is one. */
 static int empty_view(lv_t *l) {
     int info = -1;
-    if (l->lay) return 0;
+    if (l->lay || pg.f[3][0]) return 0;
     for (int i = 0; i < l->n; ++i) {
         if (!strcmp(cell(i, 0), "info") && strcmp(cell(i, 1), "about")) {
             if (info < 0) info = i;

@@ -22,6 +22,14 @@ int ringnav_ab_x(int t) {
     return I(st.np_slider, W_X) + (x - x0) * I(st.np_slider, W_W) / w0;
 }
 
+/* An A-B marker's move (stock's two widget_move calls after its x, whose y is 250: AB_MOVE_CALLS in
+ * tools/build.py): centered on the bar's box, where stock's y put it on the old bar's place,
+ * which on OLED's page is under the screen's rounded corners. */
+int ringnav_ab_move(void *w, int x, int y) {
+    if (st.np_slider) y = I(st.np_slider, W_Y) + (I(st.np_slider, W_H) - I(w, W_H)) / 2;
+    return widget_move(w, x, y);
+}
+
 /* ui_loader_load_widget_with_parent, every window's asset (window_open's); any opener comes
  * through here. */
 extern void *stock_ui_load_trampoline(const char *name, void *parent);
