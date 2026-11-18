@@ -402,3 +402,54 @@ def test_a_streaming_song_the_player_waits_for_is_buffering(fw, ui, mcl, recs):
     del q2.files['/tmp/q2player.wait']
     q2.tick()
     assert (q2.now()['buf'], q2.now()['bhave']) == ('0', '0')
+
+
+def test_a_queued_stream_download_carries_its_path_title_and_artist(fw, ui, mcl, recs):
+    """The car, 2026-11-18 00:24: Shuffle Songs over server songs, and the car's queue listed every one as "[Not in
+    the library]". The app's playlist session queues its stream downloads, records with no library id (0), named by
+    their server rows' tags (tags.c card_record_tags); the queue file had only the 0. Such a line carries the
+    record's path, title and artist after tabs, a tab or line break in them made a space; a library song keeps
+    its id alone."""
+    q2 = Q2(fw, ui, recs, songs=1)
+    song = '/mnt/mmc/.subsonic/stream/9f2c/original/0/make it with you [VcF5].flac'
+    q2.songs += [recs(id_=0, path=song, name='make it with you [VcF5].flac', title='Make It\twith You', artist='Bread',
+                      album='Manna'),
+                 recs(id_=0, path='/mnt/mmc/.subsonic/stream/9f2c/original/0/x [Q1].flac', name='x [Q1].flac',
+                      title='', artist='', album='')]
+    q2.queue(at=1)
+    q2.tick()
+    assert q2.files[QUEUE].decode().split('\n') == [
+        '1 1 3', '10', f'0\t{song}\tMake It with You\tBread',
+        '0\t/mnt/mmc/.subsonic/stream/9f2c/original/0/x [Q1].flac\tx [Q1].flac\t', '']
+
+
+def test_a_toast_goes_to_the_car_for_four_seconds(fw, ui, mcl, recs):
+    """The Q2 Muse toasted "Radio isn't available for this song" and the car, which draws no toast, showed nothing
+    (2026-11-18 00:28). Every toast (library_pages.c toast) is Now Playing's note for CR_NOTE_MS, counted, so the
+    daemon sends it as NowPlaying.notice; none is kept while Car Remote is off."""
+    q2 = Q2(fw, ui, recs)
+    q2.queue()
+    fw.mock('navigator_to_with_context', lambda *_: 0)
+    toast = fw.fn('toast', None, C.c_char_p)
+    q2.tick()
+    assert (q2.now()['note'], q2.now()['noten']) == ('', '0')
+    toast(b"Radio isn't available for this song")
+    q2.tick()
+    assert (q2.now()['note'], q2.now()['noten']) == ("Radio isn't available for this song", '1')
+    q2.tick(3000)
+    assert q2.now()['note'] == "Radio isn't available for this song"
+    q2.tick(1000)
+    assert (q2.now()['note'], q2.now()['noten']) == ('', '1')
+    toast(b"Radio isn't available for this song")
+    q2.tick()
+    assert (q2.now()['note'], q2.now()['noten']) == ("Radio isn't available for this song", '2')
+
+
+def test_no_toast_is_kept_while_car_remote_is_off(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs, on=0)
+    fw.mock('navigator_to_with_context', lambda *_: 0)
+    fw.fn('toast', None, C.c_char_p)(b'Radio Off')
+    q2.config.values[b'CARREMOTE'] = b'1'
+    fw.fn('coda_rc_toggle', None)()  # the switch on: Now Playing written from now
+    q2.tick()
+    assert (q2.now()['note'], q2.now()['noten']) == ('', '0')

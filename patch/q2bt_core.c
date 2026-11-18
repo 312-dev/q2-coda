@@ -134,6 +134,71 @@ int bt_fly_step(struct bt_fly *f, unsigned sent, unsigned done) {
     return d - f->low;
 }
 
+/* ---- EDR ---- */
+static int hex_digit(int c) {
+    return c >= '0' && c <= '9'   ? c - '0'
+           : c >= 'A' && c <= 'F' ? c - 'A' + 10
+           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                                  : -1;
+}
+/* "dev_EC_66_D1_CF_59_3F" ends 17 characters before "/a2dpsrc" */
+int bt_pcms_sink(const char *text, unsigned char *bdaddr) {
+    const char *src = strstr(text, "/a2dpsrc");
+    if (!src || src - text < 21 || strncmp(src - 21, "dev_", 4)) return 0;
+    const char *a = src - 17;
+    unsigned char b[6];
+    for (int i = 0; i < 6; ++i) {
+        int hi = hex_digit(a[3 * i]), lo = hex_digit(a[3 * i + 1]);
+        if (hi < 0 || lo < 0 || (i < 5 && a[3 * i + 2] != '_')) return 0;
+        b[5 - i] = (unsigned char)(hi << 4 | lo);
+    }
+    memcpy(bdaddr, b, 6);
+    return 1;
+}
+int bt_acl_handle_of(const unsigned char *req, int max, const unsigned char *bdaddr) {
+    int n = u16_at(req + 2);
+    for (int i = 0; i < n && i < max; ++i) {
+        const unsigned char *c = req + 4 + 16 * i;
+        int same = c[8] == 1; /* ACL_LINK */
+        for (int j = 0; j < 6; ++j) same &= c[2 + j] == bdaddr[j];
+        if (same) return u16_at(c) & 0x0fff;
+    }
+    return -1;
+}
+void bt_edr_reset(struct bt_edr *e) { e->sent = -1; }
+int bt_edr_step(struct bt_edr *e, int handle, unsigned char *out) {
+    if (handle < 0 || handle == e->sent) return 0;
+    e->sent = handle;
+    out[0] = 1; /* HCI_COMMAND_PKT */
+    out[1] = (unsigned char)BT_OP_CPT, out[2] = (unsigned char)(BT_OP_CPT >> 8), out[3] = 4;
+    out[4] = (unsigned char)handle, out[5] = (unsigned char)(handle >> 8 & 0x0f);
+    out[6] = (unsigned char)BT_PTYPE_EDR, out[7] = (unsigned char)(BT_PTYPE_EDR >> 8);
+    return 8;
+}
+/* Connection Packet Type Changed: status, the handle, the packet types now allowed. Command Status:
+ * status, ncmd, the opcode; the change follows it unless the status refuses. */
+int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, int size) {
+    int status, ptype = -1;
+    if (e->sent < 0 || n < 3 || p[0] != 4 || n < 3 + p[2]) return 0;
+    if (p[1] == 0x1d && p[2] >= 5) {
+        if (((p[4] | p[5] << 8) & 0x0fff) != e->sent) return 0;
+        status = p[3], ptype = p[6] | p[7] << 8;
+    } else if (p[1] == 0x0f && p[2] >= 4) {
+        if ((p[5] | p[6] << 8) != BT_OP_CPT || !p[3]) return 0;
+        status = p[3];
+    } else {
+        return 0;
+    }
+    if (ptype < 0)
+        snprintf(note, (size_t)size, "LINK ptype=- status=0x%02x h=%d", status, e->sent);
+    else
+        snprintf(note, (size_t)size, "LINK ptype=0x%04x status=0x%02x h=%d", ptype, status,
+                 e->sent);
+    if (e->said && e->said_ptype == ptype && e->said_status == status) return 1;
+    e->said = 1, e->said_ptype = ptype, e->said_status = status;
+    return 2;
+}
+
 /* ---- text ---- */
 static const char *find_in(const char *p, const char *end, const char *needle) {
     const char *f = strstr(p, needle);
