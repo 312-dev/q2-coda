@@ -506,6 +506,9 @@ def test_run_post_reads_which_failures_make_the_tip_red(tmp_path, monkeypatch):
     assert q.run_post(logs) == (1, ['fw-asan', 'smoke'], [])
     monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 'no build'}}))
     assert q.run_post(logs) == (1, ['smoke'], [])
+    # a leak found (exit 1) is POST_RED, a backlog item, and never the tip's hold
+    monkeypatch.setattr(q, 'wait', gate({'smoke': {'rc': 0}, 'leak-hunt': {'rc': 1}}))
+    assert q.run_post(logs) == (1, ['leak-hunt'], [])
 
 
 def test_two_batches_that_only_crash_stop_the_queue_and_keep_the_branches(tmp_path):
