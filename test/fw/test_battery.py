@@ -1,6 +1,6 @@
 """battery.c: Battery History's record on the card (a fall appends, an unplug starts again, its bound, a reload,
-a damaged file), the log it exports to the card, and its page: the graph, the reading the wheel is on and Export
-Log."""
+a damaged file), the log it writes for LocalSend to share, and its page: the graph, the reading the wheel is on and
+Share Log."""
 import calendar
 import ctypes as C
 import struct
@@ -11,7 +11,7 @@ import pytest
 from conftest import O, Files
 from test_peq_page import Canvas  # the EQ graph's canvas: the rectangles filled and the texts drawn
 
-RECORD, LOG = '/mnt/mmc/.q2pod/q2-battery', '/mnt/mmc/battery-log.txt'
+RECORD, LOG = '/mnt/mmc/.q2pod/q2-battery', '/tmp/battery-log.txt'
 FLASH = '/mnt/data/q2-battery'  # where releases before card_store.c kept it
 MAGIC, ROWS = 0x31484251, 100
 # Battery History's window and a toast's, each a zeroed widget (no parent, no name): OLED's toast and title checks read
@@ -329,7 +329,7 @@ def said(canvas, dy):
 
 def test_the_page_stands_where_the_mock_up_has_it_on_the_screen_clear_of_the_corners(fw, q2):
     """The user's mock-up of 2026-11-18 (docs/oled-design.md#battery-history), measured on the screen, the canvas at the
-    graph's own place: the readout's middle on y 66, the plot from y 84 to 226 and Export Log from y 244 to 282, the
+    graph's own place: the readout's middle on y 66, the plot from y 84 to 226 and Share Log from y 244 to 282, the
     list end, so the glass's corners hide none of it. The view's y counts from its window, which stands under the
     status row: the device drew all of it 58 px low, the button's foot 6 px from the screen's edge."""
     q2.poll(99)
@@ -338,13 +338,14 @@ def test_the_page_stands_where_the_mock_up_has_it_on_the_screen_clear_of_the_cor
     page.open()
     (top, half, bottom), _, _, _, canvas = graph(fw, page)
     texts = said(canvas, origin(page))
-    assert (texts['Nov 11, 12:10 PM \u00b7 98%'], top[1], bottom[1], texts['Export Log']) == (READ_CY, TOP, BOT, BTN_CY)
+    assert (texts['Nov 11, 12:10 PM \u00b7 98%'], top[1], bottom[1], texts['Share Log']) == (READ_CY, TOP, BOT, BTN_CY)
     assert texts['100%'] == TOP and texts['0%'] == BOT
     assert BOT - TOP >= 140 and BTN_CY - CTA_H // 2 - BOT >= 16  # a taller plot, the button lifted clear of its axis
     assert BTN_CY + CTA_H // 2 <= 282  # the button's foot on the list end, 38 px above the screen's edge
+    page.touch(187, BTN_CY + CTA_H // 2 + 1)  # just under the button: nothing
+    assert 'lsshare_page' not in shared(fw)
     page.touch(187, BTN_CY + CTA_H // 2 - 1)  # the button's last row: where it is drawn is where it is tapped
-    page.touch(187, BTN_CY + CTA_H // 2 + 1)
-    assert len(page.toasts) == 1
+    assert 'lsshare_page' in shared(fw)
 
 
 def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
@@ -355,7 +356,7 @@ def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
     page.open()
     (top, half, bottom), (first, last), steps, hair, canvas = graph(fw, page)
     texts = said(canvas, origin(page))
-    assert {'100%', '50%', '0%', 'Export Log'} <= set(texts)
+    assert {'100%', '50%', '0%', 'Share Log'} <= set(texts)
     assert (top[1], half[1], bottom[1]) == (TOP, (TOP + BOT) // 2, BOT) and top[0] == half[0] == bottom[0]
     left, width = top[0], top[2]
     assert [bottom[1] - (y + 1) for _, y, _, _ in (first, last)] == [90 * (BOT - TOP) // 100, 60 * (BOT - TOP) // 100]
@@ -445,51 +446,46 @@ def test_no_history_says_to_unplug(fw, q2):
     page.open()
     assert 'Unplug to start' in page.texts.values()
     assert not fw.calls('widget_factory_create_widget')  # no graph
-    assert page.key(KEY_CENTER) == 0 and page.key(KEY_NEXT) == 0  # nothing to scrub or export
+    assert page.key(KEY_CENTER) == 0 and page.key(KEY_NEXT) == 0  # nothing to scrub or share
 
 
-@pytest.mark.parametrize('usb, mounted, free, said_', [
-    (0, 1, 64 << 20, 'Saved to battery-log.txt'),
-    (1, 1, 64 << 20, 'The card is in use over USB'),
-    (0, 0, 64 << 20, 'Storage unavailable'),
-    (0, 1, 1000, 'The card is full'),
-])
-def test_centre_exports_the_log_whole_or_says_why_not(fw, q2, usb, mounted, free, said_):
+def shared(fw):
+    """The names the payload's pages were given (page_open): LocalSend's share sheet's is lsshare_page."""
+    return [C.string_at(a[1]).decode() for _, a in fw.calls('widget_set_name') if a[1]]
+
+
+def test_centre_writes_the_log_to_tmp_and_opens_the_share_sheet(fw, q2):
+    """Share Log (docs/localsend.md#sending): the log whole in /tmp, never the card, then the share sheet."""
     q2.poll(99)
     q2.poll(98, minutes=60)
     page = Page(fw)
-    page.free = free
-    fw.mock('navigator_window_is_exist', lambda name, *_: usb and C.string_at(name) == b'usbmode_page')
-    if not mounted:
-        q2.files.files.pop('/proc/mounts')
     page.open()
     assert page.key(KEY_CENTER) == 1
-    assert page.toasts == [said_]
-    assert q2.files.files.get(LOG) == (q2.log().encode() if usb == 0 and mounted and free > 1000 else None)
-    assert LOG + '.tmp' not in q2.files.files
+    assert q2.files.files.get(LOG) == q2.log().encode() and LOG + '.tmp' not in q2.files.files
+    assert not [f for f in q2.files.files if f.startswith('/mnt/mmc/battery-log')]
+    assert 'lsshare_page' in shared(fw) and page.toasts == []
 
 
-def test_an_export_the_card_refuses_leaves_no_temporary_file(fw, q2):
+def test_a_log_that_cannot_be_written_says_so_and_shares_nothing(fw, q2):
     q2.poll(99)
     page = Page(fw)
-    q2.files.files['/proc/mounts'] = MOUNTS
     q2.files.fail_rename = True
     page.open()
     page.key(KEY_CENTER)
-    assert page.toasts == ["Couldn't save"] and LOG not in q2.files.files
+    assert page.toasts == ["Couldn't write the log"] and LOG not in q2.files.files
     assert [C.string_at(a[0]).decode() for _, a in fw.calls('fw_unlink')] == [LOG + '.tmp']
+    assert 'lsshare_page' not in shared(fw)
 
 
-def test_a_tap_on_the_button_exports_and_elsewhere_does_not(fw, q2):
+def test_a_tap_on_the_button_shares_and_elsewhere_does_not(fw, q2):
     q2.poll(99)
     page = Page(fw)
-    q2.files.files['/proc/mounts'] = MOUNTS
     page.open()
     graph(fw, page)  # painted: the button's place known
     page.touch(187, 120)  # the graph
-    assert page.toasts == []
+    assert 'lsshare_page' not in shared(fw)
     page.touch(187, BTN_CY)
-    assert page.toasts == ['Saved to battery-log.txt']
+    assert 'lsshare_page' in shared(fw)
 
 
 def lit(fw, on):
@@ -502,13 +498,13 @@ def test_the_button_gives_way_to_a_toast(fw, q2):
     page = Page(fw)
     page.open()
     texts = said(graph(fw, page)[4], 0)
-    assert 'Export Log' in texts
+    assert 'Share Log' in texts
     page.top = TOAST
-    assert 'Export Log' not in said(graph(fw, page)[4], 0)
+    assert 'Share Log' not in said(graph(fw, page)[4], 0)
     page.touch(187, BTN_CY)
     assert page.toasts == []
     page.top = PAGE
-    assert 'Export Log' in said(graph(fw, page)[4], 0)
+    assert 'Share Log' in said(graph(fw, page)[4], 0)
 
 
 def test_with_the_card_away_rows_are_kept_in_ram_and_written_when_it_is_back(fw, q2):

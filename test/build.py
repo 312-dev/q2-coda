@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """JPEG checks; optionally pass the stock ZIP to test packaging with a custom logo and quoted paths too."""
 import io, math, re, sys; sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first: test/build.py must import tools/build.py
-from build import jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, WEB, patch_web, DEFAULT_CONFIG, default_config
+from build import jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, DEFAULT_CONFIG, default_config
 
 logo = (ROOT/'assets/boot-logo.jpg').read_bytes()
 assert jpeg_size(logo) == (320, 375)
@@ -458,8 +458,7 @@ def validate_assets(directory):
     assert patched_ui | chinese <= kept_ui
     assert set(changed) == {ui+p for p in kept_ui} | {
         'release/assets/default/raw/styles/'+p for p in AUDIT['styles']} | {
-        xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C, *WEB} | {
-        'usr/share/web/cgi-bin/%s.cgi' % n for n in ('create', 'delete', 'list', 'download', 'upload')} | {
+        xx+n for n in SETTINGS_ICONS | QUIET_ICONS | STATUS_ICONS | ART_PLACEHOLDERS} | {'release/assets/default/raw/strings/en_US.bin', FONT, TAG_C} | {
         xx+n for n in STOCK_NAMED_ICONS} | ({'usr/bin/' + n for n in USB_SCRIPTS} if manifest['dev'] else set())  # adb_wrapper
     master = (ROOT/'assets/icons/default_album_home.png').read_bytes()
     for name, size in ART_PLACEHOLDERS.items():
@@ -485,27 +484,10 @@ def validate_assets(directory):
     tag_old, tag_new = read('stock.squashfs', TAG_C), read('rootfs.squashfs', TAG_C)
     assert tag_new == patch_m4b_cover(tag_old)
     assert changed[TAG_C] == dict(original_sha256=sha(tag_old), sha256=sha(tag_new))
-    for path in WEB:  # Wi-Fi transfer's page: English, folder uploads
-        old, new = read('stock.squashfs', path), read('rootfs.squashfs', path)
-        assert new == patch_web(path, old)
-        assert changed[path] == dict(original_sha256=sha(old), sha256=sha(new))
-    # The safe file-manager CGI, q2cgi, replaces all five stock CGIs and is the PIN check, cgi-bin/auth.cgi, a CGI
-    # stock has none of (docs/internals.md#wi-fi-transfer-pin). thttpd runs as www-data, and every CGI is cgi_root,
-    # set-uid root, which runs q2cgi as root (docs/internals.md#wi-fi-transfer-root).
-    from build import THTTPD_CONF, THTTPD_USER, Q2CGI, CGIS, CGI_MODE
-    assert read('rootfs.squashfs', Q2CGI) == (ROOT/'assets/web/q2cgi').read_bytes()
-    cgi_root = read('rootfs.squashfs', 'usr/share/web/cgi-bin/auth.cgi')
-    assert cgi_root[:4] == b'\x7fELF' and b'/usr/bin/q2cgi\0' in cgi_root
-    for n in CGIS[:-1]:
-        path = 'usr/share/web/cgi-bin/%s.cgi' % n
-        old, new = read('stock.squashfs', path), read('rootfs.squashfs', path)
-        assert new == cgi_root
-        assert changed[path] == dict(original_sha256=sha(old), sha256=sha(cgi_root))
-    modes = {l.split()[0]: l.split()[3:6] for l in subprocess.check_output(
-        ['unsquashfs', '-pf', '-', str(directory/'rootfs.squashfs')]).split(b'\n# START OF DATA')[0].splitlines() if l and l[:1] != b'#'}
-    for n in CGIS:
-        assert modes[b'usr/share/web/cgi-bin/%s.cgi' % n.encode()] == [CGI_MODE[1], b'0', b'0'], n
-    assert read('rootfs.squashfs', THTTPD_CONF) == read('stock.squashfs', THTTPD_CONF).replace(*THTTPD_USER)
+    # Wi-Fi File Transfer is gone (docs/localsend.md#what-it-replaces): stock's thttpd conf, its page and its CGIs
+    # stay as stock shipped them, and nothing starts the server.
+    for path in ('etc/thttpd.conf', 'usr/share/web/index.html', 'usr/share/web/cgi-bin/upload.cgi'):
+        assert read('rootfs.squashfs', path) == read('stock.squashfs', path) and path not in changed, path
     from build import segments
     tag_segment = segments(tag_new)[-1][1]
     assert tag_segment[0] == 1 and tag_segment[2] == 0x30000 and tag_segment[4:7] == (48, 48, 5)

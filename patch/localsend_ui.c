@@ -43,6 +43,7 @@
 #define LS_SHEET_TOP 26 /* the share sheet's file line to its Send to header */
 #define LS_CTA_OUT (CTA_RING_OFF + CTA_RING_W)
 #define LS_STACK 118 /* the empty state's stack with its glyph (feedback.c ES_TEXT) */
+#define LS_WORDS 44  /* and without it (ES_WORDS) */
 #define LS_KIND "_ls_kind"
 #define LS_VALUE "_ls_value"
 #define LS_DEV "_ls_dev"
@@ -74,7 +75,7 @@ static struct {
     void *xfer;          /* Sending or Receiving */
     int xfer_recv;       /* the transfer page's: 1 a receive */
     unsigned at, started_at, shown[5]; /* each page's sum when built (by P_*) */
-    int live, asking, scan_due, wifi_off, cta_y, page_none, share_none;
+    int live, asking, scan_due, wifi_off, cta_y, page_none, share_none, trusted_row;
     char rphase[16], sphase[16]; /* the phases at the last poll */
     char ask_id[72];             /* the request the card asks about */
     char to_fp[65], to_alias[40];
@@ -566,6 +567,7 @@ static int ls_page_show(const void *ctx) {
     ringnav_select(view, sel < 0 ? 0 : sel, rows);
     ls.view = view;
     ls.page_none = !s.n; /* the empty state's stack, painted (localsend_paint) */
+    ls.trusted_row = s.ntrust > 0;
     empty_state(ls.page, 0, 0, 0);
     return 0;
 }
@@ -671,9 +673,11 @@ static void ls_xfer_paint(void *w, void *canvas) {
 /* None found: the empty state's stack with its glyph, as the mock-up draws it, centred between top and end (screen
  * rows): the house's compact form under rows has no glyph (feedback.c empty_compact), so the page paints it
  * (empty_paint). */
-static void ls_none_paint(void *w, void *canvas, int top, int end) {
+static void ls_none_paint(void *w, void *canvas, int top, int end, int glyph) {
     static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer", 0 };
-    empty_paint(w, canvas, &none, top + (end - top - LS_STACK) / 2 - ls_screen_y(w));
+    empty_t e = none;
+    if (!glyph) e.glyph = 0; /* under Trusted Devices too: no room for it */
+    empty_paint(w, canvas, &e, top + (end - top - (glyph ? LS_STACK : LS_WORDS)) / 2 - ls_screen_y(w));
 }
 
 /* ringnav_paint's, for the pages: the glyphs, the header's spinner, a value at a row's right, the captions and the
@@ -692,7 +696,7 @@ void localsend_paint(void *w, void *canvas) {
                 2);
         if (ls.page_none && ls.view) {
             int top = ls_screen_y(P(ls.view, W_PARENT)) + I(P(ls.view, W_PARENT), W_H);
-            ls_none_paint(w, canvas, top, LS_LIST_END);
+            ls_none_paint(w, canvas, top, LS_LIST_END, !ls.trusted_row);
         }
         return;
     }
@@ -704,7 +708,7 @@ void localsend_paint(void *w, void *canvas) {
         ui_text(canvas, ls.share_line, 0, TYPE(15), tok(TOK_TERTIARY), 0, 46, 70 - dy, 375 - 46 - 24, 2);
         if (ls.share_none && ls.share_view) {
             int top = ls_screen_y(P(ls.share_view, W_PARENT)) + I(P(ls.share_view, W_PARENT), W_H);
-            ls_none_paint(w, canvas, top, 320);
+            ls_none_paint(w, canvas, top, 320, 1);
         }
         return;
     }
@@ -819,12 +823,13 @@ static void ls_received(void) {
 }
 
 /* A phase changed: what the user sees of it. */
-static void ls_recv_moved(const ls_xfer *x) {
+/* phone: the sender's glyph, as the device list has it (a trusted sender gets no card, which reads its type) */
+static void ls_recv_moved(const ls_xfer *x, int phone) {
     char text[80];
     const char *ph = x->phase;
     if (!tk_strcmp(ph, "run") && x->trusted) {
         tk_snprintf(text, sizeof text, "Receiving from %s", x->alias);
-        toast_later(ls.x_phone ? "lstoast_phone" : "lstoast_laptop", text);
+        toast_later(phone ? "lstoast_phone" : "lstoast_laptop", text);
         return;
     }
     if (!tk_strcmp(ph, "done") || !tk_strcmp(ph, "failed") || !tk_strcmp(ph, "cancelled") ||
@@ -894,7 +899,10 @@ void localsend_poll(void) {
     if (!read) return;
     ls_ask();
     if (tk_strcmp(s.recv.phase, ls.rphase)) {
-        if (*ls.rphase || tk_strcmp(s.recv.phase, "idle")) ls_recv_moved(&s.recv);
+        int phone = ls.x_phone;
+        for (int i = 0; i < s.n; ++i)
+            if (!tk_strcmp(s.dev[i].alias, s.recv.alias)) phone = s.dev[i].phone;
+        if (*ls.rphase || tk_strcmp(s.recv.phase, "idle")) ls_recv_moved(&s.recv, phone);
         tk_snprintf(ls.rphase, sizeof ls.rphase, "%s", s.recv.phase);
     }
     if (tk_strcmp(s.send.phase, ls.sphase)) {
