@@ -161,6 +161,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     inset = [f'batt{n}_{k}' for n in art.BATT_GLYPHS for k in ('d', 'l')]  # list_marks.c battery_slim
     keylock = [f'keylock_{k}' for k in ('d', 'l')]  # status_row.c's padlock (the card's below)
     status = [f'status_{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bt', 'btdim', 'headphones', 'car', 'down',
+                                          'vol', 'mute',
                                           *(f'sync_{f}' for f in range(art.STATUS_SPIN)))
               for k in ('d', 'l')]  # status_row.c's other glyphs: their own test
     # bt_ui.c's device kinds, its scan spinner and the connection toasts (a drop's in Text Secondary)
@@ -234,7 +235,7 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
     """status_row.c's slots, every one 11 px tall (STATUS_INK, the clock's digits') with its ink's top on STATUS_TOP,
     so on the row it covers rows 17 to 27 with the digits: Wi-Fi iOS's fan, 15.6 x 11 in a 16 px box, its levels
     lighting the dot and bands over the rest in STATUS_UNLIT, the shape one box in every level; wifi-x, the
-    Bluetooth rune (dim while connecting), headphones and the car sized by their height (wifi-x and the car are wider
+    Bluetooth rune (dim while connecting), headphones, the car and the volume pill's speakers (vol_pill.c) sized by their height (wifi-x and the car are wider
     than tall: by the longer side Wi-Fi came out 8 px tall) in Text Primary; the sync arrows' STATUS_SPIN frames in Text Secondary, each turned from the last."""
     got = art.images(theme.builtins()[0])
     def ink(name, cut=64):
@@ -252,7 +253,7 @@ def test_the_status_rows_glyphs_are_the_clocks_digits_height_in_each_halfs_ink(h
         assert size == (art.STATUS_WIFI_W, art.STATUS_PX) and near(primary) and near(unlit) == (level < 3)
     assert boxes == {(0, 15, 1, 11)}  # 16 columns (15.6 of ink), rows 1 to 11: 11 tall
     for name, w in (('wifi_x', art.STATUS_WIFI_W), ('bt', art.STATUS_PX), ('headphones', art.STATUS_PX), ('car', art.STATUS_CAR_W),
-                    ('btdim', art.STATUS_PX)):
+                    ('btdim', art.STATUS_PX), ('vol', art.STATUS_PX), ('mute', art.STATUS_PX)):
         size, lit, colours = ink(name, 8)
         assert size == (w, art.STATUS_PX) and (name == 'btdim' or colours == {rgb(primary)})
         x0, x1, y0, y1 = box(lit)
