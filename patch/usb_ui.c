@@ -65,7 +65,7 @@ static struct {
     void *chooser, *view, *always, *debug, *mode;
     /* the USB picker, its footer, General's row's label, and a pick the confirmation card is asking about */
     void *pick, *pick_view, *pick_foot, *row;
-    int pending, pick_ready;
+    int pending;
     /* the ADB prompt */
     int fd, asking; /* asking: the card is up for adbd's question */
     unsigned auth_at;
@@ -352,7 +352,6 @@ static const unsigned char usb_pick_order[] = { USB_ASK, USB_FILES, USB_AUDIO, U
 #define USB_FOOT_DY 19   /* the first line's centre under the rows */
 #define USB_FOOT_LINE 17 /* and the next one's under it */
 #define USB_FOOT_PX TYPE(13)
-#define USB_PICK_DUE_MS 50 /* usb_pick_due's look at the slide */
 static const char *const usb_notes[USB_CHOICES][2] = {
     { "Plug into a computer to choose.", 0 },
     { "Every cable only charges, a computer's too.", 0 },
@@ -449,25 +448,14 @@ static int usb_pick_click(void *ctx, void *event) {
     return 0;
 }
 
-/* The wheel's list loaded on the picker once it is on top and its slide is over (usb_ready): opened
- * by Control Center's Centre, which that page takes, no key loads it, and nothing paints the page
- * again once it has come to rest (the emulator, 2026-11-17: no selection bar until a turn). */
-static void usb_ready(void *page, void *view, int *ready, int rows);
-static int usb_pick_due(const void *info) {
-    if (!u.pick) return 0; /* RET_OK: removed */
-    if (window_manager_is_animating(window_manager())) return 8; /* RET_REPEAT */
-    usb_ready(u.pick, u.pick_view, &u.pick_ready, USB_PICK_ROWS);
-    return 0;
-}
-
 static int usb_pick_closed(void *ctx, void *event) {
     if (u.pick == ctx) u.pick = u.pick_view = u.pick_foot = (void *)0;
     return 0;
 }
 
 /* The USB picker (General's USB row, Control Center's): one row a choice, the check on the right
- * column, the footer view under the rows. It opens on the checked row (contexts.inc CHOICE, and
- * usb_pick_due) and stays after a pick, as the other pickers do. */
+ * column, the footer view under the rows. It opens on the checked row (contexts.inc CHOICE) and
+ * stays after a pick, as the other pickers do. */
 int usb_pick_open(void *ctx, void *event) {
     if (u.pick || !(u.pick = page_open("usbpick_page", usb_pick_closed, page_keyup))) return 0;
     void *view = u.pick_view = page_list(u.pick, u.pick, 0, "USB", USB_PICK_ROWS, 48);
@@ -485,10 +473,6 @@ int usb_pick_open(void *ctx, void *event) {
                                                I(list, W_Y) + I(list, W_H), 375, USB_FOOT_H);
     widget_set_name(u.pick_foot, "_usb_pick_foot");
     usb_pick_marks();
-    for (int i = 0; i < USB_PICK_ROWS; ++i) /* the checked row, for usb_pick_due */
-        if (usb_pick_order[i] == usb_remembered()) widget_set_prop_int(view, SEL, i);
-    u.pick_ready = 0;
-    timer_add(usb_pick_due, (void *)0, USB_PICK_DUE_MS);
     return 0;
 }
 

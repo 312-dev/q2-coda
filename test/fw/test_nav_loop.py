@@ -2803,6 +2803,18 @@ def test_centre_on_the_now_playing_block_opens_now_playing(fw, keys, status, ope
     assert not fw.calls('player_play_pause')  # what plays stays as it is
 
 
+@pytest.mark.parametrize('ring', [None, 100000])
+def test_control_center_s_wheel_is_the_wheel_for_the_focus_rule(fw, keys, st, ring):
+    """Control Center is pulled down by a finger, so the one record says touch; a wheel tick there, the one that only
+    brings the ring up too, is the wheel's input as a list's is (docs/oled-design.md#focus-ring). The emulator,
+    2026-11-17: the USB picker opened from the USB row showed no selection, the turns that reached the row having left
+    touch mode on."""
+    ui = Ui(fw)
+    cc_window(fw, ui, ring=ring)
+    st('touch_mode').value = 1
+    assert keys(KEY_NEXT) == STOP and st('touch_mode').value == 0
+
+
 @pytest.mark.parametrize('cable', [1, 0])
 def test_centre_on_the_usb_row_opens_the_usb_picker(fw, keys, cable):
     """Centre on the USB row closes Control Center and opens the USB picker Settings > General > USB opens

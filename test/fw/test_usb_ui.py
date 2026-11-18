@@ -484,21 +484,6 @@ def test_the_footer_says_what_the_checked_choice_does(fw_dev, st, pick, lines):
     assert ys[0] == 19 and all(b - a == 17 for a, b in zip(ys, ys[1:]))
 
 
-def test_the_picker_loads_the_wheel_on_its_checked_row_once_its_slide_is_over(fw_dev):
-    """Opened by Control Center's Centre, which that page takes, no key loads the wheel's list on the picker, and nothing
-    paints it again once it is at rest (the emulator, 2026-11-17: no selection bar until a turn): a timer from its open
-    waits out the slide, then loads it on the checked row."""
-    u = Usb(fw_dev, ini={'USBPICK': 4})
-    page = picker(u)
-    view = u.ui.of('scroll_view')[-1]
-    due, = [i for i, (fn, _, ms) in u.ui.timers.items() if ms == 50]
-    u.ui.top, u.ui.animating = page, 1
-    assert u.ui.fire(due) == 8 and '_ringnav_count' not in u.ui[view].props  # still sliding in: again
-    u.ui.animating = 0
-    assert u.ui.fire(due) == 0 and due not in u.ui.timers
-    assert (u.ui[view].props['_ringnav_count'], u.ui[view].props['_ringnav_index']) == (5, 4)
-
-
 def test_a_pick_with_no_cable_only_saves_it_and_ask_every_time_undoes_a_saved_charge_only(fw):
     """The gap feat/usb-mode-row left: a saved Charge Only had no way back. With no cable in a pick is only saved
     (Transfer Files with stock's mode, as Always Do This saves it); the link, which stock's USB-mode exit prompt may

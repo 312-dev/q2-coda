@@ -650,10 +650,14 @@ void cc_open(void *win) {
 }
 
 /* The wheel on the page: from stop to stop, ends kept, past the Now Playing block while nothing is
- * loaded and short of the USB row while no cable is in; or a slider's level while it has it, Volume's as Now Playing's wheel sets it (vol_next)
- * and Brightness's as the Brightness page's (bright_wheel). A tick with no ring showing only
- * brings it up. */
+ * loaded and short of the USB row while no cable is in; or a slider's level while it has it,
+ * Volume's as Now Playing's wheel sets it (vol_next) and Brightness's as the Brightness page's
+ * (bright_wheel). A tick with no ring showing only
+ * brings it up. Any tick is the wheel's input for the focus rule's one record (st.touch_mode,
+ * docs/oled-design.md#focus-ring), as a list's is: a page Centre opens from here (the USB
+ * picker) shows its selection. */
 void cc_wheel(void *win, int dir) {
+    st.touch_mode = 0;
     if (cc_ring_wake(win)) {
         cc_marq(win);
         return;
