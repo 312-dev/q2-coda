@@ -65,8 +65,9 @@ static struct {
 
 #if Q2POD_DEV
 /* --dev builds only, for the emulator, which has no radio or charger: STATUS_FAKE's "wifi=N
- * charge=1" (either, each found by its first letter, key) stands in for what the Q2 would report;
- * -1 when the file does not name it. Read at most every STATUS_FAKE_MS. */
+ * charge=N" (charge 1 a charging cable, 2 one holding it full; either, each found by its first
+ * letter, key) stands in for what the Q2 would report; -1 when the file does not name it. Read at
+ * most every STATUS_FAKE_MS. */
 #define STATUS_FAKE "/mnt/data/q2-status.fake"
 #define STATUS_FAKE_MS 500
 int status_fake(char key) {

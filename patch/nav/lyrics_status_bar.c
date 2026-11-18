@@ -313,18 +313,23 @@ static int bar_charging(void) {
     return icon && !tk_strcmp(icon, "bar_charge") && !usb_charge_held();
 }
 /* The battery view_battery shows, as a BATT_KEY_* key: the level from label_battery's "88%" (stock
- * zeroes progress_battery while charging), then what the cable does, as stock picks the icon
- * (bar_charge whenever one is in): too weak to charge (charge_weak), full (g_power_chargestate 2)
- * or held at Charge Limit, else charging (bar_charging); and low (bar_lowcharge, or under 15% on a
- * cable that charges nothing). Reads stock's widgets and bytes, no I/O. */
+ * zeroes progress_battery while charging), then what the cable does: too weak to charge
+ * (charge_weak), full (g_power_chargestate 2) or held at Charge Limit, else charging
+ * (bar_charging); and low (bar_lowcharge, or under 15% on a cable that charges nothing). The cable
+ * is g_usbdet_value, stock's own read of it: stock's icon cannot say it, as systembar_showface
+ * picks bar_charge for a cable only while the charger is not Full (0x541e2c) and the plain icon
+ * over a USB DAC link with its charging Off, so at Full the cable read as out and the battery was
+ * drawn as on battery. A --dev build's STATUS_FAKE "charge=1" is charging, "charge=2" a cable held
+ * full. Reads stock's widgets and bytes, no I/O. */
 static unsigned battery_now(void) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0, charging = bar_charging() || status_fake('c') > 0,
-        cable = icon && !tk_strcmp(icon, "bar_charge");
+    int fake = status_fake('c'), level = 0, charging = bar_charging() || fake == 1,
+        cable = g_usbdet_value == 1 || (icon && !tk_strcmp(icon, "bar_charge")) || fake > 0;
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
     int held = cable && !charging, weak = charging && charge_weak();
-    int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
+    int full = cable && !weak &&
+               (fake == 2 || I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
     unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
     if (weak)
         key |= BATT_KEY_WEAK;

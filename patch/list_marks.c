@@ -291,8 +291,9 @@ void round_path(void *vg, float x, float y, float w, float h, float r) {
  * Text Primary (red under BATT_LOW_PCT; green on a cable that charges it or holds it full, or
  * at Charge Limit; orange on one too weak), and the nub, BATT_SLIM_NUB_W x BATT_SLIM_NUB_H, a pixel
  * past the body in BATT_SLIM_DIM. Charging, Phosphor's lightning (fill, 7 px, Text Primary) sits on
- * the body's centre with a 1 px Canvas gap cut round it where it crosses the fill; too weak, its
- * warning in the same place (docs/oled-design.md#status-row, tools/art.py BATT_GLYPHS: the gap is
+ * the body's centre with a 1 px Canvas gap cut round it where it crosses the fill; full or held at
+ * Charge Limit on the cable, an upright plug drawn on whole pixels (5 x 7) in its place; too weak,
+ * its warning there (docs/oled-design.md#status-row, tools/art.py BATT_GLYPHS: the gap is
  * the image's own, BATT_GLYPH_BOX px with the glyph's centre BATT_GLYPH_X, BATT_GLYPH_Y in from its
  * corner). Final colours; the caller restores the fill. */
 #define BATT_SLIM_R 4.0f
@@ -319,6 +320,7 @@ static const char *battery_glyph(unsigned key) {
     int light = ipod_light();
     if (key & BATT_KEY_WEAK) return theme_art(light ? "battwarn_l" : "battwarn_d");
     if (key & BATT_KEY_CHARGING) return theme_art(light ? "battbolt_l" : "battbolt_d");
+    if (key & BATT_KEY_PLUGGED) return theme_art(light ? "battplug_l" : "battplug_d");
     return (const char *)0;
 }
 void battery_slim(void *w, void *canvas, int x, int y, int bw, int bh, unsigned key) {
