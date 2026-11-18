@@ -948,7 +948,7 @@ def test_rockbox_leaves_a_headset_without_absolute_volume(fw, st, link, current)
 
 # Bluetooth's absolute volume (docs/internals.md#headset-controls-and-volume).
 class Btvol(C.Structure):
-    _fields_ = [('checked', C.c_uint), *((k, C.c_int) for k in 'ready last failed'.split())]
+    _fields_ = [('checked', C.c_uint), *((k, C.c_int) for k in 'ready last failed pending'.split())]
 
 
 class Headset:

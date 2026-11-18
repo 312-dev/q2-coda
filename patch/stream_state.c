@@ -111,6 +111,22 @@ int stream_startable(const char *id, const char *path) {
     return 1;
 }
 
+/* How sure the length of path is (peq.h stream_length). A song arriving in place reads short to the
+ * player, a constant-bitrate MP3 without a Xing frame by its bytes so far, so its length is only
+ * the server's: the line's own, else the catalogue's duration for that song. */
+int stream_length(const char *path, unsigned *ms) {
+    char id[16];
+    sline_t l;
+    if (!stream_app_of(path, id, sizeof id) ||
+        !tk_str_start_with(path + 10 + strlen(id), "/stream/") || !stream_line(id, path, &l) ||
+        l.state == SL_DONE)
+        return 0;
+    int sec = l.ms ? 0 : catalogue_copy_seconds(path);
+    if (!l.ms && sec <= 0) return 2;
+    *ms = l.ms ? l.ms : (unsigned)sec * 1000u;
+    return 1;
+}
+
 /* The card app's id in a path under its folder (/mnt/mmc/.<id>/...), into id; 0 for another path.
  */
 int stream_app_of(const char *path, char *id, unsigned size) {

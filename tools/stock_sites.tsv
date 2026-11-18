@@ -257,6 +257,12 @@ demo	0x4faa80	0x4	switchBtPriority	`addiu $4, $zero, 0x16`, before 1st of 4 call
 demo	0x4fbf2c	0x4	autoLinkBluetooth	the only call to checkPairDev; tools/build.py BT_AUTOLINK
 demo	0x4fdcbc	0x4	checkBluetoothStatus	1st of 3 calls to player_save_start, after "[%s]"; tools/build.py BT_CONNECT_START
 demo	0x4fe1e4	0x4	config_bt_init	the only call to initBluetoothParam; tools/build.py BT_PARAMS
+demo	0x4ff268	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetBatterycapacity; tools/build.py BATTERY_READS
+demo	0x4ff278	0x4	get_battery_capacity	the only call to toolsGetBatterycapacity; tools/build.py BATTERY_READS
+demo	0x4ff294	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetBatteryVoltage; tools/build.py BATTERY_READS
+demo	0x4ff298	0x4	get_battery_capacity	the only call to toolsGetBatteryVoltage; tools/build.py BATTERY_READS
+demo	0x4ff2b0	0x4	get_battery_capacity	the load of $25 for the only call to toolsGetChargeStatus; tools/build.py BATTERY_READS
+demo	0x4ff2b4	0x4	get_battery_capacity	the only call to toolsGetChargeStatus; tools/build.py BATTERY_READS
 demo	0x5000f0	0x4	remove_file	the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
 demo	0x5000f4	0x4	remove_file	`addiu $6, $6, 0x2ff8, forming "rm -rf "%s""`, the delay slot of the only call to snprintf, after "sync"; tools/build.py FOLDER_RM_CALL, FOLDER_RM_FMT
 demo	0x5024b4	0x4	device_standby	the only call to awake_screen, after "rmmod soc_msc"; tools/build.py STANDBY_WAKE

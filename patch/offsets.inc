@@ -426,11 +426,18 @@ static inline int arc_out(int r, int y) {
 /* A wheel turn with the screen off idles neither for this long after a tick (ringnav_sleep). A
  * calibration knob: a turn slower than a tick in this long waits out a dark pass for each. */
 #define DARK_TURN_MS 500
-/* Bluetooth absolute volume is read back this often with the screen off and no volume limit to
- * hold, or after the headset refused it (bt_volume_poll); 400 ms otherwise. A headset's own volume
- * keys show on the Q2 that late. */
+/* Without BlueZ's volume signal (below), Bluetooth absolute volume is read back this often with the
+ * screen off and no volume limit to hold (BT_VOLUME_LIMIT_MS with one), and 400 ms lit, so a
+ * headset's own volume keys show on the Q2 that late; after the headset refused it, this often
+ * whatever the screen or the signal (bt_volume_poll). */
 #define BT_VOLUME_SLOW_MS 2000
 #define BT_VOLUME_LIMIT_MS 1000
+/* While BlueZ's volume signal is subscribed (bt_vol_event.c), a signal reads the level on the next
+ * UI pass, at most one read every BT_VOLUME_EVENT_GAP_MS (a burst, the wheel's own writes echoed,
+ * coalesces at the timed pace above), and with no signal it is still read every
+ * BT_VOLUME_FALLBACK_MS, lit or dark, for a stack or headset that sends none. */
+#define BT_VOLUME_EVENT_GAP_MS 400
+#define BT_VOLUME_FALLBACK_MS 5000
 /* Screen on, once IDLE_MS pass without input or a window animation, each turn idles IDLE_SLEEP_MS
  * (about 30 passes a second; the first input after waits at most that). */
 #define IDLE_MS 2000
@@ -475,6 +482,11 @@ static inline int arc_out(int r, int y) {
 /* The Wi-Fi signal (ringnav_wifi_signal) is read from the driver again at most every
  * WIFI_SIGNAL_MS; its two pollers each ask about once a second. */
 #define WIFI_SIGNAL_MS 1000
+/* The battery's level, voltage and charge status (get_battery_capacity, from the status bar's
+ * one-second timer) are read at most every BATT_DARK_MS with the screen off, on battery, at a level
+ * of BATT_DARK_FLOOR or more (ringnav_batt_level); stock's second otherwise. */
+#define BATT_DARK_MS 30000
+#define BATT_DARK_FLOOR 20
 /* Resume (docs/internals.md#resume): tracks of Q2POD RESUMEMIN minutes or longer (crossfade.c
  * resume_min) keep their place in the RESUME_SLOTS most recent; a place within RESUME_EDGE_S of
  * either end is forgotten. Saved on a track change, a pause and every RESUME_SAVE_S of play;

@@ -351,6 +351,7 @@ static int bt_audio_ready(void) {
 static struct {
     unsigned checked;
     int ready, last, failed; /* failed: the headset refused the last absolute volume */
+    int pending;             /* a volume signal not yet read (bt_vol_event.c) */
 } btvol __attribute__((section(".scratch")));
 
 void headset_volume_reset(void) { btvol.ready = 0; }
@@ -387,23 +388,33 @@ int ringnav_btvol(int left, int right) {
     return stock_btvol_trampoline(left, right);
 }
 
-/* Every 400 ms lit; dark, every BT_VOLUME_LIMIT_MS while a volume limit has to be held on the
- * headset's own keys, else BT_VOLUME_SLOW_MS, so a long dark session doesn't wake libbtctl 2.5
- * times a second for a volume nobody sees. A headset that refuses or can't report absolute volume
- * gets the slow pace lit too. ponytail: dark, the headset's keys can pass the limit for up to
- * BT_VOLUME_LIMIT_MS before it is pulled back. */
+/* With BlueZ's volume signal subscribed (bt_vol_event_live), a signal reads the level on the next
+ * pass, unless one was read within BT_VOLUME_EVENT_GAP_MS (then that long after it), and without
+ * one every BT_VOLUME_FALLBACK_MS, lit or dark, so a lit headset change shows within a pass.
+ * Without the subscription: every 400 ms lit; dark, every BT_VOLUME_LIMIT_MS while a volume limit
+ * has to be held on the headset's own keys, else BT_VOLUME_SLOW_MS, so a long dark session doesn't
+ * wake libbtctl 2.5 times a second for a volume nobody sees. A headset that refuses or can't report
+ * absolute volume gets the slow pace lit too, signal or not. ponytail: without the signal, dark,
+ * the headset's keys can pass the limit for up to BT_VOLUME_LIMIT_MS before it is pulled back. */
 static void bt_volume_poll(void) {
     unsigned now = time_now_ms();
+    if (bt_vol_event_take()) btvol.pending = 1;
+    int live = bt_vol_event_live();
     unsigned gap = btvol.failed                       ? BT_VOLUME_SLOW_MS
+                   : live                             ? BT_VOLUME_FALLBACK_MS
                    : g_backlight_status               ? 400u
                    : btvol.ready && g_maxvolume < 100 ? BT_VOLUME_LIMIT_MS
                                                       : BT_VOLUME_SLOW_MS;
+    if (btvol.pending && !btvol.failed && gap > BT_VOLUME_EVENT_GAP_MS)
+        gap = BT_VOLUME_EVENT_GAP_MS;
     if (now - btvol.checked < gap) return;
     btvol.checked = now;
+    btvol.pending = 0;
     if (!bt_audio_ready()) {
         btvol.ready = btvol.failed = 0;
         return;
     }
+    bt_vol_event_start(); /* once */
     if (!btvol.ready) {
         device_set_volume(g_volume, 0); /* Reuse stock's Balance calculation on reconnect. */
         return;                         /* Initial connection preserves Q2 volume. */
