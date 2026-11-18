@@ -6,9 +6,10 @@ each stream with its codec, the seconds it fell behind, and what every signal di
     adb shell cat /mnt/mmc/.q2muse/logs/q2-bt.1 /mnt/mmc/.q2muse/logs/q2-bt.0 | python3 tools/q2bt.py -
     python3 tools/q2bt.py --all q2-bt.0                # every second, not only the stalls
 
-A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew=`, one a second
-while a stream runs (`ba` and `own` in tenths of a percent of one core, printed here as percent; `er` and `ew` in ms a
-second); a note is `TIME WORD ...` (START, ENCODER, CODEC, LINK, STOP). The card store's `== N lines lost while the
+A line is `TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done= fly=`, one
+a second while a stream runs (`ba` and `own` in percent of one core, written in tenths by older logs: 90 for 9.0; `er`
+and `ew` in ms a second; `done` packets a second the controller delivered, `fly` packets in it, so fly/done is how long
+one waits there); a note is `TIME WORD ...` (START, ENCODER, CODEC, LINK, STOP). The card store's `== N lines lost while the
 card was away` is a GAP. A stream is cut into one segment per codec, at each ENCODER note (bluealsa's encoder thread,
 named for its codec, seen within a second of a change) or CODEC note that names another codec; a CODEC note can come up
 to a minute late (older logs have no ENCODER notes), so the seconds since the last gap in sending before it go to the
@@ -36,8 +37,9 @@ BEFORE = 10    # seconds shown before each stall
 ENC_RUN = 800  # ms a second on a CPU: the encoder could not keep up
 ENC_WAIT = 100  # ms a second waiting for a CPU: the encoder was kept from one
 SWITCH_S = 3   # seconds before a codec change whose slow seconds are the reconnect
-SIGNALS = ('kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')
-TENTHS = ('ba', 'own')  # tenths of a percent of one core, printed as percent
+SIGNALS = ('kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew', 'fcc',
+           'done', 'fly')
+TENTHS = ('ba', 'own')  # percent of one core, held in tenths (older logs wrote the tenths: 90 for 9.0)
 ENCODERS = {'sbc': 'SBC', 'aac': 'AAC', 'aptx': 'aptX', 'aptx-hd': 'aptX-HD', 'ldac': 'LDAC'}  # ba-a2dp-<name>
 
 
@@ -64,9 +66,10 @@ class Stream:
     timely: bool = False  # its codec came from an ENCODER note (on time), not only a CODEC note
 
 
-def value(v):
+def value(v, key=''):
+    """A field as an int, None for "-"; ba and own in tenths of a percent, whether written 9.0 or (older logs) 90."""
     try:
-        return int(v)
+        return round(float(v) * 10) if key in TENTHS and '.' in v else int(v)
     except ValueError:
         return None
 
@@ -115,7 +118,7 @@ def parse(lines):
                 cur = Stream(len(streams) + 1, when, 'log begins mid-stream')
                 streams.append(cur)
             kv = dict(item.split('=', 1) for item in parts if '=' in item)
-            cur.samples.append(Sample(when, value(kv.get('up', '0')) or 0, {k: value(kv.get(k, '-')) for k in SIGNALS},
+            cur.samples.append(Sample(when, value(kv.get('up', '0')) or 0, {k: value(kv.get(k, '-'), k) for k in SIGNALS},
                                       cur.n))
         elif parts[0] == 'START':
             if cur:

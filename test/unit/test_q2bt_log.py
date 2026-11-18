@@ -149,3 +149,13 @@ def test_the_edge_of_a_pause_is_not_a_stall():
     streams, _ = q2bt.parse(log)
     q2bt.classify(streams[0])
     assert q2bt.episodes(streams[0]) == [] and streams[0].samples[19].kind == 'idle'
+
+
+def test_cpu_in_percent_and_in_older_tenths_read_the_same():
+    new = f'{t(1)} up=5 kbps=614 acl=96 wq=0 rssi=-5 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=20 ba=9.0 own=0.1 h=1 ' \
+          f'er=88 ew=2 fcc=0 done=96 fly=5\n'
+    old = f'{t(2)} up=6 kbps=614 acl=96 wq=0 rssi=-5 lq=0 tpl=4 afh=79 err=0 wtx=0 wrx=0 cpu=20 ba=90 own=1\n'
+    streams, _ = q2bt.parse([new, old])
+    a, b = streams[0].samples
+    assert (a.f['ba'], a.f['own'], b.f['ba'], b.f['own']) == (90, 1, 90, 1)
+    assert (a.f['fcc'], a.f['done'], a.f['fly'], b.f['done']) == (0, 96, 5, None)

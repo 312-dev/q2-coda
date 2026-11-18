@@ -66,7 +66,7 @@ int bt_acl_handle(const unsigned char *req, int max) {
     return -1;
 }
 
-/* ---- the four commands ---- */
+/* ---- the five commands ---- */
 int bt_cmd(unsigned char *out, int op, int handle) {
     int plen = op == BT_OP_TPL ? 3 : 2;
     out[0] = 1; /* HCI_COMMAND_PKT */
@@ -82,15 +82,16 @@ int bt_handle_follow(struct bt_link *k, int listed) {
 }
 void bt_link_clear(struct bt_link *k, int handle) {
     k->handle = handle, k->answered = 0;
-    k->rssi = k->lq = k->tpl = k->afh = BT_UNSET;
+    k->rssi = k->lq = k->tpl = k->afh = k->fcc = BT_UNSET;
 }
-/* Command Complete (0x0e): ncmd, the opcode, then each of the four's return parameters: status, the
- * handle, its value (AFH: its mode, then the 10-byte map, channels 0-78). A refusal (status not 0)
- * is answered, its value left unset. */
+/* Command Complete (0x0e): ncmd, the opcode, then each of the five's return parameters: status, the
+ * handle, its value (AFH: its mode, then the 10-byte map, channels 0-78; the counter: 16 bits). A
+ * refusal (status not 0) is answered, its value left unset. */
 int bt_event(struct bt_link *k, const unsigned char *p, int n) {
     if (n < 9 || p[0] != 4 || p[1] != 0x0e || n < 3 + p[2]) return 0;
     int op = p[4] | p[5] << 8, status = p[6], handle = (p[7] | p[8] << 8) & 0x0fff;
-    if (op != BT_OP_RSSI && op != BT_OP_LQ && op != BT_OP_TPL && op != BT_OP_AFH) return 0;
+    if (op != BT_OP_RSSI && op != BT_OP_LQ && op != BT_OP_TPL && op != BT_OP_AFH && op != BT_OP_FCC)
+        return 0;
     if (handle != k->handle) return 0;
     ++k->answered;
     if (status) return 1;
@@ -99,6 +100,10 @@ int bt_event(struct bt_link *k, const unsigned char *p, int n) {
         int used = 0;
         for (int ch = 0; ch < 79; ++ch) used += p[10 + ch / 8] >> (ch % 8) & 1;
         k->afh = used;
+        return 1;
+    }
+    if (op == BT_OP_FCC) {
+        if (n >= 11) k->fcc = p[9] | p[10] << 8;
         return 1;
     }
     if (n < 10) return 1;
@@ -110,6 +115,23 @@ int bt_event(struct bt_link *k, const unsigned char *p, int n) {
     else
         k->tpl = v;
     return 1;
+}
+
+/* Number Of Completed Packets: the number of handles, then each handle and its count (16 bits each)
+ */
+int bt_completed(const unsigned char *p, int n, int handle) {
+    if (n < 4 || p[0] != 4 || p[1] != 0x13 || n < 3 + p[2] || n < 4 + 4 * p[3]) return 0;
+    int done = 0;
+    for (int i = 0; i < p[3]; ++i) {
+        const unsigned char *e = p + 4 + 4 * i;
+        if (((e[0] | e[1] << 8) & 0x0fff) == handle) done += e[2] | e[3] << 8;
+    }
+    return done;
+}
+int bt_fly_step(struct bt_fly *f, unsigned sent, unsigned done) {
+    int d = (int)(sent - done);
+    if (!f->have || d < f->low) f->have = 1, f->low = d;
+    return d - f->low;
 }
 
 /* ---- text ---- */
@@ -199,9 +221,15 @@ static int put(char *b, int at, int size, const char *key, int v, int unset) {
                        : snprintf(b + at, (size_t)(size - at), " %s=%d", key, v);
     return n < 0 ? at : at + n;
 }
-/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew=\n", "-" for
- * not read. h, er and ew come last, so a reader that knows only the fields before them reads it
- * too. */
+static int put_tenths(char *b, int at, int size, const char *key, int v) { /* 90 as 9.0 */
+    if (at >= size) return at;
+    int n = v < 0 ? snprintf(b + at, (size_t)(size - at), " %s=-", key)
+                  : snprintf(b + at, (size_t)(size - at), " %s=%d.%d", key, v / 10, v % 10);
+    return n < 0 ? at : at + n;
+}
+/* "TIME up=S kbps= acl= wq= rssi= lq= tpl= afh= err= wtx= wrx= cpu= ba= own= h= er= ew= fcc= done=
+ * fly=\n", "-" for not read, ba and own as percent of one core (9.0). The fields after own come
+ * last, so a reader that knows only those before them reads a line too. */
 int bt_line(char *out, int size, const struct bt_sample *s) {
     char b[200];
     int at = snprintf(b, sizeof b, "up=%u", s->up);
@@ -216,11 +244,14 @@ int bt_line(char *out, int size, const struct bt_sample *s) {
     at = put(b, at, sizeof b, "wtx", s->wtx, -1);
     at = put(b, at, sizeof b, "wrx", s->wrx, -1);
     at = put(b, at, sizeof b, "cpu", s->cpu, -1);
-    at = put(b, at, sizeof b, "ba", s->ba, -1);
-    at = put(b, at, sizeof b, "own", s->own, -1);
+    at = put_tenths(b, at, sizeof b, "ba", s->ba);
+    at = put_tenths(b, at, sizeof b, "own", s->own);
     at = put(b, at, sizeof b, "h", s->h, -1);
     at = put(b, at, sizeof b, "er", s->er, -1);
-    put(b, at, sizeof b, "ew", s->ew, -1);
+    at = put(b, at, sizeof b, "ew", s->ew, -1);
+    at = put(b, at, sizeof b, "fcc", s->fcc, BT_UNSET);
+    at = put(b, at, sizeof b, "done", s->done, -1);
+    put(b, at, sizeof b, "fly", s->fly, -1);
     return heat_note(out, size, s->wall, b);
 }
 
