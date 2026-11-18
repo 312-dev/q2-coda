@@ -3394,7 +3394,7 @@ int addon_radio(void) {
  * radio=1, else the playing queue's app when it says so. Its request is /tmp/q2-<id>.radio, one
  * line, "<seq> start <path>" or "<seq> stop", written only once the app's socket is there (it takes
  * a request already there at its start as answered, as a .catplay); it answers in its state file,
- * radioack=<seq> <code> (0 started or stopped, 1 not its song, 2 no radio). */
+ * radioack=<seq> <code> (0 started or stopped, 1 not its song, 2 no radio, 3 signed out). */
 static struct {
     app_t *app;     /* the app asked last */
     char line[600]; /* its request, while waiting for its socket */
