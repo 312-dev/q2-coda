@@ -95,6 +95,8 @@ def test_a_message_keeps_to_one_line_and_is_cut_to_fit(L, tmp_path):
     ('usb 1-1: new high-speed USB device', 'I', 'usb'),
     ('subtitle track 2 chosen', 'I', 'ui'),  # "bt" inside a word names no Bluetooth
     ('page home opened', 'I', 'ui'),
+    ('Selected audio codec: [ffflac] afm: ffmpeg (FFmpeg FLAC audio)', 'I', 'player'),  # hciplayer's mplayer
+    ('Starting playback...', 'I', 'player'),
 ])
 def test_a_raw_line_gets_a_level_and_source_from_its_words(L, text, level, src):
     s = C.c_char_p()

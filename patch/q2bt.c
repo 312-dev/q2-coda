@@ -266,6 +266,7 @@ int bt_flush_due(void) {
 void bt_sleep(unsigned ms) {
     unsigned end_at = now_ms() + ms;
     for (;;) {
+        if (guard_woke) return; /* a request that came while q2guard was busy: answered now */
         unsigned now = now_ms();
         int left = (int)(end_at - now), step = left;
         if (left <= 0) return;
