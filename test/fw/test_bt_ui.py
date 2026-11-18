@@ -524,7 +524,7 @@ def step_row(ui, view):
 
 
 def test_quality_opens_with_the_adapt_to_signal_switch_off_by_default(fw):
-    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under LDAC Auto
+    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under Auto
     and SBC's bitpool, off unless [Q2POD] BTSTEPDOWN says 1, so a Q2 that never saved the key (the switch's
     default was on before) is off too; one row however often the picker lays out, its caption saying what it
     does."""
@@ -718,7 +718,7 @@ def quality_pick(fw, row, codec, linked=1):
     (6, 3, 'SBC'),
     (3, 1, 'aptX-HD LDAC aptX AAC SBC'),   # back up from SBC
     (5, 4, 'AAC LDAC aptX-HD aptX SBC'),
-    (2, 3, 'LDAC aptX-HD aptX AAC SBC'),   # LDAC Auto on a headset without LDAC: the best it has, as bluetoothd picks
+    (2, 3, 'LDAC aptX-HD aptX AAC SBC'),   # Auto on a headset without LDAC: the best it has, as bluetoothd picks
 ])
 def test_a_quality_pick_on_a_live_link_switches_the_codec_in_place(fw, row, codec, order):
     """Stock asks to reconnect and drops the headset (btDisconnect, then connectBtDevice: a new ACL handle at each of
