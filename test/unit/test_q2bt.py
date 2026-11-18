@@ -1,8 +1,8 @@
 """q2bt's core (patch/q2bt_core.c, docs/internals.md#bluetooth-link-monitor): when a stream counts as running, the
 kernel's hci_dev_info and connection list as laid out, the four HCI commands and their answers, the A2DP socket's
 queue from /proc/net/l2cap, the codec from bluealsa's GetPCMs, the log line and its rotation, the EDR
-packet-type command to the A2DP sink's link, and the step-down from aptX HD (bt_step, the config it obeys and the
-PCM path SelectCodec goes to). Built for this machine
+packet-type command to the A2DP sink's link, the step-down from aptX HD or aptX to SBC (bt_step, the config it obeys,
+the PCM path SelectCodec goes to, and the commute replayed through it) and SBC's bitpool. Built for this machine
 with test/unit/q2guard_host.c."""
 import ctypes as C
 import subprocess
@@ -43,7 +43,8 @@ def L(tmp_path_factory):
     lib.bt_down_event.argtypes = [C.c_char_p, C.c_int, C.c_int, C.c_void_p, C.c_int]
     lib.bt_pcms_sink.argtypes = [C.c_char_p, C.c_void_p]
     lib.bt_acl_handle_of.argtypes = [C.c_char_p, C.c_int, C.c_char_p]
-    lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int]
+    lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_void_p]
+    lib.bt_codec_kbps.argtypes = [C.c_int, C.c_uint, C.c_int]
     lib.bt_codec_rank.argtypes = [C.c_char_p]
     lib.bt_codec_name.restype = C.c_void_p
     lib.bt_step_allowed.argtypes = [C.c_char_p]
@@ -531,109 +532,188 @@ def test_the_packet_type_change_is_read_and_noted(L):
     assert edr_event(L, edr(L), ptype_changed(0, 2, 0x0018)) == (0, '')     # nothing sent: not ours
 
 
-# ---- the step-down: aptX HD to aptX to SBC under LDAC Auto when the radio is the limit ----
+# ---- the step-down: aptX HD or aptX straight to SBC under LDAC Auto when the radio delivers short ----
 
 class Step(C.Structure):
-    _fields_ = [('top', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint)]
+    _fields_ = [('top', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint),
+                ('up_ms', C.c_uint), ('raised', C.c_int), ('raised_at', C.c_uint)]
+
+
+class StepLine(C.Structure):
+    _fields_ = [(n, C.c_int) for n in ('kbps', 'acl', 'done', 'wq', 'fly', 'bufs', 'afh', 'own', 'lowered')] + [
+        ('hz', C.c_uint)]
 
 
 SBC, APTX, APTX_HD = 1, 2, 3
 BUFS = 8
+RATE = {APTX_HD: 614, APTX: 412, SBC: 259}  # bt_codec_kbps at 48 kHz, SBC at bitpool 33
 
 
-def step(L, s, t, allowed, rank, wq, fly, bufs=BUFS):
-    return L.bt_step(C.byref(s), t * 1000, allowed, rank, wq, fly, bufs)
+def step_line(rank, kbps=None, full=False, wq=None, afh=79, lowered=0, own=33, fly=None, hz=48000):
+    """A line as q2bt.c hands it over: kbps delivered (all handed packets done), the codec's own rate when not
+    given; full, every ACL buffer held with the socket queued."""
+    kbps = RATE.get(rank, 0) if kbps is None else kbps
+    return StepLine(kbps=kbps, acl=100, done=100, wq=(9000 if full else 0) if wq is None else wq,
+                    fly=(BUFS if full else 2) if fly is None else fly, bufs=BUFS, afh=afh, own=own, lowered=lowered,
+                    hz=hz)
 
 
-def test_codec_ranks_and_names(L):
+def step(L, s, t, allowed, rank, **line):
+    return L.bt_step(C.byref(s), int(t * 1000), allowed, rank, C.byref(step_line(rank, **line)))
+
+
+def starve(L, s, t, rank=APTX_HD):
+    """Two seconds delivering a third of the codec's rate with every buffer held, from t: the step's answer."""
+    step(L, s, t, 1, rank, kbps=RATE[rank] // 3, full=True)
+    return step(L, s, t + 1, 1, rank, kbps=RATE[rank] // 3, full=True)
+
+
+def test_codec_ranks_names_and_rates(L):
     assert [L.bt_codec_rank(n) for n in (b'aptX-HD', b'aptX', b'SBC', b'LDAC', b'AAC', b'')] == [3, 2, 1, 0, 0, 0]
     assert [C.string_at(L.bt_codec_name(r)) for r in (1, 2, 3)] == [b'SBC', b'aptX', b'aptX-HD']
+    # on the link at 48 kHz, as logged; SBC by its frame (13 + 2 x bitpool bytes), 33 when not known
+    assert [L.bt_codec_kbps(r, 48000, 33) for r in (3, 2, 1)] == [614, 412, 259]
+    assert [L.bt_codec_kbps(1, 48000, b) for b in (29, 19, 0)] == [233, 167, 259]
+    assert L.bt_codec_kbps(3, 44100, 0) == 564 and L.bt_codec_kbps(3, 0, 0) == 614  # 0 Hz: not known, 48 kHz
+    assert L.bt_codec_kbps(0, 48000, 0) == 0
 
 
-def test_two_seconds_queued_with_the_buffers_full_steps_down(L):
+@pytest.mark.parametrize('rank', [APTX_HD, APTX])
+def test_two_starved_seconds_step_straight_to_sbc(L, rank):
+    """No aptX stop: where aptX HD fell short on the commute aptX did too (docs/internals.md, the commute
+    replayed)."""
     s = Step()
-    assert step(L, s, 0, 1, APTX_HD, 0, 3) == 0
-    assert step(L, s, 1, 1, APTX_HD, 5000, BUFS) == 0       # one second: not yet
-    assert step(L, s, 2, 1, APTX_HD, 5000, BUFS) == APTX    # two in a row: aptX
-    for t in range(3, 12):                                  # the switch's 10 s gap: stalls not counted
-        assert step(L, s, t, 1, APTX, 9000, BUFS) == 0
-    assert step(L, s, 12, 1, APTX, 9000, BUFS) == 0
-    assert step(L, s, 13, 1, APTX, 9000, BUFS) == SBC       # aptX stalls too
-    assert step(L, s, 30, 1, SBC, 9000, BUFS) == 0          # nothing below SBC
+    assert step(L, s, 0, 1, rank) == 0
+    assert step(L, s, 1, 1, rank, kbps=RATE[rank] * 85 // 100, full=True) == 0   # one second: not yet
+    assert step(L, s, 2, 1, rank, kbps=RATE[rank] * 85 // 100, full=True) == SBC  # two in a row: SBC
+    for t in range(3, 40):
+        assert step(L, s, t, 1, SBC, kbps=50, full=True) == 0                     # nothing below SBC
 
 
-def test_a_queue_without_full_buffers_or_a_small_one_is_not_the_radio(L):
+def test_a_backlog_with_the_rate_whole_is_not_a_shortfall(L):
+    """The trigger as first built fired on any backlog with the buffers full; on the home walk that was 224 s of
+    746 with the rate whole in all but 11."""
     s = Step()
     for t in range(10):
-        assert step(L, s, t, 1, APTX_HD, 5000, BUFS - 1) == 0   # the encoder or the source, not the link
+        assert step(L, s, t, 1, APTX_HD, kbps=560, full=True) == 0               # over 90% of 614: delivered
     for t in range(10, 20):
-        assert step(L, s, t, 1, APTX_HD, 4096, BUFS) == 0       # 4 kB is not over
-    for t in range(20, 30, 2):                                  # never two in a row
-        assert step(L, s, t, 1, APTX_HD, 9000, BUFS) == 0 and step(L, s, t + 1, 1, APTX_HD, 0, 2) == 0
-    assert step(L, s, 40, 1, APTX_HD, 9000, -1) == 0 and step(L, s, 41, 1, APTX_HD, 9000, -1) == 0  # fly not read
+        assert step(L, s, t, 1, APTX_HD, kbps=200, wq=9000, fly=BUFS - 1) == 0   # a buffer free: not the radio
+    for t in range(20, 30):
+        assert step(L, s, t, 1, APTX_HD, kbps=200, wq=0, fly=BUFS) == 0         # nothing waiting
+    for t in range(30, 40, 2):                                                  # never two in a row
+        assert step(L, s, t, 1, APTX_HD, kbps=200, full=True) == 0 and step(L, s, t + 1, 1, APTX_HD) == 0
+    for t in range(40, 50):
+        assert step(L, s, t, 1, APTX_HD, kbps=200, full=True, fly=-1) == 0      # fly not read
 
 
-def test_back_up_after_a_clean_minute_at_most_every_three_minutes(L):
+def test_back_up_after_a_clean_minute_and_three_minutes_since_the_switch(L):
     s = Step()
-    step(L, s, 0, 1, APTX_HD, 0, 0)
-    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
-    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
-    ups = [t for t in range(3, 360) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD]
-    assert ups == [182]                                    # clean long since, but 3 minutes after the switch
-    s2 = Step()
-    step(L, s2, 0, 1, APTX_HD, 0, 0)
-    step(L, s2, 1, 1, APTX_HD, 9000, BUFS)
-    step(L, s2, 2, 1, APTX_HD, 9000, BUFS)
-    for t in range(3, 300):                                # one queued second each 50 s: never a clean minute
-        assert step(L, s2, t, 1, APTX, 9000 if t % 50 == 0 else 0, 2) == 0
+    assert starve(L, s, 1) == SBC
+    up = next(t for t in range(3, 400) if step(L, s, t, 1, SBC) == APTX_HD)
+    assert up == 182                                        # clean long since, but 3 minutes after the switch
+
+
+@pytest.mark.parametrize('spoil, up', [
+    (dict(afh=59), 150 + 60),                               # afh under 60: the band has not cleared
+    (dict(afh=-1), 150 + 60),                               # afh not read
+    (dict(kbps=200, full=True), 150 + 60),                  # SBC itself short
+    (dict(lowered=1), 150 + 60),                            # the bitpool below its own
+])
+def test_back_up_needs_every_second_of_the_minute_clean(L, spoil, up):
+    s = Step()
+    assert starve(L, s, 1) == SBC
+    assert next(t for t in range(3, 400) if step(L, s, t, 1, SBC, **(spoil if t == 150 else {})) == APTX_HD) == up
+
+
+def test_the_bitpool_climbs_back_before_the_codec(L):
+    s = Step()
+    assert starve(L, s, 1) == SBC
+    assert next(t for t in range(3, 400) if step(L, s, t, 1, SBC, lowered=int(t < 300)) == APTX_HD) == 359
+
+
+def test_a_quiet_second_counts_neither_way(L):
+    """Nothing handed and no buffer held (the player between songs, a switch's gap): no evidence either way."""
+    s = Step()
+    step(L, s, 0, 1, APTX_HD, kbps=200, full=True)
+    assert step(L, s, 1, 1, APTX_HD, kbps=0) == 0
+    assert step(L, s, 2, 1, APTX_HD, kbps=200, full=True) == SBC  # the quiet second did not break the two
+    up = next(t for t in range(3, 400) if step(L, s, t, 1, SBC, kbps=0 if 100 <= t < 130 else None) == APTX_HD)
+    assert up == 182                                              # nor the clean minute
+
+
+def up_after(L, s, down):
+    """Seconds from the switch down at down to the step back up, the link clean meanwhile."""
+    return next(u for u in range(down + 1, down + 5000) if step(L, s, u, 1, SBC) == APTX_HD) - down
+
+
+def test_a_step_up_undone_within_five_minutes_doubles_the_wait_to_24_minutes(L):
+    s = Step()
+    assert starve(L, s, 1) == SBC
+    down, waits = 2, []
+    for _ in range(6):
+        waits.append(up_after(L, s, down))
+        up = down + waits[-1]
+        assert starve(L, s, up + 99) == SBC                 # undone 100 s after it
+        down = up + 100
+    assert waits == [180, 360, 720, 1440, 1440, 1440]
+
+
+def test_a_step_up_that_held_five_minutes_keeps_the_wait(L):
+    s = Step()
+    assert starve(L, s, 1) == SBC
+    assert up_after(L, s, 2) == 180
+    for u in range(183, 482):                               # 182 up, held to 482
+        assert step(L, s, u, 1, APTX_HD) == 0
+    assert starve(L, s, 481) == SBC
+    assert up_after(L, s, 482) == 180
 
 
 def test_never_above_where_it_started(L):
     s = Step()
     for t in range(400):
-        assert step(L, s, t, 1, APTX, 0, 1) == 0            # the headset chose aptX: left there
+        assert step(L, s, t, 1, APTX) == 0                  # the headset chose aptX: left there
+    assert starve(L, s, 400, APTX) == SBC
+    assert next((t, r) for t in range(402, 800) if (r := step(L, s, t, 1, SBC))) == (581, APTX)  # not aptX HD
 
 
 def test_only_under_ldac_auto_with_the_setting_on(L):
     for allowed in (0, -1):                                 # the setting off, or another choice: never
         s = Step()
         for t in range(10):
-            assert step(L, s, t, allowed, APTX_HD, 9000, BUFS) == 0
+            assert step(L, s, t, allowed, APTX_HD, kbps=100, full=True) == 0
     s = Step()
-    step(L, s, 0, 1, APTX_HD, 0, 0)
-    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
-    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
-    assert step(L, s, 20, 0, APTX, 0, 1) == APTX_HD         # turned off while stepped down: back at once
-    assert step(L, s, 21, 0, APTX, 0, 1) == 0               # asked once
+    assert starve(L, s, 1) == SBC
+    assert step(L, s, 20, 0, SBC) == APTX_HD                # turned off while stepped down: back at once
+    assert step(L, s, 21, 0, SBC) == 0                      # asked once
 
 
 def test_ldac_aac_or_no_codec_is_left_alone(L):
     s = Step()
     for t in range(10):
-        assert step(L, s, t, 1, 0, 9000, BUFS) == 0
+        assert step(L, s, t, 1, 0, kbps=10, full=True) == 0
 
 
 def test_another_choice_while_stepped_down_is_left_alone(L):
     """Quality changed from LDAC Auto to a fixed choice: stock selects that codec, and nothing is put back over it;
     Auto chosen again starts from what it streams then."""
     s = Step()
-    step(L, s, 0, 1, APTX_HD, 0, 0)
-    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
-    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
+    assert starve(L, s, 1) == SBC
     for t in range(20, 30):
-        assert step(L, s, t, -1, APTX, 0, 1) == 0
+        assert step(L, s, t, -1, SBC) == 0
     for t in range(300, 700):
-        assert step(L, s, t, 1, APTX, 0, 1) == 0             # aptX is where Auto now started
+        assert step(L, s, t, 1, SBC) == 0                   # SBC is where Auto now started
 
 
-INI = b"""[SYSSET]\r\nLANG=1\r\nBTCODING=2\r\n[PLAYSET]\r\nBTSTEPDOWN=0\r\n[Q2POD]\r\nBTNAME=Q2\r\n%s"""
+INI = b"""[SYSSET]\r\nLANG=1\r\nBTCODING=2\r\n[PLAYSET]\r\nBTSTEPDOWN=1\r\n[Q2POD]\r\nBTNAME=Q2\r\n%s"""
 
 
 @pytest.mark.parametrize('ini, allowed', [
-    (INI % b'', 1),                                          # LDAC Auto, the setting never chosen: on
-    (INI % b'BTSTEPDOWN=1\r\n', 1),
+    (INI % b'', 0),                                          # LDAC Auto, the switch never touched: off
+    (INI % b'BTSTEPDOWN=1\r\n', 1),                          # turned on by hand
     (INI % b'BTSTEPDOWN=0\r\n', 0),                          # off; PLAYSET's key of that name is not it
-    (INI.replace(b'BTCODING=2', b'BTCODING=3') % b'', -1),   # aptX HD chosen
+    (INI % b'BTSTEPDOWN=\r\n', 0),
+    (INI % b'BTSTEPDOWN=10\r\n', 0),
+    (INI.replace(b'BTCODING=2', b'BTCODING=3') % b'BTSTEPDOWN=1\r\n', -1),   # aptX HD chosen
     (INI.replace(b'BTCODING=2', b'BTCODING=21') % b'', -1),
     (INI.replace(b'BTCODING=2', b'BTCODINGX=2') % b'', -1),
     (b'', -1),                                               # no config.ini read
@@ -653,13 +733,11 @@ def test_the_a2dp_source_pcm_s_path_for_select_codec(L):
 
 def test_a_codec_not_known_yet_keeps_where_it_started(L):
     """A stream's START asks bluealsa for the codec again: until it answers, the rank is 0, and a stream that comes
-    back from a pause on aptX still climbs back to the aptX HD it started on."""
+    back from a pause on SBC still climbs back to the aptX HD it started on."""
     s = Step()
-    step(L, s, 0, 1, APTX_HD, 0, 0)
-    step(L, s, 1, 1, APTX_HD, 9000, BUFS)
-    assert step(L, s, 2, 1, APTX_HD, 9000, BUFS) == APTX
-    assert step(L, s, 100, 1, 0, 0, -1) == 0                # paused, resumed: not known yet
-    assert next(t for t in range(101, 400) if step(L, s, t, 1, APTX, 0, 2) == APTX_HD) == 182
+    assert starve(L, s, 1) == SBC
+    assert step(L, s, 100, 1, 0) == 0                       # paused, resumed: not known yet
+    assert next(t for t in range(101, 400) if step(L, s, t, 1, SBC) == APTX_HD) == 182
 
 
 # ---- SBC's bitpool: lowered frame to frame while the radio is the limit (bt_sbc_step) ----
@@ -761,8 +839,10 @@ INI_SBC = b"""[SYSSET]\r\nBTCODING=%s\r\n[Q2POD]\r\n%s"""
 
 
 @pytest.mark.parametrize('coding, key, allowed', [
-    (b'2', b'', 1),                      # LDAC Auto: the switch on unless 0
-    (b'6', b'', 1),                      # SBC HQ chosen by hand
+    (b'2', b'', 0),                      # LDAC Auto, the switch never touched: off
+    (b'2', b'BTSTEPDOWN=1\r\n', 1),      # turned on
+    (b'6', b'', 0),
+    (b'6', b'BTSTEPDOWN=1\r\n', 1),      # SBC HQ chosen by hand
     (b'7', b'BTSTEPDOWN=1\r\n', 1),      # SBC
     (b'7', b'BTSTEPDOWN=0\r\n', 0),      # the switch off
     (b'2', b'BTSTEPDOWN=0\r\n', 0),
@@ -771,7 +851,7 @@ INI_SBC = b"""[SYSSET]\r\nBTCODING=%s\r\n[Q2POD]\r\n%s"""
     (b'0', b'', -1),                     # LDAC Best
     (b'70', b'', -1),
 ])
-def test_sbc_is_adapted_under_ldac_auto_or_sbc_with_the_switch_on(L, coding, key, allowed):
+def test_sbc_is_adapted_under_ldac_auto_or_sbc_only_with_the_switch_on(L, coding, key, allowed):
     assert L.bt_sbc_allowed(INI_SBC % (coding, key)) == allowed
     assert L.bt_sbc_allowed(b'') == -1
 
@@ -809,6 +889,92 @@ def test_the_commute_replayed_steps_sbc_down_to_the_floor(L):
     steps = commute(L)
     assert steps[:3] == [('14:30:40', 33, 29), ('14:30:44', 29, 23), ('14:30:50', 23, 19)]
     assert all(to <= 19 for _, _, to in steps[3:])    # held at the floor through the interference
+
+
+# ---- the commute replayed through bt_step and bt_sbc_step (docs/internals.md, "The commute replayed") ----
+
+ENCODERS = {'ba-a2dp-aptx-hd': 'aptX-HD', 'ba-a2dp-aptx': 'aptX', 'ba-a2dp-sbc': 'SBC'}
+LOGGED = {'aptX-HD': 614, 'aptX': 412, 'SBC': 259}  # each logged codec's rate on the link
+SBC_KBPS = {33: 259, 29: 234, 23: 195, 19: 170}     # SBC by its bitpool, as logged
+GAP = 2                                             # a switch's silence, s: no Q2 has measured it
+
+
+def capacity(first, last, bound):
+    """The seconds of the logs (test/fixtures/q2bt-replay-20261118.log.gz and the commute's) from first to last
+    (hh:mm:ss) as (capacity in kbit/s, afh). A second's capacity is what the controller delivered while it held
+    every ACL buffer with the socket queued; otherwise at least the logged codec's rate ('lo') or unbounded ('hi'),
+    as what a higher codec would have got there is not in the log. A second with little handed and no buffer held
+    (a switch's own gap, a pause) says nothing, and is left out."""
+    import gzip
+    import re
+    text = gzip.decompress((ROOT / 'test/fixtures/q2bt-replay-20261118.log.gz').read_bytes()).decode()
+    text += (ROOT / 'test/fixtures/q2bt-commute-20261118.log').read_text()
+    out: list[tuple[float, int]] = []
+    codec, bufs = 'SBC', 0
+    for line in text.splitlines():
+        stamp, _, rest = line.partition(' ')
+        if rest.startswith('START'):
+            m = re.search(r'bufs=(\d+)', rest)
+            bufs = int(m[1]) if m else 0
+        elif rest.startswith(('CODEC', 'ENCODER')):
+            word = rest.split()[1]
+            codec = ENCODERS.get(word, codec) if rest.startswith('ENCODER') else word
+        if not rest.startswith('up=') or not first <= stamp[11:19] <= last:
+            continue
+        f = {k: (-1.0 if v == '-' else float(v)) for k, v in (kv.split('=', 1) for kv in rest.split())}
+        kbps, acl, done, fly, wq = (f.get(k, -1.0) for k in ('kbps', 'acl', 'done', 'fly', 'wq'))
+        if kbps < 0 or acl < 0:
+            continue
+        held = fly >= 0 and fly >= bufs and wq > 0
+        if kbps < 50 and not held:
+            continue
+        if held:
+            cap = kbps * done / acl if acl and done > 0 else 0.0
+        else:
+            cap = LOGGED[codec] if bound == 'lo' else 1e9
+        out.append((cap, int(f.get('afh', -1.0))))
+    return out
+
+
+def replay(L, seconds):
+    """LDAC Auto on a headset whose best is aptX HD (the Px7), the switch on, over seconds: each fed to bt_sbc_step
+    and bt_step as q2bt.c does, as the line the codec then in force would have logged. Its switches and bad
+    seconds (short of 90% of the codec's rate, or silent in a switch)."""
+    s, sbc_s = Step(), Sbc()
+    rank, pool, gap, switches, bad = APTX_HD, 0, 0, 0, 0
+    for i, (cap, afh) in enumerate(seconds):
+        if gap:
+            gap, bad = gap - 1, bad + 1
+            continue
+        rate = SBC_KBPS[pool or 33] if rank == SBC else LOGGED[bt_name(L, rank)]
+        bad += cap < 0.9 * rate
+        short = cap < rate
+        kbps = int(cap) if short else rate
+        line = StepLine(kbps=kbps, acl=100, done=100, wq=9000 if short else 0, fly=5 if short else 2, bufs=5,
+                        afh=afh, own=33, lowered=0, hz=48000)
+        to = L.bt_sbc_step(C.byref(sbc_s), i * 1000, 1, rank, 33 if rank == SBC else 0, line.wq, line.fly, 5)
+        if to >= 0:
+            pool = to
+        line.lowered = int(pool != 0)
+        to = L.bt_step(C.byref(s), i * 1000, 1, rank, C.byref(line))
+        if to:
+            rank, gap, switches = to, GAP, switches + 1
+    return switches, bad
+
+
+def bt_name(L, rank):
+    return C.string_at(L.bt_codec_name(rank)).decode()
+
+
+@pytest.mark.parametrize('first, last, expect', [
+    ('14:25:11', '14:31:35', (1, 27)),   # the commute's tail: aptX by pick, then SBC; the band down to 20 of 79
+    ('06:15:06', '06:28:24', (2, 11)),   # a walk at home, on aptX HD
+])
+@pytest.mark.parametrize('bound', ['lo', 'hi'])
+def test_the_commute_replayed_through_the_step_down(L, first, last, expect, bound):
+    """docs/internals.md's table, "the same, and up only with afh at 60 or more": staying on aptX HD was 91 to 379
+    bad seconds on the commute and 11 at home; the ladder as first built 4 switches and 35 to 50, and 6 and 13."""
+    assert replay(L, capacity(first, last, bound)) == expect
 
 
 def down_event(L, ev, handle):
