@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Streamed songs: picking a server song (from Search or any list) while another song is paused no longer plays a short blip of the paused song first. The paused song now just stops while the new one loads.
   - Streamed songs: a queue of server songs picks up where it left off after a restart. Memory Playback brought back only the one or two songs already downloaded, Up Next stopped there and nothing fetched the rest; now the app (Subsonic with `resume=1`) streams the queue again from the song that was playing, still paused, and Up Next lists every song. Without the app, or if it declines, the songs on the card play as before.
   - Subsonic: covers fetched on demand for the car; stars and likes sync separately; a queue you were playing comes back in full after a restart.
   - Settings > Bluetooth: while the Q2 searches for devices, the page no longer shows the Other Devices header twice, one drawn over the Audio header, and coming back from Headset Volume no longer makes the list jump down and back up. Any list scrolled to its end stays put when its page is rebuilt or comes back on top.
