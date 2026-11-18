@@ -199,6 +199,20 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
     return 2;
 }
 
+/* Disconnection Complete (0x05): status, the handle, the reason, which names the side that ended
+ * the link. */
+int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size) {
+    if (handle < 0 || n < 7 || p[0] != 4 || p[1] != 0x05 || p[2] < 4 || p[3]) return 0;
+    if (((p[4] | p[5] << 8) & 0x0fff) != handle) return 0;
+    int reason = p[6];
+    const char *who = reason >= 0x13 && reason <= 0x15 ? "headset"
+                      : reason == 0x16                  ? "q2"
+                      : reason == 0x08 || reason == 0x22 ? "timeout"
+                                                         : "other";
+    snprintf(note, (size_t)size, "LINK down h=%d reason=0x%02x %s", handle, reason, who);
+    return 1;
+}
+
 /* ---- the step-down ---- */
 static const char *const codec_names[4] = { "", "SBC", "aptX", "aptX-HD" };
 int bt_codec_rank(const char *codec) {
