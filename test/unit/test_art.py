@@ -180,7 +180,7 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               'pause_d', 'pause_l', 'shuffle_a', 'shuffle_w', 'folder_d', 'folder_l', 'folder_w',
                                               'crphone_d', 'crphone_l', 'crphone_w',
                                               *(f'ctaring_{s}_{k}' for s in 'lr' for k in 'dl'),  # the buttons' focus ring's ends
-                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
+                                              'check_a', 'check_w', 'confirm_shuffle', *modes, *wifi, *glyphs, *hearts, *rates, *stars, *marks, *menus, *speakers, *pair, *quality,
                                               *keylock, *status, *card, *circles, *tiles, *acts, *pmarks, *lives, *store, *modepages, *cc, *usb, *upnext, *charge, *inset, 'chargebolt',
                                               'search_pop', 'search_pop_letters', *(f'search_return_{m}_{k}' for m in ('search', 'go', 'save') for k in 'wa'), 'holdback',
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
