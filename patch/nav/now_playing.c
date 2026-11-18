@@ -279,6 +279,7 @@ static void lyric_poll(void) {
      * second's change, lyrics_now). Else the follow, which only jumps, at stock's timer's pace on
      * whole seconds (lyrics_sec), so a dark or covered page reads the clock only that often. */
     int front = page && usable() && window_manager_get_top_window(wm) == st.np_win;
+    lyrics_ask_poll(front); /* none of the song's own: its app's server's, when it has some */
     unsigned now = (unsigned)time_now_ms();
     if (lyrics_on(lrc) && (front || now - st.lyric_follow_at >= LYRIC_FOLLOW_MS)) {
         st.lyric_follow_at = now;
