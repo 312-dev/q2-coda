@@ -447,6 +447,8 @@ int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
 /* theme_engine.c's bar_foot is V_BAR less the window's y: 0 here, the page a window under the status row (290 high) */
 int bar_foot(void *w) { (void)w; return 0; }
+/* theme_engine.c's page_room, w's height less bar_foot: the page (1) is 290 high, as its "h" reads */
+int page_room(void *x) { return !x || (long)x == 1 ? client_h() - bar_foot(x) : w[(long)x].h - bar_foot(x); }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
 /* menu_modal.c's sheet does not open here: the Type picker is the editor's own screen */
