@@ -618,7 +618,7 @@ def test_oled_draws_a_ratings_rows_hearts_as_glyphs(fw, ui, song, st):
     """OLED's second line (docs/oled-design.md): Phosphor's filled hearts for the song's, outlined for the rest, in
     Text Secondary or white on the selection, the words after them."""
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     Rated(fw, ui, song)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     call(fw, 'rated_open', 3)
@@ -1126,38 +1126,19 @@ class Heart:
         badge = [w for w in self.ui.kids[self.win] if self.ui.kind[w] == 'hscroll_label_create'][0]  # before the picker's
         return None if badge in self.ui.hidden else self.ui.text[badge]
 
-    def panel(self):
-        return self.ui.lookup(self.win, 'rate_panel', 0)
-
-    def picker(self):
-        """The picker's caption and its five hearts' images, or None while it's down."""
-        panel = self.panel()
-        if not panel or panel in self.ui.hidden:
-            return None
-        caption, *hearts = self.ui.kids[panel]
-        return self.ui.text[caption], [self.ui.image.get(h) for h in hearts]
-
     def hold(self):
         self.ui.handler(self.heart, EVT_POINTER_DOWN)()
         return self.ui.fire('rate_long')
 
-    def tap(self, w):
-        """A press and its release on a heart of the picker, or outside it."""
-        self.ui.handler(w, EVT_POINTER_DOWN)()
-        return self.ui.handler(w, EVT_CLICK)()
-
-    def key(self, key, top=None):
-        return self.fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(top or self.win, key)
+    def pick(self, n):
+        """n hearts picked in the rating picker, the menu sheet's (ratings.c rate_show): its pick."""
+        self.fw.fn('ratings__rate_picked', None, C.c_int)(n)
 
     def kept(self):
         return self.fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, listen_key(b'/m/now.flac'))
 
     def copy_due(self):
         return self.fw.var('ratings__rc_due', C.c_int).value
-
-
-def hearts(n, on='play_fav', off='play_unfav'):
-    return [on] * n + [off] * (5 - n)
 
 
 def test_the_heart_s_click_is_swapped_for_one_that_tells_a_hold(fw, ui, song, mcl):
@@ -1206,113 +1187,36 @@ def test_a_streamed_track_has_no_badge(fw, ui, song, mcl):
     assert heart.badge() is None
 
 
-def test_holding_the_heart_opens_the_picker_on_its_rating(fw, ui, song, mcl):
+def test_holding_the_heart_asks_for_the_picker(fw, ui, song, mcl):
+    """RATE_HOLD_MS of the heart opens the menu sheet's picker (its rows: test_nav_hold's
+    test_oled_rates_in_the_inset_modal)."""
     heart = Heart(fw, ui, song, mcl, kept=3)
-    assert heart.picker() is None
     ui.handler(heart.heart, EVT_POINTER_DOWN)()
     assert [ms for _, ms in ui.pending('rate_long')] == [RATE_HOLD_MS]
     ui.fire('rate_long')
-    assert heart.picker() == ('3 of 5', hearts(3)) and heart.panel() not in ui.dull
-    # the press is aborted, so the slide_view under the heart lets go of it
-    (_, (_, kind, target, *_)), = fw.calls('pointer_event_init')
-    assert kind == EVT_POINTER_ABORT and target == heart.win
-    assert [c[1][0] for c in fw.calls('widget_dispatch_event_to_target_recursive')] == [heart.win]
-    ui.handler(heart.heart, EVT_CLICK)()  # the hold's own release: stock's toggle never runs
-    assert heart.picker() == ('3 of 5', hearts(3))
-
-
-def test_a_my_fav_opens_the_picker_on_five(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=2, fav=True)
-    heart.hold()
-    assert heart.picker() == ('5 of 5', hearts(5))
+    assert [C.string_at(c[1][0]) for c in fw.calls('navigator_to')] == [b'dialog/sortselect_dialog']
 
 
 def test_a_short_press_opens_nothing(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=3)
     heart.pressed = 0
     heart.hold()
-    assert heart.picker() is None and not fw.calls('pointer_event_init')
+    assert not fw.calls('navigator_to') and not fw.calls('pointer_event_init')
 
 
-def test_the_wheel_moves_the_rating_and_return_leaves_it(fw, ui, song, mcl):
+@pytest.mark.parametrize('kept, badge', [(4, '4'), (1, '1'), (0, None)])
+def test_the_picked_rating_is_kept(fw, ui, song, mcl, kept, badge):
     heart = Heart(fw, ui, song, mcl, kept=3)
     heart.hold()
-    seen = []
-    for key in (KEY_NEXT, KEY_NEXT, KEY_NEXT, *[KEY_PREV] * 6):
-        assert heart.key(key) == 1
-        seen.append(heart.picker()[0])
-    assert seen == ['4 of 5', '5 of 5', '5 of 5', '4 of 5', '3 of 5', '2 of 5', '1 of 5', 'Unrated', 'Unrated']
-    assert heart.picker()[1] == hearts(0)
-    assert heart.key(KEY_RETURN) == 1 and heart.picker() is None and heart.panel() in ui.dull
-    assert heart.kept() == 3 and not heart.copy_due() and heart.badge() == '3'
-
-
-@pytest.mark.parametrize('moves, kept, badge', [(1, 4, '4'), (-2, 1, '1'), (-3, 0, None)])
-def test_centre_keeps_the_picked_rating(fw, ui, song, mcl, moves, kept, badge):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.hold()
-    for _ in range(abs(moves)):
-        heart.key(KEY_NEXT if moves > 0 else KEY_PREV)
-    assert heart.key(KEY_CENTER) == 1 and heart.picker() is None
+    heart.pick(kept)
     assert heart.kept() == kept and heart.copy_due() and heart.badge() == badge
-
-
-def test_the_picker_leaves_other_keys_and_windows_alone(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    assert heart.key(KEY_NEXT) == 0  # no picker
-    heart.hold()
-    assert heart.key(KEY_PLAY) == 0 and heart.key(KEY_NEXT, top=0x1234) == 0
-    assert heart.picker() == ('3 of 5', hearts(3))
-
-
-def test_a_tap_on_a_heart_keeps_that_many(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    hearts_ = ui.kids[heart.panel()][1:]
-    assert heart.tap(hearts_[1]) == STOP
-    assert heart.kept() == 2 and heart.picker() is None and heart.badge() == '2'
-
-
-def test_the_release_of_the_hold_that_opened_the_picker_picks_nothing(fw, ui, song, mcl):
-    """#303: the picker opens under the held finger, whose release chose the heart there."""
-    clock = [5001]  # odd: the stamp is the time | 1
-    fw.mock('time_now_ms', lambda *_: clock[0])
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    hearts_ = ui.kids[heart.panel()][1:]
-    assert ui.handler(hearts_[4], EVT_CLICK)() == STOP  # no press came down on it
-    assert heart.kept() == 1 and heart.picker() == ('1 of 5', hearts(1))
-    clock[0] += 399  # the same finger settling
-    assert heart.tap(hearts_[4]) == STOP and heart.kept() == 1 and heart.picker() == ('1 of 5', hearts(1))
-    clock[0] += 1
-    assert heart.tap(hearts_[3]) == STOP and heart.kept() == 4 and heart.picker() is None
-    heart.hold()
-    clock[0] += 400
-    heart.tap(hearts_[2])
-    assert ui.handler(hearts_[1], EVT_CLICK)() == STOP and heart.kept() == 3  # one press, one tap
-
-
-def test_a_tap_on_the_rating_it_has_takes_it_away(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=3)
-    heart.hold()
-    assert heart.tap(ui.kids[heart.panel()][3]) == STOP
-    assert heart.kept() == 0 and heart.picker() is None and heart.badge() is None
-
-
-def test_the_picker_is_made_once_per_window(fw, ui, song, mcl):
-    heart = Heart(fw, ui, song, mcl, kept=1)
-    heart.hold()
-    heart.key(KEY_RETURN)
-    made = len(ui.kids[heart.win])
-    heart.hold()
-    assert len(ui.kids[heart.win]) == made and heart.picker() == ('1 of 5', hearts(1))
 
 
 def test_the_picker_goes_with_its_window(fw, ui, song, mcl, st):
     heart = Heart(fw, ui, song, mcl, kept=1)
     heart.hold()
     ui.close(heart.win)
-    assert not st('rate_on', C.c_void_p).value and not st('rate_win', C.c_void_p).value
+    assert not st('rate_win', C.c_void_p).value
     assert not ui.pending('rate_tick') and not ui.pending('rate_long')
 
 
@@ -1320,7 +1224,7 @@ def test_a_window_closed_mid_hold_opens_nothing(fw, ui, song, mcl, st):
     heart = Heart(fw, ui, song, mcl, kept=1)
     ui.handler(heart.heart, EVT_POINTER_DOWN)()
     ui.close(heart.win)
-    assert not ui.pending('rate_long') and not st('rate_on', C.c_void_p).value
+    assert not ui.pending('rate_long')
 
 
 def test_another_window_s_end_leaves_the_heart(fw, ui, song, mcl, st):
@@ -1345,8 +1249,7 @@ def test_five_hearts_are_a_my_fav_through_the_heart_s_own_click(fw, ui, song, mc
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(5)
     assert list(log[:2]) == [Heart.CTX, 0]  # stock's toggle, with its own context
     assert heart.kept() == 0 and heart.copy_due()  # 5 is My Fav's, not kept here
 
@@ -1357,22 +1260,20 @@ def test_fewer_hearts_on_a_my_fav_take_it_out(fw, ui, song, mcl):
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     heart.hold()
-    heart.key(KEY_PREV)
-    heart.key(KEY_CENTER)
+    heart.pick(4)
     assert log[0] == Heart.CTX and heart.kept() == 4
 
 
 @in_fork
-@pytest.mark.parametrize('fav, kept, key, told', [(False, 4, KEY_NEXT, b'1'), (True, 0, KEY_PREV, b'0')])
-def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, key, told):
+@pytest.mark.parametrize('fav, kept, pick, told', [(False, 4, 5, b'1'), (True, 0, 4, b'0')])
+def test_five_hearts_or_none_on_an_app_synced_song_are_told_to_the_app(fw, ui, song, mcl, fav, kept, pick, told):
     path = b'/mnt/mmc/Jellyfin/A/now.flac'
     heart = Heart(fw, ui, song, mcl, fav=fav, path=path, table=ratings((listen_key(path), kept)) if kept else None)
     log = (C.c_long * 3)()
     stock_stub(FAV_CLICK, 0, log)
     favdir_card(fw, heart.files.files)
     heart.hold()
-    heart.key(key)
-    heart.key(KEY_CENTER)
+    heart.pick(pick)
     assert log[0] == Heart.CTX  # My Fav in or out through stock's toggle
     assert heart.files.files['/mnt/mmc/.jf/fav.log'] == b'\npath\t' + told + b'\t' + path + b'\n'
 
@@ -1450,8 +1351,7 @@ def test_the_heart_on_a_song_an_app_synced_is_stock_s_and_told_to_the_app(fw, ui
 def test_a_full_ratings_table_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, table=b''.join(struct.pack('<I', (i + 1) << 3 | 1) for i in range(RATE_SLOTS)))
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(1)
     assert ui.toasts == ['Ratings are full'] and heart.kept() == 0
 
 
@@ -1459,8 +1359,7 @@ def test_a_rating_that_cannot_be_written_says_so(fw, ui, song, mcl):
     heart = Heart(fw, ui, song, mcl, kept=2)
     heart.files.fail_rename = True
     heart.hold()
-    heart.key(KEY_NEXT)
-    heart.key(KEY_CENTER)
+    heart.pick(3)
     assert ui.toasts == ['Rating not saved'] and heart.kept() == 2 and heart.badge() == '2'
 
 
@@ -1485,11 +1384,8 @@ def album_menu(fw, ui, song, st, album_id=0xa1b0):
 def test_an_album_s_rating_is_kept_apart_from_its_songs(fw, ui, song, st):
     files = Files(fw)
     win, ids = album_menu(fw, ui, song, st)
-    show = fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)
-    assert show(win, 4, 0xa1b0) == 1 and show(win, 2, 0xa1b0) == 0  # one picker at a time
-    key = fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)
-    key(win, KEY_NEXT)
-    key(win, KEY_CENTER)
+    fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
+    fw.fn('ratings__rate_picked', None, C.c_int)(5)
     kept = fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)
     assert kept(1, 0xa1b0) == 5 and kept(0, 0xa1b0) == 0 and RATINGS not in files.files
     assert ALBUM_RATINGS in files.files
@@ -1500,7 +1396,7 @@ def test_an_album_no_longer_under_the_picker_is_not_rated(fw, ui, song, st):
     win, ids = album_menu(fw, ui, song, st)
     fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
     ui.new('window_create', 0, 0, 0, 0, 0)  # another page over it
-    fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(win, KEY_CENTER)
+    fw.fn('ratings__rate_picked', None, C.c_int)(4)
     assert ui.toasts == ['Album changed'] and not files.files
 
 
@@ -1508,7 +1404,7 @@ def test_an_album_whose_row_changed_is_not_rated(fw, ui, song, st):
     files = Files(fw)
     win, ids = album_menu(fw, ui, song, st, album_id=0xb2c0)  # the row now holds another album
     fw.fn('rate_show', C.c_int, C.c_void_p, C.c_int, C.c_uint)(win, 4, 0xa1b0)
-    fw.fn('rate_key', C.c_int, C.c_void_p, C.c_uint)(win, KEY_CENTER)
+    fw.fn('ratings__rate_picked', None, C.c_int)(4)
     assert ui.toasts == ['Album changed'] and not files.files
 
 
@@ -2159,7 +2055,7 @@ def test_oled_marks_each_service_with_its_own_glyph(fw, ui, st):
     """OLED (docs/oled-design.md): a service's logo on its disc gives way to the theme's 20 px mark centred on x 34,
     in Text Secondary or white on the selection, the words from x 52; a row without a known logo keeps its own."""
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     win, view = streaming(fw, ui)
     drawn: list = []  # image names, each followed by where it was drawn
@@ -2195,7 +2091,7 @@ def test_oled_marks_a_card_app_by_its_id_its_own_icon_or_app_window(fw, ui, st, 
     icon has it drawn in the mark's 20 px box centred on x 34; one without takes app-window."""
     from test_coverflow import png
     from test_nav_hold import use_set
-    use_set(st, 'oled')
+    use_set(st)
     fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: struct.pack_into('<4i', ui.blocks[w], 0, *map(signed, (x, y, ww, h))))
     fw.mock('tk_str_start_with', lambda s, prefix, *_: bool(s) and C.string_at(s).startswith(C.string_at(prefix)))
     files = {**deezer(), '/mnt/mmc/.deez/icon-40.png': png(40, 40), '/mnt/mmc/.soul/q2app': b'name=Soulseek\n',
@@ -2280,15 +2176,14 @@ def library(fw, ui, folders=(), token=b'', extra=0):
 
 
 def boot(fw, st):
-    """The geometry set theme_boot writes (st.geom): OLED's."""
+    """OLED's settings, on the geometry set the build bakes."""
     Config(fw)
-    st('geom').value = fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())
 
 
 def test_the_library_s_rows_in_their_order(fw, ui, st):
     boot(fw, st)
     win, view = library(fw, ui)
-    # the menu review's order (2026-11-15), Search there as OLED's set has no Library icons (lib_art 0: library_search);
+    # the menu review's order (2026-11-15), Search there (home.c ringnav_localmusic);
     # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs; Shuffle,
     # Hi-Res and Long Songs hidden too, in their places
     hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs')
@@ -2323,7 +2218,6 @@ def test_a_library_that_is_not_stock_s_is_left(fw, ui):
 
 def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
     boot(fw, st)
-    assert fw.fn('library_search', C.c_int)() == 1  # OLED's set has no Library icons (lib_art 0)
     win, view = library(fw, ui)
     assert ('Search', True) in page_rows(ui, view) and ('Shuffle', False) in page_rows(ui, view)
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']
@@ -2644,25 +2538,6 @@ def test_play_all_from_a_server_song_plays_rather_than_saying_storage_unavailabl
     ui.click(page, 0)
     (queue, at, cls), = ui.played
     assert [field(r, 'title') for r in queue] == [b'B1', b'B2', b'G1', b'R1'] and not ui.toasts
-
-
-# Cover Flow's All albums card (an artist's covers) checks its first song the same way
-@pytest.mark.parametrize('first,plays', [(b'/mnt/mmc/.subsonic/cat/al1/s1.flac', True), (b'/m/blue/1.flac', False)])
-def test_cover_flows_all_albums_from_a_server_song_plays_and_from_a_gone_card_file_says_so(fw, ui, song, first, plays):
-    from test_coverflow import Cf
-    second = first.replace(b'1.flac', b'2.flac')
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
-    albums = Albums(fw, ui, song, gone={first, second})
-    albums.songs[b'Blue'] = [song(second, b'B2', album=b'Blue', track=2), song(first, b'B1', album=b'Blue', track=1)]
-    c = fw.var('cf', Cf)
-    c.name = ui.new('label_create', 0, 0, 0, 0, 0)  # its caption, which says why nothing plays
-    c.albums = ui.deques.new([song(first, album=b'Blue'), song(b'/m/red/1.flac', album=b'Red')])
-    fw.fn('coverflow__play_all', C.c_int, C.c_void_p)(None)
-    if plays:
-        (queue, at, cls), = ui.played
-        assert [field(r, 'title') for r in queue][:2] == [b'B1', b'B2'] and at == 0
-    else:
-        assert not ui.played and ui.text[c.name] == 'Storage unavailable'
 
 
 def test_shuffle_plays_the_decade_s_songs_shuffled(fw, ui, song, mcl):

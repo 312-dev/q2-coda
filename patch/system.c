@@ -379,7 +379,8 @@ void reboot_record(void *caller) {
         "echo \"bluetooth abnormal: bt_initstatus %d, "
         "$(cut -d' ' -f1 /proc/uptime) s after boot, from %p\"; "
         "echo \"== dmesg\"; dmesg | tail -n 200; "
-        "[ -f /tmp/q2-demo.err ] && { echo \"== stderr\"; tail -n 60 /tmp/q2-demo.err; }; } "
+        "[ -f /tmp/q2-demo.err ] && { echo \"== stderr\"; "
+        "cat /tmp/q2-demo.err.1 /tmp/q2-demo.err 2>/dev/null | tail -n 60; }; } "
         "> /mnt/data/q2-crash.log.tmp 2>&1; "
         "mv /mnt/data/q2-crash.log.tmp /mnt/data/q2-crash.log; sync",
         status, caller);

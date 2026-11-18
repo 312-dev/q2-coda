@@ -1,4 +1,4 @@
-/* A Library artist's page under a set with the menu sheet (OLED's; docs/oled-design.md#artist-page
+/* A Library artist's page (docs/oled-design.md#artist-page
  * and docs/internals.md#library-artist-page): stock's artistinfo_page, whichever way it opened
  * (Library > Artists, Go to Artist, Now Playing's artist tap, Search), keeps its window and its
  * Return, but its tabs are hidden and the page is drawn as a card app's artist (artist_page.c):
@@ -165,7 +165,7 @@ static int la_front(void *win, void *event) {
 int artist_local(void) {
     void *top = window_manager_get_top_window(window_manager()), *a;
     int n;
-    if (!top || !modal_set() || tk_strcmp(widget_get_prop_str(top, "name", ""), "artistinfo_page"))
+    if (!top || tk_strcmp(widget_get_prop_str(top, "name", ""), "artistinfo_page"))
         return 0;
     if (top == la.win) return 1;
     if (la.win) la_gone(la.win, 0); /* one artist page at a time; its data goes with the old one */

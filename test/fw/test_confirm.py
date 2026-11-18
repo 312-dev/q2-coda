@@ -7,7 +7,7 @@ import pytest
 
 from conftest import O
 from test_nav_hold import Ui, ui  # noqa: F401 (fixtures)
-from test_nav_painters import OLED_SET, SETS, Canvas, scratch, st, theme  # noqa: F401 (fixtures)
+from test_nav_painters import GEOMETRY, Canvas, scratch, st, theme  # noqa: F401 (fixtures)
 
 KEY_RETURN, KEY_PLAY, EVT_KEY_UP = O['KEY_RETURN'], O['KEY_PLAY'], O['EVT_KEY_UP']
 NEUTRAL, DESTRUCTIVE, CONSEQUENTIAL, INFO = range(4)
@@ -283,7 +283,6 @@ def test_the_wheel_moves_between_the_answers_and_the_list_never_scrolls(fw, ui, 
     list cut there scrolled Cancel under the bar as the second answer took it, so the wheel seemed stuck on Cancel
     (p31, 2026-11-16). The answers stand whole: the wheel lights each in turn and the list stays put."""
     theme(fw)
-    st('geom').value = OLED_SET
     card = Card(fw, ui)
     assert card.ask('Install %s?', ['Cancel', 'Install and Restart'], kind=CONSEQUENTIAL, name='Q2 Muse Dev · V0RHi',
                     body='58.5 MB, over V0RHi. Takes about 2 min;\nyour music and settings stay.')
@@ -292,7 +291,7 @@ def test_the_wheel_moves_between_the_answers_and_the_list_never_scrolls(fw, ui, 
     struct.pack_into('<2i', view.block, O['W_W'], rows[2], rows[3])  # AWTK lays the view out over the list
     C.c_ubyte.from_address(card.view + O['VIEW_VERTICAL']).value = 1
     C.c_int.from_address(card.view + O['VIEW_CONTENT_H']).value = rows[3]
-    assert rows[1] + rows[3] > SETS[OLED_SET].list_end and card.selected == 0
+    assert rows[1] + rows[3] > GEOMETRY.list_end and card.selected == 0
     wheel(fw, card, O['KEY_NEXT'])
     assert card.selected == 1 and not [a for _, a in fw.calls('scroll_view_set_offset') if a[2]]
     wheel(fw, card, O['KEY_NEXT'])

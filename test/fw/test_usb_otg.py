@@ -287,7 +287,11 @@ def test_a_wake_sets_both_pull_ups_and_the_device_role_again_and_records_the_pin
     """usb_record_wake, from system.c's ringnav_standby as toolsIntoStandby returns, and usb_ui_poll's later line."""
     p = Port(fw, cable=True)
     wake, poll = fw.fn('usb_record_wake', None), fw.fn('usb_record_poll', None)
+    err = []
+    fw.mock('fw_write', lambda fd, data, n, *_: err.append(C.string_at(data, n).decode()) if fd == 2 else None or n)
     wake()
+    # each record line is in the unified log too (ulog.c on stderr): from its event word on, stamped there
+    assert len(err) == 1 and re.match(r'^\S+Z \d+ I usb wake PD18=1 PD17=0 ', err[0]) and err[0].endswith('\n')
     assert p.commands == [PULL_UP, HOLD] and p.records() == ['wake']
     p.now += 4000
     poll()

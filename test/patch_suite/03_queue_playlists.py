@@ -118,7 +118,12 @@ class QueueMachine(Machine):
         self.u.mem_write(self.status+O['INPUT_KEYS'],bytes(O['INPUT_KEY_SIZE']))
         return sum(c[0]=='playpause_quick_click' for c in self.calls)
     def handler(self,w,kind): return next((f,ctx) for t,f,ctx in self.nodes[w]['handlers'] if t==kind)
+    def at(self,label):  # a menu row's place among the view's children, by its words
+        kids=self.nodes[self.view]['children']
+        return next(i for i,c in enumerate(kids) if self.nodes[c]['children'] and self.nodes[self.nodes[c]['children'][0]]['text']==label)
     def pick(self,row):
+        """Click a menu row, by its index among the view's children or by its label."""
+        if isinstance(row,str): row=self.at(row)
         f,ctx=self.handler(self.nodes[self.view]['children'][row],O['EVT_CLICK'])
         assert self.call(address=f,args=(ctx,self.event,0,0),gap=0)==0
     def run(self,row,steps=0):
@@ -127,7 +132,7 @@ class QueueMachine(Machine):
         n=len(self.toasts); self.t=getattr(self,"t",7000)+1; self.press(self.t); assert self.hold()==11 and self.release()==0
         self.pick(row); self.advance(0)
         return self.toasts[-1][3] if len(self.toasts)>n else None
-    def labels(self): return [self.nodes[self.nodes[i]['children'][0]]['text'] for i in self.nodes[self.view]['children']]
+    def labels(self): return [self.nodes[self.nodes[i]['children'][0]]['text'] for i in self.nodes[self.view]['children'] if self.nodes[i]['children']]  # the rows: the sheet's header and gaps hold none
     def playback(self): return [c for c in self.calls if c[0] in ('mclStartPlayer','mclStop','mclSetPause','mclSetResume','mclSetSeek','playpause_quick_click')]
 
 sel=lambda m:[c[:2] for c in m.calls if c[0].startswith('batch_')]
@@ -224,7 +229,10 @@ for selected,name,navbar,played in ((1,'clip.mp4',0,True),(1,'clip.mp4',1,True),
     assert played==(not any(o[0]=='playing_page' for o in m.opened)),(name,navbar)
 passed()
 
-SONG_MENU=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
+# A Library song's menu sheet (hold_menu.c's own song; On-The-Go is on in these machines), and the
+# song rows Now Playing's own menu keeps around its View Queue and settings.
+SONG_MENU=['Play Next','Play Last','Add to On-The-Go','Add to Playlist…','Favorite','Go to Album','Go to Artist']
+NP_SONG=['Play Next','Play Last','Add to Favorites','Add to Playlist','Go to Album','Go to Artist']
 # Now Playing targets the queue even when the last browsed list has unrelated rows.
 def playing_menu(**kw):
     m=QueueMachine(page='playing_page',pos=1,**kw)
@@ -232,7 +240,7 @@ def playing_menu(**kw):
 for state in (3,2):  # paused and playing both expose the same actions
     m=playing_menu(); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,state)
     m.press(5000); assert m.release()==1
-    m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:]+["Shuffle","Repeat","Group by: Album"]
+    m.press(6000); assert m.hold()==11 and m.labels()==NP_SONG[:2]+['View Queue']+NP_SONG[2:]+["Shuffle","Repeat","Group by"]
     assert m.nodes[m.title]['text']=='B' and m.release()==0
     m.press(7000); assert m.release()==1 and m.get(0xa50084)==state; passed()
 # A tagged song's menu is titled by its tag, not its file name.
@@ -240,7 +248,7 @@ m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_TITL
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Bee'; passed()
 # A song in a hidden folder isn't in the Library: no Go to rows, unless its app's q2app has goto=1 (addon_goes).
 m=playing_menu(); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[1]+O['REC_PATH'],m.string('/mnt/mmc/.podcasts/Show/B.mp3'))
-m.press(6000); assert m.hold()==11 and m.labels()==SONG_MENU[:2]+['View Queue']+SONG_MENU[2:4]+["Shuffle","Repeat","Group by: Album"],m.labels(); passed()
+m.press(6000); assert m.hold()==11 and m.labels()==NP_SONG[:2]+['View Queue']+NP_SONG[2:4]+["Shuffle","Repeat","Group by"]; passed()
 # A folder play's untagged record: the player's parsed title once it has parsed that file.
 m=playing_menu(); id3=syms['g_play_id3_info']; m.u.mem_write(id3,b'/p/B\0'); m.u.mem_write(id3+O['ID3_TITLE'],b'Parsed\0')
 m.press(6000); assert m.hold()==11 and m.nodes[m.title]['text']=='Parsed'; passed()
@@ -383,40 +391,15 @@ class PlaylistMachine(PlayingPlaylistMachine):
         if name=='q:widget_on' and b==O['EVT_CLICK']:
             it=self.get(self.get(a+O['W_EMITTER'])); self.word(it,d); self.word(it+12,c)
 
-for count in (0,3):
-    for mode in (0,1,2):
-        m=PlaylistMachine(count,mode); kids=m.rebuild()
-        assert len(kids)==count+(0 if mode else 1)
-        previous=len(kids); kids=m.rebuild(); assert len(kids)==previous
-        # Restacking leaves stock's numeric button names/context unchanged.
-        if count:
-            row=kids[0 if mode else 1]
-            button=m.nodes[row]['children'][0]
-            assert m.nodes[button]['name']=='0'
-            assert m.handler(button,O['EVT_CLICK'])==(m.STOCK_PICK,button)
-        passed()
-
-for stale in (False,True):
-    m=PlaylistMachine(3,2)
-    # Open through Now Playing so the picker is tracked, then rebuild as creation does.
-    m.top=m.stack[0]; m.run(4); page=m.top
-    m.view=m.nodes[page]['children'][0]; m.nodes[m.view]['name']='scroll_view'
-    m.word(syms['p_deque_playlist'],m.deque([m.song('Created')]))
-    kids=m.rebuild(); button=m.nodes[kids[0]]['children'][0]
-    f,ctx=m.handler(button,O['EVT_CLICK']); assert f!=m.STOCK_PICK
-    if stale: m.word(O['MCL_POS'],2)
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0
-    assert m.added==([] if stale else ['B']); passed()
-
 # OLED's Playlists (its set has no toolbar, toolbar 0): rows over stock's own page. Stock's toolbar builder, row builder,
 # row click and its handlers run for real; each hidden widget's click runs its real handlers, nested, as stock's dispatch.
-# booted=True makes the first system_bar load, which writes OLED's set (oled_boot: no THEME stored, so theme_boot takes
-# OLED's preset once, as on a unit an older build left); booted=False boots nothing, leaving SET0's page with its toolbar.
+# It makes the first system_bar load (oled_boot: no THEME stored, so theme_boot takes OLED's preset once, as on a unit
+# an older build left).
 class PlaylistPageMachine(PlaylistMachine):
     REBUILD_DONE=0x4b58d4
-    def __init__(self,count=3,mode=0,booted=True):
+    def __init__(self,count=3,mode=0):
         super().__init__(count,mode)
-        if booted: oled_boot(self)
+        oled_boot(self)
         self.handlers.pop(self.STOCK_PICK); self.handlers.pop(0x4b3f0c)
         self.handlers[syms['widget_restack']]='picker_restack'
         self.mock('batch_get_selectitem','batch_set_selectitem','batch_init_selectrecord','batch_clear_selectrecord','batch_empty_selectrecord',
@@ -496,7 +479,7 @@ class PlaylistPageMachine(PlaylistMachine):
         if ret is not None:
             self.calls.append((name,a,b,c)); self.returns(ret); return
         super().hook(u,address,size,unused)
-class RowPlaylistMachine(PlaylistPageMachine):  # OLED's page: its set booted as on a unit (oled_boot)
+class RowPlaylistMachine(PlaylistPageMachine):  # OLED's page, past the first system_bar load as on a unit (oled_boot)
     def __init__(self,count=3,mode=0):
         super().__init__(count,mode)
 def cpm_wheel(m,key,n=1):
@@ -507,10 +490,6 @@ def cpm_centre(m):  # Centre on the selected row, the row's click running as sto
 NEW='New Playlist…'
 LISTS=['List 0','List 1','List 2']
 PL_ART=lambda cd: f'file:///mnt/mmc/.coverflow/pl_{cd}_0000abcd_s.jpg'
-def pl_art_lists(m,n):  # List i at cd_num 10+i, as RowPlaylistMachine.lists
-    records=[m.song(f'List {i}') for i in range(n)]
-    for i,r in enumerate(records): m.word(r+O['REC_TITLE'],m.string(f'List {i}')); m.word(r+O['REC_DISC'],10+i)
-    m.word(syms['p_deque_playlist'],m.deque(records))
 def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m.nodes[k]['type']=='image' and not (m.nodes[k].get('name') or '').startswith('img_'))
 
 # A playlist row's click runs pl_pick alone, which counts the marks after stock's: every dress is on stock's fresh rows,
@@ -518,13 +497,7 @@ def pl_art_of(m,button): return next(k for k in m.nodes[button]['children'] if m
 m=RowPlaylistMachine(); m.rebuild(); m.rebuild()
 for t in LISTS: assert [f for e,f,c in m.nodes[m.row_button(t)]['handlers'] if e==O['EVT_CLICK']]==[payload_syms['pl_pick']]
 passed()
-# Before theme_boot writes a set (SET0: stock's toolbar page, no row art) the rows are stock's: its placeholder, nothing
-# asked, read or stopped; and the Add to Playlist picker shares the page and stays as it is.
-for mode in (0,1,2):
-    m=PlaylistMachine(0,mode); pl_art_lists(m,3); m.art={11:PL_ART(11)}; kids=m.rebuild()
-    assert [m.nodes[pl_art_of(m,m.nodes[r]['children'][0])]['image'] for r in kids[-3:]]==['playlist_default']*3
-    assert not m.asks and not m.refreshes and not [h for h in m.nodes[m.top].get('handlers',()) if h[0]==O['EVT_DESTROY']]; passed()
-# ... the picker keeps its text rows: their art hidden, the text from page.rows text_x, and none built for them.
+# The Add to Playlist picker shares the page and keeps its text rows: their art hidden, the text from page.rows text_x, and none built for them.
 m=RowPlaylistMachine(3,1); m.art={11:PL_ART(11)}; m.rebuild()
 for name in LISTS:
     button=m.row_button(name); info=next(k for k in m.nodes[button]['children'] if m.nodes[k]['name']=='view_info')
@@ -532,21 +505,20 @@ for name in LISTS:
 assert not m.asks and not m.refreshes; passed()
 
 # Stock's add mode is one global, left by a picker however it closes: a page coming back rebuilds as what it opened as.
-for cls in (PlaylistMachine,RowPlaylistMachine):
-    m=cls(3,0); kids=m.rebuild(); home=m.top; shown=len(kids)
-    picker=m.node('window','playlist_page',[m.node('scroll_view','scroll_view')]); m.word(m.nodes[picker]['children'][0]+O['W_PARENT'],picker)
-    m.word(m.mode,1); m.top,m.view=picker,m.nodes[picker]['children'][0]
-    if cls is RowPlaylistMachine: m.nav=m.node('view','view_navbar',visible=0); m.nodes[picker]['children'].insert(0,m.nav)
-    kids=m.rebuild(); assert m.get(m.mode)==1 and len(kids)==3+(cls is RowPlaylistMachine)
-    m.top,m.view=home,next(c for c in m.nodes[home]['children'] if m.nodes[c]['name']=='scroll_view')  # past OLED's note (feedback_empty)
-    if cls is RowPlaylistMachine: m.nav=m.nodes[home]['children'][0]
-    kids=m.rebuild(); assert m.get(m.mode)==0 and len(kids)==shown; passed()
+m=RowPlaylistMachine(3,0); kids=m.rebuild(); home=m.top; shown=len(kids)
+picker=m.node('window','playlist_page',[m.node('scroll_view','scroll_view')]); m.word(m.nodes[picker]['children'][0]+O['W_PARENT'],picker)
+m.word(m.mode,1); m.top,m.view=picker,m.nodes[picker]['children'][0]
+m.nav=m.node('view','view_navbar',visible=0); m.nodes[picker]['children'].insert(0,m.nav)
+kids=m.rebuild(); assert m.get(m.mode)==1 and len(kids)==4
+m.top,m.view=home,next(c for c in m.nodes[home]['children'] if m.nodes[c]['name']=='scroll_view')  # past OLED's note (feedback_empty)
+m.nav=m.nodes[home]['children'][0]
+kids=m.rebuild(); assert m.get(m.mode)==0 and len(kids)==shown; passed()
 
 # Playlist View: Cover Flow (Display, PLAYLISTCF): the page opens unseen (opacity 0, no slide) and its playlists go to
 # Cover Flow on the next pass (coverflow_playlists, test/coverflow.py), the page shown under them for their Return; once
 # per page, so coming back to it shows the list. Library's row, Home's list and shortcut 7 all open it through this
-# rebuild. Off, the Add to Playlist picker, no playlists, or the page gone or covered first: the list, as before. With
-# row art or without (SET0's page): the covers are the playlists' art.
+# rebuild. Off, the Add to Playlist picker, no playlists, or the page gone or covered first: the list, as before. The
+# covers are the playlists' art.
 PL_HINT='htranslate(duration=200)'
 def pl_cf(base,count=2,mode=0,on='1',**kw):
     class M(base):
@@ -555,26 +527,20 @@ def pl_cf(base,count=2,mode=0,on='1',**kw):
             self.handed.append(self.names(u.reg_read(REGS[0]))); self.returns(1)
     m=M(count,mode,**kw)
     m.handlers[syms['widget_set_prop_str']]='widget_set_prop_str'; m.handed=[]; m.config['PLAYLISTCF']=on
-    if base is PlaylistMachine: pl_art_lists(m,count)
     m.nodes[m.top]['anim_hint']=PL_HINT; m.byte(m.top+0x34,0xff)
     return m
 pl_veiled=lambda m: m.u.mem_read(m.top+0x34,1)[0]==0 and m.nodes[m.top]['anim_hint']==''
 pl_shown=lambda m: m.u.mem_read(m.top+0x34,1)[0]==0xff and m.nodes[m.top]['anim_hint']==PL_HINT
-for base in (PlaylistMachine,RowPlaylistMachine):
-    m=pl_cf(base); m.rebuild()
-    assert pl_veiled(m) and not m.handed and m.refreshes==1; m.advance(0,clear=False)  # one read of the songs, rows and covers
-    assert bool(m.asks)==(base is RowPlaylistMachine),(base,m.asks)  # the rows' art under a set with row art alone
-    assert m.handed==[['List 0','List 1']] and pl_shown(m),base
-    m.rebuild(); m.advance(0,clear=False); assert len(m.handed)==1 and pl_shown(m); passed()  # back on the page: the list
-for base in (PlaylistMachine,RowPlaylistMachine):
-    for count,mode,on in ((2,0,'0'),(2,1,'1'),(2,2,'1'),(0,0,'1')):
-        m=pl_cf(base,count,mode,on); m.rebuild(); m.advance(0,clear=False)
-        assert not m.handed and pl_shown(m),(base,count,mode,on); passed()
-m=pl_cf(PlaylistMachine); m.rebuild()
-f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,0,0,0),gap=0,clear=False)
-m.advance(0,clear=False); assert not m.handed and m.stops==1; passed()  # SET0's page: the covers' builds stop too
+m=pl_cf(RowPlaylistMachine); m.rebuild()
+assert pl_veiled(m) and not m.handed and m.refreshes==1; m.advance(0,clear=False)  # one read of the songs, rows and covers
+assert m.asks  # the rows' art
+assert m.handed==[['List 0','List 1']] and pl_shown(m)
+m.rebuild(); m.advance(0,clear=False); assert len(m.handed)==1 and pl_shown(m); passed()  # back on the page: the list
+for count,mode,on in ((2,0,'0'),(2,1,'1'),(2,2,'1'),(0,0,'1')):
+    m=pl_cf(RowPlaylistMachine,count,mode,on); m.rebuild(); m.advance(0,clear=False)
+    assert not m.handed and pl_shown(m),(count,mode,on); passed()
 # ... or another window over it by the next pass: no covers, the page shown under it.
-m=pl_cf(PlaylistMachine); m.rebuild(); page=m.top; m.top=m.node('window','other_page'); m.stack.append(m.top)
+m=pl_cf(RowPlaylistMachine); m.rebuild(); page=m.top; m.top=m.node('window','other_page'); m.stack.append(m.top)
 m.advance(0,clear=False); m.top=page; assert not m.handed and pl_shown(m); passed()
 # Centre on a playlist under the covers (coverflow.c): a click at x 0 on its row on the Playlists page under
 # the covers, which stay; its list opens over them, so Return comes back to them, as from an album. The row is found
@@ -583,11 +549,10 @@ def pl_under(m):  # the covers over the page, reordered after they opened; the p
     lists=m.items(m.get(syms['p_deque_playlist'])); m.word(syms['p_deque_playlist'],m.deque(lists[::-1])); m.rebuild()
     page=m.top; m.top=m.node('window','coverflow_page'); m.stack.append(m.top)
     return page
-for base in (PlaylistMachine,RowPlaylistMachine):
-    m=pl_cf(base,count=3,on='0'); m.rebuild(); page=pl_under(m); m.clicks=[]; xs=[]
-    m.on_click=lambda w,e,f=m.on_click: (xs.append(m.get(e+O['EVENT_X'])),f and f(w,e))
-    m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False)  # List 0, now the third row
-    assert [m.nodes[c]['name'] for c in m.clicks]==['2'] and xs==[0],(base,m.clicks); passed()
+m=pl_cf(RowPlaylistMachine,count=3,on='0'); m.rebuild(); page=pl_under(m); m.clicks=[]; xs=[]
+m.on_click=lambda w,e,f=m.on_click: (xs.append(m.get(e+O['EVENT_X'])),f and f(w,e))
+m.call(address=payload_syms['playlist_open'],args=(page,10,0,0),gap=0,clear=False)  # List 0, now the third row
+assert [m.nodes[c]['name'] for c in m.clicks]==['2'] and xs==[0],m.clicks; passed()
 # ... stock finds the row by the playlist's place in the live list, in name order, and the page's rows are the list as it
 # was built: one past them (a playlist added since sorts in, a song's Add to Playlist → New under the covers, and pushes
 # the last ones past) has no row there, and the covers close, for the page to build its rows again as it comes to the
@@ -609,7 +574,7 @@ m=QueueMachine(); page=m.top
 m.press(5000); assert m.release()==1
 m.press(6000); assert m.hold()==11 and m.nodes[m.top]['name']=='sortselect_dialog'
 assert {c[1:] for c in m.calls if c[0]=='widget_off_by_func'}=={(m.top,O['EVT_KEY_UP'],O['SORTSELECT_KEYUP']),(m.dlg_return,O['EVT_CLICK'],O['SORTSELECT_CLOSE'])}
-assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU
+assert m.nodes[m.title]['text']=='Row 0' and m.labels()==SONG_MENU,(m.nodes[m.title]['text'],m.labels())
 assert m.hold()==0 and not any(c[0]=='navigator_to' for c in m.calls) and len(m.stack)==2
 assert m.release()==0
 m.press(6500); assert m.release()==1; passed()
@@ -716,34 +681,39 @@ def menu(m,setup=None):
     m.press(5); assert m.hold()==11; t=m.nodes[m.title]['text']; got=m.labels(); m.release(); return t,got
 GROUP=['Play Next','Play Last','Shuffle','Add to Playlist']
 for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
-        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:2],'Remove from Favorites',*SONG_MENU[3:]])),
-        ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:4])),
-        ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
-        ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:4],'Go to Artist'])),
+        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:4],'Remove from Favorites',*SONG_MENU[5:]])),
+        ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:5])),
+        ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
+        ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
         ({'cls':0xf003,'page':'album_page'},None,('Album',[*GROUP[:3],'Add to Favorites','Rate Album',GROUP[3],'Go to Artist'])),
         ({'cls':0xff01,'page':'album_page'},None,('Album',GROUP)),
         # An artist's tabs set classinfo +0, not g_class_type: Albums first, then Songs after an album.
         ({'cls':0xff07,'page':'artistinfo_page'},lambda m:m.word(syms['g_local_classinfo_save'],0xff01),('Album',GROUP)),
-        ({'cls':0xff01,'page':'artistinfo_page'},lambda m:(m.word(syms['g_local_classinfo_save'],0xff07),m.open_pages.add('artistinfo_page')),('Row 0',SONG_MENU[:5])),
+        ({'cls':0xff01,'page':'artistinfo_page'},lambda m:(m.word(syms['g_local_classinfo_save'],0xff07),m.open_pages.add('artistinfo_page')),('Row 0',SONG_MENU[:6])),
         ({'cls':0xf004,'page':'localclass_page'},None,('Artist',GROUP)),
         ({'cls':0xf006,'page':'localclass_page'},lambda m:m.word(m.row(0)+0x1c,m.string('Pop')),('Pop',GROUP)),
         ({'page':'folder_page','cls':1},lambda m:m.word(m.row(0)+O['REC_TYPE'],4),('Row 0',GROUP))):
     assert menu(QueueMachine(**kw),setup)==want, (kw,want); passed()
 # Favourites: Add runs batch-select's Add to My Fav for the row alone, which tags a folder file;
 # Remove deletes it, and on My Fav itself flags the list to reload as Now Playing's heart does.
-m=QueueMachine(); assert m.run(2,steps=3)=='Added to Favorites' and m.names()==['A','B','C']
+m=QueueMachine(); assert m.run('Favorite',steps=3)=='Added to Favorites' and m.names()==['A','B','C']
 assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',3),('batch_add_file',0xf001)]
 assert [c[2:] for c in m.calls if c[0]=='batch_add_file']==[(0xf00a,m.get(syms['p_deque_showlist']))]; passed()
 for cls,flag in ((0xf001,0),(0xf00a,1)):
-    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run(2)=='Removed from Favorites'
+    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run('Remove from Favorites')=='Removed from Favorites'
     assert [c[1] for c in m.calls if c[0]=='deleteMusicFromFav']==[m.row(0)] and m.u.mem_read(syms['g_delete_flag'],1)[0]==flag
     passed()
-# Add to playlist opens the stock playlist page in its add mode (context: 1 << 16 | class) with the
-# row selected, as the batch Add to playlist does; the page adds the row's songs itself.
-for kw,row in (({},3),({'cls':0xf003,'page':'album_page'},5)):
-    m=QueueMachine(**kw); assert m.run(row,steps=1) is None
-    assert m.opened[-1]==('localmusic/playlist_page',0x10000|m.get(syms['g_class_type']))
-    assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',1)] and m.names()==['A','B','C']; passed()
+# Add to Playlist, a song's or an album's, opens the menu sheet's playlist picker (playlists.c
+# playlist_pick_open) for the held row, not stock's playlist page; the queue is left alone.
+class PickMachine(QueueMachine):
+    def __init__(self,**kw):
+        super().__init__(**kw); self.handlers[payload_syms['playlist_pick_open']]='pick:'; self.picked=[]
+    def hook(self,u,address,size,unused):
+        if self.handlers.get(address,'')!='pick:': return super().hook(u,address,size,unused)
+        self.picked.append(self.text(self.get(u.reg_read(REGS[0])+O['REC_NAME']))); return self.returns(0)
+for kw,row in (({},'Add to Playlist…'),({'cls':0xf003,'page':'album_page'},'Add to Playlist')):
+    m=PickMachine(**kw); assert m.run(row,steps=1) is None and m.picked==['Row 1']
+    assert not any(o[0]=='localmusic/playlist_page' for o in m.opened) and m.names()==['A','B','C']; passed()
 # Shuffle plays the collection's songs from a random one with shuffle saved, as Shuffle Songs.
 # Then the payload's Shuffle Songs takes the queue over (test/playback.py), so Up Next has an order.
 m=QueueMachine(cls=0xf004,page='localclass_page'); m.handlers[payload_syms['playback_shuffle']]='stock_playback_shuffle'  # a payload call: no t9
@@ -768,10 +738,10 @@ m=KeepsMachine(cls=0xf004,page='localclass_page'); m.found=m.found[:1]; assert m
 # Go to album fills the album query as Now Playing's Album info and opens playerjumpinfo_page; Go to
 # artist opens artistinfo_page with {class, record}. Closing either puts the browsing state back.
 info=syms['g_local_classinfo_save']
-for row,want in ((4,'playerjumpinfo_page'),(5,'localmusic/artistinfo_page')):
+for row,want in (('Go to Album','playerjumpinfo_page'),('Go to Artist','localmusic/artistinfo_page')):
     m=QueueMachine(); m.config['ARTISTCF']='0'; m.u.mem_write(info,bytes(range(256))*3+bytes(144)); before=bytes(m.u.mem_read(info,912))
     page=m.top; assert m.run(row,steps=2) is None and m.opened[-1][0]==want and m.top!=page
-    if row==4:
+    if row=='Go to Album':
         assert m.get(info)==0xff10 and m.u.mem_read(info+9,1)==b'\0' and m.text(info+0xd)=='Album' and m.text(info+0x10d)=='Artist'
     else: assert m.opened[-1][1:]==(0xf001,m.row(2))
     f,ctx=m.handler(m.top,O['EVT_WINDOW_CLOSE']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)

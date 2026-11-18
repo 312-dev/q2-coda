@@ -1,5 +1,5 @@
 /* The menu sheet (docs/oled-design.md#menus): the hold menus, Now Playing's More, a playlist's More
- * and the pickers in them, under a set with Geometry.modal (OLED's), as a frosted page sheet over
+ * and the pickers in them (tools/ipod.py MODAL_PAGES), as a frosted page sheet over
  * the page they act on (the user's C3, 2026-11-16). The page under it recedes: drawn at SH_SHRINK
  * of its size about the screen's centre and dimmed (half way to black; Light Mode SH_DIM_L), it
  * shows above the sheet, whose top is SH_TOP with SH_R corners and a grab bar. The sheet's material
@@ -125,8 +125,6 @@ static void sheet_run(int fall) {
         ovm_enter(&mo.ov, SH_RISE_MS, reduced ? EASE_LINEAR : EASE_CUBIC_OUT);
     if (!mo.timer) mo.timer = timer_add(sheet_tick, (void *)0, SH_FRAME_MS);
 }
-
-int modal_set(void) { return geom_val(V_MODAL); }
 
 /* The rows span the screen; their text and symbols stand on the house list grid. */
 int modal_row_w(void) { return SH_W; }
@@ -381,7 +379,7 @@ void modal_frame(void *win, void *list) {
         y += h;
     }
     if (list) {
-        int end = list_fit_end(), content = y + (end > 0 && end < SH_H ? SH_H - end : 0);
+        int end = list_fit_end(), content = y + (end < SH_H ? SH_H - end : 0);
         widget_set_prop_int(view, "virtual_h", content);
         widget_set_prop_int(view, "_list_pad", content - y); /* navigation.c LIST_PAD */
         widget_set_prop_int(view, "_list_padded", content);
@@ -949,8 +947,8 @@ int modal_actions(const char *const *names, const char *const *icons, int n, voi
     return modal_list((void *)0, names, icons, n, 0, pick);
 }
 
-/* Now Playing's More (onlinematch.c ringnav_playermore): a dialog under a modal set
- * (tools/ipod.py modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
+/* Now Playing's More (onlinematch.c ringnav_playermore): a dialog (tools/ipod.py
+ * modal_page), modeless, as the hold menu's, so navigator_to returns. Its rows as
  * the sheet's, each with its symbol: stock's by their kind (PLAYMORE_ROWS, the button's name its
  * index), AirPlay's, Get Album Lyrics' and About's by their images; stock's Download Cover & Lyrics
  * reads Get Cover & Lyrics. The header is the playing song. Delete Song, which asks first, goes

@@ -182,7 +182,7 @@ HOOKS = {
     'playlist_rebuild': (0x4b5444, 'ringnav_playlist', 'playlist'),
     'widget_on_paint_background': (0x66fcec, 'ringnav_paint_bg', 'paint_bg'),
     'bigcover_page_init': (0x52db48, 'ringnav_bigcover', 'bigcover'),
-    # Every window's asset (window_open's): the geometry set's own copy (navigation.c ringnav_ui_load)
+    # Every window's asset (window_open's): the theme's boot and each window's own form (navigation.c ringnav_ui_load)
     'ui_loader_load_widget_with_parent': (0x667304, 'ringnav_ui_load', 'ui_load'),
     # Status bar's 1 s tick: the payload's play state, before any paint (navigation.c bar_sync)
     'systembar_showface': (0x5417d0, 'ringnav_showface', 'showface'),
@@ -362,9 +362,10 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
         fi
         # demo's stderr (docs/boot.md#rockbox-from-home): stock starts its Bluetooth and Wi-Fi helpers from demo,
         # so they inherit it and their reasons for failing land here, in RAM, instead of on the serial console;
-        # emptied once a minute past 512 KB (O_APPEND keeps demo writing at its end), its tail goes in the crash
-        # log. stdout stays on the console as stock's; --dev takes both (LOG_HOOK)
-        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${{n:-0}}" -gt 524288 ] && : >/tmp/q2-demo.err; done) &
+        # q2guard reads it into the unified log on the card (docs/internals.md#unified-log). Rolled once a minute
+        # past 256 KB: copied to .1 (the one before goes), then emptied (O_APPEND keeps demo writing at its
+        # end); its tail goes in the crash log. stdout stays on the console as stock's; --dev takes both (LOG_HOOK)
+        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${{n:-0}}" -gt 262144 ] && cp /tmp/q2-demo.err /tmp/q2-demo.err.1 && : >/tmp/q2-demo.err; done) &
         while :; do
             /release/bin/demo 2>>/tmp/q2-demo.err
             s=$?
@@ -391,10 +392,16 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
                 [ -f /tmp/q2-scan.log ] && {{ echo "== scan"; tail -n 60 /tmp/q2-scan.log; }}
                 [ -f /tmp/q2-art-file ] && {{ echo "== last art"; cat /tmp/q2-art-file; }}
                 [ -f /tmp/q2-art.log ] && {{ echo "== art"; tail -n 60 /tmp/q2-art.log; }}
-                [ -f /tmp/q2-demo.err ] && {{ echo "== stderr"; tail -n 60 /tmp/q2-demo.err; }}
-                [ -f /tmp/q2-demo.log ] && {{ echo "== q2-demo.log"; tail -n 200 /tmp/q2-demo.log; }}
+                [ -f /tmp/q2-demo.err ] && {{ echo "== stderr"; cat /tmp/q2-demo.err.1 /tmp/q2-demo.err 2>/dev/null | tail -n 60; }}
+                [ -f /tmp/q2-demo.log ] && {{ echo "== q2-demo.log"; cat /tmp/q2-demo.log.1 /tmp/q2-demo.log 2>/dev/null | tail -n 200; }}
             }} > $c.tmp 2>&1; mv $c.tmp $c
             sync
+            # the unified log's crash snapshot (docs/internals.md#unified-log): q2guard reads demo's last lines,
+            # notes the crash and writes the log to the card; its answer (the request gone) is waited 3 s at most
+            echo "crash demo exit $s" > /tmp/q2guard.snap
+            kill -USR1 "$(cat /tmp/q2guard.lock 2>/dev/null)" 2>/dev/null &&
+                {{ i=0; while [ -f /tmp/q2guard.snap ] && [ $i -lt 30 ]; do usleep 100000; i=$((i+1)); done; }}
+            rm -f /tmp/q2guard.snap
         fi
         # demo is gone for good: reboot, as stock's watchdog did (build.py WATCHDOG); after a clean end only
         # if the Q2 is still up 10 s on, as a power-off or Restart takes this shell down first
@@ -434,11 +441,12 @@ def adb_wrapper(name):
             f'[ "$1" = start ] && /usr/bin/q2adb-gadget park\n/usr/bin/{stock} "$@"\nr=$?\n'
             f'[ "$1" = stop ] && /usr/bin/q2adb-gadget unpark\nexit $r\n').encode()
 # --dev only (docs/remote.md#log): demo's console output, and hciplayer's, which inherits it, in RAM, so
-# emptied once a minute past 4 MB (O_APPEND keeps demo writing at its end), in place of the release's stderr
-# file and its cap. In BOOT_HOOK's start path.
-LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${n:-0}" -gt 524288 ] && : >/tmp/q2-demo.err; done) &\n'
+# rolled once a minute past 2 MB as the release's stderr file is (copied to .1, then emptied; O_APPEND keeps
+# demo writing at its end), in its place; q2guard --dev reads this one (docs/internals.md#unified-log). In
+# BOOT_HOOK's start path.
+LOG_HOOK = (b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.err); [ "${n:-0}" -gt 262144 ] && cp /tmp/q2-demo.err /tmp/q2-demo.err.1 && : >/tmp/q2-demo.err; done) &\n'
             b'        while :; do\n            /release/bin/demo 2>>/tmp/q2-demo.err\n',
-            b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 4000000 ] && : >/tmp/q2-demo.log; done) &\n'
+            b'        (while sleep 60; do n=$(wc -c 2>/dev/null </tmp/q2-demo.log); [ "${n:-0}" -gt 2000000 ] && cp /tmp/q2-demo.log /tmp/q2-demo.log.1 && : >/tmp/q2-demo.log; done) &\n'
             b'        while :; do\n            /release/bin/demo >>/tmp/q2-demo.log 2>&1\n')
 # --dev only: the wheel's frame log (playback.c wl_flush) and stale-press notes (navigation.c stale_note) go to the
 # card's q2-wheel.log, appended, when the card is up, up to 256 KB. In BOOT_HOOK's start path.
@@ -1904,7 +1912,7 @@ FUNCTIONS = {
  'widget_move_resize': ('int', 'void *, int, int, int, int'),
  # Swipe back (swipe_back.c): a page or Home's list moved with the finger, its children's layout kept
  'widget_move': ('int', 'void *, int, int'),
- # The artist page's toolbar (navigation.c artist_bar): its tabs move down under it
+ # A view's own layout set again (control_center.c)
  'widget_set_self_layout_params': ('int', 'void *, const char *, const char *, const char *, const char *'),
  'widget_layout': ('int', 'void *'),
  'tk_str_end_with': ('int', 'const char *, const char *'),
@@ -2200,7 +2208,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2503,10 +2511,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     # Every allowlisted context must be a window name. The runtime name is the root "name"
     # property of the UI asset, not the asset path, so check the stock rootfs assets directly:
     # a prefix-trimmed typo cannot silently disable a screen this way.
-    from ipod import (AUDIT, ARTIST_ALBUMS, SETTINGS_ICONS, inc, UI_ASSETS, patch_asset,
+    from ipod import (AUDIT, ARTIST_ALBUMS, SETTINGS_ICONS, inc, ui_pages,
                       QUIET_ICONS, quiet_icon, imagemagick, patch_code, CLOSE_LOAD, DUMMY_LOAD, patch_style, patch_word, branch, settings_icon,
-                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art,
-                      set_assets)
+                      STATUS_ICONS, status_icon, row_icon, ART_PLACEHOLDERS, sized_art)
     contexts = re.findall(r'"([^"]+)"', (ROOT/'patch/contexts.inc').read_text())
     check(contexts, 'No navigation contexts audited')
     windows, chinese = set(), set()  # chinese: the UI assets english_ui rewrites
@@ -2539,20 +2546,12 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for name, size in CONTEXT_DATA.items():
         check(re.search(rf'\b{size}\s+OBJECT\s+GLOBAL\s+DEFAULT\s+\d+\s+{name}$',
                         symbol_table, re.M), f'{name}: context data size mismatch')
-    from theme import builtins, emit, geometry_sets
+    from theme import builtins, built_geometry, emit
     themes = builtins()
+    geom = built_geometry(themes)  # baked into stock's row immediates (patch_code) and pages (ui_pages)
     (out/'stock.h').write_text(stock_header({name: f'0x{syms[name]:x}u' for name in CONTEXT_DATA},
                                             [r for _, r in fonts.values()], themes, dev, repo, key))
-    set_pages, redirects = {}, {}
-    ui = 'release/assets/default/raw/ui/'
-    for i, g in enumerate(geometry_sets(themes)[1:], 1):
-        for path, data in set_assets(cat, g).items():
-            folder, _, base = path.rpartition('/')
-            like = f'{folder}/{base.removeprefix(g.name + "_")}'
-            rel = like.removeprefix('release/assets/default/raw/ui/')
-            set_pages[path] = (like, english_ui(rel, data) if rel in chinese else data)
-            redirects[rel.removesuffix('.bin')] = redirects.get(rel.removesuffix('.bin'), 0) | 1 << i
-    emit(themes, out, redirects)
+    emit(themes, out)
     ps = compile_payload(out)
     payload = (out/'patch.bin').read_bytes()
     check_layout(payload, ps)
@@ -2805,7 +2804,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for address, original in AUDIT['event_abi_words'].items():
         off = fileoff(raw_demo, int(address, 16))
         check(raw_demo[off:off+4].hex() == original, f'{address}: unexpected event ABI instruction')
-    code_changes = patch_code(patched, ps)
+    code_changes = patch_code(patched, ps, geom)
     # Single shared version literal: the updater refuses an equal firmware_v20.info version (update_firmware
     # 0x502bd0, check_otginfo 0x5030f8), so it carries the build tag and stock V1.36 can be flashed back.
     # About's FW. Version row reads it too (0x4c10b0); ringnav_about shows STOCK_VERSION there instead.
@@ -2975,7 +2974,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     changed_assets = {}
     from art import theme_images
     drawn = {xx+n+'.png': (xx+'list_tidal.png', d) for n, d in theme_images(builtin_themes()).items()}
-    for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **set_pages, **drawn,
+    for path, (like, data) in {**{xx+n: (xx+l, d) for n, (l, d) in icons.items()}, **drawn,
                                'etc/init.d/S12usbcharge': ('etc/init.d/S20urandom', (ROOT/'patch/usb_charge.sh').read_bytes()),
                                HELPER: (HELPER_LIKE, compile_helper(out, cat, 'video', 'q2video', HELPER_LIBS)),
                                SCROBBLE_CA: ('etc/hosts', (ROOT/'assets/scrobble-ca.pem').read_bytes()),
@@ -2985,7 +2984,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
-                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core'], 'q2guard', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_pmic', 'q2guard_card', 'q2bt', 'q2bt_core', 'q2log_core'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
@@ -3038,7 +3037,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         if stock in added: added.remove(stock)
         else: removed.append(stock)
         added.append([path, b'R', line[1], CGI_MODE[1], b'0', b'0'])
-    patched_ui = list(UI_ASSETS)
+    pages = ui_pages(cat, geom)
+    patched_ui = list(pages)
     check(chinese, 'No Chinese UI text found')
     assets = ['ui/'+rel for rel in patched_ui + sorted(chinese - set(patched_ui))] + ['strings/en_US.bin']
     assets += ['styles/'+rel for rel in AUDIT['styles']]
@@ -3053,7 +3053,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                 patch_style(original, AUDIT['styles'][name]) if kind == 'styles' else
                 (sized_art(art, ART_PLACEHOLDERS[name]) if name in ART_PLACEHOLDERS else
                  status_icon(name, original) if name in STATUS_ICONS else quiet_icon(name, original) if name in QUIET_ICONS else settings_icon(name, original)) if kind == 'images' else
-                patch_asset(name, original) if name in patched_ui else original)
+                pages[name] if name in pages else original)
         if kind == 'ui' and name in chinese:
             data = english_ui(name, data)
         target = out/rel

@@ -323,7 +323,7 @@ void *track_row(void *view, int index, int num, const char *title, const char *l
                 int (*click)(void *, void *), int ctx);
 #define AR_SONG_PX 22 /* cover_row's px for a song: the design's 18 px in AWTK's size */
 int geom_val(int v) __attribute__((pure));
-int modal_set(void); /* menu_modal.c */
+/* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
@@ -635,6 +635,11 @@ int video_start(const char *file, int radio); /* videos.c */
  * keyboard is up. */
 #define EDIT_NAME "q2_edit"
 void *edit_create(void *item, const char *input_type, int y, int h);
+/* The letter strip's return key's mark (search_strip.c ss_ret_kind), by what submitting the text
+ * does: an edit's STRIP_RETURN int prop, or search_strip_return for search_strip_text. STRIP_AUTO
+ * (unset) leaves it to the strip: a magnifier on its query line, else the arrow. */
+#define STRIP_RETURN "_strip_return"
+enum { STRIP_AUTO, STRIP_GO, STRIP_SEARCH, STRIP_SAVE };
 const char *output_device(char *vol); /* videos.c */
 void dac_take(void);                  /* videos.c */
 /* navigation.c: the theme's font for role on w, or stock's; canvas text's face, 0: the system
@@ -680,7 +685,7 @@ typedef struct {
 } eq_rows_t;
 int eq_rows(void);
 int eq_list_end(void); /* the page's rows end here (the set's list_end) */
-int list_fit_end(void); /* theme_engine.c: a list_fit set's list end on the screen, 0: none */
+int list_fit_end(void); /* theme_engine.c: the lists' end on the screen (the grid's list_end) */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e);
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus);
 /* slider_page.c: an iOS segmented control of n segments, w by h from x, y; open is lit */
@@ -740,7 +745,6 @@ int coverflow_playlist_queue(void); /* the queue a playlist's cover played, no l
 void *coverflow_playlist(void *page), *coverflow_playlists_close(void);
 void playlist_open(void *win, int cd_num);
 unsigned playlist_index(int cd_num);
-void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
 /* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */

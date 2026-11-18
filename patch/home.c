@@ -31,38 +31,28 @@ enum {
     L_STOCK
 };
 
-/* Every Library row, stock's and the added ones: its label takes the list titles' role. In a set
- * without Library icons (lib_art 0, as OLED's) it also drops its icon and starts its label at the
- * set's text inset on screen, its right edge kept. */
+/* Every Library row, stock's and the added ones: its label takes the list titles' role, its icon
+ * goes and its label starts at the set's text inset on screen, its right edge kept. */
 static void library_look(void *view) {
-    const theme_t *T = theme();
-    int bare = !geom_val(V_LIB_ART);
-    if (!bare && !T->font[ROLE_TITLE] && !T->font_px[ROLE_TITLE]) return;
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *row = widget_get_child(view, i);
         void *button = widget_count_children(row) ? widget_get_child(row, 0) : (void *)0;
         for (unsigned j = 0, k = button ? widget_count_children(button) : 0; j < k; ++j) {
             void *c = widget_get_child(button, j);
             if (tk_strcmp(widget_get_type(c), "hscroll_label")) {
-                if (bare) widget_set_visible(c, 0, 0);
+                widget_set_visible(c, 0, 0);
                 continue;
             }
             theme_font(c, ROLE_TITLE, FONT_ROW);
-            if (bare) {
-                int x = geom_val(V_TEXT_X) - I(button, W_X);
-                widget_move_resize(c, x, I(c, W_Y), I(c, W_W) + I(c, W_X) - x, I(c, W_H));
-            }
+            int x = geom_val(V_TEXT_X) - I(button, W_X);
+            widget_move_resize(c, x, I(c, W_Y), I(c, W_W) + I(c, W_X) - x, I(c, W_H));
             break;
         }
     }
 }
 
-/* 1 when the Library leads with Search, in a set without Library icons (lib_art 0): the pull-down's
- * own stock search (0x5350d4, which ignores its arguments) shown, as Home's Split list hides the
- * pull. Home's pane counts Shuffle's row from it (coverflow.c coverflow_home_row). */
-int library_search(void) { return !geom_val(V_LIB_ART); }
-
-/* The Library: Search (library_search), one Shuffle row opening its menu, browsing, the user's own
+/* The Library: Search (the pull-down's own stock search, 0x5350d4, which ignores its arguments, shown
+ * as Home's Split list hides the pull), one Shuffle row opening its menu, browsing, the user's own
  * lists, listening history, the card's other media, then upkeep, each row tagged with its letter
  * and put in the saved order (library_edit.c lr_default holds the default one). The added rows'
  * buttons have no name, so stock's row click (atoi of the name, 0x53510c) never sees them. */
@@ -72,8 +62,7 @@ int ringnav_localmusic(void *win, void *ctx) {
     if (!view || widget_count_children(view) != L_STOCK) return result;
     void *stock[L_STOCK], *rows[LR_ROWS] = { 0 };
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
-    if (library_search())
-        lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
+    lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
     /* Shuffle, Hi-Res, Long Songs and Upload Scrobbles are hidden until the user shows them in Edit
      * Library (the menu review's, 2026-11-15); My Fav and Frequent are never shown (lr_retire) */
     void *shuffle = library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1);

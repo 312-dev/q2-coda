@@ -447,11 +447,10 @@ int shim_chained(void) { return stock_eq_calls; }
 int client_h(void) { return 290; }
 int shim_unmounted, shim_toasts;
 int card_mounted(void) { return !shim_unmounted; }
-int modal_set(void) { return 0; } /* a geometry set without modal (the engine's default): the Type picker is the editor's own screen, not menu_modal.c's */
+/* menu_modal.c's sheet does not open here: the Type picker is the editor's own screen */
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i)) { (void)under, (void)names, (void)n, (void)current, (void)pick; return 0; }
 int eq_rows(void) { return 0; } /* a theme without settings.values.switch (the engine's default): peq_ui.c's own Simple tab, not slider_page.c's */
 int eq_list_end(void) { return 290; }
-int list_fit_end(void) { return 0; } /* no list_fit set: the list ends on its whole rows */
 void eq_rows_paint(void *w, void *canvas, const eq_rows_t *e) { (void)w, (void)canvas, (void)e; }
 void eq_tabs_paint(void *w, void *canvas, int simple, int focus) { (void)w, (void)canvas, (void)simple, (void)focus; }
 static char shim_said[160]; /* the last toast's text, until shim_told reads it */
@@ -864,7 +863,7 @@ def editor_check(lib, tmp):
     # A band edit sets the preamp to minus the combined response's peak: here the one +1 dB band.
     assert abs(read().preamp + 1) < 0.01, read().preamp
     # The toast leaves the title bar to the tabs and the list keeps every row.
-    assert ui.shim_list_height() == full == 240  # 5 rows, the curve's two among them at the top
+    assert ui.shim_list_height() == full == 290 - 48  # on to the page's foot (290) under the caption, its rows past the list end fading
     # The curve heads the list, in its scroll view with the rows under it and in its height, so it
     # scrolls off with them; a render on the same screen keeps the offset. A turn up from row 0 on
     # the main screen reaches the tabs, not from a lower row or on a band.
@@ -1126,7 +1125,7 @@ def editor_check(lib, tmp):
     # (the last row at the top of the list is not clipped), the list stays under the 48 px caption,
     # and every label's box holds its font.
     ui.shim_close(); ui.shim_theme_rows(28); advanced()
-    assert ui.shim_list_height() == 224 and ui.shim_h(ui.check_graph()) == ui.shim_row0_y() == 112
+    assert ui.shim_list_height() == 290 - 48 and ui.shim_h(ui.check_graph()) == ui.shim_row0_y() == 112
     assert ui.shim_row_y(b'EQ per Output') == ui.shim_row_y(b'Enabled') + 28
     assert ui.shim_row_y(b'2  ') == ui.shim_row_y(b'1  ') + 28 == 112 + 28 * 8
     assert ui.shim_virtual_h() == ui.shim_rows_bottom() and (ui.shim_rows_bottom() - 112) % 28 == 0

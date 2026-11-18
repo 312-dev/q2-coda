@@ -90,7 +90,8 @@ int bt_flush(card_log *l, const char *dir);
 
 /* ---- q2bt.c: the device's side ---- */
 void bt_init(card_log *l);
-/* Sleep ms; while a stream runs, wake each second to sample it. */
+/* Sleep ms; while a stream runs, wake each second to sample it. A signal that sets guard_woke
+ * (q2guard.c: a request, a SIGTERM) ends it early. */
 void bt_sleep(unsigned ms);
 int bt_streaming(void);
 int bt_flush_due(void); /* once after a stream's START or STOP: its lines to the card at once */

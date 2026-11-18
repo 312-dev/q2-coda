@@ -29,8 +29,9 @@ static const char diag_script[] =
     " /sys/class/power_supply/battery/capacity /sys/class/power_supply/battery/voltage_now;"
     " do echo \"$b: $(cat $b)\"; done;"
     " echo '== ps'; ps; echo '== dmesg'; dmesg | tail -n 300;"
-    " echo '== q2-demo.err'; tail -n 100 /tmp/q2-demo.err;"
-    " echo '== q2-demo.log (demo and q2player)'; tail -n 300 /tmp/q2-demo.log;"
+    " echo '== q2-demo.err'; cat /tmp/q2-demo.err.1 /tmp/q2-demo.err 2>/dev/null | tail -n 100;"
+    " echo '== q2-demo.log (demo and q2player)';"
+    " cat /tmp/q2-demo.log.1 /tmp/q2-demo.log 2>/dev/null | tail -n 300;"
     " } > $f.tmp 2>&1 && mv $f.tmp $f && sync";
 
 /* The row's Centre or tap: the file written, and a toast saying where (or why not). */

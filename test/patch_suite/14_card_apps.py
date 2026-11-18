@@ -240,7 +240,7 @@ gone=[*SMENU[:2],('list','downloads','Downloads','','',''),*SMENU[3:]]; m.advanc
 assert m.rows()!=rows and 'None yet' not in m.labels() and '1 downloading' not in m.labels(),m.labels(); passed()
 # A list row opens its level; Back asks for the menu again, the row kept.
 m.pick(2); m.answer('ok','refresh','',[('info','','No downloads yet','Search, then press a file','','')])
-assert m.requests[-1]==('downloads',) and m.labels()==['Downloads','No downloads yet','Search, then press a file']; asked=len(m.threads); m.row(0); assert len(m.threads)==asked
+assert m.requests[-1]==('downloads',) and m.labels()==['Downloads','No downloads yet','Search, then press a file'] and not m.rows()  # OLED's empty state: no row to press
 m.back(); m.answer('ok','refresh','',changed)
 assert m.requests[-1]==('menu',) and m.nodes[m.find('scroll_view')]['_ringnav_index']==2,(m.requests[-1],m.nodes[m.find('scroll_view')].get('_ringnav_index'))
 # An action row sends its op with its context, toasts the reply's message and asks for the level again.
@@ -317,10 +317,13 @@ m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','
 m.top=m.page; m.status=m.alloc(0x200); m.nodes[m.find('scroll_view')]['_ringnav_index']=0; m.press(80)
 assert m.hold()==11; m.answer('ok','Downloading the folder','',[]); assert m.requests[-1]==('downloadfolder','12.3') and m.toasts[-1][3]=='Downloading the folder'
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','downloadfolder')])
-m.pick(1); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requests[-1]==('search','aphex%09twin','50'),m.requests[-1]
+m.pick(1); m.answer('ok','','100',[('action','download','02 Second.flac','bob','12.4','downloadfolder')]); assert m.requests[-1]==('search','aphex%09twin','50'),m.requests[-1]
 # More… again: the list's own arguments and the newest cursor alone, Q2SPOT/1's last argument (to 1.4.1 each
 # cursor followed the ones before, "search aphex 50 100", which q2-deezer read as the second page again).
-m.pick(1); m.answer('ok','','',[]); assert m.requests[-1]==('search','aphex%09twin','100'),m.requests[-1]
+def more_row(m):  # the More… row's place among the rows, by its words
+    def texts(w): return [m.nodes[w].get('text'),*(t for c in m.nodes[w]['children'] for t in texts(c))]
+    return next(i for i,r in enumerate(m.rows()) if 'More…' in texts(r))
+m.pick(more_row(m)); m.answer('ok','','',[]); assert m.requests[-1]==('search','aphex%09twin','100'),m.requests[-1]
 m.back(); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requests[-1]==('search','aphex%09twin','50'); passed()
 # Full lists (addon.c page_next): a reply whose message is "pages" (the app opts in) and that has a cursor is
 # followed by its next pages, each asked with the list's own arguments and the newest cursor (as More… asks),
@@ -581,7 +584,7 @@ m.top=m.node('window','playing_page')
 assert run(m,'addon_goto',m.string(QSONG),m.string('The Band'),0)==1 and m.top!=old
 assert [c[2] for c in m.calls if c[0]=='window_manager_close_window_force']==[old]
 m.page=m.top; m.destroy(old); m.answer(*OK,[('info','','No albums','','','')])
-assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums'],(m.requests[-1],m.labels()); passed()
+assert m.requests[-1]==('goto','artist',QSONG) and m.labels()==['The Band','No albums',''],(m.requests[-1],m.labels()); passed()  # the page's note, its hint hidden (page_empty)
 m=AppMachine(); assert run(m,'addon_goto',m.string('/mnt/mmc/.soulseek/a.flac'),m.string('A'),1)==0
 m=QobuzMachine()
 for path in ('/mnt/mmc/Music/a.flac','/mnt/mmc/.qobuz','/mnt/mmc/.Bad_Id/a.flac','/mnt/mmc/.waytoolongforanidxx/a.flac',

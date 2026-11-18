@@ -416,7 +416,7 @@ static int edit_single(const void *info) {
     if (!usable() || window_manager_is_animating(wm) || pointer_down()) return 0;
     *(volatile unsigned char *)KEY_LOCKOUT = 0; /* stock's wheel lockout after the centre key */
     int n = fields(top), f = field_at(top);
-    void *hidden = n && !geom_val(V_TOOLBAR) ? widget_lookup(top, "view_sleep", 1) : (void *)0;
+    void *hidden = n ? widget_lookup(top, "view_sleep", 1) : (void *)0;
     if (hidden && !widget_get_visible(hidden)) /* the switch's off: only its row is showing */
         switch_click(0, 0);
     else if (!n) {
@@ -644,8 +644,6 @@ int ringnav(void *ctx, void *event) {
         key == KEY_FWD_BTN ? next_quick_click() : prev_quick_click();
         return STOP;
     }
-    /* The rating picker's keys, before the page's own (its Return would leave it) */
-    if (usable() && rate_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* A game's keys, before stock's lock filter, media keys and screen-off double Centre */
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */

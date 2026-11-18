@@ -56,7 +56,7 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Muse's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
+  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
   the page comes back on top (Return from a row's page). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
   48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
@@ -896,9 +896,9 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   from the sheet's first whole paint, which keeps the page (480 KB) until the sheet closes.
 - ponytail: the name ends in an ellipsis where the design's marquee would scroll it.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's); Up Next opens in it by
+Built by `patch/menu_modal.c` (the grid's `modal`); Up Next opens in it by
 `modal_sheet`. Now Playing's More and a
-playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
+playlist's More are stock pages, which the build loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Artist page
 
@@ -1089,10 +1089,16 @@ the wheel walks:
   ten in view, the lit one white on an 18 px accent key 5 px in. It starts at its first character and moves
   only when the highlight comes within a cell of an edge. Where more of the set lies past an edge the letters
   fade out toward it over 22 px: the text's own alpha, never a band painted over it.
-- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with the
-  return mark in white (a stem down the right, a slightly rounded corner, a bar to the left ending in an open
-  arrowhead, 2.2 px round strokes), inverted, a white circle with the mark in the accent, while the wheel is
-  on it. Center on it submits.
+- **The return key**, docked at the pill's right: a circle as tall as the strip (34 px) in the accent with its
+  mark in white, inverted, a white circle with the mark in the accent, while the wheel is on it, in either half.
+  Center on it submits. The mark says what submitting does, by the field (the user's 2026-11-17 ruling, mock-up
+  `returnkey/context.html`; 24-unit glyphs drawn 20 px, round caps and joins):
+  - a **magnifier** (a ring and a handle to the bottom right, 2.4 units) on every search: Search, Add Songs'
+    Search, a playlist's song search, Internet Radio's, Spotify's, TIDAL's and a card app's;
+  - a **check** (2.6 units) where a name or a value is saved: New Playlist, Rename Playlist, the Bluetooth name,
+    Guest Play's name, an EQ preset's name, a band's frequency and Q;
+  - an **arrow right** (2.4 units) on anything else: a Wi-Fi password, Join Other Network, the hotspot's password,
+    a card app's fields, Car Remote's phone name, and any field no caller names.
 
 One turn of the wheel stops on the return key; a new turn goes on round to the switcher. Play/Pause submits
 from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
@@ -1594,7 +1600,7 @@ pattern.
 | A Library artist                    | [Artist page](#artist-page) | Header, Shuffle alone, then Top Songs (once played), Albums and All Songs                                  |
 | Songs, a playlist's songs           | Song rows                   | The artist inline; the [A-Z index](#a-z-index) past 50 rows in name order                                  |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; the covers with the clock in the status row as Home |
 | Playlists                           | [Playlists](#playlists)     | On-The-Go first; 44 px rows with a 36 px picture or tile                                                   |
 | A playlist's songs, On-The-Go       | [Playlists](#playlists)     | Action rows, then the songs with the artist on the right                                                   |
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
@@ -1643,14 +1649,14 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - The color tokens and the type scale in one place: `tools/theme.py` `TOKENS` (to `patch/tokens.h` and
   `tools/art.py`'s inks), `tok()` and `TYPE()` in `patch/ui_kit.c` and `patch/ui_kit.h`.
 - OLED as the one built-in theme, standing alone: `assets/themes/oled/theme.xml`, index 0, extending
-  no other theme, its own `oled` geometry set. A unit left on another theme by an older build takes
+  no other theme, on its own grid (its `<geometry>`). A unit left on another theme by an older build takes
   OLED's preset once at boot ([ipod](ipod.md#theme)).
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
   in from the sides, its glyph slots left of the battery (`patch/status_row.c`: `status_slots_left`,
   `status_slots_paint`, `status_slot_at`) and its clock beside them, or centered where there is no title; lists that scroll a
-  whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`list_fit`).
+  whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`fit_rows`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`chevron_icon`, `patch/list_marks.c`) and the status row's glyphs (`STATUS_GLYPHS`); the slim battery
   (`battery_slim`); the wheel's scroll indicator (`list.scrollbar.*`, `wheel_sb_arm`);
