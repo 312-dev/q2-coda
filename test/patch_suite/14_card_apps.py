@@ -317,7 +317,7 @@ m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','
 m.top=m.page; m.status=m.alloc(0x200); m.nodes[m.find('scroll_view')]['_ringnav_index']=0; m.press(80)
 assert m.hold()==11; m.answer('ok','Downloading the folder','',[]); assert m.requests[-1]==('downloadfolder','12.3') and m.toasts[-1][3]=='Downloading the folder'
 m.answer('ok','refresh','50',[('action','download','01 Xtal.flac','bob','12.3','downloadfolder')])
-m.pick(1); m.answer('ok','','100',[('info','','Second','','','')]); assert m.requests[-1]==('search','aphex%09twin','50'),m.requests[-1]
+m.pick(1); m.answer('ok','','100',[('action','download','02 Second.flac','bob','12.4','downloadfolder')]); assert m.requests[-1]==('search','aphex%09twin','50'),m.requests[-1]
 # More… again: the list's own arguments and the newest cursor alone, Q2SPOT/1's last argument (to 1.4.1 each
 # cursor followed the ones before, "search aphex 50 100", which q2-deezer read as the second page again).
 def more_row(m):  # the More… row's place among the rows, by its words
