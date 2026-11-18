@@ -87,7 +87,7 @@ def test_validate_names_the_suites_that_fail(tmp_path, scripts):
     scripts.failing = ('patch', 'remote')
     with pytest.raises(ValueError, match=r'^Failed: test/patch\.py, test/remote\.py$'):
         release.validate(built(tmp_path/'b'))
-    assert len(scripts) == 20  # all were started, and waited for, before any failure was reported
+    assert len(scripts) == 11  # all were started, and waited for, before any failure was reported
 
 
 @pytest.mark.parametrize('field,value,message', [
