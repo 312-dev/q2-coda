@@ -427,9 +427,10 @@ static inline int arc_out(int r, int y) {
 /* A wheel turn with the screen off idles neither for this long after a tick (ringnav_sleep). A
  * calibration knob: a turn slower than a tick in this long waits out a dark pass for each. */
 #define DARK_TURN_MS 500
-/* Bluetooth absolute volume is read back this often with the screen off and no volume limit to
- * hold, or after the headset refused it (bt_volume_poll); 400 ms otherwise. A headset's own volume
- * keys show on the Q2 that late. */
+/* Without BlueZ's volume signal (below), Bluetooth absolute volume is read back this often with the
+ * screen off and no volume limit to hold (BT_VOLUME_LIMIT_MS with one), and 400 ms lit, so a
+ * headset's own volume keys show on the Q2 that late; after the headset refused it, this often
+ * whatever the screen or the signal (bt_volume_poll). */
 #define BT_VOLUME_SLOW_MS 2000
 #define BT_VOLUME_LIMIT_MS 1000
 /* While BlueZ's volume signal is subscribed (bt_vol_event.c), a signal reads the level on the next

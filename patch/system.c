@@ -116,9 +116,9 @@ int ringnav_wifi_signal(void) {
  * get_battery_capacity) gets the battery read on the pass after, by the same flag change. Charging
  * stays a read, not an event: the AXP2101 driver's interrupt handlers that call
  * power_supply_changed are not requested by the stock kernel, so no uevent is known to come at a
- * charge start or end. ponytail: dark, a new level reaches Battery History and the low-battery
- * warning up to BATT_DARK_MS late; a device check of the uevent (docs/internals.md#battery) would
- * let the charge status come by event. */
+ * charge start or end. ponytail: dark on battery, a new level reaches Battery History up to
+ * BATT_DARK_MS late, and a wake shows a level that old for its first second; a device check of the
+ * uevent (docs/internals.md#battery) would let the charge status come by event. */
 static struct {
     unsigned at; /* the last read; 0 none yet */
     int skip;    /* this pass hands stock the last values */
