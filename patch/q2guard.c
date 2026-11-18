@@ -2,7 +2,8 @@
  * watching when demo is hung (docs/internals.md#overheat-guardian). S90play starts it before demo
  * and again if it ends: q2guard [--dev] VERSION LAST, LAST how the previous session ended (clean,
  * forced, stall; respawn after a restart of q2guard itself). Every GUARD_TICK_MS it reads the
- * temperature (if anything real reports one) and the CPU's busy share, and q2guard_core.c decides;
+ * temperature (the PMIC's die, q2guard_pmic.c, or anything else real that reports one) and the CPU's
+ * busy share, and q2guard_core.c decides;
  * a log line (q2guard.h heat_line) goes to RAM every LINE_MS, every GUARD_TICK_MS while warm,
  * plugged in or busy, and the lines go to the card's /mnt/mmc/.q2muse/logs in batches. demo draws
  * the cards it is told about in /tmp/q2guard.state and answers in /tmp/q2guard.ack (heatguard.c).
@@ -13,7 +14,7 @@
 
 #define GUARD_TICK_MS 5000 /* a sample; 1 s while powering off */
 #define LINE_MS 30000      /* a log line when nothing is warm, plugged in or busy */
-#define FAST_DC 400        /* warm: a line every tick */
+#define FAST_DC 450        /* warm: a line every tick */
 #define FAST_BUSY 50
 #define FLUSH_MS 300000 /* the RAM lines to the card: every 5 min, a minute while fast or streaming, and at once on an event */
 #define FLUSH_FAST_MS 60000
@@ -24,6 +25,8 @@
 #define LOCK "/tmp/q2guard.lock" /* one q2guard at a time: S90play's loop starts another only once it ended */
 #define SENSOR_HOOK "/tmp/q2guard.sensor" /* --dev only: a temperature in tenths of a degree, or "none" */
 #define PS "/sys/class/power_supply/"
+#define PMIC_DEV "/dev/i2c-6" /* the AXP2101's bus on the Q2 (axp20x-i2c owns 0x34, so I2C_SLAVE_FORCE) */
+#define PMIC_ADDR 0x34
 
 int slurp(const char *path, char *buf, int size) { /* the file's start, NUL-terminated */
     int fd = open(path, O_RDONLY | O_CLOEXEC), n = 0, got;
@@ -52,18 +55,61 @@ unsigned now_ms(void) {
     return (unsigned)t.tv_sec * 1000u + (unsigned)(t.tv_nsec / 1000000);
 }
 
-/* The temperature, in tenths of a degree, from the first source that is a temperature: a thermal
- * zone (millidegrees), a hwmon input (millidegrees), the battery supply's temp (tenths) unless it is
- * the AXP2101's, which returns a raw ADC byte (STATUS of the investigation in
- * docs/internals.md#overheat-guardian). The stock Q2 has none of these, so this reads GUARD_NONE
- * there and q2guard_core.c watches the CPU load instead. */
+/* ---- the PMIC's bus: i2c-dev, one SMBus byte transaction at a time (linux/i2c-dev.h) ---- */
+#define I2C_SLAVE_FORCE 0x0706
+#define I2C_SMBUS 0x0720
+#define I2C_SMBUS_BYTE_DATA 2
+struct smbus_args {
+    char read_write; /* 1 read, 0 write */
+    unsigned char command;
+    unsigned size;
+    unsigned char *data; /* union i2c_smbus_data: 34 bytes, the byte first */
+};
+static int pmic_fd = -1;
+static int smbus(int read, int reg, unsigned char *data) {
+    struct smbus_args a = { (char)read, (unsigned char)reg, I2C_SMBUS_BYTE_DATA, data };
+    return ioctl(pmic_fd, I2C_SMBUS, &a);
+}
+static int bus_rd(void *ctx, int reg) {
+    unsigned char d[34];
+    return smbus(1, reg, d) < 0 ? -1 : d[0];
+}
+static int bus_wr(void *ctx, int reg, int v) {
+    unsigned char d[34] = { (unsigned char)v };
+    return smbus(0, reg, d) < 0 ? -1 : 0;
+}
+/* The window's wait sleeps in bt_sleep, so a stream's lines go on through it (a sample there only
+ * lengthens the wait); the first window's short polls sleep plainly, as their sum is the time logged. */
+static void bus_sleep(void *ctx, int ms) {
+    if (ms >= PMIC_WINDOW_MS)
+        bt_sleep((unsigned)ms);
+    else
+        usleep((unsigned)ms * 1000u);
+}
+static const struct pmic_bus bus = { bus_rd, bus_wr, bus_sleep, 0 };
+static struct pmic pmic;
+static void pmic_open(void) {
+    pmic_fd = open(PMIC_DEV, O_RDWR | O_CLOEXEC);
+    if (pmic_fd >= 0 && ioctl(pmic_fd, I2C_SLAVE_FORCE, PMIC_ADDR) >= 0) return;
+    pmic.state = PMIC_OFF; /* the emulator: no PMIC */
+    snprintf(pmic.note, sizeof pmic.note, "SENSOR pmic none: %s %s", PMIC_DEV,
+             pmic_fd < 0 ? "does not open" : "refuses 0x34");
+}
+
+/* The temperature, in tenths of a degree: the PMIC's die (die, read this sample) while its reader is
+ * on, a misread included (GUARD_NONE, which q2guard_core.c counts against it); with the reader off, a
+ * thermal zone (millidegrees), a hwmon input (millidegrees), the battery supply's temp (tenths)
+ * unless it is the AXP2101's, which returns the low byte of the die's ADC count (docs/internals.md#overheat-guardian).
+ * The stock Q2 has none of those, so with the PMIC off this reads GUARD_NONE and q2guard_core.c
+ * watches the CPU load instead. */
 static int dev_build;
-static int read_temp(int *raw) {
+static int read_temp(int *raw, int die) {
     int v;
     char b[16];
     *raw = read_int(PS "battery/temp", &v) ? GUARD_NONE : v;
     if (dev_build && slurp(SENSOR_HOOK, b, sizeof b) > 0)
         return b[0] == '-' || (b[0] >= '0' && b[0] <= '9') ? atoi(b) : GUARD_NONE;
+    if (pmic.state != PMIC_OFF) return die;
     if (!read_int("/sys/class/thermal/thermal_zone0/temp", &v)) return v / 100;
     if (!read_int("/sys/class/hwmon/hwmon0/temp1_input", &v)) return v / 100;
     word(PS "battery/manufacturer", b, sizeof b);
@@ -219,12 +265,12 @@ static int card_ready(void) { /* mounted read-write, and not the computer's */
     return m && !strncmp(m + 1, "rw", 2) && !lun_busy();
 }
 
-static void sample(struct heat_sample *s, int busy, int temp, int raw, const char *state) {
+static void sample(struct heat_sample *s, int busy, int temp, int raw, int die, int adc, const char *state) {
     int v, threads = -1, demo = 0;
     char p[32];
     s->wall = time(0);
     s->up = now_ms() / 1000;
-    s->temp = temp, s->raw_temp = raw;
+    s->temp = temp, s->raw_temp = raw, s->die = die, s->adc = adc;
     s->level = read_int("/sys/devices/i2c-0/0-0062/cw2015_capacity", &v) ? -1 : v;
     s->mv = read_int(PS "battery/voltage_now", &v) ? -1 : v / 1000;
     word(PS "battery/status", s->status, sizeof s->status);
@@ -342,19 +388,34 @@ int main(int argc, char **argv) {
     int seq = 0, cores = 1, raw, temp, busy, line_due = 1;
     const char *card = "none";
     unsigned beat = 0, start = now_ms(), last_line = start, last_flush = start, off_seq = 0;
-    unsigned load_end = 0;
+    unsigned load_end = 0, window_ms = 0;
     int cancel_seen = -1;
     busy_since(&cpu5, &cores);
     busy_since(&cpu_line, &cores);
     struct heat_sample s = { 0 };
     char line[512];
     s.cable = -1;
+    pmic_open();
     flush_start();
     for (;;) {
-        bt_sleep(g.off ? 1000 : GUARD_TICK_MS); /* sampling the Bluetooth link each second while it streams */
+        /* a tick every GUARD_TICK_MS, the PMIC's window included; the Bluetooth link sampled each second
+         * through both while it streams (bt_sleep) */
+        bt_sleep(g.off ? 1000 : GUARD_TICK_MS - (window_ms < GUARD_TICK_MS ? window_ms : 0));
         unsigned now = now_ms();
         flush_reap();
-        temp = read_temp(&raw);
+        /* the die: not while powering off (its window would hold up the 1 s ticks, and nothing reads it) */
+        int adc = -1, die = g.off ? GUARD_NONE : pmic_sample(&bus, &pmic, &adc);
+        window_ms = now_ms() - now;
+        if (pmic.note[0]) note(pmic.note), pmic.note[0] = 0;
+        if (pmic.measured == 1) {
+            pmic.measured = 2;
+            if (pmic.first_ms >= 0)
+                snprintf(b, sizeof b, "SENSOR pmic first conversion after %d ms", pmic.first_ms);
+            else
+                snprintf(b, sizeof b, "SENSOR pmic no new conversion in %d ms", PMIC_WINDOW_MS);
+            note(b);
+        }
+        temp = read_temp(&raw, die);
         busy = g.off ? -1 : busy_since(&cpu5, &cores);
         int ack, cancel;
         answers(&ack, &cancel);
@@ -368,7 +429,11 @@ int main(int argc, char **argv) {
         int was_off = g.off && o.event == EV_OFF;
         switch (o.event) {
         case EV_WARN: card = "warn", ++seq, note("WARN hot"); break;
-        case EV_SENSOR_DOWN: card = "nosensor", ++seq, note("SENSOR none usable"); break;
+        case EV_SENSOR_DOWN:
+            card = "nosensor", ++seq;
+            snprintf(b, sizeof b, "SENSOR none usable: %s", guard_why(&g));
+            note(b);
+            break;
         case EV_SENSOR_OK: card = "none", ++seq, note("SENSOR ok"); break;
         case EV_LOAD_WARN:
             card = "loadwarn", ++seq, load_end = now + GUARD_LOAD_MS, note("LOADWARN 60 s");
@@ -390,7 +455,7 @@ int main(int argc, char **argv) {
             unsigned long long before = cpu_line.all; /* the span in ticks of one core */
             int lb = busy_since(&cpu_line, &cores);
             unsigned span = before ? (unsigned)(cpu_line.all - before) / (unsigned)cores : 0;
-            sample(&s, lb, temp, raw, guard_state(&g));
+            sample(&s, lb, temp, raw, die, adc, guard_state(&g));
             top_three(&table, s.procs > 0 ? s.procs : 0, pids, (const char(*)[16])names, ticks, span,
                       s.top);
             heat_line(line, sizeof line, &s);
