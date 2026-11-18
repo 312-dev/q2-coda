@@ -15,6 +15,7 @@
 #define AIR_LOOK_MS 1000 /* the file looked for this often until the app makes it */
 #define AIR_VOLUME 35    /* a speaker's volume when the app gives none (an older app) */
 #define AIR_TRACK_MAX 1024
+#define AIR_LEN_MS 1000 /* a song arriving: its length looked at this often */
 
 extern void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
 
@@ -25,6 +26,8 @@ static struct {
     int local, limit, way; /* the earphones' volume, Volume Limit and output while it plays */
     unsigned spk_seq; /* the app's spk_seq as last taken */
     unsigned song;  /* the hash of the song CAST_TRACK names */
+    int len, arriving; /* the length it gave, and whether the song was still arriving then */
+    unsigned len_at;   /* time_now_ms of the last look at that song's length (AIR_LEN_MS) */
     /* asked: the app opened by the ⋯ row, or running when demo started (its loop's pid file, looked
      * at once): only then is the file looked for, so no one else pays for AirPlay */
     int asked, checked;
@@ -111,7 +114,8 @@ static void put(char *buf, unsigned cap, unsigned *n, const char *key, const cha
     if (*n < cap) buf[(*n)++] = '\n';
 }
 
-/* The playing song's tags to CAST_TRACK for the app (the speaker's now-playing and art), once a song. */
+/* The playing song's tags to CAST_TRACK for the app (the speaker's now-playing and art), once a song,
+ * and again when the length of one still arriving changes. */
 static void air_track(cast_tap *t) {
     void *q = P(mcl_pdeqplaylist, 0), *r;
     unsigned pos = (unsigned)I(MCL_POS, 0);
@@ -122,18 +126,29 @@ static void air_track(cast_tap *t) {
     unsigned h = FNV_SEED;
     h = fnv(h, (const unsigned char *)(path ? path : "")) ^ 0x2f;
     h = fnv(h * 16777619u, (const unsigned char *)(title ? title : ""));
-    if (h == air.song) return;
+    /* a song still arriving reads short to the player: the server's length, 0 while there is none
+     * (stream_state.c stream_length), looked at again every AIR_LEN_MS and sent when it changes */
+    unsigned now = (unsigned)time_now_ms(), ms = 0;
+    if (h == air.song && (!air.arriving || now - air.len_at < AIR_LEN_MS)) return;
+    air.len_at = now;
+    int sec = -1, total = 0, how = path ? stream_length(path, &ms) : 0;
+    player_playtime_and_length(&sec, &total);
+    if (how) total = how == 1 ? (int)(ms / 1000) : 0;
+    if (total < 0) total = 0;
+    if (h == air.song && total == air.len) {
+        air.arriving = how != 0;
+        return;
+    }
     char buf[AIR_TRACK_MAX], len[12];
     unsigned n = 0;
-    int sec = -1, total = 0;
-    player_playtime_and_length(&sec, &total);
-    snprintf(len, sizeof len, "%d", total > 0 ? total : 0);
+    snprintf(len, sizeof len, "%d", total);
     put(buf, sizeof buf, &n, "path", path);
     put(buf, sizeof buf, &n, "title", title);
     put(buf, sizeof buf, &n, "artist", artist);
     put(buf, sizeof buf, &n, "album", album);
     put(buf, sizeof buf, &n, "length", len);
-    if (blob_io(CAST_TRACK, CAST_TRACK ".tmp", buf, n, 1)) air.song = h, ++t->track;
+    if (blob_io(CAST_TRACK, CAST_TRACK ".tmp", buf, n, 1))
+        air.song = h, air.len = total, air.arriving = how != 0, ++t->track;
 }
 
 /* Every UI pass (ringnav_sleep). */
