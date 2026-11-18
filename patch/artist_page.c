@@ -11,8 +11,8 @@
  * (track_row), from a card app's reply (addon.c album_view) or on stock's album pages
  * (library_album.c).
  *
- * The header stands from screen y HERO_Y, which is above the window (the status row is V_BAR
- * high): its monogram's top is drawn again in the status bar's background paint (artist_cap),
+ * The header stands from screen y HERO_Y, above the status row's foot (V_BAR), where its view
+ * starts: its monogram's top is drawn again in the status bar's background paint (artist_cap),
  * clipped to the bar. The pair is a pair of stops above the list (pair_key), as Songs' Shuffle
  * row is (navigation.c shuffle_key): the page opens on Shuffle, a tick moves to Radio, the next
  * to the first row; a tick up from the first row comes back to Radio. A page with Shuffle alone
@@ -169,14 +169,21 @@ static void hero_art(void *canvas, void *head, int dy) {
     }
 }
 
-/* The header in body (the page's window, which starts V_BAR down the screen): the monogram of
- * name, name, sub under it and meta (none when empty) under that, kept as its props; its view
- * reaches down to the drill-down rows, so the pair's panels are its children. hero_cover makes it
- * an album's, hero_text writes its lines again. */
+/* w's top on the screen. */
+static int ar_screen_y(void *w) {
+    int y = 0;
+    for (void *wm = window_manager(); w && w != wm; w = P(w, W_PARENT)) y += I(w, W_Y);
+    return y;
+}
+
+/* The header in body (the page's window or a view in it), from the status row's foot, V_BAR down
+ * the screen: the monogram of name, name, sub under it and meta (none when empty) under that, kept
+ * as its props; its view reaches down to the drill-down rows, so the pair's panels are its
+ * children. hero_cover makes it an album's, hero_text writes its lines again. */
 void *hero_open(void *body, const char *name, const char *sub, const char *meta) {
     int bar = geom_val(V_BAR);
-    void *head =
-        widget_factory_create_widget(widget_factory(), "view", body, 0, 0, 375, AR_LIST_Y - bar);
+    void *head = widget_factory_create_widget(widget_factory(), "view", body, 0,
+                                              bar - ar_screen_y(body), 375, AR_LIST_Y - bar);
     widget_set_prop_str(head, AR_NAME, name ? name : "");
     widget_set_prop_str(head, AR_SUB, sub ? sub : "");
     widget_set_prop_str(head, AR_META, meta ? meta : "");
@@ -211,13 +218,15 @@ void hero_text(void *head, const char *name, const char *sub, const char *meta) 
 }
 
 /* The status bar's background (navigation.c ringnav_paint_bg): the monogram's (or cover's) top,
- * which stands above the window, while the header's page is on top (or under a menu sheet, which
+ * which stands above a page under the row (theme_engine.c client_window: a card app's), while the
+ * header's page is on top (or under a menu sheet, which
  * dims the bar with it) and still: a sliding page leaves the bar as it is. */
 void artist_cap(void *bar, void *canvas) {
     void *wm = window_manager(), *win = ar.head ? window_of(ar.head) : (void *)0,
          *top = window_manager_get_top_window(wm);
+    /* a full-bleed page (bar_foot above 0) paints the monogram's top itself, under the row */
     if (!win || !P(canvas, CANVAS_LCD) || (win != top && !modal_win(top)) ||
-        window_manager_is_animating(wm))
+        window_manager_is_animating(wm) || bar_foot(win) > 0)
         return;
     hero_art(canvas, ar.head, HERO_Y - I(bar, W_Y));
 }
@@ -333,7 +342,7 @@ int drill_list(void *view, int n) {
     void *lv = P(view, W_PARENT);
     int h = page_h(48), room = 320 - AR_LIST_Y, rows = n * h;
     if (rows > room) rows = room;
-    widget_move_resize(lv, I(lv, W_X), AR_LIST_Y - geom_val(V_BAR), I(lv, W_W), rows);
+    widget_move_resize(lv, I(lv, W_X), AR_LIST_Y - ar_screen_y(P(lv, W_PARENT)), I(lv, W_W), rows);
     widget_resize(view, I(view, W_W), rows);
     return h;
 }

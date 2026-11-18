@@ -188,7 +188,7 @@ int artist_local(void) {
     if (deque_size(la.songs)) la.row[la.n++] = LA_SONGS;
     for (unsigned i = 0, k = widget_count_children(top); i < k; ++i) /* the tabs and toolbar */
         widget_set_visible(widget_get_child(top, i), 0, 0);
-    a = widget_factory_create_widget(widget_factory(), "view", top, 0, 0, 375, client_h());
+    a = widget_factory_create_widget(widget_factory(), "view", top, 0, bar_foot(top), 375, client_h());
     la.win = top, la.body = a, la.stop = 1; /* opens on Shuffle */
     widget_on(top, EVT_DESTROY, la_gone, top);
     widget_on(top, EVT_WINDOW_FOREGROUND, la_front, top);
