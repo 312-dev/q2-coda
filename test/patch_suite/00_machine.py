@@ -22,7 +22,7 @@ assert manifest.get('compact_code')
 from ipod import GEOM_VALS, INC, O, VALUE_NAMES  # patch/offsets.inc and its integer #defines; the geometry tables' columns
 from theme import MOTION_WIDGET, MOTION_WINDOW, SCHEME_MODE_OFF, THEME_MOTION_OFF, builtins as theme_builtins, built_geometry
 from theme import theme_keys  # tools/theme.py: the theme's own keys
-CONFIG_READS=9+len(theme_keys(theme_builtins()))  # settings_read: the payload's nine keys (REDUCEMOTION last), then the theme's own
+CONFIG_READS=8+len(theme_keys(theme_builtins()))  # settings_read: the payload's eight keys (REDUCEMOTION last), then the theme's own
 DC=O['DOUBLE_CLICK_MS']  # centre double-press window
 # iPod accent presets: {gradient top, bottom, light tone, red tone, highlight} per Accent setting value.
 ACCENTS=[tuple(int(v,16) for v in g) for g in re.findall(r'\{ 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+), 0x(\w+) \}',INC)]
@@ -1129,7 +1129,7 @@ s.clock=(19,31); s.top=pages[-1]; minute(); assert clock()=='7:31 PM' and len(wr
 # The codec badge and the Battery setting (bar_sync, on each bar paint): stock sets img_bt's image
 # each second; a new badge shows CODEC_MS, fades out and BT_GLYPH fades in over CODEC_STEPS steps
 # each way, and BT_GLYPH then replaces the badge stock sets again. The battery shows the icon or the
-# percentage in view_battery, and the icon while the group's ink would reach past BATT_ROOM.
+# percentage in view_battery, and the icon while the group's ink would squeeze the title out (navigation.c batt_room).
 # The percentage is sized to its digits once the first paint measured them (10 px each here, 11 rounded up).
 def battery_checks():
     def battery_bar(mode,**config):
@@ -1182,16 +1182,15 @@ def battery_checks():
         assert [(l['text'],l['x'],l['y'],l['color']) for l in letters]==[
             (f'{value}%',(pct-10*len(f'{value}%'))//2,(30+1-letters[0]['font'][1])//2,color_t(rgb))]
     passed()
-    # A crowded codec (aptX HD's badge and Wi-Fi past BATT_ROOM) temporarily takes the icon and recovers without a
-    # level change: the badge's fade leaves the plain glyph's BT_REACH.
+    # A codec badge (aptX HD's) is off OLED's row, which has the room: it never takes the percentage's place, and the
+    # badge's fade changes nothing of the slot.
     b,bar,w,paint=battery_bar(1); b.nodes[w['label_battery']]['text']='100%'
     b.nodes[w['img_bt']]['image']='bar_aptxhd'
-    paint(); assert b.get(w['view_battery']+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W']
+    paint(); assert b.get(w['view_battery']+O['W_W'])==O['BATT_PCT_W']
     b.advance(O['CODEC_MS'])
     for _ in range(O['CODEC_STEPS']): b.advance(O['CODEC_STEP_MS'])
     b.calls=[]; paint()
     assert b.get(w['view_battery']+O['W_W'])==O['BATT_PCT_W']
-    assert ('widget_invalidate_force',bar) in [c[:2] for c in b.calls]
     # OLED offers Icon and Percent (theme.xml battery values): a stored 2 (Icon + Percent) or 3 (Percent Inside) reads
     # as its default, the icon, as an invalid value does; the body the set's (geom batt_w) with its nub outside.
     for invalid in ('2','3','4','9','-1','33','bad',''):
