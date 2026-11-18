@@ -2922,20 +2922,22 @@ const char *addon_radio_missing(const char *path) {
  * lyrics=1. Its request is /tmp/q2-<id>.lrcask, one line, "<seq> <path>", written only once the
  * app's socket is there (it takes a request already there at its start as answered); it answers in
  * its state file, lyricsack=<seq> <code>: 0 the .lrc is beside the song, 1 not its song, 2 its
- * server has none, 3 no answer. As the radio's (rq), one request at a time: a newer one replaces
- * one still waiting for the socket. */
+ * server has none, 3 no answer. One request at a time; the caller passes the path again while it
+ * waits for the socket, so none is kept here. */
 static struct {
-    app_t *app;     /* the app asked last */
-    char line[600]; /* its request, while waiting for its socket */
-    int scanned;    /* addon_scan run once for a path no app listed so far held */
+    app_t *app;   /* the app asked last */
+    unsigned seq; /* its request's */
+    int pending;  /* not written yet: its socket isn't there */
+    int scanned;  /* addon_scan run once for a path no app listed so far held */
 } lq __attribute__((section(".scratch")));
 
-static void lyrics_send(void) {
-    char path[48];
-    if (!lq.line[0] || !lq.app || !addon_ready(lq.app->id)) return;
-    tk_snprintf(path, sizeof path, "/tmp/q2-%s.lrcask", lq.app->id);
-    blob_io(path, "/tmp/q2-lrcask.tmp", lq.line, strlen(lq.line), 1);
-    lq.line[0] = 0;
+static void lyrics_send(const char *path) {
+    char file[48], line[600];
+    if (!lq.pending || !lq.app || !path || !addon_ready(lq.app->id)) return;
+    unsigned n = (unsigned)tk_snprintf(line, sizeof line, "%u %s\n", lq.seq, path);
+    tk_snprintf(file, sizeof file, "/tmp/q2-%s.lrcask", lq.app->id);
+    if (n < sizeof line) blob_io(file, "/tmp/q2-lrcask.tmp", line, n, 1);
+    lq.pending = 0;
 }
 
 /* The app with lyrics=1 whose folder or downloads folder holds path; 0 for none. */
@@ -2959,23 +2961,21 @@ static app_t *lyrics_app(const char *path) {
 }
 
 /* 1 when an app takes the request for path's lyrics (seq names its answer), started for it when it
- * doesn't run; 0 when no app fetches lyrics for it. */
+ * doesn't run; 0 when no app fetches lyrics for it, or path is too long to name in one line. */
 int addon_lyrics_ask(const char *path, unsigned seq) {
-    app_t *a = path ? lyrics_app(path) : 0;
+    app_t *a = path && strlen(path) < 580 ? lyrics_app(path) : 0;
     if (!a || addon_wake(a->id) < 0) return 0;
-    unsigned n = (unsigned)tk_snprintf(lq.line, sizeof lq.line, "%u %s\n", seq, path);
-    if (n >= sizeof lq.line) return lq.line[0] = 0, 0; /* cut, it would name another song */
-    lq.app = a;
-    lyrics_send();
+    lq.app = a, lq.seq = seq, lq.pending = 1;
+    lyrics_send(path);
     return 1;
 }
 
-/* The app's answer to lyrics request seq: its code, or -1 while there is none. Polled by lyrics.c,
- * which sends a request waiting for its socket. */
-int addon_lyrics_answer(unsigned seq) {
+/* The app's answer to lyrics request seq, about path: its code, or -1 while there is none. Polled by
+ * lyrics.c, which writes the request here once the app's socket is there. */
+int addon_lyrics_answer(unsigned seq, const char *path) {
     char raw[QR_RAW], v[24], want[16];
-    lyrics_send();
-    if (!lq.app || !state_read(lq.app->state, raw, sizeof raw)) return -1;
+    lyrics_send(path);
+    if (!lq.app || lq.pending || !state_read(lq.app->state, raw, sizeof raw)) return -1;
     field(raw, "lyricsack", v, sizeof v);
     unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
     return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';

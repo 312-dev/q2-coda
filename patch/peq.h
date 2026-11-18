@@ -488,7 +488,7 @@ int addon_radio_answer(unsigned seq);
 const char *addon_radio_missing(const char *path);
 /* addon.c: a song's lyrics asked of its app (lyrics.c); the answer to request seq, -1 none yet */
 int addon_lyrics_ask(const char *path, unsigned seq);
-int addon_lyrics_answer(unsigned seq);
+int addon_lyrics_answer(unsigned seq, const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);

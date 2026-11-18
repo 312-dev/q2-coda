@@ -5689,15 +5689,15 @@ def test_a_songs_lyrics_are_asked_of_its_app(fw):
     /tmp/q2-<id>.lrcask once its socket is there; its state file's lyricsack answers (docs/internals.md#server-lyrics)."""
     p = Page(fw, b'name=Foo\nlyrics=1\n', opens=False)
     ask = fw.fn('addon_lyrics_ask', C.c_int, C.c_void_p, C.c_uint)
-    answer = fw.fn('addon_lyrics_answer', C.c_int, C.c_uint)
+    answer = fw.fn('addon_lyrics_answer', C.c_int, C.c_uint, C.c_void_p)
     path = b'/mnt/mmc/.foo/stream/0000 - Song [s1].flac'
     assert ask(block(fw, path), 7) == 1
     assert b'/tmp/q2-foo.lrcask' not in p.world.files  # no socket yet: the app reads a request at its start as answered
-    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
-    assert answer(7) == -1
-    assert p.world.files[b'/tmp/q2-foo.lrcask'] == b'7 ' + path + b'\n'
     p.world.files[b'/tmp/q2-foo.state'] = b'version=1\nlyricsack=7 2\n'
-    assert answer(7) == 2 and answer(8) == -1
+    assert answer(7, block(fw, path)) == -1  # an answer before the request is written is an older run's
+    p.world.files[b'/tmp/q2-foo.browse.sock'] = b''
+    assert answer(7, block(fw, path)) == 2 and answer(8, block(fw, path)) == -1
+    assert p.world.files[b'/tmp/q2-foo.lrcask'] == b'7 ' + path + b'\n'
 
 
 @pytest.mark.parametrize('path,asked', [

@@ -196,15 +196,22 @@ static int lrc_idtag(const char *s) {
 }
 
 /* Lyrics from a card app's server (docs/internals.md#server-lyrics): the song on the card that the
- * latest load found nothing for (none, written on the loader's thread: gen odd while it is), and
- * lyrics_ask_poll's request about it. */
+ * latest load found nothing for, and lyrics_ask_poll's request about it. Songs are told apart by
+ * their path's FNV-1a (la_key), a word, so the loader's thread writes none whole. */
 static struct {
-    unsigned gen;
-    char none[512]; /* its path, "" when the load found lyrics or the song is no file of the card */
-    char asked[512]; /* the song asked about last: never twice in a row */
+    unsigned none;  /* the song the latest load found nothing for, 0 when it found lyrics */
+    unsigned asked; /* the song asked about last: never twice in a row */
     unsigned seq, at, polled;
     int wait; /* a request waits for its answer */
 } la __attribute__((section(".scratch")));
+
+/* path's FNV-1a, never 0; 0 for no path. */
+static unsigned la_key(const char *path) {
+    unsigned h = 2166136261u;
+    if (!path) return 0;
+    while (*path) h = (h ^ (unsigned char)*path++) * 16777619u;
+    return h ? h : 1;
+}
 
 /* The playing record's card path: a local queue's song, REC_TYPE 8 with an absolute path; 0 for
  * any other (a Tidal or app URL queue, 0xf1 and 0xf2, or none). */
@@ -216,12 +223,6 @@ static const char *playing_file(void) {
         *(char *)P(r, REC_PATH) != '/')
         return 0;
     return P(r, REC_PATH);
-}
-
-static void la_loaded(const char *path) {
-    __sync_fetch_and_add(&la.gen, 1);
-    tk_snprintf(la.none, sizeof la.none, "%s", path && strlen(path) < sizeof la.none ? path : "");
-    __sync_fetch_and_add(&la.gen, 1);
 }
 
 int ringnav_lyric(void) {
@@ -283,7 +284,7 @@ int ringnav_lyric(void) {
     }
     /* every load sends its synced lines, or none (the rows hold unsynced ones): never the last's */
     lyrics_publish(l, n > 0 && l[0].time != LRC_FAR ? n : 0, m);
-    la_loaded(mclGetLyricSize() > 0 ? 0 : playing_file());
+    la.none = mclGetLyricSize() > 0 ? 0 : la_key(playing_file());
     if (v) ((void (*)(char **))(lib + TAGLIB_PROPERTY_FREE))(v);
     if (f) taglib_file_free(f);
     free(file);
@@ -309,29 +310,29 @@ void lyrics_ask_poll(int front) {
     if (la.wait) {
         if (now - la.polled < LYRIC_ASK_POLL_MS) return;
         la.polled = now;
-        int code = addon_lyrics_answer(la.seq);
+        const char *p = playing_file();
+        if (la_key(p) != la.asked) { /* another song: the answer would load nothing */
+            la.wait = 0;
+            return;
+        }
+        int code = addon_lyrics_answer(la.seq, p);
         if (code < 0) {
             if (now - la.at >= LYRIC_ASK_WAIT_MS) la.wait = 0;
             return;
         }
         la.wait = 0;
-        const char *p = playing_file();
-        if (code == 0 && p && !strcmp(p, la.asked) && mclGetLyricSize() <= 0) {
+        if (code == 0 && mclGetLyricSize() <= 0) {
             ringnav_lyric();
             g_forcerefresh_flag = 1;
         }
         return;
     }
-    if (!front || mclGetLyricSize() > 0) return;
-    char none[sizeof la.none];
-    unsigned gen = la.gen;
-    if (gen & 1) return; /* the loader writes it now */
-    memcpy(none, la.none, sizeof none);
+    if (!front || !la.none || la.none == la.asked || mclGetLyricSize() > 0) return;
     const char *p = playing_file();
-    if (gen != la.gen || !none[0] || !p || strcmp(p, none) || !strcmp(none, la.asked)) return;
-    memcpy(la.asked, none, sizeof la.asked);
+    if (la_key(p) != la.none) return; /* the playing song's load hasn't ended */
+    la.asked = la.none;
     la.seq = la.seq + 1 ? la.seq + 1 : 1;
-    if (addon_lyrics_ask(none, la.seq)) la.wait = 1, la.at = la.polled = now;
+    if (addon_lyrics_ask(p, la.seq)) la.wait = 1, la.at = la.polled = now;
 }
 
 /* Every line LYRIC_PX, as large as reads well in the page's width, as many rows as it takes up to
