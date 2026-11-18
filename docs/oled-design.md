@@ -613,6 +613,9 @@ as a menu's; a lit row's foot never passes y 282.
   when the wheel is on it. It is a stop of its own; Center on it empties Playing Next, no confirm.
 - **From** the list, album or page the queue was played from ("Next in Queue" when that is not
   known) heads the rest of the queue in play order.
+- A row's title and artist are the song's tags; a song streamed from a server, not yet played, has
+  its server's title and artist (or its download's tags), not its download's file name
+  ([internals: Card apps](internals.md#card-apps), Tags).
 - **The bump arrow**, Phosphor `arrow-up` (regular, 16 px, Text Tertiary; white on the selection),
   stands on the right column of each queued song but the first. A tap on it, or Play/Pause held on
   the row, moves the song to the top of Playing Next, where a 3 px Accent Blue edge marks it for

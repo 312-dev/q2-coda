@@ -130,8 +130,7 @@ static void card_tags(char *id3, const char *path) {
     void *r = queue_now(&pos, &n);
     const char *album = r ? P(r, REC_ALBUM) : 0;
     if (I(MCL_TYPE, 0) == 1 || mclGetCueFlag() || !r || !P(r, REC_PATH) ||
-        strcmp(P(r, REC_PATH), path) || (album && *album) ||
-        !tk_str_start_with(path, "/mnt/mmc/"))
+        strcmp(P(r, REC_PATH), path) || (album && *album) || !tk_str_start_with(path, "/mnt/mmc/"))
         return;
     rec_file_tags(r, id3, path);
 }

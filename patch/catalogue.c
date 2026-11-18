@@ -1248,19 +1248,23 @@ int catalogue_np_info(const char *path, char *genre, int *year) {
     return 1;
 }
 
-/* The server row's name, songer, album and albumsonger into a record's empty fields (np_row's
- * callback for catalogue_copy_tags). */
-static int tags_row(void *r, int n, char **v, char **c) {
-    static const int to[] = { REC_TITLE, REC_ARTIST, REC_ALBUM, REC_ALBUM_ARTIST };
+/* The server row's name, album, songer and albumsonger into a record's empty fields (ctx[0] the
+ * record, ctx[1] set once a row came), for catalogue_copy_tags. */
+static int tags_row(void *ctx, int n, char **v, char **c) {
+    static const int to[] = { REC_TITLE, REC_ALBUM, REC_ARTIST, REC_ALBUM_ARTIST };
+    void *r = ((void **)ctx)[0];
     (void)c;
+    ((void **)ctx)[1] = ctx;
+    char *old[4];
+    for (int k = 0; k < 4; ++k) old[k] = P(r, to[k]); /* all read before any is written */
     for (int k = 0; k < n && k < 4; ++k) {
-        char **field = (char **)((char *)r + to[k]), *t;
-        if (!v[k] || !*v[k] || (*field && **field) || !(t = strdup(v[k]))) continue;
-        free(*field), *field = t;
+        char *t;
+        if ((old[k] && *old[k]) || !v[k] || !*v[k] || !(t = strdup(v[k]))) continue;
+        free(old[k]), P(r, to[k]) = t;
     }
     return 1; /* one row */
 }
-/* r's title, artist, album and album artist from the server row its path is a Stream Cache copy
+/* r's title, album, artist and album artist from the server row its path is a Stream Cache copy
  * of (cat_copy_of), for a song not yet played (tags.c card_record_tags); 1 when a row named it. 0
  * with Local Only or before an import, when there is no index. */
 int catalogue_copy_tags(void *r) {
@@ -1268,14 +1272,14 @@ int catalogue_copy_tags(void *r) {
     const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
     if (!e || e->dup || !cat_live()) return 0;
     char sql[640], *o = sql;
+    void *ctx[2] = { r, 0 };
     PUT(o, sql + sizeof sql - CAT_SLACK,
-        "select name,songer,album,albumsonger from cat.serverall where fileurl=");
+        "select name,album,songer,albumsonger from cat.serverall where fileurl=");
     o = sq(o, sql + sizeof sql - CAT_SLACK, ix_str(&cat.ix, e->path));
     if (o >= sql + sizeof sql - CAT_SLACK) return 0; /* cut: never run */
     *o = 0;
-    sqlite3_exec(*cat.stock_slot, sql, tags_row, r, 0);
-    const char *title = P(r, REC_TITLE);
-    return title && *title;
+    sqlite3_exec(*cat.stock_slot, sql, tags_row, ctx, 0);
+    return ctx[1] != 0;
 }
 
 /* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
