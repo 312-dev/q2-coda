@@ -35,7 +35,7 @@ class Np:
         deques[q].append(songs(SONG))
         fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = q
         mcl.pos = 0
-        # the window as the device has it: under the status row, at y 58 (its paint's coordinates are its own)
+        # the view as the device has it: at y 58 on the page (its paint's coordinates are its own)
         self.winbuf = C.create_string_buffer(0x400)
         struct.pack_into('<i', self.winbuf, O['W_Y'], NP_WIN_Y)
         self.win = C.addressof(self.winbuf)

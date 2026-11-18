@@ -1523,7 +1523,7 @@ def test_fit_rows_runs_a_list_on_to_the_window_s_foot(pitch, top):
 
 def test_full_bleed_moves_a_window_content_under_the_status_row():
     """Every page is full-bleed (tools/build.py FULL_BLEED): its top-level children move down the bar, so each rests
-    where it did when the window started under the status row; self_layout ones in their params."""
+    where it did when pages began under the status row; self_layout ones in their params."""
     page = ['window', [0, 0, 375, 262], {'name': 'p'}, [
         ['view', [0, 0, 375, 100], {'name': 'a'}, [['label', [4, 6, 10, 10], {'name': 'inner'}, []]]],
         ['image', [0, 0, 100, 100], {'name': 'b', 'self_layout': 'default(x=0,y=0,w=100%,h=100%)'}, []],

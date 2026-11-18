@@ -267,7 +267,7 @@ def prow(pm,view,i,caption,detail=None,into=False):
     return pm.call(address=f,args=(view,i,pm.string(caption),pm.string(detail) if detail is not None else 0),stack=(0,),gap=0)&0xffffffff
 def box(pm,w): return [signed(pm.get(w+O[k])) for k in ('W_X','W_Y','W_W','W_H')]
 def page_kids(pm,kind): return [c for c in pm.nodes[pm.top]['children'] if pm.nodes[c]['type']==kind]
-def under_bar(pm,name):  # a window as the device has it, under the status row
+def under_bar(pm,name):  # a window as client_window puts a code-built page, under the status row (item 5, fix/full-bleed-code-pages, makes it full-bleed)
     w=pm.node('window',name); pm.word(w+O['W_Y'],OLG.bar); pm.word(w+O['W_PARENT'],pm.wm); return w
 PX,PW=OLT['page_x'],375-2*OLT['page_x']
 pm=CoverflowMachine(); assert oled_client(pm)==320-OLG.bar; pbar=oled_page_bar(pm)

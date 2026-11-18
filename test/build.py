@@ -1060,7 +1060,7 @@ def validate_assets(directory):
                 if 'font' in key or key == 'style': assert node[2][key] == value
         if short in ('folder_page.bin', 'localmusic_page.bin', 'localmusic/localclass_page.bin', 'localmusic/playlist_page.bin'):
             surface = next(n for n in root[3] if n[0] in ('list_view', 'table_view'))
-            assert surface[1][1:] == [0, 375, 320 - GEOM.bar], 'Lists must fill the client area'
+            assert surface[1][1:] == [0, 375, 320 - GEOM.bar], 'Lists must fill the page from the status row'
         # Corrupt inputs must be rejected, never silently patched.
         try: patch_asset(short, original[:-1]+b'x', GEOM)
         except ValueError: pass

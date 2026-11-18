@@ -430,9 +430,9 @@ assert m.nodes[row]['loop']==0 and m.nodes[row]['hscroll_label_set_only_focus']=
 # Wheel only: the covers' slide_menu takes no touch.
 m=CoverflowMachine(); m.open()
 assert m.nodes[m.slide].get('sensitive')==0; passed()
-# Text geometry, past the first system_bar load as on a unit, and the page under the status row, where the
-# window manager puts it: album over artist under the covers (the theme's coverflow caption: text_y, artist_y, name_px,
-# artist_px), the album white and the artist grey (CF_GREY), CF_EDGE from the sides and clear of the rounded glass. The
+# Text geometry, past the first system_bar load as on a unit, and the page, whose window the window manager
+# puts under the status row (client_window; item 5 makes it full-bleed):
+# album over artist under the covers (the theme's coverflow caption: text_y, artist_y, name_px, artist_px), the album white and the artist grey (CF_GREY), CF_EDGE from the sides and clear of the rounded glass. The
 # tracks are the theme's one-line song rows, page_x from the sides, the album named in the bar, not over them, the list
 # running on to the window's foot, its rows past the set's list end (y 282) fading (docs/oled-design.md), the seventh
 # clear of the glass too.
