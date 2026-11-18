@@ -513,6 +513,10 @@ static inline int arc_out(int r, int y) {
  * or Centre (control_center.c cc_keydown), opens its page: the house hold, Edit Library's and Up
  * Next's (LR_HOLD_MS, UN_HOLD_MS). */
 #define QUICK_HOLD_MS 550
+/* A finger on Control Center's Volume slider sets the volume at most this often (control_center.c
+ * cc_drag): each set is the DAC's ioctl, and with Link Volume a D-Bus get and set of the headset's
+ * level, on the UI thread. About a frame; the release sets where the finger stopped at once. */
+#define CC_VOL_WRITE_MS 30
 /* Long Songs (docs/internals.md#long-songs): songs longer than this. */
 #define LONG_SONG_S 600
 /* Following lyrics' nudge against the wheel (lyric_poll), in px. */

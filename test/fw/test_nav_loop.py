@@ -2948,6 +2948,67 @@ def test_a_finger_on_the_volume_slider_sets_the_volume_where_it_is(fw, keys, x, 
     assert vol.value == want and [c[1][0] for c in fw.calls('device_set_volume')] == [want]
 
 
+def volume_drag(fw, ui, keys, buttons, xs, gap_ms):
+    """A finger pressed on Control Center's Volume slider at xs[0], moved through the rest, gap_ms apart."""
+    fw.mock('window_manager_get_pointer_pressed', lambda *_: 1)
+    ui.emit(buttons[CC_VOLUME], O['EVT_POINTER_DOWN'], x=xs[0], y=229)
+    for x in xs[1:]:
+        keys.clock.now += gap_ms
+        ui.emit(buttons[CC_VOLUME], O['EVT_POINTER_MOVE_BEFORE'], x=x, y=229)
+
+
+def test_a_volume_drag_writes_the_volume_at_most_once_a_cc_vol_write_ms_and_its_last_where_it_stops(fw, keys):
+    """cc_drag: a set of the volume is the DAC's ioctl (whose driver printks two lines on the device) and, with Link
+    Volume, a D-Bus get and set of the headset's absolute volume, all on the UI thread; the emulator's touch reports a
+    move every 20 ms. A drag sets the latest level at most once every CC_VOL_WRITE_MS, its release where the finger
+    stopped, and the saved level follows each set."""
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 30, 100
+    xs = [188 + 2 * i for i in range(61)]  # 60 moves, 2 px each, 10 ms apart: 600 ms
+    volume_drag(fw, ui, keys, buttons, xs, 10)
+    written = [c[1][0] for c in fw.calls('device_set_volume')]
+    assert written[0] == 0  # the press writes at once
+    assert len(written) <= 600 // O['CC_VOL_WRITE_MS'] + 1
+    ui.emit(buttons[CC_VOLUME], O['EVT_POINTER_UP_BEFORE'], x=xs[-1], y=229)
+    final = 120 * 100 // 167
+    assert vol.value == final and fw.calls('device_set_volume')[-1][1][0] == final
+    saved = [c[1][0] for c in fw.calls('write_int_config') if C.string_at(c[1][2]) == b'VOLUME']
+    assert saved[-1] == final and len(saved) == len(fw.calls('device_set_volume'))
+
+
+def test_a_volume_drag_held_still_writes_its_last_level_when_its_wait_ends(fw, keys):
+    """A move within CC_VOL_WRITE_MS of the last write is held, and the timer it starts writes it, finger down or not:
+    the volume ends where the finger is even if no release comes (the page closed under it)."""
+    ui = Ui(fw)
+    _, buttons = cc_opened(fw, ui)
+    vol, limit = fw.var('g_volume', C.c_ubyte), fw.var('g_maxvolume', C.c_ubyte)
+    vol.value, limit.value = 30, 100
+    volume_drag(fw, ui, keys, buttons, [188 + 100, 188 + 50], 5)
+    assert [c[1][0] for c in fw.calls('device_set_volume')] == [100 * 100 // 167]
+    due = ui.due(ui_name(fw.lib, 'cc_vol_due'))
+    assert len(due) == 1 and ui.timers[due[0]][2] == O['CC_VOL_WRITE_MS'] - 5
+    ui.fire(ui_name(fw.lib, 'cc_vol_due'))
+    assert vol.value == 50 * 100 // 167
+    assert [c[1][0] for c in fw.calls('device_set_volume')] == [100 * 100 // 167, 50 * 100 // 167]
+
+
+def test_a_volume_drag_draws_only_the_volume_slider(fw, keys):
+    """A move invalidates the Volume slider's box and its ring, as a brightness drag's stock slider invalidates its own,
+    not the whole page: on the emulator (2026-11-18) a whole-page repaint a move made a volume drag's cc_paint 2 to 17 ms
+    a frame on average against a brightness drag's 1.2 to 3.6, and the drag 20 to 37 fps against 29 to 41."""
+    ui = Ui(fw)
+    top, buttons = cc_opened(fw, ui)
+    fw.var('g_volume', C.c_ubyte).value, fw.var('g_maxvolume', C.c_ubyte).value = 30, 100
+    dirty = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: dirty.append((w, struct.unpack('<4i', C.string_at(r, 16)) if r else None)))
+    volume_drag(fw, ui, keys, buttons, [200, 260, 300], 40)
+    ring = 3  # CC_RING
+    box = (188 - ring, 210 - ring, 167 + 2 * ring, 38 + 2 * ring)
+    assert dirty and all(d == (top.p, box) for d in dirty)
+
+
 def test_a_tap_on_a_toggle_acts_and_opens_nothing(fw, keys):
     ui = Ui(fw)
     _, buttons = cc_opened(fw, ui)
