@@ -661,12 +661,16 @@ def test_general_adds_its_rows_and_hides_stock_s_but_network(fw):
     ui = Ui(fw)
     Config(fw)
     page = Settings(fw, ui)
-    # Settings' General, iOS's: About, maintenance, Network and Reset, then Restart and Shut Down after a gap
+    # Settings' General, iOS's: About, maintenance and Network, then Restart and Shut Down after a gap, Reset Settings last
     rows = [item for item in page.view.children if item.name or item.labels()]  # Restart's gap is a bare label
     assert [item.name or item.labels()[0].text for item in rows] == ['system_about', 'Software Update', 'Storage',
                                  'USB', 'system_time', 'App Store', 'stock_2',
-                                 'system_reset', 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
-                                 'stock_7', 'stock_8', 'Restart', 'Shut Down']
+                                 'stock_0', 'stock_1', 'stock_3', 'stock_4', 'stock_5', 'stock_6',
+                                 'stock_7', 'stock_8', 'Restart', 'Shut Down', 'system_reset']
+    # Reset Settings is the destructive row, last under Shut Down in Negative red (power_rows.c); Shut Down is not
+    reset, shut = rows[-1], rows[-2]
+    ink = lambda row: row.labels()[0].props.get('_final', 0) & 0xffffffff
+    assert ink(reset) == 0xff000000 | 0xff453a and ink(shut) != ink(reset)
     # stock's Language (English only for now), Wireless, Display, Power (Settings has their rows), Wheel Function,
     # In-Vehicle, General and System
     assert [item.name for item in page.view.children if not item.visible] == [

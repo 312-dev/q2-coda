@@ -859,7 +859,7 @@ void ulog_end(const char *why);
 void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every UI loop pass */
 
 /* power_rows.c */
-void power_rows(void *view);
+void power_rows(void *view, void *reset); /* General's last rows; reset: the Reset Settings row, moved last */
 
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
 int ringnav_usb_charge(int on), usb_charge_held(void);

@@ -695,6 +695,7 @@ static const unsigned char playset_order[] = {
  * (home_sets_bind), the wheel is Q2 Muse's (tools/build.py WHEEL_MODE), Battery and Controls have
  * In-Vehicle's, Key tone's and Buttons lock's rows (pod_click, keylock_open), and the rows stock
  * moved to System are here, as they were (ringnav_systemset). */
+#define SYSSET_RESET 12 /* Reset's index as built; power_rows moves it past Shut Down */
 static const unsigned char sysset_order[] = {
     13 /* About */,
     11 /* Update */,

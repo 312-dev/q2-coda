@@ -449,8 +449,12 @@ int ringnav_systemset(void *win, void *ctx) {
              *title = nav ? widget_get_child(nav, 0) : (void *)0;
         if (title) widget_set_text_utf8(title, "General");
     }
+    /* reorder's own condition: the page as built, else no row is known to be Reset */
+    void *reset = view && widget_count_children(view) == sizeof sysset_order
+                      ? widget_get_child(view, SYSSET_RESET)
+                      : (void *)0;
     reorder(view, sysset_order, sizeof sysset_order);
-    power_rows(view); /* Restart and Shut Down, last */
+    power_rows(view, reset); /* Restart, Shut Down and Reset Settings, last */
     return result;
 }
 
