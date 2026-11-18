@@ -245,8 +245,6 @@ GEOM_RANGES = {
     'search_title_h': (20, lambda g: g.search_body),
     'search_meta_y': (0, lambda g: g.search_body - g.search_meta_h),
     'search_meta_h': (16, lambda g: g.search_body),
-    'toolbar': (0, 1),
-    'list_fit': (0, lambda g: 1 if g.list_end else 0),  # a list box ends at list_end only where there is one
     'status_y': (0, lambda g: g.bar - 12),  # its glyphs (12 px) inside the bar
     'right_x': (0, 60),
     'np_art': (0, 200),  # Now Playing on the grid
@@ -258,7 +256,6 @@ GEOM_RANGES = {
     'split_art': (O['HOME_SPLIT_W'], 260),
     'split_art_up': (0, lambda g: g.bar),
     'split_inset': (0, 4),  # percent of the zoomed cover; past about 4.5 the 110 % zoom leaves no pan
-    'modal': (0, 1),  # the More pages as dialogs, drawn with the hold menus as the inset modal (ipod.modal_page)
 }
 THEME_MOTION_OFF = 4  # offsetof(theme_t, motion), right after three flags; asserted in theme_engine.c; test/patch.py pokes it
 SCHEME_MODE_OFF = 4  # offsetof(scheme_t, mode) on MIPS, right after tones; asserted in theme_engine.c; test/patch.py pokes it

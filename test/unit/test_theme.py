@@ -1100,7 +1100,7 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     o = oled()
     g = theme.geometry(o)
     assert (o['id'], o['index'], o['art_id']) == ('oled', 0, 'oled') and g.name == 'oled' and theme.check_set(g) is None
-    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end, g.list_fit) == (58, 23, 32, 32, 32, 24, 28, 224, 1)
+    assert (g.bar, g.status_y, g.pitch, g.set_row, g.home_row, g.text_x, g.right_x, g.list_end) == (58, 23, 32, 32, 32, 24, 28, 224)
     assert g.bar + g.list_end == 282 and g.list_end // g.pitch == 7 and ipod.fit_rows(g, 0, g.art_pitch) == 320 - 58
     assert ipod.corner_inset(g.bar + g.list_end) + ipod.CORNER_SLACK <= g.text_x
     fonts = {k: v for k, v in o.items() if k.startswith('font')}
@@ -1124,8 +1124,6 @@ def test_oled_states_its_grid_type_and_colour(tmp_path):
     assert (o['np_meta_font'], o['np_modes'], o['marquee_fade'], o['reopen_top'], o['shuffle_row'], o['home_lists_full']) == (inter, 1, 1, 1, 1, 1)
     # Home's Split: rows to 204 (the bar to 188, chevrons at 176), the art from x 196 and the top edge
     assert (g.split_row, g.split_art, g.split_art_up, g.split_inset, o['home_label_end[0]']) == (204, 196, 58, 2, 44)
-    # The More pages and hold menus as the menu sheet (menu_modal.c)
-    assert g.modal == 1
     # its toast and confirm (patch/feedback.c), and the confirmation's glyph
     assert 'oled_confirm_shuffle' in art.images(o) and 'oled_confirm_shadow' not in art.images(o)
     inc = geom_inc(tmp_path, [o])
