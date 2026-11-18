@@ -1173,6 +1173,9 @@ unsigned loop_span(unsigned base, unsigned most, int timers);
 void bt_vol_event_start(void);
 int bt_vol_event_take(void), bt_vol_event_live(void), bt_vol_event_connect(void),
     bt_vol_event_wait(void);
+/* card_watch.c: what the card holds, as a generation that moves on each change; 0 without the watch
+ * (docs/internals.md#card-watch) */
+unsigned card_watch_gen(void);
 /* player_push.c: q2player's status push, waited on by the player polls (docs/internals.md#player-status-push) */
 int player_push_wait(unsigned us), player_push_live(void);
 unsigned player_push_seq(void);
