@@ -300,6 +300,7 @@ sheet,chooser=games_open(); G=m.get(payload_syms['g']); rows=m.nodes[m.find('scr
 eframes=lambda: [t for t in m.timers.values() if t[1]==payload_syms['eng_frame']]
 O_ENG_RECT,O_ENG_STATE=80,216  # struct eng's rect and the game's state after it (patch/engine.c), on MIPS
 BR_X,BR_Y,BR_SPD,BR_ANG,BR_PAD,BR_TOP,BR_MODE,BR_T,BR_LEVEL,BR_LEFT,BR_SCORE,BR_CELL=0,4,8,12,16,24,32,36,40,52,68,76  # struct bricks
+ENG_RECTS=int(re.search(r'^#define ENG_RECTS (\d+)',(ROOT/'patch/engine.h').read_text(),re.M)[1])  # a frame's rects at most (engine.c eng_dirty)
 BR_STEP_BOUND,BR_FRAME_BOUND,BR_KEY_BOUND,BR_FADE_BOUND,BR_WHOLE_BOUND=2_500,135_000,200_000,270_000,1_450_000  # measured: 2,093, 116,530, 173,215, 233,009 and 1,245,213
 pick(4); EN=m.get(payload_syms['en']); BR=EN+O_ENG_STATE
 assert word(G_SCREEN)==5 and EN and len(eframes())==1 and m.get(payload_syms['wheel_raw'])==1 and m.get(BR+BR_MODE)==0
@@ -326,7 +327,7 @@ key(O['KEY_CENTER']); eframe(); assert m.get(BR+BR_MODE)==1  # the press reaches
 worst=step_worst=0; broke=cells()
 for k in range(60):
     m.word(payload_syms['wheel_travel'],(-3 if k<30 else 3)&0xffffffff)
-    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=4,rects
+    rects,cost=eframe(17 if k%3==0 else 16); assert 1<=len(rects)<=ENG_RECTS,rects  # the frame cost bounds below hold whatever their number
     worst=max(worst,eplay(rects,cost)); step_worst=max(step_worst,cost)
 # The keystone with all six neighbours: the ball under it, rising at top speed.
 m.u.mem_write(BR+BR_CELL,bytes(1 if (i//16,i%16) in lattice else 0 for i in range(112)))
