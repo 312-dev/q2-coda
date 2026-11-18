@@ -50,7 +50,7 @@ class Sm(C.Structure):
     _fields_ = [('app', C.c_void_p), ('dir', C.c_char * 160), ('last', C.c_char * 192), ('playing', C.c_char * 512), ('state', C.c_int),
                 ('timer', C.c_uint), ('seen', C.c_long), ('m3u', C.c_int), ('urls', C.c_int), ('next', C.c_int), ('more', C.c_int), ('first', C.c_char * 512),
                 ('want', C.c_char * 512), ('loads', C.c_uint),
-                ('picks', C.c_uint), ('seq', C.c_char * 24)]
+                ('picks', C.c_uint), ('seq', C.c_char * 24), ('skip', C.c_uint)]
 
 
 class Sl(C.Structure):
@@ -1182,6 +1182,59 @@ def test_a_session_starting_over_now_playing_replaces_it(fw, mcl, songs, top):
     s.step()
     opened = [('open', b'playing_page')]
     assert order == ([('close', page)] if top == b'playing_page' else []) + opened and s.queued() == [A]
+
+
+def test_next_on_a_playlists_last_song_queued_waits_for_the_next_one_to_land(fw, mcl, songs):
+    """The device, 2026-11-17 22:38: Radio on a server song, then Next. The radio's next song was still
+    downloading, so the queue held the seed alone, and stock's Next on a one-song queue played the seed again
+    (the demo log's `=====next=====` named it), then stopped: 0:00 / 0:00, the radio's songs never played. The
+    Next waits for the song the playlist is waiting for, and plays it once it lands."""
+    s = playlist(fw, mcl, songs, A, B, C3)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    assert s.queued() == [A] and mcl.pos == 0
+    changes = []
+    fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert changes == []  # not the seed again
+    s.step()
+    assert changes == []  # B is not there yet
+    s.land(B)
+    s.step()
+    assert s.queued() == [A, B] and changes == [1]  # B joined, and the Next goes on to it
+    s.land(C3)
+    s.step()
+    assert s.queued() == [A, B, C3] and changes == [1]  # once
+
+
+def test_a_next_waiting_for_a_song_gives_way_to_another_choice(fw, mcl, songs):
+    s = playlist(fw, mcl, songs, A, B)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    changes = []
+    fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    change = fw.fn('ringnav_change', C.c_int, C.c_int)
+    change(1)
+    change(0)  # Previous meanwhile: stock's, and the wait for B is over
+    s.land(B)
+    s.step()
+    assert s.queued() == [A, B] and changes == [0]
+
+
+def test_next_with_nothing_more_to_come_is_stocks(fw, mcl, songs):
+    s = playlist(fw, mcl, songs, A)
+    s.land(A)
+    s.play(b'1 ' + PLAYLIST + b'\n')
+    s.step()
+    s.step()
+    changes = []
+    fw.mock('stock_change_trampoline', lambda nxt, *_: changes.append(nxt) or 0)
+    fw.fn('ringnav_change', C.c_int, C.c_int)(1)
+    assert changes == [1]
 
 
 def test_a_song_the_player_moves_on_to_by_itself_leaves_a_playlist_session_waiting(fw, mcl, songs):
@@ -5366,7 +5419,7 @@ def nav_st(fw, scratch):
 
 
 def oled_page(fw, nav_st):
-    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as a list_fit set fits
+    """A Page under OLED's set (the menu sheet's): its list view has a list box above it, as OLED's lists fit
     page_list's box to whole rows."""
     from test_nav_hold import use_set
     p = Page(fw)
@@ -5376,7 +5429,7 @@ def oled_page(fw, nav_st):
         return p.made[-1]
     fw.mock('widget_factory_create_widget', made)
     fw.mock('button_create', made)
-    use_set(nav_st, 'oled')
+    use_set(nav_st)
     return p
 
 
@@ -5396,14 +5449,8 @@ def test_an_artists_reply_under_the_inset_modal_is_its_page(fw, nav_st):
     assert (b'_ar_name', b'Foo') in sets and (b'_ar_sub', b'4 albums') in sets and (b'_ar_count', b'4') in sets
 
 
-def test_other_sets_and_other_replies_keep_the_plain_rows(fw, nav_st):
-    p = Page(fw)
-    p.answer(rows=artist_rows())  # no modal set
-    assert p.top.lay == LAY_PLAIN and p.drawn == 9
-    from test_nav_hold import use_set
-    C.c_void_p.from_address(p.view + O['W_PARENT']).value = block(fw, size=4096)
-    use_set(nav_st, 'oled')
-    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+def test_other_replies_keep_the_plain_rows(fw, nav_st):
+    p = oled_page(fw, nav_st)
     p.answer(rows=artist_rows(radio=False))  # no Radio: an album's page, say
     assert p.top.lay == LAY_PLAIN and p.drawn == 8
 

@@ -29,8 +29,8 @@ PLAYLIST_PICK, PLAYLIST_KEYUP = 0x4b4840, 0x4f2394  # playlists.c's stock handle
 PL_SELECT_ALL, PL_NEW, PL_EDIT, PL_IMPORT, PL_EXPORT, PL_DELETE, PL_DONE = range(7)
 PL_STOCK = [0x4b46a4, 0x4b45a4, 0x4b44d4, 0x4b5e18, 0x4b5c70, 0x4b5b08, 0x4b45ec]  # pl_stock[]: stock's own handlers
 PL_MARK_X = 333
-SETS = host.tools_theme.geometry_sets(host.tools_theme.builtins())
 THEMES = host.tools_theme.builtins()
+GEOMETRY = host.tools_theme.built_geometry(THEMES)  # the one set the build bakes: OLED's
 
 
 def cstr(address):
@@ -480,11 +480,11 @@ def stock_globals():
         C.memmove(a, data, 4)
 
 
-def use_set(st, name):
-    """Geometry set name, as theme_boot leaves st.geom once it wrote it."""
-    at = [g.name for g in SETS].index(name)
-    st('geom').value, st('settings_read').value = at, 1  # read: the config would set the settings again
-    return SETS[at]
+def use_set(st):
+    """OLED's geometry set, the one the build bakes, with the settings already read (the config would set them
+    again)."""
+    st('settings_read').value = 1
+    return GEOMETRY
 
 
 # The playlist editor (ple_*).
@@ -615,7 +615,7 @@ class Editor:
 @pytest.fixture
 def editor(fw, ui, recs, st):
     e = Editor(fw, ui, recs)
-    use_set(st, 'oled')
+    use_set(st)
     assert e.open(1, None) == 0
     return e
 
@@ -703,7 +703,7 @@ def test_cancel_keeps_the_song(editor):
 
 def test_the_last_song_removed_leaves_the_selection_on_the_list(fw, ui, recs, st):
     e = Editor(fw, ui, recs, songs=('a',))
-    use_set(st, 'oled')
+    use_set(st)
     e.open(1, None)
     e.pick('One')
     e.pick('Remove from Playlist')
@@ -859,7 +859,7 @@ def test_an_out_of_range_pick_does_nothing(editor, ui):
 
 def test_a_toolbarless_editor_moves_only_the_selected_rows_title(fw, ui, recs, st):
     e = Editor(fw, ui, recs)
-    use_set(st, 'oled')
+    use_set(st)
     e.open(1, None)
     focus = [a[0] for _, a in fw.calls('hscroll_label_set_only_focus') if a[1] == 1]
     assert focus == [ui.kids(item)[0] for item in ui.kids(e.view())] and len(focus) == 5
@@ -868,7 +868,7 @@ def test_a_toolbarless_editor_moves_only_the_selected_rows_title(fw, ui, recs, s
 def test_add_songs_title_is_the_task_alone_where_the_bar_holds_the_caption(fw, ui, recs, st):
     """OLED's bar holds the page's caption (no title row, page_title_h 0): room for the task's name alone."""
     e = Editor(fw, ui, recs)
-    use_set(st, 'oled')
+    use_set(st)
     e.open(1, None)
     e.pick('Add Songs')
     assert e.title() == 'Add Songs'
@@ -940,7 +940,7 @@ class More:
         self.win = ui.window('playlistsmore_page')
         self.rows = []
         for i, name in enumerate(('rename', 'del')):
-            # from the top under a set without toolbars (tools/ipod.py), as OLED's
+            # from the top with no toolbars (the grid's toolbar 0, tools/ipod.py)
             item = ui.child(self.win, 'list_item', 0, i * pitch, 375, pitch)
             button = ui.child(item, 'button', 20, 0, 335, pitch)
             icon = ui.child(button, 'image', 10, 0, 52, pitch)
@@ -960,11 +960,11 @@ class More:
 
 
 def pitch(st):
-    return host.tools_theme.immediate_values(SETS[st('geom').value])['pitch']
+    return host.tools_theme.immediate_values(GEOMETRY)['pitch']
 
 
 def test_more_adds_edit_playlist_after_delete_at_the_same_spacing(fw, ui, st):
-    use_set(st, 'oled')
+    use_set(st)
     more = More(fw, ui, pitch(st))
     assert more.more(more.win, 1) == 0x55 and ui.nodes[more.win].props['_playlist'] == 1
     item, button, icon, label = more.edit()
@@ -975,7 +975,7 @@ def test_more_adds_edit_playlist_after_delete_at_the_same_spacing(fw, ui, st):
 
 
 def test_mores_delete_says_playlist_and_keeps_its_translation_key(fw, ui, st):
-    use_set(st, 'oled')
+    use_set(st)
     more = More(fw, ui, pitch(st))
     more.more(more.win, 1)
     label = ui.nodes[more.rows[1][2]]
@@ -983,7 +983,7 @@ def test_mores_delete_says_playlist_and_keeps_its_translation_key(fw, ui, st):
 
 
 def test_edit_playlist_from_more_opens_the_editor_on_that_playlist(fw, ui, st, recs):
-    use_set(st, 'oled')
+    use_set(st)
     editor = Editor(fw, ui, recs)
     more = More(fw, ui, pitch(st))
     more.more(more.win, 1)
@@ -992,7 +992,7 @@ def test_edit_playlist_from_more_opens_the_editor_on_that_playlist(fw, ui, st, r
 
 
 def test_more_rows_lose_their_icons_and_line_up_at_the_text_column(fw, ui, st):
-    geometry = use_set(st, 'oled')
+    geometry = use_set(st)
     more = More(fw, ui, pitch(st))
     more.more(more.win, 1)
     item, button, icon, label = more.edit()
@@ -1010,7 +1010,7 @@ def test_more_of_no_page_is_stocks(fw, ui):
     assert fw.fn('ringnav_playlistsmore', C.c_int, C.c_void_p, C.c_void_p)(None, 1) == 7 and not ui.nodes[ui.wm].children
 
 
-# Playlists as rows under a set without toolbars, as OLED's (pl_*, ringnav_playlist).
+# Playlists as rows, with no toolbars (the grid's toolbar 0; pl_*, ringnav_playlist).
 class Playlists:
     """Stock's playlist_page as its init and every rebuild (stock_playlist_trampoline) leave it: the toolbar
     (view_navbar), its title and the buttons bound to stock's handlers; the list (scroll_view): Import and Export's
@@ -1084,7 +1084,7 @@ class Playlists:
 
 @pytest.fixture
 def rows_page(fw, ui, recs, st, stock_globals):
-    use_set(st, 'oled')
+    use_set(st)
     return lambda **kw: Playlists(fw, ui, recs, **kw)
 
 
@@ -1394,7 +1394,7 @@ class Hold:
 
 @pytest.fixture
 def hold(fw, ui, st, recs, mcl):
-    use_set(st, 'oled')
+    use_set(st)
     return Hold(fw, ui, st, recs, mcl)
 
 
@@ -1539,7 +1539,7 @@ def test_play_next_puts_the_song_after_the_playing_one(hold, recs, ui):
 @pytest.mark.parametrize('row, said', [('Play Last', 'Playing Last'), ('Play Next', 'Playing Next')])
 def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
     """OLED's feedback (docs/oled-design.md#dialogs-and-toasts): every in-place action gets a toast."""
-    use_set(st, 'oled')
+    use_set(st)
     songs = [song(recs, i) for i in range(3)]
     hold.now_playing(songs, at=0, held=True)
     hold.hold()
@@ -1552,7 +1552,7 @@ def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
 @pytest.mark.parametrize('row, said', [('Add to Favorites', 'Added to Favorites'),
                                        ('Remove from Favorites', 'Removed from Favorites')])
 def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
-    use_set(st, 'oled')
+    use_set(st)
     hold.now_playing([song(recs, i) for i in range(3)])
     fw.mock('checkFavExist', lambda *_: row.startswith('Remove'))
     hold.hold()
@@ -1803,17 +1803,17 @@ def test_more_opens_the_apps_page_while_its_queue_plays(hold, recs, ui, st):
 
 
 def test_oled_rates_in_the_inset_modal(hold, recs, ui, st, rates, fw):
-    """A modal set's rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
+    """The rating picker (Now Playing's Centre cycle, its menu's Rate) is the inset modal's picker: a row for
     each rating, no hearts to five, the current one checked and selected; Centre on a row keeps that rating and closes
     the picker, Return closes it with the rating as it was."""
-    use_set(st, 'oled')
+    use_set(st)
     songs = [song(recs, i) for i in range(3)]
     hold.now_playing(songs)
     st('rate_win', C.c_void_p).value = hold.page
     key = fw.fn('listen_key', C.c_uint, C.c_void_p)(songs[1])
     kept = lambda: fw.fn('rate_kept', C.c_int, C.c_int, C.c_uint)(0, key)
     fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 2)
-    assert fw.fn('rate_open', C.c_int)() == 1 and not st('rate_on', C.c_void_p).value
+    assert fw.fn('rate_open', C.c_int)() == 1
     view = hold.view()
     assert ui.rows(view) == ['Unrated', '1 Heart', '2 Hearts', '3 Hearts', '4 Hearts', '5 Hearts']
     assert [ui.nodes[item].props.get('_mm_icon') for item in ui.kids(view)] == ['', '', 'check', '', '', '']
@@ -1834,7 +1834,7 @@ def test_oled_more_shows_ab_repeat_as_the_themes_switch(fw, ui, st, image, selec
     """Now Playing's More under a modal set: A-B Repeat's stock switch hides and its row paints the theme's switch
     (list_marks.c switch_mark, rule 7) by the hidden image's state, its label ending short of it: a track and a knob,
     or on the selection when off, an outline round the knob."""
-    use_set(st, 'oled')
+    use_set(st)
     win = ui.window('playermore_page', 'dialog')
     lv = ui.child(win, 'list_view', 0, 44, 375, 270)
     ui.nodes[lv].name = 'list_view_more'
@@ -1863,7 +1863,7 @@ def test_oled_more_speed_rows_hidden_buttons_take_no_taps(fw, ui, st):
     """Now Playing's More under a modal set: Speed's four stock buttons hide, and stock's hit test skips only an
     insensitive widget, hidden or not, so a tap on the row's left half set 1x behind the picker it opened. Each is
     made insensitive; a pick still clicks the one it names (more_speed_pick dispatches to it)."""
-    use_set(st, 'oled')
+    use_set(st)
     win = ui.window('playermore_page', 'dialog')
     lv = ui.child(win, 'list_view', 0, 44, 375, 270)
     ui.nodes[lv].name = 'list_view_more'
@@ -1993,7 +1993,7 @@ def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
     (280 px lower until its first paint starts the rise), the header's 72 px heading its rows, which span the screen
     32 px each, so the first is on the house grid at y 122; the settings read as settings, US English, and the menu
     opens on its first row."""
-    use_set(st, 'oled')
+    use_set(st)
     hold = Hold(fw, ui, st, recs, mcl).now_playing([song(recs, i) for i in range(3)])
     hold.hold()
     rows = hold.menu()
@@ -2011,7 +2011,7 @@ def test_oled_draws_the_menu_as_the_sheet(fw, ui, st, recs, mcl):
 def test_oled_menu_on_songs_has_no_sorting_row(fw, ui, st, recs, mcl):
     """Songs (0xf001), whose action row holds stock's Sort: its order is Playback > Library > Sorting's, so the menu
     starts with its actions and opens on Play Next."""
-    use_set(st, 'oled')
+    use_set(st)
     hold = Hold(fw, ui, st, recs, mcl).songs_page('allmusic_page', [song(recs, i) for i in range(3)])
     bar = ui.child(hold.page, 'view', 0, 0, 375, 32)
     for _ in range(3):  # its label, Play All's image, Sort's bars
@@ -2039,7 +2039,7 @@ def test_add_to_playlist_opens_the_picker_guarded_by_the_menus_record(hold, recs
 
 
 def test_the_pickers_rows_are_rebound_to_the_guard_after_each_rebuild(fw, ui, st, recs, mcl, stock_globals):
-    use_set(st, 'oled')
+    use_set(st)
     p = Playlists(fw, ui, recs, add=1)
     st('qm_playlist', C.c_void_p).value = p.win
     p.ring(p.win)
@@ -2233,12 +2233,6 @@ def test_another_key_held_is_stocks(hold, recs, fw):
     hold.now_playing([song(recs, i) for i in range(3)])
     fw.mock('stock_keylong_trampoline', lambda *_: 0x77)
     assert hold.hold(KEY_RETURN) == 0x77 and fw.fn('ringnav_keylong', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0x77
-
-
-def test_the_rating_pickers_hold_does_nothing(hold, recs, ui, st, fw):
-    hold.now_playing([song(recs, i) for i in range(3)])
-    st('rate_on', C.c_void_p).value = hold.page
-    assert hold.hold() == STOP and not ui.timers and st('qm_press', C.c_ulonglong).value == 0x51
 
 
 def test_a_menu_whose_record_went_before_it_opened_opens_nothing(hold, recs, ui, mcl):
@@ -3235,9 +3229,8 @@ def test_no_rtc_reads_zero(fw, ui):
 def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs):
     """song_sort.c over a list loaded in stock's title order: Artist stably (the titles stay in order within an
     artist), an untagged artist last either way; Album with its discs and tracks in their own order even descending;
-    Title descending reversed; nothing for Recently Added, which stock's query orders (g_sort_flag 3), or under a set
-    without the inset modal."""
-    use_set(st, 'oled')
+    Title descending reversed; nothing for Recently Added, which stock's query orders (g_sort_flag 3)."""
+    use_set(st)
     saved = {}
     fw.mock('write_int_config', lambda v, s, k, *_: saved.__setitem__(cstr(k), C.c_int(v).value))
     flag = fw.var('fw_ctx_g_sort_flag', C.c_int)
@@ -3266,11 +3259,6 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
     assert flag.value == 3 and saved['SORTSELECT'] == 3
     order(q)
     assert titles() == 'DBAC'
-    flag.value = 0
-    sort_set(1, 0)
-    use_set(st, 'ipod')  # SET0, no inset modal: what OLED runs on when its boot could not write its own set
-    order(q)
-    assert titles() == 'DBAC'
 
 
 @pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 5), ('library', 'Remove from Favorites', 0),
@@ -3290,7 +3278,7 @@ def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, s
         rig.files.files[f'/mnt/mmc/.{APP}/ratings.in'] = f'{key:08x}\ts1\t5\t1600000000\n'.encode()
         rig.poll(3)
         assert myfav(rig) == [url('s1')]
-    use_set(st, 'oled')
+    use_set(st)
     hold = Hold(fw, ui, st, recs, mcl)  # after the import: its deques and card files from here on
     hold.card.files[f'/mnt/mmc/.{APP}/q2app'] = rig.files.files[f'/mnt/mmc/.{APP}/q2app']
     fw.fn('rate_keep', C.c_int, C.c_int, C.c_uint, C.c_int)(0, key, 3)

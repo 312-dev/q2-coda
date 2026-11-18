@@ -185,15 +185,15 @@ Every one is an original game in its genre. None reproduces an Apple iPod game's
 
 **Save:** `/mnt/data/game-bricks`, `BRK1`: the best score and the best level, written at the game's end when either was beaten (and tried again at a pause if that write failed), never during play. A save with a best over 99,999,999 or a level over 99 reads as none. An unfinished game is not kept.
 
-**Frames.** A frame of play marks one rect for the ball's old and new place and one for the paddle's when it moved, a broken cell one more, the score line one; the keystone's seven are one joined rect. Measured on build `--dev --new-player`:
+**Frames.** A frame of play marks one rect for the ball's old and new place and one for the paddle's when it moved, a broken cell one more, the score line one; the keystone's seven are one joined rect. Measured on build `--dev --new-player`, on OLED's 262 px sheet:
 
 | What                                                       | Instructions (MIPS, payload) | Bound in `test/patch.py` |
 | ---------------------------------------------------------- | ---------------------------- | ------------------------ |
-| A frame's step, the dearest of a scripted second of play   | 2,093                        | 2,500                    |
-| That second's dearest frame with its changed rects painted | 116,530                      | 135,000                  |
-| The keystone taking its six neighbours, painted            | 173,215                      | 200,000                  |
-| The dearest frame of the next level's fade, painted        | 233,009                      | 270,000                  |
-| The whole sheet with a full lattice                        | 1,245,213                    | 1,450,000                |
+| A frame's step, the dearest of a scripted second of play   | 2,157                        | 2,500                    |
+| That second's dearest frame with its changed rects painted | 216,412                      | 250,000                  |
+| The keystone taking its six neighbours, painted            | 174,268                      | 200,000                  |
+| The dearest frame of the next level's fade, painted        | 233,143                      | 270,000                  |
+| The whole sheet with a full lattice                        | 1,177,926                    | 1,450,000                |
 
 In the emulator, 10 s of play (`design/games/bricks/bricks-play.mp4`, a finger following the ball, `bricks/autopilot.py`): 58.2 flips a second, median gap 17.03 ms, longest 24.1 ms, none over 25 ms, with the host's load average near 8. Ready and the end paint nothing while nothing moves, so a capture that waits there shows a long gap between flips that is the game at rest, not a slow frame. The payload grows by 7,344 bytes over the engine's build (989,736 against 982,392), of the brief's 9 KB; the state is 208 bytes of the brief's 2 KB; no `.scratch`.
 

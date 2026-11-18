@@ -368,7 +368,7 @@ static void ple_show(void) {
             page_row_detail(ple.view, i, caption, 0, ple_pick);
         }
     /* only the selected row's long title moves, as Songs' */
-    for (int i = 0; !geom_val(V_TOOLBAR) && i < (int)widget_count_children(ple.view); ++i)
+    for (int i = 0; i < (int)widget_count_children(ple.view); ++i)
         hscroll_label_set_only_focus(widget_get_child(widget_get_child(ple.view, i), 0), 1);
     if (n) ringnav_select(ple.view, mode == 0 && ple.selected + 2 < n ? ple.selected + 2 : 0, n);
 }
@@ -673,11 +673,11 @@ int ringnav_playlistsmore(void *win, void *ctx) {
         void *del = widget_lookup(win, "label_del", 1);
         if (del) widget_set_tr_text(del, "Delete Playlist");
         /* A row like this page's stock Rename and Delete: a 375 px list_item, the set's pitch high
-         * (SET0 72), holding a 335 px s_btn_listitem, its body high (68), its 52px icon at x 10 and
+         * (G_PITCH), holding a 335 px s_btn_listitem, its body high (G_BODY), its 52px icon at x 10 and
          * its 20px label at x 72. Edit Playlist follows the Delete row at the same spacing. */
         int h = geom(G_PITCH), inner = geom(G_BODY);
-        /* (tools/ipod.py: a set without toolbars has them from the top) */
-        void *item = list_item_create(win, 0, (geom_val(V_TOOLBAR) ? 10 : 0) + 2 * h, 375, h);
+        /* (tools/ipod.py: the set has no toolbars, so they run from the top) */
+        void *item = list_item_create(win, 0, 2 * h, 375, h);
         widget_use_style(item, "s_listitem_black");
         void *button = button_create(item, 20, 0, 335, inner);
         widget_use_style(button, "s_btn_listitem");
@@ -689,12 +689,12 @@ int ringnav_playlistsmore(void *win, void *ctx) {
         widget_use_style(label, "s_scrlabel_white20l");
         set_hscroll_label_attribute(label);
         widget_set_text_utf8(label, "Edit Playlist");
-        /* A set without settings icons: none here either, the text at its column */
+        /* The set has no settings icons: none here either, the text at its column */
         void *const rows[][2] = { { widget_lookup(win, "img_rename", 1),
                                     widget_lookup(win, "label_rename", 1) },
                                   { widget_lookup(win, "img_del", 1), del },
                                   { image, label } };
-        for (unsigned i = 0; !geom_val(V_SET_ICON) && i < 3; ++i) {
+        for (unsigned i = 0; i < 3; ++i) {
             void *c = rows[i][1];
             if (rows[i][0]) widget_set_visible(rows[i][0], 0, 0);
             if (!c) continue;
@@ -709,13 +709,12 @@ int ringnav_playlistsmore(void *win, void *ctx) {
             widget_move_resize(c, x, I(c, W_Y), I(c, W_W), I(c, W_H));
             theme_font(c, ROLE_TITLE, FONT_ROW);
         }
-        if (modal_set()) { /* a dialog over Playlists (menu_modal.c), headed by the playlist */
-            void *lists = P(p_deque_playlist, 0);
-            unsigned at = (unsigned)(long)ctx;
-            void *r = lists && at < deque_size(lists) ? deque_at(lists, at) : (void *)0;
-            if (r) modal_head(P(r, REC_NAME), "Playlist", (void *)0);
-            modal_playlist_more(win);
-        }
+        /* a dialog over Playlists (menu_modal.c), headed by the playlist */
+        void *lists = P(p_deque_playlist, 0);
+        unsigned at = (unsigned)(long)ctx;
+        void *r = lists && at < deque_size(lists) ? deque_at(lists, at) : (void *)0;
+        if (r) modal_head(P(r, REC_NAME), "Playlist", (void *)0);
+        modal_playlist_more(win);
     }
     return result;
 }
@@ -735,9 +734,8 @@ int qm_playlist_pick(void *ctx, void *event) {
         return 0; /* a STOP would leave the list's scroll_view holding its grab */
     }
     qm_select();
-    /* a toolbar-less picker has no dots: a tap at their place picks */
-    return PLAYLIST_PICK(
-        ctx, geom_val(V_TOOLBAR) ? event : pointer_event_init(click, EVT_CLICK, ctx, 0, 0));
+    /* the picker has no toolbar, so no dots: a tap at their place picks */
+    return PLAYLIST_PICK(ctx, pointer_event_init(click, EVT_CLICK, ctx, 0, 0));
 }
 
 int qm_playlist_gone(void *ctx, void *event) {
@@ -767,7 +765,7 @@ void qm_playlist_bind(void *w, int depth, int (*pick)(void *, void *)) {
         qm_playlist_bind(widget_get_child(w, i), depth + 1, pick);
 }
 
-/* Playlists under a set without toolbars (toolbar 0, as OLED's): the page is rows, as Songs'. Stock
+/* Playlists without toolbars (tools/ipod.py patch_asset): the page is rows, as Songs'. Stock
  * still builds everything: its toolbar, hidden (tools/ipod.py), and its Import and Export tile row,
  * hidden, stay as the click targets; the rows stock can't have are added after each rebuild and
  * click those hidden widgets, so its mode, marks, dialogs and reload stay its own. Stock's own
@@ -919,7 +917,7 @@ static void pl_row(void *item) {
             image_base_set_image(c, "unselect");
             if (add) widget_set_visible(c, 0, 0);
         } else if (c == art) {
-            widget_set_visible(c, geom(G_ART) && !add, 0);
+            widget_set_visible(c, !add, 0);
         } else if (c != info && !tk_str_start_with(name, "img_choice"))
             widget_set_visible(c, 0, 0);
     }
@@ -974,8 +972,8 @@ static int pl_due(const void *info) {
      * would make each insert wait), and the rebuild that follows asks again */
     if (w && action == PL_IMPORT) playlist_art_stop();
     if (w) stock_dispatch_trampoline(w, pointer_event_init(click, EVT_CLICK, w, 0, 0));
-    /* a dialog's up, or gone: its close rebuilds the rows (a toolbar's page has none) */
-    if (window_manager_get_top_window(wm) == win && !geom_val(V_TOOLBAR)) pl_rows(win);
+    /* a dialog's up, or gone: its close rebuilds the rows */
+    if (window_manager_get_top_window(wm) == win) pl_rows(win);
     return 0;
 }
 /* The latest row clicked in a pass is the one that runs. */
@@ -1264,8 +1262,8 @@ static int pl_arts(void *win) {
 }
 
 /* Display's Playlist View: Cover Flow: the page, opened unseen, gets the playlists' covers over it
- * on the next pass (coverflow_playlists), then shows under them for their Return (navigation.c's
- * Artist View, cf_veil). The page pending them: */
+ * on the next pass (coverflow_playlists), then shows under them for their Return (cf_veil,
+ * library_pages.c). The page pending them: */
 static void *pl_cf_win __attribute__((section(".scratch")));
 static unsigned pl_cf_timer __attribute__((section(".scratch")));
 static int pl_cf_open(const void *unused) {
@@ -1302,11 +1300,6 @@ void playlist_open(void *win, int cd_num) {
     coverflow_playlists_close();
 }
 
-/* A playlist cover's hold: New Playlist on this page, the covers closed over it. New is the
- * toolbar's or the row's target. */
-void playlists_new(void) {
-    if (coverflow_playlists_close()) pl_click((void *)PL_NEW, 0);
-}
 
 /* Stock leaves its mode set for a page gone in it (held Return, to Home); its art's builds stop. */
 static int pl_gone(void *win, void *event) {
@@ -1352,8 +1345,8 @@ static void pl_dress(void *win, int first) {
     }
 }
 
-/* After stock rebuilds its rows: the guarded Now Playing picker's rebind, a toolbar-less
- * set's rows, under a set with row art (G_ART) the rows' art, not the Add to Playlist picker's, a
+/* After stock rebuilds its rows: the guarded Now Playing picker's rebind, the toolbar-less
+ * rows, the rows' art, not the Add to Playlist picker's, a
  * list as it was, and Playlist View's covers. Stock's add mode is one global, left by any picker
  * that closes, which it reads as this page comes back: each page keeps the one it opened with. */
 int ringnav_playlist(void *win) {
@@ -1365,19 +1358,13 @@ int ringnav_playlist(void *win) {
     int result = stock_playlist_trampoline(win);
     if (win == st.qm_playlist) qm_playlist_bind(win, 0, qm_playlist_pick);
     void *lists = P(p_deque_playlist, 0);
-    int list = !widget_get_prop_int(win, PL_MODE, 0), toolbar = geom_val(V_TOOLBAR), read = 0;
+    int list = !widget_get_prop_int(win, PL_MODE, 0), read = 0;
     /* Playlist View: Cover Flow, once, as the page opens (from Library, Home's list or its
      * shortcut): coming back to it shows the list; with no playlists the list, New Playlist its way
-     * on. The covers are the playlists' art, so they build it under any set, row art or not. */
+     * on. */
     int covers = first && list && lists && deque_size(lists) && ringnav_playlist_coverflow();
-    if (toolbar && !covers) return result; /* a toolbar's set: stock's rows, no art built */
-    if (toolbar) { /* the rows stay stock's; the covers' builds stop with the page */
-        widget_on(win, EVT_DESTROY, pl_gone, win);
-        pl_art_page = win, playlist_art_ready = 0;
-    } else {
-        pl_dress(win, first);
-        if (list && (covers || geom(G_ART))) read = pl_arts(win);
-    }
+    pl_dress(win, first);
+    if (list) read = pl_arts(win);
     if (!covers) return result;
     if (!read) playlist_art_refresh(); /* the covers' counts and art: the songs read, once */
     cf_veil(win, 1);

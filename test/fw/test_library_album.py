@@ -9,8 +9,8 @@ from test_nav_display_library import Ui, records, scratch, st, use_set  # noqa: 
 DOT = ' \xb7 '.encode('utf-8')
 
 
-def album_page(fw, st, name='albuminfo_page', theme='oled'):
-    """A stock album page as its UI loads, over Home, under theme's set: its navbar, Songs' action row and list."""
+def album_page(fw, st, name='albuminfo_page'):
+    """A stock album page as its UI loads, over Home, under OLED's set: its navbar, Songs' action row and list."""
     ui = Ui(fw)
     fw.mock('widget_factory_create_widget', lambda f, kind, parent, x, y, w, *_:
             ui.new(C.string_at(kind).decode(), parent, x, y, w, 0))
@@ -23,8 +23,7 @@ def album_page(fw, st, name='albuminfo_page', theme='oled'):
     lv = ui.add('table_view' if jump else 'list_view', win, (0, 32, 375, 224), 'table_view' if jump else 'list_view')
     rows = ui.add('table_client' if jump else 'scroll_view', lv, (0, 0, 365, 224),
                   'music_table_client' if jump else 'scroll_view')
-    if theme:
-        use_set(st, theme)
+    use_set(st)
     info = (C.c_char * 912).in_dll(fw.lib, 'fw_ctx_g_local_classinfo_save')
     C.memmove(C.addressof(info) + 0xd, b'Caracal\0\0', 9)
     return ui, win, nav, row, lv, rows
@@ -54,14 +53,6 @@ def test_under_oled_an_album_page_is_dressed_as_it_loads(fw, st, name):
     key = fw.fn('pair_key', C.c_int, C.c_void_p, C.c_void_p, C.c_int)
     assert key(win.addr, rows.addr, 1) == 1 and key(win.addr, rows.addr, 1) == 1  # Shuffle, then the first track
     assert fw.fn('pair_holds', C.c_int, C.c_void_p)(rows.addr) == 0
-
-
-@pytest.mark.parametrize('theme', (None, 'ipod'))
-def test_other_sets_keep_the_stock_page(fw, st, theme):
-    ui, win, nav, row, lv, rows = album_page(fw, st, theme=theme)
-    fw.fn('album_local_load', None, C.c_void_p)(win.addr)
-    assert row.visible and lv.box == (0, 32, 375, 224) and not any('_ar_name' in w.props for w in made(win))
-    assert fw.fn('album_local_on', C.c_int, C.c_void_p)(win.addr) == 0
 
 
 def test_another_page_is_left_alone(fw, st):

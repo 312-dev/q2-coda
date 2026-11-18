@@ -146,9 +146,7 @@ static void clock_show(void) {
                             (unsigned)!!st.bar_title << 12 /* it changes the 12-hour form below */
                       : ~0u;                               /* 0 before the first */
     void *bar = *(void *const *)system_bar;
-    void *label = key == st.clock_key || !bar || (st.bar_titled && !geom_val(V_STATUS_Y))
-                      ? (void *)0
-                      : widget_lookup(bar, "label_clock", 1);
+    void *label = key == st.clock_key || !bar ? (void *)0 : widget_lookup(bar, "label_clock", 1);
     if (!label) return;
     st.clock_key = key;
     char s[16] = "--:--";
@@ -160,8 +158,8 @@ static void clock_show(void) {
         tk_snprintf(s, sizeof s, "%d:%02d %s", (tm[2] + 11) % 12 + 1, tm[1],
                     tm[2] < 12 ? "AM" : "PM");
     widget_set_text_utf8(label, s);
-    /* a status row's clock: the title's face, in its place */
-    if (geom_val(V_STATUS_Y)) theme_font(label, ROLE_BAR, FONT_ROW);
+    /* the status row's clock: the title's face, in its place */
+    theme_font(label, ROLE_BAR, FONT_ROW);
 }
 static void clock_zone(void) {
     if (st.clock_timer) clock_show(); /* the bar runs; boot's call comes before it */
@@ -280,7 +278,7 @@ static void clock_place(void *bar, void *top) {
     static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
                                         * a read-back of the style's current state */
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
-    if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
+    if (!st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
         ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
@@ -471,13 +469,6 @@ void clock_text(void *label, int negative, int t) {
     widget_set_text_utf8(label, s);
 }
 
-/* w back in stock's face, in every state the labels style */
-void label_font(void *w) {
-    static const char *const font[] = { "style:normal:font_name", "style:focused:font_name",
-                                        "style:disable:font_name" };
-    for (unsigned i = 0; i < sizeof font / sizeof *font; ++i)
-        widget_set_prop_str(w, font[i], "default");
-}
 /* The faces, by FONT_* (stock.h, from tools/build.py FACES): each one's name, its fallback for a
  * character it lacks and that fallback's px (% of its own), and its cmap's runs, FONT_RANGES from
  * face_at[face] to face_at[face + 1]; stock's default.ttf has none listed, and every character. */

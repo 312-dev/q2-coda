@@ -1,31 +1,3 @@
-/* Geometry sets: tools/ipod.py bakes SET0 into the stock row immediates (ipod.json). Another set
- * rewrites, once, only the low halfwords that differ. Stock text is R-X, so every page holding one
- * goes RWX first, lowest first; only if all did are they written, flushed and put back to R-X. A
- * failed mprotect puts back the pages already opened and writes nothing, so the code stays SET0's
- * and st.geom, the set the code holds, stays 0. SET0 makes no syscall and writes nothing. */
-static int boot_differs(int i, const volatile unsigned short *v) {
-    return (*(unsigned *)boot_sites[i].addr & 0xffff) != (unsigned)v[boot_sites[i].group];
-}
-static unsigned boot_page(const volatile unsigned short *v, unsigned from) { /* ~0u: none */
-    unsigned page = ~0u;
-    for (int i = 0; i < BOOT_SITES; ++i) {
-        unsigned p = boot_sites[i].addr & ~(THEME_PAGE - 1u);
-        if (p >= from && p < page && boot_differs(i, v)) page = p;
-    }
-    return page;
-}
-/* The set T boots with setting at v and every other option as stored. Its own option with sets
- * selects the set (tools/theme.py allows one); without one, T->geom. */
-static int geom_with(const theme_t *T, int setting, int v) {
-    for (int k = 0; k < T->n_opts; ++k) {
-        const option_t *o = &T->opts[k];
-        if (o->setting < SETTING_OWN || !theme_keys[o->setting - SETTING_OWN].sets) continue;
-        int s = o->setting - SETTING_OWN, w = o->setting == setting ? v : st.own[s];
-        return theme_keys[s].sets[w];
-    }
-    return T->geom;
-}
-int theme_geom(const theme_t *T) { return geom_with(T, -1, 0); }
 /* OLED is the one theme, stored as THEME 3, the fourth of the four there were (docs/ipod.md#theme).
  * A unit an older build left on another (0 Minimal, 1 Classic, 2 Modern, or no key: Minimal)
  * takes OLED's preset once, as choosing OLED did, and keeps 3 from then on. */
@@ -36,47 +8,13 @@ static void theme_boot(void) {
         theme_preset(theme());
         write_int_config(THEME_OLED, "IPOD", "THEME");
     }
-    unsigned g = theme_geom(theme()), p, q;
-    const volatile unsigned short *v = boot_values[g];
-    for (p = boot_page(v, 0); p != ~0u; p = boot_page(v, p + THEME_PAGE))
-        if (theme_mprotect((void *)p, THEME_PAGE, 7)) { /* RWX */
-            for (q = boot_page(v, 0); q != p; q = boot_page(v, q + THEME_PAGE))
-                theme_mprotect((void *)q, THEME_PAGE, 5);
-            /* ponytail: a set this boot can't write leaves the code SET0's (st.geom 0), which
-             * OLED then draws on until the next boot; a theme laid out for SET0 would be needed
-             * to look right there. */
-            return;
-        }
-    for (p = boot_page(v, 0); p != ~0u; p = boot_page(v, p + THEME_PAGE)) {
-        for (int i = 0; i < BOOT_SITES; ++i)
-            if ((boot_sites[i].addr & ~(THEME_PAGE - 1u)) == p && boot_differs(i, v)) {
-                unsigned *w = (unsigned *)boot_sites[i].addr;
-                *w = (*w & 0xffff0000) | v[boot_sites[i].group];
-            }
-        theme_cacheflush((void *)p, THEME_PAGE, 3); /* BCACHE */
-        theme_mprotect((void *)p, THEME_PAGE, 5);   /* PROT_READ|PROT_EXEC */
-    }
-    st.geom = g;
 }
 
-/* The set theme_boot wrote's own copy of a window, <set>_<name>.bin in name's folder
- * (tools/build.py), written into buf (the caller's 64 bytes), else name. */
-static const char *ui_redirect(const char *name, char *buf) {
-    unsigned g = st.geom;
-    for (const volatile ui_redirect_t *r = ui_redirects; r->name; ++r)
-        if (r->sets >> g & 1 && !tk_strcmp(r->name, name)) {
-            const char *slash = strrchr(name, '/'), *base = slash ? slash + 1 : name;
-            tk_snprintf(buf, 64, "%.*s%s_%s", (int)(base - name), name, geom_names[g], base);
-            return buf;
-        }
-    return name;
-}
-
-/* The value of group (G_PITCH, G_BODY, ...) in the set theme_boot wrote (st.geom). */
-int geom(int group) { return boot_values[st.geom][group]; }
+/* The value of group (G_PITCH, G_BODY, ...) that tools/ipod.py baked into stock's immediates. */
+int geom(int group) { return geom_words[group]; }
 
 /* An A-B marker's x for point t (stock 0x53b9d8, from its three calls in the markers' placement:
- * AB_X_CALLS in tools/build.py), on the boot set's bar (the np_bar_x and np_bar_w immediates):
+ * AB_X_CALLS in tools/build.py), on the baked bar (the np_bar_x and np_bar_w immediates):
  * a bar laid out elsewhere takes it along, at the same share of it. 0, no point to mark, stays. */
 int ringnav_ab_x(int t) {
     int x = ab_x(t), x0 = geom(G_NP_BAR_X), w0 = geom(G_NP_BAR_W);
@@ -84,8 +22,8 @@ int ringnav_ab_x(int t) {
     return I(st.np_slider, W_X) + (x - x0) * I(st.np_slider, W_W) / w0;
 }
 
-/* ui_loader_load_widget_with_parent, every window's asset (window_open's): the geometry set's own
- * copy of it (ui_redirect); any opener comes through here. */
+/* ui_loader_load_widget_with_parent, every window's asset (window_open's); any opener comes
+ * through here. */
 extern void *stock_ui_load_trampoline(const char *name, void *parent);
 /* key: STYLE_KEY bytes. */
 const char *style_key(char *key, const char *state, const char *name) {
@@ -183,7 +121,6 @@ static int usb_poll(const void *info) {
 }
 
 void *ringnav_ui_load(const char *name, void *parent) {
-    char path[64]; /* this call's own: a window stock loads inside this one keeps its name */
     /* application_init's first window; accent() makes theme() final */
     if (name && !st.theme_booted && !tk_strcmp(name, "system_bar")) {
         st.theme_booted = 1;
@@ -191,7 +128,7 @@ void *ringnav_ui_load(const char *name, void *parent) {
         theme_boot();
     }
     int np = name && !tk_strcmp(name, "playing_page");
-    void *root = stock_ui_load_trampoline(ui_redirect(name, path), parent);
+    void *root = stock_ui_load_trampoline(name, parent);
     if (root && slider_page(root)) slider_open(root); /* no knob; slider_page.c's form */
     if (root) msg_open(root);                         /* the scan page (scan_page.c oled_scan) */
     if (root) usb_ui_mode_load(root);                 /* USB's page as a mode page (usb_ui.c) */
@@ -369,18 +306,18 @@ static void *page_caption(void *win) {
  * page's 48 px caption row (page_title). */
 static const char *bar_title_of(void *win, void **label) {
     const char *name = widget_get_prop_str(win, "name", "");
-    /* a status row shows the clock on Now Playing (tools/ipod.py status_row) */
-    if (tk_str_start_with(name, "playing_page")) return geom_val(V_STATUS_Y) ? "" : "Now Playing";
-    /* a status row names the Library and its whole Songs list as Home does, not by stock's "Local
+    /* the status row shows the clock on Now Playing (tools/ipod.py status_row) */
+    if (tk_str_start_with(name, "playing_page")) return "";
+    /* the status row names the Library and its whole Songs list as Home does, not by stock's "Local
      * Songs" in both: allmusic_page's other lists (an album, a playlist, Recently Added) keep their
      * own (0xf001: all songs, az_index.c name_sorted's class) */
-    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "localmusic_page"))
+    if (!tk_strcmp(name, "localmusic_page"))
         return lr_editing(win) ? lr_edit_title() : "Library";
     if (album_local_on(win)) return ""; /* the design's album page: its header names it */
-    if (geom_val(V_STATUS_Y) && !tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
+    if (!tk_strcmp(name, "allmusic_page") && I(g_class_type, 0) == 0xf001)
         return "Songs";
     if (!tk_strcmp(name, "coverflow_page")) { /* its screen's own, else its caption row's */
-        const char *t = coverflow_bar_title(geom_val(V_STATUS_Y));
+        const char *t = coverflow_bar_title();
         if (!t) *label = page_caption(win);
         return t;
     }
@@ -475,9 +412,8 @@ static void action_row(void *view) {
     widget_move_resize(play, 0, 0, 300, h);
     if (n < 3) return; /* Recently Added and the like have no Sort */
     void *sort = widget_get_child(view, 2);
-    /* the menu sheet's set orders Songs from Playback > Library > Sorting (library_settings.c):
-     * the bars stay, hidden */
-    if (modal_set()) widget_set_visible(sort, 0, 0);
+    /* Songs' order is Playback > Library > Sorting's (library_settings.c): the bars stay, hidden */
+    widget_set_visible(sort, 0, 0);
     widget_use_style(sort, "default");
     image_base_set_image(sort, "sort_bars");
     image_set_draw_type(sort, IMAGE_DRAW_CENTER);
@@ -534,11 +470,11 @@ void bar_title_sync(void *win) {
     if (modal_win(win) && !(win = feedback_under(win))) return;
     static const unsigned none = 0;
     char s[256], now[256]; /* stock writes nothing unless all of it fits */
-    /* Home names the list it shows; a status row names none of Home's own, and shows the clock */
-    const char *t = !home_menu(win)                                 ? (const char *)0
-                    : lr_editing(win)                               ? lr_edit_title()
-                    : geom_val(V_STATUS_Y) && !coverflow_home_sub() ? ""
-                                                                    : coverflow_home_title();
+    /* Home names the list it shows; the status row names none of Home's own, and shows the clock */
+    const char *t = !home_menu(win)        ? (const char *)0
+                    : lr_editing(win)      ? lr_edit_title()
+                    : !coverflow_home_sub() ? ""
+                                           : coverflow_home_title();
     if (t)
         ;
     else if (win != st.title_win) {
@@ -552,8 +488,8 @@ void bar_title_sync(void *win) {
             !msg_title(widget_get_prop_str(win, "name", "")))
             return;
         t = bar_title_of(win, &st.title_lbl);
-        /* a page may have Songs' action bar: only a set with action_row looks */
-        if (geom_val(V_ACTION_ROW)) st.action_view = widget_lookup(win, "view_navbar_allplay", 0);
+        /* a page may have Songs' action bar, drawn as a row (the set's action_row) */
+        st.action_view = widget_lookup(win, "view_navbar_allplay", 0);
         if (st.title_lbl) widget_on(st.title_lbl, EVT_DESTROY, title_gone, st.title_lbl);
     } else {
         if (!st.title_lbl) return;
@@ -565,9 +501,7 @@ void bar_title_sync(void *win) {
     if (!t) {
         *s = 0;
         if (st.title_lbl) widget_get_text_utf8(st.title_lbl, s, sizeof s);
-        /* English's only, for a bar too narrow for it; a status row's title has the room */
-        t = !geom_val(V_STATUS_Y) && !tk_strcmp(s, "Channel Balance") ? "Balance"
-            : !tk_strcmp(s, "(null)") ? "" /* stock's "%s" of a NULL name: no title */
+        t = !tk_strcmp(s, "(null)") ? "" /* stock's "%s" of a NULL name: no title */
             : !tk_strcmp(widget_get_prop_str(win, "name", ""), "folder_page") ? folder_title(s)
                                                                               : s;
     }
@@ -596,20 +530,11 @@ void page_empty(void *body, const char *name) {
     bar_title_sync(window_manager_get_top_window(window_manager()));
 }
 
-/* Whether label's text fits the bar's title box: measured on the bar's canvas in the face and size
- * the title would take, against the box less hscroll_label's two 2 px margins. A status row's box
- * fits any, as its label ends a long one in an ellipsis (docs/oled-design.md#status-row). A bar
- * not found yet fits nothing. */
+/* Whether label's text fits the bar's title box: the status row's box fits any, as its label ends a
+ * long one in an ellipsis (docs/oled-design.md#status-row). A bar not found yet fits nothing. */
 int bar_title_fits(void *label) {
-    void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
-    const unsigned *s = widget_get_text(label);
-    unsigned n = wide_len(s);
-    if (!canvas) return 0;
-    if (geom_val(V_STATUS_Y)) return 1;
-    int px = theme()->font_px[ROLE_BAR];
-    const char *face = theme_face(s, (int)n, &px);
-    canvas_set_font(canvas, face, px);
-    return canvas_measure_text(canvas, s, n) <= I(st.bar_title, W_W) - 4;
+    (void)label;
+    return st.bar_title && widget_get_canvas(st.bar_title);
 }
 
 /* The title's clip before a slide's fade (bar_title_fades), and whether one is on */
@@ -712,7 +637,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         }
         bar_sync(bar);
         bar_title_sync(top);
-        bar_title(bar, top);
+        bar_title(bar);
         clock_place(bar, feedback_top()); /* beside Split's art under a toast too */
         if (st.action_view) action_row(st.action_view);
         feedback_songs(top, st.action_view); /* OLED: an empty list's note, no Shuffle row */

@@ -414,12 +414,10 @@ def test_display_settings(fw, clock, values, home, light):
 
 
 def boot(fw):
-    """theme_boot as the system bar's load runs it (ringnav_ui_load: accent(), then theme_boot), its pages
-    left unwritten (theme_mprotect refuses: st.geom stays SET0's, which is not under test here). The keys
+    """theme_boot as the system bar's load runs it (ringnav_ui_load: accent(), then theme_boot). The keys
     write_int_config saved, by name, in order."""
     written = []
     fw.mock('write_int_config', lambda v, s, k, *_: written.append((C.string_at(k).decode(), C.c_int(v).value)))
-    fw.mock('theme_mprotect', lambda *_: -1)
     fw.fn('accent', C.c_int)()
     fw.fn('navigation__theme_boot', None)()
     return written
@@ -1971,11 +1969,14 @@ def test_no_streamhide_key_hides_nothing(fw):
     assert seen == [b''] and hide.value == b''
 
 
-def test_root_click_saves_the_next_folder(fw):
+def test_root_click_saves_the_next_folder(fw, st):
+    from test_nav_display_library import Ui
     Card(fw, FOLDERS)
     Config(fw, FOLDERROOT=b'art')
     seen = []
     fw.mock('toolsWriteConfig', lambda path, section, key, value, *_: seen.append((C.string_at(key), C.string_at(value))) and 0)
+    ui = Ui(fw)  # the row it is the click of (folder_root_row), whose label it writes
+    st('root_label', C.c_void_p).value = ui.add('hscroll_label', ui.add('button', ui.window('playset_page'), (20, 0, 335, 32))).addr
     fw.fn('navigation__root_click', C.c_int, C.c_void_p, C.c_void_p)(None, None)
     assert seen == [(b'FOLDERROOT', b'Music')]
 
@@ -2572,27 +2573,6 @@ def test_qm_playlist_gone(fw, st):
     st('qm_playlist', C.c_void_p).value = 0x10
     assert fw.fn('qm_playlist_gone', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
     assert not st('qm_playlist', C.c_void_p).value
-
-
-def test_rate_panel_gone_with_its_window(fw, st):
-    gone = fw.fn('ratings__rate_panel_gone', C.c_int, C.c_void_p, C.c_void_p)
-    st('rate_on', C.c_void_p).value = 0x10
-    gone(0x20, None)
-    assert st('rate_on', C.c_void_p).value == 0x10
-    gone(0x10, None)
-    assert not st('rate_on', C.c_void_p).value
-
-
-def test_artist_cf_gone_clears_what_it_held(fw, st):
-    gone = fw.fn('navigation__artist_cf_gone', C.c_int, C.c_void_p, C.c_void_p)
-    win, veil = st('art_cf_win', C.c_void_p), st('art_cf_veil', C.c_void_p)
-    win.value, veil.value = 0x10, 0x20
-    gone(0x30, None)
-    assert (win.value, veil.value) == (0x10, 0x20)
-    gone(0x10, None)
-    assert not win.value and veil.value == 0x20
-    gone(0x20, None)
-    assert not veil.value
 
 
 def test_qm_restore_puts_back_what_a_go_to_overwrote(fw, st, scratch):

@@ -121,7 +121,7 @@ def es(ui, page):
 def test_with_no_songs_the_page_is_add_songs_over_the_compact_empty_state(fw, ui, pages, st, dest, name, hint):
     """docs/oled-design.md#empty-and-offline: no songs, the empty state under Add Songs in its compact form (a row
     above it: no glyph), no button of its own (Add Songs is the row above it), centred from that row's foot."""
-    use_set(st, 'oled')
+    use_set(st)
     pv = open_page(fw, dest, name)
     assert es(ui, pv.page) is None  # songs: none
     ui.close(ui.top())
@@ -183,7 +183,7 @@ def test_a_held_song_opens_its_whole_menu_with_remove_last_on_the_card(fw, ui, s
     """The user's ruling (2026-11-16, 0plh): a song held in a playlist gets the menu a Library song gets (Play Next,
     Play Last, Add to Playlist…, Go to Album, Go to Artist and the rest), then Remove from Playlist last, after a gap
     and red, which asks on the confirmation card before it takes the song out."""
-    use_set(st, 'oled')
+    use_set(st)
     hold = Hold(fw, ui, st, recs, mcl)  # its deques first: the page's own take their place
     pages = road_trip(fw, ui, recs)
     pv = open_page(fw, 3, b'Road Trip')

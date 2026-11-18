@@ -170,8 +170,8 @@ static int th_letter(void *s, int n, int first) {
  * top_speed albums a second; turning back drops what's queued, and the speed with it. Going by
  * letters, the travel counts towards the next one instead, or the one before from a turn back's
  * first jump_ticks; the row keeps its lean. 1.7.6's letters count it too, and a turn back ends
- * them. An artist's albums stop at the ends:
- * the first push past one kicks the covers out, and they spring back. */
+ * them. The playlists stop at the ends (coverflow_bounded): the first push past one kicks the
+ * covers out, and they spring back. */
 static void th_turn(void *s, int travel, unsigned now, int n, int ms) {
     int dir = travel > 0 ? -1 : 1; /* x rises anticlockwise: back */
     if (dir != th.dir) {
