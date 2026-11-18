@@ -728,6 +728,7 @@ static int trust_click(void *ctx, void *event) {
     switch ((int)(long)ctx) {
     case 0:
         search_strip_label("Rename");
+        search_strip_return(STRIP_SAVE); /* the return key's check */
         search_strip_text("Rename", gu.trusted[gu.cur].name, GU_NAME_MAX, trust_renamed);
         break;
     case 1:

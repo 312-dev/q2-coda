@@ -205,3 +205,14 @@ def test_guest_play_s_name_gets_the_strip_s_check(g):
 def test_the_hotspot_s_name_gets_the_check_and_its_password_the_arrow(g, row, want):
     g.fw.fn('guest_ui__hot_click', C.c_int, C.c_void_p, C.c_void_p)(row, None)
     assert strip_ret(g) == want
+
+
+def test_renaming_a_trusted_guest_gets_the_strip_s_check(g):
+    """A trusted guest's Rename saves a name: the return key shows the check (search_strip.c ss_ret_kind)."""
+    g.files[TRUSTED] = b"AA:BB\t0\t1763300000\tSam's iPhone\n"
+    g.look(state='idle', enabled=1)
+    g.fw.fn('guest_settings_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    set_page = g.page('guestset_page')
+    g.ui.click(set_page, g.ui.captions(set_page).index("Sam's iPhone"))
+    g.ui.click(g.page('guesttrust_page'), 0)
+    assert strip_ret(g) == STRIP_SAVE

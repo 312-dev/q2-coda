@@ -1099,8 +1099,8 @@ painted it white, which drew the box at rest.
   return key docked at its right, a 34 px circle in the accent with its mark in white, turned to a white circle
   with the mark in the accent while the wheel is on it. The mark is what submitting does: a magnifier on a search
   (Search's own, Add Songs', a playlist's, Internet Radio's, Spotify's, TIDAL's, a card app's), a check where a
-  name or a value is saved (New Playlist, Rename Playlist, the Bluetooth and Guest Play names, an EQ preset's name,
-  a band's frequency and Q), and an arrow right anywhere else (`search_strip.c` `ss_ret_kind`,
+  name or a value is saved (New Playlist, Rename Playlist, the Bluetooth and Guest Play names, a paired device's
+  or a trusted guest's Rename, an EQ preset's name, a band's frequency and Q), and an arrow right anywhere else (`search_strip.c` `ss_ret_kind`,
   [oled-design](oled-design.md#text-entry)). #+= holds all 32 printable ASCII symbols, so the four sets type every
   printable character. Ten cells show; the run starts at its first character and moves only when the highlight
   comes within a cell of an edge, its letters themselves fading out over 22 px where more of the set lies past that
