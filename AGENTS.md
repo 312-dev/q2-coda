@@ -50,7 +50,7 @@ Read [docs/architecture.md](docs/architecture.md) first (20 minutes: the payload
 
 ## Plans
 
-Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list), [docs/oled-design.md](docs/oled-design.md) (the OLED theme), [docs/server-library.md](docs/server-library.md) (server songs in the Library).
+Work planned but not built: [docs/backlog.md](docs/backlog.md) (the ordered list), [docs/oled-design.md](docs/oled-design.md) (the OLED theme), [docs/server-library.md](docs/server-library.md) (server songs in the Library), [docs/localsend.md](docs/localsend.md) (LocalSend in place of Wi-Fi Transfer).
 
 ## Commands
 
