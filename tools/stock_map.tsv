@@ -474,6 +474,7 @@ demo	0x6945bc	0xe4	image_loader_stb_load	Image loader entry: decodes an image vi
 demo	0x6954e0	0x120	widget_animator_scroll_update	Animator update: sets xoffset and yoffset props to from plus (to minus from) times progress when each differs.
 demo	0x6989cc	0x50	window_manager_default_clear_refs	Clears the window manager references (+0x4c, +0x50, +0x58) that point at the given window.
 demo	0x699784	0xec	window_manager_default_get_prev_window	Scans children downward from the second from top for a normal, dialog, popup or non-always-on-top overlay window.
+demo	0x699908	0x1ec	window_manager_default_layout_child	Lays out a window: a normal one takes the screen when fullscreen, else the client rect under the system bar; then widget_layout. Name is ours.
 demo	0x69b5f0	0xbc	window_manager_default_update_highlighter	Re-snapshots the previous window into the dialog highlighter's image when a highlighter exists.
 demo	0x69b6ac	0x2a0	window_manager_default_on_event	Widget on_event of the window manager: orientation change (0x143, answered with 0x144) resizes lcd, native window and layout; theme change (0x148) reloads; 0x12e aborts pressed keys.
 demo	0x69b94c	0x138	window_manager_default_on_native_window_event	Slot of the window manager vtable (0x9b3cec) taking native window events: the first kind refreshes size and layout, two call input_device_status pointer enter/leave, one aborts keys and mouse.

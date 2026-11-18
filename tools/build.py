@@ -665,6 +665,11 @@ KEYLOCK_LIT = (0x4f2728, 0x10400010, 0x10000010)
 # config_init stores SYSSET SCREENSAVER's 0 or 1 in g_screensaver_mode (sb $2); it stores 0 (sb $zero) whatever
 # the file says, so stock's wake never opens its lock window (docs/internals.md#screen-off-and-wake).
 SAVER_OFF = (0x504c78, 0xa0620000, 0xa0600000)
+# Full-bleed pages: window_manager_default_layout_child (0x699908) gives a normal window the screen when it is
+# "fullscreen" and the client rect under the system bar otherwise. Its branch to the client rect goes, so every page
+# takes the whole 375x320 screen without the fullscreen property, which paint_normal (0x69d538) reads to leave the bar
+# out: the bar still paints after the pages and before the dialogs, an overlay on the page (docs/oled-design.md#full-bleed).
+FULL_BLEED = (0x69997c, 0x1040001b, 0)
 # V1.36's volume_dialog_on_keyup leaves at once with the screen off (beqz g_backlight_status), so a dark wheel tick over the
 # volume dialog falls through to on_wm_keyup_fun, which opens "dialog/volume_dialog" again: navigator_to looks an open window
 # up by that path, never its name "volume_dialog", so every tick stacked one more dialog and none changed the volume. Each
@@ -2637,6 +2642,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     patch_word(patched, *NP_CENTRE, "Now Playing leaves Centre to stock's power-key handling")
     patch_word(patched, *KEYLOCK_LIT, 'Buttons lock acts only with the screen off')
     patch_word(patched, *SAVER_OFF, "stock's lock screen stays off")
+    patch_word(patched, *FULL_BLEED, 'every page window takes the whole screen')
     patch_word(patched, *PREV_RESTART, 'Previous restarts the track from 3 s in')
     patch_word(patched, *VOL_DARK, 'The volume dialog steps with the screen off')
     for site in MORE_ARTIST_CLOSE:
