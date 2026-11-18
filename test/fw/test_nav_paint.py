@@ -10,7 +10,8 @@ import struct
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, block, in_fork, libc
+from conftest import NAVIGATION_SOURCE, O, Deques, Externpic, Files, block, in_fork, libc
+from test_nav_hold import recs  # noqa: F401  stSongInfo records P() reads whole
 
 W_X, W_Y, W_W, W_H, W_PARENT = O['W_X'], O['W_Y'], O['W_W'], O['W_H'], O['W_PARENT']
 CANVAS_LCD, LCD_FILL_COLOR = O['CANVAS_LCD'], O['LCD_FILL_COLOR']
@@ -428,7 +429,7 @@ def test_stock_s_thumbnails_take_the_list_art_s_corners(fw, st, bitmaps, name):
     assert alpha[r][r] == 255 and alpha[0][r] == 255 and alpha[r][0] == 255  # past the arc
     assert alpha[83][83] == 255 and all(row == row[::-1] for row in alpha) and alpha == alpha[::-1]
     assert any(0 < a < 255 for a in alpha[0][:r])  # an antialiased step on the arc
-    assert alpha[r - 1][0] < 255  # the arc reaches the radius down the side
+    assert alpha[r - 2][0] < 255 == alpha[r - 1][0]  # the arc runs down the side to the radius, meeting it within a pixel
     assert all(alpha[y][:r] == sorted(alpha[y][:r]) for y in range(r))  # rising inwards along each row
     assert bm.flags & OPAQUE == 0 and {p[:3] for row in bm.rows() for p in row} == {(255, 255, 255)}
 
@@ -839,7 +840,7 @@ class Canvas:
             struct.pack_into('<Q', self.raw, CANVAS_LCD, C.addressof(self.lcd))
         struct.pack_into('<I', self.lcd, LCD_FILL_COLOR, fill)
         self.p = C.addressof(self.raw)
-        self.fills, self.rounded, self.arts, self.texts, self.loaded = [], [], [], [], {}
+        self.fills, self.rounded, self.arts, self.texts, self.loaded, self.names = [], [], [], [], {}, []
         self.text_color, self.font = 0, (None, 0)
         fw.mock('canvas_set_fill_color', lambda c, color, *_: struct.pack_into('<I', self.lcd, LCD_FILL_COLOR, color & 0xffffffff))
         fw.mock('canvas_fill_rect', lambda c, x, y, w, h, *_: self.fills.append(
@@ -861,6 +862,7 @@ class Canvas:
 
     def load(self, w, name, bitmap, *_):
         self.loaded[bitmap] = C.string_at(name).decode()
+        self.names.append(self.loaded[bitmap])
         C.memmove(bitmap, struct.pack('<ii', 20, 10), 8)
         return 0
 
@@ -1015,26 +1017,36 @@ def test_another_dialog_s_labels_stay(fw, world):
 
 def test_a_toast_rises_and_fades_in_then_sinks_and_fades_out_over_the_page(fw, world):
     """docs/oled-design.md#overlay-motion: the pill comes up 10 px and fades in over 200 ms cubic out (the dialog's
-    opacity, its line moved with the pill), nothing on its first frame; once its dialog goes, the page under paints it
-    sinking 4 px and fading over 150 ms cubic in, then nothing."""
+    opacity, set by the shared frame timer: stock's widget_paint skips a widget under opacity 9, so the toast's own
+    paint never could; its line moved with the pill), nothing on its first frame; once its dialog goes, the page under
+    paints it sinking 4 px and fading over 150 ms cubic in, then nothing."""
     theme(fw)
     now = [10000]
     fw.mock('time_now_ms', lambda *_: now[0])
     page = world.window('settings_page')
     win = world.window('msginfo_dialog', 'dialog')
     line = world.add(win, 'line', 'label', box=(30, 60, 315, 40), text='Saved')
-    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity')][-1]  # noqa: E731
-    paint_bg(fw, win, Canvas(fw))
+    opacity = lambda: [a[1] for _, a in fw.calls('widget_set_opacity') if a[0] == win][-1]  # noqa: E731
+    frame_fn = C.cast(fw.lib.ui_kit__mo_frame, C.c_void_p).value
+
+    def frame():
+        """The shared frame timer's tick (ui_kit.c mo_frame), then the toast's paint only as stock would: at 9 up."""
+        world.fire(max(i + 1 for i, (fn, _, _) in enumerate(world.timers) if fn == frame_fn))
+        canvas = Canvas(fw)
+        if opacity() >= 9:
+            paint_bg(fw, win, canvas)
+        return canvas
+
+    paint_bg(fw, win, Canvas(fw))  # its first frame, at stock's 255
     assert not world[line].visible and opacity() == 0
     now[0] += 100  # 875 of the way in
-    paint_bg(fw, win, Canvas(fw))
+    frame()
     assert world[line].visible and world.at(line)[1] == 236 + 1 and opacity() == 223
     now[0] += 100
-    canvas = Canvas(fw)
-    paint_bg(fw, win, canvas)
+    canvas = frame()
     assert world.at(line)[1] == 236 and opacity() == 255 and canvas.rounded[0][0][1] == 236
-    gone, = [(fn, ctx) for w, evt, fn, ctx in world.handlers if w == win and evt == O['EVT_DESTROY']]
-    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(gone[0])(gone[1], None)
+    for gone in world.on(win, O['EVT_DESTROY']):  # toast_gone and ovm_bind's ovm_gone
+        gone()
     world.top = page
     leave = fw.fn('feedback_toast_leave', None, C.c_void_p, C.c_void_p)
     now[0] += 75  # half way out, cubic in: 1/8 gone
@@ -1806,18 +1818,14 @@ def named(world, win, name):
     return world.find(win, name)
 
 
-# The library scan's page (scan_page.c): Update Local Music's dialog as a page of rows.
+# The library scan's page (scan_page.c): Update Local Music's dialog as the empty states' stack.
 
 SCAN_WHOLE = O['SCAN_WHOLE']
-SCAN_X, SCAN_END, SCAN_BAR_Y = 24, 347, 228  # the bar: from the text column to the right column, at y 228
-_track = re.search(r'<element name="scrubber" [^>]*track="#(\w+)"', _OLED_XML)
-assert _track
-TRACK = int(_track[1], 16)
 
 
 @pytest.fixture
 def whole(fw):
-    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives the test, so it goes back."""
+    """Stock's whole-library scan flag, at its fixed address: conftest's map outlives a load, so it goes back."""
     flag = C.c_ubyte.from_address(SCAN_WHOLE)
     saved = flag.value
     yield flag
@@ -1850,14 +1858,14 @@ def count(fw, threads, songs):
 
 
 def test_the_scan_dialog_s_page_lives_with_its_window(fw, world, st):
-    """Stock's widgets stay for its look-ups, hidden; one count runs, detached; the poll every 200 ms follows the
+    """Stock's widgets stay for its look-ups, hidden; one count runs, detached; the poll every 80 ms (the spinner's frame) follows the
     window, which takes both with it as it goes."""
     win, threads = scan_dialog(fw, world, st)
     for name in ('img_animation', 'label_msg', 'label_scanfolder'):
         assert world[named(world, win, name)].visible == 0
     assert len(threads) == 1 and fw.calls('fw_pthread_detach')
     (fn, _, ms), = world.timers
-    assert ms == 200 and st('msg_win', C.c_void_p).value == win
+    assert ms == 80 and st('msg_win', C.c_void_p).value == win
     for gone in world.on(win, EVT_DESTROY):
         gone()
     assert st('msg_win', C.c_void_p).value is None and world.removed == [1]
@@ -1886,89 +1894,159 @@ def poll(world):
     return world.fire(1)
 
 
-def msg_paint(fw, win, y=0, world=None):
-    if world:
-        world.box(win, 0, y, 375, 320 - y)
+@pytest.fixture
+def done(fw):
+    """Stock's scan-over counter (wait_scan sets it), at its fixed address, and its stop flag (toolsGetUserStop's
+    answer): 0 ran to the end, 1 Stop, 2 /mnt/data full. Both go back."""
+    counter = C.c_int.from_address(O['SCAN_DONE'])
+    saved, stop = counter.value, [0]
+    fw.mock('toolsGetUserStop', lambda *_: stop[0])
+    counter.value = 0
+    yield counter, stop
+    counter.value = saved
+
+
+def scan_page(fw, win):
+    """The scan page painted: its words (text, centre x, centre y, colour) and its art (name, x, y)."""
     canvas = Canvas(fw)
     paint_bg(fw, win, canvas)
-    return canvas
+    words = [(t, r[0] + r[2] // 2, r[1] + r[3] // 2, c) for t, r, c, _ in canvas.texts]
+    return canvas, words, [(n, d[0], d[1]) for n, d in canvas.arts]
 
 
-def scan_bar(fills):
-    """The scan's bar among fills, if it has its track (playing.scrubber.track's grey, theme.xml's): the track's x,
-    end and rows, and its fill's (the rest's) end, the furthest, and rows."""
-    if not fills:
-        return None
-    lit = [f for f in fills if f[4] & 0xffffff not in (TRACK, 0)]
-    return (min(f[0] for f in fills), max(f[0] + f[2] for f in fills), {f[1] for f in fills},
-            max((f[0] + f[2] for f in lit), default=-1), {f[1] for f in lit})
+def said(words):
+    return [w[0] for w in words]
 
 
-def counted(fw, world, st, whole, text, songs=704):
-    """A whole-library scan's dialog at stock's text, painted before the count answers and after: the dialog and
-    what the count added (scan_bar's)."""
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, text)
-    before = msg_paint(fw, win)
-    count(fw, threads, songs)
-    return win, scan_bar(added(msg_paint(fw, win), before))
+SCAN_FIG_Y, SCAN_TITLE_CY, SCAN_LINE_CY, SCAN_BTN_CY = 92, 178, 200, 249  # 27 v4's stack, centred from y 40 to 320
 
 
-def test_the_scan_counts_against_the_library_before_it(fw, world, st, whole):
+def test_the_scan_counts_against_the_library_before_it(fw, world, st, whole, done):
+    """Late: the ring's percent (its line's arc needs a vgcanvas, none here), "312 of 704 songs", Stop; the poll
+    repaints the stack only when stock's text changes or the spinner turns."""
     whole.value = 1
     win, threads = scan_dialog(fw, world, st, 'Scanned 312')
-    before = msg_paint(fw, win)
     count(fw, threads, 704)
     assert poll(world) == RET_REPEAT
-    line, button = named(world, win, 'msg_line'), named(world, win, 'btn_no')
-    assert world[line].text == '312 of 704'  # msg_sync's own example
-    assert world[button].text == 'Cancel'  # over stock's word
     (target, box), = world.invalid
-    after = msg_paint(fw, win)  # the line in its place, the bar drawn
-    bar = added(after, before)
-    assert target == win and box == (0, 58, 375, 282 - 58)  # the rows under the status row, to the list's end
-    assert scan_bar(bar) and inside(world.at(line), box)
-    assert all(inside(f[:4], box) for f in bar)  # the line and the bar repainted
-    assert poll(world) == RET_REPEAT and len(world.invalid) == 1  # nothing new: nothing repainted
+    assert target == win and box == (0, 40, 375, 320 - 40)  # under the status row, to the screen's end
+    _, words, _ = scan_page(fw, win)
+    assert ('312 of 704 songs', 187, SCAN_TITLE_CY, 0xffffffff) in words
+    assert '44%' in said(words) and 'Stop' in said(words)
+    assert poll(world) == RET_REPEAT and len(world.invalid) == 1  # nothing new, no spinner: nothing repainted
 
 
-def test_the_scan_dialog_is_a_page_of_rows(fw, world, st, whole):
-    """The scan page (oled_scan): the title in the status row's place (its text from STATUS_ROW_INSET, its line
-    centred on status_y), Songs and Folder rows from y 58, stock's
-    Cancel as the row after them on the selection bar; the count against the library's songs on the Songs row
-    ("312 of 704"), the name of stock's folder on the Folder row, and the 6 px bar at y 228 from the text column to the right
-    column, its fill the count's share."""
+def test_the_scan_dialog_is_the_empty_states_stack(fw, world, st, whole, done):
+    """Early (27 v4): the status row the dialog covers, painted under its title, the spinner in the figure's box, "1,284 songs found", the
+    folder's glyph before the name stock writes on a whole scan, and stock's button unseen over the painted Stop, which Centre and a tap press."""
     whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 312')
+    win, threads = scan_dialog(fw, world, st, 'Scanned 1284')
     for name in ('img_animation', 'label_msg', 'label_scanfolder'):
         assert world[named(world, win, name)].visible == 0
     world[named(world, win, 'label_scanfolder')].text = 'SD:/Music/Brent Faiyaz/'
-    heading, line, button = (named(world, win, n) for n in ('msg_heading', 'msg_line', 'btn_no'))
-    assert world[heading].text == 'Update Library' and world.at(heading)[:2] == (O['STATUS_ROW_INSET'] - 2, 23 - 16)
-    assert world.at(button) == (16, 122, 343, 32) and world[button].props['style:normal:round_radius'] == 8
-    before = msg_paint(fw, win)
+    folder, button = (named(world, win, n) for n in ('msg_folder', 'btn_no'))
+    assert fw.fn('msg_title', C.c_char_p, C.c_char_p)(b'updatemusic_dialog') == b'Update Library'  # the status row's
+    assert fw.fn('msg_title', C.c_char_p, C.c_char_p)(b'updatemusic_page') is None
+    bar, painted = fw.var('fw_ctx_system_bar', C.c_void_p), []
+    saved_bar, bar.value = bar.value, 0x5eed
+    fw.mock('widget_paint', lambda w, c, *_: painted.append(w) or 0)
+    assert world[button].props['style:normal:bg_color'] == 0 and world[button].props['style:normal:text_color'] == 0
+    poll(world)
+    canvas, words, arts = scan_page(fw, win)
+    bar.value = saved_bar
+    assert painted == [0x5eed]  # the status row the dialog covers, painted first, as Control Center's
+    assert ('1,284 songs found', 187, SCAN_TITLE_CY, 0xffffffff) in words
+    assert [a for a in arts if a[0].startswith('oled_swspin_d_')] and \
+        [(x, y) for n, x, y in arts if n.startswith('oled_swspin_d_')] == [(187 - 24, SCAN_FIG_Y + 30 - 24)]
+    assert world[folder].text == 'Brent Faiyaz' and world[folder].visible
+    assert world[folder].props['style:normal:text_color'] & 0xffffffff == 0xffababab  # Text Secondary, opaque
+    (fx, fy), = [(x, y) for n, x, y in arts if n == 'oled_scan_folder_d']
+    assert fy == SCAN_LINE_CY - 7 and world.at(folder)[0] == fx + 15 + 6 - 2  # the glyph, 6 px, the name
+    bx, by, bw, bh = world.at(button)
+    assert (by, bh) == (SCAN_BTN_CY - 19, 38) and bx == (375 - bw) // 2  # over the painted Stop
+    pill = [r for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19 and r[3] == 38]
+    assert pill and pill[0][2] == bw and ('Stop', 187, SCAN_BTN_CY, 0xffffffff) in [(t, x, y, c) for t, x, y, c in words if t == 'Stop']
+
+
+def test_the_spinner_turns_with_the_poll(fw, world, st, whole, done):
+    win, _ = scan_dialog(fw, world, st, 'Scanned 3')
+    frames = []
+    for _ in range(3):
+        assert poll(world) == RET_REPEAT
+        frames += [n for n, *_ in scan_page(fw, win)[2] if n.startswith('oled_swspin')]
+    assert frames == ['oled_swspin_d_1', 'oled_swspin_d_2', 'oled_swspin_d_3'] and len(world.invalid) == 3
+    _, words, arts = scan_page(fw, win)  # stock named no folder: the line says what is scanned, no glyph
+    assert ('Scanning the SD card', 187, SCAN_LINE_CY) in [w[:3] for w in words] and not [a for a in arts if 'folder' in a[0]]
+
+
+@pytest.mark.parametrize('stop, whole_scan, text, total, figure, title, line, card', [
+    (0, 1, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs, 34 new', 1),
+    (0, 1, 'Updated 3800', 800, 'oled_scan_done_d', 'Library Updated', '3,800 songs, 3,000 new', 1),  # thousands, both
+    (0, 1, 'Updated 700', 704, 'oled_scan_done_d', 'Library Updated', '700 songs', 1),  # fewer: no "new"
+    (0, 0, 'Updated 738', 704, 'oled_scan_done_d', 'Library Updated', '738 songs', 1),  # a folder's scan: not measured
+    (1, 1, 'Updated 120', 704, 'oled_scan_done_d', 'Scan Stopped', '120 songs found', 1),
+    (2, 1, 'No storage', 704, 'oled_scan_card_d', 'Not Enough Space', "Some songs weren't added", 1),
+    # the card pulled mid-scan (emulator, 2026-11-16): stock ends as a finish with the count it had and toasts
+    # "SD Card Removed"; the library is not left as it was (3,800 songs became 3,000)
+    (0, 1, 'Updated 3000', 3800, 'oled_scan_card_d', 'SD Card Removed', 'Put it back and scan again', 0)])
+def test_the_scan_s_ending_says_how_it_ended(fw, world, st, whole, done, stop, whole_scan, text, total, figure, title, line,
+                                            card):
+    """Once wait_scan sets SCAN_DONE stock writes its ending into label_msg (scan_updatefinish, or msg_no_storage
+    with the stop flag at 2): the check circle or the memory chip, the title, the line and Done in the accent. With the
+    card gone (stock's /tmp/mmc_add) it says so instead."""
+    fw.mock('fw_access', lambda path, *_: 0 if card or C.string_at(path) != b'/tmp/mmc_add' else -1)
+    whole.value = whole_scan
+    win, threads = scan_dialog(fw, world, st, 'Scanned 100')
+    count(fw, threads, total)
+    poll(world)
+    done[0].value, done[1][0] = 1, stop
+    world[named(world, win, 'label_msg')].text = text
+    poll(world)
+    canvas, words, arts = scan_page(fw, win)
+    assert [(n, x, y) for n, x, y in arts if n.startswith('oled_scan_')] == [(figure, 187 - 30, SCAN_FIG_Y)]
+    assert (title, 187, SCAN_TITLE_CY) in [w[:3] for w in words] and (line, 187, SCAN_LINE_CY) in [w[:3] for w in words]
+    assert 'Done' in said(words) and not world[named(world, win, 'msg_folder')].visible
+    assert [c for r, c, _ in canvas.rounded if r[1] == SCAN_BTN_CY - 19] == [rgba(0x2160d8)]  # the primary button
+
+
+def test_an_ending_a_paint_read_first_still_repaints_the_whole_stack(fw, world, st, whole, done):
+    """Stock repaints its hidden label's box as it writes the ending; that paint's msg_sync sees the new text first,
+    and the next poll still repaints the stack, so the button turns from Stop to Done with the rest."""
+    win, threads = scan_dialog(fw, world, st, 'Scanned 100')
     count(fw, threads, 704)
     poll(world)
-    assert world[line].text == '312 of 704' and world.at(line)[1] == 58
-    source = world[named(world, win, 'label_scanfolder')]
-    assert [n for n in world.nodes.values() if n is not source and n.text == 'Brent Faiyaz']  # the folder's own name
-    bar = added(msg_paint(fw, win), before)
-    rows = {f[1] for f in bar}
-    assert rows == set(range(228, 234)) and min(f[0] for f in bar) == 24 and max(f[0] + f[2] for f in bar) == 347
-    lit = [f for f in bar if f[4] & 0xffffff not in (0x333333, 0)]
-    assert max(f[0] + f[2] for f in lit) <= 24 + 323 * 312 // 704 + 1
+    done[0].value = 1
+    world[named(world, win, 'label_msg')].text = 'Updated 738'
+    scan_page(fw, win)  # stock's own repaint, before the poll
+    before = len(world.invalid)
+    poll(world)
+    assert len(world.invalid) == before + 1 and world.invalid[-1] == (win, (0, 40, 375, 280))
 
 
-CC_NOW, CC_BRIGHT = 4, 5  # control_center.c's stops: the Now Playing block, the Brightness slider
+def test_a_scan_window_lower_down_keeps_its_stack_s_place_on_the_screen(fw, world, st, whole, done):
+    """The stack is in screen rows: the window's own origin is read when it paints."""
+    win, _ = scan_dialog(fw, world, st, 'Scanned 9')
+    poll(world)
+    full = scan_page(fw, win)[1]
+    world.box(win, 0, 26, 375, 320 - 26)
+    low = scan_page(fw, win)[1]
+    assert [(t, y - 26) for t, _, y, _ in full] == [(t, y) for t, _, y, _ in low]
 
 
-def control_center(fw, world, focus=0, adjust=0, ring=True):
-    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, the lock on, nothing playing, the
-    brightness at half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock
-    at 0) or the page just pulled down. The canvas."""
-    theme(fw)
+# USB mode's page: the computer's eject.
+
+USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
+
+
+CC_SMART, CC_NOW, CC_BRIGHT, CC_VOLUME = 4, 6, 7, 8  # control_center.c's stops
+
+
+def control_center(fw, world, focus=0, adjust=0, ring=True, light=False):
+    """Control Center painted (control_center.c cc_paint): Wi-Fi on, Bluetooth off, nothing playing, the brightness at
+    half; the wheel on focus, a slider adjusting or not, its ring showing (a tick just now, the clock at 0) or the page
+    just pulled down; Light Mode on or off. The canvas."""
+    theme(fw, **({'LIGHT': '1'} if light else {}))
     fw.var('g_wififlag', C.c_ubyte).value, fw.var('g_bluetoothflag', C.c_ubyte).value = 1, 0
-    fw.var('g_keylock_flag', C.c_ubyte).value = 1
     win, _, _ = quick_window(world)
     world[win].props.update(_cc_focus=focus, _cc_adjust=adjust, **({'_cc_seen': 1} if ring else {}))
     canvas = Canvas(fw)
@@ -1976,35 +2054,191 @@ def control_center(fw, world, focus=0, adjust=0, ring=True):
     return canvas
 
 
-def test_control_center_is_v3a_s_blocks_toggles_sliders_and_tiles(fw, world):
-    """The connectivity block and Now Playing's from y 38, the toggles' circles (Wi-Fi lit), the sliders under them,
-    the five tiles named under them (Lock lit), the grab bar at y 304, and the wheel's white ring on Wi-Fi."""
+def cc_words(canvas):
+    """The words the page set glyph by glyph (ui_set), spaces dropped: a word ends where the next glyph is on another
+    row or more than 16 px on (wider than a glyph and a space at 13 px), or back to the left."""
+    words, last = [], None
+    for ch, (x, y, _, _), *_ in canvas.texts:
+        if last is None or y != last[1] or not 0 < x - last[0] <= 16:
+            words.append('')
+        words[-1] += ch
+        last = (x, y)
+    return words
+
+
+def test_control_center_is_v4_s_tightened_layout(fw, world):
+    """v4, A tightened (mock_cc4_tight.py): one 10 px gap everywhere. The toggles' block 158 x 210 from (20, 38), two by
+    three, circles 66 px apart both ways (centres x 66 and 132, y 68, 134, 200); Now Playing 188, 38, 167 x 114;
+    Brightness at y 162 and Volume at y 210, each 167 x 38, ending level with the block; the grab bar along the
+    screen's foot (test below); the
+    wheel's white ring on Wi-Fi. No tiles. Every name set, Smart Wi-Fi's whole."""
     canvas = control_center(fw, world)
     accent, block, off = rgba(0x2160d8), rgba(0x1c1c1e), rgba(0x3a3a3c)
     boxes = [(r, c) for r, c, _ in canvas.rounded]
-    assert ((20, 38, 138, 124), block) in boxes and ((166, 38, 189, 124), block) in boxes
-    assert ((35, 46, 40, 40), accent) in boxes and ((103, 46, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
-    assert ((32, 43, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
-    assert ((32, 216, 44, 44), accent) in boxes  # Lock, on
-    assert ((375 // 2 - 18, 304, 36, 5), rgba(0x5a5a5e)) in boxes
-    words = [t for t, *_ in canvas.texts]
-    for label in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Lock', 'Sleep', 'Night Shift', 'EQ', 'Smart Wi-Fi'):
-        assert label in words, label
+    assert ((20, 38, 158, 210), block) in boxes and ((188, 38, 167, 114), block) in boxes
+    circles = [r for r, c, radius in canvas.rounded if radius == 20 and r[2] == 40]
+    assert circles == [(cx - 20, cy - 20, 40, 40) for cy in (68, 134, 200) for cx in (66, 132)]
+    assert ((46, 48, 40, 40), accent) in boxes and ((112, 48, 40, 40), off) in boxes  # Wi-Fi on, Bluetooth off
+    assert ((43, 45, 46, 46), rgba(0xffffff)) in boxes  # the wheel's ring round Wi-Fi
+    assert ((188, 162, 167, 38), off) in boxes and ((188, 210, 167, 38), off) in boxes
+    assert not [r for r, c, radius in canvas.rounded if radius == 12]  # v3's tiles' corners
+    assert cc_words(canvas)[:6] == ['Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'SmartWi-Fi', 'EQ']
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_the_grab_bar_stands_on_the_sheet_s_foot_as_the_page_sheets_stand_off_their_top(fw, world, light):
+    """The grab bar is centred, 36 x 5, 6 px off the sheet's foot (the screen's, y 320), the gap menu_modal.c's sheets keep
+    off their top (grab at 46 under a top of 40); not 10 px under the blocks, which end at y 248. It is the one thing
+    that moved: the blocks stay where the layout test puts them."""
+    grabs = [(r, c) for r, c, radius in control_center(fw, world, light=light).rounded if r[2:] == (36, 5)]
+    assert [r for r, _ in grabs] == [(375 // 2 - 18, 309, 36, 5)] and 320 - (309 + 5) == 6
 
 
 def test_a_slider_with_the_wheel_takes_the_accent_s_ring(fw, world):
-    rings = lambda canvas: [r for r, c, _ in canvas.rounded if r == (17, 167, 169, 44)]
-    assert rings(control_center(fw, world, focus=CC_BRIGHT, adjust=1)) and \
-        [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == (17, 167, 169, 44)] == [rgba(0x2160d8)]
-    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == (17, 167, 169, 44)] == [rgba(0xffffff)]
+    ring = (185, 159, 173, 44)  # Brightness's, 3 px out
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT, adjust=1).rounded if r == ring] == [rgba(0x2160d8)]
+    assert [c for r, c, _ in control_center(fw, world, focus=CC_BRIGHT).rounded if r == ring] == [rgba(0xffffff)]
 
 
 def test_pulled_down_the_page_shows_no_ring_and_the_now_playing_block_takes_one(fw, world):
     """No wheel input yet: no ring anywhere. On the Now Playing block the ring goes round the whole block."""
     boxes = lambda canvas: [r for r, c, _ in canvas.rounded if c == rgba(0xffffff)]
     assert boxes(control_center(fw, world, ring=False)) == []
-    assert boxes(control_center(fw, world)) == [(32, 43, 46, 46)]  # Wi-Fi's
-    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(163, 35, 195, 130)]
+    assert boxes(control_center(fw, world)) == [(43, 45, 46, 46)]  # Wi-Fi's
+    assert boxes(control_center(fw, world, focus=CC_NOW)) == [(185, 35, 173, 120)]
+
+
+SCREEN = 375 * 320
+CC_BEHIND, CC_INK = 0xff1c1c1e, 0xffffffff
+
+
+def inter_pens(text, px=16):
+    """text's pens as Inter Medium sets it at AWTK size px: each glyph's start from the first's, exact, in px."""
+    from fontTools.ttLib import TTFont
+    font = TTFont(host.ROOT/'assets/fonts/Inter-Medium.ttf')
+    cmap, hmtx, line = font.getBestCmap(), font['hmtx'], font['hhea'].ascent - font['hhea'].descent
+    pens, at = [], 0.0
+    for ch in text:
+        pens.append(at)
+        at += hmtx[cmap[ord(ch)]][0] * px / line
+    return pens, at
+
+
+def fb_canvas(fw):
+    """A Canvas over a 375 x 320 BGRA buffer of the block's colour whose glyphs ink: each text stock draws inks its rect's
+    first 6 columns over rows 4 above to 4 below its row, as far as the clip lets it. (canvas, the buffer)"""
+    canvas = Canvas(fw)
+    fb = (C.c_uint * SCREEN)(*([CC_BEHIND] * SCREEN))
+    struct.pack_into('<Q', canvas.lcd, O['LCD_OFFLINE_FB'], C.addressof(fb))
+    for k, v in (('LCD_W', 375), ('LCD_H', 320), ('LCD_LINE_LENGTH', 4 * 375), ('LCD_FORMAT', O['LCD_BGRA8888'])):
+        struct.pack_into('<i', canvas.lcd, O[k], v)
+    canvas.clip = (0, 0, 375, 320)
+    fw.mock('canvas_set_clip_rect', lambda c, r, *_: setattr(canvas, 'clip', struct.unpack('<4i', C.string_at(r, 16))) or 0)
+
+    def ink(c, s, n, r, *_):
+        canvas.texts.append((wide(s, n), rect(r), canvas.text_color, canvas.font))
+        x, y, w, h = rect(r)
+        cx, cy, cw, ch = canvas.clip
+        for yy in range(max(y + h // 2 - 4, cy), min(y + h // 2 + 4, cy + ch)):
+            for xx in range(max(x, cx), min(x + 6, cx + cw)):
+                fb[yy * 375 + xx] = CC_INK
+        return 0
+    fw.mock('canvas_draw_text_in_rect', ink)
+    return canvas, fb
+
+
+def set_in(fw, text, x, w, off=0, y=275):
+    """ui_kit.c ui_set_in: text in Inter Medium 13 (AWTK 16) in the column x to x + w on row y, scrolled off px."""
+    theme(fw)
+    canvas, fb = fb_canvas(fw)
+    fn = fw.fn('ui_set_in', C.c_int, C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_uint, C.c_int, C.c_int, C.c_int,
+               C.c_int, C.c_int)
+    width = fn(canvas.p, text.encode(), 1, 16, 0xffffff, x, w, y, off, 0)
+    return canvas, fb, width
+
+
+def test_a_toggle_s_name_is_set_at_inter_s_own_advances(fw, world):
+    """ui_set: each glyph of "Bluetooth" starts at its exact pen from Inter Medium's advances, rounded on its own (AWTK
+    rounds every advance and carries the error), centred in its 76 px room on its circle (x 132); "Smart Wi-Fi" (75 px)
+    fits its room centred on x 66, its space Inter's 3.5 px, not the 7 AWTK leaves. The names' scrollers hold each
+    name's width (cc_marq's range)."""
+    theme(fw)
+    win, _, _ = quick_window(world)
+    names = [world.add(win, f'cc_name{i}', 'hscroll_label', box=(0, 0, 80, 16)) for i in range(6)]
+    world[win].props.update(_cc_focus=0, _cc_seen=1)
+    canvas, _ = fb_canvas(fw)
+    paint_bg(fw, win, canvas)
+    pens, w = inter_pens('Bluetooth')
+    blue = [r[0] for t, r, *_ in canvas.texts if r[1] == 68 + 29 - 16 and r[0] > 99]
+    assert blue == [94 + (76 - round(w)) // 2 + int(p + 0.5) for p in pens]
+    pens, w = inter_pens('Smart Wi-Fi')
+    smart = [r[0] for t, r, *_ in canvas.texts if r[1] == 200 + 29 - 16 and r[0] < 104]
+    assert smart == [28 + (76 - round(w)) // 2 + int(p + 0.5) for k, p in enumerate(pens) if k != 5]
+    widths = [struct.unpack_from('<i', world[n].block, O['HSCROLL_TEXT_W'])[0] for n in names]
+    assert widths == [round(inter_pens(t)[1]) for t in ('Wi-Fi', 'Bluetooth', 'AirPlay', 'Car', 'Smart Wi-Fi', 'EQ')]
+
+
+def test_text_wider_than_its_column_fades_out_at_its_edge_inside_its_box(fw):
+    """ui_set_in, "Smart Wi-Fi" (75 px) in a 68 px column from x 24 on row 275 (rows 267 to 283): it starts at the
+    column's left, its text whole there; the right end's last column shows only what is behind it, the columns before
+    it a blend (the text itself fading, no band painted); nothing is drawn outside the column."""
+    _, fb, width = set_in(fw, 'Smart Wi-Fi', 24, 68)
+    px = lambda x, y: fb[y * 375 + x]  # noqa: E731
+    assert width == round(inter_pens('Smart Wi-Fi')[1])
+    rows = range(255, 300)
+    assert all(px(x, y) == CC_BEHIND for y in rows for x in (*range(14, 24), *range(92, 100)))
+    assert all(px(91, y) == CC_BEHIND for y in rows)  # the end column: the text weighs 0 there
+    assert CC_INK in [px(x, 275) for x in range(24, 30)]  # the start whole
+    ramp = {px(x, 275) for x in range(80, 91)} - {CC_BEHIND, CC_INK}
+    assert ramp and not [y for y in (*range(255, 267), *range(283, 300)) for x in range(24, 92) if px(x, y) != CC_BEHIND]
+
+
+def test_scrolled_text_fades_at_both_ends(fw):
+    """Scrolled off its start (the marquee's xoffset) the left end fades too; at the end of its range only the left."""
+    _, fb, _ = set_in(fw, 'Smart Wi-Fi', 24, 68, off=3)
+    assert all(fb[y * 375 + 24] == CC_BEHIND for y in range(267, 283)) and all(fb[y * 375 + 91] == CC_BEHIND for y in range(267, 283))
+    _, fb, _ = set_in(fw, 'Smart Wi-Fi', 24, 68, off=7)  # 75 - 68: its end in view
+    assert all(fb[y * 375 + 24] == CC_BEHIND for y in range(267, 283)) and CC_INK in [fb[275 * 375 + x] for x in range(84, 92)]
+
+
+def test_text_that_fits_its_column_is_centred_and_unclipped(fw):
+    canvas, fb, width = set_in(fw, 'EQ', 24, 68)
+    assert canvas.clip == (0, 0, 375, 320) and [r[0] for _, r, *_ in canvas.texts][0] == 24 + (68 - width) // 2
+
+
+@pytest.mark.parametrize('flag, image, online, glyph', [
+    (0, 'bar_wifi0', 1, 'cc_wifi_slash'),  # off
+    (0, 'bar_wifi3', 1, 'cc_wifi_3'),      # the status row's bars win: the two never disagree
+    (1, 'bar_wifi0', 1, 'cc_wifi_0'),      # on, not joined
+    (1, 'bar_wifi1', 1, 'cc_wifi_1'), (1, 'bar_wifi2', 1, 'cc_wifi_2'),
+    (1, 'bar_wifi3', 1, 'cc_wifi_3'), (1, 'bar_wifi4', 1, 'cc_wifi_3'),
+    (1, 'bar_wifi2', 0, 'cc_wifi_x'),      # joined, no link up
+])
+def test_the_wi_fi_circle_shows_the_link_as_the_status_row_reads_it(fw, world, st, flag, image, online, glyph):
+    """control_center.c cc_wifi, from status_row.c's wifi_level (stock's bars) and wifi_offline: wifi-slash off,
+    wifi-none on but not joined, wifi-low to wifi-high by the bars (3 and 4 full), wifi-x with no link up."""
+    fw.mock('networkGetConnectStatus', lambda *_: online)
+    bar = world.window('system_bar', 'system_bar', box=(0, 0, 375, 26), top=False)
+    st('bar_wifi', C.c_void_p).value = world.add(bar, 'img_wifi', 'image', image=image)
+    theme(fw)
+    fw.var('g_wififlag', C.c_ubyte).value = flag
+    win, _, _ = quick_window(world)
+    world[win].props.update(_cc_focus=0)
+    canvas = Canvas(fw)
+    paint_bg(fw, win, canvas)
+    assert [n for n in canvas.names if '_cc_wifi' in n] == [f'oled_{glyph}']
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_light_mode_inks_the_glyphs_on_light_ground_and_keeps_a_lit_circle_s_white(fw, world, light):
+    """Light Mode (tools/art.py CC_LIGHT): an off circle's glyph, the transport and the sliders' sun and speaker take
+    their _l art; a lit circle (Wi-Fi here) keeps its white glyph on Accent Blue."""
+    names = [n for n in control_center(fw, world, light=light).names if '_cc_' in n]
+    lit = [n for n in names if 'cc_wifi' in n]
+    off = [n for n in names if n.split('_cc_')[1].split('_l')[0] in ('bluetooth', 'airplay', 'car', 'leaf', 'eq', 'sun',
+                                                                     'speaker', 'back', 'play', 'pause', 'forward')]
+    assert lit and not [n for n in lit if n.endswith('_l')]
+    assert off and all(n.endswith('_l') == light for n in off)
 
 
 def landed(fw, world, t, **keys):
@@ -2025,9 +2259,9 @@ def landed(fw, world, t, **keys):
 
 @pytest.mark.parametrize('t, dy', [(0, 0), (50, 8), (140, 0), (190, -2), (279, 0), (280, 0), (5000, 0)])
 def test_landing_open_the_blocks_overshoot_8_px_and_settle_by_280_ms(fw, world, t, dy):
-    """The landing's spring (cc_springs): every block, slider and tile drawn dy lower (the canvas's offset)."""
+    """The landing's spring (cc_springs): every block, circle and slider drawn dy lower (the canvas's offset)."""
     drawn = landed(fw, world, t)
-    blocks = [d for d in drawn if d[0] == (20, 38, 138, 124)]
+    blocks = [d for d in drawn if d[0] == (20, 38, 158, 210)]
     assert blocks and {y for _, _, y in drawn} == {dy}
 
 
@@ -2046,55 +2280,7 @@ def test_the_sliders_fill_to_their_eased_levels(fw, world):
     struct.pack_into('<iiI', fw.var('bright_bar', C.c_char * 12), 0, 25 << 8, 1, 0)
     canvas = control_center(fw, world)
     fills = [r for r, c, _ in canvas.rounded if c == rgba(0xe5e5ea)]
-    assert (192, 170, 163 * 128 // 256, 38) in fills and (20, 170, 163 * 64 // 256, 38) in fills
-
-
-@pytest.mark.parametrize('flag, text, songs, line', [(0, 'Scanned 312', 704, '312'), (1, 'Scanned 800', 704, '800'),
-                                                     (1, 'Scanning', 704, 'Scanning'), (1, 'Scanned 3', 0, '3')])
-def test_without_a_total_to_measure_the_line_is_the_count_and_no_bar(fw, world, st, whole, flag, text, songs, line):
-    """A folder's scan, a scan past the total, no number yet (stock's text), or no library before it."""
-    whole.value = flag
-    win, threads = scan_dialog(fw, world, st, text)
-    before = msg_paint(fw, win)
-    count(fw, threads, songs)
-    poll(world)
-    assert world[named(world, win, 'msg_line')].text == line and added(msg_paint(fw, win), before) == []
-
-
-def test_before_the_count_answers_the_line_is_the_count_and_no_bar(fw, world, st, whole):
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 9')
-    poll(world)
-    before = msg_paint(fw, win)
-    assert world[named(world, win, 'msg_line')].text == '9'
-    count(fw, threads, 704)
-    assert scan_bar(added(msg_paint(fw, win), before))  # the track comes with the count
-
-
-def test_the_scan_s_bar_fills_to_its_part(fw, world, st, whole):
-    win, (x, end, rows, fill_end, fill_rows) = counted(fw, world, st, whole, 'Scanned 352')
-    assert (x, end, rows) == (SCAN_X, SCAN_END, set(range(SCAN_BAR_Y, SCAN_BAR_Y + 6)))
-    assert fill_end == x + (end - x) * 352 // 704 and fill_rows <= rows  # the count's share, on the track
-    heading, line = named(world, win, 'msg_heading'), named(world, win, 'msg_line')
-    assert world.at(heading)[1] < world.at(line)[1] and world.at(line)[1] + world.at(line)[3] <= min(rows)
-    assert world[line].text == '352 of 704'
-
-
-def test_a_scan_window_lower_down_keeps_its_bar_s_place_on_the_screen(fw, world, st, whole):
-    """The bar is in screen rows: the window's own origin is read when it paints."""
-    whole.value = 1
-    win, threads = scan_dialog(fw, world, st, 'Scanned 352')
-    before = msg_paint(fw, win)
-    count(fw, threads, 704)
-    full = scan_bar(added(msg_paint(fw, win), before))
-    world.box(win, 0, 26, 375, 320 - 26)
-    low = scan_bar(added(msg_paint(fw, win), before))
-    assert full and low and low[2] == {y - 26 for y in full[2]} and low[:2] == full[:2] and low[3] == full[3]
-
-
-# USB mode's page: the computer's eject.
-
-USB_LUN = '/sys/kernel/config/usb_gadget/storage_demo/functions/mass_storage.msg/lun.0/file'
+    assert (188, 210, 167 * 128 // 256, 38) in fills and (188, 162, 167 * 64 // 256, 38) in fills
 
 
 def usb_page(fw, world, st, mode=0):
@@ -2269,3 +2455,62 @@ def test_an_empty_folder_level_says_so(fw, world):
     deques[level].clear()
     folder(other)
     assert not world.find(other, '_empty_state')
+
+
+CC_ART_AT = (200, 50, 52, 52)  # control_center.c: the Now Playing block's cover, CC_ART square, CC_ART_IN in
+
+
+def cc_playing(fw, world, mcl, recs, path, cover_type=0, light=False):
+    """Control Center over a queue playing one record at path, by artist B on album A; the player's cover thread has
+    parsed it as cover_type (now_cover: 1 embedded, 2 folder image, 3 none; 0 not parsed). The canvas."""
+    deques = Deques(fw)
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = deques.new([recs(path=path, title='Song', artist='B', album='A')])
+    mcl.pos = 0
+    fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode() if cover_type else b''
+    fw.var('g_playcover_type', C.c_ubyte).value = cover_type
+    canvas = control_center(fw, world, light=light)
+    canvas.keep = deques
+    return canvas
+
+
+def test_control_center_shows_the_cover_home_shows(fw, world, mcl, recs):
+    """Control Center's Now Playing block takes the song's cover from the same lookup as Home's pane and the modal
+    header (coverflow.c song_cover_url): the player's file once it has parsed the song (embedded art or a folder
+    image, its cached bitmap dropped when the song changes, as the player writes each song's to one file), else Cover
+    Flow's cache of the album; none is the block's grey square. Before, the block asked for the
+    player's file as "file://file://..." and showed the grey square for every song (the device, 2026-11-16: 'Heart
+    Shaped Box' blank while Home showed its cover)."""
+    files = Files(fw)
+    Externpic(fw).write()  # the player's file, stat'd (now_cover_written): one write, so every paint sees one key
+    for kind in (1, 2):
+        canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=kind)
+        name = 'file:///tmp/coverpic.jpg' if kind == 1 else 'file:///tmp/externpic.jpg'
+        assert canvas.art(name) == [CC_ART_AT], (kind, sorted(set(canvas.loaded.values())))
+    unloads = lambda: fw.calls('image_manager_unload_bitmap_by_name')  # the name was cc_paint's own buffer
+    before = len(unloads())
+    paint_bg(fw, world.top, Canvas(fw))  # the same song and file: the cached bitmap stays
+    assert len(unloads()) == before
+    cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/b.flac', cover_type=1)  # the next song, the same file
+    assert len(unloads()) == before + 1
+    key = fw.fn('tags_key', C.c_uint, C.c_char_p, C.c_char_p)(b'B', b'A')
+    cached = f'/mnt/mmc/.coverflow/{key:08x}.jpg'
+    files.files[cached] = b'\xff\xd8jpeg'
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=3)  # the player found none
+    assert canvas.art('file://' + cached) == [CC_ART_AT]
+    del files.files[cached]
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=3)
+    assert canvas.arts == [a for a in canvas.arts if a[1] != CC_ART_AT]
+    assert (CC_ART_AT, rgba(0x3a3a3c)) in [(r, c) for r, c, _ in canvas.rounded]  # the grey square
+
+
+@pytest.mark.parametrize('light', [False, True])
+def test_control_center_s_cover_corners_are_the_block_s_colour_as_painted(fw, world, mcl, recs, light):
+    """The cover's rounded corners are scrubbed in the block's colour as the screen shows it: Light Mode's block is
+    the flipped one, so a dark corner would show on it (the emulator, 2026-11-16, once the cover showed)."""
+    canvas = cc_playing(fw, world, mcl, recs, '/mnt/mmc/Music/a.flac', cover_type=1, light=light)
+    flip = fw.fn('flip_if', C.c_uint, C.c_int, C.c_uint)
+    block = [c for r, c, _ in canvas.rounded if r == (188, 38, 167, 114)]
+    x, y = CC_ART_AT[:2]
+    corner = [c for fx, fy, w, h, c in canvas.fills if (fx, fy, h) == (x, y, 1)]
+    want = flip(int(light), 0x1c1c1e)
+    assert corner and set(corner) == {rgba(want) & 0xffffff | 0xff000000} and block

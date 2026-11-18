@@ -45,7 +45,7 @@ static void spot_keep(unsigned key, int sec, int total) {
         for (; i < RESUME_SLOTS - 1; i++) st.spots[i] = st.spots[i + 1];
         st.spots[i].key = 0;
     }
-    BLOB_IO(RESUME_FILE, st.spots, 1);
+    card_blob_write(RESUME_STORE, st.spots, sizeof st.spots);
 }
 
 /* Counts key's play and moves it first, so among equal counts the least recently played is the
@@ -62,7 +62,7 @@ static void play_count(void *r, unsigned key) {
     for (; i > 0; i--) st.plays[i] = st.plays[i - 1];
     st.plays[0].key = key;
     st.plays[0].n = n;
-    BLOB_IO(PLAYS_FILE, st.plays, 1);
+    card_blob_write(PLAYS_STORE, st.plays, sizeof st.plays);
 }
 
 /* Scrobbling (docs/internals.md#scrobbling): a Rockbox-style AudioScrobbler 1.1 log at the card's
@@ -128,10 +128,13 @@ void resume_restart(void) { st.rs_stopped = 0; }
 /* Once a second from the UI loop: a long track saves its place and, when it starts playing near
  * its beginning, jumps to the saved one. A spoken CUE track saves its file's place but jumps only
  * when a Resume row (book_place) started it. A track change waits a poll, so the previous track's
- * time never counts for the new one. */
+ * time never counts for the new one. Places and counts kept in RAM while the card was away go to
+ * it here once it is back. */
 static void resume_poll(void) {
     unsigned now = (unsigned)time_now_ms(), at, n;
     if (now - st.rs_at < 1000) return;
+    card_blob_flush(RESUME_STORE);
+    card_blob_flush(PLAYS_STORE);
     st.rs_at = now;
     int sec = 0, total = 0;
     void *r = queue_now(&at, &n);
@@ -187,8 +190,10 @@ static void resume_poll(void) {
             int pct = scrobble_value("PERCENT");
             st.ls_pct = pct >= 1 && pct <= 100 ? pct : 0;
         }
+        /* up to 3 s on counts as heard: dark, the cached second is up to DARK_POLL_US old, so two
+         * reads a second apart can be 3 s apart; a longer step is a seek */
         int d = sec - st.ls_sec;
-        if (d > 0 && d <= 2) st.ls_heard += d;
+        if (d > 0 && d <= 3) st.ls_heard += d;
         st.ls_sec = sec;
         int listen = total / 2 < LISTEN_MAX_S ? total / 2 : LISTEN_MAX_S;
         if (!st.ls_done && total > LISTEN_MIN_S && st.ls_heard >= listen) {
@@ -228,14 +233,40 @@ static void resume_poll(void) {
     }
 }
 
+/* The headset's absolute volume (AVRCP, 0 to 127) for the Q2's volume v (0 to 100): 0 silent, 100
+ * the headset's top, and between a 40 dB curve, 127 x 10^(-40 dB x (100 - v) / 100 / 20), so each
+ * Q2 step is the same 0.4 dB louder wherever it is. A straight 127 v / 100 put the top half in the
+ * headset's last 6 dB, where a headset that takes the value as a gain is loudest. Under v 58 the
+ * curve's levels come closer together than AVRCP's steps, so there the value rises no slower than
+ * one level every three steps (127 v / 400) and no Q2 step is more than two steps from a change.
+ * At least 1 above 0, so only 0 mutes. docs/internals.md#headset-controls-and-volume. */
+static const unsigned char bt_vol_curve[101] = {
+    0,  1,  1,  1,  2,  2,  2,  2,  3,  3,  3,  3,   4,   4,   4,   5,   5,  5,  6,  6,  6,
+    7,  7,  7,  8,  8,  8,  9,  9,  9,  10, 10, 10,  10,  11,  11,  11,  12, 12, 12, 13, 13,
+    13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 17, 17,  17,  17,  18,  18,  18, 19, 20, 21, 22,
+    23, 24, 25, 27, 28, 29, 30, 32, 33, 35, 37, 38,  40,  42,  44,  46,  48, 51, 53, 55, 58,
+    61, 64, 67, 70, 73, 77, 80, 84, 88, 92, 96, 101, 106, 111, 116, 121, 127
+};
+static unsigned bt_vol_avrcp(int v) { return bt_vol_curve[v < 0 ? 0 : v > 100 ? 100 : v]; }
+/* The Q2 volume a headset's level reads as: the one whose curve value is nearest, the lowest of
+ * those that share it, so a level the Q2 wrote reads back as a volume that writes it again. */
+static int bt_vol_q2(unsigned level) {
+    int best = 0;
+    unsigned off = 255;
+    for (int v = 0; v <= 100; ++v) {
+        unsigned d = bt_vol_curve[v] > level ? bt_vol_curve[v] - level : level - bt_vol_curve[v];
+        if (d < off) best = v, off = d;
+    }
+    return best;
+}
+
 /* Home's Rockbox row (docs/boot.md#rockbox-from-home), bound by coverflow_home: a click leaves
  * Q2 Muse for Rockbox. demo cannot start it itself: Rockbox needs the screen, the keys and ALSA. So
  * demo leaves S90play's flag and ends; S90play sees it, runs Rockbox and starts demo again when
  * Rockbox exits. Bluetooth's daemons are not demo's children and keep the headphones connected, so
  * Rockbox finds them and plays there (q2-rockbox's pcm-alsa). The queue is saved as power-off
- * saves it, charging is handed back as Rockbox expects it at boot, the
- * watchdog (checkappprocess.sh, which reboots once demo is gone) and hciplayer (which holds the
- * DAC's PCM) are stopped, and demo is killed outright, so no exit handler can hang it. */
+ * saves it, charging is handed back as Rockbox expects it at boot, hciplayer (which holds the
+ * DAC's PCM) is stopped, and demo is killed outright, so no exit handler can hang it. */
 int rockbox_open(void *ctx, void *event) {
     void *flag = !rockbox_available() ? (void *)0 : fopen(ROCKBOX_FLAG, "w");
     if (!flag) {
@@ -254,9 +285,9 @@ int rockbox_open(void *ctx, void *event) {
      */
     if (bt_link() && g_bluetoothflag && bt_linkstatus &&
         (unsigned)btctl_transport_get_volume() <= 127)
-        btctl_transport_set_volume(((g_maxvolume < 100 ? g_maxvolume : 100) * 127 + 50) / 100);
+        btctl_transport_set_volume(bt_vol_avrcp(g_maxvolume));
     ringnav_clean_end(); /* the watchdog would outlive demo's kill; nothing to report */
-    system("killall checkappprocess.sh; killall -9 hciplayer; " SPOT_KILL "; sync; kill -9 $PPID");
+    system("killall -9 hciplayer; " SPOT_KILL "; sync; kill -9 $PPID");
     return 0;
 }
 
@@ -275,13 +306,15 @@ static int np_animating(void) {
 }
 
 /* Keep stock VOLUME for wired/USB and boot; Bluetooth saves its own level. Smart Wi-Fi's own
- * toggles of the Wi-Fi switch save nothing (smart_config). */
+ * toggles of the Wi-Fi switch save nothing (smart_config). A key a wheel steps is held and written
+ * once it settles (config_hold, config_ini.c), under the output's key as it was at the step. */
 int ringnav_write_config(int value, const char *section, const char *key) {
     if (smart_config(section, key)) return 0;
     if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && airplay_on())
         section = "Q2POD", key = "AIRVOL"; /* an AirPlay speaker's, while it plays (airplay.c) */
     else if (!tk_strcmp(section, "PLAYSET") && !tk_strcmp(key, "VOLUME") && mclGetOutputWay() == 1)
         key = "BT_VOLUME";
+    if (config_hold(value, section, key)) return 0;
     return stock_write_config_trampoline(value, section, key);
 }
 
@@ -291,6 +324,7 @@ int ringnav_output(int way) {
     if (changed &&
         !airplay_on()) { /* a speaker's level stays its own; airplay.c swaps back at its end */
         write_int_config(g_volume, "PLAYSET", "VOLUME");
+        config_settle(1); /* the old output's level on the flash before the new one's is read */
         char s[256] = "";
         toolsReadConfig("/mnt/data/config.ini", "PLAYSET", way == 1 ? "BT_VOLUME" : "VOLUME", s,
                         "");
@@ -326,10 +360,10 @@ static int bt_sync_volume(int left, int right) {
     if (cur > 127) return btvol.failed = 1, 0; /* no absolute volume (yet): the slow pace */
     int v = left > right ? left : right;
     v = v < 0 ? 0 : v > 100 ? 100 : v;
-    /* 128 headset steps onto 101: one that already reads as v stays, so the headset's own steps
-     * hold */
-    if ((int)(cur * 100 + 63) / 127 != v) {
-        unsigned want = (v * 127 + 50) / 100;
+    /* v's level on the curve, unless the headset is there or at a level of its own that reads as
+     * v, so the headset's own steps hold */
+    unsigned want = bt_vol_avrcp(v);
+    if (cur != want && bt_vol_q2(cur) != v) {
         if (btctl_transport_set_volume(want)) return btvol.failed = 1, 0;
         cur = want;
     }
@@ -381,7 +415,7 @@ static void bt_volume_poll(void) {
         return;
     }
     if (cur == btvol.last) return;
-    int v = (cur * 100 + 63) / 127;
+    int v = bt_vol_q2((unsigned)cur), from = g_volume;
     int limit = g_maxvolume < 100 ? g_maxvolume : 100;
     if (v > limit) v = limit;
     btvol.last = cur;
@@ -389,11 +423,7 @@ static void bt_volume_poll(void) {
     *(volatile signed char *)0xa4cbb5u = (signed char)v; /* stock responseSetVolume's level */
     device_set_volume(v, 1);
     write_int_config(v, "PLAYSET", "VOLUME");
-    void *top = vol_top();
-    if (top) {
-        void *slider = widget_lookup(top, "slider_vol", 1);
-        if (slider) widget_set_prop_int(slider, "value", v);
-    }
+    vol_show(from); /* on screen, as a wheel's change: volume.c */
 }
 
 /* main_loop_sleep_default paces the UI loop at 8 ms (125 Hz), screen on or off. With the backlight
@@ -410,10 +440,30 @@ static void bt_volume_poll(void) {
  * (woke_at). With the screen on, a pass idles IDLE_SLEEP_MS once input and window animations have
  * been still for IDLE_MS, except while Now Playing animates or the volume row's push runs (it
  * leaves 5.3 s after the last key). */
-static volatile int dark_quiet; /* read by ringnav_dark_usleep on stock's threads */
-static int tone_dark;           /* this pass clicked with the screen off (ringnav_buzzer) */
+static int dark_quiet;         /* dark, nothing playing, the DAC off: the long idle */
+static volatile int dark_slow; /* the player polls' slow pace; read on stock's status thread */
+static int player_quick;       /* ringnav_mainscheduling: the track's end is near or just passed */
+static int tone_dark;          /* this pass clicked with the screen off (ringnav_buzzer) */
+/* mclSyncPlayerStatus' 200 ms wait (DARK_POLLS): DARK_POLL_US while dark_slow. */
 int ringnav_dark_usleep(unsigned us) {
-    return usleep(dark_quiet && us < DARK_POLL_US ? DARK_POLL_US : us);
+    return usleep(dark_slow && us < DARK_POLL_US ? DARK_POLL_US : us);
+}
+/* Dark, may stock's status sync and player scheduling slow to DARK_POLL_US? Always when quiet.
+ * While the local player plays or is paused, only the screen reads its position closely, so they
+ * slow down unless something else follows it: the track's last DARK_END_LEAD_S and the moments
+ * after its end (player_quick: the Gapless preload, a change without Gapless, the sleep timer's
+ * end, Download Ahead's next song), A-B Repeat's loop (check_abrepeatmode reads the cached
+ * position), Car Remote (the phone shows it), or another player (AirPlay, Bluetooth receive, a
+ * video), which keeps stock's pace. Play and pause need neither: mclSetPause and mclSetResume
+ * set the status word themselves. ponytail: dark, the cached second can be up to DARK_POLL_US
+ * old: Resume's place, a card app's .now and the listen count (playback_power.c resume_poll) see
+ * the position that much later; and lit again, the thread finishes its long sleep first, so Now
+ * Playing's time and a lyric line can lag up to a second at wake. */
+static int dark_slow_ok(int quiet) {
+    if (quiet) return 1;
+    return !player_quick && media_owner() == 1 && !video_on() && airplayGetFlag() != 2 &&
+           (signed char)bt__recv_pageflag != 2 && !coda_rc_enabled() &&
+           !(*(volatile unsigned char *)REPEAT_INFO && I(REPEAT_INFO, REPEAT_AB_STATE) == 2);
 }
 /* The cover pollers feed only what is painted, so they slow down whenever the screen is off,
  * playing or not. ponytail: art parsed while dark can show up to DARK_POLL_US late after wake. */
@@ -422,23 +472,27 @@ int ringnav_dark_cover_usleep(unsigned us) {
 }
 /* on_wm_idle_status ran player_mainscheduling every UI pass, and its mclAutoChange asks hciplayer
  * for its status and waits for the answer on the UI thread: 40 to 125 round trips a second, each
- * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark and quiet:
+ * waking both players. It runs every MAINSCHEDULING_MS instead, DARK_POLL_US while dark_slow:
  * a lyric line and the play-state notifications follow within that, as stock's 200 ms status sync
  * does. From a second before the playing track's end (player_playtime_and_length's cache, a CUE
  * track's own end) until MAINSCHEDULING_END_MS after, it runs every pass, so a change without
- * Gapless starts as soon as stock's did; paused, it stays paced. ponytail: a length that overstates
- * the audio (a VBR MP3 without a Xing header) ends outside the window, up to 100 ms late; follow
- * mclAutoChange's own end flag if that shows. */
+ * Gapless starts as soon as stock's did; paused, it stays paced. Playing, from DARK_END_LEAD_S
+ * before the end, or with no length or position to go by, player_quick keeps dark_slow off.
+ * ponytail: a length that overstates the audio (a VBR MP3 without a Xing header) ends outside the
+ * window, up to 100 ms late (DARK_POLL_US dark); follow mclAutoChange's own end flag if that
+ * shows. */
 #define MAINSCHEDULING_MS 100
 #define MAINSCHEDULING_END_MS 2000
 int ringnav_mainscheduling(void) {
     static unsigned last, end;
-    int sec = -1, total = 0;
-    if (mclGetPlayStatus() == 2) player_playtime_and_length(&sec, &total);
+    int sec = -1, total = 0, playing = mclGetPlayStatus() == 2;
+    if (playing) player_playtime_and_length(&sec, &total);
     unsigned now = (unsigned)time_now_ms(),
-             gap = dark_quiet ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
+             gap = dark_slow ? DARK_POLL_US / 1000 : MAINSCHEDULING_MS;
     if (total > 0 && total - sec <= 1) end = now | !now;
-    if (last && now - last < gap && !(end && now - end < MAINSCHEDULING_END_MS)) return 0;
+    int ending = end && now - end < MAINSCHEDULING_END_MS;
+    player_quick = ending || (playing && (total <= 0 || sec < 0 || total - sec <= DARK_END_LEAD_S));
+    if (last && now - last < gap && !ending) return 0;
     last = now | !now; /* never 0 */
     return player_mainscheduling();
 }
@@ -464,6 +518,7 @@ int ringnav_sleep(void *loop) {
     stale_heal();
     quick_poll();
     headset_poll();
+    bt_ui_poll(); /* Settings > Bluetooth's scan, the connection toasts (bt_ui.c) */
     headset_eq_poll();
     bt_volume_poll();
     video_poll();
@@ -471,6 +526,7 @@ int ringnav_sleep(void *loop) {
     radio_poll();
     addon_poll();
     coda_rc_poll();
+    song_radio_poll();
     airplay_poll();
     playback_poll();
     resume_poll();
@@ -482,6 +538,7 @@ int ringnav_sleep(void *loop) {
     lyric_poll();
     keep_lit_poll();
     np_art_poll();
+    np_settle_poll();
     if ((st.np_slide && widget_get_prop_int(st.np_slide, "value", 0)) || /* off the art page */
         np_about_page()) /* the details over it (np_about.c) */
         *(volatile signed char *)BC_IDLE = BC_IDLE_FULL;
@@ -492,10 +549,11 @@ int ringnav_sleep(void *loop) {
                     airplayGetFlag() != 2 && (signed char)bt__recv_pageflag != 2 &&
                     time_now_ms() - st.wake_at >= WAKE_MS;
         dark_quiet = quiet;
+        dark_slow = dark_slow_ok(quiet);
         if ((unsigned)time_now_ms() - st.tick_at >= DARK_TURN_MS)
             sleep_ms(quiet ? DARK_IDLE_SLEEP_MS : SCREEN_OFF_SLEEP_MS);
     } else if (st.dark) {
-        dark_quiet = 0;
+        dark_quiet = dark_slow = 0;
         if (st.dark & 2) st.woke_at = (unsigned)time_now_ms();
         st.dark = 0;
         if (st.clock_timer) clock_show(); /* a time set while dark */

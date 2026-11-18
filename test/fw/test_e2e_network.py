@@ -19,7 +19,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, block, high_halves, libc
+from conftest import O, Deques, block, high_halves, libc, stock_prop_str
 from test_addon import Dirent
 from test_lyrics import Ly
 
@@ -371,7 +371,7 @@ class Net:
         if not self.up or reply is None:
             return 6  # CURLE_COULDNT_RESOLVE_HOST
         reply = reply(url) if callable(reply) else reply
-        h.code, h.location = reply.code, reply.location
+        h.code, h.location, h.length = reply.code, reply.location, len(reply.body)
         if reply.fail or h.opts.get(44):  # NOBODY: the headers alone
             return reply.fail
         write = WRITE(h.opts[20011]) if 20011 in h.opts else None
@@ -400,6 +400,8 @@ class Net:
             loc = C.create_string_buffer(h.location.encode()) if h.location else None
             self.keep.append(loc)
             C.c_void_p.from_address(out).value = C.addressof(loc) if loc else None
+        elif what == 0x30000f:  # CONTENT_LENGTH_DOWNLOAD
+            C.c_double.from_address(out).value = getattr(h, 'length', -1)
         return 0
 
 
@@ -508,13 +510,16 @@ class Ui:
 
     def prop_str(self, p, name, default, *_):
         """A widget's name, as AWTK hands out its widget->name: one buffer per name a widget has had,
-        kept to the test's end, so a name the C holds stays readable while it asks again."""
-        if s(name) not in ('name', 'image') or p not in self.widgets:
-            return default
-        value = self.get(p).name if s(name) == 'name' else getattr(self.get(p), 'image', None)
-        if value is None:
-            return default
-        key = (p, value)
+        kept to the test's end, so a name the C holds stays readable while it asks again; NULL where stock's
+        is (conftest.stock_prop_str), as for a widget never named."""
+        if p not in self.widgets:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        widget, key = self.get(p), s(name)
+        value = (widget.name or None) if key == 'name' else getattr(widget, 'image', None) if key == 'image' else None
+        value = stock_prop_str(widget.kind.encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        if not isinstance(value, bytes):
+            return 0 if value is None else value
+        key = (p, value.decode())
         if key not in self.names:
             self.names[key] = C.create_string_buffer(key[1].encode())
         return C.addressof(self.names[key])
@@ -750,7 +755,7 @@ def w(fw, mcl):
     assert not world.ui.stale, f'text written to widgets already gone: {world.ui.stale}'
 
 
-# Network Update (System Update's second row)
+# Software Update's online half: General's Software Update row, the check and the download
 
 RELEASES = 'https://github.com/owner/repo/releases'  # host.py builds with --update-repo's owner/repo
 LATEST = RELEASES + '/latest'
@@ -779,28 +784,37 @@ def signed(tar, tag=NEWER):
     return host.tools_signing.sign(f'q2-coda-update-v1 {tag} {hashlib.sha512(tar).hexdigest()}\n'.encode(), PEM)
 
 
-class SystemUpdate:
-    """Stock's System Update page as its builder leaves it, two rows of a button (named by its index) over
-    its label, with ringnav_fwupdate run on it: the second row is Network Update's."""
-    def __init__(self, w):
-        self.w, ui = w, w.ui
-        self.page = ui.new(0, 'window', 'systemset_fwupdate_page')
-        view = ui.new(self.page, 'view', 'scroll_view_fwupdate')
-        self.buttons, self.labels = [], []
-        for i, text in enumerate(('tr:update_tf', 'tr:update_online')):
-            self.buttons.append(ui.new(ui.new(view, 'row'), 'button', str(i)))
-            self.labels.append(ui.new(self.buttons[-1], 'label', text=text))
-            ui.get(ui.new(self.buttons[-1], 'image')).image = 'list_into'  # stock's chevron
-        w.mock('stock_fwupdate_trampoline', lambda *_: 0)
-        w.mock('fwupdate_tf', lambda *_: w.log.append(('fwupdate_tf',)))
-        assert w.fn('ringnav_fwupdate', C.c_int, C.c_void_p, C.c_void_p)(self.page, None) == 0
+SW_CHECKING, SW_LATEST, SW_OFFER_NET, SW_OFFER_SD, SW_DOWNLOADING = 0, 2, 10, 11, 12  # sw_update.c's results
+SW_FULL_CODE = -12  # check_updatefw_exist's answer for no room: the card's check stops there, its tar unread
+
+
+class SoftwareUpdate:
+    """General's Software Update row pressed (sw_update.c sw_update_open) with Wi-Fi on: the online check against
+    the routes, and the card's check, whose stock half (check_updatefw_exist) stands in, logging each card check
+    ('card_check') and answering card; then the offer's button pressed with Centre."""
+    def __init__(self, w, card=SW_FULL_CODE):
+        from test_sw_update import Sw
+        self.w = w
+        w.byte('g_wififlag', 1)
+        w.mock('check_updatefw_exist', lambda *_: w.log.append(('card_check',)) or card)
+        self.sw = w.fw.var('sw_update__swu', Sw)
+        self.key = w.fn('sw_update_key', C.c_int, C.c_void_p, C.c_uint)
+        w.fn('sw_update_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
 
     def press(self):
-        self.w.ui.click(self.buttons[1])
+        assert self.key(self.sw.page, O['KEY_CENTER']) == 1
+
+    @property
+    def result(self):
+        return self.sw.result
 
     @property
     def text(self):
-        return self.w.ui.get(self.labels[1]).text
+        """The download's progress as its page says it."""
+        return 'Verifying…' if self.sw.verifying else f'{self.sw.percent}%'
+
+    def checks(self):
+        return [e for e in self.w.log if e == ('card_check',)]
 
 
 def releases(w, tag=NEWER, tar=UPDATE_TAR, sig=None, **reply):
@@ -811,22 +825,29 @@ def releases(w, tag=NEWER, tar=UPDATE_TAR, sig=None, **reply):
     w.net.route(asset(tag) + '.sig', sig or Reply(200, signed(tar, tag)))
 
 
-def test_network_update_checks_downloads_and_hands_the_tar_to_stocks_tf_update(w):
-    w.ui.wifi = 3
-    page = SystemUpdate(w)
-    seen = []
-    releases(w, during=lambda sent: (w.ui.run(500), seen.append(page.text)))
-    assert page.buttons[1] and w.ui.get(page.buttons[1]).name == '2'  # stock's click (an atoi of it) passes it by
-    page.press()
-    assert page.text == 'Checking…'
+def offered(w, **kw):
+    """Software Update opened on a newer release, its check done: the offer, online first."""
+    page = SoftwareUpdate(w, **kw)
     w.ui.run(500)
-    assert seen == ['Downloading 25%', 'Downloading 50%', 'Downloading 75%', 'Downloading 100%']
-    assert w.card.files[TAR] == UPDATE_TAR and PART not in w.card.files
-    assert page.text == 'tr:update_online' and not w.ui.toasts
-    # the part whole on the card, renamed, and the rename's entry on the card, before stock flashes it
-    steps = [e for e in w.log if e[0] in ('fsync', 'rename', 'fwupdate_tf')]
-    assert steps == [('fsync', PART), ('rename', PART, TAR), ('fsync', '/mnt/mmc'), ('fwupdate_tf',)]
-    assert w.net.asked == [LATEST, asset() + '.sig', asset()]
+    assert page.result == SW_OFFER_NET and page.sw.net_kb == len(UPDATE_TAR) // 1024
+    return page
+
+
+def test_software_update_checks_downloads_and_hands_the_tar_to_the_cards_check(w):
+    releases(w)
+    page = offered(w)
+    assert w.net.asked == [LATEST, asset()]  # the check: the tag, then the size, headers alone
+    seen = []
+    releases(w, during=lambda sent: (w.ui.run(300), seen.append(page.text)))
+    page.press()
+    assert page.result == SW_DOWNLOADING
+    w.ui.run(500)
+    assert seen == ['25%', '50%', '75%', '100%']
+    assert w.card.files[TAR] == UPDATE_TAR and PART not in w.card.files and not w.ui.toasts
+    # the part whole on the card, renamed, and the rename's entry on the card, before the card's check of it
+    steps = [e for e in w.log if e[0] in ('fsync', 'rename', 'card_check')]
+    assert steps == [('card_check',), ('fsync', PART), ('rename', PART, TAR), ('fsync', '/mnt/mmc'), ('card_check',)]
+    assert w.net.asked == [LATEST, asset(), LATEST, asset() + '.sig', asset()]
     assert '/tmp/q2-update.sig' not in w.card.files and w.card.reads[PART] == 1  # the part read back once, to check it
     held = w.calls('reset_poweroptions_timer')
     assert held and all(c[:3] == (1, 1, 0) for c in held)  # standby and auto power-off, not the screen
@@ -835,123 +856,91 @@ def test_network_update_checks_downloads_and_hands_the_tar_to_stocks_tf_update(w
 
 
 @pytest.mark.parametrize('tag', [TAG, '0.9.9'])
-def test_network_update_on_the_latest_release_or_an_older_one_writes_nothing(w, tag):
-    w.ui.wifi = 3
-    page = SystemUpdate(w)
+def test_software_update_on_the_latest_release_or_an_older_one_writes_nothing(w, tag):
     releases(w, tag)
+    page = SoftwareUpdate(w, card=-11)  # no update.tar either
+    w.ui.run(500)
+    assert page.result == SW_LATEST and page.sw.note == 0 and w.net.asked == [LATEST]
+    assert not w.card.tree() and not w.ui.toasts
+
+
+def test_an_online_check_with_no_network_leaves_the_cards_answer_and_offers_to_try_again(w):
+    w.net.up = False
+    page = SoftwareUpdate(w, card=-11)
+    w.ui.run(500)
+    assert page.result == SW_LATEST and page.sw.note == 3 and w.net.asked == [LATEST] and not w.card.tree()
+    w.net.up = True
+    releases(w)
+    page.key(page.sw.page, O['KEY_NEXT'])  # the wheel on Couldn't check online · Try Again
     page.press()
     w.ui.run(500)
-    assert w.ui.toasts == ['Latest firmware installed'] and w.net.asked == [LATEST]
-    assert not w.card.tree() and page.text == 'tr:update_online' and not w.calls('fwupdate_tf')
+    assert page.result == SW_OFFER_NET and page.sw.note == 0 and len(page.checks()) == 1  # the card isn't asked again
 
 
-def test_network_update_cut_off_midway_keeps_the_old_tar(w):
-    w.ui.wifi = 3
+def test_a_download_cut_off_midway_keeps_the_old_tar_and_offers_it_again(w):
     w.card.put(TAR, b'the release before', count=False)
-    page = SystemUpdate(w)
     releases(w, cut=len(UPDATE_TAR) // 2)
+    page = offered(w)
     page.press()
     w.ui.run(500)
     assert w.ui.toasts == ["Can't reach GitHub"] and w.card.tree() == {'update.tar': b'the release before'}
-    assert page.text == 'tr:update_online' and not w.calls('fwupdate_tf')
+    assert page.result == SW_OFFER_NET and len(page.checks()) == 1
 
 
-def test_network_update_with_no_network_asks_once(w):
-    w.ui.wifi = 3  # the bars, but no way out
-    w.net.up = False
-    page = SystemUpdate(w)
-    page.press()
-    w.ui.run(500)
-    assert w.ui.toasts == ["Can't reach GitHub"] and w.net.asked == [LATEST] and not w.card.tree()
-
-
-def test_network_update_on_a_full_card_says_so_and_gives_the_room_back(w):
-    w.ui.wifi = 3
+def test_a_download_onto_a_full_card_says_so_and_gives_the_room_back(w):
     w.card.room = len(UPDATE_TAR) // 3
-    page = SystemUpdate(w)
     releases(w)
+    page = offered(w)
     page.press()
     w.ui.run(500)
     assert w.ui.toasts == ["Can't write to the card"] and not w.card.tree() and w.card.room == len(UPDATE_TAR) // 3
 
 
-def test_a_second_press_cancels_the_download_and_a_third_before_it_ends_does_nothing(w):
-    w.ui.wifi = 3
+def test_leaving_software_update_cancels_its_download(w):
     w.card.put(TAR, b'the release before', count=False)
-    page = SystemUpdate(w)
-    seen = []
-    def during(sent):
-        if sent == len(UPDATE_TAR) // 4:
-            page.press()
-            seen.append(page.text)
-    releases(w, during=during)
-    page.press()
-    w.ui.work()
-    assert seen == ['Canceling…'] and w.net.asked == [LATEST, asset() + '.sig', asset()]
-    page.press()  # the thread has ended, not yet joined
-    w.ui.run(500)
-    assert w.ui.started == 1 and w.ui.toasts == ['Download canceled']
-    assert w.card.tree() == {'update.tar': b'the release before'} and page.text == 'tr:update_online'
-
-
-def test_leaving_system_update_cancels_its_download(w):
-    w.ui.wifi = 3
-    page = SystemUpdate(w)
-    releases(w, during=lambda sent: sent == len(UPDATE_TAR) // 4 and w.ui.destroy(page.page))
-    page.press()
-    w.ui.run(500)
-    assert w.ui.toasts == ['Download canceled'] and not w.card.tree()
-    assert len(w.net.asked) == 3 and not w.calls('fwupdate_tf')
-
-
-def test_a_download_that_ends_as_the_page_closes_says_where_it_is(w):
-    w.ui.wifi = 3
-    page = SystemUpdate(w)
     releases(w)
+    page = offered(w)
+    releases(w, during=lambda sent: sent == len(UPDATE_TAR) // 4 and w.ui.destroy(page.sw.page))
     page.press()
-    w.ui.work()
-    w.ui.destroy(page.page)  # after the rename, before the join
     w.ui.run(500)
-    assert w.ui.toasts == ['Update downloaded: use SD Card Update'] and w.card.files[TAR] == UPDATE_TAR
-    assert not w.calls('fwupdate_tf')
+    assert not w.ui.toasts and w.card.tree() == {'update.tar': b'the release before'}
+    assert len(w.net.asked) == 5 and len(page.checks()) == 1 and not page.sw.page
 
 
-def test_network_update_refuses_an_unsigned_release_before_downloading_it(w):
+def test_software_update_refuses_an_unsigned_release_before_downloading_it(w):
     """q2-pod's upstream releases carry no update.tar.sig."""
-    w.ui.wifi = 3
     w.card.put(TAR, b'the release before', count=False)
-    page = SystemUpdate(w)
     releases(w, sig=Reply(404, b'Not Found'))
+    page = offered(w)
     page.press()
     w.ui.run(500)
-    assert w.ui.toasts == ['Release not signed: not installed'] and w.net.asked == [LATEST, asset() + '.sig']
-    assert w.card.tree() == {'update.tar': b'the release before'} and not w.calls('fwupdate_tf')
+    assert w.ui.toasts == ['Release not signed: not installed'] and w.net.asked[2:] == [LATEST, asset() + '.sig']
+    assert w.card.tree() == {'update.tar': b'the release before'} and len(page.checks()) == 1
 
 
 @pytest.mark.parametrize('how', ['tar', 'sig', 'tag'])
-def test_network_update_refuses_a_forged_release_and_keeps_the_old_tar(w, how):
+def test_software_update_refuses_a_forged_release_and_keeps_the_old_tar(w, how):
     """A tar changed after signing, a signature changed, and an older release's file and signature under a newer tag."""
-    w.ui.wifi = 3
     w.card.put(TAR, b'the release before', count=False)
-    page = SystemUpdate(w)
     sig = signed(UPDATE_TAR)
     tar = UPDATE_TAR[:-1] + b'!' if how == 'tar' else UPDATE_TAR
     sig = bytes([sig[0] ^ 1]) + sig[1:] if how == 'sig' else signed(UPDATE_TAR, TAG) if how == 'tag' else sig
     releases(w, tar=tar, sig=Reply(200, sig))
+    page = offered(w)
     page.press()
     w.ui.run(500)
-    assert w.ui.toasts == ['Signature check failed: not installed'] and len(w.net.asked) == 3
-    assert w.card.tree() == {'update.tar': b'the release before'} and not w.calls('fwupdate_tf')
-    assert not [e for e in w.log if e[0] == 'rename'] and page.text == 'tr:update_online'
+    assert w.ui.toasts == ['Signature check failed: not installed'] and len(w.net.asked) == 5
+    assert w.card.tree() == {'update.tar': b'the release before'} and len(page.checks()) == 1
+    assert not [e for e in w.log if e[0] == 'rename']
 
 
 def test_a_worker_done_before_pthread_create_returns_is_still_reported(w):
-    w.ui.wifi, w.ui.eager = 3, True
-    page = SystemUpdate(w)
+    w.ui.eager = True
     releases(w)
+    page = offered(w)
     page.press()
     w.ui.run(500)
-    assert w.card.files[TAR] == UPDATE_TAR and ('fwupdate_tf',) in w.log
+    assert w.card.files[TAR] == UPDATE_TAR and len(page.checks()) == 2
 
 
 # Q2 Shelf: System settings' App Store
@@ -1121,47 +1110,39 @@ def test_the_app_store_removes_an_app_with_what_it_saved_and_without_wifi(w):
 
 
 def test_wifi_gates_the_online_jobs_until_it_comes_up(w):
-    store, page = AppStore(w), SystemUpdate(w)  # no list on the card yet; opened offline, no check
+    store = AppStore(w)  # no list on the card yet; opened offline, no check
     before = w.ui.rows(store.page)
     assert store.rows() == [] and store.detail(store.CHECK) == ''  # OLED's note under the row says why
     assert w.ui.texts(store.page)[-2:] == ['No apps listed', 'Connect to Wi-Fi, then Check for Updates']
     store.press(store.CHECK)
-    page.press()
-    assert w.ui.toasts == ['Connect to Wi-Fi first'] * 2 and not w.ui.started
+    assert w.ui.toasts == ['Connect to Wi-Fi first'] and not w.ui.started
     w.ui.run(1000)
-    assert not w.net.asked and page.text == 'tr:update_online' and w.ui.rows(store.page) == before
-    w.ui.wifi = 2  # it comes up: the same presses go out
+    assert not w.net.asked and w.ui.rows(store.page) == before
+    w.ui.wifi = 2  # it comes up: the same press goes out
     GitHub(w, 'me/q2-foo Foo\n').release('me/q2-foo', '1.0', app_zip('x'))
-    releases(w, TAG)
     store.press(store.CHECK)
     assert store.rows() == [] and store.detail(store.CHECK) == 'Checking…'  # the list is loading: no app rows yet
     w.ui.run(500)
-    assert store.rows() == [('Foo', 'Install')] and w.ui.toasts[2:] == []  # System Update's page covers it: no count
-    page.press()
-    w.ui.run(500)
-    assert w.ui.toasts[2:] == ['Latest firmware installed'] and w.ui.started == 2
+    assert store.rows() == [('Foo', 'Install')] and w.ui.started == 1
 
 
 def test_a_job_whose_thread_cant_start_says_so_and_the_next_press_starts_it(w):
     w.ui.wifi = 3
     GitHub(w, 'me/q2-foo Foo\n').release('me/q2-foo', '1.0', app_zip('x'))
-    releases(w, TAG)
     installed(w, sources='me/q2-foo Foo\n')  # opened offline-checked: no job runs
     w.ui.wifi = -1
-    store, page = AppStore(w), SystemUpdate(w)
+    store = AppStore(w)
     w.ui.wifi = 3
     w.mock('fw_pthread_create', lambda *_: 11)  # EAGAIN
-    page.press()
     store.press('Foo')
     store.press('Foo')  # Installed's second press removes it
-    assert len(w.ui.toasts) == 2 and page.text == 'tr:update_online'  # one each, and both rows as before
+    assert len(w.ui.toasts) == 1  # it says so, and the row is as before
     assert store.rows() == [('Foo', 'Installed')] and FOO_FILES <= set(w.card.tree()) and not w.ui.timers
     w.mock('fw_pthread_create', w.ui.create)
-    page.press()
     store.press('Foo')
     store.press('Foo')
     w.ui.run(500)
-    assert w.ui.toasts[2:] == ['Latest firmware installed', 'Foo removed']
+    assert w.ui.toasts[1:] == ['Foo removed']
 
 
 def test_an_install_without_room_says_how_much_more_and_downloads_nothing(w):
@@ -1980,11 +1961,3 @@ def test_the_cover_search_offline_asks_once(w):
     w.mock('online_addcoverlist', lambda url, *_: covers.append(s(url)))
     w.fn('ringnav_cover_search', None, C.c_char_p)(b'Album B Artist B')
     assert w.net.asked == [MB_SEARCH] and not covers
-
-
-def test_sd_card_update_has_no_chevron_and_network_update_keeps_its_own(w):
-    """SD Card Update acts in place (audit2 J4): stock's chevron goes from its row; Network Update opens its check."""
-    page = SystemUpdate(w)
-    chevrons = [[w.ui.get(c).visible for c in w.ui.get(b).children if getattr(w.ui.get(c), 'image', None)]
-                for b in page.buttons]
-    assert chevrons == [[False], [True]]

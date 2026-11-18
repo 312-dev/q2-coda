@@ -23,6 +23,7 @@
  * it isn't running: addon.c addon_wake), the offline queue, and the ratings channel (ratings.out,
  * ratings.in). */
 #include "navigation.h"
+#include "stream_path.h"
 
 #define CAT_DIR "/mnt/mmc/.q2pod"
 #define CAT_DB CAT_DIR "/catalogue.db"
@@ -124,10 +125,12 @@ static struct {
     int cp_start;
     /* Now Playing's song from a press until the player parses one (catalogue_np_now): its record
      * (one copied into np_list), its place in its list, the parse count and time it began at, and
-     * the title and artist labels' text as set last, hashed */
+     * the title and artist labels' text as set last, hashed; np_back: shown no more, the player's
+     * own title and artist still to be written (catalogue_np_text) */
     void *np_list;
     unsigned np_at, np_n, np_parses, np_since;
     unsigned np_text[2];
+    int np_back;
     char np_cover[160]; /* its art: "file://" and the app's cover, or stock's placeholder */
     /* cat_row_of's last answer, on the UI thread: the path's fnv64, local_gen plus 1 when it was
      * found, and the entry's index plus 1 (0 for none). Now Playing's badge asks for the playing
@@ -1150,13 +1153,26 @@ int catalogue_seconds(const char *path) {
     return e ? e->sec : -1;
 }
 
-/* The server row whose offline copy path is, or 0: a Stream Cache file the app played it from. */
+static int cat_app_of(const char *path);
+/* The server row whose offline copy path is, or 0: a Stream Cache file the app played it from,
+ * named in catalogue.avail, or a song it streams, whose download in its stream cache only the sid
+ * in the file's name ties to the row (stream_path.h; the device, 2026-11-16: no cover in Control
+ * Center or the car for one). Every UI lookup from a playing path to its server row comes here:
+ * its cover (catalogue_cover: the player's cover thread, Up Next, the modal header), its play key
+ * and hearts (cat_row_of) and its genre and year (catalogue_np_info). */
 static const cat_ent *cat_copy_of(const char *path) {
     if (!path || !tk_str_start_with(path, "/mnt/mmc/.")) return 0;
     for (unsigned i = 0; i < cat.ix.n; ++i)
         if (cat.ix.e[i].local && !strcmp(ix_str(&cat.ix, cat.ix.e[i].local), path))
             return &cat.ix.e[i];
-    return 0;
+    const char *app, *sid;
+    int appn, sidn, slot = -1;
+    char key[64];
+    if (!stream_path_sid(path, &app, &appn, &sid, &sidn) || sidn >= (int)sizeof key ||
+        (slot = cat_app_of(path)) < 0)
+        return 0;
+    memcpy(key, sid, (unsigned)sidn), key[sidn] = 0;
+    return ix_sid(&cat.ix, slot, key);
 }
 /* The server row r plays as: r's own path is a Stream Cache copy of it (not a linked card file's
  * row, which plays from the card). 0 for any other record. On the UI thread only (stock's cover
@@ -1775,17 +1791,24 @@ static void np_press(void *q, int at) {
     cat.np_at = (unsigned)at, cat.np_n = deque_size(q);
     cat.np_parses = id3_parses, cat.np_since = time_now_ms();
     cat.np_text[0] = cat.np_text[1] = 0;
+    cat.np_back = 0;
     tk_snprintf(cat.np_cover, sizeof cat.np_cover, "file://");
     if (!catalogue_cover(P(deque_at(cat.np_list, 0), REC_PATH), cat.np_cover + 7,
                          sizeof cat.np_cover - 7))
         tk_snprintf(cat.np_cover, sizeof cat.np_cover, "play_defaultcover");
     timer_add(np_stop, 0, 0);
 }
-/* The pressed song shown no more: stock writes its own title and artist again
- * (g_forcerefresh_flag, as Play/Pause has it do). */
+/* The pressed song shown no more: the player's title and artist go back on the page. Stock's update
+ * writes them only while g_forcerefresh_flag (or g_autochange_flag) is set, and every library list
+ * page's timer clears it too: one set here, from inside Now Playing's update (np_bar.c np_sync,
+ * after its title), was taken by the Songs page under it before Now Playing's next update, so the
+ * pressed song's title stayed on the song playing (the device, 2026-11-17, Shuffle Songs then
+ * Next). catalogue_np_text writes them itself (np_back), the flag still asking stock for the rest.
+ */
 static void np_done(void) {
     if (!cat.np_list) return;
     deque_destroy(cat.np_list), cat.np_list = 0;
+    cat.np_back = 1;
     g_forcerefresh_flag = 1;
 }
 /* The record Now Playing shows in place of the playing one, *at and *n its place in its list, or
@@ -1804,11 +1827,26 @@ static unsigned wide_hash(const unsigned *s) {
     return h;
 }
 /* win's title and artist (scrlabel_title, scrlabel_artist) as the shown song's, set again only
- * when their text is not what was set last (stock rewrites them on its own refreshes). */
+ * when their text is not what was set last (stock rewrites them on its own refreshes). After the
+ * pressed song (np_back): once, the playing song's as the player parsed them (now_tag, whose tags
+ * are complete once g_play_id3_info names its path), the record's name for a title it has none
+ * of, as stock's g_song_name has it. */
 void catalogue_np_text(void *win) {
     static const char *const names[] = { "scrlabel_title", "scrlabel_artist" };
     unsigned at, n;
     void *r = catalogue_np_now(&at, &n);
+    if (!r && cat.np_back) {
+        void *now = queue_now(&at, &n);
+        if (!now || tk_strcmp((const char *)g_play_id3_info, P(now, REC_PATH))) return;
+        cat.np_back = 0;
+        for (int i = 0; i < 2; ++i) {
+            void *label = widget_lookup(win, names[i], 1);
+            const char *text = now_tag(now, i ? REC_ARTIST : REC_TITLE);
+            if (!i && (!text || !*text)) text = P(now, REC_NAME);
+            if (label) widget_set_text_utf8(label, text ? text : "");
+        }
+        return;
+    }
     for (int i = 0; r && i < 2; ++i) {
         void *label = widget_lookup(win, names[i], 1);
         const char *text = P(r, i ? REC_ARTIST : REC_TITLE);

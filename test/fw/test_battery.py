@@ -1,5 +1,6 @@
-"""battery.c: Battery History's record on the flash (a fall appends, an unplug starts again, its bound, a reload,
-a damaged file), the log it exports to the card, the rows of its page and the graph over them."""
+"""battery.c: Battery History's record on the card (a fall appends, an unplug starts again, its bound, a reload,
+a damaged file), the log it exports to the card, and its page: the graph, the reading the wheel is on and Export
+Log."""
 import calendar
 import ctypes as C
 import struct
@@ -10,7 +11,8 @@ import pytest
 from conftest import O, Files
 from test_peq_page import Canvas  # the EQ graph's canvas: the rectangles filled and the texts drawn
 
-RECORD, LOG = '/mnt/data/q2-battery', '/mnt/mmc/battery-log.txt'
+RECORD, LOG = '/mnt/mmc/.q2pod/q2-battery', '/mnt/mmc/battery-log.txt'
+FLASH = '/mnt/data/q2-battery'  # where releases before card_store.c kept it
 MAGIC, ROWS = 0x31484251, 100
 # Battery History's window and a toast's, each a zeroed widget (no parent, no name): OLED's toast and title checks read
 # the window on top
@@ -23,9 +25,10 @@ MOUNTS = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
 
 
 class Q2:
-    """The flash and card's files, the wall clock (UTC as the local time), the cable and the level."""
+    """The flash's and card's files, the wall clock (UTC as the local time), the cable and the level."""
     def __init__(self, fw, files=None):
         self.fw, self.files, self.now = fw, Files(fw, files), NOON
+        self.files.files.setdefault('/proc/mounts', MOUNTS)  # the card in, unless a test takes it out
         fw.mock('fw_time', lambda *_: self.now)
         fw.mock('fw_localtime_r', self.local)
         self.tick = fw.fn('battery_tick', None, C.c_int, C.c_int)
@@ -42,14 +45,14 @@ class Q2:
         self.tick(level, cable)
 
     def rows(self):
-        """The record on the flash: [(time, level)]."""
+        """The record on the card: [(time, level)]."""
         data = self.files.files[RECORD]
         magic, n = struct.unpack_from('<II', data)
         assert magic == MAGIC and len(data) == 8 + 8 * ROWS
         return [struct.unpack_from('<II', data, 8 + 8 * k) for k in range(n)]
 
     def reboot(self):
-        """A power-off and on: the payload's memory zeroed, the flash kept."""
+        """A power-off and on: the payload's memory zeroed, the files kept."""
         bh = C.c_char.in_dll(self.fw.lib, 'battery__bh')
         C.memset(C.addressof(bh), 0, self.fw.sizes['battery__bh'])
 
@@ -209,28 +212,32 @@ def test_the_graph_runs_by_time_up_to_now(fw, q2):
     assert xs(fw, q2) == [0, 100, 300]
 
 
+KEY_CENTER, KEY_PREV, KEY_NEXT = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT']
+TOP, BOT, BTN_CY, READ_CY = 99, 199, 237, 70  # battery.c BH_TOP, BH_BOT, BH_BTN_CY, BH_READ_CY: the screen's rows
+
+
 class Page:
-    """Power's Battery History page on stubs: its rows' labels, a row's tap and the toasts."""
+    """Power's Battery History page on stubs: its title, the graph's view, the wheel and Centre, a tap and the
+    toasts."""
     def __init__(self, fw):
-        self.fw, self.texts, self.children, self.items, self.toasts, self.boxes = fw, {}, {}, [], [], {}
-        self.buffers, self.lists = [], []
+        self.fw, self.texts, self.toasts, self.boxes, self.visible = fw, {}, [], {}, {}
+        self.buffers, self.lists, self.graph = [], [], None
         fw.mock('window_create', lambda *_: PAGE)
         self.top = PAGE  # the window on top: a toast's, while its modal loop runs
         fw.mock('window_manager_get_top_window', lambda *_: self.top)
         fw.mock('list_view_create', lambda parent, x, y, w, h, *_: self.widget(x, y, w, h))
         fw.mock('scroll_view_create', self.scroll)
-        fw.mock('list_item_create', lambda *_: self.items.append(self.widget()) or self.items[-1])
-        fw.mock('hscroll_label_create', self.label)
+        fw.mock('list_item_create', lambda *_: self.widget())
+        fw.mock('hscroll_label_create', lambda *_: self.widget())
         fw.mock('widget_set_text_utf8', lambda w, s, *_: self.texts.__setitem__(w, C.string_at(s).decode()))
         fw.mock('widget_get_text_utf8', self.get_text)  # an empty page's note reads its caption back (page_empty)
-        self.props = {}
-        fw.mock('widget_get_prop_int', self.prop)
-        fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.props.__setitem__((w, C.string_at(key)), C.c_int(v).value))
-        fw.mock('widget_move_resize', lambda w, x, y, width, h, *_: self.boxes.__setitem__(w, (x, y, width, h)))
+        fw.mock('widget_get_prop_int', lambda w, key, default, *_: 290 if C.string_at(key) == b'h' else default)
+        fw.mock('widget_set_visible', lambda w, on, *_: self.visible.__setitem__(w, on))
         fw.mock('widget_factory_create_widget', self.made)
         fw.mock('navigator_to_with_context', lambda page, info, *_: self.toasts.append(C.string_at(info + 8).decode()))
         fw.mock('navigator_window_is_exist', lambda *_: 0)
         fw.mock('fw_statfs', self.statfs)
+        self.key_fn = fw.fn('battery_key', C.c_int, C.c_void_p, C.c_uint)
         self.free = 64 << 20
 
     def widget(self, x=0, y=0, w=0, h=0):
@@ -241,14 +248,13 @@ class Page:
         return p
 
     def scroll(self, parent, x, y, w, h, *_):
-        self.items.clear()
         p = self.widget(x, y, w, h)
         self.lists.append(p)
         C.c_void_p.from_address(p + O['W_PARENT']).value = parent
         return p
 
     def made(self, factory, kind, parent, x, y, *_):
-        """The graph's view: its height is a seventh argument, which a stub doesn't pass on."""
+        """The graph's view: its size is a sixth and seventh argument, which a stub doesn't pass on."""
         self.graph = self.widget(x, y)
         return self.graph
 
@@ -257,20 +263,6 @@ class Page:
         C.memmove(out, data, len(data))
         return 0
 
-    def label(self, parent, *_):
-        p = self.widget()
-        self.children.setdefault(parent, []).append(p)
-        return p
-
-    def prop(self, w, key, default, *_):
-        name = C.string_at(key)
-        return 290 if name == b'h' else self.props.get((w, name), C.c_int(default).value)
-
-    @property
-    def view(self):
-        """The list's scroll view, the latest built."""
-        return self.lists[-1]
-
     def statfs(self, path, out, *_):
         C.c_uint.from_address(out + 4).value, C.c_uint.from_address(out + 28).value = 1, self.free
         return 0
@@ -278,29 +270,27 @@ class Page:
     def open(self):
         assert self.fw.fn('battery_history', C.c_int, C.c_void_p, C.c_void_p)(None, None) == 0
 
-    @property
-    def captions(self):
-        return [self.texts.get(self.children[item][0]) for item in self.items]
+    def key(self, key, top=PAGE):
+        return self.key_fn(top, key)
 
-    def tap(self, row):
-        (fn, ctx), = [(a[2], a[3]) for _, a in self.fw.calls('widget_on') if a[0] == self.items[row] and a[1] == EVT_CLICK]
-        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
+    def touch(self, x, y):
+        (fn, ctx), = [(a[2], a[3]) for _, a in self.fw.calls('widget_on') if a[0] == PAGE and a[1] == O['EVT_POINTER_UP_BEFORE']]
+        event = C.create_string_buffer(0x100)
+        C.c_int.from_address(C.addressof(event) + O['EVENT_X']).value = x
+        C.c_int.from_address(C.addressof(event) + O['EVENT_Y']).value = y
+        return C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, C.addressof(event))
 
 
-def test_the_page_lists_export_then_each_row_a_day_s_first_dated(fw, q2):
-    fw.var('g_time24h_flag', C.c_ubyte).value = 1
+def test_the_page_titles_the_bar_and_gives_the_rest_to_the_graph(fw, q2):
     q2.poll(99)
-    q2.poll(98, minutes=12 * 60 + 30)
+    q2.poll(98, minutes=10)
     page = Page(fw)
     page.open()
-    assert page.captions == ['Export Log', '99% | 12:00, 11 Nov', '98% | 00:30, 12 Nov']
-    graph = [a for _, a in fw.calls('widget_factory_create_widget')]
-    assert len(graph) == 1 and graph[0][2] == PAGE  # over the list, which starts below it
-    gy = graph[0][4]
-    lv = C.c_void_p.from_address(page.view + O['W_PARENT']).value  # the list, the scroll view's parent
-    assert [a[0] for _, a in fw.calls('widget_move_resize')].count(lv) == 1
-    x, y, w, h = page.boxes[lv]
-    assert y > gy and y + h <= 290 and h >= 48  # under the graph, to the page's foot at most
+    assert 'Battery History' in page.texts.values()
+    lv = C.c_void_p.from_address(page.lists[-1] + O['W_PARENT']).value  # the list, the scroll view's parent
+    assert page.visible.get(lv) == 0  # no rows: the list only titles the bar
+    (_, kind, parent, x, y, *_), = [a for _, a in fw.calls('widget_factory_create_widget')]
+    assert parent == PAGE and (x, y) == (0, page.boxes[lv][1])
 
 
 def paint(fw, widget):
@@ -311,15 +301,22 @@ def paint(fw, widget):
 
 
 def graph(fw, page):
-    """The open page's graph painted 220 px high, 20 of them its margins, so 2 px a percent: its three
-    guide lines top to bottom, each row's level line left to right and the steps between them, as (x, y, w, h),
-    and the canvas."""
-    C.c_int.from_address(page.graph + O['W_H']).value = 220
+    """The open page painted: its three guide lines top to bottom, each row's level line left to right and the
+    steps between them, as (x, y, w, h) on screen, the reading's hairline, and the canvas. 100% is TOP, 0% BOT:
+    1 px a percent."""
     canvas = paint(fw, page.graph)
-    guides = sorted((r[1:] for r in canvas.rects if r[4] == 1), key=lambda r: r[1])
-    levels = sorted((r[1:] for r in canvas.rects if r[4] == 2), key=lambda r: r[0])
-    steps = sorted(r[1:] for r in canvas.rects if r[3] == 2 and r[4] > 2)
-    return guides, levels, steps, canvas
+    dy = page.boxes[page.graph][1]
+    rects = [(c, x, y + dy, w, h) for c, x, y, w, h in canvas.rects]
+    guides = sorted((r[1:] for r in rects if r[4] == 1), key=lambda r: r[1])
+    levels = sorted((r[1:] for r in rects if r[4] == 2), key=lambda r: r[0])
+    steps = sorted(r[1:] for r in rects if r[3] == 2 and r[4] > 2)
+    hair = [r[1:] for r in rects if r[3] == 1 and r[4] > 2]
+    return guides, levels, steps, hair, canvas
+
+
+def said(canvas, dy):
+    """The texts drawn, each with its row's middle on screen."""
+    return {t[0]: t[3][1] + t[3][3] // 2 + dy for t in canvas.texts}
 
 
 def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
@@ -328,15 +325,17 @@ def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
     q2.now += 2 * 3600  # the second level has held twice as long as the first did
     page = Page(fw)
     page.open()
-    (top, half, bottom), (first, last), steps, canvas = graph(fw, page)
-    assert {text[0] for text in canvas.texts} == {'100%', '50%', '0%'}
-    assert top[1] + 200 == half[1] + 100 == bottom[1] and top[0] == half[0] == bottom[0]
+    (top, half, bottom), (first, last), steps, hair, canvas = graph(fw, page)
+    texts = said(canvas, page.boxes[page.graph][1])
+    assert {'100%', '50%', '0%', 'Export Log'} <= set(texts)
+    assert (top[1], half[1], bottom[1]) == (TOP, (TOP + BOT) // 2, BOT) and top[0] == half[0] == bottom[0]
     left, width = top[0], top[2]
-    assert [bottom[1] - (y + 1) for _, y, _, _ in (first, last)] == [180, 120]  # each line's middle at its level
+    assert [bottom[1] - (y + 1) for _, y, _, _ in (first, last)] == [90, 60]  # each line's middle at its level
     # from the plot's left edge to its right, the one step down a third of the way along
     assert first[0] == left and first[0] + first[2] - 1 == last[0] == left + width // 3
     assert last[0] + last[2] - 1 == left + width
     assert [(x + 1, y, y + h - 2) for x, y, _, h in steps] == [(last[0], first[1], last[1])]
+    assert hair == [(last[0], TOP, 1, BOT - TOP + 1)]  # on the newest reading
     assert canvas.fill == canvas.lcd_fill  # the LCD's own fill back
 
 
@@ -350,47 +349,94 @@ def test_the_graph_spaces_the_rows_evenly_when_their_times_don_t_run_forward_on_
         q2.poll(level)
     page = Page(fw)
     page.open()
-    (top, _, _), levels, _, _ = graph(fw, page)
+    (top, _, _), levels, _, _, _ = graph(fw, page)
     assert [x - top[0] for x, _, _, _ in levels] == [k * top[2] // 4 for k in range(4)]
+
+
+@pytest.mark.parametrize('h24, newest, older', [
+    (1, 'Nov 12, 00:30 \u00b7 98%', 'Nov 11, 12:00 \u00b7 99%'),
+    (0, 'Nov 12, 12:30 AM \u00b7 98%', 'Nov 11, 12:00 PM \u00b7 99%'),
+])
+def test_the_wheel_moves_the_reading_and_the_readout_follows(fw, q2, h24, newest, older):
+    fw.var('g_time24h_flag', C.c_ubyte).value = h24
+    q2.poll(99)
+    q2.poll(98, minutes=12 * 60 + 30)
+    page = Page(fw)
+    page.open()
+    dy = page.boxes[page.graph][1]
+    (top, _, _), (first, last), _, hair, canvas = graph(fw, page)
+    assert said(canvas, dy).get(newest) == READ_CY and hair[0][0] == last[0]
+    assert page.key(KEY_PREV) == 1  # anticlockwise: the older
+    (top, _, _), _, _, hair, canvas = graph(fw, page)
+    assert older in said(canvas, dy) and hair[0][0] == first[0] == top[0]
+    assert page.key(KEY_PREV) == 1 and graph(fw, page)[3][0][0] == top[0]  # held at the first
+    assert page.key(KEY_NEXT) == 1 and newest in said(graph(fw, page)[4], dy)
+    assert page.key(KEY_NEXT, top=TOAST) == 0  # another window's key
+
+
+def test_a_clock_never_set_reads_the_time_since_the_start(fw, q2):
+    q2.now = 3600
+    q2.poll(99)
+    q2.poll(97, minutes=83)
+    page = Page(fw)
+    page.open()
+    assert '+1:23 \u00b7 97%' in said(graph(fw, page)[4], 0)
+
+
+def test_the_newest_reading_follows_a_new_row_and_an_older_one_stays(fw, q2):
+    lit(fw, 1)
+    q2.poll(99)
+    q2.poll(98, minutes=10)
+    page = Page(fw)
+    page.open()
+    invalid = len(fw.calls('widget_invalidate_force'))
+    q2.poll(97, minutes=10)
+    assert len(fw.calls('widget_invalidate_force')) > invalid  # the open page drawn again
+    assert any(t.endswith('97%') for t in said(graph(fw, page)[4], 0))
+    page.key(KEY_PREV)
+    q2.poll(96, minutes=10)
+    assert any(t.endswith('98%') for t in said(graph(fw, page)[4], 0))
 
 
 def test_only_the_open_page_s_graph_is_painted_on(fw, q2):
     q2.poll(90)
     page = Page(fw)
     page.open()
-    canvas = paint(fw, page.view)  # ringnav_paint passes every widget
+    canvas = paint(fw, page.lists[-1])  # ringnav_paint passes every widget
     assert not canvas.rects and not canvas.texts
     (fn, ctx), = [(a[2], a[3]) for _, a in fw.calls('widget_on') if a[0] == PAGE and a[1] == O['EVT_DESTROY']]
     C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
     for widget in (page.graph, None):  # the page gone, its graph's widget may be another's by now
         assert not paint(fw, widget).rects
+    assert page.key(KEY_CENTER) == 0 and page.toasts == []
 
 
 def test_no_history_says_to_unplug(fw, q2):
     q2.poll(70, cable=1)
     page = Page(fw)
     page.open()
-    assert page.items == [] and 'Unplug to start' in page.texts.values()
+    assert 'Unplug to start' in page.texts.values()
     assert not fw.calls('widget_factory_create_widget')  # no graph
+    assert page.key(KEY_CENTER) == 0 and page.key(KEY_NEXT) == 0  # nothing to scrub or export
 
 
-@pytest.mark.parametrize('usb, mounted, free, said', [
+@pytest.mark.parametrize('usb, mounted, free, said_', [
     (0, 1, 64 << 20, 'Saved to battery-log.txt'),
     (1, 1, 64 << 20, 'The card is in use over USB'),
     (0, 0, 64 << 20, 'Storage unavailable'),
     (0, 1, 1000, 'The card is full'),
 ])
-def test_export_writes_the_log_whole_or_says_why_not(fw, q2, usb, mounted, free, said):
+def test_centre_exports_the_log_whole_or_says_why_not(fw, q2, usb, mounted, free, said_):
     q2.poll(99)
     q2.poll(98, minutes=60)
     page = Page(fw)
     page.free = free
     fw.mock('navigator_window_is_exist', lambda name, *_: usb and C.string_at(name) == b'usbmode_page')
-    if mounted:
-        q2.files.files['/proc/mounts'] = MOUNTS
+    if not mounted:
+        q2.files.files.pop('/proc/mounts')
     page.open()
-    page.tap(0)
-    assert page.toasts == [said]
+    assert page.key(KEY_CENTER) == 1
+    assert page.toasts == [said_]
     assert q2.files.files.get(LOG) == (q2.log().encode() if usb == 0 and mounted and free > 1000 else None)
     assert LOG + '.tmp' not in q2.files.files
 
@@ -401,91 +447,65 @@ def test_an_export_the_card_refuses_leaves_no_temporary_file(fw, q2):
     q2.files.files['/proc/mounts'] = MOUNTS
     q2.files.fail_rename = True
     page.open()
-    page.tap(0)
+    page.key(KEY_CENTER)
     assert page.toasts == ["Couldn't save"] and LOG not in q2.files.files
     assert [C.string_at(a[0]).decode() for _, a in fw.calls('fw_unlink')] == [LOG + '.tmp']
 
 
-def test_every_row_takes_the_wheel(fw, q2):
-    """ringnav's wheel and Centre go only to rows with a click handler: each history row needs one too."""
+def test_a_tap_on_the_button_exports_and_elsewhere_does_not(fw, q2):
     q2.poll(99)
-    q2.poll(98, minutes=10)
     page = Page(fw)
+    q2.files.files['/proc/mounts'] = MOUNTS
     page.open()
-    clicks = {a[0]: a[2] for _, a in fw.calls('widget_on') if a[1] == EVT_CLICK}
-    assert len(page.items) == 3 and all(clicks.get(item) for item in page.items)
-    assert page.tap(2) == 0 and page.toasts == []  # a history row's Centre does nothing
+    graph(fw, page)  # painted: the button's place known
+    page.touch(187, 120)  # the graph
+    assert page.toasts == []
+    page.touch(187, BTN_CY)
+    assert page.toasts == ['Saved to battery-log.txt']
 
 
 def lit(fw, on):
     fw.var('g_backlight_status', C.c_ubyte).value = on
 
 
-def test_a_new_row_shows_on_the_open_page_where_the_wheel_left_it(fw, q2):
-    lit(fw, 1)
-    q2.poll(99)
-    q2.poll(98, minutes=10)
-    page = Page(fw)
-    page.open()
-    view = page.view
-    page.props[view, SEL], page.props[view, b'yoffset'] = 2, 48
-    builds = len(page.lists)
-    q2.poll(98, minutes=5)  # nothing new: the page stays
-    assert len(page.lists) == builds
-    q2.poll(97, minutes=5)
-    assert page.captions[1:] == ['99% | 12:00 PM, 11 Nov', '98% | 12:10 PM', '97% | 12:20 PM'] and page.view != view
-    assert page.props[page.view, SEL] == 2 and page.props[page.view, COUNT] == 4
-    assert [a[:3] for _, a in fw.calls('scroll_view_set_offset')][-1] == (page.view, 0, 48)
-    assert len([a for _, a in fw.calls('widget_factory_create_widget')]) == 2  # the graph drawn again
-
-
-def test_a_row_while_dark_shows_at_the_first_lit_poll(fw, q2):
-    lit(fw, 1)
+def test_the_button_gives_way_to_a_toast(fw, q2):
+    """The toasts show in the button's place (y 236 to 268): while one is on top, no button, and no tap on it."""
     q2.poll(99)
     page = Page(fw)
     page.open()
-    lit(fw, 0)
-    builds = len(page.lists)
-    q2.poll(98, minutes=10)
-    q2.poll(98, minutes=1)
-    assert len(page.lists) == builds  # nothing drawn while the screen is off
-    lit(fw, 1)
-    q2.poll(98, minutes=1)
-    assert len(page.lists) == builds + 1 and page.captions[-1] == '98% | 12:10 PM'
-    q2.poll(98, minutes=1)
-    assert len(page.lists) == builds + 1  # once
+    texts = said(graph(fw, page)[4], 0)
+    assert 'Export Log' in texts
+    page.top = TOAST
+    assert 'Export Log' not in said(graph(fw, page)[4], 0)
+    page.touch(187, BTN_CY)
+    assert page.toasts == []
+    page.top = PAGE
+    assert 'Export Log' in said(graph(fw, page)[4], 0)
 
 
-def test_a_closed_page_is_not_drawn(fw, q2):
-    lit(fw, 1)
-    q2.poll(99)
-    page = Page(fw)
-    page.open()
-    (fn, ctx), = [(a[2], a[3]) for _, a in fw.calls('widget_on') if a[0] == PAGE and a[1] == O['EVT_DESTROY']]
-    C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, None)
-    builds = len(page.lists)
-    q2.poll(98, minutes=10)
-    assert len(page.lists) == builds
-
-
-def test_a_row_while_the_export_toast_is_up_waits_for_the_toast(fw, q2):
-    """toast()'s modal loop polls the battery under Export Log's own click: the clicked row must not be freed."""
-    lit(fw, 1)
-    q2.poll(99)
-    page = Page(fw)
+def test_with_the_card_away_rows_are_kept_in_ram_and_written_when_it_is_back(fw, q2):
+    q2.poll(90)
+    q2.files.files.pop('/proc/mounts')  # USB storage, or the card out
+    q2.poll(89, minutes=10)
+    q2.poll(88, minutes=10)
+    assert q2.rows() == [(NOON, 90)]  # the card's copy is the one before it went
+    assert FLASH not in q2.files.files  # and nothing went to the flash instead
     q2.files.files['/proc/mounts'] = MOUNTS
-    page.open()
-    builds = len(page.lists)
+    q2.poll(88, minutes=1)  # the next poll, no new row: the held one is written
+    assert q2.rows() == [(NOON, 90), (NOON + 600, 89), (NOON + 1200, 88)]
 
-    def toast(*_):
-        page.top = TOAST  # the toast's window
-        q2.poll(98, minutes=10)  # a percent falls under it
-        assert len(page.lists) == builds  # the rows stay
-        page.top = PAGE
-        return 0
-    fw.mock('navigator_to_with_context', toast)
-    page.tap(0)
-    q2.poll(98, minutes=1)  # the first poll after the toast
-    assert len(page.lists) == builds + 1 and page.captions[-1] == '98% | 12:10 PM'
-    q2.poll(98, minutes=1)
-    assert len(page.lists) == builds + 1
+
+def test_the_flash_record_is_read_with_no_card_and_copied_to_it_once(fw):
+    first = Q2(fw)
+    first.poll(70)
+    first.poll(69, minutes=10)
+    old = first.files.files.pop(RECORD)
+    q2 = Q2(fw, {FLASH: old})
+    first.reboot()
+    q2.files.files.pop('/proc/mounts')
+    q2.poll(69, minutes=1)  # boot with no card: the flash's history reads, and nothing is written
+    assert q2.log().count('%') == 2 and RECORD not in q2.files.files
+    q2.files.files['/proc/mounts'] = MOUNTS
+    q2.poll(68, minutes=9)  # this Q2's clock: NOON + 600
+    assert q2.rows() == [(NOON, 70), (NOON + 600, 69), (NOON + 600, 68)]
+    assert q2.files.files[FLASH] == old  # left as it was, never written again

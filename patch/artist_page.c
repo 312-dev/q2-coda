@@ -83,17 +83,11 @@ static void ar_box(void *canvas, const rect_t *r, int R, unsigned rgb) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* A square image's corners over r rounded to R: the pixels outside each arc in behind, the final
- * 0xRRGGBB of what stands behind it. Up Next's covers too (upnext.c). */
+/* A square image's corners over r rounded to R, anti-aliased into behind, the final 0xRRGGBB of
+ * what stands behind it (nav/row_paint.c corner_mask). Up Next's and Control Center's covers too.
+ */
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind) {
-    for (int i = 0; i < R; ++i) {
-        int n = round_inset(R, i, r->h);
-        for (int b = 0; b < 2 && n; ++b) {
-            int y = r->y + (b ? r->h - 1 - i : i);
-            scrub_row(canvas, 0xff000000u | behind, r->x, y, n);
-            scrub_row(canvas, 0xff000000u | behind, r->x + r->w - n, y, n);
-        }
-    }
+    corner_mask(canvas, r, R, behind);
 }
 
 static unsigned ar_accent(void) { return scheme()->tones[0] & 0xffffffu; }
@@ -145,6 +139,12 @@ static void mono(void *canvas, const char *name, int x, int y, int d, int px, un
     if (face && !tk_strcmp(face, "inter")) face = "inter-medium";
     int w = n ? ui_measure_w(canvas, face, fpx, buf, n) : 0;
     ui_text(canvas, letter, 1, px, 0xffffff, 0, x + (d - w) / 2, y + d / 2, d, 2);
+}
+
+/* An album's cover in the header, on screen (art_zoom.c: Now Playing grows from it). */
+int hero_cover_box(rect_t *r) {
+    r->x = geom_val(V_TEXT_X), r->y = HERO_Y, r->w = r->h = HERO_MONO;
+    return 1;
 }
 
 /* The header's art, its top dy px down the canvas from the header's top on screen: the name's

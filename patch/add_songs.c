@@ -68,8 +68,6 @@ int add_songs_mark(void *r) {
     return was && now ? 1 : now ? 2 : was ? 3 : 0;
 }
 
-/* The target's entries in its own order, from which a removal takes the entry's ID. */
-static int as_query(void *dest) { return sort_playlist_addtime((int)(long)dest); }
 /* r added to or taken out of the target, as its mark says, and the mark changed; a toast says
  * what happened. */
 void add_songs_toggle(void *r) {
@@ -81,7 +79,7 @@ void add_songs_toggle(void *r) {
         if (ok && as.now && as.nnow < AS_MAX_KEYS) as.now[as.nnow++] = k;
         if (ok) playlist_synced(as.dest);
     } else {
-        void *songs = staged(as_query, (void *)(long)as.dest, &n);
+        void *songs = staged(playlist_query, (void *)(long)as.dest, &n);
         for (unsigned i = 0; songs && i < deque_size(songs) && !ok; ++i)
             if (as_key(deque_at(songs, i)) == k) ok = playlist_remove(as.dest, deque_at(songs, i));
         if (songs) deque_destroy(songs);
@@ -467,7 +465,7 @@ void add_songs(int dest, const char *name) {
     tk_snprintf(as.name, sizeof as.name, "%s", name);
     as.was = calloc(AS_MAX_KEYS, sizeof *as.was);
     as.now = calloc(AS_MAX_KEYS, sizeof *as.now);
-    void *songs = staged(as_query, (void *)(long)dest, &n);
+    void *songs = staged(playlist_query, (void *)(long)dest, &n);
     for (unsigned i = 0; songs && as.was && as.now && i < deque_size(songs) && i < AS_MAX_KEYS; ++i)
         as.was[as.nwas++] = as.now[as.nnow++] = as_key(deque_at(songs, i));
     if (songs) deque_destroy(songs);

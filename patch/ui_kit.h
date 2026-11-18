@@ -24,6 +24,23 @@ unsigned ui_fade_alpha(unsigned at);
 int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
             int w, int align);
 unsigned ui_wide(const char *s, unsigned *out, unsigned n);
+/* Set text (docs/oled-design.md#type): UTF-8 s drawn glyph by glyph at Inter's own advances
+ * (stock.h FONT_ADV) plus track thousandths of an em between glyphs, each glyph at its own pen
+ * rounded, so its gaps are even: AWTK's own text rounds every advance to a pixel, carrying the
+ * error on, and draws a space about 3 px wider than Inter's at 13 px. Faces and colour as ui_text,
+ * from x, its row centred on y, never cut or ellipsized (ui_set_in fits it to a column). Returns
+ * its width; ui_set_w the width alone. TRACK_CAPTION: the house tracking for the 13 px captions. */
+#define TRACK_CAPTION 0
+int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+           int track);
+int ui_set_w(void *canvas, const char *s, int medium, int px, int track);
+/* ... in the column x to x + w, its row centred on y and px rows tall (AWTK's line): centred when
+ * it fits; wider, from the column's left less off (a scroller's xoffset, kept within the overflow),
+ * clipped to the column and never ellipsized, its ends fading (list_marks.c text_fade, the
+ * marquee's fade: the text itself onto what is behind it): the right while text runs past it, the
+ * left while off > 0. Nothing is drawn outside that box. Returns the text's width. */
+int ui_set_in(void *canvas, const char *s, int medium, int px, unsigned rgb, int x, int w, int y,
+              int off, int track);
 int ui_measure_w(void *canvas, const char *face, int px, const unsigned *s, unsigned n);
 /* Text in a box: s (n characters, or UTF-8 for ui_line) centred on row y in the columns x to x + w,
  * aligned (1 centre, 2 left, 3 right), in face at px, in color (ui_line_w: 0xAARRGGBB; ui_line:
@@ -36,11 +53,14 @@ int ui_measure(void *canvas, const char *s, const char *face, int px);
 /* feedback.c mode_page_paint: a mode page (docs/oled-design.md#usb) in w's coordinates, dy its y
  * on screen; USB's, the sign-in steps', SD Card Update's and Bluetooth's receiver's. MODE_R: the
  * solid circle's radius; MODE_GLYPH: its glyph's size (tools/art.py MODE_GLYPH_PX); MODE_BARE: the
- * ring that draws no circle (a spinner in its place). Returns the stack's top in w's coordinates.
+ * ring that draws no circle (a spinner in its place); MODE_BUTTON, or'd into the ring: the pill is
+ * the page's one button (Centre presses it), the empty states' secondary button (ui_button),
+ * ringed under the focus rule. Returns the stack's top in w's coordinates.
  */
 #define MODE_R 46
 #define MODE_GLYPH 44
 #define MODE_BARE 0x1000000u
+#define MODE_BUTTON 0x2000000u
 typedef struct {
     unsigned ring;                   /* 0xRRGGBB, or MODE_BARE */
     const char *glyph;               /* theme image stem, white */
@@ -71,11 +91,18 @@ int ui_focus_shown(void);
 #define CTA_BOX (375 - 48)
 #define CTA_INSET 14 /* a label's least room inside its capsule */
 #define CTA_RING_OFF 3
+#define CTA_RING_W 2                                         /* tools/art.py CTA_RING_W */
+#define CTA_RING_H (CTA_H + 2 * (CTA_RING_OFF + CTA_RING_W)) /* tools/art.py CTA_RING_H */
 #define CTA_ACCENT_DOWN 0x1a4dad
 int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
+/* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
+ * the accent with white words (a screen's main action), else the grey with Text Primary words;
+ * focused: ringed while ui_focus_shown; pressed: a step darker. Returns its width. */
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed);
 /* A label/value row's split (docs/oled-design.md#labelvalue-rows: About, Storage, Bluetooth's
  * device page, Configuration): the label at its natural width, KV_GAP px, then the value's box to
  * the row's end, the value right-aligned in it. A value wider than its box scrolls in it (the house
@@ -106,8 +133,10 @@ typedef struct {
     int timeout_ms, timeout_row;
     void (*answer)(void *ctx, int row, int toggle_on);
     void *ctx;
+    const char *glyph; /* a theme image's name over the title (pair_prompt's phone), or 0 */
 } confirm_t;
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
+void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
 void confirm_close(void);        /* closes the card without an answer */
 int confirm_up(void);            /* a card is up */
 /* Motion (docs/oled-design.md#motion): every animation's duration, curve and timer go through
@@ -144,6 +173,37 @@ void anim_start(anim_t *a, int ms, int ease, int kind);
 int anim_at(const anim_t *a);
 int anim_running(const anim_t *a);
 void motion_frames(unsigned ms); /* the shared timer repaints for ms more at least */
+/* A painter outside the top window (the status row, on the system bar) has fn called on each of
+ * the shared timer's frames, to repaint its own box while its run moves, and once more after the
+ * last run ends; at most MO_HOOKS, each added once. */
+#define MO_HOOKS 2
+void motion_hook(void (*fn)(void));
+/* A loop that says nothing new (MO_DECOR: the level bars) repaints only its own box: fn, added
+ * once, is called every MO_LOOP_MS by one shared loop timer while it returns 1 (it invalidates its
+ * box then), and dropped when it returns 0; the timer ends with the last loop. Unlike motion_frames
+ * it never repaints the top window. At most MO_LOOPS. */
+#define MO_LOOP_MS 33 /* 30 frames a second */
+#define MO_LOOPS 4
+void motion_loop(int (*fn)(void));
+/* The level bars (docs/oled-design.md#level-bars): Up Next's header, Home's first row and the
+ * status row draw the one motion. Bar i's height follows its column of LVL_KEYS keyframes
+ * LVL_STEP_MS apart, through a Catmull-Rom spline, so it moves continuously at any frame rate and
+ * passes each keyframe without stopping; the loop is LVL_KEYS * LVL_STEP_MS. lvl_clock_t is one
+ * user's time along it: running, it goes on with time_now_ms; stopped (paused, Reduce Motion) it
+ * holds, and running again goes on from where it held, so the bars never jump. Zero is stopped at
+ * the loop's start. lvl_h16: bar i's height at t, lo to hi px, in sixteenths. lvl_fill: a bar w px
+ * wide standing on base, h16 sixteenths tall, its part-covered top row at that part of its alpha,
+ * so a height between pixels shows as one. */
+#define LVL_KEYS 10
+#define LVL_STEP_MS 125
+typedef struct {
+    unsigned base, at; /* running: t is now - base; stopped: t is at */
+    unsigned char run;
+} lvl_clock_t;
+void lvl_run(lvl_clock_t *c, int run);
+unsigned lvl_time(const lvl_clock_t *c);
+int lvl_h16(int i, unsigned t, int lo, int hi);
+void lvl_fill(void *canvas, int x, int base, int w, int h16, unsigned rgba);
 /* An overlay's enter and exit (docs/oled-design.md#overlay-motion): a toast, the confirmation
  * card, the menu sheet and Up Next in it all move through one ovm_t each, painted from its level.
  * ovm_enter runs it in over ms along ease, ovm_exit out, either from where it is now (a turn
@@ -165,4 +225,12 @@ int ovm_shift(const ovm_t *o, int px);
 int ovm_scale(const ovm_t *o, int from);
 int ovm_running(const ovm_t *o);
 int ovm_shown(const ovm_t *o);
+/* An overlay drawn through its widget's opacity (a toast's or the card's dialog): ovm_bind ties w
+ * to o, and the shared frame timer sets w's opacity to ovm_opacity on each frame until w goes (or
+ * ovm_bind(o, 0)). Never from w's own paint: stock's widget_paint (demo 0x672848) skips a widget
+ * whose opacity is under OVM_PAINT_MIN, so a paint that raised it from 0 would never run.
+ * ovm_opacity: 0..255 at o's level; 255 at once for an enter under Reduce Motion. */
+#define OVM_PAINT_MIN 9
+void ovm_bind(ovm_t *o, void *w);
+int ovm_opacity(const ovm_t *o);
 #endif

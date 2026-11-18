@@ -7,7 +7,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Files, in_fork
+from conftest import O, Files, in_fork, stock_prop_str
 
 W_PARENT, EVT_CLICK, TIMER_CTX = O['W_PARENT'], O['EVT_CLICK'], O['TIMER_CTX']
 EVT_KEY_DOWN, EVT_KEY_UP = O['EVT_KEY_DOWN'], O['EVT_KEY_UP']
@@ -69,8 +69,8 @@ class Screen:
         fw.mock('widget_get_visible', lambda w, *_: self.shown.get(w, 1))
         fw.mock('widget_move_resize', lambda w, x, y, ww, h, *_: self.box(w, x, y, ww, h))
         fw.mock('widget_resize', lambda w, ww, h, *_: self.resize(w, ww, h))
-        fw.mock('widget_get_prop_str', lambda w, key, default, *_: self.prop(w, key, default, str))
-        fw.mock('widget_get_prop_int', lambda w, key, default, *_: self.prop(w, key, default, int))
+        fw.mock('widget_get_prop_str', self.prop_str)
+        fw.mock('widget_get_prop_int', lambda w, key, default, *_: self.prop(w, key, default))
         fw.mock('widget_set_prop_str', lambda w, key, v, *_: self.set_prop(w, C.string_at(key).decode(),
                                                                            C.string_at(v).decode()))
         fw.mock('widget_set_prop_int', lambda w, key, v, *_: self.set_prop(w, C.string_at(key).decode(),
@@ -134,11 +134,17 @@ class Screen:
         x, y, _, _ = self.at(w)
         self.box(w, x, y, ww, h)
 
-    def prop(self, w, key, default, kind):
+    def prop(self, w, key, default):
         value = self.props.get(w, {}).get(C.string_at(key).decode())
-        if value is None:
-            return default
-        return self.string(value) if kind is str else value
+        return default if value is None else value
+
+    def prop_str(self, w, key, default, *_):
+        if w not in self.types:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        key = C.string_at(key).decode()
+        value = self.names.get(w) if key == 'name' else self.props.get(w, {}).get(key)
+        value = stock_prop_str(self.types[w].encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.string(value.decode()) if isinstance(value, bytes) else value
 
     def set_prop(self, w, key, value):
         self.props.setdefault(w, {})[key] = value
@@ -617,7 +623,7 @@ def test_a_dark_pass_sleeps_longer_once_nothing_plays_and_the_dac_is_off(q2):
     quiet = q2.sleeps()[-1]
     usleep(200000)
     assert playing == paused < quiet
-    assert polls()[0] == 200000 < polls()[1]  # dark and quiet, stock's pollers slow down too
+    assert polls()[:2] == [O['DARK_POLL_US']] * 2  # dark, playing or quiet, stock's status poll slows down too
     lit(q2)
     usleep(200000)
     assert polls()[-1] == 200000
@@ -900,7 +906,10 @@ def test_the_state_record_says_what_the_q2_does_and_a_power_off_removes_it(q2):
     assert [path for path, _ in q2.disk.written].count(STATE) == 1  # rewritten only on a change
     q2.status, q2.way = PLAYING, 1
     lit(q2)
+    q2.loop(ms=5000)  # a change is written once its burst settles (system.c STATE_SETTLE_MS)
     assert q2.flash.files[STATE] == b'screen:on power:running cable:out battery:64 play:playing out:bluetooth\n'
+    q2.status = PAUSED
+    q2.loop()  # a change still settling: the clean end below does not wait for it
     del events[:]
     q2.fw.fn('ringnav_savequeue', C.c_int)()  # the power-off page's into_poweroff saves, hooked
     assert STATE not in q2.flash.files and events == [(9, WDT_STOP, None)]  # a clean end: nothing to report
@@ -946,6 +955,8 @@ def test_bluetooth_and_the_wire_keep_their_own_volumes_across_a_restart(q2):
     output(q2, 1)  # a headset connects
     assert q2.way == 1 and volume() == 30  # no Bluetooth level saved yet: the wired one carries over
     set_volume(q2, 55)
+    assert q2.flash.get('PLAYSET', 'BT_VOLUME') is None  # held: a turn is one write, once it settles
+    q2.loop(ms=3000)
     assert q2.flash.get('PLAYSET', 'VOLUME') == '30' and q2.flash.get('PLAYSET', 'BT_VOLUME') == '55'
     output(q2, 0)  # it goes
     assert volume() == 30 and q2.fw.calls('device_set_volume')[-1][1][0] == 30
@@ -972,9 +983,14 @@ class Headset:
         q2.fw.mock('stock_btvol_trampoline', lambda left, right, *_: self.gain.append((left, right)) or 0)
 
 
-def nearest(x):
-    """The nearest whole step to x, a half up: a volume carried between the Q2's 101 steps and the headset's 128."""
-    return int(x + 0.5)
+def curve(v):
+    """The headset's level for Q2 volume v on its 40 dB curve (docs/internals.md#headset-controls-and-volume)."""
+    return 0 if v == 0 else max(1, round(127 * 10 ** (-40 * (100 - v) / 2000)), round(127 * v / 400))
+
+
+def reads_as(level):
+    """The Q2 volume a headset level reads as: the nearest on the curve, the lowest of those sharing it."""
+    return min(range(101), key=lambda v: (abs(curve(v) - level), v))
 
 
 @pytest.fixture
@@ -997,18 +1013,19 @@ def test_control_device_volume_hands_the_volume_to_the_headset_and_follows_its_k
     assert headset.level == 64 and q2.var('g_volume').value == 55  # Off: each keeps its own
     q2.build('ringnav_btrows', 'bluetooth_page', 'scroll_view_bluetooth',  # System settings → Bluetooth
              *((f'stock_{i}', 'list_item', 'scroll_view_bluetooth') for i in range(4)))
-    q2.screen.click('Control Device Volume')
-    assert q2.screen.switch('Control Device Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
-    # the Q2's level sent, as the headset's nearest step, and the Q2's own gain full
-    assert headset.level == nearest(55 * 127 / 100) and headset.gain[-1] == (100, 100)
-    headset.level = 100  # its own keys: 100/127 of its range, 79 of the Q2's 100
+    q2.screen.click('Link Volume')
+    assert q2.screen.switch('Link Volume') == 'switch_on' and q2.flash.get('Q2POD', 'BTVOLLINK') == '1'
+    # the Q2's level sent, on the curve, and the Q2's own gain full
+    assert headset.level == curve(55) == 17 and headset.gain[-1] == (100, 100)
+    headset.level = 100  # its own keys: 100 of its 127, which reads as the Q2's 95
     q2.loop(ms=500)
-    assert q2.var('g_volume').value == nearest(100 * 100 / 127) == 79
-    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '79'
+    assert q2.var('g_volume').value == reads_as(100) == 95
+    q2.loop(ms=3000)  # saved once it settles (config_ini.c config_settle)
+    assert q2.flash.get('PLAYSET', 'BT_VOLUME') == '95'
     q2.var('g_maxvolume').value = 60
     headset.level = 127
     q2.loop(ms=500)
     # the volume limit holds, the headset pulled back to it
-    assert q2.var('g_volume').value == 60 and headset.level == nearest(60 * 127 / 100)
+    assert q2.var('g_volume').value == 60 and headset.level == curve(60)
     q2.loop(ms=500)
-    assert q2.var('g_volume').value == 60 and headset.level == nearest(60 * 127 / 100)
+    assert q2.var('g_volume').value == 60 and headset.level == curve(60)

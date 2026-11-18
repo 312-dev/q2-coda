@@ -93,7 +93,7 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
-    "more fav now catalogue ratings artist album playlists storage signin libsource"
+    "more fav now catalogue ratings artist album playlists storage signin libsource radio"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -111,6 +111,7 @@ typedef struct {
     char more[48]; /* q2app's more: an op, a space and a title (addon_more) */
     int qr, game, audio, hidden, present, launched, hold, relaunch, restart;
     int nostop; /* q2app's stop=0: no Stop row on its page */
+    int radio;  /* q2app's radio=1: it plays a song's radio (addon_radio_start) */
     int sync, sync_pm; /* its state file's sync=: addon_sync's kind, and a download's permille */
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
 } app_t;
@@ -220,6 +221,7 @@ static void scan_one(const char *id, const char *from) {
     char stop[4]; /* as text, as scrobble: number() is 0 for a missing key too */
     field(raw, "stop", stop, sizeof stop);
     a->nostop = !strcmp(stop, "0") || !strcmp(stop, "0\r");
+    a->radio = number(raw, "radio") == 1;
     field(raw, "more", a->more, sizeof a->more);
     unsigned k = strlen(a->more);
     if (k && a->more[k - 1] == '\r') a->more[k - 1] = 0; /* a Windows editor's line end */
@@ -267,7 +269,9 @@ int addon_scan(void) {
     }
     /* libsource's state first: an app reading the caps finds it there (library_settings.c) */
     library_source_file();
-    blob_io(CAPS_FILE, CAPS_FILE ".tmp", ADDON_CAPS "\n", sizeof(ADDON_CAPS "\n") - 1, 1);
+    char caps[sizeof ADDON_CAPS + 16]; /* Download Ahead's words (stream_state.c ahead_caps) */
+    int n = tk_snprintf(caps, sizeof caps, "%s%s\n", ADDON_CAPS, ahead_caps());
+    blob_io(CAPS_FILE, CAPS_FILE ".tmp", caps, (unsigned)n, 1);
     return ap.shown;
 }
 
@@ -339,7 +343,9 @@ int addon_ready(const char *id) {
  * end, as Add to Queue adds them (playback_queue_insert); the path of the one playing is left in
  * /tmp/q2-<id>.playing, so the app fetches only a few ahead and deletes the ones long played. Or
  * .play names an .m3u on the card (q2-subsonic's queue), one card path a line: its songs are queued
- * in its order, each waited for until it is there (m3u_songs). */
+ * in its order, each waited for until it is there (m3u_songs), or with "grow" until enough of it
+ * is (stream_startable); and while it plays the app is told the songs after the one playing in
+ * /tmp/q2-<id>.ahead (stream_state.c, docs/server-library.md#download-ahead-and-the-streaming-state). */
 #define M3U_MAX (256 << 10) /* a playlist file read this far: about 2,000 card paths */
 #define M3U_BATCH 32        /* folders listed a poll at most, so a long list doesn't stall the UI */
 static struct {
@@ -357,6 +363,7 @@ static struct {
     char first[512]; /* the session's first song */
     char want[512];  /* the entry waited for */
     unsigned loads;  /* playback_loads at its start, then once its queue was loaded */
+    unsigned picks;  /* playback_picks at its start: a song the user moved to since ends its wait */
     char seq[24];    /* its .play's seq, as far as the first space (now_start) */
 } sm __attribute__((section(".scratch")));
 enum { S_WAIT, S_PLAY, S_DONE };
@@ -431,8 +438,8 @@ static void *m3u_songs(void) {
             ++sm.next;
             continue;
         }
-        if (access(line, 0)) {
-            tk_snprintf(sm.want, sizeof sm.want, "%s", line);
+        if (access(line, 0) || !stream_startable(sm.app ? sm.app->id : "", line)) {
+            tk_snprintf(sm.want, sizeof sm.want, "%s", line); /* not there, or arriving (grow) */
             break;
         }
         char *slash = strrchr(line, '/');
@@ -467,7 +474,8 @@ static void *m3u_songs(void) {
 
 /* m3u mode's wake: a batch to go on with, the file rewritten, or the song waited for there. */
 static int m3u_ready(void) {
-    return sm.more || changed(sm.dir) || (sm.want[0] && !access(sm.want, 0));
+    return sm.more || changed(sm.dir) ||
+           (sm.want[0] && !access(sm.want, 0) && stream_startable(sm.app ? sm.app->id : "", sm.want));
 }
 
 /* A scan running, or its window still open: the user's own Update Local Music page
@@ -478,10 +486,18 @@ static int scanning(void) {
            navigator_window_is_exist("updatemusic_dialog");
 }
 
+/* Whether the user left a session still waiting for its first song: a playlist's by playing another
+ * queue, any by moving to another song of the queue playing (Next or Previous on the one before:
+ * the device, 2026-11-17, Shuffle's first song landed half way through the song Next had played,
+ * and played over it). The song waited for is left on the card. */
+static int moved_on(void) {
+    return (sm.m3u && playback_loads != sm.loads) || playback_picks != sm.picks;
+}
+
 static int stream_start(const void *unused) {
     (void)unused;
     sm.timer = 0;
-    if (sm.m3u && playback_loads != sm.loads) sm.state = S_DONE; /* the user played a queue since */
+    if (moved_on()) sm.state = S_DONE; /* the user played a queue, or another song, since */
     if (sm.state != S_WAIT) return 0;
     if (scanning()) { /* no listing during a scan, no play over its dialog: looked at again after */
         sm.seen = 0;
@@ -605,8 +621,9 @@ static void now_poll(void) {
 static int urls_start(const void *unused) {
     (void)unused;
     sm.timer = 0;
-    if (playback_loads != sm.loads) sm.state = S_DONE; /* the user played a queue since */
-    if (sm.state != S_WAIT || scanning()) return 0;    /* looked at again after the scan */
+    if (playback_loads != sm.loads || playback_picks != sm.picks)
+        sm.state = S_DONE; /* the user played a queue, or another song, since */
+    if (sm.state != S_WAIT || scanning()) return 0; /* looked at again after the scan */
     press_natural = 1;
     if (app_urls_play(sm.dir)) {
         qa.app = sm.app, qa.loads = playback_loads;
@@ -654,7 +671,7 @@ static void stream_poll(app_t *a) {
         tk_snprintf(own, sizeof own, "/tmp/q2-%s.urls", a->id);
         sm.urls = !strcmp(sm.dir, own); /* the app's own alone, in /tmp */
         sm.next = sm.more = 0, sm.first[0] = sm.want[0] = 0;
-        sm.loads = playback_loads;
+        sm.loads = playback_loads, sm.picks = playback_picks;
         /* a playlist on the card, or a hidden folder of it, as the app's own are, or its URL queue;
          * whole in raw and in sm.dir, as a cut path names another */
         sm.state = got < sizeof raw - 2 && dir && !dir[1 + k] && !dotdot(sm.dir) &&
@@ -669,15 +686,15 @@ static void stream_poll(app_t *a) {
      * play_folder would open Now Playing over the dialog, so nothing until it closes. */
     int scan = scanning();
     if (sm.state == S_WAIT && sm.urls) { /* played whole at once, by stock's Tidal player */
-        if (playback_loads != sm.loads)
-            sm.state = S_DONE; /* the user played a queue before it started */
+        if (playback_loads != sm.loads || playback_picks != sm.picks)
+            sm.state = S_DONE; /* the user played a queue, or another song, before it started */
         else if (!sm.timer && !scan && !addon_game_audio()) /* not under a card game's sound */
             sm.timer = timer_add(urls_start, 0, 0);
         return;
     }
     if (sm.state == S_WAIT) {
-        if (sm.m3u && playback_loads != sm.loads)
-            sm.state = S_DONE; /* the user played a queue before its first song came */
+        if (moved_on())
+            sm.state = S_DONE; /* the user played a queue, or another song, before its first came */
         else if (!sm.timer && !scan && !addon_game_audio() && /* the game's sound: the song waits */
                  (sm.m3u ? m3u_ready() : stream_newer(sm.dir, "")))
             sm.timer = timer_add(stream_start, 0, 0);
@@ -694,6 +711,7 @@ static void stream_poll(app_t *a) {
             if (deque_size(add)) playback_queue_insert(q, add, 0);
             deque_destroy(add);
         }
+        ahead_poll(a->id, sm.seq, q); /* Download Ahead: the songs after the one playing */
     } else if (!scan && stream_newer(sm.dir, sm.last)) {
         void *songs = app_album_songs(sm.dir), *add = _create_deque("stSongInfo");
         deque_init(add);
@@ -2404,14 +2422,27 @@ static int swipe(void *ctx, void *event) {
     return 11; /* RET_STOP */
 }
 
+/* Whether field row i takes a password, which the letter strip shows as dots (search_strip.c
+ * ss_secret_box). Q2SPOT/1 has no word for one, so it is a field titled as one ("Password",
+ * "Passcode": "pass" in any case) or one whose subtitle is asterisks alone, the app's mask. */
+static int field_secret(int i) {
+    const char *sub = cell(i, 3);
+    if (strcasestr(cell(i, 2), "pass")) return 1;
+    while (*sub == '*') ++sub;
+    return *cell(i, 3) && !*sub;
+}
+
 /* peq_ui.c's T9 edit over the title, its keyboard open: a Search row's press, or its icon's tap
- * (field 0); or field row field - 1's press, its title the box's hint. */
+ * (field 0); or field row field - 1's press, its title the box's hint and its label on the letter
+ * strip, marked _secret when it takes a password (field_secret). */
 static void search_box(int field) {
     keep_sel();
     pg.field = field;
     widget_destroy_children(pg.page), pg.view = 0; /* the box alone, as Spotify's */
     pg.edit = edit_create(pg.page, "text", 2, 26);
     widget_set_prop_str(pg.edit, "tips", field ? cell(field - 1, 2) : app()->tips);
+    if (field) widget_set_prop_str(pg.edit, "_strip_label", cell(field - 1, 2)); /* search_strip_box */
+    if (field && field_secret(field - 1)) widget_set_prop_int(pg.edit, "_secret", 1);
     widget_on(pg.edit, EVT_VALUE_CHANGED, searched, 0);
     widget_on(pg.edit, EVT_IM_ACTION, searched, 0);
     widget_on(pg.edit, EVT_BLUR, search_left, 0);
@@ -2782,6 +2813,77 @@ int addon_radio(void) {
         on = seed[0] && seed[0] != '\r';
     }
     return on;
+}
+
+/* A song's radio asked of the app that plays it (song_radio.c, docs/internals.md#radio): the app
+ * whose folder holds path (a streamed song's file, a Library server row's path) when its q2app says
+ * radio=1, else the playing queue's app when it says so. Its request is /tmp/q2-<id>.radio, one
+ * line, "<seq> start <path>" or "<seq> stop", written only once the app's socket is there (it takes
+ * a request already there at its start as answered, as a .catplay); it answers in its state file,
+ * radioack=<seq> <code> (0 started or stopped, 1 not its song, 2 no radio). */
+static struct {
+    app_t *app;     /* the app asked last */
+    char line[600]; /* its request, while waiting for its socket */
+    unsigned at;    /* when it was asked */
+} rq __attribute__((section(".scratch")));
+
+static void radio_send(void) {
+    char path[48];
+    if (!rq.line[0] || !rq.app || !addon_ready(rq.app->id)) return;
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.radio", rq.app->id);
+    blob_io(path, "/tmp/q2-radio.tmp", rq.line, strlen(rq.line), 1);
+    rq.line[0] = 0;
+}
+
+static app_t *radio_app(const char *path) {
+    char id[APP_ID];
+    app_t *a = path && card_id(path, id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan(); /* a Library server row's app, not listed since boot */
+    if ((!a || !a->present || !a->radio) && qa.app && playback_loads == qa.loads) a = qa.app;
+    return a && a->present && a->radio ? a : 0;
+}
+
+/* 1 when an app takes the request for a radio of path's song (seq names its answer), started for
+ * it when it doesn't run; 0 when no app plays radios of it. */
+int addon_radio_start(const char *path, unsigned seq) {
+    app_t *a = radio_app(path);
+    if (!a || addon_wake(a->id) < 0) return 0;
+    unsigned n = (unsigned)tk_snprintf(rq.line, sizeof rq.line, "%u start %s\n", seq, path);
+    if (n >= sizeof rq.line) return rq.line[0] = 0, 0; /* cut, it would name another song */
+    rq.app = a, rq.at = time_now_ms();
+    radio_send();
+    return 1;
+}
+
+/* The name of the app whose folder holds path (a streamed song's file, a Library server row's path)
+ * when that app plays no song radios: its q2app has no radio=1, as a version from before them
+ * (q2-subsonic before q2-v1.0). 0 for any other path, or an app that does. */
+const char *addon_radio_missing(const char *path) {
+    char id[APP_ID];
+    app_t *a = path && card_id(path, id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    return a && a->present && !a->radio && a->name[0] ? a->name : 0;
+}
+
+/* The playing queue's app's radio stopped; 1 when asked. */
+int addon_radio_stop(unsigned seq) {
+    app_t *a = qa.app && playback_loads == qa.loads && qa.app->radio ? qa.app : 0;
+    if (!a) return 0;
+    tk_snprintf(rq.line, sizeof rq.line, "%u stop\n", seq);
+    rq.app = a, rq.at = time_now_ms();
+    radio_send();
+    return 1;
+}
+
+/* The app's answer to request seq: its code, or -1 while there is none. Polled by song_radio.c,
+ * which sends a request waiting for its socket. */
+int addon_radio_answer(unsigned seq) {
+    char raw[QR_RAW], v[24], want[16];
+    radio_send();
+    if (!rq.app || !state_read(rq.app->state, raw, sizeof raw)) return -1;
+    field(raw, "radioack", v, sizeof v);
+    unsigned k = (unsigned)tk_snprintf(want, sizeof want, "%u ", seq);
+    return strncmp(v, want, k) || v[k] < '0' || v[k] > '9' ? -1 : v[k] - '0';
 }
 
 

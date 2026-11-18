@@ -74,8 +74,8 @@ class CardMachine(DepthMachine):
             if not c: self.execs.append((self.text(a),self.text(b))); ret=-1  # no arguments: the terminator third
             else: self.execs.append((self.text(a),self.text(b),self.text(c),self.text(d),e and (self.text(e),self.get(sp+20)))); ret=-1
         elif name=='waitpid': assert a==self.forked and c==1; ret=self.waited
-        elif name=='socket': assert (a,b,c)==(1,1,0); ret=7
-        elif name=='connect': assert self.text(b+2)=='/tmp/q2adb-ui'; ret=0xffffffff  # adbd's UI socket (a dev build's usb_ui.c auth_poll): not listening
+        elif name=='socket': assert (a,b,c) in ((1,1,0),(1,2,0)); self.sock_type=b; ret=7  # AF_UNIX, MIPS SOCK_DGRAM 1 or SOCK_STREAM 2
+        elif name=='connect': assert self.text(b+2)=='/tmp/q2adb-ui' and self.sock_type==2, 'adbd listens on a stream socket (MIPS SOCK_STREAM is 2)'; ret=0xffffffff  # adbd's UI socket (a dev build's usb_ui.c auth_poll): not listening
         elif name=='sendto':
             sp=u.reg_read(UC_MIPS_REG_SP); to=self.get(sp+16)
             self.sent.append((a,bytes(self.u.mem_read(b,c)).decode('latin1'),c,d,self.get(to)&0xffff,self.text(to+2),self.get(sp+20)))

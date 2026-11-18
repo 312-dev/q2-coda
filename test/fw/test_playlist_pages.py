@@ -108,6 +108,31 @@ def test_on_the_go_adds_save_and_clear_and_empty_it_offers_add_songs_alone(fw, u
     assert ui.rows(pv.view) == ['Add Songs']
 
 
+def es(ui, page):
+    """The empty state's (glyph, title, hint, button) in page, or None while it is hidden or absent."""
+    art = ui.lookup(page, '_empty_state', 0)
+    if not art or not ui.nodes[art].visible:
+        return None
+    return tuple(ui.nodes[art].props[k] for k in ('_es_glyph', '_es_title', '_es_hint', '_es_row'))
+
+
+@pytest.mark.parametrize('dest, name, hint', [(OTG, b'On-The-Go', 'Hold Play/Pause on a song to add it'),
+                                              (3, b'Road Trip', 'Choose Add Songs to fill it')])
+def test_with_no_songs_the_page_is_add_songs_over_the_compact_empty_state(fw, ui, pages, st, dest, name, hint):
+    """docs/oled-design.md#empty-and-offline: no songs, the empty state under Add Songs in its compact form (a row
+    above it: no glyph), no button of its own (Add Songs is the row above it), centred from that row's foot."""
+    use_set(st, 'oled')
+    pv = open_page(fw, dest, name)
+    assert es(ui, pv.page) is None  # songs: none
+    ui.close(ui.top())
+    pages.table.rows.clear()
+    pv = open_page(fw, dest, name)
+    assert ui.rows(pv.view) == ['Add Songs'] and es(ui, pv.page) == ('', 'No Songs Yet', hint, '')
+    free = fw.fn('feedback_below', C.c_int, C.c_void_p)(ui.find(pv.view, 'Add Songs'))  # Add Songs' foot
+    assert free > 58  # under the bar: the compact form's rule (empty_compact)
+    assert ui.nodes[ui.lookup(pv.page, '_empty_state', 0)].props['_es_top'] == free + (320 - free - 44) // 2
+
+
 def test_a_song_plays_its_list_as_stock_plays_a_playlist(fw, ui, pages):
     played = []
     ui.routes['playing_page'] = lambda ctx: played.append(tuple((C.c_int * 2).from_address(ctx + C.sizeof(C.c_void_p))))

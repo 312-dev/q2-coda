@@ -1,79 +1,94 @@
 /* Search as an iPod classic's letter strip (list.entry.ipod, the OLED theme's;
- * docs/ipod.md#search): the Library's Search row opens a page with a pill low in the glass, the
- * typed text at its left and the alphabet passing under a fixed highlight, and what matches in the
- * list above it, filtered as each character goes in: the songs, then the artists, then the albums.
- * While the wheel is on the results, tabs above them (All, Songs, Artists, Albums, an iOS
- * segmented control) pick what the list holds: All the three groups, SS_GROUP of each at most,
- * the others one group in full. The tab picked stays while the text changes.
+ * docs/ipod.md#search): the Library's Search row opens a page with the query on its first line,
+ * a pill low in the glass, the letter strip, and what matches in the list between them, filtered
+ * as each character goes in: the songs, then the artists, then the albums. While the wheel is on
+ * the results, tabs above them (All, Songs, Artists, Albums, an iOS segmented control) pick what
+ * the list holds: All the three groups, SS_GROUP of each at most, the others one group in full.
+ * The tab picked stays while the text changes.
  *
- * Keys: the wheel walks the strip (A to Z, 0 to 9, a space, then delete, round again) and Centre
- * enters what is highlighted at the text's cursor; Previous and Next move the cursor along the
- * text, and Return erases the character before it (nothing, but the click, at the start). Next
- * with the cursor at the text's end moves to the results: the wheel moves their bar, Centre opens
- * a song, which plays with the songs after it as the queue, an artist (stock's artist page) or an
- * album (its tracks in Cover Flow). A turn up from the first result lands on the tabs, where the
- * wheel moves between them, each picked as it is reached (docs/oled-design.md#tabs): a turn down
- * past Albums, or Centre, goes back to the results, a turn up past All to the strip, and Next picks
- * the next tab and Previous the one before. Previous or Return on the results, and Return on the
- * tabs, go back to the strip, the text, cursor and tab kept. A held Return closes Search from any
- * of them (search_strip_hold, from Hold Return's compact_now_playing). Play/Pause stays the
- * player's.
+ * The strip (docs/oled-design.md#text-entry, the user's mock-up keyboard-inscreen/strip.html) is
+ * one loop the wheel walks, its stops: the set switcher docked at the pill's left (abc, ABC, 123,
+ * #+=: every printable ASCII character between them), the set's characters and a space, and the
+ * return key docked at its right, a circle as tall as the strip. The run of characters starts at
+ * its first and scrolls only when the highlight comes within a cell of an edge, its letters
+ * fading out where more of the set lies past that edge. One turn of the wheel (ticks closer than
+ * SS_GESTURE_MS) stops at the return key; a new turn goes on round to the switcher.
  *
- * The key pop (ss_pop_paint): when the wheel or a drag lands on a letter or digit, or a tap types
- * one, its key grows a bubble holding the letter large, and the key keeps it at the strip's size,
- * dimmed; it goes SS_POP_MS after the letters stop. A spin faster than SS_POP_FAST_MS a step shows
- * none until it stops, then one. The bubble and the letters are tools/art.py's images
- * (pop_images), drawn at whole pixels.
+ * Keys on the strip: Centre types the character at the text's cursor, cycles the set on the
+ * switcher (the highlight stays there), and submits on the return key; Play/Pause submits from
+ * anywhere on it; Return jumps the highlight to the return key, and held SS_HOLD_MS goes back
+ * (its card, search_strip_overlay); Previous and Next move the cursor along the text, and
+ * Previous held erases the character before it, again and again, faster the longer it is held
+ * (ss_erase_due). Submitting Search moves the wheel to its results: the wheel moves their bar,
+ * Centre opens a song, which plays with the songs after it as the queue, an artist (stock's
+ * artist page) or an album (its tracks in Cover Flow). A turn up from the first result lands on
+ * the tabs, where the wheel moves between them, each picked as it is reached
+ * (docs/oled-design.md#tabs): a turn down past Albums, or Centre, goes back to the results, a
+ * turn up past All to the strip, and Next picks the next tab and Previous the one before.
+ * Previous or Return on the results, and Return on the tabs, go back to the strip, the text,
+ * cursor and tab kept. A held Return closes Search from any of them (search_strip_hold, from Hold
+ * Return's compact_now_playing). Off the strip Play/Pause is the player's.
  *
- * Touch (ss_touch): a drag along the strip moves the alphabet a cell per 19 px as the finger goes,
- * popping as the wheel does, and types nothing; a tap on a letter, the faded ones at the run's ends
- * too, pops and types it; a tap on a tab picks it, a tap on a result opens or plays it, and a drag
- * up or down the results scrolls them a row per 32 px.
+ * The key pop (ss_pop_paint): when the wheel or a drag lands on a character, or a tap types one,
+ * its key grows a bubble holding it large, and the key keeps it at the strip's size, dimmed; it
+ * goes SS_POP_MS after the wheel stops. A spin faster than SS_POP_FAST_MS a step shows none until
+ * it stops, then one. The bubble and its big characters are tools/art.py's images (pop_images),
+ * drawn at whole pixels.
+ *
+ * Touch (ss_touch): a drag along the strip moves the highlight a cell per 19 px as the finger
+ * goes, popping as the wheel does, and types nothing; a tap on a character types it, on the
+ * switcher cycles the set and on the return key submits; a tap on a tab picks it, a tap on a
+ * result opens or plays it, and a drag up or down the results scrolls them a row per 32 px.
  *
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
  * the wheel, and only one of them shows a selection at a time.
  *
- * With nothing typed, the free area above the strip says what Search finds, as the house empty
- * note (ss_note).
- *
- * One strip, two forms (docs/oled-design.md#text-entry, approved as 05b and 05c from audit2): its
- * typed-text field ON, as above, or OFF, for naming a playlist: New Playlist (playlist_new_open)
- * and Rename Playlist (playlist_rename_open, prefilled). Field OFF the letters run across the whole
- * pill, the same pill in the same place, and the name is written large in the middle of the
- * screen with its cursor over a hint, "Press Next to create" or "Press Next to save". Next with the
- * cursor at the name's end creates or saves it; elsewhere Previous and Next move the cursor. Add
- * Songs' Search row (add_songs_search) is field ON over songs alone.
- *
- * Return on every form (the user's, 2026-11-17, mock_hold_back.py): a press erases a character;
- * held past SS_HOLD_SHOW_MS, the page dims under a card, "Keep holding to go back", whose ring
- * fills in the accent until SS_HOLD_MS, when the page closes; let go before that and nothing
- * happens, nothing erased (search_strip_overlay). */
+ * One strip for Search, the query over the results, for naming a playlist: New Playlist
+ * (playlist_new_open) and Rename Playlist (playlist_rename_open, prefilled), and for a text box
+ * (search_strip_box, search_strip_text). The text is typed where it lives (the user's
+ * keyboard-inscreen mock-up, all-inputs.png; ss_place, ss_field): on Search's query line, in the
+ * row or cell the wheel was on over the page under, or in a field under its label, with a blinking
+ * cursor and no hint; submitting creates, saves or hands it on. Add Songs' Search row
+ * (add_songs_search) is Search over songs alone. */
 #include "navigation.h"
 
 /* The sheet starts under the 58 px status row; on it, from the top: */
-#define SS_PITCH 32   /* a result row */
+#define SS_PITCH 32 /* a result row */
+#define SS_QUERY_Y                                                                                 \
+    16 /* Search's query line: its centre, the text from SS_QUERY_X after the glass */
+#define SS_QUERY_X 48
+#define SS_GLASS_X                                                                                 \
+    31 /* ... the magnifier's lens centred here, SS_GLASS_R px to its line's middle */
+#define SS_GLASS_R 6
+#define SS_RULE_Y 35  /* ... a 1 px rule under it, from x 24 to 351 */
+#define SS_QUERY_H 40 /* ... and the results' top under it */
 #define SS_STRIP_X 40 /* the strip, a pill from x 40 to 335 and y 254 to 288 on the page */
+#define SS_STRIP_RX 335
 #define SS_STRIP_Y 196
 #define SS_STRIP_H 34
 #define SS_STRIP_R 17
-#define SS_ROWS (SS_STRIP_Y / SS_PITCH) /* result rows above the strip, from the sheet's top */
+#define SS_ROWS                                                                                    \
+    ((SS_STRIP_Y - SS_QUERY_H) / SS_PITCH) /* result rows between the query and strip              \
+                                            */
 #define SS_TABS_X 16 /* the tabs: a 30 px segmented control in the first row, the rows' inset */
-#define SS_TABS_Y 1
+#define SS_TABS_Y (SS_QUERY_H + 1)
 #define SS_TABS_H 30
 #define SS_TABS_W (375 - 2 * SS_TABS_X)
-#define SS_LIST_Y SS_PITCH /* the results' top under the tabs, and the rows that fit there */
+#define SS_LIST_Y                                                                                  \
+    (SS_QUERY_H + SS_PITCH) /* the results' top under the tabs, and the rows there                 \
+                             */
 #define SS_TAB_ROWS ((SS_STRIP_Y - SS_LIST_Y) / SS_PITCH)
-#define SS_BOX_X 46  /* the typed text's black box, x 46 to 142, 5 px in from the strip's edges */
-#define SS_BOX_R 142 /* ... */
-#define SS_BOX_IN 5
-#define SS_BOX_RADIUS 12
-#define SS_TYPED_X 56 /* the typed text, the cursor 1 px after the characters before it */
-#define SS_RUN_L 148  /* the letters' run, faded into the strip over SS_FADE px at each end */
-#define SS_RUN_R 327
-#define SS_FADE 22
-#define SS_STEP 19       /* a letter's cell */
-#define SS_LIT_X 228     /* the lit cell's left, so it is centred in the run */
-#define SS_SIDE 4        /* cells each side of it inside the run */
+#define SS_KEY_IN 5  /* the lit key's box, SS_KEY_IN in from the strip's top and bottom */
+#define SS_CHIP_R 96 /* the set switcher, docked at the pill's left, to x 96 */
+#define SS_RET_L (SS_STRIP_RX - SS_STRIP_H) /* the return key, a circle docked at its right */
+#define SS_RUN_L 100 /* the run of characters between them, its first cell SS_PAD in */
+#define SS_RUN_R (SS_RET_L - 4)
+#define SS_PAD 6
+#define SS_STEP 19                                            /* a character's cell */
+#define SS_VISIBLE ((SS_RUN_R - SS_RUN_L - SS_PAD) / SS_STEP) /* cells in the run: 10 */
+#define SS_FADE 22       /* the run's letters fade out over this at an edge with more past it */
+#define SS_FADE_SLICE 2  /* ... a slice of this many columns at a time */
+#define SS_RET_MARK 20   /* the return mark's image (tools/art.py RETURN_PX), centred on the key */
 #define SS_TEXT_MAX 64   /* characters typed, at most (a WPA passphrase is 63) */
 #define SS_TITLE_W 233   /* a result's title, at most; the artist takes the rest */
 #define SS_ARTIST_MIN 40 /* an artist with less room than this is left out */
@@ -83,63 +98,88 @@
 #endif
 #define SS_MARK_X (SS_RIGHT - CAT_MARK_W / 2) /* a greyed row's mark: its ink ends at SS_RIGHT */
 #define SS_MARK_GAP 12 /* a greyed row's text ends this far short of the mark's ink */
-#define SS_ENTRIES 38  /* 26 letters, 10 digits, the space and delete */
-#define SS_SPACE 36    /* ... on Search's and a name's strip; a box's sets end in them too */
-/* AWTK sizes a face by its line, 1.21 em for Inter: the design's 20, 18, 19, 16 and 15 px */
+/* AWTK sizes a face by its line, 1.21 em for Inter: the design's 20, 17, 16 and 15 px */
 #define SS_PX_ROW TYPE(20)
-#define SS_PX_TYPED TYPE(18)
-#define SS_PX_LETTER TYPE(20)
-#define SS_PX_NOTE TYPE(16)
+#define SS_PX_QUERY TYPE(20)
+#define SS_PX_LETTER TYPE(17)
 #define SS_PX_ARTIST TYPE(15)
-/* Field OFF (a playlist's name): the run across the whole pill, faded into it at its ends, the lit
- * cell centred on the pill; the name in Inter Medium 22 centred on SS_NAME_Y of the sheet, its
- * cursor after the characters before it, the hint in 15 px Text Tertiary SS_HINT_DY under it */
-#define SS_OPEN_RUN_L 46
-#define SS_OPEN_RUN_R 329
-#define SS_OPEN_LIT_X 178
-#define SS_OPEN_SIDE 7
-#define SS_NAME_Y 82     /* screen y 140 */
-#define SS_HINT_DY 40    /* screen y 180 */
-#define SS_NAME_ROOM 327 /* the text column to the right column */
+/* Where the text lives (ss.form, ss_place; docs/oled-design.md#text-entry): */
+enum {
+    SS_FORM_QUERY, /* Search's query line, and a search box's */
+    SS_FORM_ROW,   /* the row the wheel is on, the text its whole width (a playlist's name) */
+    SS_FORM_CELL,  /* ... the text a cell after the row's label, at its right (Bluetooth's Name) */
+    SS_FORM_FIELD  /* a field of its own under its label (a password, or a row not in sight) */
+};
+/* A row's or cell's box: the row's own place, x 16 to 359, in the raised grey with 8 px corners
+ * and an accent line 2 px in; the label from x 24 in Text Secondary, the text from x 24 (a row)
+ * or SS_CELL_GAP past the label and not left of SS_CELL_MIN (a cell), to the right column. The
+ * page under shows down to SS_UNDER_GAP above the strip, or to the box with a note under it. */
+#define SS_ROW_X 16
+#define SS_ROW_W (375 - 2 * SS_ROW_X)
+#define SS_ROW_R 8
+#define SS_ROW_LINE 2
+#define SS_ROW_TEXT 24
+#define SS_CELL_GAP 36
+#define SS_CELL_MIN 165
+#define SS_UNDER_GAP 8
+#define SS_NOTE_DY 24 /* a note's middle under its box (search_strip_note) */
+/* A field: its label in 15 px Text Tertiary from x 40 on screen y 92, the field a raised pill
+ * from x 40 to 335 and y 106 to 150 with 12 px corners, its text in Inter Medium 22 SS_FIELD_IN
+ * in from either end, centred on y 128; a note on y 176 */
+#define SS_FIELD_X 40
+#define SS_FIELD_W 295
+#define SS_FIELD_Y 48
+#define SS_FIELD_H 44
+#define SS_FIELD_R 12
+#define SS_FIELD_IN 16
+#define SS_LABEL_Y 34
+#define SS_FIELD_NOTE_Y 118
 #define SS_PX_NAME TYPE(22) /* Inter Medium 22, AWTK's size */
-#define SS_PX_HINT TYPE(15) /* 15 */
-/* A text box's form: the set chip a #2C2C2E pill from the strip's left to x 96, its name in Inter
- * Medium 16 white; the run after it, its lit cell at x 192; a password's "Password" over it in
- * 15 px Text Tertiary on screen y 84, the value on y 128 and the hint, 13 px, on y 176 */
-#define SS_CHIP_R 96
+#define SS_PX_LABEL TYPE(15)
+/* The text in its field (ss_field): the cursor kept SS_KEEP px in from either edge while the
+ * text is wider than the field, which fades it out over SS_EDGE px at an edge that cuts it; the
+ * cursor blinks, SS_BLINK_MS on and off, steady under Reduce Motion */
+#define SS_KEEP 10
+#define SS_EDGE 16
+#define SS_BLINK_MS 530
+/* The set switcher: a #2C2C2E pill (the accent while the wheel is on it), its set's name in Inter
+ * Medium 16 */
 #define SS_CHIP_RGB RGB_RAISED_2
-#define SS_BOX_LIT_X 192
-#define SS_BOX_SIDE 6
-#define SS_LABEL_Y 26
-#define SS_SECRET_Y 70
-#define SS_SECRET_HINT_Y 118
 #define SS_PX_CHIP TYPE(16)  /* 16 */
 #define SS_PX_SMALL TYPE(13) /* 13 */
-#define SS_PEEK_MS 1000 /* a password's last character typed shows this long */
-#define SS_SHOW_MS 400  /* Play/Pause held this long shows a password in plain text */
-#define SS_NOTE_Y 86    /* the empty note's line (screen y 144), its hint 24 px under it */
+#define SS_PEEK_MS 1000      /* a password's last character typed shows this long */
+/* ss.secret: what the text is (ss_secret_box, search_strip_secret); a password shows as dots,
+ * and a Wi-Fi network's joins when submitted */
+enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 /* The key pop (tools/art.py POP_*): the bubble's image is the head's width, its foot the key's,
- * the key 18 px wide from the lit cell's left and SS_BOX_IN below the strip's top, as the lit
- * cell's accent box is; the big letters and the echoes are strips of a cell per strip character,
- * a head's and a key's box each, the echo's the strip's height */
+ * the key 18 px wide from the lit cell's left and SS_KEY_IN below the strip's top, as the lit
+ * cell's accent box is; the big characters a strip of a head's box per character, in
+ * tools/art.py POP_CHARS' order, the sets' (ss_pop_cell) */
 #define SS_POP_W 30
 #define SS_POP_H 66
 #define SS_POP_HEAD 30
 #define SS_POP_KEY_W 18
 #define SS_POP_KEY_H 24
-#define SS_POP_ECHO_H SS_STRIP_H
-#define SS_POP_MS 300 /* the pop goes this long after the wheel's last step */
+#define SS_POP_ECHO 0x99ffffffu /* the key's own character under the bubble: white at 60% */
+#define SS_POP_MS 300           /* the pop goes this long after the wheel's last step */
 #define SS_POP_FAST_MS                                                                             \
     125 /* steps closer than this, 8 a second, are a spin: no pop until it stops */
+/* ticks of the wheel closer than this are one turn, which stops at the return key */
+#define SS_GESTURE_MS 250
 /* songs, artists and albums listed at most on All (docs/ipod.md#search): the wheel moves its bar a
  * row a tick, 7 ticks a turn at the default Wheel Sensitivity, so the artists are under five turns
  * down; each artist and album is checked against those before it */
 #define SS_GROUP 32
-/* Return held (ss_hold_*): the card shows this long into the hold, the page closes at its end, and
- * the ring steps this often between */
+/* Return held (ss_hold_*): the card shows this long into the hold, the page closes at its end
+ * (before stock's own long press, KEY_HOLD_MS), and the ring steps this often between */
 #define SS_HOLD_SHOW_MS 200
-#define SS_HOLD_MS 800
+#define SS_HOLD_MS 600
 #define SS_HOLD_STEP_MS 33
+/* Previous held (ss_erase_due): the first erase this long into the hold, the next SS_ERASE_GAP_MS
+ * after it, and each after that 15% sooner than the one before, down to SS_ERASE_MIN_MS */
+#define SS_ERASE_HOLD_MS 450
+#define SS_ERASE_GAP_MS 500
+#define SS_ERASE_MIN_MS 110
 enum { SS_SONG, SS_ARTIST, SS_ALBUM };                                     /* a result's kind */
 enum { SS_TAB_ALL, SS_TAB_SONGS, SS_TAB_ARTISTS, SS_TAB_ALBUMS, SS_TABS }; /* tab, kind + 1 */
 enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS };                              /* what has the wheel */
@@ -148,7 +188,8 @@ static struct {
     void *page, *sheet, *songs; /* the page, what it paints on, the library's songs A to Z */
     void **match;               /* the results: songs, artists, albums; a record of each */
     unsigned char *kind;        /* ... each one's SS_* */
-    int nmatch, letter, focus, sel, top; /* focus: SS_ON_* */
+    int nmatch, stop, off, focus, sel, top; /* the strip's stop (ss_stops), its run's first cell
+                                             * shown; focus: SS_ON_* */
     int nsongs, tab, any; /* the songs first in match; the tab, SS_TAB_*; anything matches */
     int cur, by;          /* the cursor's place in text; ss_by_name's field */
     int rename;           /* Rename's playlist + 1 (playlist_rename_open), 0 for Search */
@@ -156,36 +197,70 @@ static struct {
     int create;           /* New Playlist's (playlist_new_open) */
     void *box; /* a stock text box's edit the strip types for (search_strip_box), or the page
                 * itself for a text of the payload's own (search_strip_text) */
-    const char *(*done)(const char *); /* ... the latter's, given the text at Next */
+    const char *(*done)(const char *); /* ... the latter's, given the text when submitted */
     int max;                           /* ... the latter's characters, at most */
-    int secret, set;                   /* the box is a password; its strip's set, SS_SET_* */
-    unsigned typed_at, show_timer;     /* the last character typed (shown a moment); Play's hold */
-    unsigned char shown, play_held;    /* the password in plain text; Play/Pause down */
+    const char *note;                  /* ... and who sees the text, under it (search_strip_note) */
+    int secret, set;            /* the text is a password, SS_SECRET_*; the strip's set, SS_SET_* */
+    unsigned typed_at, turn_at; /* the last character typed (shown a moment); the last tick */
+    unsigned char halted;       /* this turn stopped on the return key */
     short down_x, down_y, pressed, swiped; /* a touch: where it went down, cells it moved */
     char text[SS_TEXT_MAX + 1];
     unsigned pop_timer, pop_step_at; /* the pop's timer; the wheel's last step on the strip */
     unsigned char pop;               /* 1 shown, 2 a spin's, shown when it stops */
     unsigned hold_at, hold_timer;    /* Return's press (time_now_ms, 0 none), its timer */
     unsigned char held;              /* the hold's card shows */
+    unsigned erase_timer, erase_gap; /* Previous held: its timer, the gap to the next erase */
+    unsigned char prev_down, erased; /* Previous is down; its hold erased (the release is its) */
+    unsigned peek_timer;             /* a password's last character typed: dots again when due */
+    void *under;          /* the page typed for, painted once (under_snap), under a row's form */
+    const char *label;    /* a cell's label, a field's (SS_FORM_CELL, SS_FORM_FIELD) */
+    short form;           /* where the text lives, SS_FORM_* (ss_place) */
+    short row_y, row_h;   /* ... a row's or cell's box on the sheet */
+    short scroll;         /* the text's scroll in its field, px (ss_field) */
+    short fx, fy, fw, fh; /* the field as last painted, on the sheet, for the blink to repaint */
+    unsigned blink_at, blink_timer; /* the cursor shown from (its blink's start); the timer */
+    void *covered;     /* stock's own text box's row, hidden under the strip (Add Network's) */
+    void *covered_win; /* ... and its dialog */
 } ss __attribute__((section(".scratch")));
+/* Return's hold closed the page: stock's long press, if it comes, is the hold's
+ * (search_strip_hold), not the page under it */
+static unsigned ss_hold_closed __attribute__((section(".scratch"))); /* when (time_now_ms | 1) */
+#define SS_HOLD_LATE_MS 400 /* ... a long press this soon after is the same hold's */
 
-/* A text box's character sets (the user's P1, mock_strip_password.py): the set chip at the pill's
- * left names the one the strip walks, Play/Pause steps to the next; each ends in the space and
- * delete */
+/* The sets the switcher cycles (the user's mock-up): every printable ASCII character but the
+ * space, which ends each; #+= the 32 symbols, those most used in passwords first. tools/art.py
+ * POP_CHARS is these in this order. */
 enum { SS_SET_LOWER, SS_SET_UPPER, SS_SET_DIGITS, SS_SET_SYMBOLS, SS_SETS };
 static const char *const ss_sets[SS_SETS] = { "abcdefghijklmnopqrstuvwxyz",
                                               "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "0123456789",
-                                              "!@#$%&*-_.?/+=" };
+                                              "!@#$%&*-_.?/+=:;,'\"()[]{}<>^~`\\|" };
 static const char *const ss_set_names[SS_SETS] = { "abc", "ABC", "123", "#+=" };
-/* The strip's entries, the space's and delete's (its last two). */
-static int ss_entries(void) { return ss.box ? (int)strlen(ss_sets[ss.set]) + 2 : SS_ENTRIES; }
-static int ss_space(void) { return ss_entries() - 2; }
-static int ss_delete(void) { return ss_entries() - 1; }
-/* The strip's entry e as text: a capital, a digit, a box's set's character, or 0 for the space
- * and delete (drawn). */
+/* The run: the set's characters, then the space. The stops: the switcher (0), the run's entries
+ * (1 on), the return key (the last). */
+static int ss_run(void) { return (int)strlen(ss_sets[ss.set]) + 1; }
+static int ss_stops(void) { return ss_run() + 2; }
+static int ss_on_ret(void) { return ss.stop == ss_stops() - 1; }
+static int ss_in_run(void) { return ss.stop > 0 && !ss_on_ret(); }
+/* The run's entry e as text: the set's character, or the space. */
 static unsigned ss_char(int e) {
-    if (ss.box) return e < ss_space() ? (unsigned char)ss_sets[ss.set][e] : 0;
-    return e < 26 ? 'A' + (unsigned)e : e < 36 ? '0' + (unsigned)(e - 26) : 0;
+    return e < ss_run() - 1 ? (unsigned char)ss_sets[ss.set][e] : ' ';
+}
+/* Entry e's cell in the pop's images (every set's characters in order), -1 the space's. */
+static int ss_pop_cell(int e) {
+    int at = 0;
+    for (int i = 0; i < ss.set; ++i) at += (int)strlen(ss_sets[i]);
+    return e < ss_run() - 1 ? at + e : -1;
+}
+/* The run kept about the highlight: shown from its first entry, scrolled only to keep the
+ * highlight a cell in from either edge. ponytail: the run steps a whole cell at once, where the
+ * mock-up eases it over 90 ms (as under Reduce Motion); an eased offset needs a repaint timer and
+ * the run clipped to its cells. */
+static void ss_follow(void) {
+    if (!ss_in_run()) return;
+    int r = ss.stop - 1, most = ss_run() - SS_VISIBLE;
+    if (r < ss.off + 1) ss.off = r - 1 > 0 ? r - 1 : 0;
+    if (r > ss.off + SS_VISIBLE - 2) ss.off = r - SS_VISIBLE + 2 < most ? r - SS_VISIBLE + 2 : most;
+    if (ss.off < 0) ss.off = 0;
 }
 
 /* Whether the results from from on already hold field off's text of r, case aside. */
@@ -197,15 +272,11 @@ static int ss_listed(int from, int off, void *r) {
 
 static int ss_has(const char *s) { return s && *s && strcasestr(s, ss.text); }
 
-/* Field OFF: the page names a playlist (New Playlist, Rename Playlist) or types for a text box,
- * no field in the pill. */
+/* The page names a playlist (New Playlist, Rename Playlist) or types for a text box: no results,
+ * the text where it lives (ss.form). */
 static int ss_named(void) { return ss.rename || ss.create || ss.box; }
-/* The lit cell's left, the cells each side of it in the run, and the run's ends, by the form: a
- * box's run starts after its set chip. */
-static int ss_lit_x(void) { return ss.box ? SS_BOX_LIT_X : ss_named() ? SS_OPEN_LIT_X : SS_LIT_X; }
-static int ss_side(void) { return ss.box ? SS_BOX_SIDE : ss_named() ? SS_OPEN_SIDE : SS_SIDE; }
-static int ss_run_l(void) { return ss.box ? SS_CHIP_R + 4 : ss_named() ? SS_OPEN_RUN_L : SS_RUN_L; }
-static int ss_run_r(void) { return ss_named() ? SS_OPEN_RUN_R : SS_RUN_R; }
+/* Run entry e's cell's left on the sheet, as the run is scrolled now. */
+static int ss_cell_x(int e) { return SS_RUN_L + SS_PAD + (e - ss.off) * SS_STEP; }
 
 /* Two records by their field ss.by, case aside: a tab's artists or albums A to Z. */
 static int ss_by_name(const void *a, const void *b) {
@@ -257,35 +328,42 @@ static void ss_filter(void) {
     }
 }
 
-/* Entry e typed at the cursor: a lower-case letter (Rename's a capital at a word's start), a
- * digit, a space (not first, nor beside another), or the character before the cursor taken off.
- * The text is ASCII, a byte a character. */
+/* A password's last character typed has shown its second: the text is dots again. */
+static int ss_peek_due(const void *unused) {
+    ss.peek_timer = 0;
+    if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
+    return 0;
+}
+
+/* Run entry e typed at the cursor: the set's character as it reads, or a space (on Search and a
+ * name not first, nor beside another). The text is ASCII, a byte a character. */
 static void ss_type(int e) {
     int n = (int)strlen(ss.text), at = ss.cur;
-    if (e == ss_delete()) {
-        if (!at) return;
-        for (int i = at - 1; i < n; ++i) ss.text[i] = ss.text[i + 1];
-        --ss.cur;
-    } else {
-        int cap = (ss.rename || ss.create) && (!at || ss.text[at - 1] == ' ');
-        char c = (char)(e == ss_space() ? ' '
-                        : ss.box        ? ss_char(e) /* a box's set types as it reads */
-                        : e < 26        ? (cap ? 'A' : 'a') + (unsigned)e
-                                        : ss_char(e));
-        /* a box takes any space (a password may hold them); a name or a search no doubled one */
-        if (n >= (ss.max ? ss.max : SS_TEXT_MAX) ||
-            (c == ' ' && !ss.box && (!at || ss.text[at - 1] == ' ' || ss.text[at] == ' ')))
-            return;
-        unsigned now = (unsigned)time_now_ms();
-        ss.typed_at = now ? now : 1; /* 0: nothing typed */
-        for (int i = n + 1; i > at; --i) ss.text[i] = ss.text[i - 1];
-        ss.text[at] = c;
-        ++ss.cur;
-    }
+    char c = (char)ss_char(e);
+    /* a box takes any space (a password may hold them); a name or a search no doubled one */
+    if (n >= (ss.max ? ss.max : SS_TEXT_MAX) ||
+        (c == ' ' && !ss.box && (!at || ss.text[at - 1] == ' ' || ss.text[at] == ' ')))
+        return;
+    unsigned now = (unsigned)time_now_ms();
+    ss.typed_at = now ? now : 1; /* 0: nothing typed */
+    if (ss.secret) rearm(&ss.peek_timer, ss_peek_due, SS_PEEK_MS);
+    for (int i = n + 1; i > at; --i) ss.text[i] = ss.text[i - 1];
+    ss.text[at] = c;
+    ++ss.cur;
     if (!ss_named()) ss_filter();
 }
 
-/* Next at the name's end: the name, its edge spaces gone, saved (Rename) or made a playlist (New
+/* The character before the cursor taken off (Previous held); nothing at the text's start. */
+static void ss_erase(void) {
+    int n = (int)strlen(ss.text), at = ss.cur;
+    if (!at) return;
+    for (int i = at - 1; i < n; ++i) ss.text[i] = ss.text[i + 1];
+    --ss.cur;
+    ss.typed_at = 0; /* a password's peek goes with it */
+    if (!ss_named()) ss_filter();
+}
+
+/* A name submitted: the name, its edge spaces gone, saved (Rename) or made a playlist (New
  * Playlist, ringnav_playlist_create, which the list it goes back to opens on), and the page
  * closes; else a toast says why not and the name stays to edit. */
 static void ss_save(void) {
@@ -332,7 +410,18 @@ static void ss_box_done(void) {
     if (ss.box && P(im, IM_WIDGET) == edit) input_method_request(im, (void *)0);
 }
 /* Return held on a text box: the box's keyboard closes, the strip with it, as the keyboard's Return
- * did (navigation.c search_key: our own edits emptied first, so their pages back out). */
+ * did (navigation.c search_key: our own edits emptied first, so their pages back out). Add
+ * Network's dialog is only the box, a modal one that stock leaves up for a second Return to close:
+ * it is quit too, back to the page's rows with the text as it was, from the next loop pass (quit
+ * inside the keyboard's own close, demo crashes). */
+static unsigned ss_quit_timer __attribute__((section(".scratch")));
+static void *ss_quit_win __attribute__((section(".scratch")));
+static int ss_holds(void *root, void *w);
+static int ss_quit_due(const void *unused) {
+    ss_quit_timer = 0;
+    if (ss_holds(window_manager(), ss_quit_win)) dialog_quit(ss_quit_win, 0);
+    return 0;
+}
 static void ss_box_cancel(void) {
     void *edit = ss.box, *im = input_method();
     if (ss.done) { /* the payload's own text: its page closes, the text as it was */
@@ -343,7 +432,10 @@ static void ss_box_cancel(void) {
     if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), EDIT_NAME))
         widget_set_text_utf8(edit, "");
     widget_set_focused(edit, 0);
+    void *win = window_of(edit);
+    int own = !tk_strcmp(widget_get_prop_str(win, "name", ""), "editwifi_dialog");
     input_method_request(im, (void *)0);
+    if (own) ss_quit_win = win, rearm(&ss_quit_timer, ss_quit_due, 0);
 }
 
 /* The result at sel: a song plays, the songs found after it as the queue (a song list's class, as
@@ -376,11 +468,13 @@ static void ss_play(void) {
 
 /* The pop's box on the sheet: the bubble's, whose key sits on the lit cell's accent box. */
 static rect_t ss_pop_box(void) {
-    return (rect_t){ ss_lit_x() - (SS_POP_W - SS_POP_KEY_W) / 2,
-                     SS_STRIP_Y + SS_BOX_IN + SS_POP_KEY_H - SS_POP_H, SS_POP_W, SS_POP_H };
+    return (rect_t){ ss_cell_x(ss.stop - 1) - (SS_POP_W - SS_POP_KEY_W) / 2,
+                     SS_STRIP_Y + SS_KEY_IN + SS_POP_KEY_H - SS_POP_H, SS_POP_W, SS_POP_H };
 }
-/* a box's sets have no pop images (tools/art.py pop_images: A to Z and 0 to 9) */
-static int ss_popping(void) { return ss.pop == 1 && !ss.focus && !ss.box && ss.letter < SS_SPACE; }
+/* the pop shows over a character the wheel is on, not the space (it has no big form) */
+static int ss_popping(void) {
+    return ss.pop == 1 && !ss.focus && ss_in_run() && ss_pop_cell(ss.stop - 1) >= 0;
+}
 static void ss_pop_dirty(void) {
     rect_t r = ss_pop_box();
     if (ss.sheet) widget_invalidate_force(ss.sheet, &r); /* the bubble's box alone */
@@ -396,7 +490,7 @@ static int ss_pop_due(const void *unused) {
     ss_pop_dirty();
     return 0;
 }
-/* A step of the strip's letters, by the wheel or a drag (or a tap's letter): the pop at once, or,
+/* A step of the highlight, by the wheel or a drag (or a tap's character): the pop at once, or,
  * inside a spin, once it stops. */
 static void ss_pop_step(void) {
     unsigned now = (unsigned)time_now_ms();
@@ -413,13 +507,29 @@ static void ss_cell(void *canvas, const char *name, int i, int w, int h, int x, 
     rect_t src = { i * w, 0, w, h }, dst = { x, y, w, h };
     canvas_draw_image(canvas, bitmap, &src, &dst);
 }
-/* The bubble over the lit cell, the big letter in its head, the echo on its key. */
+/* Run entry e in its cell from x, in argb: its character, or the space's open box under the
+ * line (the keyboard's), as the strip's letters are drawn. */
+static void ss_letter(void *canvas, int e, int x, unsigned argb) {
+    int cy = SS_STRIP_Y + SS_STRIP_H / 2;
+    unsigned c[2] = { ss_char(e), 0 };
+    if (c[0] == ' ') {
+        stock_canvas_set_fill_color(canvas, argb);
+        canvas_fill_rect(canvas, x + 4, cy + 4, 11, 2);
+        canvas_fill_rect(canvas, x + 4, cy, 2, 4);
+        canvas_fill_rect(canvas, x + 13, cy, 2, 4);
+        return;
+    }
+    rect_t r = { x, SS_STRIP_Y, SS_STEP, SS_STRIP_H };
+    int px = SS_PX_LETTER;
+    final_text(canvas, theme_face(c, 1, &px), c, &r, (unsigned)px, argb);
+}
+/* The bubble over the lit cell, the big character in its head, its echo on its key. */
 static void ss_pop_paint(void *canvas) {
     rect_t b = ss_pop_box();
+    int e = ss.stop - 1;
     ss_cell(canvas, "search_pop", 0, SS_POP_W, SS_POP_H, b.x, b.y);
-    ss_cell(canvas, "search_pop_letters", ss.letter, SS_POP_HEAD, SS_POP_HEAD, b.x, b.y);
-    ss_cell(canvas, "search_pop_echoes", ss.letter, SS_POP_KEY_W, SS_POP_ECHO_H, ss_lit_x(),
-            SS_STRIP_Y);
+    ss_cell(canvas, "search_pop_letters", ss_pop_cell(e), SS_POP_HEAD, SS_POP_HEAD, b.x, b.y);
+    ss_letter(canvas, e, ss_cell_x(e), SS_POP_ECHO);
 }
 
 /* Whether the tabs show: while the wheel is off the strip, never under Add Songs (nor naming a
@@ -427,7 +537,7 @@ static void ss_pop_paint(void *canvas) {
  * the tabs while they show. */
 static int ss_tabs(void) { return ss.focus && !ss_named() && !ss.pick; }
 static int ss_rows(void) { return ss_tabs() ? SS_TAB_ROWS : SS_ROWS; }
-static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : 0; }
+static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : SS_QUERY_H; }
 /* The bar's row kept in view. */
 static void ss_keep(void) {
     if (ss.sel < ss.top) ss.top = ss.sel;
@@ -438,6 +548,14 @@ static void ss_pick(int tab) {
     ss_filter();
 }
 
+/* The page left with nothing taken: a box's keyboard closed, else the page. */
+static void ss_leave(void) {
+    if (ss.box)
+        ss_box_cancel();
+    else
+        navigator_back();
+}
+
 /* Return's hold: over, its card gone. */
 static void ss_hold_end(void) {
     stop_timer(&ss.hold_timer);
@@ -446,16 +564,18 @@ static void ss_hold_end(void) {
     ss.held = 0;
 }
 /* The hold's card from SS_HOLD_SHOW_MS, its ring repainted as it fills, and at SS_HOLD_MS the page
- * closed. */
+ * closed. The release is then the hold's: the latch is armed, as stock's own long press arms it,
+ * for stock's key-up filter to swallow it, and stock's long press, should Return still be down
+ * at KEY_HOLD_MS, finds the page gone and does nothing (search_strip_hold). */
 static int ss_hold_tick(const void *unused) {
     ss.hold_timer = 0;
     if (!ss.page || !ss.hold_at) return 0;
-    if ((unsigned)time_now_ms() - ss.hold_at >= SS_HOLD_MS) {
+    unsigned now = (unsigned)time_now_ms();
+    if (now - ss.hold_at >= SS_HOLD_MS) {
         ss_hold_end();
-        if (ss.box)
-            ss_box_cancel();
-        else
-            navigator_back();
+        *(volatile unsigned char *)RETURN_RELEASE_LATCH = 1;
+        ss_hold_closed = now | 1;
+        ss_leave();
         return 0;
     }
     ss.held = 1;
@@ -463,60 +583,122 @@ static int ss_hold_tick(const void *unused) {
     ss.hold_timer = timer_add(ss_hold_tick, (void *)0, SS_HOLD_STEP_MS);
     return 0;
 }
-/* ringnav_keydown: Return pressed on the page starts the hold's clock (a repeat while it is held
- * changes nothing). */
-static int ss_show_due(const void *unused) {
-    ss.show_timer = 0;
-    if (ss.page && ss.play_held && ss.secret) {
-        ss.shown = 1;
-        if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
-    }
+
+/* The cursor's blink: shown from ss.blink_at for SS_BLINK_MS, hidden as long, and so on; shown
+ * always under Reduce Motion. */
+static int ss_blink_on(void) {
+    return motion_reduced() || ((unsigned)time_now_ms() - ss.blink_at) / SS_BLINK_MS % 2 == 0;
+}
+/* The blink's turn: the field alone repainted, while the strip has the wheel (the cursor's). */
+static int ss_blink_due(const void *unused) {
+    ss.blink_timer = 0;
+    if (!ss.sheet || ss.focus || motion_reduced()) return 0;
+    widget_invalidate_force(ss.sheet, &(rect_t){ ss.fx, ss.fy, ss.fw, ss.fh });
+    ss.blink_timer = timer_add(ss_blink_due, (void *)0, SS_BLINK_MS);
     return 0;
 }
+/* The sheet repainted after a key, the cursor shown from now (a blink starts over, as a text
+ * field's cursor stays lit while it moves). */
+static void ss_dirty(void) {
+    if (!ss.sheet) return;
+    unsigned now = (unsigned)time_now_ms();
+    ss.blink_at = now;
+    if (!ss.focus && !motion_reduced()) rearm(&ss.blink_timer, ss_blink_due, SS_BLINK_MS);
+    widget_invalidate_force(ss.sheet, (void *)0);
+}
+/* Previous held: an erase, and the next one armed 15% sooner than this one was, to
+ * SS_ERASE_MIN_MS. */
+static int ss_erase_due(const void *unused) {
+    ss.erase_timer = 0;
+    if (!ss.page || !ss.prev_down || ss.focus) return 0;
+    ss.erased = 1;
+    ss_erase();
+    ss_dirty();
+    unsigned gap = ss.erase_gap ? ss.erase_gap * 85 / 100 : SS_ERASE_GAP_MS;
+    ss.erase_gap = gap < SS_ERASE_MIN_MS ? SS_ERASE_MIN_MS : gap;
+    ss.erase_timer = timer_add(ss_erase_due, (void *)0, ss.erase_gap);
+    return 0;
+}
+
+/* ringnav_keydown: Return pressed on the page starts the hold's clock, and Previous pressed on the
+ * strip the erase's (a repeat while either is held changes nothing). */
 void search_strip_down(void *top, unsigned key) {
-    if (ss.page && top == ss.page && ss.box && key == KEY_PLAY && !ss.play_held) {
-        ss.play_held = 1; /* a password shows while it is held (ss_show_due) */
-        rearm(&ss.show_timer, ss_show_due, SS_SHOW_MS);
+    if (!ss.page || top != ss.page) return;
+    if (key == KEY_BACK_BTN && !ss.focus && !ss.prev_down) {
+        ss.prev_down = 1;
+        ss.erased = 0;
+        ss.erase_gap = 0;
+        rearm(&ss.erase_timer, ss_erase_due, SS_ERASE_HOLD_MS);
         return;
     }
-    if (!ss.page || top != ss.page || key != KEY_RETURN || ss.hold_at) return;
+    if (key != KEY_RETURN || ss.hold_at) return;
     unsigned now = (unsigned)time_now_ms();
     ss.hold_at = now ? now : 1;
     ss.held = 0;
     rearm(&ss.hold_timer, ss_hold_tick, SS_HOLD_SHOW_MS);
 }
 
-/* ringnav: the page's keys before stock's (Play/Pause and a held Return's release go on). */
+/* Submitted, by the return key's Centre, its tap or Play/Pause: a box's text to its box, a name
+ * saved or created, Search's wheel to its results (to the tabs while the tab picked lists none). */
+static void ss_submit(void) {
+    if (ss.box)
+        ss_box_done();
+    else if (ss_named())
+        ss_save();
+    else if (ss.pick && ss.nmatch) /* Add Songs' songs */
+        ss.focus = SS_ON_LIST, ss.sel = ss.top;
+    else if (ss.any && !ss.pick)
+        ss.focus = ss.nmatch ? SS_ON_LIST : SS_ON_TABS, ss.sel = ss.top;
+}
+
+/* The highlight a stop on round the loop, dir 1 or -1. A tick of the turn that stopped on the
+ * return key (closer than SS_GESTURE_MS to the one before) goes nowhere; a new turn goes on. */
+static void ss_turn(int dir, int cont) {
+    if (ss.halted && cont) return;
+    ss.halted = 0;
+    ss.stop = ((ss.stop + dir) % ss_stops() + ss_stops()) % ss_stops();
+    ss.halted = (unsigned char)ss_on_ret();
+    ss_follow();
+    if (ss_in_run()) ss_pop_step();
+}
+
+/* Centre on the strip: the switcher's next set, the highlight staying on it; the return key's
+ * submit; the character typed. */
+static void ss_centre(void) {
+    if (!ss.stop) {
+        ss.set = (ss.set + 1) % SS_SETS;
+        ss.off = 0;
+    } else if (ss_on_ret())
+        ss_submit();
+    else
+        ss_type(ss.stop - 1);
+}
+
+/* ringnav: the page's keys before stock's (Play/Pause off the strip and a held Return's release
+ * go on). */
 int search_strip_key(void *top, unsigned key) {
     if (!ss.page || top != ss.page) return 0;
-    if (key == KEY_RETURN && ss.hold_at) { /* a hold let go early: nothing erased */
-        int held = ss.held;
-        ss_hold_end();
-        if (held && !*(volatile unsigned char *)RETURN_RELEASE_LATCH) {
-            *(volatile signed char *)KEY_TONE_LATCH = 0;
-            return 1;
-        }
-    }
+    if (key == KEY_RETURN && ss.hold_at) ss_hold_end(); /* let go before the page closed */
     if (key == KEY_RETURN && *(volatile unsigned char *)RETURN_RELEASE_LATCH) return 0;
-    if (ss.box &&
-        key == KEY_PLAY) { /* a box's Play/Pause: its hold showed it; a press, the next set */
-        stop_timer(&ss.show_timer);
-        if (!ss.shown) ss.set = (ss.set + 1) % SS_SETS, ss.letter = 0;
-        ss.shown = ss.play_held = 0;
-        if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
-        *(volatile signed char *)KEY_TONE_LATCH = 0;
-        return 1;
-    }
     int wheel = key == KEY_NEXT   ? 1
                 : key == KEY_PREV ? -1
                                   : 0,
         button = key == KEY_FWD_BTN    ? 1
                  : key == KEY_BACK_BTN ? -1
                                        : 0;
+    if (button < 0) { /* Previous let go: its hold's erases, or a press's cursor step */
+        int erased = ss.erased;
+        stop_timer(&ss.erase_timer);
+        ss.prev_down = ss.erased = 0;
+        if (erased && !ss.focus) {
+            *(volatile signed char *)KEY_TONE_LATCH = 0;
+            return 1;
+        }
+    }
     if (ss.focus == SS_ON_LIST && (button < 0 || (wheel < 0 && !ss.sel)))
         ss.focus = button || ss.pick ? SS_ON_STRIP : SS_ON_TABS, wheel = button = 0, key = 0;
     if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
-        return 0; /* Play/Pause, on the results too */
+        return 0; /* Play/Pause, on the results */
     if (ss.focus == SS_ON_TABS) {
         int to = ss.tab + wheel; /* the wheel's tab, past either end off the tabs */
         if (key == KEY_RETURN || to < 0)
@@ -534,42 +716,47 @@ int search_strip_key(void *top, unsigned key) {
     } else if (!key) {
         /* the results' Previous, back on the strip */
     } else if (wheel) {
-        ss.letter = (ss.letter + wheel + ss_entries()) % ss_entries();
-        ss_pop_step();
+        unsigned now = (unsigned)time_now_ms();
+        int cont = ss.turn_at && now - ss.turn_at < SS_GESTURE_MS;
+        ss.turn_at = now ? now : 1;
+        ss_turn(wheel, cont);
     } else if (key == KEY_CENTER)
-        ss_type(ss.letter);
+        ss_centre();
+    else if (key == KEY_PLAY)
+        ss_submit();
+    else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
+        ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
     else if (button < 0) {
-        if (ss.cur) --ss.cur;
-    } else if (button > 0 && ss.text[ss.cur])
-        ++ss.cur;
-    else if (button > 0) {
-        if (ss.box) /* Next at the text's end: the box's own OK */
-            ss_box_done();
-        else if (ss_named()) /* Next at the name's end: create it, or save it */
-            ss_save();
-        else if (ss.pick && ss.nmatch) /* Add Songs' songs */
-            ss.focus = SS_ON_LIST;
-        else if (ss.any && !ss.pick)
-            ss.focus = ss.nmatch ? SS_ON_LIST : SS_ON_TABS; /* an empty tab: the tabs */
-    } else if (key == KEY_RETURN)
-        ss_type(ss_delete());
-    else
+        if (ss.cur) --ss.cur, ss.typed_at = 0; /* the peek is the character just typed alone */
+    } else if (button > 0) {
+        if (ss.text[ss.cur]) ++ss.cur, ss.typed_at = 0;
+    } else
         return 0;
-    ss_keep();
-    if (ss.sheet) widget_invalidate_force(ss.sheet, (void *)0);
+    if (ss.page) { /* a submit may have closed it */
+        ss_keep();
+        ss_dirty();
+    }
     /* stock's key-up clears the click latch, and ringnav skips it: the next press clicks */
     *(volatile signed char *)KEY_TONE_LATCH = 0;
     return 1;
 }
 
-/* Hold Return (compact_now_playing) on the page: the hold's own clock closes it (ss_hold_tick); a
- * hold whose press it never saw closes it at once, whatever has the wheel. The latch stays armed
- * for stock's filter to swallow the release, as on the hold's other ways. */
+/* Hold Return (compact_now_playing): on the page, the hold's own clock closes it (ss_hold_tick);
+ * a hold whose press it never saw closes it at once, whatever has the wheel. Just after the hold's
+ * clock closed it, the page under it takes nothing from the same hold. The latch stays armed for
+ * stock's filter to swallow the release, as on the hold's other ways. */
 int search_strip_hold(void *top) {
+    unsigned closed = ss_hold_closed;
+    ss_hold_closed = 0;
+    if (closed && !ss.page && (unsigned)time_now_ms() - closed < SS_HOLD_LATE_MS) return 1;
     if (!ss.page || top != ss.page) return 0;
-    if (!ss.hold_at) navigator_back();
+    if (!ss.hold_at) ss_leave();
     return 1;
 }
+
+/* Whether top is the strip's page, where Previous and Next are the text's cursor: no scan of the
+ * song on their hold (seek.c), and no long press of stock's (hold_menu.c ringnav_keylong). */
+int search_strip_owns(void *top) { return ss.page && top == ss.page; }
 
 /* UTF-8 s as wide characters in out (at most max - 1 of them), 0-ended; its length. */
 static unsigned ss_wide(const char *s, unsigned *out, unsigned max) {
@@ -610,27 +797,6 @@ static int ss_text(void *canvas, const char *face, const char *s, int x, int y, 
     return w;
 }
 
-/* The typed text from x in room, scrolled to keep the cursor in it: from the first character that
- * leaves the cursor inside room, up to the last that fits. Returns the cursor's x from x. */
-static int ss_typed(void *canvas, int x, int y, int h, int room, unsigned rgb) {
-    unsigned wide[SS_TEXT_MAX + 1];
-    unsigned n = ss_wide(ss.text, wide, sizeof wide / sizeof *wide), at = 0, end = n,
-             cur = (unsigned)ss.cur;
-    int px = SS_PX_TYPED;
-    const char *face = theme_face(wide, (int)n, &px);
-    canvas_set_font(canvas, face, (unsigned)px);
-#define SS_W(a, b)                                                                                 \
-    ((b) > (a) ? (int)(canvas_measure_text(canvas, wide + (a), (b) - (a)) + 0.5f) : 0)
-    while (at < cur && SS_W(at, cur) > room) ++at;
-    while (end > cur && SS_W(at, end) > room) --end;
-    int cw = SS_W(at, cur), w = SS_W(at, end);
-#undef SS_W
-    wide[end] = 0;
-    rect_t r = { x, y, w + 2, h };
-    if (end > at) final_text(canvas, face, wide + at, &r, (unsigned)px, 0xff000000u | rgb);
-    return cw;
-}
-
 /* A line of s centred across the sheet on y, in face (0: the theme's for s) at px, in rgb; its
  * width. */
 static int ss_centred(void *canvas, const char *face, const char *s, int y, int px, unsigned rgb) {
@@ -645,68 +811,156 @@ static int ss_centred(void *canvas, const char *face, const char *s, int y, int 
     return w;
 }
 
-/* Search with nothing typed: the house empty note (docs/oled-design.md#empty-and-offline), its
- * line in 16 px Text Secondary and its hint in 15 px Text Tertiary 24 px under it, in the free
- * area above the strip. */
-static void ss_note(void *canvas, const char *line, const char *hint, unsigned secondary,
-                    unsigned tertiary) {
-    ss_centred(canvas, 0, line, SS_NOTE_Y, SS_PX_NOTE, secondary);
-    ss_centred(canvas, 0, hint, SS_NOTE_Y + 24, SS_PX_HINT, tertiary);
-}
+/* Ink drawn by ss_fade: the ink at alpha (0 to 255) over arg's colour. */
+typedef void ss_ink_t(void *canvas, const void *arg, unsigned alpha);
 
-/* Field OFF: text in Inter Medium 22, centred on y, and its cursor after cur characters; a text
- * wider than the text column keeps the cursor in it, from the first character that does (as
- * ss_typed). */
-static void ss_value_paint(void *canvas, const char *text, int cur_at, int y, unsigned primary) {
-    static const char *const faces[] = FONT_NAMES;
-    unsigned wide[SS_TEXT_MAX * 3 + 1]; /* a password's dots are 3 bytes of UTF-8 each */
-    unsigned n = ss_wide(text, wide, sizeof wide / sizeof *wide), at = 0, end = n,
-             cur = (unsigned)cur_at;
-    int px = SS_PX_NAME;
-    const char *face = theme_face(wide, (int)n, &px);
-    if (!face || !tk_strcmp(face, faces[theme()->font[ROLE_TITLE]]))
-        face = faces[FONT_INTER_MEDIUM];
-    canvas_set_font(canvas, face, (unsigned)px);
-#define SS_W(a, b)                                                                                 \
-    ((b) > (a) ? (int)(canvas_measure_text(canvas, wide + (a), (b) - (a)) + 0.5f) : 0)
-    while (at < cur && SS_W(at, cur) > SS_NAME_ROOM) ++at;
-    while (end > cur && SS_W(at, end) > SS_NAME_ROOM) --end;
-    int cx = SS_W(at, cur), w = SS_W(at, end);
-#undef SS_W
-    int x = (375 - w) / 2;
-    wide[end] = 0;
-    rect_t r = { x, y - SS_PITCH / 2, w + 2, SS_PITCH };
-    if (end > at) final_text(canvas, face, wide + at, &r, (unsigned)px, 0xff000000u | primary);
-    stock_canvas_set_fill_color(canvas, RGBA(primary)); /* the cursor, steady */
-    canvas_fill_rect(canvas, x + cx + 1, y - 13, 2, 26);
-}
-
-/* Field OFF: the name and its hint; a box's text and its hint, a password as dots ("Password"
- * over them) but the character just typed, shown a moment, or all of it while Play/Pause is held.
- */
-static void ss_name_paint(void *canvas, unsigned primary, unsigned tertiary) {
-    if (!ss.secret) {
-        ss_value_paint(canvas, ss.text, ss.cur, SS_NAME_Y, primary);
-        ss_centred(canvas, 0,
-                   ss.create ? "Press Next to create"
-                   : ss.box  ? "Press Next when done"
-                             : "Press Next to save",
-                   SS_NAME_Y + SS_HINT_DY, SS_PX_HINT, tertiary);
-        return;
+/* ink, which lies from x to x + w on the band y to y + h of the sheet, clipped to x0 to x1; its
+ * columns within fade of x0 (when fl) or of x1 (when fr) drawn a slice of SS_FADE_SLICE columns at
+ * a time under a clip, each slice in an alpha falling to 0 at that edge. The ink's own alpha fades
+ * it, so nothing is painted over what lies under it (the strip's pill, a row's box, the page): the
+ * run's letters at an edge with more of the set past it (ss_run_letter), and a field's text at an
+ * edge that cuts it (ss_field). */
+static void ss_fade(void *canvas, int x, int w, int y, int h, int x0, int x1, int fade, int fl,
+                    int fr, ss_ink_t *ink, const void *arg) {
+    int l = fl ? x0 + fade : x0, r = fr ? x1 - fade : x1, a0 = x > x0 ? x : x0,
+        a1 = x + w < x1 ? x + w : x1, ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), old[4],
+        clip[4];
+    int s0 = a0 > l ? a0 : l, s1 = a1 < r ? a1 : r;
+    if (s0 < s1 && clip_within(canvas, old, clip, ox + s0, oy + y, s1 - s0, h)) {
+        canvas_set_clip_rect(canvas, (rect_t *)clip);
+        ink(canvas, arg, 255);
+        canvas_set_clip_rect(canvas, (rect_t *)old);
     }
-    char shown[SS_TEXT_MAX * 3 + 1], *o = shown;
+    for (int side = 0; side < 2; ++side) {
+        int from = side ? (r > a0 ? r : a0) : a0, to = side ? a1 : (l < a1 ? l : a1);
+        for (int c = from; c < to; c += SS_FADE_SLICE) {
+            int sw = to - c < SS_FADE_SLICE ? to - c : SS_FADE_SLICE, mid = c + sw / 2,
+                a = side ? 255 * (x1 - mid) / fade : 255 * (mid - x0) / fade;
+            if (a <= 0) continue;
+            if (!clip_within(canvas, old, clip, ox + c, oy + y, sw, h)) continue;
+            canvas_set_clip_rect(canvas, (rect_t *)clip);
+            ink(canvas, arg, (unsigned)(a > 255 ? 255 : a));
+            canvas_set_clip_rect(canvas, (rect_t *)old);
+        }
+    }
+}
+
+/* A line of text for ss_fade: wide characters (0-ended) in face at px, left-aligned in box, in
+ * rgb. */
+struct ss_line {
+    const unsigned *wide;
+    const char *face;
+    int px;
+    rect_t box;
+    unsigned rgb;
+};
+static void ss_line_ink(void *canvas, const void *arg, unsigned alpha) {
+    const struct ss_line *l = arg;
+    rect_t r = l->box;
+    final_text(canvas, l->face, l->wide, &r, (unsigned)l->px, alpha << 24 | (l->rgb & 0xffffff));
+}
+
+/* The text where it lives (docs/oled-design.md#text-entry): s from x0 to x1, centred on y, in
+ * face at px (face 0: the theme's for s), right-aligned to x1 when right and it fits, else from
+ * x0; its cursor, 2 px by ch, after cur characters while the strip has the wheel and the blink
+ * shows it. A text wider than the field scrolls by as little as keeps the cursor SS_KEEP px in
+ * from either edge (ss.scroll, kept between paints as a text field keeps its own), and an edge
+ * that cuts the text fades it out over SS_EDGE px inside the field (ss_fade). */
+static void ss_field(void *canvas, const char *s, int cur, int x0, int x1, int y, const char *face,
+                     int px, int ch, int right, unsigned rgb) {
+    unsigned wide[SS_TEXT_MAX * 3 + 1]; /* a password's dots are 3 bytes of UTF-8 each */
+    unsigned n = ss_wide(s, wide, sizeof wide / sizeof *wide);
+    int fpx = px;
+    if (!face) face = theme_face(wide, (int)n, &fpx);
+    canvas_set_font(canvas, face, (unsigned)fpx);
+    int room = x1 - x0, full = (int)(canvas_measure_text(canvas, wide, n) + 0.5f) + 3,
+        cx = cur > 0 && (unsigned)cur <= n
+                 ? (int)(canvas_measure_text(canvas, wide, (unsigned)cur) + 0.5f)
+                 : 0,
+        left;
+    if (full <= room) {
+        left = right ? x1 - full : x0;
+        ss.scroll = 0;
+    } else {
+        int sc = ss.scroll;
+        if (sc < cx - room + SS_KEEP) sc = cx - room + SS_KEEP;
+        if (sc > cx - SS_KEEP) sc = cx - SS_KEEP;
+        if (sc > full - room) sc = full - room;
+        if (sc < 0) sc = 0;
+        ss.scroll = (short)sc;
+        left = x0 - sc;
+    }
+    ss.fx = (short)(x0 - 2), ss.fy = (short)(y - SS_PITCH / 2), ss.fw = (short)(room + 4),
+    ss.fh = SS_PITCH;
+    if (n) {
+        struct ss_line l = { wide, face, fpx, { left, y - SS_PITCH / 2, full + 2, SS_PITCH }, rgb };
+        ss_fade(canvas, left, full + 2, y - SS_PITCH / 2, SS_PITCH, x0, x1, SS_EDGE,
+                left<x0, left + full> x1, ss_line_ink, &l);
+    }
+    if (ss.focus || !ss_blink_on()) return;
+    stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_PRIMARY)));
+    canvas_fill_rect(canvas, left + (cx ? cx + 1 : 0), y - 13, 2, (unsigned)ch);
+}
+
+/* The text as it shows into out: a password's characters as dots, but the one just typed for a
+ * moment (SS_PEEK_MS). */
+static const char *ss_shown(char *out) {
+    if (!ss.secret) return ss.text;
+    char *o = out;
     int n = (int)strlen(ss.text),
         peek = ss.cur && ss.typed_at && (unsigned)time_now_ms() - ss.typed_at < SS_PEEK_MS;
     for (int i = 0; i < n; ++i)
-        if (ss.shown || (peek && i == ss.cur - 1))
+        if (peek && i == ss.cur - 1)
             *o++ = ss.text[i];
         else /* U+2022, a bullet */
             *o++ = (char)0xe2, *o++ = (char)0x80, *o++ = (char)0xa2;
     *o = 0;
-    ss_centred(canvas, 0, "Password", SS_LABEL_Y, SS_PX_HINT, tertiary);
-    ss_value_paint(canvas, shown, ss.cur, SS_SECRET_Y, primary);
-    ss_centred(canvas, 0, "Hold Play/Pause to show \xc2\xb7 Next at the end to join",
-               SS_SECRET_HINT_Y, SS_PX_SMALL, tertiary);
+    return out;
+}
+
+/* A row's or a cell's form: the page under as it was (ss.under), down to the strip or, with a
+ * note, to the row; over the row the wheel was on, its box, a cell's label, and the text. A field's
+ * form: its label over a pill holding the text. Either's note under it. */
+static void ss_form_paint(void *canvas, unsigned primary, unsigned secondary, unsigned tertiary,
+                          unsigned accent) {
+    static const char *const faces[] = FONT_NAMES;
+    char dots[SS_TEXT_MAX * 3 + 1];
+    const char *shown = ss_shown(dots);
+    int note_y;
+    if (ss.form == SS_FORM_FIELD) {
+        if (ss.label)
+            ss_text(canvas, 0, ss.label, SS_FIELD_X, SS_LABEL_Y - SS_PITCH / 2, SS_PITCH,
+                    SS_FIELD_W, SS_PX_LABEL, tertiary);
+        fill_box(canvas, &(rect_t){ SS_FIELD_X, SS_FIELD_Y, SS_FIELD_W, SS_FIELD_H },
+                 RGBA(tok(TOK_RAISED)), SS_FIELD_R);
+        ss_field(canvas, shown, ss.cur, SS_FIELD_X + SS_FIELD_IN,
+                 SS_FIELD_X + SS_FIELD_W - SS_FIELD_IN, SS_FIELD_Y + SS_FIELD_H / 2,
+                 faces[FONT_INTER_MEDIUM], SS_PX_NAME, 26, 0, primary);
+        note_y = SS_FIELD_NOTE_Y;
+    } else {
+        int y = ss.row_y, h = ss.row_h, end = ss.note ? y + h : SS_STRIP_Y - SS_UNDER_GAP;
+        if (ss.under && end > 0) {
+            int top = feedback_below(ss.sheet) - I(ss.sheet, W_H);
+            rect_t src = { 0, top, 375, end }, dst = { 0, 0, 375, end };
+            canvas_draw_image(canvas, ss.under, &src, &dst);
+        }
+        fill_box(canvas, &(rect_t){ SS_ROW_X, y, SS_ROW_W, h }, RGBA(accent), SS_ROW_R);
+        fill_box(canvas,
+                 &(rect_t){ SS_ROW_X + SS_ROW_LINE, y + SS_ROW_LINE, SS_ROW_W - 2 * SS_ROW_LINE,
+                            h - 2 * SS_ROW_LINE },
+                 RGBA(tok(TOK_RAISED)), SS_ROW_R - SS_ROW_LINE);
+        int x0 = SS_ROW_TEXT;
+        if (ss.form == SS_FORM_CELL && ss.label) {
+            int lw =
+                ss_text(canvas, 0, ss.label, SS_ROW_TEXT, y, h, SS_ROW_W / 2, SS_PX_ROW, secondary);
+            x0 = SS_ROW_TEXT + lw + SS_CELL_GAP;
+            if (x0 < SS_CELL_MIN) x0 = SS_CELL_MIN;
+        }
+        ss_field(canvas, shown, ss.cur, x0, SS_RIGHT, y + h / 2, 0, SS_PX_ROW, 25,
+                 ss.form == SS_FORM_CELL, primary);
+        note_y = y + h + SS_NOTE_DY;
+    }
+    if (ss.note) ss_centred(canvas, 0, ss.note, note_y, SS_PX_SMALL, tertiary);
 }
 
 /* ringnav_paint, after stock painted w: Return held, the screen dimmed by black at 55%
@@ -756,15 +1010,101 @@ void search_strip_overlay(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* ringnav_paint: the results and the strip, on the sheet. Colours are the theme's tokens
- * (docs/oled-design.md#color), drawn as stated in each half. */
+/* Search's query line, and a search box's: the magnifier's lens and handle in Text Secondary, the
+ * query in 20 px from SS_QUERY_X with its cursor while the strip has the wheel (ss_field; or the
+ * placeholder, ss.label, in Text Tertiary while it is empty), and a 1 px rule in the raised grey
+ * under it. */
+static void ss_query_paint(void *canvas, unsigned primary, unsigned secondary, unsigned tertiary) {
+    void *vg = canvas_get_vgcanvas(canvas);
+    if (vg) {
+        float x = (float)I(canvas, CANVAS_X), y = (float)I(canvas, CANVAS_Y), cx = x + SS_GLASS_X,
+              cy = y + SS_QUERY_Y - 2;
+        vgcanvas_save(vg);
+        vgcanvas_set_line_width(vg, 1.8f);
+        vgcanvas_set_stroke_color(vg, RGBA(secondary));
+        vgcanvas_begin_path(vg);
+        vgcanvas_arc(vg, cx, cy, SS_GLASS_R, 0, 6.2831853f, 0);
+        vgcanvas_stroke(vg);
+        vgcanvas_begin_path(vg);
+        vgcanvas_move_to(vg, cx + 4.5f, cy + 4.5f);
+        vgcanvas_line_to(vg, cx + 9, cy + 9);
+        vgcanvas_stroke(vg);
+        vgcanvas_restore(vg);
+    }
+    if (!ss.text[0]) /* the placeholder, the cursor before it */
+        ss_text(canvas, 0, ss.label ? ss.label : "Search", SS_QUERY_X, SS_QUERY_Y - SS_PITCH / 2,
+                SS_PITCH, SS_RIGHT + 4 - SS_QUERY_X, SS_PX_QUERY, tertiary);
+    ss_field(canvas, ss.text, ss.cur, SS_QUERY_X, SS_RIGHT + 4, SS_QUERY_Y, 0, SS_PX_QUERY, 25, 0,
+             primary);
+    stock_canvas_set_fill_color(canvas, RGBA(tok(TOK_RAISED)));
+    canvas_fill_rect(canvas, 24, SS_RULE_Y, 375 - 48, 1);
+}
+
+/* Run entry e at x in rgb, faded out toward a run edge over SS_FADE where more of the set lies
+ * past it (fade_l, fade_r; ss_fade). */
+struct ss_cell {
+    int e, x;
+    unsigned rgb;
+};
+static void ss_cell_ink(void *canvas, const void *arg, unsigned alpha) {
+    const struct ss_cell *c = arg;
+    ss_letter(canvas, c->e, c->x, alpha << 24 | c->rgb);
+}
+static void ss_run_letter(void *canvas, int e, int x, unsigned rgb, int fade_l, int fade_r) {
+    struct ss_cell c = { e, x, rgb };
+    ss_fade(canvas, x, SS_STEP, SS_STRIP_Y, SS_STRIP_H, SS_RUN_L, SS_RUN_R, SS_FADE, fade_l, fade_r,
+            ss_cell_ink, &c);
+}
+
+/* The strip (docs/oled-design.md#text-entry): a pill in the raised grey; the set switcher docked
+ * at its left, its set's name on a #2C2C2E pill, the accent's while the wheel is on it; the
+ * return key docked at its right, an accent circle with the return mark in white, turned to a
+ * white circle (in either half) with the mark in the accent while the wheel is on it; between them
+ * the run, a cell of each character in Text Primary from the first shown, the lit one on an accent
+ * box (or under its pop). The highlights show while the strip has the wheel. */
+static void ss_strip_paint(void *canvas, unsigned primary, unsigned accent, int light) {
+    int y0 = SS_STRIP_Y, on = !ss.focus;
+    fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, SS_STRIP_RX - SS_STRIP_X, SS_STRIP_H },
+             RGBA(tok(TOK_RAISED)), SS_STRIP_R);
+    int lit = on && ss_in_run() ? ss.stop - 1 : -1, pop = ss_popping(), run = ss_run();
+    int fade_l = ss.off > 0, fade_r = ss.off + SS_VISIBLE < run;
+    for (int e = ss.off; e < run && e < ss.off + SS_VISIBLE; ++e) {
+        int x = ss_cell_x(e);
+        if (e == lit && pop) continue; /* ss_pop_paint draws the cell */
+        if (e == lit)
+            fill_box(canvas,
+                     &(rect_t){ x, y0 + SS_KEY_IN, SS_POP_KEY_W, SS_STRIP_H - 2 * SS_KEY_IN },
+                     RGBA(accent), 5);
+        ss_run_letter(canvas, e, x, e == lit ? 0xffffff : primary, fade_l, fade_r);
+    }
+    static const char *const faces[] = FONT_NAMES;
+    unsigned w[8], n = ss_wide(ss_set_names[ss.set], w, sizeof w / sizeof *w);
+    rect_t chip = { SS_STRIP_X, y0, SS_CHIP_R - SS_STRIP_X, SS_STRIP_H };
+    fill_box(canvas, &chip, RGBA(on && !ss.stop ? accent : flip_if(light, SS_CHIP_RGB)),
+             SS_STRIP_R);
+    final_text(canvas, faces[FONT_INTER_MEDIUM], w, &chip, SS_PX_CHIP,
+               0xff000000u | (on && !ss.stop ? 0xffffff : primary));
+    (void)n;
+    int ret = on && ss_on_ret();
+    fill_box(canvas, &(rect_t){ SS_RET_L, y0, SS_STRIP_H, SS_STRIP_H },
+             RGBA(ret ? 0xffffff : accent), SS_STRIP_R);
+    paint_art(ss.sheet, canvas, theme_art(ret ? "search_return_a" : "search_return_w"),
+              SS_RET_L + (SS_STRIP_H - SS_RET_MARK) / 2, y0 + (SS_STRIP_H - SS_RET_MARK) / 2);
+    if (pop) ss_pop_paint(canvas);
+}
+
+/* ringnav_paint: the query, the results and the strip, on the sheet; or a name over the strip.
+ * Colours are the theme's tokens (docs/oled-design.md#color), drawn as stated in each half. */
 void search_strip_paint(void *w, void *canvas) {
     if (!ss.page || w != ss.sheet || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
     int light = ipod_light();
     unsigned primary = tok(TOK_PRIMARY), secondary = tok(TOK_SECONDARY),
              tertiary = tok(TOK_TERTIARY), accent = accent_tone(2);
-    if (ss_named()) ss_name_paint(canvas, primary, tertiary);
+    if (ss.form == SS_FORM_QUERY)
+        ss_query_paint(canvas, primary, secondary, tertiary);
+    else
+        ss_form_paint(canvas, primary, secondary, tertiary, accent);
     if (ss_tabs()) {
         static const char *const tabs[] = { "All", "Songs", "Artists", "Albums" };
         segments_paint(canvas, tabs, SS_TABS, ss.tab, ss.focus == SS_ON_TABS, SS_TABS_X, SS_TABS_Y,
@@ -817,10 +1157,6 @@ void search_strip_paint(void *w, void *canvas) {
             ss_text(canvas, 0, artist, ax, y + 1, SS_PITCH, right - ax, SS_PX_ARTIST, note);
         if (grey) catalogue_mark_paint(canvas, SS_MARK_X, y + SS_PITCH / 2, ink);
     }
-    if (!ss.text[0] && !ss_named()) /* nothing typed: what Search finds */
-        ss_note(canvas, "Search your music",
-                ss.pick ? "Songs by title or artist" : "Artists, albums and songs", secondary,
-                tertiary);
     if (ss.text[0] && !ss.nmatch && !ss_named()) { /* the empty state, between the tabs and strip */
         int y = I(ss.page, W_Y), free = y + ss_list_y(); /* empty_top's are screen ys */
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
@@ -828,71 +1164,7 @@ void search_strip_paint(void *w, void *canvas) {
         if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
         empty_paint(ss.sheet, canvas, &e, empty_top(free, y + SS_STRIP_Y, 0) - y);
     }
-    /* the strip: a #1C1C1E pill, the text in a black box with its cursor, the letters in
-     * equal cells about the lit one, white on the accent while the strip has the wheel */
-    int y0 = SS_STRIP_Y, cy = y0 + SS_STRIP_H / 2;
-    unsigned strip = tok(TOK_RAISED);
-    fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, 375 - 2 * SS_STRIP_X, SS_STRIP_H }, RGBA(strip),
-             SS_STRIP_R);
-    if (!ss_named()) { /* field ON: the typed text's black box, its cursor */
-        fill_box(
-            canvas,
-            &(rect_t){ SS_BOX_X, y0 + SS_BOX_IN, SS_BOX_R - SS_BOX_X, SS_STRIP_H - 2 * SS_BOX_IN },
-            RGBA(light ? 0xffffff : 0), SS_BOX_RADIUS);
-        int cx =
-            ss_typed(canvas, SS_TYPED_X, y0, SS_STRIP_H, SS_BOX_R - 6 - SS_TYPED_X - 1, primary);
-        if (!ss.focus) { /* the cursor, steady, in the text's ink */
-            stock_canvas_set_fill_color(canvas, RGBA(primary));
-            canvas_fill_rect(canvas, SS_TYPED_X + 1 + cx, cy - 9, 2, 18);
-        }
-    }
-    int lit_x = ss_lit_x(), side = ss_side();
-    int run_l = ss_run_l(), run_r = ss_run_r();
-    for (int k = -side; k <= side; ++k) {
-        int e = (ss.letter + k + ss_entries()) % ss_entries(), on = !k, x = lit_x + k * SS_STEP;
-        unsigned ink = on && !ss.focus ? 0xffffff : on ? primary : secondary;
-        if (on && ss_popping()) continue; /* ss_pop_paint draws the cell */
-        if (on && !ss.focus)
-            fill_box(canvas,
-                     &(rect_t){ x, y0 + SS_BOX_IN, SS_POP_KEY_W, SS_STRIP_H - 2 * SS_BOX_IN },
-                     RGBA(accent), 5);
-        unsigned c[2] = { ss_char(e), 0 };
-        int gx = x + 2; /* the space and delete marks, 11 px wide in the cell */
-        stock_canvas_set_fill_color(canvas, RGBA(ink));
-        if (e == ss_space()) { /* an open box under the line, the keyboard's space */
-            canvas_fill_rect(canvas, gx + 2, cy + 4, 11, 2);
-            canvas_fill_rect(canvas, gx + 2, cy, 2, 4);
-            canvas_fill_rect(canvas, gx + 11, cy, 2, 4);
-        } else if (e == ss_delete()) { /* a left-pointing arrow */
-            canvas_fill_rect(canvas, gx + 2, cy - 1, 11, 2);
-            for (int d = 1; d <= 4; ++d) {
-                canvas_fill_rect(canvas, gx + 2 + d, cy - 1 - d, 2, 1);
-                canvas_fill_rect(canvas, gx + 2 + d, cy + d, 2, 1);
-            }
-        } else {
-            rect_t r = { x, y0, SS_STEP, SS_STRIP_H };
-            int px = SS_PX_LETTER;
-            final_text(canvas, theme_face(c, 1, &px), c, &r, (unsigned)px, 0xff000000u | ink);
-        }
-    }
-    /* the run's ends dissolve into the strip: a column of its grey over each, opaque at the edge,
-     * as color_t lays it out (RGBA), the pill's own fill exactly */
-    for (int i = 0; i < SS_FADE; ++i) {
-        unsigned a = (unsigned)(255 * (SS_FADE - i) / SS_FADE);
-        stock_canvas_set_fill_color(canvas, a << 24 | (RGBA(strip) & 0xffffffu));
-        canvas_fill_rect(canvas, run_l + i, y0 + 6, 1, SS_STRIP_H - 12);
-        canvas_fill_rect(canvas, run_r - 1 - i, y0 + 6, 1, SS_STRIP_H - 12);
-    }
-    if (ss.box) { /* the set chip over the run's start */
-        fill_box(canvas, &(rect_t){ SS_STRIP_X, y0, SS_CHIP_R - SS_STRIP_X, SS_STRIP_H },
-                 RGBA(flip_if(light, SS_CHIP_RGB)), SS_STRIP_R);
-        static const char *const faces[] = FONT_NAMES;
-        unsigned w[8], n = ss_wide(ss_set_names[ss.set], w, sizeof w / sizeof *w);
-        rect_t r = { SS_STRIP_X, y0, SS_CHIP_R - SS_STRIP_X, SS_STRIP_H };
-        final_text(canvas, faces[FONT_INTER_MEDIUM], w, &r, SS_PX_CHIP, 0xff000000u | primary);
-        (void)n;
-    }
-    if (ss_popping()) ss_pop_paint(canvas);
+    ss_strip_paint(canvas, primary, accent, light);
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -900,16 +1172,15 @@ void search_strip_paint(void *w, void *canvas) {
 #define SS_TAP 8 /* a touch that moves less than this is a tap */
 static int ss_dist(int d) { return d < 0 ? -d : d; }
 
-/* The strip's letters moved by n cells, a pop for the step, as the wheel's. */
+/* The highlight moved n stops by a drag, as the wheel's turn: a drag is one turn, stopping at the
+ * return key. */
 static void ss_slide(int n) {
-    if (!n) return;
-    ss.letter = ((ss.letter + n) % ss_entries() + ss_entries()) % ss_entries();
-    ss_pop_step();
+    for (int i = 0; i < (n < 0 ? -n : n); ++i) ss_turn(n < 0 ? -1 : 1, ss.swiped || i);
 }
 
 /* The sheet's press, and the page's moves and release wherever they land (as 3EQ's sliders take
- * theirs). A drag on the strip moves its letters as it goes: left brings later letters under the
- * highlight. */
+ * theirs). A drag on the strip moves the highlight as it goes, to the left the later
+ * characters. */
 static int ss_touch(void *ctx, void *event) {
     int xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) }, type = I(event, EVENT_TYPE);
     if (!ss.sheet) return 0;
@@ -933,18 +1204,26 @@ static int ss_touch(void *ctx, void *event) {
     }
     ss.pressed = 0;
     if (strip) {
-        int side = ss_side(),
-            k = (ss.down_x - ss_lit_x() + side * SS_STEP + SS_STEP) / SS_STEP - side - 1;
-        k = k < -side ? -side : k > side ? side : k; /* the run's faded ends */
+        int x = ss.down_x,
+            e = x < SS_RUN_L + SS_PAD ? -1 : (x - SS_RUN_L - SS_PAD) / SS_STEP + ss.off;
         ss.focus = SS_ON_STRIP;
-        if (tap && ss.down_x >= (ss_named() ? SS_STRIP_X : SS_BOX_R) &&
-            ss.down_x < 375 - SS_STRIP_X) {
-            ss_slide(k);
-            if (!k) ss_pop_step();
-            ss_type(ss.letter);
+        if (!tap || x < SS_STRIP_X || x >= SS_STRIP_RX) {
+            /* a drag, or off the pill */
+        } else if (x < SS_CHIP_R) { /* the switcher: the next set */
+            ss.stop = 0;
+            ss_centre();
+        } else if (x >= SS_RET_L) { /* the return key: submitted */
+            ss.stop = ss_stops() - 1, ss.halted = 1;
+            ss_submit();
+            if (!ss.page) return 0; /* it closed the page */
+        } else if (e >= 0 && e < ss_run() && e < ss.off + SS_VISIBLE && x < SS_RUN_R) {
+            ss.stop = e + 1, ss.halted = 0;
+            ss_follow();
+            ss_pop_step();
+            ss_type(e);
         }
     } else if (ss_named()) {
-        /* the name and its hint: nothing to scroll or pick */
+        /* a name or a box's text: nothing to scroll or pick */
     } else if (!tap) {
         int most = ss.nmatch > ss_rows() ? ss.nmatch - ss_rows() : 0;
         ss.top -= dy / SS_PITCH;
@@ -965,14 +1244,28 @@ static int ss_touch(void *ctx, void *event) {
         }
     }
     ss_keep();
-    widget_invalidate_force(ss.sheet, (void *)0);
+    ss_dirty();
+    return 0;
+}
+
+/* Whether w is in the tree under root (w only compared, never read: it may be gone). */
+static int ss_holds(void *root, void *w) {
+    if (!root || !w) return 0;
+    if (root == w) return 1;
+    for (unsigned i = 0, n = widget_count_children(root); i < n; ++i)
+        if (ss_holds(widget_get_child(root, i), w)) return 1;
     return 0;
 }
 
 static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
     stop_timer(&ss.hold_timer);
-    stop_timer(&ss.show_timer);
+    stop_timer(&ss.erase_timer);
+    stop_timer(&ss.peek_timer);
+    stop_timer(&ss.blink_timer);
+    if (ss.covered && ss_holds(window_manager(), ss.covered_win))
+        widget_set_visible(ss.covered, 1, 0); /* a dialog an OK left open shows its box again */
+    if (ss.under) bitmap_destroy(ss.under);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
     free(ss.kind);
@@ -993,6 +1286,32 @@ static void ss_sheet(const char *caption) {
     widget_on(ss.page, EVT_POINTER_UP_BEFORE, ss_touch, 0);
 }
 
+/* Where the text lives (docs/oled-design.md#text-entry), as the strip opens over under, the page
+ * it types for: Search's query line (SS_FORM_QUERY); a row or a cell (SS_FORM_ROW, SS_FORM_CELL)
+ * in the place of the row the wheel's selection is on in under (navigation's st.sel_*), under
+ * painted once under the strip (under_snap; the box's own edit hidden for it); a field of its own
+ * (SS_FORM_FIELD) when that row is not in under or not clear of the strip. The cursor's blink
+ * starts. */
+static void ss_place(void *under, int form, void *edit) {
+    ss.form = (short)form;
+    ss_dirty();
+    if (form != SS_FORM_ROW && form != SS_FORM_CELL) return;
+    void *w = st.sel_w;
+    int y = -1;
+    if (ss_holds(under, w))
+        y = feedback_below(w) - I(w, W_H) + st.sel_y - st.sel_h / 2 -
+            (feedback_below(ss.sheet) - I(ss.sheet, W_H));
+    if (y < 0 || st.sel_h <= 0 || y + st.sel_h > SS_STRIP_Y - SS_UNDER_GAP) {
+        ss.form = SS_FORM_FIELD;
+        return;
+    }
+    ss.row_y = (short)y, ss.row_h = (short)st.sel_h;
+    int shown = edit && widget_get_visible(edit);
+    if (shown) widget_set_visible(edit, 0, 0);
+    ss.under = under_snap(under);
+    if (shown) widget_set_visible(edit, 1, 0);
+}
+
 /* The Library's Search row and Local Songs' pull: the strip under a list.entry.ipod theme, stock's
  * search dialog under the others. */
 int library_search_open(void *ctx, void *event) {
@@ -1004,30 +1323,34 @@ int library_search_open(void *ctx, void *event) {
     ss.match = n ? calloc((unsigned)n + 2 * SS_GROUP, sizeof *ss.match) : (void *)0;
     ss.kind = ss.match ? calloc((unsigned)n + 2 * SS_GROUP, 1) : (void *)0;
     if (!ss.kind) free(ss.match), ss.match = (void *)0;
+    ss.set = SS_SET_UPPER, ss.stop = 1; /* on A (the user's mock-up) */
+    ss.label = "Search your music";
     ss_sheet("Search");
+    ss_place(0, SS_FORM_QUERY, 0);
     return 0;
 }
 
-/* A playlist's Rename (its hold menu, docs/oled-design.md#playlists): the strip with its field
- * OFF and the name large over it, prefilled, the cursor at its end (a word's first letter a
- * capital); Next at the name's end saves it (playlists.c playlist_rename), and a held Return
- * closes the page and leaves the name as it was. */
+/* A playlist's Rename (its hold menu, docs/oled-design.md#playlists): the strip, the name typed in
+ * the playlist's row, prefilled, the cursor at its end; submitting saves it (playlists.c
+ * playlist_rename), and a held Return closes the page and leaves the name as it was. */
 void playlist_rename_open(int id, const char *name) {
     if (ss.page || id < 0 || id >= 100 ||
         !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
-    ss.rename = id + 1;
+    ss.rename = id + 1, ss.stop = 1;
     tk_snprintf(ss.text, sizeof ss.text, "%s", name ? name : "");
     ss.cur = (int)strlen(ss.text);
     ss_sheet("Rename Playlist");
+    ss_place(window_under(window_manager(), ss.page), SS_FORM_ROW, 0);
 }
 
-/* New Playlist (stock's add-playlist dialog's place, playlists.c): the same page, empty; Next at
- * the name's end makes the playlist (ringnav_playlist_create). */
+/* New Playlist (stock's add-playlist dialog's place, playlists.c): the same page, empty;
+ * submitting makes the playlist (ringnav_playlist_create). */
 void playlist_new_open(void) {
     if (ss.page || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup))) return;
-    ss.create = 1;
+    ss.create = 1, ss.stop = 1;
     ss_sheet("New Playlist");
+    ss_place(window_under(window_manager(), ss.page), SS_FORM_ROW, 0);
 }
 
 /* Add Songs' Search row (add_songs.c): the strip over the library's songs alone, each found by its
@@ -1037,14 +1360,35 @@ void add_songs_search(void) {
     library_search_open(0, 0);
     ss.pick = ss.page != 0;
     ss.tab = SS_TAB_SONGS;
+    ss.label = "Search songs";
 }
 
-/* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip with its
- * field off types for it on the keyboard's own window, the keys hidden and the window over the
+/* What a text box's edit takes, SS_SECRET_*. Stock's Wi-Fi password boxes say so by neither
+ * input_type (its pages' "password" reads back as 0, text) nor anything else on the edit:
+ * a network's own (kbwifipass_dialog) is the edit named edit_passwd, and Add Network's two rows
+ * both type in editwifi_dialog, whose init keeps which in EDITWIFI_PASSWORD. A payload box marks
+ * itself _secret (addon.c search_box, a card app's password field). */
+static int ss_secret_box(void *edit) {
+    if (!tk_strcmp(widget_get_prop_str(edit, "name", ""), "edit_passwd") ||
+        (!tk_strcmp(widget_get_prop_str(window_of(edit), "name", ""), "editwifi_dialog") &&
+         *(volatile int *)EDITWIFI_PASSWORD))
+        return SS_SECRET_WIFI;
+    return widget_get_prop_int(edit, "_secret", 0) ? SS_SECRET_PASS : SS_SECRET_NONE;
+}
+
+/* A box's label, kept for as long as the strip is up (the edit's own may go first). */
+static char ss_box_label[48] __attribute__((section(".scratch")));
+
+/* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip types for
+ * it on the keyboard's own window, the keys hidden and the window over the
  * screen under the status row, so nothing takes the edit's focus (a page of its own would: a
  * window to the background blurs its focus, which ends a search box); titled as the page under
  * it is, the box's text prefilled, the cursor at its end, a password's characters as dots. The sets
- * start on letters, or on digits for a box holding a number. 1 when it opened. */
+ * start on letters, or on digits for a box holding a number. Where the text shows (ss_place): a
+ * Wi-Fi password or network name in a field under "Password" or "Network Name"; a box whose page
+ * names its row (the edit's _strip_label: an EQ preset's Name, a band's Frequency, a card app's
+ * field) in that row as a cell; any other box, a search's, on the query line, its tips the
+ * placeholder. 1 when it opened. */
 int search_strip_box(void *kb, void *edit, const char *title) {
     if (ss.page || !kb || !edit) return 0;
     int top = geom_val(V_BAR);
@@ -1055,7 +1399,7 @@ int search_strip_box(void *kb, void *edit, const char *title) {
     widget_set_prop_int(kb, "h", 320 - top);
     widget_on(kb, EVT_DESTROY, ss_closed, 0);
     ss.box = edit;
-    ss.secret = !tk_strcmp(widget_get_prop_str(edit, "input_type", ""), "password");
+    ss.secret = ss_secret_box(edit);
     widget_get_text_utf8(edit, ss.text, sizeof ss.text);
     ss.cur = (int)strlen(ss.text);
     int digits = ss.cur > 0;
@@ -1063,23 +1407,63 @@ int search_strip_box(void *kb, void *edit, const char *title) {
         digits &=
             (ss.text[i] >= '0' && ss.text[i] <= '9') || ss.text[i] == '.' || ss.text[i] == '-';
     ss.set = digits ? SS_SET_DIGITS : SS_SET_LOWER;
+    ss.stop = 1;
     ss_sheet(title && *title ? title : ss.secret ? "Wi-Fi Password" : "Text");
+    const char *label = widget_get_prop_str(edit, "_strip_label", ""), *tips;
+    int form = SS_FORM_CELL;
+    if (!tk_strcmp(widget_get_prop_str(window_of(edit), "name", ""), "editwifi_dialog") ||
+        ss.secret == SS_SECRET_WIFI)
+        form = SS_FORM_FIELD, label = ss.secret ? "Password" : "Network Name";
+    else if (!label || !*label)
+        form = SS_FORM_QUERY,
+        label = *(tips = widget_get_prop_str(edit, "tips", "")) ? tips : "Search";
+    tk_snprintf(ss_box_label, sizeof ss_box_label, "%s", label);
+    ss.label = ss_box_label;
+    /* Add Network's dialog is its box alone, in a row at the status row's height (stock lifts it
+     * above its keyboard): the strip's field shows the text, so the row stays out of sight. */
+    void *win = window_of(edit), *row = P(edit, W_PARENT);
+    if (!tk_strcmp(widget_get_prop_str(win, "name", ""), "editwifi_dialog") && row && row != win)
+        ss.covered = row, ss.covered_win = win, widget_set_visible(row, 0, 0);
+    ss_place(win, form, edit);
     bar_title_sync(kb);
     widget_invalidate_force(kb, (void *)0);
     return 1;
 }
 
-/* A text the payload keeps itself (the Bluetooth name, bt_name.c): the strip in a text box's form,
- * its sets and chip, on a page of its own titled title, text prefilled and the cursor at its end;
- * Next at the end hands the text to done, which closes the page (0) or toasts why not, and a held
- * Return closes it with nothing changed. */
+/* A text the payload keeps itself (the Bluetooth name, bt_name.c): the strip on a page of its own
+ * titled title, text prefilled and the cursor at its end, the text in the row the wheel is on
+ * (ss_place): as a cell after the row's label (search_strip_label), else the row's whole width; a
+ * password with no label in a field under "Password". Submitting hands the text to done, which
+ * closes the page (0) or toasts why not, and a held Return closes it with nothing changed. */
+/* The next search_strip_text's note: who sees the text (Bluetooth's "Phones and cars see this
+ * name"), in 13 px Text Tertiary under the text's box. */
+static const char *strip_note __attribute__((section(".scratch")));
+void search_strip_note(const char *note) { strip_note = note; }
+/* The next search_strip_text's text is a password (the Guest Play hotspot's): dots, the character
+ * just typed shown a second, as a password box's. */
+static int strip_secret __attribute__((section(".scratch")));
+void search_strip_secret(void) { strip_secret = 1; }
+/* The next search_strip_text's row's label (Bluetooth's "Name"): the text a cell after it. */
+static const char *strip_label __attribute__((section(".scratch")));
+void search_strip_label(const char *label) { strip_label = label; }
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *)) {
+    const char *note = strip_note, *label = strip_label;
+    int secret = strip_secret;
+    strip_note = 0, strip_secret = 0, strip_label = 0;
     if (ss.page || !done || !(ss.page = page_open("searchstrip_page", ss_closed, page_keyup)))
         return;
-    ss.box = ss.page, ss.done = done;
+    ss.box = ss.page, ss.done = done, ss.note = note;
+    ss.secret = secret ? SS_SECRET_PASS : SS_SECRET_NONE;
     ss.max = max > 0 && max < SS_TEXT_MAX ? max : SS_TEXT_MAX;
     tk_snprintf(ss.text, (unsigned)ss.max + 1, "%s", text ? text : "");
     ss.cur = (int)strlen(ss.text);
+    ss.stop = 1;
+    ss.label = label ? label : secret ? "Password" : (const char *)0;
     ss_sheet(title);
+    ss_place(window_under(window_manager(), ss.page),
+             label    ? SS_FORM_CELL
+             : secret ? SS_FORM_FIELD
+                      : SS_FORM_ROW,
+             0);
 }

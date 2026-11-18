@@ -211,6 +211,10 @@ int ringnav_input(void *wm, void *e) {
         return 0;
     }
     if (addon_game_input(e)) return 0;
+    /* the selection bar's press (tilt.c): past the gates that drop a press with its release, and
+     * the video and the card game that own every key */
+    if (key == KEY_CENTER && (type == EVT_KEY_DOWN || type == EVT_KEY_UP))
+        tilt_press(type == EVT_KEY_DOWN);
     if (e && seek_input(e)) return 0; /* a held Previous or Next's repeats: seek.c */
     if (type >= EVT_POINTER_FIRST && type <= EVT_POINTER_ABORT) { /* a finger (stale_heal) */
         st.touch_at = st.last_input;
@@ -327,8 +331,8 @@ int ringnav_keydown(void *ctx, void *event) {
         st.center_down_at = st.centre_at ? st.centre_at : (unsigned)time_now_ms() | 1;
     lr_edit_keydown(key); /* Center held on the Library or Home: its editor (library_edit.c) */
     search_strip_down(top, key); /* Return held on a letter strip: its card (search_strip.c) */
-    cc_keydown(key);      /* ... on a Control Center stop: its page (control_center.c) */
-    un_keydown(key);      /* ... on a queued song in Up Next: it lifts (upnext.c) */
+    cc_keydown(key);             /* ... on a Control Center stop: its page (control_center.c) */
+    un_keydown(key);             /* ... on a queued song in Up Next: it lifts (upnext.c) */
     unsigned char tone = g_keytone_flag;
     void *row = (void *)0;
     entries_t s = { &row, 0, 1, 4096 };
@@ -420,7 +424,8 @@ static int edit_single(const void *info) {
         char click[0x30];
         if (sw && widget_get_visible(sw)) {
             stock_dispatch_trampoline(sw, pointer_event_init(click, EVT_CLICK, sw, 0, 0));
-            widget_invalidate_force(top, (void *)0); /* the hidden switch's change repaints no row */
+            widget_invalidate_force(top,
+                                    (void *)0); /* the hidden switch's change repaints no row */
         } else if (slider_page(top))
             navigator_back();
     } else if (f < n)
@@ -645,6 +650,8 @@ int ringnav(void *ctx, void *event) {
     if (usable() && games_key(window_manager_get_top_window(window_manager()), key)) return STOP;
     /* the row editors' keys, and the release of the Center hold that entered or left one */
     if (lr_edit_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
+    /* a grabbed inline slider's keys: the wheel sets it, Centre or Return sets it down */
+    if (inline_slider_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
     if (cc_key_release(key)) return STOP; /* the release of a Centre hold on Control Center */
     if (modal_closing()) return STOP; /* a menu sheet falling away (menu_modal.c) */
     if (un_key(window_manager_get_top_window(window_manager()), key, owned)) return STOP;
@@ -694,7 +701,8 @@ int ringnav(void *ctx, void *event) {
             return STOP;
         }
     }
-    if (usb_ui_key(window_manager_get_top_window(window_manager()), key)) return STOP; /* USB's Stop */
+    if (usb_ui_key(window_manager_get_top_window(window_manager()), key))
+        return STOP; /* USB's Stop */
     if (search_key(key)) return STOP;
     int result = usb_prompt() ? 0 : stock_keyup_trampoline(ctx, event);
     if (key == KEY_PLAY && play_hold_released()) return STOP;
@@ -753,7 +761,8 @@ int ringnav(void *ctx, void *event) {
                 select(&g_menu, 0);
                 reveal(&g_menu, 0, 1);
                 widget_invalidate_force(w, (void *)0);
-            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing"))
+            } else if (!tk_strcmp(widget_get_prop_str(g_menu.at[0], "name", ""), "img_playing") &&
+                       !guest_home_np()) /* the row reads Guest Play: the guest's (guest_ui.c) */
                 compact_now_playing();
             return STOP;
         }
@@ -802,6 +811,8 @@ int ringnav(void *ctx, void *event) {
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
     if (spot_key(top, key)) return STOP;     /* Spotify's page: Centre scrubs */
     if (np_about_key(top, key)) return STOP; /* OLED's About: the wheel scrolls it */
+    if (sw_update_key(top, key)) return STOP; /* Software Update's button and the line under it */
+    if (battery_key(top, key)) return STOP;   /* Battery History: the wheel scrubs, Centre exports */
     if (xfade_key(top, key))
         return STOP; /* Crossfade's page: Centre toggles, the wheel sets the length */
     if (eq_key(top, key))
@@ -932,9 +943,9 @@ int ringnav(void *ctx, void *event) {
             slide_menu_scroll_to_prev(w);
     } else if (g_menu.n) {
         int id = widget_get_prop_int(w, SEL, -1);
-        /* No letter over a list in an order of its own. Tested here, as at paint the top may
-         * already be the page a Return brings back. */
-        if (step > 1 && !own_order(widget_get_prop_str(top, "name", "")))
+        /* The letter only over a name-sorted list (az_index.c name_sorted). Tested here, as at
+         * paint the top may already be the page a Return brings back. */
+        if (step > 1 && name_sorted(widget_get_prop_str(top, "name", "")))
             rearm(&st.letter_timer, letter_expire, LETTER_MS);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);

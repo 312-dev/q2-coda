@@ -1413,8 +1413,9 @@ int clip_within(void *canvas, int *old, int *clip, int x, int y, int w, int h) {
     return clip[2] && clip[3];
 }
 
-/* Resume, play counts, video places, the last album and Boot to: each file is written whole, to a
- * .tmp, synced and renamed. Shared with navigation.c and videos.c. */
+/* Video places, the last album, Boot to, games and the rest: each file is written whole, to a .tmp,
+ * synced and renamed. Shared with navigation.c and videos.c; card_store.c does the same for the
+ * records kept on the card. */
 int blob_io(const char *path, const char *tmp, void *buf, unsigned size, int write) {
     void *f = fopen(write ? tmp : path, write ? "wb" : "rb");
     if (!f) return 0;
@@ -1606,13 +1607,22 @@ HOT void put(unsigned *px, unsigned colour, unsigned cov) {
 /* What dimming washes towards: black, or Light Mode's paper (set per frame). */
 static unsigned cf_paper;
 
+/* The covers' corners (cf_corners): their radius in texels and its coverage table (corner_cover.c),
+ * cf_r rows of cf_r from the outermost; 0 for square. */
+static int cf_r;
+static const unsigned char *cf_cover;
+/* By texel column: the corner's rows from either end it covers in part, and of those the ones it
+ * leaves clear; 0 off the corners (cf_corners) */
+static unsigned char cf_part[ART_SIZE], cf_clear[ART_SIZE];
+
 /* One texture column (texels ART_SIZE apart) h high (1/256 px) on the horizon at frame column col,
- * its partial end rows by coverage, then its reflection fading out below. */
-static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int inset) {
+ * its partial end rows by coverage, then its reflection fading out below: a column off the
+ * corners, the hot path. */
+static void plain_column(shelf_t *f, int col, const unsigned *tex, int h, int bright) {
     if (h < 16) return;
     unsigned *d = f->d + col;
     int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
-    int ins = h * inset / (ART_SIZE * 256), clipped_top = top + ins, clipped_bottom = bottom - ins;
+    int ins = 0, clipped_top = top, clipped_bottom = bottom;
     int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col];
     int y = clipped_top >> 8, end = (clipped_bottom + 255) >> 8,
         last = end < cfs.view_h ? end : cfs.view_h;
@@ -1670,16 +1680,97 @@ static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, 
     f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
 }
 
+/* The same in a corner's column, texel k across the art: each end row the corner covers in part
+ * takes the corner pixel's coverage at its texel too (docs/internals.md#rounded-corners), so the
+ * arc is anti-aliased where it runs steep as well as where it runs flat; its reflection mirrors it.
+ * Only the corner's bands (the rows from either end whose texel row is under part) go a row at a
+ * time; the rows between them are whole and go as plain_column's do, and the rows the corner leaves
+ * wholly clear are not visited. */
+static void corner_column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    unsigned *d = f->d + col;
+    int part = cf_part[k], clear = cf_clear[k], R = cf_r;
+    const unsigned char *corner = cf_cover + (k < R ? k : ART_SIZE - 1 - k);
+    int top = CF_TOP256(h), bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
+    int ins = h * part / ART_SIZE, out = h * clear / ART_SIZE;
+    int solid_top = f->solid_top[col], solid_bottom = f->solid_bottom[col], pitch = f->pitch;
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < cfs.view_h ? end : cfs.view_h;
+    /* [b1, b2): the rows whose centres lie past both bands, whole and of no corner */
+    int b1 = (top + ins + 255) >> 8, b2 = (bottom - ins) >> 8;
+    int v = (((y << 8) + 128 - top) >> 4) * step >> 4; /* 16.16 texel row */
+    if (y < 0) v -= y * step, y = 0;
+    unsigned *px = d + y * pitch, wash = shade(cf_paper, 256u - (unsigned)bright);
+    int whole = bright >= 256;
+    while (y < last) {
+        if (y >= solid_top && y < solid_bottom) {
+            int skip = solid_bottom - y;
+            v += skip * step, px += skip * pitch, y = solid_bottom;
+            continue;
+        }
+        if (y >= b1 && y < b2) {
+            int run = b2 < last ? b2 : last;
+            if (y < solid_top && solid_top < run) run = solid_top;
+            for (; y < run; ++y, v += step, px += pitch) {
+                unsigned t = tex[(v >> 16) * ART_SIZE];
+                put(px, whole ? t : shade(t, (unsigned)bright) + wash, 256);
+            }
+            continue;
+        }
+        int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
+        int cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row; /* corner row */
+        int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
+        unsigned cov = (unsigned)(to - from), c = cr < part ? corner[cr * R] : 255;
+        cov = cov * (c + (c >> 7)) >> 8; /* of 256, no divide */
+        if (cov) put(px, whole ? tex[row * ART_SIZE] : shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
+        ++y, v += step, px += pitch;
+    }
+    int reflect = h * cfs.reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
+    int fade = (256 << 16) / reflect;
+    unsigned dim = (unsigned)bright * cfs.reflect_top >> 8;
+    wash = shade(cf_paper, 256u - dim);
+    if (stop > cfs.view_h) stop = cfs.view_h;
+    for (y = (bottom + out) >> 8; y < stop; ++y) {
+        int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
+        if (dist >= reflect) break;
+        if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
+        int mirrored = dist * step >> 8 >> 16; /* texel rows up from the bottom edge */
+        int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
+        unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        unsigned c = mirrored < part ? corner[mirrored * R] : 255;
+        put(d + y * f->pitch, shade(tex[row * ART_SIZE], dim) + wash, cov * (c + (c >> 7)) >> 8);
+    }
+    /* the rows it covers whole join the opaque span, as plain_column's do */
+    int s0 = (top + ins + 255) >> 8, s1 = (bottom - ins) >> 8;
+    s0 = s0 < 0 ? 0 : s0, s1 = s1 > cfs.view_h ? cfs.view_h : s1;
+    if (s1 <= s0) return;
+    if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
+        s0 = s0 < solid_top ? s0 : solid_top;
+        s1 = s1 > solid_bottom ? s1 : solid_bottom;
+    } else if (s1 - s0 <= solid_bottom - solid_top)
+        return;
+    f->solid_top[col] = (short)s0, f->solid_bottom[col] = (short)s1;
+}
+
+/* A column, k its texel across the art or -1: a corner's to corner_column, else the plain one. */
+static void column(shelf_t *f, int col, const unsigned *tex, int h, int bright, int k) {
+    if (h < 16) return;
+    if (k >= 0 && cf_part[k])
+        corner_column(f, col, tex, h, bright, k);
+    else
+        plain_column(f, col, tex, h, bright);
+}
+
 #ifdef PEQ_HOST
+static void cf_corners(void);
 /* test/coverflow.py's column_fuzz: column() alone, on the caller's frame and solid span (solid[0]
- * its top, solid[1] its bottom, kept), the open page's values, the light half's paper as the
- * render takes it. */
+ * its top, solid[1] its bottom, kept), the open page's values and corners, the light half's paper
+ * as the render takes it; k the column's texel, or -1. */
 void cf_column(unsigned *d, int pitch, short *solid, int col, const unsigned *tex, int h,
-               int bright, int inset) {
+               int bright, int k) {
     static shelf_t f;
+    cf_corners();
     cf_paper = ipod_light() ? scheme()->paper : 0;
     f.d = d, f.pitch = pitch, f.solid_top[col] = solid[0], f.solid_bottom[col] = solid[1];
-    column(&f, col, tex, h, bright, inset);
+    column(&f, col, tex, h, bright, k);
     solid[0] = f.solid_top[col], solid[1] = f.solid_bottom[col];
 }
 #endif
@@ -1696,13 +1787,21 @@ void cf_restyle(void) {
     cf_s1 = rest.s, cf_rest16 = project(&rest, CF_HALF16);
     cf_top256 = 256 * cfs.top + 40960 * cfs.horizon / 100;
 }
-/* cf_inset follows the theme's radius. */
+/* cf_inset (coverflow_hit's), cf_r and cf_cover (column's) follow the theme's radius. */
 static void cf_corners(void) {
     static short filled __attribute__((section(".scratch")));
     int radius = cfs.radius;
-    if (radius == filled) return;
+    if (radius == filled && (cf_cover || !cf_r)) return;
     filled = (short)radius;
     int r = ART_SIZE * radius / 166;
+    cf_r = r, cf_cover = corner_cover(r);
+    memset(cf_part, 0, sizeof cf_part), memset(cf_clear, 0, sizeof cf_clear);
+    for (int k = 0; cf_cover && k < r; ++k) {
+        int n = 0, z = 0;
+        while (n < r && cf_cover[n * r + k] < 255) z += !cf_cover[n * r + k], ++n;
+        cf_part[k] = cf_part[ART_SIZE - 1 - k] = (unsigned char)n;
+        cf_clear[k] = cf_clear[ART_SIZE - 1 - k] = (unsigned char)z;
+    }
     memset(cf_inset, 0, sizeof cf_inset);
     for (int k = 0; k < r; ++k)
         cf_inset[k] = cf_inset[ART_SIZE - 1 - k] = (unsigned short)(arc_out(r, k) * 16);
@@ -1735,7 +1834,7 @@ void draw_posed(shelf_t *f, const pose_t *p, int side, const unsigned *tex) {
         if (col < 0 || col >= CF_VIEW_W || !unproject(p, (2 * v + 1 - 2 * CF_CX) * 8, &u, &h))
             continue;
         int k = cf_texel(u + CF_HALF16, 2 * CF_HALF16, q);
-        column(f, col, tex + (side > 0 ? k : ART_SIZE - 1 - k), h, p->bright, cf_inset[k]);
+        column(f, col, tex + (side > 0 ? k : ART_SIZE - 1 - k), h, p->bright, k);
     }
 }
 
@@ -1758,7 +1857,7 @@ void draw_quad(shelf_t *f, int xl, int xr, int hl, int hr, const unsigned *tex, 
         float p = (float)dx / (float)(xr - xl);
         int k = cf_texel(left ? xr - xl - dx : dx, xr - xl, q);
         k = left ? ART_SIZE - 1 - k : k;
-        column(f, col, tex + k, (int)((float)hl + (float)(hr - hl) * p), bright, cf_inset[k]);
+        column(f, col, tex + k, (int)((float)hl + (float)(hr - hl) * p), bright, k);
     }
 }
 
@@ -2861,13 +2960,22 @@ void album_memory(void *r) {
     tk_snprintf((char *)m + 0x611, 0x100, "%s", album ? album : "");
 }
 
-/* Start a queue at idx with its playback class; playing_page copies dq synchronously. */
+/* Start a queue at idx with its playback class; playing_page copies dq synchronously. Stock's
+ * navigator_to_with_context opens a new playing_page even over one, and then both pages' timers
+ * run stock's update (0x53cf08), which writes the title and artist only while g_autochange_flag or
+ * g_forcerefresh_flag is set and clears them: the page under may take the flag, and the one on top
+ * keeps the last song's title through every Next (the device, 2026-11-17: a card app's first song
+ * started over the pressed server song's Now Playing, addon.c stream_start). Now Playing on top is
+ * closed first, so there is one, and Return leaves for the page under it. */
 void play_folder(void *dq, int idx, int cls) {
     if (cls == 0xff10) album_memory(deque_at(dq, (unsigned)idx));
     struct {
         void *dq;
         int idx, cls, mode;
     } context = { dq, idx, cls, 2 };
+    void *top = window_manager_get_top_window(window_manager());
+    if (top && !tk_strcmp(widget_get_prop_str(top, "name", ""), "playing_page"))
+        window_manager_close_window_force(window_manager(), top);
     navigator_to_with_context("playing_page", &context);
 }
 
@@ -3216,31 +3324,57 @@ static void *open_page(void) {
  * with a spinner for its chevron (coverflow_spinner) and input is taken, until the page opens. A
  * warm open, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
  * the keys, the wheel and touches go nowhere (coverflow_wait_input), and Return gives the open up.
- * ponytail: the spinner turns between steps, not within one: getAllAlbum's and the grouping's
- * queries each hold the UI thread (stock's library calls are the UI thread's), and demo imports no
- * sqlite3_progress_handler to paint from inside them; a frame from it would turn it smoothly. */
+ * Within a step the spinner turns too: getAllAlbum's and the grouping's queries take seconds on a
+ * large library and stock's library calls hold whichever thread runs them, so each step runs on a
+ * thread of its own while the UI thread waits for it (step_turning, name_order.c's way), and,
+ * once the spinner shows, paints its frames itself (list_marks.c spinner_turn, then the window
+ * manager's paint). Only the step's thread touches the library meanwhile: the staging pointer
+ * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
-#define SPIN_FRAME_MS 100                                 /* a spoke on, eight a turn */
-extern void spinner_dirty(void *win), spinner_done(void); /* list_marks.c */
+#define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
+extern int spinner_turn(void);         /* list_marks.c */
+extern int ringnav_wm_paint(void *wm); /* nav/input.c */
 static struct {
     unsigned at, timer;
     void *home; /* the window it opens over: gone, the open is given up */
     int waiting, step, spin;
+    volatile int done, ret; /* step_turning's thread: finished, and query_step's answer */
 } op __attribute__((section(".scratch")));
 static void open_end(void) {
     if (op.timer) timer_remove(op.timer);
     query_drop();
     if (cf_traced) unlink(CF_TRACE), cf_traced = 0;
-    if (op.spin) spinner_done(), widget_invalidate_force(op.home, 0);
+    if (op.spin) widget_invalidate_force(op.home, 0); /* the row's chevron again */
     op.waiting = op.timer = op.spin = 0;
+}
+static void *step_thread(void *k) {
+    op.ret = query_step((int)(long)k, op.at);
+    op.done = 1;
+    return k;
+}
+/* query_step(k) on a thread of its own, the spinner turning meanwhile from OPEN_SPIN_MS / 2 into
+ * the open; in place when no thread starts (a started one has a nonzero id). */
+static int step_turning(int k) {
+    unsigned long t = 0;
+    op.done = 0;
+    if (pthread_create(&t, 0, step_thread, (void *)(long)k) || !t) return query_step(k, op.at);
+    while (!op.done) {
+        usleep(STEP_TICK_MS * 1000);
+        if (!op.spin && (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)
+            op.spin = 1, widget_invalidate_force(op.home, 0); /* Home with its row's spinner */
+        else if (!op.spin || spinner_turn() < 2)
+            continue;
+        ringnav_wm_paint(window_manager());
+    }
+    pthread_join(t, 0);
+    return op.ret;
 }
 static int open_step(const void *unused) {
     op.timer = 0;
     if (window_manager_get_top_window(window_manager()) != op.home) return open_end(), 0;
-    while (!query_step(op.step++, op.at))
+    while (!step_turning(op.step++))
         if (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2) {
-            if (!op.spin) op.spin = 1;
-            spinner_dirty(op.home);
+            if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0);
             op.timer = timer_add(open_step, 0, 0); /* Home's input and paint, then the next */
             return 0;
         }
@@ -3248,11 +3382,9 @@ static int open_step(const void *unused) {
     if ((cf.page = open_page())) load();
     return 0;
 }
-/* The spinner's frame, 1-8, while an open waits on its query, else 0 (navigation.c
- * paint_chevrons). */
-int coverflow_spinner(void) {
-    return op.spin ? (int)(((unsigned)time_now_ms() - op.at) / SPIN_FRAME_MS % 8) + 1 : 0;
-}
+/* Whether Home's Cover Flow row shows the spinner for its chevron: an open waits on its query
+ * (nav/row_paint.c paint_chevrons, list_marks.c spinner_icon). */
+int coverflow_spinner(void) { return op.spin; }
 /* ringnav_input: whether e goes nowhere while an open waits. Return's release gives it up. */
 int coverflow_wait_input(void *e) {
     if (!op.waiting) return 0;
@@ -3513,7 +3645,7 @@ static struct {
     int clip[4]; /* the canvas clip while the art paints, restored after */
     int clipped;
     /* the bar whose border paint inks the pane's rows (coverflow_home_bar), 0: none due; ground:
-     * the bar's background there (BGRA); held: each pane column's glyph's last ink (home_ink) */
+     * the bar's background there (BGRA); held: the row's ink, a byte a pane column (home_ink) */
     void *ink_bar;
     unsigned ground;
     unsigned char held[HOME_PW];
@@ -3529,10 +3661,11 @@ static struct {
 } home __attribute__((section(".scratch")));
 extern int ipod_home(void), home_shortcut_open(void *, void *), library_search(void);
 extern void ipod_shortcut_seen(void), home_sets_bind(void *win); /* theme_engine.c, navigation.c */
+extern void home_np_bind(void *win), home_np_sync(void); /* home_np.c: Home's first row */
 extern void library_rows(void *list), stream_rows(void *list);
 /* home.c: Home's overflow */
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
-    home_fades(void *canvas, void *list, int list_y, int cols, int split);
+    home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift);
 extern int library_search_open(void *ctx, void *event);
 /* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
 extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
@@ -3571,6 +3704,32 @@ unsigned char now_cover(void *r, const char **file) {
         path && !tk_strcmp((const char *)g_lastcover_url, path) ? g_playcover_type : 0;
     *file = type < sizeof(player_covers) / sizeof(*player_covers) ? player_covers[type] : 0;
     return type;
+}
+
+/* r's cover as a file:// URL in url (size bytes, a cover's path cut short counted as none), as Home's pane finds it: the player's file once
+ * the cover thread has parsed r (now_cover: embedded, folder image or downloaded; for a server
+ * song's stream download, its app's cover first, catalogue.c cat_copy_of), else the app's cover of
+ * a server row's album (catalogue_cover), else Cover Flow's cache of the album by its tags
+ * (now_tag: the playing file's own). 0, url empty, for none: the caller's placeholder. Control
+ * Center and the modal header take it. */
+int song_cover_url(void *r, char *url, unsigned size) {
+    const char *file = (const char *)0;
+    char art[512];
+    *url = 0;
+    if (!r || size < 8) return 0;
+    if (now_cover(r, &file) && file && *file) {
+        tk_snprintf(url, size, "%s", file); /* a file:// URL already */
+        return 1;
+    }
+    tk_snprintf(url, 8, "file://");
+    if (catalogue_cover(P(r, REC_PATH), url + 7, size - 7)) return 1;
+    art_path(art, tags_key(now_tag(r, REC_ARTIST), now_tag(r, REC_ALBUM)), "");
+    if (file_size(art) > 0 && strlen(art) < size - 7) {
+        tk_snprintf(url + 7, size - 7, "%s", art);
+        return 1;
+    }
+    *url = 0;
+    return 0;
 }
 
 /* Repaint every window once the paint that changed the art is over: AWTK drops what a paint
@@ -4162,13 +4321,16 @@ static const unsigned short srgb_lin[256] = {
     60955, 61517, 62082, 62650, 63221, 63795, 64372, 64952, 65535
 };
 #define INK_WHITE_MAX 117392049u
-/* A glyph keeps its ink until the mean crosses the bound by 0.03 of L, so a pan easing over a
+/* The row keeps its ink until the mean crosses the bound by 0.03 of L, so a pan easing over a
  * mean near it doesn't flicker (docs/ipod.md#home has the measure); between L 0.149 and 0.209
  * either ink keeps at least 3.98:1. */
 #define INK_HOLD 19660500u
 /* Glyphs are the bar's columns with ink, parted by at least INK_GAP empty ones (a pause's bars,
- * a battery's body and nub, are one glyph; STATUS_GAP and more part two). */
+ * a battery's body and nub, are one glyph; status_row.c SR_GAP and more part two): each finds its
+ * own status colour, though the row takes one ink. */
 #define INK_GAP 4
+/* The most glyphs a row holds: the pane is at most 179 columns, a glyph and its gap 5. */
+#define INK_GLYPHS 40
 /* 1: a coloured pixel (the slim battery's charging green or low red) keeps its own colour over
  * the art, and only the glyph's grey part is inked; 0: it is inked with the rest. */
 #define INK_KEEP_STATUS_COLOURS 1
@@ -4195,47 +4357,62 @@ static unsigned ink_share(unsigned p, unsigned ground, unsigned *spread) {
     return c;
 }
 
+/* A glyph: its columns [x, end), its status colour's pixel, spread and share (spread 0: none). */
+typedef struct {
+    int x, end;
+    unsigned hue, hue_s, hue_c;
+} ink_glyph_t;
+
 /* The bar's rows over the pane, w x h at fb (the screen's BGRA8888, pitch words a row), as its
  * background and glyphs left them on the flat ground (BGRA): each pixel becomes the art's (art,
- * the frame's RGBA8888, apitch words a row), and each glyph is laid over it in one contrast ink,
- * a pixel by its share, its greatest channel's distance from the ground (an antialiased edge, or
- * the slim battery's dim outline, a part), so it keeps its shape and smooth edges. held has a
- * byte a column, the ink each glyph there last had (1 white, 2 black, 0 none): it is kept until
- * INK_HOLD past the bound. cut (INK_CUT_*) names the edges where the canvas's clip, not the
- * pane, ends the rows: a glyph there may go on past it, so with an ink it keeps it (a repaint of
- * part of the battery chose its part's own). A status colour stays itself
- * (INK_KEEP_STATUS_COLOURS), its share read against its own full colour, the glyph's most
- * saturated pixel. test/fw/test_coverflow.py */
+ * the frame's RGBA8888, apitch words a row), and every glyph, the clock's and the status slots'
+ * alike, is laid over it in one contrast ink for the whole row, as iOS's status bar takes one
+ * style: white or black by the art's mean L under all of their inked pixels together, each pixel
+ * weighed by its share, its greatest channel's distance from the ground (an antialiased edge, or
+ * the slim battery's dim outline, a part), so each keeps its shape and smooth edges. held has a
+ * byte a column, the row's ink when it was last picked (1 white, 2 black, 0 none): it is kept
+ * until INK_HOLD past the bound. cut (INK_CUT_*) says the canvas's clip, not the pane, ends the
+ * rows there: a repaint of part of the row (the play state's 8 frames a second, a battery's
+ * level) shows too little of it to pick from, so with an ink held it keeps it. A status colour
+ * stays itself (INK_KEEP_STATUS_COLOURS), its share read against its own full colour, its
+ * glyph's most saturated pixel. test/fw/test_coverflow.py */
 void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, int h,
               unsigned ground, unsigned char *held, int cut) {
+    ink_glyph_t g[INK_GLYPHS];
+    int n = 0;
     unsigned sp;
-    for (int x = 0; x < w;) {
+    for (int x = 0; x < w;) { /* the glyphs: each on to INK_GAP empty columns */
         int lit = 0, b = x, gap = 0;
         for (int y = 0; y < h && !lit; ++y) lit = INKED(fb[y * pitch + x], ground);
-        if (lit) /* the glyph: on to INK_GAP empty columns */
-            for (b = x + 1; b < w && gap < INK_GAP; ++b) {
-                int on = 0;
-                for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
-                gap = on ? 0 : gap + 1;
-            }
-        b = lit ? b - gap : x + 1;
-        /* its status colour, if any: the most saturated pixel */
-        unsigned hue = 0, hue_s = 0, hue_c = 0;
-        for (int y = 0; lit && INK_KEEP_STATUS_COLOURS && y < h; ++y)
-            for (int i = x; i < b; ++i) {
+        if (!lit) {
+            ++x;
+            continue;
+        }
+        for (b = x + 1; b < w && (gap < INK_GAP || n == INK_GLYPHS - 1); ++b) {
+            int on = 0;
+            for (int y = 0; y < h && !on; ++y) on = INKED(fb[y * pitch + b], ground);
+            gap = on ? 0 : gap + 1;
+        }
+        ink_glyph_t *k = &g[n++];
+        k->x = x, k->end = b - gap, k->hue = k->hue_s = k->hue_c = 0;
+        for (int y = 0; INK_KEEP_STATUS_COLOURS && y < h; ++y) /* the most saturated pixel */
+            for (int i = x; i < k->end; ++i) {
                 unsigned p = fb[y * pitch + i], c = ink_share(p, ground, &sp);
-                if (sp > hue_s) hue = p, hue_s = sp, hue_c = c;
+                if (sp > k->hue_s) k->hue = p, k->hue_s = sp, k->hue_c = c;
             }
-        if (hue_s < INK_HUE_MIN) hue_s = 0;
-        /* the art's L under its inked share, and the ink */
-        unsigned long long sum = 0;
-        unsigned weight = 0; /* at most 255 a pixel */
-        for (int y = 0; lit && y < h; ++y)
-            for (int i = x; i < b; ++i) {
+        if (k->hue_s < INK_HUE_MIN) k->hue_s = 0;
+        x = k->end;
+    }
+    /* the art's L under every glyph's inked share, less its status colour's */
+    unsigned long long sum = 0;
+    unsigned weight = 0; /* at most 255 a pixel */
+    for (ink_glyph_t *k = g; k < g + n; ++k)
+        for (int y = 0; y < h; ++y)
+            for (int i = k->x; i < k->end; ++i) {
                 if (!INKED(fb[y * pitch + i], ground)) continue; /* no share: adds nothing */
                 unsigned c = ink_share(fb[y * pitch + i], ground, &sp), a = art[y * apitch + i];
-                if (hue_s) {
-                    unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
+                if (k->hue_s) {
+                    unsigned q = sp >= k->hue_s ? 256 : (sp << 8) / k->hue_s, t = k->hue_c * q >> 8;
                     c = c > t ? c - t : 0;
                 }
                 sum += (unsigned long long)c *
@@ -4243,33 +4420,32 @@ void home_ink(unsigned *fb, int pitch, const unsigned *art, int apitch, int w, i
                         2126u * srgb_lin[a & 255]);
                 weight += c;
             }
-        unsigned was = 0, ink = 0;
-        for (int i = x; i < b && !was; ++i) was = held[i];
-        /* a glyph the clip cuts shows only a part: it keeps the ink it has */
-        if (was && ((x == 0 && cut & INK_CUT_LEFT) || (b == w && cut & INK_CUT_RIGHT) ||
-                    cut & INK_CUT_ROWS))
-            ink = was;
-        else if (weight) {
-            unsigned bound = was == 1   ? INK_WHITE_MAX + INK_HOLD
-                             : was == 2 ? INK_WHITE_MAX - INK_HOLD
-                                        : INK_WHITE_MAX;
-            ink = sum <= (unsigned long long)weight * bound ? 1 : 2;
-            for (int i = x; i < b; ++i) held[i] = (unsigned char)ink;
-        }
-        for (int y = 0; y < h; ++y)
-            for (int i = x; i < b; ++i) {
-                unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
-                         c = lit && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
-                if (c && hue_s) {
-                    unsigned k = sp >= hue_s ? 256 : (sp << 8) / hue_s, t = hue_c * k >> 8;
-                    a = lerp(a, hue, k);
-                    c = c > t ? c - t : 0;
-                }
-                if (c && ink) a = lerp(a, ink == 1 ? 0xffffffffu : 0xff000000u, c + (c >> 7));
-                *p = a;
-            }
-        x = b;
+    unsigned was = 0, ink = 0;
+    for (int i = 0; i < w && !was; ++i) was = held[i];
+    if (was && cut) /* part of the row: it keeps the ink it has */
+        ink = was;
+    else if (weight) {
+        unsigned bound = was == 1   ? INK_WHITE_MAX + INK_HOLD
+                         : was == 2 ? INK_WHITE_MAX - INK_HOLD
+                                    : INK_WHITE_MAX;
+        ink = sum <= (unsigned long long)weight * bound ? 1 : 2;
     }
+    if (ink)
+        for (int i = 0; i < w; ++i) held[i] = (unsigned char)ink;
+    for (int y = 0; y < h; ++y) /* the art, and the glyphs on it */
+        for (int i = 0, k = 0; i < w; ++i) {
+            while (k < n && i >= g[k].end) ++k;
+            unsigned *p = fb + y * pitch + i, a = bgra(art[y * apitch + i]),
+                     c = k < n && i >= g[k].x && INKED(*p, ground) ? ink_share(*p, ground, &sp) : 0;
+            if (c && g[k].hue_s) {
+                unsigned q = sp >= g[k].hue_s ? 256 : (sp << 8) / g[k].hue_s,
+                         t = g[k].hue_c * q >> 8;
+                a = lerp(a, g[k].hue, q);
+                c = c > t ? c - t : 0;
+            }
+            if (c && ink) a = lerp(a, ink == 1 ? 0xffffffffu : 0xff000000u, c + (c >> 7));
+            *p = a;
+        }
 }
 
 /* The screen's buffer while canvas draws straight into it (nightshift.c's warm reads it the same
@@ -4297,20 +4473,51 @@ int coverflow_home_split(void *top) {
     return pane_up() && home.sl[0].tw ? 2 : 1;
 }
 
+/* page_parallax.c: the page under a window's slide, its drift and dimming */
+extern void *parallax_slide(float *percent);
+extern int parallax_under_x(int w, float percent);
+extern unsigned parallax_dim(float percent);
+
+/* The page whose band the bar paints: top while nothing slides; under a window's slide Home, when
+ * it is the page under (page_parallax.c), else 0. With Home under, *dx is how far its snapshot
+ * has drifted left and *open the columns from the left that the sliding page does not cover yet;
+ * otherwise 0 and the screen's width. */
+static void *band_page(void *top, int *dx, int *open) {
+    float percent = 0;
+    *dx = 0, *open = 375;
+    if (!window_manager_is_animating(window_manager())) return top;
+    void *under = parallax_slide(&percent);
+    if (!under || under != home.win) return (void *)0;
+    int w = I(under, W_W);
+    *dx = parallax_under_x(w, percent);
+    *open = w - (int)(w * percent + 0.5f);
+    return *open > 0 ? under : (void *)0;
+}
+
+/* Whether Home in Split is the page under a window's slide, its band the bar's to draw beside the
+ * sliding page; *open as band_page's. The bar's title then shows only over the sliding page
+ * (theme_titles_paint.c bar_title_fades). */
+int coverflow_home_slide(int *open) {
+    int dx;
+    void *page = band_page((void *)0, &dx, open); /* still: no top, so 0 */
+    return page && coverflow_home_split(page);
+}
+
 /* The bar's background (ringnav_paint_bg), with Home on top and still: the pane's rows above Home's
  * window, the cover's top, as Home's own paint draws none outside its window. A set with no
- * split_art_up draws nothing. Under a window's slide Home is a snapshot, so the rows wait for
- * it. Where the canvas draws on the screen itself the rows keep the bar's flat ground for now: the
- * bar's glyphs paint on it, and its border paint (coverflow_home_clip) puts the art there with
- * them inked (home_ink). Elsewhere the art is drawn here, under the glyphs as they are. */
+ * split_art_up draws nothing. Where the canvas draws on the screen itself the rows keep the bar's
+ * flat ground for now: the bar's glyphs paint on it, and its border paint (coverflow_home_clip)
+ * puts the art there with them inked (home_ink). Elsewhere the art is drawn here, under the glyphs
+ * as they are. Under a window's slide with Home under it (band_page), the rows drift with Home's
+ * snapshot, drawn here on any canvas and only where the sliding page leaves them in sight
+ * (ponytail: the glyphs keep the bar's ink, not home_ink's, until Home settles). */
 void coverflow_home_bar(void *canvas, void *top) {
-    int r[4];
+    int r[4], old[4], dx, open;
     home.ink_bar = 0;
-    if (coverflow_home_split(top) != 2 || window_manager_is_animating(window_manager()) ||
-        !home_frame())
-        return;
+    void *page = band_page(top, &dx, &open);
+    if (coverflow_home_split(page) != 2 || !home_frame()) return;
     int up = pane_up();
-    unsigned *fb = screen_fb(canvas);
+    unsigned *fb = page == top ? screen_fb(canvas) : (unsigned *)0;
     if (fb) {
         if (bar_rows(canvas, r)) {
             home.ground = fb[r[1] * 375 + r[0]]; /* the background just painted, no glyph yet */
@@ -4318,8 +4525,14 @@ void coverflow_home_bar(void *canvas, void *top) {
         }
         return;
     }
-    int src[4] = { 0, 0, pane_w(), up }, dst[4] = { pane_x(), 320 - client_h() - up, src[2], up };
-    canvas_draw_image(canvas, home.frame, src, dst);
+    int src[4] = { 0, 0, pane_w(), up }, dst[4] = { pane_x() - dx, 320 - client_h() - up, src[2], up };
+    if (page == top) {
+        canvas_draw_image(canvas, home.frame, src, dst);
+    } else if (clip_within(canvas, old, r, 0, dst[1], open, up)) {
+        canvas_set_clip_rect(canvas, r);
+        canvas_draw_image(canvas, home.frame, src, dst);
+        canvas_set_clip_rect(canvas, old);
+    }
 }
 
 /* Home's main list and its scroll view d px taller upward, their rows where they were: the row
@@ -4344,30 +4557,49 @@ static int strip_rows(void *l, int *h) {
  * the window (home_width, HOME_SPLIT_TOP), the rows between its top and the window's that Home's
  * own paint clips away, and under OLED's pages the row above it once it has scrolled, faded. The
  * list paints into the bar's canvas at its place on the screen, left of the pane; taps there reach
- * the bar. Under a window's slide Home is a snapshot: none. The caller puts navigation.c's paint_w
- * back after. */
+ * the bar. Under a window's slide with Home under it (band_page) the rows drift with Home's
+ * snapshot, left of the sliding page. The caller puts navigation.c's paint_w back after. */
 void coverflow_home_strip(void *canvas, void *top) {
     void *l = home.list;
-    int old[4], clip[4], h, wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
-    if (!l || top != home.win || I(l, W_Y) >= 0 || !widget_get_visible(l) ||
-        !widget_count_children(l) || window_manager_is_animating(window_manager()))
+    int old[4], clip[4], h, dx, open, wx = l ? I(home.win, W_X) : 0, wy = l ? I(home.win, W_Y) : 0;
+    void *page = band_page(top, &dx, &open);
+    if (!l || !page || page != home.win || I(l, W_Y) >= 0 || !widget_get_visible(l) ||
+        !widget_count_children(l))
         return;
-    int from = strip_rows(l, &h);
-    if (!clip_within(canvas, old, clip, 0, from, pane_x(), h)) return;
+    int from = strip_rows(l, &h), cols = pane_x() - dx < open ? pane_x() - dx : open;
+    if (!clip_within(canvas, old, clip, 0, from, cols, h)) return;
     int y = wy + I(l, W_Y), reach = I(widget_get_child(l, 0), SCROLL_Y) > 0 ? y : 0;
     canvas_set_clip_rect(canvas, clip);
-    canvas_translate(canvas, wx, wy);
+    canvas_translate(canvas, wx - dx, wy);
     home.stripping = 1;
     if (reach) list_reach(l, reach);
     widget_paint(l, canvas);
     if (reach) list_reach(l, -reach);
     home.stripping = 0;
-    canvas_translate(canvas, -wx, -wy);
-    home_fades(canvas, l, y, pane_x(), 1);
+    canvas_translate(canvas, dx - wx, -wy);
+    home_fades(canvas, l, y, pane_x(), 1, dx);
     canvas_set_clip_rect(canvas, old);
-    if (clip[1] == from && clip[3] == h) /* the band's rows whole: these columns need no repaint */
+    /* the band's rows whole: these columns need no repaint */
+    if (page == top && clip[1] == from && clip[3] == h)
         home.strip_done[0] = clip[0], home.strip_done[1] = clip[0] + clip[2];
 }
+
+/* After the bar's band painters: under a window's slide with Home in Split under it, the band
+ * darkened as page_parallax.c darkens Home's snapshot below it, left of the sliding page. */
+void coverflow_home_dim(void *canvas, void *top) {
+    int old[4], clip[4], dx, open;
+    float percent = 0;
+    void *page = band_page(top, &dx, &open), *lcd = P(canvas, CANVAS_LCD);
+    if (!page || page == top || !coverflow_home_split(page) || !lcd) return;
+    parallax_slide(&percent);
+    unsigned a = parallax_dim(percent), fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    if (!a || !clip_within(canvas, old, clip, 0, 0, open, I(page, W_Y))) return;
+    stock_canvas_set_fill_color(canvas, a << 24); /* black in both halves, as the page's */
+    canvas_fill_rect(canvas, clip[0] - I(canvas, CANVAS_X), clip[1] - I(canvas, CANVAS_Y), clip[2],
+                     clip[3]);
+    stock_canvas_set_fill_color(canvas, fill);
+}
+
 /* After a paint of the raised list in its window (a new selection, a slide's frame), its rows in
  * the bar again: AWTK keeps a widget's invalidate inside its window, so the bar's rows would keep
  * the old ones, and an invalidate made mid-paint is lost. */
@@ -4424,7 +4656,7 @@ void coverflow_home_clip(void *w, void *canvas, int begin) {
         if (w == home.art && home.sl[0].tw) home_paint(canvas);
         if (w == home.list && !home.stripping) {
             int split = widget_get_visible(home.art);
-            home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split);
+            home_fades(canvas, w, I(canvas, CANVAS_Y), split ? pane_x() : 375, split, 0);
         }
         if (home.clipped) canvas_set_clip_rect(canvas, home.clip);
         home.clipped = 0;
@@ -4536,9 +4768,11 @@ static int np_loaded(void) {
         home.np_timer = timer_add(np_due, (void *)0, (unsigned)left);
     return home.np && left > 0;
 }
-/* Every bar paint (navigation.c bar_sync): Home laid out again once Now Playing's row is to come
- * or go, or, with Home on top, Folders' rule changes (home.c home_folders). */
+/* Every bar paint (navigation.c bar_sync): Home's first row follows the play state (home_np.c),
+ * and Home is laid out again once Now Playing's row is to come or go, or, with Home on top,
+ * Folders' rule changes (home.c home_folders). */
 void coverflow_home_np(void) {
+    home_np_sync(); /* its first row's state (home_np.c) */
     if (!home.list) return;
     int top = window_manager_get_top_window(window_manager()) == home.win;
     if (np_loaded() != home.np || (top && home_folders() != home.folders)) coverflow_home_layout();
@@ -4699,6 +4933,8 @@ int coverflow_home_back(void *top) {
 
 /* The list one of Home's rows opened while top is Home, which Return leaves (swipe_back.c); else 0. */
 void *coverflow_home_sublist(void *top) { return top && top == home.win ? home_open() : (void *)0; }
+/* Home's art pane, which shows the selected row's cover (art_zoom.c: Now Playing grows from it) */
+void *coverflow_home_pane(void) { return home.art; }
 
 /* 1 while Home shows a list of its rows' (the Library's, Streaming's, Settings'), not its own. */
 int coverflow_home_sub(void) { return home_open() != (void *)0; }
@@ -4719,6 +4955,7 @@ int coverflow_home(void *win, void *ctx) {
     widget_on(widget_lookup(win, "img_cover_flow", 1), EVT_CLICK, coverflow_open, 0);
     widget_on(widget_lookup(win, "img_settings", 1), EVT_CLICK, home_settings, 0);
     widget_on(widget_lookup(win, "img_home_search", 1), EVT_CLICK, library_search_open, 0);
+    home_np_bind(win); /* its first row's click and glyph (home_np.c) */
     home_sets_bind(win);
     home.win = win;
     void *art = widget_lookup(win, "img_homeart", 1);

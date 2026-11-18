@@ -1,10 +1,12 @@
 /* coda-rc, the car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): the platform under
  * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
- * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate and queue
- * commands, the pairing code and the connected phones in.
+ * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate, queue and
+ * radio commands, the pairing code and the connected phones in.
  *
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
+ * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
+ * names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
  * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
@@ -14,18 +16,24 @@
 #define HELLO_MS 10000
 #define AUTH_MS 150000
 #define ACK_MS 4000
-#define POLL_MS 250
+#define TICK_MS 1000 /* the loop's longest sleep: pairing's end, forgotten phones, the handshakes' limits */
 #define LOG_MAX 65536
 
 enum { TR_TCP, TR_BLE };
 
 static char root[160];
 static int port = CRC_TCP_PORT, use_ble = 1, quit, rnd = -1;
+#ifdef CODA_HOST
+static const char *mdns_if; /* the tests' daemon is never on the network unless asked */
+#else
+static const char *mdns_if = "wlan0";
+#endif
 uint8_t crc_device_id[8];
 
 typedef struct {
-    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen;
+    int seq, state, pos_ms, len_s, id, shuffle, repeat, volume, qpos, qlen, qgen, radio;
     int hearts; /* 0-5, -1 when the song can't be rated */
+    int buf, bhave, btotal, bms; /* a server song loading: its bytes and length (np_stream.c) */
     char path[512], title[160], artist[160], album[160];
 } np_t;
 
@@ -200,7 +208,7 @@ int crc_write(crc_session *s, const uint8_t *buf, size_t n) {
 /* ---- Now Playing: the shim's /tmp/coda-rc.now (coda_rc_shim.c np_write) ---- */
 
 static np_t np, np_sent;
-static uint32_t np_at, pos_pushed;
+static uint32_t np_at, pos_pushed, buf_pushed;
 
 static void np_parse(const char *b, np_t *o) {
     memset(o, 0, sizeof *o);
@@ -217,7 +225,8 @@ static void np_parse(const char *b, np_t *o) {
             if (0) {}
             NUM("state", state) NUM("pos", pos_ms) NUM("len", len_s) NUM("id", id) NUM("shuffle", shuffle)
             NUM("repeat", repeat) NUM("volume", volume) NUM("qpos", qpos) NUM("qlen", qlen) NUM("qgen", qgen)
-            NUM("seq", seq) NUM("hearts", hearts) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
+            NUM("seq", seq) NUM("hearts", hearts) NUM("buf", buf) NUM("bhave", bhave) NUM("btotal", btotal)
+            NUM("bms", bms) NUM("radio", radio) STR("path", path) STR("title", title) STR("artist", artist) STR("album", album)
             if (dst) {
                 if (vn > cap - 1) vn = cap - 1;
                 memcpy(dst, v, vn);
@@ -247,8 +256,8 @@ int crc_shim_alive(void) {
 }
 
 uint32_t crc_caps(void) {
-    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS |
-           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME : 0) |
+    return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
+           (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO : 0) |
            (lib_has_server() ? CAP_SERVER : 0);
 }
 
@@ -295,6 +304,11 @@ static void put_now_playing(pbw *w) {
     pb_varint(w, 10, np.volume);
     pb_varint(w, 11, np.hearts > 0 ? np.hearts : 0);
     pb_varint(w, 12, np.hearts >= 0 && rid > 0);
+    pb_varint(w, 13, np.buf != 0); /* CAP_BUFFERING: a server song loading, how far it has come */
+    pb_varint(w, 14, (uint32_t)np.bhave);
+    pb_varint(w, 15, (uint32_t)np.btotal);
+    pb_varint(w, 16, crc_buffered_ms((uint32_t)np.bhave, (uint32_t)np.btotal, (uint32_t)np.bms));
+    pb_varint(w, 17, np.radio != 0); /* CAP_RADIO */
     pb_end(w, m);
 }
 
@@ -337,13 +351,19 @@ static void np_poll(void) {
     int parts = 0;
     if (np.state != np_sent.state || np.id != np_sent.id || np.shuffle != np_sent.shuffle ||
         np.repeat != np_sent.repeat || np.volume != np_sent.volume || np.hearts != np_sent.hearts ||
-        strcmp(np.path, np_sent.path) ||
+        np.radio != np_sent.radio ||
+        strcmp(np.path, np_sent.path) || np.buf != np_sent.buf ||
+        /* its bytes: at most twice a second */
+        (np.bhave != np_sent.bhave && crc_now_ms() - buf_pushed >= 500) ||
         strcmp(np.title, np_sent.title))
         parts |= 1 | 2;
     if (np.qgen != np_sent.qgen || np.qpos != np_sent.qpos || np.qlen != np_sent.qlen) parts |= 4;
     if (np.pos_ms != np_sent.pos_ms) parts |= 2;  /* a seek, or the shim's once-a-second refresh */
     if (np.state == 1 && crc_now_ms() - pos_pushed >= 1000) parts |= 2;
+    int bhave = parts & 1 ? np.bhave : np_sent.bhave; /* bytes held back are sent at a later look */
     np_sent = np;
+    np_sent.bhave = bhave;
+    if (parts & 1) buf_pushed = crc_now_ms();
     if (!parts) return;
     lib_now(np.qgen, np.id);
     if (parts & 2) pos_pushed = crc_now_ms();
@@ -514,7 +534,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_SET_MODE: np_read(); return set_mode(s, req_id, p, n);
     case T_RATE: np_read(); return rate(s, req_id, p, n);
     case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
-    case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY:
+    case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:
         np_read();
         return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);
     }
@@ -577,6 +597,8 @@ static int tcp_listen(void) {
     return fd;
 }
 
+int crc_tcp_port(void) { return port; }
+
 /* ---- BLE's session (coda_rc_ble.c calls these) ---- */
 
 void crc_ble_connected(void) {
@@ -599,9 +621,50 @@ void crc_ble_gone(void) {
     if (ble.used) conn_close(&ble);
 }
 
+/* Whether a phone's Bluetooth scan can find this Q2 now: the Pair a Phone page reads it (carremote_page.c
+ * cr_howto_mode) to give the Bluetooth steps only then, the Wi-Fi ones otherwise. */
+void crc_ble_advertising(int on) {
+    if (on) crc_write_file("/tmp/coda-rc.ble", "1\n", 2, 0644);
+    else unlink_at("/tmp/coda-rc.ble");
+}
+
 /* ---- the loop ---- */
 
 static void on_term(int sig) { quit = 1; }
+
+/* ms from now to at, 0 when it has passed */
+static uint32_t until(uint32_t at, uint32_t now) {
+    uint32_t d = at - now;
+    return d >= 0x80000000u ? 0 : d;
+}
+
+static int position_wanted(void) {
+    for (int i = 0; i < MAX_TCP; ++i)
+        if (tcp[i].used && tcp[i].s.state == S_AUTHED && tcp[i].s.subscribed & 2) return 1;
+    return ble.used && ble.s.state == S_AUTHED && ble.s.subscribed & 2;
+}
+
+/* How long the loop's poll may sleep: until the next thing falls due, at most TICK_MS. A socket's bytes and demo's
+ * files (renamed into /tmp by its shim: inotify's IN_MOVED_TO) end it sooner. Due: the second's tick, mDNS's next
+ * look or announcement, a playing song's position for a phone that follows it, Now Playing's bytes held back,
+ * a command's ACK_MS; at once while libdbus holds a message it read while sending. */
+static int wait_ms(uint32_t now, uint32_t last_tick) {
+    uint32_t w = until(last_tick + TICK_MS, now), d;
+    if ((d = mdns_due(now)) < w) w = d;
+    if (np.state == 1 && position_wanted() && (d = until(pos_pushed + 1000, now)) < w) w = d;
+    if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
+    if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
+    return ble_pending() ? 0 : (int)w;
+}
+
+/* demo's shim renames each file into /tmp: a watch on it ends the loop's sleep. Without one (no inotify) the loop
+ * looks every TICK_MS. */
+static int files_watch(void) {
+    char p[256];
+    int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (fd >= 0 && inotify_add_watch(fd, crc_path(p, sizeof p, "/tmp"), IN_MOVED_TO) < 0) close(fd), fd = -1;
+    return fd;
+}
 
 static void timeouts(conn *c) {
     if (!c->used) return;
@@ -633,21 +696,66 @@ static void peers_poll(void) {
     crypto_wipe(peers, sizeof peers);
 }
 
-/* The paired phones connected now, for Settings > Car Remote's rows (coda_rc_shim.c cr_page_show): the
- * peer id of each authenticated session in /tmp/coda-rc.online, 8 bytes each, written when the set
- * changes. Ids are not secret (every Hello carries one in the clear). */
+#define ONLINE_REC (CRC_PEER_ID + 1)
+#define SEEN "/mnt/data/coda-rc/seen"
+#define SEEN_REC (CRC_PEER_ID + 4)
+
+/* Last Connected, for Settings > Car Remote's phone page (carremote_page.c): SEEN holds a record per paired
+ * phone, its peer id and the wall clock (little-endian seconds) when a session of it last authenticated or
+ * ended. The phones in changed (n ids) take the time now, the others keep theirs, and a phone no longer
+ * paired is dropped. Written only when a phone comes or goes, so the flash is not worn. */
+static void seen_stamp(const uint8_t *changed, int n) {
+    crc_peer peers[CRC_MAX_PEERS];
+    uint8_t old[CRC_MAX_PEERS * SEEN_REC], out[CRC_MAX_PEERS * SEEN_REC];
+    int np = crc_peers_load(peers, CRC_MAX_PEERS), k = read_file(SEEN, old, sizeof old), m = 0;
+    uint32_t now = crc_now_s();
+    k = k > 0 ? k / SEEN_REC : 0;
+    for (int i = 0; i < np; ++i) {
+        uint8_t *r = out + m * SEEN_REC;
+        int stamp = 0, kept = 0;
+        for (int j = 0; j < n; ++j) stamp |= !memcmp(changed + j * CRC_PEER_ID, peers[i].id, CRC_PEER_ID);
+        memcpy(r, peers[i].id, CRC_PEER_ID);
+        if (stamp)
+            for (int b = 0; b < 4; ++b) r[CRC_PEER_ID + b] = now >> (8 * b);
+        for (int j = 0; j < k && !stamp && !kept; ++j)
+            if (!memcmp(old + j * SEEN_REC, peers[i].id, CRC_PEER_ID))
+                memcpy(r + CRC_PEER_ID, old + j * SEEN_REC + CRC_PEER_ID, 4), kept = 1;
+        m += stamp || kept;
+    }
+    crypto_wipe(peers, sizeof peers);
+    crc_write_file(SEEN, out, m * SEEN_REC, 0600);
+}
+
+/* id (8 bytes) among the n ONLINE_REC records at set */
+static int online_has(const uint8_t *set, int n, const uint8_t *id) {
+    for (int i = 0; i < n; ++i)
+        if (!memcmp(set + i * ONLINE_REC, id, CRC_PEER_ID)) return 1;
+    return 0;
+}
+
+/* The paired phones connected now, for Settings > Car Remote's rows (carremote_page.c): a record per
+ * authenticated session in /tmp/coda-rc.online, its peer id and its link (0 Wi-Fi, TCP; 1 Bluetooth, BLE),
+ * written when the set changes; a phone that came or went is stamped in SEEN. Ids are not secret (every
+ * Hello carries one in the clear). */
 static void online_poll(void) {
-    static uint8_t was[(MAX_TCP + 1) * CRC_PEER_ID];
+    static uint8_t was[(MAX_TCP + 1) * ONLINE_REC];
     static int was_n = -1;
-    uint8_t ids[(MAX_TCP + 1) * CRC_PEER_ID];
-    int n = 0;
+    uint8_t ids[(MAX_TCP + 1) * ONLINE_REC], changed[(MAX_TCP + 1) * 2 * CRC_PEER_ID];
+    int n = 0, nc = 0;
     for (int i = 0; i <= MAX_TCP; ++i) {
         conn *c = i < MAX_TCP ? &tcp[i] : &ble;
-        if (c->used && c->s.state == S_AUTHED) memcpy(ids + CRC_PEER_ID * n++, c->s.peer, CRC_PEER_ID);
+        if (!c->used || c->s.state != S_AUTHED) continue;
+        memcpy(ids + ONLINE_REC * n, c->s.peer, CRC_PEER_ID);
+        ids[ONLINE_REC * n++ + CRC_PEER_ID] = c->s.transport == TR_BLE;
     }
-    if (n == was_n && !memcmp(ids, was, n * CRC_PEER_ID)) return;
-    if (crc_write_file("/tmp/coda-rc.online", ids, n * CRC_PEER_ID, 0644)) return; /* tried again next pass */
-    memcpy(was, ids, n * CRC_PEER_ID);
+    if (n == was_n && !memcmp(ids, was, n * ONLINE_REC)) return;
+    if (crc_write_file("/tmp/coda-rc.online", ids, n * ONLINE_REC, 0644)) return; /* tried again next pass */
+    for (int i = 0; i < n; ++i)
+        if (!online_has(was, was_n, ids + i * ONLINE_REC)) memcpy(changed + CRC_PEER_ID * nc++, ids + i * ONLINE_REC, CRC_PEER_ID);
+    for (int i = 0; i < was_n; ++i)
+        if (!online_has(ids, n, was + i * ONLINE_REC)) memcpy(changed + CRC_PEER_ID * nc++, was + i * ONLINE_REC, CRC_PEER_ID);
+    if (nc) seen_stamp(changed, nc);
+    memcpy(was, ids, n * ONLINE_REC);
     was_n = n;
 }
 
@@ -673,6 +781,8 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--root") && i + 1 < argc) snprintf(root, sizeof root, "%s", argv[++i]);
         else if (!strcmp(argv[i], "--port") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
+        else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
+        else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
     }
     setpriority(PRIO_PROCESS, 0, 19);
     signal(SIGPIPE, SIG_IGN);
@@ -683,26 +793,36 @@ int main(int argc, char **argv) {
     crc_write_file("/tmp/coda-rc.pid", b, snprintf(b, sizeof b, "%d\n", getpid()), 0644);
     device_id();
     unlink_at("/tmp/coda-rc.pair");
+    unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
     int lfd = tcp_listen();
     crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
     int bfd = use_ble ? ble_start() : -1;
+    if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;
-    uint32_t last_tick = 0;
+    int wfd = files_watch();
+    uint32_t last_tick = crc_now_ms() - TICK_MS;
     while (!quit) {
-        struct pollfd fds[MAX_TCP + 3];
-        int nf = 0;
+        struct pollfd fds[MAX_TCP + 4];
+        int nf = 0, mfd = mdns_fd();
         if (lfd >= 0) fds[nf++] = (struct pollfd){lfd, POLLIN, 0};
+        if (mfd >= 0) fds[nf++] = (struct pollfd){mfd, POLLIN, 0};
         if (bfd >= 0) fds[nf++] = (struct pollfd){bfd, (short)ble_events(), 0};
+        if (wfd >= 0) fds[nf++] = (struct pollfd){wfd, POLLIN, 0};
         int at[MAX_TCP];
         for (int i = 0; i < MAX_TCP; ++i) {
             at[i] = -1;
             if (tcp[i].used) { at[i] = nf; fds[nf++] = (struct pollfd){tcp[i].fd, POLLIN, 0}; }
         }
-        int r = poll(fds, nf, POLL_MS);
+        int r = poll(fds, nf, wait_ms(crc_now_ms(), last_tick));
         if (r < 0 && errno != EINTR) break;
         int k = 0;
         if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd);
+        if (mfd >= 0 && fds[k++].revents & POLLIN) mdns_handle();
         if (bfd >= 0) ++k;
+        if (wfd >= 0 && fds[k++].revents & POLLIN) { /* which file does not matter: each is read below */
+            char ev[512];
+            while (read(wfd, ev, sizeof ev) > 0) {}
+        }
         ble_handle(); /* every pass: libdbus may hold bytes it has already read */
         for (int i = 0; i < MAX_TCP; ++i)
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
@@ -710,7 +830,8 @@ int main(int argc, char **argv) {
         ack_poll();
         online_poll();
         uint32_t now = crc_now_ms();
-        if (now - last_tick >= 1000) {
+        mdns_poll(now);
+        if (now - last_tick >= TICK_MS) {
             last_tick = now;
             crc_tick();
             peers_poll();
@@ -725,6 +846,8 @@ int main(int argc, char **argv) {
         if (tcp[i].used) conn_close(&tcp[i]);
     if (ble.used) conn_close(&ble);
     ble_stop();
+    mdns_stop();
+    if (wfd >= 0) close(wfd);
     unlink_at("/tmp/coda-rc.pair");
     unlink_at("/tmp/coda-rc.online");
     unlink_at("/tmp/coda-rc.pid");

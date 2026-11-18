@@ -13,7 +13,8 @@ from conftest import FNV_PRIME, O, Deques, Files, Rows, claim, fnv1a, high_halve
 
 MAGIC = 0x5132524e
 HEADER = '<14I'
-QUEUE_FILE = '/mnt/data/ringnav-queue'
+MOUNTS = b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'
+QUEUE_FILE = '/mnt/mmc/.q2pod/ringnav-queue'  # on the card (card_store.c); dropped leaves it empty
 CHECKPOINT = QUEUE_FILE + '-elapsed'
 FOLDER, LIBRARY = 1, 0xf001
 ONE_SONG, ONE_GROUP, ONE_PASS, REPEAT_SONG, REPEAT_GROUP, REPEAT_ALL = range(6)
@@ -1667,6 +1668,7 @@ class Saved(Player):
     def __init__(self, fw, mcl):
         super().__init__(fw, mcl)
         self.disk = Files(fw)
+        self.disk.files['/proc/mounts'] = MOUNTS  # the card in
         self.save = fw.fn('playback_save', None)
         self.memory = fw.fn('ringnav_memory', C.c_int, C.c_void_p)
         self.sec = 0
@@ -1764,8 +1766,9 @@ def test_nothing_changed_writes_nothing(saved):
     saved.s.dirty = 1
     saved.save()
     saved.disk.files.clear()
+    saved.disk.files['/proc/mounts'] = MOUNTS
     saved.save()
-    assert not saved.disk.files
+    assert saved.disk.files.keys() <= {'/proc/mounts'}
 
 
 def test_a_failed_write_stays_due(saved):
@@ -1776,7 +1779,32 @@ def test_a_failed_write_stays_due(saved):
     assert saved.s.save_failed == 1 and saved.s.dirty == 1
     saved.disk.fail_rename = False
     saved.save()
-    assert saved.s.save_failed == 0 and saved.s.dirty == 0 and QUEUE_FILE in saved.disk.files
+    assert saved.s.save_failed == 0 and saved.s.dirty == 0 and bool(saved.disk.files.get(QUEUE_FILE))
+
+
+def test_with_the_card_away_the_snapshot_waits_in_ram_and_the_flash_is_not_written(saved, fw):
+    full_queue(saved)
+    saved.s.dirty = 1
+    saved.disk.files.clear()  # the card out, or USB storage: no /proc/mounts line
+    saved.save()
+    assert saved.s.save_failed == 0 and saved.s.dirty == 0  # kept, in RAM
+    assert not [k for k in saved.disk.files if k.startswith('/mnt/data')] and QUEUE_FILE not in saved.disk.files
+    held = C.c_char.in_dll(fw.lib, 'playback__queue_store')
+    saved.disk.files['/proc/mounts'] = MOUNTS
+    assert fw.fn('card_blob_flush', C.c_int, C.c_void_p)(C.addressof(held)) == 1
+    assert struct.unpack_from('<I', saved.disk.files[QUEUE_FILE])[0] == 0x5132524e  # the snapshot, whole
+
+
+def test_a_snapshot_from_the_flash_is_restored_and_copied_to_the_card_once(saved, fw):
+    full_queue(saved)
+    saved.s.dirty = 1
+    saved.save()
+    old = saved.disk.files.pop(QUEUE_FILE)
+    saved.disk.files['/mnt/data/ringnav-queue'] = old  # where releases before card_store.c kept it
+    store = C.addressof(C.c_char.in_dll(fw.lib, 'playback__queue_store'))
+    C.c_int.from_address(store + 44).value = 0  # a new boot: card_blob's moved, after 3 pointers and 5 words
+    f = fw.fn('card_blob_open', C.c_void_p, C.c_void_p)(store)
+    assert f and saved.disk.files[QUEUE_FILE] == old and saved.disk.files['/mnt/data/ringnav-queue'] == old
 
 
 def test_a_queue_past_the_limit_drops_its_snapshot(saved):
@@ -1784,7 +1812,7 @@ def test_a_queue_past_the_limit_drops_its_snapshot(saved):
     saved.s.dirty, saved.disk.files[QUEUE_FILE] = 1, b'old'
     saved.s.n = 1000
     saved.save()
-    assert QUEUE_FILE not in saved.disk.files and saved.s.dirty == 0
+    assert not saved.disk.files.get(QUEUE_FILE) and saved.s.dirty == 0
     saved.s.n = 9
 
 
@@ -1806,7 +1834,7 @@ def test_a_snapshot_restores_only_at_a_size_the_save_keeps(saved, n):
     assert saved.set(0, 1) == 1
     saved.s.dirty = 1
     saved.save()
-    kept = QUEUE_FILE in saved.disk.files
+    kept = bool(saved.disk.files.get(QUEUE_FILE))
     saved.disk.files[QUEUE_FILE] = plain_snapshot(paths)
     assert restore(saved) == (0 if kept else -7)
 
@@ -1826,8 +1854,9 @@ def test_a_snapshot_path_is_at_most_1023(saved, path, kept):
     saved.deques[saved.handle][:] = rows
     saved.s.dirty = 1
     saved.disk.files.clear()
+    saved.disk.files['/proc/mounts'] = MOUNTS
     saved.save()
-    assert (QUEUE_FILE in saved.disk.files) == kept
+    assert bool(saved.disk.files.get(QUEUE_FILE)) == kept
 
 
 PLAIN = high_halves(3)
@@ -1885,21 +1914,21 @@ def test_a_plain_queue_is_kept_only_for_memory_playback(saved):
     plain_queue(saved)
     saved.fw.var('g_memory_play', C.c_ubyte).value = 0
     saved.save()
-    assert QUEUE_FILE not in saved.disk.files and saved.s.dirty == 0
+    assert not saved.disk.files.get(QUEUE_FILE) and saved.s.dirty == 0
 
 
 def test_a_card_app_stream_is_not_kept(saved):
     plain_queue(saved)
     saved.mcl.type = 2
     saved.save()
-    assert QUEUE_FILE not in saved.disk.files
+    assert not saved.disk.files.get(QUEUE_FILE)
 
 
 def test_airplay_is_not_kept(saved):
     plain_queue(saved)
     saved.fw.mock('airplayGetFlag', lambda *_: 2)
     saved.save()
-    assert QUEUE_FILE not in saved.disk.files
+    assert not saved.disk.files.get(QUEUE_FILE)
 
 
 def test_boots_empty_queue_keeps_the_last_snapshot(saved):
@@ -1914,6 +1943,7 @@ def restore(saved):
     data = dict(saved.disk.files)
     saved.forget()
     saved.disk.files.clear()
+    saved.disk.files['/proc/mounts'] = MOUNTS
     saved.disk.files.update(data)
     return saved.memory(saved.out)
 
@@ -2158,6 +2188,7 @@ def test_a_mangled_sealed_snapshot_never_breaks_the_restore(saved):
             struct.pack_into('<I', head, 8, len(head))
             data = sealed(head) if rng.random() < .5 else sealed(data)
         saved.disk.files.clear()
+        saved.disk.files['/proc/mounts'] = MOUNTS
         saved.disk.files[QUEUE_FILE] = data
         got = restore(saved)
         if got == -7:
@@ -2175,6 +2206,7 @@ def test_random_bytes_are_refused(saved):
     rng = random.Random(0xf11e)
     for i in range(1500):
         saved.disk.files.clear()
+        saved.disk.files['/proc/mounts'] = MOUNTS
         saved.disk.files[QUEUE_FILE] = rng.randbytes(rng.randrange(200))
         assert restore(saved) == -7
 
@@ -2326,7 +2358,7 @@ def test_a_speed_for_a_stream_stays_with_the_track(saved, fw):
     speed = fw.fn('ringnav_speed', C.c_int, C.c_int)
     saved.load([saved.song(b'/books/a/1.m4b', kind=4)], 0)
     fw.mock('stock_speed_trampoline', lambda mode, *_: mode)
-    assert speed(2) == 2 and fw.var('g_playspeed_mode', C.c_ubyte).value == 2 and not saved.disk.files
+    assert speed(2) == 2 and fw.var('g_playspeed_mode', C.c_ubyte).value == 2 and saved.disk.files.keys() <= {'/proc/mounts'}
 
 
 def test_a_failed_save_keeps_the_folders_speed(saved, fw):
@@ -2335,7 +2367,7 @@ def test_a_failed_save_keeps_the_folders_speed(saved, fw):
     saved.disk.fail_rename = True
     speed(2)
     assert fw.var('g_playspeed_mode', C.c_ubyte).value == 0
-    assert fw.calls('stock_speed_trampoline')[-1][1][0] == 0 and not saved.disk.files
+    assert fw.calls('stock_speed_trampoline')[-1][1][0] == 0 and saved.disk.files.keys() <= {'/proc/mounts'}
 
 
 @pytest.mark.parametrize('path, ok', [

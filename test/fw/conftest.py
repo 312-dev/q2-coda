@@ -27,6 +27,36 @@ NAVIGATION_SOURCE = ''.join([*((ROOT/'patch'/n).read_text() for n in ['navigatio
                              *(p.read_text() for p in sorted((ROOT/'patch/nav').glob('*.c')))])  # navigation.c's pieces
 
 
+# What stock V1.36's widget_get_prop_str (0x66c99c) returns. It calls widget_get_prop and hands back value_str of
+# the answer, and returns its default only when widget_get_prop fails; value_str (0x730134) is NULL for any value
+# that is not a string. widget_get_prop (0x66b744) answers these keys for every widget itself, RET_OK:
+# `text` as a wide string (so NULL here), the rest with the widget's own field, NULL until set. A window's
+# vtable (window_base_get_prop, 0x67e5xx) answers its anim hints, theme and applet name the same way, and an
+# image's (image_base_get_prop, 0x656a90) its image. A custom prop set with widget_set_prop_int is an int: NULL too.
+STOCK_STR_FIELDS = (b'name', b'style', b'tr_text', b'pointer_cursor', b'self_layout', b'children_layout')
+WINDOW_STR_FIELDS = (b'anim_hint', b'open_anim_hint', b'close_anim_hint', b'theme', b'applet_name')
+IMAGE_STR_FIELDS = (b'image',)
+WINDOW_KINDS = (b'window', b'dialog', b'popup', b'overlay', b'system_bar')
+
+
+def stock_prop_str(kind, key, value, default):
+    """widget_get_prop_str as stock answers it for a widget of type kind (bytes) whose prop key holds value (bytes for a
+    string, an int, None when never set): the string, NULL (None here) where stock's is NULL, else default."""
+    if isinstance(value, bytes) and key != b'text':
+        return value
+    if value is not None or key == b'text' or key in STOCK_STR_FIELDS:
+        return None
+    if kind in WINDOW_KINDS and key in WINDOW_STR_FIELDS or kind == b'image' and key in IMAGE_STR_FIELDS:
+        return None
+    return default
+
+
+def stock_start_with(s, prefix, *_):
+    """tk_str_start_with as stock's (0x72c488), for fw.mock: false for a NULL string or prefix, as
+    widget_get_prop_str's NULL name of a widget never named is."""
+    return bool(s and prefix) and C.string_at(s).startswith(C.string_at(prefix))
+
+
 def ui_name(lib, name):
     """The symbol of navigation.c's `name`, wherever the split put it: `name` itself once navigation.h shares it,
     else `<unit>__<name>`, a static of navigation.c or of a unit split out of it."""
@@ -44,14 +74,27 @@ def c_enum(first):
 
 FNV_SEED, FNV_PRIME = 2166136261, 16777619
 
-# The C uses stock's fixed addresses as they are: zeroed pages here. A non-PIE python (Debian's and
-# Ubuntu's own) has its code and data there, which the C would overwrite.
+# The C uses stock's fixed addresses as they are: zeroed pages here, mapped once per process and zeroed again
+# before every test (stock_memory). A non-PIE python (Debian's and Ubuntu's own) has its code and data there,
+# which the C would overwrite.
+STOCK, STOCK_SIZE = 0x400000, 0x800000
 libc = C.CDLL(None)
 libc.mmap.restype, libc.mmap.argtypes = C.c_void_p, [C.c_void_p, C.c_size_t, C.c_int, C.c_int, C.c_int, C.c_long]
 libc.mprotect.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
-if libc.mmap(0x400000, 0x800000, 3, 0x100022, -1, 0) != 0x400000:  # read/write, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+libc.madvise.argtypes = [C.c_void_p, C.c_size_t, C.c_int]
+if libc.mmap(STOCK, STOCK_SIZE, 3, 0x100022, -1, 0) != STOCK:  # read/write, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
     pytest.exit('test/fw needs a position-independent python: 0x400000-0xc00000, stock\'s addresses, is taken '
                             '(a non-PIE python lives there); use one built with -pie, e.g. actions/setup-python\'s or a venv of a PIE build', returncode=4)
+
+
+@pytest.fixture(autouse=True)
+def stock_memory():
+    """Stock's fixed addresses zeroed before each test, as a fresh load zeroes the library's own globals: a byte
+    one test left there (stock's Return latch, set by a held Return) would otherwise reach whichever test the run
+    puts after it in the same process. MADV_DONTNEED drops a private anonymous map's pages, which read as zero
+    again, so this costs only the pages a test touched. A test's own Fw loads (a restart within it) keep what is
+    there."""
+    assert not libc.madvise(STOCK, STOCK_SIZE, 4)  # MADV_DONTNEED
 
 
 # Strings at chosen addresses: stock's records hold 4-byte pointers a word apart and P() reads 8 here, so a test puts
@@ -143,7 +186,7 @@ def claim(address):
 def ask_cover(fw):
     """A card app's song asks for its cover, as get_onlineid3info does (build.py COVERINFO_CALL, tidal.c
     app_coverinfo): stock's player_set_coverinfo sets g_playcover_type to 0 for its cover thread, here before the
-    call, as its stand-in at tidal.c's own define only returns. The stand-in outlives the test: call it in_fork."""
+    call, as its stand-in at tidal.c's own define only returns. The stand-in is code at stock's address: call it in_fork."""
     at = int(re.findall(r'#define player_set_coverinfo \(\(.*\)(0x[0-9a-f]+)u\)', (ROOT/'patch/tidal.c').read_text())[0], 16)
     claim(at)
     C.memmove(at, b'\xc3', 1)  # ret
@@ -177,7 +220,7 @@ class Externpic:
         return 0
 
 def in_fork(test):
-    """The test in a child: what it writes at stock's code addresses would outlive the test here. The child
+    """The test in a child: what it writes at stock's code addresses stays in the child. The child
     closes its firmware (dlclose) before it leaves: gcov writes a library's counts then, and _exit alone would
     lose the child's, so a forked test counted nothing towards the C's coverage."""
     @functools.wraps(test)
@@ -302,9 +345,12 @@ class Rows(Deques):
 
 
 class Files:
-    """The card's and flash's files as a dict: fopen and all, so blob_io and the snapshot's reader run whole; "a" appends."""
-    def __init__(self, fw, files=None):
+    """The card's and flash's files as a dict: fopen and all, so blob_io and the snapshot's reader run whole; "a" appends.
+    card: /proc/mounts lists the card, as card_mounted reads it, which card_store.c's files need."""
+    def __init__(self, fw, files=None, card=False):
         self.files = files if files is not None else {}
+        if card:
+            self.files.setdefault('/proc/mounts', b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')
         self.open = {}
         self.fail_rename = False
         fw.mock('fw_fopen', self.fopen)

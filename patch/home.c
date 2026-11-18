@@ -314,7 +314,8 @@ static int shown_foot(void *view) {
 int home_rest(void *view, int *foot) {
     if (!view || view != coverflow_home_view() || !widget_count_children(view)) return 0;
     if (foot) *foot = shown_foot(view);
-    return HOME_REST * I(widget_get_child(view, 0), W_H);
+    /* a row fewer in Edit Home, the hint under them (library_edit.c lr_edit_room) */
+    return HOME_REST * I(widget_get_child(view, 0), W_H) - lr_edit_room(view);
 }
 
 /* The scroll view's content as AWTK's touch scroll clamps it (to the content less the view): the
@@ -375,23 +376,33 @@ void home_keep(int d, int k) {
  * list, the test Folders' empty page makes (feedback.c feedback_folder): stock's listing of the
  * card's root (toolsLoadDirectory, which leaves out what stock hides) holds a row. It is read again
  * only when the card comes or goes or its root changes (its mtime), never while a library scan
- * fills the listing's deque, and only with Home on top, so no Folders page holds that listing.
- * ponytail: a stat of the card's root a bar paint on Home; Folder Root's folder is not what is
- * listed (the card's root is), so a Folder Root holding nothing still shows Folders. */
+ * fills the listing's deque, and only with Home on top, so no Folders page holds that listing. The
+ * card and its root are looked at on a bar paint on Home at most every CARD_RECHECK_MS, and at once
+ * after a library scan (library_gen), not on every paint. ponytail: a card's mount, removal or new
+ * root folder shows on Home up to CARD_RECHECK_MS late; Folder Root's folder is not what is listed
+ * (the card's root is), so a Folder Root holding nothing still shows Folders. */
 #define HOME_CARD "/mnt/mmc"
+/* The card's root as a key: 1 with no card, else its device and mtime hashed, never 0 or 1. */
+static unsigned home_card_key(void) {
+    unsigned s[36] = { 0 };
+    if (access("/tmp/mmc_add", 0) || __xstat(3, HOME_CARD, s)) return 1;
+    return hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&s[0], 4),
+                      (const unsigned char *)&s[16], 8) |
+           2;
+}
 static struct {
     unsigned key; /* the root's identity at the last listing, 0: none yet */
     unsigned char folders;
+    unsigned seen, at, gen; /* the key last looked at (0: never), when, and library_gen then */
 } hf __attribute__((section(".scratch")));
 int home_folders(void) {
-    unsigned s[36] = { 0 }, key = 1;
-    if (!access("/tmp/mmc_add", 0) && !__xstat(3, HOME_CARD, s))
-        key = hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&s[0], 4),
-                         (const unsigned char *)&s[16], 8) |
-              2;
-    if (key != hf.key && !library_scanning()) {
-        hf.key = key;
-        hf.folders = key != 1 && toolsLoadDirectory(HOME_CARD) > 0;
+    unsigned now = time_now_ms();
+    if (!hf.seen || hf.gen != library_gen || now - hf.at >= CARD_RECHECK_MS) {
+        hf.seen = home_card_key(), hf.at = now, hf.gen = library_gen;
+    }
+    if (hf.seen != hf.key && !library_scanning()) {
+        hf.key = hf.seen;
+        hf.folders = hf.seen != 1 && toolsLoadDirectory(HOME_CARD) > 0;
     }
     return hf.folders;
 }
@@ -429,22 +440,25 @@ static int lip(int x) {
 /* Every other scrolling list's fades (navigation.c list_fade), Home (Full)'s on a list whose box
  * runs on below the set's list end: rows top to bottom on the screen, the list's top and box's foot;
  * end, the list end (y 282 on OLED), past which rows peek through a fade into the ground from
- * FULL_FOOT_CLEAR above it to FULL_FOOT_GROUND; above (scrolled) fades its first FULL_TOP_CLEAR px
- * from FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on
- * the screen, is never faded. Inside the canvas's clip. */
-void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1) {
+ * FULL_FOOT_CLEAR above it to foot, or FULL_FOOT_GROUND when foot is 0 (an editor's hint's band,
+ * library_edit.c lr_edit_foot); above (scrolled) fades its first FULL_TOP_CLEAR px from
+ * FULL_TOP_GROUND above the top, below (rows past end) the foot; s0 to s1, the selected row on the
+ * screen, is never faded. Inside the canvas's clip. */
+void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
+                int s1) {
     if (!P(canvas, CANVAS_LCD) || (!above && !below)) return;
     int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y), clip[4];
     canvas_get_clip_rect(canvas, clip);
     int y0 = clip[1] > top ? clip[1] : top, y1 = clip[1] + clip[3] < bottom ? clip[1] + clip[3] : bottom;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
              ground = ui_ink(RGBA(0)) & 0xffffffu;
-    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR;
+    int clear = top + FULL_TOP_CLEAR, from = end - FULL_FOOT_CLEAR,
+        ground_y = foot ? foot : FULL_FOOT_GROUND;
     for (int y = y0; y < y1; ++y) {
         if (y >= s0 && y < s1) continue;
         int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
         if (below) {
-            int b = 256 - smooth(y - from, FULL_FOOT_GROUND - from);
+            int b = 256 - smooth(y - from, ground_y - from);
             if (b < k) k = b;
         }
         fade_row(canvas, ox, oy, ground, k, clip[0], y, clip[2]);
@@ -453,17 +467,21 @@ void list_fades(void *canvas, int top, int bottom, int end, int above, int below
 }
 
 /* OLED's fades over Home's main list, list's top at screen y list_y, its columns 0 to cols (Split's
- * left of the art): at the top once it has scrolled, at the foot while rows lie past the rest. In
+ * left of the art), drawn shift columns left of there (Home drifting under a window's slide,
+ * coverflow.c coverflow_home_strip): at the top once it has scrolled, at the foot while rows lie
+ * past the rest. In
  * Split they follow the glass's rounded edge, as far from it in a corner as on the straight part,
  * so a row dissolves the same way in both; in Full they run straight across. The selected row is
  * never faded. Each row of the band one fill per FADE_COL columns in a corner, inside the canvas's
  * clip. */
-void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {
     void *view = list && widget_count_children(list) ? widget_get_child(list, 0) : (void *)0;
     int foot, rest = home_rest(view, &foot);
     if (!rest || !P(canvas, CANVAS_LCD)) return;
-    int ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y); /* its origin on the screen */
-    int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest;
+    /* the canvas origin on the screen, moved to where Home's column 0 is drawn */
+    int ox = I(canvas, CANVAS_X) + shift, oy = I(canvas, CANVAS_Y);
+    int off = I(view, SCROLL_Y), above = off > 0, below = foot - off > rest,
+        foot_y = lr_edit_foot(view);
     if (!above && !below) return;
     /* the selected row, on the screen: SEL counts the rows shown */
     int sel = widget_get_prop_int(view, SEL, -1), s0 = 1, s1 = 0;
@@ -485,8 +503,8 @@ void home_fades(void *canvas, void *list, int list_y, int cols, int split) {
         if (!split) {
             int clear = list_y + FULL_TOP_CLEAR, end = list_y + rest - FULL_FOOT_CLEAR;
             int k = above ? 256 - smooth(clear - y, FULL_TOP_CLEAR + FULL_TOP_GROUND) : 256;
-            if (below) {
-                int b = 256 - smooth(y - end, FULL_FOOT_GROUND - end);
+            if (below) { /* into Edit Home's hint's band while it is open */
+                int b = 256 - smooth(y - end, (foot_y ? foot_y : FULL_FOOT_GROUND) - end);
                 if (b < k) k = b;
             }
             fade_row(canvas, ox, oy, ground, k, 0, y, cols);

@@ -937,7 +937,7 @@ assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 # then any it scrolls in by whole rows, so the last rests where the last shown did (this Home is not
 # coverflow.c's, whose home_rest would rest it on its seven); it stops at both ends however long the pause, Return selects
 # Now Playing, the bar spans the list's width and centre clicks the image.
-m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
+m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
 m.paint(view)
 assert m.selected(view)==0
 last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),(OLED_G.list_end-HOME_TOP)//HOME_ROW)
@@ -956,7 +956,7 @@ assert not m.slides and m.confirm()==11 and m.dispatched()[0][1]==imgs[2]; passe
 
 # Boot: if Home's first paint comes before the screen is usable, no row is chosen or drawn. The
 # status bar's next paint repaints the list, once, and Now Playing gets the bar.
-m=Machine(); view,imgs=home_list(m); bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar); m.word(bar+O['W_PARENT'],m.wm)
+m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); bar=m.node('window','system_bar'); m.word(syms['system_bar'],bar); m.word(bar+O['W_PARENT'],m.wm)
 paint_bar=lambda: m.call(address=HOOKS['widget_on_paint_background'][0],args=(bar,m.canvas,0,0))
 m.byte(syms['g_backlight_status'],0); m.paint(view); assert m.selected(view)==-1 and not m.drawn()
 paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.calls]
@@ -1092,7 +1092,7 @@ def canvas_state(m):
     return (m.lcd_colors(),m.get(m.lcd+O['LCD_TEXT_COLOR']),m.get(m.canvas+O['CANVAS_ALIGN_V']),
             m.get(m.canvas+O['CANVAS_ALIGN_H']),m.clip)
 def letter_machine(virtual,n=40,**config):
-    m=Machine(); m.config.update(config); m.word(m.canvas+O['CANVAS_ALIGN_V'],2)
+    m=Machine(); m.config.update(FLAT); m.config.update(config); m.word(m.canvas+O['CANVAS_ALIGN_V'],2)
     m.word(m.canvas+O['CANVAS_ALIGN_H'],3); m.word(m.lcd+O['LCD_TEXT_COLOR'],0x11223344)
     if virtual:
         w,rs,es=m.table_page(rebind=True); m.word(w+O['TABLE_ROWS'],n)
@@ -1126,12 +1126,16 @@ for virtual in (False,True):
     assert m.call(gap=100)==11; m.advance(O['LETTER_MS']-1); m.paint(w,gap=0); assert m.letters
     m.advance(1); assert any(c[:2]==('widget_invalidate_force',w) for c in m.calls)
     m.paint(w,gap=0); assert not m.letters and canvas_state(m)==before; passed()
-# Nor on Library's category list, which Home's split shows beside the pane (localmusic_page's own is CTX_FIXED).
-m,w,rs,es=letter_machine(False); m.nodes[w]['name']='scroll_view_localmusic'
-for _ in range(4): m.call(gap=100)
-m.paint(w,gap=0); assert not m.letters
-m.nodes[w]['name']=''; m.paint(w,gap=0); assert m.letters; passed()  # the same spin elsewhere shows it
-# Nor over a page whose list is in an order of its own (own_order, where the wheel arms the letter): Up Next, Chapters,
+# Only a name-sorted list arms it (az_index.c name_sorted): not Library's category list beside Home's pane, Wi-Fi's
+# networks (by signal), Internet Radio (file order) or a settings list; the same spin on Songs shows it.
+for name,shown in (('home_page',False),('wifi_page',False),('radio_page',False),('sysset_page',False),
+                   ('allmusic_page',True)):
+    m=Machine(); w,es=m.page_list(40,extent=40*48,name=name)
+    for e in es: m.nodes[e]['text']='row'
+    m.paint(w,gap=0)
+    for _ in range(4): m.call(gap=100)
+    m.paint(w,gap=0); assert bool(m.letters)==shown,name; passed()
+# Nor over a page whose list is in an order of its own (name_sorted says no): Up Next, Chapters,
 # and Library's song list by the class it shows and Songs' Sort. That list in name order, and another page left with
 # the song list's class and Sort, keep the letter.
 # A playlist's Sort is its own flag (0 by name, 1 Time added), read in sort's place for 0xff13.

@@ -77,7 +77,7 @@
   </tr>
   <tr valign="top">
     <td><b>Bluetooth and AirPods</b></td>
-    <td>AirPods stem controls, ear detection and two-way volume sync. Resume on Connect, Control Device Volume, and separate volume levels for Bluetooth and wired output. Smoother AAC and click-free gapless changes.</td>
+    <td>AirPods stem controls, ear detection and two-way volume sync. Resume on Connect, Link Volume, and separate volume levels for Bluetooth and wired output. Smoother AAC and click-free gapless changes.</td>
   </tr>
   <tr valign="top">
     <td><b>Battery and buttons</b></td>
@@ -111,7 +111,7 @@ The [user guide][guide] covers every control, EQ, Cover Flow and more tips.
 
 ## Updating
 
-- **Over Wi-Fi:** **System settings → System Update → Network Update** downloads the newest [q2-coda release](https://github.com/312-dev/q2-coda/releases/latest) to the card's `update.tar`, replacing any that's there, then opens the TF card update's confirmation. Press the row again to cancel the download. q2-coda's releases are signed, and the Q2 installs only one whose signature checks against the key built into it: Q2 Muse's own releases, unsigned, are refused, as is a release changed after it was signed.
+- **Over Wi-Fi:** **Settings → General → Software Update** looks online and on the card at once; **Download and Install** downloads the newest [q2-coda release](https://github.com/312-dev/q2-coda/releases/latest) to the card's `update.tar`, replacing any that's there, then asks to install it. Press Return to cancel the download. q2-coda's releases are signed, and the Q2 installs only one whose signature checks against the key built into it: Q2 Muse's own releases, unsigned, are refused, as is a release changed after it was signed.
 - **By hand:** repeat the [install steps](#install) with the newest release.
 
 Your settings, ratings and play counts are kept. The updater skips a version that's already installed, so a newer release always goes on.

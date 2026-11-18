@@ -120,7 +120,8 @@ def stubs_source(names, data):
             f'long (*fw_mock_tk_strcmp)({args});', f'long tk_strcmp({args}) {{',
             f'    long saved[] = {{ {call} }}; note("tk_strcmp", saved, fw_mock_tk_strcmp != 0);',
             f'    if (fw_mock_tk_strcmp) return fw_mock_tk_strcmp({call});',
-            '    return a0 && a1 ? strcmp((const char *)a0, (const char *)a1) : a0 != a1;', '}']
+            # stock's (0x72ba24): equal pointers 0, a NULL first -1, a NULL second 1, else strcmp
+            '    return a0 == a1 ? 0 : !a0 ? -1 : !a1 ? 1 : strcmp((const char *)a0, (const char *)a1);', '}']
     # And libc's errno, which every caller reads through the pointer: unmocked it is fw_errno, 0 at each load, not NULL.
     out += ['int fw_errno;']
     for name in names:

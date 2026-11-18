@@ -289,7 +289,8 @@ static void setting_row(void *view, int i) {
  * holding a 335x70 s_btn_listitem button with a 52px icon, a 24px label at x 72 and list_into).
  * Its fourth, Show Navigation Bar, goes: the themes own the bar and each list's box, so stock's
  * switch is held on (tools/build.py NAV_SHOWN). Its third, Lock Screen, goes too: Q2 Muse has no
- * lock screen (docs/internals.md#screen-off-and-wake). Smart Awake and Night Shift (the brightness
+ * lock screen (docs/internals.md#screen-off-and-wake). Its first, Brightness, is hidden for an
+ * inline slider row in its place (inline_slider.c). Smart Awake and Night Shift (the brightness
  * icon, opening its slider page, crossfade.c) follow Brightness and Screen Off Time, then
  * Appearance and Coverflow, each opening stock's page again (display_open) with its stock rows
  * dropped and its own instead: the theme's options (OLED's: Light Mode, Accent, Home, Shortcut,
@@ -313,6 +314,11 @@ int ringnav_display(void *win, void *ctx) {
     if (!sub) {
         widget_destroy(widget_get_child(view, 3)); /* Show Navigation Bar */
         widget_destroy(widget_get_child(view, 2)); /* Lock Screen */
+        /* Brightness, set in the list (inline_slider.c), first; stock's row, which opens its page,
+         * stays hidden */
+        widget_set_visible(widget_get_child(view, 0), 0, 0);
+        void *bright = inline_slider_row(view, "display_backlight", IS_BRIGHT);
+        widget_restack(P(P(bright, W_PARENT), W_PARENT), 0);
         setting_row(view, SETTING_KEEPLIT);
         night_row(list_row_into(view, "display_backlight", xfade_open, (void *)3));
         for (int i = DISPLAY_APPEARANCE; i <= DISPLAY_COVERFLOW; ++i)
@@ -350,14 +356,16 @@ int ringnav_display(void *win, void *ctx) {
 
 /* Settings' rows on Home that are not stock's (tools/ipod.py HOME_SETS; stock binds General and
  * Playback): Wi-Fi's and Bluetooth's pages, which Wireless held, Car Remote, Display, Controls and
- * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is. */
+ * Battery, which General (stock's System page, ringnav_systemset) held. Here, as display_open is.
+ */
 static int set_open(void *ctx, void *event) {
     int i = (int)(long)ctx;
     if (i == 2) return carremote_open(0, event);
     if (i == 4) return display_open((void *)DISPLAY_CONTROLS, event);
-    static const char *const pages[] = { "systemset/wifi_page",    "systemset/bluetooth_page", 0,
-                                         "systemset/display_page", 0,
-                                         "systemset/powermanager_page" };
+    static const char *const pages[] = {
+        "systemset/wifi_page",        "systemset/bluetooth_page", 0, "systemset/display_page", 0,
+        "systemset/powermanager_page"
+    };
     navigator_to(pages[i]);
     return 0;
 }
@@ -418,9 +426,15 @@ int ringnav_systemset(void *win, void *ctx) {
                                                 { "system_reset", "systemset/reset_page" },
                                                 { "system_about", "systemset/about_page" } };
         widget_set_text_utf8(list_row_into(view, "system_update", shelf_open, 0), "App Store");
-        for (unsigned i = 0; i < 4; ++i)
-            widget_set_tr_text(list_row_into(view, moved[i][0], to_page, (void *)moved[i][1]),
-                               moved[i][0]);
+        for (unsigned i = 0; i < 4; ++i) {
+            /* Software Update (sw_update.c) checks online and the card from one row */
+            void *row = list_row_into(view, moved[i][0], i == 1 ? sw_update_open : to_page,
+                                      (void *)moved[i][1]);
+            if (i == 1)
+                widget_set_text_utf8(row, "Software Update");
+            else
+                widget_set_tr_text(row, moved[i][0]);
+        }
         /* Storage (storage.c): the card's use and a card app's Downloads */
         widget_set_text_utf8(list_row_into(view, "playset_folderjump", storage_open, 0), "Storage");
         static const unsigned char hidden[] = { 1, 3, 4, 5, 6, 7, 8 };

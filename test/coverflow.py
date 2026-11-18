@@ -26,7 +26,7 @@ SHELF_180 = {'cf.eye': 94, 'cf.tilt': 89, 'cf.x1': 116, 'cf.xs': 34, 'cf.z1': 77
 
 # coverflow.c, coverflow_thumb.c, coverflow_letters.c, coverflow_loader.c and playlist_art.c as one unit, so the shim's
 # stubs are defined once
-CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n'
+CF_SOURCES = '#include "coverflow.c"\n#include "coverflow_thumb.c"\n#include "coverflow_letters.c"\n#include "coverflow_loader.c"\n#include "playlist_art.c"\n#include "coverflow_position.c"\n#include "corner_cover.c"\n'
 SHIM_H = r"""
 extern char system_bar[];
 """ + ''.join(line + '\n' for line in font_indices()) + r"""
@@ -75,7 +75,7 @@ deque_assign deque_destroy deque_size deque_at window_create widget_factory
 widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses
 slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create list_item_create image_set_draw_type
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
-widget_set_text_utf8 widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
+widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
 widget_get_prop_str widget_on widget_destroy_children widget_invalidate_force
 widget_count_children widget_get_child widget_lookup widget_move_resize widget_resize widget_get_canvas widget_get_visible
 canvas_get_clip_rect canvas_set_clip_rect widget_set_sensitive widget_get_type tk_strcmp widget_animator_destroy
@@ -241,6 +241,8 @@ int widget_set_name(void *x, const char *s) { snprintf(W(x)->type, 32, "%s", s);
 void page_empty(void *body, const char *name) { (void)body; (void)name; } /* navigation.c: page_list_or only */
 int widget_use_style(void *x, const char *s) { return 0; }
 int widget_set_text_utf8(void *x, const char *s) { if (s) snprintf(W(x)->text, 160, "%s", s); return 0; } /* stock: NULL keeps the text */
+int widget_get_text_utf8(void *x, char *s, unsigned n) { return snprintf(s, n, "%s", W(x)->text) >= (int)n; } /* stock: nonzero when it doesn't fit */
+unsigned widget_add_timer(void *x, int (*f)(const void *), unsigned ms) { (void)x, (void)f, (void)ms; return 1; } /* the empty page's poll: not run here */
 int widget_restack(void *x, unsigned i) { return 0; }
 void *widget_animator_prop_create(void *x, unsigned d, unsigned l, int e, const char *p) { return 0; }
 int widget_animator_prop_set_params(void *a, double f, double t) { return 0; }
@@ -338,8 +340,31 @@ void home_pad(void *view) {}
 void home_np_keep(int d) {} /* home.c's selection as Now Playing's row comes or goes */
 void home_overflow(void *list, int bottom) {}
 void home_in_place(void *list) {}
-void home_fades(void *canvas, void *list, int list_y, int cols, int split) {}
+void home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift) {}
+/* page_parallax.c: no window slides in these tests */
+void *parallax_slide(float *percent) { return 0; }
+int parallax_under_x(int w, float percent) { return 0; }
+unsigned parallax_dim(float percent) { return 0; }
 int shuffle_songs(void *ctx, void *event) { return 0; }
+/* Home's first row, edit mode, folders' rule and shortcut (home_np.c, library_edit.c, home.c, theme_engine.c,
+ * navigation.c): Home as stock has it, none of it edited or playing here */
+void home_np_bind(void *win) {}
+void home_np_sync(void) {}
+void home_sets_bind(void *win) {}
+void ipod_shortcut_seen(void) {}
+void lr_home_tag(void *view) {}
+void lr_home_apply(void *view, int np) {}
+void lr_edit_labels(void *view, int on) {}
+int lr_home_editing(void) { return 0; }
+int home_folders(void) { return 0; }
+/* ui_kit.c's motion: reduced, and a theme row with no duration, so a level changes at once */
+int motion_reduced(void) { return 0; }
+const motion_t *motion_row(int kind) { static const motion_t still; return &still; }
+/* feedback.c's empty-page mark, cf_empty.c's page (none: the page is plain here) and catalogue.c's playlist covers (none) */
+int empty_shown(void *page) { return 0; }
+int cf_empty(void *page, void *body) { return 0; }
+void catalogue_playlist_covers(void) {}
+int catalogue_playlist_cover(int list, char *url) { return 0; }
 int library_search_open(void *ctx, void *event) { return 0; }
 /* library_artist.c's own artist page: never up in these tests, so the page under is closed as before */
 int artist_local_on(void *win) { return 0; }
@@ -372,9 +397,9 @@ int canvas_offline_destroy(void *c) { return 0; }
 unsigned unflip(unsigned v) { return v; }
 unsigned mix(unsigned a, unsigned b, int j, int n) { return a; }
 void bar_title_sync(void *win) {}
-static int spun_dirty, spun_done; /* list_marks.c's spinner calls, for slow_open */
-void spinner_dirty(void *win) { ++spun_dirty; }
-void spinner_done(void) { ++spun_done; }
+static volatile int spun_paints; /* the frames step_turning painted itself, for slow_open */
+int spinner_turn(void) { return 2; } /* list_marks.c's: a frame due */
+int ringnav_wm_paint(void *wm) { (void)wm; return ++spun_paints, 0; }
 void forget_rows(void *list) { (void)list; }
 int title_gone(void *w, void *event) { (void)w, (void)event; return 0; }
 int bar_title_fits(void *label) { return 1; }
@@ -609,12 +634,14 @@ static void album(const char *name, const char *art) {
 static int unknown_row, unknown_songs;
 static char unknown_record[0x60], untagged_song[0x60], untagged_more[0x60];
 static int untagged_two; /* getMusicByAlbum(NULL) finds untagged_more too */
-static unsigned all_ms; /* what each getAllAlbum takes on the fake clock (slow_open) */
+static unsigned all_ms, all_hold; /* what each getAllAlbum takes on the fake clock; held for paints (slow_open) */
 static int all_queries;
 int getAllAlbum(void) {
     deque *d = shim_dir;
     ++queries, ++all_queries;
     clock_ms += all_ms;
+    for (int start = spun_paints, i = 0; all_hold && spun_paints < start + 3 && i < 2000; ++i)
+        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     d->n = 0;
     for (int i = 0, j; i < albums; ++i) {
         for (j = 0; j < i && strcasecmp(names[j], names[i]); ++j) {}
@@ -979,17 +1006,22 @@ static void renderer(void) {
     }
     assert(rows >= CF_REFLECT - 1 && rows <= CF_REFLECT);
     /* No seam where a body ends mid-row: down any column from a cover's middle, brightness never
-       dips between the body, the row they share and the reflection. */
+       dips between the body, the row they share and the reflection. Square covers: mid-turn the
+       centre column can fall on a rounded corner, whose reflection mirrors the arc and so does
+       brighten for a few rows below the edge (corner_column). */
     const unsigned *alone[7] = { 0, 0, 0, flat[3], 0, 0, 0 };
     render(0, alone);
     assert(px(CF_CX, CF_TOP + 80) == colours[3]);
     assert(px(CF_CX - 80, CF_TOP) == 0xff000000u);
     assert(px(CF_CX - 80, CF_TOP + 160) == 0xff000000u);
+    theme_t *t = (theme_t *)theme();
+    int radius = t->cf.radius;
+    close_page(); t->cf.radius = 0; open_page();
     for (int frac = -ONE / 2; frac < ONE / 2; frac += ONE / 16 + 77) {
         render(frac, alone);
         for (int x = 0; x < CF_VIEW_W; ++x) {
             if (slot_of(px(x, CF_TOP + 80)) != 3) continue;
-            if (x != CF_CX) continue; /* rounded edges leave a gap before their reflection */
+            if (x != CF_CX) continue;
             int body = 256, dipped = 0;
             for (int y = CF_TOP + 80; y < CF_VIEW_H; ++y) {
                 int v = ch(px(x, y), 0);
@@ -999,6 +1031,7 @@ static void renderer(void) {
             assert(!dipped);
         }
     }
+    close_page(); t->cf.radius = radius; open_page();
     /* Symmetry: a mirror-image ring renders the mirror image, at rest and mid-turn either way. */
     for (int j = 0; j < 7; ++j) mirror[j] = flat[j < 3 ? j : 6 - j];
     render(0, mirror);
@@ -1509,49 +1542,48 @@ static void ref_put(unsigned *px, unsigned colour, unsigned cov) {
     have += w;
     *px = ((*px & 0xffffffu) + ref_shade(colour, w)) | (have > 255 ? 255u : have) << 24;
 }
-static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pitch, short *solid, int col, const unsigned *tex, int h, int bright, int inset) {
+/* Each row's coverage of a column by the plain rule: the share of the row the cover spans, times, in a corner's
+   columns, the corner pixel's coverage (corner_cover.c) at the row's texel. */
+static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pitch, short *solid, int col, const unsigned *tex, int h, int bright, int k) {
     if (h < 16) return;
     unsigned *d = d0 + col;
+    int R = ART_SIZE * c->radius / 166;
+    const unsigned char *cover = corner_cover(R);
+    int kc = k < 0 || !cover ? -1 : k < R ? k : k >= ART_SIZE - R ? ART_SIZE - 1 - k : -1;
     int top = 256 * c->top + 40960 * c->horizon / 100 - h * c->horizon / 100, bottom = top + h, step = (ART_SIZE << 20) / (h >> 4);
-    int ins = h * inset / (ART_SIZE * 256), clipped_top = top + ins, clipped_bottom = bottom - ins;
-    int solid_top = solid[0], solid_bottom = solid[1];
-    int y = clipped_top >> 8, end = (clipped_bottom + 255) >> 8, last = end < c->view_h ? end : c->view_h;
-    int first = y, final = end - 1;
+    int solid_top = solid[0], solid_bottom = solid[1], part = 0;
+    int clear = 0;
+    while (kc >= 0 && part < R && cover[part * R + kc] < 255) clear += !cover[part * R + kc], ++part;
+    int out = h * clear / ART_SIZE; /* the rows wholly clear at either end are not visited */
+    int y = (top + out) >> 8, end = (bottom - out + 255) >> 8, last = end < c->view_h ? end : c->view_h;
     int v = (((y << 8) + 128 - top) >> 4) * step >> 4;
     if (y < 0) v -= y * step, y = 0;
     unsigned *px = d + y * pitch, wash = ref_shade(paper, 256u - (unsigned)bright);
-    while (y < last) {
-        if (y >= solid_top && y < solid_bottom) {
-            int skip = solid_bottom - y;
-            v += skip * step, px += skip * pitch, y = solid_bottom;
-            continue;
-        }
-        int run = y < solid_top && solid_top < last ? solid_top : last;
-        for (; y < run; ++y, v += step, px += pitch) {
-            int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16;
-            unsigned cov = 256;
-            if (y == first || y == final) {
-                int from = y << 8 > clipped_top ? y << 8 : clipped_top, to = (y + 1) << 8 < clipped_bottom ? (y + 1) << 8 : clipped_bottom;
-                cov = (unsigned)(to - from);
-            }
-            ref_put(px, ref_shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
-        }
+    for (; y < last; ++y, v += step, px += pitch) {
+        if (y >= solid_top && y < solid_bottom) continue;
+        int row = v < 0 ? 0 : v >> 16 >= ART_SIZE ? ART_SIZE - 1 : v >> 16, cr = row < ART_SIZE / 2 ? row : ART_SIZE - 1 - row;
+        int from = y << 8 > top ? y << 8 : top, to = (y + 1) << 8 < bottom ? (y + 1) << 8 : bottom;
+        unsigned cov = (unsigned)(to - from);
+        if (cr < part) cov = cov * (cover[cr * R + kc] + (cover[cr * R + kc] >> 7)) >> 8;
+        if (cov) ref_put(px, bright >= 256 ? tex[row * ART_SIZE] : ref_shade(tex[row * ART_SIZE], (unsigned)bright) + wash, cov);
     }
     int reflect = h * c->reflect / ART_SIZE, stop = (bottom + reflect + 255) >> 8;
     int fade = (256 << 16) / reflect;
     unsigned dim = (unsigned)bright * c->reflect_top >> 8;
     wash = ref_shade(paper, 256u - dim);
     if (stop > c->view_h) stop = c->view_h;
-    for (y = (bottom + ins) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
-        int from = y << 8 > bottom + ins ? y << 8 : bottom + ins, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
+    for (y = (bottom + out) >> 8, px = d + y * pitch; y < stop; ++y, px += pitch) {
+        int from = y << 8 > bottom ? y << 8 : bottom, dist = ((from + ((y + 1) << 8)) >> 1) - bottom;
         if (dist >= reflect) break;
         if (y < 0 || (y >= solid_top && y < solid_bottom)) continue;
         int mirrored = dist * step >> 8 >> 16;
         int row = ART_SIZE - 1 - (mirrored >= ART_SIZE ? ART_SIZE - 1 : mirrored);
         unsigned cov = (unsigned)(((y + 1) << 8) - from) * (256u - (unsigned)(dist * fade >> 16)) >> 8;
+        if (mirrored < part) cov = cov * (cover[mirrored * R + kc] + (cover[mirrored * R + kc] >> 7)) >> 8;
         ref_put(px, ref_shade(tex[row * ART_SIZE], dim) + wash, cov);
     }
-    int s0 = (clipped_top + 255) >> 8, s1 = clipped_bottom >> 8;
+    int ins = h * part / ART_SIZE;
+    int s0 = (top + ins + 255) >> 8, s1 = (bottom - ins) >> 8;
     s0 = s0 < 0 ? 0 : s0, s1 = s1 > c->view_h ? c->view_h : s1;
     if (s1 <= s0) return;
     if (solid_bottom > solid_top && s0 <= solid_bottom && s1 >= solid_top) {
@@ -1563,8 +1595,9 @@ static void ref_column(const cf_style_t *c, unsigned paper, unsigned *d0, int pi
 }
 void cf_column(unsigned *, int, short *, int, const unsigned *, int, int, int);
 /* column() byte for byte its reference, over many random columns in both shim themes, dark and
-   light: any height to three times the rest's, brightness (whole half the time), corner inset,
-   texture column, solid span, and what lies under it (empty, opaque or part covered). */
+   light: any height to three times the rest's, brightness (whole half the time), the texel across
+   (a corner's column a third of the time), texture column, solid span, and what lies under it
+   (empty, opaque or part covered). */
 static void column_fuzz(void) {
     enum { ROWS = 300, N = 40000 };
     static unsigned a[ROWS * PITCH], b[ROWS * PITCH], tex[160 * 160];
@@ -1577,7 +1610,7 @@ static void column_fuzz(void) {
         for (light = 0; light < 2; ++light)
             for (int n = 0; n < N; ++n) {
                 int col = (int)(RND() % CF_VIEW_W), h = (int)(RND() % (3 * 40960)), bright = RND() & 1 ? 256 : (int)(RND() % 256) + 1;
-                int inset = RND() % 3 ? 0 : (int)(RND() % 4000);
+                int k = RND() % 3 ? -1 : (int)(RND() % 160); /* the shim themes' radius makes some corner columns */
                 const unsigned *t = tex + RND() % 160;
                 short sa[2] = { 0, 0 }, sb[2];
                 if (RND() % 3) {
@@ -1589,8 +1622,8 @@ static void column_fuzz(void) {
                     unsigned k = RND() % 4, p = RND() << 8 ^ RND();
                     a[y * PITCH + col] = b[y * PITCH + col] = k == 0 ? 0 : k == 1 ? p | 0xff000000u : p;
                 }
-                ref_column(c, light ? scheme()->paper : 0, a, PITCH, sa, col, t, h, bright, inset);
-                cf_column(b, PITCH, sb, col, t, h, bright, inset);
+                ref_column(c, light ? scheme()->paper : 0, a, PITCH, sa, col, t, h, bright, k);
+                cf_column(b, PITCH, sb, col, t, h, bright, k);
                 assert(sa[0] == sb[0] && sa[1] == sb[1]);
                 for (int y = 0; y < ROWS; ++y) assert(a[y * PITCH + col] == b[y * PITCH + col]);
             }
@@ -1757,7 +1790,7 @@ static void depth(void) {
     tex_fail = 0;
 }
 
-/* Display settings' Cover Flow Sort (coverflow_sort_step): each press takes the next order, saved and
+/* Library settings' Cover Flow Sort picker (coverflow_sort_set): each press takes the next order, saved and
    taken at the next open; ties keep the stock order. */
 static const char *album_at(int i) {
     static char got[160];
@@ -1777,9 +1810,10 @@ static int saved_sort(void) {
     if (f) assert(fread(&v, sizeof v, 1, f) == 1), fclose(f);
     return v;
 }
-extern void coverflow_sort_step(void), coverflow_refresh_art(void);
-static void press_sort(void) {
-    coverflow_sort_step();
+extern void coverflow_sort_set(int), coverflow_refresh_art(void);
+extern int coverflow_sort_now(void), coverflow_sort_count(void);
+static void press_sort(void) { /* the picker's next choice, as library_settings.c's rows take it */
+    coverflow_sort_set((coverflow_sort_now() + 1) % coverflow_sort_count());
     close_page();
     open_page();
 }
@@ -1963,9 +1997,10 @@ static void unknown_card(void) {
 }
 
 /* A cold open that takes a while (docs/internals.md#coverflow): once getAllAlbum has taken half of
-   150 ms, Home stays up with the spinner, a step a timer pass, the keys, the wheel and a second
-   press go nowhere, and the page opens after the last step; Return gives the open up, and the next
-   open queries again. A quick one opens as it is pressed, the spinner never asked for. */
+   150 ms, Home stays up with the spinner, each step on a thread of its own (step_turning) while the
+   UI thread paints the spinner's frames itself, a timer pass between steps; the keys, the wheel and
+   a second press go nowhere, and the page opens after the last step; Return gives the open up, and
+   the next open queries again. A quick one opens as it is pressed, the spinner never shown. */
 static void slow_open(void) {
     extern int coverflow_spinner(void), coverflow_wait_input(void *);
     int down[16] = {0}, back[16] = {0}, touch[16] = {0};
@@ -1975,26 +2010,25 @@ static void slow_open(void) {
     widget home;
     memset(&home, 0, sizeof(home));
     coverflow_home(&home, 0);
-    int dirty = spun_dirty, done = spun_done, q = all_queries;
+    int painted = spun_paints, q = all_queries;
     rescan();
     all_ms = 70; /* under half: the open does not wait */
     open_page();
-    assert(all_queries == q + 1 && slide() && spun_dirty == dirty && !coverflow_spinner());
+    assert(all_queries == q + 1 && slide() && spun_paints == painted && !coverflow_spinner());
     close_page();
     rescan();
     all_ms = 80;
     page = &w[nw + 1];
-    unsigned at = clock_ms;
-    home.click(home.ctx, 0); /* getAllAlbum alone, then a pass */
-    assert(all_queries == q + 2 && timer_fn && !slide() && spun_dirty == dirty + 1);
-    assert(coverflow_spinner() == 1); /* 80 ms in: the first frame */
-    clock_ms = at + 250;
-    assert(coverflow_spinner() == 3); /* a frame each 100 ms */
+    all_hold = 1, painted = spun_paints;
+    home.click(home.ctx, 0); /* getAllAlbum alone, held until three frames painted, then a pass */
+    all_hold = 0;
+    assert(all_queries == q + 2 && timer_fn && !slide() && coverflow_spinner());
+    assert(spun_paints >= painted + 3); /* the spinner turned within the step */
     assert(coverflow_wait_input(down) && coverflow_wait_input(touch)); /* taken */
     home.click(home.ctx, 0); /* a second press opens nothing more */
     assert(all_queries == q + 2);
     run();
-    assert(slide() && !coverflow_spinner() && spun_done == done + 1 && !coverflow_wait_input(down));
+    assert(slide() && !coverflow_spinner() && !coverflow_wait_input(down));
     assert(slide()->nkids == albums);
     close_page();
     rescan();
@@ -2002,12 +2036,12 @@ static void slow_open(void) {
     home.click(home.ctx, 0);
     assert(timer_fn && coverflow_spinner());
     assert(coverflow_wait_input(back)); /* Return's release gives it up */
-    assert(!timer_fn && !coverflow_spinner() && spun_done == done + 2);
+    assert(!timer_fn && !coverflow_spinner());
     run();
     assert(!slide());
-    all_ms = 0, dirty = spun_dirty;
+    all_ms = 0, painted = spun_paints;
     open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
-    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_dirty == dirty);
+    assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_paints == painted);
     close_page();
 }
 
@@ -3311,7 +3345,7 @@ static void enter_frames(void) {
 void cf_shelf_still(int still);
 static void rest_pinned(void) {
     static const cf_style_t shipped[CF_THEMES] = CF_SHIPPED_ALL; /* every built-in theme's, in index order */
-    static const unsigned pinned[CF_THEMES] = { 0xfc1b693eu };
+    static const unsigned pinned[CF_THEMES] = { 0xa723fc9cu };
     static unsigned f[300 * PITCH], art[15][160 * 160];
     const cf_style_t ticks = shim_themes[0].cf;
     for (int i = 0; i < 15; ++i)
@@ -7299,7 +7333,7 @@ int main(void) {
     int drew = draws;
     coverflow_home_clip(home_art, canvas, 0);
     assert(draws == drew + 1);
-    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black. */
+    /* A transparent cover pans over the half's paper: Light Mode's (the scheme's), else black, dimmed in the vignette's rows. */
     clear_cover = 1;
     static const struct { int light; unsigned paper; } papers[] = {
         { 1, 0xff000000u | LIGHT_PAPER * 0x010101u }, { 0, 0xff000000u } };
@@ -7308,7 +7342,8 @@ int main(void) {
         coverflow_home_layout();
         coverflow_home_art(win);
         coverflow_home_clip(home_art, canvas, 0);
-        assert(shown[0] == papers[i].paper && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
+        /* the panel's top rows are under the vignette (vig_k): darker than the paper, the black one's unchanged; below it, the paper */
+        assert(shown[0] <= papers[i].paper && (i || (shown[0] & 255) < (papers[i].paper & 255)) && shown[100 * CF_VIEW_W + 90] == papers[i].paper);
     }
     clear_cover = 0;
 
@@ -7365,7 +7400,7 @@ def main():
     # every built-in theme's .cf, for the checks that run each shipped look in turn
     cf_style.append(f'-DCF_THEMES={len(builtins())}')
     cf_style.append('-DCF_SHIPPED_ALL={ ' + ', '.join('{ ' + ', '.join(f'.{f[3:]} = {v}' for f, v in t.items() if f.startswith('cf.')) + ' }' for t in builtins()) + ' }')
-    cf_style.append('-DPINNED_FRAMES=0x055534d4u')
+    cf_style.append('-DPINNED_FRAMES=0x3cbea4d0u')
     # The built-in numbers the checks use, as coverflow.h and coverflow.c have them
     cf_style += [f'-D{k}={v}' for k, v in re.findall(r'^#define (CF_FOLD_MS|CF_ENTER_SPEED|FOLD_FROM|FOLD_TO|ENTER_RUN|LD_SLOTS|FX_ENTER_MS|FX_LETTERS_MS|FX_SLACK_MS|FX_LATE_MS|HALF_GAP_MS) (\d+)',
                                                  ''.join((ROOT/'patch'/f).read_text() for f in ('coverflow.h', 'coverflow.c', 'coverflow_letters.c', 'coverflow_loader.c')), re.M)]

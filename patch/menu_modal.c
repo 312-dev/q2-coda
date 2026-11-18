@@ -19,9 +19,6 @@
  * MO_FADE_MS in and MO_OUT_FADE_MS out (sheet_run). */
 #include "navigation.h"
 
-extern unsigned char now_cover(void *r, const char **file); /* coverflow.c */
-extern unsigned album_key(void *r);                         /* coverflow.c */
-extern char *art_path(char *out, unsigned key, const char *suffix);
 void ar_corners(void *canvas, const rect_t *r, int R, unsigned behind); /* artist_page.c */
 void un_bars(void *canvas, int x, int base);                            /* upnext.c */
 
@@ -275,18 +272,8 @@ void modal_head(const char *title, const char *sub, void *r) {
     head_t *h = &head_next;
     tk_snprintf(h->title, sizeof h->title, "%s", title ? title : "");
     tk_snprintf(h->sub, sizeof h->sub, "%s", sub ? sub : "");
-    h->url[0] = 0, h->bars = 0;
-    const char *file = (const char *)0;
-    if (!r) return;
-    if (now_cover(r, &file) && file && *file) {
-        tk_snprintf(h->url, sizeof h->url, "%s", file); /* a file:// URL already */
-        return;
-    }
-    tk_snprintf(h->url, 8, "file://");
-    if (!catalogue_cover(P(r, REC_PATH), h->url + 7, sizeof h->url - 7)) {
-        art_path(h->url + 7, album_key(r), "");
-        if (file_size(h->url + 7) <= 0) h->url[0] = 0;
-    }
+    h->bars = 0;
+    song_cover_url(r, h->url, sizeof h->url); /* coverflow.c: empty for none */
 }
 
 /* ... and the playing song's level bars after its name (Up Next's header, upnext.c un_bars) */
@@ -666,26 +653,39 @@ void modal_paint(void *w, void *canvas) {
     stock_canvas_set_fill_color(canvas, fill);
 }
 
-/* r (canvas coordinates) rounded by R on the sheet: its corners the material under them; on a
- * canvas not the screen's, or before the material is made, the flat sheet's colour. */
+/* The screen pixel d moved towards the material's m by a of 255, per channel. */
+static unsigned toward(unsigned d, unsigned m, unsigned a) {
+    unsigned out = 0;
+    for (int s = 0; s < 32; s += 8) {
+        unsigned p = d >> s & 255, q = m >> s & 255;
+        out |= (p * (255 - a) + q * a + 127) / 255 << s;
+    }
+    return out;
+}
+
+/* r (canvas coordinates) rounded by R on the sheet, anti-aliased: each corner pixel the material
+ * under it by the share the arc leaves (corner_cover.c); on a canvas not the screen's, or before
+ * the material is made, the flat sheet's colour (ar_corners). */
 void modal_corners(void *canvas, const rect_t *r, int R) {
     unsigned *fb = sheet_fb(canvas);
-    if (!fb || !fr.buf) {
+    const unsigned char *cover = corner_cover(R);
+    if (!fb || !fr.buf || !cover) {
         ar_corners(canvas, r, R, flip_if(ipod_light(), MODAL_FILL));
         return;
     }
     int c[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
     sheet_clip(canvas, c);
     for (int i = 0; i < R; ++i) {
-        int n = round_inset(R, i, r->h);
-        for (int b = 0; b < 2 && n; ++b) {
+        for (int b = 0; b < 2; ++b) {
             int y = oy + r->y + (b ? r->h - 1 - i : i);
             if (y < c[1] || y >= c[3] || y < SH_TOP) continue;
-            for (int k = 0; k < n; ++k)
+            for (int k = 0; k < R && cover[i * R + k] < 255; ++k)
                 for (int side = 0; side < 2; ++side) {
                     int x = ox + (side ? r->x + r->w - 1 - k : r->x + k);
                     if (x >= c[0] && x < c[2])
-                        fb[y * SH_W + x] = fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x];
+                        fb[y * SH_W + x] =
+                            toward(fb[y * SH_W + x], fr.buf[(SH_STRIP + y - SH_TOP) * SH_W + x],
+                                   255u - cover[i * R + k]);
                 }
         }
     }

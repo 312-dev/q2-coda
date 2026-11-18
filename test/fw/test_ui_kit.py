@@ -119,8 +119,61 @@ def test_a_selected_button_is_ringed_only_under_the_focus_rule(fw, st, touch_mod
     arr = (C.c_char_p * 1)(b'Scan Music Now')
     fw.fn('ui_cta_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(
         c.addr, C.addressof(arr), 1, 100, 0, 0)
-    beside = [r for r in c.rects if r[1] < 100 or r[1] >= 138]  # the ring's rows, above and below the capsule
-    assert bool(beside) == ringed
+    beside = [r for r, _ in c.rects if r[1] < 100 or r[1] >= 138]  # the ring's rows, above and below the capsule
+    assert bool(beside) == ringed and len(c.boxes) == 1  # the capsule either way
+
+
+@pytest.mark.parametrize('light', [0, 1])
+def test_the_focus_ring_is_tools_art_pys_supersampled_ends_and_whole_rows_between(fw, st, light):
+    """The user's device (2026-11-16, Car Remote's Pair a Phone): the ring was aliased, its round ends dotted, drawn a
+    row at a time from the build's corner tables, which then held none for its radii (24, 23); then two one-pixel
+    AWTK strokes, whose arcs still stepped unevenly at 6x where they met. Its ends are tools/art.py's images (cta_ring_end, 16 x 16 samples a
+    pixel, the half's Text Primary), 24 x 48, at the ring's box CTA_RING_OFF + 2 (5) px out from the capsule, and the
+    straight runs between them two whole rows of the ink at the box's top and foot, nothing else outside the
+    capsule."""
+    from test_nav_painters import Canvas, theme
+    theme(fw)
+    st('light').value = light
+    st('touch_mode').value = 0
+    c = Canvas(fw, char_w=7)
+    prefix = C.string_at(fw.fn('theme_art', C.c_void_p, C.c_char_p)(b'')).decode()
+    half = 'l' if light else 'd'
+    c.art = {f'{prefix}ctaring_{s}_{half}': (24, 48) for s in 'lr'}
+    arr = (C.c_char_p * 1)(b'Pair a Phone')
+    fw.fn('ui_cta_paint', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int)(
+        c.addr, C.addressof(arr), 1, 100, 0, 0)
+    (capsule, _, radius), = c.boxes
+    x, y, w, h = capsule
+    assert (y, h, radius) == (100, 38, 19)
+    box = (x - 5, y - 5, w + 10, h + 10)
+    assert c.images == [(box[0], box[1], 24, 48), (box[0] + box[2] - 24, box[1], 24, 48)]
+    ink = 0xff000000 | host.tools_theme.token('primary', bool(light))
+    assert c.rects == [((box[0] + 24, box[1], box[2] - 48, 2), ink), ((box[0] + 24, box[1] + 46, box[2] - 48, 2), ink)]
+    assert not c.frames
+
+
+@pytest.mark.parametrize('light', [0, 1])
+@pytest.mark.parametrize('primary, pressed, fill', [(1, 0, None), (1, 1, 0x1a4dad), (0, 0, 'grey'), (0, 1, 'down')])
+def test_one_button_is_the_empty_states_capsule_in_either_kind(fw, st, light, primary, pressed, fill):
+    """ui_kit.c ui_button, Software Update's and the library scan's (docs/oled-design.md#buttons): the empty states'
+    capsule, 38 px tall, its label Inter Medium 17 with 24 px each side and at least 140 px, centred on (cx, cy);
+    primary the accent with white words, secondary the grey with Text Primary words, and pressed a step darker."""
+    from test_nav_painters import OLED as OLED_THEME, THEMES, Canvas, rgba, theme
+    theme(fw)
+    st('light').value = light
+    st('touch_mode').value = 1
+    c = Canvas(fw, char_w=7)
+    w = fw.fn('ui_button', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_char_p, C.c_int, C.c_int, C.c_int)(
+        c.addr, 187, 100, b'Stop', primary, 0, pressed)
+    assert w == 140  # 'Stop' is 28 px + 48: the least width
+    t = THEMES[OLED_THEME]
+    accent = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
+    grey = {('grey', 0): 0x2c2c2e, ('grey', 1): 0xe5e5ea, ('down', 0): 0x3a3a3c, ('down', 1): 0xd1d1d6}
+    want = accent if fill is None else grey.get((fill, light), fill)
+    (box, ink, radius), = c.boxes
+    assert box == (187 - 70, 100 - 19, 140, 38) and ink == rgba(want) and radius == 19
+    (words, _, color), = c.texts
+    assert words == 'Stop' and color & 0xffffff == (0xffffff if primary else host.tools_theme.token('primary', bool(light)))
 
 
 # ---- motion (ui_kit.h, docs/oled-design.md#motion) ----
@@ -262,3 +315,101 @@ def test_an_overlay_rises_and_fades_in_then_leaves_from_where_it_is(fw, on):
     assert level(p) == 438
     now[0] += o.a.ms
     assert level(p) == 0 and not shown(p)
+
+
+# The level bars' one motion (ui_kit.h lvl_*): Up Next's header, Home's first row and the status row draw it.
+LVL_KEYS = [(500, 875, 0), (750, 625, 0), (1000, 250, 250), (1000, 0, 500), (750, 0, 875), (500, 125, 1000),
+            (250, 375, 1000), (0, 750, 750), (0, 1000, 500), (250, 1000, 125)]  # the status row's approved ten frames
+LVL_STEP, LVL_LOOP, LOOP_MS = 125, 1250, 33
+
+
+class LvlClock(C.Structure):
+    _fields_ = [('base', C.c_uint), ('at', C.c_uint), ('run', C.c_ubyte)]
+
+
+def lvl_h16(fw, i, t, lo=3, hi=11):
+    return fw.fn('lvl_h16', C.c_int, C.c_int, C.c_uint, C.c_int, C.c_int)(i, t, lo, hi)
+
+
+@pytest.mark.parametrize('lo, hi', [(3, 11), (5, 12)])
+def test_the_bars_pass_through_their_keyframes_on_a_125_ms_step(fw, lo, hi):
+    """Each bar meets its column of the approved frames every LVL_STEP_MS, scaled to the user's lo..hi, and the loop
+    repeats every 1.25 s."""
+    for k, keys in enumerate(LVL_KEYS):
+        for i in range(3):
+            assert lvl_h16(fw, i, k * LVL_STEP, lo, hi) == lo * 16 + (hi - lo) * 16 * keys[i] // 1000
+            assert lvl_h16(fw, i, k * LVL_STEP + 7, lo, hi) == lvl_h16(fw, i, LVL_LOOP + k * LVL_STEP + 7, lo, hi)
+
+
+def test_between_keyframes_the_bars_move_in_small_continuous_steps_never_holding_or_jumping(fw):
+    """The user's (08:35): the bars stepped through a few heights at 8 a second and read as jumpy. Sampled at the
+    loop timer's 33 ms, each bar takes a different height nearly every frame, never moves more than a pixel and a half
+    a frame, and stays in lo..hi; stepping between the 125 ms keyframes alone, each jumped 2 px or more at once."""
+    for i in range(3):
+        hs = [lvl_h16(fw, i, t) for t in range(0, LVL_LOOP + 1, LOOP_MS)]
+        assert all(3 * 16 <= h <= 11 * 16 for h in hs)
+        steps = [abs(b - a) for a, b in zip(hs, hs[1:])]
+        assert max(steps) <= 24  # sixteenths: 1.5 px a frame at most
+        assert len(set(hs)) >= 25  # of 38 frames: no few discrete heights
+        keys = [lvl_h16(fw, i, t) for t in range(0, LVL_LOOP + 1, LVL_STEP)]
+        assert max(abs(b - a) for a, b in zip(keys, keys[1:])) >= 32  # the old steps: 2 px or more at once
+
+
+def test_the_clock_holds_when_stopped_and_goes_on_from_there(fw):
+    now, _ = clock(fw)
+    c = LvlClock()
+    run = fw.fn('lvl_run', None, C.c_void_p, C.c_int)
+    t = lambda: fw.fn('lvl_time', C.c_uint, C.c_void_p)(C.addressof(c))
+    assert t() == 0  # zero: stopped at the loop's start
+    run(C.addressof(c), 1)
+    now[0] += 400
+    assert t() == 400
+    run(C.addressof(c), 0)  # a pause, or Reduce Motion
+    now[0] += 3000
+    assert t() == 400
+    run(C.addressof(c), 0)  # stopping twice keeps the time
+    run(C.addressof(c), 1)
+    assert t() == 400  # no jump on resuming
+    now[0] += 33
+    assert t() == 433
+
+
+@pytest.mark.parametrize('h16, boxes', [(8 * 16, [((10, 22, 3, 8), 0xff3366ff)]),
+                                        (8 * 16 + 8, [((10, 22, 3, 8), 0xff3366ff), ((10, 21, 3, 1), 0x7f3366ff)]),
+                                        (4, [((10, 29, 3, 1), 0x3f3366ff)])])
+def test_a_bar_s_part_covered_top_row_shows_its_part_as_alpha(fw, h16, boxes):
+    """lvl_fill: whole pixels solid, the row above them at the part of a pixel the height covers, so a height between
+    pixels moves smoothly on a canvas without subpixel boxes."""
+    from test_nav_painters import Canvas
+    canvas = Canvas(fw)
+    fw.fn('lvl_fill', None, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_int, C.c_uint)(canvas.addr, 10, 30, 3, h16, 0xff3366ff)
+    assert [(b[0], b[1]) for b in canvas.boxes] == boxes
+
+
+def test_every_loop_shares_one_33_ms_timer_that_never_repaints_the_top_window(fw):
+    """motion_loop: one timer for every loop, each fn called a frame and dropped when it returns 0, the timer gone
+    with the last; the top window is never invalidated (only motion_frames does that)."""
+    now, timers = clock(fw)
+    loops = C.c_char.in_dll(fw.lib, 'ui_kit__loops')
+    C.memset(C.addressof(loops), 0, fw.sizes['ui_kit__loops'])
+    calls, keep = [], {'a': 3, 'b': 1}
+    invalidated = []
+    fw.mock('widget_invalidate_force', lambda w, r, *_: invalidated.append(w) or 0)
+    def make(name):
+        def fn():
+            calls.append(name)
+            keep[name] -= 1
+            return int(keep[name] > 0)
+        return C.CFUNCTYPE(C.c_int)(fn)
+    a, b = make('a'), make('b')
+    add = fw.fn('motion_loop', None, C.c_void_p)
+    for f in (a, b, a):  # a added twice is one loop
+        add(C.cast(f, C.c_void_p).value)
+    assert timers == [LOOP_MS]
+    frame = fw.fn('ui_kit__loop_frame', C.c_int, C.c_void_p)
+    assert frame(None) == 8 and calls == ['a', 'b']  # b said 0: dropped
+    assert frame(None) == 8 and calls == ['a', 'b', 'a']
+    assert frame(None) == 7 and calls == ['a', 'b', 'a', 'a']  # the last loop ended: RET_REMOVE
+    assert invalidated == []
+    add(C.cast(b, C.c_void_p).value)
+    assert timers == [LOOP_MS, LOOP_MS]  # a new loop starts it again

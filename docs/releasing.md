@@ -28,7 +28,7 @@ GitHub credentials or network.
 
 ## Signing a release
 
-Network Update installs only an `update.tar` whose `update.tar.sig` the q2-coda release key signed, and the App Store reads only a `sources.list` it signed ([Release signatures](internals.md#release-signatures)). The key is Ed25519. Its public half is `assets/signing/q2-coda-release.pub`, which every build compiles in; its private half lives only in the password vault, reached through a secret broker that runs a command with the key's PEM in an environment variable. Nothing here writes the private key to disk.
+Software Update's download installs only an `update.tar` whose `update.tar.sig` the q2-coda release key signed, and the App Store reads only a `sources.list` it signed ([Release signatures](internals.md#release-signatures)). The key is Ed25519. Its public half is `assets/signing/q2-coda-release.pub`, which every build compiles in; its private half lives only in the password vault, reached through a secret broker that runs a command with the key's PEM in an environment variable. Nothing here writes the private key to disk.
 
 The broker runs commands under `/bin/sh` as another user who can't write beside the release, and hands back what they print. So signing takes three steps, and only the middle one has the key:
 

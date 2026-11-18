@@ -327,6 +327,8 @@ int modal_set(void); /* menu_modal.c */
 int modal_actions(const char *const *names, const char *const *icons, int n, void (*pick)(int i));
 int modal_pick(void *under, const char *const *names, int n, int current, void (*pick)(int i));
 void list_toggle(void *label, const char *title, int on); /* navigation.c: a row's switch */
+int xfade_state(int *seconds);       /* crossfade.c: Crossfade 1 on; *seconds its length */
+void xfade_set(int on, int seconds); /* ... both set and saved */
 /* navigation.c: a set_text row's value */
 void list_value(void *label, const char *title, const char *value);
 char *csv_find(char *list, const char *item); /* navigation.c: comma lists */
@@ -368,7 +370,7 @@ int mono_on(void);   /* crossfade.c: Mono Audio's setting */
 #define NS_STEP 100
 #define NS_DEFAULT 3400
 int night_on(void), night_kelvin(void); /* night_on: 0 Off, 1 On, 2 Auto */
-void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ tile */
+void eq_toggle(void); /* peq_ui.c: EQ off, or on as PEQ; Control Center's EQ circle */
 void night_set(int on, int kelvin), night_save(void), night_paint(void *canvas), night_clock(int dark);
 void splash_poll(void); /* splash_hold.c: the boot animation's hold, every UI loop pass */
 int clock_night(void); /* theme_engine.c: Night Shift's Auto hours now */
@@ -421,6 +423,20 @@ int addon_games_last(void); /* the card's games as the last addon_scan found the
 #define GAMES_BUILTIN 4     /* games.c's Sudoku, Vortex, Solitaire and Snake */
 const char *addon_name(int a), *addon_id(int a), *addon_icon(int a);
 int card_path(const char *path); /* on the card, no ".." segment: what an app or server may name */
+/* stream_state.c: Download Ahead and a card app's .stream
+ * (docs/server-library.md#download-ahead-and-the-streaming-state) */
+enum { SL_NONE, SL_WAIT, SL_GET, SL_STALL, SL_DONE, SL_FAIL };
+typedef struct {
+    int state;               /* SL_* */
+    unsigned have, total, ms; /* bytes on the card, of the whole (0 unknown), length (0 unknown) */
+} sline_t;
+int ahead_n(void), ahead_step(void);
+const char *ahead_caps(void);
+int stream_line(const char *id, const char *path, sline_t *l);
+int stream_startable(const char *id, const char *path);
+int stream_app_of(const char *path, char *id, unsigned size);
+int stream_player_waits(const char *path);
+void ahead_poll(const char *id, const char *seq, void *queue);
 int addon_is_icon(const char *name); /* a card app's Streaming icon, by its file:// name */
 void addon_poll(void), addon_stop(void), addon_paint(void *w, void *canvas), addon_card_away(void);
 const char *addon_qr_title(void *win); /* addon.c: the QR page's app name, 0 for another window */
@@ -462,6 +478,10 @@ int addon_goes(const char *path);      /* addon.c: Go to on path opens a page */
 int addon_scrobbles(const char *path); /* addon.c: not when path's app says scrobble=0 */
 int addon_more(void); /* addon.c: Now Playing's ⋯ opens the playing queue's app's page */
 int addon_radio(void); /* addon.c: the playing queue's app plays a radio */
+/* addon.c: a song's radio asked of its app (song_radio.c); the answer to request seq, -1 none yet */
+int addon_radio_start(const char *path, unsigned seq), addon_radio_stop(unsigned seq);
+int addon_radio_answer(unsigned seq);
+const char *addon_radio_missing(const char *path);
 void addon_open_id(const char *id); /* a card app's page by its id, hidden or not */
 /* ... at op, its one argument arg ("" for none), titled title (0: the app's name) */
 int addon_open_at(const char *id, const char *op, const char *arg, const char *title);
@@ -529,7 +549,7 @@ extern unsigned id3_parses;          /* tags.c: the player's fresh parses (ringn
 int ringnav_row_selected(void *row); /* navigation.c: row holds the painted selection */
 void *ringnav_search_rows(void *win, int *tab); /* navigation.c: Search's results, while shown */
 extern unsigned auto_nexts;    /* playback.c ringnav_next: tracks that ended by themselves */
-int stream_cache(int spotify); /* navigation.c: Streaming's Configuration, a cap of 512 << it MB */
+int stream_cache(int spotify); /* stream_config.c: Streaming's Configuration, a cap of 512 << it MB */
 void album_memory(void *r);
 void draw_centred(void *canvas, const unsigned *s, unsigned n, const void *r, unsigned px,
                   unsigned color);
@@ -632,6 +652,7 @@ void slider_page_dirty(
     void *page); /* slider_page.c: its switch row, after the hidden switch changes */
 void stock_more_speed(void *win);
 int xfade_page(void *top);                       /* crossfade.c */
+int xfade_volume_shown(void *top);               /* crossfade.c */
 int night_page(void *top);                       /* crossfade.c */
 void xfade_ends(char *lo, char *hi, unsigned n); /* crossfade.c: its page's range ends */
 /* slider_page.c: EQ's Simple tab as a set_switch theme draws it (docs/oled-design.md Progress and
@@ -660,6 +681,9 @@ int title_gone(void *w, void *event); /* ... and looks for its source again at t
 int bar_title_fits(void *label);      /* label's text fits the bar's title box */
 int ipod_light(void);                 /* theme_engine.c: Light Mode */
 unsigned unflip(unsigned v);          /* theme_engine.c: the grey Light Mode's flip turns into v */
+/* corner_cover.c: a radius r corner's anti-aliased coverage, r rows of r from the outermost, out
+ * of 255; 0 for r < 1 (docs/internals.md#rounded-corners) */
+const unsigned char *corner_cover(int r);
 #define SPOT_GREY 0xffaaaaaau
 void radio_search(void);      /* radio.c */
 void toast(const char *text); /* navigation.c */
@@ -673,6 +697,26 @@ int need_link(int (*fn)(void *, void *), void *ctx); /* smart_hold, else "Connec
  * netupdate.c's and onlinematch.c's */
 int spot_running(void), scrobble_busy(void), tidal_busy(void), addon_running(void),
     netupdate_busy(void), album_lyrics_busy(void);
+/* netupdate.c: Software Update's online half (sw_update.c draws its page): the check's answers,
+ * the download's states (netupdate_poll's); sw_update_open opens the page (General's row) */
+enum { NET_NEWER = 1, NET_LATEST, NET_FAILED };
+enum {
+    NU_IDLE,
+    NU_RUNNING,
+    NU_DONE,
+    NU_LATEST,
+    NU_NET,
+    NU_MISSING,
+    NU_CARD,
+    NU_CANCELLED,
+    NU_UNSIGNED,
+    NU_FORGED
+};
+int netupdate_check(char *tag, unsigned n, unsigned *kb);
+int netupdate_start(void), netupdate_poll(int *percent, int *verifying);
+void netupdate_cancel(void);
+const char *netupdate_said(int state);
+int sw_update_open(void *ctx, void *event);
 /* coverflow.c: Display > Cover Flow's Sort, its value and its picker's choices */
 const char *coverflow_sort_name(void), *coverflow_sort_at(int i);
 int coverflow_sort_count(void), coverflow_sort_now(void);
@@ -690,6 +734,9 @@ unsigned playlist_index(int cd_num);
 void playlists_new(void);
 int rockbox_available(void);   /* theme_engine.c: a regular Rockbox binary on the card */
 int groovebox_available(void); /* theme_engine.c: the Groovebox card app's binary on the card */
+/* theme_engine.c: the two as last looked at, for every paint; card_bins_changed: look again now */
+int rockbox_seen(void), groovebox_seen(void);
+void card_bins_changed(void);
 #define SHORTCUT_GROOVEBOX 10  /* IPOD SHORTCUT's Groovebox, after the ten stock-era values */
 #define SHORTCUT_NONE 11       /* IPOD SHORTCUT's None: Home has no Shortcut row */
 int page_keyup(void *ctx, void *event); /* navigation.c: Return leaves a payload page */
@@ -698,7 +745,7 @@ int shelf_open(void *ctx, void *event); /* netupdate.c: System settings' Apps pa
 const char *shelf_busy(void);           /* netupdate.c: the app folder a job replaces */
 const char *shelf_moving(void);         /* netupdate.c: the app folder deleted or moved into */
 int shelf_erase(int start);             /* netupdate.c: Spotify's erase, started or running */
-void stream_erased(void);               /* navigation.c: Configuration follows a finished erase */
+void stream_erased(void);               /* stream_config.c: Configuration follows a finished erase */
 void album_lyrics_stop(void); /* onlinematch.c: Get Album Lyrics before USB storage */
 /* release_sig.c (docs/internals.md#release-signatures): the release key's checks */
 enum { SIG_OK, SIG_BAD, SIG_IO, SIG_CANCELLED };

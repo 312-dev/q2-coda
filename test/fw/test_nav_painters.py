@@ -17,7 +17,7 @@ import typing
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, ui_name
+from conftest import NAVIGATION_SOURCE, O, c_enum, Deques, Files, claim, high_halves, libc, stock_prop_str, stock_start_with, ui_name
 
 STRINGS = dict(re.findall(r'^#define (\w+) "([^"]*)"', (host.ROOT/'patch/offsets.inc').read_text(), re.M))
 BT_GLYPH = STRINGS['BT_GLYPH']
@@ -175,11 +175,10 @@ class Ui:
     def prop_str(self, w, name, default, *_):
         node, key = self.nodes.get(w), C.string_at(name).decode()
         if node is None:
-            return default
-        if key == 'name':
-            return self.c(node.name)
-        value = node.props.get(key)
-        return self.c(value) if isinstance(value, str) else default
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (node.name or None) if key == 'name' else node.props.get(key)  # '' is a node never named
+        value = stock_prop_str(node.kind.encode(), key.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.c(value.decode()) if isinstance(value, bytes) else value
 
     def prop_int(self, w, name, default, *_):
         node = self.nodes.get(w)
@@ -351,7 +350,7 @@ def st(fw, scratch):
 
 
 def strings(fw):
-    fw.mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
+    fw.mock('tk_str_start_with', stock_start_with)
 
 
 def theme(fw, **values):
@@ -968,7 +967,7 @@ class Modes:
     def tap(self, side):
         event = C.create_string_buffer(0x40)
         struct.pack_into('<i', event, 0, O['EVT_CLICK'])
-        struct.pack_into('<ii', event, O['EVENT_X'], 64 if side == 'shuffle' else 228, 286)
+        struct.pack_into('<ii', event, O['EVENT_X'], {'shuffle': 64, 'radio': 146}.get(side, 228), 286)
         return self.fw.fn('np_mode_click', C.c_int, C.c_void_p, C.c_void_p)(self.button.addr, C.addressof(event))
 
 
@@ -983,6 +982,17 @@ def test_shuffle_and_repeat_are_two_controls_over_stocks_one_mode(fw, st, mcl):
     assert m.sent == [2, 1]
     m.tap('repeat')  # repeat Off, shuffle off: order
     assert m.sent == [2, 1, 0]
+
+
+def test_the_radio_tap_starts_a_radio_of_the_playing_song(fw, st, mcl):
+    """The Radio button starts a song radio (song_radio.c song_radio_tap, on a timer: a radio's queue opens Now
+    Playing). It opened the playing app's page (addon_more) before, which did nothing for the Subsonic app, whose
+    q2app has no more= (the user's dead tap, 2026-11-16 17:09); stock's mode is left alone."""
+    m = Modes(fw, st, mcl, 0)
+    timers: list = []
+    fw.mock('timer_add', lambda fn, ctx, ms, *_: timers.append(fn) or 1)
+    assert m.tap('radio') == 1 and m.sent == []
+    assert timers[-1] == C.cast(fw.lib.song_radio_tap, C.c_void_p).value
 
 
 def test_each_control_finds_the_other_as_it_was(fw, st, mcl):
@@ -1179,6 +1189,11 @@ class Page:
         return {y: (min(r), max(r) + 1, [r[x] for x in sorted(r)]) for y, r in sorted(rows.items())}
 
 
+# The bar's flat form, Reduce Motion's: the shape tests below pin its inset, ends, pitch and tones; its rest lift
+# (tilt.c, 1.02 and a shadow) is pinned by test_the_bar_at_rest_is_lifted_with_a_shadow_under_it and test_tilt.py.
+FLAT = {'REDUCEMOTION': b'1'}
+
+
 def solid(row):
     return len(set(row[2])) == 1 and row[2][0]
 
@@ -1212,7 +1227,7 @@ def text_ink(fw, st, w, color=0xffffffff):
 def test_the_selected_row_is_the_accents_bar_inset_with_round_ends(fw, st, layout):
     """list.selection: the bar sel_inset in from each side, its ends sel_radius round, a one-pixel highlight over the
     accent's gradient, each row j / 47 of the way top tone to bottom (OLED's tones are one blue: solid)."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     S = Scheme(fw, layout)
     T = THEMES[OLED]
     inset, radius = T['sel_inset'], T['sel_radius']
@@ -1223,6 +1238,19 @@ def test_the_selected_row_is_the_accents_bar_inset_with_round_ends(fw, st, layou
     assert solid(band[72]) == rgba(mix(S.tones[0], S.tones[1], 24, 47)) and band[48][2][len(band[48][2]) // 2] == rgba(S.tones[4])
     assert S.tones[0] == T['schemes'][T['accents'].bit_length() - 1]['tones'][0]  # OLED's Accent Blue
     assert page.canvas.restored() and page.canvas.clip == [0, 0, 375, 320]
+
+
+def test_the_bar_at_rest_is_lifted_with_a_shadow_under_it(fw, layout):
+    """The press's rest state (tilt.c, docs/internals.md#row-press): the bar 1.02 of its size about its centre, 3 px
+    wider each side on a 375 px list, the same height, and the accent's translucent shadow in the rows under it."""
+    inset = THEMES[OLED]['sel_inset']
+    page = Page(fw)
+    band = page.band() if page.paint() else {}
+    grow = (375 - 2 * inset) * 20 // 1000 // 2
+    opaque = sorted(x for (x, y), c in page.canvas.px.items() if y == 72 and c >> 24 == 255)  # the bar, not its shadow
+    assert (opaque[0], opaque[-1] + 1) == (inset - grow, 375 - inset + grow)
+    assert min(band) == 48 and max(band) > 95  # the shadow below the bar's last row
+    assert all(c >> 24 < 255 for c in band[max(band)][2])  # translucent
 
 
 # A theme's own selection shape and accent (an OLED theme's: a flat exact blue, 8 px in, 6 px ends), written into the
@@ -1250,7 +1278,7 @@ def own_shape(fw, theme_layout, layout, radius, inset):
 
 
 def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, theme_layout):
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     own_shape(fw, theme_layout, layout, 6, 8)
     band = page.band() if page.paint() else {}
     blue = rgba(0x2f5bea)
@@ -1262,7 +1290,7 @@ def test_a_theme_s_own_bar_is_its_inset_its_radius_and_its_tones(fw, layout, the
 
 
 def test_a_theme_s_square_ended_bar_keeps_its_inset(fw, layout, theme_layout):
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     own_shape(fw, theme_layout, layout, 0, 8)
     band = page.band() if page.paint() else {}
     assert list(band) == list(range(48, 96)) and all(r[:2] == (8, 375 - 8) and solid(r) == rgba(0x2f5bea) for r in band.values())
@@ -1319,7 +1347,7 @@ def test_the_shuffle_rows_label_on_the_bar_keeps_the_selections_ink_in_light_mod
 
 
 def test_a_fresh_page_settles_on_its_first_row(fw, layout):
-    page = Page(fw, sel=None)
+    page = Page(fw, sel=None, **FLAT)
     band = page.band() if page.paint() else {}
     assert min(band) == 0 and max(band) == 47
     assert page.view.props['_ringnav_index'] == 0 and page.view.props['_ringnav_count'] == 4
@@ -1333,7 +1361,7 @@ def test_touch_hides_the_selection_until_the_wheel(fw, st):
 
 def test_the_band_takes_a_rows_whole_pitch_under_its_button(fw):
     """The Library's row is a button over its pitch's top: the bar fills the row."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     for item in page.view.children:
         item.move(*item.box[:3], 56)
         item.children[0].move(20, 0, 335, 48)
@@ -1377,7 +1405,7 @@ def test_a_grid_tile_keeps_its_own_card_inset_all_round(fw, layout):
 
 def test_a_page_under_a_sliding_one_draws_the_row_it_holds(fw, st):
     """The snapshot of the page under a sliding page: its own held row, nothing loaded or settled."""
-    page = Page(fw)
+    page = Page(fw, **FLAT)
     top = page.ui.window('playset_page')
     top.props['anim_hint'] = 'htranslate'
     page.view.props['_ringnav_index'] = 3
@@ -1888,23 +1916,22 @@ def test_smart_wifi_switches_and_saves_its_own_key(fw, st):
 
 
 @pytest.mark.parametrize('bt', [1, 0])
-def test_bluetooth_adds_resume_and_device_volume_after_its_fourth_row(fw, bt):
-    """Iconless and as high as stock's rows (78 px on this page), each saving its own key."""
+def test_bluetooth_ends_with_resume_and_link_volume(fw, bt):
+    """Iconless and as high as stock's rows (78 px on this page), each saving its own key, last in the Audio group
+    (bt_ui.c orders the page; test_bt_ui.py)."""
     ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 7, row_h=78)
     fw.mock('stock_btrows_trampoline', build)
     g(fw, 'g_bluetoothflag', bt)
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
     if not bt:
-        assert [r.name for r in rows] == [f's{i}' for i in range(7)]
+        assert 'Link Volume' not in [ui.text(c) for r in rows for c in r.walk()]
         return
-    ours = rows[4:6]
-    # stock's second row, its Bluetooth Name, is bt_name.c's Name row in its place (test_bt_name.py)
-    assert [r.name for r in rows[:4] + rows[6:]] == ['s0', ''] + [f's{i}' for i in range(2, 7)]
+    ours = rows[-2:]
     for r in ours:
         click(ui, r)
-    assert [key for key, _ in settings.written] == ['RESUME', 'BTVOLLINK']  # Resume on Connect, Control Device Volume
-    assert [r.box[3] for r in ours] == [rows[0].box[3]] * 2
+    assert [key for key, _ in settings.written] == ['RESUME', 'BTVOLLINK']  # Resume on Connect, Link Volume
+    assert [r.box[3] for r in ours] == [78] * 2
     beside = ui.add('scroll_view', win, (0, 0, 375, 100), 'beside')  # a settings row with an icon
     with_icon = ui.nodes[fw.fn('list_row', C.c_void_p, C.c_void_p, C.c_char_p, C.c_void_p, C.c_void_p)(beside.addr, b'icon', None, None)]
     assert [c.name for r in ours for c in r.walk() if c.kind == 'image'] == ['_setting_switch'] * 2  # no icon
@@ -1913,17 +1940,41 @@ def test_bluetooth_adds_resume_and_device_volume_after_its_fourth_row(fw, bt):
 
 @pytest.mark.parametrize('way, sent', [(1, 1), (0, 0)])
 def test_device_volume_off_gives_stock_its_gain_back_at_once(fw, way, sent):
-    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 0, BTVOLLINK=b'1')
+    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 5, row_h=78, BTVOLLINK=b'1')
+    fw.mock('stock_btrows_trampoline', build)  # stock's five head rows
     g(fw, 'g_bluetoothflag', 1)
     g(fw, 'g_volume', 37)
     fw.mock('mclGetOutputWay', lambda *_: way)
     fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    link = row(ui, view, 'Control Device Volume')
+    link = row(ui, view, 'Link Volume')
     bt_link = fw.fn('navigation__bt_link', C.c_int)
     assert switch(link) == 'switch_on' and bt_link() == 1
     click(ui, link)
     assert switch(link) == 'switch_off' and settings.written == [('BTVOLLINK', 0)] and bt_link() == 0
     assert [c[1][:2] for c in fw.calls('device_set_volume')] == [(37, 0)] * sent
+
+
+def test_link_volume_unset_shows_and_turns_off_from_what_applies(fw):
+    """Never chosen, the switch shows what applies to the device connected now: on for headphones; a click saves the
+    other way from there (off), and that choice holds."""
+    ui, win, view, settings, build = settings_page(fw, 'bluetooth_page', 'scroll_view_bluetooth', 5, row_h=78)
+    fw.mock('stock_btrows_trampoline', build)
+    g(fw, 'g_bluetoothflag', 1)
+    mac = 'AA:BB:CC:DD:EE:07'
+    fw.mock('getBtLinkSize', lambda *_: 1)
+    def item(i, status, out, *_):
+        C.c_int.from_address(status).value = 3
+        C.memmove(out, mac.encode() + b'\0', len(mac) + 1)
+        return 0
+    fw.mock('getBtLinkItem', item)
+    fw.mock('fw_system', lambda *_: 0)
+    Files(fw, {'/tmp/q2-btbatt': f'{mac} 80 48000 {0x240418} Px7\n'.encode()})  # headphones
+    fw.fn('ringnav_btrows', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
+    link = row(ui, view, 'Link Volume')
+    bt_link = fw.fn('navigation__bt_link', C.c_int)
+    assert switch(link) == 'switch_on' and bt_link() == 1
+    click(ui, link)
+    assert switch(link) == 'switch_off' and settings.written == [('BTVOLLINK', 0)] and bt_link() == 0
 
 
 def playset(fw, ui, view, stock_rows=13):
@@ -1945,37 +1996,29 @@ def test_playback_orders_its_rows_eq_and_the_library_first(fw):
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
     rows = view.children
-    ids = [r.name for r in rows]
-    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'
-    assert len(rows) == 20 and 's11' not in ids and 's12' not in ids
-    at = {r.name or icon(r): k for k, r in enumerate(rows)}  # Max Volume's icon: Volume's row has it too
-    volume = next(k for k, r in enumerate(rows) if icon(r) == 'playset_maxvol')
-    assert at['s2'] == 0 and rows[1] is row(ui, view, 'Library') and 'list_into' in [c.props.get('image') for c in rows[1].walk()]
-    assert at['s3'] == 2  # Play Mode after EQ and the Library
-    assert at['playset_gapless'] == at['s7'] + 1 and at['playset_memplay'] == at['s6'] + 1  # Crossfade, Resume Songs
-    assert at['s8'] == at['playset_memplay'] + 1  # Headphones required, after Resume Songs
-    assert rows[at['s8'] + 1] is row(ui, view, 'Sleep Timer')
-    assert [volume, at['playset_maxvol'], at['playset_bootvol'], at['s0'], at['s9'], at['s10']] == list(range(at['s8'] + 2, at['s8'] + 8))
-    balance = [k for k, r in enumerate(rows) if icon(r) == 'playset_balance']
-    assert balance == [at['s10'] + 1, at['s10'] + 2]  # Mono Audio and Swap L/R
-    assert [at['s1'], at['s4'], at['s5']] == [balance[1] + 1, balance[1] + 2, 19]  # Filters, DSD Output, USB Audio last
-    assert 'playset_covermode' not in at and not [r for r in rows if not r.name and ui.text(label_of(r)) == 'On-The-Go']
-    assert ui.text(label_of(rows[volume])).startswith('Volume')  # crossfade.c volume_row, just before Max Volume
+    # stock's Volume and Album Display is not offered; Folder skip is Library > Folders'; stock's Balance (s10) stays,
+    # hidden, after the inline Balance (inline_slider.c); Crossfade's Duration and Default Volume's Level under them
+    seq = [r.name or ui.text(label_of(r)).split(':')[0] for r in rows]
+    assert seq == ['s2', 'Library', 's3', 's7', 'Crossfade', 'Duration', 's6', 'Resume Songs', 's8', 'Sleep Timer',
+                   'Volume', 'Max Volume', 'Default Volume', 'Level', 's0', 's9', 'Balance', 's10', 'Mono Audio',
+                   'Swap L/R', 's1', 's4', 's5']
+    assert 'list_into' in [c.props.get('image') for c in rows[1].walk()] and not rows[seq.index('s10')].visible
+    assert 'playset_covermode' not in [icon(r) for r in rows]
+    assert icon(rows[seq.index('Volume')]) == 'playset_maxvol'  # crossfade.c volume_row, just before Max Volume
 
 
-def test_playback_s_volume_rows_open_stock_s_pages(fw):
+def test_playback_s_volume_rows_change_in_place(fw):
+    """Max Volume and Default Volume open no page: an inline slider and a switch (inline_slider.c)."""
     ui, win, view, settings, _ = settings_page(fw, 'playset_page', 'scroll_view_playset')
     playset(fw, ui, view)
     fw.fn('ringnav_audioset', C.c_int, C.c_void_p, C.c_void_p)(win.addr, None)
-    ours = {icon(r): r for r in view.children if not r.name}
     opened = []
     fw.mock('navigator_to', lambda name, *_: opened.append(C.string_at(name).decode()))
-    for key in ('playset_maxvol', 'playset_bootvol'):
-        assert 'list_into' in [c.props.get('image') for c in ours[key].walk()]
-        click(ui, ours[key])
-    assert opened == ['playset/maxvol_page', 'playset/bootvol_page']
-    # stock's rows, stock's translations
-    assert [C.string_at(c[1][1]) for c in fw.calls('widget_set_tr_text')] == [b'playset_maxvol', b'playset_bootvol']
+    for title in ('Max Volume', 'Default Volume'):
+        item = row(ui, view, title)
+        assert 'list_into' not in [c.props.get('image') for c in item.walk()]
+        click(ui, item)
+    assert opened == []
 
 
 def test_enlarged_album_art_is_display_s_last_row_and_stock_s_switch(fw):
@@ -2035,7 +2078,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     again = ui.add('scroll_view', ui.window('playset_page'), (0, 26, 375, 294), 'scroll_view_playset')
     playset(fw, ui, again)
     audioset(ui.top.addr, None)
-    assert len(again.children) == 20  # the next open is the main page again
+    assert len(again.children) == 23  # the next open is the main page again
 
 
 def caption_texts(fw, view):
@@ -2316,10 +2359,15 @@ def test_a_release_before_the_hold_is_stocks_tap(fw, st):
     assert not fw.calls('navigator_to') and not fw.calls('dialog_quit')
 
 
-def test_an_open_eq_page_is_already_the_goal(fw, st):
+@pytest.mark.parametrize('name, window', [('img_wifiswitch', b'wifi_page'), ('img_btswitch', b'bluetooth_page'),
+                                          ('img_playset', b'equalizer_page')])
+def test_an_open_settings_page_is_already_the_goal(fw, st, name, window):
+    """Held over the page it opens (Control Center pulled down on Settings > Wi-Fi), a hold closes Control Center
+    and opens no second page: a second wifi_page stacked on the first, and Return took two presses to leave
+    Wi-Fi (the emulator, 2026-11-17)."""
     quick = Quick(fw, st)
-    fw.mock('navigator_window_is_exist', lambda name, *_: C.string_at(name) == b'equalizer_page')
-    quick.press('img_playset')
+    fw.mock('navigator_window_is_exist', lambda n, *_: C.string_at(n) == window)
+    quick.press(name)
     quick.hold()
     assert fw.calls('dialog_quit') and not fw.calls('navigator_to')
 
@@ -2342,9 +2390,9 @@ def test_control_center_lays_stock_s_buttons_over_its_circles_and_slider(fw, st)
     """Control Center (control_center.c cc_open): Wi-Fi's and Bluetooth's buttons over their circles at opacity 0, so a
     tap and a hold there are stock's; the rest of stock's buttons hidden; the brightness slider over its track."""
     quick = Quick(fw, st)
-    assert [quick.icons[n].box for n in ('img_wifiswitch', 'img_btswitch')] == [(35, 46, 40, 40), (103, 46, 40, 40)]
+    assert [quick.icons[n].box for n in ('img_wifiswitch', 'img_btswitch')] == [(46, 48, 40, 40), (112, 48, 40, 40)]
     assert [quick.icons[n].visible for n in Quick.ICONS] == [1, 1, 0, 0, 0, 0, 0, 0]
-    assert quick.slider.parent.box == (20, 170, 163, 38) and quick.slider.box == (0, 0, 163, 38)
+    assert quick.slider.parent.box == (188, 162, 167, 38) and quick.slider.box == (0, 0, 167, 38)
 
 
 # A page's switch as a row, under a set without stock's toolbars.
@@ -2942,8 +2990,8 @@ def test_an_untitled_page_s_clock_is_centred_across_the_status_row(fw, st):
 def test_a_titled_page_s_clock_sits_beside_the_play_state_and_the_title_ends_short_of_it(fw, st):
     row = StatusRow(fw, st, 'A Long Album Name That Runs On Past The Clock')
     clock = row.place()
-    edge = 322 - 4 - 10 - 6  # the clock's text ends here, 6 px left of the level bars (4 px left of the battery,
-    # 10 wide), hscroll_label's 2 px margin inside its box
+    edge = 322 - 6 - 10 - 7  # the clock's text ends here, CLOCK_BESIDE 7 px left of the level bars (SR_GAP 6 px
+    # left of the battery, 10 wide), hscroll_label's 2 px margin inside its box
     assert clock.box[0] + clock.box[2] - 2 == edge and clock.box[2] == CLOCK_W + 4
     title = row.w['label_title']
     assert title.box[0] + title.box[2] - 2 == edge - CLOCK_W - 12  # its ellipsis 12 px clear of the widest clock
@@ -2957,7 +3005,7 @@ def test_home_split_s_clock_goes_right_and_over_the_art_in_text_primary(fw, st):
     art = row.ui.add('view', row.ui.top, (196, 0, 179, 262), 'art')
     home.art, home.win = art.addr, row.ui.top.addr
     clock = row.place()
-    assert clock.box[0] + clock.box[2] - 2 == 322 - 4 - 10 - 6
+    assert clock.box[0] + clock.box[2] - 2 == 322 - 6 - 10 - 7
     assert clock.props['style:normal:text_color'] == i32(INK_ROW)  # no cover under the bar: the row's grey
     home.sl[0].tw = 128  # a cover that fills the pane, up under the status row: inked over it, whole
     clock = row.place()
@@ -3015,7 +3063,7 @@ def test_a_greyed_row_keeps_its_contrast_on_the_selection_and_carries_the_offlin
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     for i in (1, 2):  # Local Only: a server row can't play
         fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
     page.paint()  # before the rows: the greyed rows' titles end 12 px clear of the mark's ink (322 +- 10), their
@@ -3060,7 +3108,7 @@ def test_oleds_song_rows_end_their_title_and_inline_artist_clear_of_the_offline_
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     for i in (0, 1):  # Local Only: a server row can't play
         fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[i].parent.addr, C.addressof(record), 0)
     for paint in range(3):  # a box changed under a paint is final on the next, and stays
@@ -3103,7 +3151,7 @@ def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, 
     record = C.create_string_buffer(O['REC_SIZE'] + 8)
     struct.pack_into('<Q', record, O['REC_PATH'], C.addressof(url))
     struct.pack_into('<i', record, O['REC_TYPE'], 8)
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     fw.fn('catalogue_mark', None, C.c_void_p, C.c_void_p, C.c_int)(page.rows[2].parent.addr, C.addressof(record), 0)
     page.paint()
     assert [a.box[2] for a in artists] == [320, 320, 272, 320]  # as the title: 30 + 272 = 322 - 10 - 12 + 2
@@ -3125,7 +3173,7 @@ def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low,
         page.ui.add('tab_button', group, value=tab)
         page.ui.add('tab_button', group, value=1 - tab)
     fw.var('catalogue_source', C.c_int).value = 1
-    fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+    fw.mock('tk_str_start_with', stock_start_with)
     keep = []
 
     def record(path):

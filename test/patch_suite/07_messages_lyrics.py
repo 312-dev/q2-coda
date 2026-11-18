@@ -105,21 +105,15 @@ def usb_page(mode,light='1',y=26,machine=None):
     win=m.node('window','usbmode_page',[ret,img,info,charge,dacset]); parents(m,win); m.word(win+O['W_PARENT'],m.wm)
     place(m,win,0,y,375,320-y); place(m,ret,20,0,80,60); place(m,charge,247,0,50,50); place(m,dacset,305,0,50,50); m.top=win; m.nodes[m.wm]={'children':[win]}; ui_loaded(m,'usbmode_page',win)
     return m,win,ret,img,info,charge,dacset
-# The art's corners: after the image (the border hook), each of the theme's playing.art.radius rows
-# (np_art_radius; NP_ART_RADIUS at 166 px without one) of a corner is black outside the arc, then one
-# edge pixel at the alpha it leaves uncovered.
+# The art's corners: after the image (the border hook), the theme's playing.art.radius (np_art_radius; NP_ART_RADIUS at
+# 166 px without one) rounded into the page's black by corner_mask, each corner pixel at the alpha the arc leaves.
 m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'
 cover=m.node('image','img_cover'); win=m.node('window','playing_page',[cover]); m.word(win+O['W_PARENT'],m.wm); m.top=win
 put(cover,16,10,166,166); m.call(address=playing,args=(win,7,0,0),gap=0)
 m.word(m.lcd+O['LCD_FILL_COLOR'],0x12345678)
 m.bands.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(cover,m.canvas,0,0))
-R=theme_builtins()[0]['np_art_radius']; want=[]
-for i in range(R):
-    out=16*R-math.isqrt((4*R*R-(2*(R-i)-1)**2)*64); n=out>>4
-    for c in range(4):
-        y=166-1-i if c&1 else i; left=not c&2
-        want+=[(0 if left else 166-n,y,n,1,color_t(0)),(n if left else 166-n-1,y,1,1,(out&15)*17<<24)]
-assert R and [b[:5] for b in m.bands]==want and want[0][2]==3 and want[-2][2]==0,want[:2]  # R 6: 3 px of black in the top row
+R=theme_builtins()[0]['np_art_radius']; want=corner_mask_bands(0,0,166,166,R,color_t(0))
+assert R and [b[:5] for b in m.bands]==want,want[:2]
 assert m.get(m.lcd+O['LCD_FILL_COLOR'])==0x12345678; passed()  # restored
 m.bands.clear(); m.call(address=HOOKS['widget_on_paint_border'][0],args=(win,m.canvas,0,0)); assert not m.bands; passed()
 
@@ -155,8 +149,8 @@ OLED=theme_builtins()[0]; assert [q.u.mem_read(w+0x34,1)[0] for w in (glyph,albu
 # Scrub: Centre on Now Playing starts it at once and the next press ends it (np_centre); the wheel then
 # moves a target of SCRUB_STEP seconds times the ramp, previewed on the slider and both labels however far
 # apart the ticks, and committed once through player_seek_time (track seconds) when the scrub ends. Stock's
-# page timer stops meanwhile. The press that ends it goes on to the Centre cycle's shuffle stage (OLED's
-# playing.modes pair), whose wheel is the shuffle's until NP_STAGE_MS (SCRUB_MS) without a key.
+# page timer stops meanwhile. The press that ends it puts the Centre cycle's ring on shuffle (OLED's
+# playing.modes pair), which takes the wheel until NP_STAGE_MS (SCRUB_MS) without a key.
 CONFIG.clear(); FILL_HI=signed(color_t(O['MINIMAL_FILL'])); FG='style:normal:fg_color'  # FILL_HI: MINIMAL_FILL, which a block further down checks
 def scrub_page(value=100,mx=225,m=None):  # m: Now Playing opened again on that machine
     if not m: m=QueueMachine(queue=3,pos=1); m.handlers[playing+12]='stock_playing'

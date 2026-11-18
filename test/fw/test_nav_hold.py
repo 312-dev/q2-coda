@@ -9,7 +9,7 @@ import struct
 import pytest
 
 import host
-from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, ui_name
+from conftest import O, Deques, Files, Rows, claim, favdir_card, fnv1a, high_halves, in_fork, stock_prop_str, ui_name
 
 W_X, W_PARENT, W_EMITTER = O['W_X'], O['W_PARENT'], O['W_EMITTER']
 EMIT_TYPE, EMIT_PENDING_REMOVE, EMIT_NEXT = O['EMIT_TYPE'], O['EMIT_PENDING_REMOVE'], O['EMIT_NEXT']
@@ -270,8 +270,11 @@ class Ui:
 
     def prop_str(self, w, name, default):
         node = self.nodes.get(w)
-        value = None if node is None else node.name if name == 'name' else node.image if name == 'image' else node.props.get(name)
-        return self.c(w, value) if isinstance(value, str) and value else default
+        if node is None:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        value = (node.name or None) if name == 'name' else (node.image or None) if name == 'image' else node.props.get(name)
+        value = stock_prop_str(node.kind.encode(), name.encode(), value.encode() if isinstance(value, str) else value, default)
+        return 0 if value is None else self.c(w, value.decode()) if isinstance(value, bytes) else value
 
     def set(self, w, name, value):
         if w in self.nodes:
@@ -781,9 +784,19 @@ def test_a_search_that_matches_nothing_says_so(editor, ui):
     ui.nodes[ui.lookup(editor.ple.page, 'search_edit', 1)].text = 'zz'
     assert ui.key(editor.ple.page, KEY_RETURN) == STOP  # Return applies the box, from the next pass
     ui.due('ple_run')
-    assert editor.rows() == ['Search: zz', 'No songs match']
-    ui.click(ui.find(editor.ple.view, 'No songs match'))
-    assert not ui.timers  # the note is no row to pick
+    # docs/oled-design.md#empty-and-offline: the Search row alone, the empty state under it in its compact form
+    # (a row above it: no glyph), centred from the row's foot, with no button and no fake row to pick
+    assert editor.rows() == ['Search: zz']
+    art = ui.lookup(editor.ple.page, '_empty_state', 0)
+    assert art and ui.nodes[art].visible
+    props = ui.nodes[art].props
+    assert (props['_es_glyph'], props['_es_title'], props['_es_hint'], props['_es_row']) == ('', 'No Matches', 'Try fewer letters', '')
+    assert not ui.lookup(editor.ple.page, '_empty_row', 1)
+    editor.pick('Search: zz')  # a search that matches: the state goes with the page's rows
+    ui.nodes[ui.lookup(editor.ple.page, 'search_edit', 1)].text = 'tw'
+    ui.key(editor.ple.page, KEY_RETURN)
+    ui.due('ple_run')
+    assert editor.rows() == ['Search: tw', 'Two', 'Twenty'] and not ui.lookup(editor.ple.page, '_empty_state', 0)
 
 
 def test_the_search_box_keeps_its_query(editor, ui):
@@ -1277,7 +1290,7 @@ def test_a_go_to_that_opened_nothing_keeps_no_restore(fw, ui, st, recs):
 class Card(Files):
     """Files, appends too ("ab" keeps what the file held), with access() and fputs."""
     def __init__(self, fw, files=None):
-        super().__init__(fw, files)
+        super().__init__(fw, files, card=True)  # places and counts are on it (card_store.c)
         fw.mock('fw_access', lambda path, *_: 0 if cstr(path) in self.files else -1)
         fw.mock('fw_fputs', lambda s, f, *_: self.fwrite(s, 1, len(C.string_at(s)), f) and 0)
 
@@ -2354,7 +2367,7 @@ def test_a_pull_down_moving_or_held_is_left(fw, ui, state, idex, pressed):
 
 
 # Resume: a long track's place, kept each second by the UI loop (resume_poll), and a spoken book's.
-RESUME_FILE, PLAYS_FILE = '/mnt/data/ringnav-resume', '/mnt/data/ringnav-plays'
+RESUME_FILE, PLAYS_FILE = '/mnt/mmc/.q2pod/ringnav-resume', '/mnt/mmc/.q2pod/ringnav-plays'  # card_store.c
 EDGE, SAVE_S = O['RESUME_EDGE_S'], O['RESUME_SAVE_S']
 
 
@@ -2654,6 +2667,16 @@ def test_only_a_listen_the_card_takes_counts_for_an_upload(fw, player, recs, tak
         player.poll(s)
     assert PLAYS_FILE in player.card.files and (log in player.card.files) == takes
     assert fw.var('scrobble_ui__sa', C.c_uint).value == takes  # pending, the struct's first field
+
+
+def test_reads_3_s_apart_still_count_as_heard(player, recs):
+    """Dark, stock's status cache is up to DARK_POLL_US old, so two reads a second apart can be 3 s apart."""
+    player.play([recs(path='/mnt/mmc/Music/a.flac', artist='A')], total=200)
+    for s in range(0, 103, 3):  # heard from the second poll (3 s) on: 99 s
+        player.poll(s)
+    assert PLAYS_FILE not in player.card.files
+    player.poll(105)
+    assert plays(player.card.files[PLAYS_FILE]) == [(key_of('/mnt/mmc/Music/a.flac'), 1)]
 
 
 def test_a_seek_is_not_heard(player, recs):
@@ -2986,21 +3009,27 @@ def test_a_clean_end_stops_the_watchdog_and_removes_the_state_record(fw, ui):
     end(), end()
     wdt.poll()
     fw.fn('system__state_poll', None)()
-    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files == {}
+    assert wdt.calls == [(5, WDT_START, WDT_MS), (5, WDT_STOP, None)] and card.files.keys() <= {'/proc/mounts'}
 
 
-# The state record (state_poll): /mnt/data/q2-state, one line rewritten whenever it changes.
+# The state record (state_poll): /mnt/data/q2-state, one line rewritten when it changes, a burst's latest
+# STATE_SETTLE_MS (5 s) after its first change; a run's first line and the power field at once.
 class State:
     def __init__(self, fw, ui):
-        self.fw, self.card = fw, Card(fw)
+        self.fw, self.card, self.ms = fw, Card(fw), 1000
         self.status, self.out = 2, 0
         fw.mock('mclGetPlayStatus', lambda *_: self.status)
         fw.mock('mclGetOutputWay', lambda *_: self.out)
+        fw.mock('time_now_ms', lambda *_: self.ms)
         self.poll_fn = fw.fn('system__state_poll', None)
 
-    def poll(self):
+    def poll(self, ms=0):
+        self.ms += ms
         self.poll_fn()
         return self.card.files.get('/mnt/data/q2-state', b'').decode()
+
+    def writes(self):
+        return len([a for _, a in self.fw.calls('fw_fopen') if C.string_at(a[0]) == b'/mnt/data/q2-state'])
 
 
 def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
@@ -3010,7 +3039,8 @@ def test_the_state_record_says_what_the_q2_is_doing(fw, ui):
     fw.var('g_backlight_status', C.c_ubyte).value = 0
     fw.var('g_usbdet_value', C.c_ubyte).value = 1
     state.status, state.out = 3, 1
-    assert state.poll() == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
+    state.poll()  # the change seen; written once it has settled
+    assert state.poll(5000) == 'screen:off power:running cable:in battery:57 play:paused out:bluetooth\n'
 
 
 @pytest.mark.parametrize('level, status, out, line', [
@@ -3026,11 +3056,40 @@ def test_the_state_records_odd_readings(fw, ui, level, status, out, line):
 
 def test_the_state_record_is_written_only_when_it_changes(fw, ui):
     state = State(fw, ui)
-    state.poll(), state.poll()
-    assert len(fw.calls('fw_fopen')) == 1 and len(fw.calls('fw_fsync')) == 1
+    state.poll()  # a run's first line: at once, the forced-restart mark
+    assert state.writes() == 1 and len(fw.calls('fw_fsync')) == 1
+    for _ in range(20):
+        state.poll(1000)  # nothing changed: nothing written, however long
+    assert state.writes() == 1
     state.status = 3
+    state.poll(), state.poll(4999)
+    assert state.writes() == 1  # a change waits for the burst
+    assert 'play:paused' in state.poll(1) and state.writes() == 2
+
+
+def test_a_burst_of_changes_is_one_write_of_the_latest_line(fw, ui):
+    state = State(fw, ui)
     state.poll()
-    assert len(fw.calls('fw_fopen')) == 2
+    for level in range(90, 80, -1):  # ten changes, 400 ms apart: battery, screen, playback
+        fw.var('fw_ctx_g_power_capacity', C.c_int).value = level
+        fw.var('g_backlight_status', C.c_ubyte).value = level % 2
+        state.status = 2 + level % 2
+        state.poll(400)
+    assert state.writes() == 1
+    line = state.poll(1400)  # 5 s after the burst's first change
+    assert state.writes() == 2 and line == 'screen:on power:running cable:out battery:81 play:paused out:jack\n'
+    state.poll(5000)
+    assert state.writes() == 2
+
+
+def test_a_change_undone_within_the_burst_writes_nothing(fw, ui):
+    state = State(fw, ui)
+    state.poll()
+    state.status = 3
+    state.poll(1000)
+    state.status = 2
+    state.poll(1000), state.poll(5000)
+    assert state.writes() == 1
 
 
 def test_a_record_that_cant_be_written_is_tried_again(fw, ui):
@@ -3045,8 +3104,12 @@ def test_standby_records_the_suspend_it_may_never_wake_from(fw, ui, power):
     state = State(fw, ui)
     seen = []
     fw.mock('stock_standby_trampoline', lambda *_: seen.append(state.card.files['/mnt/data/q2-state'].decode()) or 0)
-    fw.fn('ringnav_standby', C.c_int)()
-    assert 'power:suspending' in seen[0] and power('suspended').value == 0
+    state.poll()
+    state.status = 3
+    state.poll(100)  # a change waiting out its burst
+    fw.fn('ringnav_standby', C.c_int)()  # 100 ms after the last write: the suspend is not held back
+    assert 'power:suspending' in seen[0] and 'play:paused' in seen[0] and power('suspended').value == 0
+    assert 'power:running' in state.poll(100)  # and the resume, at once too
 
 
 # The RTC's clock (rtc_now), as Standby's limit reads it.

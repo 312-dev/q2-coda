@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Wait for a process to end or a log to say something, never for longer than a stated time.
+
+    q2-wait --pid 12345 --timeout 600                          # until the process is gone
+    q2-wait --log run.log --match 'passed|failed' --timeout 900  # until a line of the log matches
+    q2-wait --log run.log --match READY --fail 'Traceback|Error' --timeout 300
+    q2-wait --pid 12345 --log run.log --match done --timeout 600  # whichever comes first
+
+--timeout is required and is at most an hour: a wait with no end is how 26 shells came to sit for hours
+on 2026-11-16 (`until ! pgrep -f PATTERN` matches the waiting shell's own command line). Wait on the
+process id you started or on the line its log will print, never on a process name.
+
+Exit status: 0 the process ended or --match was seen; 1 --fail was seen first; 124 the time ran out
+(as timeout(1)); 2 bad arguments. The matching line, or what ended the wait, is printed.
+"""
+import argparse
+import os
+import re
+import sys
+import time
+
+LONGEST = 3600
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:  # a zombie is over: its parent has only not collected it yet
+        with open(f'/proc/{pid}/stat') as f:
+            return f.read().rsplit(')', 1)[1].split()[0] != 'Z'
+    except OSError:
+        return False
+
+
+def wait(pid=None, log=None, match=None, fail=None, timeout=60, poll=1.0, clock=time.monotonic, sleep=time.sleep):
+    """(exit status, what ended the wait)."""
+    end = clock() + timeout
+    seen = 0
+    while True:
+        if log and os.path.exists(log):
+            with open(log, 'rb') as f:
+                f.seek(seen)
+                data = f.read()
+            whole = data[:data.rfind(b'\n') + 1]  # a line still being written is read next time
+            seen += len(whole)
+            for line in whole.decode(errors='replace').splitlines():
+                if fail and re.search(fail, line):
+                    return 1, f'failed: {line.strip()[:300]}'
+                if match and re.search(match, line):
+                    return 0, line.strip()[:300]
+        if pid is not None and not alive(pid):
+            return 0, f'process {pid} has ended'
+        if clock() >= end:
+            return 124, f'timed out after {timeout:g} s'
+        sleep(poll)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--pid', type=int)
+    ap.add_argument('--log')
+    ap.add_argument('--match', help='a regular expression: a log line that ends the wait well')
+    ap.add_argument('--fail', help='a regular expression: a log line that ends the wait badly')
+    ap.add_argument('--timeout', type=float, required=True, help=f'seconds, at most {LONGEST}')
+    ap.add_argument('--poll', type=float, default=1.0)
+    args = ap.parse_args()
+    if args.pid is None and not (args.log and (args.match or args.fail)):
+        ap.error('give --pid, or --log with --match')
+    if (args.match or args.fail) and not args.log:
+        ap.error('--match and --fail need --log')
+    if not 0 < args.timeout <= LONGEST:
+        ap.error(f'--timeout must be between 1 and {LONGEST} seconds')
+    rc, why = wait(args.pid, args.log, args.match, args.fail, args.timeout, args.poll)
+    print(why)
+    return rc
+
+
+if __name__ == '__main__':
+    sys.exit(main())

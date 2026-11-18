@@ -4,8 +4,9 @@
 class PowerMachine(ResumeMachine):
     def __init__(self,config={},files=None):
         super().__init__(files); self.config.update(config); self.writes=[]; self.records=[]  # records: the state record's
-        for n in ('fflush@GLIBC_2.0','fsync@GLIBC_2.0','fileno@GLIBC_2.0','unlink@GLIBC_2.0','open@GLIBC_2.0','close@GLIBC_2.0'):
-            self.handlers[syms[n]]='p:'+n
+        for n in ('fflush@GLIBC_2.0','fsync@GLIBC_2.0','fileno@GLIBC_2.0','unlink@GLIBC_2.0','open@GLIBC_2.0','close@GLIBC_2.0',
+                  'read@GLIBC_2.0','write@GLIBC_2.0'):
+            self.handlers[syms[n]]='p:'+n  # read, write: heatguard_poll's (the base machine's access finds no q2guard)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a=u.reg_read(REGS[0])
         if name.startswith('r:fclose') and self.open.get(a,[0,0])[1]=='w':
@@ -119,7 +120,7 @@ for usb,play in ((1,3),(0,2)):  # a cable in, or playing: it stays on, and no la
 # /dev/jz_watchdog and starts it at WDT_MS, every pass feeds it, Standby stops it around the suspend
 # and starts it again, and a clean end stops it and removes the record; nothing is fed or written
 # after. No device, or a refused start: tried once, and the record is kept all the same. The record
-# is rewritten only when it changes, and as suspending just before Standby's suspend.
+# is rewritten only when it changes, a burst once it settles, and as suspending just before Standby's suspend.
 WDT_START,WDT_STOP,WDT_FEED=0x8004570d,0x2000570e,0x2000570f
 class WatchdogMachine(StandbyMachine):
     def __init__(self,config={},fd=3,refuse_start=False,**k):
@@ -128,6 +129,7 @@ class WatchdogMachine(StandbyMachine):
         self.byte(syms['g_backlight_status'],1); self.byte(syms['g_usbdet_value'],0)
     def hook(self,u,address,size,unused):
         name=self.handlers.get(address,''); a,b,c=[u.reg_read(r) for r in REGS[:3]]
+        if name=='p:open@GLIBC_2.0' and self.text(a)=='/tmp/q2guard.state': self.returns(0xffffffff); return  # no q2guard here
         if name=='p:open@GLIBC_2.0':
             assert self.text(a)=='/dev/jz_watchdog' and b==0x80002; self.wdt_opens+=1; self.returns(self.fd&0xffffffff); return
         if name=='d:ioctl':
@@ -140,9 +142,11 @@ m=WatchdogMachine(key=600); m.pass_(1)
 assert m.wdt_opens==1 and m.ioctls==[(3,WDT_START,O['WDT_MS'])],(m.ioctls)
 assert m.record()==b'screen:on power:running cable:out battery:0 play:paused out:jack\n',m.record()
 m.pass_(1); m.pass_(1); assert m.ioctls[1:]==[(3,WDT_FEED)]*2 and m.wdt_opens==1 and len(m.records)==1; passed()
-level(m,57,0); m.pass_(1); assert m.records[-1]==(RECORD,b'screen:on power:running cable:out battery:57 play:paused out:jack\n')
-n=len(m.records); m.pass_(1); assert len(m.records)==n  # unchanged: not rewritten
-m.byte(syms['g_backlight_status'],0); m.byte(syms['g_usbdet_value'],1); m.pass_(1)
+# a change is written once it has held STATE_SETTLE_MS (5 s, system.c): a burst is one write of its latest line
+n=len(m.records); level(m,56,0); m.pass_(1); level(m,57,0); m.pass_(1); assert len(m.records)==n
+m.pass_(5000); assert m.records[-1]==(RECORD,b'screen:on power:running cable:out battery:57 play:paused out:jack\n') and len(m.records)==n+1
+n=len(m.records); m.pass_(1); m.pass_(6000); assert len(m.records)==n  # unchanged: not rewritten
+m.byte(syms['g_backlight_status'],0); m.byte(syms['g_usbdet_value'],1); m.pass_(1); m.pass_(5000)
 assert m.records[-1][1]==b'screen:off power:running cable:in battery:57 play:paused out:jack\n'; passed()
 m.ioctls=[]; assert m.standby()==[('wdt',WDT_STOP),'suspend',('wdt',WDT_START)],m.events
 assert m.records[-1][1]==b'screen:off power:suspending cable:in battery:57 play:paused out:jack\n'
@@ -508,22 +512,8 @@ m=SmartRadio(); m.config['TOKEN']='t'; m.poll(1); m.poll(SW_IDLE); m.windows('lo
 m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0); m.advance(500); m.link=1
 assert m.call(address=payload_syms['upload_scrobbles'],args=(0,0,0,0),gap=0)==0 and not m.threads and m.toasts[-1][3]==SW_WAIT
 m.advance(500); assert len(m.threads)==1 and [x[3] for x in m.toasts].count('Uploading scrobbles')==1; passed()
-# The same for the other presses that start a job: Network Update's download, an Apps install and
-# Get Album Lyrics each start once, not cancelled by the held press ("Canceling…").
-m=SmartRadio(); resume=int(manifest['patch_symbols']['stock_fwupdate_trampoline'],16); m.handlers[resume]='stock_fwupdate'
-m.u.hook_add(UC_HOOK_CODE,m.hook,begin=resume,end=resume); m.mock('strcpy@GLIBC_2.0','widget_set_tr_text')
-view=m.node('scroll_view','scroll_view_fwupdate'); m.top=m.node('window','fwupdate_page',[view])
-for i in range(2):
-    row=m.node('list_item'); m.nodes[view]['children'].append(row); assert m.call(address=0x4c8660,args=(row,i,0,0),gap=0)==0
-assert m.call(address=HOOKS['systemset_fwupdate_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-online=m.nodes[m.nodes[view]['children'][1]]['children'][0]; label=m.nodes[online]['children'][0]
-m.poll(1); m.poll(SW_IDLE); assert m.flag()==0; m.nodes[m.wm]['children']=[m.top]
-def nu_press():
-    f,ctx=[(f,c) for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
-nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
-m.advance(500); m.link=1; nu_press(); assert m.toasts[-1][3]==SW_WAIT and not m.threads
-m.advance(500,clear=False); assert len(m.threads)==1 and m.nodes[label]['text']=='Checking…'; passed()
+# The same for the other presses that start a job: an Apps install and Get Album Lyrics each start
+# once, not cancelled by the held press ("Canceling…").
 class SmartShelf(SmartMixin,ShelfMachine): pass
 m=SmartShelf({LIST:bytearray(REPO_LIST)}); m.rockbox_mode=0
 m.poll(1); m.poll(SW_IDLE); assert m.flag()==0
@@ -733,7 +723,8 @@ for mode in (0o100755,0):
     about,update,storage,date,apps,reset=(m.nodes[kids[i]]['children'][0] for i in (0,1,2,3,4,6))
     assert m.nodes[m.nodes[apps]['children'][1]]['text']=='App Store' and m.handler(apps,O['EVT_CLICK'])[0]==payload_syms['shelf_open']
     assert m.nodes[m.nodes[storage]['children'][1]]['text']=='Storage' and m.handler(storage,O['EVT_CLICK'])[0]==payload_syms['storage_open']
-    for b,key,page in ((date,'system_time','systemset/datetime_page'),(update,'system_update','systemset/fwupdate_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
+    assert m.nodes[m.nodes[update]['children'][1]]['text']=='Software Update' and m.handler(update,O['EVT_CLICK'])[0]==payload_syms['sw_update_open']
+    for b,key,page in ((date,'system_time','systemset/datetime_page'),(reset,'system_reset','systemset/reset_page'),(about,'system_about','systemset/about_page')):
         f,ctx=m.handler(b,O['EVT_CLICK']); assert m.nodes[m.nodes[b]['children'][1]]['text']==key and m.nodes[m.nodes[b]['children'][0]]['image']==key
         m.calls=[]; assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and m.opened[-1]==(page,None),key
     assert m.nodes[kids[15]]['type']=='label' and [m.nodes[m.nodes[m.nodes[k]['children'][0]]['children'][1]]['text'] for k in kids[16:]]==['Restart','Shut Down']
@@ -766,7 +757,7 @@ for site in AUDIO_EXTENSION_CALLS:
 for path in ('/mnt/mmc/Novel.m4b','/mnt/mmc/Music/Novel.M4B','/mnt/mmc/Novel.m4B'):
     m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]
     m.word(r+O['REC_PATH'],m.string(path)); playing(m,0,200,pos=0,n=110)
-    assert m.places()==[(fnv(path),61)] and '/mnt/data/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
+    assert m.places()==[(fnv(path),61)] and '/mnt/mmc/.q2pod/ringnav-plays' not in m.files and '/mnt/mmc/.scrobbler.log' not in m.files
     m.poll(110,200,n=3)
     files=m.files
     m=ResumeMachine(files); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]; m.word(r+O['REC_PATH'],m.string(path))

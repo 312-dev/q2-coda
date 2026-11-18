@@ -12,10 +12,11 @@ from collections import Counter
 import pytest
 
 import host
-from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, ui_name
+from conftest import NAVIGATION_SOURCE, O, Deques, Files, claim, in_fork, stock_prop_str, stock_start_with, ui_name
 from test_coverflow import COVERS, TRACKS, Home, Rec, cf, deque_of  # coverflow.c's home struct, its page and an album
 from test_nav_display_library import Ple  # playlists.c's editor state
 from test_navigation import Config
+from test_corners import art as art_py  # tools/art.py: corner_cover, the corners' coverage
 
 W_PARENT, W_EMITTER = O['W_PARENT'], O['W_EMITTER']
 KEY_NEXT, KEY_PREV, KEY_CENTER, KEY_RETURN = O['KEY_NEXT'], O['KEY_PREV'], O['KEY_CENTER'], O['KEY_RETURN']
@@ -106,7 +107,7 @@ class Ui:
         mock('time_now_ms', lambda *_: self.now)
         mock('scroll_view_set_offset', self.set_offset)
         mock('scroll_view_scroll_delta_to', self.glide)
-        mock('tk_str_start_with', lambda s, prefix, *_: C.string_at(s).startswith(C.string_at(prefix)))
+        mock('tk_str_start_with', stock_start_with)
 
     def widget(self, kind, parent=None, box=(0, 0, 0, 0), **kwargs):
         w = Widget(kind, parent, box, **kwargs)
@@ -119,8 +120,13 @@ class Ui:
         return C.addressof(self.strings[value])
 
     def prop_str(self, w, name, default, *_):
-        value = self.by[w].props.get(C.string_at(name)) if w in self.by else None
-        return self.cstr(value) if isinstance(value, bytes) else default
+        widget, key = self.by.get(w), C.string_at(name)
+        if widget is None:
+            return default  # stock: widget_get_prop fails on a NULL widget
+        if key == b'text':  # the label's text, which stock answers as a wide string: NULL
+            return 0
+        value = stock_prop_str(widget.kind, key, widget.props.get(key), default)
+        return 0 if value is None else self.cstr(value) if isinstance(value, bytes) else value
 
     def prop_int(self, w, name, default, *_):
         value = self.by[w].props.get(C.string_at(name)) if w in self.by else None
@@ -1750,13 +1756,6 @@ class Canvas:
 PAGE_BLACK = 0xff000000  # RGBA(0): the page's black, which the corners are painted in
 
 
-def arc(r, i):
-    """How far in, in px, a radius-r round corner's row i (0 the outermost) starts: where the circle
-    crosses the middle of the row."""
-    y = r - i - 0.5  # the row's middle, up from the circle's centre
-    return r - math.sqrt(r * r - y * y)
-
-
 def painted(fills, size):
     """How much of each pixel of a size-px square art the fills cover in the page's black, 0 to 1, as
     alpha blending builds it up: a fill at alpha a leaves 1 - a of what was under it."""
@@ -1783,23 +1782,13 @@ def test_now_playings_art_has_round_corners_in_the_pages_black(fw, ui, st):
     assert r
     black = painted(canvas.fills, size)
     assert {y for _, y in black} == {*range(r), *range(size - r, size)}  # r rows a corner; the straight edges are the art's own
-    edges = []
-    for i in range(r):
-        # row i from each corner's side inward: top and bottom, the left and the mirrored right
-        lines = [[black.get((x if left else size - 1 - x, y), 0) for x in range(size // 2)]
-                 for y in (i, size - 1 - i) for left in (True, False)]
-        assert all(line == lines[0] for line in lines)  # the four corners alike
-        line = lines[0]
-        whole = next(x for x, c in enumerate(line) if c < 1)
-        assert not any(line[whole + 1:])  # whole black pixels, at most one part pixel, then the art
-        # where the arc crosses the row: to 1/16 px, its edge pixel's alpha in 16 steps from 0 to 255,
-        # so the paint may run 1/16 px more on top
-        assert abs(whole + line[whole] - arc(r, i)) < 1 / 8
-        edges.append((arc(r, i) - whole, line[whole]))  # how far the arc reaches past the whole pixels; that pixel's paint
-    # the edge pixel is painted only where the arc reaches into it, the more the further it reaches
-    assert all((part > 0) == (reach > 0) for reach, part in edges)
-    assert [part for _, part in sorted(edges)] == sorted(part for _, part in edges)
-    assert {part > 0 for _, part in edges} == {arc(r, i) % 1 > 0 for i in range(r)}  # the kinds of row at this radius
+    cover = art_py.corner_cover(r)
+    for y in range(size):
+        for x in range(size):
+            cx, cy = min(x, size - 1 - x), min(y, size - 1 - y)
+            # each corner pixel black by the share of it the arc leaves, along the flat of the arc as much as the steep
+            want = 1 - cover[cy * r + cx] / 255 if cx < r and cy < r else 0
+            assert abs(black.get((x, y), 0) - want) <= 1 / 255, (x, y)
     assert canvas.fill == LCD_FILL
 
 
@@ -1851,7 +1840,7 @@ def letter(fw, page, canvas):
     ('beatles', 'allmusic_page', 'B'), ('The Beatles', 'allmusic_page', 'B'), ('An Elephant', 'allmusic_page', 'E'),
     ('A Tribe', 'allmusic_page', 'T'), ('A', 'allmusic_page', 'A'), ('The ', 'allmusic_page', 'T'),  # no name after it
     ('Theory', 'allmusic_page', 'T'), ('  zed', 'allmusic_page', 'Z'),
-    ('The Beatles', 'radio_page', 'T'),  # only the Library sorts past "The"
+    ('The Beatles', 'folder_page', 'T'),  # only the Library sorts past "The": a folder sorts by its file name
     ('Éclair', 'allmusic_page', 'É'),
     ('', 'allmusic_page', None), ('   ', 'allmusic_page', None),
 ])
@@ -1892,7 +1881,7 @@ def test_the_letter_goes_with_its_timer_or_a_touch(fw, ui):
 
 
 def test_homes_library_pane_shows_no_letter(fw, ui):
-    page, canvas = spun(fw, ui, titles(200))
+    page, canvas = spun(fw, ui, titles(200), 'home_page')  # Library's categories beside Home's pane: not A to Z
     page.view.props[b'name'] = b'scroll_view_localmusic'
     assert letter(fw, page, canvas) == []
 
@@ -1970,6 +1959,23 @@ def test_edit_playlists_songs_show_no_letter_but_its_picker_does(fw, ui, mode, s
     assert letter(fw, page, canvas) == (['S'] if shown else [])
 
 
+# The letter is opt-in: a list takes it only when its page is one of the name-sorted Library lists (az_index.c
+# name_order). Every other long list, whatever its rows say, is in an order of its own: Wi-Fi's networks (by signal),
+# Bluetooth's devices, Settings, the queue, the play-count and battery lists, a card app's.
+@pytest.mark.parametrize('name', ['wifi_page', 'bluetooth_page', 'sysset_page', 'playerqueue_page', 'mostplayed_page',
+                                  'era_albums_page', 'radio_page', 'home_page'])
+def test_only_a_name_sorted_library_list_shows_the_letter(fw, ui, name):
+    page, canvas = spun(fw, ui, titles(200), name)
+    assert letter(fw, page, canvas) == []
+
+
+@pytest.mark.parametrize('cls', [0xff07, 0xff09])  # an artist's songs, a genre's: unsorted (getMusicBySonger, ByGenre)
+def test_an_artists_or_genres_songs_show_no_letter(fw, ui, cls):
+    fw.var('fw_ctx_g_class_type', C.c_int).value = cls
+    page, canvas = spun(fw, ui, titles(200))
+    assert letter(fw, page, canvas) == []
+
+
 # The iPod `>` on rows that open another list.
 def chevrons(fw, page, canvas):
     fw.fn('navigation__paint_chevrons', None, C.c_void_p, C.c_void_p)(page.view.at, canvas.at)
@@ -1997,6 +2003,13 @@ def test_rows_with_more_dots_or_tiles_get_no_chevron(fw, ui):
 def test_no_chevrons_off_a_drill_list_or_in_multi_select(fw, ui, name, navbar):
     fw.var('g_navbar_status', C.c_ubyte).value = navbar
     page, canvas = Page(ui, titles(6), name=name), Canvas(fw)
+    assert chevrons(fw, page, canvas) == []
+
+
+@pytest.mark.parametrize('mode', [1, 2])  # Add to Playlist from a list, from Now Playing
+def test_the_add_to_playlist_picker_s_rows_act_in_place_and_get_no_chevron(fw, ui, mode):
+    page, canvas = Page(ui, titles(6), name='playlist_page'), Canvas(fw)
+    page.win.props[b'_pl_mode'] = mode
     assert chevrons(fw, page, canvas) == []
 
 
@@ -2194,11 +2207,11 @@ def test_a_pill_gradient_rounds_both_ends_alike(fw):
     insets = [inset(y) for y in range(h)]
     assert insets == insets[::-1] and insets[0] > h // 4 and insets[h // 2 - 1] <= 1
     assert insets[:h // 2] == sorted(insets[:h // 2], reverse=True)
-    for y in range(h):  # an end's part pixel sits just outside the band, both sides alike
-        edge = [(color >> 24, x) for color, x, w in rows[y] if w == 1]
-        if edge:
-            assert [a for a, _ in edge] == [edge[0][0]] * 2 and 0 < edge[0][0] <= 255
-            assert sorted(x for _, x in edge) == [inset(y) - 1, 120 - inset(y)]
+    for y in range(h):  # an end's part pixels sit just outside the band, both sides alike
+        edge = sorted((x, color >> 24) for color, x, w in rows[y] if w == 1)
+        left, right = edge[:len(edge) // 2], edge[len(edge) // 2:]
+        assert [a for _, a in left] == [a for _, a in right][::-1] and all(0 < a < 255 for _, a in edge)
+        assert all(x < inset(y) for x, _ in left) and all(x >= 120 - inset(y) for x, _ in right)
 
 
 def pill(fw, ui, h, children, inset=0):
@@ -2427,6 +2440,7 @@ def test_setting_keys_name_each_option_in_config(fw):
     assert key_of(T, 0) == b'OLED_ACCENT'  # the theme's own accent key
 
 
+@in_fork  # Now Playing's new window answers NULL for its open_anim_hint: a bad read kills the process
 def test_a_window_takes_its_themes_motion_as_it_loads(fw, ui):
     theme(fw)
     oled, = host.tools_theme.builtins()
@@ -2468,13 +2482,19 @@ def wide(text):
     return (C.c_uint * (len(text) + 1))(*map(ord, text), 0)
 
 
-def test_without_vgcanvas_the_letters_box_is_square(fw, ui):
+def test_without_vgcanvas_the_letters_box_is_rounded_a_row_at_a_time(fw, ui):
+    """fill_box's own rows when AWTK declines: the same box, its corners antialiased (corner_cover.c)."""
     page, canvas = spun(fw, ui, titles(200))
     canvas.declines = 1
     letter(fw, page, canvas)
     (_, box, _), = canvas.boxes
     (_, rounded, color, _), = canvas.rounds  # asked for first, and declined
-    assert rounded == box and (color, *box) in canvas.fills  # the same square, its corners square
+    x, y, w, h = box
+    assert rounded == box and all(x <= fx and fx + fw_ <= x + w and y <= fy < y + h for _, fx, fy, fw_, _ in canvas.fills)
+    assert (color, x, y + h // 2, w, 1) in canvas.fills  # a middle row whole, in the box's colour
+    top = [(c, fx, fw_) for c, fx, fy, fw_, _ in canvas.fills if fy == y]
+    assert min(fx for _, fx, _ in top) > x  # the corner's outermost pixel clear
+    assert any(0 < c >> 24 < color >> 24 for c, _, _ in top)  # part pixels along the flat of the arc
 
 
 @pytest.mark.parametrize('declines, box, rounded', [(0, (10, 10, 80, 40), True), (1, (10, 10, 80, 40), False), (0, (10, 10, 20, 20), False)])

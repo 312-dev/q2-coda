@@ -17,6 +17,7 @@ class PlaybackMachine(QueueMachine):
     def __init__(self, files=None, **kw):
         super().__init__(**kw)
         self.files = dict(files or {}); self.handles = {}; self.fd = 100
+        self.files.setdefault('/proc/mounts', b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')  # the card in: the queue is on it (card_store.c)
         self.fail = ''; self.elapsed = 37; self.random_calls = 0; self.rng = 71
         self.allocations = 0; self.write_opens = 0; self.time_reads = 0; self.eq_boots = 0
         self.path_comparisons = 0; self.library_modes = []
@@ -33,7 +34,7 @@ class PlaybackMachine(QueueMachine):
         self.sent_speed = None; self.toasts = []
         for name in ('calloc@GLIBC_2.0','qsort@GLIBC_2.0','memcmp@GLIBC_2.0','strcmp@GLIBC_2.0',
                      'fopen@GLIBC_2.2','fread@GLIBC_2.0','fwrite@GLIBC_2.0','fclose@GLIBC_2.2',
-                     'rename@GLIBC_2.0','unlink@GLIBC_2.0','access@GLIBC_2.0','mclGetPlayTime',
+                     'rename@GLIBC_2.0','unlink@GLIBC_2.0','access@GLIBC_2.0','mkdir@GLIBC_2.0','mclGetPlayTime',
                      'mclStartPlayer','mclStop','mclSetStartSeekTime','mcl_open_preload','toolsRandnum','getAllMusic'):
             self.handlers[syms[name]] = 'p:'+name.split('@')[0]
         self.word(0xa3a270, 0x1000010); self.handlers[0x1000010] = 'p:free'
@@ -73,7 +74,7 @@ class PlaybackMachine(QueueMachine):
         elif name=='fopen':
             path,mode=self.text(a),self.text(b)
             if mode=='wb': self.write_opens+=1
-            if self.fail!='open' and (mode=='wb' or path in self.files):
+            if (self.fail!='open' or path=='/proc/mounts') and (mode=='wb' or path in self.files):  # the card stays mounted
                 self.fd+=1; ret=self.fd; self.handles[ret]=[path,0]
                 if mode=='wb': self.files[path]=b''
         elif name in ('fread','fwrite'):
@@ -90,6 +91,7 @@ class PlaybackMachine(QueueMachine):
             else: self.files[self.text(b)]=self.files.pop(self.text(a))
         elif name=='unlink': self.files.pop(self.text(a),None)
         elif name=='access': ret=-1 if self.text(a) in self.missing else 0
+        elif name=='mkdir': ret=-1  # card_store.c's CARD_STORE_DIR, there already (EEXIST)
         elif name=='speed': self.sent_speed=a; ret=1
         elif name=='toast': self.toasts.append(self.text(a))
         elif name=='mp4_fits': self.mp4_checks.append(self.text(a)); ret=self.fits
@@ -206,16 +208,16 @@ assert m.fn('playback_listable')==0 and [m.fn('playback_option',k) for k in rang
 
 # Over SAVE_LIMIT (999) tracks nothing is saved, and an older snapshot goes.
 for n,kept in ((999,True),(1000,False)):
-    m=PlaybackMachine({'/mnt/data/ringnav-queue':b'old'}); m.budget=100000000; m.install([(f't{i}',f'/L/{i}.flac','L',1,i,0,0) for i in range(n)])
-    assert m.fn('playback_shuffle')==1 and ('/mnt/data/ringnav-queue' in m.files)==kept and m.files.get('/mnt/data/ringnav-queue')!=b'old'; checks+=1
+    m=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':b'old'}); m.budget=100000000; m.install([(f't{i}',f'/L/{i}.flac','L',1,i,0,0) for i in range(n)])
+    assert m.fn('playback_shuffle')==1 and bool(m.files.get('/mnt/mmc/.q2pod/ringnav-queue'))==kept and m.files.get('/mnt/mmc/.q2pod/ringnav-queue')!=b'old'; checks+=1
 
 # A failed rebuild ends advanced play and drops the older queue's snapshot, so a reboot cannot
 # restore it.
-m=PlaybackMachine(); assert m.fn('playback_shuffle')==1 and '/mnt/data/ringnav-queue' in m.files
-m.fail='alloc'; assert m.fn('playback_shuffle')==0 and '/mnt/data/ringnav-queue' not in m.files and m.fn('playback_option',0)==0; checks+=1
+m=PlaybackMachine(); assert m.fn('playback_shuffle')==1 and bool(m.files.get('/mnt/mmc/.q2pod/ringnav-queue'))
+m.fail='alloc'; assert m.fn('playback_shuffle')==0 and not m.files.get('/mnt/mmc/.q2pod/ringnav-queue') and m.fn('playback_option',0)==0; checks+=1
 
-# The Now Playing hold's View Queue opens the Up Next list only while a shuffle is on (stock's page
-# otherwise); it lists those rows, in play order, and opens nothing else. No separate Up Next row.
+# The Now Playing hold's View Queue opens the Up Next sheet; it lists the rows in play order, and plays
+# nothing. No separate Up Next row.
 def now_playing():
     m=PlaybackMachine(page='playing_page',pos=1); m.handlers.pop(syms['mclGetPlayStatus'],None); m.word(0xa50084,2); return m
 m=now_playing(); m.options(0,2,0); m.press(5000); assert m.release()==1
@@ -224,7 +226,7 @@ m.press(7000); assert m.release()==1; checks+=1
 m=now_playing(); m.options(1,2,0); calls=m.random_calls
 m.press(6000); assert m.hold()==11 and m.release()==0 and 'Up Next' not in m.labels()
 m.pick(m.labels().index('View Queue')); m.advance(0)
-assert 'window_create' in [c[0] for c in m.calls] and m.random_calls==calls and not m.playback(); checks+=1
+assert m.nodes[m.top]['name']=='upnext_page' and m.random_calls==calls and not m.playback(); checks+=1  # Up Next's sheet (upnext.c)
 
 # Album identity (name, then album artist, else folder) crosses folders with an album artist;
 # folder grouping does not. Disc/track and CUE order differ from source order, and categories keep
@@ -256,9 +258,9 @@ for copies,want in (((1,),[4,5,6]),((1,2),[4,5,6,7])):
 m=PlaybackMachine(); m.options(1,2,0); q=m.get(syms['mcl_pdeqplaylist'])
 m.items(q).append(m.song('appended')); m.fn('playback_insert',7,1,0)
 assert set(m.sequence())==set(range(8))
-m.fn('playback_save'); assert '/mnt/data/ringnav-queue' in m.files
+m.fn('playback_save'); assert bool(m.files.get('/mnt/mmc/.q2pod/ringnav-queue'))
 m.handlers[ps['stock_mode_trampoline']]='p:saved'; m.fn('ringnav_mode',2)
-assert '/mnt/data/ringnav-queue' not in m.files and m.fn('playback_successor',1)==-1
+assert not m.files.get('/mnt/mmc/.q2pod/ringnav-queue') and m.fn('playback_successor',1)==-1
 checks+=1
 
 # Explicit group skips bypass category boundaries and return to the previous group's start.
@@ -391,7 +393,7 @@ checks+=1
 m=PlaybackMachine(); m.options(4,5,0); m.advance_song(0); m.advance_song(0); m.fn('playback_save')
 files=dict(m.files); want=m.current(); expected=m.fn('playback_successor',1)
 for fail in ('open','write','close','rename','alloc'):
-    m.fail=fail; m.elapsed+=1; m.fn('playback_save'); assert m.files['/mnt/data/ringnav-queue']==files['/mnt/data/ringnav-queue']
+    m.fail=fail; m.elapsed+=1; m.fn('playback_save'); assert m.files['/mnt/mmc/.q2pod/ringnav-queue']==files['/mnt/mmc/.q2pod/ringnav-queue']
 m.fail=''
 r=PlaybackMachine(files); r.byte(syms['g_memory_play'],2); out=r.deque([])
 assert r.fn('ringnav_memory',out)==want and r.seek==37
@@ -402,15 +404,15 @@ assert r.fn('playback_successor',1)==expected and len(r.names())==7
 record=r.items(r.get(syms['mcl_pdeqplaylist']))[want]
 assert r.fn('playback_resumed',record)==1 and r.fn('playback_resumed',record)==0
 r.elapsed=0; r.fn('playback_save')
-assert struct.unpack_from('<I',r.files['/mnt/data/ringnav-queue'],24)[0]==37
+assert struct.unpack_from('<I',r.files['/mnt/mmc/.q2pod/ringnav-queue'],24)[0]==37
 r.elapsed=38; r.fn('playback_save'); r.elapsed=0; r.fn('playback_save')
-assert struct.unpack_from('<I',r.files['/mnt/data/ringnav-queue-elapsed'],12)[0]==0
+assert struct.unpack_from('<I',r.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed'],12)[0]==0
 assert r.fn('ringnav_prev')==1 and r.current()!=want
 # Skip missing files; both CUE occurrences and duplicate files remain distinct.
 r=PlaybackMachine(files); r.byte(syms['g_memory_play'],2); r.missing={'/B/01.flac'}
 assert r.fn('ringnav_memory',r.deque([]))>=0 and len(r.names())==6
-for corrupt in (b'',files['/mnt/data/ringnav-queue'][:-1],b'bad'+files['/mnt/data/ringnav-queue'][3:],files['/mnt/data/ringnav-queue']+b'x'):
-    r=PlaybackMachine({'/mnt/data/ringnav-queue':corrupt}); r.byte(syms['g_memory_play'],2)
+for corrupt in (b'',files['/mnt/mmc/.q2pod/ringnav-queue'][:-1],b'bad'+files['/mnt/mmc/.q2pod/ringnav-queue'][3:],files['/mnt/mmc/.q2pod/ringnav-queue']+b'x'):
+    r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':corrupt}); r.byte(syms['g_memory_play'],2)
     before=r.names(); assert r.fn('ringnav_memory',r.deque([]))==-1 and r.names()==before
 r=PlaybackMachine(files); r.byte(syms['g_memory_play'],1)
 assert r.fn('ringnav_memory',r.deque([]))>=0 and r.seek==0
@@ -442,18 +444,18 @@ checks+=1
 # play; a queue edit at the same track rewrites it, and a stream's queue leaves it alone.
 m=PlaybackMachine(); m.word(O['MCL_TYPE'],0xff01); q=m.get(syms['mcl_pdeqplaylist'])
 m.items(q).append(m.song('added')); m.fn('playback_insert',7,1,0); m.fn('playback_save')
-assert '/mnt/data/ringnav-queue' not in m.files  # Memory Playback off: nothing written
+assert not m.files.get('/mnt/mmc/.q2pod/ringnav-queue')  # Memory Playback off: nothing written
 m.byte(syms['g_memory_play'],2); m.fn('playback_save')
-saved=struct.unpack_from('<14I',m.files['/mnt/data/ringnav-queue'])
+saved=struct.unpack_from('<14I',m.files['/mnt/mmc/.q2pod/ringnav-queue'])
 assert (saved[1],saved[4],saved[5],saved[13])==(4,8,2,0xff01) and m.fn('playback_option',0)==0
 r=PlaybackMachine(m.files); r.byte(syms['g_memory_play'],2); r.library_rows.append(r.song('added'))
 out=r.deque([]); assert r.fn('ringnav_memory',out)==2 and r.seek==37
 assert r.names()==['a2','b1','a1','cue1','cue2','solo','a1','added'] and r.fn('playback_option',1)==2
 r.fn('ringnav_load',out,2,0xff01); assert r.fn('playback_option',1)==2 and len(r.names())==8
 m.items(q).pop(); m.fn('playback_save')
-assert struct.unpack_from('<I',m.files['/mnt/data/ringnav-queue'],16)[0]==7
-plain=m.files['/mnt/data/ringnav-queue']; m.word(O['MCL_TYPE'],0xf1); m.items(q).pop(); m.fn('playback_save')
-assert m.files['/mnt/data/ringnav-queue']==plain
+assert struct.unpack_from('<I',m.files['/mnt/mmc/.q2pod/ringnav-queue'],16)[0]==7
+plain=m.files['/mnt/mmc/.q2pod/ringnav-queue']; m.word(O['MCL_TYPE'],0xf1); m.items(q).pop(); m.fn('playback_save')
+assert m.files['/mnt/mmc/.q2pod/ringnav-queue']==plain
 checks+=1
 
 # Missing priority files retain the remaining Play Next block and a valid next-boot snapshot.
@@ -468,7 +470,7 @@ for missing in ({'priority1'}, {'priority3'}, {'priority1','priority3'},
     r.missing={'/p/'+n for n in missing}
     assert r.fn('ringnav_memory',r.deque([]))==2
     r.fn('playback_save')
-    saved=struct.unpack_from('<14I',r.files['/mnt/data/ringnav-queue'])
+    saved=struct.unpack_from('<14I',r.files['/mnt/mmc/.q2pod/ringnav-queue'])
     remaining=[n for n in ('priority1','priority2','priority3') if n not in missing]
     assert saved[12]==len(remaining)
     for name in remaining:
@@ -516,16 +518,16 @@ checks+=1
 # Repeated UI passes do not hammer allocation/storage while the checkpoint is pending.
 for failure in ('alloc','open','write','close','rename'):
     m=PlaybackMachine(); m.options(4,5,0)
-    previous=m.files['/mnt/data/ringnav-queue']; m.advance_song(0)
+    previous=m.files['/mnt/mmc/.q2pod/ringnav-queue']; m.advance_song(0)
     m.fail=failure; m.fn('playback_poll')
     attempts=(m.allocations,m.write_opens)
-    assert m.files['/mnt/data/ringnav-queue']==previous
+    assert m.files['/mnt/mmc/.q2pod/ringnav-queue']==previous
     for delta in (1,100,1000,3000,898,25000):
         m.now+=delta; m.fn('playback_poll')
         assert (m.allocations,m.write_opens)==attempts
     m.fail=''; m.now+=1; m.fn('playback_poll')
-    assert m.files['/mnt/data/ringnav-queue']!=previous
-    assert struct.unpack_from('<I',m.files['/mnt/data/ringnav-queue'],20)[0]==m.current()
+    assert m.files['/mnt/mmc/.q2pod/ringnav-queue']!=previous
+    assert struct.unpack_from('<I',m.files['/mnt/mmc/.q2pod/ringnav-queue'],20)[0]==m.current()
     assert m.allocations==attempts[0]+1 and m.write_opens==attempts[1]+2
     m.fn('playback_save'); assert m.allocations==attempts[0]+1
     checks+=1
@@ -560,29 +562,29 @@ def fnv(data):
     return value
 def snapshot_checksum(data):
     struct.pack_into('<I',data,12,0); struct.pack_into('<I',data,12,fnv(data))
-legacy=bytearray(files['/mnt/data/ringnav-queue']); del legacy[52:56]
+legacy=bytearray(files['/mnt/mmc/.q2pod/ringnav-queue']); del legacy[52:56]
 struct.pack_into('<I',legacy,4,1); struct.pack_into('<I',legacy,8,len(legacy)); snapshot_checksum(legacy)
-r=PlaybackMachine({'/mnt/data/ringnav-queue':bytes(legacy)}); r.byte(syms['g_memory_play'],2)
+r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':bytes(legacy)}); r.byte(syms['g_memory_play'],2)
 assert r.fn('ringnav_memory',r.deque([]))==-1
-bad=bytearray(files['/mnt/data/ringnav-queue']); struct.pack_into('<I',bad,52,5); snapshot_checksum(bad)
-r=PlaybackMachine({'/mnt/data/ringnav-queue':bytes(bad)}); r.byte(syms['g_memory_play'],2)
+bad=bytearray(files['/mnt/mmc/.q2pod/ringnav-queue']); struct.pack_into('<I',bad,52,5); snapshot_checksum(bad)
+r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':bytes(bad)}); r.byte(syms['g_memory_play'],2)
 assert r.fn('ringnav_memory',r.deque([]))==-1
 # A version 2 snapshot (its Play Next one run, forced and force_end in the header) restores: the run
 # comes back as the list, in order, with the queue and position, and the next save writes version 3.
 m=PlaybackMachine(); m.options(1,5,0); q=m.get(syms['mcl_pdeqplaylist']); old=m.current()
 m.deqs[q][1][old+1:old+1]=[m.song('next%d'%i) for i in range(3)]; m.fn('playback_insert',old+1,3,1); m.fn('playback_save')
-v3=m.files['/mnt/data/ringnav-queue']; hdr=struct.unpack_from('<14I',v3); n,hn=hdr[4],hdr[11]
+v3=m.files['/mnt/mmc/.q2pod/ringnav-queue']; hdr=struct.unpack_from('<14I',v3); n,hn=hdr[4],hdr[11]
 assert hdr[12]==3
 body=bytearray(v3[56:]); at=(n*3+hn)*4; run=struct.unpack_from('<3I',body,at)
 assert run==(old+1,old+2,old+3)
 v2=struct.pack('<15I',0x5132524e,2,0,0,*hdr[4:12],run[0]+1,run[2]+1,hdr[13])+bytes(body[:at]+body[at+12:])
 v2=bytearray(v2); struct.pack_into('<I',v2,8,len(v2)); snapshot_checksum(v2)
 names=m.names(); want=m.current()
-r=PlaybackMachine({'/mnt/data/ringnav-queue':bytes(v2)}); r.byte(syms['g_memory_play'],2)
+r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':bytes(v2)}); r.byte(syms['g_memory_play'],2)
 r.library_rows.extend(r.song('next%d'%i) for i in range(3))
 assert r.fn('ringnav_memory',r.deque([]))==want and r.names()==same(names)
 assert up_names(r)[:3]==['next0','next1','next2'] and up_names(r)==same(up_names(m))
-r.fn('playback_save'); saved=struct.unpack_from('<14I',r.files['/mnt/data/ringnav-queue'])
+r.fn('playback_save'); saved=struct.unpack_from('<14I',r.files['/mnt/mmc/.q2pod/ringnav-queue'])
 assert saved[1]==3 and saved[12]==3
 checks+=1
 
@@ -686,18 +688,18 @@ for folder in (0,1):
         r.u.emu_start(0x504184,0x504190,count=r.budget)
         assert r.u.reg_read(UC_MIPS_REG_PC)==0x504190 and r.eq_boots==1
         assert r.mcl('MCL_MODE')==mode
-        assert r.files['/mnt/data/ringnav-queue']==m.files['/mnt/data/ringnav-queue']
+        assert r.files['/mnt/mmc/.q2pod/ringnav-queue']==m.files['/mnt/mmc/.q2pod/ringnav-queue']
         at=r.fn('ringnav_memory',out); assert at==want[0] and r.seek==37
         r.fn('ringnav_load',out,at,0xf001)
         r.word(O['MCL_FD'],9); r.sent=[]
         r.word(ps['peq_chained'],1) # the filter was attached under the last hciplayer
         r.call(address=0x51e024,args=(0,0,0,0),gap=0) # player_initconfig
-        assert '/mnt/data/ringnav-queue' in r.files and r.sequence()==want
+        assert bool(r.files.get('/mnt/mmc/.q2pod/ringnav-queue')) and r.sequence()==want
         assert r.get(ps['peq_chained'])==0 # a new hciplayer has no filter: peq_chain attaches again
         # A real mode choice still clears the snapshot after startup.
         r.call(address=syms['config_playmode'],args=(mode,0,0,0),gap=0)
         # Stock Shuffle (2) keeps Shuffle Albums/Folders; every other mode ends them.
-        assert ('/mnt/data/ringnav-queue' in r.files) == (mode == 2)
+        assert bool(r.files.get('/mnt/mmc/.q2pod/ringnav-queue')) == (mode == 2)
         checks+=1
 
 # Previous then Next returns to the track Previous left instead of skipping it.
@@ -712,16 +714,16 @@ for shuffle,kept in ((3,0),(4,0),(2,2),(1,1)):
     m=PlaybackMachine(); m.options(shuffle,5,0); m.advance_song(0)
     m.fn('ringnav_load',m.deque([m.song('library')]),0,0xf001)
     assert m.fn('playback_option',0)==kept
-    assert ('/mnt/data/ringnav-queue' in m.files)==(kept!=0)
+    assert bool(m.files.get('/mnt/mmc/.q2pod/ringnav-queue'))==(kept!=0)
 m=PlaybackMachine(); m.options(3,5,0); m.advance_song(0)
 assert m.fn('playback_groups',m.deque(list(m.items(m.get(syms['mcl_pdeqplaylist'])))),0)==1
 assert m.fn('playback_option',0)==3
 checks+=1
 
 # Empty replacement cannot resurrect the previous saved queue at the next boot.
-m=PlaybackMachine(); m.options(0,2,0); assert '/mnt/data/ringnav-queue' in m.files
+m=PlaybackMachine(); m.options(0,2,0); assert bool(m.files.get('/mnt/mmc/.q2pod/ringnav-queue'))
 m.fn('ringnav_load',m.deque([]),0,1); m.fn('playback_save')
-assert '/mnt/data/ringnav-queue' not in m.files
+assert not m.files.get('/mnt/mmc/.q2pod/ringnav-queue')
 checks+=1
 
 # Empty and one-track queues, all combinations.
@@ -1298,7 +1300,7 @@ class HeldMachine(ChangeMachine):
         for _ in range(n):
             self.play=(sec,3600); self.now+=1000; self.fn('ringnav_sleep',0x1234); sec=self.play[0]
     def places(self):
-        return [(k,signed(v)) for k,v in struct.iter_unpack('<II',self.files.get('/mnt/data/ringnav-resume',b'')) if k]
+        return [(k,signed(v)) for k,v in struct.iter_unpack('<II',self.files.get('/mnt/mmc/.q2pod/ringnav-resume',b'')) if k]
 # A refused press keeps the place and toasts; the second within RESTART_ASK_MS restarts, which the poll forgets it for.
 m=HeldMachine(); m.install([('book','/a/book.m4b','B',0,0,0,0)],0); m.word(O['MCL_TYPE'],1)
 m.poll(0,2); m.poll(100,3); place=m.places(); assert [s for _,s in place]==[100]
@@ -1498,9 +1500,12 @@ m=PickMachine(); assert m.at_site(m.ROW,at=0)==['stock_queue']
 m=PickMachine(status=1); assert m.at_site(m.ROW)==['stock_queue']
 m=PickMachine(); m.held=0; assert m.at_site(m.ROW)==['stock_queue']
 m=PickMachine(); m.handlers.pop(syms['player_start_queue'],None); m.fn('ringnav_start_queue',1); assert m.seen==['resume_held','stock_queue'] or m.seen==['stock_queue'],m.seen  # DLNA, a delete
-# Up Next's row of it closes the page, then opens Now Playing. Any other row plays, as before.
-m=PickMachine(); m.word(O['MCL_POS'],0); del m.seen[:]; m.fn('un_play',0); assert [e for e in m.seen if e!='resume_held']==['back','np'],m.seen
-m=PickMachine(); m.held=0; m.word(O['MCL_POS'],0); del m.seen[:]; m.fn('un_play',0); assert [e for e in m.seen if e!='resume_held']==['stock_queue','back'],m.seen
+# Up Next's row of it closes the sheet, then opens Now Playing. Any other row plays, as before.
+def up_next_row(m,at):  # upnext.c's rows as un_fill leaves them: one song, queue index at, nothing queued
+    un=ps['un']; m.word(un+20,at); m.word(un+20+4*500,1); m.word(un+20+4*501,0)
+    m.fn('un_click',0,0)  # its row's stop 0, pressed by Centre (no event)
+m=PickMachine(); m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['back','np'],m.seen
+m=PickMachine(); m.held=0; m.word(O['MCL_POS'],0); del m.seen[:]; up_next_row(m,0); assert [e for e in m.seen if e!='resume_held']==['stock_queue','back'],m.seen
 checks+=30
 # player_start's real body: another list loads and starts through the hook, past stock's mclLoadPlayList and mclStartPlayer.
 class BodyMachine(PickMachine):
@@ -1534,12 +1539,12 @@ print(f'{checks} advanced playback/wheel MIPS checks passed')
 
 # Elapsed checkpoints are fixed-size, atomic, and tied to both snapshot and position.
 m=PlaybackMachine(); m.options(0,5,0)
-full=m.files['/mnt/data/ringnav-queue']; m.elapsed=52; m.fn('playback_save')
-checkpoint=m.files['/mnt/data/ringnav-queue-elapsed']
-assert len(checkpoint)==16 and m.files['/mnt/data/ringnav-queue']==full
+full=m.files['/mnt/mmc/.q2pod/ringnav-queue']; m.elapsed=52; m.fn('playback_save')
+checkpoint=m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed']
+assert len(checkpoint)==16 and m.files['/mnt/mmc/.q2pod/ringnav-queue']==full
 for failure in ('open','write','close','rename'):
     m.fail=failure; m.elapsed=53; m.fn('playback_save')
-    assert m.files['/mnt/data/ringnav-queue-elapsed']==checkpoint
+    assert m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed']==checkpoint
 m.fail=''; m.fn('playback_save')
 def checkpoint_checksum(data): struct.pack_into('<I',data,0,fnv(data[4:]))
 for kind in ('valid','truncated','checksum','snapshot','position'):
@@ -1547,23 +1552,23 @@ for kind in ('valid','truncated','checksum','snapshot','position'):
     if kind=='truncated': c=c[:-1]
     elif kind=='checksum': c[-1]^=1
     elif kind!='valid': struct.pack_into('<I',c,{'snapshot':4,'position':8}[kind],999); checkpoint_checksum(c)
-    r=PlaybackMachine({'/mnt/data/ringnav-queue':full,'/mnt/data/ringnav-queue-elapsed':bytes(c)})
+    r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':full,'/mnt/mmc/.q2pod/ringnav-queue-elapsed':bytes(c)})
     r.byte(syms['g_memory_play'],2)
     assert r.fn('ringnav_memory',r.deque([]))>=0 and r.seek==(52 if kind=='valid' else 37),kind
 # Interrupted full-snapshot publication leaves an old checkpoint harmless.
 stale=bytearray(checkpoint); stale[4]^=1; checkpoint_checksum(stale)
-r=PlaybackMachine({'/mnt/data/ringnav-queue':full,'/mnt/data/ringnav-queue-elapsed':bytes(stale)})
+r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':full,'/mnt/mmc/.q2pod/ringnav-queue-elapsed':bytes(stale)})
 r.byte(syms['g_memory_play'],2); assert r.fn('ringnav_memory',r.deque([]))>=0 and r.seek==37
 # A snapshot with a time wins over the track's own place; Memory Playback: Track has none to give.
 for memory,taken in ((2,1),(1,0)):
-    r=PlaybackMachine({'/mnt/data/ringnav-queue':full}); r.byte(syms['g_memory_play'],memory); assert r.fn('ringnav_memory',r.deque([]))>=0
+    r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':full}); r.byte(syms['g_memory_play'],memory); assert r.fn('ringnav_memory',r.deque([]))>=0
     q=r.items(r.get(syms['mcl_pdeqplaylist']))[r.current()]
     assert (r.fn('playback_resumed',q)!=0)==bool(taken) and r.fn('playback_resumed',q)==0,memory  # asked once
 # And through the poll: Track goes back to the track's own place once it plays, Location's time keeps it.
 for memory,seeks in ((1,[1000]),(2,[])):
-    r=HeldMachine(); r.files['/mnt/data/ringnav-queue']=full; r.byte(syms['g_memory_play'],memory); assert r.fn('ringnav_memory',r.deque([]))>=0
+    r=HeldMachine(); r.files['/mnt/mmc/.q2pod/ringnav-queue']=full; r.byte(syms['g_memory_play'],memory); assert r.fn('ringnav_memory',r.deque([]))>=0
     path=r.get(r.items(r.get(syms['mcl_pdeqplaylist']))[r.current()]+O['REC_PATH'])
-    r.files['/mnt/data/ringnav-resume']=struct.pack('<II',r.fn('fnv',2166136261,path)&0xffffffff,1000)+bytes(8*O['RESUME_SLOTS']-8)
+    r.files['/mnt/mmc/.q2pod/ringnav-resume']=struct.pack('<II',r.fn('fnv',2166136261,path)&0xffffffff,1000)+bytes(8*O['RESUME_SLOTS']-8)
     r.poll(0,2); assert not r.seeks  # at 0, paused or not started: it waits
     r.poll(1); assert r.seeks==seeks,memory
 # Measure actual payload instructions: even exhausted/category-repeat scans occur only once.
@@ -1589,25 +1594,25 @@ for n in (8,128):
         m.u.hook_del(read_hook)
         assert scanned>=n-1 and visits[0]==0
         assert warm<100 and cold>=warm
-        full_bytes=len(m.files['/mnt/data/ringnav-queue']); m.elapsed+=5; m.fn('playback_save')
-        assert len(m.files['/mnt/data/ringnav-queue-elapsed'])==16
+        full_bytes=len(m.files['/mnt/mmc/.q2pod/ringnav-queue']); m.elapsed+=5; m.fn('playback_save')
+        assert len(m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed'])==16
         print(f'queue={n} repeat={repeat}: successor uncached={uncached}, cold={cold}, cached={warm} instructions, traversal reads {scanned} -> 0; elapsed save {full_bytes} full -> 16 bytes')
 print('Checkpoint and polling performance checks passed')
 
 # A checkpoint publication failure after full commit retries without rewriting the queue.
 m=PlaybackMachine(); m.options(0,5,0)
-old_checkpoint=m.files['/mnt/data/ringnav-queue-elapsed']
+old_checkpoint=m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed']
 m.advance_song(); m.elapsed=49; m.fail='checkpoint-rename'; m.fn('playback_save')
-committed=m.files['/mnt/data/ringnav-queue']; writes=m.write_opens
-assert m.files['/mnt/data/ringnav-queue-elapsed']==old_checkpoint
+committed=m.files['/mnt/mmc/.q2pod/ringnav-queue']; writes=m.write_opens
+assert m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed']==old_checkpoint
 r=PlaybackMachine(m.files); r.byte(syms['g_memory_play'],2)
 assert r.fn('ringnav_memory',r.deque([]))==m.current() and r.seek==49
 m.fail=''; m.fn('playback_save')
-assert m.files['/mnt/data/ringnav-queue']==committed and m.write_opens==writes+1
-assert m.files['/mnt/data/ringnav-queue-elapsed']!=old_checkpoint
+assert m.files['/mnt/mmc/.q2pod/ringnav-queue']==committed and m.write_opens==writes+1
+assert m.files['/mnt/mmc/.q2pod/ringnav-queue-elapsed']!=old_checkpoint
 
 # Uncommitted checkpoint temporaries never override the committed full snapshot.
-r=PlaybackMachine({'/mnt/data/ringnav-queue':full,'/mnt/data/ringnav-queue-elapsed.tmp':checkpoint})
+r=PlaybackMachine({'/mnt/mmc/.q2pod/ringnav-queue':full,'/mnt/mmc/.q2pod/ringnav-queue-elapsed.tmp':checkpoint})
 r.byte(syms['g_memory_play'],2)
 assert r.fn('ringnav_memory',r.deque([]))>=0 and r.seek==37
 
@@ -1709,7 +1714,7 @@ for badpath in ('https://host/book.mp3','/A/','/'+'x'*1024+'/a.mp3'):
     m=PlaybackMachine(); m.install([('invalid',badpath,'',0,0,0,0)])
     assert speed_at(m,0)==0
     # No folder (a stream): the change applies to this track only, nothing is saved.
-    m.fn('ringnav_speed',2); assert not m.files and m.sent_speed==2 and m.u.mem_read(syms['g_playspeed_mode'],1)[0]==2
+    m.fn('ringnav_speed',2); assert m.files.keys()<={'/proc/mounts'} and m.sent_speed==2 and m.u.mem_read(syms['g_playspeed_mode'],1)[0]==2
 # A track's start sends its own folder's speed to the running decoder: a song after a fast book
 # plays at normal speed, not the decoder's last speed.
 m=PlaybackMachine(); m.word(O['MCL_POS'],0); m.fn('ringnav_speed',2); m.sent_speed=None
@@ -1830,7 +1835,7 @@ assert m.fn('ringnav_shuffle',1)==1 and m.mcl('MCL_POS')==6
 m=XfadeMachine(); rows=list(m.library_rows); assert m.fade(3)==0
 m.word(syms['mcl_pdeqplaylist'],m.deque(rows[:4]+[rows[0]]+rows[4:])); assert m.fade()==7000
 m.word(syms['mcl_pdeqplaylist'],m.deque(rows)); assert m.fade()==0
-m=XfadeMachine('0'); assert m.fade()==0 and not m.files and not m.attaches  # off: no file
+m=XfadeMachine('0'); assert m.fade()==0 and m.files.keys()<={'/proc/mounts'} and not m.attaches  # off: no file
 # Shuffle Songs (the reports' mode, #164): the next is the shuffle's successor, not pos + 1, and
 # the fade follows album_cmp of the two records at every automatic change.
 m=XfadeMachine(); assert m.fn('playback_shuffle',2)==1
@@ -1898,7 +1903,7 @@ for kind,stamps in ((1,True),(0xff10,True),(0xf001,True),(2,False),(3,False),(0x
 # Stock's own player_start_queue hook doesn't stamp (DLNA, SyncLink's URL plays); Up Next's row does, before it.
 m=PressMachine(); m.handlers[ps['stock_start_queue_trampoline']]='xf:none'; m.fn('ringnav_start_queue',2); assert m.nothing()
 m=PressMachine(); m.handlers[syms['player_start_queue']]='xf:start'; m.handlers[syms['navigator_back']]='xf:none'
-m.fn('un_play',0); assert m.stock==['xf:start'] and m.seen==5001
+up_next_row(m,0); assert m.stock==['xf:start'] and m.seen==5001
 # Play from a stop stamps, a headset's own too (media_set_playing, through the same hook); playing or paused doesn't.
 m=PressMachine(); m.word(0xa50084,1); m.enter('player_play_pause'); assert m.at()==5001 and m.stock==['xf:pause']
 m=PressMachine(); m.handlers.pop(syms['player_play_pause'],None); m.word(0xa50084,1); m.fn('media_set_playing',1); assert m.at()==5001 and m.stock==['xf:pause']

@@ -47,6 +47,30 @@ int vol_keyup(void *dialog, void *e) {
     return stock_vol_keyup_trampoline(dialog, e);
 }
 
+/* The volume moved from `from` by something other than the wheel (a headset's own keys,
+ * bt_volume_poll): shown at once as a wheel's change shows, with the screen lit. The volume dialog
+ * in front takes the new value and its 3 s start again (stock's count, VOL_DIALOG_COUNT, as its
+ * keyup zeroes it); Control Center's slider eases to it; Playback's Volume page shows it itself
+ * (xfade_volume_shown); over any other window stock's volume dialog opens on it, the panel or
+ * Now Playing's band (vol_paint). Not over a video, which has its own volume, nor over another
+ * dialog, whose keys the volume dialog would take for 3 s, nor where stock's on_wm_keyup_fun
+ * opens none (the lock window, test mode, the first-boot guide, powering off). */
+void vol_show(int from) {
+    void *top = window_manager_get_top_window(window_manager());
+    if (xfade_volume_shown(top) || !g_backlight_status || !top || video_on()) return;
+    const char *name = widget_get_prop_str(top, "name", "");
+    level_ease_from(&vol_bar, from);
+    if (!tk_strcmp(name, "volume_dialog")) {
+        void *slider = widget_lookup(top, "slider_vol", 1);
+        if (slider) widget_set_prop_int(slider, "value", g_volume);
+        *(volatile signed char *)VOL_DIALOG_COUNT = 0;
+    } else if (!tk_strcmp(name, "statusbar_dialog"))
+        level_follow(top);
+    else if (tk_strcmp(widget_get_type(top), "dialog") && !g_lockscreen_pageflag &&
+             !g_testmode_flag && !g_guideflag && !g_poweroff_state) /* stock's own exits */
+        navigator_to("dialog/volume_dialog");
+}
+
 /* The windows whose wheel is the volume: playback screens. Stock's Now Playing (TIDAL's songs and
  * the card apps' play there too), the AirPlay and DLNA receiver, Internet Radio's Now Playing and
  * Spotify's while it shows a track (spot_np_track). Videos (videos.c video_key), Control Center's

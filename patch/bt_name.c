@@ -5,15 +5,16 @@
  * time demo turns Bluetooth on (openBluetooth, through headset.c's headset_status_register) and
  * after a rename, bt_name_apply sets BlueZ's adapter Alias over D-Bus to the chosen name, or to ""
  * with none, which BlueZ takes as "use main.conf's Name": so config.ini is the one record, and Q2
- * Q2 Muse's first-boot defaults (a config.ini without BTNAME) give the Q2 its default name back even
- * where BlueZ kept an old alias in /mnt/data/bluetooth. The change is live: a phone scanning sees
- * the new name at once, and one already paired shows it the next time it reads the Q2's name.
+ * Q2 Muse's first-boot defaults (a config.ini without BTNAME) give the Q2 its default name back
+ * even where BlueZ kept an old alias in /mnt/data/bluetooth. The change is live: a phone scanning
+ * sees the new name at once, and one already paired shows it the next time it reads the Q2's name.
  *
- * Settings > Bluetooth's Name row shows the name and opens the letter strip in a text box's form
- * (search_strip_text): Next at the end saves, a held Return leaves it as it was. */
+ * Settings > Bluetooth's Name row shows the name and opens the letter strip (search_strip_text),
+ * the name typed in the row itself after its label and who sees it said under the row:
+ * submitting saves, a held Return leaves it as it was. */
 #include "navigation.h"
 
-#define BT_NAME_DEFAULT "Q2"
+#define BT_NAME_DEFAULT "Q2 Muse"
 #define BT_NAME_KEY "BTNAME"
 #define BT_NAME_MAX                                                                                \
     30 /* characters; BlueZ takes 248 bytes, the row and the strip about this many */
@@ -82,6 +83,8 @@ static const char *bt_name_done(const char *text) {
 static int bt_name_open(void *ctx, void *event) {
     (void)ctx, (void)event;
     char name[BT_NAME_MAX + 1];
+    search_strip_note("Phones and cars see this name");
+    search_strip_label("Name"); /* typed in its row, after the label (search_strip.c) */
     search_strip_text("Bluetooth", bt_name(name, sizeof name), BT_NAME_MAX, bt_name_done);
     return 0;
 }
@@ -91,14 +94,16 @@ static int bt_name_gone(void *ctx, void *event) {
     return 0;
 }
 
-/* ringnav_btrows: stock's second head row, its "Bluetooth Name" over what the radio reports (row
+/* bt_ui.c bt_page: stock's second head row, its "Bluetooth Name" over what the radio reports (row
  * 1, which stock's click ignores), becomes Name with the saved name as its value, opening the
- * strip. The row keeps stock's place and height. */
+ * strip; the row keeps stock's place and height. With Bluetooth off stock builds only the switch,
+ * and Name is made after it. */
 void bt_name_row(void *view) {
-    void *old = view && widget_count_children(view) > 1 ? widget_get_child(view, 1) : (void *)0;
-    if (!old) return;
-    int h = I(old, W_H);
-    widget_destroy(old);
+    unsigned n = view ? widget_count_children(view) : 0;
+    if (!n) return;
+    void *old = n > 1 ? widget_get_child(view, 1) : (void *)0;
+    int h = old ? I(old, W_H) : SET_STOCK_ROW;
+    if (old) widget_destroy(old);
     char name[BT_NAME_MAX + 1];
     bn.label = list_row_into(view, 0, bt_name_open, 0);
     void *row = P(P(bn.label, W_PARENT), W_PARENT);

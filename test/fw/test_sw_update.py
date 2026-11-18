@@ -10,7 +10,11 @@ import pytest
 import host
 from conftest import O, Files
 
-SW_CHECKING, SW_OK, SW_LATEST, SW_NONE, SW_NOCARD, SW_LOW, SW_BAD, SW_FULL, SW_CANCELLED, SW_ASKING = range(10)
+(SW_CHECKING, SW_OK, SW_LATEST, SW_NONE, SW_NOCARD, SW_LOW, SW_BAD, SW_FULL, SW_CANCELLED, SW_ASKING, SW_OFFER_NET,
+ SW_OFFER_SD, SW_DOWNLOADING) = range(13)
+ON_NONE, ON_OFF, ON_CHECKING = -2, -1, 0
+NET_NEWER, NET_LATEST, NET_FAILED = 1, 2, 3
+NOTE_NONE, NOTE_SD, NOTE_WIFI, NOTE_RETRY = range(4)
 TAR = '/mnt/mmc/update.tar'
 INSTALLED = b'V0JYi'
 
@@ -18,7 +22,11 @@ INSTALLED = b'V0JYi'
 class Sw(C.Structure):
     _fields_ = [('thread', C.c_ulong), *((n, C.c_int) for n in ('state', 'cancel', 'result', 'level', 'frame')),
                 ('timer', C.c_uint), ('size_kb', C.c_uint), ('parts', C.c_longlong),
-                *((n, C.c_void_p) for n in ('page', 'restart')), ('tag', C.c_char * 24)]
+                *((n, C.c_void_p) for n in ('page', 'restart')), ('tag', C.c_char * 24),
+                *((n, C.c_int) for n in ('online', 'net_up', 'sd_up')), ('net_thread', C.c_ulong),
+                ('net_kb', C.c_uint), ('net_tag', C.c_char * 32),
+                *((n, C.c_int) for n in ('note', 'focus', 'percent', 'verifying')),
+                ('button', C.c_int * 4), ('link', C.c_int * 4)]
 
 
 def carded(fw):
@@ -250,3 +258,89 @@ def test_the_restarts_bar_is_what_stocks_tar_unpacked(fw, have, part):
                '/mnt/mmc/recovery-update/rootfs.squashfs': b'r' * max(0, have - 700)} if have else {})
     fw.var('sw_update__swu', Sw).parts = 2200
     assert fw.fn('sw_update__sw_unpacked', C.c_int, C.c_int)(180) == part
+
+
+# Software Update (29 v3): General's one row checks online and the card at once, each apart from the other.
+
+def offer(fw, sd, net):
+    note = C.c_int(-1)
+    return fw.fn('sw_offer', C.c_int, C.c_int, C.c_int, C.POINTER(C.c_int))(sd, net, C.byref(note)), note.value
+
+
+@pytest.mark.parametrize('sd, net, page, note', [
+    (SW_OK, NET_FAILED, SW_OFFER_SD, NOTE_RETRY),  # online timed out or failed: the card's update, and Try Again
+    (SW_NONE, NET_FAILED, SW_LATEST, NOTE_RETRY),  # nothing on the card: up to date, and the note
+    (SW_NOCARD, NET_FAILED, SW_LATEST, NOTE_RETRY),
+    (SW_OK, NET_NEWER, SW_OFFER_NET, NOTE_SD),  # both: online first, the card a line away
+    (SW_NONE, NET_NEWER, SW_OFFER_NET, NOTE_NONE),
+    (SW_BAD, NET_NEWER, SW_OFFER_NET, NOTE_NONE),
+    (SW_OK, ON_OFF, SW_OFFER_SD, NOTE_WIFI),  # Wi-Fi off: the card's, and Turn on Wi-Fi
+    (SW_NONE, ON_OFF, SW_LATEST, NOTE_WIFI),
+    (SW_OK, NET_LATEST, SW_OFFER_SD, NOTE_NONE),
+    (SW_LATEST, NET_LATEST, SW_LATEST, NOTE_NONE),
+    (SW_BAD, NET_LATEST, SW_BAD, NOTE_NONE), (SW_FULL, NET_FAILED, SW_FULL, NOTE_RETRY),  # a file that can't be used
+    (SW_LOW, NET_NEWER, SW_LOW, NOTE_NONE),  # stock's updater refuses either while the battery is low
+])
+def test_the_page_weighs_the_card_and_the_internet_apart(fw, sd, net, page, note):
+    assert offer(fw, sd, net) == (page, note)
+
+
+def both(fw, wifi=1):
+    """sw_update_open with the card's file found, threads and timers held: (the state, its tick)."""
+    opened(fw)
+    fw.var('g_wififlag', C.c_ubyte).value = wifi
+    fw.mock('check_updatefw_exist', lambda *_: 1)
+    fw.mock('fw_pthread_create', lambda *_: 0)
+    fw.mock('timer_add', lambda *_: 5)
+    fw.fn('sw_update_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    return fw.var('sw_update__swu', Sw), fw.fn('sw_update__sw_tick', C.c_int, C.c_void_p)
+
+
+def test_opening_checks_online_and_the_card_at_once(fw):
+    sw, tick = both(fw)
+    assert len(fw.calls('fw_pthread_create')) == 2 and sw.result == SW_CHECKING and sw.timer == 5
+    assert sw.online == ON_CHECKING and sw.state == SW_CHECKING
+    sw.state = SW_OK  # the card answers first: the page waits for the internet
+    assert tick(None) == 8 and sw.result == SW_CHECKING
+    sw.online, sw.net_tag, sw.net_kb = NET_NEWER, b'1.8.3', 56000
+    assert tick(None) == 7 and len(fw.calls('fw_pthread_join')) == 2
+    assert (sw.result, sw.note, sw.focus) == (SW_OFFER_NET, NOTE_SD, 0) and not carded(fw)
+
+
+def test_a_failed_online_check_never_holds_the_card_up(fw):
+    sw, tick = both(fw)
+    sw.online = NET_FAILED  # no DNS, a timeout: answered before the card's
+    assert tick(None) == 8 and sw.result == SW_CHECKING
+    sw.state = SW_OK
+    assert tick(None) == 7 and (sw.result, sw.note) == (SW_OFFER_SD, NOTE_RETRY)
+
+
+def test_with_wifi_off_only_the_card_is_checked(fw):
+    sw, tick = both(fw, wifi=0)
+    assert len(fw.calls('fw_pthread_create')) == 1 and sw.online == ON_OFF
+    sw.state = SW_NONE
+    assert tick(None) == 7 and (sw.result, sw.note) == (SW_LATEST, NOTE_WIFI)
+
+
+def test_the_switch_row_offers_the_card_and_install_asks_on_the_card(fw):
+    sw, tick = both(fw)
+    sw.state, sw.online = SW_OK, NET_NEWER
+    tick(None)
+    key = fw.fn('sw_update_key', C.c_int, C.c_void_p, C.c_uint)
+    assert key(sw.page, O['KEY_NEXT']) == 1 and sw.focus == 1  # the wheel: the line under the button
+    assert key(sw.page, O['KEY_NEXT']) == 1 and sw.focus == 1  # and no further
+    assert key(sw.page, O['KEY_CENTER']) == 1 and (sw.result, sw.note, sw.focus) == (SW_OFFER_SD, NOTE_NONE, 0)
+    assert key(sw.page, O['KEY_CENTER']) == 1 and carded(fw) and sw.state == SW_ASKING
+
+
+def test_try_again_checks_online_again_and_keeps_the_cards_answer(fw):
+    sw, tick = both(fw)
+    sw.state, sw.online = SW_NONE, NET_FAILED
+    tick(None)
+    assert (sw.result, sw.note) == (SW_LATEST, NOTE_RETRY)
+    key = fw.fn('sw_update_key', C.c_int, C.c_void_p, C.c_uint)
+    key(sw.page, O['KEY_NEXT'])
+    assert key(sw.page, O['KEY_CENTER']) == 1 and sw.result == SW_CHECKING and sw.online == ON_CHECKING
+    assert len(fw.calls('fw_pthread_create')) == 3 and sw.state == SW_NONE
+    sw.online = NET_LATEST
+    assert tick(None) == 7 and (sw.result, sw.note) == (SW_LATEST, NOTE_NONE)

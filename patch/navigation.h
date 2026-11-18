@@ -117,14 +117,18 @@ typedef struct {
     void *ch_page;
     chapters *ch;
     unsigned ch_timer, ch_track, ch_key;
-    int ch_cue, ch_end;        /* the Chapters track's CUE start and end, file seconds */
-    void *sc_page, *sc_row[3]; /* Streaming's Configuration page, its cache rows and Erase's */
+    int ch_cue, ch_end; /* the Chapters track's CUE start and end, file seconds */
+    /* Streaming's Configuration (stream_config.c): its page, the provider page it opened and whose
+     * (sc_of: 0 TIDAL, 1 Spotify), the TIDAL and Spotify rows' labels, Download Ahead's label, the
+     * provider page's Cache and Erase Spotify Data labels; each 0 while its page is closed */
+    void *sc_page, *sc_sub, *sc_prov[2], *sc_ahead, *sc_cache, *sc_erase;
+    int sc_of;
 /* Streaming's services (svc): five fixed, and at most APPS_MAX card apps. */
 #define SVC_FIXED 5
 #define SVC_MAX (SVC_FIXED + APPS_MAX)
 #define SVC_HIDE 260 /* STREAMHIDE, "key,key" */
 #define SVC_PROP "ringnav_svc"
-    void *sc_check[SVC_MAX]; /* the Configuration page's switch labels, by service */
+    void *sc_check[SVC_MAX]; /* the Configuration pages' switch labels, by service, while shown */
     int svc_n;               /* the card apps Streaming listed at its last build */
     /* Ratings (ratings.c keeps the rest): Now Playing's window and the window the picker is up on
      * (0 when down); the page a Ratings list or Long Songs opened, with its tracks (page_tracks).
@@ -324,7 +328,7 @@ extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
-    search_strip_hold(void *top);
+    search_strip_hold(void *top), search_strip_owns(void *top);
 void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
 /* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
 int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
@@ -351,7 +355,9 @@ extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *
     stock_usbmode_trampoline(void *, void *, void *, void *),
     stock_hscroll_start_trampoline(void *), stock_wifi_page_trampoline(void *, void *),
     stock_stream_row_trampoline(void *, void *), stock_netservice_row_trampoline(void *, void *),
-    stock_online_match_trampoline(void *);
+    stock_online_match_trampoline(void *), stock_wifi_switch_row_trampoline(void *, void *),
+    stock_wifi_network_row_trampoline(void *, void *), stock_wifi_rows_trampoline(void *),
+    stock_wifi_checkstatus_trampoline(void);
 extern int scrobble_ready(void), scrobble_start(void), scrobble_poll(int *sent),
     scrobble_flag(const char *key), scrobble_value(const char *key);
 extern const char *now_tag(void *r, int field);
@@ -386,6 +392,8 @@ int painting_in(void *row);
 int round_inset(int R, int i, int h);
 void round_ring(void *canvas, const rect_t *r, int R, unsigned c);
 void round_row(void *canvas, const rect_t *r, int R, int i, unsigned c);
+/* nav/row_paint.c: rounds what is drawn in r into behind (0xRRGGBB, final), anti-aliased */
+void corner_mask(void *canvas, const rect_t *r, int R, unsigned behind);
 int slider_part(void *s, int w);
 const char *style_key(char *key, const char *state, const char *name);
 unsigned wide_len(const unsigned *s);
@@ -412,7 +420,12 @@ int feedback_offline(void);
 void feedback_switch_bar(void *w, void *canvas);
 void feedback_scan_bar(void *w, void *canvas);
 void feedback_shuffled(const char *what, int songs);
-int confirm_surface(void *w);    /* w holds the card's answers */
+int confirm_surface(void *w); /* w holds the card's answers */
+/* pair_prompt.c: one pairing presentation, Car Remote's and Guest Play's
+ * (docs/oled-design.md#pairing) */
+void *pair_prompt(const char *phone, const char *code, const char *body, const char *const *rows,
+                  int n_rows, int back, int timeout_ms, int timeout_row,
+                  void (*answer)(void *ctx, int row, int toggle_on), void *ctx);
 void confirm_paint(void *w, void *canvas), confirm_rows_paint(void *w, void *canvas);
 void confirm_bar_dim(void *w, void *canvas);
 void cf_veil(void *win, int on);              /* win unseen (1) or seen again under Coverflow */
@@ -454,8 +467,9 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected);
  * clear of it (navigation.c value_fit, slider_page.c eq_rows_paint) */
 #define VALUE_CHEVRON_GAP 21
 void chevron_muted(void *w, void *canvas, int right, int y);
-void spinner_icon(void *w, void *canvas, int right, int y, int frame);
-void spinner_dirty(void *win), spinner_done(void);
+void spinner_icon(void *w, void *canvas, int right, int y);
+int spinner_frame(void), spinner_turn(void);
+void spinner_painted(void *w, const rect_t *r);
 int coverflow_spinner(void), coverflow_wait_input(void *e);
 
 /* slider_page.c: a set_switch theme's slider page, laid out as stock's window loads and painted
@@ -471,6 +485,9 @@ int wifi_sig(const char *image); /* stock's signal image's level, 1-4, else 0 */
 void wifi_rows_pre(void *view);
 void wifi_rows_post(void *view);
 void wifi_mark(void *w, void *canvas, int level, int selected);
+void wifi_busy_show(void *win); /* "Searching..." on the section's line while a scan runs */
+/* wifi_flows.c: Settings > Wi-Fi's flows past stock's */
+int ringnav_wifi_rows(void *win), wifi_flows_hold(void *top), wifi_flows_cancel_join(void);
 
 /* synclink.c: SyncLink off unless the user turns it on (from ringnav_usb_config) */
 void synclink_default(void);
@@ -481,37 +498,78 @@ void synclink_default(void);
 int about_list(void *list);
 void about_rows(void *view);
 int reset_list(void *list);
-void reset_rows(void *view);     /* settings_pages.c: Reset Settings' rows */
-int kv_text_w(void *label); /* an hscroll_label's text width in its row's face; -1 unmeasured */
+void reset_rows(void *view); /* settings_pages.c: Reset Settings' rows */
+int kv_text_w(void *label);  /* an hscroll_label's text width in its row's face; -1 unmeasured */
 void kv_row(void *key, void *val, int kw, int vw, int right); /* settings_pages.c: kv_fit's split */
 void diag_about_row(void *view); /* diagnostics.c, --dev builds' Save Diagnostics */
 int diag_row(void *item);
 void caption_row(void *label, const unsigned *text);
 const unsigned *pod_caption(int i);
 extern const unsigned *const smart_awake_caption, *const folder_skip_caption,
-    *const reduce_motion_caption;
+                                                      *const reduce_motion_caption;
 void caption_sel(void *view, void *item);
 void caption_paint(void *view, void *item, void *canvas, const rect_t *bar);
+/* inline_slider.c: Settings' one-value rows that change in place
+ * (docs/oled-design.md#inline-sliders) */
+enum { IS_MAXVOL, IS_BALANCE, IS_BRIGHT, IS_BOOTVOL, IS_XFADE, IS_KINDS };
+void *inline_slider_row(void *view, const char *icon, int kind);
+void inline_pair(void *view, const char *icon, int kind);
+void inline_slider_sel(void *view, void *item), inline_slider_paint(void *w, void *canvas);
+int inline_slider_key(void *top, unsigned key, int owned), inline_value(int kind);
+void inline_value_text(int kind, int v, char *out, unsigned n);
 /* control_center.c: Quick Settings drawn as Control Center (ringnav_quick_settings, its paint and
  * keys) */
 void cc_open(void *win), cc_paint(void *win, void *canvas), cc_wheel(void *win, int dir);
 int cc_key(void *win, unsigned key), cc_key_release(unsigned key);
 void cc_keydown(unsigned key), cc_hold(int stop);
+/* A settings page by its folder and name, unless that window is open already (control_center.c). */
+void cc_page(const char *path);
 /* navigation.c: a button's touch held QUICK_HOLD_MS opens page; Control Center's from QUICK_CC */
 #define QUICK_CC 16
 void quick_hold(void *button, int page);
-/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep) */
+/* tilt.c: the selection bar leans toward the wheel's next tick (paint_selection, ringnav_sleep),
+ * and sinks and springs back under Centre (tilt_press, from ringnav_input; tilt_tone its blue) */
 void tilt_poll(void);
 void tilt_bar(void *w, void *canvas, rect_t *bar, unsigned accent, int radius);
 void tilt_gleam(void *canvas, const rect_t *bar, int radius);
-int tilt_clip(void *canvas, int *old);
+int tilt_clip(void *canvas, int *old, const int *frame);
 void tilt_end(void *w, int dir);
+void tilt_press(int down);
+unsigned tilt_tone(unsigned c);
 /* swipe_back.c: the left edge's swipe back (docs/internals.md#swipe-back) */
 void swipe_back_down(void *event, int allowed);
 void swipe_back_poll(void);
+void swipe_back_paint(void *w, void *canvas);
+void *window_under(void *wm, void *top); /* the normal window under top, 0 none */
+void *under_snap(void *under); /* a window painted once into a whole-screen bitmap, 0 none */
+/* art_zoom.c: Now Playing's art grows from the cover it opened from (docs/oled-design.md#motion) */
+void art_zoom_load(void *np_win);
+const char *window_hint(void *win, const char *name);
+int art_zoom_source(void *top, rect_t *r);
+void art_zoom_at(int k, const rect_t *a, const rect_t *b, unsigned *page, unsigned *np,
+                 rect_t *art);
+void *coverflow_home_pane(void);
+int hero_cover_box(rect_t *r);
+/* page_parallax.c: a page's push and pop, the page under drifting and dimming */
+int parallax_under_x(int w, float percent);
+unsigned parallax_dim(float percent);
+void *parallax_slide(float *percent);
+/* np_settle.c: Now Playing's art settles smaller on pause (docs/oled-design.md#motion) */
+void np_settle_poll(void);
+int np_settle_scale(void);
+int np_settle_box(void *w, int *box);
+void np_settle_begin(void *w, void *canvas);
+void np_settle_paint(void *w, void *canvas);
+/* np_skip.c: Now Playing's track change slides and fades the art and lines */
+void np_skip_begin(void *w, void *canvas), np_skip_end(void *w, void *canvas);
+void np_skip_at(int t, int reduced, int dir, int *a_old, int *x_old, int *a_new, int *x_new);
 /* list_marks.c: a scrolling hscroll_label's ends faded into what is behind it (list.marquee.fade)
  */
 void marquee_fade(void *w, void *canvas), marquee_fade_under(void *w, void *canvas);
+/* ... and any text a painter draws itself into the columns x0 to x1, rows y to y + h (the canvas's
+ * coordinates): its ends (1 left, 2 right) copied before it, faded after it; 1 when armed */
+int text_fade_under(void *canvas, int x0, int x1, int y, int h, int ends);
+void text_fade(void *canvas);
 void sel_bar_flat(void *canvas, int x, int y, int w, int h); /* list_marks.c: the flat bar */
 /* np_marquee.c: Now Playing's lines as one marquee under a fading theme */
 int np_marq_owns(void *w);
@@ -520,6 +578,10 @@ unsigned np_marq_wait(unsigned max);
 unsigned np_glide_wait(unsigned max); /* np_bar.c: the progress bar's next pixel */
 /* np_bar.c: Now Playing's shuffle and repeat as the theme's own pair (playing.modes.icons) */
 void np_modes(void *win, void *canvas);
+void np_stream_paint(void *w, void *canvas); /* np_stream.c: a server song loading */
+int np_stream_loading(unsigned *have, unsigned *total, unsigned *ms); /* and for the car remote */
+int np_stream_error(void); /* np_stream.c: a server song stuck with its server down */
+void np_stream_cta_paint(void *canvas, int cy), np_stream_retry(void), np_stream_cta_click(int x);
 /* np_bar.c: ... and its own heart and More over stock's (playing.modes.icons) */
 void np_glyphs_bind(void *win), np_glyphs(void *win);
 void wheel_sb_arm(void *list);
@@ -551,6 +613,15 @@ void status_slots_paint(void *bar, void *canvas);
 int status_slot_at(int x, int y);
 int status_row_sync(void);
 void status_touch(unsigned type, int x, int y);
+/* ... and the Wi-Fi link as it reads it: stock's bars 1 to 4 while joined, else 0; joined with no
+ * link up (Control Center's Wi-Fi circle, control_center.c cc_wifi) */
+int wifi_level(void), wifi_offline(void);
+/* --dev builds: the emulator's stand-in for Wi-Fi, a headset, a charger; -1 for none */
+#if Q2POD_DEV
+int status_fake(char key);
+#else
+#define status_fake(key) (-1)
+#endif
 /* charging.c: the cable in (usb_ui_status), Charge Limit reached (system.c charge_poll), the
  * plug-in screen's input gate (ringnav_input; 1 drops the event) and paint (ringnav_paint) */
 void charge_plugged(void), charge_limited(void), usb_charger_in(void);
@@ -603,10 +674,13 @@ int np_about_key(void *top, unsigned key);
 int ringnav_np_info(void *win); /* navigation.c: Now Playing's details, filled */
 /* np_bar.c: Now Playing's shuffle and repeat as two controls */
 void np_mode_set(int on, int rep), np_mode_step(int repeat, int dir);
-int np_mode_shuffle(void), np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
-/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, shuffle, repeat
- * and the rating picker (navigation.c np_centre; np_bar.c np_modes marks shuffle's and repeat's) */
-enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT };
+int np_mode_shuffle(void),
+    np_mode_repeat(void); /* repeat: 0 Off, 1 All, 2 One (np_bar.c NP_REPEAT_*) */
+/* Now Playing's Centre cycle: at rest (the wheel is the volume's), the scrubber, then a focus ring
+ * the wheel moves across shuffle, repeat and the heart (nav/now_playing.c np_centre; np_bar.c
+ * np_modes draws it) */
+enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_RATING };
+void *np_heart(void); /* np_bar.c: the heart, while it shows on the art page, else 0 */
 int np_mode_click(void *target, void *event);
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
@@ -651,7 +725,7 @@ void keylock_paint(void *w, void *canvas);
 /* feedback.c: an overlay card's scrim over the top window and the status bar; 1 on the window */
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
 void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
-int ringnav_wm_paint(void *wm); /* window_manager_paint's leaf */
+int ringnav_wm_paint(void *wm);                   /* window_manager_paint's leaf */
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
@@ -708,7 +782,8 @@ void vol_paint(void *top, void *canvas);
 int vol_keyup(void *dialog, void *e); /* volume_dialog_on_keyup's hook: the wheel's steps */
 /* on_wm_keyup_fun's hook: the wheel's volume, playback screens' alone */
 int vol_wm_keyup(void *ctx, void *e);
-int vol_accel(void);                  /* volume.c: a wheel tick's steps at its speed */
+int vol_accel(void);     /* volume.c: a wheel tick's steps at its speed */
+void vol_show(int from); /* volume.c: a change not the wheel's, on screen */
 /* levels.c: the wheel's step and the bar's ease, shared by the volume and the brightness. shown:
  * the bar's level in 1/256 steps, moving towards the level while easing, from at. */
 typedef struct {
@@ -737,9 +812,11 @@ void battery_tick(int level, int cable);
 unsigned battery_log(char *out, unsigned size);
 int battery_history(void *ctx, void *event);
 void battery_paint(void *w, void *canvas);
+int battery_key(void *top, unsigned key); /* the wheel along the readings, Centre exports */
 
 /* system.c */
 void power_poll(void);
+void heatguard_poll(void); /* heatguard.c: q2guard's cards, from power_poll */
 
 /* power_rows.c */
 void power_rows(void *view);
@@ -751,10 +828,13 @@ int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void)
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);
 
-/* config_ini.c: toolsWriteConfig's hook */
+/* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
     stock_ini_write_trampoline(const char *path, const char *section, const char *key,
                                const char *value);
+#define CONFIG_SETTLE_MS 3000 /* a held key is written this long after its last change */
+int config_hold(int value, const char *section, const char *key);
+void config_settle(int now_too);
 
 /* library_lists.c */
 int era_menu(void *ctx, void *event);
@@ -778,7 +858,8 @@ extern void *stream_mark_views[2];             /* home.c: the lists whose rows i
 /* home.c: Home's main list's rest height and its rows' foot (0: another view); coverflow.c: its
  * scroll view */
 int home_rest(void *view, int *foot);
-void list_fades(void *canvas, int top, int bottom, int end, int above, int below, int s0, int s1);
+void list_fades(void *canvas, int top, int bottom, int end, int foot, int above, int below, int s0,
+                int s1);
 void *coverflow_home_view(void);
 int rate_keep(int album, unsigned key, int n);
 int rate_kept(int album, unsigned key);
@@ -803,6 +884,7 @@ int rt_play(void *ctx, void *event);
 /* scan_page.c */
 void msg_open(void *win);
 void msg_paint(void *w, void *canvas);
+const char *msg_title(const char *name); /* its status row's title, else 0 */
 
 /* playlists.c */
 /* The Playlists rows (pl_dress): a page's add mode (ringnav_playlist), the button of a row that
@@ -845,6 +927,39 @@ void playlist_new_open(void); /* search_strip.c: New Playlist on the strip, its 
 const char *bt_name(char *out, unsigned n);
 int bt_name_valid(const char *s);
 void bt_name_apply(void), bt_name_row(void *view);
+/* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
+void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
+int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
+#define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
+void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
+/* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */
+void guest_ui_poll(void), guest_ui_paint(void *w, void *canvas), guest_np_open(void);
+int guest_ui_state(void), guest_ui_on(void), guest_settings_open(void *ctx, void *event),
+    guest_home_np(void);
+/* home_np.c: Home's first row led by the play state (docs/ipod.md#home) */
+void home_np_row(void *row, int editing), home_np_bind(void *win),
+    home_np_paint(void *w, void *canvas);
+int home_np_lead(void);
+void home_np_sync(void);
+const char *guest_ui_value(void), *guest_ui_title(const char *name);
+int guest_ui_keeps_lit(void *top);
+void guest_short(const char *name, char *out, unsigned n);
+void bt_ui_paint(void *w, void *canvas), bt_ui_poll(void);
+int ringnav_bt_resume(void); /* navigation.c: Resume on Connect */
+const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_name(int i);
+unsigned bt_class(const char *mac);
+enum { BT_ROW_FOUND, BT_ROW_PAIRED, BT_ROW_CONNECTING, BT_ROW_CONNECTED };
+int bt_dev_state(int i), bt_stock_click(int dev, int x), bt_ui_hold(void *top);
+void bt_dev_rename(int i, const char *name);
+/* bt_detail.c: a Bluetooth device's page */
+void bt_detail_open(int dev), bt_detail_poll(void);
+const char *bt_detail_title(const char *name);
+int bt_codec_line(char *s, unsigned n);
+unsigned bt_kbps(const char *codec, unsigned hz);
+/* bt_stopped.c: Bluetooth Stopped, the dead radio's restart asked first */
+int bt_stopped_hold(void *caller), bt_stopped_toast(const char *name, void *ctx);
+void bt_stopped_paint(void *w, void *canvas);
+const char *bt_stopped_title(const char *name);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
 /* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,
@@ -852,8 +967,12 @@ int search_strip_box(void *kb, void *edit, const char *title);
  * else is a toast saying why not, the text kept to edit */
 void search_strip_text(const char *title, const char *text, int max,
                        const char *(*done)(const char *));
+void search_strip_note(const char *note);   /* ... the next one's note: who sees the text */
+void search_strip_secret(void);             /* ... the next one's text a password, as dots */
+void search_strip_label(const char *label); /* ... the next one's row's label: typed as a cell */
 /* playlist_pages.c: a playlist's songs and On-The-Go under OLED (docs/oled-design.md#playlists) */
 void playlist_page_open(int dest, const char *name);
+int playlist_query(void *dest); /* dest's songs in its own order, for staged */
 /* add_songs.c: Add Songs (docs/oled-design.md#add-songs) */
 void add_songs(int dest, const char *name);
 int add_songs_key(void *top, unsigned key);
@@ -887,6 +1006,8 @@ void modal_frame(void *win, void *list);
 void modal_paint(void *w, void *canvas);
 void modal_after(void *w, void *canvas);
 void modal_head(const char *title, const char *sub, void *r);
+/* coverflow.c: r's cover as Home finds it, a file:// URL in url; 0, url empty, for none */
+int song_cover_url(void *r, char *url, unsigned size);
 void modal_red(void *row);
 int modal_is_red(void *row);
 int modal_sel_height(void *view, int h);
@@ -933,9 +1054,15 @@ void cstl_sort(void *list, void *cmp);
 extern unsigned long ui_thread; /* playback.c: the UI thread, from its first pass */
 
 /* coda_rc_shim.c: Car Remote (docs/internals.md#car-remote) */
-void coda_rc_poll(void);
+void coda_rc_poll(void), coda_rc_toggle(void);
 int coda_rc_enabled(void);
+/* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
+void carremote_poll(void), carremote_paired(const char *name),
+    carremote_paint(void *w, void *canvas);
+/* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
+int song_radio_on(void), song_radio_tap(const void *unused), song_radio_car(int id, int stop_it);
+void song_radio_poll(void);
 /* storage.c: Settings > Storage and its Downloads (docs/internals.md#storage) */
 int storage_open(void *ctx, void *event), storage_hold(void *top);
 void storage_paint(void *w, void *canvas);
@@ -947,16 +1074,19 @@ int usb_ui_key(void *top, unsigned key);
 /* bt_battery.c: a connected headset's battery, 0 to 100, -1 for none
  * (docs/internals.md#headset-battery) */
 int bt_headset_battery(void);
+unsigned bt_headset_rate(void), bt_headset_class(void);
+const char *bt_headset_name(void);
 /* bt_recv.c: Bluetooth receiver mode as a mode page (docs/internals.md#bluetooth-receiver) */
 void bt_recv_load(void *win), bt_recv_paint(void *w, void *canvas);
 const char *bt_recv_title(const char *name), *bt_recv_codec(void *win);
 /* sw_update.c */
 void sw_update_paint(void *w, void *canvas), sw_update_restarting(void *win);
 const char *sw_update_title(const char *name);
+int sw_update_key(void *top, unsigned key);           /* its page's wheel and Centre */
 void toast_icon(const char *glyph, const char *text); /* feedback.c */
 /* feedback.c: a toast with glyph (a theme image without its prefix) by the next loop pass */
 void toast_later(const char *glyph, const char *text), toast_later_poll(void);
-int tsv_split(char *line, char **f, int max);         /* catalogue.c */
+int tsv_split(char *line, char **f, int max); /* catalogue.c */
 
 /* az_index.c: the A-Z index on a long Library list in name order (docs/oled-design.md#a-z-index):
  * a list this long or shorter has none; a touch this near the list's right edge is the index's;
@@ -965,6 +1095,7 @@ int tsv_split(char *line, char **f, int max);         /* catalogue.c */
 #define AZ_MIN_ROWS 50
 #define AZ_EDGE_PX 28
 #define AZ_SPIN_DPS 300
+int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
@@ -984,7 +1115,8 @@ void lr_home_tag(void *view), lr_home_apply(void *view, int np), lr_edit_labels(
 void lr_edit_keydown(unsigned key), lr_edit_paint(void *w, void *canvas);
 int lr_edit_key(void *top, unsigned key, int owned), lr_edit_touch(void *event),
     lr_edit_dragging(void), lr_edit_click(void *target), lr_edit_row(void *w),
-    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void);
+    lr_editing(void *page), lr_edit_list(void *view), lr_edit_dim(void *w), lr_home_editing(void),
+    lr_edit_room(void *view), lr_edit_foot(void *view);
 const char *lr_edit_title(void);
 /* home.c: Home's Folders rule and its list's rows coming and going; coverflow.c: Home's list */
 int home_folders(void);
@@ -1007,7 +1139,6 @@ void *folder_root_row(void *view); /* Folder Root's row, its label */
 void settings_gap(void *view);     /* a 12 px space between a settings page's rows */
 void pull_cancel(void); /* a pull to search let go: Edit Library's drag takes the touch */
 void ringnav_jump(void *w, int id); /* table w's row id selected, at the list's top */
-int own_order(const char *page);    /* a page whose list is not in name order */
 void ringnav_sort_key(char *s);     /* a name's sort key: trimmed, its article dropped */
 
 #endif

@@ -90,6 +90,93 @@ int ui_text(void *canvas, const char *s, int medium, int px, unsigned rgb, int r
     return ink;
 }
 
+/* Set text (ui_set): each face's advances in its font units (tools/build.py face_advances), its
+ * line, which AWTK sizes it by, and its em. */
+static const unsigned short ui_adv[FONT_N][FONT_ADV_LAST - FONT_ADV_FIRST + 1] = FONT_ADV;
+static const unsigned short ui_line_units[FONT_N] = FONT_LINE, ui_upm[FONT_N] = FONT_UPM;
+
+/* s's n characters set in face at AWTK size px with track thousandths of an em between them: where
+ * each starts, pen[k] in 1/64 px from the first's, and pen[n] the whole width. A character the
+ * table lacks (or a face it has no row for) takes its width from the canvas, a whole pixel. */
+static void ui_set_pens(void *canvas, const unsigned *s, unsigned n, const char *face, int px,
+                        int track, int *pen) {
+    int fi = !tk_strcmp(face, "inter-medium") ? FONT_INTER_MEDIUM
+             : !tk_strcmp(face, "inter")      ? FONT_INTER
+                                              : -1;
+    if (fi >= 0 && !ui_line_units[fi]) fi = -1;
+    int line = fi >= 0 ? ui_line_units[fi] : 121, upm = fi >= 0 ? ui_upm[fi] : 100, at = 0,
+        gap = track * px * upm * 64 / (1000 * line);
+    canvas_set_font(canvas, face, (unsigned)px);
+    for (unsigned k = 0; k < n; ++k) {
+        unsigned c = s[k], u = fi >= 0 && c >= FONT_ADV_FIRST && c <= FONT_ADV_LAST
+                                   ? ui_adv[fi][c - FONT_ADV_FIRST]
+                                   : 0;
+        pen[k] = at;
+        at += u ? (int)((u * (unsigned)px * 64 + (unsigned)line / 2) / (unsigned)line)
+                : (int)(canvas_measure_text(canvas, s + k, 1) * 64 + 0.5f);
+        if (k + 1 < n) at += gap;
+    }
+    pen[n] = at;
+}
+
+#define UI_SET_MAX 48 /* a set label's characters; past them it is cut */
+int ui_set_w(void *canvas, const char *s, int medium, int px, int track) {
+    unsigned buf[UI_SET_MAX + 1], n = ui_wide(s, buf, UI_SET_MAX + 1);
+    if (!n) return 0;
+    const char *face = theme_face(buf, (int)n, &px);
+    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    int pen[UI_SET_MAX + 1];
+    ui_set_pens(canvas, buf, n, face, px, track, pen);
+    return (pen[n] + 32) >> 6;
+}
+int ui_set(void *canvas, const char *s, int medium, int px, unsigned rgb, int raw, int x, int y,
+           int track) {
+    unsigned buf[UI_SET_MAX + 1], n = ui_wide(s, buf, UI_SET_MAX + 1);
+    if (!n) return 0;
+    int fpx = px, pen[UI_SET_MAX + 1];
+    const char *face = theme_face(buf, (int)n, &fpx);
+    if (medium && face && !tk_strcmp(face, "inter")) face = "inter-medium";
+    ui_set_pens(canvas, buf, n, face, fpx, track, pen);
+    unsigned text = (unsigned)I(P(canvas, CANVAS_LCD), LCD_TEXT_COLOR),
+             was = ui_ink_raw((unsigned)raw);
+    int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
+    canvas_set_text_color(canvas, RGBA(rgb));
+    I(canvas, CANVAS_ALIGN_V) = 1;
+    I(canvas, CANVAS_ALIGN_H) = 2;
+    for (unsigned k = 0; k < n; ++k) {
+        if (buf[k] == ' ') continue;
+        /* one glyph from its own pen, rounded: no glyph's error carries to the next */
+        rect_t r = { x + ((pen[k] + 32) >> 6), y - fpx, 2 * fpx, 2 * fpx };
+        canvas_draw_text_in_rect(canvas, buf + k, 1, &r);
+    }
+    I(canvas, CANVAS_ALIGN_V) = align_v;
+    I(canvas, CANVAS_ALIGN_H) = align_h;
+    ui_ink_raw(was);
+    stock_canvas_set_text_color(canvas, text);
+    return (pen[n] + 32) >> 6;
+}
+
+int ui_set_in(void *canvas, const char *s, int medium, int px, unsigned rgb, int x, int w, int y,
+              int off, int track) {
+    int ink = ui_set_w(canvas, s, medium, px, track), over = ink - w;
+    if (over <= 0) return ui_set(canvas, s, medium, px, rgb, 0, x + (w - ink) / 2, y, track);
+    off = off < 0 ? 0 : off > over ? over : off;
+    int was[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y),
+                col[4] = { ox + x, oy + y - px / 2, w, px };
+    canvas_get_clip_rect(canvas, was);
+    int l = col[0] > was[0] ? col[0] : was[0], t = col[1] > was[1] ? col[1] : was[1],
+        r = col[0] + col[2] < was[0] + was[2] ? col[0] + col[2] : was[0] + was[2],
+        b = col[1] + col[3] < was[1] + was[3] ? col[1] + col[3] : was[1] + was[3];
+    if (r <= l || b <= t) return ink;
+    int clip[4] = { l, t, r - l, b - t };
+    canvas_set_clip_rect(canvas, clip);
+    int faded = text_fade_under(canvas, x, x + w, y - px / 2, px, (off > 0) | (off < over) << 1);
+    ui_set(canvas, s, medium, px, rgb, 0, x - off, y, track);
+    if (faded) text_fade(canvas);
+    canvas_set_clip_rect(canvas, was);
+    return ink;
+}
+
 int kv_fit(int span, int label_w, int value_w, int *box) {
     int keep = value_w < KV_VALUE_MIN ? value_w : KV_VALUE_MIN; /* the value's least */
     if (label_w > span - KV_GAP - keep) label_w = span - KV_GAP - keep;
@@ -121,29 +208,64 @@ int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w) {
     *w = ui_cta_w(canvas, labels, n);
     return 375 / 2 - (n * *w + (n - 1) * CTA_GAP) / 2 + i * (*w + CTA_GAP);
 }
+/* The buttons' focus ring in a, CTA_RING_H tall: its round ends tools/art.py's supersampled
+ * images (cta_ring_end, Text Primary in the half's ink), the straight runs between them
+ * CTA_RING_W whole rows of ink at its top and foot. Without the images (another set's art),
+ * round_ring's row-at-a-time rings, a pixel apart. */
+static void cta_ring(void *canvas, const rect_t *a, unsigned ink) {
+    unsigned bitmap[64]; /* bitmap_t: width @0, height @4 */
+    int end = CTA_RING_H / 2, light = ipod_light();
+    for (int right = 0; right < 2; ++right) {
+        char name[16];
+        tk_snprintf(name, sizeof name, "ctaring_%c_%c", right ? 'r' : 'l', light ? 'l' : 'd');
+        if (a->h != CTA_RING_H || widget_load_image(window_manager(), theme_art(name), bitmap)) {
+            rect_t b = { a->x + 1, a->y + 1, a->w - 2, a->h - 2 };
+            round_ring(canvas, a, a->h / 2, ink);
+            round_ring(canvas, &b, b.h / 2, ink);
+            return;
+        }
+        rect_t src = { 0, 0, (int)bitmap[0], (int)bitmap[1] },
+               dst = { right ? a->x + a->w - end : a->x, a->y, src.w, src.h };
+        canvas_draw_image(canvas, bitmap, &src, &dst);
+    }
+    canvas_set_fill_color(canvas, ink);
+    canvas_fill_rect(canvas, a->x + end, a->y, a->w - 2 * end, CTA_RING_W);
+    canvas_fill_rect(canvas, a->x + end, a->y + a->h - CTA_RING_W, a->w - 2 * end, CTA_RING_W);
+}
+/* One capsule at r: primary the accent, else the grey; ringed while ui_focus_shown when lit; down
+ * a step darker. */
+static void cta_capsule(void *canvas, rect_t *r, const char *label, int primary, int lit,
+                        int down) {
+    int light = ipod_light();
+    unsigned fill = !primary
+                        ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
+                    : down ? CTA_ACCENT_DOWN
+                           : (scheme()->tones[0] & 0xffffffu);
+    unsigned raw = ui_ink_raw(1); /* final in both halves */
+    if (lit && ui_focus_shown()) {
+        /* a CTA_RING_W px ring in Text Primary CTA_RING_OFF px out, concentric with the capsule */
+        int o = CTA_RING_OFF + CTA_RING_W;
+        rect_t a = { r->x - o, r->y - o, r->w + 2 * o, r->h + 2 * o };
+        cta_ring(canvas, &a, RGBA(tok(TOK_PRIMARY)));
+    }
+    fill_box(canvas, r, RGBA(fill), CTA_H / 2);
+    ui_ink_raw(raw);
+    ui_text(canvas, label, 1, CTA_PX, primary ? 0xffffff : tok(TOK_PRIMARY), 1, r->x + r->w / 2,
+            r->y + r->h / 2, r->w - 2 * CTA_INSET, 1);
+}
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed) {
-    int light = ipod_light(), ring = ui_focus_shown();
     for (int i = 0; i < n; ++i) {
         rect_t r = { 0, y, 0, CTA_H };
         r.x = ui_cta_x(canvas, labels, n, i, &r.w);
-        int lit = i == sel, down = lit && pressed;
-        unsigned fill = i ? (light ? (down ? 0xd1d1d6 : 0xe5e5ea) : (down ? RGB_OFF : RGB_RAISED_2))
-                        : down ? CTA_ACCENT_DOWN
-                               : (scheme()->tones[0] & 0xffffffu);
-        if (lit && ring) { /* a 2 px ring in Text Primary CTA_RING_OFF px out */
-            int o = CTA_RING_OFF + 2;
-            rect_t a = { r.x - o, r.y - o, r.w + 2 * o, r.h + 2 * o },
-                   b = { a.x + 1, a.y + 1, a.w - 2, a.h - 2 };
-            unsigned ink = RGBA(tok(TOK_PRIMARY));
-            round_ring(canvas, &a, a.h / 2, ink);
-            round_ring(canvas, &b, b.h / 2, ink);
-        }
-        unsigned raw = ui_ink_raw(1); /* final in both halves */
-        fill_box(canvas, &r, RGBA(fill), CTA_H / 2);
-        ui_ink_raw(raw);
-        ui_text(canvas, labels[i], 1, CTA_PX, i ? tok(TOK_PRIMARY) : 0xffffff, 1, r.x + r.w / 2,
-                r.y + r.h / 2, r.w - 2 * CTA_INSET, 1);
+        cta_capsule(canvas, &r, labels[i], !i, i == sel, i == sel && pressed);
     }
+}
+int ui_button(void *canvas, int cx, int cy, const char *label, int primary, int focused,
+              int pressed) {
+    int w = ui_cta_w(canvas, &label, 1);
+    rect_t r = { cx - w / 2, cy - CTA_H / 2, w, CTA_H };
+    cta_capsule(canvas, &r, label, primary, focused, pressed);
+    return w;
 }
 
 /* Motion (ui_kit.h): the one Reduce Motion flag, the curves, a run's progress and the shared
@@ -185,10 +307,33 @@ int motion_ease(int t, int ease) {
 static struct {
     unsigned until, timer; /* the last running motion's end, time_now_ms; the shared timer */
 } mo __attribute__((section(".scratch")));
+/* The overlays ovm_bind tied to a widget, whose opacity each frame sets. */
+#define OVM_BOUND 4
+static struct {
+    ovm_t *o;
+    void *w;
+} bound[OVM_BOUND] __attribute__((section(".scratch")));
+static void ovm_apply(void) {
+    for (int i = 0; i < OVM_BOUND; ++i)
+        if (bound[i].w) widget_set_opacity(bound[i].w, (unsigned)ovm_opacity(bound[i].o));
+}
+static void (*mo_hooks[MO_HOOKS])(void) __attribute__((section(".scratch")));
+void motion_hook(void (*fn)(void)) {
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i] == fn) return;
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (!mo_hooks[i]) {
+            mo_hooks[i] = fn;
+            return;
+        }
+}
 static int mo_frame(const void *info) {
     (void)info;
+    ovm_apply();
     void *top = window_manager_get_top_window(window_manager());
     if (top) widget_invalidate_force(top, (void *)0);
+    for (int i = 0; i < MO_HOOKS; ++i)
+        if (mo_hooks[i]) mo_hooks[i]();
     if ((int)(mo.until - (unsigned)time_now_ms()) > -MO_FRAME_MS) return 8; /* RET_REPEAT */
     mo.timer = 0;
     return 7; /* RET_REMOVE */
@@ -198,6 +343,76 @@ void motion_frames(unsigned ms) {
     if (!mo.timer || (int)(end - mo.until) > 0) mo.until = end;
     if (!mo.timer) mo.timer = timer_add(mo_frame, (void *)0, MO_FRAME_MS);
 }
+static struct {
+    int (*fn[MO_LOOPS])(void);
+    unsigned timer;
+} loops __attribute__((section(".scratch")));
+static int loop_frame(const void *info) {
+    (void)info;
+    int any = 0;
+    for (int i = 0; i < MO_LOOPS; ++i)
+        if (loops.fn[i]) {
+            if (loops.fn[i]())
+                any = 1;
+            else
+                loops.fn[i] = 0;
+        }
+    if (any) return 8; /* RET_REPEAT */
+    loops.timer = 0;
+    return 7; /* RET_REMOVE */
+}
+void motion_loop(int (*fn)(void)) {
+    int free = -1;
+    for (int i = 0; i < MO_LOOPS; ++i) {
+        if (loops.fn[i] == fn) free = -2;
+        if (free == -1 && !loops.fn[i]) free = i;
+    }
+    if (free >= 0) loops.fn[free] = fn;
+    if (free != -1 && !loops.timer) loops.timer = timer_add(loop_frame, (void *)0, MO_LOOP_MS);
+}
+
+/* The level bars' keyframes, 0 low to 1000 high, a column a bar: offset sines over the loop (the
+ * status row's ten frames as approved, mock_status_bars.py). */
+static const short lvl_keys[LVL_KEYS][3] = {
+    { 500, 875, 0 },    { 750, 625, 0 },    { 1000, 250, 250 }, { 1000, 0, 500 }, { 750, 0, 875 },
+    { 500, 125, 1000 }, { 250, 375, 1000 }, { 0, 750, 750 },    { 0, 1000, 500 }, { 250, 1000, 125 }
+};
+void lvl_run(lvl_clock_t *c, int run) {
+    if (!run == !c->run) return;
+    unsigned now = (unsigned)time_now_ms();
+    if (run)
+        c->base = now - c->at;
+    else
+        c->at = now - c->base;
+    c->run = (unsigned char)!!run;
+}
+unsigned lvl_time(const lvl_clock_t *c) {
+    return c->run ? (unsigned)time_now_ms() - c->base : c->at;
+}
+int lvl_h16(int i, unsigned t, int lo, int hi) {
+    unsigned step = t / LVL_STEP_MS;
+    int k = (int)(step % LVL_KEYS), u = (int)(t % LVL_STEP_MS) * 1000 / LVL_STEP_MS;
+    int p0 = lvl_keys[(k + LVL_KEYS - 1) % LVL_KEYS][i], p1 = lvl_keys[k][i],
+        p2 = lvl_keys[(k + 1) % LVL_KEYS][i], p3 = lvl_keys[(k + 2) % LVL_KEYS][i];
+    int u2 = u * u / 1000, u3 = u2 * u / 1000; /* in thousandths: no 64-bit sums */
+    int v = (2 * p1 * 1000 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+             (-p0 + 3 * p1 - 3 * p2 + p3) * u3) /
+            2000;
+    v = v < 0 ? 0 : v > 1000 ? 1000 : v;
+    return lo * 16 + (hi - lo) * 16 * v / 1000;
+}
+void lvl_fill(void *canvas, int x, int base, int w, int h16, unsigned rgba) {
+    int whole = h16 >> 4, part = h16 & 15;
+    if (whole > 0) {
+        rect_t r = { x, base - whole, w, whole };
+        fill_box(canvas, &r, rgba, 1);
+    }
+    if (part) {
+        rect_t top = { x, base - whole - 1, w, 1 };
+        fill_box(canvas, &top, (rgba & 0xffffffu) | ((rgba >> 24) * (unsigned)part / 16) << 24, 1);
+    }
+}
+
 void anim_start(anim_t *a, int ms, int ease, int kind) {
     a->at = (unsigned)time_now_ms() ?: 1;
     a->ms = (unsigned short)motion_ms(ms, kind);
@@ -236,3 +451,23 @@ int ovm_scale(const ovm_t *o, int from) {
 }
 int ovm_running(const ovm_t *o) { return anim_running(&o->a); }
 int ovm_shown(const ovm_t *o) { return o->a.at && (!o->out || anim_running(&o->a)); }
+int ovm_opacity(const ovm_t *o) {
+    return !o->out && o->a.at && motion_reduced() ? 255 : ovm_alpha(o, 255);
+}
+static int ovm_gone(void *ctx, void *event) {
+    (void)event;
+    for (int i = 0; i < OVM_BOUND; ++i)
+        if (bound[i].w == ctx) bound[i].o = (ovm_t *)0, bound[i].w = (void *)0;
+    return 0;
+}
+void ovm_bind(ovm_t *o, void *w) {
+    int at = -1;
+    for (int i = 0; i < OVM_BOUND; ++i)
+        if (bound[i].o == o || (at < 0 && !bound[i].w)) at = i;
+    if (at < 0) return; /* ponytail: four at once; a fifth shows at the opacity it has */
+    bound[at].o = w ? o : (ovm_t *)0;
+    bound[at].w = w;
+    if (!w) return;
+    widget_on(w, EVT_DESTROY, ovm_gone, w);
+    widget_set_opacity(w, (unsigned)ovm_opacity(o));
+}

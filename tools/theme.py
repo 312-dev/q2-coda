@@ -455,7 +455,10 @@ TOKENS = {'canvas': (0x000000, 0xffffff), 'primary': (0xffffff, 0x000000), 'seco
           'tertiary': (0x858585, 0x6e6e6e), 'chevron': (0x999999, 0x8a8a8a), 'track': (0x333333, 0xd9d9d9),
           'on_accent': (0xffffff, 0xffffff), 'caption_on_accent': (0xd6e2fa, 0xd6e2fa),
           'raised': (0x1c1c1e, None), 'raised_2': (0x2c2c2e, None), 'off': (0x3a3a3c, None),
-          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xff453a)}
+          'positive': (0x34c759, 0x34c759), 'warning': (0xff9f0a, 0xff9f0a), 'negative': (0xff453a, 0xff453a),
+          # text in the accent (an action row's words, a link under a button): the accent lifted for 4.5:1 on black
+          # (design/mockups/action-row-blue.png), and the accent itself on white (5.6:1)
+          'accent_text': (0x4a8bff, 0x2160d8)}
 
 
 TOKEN_PAPER = (0xffffff, 0x000000)

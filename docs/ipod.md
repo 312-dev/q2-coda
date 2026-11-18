@@ -101,8 +101,13 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, by default in the order the menu review chose (2026-11-15), are Now Playing, Library, Streaming,
-Folders, Cover Flow, Search and Settings. **Now Playing** is there only while something is loaded, playing or paused, as
+The seven rows, by default in the order the menu review chose (2026-11-15), are the play state's row, Library,
+Streaming, Folders, Cover Flow, Search and Settings. **The first row** is stock's Now Playing row named for what plays
+(`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
+guest plays ([internals](internals.md#guest-play)), when it opens the guest's Now Playing (its click and a short
+Return, `guest_home_np`), else the owner's. It leads with the play state, which leaves the status row while the row
+is in sight (`home_np_lead`, [oled-design](oled-design.md#homes-first-row)), and only its words move, 18 px past the
+glyph; Edit Home lists it as Playing. The row is there only while something is loaded, playing or paused, or a guest plays, as
 on an iPod: with nothing loaded, or once play has stopped for `NP_GONE_MS` (3 s, so the moment
 between two tracks keeps it), the row goes, in Split and Full, and it comes back as play
 starts (`np_loaded`, checked on each bar paint and by `np_due` when the 3 s are up;
@@ -246,8 +251,10 @@ timer runs. A theme with `home.lists.full` (OLED's) opens the lists Home's rows 
 screen's width in Full's rows (`sub_full`), the art is hidden while it shows and no pan runs, and
 Return brings the main list back beside the art, whose last frame shows at once. A set with `split_art_up` starts the pane that many rows above Home's window: the
 frame is that much taller, Home's window draws its rows from the window's top down, and the bar
-draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top and no
-window sliding, as Home's paint draws nothing outside its window). OLED's `split_art_up` is the
+draws the rest (`coverflow_home_bar`, from the bar's background paint, with Home on top, as Home's
+paint draws nothing outside its window; while a page slides over Home, from `page_parallax.c`'s
+paint of the bar after Home's snapshot, drifted and darkened with it and left of the sliding page,
+whose title alone shows over it: [internals](internals.md#page-parallax)). OLED's `split_art_up` is the
 bar's whole 58, so the art reaches the top edge and the status row's clock, play state and battery
 stand over it. The main menu rises too: with the clock at the row's right, its left side is empty,
 so the list starts at y 40 (`HOME_SPLIT_TOP`), 18 rows above Home's window, and the bar's background
@@ -259,27 +266,33 @@ those columns of them in the same frame (`coverflow_home_painted`, after each fr
 every invalidate by a few pixels, so the bar's repaint of the rows paints the list's top rows in the
 window too; without that test each repaint asked for the next, and Home repainted about 15 times a
 second while it showed, its pan's steps the whole screen. Settings and the other
-lists Home opens are full pages under OLED, and stay in the window. Each glyph is drawn in one ink, white or black, whichever has the higher WCAG contrast
-against the art under it, as Scrolly's feed-end line does: the art's relative luminance (from a
-256-entry linear table) averaged over the glyph, each pixel weighted by the glyph's coverage
-there, white while that is at most 0.179. The glyph keeps its shape, and an antialiased edge blends
-the ink over the art by its share, so a play state or battery over lettering stays one smooth
-shape rather than a speckle of both inks. A glyph is a run of the bar's columns with ink, parted
-from the next by four empty ones (`INK_GAP`; a pause's two bars are one glyph). It keeps its ink
-until the mean passes the bound by 0.03 (`INK_HOLD`), so a mean the pan carries along the bound
-doesn't flicker: on the emulator's test covers (30 s pans) a hold of 0.03 left a glyph changing ink
-at most twice, each time for seconds, where with none a battery over lettering changed up to ten
-times, and inside that band either ink still has at least 3.98:1. The ink last chosen is held per pane column
-(`home.held`). To get the glyphs alone, the bar's background leaves the pane's rows its flat ground
+lists Home opens are full pages under OLED, and stay in the window. The clock and every glyph
+are drawn in one ink for the whole row, white or black, whichever has the higher WCAG contrast
+against the art under them all, as Scrolly's feed-end line does and as iOS's status bar takes one
+style (`mock_status_icons.py`, the user's, 2026-11-16: inked a glyph at a time, the level bars came
+out black beside a white clock over a mid-grey cover): the art's relative luminance (from a
+256-entry linear table) averaged under every glyph together, each pixel weighted by its glyph's
+coverage there, white while that is at most 0.179. Each glyph keeps its shape, and an antialiased
+edge blends the ink over the art by its share, so a play state or battery over lettering stays one
+smooth shape rather than a speckle of both inks. A glyph is still a run of the bar's columns with
+ink, parted from the next by four empty ones (`INK_GAP`; a pause's two bars are one glyph), so the
+battery's charging green and low red are found in their own glyph and keep their hue. The row
+keeps its ink until the mean passes the bound by 0.03 (`INK_HOLD`), so a mean the pan carries
+along the bound doesn't flicker: on the emulator's test covers (30 s pans) a hold of 0.03 left a
+glyph changing ink at most twice, each time for seconds, where with none a battery over lettering
+changed up to ten times, and inside that band either ink still has at least 3.98:1. The row's ink
+is held in every pane column (`home.held`). Under the vignette the art behind rows 17 to 27 is
+darkened to between 38% and 51% of itself, so the row is white over almost any cover; a white cover sits
+near the bound and stays white. To get the glyphs alone, the bar's background leaves the pane's rows its flat ground
 when it draws straight onto the screen; the glyphs paint on that, and the bar's border paint
 (`coverflow_home_clip`, `home_ink`) reads each pixel's distance from the ground as the glyph's
-share and writes the art with the ink over it, only within the paint's clip. A glyph at an edge
-where the clip, not the pane, ends (a repaint of part of the battery) keeps the ink it has, as its
-part alone would average differently. A pan step invalidates those rows of the bar with the
+share and writes the art with the ink over it, only within the paint's clip. A paint the clip
+cuts short of the pane (the play state's frames, a repaint of part of the battery) keeps the row's
+ink, as its part alone would average differently. A pan step invalidates those rows of the bar with the
 window's, so the ink follows the art. Inking them costs about 0.84 million instructions a step
 (`test/patch.py`, 188 × 58 with a pause and a battery), a sixth of the frame's render: a pixel left
 the ground's color (the bare art, most of them) takes one compare, not the share's three channels. The clock is drawn in Text Primary there (`clock_place`), so it
-is inked as one glyph like the others.
+is inked with the others.
 The battery's charging green and low red keep their own colors over the art, each pixel's share
 read against the glyph's most saturated pixel, and only its gray part (the dim outline as a
 lighter share, the nub) is inked (`INK_KEEP_STATUS_COLOURS`; 0 inks them with the rest). Where the bar
@@ -379,9 +392,9 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
 review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
 page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
-(`ringnav_systemset`): About, System Update, Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer) and Reset Settings, then Restart and Shut Down after a 12 px gap (`power_rows`); Battery is stock's Power
-page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page, which Control Center's tile opens too); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)). Added binary settings
+page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
 that cycle between named choices retain their value labels. Volume, Crossfade, Resume Songs, Wheel
 Sensitivity and App Store show a chevron, as do the added Library browsing rows.
@@ -479,7 +492,7 @@ Spotify row's Now Playing page uses Now Playing's layout (`NP_*`), rounded art i
 (`ringnav_image_add`) works on the decoded bitmap, so it applies at either size.
 
 Brightness, Balance, Maximum Volume and Default Volume use eight-pixel rounded, theme-aware bars
-with their original touch areas. Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
+with their original touch areas, where they still open (Settings sets them in its list instead). Crossfade, Wheel Sensitivity, Resume Songs, Night Shift and Playback's Volume reuse Default Volume's
 page and inherit its styling. All keep their ranges and wheel/touch controls, but lose their endpoint icons (`slider_plain`, tools/ipod.py):
 the images stay, named, with no image and no size, since stock looks them up. The quick
 settings slider and custom volume overlay retain their layouts. Under OLED (`settings.values.switch`) the four
@@ -500,7 +513,7 @@ bright suns stay at its ends, in line with the first and last icon columns. Size
 never moves or resizes one. A finger held on Wi-Fi or Bluetooth opens its settings
 ([internals.md](internals.md#quick-settings-holds)); a tap stays stock's.
 
-At run time the page is Control Center ([oled-design](oled-design.md#control-center), `patch/control_center.c`): `cc_open` hides stock's buttons and labels but Wi-Fi's and Bluetooth's, which it lays at opacity 0 over their circles (their taps and the Wi-Fi and Bluetooth holds stay stock's), puts the brightness slider at opacity 0 over the Brightness slider's track, and makes a clear button over every other control. `cc_paint` draws the page under the window's children: the status row first, its clock centered (no title), then the blocks. The wheel walks the stops (the four toggles, the Now Playing block while something is playing or paused, the two sliders, the five tiles; the window's `_cc_focus`), stopping at the ends; Center acts on a stop as a tap does, or gives a slider the wheel (`_cc_adjust`, the accent's ring) until Center or Return takes it back (`cc_key`, `cc_wheel`). Return off a slider closes the page. The ring shows only after the wheel or a key: pulled down there is none, the first tick or Center brings it up without stepping or acting (`_cc_seen`), and it goes 5 s after the last (`CC_RING_MS`). A tap on the Now Playing block, or Center on it, closes the page and opens Now Playing (`playback_np_open`); the transport's buttons lie over it and keep their taps. A toggle or tile held `QUICK_HOLD_MS` opens its settings page ([internals](internals.md#quick-settings-holds)). Coming to rest open, the blocks spring 8 px past rest and back (`cc_land`, `cc_spring`). Volume steps as Now Playing's wheel volume (`vol_next`) and is set as Car Remote sets it (up to Volume Limit, saved for the output in use); Brightness steps as the Brightness page does (`bright_wheel`, [internals](internals.md#wheel-volume)); Lock turns Buttons Lock on in its last mode or off (`keylock_toggle`), Car Remote starts or stops its daemon (`coda_rc_toggle`), EQ turns the EQ off or on as PEQ (`eq_toggle`), Night Shift on or off, Smart Wi-Fi its setting; AirPlay and Sleep close the page for their settings pages.
+At run time the page is Control Center ([oled-design](oled-design.md#control-center), `patch/control_center.c`): `cc_open` hides stock's buttons and labels but Wi-Fi's and Bluetooth's, which it lays at opacity 0 under their circles for `cc_act` to click, puts the brightness slider at opacity 0 over the Brightness slider's track, and makes a clear button over every other control, the six circles included ([internals](internals.md#quick-settings-holds)). `cc_paint` draws the page under the window's children: the status row first, its clock centered (no title), then the blocks. The wheel walks the stops (the six toggles by rows, the Now Playing block while something is playing or paused, Brightness, Volume; the window's `_cc_focus`), stopping at the ends; Center acts on a stop as a tap does, or gives a slider the wheel (`_cc_adjust`, the accent's ring) until Center or Return takes it back (`cc_key`, `cc_wheel`). Return off a slider closes the page. The ring shows only after the wheel or a key: pulled down there is none, the first tick or Center brings it up without stepping or acting (`_cc_seen`), and it goes 5 s after the last (`CC_RING_MS`). A tap on the Now Playing block, or Center on it, closes the page and opens Now Playing (`playback_np_open`); the transport's buttons lie over it and keep their taps. A toggle held `QUICK_HOLD_MS` opens its settings page ([internals](internals.md#quick-settings-holds)). Coming to rest open, the blocks spring 8 px past rest and back (`cc_land`, `cc_spring`). Volume steps as Now Playing's wheel volume (`vol_next`) and is set as Car Remote sets it (up to Volume Limit, saved for the output in use); Brightness steps as the Brightness page does (`bright_wheel`, [internals](internals.md#wheel-volume)); Car Remote starts or stops its daemon (`coda_rc_toggle`), EQ turns the EQ off or on as PEQ (`eq_toggle`), Smart Wi-Fi its setting; AirPlay closes the page for its settings page. A toggle's name is set glyph by glyph (`ui_set`) in its room; one too wide fades at its edge (`ui_set_in`, `text_fade`) and, while the wheel is on its circle, scrolls through a clear `hscroll_label` of its own whose `xoffset` stock's scroller moves (`cc_marq`). The Wi-Fi circle's glyph is the link as the status row reads it (`cc_wifi`: `wifi_level`, `wifi_offline`), polled every second while the page is open (`cc_wifi_poll`, which redraws that circle alone when it changes).
 
 The rows page keeps stock's controls at opacity 0, for their taps. Their stock images are 60-pixel discs: `#444444` with a white glyph when off, stock red
 (`#FF1448`) with a white glyph when on (`drop_wifiopen`, `drop_btopen`, `drop_keylockopen`,
@@ -603,14 +616,16 @@ going Home, with its slide when held on the list itself. The release latch on th
 
 ## Transitions
 
-Pages slide with stock's own window animator; the payload adds no animation code. The build sets
-`anim_hint` to `SLIDE` (`tools/ipod.py`) on the window of the nine local browsing pages, the
-settings and streaming pages and the equalizer page. A hinted page slides in from the right,
-pushing the page below it out to the left, and Return reverses that; the status bar is not part
-of either page and stays still.
+Pages slide with stock's own window animator, its page under drawn with parallax
+(`page_parallax.c`, [internals](internals.md#page-parallax)). The build sets `anim_hint` to `SLIDE`
+(`tools/ipod.py`) on the window of the nine local browsing pages, the settings and streaming pages
+and the equalizer page. A hinted page slides in from the right over 220 ms while the page below it
+drifts 30% of the width left and darkens, and Return reverses that over 200 ms; the status bar is
+not part of either page and stays still.
 
 Left immediate: Home (opened once, never closed), Now Playing (its open starts the player, which
-can hold the UI thread), Cover Flow (its open loads the albums and covers), the dialogs and quick
+can hold the UI thread; opened from Home's art or an album page, its cover grows into it instead,
+[internals](internals.md#now-playing-motion)), Cover Flow (its open loads the albums and covers), the dialogs and quick
 settings, the queue, More and jump pages over Now Playing, and the pages that keep their stock
 assets: Tidal and the other online pages, Wi-Fi transfer and the firmware download. Moving between
 folders reloads the folder page in place, so only opening and leaving that page slides. Stock
@@ -663,12 +678,14 @@ once a step moves more than one row, from 300 ms of continuous spin
 ([internals.md](internals.md#wheel-movement)), and disappears 400 ms after the last such step, or
 at once on a slow tick, a touch or the end of the list. Latin letters show in
 capitals; leading spaces are skipped, as is a leading "The", "A" or "An" in library lists
-([internals.md](internals.md#sorting)), and any other character shows as it is. Home, Library's categories (on its page or beside Home's pane), settings menus
-(`CTX_FIXED` windows, which are not alphabetical) and other short lists never show it, and nor does an album's track list, in Cover Flow or the Library, which is in album order (disc and track).
-Nor do these lists, which are in an order of their own, where a row's letter would say nothing of
-how far the spin has got: a playlist's songs in the order they were added (Sort: Time added, and
-always in Edit Playlist), Recent, Frequent and Recently Added, Songs sorted by Time added, View
-Queue while a shuffle is on (Up Next) and Chapters. Values are in `patch/offsets.inc` (`LETTER_*`); see
+([internals.md](internals.md#sorting)), and any other character shows as it is. Only the
+Library's lists in name order take it: Songs A to Z (and a playlist sorted by name, Hi-Res and
+Favorites), Albums, Artists, Composers, Genres, an artist's albums, Folders, Cover Flow's covers
+and Edit Playlist's Add Songs picker. Every other list is in an order of its own, where a row's
+letter would say nothing of how far the spin has got, and never shows it: Wi-Fi's networks,
+Bluetooth's devices, settings, Home, the queue, Chapters, Recent, Frequent, Recently Added, Songs
+sorted by Time added, a playlist in the order songs were added, an artist's or a genre's songs,
+an album's tracks, Most Played, Era, Internet Radio, card apps and streaming lists. Values are in `patch/offsets.inc` (`LETTER_*`); see
 [internals.md](internals.md#drawing).
 
 ## Now Playing
@@ -806,12 +823,14 @@ fast spin is heard as a few jumps and lands on the target. A press of the center
 and leaves the screen on (and moves on to shuffle, below), as do Return, a touch and
 3 seconds without a tick, and each gives the wheel back to the volume; Return then stays on the
 page. Ending without having moved the target does not seek. Paused, the track stays paused and
-plays from the target at Play. Center cycles the controls the wheel sets, as an iPod classic's
-does (`np_centre`): a press starts scrubbing at once,
-the next ends the scrub and rings shuffle, the next repeat (a tick toggles shuffle or steps repeat
-Off, All, One; under a theme without the pair these two are skipped), the next opens the rating
-picker, whose Center saves and leaves the page at rest, the wheel back on the volume. Return, a
-touch or 3 seconds without a key end a stage. A short hold (`NP_HOLD_MS`, 400 ms) turns the
+plays from the target at Play. Center works as an iPod classic's
+(`np_centre`): a press starts scrubbing at once, and the next ends the scrub and puts a ring on
+Shuffle. The wheel then moves the ring across Shuffle, Repeat and the heart, changing nothing;
+Center works the ringed control as a tap does (Shuffle on or off, Repeat Off, All, One) and the
+ring stays, and on the heart opens the rating picker, whose Center saves and leaves the page at
+rest, the wheel back on the volume. While a radio plays the ring has only the heart; under a theme
+without the pair there is no ring and the scrub's press opens the picker. Return, a touch or 3
+seconds without a key end the ring. A short hold (`NP_HOLD_MS`, 400 ms) turns the
 screen off, and a long hold is still Shut Down. The presses work the same while the volume shows
 `patch/offsets.inc`; see [internals.md](internals.md#scrub-ipod).
 
@@ -1026,18 +1045,18 @@ Now Playing's bar has no thumb: stock draws its dragger (a box and knob, the sto
 painted it white, which drew the box at rest.
 
 - **The status row.** No bar band: the page's title, small and gray, from x 62, and on the right, right to left, a
-  slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (frozen
-  and gray while paused; a tap on them opens Now Playing), Wi-Fi's signal while connected (a crossed glyph with no
-  link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
-  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each centered on y 23, up in
-  the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
+  slim battery ending 62 px from the right edge (`STATUS_ROW_INSET`), three level bars while something plays (a pause
+  in their place while paused, in the same white; a tap on either opens Now Playing), Wi-Fi's signal while connected
+  (iOS's fan; a crossed glyph with no link past the access point), a card app's sync (turning arrows while it checks, a filling ring while it
+  downloads), a Bluetooth headset's battery, and a 13 px padlock while Buttons Lock is on, each the clock's digits' height (11 px) on their
+  rows, 6 px apart, up in the glass's top curve and clear of it ([Status row slots](internals.md#status-row-slots)). A press Buttons Lock
   blocks with the screen off shows a card saying so for 1.5 s, as the iPod's Hold switch did ([Buttons
-  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 6 px left of the leftmost of them,
+  lock](internals.md#buttons-lock)). The clock, in the title's face and gray, sits 8 px left of the leftmost of them,
   and the title ends with an ellipsis 12 px short of the widest clock ("00:00"), however long it is: under a status row a
   page's caption never takes a row of its own (`bar_title_fits`), so the list keeps its top. A page with no title (Home, Now Playing, Cover Flow's covers;
   an artist's are titled by the artist) has the clock centered across the row instead (at the right where centered it
-  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black as
-  one glyph with the others (`clock_place`).
+  would reach the glyphs), but Home in Split keeps it at the right, over the art, where it is inked white or black with
+  the others, one ink for the row (`clock_place`, `home_ink`).
 - **The grid.** 32 px rows from y 58 with their text at x 24, seven to a screen: the list ends at y 282, above
   the bottom corners, and the strip below it stays black (`list_fit`). Chevrons and values share one column 28 px
   from the right edge on every row. Settings, the Library, Home (Full and Split) and stock's own list pages all
@@ -1072,72 +1091,88 @@ painted it white, which drew the box at rest.
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
 - <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
-  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`): a `#1C1C1E` pill low in the glass,
-  x 40 to 335 and y 254 to 288 with 17 px corners, the typed text in 18 px white in a black box at its left (x 46 to
-  142, 5 px in, 12 px corners) with a steady 2 px cursor, and A to Z, 0 to 9, a space and delete in 19 px Inter, each
-  centered in an equal 19 px cell, the lit one white on a fixed accent key in the middle of the run (x 148 to 327),
-  the rest Text Secondary, both ends of the run fading into the pill's gray over 22 px. When the wheel lands on a
-  letter or digit its key pops up, as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head
-  with 9 px corners narrowing over 18 px to the 18 px key, the accent) holding the letter in 26 px white Inter
-  Medium, and the key keeps the letter at 19 px in white at 60 %; it goes 300 ms after the wheel stops. Turning
-  faster than 8 letters a second shows none until the wheel stops, then one. The bubble may cover the last result
-  rows while it shows. The wheel walks the strip (round from delete to A) and Center enters the lit character at
-  the cursor; Previous and Next move the cursor along the text, Return erases the character before it (at the
-  text's start it does nothing but click), and a held Return closes Search from anywhere on the page: 200 ms into
-  the hold a card says "Keep holding to go back" over the dimmed page, its ring filling until 800 ms, when Search
-  closes; let go before and nothing is erased (`search_strip_down`, [oled-design](oled-design.md#text-entry)). A space is never typed first or beside
-  another. A text longer than the box scrolls to keep the cursor in it. With nothing typed, the free area above
-  the strip says what Search finds, as an empty list's note does: "Search your music" in 16 px Text Secondary and
-  "Artists, albums and songs" in 15 px Text Tertiary 24 px under it, the pair centered on y 144 and 168 (Add Songs'
-  Search: "Songs by title or artist").
-  What holds the text lists above the strip as it is typed: the songs whose title, artist or album holds it, then
-  the artists whose name holds it, then the albums, each artist and album once; six single-line rows from y 58, the
-  name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
-  "Album" and its artist on an album's. Next with the cursor at the text's end moves to the results: the selection
-  bar takes the first one, the strip's key goes gray, and an iOS segmented control takes the first row (All, Songs,
-  Artists, Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent
-  while the wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving five rows under it. All lists
-  the three groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five
-  turns of the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists
-  and albums A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the
-  bar; Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
-  tracks in Cover Flow. A turn up from the first result lands on the tabs, where the wheel moves between them, each
-  picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past Albums, or Center, goes back to the results
-  and a turn up past All to the strip; Next picks the next tab and Previous the one before. Previous or Return
-  on the results, and Return on the tabs, go back to the strip with the text, cursor and tab as they were. With text
-  and no match, the empty state stands in the list's place, "No Matches", "Try fewer letters"
-  ([oled-design](oled-design.md#empty-and-offline)), and Next stays on the strip; on a tab with nothing, Next
-  lands on the tabs. A server song that can't play now (offline, no copy on the card), and an artist or album none
-  of whose songs can, is grayed with the offline mark at its right, as in every other list
-  ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the alphabet a letter
-  per 19 px as the finger goes, popping each one as the wheel does, and types nothing; a tap on a letter, the faded
-  ones at the ends too, pops it and types it at the cursor; a tap on a tab opens it, a tap on a result opens or
-  plays it, and a drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a
-  list's row change does, and Center, Next, Previous and Return click as a button does, through the Clicker
-  setting.
+  stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`, the user's mock-up
+  `keyboard-inscreen/strip.html`). The query reads on the page's first line: a magnifier in Text Secondary at x 31,
+  the text in 20 px white from x 48 with a steady 2 px cursor while the strip has the wheel, or "Search your music"
+  in Text Tertiary while it is empty (Add Songs' Search: "Search songs"), and a 1 px raised-gray rule under it on
+  y 93. The strip is a `#1C1C1E` pill low in the glass, x 40 to 335 and y 254 to 288 with 17 px corners, and one
+  loop the wheel walks: the set switcher docked at its left (x 40 to 96, a `#2C2C2E` pill naming the set, abc, ABC,
+  123 or #+=, in Inter Medium 16, the accent while the wheel is on it); the set's characters and a space, each in
+  17 px Inter Text Primary in an equal 19 px cell from x 106, the lit one white on an 18 px accent key; and the
+  return key docked at its right, a 34 px circle in the accent with the return mark (a stem down the right, a
+  rounded corner, a bar to the left ending in an open arrowhead) in white, turned to a white circle with the mark
+  in the accent while the wheel is on it. #+= holds all 32 printable ASCII symbols, so the four sets type every
+  printable character. Ten cells show; the run starts at its first character and moves only when the highlight
+  comes within a cell of an edge, its letters themselves fading out over 22 px where more of the set lies past that
+  edge (nothing is painted over them). One turn of the wheel (ticks under 250 ms apart) stops on the return key; a
+  new turn goes on round to the switcher. Search opens on A. When the wheel lands on a character its key pops up,
+  as an iPhone's keyboard does: the key grows a bubble above the strip (a 30 px head with 9 px corners narrowing
+  over 18 px to the 18 px key, the accent) holding it in 24 px white Inter Medium, and the key keeps it at the
+  strip's size in white at 60 %; it goes 300 ms after the wheel stops. Turning faster than 8 characters a second
+  shows none until the wheel stops, then one. The bubble may cover the last result rows while it shows. Center
+  types the lit character at the cursor, cycles the set on the switcher (the highlight stays on it), and submits on
+  the return key; Play/Pause submits from anywhere on the strip. Return jumps the highlight to the return key, a
+  Center away from submitting, and a held Return closes Search from anywhere on the page: 200 ms into the hold a
+  card says "Keep holding to go back" over the dimmed page, its ring filling until 600 ms, when Search closes; let
+  go before and the highlight is on the return key (`search_strip_down`, [oled-design](oled-design.md#text-entry)).
+  Previous and Next move the cursor along the text; Previous held erases the character before it 450 ms into the
+  hold, the next 500 ms later and each after that 15 % sooner, down to one every 110 ms, and its release moves
+  nothing (a hold of Previous or Next there never scans the song). There is no delete key. A space is never typed
+  first or beside another. A query longer than its line scrolls to keep the cursor in it.
+  What holds the text lists under the query as it is typed: the songs whose title, artist or album holds it, then
+  the artists whose name holds it, then the albums, each artist and album once; four single-line rows from y 98,
+  the name in 20 px white and after it, in 15 px Text Tertiary, the artist on a song's row, "Artist" on an artist's,
+  "Album" and its artist on an album's. Submitting moves to the results: the selection bar takes the first one, the
+  strip's highlights go, and an iOS segmented control takes the first row under the query (All, Songs, Artists,
+  Albums; a 30 px `#1C1C1E` track with 9 px corners, the open tab a raised `#3A3A3C` segment, the accent while the
+  wheel is on it, labels in Inter Medium 17, the others `#ABABAB`), leaving three rows under it. All lists the three
+  groups, 32 of each at most, so a common string's artists are never more than 32 rows down (under five turns of
+  the wheel at the default sensitivity); Songs, Artists and Albums list their group in full, the artists and albums
+  A to Z. The tab chosen stays while the text changes, and the strip's list shows it. The wheel moves the bar;
+  Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
+  tracks in Cover Flow; Play/Pause there is the player's. A turn up from the first result lands on the tabs, where
+  the wheel moves between them, each picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past
+  Albums, or Center, goes back to the results and a turn up past All to the strip; Next picks the next tab and
+  Previous the one before. Previous or Return on the results, and Return on the tabs, go back to the strip with the
+  text, cursor and tab as they were. With text and no match, the empty state stands in the list's place, "No
+  Matches", "Try fewer letters" ([oled-design](oled-design.md#empty-and-offline)), and a submit stays on the strip;
+  on a tab with nothing, it lands on the tabs. A server song that can't play now (offline, no copy on the card),
+  and an artist or album none of whose songs can, is grayed with the offline mark at its right, as in every other
+  list ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the highlight a
+  cell per 19 px as the finger goes (to the left the later characters), popping each as the wheel does, as one
+  turn, and types nothing; a tap on a character pops it and types it at the cursor, a tap on the switcher cycles
+  the set and a tap on the return key submits; a tap on a tab opens it, a tap on a result opens or plays it, and a
+  drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change
+  does, and Center, Next, Previous and Return click as a button does, through the Clicker setting.
 - <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
   playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
-  (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip with its typed-text
-  field off: the same pill in the same place, the letters run across the whole of it (x 46 to 329, the lit key centered
-  at x 178, seven cells each side), and the name is written large in the middle of the screen, Inter Medium 22 white
-  centered on y 140 with a steady cursor, over the hint "Press Next to create" or "Press Next to save" in 15 px Text
-  Tertiary on y 180. The status row reads New Playlist or Rename Playlist. A word's first letter is typed as a
-  capital. Previous and Next move the cursor along the name; Next with the cursor at the name's end creates the
-  playlist (`ringnav_playlist_create`, "Playlist created", and the list goes back to open on it) or saves the new name
-  ("Renamed"), and the page closes; an empty name ("Name can't be empty") or one taken ("A playlist has that name")
-  says so and stays. Return erases the character before the cursor, and a held Return leaves without a change, as
-  on Search.
-- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: the first
-  time one opens, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
+  (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip, opening on abc, and
+  the name is typed in the row the wheel was on, in its place over the page under ([oled-design](oled-design.md#text-entry)'s
+  row form), with a blinking cursor and no hint. The strip is a page of its own, so the window manager no longer
+  paints the page under it: `ss_place` paints that page once into a bitmap as it opens (`under_snap`, the swipe
+  back's) and finds the row from navigation's selection (`st.sel_w`, `sel_y`, `sel_h`, matched only while the row's
+  list is still in that page), and with no such row in sight, or one the strip would cover, the text goes in a field
+  of its own. The status row reads New Playlist or Rename Playlist. Capitals are ABC's. Previous and Next move the cursor along
+  the name; submitting (Play/Pause, or Center on the return key) creates the playlist (`ringnav_playlist_create`,
+  "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
+  an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held
+  Return and held Previous are as on Search.
+- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: each
+  time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
   its keys hidden and the window over the screen under the status row (`search_strip_box`,
   [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
-  Field off, with its set chip (abc, ABC, 123, #+=,
-  stepped by Play/Pause) and the box's text prefilled; a password shows as dots ("Password" over them, the character
-  just typed for a second, all of it while Play/Pause is held). Next at the text's end writes the
+  The box's text is prefilled, the strip opening on abc (123 for a box holding a number), and typed where the box's
+  value lives: a search box's on the query line, a Wi-Fi password or network name in a field under its label, a box
+  whose page names its row (`_strip_label`: an EQ preset's Name, a band's Frequency or Q, a card app's field) in that
+  row. A password shows as dots, the character just typed for a second, with no way to show the rest: a Wi-Fi
+  network's, Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
   closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
-  keyboard's Return did), leaving the box. Under another theme
+  keyboard's Return did), leaving the box; on Add Network's two rows, whose dialog (`editwifi_dialog`) holds nothing
+  but the box, it quits the dialog too, a loop pass later (quit inside the keyboard's close, demo crashes), back to the
+  rows with their text as it was. That dialog's own box, in a row at the status row's height, is hidden while the strip
+  is up (`search_strip_box`) and shown again if the dialog outlives the strip. Under another theme
   the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Center pressing the lit
   one.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its

@@ -29,17 +29,23 @@
 { "longsongs_page", CTX_FIXED, 0 },  /* runtime window (patch/library_lists.c); fixed: the hold menu */
 { "radio_page", CTX_DYNAMIC, 0 },     /* runtime window (patch/radio.c) */
 { "spotbrowse_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/spotify.c) */
-{ "streamconf_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/navigation.c) */
+{ "streamconf_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/stream_config.c) */
+{ "streamsvc_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/stream_config.c): TIDAL's or Spotify's */
 { "apps_page", CTX_DYNAMIC, 0 },       /* runtime window (patch/netupdate.c) */
 { "tidal_downloads", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_lists.c) */
 { "app_songs", CTX_DYNAMIC, 0 },       /* runtime window (patch/library_lists.c) */
 { "addon_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/addon.c) */
 { "artistrows_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/library_artist.c) */
 { "battery_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/battery.c) */
-{ "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/coda_rc_shim.c) */
-{ "carpair_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/coda_rc_shim.c) */
+{ "carremote_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/carremote_page.c) */
+{ "carphone_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
+{ "carhowto_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/carremote_page.c) */
 { "empty_page", CTX_DYNAMIC, 0 },      /* runtime window (patch/feedback.c empty_open) */
 { "storage_page", CTX_DYNAMIC, 0 },    /* runtime window (patch/storage.c) */
+{ "btdevice_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/bt_detail.c) */
+{ "guestset_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/guest_ui.c) */
+{ "guesttrust_page", CTX_DYNAMIC, 0 }, /* runtime window (patch/guest_ui.c) */
+{ "hotspot_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/guest_ui.c) */
 { "downloads_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/storage.c) */
 { "usbchoose_page", CTX_DYNAMIC, 0 },  /* runtime window (patch/usb_ui.c) */
 { "usbdebug_page", CTX_DYNAMIC, 0 },   /* runtime window (patch/usb_ui.c) */

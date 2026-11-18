@@ -18,8 +18,9 @@ class ShuffleMachine(CoverflowMachine):
             self.queued=self.names(self.get(u.reg_read(REGS[1])))
         if not name.startswith('s:'): return super().hook(u,address,size,unused)
         name=name[2:].split('@')[0]; a,b=u.reg_read(REGS[0]),u.reg_read(REGS[1]); ret=0; self.calls.append((name,a,b))
+        # no card (/proc/mounts doesn't open): the counts an earlier release left on the flash (card_store.c)
         if name=='fopen': ret=1 if self.text(a)=='/mnt/data/ringnav-plays' and self.counts else 0
-        elif name=='fread': self.u.mem_write(a,self.counts); ret=1
+        elif name=='fread': self.u.mem_write(a,self.counts); ret=len(self.counts)//b if b else 0  # items of b bytes
         elif name=='getAllMusic':
             self.deqs[self.get(syms['tools_pdeq_directory'])][1]=[self.copy('stSongInfo',e) for e in self.found]; ret=len(self.found)
             self.calls[-1]=(name,a,self.get(payload_syms['library_music']))  # scoped to music (MUSIC_WHERE)
@@ -159,16 +160,16 @@ def home_settings(full):
         assert m.nodes[sets]['visible'] and not m.nodes[lst]['visible'] and not m.nodes[art]['visible'] and m.nodes[sets]['animated']=='x'
         assert m.nodes[sets]['sensitive']==1 and m.nodes[lst]['sensitive']==0
         assert [c[1:3] for c in m.calls if c[0]=='widget_move_resize'][:1]==[(sets,375)]; passed()
-        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==O['PAGE_SLIDE_MS']==120
-        m.advance(119); assert signed(m.get(sets+O['W_X']))>0
+        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==O['PAGE_SLIDE_MS']==220
+        m.advance(219); assert signed(m.get(sets+O['W_X']))>0
         m.advance(1); assert m.get(sets+O['W_X'])==0 and not m.props
         m.paint(sview); assert m.selected(sview)==0 and m.call()==11 and m.selected(sview)==1; passed()
         m.calls=[]; assert m.call(O['KEY_RETURN'])==11
         assert m.nodes[lst]['visible'] and not m.nodes[sets]['visible'] and m.nodes[lst]['animated']=='x'
         assert m.nodes[lst]['sensitive']==1 and m.nodes[sets]['sensitive']==0
         assert [c[1:3] for c in m.calls if c[0]=='widget_move_resize'][:1]==[(lst,-(375 if full else OLED_G.split_row)&0xffffffff)]  # the main list from its own width (split_row)
-        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==120
-        m.advance(120); assert m.get(lst+O['W_X'])==0 and not m.props
+        assert next(c[2] for c in m.calls if c[0]=='widget_animator_prop_create')==220
+        m.advance(220); assert m.get(lst+O['W_X'])==0 and not m.props
         m.paint(view); assert m.selected(view)==6; passed()
         # Return on Home's main list selects Now Playing; Return there opens it without starting a track.
         m.calls=[]; assert m.call(O['KEY_RETURN'])==11 and m.selected(view)==0 and not destinations(m)

@@ -15,45 +15,42 @@ for i in range(2):
 tf,online=(m.nodes[r]['children'][0] for r in m.nodes[view]['children'])
 assert m.call(address=HOOKS['systemset_fwupdate_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
 assert m.calls[0][:3]==('stock_fwupdate',m.top,5) and m.nodes[tf]['name']=='0' and m.nodes[online]['name']=='2'
-label=m.nodes[online]['children'][0]; assert m.nodes[label]['type']=='hscroll_label'
-def press():
-    f,ctx=[(f,c) for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]
-    assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0; m.advance(0,clear=False)
+assert [f for t,f,c in m.nodes[online]['handlers'] if t==O['EVT_CLICK']][-1]==payload_syms['sw_update_open']; passed()  # after stock's own
 UPDATE='/mnt/mmc/update.tar'; ASSET='update.tar'
 RELEASES=f"https://github.com/{manifest['update_repo']}/releases"  # build.py --update-repo
 m.files[UPDATE]=bytearray(b'old')
-m.wifi=-1; press(); assert m.toasts[-1][3]=='Connect to Wi-Fi first' and not m.threads; m.wifi=3
-def fetch(codes,tag,reply=b'',done=500,sig=None):
-    press(); assert m.nodes[label]['text']=='Checking…'
+NU_RUNNING,NU_DONE=1,2; out=m.alloc(8)
+def poll(): return m.call(address=payload_syms['netupdate_poll'],args=(out,out+4,0,0),gap=0)
+def start(): return m.call(address=payload_syms['netupdate_start'],args=(0,0,0,0),gap=0)
+def said(state): return m.text(m.call(address=payload_syms['netupdate_said'],args=(state,0,0,0),gap=0))
+def fetch(codes,tag,reply=b'',sig=None):
+    """Software Update's Download and Install (sw_update.c drives netupdate_start and netupdate_poll): its state."""
+    assert start()==1
     m.codes=list(codes); m.location=f'{RELEASES}/tag/{tag}'; m.reply=reply; m.sig=update_sig(reply,tag) if sig is None else sig
-    m.advance(500,clear=False)  # while it runs: the percentage, and standby and auto power-off wait
-    assert m.nodes[label]['text']=='Checking…' and ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls]
+    assert poll()==NU_RUNNING and ('reset_poweroptions_timer',1,1,0) in [c[:4] for c in m.calls]  # standby waits
     worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=200_000_000)==0
-    threads=len(m.threads); press(); assert len(m.threads)==threads  # ended, not yet joined: nothing
-    m.advance(done,clear=False)
-    assert ('widget_set_tr_text',label) in [c[:2] for c in m.calls] and UPDATE+'.part' not in m.files
-fetch([302,200,200],'9.9.9',b'TAR'*100)
+    assert start()==0  # ended, not yet joined: no second
+    state=poll(); assert UPDATE+'.part' not in m.files; return state
+assert fetch([302,200,200],'9.9.9',b'TAR'*100)==NU_DONE
 assert m.opts[10002]==f'{RELEASES}/download/9.9.9/{ASSET}' and m.opts[52]==1
 assert m.opts[10065]=='/etc/scrobble-ca.pem' and m.opts[64]==1 and m.opts[81]==2 and m.opts[99]==1 and 20108 not in m.opts
-assert bytes(m.files[UPDATE])==b'TAR'*100 and 'fwupdate_tf' in [c[0] for c in m.calls]
+assert bytes(m.files[UPDATE])==b'TAR'*100
 m.files[UPDATE]=bytearray(b'old')
-fetch([302,200,404],'9.9.9'); assert m.toasts[-1][3]=='No update for this build' and m.files[UPDATE]==b'old'
-fetch([302,404],'9.9.9'); assert m.toasts[-1][3]=='Release not signed: not installed' and m.files[UPDATE]==b'old'
-flashes=lambda: [c[0] for c in m.calls].count('fwupdate_tf'); flashed=flashes()
-fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*99,'9.9.9'))
-assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old'
-fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*100,'9.9.8'))  # another release's: refused
-assert m.toasts[-1][3]=='Signature check failed: not installed' and m.files[UPDATE]==b'old' and flashes()==flashed
-fetch([200],'9.9.9'); assert m.toasts[-1][3]=="Can't reach GitHub"  # no redirect: no tag
+assert said(fetch([302,200,404],'9.9.9'))=='No update for this build' and m.files[UPDATE]==b'old'
+assert said(fetch([302,404],'9.9.9'))=='Release not signed: not installed' and m.files[UPDATE]==b'old'
+assert said(fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*99,'9.9.9')))=='Signature check failed: not installed'
+assert m.files[UPDATE]==b'old'
+assert said(fetch([302,200,200],'9.9.9',b'TAR'*100,sig=update_sig(b'TAR'*100,'9.9.8')))=='Signature check failed: not installed'
+assert m.files[UPDATE]==b'old'  # another release's: refused
+assert said(fetch([200],'9.9.9'))=="Can't reach GitHub"  # no redirect: no tag
 if not manifest['dev']:  # --dev builds have no release tag, so always fetch
-    fetch([302],VERSION); assert m.toasts[-1][3]=='Latest firmware installed' and m.files[UPDATE]==b'old'
-    fetch([302],'1.0.0'); assert m.toasts[-1][3]=='Latest firmware installed'  # older: never a downgrade
-# Leaving the page cancels before the download starts: the card may be unmounted or shared next.
-press(); m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
-f,ctx=m.handler(label,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
+    assert said(fetch([302],VERSION))=='Latest firmware installed' and m.files[UPDATE]==b'old'
+    assert said(fetch([302],'1.0.0'))=='Latest firmware installed'  # older: never a downgrade
+# A cancel (the page left) before the download starts: the card may be unmounted or shared next.
+assert start()==1; m.codes=[302,200,200]; m.location=f'{RELEASES}/tag/9.9.9'; m.reply=b'NEW'; m.sig=update_sig(b'NEW','9.9.9')
+m.call(address=payload_syms['netupdate_cancel'],args=(0,0,0,0),gap=0)
 worker,arg=m.threads[-1]; assert m.call(address=worker,args=(arg,0,0,0),gap=0,count=5_000_000)==0
-m.advance(500,clear=False); assert m.toasts[-1][3]=='Download canceled' and m.files[UPDATE]==b'old'
-assert 'fwupdate_tf' not in [c[0] for c in m.calls]; passed()
+assert said(poll())=='Download canceled' and m.files[UPDATE]==b'old'; passed()
 
 # Q2 Shelf (netupdate.c, docs/internals.md#q2-shelf): System settings' Apps page, Check for Updates
 # then a row per app with its state from .q2/apps/<id>.tag against the list's pin, a manual install's
@@ -195,6 +192,7 @@ class ResumeMachine(QueueMachine):
     def __init__(self,files=None):
         super().__init__()
         self.files={} if files is None else files; self.open={}; self.play=(0,0); self.seeks=[]; self.opens=self.renames=0
+        self.files.setdefault('/proc/mounts',b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n')  # the card in: places and counts are on it (card_store.c)
         self.handlers[sleep_hook+12]='stock_sleep'
         for n in ('fopen@GLIBC_2.2','fread@GLIBC_2.0','fwrite@GLIBC_2.0','fclose@GLIBC_2.2','rename@GLIBC_2.0',
                   'access@GLIBC_2.0','time@GLIBC_2.0','player_playtime_and_length',
@@ -240,7 +238,7 @@ class ResumeMachine(QueueMachine):
             sec=self.play[0]  # where a seek left it
         return self
     def places(self):
-        data=self.files.get('/mnt/data/ringnav-resume',b'')
+        data=self.files.get('/mnt/mmc/.q2pod/ringnav-resume',b'')
         return [(k,signed(v)) for k,v in struct.iter_unpack('<II',data) if k]
 def playing(m,sec,total=3600,pos=None,n=1):  # n polls a second apart while it plays on from sec
     m.poll(sec,total,pos)
@@ -266,7 +264,7 @@ for i in range(O['RESUME_SLOTS']+2):  # the last is saved by no later change
     m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[0]+O['REC_PATH'],m.string(f'/p/long{i}')); m.poll(100+i,pos=0,n=3)
 assert len(m.places())==O['RESUME_SLOTS']>=512 and m.places()[0][1]==100+O['RESUME_SLOTS'] and m.places()[-1][1]==101; passed()
 old32=struct.pack('<II',fnv('/p/old'),700)+bytes(8*31)  # an earlier release's 32-slot file keeps its places
-m=ResumeMachine({'/mnt/data/ringnav-resume':old32}); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[0]+O['REC_PATH'],m.string('/p/old'))
+m=ResumeMachine({'/mnt/mmc/.q2pod/ringnav-resume':old32}); m.word(m.items(m.get(syms['mcl_pdeqplaylist']))[0]+O['REC_PATH'],m.string('/p/old'))
 m.poll(0,pos=0,n=2); playing(m,1,n=3); assert m.seeks==[700]; passed()
 # Q2POD RESUMEMIN (crossfade.c resume_min): the minutes a music track needs, 30 unless 0 (Off) or a
 # five in 20-120; Off leaves music alone while Podcasts/Audiobooks still resume.
@@ -281,7 +279,7 @@ assert m.places()==[(fnv('/mnt/mmc/podcasts/Show/01.mp3'),61)]; passed()
 
 m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]  # Podcasts/Audiobooks: any length, never counted
 m.word(r+O['REC_PATH'],m.string('/mnt/mmc/audiobooks/Book/01.mp3')); playing(m,0,200,pos=0,n=110)
-assert m.places()==[(fnv('/mnt/mmc/audiobooks/Book/01.mp3'),61)] and '/mnt/data/ringnav-plays' not in m.files
+assert m.places()==[(fnv('/mnt/mmc/audiobooks/Book/01.mp3'),61)] and '/mnt/mmc/.q2pod/ringnav-plays' not in m.files
 assert '/mnt/mmc/.scrobbler.log' not in m.files; passed()
 
 # resume_held: a long track past RESUME_EDGE_S holds a place a restart would lose; ringnav_change asks then.
@@ -299,9 +297,9 @@ playing(m,3600-O['RESUME_EDGE_S']); assert not held(m); passed()  # the last sec
 book='/mnt/mmc/Book/book.m4b'
 def chapter(m,r,start,end,path=book):
     m.word(r+O['REC_PATH'],m.string(path)); m.word(r+O['REC_CUE_START'],start); m.word(r+O['REC_CUE_END'],end)
-def resume_at(sec,path=book): return {'/mnt/data/ringnav-resume':struct.pack('<II',fnv(path),sec)+bytes(8*O['RESUME_SLOTS']-8)}
+def resume_at(sec,path=book): return {'/mnt/mmc/.q2pod/ringnav-resume':struct.pack('<II',fnv(path),sec)+bytes(8*O['RESUME_SLOTS']-8)}
 m=ResumeMachine(); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],600,1200)
-playing(m,0,600,pos=0,n=70); assert m.places()==[(fnv(book),661)] and '/mnt/data/ringnav-plays' not in m.files
+playing(m,0,600,pos=0,n=70); assert m.places()==[(fnv(book),661)] and '/mnt/mmc/.q2pod/ringnav-plays' not in m.files
 assert not held(m)  # a chapter's restart leaves the book's place alone: nothing to ask
 m=ResumeMachine(m.files); chapter(m,m.items(m.get(syms['mcl_pdeqplaylist']))[0],600,1200)
 m.poll(0,600,pos=0,n=2); playing(m,1,600,n=3); assert not m.seeks; passed()  # picking a chapter plays it
@@ -339,7 +337,7 @@ playing(m,0,600,pos=0,n=70); assert not m.places(); passed()
 # Play counts: a track over LISTEN_MIN_S counts once half of it, or LISTEN_MAX_S, has been heard,
 # seeks aside; a repeat counts again. Counts are written whole to /mnt/data, most recent first, the
 # least recently played of the lowest counts replaced when full.
-def counts(m): return [(k,n) for k,n in struct.iter_unpack('<II',m.files.get('/mnt/data/ringnav-plays',b'')) if k]
+def counts(m): return [(k,n) for k,n in struct.iter_unpack('<II',m.files.get('/mnt/mmc/.q2pod/ringnav-plays',b'')) if k]
 m=ResumeMachine(); playing(m,0,200,pos=0,n=101); assert not counts(m)
 playing(m,100,200,n=50); assert counts(m)==[(fnv('/p/A'),1)]; passed()
 m.poll(0,200); playing(m,1,200,n=101); assert counts(m)==[(fnv('/p/A'),2)]; passed()  # repeat-one
@@ -408,7 +406,7 @@ assert len(counts(m))==2 and counts(m)[1]==(fnv('/p/A'),1); passed()
 m=ResumeMachine(); r=m.items(m.get(syms['mcl_pdeqplaylist']))[0]  # a skipped CUE track's time stays its own
 playing(m,0,200,pos=0,n=26); m.word(r+O['REC_CUE_START'],300); playing(m,0,200,n=80); assert not counts(m); passed()
 full=[(i+1,1 if i==5 else 2) for i in range(O['PLAYS_SLOTS'])]
-m=ResumeMachine({'/mnt/data/ringnav-plays':b''.join(struct.pack('<II',*e) for e in full)})
+m=ResumeMachine({'/mnt/mmc/.q2pod/ringnav-plays':b''.join(struct.pack('<II',*e) for e in full)})
 playing(m,0,200,pos=0,n=110); assert counts(m)==[(fnv('/p/A'),1)]+full[:5]+full[6:]; passed()
 
 # Both lock UIs use stock's persistent flag/mode, Off or On (stock's mode 2, the buttons), and stock's key gates enforce

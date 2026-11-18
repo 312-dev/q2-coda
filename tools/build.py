@@ -10,7 +10,7 @@ ZIP_SHA = '4e298cab6c12d86cfc55565645f7e3ae11d3fb44677a93ca13991e7184ecec4e'
 DEMO_SHA = 'e65d638d6e70332b4c3193af8ac2044941ec0157d20e41e40233aac5b0c2c59f'
 VERSION = '1.8.2'  # major.minor.patch, single digits, shown as is (About and release tag)
 BETA = 0  # a pre-release's beta number (1-9), 0 for the release itself
-REPO = '312-dev/q2-coda'  # whose releases Network Update fetches (--update-repo) and release.py publishes
+REPO = '312-dev/q2-coda'  # whose releases Software Update fetches (--update-repo) and release.py publishes
 # The updater's identity (firmware_v20.info and demo's version literal) must be 5 characters and
 # differ from the installed one, so it packs the digits and the beta number: 1.8.0 beta 2 is V1802,
 # 1.8.0 itself V1800, so each installs over the betas before it. Releases up to 1.8.0 BETA ended in I
@@ -89,7 +89,7 @@ HOOKS = {
     'toolsWriteConfig': (0x5d0284, 'ringnav_ini_write', 'ini_write'),
     'main_loop_sleep_default': (0x65c470, 'ringnav_sleep', 'sleep'),
     'systemset_about_page_init': (0x4c1390, 'ringnav_about', 'about'),
-    # Network Update (patch/netupdate.c): the latest GitHub release to the card's update.tar
+    # stock's System Update page (patch/netupdate.c): its second row opens Software Update (sw_update.c)
     'systemset_fwupdate_page_init': (0x4c88d0, 'ringnav_fwupdate', 'fwupdate'),
     # Podcasts and Audiobooks: folder_page opened at their folder, and Back there leaving it
     'folder_page_init': (0x533ed0, 'ringnav_folder', 'folder'),
@@ -118,7 +118,7 @@ HOOKS = {
     # the firmware update's dialog, which stops the player before it flashes and reboots
     'device_reboot': (0x502004, 'ringnav_reboot', 'reboot'),
     'dialog_checkfw_dialog_init': (0x49982c, 'ringnav_checkfw', 'checkfw'),
-    # SD Card Update (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
+    # Software Update's card half (patch/sw_update.c): the card's update.tar checked, then stock's checkfw_dialog flashes it
     'fwupdate_tf': (0x4c7eb4, 'ringnav_fwupdate_tf', None),
     'mclLoadPlayList': (0x5bcfc8, 'ringnav_load', 'load'),
     'mclNextSong': (0x5c063c, 'ringnav_next', 'next'),
@@ -197,6 +197,12 @@ HOOKS = {
     'stream_row': (0x540f7c, 'ringnav_stream_row', 'stream_row'),
     'netservice_row': (0x4cce64, 'ringnav_netservice_row', 'netservice_row'),
     'playermore_online': (0x539614, 'ringnav_online_match', 'online_match'),
+    # Settings > Wi-Fi's flows (wifi_flows.c, docs/internals.md#wi-fi-page-flows): the switch and Search Again rows'
+    # click, a network row's click and the list's builder (none has a symbol), and stock's 500 ms Wi-Fi poll
+    'wifimenu_switch_row': (0x4d61e0, 'ringnav_wifi_switch_row', 'wifi_switch_row'),
+    'wifimenu_network_row': (0x4d62d8, 'ringnav_wifi_network_row', 'wifi_network_row'),
+    'wifimenu_rows_build': (0x4d5950, 'ringnav_wifi_rows', 'wifi_rows'),
+    'network_checkstatus': (0x518cf0, 'ringnav_wifi_checkstatus', 'wifi_checkstatus'),
     # Scan Folders' row click: a tap on a folder with no folders inside ticks it (scan_folders.c)
     'specfolder_click': (0x53f9b4, 'ringnav_specfolder_click', 'specfolder_click'),
     # The boot animation plays to its end: demo's screen shows nothing until it has (splash_hold.c)
@@ -235,11 +241,15 @@ HELPER_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libasound.
 # power-on default (missing or invalid retains Rockbox). ponytail: the card's mount is awaited (up to 3 s without a card)
 # unless Q2 Muse was asked for, as the card probe can't tell "no card" from "not yet". Rockbox runs
 # with the launcher contract in its tools/shanlingq2/README; demo starts when it exits, or when the
-# card has none. demo keeps its argv[0], which checkappprocess.sh pgreps for. iPod's Home Rockbox row
-# (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills demo: Rockbox runs again, its
-# watchdog stopped in case demo's kill was not reached, then demo once more. Any other end of demo
-# ends the loop, so the watchdog reboots as stock's would. Wi-Fi is off while Rockbox runs (WIFI_OFF).
+# card has none. iPod's Home Rockbox row (navigation.c rockbox_open) leaves ROCKBOX_FLAG and kills
+# demo: Rockbox runs again, then demo once more. Any other end of demo ends the loop and reboots, as
+# stock's watchdog did (WATCHDOG): at once after a crash's log, 10 s on after a clean end (power-off,
+# Restart, an update), which the Q2 going down ends first. Wi-Fi is off while Rockbox runs (WIFI_OFF).
 BOOT = 'usr/bin/q2boot'
+# The heat log and overheat guardian (docs/internals.md#overheat-guardian, patch/q2guard.c): BOOT_HOOK starts it.
+GUARD = 'usr/bin/q2guard'
+# --dev only: q2guard takes a temperature from /tmp/q2guard.sensor, so the emulator can play an overheat.
+GUARD_DEV_HOOK = (b' /usr/bin/q2guard ', b' /usr/bin/q2guard --dev ')
 # The boot animation's player (docs/boot.md#boot-animation, patch/splash.c): S11logo_display_shell runs it.
 SPLASH = 'usr/bin/q2splash'
 REMOTE = 'usr/bin/q2remote'
@@ -248,7 +258,7 @@ Q2EQ = 'usr/bin/q2eq'
 # The car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): demo's payload starts it
 # while Settings > Car Remote is on (patch/coda_rc_shim.c). SQLite reads the library, libdbus talks to BlueZ.
 CODA_RC = 'usr/bin/coda-rc'
-CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'monocypher/monocypher',
+CODA_RC_SOURCES = ['coda_rc', 'coda_rc_core', 'coda_rc_lib', 'coda_rc_ble', 'coda_rc_mdns', 'monocypher/monocypher',
                    'monocypher/monocypher-ed25519']
 CODA_RC_LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6', 'usr/lib/libdbus-1.so.3.19.15']
 # Guest Play's daemon (docs/internals.md#guest-play): demo starts it (patch/guest.c), libdbus talks to BlueZ,
@@ -264,8 +274,8 @@ PLAYER_STOCK_DIR = b'usr/lib/hciplayer-stock'  # --new-player: hciplayer.xz's pl
 # app's, so the app keeps its data in the card's .<id>. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v0.9', 'q2-subsonic-v0.9-43b537a.zip', 2834040,
-                 'fd96e4790e655cd95cb1c2c044b9ac3787960a0c1bc035126d886625471d710a'),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6bdfe61.zip', 2859355,
+                 '03eeebeef4a06fe665cb2b5e50ec09ae4094027ed35989b79e84fe81e5434a10'),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -293,6 +303,11 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             mv -f /mnt/data/config.ini.new /mnt/data/config.ini && echo 1 > $d && sync; }}
         c=/mnt/data/q2-crash.log
         m=/mnt/data/q2-state
+        # q2guard (patch/q2guard.c, docs/internals.md#overheat-guardian): the heat log and overheat guardian, before
+        # demo, told how the last session ended (the state and stall records, read before they are moved below), and
+        # started again whenever it ends
+        e=clean; [ -f $m ] && e=forced; [ -f /mnt/data/q2-stall ] && e=stall
+        (while :; do nice -n -5 /{GUARD} {VERSION}{f"b{BETA}" if BETA else ""} $e; e=respawn; sleep 2; done) &
         [ -f $m ] && {{
             [ -f $c ] || {{
                 echo "== date"; date
@@ -347,7 +362,6 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             s=$?
             [ -e {ROCKBOX_FLAG} ] || break
             rm -f {ROCKBOX_FLAG}
-            killall checkappprocess.sh 2>/dev/null
             # demo is gone: what it just launched gets this long to reach a name WIFI_OFF kills (build.py)
             usleep 300000
             (usleep 2000000; {WIFI_OFF}) &
@@ -374,6 +388,10 @@ BOOT_HOOK = (b'    /release/bin/demo &\n', f'''    (
             }} > $c.tmp 2>&1; mv $c.tmp $c
             sync
         fi
+        # demo is gone for good: reboot, as stock's watchdog did (build.py WATCHDOG); after a clean end only
+        # if the Q2 is still up 10 s on, as a power-off or Restart takes this shell down first
+        [ "$s" ] || sleep 10
+        reboot
     ) &
 '''.encode())
 # User boot logo (docs/boot.md#custom-boot-logo): demo copies the card's to /mnt/data, which
@@ -459,7 +477,7 @@ BT_MAIN = 'etc/bluetooth/main.conf'
 BT_DISCOVERABLE = (b'\nDiscoverableTimeout = 0\n', b'\nDiscoverableTimeout = 180\n')
 # The name a phone lists the Q2 as when the user chose none: BlueZ's own Name, which bt_name.c's Alias of "" falls
 # back to (docs/internals.md#bluetooth-name); a chosen one is [Q2POD] BTNAME in config.ini.
-BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2\n')
+BT_NAME = (b'\nName = Shanling Q2\n', b'\nName = Q2 Muse\n')
 # BlueZ 5.66's experimental D-Bus interfaces, off in stock's file: BatteryProviderManager1 among them, through which
 # bluealsa hands BlueZ the level a headset reports over HFP, so it shows as the device's Battery1 (patch/bt_battery.c,
 # docs/internals.md#headset-battery).
@@ -518,9 +536,12 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
                     (0x42d09c, 0x0041463c, None, 0x004147a0))
-# platform_init's crash watchdog forks pgrep every 2 s; 10 s is still quick to reboot a dead UI.
+# platform_init's crash watchdog, checkappprocess.sh, forked pgrep "/release/bin/demo" every 2 s and rebooted when it
+# found none: demo gone. S90play runs demo and waits for it (BOOT_HOOK), so it reboots there instead, and the script
+# platform_init still starts ends at once: no process starts every few seconds for the life of the Q2.
 WATCHDOG = 'usr/bin/checkappprocess.sh'
-WATCHDOG_SLEEP = (b'\tsleep 2\n', b'\tsleep 10\n')
+WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/build.py BOOT_HOOK); demo still starts this\n'
+                 b'exit 0\n')
 # The config a reset copies to /mnt/data: Enlarged Album Art (10 s wait) and Standby start off. So does stock's Wheel Function: Q2 Muse runs stock in Volume Mode whatever the key holds (WHEEL_MODE), and a Q2 reset here and returned to stock gets Menu Mode, the default stock's changelog names and a missing key gives (the shipped file says 1).
 # It also names the language, English (2): stock's config_init (0x5047f8) sets g_guideflag when SYSSET LANGUAGE is
 # missing, and the first boot and every reset opened stock's language guide, where Q2 Muse's wheel and Centre are off.
@@ -645,6 +666,10 @@ BT_PARAMS = (0x4fe1e4, 0x0411f5ef)  # config_bt_init's reset moves before the co
 # autoLinkBluetooth's bal checkPairDev also skips while the link list holds a connected link.
 BT_STATUS = (0x4fa700, 0x0320f809)
 BT_AUTOLINK = (0x4fbf2c, 0x0411fd04)
+# on_wm_idle_status's two "Bluetooth abnormal" toasts, each before its device_reboot (bal navigator_to_with_context
+# at 0x4f4278 and 0x4f448c, the name loaded in the delay slot), become jal bt_stopped_toast: Bluetooth Stopped's
+# page (patch/bt_stopped.c) says what happened instead, and Not Now keeps the loop's later passes quiet.
+BT_ABNORMAL_TOASTS = ((0x4f4278, 0x04110afe), (0x4f448c, 0x04110a79))
 # player_parsecover_thd's jalr toolsGetExternCover (lw $t9 at 0x51dcbc; Now Playing's folder art, after its
 # embedded art failed) becomes jal coverflow_player_cover, which gives ffmpeg what stock's decoder refuses.
 PLAYER_COVER = (0x51dccc, 0x0320f809)
@@ -895,6 +920,13 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('msg_namenull', "The name can't be empty", "Name can't be empty"),
     ('msg_lowarn', 'Line Out sets max volume,continue?', 'Line Out sets max volume, continue?'),
     ('scan_now', 'Scan music now', 'Scan Music Now'), ('scan_spec', 'Scan specified folders', 'Scan Specified Folders'),
+    # Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): the device lists' headers, a paired device's
+    # state, the Audio group's rows and the Quality picker's choices in the design's words; Unpair is Forget
+    ('bt_paireddev', 'Paired Device', 'My Devices'), ('bt_compatiabledev', 'Compatible Device', 'Other Devices'),
+    ('msg_paired', 'Paired', 'Not Connected'), ('msg_connecting', 'Connecting', 'Connecting…'),
+    ('bt_adjvol', 'Bluetooth Headset Volume Control', 'Headset Volume'),
+    ('btcode_ldachq', 'LDAC HQ', 'LDAC Best'), ('btcode_ldacauto', 'LDAC Connection (auto)', 'LDAC Auto'),
+    ('msg_unpairing', 'unpair?', 'Forget This Device?'), ('msg_unpaired', 'Unpaired', 'Device Forgotten'),
     # the card is an SD card in every label (docs/oled-design.md Copy): stock says TF
     ('update_tf', 'TF card update', 'SD Card Update'), ('msg_nottf', 'No TF Card Found', 'No SD Card Found'),
     ('msg_tfeject', 'TF Card Removed', 'SD Card Removed'), ('msg_tfinsert', 'TF Card Inserted', 'SD Card Inserted'),
@@ -1356,22 +1388,45 @@ def font_indices():
     """FONT_<NAME>, each face's index in FACES' order, and FONT_N: theme_t.font[]'s values."""
     return [*(f'#define {f.c} {i}' for i, f in enumerate(FACES.values())), f'#define FONT_N {len(FACES)}']
 
+ADV_FIRST, ADV_LAST = 0x20, 0x7e  # the characters FONT_ADV holds: printable ASCII
+
+def face_advances(face):
+    """face's advance widths, ADV_FIRST to ADV_LAST, in its font units as its subset maps them (TABULAR's
+    characters on their tabular glyphs), with its line (hhea ascent - descent, which stb sizes a face by)
+    and units per em: (advances, line, upm). Stock's uncut face: zeros, which ui_kit.c's ui_set takes as
+    "measure it". ui_set sets a label's glyphs at these exact widths: AWTK rounds each glyph's advance to
+    a whole pixel and draws a space wider than its own, so at 13 px its gaps run uneven."""
+    if not face.source:
+        return [0] * (ADV_LAST - ADV_FIRST + 1), 0, 0
+    from fontTools.ttLib import TTFont
+    font = TTFont(ROOT/'assets/fonts'/face.source, lazy=True)
+    cmap, hmtx = font.getBestCmap(), font['hmtx']
+    glyph = lambda u: cmap[u] + face.tabular if face.tabular and chr(u) in TABULAR else cmap[u]  # noqa: E731
+    adv = [hmtx[glyph(u)][0] if u in cmap else 0 for u in range(ADV_FIRST, ADV_LAST + 1)]
+    return adv, font['hhea'].ascent - font['hhea'].descent, font['head'].unitsPerEm
+
 def faces_header(ranges):
     """stock.h's faces, ranges the subset faces' range macros in FACES' order: font_indices, then
     FONT_NAMES, FONT_FALLBACK and FONT_FALLBACK_PCT by index, FONT_RANGES every subset face's runs one
-    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character)."""
+    after another, a face's from FONT_RANGE_AT[i] to [i + 1] (none: stock's, every character), and
+    face_advances' FONT_ADV (each face's row), FONT_LINE and FONT_UPM by index."""
     faces = list(FACES.values())
     cut = [f for f in faces if f.source]
     check(len(ranges) == len(cut), 'One ranges macro per subset face')
     runs = dict(zip((f.name for f in cut), (r.split(' ', 2)[2][1:-1].split(',') for r in ranges)))
     at = [0]
     for f in faces: at.append(at[-1] + len(runs.get(f.name, ())))
+    adv = [face_advances(f) for f in faces]
     return [*font_indices(), *ranges,
             '#define FONT_NAMES {' + ','.join(json.dumps(f.name) for f in faces) + '}',
             '#define FONT_FALLBACK {' + ','.join(FACES[f.fallback].c if f.fallback else '0' for f in faces) + '}',
             '#define FONT_FALLBACK_PCT {' + ','.join(str(f.fallback_pct) for f in faces) + '}',
             '#define FONT_RANGES {' + ','.join(v for f in cut for v in runs[f.name]) + '}',
-            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}']
+            '#define FONT_RANGE_AT {' + ','.join(map(str, at)) + '}',
+            f'#define FONT_ADV_FIRST 0x{ADV_FIRST:x}', f'#define FONT_ADV_LAST 0x{ADV_LAST:x}',
+            '#define FONT_ADV {' + ','.join('{' + ','.join(map(str, a[0])) + '}' for a in adv) + '}',
+            '#define FONT_LINE {' + ','.join(str(a[1]) for a in adv) + '}',
+            '#define FONT_UPM {' + ','.join(str(a[2]) for a in adv) + '}']
 
 def relabel(data):
     """A strings/*.bin value replaced: after a u16 0 and a u16 pair count, a u32 offset to each key and
@@ -1729,7 +1784,6 @@ FUNCTIONS = {
  'hscroll_label_set_only_parent_focus': ('int', 'void *, int'),
  'hscroll_label_set_ellipses': ('int', 'void *, int'),
  'hscroll_label_set_xoffset': ('int', 'void *, int'),
- 'hscroll_label_set_loop_interval_distance': ('int', 'void *, int'),  # Now Playing's lines' copy (np_marquee.c)
  'hscroll_label_start': ('int', 'void *'),
  'hscroll_label_stop': ('int', 'void *'),
  'widget_add_timer': ('unsigned', 'void *, int (*)(const void *), unsigned'),
@@ -1838,6 +1892,10 @@ FUNCTIONS = {
  'bitmap_lock_buffer_for_read': ('const unsigned char *', 'void *'),
  'canvas_draw_image': ('int', 'void *, void *, const void *, const void *'),
  'canvas_set_global_alpha': ('int', 'void *, unsigned'),
+ # a window animator of the payload's own (art_zoom.c): stock's factory and window_animator_t with its vtable
+ 'window_animator_factory': ('void *', 'void'), 'window_animator_factory_register': ('int', 'void *, const char *, void *'),
+ 'window_animator_create': ('void *', 'int, const void *'),
+ 'htranslate_update': ('int', 'void *'), 'htranslate_draw_prev': ('int', 'void *'),
  'widget_paint': ('int', 'void *, void *'),  # a widget painted into another's canvas (coverflow.c coverflow_home_strip)
  # Cover Flow's flip paints the tracks panel to a bitmap as stock's window snapshots do (coverflow.c flip_capture)
  'canvas_offline_create': ('void *', 'unsigned, unsigned, unsigned'),
@@ -1860,7 +1918,7 @@ FUNCTIONS = {
  'check_forbid_play_no_headset': ('int', 'int'),
  'on_wm_keyup_fun': ('int', 'void *, void *'),  # stock key-up: np_single replays a centre release
  'get_wifisignal': ('int', 'void'),  # the status bar's Wi-Fi bars, 1-4; -1 when not connected
- 'fwupdate_tf': ('int', 'void'),  # System Update's SD Card Update (sw_update.c ringnav_fwupdate_tf)
+ 'fwupdate_tf': ('int', 'void'),  # the card's update alone (sw_update.c ringnav_fwupdate_tf)
  # its stock checks: -15 battery under 16% with no cable, -2 no card, -11 no file, -12 under 0.1 GB free, else 1
  'check_updatefw_exist': ('int', 'const char *, const char *'),
  'widget_set_tr_text': ('int', 'void *, const char *'),
@@ -1877,6 +1935,14 @@ FUNCTIONS = {
  'getBtLinkSize': ('int', 'void'), 'getBtLinkItem': ('int', 'int, int *, char *'),
  'getBtLinkStatus': ('int', 'char *'), 'addBtLinkItem': ('void', 'char *, int'),
  'updateBtLinkStatus': ('int', 'int, char *'), 'checkPairDev': ('int', 'char *'),
+ 'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
+ 'btmenu_item_on_click': ('int', 'void *, void *'),  # a device row's click: connect, disconnect or Unpair? (bt_ui.c)
+ # a device's page's Forget (bt_detail.c), as stock's row click does it after its Unpair? dialog's OK: the pairing
+ # removed (1, or 2 when it was the output), the output back to a jack, the list read again
+ # Guest Play's join QR codes (guest_ui.c): libqrencode, which demo imports; a QRcode is its version, width and
+ # width x width modules, bit 0 dark
+ 'QRcode_encodeString': ('void *', 'const char *, int, int, int, int'), 'QRcode_free': ('void', 'void *'),
+ 'handleBluetoothPair': ('int', 'int'), 'check_outputdevice': ('int', 'int, int'), 'getSearchResult': ('int', 'void'),
  'btctl_create_daemon_thread': ('int', 'void *'),
  'initBluetoothParam': ('void', 'void'),
  'btctl_set_prompt_callback': ('void', 'void *, void *'),
@@ -1900,7 +1966,11 @@ FUNCTIONS = {
  'screen_action': ('int', 'int'),  # 1: the backlight and stock's power timers; 0: the panel blanks (disable_fb)
  'btctl_transport_get_volume': ('int', 'void'),
  'btctl_transport_set_volume': ('int', 'int'),
- 'device_set_volume': ('int', 'int, int'),  # volume, notify: the DAC's or hciplayer's, as the volume dialog
+ 'device_set_volume': ('int', 'int, int'),
+ # Settings' inline sliders (inline_slider.c): stock's setters, each as its page sets a step
+ 'config_balance': ('int', 'int'),  # -10 (left) to 10: the DAC's ioctl and PLAYSET BALANCE; the caller clamps
+ 'config_lightness': ('int', 'int'),  # 0 to 100: g_lightness, the backlight and SYSSET LIGHTNESS
+ 'mclGetBalance': ('int', 'void'),  # volume, notify: the DAC's or hciplayer's, as the volume dialog
  # Spotify (spotify.c): the headphone output as a headset insert sets it, then PCM mode and unmuted, as AirPlay's page
  'config_outputchannel': ('int', 'int, int'),  # g_headset_output, 2
  'mclSetPcmMode': ('int', 'void'),
@@ -1942,9 +2012,18 @@ FUNCTIONS = {
  'wifi_switch': ('int', 'int'),
  'networkGetConnectStatus': ('int', 'void'),  # 0 no link (networkStop), above 0 connected
  'mclGetPlayType': ('int', 'void'),  # the queue's type: 2, 3, 0xf1 and 0xf2 stream (on_wm_timer_networkstatus)
+ # Settings > Wi-Fi's flows (wifi_flows.c): a scan record's join and Forget by its index in wifi_showlist,
+ # whether a network is saved, wpa_supplicant's disconnect, and the saved list dropped and read again
+ 'wifi_action_connect': ('int', 'int'), 'wifi_action_deleterecord': ('int', 'int'),
+ 'networkCheckConnectedSsid': ('int', 'const char *'), 'networkDisconnect': ('int', 'void'),
+ 'networkClearSsid': ('int', 'void'), 'networkGetSsidList': ('int', 'const char *'),
+ # a password fit for a scan record's flags (wifi_action_connect's check): not 0 when it is
+ 'networkCheckSsidPassword': ('int', 'const char *, const char *'),
 }
 # Local stock routines in the SHA-256-pinned V1.36 executable.
 PRIVATE_FUNCTIONS = {
+    # stock's htranslate window animator's own (its vtable, HTRANSLATE_VT): page_parallax.c runs each after its change
+    'htranslate_update': 0x696bd0, 'htranslate_draw_prev': 0x696d90,
     "playlist_delete_click": 0x4b62c8,
     'volume_dialog_on_keyup': HOOKS['volume_dialog_on_keyup'][0],
     'keylock_rows': HOOKS['keylock_rows'][0],
@@ -1957,6 +2036,7 @@ PRIVATE_FUNCTIONS = {
     "mcl_preload": HOOKS['mcl_preload'][0],
     "mcl_open_preload": HOOKS['mcl_open_preload'][0],
     "btmenu_rows": HOOKS['btmenu_rows'][0],  # systemset_bluetooth_page's list: rows, paired, found
+    "btmenu_item_on_click": 0x4c43a4,  # a device row's click, by its button's name (bt_ui.c bt_stock_click)
     "mcl_shuffle_pick": 0x5ba7d0,
     "album_row": 0x506e94,  # getAllAlbum's sqlite3_exec callback: id, album, songer, fileurl to a record
     "folder_refresh": 0x531efc,  # folder_page's navbar and table from p_deque_showlist (its init, back)
@@ -1964,11 +2044,16 @@ PRIVATE_FUNCTIONS = {
     "folder_click": HOOKS['folder_click'][0],  # folder_page's row click (folder_enter, then a file's queue)
     "np_info": 0x53bc78,  # Now Playing's info page labels, from the track (NP_INFO_CALL)
     "ab_x": 0x53b9d8,  # an A-B marker's x, on the boot set's np_bar_x and np_bar_w (AB_X_CALLS)
-    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's SD Card Update
+    "fwupdate_tf": HOOKS['fwupdate_tf'][0],  # systemset_fwupdate_page's row 0 click (0x4c84cc): sw_update.c's card update
     # Smart Wi-Fi's held stock actions (smart_wifi.c smart_hold)
     "stream_row": HOOKS['stream_row'][0],  # Streaming's Tidal row: atoi of the button's name
     "netservice_row": HOOKS['netservice_row'][0],  # Network service's DLNA, AirPlay and Wi-Fi transfer
     "playermore_online": HOOKS['playermore_online'][0],  # More's Download Cover & Lyrics: (window)
+    # Settings > Wi-Fi's flows (wifi_flows.c): the switch and Search Again rows' click (row named 0 or 1), a network
+    # row's click (named by its scan record) and the list's builder (window)
+    "wifimenu_switch_row": HOOKS['wifimenu_switch_row'][0],
+    "wifimenu_network_row": HOOKS['wifimenu_network_row'][0],
+    "wifimenu_rows_build": HOOKS['wifimenu_rows_build'][0],
     "specfolder_click": HOOKS['specfolder_click'][0],  # Scan Folders' row click
 }
 GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a Tidal list loaded
@@ -1980,6 +2065,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_bluetoothflag', 'bt_linkstatus', 'g_guideflag', 'g_poweroff_state', 'g_usblink_status', 'bt__recv_pageflag',
            'g_power_longkey', 'g_ingore_bootkey_flag', 'g_equalizer_flag', 'g_navbar_status', 'g_playcover_type',
            'g_keytone_flag', 'g_folder_layer', 'g_otg_status', 'g_delete_flag', 'g_volume', 'g_maxvolume',
+           'g_lightness', 'g_bootvolume', 'g_bootvol_flag',  # Brightness, Default Volume's level and switch (inline_slider.c)
            'g_po_status', 'g_bal_status',  # 3.5 mm and 4.4 mm jacks: 1 plugged (check_headset_status)
            'g_usbvol_mode',  # USB DAC volume: 0 fixed, else the volume (config_usbvolmode, device_set_volume)
            'g_usbdac_chargeflag',  # USB mode's charge choice, which switch_charge_enable gets there
@@ -1988,13 +2074,17 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
            'g_headset_output',  # the output config_outputchannel sets: 0, 1 the jacks, 2 Bluetooth
            'g_usbmode',  # USB mode: 1 Audio and DAC, else USB Storage (usbmode_page_init)
            'g_usbdet_value',  # 1 while a USB cable is in (USB mode's scan prompt outlives it)
+           'g_last_otgid',  # 1 while the Q2 is a USB host powering the bus (check_otg_status)
            # Smart Wi-Fi (smart_wifi.c smart_poll): the Wi-Fi switch's state and stock's own gates on
            # toggling it (wifi_initstatus 0, wifi_connectstatus not 1, connecting), Network service's
            # AirPlay and DLNA, SyncLink (2: over Wi-Fi) and its session, Wi-Fi transfer and a pending time sync
            'g_wififlag', 'wifi_initstatus', 'wifi_connectstatus', 'g_airplayflag', 'g_dlnaflag',
            'g_synclinkflag', 'g_syncLink_status', 'g_wifitransport_flag', 'g_syncnettime_flag',
            'g_forcerefresh_flag',  # Now Playing's page update writes the title and artist again (catalogue.c np_done)
-           'wifi_searchtime']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
+           'wifi_searchtime', 'g_wifisetting_flag',  # the Wi-Fi page's timer rebuilds its list (wifi_flows.c)
+           # Settings > Bluetooth (bt_ui.c): its scan's countdown (not 0 while it runs, 1 as it ends), a flag that
+           # has the page's timer rebuild its list, and Quality's choice (the btcode_* row, 0 LDAC Best to 7 SBC)
+           'bt_searchtime', 'g_btsetting_flag', 'g_btcoding']  # the Wi-Fi page's scan running: not 0 (wifimenu_rows_build; wifi_rows.c)
 # Audited stock browsing state, deque pointers, art locks, the status bar widget
 # (system_bar_init stores it), the playing cover's track path and the playing track's tags as
 # player_get_id3info parsed them; sizes are checked against the ELF.
@@ -2016,13 +2106,18 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 'g_dropdown_menu_state': 4,  # Quick Settings: 1, 2 while it slides or follows a swipe, 3 open
                 'bt_connectstatus': 4,  # a link thread runs (1), ended (2), checked (3)
                 'bt_initstatus': 4,  # Bluetooth's start-up status: -102 is stock's "Bluetooth abnormal" (system.c reboot_record)
-                'wifi_showlist': 4}  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
+                'wifi_showlist': 4,  # the Wi-Fi page's scan records: name @0, flags @4 (wifi_rows.c)
+                # Settings > Wi-Fi's flows (wifi_flows.c): stock's monitor's last STATUS (wpa_state @0xd8), the network
+                # a join tries, and the network and password the password entry asks for
+                'g_wifiStatus': 248, 'wifi_name': 256, 'prepare_linkssid': 256, 'prepare_linkpasswd': 128,
+                'pdeq_btshowlist': 4}  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
-                   'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'tidal_downloads', 'apps_page',
-                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carpair_page', 'artistrows_page',
+                   'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
+                   'addon_page', 'app_songs', 'qrcode_page', 'battery_page', 'carremote_page', 'carphone_page', 'carhowto_page', 'artistrows_page',
                    'storage_page', 'downloads_page', 'usbchoose_page', 'usbdebug_page',
-                   'swupdate_page', 'empty_page'}
+                   'swupdate_page', 'empty_page', 'btdevice_page', 'btstopped_page',
+                   'guestnp_page', 'guestset_page', 'guesttrust_page', 'hotspot_page', 'guestconnect_page', 'guestfail_page'}
 ICONS = [f'menu_{c}{s}.png' for c in ('coverflow', 'rockbox') for s in ('', 'down')]
 # The stock EQ preset page and the images only it and the stock equalizer page show: the PEQ
 # editor clears that page's widgets on init and never binds the preset button, so none can load.
@@ -2069,12 +2164,12 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'wifi_rows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'status_row.c', 'ui_kit.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_ui.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'wifi_transfer.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'pair_prompt.c', 'bt_ui.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'art_zoom.c', 'heatguard.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'ringnav_ab_x', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_prev', 'parallax_update', 'ringnav_ab_x', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text', 'ringnav_dark_cover_usleep',
@@ -2107,7 +2202,7 @@ def compile_payload(out):  # pragma: no mutate block
         f'--undefined={WM_PAINT_LEAF[2]}', f'--undefined={QUEUE_LEAF[2]}', '--undefined=ringnav_audio_extension', '--undefined=start_mute', '--undefined=start_sleep', '--undefined=ringnav_genre_copy', '--undefined=ringnav_lyric_save', '--undefined=ringnav_lyric_drop', '--undefined=ringnav_cover_copy','--undefined=ringnav_folder_rm','--undefined=ringnav_bootmode', '--undefined=ringnav_ts_read',
         '--undefined=ringnav_baidu_poll', '--undefined=ringnav_stock_tls', '--undefined=ringnav_tidal_poll', '--undefined=catalogue_access', '--undefined=addon_m3u_dir', f'--undefined={COVERINFO_CALL[2]}',
         '--undefined=coverflow_player_cover', '--undefined=coverflow_grid_cover', '--undefined=coverflow_album_cover', '--undefined=coverflow_folder_cover', '--undefined=headset_bt_init',
-        '--undefined=headset_status_register', '--undefined=headset_bt_autolink',
+        '--undefined=headset_status_register', '--undefined=headset_bt_autolink', '--undefined=bt_stopped_toast',
         *[f'--undefined={name}' for name in PAYLOAD_ROOTS],
         '--undefined=scrobble_auto_ms',  # inlined where the payload calls it; test/patch.py calls its own copy
         *nav,out/'trampoline.o',*extra,'-o',out/'patch.elf')
@@ -2282,6 +2377,11 @@ def patch_bluealsa(raw):
         struct.pack_into('<I', image, fileoff(raw, address), new)
     return bytes(image)
 
+# Stock's htranslate window animator's vtable (window_animator_htranslate_create's, .data.rel.ro): update_percent
+# and draw_prev_window at +0x14 and +0x18, each pointed at page_parallax.c's, which runs stock's with its change (docs/internals.md#page-parallax).
+HTRANSLATE_VT = 0x93b234
+HTRANSLATE_SLOTS = ((0x696bd0, 'parallax_update'), (0x696d90, 'parallax_prev'))
+
 PRODUCT_NAME = 'Q2 Muse'  # the product's name on screen (About); one place to rename it
 STOCK_VERSION = 'V1.36'
 
@@ -2315,12 +2415,10 @@ def stock_header(context, ranges, themes, dev=0, repo=REPO, key=None):
     check(len(themes) == 1, f'{len(themes)} built-in themes: the payload has one (theme_engine.c theme())')
     header.append(f'#define THEME_N {len(themes)}')  # theme_engine.c theme()
     header.append(f'#define THEME_KEYS {len(theme_keys(themes))}')  # navigation.c st.own[], themes.inc theme_keys[]
-    from art import corner_table
-    header.append(f'#define ROUND_COVER {corner_table()}')  # navigation.c paint_round_rows
     return '\n'.join(header)+'\n'
 
 def signing_key(path, dev):
-    """The release key's 32 public bytes that Network Update and the App Store check signatures with
+    """The release key's 32 public bytes that Software Update and the App Store check signatures with
     (docs/internals.md#release-signatures): assets/signing/q2-coda-release.pub, which a release build must have;
     a --dev build may take another (path), such as a test key whose private half is at hand."""
     from signing import PUBLIC_KEY, public_key
@@ -2452,7 +2550,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     (out/'bluealsa').write_bytes(bluealsa)
     bluetoothd = patch_bluetoothd(cat(BLUETOOTHD))
     (out/'bluetoothd').write_bytes(bluetoothd)
-    (out/'watchdog').write_bytes(cat(WATCHDOG).replace(*WATCHDOG_SLEEP))
+    (out/'watchdog').write_bytes(WATCHDOG_STUB)
     shadow = lock_root(cat(SHADOW))
     check(not password_logins(shadow), 'A password still logs in')
     (out/'shadow').write_bytes(shadow)
@@ -2537,6 +2635,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
           (0x8f99fc1c, 0x0320f809, 0x2484c180), 'Bluetooth status: expected btctl_device_status_callback(0x4fc180)')
     patch_word(patched, *BT_STATUS, jal(ps['headset_status_register']), 'Bluetooth: incoming link during a connect')
     patch_word(patched, *BT_AUTOLINK, jal(ps['headset_bt_autolink']), 'Bluetooth: auto-link keeps an incoming link')
+    for site, stock in BT_ABNORMAL_TOASTS:
+        patch_word(patched, site, stock, jal(ps['bt_stopped_toast']), 'Bluetooth Stopped: its page, not the toast')
     patch_word(patched, *SCAN_REFRESH, jal(ps['ringnav_scan_refresh']), 'folder scan refreshes existing tags')
     patch_word(patched, *TAG_TEXT, jal(ps['ringnav_gbk_tag']), 'tag text GBK only when it reads as GBK')
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GENRE_COPY[0] - 4))[0] == 0x8f99f680,
@@ -2546,6 +2646,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     for address in CUE_TEXT:
         patch_word(patched, address, branch(0x04110000, address, syms['toolsIconvConvert']),
                    jal(ps['ringnav_cue_text']), 'CUE text read as UTF-8, GBK or Windows-1252')
+    for slot, (old, name) in enumerate(HTRANSLATE_SLOTS):  # page push and pop with parallax (page_parallax.c)
+        patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: the page under drifts and dims')
     patch_word(patched, DIALOG_CLOSE, branch(0x04110000, DIALOG_CLOSE, syms['idle_add']),
                jal(ps['ringnav_dialog_close']), "a modal dialog's close skips one already gone")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,
@@ -2696,7 +2798,8 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     s90play = s90play.replace(*BOOT_HOOK)
     check(s90play.count(LOG_HOOK[0]) == 1, 'Unexpected demo loop')
     check(s90play.count(WHEEL_LOG_HOOK[0]) == 1, 'Unexpected card path')
-    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK) if dev else s90play)
+    check(s90play.count(GUARD_DEV_HOOK[0]) == 1, 'Unexpected q2guard start')
+    (out/'S90play').write_bytes(s90play.replace(*REMOTE_HOOK).replace(*ADB_HOOK).replace(*LOG_HOOK).replace(*WHEEL_LOG_HOOK).replace(*GUARD_DEV_HOOK) if dev else s90play)
     (out/'config.ini').write_bytes(default_config(cat(DEFAULT_CONFIG)))
     s11logo = cat(S11LOGO)
     check(s11logo.count(LOGO_HOOK[0]) == 1, 'Unexpected S11logo_display_shell')
@@ -2831,6 +2934,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
                                Q2CGI: (HELPER_LIKE, (ROOT/'assets/web/q2cgi').read_bytes()),
                                BOOT: (HELPER_LIKE, compile_helper(out, cat, 'boot', 'q2boot', HELPER_LIBS[:1])),
                                SPLASH: (HELPER_LIKE, compile_helper(out, cat, 'splash', 'q2splash', HELPER_LIBS[:1])),
+                               GUARD: (HELPER_LIKE, compile_helper(out, cat, ['q2guard', 'q2guard_core', 'q2guard_card'], 'q2guard', HELPER_LIBS[:1])),
                                **({path: (xx+'list_tidal.png', data) for path, data in anim.items()} if anim else {}),
                                CODA_RC: (HELPER_LIKE, compile_helper(out, cat, CODA_RC_SOURCES, 'coda-rc', CODA_RC_LIBS)),
                                GUEST: (HELPER_LIKE, compile_helper(out, cat, 'q2_guest', 'q2-guest', GUEST_LIBS)),
@@ -2964,7 +3068,7 @@ if __name__ == '__main__':
     ap.add_argument('--flac-experiments', default='sync,lpc,output', metavar='sync,lpc,output',
                     help='FLAC fast paths (comma-separated subset; empty for stock FLAC)')
     ap.add_argument('--update-repo', default=REPO, metavar='OWNER/NAME',
-                    help="GitHub repo whose latest release Network Update fetches (default: %(default)s), for a fork's test builds")
+                    help="GitHub repo whose latest release Software Update fetches (default: %(default)s), for a fork's test builds")
     ap.add_argument('--signing-key', type=pathlib.Path, metavar='PUB.PEM',
                     help='Ed25519 public key that updates and the app list must be signed with, in place of assets/signing/q2-coda-release.pub (requires --dev)')
     ap.add_argument('--aic-idle-wait', action='store_true',

@@ -216,14 +216,38 @@ def phosphor(name, px, rgb, ink=0.0):
     return glyph_png(phosphor_polys(name, px), px, rgb, ink)
 
 
-def status_wifi(level, px, ink, lit, unlit):
-    """The status row's Wi-Fi at level (1 to 3 arcs, wifi-low to wifi-high), a px square PNG: the full glyph in unlit,
-    the level's arcs over it in lit, both at wifi-high's optical size and centre, so the shape keeps its width."""
-    full = phosphor_polys('wifi-high-bold', px)
-    part = phosphor_polys(f"wifi-{('low', 'medium', 'high')[level - 1]}-bold", px)
-    box = (0, 0, px, px)
-    return png(px, px, laid(px, px, [(coverage_nonzero(optical(full, px, ink), box), lambda x, y: (unlit, 1)),
-                                     (coverage_nonzero(optical(part, px, ink, full), box), lambda x, y: (lit, 1))]))
+def status_fit(polys, w):
+    """polys, a glyph laid in a STATUS_PX box, as the status row sizes it: scaled until its ink is STATUS_INK px tall
+    (its height, not its longer side, so a wide glyph such as wifi-x is as tall as the clock's digits too), its ink's
+    top on STATUS_TOP and centred across a w px wide box."""
+    xs, ys = [x for poly in polys for x, _ in poly], [y for poly in polys for _, y in poly]
+    k, cx = STATUS_INK / (max(ys) - min(ys)), (min(xs) + max(xs)) / 2
+    return [[(w / 2 + (x - cx) * k, STATUS_TOP + (y - min(ys)) * k) for x, y in poly] for poly in polys]
+
+
+def status_glyph(name, w, rgb):
+    """Phosphor's icon name at the status row's size (status_fit), a w x STATUS_PX PNG in rgb."""
+    box = (0, 0, w, STATUS_PX)
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero(status_fit(phosphor_polys(name, STATUS_PX), w), box),
+                                                  lambda x, y: (rgb, 1))]))
+
+
+def wifi_fan(w):
+    """iOS's Wi-Fi fan in a w x STATUS_PX box, as polygons per band: a STATUS_FAN_DEG sector from an apex on the
+    ink's bottom (STATUS_TOP + STATUS_INK, the clock's baseline), radius STATUS_INK, cut at STATUS_FAN into the dot
+    and two bands, centred across w."""
+    ax, ay, half = w / 2, STATUS_TOP + STATUS_INK, STATUS_FAN_DEG / 2
+    angles = [math.radians(a - 90) for a in (half * (2 * i / 30 - 1) for i in range(31))]
+    return [[(ax + r1 * math.cos(t), ay + r1 * math.sin(t)) for t in angles] +
+            [(ax + r0 * math.cos(t), ay + r0 * math.sin(t)) for t in reversed(angles)] for r0, r1 in STATUS_FAN]
+
+
+def status_wifi(level, lit, unlit):
+    """The status row's Wi-Fi at level (1 to 3 lit of wifi_fan's dot and bands, from the dot), a STATUS_WIFI_W x
+    STATUS_PX PNG: the lit part in lit, the rest in unlit, so the shape keeps its size at every level."""
+    w, box = STATUS_WIFI_W, (0, 0, STATUS_WIFI_W, STATUS_PX)
+    return png(w, STATUS_PX, laid(w, STATUS_PX, [(coverage_nonzero([band], box), lambda x, y, c=lit if i < level else unlit: (c, 1))
+                                                 for i, band in enumerate(wifi_fan(w))]))
 
 
 def status_turn(name, px, ink, rgb, turn):
@@ -258,17 +282,26 @@ SPIN_R = (3.4, 6.4)  # a spoke's ends' distances from the centre, round capped
 SPIN_STROKE = 1.9
 SPIN_FADE = 0.1
 STATE_INKS = inks('primary', 'd', 'l')
-# The status row's glyphs by role (status_row.c, docs/oled-design.md#status-row): name -> (Phosphor stem, box px,
-# optical ink, 0 for none), each in Text Primary per half (STATE_INKS). The play state and the padlock are 13 px boxes
-# drawn as they were (their ink 10.6 and 11 px); the rest are STATUS_PX boxes at STATUS_INK, the padlock's ink, so
-# they read as one size. Wi-Fi's levels (status_wifi) light 1 to 3 of wifi-high's arcs over the rest in STATUS_UNLIT;
-# the sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), in Text
-# Secondary; the download's arrow sits in its ring, white.
+# The status row's glyphs by role (status_row.c, docs/oled-design.md#status-row), each in Text Primary per half
+# (STATE_INKS). Every one is STATUS_INK px tall, the clock's digits' height, with its ink's top STATUS_TOP rows into a
+# STATUS_PX tall box that status_row.c puts on the row's centre less 7, so the glyphs stand on rows 17 to 27 with the
+# digits. STATUS_FIT's are Phosphor's, sized by their ink's height (status_fit), centred across their box: STATUS_PX
+# square, or wider where the ink is (wifi-x, the car). The Bluetooth rune dims while a device connects (BT_SPIN_INKS).
+# Wi-Fi is iOS's fan, drawn here (wifi_fan): its levels light 1 to 3 of the dot and two bands over the rest in
+# STATUS_UNLIT. The play state and the padlock are 13 px boxes drawn as they were (their ink 10.6 and 11 px); the
+# sync arrows turn through STATUS_SPIN frames of a half turn (the glyph repeats every half turn), sized by their
+# longer side as they turn, in Text Secondary; the download's arrow sits in its ring, white.
 STATUS_PX = 14
 STATUS_INK = 11.0
+STATUS_TOP = 1.0
+STATUS_WIFI_W = 16  # the fan's 15.6 px, status_row.c SR_WIFI_W
+STATUS_CAR_W = 19  # car-profile-bold's 18.5 px at 11 tall, status_row.c SR_CAR_W
+STATUS_FAN_DEG = 90
+STATUS_FAN = ((0, 3.6), (5.0, 7.3), (8.7, 11.0))  # the dot and the bands' radii: 1.4 px of ground between
 STATUS_GLYPHS = {'play': ('play-fill', STATE_PX, 0), 'pause': ('pause-fill', STATE_PX, 0), 'keylock': ('lock-simple-fill', STATE_PX, 0),
-                 'status_wifi_x': ('wifi-x-bold', STATUS_PX, STATUS_INK), 'status_bt': ('bluetooth-bold', STATUS_PX, STATUS_INK),
                  'status_down': ('arrow-down-bold', 8, 0)}
+STATUS_FIT = {'status_wifi_x': ('wifi-x-bold', STATUS_WIFI_W), 'status_bt': ('bluetooth-bold', STATUS_PX),
+              'status_headphones': ('headphones-bold', STATUS_PX), 'status_car': ('car-profile-bold', STATUS_CAR_W)}
 STATUS_UNLIT = {'d': 0x3a3a3c, 'l': 0xc7c7cc}
 STATUS_SECONDARY = inks('secondary', 'd', 'l')
 STATUS_SPIN = 8
@@ -285,6 +318,7 @@ ROW_ICON_PX = 20
 ROW_INK = 15.5  # a 20 px symbol's optical size: its ink's longer side (phosphor's ink)
 VOL_SPK_PX = 16  # Now Playing's volume speakers (patch/offsets.inc VOL_SPK_PX, the same)
 FOLDER_INKS = inks('secondary', 'd', 'l', 'w')  # Text Secondary in each half, white on the bar
+CTA_RING_INKS = inks('primary', 'd', 'l')  # the buttons' focus ring (cta_ring_end), Text Primary per half
 SORT = 'M0 0H16V2H0ZM0 5H11V7H0ZM0 10H6V12H0Z'
 SORT_BOX = (0, 0, 16, 12)  # Songs' Sort (navigation.c action_row), white as stock's glyphs: Light Mode flips it to the ink
 CIRCLE_CHECK_PX = 11  # the row editors' check circle's glyphs (list_marks.c CIRCLE_CHECK_PX, CIRCLE_LOCK_PX)
@@ -332,20 +366,32 @@ TILE_INKS = BUMP_INKS
 PL_ACTION_PX = 18
 PL_ACTIONS = {'shuffle': 'shuffle', 'add': 'plus-circle', 'save': 'arrow-down', 'clear': 'x', 'search': 'magnifying-glass'}
 PL_MARK_PX = 20
-# Control Center's glyphs (control_center.c cc_glyph, from mock_cc3.py): fill, white on its toggles, tiles and transport
-# (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill.
-CC_ICONS = {'wifi': ('wifi-high-fill', 22, 0xffffff), 'bluetooth': ('bluetooth-fill', 22, 0xffffff),
-            'airplay': ('airplay-fill', 22, 0xffffff), 'car': ('car-profile-fill', 22, 0xffffff),
+# Control Center's glyphs (control_center.c cc_glyph, from mock_cc4_tight.py): Phosphor fill, white on its toggles
+# and transport (Play/Pause the larger), the sliders' sun and speaker in the block's #1C1C1E on their light fill. The
+# Wi-Fi circle's is the link's (cc_wifi): wifi-slash off, wifi-none on but not joined, wifi-low to wifi-high by the
+# status row's level (Phosphor's fill levels draw the whole fan and fill as much of it as the signal), wifi-x with no
+# internet. The toggles' glyphs are at CC_INK, their optical size: each ink's longer side 18 px, so the wide fan and
+# the tall Bluetooth rune read as one size.
+CC_ICONS = {'wifi_slash': ('wifi-slash-fill', 22, 0xffffff), 'wifi_0': ('wifi-none-fill', 22, 0xffffff),
+            'wifi_1': ('wifi-low-fill', 22, 0xffffff), 'wifi_2': ('wifi-medium-fill', 22, 0xffffff),
+            'wifi_3': ('wifi-high-fill', 22, 0xffffff), 'wifi_x': ('wifi-x-fill', 22, 0xffffff),
+            'bluetooth': ('bluetooth-fill', 22, 0xffffff), 'airplay': ('airplay-fill', 22, 0xffffff),
+            'car': ('car-profile-fill', 22, 0xffffff), 'leaf': ('leaf-fill', 22, 0xffffff),
+            'eq': ('equalizer-fill', 22, 0xffffff),
             'sun': ('sun-fill', 18, token('raised')), 'speaker': ('speaker-high-fill', 18, token('raised')),
-            'lock': ('lock-simple-fill', 22, 0xffffff), 'timer': ('timer-fill', 22, 0xffffff),
-            'moon': ('moon-stars-fill', 22, 0xffffff), 'eq': ('equalizer-fill', 22, 0xffffff),
-            'leaf': ('leaf-fill', 22, 0xffffff), 'back': ('skip-back-fill', 22, 0xffffff),
-            'forward': ('skip-forward-fill', 22, 0xffffff), 'pause': ('pause-fill', 30, 0xffffff),
-            'play': ('play-fill', 30, 0xffffff)}
+            'back': ('skip-back-fill', 22, 0xffffff), 'forward': ('skip-forward-fill', 22, 0xffffff),
+            'pause': ('pause-fill', 30, 0xffffff), 'play': ('play-fill', 30, 0xffffff)}
+# Light Mode's (control_center.c cc_glyph, <name>_l): the art is final, so the light half has its own: a toggle
+# off and the transport in the light half's Text Primary on the light block, the sliders' sun and speaker white on
+# the fill that is dark there. A toggle on keeps the white on Accent Blue.
+CC_LIGHT = {**{n: token('primary', True) for n in CC_ICONS if n not in ('sun', 'speaker')},
+            'sun': 0xffffff, 'speaker': 0xffffff}
+CC_INK = {n: 18.0 for n in ('wifi_slash', 'wifi_0', 'wifi_1', 'wifi_2', 'wifi_3', 'wifi_x', 'bluetooth', 'airplay',
+                            'car', 'leaf', 'eq')}
 
 # Every mode page's glyph by role (feedback.c mode_page_paint, docs/oled-design.md#usb): fill, white on its solid
 # circle, MODE_GLYPH_PX: a card app's sign-in steps (addon.c qr_paint: phone, check, done, fail, error), USB's modes
-# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and SD Card Update's
+# (usb_ui.c: files, audio, debug; ejected is done), Bluetooth's receiver (bt_recv.c: receive) and Software Update's
 # results (sw_update.c: done for up to date, none, low, bad, restart). Each glyph is drawn once; the bold check is
 # done for all three that show it.
 MODE_GLYPH_PX = 44
@@ -359,6 +405,21 @@ MODE_GLYPHS = {'phone': 'device-mobile-fill', 'check': 'arrows-clockwise-fill', 
 USB_ROW_PX = 19
 USB_ROWS = {'charge': 'lightning', 'files': 'folder-simple', 'audio': 'speaker-hifi', 'debug': 'terminal-window'}
 USB_TOAST_PX = 15
+PAIR_GLYPH_PX = 28  # the pairing card's phone, over its title (pair_prompt.c, feedback.c CARD_GLYPH)
+# Settings > Bluetooth (bt_ui.c, docs/oled-design.md#bluetooth): a device row's kind at the row symbols' size (regular,
+# Text Secondary per half, white on the selection), the scan's spinner beside Other Devices in Text Tertiary per half,
+# and the connection toasts' glyphs (fill, 15 px, white, a drop's in Text Secondary; the low headset battery's in the
+# battery's red).
+BT_ROW_GLYPHS = {'bt': 'bluetooth', 'headphones': 'headphones', 'car': 'car-profile', 'speaker': 'speaker-hifi',
+                 'phone': 'device-mobile'}
+BT_SPIN_INKS = {'d': 0x858585, 'l': 0x6e6e6e}
+BT_TOASTS = {'headphones': ('headphones-fill', 0xffffff), 'car': ('car-profile-fill', 0xffffff),
+             'speaker': ('speaker-hifi-fill', 0xffffff), 'phone': ('device-mobile-fill', 0xffffff),
+             'bt': ('bluetooth-fill', 0xffffff), 'low': ('battery-warning-fill', 0xff453a),
+             'warn': ('warning-fill', 0xff9f0a), 'no': ('prohibit-fill', 0xababab)}  # Guest Play's (guest_ui.c)
+# Settings > Car Remote's phone rows (carremote_page.c): Phosphor device-mobile, regular, Text Secondary per half,
+# white on the selection
+CR_PHONE_PX = 20
 # The software update's check (sw_update.c, docs/oled-design.md Software Update): iOS's twelve-spoke spinner in the
 # half's Text Primary (_d white, _l black) on no circle, 48 px across (its results' glyphs are MODE_GLYPHS).
 SW_SPIN_SPOKES = 12
@@ -366,6 +427,26 @@ SW_SPIN_PX = 48
 SW_SPIN_R = (13.2, 22)  # round capped: the outer cap reaches 24, the mock-up's radius
 SW_SPIN_STROKE = 4
 SW_SPIN_FADE = 0.75 / 11  # the spoke behind the head's head a quarter as bright
+# Now Playing's loading spinner (np_stream.c, docs/server-library.md#download-ahead-and-the-streaming-state): the
+# software update's twelve spokes and fade at 14 px, Text Secondary per half, as streaming-v3's variant D draws it.
+NP_SPIN_PX = 14
+NP_SPIN_R = (3.25, 6.5)
+NP_SPIN_STROKE = 1.5
+NP_SPIN_INKS = inks('secondary', 'd', 'l')
+# Now Playing's format badge for a server song (np_stream.c, streaming-v3): the cloud, or the crossed-out cloud while
+# the server can't be reached, 12 px in Text Secondary per half, as About's quality badge's glyph (QUALITY_PX)
+NP_CLOUDS = {'cloud': 'cloud', 'cloudoff': 'cloud-slash'}
+# Software Update's offer (sw_update.c sw_offer_paint): its source's glyph, white on the accent's 60 px circle: the
+# internet's download tray, the card's file.
+SW_OFFER_PX = 30
+SW_OFFER = {'net': 'download-simple-fill', 'sd': 'file-arrow-down-fill'}
+# The library scan's page (scan_page.c, docs/oled-design.md#update-library): its ending's figure, regular weight,
+# SCAN_GLYPH_PX in Text Secondary per half (done the check circle; stopped short the memory chip, as the empty
+# state's card), and the folder glyph before the scanned folder's name, SCAN_FOLDER_PX. Scanning is SW_SPIN's spinner.
+SCAN_GLYPH_PX = 60
+SCAN_FOLDER_PX = 15
+SCAN_GLYPHS = {'done': 'check-circle', 'card': 'memory', 'folder': 'folder'}
+SCAN_INKS = inks('secondary', 'd', 'l')
 HOLD_BACK_PX = 20  # search_strip.c's Return-held card: Phosphor arrow-u-up-left, bold, white
 # The empty state (feedback.c empty_state): its glyph in outline, Phosphor's regular weight at EMPTY_PX, in Text
 # Secondary per half (_d, _l), by the glyph a page names (empty_t.glyph; docs/oled-design.md#empty-and-offline has the
@@ -463,35 +544,58 @@ def png(w, h, rgba):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b'')
 
 
-# A coverage table per radius of the round boxes the painter draws a row at a time (navigation.c paint_round_rows): their
-# corners' pixels take the row's colour at this alpha, so they stay the scheme's.
-CORNERS = (2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16)
+# A radius r corner's coverage table, the one patch/corner_cover.c works out at run time for any radius the payload
+# rounds (docs/internals.md#rounded-corners): the tests hold the C to this.
 def corner_cover(r):
     """A radius r corner's coverage out of 255, r rows of r pixels, the outermost first."""
     n = 16
     inside = lambda x, y: sum(math.hypot(r - x - (i + .5) / n, r - y - (j + .5) / n) <= r for i in range(n) for j in range(n))
     return bytes(round(inside(x, y) * 255 / n ** 2) for y in range(r) for x in range(r))
-def corner_table():
-    """The tables as a C initialiser, by radius."""
-    rows = (f'[{r}] = (const unsigned char[]){{ {",".join(map(str, corner_cover(r)))} }}' for r in CORNERS)
-    return '{ ' + ', '.join(rows) + ' }'
 
 
-# Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a letter, the lit key grows a bubble
-# holding the letter at POP_LETTER_PX, and the key keeps the letter at the strip's size, dimmed (the echo). Panel px.
+# The buttons' focus ring (ui_kit.c cta_capsule, docs/oled-design.md#buttons): CTA_RING_W px in Text Primary, 3 px out
+# from the 38 px capsule (ui_kit.h CTA_RING_OFF), so CTA_RING_H tall, its ends half circles of radius CTA_RING_H / 2
+# outside and CTA_RING_W less inside. Its two ends are these images, 16 x 16 samples a pixel as corner_cover's; the
+# straight runs between them are whole pixels, which the payload fills.
+CTA_RING_H, CTA_RING_W = 48, 2
+def cta_ring_end(right, rgb):
+    """The ring's left (right False) or right end, CTA_RING_H / 2 wide and CTA_RING_H tall, as a PNG in rgb."""
+    r, n = CTA_RING_H // 2, 16
+    def cover(x, y):
+        return sum(r - CTA_RING_W < math.hypot(x + (i + .5) / n - r, y + (j + .5) / n - r) <= r
+                   for i in range(n) for j in range(n)) / n ** 2
+    cov = [cover(r - 1 - x if right else x, y) for y in range(CTA_RING_H) for x in range(r)]
+    return png(r, CTA_RING_H, laid(r, CTA_RING_H, [(cov, lambda x, y: (rgb, 1))]))
+
+
+# Search's key pop (search_strip.c, list.entry.ipod): when the wheel lands on a character, the lit key grows a bubble
+# holding it at POP_LETTER_PX (the key keeps it at the strip's size, dimmed, drawn by the payload). Panel px.
 # The bubble is one closed path: a POP_HEAD head with POP_HEAD_R corners whose sides each run one cubic S-curve
 # over POP_NECK px, leaving the head and meeting the key vertically (tangents continuous, so the edge never kinks),
 # ending inside the key's top 6 px; then the POP_KEY key with POP_KEY_R corners. Even widths with an even
-# difference, so head, key and letter share one centre. The image is the head's width and reaches the key's foot.
+# difference, so head, key and character share one centre. The image is the head's width and reaches the key's foot.
 POP_KEY_W, POP_KEY_H, POP_KEY_R = 18, 24, 5
 POP_HEAD_W, POP_HEAD_H, POP_HEAD_R = 30, 30, 9
 POP_NECK = 18
 POP_H = POP_HEAD_H + POP_NECK + POP_KEY_H - 6
-POP_LETTER_PX, POP_LETTER_DY = 26, 2  # the big letter's ink centred on the head, 2 px below its middle
-POP_ECHO_PX, POP_ECHO_A = 19, 153  # the echo: Inter Regular at the strip's size, white at 60 %
-POP_ECHO_H = 34  # the echo's box is the key's width by the strip's height, its baseline the strip letters' own
-POP_ECHO_BASELINE = 23  # ... where the payload's text rule puts the strip's 19 px letters (measured)
-POP_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+POP_LETTER_PX, POP_LETTER_DY = 24, 2  # the big character's ink centred on the head, 2 px below its middle
+# every character of the strip's sets but the space, in their order (search_strip.c ss_sets): abc, ABC, 123, #+=
+POP_CHARS = ('abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' '0123456789'
+             '!@#$%&*-_.?/+=:;,\'"()[]{}<>^~`\\|')
+# the strip's return key's mark (search_strip.c SS_RET_MARK): the keyboard's return symbol, a stem down the right, a
+# slightly rounded corner, a bar to the left ending in an open arrowhead, round capped and joined; centred in a
+# RETURN_PX box, its strokes RETURN_STROKE wide, in white on the accent's circle and in the accent on white
+RETURN_PX, RETURN_STROKE, RETURN_CORNER = 20, 2.2, 2.5
+
+
+def return_mark(rgb):
+    """The return key's mark as a RETURN_PX square PNG in rgb."""
+    c, r = RETURN_PX / 2, RETURN_CORNER
+    bend = [(c + 7 - r + r * math.cos(a * math.pi / 16), c + 3 - r + r * math.sin(a * math.pi / 16)) for a in range(9)]
+    stem = [(c + 7, c - 7), *bend, (c - 7, c + 3)]
+    head = [(c - 3, c - 1), (c - 7, c + 3), (c - 3, c + 7)]
+    polys = stroke([stem, head], RETURN_STROKE)
+    return png(RETURN_PX, RETURN_PX, laid(RETURN_PX, RETURN_PX, [(coverage_nonzero(polys, (0, 0, RETURN_PX, RETURN_PX)), lambda x, y: (rgb, 1))]))
 
 
 def pop_bubble_d():
@@ -525,27 +629,28 @@ def ink_polys(ch, px, cx, cy=None, baseline=None, face='Medium'):
 
 
 def pop_images(accent):
-    """{name: PNG}: the bubble in the accent, and two strips of the characters in POP_CHARS' order, white: the big
-    letters, one head's box each, and the echoes, one key's box each (one image a strip, not one a character: a
-    third of the bytes)."""
+    """{name: PNG}: the bubble in the accent, a strip of the characters in POP_CHARS' order, white, one head's box each
+    (one image, not one a character: a third of the bytes), and the return key's mark in white and in the accent."""
     n, out = len(POP_CHARS), {}
     out['search_pop'] = png(POP_HEAD_W, POP_H, laid(POP_HEAD_W, POP_H, [
         (coverage_nonzero(path(pop_bubble_d()), (0, 0, POP_HEAD_W, POP_H)), lambda x, y: (accent, 1))]))
-    for name, cell, h, a, place in (
-            ('search_pop_letters', POP_HEAD_W, POP_HEAD_H, 1,
-             lambda ch, cx: ink_polys(ch, POP_LETTER_PX, cx, cy=POP_HEAD_H / 2 + POP_LETTER_DY)),
-            ('search_pop_echoes', POP_KEY_W, POP_ECHO_H, POP_ECHO_A / 255,
-             lambda ch, cx: ink_polys(ch, POP_ECHO_PX, cx, baseline=POP_ECHO_BASELINE, face='Regular'))):
-        polys = [p for i, ch in enumerate(POP_CHARS) for p in place(ch, cell * i + cell / 2)]
-        out[name] = png(cell * n, h, laid(cell * n, h, [(coverage_nonzero(polys, (0, 0, cell * n, h)), lambda x, y, a=a: (0xffffff, a))]))
+    polys = [p for i, ch in enumerate(POP_CHARS)
+             for p in ink_polys(ch, POP_LETTER_PX, POP_HEAD_W * i + POP_HEAD_W / 2, cy=POP_HEAD_H / 2 + POP_LETTER_DY)]
+    out['search_pop_letters'] = png(POP_HEAD_W * n, POP_HEAD_H, laid(POP_HEAD_W * n, POP_HEAD_H, [
+        (coverage_nonzero(polys, (0, 0, POP_HEAD_W * n, POP_HEAD_H)), lambda x, y: (0xffffff, 1))]))
+    out['search_return_w'] = return_mark(0xffffff)
+    out['search_return_a'] = return_mark(accent)
     return out
 
 
 def status_images(prefix):
     """The status row's glyphs (STATUS_GLYPHS and the rest of its role), {name: PNG bytes}, per half."""
     out = {f'{prefix}_{n}_{k}': phosphor(g, px, c, ink) for n, (g, px, ink) in STATUS_GLYPHS.items() for k, c in STATE_INKS.items()}
-    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, STATUS_PX, STATUS_INK, c, STATUS_UNLIT[k])
+    out |= {f'{prefix}_{n}_{k}': status_glyph(g, w, c) for n, (g, w) in STATUS_FIT.items() for k, c in STATE_INKS.items()}
+    out |= {f'{prefix}_status_wifi_{n}_{k}': status_wifi(n, c, STATUS_UNLIT[k])
             for n in (1, 2, 3) for k, c in STATE_INKS.items()}
+    # the Bluetooth slot while a device connects: the rune in Text Tertiary per half (status_row.c headset_paint)
+    out |= {f'{prefix}_status_btdim_{k}': status_glyph('bluetooth-bold', STATUS_PX, c) for k, c in BT_SPIN_INKS.items()}
     out |= {f'{prefix}_status_sync_{f}_{k}': status_turn('arrows-clockwise-bold', STATUS_PX, STATUS_INK, c, f / STATUS_SPIN / 2)
             for f in range(STATUS_SPIN) for k, c in STATUS_SECONDARY.items()}
     return out
@@ -638,15 +743,36 @@ def images(t):
     out |= {f'{prefix}_store_pick_{k}': phosphor('arrow-circle-down', MARK_PX, c) for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_store_auto_{k}': phosphor('arrows-clockwise', MARK_PX, c) for k, c in FOLDER_INKS.items()}
     out |= {f'{prefix}_modepage_{n}': phosphor(g, MODE_GLYPH_PX, 0xffffff) for n, g in MODE_GLYPHS.items()}
-    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_swoffer_{n}': phosphor(g, SW_OFFER_PX, 0xffffff) for n, g in SW_OFFER.items()}
+    out |= {f'{prefix}_cc_{n}': phosphor(g, px, c, CC_INK.get(n, 0.0)) for n, (g, px, c) in CC_ICONS.items()}
+    out |= {f'{prefix}_cc_{n}_l': phosphor(g, px, CC_LIGHT[n], CC_INK.get(n, 0.0)) for n, (g, px, _) in CC_ICONS.items()}
     out |= {f'{prefix}_usb_{n}_{k}': phosphor(g, USB_ROW_PX, c) for n, g in USB_ROWS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_crphone_{k}': phosphor('device-mobile', CR_PHONE_PX, c) for k, c in FOLDER_INKS.items()}
+    # the buttons' focus ring's ends (ui_kit.c cta_capsule), Text Primary per half
+    out |= {f'{prefix}_ctaring_{s}_{k}': cta_ring_end(s == 'r', c) for s in 'lr' for k, c in CTA_RING_INKS.items()}
     out |= {f'{prefix}_usbtoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in USB_TOASTS.items()}
+    out |= {f'{prefix}_btdev_{n}_{k}': phosphor(g, ROW_ICON_PX, c, ROW_INK) for n, g in BT_ROW_GLYPHS.items() for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_btspin_{k}_{f}': spinner(f, SPIN_SPOKES, CARET_PX, SPIN_R, SPIN_STROKE, SPIN_FADE, c)
+            for k, c in BT_SPIN_INKS.items() for f in range(SPIN_SPOKES)}
+    out |= {f'{prefix}_bttoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in BT_TOASTS.items()}
+    out |= {f'{prefix}_bttoast_{n}_off': phosphor(g, USB_TOAST_PX, 0xababab) for n, (g, _) in BT_TOASTS.items() if n != 'low'}
+    # Guest Play (guest_ui.c, status_row.c): the guest's phone in the accent, beside "Playing from" and in the status row,
+    # and the status row's relay mark (phone › car) in Text Secondary per half
+    out[f'{prefix}_guestphone_a'] = phosphor('device-mobile-fill', USB_TOAST_PX, on)
+    out[f'{prefix}_pairing_phone'] = phosphor('device-mobile', PAIR_GLYPH_PX, on)  # pair_prompt.c's card
+    out[f'{prefix}_status_guest'] = phosphor('device-mobile-fill', STATUS_PX, on, STATUS_INK)
+    out |= {f'{prefix}_status_relay_{k}': phosphor('caret-right-bold', 8, c) for k, c in STATUS_SECONDARY.items()}
     out |= {f'{prefix}_batt{n}_{k}': inset_glyph(g, *inks) for n, g in BATT_GLYPHS.items() for k, inks in BATT_GLYPH_INKS.items()}
     out |= {f'{prefix}_chargetoast_{n}': phosphor(g, USB_TOAST_PX, c) for n, (g, c) in CHARGE_TOASTS.items()}
     out |= {f'{prefix}_chargetoast_battery_{k}': phosphor('battery-high-fill', USB_TOAST_PX, c) for k, c in CHARGE_TOAST_BATTERY.items()}
     out[f'{prefix}_chargebolt'] = phosphor('lightning-fill', CHARGE_BOLT_PX, token('positive'))
     out |= {f'{prefix}_swspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, SW_SPIN_PX, SW_SPIN_R, SW_SPIN_STROKE, SW_SPIN_FADE, c)
             for k, c in STATE_INKS.items() for f in range(SW_SPIN_SPOKES)}
+    out |= {f'{prefix}_np{n}_{k}': phosphor(g, QUALITY_PX, c) for n, g in NP_CLOUDS.items() for k, c in NP_SPIN_INKS.items()}
+    out |= {f'{prefix}_npspin_{k}_{f}': spinner(f, SW_SPIN_SPOKES, NP_SPIN_PX, NP_SPIN_R, NP_SPIN_STROKE, SW_SPIN_FADE, c)
+            for k, c in NP_SPIN_INKS.items() for f in range(SW_SPIN_SPOKES)}
     out |= {f'{prefix}_empty_{n}_{k}': phosphor(g, EMPTY_PX, c) for n, g in EMPTY_GLYPHS.items()
             for k, c in inks('secondary', 'd', 'l').items()}
+    out |= {f'{prefix}_scan_{n}_{k}': phosphor(g, SCAN_FOLDER_PX if n == 'folder' else SCAN_GLYPH_PX, c)
+            for n, g in SCAN_GLYPHS.items() for k, c in SCAN_INKS.items()}
     return out

@@ -224,8 +224,6 @@ static void lock_set(int choice) {
     write_int_config(g_keylock_mode, "SYSSET", "LOCKMODE");
     write_int_config(g_keylock_flag, "SYSSET", "LOCKFLAG");
 }
-/* Control Center's Lock tile (control_center.c): Buttons Lock on or off. */
-void keylock_toggle(void) { lock_set(!g_keylock_flag); }
 static int lock_pick(void *ctx, void *event) {
     lock_set((int)(long)ctx);
     void *win = window_manager_get_top_window(window_manager());
@@ -288,11 +286,10 @@ static int quick_long(const void *unused) {
     dialog_quit(win, 0);
     if (page >= QUICK_CC)
         return cc_hold(page - QUICK_CC), 0; /* Control Center's (control_center.c) */
-    /* An open EQ page is already the goal: a second would share peq_ui.c's one state. */
-    if (page == 3 && navigator_window_is_exist("equalizer_page")) return 0;
-    navigator_to(page == 1   ? "systemset/wifi_page"
-                 : page == 2 ? "systemset/bluetooth_page"
-                             : "playset/equalizer_page"); /* as Playback's EQ row (0x4bd114) */
+    /* an open page is already the goal (control_center.c cc_page) */
+    cc_page(page == 1   ? "systemset/wifi_page"
+            : page == 2 ? "systemset/bluetooth_page"
+                        : "playset/equalizer_page"); /* as Playback's EQ row (0x4bd114) */
     return 0;
 }
 static int quick_down(void *icon, void *event) {
@@ -337,13 +334,14 @@ int ringnav_quick_settings(void *win, void *ctx) {
  * holds playback; docs/internals.md#resume-on-connect), and Playback's Artist album order
  * (ARTISTAZ), and Display's Hold Return (HOLDRETURN, compact_now_playing;
  * docs/ipod.md#hold-return), and Power's Standby limit (STANDBYLIMIT, ringnav_standby;
- * docs/internals.md#standby-limit), and Bluetooth's Control Device Volume (BTVOLLINK,
+ * docs/internals.md#standby-limit), and Bluetooth's Link Volume (BTVOLLINK,
  * bt_audio_ready; docs/internals.md#headset-controls-and-volume), and Power's Smart Wi-Fi
  * (SMARTWIFI, smart_poll; docs/internals.md#smart-wi-fi), and Display's Fast Navigation
  * (BIGLIBRARY, Cover Flow's letters; docs/internals.md#coverflow-thumb) and Playlist View
  * (PLAYLISTCF).
  */
-/* Bluetooth's Control Device Volume on: the Q2's volume is the device's own (bt_audio_ready). */
+/* Bluetooth's Link Volume as saved, -1 never chosen (bt_link): on, the Q2's volume is the device's
+ * own (bt_audio_ready). */
 static int bt_vol_link __attribute__((section(".scratch")));
 /* Playback > Library's On-The-Go (OTG, playlist_pages.c): the Playlists row and the hold menu's Add
  * to On-The-Go; on unless the key says 0. */
@@ -405,9 +403,12 @@ static int pod_choices(unsigned i) { return i == POD_ARTIST_CF ? 3 : i == POD_ST
 void pod_settings(void) {
     if (st.pod_read) return;
     for (unsigned i = 0; i < sizeof pod_keys / sizeof *pod_keys; ++i)
-        if (pod_keys[i]) /* Artist albums defaults to Coverflow, On-The-Go to on */
+        if (pod_keys[i]) /* Artist albums defaults to Coverflow, On-The-Go to on; Link Volume
+                          * never chosen is -1 (bt_link) */
             *pod_values[i] = config_value("Q2POD", pod_keys[i], pod_choices(i),
-                                          i == POD_ARTIST_CF || i == POD_OTG);
+                                          i == POD_BT_LINK                     ? -1
+                                          : i == POD_ARTIST_CF || i == POD_OTG ? 1
+                                                                               : 0);
     st.pod_read = 1;
 }
 int ringnav_year_old(void) {
@@ -455,9 +456,13 @@ int ringnav_bt_resume(void) {
     pod_settings();
     return st.resume;
 }
+/* Link Volume as it applies now: the choice saved, else on for the device connected now when its
+ * Class is headphones or a headset (bt_kind's "headphones", from the battery loop's read of it,
+ * bt_battery.c) and off for a speaker, a car or a device not yet known, whose own amplifier a low
+ * Q2 volume would turn down with it (docs/internals.md#headset-controls-and-volume). */
 static int bt_link(void) {
     pod_settings();
-    return bt_vol_link;
+    return bt_vol_link >= 0 ? bt_vol_link : !tk_strcmp(bt_kind(bt_headset_class()), "headphones");
 }
 /* read_artistype_value (a Library list's or artist page's init) and boot (playback.c
  * ringnav_bootmode): Artists as stock reads it, PLAYSET ARTISTTYPE, but Album Artist when no choice
@@ -489,7 +494,7 @@ static void pod_text(int i) {
         { "Hold Return: Recent", "Hold Return: Home" },
         { "Standby Limit: Off", "Standby Limit: " STR(STANDBY_LIMIT_1) "h",
           "Standby Limit: " STR(STANDBY_LIMIT_2) "h", "Standby Limit: " STR(STANDBY_LIMIT_3) "h" },
-        { 0 }, /* Control Device Volume: a switch */
+        { 0 }, /* Link Volume: a switch */
         { 0 }, /* Coverflow Sort's from coverflow.c */
         { "Refresh Cover Flow" },
         { 0 }, /* EQ per Output: a switch */
@@ -518,13 +523,14 @@ static void pod_text(int i) {
             : i == POD_CARMODE     ? g_carmode != 0
             : i == POD_COVERMODE   ? g_bigcovermode == 1
             : i == POD_FOLDERCOVER ? g_foldercover_flag != 0
+            : i == POD_BT_LINK     ? bt_link() /* never chosen: what applies now */
             : pod_values[i]        ? *pod_values[i]
                                    : 0;
     /* a set_switch theme's Charge Limit is a key/value row, Off or its level, as names[] has it */
     const char *toggle = i == POD_CHARGE && theme()->set_switch ? 0
                          : i == POD_CHARGE         ? "Charge Limit (" STR(CHARGE_STOP) "%)"
                          : i == POD_RESUME         ? "Resume on Connect"
-                         : i == POD_BT_LINK        ? "Control Device Volume"
+                         : i == POD_BT_LINK        ? "Link Volume"
                          : i == POD_CARMODE        ? "In-Vehicle Mode"
                          : i == POD_SMART_WIFI     ? "Smart Wi-Fi"
                          : i == POD_COVERMODE      ? "Enlarged Album Art"
@@ -582,12 +588,12 @@ static int pod_click(void *ctx, void *event) {
         write_int_config(g_foldercover_flag, "PLAYSET", "FOLDERCOVER");
     } else {
         int *value = pod_values[i];
-        *value = (*value + 1) % pod_choices(i);
+        *value = i == POD_BT_LINK ? !bt_link() : (*value + 1) % pod_choices(i);
         write_int_config(*value, "Q2POD", pod_keys[i]);
         if (i == POD_SCAN_DURATIONS && !*value) durations_cancel();
         if (i == POD_CF_POSITION) coverflow_position_reset();
         st.charge_at = 0;
-        /* Control Device Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
+        /* Link Volume: off, stock's gain back at once; on, bt_volume_poll's next pass
          * sends the Q2's level to the device. */
         if (i == POD_BT_LINK && mclGetOutputWay() == 1)
             headset_volume_reset(), device_set_volume(g_volume, 0);
@@ -632,25 +638,17 @@ int ringnav_powermanager(void *win, void *ctx) {
     return result;
 }
 /* The Bluetooth page's list (stock's local builder, btmenu_rows), rebuilt whole on every search and
- * link change: its rows, five with Bluetooth on (one, the switch, off), then the device lists.
- * With Bluetooth on, Resume on connect and Control Device Volume follow the fourth, Bluetooth
- * Headset Volume Control (bt_adjvol), each time, iconless and 78 high as stock's rows, and the
- * second, stock's Bluetooth Name, is bt_name.c's Name row. */
+ * link change: Resume on Connect and Link Volume, pod_rows' switches, with Bluetooth on, then
+ * bt_ui.c's order and look (docs/oled-design.md#bluetooth). */
 int ringnav_btrows(void *win, void *ctx) {
     static const char *const icons[] = { 0 };
     int result = stock_btrows_trampoline(win, ctx);
-    if (!g_bluetoothflag) return result;
-    pod_rows(win, "scroll_view_bluetooth", POD_RESUME, 1, icons);
-    pod_rows(win, "scroll_view_bluetooth", POD_BT_LINK, 1, icons);
     void *view = win ? widget_lookup(win, "scroll_view_bluetooth", 1) : (void *)0;
-    unsigned n = view ? widget_count_children(view) : 0;
-    if (n < 2) return result;
-    for (unsigned k = 0; k < 2; ++k) {
-        void *row = widget_get_child(view, n - 2 + k);
-        widget_resize(row, I(row, W_W), 78);
-        widget_restack(row, 4 + k);
+    if (g_bluetoothflag) {
+        pod_rows(win, "scroll_view_bluetooth", POD_RESUME, 1, icons);
+        pod_rows(win, "scroll_view_bluetooth", POD_BT_LINK, 1, icons);
     }
-    bt_name_row(view);
+    if (view) bt_page(view, g_bluetoothflag);
     return result;
 }
 /* A settings list's rows, stock's (in its table's order, each button named by its place there,
@@ -665,13 +663,32 @@ static void reorder(void *view, const unsigned char *order, unsigned n) {
 
 /* EQ and the Library first, then everyday listening, what plays next, the Sleep Timer, level,
  * channels, then specialist output controls. Stock's rows 0-10 (ringnav_audioset drops its Volume
- * and Album Display and Folder skip), then ours as built. */
+ * and Album Display and Folder skip, and hides its Balance, 10, for the inline one), then ours as
+ * built. */
 static const unsigned char playset_order[] = {
-    2 /* EQ */,           19 /* Library */,     3 /* Play Mode */,     7 /* Gapless */,
-    11 /* Crossfade */,   6 /* Memory play */,  12 /* Resume Songs */, 8 /* Headphones required */,
-    15 /* Sleep Timer */, 16 /* Volume */,      17 /* Max Volume */,   18 /* Default Vol */,
-    0 /* Gain */,         9 /* ReplayGain */,   10 /* Balance */,      13 /* Mono Audio */,
-    14 /* Swap L/R */,    1 /* Filters */,      4 /* DSD Output */,    5 /* USB Audio */,
+    2 /* EQ */,
+    22 /* Library */,
+    3 /* Play Mode */,
+    7 /* Gapless */,
+    11 /* Crossfade */,
+    12 /* its Duration */,
+    6 /* Memory play */,
+    13 /* Resume Songs */,
+    8 /* Headphones required */,
+    16 /* Sleep Timer */,
+    17 /* Volume */,
+    18 /* Max Volume */,
+    19 /* Default Volume */,
+    20 /* its Level */,
+    0 /* Gain */,
+    9 /* ReplayGain */,
+    21 /* Balance */,
+    10 /* stock's Balance, hidden */,
+    14 /* Mono Audio */,
+    15 /* Swap L/R */,
+    1 /* Filters */,
+    4 /* DSD Output */,
+    5 /* USB Audio */,
 };
 /* General, iOS's: About first, then device maintenance, Network's receivers and Reset. Stock's
  * Language, Wireless, Display, Power, Wheel Function, In-Vehicle, General and System stay hidden,
@@ -769,10 +786,11 @@ static int to_page(void *ctx, void *event) {
  * instead of stock's: Folders keeps stock's Folder skip (12), the others none. Playback itself
  * drops stock's Volume and Album Display (11) and Folder skip; Album Display's rows are elsewhere,
  * Max Volume and Default Volume here, Enlarged Album Art on Display and Folder Album Cover on
- * Library > Folders, opening stock's pages and flipping stock's switches (pod_click). Playback's
- * Volume row, before Max Volume, opens the slider page on the volume (crossfade.c xfade_open 4).
- * Each page
- * builds only its own rows, so a row's kept label is its page's. */
+ * Library > Folders, flipping stock's switches (pod_click). Max Volume, Balance and Crossfade's and
+ * Default Volume's values are inline sliders, set in the list (inline_slider.c); stock's Balance
+ * row stays, hidden. Playback's Volume row, before Max Volume, opens the slider page on the volume
+ * (crossfade.c xfade_open 4). Each page builds only its own rows, so a row's kept label is its
+ * page's. */
 static int playset_sub __attribute__((section(".scratch")));
 int library_open(void *ctx, void *event) {
     playset_sub = (int)(long)ctx;
@@ -801,7 +819,8 @@ int ringnav_audioset(void *win, void *ctx) {
         library_page(win, view, sub);
         return result;
     }
-    xfade_row(list_row_into(view, "playset_gapless", xfade_open, (void *)0));  /* crossfade.c */
+    /* Crossfade and its Duration (inline_slider.c) */
+    inline_pair(view, "playset_gapless", IS_XFADE);
     resume_row(list_row_into(view, "playset_memplay", xfade_open, (void *)2)); /* crossfade.c */
     mono_row(list_row(view, "playset_balance", mono_click, 0));
     swap_row(list_row(view, "playset_balance", swap_click, 0));
@@ -810,12 +829,11 @@ int ringnav_audioset(void *win, void *ctx) {
         list_row_into(view, "system_powermanager", to_page, (void *)"systemset/sleepshutdown_page"),
         "Sleep Timer");
     volume_row(list_row_into(view, "playset_maxvol", xfade_open, (void *)4)); /* crossfade.c */
-    widget_set_tr_text(
-        list_row_into(view, "playset_maxvol", to_page, (void *)"playset/maxvol_page"),
-        "playset_maxvol");
-    widget_set_tr_text(
-        list_row_into(view, "playset_bootvol", to_page, (void *)"playset/bootvol_page"),
-        "playset_bootvol");
+    inline_slider_row(view, "playset_maxvol", IS_MAXVOL);
+    inline_pair(view, "playset_bootvol", IS_BOOTVOL); /* Default Volume and its Level */
+    inline_slider_row(view, "playset_balance", IS_BALANCE);
+    /* stock's Balance, which opens its page */
+    widget_set_visible(widget_get_child(view, 10), 0, 0);
     widget_set_text_utf8(
         list_row_into(view, "playset_folderjump", library_open, (void *)LIB_LIBRARY), "Library");
     reorder(view, playset_order, sizeof playset_order);

@@ -23,7 +23,7 @@ enum {
     T_SUBSCRIBE = 0x10, T_STATE, T_GET_STATE,
     T_TRANSPORT = 0x20, T_ACK, T_SET_MODE, T_RATE = 0x24,
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
-    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM,
+    T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM, T_START_RADIO = 0x46,
     T_GET_COVER = 0x50, T_COVER,
     T_PING = 0x7e, T_PONG,
 };
@@ -46,6 +46,10 @@ enum {
 #define CAP_QUEUE_JUMP 256u /* PlayQueueItem */
 #define CAP_RATE 512u       /* Rate, NowPlaying.hearts and .rateable */
 #define CAP_RESUME 1024u    /* Play.resume, ACTION_RESUME */
+#define CAP_FAVORITES 2048u /* the library's favorites node */
+#define CAP_RECENT 4096u    /* the library's recent node (Recently Added) */
+#define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
+#define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
@@ -90,6 +94,8 @@ typedef struct crc_session {
 
 /* ---- what the platform provides (coda_rc.c; the host test's fakes) ---- */
 void crc_random(void *buf, size_t n);
+/* NowPlaying.buffered_ms: have of total bytes as a share of ms, 0 without a total or a length; in 32 bits */
+uint32_t crc_buffered_ms(uint32_t have, uint32_t total, uint32_t ms);
 uint32_t crc_now_ms(void);
 uint32_t crc_now_s(void);  /* wall clock, for crc_peer.created */
 int crc_write(crc_session *s, const uint8_t *buf, size_t n);  /* the whole frame, or -1 */
@@ -137,6 +143,7 @@ int lib_has_server(void);
 int ble_start(void);
 int ble_events(void);
 void ble_handle(void);
+int ble_pending(void); /* messages read and not yet handled: poll without waiting */
 int ble_write(const uint8_t *p, size_t n);
 void ble_disconnect(void);
 void ble_stop(void);
@@ -144,6 +151,29 @@ int ble_retry_due(uint32_t now_ms);
 void crc_ble_connected(void);
 void crc_ble_bytes(const uint8_t *p, size_t n);
 void crc_ble_gone(void);
+void crc_ble_advertising(int on); /* /tmp/coda-rc.ble while the GATT application and advertisement stand */
+int crc_tcp_port(void); /* the port TCP sessions are accepted on (CRC_TCP_PORT, or --port) */
+
+/* ---- mDNS (coda_rc_mdns.c, docs/remote-protocol.md#discovery) ---- */
+#define MDNS_TTL 120 /* seconds, every record */
+enum { MD_PTR = 1, MD_SRV = 2, MD_TXT = 4, MD_A = 8, MD_ENUM = 16, MD_ALL = 31 };
+typedef struct {
+    uint8_t ip[4], id[8]; /* the address (network order) and crc_device_id */
+    uint16_t port;
+    char name[64]; /* the instance: the Bluetooth name */
+    char host[64]; /* the host's label, before .local */
+} mdns_self;
+/* the records a packet asks for (MD_* bits), 0 none of ours or not a query, -1 malformed */
+int mdns_query(const mdns_self *me, const uint8_t *p, size_t n);
+/* a response with those records as answers (and what they lead to as additionals) at ttl into out; its size,
+ * 0 when it does not fit */
+size_t mdns_reply(const mdns_self *me, unsigned answers, uint32_t ttl, uint8_t *out, size_t cap);
+void mdns_start(const char *ifname); /* answer on ifname's address whenever it has one */
+int mdns_fd(void);                   /* the socket to poll for POLLIN, -1 with none */
+void mdns_poll(uint32_t now_ms);     /* every pass: the address and name followed, announcements sent */
+uint32_t mdns_due(uint32_t now_ms);  /* ms until mdns_poll has something to do; 0xffffffff never */
+void mdns_handle(void);              /* a packet waiting on mdns_fd */
+void mdns_stop(void);                /* goodbye, and closed */
 
 #define CRC_PAIR_TIMEOUT_MS 120000
 #define CRC_PAIR_FAILS 3              /* wrong codes before pairing locks */

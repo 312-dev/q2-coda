@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from conftest import FNV_SEED, O, Files, Rows, in_fork
+from conftest import FNV_SEED, O, Files, Rows, in_fork, stock_start_with
 from test_nav_library_pages import EVT_CLICK, song, ui  # noqa: F401  the Now Playing heart's fixtures
 from test_nav_painters import scratch, st  # noqa: F401  navigation.c's st by field
 
@@ -80,7 +80,7 @@ class Rig:
         fw.mock('fw_opendir', self.opendir)
         fw.mock('fw_readdir', self.readdir)
         fw.mock('fw_pthread_create', lambda t, attr, fn, arg, *_: C.CFUNCTYPE(C.c_void_p, C.c_void_p)(fn)(arg) and 0)
-        fw.mock('tk_str_start_with', lambda s, p, *_: C.string_at(s).startswith(C.string_at(p)))
+        fw.mock('tk_str_start_with', stock_start_with)
         fw.mock('time_now_ms', lambda *_: self.now)
         fw.mock('fw_time', lambda *_: 1700000000)
         fw.mock('networkGetConnectStatus', lambda *_: 3 if self.online else 0)
@@ -120,7 +120,8 @@ class Rig:
         return self.lib.sqlite3_exec(db, fixed, cb, ctx, err)
 
     def host(self, path):
-        return self.tmp/path[len(CARD_DB):].decode() if path.startswith(CARD_DB) else None
+        # the catalogue's database files, on disk for sqlite; card_store.c's records there stay in the Files dict
+        return self.tmp/path[len(CARD_DB):].decode() if path.startswith(CARD_DB + b'catalogue') else None
 
     def access(self, path, mode, *_):
         path = C.string_at(path)
@@ -924,6 +925,62 @@ def test_a_server_albums_cover_is_the_apps_by_its_album_id(rig, fw):
     assert album(url('s2', 'al2').encode(), b'/tmp/x', 100, 100) == 0 and thumbs == [cover]
 
 
+def test_a_streaming_songs_download_is_its_server_row_by_the_sid_in_its_name(rig, fw):
+    """The app streams a server song from its stream cache, /mnt/mmc/.<app>/stream/<hash>/original/0/<title>
+    [<sid>].<suffix>, a file catalogue.avail does not name (the player's id 0; the device, 2026-11-16: Control
+    Center's art blank for 'Heart Shaped Box'). The sid in its name makes it the server row (stream_path.h), so its
+    album's cover, its play key and its hearts are the row's, as for an offline copy; a sid the catalogue lacks, a
+    sid with a glob or path character, another app's folder or a card file are none."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1'),
+                  song_row('s-2_X', 'Two', 'B', 'C', 1, 100, 2, album_id='al2')])
+    rig.poll()
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    rig.files.files['/mnt/mmc/.subsonic/covers/al2.jpg'] = b'jpeg'
+    find = fw.fn('catalogue_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_uint)
+
+    def ask(path):
+        out = C.create_string_buffer(512)
+        return out.value.decode() if find(path.encode(), out, 512) else None
+    stream = '/mnt/mmc/.subsonic/stream/9f3a/original/0/'
+    assert ask(stream + 'One [s1].flac') == '/mnt/mmc/.subsonic/covers/al1.jpg'
+    assert ask(stream + 'Two (live) [x] [s-2_X].mp3') == '/mnt/mmc/.subsonic/covers/al2.jpg'  # the last brackets
+    for other in (stream + 'Three [s3].flac', stream + 'One [s*].flac', stream + 'One [].flac', stream + 'One.flac',
+                  '/mnt/mmc/.other/stream/9f3a/original/0/One [s1].flac', '/mnt/mmc/.subsonic/cache/One [s1].flac',
+                  '/mnt/mmc/Music/One [s1].flac'):
+        assert ask(other) is None, other
+    key = fw.fn('catalogue_song_key', C.c_uint, C.c_void_p, C.c_uint)
+    assert key(rig.record(stream + 'One [s1].flac'), 7) == listen_key(url('s1'))
+    assert key(rig.record('/mnt/mmc/Music/One [s1].flac'), 7) == 7
+
+
+def test_a_streaming_songs_cover_is_the_players_else_its_apps(rig, fw):
+    """song_cover_url (coverflow.c), which Control Center and the modal header share with Home's pane: a streaming
+    song's download the player parsed shows the player's file (its embedded picture); one it found no picture in,
+    or has not parsed yet, its app's cover of the album; with none fetched, nothing (the placeholder). The player's
+    cover thread finds the app's cover for it too (coverflow_player_cover), so Home and Now Playing show it."""
+    rig.write(1, [song_row('s1', 'One', 'B', 'A', 1, 100, 1, album_id='al1')])
+    rig.poll()
+    path = '/mnt/mmc/.subsonic/stream/9f3a/original/0/One [s1].flac'
+    r = rig.record(path)
+    cover = fw.fn('song_cover_url', C.c_int, C.c_void_p, C.c_char_p, C.c_uint)
+
+    def ask(kind):
+        fw.var('fw_ctx_g_lastcover_url', C.c_char * 1024).value = path.encode() if kind else b''
+        fw.var('g_playcover_type', C.c_ubyte).value = kind
+        out = C.create_string_buffer(600)
+        return out.value.decode() if cover(r, out, 600) else None
+    assert ask(3) is None and ask(0) is None  # no app cover fetched: the placeholder
+    rig.files.files['/mnt/mmc/.subsonic/covers/al1.jpg'] = b'jpeg'
+    assert ask(1) == 'file:///tmp/coverpic.jpg'  # the stream file's embedded picture
+    assert ask(3) == ask(0) == 'file:///mnt/mmc/.subsonic/covers/al1.jpg'
+    # the player's cover thread, after the download's embedded art failed: the app's cover goes to ffmpeg first
+    fw.mock('toolsGetExternCover', lambda *_: 0)
+    forks = []
+    fw.mock('fw_fork', lambda *_: forks.append(1) and -1)
+    fw.fn('coverflow_player_cover', C.c_int, C.c_char_p, C.c_char_p, C.c_int, C.c_int)(path.encode(), b'/tmp/externpic.jpg', 300, 300)
+    assert len(forks) == 2  # the app's cover, then the probe; before, the probe alone
+
+
 def group_record(rig, field, name, rid=1):
     """A row of Search's Artists, Albums or Genres tab as its callback fills it: a directory's type, its id
     and the name in its tab's field alone (the others overlap it as host pointers)."""
@@ -1086,6 +1143,51 @@ def test_now_playing_shows_a_pressed_server_song_until_the_player_parses_one(rig
     assert shown()
     rig.now += 1000
     assert not shown()
+
+
+def test_the_players_title_comes_back_after_a_pressed_song_though_stocks_flag_is_taken(rig, fw, mcl):
+    """The device, 2026-11-17: Shuffle Songs pressed a server song still to download, Next played another, and the
+    pressed song's title stayed on it. Stock's update writes its title only on g_forcerefresh_flag, and the Songs
+    page's timer under Now Playing clears that flag first. The player's title and artist are written back, once
+    the player has parsed the song playing (g_play_id3_info names its path), not before."""
+    rig.online = True
+    rig.write(1, [song_row('s2', 'Streamed', 'Band', 'Album', 2, 100, 2, album_id='al2')])
+    rig.poll()
+    fw.mock('mclGetPlayStatus', lambda *_: 1)
+    fw.mock('timer_add', lambda *_: 1)
+    from test_nav_painters import Ui
+    ui = Ui(fw)
+    win = ui.window('playing_page')
+    labels = [ui.add('hscroll_label', win, name=n) for n in ('scrlabel_title', 'scrlabel_artist')]
+    text = fw.fn('catalogue_np_text', None, C.c_void_p)
+    parses, refresh = fw.var('id3_parses', C.c_uint), fw.var('g_forcerefresh_flag', C.c_ubyte)
+    assert load(rig, rig.rows.rows([rig.record(url('s2', 'al2'))]), 0)[0] == 2
+    at, n = C.c_uint(), C.c_uint()
+    shown = fw.fn('catalogue_np_now', C.c_void_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint))(C.byref(at), C.byref(n))
+    # its title and artist, set on the shown copy after the load (the title's host pointer overlaps the path's)
+    tags = [C.create_string_buffer(t) for t in (b'Streamed', b'Band')]
+    rig.keep += tags
+    C.c_void_p.from_address(shown + O['REC_TITLE']).value = C.addressof(tags[0])
+    C.c_void_p.from_address(shown + O['REC_ARTIST']).value = C.addressof(tags[1])
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band']
+    # Next: another queue's song, B, plays; the player parses it, which ends the pressed song
+    b = rig.record('/mnt/mmc/Music/B.flac')
+    fw.var('fw_ctx_mcl_pdeqplaylist', C.c_uint).value = rig.rows.rows([b])
+    mcl.pos = 0
+    info = fw.var('fw_ctx_g_play_id3_info', C.c_char * 2716)
+    parses.value += 1
+    text(win.addr)  # its tags not parsed yet (the path is written last): nothing written
+    assert [ui.text(label) for label in labels] == ['Streamed', 'Band'] and refresh.value == 1
+    refresh.value = 0  # the Songs page's timer took the flag: stock's update never writes its title
+    C.memmove(C.addressof(info) + O['ID3_TITLE'], b'Song B\0', 7)
+    C.memmove(C.addressof(info) + O['ID3_ARTIST'], b'Band B\0', 7)
+    info.value = b'/mnt/mmc/Music/B.flac'
+    text(win.addr)
+    assert [ui.text(label) for label in labels] == ['Song B', 'Band B']
+    ui.set_text(labels[0], 'Stock')  # written once: stock's own writes after are left alone
+    text(win.addr)
+    assert ui.text(labels[0]) == 'Stock'
 
 
 def test_cover_flow_shows_server_albums_with_the_apps_cover_and_greys_them_offline(rig, fw):

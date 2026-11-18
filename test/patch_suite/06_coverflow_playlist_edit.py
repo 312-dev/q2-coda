@@ -67,8 +67,12 @@ class CoverflowMachine(QueueMachine):
             self.freed+=a!=0; self.live.pop(a,0)
             if a in getattr(self,'poison',{}): self.u.mem_write(a,b'\0'*self.poison.pop(a))
         elif name=='statfs': self.word(b+4,4096); self.word(b+28,1<<20 if getattr(self,'room',True) else 1024)  # 4 GB free, or 4 MB
-        elif name=='pthread_create': self.word(a,77); self.threads.append((c,d))
-        elif name=='pthread_join': self.joins.append(a)
+        elif name=='pthread_create':  # an open's query step (coverflow.c step_turning) runs at once, as thread 78
+            step=c==payload_syms['step_thread']; self.word(a,78 if step else 77)
+            if step: self.nested(c,d)
+            else: self.threads.append((c,d))
+        elif name=='pthread_join':
+            if a!=78: self.joins.append(a)  # the step's join is step_turning's own
         self.returns(ret,clobber=True)
     def open(self):
         """Home with its Cover Flow row selected: centre confirms its image, whose click opens Coverflow."""
@@ -334,7 +338,7 @@ assert m.showlabels()==['Search: beat','T1']
 m.choose(1); assert m.toasts[-1][3]=='Added to Playlist' and m.showlabels()==['Search: beat','T1']
 ple_search(m,'zeb'); assert m.showlabels()==['Search: zeb','T2']
 ple_search(m,''); assert m.showlabels()==['Search','T1','T2'] and m.ticks()==[False,True,False]
-ple_search(m,'zzz'); assert m.showlabels()==['Search: zzz','No songs match']
+ple_search(m,'zzz'); assert m.showlabels()==['Search: zzz'] and empty_titles(m)==['No Matches']  # compact, under Search
 # Return from the box applies its text, and a filtered pick can close the page cleanly.
 m.choose(0); m.nodes[m.find('edit')]['text']='t1'; assert m.key()==11
 assert m.showlabels()==['Search: t1','T1']; m.close(); passed()

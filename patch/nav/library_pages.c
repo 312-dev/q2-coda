@@ -874,7 +874,7 @@ int page_keyup(void *ctx, void *event) {
     return STOP;
 }
 
-/* The close of navigation.c's own pages: Chapters and Streaming's Configuration. */
+/* The close of navigation.c's own page, Chapters. */
 static int page_closed(void *ctx, void *event) {
     if (ctx == st.ch_page) {
         st.ch_page = 0;
@@ -885,10 +885,17 @@ static int page_closed(void *ctx, void *event) {
             st.ch = 0;
         }
     }
-    if (ctx == st.sc_page) st.sc_page = 0;
     return 0;
 }
 
-#define RESUME_FILE "/mnt/data/ringnav-resume" /* coverflow.c's blob_io */
-#define PLAYS_FILE "/mnt/data/ringnav-plays"
+/* Places and play counts, on the card with the songs they are of (card_store.c,
+ * docs/internals.md#where-q2-muse-writes); the flash files earlier releases wrote are read until
+ * the card has a copy. */
+#define RESUME_FILE CARD_STORE_DIR "/ringnav-resume"
+#define PLAYS_FILE CARD_STORE_DIR "/ringnav-plays"
+static card_blob resume_store __attribute__((section(".scratch"))),
+    plays_store __attribute__((section(".scratch")));
+#define RESUME_STORE                                                                               \
+    card_blob_at(&resume_store, RESUME_FILE, "/mnt/data/ringnav-resume", sizeof st.spots)
+#define PLAYS_STORE card_blob_at(&plays_store, PLAYS_FILE, "/mnt/data/ringnav-plays", sizeof st.plays)
 
