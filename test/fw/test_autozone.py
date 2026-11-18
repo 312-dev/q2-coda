@@ -22,7 +22,9 @@ def offset(zone, when):
     if zone in POSIX:
         return POSIX[zone]
     at = datetime.datetime.fromtimestamp(when, zoneinfo.ZoneInfo(zone))
-    return int(at.utcoffset().total_seconds())
+    utc = at.utcoffset()
+    assert utc is not None  # an aware datetime's
+    return int(utc.total_seconds())
 
 
 class Q2:
