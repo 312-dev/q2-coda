@@ -139,7 +139,6 @@ class Ui:
         m('widget_move_resize', lambda w, x, y, ww, h, *_: self.nodes[w].move(i32(x), i32(y), i32(ww), i32(h)))
         m('widget_resize', lambda w, ww, h, *_: self.nodes[w].move(*self.nodes[w].box[:2], i32(ww), i32(h)))
         m('widget_get_text', self.get_text)
-        m('widget_set_text', self.set_wide)
         m('widget_set_text_utf8', lambda w, s, *_: self.set_text(self.nodes[w], C.string_at(s).decode()))
         m('image_base_set_image', lambda w, s, *_: self.nodes[w].props.__setitem__('image', C.string_at(s).decode()))
         m('widget_set_name', lambda w, s, *_: setattr(self.nodes[w], 'name', C.string_at(s).decode()))
@@ -199,12 +198,6 @@ class Ui:
     def get_text(self, w, *_):
         node = self.nodes.get(w)
         return C.addressof(node.wide) if node is not None and node.wide is not None else 0
-
-    def set_wide(self, w, s, *_):
-        chars = []
-        while s and (ch := C.c_uint.from_address(s + 4 * len(chars)).value):
-            chars.append(ch)
-        self.set_text(self.nodes[w], ''.join(map(chr, chars)))
 
     def destroy(self, w, *_):
         node = self.nodes[w]

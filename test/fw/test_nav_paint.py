@@ -33,8 +33,8 @@ PAPER, INK = int(_paper[1], 16) & 255, int(_ink[1], 16) & 255
 # bitmap_t's formats (u16 @0xe) and where each keeps r, g, b and a (docs/internals.md#accent)
 AT = {1: (0, 1, 2, 3), 2: (3, 2, 1, 0), 3: (2, 1, 0, 3), 4: (1, 2, 3, 0)}
 OPAQUE, PREMULTI = 1, O['BITMAP_PREMULTI']
-# OLED's own geometry set, which the build bakes into stock's rows
-_set = re.search(r'<geometry name="oled" ([^>]*)/>', _OLED_XML)
+# OLED's grid, which the build bakes into stock's rows
+_set = re.search(r'<geometry ([^>]*)/>', _OLED_XML)
 assert _set
 GEOMETRY = {k: int(v) for k, v in re.findall(r'(\w+)="(\d+)"', _set[1])}
 # its list's art corners (list.art.radius) and the selection's inset (list.selection.inset)
@@ -601,7 +601,6 @@ class World:
         m('widget_get_text', self.get_text)
         m('widget_get_text_utf8', self.get_utf8)
         m('widget_set_text_utf8', lambda w, s, *_: self.set_text(w, C.string_at(s).decode()))
-        m('widget_set_text', lambda w, s, *_: self.set_text(w, wide(s)))
         m('widget_get_visible', lambda w, *_: self.nodes[w].visible if w in self.nodes else 0)
         m('widget_set_visible', lambda w, v, *_: self.node(w).__setattr__('visible', v))
         m('widget_move_resize', lambda w, x, y, ww, h, *_: self.box(w, x, y, ww, h))

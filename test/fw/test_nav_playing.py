@@ -129,7 +129,6 @@ class Ui:
         m('widget_set_prop_str', lambda w, key, v, *_: self.set_str(w, C.string_at(key), C.string_at(v)))
         m('image_base_set_image', lambda w, name, *_: self.set_str(w, b'image', C.string_at(name)))
         m('widget_get_text', lambda w, *_: C.addressof(self.texts[w]) if w in self.texts else 0)
-        m('widget_set_text', lambda w, s, *_: self.set_text(w, read_wide(s)))
         m('widget_set_text_utf8', lambda w, s, *_: self.set_text(w, C.string_at(s).decode()))
         m('widget_get_text_utf8', lambda w, out, n, *_: C.memmove(out, s := (self.text(w) or '').encode()[:n - 1] + b'\0', len(s)) and 0)
         m('widget_get_visible', lambda w, *_: self.shown.get(w, 1))
