@@ -422,8 +422,10 @@ int ringnav_standby(void) {
     config_settle(1); /* a suspend may end in a power-off */
     state_poll();     /* the record a resume that never comes leaves behind */
     wdt_set(0);   /* it would count through the suspend */
+    usb_record("standby"); /* the USB pins either side of it (usb_record.c) */
     int result = stock_standby_trampoline();
     wdt_set(1);
+    usb_record_wake();
     pw.suspended = 0; /* the next pass records the resume */
     pw.card_quiet = 1, pw.card_at = (unsigned)time_now_ms();
     if (armed) {

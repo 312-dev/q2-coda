@@ -601,6 +601,7 @@ static void usb_probe_look(void) {
 void usb_ui_status(void) {
     int det = g_usbdet_value == 1;
     if (det != u.det && u.det_known) {
+        usb_record_edge(det); /* the USB record (usb_record.c) */
         if (u.by_event)
             usb_log(det ? "cable in, seen after its edge" : "cable out, seen after its edge",
                     (int)((usb_event_now_ns() - u.edge_ns) / 1000000));
@@ -763,6 +764,7 @@ void usb_ui_poll(void) {
         u.by_event = 0;
     }
     if (u.probing && (unsigned)time_now_ms() - u.probe_look_at >= USB_PROBE_LOOK_MS) usb_probe_look();
+    usb_record_poll();  /* usb_record.c: a cable edge's second line */
     charging_poll();    /* charging.c's plug-in screen and weak charger */
     toast_later_poll(); /* a toast USB or charging left */
     auth_poll();
