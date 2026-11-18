@@ -158,6 +158,7 @@ license (`docs/ipod.md`).
 | glibc          | 55 (7, 22)                      | 55 (7, 22), not replaced          |
 | thttpd         | 1 (0, 0)                        | 1 (0, 0), not replaced            |
 | All            | 294 (28 critical, 136 high)     | 171 (12 critical, 83 high)        |
+| Subsonic app's Go standard library | not in stock | 0, built with Go 1.27.4 (77 with Go 1.22.2) |
 
 What is left of the rebuilt components is in releases nothing newer replaces with the same ABI:
 
