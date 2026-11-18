@@ -1254,17 +1254,17 @@ def test_oled_about_keeps_the_details_hidden_and_paints_the_grid(fw, st, geometr
     apart, each name over its value, Location across the last row: the values in plain words."""
     g = Grid(fw, st, geometry)
     assert g.details.parent is g.page and g.details.visible == 0
-    texts = g.paint()
-    bar = g.page.box[1]
+    texts = g.paint()  # screen rows
+    page_y = g.page.box[1]  # the page sits under the status row (theme_engine.c client_window)
     assert [t for t, _ in texts] == [
         'Omen', 'Disclosure', '3:57', 'Lossless', 'FLAC · 16-bit / 44.1 kHz',
         'Album', 'Caracal (Deluxe)', 'Year', '2015', 'Genre', 'Electronic', 'Bit Rate', '1,001 kbps', 'Size', '38.3 MB',
         'Location', 'SD Card · Music/Disclosure/Caracal (Deluxe)']
     y = dict(texts)
-    assert (y['Omen'] - bar, y['Disclosure'] - bar, y['3:57'] - bar) == (56, 77, 95)
-    assert y['Lossless'] - bar == y['FLAC · 16-bit / 44.1 kHz'] - bar == 122
-    assert [y[k] - bar for k in ('Album', 'Caracal (Deluxe)', 'Genre', 'Size', 'Location')] == [146, 164, 190, 234, 278]
-    assert g.canvas.art('file:///c.jpg') == [(24, 46 - bar, 56, 56)]  # the cover, rounded by the page's black
+    assert (y['Omen'], y['Disclosure'], y['3:57']) == (56, 77, 95)
+    assert y['Lossless'] == y['FLAC · 16-bit / 44.1 kHz'] == 122
+    assert [y[k] for k in ('Album', 'Caracal (Deluxe)', 'Genre', 'Size', 'Location')] == [146, 164, 190, 234, 278]
+    assert g.canvas.art('file:///c.jpg') == [(24, 46 - page_y, 56, 56)]  # in the page's rows  # the cover, rounded by the page's black
     assert g.canvas.art('oled_quality_d')
 
 
@@ -1296,8 +1296,8 @@ def test_oled_about_leaves_out_what_is_unknown_and_closes_up(fw, st, geometry):
     texts = g.paint()
     names = [t for t, _ in texts][5::2]
     assert names == ['Album', 'Size', 'Location'] and not any('Unknown' in t for t, _ in texts)
-    y, bar = dict(texts), g.page.box[1]
-    assert (y['Album'] - bar, y['Size'] - bar, y['Location'] - bar) == (146, 146, 190)
+    y = dict(texts)  # screen rows
+    assert (y['Album'], y['Size'], y['Location']) == (146, 146, 190)
 
 
 def test_oled_about_takes_a_year_0_for_none(fw, st, geometry):
@@ -2164,7 +2164,9 @@ def test_a_settings_list_takes_the_themes_top(fw, st, geometry, stand_in):
     top = OLED_THEME['set_top']
     lst.list.box = (0, top + 30, 375, 290)  # anywhere but the theme's top
     lst()
-    assert lst.list.box[1] == top
+    names, rows = geometry
+    # set_top counts from the status row's foot: in this full-bleed window (0, 0, 375, 320), the bar's height down
+    assert lst.list.box[1] == top + rows['geom_vals'][names['V_BAR']]
 
 
 # Hold Return's Now Playing, and the boot resume.
