@@ -594,6 +594,8 @@ int lyrics_rows(void *lrc), lyrics_fit(void *lrc), lyrics_on(void *lrc), lyrics_
     lyrics_row_h(void),
     lyrics_sec(void), lyrics_line(void *lrc, int ms, int page);
 void lyrics_paint(void *row, void *canvas), lyrics_fade(void *lrc, void *canvas), lyrics_gone(void);
+/* np_rate.c: rows y to y + n of w's from Now Playing's glow at alpha a; 0 when there is none */
+int np_glow_rows(void *w, void *canvas, int y, int n, unsigned a);
 unsigned accent_tone(int tone); /* iPod: the Accent's ACCENTS column  */
 unsigned rgba(unsigned rgb, unsigned alpha);
 /* const and pure below: each one's result rests on its arguments (and pure's, memory) alone, so

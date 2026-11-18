@@ -329,6 +329,11 @@ CONFIRM_GLYPH_PX = 56
 # A Ratings row's hearts (ratings.c rate_hearts_paint): heart-fill for the song's, heart for the rest, regular, in the
 # folder's inks (Text Secondary in each half, white on the bar)
 RATE_PX = 14
+# Now Playing's rating page (np_rate.c NR_STAR, NR_STAR_BIG): star-fill up to the rating and star for the rest,
+# regular, Text Primary in each half (STATE_INKS); the payload draws the rest's outlines at 30% over the glow. The
+# wheel's target draws at NP_STAR_BIG_PX, 1.18 times as large (the approved mock-up's scale)
+NP_STAR_PX = 44
+NP_STAR_BIG_PX = 52
 # Streaming's service marks (home.c stream_marks): monochrome at 20 px, no disc, in the folder's inks; Phosphor's
 # regular glyphs, TIDAL's own mark (Phosphor has none) drawn here as its four diamonds, three across and one under
 # the middle, each corner to corner with the next, and the q2-subsonic card app's (home.c stream_apps) our own
@@ -768,6 +773,8 @@ def images(t):
     out[f'{prefix}_confirm_shuffle'] = phosphor('shuffle-bold', CONFIRM_GLYPH_PX, on)
     out |= {f'{prefix}_rate_{state}_{k}': phosphor(glyph, RATE_PX, c) for state, glyph in (('on', 'heart-fill'), ('off', 'heart'))
             for k, c in FOLDER_INKS.items()}
+    out |= {f'{prefix}_npstar_{state}{big}_{k}': phosphor(glyph, px, c) for state, glyph in (('on', 'star-fill'), ('off', 'star'))
+            for big, px in (('', NP_STAR_PX), ('_big', NP_STAR_BIG_PX)) for k, c in STATE_INKS.items()}
     for k, c in FOLDER_INKS.items():
         out |= {f'{prefix}_stream_{n}_{k}': phosphor(glyph, STREAM_PX, c, ROW_INK) for n, glyph in STREAM_MARKS.items()}
         out[f'{prefix}_stream_tidal_{k}'] = tidal_mark(STREAM_PX, c, ROW_INK)

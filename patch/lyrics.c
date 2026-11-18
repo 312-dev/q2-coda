@@ -665,11 +665,12 @@ void lyrics_paint(void *row, void *canvas) {
 }
 
 /* OLED's lyrics view, after its rows (ringnav_paint): LYRIC_FADE_PX rows at the top and the foot
- * of what shows of it, each a fill of the page's ground from clear at the inside to opaque
- * at the edge, linear, as marquee_fade's columns: a line leaving
- * the view fades away rather than being cut. It paints over whatever the rows drew this pass, in
- * the canvas's clip, so a scroll fades each line where it now is; 2 x LYRIC_FADE_PX one-row fills
- * a repaint, no loop over pixels in the payload. */
+ * of what shows of it, each the page's ground from clear at the inside to opaque at the edge,
+ * linear, as marquee_fade's columns: a line leaving the view fades away rather than being cut.
+ * The ground is Now Playing's glow where it has one (np_rate.c np_glow_rows: the glow's own rows
+ * drawn over at that alpha), else a fill of the page's colour. It paints over whatever the rows
+ * drew this pass, in the canvas's clip, so a scroll fades each line where it now is; 2 x
+ * LYRIC_FADE_PX one-row fills or copies a repaint, no loop over pixels in the payload. */
 #define LYRIC_FADE_PX 32
 void lyrics_fade(void *lrc, void *canvas) {
     void *lcd = canvas ? P(canvas, CANVAS_LCD) : (void *)0;
@@ -686,6 +687,10 @@ void lyrics_fade(void *lrc, void *canvas) {
     unsigned saved = (unsigned)I(lcd, LCD_FILL_COLOR), behind = ui_ink(RGBA(0)) & 0xffffffu;
     for (int i = 0; i < LYRIC_FADE_PX; ++i) {
         unsigned a = 255u * (unsigned)(LYRIC_FADE_PX - i) / LYRIC_FADE_PX;
+        if (np_glow_rows(lrc, canvas, top + i, 1, a)) {
+            np_glow_rows(lrc, canvas, h - 1 - i, 1, a);
+            continue;
+        }
         stock_canvas_set_fill_color(canvas, behind | a << 24);
         canvas_fill_rect(canvas, 0, top + i, w, 1);
         canvas_fill_rect(canvas, 0, h - 1 - i, w, 1);
