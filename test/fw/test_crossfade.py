@@ -9,7 +9,7 @@ import pytest
 from conftest import O, Deques, libc
 from test_misc import Xf  # test_misc.py keeps the mirror
 
-XFADE, PRESS, MUTE, SWAP = '/tmp/q2xfade', '/tmp/q2press', '/tmp/q2mute', '/tmp/q2swap'
+XFADE, PRESS, SWAP = '/tmp/q2xfade', '/tmp/q2press', '/tmp/q2swap'
 XF_STOPS = 16  # peq.h: the fade's ms in the low bits, the count of stops above, as the filter reads them
 LOCAL, LIBRARY, DLNA, ONLINE = 1, 0xf001, 2, 0xf1
 PAGE, BELOW, WM = 0x7000, 0x6000, 0x9000
@@ -823,8 +823,8 @@ def test_a_natural_next_forgets_the_last_press(fw, wired):
     assert wired.shared[PRESS] == 0
 
 
-@pytest.mark.parametrize('status, word', [(1, PRESS), (2, MUTE), (3, None)])
-def test_play_from_a_stop_stamps_the_press_and_pause_the_mute(fw, wired, status, word):
+@pytest.mark.parametrize('status, word', [(1, PRESS), (2, None), (3, None)])
+def test_play_from_a_stop_stamps_the_press_and_nothing_else(fw, wired, status, word):
     fw.mock('mclGetPlayStatus', lambda *_: status)
     fw.fn('ringnav_play_pause', C.c_int)()
     assert set(wired.shared.files) == ({word} if word else set()) and (not word or wired.shared[word] == 5001)
