@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Search: turning the wheel up through the tabs to the search field now only highlights it, as any row is, instead of opening the letter strip at once; press Center (or Return, or tap the field) to type. The wheel can pass on down to the tabs again without the keyboard coming up. A finger that lands on the field while the wheel is elsewhere and then drags no longer opens the keyboard: only a tap does. Add Songs' search behaves the same.
   - Streamed songs: a queue of server songs picks up where it left off after a restart. Memory Playback brought back only the one or two songs already downloaded, Up Next stopped there and nothing fetched the rest; now the app (Subsonic with `resume=1`) streams the queue again from the song that was playing, still paused, and Up Next lists every song. Without the app, or if it declines, the songs on the card play as before.
   - Subsonic: covers fetched on demand for the car; stars and likes sync separately; a queue you were playing comes back in full after a restart.
   - Settings > Bluetooth: while the Q2 searches for devices, the page no longer shows the Other Devices header twice, one drawn over the Audio header, and coming back from Headset Volume no longer makes the list jump down and back up. Any list scrolled to its end stays put when its page is rebuilt or comes back on top.
