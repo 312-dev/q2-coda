@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The rebuilt third-party components (tools/thirdparty.py) in a build's root filesystem, run under
 qemu-mipsel in a bwrap chroot of it. Usage: test/thirdparty.py BUILD QEMU_MIPSEL [--offline]
+(QEMU_MIPSEL statically linked: the chroot has no host libraries)
 
 Each replaced program reports the version the manifest records; every stock program that links a
 replaced library still resolves all of its libraries; the curl tool built beside libcurl verifies
@@ -11,9 +12,13 @@ libpng 1.2 and round-trips zlib; SQLite runs an FTS3 and an R*Tree query; ffmpeg
 encodes as the payload's art and photo paths do. Needs bwrap, unsquashfs, and the toolchain and
 component outputs tools/thirdparty.py caches (a build has made them).
 """
-import json, pathlib, re, shutil, subprocess, sys, tempfile
+import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 import thirdparty
+
+# q2-heavy preloads tools/ci/nodump.c, which makes bwrap non-dumpable, and the kernel then refuses the write of
+# its uid map ("bwrap: setting up uid map: Permission denied"). The sandbox runs without the preload.
+NO_PRELOAD = {k: v for k, v in os.environ.items() if k != 'LD_PRELOAD'}
 
 PNG_TEST = r'''
 #include <stdio.h>
@@ -80,7 +85,7 @@ def main(argv):
                                 '--bind', root, '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run',
                                 '--ro-bind', qemu, '/usr/libexec/qemu-binfmt/mipsel-binfmt-P', '--ro-bind', resolv, '/tmp/resolv.conf',
                                 '--ro-bind', tools, '/opt/q2test', '--setenv', 'PATH', '/usr/bin:/bin:/usr/sbin:/sbin', *cmd],
-                               capture_output=True, text=True, timeout=timeout)
+                               capture_output=True, text=True, timeout=timeout, env=NO_PRELOAD)
             return p.returncode, p.stdout + p.stderr
 
         (root/'opt').mkdir(exist_ok=True)

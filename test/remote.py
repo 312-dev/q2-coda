@@ -67,8 +67,8 @@ static void term(int sig) { (void)sig; exit(0); }
 __attribute__((constructor)) static void init(void) { unsetenv("LD_PRELOAD"); signal(SIGTERM, term); }
 '''
 
-# --prof's target. It lets any process trace it (Yama's ptrace_scope 1 allows only ancestors) and says
-# ready; then it pauses, or with an argument signals itself without a break. SIGUSR2 ends it, printing
+# --prof's target. It lets any process trace it (Yama's ptrace_scope 1 allows only ancestors, and a
+# non-dumpable process, which q2-heavy's preload makes every job's, allows nobody) and says ready; then it pauses, or with an argument signals itself without a break. SIGUSR2 ends it, printing
 # how many SIGUSR1 it sent and how many reached its handler.
 TARGET = r'''
 #include <signal.h>
@@ -80,6 +80,7 @@ static void on_usr1(int sig) { (void)sig; ++handled; }
 static void on_usr2(int sig) { (void)sig; stop = 1; }
 int main(int argc, char **argv) {
     (void)argv;
+    prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
     prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
     signal(SIGUSR1, on_usr1);
     signal(SIGUSR2, on_usr2);
