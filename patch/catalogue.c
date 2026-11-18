@@ -1248,6 +1248,40 @@ int catalogue_np_info(const char *path, char *genre, int *year) {
     return 1;
 }
 
+/* The server row's name, album, songer and albumsonger into a record's empty fields (ctx[0] the
+ * record, ctx[1] set once a row came), for catalogue_copy_tags. */
+static int tags_row(void *ctx, int n, char **v, char **c) {
+    static const int to[] = { REC_TITLE, REC_ALBUM, REC_ARTIST, REC_ALBUM_ARTIST };
+    void *r = ((void **)ctx)[0];
+    (void)c;
+    ((void **)ctx)[1] = ctx;
+    char *old[4];
+    for (int k = 0; k < 4; ++k) old[k] = P(r, to[k]); /* all read before any is written */
+    for (int k = 0; k < n && k < 4; ++k) {
+        char *t;
+        if ((old[k] && *old[k]) || !v[k] || !*v[k] || !(t = strdup(v[k]))) continue;
+        free(old[k]), P(r, to[k]) = t;
+    }
+    return 1; /* one row */
+}
+/* r's title, album, artist and album artist from the server row its path is a Stream Cache copy
+ * of (cat_copy_of), for a song not yet played (tags.c card_record_tags); 1 when a row named it. 0
+ * with Local Only or before an import, when there is no index. */
+int catalogue_copy_tags(void *r) {
+    const char *path = r && cat.ix.n ? P(r, REC_PATH) : 0;
+    const cat_ent *e = path && !catalogue_path(path) ? cat_copy_of(path) : 0;
+    if (!e || e->dup || !cat_live()) return 0;
+    char sql[640], *o = sql;
+    void *ctx[2] = { r, 0 };
+    PUT(o, sql + sizeof sql - CAT_SLACK,
+        "select name,album,songer,albumsonger from cat.serverall where fileurl=");
+    o = sq(o, sql + sizeof sql - CAT_SLACK, ix_str(&cat.ix, e->path));
+    if (o >= sql + sizeof sql - CAT_SLACK) return 0; /* cut: never run */
+    *o = 0;
+    sqlite3_exec(*cat.stock_slot, sql, tags_row, ctx, 0);
+    return ctx[1] != 0;
+}
+
 /* The album cover the app keeps for path's album (docs/server-library.md#covers): path a server
  * row's (/mnt/mmc/.<id>/cat/<album id>/<sid>.<suffix>) or its offline copy's, the cover
  * /mnt/mmc/.<id>/covers/<album id>.jpg, into out, when it is there. 0 for any other path, or none
@@ -1803,6 +1837,17 @@ static void np_press(void *q, int at) {
                          sizeof cat.np_cover - 7))
         tk_snprintf(cat.np_cover, sizeof cat.np_cover, "play_defaultcover");
     timer_add(np_stop, 0, 0);
+}
+/* A song not yet the player's shown on Now Playing as a press shows it (np_press: the song
+ * playing stops, the spinner turns while it loads), r alone, at its place at of n: a card app's
+ * playlist session's next song, which a Next waits for (addon.c addon_next_waits). */
+void catalogue_np_show(void *r, unsigned at, unsigned n) {
+    void *q = _create_deque("stSongInfo");
+    deque_init(q);
+    _deque_push_back(q, r);
+    np_press(q, 0);
+    deque_destroy(q);
+    if (cat.np_list) cat.np_at = at, cat.np_n = n;
 }
 /* The pressed song shown no more: the player's title and artist go back on the page. Stock's update
  * writes them only while g_forcerefresh_flag (or g_autochange_flag) is set, and every library list
