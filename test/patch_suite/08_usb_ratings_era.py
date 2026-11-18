@@ -56,7 +56,7 @@ for light in '01':
     assert hold_pick(fm,4) is None and fm.picker() and fm.nodes[fm.page]['name']=='coverflow_page'
     for k in [O['KEY_NEXT']]*3: assert fm.call(k)==11
     assert fm.call(O['KEY_CENTER'])==11; fm.advance(0)
-    assert fm.picker() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm)  # the album's table, no song touched
+    assert fm.picker() is None and fm.kept()==[(a1&~7)|3] and not song_side_effects(fm),(fm.picker(),fm.kept(),a1,fm.top==fm.page,fm.toasts[-2:],[c[0] for c in fm.calls][-30:])  # the album's table, no song touched
     assert hold_pick(fm,3) is None and fm.kept()==[(a1&~7)|5]  # Add to Favorites
     fm=light_half(AlbumRateMachine,light); fm.open(); fm.word(fm.slide+O['SLIDE_INDEX'],1)
     assert hold_pick(fm,0)=='Playing Next' and fm.top==fm.page and fm.query[:1]==('getMusicByAlbum',); passed()  # Play Next finds the cover's album

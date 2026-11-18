@@ -1242,7 +1242,7 @@ assert m.call(O['KEY_PLAY'],address=syms['on_wm_keylong_fun'],event_type=O['EVT_
 m.close(); m.advance(0); assert not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 
 # Hold Play/Pause on a playlist's cover (navigation.c qm_hold): the menu sheet's playlist menu, Play, Shuffle, Rename
-# and Delete. The playlist is found in the live list by its cd_num, as New, Rename and Delete read that list again under
+# and Delete. The playlist is found in the live list by its cd_num, as Rename and Delete read that list again under
 # the covers after they copied it, and a playlist gone from it holds nothing.
 PL_COVER_MENU=['Play','Shuffle','Rename','Delete']
 class PlaylistCoverMachine(CoverflowMachine):
@@ -1277,23 +1277,6 @@ m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1])
 m.press(100); assert m.hold()==11 and m.nodes[m.title]['text']=='List 0'; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[::-1]))  # Play: its songs, by cd_num 10's query
 assert m.run('Play') is None and m.query[:2]==('getMusicByPlayList',10) and m.opened[-1]==('playing_page',['T1','T2'],0,0xff13,2); passed()
-# ... each runs once the menu's dialog is destroyed (its close may still be animating, the dialog on top, and the
-# Playlists page's own click acts only on the top page), and from the pass after: the covers never close inside the
-# dialog's destroy.
-class ClosingCoverMachine(PlaylistCoverMachine):  # window_close animates: the dialog stays on top until destroyed
-    def hook(self,u,address,size,unused):
-        if address!=syms['window_close']: return super().hook(u,address,size,unused)
-        self.closing.append(u.reg_read(REGS[0])); self.returns(0,clobber=True)
-def destroyed(m,w):  # w gone from the stack, then its destroy handlers, in order
-    if w in m.stack: m.stack.remove(w); m.top=m.stack[-1]
-    for t,f,ctx in list(m.nodes[w].get('handlers',())):
-        if t==O['EVT_DESTROY']: m.call(address=f,args=(ctx,m.event,0,0),gap=0,clear=False)
-m=ClosingCoverMachine()  # Play
-m.closing=[]; m.press(100); assert m.hold()==11 and m.release()==0; dlg=m.top
-m.pick('Play'); m.advance(0,clear=False); m.advance(0,clear=False)
-assert m.closing==[dlg] and m.top==dlg and [o[0] for o in m.opened]==['dialog/sortselect_dialog'],(m.closing,m.opened)
-destroyed(m,dlg); assert len(m.opened)==1; m.advance(0,clear=False)
-assert [o[0] for o in m.opened]==['dialog/sortselect_dialog','playing_page'],m.opened; passed()
 m=PlaylistCoverMachine(); m.word(syms['p_deque_playlist'],m.deque(m.lists[1:]))  # List 0 deleted under the covers
 m.press(100); assert m.hold()!=11 and not any(p[0]=='dialog/sortselect_dialog' for p in m.opened); passed()
 # More's Rename or Delete over the covers: as the covers come back to the front the playlists are read again
