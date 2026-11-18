@@ -192,3 +192,30 @@ def test_a_song_outside_a_stream_cache_or_with_no_line_is_the_players(fw):
     assert length(fw, CACHED) == (0, 0)  # no line for it
     assert length(fw, b'/mnt/mmc/Music/a.mp3') == (0, 0)
     assert length(fw, b'/mnt/mmc/.foo/cat/x.mp3') == (0, 0)  # a catalogue row: its server length is the library's
+
+
+def reach(fw, total, path=CACHED):
+    return fw.fn('stream_reach', C.c_int, C.c_char_p, C.c_int)(path, total)
+
+
+@pytest.mark.parametrize('line_, total, want', [
+    (('get', 1000000, 4000000, 400000), 400, 99),   # a quarter of the bytes: a quarter of the server's 400 s
+    (('get', 1000000, 4000000, 400000), 61, 60),    # never past the player's own length
+    (('get', 1000000, 0, 400000), 61, 60),          # no total bytes: the player's length is what has arrived
+    (('get', 1000000, 4000000, 0), 200, 49),        # no server length: a quarter of the player's
+    (('wait', 0, 4000000, 400000), 0, 0),           # nothing there yet: its start
+    (('stall', 4000000000, 4000000000, 3600000), 3600, 3599),  # past 32 bits in the sum: still whole
+])
+def test_a_seek_in_a_song_arriving_reaches_only_what_is_on_the_card(fw, line_, total, want):
+    world = World(fw, now=NOW)
+    world.files[STREAM] = status(line_ + (CACHED,))
+    world.mtime[STREAM] = NOW
+    assert reach(fw, total) == want
+
+
+def test_a_whole_song_or_one_outside_a_stream_cache_has_no_reach_of_its_own(fw):
+    world = World(fw, now=NOW)
+    world.files[STREAM] = status(('done', 4000000, 4000000, 400000, CACHED), ('get', 9, 99, 0, A))
+    world.mtime[STREAM] = NOW
+    assert reach(fw, 400) == -1
+    assert reach(fw, 400, A) == -1
