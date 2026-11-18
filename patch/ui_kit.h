@@ -136,7 +136,10 @@ int kv_fit(int span, int label_w, int value_w, int *box);
  * switch row's label above the answers, toggle_on its start. timeout_ms: the card answers
  * timeout_row by itself after this long, the seconds left shown on that row and a bar emptying
  * along the card's foot. answer runs once, after the card has closed, with the chosen row and the
- * switch's state. */
+ * switch's state. across: the wide form (adb's Allow this computer?, usb_ui.c): the glyph beside a
+ * leading title, the body left-aligned with name (its %s) in Text Primary, note a small line under
+ * it, the switch row, then two answers side by side as buttons, the lit one in the accent; it shows
+ * no countdown for its timeout. */
 enum { CONFIRM_NEUTRAL, CONFIRM_DESTRUCTIVE, CONFIRM_CONSEQUENTIAL, CONFIRM_INFO };
 typedef struct {
     const char *title, *name, *body, *code;
@@ -148,6 +151,8 @@ typedef struct {
     void (*answer)(void *ctx, int row, int toggle_on);
     void *ctx;
     const char *glyph; /* a theme image's name over the title (pair_prompt's phone), or 0 */
+    const char *note;  /* across: the line under the body (a key's fingerprint), or 0 */
+    int across;        /* the wide form, two answers side by side */
 } confirm_t;
 int confirm(const confirm_t *c); /* 1: shown; 0: another card is up, or no dialog */
 void *confirm_dialog(void);      /* the card's dialog while one is up, else 0 */
