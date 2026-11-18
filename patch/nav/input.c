@@ -275,6 +275,7 @@ int ringnav_wm_paint(void *wm) {
     void *vt = wm && !away ? P(wm, 0x94) : (void *)0;
     int (*paint)(void *) = vt ? (int (*)(void *))P(vt, 0xc) : (int (*)(void *))0;
     if (!paint) return away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
+    list_reach_due(); /* the status row's band, when the list under it moved (row_paint.c) */
     return paint(wm);
 }
 
