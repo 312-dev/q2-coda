@@ -353,11 +353,11 @@ for _ in range(60):  # the entry: enter_albums at the cap's 20 albums a second; 
     n=len(m.draws); tpaint(m); assert len(m.draws)==n+1  # a frame mid-slide
 assert not letter_on(m) and len(seen)>=4 and seen[1:]==sorted(seen[1:]) and seen[-1]==8 and first(seen[1:]) and slid
 assert did(m,'buzzeer_switch'); tarrive(m); assert tindex(m)==8 and toff(m)==0 and tcaption(m)==FRUIT[8]
-for back,to in ((-30,0),(30,8)):  # on past the last: the first letter's first album; back past it: the last's
+for push,to in ((-30,0),(30,8)):  # on past the last: the first letter's first album; back past it: the last's
     m.calls=[]
     for _ in range(10):
         if ttarget(m)==to: break
-        tp(m,back)
+        tp(m,push)
     assert ttarget(m)==to and did(m,'buzzeer_switch') and not letter_on(m)
     tarrive(m); assert tindex(m)==to and toff(m)==0 and tcaption(m)==FRUIT[to]
 seen=[tindex(m)]
