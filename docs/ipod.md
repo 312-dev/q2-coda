@@ -18,8 +18,8 @@ moved into its space.
 ## Rows
 
 `PITCH = 72` is shared by all build-time row geometry edits, native row-height
-resets and artwork offset divisors. Four rows fit the 290-pixel client area below
-the status bar, so `BOTTOM = 290` replaces the stock lists' 260-pixel content
+resets and artwork offset divisors. The page is the whole screen and its rows rest below the
+status bar: four rows fit the 290 pixels from the bar's foot, so `BOTTOM = 290` replaces the stock lists' 260-pixel content
 bottom. Row bodies are `PITCH - 4` pixels, and the stock 52-pixel artwork is
 drawn at natural size (`ART = 52`) with `ART_INSET = 8` on all four sides: the
 artwork never rescales, so glyphs and covers stay as sharp as stock, and the row
@@ -659,8 +659,8 @@ an album's tracks, Most Played, Era, Internet Radio, card apps and streaming lis
 
 ## Now Playing
 
-`playing_page.bin` follows Rockbox's iVideo Now Playing in the 375x290 client area, below the
-status bar and its clock, with Apple's finish: rounded art, a larger title over gray artist and
+`playing_page.bin` follows Rockbox's iVideo Now Playing on the full-bleed 375x320 page, its content resting
+below the status bar and its clock (a 290 px column), with Apple's finish: rounded art, a larger title over gray artist and
 album, and a four-pixel progress line:
 
 ```
@@ -1159,7 +1159,7 @@ painted it white, which drew the box at rest.
   Return and held Previous are as on Search.
 - <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: each
   time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
-  its keys hidden and the window over the screen under the status row (`search_strip_box`,
+  its keys hidden and the window over the whole screen, the status row an overlay on it (`search_strip_box`,
   [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
   The box's text is prefilled, the strip opening on abc (123 for a box holding a number), and typed where the box's
   value lives: a search box's on the query line, a Wi-Fi password or network name in a field under its label, a box

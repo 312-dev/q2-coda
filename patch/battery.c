@@ -238,7 +238,7 @@ static int bh_x(unsigned i, int x0, int w, unsigned now, int forward) {
  * axis at 0%, labelled in 15 px Text Tertiary, the level as steps from the start to now, a 2 px
  * line in the accent's light tone over a faint fill, as peq_ui.c's curve, the reading's line and
  * dot, and Export Log unless a toast is up. Positions are the screen's, less the canvas's origin
- * on the screen: the view's y counts from its window, which stands under the status row. */
+ * on the screen: the view's y counts from its window, and the view rests at y 58, the status row's foot. */
 void battery_paint(void *w, void *canvas) {
     if (!w || w != bh.graph || !P(canvas, CANVAS_LCD) || !bh.rec.n) return;
     static const char *const labels[] = { "100%", "50%", "0%" };

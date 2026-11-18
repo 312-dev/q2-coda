@@ -198,7 +198,7 @@ All lists share one grid.
 
 ### Status row
 
-- No band: the bar is the page's black, 58 px, with no rule under it. Its glyphs center on y 23.
+- No band: the status row is an overlay on the page's own ground, with no fill or rule, over the 58 px where content does not rest. Its glyphs center on y 23.
 - Left, from x 62: the page's title in Inter Medium 15 px, Text Secondary, ending with an
   ellipsis 12 px short of the clock's widest ("00:00"), however long: a title never moves to a
   row of its own, so the list keeps its place.
@@ -323,8 +323,8 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 - **A list's end is its end** (approved on 2026-11-16): the wheel stops on the first and last rows, never wrapping
   to the other end and never bouncing. Turning on past an end, the bar's tug holds full against it, the
   selection staying, and springs back when the finger lifts. A drag stops at the ends too, with no rubber band.
-  The lean is never cut at the list's edge: on the first or last row it reaches up into the status row's
-  black band and down into the fade.
+  The lean is never cut at the list's edge: on the first or last row it reaches up under the status row's
+  glyphs and down into the fade.
 - **Press** (approved on 2026-11-16 from `design/row-press`, option C; [internals](internals.md#row-press)): the bar
   sits raised at 1.02 with a soft accent shadow; Centre's press sinks it to 0.965 over 90 ms and brightens its
   blue to `#4080F0`; the release springs it back past 1.02 once over 280 ms and the blue fades back over 120 ms. A
@@ -459,7 +459,7 @@ Home's list.
   puts it down and saves. Return while it is lifted puts it back exactly where it was, still in the
   editor.
 - **A finger** on a row's grip (the last 64 px) drags it at once; held on a row it drags it after
-  the hold. The row follows the finger on its card, held inside the list (from y 58 to the list's
+  the hold. The row follows the finger on its card, held inside the list (its rest, y 58 to the list's
   end), never over the status row or the hint; the rows it passes slide aside over 150 ms (cubic
   out); within 16 px of the list's top or bottom the list scrolls on. The lift puts it in
   its place and saves. A tap selects a row and opens nothing.
@@ -686,7 +686,7 @@ Playing's own title line.
 - **The glow** (also behind the lyrics page): the cover averaged on a 4 x 4 grid, each cell's colour raised 1.4
   times about its luma and dimmed to 45%, spread across the window and shaded by an ellipse centred at y 122
   (radii 273 by 220 px) that is black from 80% of the way out, and faded in over the window's top 32 rows
-  under the status row's band. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
+  at the screen's top, under the status row's glyphs. No channel passes 60, so Text Secondary (`#ABABAB`, the lyrics' unsung lines)
   keeps WCAG's 4.5:1 over its brightest pixel, and the lyrics' edge fades go into the glow, not black. It is
   made once for each cover shown, never per frame; Light Mode has none.
 
@@ -1138,7 +1138,7 @@ on 2026-11-15. Built by `patch/np_about.c`, which paints it from the details sto
 - **Scrolling:** inert, no selection, as an iOS info page. When the grid ends past the list's end
   (y 282) the wheel scrolls it a row a tick, as far as its last row, and back, and a finger dragged up
   or down moves it with the finger between the same two ends, stopping where it lifts (no momentum,
-  so a flick never overshoots); the window clips it under the status row, where the header's top shows only at the page's top.
+  so a flick never overshoots); the list runs under the status row and fades there (the header's top shows only at the page's top).
 
 ### Album page
 
@@ -1619,8 +1619,8 @@ the status row "Software Update" over mode pages as USB's:
 <a id="battery-history"></a>Power's Battery History (approved as 33 v3 on 2026-11-16 and laid out again from the user's
 mock-up of 2026-11-18, `patch/battery.c`) is a graph over the whole page, under the status row titled "Battery History".
 The three parts stand as one block from y 57 to the list end (y 282), so nothing reaches the glass's bottom corners. Each
-y here is on the screen; the page's window starts under the status row, so the code takes them from the canvas's origin,
-not the view's own y:
+y here is on the screen; the page's window is the whole screen but the view starts at y 58, so the code takes them from
+the canvas's origin, not the view's own y:
 
 - **Readout**, centered at y 66 in Inter Medium 17, Text Primary: the reading the wheel is on, "Nov 16, 3:10 PM · 51%"
   (the status bar's 12- or 24-hour form; "+1:23 · 51%" with the clock never set).
