@@ -267,7 +267,10 @@ int ringnav_queue_event(void *loop, const unsigned *r) {
             wl_note_stop();
         }
     }
-    return r[0] ? post(loop, r) : 0;
+    if (!r[0]) return 0;
+    int ret = post(loop, r);
+    loop_wake(); /* the loop's idle ends: the event is dispatched now (loop_wake.c) */
+    return ret;
 }
 
 /* The wheel's speed, as Rockbox's iPod driver measures it (firmware/target/arm/ipod/
@@ -325,6 +328,7 @@ void wheel_sample(int *s, int ret, char *info) {
         wheel_held = 0;
         return;
     }
+    loop_wake_touch(); /* the thumb and the bar's lean read this travel with no event (loop_wake.c) */
     unsigned now = (unsigned)time_now_ms();
     /* the sample's own time, its kernel stamp (tv) in ms, for the speed; else now */
     unsigned at = s[3] || s[4] ? (unsigned)s[3] * 1000 + (unsigned)s[4] / 1000 : now;

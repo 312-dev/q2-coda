@@ -1088,6 +1088,10 @@ unsigned long long usb_event_now_ns(void);
 int bt_headset_battery(void);
 unsigned bt_headset_rate(void), bt_headset_class(void);
 const char *bt_headset_name(void);
+/* loop_wake.c: the UI loop's idle as a poll() on an eventfd that loop_wake (peq.h, any thread)
+ * ends; loop_span, how long an idle may run past its fixed length. */
+void loop_wait(unsigned ms);
+unsigned loop_span(unsigned base, unsigned most, int timers);
 /* bt_vol_event.c: BlueZ's PropertiesChanged on MediaTransport1, counted by a thread, taken by
  * bt_volume_poll (docs/internals.md#headset-controls-and-volume) */
 void bt_vol_event_start(void);

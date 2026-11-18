@@ -523,6 +523,9 @@ int cf_syscall(int nr, int a, int b, int c) {
     l[0] = nr, l[1] = a, l[2] = b, l[3] = c;
     return nr == 4222 ? 4242 : nr == 4314 && c == 3 << 13 && idle_fails ? -1 : 0;
 }
+/* loop_wake.c's: a half read ends the UI loop's idle; counted, as there is no loop here. */
+static int loop_wakes;
+void loop_wake(void) { ++loop_wakes; }
 #define SYS_IS(i, nr, a, b, c) (sys_log[i][0] == (nr) && sys_log[i][1] == (a) && sys_log[i][2] == (b) && sys_log[i][3] == (c))
 /* The loader: by default each wake-up reads every copy asked for, its reads off the UI thread's
    clock, as on a thread of its own on a card at once; ld_hold leaves them asked for (cf_ld_step
