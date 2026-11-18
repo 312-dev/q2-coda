@@ -213,7 +213,9 @@ def test_the_graph_runs_by_time_up_to_now(fw, q2):
 
 
 KEY_CENTER, KEY_PREV, KEY_NEXT = O['KEY_CENTER'], O['KEY_PREV'], O['KEY_NEXT']
-TOP, BOT, BTN_CY, READ_CY = 99, 199, 237, 70  # battery.c BH_TOP, BH_BOT, BH_BTN_CY, BH_READ_CY: the screen's rows
+TOP, BOT, BTN_CY, READ_CY = 84, 226, 263, 66  # battery.c BH_TOP, BH_BOT, BH_BTN_CY, BH_READ_CY: the screen's rows
+CTA_H = 38  # ui_kit.h: the shared button's height
+CLIENT_Y = 58  # the page's window on the screen, under OLED's status row: a view's y counts from it
 
 
 class Page:
@@ -293,19 +295,25 @@ def test_the_page_titles_the_bar_and_gives_the_rest_to_the_graph(fw, q2):
     assert parent == PAGE and (x, y) == (0, page.boxes[lv][1])
 
 
-def paint(fw, widget):
-    """ringnav_paint's call for one widget, on a canvas of its own."""
+def origin(page, widget=None):
+    """A widget of the page's window on the screen: its y and the window's."""
+    return CLIENT_Y + page.boxes[widget or page.graph][1]
+
+
+def paint(fw, widget, y=0):
+    """ringnav_paint's call for one widget, on a canvas of its own whose origin is the widget's place on the screen, y:
+    AWTK's canvas as it paints a widget."""
     canvas = Canvas(fw)
+    struct.pack_into('<i', canvas.raw, O['CANVAS_Y'], y)
     fw.fn('battery_paint', None, C.c_void_p, C.c_void_p)(widget, canvas.p)
     return canvas
 
 
 def graph(fw, page):
     """The open page painted: its three guide lines top to bottom, each row's level line left to right and the
-    steps between them, as (x, y, w, h) on screen, the reading's hairline, and the canvas. 100% is TOP, 0% BOT:
-    1 px a percent."""
-    canvas = paint(fw, page.graph)
-    dy = page.boxes[page.graph][1]
+    steps between them, as (x, y, w, h) on screen, the reading's hairline, and the canvas. 100% is TOP, 0% BOT."""
+    dy = origin(page)
+    canvas = paint(fw, page.graph, dy)
     rects = [(c, x, y + dy, w, h) for c, x, y, w, h in canvas.rects]
     guides = sorted((r[1:] for r in rects if r[4] == 1), key=lambda r: r[1])
     levels = sorted((r[1:] for r in rects if r[4] == 2), key=lambda r: r[0])
@@ -319,6 +327,26 @@ def said(canvas, dy):
     return {t[0]: t[3][1] + t[3][3] // 2 + dy for t in canvas.texts}
 
 
+def test_the_page_stands_where_the_mock_up_has_it_on_the_screen_clear_of_the_corners(fw, q2):
+    """The user's mock-up of 2026-11-18 (docs/oled-design.md#battery-history), measured on the screen, the canvas at the
+    graph's own place: the readout's middle on y 66, the plot from y 84 to 226 and Export Log from y 244 to 282, the
+    list end, so the glass's corners hide none of it. The view's y counts from its window, which stands under the
+    status row: the device drew all of it 58 px low, the button's foot 6 px from the screen's edge."""
+    q2.poll(99)
+    q2.poll(98, minutes=10)
+    page = Page(fw)
+    page.open()
+    (top, half, bottom), _, _, _, canvas = graph(fw, page)
+    texts = said(canvas, origin(page))
+    assert (texts['Nov 11, 12:10 PM \u00b7 98%'], top[1], bottom[1], texts['Export Log']) == (READ_CY, TOP, BOT, BTN_CY)
+    assert texts['100%'] == TOP and texts['0%'] == BOT
+    assert BOT - TOP >= 140 and BTN_CY - CTA_H // 2 - BOT >= 16  # a taller plot, the button lifted clear of its axis
+    assert BTN_CY + CTA_H // 2 <= 282  # the button's foot on the list end, 38 px above the screen's edge
+    page.touch(187, BTN_CY + CTA_H // 2 - 1)  # the button's last row: where it is drawn is where it is tapped
+    page.touch(187, BTN_CY + CTA_H // 2 + 1)
+    assert len(page.toasts) == 1
+
+
 def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
     q2.poll(90)
     q2.poll(60, minutes=60)
@@ -326,11 +354,11 @@ def test_the_graph_steps_down_through_each_level_from_the_start_to_now(fw, q2):
     page = Page(fw)
     page.open()
     (top, half, bottom), (first, last), steps, hair, canvas = graph(fw, page)
-    texts = said(canvas, page.boxes[page.graph][1])
+    texts = said(canvas, origin(page))
     assert {'100%', '50%', '0%', 'Export Log'} <= set(texts)
     assert (top[1], half[1], bottom[1]) == (TOP, (TOP + BOT) // 2, BOT) and top[0] == half[0] == bottom[0]
     left, width = top[0], top[2]
-    assert [bottom[1] - (y + 1) for _, y, _, _ in (first, last)] == [90, 60]  # each line's middle at its level
+    assert [bottom[1] - (y + 1) for _, y, _, _ in (first, last)] == [90 * (BOT - TOP) // 100, 60 * (BOT - TOP) // 100]
     # from the plot's left edge to its right, the one step down a third of the way along
     assert first[0] == left and first[0] + first[2] - 1 == last[0] == left + width // 3
     assert last[0] + last[2] - 1 == left + width
@@ -363,7 +391,7 @@ def test_the_wheel_moves_the_reading_and_the_readout_follows(fw, q2, h24, newest
     q2.poll(98, minutes=12 * 60 + 30)
     page = Page(fw)
     page.open()
-    dy = page.boxes[page.graph][1]
+    dy = origin(page)
     (top, _, _), (first, last), _, hair, canvas = graph(fw, page)
     assert said(canvas, dy).get(newest) == READ_CY and hair[0][0] == last[0]
     assert page.key(KEY_PREV) == 1  # anticlockwise: the older
