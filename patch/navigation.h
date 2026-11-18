@@ -833,6 +833,9 @@ int ringnav_usb_config(void), ringnav_usb_detect(void), ringnav_usb_status(void)
 int stock_usb_config_trampoline(void), stock_usb_detect_trampoline(void);
 int stock_usb_status_trampoline(void);
 
+/* usb_otg.c: check_otg_status's hook, OTG host power only with no VBUS on the port */
+int ringnav_otg_status(void), stock_otg_status_trampoline(void);
+
 /* config_ini.c: toolsWriteConfig's hook, and the settled keys write_int_config's hook holds */
 int ringnav_ini_write(const char *path, const char *section, const char *key, const char *value),
     stock_ini_write_trampoline(const char *path, const char *section, const char *key,

@@ -1624,7 +1624,7 @@ PMIC before Linux and this startup script execute.
 The policy is `requested && ready && g_last_otgid != 1 && (g_usbdac_chargeflag == 1 || (cable == 1 && g_usbmode == 0))`:
 USB DAC Charging On permits charging, as does a detected cable with USB Storage selected.
 `g_last_otgid` 1 is the Q2 as a USB host: stock's `check_otg_status` (`0x4f3408`), with the ID pin
-(`PD18`) low, turns the bus power on (`PC20` high) and the charger off (`PE22` high) by writing the
+(`PD18`) low (and only once [OTG host power](#otg-host-power)'s wait is over), turns the bus power on (`PC20` high) and the charger off (`PE22` high) by writing the
 pins directly, and `get_battery_capacity` reads no cable while it lasts. Each USB pass reads `PE22`
 back and writes the policy again when the two differ, so without that term the guard turned the
 charger back on within the same pass (seen in the emulator with the pins recorded, 2026-11-17:
@@ -1673,6 +1673,16 @@ Stock's `systembar_showface` picks `bar_charge` from the cable flag alone (and t
 
 The four hooks use the pinned V1.36 build's symbol/address and PIC-prologue/GOT checks. Source
 changes are exercised by `test/fw/test_usb_charge.py`.
+
+### OTG host power
+
+Stock's `check_otg_status` (`0x4f3408`), called once a second from `on_wm_idle_status` (its only caller, `0x4f43dc`), reads the ID pin `PD18` with `toolsGpioGetValue`; when its role `PD18 == 0` differs from `g_last_otgid` it writes `PC20` (bus power, 1 on) and `PE22` (charger, 1 off) to that role and stores it, then on a host pass follows a USB DAC through `/tmp/usb_add` and `/dev/snd/pcmC1D0` (`g_otg_status`). Nothing else in demo writes `PC20` high: `into_poweroff`, `device_reboot` and `device_standby` write it 0 with `g_last_otgid`. `get_battery_capacity` reads no cable (`g_usbdet_value` 0) while `g_last_otgid` is 1, and the dwc2 controller follows the same pin (`13500000.otg/id_status`). The cable sense `PD17` (`usb_detect`: 0 is VBUS on the port) reads the Q2's own bus power as well as a computer's.
+
+A pin log on the Q2 (2026-11-17, build p32b, every 0.5 s) showed the fault: after each unplug `PD18` read 0 with no cable in, stock turned `PC20` on in the next pass (within 0.53 s every time), and `PD18` stayed low for 5 to 19 s. A cable put into a computer in that window met the Q2 powering the bus: `PC20=1` with VBUS on, the battery Discharging, nothing enumerated, until `PD18` read high (dwc2: "Do port resume before switching to device mode") and stock turned `PC20` off in its next pass. Plugs that worked were those made after `PD18` was back to 1.
+
+`ringnav_otg_status` (`patch/usb_otg.c`) hooks `check_otg_status`. In device role (`g_last_otgid` not 1) a high ID runs stock's pass as before (its device path ends a DAC's output); a low ID runs it only once `PD18` has read 0 and `PD17` 1 on every pass for `OTG_SETTLE_MS` (3 s). VBUS on the port, a high ID, or passes more than `OTG_GAP_MS` (5 s) apart (a Standby) start the wait again; until it ends stock does not run, so `PC20` stays off, `g_last_otgid` stays 0 and the cable is a device's. In host role stock runs every pass, and turns `PC20` off in the pass `PD18` reads high. A USB DAC or drive on an OTG adapter (ID grounded, no VBUS) gets bus power about 3 s after it goes in, or 3 s into boot. `test/fw/test_usb_otg.py` replays the logged unplug-replug sequences over a model of stock's pass and the pins (bus power never on), and the adapter's path (on after the settle time, off in the pass the adapter comes out).
+
+ponytail: while the Q2 already powers the bus, a computer plugged in is not seen until `PD18` reads high, as `PD17` then reads the Q2's own power; the settle time keeps the post-unplug low from getting there. Whether `PD18` returns high sooner with `PC20` held off (the log never saw it low for long with the bus unpowered) decides whether 3 s is enough; dropping `PC20` for a pass to read `PD17` would close the window at the cost of a power gap to a DAC. The kernel's dwc2 still takes host role from the pin during the low, so a cable put in then enumerates once it reads high. The hook uses the pinned V1.36 PIC-prologue/GOT check.
 
 ## Battery History
 
