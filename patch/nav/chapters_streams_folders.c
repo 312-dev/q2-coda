@@ -58,9 +58,18 @@ static int chapter_pick(void *ctx, void *event) {
     navigator_back();
     return 0;
 }
+/* Chapters given up while they load under the overlay (Return, a tap off the spinner, its window
+ * gone): ffmpeg ended, and the poll frees them once it is reaped, as a closed page's. */
+static void chapters_gone(void) {
+    if (st.ch && !st.ch->done) chapters_cancel(st.ch);
+}
 static int chapter_poll(const void *unused) {
     if (!chapters_poll(st.ch, time_now_ms())) return 8;
     st.ch_timer = 0;
+    if (!st.ch_page && load_over_for(chapters_gone)) { /* read under the overlay: the page now */
+        st.ch_page = page_open("chapters_page", page_closed, page_keyup);
+        load_over(0, 0);
+    }
     if (!st.ch_page) {
         free(st.ch);
         st.ch = 0;
@@ -115,9 +124,14 @@ static void chapters_open(void *r) {
         toast("Could not read chapters");
         return;
     }
-    st.ch_page = page_open("chapters_page", page_closed, page_keyup);
+    /* the page opens once they are read, the loading overlay over the one the menu was held on
+     * (its sheet may still be falling away); at once, with its Loading… page, with none */
+    void *from = page_in_use();
+    if (from && tk_strcmp(widget_get_type(from), "window"))
+        from = window_under(window_manager(), from);
+    if (!from) st.ch_page = page_open("chapters_page", page_closed, page_keyup);
     st.ch_timer = timer_add(chapter_poll, 0, 50);
-    if (!st.ch_page || !st.ch_timer) {
+    if ((!from && !st.ch_page) || !st.ch_timer) {
         /* No polling timer: kill and reap the child before releasing its storage. */
         chapters_cancel(st.ch);
         if (st.ch->pid > 0) {
@@ -130,7 +144,10 @@ static void chapters_open(void *r) {
         stop_timer(&st.ch_timer);
         return;
     }
-    page_list(st.ch_page, st.ch_page, 0, "Loading chapters…", 0, 64);
+    if (st.ch_page)
+        page_list(st.ch_page, st.ch_page, 0, "Loading chapters…", 0, 64);
+    else
+        load_over(from, chapters_gone);
 }
 
 /* 1 + the MEDIA folder s names (up to its end or a '/'), 0 for none. MEDIA is letters only. */

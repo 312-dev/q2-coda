@@ -947,7 +947,9 @@ Settings, and a payload list's other messages (Internet Radio's "Loading…", Ba
 
 A page whose content has to be fetched first opens only once it is there: until then the busy spinner is laid over the
 page that was pressed (`patch/addon.c` `push`, `patch/list_marks.c` `load_spinner_paint`), never a Loading… page of its
-own.
+own. A page opened from another module's window (a card app's first open, Chapters) lays it over that window
+(`patch/list_marks.c` `load_over`, painted by `ringnav_paint` and given every input first by `ringnav_input`, as Cover
+Flow's open holds Home).
 
 - **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
   15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
@@ -968,7 +970,14 @@ own.
   A search or a sign-in field's text, once typed, closes the box onto the list it was opened from, the spinner over it.
   Spotify's browser: a list pressed on a page showing its rows (the menu, a list, Search's categories, More…).
   Internet Radio's directory: Top Stations, By Country, By Genre, a country or a genre, and a search, over the list
-  they were opened from. Not yet (`ponytail:`, each keeps its Loading… page): Chapters.
+  they were opened from, through a wait for Smart Wi-Fi's link too (a "Connecting to Wi-Fi…" toast says why).
+  A card app's or Spotify's first open, from Streaming (and a card app's Go to, More and Settings > Storage): the page
+  opens once the app's first answer (its rows, its pairing prompt or its error) is there, through the app's start, the
+  spinner over the window it was opened from; Return there gives it up and the app runs on. Chapters, from the hold
+  menu, over the window the menu was held on, until ffmpeg has read them; given up, ffmpeg is ended. In place, the page
+  as it shows until the answer replaces it: Retry on an error page (a card app's, Spotify's), a card app's next or
+  previous section (a sideways swipe), the reload after an action on a card app's level, Spotify's Playback Settings
+  after a change, and Spotify's Back to a list more than three levels down, which let its rows go.
 - **Back** in a card app waits on nothing, so it has no overlay: the level below comes back at once, as it was left,
   its selected row and every page of it, and is asked again behind the scenes; its rows change only if the answer
   differs.

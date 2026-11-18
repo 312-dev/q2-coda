@@ -1782,10 +1782,17 @@ static struct {
      * lv[ADDON_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
      * nothing; pmoved: the way a level in the top's place slides in */
     char pend;
-    signed char pmoved;
+    signed char pmoved, psec; /* psec: the section a swipe's level is (P_SECTION) */
+    /* hold: the top level asked for (again) in place under the loading overlay, what is shown left
+     * as it is until its rows or its error are there, 1 + the state a cancel puts back (hold_load):
+     * its first, with no page yet, over the window it was opened from (list_marks.c load_over), its
+     * page made then (page_make); Retry; the reload after an action */
+    char hold;
 } pg __attribute__((section(".scratch")));
 
 static void qr_open(const char *state, const char *title);
+static int page_make(void);
+void *page_in_use(void); /* smart_wifi.c: the top window past toasts and the volume dialog */
 static app_t *app(void) { return &ap.a[pg.a]; }
 static lv_t *top(void) { return &pg.lv[pg.depth - 1]; }
 static const char *cell(int i, int k) { return pg.f[4 + 6 * i + k]; }
@@ -2511,9 +2518,15 @@ static void show(void) {
      * page that append() rebuilds drops it too, row kept or not; match the row by identity in go()
      * if that is ever pressed for. */
     if (pg.next == G_ROW) stop_timer(&pg.go);
+    if (l->state == K_LOAD && !((req.running || req.done) && !pg.act && req.id == l->id)) fetch(l);
+    if (pg.hold && (l->state == K_LOAD || l->state == K_WAIT)) return; /* under the overlay */
+    if (pg.hold && !pg.page) { /* its first answer: the page opens over the window it held */
+        if (!page_make()) return; /* none to be had: the overlay stays until Return */
+        load_over(0, 0);
+    }
+    pg.hold = 0;
     pg.view = pg.edit = 0;
     pg.busy = 0; /* new rows, their own texts: the tick says Working… again */
-    if (l->state == K_LOAD && !((req.running || req.done) && !pg.act && req.id == l->id)) fetch(l);
     if (l->state == K_LOAD || l->state == K_WAIT) {
         char t[48];
         tk_snprintf(t, sizeof t, "Starting %s…", app()->name);
@@ -2602,12 +2615,22 @@ static void enter(const lv_t *next) {
 static void load_cancel(void) {
     pg.pend = 0;
     req_cancel();
+    if (pg.hold) /* the level as it was, still shown */
+        top()->state = pg.hold - 1, pg.hold = 0;
     if (pg.page) widget_invalidate_force(pg.page, 0);
 }
 
+/* The top level l asked for again in place under the loading overlay, the page as it shows until
+ * its answer is there (show); with nothing shown, its Loading… page. */
+static void hold_load(lv_t *l) {
+    if (pg.view) pg.hold = (char)(1 + l->state), widget_invalidate_force(pg.page, 0);
+    l->state = K_LOAD;
+    show();
+}
+
 /* How the loading overlay's level is taken once its reply comes (load_take): entered over the top
- * one (push), or in the top's place (page_to). */
-enum { P_PUSH = 1, P_PLACE };
+ * one (push), or in the top's place (page_to), or as the first level's section psec (sec_open). */
+enum { P_PUSH = 1, P_PLACE, P_SECTION };
 
 /* Whether the top level shows its rows, so a level can be asked for under the overlay over them. */
 static int stageable(void) { return top()->state == K_READY && pg.view; }
@@ -2636,8 +2659,10 @@ static void load_take(void) {
     pg.pend = 0;
     if (how == P_PUSH)
         enter(w);
-    else
+    else {
+        if (how == P_SECTION) keep_sel(), pg.sec[pg.cur].sel = top()->sel, pg.cur = pg.psec;
         drop(), *top() = *w, pg.moved = pg.pmoved;
+    }
     widget_invalidate_force(pg.page, 0);
 }
 
@@ -2682,18 +2707,24 @@ static void pop(void) {
 }
 
 /* Section i shown as the first level: its op asked, its list sliding in from dir's side (1 from the
- * right, as the next; -1 from the left; 0 in place), the one it replaces keeping its selected row.
- * With two or more the title has the position, Albums 2/3. */
+ * right, as the next; -1 from the left; 0 in place), the one it replaces keeping its selected row;
+ * a swipe's under the loading overlay over the one shown, which it replaces once its reply comes
+ * (load_take, P_SECTION). With two or more the title has the position, Albums 2/3. */
 static void sec_open(int i, int dir) {
-    lv_t *l = &pg.lv[0];
+    lv_t *l = &pg.lv[0], next = pg.sec[i]; /* K_LOAD */
+    if (pg.nsec > 1)
+        tk_snprintf(next.title, sizeof next.title, "%s %d/%d", pg.sec[i].title, i + 1, pg.nsec);
+    if (dir && stageable()) { /* a swipe: asked for under the overlay, the one shown staying */
+        pg.pmoved = (signed char)dir, pg.psec = (signed char)i;
+        stage(&next, P_SECTION, 0, 0);
+        return;
+    }
     req_cancel();
     keep_sel();
     pg.sec[pg.cur].sel = l->sel;
     drop();
     pg.cur = (signed char)i;
-    *l = pg.sec[i]; /* K_LOAD */
-    if (pg.nsec > 1)
-        tk_snprintf(l->title, sizeof l->title, "%s %d/%d", pg.sec[i].title, i + 1, pg.nsec);
+    *l = next;
     pg.moved = (signed char)dir;
     show();
 }
@@ -2789,7 +2820,7 @@ static void got(void) {
             keep_sel(), fetch(l); /* a live level stays shown, asked again now: no Loading… page */
             pg.qrnext = 1;        /* one press: a sign-in's row turned remote opens the QR page */
         } else
-            keep_sel(), l->state = K_LOAD, show(); /* the level as the action left it */
+            keep_sel(), hold_load(l); /* the level as the action left it */
     } else if (l->id != req.id) {
     } else if (pg.paging) { /* a next page appended, or the list ends at More… (rows kept) */
         int from = l->n;
@@ -2901,7 +2932,7 @@ static int search_left(void *ctx, void *event) {
 static int swipe(void *ctx, void *event) {
     (void)ctx;
     int type = I(event, EVENT_TYPE);
-    if (pg.pend && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
+    if ((pg.pend || pg.hold) && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
         return load_touch(pg.page, event, load_cancel);
     if (type == EVT_POINTER_ABORT || pg.nsec < 2 || pg.depth != 1 || pg.edit) {
         pg.sdown = pg.sclaim = 0;
@@ -3013,7 +3044,7 @@ static int go(const void *unused) {
     int i = pg.arg;
     char a[sizeof l->args] = "";
     pg.go = 0;
-    if (pg.pend) return 0; /* the wheel's Centre, a row or an icon while the overlay waits */
+    if (pg.pend || pg.hold) return 0; /* the wheel's Centre, a row or an icon while the overlay waits */
     if (pg.next == G_SHOW)
         show();
     else if (pg.next == G_SECTION) { /* a swipe: the next or previous section, none past the ends */
@@ -3041,7 +3072,8 @@ static int go(const void *unused) {
                 app_stop(app(), 1);
             else if (!app()->launched || access(app()->pid, 0))
                 launch(app());
-            l->state = K_LOAD, show();
+            /* asked again under the loading overlay, the error page left as it is meanwhile */
+            hold_load(l);
         }
     } else if (l->state != K_READY) {
     } else if (i == l->n) { /* More…, as a level of its own; Loading… does nothing */
@@ -3099,7 +3131,7 @@ static int tick(const void *unused) {
 static int leave(const void *unused) {
     (void)unused;
     pg.leave = 0;
-    if (pg.pend) /* the load cancelled: the page stays */
+    if (pg.pend || pg.hold) /* the load cancelled: the page stays */
         load_cancel();
     else if (pg.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box
                   */
@@ -3133,9 +3165,34 @@ static int closed(void *ctx, void *event) {
     return 0;
 }
 
+/* The page's window, its touches bound (swipe). 0 when none could be made. */
+static int page_make(void) {
+    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
+                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    if (!(pg.page = page_open("addon_page", closed, keyup))) return 0;
+    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
+        widget_on(pg.page, touches[t], swipe, 0);
+    return 1;
+}
+
+/* The first open given up under the overlay (Return, a tap off the spinner, its window gone): no
+ * page was made, and the app started for it runs on. */
+static void held_cancel(void) { closed(0, 0); }
+
+/* The page, or its first open under the overlay, let go: its state with it. */
+static void page_drop(void) {
+    void *old = pg.page;
+    if (old)
+        closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    else if (pg.lv)
+        load_over(0, 0), closed(0, 0);
+}
+
 /* Slot k's page, its first level op (args: "\t" and escaped each) titled title: the app started if
  * it isn't (its QR code shown at the first answer when qr); gone from the card, the page says so.
- * 1 when it opened or said why not. */
+ * The page opens once the app's first answer (its rows or its error) is there, the loading overlay
+ * over the window it was opened from meanwhile, through the app's start (pg.hold); at once with no
+ * such window. 1 when it opened, is on its way, or said why not. */
 static int page_at(int k, const char *op, const char *args, const char *title, int qr) {
     const char *busy = shelf_busy(); /* a job on this app's folder */
     app_t *b = &ap.a[k];
@@ -3144,20 +3201,17 @@ static int page_at(int k, const char *op, const char *args, const char *title, i
     if (busy && !strcmp(busy + 1, b->id) &&
         (shelf_moving() || !b->launched || access(b->pid, 0)))
         return toast("Wait until the App Store finishes"), 1;
-    if (pg.page || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
+    void *from = page_in_use();
+    if (pg.lv || !(pg.lv = calloc(ADDON_DEPTH + 1, sizeof *pg.lv))) return 0;
+    int missing = access(b->bin, 0);
     if (!(pg.f = calloc(4 + 6 * ADDON_ROWS * ADDON_PAGES, sizeof *pg.f)) ||
-        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) ||
-        !(pg.page = page_open("addon_page", closed, keyup)))
+        !(pg.kept = calloc(ADDON_DEPTH, sizeof *pg.kept)) || ((missing || !from) && !page_make()))
         return free(pg.lv), free(pg.f), free(pg.kept), pg.lv = 0, pg.f = 0, pg.kept = 0, 0;
     pg.a = k;
     app_t *a = app();
-    int missing = access(a->bin, 0);
     if (!missing && (!a->launched || access(a->pid, 0))) launch(a), pg.code = qr && a->qr;
     pg.depth = 1;
-    static const unsigned short touches[] = { EVT_POINTER_DOWN, EVT_POINTER_MOVE_BEFORE,
-                                              EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
-    for (unsigned t = 0; t < sizeof touches / sizeof *touches; ++t)
-        widget_on(pg.page, touches[t], swipe, 0);
+    if (!pg.page) pg.hold = 1 + K_LOAD, load_over(from, held_cancel); /* the page once it answers */
     lv_t *l = top();
     tk_snprintf(l->op, sizeof l->op, "%s", op);
     tk_snprintf(l->args, sizeof l->args, "%s", args);
@@ -3191,8 +3245,7 @@ int addon_open_at(const char *id, const char *op, const char *arg, const char *t
     for (int i = 0; i < ap.n; ++i)
         if (ap.a[i].present && !strcmp(ap.a[i].id, id)) {
             if (*arg && !put(args, sizeof args, arg)) return 0;
-            void *old = pg.page;
-            if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+            page_drop();
             return page_at(i, op, args, title && *title ? title : ap.a[i].name,
                            !strcmp(op, "menu"));
         }
@@ -3293,8 +3346,7 @@ int addon_goto(const char *path, const char *title, int album) {
     app_t *a = goto_app(path);
     if (!a || !put(args, sizeof args, album ? "album" : "artist") || !put(args, sizeof args, path))
         return 0;
-    void *old = pg.page;
-    if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    page_drop();
     return page_at((int)(a - ap.a), "goto", args, title && *title ? title : a->name, 0);
 }
 
@@ -3313,8 +3365,7 @@ int addon_more(void) {
     unsigned k = title ? (unsigned)(title - a->more) : strlen(a->more);
     if (!k || k >= sizeof op) return 0; /* no op, or one too long for a level */
     tk_snprintf(op, k + 1, "%s", a->more);
-    void *old = pg.page;
-    if (old) closed(old, 0), window_manager_close_window_force(window_manager(), old);
+    page_drop();
     return page_at((int)(a - ap.a), op, "", title && title[1] ? title + 1 : a->name, 0);
 }
 
@@ -3707,7 +3758,7 @@ void addon_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         return;
     }
-    if (pg.pend && w == pg.page) load_spinner_paint(w, canvas); /* over the page's rows */
+    if ((pg.pend || pg.hold) && w == pg.page) load_spinner_paint(w, canvas); /* over the page */
     if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     qr_paint(w, canvas);

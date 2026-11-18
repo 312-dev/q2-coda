@@ -457,7 +457,8 @@ m.answer(*OK,[]); assert m.nodes[m.top]['name']=='spotify_page'; m.destroy(m.top
 # Loading, an error with Retry (offline, throttled, error, or no answer), one without, and empty.
 m.row(0); assert m.labels()==MENU and m.asked()==('liked',)  # under the loading overlay: the menu stays
 m.answer('offline',"Spotify can't be reached",'',[]); assert m.labels()==["Spotify can't be reached",'Retry']
-m.row(0); assert m.labels()==['Loading…']; m.answer('premium','Spotify Premium is needed','',[]); assert m.labels()==['Spotify Premium is needed']
+m.row(0); assert m.labels()==["Spotify can't be reached",'Retry'] and m.asked()==('liked',)  # Retry under the overlay
+m.answer('premium','Spotify Premium is needed','',[]); assert m.labels()==['Spotify Premium is needed']
 m.back(); m.row(0); m.answer(*OK,[]); assert m.labels()==['Nothing here']
 # A short or empty page with a cursor (the backend's paging cap) still offers More….
 m.back(); m.row(0); m.answer('ok','','c%251',[]); assert m.labels()==['Liked Songs','More…','']
@@ -502,7 +503,7 @@ m.pick(1); assert m.asked()==('album','spotify:album:y'); m.answer('ok','','p2',
 m.pick(0); assert m.asked()==('play','spotify:album:y','0','spotify:track:z'); m.answer(*OK,[]); m.destroy(m.top); m.top=m.page
 m.pick(1); assert m.asked()==('album','spotify:album:y','p2'); m.answer(*OK,[])
 asked=len(m.threads); m.back(); m.back(); assert len(m.threads)==asked and m.labels()[:2]==['X','Top']
-m.back(); assert m.labels()==['Loading…'] and m.asked()==('artists',)
+m.back(); assert m.labels()[:2]==['X','Top'] and m.asked()==('artists',)  # asked again under the overlay, the page stays
 m.answer(*OK,[('artist','spotify:artist:x','X','','','')]); assert m.labels()==['Artists','X',''] and m.nodes[m.find('scroll_view')]['_ringnav_index']==0
 m.back(); assert m.labels()==MENU; passed()
 # No saved login: the pairing prompt, asking again every 2 s while it is open, so a pairing from the
@@ -554,7 +555,7 @@ m.answer(*OK,[track('spotify:track:q','Q',pos='3')]); m.row(0); assert m.asked()
 m.answer(*OK,[]); assert m.nodes[m.top]['name']=='spotify_page'; m.destroy(m.top); m.top=m.page; m.back()
 m.row(7); m.answer(*OK,[('setting','shuffle','off','','',''),('setting','repeat','context','','','')])
 assert m.labels()==['Playback Settings','Shuffle','','Repeat','All'] and switch(m,0)=='switch_off' and switch(m,1)!='switch_off'
-m.row(0); assert m.asked()==('shuffle','on'); m.answer(*OK,[]); assert m.labels()==['Loading…'] and m.asked()==('settings',)
+m.row(0); assert m.asked()==('shuffle','on'); m.answer(*OK,[]); assert m.labels()==['Playback Settings','Shuffle','','Repeat','All'] and m.asked()==('settings',)  # under the overlay
 freed=m.freed
 m.answer(*OK,[('setting','shuffle','on','','',''),('setting','repeat','track','','','')]); assert m.labels()==['Playback Settings','Shuffle','','Repeat','One'] and switch(m,0)=='switch_on' and m.freed==freed+1
 m.row(1); assert m.asked()==('repeat','off'); t=len(m.threads); m.answer('offline',"Spotify didn't answer in time",'',[]); m.advance(1000)

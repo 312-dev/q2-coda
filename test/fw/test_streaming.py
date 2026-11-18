@@ -2,10 +2,11 @@
 Tidal's cached names, and Internet Radio's lists and fetch."""
 import ctypes as C
 import random
+import struct
 
 import pytest
 
-from conftest import block, text
+from conftest import O, block, text
 
 REPLY_MAX = 64 << 10
 RADIO_MAX = 200
@@ -39,7 +40,7 @@ class Br(C.Structure):
                 *((n, C.c_int) for n in ('depth', 'act', 'next', 'arg', 'playing')),
                 ('rows', C.c_int * 11), ('caps_checked', C.c_int), ('downloads', C.c_int), ('can_download', C.c_int),
                 ('selected', C.c_char * 6500), ('remove_kind', C.c_char * 16), ('remove_note', C.c_char * 128), ('term', C.c_char * 64),
-                ('lv', C.POINTER(Level)), ('pend', C.c_byte)]
+                ('lv', C.POINTER(Level)), ('pend', C.c_byte), ('hold', C.c_byte)]
 
 
 class Wk(C.Structure):
@@ -551,9 +552,10 @@ def test_a_read_error_fails(fw):
 class Browser:
     """Spotify's browser driven as the UI drives it, on stubs. The worker's pthread never runs: answer()
     puts its reply where the pthread would and the page's tick takes it; a click runs through go()."""
-    def __init__(self, fw):
+    def __init__(self, fw, home=False):
         self.fw, self.now, self.sel, self.timers, self.drawn, self.toasts = fw, 1000, 0, 0, 0, []
         self.page, self.view = block(fw, size=4096), block(fw, size=4096)  # a widget's bytes, all zero
+        self.home = block(fw, size=4096) if home else 0  # the window it is opened from (smart_wifi.c page_in_use)
         self.sp, self.br, self.wk = fw.var('spotify__sp', Sp), fw.var('spotify__br', Br), fw.var('spotify__wk', Wk)
         def timer(*_):
             self.timers += 1
@@ -578,6 +580,10 @@ class Browser:
         fw.mock('widget_lookup', lambda *_: self.view)
         fw.mock('navigator_to_with_context', toast)
         fw.mock('widget_get_prop_int', prop)
+        if home:
+            fw.mock('widget_count_children', lambda w, *_: 1 if not w else 0)
+            fw.mock('widget_get_child', lambda w, i, *_: self.home if not w else self.view)
+            fw.mock('widget_get_prop_str', lambda w, k, d, *_: d)
         fw.fn('spot_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
 
     @property
@@ -820,7 +826,9 @@ def test_levels_well_below_the_top_let_their_rows_go_and_fetch_them_back(fw):
     b.back()
     assert b.top.state == S_READY and b.top.f[6] == b'Album 1'
     b.back()
-    assert b.top.state == S_LOAD and b.request().endswith(b'\tliked\n')
+    assert b.br.pend and b.br.lv[SPOT_DEPTH].op == b'liked' and b.request().endswith(b'\tliked\n')  # under the overlay
+    b.answer(rows=[album(0)])
+    assert not b.br.pend and b.br.depth == 2 and b.top.state == S_READY and b.top.op == b'liked'
 
 
 def test_a_refreshing_level_keeps_its_rows_when_the_refresh_fails(fw):
@@ -841,6 +849,50 @@ def test_a_refreshing_level_keeps_its_rows_when_the_refresh_fails(fw):
     b.tick()
     b.answer(rows=[(b'job', b'j1', b'Job', b'60%25', b'ctx', b''), (b'job', b'j2', b'Two', b'1%25', b'ctx', b'')])
     assert b.top.n == 2 and b.top.f[7] == b'60%'
+
+
+# The first open (docs/oled-design.md#loading): the browser opens once Spotify answers, the overlay over Streaming.
+class Lo(C.Structure):
+    _fields_ = [('win', C.c_void_p), ('cancel', C.c_void_p)]
+
+
+def gate(fw, type, a, b=0):
+    e = C.create_string_buffer(0x40)
+    struct.pack_into('<i', e, O['EVENT_TYPE'], type)
+    struct.pack_into('<ii', e, O['EVENT_X'], a, b)
+    return fw.fn('load_over_input', C.c_int, C.c_void_p)(e)
+
+
+def test_spotify_s_first_open_waits_under_the_overlay_then_opens_on_its_menu(fw):
+    b = Browser(fw, home=True)
+    lo = fw.var('list_marks__lo', Lo)
+    assert not b.br.page and b.br.hold and lo.win == b.home and not fw.calls('window_create')
+    assert b.request().endswith(b'\taccount\n')
+    b.answer(fail=W_NOSOCK)  # librespot starting
+    assert b.top.state == S_WAIT and not fw.calls('window_create') and lo.win == b.home
+    b.now += 600
+    b.tick()
+    b.answer()  # signed in: caps asked, still no page
+    assert not fw.calls('window_create') and b.request().endswith(b'\tcaps\n')
+    b.answer()
+    assert b.br.page == b.page and not b.br.hold and lo.win is None and len(fw.calls('window_create')) == 1
+    assert b.drawn == 8  # the menu
+
+
+def test_return_gives_spotify_s_first_open_up(fw):
+    b = Browser(fw, home=True)
+    lo = fw.var('list_marks__lo', Lo)
+    assert gate(fw, O['EVT_KEY_DOWN'], O['KEY_RETURN']) == 1 and gate(fw, O['EVT_KEY_UP'], O['KEY_RETURN']) == 1
+    assert lo.win is None and not b.br.lv and not b.br.timer and b.wk.running == 0 and not fw.calls('window_create')
+    assert gate(fw, O['EVT_KEY_DOWN'], 218) == 0  # Centre is Streaming's again
+
+
+def test_centre_while_spotify_s_first_open_loads_opens_nothing_more(fw):
+    b = Browser(fw, home=True)
+    asked = b.wk.id
+    assert gate(fw, O['EVT_KEY_UP'], 218) == 1
+    fw.fn('spot_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    assert b.wk.id == asked and not fw.calls('window_create')
 
 
 def test_a_refresh_drops_a_click_on_its_old_rows(fw):
@@ -864,11 +916,40 @@ def test_settings_toggle(fw):
     b.answer(rows=[(b'setting', b'shuffle', b'off', b'', b'', b''), (b'setting', b'repeat', b'context', b'', b'', b'')])
     b.click(0)
     assert b.request().endswith(b'\tshuffle\ton\n') and b.br.act == A_SET
+    lists = len(fw.calls('scroll_view_create'))
     b.answer()
-    assert b.top.state == S_LOAD  # asked again, as it may have changed
+    assert b.top.state == S_LOAD and b.br.hold  # asked again, as it may have changed, under the overlay
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page: the rows stay
     b.answer(rows=[(b'setting', b'repeat', b'context', b'', b'', b'')])
+    assert not b.br.hold and b.top.state == S_READY and len(fw.calls('scroll_view_create')) == lists + 1
     b.click(0)
     assert b.request().endswith(b'\trepeat\ttrack\n')
+
+
+def settings_changed(fw):
+    b = Browser(fw)
+    b.sp.track, b.sp.state = b'x', b'playing'
+    b.menu()
+    b.click(7)  # Playback Settings
+    b.answer(rows=[(b'setting', b'shuffle', b'off', b'', b'', b''), (b'setting', b'repeat', b'context', b'', b'', b'')])
+    b.click(0)
+    b.answer()  # shuffle on: the settings asked again
+    return b, len(fw.calls('scroll_view_create')), b.wk.id
+
+
+def test_return_gives_the_settings_reload_up_and_its_rows_stay(fw):
+    b, lists, asked = settings_changed(fw)
+    b.back()
+    assert not b.br.hold and b.br.depth == 2 and b.top.state == S_READY and b.top.n == 2
+    assert b.wk.running == 0 and len(fw.calls('scroll_view_create')) == lists and not fw.calls('navigator_back')
+    b.click(1)  # the rows work again: repeat
+    assert b.request().endswith(b'\trepeat\ttrack\n')
+
+
+def test_centre_while_the_settings_reload_does_nothing(fw):
+    b, lists, asked = settings_changed(fw)
+    b.click(1)
+    assert b.wk.id == asked and b.br.hold and b.br.act != A_SET
 
 
 def test_a_held_play_queues_a_track_and_downloads_a_playlist(fw):
