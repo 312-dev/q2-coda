@@ -14,7 +14,8 @@
  *
  * The sheet rises from the screen's foot over SH_RISE_MS, cubic_out, while the page behind recedes
  * and dims and the frost fades in; Return lets it fall away over SH_CLOSE_MS, ease-in
- * (modal_close), its keys taken meanwhile (modal_closing). Both run through ui_kit.h's ovm_t
+ * (modal_close), its keys taken meanwhile (modal_closing); Up Next's falls too on a tap above it or
+ * a drag down on it (modal_touch_close). Both run through ui_kit.h's ovm_t
  * (docs/oled-design.md#overlay-motion), so under Reduce Motion each is a cross-fade in place,
  * MO_FADE_MS in and MO_OUT_FADE_MS out (sheet_run). */
 #include "navigation.h"
@@ -254,6 +255,60 @@ void modal_close(void *win) {
     }
     mo.phase = MO_FALL, mo.win = win;
     sheet_run(1);
+}
+
+/* A finger that closes a sheet (the user's, 2026-11-18, for Up Next; docs/oled-design.md#up-next):
+ * a tap on the page receding above it (down and up over SH_TOP, within TAP_PX), or a drag down of
+ * SH_DRAG_PX or more, more down than across (the swipe up that opens Up Next, reversed), that came
+ * down on the sheet's strip above its rows (the grab bar's) or on its rows while they are at their
+ * top. A drag on rows scrolled down scrolls them, as anywhere. The sheet falls away as Return lets
+ * it (modal_close), from the next pass, outside the touch's dispatch. The handlers return 0: the
+ * rows keep their taps and drags. ponytail: the sheet does not follow the finger as it drags; it
+ * falls once the finger lifts past the threshold (a drag offset fed to sheet_frame would). */
+#define SH_DRAG_PX 48
+enum { MT_NONE, MT_SCRIM, MT_SHEET };
+static struct {
+    int x, y, from; /* where the touch came down, and on what (MT_*) */
+} mt __attribute__((section(".scratch")));
+
+static int sheet_touch_close(const void *info) {
+    void *win = P(info, TIMER_CTX);
+    if (modal_win(win) && !widget_get_prop_int(win, "_mm_closing", 0)) {
+        widget_set_prop_int(win, "_mm_closing", 1);
+        modal_close(win);
+    }
+    return 0;
+}
+static int sheet_touch(void *win, void *event) {
+    int type = I(event, EVENT_TYPE), x = I(event, EVENT_X), y = I(event, EVENT_Y), k = 0;
+    while (k < MODAL_MAX && modals[k].win != win) ++k;
+    if (k == MODAL_MAX || type == EVT_POINTER_ABORT) {
+        mt.from = MT_NONE;
+        return 0;
+    }
+    if (type == EVT_POINTER_DOWN) {
+        void *view = modals[k].view;
+        mt.x = x, mt.y = y;
+        mt.from = y < SH_TOP                                             ? MT_SCRIM
+                  : y < modals[k].top || !view || I(view, SCROLL_Y) <= 0 ? MT_SHEET
+                                                                         : MT_NONE;
+        return 0;
+    }
+    if (type != EVT_POINTER_UP_BEFORE) return 0;
+    int dx = x - mt.x, dy = y - mt.y, from = mt.from;
+    mt.from = MT_NONE;
+    if (dx < 0) dx = -dx;
+    int tap = dx <= TAP_PX && (dy < 0 ? -dy : dy) <= TAP_PX;
+    if ((from == MT_SCRIM && tap && y < SH_TOP) ||
+        (from == MT_SHEET && dy >= SH_DRAG_PX && 2 * dx < dy))
+        timer_add(sheet_touch_close, win, 0);
+    return 0;
+}
+/* win, an open sheet, closed by a finger too (sheet_touch) */
+void modal_touch_close(void *win) {
+    static const unsigned types[] = { EVT_POINTER_DOWN, EVT_POINTER_UP_BEFORE, EVT_POINTER_ABORT };
+    for (unsigned i = 0; win && i < sizeof types / sizeof *types; ++i)
+        widget_on(win, types[i], sheet_touch, win);
 }
 
 /* A 12 px space in the rows, never a rule; it is no row (nothing to click), so the wheel steps

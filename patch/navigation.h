@@ -680,6 +680,7 @@ int np_mode_shuffle(void),
 enum { NP_STAGE_REST, NP_STAGE_SHUFFLE, NP_STAGE_REPEAT, NP_STAGE_RATING };
 void *np_heart(void); /* np_bar.c: the heart, while it shows on the art page, else 0 */
 int np_mode_click(void *target, void *event);
+void np_corner_tap(int x0, int y0, int x, int y); /* np_bar.c: np_tap's tap past the row */
 int np_radio_on(void);            /* np_bar.c: radio on, shuffle and repeat the app's */
 int np_queue(const void *unused); /* navigation.c: Up Next, from Now Playing's row or hold menu */
 int song_list(void *w);

@@ -1,9 +1,9 @@
-/* Now Playing's art, artist and album as links (docs/ipod.md#now-playing), and a swipe up there for
- * Up Next: a tap on the artist
- * opens that artist, on the album or the art that album, as the More page's Look up Artist and
- * Look up Album do (navigation.c np_goto, which also says whether there is anywhere to go); a hold
- * on the art, ART_HOLD_MS without moving, opens stock's full-screen art (bigcover_page), whatever
- * Enlarged Album Art says, and its lift is no tap.
+/* Now Playing's art, artist and album as links (docs/ipod.md#now-playing), a swipe up there for
+ * Up Next, and the state row's outer buttons' taps past its target (np_bar.c np_corner_tap): a tap
+ * on the artist opens that artist, on the album or the art that album, as the More page's Look up
+ * Artist and Look up Album do (navigation.c np_goto, which also says whether there is anywhere to
+ * go); a hold on the art, ART_HOLD_MS without moving, opens stock's full-screen art
+ * (bigcover_page), whatever Enlarged Album Art says, and its lift is no tap.
  *
  * The window takes the touch, as for the right-hand time (np_bar.c np_time_tap): whichever child
  * gets it (the slide_view, its page, a label), the page's own handler sees it come down, move and
@@ -119,11 +119,16 @@ int np_tap(void *ctx, void *event) {
     if (type == EVT_POINTER_UP_BEFORE && k && near && !npt.held && npt_at(x, y) == k &&
         np_goto(k != NPT_ARTIST, 0) && !npt.timer)
         npt.timer = timer_add(npt_go, (void *)(long)k, 0);
-    /* a swipe up on the art's page, more up than across: Up Next (navigation.c np_queue) */
+    /* a swipe up that came down on the art's page (the slide_view, above the bar), more up than
+     * across: Up Next (navigation.c np_queue). Never from the times or the state row under
+     * it: a tap on Radio that rolls up as it lifts is no swipe (the user's, 2026-11-18). */
     int up = npt.y - y, across = x > npt.x ? x - npt.x : npt.x - x;
     if (type == EVT_POINTER_UP_BEFORE && up >= SWIPE_UP_PX && 2 * across < up && st.np_slide &&
-        !st.np_full && !widget_get_prop_int(st.np_slide, "value", 0))
+        !st.np_full && !widget_get_prop_int(st.np_slide, "value", 0) &&
+        np_hit(st.np_slide, npt.x, npt.y))
         timer_add(np_queue, (void *)0, 0);
+    /* a tap past the state row's target, in its outer buttons' corners (np_bar.c np_corner_tap) */
+    if (type == EVT_POINTER_UP_BEFORE && near) np_corner_tap(npt.x, npt.y, x, y);
     return 0;
 }
 
