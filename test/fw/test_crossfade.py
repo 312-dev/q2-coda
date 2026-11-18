@@ -12,7 +12,10 @@ from test_misc import Xf  # test_misc.py keeps the mirror
 XFADE, PRESS, SWAP = '/tmp/q2xfade', '/tmp/q2press', '/tmp/q2swap'
 XF_STOPS = 16  # peq.h: the fade's ms in the low bits, the count of stops above, as the filter reads them
 LOCAL, LIBRARY, DLNA, ONLINE = 1, 0xf001, 2, 0xf1
-PAGE, BELOW, WM = 0x7000, 0x6000, 0x9000
+# PAGE is real, zeroed memory: slider_page.c reads the window's own fields (its y, 0: a full-bleed window at the
+# screen's top); its widgets' handles (PAGE + 0x100 on) fall inside it. BELOW and WM are only compared.
+_PAGE_MEM = (C.c_char * 0x1000)()
+PAGE, BELOW, WM = C.addressof(_PAGE_MEM), 0x6000, 0x9000
 CLICK, CHANGING, CHANGED, DESTROY = O['EVT_CLICK'], O['EVT_VALUE_CHANGING'], O['EVT_VALUE_CHANGED'], O['EVT_DESTROY']
 CENTER, NEXT, PREV = O['KEY_CENTER'], O['KEY_NEXT'], O['KEY_PREV']
 HANDLER = C.CFUNCTYPE(C.c_int, C.c_long, C.c_long)  # an AWTK event handler: (ctx, event)

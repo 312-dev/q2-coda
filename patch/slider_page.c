@@ -112,8 +112,9 @@ void slider_page_open(void *win, void *s, unsigned kind) {
 /* The switch row of page, when it is this page: its hidden switch's image change repaints
  * nothing (crossfade.c's switch). */
 void slider_page_dirty(void *page) {
-    rect_t row = { 0, page ? bar_foot(page) : 0, 375, SP_ROW };
-    if (page && page == slider_page_win) widget_invalidate_force(page, &row);
+    if (!page || page != slider_page_win) return;
+    rect_t row = { 0, bar_foot(page), 375, SP_ROW };
+    widget_invalidate_force(page, &row);
 }
 
 /* A pill (a rounded rectangle whose radius is half its height) on vg. */

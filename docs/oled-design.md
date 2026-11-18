@@ -666,14 +666,15 @@ row gone; while a swipe moves it, it slides in the pages' column. Nothing on it 
 
 | Element    | Position (x, y) and size                    | Notes                                                                                   |
 | ---------- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Title      | centred, line top 46                        | Inter Medium 19 px (AWTK 23), Text Primary, one line, an ellipsis when long              |
+| Title      | centred, line top 64                        | Inter Medium 19 px (AWTK 23), Text Primary, one line, an ellipsis when long              |
 | Artist     | centred, 3 px under the title               | Inter 15 px (AWTK 18), Text Secondary                                                    |
 | Stars      | five 44 px, 14 px apart, centred, top 128   | Phosphor `star-fill` in Text Primary up to the rating, `star` outlines at 30% for the rest |
 | Target     | 52 px (1.18 times) on its star's centre      | the wheel's: filled if within the rating, else a full Text Primary outline              |
 | Page dots  | 6 px, 7 px apart, centred, top 292          | one a page, this one Text Primary, the others at 30%                                    |
 
 No words under the stars, no hint, no progress bar, and no colour but the glow's. The page is [full-bleed](#full-bleed):
-the glow runs to the screen's top edge under the status row, and the title stands on the mock-up's own row, 46.
+the glow runs to the screen's top edge under the status row. The mock-up has the title at 46; it stays at 64, on Now
+Playing's own title line.
 
 - **Rating** is 0 to 5 whole stars (Subsonic's `setRating` is 0 to 5), apart from the like: the heart on the
   art's page sets no stars and five stars like nothing. This page is the one place to rate (the user, 2026-11-18:
@@ -966,8 +967,8 @@ own.
 
 - **Form:** the [busy spinner](#empty-and-offline)'s, a 64 px `#1C1C1E` square with 12 px corners and eight 7 px dots
   15 px out (11 on the diagonals), the lit one a step clockwise every 100 ms and each before it dimmer, in every theme.
-- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. The page's window is the
-  whole screen ([full-bleed](#full-bleed)), so its rows are the screen's.
+- **Place:** centered on the whole screen, status row included: x 155 to 219, y 128 to 192. A window under the status
+  row places it by its screen y, so it is never centered on the room under the bar.
 - **The page beneath** stays in sight, undimmed, with its status row and its selection: the overlay asks nothing, and
   the 50% scrim is the [confirmation card](#confirmation-card)'s, for a question.
 - **While it loads** Return, or a tap anywhere off the spinner, cancels: the page stays as it was and the answer, when it

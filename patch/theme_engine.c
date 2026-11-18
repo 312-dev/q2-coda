@@ -125,7 +125,9 @@ int client_h(void) { return 320 - geom_val(V_BAR); }
 /* A page the payload builds (coverflow.c page_open, the shuffle confirmation): every normal window
  * takes the whole screen (tools/build.py FULL_BLEED), and these lay their children out from the
  * status row's foot, so each goes back under the row, its box set once as the window manager sets
- * a window's (docs/oled-design.md#full-bleed). The bar fills black over a window placed so. */
+ * a window's (docs/oled-design.md#full-bleed). The bar fills black over a window placed so.
+ * ponytail: these pages are not full-bleed yet; lifting it means laying each page_open caller and
+ * the confirmation out from bar_foot (as slider_page.c does), then dropping this call. */
 void client_window(void *w) {
     if (w) widget_move_resize(w, 0, geom_val(V_BAR), 375, client_h());
 }

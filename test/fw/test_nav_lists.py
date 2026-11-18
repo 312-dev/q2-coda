@@ -181,6 +181,7 @@ class Ui:
 
 
 ROW_H, VIEW_H = 30, 240
+BAR = 58  # OLED's status row: a full-bleed page's content starts at its foot
 
 
 def scroll_list(ui, parent, titles, box=(0, 0, 375, VIEW_H), subtitles=None):
@@ -198,11 +199,12 @@ def scroll_list(ui, parent, titles, box=(0, 0, 375, VIEW_H), subtitles=None):
 
 
 class Page:
-    """A list page on top: its window, a scroll_list of titles and the view's offset."""
+    """A list page on top: its window, a scroll_list of titles and the view's offset. The window is the whole
+    screen and the list starts under the status row, as a built page's does (docs/oled-design.md#full-bleed)."""
     def __init__(self, ui, titles, name='allmusic_page', height=VIEW_H, subtitles=None, top=True):
         self.ui = ui
-        self.win = ui.widget('window', ui.wm, (0, 30, 375, 290), name=name)
-        self.view = scroll_list(ui, self.win, titles, (0, 0, 375, height), subtitles)
+        self.win = ui.widget('window', ui.wm, (0, 0, 375, 320), name=name)
+        self.view = scroll_list(ui, self.win, titles, (0, BAR, 375, height), subtitles)
         self.rows = self.view.children[:]
         if top:
             ui.top = self.win
@@ -898,11 +900,12 @@ def test_usb_modes_scan_prompt_takes_the_wheel_once_the_cable_is_out(fw, ui, cab
 # A virtual table: a pool of row widgets rebound to the rows in view.
 class Table:
     """A table_client of n logical rows ROW_H high on page name, drawn by a pool of table_rows that its
-    offset setter rebinds (ROW_INDEX each, -1 past the end)."""
+    offset setter rebinds (ROW_INDEX each, -1 past the end). Full-bleed, as Page's: the window is the screen, the
+    client under the status row."""
     def __init__(self, fw, ui, n, pool=10, name='allmusic_page'):
         self.ui, self.n, self.names = ui, n, titles(n)
-        self.win = ui.widget('window', ui.wm, (0, 30, 375, 290), name=name)
-        self.client = self.view = ui.widget('table_client', self.win, (0, 0, 375, VIEW_H))
+        self.win = ui.widget('window', ui.wm, (0, 0, 375, 320), name=name)
+        self.client = self.view = ui.widget('table_client', self.win, (0, BAR, 375, VIEW_H))
         self.client.int(O['ROW_HEIGHT'], ROW_H)
         self.client.int(O['TABLE_ROWS'], n)
         self.pool = []
@@ -968,11 +971,11 @@ def test_a_virtual_table_recalls_its_logical_row(fw, ui):
     assert again.selected == 40 and scrolled and 0 <= ROW_H * 40 - scrolled[-1] <= VIEW_H - ROW_H
 
 
-@pytest.mark.parametrize('finger, top', [(-90, 0), (0, 0), (ROW_H * 30, ROW_H * 30), (ROW_H * 200, ROW_H * 100 - VIEW_H)])
+@pytest.mark.parametrize('finger, top', [(-90, 0), (0, 0), (ROW_H * 30, ROW_H * 30), (ROW_H * 200, ROW_H * 100 - (282 - BAR))])
 def test_a_drag_on_a_virtual_table_stops_at_its_ends(fw, ui, finger, top):
     """TABLE_DRAG_CALL: table_client's pointer move hands its unbounded offset to ringnav_table_drag, which keeps it
-    from the first row's top to the end its release scrolls to (the rows less the client's height): nothing springs
-    back."""
+    from the first row's top to the end its release scrolls to (the rows less the client's height, cut at the set's list
+    end, y 282 on the screen): nothing springs back."""
     table = Table(fw, ui, 100)
     paint(fw, table)
     drag = fw.fn('ringnav_table_drag', C.c_int, C.c_void_p, C.c_int)
@@ -985,12 +988,12 @@ def test_a_drag_on_a_tall_virtual_table_stops_on_the_list_end(fw, ui):
     where the wheel ends, the last row's foot on y 282, not the box's foot (a drag to the end stopped near y 316, in
     the rounded corners)."""
     table = Table(fw, ui, 100)
-    table.client.int(O['W_H'], 294)  # the page's box runs to the screen's foot: y 30 + 294
+    table.client.int(O['W_H'], 320 - BAR)  # the page's box runs to the screen's foot
     paint(fw, table)
     drag = fw.fn('ringnav_table_drag', C.c_int, C.c_void_p, C.c_int)
     drag(table.client.at, ROW_H * 200)
     top = table.client.int(O['TABLE_TOP'])
-    assert 30 + ROW_H * 100 - top == 282
+    assert BAR + ROW_H * 100 - top == 282
 
 
 def test_a_fling_on_a_tall_virtual_table_clamps_to_the_list_end_not_the_boxs_foot(fw, ui):
@@ -998,7 +1001,7 @@ def test_a_fling_on_a_tall_virtual_table_clamps_to_the_list_end_not_the_boxs_foo
     to the rows less the client's height (the box's foot). ringnav_table_scroll runs it with the height cut at the
     set's list end (y 282), so the fling ends with the last row's foot there, and puts the height back."""
     table = Table(fw, ui, 100)
-    table.client.int(O['W_H'], 294)
+    table.client.int(O['W_H'], 320 - BAR)
     seen = []
 
     def stock(w, top, ms, *_):  # stock's clamp: the rows less the client's height now
@@ -1006,7 +1009,7 @@ def test_a_fling_on_a_tall_virtual_table_clamps_to_the_list_end_not_the_boxs_foo
         return 0
     fw.mock('table_client_scroll_to', stock)
     fw.fn('ringnav_table_scroll', C.c_int, C.c_void_p, C.c_int, C.c_int)(table.client.at, ROW_H * 200, 300)
-    assert 30 + ROW_H * 100 - seen[0] == 282 and table.client.int(O['W_H']) == 294
+    assert BAR + ROW_H * 100 - seen[0] == 282 and table.client.int(O['W_H']) == 320 - BAR
 
 
 def test_a_list_takes_no_overscroll_once_bound(fw, ui):
@@ -1293,7 +1296,7 @@ def test_a_sideways_or_upward_drag_is_left_to_the_list(fw, ui, dx, dy):
     assert not searches(fw) and page.view.props.get(b'_pull_suppress') == 0
 
 
-@pytest.mark.parametrize('y, scrolled', [(O['QUICK_EDGE_PX'] - 1, 0), (100, ROW_H), (30 + VIEW_H + 5, 0)])
+@pytest.mark.parametrize('y, scrolled', [(O['QUICK_EDGE_PX'] - 1, 0), (100, ROW_H), (BAR + VIEW_H + 5, 0)])
 def test_a_touch_at_the_top_edge_below_the_list_or_on_a_scrolled_list_starts_no_pull(fw, ui, y, scrolled):
     page = Page(ui, titles(20), name='localmusic_page')
     page.scroll(scrolled)
