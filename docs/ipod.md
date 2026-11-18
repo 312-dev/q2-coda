@@ -1142,8 +1142,17 @@ painted it white, which drew the box at rest.
   cell per 19 px as the finger goes (to the left the later characters), popping each as the wheel does, as one
   turn, and types nothing; a tap on a character pops it and types it at the cursor, a tap on the switcher cycles
   the set and a tap on the return key submits; a tap on a tab opens it, a tap on a result opens or plays it, and a
-  drag up or down the results scrolls them a row per 32 px. Each tick along the strip clicks as a list's row change
-  does, and Center, Next, Previous and Return click as a button does, through the Clicker setting.
+  drag up or down the results scrolls them a row per 32 px. In the text, in every form a text takes (the query
+  line, a row, a cell, a field), a tap puts the cursor at the nearest character boundary and gives the wheel back
+  to the strip; held 250 ms, or moved, the finger brings up a loupe as an iPhone's does: a 104 by 46 px lens with
+  14 px corners and a `#6E6E6E` line, its foot 10 px over the text's top and kept 4 px inside the screen (over the
+  status row on Search), showing the text around the cursor at 1.6 times, drawn by the same text renderer, with a
+  steady cursor in its middle; it grows in from half its size over 100 ms (at once under Reduce Motion) and the
+  cursor follows the finger. Held within 10 px of an edge that cuts the text, the finger nudges it a character
+  every 150 ms until that end is in view. Letting go leaves the cursor there. A name typed elsewhere (a
+  playlist's, a Bluetooth name) may hold any character: the cursor steps, erases and lands on whole ones. Each
+  tick along the strip clicks as a list's row change does, and Center, Next, Previous and Return click as a button
+  does, through the Clicker setting.
 - <a id="name-strip"></a>**Naming a playlist.** New Playlist (stock's add-playlist dialog's place: Cover Flow's
   playlists' hold menu, the Add to Playlist picker's New Playlist… row; `playlist_new_open`) and a playlist's Rename
   (`playlist_rename_open`, prefilled with the name, the cursor at its end) are the same strip, opening on abc, and
