@@ -134,8 +134,9 @@ static void card_tags(char *id3, const char *path) {
         return;
     rec_file_tags(r, id3, path);
 }
-/* A card app's stream download as a playlist session queues it (addon.c m3u_songs), or the song a
- * Next waits for (addon_next_waits): the record's title, artist and album before it plays, so Up
+/* A card app's stream download as a playlist session queues it (addon.c m3u_songs), the song a
+ * Next waits for (addon_next_waits), or a saved queue's song restored at boot from its folder's
+ * listing (playback.c ringnav_memory): the record's title, artist and album before it plays, so Up
  * Next and Now Playing name it as its tags do, not by its file's name (q2-subsonic's is the title
  * in lower case and the server's id: the device, 2026-11-17, a radio's Up Next). The server row's
  * tags when the catalogue knows the download (catalogue_copy_tags: no file read, and a file not

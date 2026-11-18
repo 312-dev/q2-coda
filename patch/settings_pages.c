@@ -232,7 +232,8 @@ const unsigned *const reduce_motion_caption = W("Fades in place of slides, zooms
 /* Captioned row i's grown height, its caption measured. */
 static int cap_full(int i) { return CAP_TOP + cap.lines[i] * CAP_LINE + CAP_FOOT; }
 /* The heights for the change's progress, the list laid out again, and the grown row kept in view,
- * the view moved by whole rows so the others stay on the list's grid. */
+ * the view moved by whole rows so the others stay on the list's grid and the grown row's foot on or
+ * above the list end (nav/lists.c list_shown_h). */
 static int cap_step(const void *unused) {
     unsigned t = (unsigned)time_now_ms() - cap.at, ms = (unsigned)motion_ms(CAP_MS, MO_SPATIAL);
     int k = t >= ms ? 256 : motion_ease((int)(t * 1000 / ms), EASE_QUAD_OUT) * 256 / 1000;
@@ -247,8 +248,8 @@ static int cap_step(const void *unused) {
     void *list = P(cap.view, W_PARENT);
     if (list) widget_layout(list);
     void *o = cap.open;
-    if (o) { /* its foot in sight: the view scrolls by whole rows, as far as it overruns */
-        int over = I(o, W_Y) + I(o, W_H) - I(cap.view, SCROLL_Y) - I(cap.view, W_H);
+    if (o) { /* its foot in sight, on or above the list end: the view scrolls by whole rows */
+        int over = I(o, W_Y) + I(o, W_H) - I(cap.view, SCROLL_Y) - list_shown_h(cap.view);
         if (over > 0)
             scroll_view_set_offset(cap.view, I(cap.view, SCROLL_X),
                                    I(cap.view, SCROLL_Y) + (over + CAP_TOP - 1) / CAP_TOP * CAP_TOP);
