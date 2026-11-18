@@ -245,6 +245,7 @@ demo	0x4c4234	0x64	btmenu_page_on_foreground	Page handler for window to foregrou
 demo	0x4c4298	0x10c	btmenu_setting_row_on_click	Bluetooth head row click by row index: 0 switches Bluetooth and rebuilds, 2 btquality_page, 3 btadjustvol_page, 4 starts a search; while bt_initstatus is non-zero calls a busy helper.
 demo	0x4c43a4	0x36c	btmenu_item_on_click	Click on a Bluetooth device row: checks link state, finds the device by row index and connects or reports an error toast.
 demo	0x4c4710	0x1b8	btmenu_page_on_timer	Bluetooth page 200 ms timer: clears refresh flags, rebuilds the list when asked, and counts down the search-icon animation, updating the icon; keeps repeating.
+demo	0x4c54f4	0x2ac	btquality_item_on_click	Quality's choice click by row index: a new choice with a headset linked (bt_linkstatus, bt_showcoding) asks msg_btreconnect, stops the player, clears the link state and runs bluetoothLink(2) after switchBtPriority; with none linked it sets the priority and saves BTCODING.
 demo	0x4c617c	0x408	systemset_datetime_row_build	Builds the Date and Time rows (auto sync, manual, 24 hour) with their switch images.
 demo	0x4c6a60	0xdc	systemset_display_page_on_background	Page handler for window to background: removes the page timer kept in the timer_idex prop.
 demo	0x4c6b3c	0x58	systemset_display_page_on_timer	500 ms page timer: when the force-refresh or auto-change flag is set, clears both and refreshes the navbar play gif.
