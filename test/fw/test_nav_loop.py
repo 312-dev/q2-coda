@@ -3438,7 +3438,7 @@ class Wait:
             if self.during:
                 self.during()
             return 0
-        fw.mock('cf_syscall', syscall)
+        fw.mock('lw_syscall', syscall)
         fw.mock('timer_manager', lambda *_: self.tm)
         fw.mock('widget_animator_manager', lambda *_: self.am)
         fw.mock('widget_get_native_window', lambda w, *_: self.nw if w == loop.page.p else 0)  # a window's, not the wm's
@@ -3511,7 +3511,7 @@ def test_without_an_eventfd_the_loop_sleeps_as_before(fw, stock_bytes):
     loop = Loop(fw, stock_bytes)
     wait = Wait(fw, loop)
     wait.timer(1000, 0)
-    fw.mock('cf_syscall', lambda *_: -1)
+    fw.mock('lw_syscall', lambda *_: -1)
     assert loop() == [O['IDLE_SLEEP_MS']] and wait.polls == []
 
 

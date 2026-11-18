@@ -13,7 +13,16 @@
 #define SYS_POLL 4188
 #define EFD_FLAGS (0x80 | 0x80000) /* EFD_NONBLOCK | EFD_CLOEXEC: O_NONBLOCK, O_CLOEXEC on MIPS */
 
-extern int cf_syscall(int nr, int a, int b, int c); /* coverflow_loader.c */
+/* The o32 syscall nr(a, b, c): its result, or -1 when the kernel reports an error ($a3). A name of
+ * its own, not coverflow_loader.c's, so test/patch.py's machine can answer the loop's alone. */
+#ifndef PEQ_HOST
+__asm__(".globl lw_syscall\nlw_syscall:\n.set push\n.set noreorder\nmove $v0, $a0\nmove $a0, $a1\n"
+        "move $a1, $a2\nmove $a2, $a3\nsyscall\nbnez $a3, 1f\nnop\njr $ra\nnop\n1:\njr $ra\n"
+        "li $v0, -1\n.set pop\n");
+extern int lw_syscall(int nr, int a, int b, int c);
+#else
+__attribute__((weak)) int lw_syscall(int nr, int a, int b, int c) { return -1; }
+#endif
 
 static struct {
     volatile int fd;      /* the eventfd, plus one; 0 not made yet, -1 refused */
@@ -41,7 +50,7 @@ void loop_wake_touch(void) {
  * either. */
 static int lw_fd(void) {
     if (!lw.fd) {
-        int fd = cf_syscall(SYS_EVENTFD2, 0, EFD_FLAGS, 0);
+        int fd = lw_syscall(SYS_EVENTFD2, 0, EFD_FLAGS, 0);
         lw.fd = fd > 0 ? fd + 1 : -1;
     }
     return lw.fd > 0 ? lw.fd - 1 : -1;
@@ -107,7 +116,7 @@ void loop_wait(unsigned ms) {
     } p = { fd, 1 /* POLLIN */, 0 };
     lw.waiting = 1;
     __sync_synchronize();
-    if (cf_syscall(SYS_POLL, (int)(long)&p, 1, (int)ms) > 0) {
+    if (lw_syscall(SYS_POLL, (int)(long)&p, 1, (int)ms) > 0) {
         unsigned long long n;
         read(fd, &n, sizeof n); /* nonblocking: the count back to 0 */
     }
