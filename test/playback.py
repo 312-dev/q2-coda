@@ -1938,11 +1938,13 @@ m=guarded(); assert asks(m,'player_seek_start')==1 and m.nothing() and not m.sto
 m.now+=2000; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.seen==7001 and m.at()==7001
 m=guarded(); assert asks(m,'player_change_music',1)==0 and m.nothing() and not m.stock
 m.now+=2000; asks(m,'player_change_music',1); assert m.stock==['xf:change'] and m.seen==7001 and m.at()==7001
-# A pick that starts nothing stamps nothing; one of a short song goes on to stock, where ringnav_load stamps.
+# A pick of the playing file starts nothing and stamps nothing, a short song's too; another song's goes on to stock,
+# where ringnav_load stamps.
 m=guarded(); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
 m.now+=2000; assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
 m=guarded(); m.word(0xa50084,3); q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing()
-m=guarded(); m.held=0; q=m.get(syms['mcl_pdeqplaylist']); asks(m,'player_start',q,0,1,2); assert m.stock==['xf:player_start']
+m=guarded(); m.held=0; q=m.get(syms['mcl_pdeqplaylist']); assert asks(m,'player_start',q,0,1,2)==1 and m.nothing() and not m.stock
+m=guarded(); m.install([('a','/a/a','A',0,0,0,0),('b','/a/b','A',0,0,0,0)],0); q=m.get(syms['mcl_pdeqplaylist']); asks(m,'player_start',q,1,1,2); assert m.stock==['xf:player_start']
 m=guarded(); m.sec=2; asks(m,'player_seek_start'); assert m.stock==['xf:seek_start'] and m.nothing()
 # An earlier stamp stands through a refusal: the press it was for, not this one.
 m=guarded(); m.held=0; asks(m,'player_change_music',1); assert m.at()==5001; m.held=1; m.now=9000; asks(m,'player_seek_start'); assert m.at()==5001
@@ -1996,6 +1998,6 @@ m.now+=2000; asks(m,'player_change_music',1); assert m.at()==7001 and m.stock==[
 m.handlers[syms['player_change_music']]='xf:none'; m.advance_song(1); assert m.at()==0 and m.get(ps['press_natural'])==0
 m=guarded(StartMachine); assert asks(m,'player_seek_start')==1; m.now+=2000; asks(m,'player_seek_start'); assert m.at()==7001 and m.site()==STOCK and m.at()==7001
 m.advance_song(1); assert m.at()==0
-m=guarded(StartMachine); m.word(ps['press_natural'],2); m.site(); m.word(ps['press_natural'],0); m.held=0; asks(m,'player_start',m.get(syms['mcl_pdeqplaylist']),0,1,2)
-assert m.stock==['xf:player_start'] and m.site()==STOCK and m.at()==0  # a real pick's start mutes, and clears the mark it isn't for
+m=guarded(StartMachine); m.install([('a','/a/a','A',0,0,0,0),('b','/a/b','A',0,0,0,0)],0); m.word(ps['press_natural'],2); m.site(); m.word(ps['press_natural'],0); asks(m,'player_start',m.get(syms['mcl_pdeqplaylist']),1,1,2)
+assert m.stock==['xf:player_start'] and m.site()==STOCK and m.at()==0  # another song's pick starts: it mutes, and clears the mark it isn't for
 print('Start: a natural start on the jack skips demo\'s mute and sleep and marks the word; everything else keeps stock\'s')

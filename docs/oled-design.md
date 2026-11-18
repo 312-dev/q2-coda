@@ -517,7 +517,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
 - **The playing song's row**, as the user approved from its mock-up on 2026-11-18 ("B. A where constrained"),
   in every song list (Songs and a genre's, an artist's, an album's tracks and Cover Flow's, Folder view, a playlist's
   songs, Search's results, Most Played, Long Songs, the Ratings lists, the card's songs; Up Next already heads with
-  it): the song playing or paused, known by its path and CUE start (a server song by its row, the copy playing it
+  it): the song playing or paused, known by its path and CUE track (a server song by its row, the copy playing it
   mapped back), never its title. Its title is Accent Blue, and four bars stand on the right: Up Next's level bars'
   shape (3 px wide, 4.5 px apart), 8, 12, 5 and 10 px high, centred on the row, Accent Blue, still (no list repaints
   for them). **B:** where the row has a length, the bars stand SONG_COL_GAP (12 px) before it and the title ends 12 px

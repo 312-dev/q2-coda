@@ -26,7 +26,7 @@ extern void *coverflow_tracks(void *page);
 /* The playing song's row (docs/oled-design.md#song-rows): in every song list, the song playing or
  * paused has its title in the accent and four bars on the right, beside its length (B) or, where
  * the title would keep less than PLAY_TITLE_MIN px beside both or the row has no length, in the
- * length's place (A); white on the selection. The song is known by its record's path and CUE start
+ * length's place (A); white on the selection. The song is known by its record's path and CUE track
  * (a server row by its fileurl, which the Stream Cache copy playing it maps back to,
  * catalogue_row_path), never by its title. The bars are Up Next's level bars' shape (ui_kit.h
  * lvl_fill, 3 px wide, 4.5 px apart, 5 to 12 px), four of them, still: a list repaints nothing for
@@ -44,13 +44,17 @@ static const unsigned char play_heights[PLAY_BARS] = { 8, 12, 5, 10 };
 #define PLAY_MARK "_np_title"
 static void *play_titles[PLAY_TITLES] __attribute__((section(".scratch")));
 
-static unsigned song_key(const char *path, int cue) {
+static unsigned song_key(const char *path, int start, int end) {
     if (!path || !*path) return 0;
     unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)path, strlen(path));
-    return ((h ^ (unsigned)cue) * 16777619u) | 1;
+    h = (h ^ (unsigned)start) * 16777619u;
+    return ((h ^ (unsigned)end) * 16777619u) | 1;
 }
-/* r's identity for song_playing: 0 for a record with no path */
-unsigned song_identity(void *r) { return r ? song_key(P(r, REC_PATH), I(r, REC_CUE_START)) : 0; }
+/* r's identity for song_playing: its path and CUE track (start and end: a chapter row is another
+ * track than its file played whole); 0 for a record with no path */
+unsigned song_identity(void *r) {
+    return r ? song_key(P(r, REC_PATH), I(r, REC_CUE_START), I(r, REC_CUE_END)) : 0;
+}
 /* Whether r is the song playing or paused (nothing is while stopped), by its identity. */
 int song_playing(void *r) {
     unsigned k = song_identity(r), at, n;
@@ -58,7 +62,7 @@ int song_playing(void *r) {
     if (!now) return 0;
     if (k == song_identity(now)) return 1;
     const char *row = catalogue_row_path(now); /* a Stream Cache copy: its server row's */
-    return row && k == song_key(row, 0);
+    return row && k == song_key(row, 0, 0);
 }
 /* label as the playing song's title or not; 1 when that changed (a label painted already repaints)
  */
@@ -120,7 +124,7 @@ static int marked_playing(void *item) {
     void *now = k && mclGetPlayStatus() != 1 ? queue_now(&at, &n) : (void *)0;
     if (!now) return 0;
     const char *row = catalogue_row_path(now);
-    return k == song_identity(now) || (row && k == song_key(row, 0));
+    return k == song_identity(now) || (row && k == song_key(row, 0, 0));
 }
 /* A marked row, after it paints: while its song plays, the bars on its right column (their ink's
  * last px on column), its title (child 0) in the accent and ending SONG_COL_GAP and reserve px (the

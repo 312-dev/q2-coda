@@ -1263,7 +1263,7 @@ void playback_np(void) {
 #define PAGE_PICK_RET 0x53e514  /* playing_page_init, which opens Now Playing itself */
 #define ALBUM_PLAY_RET 0x4a97c0 /* the album page's play (0x4a96c0), which stays on its page */
 #define ALBUMINFO_PLAY_RET 0x4ac008 /* a song list's Play All (localmusic_songs_play_all) */
-/* A pick of the song playing or paused (song_rows.c song_playing: its path and CUE start, a server
+/* A pick of the song playing or paused (song_rows.c song_playing: its path and CUE track, a server
  * row by its fileurl) never loads it again, from any row of any list (the user's report: a tap on
  * the playing song's row restarted it; docs/oled-design.md#song-rows): the same row of the same
  * list changes nothing, another list's of the same class (a queue's class is stock's: a folder's,
@@ -1272,7 +1272,7 @@ void playback_np(void) {
  * the list (the firmware plays none after it). A page that stays (an album's play, Play All) opens
  * Now Playing; Now Playing's own pick plays a paused song on. SyncLink's (0x5264c4, 0x5266b4), off
  * the UI thread, stays silent. Not a press: an app's .play (press_natural), Shuffle Albums' load,
- * DLNA and online, which stock loads. */
+ * DLNA and online, nor a local list over a DLNA or online queue, which stock loads. */
 static int has_server_row(void *q) {
     for (unsigned i = 0, n = deque_size(q); i < n; ++i)
         if (catalogue_path(P(deque_at(q, i), REC_PATH))) return 1;
@@ -1281,7 +1281,8 @@ static int has_server_row(void *q) {
 int ringnav_player_start(void *q, int at, int cls, int mode) {
     void *from = __builtin_return_address(0);
     void *r = q && at >= 0 && (unsigned)at < deque_size(q) ? deque_at(q, (unsigned)at) : (void *)0;
-    if (!press_natural && !s.grouping && local_class(cls) && r && song_playing(r)) {
+    if (!press_natural && !s.grouping && local_class(cls) && local_class(M(MCL_TYPE)) && r &&
+        song_playing(r)) {
         int same = queue() && at == M(MCL_POS) && deque_size(q) == deque_size(queue()) &&
                    cls == M(MCL_TYPE);
         if (!same && cls == M(MCL_TYPE) && !has_server_row(q)) {

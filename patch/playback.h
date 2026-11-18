@@ -21,7 +21,7 @@ int playback_next_move(unsigned from, unsigned to); /* Playing Next's entry from
 int playback_next_clear(void); /* Up Next's Clear: Playing Next's tracks leave the queue */
 /* A radio of the song playing: the queue becomes that song then add's, with no load (1) */
 int playback_queue_rest(void *add);
-/* song_rows.c: r is the song playing or paused, by its path and CUE start (a server row by its
+/* song_rows.c: r is the song playing or paused, by its path and CUE track (a server row by its
  * fileurl); nothing is while stopped (docs/oled-design.md#song-rows) */
 int song_playing(void *r);
 /* song_radio.c: a playlist session's first entry is the song playing, its app's radio of it (1) */
