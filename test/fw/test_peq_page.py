@@ -417,14 +417,6 @@ def scratch(library):
     return host.offsets(library.parent/'navigation.o', 'scratch_t')
 
 
-@pytest.fixture(autouse=True)
-def oled_set(fw, scratch):
-    """OLED's geometry set, as theme_boot leaves st.geom on the device (a zeroed st is SET0's, with no list_end)."""
-    st = C.addressof(fw.var('st', C.c_char))
-    sets = host.tools_theme.geometry_sets(host.tools_theme.builtins())
-    C.c_int.from_address(st + scratch['geom']).value = [g.name for g in sets].index('oled')
-
-
 def page(fw, s=None, files=None, values=None):
     card = Card(fw, {ACTIVE: saved(s if s is not None else state(fw)), **(files or {})})
     return Page(fw, card, values)
@@ -839,7 +831,7 @@ def test_a_render_lets_t9_go_before_replacing_its_edit(fw):
 
 @pytest.mark.parametrize('pick', (None, 'Balance'))
 def test_a_scrolling_list_runs_on_to_the_page_s_foot(fw, pick):
-    """Under a list_fit set (OLED's) Advanced's list and a picker's run from under the tab bar on to the page's foot,
+    """Under OLED's grid Advanced's list and a picker's run from under the tab bar on to the page's foot,
     so their rows past the list end peek through its fade (navigation.c list_fade) as every list's do, rather than
     stopping on a whole row above it over a black band."""
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
@@ -1671,8 +1663,7 @@ def test_a_notch_s_q_goes_to_30_and_back_to_10_for_another_type(fw):
     assert p.ui.draft.bands[0].q == 10 and 'Gain +6.0 dB' in p.captions()  # the gain it had, kept
 
 
-def test_under_a_modal_set_type_opens_the_inset_modal_s_picker(fw):
-    assert fw.fn('modal_set', C.c_int)()
+def test_type_opens_the_inset_modal_s_picker(fw):
     p = page(fw, state(fw, EQ_PEQ, peq=peak(fw, 6))).advanced()
     p.click('1  ')
     p.click('Type')

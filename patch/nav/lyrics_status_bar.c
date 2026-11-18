@@ -146,9 +146,7 @@ static void clock_show(void) {
                             (unsigned)!!st.bar_title << 12 /* it changes the 12-hour form below */
                       : ~0u;                               /* 0 before the first */
     void *bar = *(void *const *)system_bar;
-    void *label = key == st.clock_key || !bar || (st.bar_titled && !geom_val(V_STATUS_Y))
-                      ? (void *)0
-                      : widget_lookup(bar, "label_clock", 1);
+    void *label = key == st.clock_key || !bar ? (void *)0 : widget_lookup(bar, "label_clock", 1);
     if (!label) return;
     st.clock_key = key;
     char s[16] = "--:--";
@@ -160,8 +158,8 @@ static void clock_show(void) {
         tk_snprintf(s, sizeof s, "%d:%02d %s", (tm[2] + 11) % 12 + 1, tm[1],
                     tm[2] < 12 ? "AM" : "PM");
     widget_set_text_utf8(label, s);
-    /* a status row's clock: the title's face, in its place */
-    if (geom_val(V_STATUS_Y)) theme_font(label, ROLE_BAR, FONT_ROW);
+    /* the status row's clock: the title's face, in its place */
+    theme_font(label, ROLE_BAR, FONT_ROW);
 }
 static void clock_zone(void) {
     if (st.clock_timer) clock_show(); /* the bar runs; boot's call comes before it */
@@ -280,7 +278,7 @@ static void clock_place(void *bar, void *top) {
     static int ink, widest, set_color; /* set_color: the colour written last, compared in place of
                                         * a read-back of the style's current state */
     void *canvas = st.bar_title ? widget_get_canvas(st.bar_title) : (void *)0;
-    if (!geom_val(V_STATUS_Y) || !st.bar_slot || !canvas) return;
+    if (!st.bar_slot || !canvas) return;
     if (!clock) {
         if (!(clock = widget_lookup(bar, "label_clock", 1))) return;
         ink = style_get_int(P(clock, W_ASTYLE), "text_color", (int)RGBA(RGB_SECONDARY));
@@ -313,18 +311,23 @@ static int bar_charging(void) {
     return icon && !tk_strcmp(icon, "bar_charge") && !usb_charge_held();
 }
 /* The battery view_battery shows, as a BATT_KEY_* key: the level from label_battery's "88%" (stock
- * zeroes progress_battery while charging), then what the cable does, as stock picks the icon
- * (bar_charge whenever one is in): too weak to charge (charge_weak), full (g_power_chargestate 2)
- * or held at Charge Limit, else charging (bar_charging); and low (bar_lowcharge, or under 15% on a
- * cable that charges nothing). Reads stock's widgets and bytes, no I/O. */
+ * zeroes progress_battery while charging), then what the cable does: too weak to charge
+ * (charge_weak), full (g_power_chargestate 2) or held at Charge Limit, else charging
+ * (bar_charging); and low (bar_lowcharge, or under 15% on a cable that charges nothing). The cable
+ * is g_usbdet_value, stock's own read of it: stock's icon cannot say it, as systembar_showface
+ * picks bar_charge for a cable only while the charger is not Full (0x541e2c) and the plain icon
+ * over a USB DAC link with its charging Off, so at Full the cable read as out and the battery was
+ * drawn as on battery. A --dev build's STATUS_FAKE "charge=1" is charging, "charge=2" a cable held
+ * full. Reads stock's widgets and bytes, no I/O. */
 static unsigned battery_now(void) {
     const char *icon = widget_get_prop_str(st.bar_icon, "image", "");
     const unsigned *t = widget_get_text(st.bar_pct);
-    int level = 0, charging = bar_charging() || status_fake('c') > 0,
-        cable = icon && !tk_strcmp(icon, "bar_charge");
+    int fake = status_fake('c'), level = 0, charging = bar_charging() || fake == 1,
+        cable = g_usbdet_value == 1 || (icon && !tk_strcmp(icon, "bar_charge")) || fake > 0;
     while (t && *t >= '0' && *t <= '9') level = level * 10 + (int)(*t++ - '0');
     int held = cable && !charging, weak = charging && charge_weak();
-    int full = cable && !weak && (I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
+    int full = cable && !weak &&
+               (fake == 2 || I(g_power_chargestate, 0) == 2 || (held && st.charge_held));
     unsigned key = (unsigned)(level > 100 ? 100 : level) << 4;
     if (weak)
         key |= BATT_KEY_WEAK;
@@ -466,13 +469,6 @@ void clock_text(void *label, int negative, int t) {
     widget_set_text_utf8(label, s);
 }
 
-/* w back in stock's face, in every state the labels style */
-void label_font(void *w) {
-    static const char *const font[] = { "style:normal:font_name", "style:focused:font_name",
-                                        "style:disable:font_name" };
-    for (unsigned i = 0; i < sizeof font / sizeof *font; ++i)
-        widget_set_prop_str(w, font[i], "default");
-}
 /* The faces, by FONT_* (stock.h, from tools/build.py FACES): each one's name, its fallback for a
  * character it lacks and that fallback's px (% of its own), and its cmap's runs, FONT_RANGES from
  * face_at[face] to face_at[face + 1]; stock's default.ttf has none listed, and every character. */

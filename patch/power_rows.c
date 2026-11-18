@@ -1,8 +1,7 @@
 /* General's last two rows, Restart and Shut Down (docs/ipod.md#settings), after a 12 px gap: each
  * asks in stock's confirm (confirminfo_dialog, whatever form the theme gives it; OLED's says the
- * verb, feedback.c asks[]), and Cancel or Return leaves the page as it was. Restart takes the
- * theme change's way (navigation.c restart_confirm): ringnav_reboot, which saves the queue and
- * ends cleanly before stock's device_reboot. Shut Down takes stock's: its power-off page, which
+ * verb, feedback.c asks[]), and Cancel or Return leaves the page as it was. Restart calls
+ * ringnav_reboot, which saves the queue and ends cleanly before stock's device_reboot. Shut Down takes stock's: its power-off page, which
  * the power key's Shut Down? (on_wm_keylong_fun) and its Auto power-off open, and whose
  * into_poweroff saves the queue (playback.c ringnav_savequeue). */
 #include "navigation.h"

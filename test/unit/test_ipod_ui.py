@@ -48,12 +48,12 @@ def test_home_list():
             home_row(2, 'coverflow', {'name': 'label_cover_flow', 'text': 'Cover Flow'})]
     scroll = ['scroll_view', [0, 0, 375, 3 * h],
               {'name': 'scroll_view_home', 'self_layout': 'default(x=0,y=0,w=100%,h=100%)', 'yslidable': 'true'}, rows]
-    assert ipod.home_list('home', ['playing', 'localmusic', 'coverflow'], ipod.SET0, {'visible': 'false'}) == [
+    assert ipod.home_list('home', ['playing', 'localmusic', 'coverflow'], ipod.STOCK_GRID, {'visible': 'false'}) == [
         'list_view', [0, ipod.HOME_TOP, 375, 3 * h], {'name': 'list_view_home', 'item_height': str(h), **CLEAR, 'visible': 'false'}, [scroll]]
 
 
 def test_home_list_settings_rows():
-    view = ipod.home_list('homeset', ['playset', 'sysset'], ipod.SET0)
+    view = ipod.home_list('homeset', ['playset', 'sysset'], ipod.STOCK_GRID)
     assert view[2] == {'name': 'list_view_homeset', 'item_height': str(ipod.HOME_ROW), **CLEAR}
     assert view[3][0][3] == [home_row(0, 'playset', {'name': 'label_playback', 'text': 'Playback'}),
                              home_row(1, 'sysset', {'name': 'label_system', 'text': 'General'})]

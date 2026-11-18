@@ -1183,10 +1183,9 @@ checks+=1
 # UI wiring: stock-style choice menu, selected marker, touch and wheel slider.
 m=PlaybackMachine(); m.top=m.node('window','playing_page'); m.stack=[m.top]; m.word(m.top+O['W_PARENT'],m.wm)
 m.press(100); assert m.hold()==11
-assert m.labels()[-3:]==['Shuffle','Repeat','Group by: Album']
+assert m.labels()[-3:]==['Shuffle','Repeat','Group by']  # the menu sheet's rows: Group by's value (Album) on the right column
 m.pick(m.labels().index('Shuffle')); m.advance(0,clear=False)
 assert m.labels()==['Off','All Songs','Songs in Album','Albums','Albums and Songs']
-assert any(n.get('image')=='select' for n in m.nodes.values())
 m.pick(3); m.advance(0,clear=False); assert m.fn('playback_option',0)==3
 # Grouped by folder, the choices name folders.
 m=PlaybackMachine(); m.options(3,2,1); m.top=m.node('window','playing_page'); m.stack=[m.top]; m.word(m.top+O['W_PARENT'],m.wm)
@@ -1205,7 +1204,8 @@ m.top=m.node('window','display_page',[lst]); m.stack=[m.top]
 for child,parent in ((view,lst),(lst,m.top),(m.top,m.wm)): m.word(child+O['W_PARENT'],parent)
 m.word(ps['display_sub'],3)  # Display's Controls page
 assert m.fn('ringnav_display',m.top,0)==0
-assert [n['text'] for n in m.nodes.values() if 'Wheel Sensitivity' in str(n.get('text'))]==['Wheel Sensitivity: 50%']  # the row, test/patch.py's
+texts=[(n.get('name'),n.get('text')) for n in m.nodes.values() if n.get('text')]  # the row, test/patch.py's: its value on the right column (list_value)
+assert texts[texts.index(('label_wheel','Wheel Sensitivity'))+1]==('_setting_value','50%')
 checks+=1
 
 # Manual Next/Prev at the queue ends runs stock player_change_music through ringnav_change. Stock

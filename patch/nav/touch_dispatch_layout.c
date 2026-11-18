@@ -191,22 +191,19 @@ int ringnav_dispatch(void *target, void *event) {
     return stock_dispatch_trampoline(target, event);
 }
 
-/* Songs' bind found no artist on the record (SONG_UNKNOWN_CALL, tools/build.py). Stock's "Unknown
- * Artist" shows only where a set keeps stock's row; under a set without text-row artwork the
- * two-line row says only what the record says, so the second line stays empty. */
-void ringnav_song_unknown(const char *key, char *text, int size) {
-    if (geom(G_TEXT_ART)) getFormatString(key, text, size);
-}
+/* Songs' bind found no artist on the record (SONG_UNKNOWN_CALL, tools/build.py). Stock would write
+ * "Unknown Artist"; the set has no text-row artwork (text_art 0), so the two-line row says only what
+ * the record says and the second line stays empty. */
+void ringnav_song_unknown(const char *key, char *text, int size) { (void)key, (void)text, (void)size; }
 
-/* Under a set without text-row artwork (text_art 0, as OLED's), a row no taller than the pitch is
- * one line: its leading children (artwork, the playing gif; stock's choice box stays) and the
+/* The set has no text-row artwork (text_art 0): a row no taller than the pitch is one line: its leading children (artwork, the playing gif; stock's choice box stays) and the
  * text's second line hide, and the title, at the set's centred y, takes their width. Stock
  * re-showing one relayouts the row, which hides it again. */
-static int one_line(void *row) { return !geom(G_TEXT_ART) && I(row, W_H) <= geom(G_PITCH); }
-/* Under such a set, a taller row whose leading image stock gave no width (text_art 0, as Songs') is
+static int one_line(void *row) { return I(row, W_H) <= geom(G_PITCH); }
+/* A taller row whose leading image stock gave no width (text_art 0, as Songs') is
  * two lines of text: the same children hide, its second line stays. */
 static int two_lines(void *row) {
-    if (geom(G_TEXT_ART) || I(row, W_H) <= geom(G_PITCH)) return 0;
+    if (I(row, W_H) <= geom(G_PITCH)) return 0;
     for (unsigned i = 0; i < widget_count_children(row); ++i) {
         void *child = widget_get_child(row, i);
         if (!tk_str_start_with(widget_get_prop_str(child, "name", ""), "img_choice"))
@@ -364,10 +361,9 @@ int compact_set_row_layout(void *row, const char *params) {
     return ret;
 }
 
-/* Stock's own table rows (ipod.json stock_row_layout_calls), under a set that re-pitches them. */
+/* Stock's own table rows (ipod.json stock_row_layout_calls), which the set re-pitches. */
 int stock_set_row_layout(void *row, const char *params) {
-    return geom_val(V_STOCK_ROW) < SET_STOCK_ROW ? compact_set_row_layout(row, params)
-                                                 : widget_set_children_layout(row, params);
+    return compact_set_row_layout(row, params);
 }
 
 /* ... whose titles are bound with no relayout (stock_row_text_calls), so the face that has the
@@ -375,12 +371,10 @@ int stock_set_row_layout(void *row, const char *params) {
  * text inset. */
 int stock_row_text(void *label, const char *text) {
     int ret = widget_set_text_utf8(label, text);
-    if (geom_val(V_STOCK_ROW) < SET_STOCK_ROW) {
-        theme_font(label, ROLE_TITLE, FONT_ROW);
-        if (I(label, W_X) == 10) {
-            int x = geom_val(V_TEXT_X) - SET_STOCK_X;
-            widget_move_resize(label, x, 0, I(label, W_W) + 10 - x, I(label, W_H));
-        }
+    theme_font(label, ROLE_TITLE, FONT_ROW);
+    if (I(label, W_X) == 10) {
+        int x = geom_val(V_TEXT_X) - SET_STOCK_X;
+        widget_move_resize(label, x, 0, I(label, W_W) + 10 - x, I(label, W_H));
     }
     return ret;
 }
@@ -388,7 +382,7 @@ int stock_row_text(void *label, const char *text) {
 /* ... whose style stock then picks, after the title on each bind: the playing row's red, which the
  * build turns white for every theme (ipod.json), so a play mark goes before its title: every face
  * a row takes has one (tools/build.py play_mark), so the title keeps the
- * face stock_row_text gave it. It keeps its colour under a set that re-pitches the rows; the style
+ * face stock_row_text gave it. It keeps its colour, as the set re-pitches the rows; the style
  * hook takes it from there, as any stock red. Inline, as the row's font is, and written on each
  * bind, as the rows are reused. */
 int stock_row_style(void *label, const char *style) {
@@ -398,9 +392,7 @@ int stock_row_style(void *label, const char *style) {
         widget_get_text_utf8(label, text + 4, sizeof text - 4);
         widget_set_text_utf8(label, text);
     }
-    if (geom_val(V_STOCK_ROW) < SET_STOCK_ROW)
-        widget_set_prop_int(label, "style:normal:text_color",
-                            (int)RGBA(playing ? STOCK_RED : 0xffffff));
+    widget_set_prop_int(label, "style:normal:text_color", (int)RGBA(playing ? STOCK_RED : 0xffffff));
     return ret;
 }
 
@@ -408,8 +400,7 @@ int stock_row_style(void *label, const char *style) {
  * over the set's rows. Its icon goes and its labels take the row's fonts, each box holding its
  * font and ending before the first button. */
 void stock_more_speed(void *win) {
-    void *first =
-        geom_val(V_STOCK_ROW) < SET_STOCK_ROW ? widget_lookup(win, "img_forward_0", 1) : (void *)0;
+    void *first = widget_lookup(win, "img_forward_0", 1);
     if (!first) return;
     void *button = P(first, W_PARENT), *row = P(button, W_PARENT);
     int x = geom_val(V_TEXT_X) - I(button, W_X), labels = 0;
@@ -430,27 +421,21 @@ void stock_more_speed(void *win) {
 }
 
 /* Settings rows (docs/ipod.md#settings). One stock child in row coordinates: full-height children
- * fill the row and shorter ones keep their centre; the icon shrinks to the set's icon size, or
- * hides at 0; text starts at the corner-safe column; children from SET_RIGHT_SIDE, and wide ones'
+ * fill the row and shorter ones keep their centre; the icon hides (the set's set_icon 0); text starts at the corner-safe column; children from SET_RIGHT_SIDE, and wide ones'
  * right edges, move with the trailing image by `shift`, never past the text margin. */
 /* The settings rows' trailing images' right edge from the row's: the set's right column (a 50 px
- * switch's glyph fills its box), else SET_EDGE. */
-static int set_edge(void) { return geom_val(V_RIGHT_X) ? geom_val(V_RIGHT_X) : SET_EDGE; }
-/* ... and their text's box's left edge: on a set with a right column, the set's text column less
- * hscroll_label's 2 px margin, so the text starts on it as the list's rows do
- * (docs/oled-design.md Spacing), else SET_TEXT_X. */
-static int set_text_x(void) { return geom_val(V_RIGHT_X) ? geom_val(V_TEXT_X) - 2 : SET_TEXT_X; }
+ * switch's glyph fills its box). */
+static int set_edge(void) { return geom_val(V_RIGHT_X); }
+/* ... and their text's box's left edge: the set's text column less hscroll_label's 2 px margin, so
+ * the text starts on it as the list's rows do (docs/oled-design.md Spacing). */
+static int set_text_x(void) { return geom_val(V_TEXT_X) - 2; }
 static void set_child(void *c, int row_w, int row_h, int shift) {
     int x = I(c, W_X), y = I(c, W_Y), w = I(c, W_W), h = I(c, W_H), right = x + w;
-    /* Streaming's rows, taller than the set's, have an icon in a set with none */
-    int stream = row_h == geom_val(V_STREAM_ROW) && row_h != geom_val(V_SET_ROW),
-        icon = stream ? SET_ICON : geom_val(V_SET_ICON),
-        art_x = stream ? theme()->art_x : 0; /* the theme's art columns are Streaming's alone */
     const theme_t *T = theme();
-    /* A set without settings icons: any image leading the row goes, whatever its width (a paired
-     * device's 50 px one), and text after one starts at the text column. A payload picker's mark
-     * (Key Lock's) stays, in the column of stock's own marks. */
-    if (!icon && x < SET_RIGHT_SIDE && !tk_strcmp(widget_get_type(c), "image")) {
+    /* No settings icons: any image leading the row goes, whatever its width (a paired device's
+     * 50 px one), and text after one starts at the text column. A payload picker's mark (Key
+     * Lock's) stays, in the column of stock's own marks. */
+    if (x < SET_RIGHT_SIDE && !tk_strcmp(widget_get_type(c), "image")) {
         const char *image = widget_get_prop_str(c, "image", "");
         if (!tk_strcmp(image, "select") || !tk_strcmp(image, "unselect"))
             widget_move_resize(c, row_w - set_edge() - 50, 0, 50, row_h);
@@ -464,25 +449,14 @@ static void set_child(void *c, int row_w, int row_h, int shift) {
     } else
         y -= (SET_STOCK_BODY - row_h) / 2;
     if (w == SET_STOCK_ICON && !tk_strcmp(widget_get_type(c), "image")) {
-        if (!icon) {
-            widget_set_visible(c, 0, 0);
-            return;
-        }
-        /* the build pre-sizes the audited icons to SET_ICON, so they draw 1:1; any other one scales
-         * down */
-        image_set_draw_type(c, IMAGE_DRAW_SCALE_DOWN);
-        /* a theme's art rows' columns: its cover's, and its text's less hscroll_label's margin */
-        widget_move_resize(c, art_x ? art_x : SET_ICON_X, (row_h - icon) / 2, icon, icon);
+        widget_set_visible(c, 0, 0);
         return;
     }
-    int left = x >= SET_RIGHT_SIDE ? SET_STOCK_X + x + shift
+    int left = x >= SET_RIGHT_SIDE                ? SET_STOCK_X + x + shift
                : x > SET_STOCK_ICON / 2 + 10 /* after a stock icon at x 10 */
-                   ? (!icon   ? set_text_x()
-                      : art_x ? T->art_text_x - 2
-                              : SET_ICON_X + icon + SET_GAP) +
-                         x - (SET_STOCK_ICON + 20)
+                   ? set_text_x() + x - (SET_STOCK_ICON + 20)
                    : set_text_x() + x - 10;
-    if (!icon && left < set_text_x()) left = set_text_x();
+    if (left < set_text_x()) left = set_text_x();
     right = right >= SET_RIGHT_SIDE ? SET_STOCK_X + right + shift : right + left - x;
     if (right > row_w - SET_TEXT_X) right = row_w - SET_TEXT_X;
     widget_move_resize(c, left, y, right > left ? right - left : 0, h);
@@ -564,7 +538,7 @@ static int stream_list(void *view) {
 int ipod_list_layout(void *layout, void *view) {
     void *list = view ? P(view, W_PARENT) : (void *)0;
     int settings = settings_list(list);
-    int row = stream_list(view) ? geom_val(V_STREAM_ROW) : settings ? geom_val(V_SET_ROW) : 0;
+    int row = stream_list(view) || settings ? geom_val(V_SET_ROW) : 0;
     int wifi = settings && wifi_list(list), bt = settings && bt_list(list);
     if (settings) settings_layout(list);
     if (wifi) wifi_rows_pre(view);

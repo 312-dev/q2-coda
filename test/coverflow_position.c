@@ -11,7 +11,6 @@
 
 static struct {
     void *slide, *covers, *albums;
-    int text_albums;
 } cf;
 static struct {
     int text_y, artist_y, top;
@@ -311,10 +310,6 @@ int main(int argc, char **argv) {
     coverflow_position_paint(covers, canvas);
     assert(!fills);
     live = 1;
-    cf.text_albums = 1;
-    coverflow_position_paint(covers, canvas);
-    assert(!fills);
-    cf.text_albums = 0;
     albums = 1;
     coverflow_position_paint(covers, canvas);
     assert(!fills);

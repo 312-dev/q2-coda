@@ -88,7 +88,6 @@ enum {
     QA_FOLDER,
     QA_CHAPTERS,
     QA_MORE,
-    QA_NEW_PLAYLIST,
     QA_OTG,  /* Add to On-The-Go (playlist_pages.c) */
     QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
@@ -377,7 +376,6 @@ static int artist_album(void *all, void *r) {
         }
     return -1;
 }
-extern int coverflow_artist(void *albums);
 extern void coverflow_by_year(void *albums);
 /* The artist page's songs, as its Songs tab lists them (staged_music: with Local + Server, the
  * server library's too); also library_artist.c's. */
@@ -422,12 +420,7 @@ static void artist_order(void *list, void *mine) {
     deque_assign(list, out);
     deque_destroy(out);
 }
-static int artist_cf_gone(void *win, void *event) {
-    if (win == st.art_cf_win) st.art_cf_win = (void *)0;
-    if (win == st.art_cf_veil) st.art_cf_veil = (void *)0;
-    return 0;
-}
-/* The page Coverflow is about to cover (an artist's, or Playlists from playlists.c) opens unseen
+/* The page Coverflow is about to cover (Playlists, from playlists.c) opens unseen
  * and without its slide, so the list cuts straight to the covers, as Home's Coverflow card does;
  * once they are up it is shown again under them, its slide back for its own Return. */
 void cf_veil(void *win, int on) {
@@ -439,42 +432,6 @@ void cf_veil(void *win, int on) {
         widget_set_prop_str(win, "anim_hint", st.art_cf_hint);
     widget_set_opacity(win, on ? 0 : 0xff);
 }
-static int artist_cf_open(const void *unused) {
-    void *top = window_manager_get_top_window(window_manager()), *all = st.art_cf_list,
-         *veiled = st.art_cf_veil;
-    st.art_cf_timer = 0;
-    st.art_cf_list = st.art_cf_veil = (void *)0;
-    if (veiled && top == veiled && coverflow_artist(all))
-        st.art_cf_win = top;
-    else
-        deque_destroy(all);
-    if (veiled) cf_veil(veiled, 0);
-    return 0;
-}
-/* Artist albums: Grid gives the artist page its stock toolbar back, for its multi-select
- * (s_img_mulsel), which iPod hides on the local pages; the tabs move down under it. A toolbar
- * already showing (a reload) is left alone. */
-static void artist_bar(void) {
-    void *top = window_manager_get_top_window(window_manager()),
-         *nav = top ? widget_lookup(top, "view_navbar", 0) : 0,
-         *tab = top ? widget_lookup(top, "tab_control", 0) : 0,
-         *pages = tab ? widget_lookup(tab, "pages_artistinfo", 0) : 0, *album;
-    char h[12], y[12];
-    pod_settings();
-    if (st.artist_cf || !nav || !pages || widget_get_visible(nav) ||
-        tk_strcmp(widget_get_prop_str(top, "name", ""), "artistinfo_page"))
-        return;
-    int height = I(tab, W_H) - I(nav, W_H), inner = height - I(pages, W_Y);
-    widget_set_visible(nav, 1, 0);
-    widget_set_enable(nav, 1);
-    widget_move_resize(tab, I(tab, W_X), I(nav, W_H), I(tab, W_W), height);
-    tk_snprintf(y, sizeof y, "%d", I(pages, W_Y));
-    tk_snprintf(h, sizeof h, "%d", inner);
-    widget_set_self_layout_params(pages, "0", y, "100%", h);
-    if ((album = widget_lookup(pages, "list_view_album", 1))) /* its height is fixed, not 100% */
-        widget_move_resize(album, I(album, W_X), I(album, W_Y), I(album, W_W), inner);
-    widget_layout(tab);
-}
 static int artist_list(int tab) {
     int n = stock_artist_trampoline(tab);
     void *list = P(p_deque_showlist, 0), *all;
@@ -482,12 +439,9 @@ static int artist_list(int tab) {
      * Artist", as Songs' rows say, not glibc's "(null)" */
     if (!strcmp((const char *)ARTIST_TITLE, "(null)"))
         getFormatString("player_unknown", (char *)ARTIST_TITLE, 0x200);
-    if (artist_local()) { /* OLED's: the design's page in place of the tabs (library_artist.c) */
-        artist_keys_free();
-        return n;
-    }
-    artist_bar();
+    /* the design's page in place of the tabs (library_artist.c), on the top artistinfo_page */
     artist_keys_free();
+    if (artist_local()) return n;
     if (tab != 1 || n <= 0 || !(st.art_keys = calloc((unsigned)n, sizeof(char *)))) return n;
     st.art_ids = calloc((unsigned)n, sizeof *st.art_ids);
     st.art_n = (unsigned)n;
@@ -507,19 +461,7 @@ static int artist_list(int tab) {
         if (j >= 0 && (k = split_key(buf, all, (unsigned)j))) st.art_keys[i] = strdup(k);
         if (j >= 0 && st.art_ids) st.art_ids[i] = album_id(deque_at(all, (unsigned)j));
     }
-    /* Artist albums: Coverflow: the albums go to Coverflow once the page is up, once per page,
-     * so coming back from it shows the stock grid. */
-    pod_settings();
-    void *top = window_manager_get_top_window(window_manager());
-    if (st.artist_cf && !st.art_cf_list && top && top != st.art_cf_win &&
-        !tk_strcmp(widget_get_prop_str(top, "name", ""), "artistinfo_page")) {
-        st.art_cf_list = mine, mine = 0;
-        st.art_cf_veil = top;
-        cf_veil(top, 1);
-        widget_on(top, EVT_DESTROY, artist_cf_gone, top);
-        rearm(&st.art_cf_timer, artist_cf_open, 0);
-    }
-    if (mine) deque_destroy(mine);
+    deque_destroy(mine);
     deque_destroy(all);
     return n;
 }
@@ -586,14 +528,12 @@ static int empty_class(const void *unused) {
     return 0;
 }
 
-/* Library Artists rows have no head picture, so the name gets its width (compact_row_layout skips
- * hidden siblings). Composers and Genres share the rows, which are rebound, so they show theirs
- * again, and a one-line row (one_line) shows none. */
+/* Artists, Composers and Genres rows have no picture: the rows are one line (one_line, the set's
+ * text_art 0), so the name gets the width (compact_row_layout skips hidden siblings). */
 int ringnav_class_icon(void *row, int i) {
-    int artists = I(g_class_type, 0) == 0xf004;
-    int shown = !artists && geom(G_TEXT_ART); /* no class icon on a one-line row */
-    widget_set_visible(widget_lookup(row, "img_icon", 1), shown, 0);
-    return shown ? class_icon(row, i) : 0;
+    (void)i;
+    widget_set_visible(widget_lookup(row, "img_icon", 1), 0, 0);
+    return 0;
 }
 
 /* load_localclass_list: stock fills p_deque_showlist and returns its size (Playlists and Baidu:
@@ -682,7 +622,7 @@ static int songs_load(void) {
     void *list = P(p_deque_showlist, 0);
     deque_clear(list);
     staged_into(list, songs_sorted, 0);
-    song_order(list);                        /* a modal set's Sort picker's order (song_sort.c) */
+    song_order(list);                        /* the Sort picker's order (song_sort.c) */
     deque_clear(P(tools_pdeq_directory, 0)); /* as stock leaves it */
     music_nagvation_title(0xf001);
     return (int)deque_size(list);

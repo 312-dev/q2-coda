@@ -135,18 +135,17 @@ for btime,mask,error,expect in ((1700000000,0x800,0,1700000000),(1700000000,0x7f
     assert m.call(address=payload_syms['ringnav_file_created'],args=(path,0,0,0),gap=0)==expect
     assert seen==[(4366,0xffffff9c,'/m/a.flac',0,0x800)] and [c[1] for c in m.calls if c[0]=='stock_created']==([] if expect else [path]); passed()
 # Library Artists rows hide the head picture (CLASS_ICON); Composers and Genres, sharing the rebound
-# rows, show theirs again through stock's setter.
+# rows, hide theirs too under OLED's one-line rows (text_art 0), and stock's setter never runs.
 from build import CLASS_ICON
 assert struct.unpack_from('<I',demo,fileoff(demo,CLASS_ICON))[0]==jal(payload_syms['ringnav_class_icon'])
 m=Machine(); m.mock('class_icon'); icon=m.node('image','img_icon'); row=m.node('view','',[icon])
-for cls,shown in ((0xf004,0),(0xf006,1),(0xf005,1),(0xf004,0)):
+for cls,shown in ((0xf004,0),(0xf006,0),(0xf005,0),(0xf004,0)):  # no icon on a one-line row
     m.word(syms['g_class_type'],cls); m.calls=[]
     m.call(address=payload_syms['ringnav_class_icon'],args=(row,3,0,0),gap=0)
     assert m.nodes[icon]['visible']==shown and [c[1:3] for c in m.calls if c[0]=='class_icon']==([(row,3)] if shown else [])
 passed()
 # A song with no artist tag (an empty REC_ARTIST): under OLED's set (text_art 0) the second line is empty
-# (ringnav_song_unknown), and a rebound row loses the last song's artist; a record that says Unknown reads so. Before a set
-# is written (SET0, text-row artwork) the row keeps stock's "Unknown Artist".
+# (ringnav_song_unknown), and a rebound row loses the last song's artist; a record that says Unknown reads so.
 from build import SONG_UNKNOWN_CALL
 assert struct.unpack_from('<I',demo,fileoff(demo,SONG_UNKNOWN_CALL))[0]==jal(payload_syms['ringnav_song_unknown'])
 class SongBindMachine(Machine):
@@ -155,17 +154,16 @@ class SongBindMachine(Machine):
             self.formats.append(self.text(u.reg_read(UC_MIPS_REG_A0))); self.u.mem_write(u.reg_read(UC_MIPS_REG_A1),b'Unknown Artist\0'); self.returns(0); return
         return super().hook(u,address,size,unused)
 assert OLED_G.text_art==0
-for boot,want in ((oled_boot,''),(lambda k:None,'Unknown Artist')):
-    m=SongBindMachine(); boot(m); m.formats=[]; m.handlers[syms['getFormatString']]='b:format'
-    m.mock('deque_at','tk_snprintf','widget_set_text_utf8','widget_use_style','file_is_playing','toolsTrimLeft','toolsTrimRight')
-    title,meta,badge=(m.node('hscroll_label','scrlabel_name'),m.node('hscroll_label','scrlabel_artist'),m.node('image','img_pic'))
-    view_info=m.node('view','view_info',[title,meta,badge]); button=m.node('button','',[view_info]); m.row_record=m.alloc(0x80)
-    m.mock('list_get_img_pic'); m.word(m.row_record+8,m.string('Song')); m.word(m.row_record+12,m.string('/mnt/mmc/x.flac')); m.word(m.row_record+0x48,1)
-    for artist,text in (('Mac Quayle','Mac Quayle'),('',want),('Unknown','Unknown'),('',want)):
-        m.word(m.row_record+0x18,m.string(artist))
-        rc=m.call(address=0x4ab208,args=(button,0,0,0)); assert rc==0,(rc,artist,[c[:2] for c in m.calls][-6:])
-        assert m.nodes[meta].get('text')==text,(artist,m.nodes[meta].get('text'),want)
-    assert m.formats==(['Unknown Artist']*2 if want else []),m.formats
+m=SongBindMachine(); oled_boot(m); m.formats=[]; m.handlers[syms['getFormatString']]='b:format'
+m.mock('deque_at','tk_snprintf','widget_set_text_utf8','widget_use_style','file_is_playing','toolsTrimLeft','toolsTrimRight')
+title,meta,badge=(m.node('hscroll_label','scrlabel_name'),m.node('hscroll_label','scrlabel_artist'),m.node('image','img_pic'))
+view_info=m.node('view','view_info',[title,meta,badge]); button=m.node('button','',[view_info]); m.row_record=m.alloc(0x80)
+m.mock('list_get_img_pic'); m.word(m.row_record+8,m.string('Song')); m.word(m.row_record+12,m.string('/mnt/mmc/x.flac')); m.word(m.row_record+0x48,1)
+for artist,text in (('Mac Quayle','Mac Quayle'),('',''),('Unknown','Unknown'),('','')):
+    m.word(m.row_record+0x18,m.string(artist))
+    rc=m.call(address=0x4ab208,args=(button,0,0,0)); assert rc==0,(rc,artist,[c[:2] for c in m.calls][-6:])
+    assert m.nodes[meta].get('text')==text,(artist,m.nodes[meta].get('text'))
+assert m.formats==[],m.formats
 passed()
 # Library sorts: both stock name comparators, on the patched trim calls, skip a leading article.
 from build import SORT_TRIMS
@@ -770,79 +768,6 @@ for path,artist,want in (('/p/x','Artist','Album\x1fBaroness'),('/z/x','STP','Al
     m.call(address=HOOKS['load_localartist_list'][0],args=(0,0,0,0),gap=0)
     m.call(address=art['ringnav_artist_art_name'],args=(buf,0x100,0,m.string('Album')),gap=0); assert m.text(buf)=='Album'
 passed()
-# Artist albums: Coverflow (Display settings): the albums tab's split albums go to Coverflow once the artist page is
-# up, once per page, so coming back from it shows the grid; Grid, the songs tab or another page leave it stock. Until
-# then the artist page is unseen (opacity 0) and has no slide, so the Artists list cuts straight to the covers; once
-# they are up it is shown under them with its slide back.
-SLIDE_HINT='htranslate(duration=200)'
-class ArtistCoverflow(ArtistMachine):
-    def __init__(self,*a,**k):
-        super().__init__(*a,**k); self.handlers[syms['widget_set_prop_str']]='widget_set_prop_str'
-    def artist_page(self,name):
-        self.top=self.node('window',name); self.nodes[self.top]['anim_hint']=SLIDE_HINT; self.byte(self.top+0x34,0xff)
-    def veiled(self): return self.u.mem_read(self.top+0x34,1)[0]==0 and self.nodes[self.top]['anim_hint']==''
-    def shown(self): return self.u.mem_read(self.top+0x34,1)[0]==0xff and self.nodes[self.top]['anim_hint']==SLIDE_HINT
-    def hook(self,u,address,size,unused):
-        if address!=payload_syms['coverflow_artist']: return super().hook(u,address,size,unused)
-        self.handed.append(len(self.items(u.reg_read(REGS[0])))); self.covers=self.names(u.reg_read(REGS[0])); self.returns(1)
-for on,tab,page,want in ((1,1,'artistinfo_page',[1]),(2,1,'artistinfo_page',[1]),(0,1,'artistinfo_page',[]),(1,0,'artistinfo_page',[]),(1,1,'localclass_page',[])):
-    m=ArtistCoverflow(page='localclass_page',cls=0xff01,rows=2); m.handed=[]
-    m.word(m.row(1)+O['REC_ALBUM'],m.string('Other album'))
-    m.config['ARTISTCF']=str(on)
-    m.split=[m.song('Baroness'),m.song('STP')]
-    for r in m.split: m.word(r+O['REC_ALBUM_ARTIST'],m.get(r+O['REC_NAME']))
-    m.found=[m.split[0]]; m.artist_page(page)
-    m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0)
-    assert m.veiled()==bool(want); m.advance(0)
-    assert m.handed==want and m.shown(),(on,tab,page,m.handed)
-    if want:  # back from Coverflow, the tab loads again on the same page: the grid stays, seen
-        m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0); assert m.shown(); m.advance(0); assert len(m.handed)==1
-        # The page gone, another at the same address gets Coverflow again.
-        f,ctx=m.handler(m.top,O['EVT_DESTROY']); m.call(address=f,args=(ctx,m.event,0,0),gap=0)
-        m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0); m.advance(0); assert len(m.handed)==2
-    passed()
-# Artist albums: Grid shows the artist page's hidden stock toolbar (its multi-select) on either
-# tab, the tabs moved down under it; other modes, pages or a toolbar already up stay as they are.
-for on,tab,page,up in ((0,1,'artistinfo_page',0),(0,0,'artistinfo_page',0),(1,1,'artistinfo_page',0),
-                       (2,1,'artistinfo_page',0),(0,1,'localclass_page',0),(0,1,'artistinfo_page',1)):
-    m=ArtistCoverflow(page='localclass_page',cls=0xff01,rows=1); m.handed=[]; m.found=[]
-    m.config['ARTISTCF']=str(on); m.artist_page(page)
-    album=m.node('list_view','list_view_album'); pages=m.node('pages','pages_artistinfo',[album])
-    bar=m.node('tab_control','tab_control',[pages]); nav=m.node('view','view_navbar',visible=up)
-    m.nodes[nav]['enable']=up; m.nodes[m.top]['children']+=[nav,bar]
-    geo=lambda w:[m.get(w+O[o]) for o in ('W_X','W_Y','W_W','W_H')]
-    for w,g in ((nav,(0,0,375,50)),(bar,(0,0,375,290)),(pages,(0,40,375,250)),(album,(0,0,375,250))):
-        for o,v in zip(('W_X','W_Y','W_W','W_H'),g): m.word(w+O[o],v)
-    m.call(address=HOOKS['load_localartist_list'][0],args=(tab,0,0,0),gap=0)
-    want=not on and page=='artistinfo_page' and not up
-    assert bool(m.nodes[nav]['visible'])==bool(want or up) and bool(m.nodes[nav]['enable'])==bool(want or up),(on,tab,page,up)
-    assert geo(bar)==([0,50,375,240] if want else [0,0,375,290]) and geo(album)[3]==(200 if want else 250),(on,tab,page,up)
-    assert m.nodes[pages].get('self_layout')==(('0','40','100%','200') if want else None),(on,tab,page,up)
-    passed()
-# Same-named albums by other artists stay out, in both artist modes. Membership follows
-# the artist's songs, so a guest artist and multiple albums of one name work too.
-for mode in (0,1):
-    m=ArtistCoverflow(page='localclass_page',cls=0xff01,rows=1); m.handed=[]; m.config['ARTISTCF']='1'
-    m.word(syms['artist_type'],mode)
-    m.u.mem_write(syms['g_local_classinfo_save']+0x10d,b'Artist\0')
-    m.word(m.row(0)+O['REC_ARTIST'],m.string('Guest singer'))  # selected album artist comes from page context
-    m.split=[m.song(name) for name in ('Selected','Other','Guest')]
-    for r in m.split:
-        m.word(r+O['REC_ALBUM_ARTIST'],m.get(r+O['REC_NAME']))
-    m.found=[m.split[0],m.split[2],m.split[0]]  # duplicates must not create extra cards
-    staging=m.names(m.get(syms['tools_pdeq_directory'])); m.artist_page('artistinfo_page')
-    assert m.call(address=HOOKS['load_localartist_list'][0],args=(1,0,0,0),gap=0)==1
-    assert m.query[:2]==(('getMusicByAlbumArtist' if mode else 'getMusicBySonger'),'Artist')
-    assert m.names(m.get(syms['tools_pdeq_directory']))==staging
-    m.advance(0)
-    assert m.covers==['Selected','Guest'] and m.handed==[2],(mode,m.covers)
-    assert m.names(m.get(syms['p_deque_showlist']))==['Row 0']  # the Library grid stays intact
-    passed()
-# No albums in the selected artist query leaves the grid rather than opening an empty Coverflow.
-m=ArtistCoverflow(page='localclass_page',cls=0xff01,rows=1); m.handed=[]; m.config['ARTISTCF']='1'; m.found=[]
-m.artist_page('artistinfo_page'); m.call(address=HOOKS['load_localartist_list'][0],args=(1,0,0,0),gap=0)
-m.advance(0)
-assert m.handed==[0] and m.shown(); passed()  # coverflow_artist rejects the empty list (test/coverflow.py)
 # A local art job that finishes after a list rebuild must not mark the new row ready.
 # Run the worker's real completion call site, including its stack-buffer argument, then stock's
 # readiness check (used by the renderer and by the request queue to skip completed covers).
@@ -940,7 +865,8 @@ assert m.names(m.get(syms['p_deque_showlist']))==['Row 0'] and ('stock_localclas
 
 # Coverflow (docs/internals.md): the Home card, the runtime coverflow_page over a stock slide_menu,
 # the tracks query and handoff. The art thread itself runs on the host (test/coverflow.py).
-from ipod import HOME_TEXT_X, HOME_LIST_W, HOME_OURS, HOME_PAGE, HOME_ROW, HOME_ROWS, HOME_TOP, decode
+from ipod import HOME_TEXT_X, HOME_LIST_W, HOME_OURS, HOME_PAGE, HOME_ROWS, HOME_TOP, decode
+HOME_ROW=OLED_G.home_row  # Home's rows as built (OLED's set)
 cards=[c[2]['name'] for c in decode((B/'ui'/HOME_PAGE).read_bytes())[3][1][3][0][3]]  # list_view_home's scroll_view's rows
 assert cards==[f'btn_{r}' for r in HOME_ROWS] and 'btn_coverflow' in cards, cards  # Home's rows, in tools/ipod.py's order
 home_hook=HOOKS['home_page_init']
@@ -1004,16 +930,17 @@ assert m.call(O['KEY_RETURN'])==0; m.paint(w,gap=0); assert m.drawn()
 m.paint(w2,gap=0); assert not m.drawn(); passed()
 # A sliding page's first paint is its snapshot, so a recalled row is revealed at once, not by a glide.
 m,w,es=walk(10,5); w2,es2=m.page_list(10,extent=1000); m.nodes[m.top]['anim_hint']=HINT
-assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==204
+assert m.paint(w2)==0 and m.selected(w2)==5 and m.get(w2+O['SCROLL_Y'])==192
 assert [c[0] for c in m.moved()]==['scroll_view_set_offset']; passed()
 
-# Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, the seven its box shows and then
-# any it scrolls in, so the last rests where the seventh did; it stops at both ends however long the
-# pause, Return selects Now Playing, the bar spans the list's width and centre clicks the image.
+# Home is an ordinary list: the wheel walks its rows (HOME_ROWS) one by one, those that end above OLED's list_end and
+# then any it scrolls in by whole rows, so the last rests where the last shown did (this Home is not
+# coverflow.c's, whose home_rest would rest it on its seven); it stops at both ends however long the pause, Return selects
+# Now Playing, the bar spans the list's width and centre clicks the image.
 m=Machine(); m.config.update(FLAT); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')])
 m.paint(view)
 assert m.selected(view)==0
-last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),7)
+last=len(HOME_ROWS)-1; shown=min(len(HOME_ROWS),(OLED_G.list_end-HOME_TOP)//HOME_ROW)
 for i in range(1,last+1): assert m.call()==11 and m.selected(view)==i
 assert m.get(view+O['SCROLL_Y'])==(last+1-shown)*HOME_ROW
 m.paint(view); assert not m.rounded and [b[:5] for b in m.bands]==bar_bands(inset,(shown-1)*HOME_ROW,HOME_LIST_W-2*inset,HOME_ROW,radius)
@@ -1043,13 +970,12 @@ paint_bar(); assert ('widget_invalidate_force',view) not in [c[:2] for c in m.ca
 # (home.chevron visible), but for Shuffle Songs, which acts rather than opening a list. Stock draws its own on folder,
 # category, album-list and Local Music rows, so those windows, song lists and grids get none from here. The names are
 # read as each loads (Machine.image_loads): theme_art's answer is one buffer, rewritten by the next.
-from ipod import SET0  # Home's asset as built is SET0's, before theme_boot writes a set
 def window(m,name,w):
     m.top=m.node('window',name,[w]); m.word(w+O['W_PARENT'],m.top); m.word(m.top+O['W_PARENT'],m.wm)
 def loaded(m): return [m.text(c[2]) for c in m.calls if c[0]=='widget_load_image']
 m=Machine(); view,imgs=home_list(m); click_target(m,imgs[HOME_ROWS.index('coverflow')]); m.clip=(0,0,375,320)
 m.image_loads=[]; m.paint(view)
-CHEV_X=HOME_LIST_W-SET0.right_x-5
+CHEV_X=HOME_LIST_W-OLED_G.right_x-5
 def bar(sel):  # Home's chevrons, their row's selected one white
     rows=[i for i,r in enumerate(HOME_ROWS) if r!='shuffle_songs']
     return ([(CHEV_X,i*HOME_ROW+HOME_ROW//2-m.get(view+O['SCROLL_Y']),(0,0,HOME_LIST_W,7*HOME_ROW)) for i in rows],
@@ -1066,17 +992,18 @@ m=Machine(); w,es=m.page_list(10,height=96,extent=480,name='playlist_page'); win
 tile=m.entry(w,0); m.word(tile+O['W_W'],100); m.nodes[w]['children'].insert(0,tile)
 for top in (0,24):
     m.word(w+O['SCROLL_Y'],top); m.paint(w)
-    assert m.icons==[(240-SET0.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10)]; passed()
+    assert m.icons==[(240-OLED_G.right_x-5,48*i+24-top,(0,0,240,96)) for i in range(10)]; passed()
 # Leaf lists, grids and windows whose rows stock already marks draw none.
 for name in ('allmusic_page','albuminfo_page','artistinfo_page','album_page','folder_page',
              'localclass_page','localmusic_page','sysset_page'):
     m=Machine(); w,_=m.page_list(5,extent=240,name=name); window(m,name,w); m.paint(w)
     assert not m.icons and not loaded(m), name; passed()
 
-# The status bar as built (ui/system_bar.bin), laid out by the stock row layouter
-# (children_layouter_default, 0x63bda8) with every icon shown: the icons, 16px high and drawn
-# centred in their 30px cells, and the title clear the glass's rounded top corners.
-from ipod import STATUS_BAR, corner_inset
+# The status bar as built (ui/system_bar.bin), OLED's status row, laid out by the stock row layouter
+# (children_layouter_default, 0x63bda8) with every icon shown: the left group empty (its glyphs off-screen
+# for stock to update), the right one the battery's, STATUS_ROW_ICON high and ending STATUS_ROW_INSET from
+# the screen's edge, and the title's and clock's box starting on that inset (ipod.py status_row).
+from ipod import STATUS_BAR, STATUS_ROW_ICON
 m=Machine(); m.mock('strtol@GLIBC_2.0','strstr@GLIBC_2.0'); m.mock('tk_calloc','tk_free',prefix='alloc:')
 bar=asset_tree(m,STATUS_BAR); m.word(bar+O['W_W'],375)
 views=[named(m,bar,n) for n in ('view_left','view_right')]
@@ -1090,23 +1017,18 @@ def laid_out():
     return [(signed(m.get(v+O['W_X']))+signed(m.get(c+O['W_X'])),m.get(c+O['W_W']),m.get(c+O['W_H'])) for v in views
             for c in m.nodes[v]['children'] if m.nodes[c]['visible']]
 cells=laid_out()
-inset=corner_inset((30-16)//2)
-assert all(h==30 and inset<=x and x+w<=375-inset for x,w,h in cells), (inset,cells)
-assert not any(m.get(c+O['W_Y']) for v in views for c in m.nodes[v]['children'] if m.nodes[c]['visible'])  # at y 0, which a look's rows (bar.icons) count from
-title=named(m,bar,'label_clock'); x,w=m.get(title+O['W_X']),m.get(title+O['W_W'])
-left,right=(cells[len(m.nodes[views[0]]['children'])-1],cells[len(m.nodes[views[0]]['children'])])
-assert left[0]+left[1]<=x and x+w<=right[0] and x+w/2==375/2, (left,right,x,w); passed()
+assert not m.nodes[views[0]]['children'] and cells and all(h==STATUS_ROW_ICON for x,w,h in cells), cells
+assert cells[-1][0]+cells[-1][1]==375-O['STATUS_ROW_INSET'], cells
+assert not any(m.get(c+O['W_Y']) for v in views for c in m.nodes[v]['children'] if m.nodes[c]['visible'])  # at y 0 of their group's box
+for name in ('label_title','label_clock'): assert m.get(named(m,bar,name)+O['W_X'])==O['STATUS_ROW_INSET']-2, name  # hscroll_label's 2 px
+passed()
 # The battery's slot (bar_sync shows view_battery alone, stock's img_battery and label_battery hidden): the layout skips
-# the hidden two, the slot as built (ipod.py BATT_H_W, its widest) ends at the icons' margin, a percentage's text clears
-# the corner there, and with the plain Bluetooth glyph and Wi-Fi the group's ink stays CLOCK_GAP clear of the widest clock.
-from ipod import CLOCK_TEXT, CLOCK_GAP, STATUS_MARGIN, BATT_H_W, corner_x
+# the hidden two, and the slot as built (ipod.py BATT_H_W, its widest) ends on the row's inset.
+from ipod import BATT_H_W
 batt=[named(m,bar,n) for n in ('img_battery','label_battery','view_battery')]
 for i,b in enumerate(batt): m.nodes[b]['visible']=int(i==2)
-cells=laid_out(); bt=cells[len(m.nodes[views[0]]['children'])]
-assert cells[-1][0]+cells[-1][1]==375-STATUS_MARGIN and cells[-1][1]==BATT_H_W==O['BATT_BODY_W']+O['BATT_NUB_W']+O['BATT_GAP']+O['BATT_PCT_W'], cells
-assert corner_x((30-O['BATT_PCT_PX'])//2,O['BATT_PCT_PX'])<=STATUS_MARGIN
-ink=bt[0]+bt[1]-O['BT_REACH']
-assert ink>=375/2+CLOCK_TEXT/2+CLOCK_GAP and 375-STATUS_MARGIN-ink<=O['BATT_ROOM'], cells
+cells=laid_out()
+assert cells[-1][0]+cells[-1][1]==375-O['STATUS_ROW_INSET'] and cells[-1][1]==BATT_H_W==O['BATT_BODY_W']+O['BATT_NUB_W']+O['BATT_GAP']+O['BATT_PCT_W'], cells
 passed()
 
 # Cycle the live Battery setting with the actual parent row layouter: the slot stays visible from Percent to Icon, so a
@@ -1158,8 +1080,8 @@ for mode in (1,0,1,0):
     assert ('widget_invalidate_force',bar) in [c[:2] for c in m.calls]  # the whole bar, after the frame
     if mode != 1:
         assert m.nodes[slot]['visible']
-        assert m.get(slot+O['W_W'])==O['BATT_BODY_W']+O['BATT_NUB_W']
-        assert signed(m.get(views[1]+O['W_X']))+signed(m.get(slot+O['W_X']))+m.get(slot+O['W_W'])==375-STATUS_MARGIN
+        assert m.get(slot+O['W_W'])==OLED_G.batt_w+O['BATT_NUB_W']
+        assert signed(m.get(views[1]+O['W_X']))+signed(m.get(slot+O['W_X']))+m.get(slot+O['W_W'])==375-O['STATUS_ROW_INSET']
 passed()
 
 # Fast-scroll letter (iPod): once the wheel ramp moves more than one row per detent on a long list,

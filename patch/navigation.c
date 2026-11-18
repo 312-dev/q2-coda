@@ -87,14 +87,6 @@ static int library_first __attribute__((section(".scratch")));
 
 /* Failed exec in a forked child must not flush demo's copied stdio or run its exit handlers. */
 __asm__(".globl child_exit\nchild_exit:\nli $v0, 4001\nsyscall\n");
-/* Geometry sets (theme_boot): demo imports neither, so the o32 syscalls, as spot_shut. 0, errno */
-int theme_mprotect(void *addr, unsigned len, int prot);
-int theme_cacheflush(void *addr, int len, int cache);
-__asm__(".set push\n.set noreorder\n"
-        ".globl theme_mprotect\ntheme_mprotect:\nli $v0,4125\nsyscall\njr $ra\nnop\n"
-        ".globl theme_cacheflush\ntheme_cacheflush:\nli $v0,4147\nsyscall\njr $ra\nnop\n"
-        ".set pop\n");
-#define THEME_PAGE 4096u /* the Q2's kernel page: mprotect's rounding unit */
 /* Out of memory, the kernel kills the fattest process, which was demo (#169): every child demo
  * forks, whose one job can need tens of MB, makes itself the first to go, between fork and exec. */
 int open(const char *, int, ...);
@@ -191,7 +183,7 @@ int ringnav_content_query(const char *db, const char *sql, void *row, void *arg,
     return library_query(1, db, sql, row, arg, sort);
 }
 extern void *coverflow_tracks(void *page);
-extern const char *coverflow_bar_title(int status);
+extern const char *coverflow_bar_title(void);
 extern int coverflow_jump(void *w, int from, int dir, unsigned *letter), coverflow_bounded(void *w),
     coverflow_slide(void *w);
 extern void coverflow_lost_touch(void), coverflow_wheel_land(void);
@@ -243,7 +235,6 @@ void *staged_music(int (*query)(void *), void *arg, int *count) {
 }
 
 extern int album_only(void *, void *, int), coverflow_split(void *);
-#define SCROLL_MARGIN 12
 #define HOME_FAST_WINDOW_MS 200
 #define WHEEL_RUN_MS 140
 #define WHEEL_RAMP_MS 100 /* scrub and the pixel fallback: one step for this long, then */

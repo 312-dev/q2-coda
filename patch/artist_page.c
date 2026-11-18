@@ -1,4 +1,4 @@
-/* An artist's page under a set with the menu sheet (OLED's; docs/oled-design.md#artist-page): a
+/* An artist's page (docs/oled-design.md#artist-page): a
  * header (hero_open) of a monogram, the name, a line of counts and one of genre, then an action
  * pair (pair_open), two accent panels side by side, Shuffle and Radio, then drill-down rows (Top
  * Songs, Albums, Singles & EPs, Similar Artists, All Songs) with a count and a chevron, and the

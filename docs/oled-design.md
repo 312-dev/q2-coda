@@ -56,7 +56,7 @@ those spots are under the glass. So:
   250, seven in all), peek through a fade into black from y 266 to y 316, black below; once the
   list has scrolled, its top row's first 14 px fade under the status row. A selected row is never
   faded and never lands past y 282: scrolled to its end, by the wheel or a drag, the last row's
-  foot is on y 282 (Q2 Muse's `list_end` and `list_fit`, `navigation.c` `list_fade`), also after
+  foot is on y 282 (Q2 Muse's `list_end`, `navigation.c` `list_fade`), also after
   the page comes back on top (Return from a row's page). A page with nothing to select (text) ends the
   same way: the wheel scrolls it until its content's foot is on y 282, as a drag does. A list whose top is off the 32 px grid (EQ's, under its
   48 px tab bar) or whose rows are of another pitch keeps whole rows at its top, so scrolled to its end its last row
@@ -232,8 +232,12 @@ All lists share one grid.
   keep up), and a 1.5x4.4 nub with 0.8 px corners in `#6E6E6E`.
 - Charging, Phosphor's `lightning` (fill, 7 px, Text Primary) sits on the body's center with a
   1 px gap in the Canvas cut round it where it crosses the fill, and no outline; a weak charger's
-  `warning` (fill) takes its place the same way. Full or held at Charge Limit, the fill is green
-  with no glyph. Picked as I2 from `mock_batt_inside.py` on 2026-11-15.
+  `warning` (fill) takes its place the same way. Picked as I2 from `mock_batt_inside.py` on
+  2026-11-15. Full or held at Charge Limit with the cable in, the fill is green with an upright plug
+  in the bolt's place, drawn on whole pixels (5x7 ink, panel rows 19 to 25, columns 295 to 299: two
+  1 px prongs with a 1 px slot, a 5 px body with rounded lower corners, a 1 px cord) over the same
+  1 px Canvas gap; the two differ only by level, and a tap's toast names which. Picked as option A
+  from `mock_plugged_full.py` on 2026-11-17. On battery there is no glyph.
 - With Battery on Percent, the level and "%" in BATT_PX type stand in the battery's place, in its
   colors, on one line: nothing in the status row ever wraps. The slot is as wide as "100%" measures,
   each digit and the sign rounded up to a whole pixel, and the row lays out from the right edge, so
@@ -892,9 +896,9 @@ pickers in them) open as a frosted page sheet over the page (the user's C3, 2026
   from the sheet's first whole paint, which keeps the page (480 KB) until the sheet closes.
 - ponytail: the name ends in an ellipsis where the design's marquee would scroll it.
 
-Built by `patch/menu_modal.c` under a set with `modal` (OLED's); Up Next opens in it by
+Built by `patch/menu_modal.c` (the grid's `modal`); Up Next opens in it by
 `modal_sheet`. Now Playing's More and a
-playlist's More are stock pages, which such a set loads as dialogs (`tools/ipod.py` `modal_page`).
+playlist's More are stock pages, which the build loads as dialogs (`tools/ipod.py` `modal_page`).
 
 ### Artist page
 
@@ -1596,7 +1600,7 @@ pattern.
 | A Library artist                    | [Artist page](#artist-page) | Header, Shuffle alone, then Top Songs (once played), Albums and All Songs                                  |
 | Songs, a playlist's songs           | Song rows                   | The artist inline; the [A-Z index](#a-z-index) past 50 rows in name order                                  |
 | Volume                              | Progress                    | A 6 px bar across the bottom of Now Playing, not a panel                                                   |
-| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; an artist's covers titled by the artist, other covers with the clock in the status row as Home |
+| Cover Flow                          | Own                         | Covers on black, no reflection floor; the caption uses Song title and Artist roles; an album's tracks as Album tracks; the covers with the clock in the status row as Home |
 | Playlists                           | [Playlists](#playlists)     | On-The-Go first; 44 px rows with a 36 px picture or tile                                                   |
 | A playlist's songs, On-The-Go       | [Playlists](#playlists)     | Action rows, then the songs with the artist on the right                                                   |
 | Add Songs                           | [Add Songs](#add-songs)     | The chooser, then artists, albums and songs with marks                                                     |
@@ -1645,14 +1649,14 @@ Built, as `theme.xml` keys and geometry fields ([internals](internals.md#themes)
 - The color tokens and the type scale in one place: `tools/theme.py` `TOKENS` (to `patch/tokens.h` and
   `tools/art.py`'s inks), `tok()` and `TYPE()` in `patch/ui_kit.c` and `patch/ui_kit.h`.
 - OLED as the one built-in theme, standing alone: `assets/themes/oled/theme.xml`, index 0, extending
-  no other theme, its own `oled` geometry set. A unit left on another theme by an older build takes
+  no other theme, on its own grid (its `<geometry>`). A unit left on another theme by an older build takes
   OLED's preset once at boot ([ipod](ipod.md#theme)).
 - Font faces as a table, with Inter Regular and Medium and tabular digits.
 - A theme's own accent tones, and the selection bar's radius and inset on every row.
 - A status row in place of a bar band (`status_y`), its title and its battery's end `STATUS_ROW_INSET`
   in from the sides, its glyph slots left of the battery (`patch/status_row.c`: `status_slots_left`,
   `status_slots_paint`, `status_slot_at`) and its clock beside them, or centered where there is no title; lists that scroll a
-  whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`list_fit`).
+  whole row at a time and stop with the last row's foot on `list_end`, the rows past it fading (`fit_rows`).
 - A theme's own art from Phosphor (`tools/art.py`), loaded by its own prefix (`theme_art`): the
   chevron (`chevron_icon`, `patch/list_marks.c`) and the status row's glyphs (`STATUS_GLYPHS`); the slim battery
   (`battery_slim`); the wheel's scroll indicator (`list.scrollbar.*`, `wheel_sb_arm`);

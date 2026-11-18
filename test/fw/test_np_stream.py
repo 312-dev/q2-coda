@@ -24,8 +24,6 @@ class Np:
     def __init__(self, fw, mcl, songs, scratch, stream=None, waits=True):
         self.fw = fw
         theme(fw)
-        C.c_int.from_address(C.addressof(fw.var('st', C.c_char)) + scratch['geom']).value = \
-            fw.fn('theme_geom', C.c_int, C.c_void_p)(fw.fn('theme', C.c_void_p)())  # OLED's set: its status row
         self.world = World(fw, now=1000)
         if stream is not None:
             self.world.files[STREAM] = stream
