@@ -5,17 +5,22 @@
  * happened and that the Q2 restarts to fix it, counting down BS_COUNT seconds, with Not Now:
  * Centre, Return or a tap keeps the Q2 running without Bluetooth until it restarts some other way,
  * and stock's later calls (its loop asks again each pass that finds the radio dead) do nothing.
- * Stock's toast before each call is not shown (bt_stopped_toast): the page says it. */
+ * Stock's toast before each call is not shown (bt_stopped_toast): the page says it.
+ * The emulator has no radio at all, so with BLUETOOTH=1 in its config.ini stock always reaches
+ * BT_ABNORMAL: there the page is not opened and the restart waits for ever (EMU_MARK). Which
+ * machine this is comes from libq2emu.so, the emulator's shim, present in its guest and on no Q2,
+ * not from the radio being absent: a Q2 whose radio has failed still gets the page. */
 #include "navigation.h"
 
 #define BT_ABNORMAL (-102) /* system.c's */
 #define BS_COUNT 10        /* seconds before the restart */
 #define BS_TICK_MS 1000
+#define EMU_MARK "/lib/libq2emu.so" /* the emulator's LD_PRELOAD shim (~/q2-emu-server/run.sh) */
 
 static struct {
     void *page, *caller; /* the page; the stock call that asked to restart (reboot_record's) */
     unsigned timer;
-    int left, declined, restarting;
+    int left, declined, restarting, emulator; /* emulator: 0 unknown, 1 no, 2 yes */
 } bs __attribute__((section(".scratch")));
 
 int ringnav_reboot_from(void *caller); /* playback.c: the reboot itself */
@@ -63,9 +68,11 @@ int bt_stopped_toast(const char *name, void *ctx) {
 }
 
 /* playback.c ringnav_reboot, before it restarts: 1 when the restart waits on the page (or the user
- * said Not Now), 0 to restart now. */
+ * said Not Now, or this is the emulator), 0 to restart now. */
 int bt_stopped_hold(void *caller) {
     if (I(bt_initstatus, 0) != BT_ABNORMAL || bs.restarting) return 0;
+    if (!bs.emulator) bs.emulator = access(EMU_MARK, 0) ? 1 : 2;
+    if (bs.emulator == 2) return 1; /* no radio to wait for, no page, no restart */
     if (bs.declined || bs.page) return 1;
     if (!(bs.page = page_open("btstopped_page", bs_closed, bs_key))) return 0;
     widget_on(bs.page, EVT_CLICK, bs_tap, 0);

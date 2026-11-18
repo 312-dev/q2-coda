@@ -360,8 +360,10 @@ def test_the_headset_s_battery_toasts_at_20_and_at_10_once_each(fw):
 
 class Stopped:
     """playback.c's ringnav_reboot, as stock's idle loop calls it with the radio dead (bt_initstatus -102)."""
-    def __init__(self, fw, status=-102):
+    def __init__(self, fw, status=-102, emulator=False):
         self.fw, self.ui = fw, Ui(fw)
+        # the emulator's marker: libq2emu.so, bound into its guest at /lib and on no Q2
+        fw.mock('fw_access', lambda path, *_: 0 if emulator and C.string_at(path) == b'/lib/libq2emu.so' else -1)
         Config(fw)
         self.reboots, self.closed = [], []
         fw.var('fw_ctx_bt_initstatus', C.c_int).value = status
@@ -388,6 +390,20 @@ def test_a_dead_radio_asks_before_it_restarts_then_counts_down(fw):
         assert s.ui.fire('bs_tick') == 8 and not s.reboots
     s.ui.fire('bs_tick')
     assert s.reboots == [1]
+
+
+def test_a_real_q2_with_a_dead_radio_shows_the_page(fw):
+    s = Stopped(fw, emulator=False)  # no libq2emu.so: a Q2, whatever else is missing
+    assert s.reboot() == 0 and s.page() and not s.reboots
+    assert [a for _, a in fw.calls('fw_access') if C.string_at(a[0]) == b'/lib/libq2emu.so']  # it looked
+
+
+def test_the_emulator_has_no_radio_and_no_bluetooth_stopped_page(fw):
+    s = Stopped(fw, emulator=True)
+    for _ in range(3):  # stock's loop asks each pass
+        assert s.reboot() == 0
+    assert not s.page() and not s.reboots
+    assert not s.ui.timers  # no countdown to a restart either
 
 
 @pytest.mark.parametrize('key', [218, 170])  # Centre, Return

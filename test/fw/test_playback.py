@@ -2537,6 +2537,7 @@ def test_a_reboot_for_bluetooth_abnormal_leaves_a_crash_log(fw, tmp_path):
     the clean end; any other status, Restart's, writes nothing. The command then runs here under sh, with stand-ins."""
     cmds: list[bytes] = []
     fw.mock('fw_system', lambda cmd, *_: cmds.append(C.string_at(cmd)))
+    fw.mock('fw_access', lambda *_: -1)  # a Q2: no libq2emu.so (bt_stopped.c)
     fw.mock('stock_reboot_trampoline', lambda *_: 9)
     status = fw.var('fw_ctx_bt_initstatus', C.c_int)
     status.value = -102
