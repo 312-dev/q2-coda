@@ -965,6 +965,7 @@ int ringnav_paint(void *w, void *canvas) {
     az_paint(w, canvas);
     pl_tile_paint(w, canvas);
     pv_paint(w, canvas);
+    playing_rows_paint(w, canvas); /* a payload list's playing song (song_rows.c) */
     lr_edit_paint(w, canvas); /* OLED's Edit Library or Edit Home over its page (library_edit.c) */
     upnext_paint(w, canvas);  /* Up Next's rows (upnext.c) */
     paint_cover(w, canvas);

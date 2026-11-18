@@ -23,6 +23,144 @@
 
 extern void *coverflow_tracks(void *page);
 
+/* The playing song's row (docs/oled-design.md#song-rows): in every song list, the song playing or
+ * paused has its title in the accent and four bars on the right, beside its length (B) or, where
+ * the title would keep less than PLAY_TITLE_MIN px beside both or the row has no length, in the
+ * length's place (A); white on the selection. The song is known by its record's path and CUE track
+ * (a server row by its fileurl, which the Stream Cache copy playing it maps back to,
+ * catalogue_row_path), never by its title. The bars are Up Next's level bars' shape (ui_kit.h
+ * lvl_fill, 3 px wide, 4.5 px apart, 5 to 12 px), four of them, still: a list repaints nothing for
+ * them. */
+#define PLAY_BARS 4
+#define PLAY_BAR_W 3
+/* PLAY_BARS_W (navigation.h), 16: the four bars' ink, 3 px each at 0, 4, 9 and 13 */
+#define PLAY_BAR_HI 12
+#define PLAY_TITLE_MIN 80 /* B's least room for the title beside the bars and the length */
+static const unsigned char play_heights[PLAY_BARS] = { 8, 12, 5, 10 };
+/* Titles shown as the playing song's, which ringnav_style_color paints in the accent: a few, as a
+ * list may hold the song twice (a playlist). A label is also marked (PLAY_MARK) while it is here,
+ * so a freed label's address taken by another widget is not mistaken for it. */
+#define PLAY_TITLES 4
+#define PLAY_MARK "_np_title"
+static void *play_titles[PLAY_TITLES] __attribute__((section(".scratch")));
+
+static unsigned song_key(const char *path, int start, int end) {
+    if (!path || !*path) return 0;
+    unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)path, strlen(path));
+    h = (h ^ (unsigned)start) * 16777619u;
+    return ((h ^ (unsigned)end) * 16777619u) | 1;
+}
+/* r's identity for song_playing: its path and CUE track (start and end: a chapter row is another
+ * track than its file played whole); 0 for a record with no path */
+unsigned song_identity(void *r) {
+    return r ? song_key(P(r, REC_PATH), I(r, REC_CUE_START), I(r, REC_CUE_END)) : 0;
+}
+/* Whether r is the song playing or paused (nothing is while stopped), by its identity. */
+int song_playing(void *r) {
+    unsigned k = song_identity(r), at, n;
+    void *now = k && mclGetPlayStatus() != 1 ? queue_now(&at, &n) : (void *)0;
+    if (!now) return 0;
+    if (k == song_identity(now)) return 1;
+    const char *row = catalogue_row_path(now); /* a Stream Cache copy: its server row's */
+    return row && k == song_key(row, 0, 0);
+}
+/* label as the playing song's title or not; 1 when that changed (a label painted already repaints)
+ */
+int playing_title(void *label, int on) {
+    int at = -1, free = -1;
+    for (int i = 0; i < PLAY_TITLES; ++i)
+        if (play_titles[i] == label)
+            at = i;
+        else if (!play_titles[i] && free < 0)
+            free = i;
+    if (!label || on == (at >= 0)) return 0;
+    if (on) {
+        play_titles[free < 0 ? 0 : free] = label;
+        widget_set_prop_int(label, PLAY_MARK, 1);
+    } else {
+        play_titles[at] = (void *)0;
+        widget_set_prop_int(label, PLAY_MARK, 0);
+    }
+    return 1;
+}
+int playing_title_is(void *label) {
+    for (int i = 0; label && i < PLAY_TITLES; ++i)
+        if (play_titles[i] == label) return widget_get_prop_int(label, PLAY_MARK, 0);
+    return 0;
+}
+/* The four bars, their ink ending before right, standing centred on cy: the accent, white on the
+ * selection. Returns their left. */
+int playing_bars(void *canvas, int right, int cy, int selected) {
+    unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR),
+             ink = selected ? 0xffffffffu : RGBA(scheme()->tones[0] & 0xffffffu);
+    int x = right - PLAY_BARS_W, base = cy + PLAY_BAR_HI / 2;
+    for (int i = 0; i < PLAY_BARS; ++i)
+        lvl_fill(canvas, x + i * 9 / 2, base, PLAY_BAR_W, play_heights[i] * 16, ink);
+    stock_canvas_set_fill_color(canvas, fill);
+    return x;
+}
+/* Where the bars go on a row whose right column's ink ends at column (inclusive), with a text of
+ * right_w px there (its length; 0, none) and its title from left: the bars' right edge (exclusive).
+ * B, the text kept, when the title keeps PLAY_TITLE_MIN px beside both; else A, *keep 0: the bars
+ * on the column in the text's place. */
+int playing_fit(int column, int right_w, int left, int *keep) {
+    *keep =
+        right_w > 0 && column - right_w - 2 * SONG_COL_GAP - PLAY_BARS_W - left >= PLAY_TITLE_MIN;
+    return *keep ? column - right_w - SONG_COL_GAP : column + 1;
+}
+/* A payload list's song row (a list_item of a page_list): its record's identity, and whether a
+ * painter of its own (own: a playlist's, a cover row's) draws its bars through playing_row, else
+ * playing_rows_paint does after the row paints. */
+#define PLAY_KEY "_np_key"
+#define PLAY_OWN "_np_own"
+#define PLAY_WIDE "_np_wide" /* the title label's width before playing_row narrowed it */
+void playing_mark(void *item, void *r, int own) {
+    widget_set_prop_int(item, PLAY_KEY, (int)song_identity(r));
+    if (own) widget_set_prop_int(item, PLAY_OWN, 1);
+}
+/* Whether a marked row's song plays (song_playing, by the identity playing_mark kept) */
+static int marked_playing(void *item) {
+    unsigned k = (unsigned)widget_get_prop_int(item, PLAY_KEY, 0), at, n;
+    void *now = k && mclGetPlayStatus() != 1 ? queue_now(&at, &n) : (void *)0;
+    if (!now) return 0;
+    const char *row = catalogue_row_path(now);
+    return k == song_identity(now) || (row && k == song_key(row, 0, 0));
+}
+/* A marked row, after it paints: while its song plays, the bars on its right column (their ink's
+ * last px on column), its title (child 0) in the accent and ending SONG_COL_GAP and reserve px (the
+ * row's own text at its right) before them, white on the selection (selected); its title's width
+ * back once it no longer plays. Returns the room the bars take (their ink and the gap before them),
+ * which a row's own right-hand text moves left by (B), else 0. */
+int playing_row(void *item, void *canvas, int column, int reserve, int selected) {
+    if (!widget_get_prop_int(item, PLAY_KEY, 0)) return 0;
+    void *label = widget_count_children(item) ? widget_get_child(item, 0) : (void *)0;
+    int on = marked_playing(item), end = column + 1 - PLAY_BARS_W - SONG_COL_GAP - reserve;
+    if (label && playing_title(label, on)) widget_invalidate_force(label, (void *)0);
+    if (on) playing_bars(canvas, column + 1, I(item, W_H) / 2, selected);
+    if (label) {
+        int wide = widget_get_prop_int(label, PLAY_WIDE, 0);
+        if (on && I(label, W_X) + I(label, W_W) > end && end > I(label, W_X)) {
+            if (!wide) widget_set_prop_int(label, PLAY_WIDE, I(label, W_W));
+            widget_resize(label, end - I(label, W_X), I(label, W_H));
+        } else if (!on && wide) {
+            widget_set_prop_int(label, PLAY_WIDE, 0);
+            widget_resize(label, wide, I(label, W_H));
+        }
+    }
+    return on ? PLAY_BARS_W + SONG_COL_GAP : 0;
+}
+/* navigation.c ringnav_paint's, for each widget after its paint: a marked row with no painter of
+ * its own (Most Played's, Long Songs', the Ratings lists', the card's songs), its bars on the right
+ * column in place of nothing (A), lit as the wheel's selection is. */
+void playing_rows_paint(void *w, void *canvas) {
+    if (!w || !P(canvas, CANVAS_LCD) || tk_strcmp(widget_get_type(w), "list_item") ||
+        widget_get_prop_int(w, PLAY_OWN, 0))
+        return;
+    playing_row(w, canvas, 375 - geom_val(V_RIGHT_X) - 1, 0,
+                !st.touch_mode &&
+                    widget_get_prop_int(P(w, W_PARENT), SEL, -1) == widget_index_of(w));
+}
+
 /* The list w's window shows: SONGS_MIXED, SONGS_ARTIST, SONGS_ALBUM, SONGS_FOLDER, or 0, not a
  * song list. Cover Flow's album tracks (coverflow_tracks) read as an album; the other lists the
  * payload builds itself (Most Played, Long Songs) have their own rows. */
@@ -258,10 +396,17 @@ static void folder_row(void *w, void *canvas, void *row, void *title, int id, re
                : playback_video(rec) ? geom_val(V_TEXT_X)
                                      : SONG_NUM_TITLE,
         column = I(w, W_W) - 1 - geom_val(V_RIGHT_X) - HSCROLL_MARGIN,
-        len_w = measure(canvas, wlen, nlen, spx),
-        end = nlen   ? column - len_w - SONG_COL_GAP
-              : text ? column
-                     : column - FOLDER_CHEV_ROOM;
+        len_w = measure(canvas, wlen, nlen, spx), playing = text && song_playing(rec), bars = 0,
+        keep = 0;
+    playing_title(title, playing);
+    if (playing) {
+        bars = playing_fit(column, nlen ? len_w : 0, left + HSCROLL_MARGIN, &keep);
+        if (!keep) nlen = 0;
+    }
+    int end = playing ? bars - PLAY_BARS_W - SONG_COL_GAP
+              : nlen  ? column - len_w - SONG_COL_GAP
+              : text  ? column
+                      : column - FOLDER_CHEV_ROOM;
     const unsigned *name = widget_get_text(title);
     int ink = name ? measure(canvas, name, wide_len(name), tpx) : 0,
         room = end - left - HSCROLL_MARGIN;
@@ -290,6 +435,7 @@ static void folder_row(void *w, void *canvas, void *row, void *title, int id, re
         small_text(canvas, num, geom_val(V_TEXT_X) + HSCROLL_MARGIN + SONG_NUM_W - 40, 40, 1, &r);
     }
     if (nlen) small_text(canvas, wlen, column - len_w, len_w, 1, &r);
+    if (playing) playing_bars(canvas, bars, r.y + r.h / 2, selected);
     stock_canvas_set_text_color(canvas, ink0);
     st.raw_ink = raw;
 }
@@ -322,19 +468,29 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, 
     while (len[nlen] && nlen < sizeof wlen / sizeof *wlen - 1)
         wlen[nlen] = (unsigned char)len[nlen], ++nlen;
     wlen[nlen] = 0;
-    /* where the artist stands: a length takes the right column, so Right is inline beside it */
+    /* the playing song's (a greyed row's can't be): its bars beside the length or in its place */
+    int playing = rec && !edge && song_playing(rec);
+    playing_title(title, playing);
+    /* where the artist stands: a length or the bars take the right column, so Right is inline
+     * beside them */
     int place = !artist || how == SONG_ARTIST_OFF || (how == SONG_ARTIST_SELECTED && !selected) ? 0
-                : how == SONG_ARTIST_INLINE || nlen ? SONG_INLINE
-                                                    : SONG_RIGHT;
+                : how == SONG_ARTIST_INLINE || nlen || playing ? SONG_INLINE
+                                                               : SONG_RIGHT;
     int tpx = T->font_px[ROLE_TITLE], spx = T->font_px[ROLE_META];
     /* the right column (in while the A-Z index shows, az_index.c), or SONG_COL_GAP short of a
      * greyed row's offline mark: the length, a right-hand artist and the title's room all end
      * there */
     int left = ctx == SONGS_ALBUM ? SONG_NUM_TITLE : geom_val(V_TEXT_X),
         column = I(w, W_W) - 1 - az_right(w) - HSCROLL_MARGIN,
-        len_w = measure(canvas, wlen, nlen, spx);
+        len_w = measure(canvas, wlen, nlen, spx), bars = 0, keep = 0;
     if (edge && edge - SONG_COL_GAP < column) column = edge - SONG_COL_GAP;
-    int end = nlen ? column - len_w - SONG_COL_GAP : column;
+    if (playing) {
+        bars = playing_fit(column, nlen ? len_w : 0, left + HSCROLL_MARGIN, &keep);
+        if (!keep) nlen = 0;
+    }
+    int end = playing ? bars - PLAY_BARS_W - SONG_COL_GAP
+              : nlen  ? column - len_w - SONG_COL_GAP
+                      : column;
     static const unsigned spaces[] = { ' ', ' ', 0 };
     int gap = measure(canvas, spaces, 2, tpx), shown = 0;
     int ink =
@@ -366,6 +522,7 @@ void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, 
         small_text(canvas, artist, left + HSCROLL_MARGIN + ink + gap, shown, 0, &r);
     if (shown && place == SONG_RIGHT) small_text(canvas, artist, end - shown, shown, 1, &r);
     if (nlen) small_text(canvas, wlen, column - len_w, len_w, 1, &r);
+    if (playing) playing_bars(canvas, bars, r.y + r.h / 2, selected);
     stock_canvas_set_text_color(canvas, text);
     st.raw_ink = raw;
 }

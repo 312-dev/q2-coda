@@ -712,6 +712,22 @@ int song_fit(int place, int room, int title, int gap, int artist, int *shown);
 #define HSCROLL_MARGIN 2
 /* edge: the left of the offline mark where the row carries it (navigation.c offline_x), else 0 */
 void song_row(void *w, void *canvas, void *row, int id, rect_t r, int selected, int edge);
+/* song_rows.c: the playing song's row (docs/oled-design.md#song-rows), the song known by
+ * song_playing (playback.h). playing_title: label shown as its title (the accent, through
+ * ringnav_style_color's playing_title_is), 1 when that changed. playing_bars: the four bars ending
+ * before right, centred on cy, returning their left. playing_fit: the bars' right edge on a row
+ * whose right column ends at column, beside a length right_w wide (B, *keep) or in its place (A).
+ * playing_mark: a payload list's song row's record, for playing_row (its bars and title after it
+ * paints, and the room they take, which the row's own right-hand text moves left by;
+ * playing_rows_paint calls it for a row with no painter of its own). */
+#define PLAY_BARS_W 16
+unsigned song_identity(void *r);
+int playing_title(void *label, int on), playing_title_is(void *label);
+int playing_bars(void *canvas, int right, int cy, int selected);
+int playing_fit(int column, int right_w, int left, int *keep);
+void playing_mark(void *item, void *r, int own);
+int playing_row(void *item, void *canvas, int column, int reserve, int selected);
+void playing_rows_paint(void *w, void *canvas);
 void paint_art(void *w, void *canvas, const char *name, int x, int y); /* navigation.c */
 
 /* np_bar.c */

@@ -1195,6 +1195,12 @@ static const cat_ent *cat_row_of(void *r) {
     }
     return cat.row_at ? &cat.ix.e[cat.row_at - 1] : 0;
 }
+/* The fileurl of the server row r plays as (cat_row_of), for song_rows.c's song_playing: a song
+ * list names a server song by its row, the queue by the copy that plays it. */
+const char *catalogue_row_path(void *r) {
+    const cat_ent *e = cat_row_of(r);
+    return e ? ix_str(&cat.ix, e->path) : 0;
+}
 /* listen_key's, for a server row's record: its fileurl's (a server row has no CUE start). */
 static unsigned row_key(const cat_ent *e) {
     unsigned row = fnv(FNV_SEED, (const unsigned char *)ix_str(&cat.ix, e->path));

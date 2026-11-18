@@ -94,8 +94,9 @@ static void pv_show(void) {
                pv_click, pv.act[k]);
     for (int i = 0; i < n; ++i) {
         void *r = deque_at(pv.songs, (unsigned)i);
-        pv_row(pv.view, k + i, track_name(title, sizeof title, r), 0, P(r, REC_ARTIST), pv_click,
-               i);
+        playing_mark(pv_row(pv.view, k + i, track_name(title, sizeof title, r), 0, P(r, REC_ARTIST),
+                            pv_click, i),
+                     r, 1); /* pv_paint draws its bars */
     }
     /* no songs: the empty state under Add Songs, compact (a row above it: no glyph), no button of
      * its own as Add Songs is the row above (oled-design.md Empty and offline) */
@@ -241,7 +242,8 @@ static int pv_lit(void *item) {
 }
 
 /* ringnav_paint's, for a row built by pv_row: an action's glyph and its label's accent, and the
- * right-hand text, white on the selection. The title's label ends PV_GAP short of it. */
+ * right-hand text, white on the selection, after the playing song's bars where its row has them
+ * (song_rows.c playing_row). The title's label ends PV_GAP short of it. */
 void pv_paint(void *w, void *canvas) {
     void *win = pv.page ? window_of(w) : (void *)0;
     if (!win || win != pv.page || !P(canvas, CANVAS_LCD) ||
@@ -262,6 +264,7 @@ void pv_paint(void *w, void *canvas) {
             widget_set_prop_int(label, "style:normal:text_color", ink);
         return;
     }
+    end -= playing_row(w, canvas, end - 1, 0, on); /* the playing song's bars (song_rows.c) */
     if (right && *right)
         end -= ui_text(canvas, right, 0, PV_PX_15, muted, 1, end, h / 2, 150, 3) + PV_GAP;
     if (label && I(label, W_X) + I(label, W_W) != end && end > I(label, W_X))
