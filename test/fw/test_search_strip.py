@@ -188,10 +188,10 @@ def test_one_turn_stops_at_the_return_key_and_a_new_one_loops_to_the_switcher(fw
     assert s.ss.stop == 28 and s.ss.halted
     s.key(KEY_PREV, ms=GESTURE_MS - 10)  # the same turn back goes nowhere either
     assert s.ss.stop == 28
-    s.key(KEY_NEXT, ms=GESTURE_MS)  # a new turn: round to the switcher
-    assert s.ss.stop == 0 and not s.ss.halted
-    s.key(KEY_NEXT, KEY_NEXT, ms=10)
-    assert s.ss.stop == 2
+    s.key(KEY_NEXT, ms=GESTURE_MS)  # a new turn: round to the switcher, which stops it too
+    assert s.ss.stop == 0 and s.ss.halted
+    s.key(KEY_NEXT, KEY_NEXT, ms=GESTURE_MS)  # and the next turn leaves it, a tick each
+    assert s.ss.stop == 2 and not s.ss.halted
 
 
 def test_one_turn_stops_at_the_switcher_too_and_a_new_one_loops_to_the_return_key(fw, ui, song):
