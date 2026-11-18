@@ -20,6 +20,9 @@ new codec. A second is behind when the controller was handed under BEHIND of its
   ENC_WAIT ms for one: it could not make packets fast enough (the codec's cost, or the CPU taken by others).
 - **source**: nothing waiting and the encoder mostly asleep, but some sent: it was waiting for PCM, the player late.
 - **switch**: a slow second in the SWITCH_S before a codec change: the reconnect, not a stall.
+Each segment with done and fly also gets its capacity: in the seconds the controller held all its ACL buffers (fly
+at START's bufs) the radio was the limit, so the packets it delivered a second are what the link carries, set against
+what basic rate (DH5, DH3, DH1) and EDR 2 Mbps (2-DH5, 2-DH3, 2-DH1) can carry for packets of that size.
 A second with nothing sent and nothing waiting is idle (a pause, the transport let go), not a stall, and so is a slow
 second with nothing waiting beside one (the pause's or the resume's edge)."""
 import argparse
@@ -64,6 +67,7 @@ class Stream:
     end: Optional[datetime.datetime] = None
     cut: bool = False   # it ended at a codec change, not a STOP
     timely: bool = False  # its codec came from an ENCODER note (on time), not only a CODEC note
+    bufs: int = 0         # the controller's ACL buffers, from START's bufs=
 
 
 def value(v, key=''):
@@ -82,7 +86,7 @@ def median_rate(samples):
 def change(streams, cur, codec, when, late):
     """cur cut at a change to codec: the new segment. late (a CODEC note, up to a minute after the change): the
     seconds since cur's last gap in sending (under a tenth of its median) in that minute move to the new segment."""
-    nxt = Stream(len(streams) + 1, when, f'codec change from {cur.codec}', codec)
+    nxt = Stream(len(streams) + 1, when, f'codec change from {cur.codec}', codec, bufs=cur.bufs)
     if late and cur.samples:
         low = 0.1 * median_rate(cur.samples)
         gap = [i for i, s in enumerate(cur.samples) if (when - s.when).total_seconds() <= 60
@@ -123,7 +127,9 @@ def parse(lines):
         elif parts[0] == 'START':
             if cur:
                 cur.end = when
-            cur = Stream(len(streams) + 1, when, rest[5:].strip())
+            head = rest[5:].strip()
+            bufs = re.search(r'\bbufs=(\d+)', head)
+            cur = Stream(len(streams) + 1, when, head, bufs=int(bufs[1]) if bufs else 0)
             streams.append(cur)
         elif parts[0] in ('ENCODER', 'CODEC') and cur and len(parts) > 1:
             timely = parts[0] == 'ENCODER'
@@ -228,6 +234,57 @@ def mean(vals):
     return sum(vals) / len(vals) if vals else None
 
 
+# Baseband packets for an ACL packet's bytes, (payload, slots) largest first: basic rate's DH5, DH3, DH1 and EDR
+# 2 Mbps's 2-DH5, 2-DH3, 2-DH1 (the Q2 has no 3 Mbps, docs/internals.md#bluetooth-link-monitor). Each is followed
+# by the headset's own slot, so a second's 1600 slots carry 1600 / slots(n) packets of n bytes at most.
+BASIC = ((339, 5), (183, 3), (27, 1))
+EDR2 = ((679, 5), (367, 3), (54, 1))
+SLOTS_S = 1600
+OVERHEAD = 10  # bytes a packet carries to the controller beyond its baseband payload: HCI's and H5's headers
+
+
+def slots(n, kinds):
+    """Slots n bytes take, cut largest first, the last piece in the smallest packet that holds it."""
+    used = 0
+    while n > 0:
+        fits = [k for k in kinds if k[0] >= n]
+        payload, s = min(fits) if fits else kinds[0]
+        used, n = used + s + 1, n - payload
+    return used
+
+
+@dataclass
+class Capacity:
+    seconds: int          # seconds with all the controller's ACL buffers full
+    median: float         # packets a second it delivered then
+    maximum: int
+    payload: int          # bytes a packet, from the segment's rate and packet count
+    ceiling_basic: int    # the most a second at basic rate, and at EDR 2 Mbps, for packets of that size
+    ceiling_edr: int
+    verdict: str
+
+
+def capacity(stream):
+    """What the link carried while the controller was full: with all its buffers taken (fly at bufs) the radio is the
+    limit, so the packets it delivered a second (done) are its capacity, set against the basic-rate and EDR ceilings
+    for packets of this size. None for a segment with no done and fly (a log from before them)."""
+    if not stream.bufs or not any(s.f['done'] is not None and s.f['fly'] is not None for s in stream.samples):
+        return None
+    sizes = [s.f['kbps'] * 125 / s.f['acl'] for s in stream.samples if s.f['kbps'] and s.f['acl']]
+    payload = round(statistics.median(sizes)) - OVERHEAD if sizes else 0
+    basic = SLOTS_S // slots(payload, BASIC) if payload > 0 else 0
+    edr = SLOTS_S // slots(payload, EDR2) if payload > 0 else 0
+    full = [s.f['done'] for s in stream.samples if s.f['fly'] is not None and s.f['done'] is not None
+            and s.f['fly'] >= stream.bufs]
+    if len(full) < 5 or not basic:
+        return Capacity(len(full), statistics.median(full) if full else 0, max(full, default=0), payload, basic, edr,
+                        'too few saturated seconds')
+    median = statistics.median(full)
+    verdict = ('basic rate' if median <= 1.1 * basic else 'EDR 2 Mbps' if median > (basic + edr) / 2
+               else 'undecided')
+    return Capacity(len(full), median, max(full), payload, basic, edr, verdict)
+
+
 def summary(streams):
     """Per codec: (codec, seconds, link, encoder and source stall seconds, seconds with the socket's queue backed up,
     median kbps, median and lowest rssi, bluealsa's and q2guard's mean CPU in percent of one core)."""
@@ -261,6 +318,12 @@ def report(streams, notes, out=None, every=False):
         hz = f' {st.hz} Hz' if st.hz else ''
         print(f'\nSegment {st.n}: {st.codec}{hz}, {st.start:%Y-%m-%d %H:%M:%S} to {end}, {len(st.samples)} s, '
               f'median {median:g} kbps ({st.head})', file=out)
+        cap = capacity(st)
+        if cap and cap.seconds:
+            print(f'  saturated: {cap.seconds} s with all {st.bufs} ACL buffers full, the controller delivered '
+                  f'{cap.median:g} packets/s (median; most {cap.maximum}) of about {cap.payload} bytes; for those '
+                  f'basic rate carries {cap.ceiling_basic}/s at most, EDR 2 Mbps {cap.ceiling_edr}/s: {cap.verdict}',
+                  file=out)
         eps = episodes(st)
         found += [(st, e) for e in eps]
         if every:
