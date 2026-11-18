@@ -635,6 +635,9 @@ static struct {
      * in lv[SPOT_DEPTH], its id the request's, never reused, so a reply to a cancelled one matches
      * nothing */
     char pend;
+    /* hold: the top level asked for again in place under the overlay (Retry), what it shows left as
+     * it is until its rows or its error are there; 1 + the state a cancel puts back */
+    char hold;
 } br __attribute__((section(".scratch")));
 
 static void *browsing(void) { return br.page; }
@@ -778,9 +781,11 @@ static void *into(int i, const char *caption, const char *detail) {
 static void show(void) {
     level_t *l = top();
     int n = 0;
-    br.view = br.edit = 0;
     if (l->state == S_LOAD && !((wk.running || wk.done) && br.act == A_FETCH && wk.id == l->id))
         fetch(l);
+    if (br.hold && (l->state == S_LOAD || l->state == S_WAIT)) return; /* under the overlay */
+    br.hold = 0;
+    br.view = br.edit = 0;
     if (l->state == S_LOAD || l->state == S_WAIT) {
         page_list(br.page, br.page, 0, "Loading…", 0, 48);
         return;
@@ -895,7 +900,17 @@ static void load_cancel(void) {
     br.pend = 0;
     fetch_cancel();
     br.act = A_FETCH;
+    if (br.hold) /* the level as it was, still shown */
+        top()->state = br.hold - 1, br.hold = 0;
     if (br.page) widget_invalidate_force(br.page, 0);
+}
+
+/* The top level l asked for again in place under the loading overlay, what the page shows staying
+ * until its answer is there (show); with nothing shown, its Loading… page. */
+static void hold_load(level_t *l) {
+    if (br.view) br.hold = (char)(1 + l->state), widget_invalidate_force(br.page, 0);
+    l->state = S_LOAD;
+    show();
 }
 
 /* A level over the top one. A list over a level showing its rows is asked for under the loading
@@ -1072,13 +1087,13 @@ static int go(const void *unused) {
     int i = br.arg;
     char a[sizeof l->args] = "";
     br.go = 0;
-    if (br.pend) return 0; /* the wheel's Centre, or a row, while the overlay waits */
+    if (br.pend || br.hold) return 0; /* the wheel's Centre, or a row, while the overlay waits */
     if (br.next == G_SHOW)
         show();
     else if (br.next == G_SEARCH)
         push(L_CATS, "", "", "", br.term);
-    else if (l->state == S_ERROR) /* Retry */
-        l->state = S_LOAD, show();
+    else if (l->state == S_ERROR) /* Retry, under the overlay over the error page */
+        hold_load(l);
     else if (l->state == S_OLD || l->state == S_PAIR) {
         if (l->state == S_OLD && !i) spot_np();
     } else if (l->kind == L_BASE) {
@@ -1202,7 +1217,7 @@ static int br_tick(const void *unused) {
 
 static int br_leave(const void *unused) {
     br.leave = 0;
-    if (br.pend) /* the load cancelled: the page stays */
+    if (br.pend || br.hold) /* the load cancelled: the page stays */
         load_cancel();
     else if (br.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the
                          box */
@@ -1221,13 +1236,13 @@ static int br_keyup(void *ctx, void *event) {
 
 /* The browser's loading overlay, over its rows while a list loads (spot_paint, ringnav_paint's). */
 static void br_paint(void *w, void *canvas) {
-    if (br.pend && w && w == br.page) load_spinner_paint(w, canvas);
+    if ((br.pend || br.hold) && w && w == br.page) load_spinner_paint(w, canvas);
 }
 
 /* The page's touches while the loading overlay shows: taken from its rows, a lift off the spinner
  * cancelling the load (list_marks.c load_touch). */
 static int br_touch(void *ctx, void *event) {
-    return br.pend && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
+    return (br.pend || br.hold) && I(event, EVENT_TYPE) != EVT_POINTER_ABORT
                ? load_touch(br.page, event, load_cancel)
                : 0;
 }

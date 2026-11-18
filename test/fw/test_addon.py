@@ -2325,6 +2325,53 @@ def test_another_apps_page_over_a_first_open_lets_it_go(fw):
     assert p.pg.hold == 1 and lo.win == p.home and p.req.id == 2  # the first let go, this one held in its place
 
 
+# Retry on an error page: asked again under the overlay, the error page left as it is until the answer is there.
+def retrying(fw):
+    p = Page(fw)
+    p.answer(rows=[item(1)])
+    p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
+    p.answer(status=b'error', msg=b'Sign in first')
+    assert p.top.state == K_ERROR and p.top.retry == 1
+    lists, asked = len(fw.calls('scroll_view_create')), p.req.id
+    p.click(0)  # Retry
+    return p, lists, asked
+
+
+def test_retry_asks_again_under_the_overlay_over_its_error_page(fw):
+    p, lists, asked = retrying(fw)
+    assert p.pg.hold == 1 and p.top.state == K_LOAD and p.req.id == asked + 1 and p.request().endswith(b'\tmenu\n')
+    assert len(fw.calls('scroll_view_create')) == lists  # no Loading… page: the error page stays
+    p.answer(rows=[item(1), item(2)])
+    assert p.pg.hold == 0 and p.top.state == K_READY and p.top.n == 2 and len(fw.calls('scroll_view_create')) == lists + 1
+
+
+def test_retry_failing_again_shows_its_error_once_it_is_there(fw):
+    p, lists, _ = retrying(fw)
+    p.answer(status=b'error', msg=b'Still not')
+    assert p.pg.hold == 0 and p.top.state == K_ERROR and p.top.note == b'Still not'
+
+
+def test_return_gives_retry_up_and_its_error_page_stays(fw):
+    p, lists, asked = retrying(fw)
+    p.back()
+    assert p.pg.hold == 0 and p.top.state == K_ERROR and p.backs == 0 and p.req.running == 0 and not p.req.buf
+    assert len(fw.calls('scroll_view_create')) == lists
+    p.tick()
+    assert p.top.state == K_ERROR and len(fw.calls('scroll_view_create')) == lists  # nothing opens late
+
+
+def test_centre_on_retry_while_it_loads_sends_nothing_again(fw):
+    p, lists, asked = retrying(fw)
+    p.click(0), p.click(1)
+    assert p.req.id == asked + 1 and p.pg.hold == 1
+
+
+def test_a_tap_off_the_spinner_gives_retry_up(fw):
+    p, lists, asked = retrying(fw)
+    assert touch(p, 'EVT_POINTER_DOWN', 40, 100) == 11 and touch(p, 'EVT_POINTER_UP_BEFORE', 40, 100) == 11
+    assert p.pg.hold == 0 and p.top.state == K_ERROR
+
+
 def test_a_level_under_another_keeps_its_reply_and_asks_again_on_back(fw):
     p = Page(fw)
     p.answer(rows=[item(1, b'list')])

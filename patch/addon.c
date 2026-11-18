@@ -2614,6 +2614,8 @@ static void enter(const lv_t *next) {
 static void load_cancel(void) {
     pg.pend = 0;
     req_cancel();
+    if (pg.hold) /* Retry given up: its error page, still shown, as it was */
+        pg.hold = 0, top()->state = K_ERROR;
     if (pg.page) widget_invalidate_force(pg.page, 0);
 }
 
@@ -2913,7 +2915,7 @@ static int search_left(void *ctx, void *event) {
 static int swipe(void *ctx, void *event) {
     (void)ctx;
     int type = I(event, EVENT_TYPE);
-    if (pg.pend && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
+    if ((pg.pend || pg.hold) && type != EVT_POINTER_ABORT) /* the overlay takes every touch */
         return load_touch(pg.page, event, load_cancel);
     if (type == EVT_POINTER_ABORT || pg.nsec < 2 || pg.depth != 1 || pg.edit) {
         pg.sdown = pg.sclaim = 0;
@@ -3025,7 +3027,7 @@ static int go(const void *unused) {
     int i = pg.arg;
     char a[sizeof l->args] = "";
     pg.go = 0;
-    if (pg.pend) return 0; /* the wheel's Centre, a row or an icon while the overlay waits */
+    if (pg.pend || pg.hold) return 0; /* the wheel's Centre, a row or an icon while the overlay waits */
     if (pg.next == G_SHOW)
         show();
     else if (pg.next == G_SECTION) { /* a swipe: the next or previous section, none past the ends */
@@ -3053,7 +3055,8 @@ static int go(const void *unused) {
                 app_stop(app(), 1);
             else if (!app()->launched || access(app()->pid, 0))
                 launch(app());
-            l->state = K_LOAD, show();
+            /* asked again under the loading overlay, the error page left as it is meanwhile */
+            l->state = K_LOAD, pg.hold = 1, widget_invalidate_force(pg.page, 0), show();
         }
     } else if (l->state != K_READY) {
     } else if (i == l->n) { /* More…, as a level of its own; Loading… does nothing */
@@ -3111,7 +3114,7 @@ static int tick(const void *unused) {
 static int leave(const void *unused) {
     (void)unused;
     pg.leave = 0;
-    if (pg.pend) /* the load cancelled: the page stays */
+    if (pg.pend || pg.hold) /* the load cancelled: the page stays */
         load_cancel();
     else if (pg.edit) /* the search box emptied, so no search; its blur shuts the keyboard, then the box
                   */
@@ -3738,7 +3741,7 @@ void addon_paint(void *w, void *canvas) {
         stock_canvas_set_fill_color(canvas, fill);
         return;
     }
-    if (pg.pend && w == pg.page) load_spinner_paint(w, canvas); /* over the page's rows */
+    if ((pg.pend || pg.hold) && w == pg.page) load_spinner_paint(w, canvas); /* over the page */
     if (!qp.page || w != qp.view || !P(canvas, CANVAS_LCD)) return;
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR);
     qr_paint(w, canvas);

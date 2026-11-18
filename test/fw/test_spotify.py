@@ -8,7 +8,7 @@ import ctypes as C
 import pytest
 
 from conftest import O, Files, STRIP_SEARCH, strip_return
-from test_streaming import (SPOT_DEPTH, S_READY, A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
+from test_streaming import (SPOT_DEPTH, S_ERROR, S_READY, A_CAPS, A_DOWNLOAD, A_PLAY, A_PREVIEW, A_REMOVE, A_SIGNOUT, L_DOWNLOADS, L_JOB,
                             L_LIST, L_SELECT, L_STORAGE, S_OLD, S_PAIR, S_WAIT, W_NOSOCK, Br, Sp, Wk, track)
 
 STATE, DOWNLOAD, LOG, OUT = '/tmp/q2-librespot.state', '/tmp/q2-librespot.download', '/mnt/mmc/.spotify/spot.log', '/tmp/q2-librespot.out'
@@ -1309,3 +1309,38 @@ def test_the_search_box_gives_the_strip_its_magnifier(fw):
     b.menu()
     b.click(SEARCH)
     assert strip_return(fw, b.br.edit) == STRIP_SEARCH
+
+
+# Retry on the browser's error page: asked again under the overlay, the error page left as it is meanwhile.
+def retrying(fw):
+    b = Browser(fw)
+    b.menu()
+    b.click(LIKED)
+    b.answer(status=b'error', msg=b'Spotify is offline')
+    assert b.top.op == b'liked' and b.captions() == ['Retry']
+    writes, asked = len(b.w.writes), b.wk.id
+    b.click(0)
+    return b, writes, asked
+
+
+def test_spotify_s_retry_asks_again_under_the_overlay(fw):
+    b, writes, asked = retrying(fw)
+    assert b.br.hold and b.wk.id == asked + 1 and b.request().endswith(b'\tliked\n')
+    assert b.captions() == ['Retry'] and len(b.w.writes) == writes  # no Loading… page
+    b.answer(rows=[track(1), track(2)])
+    assert not b.br.hold and b.top.state == S_READY and len(b.captions()) == 2
+
+
+def test_return_gives_spotify_s_retry_up_and_its_error_page_stays(fw):
+    b, writes, asked = retrying(fw)
+    b.back()
+    assert not b.br.hold and b.br.depth == 2 and b.top.state == S_ERROR and b.captions() == ['Retry']
+    assert b.wk.running == 0 and not b.wk.buf
+    b.tick()
+    assert b.captions() == ['Retry']  # nothing opens late
+
+
+def test_centre_on_spotify_s_retry_while_it_loads_sends_nothing_again(fw):
+    b, writes, asked = retrying(fw)
+    b.click(0)
+    assert b.wk.id == asked + 1 and b.br.hold
