@@ -722,6 +722,50 @@ def test_smoke_turns_bluetooth_off_and_keeps_the_rest_of_the_config():
     assert smoke.bluetooth_off('[A]\nX=2\n') == '[A]\nX=2\n[SYSSET]\nBLUETOOTH=0\n'
 
 
+def guard_run(monkeypatch, answers, stacks):
+    """smoke's Emulator.guard() over q2guard answers and window stacks given in turn (the last of each repeats);
+    the keys it pressed."""
+    keys = []
+    state = {'state': 'done', 'card': 'nosensor', 'seq': '1'}
+    feed = iter(answers)
+    last: list = [None]
+
+    def files(pid):
+        last[0] = next(feed, last[0])
+        return state, dict(last[0])
+    shown = iter(stacks)
+    top: list = [None]
+
+    def stack():
+        top[0] = next(shown, top[0])
+        return [('normal', 'system_bar'), ('normal', 'home_page')] + ([('dialog', top[0])] if top[0] else [])
+    monkeypatch.setattr(smoke, 'guard_files', files)
+    e = smoke.Emulator.__new__(smoke.Emulator)
+    e.pid, e.log = 1, lambda m: None
+    e.stack, e.settle = stack, lambda box=None: None
+    e.q2emu = lambda *a: keys.append(a)
+    e.guard()
+    return keys
+
+
+def test_smoke_waits_for_demo_to_name_a_card_it_has_just_shown(monkeypatch):
+    """demo puts the guardian's card in its window stack a few ms before it writes `card nosensor` to its answer
+    file (hg_info: the card, then hg_answer). A boot step that read the file just before the card came up and the
+    stack just after saw an unnamed sortselect_dialog and failed: smoke's first-run flake on 2026-11-18 (02:46,
+    03:05, 12:42), which a boot loop with a 20 ms poll hit on 8 boots of 10, and on none of 10 with this wait."""
+    keys = guard_run(monkeypatch, [{}, {'card': 'nosensor'}, {'card': '-'}],
+                     ['sortselect_dialog', 'sortselect_dialog', None])
+    assert keys == [('key', 'centre')]
+    # a card demo never names is still a failure, once demo has had the time to name it
+    monkeypatch.setattr(smoke, 'ANSWER_S', .2)
+    try:
+        guard_run(monkeypatch, [{'card': '-'}], ['sortselect_dialog'])
+    except smoke.Failed as why:
+        assert 'a dialog over Home' in str(why)
+    else:
+        raise AssertionError('an unnamed confirm card passed')
+
+
 def test_smoke_confirms_only_the_guardian_cards_demo_vouches_for_at_boot():
     """smoke.py's boot step (boot_rule): Home on top goes on; a confirm card demo's answer file names as one of
     q2guard's must-confirm cards is confirmed; the same dialog without that word, or any other window, fails."""

@@ -80,9 +80,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAVY = pathlib.Path(os.environ.get('Q2_HEAVY', pathlib.Path.home()/'.local/bin/q2-heavy'))
 FLOOR = 4.0  # GB of MemAvailable a new suite must leave
 RAMP = 30    # s: a suite this young may not have reached its peak yet, so its estimate still counts
-# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (the planned four:
-# their own runs on 2026-11-18, under 0.25 GB each): the
-# order they start in and what each needs free.
+# A suite's peak memory (GB) and how long it takes alone (s), from the gate's runs on 2026-11-16 (PLANNED's
+# from their own runs on 2026-11-18, each under 0.25 GB): the order they start in and what each needs free.
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
