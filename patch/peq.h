@@ -517,6 +517,8 @@ void addon_q2app(const char *id, char *path, unsigned n);
  * catalogue_load: ringnav_load's queue (0 as it is, 1 *own instead, 2 nothing loaded). */
 extern int catalogue_source;
 int catalogue_on(void), catalogue_path(const char *path), catalogue_unavailable(void *r);
+/* catalogue.c: the server row (its fileurl) record r's Stream Cache copy plays, or 0 */
+const char *catalogue_row_path(void *r);
 int catalogue_album_unavailable(void *r), catalogue_artist_unavailable(void *r);
 int catalogue_seconds(const char *path), catalogue_copy_seconds(const char *path), catalogue_load(void *q, int *at, void **own);
 int catalogue_access(const char *path, int mode); /* stock's play check, tools/build.py */

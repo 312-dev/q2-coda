@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 import host
-from conftest import FNV_PRIME, O, Deques, Files, Rows, claim, fnv1a, high_halves, in_fork, libc  # noqa: F401
+from conftest import FNV_PRIME, O, Deques, Files, Rows, claim, fnv1a, high_halves, in_fork, libc, stock_start_with  # noqa: F401
 
 MAGIC = 0x5132524e
 HEADER = '<14I'
@@ -2743,7 +2743,11 @@ def test_a_users_seek_stamps_before_stock(fw, mcl, press):
     assert fw.fn('ringnav_seek_time', C.c_int, C.c_int)(30) == 5031
 
 
-# A pick of the file playing, holding its place: the same row starts nothing; another list's goes back to it.
+# Stock's sites that start a pick (playback.c), which the C tells by its return address.
+PAGE_PICK_RET, ALBUM_PLAY_RET, ALBUMINFO_PLAY_RET = 0x53e514, 0x4a97c0, 0x4ac008
+
+
+# A pick of the file playing: the same row starts nothing; another list's plays on with that list after it.
 @pytest.fixture
 def keeps(fw, mcl, scratch, player):
     keeps = Held(fw, mcl, scratch, player.load([player.song(b'/m/%d.m4b' % i) for i in range(3)], 1))
@@ -2762,14 +2766,54 @@ def test_the_playing_rows_pick_from_its_own_list_starts_nothing(fw, keeps, playe
 
 
 @pytest.mark.parametrize('rows, at, kind', [([1, 0, 2], 0, LIBRARY), ([0, 1], 1, LIBRARY), ([0, 1, 2], 1, FOLDER)])
-def test_the_playing_file_from_another_list_goes_back_to_its_place(fw, keeps, player, rows, at, kind):
-    other = player.deques.new([keeps.rows[i] for i in rows])  # another row, another size or another class
-    player_start(fw)(other, at, kind, 0)
-    assert [a[:3] for _, a in fw.calls('stock_player_start_trampoline')] == [(other, at, kind)]
-    assert (keeps.st('rs_go').value, keeps.st('rs_go_key').value) == (600, 0x1234)
+@pytest.mark.parametrize('place', [True, False])
+def test_the_playing_file_from_another_list_plays_on_with_that_lists_songs_after_it(fw, keeps, player, rows, at, kind,
+                                                                                    place):
+    """Another row or another size, each its own record of the playing file: nothing is sent to the player (no
+    load, no seek back), whether the track holds a place or not. From a list of the queue's class the queue becomes
+    the playing song followed by the list's songs after it (playback_queue_rest, as a radio of it does); from
+    another class (a folder's rows over a library queue) it stays as it was."""
+    keeps.st('rs_long').value = place
+    fw.mock('fw_deque_pop_back', lambda q, *_: player.deques[q].pop() and 0)
+    C.c_uint.from_address(O['MCL_POOL']).value = player.deques.new()  # stock shuffle's pool, which an edit keeps
+    other = player.deques.new([player.song(b'/m/%d.m4b' % i) for i in rows])
+    assert player_start(fw)(other, at, kind, 0) == 1
+    assert not fw.calls('stock_player_start_trampoline') and not fw.calls('stock_load_trampoline')
+    assert keeps.st('rs_go').value == 0
+    queue = paths(player.deques[player.handle])
+    if kind == LIBRARY:
+        assert queue == [b'/m/1.m4b'] + [b'/m/%d.m4b' % i for i in rows[at + 1:]] and player.mcl.pos == 0
+    else:
+        assert queue == [b'/m/0.m4b', b'/m/1.m4b', b'/m/2.m4b'] and player.mcl.pos == 1
 
 
-@pytest.mark.parametrize('case', ['another file', 'another cue track', 'stopped', 'dlna', 'natural', 'grouping', 'no place',
+@pytest.mark.parametrize('ret', [PAGE_PICK_RET, ALBUMINFO_PLAY_RET])
+@pytest.mark.parametrize('status', [2, 3])
+def test_a_songs_row_of_the_playing_song_opens_now_playing_and_sends_nothing(fw, keeps, player, stock_call, ret, status):
+    """The user's report: a tap on the playing song's row restarted it. A song holds no place, which was the only
+    pick of the playing file stock didn't load again; now no pick of it loads. A paused one plays on."""
+    keeps.st('rs_long').value = 0
+    keeps.status = status
+    start = stock_call(ret, 'ringnav_player_start', C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_int)
+    assert start(player.handle, 1, LIBRARY, 0) == 1
+    assert not fw.calls('stock_player_start_trampoline') and not fw.calls('stock_load_trampoline')
+    assert now_playing(fw) == ([b'playing_page'] if ret == ALBUMINFO_PLAY_RET else [])
+    assert len(fw.calls('player_play_pause')) == (status == 3)
+
+
+def test_a_server_songs_row_of_the_song_playing_keeps_the_queue(fw, keeps, player):
+    """A list holding a server row (its fileurl under /mnt/mmc/.<app>/cat/): the press is the playing song's by its
+    path, so nothing loads, and the queue stays as it is, as the firmware can't play a server row after it."""
+    url = b'/mnt/mmc/.subsonic/cat/al1/s1.flac'
+    player.load([player.song(b'/m/0.m4b'), player.song(url)], 1)
+    fw.mock('tk_str_start_with', stock_start_with)
+    other = player.deques.new([player.song(url), player.song(b'/mnt/mmc/.subsonic/cat/al1/s2.flac')])
+    assert player_start(fw)(other, 0, LIBRARY, 0) == 1
+    assert not fw.calls('stock_player_start_trampoline')
+    assert paths(player.deques[player.handle]) == [b'/m/0.m4b', url] and player.mcl.pos == 1
+
+
+@pytest.mark.parametrize('case', ['another file', 'another cue track', 'stopped', 'dlna', 'natural', 'grouping',
                                   'past the list'])
 def test_a_pick_that_keeps_nothing_is_stocks(fw, keeps, player, case):
     at, q = {'another file': 2, 'past the list': 3}.get(case, 1), player.handle
@@ -2779,14 +2823,12 @@ def test_a_pick_that_keeps_nothing_is_stocks(fw, keeps, player, case):
     keeps.status = 1 if case == 'stopped' else 2
     fw.var('press_natural', C.c_int).value = case == 'natural'  # an app's .play
     player.s.grouping = case == 'grouping'  # Shuffle Albums' own load
-    keeps.st('rs_long').value = case != 'no place'
     player_start(fw)(q, at, 2 if case == 'dlna' else LIBRARY, 0)
     assert len(fw.calls('stock_player_start_trampoline')) == 1 and keeps.st('rs_go').value == 0
 
 
 # Calls from stock's own sites, which the C tells by its return address.
 VIEW_QUEUE_RET, UNPLAYABLE_NEXT_RET, LOAD_DIRECTORY_RET, SPEED_RECONNECT_RET = 0x53acf8, 0x4f4ddc, 0x5d4cb4, 0x51e04c
-PAGE_PICK_RET, ALBUM_PLAY_RET, ALBUMINFO_PLAY_RET = 0x53e514, 0x4a97c0, 0x4ac008
 
 
 @pytest.fixture
@@ -2828,8 +2870,10 @@ def test_a_pick_of_the_playing_file_from_a_page_shows_it_playing(fw, keeps, play
     ('view queue', 1, True), ('view queue', 2, False),
     ('elsewhere', 1, False),  # the queue's delete, a DLNA or URL play: stock's start, even on the playing row
 ])
-def test_view_queues_row_of_the_playing_track_opens_now_playing(fw, keeps, player, stock_call, site, at, kept):
+@pytest.mark.parametrize('place', [True, False])  # a song holding no place is never sent again either
+def test_view_queues_row_of_the_playing_track_opens_now_playing(fw, keeps, player, stock_call, site, at, kept, place):
     keeps.status = 3
+    keeps.st('rs_long').value = place
     if site == 'view queue':
         start = stock_call(VIEW_QUEUE_RET, 'ringnav_start_queue', C.c_int, C.c_int)
     else:
