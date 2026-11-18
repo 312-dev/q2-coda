@@ -1,6 +1,7 @@
 /* q2guard: the heat recorder and overheat guardian (docs/internals.md#overheat-guardian). The
  * decisions, the log line and the log's rotation, with no reads of the device: q2guard_core.c,
- * tested on this machine by test/unit/test_q2guard.py. The device's side is q2guard.c. */
+ * tested on this machine by test/unit/test_q2guard.py, as is the PMIC's die temperature reader,
+ * q2guard_pmic.c, over a bus it is given. The device's side is q2guard.c. */
 #ifndef Q2GUARD_H
 #define Q2GUARD_H
 
