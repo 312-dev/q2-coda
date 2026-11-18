@@ -165,7 +165,8 @@ static void glide(int off) {
  * emptied for Return and put back after, from a copy: stock's widget_get_prop_str answers the
  * window's own field (window_base_get_prop), and the clear's tk_str_copy reallocs that block to one
  * byte, so the pointer read would be "" or freed by then (test/patch.py, 02_navigation_pull).
- * A hint too long for the copy is left in place: the window slides out once more. */
+ * No hint (NULL, as stock answers for a window never given one, or "") is left alone, and one too
+ * long for the copy is left in place: the window slides out once more. */
 static void go_back(void) {
     void *page = sb.page, *wm = window_manager();
     char close[64];

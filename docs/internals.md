@@ -1158,7 +1158,7 @@ ponytail: every wired manual start comes about 130 ms later. A stamp left unspen
 
 ## Unpause
 
-`q2player` pauses with `snd_pcm_pause` (a device that cannot pause plays out what it holds, then waits) and resumes under the DAC's mute with the 130 ms wait ([Wired start](#wired-start)). The stock player's resume skipped what the DMA held at the pause (`soc_aic.ko` restarts its ring at the first descriptor), which Q2 Muse's patched player rewrote from a ring of its own; `q2player` does not yet, and whether anything is skipped is phase 6's recording ([player-plan: Parity checklist](player-plan.md#parity-checklist) row 60). `mute_stamp` (`patch/crossfade.c`) still writes `/tmp/q2mute`, which nothing reads now.
+`q2player` pauses with `snd_pcm_pause` (a device that cannot pause plays out what it holds, then waits) and resumes under the DAC's mute with the 130 ms wait ([Wired start](#wired-start)). The stock player's resume skipped what the DMA held at the pause (`soc_aic.ko` restarts its ring at the first descriptor), which Q2 Muse's patched player rewrote from a ring of its own; `q2player` does not yet, and whether anything is skipped is phase 6's recording ([player-plan: Parity checklist](player-plan.md#parity-checklist) row 60).
 
 ## Large MP3s
 
