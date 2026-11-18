@@ -1673,6 +1673,44 @@ def test_a_list_scrolled_to_its_end_keeps_its_padding_through_stock_s_relayout(f
     assert view.int_at(O['SCROLL_Y']).value == h
 
 
+@pytest.mark.parametrize('animating', [0, 1])
+def test_a_relayout_puts_a_padded_list_s_scroll_back_before_any_frame_draws_it(fw, st, animating):
+    """Stock's list layout of a list scrolled to its end (the Bluetooth page's rebuild on each scan result, the page
+    back on top from Headset Volume) puts stock's height back and AWTK clamps the scroll to it. ipod_list_layout pads
+    the content again and puts back the scroll the last paint saw, there and then: left to the paint's end, the frame
+    drew the rows at the clamp, a pad lower than the scroll the paint then set, and a later repaint of part of the
+    screen at that scroll left both (Settings > Bluetooth's Other Devices header twice, seen on V18Ri); a page coming
+    back on top, whose slide-in paints skip the fades, flicked down then up. Each relayout, one after another."""
+    rows, h, box = 12, THEMES[OLED]['page_detail'], 294
+    view, _, _ = detail_page(fw, st, rows=rows, touch=1)
+    fw.mock('scroll_view_set_offset', lambda w, x, y, *_: struct.pack_into('<i', view.block, O['SCROLL_Y'], y) or 0)
+    paint = lambda: fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)(view.addr, Canvas(fw).addr)
+    paint()
+    padded = view.int_at(O['VIEW_CONTENT_H']).value
+    end_top = padded - box  # the wheel's end: the last row's foot on the list end
+    view.int_at(O['SCROLL_Y']).value = end_top
+    paint()
+    # stock's layouter: the rows' foot as the content, and AWTK's clamp of the scroll to it
+    content, scroll = (C.addressof(view.int_at(O[k])) for k in ('VIEW_CONTENT_H', 'SCROLL_Y'))
+    code = (b'\x48\xb8' + struct.pack('<Q', content) + b'\xc7\x00' + struct.pack('<i', rows * h) +
+            b'\x48\xb8' + struct.pack('<Q', scroll) + b'\xc7\x00' + struct.pack('<i', rows * h - box) +
+            b'\xb8' + struct.pack('<i', 6) + b'\xc3')  # movabs rax; mov dword [rax], imm (twice); mov eax, 6; ret
+    address = O['LIST_VIEW_LAYOUT']
+    claim(address)
+    saved = C.string_at(address, len(code))
+    C.memmove(address, code, len(code))
+    try:
+        fw.mock('window_manager_is_animating', lambda *_: animating)
+        layout = fw.fn('ipod_list_layout', C.c_int, C.c_void_p, C.c_void_p)
+        for _ in range(3):
+            assert layout(None, view.addr) == 6  # stock's answer
+            assert view.int_at(O['VIEW_CONTENT_H']).value == padded and view.int_at(O['SCROLL_Y']).value == end_top
+            paint()
+            assert view.int_at(O['SCROLL_Y']).value == end_top
+    finally:
+        C.memmove(address, saved, len(saved))
+
+
 def test_a_list_cut_above_the_list_end_has_no_fade(fw, st):
     ui = oled(fw, st)
     view = ui.add('scroll_view', ui.window('about_page'), (0, 26, 375, 200))

@@ -1021,6 +1021,29 @@ static int list_pad(void *w) {
                ? widget_get_prop_int(w, LIST_PAD, 0)
                : 0;
 }
+/* w's content padded by pad past the rows' foot. A relayout (a page back on top, a list rebuilt
+ * whole, as Settings > Bluetooth's on each scan result) puts stock's height back, unpadded, and
+ * AWTK clamps the scroll to it, which put a list scrolled to its end down until its last row sat on
+ * the screen's foot: the scroll the last paint saw goes back while it fits. */
+static void list_pad_to(void *w, int pad) {
+    int content = I(w, VIEW_CONTENT_H) - list_pad(w), h = I(w, W_H), off = I(w, SCROLL_Y),
+        kept = widget_get_prop_int(w, LIST_TOP, 0) - 1;
+    int relaid = widget_get_prop_int(w, LIST_PADDED, -1) != I(w, VIEW_CONTENT_H);
+    widget_set_prop_int(w, LIST_PAD, pad);
+    I(w, VIEW_CONTENT_H) = content + pad;
+    widget_set_prop_int(w, LIST_PADDED, content + pad);
+    if (relaid && kept > off && kept <= content + pad - h)
+        scroll_view_set_offset(w, I(w, SCROLL_X), kept);
+}
+/* After stock's list layout (ipod_list_layout): a list list_fade padded gets its pad and its scroll
+ * back at once, before a frame draws it. Left to list_fade, at the end of the next paint, that
+ * frame drew the rows at the clamp, the pad lower, and the scroll then moved under it: a later
+ * repaint of part of the screen at that scroll left both (Settings > Bluetooth's headers twice
+ * under its scans), and a page back on top, whose slide-in skips the fades, flicked down and up. */
+static void list_relaid(void *w) {
+    if (w && widget_get_prop_int(w, LIST_PADDED, -1) >= 0)
+        list_pad_to(w, widget_get_prop_int(w, LIST_PAD, 0));
+}
 static void list_fade(void *w, void *canvas) {
     int k = w && P(canvas, CANVAS_LCD) ? kind(w) : 0;
     if ((k != 1 && k != 2) || home_rest(w, (int *)0) || modal_rows_of(w) ||
@@ -1034,16 +1057,8 @@ static void list_fade(void *w, void *canvas) {
     int off = k == 2 ? I(w, TABLE_TOP) : I(w, SCROLL_Y),
         content = k == 2 ? I(w, TABLE_ROWS) * I(w, ROW_HEIGHT) : I(w, VIEW_CONTENT_H) - list_pad(w);
     if (k == 1) { /* a drag's end at the wheel's */
-        int pad = bottom - end, h = I(w, W_H), kept = widget_get_prop_int(w, LIST_TOP, 0) - 1;
-        /* A relayout (the page back on top) puts stock's height back, unpadded, and AWTK clamps
-         * the scroll to it, which put a list scrolled to its end down until its last row sat on
-         * the screen's foot: the scroll the last paint saw goes back while it fits. */
-        int relaid = widget_get_prop_int(w, LIST_PADDED, -1) != I(w, VIEW_CONTENT_H);
-        widget_set_prop_int(w, LIST_PAD, pad);
-        I(w, VIEW_CONTENT_H) = content + pad;
-        widget_set_prop_int(w, LIST_PADDED, content + pad);
-        if (relaid && kept > off && kept <= content + pad - h)
-            scroll_view_set_offset(w, I(w, SCROLL_X), off = kept);
+        list_pad_to(w, bottom - end);
+        off = I(w, SCROLL_Y);
         widget_set_prop_int(w, LIST_TOP, off + 1);
     }
     int s0 = 1, s1 = 0; /* the selected row, on the screen */
