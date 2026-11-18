@@ -49,7 +49,7 @@ import q2ci  # noqa: E402
 
 ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
-BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'flac', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
+BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
 # test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
 # page_parallax.c and playlist_art.c. It is in no gate tier, so a change to any of these plans it (in `other`).

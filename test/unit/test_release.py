@@ -74,12 +74,11 @@ def scripts(monkeypatch):
 def test_validate_runs_every_suite(tmp_path, scripts):
     d = built(tmp_path/'b')
     release.validate(d)
-    names = [(pathlib.Path(a[1]).name, a[2:]) for a, _ in scripts]
+    names = [(pathlib.Path(a[1]).relative_to(release.ROOT/'test').as_posix(), a[2:]) for a, _ in scripts]
     s = str(d)
     assert names == [('peq.py', []), ('build.py', ['--build', s]), ('patch.py', [s]), ('playback.py', [s]), ('m4b.py', [s]),
-                     ('ldac.py', [s]), ('id3.py', [s]), ('headset_io.py', [s]), ('bluealsa.py', [s]), ('coverflow.py', []),
-                     ('mp3.py', []), ('mp3_gapless.py', []), ('mp3_gapless_player.py', [s]), ('player_seam.py', [s]), ('bt_resample.py', [s]),
-                     ('xfade_player.py', [s]), ('hci_natural.py', [s]), ('hci_ao.py', [s]), ('hci_wait.py', [s]), ('remote.py', [])]
+                     ('ldac.py', [s]), ('headset_io.py', [s]), ('bluealsa.py', [s]), ('coverflow.py', []),
+                     ('player/run.py', []), ('remote.py', [])]
     assert all(k == {} for _, k in scripts)
     assert all(a[0] == release.sys.executable and a[1] == release.ROOT/'test'/n for (a, _), (n, _) in zip(scripts, names))
 

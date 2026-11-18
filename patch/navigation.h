@@ -819,8 +819,6 @@ void cover_wake_poll(void); /* cover_wake.c: the album cover thread woken, every
 
 /* power_rows.c */
 void power_rows(void *view);
-/* player_choice.c */
-void player_choice_row(void *view);
 
 /* usb_charge.c: wrappers for charging, configuration loading and USB gadget dispatch. */
 int ringnav_usb_charge(int on), usb_charge_held(void);

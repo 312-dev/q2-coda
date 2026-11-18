@@ -73,12 +73,8 @@ def suites(directory):
     runs = [(test, subprocess.Popen([sys.executable, ROOT/f'test/{test}.py', *map(str, args)]))
             for test, *args in (('peq',), ('build', '--build', directory), ('patch', directory),
                                 ('playback', directory), ('m4b', directory), ('ldac', directory),
-                                ('id3', directory), ('headset_io', directory), ('bluealsa', directory),
-                                ('coverflow',), ('mp3',), ('mp3_gapless',),
-                                ('mp3_gapless_player', directory), ('player_seam', directory), ('bt_resample', directory),
-                                ('xfade_player', directory), ('hci_natural', directory),
-                                ('hci_ao', directory), ('hci_wait', directory),
-                                ('remote',))]
+                                ('headset_io', directory), ('bluealsa', directory),
+                                ('coverflow',), ('player/run',), ('remote',))]
     failed = [f'test/{test}.py' for test, suite in runs if suite.wait()]
     check(not failed, f'Failed: {", ".join(failed)}')
 

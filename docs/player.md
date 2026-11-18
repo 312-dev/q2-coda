@@ -295,7 +295,7 @@ A held Previous or Next scans the track (`patch/seek.c`, [internals: Scan](inter
 - every log line has the monotonic time in ms; the DAC's ioctls are logged with their argument, and `snd_pcm_pause`, `snd_pcm_drop`, `snd_pcm_drain` and `snd_pcm_prepare` with their order among them;
 - `readdir` and `scandir` are rebuilt on `readdir64`: under qemu-user the host hands out 64-bit directory offsets, which the guest's 32-bit `readdir` cannot hold, so on ext4 every directory read as empty after its first entry (demo's Folder page, its library scan, ALSA's `alsa.conf.d`); and a stand-in `nice` runs demo's `nice -n -5 hciplayer` at the priority the sandbox has.
 
-`fakedemo.py --emu` also tries the fallback ([player-plan.md](player-plan.md#architecture)): `--stock` puts a player, xz-compressed as the build installs it, at `/usr/lib/hciplayer-stock/hciplayer.xz`, `--switch` makes `/mnt/data/stock-player` (Settings' Player: Stock), and `--killall N` has a shell in the sandbox list each process's name and command line in `ps.txt` and run demo's `killall -9 hciplayer` N seconds in.
+`fakedemo.py --emu`'s `--killall N` has a shell in the sandbox list each process's name and command line in `ps.txt` and run demo's `killall -9 hciplayer` N seconds in.
 
 ```sh
 python3 test/player/music.py MUSIC

@@ -405,16 +405,6 @@ def validate_assets(directory):
     STOCK_NAMED_ICONS = ('menu_coverflow.png', 'menu_coverflowdown.png')
     def read(image, rel):
         return subprocess.check_output(['unsquashfs', '-cat', str(directory/image), rel])
-    def patched_hciplayer():
-        """The patched stock hciplayer the image ships: xz-compressed under PLAYER_STOCK_DIR (player/main.c's STOCK_XZ)
-        with q2player at usr/bin/hciplayer, as every build but a --stock-player one has it."""
-        from build import PLAYER_STOCK_DIR
-        player = read('rootfs.squashfs', 'usr/bin/hciplayer')
-        if 'q2player_sha256' not in manifest:
-            return player
-        assert manifest['q2player_sha256'] == sha(player)
-        import lzma
-        return lzma.decompress(read('rootfs.squashfs', PLAYER_STOCK_DIR.decode() + '/hciplayer.xz'))
     # Every stock UI asset with Chinese text is given in English (english_ui), the edited ones after their edit.
     ui = 'release/assets/default/raw/ui/'
     chinese = {l.removeprefix('squashfs-root/'+ui) for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
@@ -621,18 +611,9 @@ def validate_assets(directory):
     check_bluetoothd(directory)
     from build import SCROBBLE_CA
     assert read('rootfs.squashfs', SCROBBLE_CA) == (ROOT/'assets/scrobble-ca.pem').read_bytes()
-    # The whole Mozilla bundle, for stock's HTTPS and the player's; ffmpeg's tls options in the patched hciplayer
-    # default to it.
+    # The whole Mozilla bundle, for stock's HTTPS and the player's.
     from build import STOCK_CA, STOCK_CA_SHA
     assert sha(read('rootfs.squashfs', STOCK_CA)) == STOCK_CA_SHA
-    from peq import TLS_OPTIONS, TLS_DEFAULTS
-    player, stock_player, pps = patched_hciplayer(), read('stock.squashfs', 'usr/bin/hciplayer'), symbols(directory/'peq'/'peq.elf')
-    for address, value in TLS_DEFAULTS:
-        off = fileoff(stock_player, address)
-        assert struct.unpack_from('<I', stock_player, off)[0] == 0
-        assert struct.unpack_from('<I', player, off)[0] == (pps[value] if isinstance(value, str) else value)
-    ca = fileoff(player, pps['player_ca_file'])
-    assert player[ca:player.index(b'\0', ca)] == b'/' + STOCK_CA.encode()
     # each subset face ships, cut to what its <NAME>_RANGES lists, with its licence files
     from build import FACES, FONT_DIR, FONT_NOTICES, face_font
     for face in FACES.values():
@@ -683,40 +664,10 @@ def validate_assets(directory):
     # hciplayer's code (.text) differs from stock only in the VBR scan branch, now a nop, the 48 kHz EQ gates,
     # the ID3v2 walker calls, now id3_gain (MP3 ReplayGain), the pause and idle loops' futex waits and their wakes, gapless MP3 allocation/pre-filter/last-frame
     # hooks, the USB DAC buffer's two stores, now nops, the wired unmute calls, now the DAC release wait,
-    # the DSF, DFF and ISO checks' stop stores, now jumps to probe_stop, and the preload's publish, its failure
-    # stores, moved to its exit, and the cold path's clear of the same word; the forced EOF's store, now a hook;
-    # the stores of the stop on the thread's other paths, the close handlers, the preload's open;
-    # the FLAC seek's gate exit, no-sync scan and near-the-end steps.
-    from peq import VBR_SCAN, EQ_RATE_GATES, ID3_CALLS, PAUSE_WAIT, CMD_DONE, IDLE_WAIT, MP3_ALLOC, MP3_FILTER, MP3_CLOSE, MP3_READ, MP3_FILL, USB_BUFFER, DAC_RELEASE, PROBE_STOP, EXIT_HOLD, PRELOAD_PUBLISH, PRELOAD_FAILED, PRELOAD_FAIL_STORES, COLD_CLEAR, FORCED_EOF, STOP_SITES, STOP_NOPS, STOP_FILL, PRELOAD_CLOSE, FLAC_GATE, SEEK_NOSYNC, SEEK_WORDS, FLAC_META_EOF, MEDIA_INFO_NULL
-    old, new = read('stock.squashfs', 'usr/bin/hciplayer'), patched_hciplayer()
-    off = fileoff(old, VBR_SCAN)
-    words = (*EQ_RATE_GATES, *USB_BUFFER, *PRELOAD_FAIL_STORES, *STOP_NOPS, *SEEK_WORDS, *FLAC_META_EOF, *MEDIA_INFO_NULL)
-    gates = [fileoff(old, a) for a in (*(a for a, _, _ in (*words, *DAC_RELEASE, *PROBE_STOP, *STOP_SITES, STOP_FILL, *PRELOAD_CLOSE, FORCED_EOF, EXIT_HOLD, PRELOAD_PUBLISH, PRELOAD_FAILED, COLD_CLEAR, FLAC_GATE, SEEK_NOSYNC)), *ID3_CALLS, MP3_ALLOC, MP3_FILTER, MP3_READ,
-                                       IDLE_WAIT[0], PAUSE_WAIT[0], CMD_DONE[0])]
-    # The FLAC fast paths (tools/flac.py, on by default) patch hciplayer's sync calls and LPC/output pointers.
-    from flac import patch_words as flac_words
-    flac = flac_words('sync,lpc,output', symbols(directory/'peq'/'peq.elf'))
-    gates += [fileoff(old, a) for a, _, _ in flac]
-    # Lossy gapless: the window's room and the kept edit list.
-    from peq import LAVF_PRIV, MOV_EDITS
-    gates += [fileoff(old, a) for a, _, _ in (LAVF_PRIV, MOV_EDITS)]
-    assert [struct.unpack_from('<I', new, fileoff(old, a))[0] for a, _, _ in (LAVF_PRIV, MOV_EDITS)] == [LAVF_PRIV[2], MOV_EDITS[2]]
-    differ = [i for i in range(0x3e40, 0x485250) if old[i] != new[i]]
-    assert set(differ) <= {*range(off, off+4), *(i for g in gates for i in range(g, g+4))} and not any(new[off:off+4])
-    assert [struct.unpack_from('<I', new, fileoff(old, a))[0] for a, _, _ in words] == [p for _, _, p in words]
-    assert [struct.unpack_from('<I', new, fileoff(old, a))[0] for a, _, _ in flac] == [p for _, _, p in flac]
-    id3_gain = symbols(directory/'peq'/'peq.elf')['id3_gain']
-    assert {struct.unpack_from('<I', new, fileoff(old, a))[0] for a in ID3_CALLS} == {jal(id3_gain)}
-    ps = symbols(directory/'peq'/'peq.elf')
-    for address, value in ((IDLE_WAIT[0], jal(ps['hci_idle_wait'])),
-                           (PAUSE_WAIT[0], jal(ps['hci_pause_wait'])), (CMD_DONE[0], jal(ps['hci_command'])),
-                           (MP3_ALLOC, jal(ps['mp3_private_alloc'])),
-                           (MP3_FILTER, jal(ps['mp3_filter_entry'])), (MP3_CLOSE, ps['mp3_close']),
-                           (MP3_FILL, ps['mp3_fill']),
-                           *((a, jal(ps[name])) for a, _, name in DAC_RELEASE),
-                           *((a, j(ps[name])) for a, _, name in (*PROBE_STOP, STOP_FILL, *PRELOAD_CLOSE, PRELOAD_PUBLISH, FLAC_GATE, SEEK_NOSYNC)),
-                           *((a, jal(ps[name])) for a, _, name in (*STOP_SITES, FORCED_EOF, EXIT_HOLD, PRELOAD_FAILED, COLD_CLEAR))):
-        assert struct.unpack_from('<I', new, fileoff(old, address))[0] == value
+    # q2player is the player, at stock's path, and stock's hciplayer and libmad, its only user, are gone
+    assert manifest['q2player_sha256'] == sha(read('rootfs.squashfs', 'usr/bin/hciplayer'))
+    rootfs_names = set(run('unsquashfs', '-l', directory/'rootfs.squashfs').splitlines())
+    assert not {n for n in rootfs_names if 'libmad' in n or 'hciplayer-stock' in n}, 'stock player files remain'
     # Include every excluded UI screen and saved-preference defaults in byte parity checks.
     paths = [l.removeprefix('squashfs-root/') for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
              if ('/raw/ui/' in l or '/raw/styles/' in l) and l.endswith('.bin') or l.endswith('/config.ini')]

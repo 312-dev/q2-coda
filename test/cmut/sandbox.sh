@@ -15,7 +15,6 @@ results=$(realpath -m "$3")
 shift 3
 
 # Each file's test, the flags that test builds it with, and what else in the repository the test reads.
-# mp3_gapless.py wraps the file in code that calls the static mp3_trim, which is unused on its own.
 # A test/fw file is the one named for the source, against the library test/fw/host.py builds from the tree.
 fw=
 case $source in
@@ -26,11 +25,6 @@ patch/library_scope.c)
 patch/chapters.c)
     test=test/chapters.py
     cflags='-fPIC -DPEQ_HOST -Wall -Wextra -Werror'
-    mounts=patch ;;
-patch/mp3_gapless.c)
-    test=test/mp3_gapless.py
-    cflags='-fPIC -DPEQ_HOST -fsanitize=undefined -fno-sanitize-recover=undefined -Wall -Wextra -Werror
-        -Wno-unused-function'
     mounts=patch ;;
 patch/headset.c|patch/radio.c)
     name=${source#patch/}
