@@ -3610,7 +3610,8 @@ class Wait:
         self.timers += 1
 
     def writes(self):
-        return [c[1][0] for c in self.fw.calls('fw_write')]
+        """The wake writes: stderr (fd 2) carries demo's log lines (ulog.c), as bt_trace.c's first poll's."""
+        return [c[1][0] for c in self.fw.calls('fw_write') if c[1][0] != 2]
 
 
 def test_lit_and_idle_the_loop_waits_for_the_next_timer_due(fw, stock_bytes):
