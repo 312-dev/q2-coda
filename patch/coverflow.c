@@ -846,10 +846,11 @@ static void drop_unknown(void) {
  * (docs/internals.md#coverflow-sort): Album is the stock order;
  * Artist sorts by artist without a leading article, as every library list does (ringnav_sort_key),
  * then year, then album; Year in Playback settings' Year order (year_sql), undated last; Recently
- * Added by the newest song's time_create; Most Played by the album's listens (library_lists.c
- * album_plays); Random by playback.c's rand_below, reshuffled whenever the list is rebuilt. Ties
- * keep the stock order, and the Unknown row stays last. Ranks come from ALBUM_SQL with another
- * ORDER BY (toolsQueryDbTable without its name sort), matched back to the rows by album_cmp. */
+ * Added by the newest song's time_create, a tie by file time (added_places); Most Played by the
+ * album's listens (library_lists.c album_plays); Random by playback.c's rand_below, reshuffled
+ * whenever the list is rebuilt. Other ties keep the stock order, and the Unknown row stays last.
+ * Ranks come from ALBUM_SQL with another ORDER BY (toolsQueryDbTable without its name sort),
+ * matched back to the rows by album_cmp. */
 enum { SORT_ALBUM, SORT_ARTIST, SORT_ADDED, SORT_PLAYED, SORT_RANDOM, SORT_RATING, SORT_YEAR };
 #define SORT_FILE PEQ_ROOT "/mnt/data/ringnav-coversort"
 /* The rated albums' Sort: most hearts first, Album, Artist, Year, then Most Played. */
@@ -1231,15 +1232,68 @@ int album_only(void *list, void *r, int at) {
     deque_destroy(out);
     return k;
 }
-static void rank_by(order_t *v, const char *sql) {
+/* Recently Added: ALBUM_SQL with each album's newest time_create after (split_row's REC_YEAR), by
+ * it, newest first. */
+#define ADDED_SQL                                                                                  \
+    "select id,album,songer," ALBUM_TRACK                                                          \
+    ",albumsonger,max(time_create) from songtable" ALBUM_GROUP " order by max(time_create) desc"
+typedef struct {
+    unsigned j;
+    int mtime;
+    const char *path;
+} tie_t;
+static int by_newer(const void *a, const void *b) {
+    const tie_t *x = a, *y = b;
+    if (x->mtime != y->mtime) return x->mtime > y->mtime ? -1 : 1;
+    int d = strcmp(x->path, y->path);
+    return d ? d : x->j < y->j ? -1 : 1;
+}
+/* ADDED_SQL's rows' places: each row's own, but albums whose newest song has one time_create
+ * (files copied in one go share a second, and a card copied whole can date every album alike) go
+ * newest file first, by the modification time each album's art track (ALBUM_TRACK) keeps from
+ * before the copy, then by that track's path. SQLite hands a tie in the grouping's order, the
+ * Album order, so Recently Added looked as if it had not applied. 0 out of memory: the rows' order. ponytail: the art track stands
+ * for its album, one stat an album in a tie; stat every track if albums tagged over time show up
+ * out of order. */
+static unsigned *added_places(void *rows) {
+    unsigned n = deque_size(rows), *place = calloc(n + 1, sizeof *place);
+    tie_t *t = calloc(n + 1, sizeof *t);
+    for (unsigned j = 0; place && t && j < n;) {
+        unsigned k = j;
+        int when = I(deque_at(rows, j), REC_YEAR);
+        while (k < n && I(deque_at(rows, k), REC_YEAR) == when) {
+            const char *path = P(deque_at(rows, k), REC_PATH);
+            t[k - j] = (tie_t){ k, 0, path ? path : "" };
+            place[k] = k, ++k;
+        }
+        for (unsigned m = 0; k - j > 1 && m < k - j; ++m) {
+            unsigned st[36]; /* o32 stat: st_mtime word 16 */
+            if (*t[m].path && !__xstat(3, t[m].path, st)) t[m].mtime = (int)st[16];
+        }
+        if (k - j > 1) {
+            qsort(t, k - j, sizeof *t, by_newer);
+            for (unsigned m = 0; m < k - j; ++m) place[t[m].j] = j + m;
+        }
+        j = k;
+    }
+    if (!t) free(place), place = 0;
+    free(t);
+    return place;
+}
+/* v's ranks, the places of sql's rows: ADDED_SQL's with its ties ordered (added_places). */
+static void rank_by(order_t *v, const char *sql, int added) {
     int n;
     void *rows = cf_staged(rank_query, (void *)sql, &n);
+    unsigned *place = added ? added_places(rows) : 0;
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_index(deque_at(rows, j));
         int y = I(deque_at(rows, j), REC_YEAR);
-        if (i >= 0 && v[i].rank == ~0u) /* a year past 1-9999 is no year: undated */
-            v[i].rank = j, v[i].year = y > 0 && y < 10000 ? (unsigned short)y : 0;
+        if (i >= 0 && (v[i].rank == ~0u || (place && place[j] < v[i].rank)))
+            /* a year past 1-9999 is no year: undated */
+            v[i].rank = place ? place[j] : j,
+            v[i].year = y > 0 && y < 10000 ? (unsigned short)y : 0;
     }
+    free(place);
     deque_destroy(rows);
 }
 static int by_rank(const void *a, const void *b) {
@@ -1291,7 +1345,7 @@ static void *sorted(void) {
     } else if (cf.sort == SORT_RANDOM)
         for (unsigned i = 0; i < n; ++i) v[i].rank = rand_below(~0u);
     else
-        rank_by(v, cf.sort == SORT_ADDED ? SORT_SQL "max(time_create) desc" : year_sql());
+        rank_by(v, cf.sort == SORT_ADDED ? ADDED_SQL : year_sql(), cf.sort == SORT_ADDED);
     qsort(v, n, sizeof *v, artist ? by_artist : by_rank);
     void *out = _create_deque("stSongInfo");
     deque_init(out);
@@ -2828,14 +2882,16 @@ static void covers(void) {
             widget_set_prop_int(img, "clickable", 1);
             widget_on(img, EVT_CLICK, pick_child, (void *)(long)i);
         }
-        /* Album over artist under the frame, white and larger, then grey, clear of the rounded
-         * glass (docs/ipod.md#coverflow). */
+        /* Album over artist under the frame, white and larger, then Text Secondary (the Artist
+         * role, docs/oled-design.md#color), clear of the rounded glass (docs/ipod.md#coverflow).
+         * Not stock's #AAAAAA: ringnav_style_color paints that as the quieter Text Tertiary. */
         cf.name = text(cf.covers, CF_EDGE, cfs.text_y, 375 - 2 * CF_EDGE, CF_NAME_H);
         widget_set_prop_int(cf.name, "style:normal:font_size", cfs.name_px);
         cf.artist =
             text(cf.covers, CF_EDGE, cfs.text_y + cfs.artist_y, 375 - 2 * CF_EDGE, CF_ARTIST_H);
         widget_set_prop_int(cf.artist, "style:normal:font_size", cfs.artist_px);
-        widget_set_prop_int(cf.artist, "style:normal:text_color", (int)CF_GREY);
+        widget_set_prop_int(cf.artist, "style:normal:text_color",
+                            (int)(0xff000000u | tok(TOK_SECONDARY)));
         slide_menu_set_value(cf.slide, cf.album);
         widget_on(cf.slide, EVT_VALUE_CHANGED, changed, 0);
         tc.down = th.on = 0; /* a touch or thumb on the covers these replace */

@@ -34,6 +34,7 @@ extern char system_bar[];
 #include <errno.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 typedef int (*handler)(void *, void *);
 extern pthread_mutex_t shim_parse, shim_play;
@@ -464,6 +465,10 @@ void draw_centred(void *c, const unsigned *s, unsigned n, const void *r, unsigne
     memcpy(centred_box, r, sizeof centred_box), centred_px = px;
 }
 int ipod_light(void) { return light; }
+unsigned tok(int t) { /* ui_kit.c's: the token in the mode shown */
+    static const unsigned tokens[][2] = UI_TOKENS;
+    return tokens[t][light ? 1 : 0];
+}
 int ipod_home_rockbox(void) { return 0; }
 const char *ipod_home_shortcut(void) { return "Rockbox"; }
 int home_shortcut_open(void *x, void *e) { return 0; }
@@ -725,6 +730,9 @@ static unsigned rank_ms, rank_hold; /* what a ranking takes on the fake clock; h
 static pthread_t rank_thread;       /* the thread the last ranking ran on */
 static char rank_rows[16][0x60];
 static int rank_year[16]; /* the Year query's year column, each ranked row's (split_row's REC_YEAR) */
+/* Recently Added's time column, each ranked row's newest time_create; unset, each row a second older than the
+   last */
+static const char *rank_when[16];
 /* navigation.c's Year order: newest first (0) or oldest. */
 static int year_old;
 int ringnav_year_old(void) { return year_old; }
@@ -771,12 +779,14 @@ int toolsQueryDbTable(const char *db, const char *sql, void *row, int sort) {
         usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     /* each row's columns as text, as SQLite hands them: id, album, songer, the art track,
        albumsonger, and YEAR_SQL's year */
-    int cols = strstr(sql, "else 0 end) from") ? 6 : 5;
+    int added = strstr(sql, "max(time_create) from") != 0, cols = added || strstr(sql, "else 0 end) from") ? 6 : 5;
     rank_n = 0;
     for (int i = 0; ranked[i]; ++i) {
-        char id[12], year[12];
+        char id[12], year[12], when[12];
         snprintf(id, sizeof id, "%d", i + 1), snprintf(year, sizeof year, "%d", rank_year[i]);
-        char *v[6] = { id, (char *)ranked[i], "Artist", "/music/x/01.flac", 0, year };
+        snprintf(when, sizeof when, "%s", rank_when[i] ? rank_when[i] : "");
+        if (!rank_when[i]) snprintf(when, sizeof when, "%d", 1700000000 - i);
+        char *v[6] = { id, (char *)ranked[i], "Artist", "/music/x/01.flac", 0, added ? when : year };
         ((int (*)(void *, int, char **, char **))row)(0, cols, v, 0);
     }
     ++queries;
@@ -1693,6 +1703,8 @@ static void depth(void) {
         int *g = (int *)l->raw;
         const cf_style_t *c = &theme()->cf; /* the album's caption at text_y, the artist's artist_y under it */
         assert(g[0] == CF_EDGE && g[2] == 375 - 2 * CF_EDGE && g[1] == c->text_y + labels * c->artist_y && g[1] >= CF_TOP + 160);
+        /* the artist in the design's Artist role, Text Secondary: never stock's #AAAAAA, which the theme paints Tertiary */
+        if (labels == 1) assert((unsigned)l->fg == (0xff000000u | RGB_SECONDARY));
         ++labels;
     }
     assert(labels == 2);
@@ -1926,6 +1938,43 @@ static void sorting(void) {
     *(const char **)(records[8] + REC_ARTIST) = "Artist";
     memset(played, 0, sizeof played);
     rescan();
+}
+
+/* Recently Added with every album's newest song at one time_create (a card's albums copied in one go): SQLite
+   hands the ties in the Album order, which showed as if the Sort had not applied. They go newest file first, by
+   the art track's modification time (each album's row is its art track, album()'s file), then by its path; an
+   album an hour newer still goes first, and a file that is gone counts as oldest. */
+static int album_no(const char *name) {
+    int i = 0;
+    while (i < albums && strcmp(names[i], name)) ++i;
+    assert(i < albums);
+    return i;
+}
+static void added_ties(void) {
+    static const char *const tied[] = { "A", "B", "C", "Cover", "Tight" };
+    static const long mtimes[] = { 100, 200, 300, 0, 200 };
+    char gone[620];
+    for (int i = 0; i < 5; ++i) {
+        const char *path = paths[album_no(tied[i])];
+        struct timeval tv[2] = { { mtimes[i], 0 }, { mtimes[i], 0 } };
+        if (mtimes[i]) assert(!utimes(path, tv));
+        else snprintf(gone, sizeof gone, "%s.away", path), assert(!rename(path, gone));
+    }
+    /* the query's order: New an hour newer, then the tie as SQLite gives it, by album */
+    ranked[0] = "New", ranked[1] = "A", ranked[2] = "B", ranked[3] = "C", ranked[4] = "Cover", ranked[5] = "Tight";
+    ranked[6] = 0;
+    rank_when[0] = "1700003600";
+    for (int i = 1; i < 6; ++i) rank_when[i] = "1700000000";
+    open_page();
+    while (saved_sort() != 2) press_sort(); /* Recently Added */
+    assert(strstr(rank_sql, "max(time_create) desc"));
+    /* C newest (300), then B and Tight at 200 by path, A (100), Cover's file gone */
+    order_is((const char *const[]){ "New", "C", "B", "Tight", "A", "Cover", 0 });
+    while (saved_sort() != 0) press_sort();
+    close_page();
+    assert(!rename(gone, paths[album_no("Cover")]));
+    ranked[0] = 0;
+    memset(rank_when, 0, sizeof rank_when);
 }
 
 /* The Unknown Album card shows only when its press would find a song: getAllAlbum appends it even
@@ -7251,6 +7300,7 @@ int main(void) {
     same_name();
     slow_open();
     slow_sort();
+    added_ties();
     caption_marquee();
     disc_folders();
     audiobooks();
