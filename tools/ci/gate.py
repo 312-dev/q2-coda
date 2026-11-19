@@ -86,16 +86,16 @@ RAMP = 30    # s: a suite this young may not have reached its peak yet, so its e
 MEM_GB = {'build': 2.0, 'unit': 1.0, 'unit-cov': 1.5, 'mypy-tools': 1.0, 'mypy-fw': 1.0, 'fw': 3.0, 'fw-asan': 5.0,
           'patch': 1.5, 'test/build.py': 1.0, 'test/peq.py': 1.0, 'test/playback.py': 1.0, 'test/headset_io.py': 0.5,
           'smoke': 1.0, 'leak-hunt': 1.0, 'test/coverflow.py': 0.5, 'test/player/run.py': 0.5, 'tools/ci/test_ci.py': 0.5,
-          'tools/ci/test_orch.py': 0.5}
+          'tools/ci/test_orch.py': 0.5, 'test/stock_sites.py': 0.5}
 SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 95, 'leak-hunt': 200, 'test/playback.py': 80, 'fw': 50,
            'mypy-tools': 40, 'mypy-fw': 30, 'test/build.py': 20, 'test/peq.py': 20, 'test/headset_io.py': 5,
-           'test/coverflow.py': 20, 'test/player/run.py': 800, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15}
+           'test/coverflow.py': 20, 'test/player/run.py': 800, 'tools/ci/test_ci.py': 5, 'tools/ci/test_orch.py': 15, 'test/stock_sites.py': 12}
 # The suites a rule of affected.py plans for a change no merge-tier suite covers (patch/coverflow*.c, player/,
-# tools/ci/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
+# tools/ci/, a stock address in patch/ or tools/). Not in the merge tier, as test/player/run.py alone is longer than all of it: a batch's plan names
 # them when its diff needs them, and the gate runs a plan's `other` suites beside the tier. A plan that runs
 # everything (affected.Plan.everything) and a release's gate run them all. tools/ci/test_ci.py checks that
 # what an everything plan runs holds each rule's suites.
-PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py')
+PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py', 'test/stock_sites.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
 FULL = MERGE + PLANNED + POST
@@ -221,6 +221,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/rotator.py': ['{stockfs}/module_driver/soc_rotator.ko'],
     'test/rotator_build.py': [],  # given builds it asserts those were built with the module options, which a --dev build was not
     'test/server_catalogue.py': 'a generator of a catalogue file for a card (CARD_ROOT), not a test',
+    'test/stock_sites.py': [],  # finds the stock zip itself (Q2_STOCK_ZIP)
     'test/suite_source.py': "test/patch.py's loader (and a line-number lookup by hand), not a test",
     'test/thirdparty.py': ['{build}', '{qemu_static}', '--offline'],  # its TLS checks need the network, which a gate does not
 }

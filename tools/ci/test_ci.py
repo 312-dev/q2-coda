@@ -225,6 +225,21 @@ def test_an_unrelated_payload_file_does_not_plan_the_coverflow_suite(tmp_path):
     assert 'test/coverflow.py' not in affected.plan_for({'patch/volume.c': {1}}, tmp_path).as_dict()['other']
 
 
+def test_a_change_to_what_sitenotes_reads_plans_the_stock_sites_check(tmp_path):
+    """tools/stock_sites.tsv went stale on the trunk (about 30 sites added by branches, none in the table) because
+    nothing ran docs/rebasing/sitenotes.py --check but a release's package step. It reads patch/ and tools/, so a
+    change to either, to the tables or to the script plans test/stock_sites.py, which runs it."""
+    for path in ('tools/build.py', 'patch/bt_ui.c', 'tools/bt_silence.S', 'tools/stock_map.tsv', 'tools/stock_sites.tsv',
+                 'docs/rebasing/sitenotes.py'):
+        assert 'test/stock_sites.py' in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
+    for path in ('docs/ipod.md', 'tools/ci/gate.py', 'test/unit/test_art.py'):
+        assert 'test/stock_sites.py' not in affected.plan_for({path: {1}}, tmp_path).as_dict()['other'], path
+    every = affected.Plan()
+    every.everything('x')
+    assert 'test/stock_sites.py' in every.other and 'test/stock_sites.py' in gate.FULL
+    assert gate.other_suite('test/stock_sites.py', 'py').argv == ['py', 'test/stock_sites.py']
+
+
 def test_docs_only_run_the_anchor_check(tmp_path):
     p = affected.plan_for({'docs/ipod.md': {4}}, tmp_path).as_dict()
     assert p['unit'] == ['test_docs.py'] and not p['patch'] and not p['fw']
