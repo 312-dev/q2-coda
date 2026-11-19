@@ -1,103 +1,122 @@
-/* coda-rc's Bluetooth LE transport (docs/remote-protocol.md#bluetooth-le-primary): a GATT application and an
- * advertisement registered with bluetoothd over D-Bus (org.bluez.GattManager1, LEAdvertisingManager1), so the
- * Q2 is a peripheral a phone connects to. The frame stream rides the control characteristic's writes in and the
- * event characteristic's notifications out, cut at the link's MTU and joined again by the frames' lengths.
+/* coda-rc's Bluetooth LE transport (docs/remote-protocol.md#bluetooth-le-primary): its own GATT server, as
+ * SyncLink's libSL.so has. Stock's bluetoothd offers no GattManager1 or LEAdvertisingManager1 (its adapter
+ * never makes a GATT database or an advertising manager), so the daemon listens on the LE ATT fixed channel
+ * (L2CAP CID 4) itself, answers the few ATT requests a phone's GATT client sends, and advertises through the
+ * kernel's management socket (MGMT_OP_ADD_ADVERTISING), as libSL's ble_mgmt_adv does.
  *
- * bluetoothd is stock's BlueZ 5.66, started by demo when Bluetooth is on. While it is off the bus (Bluetooth off)
- * nothing is tried: its NameOwnerChanged, when it comes, starts the registration 2 s later. A refusal while it is
- * on is tried again every 30 s. Each failure is logged once, not at every try, and TCP goes on meanwhile.
- * /tmp/coda-rc.ble exists while both registrations stand, for the Pair a Phone page (crc_ble_advertising). Proven
- * only on a real Q2: the emulator has no Bluetooth (docs/remote-protocol.md#testing-on-a-q2). */
+ * The frame stream rides the control characteristic's writes in and the event characteristic's notifications
+ * out, cut at the link's MTU and joined again by the frames' lengths. Nothing asks for encryption or a bond:
+ * coda-rc's own pairing and sealing protect the session, and a bonded phone could take the Q2 for an audio
+ * device. One phone at a time; advertising stops while it is connected and starts again when it goes.
+ *
+ * The phone's frames reach the session one at a time, each once the answer before it has left (feed), so a
+ * phone that asks for many covers at once gets them one by one and the link never holds more than one answer:
+ * LE shares the radio with A2DP. The connection interval is the kernel's: on a peripheral link outside its
+ * 30-50 ms default it asks the phone for that range (l2cap_le_conn_ready).
+ *
+ * While SyncLink is on (config.ini SYSSET SYNCLINK, off unless the user turns it on) the LE side stays off:
+ * its libSL listens on the same channel. With Bluetooth off there is no hci0: the daemon waits for the kernel's
+ * Index Added and advertises 2 s after it. Each failure is logged once, not at every try, and TCP goes on
+ * meanwhile. /tmp/coda-rc.ble exists while the advertisement stands (crc_ble_advertising), for the Pair a
+ * Phone page.
+ *
+ * The host build takes --ble-sim DIR: the ATT channel is a SOCK_SEQPACKET listener at DIR/att and the
+ * management socket a SOCK_SEQPACKET connection to DIR/mgmt, so test/unit/test_coda_rc_ble.py plays the
+ * phone's GATT client and the kernel. */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
-
-/* ---- the libdbus 1.12 API used here (the rootfs's libdbus-1.so.3; no headers on this side either) ---- */
-typedef struct DBusConnection DBusConnection;
-typedef struct DBusMessage DBusMessage;
-typedef struct DBusPendingCall DBusPendingCall;
-typedef struct { const char *name, *message; unsigned dummy; void *pad; } DBusError;
-typedef struct { void *p[4]; int i[16]; void *q[4]; } DBusMessageIter; /* larger than libdbus's; only its size is ours */
-typedef int (*dbus_msg_fn)(DBusConnection *, DBusMessage *, void *);
-typedef struct { void (*unregister)(DBusConnection *, void *); dbus_msg_fn message; void (*pad[4])(void *); } DBusObjectPathVTable;
-void dbus_error_init(DBusError *);
-void dbus_error_free(DBusError *);
-DBusConnection *dbus_bus_get(int, DBusError *);
-void dbus_bus_add_match(DBusConnection *, const char *, DBusError *);
-void dbus_connection_set_exit_on_disconnect(DBusConnection *, int);
-int dbus_connection_get_unix_fd(DBusConnection *, int *);
-int dbus_connection_register_object_path(DBusConnection *, const char *, const DBusObjectPathVTable *, void *);
-int dbus_connection_add_filter(DBusConnection *, dbus_msg_fn, void *, void (*)(void *));
-int dbus_connection_read_write(DBusConnection *, int);
-int dbus_connection_dispatch(DBusConnection *);
-int dbus_connection_get_dispatch_status(DBusConnection *);
-int dbus_connection_send(DBusConnection *, DBusMessage *, uint32_t *);
-void dbus_connection_flush(DBusConnection *);
-int dbus_connection_send_with_reply(DBusConnection *, DBusMessage *, DBusPendingCall **, int);
-int dbus_connection_get_is_connected(DBusConnection *);
-void dbus_connection_unref(DBusConnection *);
-int dbus_pending_call_get_completed(DBusPendingCall *);
-DBusMessage *dbus_pending_call_steal_reply(DBusPendingCall *);
-void dbus_pending_call_unref(DBusPendingCall *);
-DBusMessage *dbus_message_new_method_call(const char *, const char *, const char *, const char *);
-DBusMessage *dbus_message_new_method_return(DBusMessage *);
-DBusMessage *dbus_message_new_error(DBusMessage *, const char *, const char *);
-DBusMessage *dbus_message_new_signal(const char *, const char *, const char *);
-void dbus_message_unref(DBusMessage *);
-int dbus_message_get_type(DBusMessage *);
-const char *dbus_message_get_error_name(DBusMessage *);
-int dbus_message_is_method_call(DBusMessage *, const char *, const char *);
-int dbus_message_is_signal(DBusMessage *, const char *, const char *);
-const char *dbus_message_get_path(DBusMessage *);
-int dbus_message_iter_init(DBusMessage *, DBusMessageIter *);
-void dbus_message_iter_init_append(DBusMessage *, DBusMessageIter *);
-int dbus_message_iter_get_arg_type(DBusMessageIter *);
-void dbus_message_iter_recurse(DBusMessageIter *, DBusMessageIter *);
-int dbus_message_iter_next(DBusMessageIter *);
-void dbus_message_iter_get_basic(DBusMessageIter *, void *);
-void dbus_message_iter_get_fixed_array(DBusMessageIter *, void *, int *);
-int dbus_message_iter_append_basic(DBusMessageIter *, int, const void *);
-int dbus_message_iter_append_fixed_array(DBusMessageIter *, int, const void *, int);
-int dbus_message_iter_open_container(DBusMessageIter *, int, const char *, DBusMessageIter *);
-int dbus_message_iter_close_container(DBusMessageIter *, DBusMessageIter *);
-#define DBUS_BUS_SYSTEM 1
-#define DBUS_TYPE_ERROR_MSG 3
-#define DBUS_HANDLED 0
-#define DBUS_NOT_YET_HANDLED 1
-#define DBUS_DATA_REMAINS 0
-#define T_ARRAY 'a'
-#define T_BYTE 'y'
-#define T_BOOL 'b'
-#define T_STR 's'
-#define T_PATH 'o'
-#define T_VARIANT 'v'
-#define T_DICT 'e'
-#define T_U16 'q'
 
 #define SERVICE_UUID "b67cefa7-194f-4988-8820-4974e36704c3"
 #define CONTROL_UUID "1666f4ad-18d6-4692-b723-b5ae83ce5ef3"
 #define EVENT_UUID "5645283b-18bb-419e-b338-f089cfc8dced"
 #define INFO_UUID "c7f73d6b-93b1-46b5-8892-1ba59bdb7513"
-#define ADAPTER "/org/bluez/hci0"
-#define APP "/coda"
-#define SVC APP "/service0"
-#define CH_CONTROL SVC "/char0"
-#define CH_EVENT SVC "/char1"
-#define CH_INFO SVC "/char2"
-#define ADV APP "/adv0"
-#define RETRY_MS 30000
 #define INFO_VALUE "coda-rc 1"
+#define RETRY_MS 30000
+#define INDEX_WAIT_MS 2000 /* after hci0 appears, for bluetoothd to power it */
+#define CONFIG_MS 5000     /* how often config.ini is read for SyncLink and the name */
+#define CONFIG "/mnt/data/config.ini"
+
+/* ---- Bluetooth sockets: Linux's ABI (no headers on the Q2's side) ---- */
+#define AF_BT 31
+#define BTPROTO_L2CAP 0
+#define BTPROTO_HCI 1
+#define HCI_DEV_NONE 0xffff
+#define HCI_CHANNEL_CONTROL 3
+#define ATT_CID 4
+#define BDADDR_LE_PUBLIC 1
+#define HCI_INDEX 0 /* hci0 */
+
+/* the management protocol (BlueZ doc/mgmt-api.txt): little-endian, a 6-byte header, then the parameters */
+#define MGMT_OP_DISCONNECT 0x0014
+#define MGMT_OP_ADD_ADVERTISING 0x003e
+#define MGMT_OP_REMOVE_ADVERTISING 0x003f
+#define MGMT_EV_CMD_COMPLETE 0x0001
+#define MGMT_EV_CMD_STATUS 0x0002
+#define MGMT_EV_INDEX_ADDED 0x0004
+#define MGMT_EV_INDEX_REMOVED 0x0005
+#define MGMT_STATUS_INVALID_INDEX 0x11
+#define ADV_INSTANCE 2           /* libSL's is 1 */
+#define ADV_CONNECTABLE 1u       /* MGMT_ADV_FLAG_CONNECTABLE */
+#define ADV_DISCOV 2u            /* MGMT_ADV_FLAG_DISCOV: the kernel adds the Flags field */
+
+/* ---- ATT (Core 5.x Vol 3 Part F) ---- */
+#define ATT_MTU_MIN 23
+#define ATT_MTU 247 /* what this side takes; the remote app asks for 247 */
+enum {
+    ERR_RSP = 0x01, MTU_REQ = 0x02, MTU_RSP = 0x03, FIND_INFO_REQ = 0x04, FIND_INFO_RSP = 0x05, FIND_TYPE_REQ = 0x06,
+    FIND_TYPE_RSP = 0x07, READ_TYPE_REQ = 0x08, READ_TYPE_RSP = 0x09, READ_REQ = 0x0a, READ_RSP = 0x0b,
+    READ_BLOB_REQ = 0x0c, READ_BLOB_RSP = 0x0d, READ_GROUP_REQ = 0x10, READ_GROUP_RSP = 0x11, WRITE_REQ = 0x12,
+    WRITE_RSP = 0x13, NOTIFY = 0x1b, CONFIRM = 0x1e, WRITE_CMD = 0x52, CMD_BIT = 0x40,
+};
+enum {
+    E_HANDLE = 0x01, E_READ = 0x02, E_WRITE = 0x03, E_PDU = 0x04, E_REQ = 0x06, E_OFFSET = 0x07, E_NONE = 0x0a,
+    E_LEN = 0x0d, E_GROUP = 0x10,
+};
+
+/* the attribute table: GAP's service (the name a scanner shows), then coda-rc's */
+enum {
+    H_GAP = 1, H_NAME_DECL, H_NAME, H_LOOK_DECL, H_LOOK, H_SVC, H_CONTROL_DECL, H_CONTROL, H_EVENT_DECL, H_EVENT,
+    H_CCCD, H_INFO_DECL, H_INFO, H_LAST = H_INFO
+};
+#define PRIMARY 0x2800
+#define CHAR_DECL 0x2803
+#define CCCD 0x2902
+#define GAP 0x1800
+#define DEVICE_NAME 0x2a00
+#define APPEARANCE 0x2a01
+#define P_READ 0x02
+#define P_WRITE_CMD 0x04
+#define P_WRITE 0x08
+#define P_NOTIFY 0x10
+
+#define IN_CAP (2 * CRC_MAX_FRAME)  /* the phone's bytes not yet framed or held for the answer before them */
+#define OUT_CAP (3 * CRC_MAX_FRAME) /* one answer and the pushes made while it leaves */
 
 static struct {
-    DBusConnection *bus;
-    int fd, registered, notifying, mtu;
-    int absent;  /* bluetoothd is not on the bus: wait for its NameOwnerChanged, try nothing */
-    DBusPendingCall *app_call, *adv_call;
-    uint32_t failed_at;
-    char logged[96];  /* the last failure logged, so a failure that repeats is logged once */
-    char device[96];  /* the connected phone's object path, from its writes */
-} b;
+    int mfd, lfd, cfd;           /* the management socket, the ATT listener, the phone's ATT channel */
+    int adv;                     /* ADV_* below */
+    int absent;                  /* no hci0 (Bluetooth off): advertise on its Index Added */
+    int synclink;                /* SyncLink on at the last look: everything here is closed */
+    uint32_t failed_at, add_at;  /* the last refusal; when the next ADD_ADVERTISING may go */
+    uint32_t config_at;
+    uint16_t mtu, cccd;
+    uint8_t peer[7];             /* the phone's address and its type, for MGMT_OP_DISCONNECT */
+    int has_peer, dead;          /* dead: a send failed; the link ends at ble_handle's end, outside the session */
+    uint8_t in[IN_CAP], out[OUT_CAP], rsp[ATT_MTU];
+    size_t in_n, out_off, out_n, rsp_n;
+    char name[32], adv_name[32]; /* the Bluetooth name, and the one advertised */
+    char logged[96];             /* the last failure logged, so a failure that repeats is logged once */
+#ifdef CODA_HOST
+    char sim[160];
+#endif
+} b = {.mfd = -1, .lfd = -1, .cfd = -1};
+enum { ADV_OFF, ADV_ASKED, ADV_ON };
 
-/* ---- building replies ---- */
+static uint8_t u_service[16], u_control[16], u_event[16], u_info[16];
+
+#ifdef CODA_HOST
+void ble_sim(const char *dir) { snprintf(b.sim, sizeof b.sim, "%s", dir); }
+#endif
 
 /* what (a failure) logged unless it is the one logged last; 0 forgets it, so the next is logged */
 static void log_once(const char *what) {
@@ -110,407 +129,532 @@ static void log_once(const char *what) {
     crc_log("ble: %s", what);
 }
 
-/* registered is both registrations' bits; the page's file follows whether both stand */
-static void set_registered(int bits) {
-    int was = b.registered == 3;
-    b.registered = bits;
-    if (was != (bits == 3)) crc_ble_advertising(bits == 3);
-}
+static void put16(uint8_t *p, unsigned v) { p[0] = v, p[1] = v >> 8; }
+static unsigned get16(const uint8_t *p) { return p[0] | p[1] << 8; }
 
-static void add_str(DBusMessageIter *it, int type, const char *s) { dbus_message_iter_append_basic(it, type, &s); }
-
-static void variant_begin(DBusMessageIter *dict, DBusMessageIter *entry, DBusMessageIter *var, const char *key, const char *sig) {
-    dbus_message_iter_open_container(dict, T_DICT, 0, entry);
-    add_str(entry, T_STR, key);
-    dbus_message_iter_open_container(entry, T_VARIANT, sig, var);
-}
-
-static void variant_end(DBusMessageIter *dict, DBusMessageIter *entry, DBusMessageIter *var) {
-    dbus_message_iter_close_container(entry, var);
-    dbus_message_iter_close_container(dict, entry);
-}
-
-static void prop_str(DBusMessageIter *dict, const char *key, int type, const char *v) {
-    DBusMessageIter e, var;
-    char sig[2] = {(char)type, 0};
-    variant_begin(dict, &e, &var, key, sig);
-    add_str(&var, type, v);
-    variant_end(dict, &e, &var);
-}
-
-static void prop_bool(DBusMessageIter *dict, const char *key, int v) {
-    DBusMessageIter e, var;
-    uint32_t x = v != 0;
-    variant_begin(dict, &e, &var, key, "b");
-    dbus_message_iter_append_basic(&var, T_BOOL, &x);
-    variant_end(dict, &e, &var);
-}
-
-static void prop_strs(DBusMessageIter *dict, const char *key, const char *const *v) {
-    DBusMessageIter e, var, arr;
-    variant_begin(dict, &e, &var, key, "as");
-    dbus_message_iter_open_container(&var, T_ARRAY, "s", &arr);
-    for (; *v; ++v) add_str(&arr, T_STR, *v);
-    dbus_message_iter_close_container(&var, &arr);
-    variant_end(dict, &e, &var);
-}
-
-static void prop_bytes(DBusMessageIter *dict, const char *key, const uint8_t *p, int n) {
-    DBusMessageIter e, var, arr;
-    variant_begin(dict, &e, &var, key, "ay");
-    dbus_message_iter_open_container(&var, T_ARRAY, "y", &arr);
-    dbus_message_iter_append_fixed_array(&arr, T_BYTE, &p, n);
-    dbus_message_iter_close_container(&var, &arr);
-    variant_end(dict, &e, &var);
-}
-
-/* ---- the objects: one service, three characteristics, one advertisement ---- */
-
-static const char *const F_CONTROL[] = {"write", "write-without-response", "encrypt-write", 0};
-static const char *const F_EVENT[] = {"notify", 0};
-static const char *const F_INFO[] = {"read", 0};
-static const struct { const char *path, *uuid; const char *const *flags; } chars[] = {
-    {CH_CONTROL, CONTROL_UUID, F_CONTROL}, {CH_EVENT, EVENT_UUID, F_EVENT}, {CH_INFO, INFO_UUID, F_INFO}};
-
-/* an object's interface and its properties, as a{sv} into dict; 0 when the path has no such interface */
-static int props(const char *path, const char *iface, DBusMessageIter *dict) {
-    if (!strcmp(path, SVC) && !strcmp(iface, "org.bluez.GattService1")) {
-        prop_str(dict, "UUID", T_STR, SERVICE_UUID);
-        prop_bool(dict, "Primary", 1);
-        return 1;
+/* "b67cefa7-194f-..." as ATT sends it: 16 bytes, least significant first */
+static void uuid_le(const char *s, uint8_t *out) {
+    int n = 15;
+    for (; *s && n >= 0; ++s) {
+        if (*s == '-') continue;
+        unsigned hi = *s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10;
+        ++s;
+        unsigned lo = *s <= '9' ? *s - '0' : (*s | 32) - 'a' + 10;
+        out[n--] = hi << 4 | lo;
     }
-    for (unsigned i = 0; i < 3; ++i)
-        if (!strcmp(path, chars[i].path) && !strcmp(iface, "org.bluez.GattCharacteristic1")) {
-            prop_str(dict, "UUID", T_STR, chars[i].uuid);
-            prop_str(dict, "Service", T_PATH, SVC);
-            prop_strs(dict, "Flags", chars[i].flags);
-            if (i == 1) prop_bool(dict, "Notifying", b.notifying);
-            return 1;
-        }
-    if (!strcmp(path, ADV) && !strcmp(iface, "org.bluez.LEAdvertisement1")) {
-        static const char *const uuids[] = {SERVICE_UUID, 0};
-        prop_str(dict, "Type", T_STR, "peripheral");
-        prop_strs(dict, "ServiceUUIDs", uuids);
-        /* the Q2's default Bluetooth name (bt_name.c BT_NAME_DEFAULT); fixed, not the user's: with the
-         * 128-bit service UUID (18 bytes) and the flags (3) 10 of the 31 are left, and "Q2 Muse" takes
-         * 9. The remote app finds the Q2 by the service UUID, not this name. */
-        prop_str(dict, "LocalName", T_STR, "Q2 Muse");
-        return 1;
+}
+
+static void nonblock(int fd) {
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+}
+
+/* ---- config.ini: SyncLink's switch and the Bluetooth name ---- */
+
+/* [SYSSET] SYNCLINK above 0: SyncLink's Bluetooth (1) or Wi-Fi (2), whose LE side libSL restarts too */
+static int synclink_on(const char *ini) {
+    const char *q = strstr(ini, "[SYSSET]"), *k = q ? strstr(q, "\nSYNCLINK=") : 0, *next = q ? strstr(q + 1, "\n[") : 0;
+    if (!k || (next && k > next)) return 0;
+    return atoi(k + 10) > 0;
+}
+
+static void config_read(void) {
+    char p[256], ini[8192];
+    int fd = open(crc_path(p, sizeof p, CONFIG), O_RDONLY | O_CLOEXEC), n = 0;
+    if (fd >= 0) {
+        n = (int)read(fd, ini, sizeof ini - 1);
+        close(fd);
     }
-    return 0;
+    ini[n > 0 ? n : 0] = 0;
+    b.synclink = synclink_on(ini);
+    crc_bt_name(b.name);
 }
 
-static const char *iface_of(const char *path) {
-    if (!strcmp(path, SVC)) return "org.bluez.GattService1";
-    if (!strcmp(path, ADV)) return "org.bluez.LEAdvertisement1";
-    return "org.bluez.GattCharacteristic1";
+/* ---- the management socket ---- */
+
+static int mgmt_send(unsigned op, const uint8_t *p, unsigned n) {
+    uint8_t m[6 + 64];
+    if (b.mfd < 0 || n > sizeof m - 6) return -1;
+    put16(m, op), put16(m + 2, HCI_INDEX), put16(m + 4, n);
+    memcpy(m + 6, p, n);
+    return write(b.mfd, m, 6 + n) < 0 ? -1 : 0; /* Linux 5.10 answers a management command's write with 0 */
 }
 
-static void reply(DBusMessage *m) {
-    if (!m) return;
-    dbus_connection_send(b.bus, m, 0);
-    dbus_message_unref(m);
+static void set_adv(int state) {
+    int was = b.adv == ADV_ON;
+    b.adv = state;
+    if (was != (state == ADV_ON)) crc_ble_advertising(state == ADV_ON);
 }
 
-static void managed_objects(DBusMessage *call) {
-    DBusMessage *r = dbus_message_new_method_return(call);
-    DBusMessageIter it, objs, obj, ifs, ife, dict;
-    static const char *const paths[] = {SVC, CH_CONTROL, CH_EVENT, CH_INFO};
-    dbus_message_iter_init_append(r, &it);
-    dbus_message_iter_open_container(&it, T_ARRAY, "{oa{sa{sv}}}", &objs);
-    for (unsigned i = 0; i < 4; ++i) {
-        dbus_message_iter_open_container(&objs, T_DICT, 0, &obj);
-        add_str(&obj, T_PATH, paths[i]);
-        dbus_message_iter_open_container(&obj, T_ARRAY, "{sa{sv}}", &ifs);
-        dbus_message_iter_open_container(&ifs, T_DICT, 0, &ife);
-        add_str(&ife, T_STR, iface_of(paths[i]));
-        dbus_message_iter_open_container(&ife, T_ARRAY, "{sv}", &dict);
-        props(paths[i], iface_of(paths[i]), &dict);
-        dbus_message_iter_close_container(&ife, &dict);
-        dbus_message_iter_close_container(&ifs, &ife);
-        dbus_message_iter_close_container(&obj, &ifs);
-        dbus_message_iter_close_container(&objs, &obj);
-    }
-    dbus_message_iter_close_container(&it, &objs);
-    reply(r);
+/* The advertisement: the service's UUID, the kernel's Flags field (ADV_DISCOV), and the Bluetooth name in the
+ * scan response, which has its own 31 bytes; a 30-character name is cut to 29 and marked shortened. */
+static void adv_add(void) {
+    uint8_t m[11 + 31 + 31];
+    size_t name = strlen(b.name), cut = name > 29 ? 29 : name;
+    m[0] = ADV_INSTANCE;
+    m[1] = ADV_CONNECTABLE | ADV_DISCOV, m[2] = m[3] = m[4] = 0;
+    put16(m + 5, 0), put16(m + 7, 0); /* duration and timeout: none */
+    m[9] = 18, m[10] = 2 + cut;
+    m[11] = 17, m[12] = 0x07; /* Complete List of 128-bit Service UUIDs */
+    memcpy(m + 13, u_service, 16);
+    m[29] = 1 + cut, m[30] = cut < name ? 0x08 : 0x09; /* Shortened or Complete Local Name */
+    memcpy(m + 31, b.name, cut);
+    if (mgmt_send(MGMT_OP_ADD_ADVERTISING, m, 11 + 18 + 2 + cut)) return;
+    snprintf(b.adv_name, sizeof b.adv_name, "%s", b.name);
+    set_adv(ADV_ASKED);
 }
 
-static void get_all(DBusMessage *call, const char *path) {
-    DBusMessageIter it, dict;
-    const char *iface = "";
-    if (dbus_message_iter_init(call, &it) && dbus_message_iter_get_arg_type(&it) == T_STR)
-        dbus_message_iter_get_basic(&it, &iface);
-    DBusMessage *r = dbus_message_new_method_return(call);
-    dbus_message_iter_init_append(r, &it);
-    dbus_message_iter_open_container(&it, T_ARRAY, "{sv}", &dict);
-    props(path, iface, &dict);
-    dbus_message_iter_close_container(&it, &dict);
-    reply(r);
+static void adv_remove(void) {
+    uint8_t i = ADV_INSTANCE;
+    mgmt_send(MGMT_OP_REMOVE_ADVERTISING, &i, 1);
+    set_adv(ADV_OFF);
 }
 
-/* WriteValue(ay value, a{sv} options): the bytes, and the writer's device and MTU */
-static void write_value(DBusMessage *call) {
-    DBusMessageIter it, arr, opts, e, v;
-    const uint8_t *data = 0;
-    int n = 0;
-    const char *device = 0;
-    uint16_t mtu = 0;
-    if (dbus_message_iter_init(call, &it) && dbus_message_iter_get_arg_type(&it) == T_ARRAY) {
-        dbus_message_iter_recurse(&it, &arr);
-        dbus_message_iter_get_fixed_array(&arr, &data, &n);
-        if (dbus_message_iter_next(&it) && dbus_message_iter_get_arg_type(&it) == T_ARRAY) {
-            for (dbus_message_iter_recurse(&it, &opts); dbus_message_iter_get_arg_type(&opts) == T_DICT;
-                 dbus_message_iter_next(&opts)) {
-                const char *key;
-                dbus_message_iter_recurse(&opts, &e);
-                dbus_message_iter_get_basic(&e, &key);
-                dbus_message_iter_next(&e);
-                dbus_message_iter_recurse(&e, &v);
-                if (!strcmp(key, "device") && dbus_message_iter_get_arg_type(&v) == T_PATH) dbus_message_iter_get_basic(&v, &device);
-                if (!strcmp(key, "mtu") && dbus_message_iter_get_arg_type(&v) == T_U16) dbus_message_iter_get_basic(&v, &mtu);
-            }
-        }
-    }
-    reply(dbus_message_new_method_return(call));
-    if (mtu >= 23) b.mtu = mtu;
-    if (device && strcmp(device, b.device)) {  /* a new phone: a new session */
-        snprintf(b.device, sizeof b.device, "%s", device);
-        crc_ble_connected();
-    }
-    if (n > 0) crc_ble_bytes(data, n);
-}
-
-static void read_value(DBusMessage *call) {
-    DBusMessage *r = dbus_message_new_method_return(call);
-    DBusMessageIter it, arr;
-    const uint8_t *p = (const uint8_t *)INFO_VALUE;
-    dbus_message_iter_init_append(r, &it);
-    dbus_message_iter_open_container(&it, T_ARRAY, "y", &arr);
-    dbus_message_iter_append_fixed_array(&arr, T_BYTE, &p, (int)sizeof INFO_VALUE - 1);
-    dbus_message_iter_close_container(&it, &arr);
-    reply(r);
-}
-
-static int on_message(DBusConnection *c, DBusMessage *m, void *data) {
-    const char *path = dbus_message_get_path(m);
-    if (!path) return DBUS_NOT_YET_HANDLED;
-    if (!strcmp(path, APP) && dbus_message_is_method_call(m, "org.freedesktop.DBus.ObjectManager", "GetManagedObjects")) {
-        managed_objects(m);
-    } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Properties", "GetAll")) {
-        get_all(m, path);
-    } else if (!strcmp(path, CH_CONTROL) && dbus_message_is_method_call(m, "org.bluez.GattCharacteristic1", "WriteValue")) {
-        write_value(m);
-    } else if (!strcmp(path, CH_INFO) && dbus_message_is_method_call(m, "org.bluez.GattCharacteristic1", "ReadValue")) {
-        read_value(m);
-    } else if (!strcmp(path, CH_EVENT) && dbus_message_is_method_call(m, "org.bluez.GattCharacteristic1", "StartNotify")) {
-        b.notifying = 1;
-        reply(dbus_message_new_method_return(m));
-    } else if (!strcmp(path, CH_EVENT) && dbus_message_is_method_call(m, "org.bluez.GattCharacteristic1", "StopNotify")) {
-        /* the last subscriber gone: its link is down */
-        b.notifying = 0;
-        b.device[0] = 0;
-        crc_ble_gone();
-        reply(dbus_message_new_method_return(m));
-    } else if (!strcmp(path, ADV) && dbus_message_is_method_call(m, "org.bluez.LEAdvertisement1", "Release")) {
-        reply(dbus_message_new_method_return(m));
-    } else {
-        reply(dbus_message_new_error(m, "org.bluez.Error.NotSupported", "not supported"));
-    }
-    return DBUS_HANDLED;
-}
-
-/* bluetoothd leaving the bus, or coming back: either way the registration is to be made again */
-static int on_signal(DBusConnection *c, DBusMessage *m, void *data) {
-    if (dbus_message_is_signal(m, "org.freedesktop.DBus", "NameOwnerChanged")) {
-        DBusMessageIter it;
-        const char *name = "", *owner = "";
-        if (dbus_message_iter_init(m, &it) && dbus_message_iter_get_arg_type(&it) == T_STR) {
-            dbus_message_iter_get_basic(&it, &name);
-            /* name, old owner, new owner: an empty new owner is bluetoothd gone */
-            if (dbus_message_iter_next(&it) && dbus_message_iter_next(&it) && dbus_message_iter_get_arg_type(&it) == T_STR)
-                dbus_message_iter_get_basic(&it, &owner);
-        }
-        if (!strcmp(name, "org.bluez")) {
-            set_registered(0);
-            b.notifying = 0;
-            b.device[0] = 0;
-            crc_ble_gone();
-            b.absent = !*owner;
+static void mgmt_event(const uint8_t *m, size_t n) {
+    if (n < 6) return;
+    unsigned ev = get16(m), index = get16(m + 2);
+    if (ev == MGMT_EV_INDEX_ADDED && index == HCI_INDEX) {
+        b.absent = 0;
+        log_once(0);
+        crc_log("ble: Bluetooth on; advertising in 2 s");
+        b.add_at = crc_now_ms() + INDEX_WAIT_MS;
+    } else if (ev == MGMT_EV_INDEX_REMOVED && index == HCI_INDEX) {
+        set_adv(ADV_OFF);
+        b.absent = 1;
+        log_once("Bluetooth is off; waiting for it");
+    } else if ((ev == MGMT_EV_CMD_COMPLETE || ev == MGMT_EV_CMD_STATUS) && n >= 9 &&
+               get16(m + 6) == MGMT_OP_ADD_ADVERTISING && b.adv == ADV_ASKED) {
+        unsigned status = m[8];
+        if (!status) {
+            if (ev == MGMT_EV_CMD_STATUS) return; /* pending: its Command Complete follows */
+            set_adv(ADV_ON);
             log_once(0);
-            crc_log("ble: bluetoothd %s", b.absent ? "left the bus; waiting for it" : "started; registering in 2 s");
-            if (b.absent) snprintf(b.logged, sizeof b.logged, "bluetoothd is not running");
-            b.failed_at = crc_now_ms() - RETRY_MS + 2000;  /* in 2 s, once it has its objects up */
+            crc_log("ble: advertising");
+            return;
         }
-    }
-    return DBUS_NOT_YET_HANDLED;
-}
-
-static DBusPendingCall *call_register(const char *iface, const char *method, const char *object) {
-    DBusMessage *m = dbus_message_new_method_call("org.bluez", ADAPTER, iface, method);
-    DBusMessageIter it, dict;
-    DBusPendingCall *pc = 0;
-    if (!m) return 0;
-    dbus_message_iter_init_append(m, &it);
-    add_str(&it, T_PATH, object);
-    dbus_message_iter_open_container(&it, T_ARRAY, "{sv}", &dict);
-    dbus_message_iter_close_container(&it, &dict);
-    /* not a blocking call: bluetoothd asks this side for GetManagedObjects before it answers */
-    dbus_connection_send_with_reply(b.bus, m, &pc, 10000);
-    dbus_message_unref(m);
-    return pc;
-}
-
-/* the registrations' answers, once they come */
-static void pending(void) {
-    DBusPendingCall **calls[] = {&b.app_call, &b.adv_call};
-    for (int i = 0; i < 2; ++i) {
-        DBusPendingCall *pc = *calls[i];
-        if (!pc || !dbus_pending_call_get_completed(pc)) continue;
-        DBusMessage *r = dbus_pending_call_steal_reply(pc);
-        dbus_pending_call_unref(pc);
-        *calls[i] = 0;
-        if (r && dbus_message_get_type(r) == DBUS_TYPE_ERROR_MSG) {
-            const char *e = dbus_message_get_error_name(r);
-            char what[96];
-            e = e ? e : "?";
-            /* nobody owns org.bluez: Bluetooth is off. Its NameOwnerChanged starts the next try (on_signal). */
-            if (!strcmp(e, "org.freedesktop.DBus.Error.ServiceUnknown") || !strcmp(e, "org.freedesktop.DBus.Error.NameHasNoOwner")) {
-                b.absent = 1;
-                snprintf(what, sizeof what, "bluetoothd is not running");
-            } else {
-                snprintf(what, sizeof what, "registration refused: %s", e);
-            }
-            log_once(what);
-            b.failed_at = crc_now_ms();
-            set_registered(0);
-        } else if (r) {
-            set_registered(b.registered | 1 << i);
-            if (b.registered == 3) {
-                log_once(0);
-                crc_log("ble: registered");
-            }
-        }
-        if (r) dbus_message_unref(r);
-    }
-}
-
-static int start_registration(void) {
-    set_registered(0);
-    b.app_call = call_register("org.bluez.GattManager1", "RegisterApplication", APP);
-    b.adv_call = call_register("org.bluez.LEAdvertisingManager1", "RegisterAdvertisement", ADV);
-    dbus_connection_flush(b.bus);
-    return b.app_call && b.adv_call ? 0 : -1;
-}
-
-int ble_start(void) {
-    if (b.bus) return b.fd;
-    DBusError e;
-    dbus_error_init(&e);
-    b.failed_at = crc_now_ms();
-    b.bus = dbus_bus_get(DBUS_BUS_SYSTEM, &e);
-    if (!b.bus) {
         char what[96];
-        snprintf(what, sizeof what, "no system bus: %s", e.message ? e.message : "?");
+        if (status == MGMT_STATUS_INVALID_INDEX) {
+            b.absent = 1;
+            snprintf(what, sizeof what, "Bluetooth is off; waiting for it");
+        } else {
+            snprintf(what, sizeof what, "advertising refused: status 0x%02x", status);
+        }
         log_once(what);
-        dbus_error_free(&e);
-        return -1;
+        b.failed_at = crc_now_ms();
+        b.add_at = b.failed_at + RETRY_MS;
+        set_adv(ADV_OFF);
     }
-    dbus_connection_set_exit_on_disconnect(b.bus, 0);
-    static const DBusObjectPathVTable vt = {0, on_message, {0, 0, 0, 0}};
-    static const char *const paths[] = {APP, SVC, CH_CONTROL, CH_EVENT, CH_INFO, ADV};
-    for (unsigned i = 0; i < 6; ++i) dbus_connection_register_object_path(b.bus, paths[i], &vt, 0);
-    dbus_connection_add_filter(b.bus, on_signal, 0, 0);
-    dbus_bus_add_match(b.bus, "type='signal',sender='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.bluez'", 0);
-    b.mtu = 23;
-    if (!dbus_connection_get_unix_fd(b.bus, &b.fd)) b.fd = -1;
-    start_registration();
-    return b.fd;
 }
 
-int ble_events(void) { return POLLIN; }
-/* libdbus holds messages it read while sending (a flush reads too): the loop's next poll must not wait */
-int ble_pending(void) { return b.bus && dbus_connection_get_dispatch_status(b.bus) == DBUS_DATA_REMAINS; }
-
-void ble_handle(void) {
-    if (!b.bus) return;
-    dbus_connection_read_write(b.bus, 0);
-    while (dbus_connection_dispatch(b.bus) == DBUS_DATA_REMAINS) {}
-    pending();
-    dbus_connection_flush(b.bus);
+static int mgmt_open(void) {
+#ifdef CODA_HOST
+    if (b.sim[0]) {
+        struct sockaddr_un a = {.sun_family = AF_UNIX};
+        snprintf(a.sun_path, sizeof a.sun_path, "%s/mgmt", b.sim);
+        int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+        if (fd >= 0 && connect(fd, (void *)&a, sizeof a) < 0) close(fd), fd = -1;
+        return fd;
+    }
+#endif
+    uint8_t a[6];
+    put16(a, AF_BT), put16(a + 2, HCI_DEV_NONE), put16(a + 4, HCI_CHANNEL_CONTROL);
+    int fd = socket(AF_BT, SOCK_RAW, BTPROTO_HCI);
+    if (fd >= 0 && bind(fd, (void *)a, sizeof a) < 0) close(fd), fd = -1;
+    return fd;
 }
 
-/* called once a second from the loop: try the registration again 30 s after a refusal, never while bluetoothd is
- * off the bus (on_signal ends that) */
-int ble_retry_due(uint32_t now) {
-    if (!b.bus) return now - b.failed_at >= RETRY_MS;
-    if (!dbus_connection_get_is_connected(b.bus)) return 0;
-    if (b.registered != 3 && !b.absent && !b.app_call && !b.adv_call && now - b.failed_at >= RETRY_MS) {
+/* ---- the ATT listener ---- */
+
+static int att_listen(void) {
+#ifdef CODA_HOST
+    if (b.sim[0]) {
+        struct sockaddr_un a = {.sun_family = AF_UNIX};
+        snprintf(a.sun_path, sizeof a.sun_path, "%s/att", b.sim);
+        unlink(a.sun_path);
+        int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+        if (fd >= 0 && (bind(fd, (void *)&a, sizeof a) < 0 || listen(fd, 1) < 0)) close(fd), fd = -1;
+        return fd;
+    }
+#endif
+    /* struct sockaddr_l2: family, psm, bdaddr (any), cid, bdaddr type */
+    uint8_t a[14] = {0};
+    put16(a, AF_BT), put16(a + 10, ATT_CID);
+    a[12] = BDADDR_LE_PUBLIC;
+    int fd = socket(AF_BT, SOCK_SEQPACKET, BTPROTO_L2CAP);
+    if (fd >= 0 && (bind(fd, (void *)a, sizeof a) < 0 || listen(fd, 1) < 0)) close(fd), fd = -1;
+    return fd;
+}
+
+/* ---- the phone's link ---- */
+
+static void link_reset(void) {
+    if (b.cfd >= 0) close(b.cfd);
+    b.cfd = -1;
+    b.has_peer = b.dead = 0;
+    b.in_n = b.out_off = b.out_n = b.rsp_n = 0;
+    b.cccd = 0;
+    b.mtu = ATT_MTU_MIN;
+}
+
+/* the phone has gone (or was sent away): its session ends, and the Q2 can be found again */
+static void link_gone(void) {
+    if (b.cfd < 0) return;
+    link_reset();
+    crc_ble_gone();
+    crc_log("ble: disconnected");
+    b.add_at = crc_now_ms();
+}
+
+static void link_accept(void) {
+    int fd = accept(b.lfd, 0, 0);
+    if (fd < 0) return;
+    if (b.cfd >= 0) { /* one phone at a time */
+        close(fd);
+        return;
+    }
+    nonblock(fd);
+    int sndbuf = 4096; /* the kernel holds a few notifications, the rest waits here (feed) */
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof sndbuf);
+    link_reset();
+    b.cfd = fd;
+    uint8_t a[16] = {0};
+    socklen_t al = sizeof a;
+    if (!getpeername(fd, (void *)a, &al) && get16(a) == AF_BT) {
+        memcpy(b.peer, a + 4, 6);
+        b.peer[6] = a[12];
+        b.has_peer = 1;
+    }
+    adv_remove();
+    crc_log("ble: connected");
+    crc_ble_connected();
+}
+
+/* the next ATT reply goes before any notification still waiting */
+static void reply(const uint8_t *p, size_t n) {
+    memcpy(b.rsp, p, n);
+    b.rsp_n = n;
+}
+
+static void error_rsp(unsigned op, unsigned handle, unsigned code) {
+    uint8_t e[5] = {ERR_RSP, (uint8_t)op};
+    put16(e + 2, handle);
+    e[4] = code;
+    reply(e, 5);
+}
+
+/* the type of handle h as ATT carries it (2 or 16 bytes, little-endian) into t; its length */
+static int att_type(unsigned h, uint8_t *t) {
+    static const uint16_t types[] = {0, PRIMARY, CHAR_DECL, DEVICE_NAME, CHAR_DECL, APPEARANCE, PRIMARY, CHAR_DECL,
+                                     0, CHAR_DECL, 0, CCCD, CHAR_DECL, 0};
+    if (h == H_CONTROL) return memcpy(t, u_control, 16), 16;
+    if (h == H_EVENT) return memcpy(t, u_event, 16), 16;
+    if (h == H_INFO) return memcpy(t, u_info, 16), 16;
+    put16(t, types[h]);
+    return 2;
+}
+
+static int decl(uint8_t *v, unsigned props, unsigned value, const uint8_t *uuid, int n) {
+    v[0] = props;
+    put16(v + 1, value);
+    memcpy(v + 3, uuid, n);
+    return 3 + n;
+}
+
+/* the value of handle h into v (at most 32 bytes); -1 when it cannot be read */
+static int att_value(unsigned h, uint8_t *v) {
+    uint8_t u[2];
+    switch (h) {
+    case H_GAP: return put16(v, GAP), 2;
+    case H_NAME_DECL: return put16(u, DEVICE_NAME), decl(v, P_READ, H_NAME, u, 2);
+    case H_NAME: return memcpy(v, b.name, strlen(b.name)), (int)strlen(b.name);
+    case H_LOOK_DECL: return put16(u, APPEARANCE), decl(v, P_READ, H_LOOK, u, 2);
+    case H_LOOK: return put16(v, 0), 2; /* Unknown */
+    case H_SVC: return memcpy(v, u_service, 16), 16;
+    case H_CONTROL_DECL: return decl(v, P_WRITE | P_WRITE_CMD, H_CONTROL, u_control, 16);
+    case H_EVENT_DECL: return decl(v, P_NOTIFY, H_EVENT, u_event, 16);
+    case H_CCCD: return put16(v, b.cccd), 2;
+    case H_INFO_DECL: return decl(v, P_READ, H_INFO, u_info, 16);
+    case H_INFO: return memcpy(v, INFO_VALUE, sizeof INFO_VALUE - 1), (int)sizeof INFO_VALUE - 1;
+    }
+    return -1;
+}
+
+static unsigned group_end(unsigned h) { return h == H_GAP ? H_LOOK : H_LAST; }
+
+/* a write to handle h; 0, or the ATT error */
+static int att_write(unsigned h, const uint8_t *p, size_t n) {
+    if (h == H_CONTROL) {
+        if (b.in_n + n > IN_CAP) { /* far more than requests come to: a phone not waiting for answers is let go */
+            b.dead = 1;
+            return E_LEN;
+        }
+        memcpy(b.in + b.in_n, p, n);
+        b.in_n += n;
+        return 0;
+    }
+    if (h == H_CCCD) {
+        if (n != 2) return E_LEN;
+        b.cccd = get16(p) & 1; /* notifications only: event does not indicate */
+        return 0;
+    }
+    return h && h <= H_LAST ? E_WRITE : E_HANDLE;
+}
+
+/* one PDU from the phone; the answer, if any, into b.rsp */
+static void att_pdu(const uint8_t *p, size_t n) {
+    uint8_t r[ATT_MTU], t[16], v[32];
+    unsigned op = p[0], start = n >= 5 ? get16(p + 1) : 0, end = n >= 5 ? get16(p + 3) : 0;
+    size_t room = b.mtu, k = 0;
+    switch (op) {
+    case MTU_REQ: {
+        if (n != 3) break;
+        unsigned want = get16(p + 1);
+        b.mtu = want < ATT_MTU_MIN ? ATT_MTU_MIN : want > ATT_MTU ? ATT_MTU : want;
+        r[0] = MTU_RSP;
+        put16(r + 1, ATT_MTU);
+        return reply(r, 3);
+    }
+    case FIND_INFO_REQ:
+    case READ_TYPE_REQ:
+    case READ_GROUP_REQ:
+    case FIND_TYPE_REQ: {
+        if (n < 5 || (op == READ_TYPE_REQ || op == READ_GROUP_REQ ? n != 7 && n != 21 : op == FIND_INFO_REQ ? n != 5 : n < 7))
+            break;
+        if (!start || start > end) return error_rsp(op, start, E_HANDLE);
+        const uint8_t *want = p + 5;
+        int want_n = op == FIND_TYPE_REQ ? 2 : (int)n - 5, each = 0;
+        if (op == READ_GROUP_REQ && !(want_n == 2 && get16(want) == PRIMARY))
+            return error_rsp(op, start, want_n == 2 && get16(want) == 0x2801 ? E_NONE : E_GROUP);
+        r[0] = op + 1;
+        k = op == FIND_INFO_REQ || op == READ_TYPE_REQ || op == READ_GROUP_REQ ? 2 : 1;
+        for (unsigned h = start; h <= end && h <= H_LAST; ++h) {
+            int tn = att_type(h, t), vn, e;
+            if (op != FIND_INFO_REQ && (tn != want_n || memcmp(t, want, tn))) continue;
+            if (op == FIND_INFO_REQ) { /* handle and type, all of one size */
+                e = 2 + tn;
+                if (each && e != each) break;
+                if (k + e > room) break;
+                r[1] = tn == 2 ? 1 : 2;
+                put16(r + k, h), memcpy(r + k + 2, t, tn);
+            } else if (op == FIND_TYPE_REQ) { /* the services whose value is the one asked for */
+                vn = att_value(h, v);
+                if (vn != (int)n - 7 || memcmp(v, p + 7, vn)) continue;
+                e = 4;
+                if (k + e > room) break;
+                put16(r + k, h), put16(r + k + 2, get16(t) == PRIMARY ? group_end(h) : h);
+            } else {
+                vn = att_value(h, v);
+                if (vn < 0) {
+                    if (!each) return error_rsp(op, h, E_READ);
+                    break;
+                }
+                e = (op == READ_GROUP_REQ ? 4 : 2) + vn;
+                if ((each && e != each) || k + e > room) break;
+                put16(r + k, h);
+                if (op == READ_GROUP_REQ) put16(r + k + 2, group_end(h));
+                memcpy(r + k + e - vn, v, vn);
+                r[1] = e;
+            }
+            k += e;
+            each = e;
+            if (op == READ_GROUP_REQ) h = group_end(h);
+        }
+        if (!each) return error_rsp(op, start, E_NONE);
+        return reply(r, k);
+    }
+    case READ_REQ:
+    case READ_BLOB_REQ: {
+        if (n != (op == READ_REQ ? 3u : 5u)) break;
+        unsigned h = get16(p + 1), off = op == READ_BLOB_REQ ? get16(p + 3) : 0;
+        if (!h || h > H_LAST) return error_rsp(op, h, E_HANDLE);
+        int vn = att_value(h, v);
+        if (vn < 0) return error_rsp(op, h, E_READ);
+        if ((int)off > vn) return error_rsp(op, h, E_OFFSET);
+        r[0] = op + 1;
+        k = (size_t)vn - off < room - 1 ? (size_t)vn - off : room - 1;
+        memcpy(r + 1, v + off, k);
+        return reply(r, 1 + k);
+    }
+    case WRITE_REQ:
+    case WRITE_CMD: {
+        if (n < 3) break;
+        int e = att_write(get16(p + 1), p + 3, n - 3);
+        if (op == WRITE_CMD) return;
+        if (e) return error_rsp(op, get16(p + 1), e);
+        r[0] = WRITE_RSP;
+        return reply(r, 1);
+    }
+    case CONFIRM:
+        return;
+    default:
+        if (op & CMD_BIT) return; /* a command this side does not know: ignored, as ATT says */
+        return error_rsp(op, 0, E_REQ);
+    }
+    if (!(op & CMD_BIT)) error_rsp(op, 0, E_PDU);
+}
+
+/* the reply, then the frame bytes as notifications on event, at most MTU - 3 each, until the socket is full */
+static void flush(void) {
+    if (b.dead) return;
+    if (b.cfd >= 0 && b.rsp_n) {
+        if (send(b.cfd, b.rsp, b.rsp_n, MSG_NOSIGNAL) < 0) {
+            if (errno != EAGAIN && errno != EINTR) b.dead = 1;
+            return;
+        }
+        b.rsp_n = 0;
+    }
+    while (b.cfd >= 0 && b.out_off < b.out_n) {
+        uint8_t pdu[ATT_MTU];
+        size_t k = b.out_n - b.out_off, max = b.mtu - 3;
+        if (k > max) k = max;
+        pdu[0] = NOTIFY;
+        put16(pdu + 1, H_EVENT);
+        memcpy(pdu + 3, b.out + b.out_off, k);
+        if (send(b.cfd, pdu, 3 + k, MSG_NOSIGNAL) < 0) {
+            if (errno != EAGAIN && errno != EINTR) b.dead = 1;
+            return;
+        }
+        b.out_off += k;
+    }
+    if (b.out_off == b.out_n) b.out_off = b.out_n = 0;
+}
+
+/* The phone's frames to the session, one at a time, each only once everything before it has gone out. A
+ * malformed length goes as it is: the session closes on it. */
+static void feed(void) {
+    static uint8_t f[CRC_MAX_FRAME];
+    while (b.cfd >= 0 && !b.dead && b.out_n == 0 && !b.rsp_n && b.in_n >= 2) {
+        size_t len = b.in[0] << 8 | b.in[1], take = 2 + len;
+        if (len < 4 || take > CRC_MAX_FRAME) take = b.in_n;
+        if (take > b.in_n) return;
+        memcpy(f, b.in, take);
+        memmove(b.in, b.in + take, b.in_n - take);
+        b.in_n -= take;
+        crc_ble_bytes(f, take); /* may answer (ble_write), or close the link (ble_disconnect) */
+    }
+}
+
+static void att_read(void) {
+    uint8_t p[ATT_MTU + 8];
+    for (;;) {
+        ssize_t n = read(b.cfd, p, sizeof p);
+        if (n < 0 && (errno == EAGAIN || errno == EINTR)) return;
+        if (n <= 0) return link_gone();
+        att_pdu(p, n);
+        flush();
+        if (b.cfd < 0 || b.rsp_n) return; /* the reply is still to go: no more requests until it has */
+    }
+}
+
+/* ---- the daemon's side (coda_rc.h) ---- */
+
+static void open_all(uint32_t now) {
+    config_read();
+    b.config_at = now;
+    if (b.synclink) {
+        log_once("off while SyncLink is on");
+        return;
+    }
+    if (b.mfd < 0 && (b.mfd = mgmt_open()) >= 0) nonblock(b.mfd);
+    if (b.lfd < 0 && (b.lfd = att_listen()) >= 0) nonblock(b.lfd);
+    if (b.mfd < 0 || b.lfd < 0) {
+        char what[96];
+        snprintf(what, sizeof what, "no %s (%d)", b.mfd < 0 ? "management socket" : "LE ATT channel", errno);
+        log_once(what);
         b.failed_at = now;
-        start_registration();
+        return;
     }
-    pending();
-    return 0;
+    b.add_at = now;
 }
 
-/* the frame bytes out as notifications on the event characteristic, at most MTU - 3 each */
-int ble_write(const uint8_t *p, size_t n) {
-    if (!b.bus || !b.notifying) return -1;
-    int chunk = b.mtu - 3;
-    while (n) {
-        int k = n < (size_t)chunk ? (int)n : chunk;
-        DBusMessage *sig = dbus_message_new_signal(CH_EVENT, "org.freedesktop.DBus.Properties", "PropertiesChanged");
-        DBusMessageIter it, dict, inv;
-        if (!sig) return -1;
-        dbus_message_iter_init_append(sig, &it);
-        add_str(&it, T_STR, "org.bluez.GattCharacteristic1");
-        dbus_message_iter_open_container(&it, T_ARRAY, "{sv}", &dict);
-        prop_bytes(&dict, "Value", p, k);
-        dbus_message_iter_close_container(&it, &dict);
-        dbus_message_iter_open_container(&it, T_ARRAY, "s", &inv);
-        dbus_message_iter_close_container(&it, &inv);
-        dbus_connection_send(b.bus, sig, 0);
-        dbus_message_unref(sig);
-        p += k;
-        n -= k;
+static void close_all(void) {
+    ble_disconnect();
+    if (b.mfd >= 0 && b.adv != ADV_OFF) adv_remove();
+    set_adv(ADV_OFF);
+    if (b.lfd >= 0) close(b.lfd);
+    if (b.mfd >= 0) close(b.mfd);
+    b.lfd = b.mfd = -1;
+}
+
+void ble_start(void) {
+    if (b.mfd >= 0 || b.lfd >= 0) return;
+    uuid_le(SERVICE_UUID, u_service), uuid_le(CONTROL_UUID, u_control);
+    uuid_le(EVENT_UUID, u_event), uuid_le(INFO_UUID, u_info);
+    b.mtu = ATT_MTU_MIN;
+    open_all(crc_now_ms());
+    ble_tick(crc_now_ms());
+}
+
+int ble_fds(struct pollfd *p) {
+    int n = 0;
+    if (b.mfd >= 0) p[n++] = (struct pollfd){b.mfd, POLLIN, 0};
+    if (b.lfd >= 0) p[n++] = (struct pollfd){b.lfd, POLLIN, 0};
+    if (b.cfd >= 0) p[n++] = (struct pollfd){b.cfd, (short)(POLLIN | (b.rsp_n || b.out_off < b.out_n ? POLLOUT : 0)), 0};
+    return n;
+}
+
+void ble_handle(const struct pollfd *p, int n) {
+    for (int i = 0; i < n; ++i) {
+        if (!p[i].revents) continue;
+        if (p[i].fd == b.mfd) {
+            uint8_t m[512];
+            ssize_t k;
+            while (b.mfd >= 0 && (k = read(b.mfd, m, sizeof m)) > 0) mgmt_event(m, k);
+        } else if (p[i].fd == b.lfd) {
+            link_accept();
+        } else if (p[i].fd == b.cfd) {
+            att_read();
+        }
     }
-    dbus_connection_flush(b.bus);
+    flush();
+    feed();
+    if (b.dead) link_gone();
+}
+
+/* once a second: SyncLink and the name every CONFIG_MS, a socket refused tried again after RETRY_MS, and the
+ * advertisement made when it is due */
+void ble_tick(uint32_t now) {
+    if (now - b.config_at >= CONFIG_MS) {
+        int was = b.synclink;
+        config_read();
+        b.config_at = now;
+        if (b.synclink && !was) {
+            close_all();
+            log_once("off while SyncLink is on");
+        } else if (!b.synclink && was) {
+            log_once(0);
+            open_all(now);
+        } else if (b.adv != ADV_OFF && strcmp(b.name, b.adv_name)) {
+            adv_add(); /* renamed: the same instance, replaced */
+        }
+    }
+    if (b.synclink) return;
+    if ((b.mfd < 0 || b.lfd < 0) && now - b.failed_at >= RETRY_MS) open_all(now);
+    if (b.mfd >= 0 && b.lfd >= 0 && b.cfd < 0 && b.adv == ADV_OFF && !b.absent && (int32_t)(now - b.add_at) >= 0) adv_add();
+}
+
+/* the frame bytes out, once the phone has asked for notifications */
+int ble_write(const uint8_t *p, size_t n) {
+    if (b.cfd < 0 || b.dead || !b.cccd) return -1;
+    if (b.out_n + n > OUT_CAP) {
+        memmove(b.out, b.out + b.out_off, b.out_n - b.out_off);
+        b.out_n -= b.out_off;
+        b.out_off = 0;
+        if (b.out_n + n > OUT_CAP) return -1;
+    }
+    memcpy(b.out + b.out_n, p, n);
+    b.out_n += n;
+    flush();
     return 0;
 }
 
 /* the session ended on this side (a bad frame, a forgotten phone): drop the phone's link too */
 void ble_disconnect(void) {
-    if (!b.bus || !b.device[0]) return;
-    DBusMessage *m = dbus_message_new_method_call("org.bluez", b.device, "org.bluez.Device1", "Disconnect");
-    if (m) {
-        dbus_connection_send(b.bus, m, 0);
-        dbus_message_unref(m);
-        dbus_connection_flush(b.bus);
-    }
-    b.device[0] = 0;
+    if (b.cfd < 0) return;
+    if (b.has_peer) mgmt_send(MGMT_OP_DISCONNECT, b.peer, 7);
+    link_reset();
+    crc_log("ble: disconnected");
+    b.add_at = crc_now_ms();
 }
 
-void ble_stop(void) {
-    if (!b.bus) return;
-    if (b.registered & 2) {
-        DBusMessage *m = dbus_message_new_method_call("org.bluez", ADAPTER, "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement");
-        DBusMessageIter it;
-        if (m) {
-            dbus_message_iter_init_append(m, &it);
-            add_str(&it, T_PATH, ADV);
-            dbus_connection_send(b.bus, m, 0);
-            dbus_message_unref(m);
-        }
-    }
-    if (b.registered & 1) {
-        DBusMessage *m = dbus_message_new_method_call("org.bluez", ADAPTER, "org.bluez.GattManager1", "UnregisterApplication");
-        DBusMessageIter it;
-        if (m) {
-            dbus_message_iter_init_append(m, &it);
-            add_str(&it, T_PATH, APP);
-            dbus_connection_send(b.bus, m, 0);
-            dbus_message_unref(m);
-        }
-    }
-    dbus_connection_flush(b.bus);
-    set_registered(0);
-}
+void ble_stop(void) { close_all(); }

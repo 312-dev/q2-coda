@@ -760,7 +760,8 @@ static inline int arc_out(int r, int y) {
 /* Coverflow text: every label, captions included, sits CF_EDGE from the sides, where the lowest
  * track row's text clears the bottom corners. Album names and artists scroll
  * within that. Under the covers (CF_TEXT_Y), the album name is CF_NAME_PX white and the artist
- * CF_ARTIST_PX in CF_GREY (stock secondary text) right under it. */
+ * CF_ARTIST_PX in Text Secondary right under it. CF_GREY is stock's secondary text (the
+ * Equalizer's captions). */
 #define CF_EDGE 36
 #define CF_NAME_PX 24
 #define CF_NAME_H 32

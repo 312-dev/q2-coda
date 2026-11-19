@@ -1,5 +1,5 @@
 /* coda-rc, the car remote daemon (docs/remote-protocol.md, docs/internals.md#car-remote): the platform under
- * coda_rc_core.c. It listens on TCP 7720 and, through BlueZ, as a BLE GATT peripheral (coda_rc_ble.c), serves
+ * coda_rc_core.c. It listens on TCP 7720 and, as a BLE GATT peripheral with its own ATT server (coda_rc_ble.c), serves
  * the library from SQLite (coda_rc_lib.c), and talks to demo only through files in /tmp that the payload's
  * shim (patch/coda_rc_shim.c) polls: Now Playing out; play, transport, seek, volume, mode, rate, queue and
  * radio commands, the pairing code and the connected phones in, and a card app to start for a cover the car wants
@@ -8,7 +8,8 @@
  * demo starts it when Settings > Car Remote is on and kills it when that goes off; nothing else starts it.
  * It also answers mDNS for Q2 Muse Remote's Wi-Fi tab (coda_rc_mdns.c) on wlan0, or the interface --mdns-if
  * names (the emulator's), and not at all with --no-mdns; the host build answers only with --mdns-if.
- * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble and --port N are for them too. */
+ * It runs at nice 19. --root DIR prefixes every path (the host tests); --no-ble, --ble-sim DIR and --port N are for
+ * them too. */
 #include "coda_rc_sys.h"
 #include "coda_rc.h"
 #include "monocypher/monocypher.h"
@@ -861,6 +862,9 @@ void crc_ble_advertising(int on) {
 /* ---- the loop ---- */
 
 static void on_term(int sig) { quit = 1; }
+#ifdef CODA_HOST
+void crc_host_quit(void) { quit = 1; } /* the tests' SIGTERM: the daemon runs on a thread of theirs */
+#endif
 
 /* ms from now to at, 0 when it has passed */
 static uint32_t until(uint32_t at, uint32_t now) {
@@ -877,7 +881,7 @@ static int position_wanted(void) {
 /* How long the loop's poll may sleep: until the next thing falls due, at most TICK_MS. A socket's bytes and demo's
  * files (renamed into /tmp by its shim: inotify's IN_MOVED_TO) end it sooner. Due: the second's tick, mDNS's next
  * look or announcement, a playing song's position for a phone that follows it, Now Playing's bytes held back,
- * a command's ACK_MS; at once while libdbus holds a message it read while sending. */
+ * a command's ACK_MS. */
 static int wait_ms(uint32_t now, uint32_t last_tick) {
     uint32_t w = until(last_tick + TICK_MS, now), d;
     if ((d = mdns_due(now)) < w) w = d;
@@ -885,7 +889,7 @@ static int wait_ms(uint32_t now, uint32_t last_tick) {
     if (np.bhave != np_sent.bhave && (d = until(buf_pushed + 500, now)) < w) w = d;
     if (pend.s && (d = until(pend.at + ACK_MS + 1, now)) < w) w = d;
     if ((d = cover_due(now)) < w) w = d;
-    return ble_pending() ? 0 : (int)w;
+    return (int)w;
 }
 
 /* demo's shim renames each file into /tmp: a watch on it ends the loop's sleep. Without one (no inotify) the loop
@@ -1014,6 +1018,9 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
         else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
         else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
+#ifdef CODA_HOST
+        else if (!strcmp(argv[i], "--ble-sim") && i + 1 < argc) ble_sim(argv[++i]);
+#endif
         else if (!strcmp(argv[i], "--tell-fd") && i + 1 < argc) tell_fd = tell_open(atoi(argv[++i]));
     }
     setpriority(PRIO_PROCESS, 0, 19);
@@ -1028,18 +1035,19 @@ int main(int argc, char **argv) {
     unlink_at("/tmp/coda-rc.ble"); /* a killed daemon's */
     int lfd = tcp_listen();
     crc_log("start: tcp %d %s", port, lfd >= 0 ? "listening" : "failed");
-    int bfd = use_ble ? ble_start() : -1;
+    if (use_ble) ble_start();
     if (mdns_if) mdns_start(mdns_if);
     for (int i = 0; i < MAX_TCP; ++i) tcp[i].fd = -1;
     int wfd = files_watch();
     uint32_t last_tick = crc_now_ms() - TICK_MS;
     while (!quit) {
-        struct pollfd fds[MAX_TCP + 4];
+        struct pollfd fds[MAX_TCP + 3 + BLE_FDS];
         int nf = 0, mfd = mdns_fd();
         if (lfd >= 0) fds[nf++] = (struct pollfd){lfd, POLLIN, 0};
         if (mfd >= 0) fds[nf++] = (struct pollfd){mfd, POLLIN, 0};
-        if (bfd >= 0) fds[nf++] = (struct pollfd){bfd, (short)ble_events(), 0};
         if (wfd >= 0) fds[nf++] = (struct pollfd){wfd, POLLIN, 0};
+        int bat = nf, bn = use_ble ? ble_fds(fds + nf) : 0;
+        nf += bn;
         int at[MAX_TCP];
         for (int i = 0; i < MAX_TCP; ++i) {
             at[i] = -1;
@@ -1050,12 +1058,11 @@ int main(int argc, char **argv) {
         int k = 0;
         if (lfd >= 0 && fds[k++].revents & POLLIN) tcp_accept(lfd);
         if (mfd >= 0 && fds[k++].revents & POLLIN) mdns_handle();
-        if (bfd >= 0) ++k;
         if (wfd >= 0 && fds[k++].revents & POLLIN) { /* which file does not matter: each is read below */
             char ev[512];
             while (read(wfd, ev, sizeof ev) > 0) {}
         }
-        ble_handle(); /* every pass: libdbus may hold bytes it has already read */
+        if (bn) ble_handle(fds + bat, bn);
         for (int i = 0; i < MAX_TCP; ++i)
             if (at[i] >= 0 && tcp[i].used && fds[at[i]].revents) tcp_read(&tcp[i]);
         np_poll();
@@ -1070,15 +1077,14 @@ int main(int argc, char **argv) {
             peers_poll();
             for (int i = 0; i < MAX_TCP; ++i) timeouts(&tcp[i]);
             timeouts(&ble);
-            if (bfd < 0 && use_ble && ble_retry_due(now)) bfd = ble_start();
-            else if (bfd >= 0) ble_retry_due(now);
+            if (use_ble) ble_tick(now);
         }
     }
     crc_log("stop");
     for (int i = 0; i < MAX_TCP; ++i)
         if (tcp[i].used) conn_close(&tcp[i]);
     if (ble.used) conn_close(&ble);
-    ble_stop();
+    if (use_ble) ble_stop();
     mdns_stop();
     if (wfd >= 0) close(wfd);
     unlink_at("/tmp/coda-rc.pair");
