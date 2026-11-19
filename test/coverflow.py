@@ -702,6 +702,8 @@ int getMusicByAlbum(const char *a) {
    order, here the test's own order by name; a row may differ in case from the stock one, as the
    grouping allows. */
 static const char *ranked[16], *rank_sql;
+static unsigned rank_ms, rank_hold; /* what a ranking takes on the fake clock; held for paints (slow_sort) */
+static pthread_t rank_thread;       /* the thread the last ranking ran on */
 static char rank_rows[16][0x60];
 static int rank_year[16]; /* the Year query's year column, each ranked row's (split_row's REC_YEAR) */
 /* navigation.c's Year order: newest first (0) or oldest. */
@@ -744,7 +746,10 @@ int toolsQueryDbTable(const char *db, const char *sql, void *row, int sort) {
         return (int)d->n;
     }
     assert(strstr(sql, "time_create") || strstr(sql, "year"));
-    rank_sql = sql;
+    rank_sql = sql, rank_thread = pthread_self();
+    clock_ms += rank_ms;
+    for (int start = spun_paints, i = 0; rank_hold && spun_paints < start + 3 && i < 2000; ++i)
+        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     /* each row's columns as text, as SQLite hands them: id, album, songer, the art track,
        albumsonger, and YEAR_SQL's year */
     int cols = strstr(sql, "else 0 end) from") ? 6 : 5;
@@ -1969,6 +1974,46 @@ static void slow_open(void) {
     open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
     assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_paints == painted);
     close_page();
+}
+
+/* A Sort that ranks (Recently Added's query; docs/internals.md#coverflow) runs on the open's thread too, as the
+   albums' query does, with Home and its spinner up: on a cold open after the albums' steps, and on an open that
+   keeps the albums but has a new Sort to apply, which waits on its ranking as a cold open waits on its query. The
+   page opens in the new order after it. */
+static void slow_sort(void) {
+    extern int coverflow_spinner(void);
+    pthread_t ui = pthread_self();
+    widget home;
+    memset(&home, 0, sizeof(home));
+    coverflow_home(&home, 0);
+    ranked[0] = "C", ranked[1] = "a", ranked[2] = 0;
+    rescan();
+    coverflow_sort_set(3); /* Recently Added */
+    all_ms = 0, rank_ms = 80, rank_hold = 1;
+    int painted = spun_paints, q = all_queries;
+    page = &w[nw + 1];
+    home.click(home.ctx, 0); /* cold: the albums' steps, then the ranking past half of 150 ms */
+    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui));
+    assert(spun_paints >= painted + 3); /* the spinner turned while it ranked */
+    run();
+    assert(slide() && !coverflow_spinner() && saved_sort() == 2);
+    order_is((const char *const[]){ "C", "A", 0 });
+    close_page();
+    coverflow_sort_set(1); /* Artist: the albums kept, only its ranking to wait on */
+    ranked[0] = "B", ranked[1] = 0;
+    rank_thread = ui, painted = spun_paints;
+    page = &w[nw + 1];
+    home.click(home.ctx, 0);
+    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui) && spun_paints >= painted + 3);
+    run();
+    assert(slide() && !coverflow_spinner() && saved_sort() == 1);
+    close_page();
+    coverflow_sort_set(0); /* Album: nothing to rank, the page at once */
+    painted = spun_paints;
+    open_page();
+    assert(slide() && spun_paints == painted && saved_sort() == 0);
+    close_page();
+    rank_ms = rank_hold = 0, ranked[0] = 0;
 }
 
 /* Baroness' and Stone Temple Pilots' "Purple": getAllAlbum's one row for the name becomes two cards,
@@ -7046,6 +7091,7 @@ int main(void) {
     unknown_card();
     same_name();
     slow_open();
+    slow_sort();
     disc_folders();
     audiobooks();
     ffmpeg_art();

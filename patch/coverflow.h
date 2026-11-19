@@ -33,7 +33,7 @@ typedef struct {
     int sort, sort_read;   /* the Sort card's order (SORT_*), from SORT_FILE once */
     int year_old, artists; /* the Year order and Artists settings albums was sorted in */
     int on_sort;           /* the next load centres the Sort card */
-    int resort; /* Display settings changed the library's order: the next load reads it */
+    int resort; /* Display settings changed the library's order: the next open reads it */
     job_t *jobs;
     unsigned long thread;
     unsigned timer, title_timer; /* title_timer: the captions follow the centre cover mid-move */

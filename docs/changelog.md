@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Cover Flow: opening it on a big library no longer freezes the screen once the spinner has turned for a while. Putting the albums in Artist, Year, Recently Added or Most Played order ran after the spinner stopped; it now runs while the spinner turns, and Return still gives the open up. After you change Cover Flow's sort in Settings, the next open shows the spinner too while it puts the albums in the new order, instead of freezing on Home with no sign it is busy.
   - Bluetooth: after playing to one headset or car, switching to another (a car after your headphones) no longer says "Not Supported" at every song until the Q2 restarts. The player kept looking for the first device's audio; it now plays to the one connected.
   - Bluetooth: **Quality** now knows which codecs the connected device has. Choices it lacks are grayed (a car with only SBC and AAC grays LDAC, aptX HD and aptX), and picking one keeps the music going on the best codec the device has instead of trying to switch to one it can't play; the row says so: "BMW 6R81 doesn't support aptX HD: using AAC". Your pick is kept for the next device.
   - Home: a Rockbox or Groovebox copied onto the card, a new card, or a new folder at the card's top now shows on Home straight away, instead of up to five seconds later.

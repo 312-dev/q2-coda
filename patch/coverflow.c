@@ -628,7 +628,8 @@ static void drop_albums(void) {
 /* A stock library query run into the caller's deque, the staging pointer on it so it leaves no
  * trace. No copies: two of a 47,000-song library's rows got demo OOM-killed, with 128 MB and no
  * swap. Stock writes the pointer only at init and reads it afresh at each use; every caller is on
- * the UI thread, as an overlap could leave the pointer on a deque its owner destroyed. */
+ * the UI thread, or on a Cover Flow open's step thread while the UI thread waits for it
+ * (step_turning), as an overlap could leave the pointer on a deque its owner destroyed. */
 int staged_into(void *into, int (*query)(void *), void *arg) {
     void *dir = P(tools_pdeq_directory, 0);
     P(tools_pdeq_directory, 0) = into;
@@ -2834,15 +2835,36 @@ static int query_step(int k, unsigned t0) {
     cf_trace(t0, "drop_unknown albums=", deque_size(cf.stock), 0);
     return 1;
 }
+/* The kept order goes once what made it changed: Display > Cover Flow's Sort (its order read
+ * again), Year order, or Artists for Artist's names. The library's covers alone; a scoped page's
+ * order is its own. */
+static void sort_check(void) {
+    if (cf.scoped) return;
+    if (cf.albums &&
+        (cf.resort || ((cf.sort == SORT_YEAR || cf.sort == SORT_ARTIST) &&
+                       (cf.year_old != ringnav_year_old() ||
+                        (cf.sort == SORT_ARTIST && cf.artists != I(artist_type, 0)))))) {
+        if (cf.albums != cf.stock) deque_destroy(cf.albums);
+        cf.albums = 0;
+    }
+    if (cf.resort) cf.resort = cf.sort_read = 0;
+}
+/* Whether an open has the kept albums to put in the Sort's order (sort_albums) before its page. */
+static int sort_due(void) { return cf.stock && deque_size(cf.stock) && !cf.albums; }
+/* cf.stock in the Sort's order, as cf.albums. Its ranking queries the library (Artist, Year and
+ * Recently Added; Most Played reads every song's count), seconds on a large one, so an open runs it
+ * on a thread of its own as it does the albums' query (open_step). */
+static void sort_albums(unsigned t0) {
+    if (!cf.sort_read) BLOB_IO(SORT_FILE, cf.sort, 0), cf.sort_read = 1;
+    cf.sort = sort_next(0);
+    cf.albums = sorted();
+    cf_trace(t0, "sorted albums=", deque_size(cf.albums), 0);
+}
 void *queue_now(unsigned *pos, unsigned *n);
 static void load_albums(unsigned t0) {
     int on_sort = cf.on_sort; /* taken whatever this load shows */
     cf.on_sort = 0;
-    if (cf.resort && !cf.scoped) { /* Coverflow Sort changed: its order read again */
-        cf.resort = cf.sort_read = 0;
-        if (cf.albums && cf.albums != cf.stock) deque_destroy(cf.albums);
-        cf.albums = 0;
-    }
+    sort_check();
     drop();
     coverflow_position_reset();
     widget_destroy_children(cf.page);
@@ -2862,18 +2884,7 @@ static void load_albums(unsigned t0) {
         for (int k = 0; !query_step(k, t0); ++k) {}
         n = (int)deque_size(cf.stock);
     }
-    if (cf.albums && !cf.scoped && (cf.sort == SORT_YEAR || cf.sort == SORT_ARTIST) &&
-        (cf.year_old != ringnav_year_old() || /* Year order changed, or Artists for its names */
-         (cf.sort == SORT_ARTIST && cf.artists != I(artist_type, 0)))) {
-        if (cf.albums != cf.stock) deque_destroy(cf.albums);
-        cf.albums = 0;
-    }
-    if (n > 0 && !cf.albums) {
-        if (!cf.sort_read) BLOB_IO(SORT_FILE, cf.sort, 0), cf.sort_read = 1;
-        cf.sort = sort_next(0);
-        cf.albums = sorted();
-        cf_trace(t0, "sorted albums=", deque_size(cf.albums), 0);
-    }
+    if (n > 0 && !cf.albums) sort_albums(t0); /* an open has sorted already (open_step) */
     if (n <= 0) {
         drop_albums();      /* only a real list is kept */
         cf.screen = COVERS; /* Return goes Home */
@@ -3152,7 +3163,7 @@ static int sort_saved(void) {
 
 /* Display > Cover Flow's Sort: its label ("Sort: Album"), and its picker's choices, all_sorts in
  * order, each its name past "Sort: "; a pick is saved, and Coverflow takes it at its next open
- * (load). */
+ * (sort_check). */
 const char *coverflow_sort_name(void) { return sort_names[sort_saved()]; }
 int coverflow_sort_count(void) { return (int)sizeof all_sorts; }
 const char *coverflow_sort_at(int i) { return sort_names[all_sorts[i]] + 6; }
@@ -3271,12 +3282,14 @@ static void *open_page(void) {
     return page;
 }
 
-/* An open that has to query the albums first (query_step) runs the query with Home up. Once its
- * steps so far have taken OPEN_SPIN_MS / 2, the rest (another grouping of the library, measured at
- * no less than half getAllAlbum's time, docs/internals.md#coverflow) will take the open past
- * OPEN_SPIN_MS, so each later step waits a main-loop pass, in which Home paints its Cover Flow row
- * with a spinner for its chevron (coverflow_spinner) and input is taken, until the page opens. A
- * warm open, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
+/* An open that has to query the albums first (query_step), or put kept ones in a new Sort's order
+ * (sort_albums: its ranking is another query of the library), runs that with Home up: the query's
+ * steps, then the Sort's (OPEN_SORT) when the list has no order yet. Once its steps so far have
+ * taken OPEN_SPIN_MS / 2, the rest (another grouping of the library, measured at no less than half
+ * getAllAlbum's time, docs/internals.md#coverflow) will take the open past OPEN_SPIN_MS, so each
+ * later step waits a main-loop pass, in which Home paints its Cover Flow row with a spinner for its
+ * chevron (coverflow_spinner) and input is taken, until the page opens. A warm open in the order it
+ * kept, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
  * the keys, the wheel and touches go nowhere (coverflow_wait_input), and Return gives the open up.
  * Within a step the spinner turns too: getAllAlbum's and the grouping's queries take seconds on a
  * large library and stock's library calls hold whichever thread runs them, so each step runs on a
@@ -3285,6 +3298,8 @@ static void *open_page(void) {
  * manager's paint). Only the step's thread touches the library meanwhile: the staging pointer
  * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
+#define OPEN_SORT 3 /* the step after query_step's last: sort_albums */
+#define OPEN_DONE 4
 #define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
 extern int spinner_turn(void);         /* list_marks.c */
 extern int ringnav_wm_paint(void *wm); /* nav/input.c */
@@ -3301,17 +3316,21 @@ static void open_end(void) {
     if (op.spin) widget_invalidate_force(op.home, 0); /* the row's chevron again */
     op.waiting = op.timer = op.spin = 0;
 }
+/* Step k: query_step's, or OPEN_SORT's sort_albums; 1 once it is the last. */
+static int open_work(int k) {
+    return k == OPEN_SORT ? (sort_albums(op.at), 1) : query_step(k, op.at);
+}
 static void *step_thread(void *k) {
-    op.ret = query_step((int)(long)k, op.at);
+    op.ret = open_work((int)(long)k);
     op.done = 1;
     return k;
 }
-/* query_step(k) on a thread of its own, the spinner turning meanwhile from OPEN_SPIN_MS / 2 into
+/* open_work(k) on a thread of its own, the spinner turning meanwhile from OPEN_SPIN_MS / 2 into
  * the open; in place when no thread starts (a started one has a nonzero id). */
 static int step_turning(int k) {
     unsigned long t = 0;
     op.done = 0;
-    if (pthread_create(&t, 0, step_thread, (void *)(long)k) || !t) return query_step(k, op.at);
+    if (pthread_create(&t, 0, step_thread, (void *)(long)k) || !t) return open_work(k);
     while (!op.done) {
         usleep(STEP_TICK_MS * 1000);
         if (!op.spin && (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)
@@ -3326,12 +3345,16 @@ static int step_turning(int k) {
 static int open_step(const void *unused) {
     op.timer = 0;
     if (window_manager_get_top_window(window_manager()) != op.home) return open_end(), 0;
-    while (!step_turning(op.step++))
-        if (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2) {
+    while (op.step != OPEN_DONE) {
+        int k = op.step;
+        op.step = !step_turning(k) ? k + 1 : k < OPEN_SORT && sort_due() ? OPEN_SORT : OPEN_DONE;
+        if (op.step != OPEN_DONE &&
+            (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)) {
             if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0);
             op.timer = timer_add(open_step, 0, 0); /* Home's input and paint, then the next */
             return 0;
         }
+    }
     open_end();
     if ((cf.page = open_page())) load();
     return 0;
@@ -3350,13 +3373,14 @@ int coverflow_wait_input(void *e) {
 static int coverflow_open(void *ctx, void *event) {
     if (cf.page || op.waiting) return 0;
     if (cf.albums_gen != library_gen) drop_albums();
-    if (cf.stock || library_scanning()) { /* nothing to wait for */
+    sort_check();
+    if ((cf.stock && !sort_due()) || library_scanning()) { /* nothing to wait for */
         if ((cf.page = open_page())) load();
         return 0;
     }
     op.at = (unsigned)time_now_ms(), op.waiting = 1;
     op.home = window_manager_get_top_window(window_manager());
-    op.step = 0;
+    op.step = cf.stock ? OPEN_SORT : 0; /* kept albums: only their new order */
     return open_step(0);
 }
 
