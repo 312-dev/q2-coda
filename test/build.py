@@ -545,6 +545,14 @@ def validate_assets(directory):
     guest = read('rootfs.squashfs', GUEST)
     assert sha(guest) == manifest['q2_guest_sha256'] and guest[:4] == b'\x7fELF' and guest[36:40] == helper[36:40]
     assert read('rootfs.squashfs', GUEST_DBUS) == (ROOT/'assets/dbus/bluealsa-sink.conf').read_bytes()
+    # Car Remote across networks (docs/remote.md#car-remote-across-networks): the pinned q2-iroh (tools/iroh.py), in
+    # every image, with the Q2's ABI flags
+    from build import IROH
+    import iroh
+    sidecar = read('rootfs.squashfs', IROH)
+    assert sha(sidecar) == manifest['q2_iroh_sha256'] and len(sidecar) == manifest['q2_iroh_bytes']
+    assert sidecar[:4] == b'\x7fELF' and sidecar[36:40] == helper[36:40]
+    assert (sha(sidecar), len(sidecar)) == iroh.PIN[:2]
     assert read('rootfs.squashfs', GUARD)[:4] == b'\x7fELF'  # q2guard, which S90play starts (build.py BOOT_HOOK)
     from build import BT_CODEC  # the link monitor's codec switch, which q2guard runs (docs/internals.md#bluetooth-link-monitor)
     codec = read('rootfs.squashfs', BT_CODEC)

@@ -1,6 +1,7 @@
 #!/bin/sh
 # q2-iroh for the Q2 (MIPS32r2, FP64, NaN-2008), linked against the Q2's own glibc 2.28, the way
-# librespot is (docs/librespot.md). Not part of the firmware build: docs/remote.md#car-remote-across-networks.
+# librespot is (docs/librespot.md). tools/iroh.py runs it and pins the result for the firmware build
+# (docs/remote.md#car-remote-across-networks).
 #   remote/iroh-sidecar/q2/build.sh [OUT]
 # STOCK_LIB names a stock V1.36 rootfs's /lib (default: Q2_STOCKFS's, else the unpacked rootfs
 # tools/thirdparty.py keeps, as tools/player.py links against) and

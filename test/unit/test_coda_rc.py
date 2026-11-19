@@ -231,6 +231,49 @@ def test_wrong_code_fails_once_then_locks_after_three(fresh):
     assert len(s.pair_start()) == 32
 
 
+def qr(L, code):
+    """Pair a Phone's QR code shows code (coda_rc.c crc_code_shown); '' for none."""
+    (ctypes.c_char * 8).in_dll(L, 'qr_code').value = code.encode()
+
+
+def test_a_phone_that_scanned_the_qr_code_pairs_on_its_code(fresh):
+    """docs/remote-protocol.md#pairing-by-qr-code: the code under the QR code is the pairing's, not a new one, and it
+    pairs once: the page then shows another."""
+    qr(fresh, '042917')
+    spent = var(fresh, 'spent').value
+    s = client.Session(Core(fresh), 'Pixel 10 Pro')
+    s.hello()
+    point = s.pair_start()
+    assert shown(fresh) == '042917'
+    peer, ltk = s.pair_finish('042917', point)
+    assert len(peer) == 8 and var(fresh, 'hidden').value == 1
+    assert var(fresh, 'spent').value == spent + 1 and not (ctypes.c_char * 8).in_dll(fresh, 'qr_code').value
+    qr(fresh, '')
+
+
+def test_a_wrong_guess_spends_the_qr_code(fresh):
+    """Someone who reached the Q2 without seeing its screen gets one guess at the code shown, as with the card's."""
+    qr(fresh, '042917')
+    spent = var(fresh, 'spent').value
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    point = s.pair_start()
+    with pytest.raises(client.RemoteError) as e:
+        s.pair_finish('042918', point)
+    assert e.value.name == 'PAIRING_FAILED' and var(fresh, 'spent').value == spent + 1
+    s = client.Session(Core(fresh), 'x')
+    s.hello()
+    s.pair_start()
+    assert shown(fresh) != '042917' and len(shown(fresh)) == 6  # none shown now: a code of the card's own
+    assert var(fresh, 'spent').value == spent + 1
+
+
+def test_a_code_made_for_the_card_is_not_spent_as_the_qr_codes(fresh):
+    spent = var(fresh, 'spent').value
+    s, _, _ = paired(fresh)
+    assert var(fresh, 'spent').value == spent
+
+
 def test_one_pairing_at_a_time(fresh):
     a = client.Session(Core(fresh, 0), 'a')
     a.hello()

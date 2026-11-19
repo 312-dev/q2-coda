@@ -221,6 +221,19 @@ int crc_pair_cancelled(void) {
     return 1;
 }
 
+/* Pair a Phone's QR code carries a code (carremote_page.c): the page keeps it in /tmp/coda-rc.qr while it shows it,
+ * and makes another once a pairing on it has ended and the file is gone (docs/remote-protocol.md#pairing-by-qr-code). */
+int crc_code_shown(char code[7]) {
+    char b[16];
+    int n = read_file("/tmp/coda-rc.qr", b, sizeof b), ok = n >= 6 && (n == 6 || b[6] == '\n');
+    for (int i = 0; ok && i < 6; ++i) ok = b[i] >= '0' && b[i] <= '9';
+    if (ok) memcpy(code, b, 6), code[6] = 0;
+    crypto_wipe(b, sizeof b);
+    return ok;
+}
+
+void crc_code_spent(void) { unlink_at("/tmp/coda-rc.qr"); }
+
 int crc_write(crc_session *s, const uint8_t *buf, size_t n) {
     if (s->transport == TR_BLE) return ble_write(buf, n);
     conn *c = s->io;
@@ -287,7 +300,7 @@ int crc_shim_alive(void) {
 uint32_t crc_caps(void) {
     return CAP_BROWSE | CAP_SEARCH | CAP_QUEUE | CAP_COVERS | CAP_FAVORITES | CAP_RECENT |
            (crc_shim_alive() ? CAP_PLAY | CAP_SEEK | CAP_MODES | CAP_QUEUE_JUMP | CAP_RATE | CAP_RESUME | CAP_BUFFERING | CAP_RADIO | CAP_NOTICE : 0) |
-           (lib_has_server() ? CAP_SERVER : 0);
+           (lib_has_server() ? CAP_SERVER : 0) | CAP_REMOTE;
 }
 
 static uint32_t position_now(void) {
@@ -700,6 +713,37 @@ static int queue_item(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
 
 /* ---- authenticated requests ---- */
 
+/* The value of "key value" lines' key in b into out ("" without one) */
+static void info_value(const char *b, const char *key, char *out, size_t cap) {
+    size_t k = strlen(key);
+    *out = 0;
+    for (const char *l = b; *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : l + strlen(l)) {
+        if (strncmp(l, key, k) || l[k] != ' ') continue;
+        size_t n = 0;
+        while (l[k + 1 + n] && l[k + 1 + n] != '\n') ++n;
+        if (n >= cap) n = cap - 1;
+        memcpy(out, l + k + 1, n), out[n] = 0;
+        return;
+    }
+}
+
+/* GetRemote (CAP_REMOTE): q2-iroh's endpoint id and home relay, from the --info file it keeps while Car Remote is on
+ * (remote/iroh-sidecar, docs/remote.md#car-remote-across-networks), for a paired phone to keep and dial from another
+ * network. UNAVAILABLE while there is none: the sidecar not started, or not yet bound. */
+static int get_remote(crc_session *s, unsigned req_id) {
+    char b[512], id[80], relay[256];
+    int n = read_file("/tmp/coda-rc.iroh", b, sizeof b - 1);
+    b[n > 0 ? n : 0] = 0;
+    info_value(b, "id", id, sizeof id);
+    info_value(b, "relay", relay, sizeof relay);
+    if (!*id) return crc_error(s, req_id, E_UNAVAILABLE, "q2-iroh is not running");
+    uint8_t o[400];
+    pbw w = {o, 0, sizeof o, 0};
+    pb_str(&w, 1, id);
+    if (*relay) pb_str(&w, 2, relay);
+    return crc_send(s, T_REMOTE_INFO, req_id, o, w.n);
+}
+
 int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n) {
     switch (type) {
     case T_SUBSCRIBE: {
@@ -719,6 +763,7 @@ int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t 
     case T_SET_MODE: np_read(); return set_mode(s, req_id, p, n);
     case T_RATE: np_read(); return rate(s, req_id, p, n);
     case T_PLAY_QUEUE_ITEM: np_read(); return queue_item(s, req_id, p, n);
+    case T_GET_REMOTE: return get_remote(s, req_id);
     case T_BROWSE: case T_SEARCH: case T_GET_QUEUE: case T_GET_COVER: case T_PLAY: case T_START_RADIO:
         np_read();
         return lib_request(s, type, req_id, p, n, np.qgen, np.qpos);

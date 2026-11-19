@@ -376,6 +376,81 @@ def test_pair_a_phone_follows_bluetooth_coming_on(fw, ui, mcl, recs):
     assert howto_texts(fw, ui, howto)[3] == 'Pair a Q2 Muse > Bluetooth'
 
 
+IROH, QR = '/tmp/coda-rc.iroh', '/tmp/coda-rc.qr'
+ENDPOINT = '8aace45aa34b357c67fae6d1433685921c74f979a8be842802efc17807939913'
+
+
+def open_qr(fw, ui, recs, random=1042917, relay=True):
+    """Pair a Phone with q2-iroh running (its --info file) and /dev/urandom giving random; the QR codes it encodes."""
+    encoded = []
+    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
+    q2 = Car(fw, ui, recs)
+    q2.files[IROH] = f'id {ENDPOINT}\n'.encode() + (b'relay https://use1-1.relay.n0.iroh.link./\n' if relay else b'')
+    q2.files['/dev/urandom'] = struct.pack('<I', random)
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
+    return q2, ui.top(), encoded
+
+
+def test_with_q2_iroh_pair_a_phone_is_a_qr_code_with_the_code_under_it(fw, ui, mcl, recs):
+    """docs/remote-protocol.md#pairing-by-qr-code: the QR code carries the code, the endpoint id, the Wi-Fi address
+    and the relay, in capitals (QR's alphanumeric mode); the code is in /tmp/coda-rc.qr for the daemon to take."""
+    q2, howto, encoded = open_qr(fw, ui, recs)
+    assert q2.files[QR] == b'042917\n'
+    assert howto_texts(fw, ui, howto) == ['042 917', 'Scan with', 'Q2 Muse Remote', 'Pair a Q2 Muse >', 'Scan QR Code',
+                                          'Works from any', 'network', 'Or type the code at', '192.168.1.30', 'Waiting…']
+    assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}:192.168.1.30:HTTPS://USE1-1.RELAY.N0.IROH.LINK./'
+
+
+def test_before_q2_iroh_has_a_relay_the_qr_code_leaves_it_empty(fw, ui, mcl, recs):
+    q2, howto, encoded = open_qr(fw, ui, recs, relay=False)
+    howto_texts(fw, ui, howto)
+    assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}:192.168.1.30:'
+
+
+def test_a_code_the_daemon_spent_is_replaced_and_closing_takes_it_away(fw, ui, mcl, recs):
+    """The daemon removes /tmp/coda-rc.qr when a pairing on its code ended (a wrong guess among them): the page makes
+    another at its next poll and paints it. Closed, the page leaves no code for the daemon to take."""
+    q2, howto, encoded = open_qr(fw, ui, recs)
+    del q2.files[QR]
+    q2.files['/dev/urandom'] = struct.pack('<I', 7)
+    q2.tick()
+    assert q2.files[QR] == b'000007\n'
+    assert howto_texts(fw, ui, howto)[0] == '000 007' and encoded[-1].startswith('Q2MUSE:1:000007:')
+    fw.fn('window_close', None, C.c_void_p)(howto)
+    assert QR not in q2.files
+
+
+def test_with_a_relay_and_no_wi_fi_address_it_is_still_a_qr_code(fw, ui, mcl, recs):
+    """The emulator's case (no wlan0): reachable through the relay alone, the QR code has no address and the page
+    names none to type at."""
+    encoded = []
+    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
+    q2 = Car(fw, ui, recs)
+    fw.mock('fw_ioctl', lambda *_: -1)
+    q2.files[IROH] = f'id {ENDPOINT}\nrelay https://use1-1.relay.n0.iroh.link./\n'.encode()
+    q2.files['/dev/urandom'] = struct.pack('<I', 1042917)
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
+    texts = howto_texts(fw, ui, ui.top())
+    assert texts[0] == '042 917' and 'Or type the code at' not in texts
+    assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}::HTTPS://USE1-1.RELAY.N0.IROH.LINK./'
+
+
+def test_with_neither_the_page_keeps_its_steps(fw, ui, mcl, recs):
+    q2 = Car(fw, ui, recs)
+    fw.mock('fw_ioctl', lambda *_: -1)
+    q2.files[IROH] = f'id {ENDPOINT}\n'.encode()  # not yet online
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
+    assert howto_texts(fw, ui, ui.top())[1] == 'Open Settings > Wi-Fi'
+
+
+def test_without_randomness_there_is_no_code_and_nothing_to_scan(fw, ui, mcl, recs):
+    q2, howto, encoded = open_qr(fw, ui, recs, random=4294967295)  # rejected every time
+    assert QR not in q2.files and howto_texts(fw, ui, howto) == [] and encoded == []
+
+
 def test_renaming_a_phone_gets_the_strip_s_arrow(fw, ui, mcl, recs):
     """Car Remote's Rename Phone: the letter strip's return key is the arrow (the user's 22:14 ruling)."""
     from test_search_strip import Ss

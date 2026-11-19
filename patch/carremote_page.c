@@ -1,8 +1,10 @@
 /* Settings > Car Remote (docs/internals.md#car-remote, docs/oled-design.md#car-remote): the switch, then, while it
  * is on, Pair a Phone and a row per paired phone, each opening the phone's page (Status, Paired, Last Connected,
  * Rename, Forget Phone); with none paired, the empty state with Pair a Phone as its button. Pair a Phone opens a
- * page that says how a phone pairs (the phone starts it, so the Q2 Muse can only wait), step by step over the link
- * a phone can find it on now: Bluetooth while the daemon advertises, else Wi-Fi with the address to type.
+ * page that says how a phone pairs (the phone starts it, so the Q2 Muse can only wait): with q2-iroh running, a QR
+ * code for Q2 Muse Remote to scan, which carries the pairing's code (shown under it) and how to reach this Q2 Muse
+ * from any network; else step by step over the link a phone can find it on now: Bluetooth while the daemon
+ * advertises, else Wi-Fi with the address to type.
  *
  * What it shows comes from the daemon's files (patch/coda_rc.c): the peers file (a phone's id, key, name and when
  * it paired), /tmp/coda-rc.online (the connected phones and their links) and the seen file (when each was last
@@ -21,6 +23,12 @@
 #define CR_ONLINE_REC 9
 #define CR_PEERS_MAX 8
 #define CR_BLE "/tmp/coda-rc.ble"       /* coda_rc.c crc_ble_advertising: while a phone's Bluetooth scan can find it */
+#define CR_IROH "/tmp/coda-rc.iroh"     /* q2-iroh --info (coda_rc_shim.c starts it): "id HEX" and "relay URL" lines */
+#define CR_QR "/tmp/coda-rc.qr"         /* the code the QR code carries, while it shows (coda_rc.c crc_code_shown) */
+#define CR_QR_X 20                      /* the QR code's plate: version 6 at 4 px a module, its quiet zone in */
+#define CR_QR_Y 58
+#define CR_QR_PX 180
+#define CR_QR_SIDE_X 216                /* the words beside it */
 
 /* The rows' geometry (docs/oled-design.md#car-remote, design/carremote-page mock_carremote.py) */
 #define CR_ROW 32       /* a one-line row */
@@ -60,7 +68,8 @@ static struct {
     void *page, *view;       /* Settings > Car Remote and its list */
     void *phone, *phone_view; /* a phone's page */
     void *howto;             /* Pair a Phone */
-    unsigned howto_shown;    /* what it shows (cr_howto_mode and the address, hashed) */
+    unsigned howto_shown;    /* what it shows (cr_howto_mode, the address and the QR code, hashed) */
+    char code[8];            /* the pairing code the QR code carries; empty with none made */
     unsigned char phone_id[8]; /* whose page */
     unsigned shown, phone_shown; /* what each shows (cr_read's sum) */
     int sel;                 /* 0 while the switch's bar shows (it is laid out tall), else -1 */
@@ -251,14 +260,18 @@ static int cr_selected(void *view) { return view ? widget_get_prop_int(view, "_r
 /* ---- Pair a Phone: how a phone pairs ---- */
 
 static unsigned cr_howto_sum(void);
+static void cr_qr_code(void);
 
 static int cr_howto_closed(void *ctx, void *event) {
     if (cp.howto == ctx) cp.howto = 0;
+    unlink(CR_QR); /* no code stands once the page has gone */
+    memset(cp.code, 0, sizeof cp.code);
     return 0;
 }
 
 static int cr_howto_open(void *ctx, void *event) {
     if (cp.howto || !(cp.howto = page_open("carhowto_page", cr_howto_closed, page_keyup))) return 0;
+    cr_qr_code();
     cp.howto_shown = cr_howto_sum();
     page_list(cp.howto, cp.howto, 0, "Pair a Phone", 1, 48); /* the title; no rows */
     widget_invalidate_force(cp.howto, 0);
@@ -271,19 +284,96 @@ static int cr_howto_open(void *ctx, void *event) {
  * Bluetooth tab finds a Q2 Muse by its advertisement only, and its Wi-Fi tab lists the ones the daemon announces
  * over mDNS (docs/remote-protocol.md#discovery) or takes an address typed, so the page gives the steps of the one
  * that can work and never the other's. */
-enum { CR_BY_NONE, CR_BY_WIFI, CR_BY_BLE };
+enum { CR_BY_NONE, CR_BY_WIFI, CR_BY_BLE, CR_BY_QR };
+
+/* The QR code's text into out ("" with no q2-iroh running): Q2MUSE:1:<code>:<endpoint id>:<Wi-Fi address>:<relay>, in
+ * capitals so that QR's alphanumeric mode packs it into version 6 (Q2 Muse Remote reads it in any case; an empty
+ * field is unknown). The endpoint id and relay are q2-iroh's (CR_IROH), the code the one the daemon takes for the
+ * next pairing (CR_QR, docs/remote-protocol.md#pairing-by-qr-code). */
+/* q2-iroh's endpoint id and home relay from CR_IROH into id[72] and relay[200] ("" each when not known) */
+static void cr_iroh(char *id, char *relay) {
+    char raw[400];
+    *id = *relay = 0;
+    state_read(CR_IROH, raw, sizeof raw);
+    for (char *l = raw + 1; *l;) {
+        char *end = l;
+        while (*end && *end != '\n') ++end;
+        int more = *end != 0;
+        *end = 0;
+        if (!strncmp(l, "id ", 3)) tk_snprintf(id, 72, "%s", l + 3);
+        if (!strncmp(l, "relay ", 6)) tk_snprintf(relay, 200, "%s", l + 6);
+        l = end + more;
+    }
+}
+
+static void cr_qr_text(char *out, unsigned n, const char *addr) {
+    char id[72], relay[200];
+    *out = 0;
+    cr_iroh(id, relay);
+    if (strlen(id) != 64 || !cp.code[0]) return;
+    tk_snprintf(out, n, "Q2MUSE:1:%s:%s:%s:%s", cp.code, id, addr, relay);
+    for (char *c = out; *c; ++c)
+        if (*c >= 'a' && *c <= 'z') *c -= 32;
+}
+
+/* A new code for the QR code, in CR_QR for the daemon: on opening, and after a pairing on the last one ended (the
+ * daemon removed the file). Drawn as the daemon draws its own (coda_rc_core.c new_code); none without randomness. */
+static void cr_qr_code(void) {
+    unsigned v = 0xffffffffu;
+    memset(cp.code, 0, sizeof cp.code);
+    for (int i = 0; i < 8 && v >= 4294000000u; ++i)
+        if (!blob_io("/dev/urandom", 0, &v, sizeof v, 0)) return;
+    if (v >= 4294000000u) return;
+    tk_snprintf(cp.code, sizeof cp.code, "%06u", v % 1000000);
+    char line[8];
+    tk_snprintf(line, sizeof line, "%s\n", cp.code);
+    if (!blob_io(CR_QR, CR_QR ".new", line, 7, 1)) memset(cp.code, 0, sizeof cp.code);
+}
+
 static int cr_howto_mode(char *addr, unsigned n) {
     int wifi = cr_address(addr, n) != 0;
     if (!wifi) *addr = 0;
+    /* q2-iroh running, and reachable: through the relay it has (any network), or at the Wi-Fi address the QR code
+     * carries (a phone on the same Wi-Fi) */
+    char id[72], relay[200];
+    cr_iroh(id, relay);
+    if (strlen(id) == 64 && (wifi || *relay)) return CR_BY_QR;
     if (g_bluetoothflag && !access(CR_BLE, 0)) return CR_BY_BLE; /* the flag: a killed daemon's file says nothing */
     return wifi ? CR_BY_WIFI : CR_BY_NONE;
 }
 
 static unsigned cr_howto_sum(void) {
-    char addr[20];
+    char addr[20], qr[400] = "";
     int mode = cr_howto_mode(addr, sizeof addr);
-    return hash_bytes(hash_bytes(FNV_SEED, (const unsigned char *)&mode, sizeof mode), (const unsigned char *)addr,
-                      strlen(addr));
+    if (mode == CR_BY_QR) cr_qr_text(qr, sizeof qr, addr);
+    unsigned h = hash_bytes(FNV_SEED, (const unsigned char *)&mode, sizeof mode);
+    return hash_bytes(hash_bytes(h, (const unsigned char *)addr, strlen(addr)), (const unsigned char *)qr, strlen(qr));
+}
+
+/* With q2-iroh running: the QR code, the code under it in two groups of three, and beside it what to do with it in
+ * Q2 Muse Remote's words (its Pair a Q2 Muse screen's Scan QR Code). Scanned on the same Wi-Fi or on any other
+ * network, the phone pairs on the code with nothing typed; the code is there to type in the app's Wi-Fi address tab,
+ * at the address under it, when the phone is on this Wi-Fi and cannot scan. */
+static void cr_howto_qr(void *w, void *canvas, const char *addr) {
+    char text[400], code[8];
+    int sy = cr_screen_y(w), x = CR_QR_SIDE_X, tw = 375 - CR_QR_SIDE_X - 12, foot = CR_QR_Y + CR_QR_PX + 26 - sy;
+    unsigned primary = 0xffffff, secondary = tok(TOK_SECONDARY), muted = tok(TOK_TERTIARY);
+    cr_qr_text(text, sizeof text, addr);
+    if (!*text) return; /* no code could be made: nothing to scan */
+    ui_qr(canvas, text, CR_QR_X, CR_QR_Y - sy, CR_QR_PX);
+    tk_snprintf(code, sizeof code, "%.3s %.3s", cp.code, cp.code + 3);
+    ui_text(canvas, code, 1, TYPE(28), primary, 0, CR_QR_X + CR_QR_PX / 2, foot, CR_QR_PX, 1);
+    ui_text(canvas, "Scan with", 0, TYPE(14), secondary, 0, x, 72 - sy, tw, 2);
+    ui_text(canvas, "Q2 Muse Remote", 1, TYPE(16), primary, 0, x, 94 - sy, tw, 2);
+    ui_text(canvas, "Pair a Q2 Muse >", 0, TYPE(14), secondary, 0, x, 122 - sy, tw, 2);
+    ui_text(canvas, "Scan QR Code", 0, TYPE(14), secondary, 0, x, 140 - sy, tw, 2);
+    ui_text(canvas, "Works from any", 0, TYPE(14), muted, 0, x, 172 - sy, tw, 2);
+    ui_text(canvas, "network", 0, TYPE(14), muted, 0, x, 190 - sy, tw, 2);
+    if (*addr) { /* the Wi-Fi address tab's way, for a phone on this Wi-Fi with no camera to hand */
+        ui_text(canvas, "Or type the code at", 0, TYPE(13), muted, 0, x, 222 - sy, tw, 2);
+        ui_text(canvas, addr, 0, TYPE(13), muted, 0, x, 239 - sy, tw, 2);
+    }
+    ui_text(canvas, "Waiting\xe2\x80\xa6", 0, TYPE(14), secondary, 0, x, foot, tw, 2);
 }
 
 /* Its steps in Q2 Muse Remote's own words (its Pair a Q2 Muse screen, its Bluetooth and Wi-Fi address tabs, Next),
@@ -291,8 +381,7 @@ static unsigned cr_howto_sum(void) {
  * that it waits. The Wi-Fi tab lists this Q2 Muse by its Bluetooth name (the mDNS instance), so its step names
  * that; the Bluetooth tab's advertisement is always "Q2 Muse" (coda_rc_ble.c). With neither
  * link, the steps join a Wi-Fi network first; the page turns to the Wi-Fi steps once it has (carremote_poll). Each
- * line fits the 297 px beside its number at CR_STEP_PX. ponytail: no QR code until Q2 Muse Remote can scan one
- * (design/carremote-page NOTES.md, question 2). */
+ * line fits the 297 px beside its number at CR_STEP_PX. With q2-iroh running, the QR code instead (cr_howto_qr). */
 static void cr_howto_paint(void *w, void *canvas) {
     static const char *const steps[3][4] = {
         [CR_BY_NONE] = { "Open Settings > Wi-Fi", "Join the Wi-Fi your phone is on", "Come back here to pair", 0 },
@@ -303,6 +392,10 @@ static void cr_howto_paint(void *w, void *canvas) {
     };
     char addr[20], line[64], name[40], pick[64];
     int mode = cr_howto_mode(addr, sizeof addr), y = 66 - cr_screen_y(w);
+    if (mode == CR_BY_QR) {
+        cr_howto_qr(w, canvas, addr);
+        return;
+    }
     tk_snprintf(pick, sizeof pick, "Pick %s, then tap Next", bt_name(name, sizeof name));
     /* Text Primary as the dark theme's: ui_text's ink turns it for Light Mode, as the muted lines'. The digits sit
      * on Raised 2's disc, which fill_box leaves dark in either mode, so theirs is white in both (turned twice). */
@@ -579,6 +672,7 @@ void carremote_paint(void *w, void *canvas) {
  * whose answer acts first; the change is seen at the first poll after. */
 void carremote_poll(void) {
     if (cp.howto) { /* Pair a Phone: painted again when Bluetooth or Wi-Fi changes what a phone can find */
+        if (access(CR_QR, 0)) cr_qr_code(); /* a pairing on its code ended: the QR code carries a new one */
         unsigned h = cr_howto_sum();
         if (h != cp.howto_shown) widget_invalidate_force(cp.howto, 0);
         cp.howto_shown = h;
