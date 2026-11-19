@@ -59,7 +59,7 @@ class Page:
             ui.name[b] = str(i)
             if i == 2:  # Quality over its choice, a second line (btmenu_setting_row_build)
                 ui.text[ui.new('hscroll_label_create', b, 10, 0, 266, 35)] = 'Quality'
-                ui.text[ui.new('hscroll_label_create', b, 10, 35, 266, 35)] = 'LDAC Auto'
+                ui.text[ui.new('hscroll_label_create', b, 10, 35, 266, 35)] = 'Auto'
         if not self.fw.var('g_bluetoothflag', C.c_ubyte).value:
             return 0
         paired = [i for i, d in enumerate(self.devices) if d[2] != 'found']
@@ -481,7 +481,7 @@ def test_quality_is_a_key_value_row_naming_the_choice(fw):
     p = Page(fw, DEVICES)
     b = p.ui.kids[p.row('s2')][0]
     labels = [(p.ui.text.get(w), p.ui.name.get(w)) for w in p.ui.subtree(b) if p.ui.kind[w] == 'hscroll_label_create']
-    assert labels == [('Quality', None), ('LDAC Auto', '_setting_value')]  # the title, its value (list_value), one line
+    assert labels == [('Quality', None), ('Auto', '_setting_value')]  # the title, its value (list_value), one line
 
 
 def test_quality_s_choices_show_their_bit_rates(fw):
@@ -491,7 +491,7 @@ def test_quality_s_choices_show_their_bit_rates(fw):
     ui.name[win] = 'btquality_page'
     lv = ui.new('list_view_create', win, 0, 26, 375, 294)
     view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
-    names = ['LDAC Best', 'LDAC Standard', 'LDAC Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']
+    names = ['LDAC Best', 'LDAC Standard', 'Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']
     for i, n in enumerate(names):
         item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
         b = ui.new('button_create', item, 0, 0, 375, 32)
@@ -517,7 +517,7 @@ def test_quality_s_auto_caption_is_one_entry_however_often_the_picker_lays_out(f
     ui.name[win] = 'btquality_page'
     lv = ui.new('list_view_create', win, 0, 26, 375, 294)
     view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
-    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto']):
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'Auto']):
         item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
         b = ui.new('button_create', item, 0, 0, 375, 32)
         ui.name[b] = str(i)
@@ -531,7 +531,7 @@ def test_quality_s_auto_caption_is_one_entry_however_often_the_picker_lays_out(f
 
 
 STEP_TITLE = 'Adapt to Signal'
-STEP_CAPTION = 'On LDAC Auto or SBC, lowers quality to keep playing when the signal is weak'
+STEP_CAPTION = 'On Auto or SBC, lowers quality to keep playing when the signal is weak'
 
 
 def quality_page(fw, **config):
@@ -543,7 +543,7 @@ def quality_page(fw, **config):
     ui.name[win] = 'btquality_page'
     lv = ui.new('list_view_create', win, 0, 26, 375, 294)
     view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
-    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']):
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']):
         item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
         b = ui.new('button_create', item, 0, 0, 375, 32)
         ui.name[b] = str(i)
@@ -557,7 +557,7 @@ def quality_page(fw, **config):
 def step_row(ui, view):
     """The step-down's row: its button, its title and whether its switch is on."""
     rows = [item for item in ui.kids[view] if any(ui.text.get(w) == STEP_TITLE for w in ui.subtree(item))]
-    assert len(rows) == 1 and rows[0] == ui.kids[view][-1]  # one, after the eight choices
+    assert len(rows) == 1 and rows[0] == ui.kids[view][0]  # one, first, above the choices
     b = ui.kids[rows[0]][0]
     switch = [w for w in ui.subtree(b) if ui.name.get(w) == '_setting_switch']
     assert len(switch) == 1
@@ -565,8 +565,8 @@ def step_row(ui, view):
     return b, ui.image[switch[0]] == 'switch_on'
 
 
-def test_quality_ends_with_the_adapt_to_signal_switch_off_by_default(fw):
-    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under LDAC Auto
+def test_quality_opens_with_the_adapt_to_signal_switch_off_by_default(fw):
+    """Adapt to Signal (docs/internals.md#bluetooth-link-monitor): q2guard's step-down from aptX HD under Auto
     and SBC's bitpool, off unless [Q2POD] BTSTEPDOWN says 1, so a Q2 that never saved the key (the switch's
     default was on before) is off too; one row however often the picker lays out, its caption saying what it
     does."""
@@ -574,12 +574,51 @@ def test_quality_ends_with_the_adapt_to_signal_switch_off_by_default(fw):
     assert step_row(ui, view)[1] is False
     table = fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
     items = [table[1 + k] for k in range(8)]
-    assert items.count(ui.kids[view][-1]) == 1
-    assert C.wstring_at(table[9 + items.index(ui.kids[view][-1])]) == STEP_CAPTION
+    assert items.count(ui.kids[view][0]) == 1
+    assert C.wstring_at(table[9 + items.index(ui.kids[view][0])]) == STEP_CAPTION
     ui, _, view = quality_page(fw, BTSTEPDOWN=b'1')    # turned on by hand: kept on
     assert step_row(ui, view)[1] is True
     ui, _, view = quality_page(fw, BTSTEPDOWN=b'0')
     assert step_row(ui, view)[1] is False
+
+
+def test_quality_is_one_flat_list_switch_then_codec_header_then_auto_first(fw):
+    """docs/oled-design.md#bluetooth Quality: Adapt to Signal, a CODEC header the wheel passes, then Auto and the
+    fixed choices (stock's rows, named by their index in g_btcoding, so a pick still saves stock's number); the
+    order holds however often the picker lays out."""
+    ui, _, view = quality_page(fw)
+    rows = ui.kids[view]
+    head = ui.lookup(rows[1], '_bt_head', 0)
+    assert head and ui.text[head] == 'CODEC' and ui.props.get((rows[1], '_bt_head')) == 1  # a heading: passed
+    names = [ui.name.get(ui.kids[r][0]) if ui.kids[r] else None for r in rows[2:]]
+    assert names == ['2', '0', '1', '3', '4', '5', '6', '7']
+    assert len(rows) == 10
+
+
+def test_quality_s_rates_end_on_the_switch_s_edge_and_before_the_check_on_the_checked_row(fw):
+    """A rate is a Settings row's value: flush with the right column, where the switch above ends; the checked
+    row's sits just before its check (12 px and the gap), and moves when a pick moves the check (no layout)."""
+    fw.mock('widget_move_resize', lambda w, *box: [setattr(C.c_int.from_address(w + 4 * i), 'value', v)
+                                                   for i, v in enumerate(box[:4])] and 0)
+    fw.var('g_btcoding', C.c_ubyte).value = 3  # aptX HD
+    ui, _, view = quality_page(fw)
+
+    def ends():
+        out = {}
+        for item in ui.kids[view]:
+            b = ui.kids[item][0] if ui.kids[item] else 0
+            l = ui.lookup(b, '_bt_kbps', 0) if b else 0
+            if l:
+                x, _, w, _ = geometry(l)
+                out[ui.name[b]] = geometry(b)[0] + x + w
+        return out
+    b, _ = step_row(ui, view)
+    sw = next(w for w in ui.subtree(b) if ui.name.get(w) == '_setting_switch')
+    edge = geometry(b)[0] + geometry(sw)[0] + geometry(sw)[2]
+    assert ends() == {'0': edge, '1': edge, '3': edge - 24, '4': edge}
+    fw.var('g_btcoding', C.c_ubyte).value = 0  # LDAC Best picked: stock moves the check, nothing lays out
+    fw.fn('bt_ui_poll', None)()
+    assert ends() == {'0': edge - 24, '1': edge, '3': edge, '4': edge}
 
 
 def test_the_adapt_to_signal_switch_toggles_and_saves(fw):
@@ -592,14 +631,14 @@ def test_the_adapt_to_signal_switch_toggles_and_saves(fw):
 
 
 @pytest.mark.parametrize('codec, status, caption', [
-    (13, 3, 'Streams aptX HD to this headset, 576 kbps'),  # a B&W Px7 on LDAC Auto: no LDAC, aptX HD at 48 kHz
-    (2, 3, 'Streams AAC to this headset'),                 # no fixed rate to name
+    (13, 3, 'Best this headset supports: aptX HD, 576 kbps'),  # a B&W Px7 on Auto: no LDAC, aptX HD at 48 kHz
+    (2, 3, 'Best this headset supports: AAC'),                 # no fixed rate to name
     (4, 3, 'Steps with the signal, 330 to 990 kbps'),      # LDAC: Auto is what it says
     (13, 2, 'Steps with the signal, 330 to 990 kbps'),     # not connected: the setting, not a headset
     (0, 3, 'Steps with the signal, 330 to 990 kbps'),      # codec not known yet
 ])
 def test_quality_s_auto_caption_names_what_the_connected_headset_streams(fw, codec, status, caption):
-    """LDAC Auto offers aptX HD, aptX, AAC and SBC beside LDAC; a headset without LDAC gets one of those at its own
+    """Auto offers aptX HD, aptX, AAC and SBC beside LDAC; a headset without LDAC gets one of those at its own
     rate, so the caption names it instead of LDAC's range (docs/internals.md#bluetooth-page)."""
     p = Page(fw, DEVICES, files={BATT_FILE: f'{HEAD} 72 48000\n'.encode()})
     fw.var('fw_ctx_bt_showcoding', C.c_int).value = codec
@@ -611,7 +650,7 @@ def test_quality_s_auto_caption_names_what_the_connected_headset_streams(fw, cod
     ui.name[win] = 'btquality_page'
     lv = ui.new('list_view_create', win, 0, 26, 375, 294)
     view = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
-    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'LDAC Auto']):
+    for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'Auto']):
         item = ui.new('list_item_create', view, 0, 32 * i, 375, 32)
         b = ui.new('button_create', item, 0, 0, 375, 32)
         ui.name[b] = str(i)
@@ -747,7 +786,7 @@ def quality_pick(fw, row, codec, linked=1):
     (6, 3, 'SBC'),
     (3, 1, 'aptX-HD LDAC aptX AAC SBC'),   # back up from SBC
     (5, 4, 'AAC LDAC aptX-HD aptX SBC'),
-    (2, 3, 'LDAC aptX-HD aptX AAC SBC'),   # LDAC Auto on a headset without LDAC: the best it has, as bluetoothd picks
+    (2, 3, 'LDAC aptX-HD aptX AAC SBC'),   # Auto on a headset without LDAC: the best it has, as bluetoothd picks
 ])
 def test_a_quality_pick_on_a_live_link_switches_the_codec_in_place(fw, row, codec, order):
     """Stock asks to reconnect and drops the headset (btDisconnect, then connectBtDevice: a new ACL handle at each of

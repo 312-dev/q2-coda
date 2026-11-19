@@ -2,7 +2,7 @@
  * While an A2DP stream runs it writes one line a second to the card's q2-bt log: what the radio was
  * sent, what is waiting for it, what the controller says of the link, and what else was busy. Two
  * things it changes: the headset's link is allowed EDR packets (bt_edr_step), once a handle; and
- * under LDAC Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
+ * under Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
  * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
@@ -110,7 +110,7 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
 int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size);
 
 /* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
- * Under LDAC Auto with Quality's Adapt to Signal on, a link the radio cannot keep up with is moved
+ * Under Auto with Quality's Adapt to Signal on, a link the radio cannot keep up with is moved
  * from aptX HD or aptX straight to SBC, whose bitpool then adapts with no gap (bt_sbc_step), and
  * back to where it started once the link is clean and the band clear. */
 #define BT_STEP_WQ 4096         /* bt_sbc_step: bytes waiting in the A2DP socket over this, */
@@ -152,9 +152,9 @@ struct bt_step_line {
 /* One line: allowed (bt_step_allowed), the codec's rank now and the line. The rank to select now,
  * else 0. */
 int bt_step(struct bt_step *s, unsigned now, int allowed, int rank, const struct bt_step_line *l);
-#define BT_LDAC_AUTO 2           /* [SYSSET] BTCODING's LDAC Auto (g_btcoding's row) */
+#define BT_LDAC_AUTO 2           /* [SYSSET] BTCODING's Auto (g_btcoding's row) */
 #define BT_STEP_KEY "BTSTEPDOWN" /* [Q2POD]: Adapt to Signal, on only at 1 (patch/bt_ui.c) */
-/* config.ini's text: 1 LDAC Auto with the setting on, 0 LDAC Auto with it off, -1 another choice
+/* config.ini's text: 1 Auto with the setting on, 0 Auto with it off, -1 another choice
  * (or none saved) */
 int bt_step_allowed(const char *ini);
 /* GetPCMs (as bt_pcms reads it): the A2DP source PCM's object path, which SelectCodec is sent to,
@@ -192,7 +192,7 @@ int bt_sbc_step(struct bt_sbc *s, unsigned now, int allowed, int rank, int own, 
                 int bufs);
 #define BT_SBC_HQ 6 /* [SYSSET] BTCODING's SBC HQ and SBC rows (g_btcoding) */
 #define BT_SBC_ROW 7
-/* config.ini's text: 1 LDAC Auto, SBC HQ or SBC with BT_STEP_KEY's switch on, 0 those with it off,
+/* config.ini's text: 1 Auto, SBC HQ or SBC with BT_STEP_KEY's switch on, 0 those with it off,
  * -1 another choice (or none saved) */
 int bt_sbc_allowed(const char *ini);
 

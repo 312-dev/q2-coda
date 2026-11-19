@@ -214,7 +214,7 @@ def test_the_lookups_own_write_leaves_the_switch_on(fw):
 def test_shipped_default_is_utc_not_shanghai():
     """A fresh install's config.ini (tools/build.py default_config) starts on UTC until the lookup runs."""
     build = host.tools_build
-    stock = b'[SYSSET]\nAUTOSYNCTIME=1\nTIMEZONE=22\nCOVERMODE=1\nSTANDBYMODE=1\nWHEELMODE=1\n'
+    stock = b'[SYSSET]\nAUTOSYNCTIME=1\nBTCODING=2\nTIMEZONE=22\nCOVERMODE=1\nSTANDBYMODE=1\nWHEELMODE=1\n'
     config = build.default_config(stock)
     assert b'\nTIMEZONE=%d\n' % build.DEFAULT_TIMEZONE in config and b'TIMEZONE=22' not in config
     assert build.TIMEZONES[build.DEFAULT_TIMEZONE][1] == 'UTC'

@@ -280,9 +280,9 @@ void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int
     return m;
 }
 
-/* A section header: item h high, a heading the wheel passes, its label text in the header's type
- * (stock's own centred label, if any, hidden). */
-static void *head(void *view, void *item, const char *text) {
+/* A section header: item h high, a heading the wheel passes, its label text in Text Tertiary at
+ * px (stock's own centred label, if any, hidden). */
+static void *head_px(void *view, void *item, const char *text, int px) {
     if (!item) {
         item = list_item_create(view, 0, 0, 375, BT_HEAD_H);
         widget_use_style(item, "s_listitem_black");
@@ -292,11 +292,14 @@ static void *head(void *view, void *item, const char *text) {
     widget_resize(item, I(item, W_W), BT_HEAD_H);
     widget_set_enable(item, 0);
     widget_set_prop_int(item, "_bt_head", 1);
-    void *l =
-        small_label(item, geom_val(V_TEXT_X), BT_HEAD_Y, 240, BT_HEAD_H - BT_HEAD_Y, BT_HEAD_PX);
+    void *l = small_label(item, geom_val(V_TEXT_X), BT_HEAD_Y, 240, BT_HEAD_H - BT_HEAD_Y, px);
     widget_set_name(l, "_bt_head");
     widget_set_text_utf8(l, text);
     return item;
+}
+/* ... in the section header's type */
+static void *head(void *view, void *item, const char *text) {
+    return head_px(view, item, text, BT_HEAD_PX);
 }
 
 /* Stock's click on device dev's row on the Bluetooth page, as a tap at x: connect a paired or
@@ -373,7 +376,7 @@ static void off_note(void *view) {
 }
 
 /* Stock's Quality row, its title over the choice (a second line), as a key/value row: Quality and
- * the choice's name (LDAC Auto) on the right column before its chevron. */
+ * the choice's name (Auto) on the right column before its chevron. */
 static void quality_value(void *item) {
     void *b = row_button(item), *title = (void *)0, *choice = (void *)0;
     for (unsigned i = 0, n = b ? widget_count_children(b) : 0; i < n; ++i) {
@@ -449,19 +452,18 @@ void bt_page(void *view, int on) {
     class_fetch();
 }
 
-/* ---- Quality's last row: Adapt to Signal ----
- * [Q2POD] BTSTEPDOWN, off unless 1 (a Q2 that never saved the key is off): under LDAC Auto,
+/* ---- Quality: Adapt to Signal, then the codecs (docs/oled-design.md#bluetooth) ----
+ * [Q2POD] BTSTEPDOWN, off unless 1 (a Q2 that never saved the key is off): under Auto,
  * q2guard moves a link the radio cannot keep up with from aptX HD or aptX straight to SBC, and back
- * once it is clean, and on SBC (LDAC Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises
+ * once it is clean, and on SBC (Auto's, or SBC HQ or SBC chosen) lowers its bitpool and raises
  * it again (q2bt.c, docs/internals.md#bluetooth-link-monitor); q2guard reads the key itself
  * (q2bt.h's BT_STEP_KEY, the same name: q2guard's headers are not the payload's).
- * Added before the picker's first layout, after stock's eight choices, and found again by its
- * item's _bt_step on every later one; no state of its own. */
+ * Added before the picker's first layout and found again by its item's _bt_step on every later
+ * one; no state of its own. quality_order puts it first, over a CODEC header and the choices. */
 #define BT_STEP_KEY "BTSTEPDOWN"
 #define BT_STEP_TITLE "Adapt to Signal"
 #define BT_STEP_CAPTION                                                                            \
-    ((const unsigned *)L"On LDAC Auto or SBC, lowers quality to keep playing when the signal "     \
-                       L"is weak")
+    ((const unsigned *)L"On Auto or SBC, lowers quality to keep playing when the signal is weak")
 static int step_on(void) { return config_value("Q2POD", BT_STEP_KEY, 2, 0); }
 static int step_click(void *label, void *event) {
     int on = !step_on();
@@ -479,13 +481,48 @@ static void step_row(void *view) {
     caption_row(label, BT_STEP_CAPTION);
 }
 
+/* The picker's order: Adapt to Signal, a CODEC header (13 px Text Tertiary caps, a heading the
+ * wheel passes), then Auto and the fixed choices from best to SBC. Stock's rows keep their buttons'
+ * names, g_btcoding's index (0 LDAC Best to 7 SBC), which its click reads (atoi of the name) and
+ * its check finds them by, so only their places change; the picker opens on the checked row
+ * wherever it is (contexts.inc CHOICE). Restacked on every layout; the header is made once, found
+ * again by its item's _bt_codec. */
+#define BT_AUTO 2 /* Auto's row in g_btcoding */
+#define BT_CODEC_PX TYPE(13)
+static void quality_order(void *view) {
+    static const signed char order[] = { BT_AUTO, 0, 1, 3, 4, 5, 6, 7 };
+    void *step = (void *)0, *codec = (void *)0, *rows[sizeof order] = { 0 };
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *item = widget_get_child(view, i), *b = row_button(item);
+        if (widget_get_prop_int(item, "_bt_step", 0))
+            step = item;
+        else if (widget_get_prop_int(item, "_bt_codec", 0))
+            codec = item;
+        else if (b) {
+            int k = atoi(widget_get_prop_str(b, "name", ""));
+            if (k >= 0 && k < (int)sizeof order) rows[k] = item;
+        }
+    }
+    if (!codec) {
+        codec = head_px(view, (void *)0, "CODEC", BT_CODEC_PX);
+        widget_set_prop_int(codec, "_bt_codec", 1);
+    }
+    I(codec, W_H) = BT_HEAD_H; /* before the layout, as bt_rows_pre's own headers */
+    unsigned at = 0;
+    if (step) widget_restack(step, at++);
+    widget_restack(codec, at++);
+    for (unsigned i = 0; i < sizeof order; ++i)
+        if (rows[(int)order[i]]) widget_restack(rows[(int)order[i]], at++);
+}
+
 /* Before stock's layout: each device row's height, the connected one two lines (navigation.c maps
- * the others to the set's row as stock's settings rows); on Quality's picker, the step-down's row.
- */
+ * the others to the set's row as stock's settings rows); on Quality's picker, the step-down's row
+ * and the picker's order. */
 void bt_rows_pre(void *view) {
     void *win = window_of(view);
     if (win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "btquality_page")) {
         step_row(view);
+        quality_order(view);
         return;
     }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
@@ -577,28 +614,32 @@ int bt_list(void *list) {
 
 /* ---- Quality (P5): each choice's bit rate, Auto's caption ---- */
 
-/* Quality's choice i (g_btcoding's, stock's row order: LDAC Best, Standard, Auto, aptX HD, aptX,
- * AAC, SBC HQ, SBC): its bit rate at 48 kHz where the codec fixes one (bt_detail.c bt_kbps), 0
+/* Quality's choice i (g_btcoding's index: LDAC Best, Standard, Auto, aptX HD, aptX, AAC, SBC HQ,
+ * SBC): its bit rate at 48 kHz where the codec fixes one (bt_detail.c bt_kbps), 0
  * for Auto, AAC and SBC, whose rate the link sets. */
 static unsigned choice_kbps(int i) {
     static const unsigned short kbps[] = { 990, 660, 0, 576, 384, 0, 0, 0 };
     return i >= 0 && i < (int)(sizeof kbps / sizeof *kbps) ? kbps[i] : 0;
 }
-#define BT_AUTO 2 /* LDAC Auto's row */
 #define BT_AUTO_CAPTION ((const unsigned *)L"Steps with the signal, 330 to 990 kbps")
-#define BT_KBPS_W 90 /* a choice's rate, right-aligned before the check */
-#define BT_KBPS_GAP 24
+#define BT_KBPS_W 90 /* a choice's rate, right-aligned on the right column */
+#define BT_CHECK_GAP 24 /* ... and on the checked row before the check: its 12 px and the gap */
 
 /* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
  * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
- * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it. On LDAC, with
- * no device connected (stock's rule, as bt_dev_state: the link list's last item at status 3) or no
- * codec known, it says what LDAC Auto does. caption_row measures a caption again only for another
- * pointer, so a changed text goes to the other of two buffers. */
+ * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it, "Best this
+ * headset supports: aptX HD, 576 kbps". On LDAC, with no device connected (stock's rule, as
+ * bt_dev_state: the link list's last item at status 3) or no codec known, it says what Auto does.
+ * caption_row measures a caption again only for another pointer, so a changed text goes to the
+ * other of two buffers. */
 static struct {
     unsigned text[2][48];
     int at;
 } auto_cap __attribute__((section(".scratch")));
+static struct {
+    void *view; /* the picker's list while it is open */
+    int coding; /* g_btcoding its rates were placed for */
+} quality __attribute__((section(".scratch")));
 static const unsigned *auto_caption(void) {
     const char *codec = bt_codec();
     char item[32] = "", s[48];
@@ -606,7 +647,7 @@ static const unsigned *auto_caption(void) {
     if (n > 0) getBtLinkItem(n - 1, &status, item);
     if (!codec || status != 3 || !tk_strcmp(codec, "LDAC")) return BT_AUTO_CAPTION;
     unsigned kbps = bt_kbps(codec, bt_headset_rate()),
-             k = (unsigned)tk_snprintf(s, sizeof s, "Streams %s to this headset", codec);
+             k = (unsigned)tk_snprintf(s, sizeof s, "Best this headset supports: %s", codec);
     if (kbps && k < sizeof s) tk_snprintf(s + k, sizeof s - k, ", %u kbps", kbps);
     unsigned *cur = auto_cap.text[auto_cap.at], i = 0;
     while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
@@ -618,8 +659,31 @@ static const unsigned *auto_caption(void) {
     return cur;
 }
 
-/* After the layout: the picker's rows get their rates, Auto its caption. */
+/* Each rate's place: flush with the right column, the edge the switch and the check end on, as
+ * a Settings row's value; on the checked row (g_btcoding) just before the check. */
+static void quality_rates(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *b = row_button(widget_get_child(view, i)), *l = b ? widget_lookup(b, "_bt_kbps", 0) : (void *)0;
+        if (!l) continue;
+        int right = I(b, W_W) - geom_val(V_RIGHT_X) -
+                    (atoi(widget_get_prop_str(b, "name", "")) == g_btcoding ? BT_CHECK_GAP : 0);
+        widget_move_resize(l, right - BT_KBPS_W, 0, BT_KBPS_W, I(b, W_H));
+    }
+    quality.coding = g_btcoding;
+}
+static int quality_gone(void *ctx, void *event) {
+    (void)event;
+    if (quality.view == ctx) quality.view = (void *)0;
+    return 0;
+}
+
+/* After the layout: the picker's rows get their rates, Auto its caption. A pick moves the check
+ * with no layout (stock's click sets the images), so bt_ui_poll places the rates again. */
 static void quality_rows(void *view) {
+    if (quality.view != view) {
+        quality.view = view;
+        widget_on(view, EVT_DESTROY, quality_gone, view);
+    }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item), *title = (void *)0;
         if (!b || widget_lookup(b, "_bt_kbps", 0) || widget_get_prop_int(item, "_bt_step", 0))
@@ -632,13 +696,13 @@ static void quality_rows(void *view) {
         if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
         if (!kbps) continue;
         char s[16];
-        int right = I(b, W_W) - geom_val(V_RIGHT_X) - BT_KBPS_GAP;
-        void *l = small_label(b, right - BT_KBPS_W, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
+        void *l = small_label(b, 0, 0, BT_KBPS_W, I(b, W_H), BT_HEAD_PX);
         widget_set_name(l, "_bt_kbps");
         widget_set_prop_str(l, "style:normal:text_align_h", "right");
         tk_snprintf(s, sizeof s, "%u kbps", kbps);
         widget_set_text_utf8(l, s);
     }
+    quality_rates(view);
 }
 
 /* ---- painting ---- */
@@ -886,6 +950,7 @@ static void codec_follow(void) {
 void bt_ui_poll(void) {
     unsigned now = (unsigned)time_now_ms();
     codec_follow();
+    if (quality.view && quality.coding != g_btcoding) quality_rates(quality.view);
     if (bt.view) page_poll(now);
     guest_ui_poll();
     bt_detail_poll();

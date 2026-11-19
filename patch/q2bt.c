@@ -7,10 +7,10 @@
  * thread's schedstat among them; bluealsa is asked for the codec (dbus-send, in the background) at
  * the start, when its encoder thread changes and every BT_PCMS_MS. Two changes to how the Q2
  * streams: the A2DP sink's link (its address from GetPCMs) is sent Change Connection Packet Type,
- * allowing EDR, once to each of its handles while a stream runs; and under LDAC Auto with the
+ * allowing EDR, once to each of its handles while a stream runs; and under Auto with the
  * step-down's setting on (Adapt to Signal), a link the radio cannot keep up with is moved from aptX
  * HD or aptX straight to SBC and back (bt_step), each switch q2bt-codec's SelectCodec; and on SBC
- * (under LDAC Auto, or SBC chosen, with the same setting on) its bitpool is lowered a rung at a
+ * (under Auto, or SBC chosen, with the same setting on) its bitpool is lowered a rung at a
  * time and raised again
  * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
  * takes from the next frame. Every read that fails leaves its
@@ -27,7 +27,7 @@
 #define RETRY_MS 60000 /* a Bluetooth socket that would not open is tried again after this */
 #define FIND_MS 10000  /* bluealsa looked for again, while not found, after this */
 #define WLAN "/sys/class/net/wlan0/statistics/"
-#define CONFIG "/mnt/data/config.ini" /* LDAC Auto and the step-down's setting, read only */
+#define CONFIG "/mnt/data/config.ini" /* Auto and the step-down's setting, read only */
 #define CODEC_FILE "/tmp/q2bt.codec"  /* q2bt-codec's answer to a switch */
 #define CODEC_PROG "/usr/bin/q2bt-codec"
 #define STEP_ASK_MS 3000 /* bluealsa asked for the codec this long after a switch is sent */
