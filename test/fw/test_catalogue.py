@@ -549,7 +549,9 @@ class RadioOff:
                       song_row('s2', 'Streamed', 'B', 'A', 2, 100, 2)])
         rig.poll()
         rig.files.files[f'/mnt/mmc/.{APP}/q2-{APP}'] = b''  # on the card, not running
-        fw.mock('fw_system', lambda cmd, *_: self.started.append(C.string_at(cmd)) or 0)
+        # the app's start; the scan hold's wpa_cli (smart_wifi.c, this rig's wpa_supplicant socket) is not one
+        fw.mock('fw_system', lambda cmd, *_: 0 if C.string_at(cmd).startswith(b'wpa_cli ')
+                else self.started.append(C.string_at(cmd)) or 0)
         self.tick(O['SMART_IDLE_MS'] // 1000 + 2)
         rig.online = False  # networkStop's: no link
         self.tick(2)
