@@ -8,7 +8,9 @@
  * plugged in or busy, and the lines go to the card's /mnt/mmc/.q2muse/logs in batches. demo draws
  * the cards it is told about in /tmp/q2guard.state and answers in /tmp/q2guard.ack (heatguard.c).
  * Between ticks it sleeps in q2bt.c's bt_sleep, which samples the Bluetooth link each second while
- * an A2DP stream runs, into a q2-bt log beside the heat log (docs/internals.md#bluetooth-link-monitor).
+ * an A2DP stream runs, into a q2-bt log beside the heat log (docs/internals.md#bluetooth-link-monitor),
+ * and each tick it watches for a wedged Bluetooth controller, which demo relaunches when asked through
+ * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog).
  * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
  * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
  * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
@@ -346,20 +348,22 @@ static void flush_reap(void) {
 }
 
 /* ---- demo ---- */
-static void publish(int seq, const char *card, int left, const struct guard *g, int temp, unsigned beat) {
+static void publish(int seq, const char *card, int left, const struct guard *g, int temp, unsigned beat,
+                    int bt) {
     char b[160];
-    int n = snprintf(b, sizeof b, "seq=%d card=%s left=%d state=%s t=%d beat=%u\n", seq, card, left,
-                     guard_state(g), temp == GUARD_NONE ? -1 : temp, beat);
+    int n = snprintf(b, sizeof b, "seq=%d card=%s left=%d state=%s t=%d beat=%u bt=%d\n", seq, card, left,
+                     guard_state(g), temp == GUARD_NONE ? -1 : temp, beat, bt);
     int fd = open(STATE_TMP, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) return;
     write(fd, b, n);
     close(fd);
     rename(STATE_TMP, STATE);
 }
-static void answers(int *ack, int *cancel) { /* "ack N" and "cancel N" lines, the latest of each */
-    char b[128];
+/* "ack N" and "cancel N" lines, the latest of each; the file's text into b (bt_watch reads its
+ * "bt N" line) */
+static void answers(int *ack, int *cancel, char *b, int size) {
     *ack = *cancel = -1;
-    slurp(ACK, b, sizeof b);
+    slurp(ACK, b, size);
     for (char *s = b; *s;) {
         if (!strncmp(s, "ack ", 4)) *ack = atoi(s + 4);
         if (!strncmp(s, "cancel ", 7)) *cancel = atoi(s + 7);
@@ -410,6 +414,7 @@ static int feeds(void) {
         if (n < 0 && *__errno_location() == EPIPE) continue; /* overwritten before it was read: the next one */
         if (n <= 0) break;                                     /* none left (EAGAIN) */
         char level = ulog_kmsg(&ulog, wall, rec, n);
+        bt_kmsg(rec, n); /* a wedged Bluetooth controller's signs (q2bt.c) */
         if (level == 'E' || level == 'W') got |= 2;
     }
     return got & 2;
@@ -526,7 +531,11 @@ int main(int argc, char **argv) {
         temp = read_temp(&raw, die);
         busy = g.off ? -1 : busy_since(&cpu5, &cores);
         int ack, cancel;
-        answers(&ack, &cancel);
+        char ack_text[128];
+        answers(&ack, &cancel, ack_text, sizeof ack_text);
+        /* the Bluetooth controller watched (not while powering off): a probe waits up to BT_PROBE_MS,
+         * only while it is suspect */
+        int bt_req = g.off ? 0 : bt_watch(now_ms(), ack_text);
         struct guard_in in = { now, temp, busy, 0, 0, 0 };
         in.cancel = !strcmp(card, "loadwarn") && cancel == seq && cancel != cancel_seen;
         if (in.cancel) cancel_seen = cancel;
@@ -558,7 +567,7 @@ int main(int argc, char **argv) {
         int left = !strcmp(card, "loadwarn") ? (int)(load_end - now)
                    : g.off                   ? GUARD_CARD_MS - (int)(now - g.off_at)
                                              : 0;
-        publish(seq, card, left < 0 ? 0 : left, &g, temp, ++beat);
+        publish(seq, card, left < 0 ? 0 : left, &g, temp, ++beat, bt_req);
         int fast = (temp != GUARD_NONE && temp >= FAST_DC) || busy >= FAST_BUSY || g.off ||
                    g.load == LOAD_COUNTING || s.cable == 1;
         if (line_due || now - last_line >= (fast ? GUARD_TICK_MS : LINE_MS)) {

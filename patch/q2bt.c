@@ -585,6 +585,81 @@ static void tick(unsigned now) {
     if (now - bt.pcms_at >= BT_PCMS_MS) pcms_start(now);
 }
 
+/* ---- a wedged controller (docs/internals.md#bluetooth-controller-watchdog) ----
+ * The kernel's lines feed bt_wedge (q2bt_core.c); a suspicion is probed with Read Local Version on
+ * a raw socket of its own, and a confirmed wedge asks demo, through the state file's bt=, to
+ * relaunch the stack (heatguard.c); demo answers "bt N done" (or "off") in the ack file. */
+static struct bt_wedge wedge;
+void bt_kmsg(const char *rec, int n) {
+    char b[256];
+    const char *msg;
+    unsigned kms;
+    if (n <= 0) return;
+    if (n > (int)sizeof b - 1) n = (int)sizeof b - 1;
+    memcpy(b, rec, (size_t)n), b[n] = 0;
+    if (bt_kmsg_split(b, &kms, &msg)) bt_wedge_line(&wedge, now_ms(), kms, msg);
+}
+/* 1 answered, 0 not within BT_PROBE_MS, -1 no verdict (no hci0, or it is down) */
+static int probe(unsigned now) {
+    unsigned di[BT_DEVINFO_SIZE / 4] = { 0 };
+    unsigned short addr[3] = { AF_BLUETOOTH, 0, 0 }; /* hci0, HCI_CHANNEL_RAW */
+    unsigned filter[4] = { 1u << 4, 1u << 0x0e, 0, 0 }; /* event packets: Command Complete */
+    static const unsigned char cmd[4] = { 1, BT_OP_VERSION & 0xff, BT_OP_VERSION >> 8, 0 };
+    unsigned char b[64];
+    if (!ctl_ok(now) || ioctl(bt.ctl, HCIGETDEVINFO, di) || !bt_dev_up((unsigned char *)di))
+        return -1;
+    int s = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI), got = -1;
+    if (s < 0) return -1;
+    if (!bind(s, addr, sizeof addr) && !setsockopt(s, 0, 2, filter, 14) && write(s, cmd, 4) == 4) {
+        got = 0;
+        for (unsigned end = now_ms() + BT_PROBE_MS; !got;) {
+            int left = (int)(end - now_ms());
+            struct pollfd p = { s, POLLIN, 0 };
+            if (left <= 0 || poll(&p, 1, left) <= 0) break;
+            int n = (int)read(s, b, sizeof b);
+            if (n <= 0) break;
+            got = bt_probe_answer(b, n);
+        }
+    }
+    close(s);
+    return got;
+}
+int bt_watch(unsigned now, const char *ack) {
+    char line[96];
+    static int seeded;
+    int off, n = bt_answer_parse(ack, &off);
+    /* a q2guard started again numbers its asks on from demo's last answer, which would otherwise
+     * read as the answer to an ask of the same number */
+    if (!seeded) seeded = 1, wedge.req = n;
+    if (wedge.asked && n == wedge.req) {
+        bt_wedge_done(&wedge, now, n);
+        say(off ? 'W' : 'I', off ? "BT RESET not made: Bluetooth is off" : "BT RESET demo relaunched the stack");
+    }
+    switch (bt_wedge_step(&wedge, now)) {
+    case BT_W_LATE: say('W', "BT RESET unanswered: demo busy or not running"); return wedge.req;
+    case BT_W_PROBE: break;
+    default: return wedge.req;
+    }
+    int busy = bt.codec_pid > 0 || find_comm("q2bt-codec\n");
+    switch (bt_wedge_probed(&wedge, now, probe(now), busy)) {
+    case BT_W_RESET:
+        snprintf(line, sizeof line, "BT RESET reason=%s%s after %us", wedge.storm ? "storm" : "",
+                 wedge.timeout ? (wedge.storm ? "+timeout" : "timeout") : "",
+                 (now - wedge.first) / 1000u);
+        say('W', line);
+        break;
+    case BT_W_DEFER:
+        say('I', busy ? "BT RESET waits: a codec switch is running" : "BT RESET waits: too soon after the last");
+        break;
+    case BT_W_GIVEUP:
+        snprintf(line, sizeof line, "BT RESET gave up: %d in a row did not cure it", BT_RESET_MAX);
+        say('E', line);
+        break;
+    case BT_W_HEALTHY: say('I', "BT PROBE answered: the controller is alive"); break;
+    }
+    return wedge.req;
+}
+
 void bt_init(card_log *l, card_log *u) {
     bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = bt.down_h = -1;
     bt_edr_reset(&bt.edr);
