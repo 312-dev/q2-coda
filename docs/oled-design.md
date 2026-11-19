@@ -1299,7 +1299,10 @@ the wheel walks:
 
 One turn of the wheel stops on the switcher or the return key, whichever end it reaches; a new turn goes on
 round to the other. Play/Pause submits
-from anywhere on the strip. Return jumps the highlight to the return key. Previous and Next move the text's
+from anywhere on the strip. Return shuts the strip, never a submit, and so does an edge swipe (the user's
+2026-11-18 ruling, on every page the strip types for): the strip goes, the text and its cursor stay where the
+value lives, and the next Return, or swipe, leaves the page as it would anywhere. Centre or a tap in the text opens
+the strip again, and a submit shuts it too (Search's results then fill the page under the tabs). Previous and Next move the text's
 cursor; Previous held erases the character before it, the first 450 ms into the hold, the next 500 ms later,
 each after that 15% sooner, down to 110 ms. There is no delete key and no way to show a password. A key's
 pop bubble rises over the lit character as the wheel lands on it.
@@ -1315,11 +1318,11 @@ left-aligned (right-aligned in a cell). By form:
 - **Search** (and Add Songs' Search, and every search box: Internet Radio's, a card app's, a playlist's song
   search): the query on the page's first line after a magnifier, "Search your music" (a box's own tips, else
   "Search") in Text Tertiary while empty, a 1 px rule under it; on Search, the results between it and the
-  strip, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
+  strip, or the screen's foot while the strip is shut, and with text that matches nothing, the [empty state](#empty-and-offline), "No Matches", "Try fewer
   letters".
   The wheel reaching the query from the tabs (or from Add Songs' songs) only **highlights** it: the selection bar
   (the accent, 8 px corners, x 16 to 359 over the query's 32 px line) with the magnifier and the text in white and
-  no cursor, the strip left as it was and unlit. A turn on goes down to the tabs; Center, Return or a tap on the
+  no cursor, the strip shut. A turn on goes down to the tabs; Center or a tap on the
   line opens the strip with the cursor in the text. A tap counts when the finger lifts within 8 px of where it went
   down; a drag that starts on the line is a scroll and leaves it as it was.
 - **A row** (New Playlist, Rename Playlist): the page under as it was, and over the row the wheel was on, in its
@@ -1362,10 +1365,10 @@ Held, Return goes back (the user's, from `mock_hold_back.py` on 2026-11-17): 200
 dims under black at 55% and a `#1C1C1E` card with 22 px corners, centered on y 160 and sized to its line with
 24 px sides and 20 px above and below, shows a 44 px ring (a 4 px `#3A3A3C` track the accent fills clockwise
 from the top) round Phosphor's `arrow-u-up-left` (bold, 20 px, white) and, 14 px under it, "Keep holding to go
-back" in Inter Medium 16 white; at 600 ms the page closes. Let go before that and the highlight is on the
-return key. The dim covers the status row too, as Buttons Lock's card's does: both draw it the same way
-(`feedback.c` `overlay_scrim`). No box keeps stock's [keyboard](ipod.md#keyboard): each one that opens gives
-its window to the strip (`patch/keyboard.c` `kb_strip_due`).
+back" in Inter Medium 16 white; at 600 ms the page closes. Let go before that and the
+strip shuts, as a press of Return shuts it. The dim covers the status row too, as Buttons Lock's card's does: both draw it the same way
+(`feedback.c` `overlay_scrim`). Stock's [keyboard](ipod.md#keyboard) is gone: the window each box opens for
+one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_host_open`).
 
 ### Icons
 

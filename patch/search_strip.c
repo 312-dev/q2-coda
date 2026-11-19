@@ -17,19 +17,23 @@
  *
  * Keys on the strip: Centre types the character at the text's cursor, cycles the set on the
  * switcher (the highlight stays there), and submits on the return key; Play/Pause submits from
- * anywhere on it; Return jumps the highlight to the return key, and held SS_HOLD_MS goes back
- * (its card, search_strip_overlay); Previous and Next move the cursor along the text, and
+ * anywhere on it; Return shuts the strip (ss_shut: never a submit; an edge swipe does the same,
+ * search_strip_close), the next Return leaves, and held SS_HOLD_MS goes back (its card,
+ * search_strip_overlay); while it is shut the strip is not drawn and Search's results run to the
+ * screen's foot (ss_foot). Previous and Next move the cursor along the text, and
  * Previous held erases the character before it, again and again, faster the longer it is held
- * (ss_erase_due). Submitting Search moves the wheel to its results: the wheel moves their bar,
+ * (ss_erase_due). Submitting shuts the strip too; on Search the wheel goes to the results (the
+ * tabs while the tab picked lists none, the query when nothing matches): the wheel moves their bar,
  * Centre opens a song, which plays with the songs after it as the queue, an artist (stock's
  * artist page) or an album (its tracks in Cover Flow). A turn up from the first result lands on
  * the tabs, where the wheel moves between them, each picked as it is reached
  * (docs/oled-design.md#tabs): a turn down past Albums, or Centre, goes back to the results, a
  * turn up past All to the query line, and Next picks the next tab and Previous the one before.
  * The query line then takes the selection bar and nothing else (SS_ON_FIELD): the strip stays shut,
- * the wheel goes on down to the tabs, and Centre, Return or a tap opens the strip. Previous or
- * Return on the results, and Return on the tabs, go back to the strip, the text,
- * cursor and tab kept. A held Return closes Search from any of them (search_strip_hold, from Hold
+ * the wheel goes on down to the tabs, and Centre or a tap opens the strip. Previous on the results
+ * goes back to the strip, the text, cursor and tab kept; Return there or on the tabs leaves. On a
+ * name's or a box's page the shut strip leaves the text in place, the wheel doing nothing, and
+ * Play/Pause is still its OK. A held Return closes Search from any of them (search_strip_hold, from Hold
  * Return's compact_now_playing). Off the strip Play/Pause is the player's.
  *
  * The key pop (ss_pop_paint): when the wheel or a drag lands on a character, or a tap types one,
@@ -559,7 +563,7 @@ static void ss_box_done(void) {
     input_method_dispatch_action(im);
     if (ss.box && P(im, IM_WIDGET) == edit) input_method_request(im, (void *)0);
 }
-/* Return held on a text box: the box's keyboard closes, the strip with it, as the keyboard's Return
+/* Return held on a text box, or Return with its strip shut: the box's keyboard closes, the strip with it, as the keyboard's Return
  * did (navigation.c search_key: our own edits emptied first, so their pages back out). Add
  * Network's dialog is only the box, a modal one that stock leaves up for a second Return to close:
  * it is quit too, back to the page's rows with the text as it was, from the next loop pass (quit
@@ -1879,9 +1883,8 @@ static int ss_secret_box(void *edit) {
 /* A box's label, kept for as long as the strip is up (the edit's own may go first). */
 static char ss_box_label[48] __attribute__((section(".scratch")));
 
-/* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip types for
- * it on the keyboard's own window, the keys hidden and the window over the
- * screen under the status row, so nothing takes the edit's focus (a page of its own would: a
+/* A stock text box's keyboard (keyboard.c kb_host_open, the input method's bare kb for edit): the
+ * strip types for it on that window, moved over the screen under the status row, so nothing takes the edit's focus (a page of its own would: a
  * window to the background blurs its focus, which ends a search box); titled as the page under
  * it is, the box's text prefilled, the cursor at its end, a password's characters as dots. The sets
  * start on letters, or on digits for a box holding a number. Where the text shows (ss_place): a
@@ -1894,8 +1897,6 @@ int search_strip_box(void *kb, void *edit, const char *title) {
     if (ss.page || !kb || !edit) return 0;
     int top = geom_val(V_BAR);
     ss.page = kb;
-    for (unsigned i = 0, n = widget_count_children(kb); i < n; ++i)
-        widget_set_visible(widget_get_child(kb, i), 0, 0);
     widget_move_resize(kb, 0, top, 375, 320 - top);
     widget_set_prop_int(kb, "h", 320 - top);
     widget_on(kb, EVT_DESTROY, ss_closed, 0);

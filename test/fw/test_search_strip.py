@@ -64,7 +64,6 @@ class Strip:
     im: C.Array[C.c_char]  # a text box's strip (boxed): its input method, edit, keyboard and pages
     edit: int
     kb: int
-    keys: int
     dialog: int  # ... the edit's window, and the row it sits in
     holder: int
 
@@ -1003,7 +1002,7 @@ def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
     assert (b'inter-medium', 27) in fonts
 
 
-# A stock text box (keyboard.c kb_strip_due) on the strip: the sets on its switcher; Play/Pause its own OK.
+# A stock text box (keyboard.c kb_host_open) on the strip: the sets on its switcher; Play/Pause its own OK.
 def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0, **props):
     """A text box's edit, the input method's, in its window, opened on the strip. By default a Wi-Fi network's password
     (kbwifipass_dialog's edit_passwd); as stock's every box, its input_type reads 0 (text) whatever its page says. props
@@ -1024,18 +1023,17 @@ def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0
     im = C.create_string_buffer(0x40)
     C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
     fw.mock('input_method', lambda *_: C.addressof(im))
-    kb = ui.new('window_create', wm, 0, 60, 375, 260)  # the input method's keyboard window, top
-    keys = ui.new('pages', kb, 0, 40, 375, 221)
+    kb = ui.new('window_create', wm, 0, 60, 375, 260)  # the input method's keyboard window (kb_host_open's, bare), top
     assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Home Wi-Fi') == 1
     s = attached(fw, ui)
-    s.im, s.edit, s.kb, s.keys, s.dialog, s.holder = im, edit, kb, keys, dialog, holder
+    s.im, s.edit, s.kb, s.dialog, s.holder = im, edit, kb, dialog, holder
     return s
 
 
 def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     s = boxed(fw, ui)
     assert s.ss.secret and s.ss.set == LOWER and s.ss.stop == 1 and 'Home Wi-Fi' in ui.text.values()
-    assert s.ss.page == s.kb and s.keys in ui.hidden  # on the keyboard's window, its keys hidden: no focus moves
+    assert s.ss.page == s.kb  # on the keyboard's window: no focus moves
     s.type('bA!b')
     assert s.ss.text == b'bA!b' and s.ss.set == LOWER
     texts = [t for t, *_ in painted(fw, s).texts]
