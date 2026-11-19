@@ -799,7 +799,7 @@ def validate_assets(directory):
         for c in children: corners(short, c, x, y, window, slots.get(id(c)))
     full_bleed_windows = 0
     for rel in paths:
-        if rel in STOCK_EQ + STOCK_PAGES: continue
+        if rel in STOCK_EQ + STOCK_PAGES + KB_ASSETS: continue
         original, new = read('stock.squashfs', rel), read('rootfs.squashfs', rel)
         if '/raw/ui/' in rel and new[:4] == bytes.fromhex('12122211'):
             now = painted(decode(new), themes[1])

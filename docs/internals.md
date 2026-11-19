@@ -315,7 +315,7 @@ Q2 Muse runs in English with nothing Chinese left in stock's interface:
 
 - **Strings:** `en_US.bin`'s About row `system_prove` reads Certification (stock: 技术证明), with the other `LABELS`.
 - **UI assets:** stock's `.bin` layouts carry Chinese `text` in about 40 of them, designers' placeholders that stock's code mostly replaces, but some shows in every language: Search's tabs (单曲, 歌手, 专辑, 风格), Now Playing's info labels, Folder's and Streaming's titles, Quick Settings' rows, the factory test pages. The build finds every asset with Chinese text (`CJK`) and `english_ui` gives each such `text` in English (`ENGLISH`, with per-asset choices in `ENGLISH_IN`), checking the round trip and that nothing Chinese is left. Layouts the build already rewrote (`patch_asset`) are given English after that.
-- **Keyboard:** the T9 keyboard's EN key opened its Chinese pinyin page (`page:chinese`); it is a case key now (ABC on the lowercase page, abc on the capitals), so that page is never reached, and its 《》 key types «».
+- **Keyboard:** stock's T9 keyboard, the one page with Chinese keys, is not in the image ([The keyboard](#the-keyboard)).
 - **Streaming:** stock's Baidu Netdisk row (a Chinese cloud drive, signed in to from Baidu's app) is removed (`ringnav_stream` destroys the row whose image is `list_baidu`). That row is the only way into Baidu's pages (`baidu/netdisklogin_page`, `netdiskfolder_page`, `netdiskdownload_page`), and stock sends the sign-in's access token to `pan.baidu.com` over plain HTTP, so the boot (`BOOT_HOOK`, `tools/build.py`) also deletes a sign-in stock saved before, `/mnt/data/baidu_token.conf`; only stock's Baidu code reads it.
 - **Tags:** [Tag text](#tag-text).
 
