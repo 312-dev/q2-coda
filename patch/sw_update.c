@@ -27,7 +27,10 @@
  * unpacks and checks the tar again, marks the next boot as the recovery's and restarts, and the
  * recovery flashes. That dialog is drawn as a mode page here (Restarting to Install), with the
  * unpacking's progress; should its own check fail after all, the dialog's answer opens the page it
- * means. */
+ * means.
+ *
+ * --dev builds also take q2update's requests (q2update_poll, docs/adb.md#installing-an-update-over-adb):
+ * the card's path started from a computer over adb, with no Install Update? card. */
 #include "navigation.h"
 
 #define SW_CARD "/mnt/mmc"
@@ -102,6 +105,16 @@ static struct {
     int note, focus, percent, verifying; /* focus: the wheel's, 0 the button, 1 the line */
     rect_t button, link;                 /* their tap targets as last painted, screen rows */
 } swu __attribute__((section(".scratch")));
+
+#if Q2POD_DEV
+static void sw_remote_end(int state);
+static int sw_remote_ok(void);
+static void sw_remote_failed(int quit);
+#else
+#define sw_remote_end(state) ((void)0)
+#define sw_remote_ok() 0
+#define sw_remote_failed(quit) ((void)0)
+#endif
 
 /* ---- the check, on its own thread (sw_check), or from test/fw ---- */
 
@@ -313,6 +326,7 @@ static int sw_install(const void *unused) {
     int quit = navigator_to("dialog/checkfw_dialog");
     if (quit == QUIT_NOFILE || quit == QUIT_LATEST || quit == QUIT_BAD)
         sw_result(quit == QUIT_NOFILE ? SW_NONE : quit == QUIT_LATEST ? SW_LATEST : SW_BAD);
+    sw_remote_failed(quit);
     return 7; /* RET_REMOVE */
 }
 /* Install Update? (U2) on the confirmation card (docs/oled-design.md#confirmation-card) over the
@@ -430,14 +444,19 @@ static int sw_tick(const void *unused) {
     swu.sd_up = swu.net_up = 0;
     swu.timer = 0;
     int state = swu.state;
-    if (!swu.page || state == SW_CANCELLED) return 7;
+    if (!swu.page || state == SW_CANCELLED) {
+        sw_remote_end(SW_CANCELLED);
+        return 7;
+    }
     if (swu.online != ON_NONE) {
         swu.focus = 0;
         sw_result(sw_offer(state, swu.online, &swu.note));
-    } else if (state == SW_OK)
-        sw_ask();
-    else
+    } else if (state == SW_OK) {
+        if (!sw_remote_ok()) sw_ask();
+    } else {
         sw_result(state);
+        sw_remote_end(state);
+    }
     return 7;
 }
 
@@ -713,3 +732,106 @@ void sw_update_paint(void *w, void *canvas) {
 const char *sw_update_title(const char *name) {
     return !tk_strcmp(name, "swupdate_page") ? "Software Update" : (const char *)0;
 }
+
+#if Q2POD_DEV
+/* q2update (patch/q2update.sh, docs/adb.md#installing-an-update-over-adb): a computer asks, over adb,
+ * for the card's update.tar to be checked (check, the dry run) or installed (install), or for this
+ * build's tag (version). The helper writes "NONCE OP" to Q2UPDATE_REQUEST through a temporary name,
+ * root's alone (mode 0600), as q2guard writes its state file; q2update_poll (headset.c, every 500 ms
+ * with q2eq_poll) takes it on the UI thread and runs this file's own path, ringnav_fwupdate_tf's: the
+ * same page, stock's checks, the tar's check and stock's checkfw_dialog, only with no Install Update?
+ * card, as no one is at the screen. Each step is answered in Q2UPDATE_ACK, written whole (.tmp, then
+ * renamed): "NONCE WORD INSTALLED UPDATE", WORD taken (the check started), then one of version, ok
+ * (check passed, nothing installed), installing (stock's dialog runs next), busy, unknown, low,
+ * nocard, nofile, full, bad, latest, cancelled, or failed (stock's dialog refused after all);
+ * INSTALLED is this build's tag, UPDATE the file's or -. */
+#ifndef Q2UPDATE_ROOT
+#define Q2UPDATE_ROOT ""
+#endif
+#define Q2UPDATE_REQUEST Q2UPDATE_ROOT "/tmp/q2update.req"
+#define Q2UPDATE_ACK Q2UPDATE_ROOT "/tmp/q2update.ack"
+enum { SWR_NONE, SWR_CHECK, SWR_INSTALL };
+static struct {
+    unsigned nonce, installing; /* the request the page is running; the one stock's dialog runs */
+    int mode;
+} swr __attribute__((section(".scratch")));
+
+static void sw_remote_ack(unsigned nonce, const char *word) {
+    char line[64];
+    int n = tk_snprintf(line, sizeof line, "%u %s " Q2POD_FW_TAG " %s\n", nonce, word,
+                        swu.tag[0] && tk_strcmp(word, "version") ? swu.tag : "-");
+    void *f = fopen(Q2UPDATE_ACK ".tmp", "wb");
+    if (!f) return;
+    fwrite(line, 1, n, f);
+    fclose(f);
+    rename(Q2UPDATE_ACK ".tmp", Q2UPDATE_ACK);
+}
+/* The page's answer for the request it runs, as its word. */
+static void sw_remote_end(int state) {
+    static const char *const words[] = { "taken", "ok",  "latest", "nofile", "nocard",
+                                         "low",   "bad", "full",   "cancelled" };
+    if (!swr.nonce) return;
+    sw_remote_ack(swr.nonce, state >= SW_CHECKING && state <= SW_CANCELLED ? words[state] : "bad");
+    swr.nonce = 0, swr.mode = SWR_NONE;
+}
+/* The tar is good: install goes on as Install and Restart does, check stops here; 0 with no request,
+ * so the card asks as ever. */
+static int sw_remote_ok(void) {
+    unsigned nonce = swr.nonce;
+    int mode = swr.mode;
+    if (!nonce) return 0;
+    swr.nonce = 0, swr.mode = SWR_NONE;
+    if (mode == SWR_INSTALL) {
+        swr.installing = nonce;
+        sw_remote_ack(nonce, "installing");
+        sw_answer((void *)0, 1, 0); /* the page closes, stock's dialog from the next pass */
+    } else {
+        sw_remote_ack(nonce, "ok");
+        sw_close(&swu.page);
+        toast("Update checked: ready to install");
+    }
+    return 1;
+}
+static void sw_remote_failed(int quit) {
+    if (swr.installing) sw_remote_ack(swr.installing, "failed");
+    swr.installing = 0;
+}
+
+void q2update_poll(void) {
+    char text[32];
+    int st[40]; /* glibc 2.28 MIPS o32 stat: st_mode word 5, st_uid word 7 */
+    unsigned nonce = 0, i = 0;
+    if (__xstat(3, Q2UPDATE_REQUEST, st) || (st[5] & 0170077) != 0100000 || st[7]) return;
+    void *f = fopen(Q2UPDATE_REQUEST, "rb");
+    unsigned n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+    if (f) fclose(f);
+    unlink(Q2UPDATE_REQUEST);
+    text[n] = 0;
+    for (; text[i] >= '0' && text[i] <= '9'; ++i) nonce = nonce * 10 + (unsigned)(text[i] - '0');
+    if (!i) return; /* no nonce: no one to answer */
+    const char *op = text + i + (text[i] == ' ');
+    int len = 0;
+    while (op[len] && op[len] != '\n' && op[len] != ' ') ++len;
+    int mode = len == 5 && !strncmp(op, "check", 5)     ? SWR_CHECK
+               : len == 7 && !strncmp(op, "install", 7) ? SWR_INSTALL
+                                                        : SWR_NONE;
+    swu.tag[0] = 0;
+    if (len == 7 && !strncmp(op, "version", 7)) {
+        sw_remote_ack(nonce, "version");
+        return;
+    }
+    if (mode == SWR_NONE || text[i] != ' ') {
+        sw_remote_ack(nonce, "unknown");
+        return;
+    }
+    if (swr.nonce || swu.timer || swu.page || swu.restart || confirm_up()) {
+        sw_remote_ack(nonce, "busy");
+        return;
+    }
+    swr.nonce = nonce, swr.mode = mode;
+    sw_remote_ack(nonce, "taken");
+    ringnav_fwupdate_tf();
+    /* card-only, so no timer means the answer is in: stock's checks refused, or no thread */
+    if (!swu.timer) sw_remote_end(swu.page ? swu.state : SW_CANCELLED);
+}
+#endif
