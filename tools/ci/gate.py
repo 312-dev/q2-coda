@@ -215,6 +215,7 @@ SCRIPTS: dict[str, list[str] | str] = {
     'test/pwm_mcu.py': ['{stockfs}'],
     'test/q2_guest.py': [],
     'test/q2eq.py': [],
+    'test/q2update.py': [],
     'test/release.py': [],
     'test/remote.py': [],
     'test/rotator.py': ['{stockfs}/module_driver/soc_rotator.ko'],

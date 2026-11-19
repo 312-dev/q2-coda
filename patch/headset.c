@@ -396,6 +396,7 @@ void headset_eq_poll(void) {
     }
 #if Q2POD_DEV
     q2eq_poll(); /* after the swap, so a request finds the output playing (docs/adb.md#q2eq) */
+    q2update_poll(); /* an update over adb (docs/adb.md#installing-an-update-over-adb) */
 #endif
 }
 void headset_poll(void) {

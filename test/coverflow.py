@@ -72,7 +72,7 @@ float canvas_measure_text(void *, const unsigned *, unsigned);
 canvas_fill_rect getAllAlbum getMusicByAlbum toolsQueryDbTable toolsUpdateDbTable toolsGetUserStop album_row toolsThumbSpecCover toolsGetAlbumCover toolsGetExternCover _create_deque deque_init_copy deque_clear
 deque_init _deque_push_back deque_pop_back
 deque_assign deque_destroy deque_size deque_at window_create widget_factory
-widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses
+widget_factory_create_widget image_create hscroll_label_create set_hscroll_label_attribute hscroll_label_set_only_focus hscroll_label_set_ellipses hscroll_label_stop
 slide_menu_set_value slide_menu_item_width list_view_create scroll_view_create list_item_create image_set_draw_type
 image_base_set_image widget_load_image widget_unload_image widget_set_name widget_use_style
 widget_set_text_utf8 widget_get_text_utf8 widget_add_timer widget_restack widget_animator_prop_create widget_animator_prop_set_params widget_animator_start widget_set_visible widget_get_prop_int widget_set_prop_int
@@ -236,6 +236,8 @@ int image_manager_unload_all(void *m) { ++drops; return 0; }
 void set_hscroll_label_attribute(void *x) { assert(!strcmp(W(x)->type, "hscroll_label")); }
 int hscroll_label_set_only_focus(void *x, int on) { (void)x, (void)on; return 0; }
 int hscroll_label_set_ellipses(void *x, int on) { (void)x, (void)on; return 0; }
+static int scroll_stops[8192]; /* each label's hscroll_label_stop calls: its marquee back to the start */
+int hscroll_label_stop(void *x) { return ++scroll_stops[W(x) - w], 0; }
 int slide_menu_set_value(void *x, int value) { *(int *)(W(x)->raw + SLIDE_INDEX) = value; return 0; }
 int widget_set_name(void *x, const char *s) { snprintf(W(x)->type, 32, "%s", s); return 0; }
 void page_empty(void *body, const char *name) { (void)body; (void)name; } /* navigation.c: page_list_or only */
@@ -702,6 +704,8 @@ int getMusicByAlbum(const char *a) {
    order, here the test's own order by name; a row may differ in case from the stock one, as the
    grouping allows. */
 static const char *ranked[16], *rank_sql;
+static unsigned rank_ms, rank_hold; /* what a ranking takes on the fake clock; held for paints (slow_sort) */
+static pthread_t rank_thread;       /* the thread the last ranking ran on */
 static char rank_rows[16][0x60];
 static int rank_year[16]; /* the Year query's year column, each ranked row's (split_row's REC_YEAR) */
 /* navigation.c's Year order: newest first (0) or oldest. */
@@ -744,7 +748,10 @@ int toolsQueryDbTable(const char *db, const char *sql, void *row, int sort) {
         return (int)d->n;
     }
     assert(strstr(sql, "time_create") || strstr(sql, "year"));
-    rank_sql = sql;
+    rank_sql = sql, rank_thread = pthread_self();
+    clock_ms += rank_ms;
+    for (int start = spun_paints, i = 0; rank_hold && spun_paints < start + 3 && i < 2000; ++i)
+        usleep(1000); /* held on its thread until the waiting UI thread has painted three frames */
     /* each row's columns as text, as SQLite hands them: id, album, songer, the art track,
        albumsonger, and YEAR_SQL's year */
     int cols = strstr(sql, "else 0 end) from") ? 6 : 5;
@@ -1968,6 +1975,75 @@ static void slow_open(void) {
     all_ms = 0, painted = spun_paints;
     open_page(); /* the given-up query is not kept: this one queries again, in no time: no spinner */
     assert(all_queries == q + 4 && slide() && slide()->nkids == albums && spun_paints == painted);
+    close_page();
+}
+
+/* A Sort that ranks (Recently Added's query; docs/internals.md#coverflow) runs on the open's thread too, as the
+   albums' query does, with Home and its spinner up: on a cold open after the albums' steps, and on an open that
+   keeps the albums but has a new Sort to apply, which waits on its ranking as a cold open waits on its query. The
+   page opens in the new order after it. */
+static void slow_sort(void) {
+    extern int coverflow_spinner(void);
+    pthread_t ui = pthread_self();
+    widget home;
+    memset(&home, 0, sizeof(home));
+    coverflow_home(&home, 0);
+    ranked[0] = "C", ranked[1] = "a", ranked[2] = 0;
+    rescan();
+    coverflow_sort_set(3); /* Recently Added */
+    all_ms = 0, rank_ms = 80, rank_hold = 1;
+    int painted = spun_paints, q = all_queries;
+    page = &w[nw + 1];
+    home.click(home.ctx, 0); /* cold: the albums' steps, then the ranking past half of 150 ms */
+    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui));
+    assert(spun_paints >= painted + 3); /* the spinner turned while it ranked */
+    run();
+    assert(slide() && !coverflow_spinner() && saved_sort() == 2);
+    order_is((const char *const[]){ "C", "A", 0 });
+    close_page();
+    coverflow_sort_set(1); /* Artist: the albums kept, only its ranking to wait on */
+    ranked[0] = "B", ranked[1] = 0;
+    rank_thread = ui, painted = spun_paints;
+    page = &w[nw + 1];
+    home.click(home.ctx, 0);
+    assert(all_queries == q + 1 && !pthread_equal(rank_thread, ui) && spun_paints >= painted + 3);
+    run();
+    assert(slide() && !coverflow_spinner() && saved_sort() == 1);
+    close_page();
+    coverflow_sort_set(0); /* Album: nothing to rank, the page at once */
+    painted = spun_paints;
+    open_page();
+    assert(slide() && spun_paints == painted && saved_sort() == 0);
+    close_page();
+    rank_ms = rank_hold = 0, ranked[0] = 0;
+}
+
+/* The captions' marquee starts over with each new album (docs/oled-design.md#motion): a long name
+   scrolled part-way is stopped, so the next album's starts at its start after the hold, not at the
+   last one's offset; a text named again (the same album, or the same artist) leaves its scroll alone. */
+static void caption_marquee(void) {
+    open_page();
+    widget *s = slide(), *covers_view = &w[s->parent];
+    int labels[2], k = 0;
+    for (int i = 0; i < covers_view->nkids && k < 2; ++i)
+        if (!strcmp(w[covers_view->kids[i]].type, "hscroll_label")) labels[k++] = covers_view->kids[i];
+    assert(k == 2);
+    int name = scroll_stops[labels[0]], artist = scroll_stops[labels[1]];
+    *(int *)(s->raw + SLIDE_INDEX) = 2;
+    changed_fn(0, 0);
+    assert(!strcmp(album_caption(covers_view), names[2]));
+    assert(scroll_stops[labels[0]] == name + 1);
+    assert(scroll_stops[labels[1]] == artist); /* every album's artist is "Artist": left scrolling */
+    changed_fn(0, 0); /* a commit on the same album: the same text, its scroll left alone */
+    assert(scroll_stops[labels[0]] == name + 1);
+    *(int *)(s->raw + SLIDE_INDEX) = 3;
+    changed_fn(0, 0);
+    assert(!strcmp(album_caption(covers_view), names[3]) && scroll_stops[labels[0]] == name + 2);
+    *(const char **)(records[4] + REC_ARTIST) = "Another";
+    *(int *)(s->raw + SLIDE_INDEX) = 4;
+    changed_fn(0, 0);
+    assert(scroll_stops[labels[0]] == name + 3 && scroll_stops[labels[1]] == artist + 1);
+    *(const char **)(records[4] + REC_ARTIST) = "Artist";
     close_page();
 }
 
@@ -7046,6 +7122,8 @@ int main(void) {
     unknown_card();
     same_name();
     slow_open();
+    slow_sort();
+    caption_marquee();
     disc_folders();
     audiobooks();
     ffmpeg_art();

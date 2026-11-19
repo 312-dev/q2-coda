@@ -9,6 +9,7 @@
     q2 agent list
     q2 jobs                           # q2-heavy's jobs alone
     q2 trunk                          # the trunk's name (git merge "$(q2 trunk)")
+    q2 flash UPDATE [--dry-run]       # install a build on a Q2 over adb: tools/q2flash.py, from this checkout
 
 Installed as ~/.local/bin/q2 (docs/orchestration.md#install). The rules it enforces are there too.
 
@@ -366,6 +367,9 @@ def status(out=print):
 
 
 def main():
+    if sys.argv[1:2] == ['flash']:  # tools/q2flash.py beside this checkout's tools/ci, its own parser
+        tool = pathlib.Path(__file__).resolve().parents[1]/'q2flash.py'
+        os.execv(sys.executable, [sys.executable, str(tool), *sys.argv[2:]])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='command', required=True)
     sub.add_parser('status')
