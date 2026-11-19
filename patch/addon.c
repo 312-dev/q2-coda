@@ -1697,11 +1697,11 @@ static int req_done(void) {
  * spot_reply into the header's 4 fields and 6 a row, and each level under it keeps its own (kept)
  * so Back shows it at once and asks for it again. A row's kind: list
  * opens the level uri (its context the argument), action sends uri with the context and toasts the
- * reply's message, search opens the T9 box (OK opens "search" for the text; a list's first one is
+ * reply's message, search opens the text box (OK opens "search" for the text; a list's first one is
  * the title bar's search icon instead, take_find), sort opens as list does (caps word "sort"; one
  * just after a taken search is the title bar's sort icon instead, take_sort), remote opens the QR
  * code, local plays from the card (uri: a song, or a folder to list; context "album": in track
- * order), field opens the T9 box too, whose text goes to its uri, after its context, the reply
+ * order), field opens the text box too, whose text goes to its uri, after its context, the reply
  * taking the level's place with no level pushed and nothing titled with the text (field_sent),
  * needslib is an action that needs Streaming Songs on (needslib), info does nothing; its position,
  * when set, is the op a held Play/Pause sends. progress
@@ -2979,9 +2979,9 @@ static int field_secret(int i) {
     return *cell(i, 3) && !*sub;
 }
 
-/* peq_ui.c's T9 edit over the title, its keyboard open: a Search row's press, or its icon's tap
- * (field 0); or field row field - 1's press, its title the box's hint and its label on the letter
- * strip, marked _secret when it takes a password (field_secret). */
+/* peq_ui.c's text edit over the title, the letter strip open on it: a Search row's press, or its
+ * icon's tap (field 0); or field row field - 1's press, its title the box's hint and its label on
+ * the letter strip, marked _secret when it takes a password (field_secret). */
 static void search_box(int field) {
     keep_sel();
     pg.field = field;
