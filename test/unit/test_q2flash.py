@@ -101,6 +101,7 @@ class Q2:
         self.q2update, self.answers = q2update, {'check': check, 'install': install}
         self.mounted, self.free_kb, self.corrupt = mounted, free_kb, corrupt
         self.log, self.online, self.after_install = [], True, None
+        self.push_fails, self.df, self.versions = False, None, []  # versions: answers to version first, in turn
 
     def state(self):
         return 'device' if self.online else ''
@@ -108,6 +109,8 @@ class Q2:
     def run(self, *args, timeout=60):
         self.log.append(args)
         if args[0] == 'push':
+            if self.push_fails:
+                return 1, 'adb: error: failed to copy\n'
             data = pathlib.Path(args[1]).read_bytes()
             self.files[args[2]] = data[:-1] + b'x' if self.corrupt else data
             return 0, '1 file pushed\n'
@@ -115,6 +118,8 @@ class Q2:
 
     def sh(self, command, timeout=60):
         self.log.append(('exec-out', command))
+        if command == 'cat /tmp/q2update.ack 2>/dev/null':
+            return '1 failed V0JYi V0JZi\n'
         if 'q2update' in command:
             # a refusal exits 1: `q2update op || echo missing` would read it as no q2update (seen in the emulator)
             assert '||' not in command
@@ -122,7 +127,7 @@ class Q2:
                 return 'q2update-missing\n'
             op = command.split('q2update ')[-1].split()[0]
             if op == 'version':
-                return f'1 version {self.installed} -\n'
+                return self.versions.pop(0) if self.versions else f'1 version {self.installed} -\n'
             word = self.answers[op]
             if word == 'installing':
                 self.online = False
@@ -134,6 +139,8 @@ class Q2:
             return f'{self.status}\n'
         if command == 'cat /proc/mounts':
             return '/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n' if self.mounted else 'rootfs / rootfs rw 0 0\n'
+        if command.startswith('df -k') and self.df is not None:
+            return self.df
         if command.startswith('df -k'):
             return f'Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/mmcblk0p1 30000000 1 {self.free_kb} 1% /mnt/mmc\n'
         if 'wc -c' in command:
@@ -243,3 +250,165 @@ def test_adb_runs_exec_out_with_the_serial(monkeypatch):
     monkeypatch.setattr(q2flash.subprocess, 'run', lambda args, **kw: runs.append(args) or Done())
     assert q2flash.Adb('Q2CODA').sh('id') == 'x\n' and q2flash.Adb().sh('id') == 'x\n'
     assert runs == [['adb', '-s', 'Q2CODA', 'exec-out', 'id'], ['adb', 'exec-out', 'id']]
+
+
+# Every refusal and wait, for the post tier's coverage floor (pyproject.toml): each path q2flash can take.
+
+def tar_with(path, members):
+    """A tar of members [(name, bytes or None for a directory)], firmware_v20.info's lines MD5s of nothing."""
+    with tarfile.open(path, 'w', format=tarfile.GNU_FORMAT) as t:
+        for name, data in members:
+            m = tarfile.TarInfo(name)
+            if data is None:
+                m.type = tarfile.DIRTYPE
+                t.addfile(m)
+            else:
+                m.size = len(data)
+                t.addfile(m, io.BytesIO(data))
+    return path
+
+
+INFO = f'Shanling Q2\n{NEW}\n{hashlib.md5(b"k").hexdigest()}  x\n{hashlib.md5(b"r").hexdigest()}  y\n'.encode()
+
+
+@pytest.mark.parametrize('members, why', [
+    ([('firmware_v20.info', None)], 'firmware_v20.info is not a file'),
+    ([('firmware_v20.info', INFO), ('recovery-update/rootfs.squashfs', b'r')], 'no recovery-update/xImage'),
+    ([('firmware_v20.info', INFO), ('recovery-update/xImage', None)], 'xImage is not a file'),
+    ([('firmware_v20.info', b'Shanling Q2\n')], 'Shanling Q2'),  # too short
+])
+def test_a_tar_shaped_wrong_is_refused(tmp_path, members, why):
+    with pytest.raises(q2flash.Refused, match=why):
+        q2flash.ours(tar_with(tmp_path/'update.tar', members))
+
+
+def test_a_manifest_that_is_not_json_is_no_manifest(tmp_path):
+    d = build_dir(tmp_path)
+    (d/'manifest.json').write_text('{not json')
+    with pytest.raises(q2flash.Refused, match='not a build of ours'):
+        q2flash.ours(d)
+
+
+def test_no_q2_on_adb(tmp_path):
+    q2 = Q2()
+    q2.online = False
+    with pytest.raises(q2flash.Refused, match='no Q2 on adb'):
+        q2flash.flash(build_dir(tmp_path), q2)
+
+
+def test_demo_not_answering_version(tmp_path):
+    q2 = Q2()
+    q2.versions = ['\n']  # q2update's own complaint goes to stderr
+    with pytest.raises(q2flash.Refused, match='gave no answer'):
+        q2flash.flash(build_dir(tmp_path), q2)
+
+
+@pytest.mark.parametrize('kw, why', [(dict(level='?'), 'cannot read the battery'),
+                                     (dict(df='df: /mnt/mmc: no such file\n'), "cannot read the card's free space")])
+def test_what_cannot_be_read_is_refused(tmp_path, kw, why):
+    q2 = Q2(level=kw.get('level', 80))
+    q2.df = kw.get('df')
+    with pytest.raises(q2flash.Refused, match=why):
+        q2flash.flash(build_dir(tmp_path), q2)
+    assert not q2.files
+
+
+def test_a_failed_push_leaves_nothing(tmp_path):
+    q2 = Q2()
+    q2.push_fails = True
+    with pytest.raises(q2flash.Refused, match='adb push failed: adb: error: failed to copy'):
+        q2flash.flash(build_dir(tmp_path), q2)
+    assert not q2.files and ('exec-out', f'rm -f {q2flash.PART}') in q2.log
+
+
+def test_no_wait_returns_once_installing(tmp_path):
+    q2 = Q2()
+    assert q2flash.flash(build_dir(tmp_path), q2, wait=False) == 0 and ops(q2) == ['version', 'install']
+
+
+def clock(monkeypatch, step=1.0):
+    """time.monotonic moving step seconds a call (conftest makes sleep return at once)."""
+    now = [0.0]
+    def tick():
+        now[0] += step
+        return now[0]
+    monkeypatch.setattr(q2flash.time, 'monotonic', tick)
+
+
+def test_wait_for_sees_the_q2_go_and_come_back(monkeypatch):
+    clock(monkeypatch)
+    q2 = Q2()
+    states = iter(['device', 'device', ''])
+    monkeypatch.setattr(q2, 'state', lambda: next(states))
+    assert q2flash.wait_for(q2, True, 10)
+    states = iter(['', 'device'])
+    assert q2flash.wait_for(q2, False, 10)
+
+
+def test_wait_for_gives_up_at_its_limit(monkeypatch):
+    clock(monkeypatch)
+    assert not q2flash.wait_for(Q2(), True, 5)
+
+
+def test_a_q2_that_never_restarts_says_its_last_answer(tmp_path, monkeypatch):
+    q2 = Q2()
+    monkeypatch.setattr(q2flash, 'wait_for', lambda adb, gone, seconds: False)
+    with pytest.raises(q2flash.Refused, match=r'did not restart within 120 s \(last answer: 1 failed V0JYi V0JZi\)'):
+        q2flash.flash(build_dir(tmp_path), q2)
+
+
+def test_a_q2_that_never_comes_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(q2flash, 'wait_for', lambda adb, gone, seconds: gone)
+    with pytest.raises(q2flash.Refused, match='not back on adb within 900 s'):
+        q2flash.flash(build_dir(tmp_path), Q2())
+
+
+def test_back_demo_answers_once_it_has_started(tmp_path, online):
+    q2 = Q2()
+    q2.versions = [f'1 version {INSTALLED} -\n', '\n', '\n']  # before the install, then twice while demo starts
+    assert q2flash.flash(build_dir(tmp_path), q2) == 0 and ops(q2).count('version') == 4
+
+
+def test_back_but_demo_never_answers(tmp_path, online):
+    q2 = Q2()
+    q2.versions = [f'1 version {INSTALLED} -\n'] + ['\n'] * 30
+    with pytest.raises(q2flash.Refused, match=r'running \(no answer\), not V0JZi'):
+        q2flash.flash(build_dir(tmp_path), q2)
+
+
+class Run:
+    """subprocess.run's stand-in for Adb: the answers by the command's words after adb's serial, or an exception."""
+    def __init__(self, answers):
+        self.answers, self.args = answers, []
+
+    def __call__(self, args, **kw):
+        self.args.append(args)
+        key = ' '.join(args[1:])
+        answer = self.answers.get(key, (0, ''))
+        if isinstance(answer, BaseException):
+            raise answer
+
+        class Done:
+            returncode, stdout = answer
+        return Done()
+
+
+def test_adb_state_that_times_out_is_no_device(monkeypatch):
+    monkeypatch.setattr(q2flash.subprocess, 'run', Run({'get-state': q2flash.subprocess.TimeoutExpired('adb', 10)}))
+    assert q2flash.Adb().state() == ''
+    monkeypatch.setattr(q2flash.subprocess, 'run', Run({'get-state': (0, 'device\n')}))
+    assert q2flash.Adb().state() == 'device'
+
+
+def test_main_with_no_adb_says_so(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(q2flash.subprocess, 'run', Run({'get-state': FileNotFoundError(2, 'No such file', 'adb')}))
+    monkeypatch.setattr(q2flash.Adb, 'state', lambda self: self.run('get-state')[1])
+    assert q2flash.main([str(build_dir(tmp_path)), '--adb', '/nowhere/adb']) == 1
+    assert 'q2flash: adb:' in capsys.readouterr().err
+
+
+def test_main_passes_its_options_through(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(q2flash, 'flash', lambda update, adb, dry, minimum, wait: seen.append((update, adb.base, dry, minimum, wait)) or 3)
+    assert q2flash.main([str(tmp_path), '--dry-run', '-s', 'Q2CODA', '--min-battery', '50', '--no-wait', '--adb', 'my-adb']) == 3
+    assert seen == [(str(tmp_path), ['my-adb', '-s', 'Q2CODA'], True, 50, False)]
