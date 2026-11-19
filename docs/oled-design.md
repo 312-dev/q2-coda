@@ -1517,7 +1517,7 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
 
 - **Devices before settings.** The switch, Name (the name as its value), then My Devices (the paired ones) and
   Other Devices (the found ones), each a section header in 15 px Text Tertiary a whole row high, then Audio:
-  Quality (its choice as the value), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
+  Quality (its choice as the value, "Auto" by default), Headset Volume, Resume on Connect and Link Volume. With Bluetooth off, the
   switch, Name and a line in 13 px Text Tertiary: "Turn on to play to headphones, a car or a speaker."
 - **Scanning is automatic** while the page is open, the list's spinner (Text Tertiary) beside "Other Devices"
   while a scan runs: one as the page opens, then again each time one ends while nothing is connected. No Scan
@@ -1535,12 +1535,15 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
   again to use it.", Cancel first and Forget Device in red. Rename is the letter strip, "Shows on this Q2"
   under the name.
-- **Quality**: each choice with its bit rate in 15 px Text Tertiary before the check where the codec fixes one
-  (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384); LDAC Auto's caption, under it while selected,
-  "Steps with the signal, 330 to 990 kbps", or with a headset connected on another codec what it streams,
-  "Streams aptX HD to this headset, 576 kbps". After the choices, a switch row, "Adapt to Signal" (off by
-  default), its caption under it while selected: "On LDAC Auto or SBC, lowers quality to keep playing when the
-  signal is weak".
+- **Quality**: one list, no submenu (the user's, 2026-11-18, from mock B). First a switch row, "Adapt to Signal"
+  (off by default), its caption under it while selected: "On Auto or SBC, lowers quality to keep playing when the
+  signal is weak". Then a "CODEC" header in 13 px Text Tertiary caps, a heading the wheel passes, and the choices:
+  Auto, LDAC Best, LDAC Standard, aptX HD, aptX, AAC, SBC HQ and SBC, each with its bit rate in 15 px Text Tertiary
+  where the codec fixes one, flush with the right column as a Settings row's value (the switch's edge), and just
+  before the check on the checked choice (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384). Auto
+  is the default, and the page opens on the checked choice. Auto's caption, under it while selected, "Steps with
+  the signal, 330 to 990 kbps", or with a headset connected on another codec the best it supports, "Best this
+  headset supports: aptX HD, 576 kbps".
 - **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
   name, the hint in 13 px under that.
 - **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5

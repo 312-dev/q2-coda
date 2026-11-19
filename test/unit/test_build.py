@@ -79,7 +79,7 @@ def test_dev_build_ignores_an_enclosing_repository(tmp_path, monkeypatch):
     assert build.dev_build() == 1 and not (tmp_path/'.git').exists()
 
 
-STOCK_CONFIG = b'[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nAUTOSCAN=1\nTIMEZONE=22\nSTANDBYMODE=1\nWHEELMODE=1\nNAVHIDE=0'
+STOCK_CONFIG = b'[PLAYSET]\nCOVERMODE=1\n[SYSSET]\nAUTOSCAN=1\nBTCODING=2\nTIMEZONE=22\nSTANDBYMODE=1\nWHEELMODE=1\nNAVHIDE=0'
 
 
 def test_the_default_config_names_english_so_no_language_guide_opens():
@@ -87,13 +87,28 @@ def test_the_default_config_names_english_so_no_language_guide_opens():
     sends config_init to stock's first-boot language guide, the zone UTC (DEFAULT_TIMEZONE) for stock's Shanghai, and
     Smart Awake on in an [IPOD] of its own, on its own line after stock's last, which has no newline."""
     out = build.default_config(STOCK_CONFIG)
-    assert out == (b'[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\nAUTOSCAN=1\nTIMEZONE=43\nSTANDBYMODE=0\nWHEELMODE=0\n'
+    assert out == (b'[PLAYSET]\nCOVERMODE=0\n[SYSSET]\nLANGUAGE=2\nAUTOSCAN=1\nBTCODING=2\nTIMEZONE=43\nSTANDBYMODE=0\nWHEELMODE=0\n'
                    b'NAVHIDE=0\n[IPOD]\nKEEPLIT=1\n')
     assert build.default_config(STOCK_CONFIG + b'\n').endswith(b'NAVHIDE=0\n[IPOD]\nKEEPLIT=1\n')
     for bad in (STOCK_CONFIG.replace(b'AUTOSCAN', b'LANGUAGE=1\nAUTOSCAN'), STOCK_CONFIG + b'\n[SYSSET]\n',
                 STOCK_CONFIG + b'\n[IPOD]\n', STOCK_CONFIG.replace(b'TIMEZONE=22', b'TIMEZONE=5')):
         with pytest.raises(ValueError, match='Unexpected default config.ini'):
             build.default_config(bad)
+
+
+def test_the_default_config_picks_auto_for_bluetooth_quality():
+    """Auto (BTCODING 2) is Quality's choice on a Q2 that never picked one: the reset's and the first flash's
+    config.ini (docs/internals.md#bluetooth-page). Stock's says 2 too; another value from a later stock is
+    refused rather than shipped, and stock reads a missing key as 0, LDAC Best, so the key must be there."""
+    for bad in (STOCK_CONFIG.replace(b'BTCODING=2', b'BTCODING=0'), STOCK_CONFIG.replace(b'BTCODING=2\n', b'')):
+        with pytest.raises(ValueError, match='Unexpected default config.ini'):
+            build.default_config(bad)
+    assert b'\nBTCODING=2\n' in build.default_config(STOCK_CONFIG)
+
+
+def test_quality_s_adaptive_choice_is_called_auto():
+    """Settings > Bluetooth > Quality's adaptive choice, and the Quality row's value when it is chosen."""
+    assert next(n for k, _, n in build.LABELS if k == b'btcode_ldacauto') == b'Auto'
 
 
 def test_jumps():

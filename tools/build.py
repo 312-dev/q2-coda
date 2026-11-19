@@ -568,6 +568,9 @@ WATCHDOG_STUB = (b'#!/bin/sh\n# Q2 Muse: S90play reboots when demo ends (tools/b
 # Q2 Muse is English only (Settings has no Language row), so the guide is never shown (docs/internals.md#first-boot).
 # Smart Awake (IPOD KEEPLIT) starts on, as a missing key reads (theme_engine.c settings_read); stock's file has no [IPOD],
 # and ends with no newline (docs/internals.md#config-ini), so the section starts on a line of its own.
+# Bluetooth Quality starts on Auto (BTCODING 2, docs/internals.md#bluetooth-page), as stock's file has it: checked,
+# since stock's demo reads a missing or other key as LDAC Best (atoi at 0x504940).
+DEFAULT_BTCODING = b'\nBTCODING=2\n'
 DEFAULT_CONFIG_OFF = (b'COVERMODE', b'STANDBYMODE', b'WHEELMODE')
 DEFAULT_LANGUAGE = b'LANGUAGE=2\n'
 DEFAULT_IPOD = b'[IPOD]\nKEEPLIT=1\n'
@@ -575,6 +578,7 @@ def default_config(config):
     for key in DEFAULT_CONFIG_OFF:
         check(config.count(b'\n%s=1\n' % key) == 1, 'Unexpected default config.ini')
         config = config.replace(b'\n%s=1\n' % key, b'\n%s=0\n' % key)
+    check(config.count(DEFAULT_BTCODING) == 1 and config.count(b'BTCODING=') == 1, 'Unexpected default config.ini')
     check(config.count(b'\nTIMEZONE=22\n') == 1, 'Unexpected default config.ini')
     config = config.replace(b'\nTIMEZONE=22\n', b'\nTIMEZONE=%d\n' % DEFAULT_TIMEZONE)
     check(config.count(b'[SYSSET]\n') == 1 and b'\nLANGUAGE=' not in config and b'[IPOD]' not in config,
@@ -976,7 +980,7 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
     ('bt_paireddev', 'Paired Device', 'My Devices'), ('bt_compatiabledev', 'Compatible Device', 'Other Devices'),
     ('msg_paired', 'Paired', 'Not Connected'), ('msg_connecting', 'Connecting', 'Connecting…'),
     ('bt_adjvol', 'Bluetooth Headset Volume Control', 'Headset Volume'),
-    ('btcode_ldachq', 'LDAC HQ', 'LDAC Best'), ('btcode_ldacauto', 'LDAC Connection (auto)', 'LDAC Auto'),
+    ('btcode_ldachq', 'LDAC HQ', 'LDAC Best'), ('btcode_ldacauto', 'LDAC Connection (auto)', 'Auto'),
     ('msg_unpairing', 'unpair?', 'Forget This Device?'), ('msg_unpaired', 'Unpaired', 'Device Forgotten'),
     # the card is an SD card in every label (docs/oled-design.md Copy): stock says TF
     ('update_tf', 'TF card update', 'SD Card Update'), ('msg_nottf', 'No TF Card Found', 'No SD Card Found'),
@@ -1766,6 +1770,7 @@ FUNCTIONS = {
  'getBtLinkStatus': ('int', 'char *'), 'addBtLinkItem': ('void', 'char *, int'),
  'updateBtLinkStatus': ('int', 'int, char *'), 'checkPairDev': ('int', 'char *'),
  'btStartSearch': ('int', 'void'),  # Settings > Bluetooth's scan (bt_ui.c), as stock's Scan now row started it
+ 'btStopSearch': ('int', 'void'),  # its stop, as stock's row click calls it before a connect (bt_ui.c page_poll)
  'btmenu_item_on_click': ('int', 'void *, void *'),  # a device row's click: connect, disconnect or Unpair? (bt_ui.c)
  # a device's page's Forget (bt_detail.c), as stock's row click does it after its Unpair? dialog's OK: the pairing
  # removed (1, or 2 when it was the output), the output back to a jack, the list read again

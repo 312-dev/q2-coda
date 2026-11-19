@@ -272,7 +272,7 @@ def pcms(L, text):
 
 
 def test_the_a2dp_source_s_codec_rate_and_delay(L):
-    assert pcms(L, PCMS) == (1, 'aptX-HD', 48000, 2357)  # the Px7 on LDAC Auto, 2026-11-17
+    assert pcms(L, PCMS) == (1, 'aptX-HD', 48000, 2357)  # the Px7 on Auto, 2026-11-17
 
 
 def test_no_a2dp_pcm_or_no_codec_is_none(L):
@@ -532,7 +532,7 @@ def test_the_packet_type_change_is_read_and_noted(L):
     assert edr_event(L, edr(L), ptype_changed(0, 2, 0x0018)) == (0, '')     # nothing sent: not ours
 
 
-# ---- the step-down: aptX HD or aptX straight to SBC under LDAC Auto when the radio delivers short ----
+# ---- the step-down: aptX HD or aptX straight to SBC under Auto when the radio delivers short ----
 
 class Step(C.Structure):
     _fields_ = [('top', C.c_int), ('stall', C.c_int), ('clean', C.c_int), ('have', C.c_int), ('last', C.c_uint),
@@ -694,7 +694,7 @@ def test_ldac_aac_or_no_codec_is_left_alone(L):
 
 
 def test_another_choice_while_stepped_down_is_left_alone(L):
-    """Quality changed from LDAC Auto to a fixed choice: stock selects that codec, and nothing is put back over it;
+    """Quality changed from Auto to a fixed choice: stock selects that codec, and nothing is put back over it;
     Auto chosen again starts from what it streams then."""
     s = Step()
     assert starve(L, s, 1) == SBC
@@ -708,7 +708,7 @@ INI = b"""[SYSSET]\r\nLANG=1\r\nBTCODING=2\r\n[PLAYSET]\r\nBTSTEPDOWN=1\r\n[Q2PO
 
 
 @pytest.mark.parametrize('ini, allowed', [
-    (INI % b'', 0),                                          # LDAC Auto, the switch never touched: off
+    (INI % b'', 0),                                          # Auto, the switch never touched: off
     (INI % b'BTSTEPDOWN=1\r\n', 1),                          # turned on by hand
     (INI % b'BTSTEPDOWN=0\r\n', 0),                          # off; PLAYSET's key of that name is not it
     (INI % b'BTSTEPDOWN=\r\n', 0),
@@ -839,7 +839,7 @@ INI_SBC = b"""[SYSSET]\r\nBTCODING=%s\r\n[Q2POD]\r\n%s"""
 
 
 @pytest.mark.parametrize('coding, key, allowed', [
-    (b'2', b'', 0),                      # LDAC Auto, the switch never touched: off
+    (b'2', b'', 0),                      # Auto, the switch never touched: off
     (b'2', b'BTSTEPDOWN=1\r\n', 1),      # turned on
     (b'6', b'', 0),
     (b'6', b'BTSTEPDOWN=1\r\n', 1),      # SBC HQ chosen by hand
@@ -937,7 +937,7 @@ def capacity(first, last, bound):
 
 
 def replay(L, seconds):
-    """LDAC Auto on a headset whose best is aptX HD (the Px7), the switch on, over seconds: each fed to bt_sbc_step
+    """Auto on a headset whose best is aptX HD (the Px7), the switch on, over seconds: each fed to bt_sbc_step
     and bt_step as q2bt.c does, as the line the codec then in force would have logged. Its switches and bad
     seconds (short of 90% of the codec's rate, or silent in a switch)."""
     s, sbc_s = Step(), Sbc()

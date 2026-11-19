@@ -182,6 +182,15 @@ def test_a_server_with_nothing_like_it_is_told_apart_from_the_library(fw, ui, mc
     assert ui.toasts[-1] == "Radio isn't available for this song" and not ui.played
 
 
+def test_a_signed_out_app_asks_for_a_sign_in_and_starts_no_radio(fw, ui, mcl, recs):
+    q2, world = streaming(fw, ui, recs, b'name=Subsonic\nradio=1\n')
+    q2.tap(None)
+    seq = world.files[b'/tmp/q2-subsonic.radio'].split(b' ')[0].decode()
+    world.files[b'/tmp/q2-subsonic.state'] = f'version=1\nradioack={seq} 3\n'.encode()  # nobody signed in
+    q2.radio_poll()
+    assert ui.toasts[-1] == 'Sign in to use Radio' and not ui.played and q2.on() == 0
+
+
 def test_an_app_too_old_for_radio_says_so(fw, ui, mcl, recs):
     """q2-subsonic before q2-v1.0 (the firmware carried q2-v0.9 until p32) has no radio=1: no app is asked, the
     library has nothing like a server song, and "No similar songs on this Q2 Muse" read as the server having none."""
