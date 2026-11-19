@@ -14,8 +14,8 @@
  * is a two-line row: its name over "Connected · LDAC · 72%" (stock's codec, bt_showcoding, and the
  * headset's battery, bt_battery.c) after the Positive dot; another paired one is a key/value row,
  * "Not Connected", or "Connecting…" with the activity spinner on the right column. Centre on a
- * paired row connects it, on one connecting stops that (cancel_connect), on the connected one opens
- * its page (bt_detail.c); a found one pairs, as stock.
+ * paired row, connected or not, opens its page (bt_detail.c: Connect or Disconnect, Rename, Forget),
+ * on one connecting stops that (cancel_connect); a found one pairs, as stock.
  */
 #include "navigation.h"
 
@@ -419,17 +419,17 @@ static int cancel_connect(const char *mac) {
     return 1;
 }
 
-/* A device row's Centre or tap (docs/oled-design.md#bluetooth): the connected device opens its
- * page, one connecting stops connecting (stock ignores a tap then), any other connects (or pairs),
- * as stock's click. */
+/* A device row's Centre or tap (docs/oled-design.md#bluetooth): a paired device, connected or not,
+ * opens its page, where Connect is the first row for one that is not; one connecting stops
+ * connecting (stock ignores a tap then); a found one pairs, as stock's click. */
 static int row_click(void *b, void *event) {
     (void)event;
     void *item = P(b, W_PARENT);
-    int dev = item ? row_dev(item) : -1;
+    int dev = item ? row_dev(item) : -1, state = row_state(b);
     if (dev < 0) return 0;
-    if (row_state(b) == BT_CONNECTED)
+    if (state == BT_CONNECTED || state == BT_PAIRED)
         bt_detail_open(dev);
-    else if (row_state(b) != BT_CONNECTING || !cancel_connect(dev_at(dev, 0)))
+    else if (state != BT_CONNECTING || !cancel_connect(dev_at(dev, 0)))
         bt_stock_click(dev, 0);
     return STOP;
 }

@@ -1527,14 +1527,16 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   name at x 52. The connected one is a two-line row: the name over "Connected · LDAC · 72%" (what is known: the
   codec, the headset's battery) after the Positive dot, with a chevron. Another paired one says "Not Connected"
   as a value before its chevron; one connecting, "Connecting…" with the activity spinner on the right column.
-- **Centre** on a paired row connects it; on the connected one it opens the device's page; Play/Pause held on
-  any paired row opens its page.
+- **Centre** on a paired row, connected or not, opens the device's page (the user's, 2026-11-18: a device out of
+  range could not be forgotten while only the connected one had a page); on one connecting it stops connecting;
+  a found row pairs. Play/Pause held on any paired row opens its page too.
 - **A device's page**: the status row names it; under it the path, "Q2 → WH-1000XM5" in 17 px, and the codec
   line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", only what is known: the bit rate where the codec
-  fixes it), then Battery (when reported), Disconnect (Connect when not connected), Rename and Forget This
+  fixes it; "Not Connected" when it is not), then Battery (when reported), Disconnect, Rename and Forget This
+  Device in Negative red; not connected, Connect first (selected as the page opens), Rename and Forget This
   Device. Forget asks on the [confirmation card](#confirmation-card): "Forget WH-1000XM5?", "You'll need to pair
-  again to use it.", Cancel first and Forget Device in red. Rename is the letter strip, "Shows on this Q2"
-  under the name.
+  again to use it.", Cancel first and Forget Device in red; it works with the device out of range. Rename is the
+  letter strip, "Shows on this Q2" under the name.
 - **Quality**: one list, no submenu (the user's, 2026-11-18, from mock B). First a switch row, "Adapt to Signal"
   (off by default), its caption under it while selected: "On Auto or SBC, lowers quality to keep playing when the
   signal is weak". Then a "CODEC" header in 13 px Text Tertiary caps, a heading the wheel passes, and the choices:
