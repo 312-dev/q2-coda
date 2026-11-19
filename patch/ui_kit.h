@@ -112,6 +112,9 @@ int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
+/* text's QR code (ECC level M), its modules dark on a white plate of side px at (x, y), each module a whole number of
+ * pixels with a two-module quiet zone */
+void ui_qr(void *canvas, const char *text, int x, int y, int px);
 /* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
  * the accent with white words (a screen's main action), else the grey with Text Primary words;
  * focused: ringed while ui_focus_shown; pressed: a step darker. Returns its width. */

@@ -167,6 +167,45 @@ def test_now_playing_carries_the_q2_muses_toast(q2):
     assert seen == [(1, "Radio isn't available for this song"), (2, "Radio isn't available for this song"), (2, '')]
 
 
+def test_get_remote_names_the_sidecars_endpoint(q2):
+    """CAP_REMOTE (docs/remote.md#car-remote-across-networks): a paired phone learns the q2-iroh endpoint it can reach
+    the Q2 Muse by from another network, read from the sidecar's --info file; UNAVAILABLE without one."""
+    s, shim = q2
+    assert s.info['caps'] & 65536
+    info = shim.root / 'tmp/coda-rc.iroh'
+    with pytest.raises(client.RemoteError) as e:
+        s.remote()
+    assert e.value.name == 'UNAVAILABLE'
+    endpoint = '8aace45aa34b357c67fae6d1433685921c74f979a8be842802efc17807939913'
+    put(info, f'id {endpoint}\n')
+    assert s.remote() == {'endpoint_id': endpoint, 'relay_url': ''}
+    put(info, f'id {endpoint}\nrelay https://use1-1.relay.n0.iroh.link./\n')
+    assert s.remote() == {'endpoint_id': endpoint, 'relay_url': 'https://use1-1.relay.n0.iroh.link./'}
+    info.unlink()
+
+
+@pytest.fixture(scope='module')
+def scanned(q2, tmp_path_factory):
+    """A second phone that scanned Pair a Phone's QR code: /tmp/coda-rc.qr holds the code it carries, and the phone
+    pairs on that code with no card to read. Connected here: a test may not open a socket (conftest.contained)."""
+    s, shim = q2
+    qr = shim.root / 'tmp/coda-rc.qr'
+    put(qr, '042917\n')
+    p = client.connect('127.0.0.1', s.sock.getpeername()[1], tmp_path_factory.mktemp('scanned'), name='Pixel QR',
+                       code='042917')
+    yield p, qr
+    p.sock.close()
+
+
+def test_a_code_pair_a_phone_shows_is_the_pairings_and_is_spent(q2, scanned):
+    """docs/remote-protocol.md#pairing-by-qr-code: the code in /tmp/coda-rc.qr pairs the phone that scanned it, and
+    the daemon removes the file when that pairing ends, so the page shows a new one."""
+    s, _ = q2
+    p, qr = scanned
+    assert p.info['device_id'] == s.info['device_id'] and not qr.exists()
+    assert p.get_state()  # authenticated on the key that pairing made
+
+
 def sleeps(tid):
     """How many times the daemon's loop has slept and woken: its thread's voluntary context switches."""
     status = pathlib.Path(f'/proc/self/task/{tid}/status').read_text()

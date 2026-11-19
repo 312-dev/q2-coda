@@ -471,3 +471,26 @@ void ovm_bind(ovm_t *o, void *w) {
     widget_on(w, EVT_DESTROY, ovm_gone, w);
     widget_set_opacity(w, (unsigned)ovm_opacity(o));
 }
+
+/* ---- QR codes (libqrencode, which demo carries): Guest Play's join codes, Pair a Phone's ---- */
+
+/* text's QR code, its modules dark on a white plate of side px at (x, y). */
+void ui_qr(void *canvas, const char *text, int x, int y, int px) {
+    if (!text || !*text) return;
+    struct qrcode {
+        int version, width;
+        unsigned char *data;
+    } *q = QRcode_encodeString(text, 0, 1 /* QR_ECLEVEL_M */, 2 /* QR_MODE_8 */, 1);
+    if (!q) return;
+    rect_t plate = { x, y, px, px };
+    fill_box(canvas, &plate, RGBA(0xffffff), 6);
+    int quiet = 2, cells = q->width + 2 * quiet, m = px / cells, off = (px - m * cells) / 2;
+    if (m < 1) m = 1;
+    for (int r = 0; r < q->width; ++r)
+        for (int c = 0; c < q->width; ++c)
+            if (q->data[r * q->width + c] & 1) {
+                rect_t d = { x + off + (c + quiet) * m, y + off + (r + quiet) * m, m, m };
+                fill_box(canvas, &d, RGBA(0), 0);
+            }
+    QRcode_free(q);
+}

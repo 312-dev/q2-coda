@@ -165,6 +165,7 @@ static struct {
     char name[CRC_NAME]; /* the phone it is shown for */
     uint32_t since, locked_until;
     int fails;
+    int shown;           /* the code is Pair a Phone's, from its QR code (crc_code_shown) */
 } pair;
 
 /* The owner's part in the pairing wiped, the code kept */
@@ -178,6 +179,8 @@ static void pair_leave(void) {
 static void pair_end(int outcome) {
     if (!pair.code[0]) return;
     pair_leave();
+    if (pair.shown) crc_code_spent(); /* one pairing per code shown, whatever its end: the page shows another */
+    pair.shown = 0;
     crypto_wipe(pair.code, sizeof pair.code);
     crypto_wipe(pair.name, sizeof pair.name);
     crc_pair_hide(outcome);
@@ -227,7 +230,10 @@ static int pair_start(crc_session *s, unsigned req_id, const uint8_t *p, size_t 
         crc_now_ms() - pair.since > CRC_PAIR_TIMEOUT_MS) {  /* else the same phone again: the same code */
         pair_end(-1);
         pair.since = crc_now_ms();
-        new_code(pair.code);
+        /* Pair a Phone's QR code carries a code, shown under it, for a phone that scans it
+         * (docs/remote-protocol.md#pairing-by-qr-code); else one made now, shown in the pairing card */
+        pair.shown = crc_code_shown(pair.code);
+        if (!pair.shown) new_code(pair.code);
         memcpy(pair.name, name, strlen(name) + 1); /* client_name holds under CRC_NAME */
         crc_pair_show(pair.code, name);
     }

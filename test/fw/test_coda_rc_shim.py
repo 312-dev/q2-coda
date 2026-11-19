@@ -89,6 +89,45 @@ def test_a_dead_daemon_is_started_again_after_30_s(fw, ui, mcl, recs):
     assert len(q2.system) == 2
 
 
+IROH_START = ('( /usr/bin/q2-iroh serve --key /mnt/data/coda-rc/iroh.key --relay-file /mnt/data/coda-rc/relay '
+              '--info /tmp/coda-rc.iroh --pid /tmp/q2-iroh.pid --nice 19 >/tmp/q2-iroh.log 2>&1 & )')
+
+
+def test_q2_iroh_runs_while_car_remote_is_on(fw, ui, mcl, recs):
+    """docs/remote.md#car-remote-across-networks: the sidecar starts with the daemon, a stale id file gone first, and
+    stops with it; nothing of it is left once Car Remote is off."""
+    q2 = Q2(fw, ui, recs)
+    q2.files['/usr/bin/q2-iroh'] = b''
+    q2.files['/tmp/coda-rc.iroh'] = b'id dead\n'  # a killed sidecar's
+    q2.tick()
+    assert q2.system == [IROH_START, '( /usr/bin/coda-rc >/dev/null 2>&1 & )']
+    assert '/tmp/coda-rc.iroh' not in q2.files
+    q2.files['/tmp/coda-rc.iroh'] = b'id 8aac\n'
+    fw.fn('coda_rc_toggle', None)()
+    assert q2.system[-1] == 'kill $(cat /tmp/coda-rc.pid /tmp/q2-iroh.pid 2>/dev/null) 2>/dev/null'
+    assert '/tmp/coda-rc.iroh' not in q2.files
+
+
+def test_a_dead_q2_iroh_is_started_again_beside_a_live_daemon(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.files['/usr/bin/q2-iroh'] = b''
+    q2.tick()
+    q2.files.update({'/tmp/coda-rc.pid': b'4242\n', '/proc/4242': b'', '/tmp/q2-iroh.pid': b'4343\n', '/proc/4343': b''})
+    q2.tick(31000)
+    assert len(q2.system) == 2  # both running: neither started again
+    del q2.files['/proc/4343']
+    q2.tick(31000)
+    assert q2.system[2:] == [IROH_START]  # only the sidecar
+
+
+def test_an_image_without_q2_iroh_starts_the_daemon_alone(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    q2.files.update({'/tmp/coda-rc.pid': b'4242\n', '/proc/4242': b''})
+    q2.tick(31000)
+    assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )']
+
+
 def test_play_queues_the_listed_ids_from_one(fw, ui, mcl, recs):
     q2 = Q2(fw, ui, recs)
     q2.tick()

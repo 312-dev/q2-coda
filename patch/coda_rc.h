@@ -25,6 +25,7 @@ enum {
     T_BROWSE = 0x30, T_BROWSE_RESP, T_SEARCH, T_SEARCH_RESP,
     T_PLAY = 0x40, T_GET_QUEUE = 0x42, T_QUEUE_RESP, T_PLAY_QUEUE_ITEM, T_START_RADIO = 0x46,
     T_GET_COVER = 0x50, T_COVER,
+    T_GET_REMOTE = 0x60, T_REMOTE_INFO,
     T_PING = 0x7e, T_PONG,
 };
 
@@ -51,6 +52,7 @@ enum {
 #define CAP_BUFFERING 8192u /* NowPlaying.buffering and its bytes */
 #define CAP_RADIO 16384u    /* StartRadio, NowPlaying.radio */
 #define CAP_NOTICE 32768u   /* NowPlaying.notice: the Q2 Muse's toast, for the car to show a moment */
+#define CAP_REMOTE 65536u   /* GetRemote: q2-iroh's endpoint id and relay, to reach the Q2 Muse from another network */
 
 /* ---- the protobuf subset: varints (wire type 0) and length-delimited fields (wire type 2) ---- */
 typedef struct { uint8_t *p; size_t n, cap; int over; } pbw;
@@ -105,6 +107,8 @@ int crc_peers_save(const crc_peer *peers, int n);
 void crc_pair_show(const char *code, const char *client_name); /* the Q2's pairing dialog */
 void crc_pair_hide(int outcome);                               /* 1 paired, 0 failed, -1 timed out or cancelled */
 int crc_pair_cancelled(void);                                  /* the user dismissed the dialog */
+int crc_code_shown(char code[7]); /* 1 with the code Pair a Phone's QR code carries, 0 with none */
+void crc_code_spent(void);        /* a pairing on that code ended: it is never taken again */
 /* an authenticated request: answer with crc_send/crc_error; anything but 0 closes the session */
 int crc_app(crc_session *s, int type, unsigned req_id, const uint8_t *p, size_t n);
 extern uint8_t crc_device_id[8];

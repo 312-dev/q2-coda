@@ -2,7 +2,8 @@
  * cannot do from outside. Every UI pass (ringnav_sleep), paced to CR_POLL_MS, while Settings > Car Remote
  * is on, it:
  * - starts the daemon (at boot and when the switch goes on; again if it dies) and stops it when the switch
- *   goes off: nothing listens while it is off;
+ *   goes off: nothing listens while it is off; and beside it q2-iroh, the iroh sidecar that lets a phone on
+ *   another network reach the daemon (docs/remote.md#car-remote-across-networks), on and off with it;
  * - writes Now Playing for it to /tmp/coda-rc.now (radio=1 while a radio plays; a pressed server song from the
  *   press on, as Now Playing shows it; the last toast for CR_NOTE_MS), and the queue's song ids to /tmp/coda-rc.queue (a stream download's
  *   path, title and artist beside its id 0);
@@ -28,6 +29,14 @@
 #define CR_SETTLE_MS 3000   /* a Pause or Play the player has not shown by then is refused (under coda_rc.c ACK_MS) */
 #define CR_DAEMON "/usr/bin/coda-rc"
 #define CR_PID "/tmp/coda-rc.pid"
+/* q2-iroh (remote/iroh-sidecar): its key beside coda-rc's, the relays to use instead of n0's public ones one URL a
+ * line (none: n0's), and the endpoint id and home relay it keeps in CR_IROH_INFO for the daemon and Pair a Phone */
+#define CR_IROH "/usr/bin/q2-iroh"
+#define CR_IROH_PID "/tmp/q2-iroh.pid"
+#define CR_IROH_INFO "/tmp/coda-rc.iroh"
+#define CR_IROH_ARGS                                                                                                   \
+    " serve --key /mnt/data/coda-rc/iroh.key --relay-file /mnt/data/coda-rc/relay --info " CR_IROH_INFO               \
+    " --pid " CR_IROH_PID " --nice 19"
 #define CR_NOW "/tmp/coda-rc.now"
 #define CR_QUEUE "/tmp/coda-rc.queue"
 #define CR_CMD "/tmp/coda-rc.cmd"
@@ -78,11 +87,21 @@ void coda_rc_note(const char *text) {
 
 /* ---- the daemon ---- */
 
-static int cr_running(void) {
+/* The process pid_file names still runs */
+static int cr_alive(const char *pid_file) {
     char raw[24], proc[24];
-    if (!state_read(CR_PID, raw, sizeof raw)) return 0;
+    if (!state_read(pid_file, raw, sizeof raw)) return 0;
     snprintf(proc, sizeof proc, "/proc/%d", atoi(raw + 1));
     return atoi(raw + 1) > 1 && !access(proc, 0);
+}
+
+static int cr_running(void) { return cr_alive(CR_PID); }
+
+/* q2-iroh, unless it runs or the image has none; its id file is the new one's, never a dead one's */
+static void cr_iroh_start(void) {
+    if (cr_alive(CR_IROH_PID) || access(CR_IROH, 0)) return;
+    unlink(CR_IROH_INFO);
+    system("( " CR_IROH CR_IROH_ARGS " >/tmp/q2-iroh.log 2>&1 & )");
 }
 
 /* The o32 syscall nr(a, b, c): its result, or -1 when the kernel reports an error ($a3). */
@@ -116,6 +135,7 @@ static void *cr_tell(void *arg) {
  * hold the write end too, and the read end then ends only with that child: tells still come, from the daemon. */
 static void cr_start(void) {
     cr.started_at = time_now_ms() | 1;
+    cr_iroh_start();
     if (cr_running()) return;
     int fds[2] = { 0, 0 };
     unsigned long t;
@@ -138,7 +158,9 @@ static void cr_start(void) {
 }
 
 static void cr_stop(void) {
-    system("kill $(cat " CR_PID " 2>/dev/null) 2>/dev/null");
+    system("kill $(cat " CR_PID " " CR_IROH_PID " 2>/dev/null) 2>/dev/null");
+    unlink(CR_IROH_PID);
+    unlink(CR_IROH_INFO);
     unlink(CR_NOW);
     unlink(CR_QUEUE);
     unlink(CR_CMD);
@@ -599,7 +621,8 @@ void coda_rc_poll(void) {
         cr.at = now | !now;
         carremote_poll(); /* Settings > Car Remote's pages while open */
         if (!coda_rc_enabled()) return;
-        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && !cr_running())) cr_start();
+        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && (!cr_running() || !cr_alive(CR_IROH_PID) && !access(CR_IROH, 0))))
+            cr_start();
         cr_now();
         cr_settle();
         if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && now - cr.files_at < CR_FILES_MS) return;

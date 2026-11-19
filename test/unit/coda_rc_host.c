@@ -45,6 +45,14 @@ void crc_pair_show(const char *c, const char *name) {
     hidden = -9;
 }
 void crc_pair_hide(int outcome) { hidden = outcome; code[0] = 0; }
+char qr_code[8]; /* Pair a Phone's code, set by the test; spent counts the pairings that ended on it */
+int spent;
+int crc_code_shown(char c[7]) {
+    if (!qr_code[0]) return 0;
+    memcpy(c, qr_code, 7);
+    return 1;
+}
+void crc_code_spent(void) { qr_code[0] = 0, ++spent; }
 int crc_pair_cancelled(void) { int c = cancelled; cancelled = 0; return c; }
 uint32_t crc_caps(void) { return CAP_BROWSE; }
 
