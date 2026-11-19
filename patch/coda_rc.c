@@ -718,7 +718,8 @@ static void info_value(const char *b, const char *key, char *out, size_t cap) {
     *out = 0;
     for (const char *l = b; *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : l + strlen(l)) {
         if (strncmp(l, key, k) || l[k] != ' ') continue;
-        size_t n = strcspn(l + k + 1, "\n");
+        size_t n = 0;
+        while (l[k + 1 + n] && l[k + 1 + n] != '\n') ++n;
         if (n >= cap) n = cap - 1;
         memcpy(out, l + k + 1, n), out[n] = 0;
         return;

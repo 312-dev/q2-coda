@@ -289,10 +289,34 @@ def test_a_pool_copy_runs_car_remote_on_its_own_port_once(tmp_path):
     emu_pool.fit(tmp_path, 3)
     script, run = (tmp_path/'q2emu').read_text(), (tmp_path/'run.sh').read_text()
     assert 'PORT=${Q2EMU_PORT:-2403}\nexport Q2EMU_CODA_PORT=${Q2EMU_CODA_PORT:-7703}\n' in script
-    assert run.index('CODA=()') < run.index('# Q2EMU_CORE=1') and run.endswith('    "${CODA[@]}" "${BOOT[@]}"\n')
+    assert run.index('CODA=()') < run.index('IROH=()') < run.index('# Q2EMU_CORE=1')
+    assert run.endswith('    "${CODA[@]}" "${IROH[@]}" "${BOOT[@]}"\n')
     assert 'exec /emu/coda-rc.real --port $Q2EMU_CODA_PORT' in run and '--ro-bind "$S/coda-rc" /usr/bin/coda-rc' in run
+    assert '--ro-bind "$S/q2-iroh" /usr/bin/q2-iroh' in run
     emu_pool.fit(tmp_path, 3)  # a second time changes nothing
     assert (tmp_path/'q2emu').read_text() == script and (tmp_path/'run.sh').read_text() == run
+
+
+def test_a_pool_copys_q2_iroh_forwards_to_its_own_daemon(tmp_path):
+    """docs/remote.md#car-remote-across-networks: demo starts q2-iroh with no --forward, which would reach TCP 7720,
+    another emulator's daemon or the user's. The wrapper run.sh writes puts this copy's port first after serve; a copy
+    fitted before q2-iroh existed gets it too."""
+    import subprocess
+    (tmp_path/'q2emu').write_text(Q2EMU)
+    (tmp_path/'run.sh').write_text(RUN.replace(emu_pool.RUN_BEFORE, emu_pool.CODA_BLOCK + emu_pool.RUN_BEFORE)
+                                   .replace(emu_pool.RUN_BWRAP, '    "${CODA[@]}" "${BOOT[@]}"'))
+    emu_pool.fit(tmp_path, 3)
+    run = (tmp_path/'run.sh').read_text()
+    assert run.endswith('    "${CODA[@]}" "${IROH[@]}" "${BOOT[@]}"\n')
+    block = run[run.index('IROH=()'):run.index('# Q2EMU_CORE=1')]
+    (tmp_path/'rootfs/usr/bin').mkdir(parents=True)
+    (tmp_path/'rootfs/usr/bin/q2-iroh').write_text('real')
+    (tmp_path/'state').mkdir()
+    out = subprocess.run(['bash', '-c', f'E={tmp_path}; S={tmp_path}/state; Q2EMU_CODA_PORT=7703\n{block}\necho "${{IROH[@]}}"'],
+                         capture_output=True, text=True, check=True).stdout
+    assert out.strip() == f'--ro-bind {tmp_path}/state/q2-iroh /usr/bin/q2-iroh'
+    wrapper = (tmp_path/'state/q2-iroh').read_text()
+    assert wrapper == '#!/bin/sh\nc=$1; shift\nexec /emu/q2-iroh.real "$c" --forward 127.0.0.1:7703 "$@"\n'
 
 
 def test_a_changed_run_script_is_refused(tmp_path):

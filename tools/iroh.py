@@ -21,7 +21,7 @@ CACHE = pathlib.Path(os.environ.get('Q2_THIRDPARTY_CACHE') or pathlib.Path.home(
 
 # (the stripped binary's SHA-256, its size, crate_sha256() of the crate it was built from)
 PIN = ('7c80a9448c58a96700df92c075d8e3a5c01a1a61d1ced795b75b1b14d9fc5dac', 5383796,
-       'a7065644727430a4f1baf1362b2ddcfaf05fc6b9b8e297fcb12f9ce9f363235e')
+       'c7b1e2032789c8fdaa735e0d8ba671b2d9d9f150a984f91dff627fbcbfe62536')
 
 
 def crate_sha256():

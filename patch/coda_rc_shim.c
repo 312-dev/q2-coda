@@ -621,8 +621,8 @@ void coda_rc_poll(void) {
         cr.at = now | !now;
         carremote_poll(); /* Settings > Car Remote's pages while open */
         if (!coda_rc_enabled()) return;
-        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && (!cr_running() || !cr_alive(CR_IROH_PID) && !access(CR_IROH, 0))))
-            cr_start();
+        int dead = !cr_running() || (!cr_alive(CR_IROH_PID) && !access(CR_IROH, 0)); /* the daemon, or the sidecar */
+        if (!cr.started_at || (now - cr.started_at >= CR_RESTART_MS && dead)) cr_start();
         cr_now();
         cr_settle();
         if (!told && cr.tell_live && !cr.play_timer && !cr.pair_page && now - cr.files_at < CR_FILES_MS) return;
