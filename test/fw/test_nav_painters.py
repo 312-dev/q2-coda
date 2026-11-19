@@ -1621,7 +1621,7 @@ def test_oleds_confirms_are_the_card_with_cancel_and_their_verb(fw, st, prompt, 
 def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, body, verb):
     """30 v2: each reset's card says what stock's handler really takes (reset_page's: init_usersetting deletes the
     settings, saved Wi-Fi networks, Bluetooth pairings and EQ presets; init_database deletes database.db, with the
-    playlists and My Fav, and restarts; the factory reset both), and its verb names it, red after the gap."""
+    playlists and My Fav, and restarts; the factory reset both), and its verb names it, red, a row under Cancel."""
     theme(fw)
     ui = Ui(fw)
     confirm = Confirm(fw, ui, [prompt])
@@ -1635,7 +1635,7 @@ def test_oleds_reset_settings_confirm_says_what_it_takes(fw, st, prompt, title, 
     texts = confirm.paint().texts
     assert [t[0] for t in texts] == [title, *body, 'Cancel', verb]  # the body two lines as written
     assert texts[-1][2] == rgba(0xff453a)  # red
-    assert confirm.enter.box[1] - confirm.cancel.box[1] == 32 + 12
+    assert confirm.enter.box[1] - confirm.cancel.box[1] == 32  # evenly spaced, as Shut Down's
 
 
 # No list has dividers (user, 2026-11-15): two-line rows, a card app's page_list's and a table's, stand on space alone.
