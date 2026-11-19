@@ -500,6 +500,7 @@ demo	0x6b3668	0x4	input_device_status_handle_event	the only call to timer_add, a
 demo	0x6b39b8	0x4	input_device_status_on_long_press_timer	the only call to input_device_status_find_key_long_press_info; tools/build.py HOLD_KEYS
 bluealsa	0x40649c	0x4	sub_4060e0	`bgtz $2, +22 words` (1st of 2 such), before 3rd of 4 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x406580	0x4	sub_4060e0	the only call to sub_4038e0, after "PCM poll and read error: %s"; tools/bt_silence.S silent, tools/build.py BT_SILENCE_SITES, tools/build.py BT_SBC_POOL
+bluealsa	0x40abf8	0x4	sub_40ab30	the only call to g_dbus_message_get_unix_fd_list, after "(hqq)"; tools/bt_silence.S 7, tools/build.py BT_SILENCE_SITES, tools/build.py BT_MTU_MAX
 bluealsa	0x41465c	0x4	sub_4145d0	`lw $6, 0x30($18)`, before the only call to poll, after "<FA"; tools/bt_silence.S, tools/build.py BT_SILENCE_SITES
 bluealsa	0x414664	0x4	sub_4145d0	`addiu $4, $sp, 0x18`, before the only call to poll, after "<FA"; tools/bt_silence.S 1
 bluealsa	0x414684	0x4	sub_4145d0	`move $5, $zero` (2nd of 6 such), before 2nd of 4 calls to pthread_setcancelstate, after "<FA"; tools/bt_silence.S 1, tools/build.py BT_SILENCE_SITES

@@ -14,7 +14,8 @@
  * stream, or a stream torn down mid-silence, shares or inherits up to BUDGET of silence.
  *
  * Also SBC's bitpool, lowered while the radio cannot keep up (sbc_bp below,
- * docs/internals.md#bluetooth-link-monitor).
+ * docs/internals.md#bluetooth-link-monitor), and the A2DP write MTU, cut so each media packet fits one
+ * 2-DH5 (mtu_clamp below).
  */
 .set noreorder
 .set noat
@@ -121,6 +122,24 @@ sbc_bp:
     sb    $9, 9($4)
     j     0x4038e0            /* sbc_encode's stub, as stock called it */
     sb    $9, %lo(sbc_now)($10)
+
+/* 0x40abf8, transport_acquire_bt_a2dp, in place of its jal g_dbus_message_get_unix_fd_list (whose delay slot,
+ * left as stock, stores Acquire's write MTU in the transport, s0 + 0x48). Every encoder sizes its packets from
+ * that word, so it is cut to MTU_MAX: an L2CAP packet that fits one 2-DH5, the best packet a controller without
+ * 3 Mbps EDR sends (docs/internals.md#bluetooth-link-monitor, Packet size). LDAC (codec 0x2dff, s0 + 0x1e) keeps
+ * it: libldacBT refuses an MTU under 679 and already sizes its packets for one 2-DH5. t0 and t1 only. */
+.globl mtu_clamp
+mtu_clamp:
+    lhu   $8, 0x1e($16)
+    addiu $9, $zero, 0x2dff
+    beq   $8, $9, 8f
+    lw    $8, 0x48($16)
+    sltiu $8, $8, MTU_MAX + 1
+    bnez  $8, 8f              /* fits already: as stock */
+    addiu $9, $zero, MTU_MAX
+    sw    $9, 0x48($16)
+8:  j     0x430110            /* g_dbus_message_get_unix_fd_list's stub, as stock called it */
+    nop
 
 /* At BT_SILENCE + 0x200 (tools/build.py BT_SBC_POOL, patch/q2bt.h), where q2guard finds them. */
 .org 0x200
