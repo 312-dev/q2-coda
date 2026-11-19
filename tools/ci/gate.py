@@ -23,6 +23,8 @@ checkout's venv, ~/repos/q2-pod/.venv, has them all). The suites, by tier:
     planned test/coverflow.py, test/player/run.py, tools/ci/test_ci.py, tools/ci/test_orch.py (PLANNED): what
                                affected.py's rules plan for a change no merge suite covers; run when a plan
                                names them (an everything plan names all), and in a release's gate
+    cov:tools/X.py             tools/ci/covcheck.py: one tools/ module's coverage by the test/unit files that name it,
+                               against unit-cov's floor; a plan names one per changed module (COV), never a tier
     post    fw-asan            tools/ci/fw.py --asan: the sanitizers, a group of files to a process
             unit-cov           test/unit under coverage, then `coverage report` (the floor in pyproject.toml)
             smoke              tools/ci/smoke.py BUILD: the build on a pooled emulator, walked as a user would
@@ -95,6 +97,10 @@ SECONDS = {'unit-cov': 330, 'patch': 280, 'fw-asan': 150, 'unit': 120, 'smoke': 
 # them when its diff needs them, and the gate runs a plan's `other` suites beside the tier. A plan that runs
 # everything (affected.Plan.everything) and a release's gate run them all. tools/ci/test_ci.py checks that
 # what an everything plan runs holds each rule's suites.
+# A plan's `other` entry `cov:tools/X.py` (affected.py plans one for each tools/ module a branch changes) is
+# tools/ci/covcheck.py on that module: the post tier's unit-cov floor, over the tests that name it, seconds
+# not minutes. In a merge batch's run, so a branch that drops coverage is rejected, not landed and POST_RED.
+COV = 'cov:'
 PLANNED = ('test/coverflow.py', 'test/player/run.py', 'tools/ci/test_ci.py', 'tools/ci/test_orch.py')
 POST = ('fw-asan', 'unit-cov', 'smoke', 'leak-hunt')
 MERGE = tuple(n for n in SECONDS if n not in POST + PLANNED)
@@ -246,6 +252,8 @@ def other_suite(path, py):
     (SCRIPTS says why)."""
     if path.startswith('tools/ci/test_'):
         return Suite(path, [py, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', path])
+    if path.startswith(COV):  # `cov:tools/X.py`: that module's coverage by the test/unit files that name it
+        return Suite(path, [py, str(ROOT/'tools/ci/covcheck.py'), path[len(COV):], '--python', py], heavy=True)
     args = SCRIPTS.get(path, ['{build}'])
     if isinstance(args, str):
         return None

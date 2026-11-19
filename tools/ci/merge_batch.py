@@ -53,6 +53,7 @@ import q2ci  # noqa: E402
 CACHE = pathlib.Path(os.environ.get('Q2_MERGE_CACHE', pathlib.Path.home()/'.cache/q2-merge-train'))
 READY = CACHE/'ready.txt'
 FIX = 'fix'  # a ready line's last word when the branch repairs a failure the tip has
+COV = 'cov:'  # gate.COV: an `other` entry that names a tools/ module (tools/ci/covcheck.py), not a file
 SUITES = ('unit', 'fw', 'patch')  # a plan's keyed suites; each path in its 'other' list is a suite too
 
 
@@ -103,7 +104,8 @@ def widen(own, whole, exists):
                                                      if exists(f'test/{k}/{f}'))
     out['patch'] = 'all' if whole['patch'] or (own and own['patch']) else []
     names = set(whole['other']) | set(own['other'] if own else ())
-    out['other'] = sorted(o for o in names if exists(o) or o.startswith('mypy-'))
+    out['other'] = sorted(o for o in names if exists(o[len(COV):] if o.startswith(COV) else o)
+                          or o.startswith('mypy-'))
     return out
 
 
