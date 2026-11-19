@@ -1,0 +1,20 @@
+[package]
+name = "q2-iroh"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+description = "Spike: Car Remote across networks, an iroh endpoint beside coda-rc (docs/remote.md)"
+
+[dependencies]
+anyhow = "1"
+# No metrics, portmapper or Apple datapath: the Q2 has 128 MB of RAM and no swap.
+iroh = { version = "1.5", default-features = false, features = ["tls-ring"] }
+tokio = { version = "1", features = ["rt", "net", "io-util", "macros", "time"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = false  # q2/build.sh strips, after checking the 64-bit clock is linked

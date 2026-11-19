@@ -91,3 +91,36 @@ All of it is injected by writing input events to `/dev/input/eventN`, so the fir
 ## Protocol
 
 The client sends the key, a newline, the command, a newline, then any stdin. `sh` sends its script as that stdin and runs it under `setsid`, recording its pid in `/tmp/q2remote-*.pid` so Ctrl-C can kill its process group, and ends the output with `\n\0q2rc=STATUS\n`, where the client stops reading: a job left in the background doesn't hold the reply. The script isn't exported, so it may be any size. The helper answers `OK\n` and then streams the command's output until it exits, or answers `ERR\n` and closes. A handshake has to arrive within 10 seconds. `q2remote --shot` writes `Q2FB\0`, then the width, height, stride and size as little-endian 32-bit integers, then the displayed page; the client has it gzipped on the Q2, then rotates and encodes it. `state` reads demo's byte globals with `dd` from `/proc/<pid>/mem` at stock V1.36's addresses (`GLOBALS` in `tools/q2remote.py`). `python3 test/remote.py` builds the helper for the host and checks authentication, rotation, revocation, the internal copy, framing and the input encoders.
+
+## Car Remote across networks
+
+A spike, not part of any build: `remote/iroh-sidecar` is `q2-iroh`, a small Rust program that would let Q2 Muse Remote reach coda-rc ([remote-protocol](remote-protocol.md)) when the phone and the Q2 are on different networks. It uses [iroh](https://github.com/n0-computer/iroh) 1.5: QUIC between the two ends, found by the Q2's endpoint id (a public key), starting through n0's public relay and moving to a direct, hole-punched path when one opens. It runs beside coda-rc as a sidecar: each incoming stream becomes a local TCP connection to `127.0.0.1:7720`, so coda-rc is unchanged, and its own pairing, authentication and sealing still decide who may control the Q2. Tailscale, the other way to do this, was dropped for its memory.
+
+Nothing builds it by default: `tools/build.py` does not know it, and the firmware image is the same with or without it. To build it, with Rust nightly and `rust-src` (MIPS is a tier-3 target, so std is built from source), clang, lld, llvm-ar and llvm-strip, with the Codescape toolchain and the unpacked stock rootfs that `tools/thirdparty.py` keeps in its cache (or `Q2_STOCKFS`), as `tools/player.py` links against:
+
+```sh
+remote/iroh-sidecar/q2/build.sh            # prints the stripped binary's path
+cargo build --release --manifest-path remote/iroh-sidecar/Cargo.toml   # the laptop's side
+```
+
+`q2/build.sh` links against the Q2's own glibc 2.28 exactly as [librespot](librespot.md) is built (hard float, FP64, NaN-2008, `ld-linux-mipsn8.so.1`), with q2-librespot's target spec, linker wrapper and start files; `STOCK_LIB` and `GLIBC_INCLUDE` name another rootfs `/lib` or header tree. MIPS32 has no 64-bit atomics; the target spec's `max-atomic-width` of 32 is enough, as tokio and iroh's dependencies fall back on their own (`portable-atomic` among them) with no patch.
+
+```sh
+q2-iroh serve --key /mnt/data/q2-iroh.key [--forward 127.0.0.1:7720] [--allow ID]...  # on the Q2: prints its id
+q2-iroh dial ID [--listen 127.0.0.1:7720] [--relay-only]   # on the laptop: a local port that reaches the Q2's coda-rc
+q2-iroh bench ID [--count N] [--size BYTES] [--relay-only] # times echoed messages down one stream
+```
+
+Measured on 2026-11-18 under `qemu-mipsel` on this laptop, against the stock rootfs's libraries, with a TCP echo server standing in for coda-rc. Memory is the guest's own resident pages (the host mappings inside the guest's address space, not qemu's); CPU is qemu's host time, an emulator's figure, not the X2000's.
+
+| | |
+|---|---|
+| Binary, stripped | 5.35 MB (2.35 MB gzipped) |
+| Resident, idle and registered with the relay | 8.2 MB, steady over a minute |
+| Resident, after 4,000 echoed messages on both paths | 8.6 MB |
+| CPU idle (relay keep-alives) | about 0.6% of one host core under qemu |
+| Connect by id alone | about 0.4 s, through the relay |
+| Relay path (n0's `use1-1`) | p50 48 ms per 64-byte round trip; about 2.6 ms of CPU each under qemu |
+| Direct path, hole-punched within the 3 s the bench waits | p50 0.5 ms (same host); about 0.44 ms of CPU each under qemu |
+
+ponytail: a spike. Nothing starts it on the Q2, nothing shows the Q2's id to the phone, the app has no iroh side, and an endpoint registered all the time costs a little radio and battery that has not been measured on the device. The relay is n0's public one; a self-hosted relay is `RelayMode::Custom`.

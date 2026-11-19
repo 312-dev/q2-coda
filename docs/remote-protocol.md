@@ -67,6 +67,8 @@ TCP port 7720, the frame stream as is. For the emulator, for a car whose hotspot
 
 Being on the same network grants nothing: TCP sessions authenticate and seal exactly as BLE ones do, and a passive listener sees frame sizes and types only.
 
+A phone on another network could reach this port through an iroh sidecar on the Q2, a spike for now that ships in no build ([remote: Car Remote across networks](remote.md#car-remote-across-networks)); the frame stream crosses it unchanged.
+
 ### Discovery
 
 While Car Remote is on and Wi-Fi is joined, the daemon answers multicast DNS (RFC 6762, IPv4 only, UDP 5353 on `wlan0`) for one DNS-SD service (RFC 6763), `_q2muse._tcp`:
