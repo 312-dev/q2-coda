@@ -17,7 +17,9 @@
  * takes from the next frame. Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. Apart from streams, the kernel's lines q2guard reads feed the controller
- * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog). */
+ * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
+ * on the kernel's management channel, whose device events (connects, drops, failures, pairings,
+ * Forgets) go to the unified log as they come (docs/internals.md#bluetooth-devices). */
 #include "q2bt.h"
 #include "q2log.h"
 
@@ -82,6 +84,12 @@ static struct {
     unsigned pl_found_at, pl_ticks, io_r, io_w, io_d, dk_ms;
     int pl_ok, io_ok, dk_ok;  /* pl_ticks, io_* and dk_ms hold the last line's counters */
     char songs[SONGS][128];   /* the card files the player held at the last line */
+    unsigned char first[6];   /* the first ACL link's address at the last acl_handle */
+    unsigned char down[6];    /* down_h's address */
+    int mgmt;                 /* the management channel (devices), -1 none */
+    int mgmt_tried, mgmt_warned;
+    unsigned mgmt_failed_at;
+    struct bt_names names;
 } bt;
 
 static void note(const char *what) {
@@ -112,7 +120,7 @@ static int acl_handle(void) {
     bt.sink_h = -1;
     if (ioctl(bt.ctl, HCIGETCONNLIST, req)) return -1;
     if (bt.have_sink) bt.sink_h = bt_acl_handle_of((const unsigned char *)req, 4, bt.sink);
-    return bt_acl_handle((const unsigned char *)req, 4);
+    return bt_acl_handle((const unsigned char *)req, 4, bt.first);
 }
 /* bound to hci0's raw channel: Command Complete (0x0e), for the five answers, Number Of Completed
  * Packets (0x13), the controller's account of each packet it delivered, for the EDR command
@@ -144,13 +152,13 @@ static int events(int ms, int until_answered) {
         if (n <= 0) return 0;
         bt.done += (unsigned)bt_completed(b, n, bt.link.handle);
         bt_event(&bt.link, b, n);
-        char line[48];
+        char line[72];
         int said = bt_edr_event(&bt.edr, b, n, line, sizeof line);
         if (said) note(line);
         if (said == 2) /* a refusal or an unexpected mask warns */
             ulog_add(bt.ulog, time(0), now_ms(),
                      strstr(line, "ptype=0x0018 status=0x00") ? 'I' : 'W', "bt", line);
-        if (bt_down_event(b, n, bt.down_h, line, sizeof line)) {
+        if (bt_down_event(b, n, bt.down_h, bt.down, line, sizeof line)) {
             note(line);
             ulog_add(bt.ulog, time(0), now_ms(), 'W', "bt", line);
             bt.down_h = -1;
@@ -166,7 +174,7 @@ static void link_read(void) {
     /* the link followed until now ended: its Disconnection Complete is waiting, read before the
      * handle is let go */
     if (bt.raw >= 0 && bt.down_h >= 0 && h != bt.down_h) events(0, 0);
-    if (h >= 0) bt.down_h = h;
+    if (h >= 0) bt.down_h = h, memcpy(bt.down, bt.first, 6);
     if (bt_handle_follow(&bt.link, h)) {
         snprintf(line, sizeof line, "LINK h=%d", h), note(line);
         bt.fly.have = 0; /* a new link's packets: counted afresh */
@@ -482,9 +490,10 @@ static void step(unsigned now, const struct bt_sample *ls, int own, int bufs) {
 /* ---- a stream ---- */
 static void begin(unsigned now, const struct bt_counts *c) {
     int ok, cores;
-    char line[96];
+    char line[112], dev[18] = "-";
     bt.was = *c, bt.at = now;
     bt.link.handle = acl_handle();
+    if (bt.link.handle >= 0) bt_addr_text(bt.first, dev);
     raw_open();
     if (!bt.ba || !(ba_ticks(&ok), ok)) bt.ba = find_bluealsa(), bt.found_at = now;
     bt.ba_ticks = ba_ticks(&ok);
@@ -498,8 +507,8 @@ static void begin(unsigned now, const struct bt_counts *c) {
     bt.pl_ok = bt.io_ok = bt.dk_ok = 0; /* the player's and the card's first rates come a line on */
     memset(bt.songs, 0, sizeof bt.songs);     /* each START notes what the player holds */
     card_busy(1000);
-    snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s", bt.link.handle, c->acl_mtu,
-             c->acl_pkts, bt.raw >= 0 ? "ok" : "none");
+    snprintf(line, sizeof line, "START h=%d mtu=%d bufs=%d raw=%s dev=%s", bt.link.handle,
+             c->acl_mtu, c->acl_pkts, bt.raw >= 0 ? "ok" : "none", dev);
     note(line);
     pcms_start(now);
     bt.flush = 1;
@@ -661,8 +670,78 @@ int bt_watch(unsigned now, const char *ack) {
     return wedge.req;
 }
 
+/* ---- devices (docs/internals.md#bluetooth-devices) ----
+ * The kernel's Bluetooth management interface, the control channel bluetoothd itself drives:
+ * bound to no controller (HCI_DEV_NONE), it carries every controller's events. In Linux 5.10
+ * (net/bluetooth/mgmt.c mgmt_event, net/bluetooth/hci_sock.c __hci_send_to_channel) each event is
+ * copied to every bound control-channel socket a root process opened (HCI_SOCK_TRUSTED), and only
+ * the socket whose command caused it may be skipped, so this one sees what bluetoothd sees. A
+ * socket that sends no command changes nothing: it only queues copies, and this one sends none.
+ * Non-blocking, drained at each of bt_sleep's wakes and as soon as an event arrives, so a line has
+ * its event's time; the kernel queues what comes meanwhile. A read is one event whole (each is a
+ * datagram). */
+#define MGMT_RETRY_MS 60000
+#define BT_STORE                                                                                   \
+    "/mnt/data/bluetooth" /* BlueZ's: ADAPTER/DEVICE/info (docs/internals.md#bluetooth-name) */
+#define MGMT_MAX 32       /* events read in one drain; the rest wait for the next */
+static int mgmt_ok(unsigned now) {
+    /* sockaddr_hci: family, HCI_DEV_NONE, HCI_CHANNEL_CONTROL */
+    unsigned short addr[3] = { AF_BLUETOOTH, 0xffff, 3 };
+    if (bt.mgmt >= 0) return 1;
+    if (bt.mgmt_tried && now - bt.mgmt_failed_at < MGMT_RETRY_MS) return 0;
+    bt.mgmt = socket(AF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK, BTPROTO_HCI);
+    if (bt.mgmt >= 0 && bind(bt.mgmt, addr, sizeof addr)) close(bt.mgmt), bt.mgmt = -1;
+    if (bt.mgmt < 0) {
+        if (!bt.mgmt_tried) /* the emulator: said once */
+            ulog_add(bt.ulog, time(0), now_ms(), 'I', "bt",
+                     "devices: the management channel does not open");
+        bt.mgmt_failed_at = now;
+    }
+    bt.mgmt_tried = 1;
+    return bt.mgmt >= 0;
+}
+/* The device's name from BlueZ's store: ADAPTER/ADDR/info under each adapter's directory, its start
+ * only (Name= is in [General], before the keys) */
+static int store_name(const char *a, char *name, int size) {
+    void *d = opendir(BT_STORE);
+    int got = 0;
+    if (!d) return 0;
+    for (struct dirent *e; !got && (e = readdir(d));) {
+        char path[96], b[1024];
+        if (strlen(e->d_name) != 17 || e->d_name[2] != ':') continue;
+        snprintf(path, sizeof path, BT_STORE "/%s/%s/info", e->d_name, a);
+        got = slurp(path, b, sizeof b) > 0 && bt_info_name(b, name, size);
+    }
+    closedir(d);
+    return got;
+}
+static void mgmt_drain(void) {
+    unsigned char b[1024];
+    if (bt.mgmt < 0) return;
+    for (int k = 0; k < MGMT_MAX; ++k) {
+        struct bt_mgmt_ev e;
+        int n = (int)read(bt.mgmt, b, sizeof b);
+        if (n <= 0) return; /* none left (EAGAIN) */
+        if (!bt_mgmt_parse(b, n, &e)) continue;
+        char a[18], stored[64], line[192];
+        const char *name = e.name;
+        bt_addr_text(e.addr, a);
+        if (!name[0]) name = bt_names_get(&bt.names, e.addr);
+        if (!name && store_name(a, stored, sizeof stored)) name = stored;
+        bt_names_put(&bt.names, e.addr, name);
+        char level = bt_mgmt_line(&e, name, line, sizeof line);
+        ulog_add(bt.ulog, time(0), now_ms(), level, "bt", line);
+        if (level == 'W') bt.mgmt_warned = 1;
+    }
+}
+int bt_dev_warned(void) {
+    int w = bt.mgmt_warned;
+    bt.mgmt_warned = 0;
+    return w;
+}
+
 void bt_init(card_log *l, card_log *u) {
-    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = -1, bt.sink_h = bt.down_h = -1;
+    bt.log = l, bt.ulog = u, bt.ctl = bt.raw = bt.mgmt = -1, bt.sink_h = bt.down_h = -1;
     bt_edr_reset(&bt.edr);
 }
 int bt_streaming(void) { return bt.det.on; }
@@ -683,8 +762,16 @@ void bt_sleep(unsigned ms) {
             int due = (int)(bt.at + BT_TICK_MS - now);
             step = due <= 0 ? 0 : due < left ? due : left;
         }
-        if (step > 0) usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
-        if (guard_woke) return;                       /* a request to answer now (q2guard.c) */
+        if (step > 0 && mgmt_ok(now)) { /* the wait, or until a device event: logged at once */
+            struct pollfd p = { bt.mgmt, POLLIN, 0 };
+            int got = poll(&p, 1, step); /* a signal ends it early (EINTR) */
+            mgmt_drain();
+            /* woken early by an event: the rest of the wait, so the tick below keeps its time */
+            if (got > 0 && (int)(now_ms() - now) < step) continue;
+        } else if (step > 0) {
+            usleep((unsigned)step * 1000u); /* a signal ends it early (EINTR) */
+        }
+        if (guard_woke) return; /* a request to answer now (q2guard.c) */
         now = now_ms();
         if (!bt.det.on || (int)(now - bt.at) >= BT_TICK_MS) tick(now);
     }

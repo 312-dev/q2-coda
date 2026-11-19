@@ -57,11 +57,13 @@ void bt_devinfo(const unsigned char *di, struct bt_counts *c) {
 }
 /* hci_conn_list_req: dev_id, conn_num, then conn_num hci_conn_info of 16 bytes: handle, bdaddr[6],
  * type (8; ACL_LINK is 1), out, state, link_mode. */
-int bt_acl_handle(const unsigned char *req, int max) {
+int bt_acl_handle(const unsigned char *req, int max, unsigned char *bdaddr) {
     int n = u16_at(req + 2);
     for (int i = 0; i < n && i < max; ++i) {
         const unsigned char *c = req + 4 + 16 * i;
-        if (c[8] == 1) return u16_at(c) & 0x0fff;
+        if (c[8] != 1) continue;
+        if (bdaddr) memcpy(bdaddr, c + 2, 6);
+        return u16_at(c) & 0x0fff;
     }
     return -1;
 }
@@ -201,7 +203,8 @@ int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, in
 
 /* Disconnection Complete (0x05): status, the handle, the reason, which names the side that ended
  * the link. */
-int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size) {
+int bt_down_event(const unsigned char *p, int n, int handle, const unsigned char *bdaddr, char *note,
+                  int size) {
     if (handle < 0 || n < 7 || p[0] != 4 || p[1] != 0x05 || p[2] < 4 || p[3]) return 0;
     if (((p[4] | p[5] << 8) & 0x0fff) != handle) return 0;
     int reason = p[6];
@@ -209,7 +212,9 @@ int bt_down_event(const unsigned char *p, int n, int handle, char *note, int siz
                       : reason == 0x16                  ? "q2"
                       : reason == 0x08 || reason == 0x22 ? "timeout"
                                                          : "other";
-    snprintf(note, (size_t)size, "LINK down h=%d reason=0x%02x %s", handle, reason, who);
+    char dev[18] = "-";
+    if (bdaddr) bt_addr_text(bdaddr, dev);
+    snprintf(note, (size_t)size, "LINK down h=%d reason=0x%02x %s dev=%s", handle, reason, who, dev);
     return 1;
 }
 
@@ -685,4 +690,170 @@ int bt_wedge_size(void) { return (int)sizeof(struct bt_wedge); } /* the host tes
 
 int bt_flush(card_log *l, const char *dir) {
     return log_flush(l, dir, "q2-bt", BT_FILE_MAX, BT_FILES);
+}
+
+/* ---- devices: the kernel's management events (docs/internals.md#bluetooth-devices) ----
+ * Layouts from Linux 5.10's include/net/bluetooth/mgmt.h (the Q2 runs 5.10.21), all packed and
+ * little-endian: struct mgmt_hdr is opcode, index, len (6 bytes), then the event's parameters;
+ * struct mgmt_addr_info is bdaddr[6] and its type (7). mgmt_ev_device_connected: addr, flags (4),
+ * eir_len (2), eir (13 on); mgmt_ev_device_disconnected: addr, reason; mgmt_ev_connect_failed and
+ * mgmt_ev_auth_failed: addr, status (a mgmt status: net/bluetooth/mgmt.c mgmt_status() folds the
+ * controller's HCI code into one); mgmt_ev_device_unpaired: addr; mgmt_ev_new_link_key:
+ * store_hint, then mgmt_link_key_info, which starts with the addr (the key after it is never
+ * read). */
+void bt_addr_text(const unsigned char *bdaddr, char *out) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (int i = 0; i < 6; ++i) {
+        out[3 * i] = hex[bdaddr[5 - i] >> 4], out[3 * i + 1] = hex[bdaddr[5 - i] & 15];
+        out[3 * i + 2] = i < 5 ? ':' : 0;
+    }
+}
+/* EIR's structures: each a length (of what follows it), a type and its data; the complete name
+ * (0x09) over a shortened one (0x08) */
+static void eir_name(const unsigned char *eir, int n, char *name, int size) {
+    name[0] = 0;
+    for (int i = 0; i + 1 < n && eir[i];) {
+        int len = eir[i], type = eir[i + 1];
+        if (i + 1 + len > n) break;
+        if ((type == 0x09 || (type == 0x08 && !name[0])) && len > 1) {
+            int k = len - 1 < size - 1 ? len - 1 : size - 1;
+            memcpy(name, eir + i + 2, (size_t)k), name[k] = 0;
+        }
+        i += 1 + len;
+    }
+}
+int bt_mgmt_parse(const unsigned char *p, int n, struct bt_mgmt_ev *e) {
+    if (n < 6) return 0;
+    int op = u16_at(p), len = u16_at(p + 4), at = 0, need = 7;
+    const unsigned char *q = p + 6;
+    if (len > n - 6) return 0; /* cut short: a read can hold only part of a datagram */
+    switch (op) {
+    case BT_MGMT_EV_NEW_LINK_KEY:
+        at = 1, need = 8;
+        break;
+    case BT_MGMT_EV_DEVICE_CONNECTED:
+        need = 13;
+        break;
+    case BT_MGMT_EV_DEVICE_DISCONNECTED:
+    case BT_MGMT_EV_CONNECT_FAILED:
+    case BT_MGMT_EV_AUTH_FAILED:
+        need = 8;
+        break;
+    case BT_MGMT_EV_DEVICE_UNPAIRED:
+        break;
+    default:
+        return 0;
+    }
+    if (len < need) return 0;
+    e->op = op;
+    memcpy(e->addr, q + at, 6);
+    e->type = q[at + 6];
+    e->code = need == 8 && !at ? q[7] : -1;
+    e->name[0] = 0;
+    if (op == BT_MGMT_EV_DEVICE_CONNECTED) {
+        int eir = u16_at(q + 11);
+        eir_name(q + 13, eir < len - 13 ? eir : len - 13, e->name, sizeof e->name);
+    }
+    return 1;
+}
+/* mgmt.h's MGMT_DEV_DISCONN_* */
+static const char *const disconn_words[6] = { "unspecified",           "timeout or link loss",
+                                              "this Q2 ended it",      "the device ended it",
+                                              "authentication failed", "suspend" };
+/* mgmt.h's MGMT_STATUS_*, the ones a connect or authentication failure can carry */
+static const char *status_word(int s) {
+    switch (s) {
+    case 0x02:
+        return "not connected";
+    case 0x03:
+        return "failed";
+    case 0x04:
+        return "no answer (page timeout)";
+    case 0x05:
+        return "authentication failed";
+    case 0x06:
+        return "not paired";
+    case 0x07:
+        return "no resources";
+    case 0x08:
+        return "timed out";
+    case 0x09:
+        return "already connected";
+    case 0x0a:
+        return "busy";
+    case 0x0b:
+        return "rejected";
+    case 0x0c:
+        return "not supported";
+    case 0x0d:
+        return "invalid parameters";
+    case 0x0e:
+        return "disconnected";
+    case 0x10:
+        return "cancelled";
+    case 0x12:
+        return "radio blocked";
+    default:
+        return "other";
+    }
+}
+char bt_mgmt_line(const struct bt_mgmt_ev *e, const char *name, char *out, int size) {
+    char a[18], who[80] = "";
+    const char *what = "", *why = "";
+    char code[16] = "", level = 'I';
+    bt_addr_text(e->addr, a);
+    if (name && name[0]) snprintf(who, sizeof who, " \"%s\"", name);
+    switch (e->op) {
+    case BT_MGMT_EV_DEVICE_CONNECTED:
+        what = "connected";
+        break;
+    case BT_MGMT_EV_DEVICE_DISCONNECTED:
+        what = "disconnected";
+        why = e->code >= 0 && e->code < 6 ? disconn_words[e->code] : "other";
+        snprintf(code, sizeof code, " reason=%d", e->code);
+        level = e->code == 2 ? 'I' : 'W';
+        break;
+    case BT_MGMT_EV_CONNECT_FAILED:
+    case BT_MGMT_EV_AUTH_FAILED:
+        what = e->op == BT_MGMT_EV_CONNECT_FAILED ? "connect failed" : "auth failed";
+        why = status_word(e->code);
+        snprintf(code, sizeof code, " status=0x%02x", e->code);
+        level = 'W';
+        break;
+    case BT_MGMT_EV_DEVICE_UNPAIRED:
+        what = "forgotten";
+        break;
+    case BT_MGMT_EV_NEW_LINK_KEY:
+        what = "paired";
+        break;
+    default:
+        return 0;
+    }
+    snprintf(out, (size_t)size, "%s %s%s%s%s%s%s", what, a, who, e->type ? " LE" : "", code,
+             why[0] ? " " : "", why);
+    return level;
+}
+int bt_info_name(const char *text, char *name, int size) {
+    for (const char *p = text; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : 0) {
+        if (strncmp(p, "Name=", 5)) continue;
+        int k = 0;
+        for (p += 5; p[k] && p[k] != '\n' && p[k] != '\r' && k < size - 1; ++k) name[k] = p[k];
+        name[k] = 0;
+        return k > 0;
+    }
+    name[0] = 0;
+    return 0;
+}
+const char *bt_names_get(const struct bt_names *c, const unsigned char *bdaddr) {
+    for (int i = 0; i < BT_NAMES; ++i)
+        if (c->name[i][0] && !memcmp(c->addr[i], bdaddr, 6)) return c->name[i];
+    return 0;
+}
+void bt_names_put(struct bt_names *c, const unsigned char *bdaddr, const char *name) {
+    if (!name || !name[0]) return;
+    int i = 0;
+    while (i < BT_NAMES && !(c->name[i][0] && !memcmp(c->addr[i], bdaddr, 6))) ++i;
+    if (i == BT_NAMES) i = c->next, c->next = (c->next + 1) % BT_NAMES;
+    memcpy(c->addr[i], bdaddr, 6);
+    snprintf(c->name[i], sizeof c->name[i], "%s", name);
 }

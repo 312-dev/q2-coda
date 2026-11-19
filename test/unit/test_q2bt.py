@@ -29,7 +29,7 @@ def L(tmp_path_factory):
     lib.bt_cmd.argtypes = [C.c_void_p, C.c_int, C.c_int]
     lib.bt_link_clear.argtypes = [C.c_void_p, C.c_int]
     lib.bt_devinfo.argtypes = [C.c_char_p, C.c_void_p]
-    lib.bt_acl_handle.argtypes = [C.c_char_p, C.c_int]
+    lib.bt_acl_handle.argtypes = [C.c_char_p, C.c_int, C.c_void_p]
     lib.bt_line.argtypes = [C.c_void_p, C.c_int, C.c_void_p]
     lib.bt_rate.argtypes = lib.bt_ticks_pct.argtypes = [C.c_uint, C.c_uint]
     lib.bt_handle_follow.argtypes = [C.c_void_p, C.c_int]
@@ -40,7 +40,7 @@ def L(tmp_path_factory):
     lib.bt_edr_reset.argtypes = [C.c_void_p]
     lib.bt_edr_step.argtypes = [C.c_void_p, C.c_int, C.c_void_p]
     lib.bt_edr_event.argtypes = [C.c_void_p, C.c_char_p, C.c_int, C.c_void_p, C.c_int]
-    lib.bt_down_event.argtypes = [C.c_char_p, C.c_int, C.c_int, C.c_void_p, C.c_int]
+    lib.bt_down_event.argtypes = [C.c_char_p, C.c_int, C.c_int, C.c_char_p, C.c_void_p, C.c_int]
     lib.bt_pcms_sink.argtypes = [C.c_char_p, C.c_void_p]
     lib.bt_acl_handle_of.argtypes = [C.c_char_p, C.c_int, C.c_char_p]
     lib.bt_step.argtypes = [C.c_void_p, C.c_uint, C.c_int, C.c_int, C.c_void_p]
@@ -158,9 +158,13 @@ def test_the_first_acl_link_s_handle(L):
     assert C.sizeof(ConnInfo) == 16
     req = (C.c_uint16 * 2)(0, 2)
     sco, acl = ConnInfo(handle=0x0101, type=0), ConnInfo(handle=0x000c, type=1)
-    assert L.bt_acl_handle(bytes(req) + bytes(sco) + bytes(acl), 4) == 0x000c
-    assert L.bt_acl_handle(bytes((C.c_uint16 * 2)(0, 1)) + bytes(sco), 4) == -1
-    assert L.bt_acl_handle(bytes((C.c_uint16 * 2)(0, 0)), 4) == -1
+    acl.bdaddr[:] = list(range(1, 7))
+    addr = C.create_string_buffer(6)
+    assert L.bt_acl_handle(bytes(req) + bytes(sco) + bytes(acl), 4, None) == 0x000c
+    assert L.bt_acl_handle(bytes(req) + bytes(sco) + bytes(acl), 4, addr) == 0x000c
+    assert addr.raw == bytes(range(1, 7))  # the ACL link's address, not the SCO link's before it
+    assert L.bt_acl_handle(bytes((C.c_uint16 * 2)(0, 1)) + bytes(sco), 4, None) == -1
+    assert L.bt_acl_handle(bytes((C.c_uint16 * 2)(0, 0)), 4, None) == -1
 
 
 # ---- the four commands ----
@@ -981,9 +985,9 @@ def test_the_commute_replayed_through_the_step_down(L, first, last, expect, boun
     assert replay(L, capacity(first, last, bound)) == expect
 
 
-def down_event(L, ev, handle):
-    note = C.create_string_buffer(64)
-    r = L.bt_down_event(ev, len(ev), handle, note, 64)
+def down_event(L, ev, handle, bdaddr=None):
+    note = C.create_string_buffer(72)
+    r = L.bt_down_event(ev, len(ev), handle, bdaddr, note, 72)
     return r, note.value.decode()
 
 
@@ -996,12 +1000,13 @@ def test_a_dropped_link_is_noted_with_who_ended_it(L):
     ended it. Disconnection Complete carries the reason: the headset's own (0x13, and 0x14 and 0x15 for its low
     resources and power off), the Q2's host (0x16: bluetoothd, or stock's reconnect), or the radio (0x08 the
     supervision timeout, 0x22 an LMP answer that never came)."""
-    assert down_event(L, disconnected(0, 5, 0x13), 5) == (1, 'LINK down h=5 reason=0x13 headset')
-    assert down_event(L, disconnected(0, 5, 0x15), 5) == (1, 'LINK down h=5 reason=0x15 headset')
-    assert down_event(L, disconnected(0, 5, 0x16), 5) == (1, 'LINK down h=5 reason=0x16 q2')
-    assert down_event(L, disconnected(0, 5, 0x08), 5) == (1, 'LINK down h=5 reason=0x08 timeout')
-    assert down_event(L, disconnected(0, 5, 0x22), 5) == (1, 'LINK down h=5 reason=0x22 timeout')
-    assert down_event(L, disconnected(0, 5, 0x3d), 5) == (1, 'LINK down h=5 reason=0x3d other')
+    assert down_event(L, disconnected(0, 5, 0x13), 5, PX7) == (
+        1, 'LINK down h=5 reason=0x13 headset dev=EC:66:D1:CF:59:3F')  # the address while the link was up
+    assert down_event(L, disconnected(0, 5, 0x15), 5) == (1, 'LINK down h=5 reason=0x15 headset dev=-')
+    assert down_event(L, disconnected(0, 5, 0x16), 5) == (1, 'LINK down h=5 reason=0x16 q2 dev=-')
+    assert down_event(L, disconnected(0, 5, 0x08), 5) == (1, 'LINK down h=5 reason=0x08 timeout dev=-')
+    assert down_event(L, disconnected(0, 5, 0x22), 5) == (1, 'LINK down h=5 reason=0x22 timeout dev=-')
+    assert down_event(L, disconnected(0, 5, 0x3d), 5) == (1, 'LINK down h=5 reason=0x3d other dev=-')
 
 
 def test_only_the_followed_links_end_is_noted(L):

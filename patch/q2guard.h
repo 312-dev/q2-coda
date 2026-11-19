@@ -28,6 +28,7 @@ long ftell(void *);
 void free(void *);
 void *memcpy(void *, const void *, size_t), *memmove(void *, const void *, size_t);
 void *memset(void *, int, size_t);
+int memcmp(const void *, const void *, size_t);
 size_t strlen(const char *);
 #define O_WRONLY 1
 #define O_APPEND 0x8
@@ -87,6 +88,7 @@ int execl(const char *, const char *, ...);
 #define BTPROTO_HCI 1
 #define SOCK_RAW 3
 #define SOCK_CLOEXEC O_CLOEXEC
+#define SOCK_NONBLOCK O_NONBLOCK
 #define POLLIN 1
 #define HCIGETDEVINFO 0x400448d3u
 #define HCIGETCONNLIST 0x400448d4u

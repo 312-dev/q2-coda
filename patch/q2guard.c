@@ -10,7 +10,9 @@
  * Between ticks it sleeps in q2bt.c's bt_sleep, which samples the Bluetooth link each second while
  * an A2DP stream runs, into a q2-bt log beside the heat log (docs/internals.md#bluetooth-link-monitor),
  * and each tick it watches for a wedged Bluetooth controller, which demo relaunches when asked through
- * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog).
+ * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog). bt_sleep also listens to the
+ * kernel's Bluetooth management channel and logs each device's connect, drop, failure, pairing and
+ * Forget to the unified log (docs/internals.md#bluetooth-devices).
  * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
  * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
  * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
@@ -505,7 +507,7 @@ int main(int argc, char **argv) {
         bt_sleep(g.off ? 1000 : GUARD_TICK_MS - (window_ms < GUARD_TICK_MS ? window_ms : 0));
         unsigned now = now_ms();
         flush_reap();
-        if (feeds()) warn_due = 1;
+        if (feeds() | bt_dev_warned()) warn_due = 1; /* | : both, as bt_dev_warned clears */
         if (guard_woke) {
             guard_woke = 0;
             if (termed) { /* the system is going down (busybox init's SIGTERM, a second before its SIGKILL) */

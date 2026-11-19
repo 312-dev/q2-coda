@@ -6,7 +6,8 @@
  * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
  * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. The
- * controller watchdog (bt_wedge, test/unit/test_q2bt_wedge.py) lives here too. */
+ * controller watchdog (bt_wedge, test/unit/test_q2bt_wedge.py) lives here too, and the device
+ * events read off the kernel's management channel (bt_mgmt_*, test/unit/test_q2bt_devices.py). */
 #ifndef Q2BT_H
 #define Q2BT_H
 
@@ -42,8 +43,9 @@ struct bt_counts {
     int acl_mtu, acl_pkts;            /* the controller's ACL buffers: their size, how many */
 };
 void bt_devinfo(const unsigned char *di, struct bt_counts *c);
-/* hci_conn_list_req's answer (HCIGETCONNLIST): the first ACL link's handle, -1 none */
-int bt_acl_handle(const unsigned char *req, int max);
+/* hci_conn_list_req's answer (HCIGETCONNLIST): the first ACL link's handle, -1 none; its address
+ * into bdaddr[6] (bdaddr_t order) unless bdaddr is 0 */
+int bt_acl_handle(const unsigned char *req, int max, unsigned char *bdaddr);
 
 /* ---- what the controller says of one link: five commands on a raw HCI socket ---- */
 #define BT_OP_FCC 0x1401  /* Read Failed Contact Counter */
@@ -103,12 +105,14 @@ int bt_edr_step(struct bt_edr *e, int handle, unsigned char *out);
  * or one unlike the last it had), 1 for the q2-bt log only, 0 not an answer to it. */
 int bt_edr_event(struct bt_edr *e, const unsigned char *p, int n, char *note, int size);
 /* An event read from the raw socket: Disconnection Complete (0x05) for handle, the link followed.
- * Its note into note, "LINK down h=5 reason=0x13 headset": the reason as the controller gave it
- * and the side it names, headset (0x13 to 0x15: it ended the link, or ran low or switched off), q2
- * (0x16: this host, so bluetoothd, the kernel or stock's own reconnect), timeout (0x08 the
- * supervision timeout, 0x22 an LMP answer that never came: the radio) or other. 1 when it was one,
- * 0 for any other event, another handle's, or one whose status says the link stayed. */
-int bt_down_event(const unsigned char *p, int n, int handle, char *note, int size);
+ * Its note into note, "LINK down h=5 reason=0x13 headset dev=EC:66:D1:CF:59:3F": the reason as the
+ * controller gave it and the side it names, headset (0x13 to 0x15: it ended the link, or ran low or
+ * switched off), q2 (0x16: this host, so bluetoothd, the kernel or stock's own reconnect), timeout
+ * (0x08 the supervision timeout, 0x22 an LMP answer that never came: the radio) or other, and the
+ * link's address (bdaddr, from the connection list while it was up; 0 writes dev=-). 1 when it was
+ * one, 0 for any other event, another handle's, or one whose status says the link stayed. */
+int bt_down_event(const unsigned char *p, int n, int handle, const unsigned char *bdaddr, char *note,
+                  int size);
 
 /* ---- the step-down (docs/internals.md#bluetooth-link-monitor) ----
  * Under Auto with Quality's Adapt to Signal on, a link the radio cannot keep up with is moved
@@ -321,6 +325,46 @@ int bt_dev_up(const unsigned char *di);
  * for "off" (Bluetooth was off: nothing relaunched) */
 int bt_answer_parse(const char *ack, int *off);
 
+/* ---- devices: the kernel's management events (docs/internals.md#bluetooth-devices) ----
+ * Connects, disconnects, failed connects and authentications, pairings and Forgets, each a line
+ * of the unified log naming the device, whether a stream runs or not. Opcodes from Linux 5.10's
+ * include/net/bluetooth/mgmt.h. */
+#define BT_MGMT_EV_NEW_LINK_KEY 0x0009
+#define BT_MGMT_EV_DEVICE_CONNECTED 0x000B
+#define BT_MGMT_EV_DEVICE_DISCONNECTED 0x000C
+#define BT_MGMT_EV_CONNECT_FAILED 0x000D
+#define BT_MGMT_EV_AUTH_FAILED 0x0011
+#define BT_MGMT_EV_DEVICE_UNPAIRED 0x0016
+struct bt_mgmt_ev {
+    int op;                /* one of the six above */
+    unsigned char addr[6]; /* bdaddr_t: the last byte first */
+    int type;              /* the address's: 0 BR/EDR, 1 LE public, 2 LE random */
+    int code;              /* a disconnect's reason, a failure's mgmt status; -1 none */
+    char name[64];         /* the connected event's EIR name, cut to fit; "" none */
+};
+/* One event as read off the control channel (struct mgmt_hdr first, n bytes): 1 when it was one
+ * of the six, whole, into e; 0 for any other event or one cut short. */
+int bt_mgmt_parse(const unsigned char *p, int n, struct bt_mgmt_ev *e);
+/* Its unified-log message into out, name (or 0) quoted after the address: "connected
+ * 04:00:6E:D3:96:6D "Pixel Buds"", "disconnected ... reason=1 timeout or link loss", "connect
+ * failed ... status=0x04 no answer (page timeout)", "auth failed ...", "forgotten ...", "paired
+ * ...", " LE" after the name for an LE address. Its level: W for a disconnect the Q2 did not ask
+ * for and for a failure, else I; 0 for an event that is none of the six. */
+char bt_mgmt_line(const struct bt_mgmt_ev *e, const char *name, char *out, int size);
+/* BlueZ's device info file's text: its Name= line's value into name (cut to size), 1 when found */
+int bt_info_name(const char *text, char *name, int size);
+void bt_addr_text(const unsigned char *bdaddr, char *out); /* "04:00:6E:D3:96:6D" into out[18] */
+/* The names last seen, so a Forget, whose info file BlueZ has already removed, still names the
+ * device: the oldest replaced */
+#define BT_NAMES 8
+struct bt_names {
+    unsigned char addr[BT_NAMES][6];
+    char name[BT_NAMES][64];
+    int next;
+};
+const char *bt_names_get(const struct bt_names *c, const unsigned char *bdaddr); /* 0 none */
+void bt_names_put(struct bt_names *c, const unsigned char *bdaddr, const char *name);
+
 /* The log: q2-bt.0 in dir, moved on at BT_FILE_MAX through BT_FILES files (log_flush,
  * q2guard_core.c). */
 int bt_flush(card_log *l, const char *dir);
@@ -332,6 +376,7 @@ void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log (E
 void bt_sleep(unsigned ms);
 int bt_streaming(void);
 int bt_flush_due(void); /* once after a stream's START or STOP: its lines to the card at once */
+int bt_dev_warned(void); /* once after a device line at W (a drop, a failed connect): flush soon */
 void bt_kmsg(const char *rec, int n); /* each /dev/kmsg record q2guard reads: the wedge's signs */
 /* Each tick: the wedge watched (probes, relaunches asked for); the relaunch number for the state
  * file's bt= (0 none yet). ack: the ack file's text, demo's answer in it. */
