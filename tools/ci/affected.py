@@ -25,6 +25,9 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
   pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
   rejected there. They are run as gate.py defines them (`gate.full_suite`);
+- a tools/ module (not tools/ci/), or its test/unit/test_X.py, also plans `cov:tools/X.py` (`cov_target`): tools/ci/covcheck.py
+  runs the test/unit files that name the module under coverage and holds it to the post tier's `fail_under`,
+  as a merge batch does, so a branch that drops a module under the floor is rejected there, not POST_RED;
 - a payload change (patch/) also plans `smoke`, tools/ci/smoke.py on a pooled emulator, but runs it only with
   --smoke: it is optional for a worker, and a merge batch leaves it out (gate.OPTIONAL), as the queue runs it
   on the trunk's tip after landing, where a failure turns the tip red.
@@ -189,6 +192,19 @@ def mypy_argv(name, python):
     return gate.full_suite(name, python, pathlib.Path('.'))().argv
 
 
+def cov_target(path, root=ROOT):
+    """The tools/ module whose coverage a change to `path` can lower, else None: the module itself (not
+    tools/ci/, which test/unit does not cover), or the test/unit/test_X.py of tools/X.py (a test dropped or
+    weakened). One a branch deleted is not there to measure."""
+    parts, stem = pathlib.PurePath(path).parts, pathlib.PurePath(path).stem
+    if path.endswith('.py') and parts[0] == 'tools' and parts[1:2] != ('ci',) and len(parts) > 1:
+        return path if (root/path).exists() else None
+    if path.endswith('.py') and parts[:2] == ('test', 'unit') and stem.startswith('test_'):
+        mod = f'tools/{stem[5:]}.py'
+        return mod if (root/mod).exists() else None
+    return None
+
+
 def plan_for(changes, root=ROOT, patch_source=None):
     """A Plan for changes: {path: set of changed line numbers in the new file (empty if deleted or unknown)}."""
     p = Plan()
@@ -199,6 +215,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
             p.add('other', {MYPY_TOOLS}, f'{path}: type-checked by {MYPY_TOOLS}')
         if suffix == '.py' and path.startswith('test/fw/') or path == MYPY_CONFIG:
             p.add('other', {MYPY_FW}, f'{path}: type-checked by {MYPY_FW}')
+        if (cov := cov_target(path, root)):
+            p.other.add(gate.COV + cov)
+            p.why.append(f'{path}: {cov} under the post tier\'s coverage floor (tools/ci/covcheck.py)')
         if parts[0] == 'patch' or (parts[0] == 'tools' and parts[1:2] != ('ci',)) or path == SITENOTES:
             p.other.add(STOCK_SITES)
             p.why.append(f'{path}: {STOCK_SITES} (sitenotes.py --check)')
@@ -330,6 +349,8 @@ def run(plan, build, python, smoke=False):
                 print(f'== {other}: optional; --run BUILD --smoke walks the build on a pooled emulator (about 2 min)')
         elif other in MYPY_SUITES:
             go(other, mypy_argv(other, python))
+        elif other.startswith(gate.COV):
+            go(other, [python, str(ROOT/'tools/ci/covcheck.py'), other[len(gate.COV):], '--python', python])
         elif other.startswith('tools/ci/test_'):
             go(other, [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', other])
         elif other == 'test/build.py':

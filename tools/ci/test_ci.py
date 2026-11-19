@@ -6,11 +6,13 @@ small made-up files and a fake repository.
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import affected  # noqa: E402
+import covcheck  # noqa: E402
 import emu_pool  # noqa: E402
 import gate  # noqa: E402
 import merge_batch  # noqa: E402
@@ -519,6 +521,7 @@ def test_an_everything_plan_runs_every_suite_a_narrower_plan_could(tmp_path):
     names: set = set()
     for path, lines in narrow.items():
         names |= set(gate.suites_for(json.loads(affected.plan_for({path: lines}, root).to_json()), [], 'py', tmp_path))
+    names = {n for n in names if not n.startswith(gate.COV)}  # a module's coverage rides with its change, as test/X.py does
     every = affected.Plan()
     every.everything('test')
     for full in (gate.suites_for(json.loads(every.to_json()), [], 'py', tmp_path), gate.suites_for(None, [], 'py', tmp_path)):
@@ -528,6 +531,68 @@ def test_an_everything_plan_runs_every_suite_a_narrower_plan_could(tmp_path):
     plan = json.loads(affected.plan_for({'Makefile.new': set(), 'test/chapters.py': {1}}, root).to_json())
     assert gate.everything(plan) and 'test/chapters.py' in gate.suites_for(plan, [], 'py', tmp_path)
     assert 'smoke' not in gate.suites_for(plan, [], 'py', tmp_path)  # still the post tier's on a batch
+
+
+COV_PYPROJECT = '[tool.coverage.run]\nsource = ["tools"]\nbranch = true\n[tool.coverage.report]\nfail_under = 99.5\n'
+COV_MODULE = 'def flash(x):\n    if x:\n        return 1\n    return 2\n\n\ndef keyboard_check(x):\n    if x == "a":\n        return "A"\n    return "?"\n'
+COV_TEST = 'import q2flash\n\n\ndef test_flash():\n    assert q2flash.flash(1) == 1\n    assert q2flash.flash(0) == 2\n'
+
+
+def cov_tree(tmp_path, test=COV_TEST):
+    return tree(tmp_path, {'pyproject.toml': COV_PYPROJECT, 'tools/q2flash.py': COV_MODULE,
+                           'test/unit/test_q2flash.py': test, 'test/unit/test_other.py': 'x = 1\n',
+                           'test/unit/conftest.py': "import sys\nsys.path.insert(0, 'tools')\n"})
+
+
+def test_a_changed_tools_module_plans_its_coverage_check(tmp_path):
+    """tools/build.py's keyboard check, tools/q2flash.py and tools/iroh.py each landed with test/unit covering
+    under the floor and turned the post tier's unit-cov red: no worker's run and no merge batch ran the floor."""
+    root = cov_tree(tmp_path)
+    (root/'tools/ci').mkdir()
+    (root/'tools/ci/gate.py').write_text('')
+    plan = affected.plan_for({'tools/q2flash.py': {1, 2}}, root).as_dict()
+    assert 'cov:tools/q2flash.py' in plan['other']
+    assert any('covcheck' in w for w in plan['why'])
+    # a test edit counts, as a dropped test lowers the module's coverage; tools/ci and a deleted module do not
+    assert 'cov:tools/q2flash.py' in affected.plan_for({'test/unit/test_q2flash.py': {1}}, root).as_dict()['other']
+    for path in ('tools/ci/gate.py', 'tools/gone.py', 'test/unit/test_gone.py', 'docs/building.md'):
+        assert not any(o.startswith('cov:') for o in affected.plan_for({path: {1}}, root).as_dict()['other']), path
+    # an everything plan keeps it beside the merge tier, and the gate runs covcheck.py on the module
+    plan = json.loads(affected.plan_for({'tools/q2flash.py': {1}, 'Makefile.new': set()}, root).to_json())
+    suite = gate.suites_for(plan, [], 'py', tmp_path)['cov:tools/q2flash.py']
+    assert gate.everything(plan) and suite.argv[-3:] == ['tools/q2flash.py', '--python', 'py']
+    # a bisection run keeps it while the module exists at that head
+    whole = {'unit': [], 'fw': [], 'patch': [], 'other': ['cov:tools/q2flash.py', 'cov:tools/gone.py'], 'why': []}
+    assert merge_batch.widen(None, whole, lambda f: f == 'tools/q2flash.py')['other'] == ['cov:tools/q2flash.py']
+
+
+def test_coverage_check_selects_the_tests_that_name_the_module(tmp_path):
+    root = cov_tree(tmp_path)
+    (root/'test/unit/test_flow.py').write_text('import tools.q2flash\n')
+    (root/'test/unit/test_files.py').write_text("P = 'tools/q2flash.py'\n")
+    (root/'test/unit/test_near.py').write_text('import q2flash_extra\n')
+    assert covcheck.tests_for('tools/q2flash.py', root) == ['test_files.py', 'test_flow.py', 'test_q2flash.py']
+
+
+def test_coverage_check_rejects_a_module_under_the_floor_naming_its_lines(tmp_path, capfd):
+    root = cov_tree(tmp_path)
+    assert covcheck.floor(root) == 99.5
+    assert covcheck.check('tools/q2flash.py', sys.executable, root) == 1
+    out = capfd.readouterr().out
+    assert 'Missing' in out and '8-10' in out  # the table names the uncovered lines
+    last = out.strip().splitlines()[-1]
+    assert last.startswith('covcheck FAILED: tools/q2flash.py 58%') and 'missing 8-10' in last, last
+    # tested, it passes
+    (root/'test/unit/test_q2flash.py').write_text(COV_TEST + '    assert q2flash.keyboard_check("a") == "A"\n'
+                                                  '    assert q2flash.keyboard_check("b") == "?"\n')
+    assert covcheck.check('tools/q2flash.py', sys.executable, root) == 0
+
+
+def test_coverage_check_rejects_a_module_no_test_names(tmp_path, capfd):
+    root = cov_tree(tmp_path)
+    (root/'tools/iroh.py').write_text('def f():\n    return 1\n')
+    assert covcheck.check('tools/iroh.py', sys.executable, root) == 1
+    assert 'no test/unit file imports it or names it' in capfd.readouterr().out
 
 
 def test_gate_stopped_early_ends_what_its_suites_started(tmp_path):
