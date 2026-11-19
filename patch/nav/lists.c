@@ -235,12 +235,12 @@ int load_rows(menu_t *m, void *w) {
         m->rows = s.n;
         for (int i = 0; i < m->n; ++i) m->id[i] = i;
     } else {
-        if (m->kind == 3) m->rows = (int)n;
+        if (m->kind == 3) m->rows = slide_count(w); /* Cover Flow's children stand for more */
         for (unsigned i = 0; i < n && m->n < MAX_ENTRIES; ++i) {
             void *r = widget_get_child(w, i), *e = (void *)0;
             entries_t s = { &e, 0, 1, 256 };
             collect(r, &s, 0);
-            int id = m->kind == 2 ? I(r, ROW_INDEX) : (int)i;
+            int id = m->kind == 2 ? I(r, ROW_INDEX) : m->kind == 3 ? slide_child_index(w, (int)i) : (int)i;
             if (e && id >= 0 && id < m->rows) {
                 m->at[m->n] = e;
                 m->id[m->n++] = id;

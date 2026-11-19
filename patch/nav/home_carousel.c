@@ -65,7 +65,7 @@ void motion_open(void *page, const char *name) {
  * Keep this widget-owned: touch and page recreation cannot leave a dangling animator here. */
 static int slide_index(void *w) {
     void *a = P(w, SLIDE_ANIMATOR);
-    int n = (int)widget_count_children(w);
+    int n = slide_count(w);
     if (!n) return -1;
     int id = I(w, SLIDE_INDEX);
     int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
@@ -75,9 +75,17 @@ static int slide_index(void *w) {
 }
 
 static int home_done(void *w, void *event) {
-    slide_menu_on_scroll_done(w, event);
+    if (coverflow_slide(w)) { /* stock's end wraps the index by the children: Cover Flow's pool */
+        int n = slide_count(w), stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+        int off = I(w, SLIDE_OFFSET), q = stride > 0 ? (off < 0 ? off - stride / 2 : off + stride / 2) / stride : 0;
+        int id = n ? (I(w, SLIDE_INDEX) - q) % n : 0;
+        I(w, SLIDE_OFFSET) = 0;
+        P(w, SLIDE_ANIMATOR) = (void *)0;
+        slide_menu_set_value(w, id < 0 ? id + n : id); /* changed, laid out, invalidated */
+    } else
+        slide_menu_on_scroll_done(w, event);
     /* Stock skips focus restoration when a reversal returns to the original index. */
-    widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+    widget_set_focused(slide_child(w, I(w, SLIDE_INDEX)), 1);
     return 7; /* RET_REMOVE: same one-shot lifetime as stock completion */
 }
 
@@ -111,15 +119,14 @@ int carousel_glide(void *w, int goal, unsigned ms, int easing) {
         }
         P(w, SLIDE_ANIMATOR) = a;
         if (!a) {
-            int n = (int)widget_count_children(w),
-                stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
+            int n = slide_count(w), stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
             int id = n && stride > 0 ? (I(w, SLIDE_INDEX) - goal / stride) % n : 0;
             I(w, SLIDE_OFFSET) = 0;
             slide_menu_set_value(w, id < 0 ? id + n : id);
-            widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 1);
+            widget_set_focused(slide_child(w, I(w, SLIDE_INDEX)), 1);
             return 0;
         }
-        widget_set_focused(widget_get_child(w, I(w, SLIDE_INDEX)), 0);
+        widget_set_focused(slide_child(w, I(w, SLIDE_INDEX)), 0);
     }
     widget_animator_pause(a);
     widget_animator_scroll_set_params(a, I(w, SLIDE_OFFSET), 0, goal, 0);
@@ -155,7 +162,7 @@ void coverflow_letter_hold(void *w, unsigned letter) {
 }
 
 static void home_step(void *w, int dir, unsigned now, int jump) {
-    int n = (int)widget_count_children(w);
+    int n = slide_count(w);
     int stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
     int fast =
         st.home_surface == w && st.home_dir == dir && now - st.last_home <= HOME_FAST_WINDOW_MS;

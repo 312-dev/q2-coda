@@ -22,7 +22,8 @@ extern int stock_home_trampoline(void *win, void *ctx), stock_scan_all_trampolin
 enum { PREPARING, COVERS, TRACKS };
 cf_page_t cf __attribute__((section(".scratch")));
 
-static int pick(void *ctx, void *event);
+static void pick(int i);
+static int pick_child(void *ctx, void *event);
 
 /* The album list is kept across opens until songtable changes. Only these three stock functions
  * write it; each moves the generation before and after it runs, so a list queried meanwhile is
@@ -596,9 +597,83 @@ int card_room(const char *dir, unsigned mb, unsigned pct) {
 /* Whether dir's file system has MIN_FREE_MB free. Shared (peq.h). */
 int card_space(const char *dir) { return card_room(dir, MIN_FREE_MB, 0); }
 
+/* A warm open (docs/internals.md#coverflow): once a look over the library's albums found each
+ * one's art cached (or a build made it), the next opens of the same albums (cf.stock, the
+ * library_gen it was queried at, its size) show the covers at once, with no file asked for per
+ * album on the UI thread, which cost 6,000 albums 20-28 ms on the emulator: a thread looks again
+ * behind them (verify), and an album found without art makes the next open a cold one, which
+ * builds it with Preparing artwork as before. The cover drawn meanwhile is the placeholder, as for
+ * any album whose art file is missing (art_url). The first album is found from where it was last
+ * (centre_of), so a reopen passes over the albums only when the queue's album moved. */
+static struct {
+    void *clean;                  /* cf.stock when every album's art was found, else 0 */
+    unsigned clean_gen, clean_n;  /* and its library_gen and size then */
+    void *albums;                 /* the list now_at and saved_at index */
+    int now_at, saved_at;         /* the queue's album and the saved one there, + 1; 0 unknown */
+    unsigned long thread;         /* verify's */
+    int running;                  /* it was started and not joined yet */
+    volatile int found, halt;     /* an album without art seen; the UI thread wants it to end */
+} aw __attribute__((section(".scratch")));
+static void art_cleaned(void) {
+    aw.clean = cf.stock, aw.clean_gen = library_gen, aw.clean_n = cf.stock ? deque_size(cf.stock) : 0;
+}
+static int art_clean(void) {
+    return aw.clean && aw.clean == cf.stock && aw.clean_gen == library_gen &&
+           aw.clean_n == deque_size(cf.stock);
+}
+/* Whether album r has no art cached that a build could make: load_albums' job test. */
+static int art_missing(void *r, char *path, unsigned size) {
+    const char *p = P(r, REC_PATH);
+    /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
+    return p && access(art_path(path, album_key(r), ""), 0) &&
+           (!catalogue_path(p) || catalogue_cover(p, path, size));
+}
+/* The thread: files and the albums' records only, read-only; every change to the list joins it
+ * first (verify_join). */
+static void *verify(void *albums) {
+    char path[512];
+    for (unsigned i = 0, n = deque_size(albums); i < n && !aw.halt && !aw.found; ++i)
+        if (art_missing(deque_at(albums, i), path, sizeof path)) aw.found = 1;
+    return albums;
+}
+static void verify_start(void) {
+    aw.found = aw.halt = 0;
+    aw.running = !pthread_create(&aw.thread, 0, verify, cf.albums);
+}
+/* verify stopped and joined, its finding kept: shared by every change to cf.albums or cf.stock. */
+static void verify_join(void) {
+    if (aw.running) {
+        aw.halt = 1;
+        pthread_join(aw.thread, 0);
+        aw.running = 0;
+    }
+    if (aw.found) aw.clean = 0, aw.found = 0;
+}
+/* The album the covers open on: the queue's song's, else the saved one (cf.saved_album), else the
+ * first, as load_albums' pass finds them; each looked for first where it was last. */
+static int centre_of(void *now, unsigned count) {
+    if (aw.albums != cf.albums) aw.albums = cf.albums, aw.now_at = aw.saved_at = 0;
+    if (now) {
+        int k = aw.now_at - 1;
+        if (k >= 0 && (unsigned)k < count && !album_cmp(deque_at(cf.albums, (unsigned)k), now))
+            return k;
+        for (unsigned i = 0; i < count; ++i)
+            if (!album_cmp(deque_at(cf.albums, i), now)) return aw.now_at = (int)i + 1, (int)i;
+    }
+    int k = aw.saved_at - 1;
+    if (k >= 0 && (unsigned)k < count && album_key(deque_at(cf.albums, (unsigned)k)) == cf.saved_album)
+        return k;
+    for (unsigned i = count; i-- > 0;) /* the pass's last match */
+        if (album_key(deque_at(cf.albums, i)) == cf.saved_album) return aw.saved_at = (int)i + 1, (int)i;
+    return 0;
+}
+/* changed(): album c is the one saved now, at c in cf.albums. */
+static void centred_at(unsigned c) { aw.albums = cf.albums, aw.saved_at = (int)c + 1; }
+
 /* Cancel stops after the current album; finished thumbnails stay, so the next open resumes. */
 static void stop(void) {
     worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.timer);
+    verify_join();
     for (int i = 0; i < cf.total; ++i) free(cf.jobs[i].track);
     free(cf.jobs);
     cf.jobs = 0;
@@ -619,6 +694,7 @@ static void drop(void) {
 static unsigned short *years;
 static void *years_of;
 static void drop_albums(void) {
+    verify_join(); /* before the albums it reads go */
     if (cf.albums && cf.albums != cf.stock) deque_destroy(cf.albums);
     if (cf.stock) deque_destroy(cf.stock);
     cf.albums = cf.stock = 0;
@@ -2242,6 +2318,29 @@ int visual(void *s, int n, int *c, int *frac) { /* shared with coverflow_positio
 int coverflow_bounded(void *w) { return w && w == cf.slide && cf.scoped == PLAYLISTS; }
 int coverflow_slide(void *w) { return w && w == cf.slide; }
 
+/* What a slide_menu stands for, by index (docs/internals.md#coverflow-depth): Cover Flow's with
+ * depth holds only CF_POOL children and SLIDE_INDEX is the album's, of cf.count (the albums and
+ * cards); the flat fallback and Home's hold one child per index. Stock reads its children through
+ * slide_menu_fix_index (the index modulo the children) and never wraps the index itself, but for
+ * its scroll end (slide_menu_on_scroll_done), which Cover Flow's glides end in their own (nav/home_carousel.c home_done). */
+int slide_count(void *w) {
+    return w && w == cf.slide ? cf.count : (int)widget_count_children(w);
+}
+/* The child that stands for index i: the pool's slot i modulo its size. */
+void *slide_child(void *w, int i) {
+    int k = (int)widget_count_children(w);
+    return k ? widget_get_child(w, (unsigned)((i % k + k) % k)) : (void *)0;
+}
+/* The index child j stands for now: of the indexes that use it, the one nearest the centre
+ * (SLIDE_INDEX), round the ring of slide_count. */
+int slide_child_index(void *w, int j) {
+    int k = (int)widget_count_children(w), n = slide_count(w), c = I(w, SLIDE_INDEX);
+    if (k <= 0 || n <= 0) return j;
+    int d = ((j - c) % k + k) % k;
+    if (2 * d > k) d -= k;
+    return ((c + d) % n + n) % n;
+}
+
 static int retitle(const void *unused);
 
 /* The covers round album c of n for this frame, in Light Mode's colours. */
@@ -2308,7 +2407,7 @@ void coverflow_paint(void *w, void *canvas) {
     caption_mark(w, canvas);
     int c, frac, n;
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
-        !visual(w, n = (int)widget_count_children(w), &c, &frac))
+        !visual(w, n = slide_count(w), &c, &frac))
         return;
     int lead = (int)(th.lead * CF_ONE), arch = (int)(th.arch * CF_ONE), sh = 0,
         mode = !th.on || (!th.fold && !th.jump) ? FX_SHELF
@@ -2424,7 +2523,7 @@ static int bound(int off, int stride, int rubber) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
     int i = I(s, SLIDE_INDEX), hi = i * stride,
-        lo = (i + 1 - (int)widget_count_children(s)) * stride;
+        lo = (i + 1 - slide_count(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || !rubber) return edge;
     a = a * 11 * d / (a * 11 + 20 * d);
@@ -2437,7 +2536,7 @@ static int unbound(int off, int stride) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
     int i = I(s, SLIDE_INDEX), hi = i * stride,
-        lo = (i + 1 - (int)widget_count_children(s)) * stride;
+        lo = (i + 1 - slide_count(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || a >= d) return off;
     a = 20 * d * a / (11 * (d - a));
@@ -2499,7 +2598,7 @@ static void release(int v) {
 /* A tap at rest: the cover drawn under it comes to the centre, or opens if it is there. */
 static void tap(int x, int y) {
     void *s = cf.slide;
-    int n = (int)widget_count_children(s), c, frac, xy[2] = { x, y };
+    int n = slide_count(s), c, frac, xy[2] = { x, y };
     int stride = visual(s, n, &c, &frac);
     if (!stride) return;
     widget_to_local(s, xy);
@@ -2509,7 +2608,7 @@ static void tap(int x, int y) {
                 : CF_MISS; /* the flat fallback: the centre cover only */
     if (j == CF_MISS || (coverflow_bounded(s) && (unsigned)(c + j) >= (unsigned)n)) return;
     if (!j && !frac)
-        pick((void *)(long)c, 0);
+        pick(c);
     else
         carousel_glide(s, round_stride(I(s, SLIDE_OFFSET), stride) - j * stride, CF_TAP_MS,
                        SLIDE_EASING);
@@ -2587,7 +2686,7 @@ static const char *songs_text(char *buf, unsigned k) {
 /* Whether album c can't play now (catalogue.c: a server album offline); a card's or a playlist's
  * always can. */
 static int album_offline(unsigned c) {
-    void *r = c + CARDS < widget_count_children(cf.slide) && cf.scoped != PLAYLISTS
+    void *r = c + CARDS < (unsigned)cf.count && cf.scoped != PLAYLISTS
                   ? deque_at(cf.albums, c)
                   : (void *)0;
     return r && catalogue_album_unavailable(r);
@@ -2625,7 +2724,7 @@ static void caption_text(void *label, const char *s) {
 /* The captions name album c (or a card's), once each time it changes (or whether it can play
  * does); a playlist's are its name and its count. */
 void titles(unsigned c) {
-    unsigned n = widget_count_children(cf.slide);
+    unsigned n = (unsigned)cf.count;
     int off = album_offline(c);
     if ((int)c + 1 == cf.titled && off == cf.offline) return;
     cf.titled = (int)c + 1;
@@ -2640,13 +2739,13 @@ void titles(unsigned c) {
 }
 
 static int changed(void *ctx, void *event) {
-    unsigned n = widget_count_children(cf.slide), c = (unsigned)I(cf.slide, SLIDE_INDEX);
+    unsigned n = (unsigned)cf.count, c = (unsigned)I(cf.slide, SLIDE_INDEX);
     for (unsigned i = 0; !fx.frame && i < n; ++i) { /* the flat fallback's own images */
         unsigned d = i > c ? i - c : c - i;
         cover(widget_get_child(cf.slide, i), i, d <= ART_NEAR || n - d <= ART_NEAR);
     }
     void *r = c + CARDS < n ? deque_at(cf.albums, c) : (void *)0;
-    if (r && !cf.scoped) cf.saved_album = album_key(r);
+    if (r && !cf.scoped) cf.saved_album = album_key(r), centred_at(c);
     cf.titled = 0; /* a commit always writes them */
     titles(c);
     return 0;
@@ -2659,12 +2758,14 @@ static int retitle(const void *unused) {
     return 0;
 }
 
-/* One child per album plus the cards (CARDS), moved by the wheel and by touch on the covers' view
+/* An index per album plus the cards (CARDS), moved by the wheel and by touch on the covers' view
  * (touch); the slide_menu itself takes no touch. With depth it spans the frame, so every step
  * repaints all of it, and its cfs.view_h square items with a negative spacer move one album per
- * the theme's stride in px; the children stay empty under the frame. The flat fallback is the
- * stock images, 160 px, as before. ponytail: one child per album; if large libraries lag,
- * virtualize to a recycled window of children. */
+ * the theme's stride in px; its children stay empty under the frame, so CF_POOL of them stand for
+ * every album (slide_count, slide_child_index): an open makes no widget per album, which cost
+ * 6,000 albums 25 ms and their layout as much again. The flat fallback is the stock images, 160 px,
+ * as before, one child per album. ponytail: the flat fallback (no memory for the frame) still makes
+ * a child per album; a pool there would rebind the images round the visual centre mid-glide. */
 static void covers(void) {
     cf.screen = COVERS;
     widget_set_visible(cf.body, 0, 0);
@@ -2678,12 +2779,13 @@ static void covers(void) {
                                                 depth ? cfs.view_h : ART_SIZE);
         if (depth) slide_menu_set_spacer(cf.slide, cfs.stride - cfs.view_h);
         widget_set_sensitive(cf.slide, 0);
-        for (unsigned i = 0, n = deque_size(cf.albums); i < n + CARDS; ++i) {
+        cf.count = (int)deque_size(cf.albums) + CARDS;
+        for (int i = 0; i < (depth && cf.count > CF_POOL ? CF_POOL : cf.count); ++i) {
             void *img = image_create(cf.slide, 0, 0, 0, 0);
             image_set_draw_type(img, 4); /* scale_auto, as the stock cover rows */
             if (!depth) image_base_set_image(img, PLACEHOLDER);
             widget_set_prop_int(img, "clickable", 1);
-            widget_on(img, EVT_CLICK, pick, (void *)(long)i);
+            widget_on(img, EVT_CLICK, pick_child, (void *)(long)i);
         }
         /* Album over artist under the frame, white and larger, then grey, clear of the rounded
          * glass (docs/ipod.md#coverflow). */
@@ -2741,7 +2843,10 @@ static int cancel_row(void *ctx, void *event) {
 
 static int poll(const void *unused) {
     cf.timer = 0;
-    if (cf.done == cf.total) return to_covers(0); /* stop() joins the thread's last steps */
+    if (cf.done == cf.total) { /* stop() joins the thread's last steps */
+        if (!cf.scoped) art_cleaned();
+        return to_covers(0);
+    }
     char progress[64];
     tk_snprintf(progress, sizeof(progress), "Preparing artwork\xe2\x80\xa6 %d/%d", cf.done,
                 cf.total);
@@ -2847,6 +2952,7 @@ static int query_step(int k, unsigned t0) {
  * order is its own. */
 static void sort_check(void) {
     if (cf.scoped) return;
+    verify_join(); /* before the albums it reads go */
     if (cf.albums &&
         (cf.resort || ((cf.sort == SORT_YEAR || cf.sort == SORT_ARTIST) &&
                        (cf.year_old != ringnav_year_old() ||
@@ -2914,6 +3020,13 @@ static void load_albums(unsigned t0) {
     unsigned at, queued;
     void *now = P(mcl_pdeqplaylist, 0) && !on_sort && !cf.scoped ? queue_now(&at, &queued) : 0;
     if (now && !(P(now, REC_ALBUM) && *(const char *)P(now, REC_ALBUM))) now = 0;
+    if (!cf.scoped && art_clean()) { /* warm: the covers at once, the art checked behind them */
+        cf.album = on_sort ? (int)count : centre_of(now, count);
+        cf_trace(t0, "warm albums=", count, 0);
+        to_covers(0);
+        verify_start();
+        return;
+    }
     int playing = 0;
     art_strike(BUILDING);
     cf.jobs = calloc(count, sizeof(job_t));
@@ -2927,11 +3040,7 @@ static void load_albums(unsigned t0) {
         else if (key == cf.saved_album && !on_sort && !cf.scoped && !playing)
             cf.album = (int)i;
         job_t *j = cf.jobs ? &cf.jobs[cf.total] : 0;
-        /* a server album's art is its app's cover: none fetched yet, the placeholder, no job */
-        if (j && P(r, REC_PATH) && access(art_path(path, key, ""), 0) &&
-            (!catalogue_path(P(r, REC_PATH)) ||
-             catalogue_cover(P(r, REC_PATH), path, sizeof path)) &&
-            (j->track = strdup(P(r, REC_PATH)))) {
+        if (j && art_missing(r, path, sizeof path) && (j->track = strdup(P(r, REC_PATH)))) {
             cf_cold(t0);
             j->key = key;
             j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
@@ -2939,6 +3048,7 @@ static void load_albums(unsigned t0) {
         }
     }
     free(shared);
+    if (!cf.total && cf.jobs && !cf.scoped) art_cleaned(); /* every album's art is there */
     cf_trace(t0, "done jobs=", cf.total, count);
     if (on_sort) cf.album = (int)count; /* the Sort card, pressed again and again */
     mkdir(ART_DIR, 0755);
@@ -3190,6 +3300,7 @@ void coverflow_sort_set(int i) {
 static int resort(const void *unused) {
     cf.timer = 0;
     cf.sort = sort_next(1);
+    verify_join(); /* before the albums it reads go */
     if (cf.scoped)
         BLOB_IO(RATED_SORT_FILE, cf.sort, 1);
     else
@@ -3201,15 +3312,19 @@ static int resort(const void *unused) {
     return 0;
 }
 
-/* Clicks only schedule: a screen change never destroys the widget whose click is running. */
-static int pick(void *ctx, void *event) {
-    int i = (int)(long)ctx, n = (int)deque_size(cf.albums);
-    if (i == n)
+/* Album i, or the card past the albums, opened. Only scheduled: a screen change never destroys
+ * the widget whose click is running. */
+static void pick(int i) {
+    if (i == (int)deque_size(cf.albums))
         rearm(&cf.timer, resort, 0);
     else {
         cf.album = i;
         rearm(&cf.timer, to_tracks, 0);
     }
+}
+/* A click on the slide_menu's child ctx (Centre's, confirm_center): the album it stands for. */
+static int pick_child(void *ctx, void *event) {
+    if (cf.slide) pick(slide_child_index(cf.slide, (int)(long)ctx));
     return 0;
 }
 

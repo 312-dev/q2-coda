@@ -67,7 +67,7 @@ static int coverflow_position_offset(float pos, int albums, int cards, int trave
  * paint cleanup can otherwise consume the new damage before it reaches the screen. */
 void coverflow_position_paint(void *w, void *canvas) {
     if (!w || (w != cf.slide && w != cf.covers) || !position_live()) return;
-    int n = (int)deque_size(cf.albums), cards = (int)widget_count_children(cf.slide), c, frac;
+    int n = (int)deque_size(cf.albums), cards = slide_count(cf.slide), c, frac;
     if (!visual(cf.slide, cards, &c, &frac)) return;
     /* At rest, pose(0) projects the central cover to ART_SIZE pixels about CF_CX. Match those
      * edges; place the indicator halfway from the last caption's lower edge to the screen. */
