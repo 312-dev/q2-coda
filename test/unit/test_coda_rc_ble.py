@@ -63,17 +63,19 @@ class Kernel:
     """The management socket's far end: every command recorded and answered with status (0 succeeds)."""
 
     def __init__(self, sim):
-        self.status, self.commands, self.conn = 0, [], None
+        self.status, self.commands = 0, []
+        self.conn: socket.socket | None = None
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         self.srv.bind(str(sim / 'mgmt'))
         self.srv.listen(1)
         threading.Thread(target=self.serve, daemon=True).start()
 
     def serve(self):
-        self.conn, _ = self.srv.accept()
+        conn, _ = self.srv.accept()
+        self.conn = conn
         while True:
             try:
-                m = self.conn.recv(1024)
+                m = conn.recv(1024)
             except OSError:
                 return
             if not m:
@@ -81,11 +83,12 @@ class Kernel:
             op, index, n = struct.unpack('<HHH', m[:6])
             self.commands.append((op, m[6:6 + n]))
             try:
-                self.conn.send(struct.pack('<HHHHB', 1, index, 3, op, self.status))
+                conn.send(struct.pack('<HHHHB', 1, index, 3, op, self.status))
             except OSError:  # the daemon stopped: its last Remove Advertising has no one to read the answer
                 return
 
     def event(self, ev, index=0):
+        assert self.conn is not None
         self.conn.send(struct.pack('<HHH', ev, index, 0))
 
     def ops(self):
