@@ -16,7 +16,8 @@
  * (bt_sbc_step), written into bluealsa's BT_SBC_POOL byte through /proc/PID/mem, which its encoder
  * takes from the next frame. Every read that fails leaves its
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
- * does nothing else. */
+ * does nothing else. Apart from streams, the kernel's lines q2guard reads feed the controller
+ * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog). */
 #include "q2bt.h"
 #include "q2log.h"
 

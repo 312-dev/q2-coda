@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: when the Bluetooth chip stops answering (every connect fails and nothing plays until Bluetooth is switched off and on), the Q2 now notices within about ten seconds and restarts Bluetooth itself, as switching it off and on does, then reconnects your last headset. It waits while a connection, a pairing, a scan or a quality change is under way, waits two minutes or more between restarts, and stops trying after three in a row that didn't help. Each restart is noted in the logs.
   - Home: a Rockbox or Groovebox copied onto the card, a new card, or a new folder at the card's top now shows on Home straight away, instead of up to five seconds later.
   - Car Remote: the phone's buttons (play, pause, skip, volume and the rest) now act on the Q2 at once, instead of up to half a second later.
   - Battery: with the screen off and no Wi-Fi network in range, the Q2 now searches for one less and less often, down to every two minutes, instead of every few seconds for as long as Wi-Fi is on. Out of range of every saved network (Car Remote's car network at home, say), those searches used about a quarter of the battery the Q2 spends sitting idle. Turning the screen on, plugging in a cable or opening the Wi-Fi page searches every few seconds again at once.

@@ -5,7 +5,8 @@
  * under Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
  * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
- * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
+ * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. The
+ * controller watchdog (bt_wedge, test/unit/test_q2bt_wedge.py) lives here too. */
 #ifndef Q2BT_H
 #define Q2BT_H
 
