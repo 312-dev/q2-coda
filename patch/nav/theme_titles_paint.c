@@ -594,6 +594,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
         ;
     else if (!pressed_pill(w, canvas))
         result = stock_paint_bg_trampoline(w, canvas);
+    search_strip_bar_ground(w, canvas); /* a Wi-Fi box's dialog cleared under the bar */
     /* Now Playing's glow and rating page (np_rate.c), on their pages' ground */
     np_rate_bg(w, canvas);
     void *wm = window_manager(), *bar = *(void *const *)system_bar;

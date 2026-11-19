@@ -328,6 +328,7 @@ int library_search_open(void *ctx, void *event), search_strip_key(void *top, uns
     search_strip_hold(void *top), search_strip_owns(void *top), search_strip_open(void *top),
     search_strip_close(void *top);
 void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
+void search_strip_bar_ground(void *w, void *canvas);
 /* keyboard.c: the input method's keyboard window, a bare one the letter strip takes */
 void *kb_host_open(const char *name);
 int kb_open_hint(void *kb, const char *name, const char *value);

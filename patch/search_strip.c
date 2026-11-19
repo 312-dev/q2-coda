@@ -269,8 +269,6 @@ static struct {
     short scroll;         /* the text's scroll in its field, px (ss_field) */
     short fx, fy, fw, fh; /* the field as last painted, on the sheet, for the blink to repaint */
     unsigned blink_at, blink_timer; /* the cursor shown from (its blink's start); the timer */
-    void *lowered;  /* the box's dialog, moved down under the strip's window (search_strip_box) */
-    long lowered_y; /* ... its own y, given back as the strip closes */
     /* The text as last painted (ss_field), for a finger in it and the loupe: each character
      * boundary's x on the sheet, the characters shown, the face and its size, the cursor's height
      */
@@ -1277,10 +1275,12 @@ static void ss_loupe_paint(void *w, void *canvas) {
 #define SS_HOLD_CARD_MID 160      /* on the screen */
 #define SS_HOLD_SCRIM 0x8c000000u /* black at 55%, Buttons Lock's (keylock.c KEYLOCK_DIM) */
 #define SS_HOLD_RING 22           /* the ring's radius to its line's middle */
+static void ss_bar_over(void *w, void *canvas);
 void search_strip_overlay(void *w, void *canvas) {
     static const char *const faces[] = FONT_NAMES;
     static const char line[] = "Keep holding to go back";
     int dy;
+    ss_bar_over(w, canvas);
     ss_loupe_paint(w, canvas);
     if (!ss.held || !ss.page || !overlay_scrim(w, canvas, SS_HOLD_SCRIM, &dy)) return;
     unsigned wide[32], n = ss_wide(line, wide, sizeof wide / sizeof *wide),
@@ -1764,6 +1764,7 @@ static int ss_holds(void *root, void *w) {
     return 0;
 }
 
+static void ss_band_back(void);
 static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.pop_timer);
     stop_timer(&ss.hold_timer);
@@ -1772,8 +1773,7 @@ static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.blink_timer);
     stop_timer(&ss.loupe_timer);
     stop_timer(&ss.nudge_timer);
-    if (ss.lowered && ss_holds(window_manager(), ss.lowered)) /* a dialog an OK left open */
-        widget_move(ss.lowered, I(ss.lowered, W_X), (int)ss.lowered_y);
+    ss_band_back();
     if (ss.under) bitmap_destroy(ss.under);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
@@ -1886,6 +1886,66 @@ static int ss_secret_box(void *edit) {
     return widget_get_prop_int(edit, "_secret", 0) ? SS_SECRET_PASS : SS_SECRET_NONE;
 }
 
+/* A network's password (kbwifipass_dialog) and Add Network's box (editwifi_dialog) are stock
+ * dialogs of the whole screen, black, the box in a row at the status row's height with stock's
+ * back arrow beside it; the window manager paints dialogs after the status row, so that band
+ * stood over the bar and its title (the user's screenshot, 2026-11-19). While the strip types, its
+ * window covers the dialog below the bar, so the dialog's children in the band hide and its
+ * ground is cleared (as the confirmation card clears stock's, feedback.c): the status row shows
+ * through. Under the bar then lies what the dialog's highlighter dims, Add Network's own dialog's
+ * title row among it (seen on the emulator), so the bar lays a black ground of its own over it
+ * (search_strip_bar_ground); the highlighter dims the bar too, so it is painted again over the
+ * dialog (ss_bar_over). ss_band_back puts the dialog back, black as stock made it, if it is still
+ * up (an OK that leaves it open). */
+#define SS_BAND_MAX 4 /* the children hidden, at most */
+static struct {
+    void *win;
+    void *hid[SS_BAND_MAX];
+} band __attribute__((section(".scratch")));
+
+static int ss_wifi_dialog(void *win) {
+    const char *name = win ? widget_get_prop_str(win, "name", "") : "";
+    return !tk_strcmp(name, "kbwifipass_dialog") || !tk_strcmp(name, "editwifi_dialog");
+}
+static void ss_band_clear(void *win, int top) {
+    int h = 0;
+    memset(&band, 0, sizeof band);
+    band.win = win;
+    for (unsigned k = 0, n = widget_count_children(win); k < n && h < SS_BAND_MAX; ++k) {
+        void *c = widget_get_child(win, k);
+        if (!widget_get_visible(c) || I(c, W_Y) >= top) continue;
+        widget_set_visible(c, 0, 0);
+        band.hid[h++] = c;
+    }
+    widget_set_prop_int(win, "style:normal:bg_color", 0);
+    widget_invalidate_force(window_manager(), (void *)0); /* the bar too */
+}
+static void ss_band_back(void) {
+    if (band.win && ss_holds(window_manager(), band.win)) {
+        widget_set_prop_int(band.win, "style:normal:bg_color", (int)0xff000000u);
+        for (int k = 0; k < SS_BAND_MAX; ++k)
+            if (band.hid[k]) widget_set_visible(band.hid[k], 1, 0);
+    }
+    memset(&band, 0, sizeof band);
+}
+/* ringnav_paint_bg, the status row's background (w the system bar): black under its glyphs while
+ * a Wi-Fi dialog's band is cleared, over the highlighter's picture. */
+void search_strip_bar_ground(void *w, void *canvas) {
+    void *lcd = band.win && w && w == *(void *const *)system_bar ? P(canvas, CANVAS_LCD) : (void *)0;
+    if (!lcd) return;
+    unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR);
+    stock_canvas_set_fill_color(canvas, ui_ink(RGBA(0)));
+    canvas_fill_rect(canvas, 0, 0, I(w, W_W), I(w, W_H));
+    stock_canvas_set_fill_color(canvas, fill);
+}
+/* ringnav_paint, after w's children (search_strip_overlay): the status row painted again over a
+ * Wi-Fi box's cleared dialog, at full strength. The dialog's highlighter lays its dim over all
+ * that lies under the dialog, the bar too, so the bar under it read at half strength. */
+static void ss_bar_over(void *w, void *canvas) {
+    void *bar = *(void *const *)system_bar;
+    if (band.win && w == band.win && bar && P(canvas, CANVAS_LCD)) widget_paint(bar, canvas);
+}
+
 /* A box's label, kept for as long as the strip is up (the edit's own may go first). */
 static char ss_box_label[48] __attribute__((section(".scratch")));
 
@@ -1928,17 +1988,8 @@ int search_strip_box(void *kb, void *edit, const char *title) {
         label = *(tips = widget_get_prop_str(edit, "tips", "")) ? tips : "Search";
     tk_snprintf(ss_box_label, sizeof ss_box_label, "%s", label);
     ss.label = ss_box_label;
-    /* A box on a dialog of its own (a network's password, kbwifipass_dialog; Add Network's,
-     * editwifi_dialog) has it in a row at the status row's height, stock's back arrow beside it,
-     * on a dialog of the whole screen: the window manager paints dialogs after the status row, so
-     * that band covered the bar's title. The dialog moves down to the strip window's top, all of
-     * it under that window, so the bar shows over the page, titled as above. widget_move: its
-     * children keep their places. */
     void *win = window_of(edit);
-    if (win && !tk_strcmp(widget_get_type(win), "dialog") && I(win, W_Y) < top) {
-        ss.lowered = win, ss.lowered_y = I(win, W_Y);
-        widget_move(win, I(win, W_X), top);
-    }
+    if (ss_wifi_dialog(win)) ss_band_clear(win, top);
     ss_place(win, form, edit);
     bar_title_sync(kb);
     widget_invalidate_force(kb, (void *)0);
