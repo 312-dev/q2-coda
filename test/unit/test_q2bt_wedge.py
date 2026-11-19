@@ -61,8 +61,10 @@ class Guard:
     """q2guard's side as q2bt.c runs it: the kernel lines read each tick, then the step and the probe. now is
     q2guard's clock (here the kernel's plus an offset), wedged says how a probe goes (1 answered, 0 not, -1 down)."""
     def __init__(self, L, offset=1000000):
-        self.L, self.w, self.offset, self.wedged, self.busy = L, Wedge(), offset, True, False
-        self.events, self.now = [], None
+        self.L, self.w, self.offset, self.busy = L, Wedge(), offset, False
+        self.wedged: 'bool | None' = True
+        self.events: 'list[tuple[int, int]]' = []
+        self.now = 0
 
     def lines(self, now, lines):
         for kms, msg in lines:
@@ -108,7 +110,7 @@ def test_a_kmsg_record_split(L):
     ms, msg = C.c_uint(), C.c_char_p()
     assert L.bt_kmsg_split(b'3,4021,44312330044,-;Bluetooth: hci0: command 0x0402 tx timeout\n', C.byref(ms),
                            C.byref(msg))
-    assert ms.value == 44312330 and msg.value.startswith(b'Bluetooth: hci0: command 0x0402')
+    assert ms.value == 44312330 and (msg.value or b'').startswith(b'Bluetooth: hci0: command 0x0402')
     # microseconds past 2^32 (72 minutes up) and past 2^32 ms (49 days): taken modulo 2^32, never divided in 64 bits
     assert L.bt_kmsg_split(b'3,1,4300000000123456,-;x', C.byref(ms), C.byref(msg))
     assert ms.value == 4300000000123 % 2**32
