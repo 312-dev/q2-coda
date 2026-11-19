@@ -59,8 +59,8 @@ static struct {
     int lx;                /* the layer's x at rest */
     int off;               /* how far right the layer is now */
     int claimed, aborting; /* the touch is ours; our own abort is passing through the page */
-    int shut;              /* ... and it shut the letter strip, the page staying (search_strip_close) */
-    int last_x, prev_x;    /* the last two moves' x and times, for the lift's speed */
+    int shut; /* ... and it shut the letter strip, the page staying (search_strip_close) */
+    int last_x, prev_x; /* the last two moves' x and times, for the lift's speed */
     unsigned last_t, prev_t;
     int from, to;    /* a glide: the offset it started from and goes to */
     unsigned at, ms; /* ... its start (time_now_ms, 0 with none) and length */
@@ -245,7 +245,8 @@ static int sb_event(void *page, void *event) {
         sb.aborting = 0;
         sb.prev_x = sb.last_x = sb.x0;
         sb.prev_t = sb.last_t = (unsigned)time_now_ms();
-        if (sb.layer == page && !sb.shut) sb.under = under_snap(window_under(window_manager(), page));
+        if (sb.layer == page && !sb.shut)
+            sb.under = under_snap(window_under(window_manager(), page));
     }
     if (sb.shut) { /* the rest of the touch is the swipe's, and moves nothing */
         if (up) reset();

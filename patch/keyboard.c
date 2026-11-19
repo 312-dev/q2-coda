@@ -1,7 +1,7 @@
 /* Stock's on-screen keyboard, gone (the user's, 2026-11-18: "strip their keyboard out of codebase
- * completely"; docs/ipod.md#keyboard, docs/internals.md#the-keyboard). Every keyboard stock opens is
- * opened by its input method's request (input_method_default's show, the two window_open calls that
- * tools/build.py KB_OPEN_SITES names, one for the edit's keyboard and one for its fallback,
+ * completely"; docs/ipod.md#keyboard, docs/internals.md#the-keyboard). Every keyboard stock opens
+ * is opened by its input method's request (input_method_default's show, the two window_open calls
+ * that tools/build.py KB_OPEN_SITES names, one for the edit's keyboard and one for its fallback,
  * kb_default_t9): both call kb_host_open instead, which opens a bare keyboard window, no keys, over
  * the screen under the status row, and gives it to the letter strip there and then
  * (search_strip.c search_strip_box), so its first frame is the strip's: the box's text is typed in
@@ -13,7 +13,7 @@
 #include "navigation.h"
 
 static struct {
-    void *kb;       /* the keyboard window kb_host_open last opened */
+    void *kb; /* the keyboard window kb_host_open last opened */
 } kw __attribute__((section(".scratch")));
 
 /* The keyboard's window and the input method's edit to the letter strip (the input method keeps
