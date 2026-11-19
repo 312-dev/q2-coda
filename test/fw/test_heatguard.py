@@ -255,10 +255,10 @@ def test_a_relaunch_is_stocks_switch_off_then_on(rig, fw):
     assert len(bt.calls) == 3 and rig.written[ACK].endswith('bt 2 done\n')
 
 
-@pytest.mark.parametrize('busy', [dict(search=50), dict(init=1), dict(init=-102), dict(connect=1), dict(direction=1)])
+@pytest.mark.parametrize('busy', [dict(init=1), dict(init=-102), dict(connect=1), dict(direction=1)])
 def test_never_while_bluetooth_is_busy(rig, fw, busy):
-    """A scan, the stack starting (or failed), a link thread connecting or pairing, a link being set up: the ask waits
-    for the next poll, unanswered."""
+    """The stack starting (or failed), a link thread connecting or pairing, a link being set up: the ask waits for the
+    next poll, unanswered."""
     bt = Bt(fw, rig)
     bt_state(rig, 0)
     rig.poll()
@@ -268,6 +268,20 @@ def test_never_while_bluetooth_is_busy(rig, fw, busy):
         rig.poll()
     assert bt.calls == [] and not rig.written.get(ACK, '').endswith('bt 1 done\n')
     bt.set()
+    rig.poll()
+    assert [c[1:] for c in bt.calls] == [(1, 0)] and rig.written[ACK].endswith('bt 1 done\n')
+
+
+def test_a_scan_does_not_hold_off_a_relaunch(rig, fw):
+    """2026-11-19, V1JAi: a storm from 20:36:00Z, BT RESET asked at 20:36:26Z, and demo relaunched only at 20:37:26Z,
+    when the pairing page's scan ended: its commands had timed out in the kernel (0x0401 and 0x2041 tx timeout), as a
+    wedged controller answers none. A scan cannot finish on it, and stock's switch off stops the scan first
+    (btStopSearch), so a scan running is no reason to wait: the ask is answered on the next poll."""
+    bt = Bt(fw, rig)
+    bt_state(rig, 0)
+    rig.poll()
+    bt.set(search=50)
+    bt_state(rig, 1)
     rig.poll()
     assert [c[1:] for c in bt.calls] == [(1, 0)] and rig.written[ACK].endswith('bt 1 done\n')
 

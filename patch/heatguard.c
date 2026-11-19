@@ -128,9 +128,11 @@ static void hg_power_off(int seq, int left, int load) {
  * clearBluetoothStatus, closeBluetooth killing rtk_hciattach, bluetoothd and bluealsa and powering
  * the radio down), then HG_BT_OFF_MS later on (bluetoothInit: openBluetooth's thread starts them
  * again, and checkBluetoothStatus reconnects BTLINKMAC as at any Bluetooth on), so demo's own lists
- * and output follow as they do for the switch. Not while Bluetooth is busy as stock's page counts
- * it (a scan, the stack starting, a link thread connecting or pairing, a link being set up):
- * q2guard's ask stays until the next poll. Bluetooth off: nothing to relaunch, answered "off". */
+ * and output follow as they do for the switch. Not while the stack is starting, a link thread is
+ * connecting or pairing, or a link is being set up: q2guard's ask stays until the next poll. A scan
+ * does not hold it: a wedged controller answers none of the scan's commands, so the scan cannot end
+ * by itself, and the switch off stops it first (btStopSearch). Bluetooth off: nothing to relaunch,
+ * answered "off". */
 static void hg_bt(int req, unsigned now) {
     if (hg.bt_on) {
         if (now - hg.bt_off_at < HG_BT_OFF_MS) return;
@@ -140,8 +142,8 @@ static void hg_bt(int req, unsigned now) {
     }
     if (!hg.bt_have) hg.bt_have = 1, hg.bt_seen = req; /* an ask from before demo started is old */
     if (req <= hg.bt_seen) return;
-    if (g_bluetoothflag && (bt_searchtime || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1 ||
-                            I(bt_a2dp_direction, 0)))
+    if (g_bluetoothflag &&
+        (I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1 || I(bt_a2dp_direction, 0)))
         return;
     hg.bt_seen = req, hg.bt_said = g_bluetoothflag ? "done" : "off";
     hg_answer();
