@@ -2,7 +2,7 @@
 management events, as a socket on the control channel reads them, turned into unified-log lines that name the device.
 The event bytes are built field by field as Linux 5.10's net/bluetooth/mgmt.c sends them (mgmt_device_connected,
 mgmt_device_disconnected, mgmt_connect_failed, mgmt_auth_failed, device_unpaired, mgmt_new_link_key), struct mgmt_hdr
-first. Built for this machine with test/unit/q2guard_host.c."""
+first. Built for this machine with test/unit/q2guard_host.c, snprintf as the Q2's glibc 2.28 runs it."""
 import ctypes as C
 import struct
 import subprocess
@@ -30,7 +30,9 @@ class Names(C.Structure):
 @pytest.fixture(scope='module')
 def L(tmp_path_factory):
     out = tmp_path_factory.mktemp('q2bt_devices') / 'q2bt.so'
+    # the Q2's glibc 2.28 snprintf, which empties its buffer first (test/unit/glibc228_snprintf.h)
     subprocess.run(['clang', '-shared', '-fPIC', '-O1', '-DQ2GUARD_HOST', '-Wall', '-Werror', '-Wno-unused-parameter',
+                    '-include', ROOT / 'test/unit/glibc228_snprintf.h',
                     f'-DPEQ_ROOT="{out.parent}"', ROOT / 'patch/q2bt_core.c', ROOT / 'patch/q2guard_core.c',
                     ROOT / 'patch/card_store.c', ROOT / 'test/unit/q2guard_host.c', '-o', out], check=True)
     lib = C.CDLL(str(out))
@@ -186,6 +188,23 @@ def test_names_seen_outlive_the_store(L):
         L.bt_names_put(C.byref(c), bytes([i, 0, 0, 0, 0, 0x99]), f'dev {i}'.encode())
     assert L.bt_names_get(C.byref(c), BUDS) is None  # the oldest went
     assert L.bt_names_get(C.byref(c), bytes([7, 0, 0, 0, 0, 0x99])) == b'dev 7'
+
+
+def test_a_cached_name_survives_its_own_lookup(L):
+    """2026-11-19, V1JAi: `connect failed 60:E6:F0:A1:1F:09 ...` at 20:37:35Z had no name although the same address
+    was "BMW 83828" at 20:35:46Z. q2bt.c's mgmt_drain puts back the name it got, and the second event's name came
+    from the names seen, so it was put back from its own slot: glibc's snprintf empties its buffer before it reads
+    "%s", which blanked the slot and the line's name with it. Each event of a device after its first is a lookup
+    like this one."""
+    get = L['bt_names_get']  # a handle of its own that keeps the pointer (c_char_p's restype copies the bytes)
+    get.argtypes, get.restype = [C.c_void_p, C.c_char_p], C.c_void_p
+    c = Names()
+    L.bt_names_put(C.byref(c), CAR, b'BMW 83828')
+    for _ in range(3):  # the drain's order: get, put back, then the line from what get returned
+        got = C.cast(get(C.byref(c), CAR), C.c_char_p)
+        L.bt_names_put(C.byref(c), CAR, got)
+        assert got.value == b'BMW 83828'
+        assert L.bt_names_get(C.byref(c), CAR) == b'BMW 83828'
 
 
 def test_the_address_as_written(L):

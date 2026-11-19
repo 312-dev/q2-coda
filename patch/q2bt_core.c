@@ -855,5 +855,9 @@ void bt_names_put(struct bt_names *c, const unsigned char *bdaddr, const char *n
     while (i < BT_NAMES && !(c->name[i][0] && !memcmp(c->addr[i], bdaddr, 6))) ++i;
     if (i == BT_NAMES) i = c->next, c->next = (c->next + 1) % BT_NAMES;
     memcpy(c->addr[i], bdaddr, 6);
-    snprintf(c->name[i], sizeof c->name[i], "%s", name);
+    /* copied a byte at a time, not with snprintf: name is often this slot itself (bt_names_get's
+     * answer put back), and glibc 2.28's snprintf empties its buffer before it reads "%s" */
+    int k = 0;
+    for (; name[k] && k < (int)sizeof c->name[i] - 1; ++k) c->name[i][k] = name[k];
+    c->name[i][k] = 0;
 }

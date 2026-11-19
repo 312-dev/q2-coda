@@ -363,6 +363,7 @@ struct bt_names {
     int next;
 };
 const char *bt_names_get(const struct bt_names *c, const unsigned char *bdaddr); /* 0 none */
+/* name may be bt_names_get's answer for the same address: the slot it points into keeps it */
 void bt_names_put(struct bt_names *c, const unsigned char *bdaddr, const char *name);
 
 /* The log: q2-bt.0 in dir, moved on at BT_FILE_MAX through BT_FILES files (log_flush,
