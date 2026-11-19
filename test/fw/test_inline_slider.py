@@ -214,3 +214,22 @@ def test_a_row_paints_its_value_and_track_at_rest_and_grabbed(fw, grabbed):
         assert tracks[0][0][1] == 43 - 2 and tracks[0][0][2] > 250  # full width, under the title
     assert canvas.restored()
 
+
+
+def test_a_swipe_back_takes_the_value_and_track_along_with_the_page(fw):
+    """docs/internals.md#swipe-back: the swipe moves the page's window (widget_move), so every canvas in it starts
+    that far right. The value and the track are put on the page's columns and must ride with it, not stay at their
+    screen columns over the page uncovered under it (seen on the device: the value stayed put mid-swipe)."""
+    p = Playback(fw)
+    p.g('g_maxvolume', 80)
+    item = p.item('Max Volume')
+    paint = fw.fn('inline_slider_paint', None, C.c_void_p, C.c_void_p)
+    rest = Canvas(fw)
+    paint(item.addr, rest.addr)
+    off = 120
+    win = p.page.pages[-1]
+    win.box = (off,) + win.box[1:]  # where swipe_back.c's place() puts it
+    moved = Canvas(fw, x=off)
+    paint(item.addr, moved.addr)
+    assert [r for _, r, _ in moved.texts] == [r for _, r, _ in rest.texts]  # the value, on the page's column
+    assert [b[0] for b in moved.boxes] == [b[0] for b in rest.boxes]  # the track and its fill

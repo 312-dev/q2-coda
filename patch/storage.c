@@ -342,7 +342,7 @@ static void st_bar(void *canvas, int x0, int x1, int y) {
 
 /* A row's value on the right column, beside its chevron when it opens a page. */
 static void st_value(void *w, void *canvas, const char *value, int into, int sel) {
-    int right = 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), y = I(w, W_H) / 2;
+    int right = 375 - geom_val(V_RIGHT_X) - page_ox(canvas, w), y = I(w, W_H) / 2;
     unsigned ink = theme()->set_value_ink[0] ? theme()->set_value_ink[0] : RGB_SECONDARY;
     if (into) chevron_icon(w, canvas, right, y, sel), right -= VALUE_CHEVRON_GAP;
     st_text(canvas, value, right - 160, 160, y, 3, ROLE_TITLE, theme()->font_px[ROLE_TITLE],
@@ -382,7 +382,7 @@ void storage_paint(void *w, void *canvas) {
             unsigned mb[4] = { st_yours(), so.down, so.cache, so.free },
                      rgb[4] = { 0xffffff, scheme()->tones[0] & 0xffffffu, ST_CACHE, ST_TRACK };
             if (i == 1) st.raw_ink = 1; /* the accent's dot: final in both halves */
-            st_dot(canvas, x0 - I(canvas, CANVAS_X), I(w, W_H) / 2, rgb[i]);
+            st_dot(canvas, x0 - page_ox(canvas, w), I(w, W_H) / 2, rgb[i]);
             st.raw_ink = sel;
             size_text(b, sizeof b, mb[i]);
             st_value(w, canvas, b, so.id[0] && (i == 1 || i == 2), sel);
@@ -392,7 +392,7 @@ void storage_paint(void *w, void *canvas) {
             const st_item *it = &so.item[i - 1];
             const char *ink = sel ? "w" : it->auto_ ? (ipod_light() ? "l" : "d") : "a";
             tk_snprintf(a, sizeof a, "store_%s_%s", it->auto_ ? "auto" : "pick", ink);
-            paint_art(w, canvas, theme_art(a), ST_ICON_X - I(canvas, CANVAS_X),
+            paint_art(w, canvas, theme_art(a), ST_ICON_X - page_ox(canvas, w),
                       (I(w, W_H) - ST_ICON) / 2);
             size_text(b, sizeof b, it->mb);
             st_value(w, canvas, b, *it->op != 0, sel);

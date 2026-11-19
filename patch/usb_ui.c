@@ -512,11 +512,11 @@ int usb_pick_open(void *ctx, void *event) {
 }
 
 /* The footer: the checked choice's note, on the text column. */
-static void usb_pick_paint(void *canvas) {
+static void usb_pick_paint(void *w, void *canvas) {
     const char *const *note = usb_notes[usb_remembered()];
-    int x = geom_val(V_TEXT_X), w = 375 - x - geom_val(V_RIGHT_X);
+    int x = geom_val(V_TEXT_X), cw = 375 - x - geom_val(V_RIGHT_X);
     for (int k = 0; k < 2 && note[k]; ++k)
-        ui_line(canvas, note[k], x - I(canvas, CANVAS_X), w, USB_FOOT_DY + k * USB_FOOT_LINE, 2, "inter",
+        ui_line(canvas, note[k], x - page_ox(canvas, w), cw, USB_FOOT_DY + k * USB_FOOT_LINE, 2, "inter",
                 USB_FOOT_PX, scheme()->muted);
 }
 
@@ -552,7 +552,7 @@ void usb_ui_paint(void *w, void *canvas) {
             mode_page_paint(w, canvas, I(w, W_Y),
                             &(mode_page_t){ accent | MODE_BUTTON, "modepage_files", 0, "Connected", "Eject on your computer first", "Stop" });
     } else if (w == u.pick_foot) {
-        usb_pick_paint(canvas);
+        usb_pick_paint(w, canvas);
     } else if (w == u.debug) {
         mode_page_paint(w, canvas, I(w, W_Y),
                         &(mode_page_t){ accent | MODE_BUTTON, "modepage_debug", 0, "Debugging", "Charging and connected", "Stop" });
@@ -563,10 +563,10 @@ void usb_ui_paint(void *w, void *canvas) {
         if (i >= 0 && i < USB_ROWS) {
             char glyph[24];
             tk_snprintf(glyph, sizeof glyph, "%s_%c", usb_glyphs[i], sel ? 'w' : ipod_light() ? 'l' : 'd');
-            paint_art(w, canvas, theme_art(glyph), USB_ICON_X - USB_ICON / 2 - I(canvas, CANVAS_X),
+            paint_art(w, canvas, theme_art(glyph), USB_ICON_X - USB_ICON / 2 - page_ox(canvas, w),
                       USB_ROW / 2 - USB_ICON / 2);
             if (sel)
-                ui_line(canvas, usb_caps[i], USB_TEXT_X - I(canvas, CANVAS_X), 375 - USB_TEXT_X,
+                ui_line(canvas, usb_caps[i], USB_TEXT_X - page_ox(canvas, w), 375 - USB_TEXT_X,
                         USB_CAP_Y, 2, "inter", USB_CAP_PX, USB_CAP_RGB);
         }
     }

@@ -535,7 +535,7 @@ void upnext_paint(void *w, void *canvas) {
                                                : "mark_cloud_d"),
                       end - 8 - UN_CLOUD_PX / 2, h / 2 - UN_CLOUD_PX / 2);
         else if (un.lifted && queued)
-            grip_mark(canvas, 375 - geom_val(V_RIGHT_X) - UN_GRIP_X - I(canvas, CANVAS_X), h / 2,
+            grip_mark(canvas, 375 - geom_val(V_RIGHT_X) - UN_GRIP_X - page_ox(canvas, w), h / 2,
                       lifted || on ? 0xffffff : tok(TOK_TERTIARY), 100); /* list_marks.c's */
         else if (queued && k > 0) {
             unsigned bitmap[64]; /* bitmap_t: the bump arrow */

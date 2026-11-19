@@ -321,7 +321,7 @@ void az_paint(void *w, void *canvas) {
     if (!a) return;
     int oy = I(canvas, CANVAS_Y); /* the canvas's origin on screen */
     unsigned fill = (unsigned)I(P(canvas, CANVAS_LCD), LCD_FILL_COLOR), raw = ui_ink_raw(1);
-    int light = ipod_light(), x = 375 - AZ_X - I(canvas, CANVAS_X);
+    int light = ipod_light(), x = 375 - AZ_X - page_ox(canvas, w);
     unsigned ink = tok(TOK_PRIMARY), paper = light ? 0xffffff : 0x000000;
     signed char col[AZ_LETTERS];
     int n = az_column(col);

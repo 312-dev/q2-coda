@@ -489,7 +489,7 @@ void feedback_scan_bar(void *w, void *canvas) {
         tk_strcmp(widget_get_prop_str(w, "name", ""), "btn_upmusic"))
         return;
     int x = I(canvas, CANVAS_X);
-    I(canvas, CANVAS_X) = 0; /* ui_cta_paint centres on the screen */
+    I(canvas, CANVAS_X) = x - page_ox(canvas, w); /* ui_cta_paint centres on the page's origin */
     ui_cta_paint(canvas, scan_words, 1, 0, 0, pointer_down()); /* its one stop: selected */
     I(canvas, CANVAS_X) = x;
 }

@@ -10,7 +10,8 @@
  * swipe_back_paint, the top window's background paint, draws it left of the page, PX_UNDER_PCT of
  * the width short of its place and darkened to PX_DIM_ALPHA at the start, both easing to nothing
  * as the page leaves; Reduce Motion keeps it still and undimmed. Each move invalidates the whole
- * screen, as the strip left of the page moves too. Home's lists uncover black (ponytail: Home's
+ * screen, as the strip left of the page moves too; whatever the page's painters put on its own
+ * columns rides with it through page_ox. Home's lists uncover black (ponytail: Home's
  * main list could be drawn there the same way).
  *
  * A touch is a candidate from its press (swipe_back_down, from navigation.c's touch hook) and
@@ -102,6 +103,19 @@ static void place(int off) {
     sb.off = off;
     widget_move(w, sb.lx + off, I(w, W_Y));
     if (sb.under) widget_invalidate_force(window_manager(), (void *)0); /* the strip moves too */
+}
+
+/* canvas's origin as a column of w's page: its x on the screen less how far a swipe has moved w's
+ * window (place). A painter that puts something on one of the page's columns (the text column, the
+ * right column, the screen's middle) takes this from that column, not the canvas's own x, which
+ * would hold it at its screen column while the page slides out from under it. Only a normal window
+ * moves so; a dialog or a sheet keeps its own x in the canvas's. ponytail: a list of Home's, the
+ * layer a swipe moves inside Home's window, is not taken off; sb.off for a w under sb.layer
+ * would. */
+int page_ox(void *canvas, void *w) {
+    void *win = window_of(w);
+    int ox = I(canvas, CANVAS_X);
+    return win && !tk_strcmp(widget_get_type(win), "window") ? ox - I(win, W_X) : ox;
 }
 
 /* The window under, painted once into a bitmap as stock's window animator snapshots it; 0 when

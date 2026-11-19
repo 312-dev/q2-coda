@@ -402,7 +402,7 @@ void adb_trust_paint(void *w, void *canvas) {
                                             { "A computer you remove asks again",
                                               "the next time it connects." } };
     const char *const *c = caps[w == at.cap[1]];
-    int x = geom_val(V_TEXT_X) - I(canvas, CANVAS_X),
+    int x = geom_val(V_TEXT_X) - page_ox(canvas, w),
         cw = 375 - geom_val(V_TEXT_X) - geom_val(V_RIGHT_X);
     for (int k = 0; k < 2 && c[k]; ++k)
         ui_line(canvas, c[k], x, cw, ADB_CAP_H / 2 + k * ADB_CAP_LINE, 2, "inter", ADB_CAP_PX,

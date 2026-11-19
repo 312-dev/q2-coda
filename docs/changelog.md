@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Swipe back: while you swipe a page away from the left edge, everything on it now slides with it. A slider's value and track (Max Volume), a page's grey note under its rows (USB, Trusted Computers), the chevrons, Storage's sizes and the A-Z strip stayed where they were while the page slid, with the page underneath drawn over them until the swipe ended.
   - Bluetooth: a device whose connection is up now shows **Connected** on the Bluetooth page, including right after pairing when it moves to My Devices, instead of "Connecting..." for minutes while it plays.
   - Bluetooth: a device you put in pairing mode now appears on the Bluetooth page about a second after the Q2 hears it, instead of up to ten seconds later.
   - Logs: the Q2's log now also records each Bluetooth search starting and stopping and the first time each device answers it, when the pairing page opens and shows each device, who began each connection (the Q2 or the device), and each step of the Q2's own connecting (what it is trying to connect to, and why).

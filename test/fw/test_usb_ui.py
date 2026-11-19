@@ -572,6 +572,24 @@ def test_the_footer_says_what_the_checked_choice_does(fw_dev, st, pick, lines):
     assert ys[0] == 19 and all(b - a == 17 for a, b in zip(ys, ys[1:]))
 
 
+
+def test_a_swipe_back_takes_the_footer_along_with_the_page(fw_dev, st):
+    """docs/internals.md#swipe-back: the swipe moves the picker's window (widget_move), and every canvas in it starts
+    that far right. The footer's note is on the page's text column and rides with it; at its screen column it stood
+    still over the page uncovered under it (seen on the device)."""
+    u = Usb(fw_dev, ini={'USBPICK': 0})
+    page = picker(u)
+    foot = u.ui.lookup(page, '_usb_pick_foot')
+    paint = fw_dev.fn('usb_ui_paint', None, C.c_void_p, C.c_void_p)
+    rest = Canvas(fw_dev)
+    paint(foot, rest.addr)
+    off = 120
+    C.c_void_p.from_address(page + O['W_PARENT']).value = u.ui.wm  # a window is the window manager's child
+    u.ui.box(page, off, *u.ui.at(page)[1:])  # where swipe_back.c's place() puts it
+    moved = Canvas(fw_dev, x=off)
+    paint(foot, moved.addr)
+    assert moved.texts and [box for _, box, _ in moved.texts] == [box for _, box, _ in rest.texts]
+
 def test_a_pick_with_no_cable_only_saves_it_and_ask_every_time_undoes_a_saved_charge_only(fw):
     """The gap feat/usb-mode-row left: a saved Charge Only had no way back. With no cable in a pick is only saved
     (Transfer Files with stock's mode, as Always Do This saves it); the link, which stock's USB-mode exit prompt may

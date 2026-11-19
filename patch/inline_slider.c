@@ -326,7 +326,7 @@ void inline_slider_paint(void *w, void *canvas) {
     if (!lcd || !widget_get_visible(w)) return;
     unsigned fill = (unsigned)I(lcd, LCD_FILL_COLOR), text = (unsigned)I(lcd, LCD_TEXT_COLOR),
              raw = st.raw_ink;
-    int k = is.kind[i], v = inline_value(k), h = I(w, W_H), ox = I(canvas, CANVAS_X);
+    int k = is.kind[i], v = inline_value(k), h = I(w, W_H), ox = page_ox(canvas, w);
     int tx = geom_val(V_TEXT_X) - ox, rx = 375 - geom_val(V_RIGHT_X) - ox, cy = IS_PITCH / 2;
     int sel = w == is.open || (st.sel_accent && P(st.sel_accent, W_PARENT) == w);
     char s[16];

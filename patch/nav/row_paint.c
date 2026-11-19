@@ -861,10 +861,10 @@ static void paint_into(void *w, void *canvas) {
     else if (gain >= 0 && widget_get_visible(w))
         paint_gain(w, canvas, gain, st.sel_accent && painting_in(st.sel_accent));
     else if (!tk_strcmp(image, "list_into") && !lr_edit_row(w)) /* Edit Library: its grip */
-        chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2,
+        chevron_icon(w, canvas, 375 - geom_val(V_RIGHT_X) - page_ox(canvas, w), I(w, W_H) / 2,
                      st.sel_accent && painting_in(st.sel_accent));
     else if (!tk_strcmp(image, "list_intodown"))
-        chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - I(canvas, CANVAS_X), I(w, W_H) / 2);
+        chevron_muted(w, canvas, 375 - geom_val(V_RIGHT_X) - page_ox(canvas, w), I(w, W_H) / 2);
 }
 
 /* The theme's scrollbar (theme_t.sb_*), a track and thumb while the wheel turns (list_marks.c):
