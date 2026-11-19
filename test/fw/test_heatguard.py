@@ -115,9 +115,9 @@ def test_sensor_down_is_a_card_with_one_ok_that_waits_its_turn(rig):
     card, = rig.cards
     assert card['title'] == 'No Temperature Sensor' and card['rows'] == ['OK'] and card['timeout'] == 0
     assert 'watch CPU load instead' in card['body']
-    assert rig.written[ACK].endswith('card nosensor\n')  # what smoke.py confirms at boot
+    assert 'card nosensor\n' in rig.written[ACK]  # what smoke.py confirms at boot
     rig.answer(0)
-    assert rig.written[ACK].endswith('card -\n')
+    assert 'card -\n' in rig.written[ACK]
 
 
 def test_a_die_temperature_reading_raises_no_card(rig):
@@ -211,3 +211,96 @@ def test_with_no_guardian_installed_there_is_no_card(rig):
     for _ in range(140):
         rig.poll()
     assert rig.cards == []
+
+
+class Bt:
+    """Stock's Bluetooth switch recorded, and the globals the relaunch's gate reads."""
+    def __init__(self, fw, rig):
+        self.fw, self.rig, self.calls = fw, rig, []
+        fw.mock('switchBluetooth', lambda off, a1, *_: self.calls.append((rig.ms, off, a1)) or 0)
+        self.set(on=1)
+
+    def set(self, on=1, search=0, init=0, connect=0, direction=0):
+        self.fw.var('g_bluetoothflag', C.c_ubyte).value = on
+        self.fw.var('bt_searchtime', C.c_ubyte).value = search
+        self.fw.var('fw_ctx_bt_initstatus', C.c_int).value = init
+        self.fw.var('fw_ctx_bt_connectstatus', C.c_int).value = connect
+        self.fw.var('fw_ctx_bt_a2dp_direction', C.c_int).value = direction
+
+
+def bt_state(rig, req, card='none', seq=0):
+    rig.state(seq, card)
+    rig.files[STATE] = rig.files[STATE].replace(b'\n', f' bt={req}\n'.encode())
+
+
+def test_a_relaunch_is_stocks_switch_off_then_on(rig, fw):
+    """q2guard's bt=N (docs/internals.md#bluetooth-controller-watchdog): switchBluetooth(1, 0), answered at once,
+    then a second later switchBluetooth(0, 0), which starts the stack again and reconnects as any Bluetooth on."""
+    bt = Bt(fw, rig)
+    bt_state(rig, 0)
+    rig.poll()
+    bt_state(rig, 1)
+    rig.poll()
+    off_at = rig.ms
+    assert bt.calls == [(off_at, 1, 0)] and rig.written[ACK].endswith('bt 1 done\n')
+    rig.poll()  # 500 ms: the radio still off
+    assert len(bt.calls) == 1
+    rig.poll()
+    assert bt.calls == [(off_at, 1, 0), (off_at + 1000, 0, 0)]
+    for _ in range(4):  # the same ask is not made twice
+        rig.poll()
+    assert len(bt.calls) == 2
+    bt_state(rig, 2)
+    rig.poll()
+    assert len(bt.calls) == 3 and rig.written[ACK].endswith('bt 2 done\n')
+
+
+@pytest.mark.parametrize('busy', [dict(search=50), dict(init=1), dict(init=-102), dict(connect=1), dict(direction=1)])
+def test_never_while_bluetooth_is_busy(rig, fw, busy):
+    """A scan, the stack starting (or failed), a link thread connecting or pairing, a link being set up: the ask waits
+    for the next poll, unanswered."""
+    bt = Bt(fw, rig)
+    bt_state(rig, 0)
+    rig.poll()
+    bt.set(**busy)
+    bt_state(rig, 1)
+    for _ in range(6):
+        rig.poll()
+    assert bt.calls == [] and not rig.written.get(ACK, '').endswith('bt 1 done\n')
+    bt.set()
+    rig.poll()
+    assert [c[1:] for c in bt.calls] == [(1, 0)] and rig.written[ACK].endswith('bt 1 done\n')
+
+
+def test_bluetooth_off_is_answered_with_nothing_done(rig, fw):
+    bt = Bt(fw, rig)
+    bt_state(rig, 0)
+    rig.poll()
+    bt.set(on=0)
+    bt_state(rig, 1)
+    rig.poll()
+    rig.poll()
+    rig.poll()
+    assert bt.calls == [] and rig.written[ACK].endswith('bt 1 off\n')
+
+
+def test_an_ask_from_before_demo_started_is_old(rig, fw):
+    """demo started again finds bt=3 in the state file: that ask was answered by the demo before it, or given up."""
+    bt = Bt(fw, rig)
+    bt_state(rig, 3)
+    for _ in range(4):
+        rig.poll()
+    assert bt.calls == []
+    bt_state(rig, 4)
+    rig.poll()
+    assert [c[1:] for c in bt.calls] == [(1, 0)]
+
+
+def test_not_while_powering_off(rig, fw):
+    bt = Bt(fw, rig)
+    bt_state(rig, 0)
+    rig.poll()
+    bt_state(rig, 1, card='off', seq=1)
+    for _ in range(4):
+        rig.poll()
+    assert bt.calls == []
