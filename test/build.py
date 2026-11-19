@@ -370,7 +370,7 @@ def validate_assets(directory):
     at, old, new = ID_PULL_UP
     assert struct.unpack_from('<I', stock, fileoff(stock, at))[0] == old and struct.unpack_from('<I', demo, fileoff(demo, at))[0] == new
     from build import patch_timezones, TIMEZONES, CJK, english_ui
-    from build import ADB_HOOK, ADBD, ADB_GADGET, USB_SCRIPTS, adb_wrapper
+    from build import ADB_HOOK, ADBD, ADB_GADGET, Q2UPDATE, USB_SCRIPTS, adb_wrapper
     zones = bytearray(stock)
     patch_timezones(zones)
     start = fileoff(stock, 0x77efb0)
@@ -569,6 +569,7 @@ def validate_assets(directory):
         assert adbd[36:40] == helper[36:40] and '[Requesting program interpreter: /lib/ld-linux-mipsn8.so.1]' in dynamic
         assert sorted(re.findall(r'\(NEEDED\)\s+Shared library: \[(.+)\]', dynamic)) == ['libc.so.6', 'libpthread.so.0']
         assert read('rootfs.squashfs', ADB_GADGET) == (ROOT/'patch/adb_gadget.sh').read_bytes()
+        assert read('rootfs.squashfs', Q2UPDATE) == (ROOT/'patch/q2update.sh').read_bytes()
         for n in USB_SCRIPTS:
             assert read('rootfs.squashfs', 'usr/bin/' + n) == adb_wrapper(n)
             assert read('rootfs.squashfs', 'usr/bin/' + n.replace('.sh', '_stock.sh')) == read('stock.squashfs', 'usr/bin/' + n)
@@ -583,7 +584,8 @@ def validate_assets(directory):
         assert b'Q2EQR01' not in demo  # q2eq_poll is compiled out
         # No ADB in a release: no adbd, no gadget, stock's USB scripts as they were
         assert 'adbd' not in manifest and not (directory/'adbd').exists()
-        for path in (ADBD, ADB_GADGET, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
+        assert b'q2update.req' not in demo  # q2update_poll is compiled out
+        for path in (ADBD, ADB_GADGET, Q2UPDATE, *('usr/bin/' + n.replace('.sh', '_stock.sh') for n in USB_SCRIPTS)):
             absent = subprocess.run(['unsquashfs', '-cat', str(directory/'rootfs.squashfs'), path],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             assert absent.returncode != 0, f'release rootfs contains {path}'
