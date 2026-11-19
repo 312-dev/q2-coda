@@ -64,6 +64,11 @@ COVERFLOW_SOURCES = ('patch/coverflow*.[ch]', 'patch/home.c', 'patch/page_parall
 MYPY_TOOLS, MYPY_FW = 'mypy-tools', 'mypy-fw'
 MYPY_SUITES = (MYPY_TOOLS, MYPY_FW)
 MYPY_CONFIG = 'pyproject.toml'
+# docs/rebasing/sitenotes.py writes tools/stock_sites.tsv from every patch/ and tools/ file's stock addresses, so a
+# change to any of them (or to the script) can leave the table stale: test/stock_sites.py runs its --check (12 s, no
+# build). One of gate.PLANNED. A release's package step runs the same check, too late to name the branch at fault.
+STOCK_SITES = 'test/stock_sites.py'
+SITENOTES = 'docs/rebasing/sitenotes.py'
 SMOKE = 'smoke'  # tools/ci/smoke.py: optional here (run with --smoke), the post tier's on the trunk
 INTEGRATION = re.compile(r'^(release/|integrate/|main$|master$)')
 # test/unit files that check a rule over every file of a folder: (folder, suffixes or None for any, test).
@@ -213,6 +218,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
         if (cov := cov_target(path, root)):
             p.other.add(gate.COV + cov)
             p.why.append(f'{path}: {cov} under the post tier\'s coverage floor (tools/ci/covcheck.py)')
+        if parts[0] == 'patch' or (parts[0] == 'tools' and parts[1:2] != ('ci',)) or path == SITENOTES:
+            p.other.add(STOCK_SITES)
+            p.why.append(f'{path}: {STOCK_SITES} (sitenotes.py --check)')
         for folder, suffixes, test in SCANNERS:
             if path.startswith(folder) and (suffixes is None or suffix in suffixes):
                 p.add('unit', {test}, f'{path}: {test} checks every file of {folder}')

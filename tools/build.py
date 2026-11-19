@@ -555,14 +555,21 @@ BT_SILENCE, BT_SILENCE_SAMPLES = 0x450400, 192000
 # (address, stock word, patched with: j or jal to a bt_silence.S symbol, or a word):
 # poll's timeout, poll's timeout path (its delay slot takes the moved move a1,zero), the PCM read,
 # and the signal jump table's PAUSE entry: demo pauses hciplayer before some skips, so PAUSE takes
-# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded.
+# Drain's case (a 100 ms poll, then the fill) instead of polling again unbounded; then SBC's bitpool and the write MTU.
 BT_SILENCE_SITES = ((0x41465c, 0x8e460030, 'j', 'timeout'), (0x414684, 0x00002825, 'j', 'fill'),
                     (0x414688, 0x0c10c2b0, None, 0x00002825), (0x414754, 0x0c105053, 'jal', 'read'),
-                    (0x42d09c, 0x0041463c, None, 0x004147a0), (0x406580, 0x0c100e38, 'jal', 'sbc_bp'))
+                    (0x42d09c, 0x0041463c, None, 0x004147a0), (0x406580, 0x0c100e38, 'jal', 'sbc_bp'),
+                    (0x40abf8, 0x0c10c044, 'jal', 'mtu_clamp'))
 # SBC's bitpool (docs/internals.md#bluetooth-link-monitor): the SBC encoder thread's one sbc_encode call
-# (0x406580, the last site above) goes through bt_silence.S's sbc_bp, which takes the bitpool from the byte at
+# (0x406580, a site above) goes through bt_silence.S's sbc_bp, which takes the bitpool from the byte at
 # BT_SBC_POOL, the lesser of it and the thread's own; q2guard writes it (patch/q2bt.h's BT_SBC_POOL, the same).
 BT_SBC_POOL = BT_SILENCE + 0x200
+# The A2DP write MTU (docs/internals.md#bluetooth-link-monitor, Packet size): transport_acquire_bt_a2dp's
+# g_dbus_message_get_unix_fd_list call (0x40abf8, the last site above), whose delay slot stores Acquire's write MTU,
+# goes through bt_silence.S's mtu_clamp, which cuts it to BT_MTU_MAX for every codec but LDAC. The chip's
+# configuration leaves 3 Mbps EDR off, so the best ACL packet is a 2-DH5, 679 bytes of payload; less L2CAP's 4-byte
+# header that is a 675-byte L2CAP packet (Android's 663-byte media MTU plus the 12-byte RTP header).
+BT_MTU_MAX = 679 - 4
 # platform_init's crash watchdog, checkappprocess.sh, forked pgrep "/release/bin/demo" every 2 s and rebooted when it
 # found none: demo gone. S90play runs demo and waits for it (BOOT_HOOK), so it reboots there instead, and the script
 # platform_init still starts ends at once: no process starts every few seconds for the life of the Q2.
@@ -2271,7 +2278,7 @@ def bt_silence():
     with tempfile.TemporaryDirectory() as d:
         d = pathlib.Path(d)
         run('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mno-abicalls', '-fno-pic',
-            f'-DBUDGET={BT_SILENCE_SAMPLES}', '-c', ROOT/'tools/bt_silence.S', '-o', d/'s.o')
+            f'-DBUDGET={BT_SILENCE_SAMPLES}', f'-DMTU_MAX={BT_MTU_MAX}', '-c', ROOT/'tools/bt_silence.S', '-o', d/'s.o')
         run('ld.lld', '-m', 'elf32ltsmip', f'-Ttext={BT_SILENCE:#x}', '-e', 'timeout', d/'s.o', '-o', d/'s.elf')
         run('llvm-objcopy', '-O', 'binary', '-j', '.text', d/'s.elf', d/'s.bin')
         return (d/'s.bin').read_bytes(), symbols(d/'s.elf')
