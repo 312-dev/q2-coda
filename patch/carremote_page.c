@@ -290,19 +290,26 @@ enum { CR_BY_NONE, CR_BY_WIFI, CR_BY_BLE, CR_BY_QR };
  * capitals so that QR's alphanumeric mode packs it into version 6 (Q2 Muse Remote reads it in any case; an empty
  * field is unknown). The endpoint id and relay are q2-iroh's (CR_IROH), the code the one the daemon takes for the
  * next pairing (CR_QR, docs/remote-protocol.md#pairing-by-qr-code). */
-static void cr_qr_text(char *out, unsigned n, const char *addr) {
-    char raw[400], id[72] = "", relay[200] = "";
-    *out = 0;
+/* q2-iroh's endpoint id and home relay from CR_IROH into id[72] and relay[200] ("" each when not known) */
+static void cr_iroh(char *id, char *relay) {
+    char raw[400];
+    *id = *relay = 0;
     state_read(CR_IROH, raw, sizeof raw);
     for (char *l = raw + 1; *l;) {
         char *end = l;
         while (*end && *end != '\n') ++end;
         int more = *end != 0;
         *end = 0;
-        if (!strncmp(l, "id ", 3)) tk_snprintf(id, sizeof id, "%s", l + 3);
-        if (!strncmp(l, "relay ", 6)) tk_snprintf(relay, sizeof relay, "%s", l + 6);
+        if (!strncmp(l, "id ", 3)) tk_snprintf(id, 72, "%s", l + 3);
+        if (!strncmp(l, "relay ", 6)) tk_snprintf(relay, 200, "%s", l + 6);
         l = end + more;
     }
+}
+
+static void cr_qr_text(char *out, unsigned n, const char *addr) {
+    char id[72], relay[200];
+    *out = 0;
+    cr_iroh(id, relay);
     if (strlen(id) != 64 || !cp.code[0]) return;
     tk_snprintf(out, n, "Q2MUSE:1:%s:%s:%s:%s", cp.code, id, addr, relay);
     for (char *c = out; *c; ++c)
@@ -326,8 +333,11 @@ static void cr_qr_code(void) {
 static int cr_howto_mode(char *addr, unsigned n) {
     int wifi = cr_address(addr, n) != 0;
     if (!wifi) *addr = 0;
-    /* q2-iroh reaches the relay over the Wi-Fi, and the QR code carries the address for a phone on the same one */
-    if (wifi && !access(CR_IROH, 0)) return CR_BY_QR;
+    /* q2-iroh running, and reachable: through the relay it has (any network), or at the Wi-Fi address the QR code
+     * carries (a phone on the same Wi-Fi) */
+    char id[72], relay[200];
+    cr_iroh(id, relay);
+    if (strlen(id) == 64 && (wifi || *relay)) return CR_BY_QR;
     if (g_bluetoothflag && !access(CR_BLE, 0)) return CR_BY_BLE; /* the flag: a killed daemon's file says nothing */
     return wifi ? CR_BY_WIFI : CR_BY_NONE;
 }
@@ -359,8 +369,10 @@ static void cr_howto_qr(void *w, void *canvas, const char *addr) {
     ui_text(canvas, "Scan QR Code", 0, TYPE(14), secondary, 0, x, 140 - sy, tw, 2);
     ui_text(canvas, "Works from any", 0, TYPE(14), muted, 0, x, 172 - sy, tw, 2);
     ui_text(canvas, "network", 0, TYPE(14), muted, 0, x, 190 - sy, tw, 2);
-    ui_text(canvas, "Or type the code at", 0, TYPE(13), muted, 0, x, 222 - sy, tw, 2);
-    ui_text(canvas, addr, 0, TYPE(13), muted, 0, x, 239 - sy, tw, 2);
+    if (*addr) { /* the Wi-Fi address tab's way, for a phone on this Wi-Fi with no camera to hand */
+        ui_text(canvas, "Or type the code at", 0, TYPE(13), muted, 0, x, 222 - sy, tw, 2);
+        ui_text(canvas, addr, 0, TYPE(13), muted, 0, x, 239 - sy, tw, 2);
+    }
     ui_text(canvas, "Waiting\xe2\x80\xa6", 0, TYPE(14), secondary, 0, x, foot, tw, 2);
 }
 

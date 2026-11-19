@@ -421,6 +421,31 @@ def test_a_code_the_daemon_spent_is_replaced_and_closing_takes_it_away(fw, ui, m
     assert QR not in q2.files
 
 
+def test_with_a_relay_and_no_wi_fi_address_it_is_still_a_qr_code(fw, ui, mcl, recs):
+    """The emulator's case (no wlan0): reachable through the relay alone, the QR code has no address and the page
+    names none to type at."""
+    encoded = []
+    fw.mock('QRcode_encodeString', lambda text, *_: encoded.append(C.string_at(text).decode()) and 0)
+    q2 = Car(fw, ui, recs)
+    fw.mock('fw_ioctl', lambda *_: -1)
+    q2.files[IROH] = f'id {ENDPOINT}\nrelay https://use1-1.relay.n0.iroh.link./\n'.encode()
+    q2.files['/dev/urandom'] = struct.pack('<I', 1042917)
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
+    texts = howto_texts(fw, ui, ui.top())
+    assert texts[0] == '042 917' and 'Or type the code at' not in texts
+    assert encoded[-1] == f'Q2MUSE:1:042917:{ENDPOINT.upper()}::HTTPS://USE1-1.RELAY.N0.IROH.LINK./'
+
+
+def test_with_neither_the_page_keeps_its_steps(fw, ui, mcl, recs):
+    q2 = Car(fw, ui, recs)
+    fw.mock('fw_ioctl', lambda *_: -1)
+    q2.files[IROH] = f'id {ENDPOINT}\n'.encode()  # not yet online
+    page = open_page(fw, ui)
+    ui.handler(stops(ui, page)[1], O['EVT_CLICK'])()
+    assert howto_texts(fw, ui, ui.top())[1] == 'Open Settings > Wi-Fi'
+
+
 def test_without_randomness_there_is_no_code_and_nothing_to_scan(fw, ui, mcl, recs):
     q2, howto, encoded = open_qr(fw, ui, recs, random=4294967295)  # rejected every time
     assert QR not in q2.files and howto_texts(fw, ui, howto) == [] and encoded == []
