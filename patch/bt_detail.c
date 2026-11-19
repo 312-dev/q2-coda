@@ -1,16 +1,19 @@
 /* A Bluetooth device's page (docs/oled-design.md#bluetooth, docs/internals.md#bluetooth-page):
- * Centre on the connected device's row in Settings > Bluetooth opens it, as Play/Pause held does on
- * any paired one (bt_ui_hold). The status row names the device; under it the path the sound takes,
+ * Centre on a paired device's row in Settings > Bluetooth opens it, connected or not, as Play/Pause
+ * held does (bt_ui_hold). The status row names the device; under it the path the sound takes,
  * "Q2 → WH-1000XM5", and its codec line in 14 px Text Tertiary ("LDAC · 96 kHz · 990 kbps", what is
- * known of it, bt_codec_line); then Battery (when the device reports one), Disconnect (Connect when
- * it is not connected), Rename and Forget This Device.
+ * known of it, bt_codec_line, or "Not Connected"); then Battery (when the device reports one),
+ * Disconnect (Connect, the first row, when it is not connected), Rename and Forget This Device in
+ * Negative red.
  *
  * Disconnect and Connect are stock's own row click on the device (bt_stock_click), so its output
  * switch and its toasts stay stock's. Forget asks on the confirmation card (feedback.c confirm:
  * destructive, Cancel first) and then does what stock's click does after its Unpair? dialog: the
- * pairing removed (handleBluetoothPair), the output back to a jack when it was this device, the
- * list read again; the page closes. Rename sets BlueZ's Alias for the device, which its list
- * shows, through the letter strip. */
+ * pairing removed (handleBluetoothPair: BlueZ's RemoveDevice, which needs no link, so a device out
+ * of range goes too), the output back to a jack when it was this device, the list read again; and
+ * the saved link (BTLINKMAC) cleared when it names the device, so boot and Bluetooth on do not try
+ * it again; the page closes. Rename sets BlueZ's Alias for the device, which its list shows,
+ * through the letter strip. */
 #include "navigation.h"
 
 #define BD_HEAD 64   /* the path's lines above the rows */
@@ -22,6 +25,10 @@
 #define BD_NAME_MAX 30 /* a name, as the Q2's own (bt_name.c BT_NAME_MAX) */
 #define BD_VALUE_W 120 /* Battery's value, right-aligned in this much */
 #define BD_ROWS 4
+/* BTLINKMAC: stock's last connected device, [SYSSET] BTLINKMAC in config.ini, 32 bytes at a fixed
+ * address (readBtLinkMac fills it, 0x4fa1f0); autoLinkBluetooth connects it at boot and Bluetooth on */
+#define BD_LINK_MAC ((char *)0xa4c0d8)
+#define BD_LINK_MAC_N 32
 
 enum { ROW_BATTERY, ROW_LINK, ROW_RENAME, ROW_FORGET };
 
@@ -113,6 +120,8 @@ static void fill(void) {
         void *item = bd.rows[i] == ROW_RENAME
                          ? page_row_detail_into(bd.view, i, caption, 0, bd_click)
                          : page_row_detail(bd.view, i, caption, 0, bd_click);
+        if (bd.rows[i] == ROW_FORGET) /* the row that loses something, as Settings' Reset Settings */
+            text_ink(widget_get_child(item, 0), 0xff000000u | tok(TOK_NEGATIVE), INK_LABEL);
         if (bd.rows[i] == ROW_BATTERY) {
             int right = 375 - geom_val(V_RIGHT_X);
             void *v = label(item, right - BD_VALUE_W, 0, BD_VALUE_W, I(item, W_H),
@@ -146,8 +155,16 @@ const char *bt_detail_title(const char *name) {
     return bd.page && !tk_strcmp(name, "btdevice_page") ? bd.name : (const char *)0;
 }
 
+/* The saved link, cleared when it is mac: in memory, which autoLinkBluetooth reads at Bluetooth on,
+ * and in config.ini, which readBtLinkMac reads at boot. Stock's Unpair leaves it. */
+static void forget_link(const char *mac) {
+    if (strncasecmp(BD_LINK_MAC, mac, BD_LINK_MAC_N) || !*mac) return;
+    memset(BD_LINK_MAC, 0, BD_LINK_MAC_N);
+    toolsWriteConfig("/mnt/data/config.ini", "SYSSET", "BTLINKMAC", "");
+}
+
 /* The forget, once the card's Forget Device is chosen: stock's row click's own steps after its
- * dialog's OK (btmenu_item_on_click, 0x4c44b8 to 0x4c45b4). */
+ * dialog's OK (btmenu_item_on_click, 0x4c44b8 to 0x4c45b4), then the saved link. */
 static void forget(void *ctx, int row, int toggle_on) {
     (void)ctx, (void)toggle_on;
     int dev = bt_dev_find(bd.mac);
@@ -161,6 +178,7 @@ static void forget(void *ctx, int row, int toggle_on) {
             if (mclGetSavePlayStatus() != 1) config_outputchannel((signed char)g_headset_output, 3);
         }
     }
+    forget_link(bd.mac);
     toast("Device Forgotten");
     getSearchResult();
     player_save_start(1);
