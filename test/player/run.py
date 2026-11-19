@@ -880,8 +880,14 @@ def test_alsa_sw_params(player, songs, tmp):
     for k, v in gone.items():
         got, want = lines[k].split()[1:], v.split()
         assert got[:-1] == want[:-1] and (int(got[-1]) > 0 if want[-1] == '+' else got[-1] == want[-1]), lines[k]
+    # Bluetooth's device is defaults.bluealsa.device, which demo rewrites in /mnt/data/asound.conf at each link; alsa-lib
+    # re-reads a hook-loaded file only once its global configuration is freed, so every Bluetooth open frees it first,
+    # as stock's ao_alsa does (hciplayer 0x438ffc). Off Bluetooth the device never changes and nothing is re-read.
+    for way in range(3):
+        want = f'reread way {way} opens 2 fresh {2 if way == 1 else 0}'
+        assert lines[f'reread way {way}'] == want, (lines[f'reread way {way}'], want)
     return ('start 1378, stop and silence at the boundary on ways 0-2; a dry PCM forwarded by deficit + period, not on Bluetooth; '
-            "bluealsa's PCM gone: reopened on Bluetooth, an error elsewhere")
+            "bluealsa's PCM gone: reopened on Bluetooth, an error elsewhere; each Bluetooth open reads asound.conf afresh")
 
 
 def test_usb_formats(player, songs, tmp):

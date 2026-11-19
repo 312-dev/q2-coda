@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: after playing to one headset or car, switching to another (a car after your headphones) no longer says "Not Supported" at every song until the Q2 restarts. The player kept looking for the first device's audio; it now plays to the one connected.
   - Home: a Rockbox or Groovebox copied onto the card, a new card, or a new folder at the card's top now shows on Home straight away, instead of up to five seconds later.
   - Car Remote: the phone's buttons (play, pause, skip, volume and the rest) now act on the Q2 at once, instead of up to half a second later.
   - Bluetooth: while music plays to a headset, the Q2 no longer searches for Wi-Fi networks in the background every few seconds when it isn't connected to one (Wi-Fi and Bluetooth share one radio, and each search took air time from the headset). It still joins a network once the music stops, and the Wi-Fi page searches as before, music playing or not. On the Bluetooth page, a headset that connects by itself while the page is searching now stops the search, as picking a device already did.

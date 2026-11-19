@@ -142,6 +142,12 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     snd_pcm_hw_params_t *p = NULL;
     unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US, periods = PERIODS;
     const char *name = device(outputway, hw);
+    /* plug:bluealsa plays to defaults.bluealsa.device, which demo writes to /mnt/data/asound.conf each time it sets a
+     * headset's link up (SaveBlueAlsa). alsa-lib loads that file through alsa.conf's hook and reads its configuration
+     * again only when alsa.conf itself changes, so a player that has run since one headset would look for that one's
+     * PCM after a switch to another ("PCM not found"). Stock's ao_alsa frees the configuration before it opens
+     * (hciplayer 0x438ffc); so does every Bluetooth open here, the old PCM already closed. */
+    if (outputway == 1) snd_config_update_free_global();
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
     if (r < 0) { fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r)); return -1; }
     if ((r = snd_pcm_hw_params_malloc(&p)) < 0 || (r = snd_pcm_hw_params_any(o->pcm, p)) < 0 ||
