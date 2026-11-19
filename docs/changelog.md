@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: when the Bluetooth chip stops answering (every connect fails and nothing plays until Bluetooth is switched off and on), the Q2 now notices within about ten seconds and restarts Bluetooth itself, as switching it off and on does, then reconnects your last headset. It waits while a connection, a pairing, a scan or a quality change is under way, waits two minutes or more between restarts, and stops trying after three in a row that didn't help. Each restart is noted in the logs.
+  - Bluetooth: every saved device on the Bluetooth page now opens its own page, connected or not, so a device that is off or out of range can be forgotten. A device that isn't connected shows **Connect** first, then **Rename** and **Forget This Device** (now in red); selecting its row no longer connects straight away, Connect does. Forgetting a device also stops the Q2 trying to reconnect to it at start-up.
   - Bluetooth: after playing to one headset or car, switching to another (a car after your headphones) no longer says "Not Supported" at every song until the Q2 restarts. The player kept looking for the first device's audio; it now plays to the one connected.
   - Bluetooth: **Quality** now knows which codecs the connected device has. Choices it lacks are grayed (a car with only SBC and AAC grays LDAC, aptX HD and aptX), and picking one keeps the music going on the best codec the device has instead of trying to switch to one it can't play; the row says so: "BMW 6R81 doesn't support aptX HD: using AAC". Your pick is kept for the next device.
   - Home: a Rockbox or Groovebox copied onto the card, a new card, or a new folder at the card's top now shows on Home straight away, instead of up to five seconds later.
