@@ -332,6 +332,7 @@ void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, uns
 void *kb_host_open(const char *name);
 int kb_open_hint(void *kb, const char *name, const char *value);
 int kb_host_bg(void *w, void *canvas);
+int kb_host_border(void *w);
 extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *, void *),
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),

@@ -937,7 +937,7 @@ static void table_clip_end(void *w, void *canvas) {
 /* Stock paints children first and calls this with the surface's canvas origin restored. */
 int ringnav_paint(void *w, void *canvas) {
     if (st.pull_page && !pull_live()) pull_cancel();
-    int result = stock_paint_trampoline(w, canvas);
+    int result = kb_host_border(w) ? 0 : stock_paint_trampoline(w, canvas); /* keyboard.c */
     table_clip_end(w, canvas);
     night_paint(canvas);
     coverflow_paint(w, canvas);

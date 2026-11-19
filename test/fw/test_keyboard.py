@@ -90,3 +90,19 @@ def test_only_the_keyboard_window_s_ground_is_painted_black(fw, ui):
     assert bg(kb, c.addr) == 1 and [r for r, *_ in c.boxes] == [(0, 0, 375, C.c_int.from_address(kb + O['W_H']).value)]
     other = ui.new('window_create', 0, 0, 0, 375, 320)
     assert bg(other, Canvas(fw).addr) == 0
+
+
+def test_the_keyboard_window_gets_no_border(fw, ui):
+    """The window has no style of its own (tools/build.py drops keyboard.bin), so stock's border paint drew the theme's
+    default border round it: a light outline round the strip's page from the status row's foot down (the user's
+    screenshot, 2026-11-19). ringnav_paint leaves stock's border out for it alone."""
+    from test_nav_painters import Canvas
+    h = Host(fw, ui)
+    kb = h.open()
+    borders = []
+    fw.mock('stock_paint_trampoline', lambda w, c, *_: borders.append(w) or 0)
+    paint = fw.fn('ringnav_paint', C.c_int, C.c_void_p, C.c_void_p)
+    other = ui.new('window_create', 0, 0, 0, 375, 320)
+    paint(kb, Canvas(fw).addr)
+    paint(other, Canvas(fw).addr)
+    assert borders == [other]

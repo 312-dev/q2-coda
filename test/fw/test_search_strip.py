@@ -41,7 +41,7 @@ class Ss(C.Structure):
                 ('erase_timer', C.c_uint), ('erase_gap', C.c_uint), ('prev_down', C.c_ubyte), ('erased', C.c_ubyte),
                 ('peek_timer', C.c_uint), ('under', C.c_void_p), ('label', C.c_void_p),
                 *((k, C.c_short) for k in 'form row_y row_h scroll fx fy fw fh'.split()),
-                ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('covered', C.c_void_p), ('covered_win', C.c_void_p),
+                ('blink_at', C.c_uint), ('blink_timer', C.c_uint), ('lowered', C.c_void_p), ('lowered_y', C.c_long),
                 ('edge', C.c_short * 65), ('nedge', C.c_short), ('fface', C.c_void_p), ('fpx', C.c_int),
                 ('fch', C.c_int), ('grab', C.c_ubyte), ('loupe', C.c_ubyte), ('nudge', C.c_byte), ('grab_x', C.c_short),
                 ('loupe_at', C.c_uint), ('loupe_timer', C.c_uint), ('nudge_timer', C.c_uint), ('ret', C.c_int),
@@ -1010,6 +1010,10 @@ def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0
     Config(fw)
     dialog = ui.new('window_create', wm, 0, 0, 375, 320)
     ui.name[dialog] = window
+    if window in ('kbwifipass_dialog', 'editwifi_dialog'):
+        ui.kind[dialog] = 'dialog'  # stock's own: a dialog, not a page
+    fw.mock('widget_move', lambda w, x, y, *_: struct.pack_into('<2i', ui.blocks[w], 0, C.c_int(x).value,
+                                                                C.c_int(y).value))
     holder = dialog
     if window == 'editwifi_dialog':  # stock's: the edit sits in a row of its own, at the dialog's top
         holder = ui.new('view', dialog, 65, 5, 310, 50)
@@ -1086,23 +1090,34 @@ def test_add_network_s_dialog_is_a_password_only_when_stock_opened_it_for_one(fw
         assert not s.ss.secret and 'Homex' in texts and 'Network Name' in texts and 'Password' not in texts
 
 
-def test_add_network_s_own_text_box_is_hidden_while_the_strip_types_for_it(fw, ui):
-    """editwifi_dialog's edit sits in the status row; the strip's field shows the text, so stock's box is covered, and is
-    shown again when the keyboard goes with the dialog still up (an OK that leaves it open)."""
+def xy(ui, w):
+    return struct.unpack_from('<2i', ui.blocks[w], 0)
+
+
+@pytest.mark.parametrize('window, name', [('kbwifipass_dialog', 'edit_passwd'), ('editwifi_dialog', 'edit')])
+def test_a_wi_fi_box_s_dialog_moves_under_the_strip_so_the_status_row_shows(fw, ui, window, name):
+    """A network's password and Add Network's box are stock dialogs of the whole screen, their box and back arrow in
+    the status row's band, painted over the bar (the user's screenshot, 2026-11-19: stock's "Please enter password"
+    box where the title belongs). The dialog moves down to the strip window's top, all of it under that window, and
+    back when the keyboard goes with the dialog still up (an OK that leaves it open)."""
     fw.mock('window_manager', lambda *_: 1)  # a real one, whose children the C looks through for a live window
-    s = boxed(fw, ui, b'Home', 'edit', 'editwifi_dialog', wm=1)
-    assert s.holder in ui.hidden and s.edit not in ui.hidden
+    s = boxed(fw, ui, b'', name, window, wm=1)
+    top = next(a[2] for _, a in fw.calls('widget_move_resize') if a[0] == s.kb)  # the strip window's (kb_host_open)
+    assert top > 0 and xy(ui, s.dialog) == (0, top)
+    assert s.holder not in ui.hidden and s.edit not in ui.hidden  # its children keep their places, under the strip
     ui.destroy(s.kb)
-    assert s.holder not in ui.hidden
+    assert xy(ui, s.dialog) == (0, 0)
 
 
-def test_a_box_s_row_is_left_alone_when_its_dialog_went_first(fw, ui):
-    """An OK that closes the dialog frees the row before the keyboard goes: nothing is shown through a dead widget."""
+def test_a_box_s_dialog_is_left_alone_when_it_went_first(fw, ui):
+    """An OK that closes the dialog frees it before the keyboard goes: nothing is moved through a dead widget."""
     fw.mock('window_manager', lambda *_: 1)
     s = boxed(fw, ui, b'Home', 'edit', 'editwifi_dialog', wm=1)
+    moves = []
+    fw.mock('widget_move', lambda w, *_: moves.append(w))
     ui.destroy(s.dialog)
     ui.destroy(s.kb)
-    assert not [c for c in fw.calls('widget_set_visible') if c[1][0] == s.holder and c[1][1] & 0xff]
+    assert s.dialog not in moves
 
 
 def test_return_held_on_add_network_s_box_closes_its_dialog_too(fw, ui):
@@ -2024,7 +2039,7 @@ def test_an_edge_swipe_shuts_the_open_strip_and_the_page_stays(fw, ui, song, pag
     s = Strip(fw, ui, library(song)) if page == 'search' else boxed(fw, ui, b'secret')
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     top = ui.top()
-    ui.new('window_create', 0, 0, 0, 375, 320) if page == 'search' else None  # a window under to go back to
+    ui.new('window_create', 0, 0, 0, 375, 320)  # a window under to go back to (a box's: the page its dialog is over)
     for stack in (ui.windows, ui.kids.get(ui.parent(top), [])):  # the page back on top
         if top in stack:
             stack.remove(top)

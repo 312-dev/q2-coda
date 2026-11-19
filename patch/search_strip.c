@@ -269,8 +269,8 @@ static struct {
     short scroll;         /* the text's scroll in its field, px (ss_field) */
     short fx, fy, fw, fh; /* the field as last painted, on the sheet, for the blink to repaint */
     unsigned blink_at, blink_timer; /* the cursor shown from (its blink's start); the timer */
-    void *covered;     /* stock's own text box's row, hidden under the strip (Add Network's) */
-    void *covered_win; /* ... and its dialog */
+    void *lowered;  /* the box's dialog, moved down under the strip's window (search_strip_box) */
+    long lowered_y; /* ... its own y, given back as the strip closes */
     /* The text as last painted (ss_field), for a finger in it and the loupe: each character
      * boundary's x on the sheet, the characters shown, the face and its size, the cursor's height
      */
@@ -1772,8 +1772,8 @@ static int ss_closed(void *ctx, void *event) {
     stop_timer(&ss.blink_timer);
     stop_timer(&ss.loupe_timer);
     stop_timer(&ss.nudge_timer);
-    if (ss.covered && ss_holds(window_manager(), ss.covered_win))
-        widget_set_visible(ss.covered, 1, 0); /* a dialog an OK left open shows its box again */
+    if (ss.lowered && ss_holds(window_manager(), ss.lowered)) /* a dialog an OK left open */
+        widget_move(ss.lowered, I(ss.lowered, W_X), (int)ss.lowered_y);
     if (ss.under) bitmap_destroy(ss.under);
     if (ss.songs) deque_destroy(ss.songs);
     free(ss.match);
@@ -1928,11 +1928,17 @@ int search_strip_box(void *kb, void *edit, const char *title) {
         label = *(tips = widget_get_prop_str(edit, "tips", "")) ? tips : "Search";
     tk_snprintf(ss_box_label, sizeof ss_box_label, "%s", label);
     ss.label = ss_box_label;
-    /* Add Network's dialog is its box alone, in a row at the status row's height (stock lifts it
-     * above its keyboard): the strip's field shows the text, so the row stays out of sight. */
-    void *win = window_of(edit), *row = P(edit, W_PARENT);
-    if (!tk_strcmp(widget_get_prop_str(win, "name", ""), "editwifi_dialog") && row && row != win)
-        ss.covered = row, ss.covered_win = win, widget_set_visible(row, 0, 0);
+    /* A box on a dialog of its own (a network's password, kbwifipass_dialog; Add Network's,
+     * editwifi_dialog) has it in a row at the status row's height, stock's back arrow beside it,
+     * on a dialog of the whole screen: the window manager paints dialogs after the status row, so
+     * that band covered the bar's title. The dialog moves down to the strip window's top, all of
+     * it under that window, so the bar shows over the page, titled as above. widget_move: its
+     * children keep their places. */
+    void *win = window_of(edit);
+    if (win && !tk_strcmp(widget_get_type(win), "dialog") && I(win, W_Y) < top) {
+        ss.lowered = win, ss.lowered_y = I(win, W_Y);
+        widget_move(win, I(win, W_X), top);
+    }
     ss_place(win, form, edit);
     bar_title_sync(kb);
     widget_invalidate_force(kb, (void *)0);

@@ -51,6 +51,11 @@ void *kb_host_open(const char *name) {
  * on it, not sliding up from the screen's foot. */
 int kb_open_hint(void *kb, const char *name, const char *value) { return 0; }
 
+/* ringnav_paint, in place of stock's border paint: 1 when w is the keyboard window, which gets none.
+ * With no style of its own (tools/build.py drops keyboard.bin) stock drew the theme's default
+ * border round it: a light line round the strip's page from the status row's foot down. */
+int kb_host_border(void *w) { return w && w == kw.kb; }
+
 /* ringnav_paint_bg, before stock's: the keyboard window's ground, black, under the strip's sheet (a
  * bare keyboard has no style of its own to fill it). 1 when w is that window. */
 int kb_host_bg(void *w, void *canvas) {
