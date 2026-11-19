@@ -276,7 +276,7 @@ Q2 Muse shipped hciplayer patched until 2026-11-18, when `q2player` replaced it 
 | `FLAC_GATE`, `SEEK_NOSYNC`, `SEEK_WORDS`, `FLAC_META_EOF`, `flac_*.c` | A FLAC seek near the end plays to the end (stock ends the song: captured, a seek to 15 s of 20 ends it half a second later); a truncated FLAC does not hang the open | [A FLAC seek near the end](internals.md#a-flac-seek-near-the-end) |
 | `PAUSE_WAIT`, `CMD_DONE`, `IDLE_WAIT` | Paused and stopped, the player sleeps on a futex, not a 10-20 ms poll | [Battery](internals.md#battery) |
 
-Outside the player: `patch_bluealsa` and `tools/bt_silence.S` change bluealsa (AAC, silence when the player writes nothing), and stay as they are.
+Outside the player: `patch_bluealsa` and `tools/bt_silence.S` change bluealsa (AAC, silence when the player writes nothing, SBC's bitpool, the write MTU), and stay as they are.
 
 ## Scan
 

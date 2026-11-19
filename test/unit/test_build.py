@@ -832,7 +832,7 @@ def test_bt_silence_commands(monkeypatch):
     cc, ld, objcopy = commands
     obj, elf, binary = cc[-1], ld[-1], objcopy[-1]
     assert (obj.name, elf.name, binary.name) == ('s.o', 's.elf', 's.bin') and obj.parent == elf.parent == binary.parent
-    assert cc == ('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mno-abicalls', '-fno-pic', '-DBUDGET=192000', '-c',
+    assert cc == ('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mno-abicalls', '-fno-pic', '-DBUDGET=192000', '-DMTU_MAX=675', '-c',
                   build.ROOT/'tools/bt_silence.S', '-o', obj)
     assert ld == ('ld.lld', '-m', 'elf32ltsmip', '-Ttext=0x450400', '-e', 'timeout', obj, '-o', elf)
     assert objcopy == ('llvm-objcopy', '-O', 'binary', '-j', '.text', elf, binary)
@@ -842,7 +842,7 @@ def test_bt_silence_commands(monkeypatch):
 def test_bt_silence():
     code, symbols = build.bt_silence()
     assert len(code) % 4 == 0 and len(code) > 0
-    for name in ('timeout', 'fill', 'read', 'sbc_bp'):
+    for name in ('timeout', 'fill', 'read', 'sbc_bp', 'mtu_clamp'):
         assert build.BT_SILENCE <= symbols[name] < build.BT_SILENCE + len(code)
     assert symbols['timeout'] == build.BT_SILENCE  # its entry
     # SBC's three bytes where q2guard writes them (patch/q2bt.h BT_SBC_POOL), past the code
@@ -862,7 +862,7 @@ def bluealsa():
 @pytest.fixture
 def silence(monkeypatch):
     symbols = {'timeout': build.BT_SILENCE, 'fill': build.BT_SILENCE + 8, 'read': build.BT_SILENCE + 16,
-               'sbc_bp': build.BT_SILENCE + 20, 'sbc_pool': build.BT_SBC_POOL}
+               'sbc_bp': build.BT_SILENCE + 20, 'mtu_clamp': build.BT_SILENCE + 24, 'sbc_pool': build.BT_SBC_POOL}
     monkeypatch.setattr(build, 'bt_silence', lambda: (b'\x11' * 24, symbols))
     return symbols
 
@@ -908,7 +908,8 @@ def test_patch_bluealsa_hooks(silence):
     assert struct.unpack_from('<2I', out, build.fileoff(raw, build.BT_DROP_HANDLER)) == (build.j(reset), 0)
     expected = {0x41465c: build.j(silence['timeout']), 0x414684: build.j(silence['fill']), 0x414688: 0x00002825,
                 0x414754: build.jal(silence['read']), 0x42d09c: 0x004147a0,
-                0x406580: build.jal(silence['sbc_bp'])}  # the SBC encoder's one sbc_encode
+                0x406580: build.jal(silence['sbc_bp']),  # the SBC encoder's one sbc_encode
+                0x40abf8: build.jal(silence['mtu_clamp'])}  # where the A2DP acquire stores the write MTU
     for address, new in expected.items():
         assert struct.unpack_from('<I', out, build.fileoff(raw, address))[0] == new
 
@@ -920,7 +921,7 @@ def test_patch_bluealsa_refuses_a_moved_caller(silence):
         build.patch_bluealsa(bytes(raw))
 
 
-@pytest.mark.parametrize('site', range(6))
+@pytest.mark.parametrize('site', range(7))
 def test_patch_bluealsa_refuses_a_moved_site(silence, site):
     raw = bytearray(bluealsa())
     struct.pack_into('<I', raw, build.fileoff(raw, build.BT_SILENCE_SITES[site][0]), 0xdead)
