@@ -77,7 +77,8 @@ static int slide_index(void *w) {
 static int home_done(void *w, void *event) {
     if (coverflow_slide(w)) { /* stock's end wraps the index by the children: Cover Flow's pool */
         int n = slide_count(w), stride = slide_menu_item_width(w) + I(w, SLIDE_SPACER);
-        int off = I(w, SLIDE_OFFSET), q = stride > 0 ? (off < 0 ? off - stride / 2 : off + stride / 2) / stride : 0;
+        int off = I(w, SLIDE_OFFSET),
+            q = stride > 0 ? (off < 0 ? off - stride / 2 : off + stride / 2) / stride : 0;
         int id = n ? (I(w, SLIDE_INDEX) - q) % n : 0;
         I(w, SLIDE_OFFSET) = 0;
         P(w, SLIDE_ANIMATOR) = (void *)0;

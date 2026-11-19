@@ -7019,7 +7019,7 @@ static void pool_library(void) {
     assert(*index == 0 && !strcmp(album_caption(covers_view), nm[0]));
     carousel_glide(s, CF_STRIDE, 0, 0), changed_fn(0, 0);
     assert(*index == BIG - 1);
-    /* Centre on an album past the old 512 rows navigation read: its tracks. */
+    /* Centre on an album far into the library: its tracks. */
     click_album(s, 4321);
     run();
     assert(!strcmp(title(), nm[4321]));

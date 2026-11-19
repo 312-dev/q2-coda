@@ -606,16 +606,17 @@ int card_space(const char *dir) { return card_room(dir, MIN_FREE_MB, 0); }
  * any album whose art file is missing (art_url). The first album is found from where it was last
  * (centre_of), so a reopen passes over the albums only when the queue's album moved. */
 static struct {
-    void *clean;                  /* cf.stock when every album's art was found, else 0 */
-    unsigned clean_gen, clean_n;  /* and its library_gen and size then */
-    void *albums;                 /* the list now_at and saved_at index */
-    int now_at, saved_at;         /* the queue's album and the saved one there, + 1; 0 unknown */
-    unsigned long thread;         /* verify's */
-    int running;                  /* it was started and not joined yet */
-    volatile int found, halt;     /* an album without art seen; the UI thread wants it to end */
+    void *clean;                 /* cf.stock when every album's art was found, else 0 */
+    unsigned clean_gen, clean_n; /* and its library_gen and size then */
+    void *albums;                /* the list now_at and saved_at index */
+    int now_at, saved_at;        /* the queue's album and the saved one there, + 1; 0 unknown */
+    unsigned long thread;        /* verify's */
+    int running;                 /* it was started and not joined yet */
+    volatile int found, halt;    /* an album without art seen; the UI thread wants it to end */
 } aw __attribute__((section(".scratch")));
 static void art_cleaned(void) {
-    aw.clean = cf.stock, aw.clean_gen = library_gen, aw.clean_n = cf.stock ? deque_size(cf.stock) : 0;
+    aw.clean = cf.stock, aw.clean_gen = library_gen,
+    aw.clean_n = cf.stock ? deque_size(cf.stock) : 0;
 }
 static int art_clean(void) {
     return aw.clean && aw.clean == cf.stock && aw.clean_gen == library_gen &&
@@ -661,10 +662,12 @@ static int centre_of(void *now, unsigned count) {
             if (!album_cmp(deque_at(cf.albums, i), now)) return aw.now_at = (int)i + 1, (int)i;
     }
     int k = aw.saved_at - 1;
-    if (k >= 0 && (unsigned)k < count && album_key(deque_at(cf.albums, (unsigned)k)) == cf.saved_album)
+    if (k >= 0 && (unsigned)k < count &&
+        album_key(deque_at(cf.albums, (unsigned)k)) == cf.saved_album)
         return k;
     for (unsigned i = count; i-- > 0;) /* the pass's last match */
-        if (album_key(deque_at(cf.albums, i)) == cf.saved_album) return aw.saved_at = (int)i + 1, (int)i;
+        if (album_key(deque_at(cf.albums, i)) == cf.saved_album)
+            return aw.saved_at = (int)i + 1, (int)i;
     return 0;
 }
 /* changed(): album c is the one saved now, at c in cf.albums. */
@@ -683,7 +686,8 @@ static void art_found_drop(void) {
     free(aj.jobs);
     memset(&aj, 0, sizeof aj);
 }
-/* cf.albums' jobs into aj, as load_albums' own pass makes them. Files and the albums' records only. */
+/* cf.albums' jobs into aj, as load_albums' own pass makes them. Files and the albums' records only.
+ */
 static void art_find(void) {
     char path[512];
     unsigned count = deque_size(cf.albums);
@@ -2238,7 +2242,8 @@ void fx_unletter(int c) {
  * order and the rules in docs/internals.md#coverflow-thumb. A cover not loaded shows the
  * placeholder until a later frame (fx.todo) loads it. At rest every cover on the screen is decoded
  * at once, but for the covers' first frames (fx_fresh): there the centre alone, the rest within
- * the budget, so an open shows the covers a frame's decodes sooner (seven, 40 ms on the emulator). */
+ * the budget, so an open shows the covers a frame's decodes sooner (seven, 40 ms on the emulator).
+ */
 static int fx_fresh __attribute__((section(".scratch")));
 static void fx_window(int c, int n, const unsigned **ring) {
     int want[FX_POOL], r = fx_reach(), k = 0, at = 0, sh = 0, to = 0;
@@ -2361,10 +2366,9 @@ int coverflow_slide(void *w) { return w && w == cf.slide; }
  * depth holds only CF_POOL children and SLIDE_INDEX is the album's, of cf.count (the albums and
  * cards); the flat fallback and Home's hold one child per index. Stock reads its children through
  * slide_menu_fix_index (the index modulo the children) and never wraps the index itself, but for
- * its scroll end (slide_menu_on_scroll_done), which Cover Flow's glides end in their own (nav/home_carousel.c home_done). */
-int slide_count(void *w) {
-    return w && w == cf.slide ? cf.count : (int)widget_count_children(w);
-}
+ * its scroll end (slide_menu_on_scroll_done), which Cover Flow's glides end in their own
+ * (nav/home_carousel.c home_done). */
+int slide_count(void *w) { return w && w == cf.slide ? cf.count : (int)widget_count_children(w); }
 /* The child that stands for index i: the pool's slot i modulo its size. */
 void *slide_child(void *w, int i) {
     int k = (int)widget_count_children(w);
@@ -2561,8 +2565,7 @@ static int round_stride(int off, int stride) {
 static int bound(int off, int stride, int rubber) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
-    int i = I(s, SLIDE_INDEX), hi = i * stride,
-        lo = (i + 1 - slide_count(s)) * stride;
+    int i = I(s, SLIDE_INDEX), hi = i * stride, lo = (i + 1 - slide_count(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || !rubber) return edge;
     a = a * 11 * d / (a * 11 + 20 * d);
@@ -2574,8 +2577,7 @@ static int bound(int off, int stride, int rubber) {
 static int unbound(int off, int stride) {
     void *s = cf.slide;
     if (!coverflow_bounded(s)) return off;
-    int i = I(s, SLIDE_INDEX), hi = i * stride,
-        lo = (i + 1 - slide_count(s)) * stride;
+    int i = I(s, SLIDE_INDEX), hi = i * stride, lo = (i + 1 - slide_count(s)) * stride;
     int edge = off > hi ? hi : off < lo ? lo : off, x = off - edge, a = ABS(x), d = 2 * stride / 5;
     if (!x || a >= d) return off;
     a = 20 * d * a / (11 * (d - a));
@@ -2725,9 +2727,8 @@ static const char *songs_text(char *buf, unsigned k) {
 /* Whether album c can't play now (catalogue.c: a server album offline); a card's or a playlist's
  * always can. */
 static int album_offline(unsigned c) {
-    void *r = c + CARDS < (unsigned)cf.count && cf.scoped != PLAYLISTS
-                  ? deque_at(cf.albums, c)
-                  : (void *)0;
+    void *r = c + CARDS < (unsigned)cf.count && cf.scoped != PLAYLISTS ? deque_at(cf.albums, c)
+                                                                       : (void *)0;
     return r && catalogue_album_unavailable(r);
 }
 /* The captions of an album that can't play now are greyed, as a Library row is
@@ -3074,8 +3075,10 @@ static void load_albums(unsigned t0) {
         cf.jobs = aj.jobs, cf.total = aj.total; /* the build's now: stop() frees them */
         aj.jobs = 0, aj.total = 0;
         art_found_drop();
-        if (cf.total) cf_cold(t0);
-        else art_cleaned(); /* every album's art is there */
+        if (cf.total)
+            cf_cold(t0);
+        else
+            art_cleaned(); /* every album's art is there */
         cf_trace(t0, "found jobs=", cf.total, count);
         art_build();
         return;
@@ -3479,7 +3482,7 @@ static void *open_page(void) {
  * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
 #define OPEN_SORT 3 /* the step after query_step's last: sort_albums */
-#define OPEN_ART 4  /* then, unless the albums' art is known (art_clean), the look for it (art_find) */
+#define OPEN_ART 4  /* then the look for the albums' art (art_find), unless it is known */
 #define OPEN_DONE 5
 #define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
 extern int spinner_turn(void);         /* list_marks.c */
