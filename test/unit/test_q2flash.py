@@ -116,6 +116,8 @@ class Q2:
     def sh(self, command, timeout=60):
         self.log.append(('exec-out', command))
         if 'q2update' in command:
+            # a refusal exits 1: `q2update op || echo missing` would read it as no q2update (seen in the emulator)
+            assert '||' not in command
             if not self.q2update:
                 return 'q2update-missing\n'
             op = command.split('q2update ')[-1].split()[0]

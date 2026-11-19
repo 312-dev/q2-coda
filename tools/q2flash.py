@@ -61,7 +61,10 @@ def ours(path):
             members = t.getmembers()
             if not members or members[0].name != 'firmware_v20.info':
                 raise Refused('not a Q2 update: firmware_v20.info is not its first member')
-            info = t.extractfile(members[0]).read().decode(errors='replace').splitlines()
+            head = t.extractfile(members[0])
+            if head is None:
+                raise Refused('not a Q2 update: firmware_v20.info is not a file')
+            info = head.read().decode(errors='replace').splitlines()
             if len(info) < 4 or info[0].strip() != 'Shanling Q2':
                 raise Refused('not a Q2 update: its firmware_v20.info is not Shanling Q2\'s')
             tag = info[1].strip()
@@ -73,6 +76,8 @@ def ours(path):
                     raise Refused(f'damaged: no {name}')
                 md5 = hashlib.md5()
                 f = t.extractfile(member)
+                if f is None:
+                    raise Refused(f'damaged: {name} is not a file')
                 for chunk in iter(lambda: f.read(1 << 20), b''):
                     md5.update(chunk)
                 if line[:32] != md5.hexdigest():
@@ -123,7 +128,9 @@ class Adb:
 
 def q2update(adb, op, timeout=300):
     """q2update's answer as its words (NONCE WORD INSTALLED UPDATE), or None when the Q2 has no q2update."""
-    out = adb.sh(f'command -v q2update >/dev/null && q2update {op} 2>&1 || echo q2update-missing', timeout=timeout)
+    # if, not && ... ||: a refusal is q2update's exit status 1, which must not read as no q2update
+    out = adb.sh(f'if command -v q2update >/dev/null; then q2update {op} 2>&1; else echo q2update-missing; fi',
+                 timeout=timeout)
     if 'q2update-missing' in out:
         return None
     return (out.strip().splitlines() or [''])[-1].split()
@@ -166,10 +173,10 @@ def flash(update, adb, dry_run=False, minimum=MIN_BATTERY, wait=True):
         raise Refused(f'battery {level}% and not charging: needs {minimum}% or a charger')
     if f' {CARD} ' not in adb.sh('cat /proc/mounts'):
         raise Refused('the card is not mounted on the Q2 (lent to a computer? press Return on USB Connected)')
-    df = adb.sh(f'df -k {CARD} 2>/dev/null').split()
+    df = (adb.sh(f'df -k {CARD} 2>/dev/null').strip().splitlines() or [''])[-1].split()
     old = adb.sh(f'[ -f {TARGET} ] && wc -c < {TARGET}').strip()
     try:
-        free = int(df[df.index(CARD) - 2]) << 10  # Filesystem 1K-blocks Used Available Use% Mounted-on
+        free = int(df[-3]) << 10  # the last line's Available Use% Mounted-on (busybox puts a long device on its own line)
     except (ValueError, IndexError):
         raise Refused(f'cannot read the card\'s free space: {" ".join(df)!r}') from None
     if free + (int(old) if old.isdigit() else 0) - found['bytes'] < ROOM:
@@ -228,9 +235,10 @@ def main(argv=None):
     ap.add_argument('-s', '--serial', help='the Q2\'s adb serial, with more than one device')
     ap.add_argument('--min-battery', type=int, default=MIN_BATTERY, help='least charge without a charger (%(default)s)')
     ap.add_argument('--no-wait', action='store_true', help='return once the install has started')
+    ap.add_argument('--adb', default='adb', help='the adb program (%(default)s)')
     args = ap.parse_args(argv)
     try:
-        return flash(args.update, Adb(args.serial), args.dry_run, args.min_battery, not args.no_wait)
+        return flash(args.update, Adb(args.serial, args.adb), args.dry_run, args.min_battery, not args.no_wait)
     except Refused as e:
         print(f'q2flash: refused: {e}', file=sys.stderr)
         return 1

@@ -91,6 +91,43 @@ What it has no command for, and why:
 
 A request waits for demo's next look, every 500 ms, and is refused while a keyboard is up on the EQ page (a Frequency, Q or name edit). One request is taken at a time: two `q2eq` commands run at once can lose one, which then says demo did not answer.
 
+## Installing an update over adb
+
+`tools/q2flash.py` (also `q2 flash`) installs a build on a Q2 over the cable with no one at its screen. It copies `update.tar` to the card, checks the copy, and asks the Q2 to run its own **Settings > General > Software Update** path on it, so the Q2 checks the file again, shows Restarting to Install with its bar, and stock's updater flashes it as from the card. Nothing on the computer touches the flash itself.
+
+```sh
+python3 tools/q2flash.py /tmp/q2-dev --dry-run   # everything but the install: push, check the copy, the Q2's own check
+python3 tools/q2flash.py /tmp/q2-dev             # then install: the Q2 restarts, the recovery flashes, it comes back
+python3 tools/q2flash.py update.tar -s Q2CODA    # a release's update.tar (its update.tar.sig beside it); one Q2 of several
+```
+
+In order, it:
+
+1. Refuses a file that is not one of ours, before adb is used: `firmware_v20.info` first in the tar, `Shanling Q2`, a version of ours (a release's `V1820`, a `--dev` build's `V0JZi`; stock's `V1.36` is refused), both images' MD5s right, and either a `manifest.json` beside it whose `update_sha256` and `version` are this file's (a build directory) or an `update.tar.sig` the release key signed ([releasing](releasing.md#signing-a-release)). This guards against flashing the wrong file, not against someone set on it: a manifest is easily written.
+2. Asks the Q2 its build (`q2update version`) and refuses one that already runs this tag.
+3. Refuses a battery under 30% unless it is charging (`cw2015_capacity`, and `Charging` or `Full` in `power_supply/battery/status`; `--min-battery` changes the 30). Stock's own check, under 16% with no cable, still holds on the Q2.
+4. Refuses a card that is not mounted on the Q2 (lent to the computer) or has no room for the file and the 100 MB stock's updater unpacks beside it.
+5. Pushes to `/mnt/mmc/update.tar.part`, compares `sha256sum` on the Q2 with the local file's (a copy that differs is removed), and only then renames it over `/mnt/mmc/update.tar`, so a cut push never leaves a broken `update.tar`.
+6. Runs `q2update check` (`--dry-run`: the Q2's check on screen, then "Update checked: ready to install"; nothing installed) or `q2update install` (the same, then Restarting to Install), then waits for the Q2 to leave adb, come back (up to 15 minutes) and answer `q2update version` with the new tag. `--no-wait` returns once the install has started.
+
+Exit status 0 is installed (or, dry run, would install); 1 is refused or failed, with the reason; 3 is a Q2 whose build has no `q2update` (one from before it): the file is on the card and checked, and **Software Update** has to be pressed on the Q2 that once.
+
+### q2update
+
+`q2update` (`patch/q2update.sh`, a `--dev` build's `/usr/bin/q2update`) is the Q2's side, and works by hand too:
+
+```sh
+adb exec-out q2update version    # this build's tag, nothing opened
+adb exec-out q2update check      # the card's update.tar checked as Software Update checks it; nothing installed
+adb exec-out q2update install    # the same, then stock's updater, with no Install Update? card to answer
+```
+
+It prints demo's answer, `NONCE WORD INSTALLED UPDATE`: WORD is `version`, `ok` (the check passed), `installing`, or why not: `busy` (Software Update or a confirmation card is already up, such as the guardian's at boot), `low`, `nocard`, `nofile`, `full`, `bad` (damaged, another device's), `latest` (this build's own tag), `cancelled` (Return pressed on the page), `failed` (stock's updater refused after all), `unknown`. Its exit status is 0, 1 for those, 2 for no answer, but `adb shell` and `exec-out` drop it: read the word.
+
+It writes `NONCE OP` to `/tmp/q2update.req` through a temporary name, mode 0600, as `q2guard` writes its state file, and waits for `/tmp/q2update.ack`. demo's `q2update_poll` (`patch/sw_update.c`, compiled into `--dev` builds alone, every 500 ms from `headset_eq_poll` beside `q2eq_poll`) takes only a regular file owned by root that no one else can read or write, removes it, answers `taken`, and runs `ringnav_fwupdate_tf`, the SD Card Update path the download ends in ([internals: SD Card Update](internals.md#sd-card-update)): the same page, stock's checks, the tar's check on a thread. Where the user would be asked Install Update?, `install` closes the page and runs stock's `checkfw_dialog` as Install and Restart does (`sw_answer`), and `check` closes it with the toast. Any other answer leaves its page on screen, as for a press. Each answer is written whole (`.tmp`, then renamed). `q2update` gives up after 5 s with no `taken` (demo is not running) or 180 s with no answer (`Q2UPDATE_WAIT`), and removes its request.
+
+`test/fw/test_q2update.py` runs demo's side in a `--dev` build of the payload's C, `test/q2update.py` the helper under the host's `sh` against a fake demo, and `test/unit/test_q2flash.py` the host tool against a fake adb and Q2. In the emulator (2026-11-19) `q2update` reached demo through the sandbox's namespaces, `q2flash.py --dry-run` ran whole and the toast showed, and `install` reached stock's updater, which stopped at its `tar` (the emulator runs demo in `/release/bin`, not `/`) and answered `failed` with Update Can't Be Used on screen; the flash itself is only tested on a Q2.
+
 ## How it works
 
 ### adbd

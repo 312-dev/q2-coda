@@ -29,8 +29,9 @@
  * unpacking's progress; should its own check fail after all, the dialog's answer opens the page it
  * means.
  *
- * --dev builds also take q2update's requests (q2update_poll, docs/adb.md#installing-an-update-over-adb):
- * the card's path started from a computer over adb, with no Install Update? card. */
+ * --dev builds also take q2update's requests (q2update_poll,
+ * docs/adb.md#installing-an-update-over-adb): the card's path started from a computer over adb,
+ * with no Install Update? card. */
 #include "navigation.h"
 
 #define SW_CARD "/mnt/mmc"
@@ -734,17 +735,17 @@ const char *sw_update_title(const char *name) {
 }
 
 #if Q2POD_DEV
-/* q2update (patch/q2update.sh, docs/adb.md#installing-an-update-over-adb): a computer asks, over adb,
- * for the card's update.tar to be checked (check, the dry run) or installed (install), or for this
- * build's tag (version). The helper writes "NONCE OP" to Q2UPDATE_REQUEST through a temporary name,
- * root's alone (mode 0600), as q2guard writes its state file; q2update_poll (headset.c, every 500 ms
- * with q2eq_poll) takes it on the UI thread and runs this file's own path, ringnav_fwupdate_tf's: the
- * same page, stock's checks, the tar's check and stock's checkfw_dialog, only with no Install Update?
- * card, as no one is at the screen. Each step is answered in Q2UPDATE_ACK, written whole (.tmp, then
- * renamed): "NONCE WORD INSTALLED UPDATE", WORD taken (the check started), then one of version, ok
- * (check passed, nothing installed), installing (stock's dialog runs next), busy, unknown, low,
- * nocard, nofile, full, bad, latest, cancelled, or failed (stock's dialog refused after all);
- * INSTALLED is this build's tag, UPDATE the file's or -. */
+/* q2update (patch/q2update.sh, docs/adb.md#installing-an-update-over-adb): a computer asks, over
+ * adb, for the card's update.tar to be checked (check, the dry run) or installed (install), or for
+ * this build's tag (version). The helper writes "NONCE OP" to Q2UPDATE_REQUEST through a temporary
+ * name, root's alone (mode 0600), as q2guard writes its state file; q2update_poll (headset.c, every
+ * 500 ms with q2eq_poll) takes it on the UI thread and runs this file's own path,
+ * ringnav_fwupdate_tf's: the same page, stock's checks, the tar's check and stock's checkfw_dialog,
+ * only with no Install Update? card, as no one is at the screen. Each step is answered in
+ * Q2UPDATE_ACK, written whole (.tmp, then renamed): "NONCE WORD INSTALLED UPDATE", WORD taken (the
+ * check started), then one of version, ok (check passed, nothing installed), installing (stock's
+ * dialog runs next), busy, unknown, low, nocard, nofile, full, bad, latest, cancelled, or failed
+ * (stock's dialog refused after all); INSTALLED is this build's tag, UPDATE the file's or -. */
 #ifndef Q2UPDATE_ROOT
 #define Q2UPDATE_ROOT ""
 #endif
@@ -768,14 +769,14 @@ static void sw_remote_ack(unsigned nonce, const char *word) {
 }
 /* The page's answer for the request it runs, as its word. */
 static void sw_remote_end(int state) {
-    static const char *const words[] = { "taken", "ok",  "latest", "nofile", "nocard",
+    static const char *const words[] = { "taken", "ok",  "latest", "nofile",   "nocard",
                                          "low",   "bad", "full",   "cancelled" };
     if (!swr.nonce) return;
     sw_remote_ack(swr.nonce, state >= SW_CHECKING && state <= SW_CANCELLED ? words[state] : "bad");
     swr.nonce = 0, swr.mode = SWR_NONE;
 }
-/* The tar is good: install goes on as Install and Restart does, check stops here; 0 with no request,
- * so the card asks as ever. */
+/* The tar is good: install goes on as Install and Restart does, check stops here; 0 with no
+ * request, so the card asks as ever. */
 static int sw_remote_ok(void) {
     unsigned nonce = swr.nonce;
     int mode = swr.mode;
