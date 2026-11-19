@@ -447,6 +447,10 @@ void draw_centred(void *c, const unsigned *s, unsigned n, const void *r, unsigne
     memcpy(centred_box, r, sizeof centred_box), centred_px = px;
 }
 int ipod_light(void) { return light; }
+unsigned tok(int t) { /* ui_kit.c's: the token in the mode shown */
+    static const unsigned tokens[][2] = UI_TOKENS;
+    return tokens[t][light ? 1 : 0];
+}
 int ipod_home_rockbox(void) { return 0; }
 const char *ipod_home_shortcut(void) { return "Rockbox"; }
 int home_shortcut_open(void *x, void *e) { return 0; }
@@ -1668,6 +1672,8 @@ static void depth(void) {
         int *g = (int *)l->raw;
         const cf_style_t *c = &theme()->cf; /* the album's caption at text_y, the artist's artist_y under it */
         assert(g[0] == CF_EDGE && g[2] == 375 - 2 * CF_EDGE && g[1] == c->text_y + labels * c->artist_y && g[1] >= CF_TOP + 160);
+        /* the artist in the design's Artist role, Text Secondary: never stock's #AAAAAA, which the theme paints Tertiary */
+        if (labels == 1) assert((unsigned)l->fg == (0xff000000u | RGB_SECONDARY));
         ++labels;
     }
     assert(labels == 2);

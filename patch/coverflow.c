@@ -2685,14 +2685,16 @@ static void covers(void) {
             widget_set_prop_int(img, "clickable", 1);
             widget_on(img, EVT_CLICK, pick, (void *)(long)i);
         }
-        /* Album over artist under the frame, white and larger, then grey, clear of the rounded
-         * glass (docs/ipod.md#coverflow). */
+        /* Album over artist under the frame, white and larger, then Text Secondary (the Artist
+         * role, docs/oled-design.md#color), clear of the rounded glass (docs/ipod.md#coverflow).
+         * Not stock's #AAAAAA: ringnav_style_color paints that as the quieter Text Tertiary. */
         cf.name = text(cf.covers, CF_EDGE, cfs.text_y, 375 - 2 * CF_EDGE, CF_NAME_H);
         widget_set_prop_int(cf.name, "style:normal:font_size", cfs.name_px);
         cf.artist =
             text(cf.covers, CF_EDGE, cfs.text_y + cfs.artist_y, 375 - 2 * CF_EDGE, CF_ARTIST_H);
         widget_set_prop_int(cf.artist, "style:normal:font_size", cfs.artist_px);
-        widget_set_prop_int(cf.artist, "style:normal:text_color", (int)CF_GREY);
+        widget_set_prop_int(cf.artist, "style:normal:text_color",
+                            (int)(0xff000000u | tok(TOK_SECONDARY)));
         slide_menu_set_value(cf.slide, cf.album);
         widget_on(cf.slide, EVT_VALUE_CHANGED, changed, 0);
         tc.down = th.on = 0; /* a touch or thumb on the covers these replace */
