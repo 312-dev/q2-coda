@@ -670,6 +670,40 @@ static int centre_of(void *now, unsigned count) {
 /* changed(): album c is the one saved now, at c in cf.albums. */
 static void centred_at(unsigned c) { aw.albums = cf.albums, aw.saved_at = (int)c + 1; }
 
+/* A cold open's look over its albums' art, made on the open's step thread (OPEN_ART) while Home's
+ * spinner turns, for load_albums to take: the art jobs of cf.albums as they were at library_gen. */
+static struct {
+    void *albums;
+    unsigned gen, count;
+    job_t *jobs; /* 0: none made (or no memory) */
+    int total;
+} aj __attribute__((section(".scratch")));
+static void art_found_drop(void) {
+    for (int i = 0; i < aj.total; ++i) free(aj.jobs[i].track);
+    free(aj.jobs);
+    memset(&aj, 0, sizeof aj);
+}
+/* cf.albums' jobs into aj, as load_albums' own pass makes them. Files and the albums' records only. */
+static void art_find(void) {
+    char path[512];
+    unsigned count = deque_size(cf.albums);
+    art_found_drop();
+    art_strike(BUILDING); /* first: the album it strikes takes its marker, and no job */
+    if (!(aj.jobs = calloc(count, sizeof(job_t)))) return;
+    aj.albums = cf.albums, aj.gen = library_gen, aj.count = count;
+    unsigned char *shared = folders_shared(cf.albums, count);
+    for (unsigned i = 0; i < count; ++i) {
+        void *r = deque_at(cf.albums, i);
+        job_t *j = &aj.jobs[aj.total];
+        if (art_missing(r, path, sizeof path) && (j->track = strdup(P(r, REC_PATH)))) {
+            j->key = album_key(r);
+            j->shared = shared ? shared[i] : 1; /* no memory: no cover.jpg that may be another's */
+            ++aj.total;
+        }
+    }
+    free(shared);
+}
+
 /* Cancel stops after the current album; finished thumbnails stay, so the next open resumes. */
 static void stop(void) {
     worker_stop(cf.thread, &cf.running, &cf.cancel, &cf.timer);
@@ -695,6 +729,7 @@ static unsigned short *years;
 static void *years_of;
 static void drop_albums(void) {
     verify_join(); /* before the albums it reads go */
+    art_found_drop();
     if (cf.albums && cf.albums != cf.stock) deque_destroy(cf.albums);
     if (cf.stock) deque_destroy(cf.stock);
     cf.albums = cf.stock = 0;
@@ -2201,7 +2236,10 @@ void fx_unletter(int c) {
  * window of the letter gone to, the albums ahead towards it and the letters' either side; half
  * copies from the loader (ld_ask) going by letters, the rest decoded, within a frame's budget, the
  * order and the rules in docs/internals.md#coverflow-thumb. A cover not loaded shows the
- * placeholder until a later frame (fx.todo) loads it. */
+ * placeholder until a later frame (fx.todo) loads it. At rest every cover on the screen is decoded
+ * at once, but for the covers' first frames (fx_fresh): there the centre alone, the rest within
+ * the budget, so an open shows the covers a frame's decodes sooner (seven, 40 ms on the emulator). */
+static int fx_fresh __attribute__((section(".scratch")));
 static void fx_window(int c, int n, const unsigned **ring) {
     int want[FX_POOL], r = fx_reach(), k = 0, at = 0, sh = 0, to = 0;
     unsigned t0 = (unsigned)time_now_ms();
@@ -2259,7 +2297,7 @@ static void fx_window(int c, int n, const unsigned **ring) {
             }
             unsigned t = (unsigned)time_now_ms();
             int spent = (int)(t - t0) + (h && (s < 0 || fx.ld[s].ok) ? fx.half_ms : fx.full_ms);
-            if ((!th.on && !up && m <= 2 * CF_REACH) ||
+            if ((!th.on && !up && m <= 2 * CF_REACH && (!fx_fresh || !m)) ||
                 (big ? !any || spent <= budget : decodes-- > 0)) {
                 if (s >= 0)
                     ld_take(s, i, want[m] - 1);
@@ -2277,6 +2315,7 @@ static void fx_window(int c, int n, const unsigned **ring) {
         int i = fx_slot(((c + j) % n + n) % n + 1);
         ring[j + CF_REACH] = i >= 0 && fx.art[i] ? fx.art[i] : FX_PLACEHOLDER;
     }
+    if (!fx.todo) fx_fresh = 0;
 }
 
 #ifdef PEQ_HOST
@@ -2773,6 +2812,7 @@ static void covers(void) {
         coverflow_position_reset();
         void *f = widget_factory();
         int depth = fx_open();
+        fx_fresh = depth;
         cf.covers =
             widget_factory_create_widget(f, "view", cf.page, 0, bar_foot(cf.page), 375, client_h());
         cf.slide = widget_factory_create_widget(f, "slide_menu", cf.covers, 0, depth ? 0 : 24, 375,
@@ -2974,6 +3014,7 @@ static void sort_albums(unsigned t0) {
     cf_trace(t0, "sorted albums=", deque_size(cf.albums), 0);
 }
 void *queue_now(unsigned *pos, unsigned *n);
+static void art_build(void);
 static void load_albums(unsigned t0) {
     int on_sort = cf.on_sort; /* taken whatever this load shows */
     cf.on_sort = 0;
@@ -3027,6 +3068,19 @@ static void load_albums(unsigned t0) {
         verify_start();
         return;
     }
+    if (aj.jobs && aj.albums == cf.albums && aj.count == count && aj.gen == library_gen &&
+        !cf.scoped) { /* the open's thread looked already (OPEN_ART) */
+        cf.album = on_sort ? (int)count : centre_of(now, count);
+        cf.jobs = aj.jobs, cf.total = aj.total; /* the build's now: stop() frees them */
+        aj.jobs = 0, aj.total = 0;
+        art_found_drop();
+        if (cf.total) cf_cold(t0);
+        else art_cleaned(); /* every album's art is there */
+        cf_trace(t0, "found jobs=", cf.total, count);
+        art_build();
+        return;
+    }
+    art_found_drop();
     int playing = 0;
     art_strike(BUILDING);
     cf.jobs = calloc(count, sizeof(job_t));
@@ -3051,6 +3105,10 @@ static void load_albums(unsigned t0) {
     if (!cf.total && cf.jobs && !cf.scoped) art_cleaned(); /* every album's art is there */
     cf_trace(t0, "done jobs=", cf.total, count);
     if (on_sort) cf.album = (int)count; /* the Sort card, pressed again and again */
+    art_build();
+}
+/* The jobs found (cf.jobs) built on the worker with Preparing artwork, or the covers when none. */
+static void art_build(void) {
     mkdir(ART_DIR, 0755);
     cf.done = cf.cancel = 0;
     if (cf.total && card_space(ART_DIR) && !pthread_create(&cf.thread, 0, worker, 0)) {
@@ -3421,7 +3479,8 @@ static void *open_page(void) {
  * (staged_into) is never shared. Return is read between steps, not within one. */
 #define OPEN_SPIN_MS 150
 #define OPEN_SORT 3 /* the step after query_step's last: sort_albums */
-#define OPEN_DONE 4
+#define OPEN_ART 4  /* then, unless the albums' art is known (art_clean), the look for it (art_find) */
+#define OPEN_DONE 5
 #define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
 extern int spinner_turn(void);         /* list_marks.c */
 extern int ringnav_wm_paint(void *wm); /* nav/input.c */
@@ -3438,10 +3497,13 @@ static void open_end(void) {
     if (op.spin) widget_invalidate_force(op.home, 0); /* the row's chevron again */
     op.waiting = op.timer = op.spin = 0;
 }
-/* Step k: query_step's, or OPEN_SORT's sort_albums; 1 once it is the last. */
+/* Step k: query_step's, OPEN_SORT's sort_albums or OPEN_ART's art_find; 1 once it is the last. */
 static int open_work(int k) {
+    if (k == OPEN_ART) return art_find(), 1;
     return k == OPEN_SORT ? (sort_albums(op.at), 1) : query_step(k, op.at);
 }
+/* Whether an open's albums want OPEN_ART: listed and in order, their art not known. */
+static int art_due(void) { return cf.albums && deque_size(cf.albums) && !art_clean(); }
 static void *step_thread(void *k) {
     op.ret = open_work((int)(long)k);
     op.done = 1;
@@ -3466,10 +3528,14 @@ static int step_turning(int k) {
 }
 static int open_step(const void *unused) {
     op.timer = 0;
-    if (window_manager_get_top_window(window_manager()) != op.home) return open_end(), 0;
+    if (window_manager_get_top_window(window_manager()) != op.home)
+        return open_end(), art_found_drop(), 0; /* given up: the look's jobs are no open's */
     while (op.step != OPEN_DONE) {
         int k = op.step;
-        op.step = !step_turning(k) ? k + 1 : k < OPEN_SORT && sort_due() ? OPEN_SORT : OPEN_DONE;
+        op.step = !step_turning(k)              ? k + 1
+                  : k < OPEN_SORT && sort_due() ? OPEN_SORT
+                  : k < OPEN_ART && art_due()   ? OPEN_ART
+                                                : OPEN_DONE;
         if (op.step != OPEN_DONE &&
             (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)) {
             if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0);
@@ -3488,7 +3554,7 @@ int coverflow_spinner(void) { return op.spin; }
 int coverflow_wait_input(void *e) {
     if (!op.waiting) return 0;
     unsigned type = (unsigned)I(e, EVENT_TYPE);
-    if (type == EVT_KEY_UP && (unsigned)I(e, EVENT_KEY) == KEY_RETURN) open_end();
+    if (type == EVT_KEY_UP && (unsigned)I(e, EVENT_KEY) == KEY_RETURN) open_end(), art_found_drop();
     return type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG ||
            type == EVT_POINTER_DOWN;
 }
@@ -3496,13 +3562,14 @@ static int coverflow_open(void *ctx, void *event) {
     if (cf.page || op.waiting) return 0;
     if (cf.albums_gen != library_gen) drop_albums();
     sort_check();
-    if ((cf.stock && !sort_due()) || library_scanning()) { /* nothing to wait for */
+    if ((cf.stock && !sort_due() && !art_due()) || library_scanning()) { /* nothing to wait for */
         if ((cf.page = open_page())) load();
         return 0;
     }
     op.at = (unsigned)time_now_ms(), op.waiting = 1;
     op.home = window_manager_get_top_window(window_manager());
-    op.step = cf.stock ? OPEN_SORT : 0; /* kept albums: only their new order */
+    /* kept albums: only their new order, or their art looked for */
+    op.step = !cf.stock ? 0 : sort_due() ? OPEN_SORT : OPEN_ART;
     return open_step(0);
 }
 

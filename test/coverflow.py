@@ -6971,19 +6971,25 @@ static void unknown_resume(void) {
    pass the harness's 1,024-child cap), each standing for one album round the centre; the ends wrap; Centre opens the
    far album; the captions follow the index; and an open of the same albums once their art is known asks no file per
    album on the UI thread: a thread looks behind the covers, and an album it finds without art makes the next open a
-   cold one, which looks for every album's art and builds what it finds. ---- */
+   cold one, whose look runs on the open's own thread, Home up, and builds what it finds. ---- */
 #define CF_POOL 8 /* coverflow.h's: the slide_menu's children with depth */
 static void pool_library(void) {
     enum { BIG = 6000 };
     static char nm[BIG][32], keep_rec[64][0x60], keep_nm[64][64], keep_pa[64][600];
     char path[600];
     int keep = albums;
+    unsigned room = free_blocks;
+    free_blocks = 1 << 20; /* room for a build */
     assert(keep <= 64);
     memcpy(keep_rec, records, sizeof keep_rec), memcpy(keep_nm, names, sizeof keep_nm), memcpy(keep_pa, paths, sizeof keep_pa);
     albums = 0;
     for (int i = 0; i < BIG; ++i) {
         snprintf(nm[i], 32, "Pool %04d", i), album(nm[i], 0);
         fclose(fopen(art_file(path, nm[i]), "w")); /* its art looked for already: "none", no build */
+    }
+    for (int i = 4318; i <= 4324; ++i) { /* art round the album the covers reopen on */
+        FILE *f = fopen(art_file(path, nm[i]), "w");
+        fputs("art", f), fclose(f);
     }
     rescan();
     int made = nw, built = calls;
@@ -7028,6 +7034,19 @@ static void pool_library(void) {
     s = slide(), index = (int *)(s->raw + SLIDE_INDEX);
     assert(s && *index == 4321 && s->nkids == CF_POOL && nw - made < 64);
     assert(ui_access - ui < 16);
+    /* Its first frame decodes the centre cover alone, the rest within the frame's budget in the frames after; once all
+       are in, a step at rest decodes the one entering at once, as ever. */
+    int canvas[16] = { 0 }, first;
+    loads = unloads = 0, decode_ms = 6;
+    coverflow_paint(s, canvas);
+    first = loads;
+    for (int k = 0; k < 8 && loads < 7; ++k) coverflow_paint(s, canvas);
+    assert(first == 1 && loads == 7);
+    slide_menu_set_value(s, 4322), changed_fn(0, 0);
+    coverflow_paint(s, canvas);
+    assert(loads == 7); /* album 4325 has no art: the placeholder, nothing decoded */
+    slide_menu_set_value(s, 4321), changed_fn(0, 0);
+    decode_ms = 0;
     for (int i = 0; i < 5000 && all_access - all < BIG; ++i) usleep(1000); /* the look's thread */
     assert(all_access - all >= BIG && ui_access - ui < 16);
     close_page(); /* joins it */
@@ -7038,12 +7057,14 @@ static void pool_library(void) {
     assert(size(nm[17]) == -1); /* not this time */
     for (int i = 0, was = -1; i < 100 && all_access != was; ++i) was = all_access, usleep(50000); /* the look ends */
     close_page();
-    ui = ui_access;
+    ui = ui_access, all = all_access;
     open_page();
-    assert(ui_access - ui >= BIG); /* a cold open: load_albums' own look, which builds what it finds */
+    assert(ui_access - ui < 16 && all_access - all >= 18); /* its look on the open's thread, to album 17 at least */
+    assert(size(nm[17]) >= 0); /* built: its art, or the "none" marker */
     close_page();
     memcpy(records, keep_rec, sizeof keep_rec), memcpy(names, keep_nm, sizeof keep_nm), memcpy(paths, keep_pa, sizeof keep_pa);
     albums = keep;
+    free_blocks = room;
     rescan();
 }
 
