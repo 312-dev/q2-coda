@@ -372,7 +372,7 @@ Approved 2026-11-16 (`design/home-np-icon`, 2a and the morph; `patch/home_np.c`)
 - **Chevron:** Phosphor `caret-right`, bold, 15 px, centered 5 px left of the right column:
   Chevron gray, On Accent on the selection.
 - **Opening:** a row whose page has to load first (Home's Cover Flow, on its first open after a
-  restart or a library change) keeps the selection and turns its chevron into an activity
+  restart, a library change or a new Sort) keeps the selection and turns its chevron into an activity
   spinner: eight spokes in the chevron's 15 px box, On Accent, the leading spoke solid and each
   one behind it 10% fainter, a spoke on every 100 ms (redrawn between the open's steps, so it can
   pause on a long one), until the page opens. It shows only once the
