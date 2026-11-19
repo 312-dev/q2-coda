@@ -849,6 +849,9 @@ LDAC_HQ = ((0x4faa5c, 0x00042080, 0x00041880),   # sll $3,$4,2
 # know, so a call that could open a keyboard cannot pass unseen, and on any code that reads a keyboard's name
 # (KB_NAMES) other than KB_NAME_READS, so no other path names one.
 KB_OPEN_SITES = ((0x69fb5c, 0x04118db3), (0x69fbd0, 0x04118d96))
+# ... and its jalr widget_set_prop_str(keyboard, "open_anim_hint", "popup") after them becomes jal kb_open_hint, which
+# sets nothing: the strip is on the window from its first frame, so it does not slide up from the screen's foot.
+KB_OPEN_HINT = (0x69fef4, 0x0320f809)
 KB_REQUEST = (0x69f650, 0x6a0234)  # input_method_default's request (static, its frame 0xd8)
 KB_NAMES = ('kb_default_t9', 'kb_default_t26', 'kb_default', 'kb_ascii_t9', 'kb_float', 'kb_uint', 'kb_ufloat',
             'kb_hex', 'kb_phone', 'keyboard_password', 'keyboard_netname', 'keyboard_keyword')
@@ -2121,7 +2124,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
@@ -2608,6 +2611,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check_keyboard_opens(raw_demo)
     for address, stock_word in KB_OPEN_SITES:
         patch_word(patched, address, stock_word, jal(ps['kb_host_open']), "a keyboard window is the letter strip's")
+    patch_word(patched, *KB_OPEN_HINT, jal(ps['kb_open_hint']), "the strip's keyboard window opens in place")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,
           'library scan: expected the "." exclusion')
     patch_word(patched, *SCAN_DIRS, jal(ps['ringnav_scan_dir']), 'the library scan skips hidden folders')

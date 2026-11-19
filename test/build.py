@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """JPEG checks; optionally pass the stock ZIP to test packaging with a custom logo and quoted paths too."""
 import io, math, re, sys; sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first: test/build.py must import tools/build.py
-from build import KB_ASSETS, KB_OPEN_SITES, check_keyboard_opens, jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, DEFAULT_CONFIG, default_config
+from build import KB_ASSETS, KB_OPEN_HINT, KB_OPEN_SITES, check_keyboard_opens, jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, DEFAULT_CONFIG, default_config
 
 logo = (ROOT/'assets/boot-logo.jpg').read_bytes()
 assert jpeg_size(logo) == (320, 375)
@@ -714,6 +714,8 @@ def validate_assets(directory):
     for address, word in KB_OPEN_SITES:
         assert address in opens and struct.unpack_from('<I', kb_stock, address - 0x400000)[0] == word
         assert struct.unpack_from('<I', kb_demo, address - 0x400000)[0] == host, hex(address)
+    assert struct.unpack_from('<I', kb_stock, KB_OPEN_HINT[0] - 0x400000)[0] == KB_OPEN_HINT[1]
+    assert struct.unpack_from('<I', kb_demo, KB_OPEN_HINT[0] - 0x400000)[0] == jal(symbols(directory/'patch.elf')['kb_open_hint'])
     # Album Wall, the spectrum and the VU meter: their pages and images are gone, and no page that ships names what opened them
     assert not {'squashfs-root/'+rel for rel in STOCK_PAGES} & names and {'squashfs-root/'+rel for rel in STOCK_PAGES} <= stock_names
     for rel in (n.removeprefix('squashfs-root/') for n in names if '/raw/ui/' in n and n.endswith('.bin')):
