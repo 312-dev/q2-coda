@@ -94,6 +94,11 @@ class Kernel:
     def ops(self):
         return [op for op, _ in self.commands]
 
+    def last_is(self, op, seconds=30.0):
+        """True once the newest command the daemon sent is op. The daemon writes a command and then updates its
+        own files, so a test that has seen the file change must still wait for this thread to record the command."""
+        return wait_for(lambda: self.ops()[-1:] == [op], seconds)
+
 
 class Q2:
     """A daemon on a thread of this process, with its config.ini, its fake kernel and its ATT listener."""
@@ -367,14 +372,14 @@ def test_advertising_follows_the_phone(q2):
     c = connect(q2)
     c.notify()
     assert wait_for(lambda: not q2.advertising())
-    assert k.ops()[-1] == REMOVE_ADV
+    assert k.last_is(REMOVE_ADV)
     other = Central(q2.att())  # one phone at a time
     with pytest.raises((ConnectionError, OSError)):
         other.read(H_INFO)
     c.close()
     assert wait_for(q2.advertising)
-    assert k.ops()[-1] == ADD_ADV
-    assert 'ble: connected' in q2.log() and 'ble: disconnected' in q2.log()
+    assert k.last_is(ADD_ADV)
+    assert wait_for(lambda: 'ble: connected' in q2.log() and 'ble: disconnected' in q2.log())
 
 
 def test_a_session_the_daemon_ends_disconnects_the_phone(q2):
@@ -417,15 +422,14 @@ def test_bluetooth_off_waits_for_hci0(daemon_so, tmp_path):
 def test_refused_while_synclink_is_on(daemon_so, tmp_path):
     q2 = Q2(daemon_so, tmp_path, config='[SYSSET]\nSYNCLINK=1\n')
     try:
-        WAIT(0.5)
+        assert wait_for(lambda: 'ble: off while SyncLink is on' in q2.log())  # logged as the daemon starts
         assert not q2.att().exists() and not q2.kernel.commands and not q2.advertising()
-        assert 'ble: off while SyncLink is on' in q2.log()
         q2.config('[SYSSET]\nSYNCLINK=0\n')
-        assert wait_for(q2.advertising, 8)  # config.ini is read every 5 s
+        assert wait_for(q2.advertising, 30)  # config.ini is read every 5 s; the deadline is for a loaded machine
         assert q2.att().exists()
         q2.config('[SYSSET]\nSYNCLINK=2\n')
-        assert wait_for(lambda: not q2.advertising(), 8)
-        assert q2.kernel.ops()[-1] == REMOVE_ADV
+        assert wait_for(lambda: not q2.advertising(), 30)
+        assert q2.kernel.last_is(REMOVE_ADV)
     finally:
         q2.stop()
 
