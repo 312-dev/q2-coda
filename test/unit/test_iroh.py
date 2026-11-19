@@ -2,6 +2,7 @@
 import hashlib
 import pathlib
 import sys
+import types
 
 import pytest
 
@@ -69,17 +70,16 @@ def cargo(tmp_path, monkeypatch):
     built = tmp_path/'target/q2/q2-iroh'
     built.parent.mkdir(parents=True)
     (built.parent/'sysroot').mkdir()  # the stock /lib copy each build makes, dropped after
-    calls = []
+    stub = types.SimpleNamespace(data=b'\x7fELF fresh', calls=[], built=built)
 
     def run(cmd, **kw):
-        calls.append(cmd)
-        built.write_bytes(cargo.data)
+        stub.calls.append(cmd)
+        built.write_bytes(stub.data)
         return iroh.subprocess.CompletedProcess(cmd, 0, stdout=f'Compiling q2-iroh\n{built}\n')
     monkeypatch.setattr(iroh.subprocess, 'run', run)
     monkeypatch.setenv('CARGO_TARGET_DIR', str(tmp_path/'target'))
     monkeypatch.setattr(iroh, 'CACHE', tmp_path/'cache')
-    cargo.data, cargo.calls, cargo.built = b'\x7fELF fresh', calls, built
-    return cargo
+    return stub
 
 
 def test_a_build_is_kept_in_the_cache_under_its_sha(cargo):
