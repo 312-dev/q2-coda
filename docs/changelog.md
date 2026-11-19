@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: aptX HD, aptX, AAC and SBC now send each piece of audio in one radio packet instead of two, as Android does on the same kind of link, so a crowded 2.4 GHz band (a train, a street) has fewer chances to break the sound up. LDAC already did.
   - Typing (OLED): Return, or a swipe in from the screen's left edge, now closes the letter strip first instead of jumping to its return key, and never submits; the text stays where it is, and Return again leaves the page. A tap on the text, or Center, opens the strip again. Submitting a search closes the strip too, so the results fill the screen. This is the same on every page you type on: Search, the Wi-Fi password, playlist and Bluetooth names, EQ preset names and the rest.
   - Typing (OLED): a Wi-Fi password, Add Network and every other text box no longer flash Shanling's old keyboard and a second text box for half a second before the letter strip appears: the strip is there from the first frame. The old keyboard is gone from the firmware.
   - Cover Flow: **Recently Added** now puts albums copied to the card at the same moment in order too, newest file first, instead of leaving them in alphabetical order as if the sort had not applied.

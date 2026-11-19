@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run the actual MIPS DROP paths with the encoder signal deliberately delayed.
+"""Run the actual MIPS DROP paths with the encoder signal deliberately delayed, SBC's bitpool step and
+the A2DP write MTU clamp through each codec's encoder thread.
 
 Usage: python test/bluealsa.py BUILD_DIRECTORY (requires the existing Unicorn).
 """
@@ -7,8 +8,8 @@ import pathlib, struct, subprocess, sys
 from unicorn import UC_HOOK_CODE
 from unicorn.mips_const import *
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from build import (BLUEALSA, BT_DROP, BT_DROP_HANDLER, BT_PCM_CALLERS, BT_SBC_POOL, BT_SILENCE_SAMPLES, bt_silence,
-                   machine, read, word)
+from build import (BLUEALSA, BT_DROP, BT_DROP_HANDLER, BT_MTU_MAX, BT_PCM_CALLERS, BT_SBC_POOL, BT_SILENCE_SAMPLES,
+                   bt_silence, load_elf, machine, read, word)
 
 
 def check_drop(raw, queued, caller=None):
@@ -233,6 +234,195 @@ def check_sbc_bitpool(stock, raw):
     assert frame(1)[:2] == (33, 79) and frame(0)[:2] == (33, 79), 'back to its own'
 
 
+# A2DP codec ids as bluealsa keeps them in the transport (s0 + 0x1e), each with its encoder thread.
+SBC, AAC, APTX, APTX_HD, LDAC = 0x0000, 0x0002, 0x4fff, 0x24ff, 0x2dff
+ENCODERS = {SBC: 0x4060e0, AAC: 0x416d0c, APTX: 0x417e80, APTX_HD: 0x418988}
+# Stock's .plt stubs the harness answers (all others return 0): libc's memory calls, libopenaptx's and fdk-aac's.
+STUBS = {0x430670: 'malloc', 0x430030: 'calloc', 0x42ff80: 'realloc', 0x430270: 'free', 0x4300e0: 'memset',
+         0x430450: 'memcpy', 0x430830: 'memmove', 0x430200: 'aptx_init', 0x430710: 'aptx_encode',
+         0x430560: 'aptx_finish', 0x4309d0: 'aacEncOpen', 0x430980: 'aacEncInfo', 0x430b60: 'aacEncEncode'}
+PLT = (0x42fcc0, 0x430b80)
+L2CAP_2DH5 = 679  # a 2-DH5's payload: the most one baseband packet carries on 2 Mbps EDR
+
+
+def acquire(raw, codec, mtu):
+    """transport_acquire_bt_a2dp from Acquire's answer to the fd list (0x40abe8 to 0x40ac00) under Unicorn: the
+    write MTU it leaves in the transport (s0 + 0x48) for codec, from Acquire's mtu."""
+    u = machine(raw, 0x1000000)
+    t, sp, stop = 0x1000000, 0x1008000, 0x40ac00
+    u.mem_write(t + 0x1e, struct.pack('<H', codec))
+    u.mem_write(sp + 0x30, struct.pack('<HH', mtu, 672))  # g_variant_get's write and read MTUs
+    def hook(u, address, size, _):
+        if address == 0x430110:  # g_dbus_message_get_unix_fd_list
+            u.reg_write(UC_MIPS_REG_V0, 0)
+            u.reg_write(UC_MIPS_REG_PC, u.reg_read(UC_MIPS_REG_RA))
+    u.hook_add(UC_HOOK_CODE, hook)
+    for register, value in ((UC_MIPS_REG_S0, t), (UC_MIPS_REG_SP, sp), (UC_MIPS_REG_S1, 0)):
+        u.reg_write(register, value)
+    u.emu_start(0x40abe8, stop, count=100)
+    assert u.reg_read(UC_MIPS_REG_PC) == stop and read(u, t + 0x44) == 672, 'the read MTU as stock'
+    return read(u, t + 0x48)
+
+
+def encode(raw, aptx, codec, mtu, aac=(), packets=3):
+    """codec's encoder thread under Unicorn, on the shipped encoder (SBC is built into bluealsa, aptX and aptX HD are
+    libopenaptx, loaded at 0), with mtu as the transport's write MTU, fed PCM as fast as it asks: the first packets
+    it writes. AAC's fdk-aac is scripted instead: each aacEncEncode gives the next of aac's frame lengths."""
+    u = machine(raw, 0x1000000)
+    load_elf(u, aptx)
+    u.mem_map(0x2000000, 0x200000)  # the heap
+    stubs = dict(STUBS)
+    for name, address in (('malloc', 0x35a0), ('free', 0x3590), ('memset', 0x35b0), ('memmove', 0x3580)):
+        stubs[address] = name  # libopenaptx's own
+    lib = {'aptx_init': 0x1e3c, 'aptx_encode': 0x1ebc, 'aptx_finish': 0x1ea4}
+    heap, out, frames = [0x2010000], [], list(aac)
+    t, pcm = 0x2000000, 0x2000000 + 0x1c0
+    width = 4 if codec == APTX_HD else 2
+    u.mem_write(t + 0x1c, struct.pack('<HH', 1, codec))  # A2DP source
+    word(u, t + 0x48, mtu)
+    word(u, t + 0x1ec, 2)  # channels
+    word(u, t + 0x1f0, 48000)
+    word(u, t + 0x50, t)  # the thread's transport
+    u.mem_write(pcm + 0x2a, struct.pack('<H', width << 8 | width * 8))
+    if codec == SBC:
+        u.mem_write(t + 0x1a4, bytes([0x11, 0x15, 2, 53]))  # 48 kHz joint stereo, 16 blocks, 8 subbands
+        try:
+            u.mem_map(BT_SBC_POOL & ~0xfff, 0x1000)  # stock has no payload there
+        except Exception:
+            pass
+    def alloc(n):
+        heap[0] = (heap[0] + 15) & ~15
+        heap[0] += n
+        return heap[0] - n
+    def hook(u, address, size, _):
+        a = [u.reg_read(r) for r in (UC_MIPS_REG_A0, UC_MIPS_REG_A1, UC_MIPS_REG_A2, UC_MIPS_REG_A3)]
+        name = stubs.get(address)
+        if name in lib:
+            u.reg_write(UC_MIPS_REG_T9, lib[name])
+            u.reg_write(UC_MIPS_REG_PC, lib[name])
+            return
+        if name in ('malloc', 'calloc', 'realloc'):
+            n = a[0] * a[1] if name == 'calloc' else a[1] if name == 'realloc' else a[0]
+            result = alloc(n)
+            u.mem_write(result, bytes(n))
+            if name == 'realloc' and a[0]:
+                u.mem_write(result, bytes(u.mem_read(a[0], n)))
+        elif name == 'memset':
+            u.mem_write(a[0], bytes([a[1] & 0xff]) * a[2])
+            result = a[0]
+        elif name in ('memcpy', 'memmove'):
+            u.mem_write(a[0], bytes(u.mem_read(a[1], a[2])))
+            result = a[0]
+        elif name == 'aacEncOpen':
+            word(u, a[0], 0x2000f00)
+            result = 0
+        elif name == 'aacEncInfo':  # maxOutBufBytes, maxAncBytes, inBufFillLevel, inputChannels, frameLength
+            u.mem_write(a[1], struct.pack('<5I', 6144 * 2, 0, 0, 2, 1024))
+            result = 0
+        elif name == 'aacEncEncode':
+            result = 0
+            if a[1]:
+                sp = u.reg_read(UC_MIPS_REG_SP)
+                args = read(u, sp + 0x10)
+                n = frames.pop(0) if frames else 0
+                if n:
+                    u.mem_write(read(u, read(u, a[2] + 4)), bytes(i & 0xff for i in range(len(out) * 7, len(out) * 7 + n)))
+                word(u, args, n)
+                word(u, args + 4, read(u, a[3]))  # every sample taken
+        elif address == 0x4145d0:  # io_poll_and_read_pcm: all it asks for
+            u.mem_write(a[2], bytes((i * 37) & 0xff for i in range(a[3] * width)))
+            result = a[3]
+        elif address == 0x413d14:  # io_bt_write: a packet
+            out.append(bytes(u.mem_read(a[1], a[2])))
+            result = a[2]
+            if len(out) == packets:
+                u.emu_stop()
+        elif address in (0x40b49c, 0x40c5e4, 0x4049d8) or PLT[0] <= address < PLT[1]:
+            result = 0  # thread state, a stop with no clients, asrsync_sync's pacing, the rest of libc and libpthread
+        else:
+            return
+        u.reg_write(UC_MIPS_REG_V0, result)
+        u.reg_write(UC_MIPS_REG_PC, u.reg_read(UC_MIPS_REG_RA))
+    u.hook_add(UC_HOOK_CODE, hook, begin=PLT[0], end=PLT[1])  # only where it answers: the encoders run unhooked
+    for address in (*stubs, 0x4145d0, 0x413d14, 0x40b49c, 0x40c5e4, 0x4049d8):
+        if not PLT[0] <= address < PLT[1]:
+            u.hook_add(UC_HOOK_CODE, hook, begin=address, end=address)
+    for register, value in ((UC_MIPS_REG_A0, t + 0x50), (UC_MIPS_REG_SP, 0x100f000), (UC_MIPS_REG_RA, 0x100ff00)):
+        u.reg_write(register, value)
+    u.emu_start(ENCODERS[codec], 0x100ff00, count=50_000_000)
+    assert len(out) == packets, f'{codec:#x}: {len(out)} packets'
+    return out
+
+
+def ldac_mtu(ldac, mtu):
+    """libldacBT's ldacBT_init_handle_encode on a cleared handle with mtu (990 kbps, stereo, S32, 48 kHz): its
+    result and the packet it then builds to, its transmit size (handle + 0x24)."""
+    u = machine(ldac, 0x2000000)
+    handle = 0x2001000
+    def hook(u, address, size, _):
+        a0, a1, a2 = (u.reg_read(r) for r in (UC_MIPS_REG_A0, UC_MIPS_REG_A1, UC_MIPS_REG_A2))
+        if address == 0xad30:  # memset
+            u.mem_write(a0, bytes([a1 & 0xff]) * a2)
+        elif address == 0xacf0:  # memcpy
+            u.mem_write(a0, bytes(u.mem_read(a1, a2)))
+        elif address in (0xad10, 0xad40, 0xace0, 0xad20, 0xad00):  # malloc, calloc, free, floorf, sqrtf
+            raise AssertionError(f'libc call {address:#x}')
+        else:
+            return
+        u.reg_write(UC_MIPS_REG_V0, a0)
+        u.reg_write(UC_MIPS_REG_PC, u.reg_read(UC_MIPS_REG_RA))
+    u.hook_add(UC_HOOK_CODE, hook)
+    for register, value in ((UC_MIPS_REG_A0, handle), (UC_MIPS_REG_A1, mtu), (UC_MIPS_REG_A2, 0), (UC_MIPS_REG_A3, 1),
+                            (UC_MIPS_REG_T9, 0x1a00), (UC_MIPS_REG_SP, 0x200f000), (UC_MIPS_REG_RA, 0x200ff00)):
+        u.reg_write(register, value)
+    word(u, 0x200f000 + 0x10, 4)  # LDACBT_SMPL_FMT_S32
+    word(u, 0x200f000 + 0x14, 48000)
+    u.emu_start(0x1a00, 0x200ff00, count=100000)
+    return u.reg_read(UC_MIPS_REG_V0) & 0xffffffff, read(u, handle + 0x24)
+
+
+
+def sbc_frames(packet):
+    """An SBC packet's frame count (its media header) and each frame's length (from the first frame's bitpool)."""
+    return packet[12] & 0xf, sbc_length(packet[15])
+
+
+def check_mtu(stock, raw, aptx, ldac):
+    """Acquire's write MTU of 1021 (the RTL8733BS's ACL MTU) is cut to BT_MTU_MAX for every codec but LDAC, so each
+    encoder's packets fit one 2-DH5 and are still filled with as many frames as fit; stock keeps 1021, whose
+    packets each need a second baseband packet."""
+    assert BT_MTU_MAX + 4 == L2CAP_2DH5, "a 2-DH5's payload less L2CAP's header (Android's 663 plus RTP's 12)"
+    for codec in (SBC, AAC, APTX, APTX_HD, LDAC):
+        assert acquire(stock, codec, 1021) == 1021, 'stock: Acquire\'s MTU as it is'
+        assert acquire(raw, codec, 600) == 600 and acquire(raw, codec, BT_MTU_MAX) == BT_MTU_MAX, 'a smaller one kept'
+        assert acquire(raw, codec, 1021) == (1021 if codec == LDAC else BT_MTU_MAX)
+    # LDAC: libldacBT refuses an MTU under 679 and builds every packet to 661 bytes, which with RTP's 12 and
+    # LDAC's 1-byte media header is one 2-DH5 at any MTU it takes.
+    assert ldac_mtu(ldac, BT_MTU_MAX) == (0xffffffff, 0) and ldac_mtu(ldac, 678)[0] == 0xffffffff
+    assert ldac_mtu(ldac, 679) == (0, 661) and ldac_mtu(ldac, 1021) == (0, 661)
+    assert 661 + 12 + 1 <= BT_MTU_MAX
+    for binary, fits in ((stock, False), (raw, True)):
+        mtu = acquire(binary, APTX_HD, 1021)
+        sizes = [len(p) for p in encode(binary, aptx, APTX_HD, mtu)]
+        assert sizes == [12 + (mtu - 12) // 6 * 6] * 3, 'aptX HD: RTP, then as many 6-byte frames as fit'
+        assert (sizes[0] <= BT_MTU_MAX) == fits, f'aptX HD packets of {sizes[0]}'
+    assert [len(p) for p in encode(raw, aptx, APTX_HD, BT_MTU_MAX)] == [12 + 110 * 6] * 3, '110 aptX HD frames'
+    assert [len(p) for p in encode(raw, aptx, APTX, BT_MTU_MAX)] == [168 * 4] * 3, '168 aptX frames, no RTP'
+    assert [len(p) for p in encode(stock, aptx, APTX, 1021)] == [255 * 4] * 3
+    for mtu in (1021, BT_MTU_MAX):
+        packets = encode(raw, aptx, SBC, mtu)
+        count, length = sbc_frames(packets[0])
+        assert count == (mtu - 13) // length and [len(p) for p in packets] == [13 + count * length] * 3, 'SBC fills'
+    assert sbc_frames(packets[0]) == (9, 71) and len(packets[0]) == 652, 'SBC at bitpool 29: 9 frames, not 14'
+    # AAC: a frame longer than the packet's room is split across packets (RFC 3016), marked on its last.
+    frames = [900, 400, BT_MTU_MAX - 12, BT_MTU_MAX - 11]
+    packets = encode(raw, aptx, AAC, BT_MTU_MAX, aac=frames, packets=6)
+    assert [(len(p), p[1] >> 7) for p in packets] == [(675, 0), (249, 1), (412, 1), (675, 1), (675, 0), (13, 1)]
+    assert packets[0][12:] + packets[1][12:] == bytes(i & 0xff for i in range(900)), 'the frame whole, in order'
+    assert [(len(p), p[1] >> 7) for p in encode(stock, aptx, AAC, 1021, aac=frames, packets=4)] == [
+        (912, 1), (412, 1), (675, 1), (676, 1)], 'stock: no AAC frame split at 1021'
+
+
 def check(directory):
     directory = pathlib.Path(directory)
     def extract(name):
@@ -270,8 +460,11 @@ def check(directory):
         assert check_drop(patched, 4096, caller), f'DROP retained partial PCM for {caller[0]:x}'
     check_silence(stock, patched)
     check_sbc_bitpool(stock, patched)
+    lib = lambda name: subprocess.check_output(['unsquashfs', '-cat', str(directory / 'rootfs.squashfs'), name])
+    check_mtu(stock, patched, lib('usr/lib/libopenaptx.so.0.2.1'), lib('usr/lib/libldacBT.so.2.0.19'))
     print("Bluetooth silence: Drain's or PAUSE's 100 ms timeout fills silence until real PCM or the budget ends; stock sends nothing.")
     print('SBC bitpool: the encoder follows BT_SBC_POOL from the next frame, never above its own; stock ignores it.')
+    print(f'A2DP write MTU: {BT_MTU_MAX} (one 2-DH5) for SBC, AAC, aptX and aptX HD, each packet filled; LDAC keeps its own; stock keeps 1021.')
     print('Bluetooth DROP: delayed encoder signal preserves new PCM, flushes all old PCM and resets pacing; stock reproduces the fault.')
 
 
