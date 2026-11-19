@@ -221,7 +221,18 @@ def hotspot_script(d):
     check('check with nothing running: 1', run('check').returncode == 1)
 
 
+def device_socket_constants():
+    """The device build has no libc header (CODA_HOST takes the host's), so its hand-written MSG_DONTWAIT is
+    what the helper sends spot_send's datagram with: it must be Linux's value on every architecture, as the
+    host's, not MSG_EOR's (0x80), which would block the one thread on librespot's full queue."""
+    import socket
+    m = re.search(r'^#define MSG_DONTWAIT (\S+)', (ROOT / 'patch/q2_guest.c').read_text(), re.M)
+    check(f'the device\'s MSG_DONTWAIT ({m and m.group(1)}) is Linux\'s {socket.MSG_DONTWAIT:#x}',
+          bool(m) and int(m.group(1), 0) == socket.MSG_DONTWAIT)
+
+
 def main():
+    device_socket_constants()
     with tempfile.TemporaryDirectory(prefix='q2-hotspot-') as tmp:
         hotspot_script(pathlib.Path(tmp))
     with tempfile.TemporaryDirectory(prefix='q2-guest-') as tmp:
