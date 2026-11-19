@@ -451,7 +451,9 @@ E=O['CF_EDGE']; y=OLED['cf.text_y']; ay=y+OLED['cf.artist_y']
 assert y>=OLED['cf.top']+160 and ay+O['CF_ARTIST_H']<=320-BAR
 assert [cf_geometry(m,w) for w in labels]==[(E,y,375-2*E,O['CF_NAME_H']),(E,ay,375-2*E,O['CF_ARTIST_H'])]
 assert m.nodes[name]['style:normal:font_size']==OLED['cf.name_px']==27 and m.nodes[artist]['style:normal:font_size']==OLED['cf.artist_px']==22
-assert m.nodes[artist]['style:normal:text_color']==signed(O['CF_GREY']) and 'style:normal:text_color' not in m.nodes[name]
+from theme import TOKENS
+# the artist in the Artist role's Text Secondary (dark), never stock's #AAAAAA, which the theme paints Tertiary
+assert m.nodes[artist]['style:normal:text_color']==signed(0xff000000|TOKENS['secondary'][0]) and 'style:normal:text_color' not in m.nodes[name]
 for w,px in ((name,OLED['cf.name_px']),(artist,OLED['cf.artist_px'])):
     x,top,wd,h=cf_geometry(m,w); assert h>=px and clear(x,BAR+top+(h-px)//2,wd,px)
 view=m.tracks(); lv=m.get(view+O['W_PARENT']); title=next(w for w in m.nodes[m.get(lv+O['W_PARENT'])]['children'] if m.nodes[w]['type']=='hscroll_label')
