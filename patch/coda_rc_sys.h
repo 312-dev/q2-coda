@@ -60,7 +60,6 @@ typedef unsigned socklen_t;
 #define SO_SNDTIMEO 0x1005
 #define IPPROTO_TCP 6
 #define TCP_NODELAY 1
-#define MSG_DONTWAIT 0x40
 #define MSG_NOSIGNAL 0x4000
 #define POLLIN 1
 #define POLLOUT 4

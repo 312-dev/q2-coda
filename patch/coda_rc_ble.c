@@ -177,7 +177,7 @@ static int mgmt_send(unsigned op, const uint8_t *p, unsigned n) {
     if (b.mfd < 0 || n > sizeof m - 6) return -1;
     put16(m, op), put16(m + 2, HCI_INDEX), put16(m + 4, n);
     memcpy(m + 6, p, n);
-    return write(b.mfd, m, 6 + n) == (ssize_t)(6 + n) ? 0 : -1;
+    return write(b.mfd, m, 6 + n) < 0 ? -1 : 0; /* Linux 5.10 answers a management command's write with 0 */
 }
 
 static void set_adv(int state) {
@@ -497,7 +497,7 @@ static void att_pdu(const uint8_t *p, size_t n) {
 static void flush(void) {
     if (b.dead) return;
     if (b.cfd >= 0 && b.rsp_n) {
-        if (send(b.cfd, b.rsp, b.rsp_n, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
+        if (send(b.cfd, b.rsp, b.rsp_n, MSG_NOSIGNAL) < 0) {
             if (errno != EAGAIN && errno != EINTR) b.dead = 1;
             return;
         }
@@ -510,7 +510,7 @@ static void flush(void) {
         pdu[0] = NOTIFY;
         put16(pdu + 1, H_EVENT);
         memcpy(pdu + 3, b.out + b.out_off, k);
-        if (send(b.cfd, pdu, 3 + k, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
+        if (send(b.cfd, pdu, 3 + k, MSG_NOSIGNAL) < 0) {
             if (errno != EAGAIN && errno != EINTR) b.dead = 1;
             return;
         }
