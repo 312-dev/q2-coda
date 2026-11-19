@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dirent.h>
 #else
 /* No MIPS sysroot (as boot.c): glibc 2.28's declarations, with MIPS o32 open flags. */
 typedef unsigned size_t;

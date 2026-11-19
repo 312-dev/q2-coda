@@ -406,11 +406,14 @@ static void on_signal(int sig) {
     if (sig == SIGTERM) termed = 1;
 }
 static struct ulog_tail err;
+static struct ulog_apps apps; /* the card apps' own logs, /tmp/q2-<id>.log */
 static int kmsg = -1;
-/* What demo's stderr file and the kernel gained since the last tick: 2 when a line was E or W. */
+/* What demo's stderr file, the card apps' logs and the kernel gained since the last tick: 2 when a
+ * line was E or W. */
 static int feeds(void) {
     long wall = time(0);
     int got = ulog_tail(&err, &ulog, wall, now_ms());
+    got |= ulog_apps(&apps, &ulog, "/tmp", wall, now_ms());
     char rec[1024];
     for (int k = 0; kmsg >= 0 && k < KMSG_MAX; ++k) {
         int n = (int)read(kmsg, rec, sizeof rec - 1);
@@ -484,6 +487,7 @@ int main(int argc, char **argv) {
     ulog_add(&ulog, time(0), now_ms(), again || !strcmp(last, "clean") ? 'I' : 'W', "guard", b);
     /* a q2guard started again reads only what is new: the one before it read the rest */
     ulog_tail_at(&err, dev_build ? DEMO_LOG : DEMO_ERR, again);
+    apps.from_end = again;
     kmsg = open(KMSG, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (kmsg < 0)
         ulog_add(&ulog, time(0), now_ms(), 'I', "guard", "kernel log: " KMSG " does not open");

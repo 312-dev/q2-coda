@@ -39,12 +39,31 @@ struct ulog_tail {
     long off; /* bytes of path already read */
     int plen; /* a line's start held for its end */
     char part[ULOG_PART];
+    const char *src; /* every raw line's source (a card app's id), its level guessed; 0: guessed */
 };
 /* t aimed at path, from its start or (q2guard started again) its present end */
 void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end);
 /* What path gained, as lines into l (ULOG_READ_MAX at most): 1 when a line went in, | 2 when one
  * was E or W. */
 int ulog_tail(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms);
+
+/* The card apps' own logs: an app's launcher leaves its loop's pid in dir/q2-<id> while it runs
+ * (addon.c), and an app logs to dir/q2-<id>.log (q2-subsonic's SetupLog: Go's log, 256 KB, then a
+ * rename to .1). Each call finds the running apps' logs (a q2-<id>.log beside its q2-<id>), at
+ * most ULOG_APPS of them, and reads what each gained into l, its lines' source the id, the date
+ * Go's log puts first left out (the stamp has the time); an app whose pid file has gone is read
+ * once more, then let go. from_end (q2guard started again) starts a log first seen at its end. */
+#define ULOG_APPS 4
+#define ULOG_APP_ID 24
+#define ULOG_APP_PATH 160 /* dir/q2-<id>.log */
+struct ulog_apps {
+    struct ulog_tail t[ULOG_APPS];
+    char id[ULOG_APPS][ULOG_APP_ID];
+    char path[ULOG_APPS][ULOG_APP_PATH];
+    int from_end;
+};
+/* 1 when a line went in, | 2 when one was E or W, as ulog_tail */
+int ulog_apps(struct ulog_apps *a, card_log *l, const char *dir, long wall, unsigned up_ms);
 
 /* One /dev/kmsg record ("PRI,SEQ,USEC,FLAGS;message\n" and its continuation lines): a kernel line
  * of warning or worse into l, stamped with the record's own uptime. Its level, or 0 for one not

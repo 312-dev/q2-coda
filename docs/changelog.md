@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Logs: the Q2's log now includes what each running card app (Subsonic and the others) writes to its own log, under the app's name, and **Send Logs** also sends each app's own logs, so a download that fails while you are away from home can be seen afterwards.
   - Typing (OLED): the Wi-Fi password and Add Network show the status row with the page's title at the top again, instead of Shanling's old "Please enter password" box and back arrow, and no page you type on has a thin white outline round it any more.
   - Display (OLED): a confirmation's answers are now evenly spaced, like Shut Down's: a red answer (Forget, Remove, Erase, Reset) no longer sits apart from Cancel after a gap.
   - Swipe back: while you swipe a page away from the left edge, everything on it now slides with it. A slider's value and track (Max Volume), a page's grey note under its rows (USB, Trusted Computers), the chevrons, Storage's sizes and the A-Z strip stayed where they were while the page slid, with the page underneath drawn over them until the swipe ended.

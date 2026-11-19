@@ -89,3 +89,47 @@ def test_a_send_asks_the_daemon_with_each_path_on_its_line(fw):
     fw.fn('localsend_ui__ls_send', None, C.c_char_p, C.c_char_p, C.c_int, C.c_void_p, C.c_int)(
         FP.encode(), b'MacBook Air', 0, C.addressof(paths), 2)
     assert files.files[CMD] == f'send\t{FP}\n/mnt/mmc/.q2muse/logs/q2-log.0\n/tmp/battery-log.txt\n'.encode()
+
+
+def test_send_logs_takes_each_card_app_s_own_log_from_ram_too(fw):
+    """docs/localsend.md: a card app's own logs, /tmp/q2-<id>.log in RAM and .<id>/log.txt on the card (q2-subsonic's,
+    where its fetches' failures go), each with the .1 it rolls to, were not sent: a hotspot's failed Subsonic downloads
+    could not be seen from Send Logs (the user's, 2026-11-19). Send Logs takes the Q2's logs, then each app's own as
+    they are now; an app with none adds nothing."""
+    from test_games import Dirent
+    dirs = {b'/mnt/mmc/.q2muse/logs': [b'.', b'q2-log.0', b'q2-heat.0'], b'/mnt/mmc': [b'.subsonic', b'.deezer', b'Music']}
+    handles, listing = {}, {}
+
+    def opendir(path, *_):
+        names = dirs.get(C.string_at(path))
+        if names is None:
+            return 0
+        h = 0x6000 + len(handles)
+        handles[h], listing[h] = [Dirent(d_name=n) for n in names], 0
+        return h
+
+    def readdir(d, *_):
+        k = listing[d]
+        listing[d] = k + 1
+        return C.addressof(handles[d][k]) if k < len(handles[d]) else 0
+    fw.mock('fw_opendir', opendir)
+    fw.mock('fw_readdir', readdir)
+    Files(fw, {'/mnt/mmc/.subsonic/q2app': b'name=Subsonic\n', '/mnt/mmc/.deezer/q2app': b'name=Deezer\n'})
+    fw.fn('addon_scan', C.c_int)()
+    there = {'/mnt/mmc/.q2muse/logs/q2-log.0': 300, '/mnt/mmc/.q2muse/logs/q2-heat.0': 20,
+             '/tmp/q2-subsonic.log': 34, '/tmp/q2-subsonic.log.1': 256, '/mnt/mmc/.subsonic/log.txt': 900}  # KB
+
+    def statx(dirfd, path, flags, mask, out, *_):
+        size = there.get(C.string_at(path).decode())
+        if size is None:
+            return 2
+        sx = (C.c_uint * 64).from_address(out)
+        sx[10], sx[11] = size * 1024, 0
+        return 0
+    fw.mock('ringnav_statx', statx)
+    paths, kb = (C.c_char * 64 * 24)(), C.c_uint()
+    n = fw.fn('localsend_ui__ls_logs', C.c_int, C.c_void_p, C.c_int, C.c_void_p)(C.addressof(paths), 23, C.byref(kb))
+    assert [paths[k].value.decode() for k in range(n)] == [
+        '/mnt/mmc/.q2muse/logs/q2-log.0', '/mnt/mmc/.q2muse/logs/q2-heat.0', '/tmp/q2-subsonic.log',
+        '/tmp/q2-subsonic.log.1', '/mnt/mmc/.subsonic/log.txt']  # deezer has none
+    assert kb.value == sum(there.values())

@@ -119,7 +119,10 @@ is up, as it held Wi-Fi Transfer's page. Ponytail: no "always receivable" switch
 - Export Log on Battery History becomes **Share Log** and opens the sheet with `battery-log.txt` (written to
   `/tmp`, not the card).
 - **Send Logs** on the LocalSend page sends the unified log and its companions: a fresh `q2guard` snapshot of
-  `/mnt/mmc/.q2muse/logs` (`q2-log.0` to `.3`, `q2-heat`, `q2-bt`, about 1 MB), plus the battery log. This is the one
+  `/mnt/mmc/.q2muse/logs` (`q2-log.0` to `.3`, `q2-heat`, `q2-bt`, about 1 MB), plus the battery log, and each card
+  app's own logs as they are now (`ls_logs`): its log in RAM, `/tmp/q2-<id>.log`, and its log on the card,
+  `.<id>/log.txt` (q2-subsonic's, where a failed download is written, its tokens and passwords redacted by the app),
+  each with its `.1`. This is the one
   the user needs today: logs off the Q2 onto a work Mac with USB storage blocked.
 
 ## Costs

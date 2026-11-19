@@ -33,6 +33,8 @@ def L(tmp_path_factory):
     lib.ulog_guess.restype = C.c_char
     lib.ulog_tail_at.argtypes = [C.c_void_p, C.c_char_p, C.c_int]
     lib.ulog_tail.argtypes = [C.c_void_p, C.c_void_p, C.c_long, C.c_uint]
+    if hasattr(lib, 'ulog_apps'):
+        lib.ulog_apps.argtypes = [C.c_void_p, C.c_void_p, C.c_char_p, C.c_long, C.c_uint]
     lib.ulog_kmsg.argtypes = [C.c_void_p, C.c_long, C.c_char_p, C.c_int]
     lib.ulog_kmsg.restype = C.c_char
     lib.ulog_flush.argtypes = [C.c_void_p, C.c_char_p, C.c_char_p, C.c_long, C.c_int]
@@ -43,7 +45,17 @@ def L(tmp_path_factory):
 
 
 class Tail(C.Structure):
-    _fields_ = [('path', C.c_char_p), ('off', C.c_long), ('plen', C.c_int), ('part', C.c_char * PART)]
+    _fields_ = [('path', C.c_char_p), ('off', C.c_long), ('plen', C.c_int), ('part', C.c_char * PART),
+                ('src', C.c_char_p)]
+
+
+APPS, APP_ID, APP_PATH = 4, 24, 160
+
+
+class Apps(C.Structure):
+    """q2log.h's struct ulog_apps."""
+    _fields_ = [('t', Tail * APPS), ('id', (C.c_char * APP_ID) * APPS), ('path', (C.c_char * APP_PATH) * APPS),
+                ('from_end', C.c_int)]
 
 
 class Log:
@@ -179,6 +191,36 @@ def test_a_restarted_reader_starts_at_the_end_and_the_roll_loses_nothing(L, tmp_
     err.write_text('new 1\n')
     L.ulog_tail(C.byref(t), log.log, WALL, 2)
     assert [l.split(' ', 4)[4] for l in log.ram().splitlines()] == ['before roll', 'after the read', 'new 1']
+
+
+def test_a_running_card_app_s_own_log_comes_in_under_its_id(L, tmp_path):
+    """docs/internals.md#unified-log: a card app logs to /tmp/q2-<id>.log (q2-subsonic's SetupLog), in RAM, which no
+    log on the card held: a hotspot's failed downloads left nothing to read (the user's logs, 2026-11-19). The log of
+    each running app (its launcher's pid file /tmp/q2-<id> beside it) comes in as it grows, Go's date left out, the
+    source the id, the level guessed; the firmware's own /tmp/q2-*.log (no pid file) stay out; an app stopped is read
+    once more, then let go."""
+    log, tmp = Log(L, tmp_path / 'logs'), tmp_path / 'tmp'
+    tmp.mkdir()
+    (tmp / 'q2-demo.log').write_text('demo line\n')  # demo's own --dev file: q2guard tails it already
+    (tmp / 'q2-subsonic').write_text('1234\n')
+    app = tmp / 'q2-subsonic.log'
+    app.write_text('2026/11/19 23:42:49 started, server music.example.net\n')
+    a = Apps()
+    poll = lambda up: L.ulog_apps(C.byref(a), log.log, str(tmp).encode(), WALL, up)  # noqa: E731
+    assert poll(1000) == 1
+    with app.open('a') as f:
+        f.write('2026/11/19 23:42:55 download 41: dial tcp: i/o timeout\n')
+    assert poll(2000) == 3  # an E line: flush now
+    (tmp / 'q2-subsonic').unlink()  # stopped: its last words still come in
+    with app.open('a') as f:
+        f.write('2026-11-19 23:43:00 stopped\n')  # applog's date, as q2-subsonic's card log writes it
+    poll(3000)
+    with app.open('a') as f:
+        f.write('2026/11/19 23:43:01 not read\n')
+    poll(4000)
+    assert log.ram().splitlines() == [f'{TIME} 1000 I subsonic started, server music.example.net',
+                                      f'{TIME} 2000 E subsonic download 41: dial tcp: i/o timeout',
+                                      f'{TIME} 3000 I subsonic stopped']
 
 
 def test_a_line_longer_than_the_hold_is_cut_not_lost(L, tmp_path):

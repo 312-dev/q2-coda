@@ -163,13 +163,34 @@ char ulog_add_raw(card_log *l, long wall, unsigned up_ms, const char *s, int n) 
 /* ---- a file another process appends to ---- */
 
 void ulog_tail_at(struct ulog_tail *t, const char *path, int from_end) {
-    t->path = path, t->off = 0, t->plen = 0;
+    t->path = path, t->off = 0, t->plen = 0, t->src = 0;
     if (!from_end) return;
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return;
     long size = lseek(fd, 0, SEEK_END);
     close(fd);
     t->off = size > 0 ? size : 0;
+}
+
+/* A card app's line: the date Go's log puts first ("2006/01/02 15:04:05 ", or "2006-01-02 ..."
+ * as q2-subsonic's applog writes it) left out, the level guessed from its words, the source the
+ * app's id. Its level, 0 for a blank line or a repeat. */
+static char app_line(card_log *l, long wall, unsigned up_ms, const char *src, const char *s,
+                     int n) {
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ')) --n;
+    static const char date[] = "0000/00/00 00:00:00 ";
+    int k = 0;
+    while (k < (int)sizeof date - 1 && k < n &&
+           (date[k] == '0'   ? s[k] >= '0' && s[k] <= '9'
+            : date[k] == '/' ? s[k] == '/' || s[k] == '-'
+                             : s[k] == date[k]))
+        ++k;
+    if (k == (int)sizeof date - 1) s += k, n -= k;
+    while (n && (*s == ' ' || *s == '\t')) ++s, --n;
+    if (!n) return 0;
+    const char *named;
+    char level = ulog_guess(s, n, &named);
+    return add_line(l, wall, up_ms, level, src, s, n) ? level : 0;
 }
 
 /* buf's lines into l, after the start held from the last read; a start with no end yet is held */
@@ -182,7 +203,8 @@ static int take(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms, con
             if (t->plen < ULOG_PART) continue;
         }
         /* a line's end, or its start cut at ULOG_PART */
-        char level = ulog_add_raw(l, wall, up_ms, t->part, t->plen);
+        char level = t->src ? app_line(l, wall, up_ms, t->src, t->part, t->plen)
+                            : ulog_add_raw(l, wall, up_ms, t->part, t->plen);
         t->plen = 0;
         if (level) got |= 1 | (level == 'E' || level == 'W' ? 2 : 0);
         if (buf[i] != '\n') /* the cut line goes on: skip to its end */
@@ -223,6 +245,62 @@ int ulog_tail(struct ulog_tail *t, card_log *l, long wall, unsigned up_ms) {
     }
     long off = read_from(t, t->path, t->off, ULOG_READ_MAX, l, wall, up_ms, &got, &size);
     if (off >= 0) t->off = off;
+    return got;
+}
+
+/* ---- the card apps' ---- */
+
+/* name is "q2-<id>.log", id letters, digits, '-' and '_' only: the id into id, 1 */
+static int app_log_name(const char *name, char *id) {
+    int n = (int)strlen(name);
+    if (n < 8 || strncmp(name, "q2-", 3) || strcmp(name + n - 4, ".log") || n - 7 >= ULOG_APP_ID)
+        return 0;
+    for (int i = 3; i < n - 4; ++i) {
+        char c = name[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) return 0;
+        id[i - 3] = c;
+    }
+    id[n - 7] = 0;
+    return 1;
+}
+
+static int exists(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    close(fd);
+    return 1;
+}
+
+int ulog_apps(struct ulog_apps *a, card_log *l, const char *dir, long wall, unsigned up_ms) {
+    int got = 0, seen[ULOG_APPS] = { 0 };
+    char id[ULOG_APP_ID], pid[ULOG_APP_PATH];
+    void *d = opendir(dir);
+    for (struct dirent *e; d && (e = readdir(d));) {
+        if (!app_log_name(e->d_name, id)) continue;
+        snprintf(pid, sizeof pid, "%s/q2-%s", dir, id);
+        if (!exists(pid)) continue; /* no app runs by that id: the firmware's own (q2-demo.log) */
+        int k = 0, free_k = -1;
+        while (k < ULOG_APPS && (!a->id[k][0] || strcmp(a->id[k], id))) {
+            if (!a->id[k][0] && free_k < 0) free_k = k;
+            ++k;
+        }
+        if (k == ULOG_APPS) { /* new: a free slot, or none and it waits */
+            if (free_k < 0) continue;
+            k = free_k;
+            snprintf(a->id[k], sizeof a->id[k], "%s", id);
+            snprintf(a->path[k], sizeof a->path[k], "%s/q2-%s.log", dir, id);
+            ulog_tail_at(&a->t[k], a->path[k], a->from_end);
+            a->t[k].src = a->id[k];
+        }
+        seen[k] = 1;
+    }
+    if (d) closedir(d);
+    a->from_end = 0; /* a log found from here on was begun since */
+    for (int k = 0; k < ULOG_APPS; ++k) {
+        if (!a->id[k][0]) continue;
+        got |= ulog_tail(&a->t[k], l, wall, up_ms);
+        if (!seen[k]) a->id[k][0] = 0; /* stopped: what it wrote last is in, and the slot is free */
+    }
     return got;
 }
 

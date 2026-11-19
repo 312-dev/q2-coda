@@ -29,7 +29,7 @@
 #define LS_DEVS 8          /* the devices a page lists */
 #define LS_TRUSTED 8       /* the trusted devices Trusted Devices lists */
 #define LS_STATE_MAX 6144  /* localsend.c write_state's buffer */
-#define LS_FILES 16        /* the files one send takes */
+#define LS_FILES 24        /* the files one send takes */
 
 /* The rows' geometry: Car Remote's (carremote_page.c), the mock-up's (localsend-mock.png) */
 #define LS_ROW 32
@@ -223,7 +223,12 @@ static unsigned ls_file_kb(const char *path) {
     return (sx[10] >> 10) + (sx[11] << 22) + ((sx[10] & 1023) != 0);
 }
 
-/* The logs' files (LS_LOGS's, as they are) into paths, their count; their size into *kb. */
+/* The logs' files (LS_LOGS's, as they are) into paths, their count; their size into *kb. Then each
+ * card app's own logs as they are now, of the apps the last addon_scan found, each with the .1 it
+ * rolls to: its log in RAM, /tmp/q2-<id>.log (Go's standard log, q2-subsonic's SetupLog; the
+ * unified log has its lines from the time q2guard read them, q2log_core.c ulog_apps), and its log
+ * on the card, .<id>/log.txt (q2-subsonic's applog, where its fetches' failures go, their tokens
+ * and passwords redacted by the app), which q2guard never reads: the card may hang. */
 static int ls_logs(char paths[][64], int cap, unsigned *kb) {
     int n = 0;
     *kb = 0;
@@ -235,6 +240,16 @@ static int ls_logs(char paths[][64], int cap, unsigned *kb) {
         ++n;
     }
     if (d) closedir(d);
+    static const char *const where[] = { "/tmp/q2-%s.log%s", "/mnt/mmc/.%s/log.txt%s" };
+    const char *id;
+    for (int k = 0; (id = addon_id(k)); ++k)
+        for (int f = 0; f < 4 && n < cap; ++f) {
+            unsigned sx[64];
+            tk_snprintf(paths[n], 64, where[f >> 1], id, f & 1 ? ".1" : "");
+            if (ringnav_statx(-100, paths[n], 0, 0x200 /* SIZE */, sx)) continue; /* none */
+            *kb += ls_file_kb(paths[n]);
+            ++n;
+        }
     return n;
 }
 
@@ -353,7 +368,7 @@ static void ls_pick_open(const ls_dev *d) {
         widget_set_prop_str(item, LS_VALUE, values[r]);
         widget_set_prop_str(item, "_ls_label", labels[r]);
     }
-    ls_gap(view, 34, K_CAPTION, "Logs: q2-log, q2-heat and q2-bt, as they are now");
+    ls_gap(view, 34, K_CAPTION, "Logs: the Q2's and its apps', as they are now");
     ls_fit(view);
     ringnav_select(view, 0, 2);
     ls.pick_view = view;
@@ -428,7 +443,7 @@ void localsend_share(const char *path, const char *title) {
     } else {
         ls_logs(paths, LS_FILES - 1, &kb);
         ls_size(size, sizeof size, kb);
-        tk_snprintf(ls.share_line, sizeof ls.share_line, "q2-log, q2-heat, q2-bt \xc2\xb7 %s", size);
+        tk_snprintf(ls.share_line, sizeof ls.share_line, "q2-log, q2-heat, q2-bt, apps \xc2\xb7 %s", size);
     }
     ls_start();
     ls_scan();
