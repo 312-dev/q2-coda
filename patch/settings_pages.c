@@ -124,7 +124,7 @@ static int cap_gone(void *view, void *event) {
     return 0;
 }
 /* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
- * none. A row already in the table keeps its one entry, so a caller may run on every layout: a
+ * none, a caption it had dropped. A row already in the table keeps its one entry, so a caller may run on every layout: a
  * second entry for the row, never measured, would set its height in cap_step after the first. */
 void caption_row(void *label, const unsigned *text) {
     void *item = label ? P(P(label, W_PARENT), W_PARENT) : (void *)0,

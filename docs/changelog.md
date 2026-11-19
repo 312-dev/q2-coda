@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: **Quality** now knows which codecs the connected device has. Choices it lacks are grayed (a car with only SBC and AAC grays LDAC, aptX HD and aptX), and picking one keeps the music going on the best codec the device has instead of trying to switch to one it can't play; the row says so: "BMW 6R81 doesn't support aptX HD: using AAC". Your pick is kept for the next device.
   - Home: a Rockbox or Groovebox copied onto the card, a new card, or a new folder at the card's top now shows on Home straight away, instead of up to five seconds later.
   - Car Remote: the phone's buttons (play, pause, skip, volume and the rest) now act on the Q2 at once, instead of up to half a second later.
   - Bluetooth: while music plays to a headset, the Q2 no longer searches for Wi-Fi networks in the background every few seconds when it isn't connected to one (Wi-Fi and Bluetooth share one radio, and each search took air time from the headset). It still joins a network once the music stops, and the Wi-Fi page searches as before, music playing or not. On the Bluetooth page, a headset that connects by itself while the page is searching now stops the search, as picking a device already did.
