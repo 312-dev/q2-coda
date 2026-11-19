@@ -528,6 +528,83 @@ def test_homes_folders_rule_looks_at_the_card_only_when_due(fw):
     assert folders() == 0 and (len(looked), len(listed)) == (3, 2)  # no card: nothing to list
 
 
+class CardWatch:
+    """card_watch.c's descriptors as the kernel would answer them (docs/internals.md#card-watch): inotify_init1 gives
+    fd 20, /proc/mounts opens as fd 21 and reads as a mounted card; pthread_create keeps the thread, whose waits the
+    test runs one at a time, each poll finding `ready`."""
+    IN, MOUNTS = 20, 21
+
+    def __init__(self, fw):
+        self.fw, self.watches, self.ready = fw, [], ''
+        Files(fw, {'/proc/mounts': b'/dev/mmcblk0p1 /mnt/mmc vfat rw 0 0\n'})
+        def syscall(nr, a, b, c, *_):
+            if nr == 4329:  # inotify_init1
+                return self.IN
+            if nr == 4285:  # inotify_add_watch
+                self.watches.append(C.string_at(b).decode())
+                return len(self.watches)
+            assert nr == 4188 and b == 2  # poll: inotify and /proc/mounts
+            C.c_short.from_address(a + 6).value = 1 if self.ready == 'in' else 0
+            C.c_short.from_address(a + 14).value = 10 if self.ready == 'mounts' else 0  # POLLPRI | POLLERR
+            return 1
+        fw.mock('cw_syscall', syscall)
+        fw.mock('fw_open', lambda path, *_: self.MOUNTS if C.string_at(path) == b'/proc/mounts' else -1)
+        fw.mock('fw_read', lambda fd, *_: 16 if fd == self.IN else -1)
+        fw.mock('fw_pthread_create', lambda t, *_: C.c_ulong.from_address(t).__setattr__('value', 7) or 0)
+        self.wait = fw.fn('card_watch__cw_step', C.c_int)
+
+    def step(self, ready):
+        self.ready, self.watches = ready, []
+        assert self.wait() == 1
+
+
+def test_the_status_rows_binaries_follow_the_cards_changes_not_a_clock(fw):
+    """A Rockbox copied in by hand, or the card taken out, shows on the next paint; with nothing changing, no clock
+    looks again."""
+    now, stats, on = [100000], [], [False]
+    fw.mock('time_now_ms', lambda *_: now[0])
+
+    def stat(version, path, info, *_):
+        stats.append(C.string_at(path))
+        C.c_uint.from_address(info + 20).value = 0o100755
+        return 0 if on[0] else -1
+    fw.mock('fw___xstat', stat)
+    watch = CardWatch(fw)
+    rockbox = fw.fn('rockbox_seen', C.c_int)
+    assert rockbox() == 0 and len(stats) == 2
+    assert watch.watches == ['/mnt/mmc', '/mnt/mmc/.rockbox', '/mnt/mmc/.groovebox']
+    on[0] = True  # copied over a minute later
+    now[0] += 12 * O['CARD_RECHECK_MS']
+    assert [rockbox() for _ in range(50)] == [0] * 50 and len(stats) == 2  # nothing said it changed: no stat
+    watch.step('in')  # .rockbox/rockbox made
+    assert watch.watches == ['/mnt/mmc', '/mnt/mmc/.rockbox', '/mnt/mmc/.groovebox']  # set again before the count
+    assert rockbox() == 1 and len(stats) == 4
+    on[0] = False
+    watch.step('mounts')  # the card taken out
+    assert [a[0] for _, a in fw.calls('fw_close')] == [CardWatch.MOUNTS]  # opened again from the table as it is
+    assert rockbox() == 0 and len(stats) == 6
+
+
+def test_homes_folders_rule_follows_the_cards_root_at_once(fw):
+    now, looked, listed, card = [100000], [], [], {'mtime': 1}
+    fw.mock('time_now_ms', lambda *_: now[0])
+    fw.mock('fw_access', lambda path, *_: looked.append(C.string_at(path)) or 0)
+
+    def stat(version, path, info, *_):
+        C.c_uint.from_address(info + 64).value = card['mtime']
+        return 0
+    fw.mock('fw___xstat', stat)
+    fw.mock('toolsLoadDirectory', lambda *_: listed.append(1) or 3)
+    watch = CardWatch(fw)
+    folders = fw.fn('home_folders', C.c_int)
+    assert folders() == 1 and (len(looked), len(listed)) == (1, 1)
+    now[0] += 3 * O['CARD_RECHECK_MS']
+    assert folders() == 1 and (len(looked), len(listed)) == (1, 1)  # no clock
+    card['mtime'] = 2
+    watch.step('in')  # a folder made at the root
+    assert folders() == 1 and (len(looked), len(listed)) == (2, 2)
+
+
 @pytest.mark.parametrize('flag, choice', [(0, 0), (1, 1)])
 def test_lock_choice_is_off_or_on(fw, flag, choice):
     fw.var('g_keylock_flag', C.c_ubyte).value = flag

@@ -1309,6 +1309,79 @@ def test_mainscheduling_at_a_zero_clock_still_paces(fw):
     assert sched.at(0, 50, 101) == [True, False, True]  # its stamp is 1, never 0 (a ms late)
 
 
+# Lit: the player polls wait on q2player's status push (docs/internals.md#player-status-push).
+class Push:
+    """player_push.c's socket and poll as the kernel would answer them: bind takes it (unless refused), and each poll
+    returns a push while pending says one is there, else its timeout."""
+    FD = 11
+
+    def __init__(self, fw, stock_bytes, clock, refused=False):
+        self.fw, self.pending, self.polls, self.clock = fw, 0, [], clock
+        self.ab = stock_bytes(O['REPEAT_INFO'], 16)
+        fw.mock('fw_socket', lambda *_: self.FD)
+        fw.mock('fw_recv', self.recv)
+        def syscall(nr, a, b, c, *_):
+            if nr == 4169:  # bind
+                return -1 if refused else 0
+            assert nr == 4188 and b == 1  # poll, one fd
+            self.polls.append(c)
+            return 1 if self.pending else 0
+        fw.mock('pp_syscall', syscall)
+        self.wait = fw.fn('ringnav_dark_usleep', C.c_int, C.c_uint)
+        self.seq = fw.fn('player_push_seq', C.c_uint)
+
+    def recv(self, *_):
+        if not self.pending: return -1
+        self.pending -= 1
+        return 1
+
+    def sleeps(self):
+        return [c[1][0] for c in self.fw.calls('fw_usleep')]
+
+
+def test_lit_the_status_thread_waits_for_a_push_up_to_the_slow_check(fw, stock_bytes):
+    sched = Scheduling(fw)
+    push = Push(fw, stock_bytes, sched.clock)
+    sched.at(0)  # the UI pass binds the socket and finds nothing that follows the position closely
+    push.wait(200000)  # nothing changed: one poll, as long as the slow check
+    push.pending = 2
+    push.clock.now += 700
+    push.wait(200000)  # two datagrams, taken in one wake
+    assert push.polls == [O['DARK_POLL_US'] // 1000] * 2 and push.seq() == 1 and push.sleeps() == []
+
+
+def test_a_push_never_makes_the_status_thread_ask_more_often_than_stock(fw, stock_bytes):
+    sched = Scheduling(fw)
+    push = Push(fw, stock_bytes, sched.clock)
+    sched.at(0)
+    push.wait(200000)
+    push.pending, push.clock.now = 1, push.clock.now + 50
+    push.wait(200000)
+    assert push.sleeps() == [150000]  # 50 ms after the last ask: the rest of stock's 200
+
+
+def test_lit_scheduling_runs_on_a_push_else_at_the_slow_check(fw, stock_bytes):
+    sched = Scheduling(fw)
+    push = Push(fw, stock_bytes, sched.clock)
+    poll = O['DARK_POLL_US'] // 1000
+    assert sched.at(0, 100, 200, poll - 1, poll) == [True, False, False, False, True]  # nothing moved: once a second
+    push.pending = 1
+    push.wait(200000)  # the status thread takes a push
+    assert sched.at(50, 100, 200) == [False, True, False]  # the pass after it, not before stock's 100 ms
+
+
+@pytest.mark.parametrize('why', ['refused', 'a-b', 'end'])
+def test_without_the_push_or_with_the_position_followed_the_polls_keep_stocks_pace(fw, stock_bytes, why):
+    sched = Scheduling(fw, sec=195 if why == 'end' else 10)  # 'end': in the track's last DARK_END_LEAD_S
+    push = Push(fw, stock_bytes, sched.clock, refused=why == 'refused')
+    if why == 'a-b':  # check_abrepeatmode seeks back to A from the cached position
+        C.c_ubyte.from_address(push.ab).value = 1
+        C.c_int.from_address(push.ab + O['REPEAT_AB_STATE']).value = 2
+    assert sched.at(0, 50, 100) == [True, False, True]
+    push.wait(200000)
+    assert push.sleeps() == [200000] and push.polls == []
+
+
 # Dark while playing: the player polls (mclSyncPlayerStatus' wait, ringnav_mainscheduling) slow down
 # unless something follows the position (docs/internals.md#battery).
 class DarkPlay:

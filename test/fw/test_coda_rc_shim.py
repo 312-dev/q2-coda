@@ -257,6 +257,63 @@ def test_next_and_previous_go_to_the_player(fw, ui, mcl, recs):
     assert len(fw.calls('player_prev_music')) == 1 and q2.files.pop(ACK) == b'15 0\n'
 
 
+class Tell:
+    """The daemon's pipe (docs/internals.md#car-remote-tell): pipe2 answers fds 8 and 9, pthread_create keeps the
+    thread to run by hand, and each run of it reads `bytes` once, then the daemon's end closing."""
+    R, W = 8, 9
+
+    def __init__(self, fw):
+        self.fw, self.threads, self.bytes = fw, [], 0
+        def syscall(nr, a, *_):
+            assert nr == 4328  # pipe2
+            C.c_int.from_address(a).value, C.c_int.from_address(a + 4).value = self.R, self.W
+            return 0
+        fw.mock('cr_syscall', syscall)
+        fw.mock('fw_pthread_create', lambda t, attr, fn, arg, *_: self.threads.append(arg) or
+                C.c_ulong.from_address(t).__setattr__('value', 7) or 0)
+        fw.mock('fw_read', lambda fd, *_: self.take() if fd == self.R else -1)
+        self.worker = fw.fn('coda_rc_shim__cr_tell', C.c_void_p, C.c_void_p)
+
+    def take(self):
+        n, self.bytes = self.bytes, 0
+        return n
+
+    def tell(self):
+        """The daemon wrote a file the shim reads, then went: the thread counts it and ends."""
+        self.bytes = 1
+        self.worker(self.threads[-1])
+
+
+def test_the_daemons_tell_reads_its_files_on_the_next_pass_else_every_5_s(fw, ui, mcl, recs):
+    tell = Tell(fw)
+    q2 = Q2(fw, ui, recs)
+    q2.tick()
+    assert q2.system == ['( /usr/bin/coda-rc --tell-fd 9 >/dev/null 2>&1 & )']
+    assert [a[:3] for _, a in fw.calls('fw_fcntl')] == [(9, 2, 0)]  # inheritable for that start only
+    assert [a[0] for _, a in fw.calls('fw_close')] == [9] and tell.threads == [8]
+    q2.files[CMD] = b'14 next\n'
+    q2.tick()
+    assert ACK not in q2.files  # no tell: Now Playing's pass leaves the files
+    q2.tick(4500)
+    assert q2.files.pop(ACK) == b'14 0\n'  # CR_FILES_MS after the last look
+    q2.files[CMD] = b'15 previous\n'
+    tell.tell()
+    q2.tick(50)
+    assert q2.files.pop(ACK) == b'15 0\n' and len(fw.calls('player_prev_music')) == 1  # the pass after the tell
+    q2.files[CMD] = b'16 next\n'
+    q2.tick(600)
+    assert q2.files.pop(ACK) == b'16 0\n'  # the daemon's end closed: every CR_POLL_MS again
+
+
+def test_without_the_pipe_the_files_are_read_every_poll(fw, ui, mcl, recs):
+    q2 = Q2(fw, ui, recs)  # pipe2 refused (the stub's 0 leaves no fds)
+    q2.tick()
+    assert q2.system == ['( /usr/bin/coda-rc >/dev/null 2>&1 & )']
+    q2.files[CMD] = b'14 next\n'
+    q2.tick()
+    assert q2.files.pop(ACK) == b'14 0\n'
+
+
 def test_mode_sets_shuffle_and_repeat_as_the_hold_menu(fw, ui, mcl, recs):
     """SetMode's "mode <shuffle> <repeat>" while the hold menu's extended play runs: its playback_set, the nearest Q2
     mode, -1 left alone (outside it, Now Playing's own pair: test_modes_follow_now_playings_buttons_both_ways)."""

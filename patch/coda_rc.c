@@ -67,6 +67,31 @@ static int read_file(const char *path, void *buf, size_t cap) {
     return n;
 }
 
+/* --tell-fd: the write end of demo's pipe (coda_rc_shim.c cr_start). A byte after each change to a file the shim
+ * reads, so it reads them then instead of on its clock; nothing else goes on it and nothing comes back. A write
+ * refused for any reason but a full pipe (demo gone) closes it, and the shim's clock is all there is. */
+static int tell_fd = -1;
+static void tell_shim(const char *path) {
+    static const char *const read_by_shim[] = { "/tmp/coda-rc.cmd", "/tmp/coda-rc.pair", "/tmp/coda-rc.pair-end",
+                                                "/tmp/coda-rc.wake" };
+    if (tell_fd < 0) return;
+    for (unsigned i = 0; i < sizeof read_by_shim / sizeof *read_by_shim; ++i)
+        if (!strcmp(path, read_by_shim[i])) {
+            if (write(tell_fd, "1", 1) < 0 && errno != EAGAIN) close(tell_fd), tell_fd = -1;
+            return;
+        }
+}
+
+/* The fd --tell-fd names, if it is open for writing only, as a pipe's write end is: nonblocking, and not
+ * inherited further. */
+static int tell_open(int fd) {
+    int fl = fd > 2 ? fcntl(fd, F_GETFL) : -1;
+    if (fl < 0 || (fl & 3) != O_WRONLY) return -1;
+    fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    return fd;
+}
+
 /* path replaced whole: a temporary beside it, synced, renamed over it */
 int crc_write_file(const char *path, const void *buf, size_t n, unsigned mode) {
     char p[256], t[264];
@@ -80,12 +105,13 @@ int crc_write_file(const char *path, const void *buf, size_t n, unsigned mode) {
     }
     if (ok) ok = rename(t, p) == 0;
     if (!ok) unlink(t);
+    if (ok) tell_shim(path);
     return ok ? 0 : -1;
 }
 
 static void unlink_at(const char *path) {
     char p[256];
-    unlink(crc_path(p, sizeof p, path));
+    if (!unlink(crc_path(p, sizeof p, path))) tell_shim(path);
 }
 
 void crc_log(const char *fmt, ...) {
@@ -943,6 +969,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--no-ble")) use_ble = 0;
         else if (!strcmp(argv[i], "--mdns-if") && i + 1 < argc) mdns_if = argv[++i];
         else if (!strcmp(argv[i], "--no-mdns")) mdns_if = 0;
+        else if (!strcmp(argv[i], "--tell-fd") && i + 1 < argc) tell_fd = tell_open(atoi(argv[++i]));
     }
     setpriority(PRIO_PROCESS, 0, 19);
     signal(SIGPIPE, SIG_IGN);

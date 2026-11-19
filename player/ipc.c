@@ -14,6 +14,44 @@
 static int sock = -1;
 static pthread_mutex_t send_mu = PTHREAD_MUTEX_INITIALIZER;
 
+/* The status push (docs/internals.md#player-status-push): a one-byte datagram to demo's PUSH_PATH (Q2PLAYER_PUSH in
+ * tests) each time what player-status or media-info would answer changes, so demo's status poll waits on it instead
+ * of asking five times a second. Nothing listening (demo has not bound it yet) loses the push, which demo's slow
+ * check covers. */
+static struct {
+    int fd;
+    struct sockaddr_un to;
+    struct { int state, has_info, position; struct info info; } last; /* as last pushed */
+} push = {.fd = -1};
+
+void ipc_push_open(const char *path) {
+    push.to.sun_family = AF_UNIX;
+    snprintf(push.to.sun_path, sizeof push.to.sun_path, "%s", path);
+    push.fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    push.last.state = -1;
+}
+
+static void push_send(void) {
+    if (push.fd >= 0) sendto(push.fd, "s", 1, MSG_DONTWAIT | MSG_NOSIGNAL, (struct sockaddr *)&push.to, sizeof push.to);
+}
+
+/* With ctl's mu held, after the playback thread changes the status. */
+void ipc_status_note(const struct ctl *c) {
+    if (push.last.state == c->state && push.last.has_info == c->has_info && push.last.position == c->position &&
+        !memcmp(&push.last.info, &c->info, sizeof c->info))
+        return;
+    push.last.state = c->state, push.last.has_info = c->has_info, push.last.position = c->position;
+    push.last.info = c->info;
+    push_send();
+}
+
+/* An event (a song's exit, an error), then a push: demo's status poll is what reads a player-status event, so it
+ * looks once the event is on the socket, whatever the order of the status change beside it. */
+void ipc_event(const char *text) {
+    ipc_send(text);
+    push_send();
+}
+
 int ipc_connect(const char *path) {
     struct sockaddr_un a = {.sun_family = AF_UNIX};
     snprintf(a.sun_path, sizeof a.sun_path, "%s", path);

@@ -28,19 +28,21 @@ int groovebox_available(void) { return bin_available(GROOVEBOX_BIN); }
 
 /* The two as the status row asks on every paint (bar_sync, shortcut): looked at again once a
  * library scan has rewritten the library (library_gen), at once after the Shelf installs or
- * removes an app (card_bins_changed), and else CARD_RECHECK_MS after the last look, which a card's
- * mount or removal waits out as logo_poll's edge does. Stat'ing both on each paint cost Now
- * Playing 150 syscalls a second. ponytail: a binary copied on some other way shows on Home up to
- * CARD_RECHECK_MS late. */
+ * removes an app (card_bins_changed), and when the card or its app folders change (card_watch.c's
+ * generation: a binary copied in by hand, the card put in or taken out). Without that watch, again
+ * CARD_RECHECK_MS after the last look. Stat'ing both on each paint cost Now Playing 150 syscalls a
+ * second. */
 static struct {
-    unsigned at, gen;
+    unsigned at, gen, card;
     unsigned char read, rockbox, groovebox;
 } cb __attribute__((section(".scratch")));
 void card_bins_changed(void) { cb.read = 0; }
 static void card_bins(void) {
-    unsigned now = time_now_ms();
-    if (cb.read && cb.gen == library_gen && now - cb.at < CARD_RECHECK_MS) return;
-    cb.read = 1, cb.gen = library_gen, cb.at = now;
+    unsigned now = time_now_ms(), card = card_watch_gen();
+    if (cb.read && cb.gen == library_gen &&
+        (card ? cb.card == card : now - cb.at < CARD_RECHECK_MS))
+        return;
+    cb.read = 1, cb.gen = library_gen, cb.at = now, cb.card = card;
     cb.rockbox = (unsigned char)rockbox_available();
     cb.groovebox = (unsigned char)groovebox_available();
 }

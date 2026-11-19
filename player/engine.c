@@ -69,7 +69,7 @@ static void send_exit(void) {
         now = last + EXIT_HOLD_MS;
     }
     last = now;
-    ipc_send("{player-status\\exit}");
+    ipc_event("{player-status\\exit}");
 }
 
 /* ---- the preload: set-gapless's song, opened on its own thread so the song playing never waits on a slow open */
@@ -151,6 +151,7 @@ static int play(struct source *s, const struct song *song) {
     /* until the song is heard its position reads 0, a start offset's too, as stock's does (fixtures/pod-start.txt) */
     c->info = info, c->has_info = 1, c->position = 0, c->state = OPENING;
     int rg = c->replaygain; /* taken at each file, as stock's */
+    ipc_status_note(c);
     pthread_mutex_unlock(&c->mu);
     stream_playing(source_stream(s)); /* get_cache_buffer reports this song's cache, or 0 */
     struct dsp *d = dsp_open(source_format(s), untouched, untouched ? 1 : source_replaygain(s, rg), info.length);
@@ -295,6 +296,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
             if (seek && !paused) {
                 pthread_mutex_lock(&c->mu);
                 c->position = target;
+                ipc_status_note(c);
                 pthread_mutex_unlock(&c->mu);
             }
         }
@@ -337,6 +339,7 @@ static int play_through(struct source *s, const struct song *song, struct dsp *d
         if (played > 0) c->position = (int)(heard_at(s, sx, &rw, origin, offset) / f->rate);
         if (heard) c->state = PLAYING;
         if (metering) c->uv[0] = uv[0], c->uv[1] = uv[1]; /* the last levels stand otherwise, as stock's */
+        ipc_status_note(c);
         pthread_mutex_unlock(&c->mu);
     }
 }
@@ -371,6 +374,7 @@ void *engine_thread(void *unused) {
         if (!cur) {
             pthread_mutex_lock(&c->mu);
             c->state = IDLE, c->has_info = 0;
+            ipc_status_note(c);
             while (!c->play) {
                 c->stop = c->seek = c->preload = c->close_preload = 0; /* nothing is playing: stock answers none of these */
                 pthread_cond_wait(&c->wake, &c->mu);
@@ -384,13 +388,14 @@ void *engine_thread(void *unused) {
                 pthread_mutex_unlock(&c->mu);
                 if (out) dac_mute(out_way), output_drop(out);
                 close_output(0);
-                ipc_send("{player-stopstatus\\exit}");
+                ipc_event("{player-stopstatus\\exit}");
                 continue;
             }
             song = c->play_song;
             song.dsd = dsd_out(c->outputway, song.hw, c->dsdmode);
             c->play = c->next = c->seek = c->paused = c->cut = 0;
             c->state = OPENING;
+            ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);
             int error;
             preload_cancel();
@@ -403,11 +408,11 @@ void *engine_thread(void *unused) {
                 if (stopped) c->play = c->next = 0;
                 pthread_mutex_unlock(&c->mu);
                 if (stopped || skipped) { /* given up, not failed: answered as a song cut while it played */
-                    ipc_send(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
+                    ipc_event(stopped ? "{player-stopstatus\\exit}" : "{player-nextstatus\\exit}");
                     continue;
                 }
                 touch(error == ERR_MISSING ? "/tmp/notfile" : "/tmp/notsupport");
-                ipc_send("{player-status\\error}");
+                ipc_event("{player-status\\error}");
                 continue;
             }
         }
@@ -426,6 +431,7 @@ void *engine_thread(void *unused) {
                  * loop then opens that file itself; here the preload's own open goes on and this thread waits. */
                 pthread_mutex_lock(&c->mu);
                 c->has_info = 0, c->state = OPENING;
+                ipc_status_note(c);
                 pthread_mutex_unlock(&c->mu);
                 send_exit(), sent = 1;
                 settle_preload(1);
@@ -435,6 +441,7 @@ void *engine_thread(void *unused) {
         int skipped = c->next, waiting = c->play, stopping = c->stop;
         c->has_info = 0;
         if (why == STOPPED) c->play = c->next = 0; /* a stop also forgets a song that was waiting, as stock's does */
+        ipc_status_note(c);
         pthread_mutex_unlock(&c->mu);
         switch (why) {
         case ENDED:
@@ -457,13 +464,14 @@ void *engine_thread(void *unused) {
             close_output(1);
             pthread_mutex_lock(&c->mu);
             c->state = IDLE;
+            ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);
             if (!sent) send_exit();
             break;
         case NEXT: /* the PCM stays open for the next song, which closes it if its format differs */
             if (out) dac_mute(out_way), output_drop(out), out_cut = 1;
             preload_cancel();
-            if (skipped) ipc_send("{player-nextstatus\\exit}");
+            if (skipped) ipc_event("{player-nextstatus\\exit}");
             break;
         case STOPPED:
             if (out) dac_mute(out_way), output_drop(out);
@@ -471,8 +479,9 @@ void *engine_thread(void *unused) {
             preload_cancel();
             pthread_mutex_lock(&c->mu);
             c->state = IDLE;
+            ipc_status_note(c);
             pthread_mutex_unlock(&c->mu);
-            ipc_send("{player-stopstatus\\exit}");
+            ipc_event("{player-stopstatus\\exit}");
             break;
         case MOVED: { /* a DSD song opened for another output than the one it starts on: opened again for this one */
             int error;
@@ -482,14 +491,14 @@ void *engine_thread(void *unused) {
             if ((cur = source_open(&song, &error, NULL))) break;
             close_output(0);
             touch("/tmp/notsupport");
-            ipc_send("{player-status\\error}");
+            ipc_event("{player-status\\error}");
             break;
         }
         case FAILED:
             close_output(0);
             preload_cancel();
             touch("/tmp/notsupport");
-            ipc_send("{player-status\\error}");
+            ipc_event("{player-status\\error}");
             break;
         }
     }

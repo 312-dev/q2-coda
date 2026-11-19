@@ -350,6 +350,10 @@ class Session:
         self.tmp = self.out / 'tmp'; shutil.rmtree(self.tmp, ignore_errors=True); self.tmp.mkdir()
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.srv.bind(str(self.tmp / 'sock_play')); self.srv.listen(1)
+        # q2player's status push (docs/internals.md#player-status-push), bound as demo binds it: each datagram's time
+        self.push = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.push.bind(str(self.tmp / 'q2player.push')); self.push.setblocking(False)
+        self.pushes = []
         self.lines, self.seen, self.t0, self.conn, self.playing, self.preload, self.speed = [], {}, None, None, False, False, 1
         self.music = None  # the music directory on this machine, for steps that act on its files
         self.on_exit = []  # set-gapless commands sent one at each {player-status\\exit}, as demo sends one per song
@@ -385,6 +389,13 @@ class Session:
                 for p in POLL: self.send(p, quiet=True)
                 next_poll = now + 0.2 / self.speed
             r, _, _ = select.select([self.conn], [], [], min(0.02 / self.speed, until - now))
+            # pushes are taken on the loop's own passes, never waking it: the poll's timing, which the protocol
+            # fixtures' once-a-second positions are sampled from, stays what it was without them; a push sent
+            # before an answer is taken before that answer
+            while True:
+                try: self.push.recv(16)
+                except BlockingIOError: break
+                self.pushes.append(self.now())
             if not r: continue
             data = self.conn.recv(4096)
             if not data:
@@ -397,6 +408,7 @@ class Session:
                     f = m[12:-1].split('|')
                     self.positions.append((self.now(), int(f[3])))
                     shown = '{media-info\\' + '|'.join(f[:3] + ['POS'] + f[4:]) + '}'
+                if name in ('media-info', 'player-status'): self.answers.append((self.now(), m))  # as answered, position and all
                 # an answer to the 200 ms poll is written only when it differs from the last one of its kind
                 if name in ('media-info', 'player-status') and self.seen.get(name) == shown: pass
                 else: self.note('<', shown)
@@ -410,7 +422,7 @@ class Session:
     def run(self, steps, launch, speed=1):
         """speed: the player's clock runs this many times faster (its file sink's Q2PLAYER_SPEED), so the steps' times
         and the poll's period shrink by it."""
-        self.positions, self.speed = [], speed
+        self.positions, self.answers, self.speed = [], [], speed
         proc = launch(self)
         self.srv.settimeout(30)
         self.conn, _ = self.srv.accept()
@@ -441,7 +453,7 @@ def launch_host(player, music, speed=1, env=None):
         # the CA bundle q2player checks HTTPS against (Q2 Muse's player's, docs/internals.md#stock-https): the test CA's
         (s.out / 'etc/ssl/certs').mkdir(parents=True, exist_ok=True)
         shutil.copy(s.ca, s.out / 'etc/ssl/certs/ca-certificates.crt')
-        e = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed), **(env or {}))
+        e = dict(os.environ, Q2PLAYER_SOCK=str(s.tmp / 'sock_play'), Q2PLAYER_PUSH=str(s.tmp / 'q2player.push'), Q2PLAYER_PCM=str(s.out / 'pcm'), Q2PLAYER_SPEED=str(speed), **(env or {}))
         # the host build reads patch/peq.h's files (/mnt/data/peq-active, /tmp/q2xfade, ...) under its directory
         return subprocess.Popen([player], stdout=open(s.out / 'player.log', 'w'), stderr=subprocess.STDOUT, env=e, cwd=s.out)
     return go

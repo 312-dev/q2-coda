@@ -10,6 +10,8 @@ files in place of ALSA.
   assembly off): two FLACs and two MP3s through a preloaded change come out as one stream with no
   sample added or lost at the cut, and a 24-bit 96 kHz FLAC as S32.
 - formats: each output is opened in the width stock opens for the same file.
+- status push: a datagram to demo's push socket for each change of what the status queries answer, none while
+  paused (docs/internals.md#player-status-push).
 - protocol: for each transcript in fixtures/ (stock's and Q2 Muse's hciplayer under qemu, captured by
   fakedemo.py), the same commands get the same events and answers from q2player.
 """
@@ -287,6 +289,26 @@ def test_bad_preload(player, songs, tmp):
     assert events == ['{player-status\\exit}', '{player-status\\error}'], events
     assert pathlib.Path('/tmp/notsupport').exists(), '/tmp/notsupport not made'
     return 'played to the end, then exit, error and /tmp/notsupport'
+
+
+def test_status_push(player, songs, tmp):
+    """docs/internals.md#player-status-push: a datagram for each change of what player-status and media-info answer,
+    so demo's status poll waits on it, and none while they stay the same (paused, with nothing moving)."""
+    s, _, _ = play(player, songs, 'transport', tmp/'push')
+    assert s.pushes, 'no status push'
+    paused = [round(t, 2) for t in s.pushes if 4.3 < t < 6.0]  # mcl-pause at 4.0, mcl-play at 6.0
+    assert not paused, f'pushes while paused: {paused}'
+    playing = [t for t in s.pushes if 1.5 < t < 4.0]  # the position's whole seconds, one a second
+    assert 1 <= len(playing) <= 4, f'{len(playing)} pushes in 2.5 s of playing'
+    # every change the 200 ms poll saw had its push after the poll before it
+    last, missed = {}, []
+    for t, m in s.answers:
+        name = m[1:m.index('\\')]
+        if name in last and last[name][1] != m and not any(last[name][0] <= p <= t for p in s.pushes):
+            missed.append((round(t, 2), m))
+        last[name] = (t, m)
+    assert not missed, f'changes with no push: {missed}'
+    return f'{len(s.pushes)} pushes in 13 s, none paused, {len(playing)} in 2.5 s playing'
 
 
 def crc8(b):

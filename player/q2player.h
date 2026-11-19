@@ -57,6 +57,9 @@ extern struct ctl ctl;
 /* ipc.c */
 int ipc_connect(const char *path);
 void ipc_send(const char *text);
+void ipc_push_open(const char *path);         /* the status push's socket, demo's at path */
+void ipc_status_note(const struct ctl *c);    /* mu held: push when what the status queries answer has changed */
+void ipc_event(const char *text);             /* an event demo did not ask for, sent and pushed */
 void plog(char level, const char *msg, int n); /* main.c: a line in the unified log, source "player" */
 void *ipc_thread(void *);
 

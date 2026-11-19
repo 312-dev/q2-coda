@@ -98,6 +98,8 @@ hciplayer sends these on its own, from the main loop, when a song ends (`0x42240
 
 demo's reading of them (`0x5bad38`, on each `player-status` answer): `exit` and `error` clear its "playing" byte `mcl+0x2d`; `error` also sets status 1 (stopped); `playing` and `ready` set `mcl+0x2e`.
 
+Q2 Muse's `q2player` also sends a one-byte datagram to demo's `/tmp/q2player.push`, off this socket, whenever what `player-status` or `media-info` would answer changes and after each of these events, so demo's status poll waits for it instead of asking every 200 ms ([internals: Player status push](internals.md#player-status-push)). Stock's hciplayer sends nothing of the kind.
+
 ### What demo sends, and when
 
 - **Every 200 ms while it believes a song is playing** (`mclSyncPlayerStatus`): `{player-status\request}` then `{media-info\get-music-info}`. It sends nothing while stopped.
