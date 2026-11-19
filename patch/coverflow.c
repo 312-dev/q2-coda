@@ -2617,10 +2617,10 @@ static void caption_mark(void *w, void *canvas) {
  * (ringnav_hscroll_start). Stock draws even a centred caption at -xoffset, so a fitting one is set
  * back to 0 too. */
 static void caption_text(void *label, const char *s) {
-    if (!text_differs(label, s)) return;
-    hscroll_label_stop(label);
+    int fresh = text_differs(label, s);
+    if (fresh) hscroll_label_stop(label);
     widget_set_text_utf8(label, s);
-    widget_set_prop_int(label, "xoffset", 0);
+    if (fresh) widget_set_prop_int(label, "xoffset", 0);
 }
 /* The captions name album c (or a card's), once each time it changes (or whether it can play
  * does); a playlist's are its name and its count. */
