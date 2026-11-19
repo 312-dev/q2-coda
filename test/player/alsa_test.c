@@ -1,5 +1,6 @@
 /* player/output.c built with HAVE_ALSA against this file's libasound, which records what it is asked: the software
- * parameters an open sets, what a write does on a PCM that ran dry and on one bluealsa took away. run.py's
+ * parameters an open sets, what a write does on a PCM that ran dry and on one bluealsa took away, and which opens
+ * read alsa-lib's configuration afresh. run.py's
  * test_alsa_sw_params reads one line per case. The model's buffer and period are what the Q2's DAC gives at 44.1 kHz (22050 frames in 16 periods of
  * 1378, docs/internals.md#bluetooth-resampler) and its boundary is alsa-lib's for that buffer on a 32-bit long. */
 #include <stdio.h>
@@ -29,8 +30,15 @@ static unsigned rate = 44100;
 static int opens, open_fails, write_fails, gone_error, prepare_fails, sleeps;
 static unsigned reopen_rate;
 static long last_written = -1;
+/* snd_config_update_free_global: the next open reads alsa-lib's configuration afresh (fresh counts those opens),
+ * so a /mnt/data/asound.conf demo rewrote since the last one names the device (docs/player.md#output). */
+static int freed, fresh;
+static char opened[128]; /* the device the last open named */
+int snd_config_update_free_global(void) { freed = 1; return 0; }
 int usleep(useconds_t us) { sleeps++; return 0; }
 int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
+    fresh += freed, freed = 0;
+    snprintf(opened, sizeof opened, "%s", name);
     if (opens++ && reopen_rate) rate = reopen_rate;
     if (open_fails && open_fails--) return -19;
     *p = &the_pcm;
@@ -136,5 +144,23 @@ int main(void) {
     gone_case("bt-gone-44k", 1, -19, 0, 0, 44100); /* the new transport at 44.1 kHz: the song unresampled */
     gone_case("bt-lost", 1, -19, 0, 1000, 0);      /* the headset gone: no PCM comes back */
     gone_case("dac-gone", 0, -19, 0, 0, 0);        /* off Bluetooth an error ends the song, as before */
+    for (int way = 0; way < 3; ++way) { /* two opens in a row: which read the configuration afresh */
+        struct pcm_format f = {0};
+        f.rate = 44100, f.channels = 2, f.bytes = 2;
+        rate = way == 1 ? 48000 : 44100;
+        opens = fresh = freed = 0;
+        for (int i = 0; i < 2; ++i) output_close(output_open(&f, way, 17));
+        printf("reread way %d opens %d fresh %d\n", way, opens, fresh);
+    }
+    /* the device each way opens, as the Q2 runs it (no Q2PLAYER_DEVICE): Bluetooth's names no address, so the
+     * headset connected last is found whether or not demo has rewritten asound.conf yet */
+    unsetenv("Q2PLAYER_DEVICE");
+    for (int way = 0; way < 3; ++way) {
+        struct pcm_format f = {0};
+        f.rate = 44100, f.channels = 2, f.bytes = 2;
+        rate = way == 1 ? 48000 : 44100;
+        output_close(output_open(&f, way, 17));
+        printf("device way %d %s\n", way, opened);
+    }
     return 0;
 }
