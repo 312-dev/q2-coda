@@ -1543,7 +1543,9 @@ Settings > Bluetooth and its pages ([internals](internals.md#bluetooth-page), `p
   before the check on the checked choice (LDAC Best 990 kbps, LDAC Standard 660, aptX HD 576, aptX 384). Auto
   is the default, and the page opens on the checked choice. Auto's caption, under it while selected, "Steps with
   the signal, 330 to 990 kbps", or with a headset connected on another codec the best it supports, "Best this
-  headset supports: aptX HD, 576 kbps".
+  headset supports: aptX HD, 576 kbps". With a device connected, a choice whose codec it lacks is grayed as the
+  Library's grayed rows are (#666666, the selection's ink at 70% on the bar) and stays pickable; its caption says
+  why and what plays instead, "BMW 6R81 doesn't support aptX HD: using AAC".
 - **Name** (the Q2's): the letter strip says "Phones and cars see this name" in 15 px Text Secondary under the
   name, the hint in 13 px under that.
 - **Toasts**, each with its 15 px glyph: "WH-1000XM5 connected" (the device's kind, white), "WH-1000XM5

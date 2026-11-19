@@ -878,3 +878,229 @@ def test_the_codec_shown_follows_a_switch_on_a_live_link(fw, event, shown, direc
     p.poll()
     assert fw.var('fw_ctx_bt_showcoding', C.c_int).value == after
     assert fw.var('fw_ctx_a2dp_eventstate', C.c_int).value == event  # left for stock
+
+
+# The connected device's codecs (docs/internals.md#bluetooth-page, Quality): learned from bluealsa's GetCodecs once
+# the link streams, the Quality pick taken as the head of an ordered list ending in SBC, a codec the device lacks
+# refused before the link is touched and marked on the picker.
+CODECS_FILE = '/tmp/q2bt.codecs'
+BMW = ['SBC', 'AAC']                          # a car: SBC and AAC only
+PX7 = ['aptX-HD', 'aptX', 'AAC', 'SBC']        # Bowers & Wilkins Px7: no LDAC
+CODEC = {'SBC': 1, 'AAC': 2, 'aptX': 3, 'LDAC': 4, 'aptX-HD': 13}
+
+
+class Bluealsa:
+    """bluealsa and its D-Bus as sh sees them: dbus-send answering GetPCMs (the device's HFP and A2DP source PCMs)
+    and GetCodecs (the device's sink endpoints, as dbus-send --print-reply prints a{sa{sv}}), and q2bt-codec, which
+    refuses a codec the device lacks as SelectCodec does ("SEP codec not available") and records every call."""
+    def __init__(self, tmp_path, mac, codecs):
+        self.bin, self.calls, self.mac = tmp_path / 'bin', tmp_path / 'calls', mac
+        self.bin.mkdir()
+        dev = 'dev_' + mac.replace(':', '_')
+        self.pcm = f'/org/bluealsa/hci0/{dev}/a2dpsrc/sink'
+        entries = ''.join(
+            f'      dict entry(\n         string "{c}"\n         array [\n            dict entry(\n'
+            '               string "Capabilities"\n               variant                   array of bytes [\n'
+            '                     ff ff 02 35\n                  ]\n            )\n         ]\n      )\n' for c in codecs)
+        (self.bin / 'dbus-send').write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*GetPCMs*) cat <<X\nmethod return time=1 sender=:1.5 -> destination=:1.9 serial=4 reply_serial=2\n'
+            f'   array [\n      dict entry(\n         object path "/org/bluealsa/hci0/{dev}/hfpag/source"\n      )\n'
+            f'      dict entry(\n         object path "{self.pcm}"\n      )\n   ]\nX\n;;\n'
+            f'*{self.pcm}*GetCodecs*) cat <<X\nmethod return time=1 sender=:1.5 -> destination=:1.9 serial=5 '
+            f'reply_serial=2\n   array [\n{entries}   ]\nX\n;;\n*) exit 1;;\nesac\n')
+        (self.bin / 'q2bt-codec').write_text(
+            f'#!/bin/sh\necho "$1 $2" >>{self.calls}\ncase " {" ".join(codecs)} " in *" $2 "*) exit 0;; esac\n'
+            'echo "org.freedesktop.DBus.Error.Failed SEP codec not available"; exit 1\n')
+        for f in self.bin.iterdir():
+            f.chmod(0o755)
+
+    def sh(self, command, swap):
+        """command as sh runs it in the background, its /tmp file at swap's local path; returns that file's text."""
+        (path, local), = swap.items()
+        command = command.replace(path, str(local)).rstrip().removesuffix('&')
+        subprocess.run(['sh', '-c', command], check=False,
+                       env={**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}'})
+        return local.read_text() if local.exists() else None
+
+    def selected(self):
+        return [line.split()[1] for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+
+
+class Connected(Page):
+    """A device connected and streaming `codec` (bluealsa's name), its codecs learned as the payload asks for them:
+    the fetch it starts run under sh against `bluealsa`, its answer put where the payload reads it."""
+    def __init__(self, fw, tmp_path, mac, name, sink, codec):
+        super().__init__(fw, [(mac, name, 'connected')])
+        self.bluealsa = Bluealsa(tmp_path, mac, sink)
+        self.tmp = tmp_path
+        self.links = [(mac, 3)]
+        fw.var('bt_linkstatus', C.c_ubyte).value = 1
+        self.stream(codec)
+        self.commands.clear()
+        self.poll()
+        fetches = [c for c in self.commands if CODECS_FILE in c]
+        assert len(fetches) == 1 and fetches[0].rstrip().endswith('&')
+        answer = self.bluealsa.sh(fetches[0], {CODECS_FILE: tmp_path / 'codecs'})
+        assert answer is not None
+        self.files.files[CODECS_FILE] = answer.encode()
+        self.poll()
+
+    def stream(self, codec):
+        self.fw.var('fw_ctx_bt_showcoding', C.c_int).value = CODEC[codec]
+        self.fw.var('fw_ctx_a2dp_eventstate', C.c_int).value = CODEC[codec]
+
+    def picker(self):
+        """Quality's picker on this page's ui, laid out twice as ipod_list_layout does."""
+        ui = self.ui
+        win = ui.new('window_create', 0, 0, 0, 0, 0)
+        ui.name[win] = 'btquality_page'
+        lv = ui.new('list_view_create', win, 0, 26, 375, 294)
+        self.qview = ui.new('scroll_view_create', lv, 0, 0, 375, 294)
+        for i, n in enumerate(['LDAC Best', 'LDAC Standard', 'Auto', 'aptX HD', 'aptX', 'AAC', 'SBC HQ', 'SBC']):
+            item = ui.new('list_item_create', self.qview, 0, 32 * i, 375, 32)
+            b = ui.new('button_create', item, 0, 0, 375, 32)
+            ui.name[b] = str(i)
+            ui.text[ui.new('hscroll_label_create', b, 22, 0, 266, 32)] = n
+        for _ in range(2):
+            self.fw.fn('bt_rows_pre', None, C.c_void_p)(self.qview)
+            self.fw.fn('bt_rows_post', None, C.c_void_p)(self.qview)
+
+    def choice(self, k):
+        return next(r for r in self.ui.kids[self.qview] if self.ui.kids[r] and self.ui.name.get(self.ui.kids[r][0]) == str(k))
+
+    def lacking(self):
+        """The choices marked as the device lacking them, by g_btcoding's index."""
+        return sorted(k for k in range(8) if self.ui.props.get((self.choice(k), '_bt_lack')) == 1)
+
+    def caption(self, k):
+        table = self.fw.var('settings_pages__cap', C.c_void_p * 17)  # view, item[CAP_MAX], text[CAP_MAX]
+        items = [table[1 + i] for i in range(8)]
+        row = self.choice(k)
+        return C.wstring_at(table[9 + items.index(row)]) if row in items else None
+
+    def pick(self, row):
+        """Stock's Quality click on row: bt_quality_linked's answer and the codec bluealsa ends on, if it switched."""
+        self.commands.clear()
+        r = self.fw.fn('bt_quality_linked', C.c_int, C.c_int)(row)
+        switches = [c for c in self.commands if PICK_FILE in c]
+        assert len(switches) <= 1
+        took = self.bluealsa.sh(switches[0], {PICK_FILE: self.tmp / 'pick'}) if switches else None
+        return r, took.splitlines()[-1] if took else None
+
+
+def test_the_device_s_codecs_are_asked_of_bluealsa_once_it_streams(fw, tmp_path):
+    """GetCodecs on the device's own A2DP source PCM (not its HFP one), written as the MAC then each string a line."""
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    lines = (tmp_path / 'codecs').read_text().splitlines()
+    assert lines[0] == CAR and [n for n in lines if n in CODEC] == ['SBC', 'AAC']  # the inner keys are read past
+    p.commands.clear()
+    for _ in range(30):
+        p.poll(3000)
+    assert not [c for c in p.commands if CODECS_FILE in c]  # answered: not asked again
+
+
+def test_an_unanswered_ask_is_made_again_a_few_times(fw):
+    p = Page(fw, [(CAR, 'BMW 6R81', 'connected')])
+    p.links = [(CAR, 3)]
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = 0
+    p.poll()
+    assert not [c for c in p.commands if CODECS_FILE in c]  # not streaming yet: no PCM to ask
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = 2
+    for _ in range(100):
+        p.poll()
+    asks = [c for c in p.commands if CODECS_FILE in c]
+    assert len(asks) == 10 and f'dev_{CAR.replace(":", "_")}/a2dpsrc' in asks[0]
+
+
+def test_a_car_without_aptx_hd_keeps_aac_when_aptx_hd_is_picked(fw, tmp_path):
+    """The user's BMW: SBC and AAC. aptX HD picked while AAC streams: refused before the link is touched (no
+    SelectCodec at all), AAC kept, stock told nothing is linked so its tail saves the pick with no reconnect."""
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    assert p.pick(3) == (0, None)
+    assert p.bluealsa.selected() == []
+
+
+@pytest.mark.parametrize('row', [3, 2, 0, 4])  # aptX HD, Auto, LDAC Best, aptX
+def test_a_car_on_sbc_gets_aac_for_a_pick_it_lacks_or_auto(fw, tmp_path, row):
+    """The same car stepped down to SBC: aptX HD, LDAC, aptX or Auto walk the ordered list to the first codec it
+    takes, AAC; the codecs it lacks are never asked of bluealsa."""
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'SBC')
+    assert p.pick(row) == (0, 'AAC')
+    assert p.bluealsa.selected() == ['AAC']
+
+
+def test_auto_on_a_car_streaming_aac_changes_nothing(fw, tmp_path):
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    assert p.pick(2) == (0, None)
+
+
+def test_auto_on_a_px7_takes_aptx_hd(fw, tmp_path):
+    """A Px7 has no LDAC: Auto's list starts at LDAC, which it lacks, so aptX HD, asked first and taken."""
+    p = Connected(fw, tmp_path, HEAD, 'Px7', PX7, 'SBC')
+    assert p.pick(2) == (0, 'aptX-HD')
+    assert p.bluealsa.selected() == ['aptX-HD']
+
+
+def test_a_pick_with_the_device_s_codecs_unknown_walks_the_whole_list(fw, tmp_path):
+    """No answer yet: bluealsa's own refusal does the walk (each codec it lacks refused before the stream is
+    touched), as before the codecs were learned."""
+    p = Page(fw, [(CAR, 'BMW 6R81', 'connected')])
+    bluealsa = Bluealsa(tmp_path, CAR, BMW)
+    p.links = [(CAR, 3)]
+    fw.var('bt_linkstatus', C.c_ubyte).value = 1
+    fw.var('fw_ctx_bt_showcoding', C.c_int).value = 1
+    p.commands.clear()
+    assert fw.fn('bt_quality_linked', C.c_int, C.c_int)(3) == 0
+    switch, = [c for c in p.commands if PICK_FILE in c]
+    assert 'for c in aptX-HD LDAC aptX AAC SBC; do' in switch
+    assert bluealsa.sh(switch, {PICK_FILE: tmp_path / 'pick'}).splitlines()[-1] == 'AAC'
+    assert bluealsa.selected() == ['aptX-HD', 'LDAC', 'aptX', 'AAC']
+
+
+def test_the_picker_marks_and_captions_what_the_car_lacks(fw, tmp_path):
+    """LDAC Best and Standard, aptX HD and aptX marked; Auto, AAC and both SBCs not. Each marked row says why under
+    it while selected, with the codec streaming now; the picked aptX HD row (checked, kept for the next device)
+    says what is used instead."""
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    fw.var('g_btcoding', C.c_ubyte).value = 3
+    p.picker()
+    assert p.lacking() == [0, 1, 3, 4]
+    assert p.caption(3) == "BMW 6R81 doesn't support aptX HD: using AAC"
+    assert p.caption(0) == "BMW 6R81 doesn't support LDAC: using AAC"
+    assert p.caption(5) is None and p.caption(7) is None
+    assert p.caption(2) == 'Best this headset supports: AAC'  # Auto's own
+
+
+def test_the_marks_follow_the_codec_streaming_and_go_with_the_device(fw, tmp_path):
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    p.picker()
+    p.stream('SBC')  # stepped down: the caption says so at the next poll, no layout
+    p.poll()
+    assert p.caption(3) == "BMW 6R81 doesn't support aptX HD: using SBC"
+    p.links = []  # gone: nothing is known to be lacking
+    p.poll()
+    assert p.lacking() == [] and p.caption(3) is None
+
+
+def test_a_px7_marks_only_ldac(fw, tmp_path):
+    p = Connected(fw, tmp_path, HEAD, 'Px7', PX7, 'aptX-HD')
+    p.picker()
+    assert p.lacking() == [0, 1]
+    assert p.caption(1) == "Px7 doesn't support LDAC: using aptX HD"
+
+
+def test_a_marked_row_s_text_is_grayed_as_the_library_s(fw, tmp_path):
+    """docs/server-library.md#grayed-rows: #666666 off the selection; the other rows' text is left as the theme
+    gives it."""
+    p = Connected(fw, tmp_path, CAR, 'BMW 6R81', BMW, 'AAC')
+    p.picker()
+    dim = fw.fn('bt_quality_dim', C.c_int, C.c_void_p, C.c_void_p)
+
+    def ink(k):
+        title = next(w for w in p.ui.subtree(p.choice(k)) if p.ui.kind[w] == 'hscroll_label_create')
+        color = C.c_uint(0xffffffff)
+        return dim(title, C.byref(color)), color.value
+    assert ink(3) == (1, 0xff666666)
+    assert ink(5) == (0, 0xffffffff)
+    assert ink(2) == (0, 0xffffffff)

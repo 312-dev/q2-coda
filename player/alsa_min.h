@@ -9,6 +9,7 @@ typedef unsigned long snd_pcm_uframes_t;
 typedef long snd_pcm_sframes_t;
 enum { SND_PCM_STREAM_PLAYBACK = 0, SND_PCM_ACCESS_RW_INTERLEAVED = 3, SND_PCM_FORMAT_S16_LE = 2, SND_PCM_FORMAT_S32_LE = 10,
        SND_PCM_FORMAT_FLOAT_LE = 14, SND_PCM_FORMAT_S24_3LE = 32, SND_PCM_FORMAT_DSD_U32_BE = 52 };
+int snd_config_update_free_global(void);
 int snd_pcm_open(snd_pcm_t **, const char *, int stream, int mode);
 int snd_pcm_close(snd_pcm_t *);
 int snd_pcm_hw_params_malloc(snd_pcm_hw_params_t **);

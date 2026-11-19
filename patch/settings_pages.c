@@ -124,12 +124,22 @@ static int cap_gone(void *view, void *event) {
     return 0;
 }
 /* The row a list_row label stands in (its button's list_item) gets text as its caption; no text,
- * none. A row already in the table keeps its one entry, so a caller may run on every layout: a
+ * none, a caption it had dropped. A row already in the table keeps its one entry, so a caller may run on every layout: a
  * second entry for the row, never measured, would set its height in cap_step after the first. */
 void caption_row(void *label, const unsigned *text) {
-    void *item = label && text ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
+    void *item = label ? P(P(label, W_PARENT), W_PARENT) : (void *)0,
          *view = item ? P(item, W_PARENT) : (void *)0;
     if (!view) return;
+    if (!text) { /* its entry, if any, goes; the row is one row high at the next step */
+        int i = view == cap.view ? cap_find(item) : -1;
+        if (i < 0) return;
+        if (cap.open == item) cap.open = (void *)0;
+        if (cap.closing == item) cap.closing = (void *)0;
+        cap.item[i] = (void *)0, cap.text[i] = (const unsigned *)0, cap.lines[i] = 0;
+        memset(cap.cut[i], 0, CAP_LINES);
+        I(item, W_H) = CAP_TOP;
+        return;
+    }
     if (view != cap.view) {
         cap_gone(cap.view, 0);
         cap.view = view;
