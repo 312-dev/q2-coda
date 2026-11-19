@@ -690,12 +690,14 @@ int ringnav_row_selected(void *row) {
 }
 
 static unsigned *style_color(unsigned *color, void *style, const char *name, unsigned fallback);
-/* A row that can't play now (catalogue.c), a hidden one and the playing song's title take their
- * text colour last, over the theme's. */
+/* A row that can't play now (catalogue.c), a Quality choice the connected Bluetooth device lacks
+ * (bt_ui.c), a hidden one and the playing song's title take their text colour last, over the
+ * theme's. */
 unsigned *ringnav_style_color(unsigned *color, void *style, const char *name, unsigned fallback) {
     style_color(color, style, name, fallback);
     if (!st.style_depth && st.paint_w && name && tk_str_end_with(name, "text_color")) {
         catalogue_greyed(st.paint_w, color);
+        bt_quality_dim(st.paint_w, color); /* a codec the connected device lacks (bt_ui.c) */
         if (lr_edit_dim(st.paint_w)) /* a row hidden in Edit Library or Edit Home */
             *color = (*color & 0xff000000u) | (scheme()->muted & 0xffffff);
         if (np_tap_lit(st.paint_w)) /* Now Playing's artist or album held (np_taps.c) */

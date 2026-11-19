@@ -1006,6 +1006,7 @@ void bt_name_apply(void), bt_name_row(void *view);
 /* bt_ui.c: Settings > Bluetooth's order, rows and marks (docs/oled-design.md#bluetooth) */
 void bt_page(void *view, int on), bt_rows_pre(void *view), bt_rows_post(void *view);
 int bt_list(void *list), bt_mac_ok(const char *s), bt_dev_find(const char *mac);
+int bt_quality_dim(void *w, unsigned *color); /* a Quality choice the device lacks: its text */
 #define BT_MARK_CHECK 6 /* bt_mark's kind: a picker's check on the right column */
 void *bt_mark(void *parent, const char *name, int kind, int x, int y, int w, int h);
 /* guest_ui.c: Guest Play's screens (docs/oled-design.md#guest-play) */

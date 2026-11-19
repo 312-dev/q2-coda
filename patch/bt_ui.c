@@ -140,9 +140,10 @@ static int row_state(void *b) {
                                               : BT_PAIRED;
 }
 
-/* The codec stock streams with (bt_showcoding, as its status bar's badge reads it), 0 for none. */
-const char *bt_codec(void) {
-    switch (I(bt_showcoding, 0)) {
+/* Stock's codec number n (bt_showcoding, a2dp_eventstate: 1 SBC, 2 AAC, 3 aptX, 4 LDAC, 13 aptX
+ * HD) as the page names it, 0 for none. */
+static const char *codec_name(int n) {
+    switch (n) {
     case 4:
         return "LDAC";
     case 13:
@@ -156,6 +157,15 @@ const char *bt_codec(void) {
     }
     return (const char *)0;
 }
+/* ... as bluealsa names it (GetCodecs, SelectCodec) */
+static const char *codec_wire(int n) { return n == 13 ? "aptX-HD" : codec_name(n); }
+/* Quality's choice row (g_btcoding's index: LDAC Best, Standard, Auto, aptX HD, aptX, AAC, SBC HQ,
+ * SBC) as stock's codec number, Auto as LDAC, the head of its list; 0 for none. */
+static int row_codec(int row) {
+    return row < 0 ? 0 : row <= 2 ? 4 : row == 3 ? 13 : row == 4 ? 3 : row == 5 ? 2 : row <= 7;
+}
+/* The codec stock streams with (bt_showcoding, as its status bar's badge reads it), 0 for none. */
+const char *bt_codec(void) { return codec_name(I(bt_showcoding, 0)); }
 
 /* ---- kinds, from BlueZ's Class ---- */
 
@@ -237,6 +247,80 @@ static int class_read(void) {
     bt.class_seen = hash;
     tk_snprintf(bt.classes, sizeof bt.classes, "%s", raw + 1);
     return 1;
+}
+
+/* ---- the connected device's codecs ---- */
+
+/* What the device connected now can take (docs/internals.md#bluetooth-page, Quality), as Android
+ * learns its peer's endpoints before it picks: bluealsa's org.bluealsa.PCM1.GetCodecs on the
+ * device's A2DP source PCM names each codec of the sink endpoints BlueZ found on it (bluez-alsa
+ * 4.0.0 bluealsa_pcm_get_codecs). Asked in the background once the link streams (a codec in
+ * bt_showcoding: the PCM is there), written to BT_CODECS_FILE as the MAC's line then one name a
+ * line (with the inner keys, which sink_read passes), and asked again every BT_CODECS_RETRY_MS
+ * while unanswered, BT_CODECS_TRIES times; the file is read only while an ask is fresh. */
+#define BT_CODECS_FILE "/tmp/q2bt.codecs"
+#define BT_CODECS_RETRY_MS 3000
+#define BT_CODECS_TRIES 10
+static struct {
+    char mac[24];  /* the device they are for, "" none */
+    unsigned bits; /* stock's codec numbers it takes, as 1 << n; 0 not known */
+    unsigned asked_at;
+    int tries;
+} sink __attribute__((section(".scratch")));
+
+/* Whether the device connected now is known to lack stock's codec n. SBC every sink has (A2DP
+ * makes it mandatory), so the ordered walk always ends there. */
+static int sink_lacks(int n) { return sink.bits && n > 1 && !(sink.bits & 1u << n); }
+
+static void sink_fetch(const char *mac) {
+    char cmd[640], dev[24];
+    tk_snprintf(dev, sizeof dev, "%s", mac);
+    for (char *p = dev; *p; ++p)
+        if (*p == ':') *p = '_';
+    tk_snprintf(
+        cmd, sizeof cmd,
+        "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
+        "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
+        "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_]*/dev_%s/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
+        "|\\1|p' | head -n 1); [ -n \"$p\" ] && { echo %s; dbus-send --system --print-reply "
+        "--dest=org.bluealsa \"$p\" org.bluealsa.PCM1.GetCodecs 2>/dev/null | sed -n "
+        "'s/^ *string \"\\([A-Za-z0-9-]*\\)\"$/\\1/p'; } >" BT_CODECS_FILE
+        ".new && mv -f " BT_CODECS_FILE ".new " BT_CODECS_FILE ") >/dev/null 2>&1 &",
+        dev, mac);
+    system(cmd);
+}
+
+/* BT_CODECS_FILE's answer for sink.mac into sink.bits: the five codecs Quality offers, by name
+ * (GetCodecs's inner keys, "Capabilities" and the like, match none). */
+static void sink_read(void) {
+    char raw[512];
+    state_read(BT_CODECS_FILE, raw, sizeof raw);
+    unsigned n = strlen(sink.mac), bits = 0;
+    if (!n || strncmp(raw + 1, sink.mac, n) || raw[1 + n] != '\n') return;
+    for (char *line = raw + 1 + n + 1, *end; *line; line = end) {
+        for (end = line; *end && *end != '\n'; ++end) {}
+        char c = *end;
+        *end = 0;
+        for (int k = 1; k <= 13; ++k)
+            if (codec_wire(k) && !tk_strcmp(line, codec_wire(k))) bits |= 1u << k;
+        if (c) ++end;
+    }
+    if (bits) sink.bits = bits | 1u << 1;
+}
+
+/* Each link_poll: mac connected now, "" none. */
+static void sink_poll(const char *mac, unsigned now) {
+    if (strcmp(mac, sink.mac)) {
+        tk_snprintf(sink.mac, sizeof sink.mac, "%s", bt_mac_ok(mac) ? mac : "");
+        sink.bits = 0, sink.tries = 0;
+    }
+    if (!sink.mac[0] || sink.bits) return;
+    if (sink.tries && now - sink.asked_at < 2 * BT_CODECS_RETRY_MS) sink_read();
+    if (sink.bits || sink.tries >= BT_CODECS_TRIES || I(bt_showcoding, 0) <= 0 ||
+        (sink.tries && now - sink.asked_at < BT_CODECS_RETRY_MS))
+        return;
+    sink.asked_at = now, ++sink.tries;
+    sink_fetch(sink.mac);
 }
 
 /* ---- the page's rows ---- */
@@ -377,6 +461,13 @@ static void off_note(void *view) {
 
 /* Stock's Quality row, its title over the choice (a second line), as a key/value row: Quality and
  * the choice's name (Auto) on the right column before its chevron. */
+/* A row's title: the first hscroll_label in its button b. */
+static void *row_title(void *b) {
+    for (unsigned i = 0, n = b ? widget_count_children(b) : 0; i < n; ++i)
+        if (!tk_strcmp(widget_get_type(widget_get_child(b, i)), "hscroll_label"))
+            return widget_get_child(b, i);
+    return (void *)0;
+}
 static void quality_value(void *item) {
     void *b = row_button(item), *title = (void *)0, *choice = (void *)0;
     for (unsigned i = 0, n = b ? widget_count_children(b) : 0; i < n; ++i) {
@@ -591,7 +682,7 @@ static void dress(void *item, void *b) {
     }
 }
 
-static void quality_rows(void *view);
+static void quality_rows(void *view), quality_lacks(void *view);
 void bt_rows_post(void *view) {
     void *win = window_of(view);
     if (win && !tk_strcmp(widget_get_prop_str(win, "name", ""), "btquality_page")) {
@@ -637,9 +728,22 @@ static struct {
     int at;
 } auto_cap __attribute__((section(".scratch")));
 static struct {
-    void *view; /* the picker's list while it is open */
-    int coding; /* g_btcoding its rates were placed for */
+    void *view;    /* the picker's list while it is open */
+    int coding;    /* g_btcoding its rates were placed for */
+    unsigned lack; /* lack_key its marks were set for */
 } quality __attribute__((section(".scratch")));
+/* s as a caption in one of the pair of n-character buffers at pair: the current one while it says
+ * s, else the other, filled, so caption_row sees another pointer and measures it again. */
+static const unsigned *cap_text(unsigned *pair, int *at, unsigned n, const char *s) {
+    unsigned *cur = pair + *at * n, i = 0;
+    while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
+    if (s[i] || cur[i]) {
+        cur = pair + (*at ^= 1) * n;
+        for (i = 0; s[i] && i < n - 1; ++i) cur[i] = (unsigned char)s[i];
+        cur[i] = 0;
+    }
+    return cur;
+}
 static const unsigned *auto_caption(void) {
     const char *codec = bt_codec();
     char item[32] = "", s[48];
@@ -649,14 +753,38 @@ static const unsigned *auto_caption(void) {
     unsigned kbps = bt_kbps(codec, bt_headset_rate()),
              k = (unsigned)tk_snprintf(s, sizeof s, "Best this headset supports: %s", codec);
     if (kbps && k < sizeof s) tk_snprintf(s + k, sizeof s - k, ", %u kbps", kbps);
-    unsigned *cur = auto_cap.text[auto_cap.at], i = 0;
-    while (s[i] && cur[i] == (unsigned char)s[i]) ++i;
-    if (s[i] || cur[i]) {
-        cur = auto_cap.text[auto_cap.at ^= 1];
-        for (i = 0; s[i] && i < 47; ++i) cur[i] = (unsigned char)s[i];
-        cur[i] = 0;
-    }
-    return cur;
+    return cap_text(auto_cap.text[0], &auto_cap.at, 48, s);
+}
+
+/* The choices whose codec the device connected now lacks (sink_lacks: LDAC Best and Standard,
+ * aptX HD, aptX, AAC; Auto and SBC never) are marked as the Library's grayed rows are
+ * (docs/server-library.md#grayed-rows: #666666 off the selection, the selection's own ink at 70%
+ * on it, bt_quality_dim) and still pickable, the pick kept for the next device; each says why
+ * under it while selected, "BMW 6R81 doesn't support aptX HD: using AAC" (the device's name cut at
+ * BT_LACK_NAME characters, the codec streaming now if known). Run after each layout and again
+ * from bt_ui_poll when the device, its codecs or the codec streaming change (lack_key). */
+#define BT_LACK_NAME 20
+#define BT_LACK_LEN 64
+#define BT_LACK_GREY 0x666666 /* catalogue.c CAT_GREY */
+#define BT_LACK_DIM 0xb3      /* ... CAT_DIM */
+static struct {
+    unsigned text[4][2][BT_LACK_LEN]; /* LDAC, aptX HD, aptX, AAC */
+    int at[4];
+} lack __attribute__((section(".scratch")));
+static const unsigned *lack_caption(int codec) {
+    int k = codec == 4 ? 0 : codec == 13 ? 1 : codec == 3 ? 2 : 3, now = I(bt_showcoding, 0);
+    char s[BT_LACK_LEN];
+    unsigned n =
+        (unsigned)tk_snprintf(s, sizeof s, "%.*s doesn't support %s", BT_LACK_NAME,
+                              *bt.link_name ? bt.link_name : "This device", codec_name(codec));
+    if (codec_name(now) && now != codec && n < sizeof s)
+        tk_snprintf(s + n, sizeof s - n, ": using %s", codec_name(now));
+    return cap_text(lack.text[k][0], &lack.at[k], BT_LACK_LEN, s);
+}
+static unsigned lack_key(void) {
+    unsigned h = sink.bits ^ (unsigned)I(bt_showcoding, 0) << 16;
+    for (const char *p = bt.link_name; *p; ++p) h = h * 33 + (unsigned char)*p;
+    return h | 1; /* never 0, the picker's start */
 }
 
 /* Each rate's place: flush with the right column, the edge the switch and the check end on, as
@@ -689,9 +817,7 @@ static void quality_rows(void *view) {
         if (!b || widget_lookup(b, "_bt_kbps", 0) || widget_get_prop_int(item, "_bt_step", 0))
             continue;
         int choice = atoi(widget_get_prop_str(b, "name", ""));
-        for (unsigned j = 0, k = widget_count_children(b); j < k && !title; ++j)
-            if (!tk_strcmp(widget_get_type(widget_get_child(b, j)), "hscroll_label"))
-                title = widget_get_child(b, j);
+        title = row_title(b);
         unsigned kbps = choice_kbps(choice);
         if (choice == BT_AUTO && title) { caption_row(title, auto_caption()); }
         if (!kbps) continue;
@@ -703,6 +829,36 @@ static void quality_rows(void *view) {
         widget_set_text_utf8(l, s);
     }
     quality_rates(view);
+    quality_lacks(view);
+}
+
+/* Each choice row's mark and caption for the device connected now (lack_caption above). */
+static void quality_lacks(void *view) {
+    for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
+        void *item = widget_get_child(view, i), *b = row_button(item);
+        if (!b || widget_get_prop_int(item, "_bt_step", 0) ||
+            widget_get_prop_int(item, "_bt_codec", 0))
+            continue;
+        int choice = atoi(widget_get_prop_str(b, "name", ""));
+        if (choice == BT_AUTO || choice < 0 || choice > 7) continue;
+        int codec = row_codec(choice), lacks = sink_lacks(codec);
+        widget_set_prop_int(item, "_bt_lack", lacks);
+        caption_row(row_title(b), lacks ? lack_caption(codec) : (const unsigned *)0);
+    }
+    quality.lack = lack_key();
+    widget_invalidate_force(view, (void *)0);
+}
+
+/* Whether w, painted now, is text of a choice row the device connected now lacks: its colour
+ * then as the Library's grayed rows' (quality_lacks; navigation.c ringnav_style_color). */
+int bt_quality_dim(void *w, unsigned *color) {
+    if (!quality.view || !sink.bits) return 0;
+    for (int k = 0; w && k < 4 && P(w, W_PARENT) != quality.view; ++k) w = P(w, W_PARENT);
+    if (!w || P(w, W_PARENT) != quality.view || !widget_get_prop_int(w, "_bt_lack", 0)) return 0;
+    unsigned a = *color >> 24;
+    *color = ringnav_row_selected(w) ? (*color & 0xffffffu) | (a * BT_LACK_DIM / 255) << 24
+                                     : (*color & 0xff000000u) | BT_LACK_GREY;
+    return 1;
 }
 
 /* ---- painting ---- */
@@ -835,10 +991,12 @@ static void link_toast(const char *mac, const char *what, int off) {
  * "BMW 6R81 connected · resuming" with Resume on Connect on); its connect toast waits up to
  * BT_CLASS_WAIT_MS for its Class (bt_battery.c's loop) so a car says so. A headset's battery
  * toasts once as it reaches 20% and once at 10% each connection. A drop the user asked for (stock
- * toasts its own Disconnected) is not toasted again. */
+ * toasts its own Disconnected) is not toasted again. The connected device's codecs are learned
+ * here too (sink_poll). */
 static void link_poll(unsigned now) {
     char mac[24];
     int on = linked(mac);
+    sink_poll(on ? mac : "", now);
     if (!on) {
         if (bt.link[0] && !feedback_toast(window_manager_get_top_window(window_manager())) &&
             !bt.link_pending)
@@ -886,46 +1044,50 @@ static void link_poll(unsigned now) {
  * A choice of another codec than the one streaming is switched on the link as it is: bluealsa's
  * SelectCodec (q2bt-codec, as the link monitor's step-down), which closes the AVDTP stream and
  * opens one on the other codec's endpoint with the ACL link, AVRCP and the pairing untouched; the
- * player opens the PCM again when it is back (player/output.c bt_reopen). The codecs are tried in
- * the order bluetoothd would take them at a connect (a2dp_find_eps: the choice's, then LDAC, aptX
- * HD, aptX, AAC, SBC), so a headset without the choice's gets what a reconnect would have given it;
- * bluealsa refuses one the headset has not before it touches the stream, and takes the one already
- * streaming as done. A choice of the codec streaming: aptX HD, aptX and AAC have one rate, so
- * nothing is done; LDAC's three and SBC's two differ in a rate bluealsa reads as the encoder
- * starts, so those keep stock's reconnect. */
+ * player opens the PCM again when it is back (player/output.c bt_reopen). The choice is the head of
+ * an ordered list, as Android's (its codec, then LDAC, aptX HD, aptX, AAC, SBC; Auto's is LDAC's),
+ * and the first codec on it the device takes is used: one the device is known to lack (sink.bits,
+ * GetCodecs) is refused here, before anything touches the link, and when what is left starts with
+ * the codec streaming nothing is switched at all; the Quality row then says so (quality_lacks).
+ * With the device's codecs not yet known the whole list is tried in that order, bluealsa refusing
+ * one the device has not ("SEP codec not available") before it touches the stream. A choice of
+ * the codec streaming: aptX HD, aptX and AAC have one rate, so nothing is done; LDAC's three and
+ * SBC's two differ in a rate bluealsa reads as the encoder starts, so those keep stock's
+ * reconnect. */
 #define BT_PICK_FILE "/tmp/q2bt.pick" /* what the switch said: each refusal, then the codec taken */
-static int row_codec(int row) { /* a choice's codec, as stock numbers them (bt_showcoding) */
-    return row < 0 ? 0 : row <= 2 ? 4 : row == 3 ? 13 : row == 4 ? 3 : row == 5 ? 2 : row <= 7;
-}
 int bt_quality_linked(int row) {
-    static const struct {
-        signed char codec;
-        const char *order;
-    } pick[] = { { 4, "LDAC aptX-HD aptX AAC SBC" },
-                 { 13, "aptX-HD LDAC aptX AAC SBC" },
-                 { 3, "aptX LDAC aptX-HD AAC SBC" },
-                 { 2, "AAC LDAC aptX-HD aptX SBC" },
-                 { 1, "SBC" } };
-    int now = I(bt_showcoding, 0), want = row_codec(row);
-    char cmd[512];
+    static const signed char order[] = { 4, 13, 3, 2, 1 }; /* Auto's: LDAC down to SBC */
+    int now = I(bt_showcoding, 0), want = row_codec(row), first = 0;
+    char list[48], cmd[512];
+    unsigned k = 0;
     if (!bt_linkstatus || now <= 0 || !want) return 0;
     if (want == now) return want == 4 || want == 1;
-    for (unsigned i = 0; i < sizeof pick / sizeof *pick; ++i) {
-        if (pick[i].codec != want) continue;
-        /* the PCM's object path through a pattern of what one holds, as it goes to the shell */
-        tk_snprintf(cmd, sizeof cmd,
-                    "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
-                    "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
-                    "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_/]*/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
-                    "|\\1|p' | head -n 1); [ -n \"$p\" ] && for c in %s; do q2bt-codec \"$p\" $c && "
-                    "echo $c && break; done) >" BT_PICK_FILE " 2>&1 &",
-                    pick[i].order);
-        system(cmd);
-        tk_snprintf(cmd, sizeof cmd, "Quality: %s asked for on the live link", pick[i].order);
+    list[0] = 0;
+    for (int i = -1; i < (int)sizeof order && k < sizeof list; ++i) {
+        int c = i < 0 ? want : order[i];
+        if ((i >= 0 && c == want) || sink_lacks(c)) continue;
+        if (!first) first = c;
+        k += (unsigned)tk_snprintf(list + k, sizeof list - k, "%s%s", k ? " " : "", codec_wire(c));
+        if (c == 1) break; /* SBC: every device has it, nothing after it is tried */
+    }
+    if (first == now) { /* the device lacks the choice: what streams is already its best */
+        tk_snprintf(cmd, sizeof cmd, "Quality: %s not on the device, %s kept", codec_wire(want),
+                    codec_wire(now));
         ulog('I', "bt", cmd);
         return 0;
     }
-    return 1;
+    /* the PCM's object path through a pattern of what one holds, as it goes to the shell */
+    tk_snprintf(cmd, sizeof cmd,
+                "(p=$(dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "
+                "org.bluealsa.Manager1.GetPCMs 2>/dev/null | sed -n "
+                "'s|.*object path \"\\(/org/bluealsa/[A-Za-z0-9_/]*/a2dpsrc/[A-Za-z0-9_/]*\\)\".*"
+                "|\\1|p' | head -n 1); [ -n \"$p\" ] && for c in %s; do q2bt-codec \"$p\" $c && "
+                "echo $c && break; done) >" BT_PICK_FILE " 2>&1 &",
+                list);
+    system(cmd);
+    tk_snprintf(cmd, sizeof cmd, "Quality: %s asked for on the live link", list);
+    ulog('I', "bt", cmd);
+    return 0;
 }
 /* BT_QUALITY's call: the choice is in the click's $s0 (the site's delay slot hands it over), and
  * the click reads $gp next without loading it again, which the calls above have changed: back from
@@ -958,4 +1120,5 @@ void bt_ui_poll(void) {
         bt.link_poll_at = now;
         link_poll(now);
     }
+    if (quality.view && quality.lack != lack_key()) quality_lacks(quality.view);
 }
