@@ -2611,6 +2611,17 @@ static void caption_mark(void *w, void *canvas) {
                              I(cf.name, W_Y) + I(cf.name, W_H) / 2, ink);
 }
 
+/* A caption's new text, its marquee from the start: a running scroll keeps its own clock, so the
+ * xoffset alone came back on its next step and the next album's long name went on from the last
+ * one's place; stopped, the next paint starts it again with the hold at its start
+ * (ringnav_hscroll_start). Stock draws even a centred caption at -xoffset, so a fitting one is set
+ * back to 0 too. */
+static void caption_text(void *label, const char *s) {
+    if (!text_differs(label, s)) return;
+    hscroll_label_stop(label);
+    widget_set_text_utf8(label, s);
+    widget_set_prop_int(label, "xoffset", 0);
+}
 /* The captions name album c (or a card's), once each time it changes (or whether it can play
  * does); a playlist's are its name and its count. */
 void titles(unsigned c) {
@@ -2624,12 +2635,8 @@ void titles(unsigned c) {
     char songs[24];
     if (r && cf.scoped == PLAYLISTS)
         name = P(r, REC_TITLE), by = songs_text(songs, playlist_songs(I(r, REC_DISC)));
-    widget_set_text_utf8(cf.name, r ? name ?: "" : sort_names[cf.sort]);
-    widget_set_text_utf8(cf.artist, by); /* NULL leaves the old one */
-    /* Stock draws even a centred caption at -xoffset: a long one's scroll would shift the next
-     * left. */
-    widget_set_prop_int(cf.name, "xoffset", 0);
-    widget_set_prop_int(cf.artist, "xoffset", 0);
+    caption_text(cf.name, r ? name ?: "" : sort_names[cf.sort]);
+    if (by) caption_text(cf.artist, by); /* NULL leaves the old one */
 }
 
 static int changed(void *ctx, void *event) {
