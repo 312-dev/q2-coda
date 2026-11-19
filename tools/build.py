@@ -2036,8 +2036,7 @@ GLOBALS = ['tidal_albuminfo_thread_run', 'tidal_collection_thread_run',  # 2: a 
 # Audited stock browsing state, deque pointers, art locks, the status bar widget
 # (system_bar_init stores it), the playing cover's track path and the playing track's tags as
 # player_get_id3info parsed them; sizes are checked against the ELF.
-CONTEXT_DATA = {'g_keyboard_vtable': 172,  # a keyboard window's widget vtable (keyboard.c kb_host_open)
-                'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024, 'g_class_type': 4,
+CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024, 'g_class_type': 4,
                 'g_local_classinfo_save': 912, 'g_artist_type': 4, 'album_modetype': 4, 'g_sort_flag': 4,
                 'g_playlistsort_flag': 4,  # a playlist's Sort (PLAYLISTSORT): 0 by name, else Time added
                 'p_deque_playlist': 4, 'p_deque_showlist': 4, 'tools_pdeq_directory': 4, 'mcl_pdeqplaylist': 4,
@@ -2064,7 +2063,8 @@ CONTEXT_DATA = {'g_keyboard_vtable': 172,  # a keyboard window's widget vtable (
                 # Settings > Wi-Fi's flows (wifi_flows.c): stock's monitor's last STATUS (wpa_state @0xd8), the network
                 # a join tries, and the network and password the password entry asks for
                 'g_wifiStatus': 248, 'wifi_name': 256, 'prepare_linkssid': 256, 'prepare_linkpasswd': 128,
-                'pdeq_btshowlist': 4}  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
+                'pdeq_btshowlist': 4,  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
+                'g_keyboard_vtable': 172}  # a keyboard window's widget vtable (keyboard.c kb_host_open)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
