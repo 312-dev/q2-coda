@@ -1440,3 +1440,72 @@ def test_keyboard_opens_stop_the_build_on_a_caller_not_redirected(monkeypatch, c
     check = stock_opens(monkeypatch, calls, reads)
     with pytest.raises(ValueError, match=said):
         check()
+
+
+# stock_window_opens over a small ELF of the shape stock's demo has: .text, .rodata, .got and the section names, the
+# code position-independent as stock's (each address a GOT load, then an addiu), so every way a call or a name is found
+# runs here, not only on the stock image (test/build.py).
+def mips_elf(code, rodata, got, text_a=0x30000, ro_a=0x10000, got_a=0x20000):
+    """An ELF32 image: 16 nops, code (words), 48 nops in .text; rodata (bytes); got (words). (image, text address)."""
+    text = struct.pack(f'<{16 + len(code) + 48}I', *([0] * 16 + code + [0] * 48))
+    gotb = struct.pack(f'<{len(got)}I', *got)
+    names = b'\0.text\0.rodata\0.got\0.shstrtab\0'
+    body = [text, rodata, gotb, names]
+    offs, at = [], 0x34
+    for b in body:
+        offs.append(at)
+        at += len(b)
+    shoff = at
+    heads = [(0, 0, 0, 0, 0, 0)] + [(names.index(n), 1, 0, a, o, len(b)) for n, a, o, b in zip(
+        (b'.text', b'.rodata', b'.got', b'.shstrtab'), (text_a, ro_a, got_a, 0), offs, body)]
+    header = bytearray(0x34)
+    struct.pack_into('<I', header, 0x20, shoff)
+    struct.pack_into('<HHH', header, 0x2e, 40, len(heads), len(heads) - 1)
+    sections = b''.join(struct.pack('<IIIIII', *h) + bytes(16) for h in heads)
+    return bytes(header) + b''.join(body) + sections, text_a
+
+
+def lw(rt, slot, rs=28): return 0x23 << 26 | rs << 21 | rt << 16 | (-0x7ff0 + 4 * slot) & 0xffff
+def addiu(rt, rs, imm): return 0x09 << 26 | rs << 21 | rt << 16 | imm & 0xffff
+def orr(rd, rs, rt=0): return rs << 21 | rt << 16 | rd << 11 | 0x25
+def lui(rt, imm): return 0x0f << 26 | rt << 16 | imm
+
+
+JALR = 0x0320f809
+
+
+def test_stock_window_opens_finds_each_call_and_the_name_it_passes_and_each_keyboard_name_read():
+    rodata = b'\0kb_hex\0page_one\0' + b'x' * 70 + b'\0'
+    ro_a, opener = 0x10000, 0x30800
+    hexname, page, long = ro_a + 1, ro_a + 8, ro_a + 17
+    got = [opener, ro_a, hexname, 0x99999999]  # slots 0 window_open, 1 .rodata, 2 kb_hex itself, 3 nowhere mapped
+    base = 0x30000 + 16 * 4
+    code: list = []
+
+    def at(): return base + 4 * len(code)
+
+    BAL, B = object(), object()  # stand-ins for a bal or a b to the opener, placed where they land
+
+    def emit(*words):
+        """The words at the end of the code, a stand-in turned into its branch there; the call's address."""
+        for w in words:
+            if w is BAL or w is B:
+                w = (0x0411 if w is BAL else 0x1000) << 16 | (opener - at() - 4) >> 2 & 0xffff
+            code.append(w)
+        return at() - 8  # the call before the trailing delay slot
+    jalr_page = emit(lw(4, 1), addiu(4, 4, page - ro_a), lw(25, 0), JALR, 0)  # a jalr of the GOT slot: page_one
+    bal_hex = emit(lw(5, 1), orr(4, 5), addiu(4, 4, hexname - ro_a), BAL, 0)  # moved, then offset: kb_hex, by bal
+    emit(lw(6, 2), lw(7, 1), addiu(7, 7, hexname - ro_a))  # kb_hex read: the slot itself, and slot plus addiu
+    read_slot, read_addiu = at() - 12, at() - 4
+    b_call = emit(lui(4, 1), B, 0)  # b, a tail call, $4 from a lui: unknown
+    jalr_nowhere = emit(lw(4, 3), lw(25, 0), JALR, 0)  # an address in no section: unknown
+    bal_long = emit(lw(4, 1), addiu(4, 4, long - ro_a), BAL, 0)  # a string too long for a name: unknown
+    bal_or = emit(lw(4, 1), orr(4, 5, 6), BAL, 0)  # or of two registers: unknown
+    bal_addiu = emit(addiu(4, 9, 8), BAL, 0)  # addiu from a register nothing set: unknown
+    emit(lw(25, 0), lw(25, 1), JALR, 0)  # $25 loaded again before the jalr: not the opener's
+    bal_after = emit(lw(25, 0), BAL, 0)  # a bal after the load: the bal is the call, counted once
+    demo, _ = mips_elf(code, rodata, got)
+    calls, reads = build.stock_window_opens(demo, (opener,))
+    assert calls == {jalr_page: 'page_one', bal_hex: 'kb_hex', b_call: None, jalr_nowhere: None, bal_long: None,
+                     bal_or: None, bal_addiu: None, bal_after: None}
+    assert reads == {read_slot: 'kb_hex', read_addiu: 'kb_hex'}  # bal_hex's addiu builds on $4, not on the load's $5

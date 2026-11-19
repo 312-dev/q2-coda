@@ -304,7 +304,7 @@ static int ple_pick(void *ctx, void *event) {
     }
     return 0;
 }
-/* The T9 box over the title, as Internet Radio's pull-down: page children go so the keyboard has
+/* The text box over the title, as Internet Radio's pull-down: page children go so the strip has
  * room. Its widget is named search_edit, so navigation.c's search_key closes the keyboard before
  * Return can destroy the edit under it. */
 static int ple_searched(void *ctx, void *event) {
