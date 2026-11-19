@@ -57,6 +57,9 @@ struct dirent *readdir(void *);
 int flock(int, int), closedir(void *), strcmp(const char *, const char *), strncmp(const char *, const char *, size_t);
 char *strstr(const char *, const char *), *strchr(const char *, int);
 int atoi(const char *);
+ssize_t readlink(const char *, char *, size_t); /* q2bt.c's: the player's open songs */
+int access(const char *, int);
+#define F_OK 0
 #define O_RDONLY 0
 #define O_RDWR 2
 #define O_NONBLOCK 0x80

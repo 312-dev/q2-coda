@@ -57,6 +57,9 @@ def L(tmp_path_factory):
     lib.bt_sbc_next.argtypes = [C.c_int, C.c_int, C.c_int]
     lib.bt_sbc_allowed.argtypes = [C.c_char_p]
     lib.flush_every.argtypes = [C.c_int, C.c_int]
+    lib.bt_proc_io.argtypes = [C.c_char_p, C.POINTER(C.c_uint), C.POINTER(C.c_uint), C.POINTER(C.c_uint)]
+    lib.bt_disk_busy.argtypes = [C.c_char_p, C.c_char_p, C.POINTER(C.c_uint)]
+    lib.bt_song_path.argtypes = [C.c_char_p]
     return lib
 
 
@@ -80,7 +83,7 @@ class Counts(C.Structure):
 class Sample(C.Structure):
     _fields_ = [('wall', C.c_long), ('up', C.c_uint)] + [(n, C.c_int) for n in (
         'kbps', 'acl', 'wq', 'rssi', 'lq', 'tpl', 'afh', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew',
-        'fcc', 'done', 'fly', 'bp')]
+        'fcc', 'done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')]
 
 
 # ---- is a stream running ----
@@ -287,7 +290,7 @@ def test_no_a2dp_pcm_or_no_codec_is_none(L):
 def line(L, **f):
     s = Sample(wall=1795464061, up=4242, **{k: f.get(k, -1) for k in (
         'kbps', 'acl', 'wq', 'err', 'wtx', 'wrx', 'cpu', 'ba', 'own', 'h', 'er', 'ew')},
-        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly', 'bp')})
+        **{k: f.get(k, UNSET) for k in ('rssi', 'lq', 'tpl', 'afh', 'fcc')}, **{k: f.get(k, -1) for k in ('done', 'fly', 'bp', 'pl', 'pr', 'pd', 'pw', 'dk', 'gw')})
     out = C.create_string_buffer(256)
     n = L.bt_line(out, 256, C.byref(s))
     assert n == len(out.value)
@@ -296,15 +299,16 @@ def line(L, **f):
 
 def test_a_line_has_every_field(L):
     text = line(L, kbps=612, acl=95, wq=2730, rssi=-12, lq=255, tpl=4, afh=40, err=0, wtx=3, wrx=120, cpu=23,
-                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5, bp=29)
+                ba=81, own=4, h=2, er=88, ew=3, fcc=0, done=96, fly=5, bp=29, pl=25, pr=176, pd=0, pw=172, dk=12, gw=0)
     assert text == ('2026-11-23T20:01:01Z up=4242 kbps=612 acl=95 wq=2730 rssi=-12 lq=255 tpl=4 afh=40 err=0 wtx=3 '
-                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5 bp=29\n')
-    assert len(text) < 176  # about 6 minutes in the 64 KB ring
+                    'wrx=120 cpu=23 ba=8.1 own=0.4 h=2 er=88 ew=3 fcc=0 done=96 fly=5 bp=29 pl=2.5 pr=176 pd=0 pw=172 '
+                    'dk=12 gw=0\n')
+    assert len(text) < 210  # about 5 minutes in the 64 KB ring
 
 
 def test_a_field_not_read_is_a_dash(L):
     assert line(L) == ('2026-11-23T20:01:01Z up=4242 kbps=- acl=- wq=- rssi=- lq=- tpl=- afh=- err=- wtx=- wrx=- '
-                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=- bp=-\n')
+                       'cpu=- ba=- own=- h=- er=- ew=- fcc=- done=- fly=- bp=- pl=- pr=- pd=- pw=- dk=- gw=-\n')
 
 
 def test_rates_and_shares(L):
@@ -1008,3 +1012,42 @@ def test_only_the_followed_links_end_is_noted(L):
     assert down_event(L, disconnected(0x0c, 5, 0x13), 5)[0] == 0
     assert down_event(L, disconnected(0, 5, 0x13)[:6], 5)[0] == 0
     assert down_event(L, ptype_changed(0, 5, 0x0018), 5)[0] == 0
+
+
+# ---- the player's side (docs/internals.md#bluetooth-link-monitor: pl, pr, pd, pw, dk, gw and PLAY) ----
+
+PROC_IO = (b'rchar: 4183209731\nwchar: 912345678\nsyscr: 81234\nsyscw: 70123\nread_bytes: 1052672\n'
+           b'write_bytes: 0\ncancelled_write_bytes: 0\n')
+
+
+def test_the_player_s_io_counters(L):
+    r, w, d = C.c_uint(), C.c_uint(), C.c_uint()
+    assert L.bt_proc_io(PROC_IO, C.byref(r), C.byref(w), C.byref(d)) == 1
+    assert (r.value, w.value, d.value) == (4183209731, 912345678, 1052672)
+    assert L.bt_proc_io(b'rchar: 5\n', C.byref(r), C.byref(w), C.byref(d)) == 0  # no task I/O accounting
+    assert L.bt_proc_io(b'', C.byref(r), C.byref(w), C.byref(d)) == 0
+
+
+DISKSTATS = (b' 179       0 mmcblk0 6213 1901 559914 8730 3411 2601 92200 30210 0 9440 38940 0 0 0 0\n'
+             b' 179       1 mmcblk0p1 812 0 6496 960 0 0 0 0 0 980 960 0 0 0 0\n'
+             b' 179      32 mmcblk4 90213 77 9412214 401230 2213 891 1501224 288100 1 123456 689330 0 0 0 0\n'
+             b' 179      33 mmcblk4p1 90100 77 9411000 401100 2213 891 1501224 288100 1 123400 689200 0 0 0 0\n')
+
+
+def test_the_card_s_busy_time(L):
+    ms = C.c_uint()
+    assert L.bt_disk_busy(DISKSTATS, b'mmcblk4', C.byref(ms)) == 1
+    assert ms.value == 123456  # io_ticks, the tenth field after the name: the whole card, not its partition
+    assert L.bt_disk_busy(DISKSTATS, b'mmcblk0', C.byref(ms)) == 1 and ms.value == 9440
+    assert L.bt_disk_busy(DISKSTATS, b'mmcblk9', C.byref(ms)) == 0
+    assert L.bt_disk_busy(b'', b'mmcblk4', C.byref(ms)) == 0
+
+
+def test_a_song_is_a_card_file_the_player_holds(L):
+    assert L.bt_song_path(b'/mnt/mmc/Music/A/01 One.flac') == 1
+    assert L.bt_song_path(b'/mnt/mmc/.subsonic/stream/A/One [ab12].flac') == 1  # a server song's copy
+    assert L.bt_song_path(b'/mnt/mmc/.q2muse/logs/q2-bt.0') == 0
+    assert L.bt_song_path(b'/dev/shanling_dac') == 0
+    assert L.bt_song_path(b'pipe:[1234]') == 0
+    assert L.bt_song_path(b'socket:[99]') == 0
+    assert L.bt_song_path(b'/mnt/data/config.ini') == 0

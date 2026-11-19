@@ -234,8 +234,21 @@ struct bt_sample {
     int done;   /* packets a second the controller delivered (Number Of Completed Packets); -1 */
     int fly;    /* packets in the controller now (bt_fly_step); -1 */
     int bp; /* SBC's bitpool on the last frame (BT_SBC_POOL's third byte); -1 not SBC or not read */
+    /* the player's side, for the encoder fed short with the radio idle: the player's (hciplayer)
+     * CPU in tenths of a percent of one core; its kB/s read (rchar: files, cached or not, and its
+     * sockets), read from storage (read_bytes) and written (wchar: mostly the PCM to bluealsa);
+     * the microSD's busy ms in the second (io_ticks); 1 while it waits for a song still arriving
+     * (grow.c's wait file), 0 not; -1 each not read */
+    int pl, pr, pd, pw, dk, gw;
 };
 int bt_line(char *out, int size, const struct bt_sample *s);
+/* /proc/PID/io's rchar, wchar and read_bytes (each modulo 2^32); 0 without all three (no task
+ * I/O accounting) */
+int bt_proc_io(const char *text, unsigned *rchar, unsigned *wchar, unsigned *read_bytes);
+/* /proc/diskstats' io_ticks (ms the device was busy, modulo 2^32) for the device named dev; 0 none */
+int bt_disk_busy(const char *text, const char *dev, unsigned *ms);
+/* 1 when a path the player holds open is a song: a file on the card, not under .q2muse (logs) */
+int bt_song_path(const char *path);
 /* per-second rates over ms: n counted in ms, as a whole count a second (no 64-bit division) */
 int bt_rate(unsigned n, unsigned ms);
 /* clock ticks (100 a second) over ms as tenths of a percent of one core */
