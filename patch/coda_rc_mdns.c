@@ -248,8 +248,9 @@ static struct {
     char name[NAME_MAX + 1]; /* the Bluetooth name as last read */
 } md = {.fd = -1};
 
-/* config.ini's [Q2POD] BTNAME into out when it is one bt_name.c's bt_name_valid takes, else NAME_DEFAULT */
-static void bt_name(char *out) {
+/* config.ini's [Q2POD] BTNAME into out when it is one bt_name.c's bt_name_valid takes, else NAME_DEFAULT (and
+ * coda_rc_ble.c's advertised name) */
+void crc_bt_name(char *out) {
     char p[256], b[8192];
     int fd = open(crc_path(p, sizeof p, CONFIG), O_RDONLY | O_CLOEXEC), n = 0;
     snprintf(out, NAME_MAX + 1, "%s", NAME_DEFAULT);
@@ -367,7 +368,7 @@ void mdns_poll(uint32_t now) {
             char was[sizeof md.name];
             memcpy(was, md.name, sizeof was);
             md.named = now;
-            bt_name(md.name);
+            crc_bt_name(md.name);
             renamed = strcmp(was, md.name) != 0;
         }
         uint8_t ip[4];

@@ -1,4 +1,4 @@
-/* What coda-rc uses from libc, SQLite and libdbus. There is no MIPS sysroot (docs/building.md), so for the
+/* What coda-rc uses from libc and SQLite. There is no MIPS sysroot (docs/building.md), so for the
  * Q2 these are declared here with MIPS o32 Linux's constants, as patch/remote.c and patch/video.c declare
  * theirs; CODA_HOST takes the host's own headers instead, for the tests. Only what coda_rc*.c calls. */
 #ifndef CODA_RC_SYS_H
@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #else
@@ -46,6 +47,8 @@ typedef unsigned socklen_t;
 #define AF_INET 2
 #define SOCK_STREAM 2 /* MIPS swaps STREAM and DGRAM */
 #define SOCK_DGRAM 1
+#define SOCK_RAW 3
+#define SOCK_SEQPACKET 5
 #define IPPROTO_IP 0
 #define IP_MULTICAST_IF 32
 #define IP_MULTICAST_TTL 33
@@ -53,9 +56,11 @@ typedef unsigned socklen_t;
 #define SIOCGIFADDR 0x8915
 #define SOL_SOCKET 0xffff
 #define SO_REUSEADDR 4
+#define SO_SNDBUF 0x1001
 #define SO_SNDTIMEO 0x1005
 #define IPPROTO_TCP 6
 #define TCP_NODELAY 1
+#define MSG_DONTWAIT 0x40
 #define MSG_NOSIGNAL 0x4000
 #define POLLIN 1
 #define POLLOUT 4
@@ -84,7 +89,8 @@ ssize_t read(int, void *, size_t), write(int, const void *, size_t);
 int fcntl(int, int, ...), ftruncate(int, long);
 long lseek(int, long, int);
 int socket(int, int, int), setsockopt(int, int, int, const void *, socklen_t), bind(int, const void *, socklen_t);
-int listen(int, int), accept(int, void *, socklen_t *);
+int listen(int, int), accept(int, void *, socklen_t *), connect(int, const void *, socklen_t);
+int getpeername(int, void *, socklen_t *);
 ssize_t send(int, const void *, size_t, int);
 ssize_t sendto(int, const void *, size_t, int, const void *, socklen_t);
 ssize_t recvfrom(int, void *, size_t, int, void *, socklen_t *);
