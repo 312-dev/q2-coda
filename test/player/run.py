@@ -673,8 +673,8 @@ def runs(x):
 
 def test_click(player, songs, tmp):
     """mcl-click while silence plays: each sound once, both channels, at its length and level, at about 20 ms past
-    what was playing; nothing while paused or after the stop. Into a full-scale square, the click makes room: the
-    mix stays inside 16 bits, as y = x (1 - e) + s."""
+    what was playing. Into a full-scale square, the click makes room: the mix stays inside 16 bits, as
+    y = x (1 - e) + s. (With nothing playing: test_click_idle.)"""
     s, pcm, names = play(player, songs, 'click', tmp/'click')
     x = array.array('h', b''.join(pcm))
     found = runs(x)
@@ -956,18 +956,58 @@ def test_bt_formats_and_volume(player, songs, tmp):
     return f'3 opens at 48 kHz in the songs\' formats, levels {order}'
 
 
+def wheel_clicks(x, rate):
+    """The wheel clicks in x (S16 stereo), each checked against the sound made at rate: their first frames."""
+    sound = click_sound('wheel', rate)
+    lead = next(i for i, (e, c) in enumerate(sound) if abs(round(c * 32768)) >= 1)
+    out = []
+    for first, n in runs(x):
+        assert abs(n - len(sound)) <= 2, f'{n} frames, {len(sound)} made'
+        err = max(abs(x[2 * (first - lead + i) + c] - c2 * 32768) for i, (e, c2) in enumerate(sound) for c in (0, 1))
+        assert err <= 1, f'{err:.2f} from the click made'
+        out.append(first - lead)
+    return out
+
+
+def test_click_idle(player, songs, tmp):
+    """The Clicker with nothing playing (docs/internals.md#key-tone). Paused: the song's frames not yet heard are taken
+    back, the clicks play in silence in the same PCM, the first as it starts, once the DAC's mute line has let go
+    (130 ms), the second 20 ms past what plays when it comes (300 - 130 + 20 ms after the first), and on the resume the song goes on from the
+    frame where it paused, none lost or doubled. Stopped: the two clicks in a PCM of their own at 48 kHz, which closes
+    once CLICK_HOLD_MS has passed with no click; nothing else is opened."""
+    s, pcm, names = play(player, songs, 'click-idle', tmp/'click-idle')
+    assert names == ['0000_44100_2_s16.raw', '0001_48000_2_s16.raw'], names
+    out, ref = pcm[0], reference(songs/'a1.flac')
+    at = (first_difference(out, ref) or 0) // 4
+    assert 1.5 * 44100 < at < 2.6 * 44100, f'the pause at {at / 44100:.2f} s'
+    back = next(j for j in range(at, len(out) // 4) if out[4 * j:4 * j + 4000] == ref[4 * at:4 * at + 4000])
+    gap = array.array('h', out[4 * at:4 * back])
+    firsts = wheel_clicks(gap, 44100)
+    second = (300 - 130 + 20) / 1000
+    assert len(firsts) == 2 and firsts[0] < 441 and abs(firsts[1] - firsts[0] - second * 44100) < 1800, f'clicks at {firsts}'
+    assert out[4 * back:] == ref[4 * at:4 * at + len(out) - 4 * back], 'the song does not go on from where it paused'
+    held = (back - at) / 44100
+    assert 2.5 < held < 4.5, f'{held:.2f} s of silence held open'
+    idle = array.array('h', pcm[1])
+    firsts = wheel_clicks(idle, 48000)
+    assert len(firsts) == 2 and firsts[0] < 480 and abs(firsts[1] - firsts[0] - second * 48000) < 1900, f'clicks at {firsts}'
+    assert 2.5 < len(idle) / 2 / 48000 < 4.5, f'{len(idle) / 2 / 48000:.2f} s open'
+    return f'paused: 2 clicks, {held:.2f} s held, the song on from frame {at}; stopped: 2 clicks in a 48 kHz PCM'
+
+
 def test_click_volume(player, songs, tmp):
-    """A click where the volume is in software (a USB DAC at 50: 25/256) is scaled with what plays, within a step."""
+    """A click where the volume is in software (a USB DAC at 50: 25/256) is at its own level, not the music's: what
+    plays is scaled, the click is not, within a step (docs/internals.md#key-tone)."""
     s, pcm, names = play(player, songs, 'click-usb', tmp/'click-usb')
     assert names == ['0000_44100_2_s16_usb.raw'], names
     x = array.array('h', pcm[0])
     at = next(i for i, v in enumerate(x) if v)
-    want = [max(-32768, min(32767, round(c * 25 / 256 * 32768))) for _, c in click_sound('wheel')]
+    want = [max(-32768, min(32767, round(c * 32768))) for _, c in click_sound('wheel')]
     got = list(x[at - at % 2::2][:len(want)])
-    lead = next(i for i, w in enumerate(want) if w)  # the table's first frames round to 0 at this level
+    lead = next(i for i, w in enumerate(want) if w)  # the table's first frames round to 0
     far = max(abs(a - b) for a, b in zip(got, want[lead:]))
-    assert far <= 1, f'the click is {far} steps from the table at 25/256'
-    return f'{len(want)} frames within a step of the click at 25/256'
+    assert far <= 1, f'the click is {far} steps from the table at its own level'
+    return f'{len(want)} frames within a step of the click at its own level, the music at 25/256'
 
 
 def test_way_change_waits_for_the_next_song(player, songs, tmp):

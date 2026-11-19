@@ -45,7 +45,7 @@ struct ctl {
     int volume_changed; /* an mcl-setvol since the playback thread last looked */
     float eq[10];
     int eq_changed; /* an mcl-seteq since the playback thread last looked: the EQ state on disk is new */
-    int click;      /* an mcl-click to mix in, CLICK_*, while a song plays */
+    int click;      /* an mcl-click to sound, CLICK_*: mixed into a song playing, else on its own (engine.c click_session) */
     int cut;        /* an mcl-stop or set-nexturl since the playback thread began opening a song: that open gives up */
     /* status */
     int state, has_info, position;
@@ -131,6 +131,14 @@ void output_drain(struct output *);    /* play what is buffered to its end */
 void output_close(struct output *);
 enum { CLICK_WHEEL = 1, CLICK_BUTTON, CLICK_BEEP, CLICK_CHARGE }; /* mcl-click's wheel, button, beep and charge */
 int output_click(struct output *, int kind); /* mixed into what is about to be heard */
+/* A click with nothing playing (docs/internals.md#key-tone; engine.c click_session). output_hold: a paused song's
+ * frames not yet heard taken back (kept, written again by output_pause's resume) and the PCM left empty, running. Then
+ * output_idle_click for each click, output_idle_fill to keep silence ahead of what plays, and output_idle_end, which
+ * drops that silence: a held PCM is paused again as far as the song is concerned. */
+void output_hold(struct output *);
+void output_idle_click(struct output *, int kind);
+void output_idle_fill(struct output *);
+void output_idle_end(struct output *);
 /* the headphone DAC (output way 0; on the others only dac_song's mode) */
 void dac_song(int outputway, int dsd);     /* at each song's start: DoP or PCM mode */
 void dac_mute(int outputway);

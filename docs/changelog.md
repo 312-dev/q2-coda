@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Clicker: with **Headphones** or **Both**, the wheel now clicks in your headphones, Bluetooth headset or USB DAC while the music is paused or stopped too, not only while a song plays. The click is also no longer turned up and down with the Q2's volume on Bluetooth (with the headset's own volume control off) or a USB DAC that uses the Q2's volume, so it stays at the same faint level. Headphones with their own volume control (such as the Pixel Buds) and the headphone jack still set the click's loudness along with the music's.
   - Bluetooth: a device whose connection is up now shows **Connected** on the Bluetooth page, including right after pairing when it moves to My Devices, instead of "Connecting..." for minutes while it plays.
   - Bluetooth: a device you put in pairing mode now appears on the Bluetooth page about a second after the Q2 hears it, instead of up to ten seconds later.
   - Logs: the Q2's log now also records each Bluetooth search starting and stopping and the first time each device answers it, when the pairing page opens and shows each device, who began each connection (the Q2 or the device), and each step of the Q2's own connecting (what it is trying to connect to, and why).

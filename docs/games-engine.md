@@ -126,7 +126,7 @@ A buffer that is not stock's 375 x 320 BGRA8888 `lcd_mem` (a window animation's 
 
 ### Sound
 
-`eng_sfx(ENG_SFX_TICK | ENG_SFX_TAP | ENG_SFX_ALERT)` plays one of the Clicker's three sounds by the Clicker's route (`clicker_route`): mixed into the song by q2player while one plays, the buzzer's click otherwise, nothing with the Clicker off. The music is never paused, ducked or reopened.
+`eng_sfx(ENG_SFX_TICK | ENG_SFX_TAP | ENG_SFX_ALERT)` plays one of the Clicker's three sounds by the Clicker's route (`clicker_route`): q2player's under Headphones or Both (mixed into the song while one plays, in silence of its own otherwise), the buzzer's by the Clicker's rule, nothing with the Clicker off. The music is never paused, ducked or reopened.
 
 ponytail: three sounds, and the buzzer has one. Sounds of a game's own belong in q2player's table (`SOUNDS` in `player/output.c`, a pitch, a length and a decay each, made at first use): add kinds there and names to `mcl-click`, with `test/player/run.py`'s click tests extended; no payload bytes beyond the names. Not done here: it is a player change with its own tests, and one for all five games rather than per game.
 

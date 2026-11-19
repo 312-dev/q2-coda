@@ -191,11 +191,13 @@ static void command(const char *name, const char *arg) {
         c->eq_on = p ? atoi(p) : 0;
         c->eq_changed = 1;
     } else if (!strcmp(name, "mcl-click")) {
-        /* the Clicker's click in the headphones (patch/clicker.c), or the plug-in chirp (patch/charging.c); a song must
-         * be playing, as nothing else is open */
+        /* the Clicker's click in the headphones (patch/clicker.c): mixed into a song playing, or with a song paused or
+         * none, played in silence of its own (engine.c click_session); not while a song opens or one is asked for, which
+         * it would hold up. The plug-in chirp (patch/charging.c) only into a song playing. */
         int kind = !strcmp(arg, "wheel") ? CLICK_WHEEL : !strcmp(arg, "button") ? CLICK_BUTTON : !strcmp(arg, "beep") ? CLICK_BEEP
                    : !strcmp(arg, "charge") ? CLICK_CHARGE : 0;
-        if (kind && c->state == PLAYING && !c->paused) c->click = kind, wake = 1;
+        int playing = c->state == PLAYING && !c->paused, idle = (c->state == IDLE || (c->state == PLAYING && c->paused)) && !c->play;
+        if (kind && (playing || (kind != CLICK_CHARGE && idle))) c->click = kind, wake = 1;
     }
     if (wake) pthread_cond_broadcast(&c->wake);
     pthread_mutex_unlock(&c->mu);

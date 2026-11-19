@@ -60,7 +60,7 @@ demo queues every message it receives as a (name, argument) pair (`0x5bb7f4`); a
 | `mcl-getuvmeter` | `null` | | `{mcl-getuvmeter\L\|R}` |
 | `mcl-getspectrum` | `null` | | `{mcl-getspectrum\` twelve integers `}` |
 | `mcl-pcmstate` | `null` | | `{mcl-pcmstate\N}`, `0xb11c24` or 0 when it is negative: the MQA decoder's state, 1 to 3, which the UI shows as its MQA mark (the M1 Plus's `mclGetMQAState`, in [shanling-m1plus-navidrome](https://github.com/shivaluma/shanling-m1plus-navidrome)'s `docs/research/native-integration-evidence.md`). Always 0 on V1.36, where the decoder is never made |
-| `mcl-click` | `wheel`, `button`, `beep`, `charge` | Not stock's: q2player's, sent by Q2 Muse's payload for the Clicker (`patch/clicker.c`, [internals: Key Tone](internals.md#key-tone)), and `charge` at a cable in ([internals: Charging](internals.md#charging)), while a song plays. q2player mixes the sound into what is about to be heard ([player-plan: Clicker](player-plan.md#the-clicker)); stock's hciplayer, and Q2 Muse's, ignore it as any name they do not know (captured) | none |
+| `mcl-click` | `wheel`, `button`, `beep`, `charge` | Not stock's: q2player's, sent by Q2 Muse's payload for the Clicker (`patch/clicker.c`, [internals: Key Tone](internals.md#key-tone)), and `charge` at a cable in ([internals: Charging](internals.md#charging)); a click whether a song plays or not, the chirp while one plays. q2player mixes the sound into what is about to be heard, or with nothing playing plays it in silence of its own ([player-plan: Clicker](player-plan.md#the-clicker)); stock's hciplayer, and Q2 Muse's, ignore it as any name they do not know (captured) | none |
 
 The song fields, from demo's sender `0x5bf504` and hciplayer's parser:
 
