@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """JPEG checks; optionally pass the stock ZIP to test packaging with a custom logo and quoted paths too."""
 import io, math, re, sys; sys.path.insert(0, sys.path[0] + '/../tools')  # tools/ first: test/build.py must import tools/build.py
-from build import jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, DEFAULT_CONFIG, default_config
+from build import KB_ASSETS, KB_OPEN_HINT, KB_OPEN_SITES, check_keyboard_opens, jal, j, ICONS, LABELS, relabel, ROOT, STOCK_EQ, STOCK_PAGES, TAG, dev_tag, jpeg_size, FONT, TAG_C, patch_m4b_cover, DEFAULT_CONFIG, default_config
 
 logo = (ROOT/'assets/boot-logo.jpg').read_bytes()
 assert jpeg_size(logo) == (320, 375)
@@ -448,9 +448,9 @@ def validate_assets(directory):
     # Every stock UI asset the image keeps (the stock EQ pages and STOCK_PAGES go): the build writes each one full-bleed
     # (tools/ipod.py full_bleed), so each is a changed asset.
     kept_ui = {l.removeprefix('squashfs-root/'+ui) for l in run('unsquashfs', '-l', directory/'stock.squashfs').splitlines()
-               if l.startswith('squashfs-root/'+ui) and l.endswith('.bin') and l.removeprefix('squashfs-root/') not in STOCK_EQ + STOCK_PAGES}
+               if l.startswith('squashfs-root/'+ui) and l.endswith('.bin') and l.removeprefix('squashfs-root/') not in STOCK_EQ + STOCK_PAGES + KB_ASSETS}
     chinese = {rel for rel in kept_ui if CJK.search(read('stock.squashfs', ui+rel).decode('utf-8', 'replace'))}
-    assert chinese and {'testmode/test_key.bin', 'kb_default_t9.bin', 'dialog/search_dialog.bin'} <= chinese
+    assert chinese and {'testmode/test_key.bin', 'dialog/search_dialog.bin'} <= chinese
     from theme import builtins, built_geometry
     GEOM = built_geometry(builtins())  # the set the build bakes: OLED's
     # every UI asset, and the stock list pages OLED's set changes (tools/ipod.py ui_pages)
@@ -705,6 +705,17 @@ def validate_assets(directory):
     for path, source in ((LOGO_ANIM, 'assets/boot-anim.q2a'), (LOGO_BLACK, 'assets/boot-black.jpg')):
         assert ('squashfs-root/'+path in names) == default and (not default or read('rootfs.squashfs', path) == (ROOT/source).read_bytes())
     assert not {'squashfs-root/'+rel for rel in STOCK_EQ} & names, 'Stock EQ assets remain'
+    # Stock's keyboard: its page, style and key images gone, and every call that opened a keyboard window opens the
+    # letter strip's (build.py check_keyboard_opens), the stock words replaced by jal kb_host_open
+    assert not {'squashfs-root/'+rel for rel in KB_ASSETS} & names and {'squashfs-root/'+rel for rel in KB_ASSETS} <= stock_names
+    kb_stock, kb_demo = read('stock.squashfs', 'release/bin/demo'), read('rootfs.squashfs', 'release/bin/demo')
+    opens = check_keyboard_opens(kb_stock)
+    host = jal(symbols(directory/'patch.elf')['kb_host_open'])
+    for address, word in KB_OPEN_SITES:
+        assert address in opens and struct.unpack_from('<I', kb_stock, address - 0x400000)[0] == word
+        assert struct.unpack_from('<I', kb_demo, address - 0x400000)[0] == host, hex(address)
+    assert struct.unpack_from('<I', kb_stock, KB_OPEN_HINT[0] - 0x400000)[0] == KB_OPEN_HINT[1]
+    assert struct.unpack_from('<I', kb_demo, KB_OPEN_HINT[0] - 0x400000)[0] == jal(symbols(directory/'patch.elf')['kb_open_hint'])
     # Album Wall, the spectrum and the VU meter: their pages and images are gone, and no page that ships names what opened them
     assert not {'squashfs-root/'+rel for rel in STOCK_PAGES} & names and {'squashfs-root/'+rel for rel in STOCK_PAGES} <= stock_names
     for rel in (n.removeprefix('squashfs-root/') for n in names if '/raw/ui/' in n and n.endswith('.bin')):
@@ -788,7 +799,7 @@ def validate_assets(directory):
         for c in children: corners(short, c, x, y, window, slots.get(id(c)))
     full_bleed_windows = 0
     for rel in paths:
-        if rel in STOCK_EQ + STOCK_PAGES: continue
+        if rel in STOCK_EQ + STOCK_PAGES + KB_ASSETS: continue
         original, new = read('stock.squashfs', rel), read('rootfs.squashfs', rel)
         if '/raw/ui/' in rel and new[:4] == bytes.fromhex('12122211'):
             now = painted(decode(new), themes[1])

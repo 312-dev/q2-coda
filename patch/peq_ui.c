@@ -532,7 +532,7 @@ static void load_draft(peq_preset *p, const char *name, int length) {
     snprintf(ui.status, sizeof(ui.status), "Preset loaded; choose Apply to activate");
 }
 
-/* A text box on item at y, h high, on T9's keyboard, ending on its OK (the EQ page's sits in the
+/* A text box on item at y, h high, typed on the letter strip (keyboard.c), ending on its OK (the EQ page's sits in the
  * title's place, 2 px under the status row's foot: render_rows). */
 void *edit_create(void *item, const char *input_type, int y, int h) {
     void *edit = widget_factory_create_widget(widget_factory(), "edit", item, 12, y, 351, h);

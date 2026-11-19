@@ -17,20 +17,24 @@
  *
  * Keys on the strip: Centre types the character at the text's cursor, cycles the set on the
  * switcher (the highlight stays there), and submits on the return key; Play/Pause submits from
- * anywhere on it; Return jumps the highlight to the return key, and held SS_HOLD_MS goes back
- * (its card, search_strip_overlay); Previous and Next move the cursor along the text, and
+ * anywhere on it; Return shuts the strip (ss_shut: never a submit; an edge swipe does the same,
+ * search_strip_close), the next Return leaves, and held SS_HOLD_MS goes back (its card,
+ * search_strip_overlay); while it is shut the strip is not drawn and Search's results run to the
+ * screen's foot (ss_foot). Previous and Next move the cursor along the text, and
  * Previous held erases the character before it, again and again, faster the longer it is held
- * (ss_erase_due). Submitting Search moves the wheel to its results: the wheel moves their bar,
+ * (ss_erase_due). Submitting shuts the strip too; on Search the wheel goes to the results (the
+ * tabs while the tab picked lists none, the query when nothing matches): the wheel moves their bar,
  * Centre opens a song, which plays with the songs after it as the queue, an artist (stock's
  * artist page) or an album (its tracks in Cover Flow). A turn up from the first result lands on
  * the tabs, where the wheel moves between them, each picked as it is reached
  * (docs/oled-design.md#tabs): a turn down past Albums, or Centre, goes back to the results, a
  * turn up past All to the query line, and Next picks the next tab and Previous the one before.
  * The query line then takes the selection bar and nothing else (SS_ON_FIELD): the strip stays shut,
- * the wheel goes on down to the tabs, and Centre, Return or a tap opens the strip. Previous or
- * Return on the results, and Return on the tabs, go back to the strip, the text,
- * cursor and tab kept. A held Return closes Search from any of them (search_strip_hold, from Hold
- * Return's compact_now_playing). Off the strip Play/Pause is the player's.
+ * the wheel goes on down to the tabs, and Centre or a tap opens the strip. Previous on the results
+ * goes back to the strip, the text, cursor and tab kept; Return there or on the tabs leaves. On a
+ * name's or a box's page the shut strip leaves the text in place, the wheel doing nothing, and
+ * Play/Pause is still its OK. A held Return closes Search from any of them (search_strip_hold, from
+ * Hold Return's compact_now_playing). Off the strip Play/Pause is the player's.
  *
  * The key pop (ss_pop_paint): when the wheel or a drag lands on a character, or a tap types one,
  * its key grows a bubble holding it large, and the key keeps it at the strip's size, dimmed; it
@@ -44,11 +48,11 @@
  * result opens or plays it, and a drag up or down the results scrolls them a row per 32 px. In the
  * text (ss_grab, the mock-up's caretAt), a tap puts the cursor at the nearest character boundary
  * and gives the wheel back to the strip (while the wheel is off the strip the tap counts at the
- * release, and a drag from the query is no tap); a hold or a drag shows a loupe over the cursor, the text
- * at 1.6 times (ss_loupe_paint), and the cursor follows the finger; held at an edge that cuts the
- * text, the finger nudges it a character at a time (ss_nudge_due). The release leaves the cursor.
- * A double tap selects a word and a triple tap the text (ss_sel), the accent behind it and a
- * handle at either end; a drag on from the double tap, or on a handle, moves an end (ss_reach).
+ * release, and a drag from the query is no tap); a hold or a drag shows a loupe over the cursor,
+ * the text at 1.6 times (ss_loupe_paint), and the cursor follows the finger; held at an edge that
+ * cuts the text, the finger nudges it a character at a time (ss_nudge_due). The release leaves the
+ * cursor. A double tap selects a word and a triple tap the text (ss_sel), the accent behind it and
+ * a handle at either end; a drag on from the double tap, or on a handle, moves an end (ss_reach).
  * Typing replaces a selection, Previous held deletes it, and Previous or Next collapses it.
  *
  * The page is one sheet painted here (search_strip_paint), not rows: the strip and the list share
@@ -78,9 +82,6 @@
 #define SS_STRIP_Y 196
 #define SS_STRIP_H 34
 #define SS_STRIP_R 17
-#define SS_ROWS                                                                                    \
-    ((SS_STRIP_Y - SS_QUERY_H) / SS_PITCH) /* result rows between the query and strip              \
-                                            */
 #define SS_TABS_X 16 /* the tabs: a 30 px segmented control in the first row, the rows' inset */
 #define SS_TABS_Y (SS_QUERY_H + 1)
 #define SS_TABS_H 30
@@ -88,9 +89,8 @@
 #define SS_LIST_Y                                                                                  \
     (SS_QUERY_H + SS_PITCH) /* the results' top under the tabs, and the rows there                 \
                              */
-#define SS_TAB_ROWS ((SS_STRIP_Y - SS_LIST_Y) / SS_PITCH)
-#define SS_KEY_IN 5  /* the lit key's box, SS_KEY_IN in from the strip's top and bottom */
-#define SS_CHIP_R 96 /* the set switcher, docked at the pill's left, to x 96 */
+#define SS_KEY_IN 5         /* the lit key's box, SS_KEY_IN in from the strip's top and bottom */
+#define SS_CHIP_R 96        /* the set switcher, docked at the pill's left, to x 96 */
 #define SS_RET_L (SS_STRIP_RX - SS_STRIP_H) /* the return key, a circle docked at its right */
 #define SS_RUN_L 100 /* the run of characters between them, its first cell SS_PAD in */
 #define SS_RUN_R (SS_RET_L - 4)
@@ -213,7 +213,8 @@ enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 #define SS_POP_MS 300           /* the pop goes this long after the wheel's last step */
 #define SS_POP_FAST_MS                                                                             \
     125 /* steps closer than this, 8 a second, are a spin: no pop until it stops */
-/* ticks of the wheel closer than this are one turn, which stops at the switcher or the return key */
+/* ticks of the wheel closer than this are one turn, which stops at the switcher or the return key
+ */
 #define SS_GESTURE_MS 250
 /* songs, artists and albums listed at most on All (docs/ipod.md#search): the wheel moves its bar a
  * row a tick, 7 ticks a turn at the default Wheel Sensitivity, so the artists are under five turns
@@ -231,7 +232,7 @@ enum { SS_SECRET_NONE, SS_SECRET_PASS, SS_SECRET_WIFI };
 #define SS_ERASE_MIN_MS 110
 enum { SS_SONG, SS_ARTIST, SS_ALBUM };                                     /* a result's kind */
 enum { SS_TAB_ALL, SS_TAB_SONGS, SS_TAB_ARTISTS, SS_TAB_ALBUMS, SS_TABS }; /* tab, kind + 1 */
-enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS, SS_ON_FIELD }; /* what has the wheel */
+enum { SS_ON_STRIP, SS_ON_LIST, SS_ON_TABS, SS_ON_FIELD };                 /* what has the wheel */
 
 static struct {
     void *page, *sheet, *songs; /* the page, what it paints on, the library's songs A to Z */
@@ -287,7 +288,8 @@ static struct {
     short mark, word_a, word_b, tap_x;
     unsigned tap_at;
     unsigned char taps, drag;
-    unsigned char fpress; /* a finger went down on the query while the strip had no wheel (ss_grab) */
+    unsigned char
+        fpress; /* a finger went down on the query while the strip had no wheel (ss_grab) */
 } ss __attribute__((section(".scratch")));
 /* Return's hold closed the page: stock's long press, if it comes, is the hold's
  * (search_strip_hold), not the page under it */
@@ -563,11 +565,11 @@ static void ss_box_done(void) {
     input_method_dispatch_action(im);
     if (ss.box && P(im, IM_WIDGET) == edit) input_method_request(im, (void *)0);
 }
-/* Return held on a text box: the box's keyboard closes, the strip with it, as the keyboard's Return
- * did (navigation.c search_key: our own edits emptied first, so their pages back out). Add
- * Network's dialog is only the box, a modal one that stock leaves up for a second Return to close:
- * it is quit too, back to the page's rows with the text as it was, from the next loop pass (quit
- * inside the keyboard's own close, demo crashes). */
+/* Return held on a text box, or Return with its strip shut: the box's keyboard closes, the strip
+ * with it, as the keyboard's Return did (navigation.c search_key: our own edits emptied first, so
+ * their pages back out). Add Network's dialog is only the box, a modal one that stock leaves up for
+ * a second Return to close: it is quit too, back to the page's rows with the text as it was, from
+ * the next loop pass (quit inside the keyboard's own close, demo crashes). */
 static unsigned ss_quit_timer __attribute__((section(".scratch")));
 static void *ss_quit_win __attribute__((section(".scratch")));
 static int ss_holds(void *root, void *w);
@@ -690,8 +692,12 @@ static void ss_pop_paint(void *canvas) {
  * playlist, where it never leaves the strip). The rows showing, and the first one's top: under
  * the tabs while they show. */
 static int ss_tabs(void) { return ss.focus && !ss_named() && !ss.pick; }
-static int ss_rows(void) { return ss_tabs() ? SS_TAB_ROWS : SS_ROWS; }
 static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : SS_QUERY_H; }
+/* The results' foot on the sheet: the strip's top while it is open, else the screen's foot (shut,
+ * the strip is not drawn and the results fill the page; the sheet runs from the status row's foot
+ * down, client_h). The rows that fit above it. */
+static int ss_foot(void) { return ss.focus ? client_h() : SS_STRIP_Y; }
+static int ss_rows(void) { return (ss_foot() - ss_list_y()) / SS_PITCH; }
 /* The bar's row kept in view. */
 static void ss_keep(void) {
     if (ss.sel < ss.top) ss.top = ss.sel;
@@ -700,6 +706,20 @@ static void ss_keep(void) {
 static void ss_pick(int tab) {
     ss.tab = (tab + SS_TABS) % SS_TABS;
     ss_filter();
+}
+
+/* The strip closed, the page left as it is (docs/oled-design.md#text-entry, the user's 2026-11-18
+ * ruling): Return or an edge swipe on the open strip, before either leaves the page. The wheel goes
+ * to the text, highlighted on Search's query line, and nothing is typed or submitted; the text and
+ * cursor stay, Centre or a tap in the text opens the strip again, and the next Return leaves. */
+static void ss_ungrab(void);
+static void ss_shut(void) {
+    stop_timer(&ss.erase_timer);
+    stop_timer(&ss.pop_timer);
+    ss.prev_down = ss.erased = ss.pop = 0;
+    ss.pressed = 0, ss.fpress = 0;
+    if (ss.grab) ss_ungrab();
+    ss.focus = SS_ON_FIELD;
 }
 
 /* The page left with nothing taken: a box's keyboard closed, else the page. */
@@ -799,10 +819,11 @@ static void ss_submit(void) {
         ss_box_done();
     else if (ss_named())
         ss_save();
-    else if (ss.pick && ss.nmatch) /* Add Songs' songs */
-        ss.focus = SS_ON_LIST, ss.sel = ss.top;
-    else if (ss.any && !ss.pick)
-        ss.focus = ss.nmatch ? SS_ON_LIST : SS_ON_TABS, ss.sel = ss.top;
+    else /* the strip closes: on the results, else the tabs, else the query (nothing matches) */
+        ss.focus = ss.nmatch            ? SS_ON_LIST
+                   : ss.any && !ss.pick ? SS_ON_TABS
+                                        : SS_ON_FIELD,
+        ss.sel = ss.top;
 }
 
 /* The highlight a stop on round the loop, dir 1 or -1. A tick of the turn that stopped on the
@@ -854,13 +875,15 @@ int search_strip_key(void *top, unsigned key) {
         ss.focus = button ? SS_ON_STRIP : ss.pick ? SS_ON_FIELD : SS_ON_TABS;
         wheel = button = 0, key = 0;
     }
-    if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
+    if (ss.focus && key == KEY_PLAY && ss_named())
+        ss_submit(); /* a name's or a box's, its strip shut: still its OK */
+    else if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
         return 0; /* Play/Pause, on the results */
-    if (ss.focus == SS_ON_TABS) {
+    else if (ss.focus && key == KEY_RETURN)
+        ss_leave(); /* the strip shut already: Return leaves, as on any page */
+    else if (ss.focus == SS_ON_TABS) {
         int to = ss.tab + wheel; /* the wheel's tab, past either end off the tabs */
-        if (key == KEY_RETURN)
-            ss.focus = SS_ON_STRIP;
-        else if (to < 0)
+        if (to < 0)
             ss.focus = SS_ON_FIELD;
         else if (wheel && to < SS_TABS)
             ss_pick(to);
@@ -869,16 +892,15 @@ int search_strip_key(void *top, unsigned key) {
         else if (button)
             ss_pick(ss.tab + button);
     } else if (ss.focus == SS_ON_FIELD) {
-        /* the query line, highlighted: the wheel passes on down, Centre or Return types */
-        if (key == KEY_CENTER || key == KEY_RETURN)
+        /* the text, the strip shut: the wheel passes on down from Search's query, Centre types */
+        if (key == KEY_CENTER)
             ss.focus = SS_ON_STRIP;
-        else if (wheel > 0)
+        else if (wheel > 0 && !ss_named())
             ss.focus = ss.pick ? (ss.nmatch ? SS_ON_LIST : SS_ON_FIELD) : SS_ON_TABS,
             ss.sel = ss.top;
     } else if (ss.focus == SS_ON_LIST) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
         if (key == KEY_CENTER) ss_play();
-        if (key == KEY_RETURN) ss.focus = SS_ON_STRIP;
     } else if (!key) {
         /* the results' Previous, back on the strip */
     } else if (wheel) {
@@ -890,8 +912,8 @@ int search_strip_key(void *top, unsigned key) {
         ss_centre();
     else if (key == KEY_PLAY)
         ss_submit();
-    else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
-        ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
+    else if (key == KEY_RETURN) /* the strip shut, never a submit; the next Return leaves */
+        ss_shut();
     else if (button)
         ss_move(button);
     else
@@ -921,6 +943,16 @@ int search_strip_hold(void *top) {
 /* Whether top is the strip's page, where Previous and Next are the text's cursor: no scan of the
  * song on their hold (seek.c), and no long press of stock's (hold_menu.c ringnav_keylong). */
 int search_strip_owns(void *top) { return ss.page && top == ss.page; }
+/* swipe_back.c: 2 when top is the strip's page with the strip open, 1 with it shut, else 0. */
+int search_strip_open(void *top) { return !ss.page || top != ss.page ? 0 : ss.focus ? 1 : 2; }
+/* swipe_back.c, an edge swipe claimed on top: the open strip shut in the page's place (ss_shut), 1;
+ * 0 when top is not the strip's page or its strip is shut already, the swipe the page's. */
+int search_strip_close(void *top) {
+    if (search_strip_open(top) != 2) return 0;
+    ss_shut();
+    ss_dirty();
+    return 1;
+}
 
 /* UTF-8 s as wide characters in out (at most max - 1 of them), 0-ended; its length. */
 static unsigned ss_wide(const char *s, unsigned *out, unsigned max) {
@@ -1462,9 +1494,9 @@ void search_strip_paint(void *w, void *canvas) {
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
         empty_t e = none;
         if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
-        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + SS_STRIP_Y, 0) - y);
+        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + ss_foot(), 0) - y);
     }
-    ss_strip_paint(canvas, primary, accent, light);
+    if (!ss.focus) ss_strip_paint(canvas, primary, accent, light); /* shut, it is not drawn */
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -1594,7 +1626,8 @@ static int ss_grab(int type, int x, int y) {
         int again = ss.taps && now - ss.tap_at < SS_MULTI_MS && ss_dist(x - ss.tap_x) < SS_MULTI_DX,
             a, b, end = -1;
         ss.down_x = ss.grab_x = (short)x, ss.down_y = (short)y;
-        if (ss.focus != SS_ON_STRIP) { /* the wheel is elsewhere: a tap is the click, a drag a scroll */
+        if (ss.focus !=
+            SS_ON_STRIP) { /* the wheel is elsewhere: a tap is the click, a drag a scroll */
             ss.fpress = 1;
             return 1;
         }
@@ -1628,7 +1661,8 @@ static int ss_grab(int type, int x, int y) {
             if (ss_dist(x - ss.down_x) >= SS_TAP || ss_dist(y - ss.down_y) >= SS_TAP) ss.fpress = 0;
             return 1;
         }
-        ss.fpress = 0; /* released where it went down: a tap, the strip has the wheel and the cursor */
+        ss.fpress =
+            0; /* released where it went down: a tap, the strip has the wheel and the cursor */
         ss.focus = SS_ON_STRIP;
         ss_grab(EVT_POINTER_DOWN, ss.down_x, ss.down_y);
     }
@@ -1663,7 +1697,8 @@ static int ss_touch(void *ctx, void *event) {
     }
     if (!ss.pressed) return 0;
     int dx = xy[0] - ss.down_x, dy = xy[1] - ss.down_y,
-        tap = ss_dist(dx) < SS_TAP && ss_dist(dy) < SS_TAP, strip = ss.down_y >= SS_STRIP_Y;
+        tap = ss_dist(dx) < SS_TAP && ss_dist(dy) < SS_TAP,
+        strip = ss.down_y >= SS_STRIP_Y && !ss.focus; /* shut, the strip is not there */
     if (strip && !tap) {
         int cells = -dx / SS_STEP;
         ss_slide(cells - ss.swiped);
@@ -1854,23 +1889,20 @@ static int ss_secret_box(void *edit) {
 /* A box's label, kept for as long as the strip is up (the edit's own may go first). */
 static char ss_box_label[48] __attribute__((section(".scratch")));
 
-/* A stock text box's keyboard (keyboard.c, the input method's kb for edit): the strip types for
- * it on the keyboard's own window, the keys hidden and the window over the
- * screen under the status row, so nothing takes the edit's focus (a page of its own would: a
- * window to the background blurs its focus, which ends a search box); titled as the page under
- * it is, the box's text prefilled, the cursor at its end, a password's characters as dots. The sets
- * start on letters, or on digits for a box holding a number. Where the text shows (ss_place): a
- * Wi-Fi password or network name in a field under "Password" or "Network Name"; a box whose page
- * names its row (the edit's _strip_label: an EQ preset's Name, a band's Frequency, a card app's
- * field) in that row as a cell; any other box, a search's, on the query line, its tips the
- * placeholder. The edit's STRIP_RETURN picks the return key's mark (ss_ret_kind). 1 when it
- * opened. */
+/* A stock text box's keyboard (keyboard.c kb_host_open, the input method's bare kb for edit): the
+ * strip types for it on that window, moved over the screen under the status row, so nothing takes
+ * the edit's focus (a page of its own would: a window to the background blurs its focus, which ends
+ * a search box); titled as the page under it is, the box's text prefilled, the cursor at its end, a
+ * password's characters as dots. The sets start on letters, or on digits for a box holding a
+ * number. Where the text shows (ss_place): a Wi-Fi password or network name in a field under
+ * "Password" or "Network Name"; a box whose page names its row (the edit's _strip_label: an EQ
+ * preset's Name, a band's Frequency, a card app's field) in that row as a cell; any other box, a
+ * search's, on the query line, its tips the placeholder. The edit's STRIP_RETURN picks the return
+ * key's mark (ss_ret_kind). 1 when it opened. */
 int search_strip_box(void *kb, void *edit, const char *title) {
     if (ss.page || !kb || !edit) return 0;
     int top = geom_val(V_BAR);
     ss.page = kb;
-    for (unsigned i = 0, n = widget_count_children(kb); i < n; ++i)
-        widget_set_visible(widget_get_child(kb, i), 0, 0);
     widget_move_resize(kb, 0, top, 375, 320 - top);
     widget_set_prop_int(kb, "h", 320 - top);
     widget_on(kb, EVT_DESTROY, ss_closed, 0);

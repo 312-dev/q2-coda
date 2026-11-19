@@ -412,25 +412,6 @@ def test_english_ui_unknown_text_stops_the_build():
         build.english_ui('home_page.bin', ipod.encode(ui(label('未知'))))
 
 
-def t9():
-    return ui(['view', [0, 0, 1, 1], {'name': 'upper'}, [label('中', name='page:chinese')]],
-              ['view', [0, 0, 1, 1], {'name': 'lower'}, [label('中', name='page:chinese'), label('《》', name='opt:《》')]])
-
-
-def test_english_ui_t9_key_toggles_case():
-    root = ipod.decode(build.english_ui('kb_default_t9.bin', ipod.encode(t9())))
-    upper, lower = root[3]
-    assert upper[3][0][2] == {'text': 'abc', 'name': 'page:lower'}
-    assert lower[3][0][2] == {'text': 'ABC', 'name': 'page:upper'}
-    assert lower[3][1][2] == {'text': '«»', 'name': 'opt:«»'}
-
-
-def test_english_ui_other_keyboards_keep_their_names():
-    data = ipod.encode(ui(label('取消', name='page:chinese'), label('取消', name='opt:《》')))
-    root = ipod.decode(build.english_ui('other.bin', data))
-    assert [n[2]['name'] for n in root[3]] == ['page:chinese', 'opt:《》']
-
-
 def test_english_ui_refuses_a_file_it_cannot_rewrite():
     data = bytearray(ipod.encode(ui()))
     data[4 + 31] = 1  # stray byte in the widget type's padding
@@ -1434,3 +1415,28 @@ def test_every_carried_apps_paths_fit_addon_cs_slots():
         assert len(f'file:///{build.BUNDLED_DIR}/{app_id}/icon-40.png') < 56 and len(version) < 24
         assert re.fullmatch(r'[a-z0-9-]{1,15}', app_id) and size > 0 and re.fullmatch('[0-9a-f]{64}', digest)
         assert isinstance(builtin, bool)
+
+
+def stock_opens(monkeypatch, calls=None, reads=None):
+    """check_keyboard_opens over stock_window_opens' answer for V1.36's demo, as test/build.py finds it on the stock
+    image, with calls and reads changed."""
+    known = {**{a: None for a in build.WINDOW_OPENS}, 0x665374: 'edit_menu', 0x69fb5c: None, 0x69fbd0: 'kb_default_t9'}
+    found = {**dict(build.KB_NAME_READS), 0x69f9d8: 'kb_default_t9'}
+    monkeypatch.setattr(build, 'stock_window_opens', lambda demo: ({**known, **(calls or {})}, {**found, **(reads or {})}))
+    return lambda: build.check_keyboard_opens(b'')
+
+
+def test_keyboard_opens_pass_on_stock_s_calls(monkeypatch):
+    assert set(stock_opens(monkeypatch)()) >= {a for a, _ in build.KB_OPEN_SITES}
+
+
+@pytest.mark.parametrize('calls, reads, said', [
+    ({0x500000: 'some_page'}, None, 'WINDOW_OPENS does not know'),  # a new call to window_open
+    ({0x4f5390: 'kb_default_t9'}, None, 'opens the keyboard kb_default_t9'),  # a known one handed a keyboard's name
+    ({0x69fc00: None}, None, 'input_method_default calls window_open'),  # a third open in the input method
+    (None, {0x480000: 'kb_hex'}, 'code names a keyboard'),  # a keyboard's name read anywhere new
+])
+def test_keyboard_opens_stop_the_build_on_a_caller_not_redirected(monkeypatch, calls, reads, said):
+    check = stock_opens(monkeypatch, calls, reads)
+    with pytest.raises(ValueError, match=said):
+        check()
