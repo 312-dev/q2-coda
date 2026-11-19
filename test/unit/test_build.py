@@ -1504,8 +1504,10 @@ def test_stock_window_opens_finds_each_call_and_the_name_it_passes_and_each_keyb
     bal_addiu = emit(addiu(4, 9, 8), BAL, 0)  # addiu from a register nothing set: unknown
     emit(lw(25, 0), lw(25, 1), JALR, 0)  # $25 loaded again before the jalr: not the opener's
     bal_after = emit(lw(25, 0), BAL, 0)  # a bal after the load: the bal is the call, counted once
+    jalr_later = emit(lw(4, 1), addiu(4, 4, page - ro_a), lw(25, 0), 0, JALR, 0)  # the jalr a word on: still its
+    emit(lw(25, 0))  # the last load, no jalr within its reach (the trailing nops): no call
     demo, _ = mips_elf(code, rodata, got)
     calls, reads = build.stock_window_opens(demo, (opener,))
     assert calls == {jalr_page: 'page_one', bal_hex: 'kb_hex', b_call: None, jalr_nowhere: None, bal_long: None,
-                     bal_or: None, bal_addiu: None, bal_after: None}
+                     bal_or: None, bal_addiu: None, bal_after: None, jalr_later: 'page_one'}
     assert reads == {read_slot: 'kb_hex', read_addiu: 'kb_hex'}  # bal_hex's addiu builds on $4, not on the load's $5
