@@ -326,31 +326,54 @@ int bt_dev_up(const unsigned char *di);
 int bt_answer_parse(const char *ack, int *off);
 
 /* ---- devices: the kernel's management events (docs/internals.md#bluetooth-devices) ----
- * Connects, disconnects, failed connects and authentications, pairings and Forgets, each a line
- * of the unified log naming the device, whether a stream runs or not. Opcodes from Linux 5.10's
- * include/net/bluetooth/mgmt.h. */
+ * Connects (and who began them), disconnects, failed connects and authentications, pairings and
+ * Forgets, each a line of the unified log naming the device, whether a stream runs or not; and
+ * discovery: each search's start and stop, and the first answer from each device in it. Opcodes
+ * from Linux 5.10's include/net/bluetooth/mgmt.h. */
 #define BT_MGMT_EV_NEW_LINK_KEY 0x0009
 #define BT_MGMT_EV_DEVICE_CONNECTED 0x000B
 #define BT_MGMT_EV_DEVICE_DISCONNECTED 0x000C
 #define BT_MGMT_EV_CONNECT_FAILED 0x000D
 #define BT_MGMT_EV_AUTH_FAILED 0x0011
+#define BT_MGMT_EV_DEVICE_FOUND 0x0012
+#define BT_MGMT_EV_DISCOVERING 0x0013
 #define BT_MGMT_EV_DEVICE_UNPAIRED 0x0016
 struct bt_mgmt_ev {
-    int op;                /* one of the six above */
-    unsigned char addr[6]; /* bdaddr_t: the last byte first */
-    int type;              /* the address's: 0 BR/EDR, 1 LE public, 2 LE random */
-    int code;              /* a disconnect's reason, a failure's mgmt status; -1 none */
-    char name[64];         /* the connected event's EIR name, cut to fit; "" none */
+    int op;                /* one of the eight above */
+    unsigned char addr[6]; /* bdaddr_t: the last byte first; zero for Discovering */
+    int type;              /* the address's: 0 BR/EDR, 1 LE public, 2 LE random; Discovering's
+                            * type, a mask of them (1 BR/EDR, 6 LE, 7 both) */
+    int code;              /* a disconnect's reason, a failure's mgmt status, Discovering's 1 started
+                            * or 0 stopped; -1 none */
+    char name[64];         /* the connected or found event's EIR name, cut to fit; "" none */
+    int rssi;              /* Device Found's, dBm; -1 for the rest */
+    int out;               /* Device Connected: who began the link (bt_acl_out: 1 the Q2, 0 the
+                            * device), filled in by the caller; -1 not known */
 };
 /* One event as read off the control channel (struct mgmt_hdr first, n bytes): 1 when it was one
- * of the six, whole, into e; 0 for any other event or one cut short. */
+ * of the eight, whole, into e; 0 for any other event or one cut short. */
 int bt_mgmt_parse(const unsigned char *p, int n, struct bt_mgmt_ev *e);
 /* Its unified-log message into out, name (or 0) quoted after the address: "connected
- * 04:00:6E:D3:96:6D "Pixel Buds"", "disconnected ... reason=1 timeout or link loss", "connect
+ * 04:00:6E:D3:96:6D "Pixel Buds" by=q2", "disconnected ... reason=1 timeout or link loss", "connect
  * failed ... status=0x04 no answer (page timeout)", "auth failed ...", "forgotten ...", "paired
- * ...", " LE" after the name for an LE address. Its level: W for a disconnect the Q2 did not ask
- * for and for a failure, else I; 0 for an event that is none of the six. */
+ * ...", "found ... rssi=-52 BR/EDR", "discovery started BR/EDR+LE"; " LE" after the name for an LE
+ * address. Its level: W for a disconnect the Q2 did not ask for and for a failure, else I; 0 for an
+ * event that is none of the eight. */
 char bt_mgmt_line(const struct bt_mgmt_ev *e, const char *name, char *out, int size);
+/* Device Found comes for each inquiry or advertising answer, many a second: only each address's
+ * first in a discovery is logged, BT_FOUND_MAX addresses at most. */
+#define BT_FOUND_MAX 32
+struct bt_found {
+    unsigned char addr[BT_FOUND_MAX][6];
+    int n, capped;
+};
+void bt_found_reset(struct bt_found *f); /* at each discovery's start */
+/* 1 bdaddr's first in this discovery (log it); 0 seen, or past the cap; -1 the first past the
+ * cap (log that the rest are not) */
+int bt_found_first(struct bt_found *f, const unsigned char *bdaddr);
+/* HCIGETCONNLIST's answer: who began the ACL link to bdaddr, the kernel's hci_conn->out: 1 the Q2,
+ * 0 the device, -1 not listed */
+int bt_acl_out(const unsigned char *req, int max, const unsigned char *bdaddr);
 /* BlueZ's device info file's text: its Name= line's value into name (cut to size), 1 when found */
 int bt_info_name(const char *text, char *name, int size);
 void bt_addr_text(const unsigned char *bdaddr, char *out); /* "04:00:6E:D3:96:6D" into out[18] */

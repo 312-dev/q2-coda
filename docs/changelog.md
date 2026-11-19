@@ -1,6 +1,8 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: a device whose connection is up now shows **Connected** on the Bluetooth page even when the Q2's own connect is still waiting, instead of "Connecting..." for minutes while it plays.
+  - Logs: the Q2's log now also records each Bluetooth search starting and stopping and the first time each device answers it, when the pairing page opens and shows each device, who began each connection (the Q2 or the device), and each step of the Q2's own connecting (what it is trying to connect to, and why).
   - Bluetooth: when the Bluetooth chip stops answering while the Bluetooth page is searching for devices, the Q2 now restarts Bluetooth straight away instead of waiting about a minute for the search, which could never finish on a chip that had stopped answering.
   - Logs: the Q2's log now notes each Bluetooth device connecting, disconnecting (and whether the Q2, the device or a lost signal ended it), failing to connect or pair, pairing and being forgotten, with the device's address and name, whether music is playing or not. The Bluetooth link log's start and drop lines now name the device's address too.
   - Bluetooth: aptX HD, aptX, AAC and SBC now send each piece of audio in one radio packet instead of two, as Android does on the same kind of link, so a crowded 2.4 GHz band (a train, a street) has fewer chances to break the sound up. LDAC already did.

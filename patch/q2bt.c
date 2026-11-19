@@ -18,8 +18,9 @@
  * field "-", and with no Bluetooth socket at all (the emulator) it tries again a minute later and
  * does nothing else. Apart from streams, the kernel's lines q2guard reads feed the controller
  * watchdog (bt_kmsg, bt_watch, docs/internals.md#bluetooth-controller-watchdog), and bt_sleep waits
- * on the kernel's management channel, whose device events (connects, drops, failures, pairings,
- * Forgets) go to the unified log as they come (docs/internals.md#bluetooth-devices). */
+ * on the kernel's management channel, whose device events (connects and who began them, drops,
+ * failures, pairings, Forgets, discoveries and the devices each found) go to the unified log as
+ * they come (docs/internals.md#bluetooth-devices). */
 #include "q2bt.h"
 #include "q2log.h"
 
@@ -90,6 +91,7 @@ static struct {
     int mgmt_tried, mgmt_warned;
     unsigned mgmt_failed_at;
     struct bt_names names;
+    struct bt_found found; /* the addresses this discovery has answered from */
 } bt;
 
 static void note(const char *what) {
@@ -725,10 +727,27 @@ static void mgmt_drain(void) {
         if (!bt_mgmt_parse(b, n, &e)) continue;
         char a[18], stored[64], line[192];
         const char *name = e.name;
-        bt_addr_text(e.addr, a);
-        if (!name[0]) name = bt_names_get(&bt.names, e.addr);
-        if (!name && store_name(a, stored, sizeof stored)) name = stored;
-        bt_names_put(&bt.names, e.addr, name);
+        if (e.op == BT_MGMT_EV_DISCOVERING && e.code) bt_found_reset(&bt.found);
+        if (e.op == BT_MGMT_EV_DEVICE_FOUND) { /* each device's first answer in this discovery */
+            int first = bt_found_first(&bt.found, e.addr);
+            if (first < 0)
+                ulog_add(bt.ulog, time(0), now_ms(), 'I', "bt",
+                         "found: more devices this discovery, not logged");
+            if (first <= 0) continue;
+            if (!name[0]) name = bt_names_get(&bt.names, e.addr); /* no store read for these */
+            bt_names_put(&bt.names, e.addr, name);
+        } else if (e.op != BT_MGMT_EV_DISCOVERING) {
+            bt_addr_text(e.addr, a);
+            if (!name[0]) name = bt_names_get(&bt.names, e.addr);
+            if (!name && store_name(a, stored, sizeof stored)) name = stored;
+            bt_names_put(&bt.names, e.addr, name);
+        }
+        if (e.op == BT_MGMT_EV_DEVICE_CONNECTED && ctl_ok(now_ms())) { /* who began it */
+            unsigned req[1 + 4 * 4] = { 0 }; /* dev_id 0, room for four links */
+            ((unsigned short *)req)[1] = 4;
+            if (!ioctl(bt.ctl, HCIGETCONNLIST, req))
+                e.out = bt_acl_out((const unsigned char *)req, 4, e.addr);
+        }
         char level = bt_mgmt_line(&e, name, line, sizeof line);
         ulog_add(bt.ulog, time(0), now_ms(), level, "bt", line);
         if (level == 'W') bt.mgmt_warned = 1;

@@ -1030,6 +1030,11 @@ const char *bt_codec(void), *bt_kind(unsigned cls), *bt_dev_mac(int i), *bt_dev_
 unsigned bt_class(const char *mac);
 enum { BT_ROW_FOUND, BT_ROW_PAIRED, BT_ROW_CONNECTING, BT_ROW_CONNECTED };
 int bt_dev_state(int i), bt_stock_click(int dev, int x), bt_ui_hold(void *top);
+/* bt_trace.c: stock's Bluetooth connection state in the unified log
+ * (docs/internals.md#bluetooth-connection-trace); whether the kernel holds an ACL link to a MAC */
+void bt_trace_poll(void), bt_trace_why(const char *why, const char *mac), bt_trace_page(void);
+void bt_trace_shown(const char *mac);
+int bt_acl_up(const char *mac), bt_acl_listed(const unsigned char *req, int max, const char *mac);
 void bt_dev_rename(int i, const char *name);
 /* bt_detail.c: a Bluetooth device's page */
 void bt_detail_open(int dev), bt_detail_poll(void);

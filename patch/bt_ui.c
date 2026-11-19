@@ -66,6 +66,7 @@ static struct {
     int scans;          /* scans started for this view */
     int scan_shown;     /* Other Devices' spinner shown at the last poll */
     int linking;        /* a device connecting or connected at the last poll; -1 not yet looked */
+    int ahead;          /* link_ahead for the link list's last item at the last poll */
     char link[24];      /* the device connected at the last look, "" none */
     char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
@@ -99,8 +100,20 @@ void bt_dev_rename(int i, const char *name) {
     if (at) tk_snprintf(at, 0x100, "%s", name);
 }
 
+/* Stock's link list's last item is mac at a status other than 3 while the kernel holds a connected
+ * ACL link to it (bt_trace.c bt_acl_up): stock's state is behind the link. On 2026-11-19 the Pixel
+ * Buds' row said Connecting for minutes while their AAC stream ran (docs/internals.md#bluetooth-page). */
+static int link_ahead(const char *mac) {
+    char item[32] = "";
+    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
+    if (!mac || n <= 0) return 0;
+    getBtLinkItem(n - 1, &status, item);
+    return status != 3 && !strcmp(item, mac) && bt_acl_up(mac);
+}
+
 /* Where device i is in stock's link list: BT_ROW_CONNECTED as the last item at status 3 (stock's
- * own test on its rows), BT_ROW_CONNECTING while a link thread runs for it, else BT_ROW_PAIRED. */
+ * own test on its rows) or as the last item whose link the kernel holds (link_ahead),
+ * BT_ROW_CONNECTING while a link thread runs for it, else BT_ROW_PAIRED. */
 int bt_dev_state(int i) {
     const char *mac = dev_at(i, 0);
     char item[32] = "";
@@ -108,9 +121,9 @@ int bt_dev_state(int i) {
     if (!mac || n <= 0) return BT_ROW_PAIRED;
     getBtLinkItem(n - 1, &status, item);
     if (strcmp(item, mac)) return BT_ROW_PAIRED;
-    return status == 3                   ? BT_ROW_CONNECTED
-           : I(bt_connectstatus, 0) == 1 ? BT_ROW_CONNECTING
-                                         : BT_ROW_PAIRED;
+    return status == 3 || link_ahead(mac) ? BT_ROW_CONNECTED
+           : I(bt_connectstatus, 0) == 1  ? BT_ROW_CONNECTING
+                                          : BT_ROW_PAIRED;
 }
 
 /* A row's stock button (its first child, named by its device's index) and that index, -1 for a
@@ -390,6 +403,7 @@ static void *head(void *view, void *item, const char *text) {
  * found one, disconnect the connected one (x under 276), or stock's Unpair? (x 276 on, a paired
  * one's right end). 0 with no such row. */
 int bt_stock_click(int dev, int x) {
+    bt_trace_why("tap", dev_at(dev, 0)); /* the connect it may start, in the log (bt_trace.c) */
     for (unsigned i = 0, n = bt.view ? widget_count_children(bt.view) : 0; i < n; ++i) {
         void *item = widget_get_child(bt.view, i), *b = row_button(item);
         if (b && row_dev(item) == dev) {
@@ -495,6 +509,7 @@ void bt_page(void *view, int on) {
     unsigned n = widget_count_children(view);
     if (bt.view != view) {
         bt.view = view, bt.scans = 0, bt.linking = -1;
+        bt_trace_page(); /* "page opened", and its found devices logged afresh */
         widget_on(view, EVT_DESTROY, view_gone, view);
     }
     if (!on) {
@@ -617,7 +632,13 @@ void bt_rows_pre(void *view) {
         return;
     }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
-        void *item = widget_get_child(view, i), *b = row_button(item);
+        void *item = widget_get_child(view, i), *b = row_button(item), *l;
+        /* a row stock built as connecting or paired whose link the kernel holds: Connected */
+        if (b && row_dev(item) >= 0 && (l = state_label(b)) && row_state(b) != BT_CONNECTED &&
+            link_ahead(dev_at(row_dev(item), 0)))
+            widget_set_prop_str(l, "tr_text", "msg_connected");
+        if (b && row_dev(item) >= 0 && !state_label(b)) /* a found device the page shows */
+            bt_trace_shown(dev_at(row_dev(item), 0));
         if (widget_get_prop_int(item, "_bt_head", 0) && I(item, W_H) != BT_NOTE_H)
             I(item, W_H) = BT_HEAD_H;
         else if (row_dev(item) >= 0 && b && I(item, W_H) == SET_STOCK_ROW)
@@ -719,8 +740,8 @@ static unsigned choice_kbps(int i) {
 /* Auto's caption for the headset connected now. bluealsa offers aptX HD, aptX, AAC and SBC beside
  * LDAC whatever the choice, so a headset without LDAC streams one of those on Auto, at that codec's
  * own rate (a Bowers & Wilkins Px7: aptX HD, a fixed 576 kbps): the caption names it, "Best this
- * headset supports: aptX HD, 576 kbps". On LDAC, with no device connected (stock's rule, as
- * bt_dev_state: the link list's last item at status 3) or no codec known, it says what Auto does.
+ * headset supports: aptX HD, 576 kbps". On LDAC, with no device connected (stock's rule: the link
+ * list's last item at status 3) or no codec known, it says what Auto does.
  * caption_row measures a caption again only for another pointer, so a changed text goes to the
  * other of two buffers. */
 static struct {
@@ -951,6 +972,11 @@ static void page_poll(unsigned now) {
     if (now - bt.poll_at < BT_POLL_MS) return;
     bt.poll_at = now;
     if (class_read()) widget_invalidate_force(win, (void *)0);
+    char last[32] = "";
+    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
+    if (n > 0) getBtLinkItem(n - 1, &status, last);
+    int ahead = n > 0 && link_ahead(last);
+    if (ahead != bt.ahead) bt.ahead = ahead, g_btsetting_flag = 1; /* rebuilt: the row follows */
     int linking = I(bt_connectstatus, 0) == 1 || busy();
     if (bt_searchtime > 1 && linking && !bt.linking) {
         btStopSearch();

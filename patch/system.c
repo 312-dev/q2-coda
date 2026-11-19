@@ -565,6 +565,7 @@ void power_poll(void) {
     wdt_poll();
     state_poll();
     heatguard_poll(); /* q2guard's cards (heatguard.c) */
+    bt_trace_poll();  /* stock's Bluetooth state's changes, to the log (bt_trace.c) */
     smart_poll();
     autozone_poll(); /* after smart_poll: a lookup running keeps the link (smart_needed) */
     localsend_poll(); /* LocalSend's daemon and its requests (localsend_ui.c) */

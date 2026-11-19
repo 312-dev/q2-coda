@@ -727,7 +727,17 @@ int bt_mgmt_parse(const unsigned char *p, int n, struct bt_mgmt_ev *e) {
     int op = u16_at(p), len = u16_at(p + 4), at = 0, need = 7;
     const unsigned char *q = p + 6;
     if (len > n - 6) return 0; /* cut short: a read can hold only part of a datagram */
+    e->out = e->rssi = -1;
+    if (op == BT_MGMT_EV_DISCOVERING) { /* type (a mask of address types), discovering */
+        if (len < 2) return 0;
+        memset(e->addr, 0, 6);
+        e->op = op, e->type = q[0], e->code = q[1], e->name[0] = 0;
+        return 1;
+    }
     switch (op) {
+    case BT_MGMT_EV_DEVICE_FOUND: /* addr, rssi (signed), flags (4), eir_len (2), eir (14 on) */
+        need = 14;
+        break;
     case BT_MGMT_EV_NEW_LINK_KEY:
         at = 1, need = 8;
         break;
@@ -750,11 +760,21 @@ int bt_mgmt_parse(const unsigned char *p, int n, struct bt_mgmt_ev *e) {
     e->type = q[at + 6];
     e->code = need == 8 && !at ? q[7] : -1;
     e->name[0] = 0;
+    if (op == BT_MGMT_EV_DEVICE_FOUND) {
+        int eir = u16_at(q + 12);
+        e->rssi = (signed char)q[7];
+        eir_name(q + 14, eir < len - 14 ? eir : len - 14, e->name, sizeof e->name);
+    }
     if (op == BT_MGMT_EV_DEVICE_CONNECTED) {
         int eir = u16_at(q + 11);
         eir_name(q + 13, eir < len - 13 ? eir : len - 13, e->name, sizeof e->name);
     }
     return 1;
+}
+/* a discovery's type, a mask of address types (BDADDR_BREDR 0, BDADDR_LE_PUBLIC 1,
+ * BDADDR_LE_RANDOM 2: hdev->discovery.type) */
+static const char *disc_word(int t) {
+    return t == 1 ? "BR/EDR" : t == 6 ? "LE" : t == 7 ? "BR/EDR+LE" : "other";
 }
 /* mgmt.h's MGMT_DEV_DISCONN_* */
 static const char *const disconn_words[6] = { "unspecified",           "timeout or link loss",
@@ -801,12 +821,24 @@ char bt_mgmt_line(const struct bt_mgmt_ev *e, const char *name, char *out, int s
     char a[18], who[80] = "";
     const char *what = "", *why = "";
     char code[16] = "", level = 'I';
+    if (e->op == BT_MGMT_EV_DISCOVERING) {
+        snprintf(out, (size_t)size, "discovery %s %s", e->code ? "started" : "stopped",
+                 disc_word(e->type));
+        return 'I';
+    }
     bt_addr_text(e->addr, a);
     if (name && name[0]) snprintf(who, sizeof who, " \"%s\"", name);
     switch (e->op) {
     case BT_MGMT_EV_DEVICE_CONNECTED:
         what = "connected";
+        if (e->out >= 0) snprintf(code, sizeof code, " by=%s", e->out ? "q2" : "device");
         break;
+    case BT_MGMT_EV_DEVICE_FOUND:
+        what = "found";
+        snprintf(code, sizeof code, " rssi=%d", e->rssi);
+        why = e->type ? "LE" : "BR/EDR";
+        snprintf(out, (size_t)size, "%s %s%s%s %s", what, a, who, code, why);
+        return 'I';
     case BT_MGMT_EV_DEVICE_DISCONNECTED:
         what = "disconnected";
         why = e->code >= 0 && e->code < 6 ? disconn_words[e->code] : "other";
@@ -860,4 +892,24 @@ void bt_names_put(struct bt_names *c, const unsigned char *bdaddr, const char *n
     int k = 0;
     for (; name[k] && k < (int)sizeof c->name[i] - 1; ++k) c->name[i][k] = name[k];
     c->name[i][k] = 0;
+}
+
+void bt_found_reset(struct bt_found *f) { f->n = 0, f->capped = 0; }
+int bt_found_first(struct bt_found *f, const unsigned char *bdaddr) {
+    for (int i = 0; i < f->n; ++i)
+        if (!memcmp(f->addr[i], bdaddr, 6)) return 0;
+    if (f->n == BT_FOUND_MAX) return f->capped++ ? 0 : -1;
+    memcpy(f->addr[f->n++], bdaddr, 6);
+    return 1;
+}
+/* hci_conn_list_req's answer: who began the ACL link to bdaddr, the kernel's hci_conn->out
+ * (hci_conn.c hci_acl_create_connection sets it for a Create Connection this host sent): 1 the Q2,
+ * 0 the device, -1 not listed */
+int bt_acl_out(const unsigned char *req, int max, const unsigned char *bdaddr) {
+    int n = u16_at(req + 2);
+    for (int i = 0; i < n && i < max; ++i) {
+        const unsigned char *c = req + 4 + 16 * i;
+        if (c[8] == 1 && !memcmp(c + 2, bdaddr, 6)) return c[9] != 0;
+    }
+    return -1;
 }

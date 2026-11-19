@@ -35,10 +35,14 @@ static int bt_connected(char *mac) {
     for (int i = getBtLinkSize(); status != 3 && i-- > 0;) getBtLinkItem(i, &status, mac);
     return status == 3;
 }
-/* Auto-link would append its target after a connected incoming link; its failure clears both. */
+void bt_trace_why(const char *why, const char *mac); /* bt_trace.c */
+/* Auto-link would append its target after a connected incoming link; its failure clears both. A
+ * connect it goes ahead with is logged as auto (docs/internals.md#bluetooth-connection-trace). */
 int headset_bt_autolink(char *address) {
     char item[32];
-    return !bt_connected(item) && checkPairDev(address);
+    int go = !bt_connected(item) && checkPairDev(address);
+    if (go) bt_trace_why("auto", address);
+    return go;
 }
 /* The control thread can discover a boot reconnect before openBluetooth powers the radio. */
 int headset_bt_init(void *thread) {

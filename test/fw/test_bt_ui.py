@@ -1105,3 +1105,81 @@ def test_a_marked_row_s_text_is_grayed_as_the_library_s(fw, tmp_path):
     assert ink(3) == (1, 0xff666666)
     assert ink(5) == (0, 0xffffffff)
     assert ink(2) == (0, 0xffffffff)
+
+
+# ---- the row follows the kernel's link (docs/internals.md#bluetooth-page) ----
+
+def acl_list(fw, *macs):
+    """socket and HCIGETCONNLIST as the kernel answers them: each mac a connected ACL link (type 1, state 1)."""
+    fw.mock('fw_socket', lambda *_: 7)
+    def ioctl(fd, request, req, *_):
+        if request & 0xffffffff != 0x400448d4:
+            return -1
+        C.c_uint16.from_address(req + 2).value = len(macs)
+        for i, mac in enumerate(macs):
+            c = req + 4 + 16 * i
+            C.memmove(c + 2, bytes(reversed(bytes.fromhex(mac.replace(':', '')))), 6)
+            C.c_uint8.from_address(c + 8).value = 1
+            C.c_uint16.from_address(c + 10).value = 1
+        return 0
+    fw.mock('fw_ioctl', ioctl)
+
+
+def state_text(p, row):
+    return next((p.ui.props.get((w, 'tr_text')) for w in p.ui.subtree(row)
+                 if (w, 'tr_text') in p.ui.props), None)
+
+
+def test_a_connecting_row_whose_link_is_up_shows_connected(fw):
+    """2026-11-19 (V1JBi): the kernel connected the Pixel Buds at 20:40:36Z, an AAC stream ran from 20:40:42Z, yet
+    the row said Connecting for minutes: stock's last link item never reached 3 while its link thread ran. With the
+    kernel holding the link, the row and the device's page say Connected."""
+    p = Page(fw, [(HEAD, 'Pixel Buds', 'connecting'), (CAR, 'BMW 83828', 'paired')])
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1
+    p.links = [(HEAD, 5)]
+    acl_list(fw)  # not linked yet: Connecting, as stock says
+    p.rebuild()
+    p.layout()
+    assert state_text(p, p.row('d0')) == 'msg_connecting'
+    assert fw.fn('bt_dev_state', C.c_int, C.c_int)(0) == 2  # BT_ROW_CONNECTING
+    acl_list(fw, HEAD)
+    p.now += 600
+    p.rebuild()
+    p.layout()
+    row = p.row('d0')
+    assert state_text(p, row) == 'msg_connected' and geometry(row)[3] == 52
+    assert p.ui.lookup(row, '_bt_dot', 1) and not p.ui.lookup(row, '_bt_spin', 1)
+    assert fw.fn('bt_dev_state', C.c_int, C.c_int)(0) == 3  # BT_ROW_CONNECTED
+    assert state_text(p, p.row('d1')) == 'msg_paired'  # another device's row is stock's
+
+
+def test_the_link_coming_up_rebuilds_the_page(fw):
+    """Stock rebuilds its rows only when its own state moves, and here it does not: the page's poll asks for the
+    rebuild (g_btsetting_flag) when the kernel's link to the last item comes up or goes."""
+    p = Page(fw, [(HEAD, 'Pixel Buds', 'connecting')])
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1
+    p.links = [(HEAD, 5)]
+    acl_list(fw)
+    p.poll()
+    flag = fw.var('g_btsetting_flag', C.c_ubyte)
+    flag.value = 0
+    acl_list(fw, HEAD)
+    p.poll()
+    assert flag.value == 1
+
+
+def test_a_listed_acl_is_only_a_connected_one(fw):
+    """HCIGETCONNLIST's hci_conn_info: an LE link (type 0x80) or one still connecting (state 5, BT_CONNECT) to the
+    address is not a connected ACL link."""
+    def req(kind, state):
+        b = bytearray(4 + 16)
+        b[2] = 1
+        b[4 + 2:4 + 8] = bytes(reversed(bytes.fromhex(HEAD.replace(':', ''))))
+        b[4 + 8], b[4 + 10] = kind, state
+        return bytes(b)
+    listed = fw.fn('bt_acl_listed', C.c_int, C.c_char_p, C.c_int, C.c_char_p)
+    assert listed(req(1, 1), 8, HEAD.encode()) == 1
+    assert listed(req(1, 1), 8, HEAD.lower().encode()) == 1
+    assert listed(req(0x80, 1), 8, HEAD.encode()) == 0
+    assert listed(req(1, 5), 8, HEAD.encode()) == 0
+    assert listed(req(1, 1), 8, CAR.encode()) == 0

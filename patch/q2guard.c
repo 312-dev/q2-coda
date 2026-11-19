@@ -12,7 +12,8 @@
  * and each tick it watches for a wedged Bluetooth controller, which demo relaunches when asked through
  * the state file's bt= (docs/internals.md#bluetooth-controller-watchdog). bt_sleep also listens to the
  * kernel's Bluetooth management channel and logs each device's connect, drop, failure, pairing and
- * Forget to the unified log (docs/internals.md#bluetooth-devices).
+ * Forget, and each discovery with the devices it found, to the unified log
+ * (docs/internals.md#bluetooth-devices).
  * It also writes the unified log, q2-log, beside them (q2log.h, docs/internals.md#unified-log): each
  * tick it reads what demo's stderr file and the kernel's /dev/kmsg gained, and adds its own notes;
  * demo (ulog.c ulog_end) and S90play ask for a snapshot through /tmp/q2guard.snap and a SIGUSR1.
