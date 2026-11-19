@@ -33,10 +33,12 @@ static long last_written = -1;
 /* snd_config_update_free_global: the next open reads alsa-lib's configuration afresh (fresh counts those opens),
  * so a /mnt/data/asound.conf demo rewrote since the last one names the device (docs/player.md#output). */
 static int freed, fresh;
+static char opened[128]; /* the device the last open named */
 int snd_config_update_free_global(void) { freed = 1; return 0; }
 int usleep(useconds_t us) { sleeps++; return 0; }
 int snd_pcm_open(snd_pcm_t **p, const char *name, int stream, int mode) {
     fresh += freed, freed = 0;
+    snprintf(opened, sizeof opened, "%s", name);
     if (opens++ && reopen_rate) rate = reopen_rate;
     if (open_fails && open_fails--) return -19;
     *p = &the_pcm;
@@ -149,6 +151,16 @@ int main(void) {
         opens = fresh = freed = 0;
         for (int i = 0; i < 2; ++i) output_close(output_open(&f, way, 17));
         printf("reread way %d opens %d fresh %d\n", way, opens, fresh);
+    }
+    /* the device each way opens, as the Q2 runs it (no Q2PLAYER_DEVICE): Bluetooth's names no address, so the
+     * headset connected last is found whether or not demo has rewritten asound.conf yet */
+    unsetenv("Q2PLAYER_DEVICE");
+    for (int way = 0; way < 3; ++way) {
+        struct pcm_format f = {0};
+        f.rate = 44100, f.channels = 2, f.bytes = 2;
+        rate = way == 1 ? 48000 : 44100;
+        output_close(output_open(&f, way, 17));
+        printf("device way %d %s\n", way, opened);
     }
     return 0;
 }

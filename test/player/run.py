@@ -862,7 +862,7 @@ def test_alsa_sw_params(player, songs, tmp):
     0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to
     a PCM that ran dry first moves appl_ptr to a period past hw_ptr (snd_pcm_forward by the deficit plus a period)."""
     got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA')], check=True, capture_output=True, text=True).stdout.split('\n')
-    lines = {' '.join(l.split()[:3] if l.startswith(('open', 'reread')) else l.split()[:1]): l for l in got if l}
+    lines = {' '.join(l.split()[:3] if l.startswith(('open', 'reread', 'device')) else l.split()[:1]): l for l in got if l}
     for way in range(3):
         assert lines[f'open way {way}'].endswith(f'calls 1 start 1378 stop {0x56220000} silence {0x56220000} boundary {0x56220000}'), lines[f'open way {way}']
     want = {'full': 'r 0 forward -1 avail_reads 1 writes 1', 'ring': 'r 0 forward -1 avail_reads 1 writes 1',
@@ -886,8 +886,15 @@ def test_alsa_sw_params(player, songs, tmp):
     for way in range(3):
         want = f'reread way {way} opens 2 fresh {2 if way == 1 else 0}'
         assert lines[f'reread way {way}'] == want, (lines[f'reread way {way}'], want)
+    # demo rewrites asound.conf only when its own link thread sets a headset up (SaveBlueAlsa), and on 2026-11-19 the
+    # car's PCM was up 12 minutes before the file named it, so Bluetooth opens the headset connected last by name
+    # (bluealsa's plugin: 00:00:00:00:00:00, the highest Sequence), not the file's address.
+    devices = {0: 'default', 1: "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'", 2: 'hw:1,0'}
+    for way, name in devices.items():
+        assert lines[f'device way {way}'] == f'device way {way} {name}', lines[f'device way {way}']
     return ('start 1378, stop and silence at the boundary on ways 0-2; a dry PCM forwarded by deficit + period, not on Bluetooth; '
-            "bluealsa's PCM gone: reopened on Bluetooth, an error elsewhere; each Bluetooth open reads asound.conf afresh")
+            "bluealsa's PCM gone: reopened on Bluetooth, an error elsewhere; each Bluetooth open reads asound.conf afresh "
+            'and plays to the headset connected last')
 
 
 def test_usb_formats(player, songs, tmp):

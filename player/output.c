@@ -99,13 +99,19 @@ static int candidates(const struct pcm_format *f, int out[4][2]) {
 }
 
 #ifdef HAVE_ALSA
+/* The headset connected last, whatever /mnt/data/asound.conf names (docs/player.md#output, "Which headset"):
+ * bluealsa's plugin takes 00:00:00:00:00:00 as the PCM with the highest Sequence, the device that connected most
+ * recently, so the car's PCM is found from bluealsa's SetConfiguration on, before demo rewrites the file or when it
+ * never does (SaveBlueAlsa runs only on its own link thread's setup). */
+#define BT_DEVICE "plug:'bluealsa:DEV=00:00:00:00:00:00,PROFILE=a2dp'"
+
 /* Stock's ao_alsa init (hciplayer 0x438f64-0x4391f8): Bluetooth through bluealsa, a USB DAC as card 1 on a Q2
  * (hardware type 17; captured), and the local DAC as "default"; types 14 and 15 are other Shanling players'
  * "plughw:1,0". "default" is a plug over the DAC, which is what takes a float decoder's FLOAT_LE. */
 static const char *device(int outputway, int hw) {
     const char *forced = getenv("Q2PLAYER_DEVICE");
     if (forced) return forced;
-    if (outputway == 1) return "plug:bluealsa";
+    if (outputway == 1) return BT_DEVICE;
     if (outputway == 2) return "hw:1,0";
     if (hw == 14 || hw == 15) return "plughw:1,0";
     if (hw == 7 || hw == 11) return "hw:1,0";
@@ -142,11 +148,10 @@ static int alsa_open(struct output *o, int outputway, int hw) {
     snd_pcm_hw_params_t *p = NULL;
     unsigned want = outputway == 1 ? BT_ASK : (unsigned)o->f.rate, rate = want, buffer = BUFFER_US, periods = PERIODS;
     const char *name = device(outputway, hw);
-    /* plug:bluealsa plays to defaults.bluealsa.device, which demo writes to /mnt/data/asound.conf each time it sets a
-     * headset's link up (SaveBlueAlsa). alsa-lib loads that file through alsa.conf's hook and reads its configuration
-     * again only when alsa.conf itself changes, so a player that has run since one headset would look for that one's
-     * PCM after a switch to another ("PCM not found"). Stock's ao_alsa frees the configuration before it opens
-     * (hciplayer 0x438ffc); so does every Bluetooth open here, the old PCM already closed. */
+    /* alsa-lib reads its configuration again only when alsa.conf itself changes, not /mnt/data/asound.conf, which
+     * its hook loads and demo rewrites at each link (SaveBlueAlsa), so the rest of bluealsa's defaults there would
+     * stay those of the player's first open. Stock's ao_alsa frees the configuration before it opens (hciplayer
+     * 0x438ffc); so does every Bluetooth open here, the old PCM already closed. */
     if (outputway == 1) snd_config_update_free_global();
     int r = snd_pcm_open(&o->pcm, name, SND_PCM_STREAM_PLAYBACK, 0), c[4][2], n = candidates(&o->f, c), i = 0;
     if (r < 0) { fprintf(stderr, "q2player: %s: %s\n", name, snd_strerror(r)); return -1; }
