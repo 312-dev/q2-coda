@@ -21,7 +21,7 @@ __attribute__((noreturn)) void _exit(int);
 #define SIGKILL 9
 #define AF_UNIX 1
 #define SOCK_DGRAM 1 /* MIPS swaps STREAM and DGRAM */
-#define MSG_DONTWAIT 0x80
+#define MSG_DONTWAIT 0x40 /* Linux's on every architecture; 0x80 is MSG_EOR */
 struct sockaddr_un {
     unsigned short sun_family;
     char sun_path[108];

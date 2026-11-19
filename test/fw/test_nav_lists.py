@@ -2868,6 +2868,46 @@ def test_coverflow_s_page_glides_a_cover_a_tick(fw, ui):
     assert covers.started == [(-covers.stride, covers.duration)]
 
 
+class CfPage(C.Structure):
+    """coverflow.c's cf as far as the pool reads it: cf.slide, and cf.count at the end (coverflow.h)."""
+    _fields_ = [*((k, C.c_void_p) for k in 'page body covers slide name artist title albums tracks stock'.split()),
+                *((k, C.c_int) for k in 'sort sort_read year_old artists on_sort resort'.split()),
+                ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int),
+                ('offline', C.c_int), ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
+                *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
+                *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
+
+
+def pooled(fw, ui, albums, index):
+    """Cover Flow's covers with depth: eight children (CF_POOL) standing for albums albums, at index."""
+    covers = Carousel(fw, ui, n=8, index=index, name='coverflow_page')
+    c = fw.var('cf', CfPage)
+    c.slide, c.count = covers.menu.at, albums
+    return covers
+
+
+@pytest.mark.parametrize('index, code, lands', [(4000, KEY_NEXT, 4001), (5999, KEY_NEXT, 0), (0, KEY_PREV, 5999)])
+def test_a_pooled_glide_ends_on_the_album_not_the_child(fw, ui, index, code, lands):
+    """The glide's end commits SLIDE_INDEX less the offset round the albums, where stock's would wrap it by the
+    children; the focus goes to the child standing for it."""
+    covers = pooled(fw, ui, 6000, index)
+    key(fw, ui, code)
+    (evt, fn, ctx), = covers.handlers
+    covers.live(covers.goal)  # arrived
+    assert C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)(fn)(ctx, 0x40) == 7
+    assert fw.calls('slide_menu_set_value')[-1][1][:2] == (covers.menu.at, lands)
+    assert not fw.calls('slide_menu_on_scroll_done')
+    assert covers.menu.int(SLIDE_OFFSET) == 0 and covers.menu.ptr(O['SLIDE_ANIMATOR']) == 0
+
+
+@pytest.mark.parametrize('index, code, lands', [(4000, KEY_NEXT, 4001), (5999, KEY_NEXT, 0), (0, KEY_PREV, 5999)])
+def test_a_pooled_tick_with_no_animator_lands_round_the_albums(fw, ui, index, code, lands):
+    covers = pooled(fw, ui, 6000, index)
+    covers.fw.mock('widget_animator_scroll_create', lambda *_: 0)
+    key(fw, ui, code)
+    assert fw.calls('slide_menu_set_value')[-1][1][:2] == (covers.menu.at, lands)
+
+
 def test_another_page_s_slide_menu_is_not_a_carousel(fw, ui):
     other = Carousel(fw, ui, name='games_page')
     key(fw, ui, KEY_NEXT)
