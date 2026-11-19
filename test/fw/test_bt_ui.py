@@ -702,10 +702,11 @@ def test_a_connecting_row_whose_connect_is_not_running_goes_to_stock(fw, why, kw
     assert t.updates == [] and len(t.stock) == 1  # stock's click, as before: it ignores it while a thread runs
 
 
-def test_a_tap_on_a_paired_row_still_connects(fw):
+def test_a_tap_on_a_paired_row_opens_its_page(fw):
     t = Tap(fw, state='paired', linking=0, status=3, target=HEAD)
     t.tap()
-    assert t.updates == [] and len(t.stock) == 1
+    assert t.updates == [] and t.stock == []  # Connect is the page's first row (test_bt_detail.py)
+    assert any(t.ui.name.get(w) == 'btdevice_page' for w in t.ui.windows)
 
 
 class Spinning(Page):

@@ -560,6 +560,129 @@ int bt_song_path(const char *path) {
     return !strncmp(path, "/mnt/mmc/", 9) && strncmp(path, "/mnt/mmc/.q2muse/", 17);
 }
 
+/* ---- a wedged controller (docs/internals.md#bluetooth-controller-watchdog) ----
+ * The H5 lines are Realtek's out-of-tree driver's (its "Error in H5 hdr checksum", not mainline's
+ * "Invalid header checksum"); the timeout is hci_core's hci_cmd_timeout. */
+int bt_kmsg_sign(const char *msg) {
+    static const char *const h5[] = { "Peer acked invalid packet", "Error in H5 hdr checksum",
+                                      "Short H5 packet" };
+    for (unsigned i = 0; i < sizeof h5 / sizeof *h5; ++i)
+        if (strstr(msg, h5[i])) return BT_SIGN_H5;
+    if (strstr(msg, "command 0x") && strstr(msg, " tx timeout")) return BT_SIGN_TIMEOUT;
+    return BT_SIGN_NONE;
+}
+/* The microseconds are past 2^32 after 72 minutes up: ms is every digit but the last three, each
+ * taken modulo 2^32 (no 64-bit division) */
+int bt_kmsg_split(const char *rec, unsigned *ms, const char **msg) {
+    const char *s = rec;
+    for (int i = 0; i < 2; ++i) { /* PRI, SEQ */
+        while (*s >= '0' && *s <= '9') ++s;
+        if (*s++ != ',') return 0;
+    }
+    const char *d = s;
+    while (*s >= '0' && *s <= '9') ++s;
+    if (s == d || *s != ',') return 0;
+    unsigned v = 0;
+    for (const char *p = d; p < s - 3; ++p) v = v * 10 + (unsigned)(*p - '0');
+    const char *m = strchr(s, ';');
+    if (!m) return 0;
+    *ms = v, *msg = m + 1;
+    return 1;
+}
+static int settling(const struct bt_wedge *w, unsigned now) {
+    return w->asked || (w->have_reset && now - w->reset_at < BT_RESET_SETTLE_MS);
+}
+int bt_wedge_line(struct bt_wedge *w, unsigned now, unsigned kms, const char *msg) {
+    int sign = bt_kmsg_sign(msg), storm = 0;
+    if (sign == BT_SIGN_NONE || settling(w, now)) return sign;
+    if (sign == BT_SIGN_H5) {
+        w->h5[w->h5_i] = kms, w->h5_i = (w->h5_i + 1) % BT_H5_STORM;
+        if (w->h5_n < BT_H5_STORM) ++w->h5_n;
+        /* the oldest of the last BT_H5_STORM, where the ring goes next */
+        storm = w->h5_n == BT_H5_STORM && kms - w->h5[w->h5_i] <= BT_H5_WINDOW_MS;
+        if (!storm) return sign;
+    }
+    if (!w->suspect) {
+        w->suspect = storm ? 's' : 't', w->first = now, w->storm = w->timeout = 0;
+        w->fails = 0, w->deferred = 0;
+    }
+    if (storm) w->storm = 1;
+    else w->timeout = 1;
+    w->last = now;
+    return sign;
+}
+int bt_wedge_step(struct bt_wedge *w, unsigned now) {
+    if (w->asked) {
+        if (now - w->reset_at < BT_RESET_WAIT_MS) return BT_W_NONE;
+        w->asked = 0; /* the relaunch counts as made: the backoff and the settle run from here */
+        w->reset_at = now;
+        return BT_W_LATE;
+    }
+    if (!w->suspect) return BT_W_NONE;
+    if (!w->fails && now - w->last >= BT_SUSPECT_MS) {
+        w->suspect = 0;
+        return BT_W_NONE;
+    }
+    if (w->calm && (int)(now - w->calm_until) < 0) return BT_W_NONE;
+    if (w->probed && now - w->probed_at < BT_PROBE_GAP_MS) return BT_W_NONE;
+    return BT_W_PROBE;
+}
+static int defer(struct bt_wedge *w) {
+    if (w->deferred) return BT_W_NONE;
+    w->deferred = 1;
+    return BT_W_DEFER;
+}
+int bt_wedge_probed(struct bt_wedge *w, unsigned now, int answered, int busy) {
+    w->probed = 1, w->probed_at = now;
+    if (answered < 0) return BT_W_NONE;
+    if (answered) {
+        int was = w->suspect || w->fails;
+        w->suspect = 0, w->fails = 0, w->gave_up = 0;
+        w->calm = 1, w->calm_until = now + BT_PROBE_CALM_MS;
+        return was ? BT_W_HEALTHY : BT_W_NONE;
+    }
+    if (++w->fails < BT_PROBE_FAILS) return BT_W_NONE;
+    if (w->gave_up) {
+        w->calm = 1, w->calm_until = now + BT_PROBE_CALM_MS;
+        return BT_W_NONE;
+    }
+    int in_row = w->have_reset && now - w->reset_at < BT_RESET_CURED_MS;
+    int n = in_row ? w->resets + 1 : 1;
+    if (n > BT_RESET_MAX) {
+        w->gave_up = 1, w->calm = 1, w->calm_until = now + BT_PROBE_CALM_MS;
+        return BT_W_GIVEUP;
+    }
+    if (in_row && now - w->reset_at < (unsigned)BT_RESET_GAP_MS << (w->resets - 1)) return defer(w);
+    if (busy) return defer(w);
+    w->resets = n, w->have_reset = 1, w->reset_at = now, w->asked = 1, ++w->req;
+    w->suspect = 0, w->fails = 0, w->deferred = 0, w->h5_n = 0;
+    return BT_W_RESET;
+}
+void bt_wedge_done(struct bt_wedge *w, unsigned now, int n) {
+    if (!w->asked || n != w->req) return;
+    w->asked = 0, w->reset_at = now, w->h5_n = 0;
+}
+int bt_probe_answer(const unsigned char *p, int n) {
+    return n >= 6 && p[0] == 4 && p[1] == 0x0e && u16_at(p + 4) == BT_OP_VERSION;
+}
+int bt_dev_up(const unsigned char *di) { return (int)(u32_at(di + 16) & 1); }
+int bt_answer_parse(const char *ack, int *off) {
+    for (const char *p = ack; p && *p; p = strchr(p, '\n'), p = p ? p + 1 : 0) {
+        unsigned n;
+        if (strncmp(p, "bt ", 3) || !number_at(p + 3, &n)) continue;
+        const char *s = p + 3;
+        while (*s >= '0' && *s <= '9') ++s;
+        *off = !strncmp(s, " off", 4);
+        return (int)n;
+    }
+    *off = 0;
+    return 0;
+}
+
+#ifdef Q2GUARD_HOST
+int bt_wedge_size(void) { return (int)sizeof(struct bt_wedge); } /* the host test's layout check */
+#endif
+
 int bt_flush(card_log *l, const char *dir) {
     return log_flush(l, dir, "q2-bt", BT_FILE_MAX, BT_FILES);
 }

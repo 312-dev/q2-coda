@@ -5,7 +5,8 @@
  * under Auto, aptX HD or aptX is stepped down to SBC while the radio cannot keep up
  * (bt_step), and SBC's bitpool lowered (bt_sbc_step), both with Adapt to Signal on. The
  * decisions, parsers and the line, with no reads of the device: q2bt_core.c, tested on this machine
- * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. */
+ * by test/unit/test_q2bt.py. The device's side is q2bt.c; tools/q2bt.py reads the log. The
+ * controller watchdog (bt_wedge, test/unit/test_q2bt_wedge.py) lives here too. */
 #ifndef Q2BT_H
 #define Q2BT_H
 
@@ -254,6 +255,72 @@ int bt_rate(unsigned n, unsigned ms);
 /* clock ticks (100 a second) over ms as tenths of a percent of one core */
 int bt_ticks_pct(unsigned ticks, unsigned ms);
 
+/* ---- a wedged controller (docs/internals.md#bluetooth-controller-watchdog) ----
+ * Realtek's H5 UART driver logs each bad packet and carries on, and the kernel logs an HCI command
+ * left unanswered ("hci0: command 0x0401 tx timeout") and sends the next: a controller whose link
+ * has wedged leaves Bluetooth dead until the stack is relaunched. A sign (a storm of H5 errors, or
+ * a command timeout) makes the controller suspect; Read Local Version left unanswered
+ * BT_PROBE_FAILS times in a row confirms it; demo then relaunches the stack as stock's Bluetooth
+ * switch does (heatguard.c), asked through q2guard's state file. */
+#define BT_H5_STORM 20            /* H5 error lines within BT_H5_WINDOW_MS that make a storm */
+#define BT_H5_WINDOW_MS 10000     /* (the kernel's own times; one bad packet is a single line) */
+#define BT_SUSPECT_MS 60000       /* a suspicion with no new sign this long, no probe failed: dropped */
+#define BT_OP_VERSION 0x1001      /* the probe: Read Local Version Information, no side effects */
+#define BT_PROBE_MS 2500          /* a probe unanswered this long failed (the kernel gives up at 2 s) */
+#define BT_PROBE_GAP_MS 5000      /* probes while suspect no closer than this (q2guard's tick) */
+#define BT_PROBE_FAILS 2          /* in a row: the controller is wedged */
+#define BT_PROBE_CALM_MS 60000    /* after a probe answered, or once given up: the next no sooner */
+#define BT_RESET_GAP_MS 120000    /* a relaunch no sooner than this after the last, doubled for each */
+#define BT_RESET_CURED_MS 600000  /* in a row: a wedge this soon after the last relaunch is in a row */
+#define BT_RESET_MAX 3            /* relaunches in a row, none curing, before giving up */
+#define BT_RESET_SETTLE_MS 60000  /* after a relaunch: the stack starting, its lines not counted */
+#define BT_RESET_WAIT_MS 60000    /* demo's answer waited for this long */
+enum { BT_SIGN_NONE, BT_SIGN_H5, BT_SIGN_TIMEOUT };
+/* A kernel message (/dev/kmsg's text after the ';'): BT_SIGN_H5 for the H5 driver's error lines,
+ * BT_SIGN_TIMEOUT for "hci0: command 0x.... tx timeout", else BT_SIGN_NONE */
+int bt_kmsg_sign(const char *msg);
+/* /dev/kmsg's record "PRI,SEQ,USEC,FLAGS;message": the time in ms since boot (modulo 2^32) and the
+ * message; 0 when it is not one */
+int bt_kmsg_split(const char *rec, unsigned *ms, const char **msg);
+enum { BT_W_NONE, BT_W_PROBE, BT_W_RESET, BT_W_HEALTHY, BT_W_GIVEUP, BT_W_DEFER, BT_W_LATE };
+struct bt_wedge {
+    unsigned h5[BT_H5_STORM]; /* the kernel times of the last H5 error lines, a ring at h5_i */
+    int h5_n, h5_i;
+    int suspect;          /* a sign seen and not cleared: 's' a storm first, 't' a timeout first */
+    int storm, timeout;   /* which signs this suspicion has had */
+    unsigned first, last; /* now (q2guard's clock) of its first and latest sign */
+    int fails;            /* probes in a row unanswered */
+    int probed;           /* probed_at is set */
+    unsigned probed_at, calm_until;
+    int calm;             /* calm_until is set */
+    int resets;           /* relaunches in a row, none curing */
+    int have_reset, gave_up, deferred;
+    unsigned reset_at;    /* the last relaunch asked for */
+    int asked;            /* a relaunch asked for and not yet answered (its number is req) */
+    int req;              /* relaunches asked for since q2guard started: what the state file says */
+};
+/* One kernel message, now (q2guard's clock) and its own time kms; its sign */
+int bt_wedge_line(struct bt_wedge *w, unsigned now, unsigned kms, const char *msg);
+/* Each tick: BT_W_PROBE when a probe is due, BT_W_LATE when demo has not answered a relaunch in
+ * BT_RESET_WAIT_MS (given up waiting; counted as a relaunch), else BT_W_NONE */
+int bt_wedge_step(struct bt_wedge *w, unsigned now);
+/* A probe's outcome (1 answered, 0 not, -1 no verdict: hci0 down, or no socket). BT_W_RESET: ask
+ * for a relaunch now (w->req is its number, w->first when the trouble began); BT_W_DEFER: one is
+ * due but busy (a codec switch running) or too soon after the last; BT_W_GIVEUP, once, when
+ * BT_RESET_MAX in a row did not cure it; BT_W_HEALTHY when an answer cleared a suspicion; else
+ * BT_W_NONE. busy: a codec switch is running. */
+int bt_wedge_probed(struct bt_wedge *w, unsigned now, int answered, int busy);
+/* demo's answer to relaunch n: the settle starts */
+void bt_wedge_done(struct bt_wedge *w, unsigned now, int n);
+/* The probe's answer: 1 for a Command Complete to Read Local Version (an event read off a raw HCI
+ * socket, its type byte first) */
+int bt_probe_answer(const unsigned char *p, int n);
+/* hci_dev_info's flags: 1 while hci0 is up (HCI_UP) */
+int bt_dev_up(const unsigned char *di);
+/* the q2guard state file's answer line "bt N done" or "bt N off" (heatguard.c): N, 0 none; *off 1
+ * for "off" (Bluetooth was off: nothing relaunched) */
+int bt_answer_parse(const char *ack, int *off);
+
 /* The log: q2-bt.0 in dir, moved on at BT_FILE_MAX through BT_FILES files (log_flush,
  * q2guard_core.c). */
 int bt_flush(card_log *l, const char *dir);
@@ -265,5 +332,9 @@ void bt_init(card_log *l, card_log *u); /* the q2-bt log, and the unified log (E
 void bt_sleep(unsigned ms);
 int bt_streaming(void);
 int bt_flush_due(void); /* once after a stream's START or STOP: its lines to the card at once */
+void bt_kmsg(const char *rec, int n); /* each /dev/kmsg record q2guard reads: the wedge's signs */
+/* Each tick: the wedge watched (probes, relaunches asked for); the relaunch number for the state
+ * file's bt= (0 none yet). ack: the ack file's text, demo's answer in it. */
+int bt_watch(unsigned now, const char *ack);
 
 #endif

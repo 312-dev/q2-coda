@@ -1,11 +1,15 @@
-"""bt_detail.c: a Bluetooth device's page. Centre on the connected device's row opens it (any other row connects, as
-stock), Play/Pause held on a paired row too: the path ("Q2 → WH-1000XM5"), its codec line, then Battery, Disconnect
-(Connect), Rename and Forget This Device; Forget asks on the confirmation card, then does what stock's Unpair does."""
+"""bt_detail.c: a Bluetooth device's page. Centre on a saved device's row opens it, connected or not (a found row
+pairs, as stock), Play/Pause held on one too: the path ("Q2 → WH-1000XM5"), its codec line, then Battery, Disconnect
+(Connect), Rename and Forget This Device; Forget asks on the confirmation card, then does what stock's Unpair does and
+clears the saved link (BTLINKMAC) when it names the device."""
 import ctypes as C
 
 import pytest
 
+from conftest import claim
 from test_bt_ui import CAR, DEVICES, EVT_CLICK, HEAD, Page
+
+LINK_MAC = 0xa4c0d8  # BTLINKMAC: the device stock connects again at boot and Bluetooth on
 
 BATT = '/tmp/q2-btbatt'
 
@@ -47,11 +51,37 @@ def test_centre_on_the_connected_row_opens_its_page(fw):
     assert fw.fn('bt_detail_title', C.c_char_p, C.c_char_p)(b'btdevice_page') == b'WH-1000XM5'
 
 
-def test_centre_on_another_row_connects_as_stock(fw):
+def test_centre_on_a_saved_row_that_is_not_connected_opens_its_page(fw):
     d = Detail(fw)
     d.click_row('d1')
+    assert d.page and not d.clicks  # no connect: Connect is the page's first row
+    assert d.detail_rows() == ['Connect', 'Rename', 'Forget This Device']
+    shown = d.ui.shown(d.page)
+    assert 'Q2 → BMW 6R81' in shown and 'Not Connected' in shown
+    assert fw.fn('bt_detail_title', C.c_char_p, C.c_char_p)(b'btdevice_page') == b'BMW 6R81'
+
+
+def test_centre_on_a_found_row_pairs_as_stock(fw):
+    d = Detail(fw)
     d.click_row('d2')
-    assert not d.page and d.clicks == [('1', 0), ('2', 0)]
+    assert not d.page and d.clicks == [('2', 0)]
+
+
+def test_connect_is_stock_s_click_on_the_device(fw):
+    d = Detail(fw)
+    d.click_row('d1')
+    d.ui.click(d.page, 0)
+    assert d.clicks == [('1', 0)]
+
+
+def test_forget_this_device_is_red(fw):
+    d = Detail(fw)
+    for row in ('d0', 'd1'):
+        d.click_row(row)
+        items = d.ui.kids[d.ui.view(d.page)]
+        inks = [d.ui.props.get((d.ui.kids[item][0], '_final'), 0) & 0xffffffff for item in items]
+        assert inks[-1] == 0xff000000 | 0xff453a and not any(inks[:-1])
+        fw.fn('bt_detail__bd_closed', C.c_int, C.c_void_p, C.c_void_p)(d.page, None)
 
 
 def test_play_pause_held_on_a_paired_row_opens_its_page_with_connect(fw):
@@ -120,6 +150,47 @@ def test_forgetting_the_output_puts_the_sound_back_on_a_jack(fw, save, output):
     d.click_row('d0')
     fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
     assert [c for c in a.calls if c[0] == 'output'] == output and fw.var('g_headset_output', C.c_ubyte).value == 0
+
+
+def test_forget_removes_a_saved_device_that_is_not_connected(fw):
+    d = Detail(fw)
+    a = Answers(fw, d)
+    d.click_row('d1')
+    d.ui.click(d.page, 2)
+    assert 'dialog/sortselect_dialog' in d.ui.went
+    fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
+    assert a.calls == [('pair', 1), ('read',), ('start', 1), ('close', d.page)]
+    assert d.ui.toasts == ['Device Forgotten']
+
+
+@pytest.fixture
+def link_mac():
+    """BTLINKMAC's 32 bytes at stock's address, set by the test and put back after."""
+    claim(LINK_MAC)
+    saved = C.string_at(LINK_MAC, 32)
+    yield lambda mac: C.memmove(LINK_MAC, mac.encode().ljust(32, b'\0'), 32)
+    C.memmove(LINK_MAC, saved, 32)
+
+
+@pytest.mark.parametrize('saved, cleared', [(CAR, True), (CAR.lower(), True), (HEAD, False), ('', False)])
+def test_forget_clears_the_saved_link_when_it_names_the_device(fw, link_mac, saved, cleared):
+    """So neither boot nor Bluetooth on (autoLinkBluetooth) tries to connect a device that is gone."""
+    d = Detail(fw)
+    Answers(fw, d)
+    link_mac(saved)
+    d.click_row('d1')
+    fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
+    assert C.string_at(LINK_MAC) == (b'' if cleared else saved.encode())
+    assert d.config.values.get(b'BTLINKMAC') == (b'' if cleared else None)
+
+
+def test_a_failed_unpair_keeps_the_saved_link(fw, link_mac):
+    d = Detail(fw)
+    Answers(fw, d, pair=0)
+    link_mac(CAR)
+    d.click_row('d1')
+    fw.fn('bt_detail__forget', None, C.c_void_p, C.c_int, C.c_int)(None, 1, 0)
+    assert C.string_at(LINK_MAC) == CAR.encode() and b'BTLINKMAC' not in d.config.values
 
 
 def test_a_failed_unpair_does_nothing_more(fw):
