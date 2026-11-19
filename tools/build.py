@@ -433,6 +433,9 @@ REMOTE_HOOK = (b'/usr/bin/dbus-daemon --config-file=/etc/dbus-1/system.conf\n',
 # demo, whose first USB check may already want the controller for stock's gadget; adbd is started again if it
 # ends, and its gadget bound once it is up (unless stock's gadget has the controller). After REMOTE_HOOK's line.
 ADBD, ADB_GADGET = 'usr/bin/adbd', 'usr/bin/q2adb-gadget'
+# --dev only (docs/adb.md#installing-an-update-over-adb, patch/q2update.sh): Software Update's card path from a
+# computer, through demo's q2update_poll (patch/sw_update.c)
+Q2UPDATE = 'usr/bin/q2update'
 ADB_HOOK = (b'/usr/bin/q2remote &\n',
             b'/usr/bin/q2remote &\n/usr/bin/q2adb-gadget setup && (while :; do /usr/bin/adbd </dev/null >/dev/null 2>&1 &'
             b' /usr/bin/q2adb-gadget bind; wait $!; sleep 2; done) &\n')
@@ -2207,10 +2210,11 @@ def adbd_binary(out):
 
 def adb_files(out, cat):
     """A --dev build's ADB files ({rootfs path: (path whose inode metadata it takes, bytes)}): adbd, its gadget
-    script, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
+    script, q2update, and stock's USB scripts wrapped (adb_wrapper), each stock copy before its wrapper, which takes the
     inode the copy's metadata comes from."""
     return {ADBD: (HELPER_LIKE, adbd_binary(out)),
             ADB_GADGET: (HELPER_LIKE, (ROOT/'patch/adb_gadget.sh').read_bytes()),
+            Q2UPDATE: (HELPER_LIKE, (ROOT/'patch/q2update.sh').read_bytes()),
             **{f'usr/bin/{n.replace(".sh", "_stock.sh")}': (f'usr/bin/{n}', cat(f'usr/bin/{n}')) for n in USB_SCRIPTS},
             **{f'usr/bin/{n}': (f'usr/bin/{n}', adb_wrapper(n)) for n in USB_SCRIPTS}}
 
