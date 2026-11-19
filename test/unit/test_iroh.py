@@ -61,3 +61,61 @@ def test_a_stale_pin_stops_the_build(pinned, monkeypatch):
     (cache/digest/'q2-iroh').write_bytes(data)
     monkeypatch.setattr(iroh, 'PIN', (digest, len(data), '0' * 64))
     assert 'changed since q2-iroh was pinned' in iroh.problem()
+
+
+@pytest.fixture
+def cargo(tmp_path, monkeypatch):
+    """q2/build.sh stood in for: it prints the path of the binary it 'built' (data), as the real one does last."""
+    built = tmp_path/'target/q2/q2-iroh'
+    built.parent.mkdir(parents=True)
+    (built.parent/'sysroot').mkdir()  # the stock /lib copy each build makes, dropped after
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        built.write_bytes(cargo.data)
+        return iroh.subprocess.CompletedProcess(cmd, 0, stdout=f'Compiling q2-iroh\n{built}\n')
+    monkeypatch.setattr(iroh.subprocess, 'run', run)
+    monkeypatch.setenv('CARGO_TARGET_DIR', str(tmp_path/'target'))
+    monkeypatch.setattr(iroh, 'CACHE', tmp_path/'cache')
+    cargo.data, cargo.calls, cargo.built = b'\x7fELF fresh', calls, built
+    return cargo
+
+
+def test_a_build_is_kept_in_the_cache_under_its_sha(cargo):
+    data, digest = iroh.build()
+    assert data == cargo.data and digest == hashlib.sha256(data).hexdigest()
+    assert (iroh.CACHE/digest/'q2-iroh').read_bytes() == data and (iroh.CACHE/digest/'q2-iroh').stat().st_mode & 0o111
+    assert cargo.calls == [['sh', str(iroh.CRATE/'q2/build.sh'), str(cargo.built.parent)]]
+    assert not (cargo.built.parent/'sysroot').exists()
+
+
+def test_build_iroh_uses_what_it_built_and_says_when_the_pin_is_stale(cargo, monkeypatch, capsys):
+    """build.py --build-iroh (binary(fresh=True)): the new binary is installed, pinned or not."""
+    assert iroh.binary(fresh=True) == cargo.data
+    assert 'not the pinned one; PIN = ' in capsys.readouterr().err
+    digest = hashlib.sha256(cargo.data).hexdigest()
+    monkeypatch.setattr(iroh, 'PIN', (digest, len(cargo.data), iroh.crate_sha256()))
+    assert iroh.binary(fresh=True) == cargo.data
+    assert capsys.readouterr().err == ''
+
+
+def test_main_builds_and_prints_the_pin(cargo, capsys):
+    assert iroh.main(['iroh.py']) == 0
+    digest = hashlib.sha256(cargo.data).hexdigest()
+    assert capsys.readouterr().out == f'PIN = {(digest, len(cargo.data), iroh.crate_sha256())!r}\n'
+
+
+def test_main_check_passes_on_the_pinned_binary_and_fails_without_it(pinned, capsys):
+    cache, digest, data = pinned
+    assert iroh.main(['iroh.py', '--check']) == 1
+    assert 'is not in' in capsys.readouterr().out
+    (cache/digest).mkdir()
+    (cache/digest/'q2-iroh').write_bytes(data)
+    assert iroh.main(['iroh.py', '--check']) == 0
+    assert capsys.readouterr().out == f'q2-iroh {digest[:12]}: pinned, cached, crate unchanged\n'
+
+
+def test_main_refuses_other_arguments(capsys):
+    assert iroh.main(['iroh.py', '--frobnicate']) == 2
+    assert 'python3 tools/iroh.py' in capsys.readouterr().err
