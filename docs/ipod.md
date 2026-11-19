@@ -919,7 +919,7 @@ selection.
 | `tidal_sortmode_dialog`       | three sort rows, `btn_cancel`                   |
 
 `sortselect_dialog` and the search result dialogs already navigate their lists. Left out, so the
-wheel does nothing there (the keyboard's keys take it instead, [The keyboard](#keyboard); [Wheel volume](internals.md#wheel-volume)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
+wheel does nothing there (the letter strip takes it instead, [The keyboard](#keyboard); [Wheel volume](internals.md#wheel-volume)): the text-entry dialogs (`addplaylist`, `editwifi`, `kbwifiadd`,
 `kbwifipass`, `renameplaylist`, `searchbox`, `tidal_searchbox` and Baidu's `edit_dialog`), the Update
 Local Music progress (`updatemusic_dialog`, whose only button cancels a scan that can run for
 minutes), the pull-down quick settings (`statusbar_dialog`, whose rows the wheel walks, handing it to the brightness slider on Center: see
@@ -1100,10 +1100,12 @@ painted it white, which drew the box at rest.
   strip's size in white at 60 %; it goes 300 ms after the wheel stops. Turning faster than 8 characters a second
   shows none until the wheel stops, then one. The bubble may cover the last result rows while it shows. Center
   types the lit character at the cursor, cycles the set on the switcher (the highlight stays on it), and submits on
-  the return key; Play/Pause submits from anywhere on the strip. Return jumps the highlight to the return key, a
-  Center away from submitting, and a held Return closes Search from anywhere on the page: 200 ms into the hold a
+  the return key; Play/Pause submits from anywhere on the strip, and a submit shuts the strip, the results then
+  running to the screen's foot. Return on the strip shuts it, never a submit, as an edge swipe does
+  (`search_strip_close`): the query stays, highlighted, and the next Return leaves Search; Center or a tap on the
+  query opens the strip again. A held Return closes Search from anywhere on the page: 200 ms into the hold a
   card says "Keep holding to go back" over the dimmed page, its ring filling until 600 ms, when Search closes; let
-  go before and the highlight is on the return key (`search_strip_down`, [oled-design](oled-design.md#text-entry)).
+  go before and the strip shuts (`search_strip_down`, [oled-design](oled-design.md#text-entry)).
   Previous and Next move the cursor along the text; Previous held erases the character before it 450 ms into the
   hold, the next 500 ms later and each after that 15 % sooner, down to one every 110 ms, and its release moves
   nothing (a hold of Previous or Next there never scans the song). There is no delete key. A space is never typed
@@ -1121,10 +1123,10 @@ painted it white, which drew the box at rest.
   Center plays a song with the songs found after it as the queue, opens an artist's page, or opens an album's
   tracks in Cover Flow; Play/Pause there is the player's. A turn up from the first result lands on the tabs, where
   the wheel moves between them, each picked as it is reached ([Tabs](oled-design.md#tabs)): a turn down past
-  Albums, or Center, goes back to the results and a turn up past All to the query line, which takes the selection bar and nothing more (the strip stays shut and the wheel goes on down to the tabs); Center or Return there, or a tap, opens the strip; Next picks the next tab and
-  Previous the one before. Previous or Return on the results, and Return on the tabs, go back to the strip with the
-  text, cursor and tab as they were. With text and no match, the empty state stands in the list's place, "No
-  Matches", "Try fewer letters" ([oled-design](oled-design.md#empty-and-offline)), and a submit stays on the strip;
+  Albums, or Center, goes back to the results and a turn up past All to the query line, which takes the selection bar and nothing more (the strip stays shut and the wheel goes on down to the tabs); Center there, or a tap, opens the strip; Next picks the next tab and
+  Previous the one before. Previous on the results goes back to the strip with the
+  text, cursor and tab as they were; Return on the results or the tabs leaves Search. With text and no match, the empty state stands in the list's place, "No
+  Matches", "Try fewer letters" ([oled-design](oled-design.md#empty-and-offline)), and a submit shuts the strip on the query;
   on a tab with nothing, it lands on the tabs. A server song that can't play now (offline, no copy on the card),
   and an artist or album none of whose songs can, is grayed with the offline mark at its right, as in every other
   list ([server library](server-library.md#grayed-rows)). By touch, a drag along the strip moves the highlight a
@@ -1158,24 +1160,25 @@ painted it white, which drew the box at rest.
   "Playlist created", and the list goes back to open on it) or saves the new name ("Renamed"), and the page closes;
   an empty name ("Name can't be empty") or one taken ("A playlist has that name") says so and stays. Return, held
   Return and held Previous are as on Search.
-- <a id="keyboard"></a>**The keyboard.** Under `list.entry.ipod` (OLED's) no text box shows stock's keyboard: each
-  time one opens, the second as the first, `patch/keyboard.c` (`kb_strip_due`) gives its window to the letter strip for the input method's edit,
-  its keys hidden and the window over the whole screen, the status row an overlay on it (`search_strip_box`,
-  [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's focus, which ends a search box.
-  The box's text is prefilled, the strip opening on abc (123 for a box holding a number), and typed where the box's
+- <a id="keyboard"></a>**The keyboard.** Stock's keyboard is gone (the user's, 2026-11-18): no text box shows it,
+  and its page, style and key images are not in the image. Every keyboard stock opens is opened by its input method,
+  and both of that one's calls open `patch/keyboard.c`'s `kb_host_open` instead: a bare keyboard window, no keys and no
+  slide up, over the screen under the status row, which the letter strip takes for the input method's edit before its
+  first frame (`search_strip_box`, [oled-design](oled-design.md#text-entry)); a page of its own would take the edit's
+  focus, which ends a search box. The box's text is prefilled, the strip opening on abc (123 for a box holding a number), and typed where the box's
   value lives: a search box's on the query line, a Wi-Fi password or network name in a field under its label, a box
   whose page names its row (`_strip_label`: an EQ preset's Name, a band's Frequency or Q, a card app's field) in that
   row. A password shows as dots, the character just typed for a second, with no way to show the rest: a Wi-Fi
   network's, Add Network's, a card app's password field and the Guest Play hotspot's. Submitting writes the
   text into the edit and presses the keyboard's OK (`input_method_dispatch_action`, as its Enter key does), so the box
   acts as it did: the Wi-Fi password joins, an EQ preset is renamed, a search searches; the keyboard, the strip with it,
-  closes as its Done closes it. A held Return closes the keyboard and the strip (an edit of ours emptied first, as the
+  closes as its Done closes it. Return, or an edge swipe, shuts the strip and leaves the box and its text in place;
+  Center or a tap in the text opens it again, and Play/Pause is still the box's OK. The next Return, or a held one,
+  closes the keyboard and the strip (an edit of ours emptied first, as the
   keyboard's Return did), leaving the box; on Add Network's two rows, whose dialog (`editwifi_dialog`) holds nothing
   but the box, it quits the dialog too, a loop pass later (quit inside the keyboard's close, demo crashes), back to the
   rows with their text as it was. That dialog's own box, in a row at the status row's height, is hidden while the strip
-  is up (`search_strip_box`) and shown again if the dialog outlives the strip. Under another theme
-  the keyboard stays stock's, its keys `#1C1C1E` boxes on black, the wheel walking them and Center pressing the lit
-  one.
+  is up (`search_strip_box`) and shown again if the dialog outlives the strip.
 - **Track Time.** Now Playing's right-hand time shows what is left of the track ("-3:29", the default) or its
   length ("4:12"). A tap on the time switches it and the choice is kept across tracks and restarts (`IPOD NPTIME`,
   an own option; `np_time_tap`, outside the bar's target, so it never seeks); Appearance's Track Time row is the

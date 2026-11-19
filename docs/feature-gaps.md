@@ -125,7 +125,7 @@ Support: **yes** the Q2 can do it as it is, **partial** with a limit named, **no
 
 **Effort and value.** M. High: Smart Playlists are the iPod library's other half, and every iTunes user built some.
 
-**Risks.** Writing rules on the device needs the T9 box (`field` rows exist in the card-app protocol); a desktop-written file is the simpler first step. The app reads `database.db` while stock may write it: open read-only, retry on `SQLITE_BUSY`.
+**Risks.** Writing rules on the device needs the text box (`field` rows exist in the card-app protocol); a desktop-written file is the simpler first step. The app reads `database.db` while stock may write it: open read-only, retry on `SQLITE_BUSY`.
 
 ### 5. Genius-style mixes
 

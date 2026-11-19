@@ -1,7 +1,7 @@
 """search_strip.c: Search as an iPod classic's letter strip under the OLED theme (list.entry.ipod), and the names
 and text boxes that type on it (the user's mock-up keyboard-inscreen/strip.html): the wheel walks one loop, the set
 switcher, the set's characters and a space, the return key; one turn stops at the switcher or the return key and a new one goes
-on round; Centre types, cycles the set or submits; Return jumps to the return key and held goes back; Previous and Next
+on round; Centre types, cycles the set or submits; Return shuts the strip (the next leaves) and held goes back; Previous and Next
 move the cursor and Previous held erases, faster as it goes on; Play/Pause submits. Search's results filter live
 (songs, then artists, then albums), and tabs above them pick a group."""
 import ctypes as C
@@ -64,7 +64,6 @@ class Strip:
     im: C.Array[C.c_char]  # a text box's strip (boxed): its input method, edit, keyboard and pages
     edit: int
     kb: int
-    keys: int
     dialog: int  # ... the edit's window, and the row it sits in
     holder: int
 
@@ -334,10 +333,11 @@ def test_previous_and_next_held_are_the_strip_s_not_a_scan_of_the_song(fw, ui, s
     assert owns(0) == 0
 
 
-def test_return_jumps_to_the_return_key_and_centre_there_submits(fw, ui, song):
+def test_centre_on_the_return_key_submits(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.type('joy')
-    assert s.key(KEY_RETURN) == [1] and s.ss.stop == 28 and s.ss.halted and s.ss.text == b'joy'
+    s.go(s.stops() - 1)
+    assert s.ss.stop == 28 and s.ss.text == b'joy'
     s.key(KEY_CENTER)
     assert s.ss.focus == ON_LIST and s.ss.sel == 0 and ui.backs == 0
 
@@ -359,12 +359,6 @@ def test_submitting_moves_to_the_results_and_centre_plays_from_them(fw, ui, song
     assert s.ss.sel == 2
     s.key(KEY_PREV, KEY_CENTER)
     assert ui.played == [([songs[1], songs[2]], 1, LIBRARY)]  # the songs alone are the queue
-
-
-def test_a_submit_with_no_match_stays(fw, ui, song):
-    s = Strip(fw, ui, library(song))
-    s.type('zz')
-    assert s.enter() == [1] and s.ss.focus == ON_STRIP and ui.backs == 0
 
 
 def test_an_artist_is_listed_once_and_opens_its_page(fw, ui, song):
@@ -405,21 +399,6 @@ def test_results_go_back_to_the_strip_by_wheel_or_previous(fw, ui, song):
     assert s.ss.focus == ON_STRIP and s.ss.text == b'lo' and s.ss.cur == 2 and s.ss.stop == stop
 
 
-@pytest.mark.parametrize('on', ['results', 'tabs'])
-def test_return_on_the_results_goes_back_to_the_strip_and_there_jumps_to_the_return_key(fw, ui, song, on):
-    s = Strip(fw, ui, library(song))
-    s.type('lo')
-    s.enter()
-    s.key(KEY_PREV, KEY_NEXT)  # the tabs, and the wheel on to Songs
-    if on == 'results':
-        s.key(KEY_CENTER, KEY_NEXT)  # Centre: Songs' results
-        assert s.ss.focus == ON_LIST and s.ss.sel == 1
-    s.key(KEY_RETURN)
-    assert s.ss.focus == ON_STRIP and ui.backs == 0 and s.ss.text == b'lo' and s.ss.tab == SONGS
-    s.key(KEY_RETURN)
-    assert s.ss.text == b'lo' and s.ss.stop == s.stops() - 1 and ui.backs == 0
-
-
 @pytest.mark.parametrize('on', ['strip', 'results', 'tabs'])
 def test_a_held_return_closes_search_wherever_the_wheel_is(fw, ui, song, on):
     s = Strip(fw, ui, library(song))
@@ -438,7 +417,7 @@ def test_the_list_scrolls_to_keep_the_bar_on_its_rows(fw, ui, song):
     s.type('song')
     s.enter()
     s.key(*[KEY_NEXT] * 7)
-    assert (s.ss.sel, s.ss.top) == (7, 5)  # three rows under the tabs
+    assert (s.ss.sel, s.ss.top) == (7, 3)  # five rows under the tabs, the strip shut
     s.key(*[KEY_PREV] * 5)
     assert (s.ss.sel, s.ss.top) == (2, 2)
 
@@ -481,7 +460,9 @@ def test_the_wheel_moves_between_the_tabs_and_the_buttons_pick_and_the_tab_stays
     assert s.ss.tab == ALBUMS and s.ss.focus == ON_TABS and s.ss.text == b'o'
     s.key(KEY_CENTER)  # into the results
     assert s.ss.focus == ON_LIST and s.ss.sel == 0
-    s.key(KEY_PREV, KEY_RETURN)  # the tabs, then back to the strip
+    s.key(KEY_PREV)  # the tabs, then a tap on the query, after its text: the strip
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 60, 16)
     assert s.ss.focus == ON_STRIP and s.ss.tab == ALBUMS
     s.enter()
     s.key(KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV, KEY_PREV)  # the tabs, up past All: the query line
@@ -510,7 +491,9 @@ def test_submitting_onto_an_empty_tab_lands_on_the_tabs(fw, ui, song):
     s = Strip(fw, ui, library(song))
     s.type('lo')
     s.enter()
-    s.key(KEY_PREV, KEY_FWD_BTN, KEY_FWD_BTN, KEY_RETURN)  # Artists, none holding "lo"; the strip
+    s.key(KEY_PREV, KEY_FWD_BTN, KEY_FWD_BTN)  # Artists, none holding "lo"; a tap on the query: the strip
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 4, 16)
     assert s.ss.tab == ARTISTS and s.ss.nmatch == 0 and s.ss.focus == ON_STRIP
     s.enter()
     assert s.ss.focus == ON_TABS and ui.backs == 0
@@ -559,9 +542,9 @@ def test_keys_the_strip_takes_free_stock_s_click_latch(fw, ui, song):
     set, every later press on the strip was silent (docs/internals.md#ipod-row-clicks)."""
     s = Strip(fw, ui, library(song))
     latch = C.c_byte.from_address(O['KEY_TONE_LATCH'])
-    for key in (KEY_NEXT, KEY_CENTER, KEY_FWD_BTN, KEY_BACK_BTN, KEY_RETURN, KEY_PREV):
+    for key in (KEY_NEXT, KEY_CENTER, KEY_FWD_BTN, KEY_BACK_BTN, KEY_PREV, KEY_RETURN, KEY_CENTER):
         latch.value = 1
-        assert s.key(key) == [1] and latch.value == 0
+        assert s.key(key) == [1] and latch.value == 0  # Return shuts the strip, Centre opens it again
     s.key(KEY_FWD_BTN)
     s.erase(1)  # the B typed above
     s.type('lo')
@@ -652,8 +635,9 @@ def test_a_tap_types_a_character_cycles_the_set_on_the_switcher_and_submits_on_t
     assert p.ss.set == DIGITS and p.ss.stop == 0 and p.ss.text == b'D'
     p.touch(RUN_X + 5, STRIP_Y + 17)
     assert p.ss.text == b'D0'
-    p.touch(RET_L + 17, STRIP_Y + 17)  # the return key: no match, so it stays
-    assert p.ss.stop == p.stops() - 1 and p.ss.focus == ON_STRIP
+    p.touch(RET_L + 17, STRIP_Y + 17)  # the return key: no match, so the strip shuts on the query
+    assert p.ss.stop == p.stops() - 1 and p.ss.focus == ON_FIELD and p.ss.text == b'D0'
+    p.key(KEY_CENTER)
     p.erase(2)
     p.type('lo')
     p.touch(RET_L + 17, STRIP_Y + 17)
@@ -689,7 +673,7 @@ def test_the_strip_docks_the_switcher_left_and_the_return_key_right_the_run_from
     assert 'ABC' in [t for t, *_ in c.texts]
     s.key(KEY_PREV)  # the switcher: in the accent
     assert {(b, r): rgb(ink) for b, ink, r in painted(fw, s).boxes}[((40, 196, 56, 34), 17)] == accent
-    s.key(KEY_RETURN)  # the return key: a white circle (its mark in the accent)
+    s.go(s.stops() - 1)  # the return key: a white circle (its mark in the accent)
     boxes = {(b, r): rgb(ink) for b, ink, r in painted(fw, s).boxes}
     assert boxes[((301, 196, 34, 34), 17)] == 0xffffff and boxes[((40, 196, 56, 34), 17)] == 0x2c2c2e
 
@@ -698,7 +682,7 @@ def test_the_strip_docks_the_switcher_left_and_the_return_key_right_the_run_from
 def test_the_lit_return_key_is_a_white_circle_in_either_half(fw, ui, song, st, light):
     s = Strip(fw, ui, library(song))
     st('light').value = light
-    s.key(KEY_RETURN)
+    s.go(s.stops() - 1)
     assert {(b, r): rgb(ink) for b, ink, r in painted(fw, s).boxes}[((301, 196, 34, 34), 17)] == 0xffffff
 
 
@@ -731,14 +715,14 @@ def test_search_s_query_reads_on_its_first_line_with_its_cursor(fw, ui, song):
     assert not [r for r, _ in painted(fw, s).rects if r[2:] == (2, 25)]
 
 
-def test_the_rows_fill_the_glass_between_the_query_and_the_strip_and_the_tabs_take_the_first_one(fw, ui, song):
+def test_the_rows_fill_the_glass_under_the_query_and_the_tabs_take_the_first_one(fw, ui, song):
     s = Strip(fw, ui, [song(b'/m/%d.flac' % i, b'Song %d' % i) for i in range(9)])
     s.type('song')
     rows = [r[1] for t, r, _ in painted(fw, s).texts if t.startswith('Song ')]
     assert rows == [40 + 32 * i for i in range(4)]  # four rows, no tabs
     s.enter()
     c = painted(fw, s)
-    assert [r[1] for t, r, _ in c.texts if t.startswith('Song ')] == [72 + 32 * i for i in range(3)]  # three under them
+    assert [r[1] for t, r, _ in c.texts if t.startswith('Song ')] == [72 + 32 * i for i in range(5)]  # five, the strip shut
     assert [t for t, *_ in c.texts if t in ('All', 'Songs', 'Artists', 'Albums')] == ['All', 'Songs', 'Artists', 'Albums']
     track, open_tab = [(b, rgb(ink)) for b, ink, _ in c.boxes if b[1] in (41, 43)][:2]
     assert track == ((16, 41, 343, 30), 0x1c1c1e) and open_tab == ((18, 43, 84, 26), 0x3a3a3c)  # All, raised
@@ -874,7 +858,8 @@ def test_new_playlist_names_it_on_the_strip_and_the_return_key_makes_it(fw, ui, 
     assert s.ss.text == b'Road Trip'
     s.key(KEY_FWD_BTN)
     assert not [q for q in sql.log if q.startswith(b'insert')]
-    s.key(KEY_RETURN, KEY_CENTER)
+    s.go(s.stops() - 1)
+    s.key(KEY_CENTER)
     inserts = [q for q in sql.log if q.startswith(b'insert')]
     assert len(inserts) == (not taken) and all(b"'Road Trip'" in q for q in inserts)
     assert ui.toasts[-1] == said and ui.backs == back
@@ -965,7 +950,7 @@ def test_the_wheel_up_from_add_songs_results_lands_on_the_query_line_too(fw, ui,
 
 
 # Return held on any letter-strip page: a card shows from SHOW_MS and the page closes at HOLD_MS; let go before, and
-# the highlight goes to the return key.
+# the strip shuts, as a press of Return does.
 SHOW_MS, HOLD_MS = 200, 600
 
 
@@ -975,7 +960,7 @@ def r_h(ui):
 
 
 @pytest.mark.parametrize('held_ms, closed, card', [(60, False, False), (400, False, True), (HOLD_MS, True, False)])
-def test_return_held_shows_its_card_and_leaves_and_a_press_jumps_to_the_return_key(fw, ui, song, held_ms, closed, card):
+def test_return_held_shows_its_card_and_leaves_and_a_press_shuts_the_strip(fw, ui, song, held_ms, closed, card):
     s = Strip(fw, ui, library(song))
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     s.type('AB')
@@ -997,8 +982,8 @@ def test_return_held_shows_its_card_and_leaves_and_a_press_jumps_to_the_return_k
         assert [t for t, *_ in c.texts] == ['Keep holding to go back']
         assert [(r, ink) for r, ink in c.rects if r[2] == 375][:1] == [((0, 0, 375, r_h(ui)), 0x8c000000)]
     if not closed:
-        s.key(KEY_RETURN, ms=0)  # the release: the highlight on the return key, nothing erased
-        assert s.ss.stop == s.stops() - 1 and s.ss.text == b'AB' and ui.backs == 0
+        s.key(KEY_RETURN, ms=0)  # the release: the strip shut, nothing erased or submitted
+        assert s.ss.focus == ON_FIELD and s.ss.text == b'AB' and ui.backs == 0
         assert not s.ss.held and not s.ss.hold_at
         return
     assert ui.backs == 1 and latch.value == 1  # closed; its release is stock's filter's to swallow
@@ -1017,7 +1002,7 @@ def test_a_names_page_writes_the_name_in_inter_medium(fw, ui):
     assert (b'inter-medium', 27) in fonts
 
 
-# A stock text box (keyboard.c kb_strip_due) on the strip: the sets on its switcher; Play/Pause its own OK.
+# A stock text box (keyboard.c kb_host_open) on the strip: the sets on its switcher; Play/Pause its own OK.
 def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0, **props):
     """A text box's edit, the input method's, in its window, opened on the strip. By default a Wi-Fi network's password
     (kbwifipass_dialog's edit_passwd); as stock's every box, its input_type reads 0 (text) whatever its page says. props
@@ -1038,18 +1023,17 @@ def boxed(fw, ui, text=b'', name='edit_passwd', window='kbwifipass_dialog', wm=0
     im = C.create_string_buffer(0x40)
     C.c_void_p.from_address(C.addressof(im) + O['IM_WIDGET']).value = edit
     fw.mock('input_method', lambda *_: C.addressof(im))
-    kb = ui.new('window_create', wm, 0, 60, 375, 260)  # the input method's keyboard window, top
-    keys = ui.new('pages', kb, 0, 40, 375, 221)
+    kb = ui.new('window_create', wm, 0, 60, 375, 260)  # the input method's keyboard window (kb_host_open's, bare), top
     assert fw.fn('search_strip_box', C.c_int, C.c_void_p, C.c_void_p, C.c_char_p)(kb, edit, b'Home Wi-Fi') == 1
     s = attached(fw, ui)
-    s.im, s.edit, s.kb, s.keys, s.dialog, s.holder = im, edit, kb, keys, dialog, holder
+    s.im, s.edit, s.kb, s.dialog, s.holder = im, edit, kb, dialog, holder
     return s
 
 
 def test_a_password_box_types_its_sets_and_play_is_its_ok(fw, ui):
     s = boxed(fw, ui)
     assert s.ss.secret and s.ss.set == LOWER and s.ss.stop == 1 and 'Home Wi-Fi' in ui.text.values()
-    assert s.ss.page == s.kb and s.keys in ui.hidden  # on the keyboard's window, its keys hidden: no focus moves
+    assert s.ss.page == s.kb  # on the keyboard's window: no focus moves
     s.type('bA!b')
     assert s.ss.text == b'bA!b' and s.ss.set == LOWER
     texts = [t for t, *_ in painted(fw, s).texts]
@@ -1716,7 +1700,7 @@ def test_search_s_return_key_is_a_magnifier_white_at_rest_the_accent_s_on_the_wh
     s = Strip(fw, ui, library(song))
     st('light').value = light
     assert s.ss.ret == STRIP_SEARCH and mark(fw, s) == 'search_w'
-    s.key(KEY_RETURN)
+    s.go(s.stops() - 1)
     assert mark(fw, s) == 'search_a'
 
 
@@ -1733,7 +1717,7 @@ def test_naming_a_playlist_s_return_key_is_a_check(fw, ui, st, light):
     st('light').value = light
     s = renaming(fw, ui, b'Road')
     assert mark(fw, s) == 'save_w'
-    s.key(KEY_RETURN)
+    s.go(s.stops() - 1)
     assert mark(fw, s) == 'save_a'
     ui.close(ui.top())
     fw.fn('playlist_new_open', None)()
@@ -1747,7 +1731,7 @@ def test_a_wi_fi_box_s_return_key_is_the_arrow(fw, ui, st, light, window, name):
     st('light').value = light
     s = boxed(fw, ui, b'', name, window)
     assert s.ss.ret == STRIP_AUTO and mark(fw, s) == 'go_w'
-    s.key(KEY_RETURN)
+    s.go(s.stops() - 1)
     assert mark(fw, s) == 'go_a'
 
 
@@ -1935,3 +1919,131 @@ def test_a_double_tap_in_a_password_selects_all_of_it(fw, ui):
     s.touch(left + 31, s.ss.fy + 16)
     s.touch(left + 31, s.ss.fy + 16, ms=100)
     assert sel(s) == (0, 8)  # its words don't show: the whole of it
+
+
+# The strip closes before the page does (the user's ruling, 2026-11-18): Return, or an edge swipe, on the open strip
+# closes it, the text kept and nothing submitted, and the next Return leaves; a submit closes it too, Search's results
+# filling the page; a tap in the text opens it again. On every page the strip types for: Search and a box (a Wi-Fi
+# password) here.
+def strip_shown(fw, s):
+    """Whether the strip is painted: its set switcher's name among the sheet's texts."""
+    return bool({'abc', 'ABC', '123', '#+='} & {t for t, *_ in painted(fw, s).texts})
+
+
+def results_painted(fw, s):
+    return [t for t, *_ in painted(fw, s).texts if t in s.titles()]
+
+
+def test_submitting_search_closes_the_strip_and_the_results_fill_the_page(fw, ui, song):
+    songs = library(song) + [song(f'/m/{i}.flac'.encode(), f'Lo {i}'.encode(), b'Lo Artist', b'Lo Album') for i in range(5, 12)]
+    s = Strip(fw, ui, songs)
+    s.type('lo')
+    shown = len(results_painted(fw, s))
+    assert strip_shown(fw, s) and shown == 4  # the rows between the query and the strip
+    s.enter()
+    assert s.ss.focus == ON_LIST and ui.backs == 0
+    assert not strip_shown(fw, s)  # the strip closed: the results run to the page's foot under the tabs
+    assert len(results_painted(fw, s)) == (fw.fn('client_h', C.c_int)() - LIST_Y) // 32 > 3
+
+
+def test_a_submit_with_no_match_closes_the_strip_on_the_query(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('zz')
+    assert s.enter() == [1] and s.ss.focus == ON_FIELD and s.ss.text == b'zz' and ui.backs == 0
+    assert not strip_shown(fw, s)
+
+
+def test_return_on_search_s_strip_closes_it_never_submitting_and_return_again_leaves(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('joy')
+    s.go(s.stops() - 1)  # even with the return key lit
+    assert s.key(KEY_RETURN) == [1]
+    assert s.ss.focus == ON_FIELD and s.ss.text == b'joy' and ui.backs == 0 and not strip_shown(fw, s)
+    assert s.key(KEY_RETURN) == [1] and ui.backs == 1  # the page goes as any page's Return
+
+
+@pytest.mark.parametrize('on', ['results', 'tabs'])
+def test_return_on_search_s_results_or_tabs_leaves(fw, ui, song, on):
+    s = Strip(fw, ui, library(song))
+    s.type('lo')
+    s.enter()
+    if on == 'tabs':
+        s.key(KEY_PREV)
+        assert s.ss.focus == ON_TABS
+    s.key(KEY_RETURN)
+    assert ui.backs == 1 and s.ss.text == b'lo'
+
+
+def test_a_tap_on_search_s_closed_query_opens_the_strip_again(fw, ui, song):
+    s = Strip(fw, ui, library(song))
+    s.type('lo')
+    s.key(KEY_RETURN)
+    clipped(fw, s)
+    s.touch(QUERY_X0 + 4, 16)
+    assert s.ss.focus == ON_STRIP and strip_shown(fw, s) and ui.backs == 0
+
+
+def test_a_box_s_return_closes_its_strip_never_submitting_and_return_again_closes_the_box(fw, ui):
+    s = boxed(fw, ui, b'secret')
+    s.go(s.stops() - 1)
+    assert s.key(KEY_RETURN) == [1]
+    assert s.ss.focus == ON_FIELD and s.ss.text == b'secret' and not strip_shown(fw, s)
+    assert not fw.calls('input_method_dispatch_action') and not fw.calls('input_method_request')  # the box stays
+    s.key(KEY_NEXT, KEY_CENTER)  # the wheel types nothing while the strip is shut
+    assert s.ss.text == b'secret' and s.ss.focus == ON_STRIP  # Centre opens it again
+    s.key(KEY_RETURN, KEY_RETURN)
+    assert [a[1] for _, a in fw.calls('input_method_request')] == [0] and not fw.calls('input_method_dispatch_action')
+
+
+def test_a_tap_in_a_box_s_closed_field_opens_its_strip_again(fw, ui):
+    s = boxed(fw, ui, b'secret')
+    s.key(KEY_RETURN)
+    painted(fw, s)
+    s.touch(s.ss.fx + 8, s.ss.fy + s.ss.fh // 2)
+    assert s.ss.focus == ON_STRIP and strip_shown(fw, s)
+
+
+def test_play_on_a_box_s_closed_field_is_still_its_ok(fw, ui):
+    s = boxed(fw, ui, b'secret')
+    s.key(KEY_RETURN)
+    assert s.key(KEY_PLAY) == [1] and fw.calls('input_method_dispatch_action')
+
+
+@pytest.mark.parametrize('page', ['search', 'box'])
+def test_an_edge_swipe_on_the_open_strip_closes_it_and_leaves_the_page(fw, ui, song, page):
+    s = Strip(fw, ui, library(song)) if page == 'search' else boxed(fw, ui, b'secret')
+    close = fw.fn('search_strip_close', C.c_int, C.c_void_p)
+    assert close(0) == 0
+    assert close(ui.top()) == 1 and s.ss.focus == ON_FIELD and ui.backs == 0
+    assert close(ui.top()) == 0  # shut already: the swipe is the page's
+
+
+@pytest.mark.parametrize('page', ['search', 'box'])
+def test_an_edge_swipe_shuts_the_open_strip_and_the_page_stays(fw, ui, song, page):
+    """swipe_back.c: claimed over the open strip, the swipe shuts it, moves nothing and sends no Return."""
+    s = Strip(fw, ui, library(song)) if page == 'search' else boxed(fw, ui, b'secret')
+    fw.var('g_backlight_status', C.c_ubyte).value = 1
+    top = ui.top()
+    ui.new('window_create', 0, 0, 0, 375, 320) if page == 'search' else None  # a window under to go back to
+    for stack in (ui.windows, ui.kids.get(ui.parent(top), [])):  # the page back on top
+        if top in stack:
+            stack.remove(top)
+            stack.append(top)
+    returns = []
+    fw.mock('stock_input_trampoline', lambda *a: returns.append(a) or 0)
+    moved = []
+    fw.mock('widget_move', lambda *a: moved.append(a) or 0)
+    down = fw.fn('swipe_back_down', None, C.c_void_p, C.c_int)
+    event = C.create_string_buffer(0x40)
+    struct.pack_into('<i', event, 0, EVT_POINTER_DOWN)
+    struct.pack_into('<ii', event, EVENT_X, 5, 150)
+    down(C.addressof(event), 1)
+    for x in (12, 30, 120):
+        struct.pack_into('<i', event, 0, EVT_POINTER_MOVE_BEFORE)
+        struct.pack_into('<ii', event, EVENT_X, x, 150)
+        ui.handler(top, EVT_POINTER_MOVE_BEFORE)(C.addressof(event))
+    struct.pack_into('<i', event, 0, EVT_POINTER_UP_BEFORE)
+    ui.handler(top, EVT_POINTER_UP_BEFORE)(C.addressof(event))
+    for _ in range(40):
+        fw.fn('swipe_back_poll', None)()
+    assert s.ss.focus == ON_FIELD and not moved and not returns and ui.backs == 0

@@ -843,6 +843,123 @@ LDAC_HQ = ((0x4faa5c, 0x00042080, 0x00041880),   # sll $3,$4,2
            (0x4faa80, 0x24040016, 0x8fa40014))   # lw $4,0x14($sp), was li $4,0x16
 # check_mem_thd (platform_init's detached thread) returns NULL on entry: it never opens drop_caches,
 # writes 3 to it or wakes each second. lui/addiu $gp -> jr $ra; move $v0,$zero.
+# Stock's on-screen keyboard is gone (patch/keyboard.c, docs/internals.md#the-keyboard). AWTK opens a keyboard window
+# in one place, input_method_default's request (KB_REQUEST), with two window_open calls: the edit's keyboard by name
+# (kb_ascii_t9, kb_float and the rest by input type, else its keyboard property) and, should that fail, kb_default_t9.
+# Each becomes jal kb_host_open, whose bare window the letter strip takes, so no keyboard asset is ever loaded and the
+# image goes without them (KB_ASSETS). stock_window_opens lists every call to window_open and window_open_and_close in
+# stock's demo, with the name it passes where the code says it; the build stops on any that WINDOW_OPENS does not
+# know, so a call that could open a keyboard cannot pass unseen, and on any code that reads a keyboard's name
+# (KB_NAMES) other than KB_NAME_READS, so no other path names one.
+KB_OPEN_SITES = ((0x69fb5c, 0x04118db3), (0x69fbd0, 0x04118d96))
+# ... and its jalr widget_set_prop_str(keyboard, "open_anim_hint", "popup") after them becomes jal kb_open_hint, which
+# sets nothing: the strip is on the window from its first frame, so it does not slide up from the screen's foot.
+KB_OPEN_HINT = (0x69fef4, 0x0320f809)
+KB_REQUEST = (0x69f650, 0x6a0234)  # input_method_default's request (static, its frame 0xd8)
+KB_NAMES = ('kb_default_t9', 'kb_default_t26', 'kb_default', 'kb_ascii_t9', 'kb_float', 'kb_uint', 'kb_ufloat',
+            'kb_hex', 'kb_phone', 'keyboard_password', 'keyboard_netname', 'keyboard_keyword')
+# The other calls: each passes a window name it is handed or a page's own, never a keyboard's.
+WINDOW_OPENS = {
+    0x4f5390: 'navigator_create_page_by_name: the page or dialog its caller names',
+    0x5e0850: "a widget's open action (window_open_and_close): the window its asset names; none names a keyboard",
+    0x5e0874: "a widget's open action (window_open): the window its asset names; none names a keyboard",
+    0x6183d0: "file_chooser_choose: the chooser's own window",
+    0x61c8f8: "combo_box's popup: the window its open_window property names",
+    0x665374: "text_edit_show_context_menu: edit_menu",
+    0x68323c: 'window_open_and_close: the window its caller names',
+    0x683254: 'the window_open stub: the window its caller names',
+}
+# Code that names a keyboard (each found by its string's address): the dialogs looking up their own widgets of that
+# name, and Tidal's quality picker closing a keyboard by name; none opens one.
+KB_NAME_READS = {0x47b25c: 'dialog_tidal_tidal_quality_select_dialog_init', 0x47b540: 'dialog_tidal_tidal_quality_select_dialog_init',
+                 0x49a6d4: 'dialog_editwifi_dialog_init', 0x49a750: 'dialog_editwifi_dialog_init',
+                 0x49a854: 'dialog_editwifi_dialog_init', 0x49a8b8: 'dialog_editwifi_dialog_init',
+                 0x49b0e4: 'dialog_kbwifiadd_dialog_init', 0x49fc48: 'dialog_renameplaylist_dialog_init',
+                 0x49fde4: 'dialog_renameplaylist_dialog_init', 0x49fec4: 'dialog_renameplaylist_dialog_init'}
+# The keyboard's assets: its one page, its style and its key images, which nothing else names.
+KB_ASSETS = ['release/assets/default/raw/ui/kb_default_t9.bin', 'release/assets/default/raw/styles/keyboard.bin',
+             *(f'release/assets/default/raw/images/xx/keyboard_{n}{d}.png' for n in ('del', 'enter', 'upper', 'lower', 'space')
+               for d in ('', '_down'))]
+
+
+def stock_window_opens(demo, opener=(0x68322c, 0x68316c)):
+    """(calls, reads): each call in demo's text to window_open or window_open_and_close (a bal, or a jalr of the GOT slot
+    holding one) as {address: the name it passes, None where the code does not say}, and each instruction that forms
+    the address of a KB_NAMES string, {address: the name}. The name is followed back through the GOT loads and addiu
+    that build it, as stock's position-independent code does; MIPS o32's _gp is .got's address plus 0x7ff0."""
+    import struct as st
+    shoff, shentsize, shnum, shstrndx = st.unpack_from('<IxxxxxxxxxxHHH', demo, 0x20)[0], *st.unpack_from('<HHH', demo, 0x2e)
+    secs = [st.unpack_from('<IIIIII', demo, shoff + i * shentsize) for i in range(shnum)]
+    names = secs[shstrndx][4]
+    sec = {demo[names + n:demo.index(b'\0', names + n)].decode(): (a, o, z) for n, _, _, a, o, z in secs}
+    text_a, text_o, text_z = sec['.text']
+    got_a, got_o, got_z = sec['.got']
+    gp = got_a + 0x7ff0
+    def s16(x): return x - 0x10000 if x & 0x8000 else x
+    def word(a): return st.unpack_from('<I', demo, text_o + a - text_a)[0]
+    def got(off): return st.unpack_from('<I', demo, got_o + gp + off - got_a)[0]
+    def cstr(a):
+        for sa, so, sz in sec.values():
+            if sa and sa <= a < sa + sz:
+                end = demo.find(b'\0', so + a - sa)
+                return demo[so + a - sa:end].decode('latin-1') if end - (so + a - sa) < 64 else None
+        return None
+    slots = {off for off in range(-0x7ff0, got_z - 0x7ff0, 4) if got(off) in opener}
+    targets = {}
+    ro_a, ro_o, ro_z = sec['.rodata']
+    for name in KB_NAMES:
+        at = demo.find(name.encode() + b'\0', ro_o, ro_o + ro_z)
+        while at >= 0:
+            targets[at - ro_o + ro_a] = name
+            at = demo.find(name.encode() + b'\0', at + 1, ro_o + ro_z)
+    calls, reads = {}, {}
+    for a in range(text_a, text_a + text_z, 4):
+        w = word(a)
+        op, rs, rt = w >> 26, w >> 21 & 31, w >> 16 & 31
+        call = None
+        if w >> 16 in (0x0411, 0x1000) and a + 4 + (s16(w & 0xffff) << 2) in opener:
+            call = a  # bal, or b as a tail call
+        elif op == 0x23 and rs == 28 and rt == 25 and s16(w & 0xffff) in slots:
+            for b in range(a + 4, a + 160, 4):  # its jalr $25; one that a bal or b follows is that one's
+                v = word(b)
+                if v == 0x0320f809: call = b; break
+                if v >> 16 in (0x0411, 0x1000) or v >> 16 & 31 == 25 and v >> 26 in (0x23, 0x09): break
+        if call is not None:
+            regs: dict = {}
+            for b in range(call - 64, call + 8, 4):  # $4 at the call, its delay slot included
+                v = word(b); o, r_s, r_t = v >> 26, v >> 21 & 31, v >> 16 & 31
+                if o == 0x23 and r_s == 28: regs[r_t] = got(s16(v & 0xffff))
+                elif o == 0x09: regs[r_t] = regs[r_s] + s16(v & 0xffff) if regs.get(r_s) is not None else None
+                elif o == 0 and v & 0x3f == 0x25: regs[v >> 11 & 31] = regs.get(r_s) if r_t == 0 else None
+                elif o in (0x0f, 0x0d, 0x20, 0x21, 0x24, 0x25, 0x23): regs[r_t] = None
+            calls[call] = cstr(regs[4]) if regs.get(4) is not None else None
+        if op == 0x23 and rs == 28:
+            base = got(s16(w & 0xffff))
+            if base in targets: reads[a] = targets[base]
+            for b in range(a + 4, a + 48, 4):
+                v = word(b)
+                if v >> 26 == 0x09 and v >> 21 & 31 == rt:
+                    if base + s16(v & 0xffff) in targets: reads[b] = targets[base + s16(v & 0xffff)]
+                    break
+    return calls, reads
+
+
+def check_keyboard_opens(demo):
+    """Stops the build unless every call that can open a keyboard window is one KB_OPEN_SITES redirects (stock_window_opens):
+    the calls in KB_REQUEST are exactly those, every other call is a WINDOW_OPENS one naming no keyboard, and only
+    KB_NAME_READS's code names a keyboard."""
+    calls, reads = stock_window_opens(demo)
+    inside = {a for a in calls if KB_REQUEST[0] <= a < KB_REQUEST[1]}
+    check(inside == {a for a, _ in KB_OPEN_SITES}, f'keyboard opens: input_method_default calls window_open at {sorted(map(hex, inside))}')
+    for a, name in calls.items():
+        if a in inside: continue
+        check(a in WINDOW_OPENS, f'keyboard opens: a window_open at {a:#x} that WINDOW_OPENS does not know ({name})')
+        check(name not in KB_NAMES, f'keyboard opens: {a:#x} opens the keyboard {name}')
+    check(set(reads) == set(KB_NAME_READS) | {a for a in reads if KB_REQUEST[0] <= a < KB_REQUEST[1]},
+          f'keyboard opens: code names a keyboard at {sorted(map(hex, set(reads) - set(KB_NAME_READS)))}')
+    return calls
+
+
 DROP_CACHES = ((0x51cd00, 0x3c1c0052, 0x03e00008), (0x51cd04, 0x279cdde0, 0x00001025))
 # Stock V1.36's main loop starts a thread of its own on /dev/input/event4, BlueZ's AVRCP keys, and posts Play and Pause
 # alike as the Play button, Next and Previous as the skip buttons. patch/headset.c's worker reads that device already,
@@ -997,9 +1114,8 @@ LABELS = tuple((k.encode(), o.encode(), n.encode()) for k, o, n in (
 # Stock's UI assets carry Chinese text (docs/internals.md#english), most of it designers' placeholders that
 # stock replaces, but some shows through in every language (Search's tabs, Now Playing's info labels, Folder's
 # title, Quick Settings' row names, the test-mode pages). Every Chinese text in them is given in English
-# (english_ui); a per-asset entry wins over the shared one. The T9 keyboard's EN key opened its Chinese
-# pinyin page: it toggles case instead (ABC on the lowercase page, abc on the capitals), so that page is
-# never reached, and its 《》 key types «».
+# (english_ui); a per-asset entry wins over the shared one. The T9 keyboard, the one with Chinese keys, is not
+# in the image at all (KB_ASSETS).
 CJK = re.compile('[\u3000-\u9fff\uff00-\uffef]')
 ENGLISH = {
     '文件夹': 'Folder', '正在播放': 'Now Playing', '本地音乐': 'Library', '更多': 'More', 'AB复读': 'A-B Repeat',
@@ -1023,21 +1139,16 @@ ENGLISH = {
     '播放全部': 'Play All', '导入歌单': 'Import Playlists', '导出歌单': 'Export Playlists', '测试歌单': 'Playlist',
     '共0首': '0 songs',
 }
-ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Center'}, 'kb_default_t9.bin': {'中': 'abc', '《》': '«»'},
+ENGLISH_IN = {'testmode/test_key.bin': {'中': 'Center'},
               'dialog/search_dialog.bin': {'专辑': 'Albums', '风格': 'Genres'}}
 
 def english_ui(rel, data):
-    """rel's widgets' Chinese text in English, and the T9 keyboard's Chinese page out of reach."""
+    """rel's widgets' Chinese text in English."""
     from ipod import decode, encode, walk
     root = decode(data)
     check(encode(root) == data, f'{rel}: UI round trip differs')
-    upper = {id(n) for page in walk(root) if page[2].get('name') == 'upper' for n in walk(page)}
     for n in walk(root):
         props = n[2]
-        if rel == 'kb_default_t9.bin' and props.get('name') == 'page:chinese':  # EN: the case toggle
-            props['name'], props['text'] = ('page:lower', 'abc') if id(n) in upper else ('page:upper', 'ABC')
-        if rel == 'kb_default_t9.bin' and props.get('name') == 'opt:《》':
-            props['name'] = 'opt:«»'
         text = props.get('text', '')
         if not CJK.search(text):
             continue
@@ -1692,6 +1803,7 @@ FUNCTIONS = {
  'toolsGetAlbumCover': ('int', 'const char *, const char *, int, int'),
  'toolsGetExternCover': ('int', 'const char *, const char *, int, int'),
  'window_create': ('void *', 'void *, int, int, int, int'),
+ 'window_base_create': ('void *', 'void *, const void *, int, int, int, int'),  # the strip's keyboard window (keyboard.c)
  'widget_factory': ('void *', 'void'),
  'widget_factory_create_widget': ('void *', 'void *, const char *, void *, int, int, int, int'),
  'image_create': ('void *', 'void *, int, int, int, int'),
@@ -1957,7 +2069,8 @@ CONTEXT_DATA = {'bt_showcoding': 4, 'g_memory_info': 3476, 'g_folder_path': 1024
                 # Settings > Wi-Fi's flows (wifi_flows.c): stock's monitor's last STATUS (wpa_state @0xd8), the network
                 # a join tries, and the network and password the password entry asks for
                 'g_wifiStatus': 248, 'wifi_name': 256, 'prepare_linkssid': 256, 'prepare_linkpasswd': 128,
-                'pdeq_btshowlist': 4}  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
+                'pdeq_btshowlist': 4,  # Bluetooth's paired then found devices: MAC @4, name @0x24 (bt_ui.c)
+                'g_keyboard_vtable': 172}  # a keyboard window's widget vtable (keyboard.c kb_host_open)
 # Windows the payload creates at runtime (window_create), so no rootfs asset names them.
 PAYLOAD_WINDOWS = {'searchstrip_page', 'playlistedit_page', 'playlistsongs_page', 'addsongs_page', 'chapters_page', 'coverflow_page', 'games_page', 'mostplayed_page', 'shuffle_page', 'upnext_page', 'ratings_page', 'era_page', 'era_albums_page', 'rated_page', 'longsongs_page', 'spotify_page',
                    'spotbrowse_page', 'radio_page', 'radionp_page', 'streamconf_page', 'streamsvc_page', 'tidal_downloads', 'apps_page',
@@ -2017,7 +2130,7 @@ NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'h
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
 # KeyError at the lookup.
-PAYLOAD_ROOTS = ['compact_set_row_layout', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
+PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod_list_layout', 'parallax_curr', 'parallax_prev', 'parallax_update', 'ringnav_ab_move', 'ringnav_ab_x', 'ringnav_album_cover_wait', 'ringnav_album_label',
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
@@ -2329,6 +2442,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         found = re.search(r'/raw/ui/(.+)\.bin$', line)
         if not found: continue
         rel = found.group(1)
+        if 'release/assets/default/raw/ui/'+rel+'.bin' in KB_ASSETS: continue  # the keyboard's page goes
         ui_bins.add(rel + '.bin')  # each page is written full-bleed (full_bleed)
         data = cat('release/assets/default/raw/ui/'+rel+'.bin')
         if CJK.search(data.decode('utf-8', 'replace')) and 'release/assets/default/raw/ui/'+rel+'.bin' not in STOCK_EQ + STOCK_PAGES:
@@ -2501,6 +2615,10 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         patch_word(patched, HTRANSLATE_VT + 0x14 + 4 * slot, old, ps[name], 'htranslate: parallax, the status row on top')
     patch_word(patched, DIALOG_CLOSE, branch(0x04110000, DIALOG_CLOSE, syms['idle_add']),
                jal(ps['ringnav_dialog_close']), "a modal dialog's close skips one already gone")
+    check_keyboard_opens(raw_demo)
+    for address, stock_word in KB_OPEN_SITES:
+        patch_word(patched, address, stock_word, jal(ps['kb_host_open']), "a keyboard window is the letter strip's")
+    patch_word(patched, *KB_OPEN_HINT, jal(ps['kb_open_hint']), "the strip's keyboard window opens in place")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, SCAN_DIRS[0] + 4))[0] == 0x24a59870,
           'library scan: expected the "." exclusion')
     patch_word(patched, *SCAN_DIRS, jal(ps['ringnav_scan_dir']), 'the library scan skips hidden folders')
@@ -2801,7 +2919,7 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
         entry = path+b' F '+b' '.join(stock.groups())+b' cat '+shlex.quote(str(out/name)).encode()+b'\n'
         p += entry  # the definitions' end, before the embedded data
         added.append([path, b'R', *stock.groups()])
-    for path in STOCK_EQ + STOCK_PAGES + OBSOLETE:
+    for path in STOCK_EQ + STOCK_PAGES + OBSOLETE + KB_ASSETS:
         line = need(re.search(rb'^'+re.escape(path.encode())+rb' [RS] .+\n', p, re.M), f'Missing stock inode {path}')
         removed.append(line.group().split()[:6])
         p = p[:line.start()]+p[line.end():]

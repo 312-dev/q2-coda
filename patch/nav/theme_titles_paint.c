@@ -590,7 +590,7 @@ int ringnav_paint_bg(void *w, void *canvas) {
     feedback_toast_paint(w, canvas); /* the toast's pill */
     album_tile(w);
     int result = 0;
-    if (kb_wheel_bg(w, canvas))
+    if (kb_host_bg(w, canvas))
         ;
     else if (!pressed_pill(w, canvas))
         result = stock_paint_bg_trampoline(w, canvas);

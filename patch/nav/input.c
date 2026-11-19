@@ -660,7 +660,6 @@ int ringnav(void *ctx, void *event) {
         return STOP;
     if (usable() && add_songs_key(window_manager_get_top_window(window_manager()), key))
         return STOP;
-    if (usable() && kb_wheel_key(key)) return STOP;
     /* Return or Centre closes quick settings, as its swipe up does (dialog_quit), but on Control
      * Center (control_center.c cc_key) Centre acts on the stop and Return leaves a slider first;
      * stock leaves Return to its Home button and Centre to turning the screen off. A held Return's

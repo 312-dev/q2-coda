@@ -325,10 +325,13 @@ extern int games_key(void *top, unsigned key), games_open(void *ctx, void *event
 extern int games_keydown(void *top, unsigned key);
 /* search_strip.c: Search, the strip under a list.entry.ipod theme, else stock's dialog */
 int library_search_open(void *ctx, void *event), search_strip_key(void *top, unsigned key),
-    search_strip_hold(void *top), search_strip_owns(void *top);
+    search_strip_hold(void *top), search_strip_owns(void *top), search_strip_open(void *top),
+    search_strip_close(void *top);
 void search_strip_paint(void *w, void *canvas), search_strip_down(void *top, unsigned key);
-/* keyboard.c: the keyboard's keys by the wheel under a list.entry.ipod theme */
-int kb_wheel_key(unsigned key), kb_wheel_bg(void *w, void *canvas);
+/* keyboard.c: the input method's keyboard window, a bare one the letter strip takes */
+void *kb_host_open(const char *name);
+int kb_open_hint(void *kb, const char *name, const char *value);
+int kb_host_bg(void *w, void *canvas);
 extern int stock_keyup_trampoline(void *, void *), stock_touch_trampoline(void *, void *),
     stock_output_trampoline(int), stock_write_config_trampoline(int, const char *, const char *),
     stock_paint_trampoline(void *, void *), stock_dispatch_trampoline(void *, void *),
