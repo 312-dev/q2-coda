@@ -1265,3 +1265,24 @@ def test_a_device_found_mid_scan_is_listed_within_a_second(fw):
     s.p.poll()
     s.p.poll()
     assert len(reads) == 2 and flag.value == 0
+
+
+def test_a_reconnect_with_no_link_thread_is_stock_s_connected_as_it_was(fw):
+    """Test B the same evening (V1JCi): the lid closed (22:17:37Z, reason 3), the Buds reconnected by themselves at
+    22:18:08Z (by=device), the item went straight to 3 with no status 5 and no connect started: no link thread ran,
+    so stock labelled the row msg_connected itself and it said Connected. Test A above differs only in the thread
+    running through 1, 3, 5, 3: here nothing is changed and no rebuild is asked for."""
+    p = Page(fw, [(HEAD, 'Pixel Buds', 'connected')])
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 0
+    p.links = [(HEAD, 3)]
+    acl_list(fw, HEAD)
+    p.rebuild()
+    p.layout()
+    row = p.row('d0')
+    assert state_text(p, row) == 'msg_connected' and geometry(row)[3] == 52
+    assert not [a for _, a in fw.calls('widget_set_prop_str') if C.string_at(a[1]) == b'tr_text']
+    p.poll()
+    flag = fw.var('g_btsetting_flag', C.c_ubyte)
+    flag.value = 0
+    p.poll()
+    assert flag.value == 0
