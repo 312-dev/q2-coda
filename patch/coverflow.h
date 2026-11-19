@@ -50,6 +50,7 @@ typedef struct {
     int scoped, all_sort;
     void *all_albums, *all_stock;
     int (*hearts)(void *);
+    int count; /* the covers' albums and cards, SLIDE_INDEX's range (slide_count) */
 } cf_page_t;
 extern cf_page_t cf;
 
@@ -59,6 +60,9 @@ extern cf_page_t cf;
 #define ART_SIZE 160                       /* a texture's side, texels */
 #define CF_TEXELS (ART_SIZE * ART_SIZE)
 #define CF_ONE 65536
+/* the slide_menu's children with depth: empty, they stand for every album (slide_child_index), as
+ * many as stock lays out round the centre, Centre's click on the centre one */
+#define CF_POOL 8
 #define CF_REACH 3 /* ring slots either side of the centre that can show (fading in) or preload */
 #define CF_EYE16 (16 * cfs.eye) /* the eye's distance, 1/16 px */
 #define CF_HALF16 (16 * ART_SIZE / 2)
@@ -190,6 +194,9 @@ int covers_live(void);
 float ff_decay(float s);
 int lettered(void *w);
 int stride_of(void *s);
+int slide_count(void *w);
+void *slide_child(void *w, int i);
+int slide_child_index(void *w, int j);
 void titles(unsigned c);
 
 /* coverflow_letters.c */

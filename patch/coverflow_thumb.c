@@ -305,7 +305,7 @@ static void th_beat(void *s, int n, int travel, unsigned now, int ms, int since)
 /* usable: navigation.c's; gated: travel is to be dropped (its gates). Answers THUMB_*. */
 int coverflow_wheel_poll(int usable, int gated) {
     void *s = cf.slide, *wm = window_manager();
-    int shown = usable && cfs.thumb && fx.frame && covers_live() && widget_count_children(s) &&
+    int shown = usable && cfs.thumb && fx.frame && covers_live() && slide_count(s) &&
                 window_manager_get_top_window(wm) == cf.page && !window_manager_is_animating(wm);
     int raw = shown && !window_manager_get_pointer_pressed(wm);
     if (raw != th.raw) {
@@ -357,7 +357,7 @@ int coverflow_wheel_poll(int usable, int gated) {
             widget_invalidate_force(s, 0);
             return THUMB_MOVED;
         }
-        int n = (int)widget_count_children(s);
+        int n = slide_count(s);
         follow = -th.enter / v; /* only what is left of the pass past the entry's end */
         th.enter = 0, th.stretch = 0;
         entered = th_letter(s, n, 1) ? THUMB_CLICK : 0;
@@ -378,7 +378,7 @@ int coverflow_wheel_poll(int usable, int gated) {
         return 0;
     }
     if (!th.on) th_grab(s, now);
-    int n = (int)widget_count_children(s), r = THUMB_MOVED | entered;
+    int n = slide_count(s), r = THUMB_MOVED | entered;
     if (travel) {
         th_turn(s, travel, now, n, ms);
         r |= THUMB_TURNED;

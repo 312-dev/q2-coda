@@ -37,7 +37,7 @@ class Cf(C.Structure):
                 ('jobs', C.c_void_p), ('thread', C.c_ulong), ('timer', C.c_uint), ('title_timer', C.c_uint), ('titled', C.c_int), ('offline', C.c_int),
                 ('saved_album', C.c_uint), ('albums_gen', C.c_uint),
                 *((k, C.c_int) for k in 'screen album running done total cancel scoped all_sort'.split()),
-                *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split())]
+                *((k, C.c_void_p) for k in 'all_albums all_stock hearts'.split()), ('count', C.c_int)]
 
 
 class Touch(C.Structure):
@@ -1218,7 +1218,7 @@ class Shelf:
         self.goals = []
         fw.mock('widget_animator_scroll_set_params', lambda a, x0, y0, x1, y1, _: self.goals.append(C.c_int(x1).value))
         c = cf(fw)
-        c.slide, c.screen, c.scoped = self.p, COVERS, scoped
+        c.slide, c.screen, c.scoped, c.count = self.p, COVERS, scoped, n
 
     def set(self, off, v):
         struct.pack_into('<i', self.raw, off, v)
@@ -3876,7 +3876,8 @@ def captions(fw, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):
     c = cf(fw)
     c.albums, c.scoped, c.screen = 0x5000, scoped, COVERS
     c.slide = ui.make(0, 'slide_menu')
-    for _ in range(len(recs) + (scoped != 0)):
+    c.count = len(recs) + (scoped != 0)
+    for _ in range(c.count):
         ui.make(c.slide, 'image')
     c.name, c.artist = ui.make(0, 'hscroll_label'), ui.make(0, 'hscroll_label')
     return t, ui, c, fw.fn('titles', None, C.c_uint)
