@@ -31,8 +31,11 @@
  * (widget_move), and the window manager repaints what it uncovers; swipe_back_poll steps it from
  * each UI loop pass.
  *
- * Not on dialogs, Control Center, the keyboard or Home's own list (no Return there leaves a page),
- * nor while a window animates; a card game or q2video takes every touch first (addon.c, videos.c).
+ * On a page whose letter strip is open (search_strip.c, a text box's keyboard window among them)
+ * the claim shuts the strip instead and the page stays where it is, as Return there does
+ * (search_strip_close; docs/oled-design.md#text-entry); a second swipe then takes the page. Not on
+ * dialogs, Control Center or Home's own list (no Return there leaves a page), nor while a window
+ * animates; a card game or q2video takes every touch first (addon.c, videos.c).
  */
 #include "navigation.h"
 
@@ -56,6 +59,7 @@ static struct {
     int lx;                /* the layer's x at rest */
     int off;               /* how far right the layer is now */
     int claimed, aborting; /* the touch is ours; our own abort is passing through the page */
+    int shut;              /* ... and it shut the letter strip, the page staying (search_strip_close) */
     int last_x, prev_x;    /* the last two moves' x and times, for the lift's speed */
     unsigned last_t, prev_t;
     int from, to;    /* a glide: the offset it started from and goes to */
@@ -148,7 +152,7 @@ static void reset(void) {
     if (sb.under) bitmap_destroy(sb.under);
     sb.under = (void *)0;
     sb.page = sb.layer = (void *)0;
-    sb.claimed = sb.at = 0;
+    sb.claimed = sb.at = sb.shut = 0;
     sb.off = 0;
 }
 
@@ -232,6 +236,7 @@ static int sb_event(void *page, void *event) {
         }
         if (dx < SB_CLAIM_PX || dx <= ady) return 0;
         sb.claimed = 1;
+        sb.shut = search_strip_close(page); /* the strip open: it shuts, and the page stays */
         pull_cancel();
         unsigned abort_event[12];
         pointer_event_init(abort_event, EVT_POINTER_ABORT, page, sb.x0, sb.y0);
@@ -240,7 +245,11 @@ static int sb_event(void *page, void *event) {
         sb.aborting = 0;
         sb.prev_x = sb.last_x = sb.x0;
         sb.prev_t = sb.last_t = (unsigned)time_now_ms();
-        if (sb.layer == page) sb.under = under_snap(window_under(window_manager(), page));
+        if (sb.layer == page && !sb.shut) sb.under = under_snap(window_under(window_manager(), page));
+    }
+    if (sb.shut) { /* the rest of the touch is the swipe's, and moves nothing */
+        if (up) reset();
+        return STOP;
     }
     unsigned now = (unsigned)time_now_ms();
     if (x != sb.last_x) {
@@ -271,8 +280,9 @@ void swipe_back_down(void *event, int allowed) {
         !usable())
         return;
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);
-    if (!top || window_manager_is_animating(wm) || tk_strcmp(widget_get_type(top), "window"))
-        return;
+    if (!top || window_manager_is_animating(wm) ||
+        (tk_strcmp(widget_get_type(top), "window") && !search_strip_open(top)))
+        return; /* a text box's keyboard window is a page here while the strip types on it */
     void *layer = coverflow_home_sublist(top);
     if (!layer) {
         if (!window_under(wm, top)) return; /* Home's own list: nothing to go back to */

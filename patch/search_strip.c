@@ -78,9 +78,6 @@
 #define SS_STRIP_Y 196
 #define SS_STRIP_H 34
 #define SS_STRIP_R 17
-#define SS_ROWS                                                                                    \
-    ((SS_STRIP_Y - SS_QUERY_H) / SS_PITCH) /* result rows between the query and strip              \
-                                            */
 #define SS_TABS_X 16 /* the tabs: a 30 px segmented control in the first row, the rows' inset */
 #define SS_TABS_Y (SS_QUERY_H + 1)
 #define SS_TABS_H 30
@@ -88,7 +85,6 @@
 #define SS_LIST_Y                                                                                  \
     (SS_QUERY_H + SS_PITCH) /* the results' top under the tabs, and the rows there                 \
                              */
-#define SS_TAB_ROWS ((SS_STRIP_Y - SS_LIST_Y) / SS_PITCH)
 #define SS_KEY_IN 5  /* the lit key's box, SS_KEY_IN in from the strip's top and bottom */
 #define SS_CHIP_R 96 /* the set switcher, docked at the pill's left, to x 96 */
 #define SS_RET_L (SS_STRIP_RX - SS_STRIP_H) /* the return key, a circle docked at its right */
@@ -690,8 +686,12 @@ static void ss_pop_paint(void *canvas) {
  * playlist, where it never leaves the strip). The rows showing, and the first one's top: under
  * the tabs while they show. */
 static int ss_tabs(void) { return ss.focus && !ss_named() && !ss.pick; }
-static int ss_rows(void) { return ss_tabs() ? SS_TAB_ROWS : SS_ROWS; }
 static int ss_list_y(void) { return ss_tabs() ? SS_LIST_Y : SS_QUERY_H; }
+/* The results' foot on the sheet: the strip's top while it is open, else the screen's foot (shut,
+ * the strip is not drawn and the results fill the page; the sheet runs from the status row's foot
+ * down, client_h). The rows that fit above it. */
+static int ss_foot(void) { return ss.focus ? client_h() : SS_STRIP_Y; }
+static int ss_rows(void) { return (ss_foot() - ss_list_y()) / SS_PITCH; }
 /* The bar's row kept in view. */
 static void ss_keep(void) {
     if (ss.sel < ss.top) ss.top = ss.sel;
@@ -700,6 +700,20 @@ static void ss_keep(void) {
 static void ss_pick(int tab) {
     ss.tab = (tab + SS_TABS) % SS_TABS;
     ss_filter();
+}
+
+/* The strip closed, the page left as it is (docs/oled-design.md#text-entry, the user's 2026-11-18
+ * ruling): Return or an edge swipe on the open strip, before either leaves the page. The wheel goes
+ * to the text, highlighted on Search's query line, and nothing is typed or submitted; the text and
+ * cursor stay, Centre or a tap in the text opens the strip again, and the next Return leaves. */
+static void ss_ungrab(void);
+static void ss_shut(void) {
+    stop_timer(&ss.erase_timer);
+    stop_timer(&ss.pop_timer);
+    ss.prev_down = ss.erased = ss.pop = 0;
+    ss.pressed = 0, ss.fpress = 0;
+    if (ss.grab) ss_ungrab();
+    ss.focus = SS_ON_FIELD;
 }
 
 /* The page left with nothing taken: a box's keyboard closed, else the page. */
@@ -799,10 +813,9 @@ static void ss_submit(void) {
         ss_box_done();
     else if (ss_named())
         ss_save();
-    else if (ss.pick && ss.nmatch) /* Add Songs' songs */
-        ss.focus = SS_ON_LIST, ss.sel = ss.top;
-    else if (ss.any && !ss.pick)
-        ss.focus = ss.nmatch ? SS_ON_LIST : SS_ON_TABS, ss.sel = ss.top;
+    else /* the strip closes: on the results, else the tabs, else the query (nothing matches) */
+        ss.focus = ss.nmatch ? SS_ON_LIST : ss.any && !ss.pick ? SS_ON_TABS : SS_ON_FIELD,
+        ss.sel = ss.top;
 }
 
 /* The highlight a stop on round the loop, dir 1 or -1. A tick of the turn that stopped on the
@@ -854,13 +867,15 @@ int search_strip_key(void *top, unsigned key) {
         ss.focus = button ? SS_ON_STRIP : ss.pick ? SS_ON_FIELD : SS_ON_TABS;
         wheel = button = 0, key = 0;
     }
-    if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
+    if (ss.focus && key == KEY_PLAY && ss_named())
+        ss_submit(); /* a name's or a box's, its strip shut: still its OK */
+    else if (ss.focus && key && !wheel && !button && key != KEY_CENTER && key != KEY_RETURN)
         return 0; /* Play/Pause, on the results */
-    if (ss.focus == SS_ON_TABS) {
+    else if (ss.focus && key == KEY_RETURN)
+        ss_leave(); /* the strip shut already: Return leaves, as on any page */
+    else if (ss.focus == SS_ON_TABS) {
         int to = ss.tab + wheel; /* the wheel's tab, past either end off the tabs */
-        if (key == KEY_RETURN)
-            ss.focus = SS_ON_STRIP;
-        else if (to < 0)
+        if (to < 0)
             ss.focus = SS_ON_FIELD;
         else if (wheel && to < SS_TABS)
             ss_pick(to);
@@ -869,16 +884,15 @@ int search_strip_key(void *top, unsigned key) {
         else if (button)
             ss_pick(ss.tab + button);
     } else if (ss.focus == SS_ON_FIELD) {
-        /* the query line, highlighted: the wheel passes on down, Centre or Return types */
-        if (key == KEY_CENTER || key == KEY_RETURN)
+        /* the text, the strip shut: the wheel passes on down from Search's query, Centre types */
+        if (key == KEY_CENTER)
             ss.focus = SS_ON_STRIP;
-        else if (wheel > 0)
+        else if (wheel > 0 && !ss_named())
             ss.focus = ss.pick ? (ss.nmatch ? SS_ON_LIST : SS_ON_FIELD) : SS_ON_TABS,
             ss.sel = ss.top;
     } else if (ss.focus == SS_ON_LIST) {
         if (wheel && ss.sel + wheel >= 0 && ss.sel + wheel < ss.nmatch) ss.sel += wheel;
         if (key == KEY_CENTER) ss_play();
-        if (key == KEY_RETURN) ss.focus = SS_ON_STRIP;
     } else if (!key) {
         /* the results' Previous, back on the strip */
     } else if (wheel) {
@@ -890,8 +904,8 @@ int search_strip_key(void *top, unsigned key) {
         ss_centre();
     else if (key == KEY_PLAY)
         ss_submit();
-    else if (key == KEY_RETURN) /* the highlight to the return key, a submit away */
-        ss.stop = ss_stops() - 1, ss.halted = 1, ss.pop = 0;
+    else if (key == KEY_RETURN) /* the strip shut, never a submit; the next Return leaves */
+        ss_shut();
     else if (button)
         ss_move(button);
     else
@@ -921,6 +935,16 @@ int search_strip_hold(void *top) {
 /* Whether top is the strip's page, where Previous and Next are the text's cursor: no scan of the
  * song on their hold (seek.c), and no long press of stock's (hold_menu.c ringnav_keylong). */
 int search_strip_owns(void *top) { return ss.page && top == ss.page; }
+/* swipe_back.c: 2 when top is the strip's page with the strip open, 1 with it shut, else 0. */
+int search_strip_open(void *top) { return !ss.page || top != ss.page ? 0 : ss.focus ? 1 : 2; }
+/* swipe_back.c, an edge swipe claimed on top: the open strip shut in the page's place (ss_shut), 1;
+ * 0 when top is not the strip's page or its strip is shut already, the swipe the page's. */
+int search_strip_close(void *top) {
+    if (search_strip_open(top) != 2) return 0;
+    ss_shut();
+    ss_dirty();
+    return 1;
+}
 
 /* UTF-8 s as wide characters in out (at most max - 1 of them), 0-ended; its length. */
 static unsigned ss_wide(const char *s, unsigned *out, unsigned max) {
@@ -1462,9 +1486,9 @@ void search_strip_paint(void *w, void *canvas) {
         static const empty_t none = { "magnifying-glass", "No Matches", "Try fewer letters", 0 };
         empty_t e = none;
         if (empty_compact(free)) e.glyph = 0; /* under the tabs, the compact form */
-        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + SS_STRIP_Y, 0) - y);
+        empty_paint(ss.sheet, canvas, &e, empty_top(free, y + ss_foot(), 0) - y);
     }
-    ss_strip_paint(canvas, primary, accent, light);
+    if (!ss.focus) ss_strip_paint(canvas, primary, accent, light); /* shut, it is not drawn */
     ui_ink_raw(raw);
     stock_canvas_set_fill_color(canvas, fill);
 }
@@ -1663,7 +1687,8 @@ static int ss_touch(void *ctx, void *event) {
     }
     if (!ss.pressed) return 0;
     int dx = xy[0] - ss.down_x, dy = xy[1] - ss.down_y,
-        tap = ss_dist(dx) < SS_TAP && ss_dist(dy) < SS_TAP, strip = ss.down_y >= SS_STRIP_Y;
+        tap = ss_dist(dx) < SS_TAP && ss_dist(dy) < SS_TAP,
+        strip = ss.down_y >= SS_STRIP_Y && !ss.focus; /* shut, the strip is not there */
     if (strip && !tap) {
         int cells = -dx / SS_STEP;
         ss_slide(cells - ss.swiped);
