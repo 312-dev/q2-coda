@@ -149,19 +149,26 @@ int lib_stream_song(const char *path, lib_song_t *o);
 int lib_song_rid(const char *id); /* "song:t12" -> 12; 0 when not a song id */
 int lib_has_server(void);
 int lib_queue_rid(unsigned at, int rid); /* PlayQueueItem: 0 for a queued stream download of server song rid */
-/* BLE (coda_rc_ble.c): ble_start's fd joins the poll with ble_events(); -1 when BlueZ is not there */
-int ble_start(void);
-int ble_events(void);
-void ble_handle(void);
-int ble_pending(void); /* messages read and not yet handled: poll without waiting */
+/* BLE (coda_rc_ble.c, its own GATT server): ble_fds puts its sockets (at most BLE_FDS) into the loop's poll, and
+ * ble_handle takes them back with their revents; ble_tick once a second */
+#define BLE_FDS 3
+struct pollfd;
+void ble_start(void);
+int ble_fds(struct pollfd *p);
+void ble_handle(const struct pollfd *p, int n);
+void ble_tick(uint32_t now_ms);
 int ble_write(const uint8_t *p, size_t n);
 void ble_disconnect(void);
 void ble_stop(void);
-int ble_retry_due(uint32_t now_ms);
+#ifdef CODA_HOST
+void ble_sim(const char *dir); /* --ble-sim: AF_UNIX sockets in dir stand in for the kernel's (the tests) */
+#endif
 void crc_ble_connected(void);
 void crc_ble_bytes(const uint8_t *p, size_t n);
 void crc_ble_gone(void);
-void crc_ble_advertising(int on); /* /tmp/coda-rc.ble while the GATT application and advertisement stand */
+void crc_ble_advertising(int on); /* /tmp/coda-rc.ble while the advertisement stands */
+/* config.ini's [Q2POD] BTNAME when bt_name.c's bt_name_valid would take it, else "Q2 Muse"; out holds 31 */
+void crc_bt_name(char *out);
 int crc_tcp_port(void); /* the port TCP sessions are accepted on (CRC_TCP_PORT, or --port) */
 
 /* ---- mDNS (coda_rc_mdns.c, docs/remote-protocol.md#discovery) ---- */
