@@ -78,13 +78,24 @@ if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/coda-rc" ]; then
     CODA=(--ro-bind "$S/coda-rc" /usr/bin/coda-rc)
 fi
 '''
+# And for q2-iroh, which demo starts beside coda-rc (docs/remote.md#car-remote-across-networks): its streams go to
+# this copy's daemon, never to TCP 7720, where another emulator's (or the user's) daemon may listen. Its first
+# argument (serve) stays first; the --forward put after it is the one it takes, being the first.
+IROH_BLOCK = '''# q2-iroh forwarding to this copy's coda-rc (tools/ci/emu_pool.py IROH_BLOCK)
+IROH=()
+if [ -n "${Q2EMU_CODA_PORT:-}" ] && [ -e "$E/rootfs/usr/bin/q2-iroh" ]; then
+    cp -f "$E/rootfs/usr/bin/q2-iroh" "$S/q2-iroh.real"
+    printf '%s\\n' '#!/bin/sh' 'c=$1; shift' "exec /emu/q2-iroh.real \\"\\$c\\" --forward 127.0.0.1:$Q2EMU_CODA_PORT \\"\\$@\\"" > "$S/q2-iroh"; chmod +x "$S/q2-iroh"
+    IROH=(--ro-bind "$S/q2-iroh" /usr/bin/q2-iroh)
+fi
+'''
 RUN_BEFORE = '# Q2EMU_CORE=1: qemu writes'
 RUN_BWRAP = '    "${BOOT[@]}"'
 
 
 def fit(d, k):
-    """Copy k's scripts given its Car Remote port (CODA_RC_BASE + k): q2emu exports it, run.sh passes it on;
-    made once, on a copy made before this existed too."""
+    """Copy k's scripts given its Car Remote port (CODA_RC_BASE + k): q2emu exports it, run.sh passes it on to
+    coda-rc and q2-iroh; made once, on a copy made before this existed too."""
     script = (d/'q2emu').read_text()
     if 'Q2EMU_CODA_PORT' not in script:
         line = f'PORT=${{Q2EMU_PORT:-{port(k)}}}\n'
@@ -94,6 +105,11 @@ def fit(d, k):
     if 'Q2EMU_CODA_PORT' not in run:
         assert run.count(RUN_BEFORE) == 1 and run.count(RUN_BWRAP) == 1, 'run.sh has changed: update CODA_BLOCK'
         run = run.replace(RUN_BEFORE, CODA_BLOCK + RUN_BEFORE).replace(RUN_BWRAP, '    "${CODA[@]}" "${BOOT[@]}"')
+        (d/'run.sh').write_text(run)
+    if 'IROH=()' not in run:  # a copy fitted before q2-iroh too
+        coda = '    "${CODA[@]}" "${BOOT[@]}"'
+        assert run.count(RUN_BEFORE) == 1 and run.count(coda) == 1, 'run.sh has changed: update IROH_BLOCK'
+        run = run.replace(RUN_BEFORE, IROH_BLOCK + RUN_BEFORE).replace(coda, '    "${CODA[@]}" "${IROH[@]}" "${BOOT[@]}"')
         (d/'run.sh').write_text(run)
 
 

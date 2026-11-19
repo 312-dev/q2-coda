@@ -380,29 +380,6 @@ static void fail_paint(void *w, void *canvas) {
         &(mode_page_t){ tok(TOK_WARNING), "modepage_bad", 0, "Couldn't Connect", line, "Try Again" });
 }
 
-/* ---- QR codes (libqrencode, which demo carries) ---- */
-
-/* text's QR code, its modules dark on a white plate of side px at (x, y). */
-static void qr_paint(void *canvas, const char *text, int x, int y, int px) {
-    if (!text || !*text) return;
-    struct qrcode {
-        int version, width;
-        unsigned char *data;
-    } *q = QRcode_encodeString(text, 0, 1 /* QR_ECLEVEL_M */, 2 /* QR_MODE_8 */, 1);
-    if (!q) return;
-    rect_t plate = { x, y, px, px };
-    fill_box(canvas, &plate, RGBA(0xffffff), 6);
-    int quiet = 2, cells = q->width + 2 * quiet, m = px / cells, off = (px - m * cells) / 2;
-    if (m < 1) m = 1;
-    for (int r = 0; r < q->width; ++r)
-        for (int c = 0; c < q->width; ++c)
-            if (q->data[r * q->width + c] & 1) {
-                rect_t d = { x + off + (c + quiet) * m, y + off + (r + quiet) * m, m, m };
-                fill_box(canvas, &d, RGBA(0), 0);
-            }
-    QRcode_free(q);
-}
-
 /* ---- Let a Guest Connect (G2) ---- */
 
 static int conn_closed(void *ctx, void *event) {
@@ -471,7 +448,7 @@ static void conn_paint(void *w, void *canvas) {
     ui_text(canvas, s, 0, TYPE(16), primary, 1, GC_RING_CX, GC_RING_CY - dy, 60, 1);
     /* AirPlay and Spotify guests: the hotspot's code, while it runs */
     if (gv_is("hotspot_up", "1")) {
-        qr_paint(canvas, gv("hotspot_qr"), GC_QR_X, GC_QR_Y - dy, GC_QR);
+        ui_qr(canvas, gv("hotspot_qr"), GC_QR_X, GC_QR_Y - dy, GC_QR);
         ui_text(canvas, "AirPlay or Spotify?", 1, TYPE(17), primary, 1, GC_SIDE_X,
                 GC_QR_Y + 14 - dy, 227, 2);
         ui_text(canvas, "Scan to join the Q2's Wi-Fi,", 0, TYPE(14), tertiary, 1, GC_SIDE_X,
@@ -802,7 +779,7 @@ static void hot_paint(void *w, void *canvas) {
                 0, TYPE(13), tertiary, 1, geom_val(V_TEXT_X), top + 10, 327, 2);
         return;
     }
-    qr_paint(canvas, gv("hotspot_qr"), HS_QR_X, top, HS_QR);
+    ui_qr(canvas, gv("hotspot_qr"), HS_QR_X, top, HS_QR);
     ui_text(canvas, "Scan to join", 1, TYPE(17), primary, 1, HS_SIDE_X, top + 14, 227, 2);
     ui_text(canvas, "Then play from AirPlay,", 0, TYPE(14), tertiary, 1, HS_SIDE_X, top + 38, 227,
             2);

@@ -94,28 +94,46 @@ The client sends the key, a newline, the command, a newline, then any stdin. `sh
 
 ## Car Remote across networks
 
-A spike, not part of any build: `remote/iroh-sidecar` is `q2-iroh`, a small Rust program that would let Q2 Muse Remote reach coda-rc ([remote-protocol](remote-protocol.md)) when the phone and the Q2 are on different networks. It uses [iroh](https://github.com/n0-computer/iroh) 1.5: QUIC between the two ends, found by the Q2's endpoint id (a public key), starting through n0's public relay and moving to a direct, hole-punched path when one opens. It runs beside coda-rc as a sidecar: each incoming stream becomes a local TCP connection to `127.0.0.1:7720`, so coda-rc is unchanged, and its own pairing, authentication and sealing still decide who may control the Q2. Tailscale, the other way to do this, was dropped for its memory.
+Q2 Muse Remote reaches the Q2's coda-rc ([remote-protocol](remote-protocol.md)) when the phone and the Q2 are on different networks: the phone on cellular in the car, the Q2 on the car's or a home Wi-Fi. `q2-iroh` (`remote/iroh-sidecar`) is a small Rust program in every image that uses [iroh](https://github.com/n0-computer/iroh) 1.5: QUIC between the two ends, found by the Q2's endpoint id (a public key), starting through a relay and moving to a direct, hole-punched path when one opens. It runs beside coda-rc as a sidecar: each incoming stream becomes a local TCP connection to `127.0.0.1:7720`, so coda-rc is unchanged, and its own pairing, authentication and sealing still decide who may control the Q2. Tailscale, the other way to do this, was dropped for its memory.
 
-Nothing builds it by default: `tools/build.py` does not know it, and the firmware image is the same with or without it. To build it, with Rust nightly and `rust-src` (MIPS is a tier-3 target, so std is built from source), clang, lld, llvm-ar and llvm-strip, with the Codescape toolchain and the unpacked stock rootfs that `tools/thirdparty.py` keeps in its cache (or `Q2_STOCKFS`), as `tools/player.py` links against:
+### What the user does
+
+1. On the Q2: Settings > Car Remote on, then Pair a Phone. With Wi-Fi joined it shows a QR code, the pairing code under it ([remote-protocol: Pairing by QR code](remote-protocol.md#pairing-by-qr-code)).
+2. On the phone: Q2 Muse Remote > Pair a Q2 Muse > **Scan QR code**, and point it at the Q2. The phone can be on any network. It dials the Q2's Wi-Fi address and its iroh endpoint at once, keeps the first that answers, and pairs on the code it read; the Q2 shows the pairing card for a moment, then "Pixel 10 Pro paired".
+3. From then on the app connects the same way wherever the phone is: on the Q2's Wi-Fi straight to its address, elsewhere through the relay (or a direct path once iroh finds one). A phone paired the old way (Wi-Fi address or Bluetooth) learns the endpoint at its next session on a Q2 with `q2-iroh` (`GetRemote`) and does the same.
+
+The Q2 needs Wi-Fi with internet for a phone elsewhere to reach it; Car Remote on keeps its Wi-Fi on under Smart Wi-Fi ([internals: Smart Wi-Fi](internals.md#smart-wi-fi)).
+
+### On the Q2
+
+demo's Car Remote shim (`patch/coda_rc_shim.c`) starts `q2-iroh` with the daemon and stops it with it, so nothing listens while Car Remote is off ([internals: Across networks](internals.md#car-remote-iroh)). Its key is `/mnt/data/coda-rc/iroh.key` (0600, made on first start, never on the card), so the Q2's endpoint id survives restarts and updates; `/tmp/coda-rc.iroh` holds the id and the home relay for the daemon and the Pair a Phone page; `/tmp/q2-iroh.log` its log. The relay is n0's public one (`*.relay.n0.iroh.link`) unless `/mnt/data/coda-rc/relay` names others, one URL a line (an own `iroh-relay` on the Hetzner box, later): write the file and turn Car Remote off and on.
 
 ```sh
-remote/iroh-sidecar/q2/build.sh            # prints the stripped binary's path
+q2-iroh serve [--key FILE] [--forward 127.0.0.1:7720] [--allow ID]... [--relay URL]... [--relay-file FILE] [--info FILE] [--pid FILE] [--nice N]
+q2-iroh dial ID [--listen 127.0.0.1:7720] [--relay URL] [--addr IP:PORT]... [--relay-only]   # a laptop's local port to the Q2's coda-rc
+q2-iroh bench ID [--count N] [--size BYTES] [--relay URL] [--relay-only]                     # times echoed messages down one stream
+```
+
+### Building it
+
+A firmware build needs no Rust: `tools/build.py` installs the binary `tools/iroh.py` pins (`PIN`: its SHA-256, size and the crate's hash), taken from `~/.cache/q2-thirdparty/q2-iroh/<sha256>/`. A change to the crate stops the build (and `test/unit/test_iroh.py`) until it is built and pinned again:
+
+```sh
+python3 tools/iroh.py           # build from remote/iroh-sidecar, keep it in the cache, print the new PIN
+python3 tools/iroh.py --check   # the pinned one is cached and the crate unchanged
+python3 tools/build.py ZIP --out DIR --dev --build-iroh   # build it inside a firmware build, pinned or not
 cargo build --release --manifest-path remote/iroh-sidecar/Cargo.toml   # the laptop's side
 ```
 
-`q2/build.sh` links against the Q2's own glibc 2.28 exactly as [librespot](librespot.md) is built (hard float, FP64, NaN-2008, `ld-linux-mipsn8.so.1`), with q2-librespot's target spec, linker wrapper and start files; `STOCK_LIB` and `GLIBC_INCLUDE` name another rootfs `/lib` or header tree. MIPS32 has no 64-bit atomics; the target spec's `max-atomic-width` of 32 is enough, as tokio and iroh's dependencies fall back on their own (`portable-atomic` among them) with no patch.
+Building needs Rust nightly and `rust-src` (MIPS is a tier-3 target, so std is built from source), clang, lld, llvm-ar and llvm-strip, with the Codescape toolchain and the unpacked stock rootfs that `tools/thirdparty.py` keeps in its cache (or `Q2_STOCKFS`), as `tools/player.py` links against. `q2/build.sh` links against the Q2's own glibc 2.28 exactly as [librespot](librespot.md) is built (hard float, FP64, NaN-2008, `ld-linux-mipsn8.so.1`), with q2-librespot's target spec, linker wrapper and start files; `STOCK_LIB` and `GLIBC_INCLUDE` name another rootfs `/lib` or header tree. MIPS32 has no 64-bit atomics; the target spec's `max-atomic-width` of 32 is enough, as tokio and iroh's dependencies fall back on their own (`portable-atomic` among them) with no patch.
 
-```sh
-q2-iroh serve --key /mnt/data/q2-iroh.key [--forward 127.0.0.1:7720] [--allow ID]...  # on the Q2: prints its id
-q2-iroh dial ID [--listen 127.0.0.1:7720] [--relay-only]   # on the laptop: a local port that reaches the Q2's coda-rc
-q2-iroh bench ID [--count N] [--size BYTES] [--relay-only] # times echoed messages down one stream
-```
+### Measured
 
-Measured on 2026-11-18 under `qemu-mipsel` on this laptop, against the stock rootfs's libraries, with a TCP echo server standing in for coda-rc. Memory is the guest's own resident pages (the host mappings inside the guest's address space, not qemu's); CPU is qemu's host time, an emulator's figure, not the X2000's.
+On 2026-11-18 under `qemu-mipsel` on this laptop, against the stock rootfs's libraries, with a TCP echo server standing in for coda-rc. Memory is the guest's own resident pages (the host mappings inside the guest's address space, not qemu's); CPU is qemu's host time, an emulator's figure, not the X2000's.
 
 | | |
 |---|---|
-| Binary, stripped | 5.35 MB (2.35 MB gzipped) |
+| Binary, stripped | 5.38 MB (pinned build, 5,383,796 bytes); 2.6 MB of the compressed rootfs |
 | Resident, idle and registered with the relay | 8.2 MB, steady over a minute |
 | Resident, after 4,000 echoed messages on both paths | 8.6 MB |
 | CPU idle (relay keep-alives) | about 0.6% of one host core under qemu |
@@ -123,4 +141,4 @@ Measured on 2026-11-18 under `qemu-mipsel` on this laptop, against the stock roo
 | Relay path (n0's `use1-1`) | p50 48 ms per 64-byte round trip; about 2.6 ms of CPU each under qemu |
 | Direct path, hole-punched within the 3 s the bench waits | p50 0.5 ms (same host); about 0.44 ms of CPU each under qemu |
 
-ponytail: a spike. Nothing starts it on the Q2, nothing shows the Q2's id to the phone, the app has no iroh side, and an endpoint registered all the time costs a little radio and battery that has not been measured on the device. The relay is n0's public one; a self-hosted relay is `RelayMode::Custom`.
+ponytail: an endpoint registered all the time Car Remote is on costs a little radio and battery that has not been measured on the device; and n0's public relay is a third party's service, with no promise of staying up (`/mnt/data/coda-rc/relay` moves it to an own one).

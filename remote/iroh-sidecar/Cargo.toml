@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 license = "GPL-3.0-only"
-description = "Spike: Car Remote across networks, an iroh endpoint beside coda-rc (docs/remote.md)"
+description = "Car Remote across networks: an iroh endpoint beside coda-rc (docs/remote.md)"
 
 [dependencies]
 anyhow = "1"
