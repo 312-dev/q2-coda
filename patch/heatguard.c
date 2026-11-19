@@ -3,7 +3,8 @@
  * /tmp/q2guard.ack ("ack N" for a power-off it took over, "cancel N" for the load warning's
  * Cancel). A card that can't show yet (another is up) is tried again on the next poll. The same
  * file carries q2guard's Bluetooth watchdog's ask, bt=N: demo relaunches the stack as stock's
- * Bluetooth switch does and answers "bt N done" (docs/internals.md#bluetooth-controller-watchdog). */
+ * Bluetooth switch does and answers "bt N done" (docs/internals.md#bluetooth-controller-watchdog).
+ */
 #include "navigation.h"
 
 #define HG_POLL_MS 500
@@ -12,7 +13,8 @@
 #define HG_GRACE_MS 60000 /* after demo starts, before a silent q2guard counts as not running */
 #define HG_STALE_MS 30000 /* its beat unchanged this long: not running */
 #define HG_OFF_MS 10000   /* the power-off card's countdown, if q2guard gives no time left */
-#define HG_BT_OFF_MS 1000 /* a relaunch: the radio held off this long between the switch's off and on */
+#define HG_BT_OFF_MS                                                                               \
+    1000 /* a relaunch: the radio held off this long between the switch's off and on */
 
 static struct {
     unsigned at, start, beat_at;
@@ -22,8 +24,9 @@ static struct {
     int acked, cancel; /* the answers last written */
     const char *card;  /* the must-confirm card up (hg_info), or 0 */
     int norun_shown;
-    int installed; /* /usr/bin/q2guard there: 1, not: -1, not looked yet: 0 */
-    int bt_seen;   /* the last relaunch answered; bt_on: its switch-on is due at bt_off_at + HG_BT_OFF_MS */
+    int installed;      /* /usr/bin/q2guard there: 1, not: -1, not looked yet: 0 */
+    int bt_seen;        /* the last relaunch answered; bt_on: its switch-on is due at bt_off_at +
+                           HG_BT_OFF_MS */
     int bt_on, bt_have; /* bt_have: bt_seen taken from the first state read */
     unsigned bt_off_at;
     const char *bt_said; /* the answer: "done" or "off" */
@@ -125,9 +128,9 @@ static void hg_power_off(int seq, int left, int load) {
  * clearBluetoothStatus, closeBluetooth killing rtk_hciattach, bluetoothd and bluealsa and powering
  * the radio down), then HG_BT_OFF_MS later on (bluetoothInit: openBluetooth's thread starts them
  * again, and checkBluetoothStatus reconnects BTLINKMAC as at any Bluetooth on), so demo's own lists
- * and output follow as they do for the switch. Not while Bluetooth is busy as stock's page counts it
- * (a scan, the stack starting, a link thread connecting or pairing, a link being set up): q2guard's
- * ask stays until the next poll. Bluetooth off: nothing to relaunch, answered "off". */
+ * and output follow as they do for the switch. Not while Bluetooth is busy as stock's page counts
+ * it (a scan, the stack starting, a link thread connecting or pairing, a link being set up):
+ * q2guard's ask stays until the next poll. Bluetooth off: nothing to relaunch, answered "off". */
 static void hg_bt(int req, unsigned now) {
     if (hg.bt_on) {
         if (now - hg.bt_off_at < HG_BT_OFF_MS) return;
@@ -170,7 +173,8 @@ void heatguard_poll(void) {
     int left = hg_field(s, "left", v, sizeof v) ? hg_int(v) : 0;
     char card[16];
     hg_field(s, "card", card, sizeof card);
-    if (tk_strcmp(card, "off") && !hg.off) hg_bt(hg_field(s, "bt", v, sizeof v) ? hg_int(v) : 0, now);
+    if (tk_strcmp(card, "off") && !hg.off)
+        hg_bt(hg_field(s, "bt", v, sizeof v) ? hg_int(v) : 0, now);
     hg_field(s, "state", v, sizeof v);
     if (!tk_strcmp(card, "off") || hg.off) {
         hg_power_off(hg.off ? hg.off : seq, left, !strncmp(v, "poweroff-load", 13));
