@@ -36,6 +36,7 @@
 #define BT_SPIN 16            /* the spinner's box (list_marks.c SPIN_BOX) */
 #define BT_SPIN_GAP 8         /* between "Other Devices" and its spinner */
 #define BT_POLL_MS 500        /* the scan's and the class file's checks, the link's */
+#define BT_RESULTS_MS 1000    /* a running scan's results read this often (page_poll) */
 #define BT_CLASS_WAIT_MS 6000 /* a connect toast waits this long at most for the device's Class */
 #define BT_STATE_W 150      /* a paired row's state ("Not Connected"), right-aligned in this much */
 #define BT_NOTE_H 52        /* the switch-off line, two lines of 13 px */
@@ -66,7 +67,7 @@ static struct {
     int scans;          /* scans started for this view */
     int scan_shown;     /* Other Devices' spinner shown at the last poll */
     int linking;        /* a device connecting or connected at the last poll; -1 not yet looked */
-    int ahead;          /* link_ahead for the link list's last item at the last poll */
+    unsigned read_at, listed; /* a scan's results last read (page_poll), and the devices listed then */
     char link[24];      /* the device connected at the last look, "" none */
     char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
@@ -151,6 +152,28 @@ static int row_state(void *b) {
            : !tk_strcmp(tr, "msg_connected")  ? BT_CONNECTED
            : !tk_strcmp(tr, "msg_connecting") ? BT_CONNECTING
                                               : BT_PAIRED;
+}
+
+/* A paired device row bt_dev_state calls connected whose label stock left saying otherwise:
+ * "msg_connected", the label in *l; else 0. Stock labels a row msg_connecting while its link thread runs,
+ * whatever its item's status, and msg_connected only at 3 with a codec; on 2026-11-19 (V1JCi) the
+ * Pixel Buds' item was 3 from 22:14:49Z with the link up while the thread ran to 22:15:02Z, and the
+ * row, rebuilt in that time, said Connecting until something else made stock rebuild it
+ * (docs/internals.md#bluetooth-page). */
+static const char *state_tr(void *b, int dev, void **l) {
+    const char *now = (*l = state_label(b)) ? widget_get_prop_str(*l, "tr_text", "") : (const char *)0;
+    if (!now || !tk_strcmp(now, "msg_connected") || bt_dev_state(dev) != BT_ROW_CONNECTED)
+        return (const char *)0;
+    return "msg_connected";
+}
+/* A device row whose label stock left behind its state (state_tr): the list is to be rebuilt. */
+static int labels_stale(void) {
+    void *l;
+    for (unsigned i = 0, n = bt.view ? widget_count_children(bt.view) : 0; i < n; ++i) {
+        void *item = widget_get_child(bt.view, i), *b = row_button(item);
+        if (b && row_dev(item) >= 0 && state_tr(b, row_dev(item), &l)) return 1;
+    }
+    return 0;
 }
 
 /* Stock's codec number n (bt_showcoding, a2dp_eventstate: 1 SBC, 2 AAC, 3 aptX, 4 LDAC, 13 aptX
@@ -633,10 +656,8 @@ void bt_rows_pre(void *view) {
     }
     for (unsigned i = 0, n = widget_count_children(view); i < n; ++i) {
         void *item = widget_get_child(view, i), *b = row_button(item), *l;
-        /* a row stock built as connecting or paired whose link the kernel holds: Connected */
-        if (b && row_dev(item) >= 0 && (l = state_label(b)) && row_state(b) != BT_CONNECTED &&
-            link_ahead(dev_at(row_dev(item), 0)))
-            widget_set_prop_str(l, "tr_text", "msg_connected");
+        const char *tr = b && row_dev(item) >= 0 ? state_tr(b, row_dev(item), &l) : (const char *)0;
+        if (tr) widget_set_prop_str(l, "tr_text", tr); /* connected by bt_dev_state: says so */
         if (b && row_dev(item) >= 0 && !state_label(b)) /* a found device the page shows */
             bt_trace_shown(dev_at(row_dev(item), 0));
         if (widget_get_prop_int(item, "_bt_head", 0) && I(item, W_H) != BT_NOTE_H)
@@ -961,7 +982,9 @@ static int busy(void) {
  * runs stops it as stock's row click does first (btmenu_item_on_click's btStopSearch), with the
  * results so far read as its timer reads them at the scan's end: the headset reconnecting by
  * itself, headset.c's or the boot's connect, which go by no click. The opening scan beside a
- * device already connected runs on, so Other Devices fills (docs/internals.md#bluetooth-page). */
+ * device already connected runs on, so Other Devices fills (docs/internals.md#bluetooth-page). A
+ * running scan's results are read each second, and a row whose label stock left behind its state
+ * gets the list rebuilt. */
 static void page_poll(unsigned now) {
     void *win = bt.view ? window_of(bt.view) : (void *)0;
     if (!win || win != window_manager_get_top_window(window_manager())) return;
@@ -972,11 +995,8 @@ static void page_poll(unsigned now) {
     if (now - bt.poll_at < BT_POLL_MS) return;
     bt.poll_at = now;
     if (class_read()) widget_invalidate_force(win, (void *)0);
-    char last[32] = "";
-    int status = 0, n = g_bluetoothflag ? getBtLinkSize() : 0;
-    if (n > 0) getBtLinkItem(n - 1, &status, last);
-    int ahead = n > 0 && link_ahead(last);
-    if (ahead != bt.ahead) bt.ahead = ahead, g_btsetting_flag = 1; /* rebuilt: the row follows */
+    /* stock rebuilds only when its own state moves: a row it left behind is rebuilt here */
+    if (labels_stale()) g_btsetting_flag = 1;
     int linking = I(bt_connectstatus, 0) == 1 || busy();
     if (bt_searchtime > 1 && linking && !bt.linking) {
         btStopSearch();
@@ -984,11 +1004,24 @@ static void page_poll(unsigned now) {
         g_btsetting_flag = 1;
     }
     bt.linking = linking;
+    /* stock's timer reads the results only as the scan's count ends (10 s): a device found early
+     * waited for it, 5 s on 2026-11-19 (docs/internals.md#bluetooth-page). Read each second meanwhile,
+     * and rebuilt when the list grew. */
+    if (bt_searchtime > 1 && now - bt.read_at >= BT_RESULTS_MS) {
+        void *list = P(pdeq_btshowlist, 0);
+        unsigned was = bt.listed;
+        bt.read_at = now;
+        getSearchResult();
+        bt.listed = list ? deque_size(list) : 0;
+        if (bt.listed != was) g_btsetting_flag = 1;
+    }
     if (!g_bluetoothflag || bt_searchtime || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1)
         return;
     if (bt.scans && busy()) return;
     ++bt.scans;
     btStartSearch();
+    void *list = P(pdeq_btshowlist, 0);
+    bt.read_at = now, bt.listed = list ? deque_size(list) : 0;
     g_btsetting_flag = 1; /* the page's timer rebuilds the list from the scan's first results */
 }
 

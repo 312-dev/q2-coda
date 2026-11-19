@@ -336,13 +336,14 @@ def test_a_connect_starting_while_the_page_scans_stops_the_scan(fw, how):
 
 
 def test_the_opening_scan_runs_on_beside_a_device_already_connected(fw):
-    """Other Devices fills while a headset streams, as stock's page does: only a connect that starts stops a scan."""
+    """Other Devices fills while a headset streams, as stock's page does: only a connect that starts stops a scan
+    (the page reads the scan's results meanwhile, a_device_found_mid_scan below)."""
     s = Stops(fw, DEVICES)
     s.p.poll()
     fw.var('bt_searchtime', C.c_ubyte).value = 40
     s.p.poll()
     s.p.poll()
-    assert s.calls == []
+    assert 'stop' not in s.calls
 
 
 def test_the_page_gone_stops_its_scans(fw):
@@ -1183,3 +1184,84 @@ def test_a_listed_acl_is_only_a_connected_one(fw):
     assert listed(req(0x80, 1), 8, HEAD.encode()) == 0
     assert listed(req(1, 5), 8, HEAD.encode()) == 0
     assert listed(req(1, 1), 8, CAR.encode()) == 0
+
+
+def test_a_row_stock_labels_connecting_shows_connected_once_its_link_is_listed(fw):
+    """V1JCi, 2026-11-19 22:14 (test A): a tap on the found Pixel Buds; the link list went 1, 3, 5, then 3 at
+    22:14:49Z with the kernel's link up, while stock's link thread ran on to 22:15:02Z. Stock labels a row
+    msg_connecting while its link thread runs, whatever the item's status, so the row moved to My Devices said
+    Connecting and stayed so. Status 3 is connected (bt_dev_state), and the label follows it at each rebuild."""
+    p = Page(fw, [(HEAD, 'Pixel Buds', 'found')])
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1
+    p.links = [(HEAD, 1)]
+    acl_list(fw)
+    p.rebuild()
+    p.layout()
+    p.links = [(HEAD, 5)]
+    acl_list(fw, HEAD)
+    p.devices[0] = (HEAD, 'Pixel Buds', 'connecting')  # stock moved it to My Devices, labelled while connecting
+    p.now += 600
+    p.rebuild()
+    p.layout()
+    assert state_text(p, p.row('d0')) == 'msg_connected'
+    p.links = [(HEAD, 3)]  # stock's item connected; its thread still running, its label still connecting
+    p.now += 600
+    p.rebuild()
+    p.layout()
+    row = p.row('d0')
+    assert state_text(p, row) == 'msg_connected' and geometry(row)[3] == 52
+    assert fw.fn('bt_dev_state', C.c_int, C.c_int)(0) == 3
+
+
+def test_a_label_stock_left_behind_asks_for_a_rebuild(fw):
+    """A row built while stock's thread ran keeps its label until stock rebuilds, which it does only when its own
+    state moves: the page's poll asks for one (g_btsetting_flag) while any device row's label says other than
+    bt_dev_state, and stops once they agree."""
+    p = Page(fw, [(HEAD, 'Pixel Buds', 'connecting')])
+    fw.var('fw_ctx_bt_connectstatus', C.c_int).value = 1
+    p.links = [(HEAD, 5)]
+    acl_list(fw)
+    p.rebuild()
+    p.layout()
+    p.poll()
+    flag = fw.var('g_btsetting_flag', C.c_ubyte)
+    flag.value = 0
+    p.poll()
+    assert flag.value == 0  # label and state agree: Connecting
+    p.links = [(HEAD, 3)]  # no rebuild from stock
+    p.poll()
+    assert flag.value == 1
+    flag.value = 0
+    p.rebuild()
+    p.layout()
+    p.poll()
+    assert flag.value == 0
+
+
+def test_a_device_found_mid_scan_is_listed_within_a_second(fw):
+    """V1JCi, 2026-11-19: the radio heard the Pixel Buds at 22:14:32.2Z (q2guard's found) and the page listed them
+    at 22:14:37.2Z (page shows found): stock's page timer reads the search results (getSearchResult) only as a
+    scan's count ends, so a device found early in a 10 s scan waited for its end. While the page scans, its poll
+    reads them each second and asks for a rebuild when the device list grew."""
+    s = Scan(fw)
+    reads = []
+    found = C.create_string_buffer(0x124)
+    C.memmove(C.addressof(found) + 4, HEAD.encode() + b'\0', len(HEAD) + 1)
+    listed = s.p.ui.deques[fw.var('fw_ctx_pdeq_btshowlist', C.c_uint).value]
+    fw.mock('getSearchResult', lambda *_: reads.append(s.p.now) or 0)
+    s.p.poll()  # the scan starts
+    assert s.started == 1
+    flag = fw.var('g_btsetting_flag', C.c_ubyte)
+    flag.value = 0
+    s.p.poll()
+    s.p.poll()
+    assert len(reads) == 1 and flag.value == 0  # read a second on; nothing new
+    listed.append(C.addressof(found))  # what getSearchResult would add: the Buds heard
+    s.p.poll()
+    s.p.poll()
+    assert len(reads) == 2 and flag.value == 1
+    flag.value = 0
+    fw.var('bt_searchtime', C.c_ubyte).value = 1  # stock's timer reads them itself at the count's end
+    s.p.poll()
+    s.p.poll()
+    assert len(reads) == 2 and flag.value == 0
