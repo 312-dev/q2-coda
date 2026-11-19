@@ -660,9 +660,9 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
  * CARD_W wide at CARD_X, its stack centred on CARD_CY and kept within CARD_TOP..CARD_FOOT: 18 px
  * of padding, the title (Inter Medium 20), the body (15 px Text Secondary, wrapped to the column on
  * 19 px lines, 4 px under the title), the code (Inter Medium 30), then 14 px down the switch row
- * and the answers, 32 px each, a destructive answer 12 px after the rest, and 8 px of padding. The
- * answers' bar is 8 px in from the card's sides; a destructive one is red (Negative), its bar too
- * when lit. */
+ * and the answers, 32 px each, evenly spaced whatever the kind (as Shut Down's), and 8 px of
+ * padding. The answers' bar is 8 px in from the card's sides; a destructive one is red (Negative),
+ * its bar too when lit. */
 #define CARD_X 42
 #define CARD_W 291
 #define CARD_R 16
@@ -680,7 +680,6 @@ int mode_page_paint(void *w, void *canvas, int dy, const mode_page_t *m) {
 #define CARD_CODE_H 40
 #define CARD_ROWS_GAP 14
 #define CARD_ROW 32
-#define CARD_DEST_GAP 12
 #define CARD_BAR_IN 8
 #define CARD_SCRIM 0x80000000u /* black at 50% */
 #define CARD_TIMER_MS 100      /* the timeout's seconds and bar */
@@ -775,8 +774,7 @@ static void card_layout(void) {
         if (cf.lines) h += CARD_BODY_GAP + cf.lines * CARD_BODY_LINE;
         if (cf.code[0]) h += CARD_CODE_GAP + CARD_CODE_H;
         rows = h + CARD_ROWS_GAP;
-        h = rows + card_items() * CARD_ROW +
-            (card_destructive(cf.c.n_rows - 1) ? CARD_DEST_GAP : 0) + CARD_PAD_FOOT;
+        h = rows + card_items() * CARD_ROW + CARD_PAD_FOOT;
         if (h <= CARD_FOOT - CARD_TOP || !cf.c.glyph) break;
         cf.c.glyph = (const char *)0;
     }
@@ -966,11 +964,6 @@ int confirm(const confirm_t *c) {
             y += k < 0 ? AC_SWITCH_H : AC_ANS_H;
             continue;
         }
-        if (card_destructive(k)) {
-            void *gap = label_create(view, 0, y, w, CARD_DEST_GAP);
-            widget_set_text_utf8(gap, "");
-            y += CARD_DEST_GAP;
-        }
         void *item = list_item_create(view, 0, y, w, CARD_ROW);
         widget_use_style(item, "s_listitem_black");
         widget_set_prop_int(item, "style:normal:bg_color", 0);
@@ -1136,7 +1129,6 @@ int feedback_confirm_dress(void *w) {
         y = cf.rows_y - I(w, W_Y);
     if (cf.check) widget_move_resize(cf.check, x, y, cw, CARD_ROW), y += CARD_ROW;
     for (int k = 0; k < 2; ++k) {
-        if (card_destructive(k)) y += CARD_DEST_GAP;
         widget_move_resize(cell[k], x, y, cw, CARD_ROW);
         widget_set_text_utf8(cell[k], "");
         y += CARD_ROW;

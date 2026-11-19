@@ -905,7 +905,7 @@ its tiles, framed in white when selected.
 The confirm itself is the confirmation card over the page that asked (`patch/feedback.c`,
 [oled-design](oled-design.md#confirmation-card)): its title asks the question ("Shut Down?", "Delete Playlist
 “a”?"), and its answers are **Cancel** and the action's verb ("Shut Down", "Reset", "Delete"), a verb that
-loses something red after a gap; Delete Song's "Also delete source file" is the card's switch row, which
+loses something red; Delete Song's "Also delete source file" is the card's switch row, which
 Center turns. Its toasts are a pill near the screen's foot over the page, which keeps its status row and
 selection.
 

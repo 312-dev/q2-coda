@@ -78,18 +78,20 @@ def rect(ui, w):
     return tuple(ui.nodes[w].rect())
 
 
-def test_a_destructive_card_opens_on_cancel_its_verb_red_after_a_gap(fw, ui, st):
+def test_a_destructive_card_opens_on_cancel_its_verb_red_and_spaces_its_answers_evenly(fw, ui, st):
+    """docs/oled-design.md#confirmation-card: the answers stand CARD_ROW apart whatever the kind, as Shut Down's do (the
+    user's, 2026-11-19); only the ink and the default row say destructive."""
     theme(fw)
     card = Card(fw, ui)
     assert card.ask('Forget %s?', ['Cancel', 'Forget Device'], name='WH-1000XM5',
                     body="You'll need to pair it again to use it.")
     assert card.selected == 0  # Cancel
     items = card.items()
-    assert [rect(ui, i)[1] for i in items] == [0, 32 + 12]  # the destructive row after the 12 px gap
+    assert [rect(ui, i)[1] for i in items] == [0, 32]  # no gap before the destructive row
     canvas = card.paint()
     card_box = [b for b in canvas.boxes if b[0][0] == 42 and b[0][2] == 291]
-    # 18 + 24 title + 4 + 19 body + 14, two rows and the gap, 8: centred on y 168
-    h = 18 + 24 + 4 + 19 + 14 + 2 * 32 + 12 + 8
+    # 18 + 24 title + 4 + 19 body + 14, two rows, 8: centred on y 168
+    h = 18 + 24 + 4 + 19 + 14 + 2 * 32 + 8
     assert card_box and card_box[0][0] == (42, 168 - h // 2, 291, h) and card_box[0][2] == 16
     assert [t[0] for t in canvas.texts] == ['Forget WH-1000XM5?', "You'll need to pair it again to use it."]
     assert rect(ui, card.list)[1] == 168 - h // 2 + 18 + 24 + 4 + 19 + 14  # the answers from there (dialog at y 0)

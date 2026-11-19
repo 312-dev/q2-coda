@@ -133,7 +133,7 @@ int kv_fit(int span, int label_w, int value_w, int *box);
  * the dimmed page that asked. title names the object ("Forget %s?": the one %s is name); body is at
  * most two lines
  * ('\n' between); code a large line ("482 913"); rows the answers top down, the safe one first.
- * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red after a gap, opens on
+ * kind sets the default row and inks: CONFIRM_DESTRUCTIVE (the last row red, opens on
  * row 0), CONFIRM_CONSEQUENTIAL (opens on row 0), CONFIRM_NEUTRAL (opens on the last row, Return
  * answers row 0), CONFIRM_INFO (one row). back: the row Return answers, -1 for row 0. toggle: a
  * switch row's label above the answers, toggle_on its start. timeout_ms: the card answers

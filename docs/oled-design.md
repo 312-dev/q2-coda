@@ -878,11 +878,12 @@ as its callers move onto it.
   case, wrapped at words to the text column on as many lines as it needs (four at most), the card growing with it; a code (a pairing's "482
   913") in Inter Medium 30; then 14 px down an optional switch row (label at the text column, the switch at the right
   column) and the answers, 32 px rows of Inter Regular 20 centered, stacked; 8 px of padding.
-- **Kinds:** destructive (Cancel, then 12 px of space, then the verb in Negative red; opens on Cancel), consequential
+- **Kinds:** destructive (Cancel, then the verb in Negative red; opens on Cancel), consequential
   (Cancel, the verb; opens on Cancel), neutral (the safe answer, the verb; opens on the verb), info (OK). The lit
-  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb.
+  answer's bar is the accent, 8 px in from the card's sides, or Negative red on a destructive verb. Every kind's
+  answers stand 32 px apart, with no gap before a destructive one, as Shut Down's (the user's, 2026-11-19).
 - **Red:** Negative `#FF453A`, the design's one red, not the mock's `#FF3B30` (iOS's light-mode red, darker on black).
-- **Input:** the wheel moves the bar, stepping over the gap; Center answers the lit row or flips the switch;
+- **Input:** the wheel moves the bar; Center answers the lit row or flips the switch;
   Return answers the safe row; Play/Pause, Next and Previous do nothing while the card asks.
 - **Timeout:** a card that answers itself (Guest Play's 30 s Decline) shows the seconds left on that row in 15 px
   Text Tertiary and a 2 px bar along its foot emptying toward it, and answers it at 0 whatever the input.
