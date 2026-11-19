@@ -524,8 +524,8 @@ static int search_left(void *ctx, void *event) {
     return 0;
 }
 
-/* navigation.c's pull-to-search, released on the radio page: peq_ui.c's T9 edit over the title,
- * its keyboard open. */
+/* navigation.c's pull-to-search, released on the radio page: peq_ui.c's text edit over the title,
+ * its keyboard (the letter strip) open. */
 void radio_search(void) {
     if (!ui.page || ui.note || ui.edit || ui.pend) return;
     if (ui.view) ui.sel[ui.level] = widget_get_prop_int(ui.view, "_ringnav_index", 0);
