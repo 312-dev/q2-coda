@@ -2129,6 +2129,8 @@ Software Update's card half (`patch/sw_update.c`, the look in [oled-design](oled
 
 `test/fw/test_sw_update.py` covers the tar check (tars built as `tools/build.py` builds them), stock's answers, the names and the flow; `test/patch.py` runs the hook and the pages on the real payload.
 
+A `--dev` build also runs this path from a computer: `q2update_poll` takes `q2update`'s request (`check` or `install`) and calls `ringnav_fwupdate_tf`; the check's answer is written back for it, and an update stock will take goes straight to stock's dialog (`install`) or closes the page with a toast (`check`) instead of asking Install Update? ([adb: Installing an update over adb](adb.md#installing-an-update-over-adb)).
+
 ponytail: the check reads the whole 55 MB once more before stock's updater unpacks and checks it again, a few seconds the user sees as the spinner; skipping it would mean asking before knowing whether the file is any good. The bar stays full while stock checks the unpacked images and counts down its 3 s, which it reports nothing of.
 
 ## Card apps

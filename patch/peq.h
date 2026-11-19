@@ -649,6 +649,7 @@ void guest_field(const char *key, char *out, unsigned n), guest_poll(void), gues
 int guest_net(const char *kind, const char *id, const char *name);
 void spot_send_play(int playing);
 void q2eq_poll(void); /* peq_ui.c, --dev builds only: a q2eq request (q2eq.h) */
+void q2update_poll(void); /* sw_update.c, --dev builds only: a q2update request (docs/adb.md#installing-an-update-over-adb) */
 int media_owner(void), media_status(void), media_playing(void), media_focused(void);
 void media_set_playing(int playing), media_key(unsigned key);
 void video_key(unsigned key);
