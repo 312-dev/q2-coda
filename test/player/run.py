@@ -862,7 +862,7 @@ def test_alsa_sw_params(player, songs, tmp):
     0x438d64-0x438dc4: start at a period, stop_threshold and silence_size at the boundary), and off Bluetooth a write to
     a PCM that ran dry first moves appl_ptr to a period past hw_ptr (snd_pcm_forward by the deficit plus a period)."""
     got = subprocess.run([tool(tmp, 'alsa_test', '-DHAVE_ALSA')], check=True, capture_output=True, text=True).stdout.split('\n')
-    lines = {' '.join(l.split()[:3] if l.startswith('open') else l.split()[:1]): l for l in got if l}
+    lines = {' '.join(l.split()[:3] if l.startswith(('open', 'reread')) else l.split()[:1]): l for l in got if l}
     for way in range(3):
         assert lines[f'open way {way}'].endswith(f'calls 1 start 1378 stop {0x56220000} silence {0x56220000} boundary {0x56220000}'), lines[f'open way {way}']
     want = {'full': 'r 0 forward -1 avail_reads 1 writes 1', 'ring': 'r 0 forward -1 avail_reads 1 writes 1',
