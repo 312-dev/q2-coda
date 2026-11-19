@@ -64,7 +64,12 @@ class Scans(Q2):
         self.pages: list[str] = []
         self.sent: list[str] = []
         self.playing, self.out = 2, 1
+        self.linked = 0  # networkGetConnectStatus: nothing joined
+        self.lit = fw.var('g_backlight_status', C.c_ubyte)
+        self.lit.value = 1  # the screen on: the backoff below waits for dark
+        self.cable = fw.var('g_usbdet_value', C.c_ubyte)
         self.names: dict[int, C.Array[C.c_char]] = {}
+        fw.mock('networkGetConnectStatus', lambda *_: self.linked)
         fw.mock('fw___xstat', self.stat)
         fw.mock('fw_system', lambda cmd, *_: self.sent.append(C.string_at(cmd).decode()) or 0)
         fw.mock('mclGetPlayStatus', lambda *_: self.playing)
@@ -143,3 +148,51 @@ def test_a_failed_wpa_cli_is_retried_after_a_pause(fw, st):
     assert fails == [HOLD]
     q2.idle(2_000)
     assert fails == [HOLD, HOLD]
+
+
+def interval(cmd: str) -> int:
+    return int(cmd.split()[4])
+
+
+def test_dark_and_unjoined_backs_the_rescan_off_to_two_minutes(fw, st):
+    """2026-11-19, a Q2 in a pocket with only the car's network saved: wpa_supplicant scanned every 5 s for hours
+    with the screen off (ps_info's IPS leave count, one scan each 7.5 to 10 s). Dark with nothing joined, each
+    rescan waits twice the last, from 5 s up to two minutes."""
+    q2 = Scans(fw, st, CARREMOTE=b'1')
+    q2.playing = 3  # paused on the jack: no hold
+    q2.idle(2_000)
+    assert q2.sent == [FREE]
+    q2.lit.value = 0
+    q2.idle(10 * 60_000)
+    assert [interval(c) for c in q2.sent] == [5, 10, 20, 40, 80, 120]
+
+
+@pytest.mark.parametrize('why', ['lit', 'linked', 'joining', 'wifi_page', 'cable'])
+def test_the_backoff_ends_at_once(fw, st, why):
+    """The screen on, a link, a join under way, the Wi-Fi page (the user's rule: it scans as stock's) or a cable
+    put 5 s back, which also brings the rescan already due forward; dark again, it starts from 5 s."""
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    q2.playing = 3
+    q2.lit.value = 0
+    q2.idle(60_000)
+    assert interval(q2.sent[-1]) == 40
+    if why == 'lit':
+        q2.lit.value = 1
+    elif why == 'linked':
+        q2.linked = 1
+    elif why == 'joining':
+        fw.var('wifi_connectstatus', C.c_ubyte).value = 1
+    elif why == 'wifi_page':
+        q2.open('home_page', 'systemset_page', 'wifi_page')
+    else:
+        q2.cable.value = 1
+    sent = len(q2.sent)
+    q2.idle(10 * 60_000)
+    assert [interval(c) for c in q2.sent[sent:]] == [5]
+
+
+def test_a_headset_s_hold_wins_over_the_backoff(fw, st):
+    q2 = Scans(fw, st, CARREMOTE=b'0')
+    q2.lit.value = 0
+    q2.idle(5 * 60_000)
+    assert q2.sent == [HOLD]

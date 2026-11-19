@@ -1,5 +1,5 @@
 /* Smart Wi-Fi: the radio off while nothing uses the network, back for what needs it; and the scan
- * hold, wpa_supplicant's rescans held off while A2DP streams. */
+ * hold, wpa_supplicant's rescans held off while A2DP streams and backed off while dark. */
 #include "navigation.h"
 
 /* Smart Wi-Fi (docs/internals.md#smart-wi-fi): with Power's row on and the user's Wi-Fi switch on,
@@ -112,39 +112,62 @@ static int smart_needed(void) {
  * scans again scan_interval (5 s) after each scan that found none, for as long as the radio is on
  * (the shipped config has no bgscan or autoscan; demo scans only from the Wi-Fi page, its switch
  * and a join). So while music plays to a headset (or a phone streams to the Q2), Wi-Fi is on and
- * nothing needs the network, scan_interval is SCAN_HOLD_S; otherwise wpa_supplicant's own 5 s.
- * smart_needed includes the Wi-Fi page and its dialogs, so the page scans as stock's does whatever
- * plays, and a change of scan_interval moves the rescan already due (scan.c's
+ * nothing needs the network, scan_interval is SCAN_HOLD_S; otherwise 5 s, or the dark backoff
+ * below. smart_needed includes the Wi-Fi page and its dialogs, so the page scans as stock's does
+ * whatever plays, and a change of scan_interval moves the rescan already due (scan.c's
  * wpa_supplicant_update_scan_int), so the hold and its end take effect at once. Nothing joined or
- * a join's own scans are touched. held: the value wpa_supplicant was last given, 1 for the hold;
- * sock: its control socket's inode then, so a new wpa_supplicant (the switch, Smart Wi-Fi's wake)
- * or a new demo beside an old one is told again; tried: the last failed try, retried after
- * SCAN_RETRY_MS. */
+ * a join's own scans are touched.
+ *
+ * Dark backoff (docs/internals.md#scan-hold): with the screen off, nothing joined, no join trying,
+ * no cable and no Wi-Fi page open, each rescan waits twice the last, 5 s up to SCAN_BACKOFF_MAX_S,
+ * counted from when all of that began (since). Car Remote does not stop it, as it stops the hold:
+ * its car's network is joined within SCAN_BACKOFF_MAX_S of appearing, or at once on a wake. Any
+ * of them ending puts 5 s back. sent: the interval wpa_supplicant was last given; sock: its control
+ * socket's inode then, so a new wpa_supplicant (the switch, Smart Wi-Fi's wake) or a new demo
+ * beside an old one is told again; tried: the last failed try, retried after SCAN_RETRY_MS. */
 #define WPA_SOCK "/var/run/wpa_supplicant/wlan0"
-#define SCAN_HOLD_S "3600"
+#define SCAN_HOLD_S 3600
+#define SCAN_BACKOFF_MAX_S 120
 #define SCAN_RETRY_MS 10000
 static struct {
-    unsigned sock, tried;
-    int held;
+    unsigned sock, tried, since;
+    int sent;
 } sh __attribute__((section(".scratch")));
+static int scan_interval_s(unsigned now) {
+    int a2dp = (media_playing() && mclGetOutputWay() == 1) || (signed char)bt__recv_pageflag == 2;
+    if (a2dp && wifi_connectstatus != 1 && !smart_needed()) return SCAN_HOLD_S;
+    if (g_backlight_status || networkGetConnectStatus() > 0 || wifi_connectstatus == 1 ||
+        g_usbdet_value || net_page_open()) {
+        sh.since = 0;
+        return 5;
+    }
+    if (!sh.since) sh.since = now | !now;
+    unsigned s = 5, end = 5, t = (now - sh.since) / 1000;
+    while (t >= end && s < SCAN_BACKOFF_MAX_S) {
+        s = s * 2 < SCAN_BACKOFF_MAX_S ? s * 2 : SCAN_BACKOFF_MAX_S;
+        end += s;
+    }
+    return (int)s;
+}
 static void scan_hold_poll(unsigned now) {
     unsigned info[36] = { 0 };
     if (!g_wififlag || __xstat(3, WPA_SOCK, info)) {
         sh.sock = 0; /* no wpa_supplicant: the next one starts at 5 s */
+        sh.since = 0;
         return;
     }
-    int a2dp = (media_playing() && mclGetOutputWay() == 1) || (signed char)bt__recv_pageflag == 2;
-    int hold = a2dp && wifi_connectstatus != 1 && !smart_needed();
-    if (sh.sock == info[4] && sh.held == hold) return;
+    int want = scan_interval_s(now);
+    if (sh.sock == info[4] && sh.sent == want) return;
     if (sh.tried && now - sh.tried < SCAN_RETRY_MS) return;
-    if (system(hold ? "wpa_cli -i wlan0 scan_interval " SCAN_HOLD_S " >/dev/null 2>&1"
-                    : "wpa_cli -i wlan0 scan_interval 5 >/dev/null 2>&1")) {
+    char cmd[64];
+    tk_snprintf(cmd, sizeof cmd, "wpa_cli -i wlan0 scan_interval %d >/dev/null 2>&1", want);
+    if (system(cmd)) {
         sh.tried = now | !now;
         return;
     }
     sh.tried = 0;
     sh.sock = info[4];
-    sh.held = hold;
+    sh.sent = want;
 }
 
 /* power_poll, every SMART_POLL_MS. The row off, or the user's Wi-Fi off: stock's, and a radio Smart
