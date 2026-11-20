@@ -25,6 +25,7 @@
 #include "q2log.h"
 
 #define PCMS_FILE "/tmp/q2bt.pcms"
+#define CFG_FILE "/tmp/q2bt.cfg" /* the CODEC note's cfg= and cap=: GetCodecs, then the transport's object (cfg_start) */
 #define PCMS_CMD                                                                                   \
     "dbus-send --system --print-reply --dest=org.bluealsa /org/bluealsa "                          \
     "org.bluealsa.Manager1.GetPCMs > " PCMS_FILE " 2>/dev/null"
@@ -58,6 +59,10 @@ static struct {
     struct cpu cpu;
     int pcms_pid;
     unsigned pcms_at;
+    int cfg_pid;             /* cfg_start's fetch running, 0 none */
+    char cfg_line[96];       /* the CODEC note waiting for it */
+    unsigned char cap_of[6]; /* the sink whose cap= was noted last */
+    int cap_said;
     char codec[24];
     unsigned hz;
     int flush; /* a stream started or ended: the log to the card now */
@@ -378,6 +383,47 @@ static void pcms_start(unsigned now) {
     }
     bt.pcms_pid = pid > 0 ? pid : 0;
 }
+/* The CODEC note's cfg= and cap=, read only (docs/internals.md#bluetooth-link-monitor): in the background,
+ * bluealsa's GetCodecs on the A2DP source PCM (each codec's Capabilities, the sink's filtered by the Q2's own),
+ * then BlueZ's objects cut to the sink's MediaTransport1 (its Configuration: the bytes the stream was set up with).
+ * The note waits for them; 0 when there is nothing to ask (no PCM path or sink known): noted at once. */
+static int cfg_start(const char *line) {
+    char cmd[640], dev[18];
+    if (bt.cfg_pid > 0 || !bt.pcm[0] || !bt.have_sink) return 0;
+    bt_addr_text(bt.sink, dev);
+    for (char *c = dev; *c; ++c)
+        if (*c == ':') *c = '_';
+    snprintf(cmd, sizeof cmd,
+             "dbus-send --system --print-reply --dest=org.bluealsa %s org.bluealsa.PCM1.GetCodecs > " CFG_FILE
+             " 2>/dev/null; dbus-send --system --print-reply --dest=org.bluez / "
+             "org.freedesktop.DBus.ObjectManager.GetManagedObjects 2>/dev/null | "
+             "sed -n '/object path \"\\/org\\/bluez\\/hci0\\/dev_%s\\/sep[0-9]*\\/fd[0-9]*\"/,/object path/p' >> " CFG_FILE,
+             bt.pcm, dev);
+    int pid = fork();
+    if (!pid) {
+        execl("/bin/sh", "sh", "-c", cmd, (char *)0);
+        _exit(127);
+    }
+    if (pid < 0) return 0;
+    bt.cfg_pid = pid;
+    snprintf(bt.cfg_line, sizeof bt.cfg_line, "%s", line);
+    return 1;
+}
+static void cfg_reap(void) {
+    int status = 0;
+    if (bt.cfg_pid <= 0 || waitpid(bt.cfg_pid, &status, WNOHANG) != bt.cfg_pid) return;
+    bt.cfg_pid = 0;
+    static char b[8192];
+    char cfg[64] = "-", cap[64] = "", after[40], line[256];
+    int n = slurp(CFG_FILE, b, sizeof b) > 0;
+    if (n && !bt_dbus_bytes(b, "/fd", "\"Configuration\"", cfg, sizeof cfg)) snprintf(cfg, sizeof cfg, "-");
+    snprintf(after, sizeof after, "string \"%s\"", bt.codec);
+    int same = bt.cap_said && !memcmp(bt.cap_of, bt.sink, 6); /* cap= once a device */
+    if (n && !same && bt_dbus_bytes(b, after, "\"Capabilities\"", cap, sizeof cap))
+        memcpy(bt.cap_of, bt.sink, 6), bt.cap_said = 1;
+    snprintf(line, sizeof line, "%s cfg=%s%s%s", bt.cfg_line, cfg, cap[0] ? " cap=" : "", cap);
+    note(line);
+}
 static void pcms_reap(void) {
     int status = 0;
     if (bt.pcms_pid <= 0 || waitpid(bt.pcms_pid, &status, WNOHANG) != bt.pcms_pid) return;
@@ -399,7 +445,7 @@ static void pcms_reap(void) {
     if (!strcmp(codec, bt.codec) && hz == bt.hz) return;
     memcpy(bt.codec, codec, sizeof codec), bt.hz = hz;
     snprintf(line, sizeof line, "CODEC %s %u Hz delay=%u.%u ms", codec, hz, delay / 10, delay % 10);
-    note(line);
+    if (!cfg_start(line)) note(line); /* else noted with cfg= and cap= once they are read (cfg_reap) */
 }
 
 /* ---- the step-down (bt_step): a switch is q2bt-codec, in the background ---- */
@@ -581,6 +627,7 @@ static void sample(unsigned now, const struct bt_counts *c) {
 static void tick(unsigned now) {
     struct bt_counts c;
     pcms_reap();
+    cfg_reap();
     step_reap(now); /* a switch that outlived its stream, too */
     if (!ctl_ok(now) || !counts(&c)) return;
     int ev = bt_detect_step(&bt.det, now, c.byte_tx);

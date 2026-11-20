@@ -157,6 +157,26 @@ int bt_pcms_sink(const char *text, unsigned char *bdaddr) {
     memcpy(bdaddr, b, 6);
     return 1;
 }
+int bt_dbus_bytes(const char *text, const char *after, const char *key, char *hex, int size) {
+    const char *p = after ? strstr(text, after) : text;
+    if (!p || !(p = strstr(p, key)) || !(p = strstr(p, "array of bytes"))) return 0;
+    p += 14;
+    while (*p == ' ') ++p;
+    if (*p != '[') return 0; /* printed as a string */
+    int n = 0, at = 0;
+    for (++p; *p && *p != ']';) {
+        int hi = hex_digit(p[0]), lo = hi < 0 ? -1 : hex_digit(p[1]);
+        if (hi < 0 || lo < 0) {
+            ++p;
+            continue;
+        }
+        if (at + 2 < size) hex[at++] = (char)p[0] | 0x20, hex[at++] = (char)p[1] | 0x20, ++n;
+        p += 2;
+    }
+    if (*p != ']') at = n = 0; /* cut short */
+    if (size > 0) hex[at < size ? at : size - 1] = 0;
+    return n;
+}
 int bt_acl_handle_of(const unsigned char *req, int max, const unsigned char *bdaddr) {
     int n = u16_at(req + 2);
     for (int i = 0; i < n && i < max; ++i) {

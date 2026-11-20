@@ -849,9 +849,19 @@ def test_bt_silence():
     assert symbols['sbc_pool'] == build.BT_SBC_POOL and len(code) == build.BT_SBC_POOL - build.BT_SILENCE + 4
 
 
+# AAC's quality (docs/internals.md#bluetooth-aac): stock bluealsa's words, read from V1.36's binary, and what the
+# build makes them: main's forced aac_bitrate 220000 (lui $2,3; addiu $2,$2,0x5b60) to 240000 (lui $2,4; addiu
+# $2,$2,-0x5680), and the encoder thread's VBR mode cap of 4 (addiu $17,$zero,4 past the table; addiu $2,$zero,4 for
+# the 5 it turns down) to upstream's 5.
+AAC_STOCK = {0x403f2c: 0x3c020003, 0x403f3c: 0x24425b60, 0x416f58: 0x24110004, 0x4171a0: 0x24020004}
+AAC_NEW = {0x403f2c: 0x3c020004, 0x403f3c: 0x2442a980, 0x416f58: 0x24110005, 0x4171a0: 0x24020005}
+
+
 def bluealsa():
     raw = image(0x4e000, 0x400000, null=True)
     raw[build.AAC_44K1] = 0xff
+    for address, old in AAC_STOCK.items():
+        struct.pack_into('<I', raw, build.fileoff(raw, address), old)
     for caller, _ in build.BT_PCM_CALLERS:
         struct.pack_into('<I', raw, build.fileoff(raw, caller - 8), 0x0c105174)
     for address, old, _, _ in build.BT_SILENCE_SITES:
@@ -927,6 +937,34 @@ def test_patch_bluealsa_refuses_a_moved_site(silence, site):
     struct.pack_into('<I', raw, build.fileoff(raw, build.BT_SILENCE_SITES[site][0]), 0xdead)
     with pytest.raises(ValueError, match='^Bluetooth silence site mismatch$'):
         build.patch_bluealsa(bytes(raw))
+
+
+def test_patch_bluealsa_raises_aac_quality(silence):
+    """The forced peak 240000 (a frame at most 640 bytes, under the 663 one packet holds at the 675-byte MTU) and fdk-aac
+    VBR mode 5 where the bitrate allows it, as upstream bluealsa 4.0.0."""
+    raw = bluealsa()
+    out = build.patch_bluealsa(raw)
+    got = {a: struct.unpack_from('<I', out, build.fileoff(raw, a))[0] for a in AAC_STOCK}
+    assert got == AAC_NEW
+    hi, lo = got[0x403f2c] & 0xffff, got[0x403f3c] & 0xffff
+    assert (hi << 16) + (lo - 0x10000 if lo & 0x8000 else lo) == 240000
+    assert 240000 * 1024 // 48000 // 8 == 640 <= build.BT_MTU_MAX - 12 == 663
+    assert {got[0x416f58] & 0xffff, got[0x4171a0] & 0xffff} == {5}
+
+
+@pytest.mark.parametrize('site', sorted(AAC_STOCK))
+def test_patch_bluealsa_refuses_a_moved_aac_site(silence, site):
+    raw = bytearray(bluealsa())
+    struct.pack_into('<I', raw, build.fileoff(raw, site), 0xdead)
+    with pytest.raises(ValueError, match='^Bluetooth AAC site mismatch$'):
+        build.patch_bluealsa(bytes(raw))
+
+
+def test_the_launcher_turns_the_afterburner_on():
+    """bluealsa2's line: fdk-aac's afterburner (--aac-afterburner, which Shanling's forced options leave alone)."""
+    stock = b'bluealsa -c LDAC -c aptX-HD -c aptX -c AAC'
+    line = stock.replace(*build.BT_KEEPALIVE).replace(*build.BT_GUEST_SOURCE)
+    assert b' --aac-afterburner ' in line and b'--keep-alive=5' in line and line.endswith(b'-c AAC')
 
 
 def test_patch_bluealsa_refuses_sbc_bytes_elsewhere(silence):

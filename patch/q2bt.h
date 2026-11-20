@@ -165,6 +165,12 @@ int bt_step_allowed(const char *ini);
 /* GetPCMs (as bt_pcms reads it): the A2DP source PCM's object path, which SelectCodec is sent to,
  * into path (n bytes); 0 none, or one holding anything but letters, digits, _ and / */
 int bt_pcms_path(const char *text, char *path, int n);
+/* dbus-send --print-reply's text: the first byte array after key (itself the first after after, when after is not 0)
+ * as lower-case hex into hex (size bytes, NUL-terminated): its byte count; 0 for none, or one dbus-send printed as a
+ * string (every byte printable). The CODEC note's cfg= (BlueZ's MediaTransport1 Configuration, the bytes the stream
+ * was set up with) and cap= (bluealsa's GetCodecs Capabilities for the codec: the sink's, filtered by the Q2's own)
+ * (docs/internals.md#bluetooth-link-monitor). */
+int bt_dbus_bytes(const char *text, const char *after, const char *key, char *hex, int size);
 
 /* ---- SBC's bitpool (docs/internals.md#bluetooth-link-monitor) ----
  * bluealsa's SBC encoder takes its bitpool from tools/bt_silence.S's sbc_pool byte at each frame,

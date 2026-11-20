@@ -199,6 +199,7 @@ demo	0x4c23f4	0x4	systemset_timezone_row_on_click	`addiu $2, $zero, 0x1c`, after
 demo	0x4c3f94	0x4	btmenu_rows	the load of $25 for the only call to widget_move_resize, after "list_view_bluetooth"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
 demo	0x4c44b8	0x4	btmenu_item_on_click	the load of $25 for the only call to handleBluetoothPair, after "dialog/confirminfo_dialog"; patch/bt_detail.c forget
 demo	0x4c45b4	0x4	btmenu_item_on_click	`move $4, $17`, the delay slot of the only call to btmenu_rows, after "dialog/msginfo_dialog"; patch/bt_detail.c forget
+demo	0x4c4848	0x4	btmenu_page_on_timer	`lw $gp, 0x10($sp)` (4th of 4 such), before 2nd of 2 calls to btmenu_rows; patch/bt_ui.c page_poll
 demo	0x4c556c	0x4	btquality_item_on_click	`lbu $2, 0x0($22), forming bt_linkstatus`; tools/build.py BT_QUALITY
 demo	0x4c5570	0x4	btquality_item_on_click	`andi $2, $2, 0xff`; tools/build.py BT_QUALITY
 demo	0x4c5cb0	0x4	systemset_btquality_page_init	the load of $25 for the only call to widget_move_resize, after "list_view"; patch/ipod.json navbar_resize_calls (a page's list keeps its asset's box: stock's resize for its navigation bar switch does nothing)
@@ -498,6 +499,8 @@ demo	0x6b35fc	0x4	input_device_status_handle_event	`beqz $2, +18 words` (6th of 
 demo	0x6b3658	0x4	input_device_status_handle_event	the load of $25 for the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b3668	0x4	input_device_status_handle_event	the only call to timer_add, after "double clicked"; tools/build.py HOLD_KEYS
 demo	0x6b39b8	0x4	input_device_status_on_long_press_timer	the only call to input_device_status_find_key_long_press_info; tools/build.py HOLD_KEYS
+bluealsa	0x403f2c	0x4	sub_403940	`lui $2, 0x3` (27th of 32 such), after "v1.3"; tools/build.py BT_AAC_SITES
+bluealsa	0x403f3c	0x4	sub_403940	`addiu $2, $2, 0x5b60` (3rd of 4 such), before the only call to time, after "v1.3"; tools/build.py BT_AAC_SITES
 bluealsa	0x40649c	0x4	sub_4060e0	`bgtz $2, +22 words` (1st of 2 such), before 3rd of 4 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x406580	0x4	sub_4060e0	the only call to sub_4038e0, after "PCM poll and read error: %s"; tools/bt_silence.S silent, tools/build.py BT_SILENCE_SITES, tools/build.py BT_SBC_POOL
 bluealsa	0x40abf8	0x4	sub_40ab30	the only call to g_dbus_message_get_unix_fd_list, after "(hqq)"; tools/bt_silence.S 7, tools/build.py BT_SILENCE_SITES, tools/build.py BT_MTU_MAX
@@ -510,6 +513,8 @@ bluealsa	0x414754	0x4	sub_4145d0	the only call to sub_41414c, after "<FA"; tools
 bluealsa	0x4147ac	0x4	sub_4145d0	the only call to sub_4140b8, after "<FA"; tools/build.py BT_DROP_HANDLER
 bluealsa	0x4147c8	0x4	sub_4145d0	`bnez $2, -74 words` (2nd of 2 such), before the only call to clock_gettime, after "<FA"; tools/bt_silence.S 4
 bluealsa	0x4150dc	0x4	sub_414f78	`bgtz $2, +10 words` (1st of 2 such), before the only call to sub_40c5e4, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
+bluealsa	0x416f58	0x4	sub_416d0c	`addiu $17, $zero, 0x4`, before 6th of 11 calls to aacEncoder_SetParam; tools/build.py BT_AAC_SITES
+bluealsa	0x4171a0	0x4	sub_416d0c	`addiu $2, $zero, 0x4`, before 10th of 11 calls to aacEncoder_SetParam, after "Couldn't set channel mode: %s"; tools/build.py BT_AAC_SITES
 bluealsa	0x41746c	0x4	sub_416d0c	`bgtz $2, +40 words` (1st of 3 such), before 1st of 3 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x418114	0x4	sub_417e80	`bgtz $2, +16 words` (1st of 2 such), before 2nd of 5 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
 bluealsa	0x418c84	0x4	sub_418988	`bgtz $2, +16 words`, before 2nd of 5 calls to __errno_location, after "PCM poll and read error: %s"; tools/build.py BT_PCM_CALLERS
