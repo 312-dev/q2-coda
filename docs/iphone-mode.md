@@ -17,6 +17,7 @@ Route 1 of the car design has the Q2 present itself to a car as an iPhone in med
 | `tools/iap_probe/hid-car.ps1` | The desk's stand-in car on Windows: M1's whole conversation through Windows' HID driver. |
 | `tools/uac1_module/` | `usb_f_uac1.ko` for the stock kernel ([below](#the-uac1-module)). |
 | `test/iap_probe.py` | The probe on the host: its blobs parsed by `f_fs.c`'s rules, and its answers, echo and sessions against a pty standing in for ep0. |
+| `test/uac1_bind.py` | A built `usb_f_uac1.ko` bound under Unicorn with the probe's attributes: its configuration 2 interfaces, the HID's at 2. |
 
 ## The gadget and the probe
 
@@ -127,6 +128,8 @@ tools/iap_probe/q2iap start --plan min:echo:uac1 --for 120 --force   # pushes it
 # 2 minutes later, adb is back:
 tools/iap_probe/q2iap pull desk-uac1                     # usb_f_uac1.ko loaded/would not load, dmesg, the uac1 attributes
 ```
+
+**In the car (2026-11-20, plan `drive`, `full:iap2:uac1`): the BMW chose configuration 2 and stopped.** At each `ENABLE` the kernel logged `configfs-gadget gadget: invalid control req81.06 v2100 i0002 l9`, `f_uac1`'s `f_audio_setup` refusing a request it does not know, and the car never sent iAP2's detect. The request is `GET_DESCRIPTOR` for the HID descriptor (0x21) of interface 2, where a real iPhone's HID is. 5.10.21's `f_uac1.c` makes three interfaces whatever the channel masks (control, AS OUT, AS IN), so with `c_chmask` 0 the module took 0 to 2, the HID was 3, and composite handed the car's request for interface 2 to `f_uac1`, which stalled it. Upstream gave `f_uac1` interfaces only for the directions in use in 5.12 (`254cb1e0d78c`, "usb: gadget: f_uac1: disable IN/OUT ep if unused"); `uac1_build.py` applies it and the commit before it (`a59c68a6a3d1`, which it needs to apply) from `tools/uac1_module/patches/`. With capture off the module has the control interface (0) and AS IN (1), the AC header lists one streaming interface, and the HID is 2. `test/uac1_bind.py KO` binds a built module under Unicorn with the probe's attributes and fails unless the HID is interface 2 and the AC header's `bInCollection`, `baInterfaceNr` and `wTotalLength` agree with the descriptors after it: the module the car ran fails it (HID at 3), the patched one passes.
 
 ## Milestones after the experiments
 

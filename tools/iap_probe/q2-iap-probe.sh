@@ -120,7 +120,8 @@ gadget_up() {
             audio=none
         fi
     fi
-    # Link order is interface order: audio first (interfaces 0 and 1), then the HID (interface 2).
+    # Link order is interface order: audio first (interfaces 0 and 1, control and AS IN; with c_chmask 0 there is no
+    # AS OUT, in uac1 by tools/uac1_module's patches), then the HID (interface 2), where a real iPhone has it.
     [ "$configs" = full ] && ln -s $G/functions/ffs.c1 $G/configs/c.1/
     [ $audio != none ] && ln -s $G/functions/$audio.car $G/configs/c.2/
     ln -s $G/functions/ffs.c2 $G/configs/c.2/
