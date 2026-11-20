@@ -1,7 +1,7 @@
 /* coda-rc's library: Browse, Search, Play, GetQueue and GetCover over stock's database, read-only
  * (docs/internals.md#car-remote). The tree, its orders and its letter buckets are the q2-auto-remote app's
  * (its tools/q2bridge.py, remote/coda-rc.proto "browse"), built here with SQL over two temporary views of
- * stock's songtable and, with Local + Server on, the catalogue's servertable (docs/server-library.md). The
+ * stock's songtable and, with a signed-in server's catalogue on the card, its servertable (docs/server-library.md). The
  * database is opened per request and closed after it, so no lock or stale schema outlives an answer, and
  * nothing is ever written to it. Play.resume's places, the song each list last played from a phone was on,
  * are the daemon's own file (PLACES). */
@@ -11,7 +11,6 @@
 
 #define DB "/mnt/data/database.db"
 #define CAT "/mnt/mmc/.q2pod/catalogue.db"
-#define CONFIG "/mnt/data/config.ini"
 #define DURATIONS "/mnt/data/ringnav-durations-v1"
 #define SPLIT 120         /* a list longer than this opens as letter buckets (q2bridge.py SPLIT) */
 #define CAP 500           /* and a bucket longer than this splits again; no list sends more (CAP) */
@@ -272,17 +271,10 @@ static void f_dur(sqlite3_context *c, int n, sqlite3_value **v) {
 
 /* ---- the database ---- */
 
-/* Local + Server ([Q2POD] LIBRARYSOURCE=1 in config.ini) and a catalogue on the card */
+/* A catalogue on the card: the firmware keeps only signed-in apps' songs in it (catalogue.c), and
+ * they are always in the Library (no setting since 2026-11-19) */
 int lib_has_server(void) {
-    char p[256], b[4096];
-    int fd = open(crc_path(p, sizeof p, CONFIG), O_RDONLY | O_CLOEXEC), n = 0;
-    if (fd < 0) return 0;
-    n = (int)read(fd, b, sizeof b - 1);
-    close(fd);
-    if (n <= 0) return 0;
-    b[n] = 0;
-    const char *q = strstr(b, "[Q2POD]"), *k = q ? strstr(q, "\nLIBRARYSOURCE=") : 0, *next = q ? strstr(q + 1, "\n[") : 0;
-    if (!k || (next && k > next) || k[15] != '1') return 0;
+    char p[256];
     return access(crc_path(p, sizeof p, CAT), 0) == 0;
 }
 
@@ -297,7 +289,7 @@ int lib_has_server(void) {
     secs " secs, " srv " srv"
 
 static sqlite3 *db;
-static int cat_on; /* the catalogue is attached (Local + Server) */
+static int cat_on; /* the catalogue is attached (a server signed in) */
 static char sql[6144];
 
 static void lib_close(void) {

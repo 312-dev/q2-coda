@@ -184,6 +184,24 @@ const char *day_or_date(char *out, unsigned n, unsigned when) {
     return cr_date(out, n, when);
 }
 
+/* when for a line's end: "today, 18:11", "yesterday, 6:11 PM" (the clock's 12 or 24 hours), else
+ * the date ("Nov 12"); 0 for a clock never set. Storage's Update Library (storage.c st_updated). */
+const char *when_said(char *out, unsigned n, unsigned when) {
+    int a[11], b[11];
+    long t = clock_back(when), now = clock_back(wall_time());
+    const int *tm = when >= CLOCK_SET ? localtime_r(&t, a) : (const int *)0, *tn = localtime_r(&now, b);
+    if (!tm || !tn) return 0;
+    long ago = cr_day(tn, now) - cr_day(tm, t);
+    if (ago != 0 && ago != 1) return cr_date(out, n, when);
+    int h = tm[2], m = tm[1];
+    if (g_time24h_flag)
+        tk_snprintf(out, n, "%s, %d:%02d", ago ? "yesterday" : "today", h, m);
+    else
+        tk_snprintf(out, n, "%s, %d:%02d %s", ago ? "yesterday" : "today", h % 12 ? h % 12 : 12, m,
+                    h < 12 ? "AM" : "PM");
+    return out;
+}
+
 /* when as a day: Today, Yesterday, the weekday within the week, else the date; lower makes the first letter
  * small, for "last seen friday"'s place in a line. 0 for a clock never set. */
 static const char *cr_when(char *out, unsigned n, unsigned when, int lower) {
@@ -567,7 +585,7 @@ static int cr_page_show(const void *ctx) {
      * (empty_state keeps its place in the stack and leaves it to the page), so the wheel has the one list: two
      * lists that each hold a selection give it none (nav/lists.c surface_under), and it moved nothing. */
     static const empty_t none = { "car-profile", "No Paired Phones", "Open Q2 Muse Remote on your phone to pair",
-                                  "Pair a Phone" };
+                                  "Pair a Phone", 0, 0 };
     int free_top = cr_screen_y(view) + cr_switch_h(1);
     cp.cta_y = empty ? empty_row_y(free_top) - cr_screen_y(view) - CR_CTA_OUT : 0;
     if (empty) {

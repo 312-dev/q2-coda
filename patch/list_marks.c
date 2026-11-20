@@ -41,9 +41,7 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected) {
  * Settings > Bluetooth's connecting row and Other Devices' scan. Its frame is the clock's, so no
  * painter keeps a count, and a painter says where it drew it (spinner_painted): one timer,
  * every MO_FRAME_MS while any spinner shows, repaints those boxes as the frame changes, and stops
- * once none was painted for two frames. A box is its widget's and goes with it (EVT_DESTROY).
- * spinner_turn is the timer's work, for a caller that holds the UI thread and paints itself
- * (coverflow.c open_step). */
+ * once none was painted for two frames. A box is its widget's and goes with it (EVT_DESTROY). */
 #define SPIN_FRAME_MS 100
 #define SPIN_BOXES 4
 static struct {
@@ -65,7 +63,7 @@ static int spin_gone(void *ctx, void *event) {
 }
 /* Each box whose frame is due asked to repaint: 2 when one was, 1 when a spinner shows and none is
  * due yet, 0 when none shows. */
-int spinner_turn(void) {
+static int spinner_turn(void) {
     unsigned now = spin_clock();
     int live = 0;
     for (int i = 0; i < SPIN_BOXES; ++i) {

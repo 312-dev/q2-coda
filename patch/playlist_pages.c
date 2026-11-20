@@ -100,8 +100,8 @@ static void pv_show(void) {
     }
     /* no songs: the empty state under Add Songs, compact (a row above it: no glyph), no button of
      * its own as Add Songs is the row above (oled-design.md Empty and offline) */
-    static const empty_t none = { 0, "No Songs Yet", "Choose Add Songs to fill it", 0 },
-                         otg_none = { 0, "No Songs Yet", "Hold Play/Pause on a song to add it", 0 };
+    static const empty_t none = { 0, "No Songs Yet", "Choose Add Songs to fill it", 0, 0, 0 },
+                         otg_none = { 0, "No Songs Yet", "Hold Play/Pause on a song to add it", 0, 0, 0 };
     if (!n)
         empty_state(pv.page, feedback_below(widget_get_child(pv.view, rows - 1)),
                     otg ? &otg_none : &none, 0);

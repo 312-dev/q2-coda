@@ -371,7 +371,6 @@ static int *const pod_values[] = { &st.charge_limit,
                                    &st.playlist_cf,
                                    &st.scan_durations,
                                    &st.cf_position,
-                                   &catalogue_source,
                                    &otg_on,
                                    &autozone_on };
 _Static_assert(sizeof pod_values / sizeof *pod_values == POD_COUNT, "a pod_values per row");
@@ -397,7 +396,6 @@ static const char *const pod_keys[] = { "CHARGELIMIT",
                                         "PLAYLISTCF",
                                         "SCANDURATIONS",
                                         "CFPOSITION",
-                                        "LIBRARYSOURCE",
                                         "OTG",
                                         "AUTOZONE" };
 _Static_assert(sizeof pod_keys / sizeof *pod_keys == POD_COUNT, "a pod_keys entry per row");
@@ -523,7 +521,6 @@ static void pod_text(int i) {
         { "Playlist View: List", "Playlist View: Cover Flow" },
         { 0 }, /* Scan Song Durations: a switch */
         { 0 }, /* Position Bar: a switch */
-        { 0 }, /* Streaming Songs: a switch */
         { 0 }, /* On-The-Go: a switch */
         { 0 }, /* Automatic Time Zone: a switch */
     };
@@ -556,7 +553,6 @@ static void pod_text(int i) {
                          : i == POD_SCAN_DURATIONS ? "Scan Song Durations"
                          : i == POD_CF_POSITION    ? "Position Bar"
                          : i == POD_OTG            ? "On-The-Go"
-                         : i == POD_LIBRARY_SOURCE ? "Streaming Songs"
                          : i == POD_AUTOZONE       ? "Automatic Time Zone"
                                                    : 0;
     if (toggle)
@@ -576,15 +572,13 @@ void pod_text_again(int i) {
  * the artist page's switch does; Fast Navigation's letters at the next spin, its half copies at
  * Cover Flow's next idle pass; Standby limit at the next Standby; Refresh Cover Flow at Cover
  * Flow's next open (coverflow.c), with a toast, as it changes nothing in view. Cover Flow's Sort
- * opens its picker, and Streaming Songs may ask first (library_settings.c). */
+ * opens its picker. */
 static int pod_click(void *ctx, void *event) {
     int i = (int)(long)ctx;
     pod_settings();
     if (i == POD_CF_SORT) {
         cf_sort_open(); /* its pick writes the row */
         return 0;
-    } else if (i == POD_LIBRARY_SOURCE) {
-        if (!library_source_toggle()) return 0;
     } else if (i == POD_CF_REFRESH) {
         coverflow_refresh_art();
         toast("Cover Flow rebuilds artwork next time");

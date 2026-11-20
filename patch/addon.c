@@ -97,7 +97,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
-    "more fav now catalogue ratings likes artist album playlists storage signin libsource radio"
+    "more fav now catalogue ratings likes artist album playlists storage signin libsource radio "  \
+    "status"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -124,6 +125,7 @@ typedef struct {
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
     int reach;       /* its state file's reach=down: its server out of reach (addon_offline) */
     char srverr[24]; /* its srverr= as read last: the server failure toasted last (reach_read) */
+    int offline;     /* q2app's offline=1: it syncs a Library item offline (addon_offline_ask) */
 } app_t;
 
 static struct {
@@ -244,6 +246,7 @@ static void scan_one(const char *id, const char *from) {
     a->radio = number(raw, "radio") == 1;
     a->lyrics = number(raw, "lyrics") == 1;
     a->covers = number(raw, "covers") == 1;
+    a->offline = number(raw, "offline") == 1;
     a->resume = number(raw, "resume") == 1;
     field(raw, "downloads", a->dl, sizeof a->dl);
     for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
@@ -1269,6 +1272,7 @@ static void sleep_check(void) {
  * one stopped for USB storage starts again once the card is back. */
 static void sync_read(app_t *a, const char *raw);
 static void reach_read(app_t *a, const char *raw);
+static void offline_read(app_t *a, const char *raw);
 static void poll_one(app_t *a) {
     unsigned now = time_now_ms();
     if ((!a->launched && !a->relaunch && !a->restart) || now - a->polled < ADDON_POLL_MS) return;
@@ -1291,6 +1295,7 @@ static void poll_one(app_t *a) {
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
     sync_read(a, raw);
     reach_read(a, raw);
+    offline_read(a, raw);
     stream_poll(a);
     sleep_read(a);
     if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS)
@@ -1363,6 +1368,61 @@ static void reach_read(app_t *a, const char *raw) {
         return;
     toast_later("srvtoast", text);
 }
+/* Sync Offline (docs/internals.md#sync-offline): offline.c's press on a Library item asks the
+ * item's app, "<seq> <add|remove> <kind> <id>" in /tmp/q2-<id>.offline, written only once the app
+ * listens (its browse socket there: an app reads a request present at its start as answered), the
+ * app started first when it isn't running (addon_wake). Its answer, offlineack=<seq> <words> in its
+ * state file, is toasted (offline_read); none in OFF_WAIT_MS is "<name> didn't answer". One request
+ * at a time: a press while one waits replaces it. */
+#define OFF_WAIT_MS 25000
+static struct {
+    char id[APP_ID], line[300];
+    unsigned seq, at; /* at: when it was pressed; 0 with none waiting */
+    int sent;
+} off __attribute__((section(".scratch")));
+static void offline_send(app_t *a) {
+    if (!off.at || off.sent || strcmp(a->id, off.id) || access(a->browse, 0)) return;
+    char path[48], text[sizeof off.line + 16];
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.offline", a->id);
+    int n = tk_snprintf(text, sizeof text, "%u %s\n", off.seq, off.line);
+    off.sent = blob_io(path, "/tmp/q2-offline.tmp", text, (unsigned)n, 1);
+}
+/* 1 when id takes Sync Offline (its q2app's offline=1) */
+int addon_offline_ok(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    return a && a->present && a->offline;
+}
+/* Asks id to sync key ("<kind> <id>") offline (add) or stop; 1 when the request is on its way. */
+int addon_offline_ask(const char *id, int add, const char *key) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (!addon_offline_ok(id) || !key || !*key || addon_wake(id) < 0) return 0;
+    tk_snprintf(off.id, sizeof off.id, "%s", id);
+    tk_snprintf(off.line, sizeof off.line, "%s %s", add ? "add" : "remove", key);
+    off.seq = (unsigned)time((void *)0) * 8u + (off.seq + 1) % 8u, off.at = time_now_ms() | 1,
+    off.sent = 0;
+    offline_send(a);
+    return 1;
+}
+/* poll_one's part for Sync Offline: the waiting request sent once the app listens, and its answer
+ * toasted. */
+static void offline_read(app_t *a, const char *raw) {
+    if (!off.at || strcmp(a->id, off.id)) return;
+    offline_send(a);
+    char v[160], seq[16];
+    field(raw, "offlineack", v, sizeof v);
+    int k = tk_snprintf(seq, sizeof seq, "%u ", off.seq);
+    if (off.sent && !strncmp(v, seq, (unsigned)k) && v[k]) {
+        off.at = 0;
+        toast_later("", v + k);
+    } else if (time_now_ms() - off.at > OFF_WAIT_MS) {
+        char text[48];
+        off.at = 0;
+        tk_snprintf(text, sizeof text, "%s didn't answer", a->name[0] ? a->name : a->id);
+        toast_later("", text);
+    }
+}
+
 /* Whether a running app's server is out of reach and Wi-Fi is connected: the status row's
  * offline glyph. */
 int addon_offline(void) {
@@ -1747,7 +1807,7 @@ static int req_done(void) {
  * code, local plays from the card (uri: a song, or a folder to list; context "album": in track
  * order), field opens the text box too, whose text goes to its uri, after its context, the reply
  * taking the level's place with no level pushed and nothing titled with the text (field_sent),
- * needslib is an action that needs Streaming Songs on (needslib), info does nothing; its position,
+ * needslib is an action as action is (the server library is always on), info does nothing; its position,
  * when set, is the op a held Play/Pause sends. progress
  * (progress_row) draws a bar of its position, permille, under its title and subtitle; a press or a
  * held Play/Pause does nothing. page (caps word "window") shows the level's own list from the
@@ -1868,21 +1928,6 @@ static void action(int i, const char *op, const char *ctx) {
 }
 
 static int clicked(void *ctx, void *event);
-
-/* A needslib row's press: its action, once Streaming Songs is on (library_settings.c
- * library_needs, which asks first while it is off and writes the state file the app reads before
- * the action goes). The ask runs its own loop, where a reply may rebuild the list, so the action
- * goes only if the row is still the same row of the same level, its cells copied first. */
-static void needslib(lv_t *l, int i, const char *uri, const char *ctx) {
-    char op[64], arg[sizeof l->args];
-    unsigned id = l->id;
-    tk_snprintf(op, sizeof op, "%s", uri);
-    tk_snprintf(arg, sizeof arg, "%s", ctx);
-    if (!library_needs() || !pg.page || top() != l || l->id != id || l->state != K_READY ||
-        i >= l->n || pg.act || strcmp(cell(i, 0), "needslib") || strcmp(cell(i, 1), op))
-        return;
-    action(i, op, arg);
-}
 
 /* Whether row i opens a page (go()): a list (a sort row left as a row is one), the phone remote's
  * QR page or a folder on the card. Its row has a chevron. */
@@ -2555,6 +2600,31 @@ static int empty_view(lv_t *l) {
     return 1;
 }
 
+/* A status page (docs/oled-design.md#sync, the caps word "status"): a reply whose first row is an
+ * info row "status" is drawn as one centred stack, the empty state's form (feedback.c empty_state):
+ * the row's context the glyph (tools/art.py EMPTY_GLYPHS), its title the title, its subtitle the
+ * lines under it ('\n' apart), its position, when a number, a progress bar of that permille under
+ * the title; the reply's first action row the button, which Centre or a tap presses as that row,
+ * and an info row "foot" the footer. q2-subsonic's Sync draws its states so, iOS's Software Update's
+ * way (the user's, 2026-11-19, mock_sync_apple.py). 1 when the reply is one. */
+static int status_btn __attribute__((section(".scratch")));
+static int status_press(void *ctx, void *event) { return clicked((void *)(long)status_btn, event); }
+static int status_view(lv_t *l) {
+    if (!l->n || strcmp(cell(0, 0), "info") || strcmp(cell(0, 1), "status")) return 0;
+    int button = -1, foot = -1;
+    for (int i = 1; i < l->n; ++i) {
+        if (button < 0 && !strcmp(cell(i, 0), "action")) button = i;
+        if (foot < 0 && !strcmp(cell(i, 0), "info") && !strcmp(cell(i, 1), "foot")) foot = i;
+    }
+    const char *bar = cell(0, 5);
+    empty_t e = { cell(0, 4), cell(0, 2), cell(0, 3), button >= 0 ? cell(button, 2) : (const char *)0,
+                  foot >= 0 ? cell(foot, 2) : (const char *)0,
+                  *bar >= '0' && *bar <= '9' ? atoi(bar) + 1 : 0 };
+    status_btn = button;
+    pg.view = empty_list(pg.page, pg.page, l->title, &e, button >= 0 ? status_press : 0);
+    return 1;
+}
+
 /* The top level: its rows, or what it waits for. */
 static void show(void) {
     lv_t *l = top();
@@ -2596,7 +2666,9 @@ static void show(void) {
          * choice and Back or an action reloads from the first page; a list rebuilt whole with all
          * its pages there (a short first page, the search box closing) counts them */
         art_forget(); /* the rows are built anew: nothing of theirs decoded yet */
-        if (empty_view(l)) {
+        if (status_view(l)) {
+            l->art = 0, n = 0;
+        } else if (empty_view(l)) {
             l->art = 0, n = 0;
         } else if ((n = artist_view(l))) {
             l->art = 0;
@@ -3135,10 +3207,10 @@ static int go(const void *unused) {
             if (lay && to && to != l) to->lay = (signed char)lay;
         } else if (!strcmp(kind, "page"))
             page_to(l, ctx, strcmp(uri, "prev") ? 1 : -1);
-        else if (!strcmp(kind, "action") && !pg.act) /* one in flight: this press does nothing */
+        /* one in flight: this press does nothing. needslib, an action that needed the server
+         * library on when it was a setting, is an action: it is always on */
+        else if ((!strcmp(kind, "action") || !strcmp(kind, "needslib")) && !pg.act)
             action(i, uri, ctx);
-        else if (!strcmp(kind, "needslib") && !pg.act)
-            needslib(l, i, uri, ctx);
         else if (!strcmp(kind, "remote"))
             qr_open(app()->state, app()->name);
         else if (!strcmp(kind, "local")) { /* a song, or a folder of them, on the card alone */

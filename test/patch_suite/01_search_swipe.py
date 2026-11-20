@@ -1166,7 +1166,9 @@ for populated in (False,True):
     assert m.get(w+O['SCROLL_Y'])==m.get(bar+O['BAR_VALUE'])==0
     passed()
 
-# Native scrollbar lifecycle, including a fully transparent/invisible mobile bar.
+# A wheel tick leaves stock's mobile bar asleep: the theme draws its own indicator (list_marks.c wheel_sb_alpha), and
+# woken (scroll_bar_scroll_to at its own value) stock's runs a 300 ms wait and a 500 ms opacity fade as a widget
+# animator, its invisible column repainted every loop pass, ~45 frames a tick (docs/internals.md#song-rows-cost).
 for kind in ('scroll_view','table_client'):
     m=Machine()
     w,es=m.page_list(20,extent=960) if kind=='scroll_view' else (lambda t:(t[0],t[2]))(m.table_page(20))
@@ -1176,21 +1178,9 @@ for kind in ('scroll_view','table_client'):
     m.handlers.pop(syms['scroll_bar_scroll_to'])
     m.mock('scroll_bar_cast','scroll_bar_is_mobile','widget_set_opacity','widget_set_sensitive',
            'widget_set_visible_only','widget_animator_prop_create','widget_animator_prop_set_params')
-    m.paint(w); m.call(gap=0)
-    assert m.nodes[bar]['visible'] and m.u.mem_read(bar+0x34,1)==b'\xff'
-    animator=m.get(bar+0x98)
-    assert animator and m.get(animator+O['ANIM_DURATION'])==500 and m.get(animator+0x24)==300
-    assert m.get(bar+O['BAR_VALUE'])==17  # waking must not calculate or move the thumb
-    m.touch(); m.call(gap=0)
-    assert m.get(bar+0x98)!=animator
-    assert any(c[0]=='widget_animator_destroy' and c[1]==animator for c in m.calls)
-    # The stock opacity completion disables and hides the bar; no payload fade timer exists.
-    animator=m.get(bar+0x98); callback,ctx=m.slide_callbacks[animator]
-    m.byte(bar+0x34,0)
-    assert m.call(address=callback,args=(ctx,0,0,0),gap=0)==7
-    assert not m.nodes[bar]['visible'] and not m.nodes[bar]['sensitive'] and not m.get(bar+0x98)
-    m.call(gap=0); assert m.nodes[bar]['visible']
-    m.top=0; m.nodes.clear(); m.advance(1000)  # payload retains no native bar/animator pointer
+    m.paint(w); m.call(gap=0); m.call(gap=0)
+    assert not m.get(bar+0x98) and not m.nodes[bar]['visible']  # no animator, still hidden
+    assert not any(c[0] in ('scroll_bar_scroll_to','widget_animator_prop_create') for c in m.calls)
     passed()
 for count,bar_present in ((2,True),(20,False)):
     m=Machine(); w,es=m.page_list(count,height=96,extent=count*48)

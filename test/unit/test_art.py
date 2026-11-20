@@ -134,7 +134,8 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
     blue = t['schemes'][t['accents'].bit_length() - 1]['tones'][0]
     modes = [f'mode_{n}_{k}' for n in ('shuffle', 'repeat') for k in ('d', 'l', 'on')] + ['mode_repeat1_on']
     wifi = [f'{n}_{k}' for n in ('wifi_1', 'wifi_2', 'wifi_3', 'lock', 'trash') for k in ('d', 'l')]
-    hearts = {'np_fav_d': 0xffffff, 'np_fav_l': 0, 'np_unfav_d': 0xffffff, 'np_unfav_l': 0}  # Text Primary, no colour
+    # Now Playing's heart (test_now_playings_heart): on in Favorite pink-red, both halves; off in Text Secondary
+    hearts = {'np_fav_d': 0xff375f, 'np_fav_l': 0xff375f, 'np_unfav_d': 0xababab, 'np_unfav_l': 0x5c5c5c}
     glyphs = {'np_more_d': 0xffffff, 'np_more_l': 0,
               'np_moredown_d': 0xababab, 'np_moredown_l': 0x5c5c5c}
     rates = [f'rate_{on}_{k}' for on in ('on', 'off') for k in ('d', 'l', 'w')]
@@ -196,7 +197,6 @@ def test_oled_draws_its_glyphs_from_phosphor_in_each_halfs_ink():
                                               *(f'spin_{f}' for f in range(art.SPIN_SPOKES)),
                                               *offers, *(f'swspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
                                               *(f'npspin_{k}_{f}' for k in ('d', 'l') for f in range(art.SW_SPIN_SPOKES)),
-                                              *(f'np{n}_{k}' for n in ('cloud', 'cloudoff') for k in ('d', 'l')),
                                               *btdev, *btspin, *bttoast, *guest, *lsend)}
     assert {'funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'check', 'caret-up', 'caret-down'} <= set(art.MENU_ICONS)
     for name, px, rgb in (('chevron_d', art.CARET_PX, 0x999999), ('chevron_l', art.CARET_PX, 0x8a8a8a), ('chevron_w', art.CARET_PX, 0xffffff),
@@ -358,13 +358,15 @@ def test_the_software_updates_spinner_has_twelve_spokes_in_each_halfs_ink():
 
 def test_every_empty_states_glyph_is_drawn_and_every_drawn_one_is_named():
     """The glyphs the payload's empty states name (each empty_t's first string, feedback.c empty_state) are
-    EMPTY_GLYPHS' keys, no more and no fewer: a page naming one the build never drew paints no glyph."""
+    EMPTY_GLYPHS' keys, no more and no fewer but for Sync's states, which a card app's status reply names at run time
+    (addon.c, docs/oled-design.md#sync): a page naming one the build never drew paints no glyph."""
     named = set()
     for c in (pathlib.Path(__file__).parents[2]/'patch').glob('**/*.c'):
         src = c.read_text()
         for m in re.finditer(r'empty_t\b[^;(]*?=\s*\{|\(empty_t\)\s*\{', src):
             named |= set(re.findall(r'\{\s*"([a-z][a-z-]*)"', src[m.start():src.index(';', m.end())]))
-    assert named == set(art.EMPTY_GLYPHS)
+    sync = {'arrows-clockwise', 'check-circle', 'arrow-circle-down', 'cloud'}
+    assert named <= set(art.EMPTY_GLYPHS) and set(art.EMPTY_GLYPHS) - named <= sync
 
 
 def test_phosphor_fills_nonzero_so_an_inner_contour_is_a_hole():
@@ -502,3 +504,20 @@ def test_the_focus_rings_ends_are_its_annulus_supersampled_and_meet_its_straight
             elif 22 + .75 < d < 24 - .75:
                 assert alpha(x, y) == 255, (x, y)  # wholly inside it
     assert len({alpha(x, y) for y in range(h) for x in range(w)}) > 20  # graded edges, not steps
+
+
+def test_now_playings_heart():
+    """The user's mock-up (design/mockups/mock_np_heart.py, approved 2026-11-19): Now Playing's heart 18 px of ink tall,
+    not about 32, its ink's left at screen x 194 and its middle at y 164, in its 34 px image centred in the 56 x 42
+    target at x 182, y 142 (tools/ipod.py NP_GRID_HEART): image x 1, y 18. Off, Phosphor's heart (bold) in Text
+    Secondary; on, its heart (fill) in the Favorite token, iOS's dark systemPink #FF375F, the same in Light Mode."""
+    got = art.images(theme.builtins()[0])
+    for name, rgb in (('np_unfav_d', 0xababab), ('np_unfav_l', 0x5c5c5c), ('np_fav_d', 0xff375f), ('np_fav_l', 0xff375f)):
+        w, h, at = pixels(got[f'oled_{name}'])
+        assert (w, h) == (art.NP_HEART_PX, art.NP_HEART_PX)
+        ink = [(x, y) for y in range(h) for x in range(w) if at(x, y)[3] > 127]
+        xs, ys = [x for x, _ in ink], [y for _, y in ink]
+        assert max(ys) - min(ys) + 1 in (18, 19), (name, min(ys), max(ys))
+        assert min(xs) == 1 and abs((min(ys) + max(ys) + 1) / 2 - 18) <= 0.5, (name, min(xs), min(ys), max(ys))
+        assert {at(x, y)[:3] for x, y in ink if at(x, y)[3] == 255} == {(rgb >> 16, rgb >> 8 & 255, rgb & 255)}, name
+    assert art.token('favorite') == art.token('favorite', True) == 0xff375f

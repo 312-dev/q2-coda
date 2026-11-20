@@ -1367,8 +1367,8 @@ def test_music_info_of_no_path(fw, heap):
     assert not fw.calls('fw_fopen')
 
 
-def id3_path(fw, heap, tags, cue, path=b'/a/b.flac'):
-    id3 = heap.string(b'', 0xa84)
+def id3_path(fw, heap, tags, cue, path=b'/a/b.flac', id3=None):
+    id3 = id3 or heap.string(b'', 0xa84)
     for offset, value in tags.items():
         C.memmove(id3 + offset, value + b'\0', len(value) + 1)
     def info(_, out, *rest):
@@ -1397,6 +1397,17 @@ def test_a_full_sheet_reads_no_file(fw, heap, mcl):
 def test_no_cue_leaves_the_tags(fw, heap, mcl):
     id3, _ = id3_path(fw, heap, {}, 0)
     assert C.string_at(id3 + ALBUM) == b'' and C.string_at(id3) == b'/a/b.flac'
+
+
+def test_each_parse_hands_the_song_to_bluetooth_once_its_tags_are_in(fw, heap, mcl):
+    """The drive, 2026-11-19: a BMW's Bluetooth screen showed no title or artist for any song. Stock's track change
+    (player_mainscheduling) sends the AVRCP record (sendBtHeadsetPlayInfo) only for an online song; a card file's
+    change sends the play status alone, so bluetoothd's record never named a local song. Each parse sends it, once
+    the tags and the path are in g_play_id3_info, which it reads."""
+    seen, id3 = [], heap.string(b'', 0xa84)
+    fw.mock('sendBtHeadsetPlayInfo', lambda *_: seen.append(C.string_at(id3)) or 0)
+    id3_path(fw, heap, {}, 0, id3=id3)
+    assert seen == [b'/a/b.flac'], f'sendBtHeadsetPlayInfo at the parse: {seen}'
 
 
 # Rows and records.
@@ -2419,6 +2430,9 @@ def test_stock_s_connection_waits_for_a_reader_once_open(fw, opened):
     db = C.c_void_p()
     assert fw.fn('stock_db_open', C.c_int, C.c_char_p, C.c_void_p)(b'/mnt/data/database.db', C.byref(db)) == opened
     assert sql.log == ([] if opened else [BUSY]) and [c[1][0] for c in fw.calls('sqlite3_exec')] == ([] if opened else [0xdb])
+    # and a given-up Cover Flow open's statement on it stops (coverflow.c coverflow_query_stop, every 1000 VM steps)
+    stop = C.cast(fw.lib.coverflow_query_stop, C.c_void_p).value
+    assert [c[1][:3] for c in fw.calls('fw_sqlite3_progress_handler')] == ([] if opened else [(0xdb, 1000, stop)])
 
 
 def test_a_cancelled_delete_changes_nothing(fw):

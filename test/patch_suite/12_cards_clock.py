@@ -100,13 +100,9 @@ def labels(w): return [m.nodes[x].get('text') for x in m.nodes if m.nodes[x]['ty
 def under(x,w):
     while x and x!=w: x=m.get(x+O['W_PARENT']) if m.get(x+O['W_PARENT']) in m.nodes else 0
     return x==w
-def games_open():
-    view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
-    assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-    button=m.nodes[m.nodes[view]['children'][-1]]['children'][0]; icon,label,into=m.nodes[button]['children']
-    assert m.nodes[icon]['image']=='local_games' and m.nodes[label]['text']=='Games'
-    library_geometry(m,m.nodes[view]['children'][-1])
-    f,ctx=m.handler(button,O['EVT_CLICK']); assert m.call(address=f,args=(ctx,m.event,0,0),gap=0,count=5_000_000)==0
+def games_open():  # Home's Games row (2026-11-19; the Library's until then): games.c's games_open, its click
+    m.top=m.node('window','home_page',[])
+    assert m.call(address=payload_syms['games_open'],args=(0,0,0,0),gap=0,count=5_000_000)==0
     m.page=m.top; assert m.nodes[m.page]['name']=='games_page' and m.nodes[m.page]['style:normal:bg_color']==-0x1000000
     return m.nodes[m.page]['children']
 assert m.text(m.call(address=payload_syms['ipod_home_shortcut'],args=(0,0,0,0),gap=0))=='Games'
@@ -361,8 +357,12 @@ tree={'/mnt/mmc':[('Music',4),('VIDEOS',4)],R:[('b.MKV',8),('a.mp4',8),('notes.t
 m=CardMachine(tree,{})
 view=m.node('scroll_view','scroll_view_localmusic',[m.node('list_item') for _ in range(11)]); m.top=m.node('window','localmusic_page',[view])
 assert m.call(address=HOOKS['localmusic_page_init'][0],args=(m.top,5,0,0),gap=0,count=5_000_000)==0
-button=m.nodes[m.nodes[view]['children'][-2]]['children'][0]; icon,label,into=m.nodes[button]['children']
-assert m.nodes[icon]['image']=='local_videos' and m.nodes[label]['text']=='Videos' and len(m.nodes[view]['children'])==19
+def icon_of(r):  # a row's button's first child's image, '' for a stock row with none
+    kids=m.nodes[r].get('children') or [0]; b=m.nodes.get(kids[0],{}); c=(b.get('children') or [0])[0]
+    return m.nodes.get(c,{}).get('image','')
+button=next(m.nodes[r]['children'][0] for r in m.nodes[view]['children'] if icon_of(r)=='local_videos')
+icon,label,into=m.nodes[button]['children']
+assert m.nodes[label]['text']=='Videos' and len(m.nodes[view]['children'])==17,len(m.nodes[view]['children'])  # no Search or Games
 f,ctx=m.handler(button,O['EVT_CLICK']); m.calls=[]
 assert m.call(address=f,args=(ctx,m.event,0,0),gap=0)==0 and [m.text(c[1]) for c in m.calls if c[0]=='navigator_to']==['folder_page']; m.page=m.node('window','folder_page'); passed()
 # Folder view's video (video_click) starts the same q2video, with no Videos page open; anything else is left to stock.
@@ -438,7 +438,7 @@ assert ('reset_poweroptions_timer',1,1,1) in [c[:4] for c in m.calls] and m.get(
 # Its end: the socket closes, the whole screen repaints once, and the UI has its input and paint again.
 m.waited=4242; m.calls=[]; m.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0,clear=False)
 assert ('close',7) in [c[:2] for c in m.calls] and ('widget_invalidate_force',m.wm,0) in [c[:3] for c in m.calls]
-assert 'stock_input' in event(O['EVT_KEY_UP'],O['KEY_RETURN']) and not m.sent and wm_paint()==['wm_vt_paint']
+assert 'stock_input' in event(O['EVT_KEY_UP'],O['KEY_RETURN']) and not m.sent and wm_paint()==['time_now_ms','wm_vt_paint']  # the frame's time for its glyphs (ringnav_glyph_stamp)
 m.calls=[]; m.call(address=sleep_hook,args=(0x1234,0,0,0),gap=0,clear=False); assert 'waitpid' not in [c[0] for c in m.calls]
 passed()
 

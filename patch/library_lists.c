@@ -14,6 +14,31 @@ static struct {
 
 extern int coverflow_goto_album(void *r);
 
+/* all's songs in a random order, the one at at first; 0 when all has no server row. A list with
+ * server rows is handed to their app online (catalogue.c catalogue_load), which plays it in the
+ * order it was handed from the start on, so Shuffle Songs' own order, drawn over the queue
+ * play_folder loads, does not reach it (the drive, 2026-11-19: the Library's title order from a
+ * random start, "rockman", "rockstar", "rockstar"). */
+static void *shuffled_for_app(void *all, int at) {
+    unsigned n = deque_size(all), server = 0;
+    if (!catalogue_has()) return 0; /* no server signed in: no list holds a server row */
+    for (unsigned i = 0; i < n && !server; ++i)
+        server = catalogue_path(P(deque_at(all, i), REC_PATH));
+    unsigned *ix = server ? calloc(n, sizeof *ix) : 0;
+    if (!ix) return 0;
+    for (unsigned i = 0; i < n; ++i) ix[i] = i;
+    ix[0] = (unsigned)at, ix[at] = 0;
+    for (unsigned i = n - 1; i > 1; --i) { /* Fisher-Yates over all but the first */
+        unsigned j = 1 + rand_below(i), t = ix[i];
+        ix[i] = ix[j], ix[j] = t;
+    }
+    void *out = _create_deque("stSongInfo");
+    deque_init(out);
+    for (unsigned i = 0; i < n; ++i) _deque_push_back(out, deque_at(all, ix[i]));
+    free(ix);
+    return out;
+}
+
 /* Collection Shuffle is Shuffle Songs over the collection. */
 int shuffle_play(void *all) {
     int size = (int)deque_size(all);
@@ -29,7 +54,9 @@ int shuffle_play(void *all) {
         int mode = playback_unshuffle();
         playback_clear(); /* stock Shuffle keeps Shuffle Albums/Folders otherwise */
         config_playmode(2, 1);
-        play_folder(all, at, 0xf001);
+        void *order = shuffled_for_app(all, at);
+        play_folder(order ? order : all, order ? 0 : at, 0xf001);
+        if (order) deque_destroy(order); /* playing_page copies the queue at once */
         playback_shuffle(mode); /* an order Up Next can list; stock's shuffle stays the fallback */
         feedback_shuffled("Shuffled Songs", size); /* OLED's confirmation */
     }
@@ -192,7 +219,7 @@ int most_played(void *ctx, void *event) {
     deque_destroy(from);
     st.mp_list = ranked;
     static const empty_t none = { "chart-bar", "No Plays Yet",
-                                  "Your most played songs show up here", 0 };
+                                  "Your most played songs show up here", 0, 0, 0 };
     void *view = top ? page_list(st.mp_page, st.mp_page, 0, "Most Played", top, 64)
                      : empty_list(st.mp_page, st.mp_page, "Most Played", &none, 0);
     char name[512], detail[300];
@@ -296,7 +323,7 @@ static void *songs_rows(const char *dir, const char *title, int tidal, int album
     ll.td_list = card_songs(dir, album);
     int n = (int)deque_size(ll.td_list);
     static const empty_t none = { "download-simple", "No Downloads Yet",
-                                  "Synced music shows up here", 0 };
+                                  "Synced music shows up here", 0, 0, 0 };
     void *view = n ? page_list(ll.td_page, ll.td_page, 0, title, n + tidal, 48)
                    : empty_list(ll.td_page, ll.td_page, title, &none, 0);
     char name[256];
@@ -387,7 +414,7 @@ int era_sql(const char *sql, int (*row)(void *, int, char **, char **), void *ct
     void *db = 0;
     /* Era uses SQLite directly rather than the stock library query wrappers. */
     char *expanded = library_scope_query(sql); /* none: the whole library, as library_query */
-    /* Local + Server: the server's songs too (catalogue.c), its file attached to this connection.
+    /* a signed-in server's songs too (catalogue.c), its file attached to this connection.
      * ponytail: the scope's folders (MUSIC_WHERE) apply to the union here, so a scope leaves the
      * server's songs out of Era; library_query scopes the card's alone. */
     char *both = catalogue_union(expanded ? expanded : sql);
@@ -600,7 +627,7 @@ int era_menu(void *ctx, void *event) {
     if (!(era.page = page_open("era_page", era_closed, page_keyup))) return 0;
     if (!era.n) { /* the empty state (docs/oled-design.md#empty-and-offline) */
         static const empty_t e = { "calendar-blank", "No Dated Albums Yet",
-                                   "Albums need a year tag", 0 };
+                                   "Albums need a year tag", 0, 0, 0 };
         empty_list(era.page, era.page, "Years", &e, 0);
         return 0;
     }
@@ -644,7 +671,7 @@ static void ls_show(void) {
     if (n) qsort(v, n, sizeof *v, by_length);
     for (unsigned i = 0; i < n; i++) _deque_push_back(list, deque_at(songs, v[i].key));
     st.rt_list = list;
-    static const empty_t none = { "timer", "No Long Songs", "None over 10 minutes", 0 };
+    static const empty_t none = { "timer", "No Long Songs", "None over 10 minutes", 0, 0, 0 };
     void *view = n ? page_list(st.rt_page, st.rt_page, 0, "Long Songs", (int)n, 64)
                    : empty_list(st.rt_page, st.rt_page, "Long Songs", &none, 0);
     char name[512], detail[300], t[16];

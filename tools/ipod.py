@@ -335,9 +335,13 @@ def home_card(menu, at, row, text):
 # row), Playback (stock's Playback setting row), Car Remote, Display, Controls and Battery, the six that are not
 # stock's bound by the payload (navigation.c home_sets_bind). Search's name is none stock's visitor knows (stock's search
 # pages have an img_search).
-HOME_ROWS = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
-HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_car', 'set_display', 'set_controls', 'set_power']
-HOME_LITERAL = {'coverflow': 'Cover Flow', 'home_search': 'Search', 'settings': 'Settings', 'set_wifi': 'Wi-Fi',
+# Home's main list (the menu review's order, Games and Streaming moved on 2026-11-19: docs/ipod.md#home): Games
+# from the Library, Streaming to Settings, after Playback.
+HOME_ROWS = ['playing', 'localmusic', 'games', 'folder', 'coverflow', 'home_search', 'settings']
+HOME_SETS = ['set_wifi', 'set_bt', 'sysset', 'playset', 'set_stream', 'set_car', 'set_display', 'set_controls',
+             'set_power']
+HOME_LITERAL = {'games': 'Games', 'set_stream': 'Streaming', 'coverflow': 'Cover Flow', 'home_search': 'Search',
+                'settings': 'Settings', 'set_wifi': 'Wi-Fi',
                 'set_bt': 'Bluetooth', 'set_car': 'Car Remote', 'set_display': 'Display', 'set_controls': 'Controls',
                 'set_power': 'Battery'}
 # Stock's visitor translates label_localmusic, label_folder, label_playset and label_sysset by name; renamed, they
@@ -355,7 +359,7 @@ LIST_CLEAR = {f'style:{state}:{prop}': '#00000000' for state in ('normal', 'disa
               for prop in ('bg_color', 'border_color')}
 
 
-HOME_LISTED = {'localmusic': 'img_library', 'stream': 'img_services'}  # under home_lib: renamed, so stock's name match binds them nowhere
+HOME_LISTED = {'localmusic': 'img_library'}  # under home_lib: renamed, so stock's name match binds it nowhere
 
 
 def home_list(name, rows, g, extra=None, view_name=None):
@@ -674,8 +678,9 @@ NP_GRID_TIME_PX = 19
 NP_GRID_SECONDARY = '#ABABAB'  # Text Secondary; Light Mode flips it as every grey
 NP_GRID_ICON = 34  # More's target, the theme's 20 px glyph centred in it (np_bar.c np_glyphs)
 # The heart's target (the user's, 2026-11-18, docs/oled-design.md#now-playing): x from NP_GRID_HEART[0] left of the
-# text column, top on the album line's foot, w by h, the theme's 34 px heart (tools/art.py NP_HEART_PX) centred in it,
-# so it stands at screen x 193 to 227 and y 146 to 180 and the target covers x 182 to 238 and y 142 to 184
+# text column, top on the album line's foot, w by h, the theme's 34 px heart image (tools/art.py NP_HEART_PX) centred in
+# it, so it stands at screen x 193 to 227 and y 146 to 180 (its 18 px of ink from x 194, np_heart) and the target covers
+# x 182 to 238 and y 142 to 184
 NP_GRID_MORE_INSET = 7  # More's centre from the right column: Phosphor's dots-three, 12.5 px of ink, ends on it
 NP_GRID_HEART = (10, 56, 42)
 NP_GRID_BAR = 6

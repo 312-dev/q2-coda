@@ -91,7 +91,8 @@ enum {
     QA_PLAY, /* the menu sheet's playlist: Play, Rename, Delete (playlists.c) */
     QA_RENAME,
     QA_DELETE,
-    QA_REMOVE /* a payload page's own last row (qm_song_hold): Remove from Playlist */
+    QA_REMOVE, /* a payload page's own last row (qm_song_hold): Remove from Playlist */
+    QA_OFFLINE /* Sync Offline, or Stop Syncing Offline, for a server's item (offline.c) */
 };
 
 static char *play_key(void) {
@@ -376,8 +377,8 @@ static int artist_album(void *all, void *r) {
     return -1;
 }
 extern void coverflow_by_year(void *albums);
-/* The artist page's songs, as its Songs tab lists them (staged_music: with Local + Server, the
- * server library's too); also library_artist.c's. */
+/* The artist page's songs, as its Songs tab lists them (staged_music: with a server signed in,
+ * the server library's too); also library_artist.c's. */
 int artist_songs(void *unused) {
     return (I(artist_type, 0) == 1 ? getMusicByAlbumArtist : getMusicBySonger)(
         g_local_classinfo_save[0xa] ? (const char *)0
@@ -506,10 +507,10 @@ int ringnav_art_header(char *buf, unsigned size, const char *fmt, const char *al
  * EMPTY_POLL_MS until it opens or stops being on top. */
 static int empty_class(const void *unused) {
     static const empty_t none[] = {
-        { "vinyl-record", "No Albums", "Copy music to the SD card", 0 },
-        { "microphone-stage", "No Artists", "Copy music to the SD card", 0 },
-        { "music-notes-simple", "No Composers", "Songs need a composer tag", 0 },
-        { "guitar", "No Genres", "Songs need a genre tag", 0 },
+        { "vinyl-record", "No Albums", "Copy music to the SD card", 0, 0, 0 },
+        { "microphone-stage", "No Artists", "Copy music to the SD card", 0, 0, 0 },
+        { "music-notes-simple", "No Composers", "Songs need a composer tag", 0, 0, 0 },
+        { "guitar", "No Genres", "Songs need a genre tag", 0, 0, 0 },
     };
     static const char *const names[] = { "Albums", "Artists", "Composers", "Genres" };
     void *wm = window_manager(), *top = window_manager_get_top_window(wm);

@@ -241,8 +241,26 @@ static void small_text(void *canvas, const unsigned *s, int x, int w, int right,
     if (n > sizeof buf / sizeof *buf - 1) n = sizeof buf / sizeof *buf - 1;
     memcpy(buf, s, n * sizeof *buf);
     buf[n] = 0;
-    while (n > 1 && measure(canvas, buf, n, px) > w) buf[--n - 1] = 0x2026; /* … */
     int ink = measure(canvas, buf, n, px);
+    if (n > 1 && ink > w) {
+        /* the most characters that fit with the ellipsis after them, found by halving: a Songs
+         * row's artist was measured once per character it lost, each with its font set again,
+         * on every repaint of every row (docs/internals.md#song-rows-cost) */
+        unsigned lo = 1, hi = n - 1, keep = 1; /* lo..hi: lengths still possible, the … in them */
+        while (lo <= hi) {
+            unsigned mid = (lo + hi) / 2, c = buf[mid - 1];
+            buf[mid - 1] = 0x2026; /* … */
+            int fits = (ink = measure(canvas, buf, mid, px)) <= w;
+            buf[mid - 1] = c;
+            if (fits)
+                keep = mid, lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        n = keep;
+        buf[n - 1] = 0x2026, buf[n] = 0;
+        ink = measure(canvas, buf, n, px);
+    }
     rect_t box = { right ? x + w - ink : x, r->y + SONG_SMALL_DY, ink + 1, r->h };
     int align_v = I(canvas, CANVAS_ALIGN_V), align_h = I(canvas, CANVAS_ALIGN_H);
     I(canvas, CANVAS_ALIGN_V) = 1; /* middle */

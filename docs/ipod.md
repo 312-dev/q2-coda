@@ -101,8 +101,10 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, by default in the order the menu review chose (2026-11-15), are the play state's row, Library,
-Streaming, Folders, Cover Flow, Search and Settings. **The first row** is stock's Now Playing row named for what plays
+The seven rows, by default in the order the menu review chose (2026-11-15, with Games and Streaming moved on
+2026-11-19), are the play state's row, Library, Games, Folders, Cover Flow, Search and Settings. **Games** opens the
+Games page (`games_open`, [Games](#games)), which the Library held before; Streaming is a Settings row, after
+Playback. **The first row** is stock's Now Playing row named for what plays
 (`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
 guest plays ([internals](internals.md#guest-play)), when it opens the guest's Now Playing (its click and a short
 Return, `guest_home_np`), else the owner's. It leads with the play state, which leaves the status row while the row
@@ -118,10 +120,11 @@ Folder card under its plural name, shown only while the SD card has folders to l
 Folders page's test) until the user shows or hides it. **Edit Home** (Center held on the list, or a finger held on a
 row; [oled-design](oled-design.md#edit-library), [internals](internals.md#library-order)) puts the rows in the
 user's order and shows or hides each, Settings always shown. **Search** opens the Library's search (`library_search_open`: the
-letter strip under `list.entry.ipod`, OLED's, stock's search without it). Shuffle Songs and the
+letter strip under `list.entry.ipod`, OLED's, stock's search without it): every song, artist and album, the one
+search across everything; each list page searches its own rows from its search bar. Shuffle Songs and the
 Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
 (`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) is only
-Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
+Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. Both lists end at their ends, as every list does: the wheel stops there and the selection leans against the end ([internals.md](internals.md#list-ends)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -362,10 +365,13 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 (OLED) every picker opens on its mark when a tap opened it too, as a `CHOICE` picker does. Another list whose `default_item_height` equals the set's
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
 
-Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
-review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
-page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
-(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery
+(the menu review's order, 2026-11-15, Streaming from Home since 2026-11-19; `tools/ipod.py` `HOME_SETS`): Wi-Fi and
+Bluetooth open stock's pages, which its Wireless page held, and the rows that are not stock's are bound by
+`home_sets_bind`. Streaming opens stock's Streaming page (`on_home_stream_onclick`, bound by `coverflow_home`), or in a
+set with `home_lib` its rows over the Settings list, which Return gives back. General is stock's System page
+(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage (with **Update Library**, from the
+Library's page since 2026-11-19, [internals](internals.md#storage)), USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer), then Restart and Shut Down after a 12 px gap and Reset Settings last, directly under Shut Down, in Negative red as a destructive row (`power_rows`); Battery is stock's Power
 page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
@@ -377,11 +383,8 @@ Its pages are stock's Playback page opened again (`library_open`, `playset_sub` 
 rows dropped, each page's own built; each keeps its own place in position memory (`SUB_PAGE`):
 
 - Library: an **On-The-Go** switch first (`Q2POD OTG`, on by default: Playlists' On-The-Go row and the hold menu's
-  Add to On-The-Go), then a **Streaming Songs** switch (`Q2POD LIBRARYSOURCE`, off by default; caption "Streaming songs join your
-  Library"): on, the songs and playlists of a music server that a card app such as the Subsonic app lists join the
-  Library, grayed while they can't play ([Server library](internals.md#server-library)). Off asks first, "Hide
-  streaming songs?" (Cancel, Turn Off, a footer saying Show in Library pauses), while a card app has a catalogue on
-  the card; then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
+  Add to On-The-Go; there is no Streaming Songs switch: a signed-in card app's server songs and playlists are always
+  in the Library, grayed while they can't play, [Server library](internals.md#server-library)); then Sorting, "Artists: Artist" or "Album Artist" (stock's `PLAYSET ARTISTTYPE`), "Artist View: Cover
   Flow" (`Q2POD ARTISTCF`, the default; Grid and List; on Cover Flow or List, Go to Album opens the album's tracks in
   Cover Flow, see [internals.md](internals.md#artist-view-and-go-to-album-in-coverflow)), Playlists, Folders, and a "Scan Song Durations" switch
   (`Q2POD SCANDURATIONS`, off; caption "Measures lengths after each update"; durations.c).
@@ -398,8 +401,8 @@ rows built by `picker_rows` from `ringnav_keylock_rows`; a pick stays on the pag
 (Settings, Playback, Library); its Sorting, Playlists and Folders pages are depth 4, and the Songs picker depth 5.
 From Home with Now Playing selected, counting detents and Center presses straight down (Settings is 6 detents and
 Center, Playback, its fourth row, 3 and Center, Library, Playback's second, 1 and Center: 13 to open it), a row's own
-press included: On-The-Go 14, Streaming Songs 15, Artists 17, Artist View 18, Scan Song Durations 21; the Songs picker
-17, Artist's Albums 18, Years 19; Playlist View 20; Folder Root 21. Elsewhere: Sleep Timer's page 20, Enlarged Album
+press included: On-The-Go 14, Artists 16, Artist View 17, Scan Song Durations 20; the Songs picker
+16, Artist's Albums 17, Years 18; Playlist View 19; Folder Root 20. Elsewhere: Sleep Timer's page 20, Enlarged Album
 Art 20, Cover Flow's Sort picker 20.
 
 Stock's Wireless page (Wi-Fi, Bluetooth and SyncLink) is not reached from Settings, whose own rows open Wi-Fi's and Bluetooth's pages; SyncLink stays off ([internals](internals.md#synclink)).
@@ -517,7 +520,7 @@ Values are `coverflow.shelf` and `coverflow.caption` in OLED's `theme.xml` and `
 
 **Opening.** The first open after a restart, a library update or a server catalogue import reads the library's albums first ([internals](internals.md#coverflow)), half a second to a second for 2,000 albums in the emulator; later opens reuse them. Home's Cover Flow row keeps the selection meanwhile and its chevron turns into a spinner (eight spokes, white, in the chevron's 15 px place, [oled-design](oled-design.md#list-row)) until the covers show; Return stays on Home, and the wheel and the other buttons do nothing until it opens. An open quick enough never shows it.
 
-The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)): turned slowly, about 70 degrees moves one album at the default Wheel Sensitivity (50%; half that at 100%) and a cover stays part-way while your thumb does; let go, it settles on the nearest. Turned faster they speed up smoothly to at most 20 albums a second, and from about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again onto the album the caption names. (With Fast Navigation on there is no arch: the side covers form a narrower row that slides along as the caption goes on ahead.) Turned at about a turn a second (at 50%) for 0.7 s, sorted by album or artist, they go by letters (with Fast Navigation on, at about two turns a second for a quarter of a second), and a thumb re-gripping on the way doesn't start the wait again. Sorted by recently added, most played or at random, and on an artist's or the rated albums, they never do. With Fast Navigation off (Display → Cover Flow; off unless you turn it on) the letters are as they were: the big letter shows and the covers keep flowing through the alphabet, about six letters a second however hard you spin, and a gentler turn steps through them more slowly. Slowing down or turning back carries straight on album by album from where you are. Letting go lands on the letter's first album, and picking the spin back up while the letter still shows goes on by letters. With Fast Navigation on, sorted by year they go by years too, newest or oldest first as Playback settings' Year Order has them, each year shown big ("1994") and the albums with no year last, shown as "–", and letters and years go like this. Going in, you overtake the cover facing you: it leaves the screen the way you were turning as the first letter shows big, and the row carries your speed on into that letter's first album. Each further letter is about one tick of turn, at any speed and either way: the big letter changes at once and the row slides to that letter's first album, faster the farther it is, the caption naming each album it passes. Letters last until your thumb lifts: slowing down or resting your thumb keeps them, and turning back steps back a letter. Past the last letter it goes round to the first, and back, as the albums do. Lifting lets the row reach the letter's first album, then the covers fold out onto it in about half a second, none passing through another; turning meanwhile doesn't steer it. Center, Return, a touch or the screen going dark land on the caption's album at once. To go by letters smoothly Fast Navigation keeps a half-size copy of each cover beside its cache (about 26 MB for 1000 albums, or up to 128 MB on a card formatted with 128 KB clusters), made while it sits idle, about ten a second, which Refresh Coverflow removes with the rest. The numbers are `coverflow.shelf`'s.
+The wheel holds the covers directly ([internals](internals.md#coverflow-thumb)) and moves them as the lists move their rows ([internals](internals.md#wheel-acceleration)): one album a click of the wheel turned slowly, more a click as a fast turn keeps going (two after 0.3 s, one more each 0.2 s, at most 8), back to one as soon as it slows or pauses, and the covers slide through every album on the way; never by letter, and no letter shows over them. Let go, they settle on the album the caption names. From about a turn and a half a second the covers bend into an arch: the ones near the middle drop back level with the side covers and lean in gradually, none swinging out towards you, and as you slow or stop they open out again (with Fast Navigation on there is no arch: the side covers form a narrower row that slides along as the caption goes on ahead). Center, Return, a touch or the screen going dark land on the caption's album at once. The numbers are `coverflow.shelf`'s and `wheel_accel.h`'s.
 
 Center on a cover opens the album's tracks as a list in the page, the covers hidden behind it ([internals](internals.md#coverflow)); Return comes back to them.
 
@@ -965,10 +968,10 @@ drops the stock rows, takes the sub-page's title and builds only its own rows:
   Before, the window opened and closed a pass later, flashing over the lyrics every 10 s (#153).
 - Cover Flow, what changes Cover Flow alone: "Sort: Album", a picker of Album, Artist, Year, Recently Added, Most
   Played and Random (`coverflow_sort_set`), a "Fast Navigation" switch (`Q2POD BIGLIBRARY`, off;
-  `playset_covermode`): letters held until the lift and years on a fast spin, and the half copies they read, a
+  `playset_covermode`): the narrower row at speed in place of the arch, a
   "Position Bar" switch (`Q2POD CFPOSITION`, off; `playset_covermode`; coverflow_position.c), then after a 12 px gap
   "Refresh Cover Flow" (`system_update`; it empties `.coverflow/`, the playlists' art with the albums', which builds
-  again). The Library's own settings (Artist View, Playlist View, Scan Song Durations, Streaming Songs) are on
+  again). The Library's own settings (Artist View, Playlist View, Scan Song Durations) are on
   [Settings > Playback > Library](#settings).
 - Controls: Wheel Sensitivity, which opens its slider page; "Hold Return: Recent"
   (`Q2POD HOLDRETURN`, [Hold Return](#hold-return), `playset_folderjump`); "Clicker: Both", Key Tone's row, cycling Speaker, Headphones, Both and Off (`IPOD CLICKER`, Off being Key Tone off; [Key Tone](internals.md#key-tone)); Buttons Lock, which opens stock's page; and "Wake: Single Press".
@@ -1078,7 +1081,15 @@ painted it white, which drew the box at rest.
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
-- <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
+- **A list's search bar** ([oled-design](oled-design.md#search-bar), `patch/search_bar.c`): on every music list
+  page (Songs, Artists, Albums, Genres, Playlists, Years, Ratings, Most Played, Long Songs, and inside a playlist,
+  an artist or an album) a turn up from the first row brings in a search bar above it, "Search <the page's title>";
+  Centre opens the letter strip below, which filters the page's own rows as the text is typed. Return closes the
+  strip and lights the bar, the text and the filtered rows kept; a turn down goes into them, Return again goes back
+  to the page with its bar lit, and a third leaves the page. The go key goes to the first match, or with none lights
+  the bar over No Matches. Erasing on the strip clears the text. A match opens its row on the page, as the row
+  itself does there. Home's Search searches everything.
+- <a id="search"></a>**Search.** Home's Search row (and Songs' pull) opens an iPod classic's letter strip, not
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`, the user's mock-up
   `keyboard-inscreen/strip.html`). The query reads on the page's first line: a magnifier in Text Secondary at x 31,
   the text in 20 px white from x 48 with a steady 2 px cursor while the strip has the wheel, or "Search your music"
@@ -1231,7 +1242,7 @@ the protocol and the daemon: [localsend.md](localsend.md).
 
 ## Games
 
-**Library → Games** opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
+**Home → Games** (the Library's row until 2026-11-19) opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
 takes every key but Power and a held Return, so the music keeps playing untouched.
 
 | Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |

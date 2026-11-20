@@ -3,6 +3,8 @@
 import ctypes as C
 import struct
 
+import pytest
+
 from conftest import O, Deques
 from test_addon import World, songs  # noqa: F401 (songs: a fixture)
 from test_coverflow import scratch  # noqa: F401 (a fixture)
@@ -143,22 +145,25 @@ def badge(np, page):
     return [t for t, _ in np.texts], np.loads, np.icons
 
 
-def test_a_server_song_shows_its_format_and_the_cloud_on_the_art_page(fw, mcl, songs, scratch):
+def test_a_server_song_shows_its_format_alone_on_the_art_page(fw, mcl, songs, scratch):
+    """The format badge is its text in a ring, no glyph (the user's, 2026-11-19: "remove cloud icon from FLAC"): the
+    label NB_PAD px in from the badge's left, the ring that far past its end."""
     np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
     page = art_page(np, scratch)
     texts, loads, icons = badge(np, page)
-    assert texts == ['FLAC'] and loads == ['oled_npcloud_d']
-    assert icons == [(192 + 11, 150 - 10)]  # the glyph 11 px into the badge, its centre on the badge's
+    assert texts == ['FLAC'] and loads == [] and icons == []
     x, _, _, _ = np.texts[0][1]
-    assert x == 192 + 21  # the label 21 px in
+    assert x == 192 + 9  # the label 9 px in
 
 
-def test_the_cloud_is_crossed_out_while_the_server_cant_be_reached(fw, mcl, songs, scratch):
+def test_the_badge_is_the_same_while_the_server_cant_be_reached(fw, mcl, songs, scratch):
+    """No crossed-out cloud either: a server out of reach is the status row's (offline glyph) and, for a song that
+    can't go on, the times row's message."""
     np = Np(fw, mcl, songs, scratch, status(b'done', 20_000_000), waits=False)
     np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
     page = art_page(np, scratch)
     texts, loads, _ = badge(np, page)
-    assert texts == ['FLAC'] and loads == ['oled_npcloudoff_d']
+    assert texts == ['FLAC'] and loads == []
 
 
 def test_a_card_file_has_no_badge(fw, mcl, songs, scratch):
@@ -169,13 +174,27 @@ def test_a_card_file_has_no_badge(fw, mcl, songs, scratch):
     assert texts == [] and loads == []
 
 
-def test_a_song_stuck_with_its_server_down_offers_retry_and_skip(fw, mcl, songs, scratch):
-    np = Np(fw, mcl, songs, scratch, status(b'get', 7_040_000))
-    np.world.files[b'/tmp/q2-subsonic.state'] = b'server=down\n'
-    error = fw.fn('np_stream_error', C.c_int)
+def stuck(np, state):
+    """np with the server out of reach as state says, painted once its NS_TRYING_MS ran out."""
+    np.world.files[b'/tmp/q2-subsonic.state'] = state
     np.paint()
     np.tick()
+    np.texts.clear(), np.loads.clear()
     np.paint()
+    trying = [t for t, _ in np.texts], [n for n in np.loads if 'spin' in n]
+    for _ in range(20):  # 10 s
+        np.tick()
+    np.texts.clear(), np.loads.clear()
+    np.paint()
+    return trying
+
+
+def test_a_song_stuck_with_its_server_down_offers_retry_and_skip(fw, mcl, songs, scratch):
+    np = Np(fw, mcl, songs, scratch, status(b'get', 7_040_000))
+    error = fw.fn('np_stream_error', C.c_int)
+    texts, spins = stuck(np, b'server=down\n')
+    # while the app tries again: why, beside the spinner, and no Retry or Skip yet (the user's, 2026-11-19)
+    assert texts == ["Can't reach the server \u00b7 trying again"] and spins
     assert error() == 1
     assert [t for t, _ in np.texts] == ["Can't reach the server"] and np.loads == []  # no spinner, no amount
     fw.fn('np_stream_cta_click', None, C.c_int)(100)  # left of the middle: Retry
@@ -184,6 +203,17 @@ def test_a_song_stuck_with_its_server_down_offers_retry_and_skip(fw, mcl, songs,
     for _ in range(6):
         np.tick()
     assert error() == 0
+
+
+@pytest.mark.parametrize('state,why', [(b'reach=down 502\n', 'Server error 502'),
+                                       (b'reach=down none\n', 'Server not answering'),
+                                       (b'reach=down dns\n', 'Server not found')])
+def test_a_stuck_song_says_why_in_the_words_of_the_apps_reach(fw, mcl, songs, scratch, state, why):
+    np = Np(fw, mcl, songs, scratch, status(b'get', 7_040_000))
+    texts, _ = stuck(np, state)
+    assert texts == [why + ' \u00b7 trying again']
+    assert [t for t, _ in np.texts] == [why]
+    assert fw.fn('np_stream_error', C.c_int)() == 1
 
 
 def test_a_song_that_plays_on_is_not_stuck_whatever_the_server(fw, mcl, songs, scratch):

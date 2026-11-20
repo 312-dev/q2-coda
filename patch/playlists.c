@@ -45,10 +45,12 @@ static int ple_number(void *ctx, int n, char **v, char **names) {
  * ponytail: a stock write that meets Home's or the update dialog's count (a read of the whole
  * songtable) now holds the UI up to 500 ms per statement before it fails as before; a shorter
  * timeout is the knob if that shows. */
+extern void coverflow_query_watch(void *db);
 int stock_db_open(const char *path, void **db) {
     int bad = sqlite3_open(path, db);
     if (!bad) sqlite3_exec(*db, "PRAGMA busy_timeout=500", 0, 0, 0);
-    if (!bad) catalogue_attach(db); /* the server library's songs, with Local + Server */
+    if (!bad) coverflow_query_watch(*db); /* a given-up Cover Flow open's statement stops */
+    if (!bad) catalogue_attach(db);       /* the server library's songs, a server signed in */
     return bad;
 }
 /* The database for a write that waits out a reader, playlist_art.c's worker reading the table,
@@ -356,7 +358,7 @@ static void ple_show(void) {
         free(in);
         /* a search that matches nothing: the empty state under the Search row, compact (its row
          * above it: no glyph), no button (oled-design.md Empty and offline) */
-        static const empty_t none = { 0, "No Matches", "Try fewer letters", 0 };
+        static const empty_t none = { 0, "No Matches", "Try fewer letters", 0, 0, 0 };
         if (!ple.nmatch)
             empty_state(ple.page, feedback_below(widget_get_child(ple.view, 0)), &none, 0);
     } else
@@ -1105,7 +1107,7 @@ static void pl_rows(void *win) {
      * rows alone, with no room under them */
     int shown = 0;
     for (int i = 0; i < count; ++i) shown += widget_get_visible(widget_get_child(view, i));
-    static const empty_t none = { "playlist", "No Playlists", "Make one with New Playlist", 0 };
+    static const empty_t none = { "playlist", "No Playlists", "Make one with New Playlist", 0, 0, 0 };
     empty_state(win, geom_val(V_BAR) + shown * pl_pitch(view),
                 n || add ? (const empty_t *)0 : &none, 0);
     widget_set_prop_int(win, PL_MARKING, marking);

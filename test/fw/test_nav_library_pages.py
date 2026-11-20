@@ -2110,19 +2110,19 @@ def boot(fw, st):
 def test_the_library_s_rows_in_their_order(fw, ui, st):
     boot(fw, st)
     win, view = library(fw, ui)
-    # the menu review's order (2026-11-15), Search there (home.c ringnav_localmusic);
+    # the menu review's order (2026-11-15, home.c ringnav_localmusic), with no Search or Games since 2026-11-19;
     # My Fav and Frequent hidden, kept in the page for stock's index: Ratings and Most Played list theirs; Shuffle,
-    # Hi-Res and Long Songs hidden too, in their places
-    hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs')
+    # Hi-Res and Long Songs hidden too, in their places; Update Local Music kept hidden, Storage's now
+    hidden = ('Shuffle', 'My Fav', 'Frequent', 'Hi-Res', 'Long Songs', 'Update Local Music')
     assert page_rows(ui, view) == [(c, c not in hidden) for c in ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album',
-        'Search', 'Genre', 'Years', 'Ratings', 'My Fav', 'Recently Added', 'Recent', 'Most Played', 'Frequent', 'Hi-Res',
-        'Long Songs', 'Games', 'Update Local Music']]
+        'Genre', 'Years', 'Ratings', 'My Fav', 'Recently Added', 'Recent', 'Most Played', 'Frequent', 'Hi-Res',
+        'Long Songs', 'Update Local Music']]
 
 
 def test_the_library_adds_the_card_s_media_folders_and_upload(fw, ui):
     win, view = library(fw, ui, folders=['/mnt/mmc/podcasts', '/mnt/mmc/VIDEOS', '/mnt/mmc/Music'], token=b'x')
     rows = [c for c, _ in page_rows(ui, view)]
-    assert rows[rows.index('Long Songs'):] == ['Long Songs', 'Podcasts', 'Videos', 'Games', 'Upload Scrobbles',
+    assert rows[rows.index('Long Songs'):] == ['Long Songs', 'Podcasts', 'Videos', 'Upload Scrobbles',
                                                'Update Local Music']
 
 
@@ -2143,17 +2143,16 @@ def test_a_library_that_is_not_stock_s_is_left(fw, ui):
     assert [c for c, _ in page_rows(ui, view)] == LIBRARY_STOCK + ['more']
 
 
-def test_the_library_leads_with_search_and_drops_its_icons(fw, ui, st):
+def test_the_library_has_no_search_or_games_row_and_drops_its_icons(fw, ui, st):
+    """2026-11-19: each list page has its own search bar (search_bar.c) and Home has Games and its one Search."""
     boot(fw, st)
     win, view = library(fw, ui)
-    assert ('Search', True) in page_rows(ui, view) and ('Shuffle', False) in page_rows(ui, view)
+    names = [c for c, _ in page_rows(ui, view)]
+    assert 'Search' not in names and 'Games' not in names and ('Shuffle', False) in page_rows(ui, view)
     images = [w for item in ui.kids[view] for w in ui.subtree(item) if ui.kind[w] == 'image_create']
     icons = [w for w in images if ui.image[w] != 'list_into']
     assert icons and all(w in ui.hidden for w in icons)
     assert not [w for w in images if ui.image[w] == 'list_into' and w in ui.hidden]  # the chevrons stay
-    search, = [ui.kids[item][0] for item in ui.kids[view] if row_text(ui, item) == 'Search']
-    # search_strip.c's opener
-    assert [fn for w, e, fn, _ in ui.handlers if w == search and e == EVT_CLICK] == [C.cast(fw.lib.library_search_open, C.c_void_p).value]
 
 
 @in_fork
@@ -2795,63 +2794,77 @@ def rated_albums(fw, ui, song, hearts=0):
 
 
 
-def test_a_cold_cover_flow_open_turns_its_spinner_through_a_long_query(fw, ui, song):
+def test_a_cold_cover_flow_open_leaves_home_live_with_its_spinner_through_a_long_query(fw, ui, song):
     """Device report (p32, 2026-11-17): Home's Cover Flow row stopped its spinner while a cold open queried the
-    library. getAllAlbum takes 1.2 s here; each step runs on a thread of its own, and the UI thread paints the
-    spinner's box at each spoke (100 ms) through it, then opens the page."""
+    library; and (2026-11-19) the whole screen held still until the albums were in, Return included. getAllAlbum
+    takes 1.2 s here, on a thread of its own: the press returns once the open is 75 ms old, the spinner up on Home's
+    row and Home's paint drawing it; each later pass of the main loop collects a step that ended and starts the
+    next, and the page opens after the last."""
     Files(fw)
-    clock, thread, paints, dirty = [1000], [], [], []
+    clock, thread, paints = [1000], [], []
     fw.mock('time_now_ms', lambda *_: clock[0])
     fw.var('g_backlight_status', C.c_ubyte).value = 1
     home = ui.new('window_create', 0, 0, 0, 0, 0)
     ui.name[home] = 'home_page'
     rows = [song(b'/m/a/1.flac', album=b'A', id_=1), song(b'/m/b/1.flac', album=b'B', id_=2)]
     put = lambda *_: ui.deques[fw.var('fw_ctx_tools_pdeq_directory', C.c_uint).value].extend(rows) or 2  # noqa: E731
-
-    def all_albums(*_):
-        if not thread:  # on the UI thread: it holds it for the query's time
-            clock[0] += 1200
-        return put()
-    fw.mock('getAllAlbum', all_albums)
+    fw.mock('getAllAlbum', put)
     fw.mock('toolsQueryDbTable', put)
 
-    def create(out, attr, run, arg, *_):  # a step's thread: getAllAlbum's 1.2 s, the others at once
+    def create(out, attr, run, arg, *_):  # a step's thread, run when the test says it has ended
         C.c_ulong.from_address(out).value = 99
-        thread.append([run, arg, clock[0], 1200 if not thread else 0])
+        thread.append([run, arg])
         return 0
 
     def usleep(us, *_):
         clock[0] += us // 1000
-        run, arg, at, ms = thread[-1]
-        if run and clock[0] - at >= ms:
-            thread[-1][0] = None
-            C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(arg)
         return 0
     fw.mock('fw_pthread_create', create)
     fw.mock('fw_usleep', usleep)
-    fw.mock('widget_invalidate_force', lambda w, *_: dirty.append(w) or 0)
     fw.mock('widget_load_image', lambda *_: 1)
-
-    def paint(wm):  # Home's paint: its Cover Flow row draws the spinner in its chevron's place
-        if dirty and fw.fn('coverflow_spinner', C.c_int)():
-            paints.append(clock[0])
-            fw.fn('spinner_icon', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(home, None, 355, 100)
-        dirty.clear()
-        return 0
-    painter = C.CFUNCTYPE(C.c_int, C.c_void_p)(paint)
-    wm, vt = C.create_string_buffer(0x100), C.create_string_buffer(0x40)
-    C.c_void_p.from_address(C.addressof(vt) + 0xc).value = C.cast(painter, C.c_void_p).value
-    C.c_void_p.from_address(C.addressof(wm) + 0x94).value = C.addressof(vt)
-    fw.mock('window_manager', lambda *_: C.addressof(wm))
+    fw.mock('widget_invalidate_force', lambda w, *_: fw.fn('coverflow_spinner', C.c_int)() and paints.append(clock[0]) or 0)
     fw.fn('coverflow__coverflow_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
-    for _ in range(10):  # the main loop's passes between steps
+    # the press is back: getAllAlbum still runs, the open 75 ms old, Home with its row's spinner
+    assert len(thread) == 1 and thread[0][0] and clock[0] - 1000 >= 75 and clock[0] - 1000 < 1200
+    assert ui.name[ui.top()] == 'home_page' and fw.fn('coverflow_spinner', C.c_int)() and paints
+    fw.fn('spinner_icon', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int)(home, None, 355, 100)  # Home's paint draws it
+    clock[0] += 1200
+    for _ in range(10):  # each step ends, then a pass of the main loop collects it
+        for t in thread:
+            if t[0]:
+                run, t[0] = t[0], None
+                C.CFUNCTYPE(C.c_void_p, C.c_void_p)(run)(t[1])
         for t, (fn, ctx, _ms) in list(ui.timers.items()):
             if fn == C.cast(fw.lib.coverflow__open_step, C.c_void_p).value:
                 del ui.timers[t]
                 TICK(fn)(ctx)
-    during = [t for t in paints if t <= 1000 + 1200]
-    assert len({t // 100 for t in during}) >= 10  # a spoke every 100 ms through the query, each painted
     assert ui.name[ui.top()] == 'coverflow_page' and not fw.fn('coverflow_spinner', C.c_int)()
+
+
+def test_a_library_query_on_the_ui_thread_gives_a_running_cover_flow_step_up_first(fw, ui, song):
+    """A library query of the payload's own on the UI thread (staged_into) while a Cover Flow open's step runs on its
+    thread would meet the step's use of stock's staging pointer: the open is given up first, its step told to stop
+    (coverflow_query_stop answers on its thread alone) and joined, and then the query runs."""
+    Files(fw)
+    clock, thread = [1000], []
+    fw.mock('time_now_ms', lambda *_: clock[0])
+    home = ui.new('window_create', 0, 0, 0, 0, 0)
+    ui.name[home] = 'home_page'
+    fw.mock('fw_pthread_create', lambda out, attr, run, arg, *_: C.c_ulong.from_address(out).__setattr__('value', 99)
+            or thread.append(run) or 0)
+    fw.mock('fw_usleep', lambda us, *_: clock.__setitem__(0, clock[0] + us // 1000) or 0)
+    on = [0]  # the thread asking: 0 the UI's, else the step's
+    fw.mock('fw_pthread_self', lambda *_: on[0])
+    fw.fn('coverflow__coverflow_open', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    stop = fw.fn('coverflow_query_stop', C.c_int, C.c_void_p)
+    assert thread and fw.fn('coverflow_spinner', C.c_int)() and not stop(None)
+    fw.mock('getAllMusic', lambda *_: 0)
+    joins = len(fw.calls('fw_pthread_join'))
+    fw.fn('staged', C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p)(fw.lib.getAllMusic, None, C.byref(C.c_int()))
+    assert len(fw.calls('fw_pthread_join')) == joins + 1 and not fw.fn('coverflow_spinner', C.c_int)()
+    assert not ui.timers or all(fn != C.cast(fw.lib.coverflow__open_step, C.c_void_p).value
+                                for fn, _c, _m in ui.timers.values())
+
 
 def test_albums_none_of_them_rated_says_so(fw, ui, song):
     rated_albums(fw, ui, song)

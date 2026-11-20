@@ -1845,6 +1845,19 @@ def test_a_list_at_its_top_or_low_on_the_screen_leaves_the_band_alone(fw, st, sc
     assert not r.painted and not r.band()
 
 
+@pytest.mark.parametrize('table', [False, True])
+def test_songs_scrolled_under_its_shuffle_row_paints_no_rows_above_the_row(fw, st, table):
+    """Songs (the user's screenshot, 2026-11-19): its action row, Shuffle, stands between the status row and the list,
+    from y 58 to 90. The band painted the list's rows above its top over the band alone, so a row showed above Shuffle
+    and Shuffle floated over the scrolled list. A page with the row showing keeps the list's rows in its box."""
+    r = Reach(fw, st, scroll=100, top=90, table=table)
+    shuffle = r.ui.add('view', r.win, (0, 58, 375, 32), name='view_navbar_allplay')
+    st('action_view', C.c_void_p).value = shuffle.addr
+    r.paint()
+    st('action_view', C.c_void_p).value = None  # the next test's page has none
+    assert not r.painted and not r.band()
+
+
 def test_the_band_repaints_when_its_list_scrolls_and_not_otherwise(fw, st):
     """The list's own invalidate keeps inside its box, so before a frame list_reach_due asks for the band once its list
     has moved since the band last showed it, and once more when the list is back at its top, its rows gone from it."""
@@ -2335,7 +2348,7 @@ def test_the_library_is_stocks_page_again_with_its_pages(fw, st):
     name, title, library = pages[-1]
     assert name == b'playset/playset_page' and title == 'Library'
     assert [kv(ui, r) for r in library.children] == [
-        'On-The-Go', 'Streaming Songs', 'Sorting', 'Artists: Album Artist', 'Artist View: Cover Flow', 'Playlists',
+        'On-The-Go', 'Sorting', 'Artists: Album Artist', 'Artist View: Cover Flow', 'Playlists',
         'Folders', 'Scan Song Durations']
     click(ui, row(ui, library, 'Folders'))
     _, title, folders = pages[-1]
@@ -2414,7 +2427,7 @@ def test_playback_s_and_library_s_rows_carry_their_captions(fw):
         return sub
     library = sub_page(1)
     assert {ui.text(label_of(r)): t for r, t in caption_texts(fw, library).items()} == {
-        'On-The-Go': 'Shows On-The-Go in Playlists and hold menus', 'Streaming Songs': 'Streaming songs join your Library',
+        'On-The-Go': 'Shows On-The-Go in Playlists and hold menus',
         'Scan Song Durations': 'Measures lengths after each update'}
     folders = sub_page(4)
     assert [(r.name, t) for r, t in caption_texts(fw, folders).items()] == [
@@ -3474,18 +3487,21 @@ def test_a_greyed_album_rows_second_line_ends_clear_of_the_offline_mark_too(fw, 
 @pytest.mark.parametrize('name, tab, greyed', [('albuminfo_page', None, True), ('playerjumpinfo_page', None, True),
                                                ('localmusic_page', None, False), ('search_dialog', 1, True),
                                                ('search_dialog', 0, False)])
-def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low, name, tab, greyed):
+def test_an_album_page_and_search_grey_their_songs_that_cannot_play(fw, st, low, tmp_path, name, tab, greyed):
     """An album's songs, and Search's songs, are a scroll_view's rows, one per record of the showlist (Search's:
-    p_deque_searchshowlist, the lit tab's rows), not a pooled table: with Local + Server, offline, a
-    server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone.
+    p_deque_searchshowlist, the lit tab's rows), not a pooled table: with a signed-in app's catalogue in the
+    Library, offline, a server song's row is greyed as the page paints; another page's rows, or another tab's, are left alone.
     Each record's path is a 4-byte field as the Q2's (low), so the 8-byte read of its title after it finds none:
     untagged rows, which an album page's song rows (song_rows.c) leave unpainted."""
-    page = Page(fw, name=name, LIBRARYSOURCE=b'1')
+    from test_catalogue import Rig, song_row
+    rig = Rig(fw, tmp_path)  # the app signed in, its catalogue imported: the server's songs in the Library
+    rig.write(1, [song_row('s1', 'Streamed', 'B', 'A', 1, 100, 1)])
+    rig.poll()
+    page = Page(fw, name=name)
     if tab is not None:
         group = page.ui.add('view', page.view.parent, name='tab_button_group')
         page.ui.add('tab_button', group, value=tab)
         page.ui.add('tab_button', group, value=1 - tab)
-    fw.var('catalogue_source', C.c_int).value = 1
     fw.mock('tk_str_start_with', stock_start_with)
     keep = []
 

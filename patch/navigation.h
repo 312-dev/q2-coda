@@ -5,6 +5,7 @@
 #include "chapters.h"
 #include "offsets.inc"
 #include "peq.h" /* libc/libcstl imports (deque_*, send) and the shared helpers */
+#include "wheel_accel.h" /* the wheel's momentum on a long list */
 #include "playback.h"
 #include "stock.h"
 #include "themes.h" /* tools/theme.py: the themes' enums and macros; theme_engine.c has the tables */
@@ -46,9 +47,8 @@ enum {
     POD_PL_CF,   /* Display's Playlist View: List or Cover Flow, as Artist View */
     POD_SCAN_DURATIONS,
     POD_CF_POSITION,
-    POD_LIBRARY_SOURCE, /* Local Only or Local + Server (catalogue.c) */
-    POD_OTG,            /* Library's On-The-Go (playlist_pages.c), on unless chosen */
-    POD_AUTOZONE,       /* Automatic Time Zone (autozone.c), on unless chosen */
+    POD_OTG,      /* Library's On-The-Go (playlist_pages.c), on unless chosen */
+    POD_AUTOZONE, /* Automatic Time Zone (autozone.c), on unless chosen */
     POD_COUNT
 };
 
@@ -393,6 +393,11 @@ int clock_due(const void *info);
 int bar_repaint(const void *info);
 void clock_text(void *label, int negative, int t);
 void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
+/* offline.c: Sync Offline's row for a Library item (OFF_* kind, peq.h), its symbol and its press;
+ * Now Playing's ⋯ row is peq.h's offline_np_row */
+const char *offline_row(int kind, void *r, int list), *offline_icon(void);
+void offline_press(void);
+int offline_state(const char *app, const char *key);
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into);
 int media_find(int kind, char *path);
@@ -481,7 +486,7 @@ void chevron_icon(void *w, void *canvas, int right, int y, int selected);
 #define VALUE_CHEVRON_GAP 21
 void chevron_muted(void *w, void *canvas, int right, int y);
 void spinner_icon(void *w, void *canvas, int right, int y);
-int spinner_frame(void), spinner_turn(void);
+int spinner_frame(void);
 void spinner_painted(void *w, const rect_t *r);
 int coverflow_spinner(void), coverflow_wait_input(void *e);
 
@@ -796,6 +801,8 @@ void keylock_paint(void *w, void *canvas);
 int overlay_scrim(void *w, void *canvas, unsigned argb, int *dy);
 void search_strip_overlay(void *w, void *canvas); /* search_strip.c: Return held's card */
 int ringnav_wm_paint(void *wm);                   /* window_manager_paint's leaf */
+/* nav/input.c: glyph_cache_lookup's stamp (tools/build.py GLYPH_STAMP) */
+unsigned long long ringnav_glyph_stamp(void);
 
 /* theme_engine.c */
 #define ACCENT_N SETTING_N_ACCENT /* the ACCENTS rows: theme_engine.c's accents[] has as many */
@@ -1063,6 +1070,16 @@ void bt_stopped_paint(void *w, void *canvas);
 const char *bt_stopped_title(const char *name);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
+/* search_strip.c: the search bar's pill (docs/oled-design.md#search-bar), and a list page's own search
+ * over its rows (search_bar.c); search_bar.c: the bar above a list page's first row */
+#define SEARCH_PILL_X 16
+#define SEARCH_PILL_H 36
+#define SEARCH_PILL_R 10
+void search_pill_paint(void *canvas, int cy, int lit, const char *words);
+int search_strip_scoped(void *page, void *surface, const char *title);
+int search_bar_up(void *top, void *w), search_bar_up_with(void *top, void *w, void *also),
+    search_bar_key(void *top, unsigned key);
+void search_bar_off(void), search_bar_paint(void *w, void *canvas);
 /* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,
  * at most max characters; Next at the text's end calls done, whose 0 closes the page and anything
  * else is a toast saying why not, the text kept to edit */
@@ -1160,6 +1177,7 @@ void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice)
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
 const char *day_or_date(char *out, unsigned n, unsigned when); /* Today, Yesterday, Nov 12 */
+const char *when_said(char *out, unsigned n, unsigned when); /* today, 18:11; yesterday, ...; Nov 12 */
 void carremote_poll(void), carremote_paired(const char *name),
     carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */
@@ -1226,6 +1244,7 @@ int tsv_split(char *line, char **f, int max); /* catalogue.c */
 int name_sorted(const char *page); /* the top page's list is a name-sorted Library list */
 void az_mark(void *w, int letter, int held, int bubble);
 void az_wheel(void *w, int id), az_paint(void *w, void *canvas);
+int az_letter_step(void *w, int id, int dir); /* a letter's jump on the wheel (wheel_accel.c) */
 int az_touch(void *w, void *event), az_held(void *event), az_on(void *w), az_right(void *w),
     az_bar_in(void *w);
 int az_initial(const char *s), az_target(const int *first, int letter), az_letter_at(int y),
@@ -1257,7 +1276,6 @@ enum { LIB_LIBRARY = 1, LIB_SORTING, LIB_PLAYLISTS, LIB_FOLDERS };
 void library_page(void *win, void *view, int page);
 int picker_rows(void *win); /* a picker's rows on stock's Buttons Lock page */
 void cf_sort_open(void);
-int library_source_toggle(void);
 /* navigation.c */
 int library_open(void *ctx, void *event); /* Library's page ctx (LIB_*) */
 void *list_row_into(void *view, const char *icon, int (*click)(void *, void *), void *ctx);

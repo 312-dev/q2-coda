@@ -1169,6 +1169,7 @@ void modal_more(void *win) {
             }
         }
         if (widget_lookup(button, "img_forward_0", 1)) kind = 1; /* the speed row, unnamed */
+        if (widget_get_prop_int(button, "_offline", 0)) icon = offline_icon(); /* offline.c */
         if (kind >= 0 && kind < (int)(sizeof more_icons / sizeof *more_icons))
             icon = more_icons[kind];
         widget_move_resize(button, 0, 0, modal_row_w(), MODAL_ROW);

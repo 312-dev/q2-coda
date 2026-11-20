@@ -318,15 +318,15 @@ void *ringnav_search_rows(void *win, int *tab) {
     return (void *)0;
 }
 static void grey_rows(void *w) {
-    if ((catalogue_source != 1 && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
+    if ((!catalogue_has() && !catalogue_greys()) || !kind(w) || !load_rows(&g_menu, w)) return;
     void *win = window_of(w), *list = (void *)0;
     int tab = 0; /* Search's lit tab: 0 Songs */
     const char *page = widget_get_prop_str(win, "name", "");
-    if (g_menu.kind == 1 && catalogue_source == 1)
+    if (g_menu.kind == 1 && catalogue_has())
         list = !tk_strcmp(page, "albuminfo_page") || !tk_strcmp(page, "playerjumpinfo_page")
                    ? P(p_deque_showlist, 0)
                    : page_tracks(win);
-    if (!list && g_menu.kind == 1 && catalogue_source == 1) list = ringnav_search_rows(win, &tab);
+    if (!list && g_menu.kind == 1 && catalogue_has()) list = ringnav_search_rows(win, &tab);
     if (list && deque_size(list) != (unsigned)g_menu.rows) list = (void *)0;
     for (int i = 0; i < g_menu.n; ++i) {
         rect_t r = bounds(&g_menu, i);
@@ -944,6 +944,7 @@ int ringnav_paint(void *w, void *canvas) {
     keylock_paint(w, canvas);
     feedback_toast_leave(w, canvas);
     search_strip_overlay(w, canvas);
+    search_bar_paint(w, canvas); /* a music list's lit search bar */
     confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&
@@ -1155,6 +1156,12 @@ static void *reach_find(void *win, int *x, int *y, int *off) {
     int budget = 96;
     void *v = win ? reach_walk(win, 0, 0, 0, &budget, x, y) : (void *)0;
     if (!v || modal_rows_of(v) || *y <= 0 || *y > REACH_TOP) return (void *)0;
+    /* Songs' action row (its Shuffle) stands between the band and the list: rows painted above
+     * the list would run on above the row, which then floats over the scrolled list (the user's,
+     * 2026-11-19). The list keeps its rows in its box there, under the fixed row. */
+    void *row = st.action_view, *p = row;
+    for (int k = 0; p && p != win && k < 8; ++k) p = P(p, W_PARENT);
+    if (p == win && row && widget_get_visible(row) && I(row, W_H) > 0) return (void *)0;
     *off = kind(v) == 2 ? I(v, TABLE_TOP) : I(v, SCROLL_Y);
     return *off > 0 ? v : (void *)0;
 }

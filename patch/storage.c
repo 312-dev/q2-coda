@@ -200,16 +200,55 @@ static void st_label(void *item, int x) {
     hscroll_label_set_ellipses(l, 1);
 }
 
-static const char *const st_names[] = { "Your Music", "Downloads", "Stream Cache", "Free" };
+/* Update Library (docs/ipod.md#settings, from the Library's page on 2026-11-19): stock's library
+ * scan, as Scan Music Now opens it (cf_empty.c), its second line when the last whole scan ended
+ * (storage_scanned, from coverflow.c library_scan): "Last updated today, 18:11", "yesterday, ..."
+ * or the date; none before a scan this firmware saw. */
+#define ST_SCANNED "/mnt/data/q2-library-updated" /* the wall time, decimal */
+static int st_update(void *ctx, void *event) {
+    int scan[4] = { 0 };
+    navigator_to_with_context("dialog/updatemusic_dialog", scan);
+    return 0;
+}
+/* library_scan's, on stock's scan thread, as a whole scan ends unstopped: its time, written whole. */
+void storage_scanned(void) {
+    char b[24];
+    int n = tk_snprintf(b, sizeof b, "%u", (unsigned)wall_time()); /* 32 bits to 2106 */
+    if (!blob_io(ST_SCANNED, ST_SCANNED ".tmp", b, (unsigned)n, 1)) unlink(ST_SCANNED ".tmp");
+}
+/* The saved time, 0 for none. */
+static long long st_scanned_at(void) {
+    char b[24] = "";
+    void *f = fopen(ST_SCANNED, "rb");
+    if (f) b[fread(b, 1, sizeof b - 1, f)] = 0, fclose(f);
+    long long when = 0;
+    for (const char *s = b; *s >= '0' && *s <= '9'; ++s) when = when * 10 + (*s - '0');
+    return when;
+}
+static long long st_shown_scan __attribute__((section(".scratch"))); /* the time the page shows */
+/* "Last updated ..." into out from the saved time; 0 with none (or the clock unset then). */
+const char *st_updated(char *out, unsigned n) {
+    long long when = st_shown_scan = st_scanned_at();
+    char day[24];
+    return when && when_said(day, sizeof day, (unsigned)when)
+               ? (tk_snprintf(out, n, "Last updated %s", day), out)
+               : (const char *)0;
+}
+
+#define ST_ROWS 5
+static const char *const st_names[] = { "Your Music", "Downloads", "Stream Cache", "Free",
+                                        "Update Library" };
 static void st_fill(void) {
     static int (*const clicks[])(void *, void *) = { st_nothing, st_open_dl, st_open_cache,
-                                                     st_nothing };
+                                                     st_nothing, st_update };
     int sel = so.view ? widget_get_prop_int(so.view, "_ringnav_index", 0) : 0;
-    void *view = so.view = page_list(so.page, so.page, 0, "Storage", 4, 48);
+    char when[48];
+    void *view = so.view = page_list(so.page, so.page, 0, "Storage", ST_ROWS, 48);
     for (int i = 0; i < 4; ++i)
         st_label(st_row(page_row_detail(view, i, st_names[i], 0, clicks[i]), i), ST_DOT_TEXT);
-    st_frame(so.page, view, ST_HEAD, 4, &so.head, &so.foot);
-    ringnav_select(view, sel, 4);
+    st_row(page_row_detail(view, 4, st_names[4], st_updated(when, sizeof when), clicks[4]), 4);
+    st_frame(so.page, view, ST_HEAD, ST_ROWS, &so.head, &so.foot);
+    ringnav_select(view, sel, ST_ROWS);
 }
 
 static void dl_fill(void) {
@@ -229,7 +268,8 @@ static int st_poll(const void *unused) {
     if (st_read()) {
         if (so.dl) dl_fill();
         if (so.page) st_fill();
-    }
+    } else if (so.page && st_scanned_at() != st_shown_scan)
+        st_fill(); /* a scan ended since: Update Library's line */
     return 8; /* RET_REPEAT */
 }
 

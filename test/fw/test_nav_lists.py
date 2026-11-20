@@ -1023,6 +1023,9 @@ def test_a_list_takes_no_overscroll_once_bound(fw, ui):
 ANIM_X_TO, ANIM_DURATION, SLIDE_OFFSET, SLIDE_INDEX = O['ANIM_X_TO'], O['ANIM_DURATION'], O['SLIDE_OFFSET'], O['SLIDE_INDEX']
 
 
+WA = host.defines('wheel_accel.h')
+
+
 class Carousel:
     """Home's slide_menu of n cards on home_page, a card's width plus the spacer apart; its animator
     a block whose goal (ANIM_X_TO) and run (ANIM_DURATION) the C sets. The live offset is the test's."""
@@ -1142,6 +1145,29 @@ def test_a_follow_glide_runs_as_long_as_coverflows_aim_says(fw, ui):
     assert fw.calls('widget_animator_scroll_create')[0][1][3] == 0  # AWTK gets no easing it lacks
     easing = struct.unpack_from('<Q', home.animator, O['ANIM_EASING'])[0]
     assert easing == C.cast(fw.lib.coverflow_follow, C.c_void_p).value
+
+
+def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
+    """The user, 2026-11-19: Cover Flow scrolls as the lists do, through every cover, never by letter. Timed ticks
+    on a long carousel: one card a tick turned slowly, more as a sustained spin goes on (wheel_accel.c: 2 from
+    WA_FIRST_MS, one more each WA_RAMP_MS, at most WA_MAX_ROWS), however long, and no letter shown; a pause past
+    WA_RUN_MS starts over at one."""
+    home = Carousel(fw, ui, n=400)
+    goal, steps, t = 0, [], 1000
+    for i in range(3):  # slow
+        key(fw, ui, KEY_NEXT, t)
+        steps.append((goal - home.goal) // home.stride)
+        goal, t = home.goal, t + 300
+    for i in range(90):  # a sustained spin, a tick each 30 ms for 2.7 s
+        key(fw, ui, KEY_NEXT, t)
+        steps.append((goal - home.goal) // home.stride)
+        goal, t = home.goal, t + 30
+    fast = steps[3:]
+    assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
+    assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
+    assert not ui.due('cf_letter_expire')  # no letter over the covers
+    key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
+    assert (goal - home.goal) // home.stride == 1
 
 
 def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
@@ -2539,8 +2565,11 @@ def test_a_row_rebuilt_in_place_before_the_confirm_is_not_clicked(fw, ui):
     assert not clicks.seen
 
 
-@pytest.mark.parametrize('rows, parent, woken', [(40, 'list_view', True), (5, 'list_view', False), (40, 'view', False)])
-def test_a_tick_wakes_the_lists_own_scroll_bar_where_it_has_one(fw, ui, rows, parent, woken):
+@pytest.mark.parametrize('rows, parent', [(40, 'list_view'), (40, 'table_view'), (5, 'list_view')])
+def test_a_tick_leaves_the_lists_own_scroll_bar_asleep(fw, ui, rows, parent):
+    """docs/internals.md#song-rows-cost: the theme draws the wheel's indicator itself (list_marks.c); stock's mobile
+    bar, painted transparent, woken (scroll_bar_scroll_to at its own value) runs a 300 ms wait and a 500 ms opacity
+    fade as a widget animator, repainting its column every loop pass: ~45 frames a tick on Songs."""
     win = ui.widget('window', ui.wm, (0, 30, 375, 290), name='allmusic_page')
     holder = ui.widget(parent, win, (0, 0, 375, VIEW_H))
     scroll_list(ui, holder, titles(rows))
@@ -2548,8 +2577,8 @@ def test_a_tick_wakes_the_lists_own_scroll_bar_where_it_has_one(fw, ui, rows, pa
     bar.int(O['BAR_VALUE'], 123)
     ui.top = win
     key(fw, ui, KEY_NEXT)
-    seen = [a[:2] for _, a in fw.calls('scroll_bar_scroll_to')]
-    assert seen == ([(bar.at, 123)] if woken else [])  # its own value: the thumb stays stock's
+    called = {name for name, _ in fw.calls()}
+    assert called and not {n for n in called if n.startswith(('scroll_bar_', 'widget_animator_'))}
 
 
 def test_setting_keys_name_each_option_in_config(fw):
@@ -3044,3 +3073,22 @@ def test_an_ellipsis_never_follows_a_space(fw, width, kept):
 @pytest.mark.parametrize('text, ellipses', [('Short', 1), ('Sex Type Thing (2017 Remaster)', 0)])
 def test_a_text_that_fits_or_has_no_ellipsis_keeps_its_box(fw, text, ellipses):
     assert ellipsis(fw, text, 120, ellipses)[1] == 120
+
+
+def test_a_long_artist_is_cut_as_before_with_a_handful_of_measurements(fw):
+    """docs/internals.md#song-rows-cost: a Songs row's artist cut short to its box kept losing a character and measuring
+    again, once per character (and its font set each time), on every repaint of every row as the wheel scrolls. The cut
+    is the same, the ellipsis in the last place that fits, found by halving: a few measurements, not one a character."""
+    canvas = Canvas(fw)
+    measured = []
+    fw.mock('canvas_measure_text', lambda c, s, n, *_: measured.append(n) or 8.0 * n)  # every character 8 px
+    small_text = fw.fn('song_rows__small_text', None, C.c_void_p, C.c_void_p, C.c_int, C.c_int, C.c_int, C.c_void_p)
+    row = (C.c_int * 4)(0, 154, 375, 32)
+    text = 'Avenged Sevenfold and the Many Guests of the Long Night'
+    small_text(canvas.at, (C.c_uint * (len(text) + 1))(*map(ord, text), 0), 0, 80, 0, row)
+    (drawn, box, _), = canvas.boxes
+    n = len(text)  # the old loop's answer: from the whole text down, the last character the ellipsis, until it fits
+    while n > 1 and 8 * n > 80:
+        n -= 1
+    assert drawn == text[:n - 1] + '\u2026' and box[2] == 8 * n + 1
+    assert len(measured) <= 8, measured  # 55 characters: one a character was 46 measurements

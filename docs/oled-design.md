@@ -71,8 +71,9 @@ seventh of its brightness. At the foot the rows fade as Corners says, into black
 - **Which lists.** Every vertical list whose box starts at most 90 px down the screen (`REACH_TOP`): the
   settings pages, the Library's lists and tables (Songs, a playlist's songs), Home's lists and Edit Home, and the
   pages the payload builds (Recently Added, card apps' lists). A list lower down, under a page's own header or tabs (EQ's), keeps its
-  rows in its box. Songs' Shuffle row stays where it is: the rows pass behind it and show again above it, under the
-  status row; a table's rows never draw over it.
+  rows in its box. So does a list under Songs' Shuffle row (the user's, 2026-11-19): the row stays fixed under the
+  status row and the songs scroll under it, with no row above it, where one showing made Shuffle look as if it
+  floated over the list.
 - **A menu sheet's rows** (the menus, Up Next) stay in the sheet: the sheet's top is their edge, and they fade under
   y 50 as [Menus](#menus) says.
 - **Taps** on the band are the status row's, as on any page ([Full-bleed](#full-bleed)): a row shown under the
@@ -138,6 +139,7 @@ its glyphs' inks. A test fails on a colour literal equal to a token anywhere els
 | Positive       | `#34C759` | "Connected" dots, charging, OK to Disconnect, a song added                    | Green dot on Bluetooth                                     |
 | Warning        | `#FF9F0A` | A charger too weak, Charge to Update                                         |                                                            |
 | Negative       | `#FF453A` | The low battery (under 20%), a failed step                                  |                                                            |
+| Favorite       | `#FF375F` | Now Playing's heart while the song is liked (iOS's dark systemPink; not Negative, which means a failure) | the same in Light Mode |
 | Raised         | `#1C1C1E` | Toasts, cards, the modal's panel, keys                                       |                                                            |
 | Raised 2       | `#2C2C2E` | Pills and placeholders on a raised surface, a lifted row                     |                                                            |
 | Off            | `#3A3A3C` | A gray glyph's circle, a control that is off                                 |                                                            |
@@ -580,7 +582,7 @@ Songs play in place, so a song row has no chevron. It is one line, 32 px, seven 
   `subsonic`, with or without its own icon files) q2-coda's submarine with two sonar arcs. Any other card app with its
   own icon shows that icon scaled into the same 20 px box, grayed as every card app icon is under this theme
   (`icons.addon_mono`) rather than inked: a tint would turn an icon drawn on a filled tile into a solid square.
-- **Where a song lives** (with Library: Local + Server): a song row's right column says where the song is, as the
+- **Where a song lives** (with a server's app signed in): a song row's right column says where the song is, as the
   user approved from `mock_radio.py`'s storage sheet on 2026-11-15: nothing for the user's own file, Phosphor
   `arrow-circle-down` for one a card app downloaded (its `q2app`'s `downloads=` folder, q2-subsonic's `Subsonic/`),
   `cloud` for a server song that streams; regular, 18 px, Text Tertiary, white on the selection, centered where the
@@ -627,9 +629,11 @@ Built as the `oled` set's `np_art` and `np_bar_y` (`tools/ipod.py` `np_grid`) wi
 The album is one line ending in an ellipsis (the title and artist scroll), rather than two, so the heart under it keeps its place. What the design
 has no place for keeps a place of its own:
 
-- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up): Phosphor `heart`,
-  34 px, at x 193 to 227 and y 146 to 180, outlined, or `heart-fill` while the song is liked, both Text Primary, no
-  colour. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
+- **The heart** stands in the gap under the album (the user's, 2026-11-18, `heartmove` mock-up), drawn smaller and
+  pink-red when on (the user's, 2026-11-19, `mock_np_heart.py`): 18 px of ink tall, its left at x 194, two pixels left
+  of the text column, and its middle at y 164 (`tools/art.py` `np_heart`, in a 34 px image at x 193 to 227 and y 146
+  to 180); off, Phosphor `heart` (bold) in Text Secondary; on, `heart-fill` in Favorite (`#FF375F`, both halves). The
+  hold menu's Favorite rows keep the menu's own glyphs and colours. It is the like alone ([rating page](#rating-page)); its touch is x 182 to 238, y 142 to 184. The album is
   one line ending in an ellipsis, never scrolled, so the heart's place never moves.
 - **More** stands at the right end of the art's bottom line (baseline 208), on the art's page, so a swipe takes it
   away with it: Phosphor `dots-three` (regular, 20 px, Text Primary; pressed in Text Secondary), its ink ending on
@@ -683,13 +687,17 @@ has no place for keeps a place of its own:
   does not animate, no "Buffering…"; it goes once the song plays on (`np_stream.c`).
 - **A server song's badge** (streaming-v3): at the art's bottom line, from the title's column (x 192, bottom 208), on the
   art's page so a swipe takes it with the heart and More: a 20 px badge with 6 px corners and a 1 px Text Secondary
-  outline, Phosphor's `cloud` (12 px, Text Secondary, regular: the vendored set has no bold cloud) 11 px in and the
-  file's format ("FLAC", Inter Medium 13 px, Text Secondary) 21 px in, 30 px wider than the label. While the app says
-  the server can't be reached (`server=down` in its `.state`) the glyph is `cloud-slash`. A card file has none.
-- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed): while its app says the
-  server can't be reached and the song is the pressed one or one the player waits for, the times row's centre reads
-  "Can't reach the server" (Inter 13 px, Text Secondary) in the spinner's place, and the state row is the empty states'
-  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). A tap takes either; Centre at rest is Retry; the
+  outline round the file's format ("FLAC", Inter Medium 13 px, Text Secondary) alone, 9 px in and 9 px past its end:
+  no glyph (the user's, 2026-11-19, "remove cloud icon from FLAC"; it was a cloud, or a crossed-out cloud while the
+  server was out of reach, which the status row's offline glyph and the message below still say). A card file has
+  none.
+- **A server song that can't go on** (streaming-v1 frame 5, as v3 keeps it: art never dimmed; the reason in place,
+  sheet 5 option A, signed off 2026-11-19): while its app says the server can't be reached (`server=down`, or
+  `reach=down <code>`) and the song is the pressed one or one the player waits for, the times row's centre first reads
+  why beside the spinner while the app tries again, "Server error 502 · trying again" (Inter 13 px, Text Secondary;
+  "Server not answering", "Server not found", else "Can't reach the server", the words of the
+  [server toast](#dialogs-and-toasts)), for 10 s; then why alone in the spinner's place, and the state row is the empty states'
+  capsule pair, Retry (selected) and Skip ([buttons](#buttons)). Nothing is skipped without a word. A tap takes either; Centre at rest is Retry; the
   wheel stays the volume's. Retry asks the app to try again now; Skip is Next.
 - **The volume** and the scrub draw on the bar where it is. The volume (the "A: iPod speakers"
   mock-up) keeps the bar's rows, inset to x 48 to 323, white on the track, with Phosphor's
@@ -984,7 +992,7 @@ the gray one.
 | Composers | `music-notes-simple` | No Composers | Songs need a composer tag | |
 | Folders | `folder` | No Folders | Copy music to the SD card | |
 | Cover Flow, no card music | `cards` | No Albums | Copy music to the SD card | |
-| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | **Turn on Streaming** (while Streaming Songs is off) |
+| Cover Flow, a streaming app signed in | `cards` | No Albums | Streaming albums can show here | none: its albums join once its catalogue is in |
 | Cover Flow, the card's music not scanned | `cards` | No Albums Yet | Music on the card isn't scanned | **Scan Music Now** |
 | Playlists | none (compact) | No Playlists | Make one with New Playlist | none: under On-The-Go's row; New Playlist is in a song's hold menu (Add to Playlist…), not on this page. The picker keeps its rows alone |
 | Favorites | `heart-slash` | No Favorites | Hold Play/Pause on a song to add it | |
@@ -1018,6 +1026,28 @@ Settings, and a payload list's other messages (Internet Radio's "Loading…", Ba
 
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
   being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
+
+### Sync
+
+A card app's Sync (q2-subsonic's) is one centred stack per state, iOS's Software Update's way (the user's, 2026-11-19,
+`mock_sync_apple.py`), the [empty state](#empty-and-offline)'s form: the state's glyph in outline (60 px, Text
+Secondary), its title in Inter Medium 20, its lines in 15 px Text Secondary each on a 20 px band, at most one
+[button](#buttons) (the focus rule's ring), and a footer in 13 px Text Tertiary centred on y 304, clear of the glass;
+syncing, a 4 px bar 232 px wide in Track filled in the accent sits 10 px under the title. Sync asks the server every
+time it opens.
+
+| State | Glyph | Title | Lines | Button | Footer |
+| --- | --- | --- | --- | --- | --- |
+| Checking | `arrows-clockwise` | Checking for changes… | Asking music.example.net | | Last synced yesterday at 21:40 |
+| Up to date | `check-circle` | Up to date | Your offline songs match the server. | | Checked just now · last synced yesterday at 21:40 |
+| Changes | `arrow-circle-down` | 12 new songs | 380 MB · 21 GB free / 2 songs will be removed | **Sync Now** | Last synced yesterday at 21:40 |
+| Syncing | `arrow-circle-down` | Syncing 4 of 12 | the bar, then Rockstar · Post Malone | **Stop** | Keep the Q2 on Wi-Fi until it finishes |
+| Failure | `cloud-slash` | Couldn't reach the server | Server error 502. / Offline songs still play. | **Try Again** | Last synced yesterday at 21:40 |
+| Nothing chosen | `cloud` | Nothing to sync yet | Hold a song, album or artist / and choose Sync Offline. | | |
+
+The app sends each state as a reply led by an info row `status` (its context the glyph, its subtitle the lines,
+`\n` apart, its position the bar's permille), its first action row the button and an info row `foot` the footer
+(`addon.c` `status_view`, the caps word `status`; [internals](internals.md#card-apps)).
 
 ### Loading
 
@@ -1154,7 +1184,7 @@ the pair, the rows) and `patch/addon.c` `artist_view` (which reply rows go where
 - **Hold menu:** Play/Pause held on the page opens the menu sheet of its sync rows, Add to Sync
   (or Remove from Sync), Quality and Sync Now, each with its symbol. Play is gone: Shuffle plays
   the artist.
-- **A Library artist** (card songs and, with Local + Server, server-library songs; from Library >
+- **A Library artist** (card songs and a signed-in server's songs; from Library >
   Artists, Go to Artist, Search or Now Playing's artist tap: stock's artist page) is the same page,
   built by `patch/library_artist.c` from the Library's songs ([internals](internals.md#library-artist-page)):
   the counts read "8 albums · 96 songs" and the genre is the artist's songs' commonest. **Shuffle**
@@ -1261,8 +1291,12 @@ page, On-The-Go) and `patch/add_songs.c`.
   hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
-  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
-  Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), Sync Offline (a song
+  from a signed-in server; Stop Syncing Offline once chosen, `cloud-arrow-down` and `cloud-slash`), then Go to Album, Go to
+  Artist and Go to Folder. An album's and an artist's hold menu have Sync Offline after their own rows, a server
+  playlist's before Rename and Delete, and Now Playing's ⋯ has it for the song playing; none while the app syncs its
+  Entire Library ([internals](internals.md#sync-offline)). The app toasts its answer: "Syncing offline · 12 songs",
+  "Stopped syncing offline", "Offline via Entire Library" (the user's, 2026-11-19). Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
   "New Playlist N" with the song in it (renamed later from its own hold), then the playlists; a
   pick adds at once and toasts "Added to name" ("Already in name").
 
@@ -1287,6 +1321,30 @@ Recently Added, Artists, Albums and Songs, each with the chevron.
   it is, and a toast says which ("Added to name", "Removed", "Undone"); Add All adds every song not
   already in ("Added N songs", "Already added").
 - Return goes back a level; from the chooser, back to the playlist, which reads its songs again.
+
+### Search bar
+
+<a id="search-bar"></a>Every music list page has its own search (approved as `mock_search_filter.py` v3 on
+2026-11-19, `patch/search_bar.c`): Songs, Artists, Albums, Genres, Playlists, Years, Ratings, Most Played and Long
+Songs, and inside a playlist, an artist (its albums and songs) or an album.
+
+- **Where:** one wheel step above the first row. As the page opens it is out of sight: the first row lit, nothing
+  above it, and no fade or vignette hinting at it. A turn up from the first row brings it in: the list moves down
+  40 px and the bar takes that band; a turn down puts the list back with its first row lit.
+- **Look:** a Raised 2 pill from x 16 to 359, 36 px high with 10 px corners, centred in the band; a magnifier at
+  x 31 and "Search <the page's title>" ("Search Songs", "Search Road Trip", "Search The Killers") in 20 px from
+  x 48. Lit (the wheel on it, or typing) a 2 px accent outline goes round the pill, its inside unchanged, and the
+  words are Text Secondary; otherwise Text Tertiary.
+- **Typing:** Centre opens the [letter strip](#text-entry) on the same page title, the bar at the top holding the
+  text with its cursor and the page's own rows that hold the text under it, in the page's order, as they live: no
+  tabs and no other kind of result. While the strip is open the wheel picks letters.
+- **Return** closes the strip and lights the bar, the text and the filtered rows kept; the wheel turned down goes
+  into the rows. Return on the lit bar goes back to the page, its bar still lit; Return there leaves the page.
+  The text is cleared by erasing on the strip.
+- **The go key** (the accent's disc) closes the strip and lights the first match; with none it lights the bar,
+  which shows the text, over the empty state's No Matches.
+- **A match** opens as its row does on the page: the search goes and the page's selection moves to the row.
+- Home's Search row stays the one search across everything ([Text entry](#text-entry)).
 
 ### Text entry
 
@@ -1399,8 +1457,8 @@ one is a bare one the strip takes in its first frame (`patch/keyboard.c` `kb_hos
   is (a 16 unit slash from (48,40) to (208,216) joined to the ring below it, the ring above it ending in
   round caps 32 units from the slash), traced to filled paths.
 - Weights by role: `fill` for the padlock and a favorite's heart, `bold` for chevrons, the status row's `wifi-x`, sync, Bluetooth and `cloud-slash`, Now
-  Playing's and the confirmation's shuffle and repeat and About's quality badge, `regular` for row symbols and Now Playing's
-  heart and More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
+  Playing's and the confirmation's shuffle and repeat, About's quality badge and Now Playing's heart while off, `regular`
+  for row symbols and Now Playing's More. Sizes are the design's: 13 px padlock, 11 px tall status glyphs ([Status row](#status-row)), 15 px chevron, 20 px row symbols,
   heart and More, 22 px state row, 56 px confirmation, 12 px for About's quality badge
   (`waveform-bold`).
 - **Missing art** is one placeholder everywhere stock shows its own (Now Playing, the album grids,

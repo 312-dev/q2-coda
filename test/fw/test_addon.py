@@ -41,7 +41,7 @@ class App(C.Structure):
                                          'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play')),
-                ('reach', C.c_int), ('srverr', C.c_char * 24)]
+                ('reach', C.c_int), ('srverr', C.c_char * 24), ('offline', C.c_int)]
 
 
 class Ap(C.Structure):
@@ -518,11 +518,11 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio ahead\n'
-    # Streaming Songs' state goes first (library_settings.c), so an app that reads libsource in the caps finds it
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio status ahead\n'
+    # the server library's state goes first (library_settings.c), so an app that reads libsource in the caps finds it
     assert world.of('rename') == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
                                   (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
-    assert world.written[b'/tmp/q2-addon.library.tmp'] == b'local\n'
+    assert world.written[b'/tmp/q2-addon.library.tmp'] == b'server\n'  # always: no setting
 
 
 def test_hostile_manifests(fw):
@@ -2464,52 +2464,22 @@ def test_an_action_sends_its_context_toasts_and_asks_again(fw):
     assert p.toasts == [b'Done'] and p.request().endswith(b'\tmenu\n') and p.top.state == K_LOAD
 
 
-def needslib_page(fw, source, answer, during=None):
-    """A page with a needslib row and an action row, LIBRARYSOURCE as given; the confirm answers answer (10: Turn On)
-    after running during, if any, as the ask's own loop would. Its asks' questions."""
-    asked: list = []
-
+@pytest.mark.parametrize('source', [0, 1])
+def test_a_needslib_row_is_an_action(fw, source):
+    """The server library has no setting (the user's, 2026-11-19): a needslib row, an older app's, sends its action at
+    once with its context, as an action row does, asking nothing, whatever an older build saved as LIBRARYSOURCE."""
     def read(path, section, key, out, default, *_):
         v = str(source).encode() if C.string_at(key) == b'LIBRARYSOURCE' else C.string_at(default)
         C.memmove(out, v + b'\0', len(v) + 1)
     fw.mock('toolsReadConfig', read)
+    asked: list = []
     p = Page(fw)
-
-    def ask(path, info, *_):
-        asked.append(C.string_at(info + 8))
-        if during:
-            during(p)
-        return answer
     p.answer(rows=[item(1, b'needslib', b'on'), item(2)])
-    fw.mock('navigator_to_with_context', ask)
-    return p, asked
-
-
-@pytest.mark.parametrize('source, answer, sent', [(1, 0, True), (0, 10, True), (0, 0, False)])
-def test_a_needslib_row_is_an_action_that_needs_streaming_songs(fw, source, answer, sent):
-    """Pressed with Streaming Songs on, its action goes at once, with its context, as an action row's; off, it asks
-    first, and the action goes only after Turn On (which turned it on: library_settings.c library_needs)."""
-    p, asked = needslib_page(fw, source, answer)
+    fw.mock('navigator_to_with_context', lambda path, info, *_: asked.append(C.string_at(info + 8)) or 10)
     req = p.req.id
     p.click(0)
-    assert asked == ([] if source else [b'Show streaming songs?'])
-    assert (p.req.id != req) == sent and p.pg.act == sent
-    if sent:
-        assert p.request().endswith(b'\top1\ton\n')
-
-
-def test_a_needslib_row_rebuilt_while_it_asks_sends_nothing(fw):
-    """The ask runs its own loop: a live level's reply that lands meanwhile rebuilds the list, and the row pressed is
-    gone."""
-    ids = []
-
-    def reply(p):
-        p.fw.fn('addon__fetch', None, C.POINTER(Lv))(p.pg.lv)
-        p.answer(rows=[item(3)])
-        ids.append(p.req.id)
-    p, asked = needslib_page(fw, 0, 10, during=reply)
-    p.click(0)
-    assert asked == [b'Show streaming songs?'] and p.pg.act == 0 and [p.req.id] == ids  # nothing sent after it
+    assert asked == [] and p.req.id != req and p.pg.act == 1
+    assert p.request().endswith(b'\top1\ton\n')
 
 
 def test_an_action_refused_toasts_why(fw):
@@ -6467,3 +6437,33 @@ def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, starte
     assert p.world.of('system') == []
     wake(b'foo')
     assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started
+
+
+def test_a_status_reply_is_the_centred_stack_and_its_button_presses_its_action(fw, nav_st):
+    """docs/oled-design.md#sync: a reply led by an info row "status" is the empty state's stack (its glyph from the
+    row's context, its title, its lines, a bar of its position's permille), the first action row its button and an
+    info row "foot" its footer; no rows are listed. The button sends its row's action."""
+    p = oled_page(fw, nav_st)
+    props: dict = {}
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.string_at(v)))
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.c_int(v).value))
+    p.answer(rows=[(b'info', b'status', b'12 new songs', b'380 MB \xc2\xb7 21 GB free%0A2 songs will be removed',
+                    b'arrow-circle-down', b''),
+                   (b'action', b'start', b'Sync Now', b'', b'', b''),
+                   (b'info', b'foot', b'Last synced yesterday at 21:40', b'', b'', b'')])
+    assert p.drawn == 0
+    assert (props[b'_es_glyph'], props[b'_es_title'], props[b'_es_row'], props[b'_es_foot'], props[b'_es_bar']) == (
+        b'arrow-circle-down', b'12 new songs', b'Sync Now', b'Last synced yesterday at 21:40', 0)
+    assert props[b'_es_hint'] == '380 MB · 21 GB free\n2 songs will be removed'.encode()
+    fw.fn('addon__status_press', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.request().endswith(b'\tstart\n')
+
+
+def test_a_status_reply_s_position_is_its_bar_and_without_an_action_it_has_no_button(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    props: dict = {}
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.string_at(v)))
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.c_int(v).value))
+    p.answer(rows=[(b'info', b'status', b'Syncing 4 of 12', b'Rockstar', b'arrow-circle-down', b'333')])
+    assert props[b'_es_bar'] == 334 and props[b'_es_row'] == b'' and props[b'_es_foot'] == b''

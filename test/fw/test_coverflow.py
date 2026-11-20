@@ -2932,7 +2932,7 @@ class Homes:
     """A Home window as OLED's asset lays it out: the art, the main list's rows, the Settings list (hidden, two rows: a
     button with its label and icon), and Carousel's slide_menu and arrows. OLED's set has no home_lib, so no Library
     or Streaming list (tools/ipod.py ipod_home)."""
-    ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_shuffle_songs', 'img_services',
+    ROWS = ('img_playing', 'img_library', 'img_cover_flow', 'img_folder', 'img_rockbox', 'img_shuffle_songs', 'img_games',
             'img_home_search', 'img_settings')
 
     def __init__(self, ui, carousel=False, rockbox=False):
@@ -2955,6 +2955,7 @@ class Homes:
                 b = ui.make(row, 'button', 10, 60 * i, 355, 60)
                 ui.make(b, 'hscroll_label', 80, 10, 200, 40)
                 ui[ui.make(b, 'image', 10, 10, 50, 50)].image = ('stream_radio', 'file:///mnt/mmc/apps/x/icon.png')[i]
+        self.set_stream = ui.make(view, 'image', 0, 120, 375, 60, name='img_set_stream')  # Settings' Streaming
         self.sets, self.lib, self.stream = self.lists['homeset'], None, None
         self.carousel = []
         if carousel:
@@ -3012,10 +3013,12 @@ def test_home_binds_its_cards_and_lists(fw):
     assert list(home.carousel) == h.carousel
     assert not any(ui[w].sensitive for w in (h.art, h.sets))  # taps find the shown list's rows
     want = {'img_cover_flow': ('coverflow__coverflow_open', 0), 'img_settings': ('coverflow__home_settings', 0),
-            'img_home_search': ('library_search_open', 0)}
+            'img_home_search': ('library_search_open', 0), 'img_games': ('games_open', 0)}  # Games: Home's, 2026-11-19
     for row, (fn, ctx) in want.items():
         assert ui.handlers(h.rows[row]) == [(address(fw, fn), ctx)], row
-    assert not ui.handlers(h.rows['img_library']) and not ui.handlers(h.rows['img_services'])  # stock's, by name
+    assert not ui.handlers(h.rows['img_library'])  # stock's, by name
+    # Streaming is Settings' row, after Playback; with no home_lib (OLED's set) it opens stock's Streaming page
+    assert ui.handlers(h.set_stream) == [(address(fw, 'on_home_stream_onclick'), h.win)]
     on_card = [ui.handlers(ui.lookup(h.carousel[0], n)) for n in ('img_cover_flow', 'img_rockbox')]
     assert on_card == [[(address(fw, 'coverflow__coverflow_open'), 0)], [(address(fw, 'home_shortcut_open'), 0)]]
 
@@ -3242,7 +3245,7 @@ def pane_rect(fw, h):
     return h.win, (x, 320 - ph, 375 - x, ph)
 
 
-@pytest.mark.parametrize('name', ('img_library', 'img_cover_flow', 'img_folder', 'img_services', 'img_settings',
+@pytest.mark.parametrize('name', ('img_library', 'img_cover_flow', 'img_folder', 'img_games', 'img_settings',
                                   'img_shuffle_songs', 'img_home_search', 'img_unknown'))
 def test_the_pane_follows_the_highlighted_row(fw, name):
     """Off Now Playing's row (the pane's first kind) any row shows the library's covers."""
@@ -3860,12 +3863,16 @@ def test_a_level_slides_in_from_the_side_it_comes_from_where_the_theme_moves_lev
 
 # The covers' captions
 
+class WheelAccel(C.Structure):  # patch/wheel_accel.h wheel_accel_t
+    _fields_ = [('key', C.c_void_p), ('last', C.c_uint), ('run', C.c_uint), ('dir', C.c_int)]
+
+
 class Th(C.Structure):
-    _fields_ = [*((k, C.c_float) for k in 'pos vel goal lead lead_v rate tau ticks seen seen_lead stretch'.split()),
-                *((k, C.c_uint) for k in 'at tick_at edge_at letter_at'.split()),
-                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced capped jump beat jump_to lean fold'.split()),
+    _fields_ = [*((k, C.c_float) for k in 'pos vel goal lead lead_v rate tau ticks seen seen_lead'.split()),
+                *((k, C.c_uint) for k in 'at tick_at edge_at'.split()),
+                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced jump tick_acc rebased lean fold'.split()),
                 ('fold_at', C.c_uint), *((k, C.c_float) for k in 'enter fold_off fold_vel hold_lead hold_run hold_xrun hold_xs'.split()),
-                ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float)]
+                ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float), ('wa', WheelAccel)]
 
 
 def captions(fw, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):

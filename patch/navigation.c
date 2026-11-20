@@ -93,7 +93,7 @@ void ringnav_timezone_row(void *item, int i) {
 }
 /* A load's songtable reads (library_query): 0 stock's own; 1 music (LIBRARY_MUSIC): spoken
  * tracks and the Library's scope left out, the server's songs beside the card's; 2 (LIBRARY_ALL):
- * every card song and, with Local + Server, the server's, as the Ratings lists read them. */
+ * every card song and a signed-in server's, as the Ratings lists read them. */
 static int library_music __attribute__((section(".scratch")));
 static int library_first __attribute__((section(".scratch")));
 
@@ -134,7 +134,7 @@ static int library_query(int content, const char *db, const char *sql, void *row
                            ? strstr(sql, " from songtable")
                            : 0;
     if (from) { /* library_first: the Unknown row's check, which one song answers */
-        /* Local + Server: the server's songs beside them (catalogue.c) */
+        /* a signed-in server's songs beside them (catalogue.c) */
         int n = tk_snprintf(filtered, sizeof filtered,
                             "%.*s from (select * from songtable where %s%s)%s%s", (int)(from - sql),
                             sql, library_music == LIBRARY_MUSIC ? MUSIC_WHERE : "1", server,
@@ -253,7 +253,6 @@ extern int album_only(void *, void *, int), coverflow_split(void *);
 #define WHEEL_MAX_STEP 8  /* one more per this much spin, up to this many */
 #define LIST_FIRST_MS 300 /* iPod row lists: one row per step for this long, */
 #define LIST_RAMP_MS 200  /* then one row more per this much spin */
-#define CF_FIRST_MS 700   /* Coverflow: one cover per step this long before it jumps by letter */
 #define SHORT_LIST_MAX 16
 scratch_t st __attribute__((section(".scratch")));
 

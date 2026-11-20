@@ -5,7 +5,7 @@
  * of that very song, so never another album's), else nothing yet: a thread fills Cover Flow's cache
  * for the album from a copy of one of its songs on the card (the song's own file, its Library row's
  * offline copy, or a download of it in its app's stream cache), and the list asks again once
- * album_cover_gen moves. A Local Only album, or a server album Subsonic has not fetched a cover of,
+ * album_cover_gen moves. A card album, or a server album Subsonic has not fetched a cover of,
  * was grey until Cover Flow drew it (the user's, 2026-11-17: "Idle Moments"). */
 #include "navigation.h"
 

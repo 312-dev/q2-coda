@@ -295,8 +295,8 @@ Q2SEND_LIBS = ['lib/libc-2.28.so', 'lib/libpthread-2.28.so', 'usr/lib/libssl.so.
 # updates are firmware updates. A new pin is a new zip: the source hash covers the pin.
 BUNDLED_DIR = 'usr/lib/q2apps'
 BUNDLED_APPS = {
-    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-6d9cd2c.zip', 3652276,
-                 '7ab43b2b0b684887682a211be0c41fcc1a82bf77cbba73c5873eb8e9ee3ea594', True),
+    'subsonic': ('q2-v1.0', 'q2-subsonic-v1.0-52c3097.zip', 3661698,
+                 '1db92978ec2dfa3dacc81f1e0841d0220da4e16063f58b29960c5289b27f51c8', True),
 }
 APPS_DIR = pathlib.Path.home()/'.cache/q2-apps'
 S90PLAY = 'etc/init.d/S90play'
@@ -495,9 +495,10 @@ BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notif
                'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872)}
 BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
-# a track change doesn't restart the stream (true-wireless buds started one ear first).
+# a track change doesn't restart the stream (true-wireless buds started one ear first); and fdk-aac's afterburner on
+# for AAC (docs/internals.md#bluetooth-aac), which Shanling's forced AAC options (BT_AAC_SITES) leave as the option says.
 BLUEALSA2 = 'usr/bin/bluealsa2'
-BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 -c LDAC')
+BT_KEEPALIVE = (b'bluealsa -c LDAC', b'bluealsa --keep-alive=5 --aac-afterburner -c LDAC')
 # ... and while Guest Play is on, only the source role, so a device that is both (an Echo) connects as a sink and a
 # guest's phone reaches q2-guest's own sink daemon (docs/internals.md#the-relay). Applied after BT_KEEPALIVE.
 BT_GUEST_SOURCE = (b'bluealsa --keep-alive=5', b'bluealsa $(grep -qx enabled=1 /mnt/data/q2-guest/config 2>/dev/null '
@@ -539,6 +540,15 @@ def password_logins(shadow):
     return [l.split(b':')[0].decode() for l in shadow.split(b'\n')
             if l.strip() and not l.split(b':')[1].startswith((b'*', b'!'))]
 AAC_44K1 = 0x317b8
+# AAC's quality (docs/internals.md#bluetooth-aac), each (address, stock word, word): Shanling's main, once getopt_long
+# is done (0x403f00), forces aac_prefer_vbr on and aac_bitrate to 220000 whatever the options said: that 220000
+# (lui $2,3; addiu $2,$2,0x5b60) made 240000 (lui $2,4; addiu $2,$2,-0x5680), the peak and the bitrate the AAC source
+# endpoint offers, so a frame is at most 240000 * 1024 / 48000 / 8 = 640 bytes, under the 663 one packet carries at
+# BT_MTU_MAX (675 less RTP's 12): never split. And its encoder thread picks fdk-aac's VBR mode from upstream's table
+# (40000 to 192000 a step, modes 1 to 5) but caps it at 4: past the table (0x416f58) and turning a 5 down (0x4171a0);
+# both made 5, as upstream 4.0.0's a2dp_aac_get_fdk_vbr_mode.
+BT_AAC_SITES = ((0x403f2c, 0x3c020003, 0x3c020004), (0x403f3c, 0x24425b60, 0x2442a980),
+                (0x416f58, 0x24110004, 0x24110005), (0x4171a0, 0x24020004, 0x24020005))
 # DROP is acknowledged before the encoder handles its signal. Flush in the control
 # thread instead, so a delayed signal cannot discard the next track's first PCM.
 BT_DROP = 0x40cb50
@@ -758,6 +768,10 @@ HSCROLL_ONCE = (0x5fb870, 0x1440002f, 0x1000002f)
 # lw $t9 at 0x5fc060, the 1st of hscroll_label_on_paint_self's 2 calls; the 2nd draws without): jal
 # ringnav_ellipsis_text, which narrows the box so the cut before stock's "..." never ends on a space.
 HSCROLL_ELLIPSIS = (0x5fc074, 0x0320f809)
+# glyph_cache_lookup stamps every hit with time_now_ms (jalr at 0x6b2bb8, lw $t9 at 0x6b2bb4), a clock_gettime system
+# call a glyph measured or drawn, about 950 a Songs frame: jal ringnav_glyph_stamp, the frame's time while a frame
+# paints (docs/internals.md#song-rows-cost). The stamp only orders the cache's glyphs for eviction.
+GLYPH_STAMP = (0x6b2bb8, 0x0320f809)
 # Since V1.36 set_hscroll_label_attribute gives a label a loop_interval_distance of its own width (widget_set_prop_int,
 # its jalr): the text runs off the label and comes back in after that gap, without an end to hold. Q2 Muse's labels hold
 # at the start and the end and snap back (ringnav_hscroll_start, ringnav_hscroll_lull), so the call goes and the
@@ -2137,7 +2151,7 @@ FLAGS = ['--target=mipsel-linux-gnu','-march=mips32r2','-mabi=32','-mfp64',
 # d3dd2e59: 20,704 bytes of .text and 6,799 nops fewer, 9,440 left in patch.elf.
 FILL = ['-mllvm', '-disable-mips-df-succbb-search=false', '-mllvm', '-disable-mips-df-forward-search=false']
 # navigation.c and the files split out of it (patch/navigation.h), each its own object, linked in this order.
-NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c']
+NAVIGATION = ['navigation.c', 'theme_engine.c', 'playlists.c', 'scan_page.c', 'home.c', 'np_bar.c', 'volume.c', 'smart_wifi.c', 'system.c', 'usb_charge.c', 'usb_otg.c', 'usb_record.c', 'usb_ui.c', 'adb_trust.c', 'usb_event.c', 'tags.c', 'scrobble_ui.c', 'library_lists.c', 'durations.c', 'coverflow_position.c', 'ratings.c', 'scan_folders.c', 'folder_delete.c', 'battery.c', 'localsend_ui.c', 'list_marks.c', 'song_rows.c', 'catalogue.c', 'clicker.c', 'seek.c', 'slider_page.c', 'inline_slider.c', 'wifi_rows.c', 'wifi_flows.c', 'feedback.c', 'search_strip.c', 'search_bar.c', 'keyboard.c', 'settings_pages.c', 'np_marquee.c', 'menu_modal.c', 'song_sort.c', 'name_order.c', 'power_rows.c', 'np_taps.c', 'coda_rc_shim.c', 'carremote_page.c', 'synclink.c', 'artist_page.c', 'np_about.c', 'az_index.c', 'library_artist.c', 'config_ini.c', 'library_album.c', 'album_cover.c', 'keylock.c', 'playlist_pages.c', 'add_songs.c', 'storage.c', 'library_edit.c', 'engine.c', 'game_bricks.c', 'engine_demo.c', 'tilt.c', 'control_center.c', 'levels.c', 'upnext.c', 'charging.c', 'sw_update.c', 'library_settings.c', 'cf_empty.c', 'swipe_back.c', 'diagnostics.c', 'bt_name.c', 'bt_recv.c', 'bt_battery.c', 'bt_vol_event.c', 'loop_wake.c', 'pair_prompt.c', 'bt_ui.c', 'bt_trace.c', 'bt_detail.c', 'bt_stopped.c', 'guest_ui.c', 'home_np.c', 'status_row.c', 'vol_pill.c', 'ui_kit.c', 'np_settle.c', 'np_skip.c', 'song_radio.c', 'page_parallax.c', 'stream_config.c', 'stream_state.c', 'np_stream.c', 'np_rate.c', 'art_zoom.c', 'heatguard.c', 'cover_wake.c', 'ulog.c', 'autozone.c', 'player_push.c', 'card_watch.c', 'offline.c']
 
 # Payload functions nothing in the payload calls, which build.py and ipod.py patch stock to call (jal and
 # pointer sites by symbol): rooted, so --gc-sections keeps them. A name missing here fails the build with its
@@ -2146,7 +2160,7 @@ PAYLOAD_ROOTS = ['compact_set_row_layout', 'kb_host_open', 'kb_open_hint', 'ipod
                  'ringnav_albumcovers', 'ringnav_art_header', 'ringnav_art_name', 'ringnav_artist_art_name',
                  'ringnav_artist_covers', 'ringnav_batt_level', 'ringnav_batt_status', 'ringnav_batt_voltage', 'ringnav_boot', 'ringnav_bt_connect_start', 'ringnav_class_icon',
                  'ringnav_cover_done', 'ringnav_cover_push', 'ringnav_cue_text',
-                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag',
+                 'ringnav_dark_usleep', 'ringnav_dialog_close', 'ringnav_ellipsis_text', 'ringnav_gbk_tag', 'ringnav_glyph_stamp',
                  'ringnav_hold_info', 'ringnav_hold_timer', 'ringnav_hscroll_lull', 'ringnav_id3_path',
                  'ringnav_lyric_follow', 'ringnav_lyric_rows', 'ringnav_mainscheduling', 'ringnav_play_cover_wait', 'ringnav_scan_dir',
                  'ringnav_scan_refresh', 'ringnav_shuffle', 'ringnav_song_unknown', 'ringnav_table_drag',
@@ -2314,9 +2328,13 @@ def patch_bluetoothd(raw):  # pragma: no mutate block
 
 def patch_bluealsa(raw):
     """Offer AAC at 48 kHz only. A headset that opens the stream itself (AirPods out of the case)
-    picks 44.1 kHz, and bluealsa, still fed 48 kHz, drops about 8% of the AAC frames."""
+    picks 44.1 kHz, and bluealsa, still fed 48 kHz, drops about 8% of the AAC frames. AAC's peak
+    240000 and VBR mode 5 (BT_AAC_SITES)."""
     image = bytearray(raw)
     image[AAC_44K1] = 0
+    for address, old, new in BT_AAC_SITES:
+        check(struct.unpack_from('<I', raw, fileoff(raw, address))[0] == old, 'Bluetooth AAC site mismatch')
+        struct.pack_into('<I', image, fileoff(raw, address), new)
     # o32: preserve PCM and ra; hold its fd mutex while flushing the nonblocking
     # FIFO in 32 KiB batches, then send DROP. No encoder restart or codec change.
     words = [0x27bdffe0, 0xafbf001c, 0xafb00018, 0x00808025,
@@ -2581,6 +2599,9 @@ def build(zip_path, out, logo, dev=False, repo=REPO, aic_idle_wait=False, rotato
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, 0x5fc060))[0] == 0x8f99ccd0,
           'hscroll ellipsis: expected widget_draw_text_in_rect import')
     patch_word(patched, *HSCROLL_ELLIPSIS, jal(ps['ringnav_ellipsis_text']), 'an ellipsis never follows a space')
+    check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, GLYPH_STAMP[0] - 4))[0] == 0x8f99bfdc,
+          'glyph stamp: expected time_now_ms import')
+    patch_word(patched, *GLYPH_STAMP, jal(ps['ringnav_glyph_stamp']), "a frame's glyphs stamped with its time")
     check(struct.unpack_from('<I', raw_demo, fileoff(raw_demo, HSCROLL_GAP[0] - 4))[0] == 0x8f99aebc,
           'hscroll gap: expected widget_set_prop_int')
     patch_word(patched, *HSCROLL_GAP, 'a scrolling label ends its pass at its end')

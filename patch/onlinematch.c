@@ -595,6 +595,7 @@ static void more_rows(void *win) {
         if (((const int *)PLAYMORE_ROWS)[i] == PLAYMORE_DELETE)
             widget_set_visible(widget_get_child(view, i), 0, 0);
     airplay_more(view); /* first, over stock's rows */
+    offline_np_row(win, view); /* Sync Offline for a server song (offline.c) */
     void *about = list_row(view, "system_about", np_about_open, 0);
     widget_set_text_utf8(about, "About");
     widget_resize(about, 253, I(about, W_H));

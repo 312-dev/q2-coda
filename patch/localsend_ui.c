@@ -550,7 +550,7 @@ static int ls_page_show(const void *ctx) {
     int free_top = ls_screen_y(view);
     if (ls.wifi_off) {
         static const empty_t off = { "wifi-slash", "Wi-Fi Is Off", "Join the Wi-Fi your phone or computer is on",
-                                     "Turn On Wi-Fi" };
+                                     "Turn On Wi-Fi", 0, 0 };
         ls.cta_y = empty_row_y(free_top) - free_top - LS_CTA_OUT;
         ls_gap(view, ls.cta_y, K_GAP, 0);
         void *cta = ls_row(view, 0, K_CTA, "", 0, page_x(), ls_click);
@@ -689,7 +689,7 @@ static void ls_xfer_paint(void *w, void *canvas) {
  * rows): the house's compact form under rows has no glyph (feedback.c empty_compact), so the page paints it
  * (empty_paint). */
 static void ls_none_paint(void *w, void *canvas, int top, int end, int glyph) {
-    static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer", 0 };
+    static const empty_t none = { "broadcast", "Looking for Devices", "Open LocalSend on a phone or computer", 0, 0, 0 };
     empty_t e = none;
     if (!glyph) e.glyph = 0; /* under Trusted Devices too: no room for it */
     empty_paint(w, canvas, &e, top + (end - top - (glyph ? LS_STACK : LS_WORDS)) / 2 - ls_screen_y(w));

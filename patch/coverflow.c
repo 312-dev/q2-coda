@@ -19,6 +19,8 @@ extern int stock_home_trampoline(void *win, void *ctx), stock_scan_all_trampolin
     stock_file_created_trampoline(const char *),
     stock_album_cover_trampoline(const char *, const char *, int, int);
 
+extern void storage_scanned(void); /* storage.c: a whole scan's end, saved */
+
 enum { PREPARING, COVERS, TRACKS };
 cf_page_t cf __attribute__((section(".scratch")));
 
@@ -81,6 +83,7 @@ static int library_scan(int (*stock)(void *, void *), void *a, void *b, int drop
         "create index if not exists songtable_time_create on songtable(time_create desc)");
     /* Scan Song Durations' pass after a whole scan: a stopped one leaves part of the library */
     if (!toolsGetUserStop()) durations_scanned();
+    if (drops && !toolsGetUserStop()) storage_scanned(); /* Storage's Update Library: last updated */
     return result;
 }
 int coverflow_scan_all(void *a, void *b) {
@@ -688,6 +691,7 @@ static void art_found_drop(void) {
 }
 /* cf.albums' jobs into aj, as load_albums' own pass makes them. Files and the albums' records only.
  */
+static int open_cancelled(void);
 static void art_find(void) {
     char path[512];
     unsigned count = deque_size(cf.albums);
@@ -696,7 +700,7 @@ static void art_find(void) {
     if (!(aj.jobs = calloc(count, sizeof(job_t)))) return;
     aj.albums = cf.albums, aj.gen = library_gen, aj.count = count;
     unsigned char *shared = folders_shared(cf.albums, count);
-    for (unsigned i = 0; i < count; ++i) {
+    for (unsigned i = 0; i < count && !open_cancelled(); ++i) { /* a given-up open's look stops */
         void *r = deque_at(cf.albums, i);
         job_t *j = &aj.jobs[aj.total];
         if (art_missing(r, path, sizeof path) && (j->track = strdup(P(r, REC_PATH)))) {
@@ -743,9 +747,12 @@ static void drop_albums(void) {
 /* A stock library query run into the caller's deque, the staging pointer on it so it leaves no
  * trace. No copies: two of a 47,000-song library's rows got demo OOM-killed, with 128 MB and no
  * swap. Stock writes the pointer only at init and reads it afresh at each use; every caller is on
- * the UI thread, or on a Cover Flow open's step thread while the UI thread waits for it
- * (step_turning), as an overlap could leave the pointer on a deque its owner destroyed. */
+ * the UI thread, or on a Cover Flow open's step thread, and a call on the UI thread while a step
+ * runs gives that open up first (open_yield), as an overlap could leave the pointer on a deque its
+ * owner destroyed. */
+static void open_yield(void);
 int staged_into(void *into, int (*query)(void *), void *arg) {
+    open_yield();
     void *dir = P(tools_pdeq_directory, 0);
     P(tools_pdeq_directory, 0) = into;
     int n = query(arg);
@@ -1125,11 +1132,11 @@ static int split_row(void *a, int n, char **v, char **c) {
 static int rank_query(void *sql) {
     return toolsQueryDbTable("/mnt/data/database.db", sql, split_row, 0);
 }
-/* staged, with Local + Server reading the server library's songs too (catalogue.c): Cover Flow's
- * albums, their ranks and the rated albums, as the Library's Albums list reads them. */
+/* staged, reading a signed-in server's songs too (catalogue.c): Cover Flow's albums, their ranks
+ * and the rated albums, as the Library's Albums list reads them. */
 extern void *staged_music(int (*query)(void *), void *arg, int *count);
 static void *cf_staged(int (*query)(void *), void *arg, int *count) {
-    return catalogue_on() ? staged_music(query, arg, count) : staged(query, arg, count);
+    return catalogue_has() ? staged_music(query, arg, count) : staged(query, arg, count);
 }
 
 /* list's albums with music, in a new deque (list goes), using a music track for their art even when
@@ -1715,7 +1722,7 @@ void cf_thumb(float *out) {
     out[0] = th.pos, out[1] = th.vel, out[2] = th.goal, out[3] = th.lead, out[4] = th.rate;
     out[5] = (float)th.on, out[6] = (float)th.jump, out[7] = (float)th.lean;
     out[8] = (float)th.fold, out[9] = th.enter, out[10] = th.fold_off, out[11] = th.fold_vel;
-    out[12] = th.arch;
+    out[12] = th.arch, out[13] = (float)th.rebased;
 }
 void cf_thumb_lead(float lead) { th.on = lead >= 0, th.lead = lead >= 0 ? lead : 0; }
 /* For test/coverflow.py: the arch formed so far (0: none), to render at. */
@@ -2983,8 +2990,8 @@ static void cf_cold(unsigned t0) {
  * Coverflow): stock's sort converts both names to pinyin on every comparison. */
 static void load_albums(unsigned t0);
 static void load(void);
-/* The library's empty page waits for it: a scan, an import of a server's albums or Streaming Songs
- * turned on (each moves library_gen) loads the covers again. The timer is the page's (empty_page),
+/* The library's empty page waits for it: a scan, an import of a server's albums (each moves
+ * library_gen) loads the covers again. The timer is the page's (empty_page),
  * so it goes with it; one at a time. */
 static unsigned empty_gen __attribute__((section(".scratch")));
 static void *empty_page __attribute__((section(".scratch")));
@@ -3522,85 +3529,128 @@ static void *open_page(void) {
 }
 
 /* An open that has to query the albums first (query_step), or put kept ones in a new Sort's order
- * (sort_albums: its ranking is another query of the library), runs that with Home up: the query's
- * steps, then the Sort's (OPEN_SORT) when the list has no order yet. Once its steps so far have
- * taken OPEN_SPIN_MS / 2, the rest (another grouping of the library, measured at no less than half
- * getAllAlbum's time, docs/internals.md#coverflow) will take the open past OPEN_SPIN_MS, so each
- * later step waits a main-loop pass, in which Home paints its Cover Flow row with a spinner for its
- * chevron (coverflow_spinner) and input is taken, until the page opens. A warm open in the order it
- * kept, or a cold one of a small library, opens as it is pressed and never shows it. Meanwhile
- * the keys, the wheel and touches go nowhere (coverflow_wait_input), and Return gives the open up.
- * Within a step the spinner turns too: getAllAlbum's and the grouping's queries take seconds on a
- * large library and stock's library calls hold whichever thread runs them, so each step runs on a
- * thread of its own while the UI thread waits for it (step_turning, name_order.c's way), and,
- * once the spinner shows, paints its frames itself (list_marks.c spinner_turn, then the window
- * manager's paint). Only the step's thread touches the library meanwhile: the staging pointer
- * (staged_into) is never shared. Return is read between steps, not within one. */
+ * (sort_albums: its ranking is another query of the library), runs that with Home up and live
+ * (docs/internals.md#coverflow): the query's steps, then the Sort's (OPEN_SORT) when the list has no
+ * order yet, then the look for art (OPEN_ART), each on a thread of its own (open_start). The UI thread
+ * waits for them for the open's first OPEN_SPIN_MS / 2, so a warm open, or a cold one of a small
+ * library, opens as it is pressed and never shows a spinner; past that it goes back to the main loop
+ * and a timer (open_step, every STEP_TICK_MS) collects each step as it ends, Home's Cover Flow row
+ * showing the spinner for its chevron (coverflow_spinner) meanwhile. Home stays live: the wheel moves
+ * its rows, Return gives the open up, and any other key or touch, another window on top or a library
+ * query of the payload's own on the UI thread (staged_into) gives it up too, waiting for the step to
+ * stop first (open_stop), so nothing on the UI thread meets a step's use of stock's staging pointer or
+ * shared connection. A step stops within a few ms: every connection stock_db_open opens has
+ * coverflow_query_stop as its progress handler, which ends the step's statement once cancelled, and
+ * art_find looks at its cancel between albums. A step given up leaves nothing: its rows (cq) go, and
+ * a Sort cut short is dropped (open_work). ponytail: a step's own sorting and splitting (stock's name
+ * sort inside getAllAlbum, music_of, the Sort's ranking sort) runs to its end once begun, so a cancel
+ * can wait for that, a few hundred ms on a large library; a stock library call on the UI thread outside
+ * the payload's paths (none from Home is known) would not wait. */
 #define OPEN_SPIN_MS 150
 #define OPEN_SORT 3 /* the step after query_step's last: sort_albums */
 #define OPEN_ART 4  /* then the look for the albums' art (art_find), unless it is known */
 #define OPEN_DONE 5
-#define STEP_TICK_MS 16                /* the UI thread's look at a running step: MO_FRAME_MS */
-extern int spinner_turn(void);         /* list_marks.c */
-extern int ringnav_wm_paint(void *wm); /* nav/input.c */
+#define STEP_TICK_MS 16 /* the timer's look at a running step: MO_FRAME_MS */
+#define STEP_POLL_MS 2  /* the UI thread's look while it still waits, within OPEN_SPIN_MS / 2 */
+#define QUERY_STOP_OPS 1000 /* SQLite VM steps between the progress handler's looks */
 static struct {
     unsigned at, timer;
     void *home; /* the window it opens over: gone, the open is given up */
-    int waiting, step, spin;
-    volatile int done, ret; /* step_turning's thread: finished, and query_step's answer */
+    int waiting, step, spin, running;
+    unsigned long thread;       /* the running step's */
+    volatile int done, ret;     /* the step's thread: finished, and open_work's answer */
+    volatile int cancel;        /* the step is given up: its statement and art_find stop */
 } op __attribute__((section(".scratch")));
+/* stock_db_open's progress handler (playlists.c), on every connection it opens: nonzero stops the
+ * statement running, the running step's once its open is given up, nothing else's. */
+int coverflow_query_stop(void *unused) {
+    return op.cancel && op.running && pthread_self() == op.thread;
+}
+void coverflow_query_watch(void *db) { sqlite3_progress_handler(db, QUERY_STOP_OPS, coverflow_query_stop, 0); }
+/* The running step stopped and joined; the caller drops what it leaves. */
+static void open_stop(void) {
+    if (!op.running) return;
+    op.cancel = 1;
+    pthread_join(op.thread, 0);
+    op.running = 0;
+}
 static void open_end(void) {
+    open_stop();
     if (op.timer) timer_remove(op.timer);
     query_drop();
     if (cf_traced) unlink(CF_TRACE), cf_traced = 0;
     if (op.spin) widget_invalidate_force(op.home, 0); /* the row's chevron again */
-    op.waiting = op.timer = op.spin = 0;
+    op.waiting = op.timer = op.spin = op.cancel = 0;
 }
-/* Step k: query_step's, OPEN_SORT's sort_albums or OPEN_ART's art_find; 1 once it is the last. */
+/* Step k: query_step's, OPEN_SORT's sort_albums or OPEN_ART's art_find; 1 once it is the last. A
+ * Sort cut short has ranked only some albums: dropped, so the next open sorts again. */
 static int open_work(int k) {
     if (k == OPEN_ART) return art_find(), 1;
-    return k == OPEN_SORT ? (sort_albums(op.at), 1) : query_step(k, op.at);
+    if (k != OPEN_SORT) return query_step(k, op.at);
+    sort_albums(op.at);
+    if (op.cancel && cf.albums) {
+        if (cf.albums != cf.stock) deque_destroy(cf.albums);
+        cf.albums = 0;
+    }
+    return 1;
+}
+/* art_find's look between albums: the open it runs for is given up. */
+static int open_cancelled(void) { return op.cancel && op.running && pthread_self() == op.thread; }
+/* staged_into on the UI thread while a step runs on its own: the open is given up first. */
+static void open_yield(void) {
+    if (op.running && pthread_self() != op.thread) open_end(), art_found_drop();
 }
 /* Whether an open's albums want OPEN_ART: listed and in order, their art not known. */
 static int art_due(void) { return cf.albums && deque_size(cf.albums) && !art_clean(); }
 static void *step_thread(void *k) {
+    op.thread = pthread_self(); /* before any statement: coverflow_query_stop compares it */
     op.ret = open_work((int)(long)k);
+    __sync_synchronize();
     op.done = 1;
     return k;
 }
-/* open_work(k) on a thread of its own, the spinner turning meanwhile from OPEN_SPIN_MS / 2 into
- * the open; in place when no thread starts (a started one has a nonzero id). */
-static int step_turning(int k) {
+/* Step op.step on a thread of its own; in place when no thread starts (a started one has a nonzero
+ * id), as before steps had threads. */
+static void open_start(void) {
     unsigned long t = 0;
-    op.done = 0;
-    if (pthread_create(&t, 0, step_thread, (void *)(long)k) || !t) return open_work(k);
-    while (!op.done) {
-        usleep(STEP_TICK_MS * 1000);
-        if (!op.spin && (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)
-            op.spin = 1, widget_invalidate_force(op.home, 0); /* Home with its row's spinner */
-        else if (!op.spin || spinner_turn() < 2)
-            continue;
-        ringnav_wm_paint(window_manager());
+    op.done = op.cancel = 0;
+    op.running = 1;
+    if (pthread_create(&t, 0, step_thread, (void *)(long)op.step) || !t) {
+        op.running = 0;
+        op.ret = open_work(op.step);
+        op.done = 1;
+        return;
     }
-    pthread_join(t, 0);
-    return op.ret;
+    op.thread = t;
 }
+/* The step after k, whose open_work answered last (1: the query's last). */
+static int open_next(int k, int last) {
+    return !last                      ? k + 1
+           : k < OPEN_SORT && sort_due() ? OPEN_SORT
+           : k < OPEN_ART && art_due()   ? OPEN_ART
+                                         : OPEN_DONE;
+}
+/* The open's driver: from coverflow_open, then its timer. Collects a step that ended and starts the
+ * next, waiting in place while the open is younger than OPEN_SPIN_MS / 2; past that it returns to
+ * the main loop and looks again in STEP_TICK_MS, the spinner up. */
 static int open_step(const void *unused) {
     op.timer = 0;
-    if (window_manager_get_top_window(window_manager()) != op.home)
-        return open_end(), art_found_drop(), 0; /* given up: the look's jobs are no open's */
-    while (op.step != OPEN_DONE) {
-        int k = op.step;
-        op.step = !step_turning(k)              ? k + 1
-                  : k < OPEN_SORT && sort_due() ? OPEN_SORT
-                  : k < OPEN_ART && art_due()   ? OPEN_ART
-                                                : OPEN_DONE;
-        if (op.step != OPEN_DONE &&
-            (op.spin || (unsigned)time_now_ms() - op.at >= OPEN_SPIN_MS / 2)) {
-            if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0);
-            op.timer = timer_add(open_step, 0, 0); /* Home's input and paint, then the next */
+    for (;;) {
+        if (window_manager_get_top_window(window_manager()) != op.home)
+            return open_end(), art_found_drop(), 0; /* given up: the look's jobs are no open's */
+        if (op.running && !op.done) {
+            if ((unsigned)time_now_ms() - op.at < OPEN_SPIN_MS / 2) {
+                usleep(STEP_POLL_MS * 1000);
+                continue;
+            }
+            if (!op.spin) op.spin = 1, widget_invalidate_force(op.home, 0); /* the row's spinner */
+            op.timer = timer_add(open_step, 0, STEP_TICK_MS);
             return 0;
         }
+        if (op.running) pthread_join(op.thread, 0), op.running = 0;
+        if (op.done) op.step = open_next(op.step, op.ret), op.done = 0;
+        if (op.step == OPEN_DONE) break;
+        open_start();
     }
     open_end();
     if ((cf.page = open_page())) load();
@@ -3609,13 +3659,20 @@ static int open_step(const void *unused) {
 /* Whether Home's Cover Flow row shows the spinner for its chevron: an open waits on its query
  * (nav/row_paint.c paint_chevrons, list_marks.c spinner_icon). */
 int coverflow_spinner(void) { return op.spin; }
-/* ringnav_input: whether e goes nowhere while an open waits. Return's release gives it up. */
+/* ringnav_input, while an open waits: the wheel's ticks go to Home (0); Return gives the open up
+ * at its release and goes nowhere (1); any other key or a touch gives it up, the step stopped
+ * first, and goes on to Home (0), so a press into another page finds the library free. */
 int coverflow_wait_input(void *e) {
     if (!op.waiting) return 0;
-    unsigned type = (unsigned)I(e, EVENT_TYPE);
-    if (type == EVT_KEY_UP && (unsigned)I(e, EVENT_KEY) == KEY_RETURN) open_end(), art_found_drop();
-    return type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG ||
-           type == EVT_POINTER_DOWN;
+    unsigned type = (unsigned)I(e, EVENT_TYPE), key = (unsigned)I(e, EVENT_KEY);
+    int keyed = type == EVT_KEY_DOWN || type == EVT_KEY_UP || type == EVT_KEY_LONG;
+    if (keyed && (key == KEY_NEXT || key == KEY_PREV)) return 0;
+    if (keyed && key == KEY_RETURN) {
+        if (type == EVT_KEY_UP) open_end(), art_found_drop();
+        return 1;
+    }
+    if (keyed || type == EVT_POINTER_DOWN) open_end(), art_found_drop();
+    return 0;
 }
 static int coverflow_open(void *ctx, void *event) {
     if (cf.page || op.waiting) return 0;
@@ -3625,7 +3682,7 @@ static int coverflow_open(void *ctx, void *event) {
         if ((cf.page = open_page())) load();
         return 0;
     }
-    op.at = (unsigned)time_now_ms(), op.waiting = 1;
+    op.at = (unsigned)time_now_ms(), op.waiting = 1, op.done = 0;
     op.home = window_manager_get_top_window(window_manager());
     /* kept albums: only their new order, or their art looked for */
     op.step = !cf.stock ? 0 : sort_due() ? OPEN_SORT : OPEN_ART;
@@ -3831,7 +3888,7 @@ enum {
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
     void *lib;             /* the Library's rows the same way: only a set with home_lib has it */
-    void *stream;          /* and Streaming's */
+    void *stream;          /* and Streaming's, which the Settings list's row opens */
     void *carousel[3];     /* Home: Carousel's slide_menu and its img_left, img_right */
     unsigned key, repaint; /* repaint: the timer of home_repaint */
     /* drift: home_drift's timer, tick its period; drift_last: its last step */
@@ -3868,6 +3925,7 @@ extern void library_rows(void *list), stream_rows(void *list);
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift);
 extern int library_search_open(void *ctx, void *event);
+extern int games_open(void *ctx, void *event); /* games.c: Home's Games row */
 /* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
 extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
     lr_edit_labels(void *view, int on);
@@ -4965,10 +5023,10 @@ static int home_settings(void *ctx, void *event) {
     return 0;
 }
 
-/* A list its page's constructor just filled, slid in in Home's rows' shape (under sub_full, Full's
- * rows across the screen). service: Streaming's, whose 70 px rows take Home's row height, and the
- * build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
-static void home_fill(void *list, int service) {
+/* A list its page's constructor just filled, slid in over from in Home's rows' shape (under
+ * sub_full, Full's rows across the screen). service: Streaming's, whose 70 px rows take Home's row
+ * height, and the build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
+static void home_fill(void *from, void *list, int service) {
     const theme_t *T = theme();
     int full = sub_full(), split = full ? T->home_full_row : split_geom(SPLIT_ROW);
     home_width(list, full ? 375 : split, split, T->home_text_x, T->home_label_end[full], 0);
@@ -4982,7 +5040,7 @@ static void home_fill(void *list, int service) {
         widget_move_resize(b, 0, service ? 0 : I(b, W_Y), split, h);
     }
     widget_layout(list);
-    home_swap(home.list, list, I(list, W_W));
+    home_swap(from, list, I(list, W_W));
 }
 
 /* Home's Library row in Split (a set with home_lib): its rows slide in as Settings' do, each filled
@@ -4992,18 +5050,19 @@ static int home_library(void *ctx, void *event) {
     if (ipod_home() || !home.lib) return on_home_music_onclick(ctx, event);
     if (widget_get_visible(home.lib)) return 0;
     library_rows(home.lib);
-    home_fill(home.lib, 0);
+    home_fill(home.list, home.lib, 0);
     return 0;
 }
 
-/* Home's Streaming row, the same way (home.c stream_rows). The rebuild frees the rows, so the
- * highlighted row goes first. */
+/* The Settings list's Streaming row (after Playback, tools/ipod.py HOME_SETS), the same way over
+ * the Settings list (home.c stream_rows); Return goes back to Settings (coverflow_home_back). The
+ * rebuild frees the rows, so the highlighted row goes first. Full and Carousel keep the page. */
 static int home_streaming(void *ctx, void *event) {
     if (ipod_home() || !home.stream) return on_home_stream_onclick(ctx, event);
     if (widget_get_visible(home.stream)) return 0;
     home.row = (void *)0;
     stream_rows(home.stream);
-    home_fill(home.stream, 1);
+    home_fill(home.sets, home.stream, 1);
     return 0;
 }
 
@@ -5013,7 +5072,8 @@ int coverflow_home_back(void *top) {
     void *open = top == home.win ? home_open() : (void *)0;
     if (!open) return 0;
     if (theme()->reopen_top) forget_rows(open);
-    home_swap(open, home.list, -I(home.list, W_W));
+    void *back = open == home.stream && home.sets ? home.sets : home.list; /* Streaming: Settings' */
+    home_swap(open, back, -I(back, W_W));
     return 1;
 }
 
@@ -5062,8 +5122,10 @@ int coverflow_home(void *win, void *ctx) {
     home.stream = widget_lookup(win, "list_view_homestream", 1);
     if (home.stream) {
         widget_set_sensitive(home.stream, 0);
-        widget_on(widget_lookup(win, "img_services", 1), EVT_CLICK, home_streaming, win);
-    }
+        widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, home_streaming, win);
+    } else /* Full's sets: stock's Streaming page */
+        widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, on_home_stream_onclick, win);
+    widget_on(widget_lookup(win, "img_games", 1), EVT_CLICK, games_open, 0);
     static const char *const carousel[] = { "slide_menu", "img_left", "img_right" };
     for (int i = 0; i < 3; ++i) home.carousel[i] = widget_lookup(win, carousel[i], 1);
     /* The carousel's own Coverflow and Shortcut cards; the lists' come first in the window. */

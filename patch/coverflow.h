@@ -12,6 +12,7 @@
 #include "chapters.h"
 #include "library_scope.h"
 #include "playback.h"
+#include "wheel_accel.h"
 #include "xiph.h"
 
 enum { RATED_ALBUMS = 1, ALBUM_TRACKS, PLAYLISTS }; /* cf.scoped */
@@ -135,12 +136,13 @@ extern cf_depth_t fx;
 /* The covers held by the thumb (docs/internals.md#coverflow-thumb): one follower per UI pass, in
  * albums from SLIDE_INDEX, its speeds a ms. on: it owns the offset, until it commits. */
 typedef struct {
-    float pos, vel, goal, lead, lead_v, rate, tau, ticks, seen, seen_lead, stretch;
-    unsigned at, tick_at, edge_at, letter_at;
-    int raw, on, finger, held, dir, dead, early, clicked, bounced, capped, jump;
-    /* Fast Navigation off: 1.7.6's letters (th_beat), each named on the moving row from the last
-     * one named (jump_to), jump_pace apart (letter_at) */
-    int beat, jump_to;
+    float pos, vel, goal, lead, lead_v, rate, tau, ticks, seen, seen_lead;
+    unsigned at, tick_at, edge_at;
+    int raw, on, finger, held, dir, dead, early, clicked, bounced, jump;
+    int tick_acc; /* travel past the last whole tick, units x ticks_turn x Wheel Sensitivity
+                     (th_turn) */
+    int rebased; /* albums th_rebase has moved SLIDE_INDEX on by, in all (test/coverflow.py's count)
+                  */
     int lean, fold;   /* the way the row leans (1: as right-hand covers; against th.dir as letters
                          began), kept through the entry, the letters and the fold, 0 from the
                          landing; folding back out from it */
@@ -153,6 +155,7 @@ typedef struct {
                               the shelf's shift and a cover's xc an album as a pose (1/16 px) */
     int hold_k; /* and the album at the screen's middle, from the row's frac centre (16.16) */
     float arch, seen_arch; /* how far the arch has formed, 0 to 1 (th_arch) */
+    wheel_accel_t wa; /* the ticks' momentum, as the lists' (wheel_accel.c) */
 } cf_thumb_t;
 extern cf_thumb_t th;
 

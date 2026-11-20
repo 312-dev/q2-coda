@@ -8,7 +8,7 @@
  * page of cover rows newest first, an album there its album page (library_album.c), whatever
  * Artist View is; Top Songs and All Songs open cover rows of songs. Everything is read once,
  * at the page's first tab load (navigation.c artist_list), from the artist page's own songs query
- * (artist_songs), so with Local + Server a mixed artist counts both libraries' songs.
+ * (artist_songs), so with a server signed in a mixed artist counts both libraries' songs.
  * ponytail: read once per page, so a library change while it is open shows on its next open. */
 #include "navigation.h"
 

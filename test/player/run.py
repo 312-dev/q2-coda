@@ -208,7 +208,20 @@ def test_start_offset(player, songs, tmp):
     want = reference(songs/'a1.flac')[7 * 44100 * 4:]
     d = first_difference(b''.join(pcm), want)
     assert d is None and len(names) == 1, f'{names}: {len(b"".join(pcm)) // 4} frames, reference {len(want) // 4}, first difference {d}'
+    # where the song starts, in the unified log (a restart after an output change asks for one)
+    logged = re.findall(r' I player (q2player: .*)', (tmp/'start/player.log').read_text())
+    assert logged == [f'q2player: set-songurl {songs}/a1.flac from 7 s'], logged
     return f'{len(want) // 4} frames from frame {7 * 44100}'
+
+
+def test_a_pause_with_no_song_open_is_logged_as_ignored(player, songs, tmp):
+    """The drive, 2026-11-19: a restart after an output change (player_save_start) asks for a pause right after its
+    set-songurl, which this player ignores while no song is open. The log says which pauses were ignored."""
+    s, pcm, names = play(player, songs, 'pause-idle', tmp/'pause-idle')
+    logged = re.findall(r' I player (q2player: .*)', (tmp/'pause-idle/player.log').read_text())
+    assert logged == ['q2player: mcl-pause ignored, no song open', f'q2player: set-songurl {songs}/a1.flac',
+                      'q2player: mcl-pause'], logged
+    return ', '.join(logged)
 
 
 def test_seek_exact(player, songs, tmp):

@@ -265,10 +265,16 @@ int ringnav_input(void *wm, void *e) {
     return ret;
 }
 
+static unsigned long long glyph_ms __attribute__((section(".scratch"))); /* 0: no frame paints */
+/* Stock's time_now_ms whole: 64 bits ($v0, $v1), where FUNCTIONS declares its low 32 */
+static unsigned long long now_ms64(void) {
+    return ((unsigned long long (*)(void))(void *)time_now_ms)();
+}
 /* window_manager_paint, a leaf (tools/build.py WM_PAINT_LEAF): the window manager's own paint
  * (vtable +0xc), except while q2video or a card game has the framebuffer (each poll repaints after
  * it) and while the screen is off, unless a window animates (AWTK steps it from the paint); the
- * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). */
+ * first lit pass repaints the whole screen (ringnav_sleep; docs/internals.md Battery). While it
+ * paints, glyphs are stamped with the frame's time (ringnav_glyph_stamp). */
 int ringnav_wm_paint(void *wm) {
     if (wm && !g_backlight_status && !window_manager_is_animating(wm)) return 0; /* RET_OK */
     int away = video_on() || addon_game_on();
@@ -276,8 +282,21 @@ int ringnav_wm_paint(void *wm) {
     int (*paint)(void *) = vt ? (int (*)(void *))P(vt, 0xc) : (int (*)(void *))0;
     if (!paint) return away ? 0 : 0x10; /* RET_BAD_PARAMS, as stock */
     list_reach_due(); /* the status row's band, when the list under it moved (row_paint.c) */
-    return paint(wm);
+    unsigned long long outer = glyph_ms; /* a paint inside a paint (keylock.c, charging.c) */
+    glyph_ms = now_ms64();
+    int ret = paint(wm);
+    glyph_ms = outer;
+    return ret;
 }
+
+/* glyph_cache_lookup's stamp on a hit (tools/build.py GLYPH_STAMP, in place of its time_now_ms):
+ * the frame's time while a frame paints, else the time now. Stock stamps every glyph it finds,
+ * each a clock_gettime system call on the Q2, and every row's text is laid out again whatever the
+ * frame's dirty area: about 950 a Songs frame, 12% of demo's running time as the wheel scrolled.
+ * The cache only orders its glyphs by the stamp, dropping the least recent when it is full, which
+ * a frame's few milliseconds don't change (docs/internals.md#song-rows-cost). Here, beside the
+ * paint that sets the frame's time. */
+unsigned long long ringnav_glyph_stamp(void) { return glyph_ms ? glyph_ms : now_ms64(); }
 
 /* buzzeer_switch (0x4fe3f8), every Key Tone click, stock's and ringnav()'s: the Clicker's route
  * (clicker.c, docs/internals.md#key-tone). The buzzer is the MCU's (system("cmd_mcu write_str
@@ -535,7 +554,10 @@ static int shuffle_key(void *top, void *w, int dir) {
         reveal(&g_menu, 0, 1); /* the row under it in view */
     } else if (dir) {
         int stop = st.shuffle_stop - dir; /* up the stops, down to the songs */
-        if (stop > stops) return 1;       /* the last stop: nothing above */
+        if (stop > stops) { /* the last stop: above it only the search bar (search_bar.c) */
+            search_bar_up_with(top, w, row);
+            return 1;
+        }
         if (stop) {
             st.shuffle_stop = stop;
         } else {
@@ -836,6 +858,7 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         if (!kb) return result;
     }
+    if (search_bar_key(top, key)) return STOP; /* a music list's lit search bar (search_bar.c) */
     /* A double Centre turns the screen off on every listed page, also where the page has no row
      * selected or is still sliding in. A list's
      * selected row times its own double press (center_timer). */
@@ -918,8 +941,10 @@ int ringnav(void *ctx, void *event) {
     st.touch_mode = 0;
     if (is_home(top, w)) {
         if (coverflow_wheel_on(w)) return STOP; /* a tick queued as the wheel went raw */
-        int speed = ramp(top, w, g_menu.scope, g_menu.ctx, dir, now, CF_FIRST_MS, LIST_RAMP_MS);
-        home_step(w, dir, now, speed > 1);
+        /* the lists' momentum (wheel_accel.c), rows only: a length of 0, under WA_LETTER_ROWS, so
+         * Cover Flow never jumps by letter */
+        static wheel_accel_t cf_wa __attribute__((section(".scratch")));
+        home_step(w, dir, now, wheel_accel(&cf_wa, w, dir, now, 0));
         widget_invalidate_force(w, (void *)0);
         return STOP;
     }
@@ -931,8 +956,7 @@ int ringnav(void *ctx, void *event) {
         st.wheel_run = 0;
         step = 1;
     }
-    native_scrollbar(&g_menu);
-    wheel_sb_arm(g_menu.w);
+    wheel_sb_arm(g_menu.w); /* the theme's indicator (list_marks.c); stock's bar stays asleep */
     if (g_menu.kind == 3) {
         if (dir > 0)
             slide_menu_scroll_to_next(w);
@@ -946,9 +970,18 @@ int ringnav(void *ctx, void *event) {
             rearm(&st.letter_timer, letter_expire, LETTER_MS);
         int next = clamp_step(id < 0 ? (cur >= 0 ? g_menu.id[cur] : 0) : id, g_menu.rows - 1,
                               id < 0 ? 0 : dir * step);
+        /* a fast spin that goes on, on a long name-sorted table, moves a letter a tick (an iPod
+         * classic's, docs/internals.md#wheel-acceleration); back to rows once it slows */
+        static wheel_accel_t wa __attribute__((section(".scratch")));
+        if (id >= 0 && g_menu.kind == 2 &&
+            wheel_accel(&wa, g_menu.w, dir, now, g_menu.rows) == WA_LETTER) {
+            int to = az_letter_step(g_menu.w, id, dir);
+            if (to >= 0) next = to;
+        }
         if (next == 0 || next == g_menu.rows - 1) drop_wheel();
         if (next == id) { /* a list ends at its ends: no wrap; the bar leans against the end
-                             (tilt.c) */
+                             (tilt.c), but above a music list's first row stands its search bar */
+            if (dir < 0 && !id && search_bar_up(top, g_menu.w)) return STOP;
             tilt_end(w, dir);
             stop_scroll(&g_menu);
             widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */

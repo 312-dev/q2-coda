@@ -1175,7 +1175,8 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
 
 
 class EmptyT(C.Structure):
-    _fields_ = [(k, C.c_char_p) for k in ('glyph', 'title', 'hint', 'row')]
+    _fields_ = [('glyph', C.c_char_p), ('title', C.c_char_p), ('hint', C.c_char_p), ('row', C.c_char_p),
+                ('foot', C.c_char_p), ('bar', C.c_int)]
 
 
 def test_an_empty_state_retitles_the_bar_on_a_page_already_titled(fw, world, st):
@@ -2553,3 +2554,20 @@ def test_control_center_s_cover_corners_are_the_block_s_colour_as_painted(fw, wo
     corner = [c for fx, fy, w, h, c in canvas.fills if (fx, fy, h) == (x, y, 1)]
     want = flip(int(light), 0x1c1c1e)
     assert corner and set(corner) == {rgba(want) & 0xffffff | 0xff000000} and block
+
+
+def test_a_status_pages_stack_has_its_lines_a_bar_and_a_footer(fw, st):
+    """docs/oled-design.md#sync: the hint's lines each on their own 20 px band, a 4 px bar 10 px under the title when
+    it has one (Track, filled in the accent to its permille), and the footer centred on y 304 in 13 px Text Tertiary."""
+    from test_nav_painters import Canvas
+    canvas = Canvas(fw)
+    fw.mock('canvas_get_vgcanvas', lambda *_: 1)
+    w = C.create_string_buffer(0x200)
+    e = EmptyT(b'', b'Syncing 4 of 12', b'Rockstar\nPost Malone', None, b'Keep the Q2 on Wi-Fi', 334)
+    fw.fn('empty_paint', None, C.c_void_p, C.c_void_p, C.POINTER(EmptyT), C.c_int)(C.addressof(w), canvas.addr, C.byref(e), 100)
+    texts = [(t[0], t[1][1] + t[1][3] // 2) for t in canvas.texts]
+    assert [t for t, _ in texts] == ['Syncing 4 of 12', 'Rockstar', 'Post Malone', 'Keep the Q2 on Wi-Fi']
+    title, l1, l2, foot = (y for _, y in texts)
+    assert l1 - title > 24 + 2 * 10 and l2 - l1 == 20 and foot == 304
+    fills = fw.calls('vgcanvas_fill')
+    assert len(fills) == 2  # the track, then the fill to 333 permille

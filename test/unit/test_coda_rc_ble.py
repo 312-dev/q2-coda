@@ -16,6 +16,9 @@ import tempfile
 import threading
 import time
 
+import datetime
+import re
+
 import pytest
 
 import coda_rc_client as client
@@ -34,6 +37,7 @@ EVENT = '5645283b-18bb-419e-b338-f089cfc8dced'
 INFO = 'c7f73d6b-93b1-46b5-8892-1ba59bdb7513'
 H_NAME, H_CONTROL, H_EVENT, H_CCCD, H_INFO = 3, 8, 10, 11, 13
 ADD_ADV, REMOVE_ADV, DISCONNECT = 0x3e, 0x3f, 0x14
+STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ ')  # a log line's UTC stamp, ulog's
 
 
 def le(uuid):
@@ -133,9 +137,13 @@ class Q2:
     def advertising(self):
         return (self.root / 'tmp/coda-rc.ble').exists()
 
-    def log(self):
+    def stamped(self):
         p = self.root / 'tmp/coda-rc.log'
         return p.read_text().splitlines() if p.exists() else []
+
+    def log(self):
+        """The lines without their UTC stamp."""
+        return [STAMP.sub('', line, count=1) for line in self.stamped()]
 
     def stop(self):
         self.lib.crc_host_quit()
@@ -450,3 +458,18 @@ def test_no_ble_opens_nothing(daemon_so, tmp_path):
     lib.crc_host_quit()
     t.join(5)
     shutil.rmtree(sim)
+
+
+def test_each_log_line_starts_with_its_utc_time(daemon_so, tmp_path):
+    """The drive of 2026-11-19: coda-rc.log's lines ("demo: play 0 1 9199 done", twice) had no time, so they could not be
+    set beside the unified log's. Each line starts with its UTC time as the unified log writes it."""
+    q2 = Q2(daemon_so, tmp_path, config='[SYSSET]\nSYNCLINK=1\n')
+    try:
+        assert wait_for(lambda: 'ble: off while SyncLink is on' in q2.log())
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for line in q2.stamped():
+            assert STAMP.match(line), f'no UTC stamp: {line!r}'
+            at = datetime.datetime.strptime(line[:20], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+            assert abs((at - now).total_seconds()) < 60, f'{line!r} is not now ({now:%Y-%m-%dT%H:%M:%SZ})'
+    finally:
+        q2.stop()

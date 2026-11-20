@@ -542,7 +542,7 @@ void radio_search(void) {
 /* The page shows level's list, its row last chosen selected. */
 /* A station list with nothing in it, the favourites' or the directory's (oled-design.md Empty and
  * offline): stations come from the card's RADIO_DIR, which a computer fills. */
-static const empty_t no_stations = { "radio", "No Stations", "Add stations from your computer", 0 };
+static const empty_t no_stations = { "radio", "No Stations", "Add stations from your computer", 0, 0, 0 };
 
 static void show(int level) {
     static const char *const menu[] = { "Now Playing", "Favorites", "Featured",
