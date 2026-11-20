@@ -6,7 +6,6 @@ import random
 import re
 import sqlite3
 import struct
-import unicodedata
 from types import SimpleNamespace
 
 import pytest
@@ -86,8 +85,8 @@ def api(fw):
            'coverflow__lower': (u, ptr, u, ptr, ptr), 'coverflow__album_in': (i, ptr, u, ptr), 'coverflow__album_index': (i, ptr),
            'coverflow__name_cmp': (i, ptr, ptr), 'coverflow__tie': (i, i, ptr, ptr), 'coverflow__by_name': (i, ptr, ptr),
            'coverflow__by_album': (i, ptr, ptr), 'album_cmp': (i, ptr, ptr), 'album_id': (u, ptr), 'album_dir': (u, C.c_char_p, i),
-           'folder_cmp': (i, ptr, ptr), 'coverflow__cover_artist': (C.c_char_p, ptr), 'coverflow__initial': (u, i),
-           'coverflow_jump': (i, ptr, i, i, ptr), 'coverflow__bound': (i, i, i, i), 'coverflow__unbound': (i, i, i),
+           'folder_cmp': (i, ptr, ptr), 'coverflow__cover_artist': (C.c_char_p, ptr),
+           'coverflow__bound': (i, i, i, i), 'coverflow__unbound': (i, i, i),
            'coverflow__release': (None, i), 'coverflow__touch': (i, ptr, ptr), 'stride_of': (i, ptr),
            'coverflow__stamp': (u, ptr), 'coverflow__lift': (None, i, u), 'coverflow__sort_saved': (i,),
            'coverflow_sort_name': (C.c_char_p,), 'coverflow_sort_set': (None, i),
@@ -1586,104 +1585,6 @@ def test_cover_artist_is_the_album_artist_only_when_artists_says_so(fw, kind, aa
     assert api(fw).cover_artist(Rec(artist='Song Artist', album_artist=aa).p) == want
 
 
-# Letters and jumps
-
-class Albums:
-    def __init__(self, fw, names=None, artists=None, unknown=(), scoped=0, sort=SORT_ALBUM):
-        self.recs = [Rec(artist=n) if artists else Rec(n, id=-1 if i in unknown else 0) for i, n in enumerate(names or artists)]
-        fw.mock('fw_deque_at', lambda d, i, *_: self.recs[i].p)
-        fw.mock('fw_deque_size', lambda *_: len(self.recs))
-        c = cf(fw)
-        c.albums, c.slide, c.screen, c.scoped, c.sort = 0x5000, 0x6000, COVERS, scoped, sort
-        self.g = api(fw)
-
-    def jump(self, start, step):
-        letter = C.c_uint(0xdead)
-        return self.g.coverflow_jump(0x6000, start, step, r(letter)), letter.value
-
-
-@pytest.mark.parametrize('name, want', (
-    ('Abbey', 'A'), ('abbey', 'A'), ('zoo', 'Z'), ('1984', '#'), ('', '#'), ('!!!', '#'), (' Spaced', '#'), ('The Wall', 'W'), ('A Night', 'N'),
-    ('An Awesome', 'A'), ('the', 'T'), ('Thee', 'T'), ('Étude', 'É'), ('étude', 'é'), ('日本', '日'), ('Ñ', 'Ñ'), ('😀 Smile', '😀'),
-    ('¿Qué?', '#'), ('«Live»', '#'), ('１２', '#'), ('‘Tis', '#'), ('　Wide', '#')))
-def test_initial_of_an_album(fw, name, want):
-    a = Albums(fw, [name])
-    assert a.g.initial(0) == ord(want)
-
-
-def test_initial_the_unknown_row_is_hash(fw):
-    assert Albums(fw, ['Abbey'], unknown=(0,)).g.initial(0) == ord('#')
-
-
-def test_initial_goes_by_the_artist_in_artist_order(fw):
-    a = Albums(fw, artists=['The Beatles'], sort=SORT_ARTIST)
-    assert a.g.initial(0) == ord('B')
-
-
-@pytest.mark.parametrize('raw', (b'\xc3', b'\xc3A', b'\xe2\x82', b'\xe2\x82A', b'\xf0\x9f\x98', b'\xf0\x9f\x98A'))
-def test_initial_a_cut_sequence_is_hash(fw, raw):
-    assert Albums(fw, [raw]).g.initial(0) == ord('#')
-
-
-def test_initial_any_bytes_stay_in_bounds(fw):
-    rng = random.Random(7)
-    a = Albums(fw, ['x'])
-    for _ in range(2000):
-        a.recs = [Rec(rng.randbytes(rng.randrange(0, 12)).replace(b'\0', b'A'))]
-        assert 0 <= a.g.initial(0) <= 0x1fffff
-
-
-def test_the_misc_table_is_sorted_and_is_numbers_punctuation_and_separators():
-    source = (ROOT/'patch/coverflow.c').read_text()
-    body = source[source.index('initial_misc[][2] = {'):source.index('/* Initial of the active')]
-    table = [(int(a, 16), int(b, 16)) for a, b in re.findall(r'\{ (0x[0-9a-f]+), (0x[0-9a-f]+) \}', body)]
-    assert all(a <= b for a, b in table) and all(x[1] < y[0] for x, y in zip(table, table[1:]))
-    listed = {c for a, b in table for c in range(a, b + 1)}
-    for c in listed:
-        assert unicodedata.category(chr(c))[0] in 'NPZCS', hex(c)  # Cn: newer than this python's Unicode
-    if tuple(map(int, unicodedata.unidata_version.split('.'))) <= (16, 0, 0):  # the table's version
-        missing = [c for c in range(0xa0, 0x20000) if unicodedata.category(chr(c))[0] in 'NPZ' and c not in listed]
-        assert not missing, [hex(c) for c in missing[:20]]
-
-
-FIVE = ['Abba', 'Air', 'Beck', 'Blur', 'Cream']
-
-
-@pytest.mark.parametrize('start, want', ((0, (2, ord('B'))), (1, (1, ord('B'))), (2, (2, ord('C'))), (3, (1, ord('C'))), (4, (1, 0))))
-def test_jump_forward_lands_on_the_next_letter(fw, start, want):
-    assert Albums(fw, FIVE).jump(start, 1) == want
-
-
-@pytest.mark.parametrize('start, want', ((4, (2, ord('B'))), (3, (3, ord('A'))), (2, (2, ord('A')))))
-def test_jump_back_lands_on_the_group_s_start(fw, start, want):
-    assert Albums(fw, FIVE).jump(start, -1) == want
-
-
-@pytest.mark.parametrize('start', (0, 1))
-def test_jump_back_from_the_first_letter_wraps_to_the_last_album(fw, start):
-    assert Albums(fw, FIVE).jump(start, -1) == (start + 1, 0)
-
-
-def test_jump_one_album_only(fw):
-    assert Albums(fw, ['Abba']).jump(0, 1) == (1, 0)
-    assert Albums(fw, ['Abba']).jump(0, -1) == (1, 0)
-
-
-def test_jump_the_utility_cards_and_other_orders_step_one_by_one(fw):
-    a = Albums(fw, FIVE)
-    assert a.jump(-1, 1) == (1, 0) and a.jump(5, 1) == (1, 0)
-    c = cf(fw)
-    c.sort = SORT_ARTIST + 1
-    assert a.jump(0, 1) == (1, 0)
-    c.sort, c.scoped = SORT_ALBUM, 1
-    assert a.jump(0, 1) == (1, 0)
-    c.scoped, c.screen = 0, TRACKS
-    assert a.jump(0, 1) == (1, 0)
-    c.screen = COVERS
-    letter = C.c_uint(0xdead)
-    assert a.g.coverflow_jump(0x6001, 0, 1, r(letter)) == 1 and letter.value == 0
-
-
 # The files
 
 class Card:
@@ -2488,21 +2389,13 @@ def py_key(artist, album):
     return h
 
 
-FX_POOL = int(host.tools_build.need(re.search(r'^#define FX_POOL (\d+)', (ROOT/'patch/coverflow.h').read_text(), re.M), 'No FX_POOL')[1])
-LD_SLOTS = int(host.tools_build.need(re.search(r'^#define LD_SLOTS (\d+)', (ROOT/'patch/coverflow.h').read_text(), re.M), 'No LD_SLOTS')[1])
-
-
-class Ld(C.Structure):
-    _fields_ = [('key', C.c_uint), *((k, C.c_int) for k in 'album rank state ok'.split())]
+FX_POOL = 2 * int(host.tools_build.need(re.search(r'^#define CF_WIDE_REACH (\d+)', (ROOT/'patch/coverflow.h').read_text(), re.M),
+                                         'No CF_WIDE_REACH')[1]) + 1  # coverflow.h's FX_POOL, CF_WIDE
 
 
 class Fx(C.Structure):
     _fields_ = [('frame', C.c_void_p), ('tex', C.c_void_p), ('album', C.c_int * FX_POOL), ('art', C.c_void_p * FX_POOL),
-                ('half', C.c_ubyte * FX_POOL),
-                *((k, C.c_int) for k in 'c frac drawn light lead arch todo mode letters_at next prev halves'.split()),
-                ('half_at', C.c_uint), ('half_ms', C.c_int), ('full_ms', C.c_int),
-                ('ld', Ld * LD_SLOTS), ('stage', C.c_void_p), ('gate', C.c_uint * 8), ('loader', C.c_ulong),
-                ('ld_on', C.c_int), ('ld_stop', C.c_int), ('paint_at', C.c_uint), ('more', C.c_void_p), ('no_more', C.c_int)]
+                *((k, C.c_int) for k in 'c frac drawn light lead arch todo'.split())]
 
 
 def deque_of(fw, recs):
@@ -3870,9 +3763,8 @@ class WheelAccel(C.Structure):  # patch/wheel_accel.h wheel_accel_t
 class Th(C.Structure):
     _fields_ = [*((k, C.c_float) for k in 'pos vel goal lead lead_v rate tau ticks seen seen_lead'.split()),
                 *((k, C.c_uint) for k in 'at tick_at edge_at'.split()),
-                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced jump tick_acc rebased lean fold'.split()),
-                ('fold_at', C.c_uint), *((k, C.c_float) for k in 'enter fold_off fold_vel hold_lead hold_run hold_xrun hold_xs'.split()),
-                ('hold_k', C.c_int), ('arch', C.c_float), ('seen_arch', C.c_float), ('wa', WheelAccel)]
+                *((k, C.c_int) for k in 'raw on finger held dir dead early clicked bounced tick_acc rebased'.split()),
+                ('arch', C.c_float), ('seen_arch', C.c_float), ('wa', WheelAccel)]
 
 
 def captions(fw, scoped=0, albums=(('Abbey', 'Beatles'), ('Help', 'Beatles'))):

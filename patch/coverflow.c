@@ -731,17 +731,12 @@ static void drop(void) {
     cf.tracks = 0;
 }
 
-/* The Year sort's years, 0 undated, album by album as years_of (the library's sorted() list) has
- * them. */
-static unsigned short *years;
-static void *years_of;
 static void drop_albums(void) {
     verify_join(); /* before the albums it reads go */
     art_found_drop();
     if (cf.albums && cf.albums != cf.stock) deque_destroy(cf.albums);
     if (cf.stock) deque_destroy(cf.stock);
     cf.albums = cf.stock = 0;
-    free(years), years = 0, years_of = 0; /* they go with their list */
 }
 
 /* A stock library query run into the caller's deque, the staging pointer on it so it leaves no
@@ -900,170 +895,12 @@ extern void album_plays(int (*album_of)(void *), unsigned *sum);
 extern void ringnav_sort_key(char *s);
 #define ARTIST_KEY 96
 
-/* Unicode 16.0.0 number, punctuation and separator ranges. */
-static const unsigned initial_misc[][2] = {
-    { 0xa0, 0xa1 },       { 0xa7, 0xa7 },       { 0xab, 0xab },       { 0xb2, 0xb3 },
-    { 0xb6, 0xb7 },       { 0xb9, 0xb9 },       { 0xbb, 0xbf },       { 0x37e, 0x37e },
-    { 0x387, 0x387 },     { 0x55a, 0x55f },     { 0x589, 0x58a },     { 0x5be, 0x5be },
-    { 0x5c0, 0x5c0 },     { 0x5c3, 0x5c3 },     { 0x5c6, 0x5c6 },     { 0x5f3, 0x5f4 },
-    { 0x609, 0x60a },     { 0x60c, 0x60d },     { 0x61b, 0x61b },     { 0x61d, 0x61f },
-    { 0x660, 0x66d },     { 0x6d4, 0x6d4 },     { 0x6f0, 0x6f9 },     { 0x700, 0x70d },
-    { 0x7c0, 0x7c9 },     { 0x7f7, 0x7f9 },     { 0x830, 0x83e },     { 0x85e, 0x85e },
-    { 0x964, 0x970 },     { 0x9e6, 0x9ef },     { 0x9f4, 0x9f9 },     { 0x9fd, 0x9fd },
-    { 0xa66, 0xa6f },     { 0xa76, 0xa76 },     { 0xae6, 0xaf0 },     { 0xb66, 0xb6f },
-    { 0xb72, 0xb77 },     { 0xbe6, 0xbf2 },     { 0xc66, 0xc6f },     { 0xc77, 0xc7e },
-    { 0xc84, 0xc84 },     { 0xce6, 0xcef },     { 0xd58, 0xd5e },     { 0xd66, 0xd78 },
-    { 0xde6, 0xdef },     { 0xdf4, 0xdf4 },     { 0xe4f, 0xe5b },     { 0xed0, 0xed9 },
-    { 0xf04, 0xf12 },     { 0xf14, 0xf14 },     { 0xf20, 0xf33 },     { 0xf3a, 0xf3d },
-    { 0xf85, 0xf85 },     { 0xfd0, 0xfd4 },     { 0xfd9, 0xfda },     { 0x1040, 0x104f },
-    { 0x1090, 0x1099 },   { 0x10fb, 0x10fb },   { 0x1360, 0x137c },   { 0x1400, 0x1400 },
-    { 0x166e, 0x166e },   { 0x1680, 0x1680 },   { 0x169b, 0x169c },   { 0x16eb, 0x16f0 },
-    { 0x1735, 0x1736 },   { 0x17d4, 0x17d6 },   { 0x17d8, 0x17da },   { 0x17e0, 0x17e9 },
-    { 0x17f0, 0x17f9 },   { 0x1800, 0x180a },   { 0x1810, 0x1819 },   { 0x1944, 0x194f },
-    { 0x19d0, 0x19da },   { 0x1a1e, 0x1a1f },   { 0x1a80, 0x1a89 },   { 0x1a90, 0x1a99 },
-    { 0x1aa0, 0x1aa6 },   { 0x1aa8, 0x1aad },   { 0x1b4e, 0x1b60 },   { 0x1b7d, 0x1b7f },
-    { 0x1bb0, 0x1bb9 },   { 0x1bfc, 0x1bff },   { 0x1c3b, 0x1c49 },   { 0x1c50, 0x1c59 },
-    { 0x1c7e, 0x1c7f },   { 0x1cc0, 0x1cc7 },   { 0x1cd3, 0x1cd3 },   { 0x2000, 0x200a },
-    { 0x2010, 0x2029 },   { 0x202f, 0x2043 },   { 0x2045, 0x2051 },   { 0x2053, 0x205f },
-    { 0x2070, 0x2070 },   { 0x2074, 0x2079 },   { 0x207d, 0x207e },   { 0x2080, 0x2089 },
-    { 0x208d, 0x208e },   { 0x2150, 0x2182 },   { 0x2185, 0x2189 },   { 0x2308, 0x230b },
-    { 0x2329, 0x232a },   { 0x2460, 0x249b },   { 0x24ea, 0x24ff },   { 0x2768, 0x2793 },
-    { 0x27c5, 0x27c6 },   { 0x27e6, 0x27ef },   { 0x2983, 0x2998 },   { 0x29d8, 0x29db },
-    { 0x29fc, 0x29fd },   { 0x2cf9, 0x2cff },   { 0x2d70, 0x2d70 },   { 0x2e00, 0x2e2e },
-    { 0x2e30, 0x2e4f },   { 0x2e52, 0x2e5d },   { 0x3000, 0x3003 },   { 0x3007, 0x3011 },
-    { 0x3014, 0x301f },   { 0x3021, 0x3029 },   { 0x3030, 0x3030 },   { 0x3038, 0x303a },
-    { 0x303d, 0x303d },   { 0x30a0, 0x30a0 },   { 0x30fb, 0x30fb },   { 0x3192, 0x3195 },
-    { 0x3220, 0x3229 },   { 0x3248, 0x324f },   { 0x3251, 0x325f },   { 0x3280, 0x3289 },
-    { 0x32b1, 0x32bf },   { 0xa4fe, 0xa4ff },   { 0xa60d, 0xa60f },   { 0xa620, 0xa629 },
-    { 0xa673, 0xa673 },   { 0xa67e, 0xa67e },   { 0xa6e6, 0xa6ef },   { 0xa6f2, 0xa6f7 },
-    { 0xa830, 0xa835 },   { 0xa874, 0xa877 },   { 0xa8ce, 0xa8d9 },   { 0xa8f8, 0xa8fa },
-    { 0xa8fc, 0xa8fc },   { 0xa900, 0xa909 },   { 0xa92e, 0xa92f },   { 0xa95f, 0xa95f },
-    { 0xa9c1, 0xa9cd },   { 0xa9d0, 0xa9d9 },   { 0xa9de, 0xa9df },   { 0xa9f0, 0xa9f9 },
-    { 0xaa50, 0xaa59 },   { 0xaa5c, 0xaa5f },   { 0xaade, 0xaadf },   { 0xaaf0, 0xaaf1 },
-    { 0xabeb, 0xabeb },   { 0xabf0, 0xabf9 },   { 0xfd3e, 0xfd3f },   { 0xfe10, 0xfe19 },
-    { 0xfe30, 0xfe52 },   { 0xfe54, 0xfe61 },   { 0xfe63, 0xfe63 },   { 0xfe68, 0xfe68 },
-    { 0xfe6a, 0xfe6b },   { 0xff01, 0xff03 },   { 0xff05, 0xff0a },   { 0xff0c, 0xff1b },
-    { 0xff1f, 0xff20 },   { 0xff3b, 0xff3d },   { 0xff3f, 0xff3f },   { 0xff5b, 0xff5b },
-    { 0xff5d, 0xff5d },   { 0xff5f, 0xff65 },   { 0x10100, 0x10102 }, { 0x10107, 0x10133 },
-    { 0x10140, 0x10178 }, { 0x1018a, 0x1018b }, { 0x102e1, 0x102fb }, { 0x10320, 0x10323 },
-    { 0x10341, 0x10341 }, { 0x1034a, 0x1034a }, { 0x1039f, 0x1039f }, { 0x103d0, 0x103d5 },
-    { 0x104a0, 0x104a9 }, { 0x1056f, 0x1056f }, { 0x10857, 0x1085f }, { 0x10879, 0x1087f },
-    { 0x108a7, 0x108af }, { 0x108fb, 0x108ff }, { 0x10916, 0x1091b }, { 0x1091f, 0x1091f },
-    { 0x1093f, 0x1093f }, { 0x109bc, 0x109bd }, { 0x109c0, 0x109cf }, { 0x109d2, 0x109ff },
-    { 0x10a40, 0x10a48 }, { 0x10a50, 0x10a58 }, { 0x10a7d, 0x10a7f }, { 0x10a9d, 0x10a9f },
-    { 0x10aeb, 0x10af6 }, { 0x10b39, 0x10b3f }, { 0x10b58, 0x10b5f }, { 0x10b78, 0x10b7f },
-    { 0x10b99, 0x10b9c }, { 0x10ba9, 0x10baf }, { 0x10cfa, 0x10cff }, { 0x10d30, 0x10d39 },
-    { 0x10d40, 0x10d49 }, { 0x10d6e, 0x10d6e }, { 0x10e60, 0x10e7e }, { 0x10ead, 0x10ead },
-    { 0x10f1d, 0x10f26 }, { 0x10f51, 0x10f59 }, { 0x10f86, 0x10f89 }, { 0x10fc5, 0x10fcb },
-    { 0x11047, 0x1104d }, { 0x11052, 0x1106f }, { 0x110bb, 0x110bc }, { 0x110be, 0x110c1 },
-    { 0x110f0, 0x110f9 }, { 0x11136, 0x11143 }, { 0x11174, 0x11175 }, { 0x111c5, 0x111c8 },
-    { 0x111cd, 0x111cd }, { 0x111d0, 0x111d9 }, { 0x111db, 0x111db }, { 0x111dd, 0x111df },
-    { 0x111e1, 0x111f4 }, { 0x11238, 0x1123d }, { 0x112a9, 0x112a9 }, { 0x112f0, 0x112f9 },
-    { 0x113d4, 0x113d5 }, { 0x113d7, 0x113d8 }, { 0x1144b, 0x1145b }, { 0x1145d, 0x1145d },
-    { 0x114c6, 0x114c6 }, { 0x114d0, 0x114d9 }, { 0x115c1, 0x115d7 }, { 0x11641, 0x11643 },
-    { 0x11650, 0x11659 }, { 0x11660, 0x1166c }, { 0x116b9, 0x116b9 }, { 0x116c0, 0x116c9 },
-    { 0x116d0, 0x116e3 }, { 0x11730, 0x1173e }, { 0x1183b, 0x1183b }, { 0x118e0, 0x118f2 },
-    { 0x11944, 0x11946 }, { 0x11950, 0x11959 }, { 0x119e2, 0x119e2 }, { 0x11a3f, 0x11a46 },
-    { 0x11a9a, 0x11a9c }, { 0x11a9e, 0x11aa2 }, { 0x11b00, 0x11b09 }, { 0x11be1, 0x11be1 },
-    { 0x11bf0, 0x11bf9 }, { 0x11c41, 0x11c45 }, { 0x11c50, 0x11c6c }, { 0x11c70, 0x11c71 },
-    { 0x11d50, 0x11d59 }, { 0x11da0, 0x11da9 }, { 0x11ef7, 0x11ef8 }, { 0x11f43, 0x11f59 },
-    { 0x11fc0, 0x11fd4 }, { 0x11fff, 0x11fff }, { 0x12400, 0x1246e }, { 0x12470, 0x12474 },
-    { 0x12ff1, 0x12ff2 }, { 0x16130, 0x16139 }, { 0x16a60, 0x16a69 }, { 0x16a6e, 0x16a6f },
-    { 0x16ac0, 0x16ac9 }, { 0x16af5, 0x16af5 }, { 0x16b37, 0x16b3b }, { 0x16b44, 0x16b44 },
-    { 0x16b50, 0x16b59 }, { 0x16b5b, 0x16b61 }, { 0x16d6d, 0x16d79 }, { 0x16e80, 0x16e9a },
-    { 0x16fe2, 0x16fe2 }, { 0x1bc9f, 0x1bc9f }, { 0x1ccf0, 0x1ccf9 }, { 0x1d2c0, 0x1d2d3 },
-    { 0x1d2e0, 0x1d2f3 }, { 0x1d360, 0x1d378 }, { 0x1d7ce, 0x1d7ff }, { 0x1da87, 0x1da8b },
-    { 0x1e140, 0x1e149 }, { 0x1e2f0, 0x1e2f9 }, { 0x1e4f0, 0x1e4f9 }, { 0x1e5f1, 0x1e5fa },
-    { 0x1e5ff, 0x1e5ff }, { 0x1e8c7, 0x1e8cf }, { 0x1e950, 0x1e959 }, { 0x1e95e, 0x1e95f },
-    { 0x1ec71, 0x1ecab }, { 0x1ecad, 0x1ecaf }, { 0x1ecb1, 0x1ecb4 }, { 0x1ed01, 0x1ed2d },
-    { 0x1ed2f, 0x1ed3d }, { 0x1f100, 0x1f10c }, { 0x1fbf0, 0x1fbf9 },
-};
-
-/* Initial of the active alphabetic key; UTF-8 is decoded without losing non-ASCII names. */
-static unsigned initial(int i) {
-    void *r = deque_at(cf.albums, (unsigned)i);
-    if (I(r, REC_ID) == -1) return '#';
-    const char *name = cf.sort == SORT_ARTIST ? cover_artist(r) : P(r, REC_ALBUM);
-    char key[ARTIST_KEY];
-    snprintf(key, sizeof key, "%s", name ? name : "");
-    ringnav_sort_key(key);
-    const unsigned char *p = (const unsigned char *)key;
-    unsigned c = *p++;
-    if (c >= 0xc2 && c <= 0xf4) {
-        unsigned n = c < 0xe0 ? 1 : c < 0xf0 ? 2 : 3;
-        c &= (1u << (6 - n)) - 1;
-        for (unsigned j = 0; j < n; ++j) {
-            if ((*p & 0xc0) != 0x80) return '#';
-            c = (c << 6) | (*p++ & 63);
-        }
-    }
-    if (c >= 'a' && c <= 'z') c -= 32;
-    if (c < 128) return c >= 'A' && c <= 'Z' ? c : '#';
-    for (unsigned i = 0; i < sizeof initial_misc / sizeof *initial_misc; ++i)
-        if (c >= initial_misc[i][0] && c <= initial_misc[i][1]) return '#';
-    return c;
-}
-
-/* Album i's group: its initial, or in Year its year, CF_YEAR alone when undated. */
-static unsigned group(int i) {
-    if (cf.sort != SORT_YEAR) return initial(i);
-    return CF_YEAR | (years && cf.albums == years_of ? years[i] : 0u);
-}
-
-/* Letters mean something on w: the whole library's covers, sorted by album or artist; years, by
- * year, with Fast Navigation on. */
-int lettered(void *w) {
-    return w && w == cf.slide && cf.screen == COVERS &&
-           (cf.sort <= SORT_ARTIST || (cf.sort == SORT_YEAR && ringnav_big_library())) &&
-           !cf.scoped;
-}
-
-/* Utility cards and wrap edges remain individual stops. Reverse lands at a group's start. */
-int coverflow_jump(void *w, int from, int dir, unsigned *letter) {
-    int n = cf.albums ? (int)deque_size(cf.albums) : 0;
-    *letter = 0;
-    if (!lettered(w) || from < 0 || from >= n) return 1;
-    unsigned c = group(from);
-    int to = from + dir;
-    if (dir > 0) {
-        while (to < n && group(to) == c) ++to;
-        if (to < n) *letter = group(to);
-    } else {
-        while (to >= 0 && group(to) == c) --to;
-        if (to < 0) return from + 1; /* the last album, across the wrap */
-        c = group(to);
-        while (to > 0 && group(to - 1) == c) --to;
-        *letter = c;
-    }
-    return dir > 0 ? to - from : from - to;
-}
-
-/* The first album of album i's letter, or the last letter's from past them, the letter in *letter:
- * where the thumb's letters land round the seam, the first letter's after the last and the last's
- * before the first. */
-int coverflow_letter_first(int i, unsigned *letter) {
-    int n = cf.albums ? (int)deque_size(cf.albums) : 0;
-    *letter = 0;
-    if (n < 1) return i;
-    i = i < n ? i : n - 1;
-    unsigned c = *letter = group(i);
-    while (i > 0 && group(i - 1) == c) --i;
-    return i;
-}
-
-/* The first album of the letter after album from's (dir 1) or before it (-1), of n, round the seam
- * as the albums wrap; its letter in *letter. */
-int coverflow_letter_next(void *w, int from, int dir, int n, unsigned *letter) {
-    int to = from + dir * coverflow_jump(w, from, dir, letter);
-    return *letter ? to : coverflow_letter_first(dir > 0 ? 0 : n - 1, letter);
-}
 
 typedef struct {
     void *r;
     const char *artist; /* Artist: the artist's sort key, without its article */
     unsigned rank;
     int idx;
-    unsigned short year; /* Year: the query's, 0 undated or unranked */
 } order_t;
 
 static const char *album_name(void *r) {
@@ -1294,11 +1131,8 @@ static void rank_by(order_t *v, const char *sql, int added) {
     unsigned *place = added ? added_places(rows) : 0;
     for (unsigned j = 0; j < deque_size(rows); ++j) {
         int i = album_index(deque_at(rows, j));
-        int y = I(deque_at(rows, j), REC_YEAR);
         if (i >= 0 && (v[i].rank == ~0u || (place && place[j] < v[i].rank)))
-            /* a year past 1-9999 is no year: undated */
-            v[i].rank = place ? place[j] : j,
-            v[i].year = y > 0 && y < 10000 ? (unsigned short)y : 0;
+            v[i].rank = place ? place[j] : j;
     }
     free(place);
     deque_destroy(rows);
@@ -1357,12 +1191,6 @@ static void *sorted(void) {
     void *out = _create_deque("stSongInfo");
     deque_init(out);
     for (unsigned i = 0; i < n; ++i) _deque_push_back(out, v[i].r);
-    if (!cf.scoped && cf.sort == SORT_YEAR) {
-        free(years);
-        years_of = out;
-        years = calloc(n + 1, sizeof *years); /* out of memory, all undated: one group */
-        for (unsigned i = 0; years && i < n; ++i) years[i] = v[i].year;
-    }
     free(v), free(sum), free(keys), free(stock_rows), stock_rows = 0;
     return out;
 }
@@ -1720,20 +1548,11 @@ int project(const pose_t *p, int u) {
 /* For test/coverflow.py: the follower's state, and a lead (< 0: none) to render at. */
 void cf_thumb(float *out) {
     out[0] = th.pos, out[1] = th.vel, out[2] = th.goal, out[3] = th.lead, out[4] = th.rate;
-    out[5] = (float)th.on, out[6] = (float)th.jump, out[7] = (float)th.lean;
-    out[8] = (float)th.fold, out[9] = th.enter, out[10] = th.fold_off, out[11] = th.fold_vel;
-    out[12] = th.arch, out[13] = (float)th.rebased;
+    out[5] = (float)th.on, out[6] = th.arch, out[7] = (float)th.rebased;
 }
 void cf_thumb_lead(float lead) { th.on = lead >= 0, th.lead = lead >= 0 ? lead : 0; }
 /* For test/coverflow.py: the arch formed so far (0: none), to render at. */
 void cf_thumb_arch(float arch) { th.on = arch > 0, th.arch = arch; }
-/* For test/coverflow.py: going by letters, the row leaning lean (0: not). */
-void cf_thumb_lean(int lean) { th.on = th.jump = lean != 0, th.lean = lean; }
-/* For test/coverflow.py: folding out of a row leaning lean since at (0: not). */
-void cf_thumb_fold(int lean, unsigned at) {
-    th.on = th.fold = lean != 0, th.jump = 0, th.lean = lean, th.fold_at = at;
-    th.fold_off = th.fold_vel = 0;
-}
 /* For test/coverflow.py: a cover's brightness at rest, t (16.16) albums out. */
 int cf_pose_bright(int t) {
     pose_t p;
@@ -2070,9 +1889,7 @@ void coverflow_render(unsigned *d, int pitch, int frac, const unsigned *const *r
     f.d = d, f.pitch = pitch;
     for (int x = 0; x < CF_VIEW_W; ++x) f.solid_top[x] = f.solid_bottom[x] = 0;
     for (int y = 0; y < cfs.view_h; ++y) memset(d + y * pitch, 0, CF_VIEW_W * 4);
-    if (th.on && th.fold)
-        draw_fold(&f, ring, fold_t16(), th.lean < 0 ? -1 : 1, (int)(th.fold_off * CF_ONE));
-    else if (th.on && (th.jump || th.lead))
+    if (th.on && th.lead)
         draw_row(&f, frac, ring);
     else
         for (int k = 0; k <= fx_reach(); ++k)
@@ -2118,14 +1935,11 @@ int coverflow_hit(int frac, int x, int y) {
     return CF_MISS;
 }
 
-/* The texture pool: fx_reach's either side (fx_base), then the placeholder; going by letters, up to
- * FX_POOL with fx.more's. */
+/* The texture pool: fx_reach's either side (fx_base), then the placeholder. */
 int fx_base(void) { return 2 * fx_reach() + 1; }
-static int fx_slots(void) { return fx.more ? FX_POOL : fx_base(); }
+static int fx_slots(void) { return fx_base(); }
 cf_depth_t fx __attribute__((section(".scratch")));
-unsigned *fx_buf(int i) { /* slot i's texture */
-    return i < fx_base() ? fx.tex + i * CF_TEXELS : fx.more + (i - fx_base()) * CF_TEXELS;
-}
+unsigned *fx_buf(int i) { return fx.tex + i * CF_TEXELS; } /* slot i's texture */
 
 /* A decoded image copied into a texture: fitted whole and centred, nearest sampled to ART_SIZE,
  * over black, so a non-square cover shows uncropped between black bars, as Now Playing shows it.
@@ -2170,10 +1984,8 @@ int cf_decode(const char *url, unsigned *out, int unload) {
 }
 
 static void fx_close(void) {
-    ld_quit();
     if (fx.frame) bitmap_destroy(fx.frame);
     free(fx.tex);
-    free(fx.more);
     memset(&fx, 0, sizeof(fx));
 }
 
@@ -2215,18 +2027,12 @@ static int art_url(char *url, unsigned a) {
     return art_exists(url);
 }
 
-/* Album a's art into pool slot i: its half copy when half will do and it has one (never a
- * playlist's: they have none), else its art_url decoded, else the placeholder (no art, or a
- * card). */
-void fx_fill(int i, int a, int half) {
+/* Album a's art into pool slot i: its art_url decoded, else the placeholder (no art, or a card). */
+static void fx_fill(int i, int a) {
     unsigned *buf = fx_buf(i);
     char url[600] = "file://";
-    fx.art[i] = FX_PLACEHOLDER, fx.half[i] = 0;
-    if ((unsigned)a >= deque_size(cf.albums)) return;
-    if (half && cf.scoped != PLAYLISTS &&
-        half_read(album_key(deque_at(cf.albums, (unsigned)a)), buf))
-        fx.art[i] = buf, fx.half[i] = 1;
-    else if (art_url(url, (unsigned)a) && cf_decode(url, buf, 1))
+    fx.art[i] = FX_PLACEHOLDER;
+    if ((unsigned)a < deque_size(cf.albums) && art_url(url, (unsigned)a) && cf_decode(url, buf, 1))
         fx.art[i] = buf;
 }
 
@@ -2244,139 +2050,48 @@ static int fx_around(int *want, int k, int c, int n, int r) {
     return k;
 }
 /* album + 1's pool slot, or a free one taken for it; -1 with none free */
-int fx_slot(int album) {
+static int fx_slot(int album) {
     int i = 0, free = -1;
     for (; i < fx_slots() && fx.album[i] != album; ++i)
         if (!fx.album[i] && free < 0) free = i;
     if (i < fx_slots()) return i;
-    if (free >= 0) fx.album[free] = album, fx.art[free] = 0, fx.half[free] = 0;
+    if (free >= 0) fx.album[free] = album, fx.art[free] = 0;
     return free;
 }
 
-/* With Fast Navigation on a frame's loads stop at FX_BUDGET_MS, FX_ENTER_MS in the entry and
- * FX_LETTERS_MS going by letters, or FX_SLACK_MS in a frame FX_LATE_MS or more after the last
- * (docs/internals.md#coverflow-thumb); off, 1.7.6's FX_DECODES a frame. */
+/* A frame decodes FX_DECODES covers at most (docs/internals.md#coverflow-thumb). */
 #define FX_DECODES 2
-#define FX_BUDGET_MS 8
-#define FX_ENTER_MS 2   /* the entry's budget */
-#define FX_LETTERS_MS 1 /* going by letters' */
-#define FX_SLACK_MS 10  /* a late frame's going by letters */
-#define FX_LATE_MS 30   /* two refreshes of 16.7 ms, less some jitter */
 /* album a within r albums of album c, round the ring of n */
 static int fx_near(int a, int c, int n, int r) {
     int d = ((a - c) % n + n) % n;
     return d <= r || n - d <= r;
 }
-/* Letters over (any landing on album c, painted or not, or a touch): the loader asked for nothing
- * more, so it parks after the read in hand and the UI thread never waits on it; the covers kept
- * away from c are dropped, so c's window, in fx.more's slots or not, takes the base slots, those in
- * fx.more's move to the free ones before it, and fx.more goes. ponytail: the thread and its stage
- * (LD_SLOTS half copies, 0.8 MB) stay until the page closes (fx_close joins it); join here once no
- * request is LD_READ if that memory is wanted back. */
-void fx_unletter(int c) {
-    if (fx.ld_on > 0)
-        ld_ask(0, 0);
-    else if (fx.ld_on < 0)
-        ld_quit(); /* a start that failed: tried again by the next letters */
-    if (!fx.more && !fx.no_more) return;
-    int n = cf.albums ? (int)deque_size(cf.albums) : 0;
-    for (int i = 0; n && i < FX_POOL; ++i)
-        if (fx.album[i] && !fx_near(fx.album[i] - 1, c, n, fx_reach())) fx.album[i] = 0;
-    for (int i = fx_base(), j = 0; fx.more && i < FX_POOL; ++i) {
-        if (!fx.album[i]) continue;
-        while (j < fx_base() && fx.album[j]) ++j;
-        if (j < fx_base()) {
-            fx.album[j] = fx.album[i], fx.half[j] = fx.half[i], fx.art[j] = fx.art[i];
-            if (fx.art[i] == fx_buf(i)) fx.art[j] = memcpy(fx_buf(j), fx_buf(i), CF_TEXELS * 4);
-        }
-        fx.album[i] = 0;
-    }
-    free(fx.more);
-    fx.more = 0, fx.no_more = 0;
-}
 /* The covers wanted around album c of n stay loaded, others are dropped as movement crosses albums;
  * ring gets each ring slot's texture: ring[j] the cover j - CF_REACH from the centre, so a thumb
  * theme's goes either side of the seven (the callers' wide). A small library repeats albums round
- * the ring, as the slide_menu wraps. Wanted: the window on the screen and, going by letters, the
- * window of the letter gone to, the albums ahead towards it and the letters' either side; half
- * copies from the loader (ld_ask) going by letters, the rest decoded, within a frame's budget, the
- * order and the rules in docs/internals.md#coverflow-thumb. A cover not loaded shows the
- * placeholder until a later frame (fx.todo) loads it. At rest every cover on the screen is decoded
- * at once, but for the covers' first frames (fx_fresh): there the centre alone, the rest within
- * the budget, so an open shows the covers a frame's decodes sooner (seven, 40 ms on the emulator).
- */
+ * the ring, as the slide_menu wraps. Nearest first, FX_DECODES a frame; a cover not loaded shows
+ * the placeholder until a later frame (fx.todo) loads it. At rest every cover on the screen is
+ * decoded at once, but for the covers' first frames (fx_fresh): there the centre alone, the rest
+ * within the frame's decodes, so an open shows the covers that much sooner (seven, 40 ms on the
+ * emulator). */
 static int fx_fresh __attribute__((section(".scratch")));
 static void fx_window(int c, int n, const unsigned **ring) {
-    int want[FX_POOL], r = fx_reach(), k = 0, at = 0, sh = 0, to = 0;
-    unsigned t0 = (unsigned)time_now_ms();
-    int lean = th.on && th.jump && th.enter <= 0, late = (int)(t0 - fx.paint_at) >= FX_LATE_MS;
-    int half = th.on && (th.jump || th.fold), full = !th.on || (lean && th.pos == th.goal), any = 0;
-    fx.paint_at = t0;
-    /* With no room for the letters' windows, the screen's alone, which always fits. The calloc is
-     * an mmap the kernel's overcommit grants whatever is free, so short of MemAvailable for it and
-     * MP4_SPARE_KB more it is not tried: else its pages, filled, would bring the OOM killer. */
-    if (half && !fx.more && !fx.no_more) {
-        unsigned size = (unsigned)(FX_POOL - fx_base()) * CF_TEXELS * 4;
-        fx.no_more = mem_available_kb() < size / 1024 + MP4_SPARE_KB ||
-                     !(fx.more = calloc((unsigned)(FX_POOL - fx_base()), CF_TEXELS * 4));
-    }
-    if (half && !fx.more) lean = 0;
-    if (lean) { /* each letter's window sh on from its first album, as it is with the row there */
-        at = I(cf.slide, SLIDE_INDEX), sh = coverflow_window(0), to = at + cf_round(th.goal);
-        k = fx_around(want, 0, to + sh, n, r);
-    }
-    k = fx_around(want, k, c, n, r);
-    if (lean) {
-        int go = cf_round(th.goal) - cf_round(th.pos), dir = go < 0 ? -1 : 1;
-        for (int d = r + 1; d < ABS(go) - r && d <= r + CF_WIDE; ++d)
-            k = fx_want(want, k, c + dir * d, n);
-        to = (to % n + n) % n;
-        if (fx.letters_at != to + 1) {
-            unsigned letter;
-            fx.letters_at = to + 1;
-            fx.next = coverflow_letter_next(cf.slide, to, 1, n, &letter);
-            fx.prev = coverflow_letter_next(cf.slide, to, -1, n, &letter);
-        }
-        k = fx_around(want, fx_around(want, k, fx.next + sh, n, r), fx.prev + sh, n, r);
-    }
+    int want[FX_POOL], r = fx_reach(), k = fx_around(want, 0, c, n, r), decodes = FX_DECODES;
     for (int i = 0; i < fx_slots(); ++i) {
         int keep = 0;
         for (int j = 0; j < k; ++j) keep |= fx.album[i] == want[j];
         if (!keep) fx.album[i] = 0;
     }
-    int budget = !lean  ? th.on && th.jump ? FX_ENTER_MS : FX_BUDGET_MS
-                 : late ? FX_SLACK_MS
-                        : FX_LETTERS_MS;
-    int big = ringnav_big_library(), decodes = FX_DECODES;
     fx.todo = 0;
-    if (half || fx.ld_on > 0) ld_ask(want, half ? k : 0);
-    if (!half) fx_unletter(c);
-    for (int up = 0; up < 2; ++up)
-        for (int m = 0; m < k; ++m) {
-            int i = fx_slot(want[m]), h = half && !up,
-                s = h && fx.ld_on > 0 ? ld_find(want[m]) : -1;
-            int near = fx_near(want[m] - 1, c, n, r);
-            if (up ? !(near && full && fx.half[i]) : fx.art[i] != 0) continue;
-            if (h && fx.ld_on > 0 && (s < 0 || ld_state(s) != LD_READY)) { /* still on the card */
-                fx.todo = 1;
-                continue;
-            }
-            unsigned t = (unsigned)time_now_ms();
-            int spent = (int)(t - t0) + (h && (s < 0 || fx.ld[s].ok) ? fx.half_ms : fx.full_ms);
-            if ((!th.on && !up && m <= 2 * CF_REACH && (!fx_fresh || !m)) ||
-                (big ? !any || spent <= budget : decodes-- > 0)) {
-                if (s >= 0)
-                    ld_take(s, i, want[m] - 1);
-                else
-                    fx_fill(i, want[m] - 1, h);
-                if (fx.art[i] != FX_PLACEHOLDER) /* a copy wanted and none there: a decode's */
-                    *(fx.half[i] ? &fx.half_ms : &fx.full_ms) = (int)((unsigned)time_now_ms() - t);
-                any = 1;
-                if (near) fx.drawn = 0;
-            } else {
-                fx.todo = 1;
-            }
-        }
+    for (int m = 0; m < k; ++m) {
+        int i = fx_slot(want[m]);
+        if (fx.art[i] != 0) continue;
+        if ((!th.on && m <= 2 * CF_REACH && (!fx_fresh || !m)) || decodes-- > 0) {
+            fx_fill(i, want[m] - 1);
+            if (fx_near(want[m] - 1, c, n, r)) fx.drawn = 0;
+        } else
+            fx.todo = 1;
+    }
     for (int j = -r; j <= r; ++j) {
         int i = fx_slot(((c + j) % n + n) % n + 1);
         ring[j + CF_REACH] = i >= 0 && fx.art[i] ? fx.art[i] : FX_PLACEHOLDER;
@@ -2385,24 +2100,13 @@ static void fx_window(int c, int n, const unsigned **ring) {
 }
 
 #ifdef PEQ_HOST
-/* For test/coverflow.py: album a's art in the pool: 0 none, 1 its half copy, 2 its own, 3 the
- * placeholder. */
+/* For test/coverflow.py: album a's art in the pool: 0 none, 2 its own, 3 the placeholder. */
 int cf_fx_has(int a) {
     for (int i = 0; i < fx_slots(); ++i)
-        if (fx.album[i] == a + 1 && fx.art[i])
-            return fx.art[i] == FX_PLACEHOLDER ? 3 : fx.half[i] ? 1 : 2;
+        if (fx.album[i] == a + 1 && fx.art[i]) return fx.art[i] == FX_PLACEHOLDER ? 3 : 2;
     return 0;
 }
 unsigned cf_album_key(int a) { return album_key(deque_at(cf.albums, (unsigned)a)); }
-/* What letters hold: 1 fx.more, 2 the loader's stage, 4 its thread; 8 a slot past the pool's end
- * kept, or art in none of its own texture, the placeholder or nothing. */
-int cf_fx_letters(void) {
-    int bad = 0;
-    for (int i = 0; i < FX_POOL; ++i)
-        bad |= fx.album[i] && (i >= fx_slots() || (fx.art[i] && fx.art[i] != FX_PLACEHOLDER &&
-                                                   fx.art[i] != fx_buf(i)));
-    return (fx.more != 0) | (fx.stage != 0) << 1 | (fx.ld_on > 0) << 2 | bad << 3;
-}
 #endif
 
 static int floor_div(int a, int b) { /* floor division, b > 0 */ return a / b - (a % b < 0); }
@@ -2513,18 +2217,12 @@ void coverflow_paint(void *w, void *canvas) {
     if (!w || w != cf.slide || !fx.frame || cf.screen != COVERS ||
         !visual(w, n = slide_count(w), &c, &frac))
         return;
-    int lead = (int)(th.lead * CF_ONE), arch = (int)(th.arch * CF_ONE), sh = 0,
-        mode = !th.on || (!th.fold && !th.jump) ? FX_SHELF
-               : th.fold                        ? FX_FOLD
-               : th.enter > 0                   ? FX_ENTRY
-               : th.lean < 0                    ? FX_HELD_LEFT
-                                                : FX_HELD;
+    int lead = (int)(th.lead * CF_ONE), arch = (int)(th.arch * CF_ONE), sh = 0;
     if (th.on) { /* finer than the offset's whole px */
         int q = cf_round(th.pos);
         frac = (int)((th.pos - (float)q) * CF_ONE);
         c = ((I(w, SLIDE_INDEX) + q) % n + n) % n;
-        /* draw_row's: the window round the covers that show; by letters it goes on with the row */
-        if (mode != FX_FOLD && (mode || th.lead)) sh = coverflow_window(frac);
+        if (th.lead) sh = coverflow_window(frac); /* draw_row's: round the covers that show */
     }
     const unsigned *wide[CF_WIDE], **ring = wide + CF_WIDE_REACH - CF_REACH;
 #if Q2POD_DEV
@@ -2536,16 +2234,14 @@ void coverflow_paint(void *w, void *canvas) {
 #endif
     int still = !th.on && !P(w, SLIDE_ANIMATOR) && !touched();
     if (!fx.drawn || c != fx.c || frac != fx.frac || lead != fx.lead || arch != fx.arch ||
-        mode != fx.mode || still != fx_still || mode == FX_FOLD ||
-        mode == FX_ENTRY) { /* the fold: the clock, the entry: passes */
+        still != fx_still) {
         unsigned *d = (unsigned *)bitmap_lock_buffer_for_write(fx.frame);
         if (!d) return;
         cf_still = still;
         coverflow_render(d, (int)(bitmap_get_line_length(fx.frame) / 4), frac, ring);
         cf_still = 0;
         bitmap_unlock_buffer(fx.frame);
-        fx.c = c, fx.frac = frac, fx.lead = lead, fx.arch = arch, fx.mode = mode, fx.drawn = 1,
-        fx_still = still;
+        fx.c = c, fx.frac = frac, fx.lead = lead, fx.arch = arch, fx.drawn = 1, fx_still = still;
     }
 #if Q2POD_DEV
     gap_note(w, gap_t0, gap_t1, (unsigned)time_now_ms());
@@ -3500,7 +3196,6 @@ static int closed(void *ctx, void *event) {
     stop_timer(&pl_again);
     tc.down = 0;
     th.on = 0; /* the poll kept the album named (the page may be part-destroyed here) */
-    coverflow_letter(0, 0, 0); /* a held letter has no lift left to end it, and its surface goes */
     if (cf.saved_album) BLOB_IO(LAST_ALBUM, cf.saved_album, 1);
     drop();
     cf.page = cf.body = cf.covers = cf.slide = 0;

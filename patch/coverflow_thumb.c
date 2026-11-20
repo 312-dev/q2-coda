@@ -36,7 +36,7 @@ static int th_shown(void) { return th_aim(); }
 
 /* At rest on album q: the slide_menu's index moves, as a glide's end does, its offset 0. */
 static void th_commit(int q) {
-    th.on = th.jump = th.lean = th.fold = 0, th.enter = th.fold_off = th.fold_vel = 0;
+    th.on = 0;
     th.lead = th.lead_v = th.vel = th.pos = th.goal = th.arch = 0;
     carousel_glide(cf.slide, -q * stride_of(cf.slide), 0, 0);
     widget_invalidate_force(cf.slide, 0);
@@ -44,11 +44,7 @@ static void th_commit(int q) {
 
 /* The covers on the album named, at once: Centre, or nothing to show a landing on. */
 void coverflow_wheel_land(void) {
-    unsigned n = cf.albums ? deque_size(cf.albums) : 0;
-    /* landed, painted or not: the landing album's window kept (fx_unletter) */
-    fx_unletter(cf.slide ? (int)th_album(th.on ? th_shown() : 0, n) : 0);
     if (th.on && cf.slide) th_commit(th_shown());
-    th.jump = th.lean = th.fold = 0;
     th.on = 0; /* no covers left to land: a page's load replaced them */
 }
 int coverflow_wheel_live(void) { return th.raw || th.on || (cfs.thumb && cf.slide); }
@@ -68,7 +64,6 @@ static void th_grab(void *s, unsigned now) {
     }
     th.vel = th.lead = th.lead_v = th.rate = th.ticks = th.arch =
         0; /* tick_acc carries: a slow thumb's part-ticks add up across rests */
-    th.jump = th.lean = th.fold = 0, th.enter = th.fold_off = th.fold_vel = 0;
     th.tau = cfs.snap;
     th.tick_at = now;
     th.on = 1;
@@ -127,8 +122,8 @@ static void th_turn(void *s, int travel, unsigned now, int n) {
     }
 }
 
-/* The arch (arch_pose) in place of the row at speed, Fast Navigation off. */
-static int th_arched(void) { return cfs.arch_span && !ringnav_big_library(); }
+/* The arch (arch_pose) in place of the row at speed, where the theme has one (arch_span). */
+static int th_arched(void) { return cfs.arch_span != 0; }
 
 /* How far the arch has formed, this pass of ms: fully with the covers at arch_full albums a second,
  * not at all under arch_at, and only with more than an album left to go, so a step of one never

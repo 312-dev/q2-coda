@@ -1165,29 +1165,8 @@ def test_the_carousels_momentum_is_the_lists_rows_never_a_letter(fw, ui):
     fast = steps[3:]
     assert steps[:3] == [1, 1, 1] and fast[0] == 1 and max(fast) == WA['WA_MAX_ROWS'] and fast[-1] == WA['WA_MAX_ROWS']
     assert all(b >= a for a, b in zip(fast, fast[1:]))  # rising while it goes on, never a letter's jump
-    assert not ui.due('cf_letter_expire')  # no letter over the covers
     key(fw, ui, KEY_NEXT, t + WA['WA_RUN_MS'] + 100)  # after a pause: one again
     assert (goal - home.goal) // home.stride == 1
-
-
-def test_coverflows_letter_shows_for_its_time_then_repaints_away(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    assert ui.timers[timer][2] == O['LETTER_MS']
-    ui.invalidated.clear()
-    ui.fire(timer)
-    assert ui.invalidated == [page.view.at]
-
-
-def test_coverflows_letter_cleared_stops_its_timer(fw, ui):
-    page = Page(ui, titles(10), name='coverflow_page')
-    letter = fw.fn('coverflow_letter', None, C.c_void_p, C.c_uint, C.c_uint)
-    letter(page.view.at, ord('B'), 500)
-    (timer,) = ui.due('cf_letter_expire')
-    letter(page.view.at, 0, 600)
-    assert not ui.due('cf_letter_expire') and timer not in ui.timers
 
 
 # Pull to search: a drag down from the top of Local Songs' list.
@@ -2034,10 +2013,7 @@ def test_homes_library_pane_shows_no_letter(fw, ui):
     assert letter(fw, page, canvas) == []
 
 
-@pytest.mark.parametrize('big', [b'0', b'1'])  # Fast Navigation off or on: Cover Flow's own letters change, not this one
-def test_coverflows_album_tracks_show_no_letter(fw, ui, big):
-    Config(fw, BIGLIBRARY=big)
-    assert fw.fn('ringnav_big_library', C.c_int)() == int(big)
+def test_coverflows_album_tracks_show_no_letter(fw, ui):
     page = Page(ui, titles(200), name='coverflow_page')
     album = [Rec('Abbey Road', artist='The Beatles')]  # the open album: its key is the track list's scope
     deque_of(fw, album)
@@ -2052,12 +2028,9 @@ def test_coverflows_album_tracks_show_no_letter(fw, ui, big):
     assert letter(fw, page, canvas) == ['S']  # the same spin with no album open keeps its letter
 
 
-@pytest.mark.parametrize('big', [b'0', b'1'])  # Fast Navigation off or on
 @pytest.mark.parametrize('name, cls', [('albuminfo_page', 0xff10), ('albuminfo_page', 0xff11),
                                        ('playerjumpinfo_page', 0xff10)])
-def test_an_albums_songs_in_the_library_show_no_letter(fw, ui, name, cls, big):
-    Config(fw, BIGLIBRARY=big)
-    assert fw.fn('ringnav_big_library', C.c_int)() == int(big)
+def test_an_albums_songs_in_the_library_show_no_letter(fw, ui, name, cls):
     fw.var('fw_ctx_g_class_type', C.c_int).value = cls
     page, canvas = spun(fw, ui, titles(200), name)
     assert letter(fw, page, canvas) == []  # in disc and track order, not A to Z

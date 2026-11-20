@@ -336,7 +336,6 @@ int ringnav_display(void *win, void *ctx) {
     widget_set_prop_int(win, SUB_PAGE, 0x10 + sub); /* apart from Library's pages */
     if (sub == DISPLAY_COVERFLOW) { /* what changes Cover Flow alone; the Library's are Library's */
         pod_rows(win, "scroll_view_display", POD_CF_SORT, 1, cf_icons);
-        pod_rows(win, "scroll_view_display", POD_BIG_LIB, 1, cf_icons + 3);
         pod_rows(win, "scroll_view_display", POD_CF_POSITION, 1, cf_icons + 3);
         settings_gap(view);
         pod_rows(win, "scroll_view_display", POD_CF_REFRESH, 1, cf_icons + 2);
