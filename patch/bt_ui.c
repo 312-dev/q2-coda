@@ -67,7 +67,7 @@ static struct {
     int scans;          /* scans started for this view */
     int scan_shown;     /* Other Devices' spinner shown at the last poll */
     int linking;        /* a device connecting or connected at the last poll; -1 not yet looked */
-    unsigned read_at, listed; /* a scan's results last read (page_poll), and the devices listed then */
+    unsigned read_at, listed; /* a scan's results last read (page_poll); the list the rows were built from (listed_hash) */
     char link[24];      /* the device connected at the last look, "" none */
     char link_name[64]; /* ... its name: its record's, else BlueZ's Alias (bt_battery.c), "" none */
     unsigned link_at, link_cls, link_poll_at;
@@ -84,6 +84,15 @@ static const char *dev_at(int i, int name) {
     if (i < 0 || !list || (unsigned)i >= deque_size(list)) return (const char *)0;
     return (const char *)deque_at(list, (unsigned)i) + (name ? 0x24 : 4);
 }
+/* The devices pdeq_btshowlist holds, in order, as one number: what a row's place names. */
+static unsigned listed_hash(void) {
+    unsigned h = 5381;
+    const char *m;
+    for (int i = 0; (m = dev_at(i, 0)); ++i, h = h * 33 + '|')
+        while (*m) h = h * 33 + (unsigned char)*m++;
+    return h;
+}
+
 const char *bt_dev_mac(int i) { return dev_at(i, 0); }
 const char *bt_dev_name(int i) { return dev_at(i, 1); }
 /* The index in pdeq_btshowlist of mac, -1 for none. */
@@ -530,6 +539,7 @@ static void quality_value(void *item) {
 void bt_page(void *view, int on) {
     bt_name_row(view);
     unsigned n = widget_count_children(view);
+    bt.listed = listed_hash(); /* the list these rows were built from */
     if (bt.view != view) {
         bt.view = view, bt.scans = 0, bt.linking = -1;
         bt_trace_page(); /* "page opened", and its found devices logged afresh */
@@ -1005,23 +1015,23 @@ static void page_poll(unsigned now) {
     }
     bt.linking = linking;
     /* stock's timer reads the results only as the scan's count ends (10 s): a device found early
-     * waited for it, 5 s on 2026-11-19 (docs/internals.md#bluetooth-page). Read each second meanwhile,
-     * and rebuilt when the list grew. */
+     * waited for it, 5 s on 2026-11-19 (docs/internals.md#bluetooth-page). Read each second meanwhile.
+     * A row knows its device by its place in the list read (its button's name, which stock's click
+     * reads too), so a list that changed is rebuilt here and now, as stock's timer reads and rebuilds
+     * in one call (0x4c4848): left to the timer, a row painted, and a tap went to, the device that had
+     * moved into its place (V1JDi, a glyph changing under a row as the list shifted). */
     if (bt_searchtime > 1 && now - bt.read_at >= BT_RESULTS_MS) {
-        void *list = P(pdeq_btshowlist, 0);
         unsigned was = bt.listed;
         bt.read_at = now;
         getSearchResult();
-        bt.listed = list ? deque_size(list) : 0;
-        if (bt.listed != was) g_btsetting_flag = 1;
+        if ((bt.listed = listed_hash()) != was) ringnav_btrows(win, (void *)0);
     }
     if (!g_bluetoothflag || bt_searchtime || I(bt_initstatus, 0) || I(bt_connectstatus, 0) == 1)
         return;
     if (bt.scans && busy()) return;
     ++bt.scans;
     btStartSearch();
-    void *list = P(pdeq_btshowlist, 0);
-    bt.read_at = now, bt.listed = list ? deque_size(list) : 0;
+    bt.read_at = now;
     g_btsetting_flag = 1; /* the page's timer rebuilds the list from the scan's first results */
 }
 
