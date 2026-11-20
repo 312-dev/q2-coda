@@ -5,7 +5,7 @@
 # as the source, then a FunctionFS HID interface), runs q2-iap-probe on its FunctionFS instances to log what the
 # host sends, and hands the controller back to the ADB gadget when done.
 #
-#   q2-iap-probe.sh start [--plan desk|car|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
+#   q2-iap-probe.sh start [--plan desk|car|m1|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force]
 #   q2-iap-probe.sh stop        tear the gadget down now and give the controller back to adb
 #   q2-iap-probe.sh status      what runs, the controller's state, the log's last lines
 #
@@ -13,8 +13,9 @@
 # plan is phases run in order, each a gadget made, probed and removed: a phase is full or min (four configurations,
 # or configuration 2 alone), with :echo (echo iAP2's detect), :noaudio (no audio function), :uac1 (USB Audio 1.0
 # from tools/uac1_module's usb_f_uac1.ko, loaded from beside this script if it is not yet: at the desk only) or :tone
-# (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up). desk is "full:echo:tone" until --for runs out; car is
-# "full full:echo min:echo", one session (a plug, docs/iphone-mode.md#sessions) each, then the restore.
+# (play a -20 dBFS 1 kHz tone into the gadget's sound card while it is up), or :iap2 (the probe speaks iAP2, milestone
+# M1). desk is "full:echo:tone" until --for runs out; car is "full full:echo min:echo" and m1 "full:iap2 min:iap2",
+# one session (a plug, docs/iphone-mode.md#sessions) each, then the restore.
 # --for (default 900, at most 3600) is the hard limit from start: the runner stops there, and a separate watchdog
 # forces the stop 60 s later if the runner has not. --delay waits that long first, with adb still up, so the cable
 # can be moved from the computer to the car.
@@ -47,11 +48,12 @@ pidof_file() { cat "$RUN/$1.pid" 2>/dev/null; }
 
 # gadget_up PHASE: q2iap made and bound for one phase; 1 if the controller would not take it.
 gadget_up() {
-    configs=full audio=uac2 echo= tone=
+    configs=full audio=uac2 echo= tone= iap2=
     for w in $(echo "$1" | tr ':' ' '); do
         case $w in
         full | min) configs=$w ;;
         echo) echo=--echo ;;
+        iap2) iap2="--iap2 --uuid $(cat $SERIAL 2>/dev/null)" ;;
         noaudio) audio=none ;;
         uac1) audio=uac1 ;;
         tone) tone=1 ;;
@@ -127,7 +129,7 @@ gadget_up() {
         args="$args $FFS/iap$n:$k"
     done
     left=$((DEADLINE - $(date +%s)))
-    $PROBE --phase "$1" --for $left --sessions $SESSIONS $echo $ECHO_FROM $CARPLAY "$LOG" $args </dev/null >/dev/null 2>>"$LOG" &
+    $PROBE --phase "$1" --for $left --sessions $SESSIONS $echo $iap2 $ECHO_FROM $CARPLAY "$LOG" $args </dev/null >/dev/null 2>>"$LOG" &
     echo $! > $RUN/probe.pid
     # every instance's endpoints exist once the probe has written its descriptors
     i=0
@@ -192,6 +194,8 @@ stop_pid() {
 # The gadget gone, configfs's way: off the controller, the probe ended, FunctionFS unmounted, links, directories
 # innermost first. Safe to run with nothing there.
 gadget_down() {
+    # the USB picker's Charge Only parks q2adb, which unmounts configfs: the gadget is still there, only unseen
+    mountpoint -q $CFS || mount -t configfs none $CFS
     if [ -d $G ]; then
         echo "" > $G/UDC 2>/dev/null
     fi
@@ -238,6 +242,8 @@ runner() {
     # at least 2 s, so start's own lines reach the computer before parking ends adb's shell
     while [ -z "$STOP" ] && [ $(($(date +%s) - START)) -lt $((DELAY < 2 ? 2 : DELAY)) ]; do sleep 1; done
     if [ -z "$STOP" ]; then
+        pick=$(grep -o 'USBPICK=[0-9]*' $CONFIG_INI 2>/dev/null | head -n 1 | cut -d= -f2)
+        [ "$pick" = 1 ] || log "warning: the USB picker is not Charge Only (USBPICK=${pick:-unset}): a cable in may start demo's own gadget"
         $ADBG park >/dev/null 2>&1
         log "q2adb parked"
     fi
@@ -292,6 +298,7 @@ start() {
     case $PLAN in
     desk) PLAN="full:echo:tone" SESSIONS=${SESSIONS:-0} ;;
     car) PLAN="full full:echo min:echo" SESSIONS=${SESSIONS:-1} ;;
+    m1) PLAN="full:iap2 min:iap2" SESSIONS=${SESSIONS:-1} ;;
     *) SESSIONS=${SESSIONS:-0} ;;
     esac
     [ -n "$TONEALL" ] && PLAN=$(for p in $PLAN; do printf '%s%s ' "$p" "$TONEALL"; done)
@@ -304,11 +311,14 @@ start() {
     alive "$(pidof_file runner)" && { echo "already running (q2-iap-probe.sh stop first)" >&2; exit 1; }
     [ -d $G ] && { echo "$G is there from an earlier run: q2-iap-probe.sh stop first" >&2; exit 1; }
     pick=$(grep -o 'USBPICK=[0-9]*' $CONFIG_INI 2>/dev/null | head -n 1 | cut -d= -f2)
-    if [ "$pick" != 1 ] && [ -z "$FORCE" ]; then
-        # demo starts stock's storage gadget at a cable in unless Charge Only is remembered (patch/usb_ui.c)
-        echo "Settings > General > USB is not Charge Only (USBPICK=${pick:-unset}): set it, or pass --force" >&2
+    # demo starts stock's storage gadget at a cable in unless Charge Only is remembered (patch/usb_ui.c). USB
+    # Debugging (4) is taken too: arming needs adb, and Charge Only picked with the cable in parks it, so the picker is
+    # switched to Charge Only after this, within --delay; the runner checks it again then.
+    if [ "$pick" != 1 ] && [ "$pick" != 4 ] && [ -z "$FORCE" ]; then
+        echo "Settings > General > USB is neither Charge Only nor USB Debugging (USBPICK=${pick:-unset}): set it, or pass --force" >&2
         exit 1
     fi
+    [ "$pick" = 4 ] && echo "USB Debugging is on: switch Settings > General > USB to Charge Only before the delay ends." 
     [ -f "$LOG" ] && mv -f "$LOG" "${LOG%.log}.prev.log" && mv -f "$LOG.dmesg" "${LOG%.log}.prev.log.dmesg" 2>/dev/null
     START=$(date +%s)
     DEADLINE=$((START + FOR))
@@ -364,5 +374,5 @@ stop) stop ;;
 status) status ;;
 _runner) runner ;;
 _watchdog) watchdog "$2" ;;
-*) echo "usage: $0 start [--plan desk|car|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force] | stop | status" >&2; exit 2 ;;
+*) echo "usage: $0 start [--plan desk|car|m1|PHASES] [--for S] [--delay S] [--sessions N] [--tone] [--carplay] [--force] | stop | status" >&2; exit 2 ;;
 esac

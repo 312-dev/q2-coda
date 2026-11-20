@@ -4,14 +4,17 @@
  * in media mode answers: the HID report descriptor, Apple's C0 53 (four zero bytes), GET_REPORT with
  * zeros; everything OUT is read and logged, every other IN request stalled. With echo on, a SET_REPORT
  * carrying iAP2's detect (FF 55 02 00 EE 10) is echoed on the HID interrupt endpoint, so the host's
- * next reports carry its link SYN. It never answers anything past that.
+ * next reports carry its link SYN. With --iap2 it speaks iAP2 instead (iap2.c, milestone M1): the detect
+ * answered, the link set up, the car authenticated and identified, and the answers an iPhone gives next, every
+ * packet and message logged.
  *
- *   q2-iap-probe [--echo] [--echo-from N] [--sessions N] [--for S] [--gap-ms MS] [--carplay]
- *                [--phase NAME] LOG DIR:KIND...
+ *   q2-iap-probe [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--sessions N] [--for S]
+ *                [--gap-ms MS] [--carplay] [--phase NAME] LOG DIR:KIND...
  *   q2-iap-probe --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
  * KIND is ptp (configuration 1), hid (2), ptpmux (3) or ptpmuxeth (4). A session is the time from an
- * ENABLE to a DISABLE not followed by another ENABLE within --gap-ms (a cable out, not a reset); with
+ * ENABLE to a DISABLE or SUSPEND not followed by another ENABLE or RESUME within --gap-ms (a cable out, not a
+ * reset: in the car a cable out was a SUSPEND, the controller left suspended with no VBUS); with
  * --sessions N the probe exits 10 after the Nth ends, and with --for S, 0 after S seconds. Exit 1 is a
  * set-up failure (an ep0 that would not take its descriptors). Every ep0 stays open until the end:
  * closing one unbinds the gadget.
@@ -60,6 +63,10 @@ void _exit(int);
 unsigned alarm(unsigned);
 void (*signal(int, void (*)(int)))(int);
 int fsync(int);
+void *memmove(void *, const void *, size_t);
+int pipe(int *);
+int fcntl(int, int, ...);
+int kill(int, int);
 int *__errno_location(void);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
@@ -69,6 +76,8 @@ int *__errno_location(void);
 #define O_CREAT 0x0100  /* MIPS */
 #define POLLIN 1
 #define CLOCK_MONOTONIC 1
+#define F_SETFL 4
+#define O_NONBLOCK 0x0080 /* MIPS */
 #define SIGHUP 1
 #define SIGINT 2
 #define SIGPIPE 13
@@ -233,6 +242,100 @@ static long disabled_at = -1, gap_ms = 8000;
 
 static void on_signal(int s) { stopping = s; }
 
+/* ---- iAP2 (--iap2) ---- */
+
+#include "iap2.c"
+
+static int iap2_mode, writer_fd = -1, writer_pid;
+static const char *np_file = "/tmp/coda-rc.now";
+static char uuid[40] = "51320000-0000-4000-8000-000000000000", library_id[64];
+
+/* The input reports go out through a child that writes them to the HID instance's ep1 one at a time: a write there
+ * waits for the host to collect it, and the event loop must never wait (the car's control requests go unanswered
+ * meanwhile). The pipe is non-blocking on this side, so a host that stops collecting costs reports, not the loop. */
+static void writer_start(const char *dir) {
+    int fds[2];
+    char path[160];
+    if (pipe(fds)) {
+        logline("iap2", "pipe failed: no input reports");
+        return;
+    }
+    snprintf(path, sizeof path, "%s/ep1", dir);
+    writer_pid = fork();
+    if (writer_pid == 0) {
+        signal(SIGTERM, SIG_DFL), signal(SIGINT, SIG_DFL), signal(SIGHUP, SIG_DFL); /* the probe's only set a flag */
+        close(fds[1]);
+        int ep = open(path, O_RDWR), fails = 0;
+        unsigned char b[2 + 128];
+        for (;;) {
+            if (read(fds[0], b, 1) != 1) _exit(0);
+            int n = b[0], got = 0;
+            while (got < n) {
+                int r = (int)read(fds[0], b + 1 + got, n - got);
+                if (r <= 0) _exit(0);
+                got += r;
+            }
+            if (ep < 0 || write(ep, b + 1, n) != n) {
+                char msg[96];
+                if (fails++ < 20) {
+                    snprintf(msg, sizeof msg, "input report %u (%d bytes) not sent, errno %d", b[1], n, ERRNO);
+                    logline("iap2", msg);
+                }
+            } else {
+                fails = 0;
+            }
+        }
+    }
+    close(fds[0]);
+    writer_fd = fds[1];
+    fcntl(writer_fd, F_SETFL, O_NONBLOCK);
+}
+
+static void io_send(const unsigned char *r, unsigned len) {
+    unsigned char b[1 + 128];
+    char h[300], msg[360];
+    if (len > 128) return;
+    b[0] = len;
+    memcpy(b + 1, r, len);
+    int w = writer_fd < 0 ? -1 : (int)write(writer_fd, b, len + 1);
+    hex(h, sizeof h, r, len < 24 ? len : 24);
+    snprintf(msg, sizeof msg, "report > %s%s", h, w == (int)len + 1 ? "" : " (dropped: the writer is behind)");
+    logline("iap2", msg);
+}
+static void io_log(const char *m) { logline("iap2", m); }
+
+/* The shim's Now Playing (patch/coda_rc_shim.c cr_now: key=value lines; pos in ms, len in seconds), written while
+ * Car Remote is on. */
+static int io_now_playing(struct iap2_np *n) {
+    char b[1600];
+    int fd = open(np_file, O_RDONLY), len = fd < 0 ? -1 : (int)read(fd, b, sizeof b - 1);
+    if (fd >= 0) close(fd);
+    if (len <= 0) return 0;
+    b[len] = 0;
+    for (char *line = b; line && *line;) {
+        char *end = strchr(line, '\n'), *eq = strchr(line, '=');
+        if (end) *end = 0;
+        if (eq) {
+            *eq = 0;
+            const char *v = eq + 1;
+            if (!strcmp(line, "state")) n->state = atoi(v);
+            else if (!strcmp(line, "pos")) n->pos_ms = atoi(v);
+            else if (!strcmp(line, "len")) n->len_ms = atoi(v) * 1000u;
+            else if (!strcmp(line, "qpos")) n->qpos = atoi(v);
+            else if (!strcmp(line, "qlen")) n->qlen = atoi(v);
+            else if (!strcmp(line, "shuffle")) n->shuffle = atoi(v);
+            else if (!strcmp(line, "repeat")) n->repeat = atoi(v);
+            else if (!strcmp(line, "title")) snprintf(n->title, sizeof n->title, "%s", v);
+            else if (!strcmp(line, "artist")) snprintf(n->artist, sizeof n->artist, "%s", v);
+            else if (!strcmp(line, "album")) snprintf(n->album, sizeof n->album, "%s", v);
+        }
+        line = end ? end + 1 : 0;
+    }
+    return 1;
+}
+
+static const struct iap2_host io = { io_send, mono_ms, io_log, io_now_playing, "Q2 Muse", uuid, library_id };
+
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
 static void echo_report(struct inst *i, const unsigned char *payload, unsigned n) {
@@ -309,6 +412,10 @@ static void setup(struct inst *i, const unsigned char *s) {
     snprintf(msg, sizeof msg, "SETUP %02x %02x %04x %04x %04x -> read %d (errno %d, %ld ms)%s%s%s%s", rt, rq, wv, wi, wl,
              r, e, mono_ms() - at, note[0] ? ": " : "", note, r > 0 ? " data " : "", r > 0 ? h : "");
     logline(i->name, msg);
+    if (iap2_mode && i->kind == K_HID && rt == 0x21 && rq == 0x09 && r > 0) {
+        iap2_report(buf, (unsigned)r);
+        return;
+    }
     if (rt == 0x21 && rq == 0x09 && r >= 2 + (int)sizeof detect && !memcmp(buf + 2, detect, sizeof detect)) {
         if (echo_on()) echo_report(i, detect, sizeof detect);
         else logline(i->name, "detect seen: not echoed (echo off in this session)");
@@ -329,12 +436,15 @@ static void event(struct inst *i, const unsigned char *e) {
         disabled_at = -1;
         if (!active) {
             active = 1, ++session;
+            if (iap2_mode) iap2_connect(&io);
             snprintf(msg, sizeof msg, "session %d begins on configuration %d, echo %s", session, i->config,
                      echo_on() ? "on" : "off");
             logline("probe", msg);
         }
-    } else if (type == EV_DISABLE && active) {
-        disabled_at = mono_ms();
+    } else if ((type == EV_DISABLE || type == EV_SUSPEND) && active) {
+        if (disabled_at < 0) disabled_at = mono_ms();
+    } else if (type == EV_RESUME) {
+        disabled_at = -1;
     }
 }
 
@@ -373,6 +483,14 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--for")) for_s = atoi(v), ++a;
         else if (!strcmp(o, "--gap-ms")) gap_ms = atoi(v), ++a;
         else if (!strcmp(o, "--phase")) phase = v, ++a;
+        else if (!strcmp(o, "--iap2")) iap2_mode = 1;
+        else if (!strcmp(o, "--np")) np_file = v, ++a;
+        else if (!strcmp(o, "--uuid")) {
+            /* the serial's first 32 hex digits as a UUID */
+            if (strlen(v) >= 32)
+                snprintf(uuid, sizeof uuid, "%.8s-%.4s-%.4s-%.4s-%.12s", v, v + 8, v + 12, v + 16, v + 20);
+            ++a;
+        }
         else return usage();
     }
     if (argc - a < 2 || argc - a - 1 > MAX_INST) return usage();
@@ -404,12 +522,18 @@ int main(int argc, char **argv) {
         logline(i->name, msg);
         if (ws < 0) return 1;
     }
+    /* In an iPhone's form: a UUID, -MPN- for the device's own library, then a version (PodBox: an ID ending
+     * otherwise may be what silenced its car). */
+    snprintf(library_id, sizeof library_id, "%s-MPN-26.6.2", uuid);
+    for (int k = 0; iap2_mode && k < ninst; ++k)
+        if (in[k].kind == K_HID) writer_start(in[k].dir);
+    if (iap2_mode) iap2_connect(&io);
     long end = for_s > 0 ? mono_ms() + for_s * 1000L : 0;
     int rc = 0;
     while (!stopping) {
         struct pollfd p[MAX_INST];
         for (int k = 0; k < ninst; ++k) p[k].fd = in[k].ep0, p[k].events = POLLIN, p[k].revents = 0;
-        int n = poll(p, ninst, 500);
+        int n = poll(p, ninst, iap2_mode ? 10 : 500);
         if (n < 0 && ERRNO != EINTR) {
             snprintf(msg, sizeof msg, "poll failed, errno %d", ERRNO);
             logline("probe", msg), rc = 1;
@@ -421,6 +545,7 @@ int main(int argc, char **argv) {
             int r = read(in[k].ep0, e, sizeof e); /* one event at a time: a SETUP must be answered first */
             if (r == (int)sizeof e) event(&in[k], e);
         }
+        if (iap2_mode) iap2_tick();
         long now = mono_ms();
         if (active && disabled_at >= 0 && now - disabled_at > gap_ms) {
             active = 0, disabled_at = -1;
@@ -439,6 +564,7 @@ int main(int argc, char **argv) {
     snprintf(msg, sizeof msg, "end: %s, %d session%s, exit %d", stopping ? "signalled" : "by itself", session,
              session == 1 ? "" : "s", rc);
     logline("probe", msg);
+    if (writer_pid > 0) kill(writer_pid, SIGTERM);
     if (logfd != 2) fsync(logfd);
     for (int k = 0; k < ninst; ++k) close(in[k].ep0);
     return rc;
