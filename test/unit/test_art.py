@@ -521,3 +521,17 @@ def test_now_playings_heart():
         assert min(xs) == 1 and abs((min(ys) + max(ys) + 1) / 2 - 18) <= 0.5, (name, min(xs), min(ys), max(ys))
         assert {at(x, y)[:3] for x, y in ink if at(x, y)[3] == 255} == {(rgb >> 16, rgb >> 8 & 255, rgb & 255)}, name
     assert art.token('favorite') == art.token('favorite', True) == 0xff375f
+
+
+def test_stroke_skips_a_zero_length_segment():
+    """A repeated point draws no side quad, only the round join there."""
+    out = art.stroke([[(0, 0), (0, 0), (4, 0)]], 2)
+    quads = [p for p in out if len(p) == 4]
+    assert len(quads) == 1 and len(out) == 4  # the start cap, a join at the repeat, one quad, the end cap
+
+
+def test_laid_leaves_a_clear_paint_unpainted():
+    """A layer whose paint has no alpha at a pixel leaves what is under it there."""
+    under = ([1, 1], lambda x, y: (0xff0000, 1.0))
+    clear = ([1, 1], lambda x, y: (0x00ff00, 0.0 if x < 1 else 1.0))
+    assert art.laid(2, 1, [under, clear]) == bytes((255, 0, 0, 255, 0, 255, 0, 255))

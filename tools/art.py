@@ -93,7 +93,7 @@ def path(d):
                 weights = [math.comb(n, m) * (1 - t)**(n - m) * t**m for m in range(n + 1)]
                 pts.append(tuple(sum(w * p[a] for w, p in zip(weights, ctrl)) for a in (0, 1)))
             cur = pts[-1]
-        elif op == 'A':
+        else:  # A, the one command the tokens can hold that is left
             rx, ry, phi, large, sweep = num(), num(), num(), num(), num()
             end = at(rel)
             pts += _arc(cur, rx, ry, phi, large, sweep, end)
@@ -584,9 +584,7 @@ def laid(w, h, layers):
                 if not a:
                     continue
                 r, g, b, d = px[i]
-                out = a + d * (1 - a)
-                if not out:  # a soft layer's clear pixel, on nothing
-                    continue
+                out = a + d * (1 - a)  # never 0: a is above 0 here
                 px[i] = (*((v * d * (1 - a) + (rgb >> s & 255) * a) / out for v, s in ((r, 16), (g, 8), (b, 0))), out)
     return b''.join(bytes((round(r), round(g), round(b), round(a * 255))) for r, g, b, a in px)
 
