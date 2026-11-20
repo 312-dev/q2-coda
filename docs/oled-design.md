@@ -259,7 +259,8 @@ All lists share one grid.
     Mode), so the shape keeps its size; Phosphor `wifi-x` (bold) connected with no internet; nothing with Wi-Fi
     off or not connected (`mock_wifi_status.py`, `mock_status_icons.py`).
   - **Sync**, left of the glyph before it: while a card app checks its server or its metadata, Phosphor
-    `arrows-clockwise` (bold) turning in Text Secondary (S1); while it downloads songs, a 14 px ring (1.6 px) in
+    `arrows-clockwise` (bold) turning in Text Secondary (S1), 8 frames a second, its box its upright ink's 12 px so
+    the 6 px either side match the row's (turning, its corners pass up to 1 px nearer); while it downloads songs, a 14 px ring (1.6 px) in
     `#333333` filling clockwise from 12 o'clock in the accent, Phosphor `arrow-down` (bold, 8 px, Text Primary) in
     it (S2, `mock_sync_status.py`).
   - **Bluetooth** (P9 in `design/bt-redesign`): nothing while Bluetooth is off or nothing is connected; Phosphor

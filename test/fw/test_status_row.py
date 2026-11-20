@@ -86,11 +86,13 @@ def row(fw, st):
 
 def test_the_slots_lay_out_right_to_left_from_the_battery(fw, row):
     """Each shown slot's box, then GAP to the one on its right (mock_status_icons.py, iOS's spacing): the bars 10
-    wide, Wi-Fi's fan 16, a sync's ring 16, Buttons Lock's padlock 13."""
+    wide, Wi-Fi's fan 16, a sync's arrows 12 (their upright ink) and its ring 16, Buttons Lock's padlock 13."""
     assert row.left() == BODY - GAP - 10
     row.wifi(3)
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W
     row.app(1)
+    assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 12
+    row.app(2, 500)
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16
     fw.var('g_keylock_flag', C.c_ubyte).value = 1
     assert row.left() == BODY - GAP - 10 - GAP - WIFI_W - GAP - 16 - GAP - 13
@@ -333,10 +335,11 @@ def test_a_sync_check_turns_the_arrows_and_a_download_fills_its_ring(fw, row):
     row.status = 0
     row.app(1)
     canvas, names = row.paint()
-    assert names == ['oled_status_sync_0_d'] and canvas.images == [(BODY - GAP - 16 + 1, CY - 7, 14, 14)]
+    # the 14 px art a px either side of the arrows' 12 px box, and that art's box repainted each frame
+    assert names == ['oled_status_sync_0_d'] and canvas.images == [(BODY - GAP - 12 - 1, CY - 7, 14, 14)]
     assert row.sync_sig() == 1 and len(row.timers) == 1
     tick = C.CFUNCTYPE(C.c_int, C.c_void_p)(row.timers[0][0])
-    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 16, 0, 16, 26)]
+    assert tick(None) == 8 and row.dirty == [(BODY - GAP - 12 - 1, 0, 14, 26)]
     assert row.paint()[1] == ['oled_status_sync_1_d']
     row.app(2, 250)
     fw.mock('canvas_get_vgcanvas', lambda *_: 1)
@@ -401,10 +404,10 @@ OFFLINE_W = 14  # SR_OFFLINE: cloud-slash's 13.6 px of ink at 11 tall
 
 
 def crowd(fw, row):
-    """Every slot shown: bars 10, Wi-Fi 16, a sync 16, a headset 33, the padlock 13 and the offline cloud 14, with
-    their six gaps: 138 px left of the battery's body, 30 more than the room from the centred clock."""
+    """Every slot shown: bars 10, Wi-Fi 16, a download's ring 16, a headset 33, the padlock 13 and the offline cloud
+    14, with their six gaps: 138 px left of the battery's body, 30 more than the room from the centred clock."""
     row.wifi(3)
-    row.app(1)
+    row.app(2, 500)
     row.ap.a[0].reach = 1
     bt_link(fw, status=3, level=70)
     fw.var('g_keylock_flag', C.c_ubyte).value = 1

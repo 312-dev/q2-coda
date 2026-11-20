@@ -32,6 +32,7 @@
 #define SR_CAR_W 19    /* tools/art.py STATUS_CAR_W: car-profile 11 px tall is 18.5 wide */
 #define SR_LOCK 13     /* the padlock's box, tools/art.py STATE_PX */
 #define SR_RING 16     /* the download ring's box: a 14 px ring and its stroke */
+#define SR_SPIN_W 12   /* the turning arrows' box: frame 0's ink, 12 of its SR_GLYPH art's 14 */
 #define SR_RING_R 7.0f /* its centre line's radius */
 #define SR_RING_LINE 1.6f
 #define SR_DOWN 8       /* the arrow inside it */
@@ -132,7 +133,13 @@ static int play_shown(void) {
     return s == 2 || s == 3 ? SR_BARS_W : 0;
 }
 static int wifi_shown(void) { return wifi_level() ? SR_WIFI_W : 0; }
-static int sync_shown(void) { return addon_sync((int *)0) ? SR_RING : 0; }
+/* The sync's box: the ring while it downloads; while it checks, the arrows' upright ink, so the
+ * gaps beside them are SR_GAP of ground as every glyph's; turning, their corners pass up to 1 px
+ * into it (tools/art.py status_turn: 10 to 14 px of ink across the frames). */
+static int sync_shown(void) {
+    int kind = addon_sync((int *)0);
+    return kind == 2 ? SR_RING : kind ? SR_SPIN_W : 0;
+}
 /* The Bluetooth slot (docs/oled-design.md#status-row, P9): what the link is, BT_SLOT_*. Stock's
  * link list's last item is the device it links (status 3 connected, as its rows read it); a link
  * thread running (bt_connectstatus 1) is a device connecting. */
@@ -266,7 +273,7 @@ static void sync_paint(void *bar, void *canvas, int x, int cy) {
     if (addon_sync(&permille) != 2) {
         char stem[24];
         tk_snprintf(stem, sizeof stem, "status_sync_%d", sr.spin % SR_SPIN);
-        glyph(bar, canvas, stem, x, SR_RING, cy, SR_GLYPH);
+        glyph(bar, canvas, stem, x, SR_SPIN_W, cy, SR_GLYPH);
         return;
     }
     void *vg = canvas_get_vgcanvas(canvas);
@@ -507,8 +514,8 @@ void status_touch(unsigned type, int x, int y) {
 
 /* Whether the arrows turn: an app checks. */
 static int moving(void) { return addon_sync((int *)0) == 1; }
-/* Each frame, while lit and the arrows turn: the next one, and only their box repainted
- * (ringnav_paint_bg paints it with the bar's background under it). */
+/* Each frame, while lit and the arrows turn: the next one, and only their art's box repainted, a
+ * px either side of the slot's (ringnav_paint_bg paints it with the bar's background under it). */
 static int sr_tick(const void *info) {
     (void)info;
     void *bar = *(void *const *)system_bar;
@@ -519,7 +526,7 @@ static int sr_tick(const void *info) {
     layout();
     if (sr.w[SLOT_SYNC]) {
         sr.spin = (sr.spin + 1) % SR_SPIN;
-        rect_t r = { sr.x[SLOT_SYNC], 0, SR_RING, I(bar, W_H) };
+        rect_t r = { sr.x[SLOT_SYNC] - (SR_GLYPH - SR_SPIN_W) / 2, 0, SR_GLYPH, I(bar, W_H) };
         widget_invalidate_force(bar, &r);
     }
     return 8; /* RET_REPEAT */
