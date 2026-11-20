@@ -1175,7 +1175,8 @@ def test_a_title_too_long_or_stock_s_null_name(fw, world, st, text, title):
 
 
 class EmptyT(C.Structure):
-    _fields_ = [(k, C.c_char_p) for k in ('glyph', 'title', 'hint', 'row')]
+    _fields_ = [('glyph', C.c_char_p), ('title', C.c_char_p), ('hint', C.c_char_p), ('row', C.c_char_p),
+                ('foot', C.c_char_p), ('bar', C.c_int)]
 
 
 def test_an_empty_state_retitles_the_bar_on_a_page_already_titled(fw, world, st):
@@ -2553,11 +2554,6 @@ def test_control_center_s_cover_corners_are_the_block_s_colour_as_painted(fw, wo
     corner = [c for fx, fy, w, h, c in canvas.fills if (fx, fy, h) == (x, y, 1)]
     want = flip(int(light), 0x1c1c1e)
     assert corner and set(corner) == {rgba(want) & 0xffffff | 0xff000000} and block
-
-
-class EmptyT(C.Structure):
-    _fields_ = [('glyph', C.c_char_p), ('title', C.c_char_p), ('hint', C.c_char_p), ('row', C.c_char_p),
-                ('foot', C.c_char_p), ('bar', C.c_int)]
 
 
 def test_a_status_pages_stack_has_its_lines_a_bar_and_a_footer(fw, st):
