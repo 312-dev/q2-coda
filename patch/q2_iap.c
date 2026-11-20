@@ -12,6 +12,7 @@
  *   q2-iap [--echo] [--echo-from N] [--iap2] [--np FILE] [--uuid HEX] [--car-pcm DEV] [--car-file F]
  *          [--cmd-file F] [--rate-file F] [--art-dir D] [--sessions N] [--for S] [--gap-ms MS] [--carplay]
  *          [--phase NAME] [--state F] [--udc F] [--counters DIR] [--under F] [--auto-ms MS] [--car-ms MS]
+ *          [--lib-db F] [--lib-sent F] [--list-file F] [--queue-file F]
  *          LOG DIR:KIND...
  *   q2-iap --descs KIND     the descriptor and strings blobs for KIND on stdout (tests)
  *
@@ -75,6 +76,10 @@ int rename(const char *, const char *);
 int unlink(const char *);
 char *strrchr(const char *, int);
 int *__errno_location(void);
+void *malloc(size_t);
+void *realloc(void *, size_t);
+void free(void *);
+unsigned long strtoul(const char *, char **, int);
 #define ERRNO (*__errno_location())
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -335,6 +340,8 @@ static int io_now_playing(struct iap2_np *n) {
             else if (!strcmp(line, "len")) n->len_ms = atoi(v) * 1000u;
             else if (!strcmp(line, "qpos")) n->qpos = atoi(v);
             else if (!strcmp(line, "qlen")) n->qlen = atoi(v);
+            else if (!strcmp(line, "id")) n->id = (unsigned)atoi(v);
+            else if (!strcmp(line, "qgen")) n->qgen = (unsigned)atoi(v);
             else if (!strcmp(line, "shuffle")) n->shuffle = atoi(v);
             else if (!strcmp(line, "repeat")) n->repeat = atoi(v);
             else if (!strcmp(line, "title")) snprintf(n->title, sizeof n->title, "%s", v);
@@ -587,8 +594,11 @@ static void summary(void) {
     logline("car", msg);
 }
 
-static const struct iap2_host io = { io_send, mono_ms, io_log, io_now_playing, "Q2 Muse", uuid, library_id,
-                                     io_audio, io_command, io_artwork };
+#include "q2_iap_lib.c"
+
+static const struct iap2_host io = { io_send,   mono_ms,    io_log,  io_now_playing, "Q2 Muse", uuid,     library_id,
+                                     io_audio,  io_command, io_artwork, &lib_t,      lib_load,  lib_saved, lib_play,
+                                     lib_queue };
 
 /* The input report that echoes payload (link control 0, whole): the smallest that fits, zero padded,
  * written to the HID instance's ep1 in a child so the event loop never waits on the host's poll. */
@@ -758,6 +768,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(o, "--cmd-file")) cmd_file = v, ++a;
         else if (!strcmp(o, "--art-dir")) art_dir = v, ++a;
         else if (!strcmp(o, "--state")) state_file = v, ++a;
+        else if (!strcmp(o, "--lib-db")) lib_db = v, ++a;
+        else if (!strcmp(o, "--lib-sent")) lib_sent_file = v, ++a;
+        else if (!strcmp(o, "--list-file")) list_file = v, ++a;
+        else if (!strcmp(o, "--queue-file")) queue_file = v, ++a;
         else if (!strcmp(o, "--udc")) udc_file = v, ++a;
         else if (!strcmp(o, "--counters")) counters_dir = v, ++a;
         else if (!strcmp(o, "--under")) under_file = v, ++a;

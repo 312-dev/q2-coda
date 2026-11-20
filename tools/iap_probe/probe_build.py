@@ -22,7 +22,7 @@ ROOT = HERE.parents[1]
 CFLAGS = ['--target=mipsel-linux-gnu', '-march=mips32r2', '-mabi=32', '-mfp64', '-mnan=2008', '-mabs=2008', '-mabicalls',
           '-fno-pic', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-fno-unwind-tables',
           '-fno-asynchronous-unwind-tables', '-Oz', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
-LIBS = ['lib/libc-2.28.so']
+LIBS = ['lib/libc-2.28.so', 'usr/lib/libsqlite3.so.0.8.6']  # SQLite: the library on iDrive (patch/q2_iap_lib.c)
 TONE_RATE, TONE_HZ, TONE_DB, TONE_S = 44100, 1000, -20, 2
 
 

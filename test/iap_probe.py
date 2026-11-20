@@ -18,6 +18,7 @@ import tty
 import pytest
 
 SRC = pathlib.Path(__file__).resolve().parents[1]/'patch/q2_iap.c'
+SQLITE = '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0'  # the library on iDrive (q2_iap_lib.c); stock's is 3.54
 SETUP, ENABLE, DISABLE = 4, 2, 3
 
 
@@ -25,7 +26,7 @@ SETUP, ENABLE, DISABLE = 4, 2, 3
 def probe(tmp_path_factory):
     exe = tmp_path_factory.mktemp('probe')/'q2-iap-probe'
     subprocess.run(['cc', '-DPROBE_HOST', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
-                    '-Wno-unused-result', str(SRC), '-o', str(exe)], check=True)
+                    '-Wno-unused-result', str(SRC), '-o', str(exe), SQLITE], check=True)
     return exe
 
 
@@ -844,6 +845,192 @@ def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
         time.sleep(7.5)
         v = verdict(tmp_path/'state')
         assert (v['flowing'], v['trouble']) == ('0', 'nostream')
+    finally:
+        stop(p, fd)
+
+
+# ---- the library on iDrive, playing from it, and Up Next (q2_iap_lib.c) ----
+
+def plist(body):
+    """A message's parameters in order, repeats kept: [(id, data)]."""
+    out, off = [], 0
+    while off + 4 <= len(body):
+        n = body[off] << 8 | body[off + 1]
+        out.append((body[off + 2] << 8 | body[off + 3], body[off + 4:off + n]))
+        off += n
+    return out
+
+
+SONGS = [  # id, title, album, artist, album artist, genre, track, disc, path
+    (3, 'Teardrop', 'Mezzanine', 'Massive Attack', '', 'Trip Hop', 3, 1, '/mnt/mmc/m/03.flac'),
+    (5, 'Angel', 'Mezzanine', 'Massive Attack', '', 'Trip Hop', 1, 1, '/mnt/mmc/m/01.flac'),
+    (7, 'Risingson', 'Mezzanine', 'Massive Attack', '', 'Trip Hop', 2, 1, '/mnt/mmc/m/02.flac'),
+    (9, 'Roads', 'Dummy', 'Portishead', '', 'Trip Hop', 6, 1, '/mnt/mmc/d/06.flac'),
+    (11, 'A Book', '', '', '', '', 0, 0, '/mnt/mmc/audiobooks/a.mp3'),  # not music: never sent
+]
+
+
+def song_db(path, songs=SONGS):
+    import sqlite3
+    path.unlink(missing_ok=True)
+    db = sqlite3.connect(path)
+    db.execute('create table songtable (id integer primary key, filename text, fileurl text, album text, songer text,'
+               ' albumsonger text, style text, name text, year text, track integer, cd_num integer, time_create integer)')
+    for i, t, al, ar, aa, g, tr, d, url in songs:
+        db.execute('insert into songtable values (?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (i, url.rsplit('/', 1)[1], url, al, ar, aa, g, t, '1998', tr, d, 0))
+    db.commit()
+    db.close()
+
+
+def lib_car(probe, tmp_path, *more, run='run1'):
+    """A car up to identification with the library's files: the database and the sent record in tmp_path, kept from
+    one run (a cable) to the next, the rest in run."""
+    db, sent = tmp_path/'database.db', tmp_path/'q2-iap.library'
+    if not db.exists():
+        song_db(db)
+    (tmp_path/run).mkdir()
+    p, car, fd, log, files = bmw_up(probe, tmp_path/run, '--lib-db', str(db), '--lib-sent', str(sent), '--list-file',
+                                    str(tmp_path/'list'), '--queue-file', str(tmp_path/'queue'), *more)
+    return p, car, fd, log, files, db, sent
+
+
+def library(car, rev=None, timeout=3.0):
+    """The car's StartMediaLibraryUpdates and every update to the one with progress 100: (items, deleted, revision,
+    reset seen)."""
+    car.send(message(0x4C03, prm(0, b'lib\0'), *([prm(1, rev.encode() + b'\0')] if rev else [])))
+    items, gone, reset = [], [], False
+    while True:
+        mid, _ = car.msg(timeout)
+        body = car.last
+        assert mid == 0x4C04
+        ps = plist(body)
+        ids = [i for i, _ in ps]
+        reset |= 6 in ids
+        items += [params(d) for i, d in ps if i == 2]
+        gone += [int.from_bytes(d, 'big') for i, d in ps if i == 4]
+        if 7 in ids and dict(ps)[7] == b'\x64':
+            return items, gone, dict(ps)[1].rstrip(b'\0').decode(), reset
+
+
+def test_the_library_whole_then_nothing_then_the_changes(probe, tmp_path, monkeypatch):
+    """A car that holds nothing gets every song (audiobooks aside) with a reset, ids under 0x51320001, albums, artists
+    and genres by name; one that holds that revision gets the revision alone; once a song is added, one changed and one
+    removed, a car that holds the last revision sent whole gets those three alone, the removed one by id, no reset."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, gone, rev, reset = library(car)
+        assert reset and not gone and [int.from_bytes(i[0], 'big') for i in items] == [0x5132000100000000 | r for r in (3, 5, 7, 9)]
+        teardrop = items[0]
+        assert teardrop[1] == b'Teardrop\0' and teardrop[6] == b'Mezzanine\0' and teardrop[12] == b'Massive Attack\0'
+        assert teardrop[14] == b'Massive Attack\0' and teardrop[16] == b'Trip Hop\0' and teardrop[7] == b'\x00\x03'
+        assert teardrop[5][:4] == b'\x51\x32\x00\x0a' and items[1][5] == teardrop[5], 'one album, one id'
+        time.sleep(0.2)
+        assert sent.read_text().splitlines()[0] == rev
+        items, gone, rev2, reset = library(car, rev)
+        assert (items, gone, rev2, reset) == ([], [], rev, False)
+    finally:
+        stop(p, fd)
+    song_db(db, [s for s in SONGS if s[0] != 7] + [(13, 'Glory Box', 'Dummy', 'Portishead', '', 'Trip Hop', 11, 1, '/mnt/mmc/d/11.flac')])
+    import sqlite3
+    c = sqlite3.connect(db)
+    c.execute("update songtable set name='Angel (Remastered)' where id=5")
+    c.commit()
+    c.close()
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path, run='run2')
+    try:
+        items, gone, rev3, reset = library(car, rev)
+        assert not reset and rev3 != rev
+        assert sorted(int.from_bytes(i[0], 'big') & 0xffffffff for i in items) == [5, 13]
+        assert gone == [0x5132000100000007]
+    finally:
+        stop(p, fd)
+    assert 'library: changes sent, 2 songs of 4' in log.read_text()
+
+
+def bmw_msg_keeping_body(self, timeout=3.0):
+    """BmwCar.msg, keeping the message's raw parameters (repeats and all) in self.last."""
+    while True:
+        got = self.packet_any(timeout)
+        if got is None:
+            continue
+        ctl, seq, ack, session, pl = got
+        if not pl:
+            continue
+        if session == 2:
+            self.files.append(pl)
+            continue
+        self.last = pl[6:]
+        return pl[4] << 8 | pl[5], params(pl[6:])
+
+
+def test_playing_from_idrive(probe, tmp_path, monkeypatch):
+    """Songs picked on iDrive (4C07, their ids and where to start), an album (4C08, type 2: in disc and track order),
+    every song shuffled (4C09) and the current selection (4C06) as the shim's list and play command."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    try:
+        items, _, _, _ = library(car)
+        keys = b''.join((0x5132000100000000 | r).to_bytes(8, 'big') for r in (9, 3))
+        car.send(message(0x4C07, prm(0, keys), prm(1, (1).to_bytes(4, 'big'))))
+        time.sleep(0.2)
+        assert (tmp_path/'list').read_text() == '9\n3\n' and files['cmd'].read_text().split(' ', 1)[1] == 'play 1 0 2\n'
+        album = items[0][5]
+        car.send(message(0x4C08, prm(0, album), prm(1, b'\x02'), prm(2, (0).to_bytes(4, 'big'))))
+        time.sleep(0.2)
+        assert (tmp_path/'list').read_text() == '5\n7\n3\n' and files['cmd'].read_text().split(' ', 1)[1] == 'play 0 0 3\n'
+        car.send(message(0x4C09, prm(0, b'lib\0'), prm(1)))
+        time.sleep(0.2)
+        assert (tmp_path/'list').read_text() == '3\n5\n7\n9\n' and files['cmd'].read_text().split(' ', 1)[1] == 'play 0 1 4\n'
+        car.send(message(0x4C06, prm(0, b'lib\0')))
+        time.sleep(0.2)
+        assert files['cmd'].read_text().split(' ', 1)[1] == 'resume\n'
+    finally:
+        stop(p, fd)
+
+
+def file_packet(car):
+    """The next packet; one on the file transfer session kept in car.files."""
+    got = car.packet_any()
+    if got and got[4] and got[3] == 2:
+        car.files.append(got[4])
+
+
+def test_up_next_and_the_playing_song_s_id(probe, tmp_path, monkeypatch):
+    """Now Playing names the song by its library id; when the queue changes (qgen) and holds still a second, PB_QUEUE_LIST
+    1 with an empty PB_QUEUE_LIST_ID, then a file transfer of type 3 with the queue's ids in order; a queue with a song
+    outside the library is PB_QUEUE_LIST 0 and no list."""
+    monkeypatch.setattr(BmwCar, 'msg', bmw_msg_keeping_body)
+    p, car, fd, log, files, db, sent = lib_car(probe, tmp_path)
+    (tmp_path/'queue').write_text('4 1 3\n5\n3\n9\n')
+    files['np'].write_text(files['np'].read_text() + 'id=3\nqgen=4\nqpos=1\nqlen=3\n')
+    try:
+        car.send(message(0x5000, prm(0, prm(0) + prm(1)), prm(1, prm(0) + prm(2) + prm(3) + prm(14) + prm(17))))
+        mid, ps = car.msg()
+        assert mid == 0x5001 and params(ps[0])[0] == (0x5132000100000003).to_bytes(8, 'big')
+        deadline, announce = time.time() + 4, None
+        while time.time() < deadline and announce is None:
+            mid, ps = car.msg()
+            if mid == 0x5001 and 1 in ps and 14 in params(ps[1]):
+                announce = params(ps[1])
+        assert announce and announce[14] == b'\x01' and announce[17] == b''
+        while not car.files:
+            file_packet(car)
+        tid, op, setup = car.files[0][0], car.files[0][1], car.files[0][2:]
+        assert op == 0x04 and setup == bytes(4) + (24).to_bytes(4, 'big') + b'\x00\x03'
+        car.send(bytes([tid, 0x01]), session=2)
+        while len(car.files) < 2:
+            file_packet(car)
+        assert car.files[1][1] == 0xC0 and car.files[1][2:] == b''.join((0x5132000100000000 | r).to_bytes(8, 'big') for r in (5, 3, 9))
+        (tmp_path/'queue').write_text('5 0 2\n5\n0\t/mnt/mmc/.app/x.flac\tX\tY\n')
+        files['np'].write_text(files['np'].read_text().replace('qgen=4', 'qgen=5'))
+        deadline, announce = time.time() + 4, None
+        while time.time() < deadline and announce is None:
+            mid, ps = car.msg()
+            if mid == 0x5001 and 1 in ps and 14 in params(ps[1]):
+                announce = params(ps[1])
+        assert announce and announce[14] == b'\x00' and 17 not in announce
     finally:
         stop(p, fd)
 
