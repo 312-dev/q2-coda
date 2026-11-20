@@ -282,5 +282,5 @@ def test_get_image_with_a_descriptor(lib):
 
 def test_no_constant_drift_from_the_header():
     h = (ROOT / 'patch/q2bip.h').read_text()
-    assert int(re.search(r'#define BIP_PKT (\d+)', h)[1]) == PKT
-    assert re.search(r'#define BIP_PSM (0x[0-9a-f]+)', h)[1] == '0x1025'
+    assert re.findall(r'#define BIP_PKT (\d+)', h) == [str(PKT)]
+    assert re.findall(r'#define BIP_PSM (0x[0-9a-f]+)', h) == ['0x1025']

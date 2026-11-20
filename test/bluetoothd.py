@@ -238,7 +238,7 @@ def check(directory):
     stock, patched = extract('stock.squashfs'), extract('rootfs.squashfs')
     assert sha(stock) == BLUETOOTHD_SHA
     site, pdu_word, handler = BT_META_SLOT
-    # Only the table word and the program header that maps the appended code differ.
+    # Only the table word, the program header that maps the appended code and the SDP record's sites differ.
     null_header = segments(stock)[-1][0]
     changed = [i for i in range(len(stock)) if stock[i] != patched[i]]
     allowed = set(range(fileoff(stock, site + 4), fileoff(stock, site + 8))) | set(range(null_header, null_header + 32))

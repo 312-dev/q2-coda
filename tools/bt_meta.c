@@ -17,7 +17,7 @@
  * attribute, asked for or not.
  *
  * bluetoothd is position independent, so this is too, by construction: every function is inlined into
- * the one entry (no jal), there is no data or constant pool (no absolute address), and libbtctl's
+ * its entry (no jal; there are two, this and bt_cover_sdp below), there is no data or constant pool (no absolute address), and libbtctl's
  * objects and pthread's functions are reached through bluetoothd's GOT at its $gp, which the caller
  * leaves set (BT_META_GOT_*: each slot's offset from $gp, filled in by -D). tools/build.py
  * (bt_meta) refuses an object with any relocation. */

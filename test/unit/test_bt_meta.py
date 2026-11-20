@@ -239,7 +239,9 @@ def sdp_lists(code, record=0x7000, version=0x7100):
         u.mem_write(DATA + 0x200 + i * 16, struct.pack('<2I', 0x03e00008, 0))
         u.mem_write(GP + slot, struct.pack('<I', DATA + 0x200 + i * 16))
     u.mem_write(RET, struct.pack('<2I', 0x03e00008, 0))
-    objects, live, set_on = {version: 'version'}, set(), []
+    objects: dict = {version: 'version'}
+    live: set = set()
+    set_on: list = []
 
     def new(value):
         at = 0x9000 + 16 * len(objects)
@@ -309,7 +311,7 @@ def test_sdp_jump_reaches_the_code_from_gp_wherever_it_is_loaded(code):
 
 def test_the_psm_is_the_one_q2_bip_listens_on():
     import re
-    assert int(re.search(r'#define BIP_PSM (0x[0-9a-f]+)', (build.ROOT / 'patch/q2bip.h').read_text())[1], 16) \
-        == build.BT_COVER_PSM
+    psm, = re.findall(r'#define BIP_PSM (0x[0-9a-f]+)', (build.ROOT / 'patch/q2bip.h').read_text())
+    assert int(psm, 16) == build.BT_COVER_PSM
     assert build.BT_COVER_PSM & 0x0101 == 0x0001  # a valid dynamic PSM: odd, its high byte even
     assert len(build.BT_COVER_FILE) == 15  # with its NUL, the four words bt_meta.c builds

@@ -151,7 +151,7 @@ void card_record_tags(void *r) {
  * before Now Playing's lines. A CUE track's tags are its record's, the stock parser's TITLE and
  * PERFORMER (the track's, else the sheet's); a sheet without them takes the file's (issue #59).
  * ponytail: the playing track only; the database keeps the sheet's empty fields for Library. */
-unsigned id3_parses __attribute__((section(".scratch"))); /* each fresh parse: catalogue.c */
+unsigned id3_parses __attribute__((section(".scratch")));     /* each fresh parse: catalogue.c */
 extern void bt_cover_note(const char *id3, const char *path); /* bt_cover.c */
 char *ringnav_id3_path(char *id3, const char *path) {
     static const int fields[] = { ID3_ALBUM, ID3_ARTIST, ID3_ALBUM_ARTIST };

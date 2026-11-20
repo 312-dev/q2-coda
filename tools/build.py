@@ -2355,7 +2355,8 @@ def bt_meta():
         return (d/'m.bin').read_bytes(), symbols(d/'m.elf')
 
 def patch_bluetoothd(raw):  # pragma: no mutate block
-    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c."""
+    """Point stock bluetoothd's control-channel GetElementAttributes at tools/bt_meta.c, and have its AVRCP target
+    record name cover art (BT_SDP_WORDS, BT_SDP_JUMP)."""
     check(sha(raw) == BLUETOOTHD_SHA, 'Unexpected bluetoothd')
     image = bytearray(raw)
     code, sym = bt_meta()
