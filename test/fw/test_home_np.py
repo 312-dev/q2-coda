@@ -13,7 +13,7 @@ from test_guest_ui import Gui
 from test_nav_library_pages import stock_page
 from test_nav_painters import Canvas, theme
 
-HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
+HOME = ['playing', 'localmusic', 'games', 'folder', 'coverflow', 'home_search', 'settings']
 EVT_CLICK = O['EVT_CLICK']
 CLICK = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p)
 LABEL_X = 24  # Now Playing's label in its row; the text column is 2 px in (hscroll_label's margin)

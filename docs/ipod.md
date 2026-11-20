@@ -101,8 +101,10 @@ still lands on the row the page behind was left at ([internals](internals.md#pos
 Home splits the screen: the menu on the left, the current local track's art in the right panel.
 The selection is the lists' bar, and each row that opens a page has the chevron ([Theme](#theme)).
 
-The seven rows, by default in the order the menu review chose (2026-11-15), are the play state's row, Library,
-Streaming, Folders, Cover Flow, Search and Settings. **The first row** is stock's Now Playing row named for what plays
+The seven rows, by default in the order the menu review chose (2026-11-15, with Games and Streaming moved on
+2026-11-19), are the play state's row, Library, Games, Folders, Cover Flow, Search and Settings. **Games** opens the
+Games page (`games_open`, [Games](#games)), which the Library held before; Streaming is a Settings row, after
+Playback. **The first row** is stock's Now Playing row named for what plays
 (`patch/home_np.c`; approved 2026-11-16, `design/home-np-icon`): **Playing**, **Paused**, or **Guest Play** while a
 guest plays ([internals](internals.md#guest-play)), when it opens the guest's Now Playing (its click and a short
 Return, `guest_home_np`), else the owner's. It leads with the play state, which leaves the status row while the row
@@ -118,10 +120,11 @@ Folder card under its plural name, shown only while the SD card has folders to l
 Folders page's test) until the user shows or hides it. **Edit Home** (Center held on the list, or a finger held on a
 row; [oled-design](oled-design.md#edit-library), [internals](internals.md#library-order)) puts the rows in the
 user's order and shows or hides each, Settings always shown. **Search** opens the Library's search (`library_search_open`: the
-letter strip under `list.entry.ipod`, OLED's, stock's search without it). Shuffle Songs and the
+letter strip under `list.entry.ipod`, OLED's, stock's search without it): every song, artist and album, the one
+search across everything; each list page searches its own rows from its search bar. Shuffle Songs and the
 Shortcut row are not on the list: the Library's Shuffle page keeps Shuffle Songs, and the Shortcut
 (`IPOD/SHORTCUT` 0-11, read as a decimal by `config_value`, with no Appearance row to change it) is only
-Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
+Carousel's card: Rockbox when the card has it, else Favorites, or the value an older build saved: Artists, Albums, Favorites, Rated Albums, Shuffle, Games, Playlists, Podcasts, Audiobooks or Groovebox (`home_shortcut_open`; Groovebox (10, `SHORTCUT_GROOVEBOX`) is the App Store's Groovebox card game, started by id through `addon_game_open` as its Games row would start it (the tap toasts when no card game has the id); `bar_sync` lays Home out again when the card's Rockbox or Groovebox comes or goes, `ipod_shortcut_seen`; Rated Albums is Ratings → Albums, `rated_albums`; Shuffle is the Library's Shuffle page, `shuffle_menu`; Playlists is the Library's list, opened as stock's Home opens it; Podcasts and Audiobooks are the card's folders, opened as their Local Music rows open them, `media_click`, which toasts "No Podcasts folder on the card" without one); None (11, `SHORTCUT_NONE`), and a value this build does not know, are the default. Carousel's cards are stock's and have none for Search. Settings opens its own list in the menu's place, as an iPod's submenu: Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery ([Settings](#settings)); Return restores the menu's previous selection, and a short Return on the main menu selects
 its first row, Now Playing while it shows; a short Return with Now Playing selected opens it without
 changing playback. Return there goes back to Home. Both lists end at their ends, as every list does: the wheel stops there and the selection leans against the end ([internals.md](internals.md#list-ends)).
 Folder opens directly at the SD root when a card is in and no OTG drive is connected; Back at that root returns
@@ -362,10 +365,13 @@ is not an icon: at 0 it stays, in the column of stock's own marks, and under a `
 (OLED) every picker opens on its mark when a tap opened it too, as a `CHOICE` picker does. Another list whose `default_item_height` equals the set's
 `set_row` carries an explicit `item_height`, so only the settings pages are told apart by it.
 
-Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Car Remote, Display, Controls and Battery (the menu
-review's order, 2026-11-15; `tools/ipod.py` `HOME_SETS`): Wi-Fi and Bluetooth open stock's pages, which its Wireless
-page held, and the rows that are not stock's are bound by `home_sets_bind`. General is stock's System page
-(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage, USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
+Settings, as iOS's, lists Wi-Fi, Bluetooth, General, Playback, Streaming, Car Remote, Display, Controls and Battery
+(the menu review's order, 2026-11-15, Streaming from Home since 2026-11-19; `tools/ipod.py` `HOME_SETS`): Wi-Fi and
+Bluetooth open stock's pages, which its Wireless page held, and the rows that are not stock's are bound by
+`home_sets_bind`. Streaming opens stock's Streaming page (`on_home_stream_onclick`, bound by `coverflow_home`), or in a
+set with `home_lib` its rows over the Settings list, which Return gives back. General is stock's System page
+(`ringnav_systemset`): About, Software Update (`sw_update.c`: online and the card at once), Storage (with **Update Library**, from the
+Library's page since 2026-11-19, [internals](internals.md#storage)), USB (the remembered USB choice as its value; its picker is `usb_ui.c` `usb_pick_open`, [internals](internals.md#usb-pages)), Date & Time, App Store, Network (DLNA, AirPlay and Wi-Fi File
 Transfer), then Restart and Shut Down after a 12 px gap and Reset Settings last, directly under Shut Down, in Negative red as a destructive row (`power_rows`); Battery is stock's Power
 page under its new name. No list has headings. EQ and **Library** come first, then Play Mode, Gapless, Crossfade, Memory Playback, Resume Songs, Headphones Required and the Sleep Timer (stock's timer page); the volume rows (Volume, Max Volume, Default Volume) and specialist output controls come next. Volume opens the slider page on the volume itself ([Wheel volume](internals.md#wheel-volume)); Max Volume, Balance, Crossfade's length and Default Volume's level are inline sliders set in the list, Crossfade and Default Volume switches with their slider under them while on, and Display's Brightness is one too ([oled-design](oled-design.md#inline-sliders)). Added binary settings
 use Shanling's `switch_on` / `switch_off` images with the whole row as the tap target. Settings
@@ -1078,7 +1084,15 @@ painted it white, which drew the box at rest.
   selected row's artist on the right column), Right (every row's) or Off. **Song Length**: Albums (the default), All
   Lists or Off; with a length on the right column, Right and Selected Row put the artist inline. Lists Q2 Muse builds
   itself (Most Played, Long Songs, Ratings, Cover Flow's tracks) keep their own rows.
-- <a id="search"></a>**Search.** The Library's Search row (and Songs' pull) opens an iPod classic's letter strip, not
+- **A list's search bar** ([oled-design](oled-design.md#search-bar), `patch/search_bar.c`): on every music list
+  page (Songs, Artists, Albums, Genres, Playlists, Years, Ratings, Most Played, Long Songs, and inside a playlist,
+  an artist or an album) a turn up from the first row brings in a search bar above it, "Search <the page's title>";
+  Centre opens the letter strip below, which filters the page's own rows as the text is typed. Return closes the
+  strip and lights the bar, the text and the filtered rows kept; a turn down goes into them, Return again goes back
+  to the page with its bar lit, and a third leaves the page. The go key goes to the first match, or with none lights
+  the bar over No Matches. Erasing on the strip clears the text. A match opens its row on the page, as the row
+  itself does there. Home's Search searches everything.
+- <a id="search"></a>**Search.** Home's Search row (and Songs' pull) opens an iPod classic's letter strip, not
   stock's search box and keyboard (`list.entry.ipod`, `patch/search_strip.c`, the user's mock-up
   `keyboard-inscreen/strip.html`). The query reads on the page's first line: a magnifier in Text Secondary at x 31,
   the text in 20 px white from x 48 with a steady 2 px cursor while the strip has the wheel, or "Search your music"
@@ -1231,7 +1245,7 @@ the protocol and the daemon: [localsend.md](localsend.md).
 
 ## Games
 
-**Library → Games** opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
+**Home → Games** (the Library's row until 2026-11-19) opens Sudoku, Vortex, Solitaire and Snake ([internals](internals.md#games)). A game
 takes every key but Power and a held Return, so the music keeps playing untouched.
 
 | Game      | Wheel                                    | Center                                          | Play/Pause            | Previous/Next                                                           | Return                              |

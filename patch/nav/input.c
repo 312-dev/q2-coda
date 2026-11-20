@@ -535,7 +535,10 @@ static int shuffle_key(void *top, void *w, int dir) {
         reveal(&g_menu, 0, 1); /* the row under it in view */
     } else if (dir) {
         int stop = st.shuffle_stop - dir; /* up the stops, down to the songs */
-        if (stop > stops) return 1;       /* the last stop: nothing above */
+        if (stop > stops) { /* the last stop: above it only the search bar (search_bar.c) */
+            search_bar_up_with(top, w, row);
+            return 1;
+        }
         if (stop) {
             st.shuffle_stop = stop;
         } else {
@@ -836,6 +839,7 @@ int ringnav(void *ctx, void *event) {
         drop_input();
         if (!kb) return result;
     }
+    if (search_bar_key(top, key)) return STOP; /* a music list's lit search bar (search_bar.c) */
     /* A double Centre turns the screen off on every listed page, also where the page has no row
      * selected or is still sliding in. A list's
      * selected row times its own double press (center_timer). */
@@ -948,7 +952,8 @@ int ringnav(void *ctx, void *event) {
                               id < 0 ? 0 : dir * step);
         if (next == 0 || next == g_menu.rows - 1) drop_wheel();
         if (next == id) { /* a list ends at its ends: no wrap; the bar leans against the end
-                             (tilt.c) */
+                             (tilt.c), but above a music list's first row stands its search bar */
+            if (dir < 0 && !id && search_bar_up(top, g_menu.w)) return STOP;
             tilt_end(w, dir);
             stop_scroll(&g_menu);
             widget_invalidate_force(w, (void *)0); /* a wheel wake still clears touch hiding */

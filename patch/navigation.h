@@ -1063,6 +1063,16 @@ void bt_stopped_paint(void *w, void *canvas);
 const char *bt_stopped_title(const char *name);
 /* search_strip.c: a text box on the strip, on its keyboard's window */
 int search_strip_box(void *kb, void *edit, const char *title);
+/* search_strip.c: the search bar's pill (docs/oled-design.md#search-bar), and a list page's own search
+ * over its rows (search_bar.c); search_bar.c: the bar above a list page's first row */
+#define SEARCH_PILL_X 16
+#define SEARCH_PILL_H 36
+#define SEARCH_PILL_R 10
+void search_pill_paint(void *canvas, int cy, int lit, const char *words);
+int search_strip_scoped(void *page, void *surface, const char *title);
+int search_bar_up(void *top, void *w), search_bar_up_with(void *top, void *w, void *also),
+    search_bar_key(void *top, unsigned key);
+void search_bar_off(void), search_bar_paint(void *w, void *canvas);
 /* ... or on a page of its own, for a text the payload keeps itself: titled title, text prefilled,
  * at most max characters; Next at the text's end calls done, whose 0 closes the page and anything
  * else is a toast saying why not, the text kept to edit */
@@ -1160,6 +1170,7 @@ void coda_rc_note(const char *text); /* a toast, for the car (NowPlaying.notice)
 /* carremote_page.c: Settings > Car Remote, its phone page and Pair a Phone */
 int carremote_open(void *ctx, void *event);
 const char *day_or_date(char *out, unsigned n, unsigned when); /* Today, Yesterday, Nov 12 */
+const char *when_said(char *out, unsigned n, unsigned when); /* today, 18:11; yesterday, ...; Nov 12 */
 void carremote_poll(void), carremote_paired(const char *name),
     carremote_paint(void *w, void *canvas);
 /* song_radio.c: Now Playing's Radio (docs/internals.md#radio) */

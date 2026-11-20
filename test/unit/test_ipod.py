@@ -98,13 +98,13 @@ def test_ipod_home():
     assert root[3][2][2]['visible'] == 'false' and 'visible' not in root[3][1][2]
     rows = root[3][1][3][0][3]
     assert [r[2]['name'] for r in rows] == ['btn_' + r for r in ipod.HOME_ROWS]
-    assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', None, 'Folders', 'Cover Flow', 'Search', 'Settings']
-    assert [r[3][1][2]['name'] for r in rows][2:6] == ['img_stream', 'img_folder', 'img_cover_flow', 'img_home_search']
+    assert [r[3][0][2].get('text') for r in rows] == [None, 'Library', 'Games', 'Folders', 'Cover Flow', 'Search', 'Settings']  # 2026-11-19: Games, not Streaming
+    assert [r[3][1][2]['name'] for r in rows][2:6] == ['img_games', 'img_folder', 'img_cover_flow', 'img_home_search']
     sets = root[3][2][3][0][3]
-    assert [r[2]['name'] for r in sets] == ['btn_set_wifi', 'btn_set_bt', 'btn_sysset', 'btn_playset', 'btn_set_car',
-                                            'btn_set_display', 'btn_set_controls', 'btn_set_power']
-    assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Car Remote', 'Display',
-                                                  'Controls', 'Battery']
+    assert [r[2]['name'] for r in sets] == ['btn_set_wifi', 'btn_set_bt', 'btn_sysset', 'btn_playset', 'btn_set_stream',
+                                            'btn_set_car', 'btn_set_display', 'btn_set_controls', 'btn_set_power']
+    assert [r[3][0][2]['text'] for r in sets] == ['Wi-Fi', 'Bluetooth', 'General', 'Playback', 'Streaming', 'Car Remote',
+                                                  'Display', 'Controls', 'Battery']  # Streaming after Playback
     carousel = root[3][3]
     assert [c[2]['name'] for c in carousel[3]] == ['btn_playing', 'btn_localmusic', 'btn_coverflow', 'btn_folder', 'btn_rockbox',
                                                    'btn_stream', 'btn_playset', 'btn_sysset']
@@ -888,7 +888,8 @@ def test_home_lists_keep_stock_bindings():
         assert g.home_lib == 0
         root = home(); ipod.ipod_home(root, g=g); rows = named(root[3][1])
         assert 'list_view_homelib' not in named(root) and 'img_library' not in rows and 'img_localmusic' in rows
-        assert 'list_view_homestream' not in named(root) and 'img_services' not in rows and 'img_stream' in rows
+        # Streaming is Settings' row (2026-11-19), its click the payload's (coverflow.c coverflow_home)
+        assert 'list_view_homestream' not in named(root) and 'img_stream' not in rows and 'img_set_stream' in named(root[3][2])
 
 # Songs' action bar under OLED: a row of the set's action_row, the list and the empty panel under it, and stock's recreated
 # scroll bar spans that (the payload shapes what stock builds in it, navigation.c action_row).

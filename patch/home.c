@@ -51,9 +51,8 @@ static void library_look(void *view) {
     }
 }
 
-/* The Library: Search (the pull-down's own stock search, 0x5350d4, which ignores its arguments, shown
- * as Home's Split list hides the pull), one Shuffle row opening its menu, browsing, the user's own
- * lists, listening history, the card's other media, then upkeep, each row tagged with its letter
+/* The Library: one Shuffle row opening its menu, browsing, the user's own lists, listening
+ * history, the card's other media, then upkeep, each row tagged with its letter
  * and put in the saved order (library_edit.c lr_default holds the default one). The added rows'
  * buttons have no name, so stock's row click (atoi of the name, 0x53510c) never sees them. */
 int ringnav_localmusic(void *win, void *ctx) {
@@ -62,7 +61,6 @@ int ringnav_localmusic(void *win, void *ctx) {
     if (!view || widget_count_children(view) != L_STOCK) return result;
     void *stock[L_STOCK], *rows[LR_ROWS] = { 0 };
     for (int i = 0; i < L_STOCK; i++) stock[i] = widget_get_child(view, i);
-    lr_put(rows, 'S', library_row(view, (void *)0, library_search_open, 0, "Search", 1));
     /* Shuffle, Hi-Res, Long Songs and Upload Scrobbles are hidden until the user shows them in Edit
      * Library (the menu review's, 2026-11-15); My Fav and Frequent are never shown (lr_retire) */
     void *shuffle = library_row(view, "local_shuffle", shuffle_menu, 0, "Shuffle", 1);
@@ -75,6 +73,7 @@ int ringnav_localmusic(void *win, void *ctx) {
     for (unsigned i = 0; i < sizeof stocks; i += 2)
         lr_put(rows, stocks[i], stock[(int)stocks[i + 1]]);
     lr_auto_hide(stock[L_HIRES]);
+    lr_retire(stock[L_UPDATE]); /* Settings > General > Storage's Update Library (storage.c) */
     /* Years: browsing by a tag, as Genre */
     lr_put(rows, 'e', library_row(view, "local_era", era_menu, 0, "Years", 1));
     /* My Fav, the liked songs, is Ratings' Loved, its row kept hidden in its place */
@@ -85,14 +84,13 @@ int ringnav_localmusic(void *win, void *ctx) {
     void *longs = library_row(view, "local_longsongs", long_songs, 0, "Long Songs", 1);
     lr_put(rows, 'L', longs);
     lr_auto_hide(longs);
-    /* Podcasts, Audiobooks and Videos, each only with its folder; then iPod's Games. */
+    /* Podcasts, Audiobooks and Videos, each only with its folder. */
     static const char *const icons[] = { "local_podcasts", "local_audiobooks", "local_videos" };
     char path[sizeof st.media_root];
     for (int k = 0; k < VIDEOS; k++)
         if (media_find(k + 1, path))
             lr_put(rows, "PAv"[k],
                    library_row(view, icons[k], media_click, (void *)(long)(k + 1), MEDIA[k], 1));
-    lr_put(rows, 'G', library_row(view, "local_games", games_open, 0, "Games", 1));
     if (scrobble_ready()) {
         void *up = library_row(view, "local_scrobble", upload_scrobbles, 0, "Upload Scrobbles", 0);
         lr_put(rows, 'U', up);

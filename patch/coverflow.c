@@ -19,6 +19,8 @@ extern int stock_home_trampoline(void *win, void *ctx), stock_scan_all_trampolin
     stock_file_created_trampoline(const char *),
     stock_album_cover_trampoline(const char *, const char *, int, int);
 
+extern void storage_scanned(void); /* storage.c: a whole scan's end, saved */
+
 enum { PREPARING, COVERS, TRACKS };
 cf_page_t cf __attribute__((section(".scratch")));
 
@@ -81,6 +83,7 @@ static int library_scan(int (*stock)(void *, void *), void *a, void *b, int drop
         "create index if not exists songtable_time_create on songtable(time_create desc)");
     /* Scan Song Durations' pass after a whole scan: a stopped one leaves part of the library */
     if (!toolsGetUserStop()) durations_scanned();
+    if (drops && !toolsGetUserStop()) storage_scanned(); /* Storage's Update Library: last updated */
     return result;
 }
 int coverflow_scan_all(void *a, void *b) {
@@ -3831,7 +3834,7 @@ enum {
 static struct {
     void *win, *art, *list, *sets; /* sets: the Settings list, in the list's place while open */
     void *lib;             /* the Library's rows the same way: only a set with home_lib has it */
-    void *stream;          /* and Streaming's */
+    void *stream;          /* and Streaming's, which the Settings list's row opens */
     void *carousel[3];     /* Home: Carousel's slide_menu and its img_left, img_right */
     unsigned key, repaint; /* repaint: the timer of home_repaint */
     /* drift: home_drift's timer, tick its period; drift_last: its last step */
@@ -3868,6 +3871,7 @@ extern void library_rows(void *list), stream_rows(void *list);
 extern void home_overflow(void *list, int bottom), home_pad(void *view),
     home_fades(void *canvas, void *list, int list_y, int cols, int split, int shift);
 extern int library_search_open(void *ctx, void *event);
+extern int games_open(void *ctx, void *event); /* games.c: Home's Games row */
 /* library_edit.c: Home's rows in the user's order and Edit Home; home.c: Folders' rule */
 extern void lr_home_tag(void *view), lr_home_apply(void *view, int np),
     lr_edit_labels(void *view, int on);
@@ -4965,10 +4969,10 @@ static int home_settings(void *ctx, void *event) {
     return 0;
 }
 
-/* A list its page's constructor just filled, slid in in Home's rows' shape (under sub_full, Full's
- * rows across the screen). service: Streaming's, whose 70 px rows take Home's row height, and the
- * build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
-static void home_fill(void *list, int service) {
+/* A list its page's constructor just filled, slid in over from in Home's rows' shape (under
+ * sub_full, Full's rows across the screen). service: Streaming's, whose 70 px rows take Home's row
+ * height, and the build's icons are decoded now, not on the wheel's path (coverflow_home_row). */
+static void home_fill(void *from, void *list, int service) {
     const theme_t *T = theme();
     int full = sub_full(), split = full ? T->home_full_row : split_geom(SPLIT_ROW);
     home_width(list, full ? 375 : split, split, T->home_text_x, T->home_label_end[full], 0);
@@ -4982,7 +4986,7 @@ static void home_fill(void *list, int service) {
         widget_move_resize(b, 0, service ? 0 : I(b, W_Y), split, h);
     }
     widget_layout(list);
-    home_swap(home.list, list, I(list, W_W));
+    home_swap(from, list, I(list, W_W));
 }
 
 /* Home's Library row in Split (a set with home_lib): its rows slide in as Settings' do, each filled
@@ -4992,18 +4996,19 @@ static int home_library(void *ctx, void *event) {
     if (ipod_home() || !home.lib) return on_home_music_onclick(ctx, event);
     if (widget_get_visible(home.lib)) return 0;
     library_rows(home.lib);
-    home_fill(home.lib, 0);
+    home_fill(home.list, home.lib, 0);
     return 0;
 }
 
-/* Home's Streaming row, the same way (home.c stream_rows). The rebuild frees the rows, so the
- * highlighted row goes first. */
+/* The Settings list's Streaming row (after Playback, tools/ipod.py HOME_SETS), the same way over
+ * the Settings list (home.c stream_rows); Return goes back to Settings (coverflow_home_back). The
+ * rebuild frees the rows, so the highlighted row goes first. Full and Carousel keep the page. */
 static int home_streaming(void *ctx, void *event) {
     if (ipod_home() || !home.stream) return on_home_stream_onclick(ctx, event);
     if (widget_get_visible(home.stream)) return 0;
     home.row = (void *)0;
     stream_rows(home.stream);
-    home_fill(home.stream, 1);
+    home_fill(home.sets, home.stream, 1);
     return 0;
 }
 
@@ -5013,7 +5018,8 @@ int coverflow_home_back(void *top) {
     void *open = top == home.win ? home_open() : (void *)0;
     if (!open) return 0;
     if (theme()->reopen_top) forget_rows(open);
-    home_swap(open, home.list, -I(home.list, W_W));
+    void *back = open == home.stream && home.sets ? home.sets : home.list; /* Streaming: Settings' */
+    home_swap(open, back, -I(back, W_W));
     return 1;
 }
 
@@ -5062,8 +5068,10 @@ int coverflow_home(void *win, void *ctx) {
     home.stream = widget_lookup(win, "list_view_homestream", 1);
     if (home.stream) {
         widget_set_sensitive(home.stream, 0);
-        widget_on(widget_lookup(win, "img_services", 1), EVT_CLICK, home_streaming, win);
-    }
+        widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, home_streaming, win);
+    } else /* Full's sets: stock's Streaming page */
+        widget_on(widget_lookup(win, "img_set_stream", 1), EVT_CLICK, on_home_stream_onclick, win);
+    widget_on(widget_lookup(win, "img_games", 1), EVT_CLICK, games_open, 0);
     static const char *const carousel[] = { "slide_menu", "img_left", "img_right" };
     for (int i = 0; i < 3; ++i) home.carousel[i] = widget_lookup(win, carousel[i], 1);
     /* The carousel's own Coverflow and Shortcut cards; the lists' come first in the window. */

@@ -944,6 +944,7 @@ int ringnav_paint(void *w, void *canvas) {
     keylock_paint(w, canvas);
     feedback_toast_leave(w, canvas);
     search_strip_overlay(w, canvas);
+    search_bar_paint(w, canvas); /* a music list's lit search bar */
     confirm_bar_dim(w, canvas);
     if (w == st.cf_letter_surface && st.cf_letter &&
         (st.cf_letter_held || (unsigned)time_now_ms() - st.cf_letter_at < LETTER_MS) &&

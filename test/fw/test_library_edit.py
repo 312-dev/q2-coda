@@ -19,11 +19,12 @@ KEY_CENTER, KEY_RETURN, KEY_NEXT, KEY_PREV = O['KEY_CENTER'], O['KEY_RETURN'], O
 EVT_MOVE, EVT_UP, EVT_DOWN = O['EVT_POINTER_MOVE_BEFORE'], O['EVT_POINTER_UP_BEFORE'], O['EVT_POINTER_DOWN']
 STOP, PITCH = 11, 32
 SEL = '_ringnav_index'
-# the Library's rows under OLED (Search leads: its set has no Library icons), as the page shows them
-SHOWN = ['All Songs', 'Playlist', 'Artist', 'Album', 'Search', 'Genre', 'Years', 'Ratings', 'Recently Added', 'Recent',
-         'Most Played', 'Games', 'Update Local Music']
+# the Library's rows under OLED, as the page shows them: no Search (each list page has its bar, search_bar.c), Games
+# (Home's) or Update Local Music (Storage's) since 2026-11-19
+SHOWN = ['All Songs', 'Playlist', 'Artist', 'Album', 'Genre', 'Years', 'Ratings', 'Recently Added', 'Recent',
+         'Most Played']
 # ... and in Edit Library, with the rows hidden until the user shows them (the menu review's)
-EDITING = ['Shuffle', *SHOWN[:10], 'Most Played', 'Hi-Res', 'Long Songs', 'Games', 'Update Local Music']
+EDITING = ['Shuffle', *SHOWN[:9], 'Most Played', 'Hi-Res', 'Long Songs']
 
 
 def resolve(fw, saved):
@@ -201,30 +202,30 @@ def test_the_carried_row_stops_at_the_ends(fw, ui, st, keys):
 def test_return_while_carrying_puts_the_row_back_and_stays_in_edit_library(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(5)  # Search
+    lib.select(5)  # Genre
     lib.key(KEY_CENTER)
     for _ in range(6):
         lib.key(KEY_PREV)
-    assert lib.shown[0] == 'Search'
+    assert lib.shown[0] == 'Genre'
     assert lib.key(KEY_RETURN)
     assert lib.shown == EDITING and lib.editing and ui.props[(lib.view, SEL)] == 5
     assert lib.saved() == ''
     assert lib.key(KEY_RETURN)  # not carrying: saves and leaves
     assert not lib.editing and lib.saved() == DEFAULT
-    assert lib.shown == SHOWN and ui.props[(lib.view, SEL)] == 4  # the hidden rows gone, Search kept
+    assert lib.shown == SHOWN and ui.props[(lib.view, SEL)] == 4  # the hidden rows gone, Genre kept
 
 
 def test_the_order_survives_a_reboot_and_hidden_rows_keep_their_places(fw, ui, st, keys):
     lib = Library(fw, ui, st)
     lib.hold_centre()
-    lib.select(8)  # Ratings, just before the hidden My Fav
+    lib.select(7)  # Ratings, just before the hidden My Fav
     lib.key(KEY_CENTER)
     lib.key(KEY_NEXT)
     lib.key(KEY_CENTER)
     saved = lib.saved()
     assert saved.index('f') == DEFAULT.index('f') and saved.index('q') == DEFAULT.index('q')
     again = Library(fw, ui, st, dict(lib.disk.files))  # the page built afresh from the file
-    assert again.shown[7:9] == ['Recently Added', 'Ratings']
+    assert again.shown[6:8] == ['Recently Added', 'Ratings']
 
 
 def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, keys):
@@ -247,10 +248,10 @@ def test_a_finger_held_on_a_row_enters_edit_library_and_drags_it(fw, ui, st, key
     assert send(EVT_MOVE, 58 + PITCH * 2 + 10) == STOP  # not moved yet: it stays in its place
     assert lib.shown[:5] == ['Shuffle', 'All Songs', 'Playlist', 'Artist', 'Album']
     assert send(EVT_MOVE, 58 + PITCH * 4 + 10) == STOP  # two rows down: the list does not scroll
-    assert lib.shown[:6] == ['Shuffle', 'All Songs', 'Playlist', 'Album', 'Search', 'Artist']
+    assert lib.shown[:6] == ['Shuffle', 'All Songs', 'Playlist', 'Album', 'Genre', 'Artist']
     assert lib.saved() == ''
     assert send(EVT_UP, 58 + PITCH * 4 + 10) == STOP
-    assert lib.saved().startswith('hsplSa')
+    assert lib.saved().startswith('hsplga')
 
 
 def test_the_editors_list_ends_a_row_higher_with_its_fade_over_the_hint(fw, ui, st, keys):
@@ -383,12 +384,12 @@ def test_a_row_new_to_the_saved_order_shows_at_its_default_place_on_the_page(fw,
     """A saved order from before Era existed, Genres moved last: Era comes in after Genres, the rest as saved."""
     mine = DEFAULT.replace('e', '').replace('g', '') + 'g'
     lib = Library(fw, ui, st, {FILE: mine.encode().ljust(LR['LR_MAX'], b'\0')})
-    assert lib.shown[-3:] == ['Update Local Music', 'Genre', 'Years']
+    assert lib.shown[-3:] == ['Most Played', 'Genre', 'Years']
 
 
 # Visibility: each row is Auto (no mark: its own rule), Shown ('+' before its letter) or Hidden ('-'), the user's
 KEY_PLAY = O['KEY_PLAY']
-HOME = ['playing', 'localmusic', 'stream', 'folder', 'coverflow', 'home_search', 'settings']
+HOME = ['playing', 'localmusic', 'games', 'folder', 'coverflow', 'home_search', 'settings']
 HOME_DEFAULT = re.findall(r'lr_home\[\] = "(\w+)"', SOURCE)[0]
 HOME_FILE = '/mnt/data/ringnav-home-order'
 
@@ -497,9 +498,9 @@ class Home:
 
 
 def test_home_folows_its_saved_order_and_now_playing_only_with_something_loaded(fw, ui):
-    home = Home(fw, ui, {HOME_FILE: b'Sclpqsf'}, folders=3)
-    assert home.apply() == ['settings', 'coverflow', 'localmusic', 'playing', 'home_search', 'stream', 'folder']
-    assert home.apply(np=0) == ['settings', 'coverflow', 'localmusic', 'home_search', 'stream', 'folder']
+    home = Home(fw, ui, {HOME_FILE: b'Sclpqgf'}, folders=3)
+    assert home.apply() == ['settings', 'coverflow', 'localmusic', 'playing', 'home_search', 'games', 'folder']
+    assert home.apply(np=0) == ['settings', 'coverflow', 'localmusic', 'home_search', 'games', 'folder']
     assert Home(fw, ui, folders=3).apply(np=0) == HOME[1:]
 
 
@@ -517,10 +518,18 @@ def test_folders_is_auto_hidden_until_the_card_has_folders_and_a_users_choice_st
     assert 'folder' not in hidden.apply()  # Hidden, folders
 
 
+def test_an_older_home_order_with_streaming_loads_with_games_after_the_library(fw, ui):
+    """2026-11-19: Streaming left Home for Settings and Games came from the Library, under it. An order an older build
+    saved (Streaming s, moved and hidden by the user) loads without Streaming, its marks with it, Games in its default
+    place after the Library, the user's order and marks for the rest kept."""
+    home = Home(fw, ui, {HOME_FILE: b'Sc-splqf'}, folders=3)
+    assert home.apply() == ['settings', 'coverflow', 'playing', 'localmusic', 'games', 'home_search', 'folder']
+
+
 def test_settings_on_home_cannot_be_hidden(fw, ui):
     home = Home(fw, ui, {HOME_FILE: ('-S'.join(HOME_DEFAULT.split('S')) + '').encode()}, folders=1)
     assert home.apply()[-1] == 'settings'
-    other = Home(fw, ui, {HOME_FILE: b'-p-l-s-f-c-qS'}, folders=1)
+    other = Home(fw, ui, {HOME_FILE: b'-p-l-g-f-c-qS'}, folders=1)
     assert other.apply() == ['settings']
 
 

@@ -66,18 +66,22 @@ enum { LR_A_NONE, LR_A_SHOWN, LR_A_HIDDEN, LR_A_LOCKED }; /* LR_AUTO */
 enum { LR_LIBRARY, LR_HOME };
 
 /* The Library's rows in their default order (the menu review's, 2026-11-15), each its letter in
- * LR_FILE: Shuffle (hidden), Songs, Playlists, Artists, Albums, Search, Genres, Years, Ratings, My
- * Fav (hidden), Recently Added, Recent, Most Played, Frequent (hidden), Hi-Res (hidden), Long Songs
- * (hidden), Podcasts, Audiobooks, Videos, Games, Upload Scrobbles (hidden), Update Local Music. A
- * letter is never reused: a new row takes a new one, here where it goes by default. o named Photos
- * and B Books, both retired: a saved order holding them loads without them (lr_resolve). */
-const char lr_default[] = "hspalSgerfncmqiLPAvGUu";
+ * LR_FILE: Shuffle (hidden), Songs, Playlists, Artists, Albums, Genres, Years, Ratings, My Fav
+ * (hidden), Recently Added, Recent, Most Played, Frequent (hidden), Hi-Res (hidden), Long Songs
+ * (hidden), Podcasts, Audiobooks, Videos, Upload Scrobbles (hidden), Update Local Music (never
+ * listed: Settings > General > Storage has it, storage.c). A letter is never reused: a new row
+ * takes a new one, here where it goes by default. o named Photos, B Books, S Search and G Games,
+ * all gone (2026-11-19: each list page has its own search bar, search_bar.c, and Games is Home's):
+ * a saved order holding them loads without them (lr_resolve). */
+const char lr_default[] = "hspalgerfncmqiLPAvUu";
 _Static_assert(sizeof lr_default <= LR_ROWS, "a row per letter");
 /* Home's main list's rows (tools/ipod.py HOME_ROWS) in their default order, each its letter in
- * LR_HOME_FILE, by its row's name: Now Playing, Library, Streaming, Folders, Cover Flow, Search,
- * Settings. The same rule: a new row takes a new letter. */
-const char lr_home[] = "plsfcqS";
-static const char *const lr_home_names[] = { "btn_playing", "btn_localmusic", "btn_stream",
+ * LR_HOME_FILE, by its row's name: Now Playing, Library, Games, Folders, Cover Flow, Search,
+ * Settings. The same rule: a new row takes a new letter. s named Streaming, which Settings has
+ * since 2026-11-19: a saved order holding it loads without it, and Games, new, goes in after the
+ * Library (lr_resolve), so an older order keeps its rows and gains Games in its default place. */
+const char lr_home[] = "plgfcqS";
+static const char *const lr_home_names[] = { "btn_playing", "btn_localmusic", "btn_games",
                                              "btn_folder",  "btn_coverflow",  "btn_home_search",
                                              "btn_settings" };
 _Static_assert(sizeof lr_home - 1 == sizeof lr_home_names / sizeof *lr_home_names, "a name each");
