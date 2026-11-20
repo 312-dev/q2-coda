@@ -16,10 +16,10 @@ fi
 adb() { "$ADB" -s "$SERIAL" "$@"; }
 LOGS=/mnt/mmc/.q2muse/logs
 
-build() { python3 "$HERE/build.py" --out "$OUT" >/dev/null; }
+build() { python3 "$HERE/probe_build.py" --out "$OUT" >/dev/null; }
 push() {
     build
-    # the UAC1 module too once tools/uac1_module/build.py has made it (only a :uac1 phase loads it)
+    # the UAC1 module too once tools/uac1_module/uac1_build.py has made it (only a :uac1 phase loads it)
     ko=${Q2IAP_UAC1:-$HOME/.cache/q2-uac1/module/usb_f_uac1.ko}
     [ -f "$ko" ] && cp "$ko" "$OUT/usb_f_uac1.ko"
     for f in q2-iap-probe q2-iap-probe.sh q2-iap-tone.raw $([ -f "$OUT/usb_f_uac1.ko" ] && echo usb_f_uac1.ko); do

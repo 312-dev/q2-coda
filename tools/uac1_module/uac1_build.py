@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build usb_f_uac1.ko for the Q2's kernel (docs/iphone-mode.md#the-uac1-module) and check it against the stock one.
 
-    python3 tools/uac1_module/build.py [--work DIR] [--vmlinux ELF] [--stock-module KO]
+    python3 tools/uac1_module/uac1_build.py [--work DIR] [--vmlinux ELF] [--stock-module KO]
 
 Linux 5.10.21 from kernel.org (hash checked) is unpacked into --work (default ~/.cache/q2-uac1) without the other
 architectures, Documentation or most drivers' sources, configured as malta_defconfig plus q2.config, and prepared for
@@ -21,8 +21,6 @@ import subprocess
 import sys
 import urllib.request
 
-from elftools.elf.elffile import ELFFile
-from elftools.elf.relocation import RelocationSection
 
 HERE = pathlib.Path(__file__).resolve().parent
 VERSION = '5.10.21'
@@ -92,7 +90,7 @@ DEBS = ['flex', 'bison', 'gcc-12-mipsel-linux-gnu-base', 'cpp-12-mipsel-linux-gn
 TOOLS = ['as', 'ld', 'ar', 'nm', 'objcopy', 'objdump', 'readelf', 'strip']
 
 
-def run(*cmd, cwd=None):
+def run(*cmd, cwd=None):  # pragma: no mutate block (the cross toolchain)
     import os
     env = {**os.environ, **ENV}
     env['PATH'] = f"{ENV['TC']}/bin:{env['PATH']}"
@@ -101,7 +99,7 @@ def run(*cmd, cwd=None):
     subprocess.run([str(c) for c in cmd], check=True, cwd=cwd, env=env)
 
 
-def toolchain(work):
+def toolchain(work):  # pragma: no mutate block (apt-get download and dpkg-deb)
     """The cross gcc, binutils, flex and bison unpacked under work/tc, with a bin of the names the kernel uses."""
     tc = work/'tc'
     gcc = tc/'bin/mipsel-linux-gnu-gcc'
@@ -131,7 +129,7 @@ def sha256(path):
     return h.hexdigest()
 
 
-def tree(work):
+def tree(work):  # pragma: no mutate block (kernel.org's tarball and make)
     """The trimmed, configured and prepared 5.10.21 tree under work."""
     tar, src = work/f'linux-{VERSION}.tar.xz', work/f'linux-{VERSION}'
     if not tar.exists():
@@ -155,7 +153,7 @@ def tree(work):
     # snd_card_register oopsed on a parent that was no device (the desk, 2026-11-20). Unread by the module.
     g = src/'include/linux/usb/gadget.h'
     field = '\tenum usb_device_speed\t\tmax_speed;\n'
-    pad = field + '\tunsigned int\t\t\tq2_ssp_rate, q2_max_ssp_rate; /* tools/uac1_module/build.py */\n'
+    pad = field + '\tunsigned int\t\t\tq2_ssp_rate, q2_max_ssp_rate; /* tools/uac1_module/uac1_build.py */\n'
     text = g.read_text()
     if pad not in text:
         if text.count(field) != 1:
@@ -202,8 +200,10 @@ def config_mismatches(src):
     return bad
 
 
-def this_module(path):
+def this_module(path):  # pragma: no mutate block (a built .ko or a vendor one, Shanling's)
     """(size of .gnu.linkonce.this_module, {symbol: offset} of its relocations, vermagic) of a .ko."""
+    from elftools.elf.elffile import ELFFile  # type: ignore[import-not-found]  # pyelftools: here alone, so the tests import this without it
+    from elftools.elf.relocation import RelocationSection  # type: ignore[import-not-found]
     with open(path, 'rb') as f:
         elf = ELFFile(f)
         size = elf.get_section_by_name('.gnu.linkonce.this_module')['sh_size']
@@ -218,8 +218,9 @@ def this_module(path):
         return size, offs, vermagic
 
 
-def symbols(path):
+def symbols(path):  # pragma: no mutate block (a built .ko)
     """(undefined, defined global) symbol names of a .ko."""
+    from elftools.elf.elffile import ELFFile
     with open(path, 'rb') as f:
         elf = ELFFile(f)
         und, defd = set(), set()
@@ -230,13 +231,14 @@ def symbols(path):
         return und, defd
 
 
-def kernel_exports(vmlinux):
+def kernel_exports(vmlinux):  # pragma: no mutate block (the stock kernel, Shanling's)
     out = subprocess.run(['llvm-nm', str(vmlinux)], check=True, capture_output=True, text=True).stdout
     names = {line.split()[-1] for line in out.splitlines() if line.split()}
     return {n[len('__ksymtab_'):] for n in names if n.startswith('__ksymtab_')}, names
 
 
-def layout(path):
+def layout(path):  # pragma: no mutate block (a built q2_layout.ko)
+    from elftools.elf.elffile import ELFFile
     with open(path, 'rb') as f:
         elf = ELFFile(f)
         syms = elf.get_section_by_name('.symtab')
@@ -249,7 +251,7 @@ def layout(path):
         return out
 
 
-def main(argv):
+def main(argv):  # pragma: no mutate block (all of the above)
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--work', type=pathlib.Path, default=pathlib.Path.home()/'.cache/q2-uac1')
     ap.add_argument('--vmlinux', type=pathlib.Path, default=pathlib.Path.home()/'.cache/q2-uac1/k/vmlinux.elf')

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Never loaded. The kernel structures' sizes and the offsets of the fields f_uac1.c and u_audio.c touch, as this
- * tree's configuration lays them out, each a q2_off_* constant that tools/uac1_module/build.py reads back and checks
+ * tree's configuration lays them out, each a q2_off_* constant that tools/uac1_module/uac1_build.py reads back and checks
  * against the stock kernel (docs/iphone-mode.md#the-uac1-module). */
 #include <linux/module.h>
 #include <linux/usb/composite.h>
@@ -87,7 +87,7 @@ SIZE(module, struct module);
 /* the page size the module's code was compiled for: u_audio.c's PCM limits are multiples of it */
 const unsigned int q2_size_page __used = PAGE_SIZE;
 
-/* ep->maxpacket is a bit-field: build.py reads the load this makes */
+/* ep->maxpacket is a bit-field: uac1_build.py reads the load this makes */
 unsigned int q2_maxpacket(const struct usb_ep *ep) { return ep->maxpacket; }
 EXPORT_SYMBOL_GPL(q2_maxpacket);
 

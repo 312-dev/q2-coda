@@ -20,7 +20,7 @@
  * set-up failure (an ep0 that would not take its descriptors). Every ep0 stays open until the end:
  * closing one unbinds the gadget.
  *
- * Built for the Q2 by tools/iap_probe/build.py against the rootfs's libc with no headers (the
+ * Built for the Q2 by tools/iap_probe/probe_build.py against the rootfs's libc with no headers (the
  * declarations and MIPS constants below), and for this machine with -DPROBE_HOST (test/iap_probe.py). */
 #ifdef PROBE_HOST
 #include <errno.h>

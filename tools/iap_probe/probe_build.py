@@ -4,7 +4,7 @@ tools/build.py's compile_helper builds the helpers (clang for MIPS32 little endi
 rootfs's own glibc, entered through patch/start.c), plus the gadget script and a test tone, into one directory that
 q2iap pushes to the Q2's /tmp. Nothing here enters an update image.
 
-    python3 tools/iap_probe/build.py [--rootfs DIR] [--out DIR]
+    python3 tools/iap_probe/probe_build.py [--rootfs DIR] [--out DIR]
 
 --rootfs is an unpacked stock rootfs holding lib/libc-2.28.so (default ~/q2-emu/stockfs); --out defaults to
 ~/.cache/q2-iap-probe/out."""
@@ -26,7 +26,7 @@ LIBS = ['lib/libc-2.28.so']
 TONE_RATE, TONE_HZ, TONE_DB, TONE_S = 44100, 1000, -20, 2
 
 
-def run(*cmd):
+def run(*cmd):  # pragma: no mutate block (build()'s, the cross toolchain)
     subprocess.run([str(c) for c in cmd], check=True)
 
 
@@ -39,7 +39,7 @@ def tone():
                     (round(amp * math.sin(2 * math.pi * TONE_HZ * n / TONE_RATE)) for n in range(frames)))
 
 
-def build(rootfs, out):
+def build(rootfs, out):  # pragma: no mutate block (clang, ld.lld and the stock rootfs's glibc: test/iap_probe.py)
     out.mkdir(parents=True, exist_ok=True)
     obj = out/'obj'
     obj.mkdir(exist_ok=True)
