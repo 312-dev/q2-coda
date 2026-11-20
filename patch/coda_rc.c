@@ -115,13 +115,30 @@ static void unlink_at(const char *path) {
     if (!unlink(crc_path(p, sizeof p, path))) tell_shim(path);
 }
 
+/* t (Unix seconds) as the unified log's stamp, "2026-11-20T00:13:10Z " (ulog_line.h), into b's 22 bytes: no gmtime in
+ * this libc-light daemon, so the civil date from the day count (Howard Hinnant's days_from_civil, inverted). */
+static int log_stamp(char *b, long t) {
+    long days = t / 86400, sec = t % 86400;
+    if (sec < 0) sec += 86400, --days;
+    long z = days + 719468, era = (z >= 0 ? z : z - 146096) / 146097, doe = z - era * 146097;
+    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+    return snprintf(b, 22, "%04ld-%02ld-%02ldT%02ld:%02ld:%02ldZ ", yoe + era * 400 + (m <= 2), m, d, sec / 3600,
+                    sec / 60 % 60, sec % 60);
+}
+
+/* A line of /tmp/coda-rc.log, after its UTC stamp, so it lines up with the unified log (the drive of 2026-11-19 had
+ * the daemon's Play lines with no time to set beside the player's). */
 void crc_log(const char *fmt, ...) {
-    char p[256], b[300];
+    char p[256], b[322];
     va_list ap;
+    int n = log_stamp(b, time(0));
+    if (n < 0 || n > 21) n = 0; /* a year past 9999: no stamp rather than a cut one */
     va_start(ap, fmt);
-    int n = vsnprintf(b, sizeof b - 1, fmt, ap);
+    int m = vsnprintf(b + n, sizeof b - n - 1, fmt, ap);
     va_end(ap);
-    if (n < 0) return;
+    if (m < 0) return;
+    n += m;
     if (n > (int)sizeof b - 2) n = sizeof b - 2;
     b[n++] = '\n';
     int fd = open(crc_path(p, sizeof p, "/tmp/coda-rc.log"), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
