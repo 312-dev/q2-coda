@@ -73,6 +73,14 @@ Each rule was broken on 2026-11-17 or 18 with other workers' runs lost or killed
 8. **Report the static bytes you add.** The scratch state is 128 KB and `.bss` counts in it; the build prints `payload room:`. Put the figure before and after in the commit message or `STATUS.md`, so the queue's `scratch_free_bytes` has no surprise.
 9. **Know the flaky tests.** The `0x5e000000` mmap clash between `test_nav_loop.py` and `test_e2e_network.py` was fixed on 2026-11-18 by moving the `Wait` helper's page to `0x5d000000`; a clash of that kind is no longer a flake, so reproduce it before calling it one. The post tier's `smoke` failing at boot with an unnamed `sortselect_dialog` (`card None`) was a race in the test, fixed on 2026-11-18 ([building: smoke test](building.md#smoke-test)). Still open: the `fw` suite's occasional first-run failure, recorded in `~/.cache/q2-queue/flakes.jsonl`, cause not yet pinned; `test/known_failures.tsv` is empty. A failure on your branch that passes alone is not yours to fix, but name it in your final message.
 
+## Integration branches
+
+When the user has an integrator assemble an `integ/*` branch (an image ahead of the trunk), its work is tested once, at each end, never at every step:
+
+- **A feature branch** for it runs `python3 tools/ci/affected.py --base <its base> --run "$B"` before it ends `READY`, where the base is the integration branch it will be merged into. It is not queued (`--mark-ready`): the integrator merges it.
+- **The integrator** merges the `READY` branches with only a build (`rebuild.py`, which compiles everything) after each merge, to name the merge that broke it. On the final merge, before the image, it runs `affected.py --all --run "$B"` and `tools/ci/smoke.py "$B"` once.
+- **A failure** in that run is classified by running that suite again, alone (`gate.py --only SUITE --build "$B"`). One that then passes is a flake: report it, with the suite and its log. One that fails again is real, and goes back to the branch whose change it is.
+
 ## The brief
 
 A brief has four parts and nothing else; the standing rules are in this page and in the hooks, not retyped each time.

@@ -91,6 +91,7 @@ Many agents share one 16 GB laptop, and a script, not an agent, integrates their
 - Borrow an emulator: `python3 tools/ci/emu_pool.py get "$B"`, `put SLOT` when done. Don't copy `~/q2-emu-server`; slot 2 is the user's.
 - UI work: `python3 tools/ci/q2live.py` rebuilds demo and reloads a pooled emulator on every save under `patch/`, back on your page ([building: Live reload](docs/building.md#live-reload)).
 - The trunk (`q2 trunk`) moves only through the merge queue: a commit, merge or push to it is refused. When your branch is done, merge the trunk into it, run `affected.py --run "$B"` again, push, and queue it: `python3 tools/ci/merge_batch.py --mark-ready` (refused if it would conflict: resolve in your branch). Then `q2 agent end NAME --state READY` and end with `READY <branch> <sha>`. Do not wait for the merge; the queue lands it within a batch or sends it back with the failing test.
+- A branch for an integration branch (`integ/*`) is not queued: run `affected.py --base <that branch> --run "$B"`, push, end `READY`. The integrator merges with a build after each merge and runs `affected.py --all` and `smoke.py` once, on the last ([orchestration: Integration branches](docs/orchestration.md#integration-branches)).
 - Leave nothing running: `q2 agent end` is refused while a job or process of your worktree is alive.
 
 ## Traps

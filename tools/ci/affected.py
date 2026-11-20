@@ -20,7 +20,11 @@ test/patch.py, which executes the payload as one program. What gets narrowed:
 - a file in a folder a test/unit file checks whole (`SCANNERS`: test_theme.py's and test_art.py's rules
   over patch/, test_docs.py's citations in patch/, tools/ and test/) runs that test too;
 - tools/X.py runs test/unit/test_X.py when it exists (else all of test/unit), and, for a build input,
-  test/patch.py and test/fw;
+  test/patch.py and test/fw; for a module whose only output is a pinned file in the image (`IMAGE_INPUTS`:
+  iroh.py, uac1.py), test/build.py;
+- a file in a tools/ folder a rule knows (`TOOL_DIRS`) runs the tests that read that folder: tools/uac1_module/
+  the module's pin, build and tests, tools/iap_probe/ the probe's; a file in any other tools/ folder runs
+  everything, and tools/ci/ runs the CI tools' own tests;
 - a test file runs itself;
 - a .py under tools/ or test/unit/ also runs gate.py's mypy-tools suite, one under test/fw/ mypy-fw, and
   pyproject.toml (the mypy config) both: the merge queue runs them, so a plan without them passes here and is
@@ -54,6 +58,24 @@ ALL = 'all'
 # tools/ modules the build or the fw host build imports: a change reaches the payload or the fw library.
 BUILD_INPUTS = {'build', 'ipod', 'theme', 'art', 'peq', 'aic', 'rotator', 'pwm', 'mcu_park', 'module_elf',
                 'splash', 'player', 'thirdparty', 'signing'}
+# tools/ modules the build imports only to put a pinned file in the image: iroh.binary() is q2-iroh, uac1.module()
+# usb_f_uac1.ko, each taken from the third-party cache by its SHA-256. Neither reaches the payload's code or
+# test/fw, so a change runs the build's own checks (test/build.py), not test/patch.py. tools/ci/test_ci.py checks
+# that every tools/ module tools/build.py imports, directly or through another, is here or in BUILD_INPUTS.
+IMAGE_INPUTS = {'iroh', 'uac1'}
+# tools/ folders a rule knows (any other, tools/ci/ aside, runs everything): (the test/unit files that read them,
+# the test/X.py suites that do). Neither folder is in source_sha256 or in what tools/build.py reads itself.
+TOOL_DIRS = {
+    # uac1_build.py and the kernel sources it builds usb_f_uac1.ko from. tools/uac1.py hashes every file here
+    # into its PIN, and the build stops (uac1.module()) when the hash is not the pinned one: test_uac1.py checks
+    # the pin, test/build.py the build. test_iap_tools.py and test/uac1_bind.py load uac1_build.py; uac1_bind.py
+    # and uac1_isoc.py need a built module, so the gate prints why they are skipped (gate.SCRIPTS).
+    'uac1_module': ({'test_uac1.py', 'test_iap_tools.py'}, ('test/build.py', 'test/uac1_bind.py', 'test/uac1_isoc.py')),
+    # route 1's probe on a Q2 by hand: probe_build.py (test_iap_tools.py loads it) builds patch/q2_iap.c as the
+    # probe, which test/iap_probe.py builds and runs on the host; the shell and PowerShell scripts run on the
+    # devices. Nothing here goes into an image.
+    'iap_probe': ({'test_iap_tools.py'}, ('test/iap_probe.py',)),
+}
 # test/coverflow.py compiles patch/coverflow*.c and .h on the host with stand-ins for the behaviour of home.c,
 # page_parallax.c and playlist_art.c, so a change to any of these plans it (in `other`). It is one of
 # gate.PLANNED, which a plan that runs everything also names.
@@ -247,6 +269,12 @@ def plan_for(changes, root=ROOT, patch_source=None):
                 p.why.append(f'{path}: test/coverflow.py')
             if len(parts) == 2 and (named := unit_files_for(name, root)):
                 p.add('unit', named, f'{path}: test/unit ' + ', '.join(sorted(named)))
+        elif parts[0] == 'tools' and len(parts) > 2 and parts[1] in TOOL_DIRS:
+            unit, scripts = TOOL_DIRS[parts[1]]
+            have = {u for u in unit if (root/'test/unit'/u).exists()}
+            p.add('unit', have or ALL, f'{path}: test/unit ' + (', '.join(sorted(have)) if have else 'all'))
+            p.other.update(s for s in scripts if (root/s).exists())
+            p.why.append(f'{path}: ' + ', '.join(s for s in scripts if (root/s).exists()))
         elif parts[0] == 'tools' and len(parts) == 2:
             unit = root/'test/unit'/f'test_{stem}.py'
             p.add('unit', {unit.name} if unit.exists() else ALL, f'{path}: its unit tests')
@@ -254,6 +282,9 @@ def plan_for(changes, root=ROOT, patch_source=None):
                 p.add('patch', ALL, f'{path}: a build input')
                 p.add('fw', ALL, f'{path}: a build input (test/fw builds from tools/ lists)')
                 p.other.add('test/build.py')
+            elif stem in IMAGE_INPUTS and suffix == '.py':
+                p.other.add('test/build.py')
+                p.why.append(f'{path}: a file the build puts in the image (test/build.py)')
         elif parts[:2] == ('tools', 'ci'):
             p.other.update({'tools/ci/test_ci.py', 'tools/ci/test_orch.py'})
             p.why.append(f'{path}: the CI tools\' own tests')

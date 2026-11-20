@@ -107,6 +107,69 @@ def test_tool_maps_to_its_unit_test_and_a_build_input_to_the_payload(tmp_path):
     assert p['unit'] == ['test_docs.py', 'test_theme.py'] and p['patch'] == ALL and p['fw'] == ALL
 
 
+REPO = pathlib.Path(affected.__file__).resolve().parents[2]
+
+
+def test_a_uac1_module_change_plans_the_uac1_suites_not_everything():
+    """feat/car-rate (8aab0ddc) changed tools/uac1_module/ and nothing else under tools/, and its plan was everything
+    (tools/ folders had no rule), test/player/run.py's 13 minutes and the merge tier's host suites among it. What
+    reads the folder: tools/uac1.py's pin (test_uac1.py), the build that refuses an unpinned change (test/build.py),
+    and the module's own tests (test_iap_tools.py, test/uac1_bind.py, test/uac1_isoc.py)."""
+    changes = {'tools/uac1_module/uac1_build.py': {1}, 'tools/uac1_module/patches/q2-uac1-playback-rates.patch': {1},
+               'tools/uac1.py': {22}}
+    plan = json.loads(affected.plan_for(changes, REPO).to_json())
+    assert not gate.everything(plan) and not plan['patch'] and not plan['fw']
+    assert plan['unit'] == ['test_docs.py', 'test_iap_tools.py', 'test_uac1.py']
+    assert set(plan['other']) == {'test/build.py', 'test/uac1_bind.py', 'test/uac1_isoc.py', 'test/stock_sites.py',
+                                  'mypy-tools', 'cov:tools/uac1.py', 'cov:tools/uac1_module/uac1_build.py'}
+    # tools/uac1.py alone: the pinned module goes in the image, so the build's checks, and nothing of the payload
+    plan = json.loads(affected.plan_for({'tools/uac1.py': {22}}, REPO).to_json())
+    assert plan['unit'] == ['test_docs.py', 'test_uac1.py'] and 'test/build.py' in plan['other']
+    assert not plan['patch'] and not plan['fw'] and 'test/uac1_bind.py' not in plan['other']
+
+
+def test_an_iap_probe_change_plans_the_probe_suites_not_everything():
+    """feat/car-mode and feat/car-library changed tools/iap_probe/, which went to everything. probe_build.py is
+    loaded by test_iap_tools.py and builds patch/q2_iap.c as the probe, which test/iap_probe.py runs on the host."""
+    changes = {'tools/iap_probe/probe_build.py': {1}, 'tools/iap_probe/q2-iap-probe.sh': {1}}
+    plan = json.loads(affected.plan_for(changes, REPO).to_json())
+    assert not gate.everything(plan) and not plan['patch'] and not plan['fw']
+    assert plan['unit'] == ['test_docs.py', 'test_iap_tools.py']
+    assert set(plan['other']) == {'test/iap_probe.py', 'test/stock_sites.py', 'mypy-tools',
+                                  'cov:tools/iap_probe/probe_build.py'}
+
+
+def test_a_build_input_still_runs_the_payload_and_an_unknown_tools_folder_everything(tmp_path):
+    plan = affected.plan_for({'tools/build.py': {1}}, REPO).as_dict()
+    assert plan['patch'] == plan['fw'] == ALL and 'test/build.py' in plan['other']
+    assert affected.plan_for({'tools/newprobe/run.sh': {1}}, tmp_path).as_dict()['patch'] == ALL
+    every = affected.plan_for({'tools/newprobe/run.sh': {1}}, tmp_path).as_dict()
+    assert every['unit'] == every['fw'] == ALL and 'test/player/run.py' in every['other']
+
+
+def test_every_tools_module_the_build_imports_is_a_build_or_image_input():
+    """tools/uac1.py and tools/iroh.py were imported by tools/build.py and in neither set, so a change to the
+    module the image carries ran its unit test and not the build."""
+    mods = {p.stem for p in (REPO/'tools').glob('*.py')}
+
+    def imports(name):
+        tree_ = ast.parse((REPO/'tools'/f'{name}.py').read_text())
+        found = set()
+        for n in ast.walk(tree_):
+            if isinstance(n, ast.Import):
+                found |= {a.name.split('.')[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+                found.add(n.module.split('.')[0])
+        return found & mods
+    seen, todo = set(), ['build']
+    while todo:
+        if (m := todo.pop()) not in seen:
+            seen.add(m)
+            todo += imports(m)
+    assert {'uac1', 'iroh'} <= seen  # the check sees what it is for
+    assert seen <= affected.BUILD_INPUTS | affected.IMAGE_INPUTS, sorted(seen - affected.BUILD_INPUTS - affected.IMAGE_INPUTS)
+
+
 def test_payload_change_runs_the_unit_rules_over_every_patch_file(tmp_path):
     """feat/row-press changed patch/tilt.c and its plan left out test_theme.py, whose rule (no literal colour
     where a token exists) covers every patch/*.c: the queue's batch caught it, and blamed another branch."""
