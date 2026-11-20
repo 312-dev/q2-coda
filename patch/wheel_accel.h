@@ -6,8 +6,7 @@
 #ifndef WHEEL_ACCEL_H
 #define WHEEL_ACCEL_H
 
-#define WA_RUN_MS                                                                                  \
-    140 /* a gap longer than this between ticks ends the run (navigation's WHEEL_RUN_MS) */
+#define WA_RUN_MS 140      /* a longer gap ends the run (navigation.c WHEEL_RUN_MS) */
 #define WA_FIRST_MS 300    /* one row a tick for this long into a run, */
 #define WA_RAMP_MS 200     /* then one row more per this much more, */
 #define WA_MAX_ROWS 8      /* up to this many a tick */
