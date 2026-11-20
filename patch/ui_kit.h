@@ -112,8 +112,8 @@ int ui_text_w(void *canvas, const char *s, int medium, int px);
 int ui_cta_w(void *canvas, const char *const *labels, int n);
 int ui_cta_x(void *canvas, const char *const *labels, int n, int i, int *w);
 void ui_cta_paint(void *canvas, const char *const *labels, int n, int y, int sel, int pressed);
-/* text's QR code (ECC level M), its modules dark on a white plate of side px at (x, y), each module a whole number of
- * pixels with a two-module quiet zone */
+/* text's QR code (ECC level M), its modules dark on a white plate of side px at (x, y), each module
+ * a whole number of pixels with a two-module quiet zone */
 void ui_qr(void *canvas, const char *text, int x, int y, int px);
 /* One button of the same form centred on (cx, cy) (Software Update's, the library scan's): primary
  * the accent with white words (a screen's main action), else the grey with Text Primary words;
@@ -205,7 +205,8 @@ void motion_hook(void (*fn)(void));
  * box then), and dropped when it returns 0; the timer ends with the last loop. Unlike motion_frames
  * it never repaints the top window. At most MO_LOOPS. */
 #define MO_LOOP_MS 33 /* 30 frames a second */
-#define MO_LOOPS 6 /* the status row's bars, strip and arrows, the volume pill, Home's and Up Next's bars */
+/* the status row's bars, strip and arrows, the volume pill, and Home's and Up Next's bars */
+#define MO_LOOPS 6
 void motion_loop(int (*fn)(void));
 /* The level bars (docs/oled-design.md#level-bars): Up Next's header, Home's first row and the
  * status row draw the one motion. Bar i's height follows its column of LVL_KEYS keyframes

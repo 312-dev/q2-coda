@@ -380,30 +380,13 @@ static int qm_open(const void *unused) {
         if (np_more()) acts[n++] = QA_MORE; /* last: Now Playing's own menu */
     }
     if (held && qm_held.extra) acts[n++] = QA_REMOVE; /* destructive, last */
-    static const char *const rows[] = { "Play Next",
-                                        "Play Last",
-                                        "Shuffle",
-                                        "Add to Favorites",
-                                        "Unfavorite",
-                                        "Add to Playlist",
-                                        "Go to Album",
-                                        "Go to Artist",
-                                        "Shuffle",
-                                        "Repeat",
-                                        "Group by",
-                                        "Next Album",
-                                        "Previous Album",
-                                        "Resume",
-                                        "View Queue",
-                                        "Go to Folder",
-                                        "Chapters",
-                                        "More…",
-                                        "Add to On-The-Go",
-                                        "Play",
-                                        "Rename",
-                                        "Delete",
-                                        "Remove",
-                                        "Sync Offline" };
+    static const char *const rows[] = {
+        "Play Next",       "Play Last",   "Shuffle",        "Add to Favorites", "Unfavorite",
+        "Add to Playlist", "Go to Album", "Go to Artist",   "Shuffle",          "Repeat",
+        "Group by",        "Next Album",  "Previous Album", "Resume",           "View Queue",
+        "Go to Folder",    "Chapters",    "More…",          "Add to On-The-Go", "Play",
+        "Rename",          "Delete",      "Remove",         "Sync Offline"
+    };
     /* the menu sheet's symbols (tools/art.py MENU_ICONS), by row; Unfavorite's filled heart is
      * drawn in Favorite pink-red, white on the bar (art.py menu_heart-fill_*) */
     static const char *const icons[] = { "arrow-bend-down-right",

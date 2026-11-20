@@ -16,7 +16,7 @@
 
 #define SR_TURN_MS 1000 /* the sync arrows' half turn (the glyph repeats every half turn) */
 #define SR_BAR_LO 3     /* the level bars' heights, lo to SR_INK px (ui_kit.h lvl_h16) */
-#define SR_SPIN 30      /* the arrows' frames to the half turn, tools/art.py STATUS_SPIN: 30 a second */
+#define SR_SPIN 30      /* the arrows' frames a half turn, tools/art.py STATUS_SPIN: 30 a second */
 #define SR_BARS_W 10    /* three 2 px bars, 4 px apart; paused, the pause in the same box */
 #define SR_BAR_W 2
 #define SR_BAR_PITCH 4
