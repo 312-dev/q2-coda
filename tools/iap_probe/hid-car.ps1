@@ -39,7 +39,7 @@ public static class Car {
             Marshal.WriteInt32(buf, IntPtr.Size == 8 ? 8 : 6);
             SetupDiGetDeviceInterfaceDetail(set, ref did, buf, req, out req, IntPtr.Zero);
             string path = Marshal.PtrToStringAuto(buf + 4); Marshal.FreeHGlobal(buf);
-            if (path.ToLower().Contains("vid_05ac&pid_12a8")) return path;
+            if (path.ToLower().Contains("vid_05ac&pid_12a8") || path.ToLower().Contains("vid_1d6b&pid_0106")) return path; // Apple's, or :linuxid's
         }
     }
     static byte Ck(byte[] b, int off, int n) { int s = 0; for (int i = 0; i < n; i++) s += b[off + i]; return (byte)(-s); }
