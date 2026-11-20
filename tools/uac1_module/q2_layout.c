@@ -84,6 +84,8 @@ OFF(dev_id, struct device, id);
 OFF(module_init, struct module, init);
 OFF(module_exit, struct module, exit);
 SIZE(module, struct module);
+/* the page size the module's code was compiled for: u_audio.c's PCM limits are multiples of it */
+const unsigned int q2_size_page __used = PAGE_SIZE;
 
 /* ep->maxpacket is a bit-field: build.py reads the load this makes */
 unsigned int q2_maxpacket(const struct usb_ep *ep) { return ep->maxpacket; }

@@ -35,6 +35,7 @@ SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
+    'q2_size_page': (0x1000, 'alloc_pages_exact 0x8012c1d0 srl $2, $2, 0xc (get_order of the size)'),
     'q2_off_req_buf': (0x0, 'u_audio_start_playback 0x804bd868 sw $4, 0x0($2)'),
     'q2_off_req_length': (0x4, 'u_audio_start_playback 0x804bd848 sw $19, 0x4($2)'),
     'q2_off_req_complete': (0x1c, 'u_audio_start_playback 0x804bd844 sw $20, 0x1c($2)'),
