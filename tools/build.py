@@ -501,8 +501,13 @@ BLUETOOTHD_SHA = '6e6d45d66f958a028a523786ae661110b1853bf49b8a50946dd70a0518b4f3
 BT_META = 0x150000
 BT_META_SLOT = (0x12f698, 0x00000120, 0x00039454)  # (address, stock PDU and type word, stock handler)
 BT_META_GOT = {'TRACK_META': ('g_track_meta', -28700), 'NOTIFY_MUTEX': ('g_notify_mutex', -28244),
-               'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872)}
+               'LOCK': ('pthread_mutex_lock', -28204), 'UNLOCK': ('pthread_mutex_unlock', -27872),
+               'OPEN': ('open', -27244), 'READ': ('read', -27676), 'CLOSE': ('close', -28156)}
 BT_META_ROOM = 502  # an AVRCP PDU's parameters in one AVC frame (BlueZ's AVRCP_PDU_MTU)
+# Cover art over Bluetooth (docs/internals.md#bluetooth-cover-art). BT_COVER_FILE is where demo's payload keeps
+# the playing song's image handle and cover (patch/bt_cover.c): bt_meta.c reads the handle for AVRCP's attribute 8,
+# q2-bip (patch/q2bip.c) serves the cover. 16 bytes with its NUL: bt_meta.c builds it from four words.
+BT_COVER_FILE = '/tmp/q2-bip.now'
 # Its launcher: keep the A2DP transport open 5 s after hciplayer closes the PCM (a stop, a skip, a cold start), so
 # a track change doesn't restart the stream (true-wireless buds started one ear first); and fdk-aac's afterburner on
 # for AAC (docs/internals.md#bluetooth-aac), which Shanling's forced AAC options (BT_AAC_SITES) leave as the option says.
@@ -2314,7 +2319,9 @@ def bt_meta():
         d = pathlib.Path(d)
         run('clang', '--target=mipsel-linux-gnu', '-march=mips32r2', '-mabicalls', '-fpic', '-Os', '-ffreestanding',
             '-fno-builtin', '-fno-jump-tables', '-Wall', '-Wextra', '-Werror', f'-DBT_META_ROOM={BT_META_ROOM}',
-            *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()), '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
+            *(f'-DBT_META_GOT_{k}={o}' for k, (_, o) in BT_META_GOT.items()),
+            *(f'-DBT_COVER_PATH_{i}={w:#x}u' for i, w in enumerate(struct.unpack('<4I', BT_COVER_FILE.encode().ljust(16, b'\0')))),
+            '-c', ROOT/'tools/bt_meta.c', '-o', d/'m.o')
         relocs = run('readelf', '-rW', d/'m.o')
         check(not re.search(r'R_MIPS_(?!PC16)\w+', relocs.split('.rel.pdr')[0]), 'bt_meta.c needs a relocation')
         check(not re.search(r'\.(rodata|data|bss)\S*\s+PROGBITS\s+\S+\s+\S+\s+0*[1-9a-f]', run('readelf', '-SW', d/'m.o')),

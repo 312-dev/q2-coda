@@ -1,6 +1,7 @@
 """tools/bt_meta.c, the control channel's GetElementAttributes for stock's bluetoothd (docs/internals.md#track-metadata),
 compiled as tools/build.py compiles it and run under Unicorn at a load address of its own, against a GOT and a
-libbtctl record laid out as bluetoothd's: the attributes from g_track_meta, under its mutex."""
+libbtctl record laid out as bluetoothd's: the attributes from g_track_meta, under its mutex, and AVRCP 1.6's cover art
+attribute (docs/internals.md#bluetooth-cover-art) for a controller whose record says it fetches covers, and no other."""
 import struct
 
 import pytest
@@ -15,6 +16,12 @@ RET = DATA + 0x100  # where the handler returns to
 LOCK, UNLOCK = DATA + 0x200, DATA + 0x300  # pthread's stand-ins: jr $ra
 MUTEX, META, STRINGS = DATA + 0x400, DATA + 0x500, DATA + 0x600
 PDU = DATA + 0x1000
+OPEN, READ, CLOSE = DATA + 0x340, DATA + 0x360, DATA + 0x380  # libc's stand-ins, answered in hook
+SESSION, TARGET = DATA + 0x2000, DATA + 0x2040  # bluetoothd's struct avrcp and its target (the controller's record)
+FD = 9
+# A controller's SupportedFeatures (AVRCP 1.6.2, table 8.2): categories 1 and 2 and browsing, and the same with
+# its three cover art bits (7 GetImageProperties, 8 GetImage, 9 GetLinkedThumbnail)
+CT_15, CT_16_COVER = 0x0043, 0x03c3
 
 
 @pytest.fixture(scope='module')
@@ -23,16 +30,19 @@ def code():
     return blob, sym['bt_meta_get_element_attributes'] - build.BT_META
 
 
-def run(code, request, meta=None):
+def run(code, request, meta=None, features=CT_15, cover=None, files=None):
     """The handler on pdu (an AVRCP header and params), meta (track, total, time, title, artist, album, genre) or none
-    in g_track_meta: (its return, the pdu after, the calls to pthread as (function, mutex, $gp))."""
+    in g_track_meta, for a controller whose record has features (None: no record), with BT_COVER_FILE holding cover
+    (None: no file): (its return, the pdu after, the calls to pthread as (function, mutex, $gp)). files takes the
+    calls to libc: ('open', path, flags), ('read', fd, size), ('close', fd)."""
     blob, entry = code
     u = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN)
     u.mem_map(CODE, 0x10000)
     u.mem_map(DATA, 0x10000)
     u.mem_map(STACK - 0x10000, 0x10000)
     u.mem_write(CODE, blob)
-    for stub in (LOCK, UNLOCK, RET):
+    u.mem_write(STACK - 0x10000, b'5' * 0x10000)  # what a stack holds is not zeros: a short read must not pass as digits
+    for stub in (LOCK, UNLOCK, RET, OPEN, READ, CLOSE):
         u.mem_write(stub, struct.pack('<2I', 0x03e00008, 0))  # jr $ra; nop
     got = {name: slot for name, (_, slot) in build.BT_META_GOT.items()}
     track_meta = DATA + 0x80  # libbtctl's g_track_meta, a pointer
@@ -40,6 +50,11 @@ def run(code, request, meta=None):
     u.mem_write(GP + got['NOTIFY_MUTEX'], struct.pack('<I', MUTEX))
     u.mem_write(GP + got['LOCK'], struct.pack('<I', LOCK))
     u.mem_write(GP + got['UNLOCK'], struct.pack('<I', UNLOCK))
+    for name, stub in (('OPEN', OPEN), ('READ', READ), ('CLOSE', CLOSE)):
+        u.mem_write(GP + got[name], struct.pack('<I', stub))
+    u.mem_write(SESSION + 0xc, struct.pack('<I', 0 if features is None else TARGET))
+    u.mem_write(TARGET, struct.pack('<IHHi', 0, 0x0106, 0, features or 0))  # player, version, features
+    files = [] if files is None else files
     record = 0
     if meta:
         at, ptrs = STRINGS, []
@@ -60,8 +75,21 @@ def run(code, request, meta=None):
         if address in (LOCK, UNLOCK):
             calls.append(({LOCK: 'lock', UNLOCK: 'unlock'}[address], uc.reg_read(UC_MIPS_REG_4), uc.reg_read(UC_MIPS_REG_28),
                           uc.reg_read(UC_MIPS_REG_25) == address))
+        if address in (OPEN, READ, CLOSE):
+            assert uc.reg_read(UC_MIPS_REG_25) == address and uc.reg_read(UC_MIPS_REG_28) == GP
+            a0, a1, a2 = (uc.reg_read(r) for r in (UC_MIPS_REG_4, UC_MIPS_REG_5, UC_MIPS_REG_6))
+            if address == OPEN:
+                files.append(('open', bytes(uc.mem_read(a0, 32)).split(b'\0')[0].decode(), a1))
+                uc.reg_write(UC_MIPS_REG_2, 0xffffffff if cover is None else FD)
+            elif address == READ:
+                files.append(('read', a0, a2))
+                uc.mem_write(a1, cover[:a2])
+                uc.reg_write(UC_MIPS_REG_2, len(cover[:a2]))
+            else:
+                files.append(('close', a0))
+                uc.reg_write(UC_MIPS_REG_2, 0)
     u.hook_add(UC_HOOK_CODE, hook)
-    u.reg_write(UC_MIPS_REG_4, 0x1234)  # the session, unused
+    u.reg_write(UC_MIPS_REG_4, SESSION)
     u.reg_write(UC_MIPS_REG_5, PDU)
     u.reg_write(UC_MIPS_REG_6, 7)
     u.reg_write(UC_MIPS_REG_28, GP)
@@ -134,3 +162,59 @@ def test_a_short_request_is_rejected(code, bad):
 
 def test_only_invalid_ids_is_rejected(code):
     assert run(code, request(0, 8), SONG)[0] == 0x0a
+
+
+HANDLE = b'6136261\n/mnt/mmc/.coverflow/811c9dc5.jpg\n'
+ALL = [(1, 106, 'Lovely Day'), (2, 106, 'Bill Withers'), (3, 106, 'Menagerie'), (4, 106, '3'), (5, 106, '12'),
+       (6, 106, 'Soul'), (7, 106, '245000')]
+
+
+def test_cover_handle_for_a_controller_that_fetches_covers(code):
+    files = []
+    ctype, pdu, calls = run(code, request(), SONG, CT_16_COVER, HANDLE, files)
+    assert ctype == 0x0c and attrs(pdu) == (0, ALL + [(8, 106, '6136261')])
+    assert files == [('open', build.BT_COVER_FILE, 0), ('read', FD, 7), ('close', FD)]  # read-only, seven bytes
+    assert calls == [('lock', MUTEX, GP, True), ('unlock', MUTEX, GP, True)]
+    _, pdu, _ = run(code, request(8, 1), SONG, CT_16_COVER, HANDLE)
+    assert attrs(pdu)[1] == [(8, 106, '6136261'), (1, 106, 'Lovely Day')]
+    # the attribute as AVRCP 1.6.2 6.6.1 lays it out: id 8, UTF-8 (106), seven digits
+    assert pdu[7 + 1:7 + 16] == bytes.fromhex('00000008 006a 0007') + b'6136261'
+
+
+@pytest.mark.parametrize('bit', [0x80, 0x100, 0x200])
+def test_any_one_cover_bit_is_enough(code, bit):
+    assert attrs(run(code, request(8), SONG, 0x43 | bit, HANDLE)[1])[1] == [(8, 106, '6136261')]
+
+
+@pytest.mark.parametrize('features', [CT_15, 0, 0x7f, None])
+def test_no_cover_attribute_for_a_controller_that_does_not_say_so(code, features):
+    """Exactly what it was answered before cover art: all seven, the file never opened, and 8 no attribute."""
+    files = []
+    ctype, pdu, _ = run(code, request(), SONG, features, HANDLE, files)
+    assert ctype == 0x0c and attrs(pdu) == (0, ALL) and files == []
+    _, pdu, _ = run(code, request(8, 1), SONG, features, HANDLE, files)
+    assert attrs(pdu)[1] == [(1, 106, 'Lovely Day')] and files == []
+    assert run(code, request(8), SONG, features, HANDLE, files)[0] == 0x0a and files == []  # INVALID_PARAM
+
+
+@pytest.mark.parametrize('cover', [None, b'', b'613626', b'61362x1\n', b'-136261\n'])
+def test_a_song_with_no_cover_has_no_cover_attribute(code, cover):
+    assert attrs(run(code, request(), SONG, CT_16_COVER, cover)[1]) == (0, ALL)
+    ctype, pdu, _ = run(code, request(8), SONG, CT_16_COVER, cover)  # asked for alone: answered, with none
+    assert ctype == 0x0c and attrs(pdu)[1] == []
+
+
+def test_the_handle_follows_the_file(code):
+    """A track change: demo's payload rewrites the file, and the next answer carries the new handle."""
+    for cover, handle in ((HANDLE, '6136261'), (b'0000042\n/mnt/mmc/a/cover.jpg\n', '0000042')):
+        assert attrs(run(code, request(8), SONG, CT_16_COVER, cover)[1])[1] == [(8, 106, handle)]
+
+
+def test_cover_and_no_track(code):
+    files = []
+    assert attrs(run(code, request(), None, CT_16_COVER, HANDLE, files)[1])[1] == [(1, 106, ' ')]
+    assert attrs(run(code, request(8, 1), None, CT_16_COVER, HANDLE)[1])[1] == [(8, 106, ''), (1, 106, '')]
+
+
+def test_only_invalid_ids_is_rejected_with_cover(code):
+    assert run(code, request(0, 9), SONG, CT_16_COVER, HANDLE)[0] == 0x0a
