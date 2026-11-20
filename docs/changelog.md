@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Bluetooth: plugging the Q2 into USB power (a car's USB coming on with the car) now has it connect to the last Bluetooth device once, as it does when Bluetooth is switched on, so a car that dropped the Q2 when it was switched off gets it back within seconds instead of minutes later. Not when USB Audio is the cable's remembered choice, or while something is already connected.
   - Storage: opening Settings > Storage now has the Subsonic app recount its Stream Cache straight away, so the page shows a fresh size, and the app no longer recounts it every 10 minutes in the background (a few seconds of work each time).
   - Playback: a Q2 that starts up paused on the song it last played now stays paused. The song could start playing on its own straight after startup while Now Playing still showed it paused.
   - Home: **Radio Tuner**, under the Library: the FM stations that reach where you are (found from your internet connection, or a ZIP Code you enter) on a radio dial. Turn the wheel to tune 0.2 MHz a click; Next and Previous jump to the next station you can stream; Centre lists the stations. Between stations you hear static, and a station fades in out of it as you tune onto it, as on a real radio. The list is kept on the card for each place, so it shows at once the next time and updates itself in the background.

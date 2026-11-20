@@ -695,8 +695,8 @@ def test_the_cable_is_what_stock_reads(fw):
 
 # A cable in starts one Bluetooth connect to the saved device (headset.c headset_bt_usb,
 # docs/internals.md#bluetooth-on-usb-power). The car drive of 2026-11-20: the car ended the link at its switch-off
-# (reason 3, which BlueZ does not retry), and at the next start its USB enumerated the Q2 at 14:48:01 while
-# Bluetooth waited for the car to page the Q2 itself, at 14:52:35.
+# (reason 3, which BlueZ does not retry), and at the next start Bluetooth waited for the car to page the Q2 itself,
+# about 4.5 minutes after the car's USB enumerated it.
 
 def usb_power(fw, ini=None, since_on=30000):
     """usb_ui.c and headset.c with test_bt_trace's Bluetooth: on, its stack up, nothing linked, the car saved and
