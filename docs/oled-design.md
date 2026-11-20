@@ -1816,20 +1816,25 @@ Settings > Car Remote (approved 2026-11-16, `design/carremote-page`, `mock_carre
 ### Radio
 
 Home's Radio ([internals](internals.md#radio-home), `patch/radio_tuner.c`), as the approved prototype
-(`~/q2-emu/design/radio-tuner/index.html`, device shots in `~/q2-emu/design/radio-tuner/device-shots/`,
-2026-11-20). The status row names the page "Radio" on the tuner, loading and error screens, "Near <city>" on
-the stations list and "Change Location" on the ZIP entry.
+(`~/q2-emu/design/radio-tuner/index.html`, the tuner's redesign approved 2026-11-20; device shots in
+`~/q2-emu/design/radio-tuner/device-shots-v2/`). The status row names the page "Radio" on the tuner, loading and
+error screens, "Near <city>" on the stations list and "Change Location" on the ZIP entry.
 
-- **Tuner:** the frequency in Inter Medium 64 (the one size past the type steps, as the plug-in screen's 30 is),
-  its baseline at y 116, with "FM" in Inter Medium 17 Text Secondary 6 px after it, the pair centred; the brand
-  in Inter Medium 20 at y 148; call sign and city in 15 Text Secondary at y 174; the song, "Paused", "Tuning…" or
-  "On air here, not available to stream" in 15 Text Tertiary at y 196. Between stations: "No station" and "Keep
-  turning, or press Next to seek". A station with no stream has its frequency and brand in Text Tertiary.
+- **Tuner:** the frequency the needle is at in Inter Medium 64 (the one size past the type steps, as the plug-in
+  screen's 30 is), its baseline at y 158, centred between the status row and the dial, with "FM" in Inter Medium
+  17 Text Secondary 6 px after it, the pair centred. Above it the station's name in Inter Medium 20 at y 84;
+  below, the song or "Paused" in 15 Text Secondary at y 186, and call sign and city in 15 Text Tertiary at y 208.
+  A line wider than 315 px is the house marquee ([Motion](#motion)): 1.5 s still, then 30 px a second, a copy
+  40 px behind, its ends faded 16 px. The words wait for the station, as RDS does: they appear once its stream is
+  sounding and its title has come (or 4 s of sound with none), fading in over 400 ms, so tuning in feels like
+  connecting; between stations, while one connects, and on a station with no stream, the frequency stands alone.
+  There is no "No station" line.
 - **Dial:** a scale under a fixed needle, 62 px a MHz, baseline y 270: a 7 px tick each 0.2 MHz (Text Tertiary),
-  14 px on the whole MHz (Text Secondary), the even MHz labelled in 13 Text Tertiary under it; a 7 px dot per
-  station 26 px above the baseline, filled Text Primary when it streams, hollow Text Tertiary when it is on air
-  but has no stream; both ends fading into black over 48 px; the needle a 3 x 44 px bar in Favorite red
-  (#FF375F) from y 230. The needle glides to each 0.2 MHz step (60 ms time constant).
+  14 px on the whole MHz (Text Secondary), the even MHz labelled in 13 Text Tertiary under it; no mark for the
+  stations (the detents and the sound find them); both ends fading into black over 48 px; the needle a 3 x 44 px
+  bar in Favorite red (#FF375F) from y 230, gliding after the dial (90 ms time constant). The wheel tunes 0.02
+  MHz a step (one every 12 degrees of the touch wheel), 0.06 turned fast; each station is a detent that holds
+  three steps, and every step clicks, louder and duller on a station.
 - **Stations list:** the house list's measures (32 px rows from y 58, Inter 20, the flat selection bar
   `sel_bar_flat`, fades from y 40 to 74 and 266 to 310 where the list goes on, the 4 px scroll indicator at
   x 366 while the wheel turns), painted by the page: the name left, the frequency right (Text Secondary, Text

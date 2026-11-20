@@ -1,8 +1,9 @@
-/* test/tuner.py's runs of patch/tuner_core.c with patch/fmrx.c, as q2video -t's writer runs them (video.c
- * tuner_writer): "name value" lines, which tuner.py checks. A stream plays a 1 kHz tone into the ring at the
- * real rate, stops for a dropout, and comes back; the writer takes TUNER_FRAMES a write as the ring allows,
- * the carrier dropped while it can't (FMRX_NO_CARRIER); the output's level is measured in 50 ms windows. Then a
- * stream that keeps ending: when each restart is due, and what a sounding stream does to the count. */
+/* test/tuner.py's runs of patch/tuner_core.c with patch/fmrx.c, as q2video -t's writer runs them
+ * (video.c tuner_writer): "name value" lines, which tuner.py checks. A stream plays a 1 kHz tone
+ * into the ring at the real rate, stops for a dropout, and comes back; the writer takes
+ * TUNER_FRAMES a write as the ring allows, the carrier dropped while it can't (FMRX_NO_CARRIER);
+ * the output's level is measured in 50 ms windows. Then a stream that keeps ending: when each
+ * restart is due, and what a sounding stream does to the count. */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,17 +24,22 @@ static double rms(int from, int n) {
 }
 
 int main(void) {
-    /* the stream sends sound from 0 to 3 s, nothing from 3 to 6 s (the dropout), sound again from 6 s */
+    /* the stream sends sound from 0 to 3 s, nothing from 3 to 6 s (the dropout), sound again from 6
+     * s */
     const int drop_at = 3 * FS, back_at = 6 * FS;
     tuner_feed f = { 0, 0, 0 };
     fmrx_init(&rx, FS, 3);
     fmrx_params p = { 70, 0, 0.03f, 1, 1 }; /* a strong station, the needle on it */
-    unsigned sent = 0, taken = 0;           /* frames the stream has sent, and the writer has played */
+    unsigned sent = 0, taken = 0; /* frames the stream has sent, and the writer has played */
     static float in[2 * TUNER_FRAMES];
     int dry_at = -1, sounded_at = -1;
     for (int at = 0; at + TUNER_FRAMES <= FS * SECS; at += TUNER_FRAMES) {
-        int t = at + TUNER_FRAMES; /* the stream is real time: what it has sent by the end of this write */
-        sent = t < drop_at ? (unsigned)t : t < back_at ? (unsigned)drop_at : (unsigned)(drop_at + t - back_at);
+        int t =
+            at +
+            TUNER_FRAMES; /* the stream is real time: what it has sent by the end of this write */
+        sent = t < drop_at   ? (unsigned)t
+               : t < back_at ? (unsigned)drop_at
+                             : (unsigned)(drop_at + t - back_at);
         int prog = tuner_take(&f, sent - taken);
         if (!prog && f.stalled && dry_at < 0) dry_at = at;
         if (prog && dry_at >= 0 && at > back_at && sounded_at < 0) sounded_at = at;
@@ -47,7 +53,8 @@ int main(void) {
         fmrx_run(&rx, &q, prog ? in : 0, out + 2 * at, TUNER_FRAMES);
     }
     double lo = 0;
-    for (int w = dry_at + FS / 10; w + FS / 20 <= back_at; w += FS / 20) { /* the dropout's 50 ms windows */
+    for (int w = dry_at + FS / 10; w + FS / 20 <= back_at;
+         w += FS / 20) { /* the dropout's 50 ms windows */
         double v = db(rms(w, FS / 20));
         if (lo == 0 || v < lo) lo = v;
     }
@@ -83,8 +90,9 @@ int main(void) {
     tuner_nudge(&n);
     printf("wait_after_nudge_ms %u\n", tuner_wait_ms(&n));
 
-    /* the dial's click at each loudness demo asks for (tenths: 6 a held detent, 10 a step, 14 landing on a
-     * station), mixed into silence across two writes: its length, peak, brightness (zero crossings a ms) and tail */
+    /* the dial's click at each loudness demo asks for (tenths: 6 a held detent, 10 a step, 14
+     * landing on a station), mixed into silence across two writes: its length, peak, brightness
+     * (zero crossings a ms) and tail */
     static const int tenths[3] = { 6, 10, 14 };
     for (int k = 0; k < 3; ++k) {
         tuner_click c = { 0 }; /* the same noise each time: only the filter and loudness differ */

@@ -1,10 +1,11 @@
 /* Radio (docs/internals.md#radio-home, docs/oled-design.md#radio): Home's row under
- * the Library. The stations that reach the place, from q2radiofetch (radiofetch.c), laid out at
- * their real frequencies on an FM dial under a fixed needle; the wheel tunes in 0.2 MHz steps, the
- * needle glides to the step, and the sound is q2video -t's FM receiver (video.c, fmrx.c): hiss
- * between stations, a station's stream swelling out of it as the needle closes on it. The approved
- * prototype
- * (~/q2-emu/design/radio-tuner/index.html) is the spec, screen for screen.
+ * the Library. The stations that reach the place, from q2radiofetch (radiofetch.c), at their real
+ * frequencies on an FM dial under a fixed needle; the wheel tunes finely (0.02 MHz a step, 0.06
+ * turned fast), each station a detent, every step a click, the needle gliding after the dial; and
+ * the sound is q2video -t's FM receiver (video.c, fmrx.c): hiss between stations, a station's
+ * stream swelling out of it as the needle closes on it. A station's name and song wait for its
+ * stream, as RDS does. The approved prototype (~/q2-emu/design/radio-tuner/index.html) is the
+ * spec, screen for screen.
  *
  * Screens: loading, the tuner, the stations list (Centre), the ZIP entry (the list's last row) and
  * the error. The state is on the heap while the page is open; the scratch holds its pointer and the
@@ -20,17 +21,44 @@
 #define TUNER_STATE "/tmp/q2tuner.state"
 #define RT_MAX 64 /* FM stations a list holds */
 #define RT_URL 300
-#define LO 879 /* the dial's ends, in 100 kHz */
-#define HI 1079
+#define LO 8790 /* the dial's ends, in 10 kHz, the unit of every frequency here */
+#define HI 10790
 #define PX_MHZ 62         /* the dial's scale */
 #define DIAL_Y 270        /* its baseline, screen y */
-#define RT_GLIDE_MS 60.0f /* the needle's time constant toward the dial's step */
-#define LAND_MS 350       /* the needle at rest this long before a stream starts */
-#define WARM_MS 4000      /* a stream left playing this long after the dial leaves its station */
-#define FRAME_MS 16       /* a repaint while something moves */
-#define STATE_MS 500      /* q2video's state read this often */
-#define QUIT_MS 1500      /* q2video's own exit, before it is killed */
-#define ROW 32            /* the list's rows, from LIST_TOP */
+#define RT_GLIDE_MS 90.0f /* the needle's time constant toward the dial's step */
+/* Fine tuning (the prototype's fineTurn): a step FINE, FAST when steps come under FAST_MS apart. A
+ * station is a detent: a step that would reach within CAPTURE of it, or pass it, lands on it, and
+ * the next HOLD steps the same way only click in place. HEAR: a station within it (not at it) is
+ * the one the receiver hears, off centre. A tap lands on a station within TAP_SNAP of it. */
+#define FINE 2
+#define FAST 6
+#define FAST_MS 35
+#define CAPTURE 4
+#define HOLD 3
+#define HEAR 10
+#define TAP_SNAP 15
+/* The touch wheel's raw travel, 200 units a turn, makes a step every 12 degrees (the prototype's
+ * drag): STEP_THIRDS thirds of a unit, 30 steps a turn, where a tick (7 a turn at 50% Wheel
+ * Sensitivity) would be 51 degrees. */
+#define STEP_THIRDS 20
+/* The words (the prototype's reveal): up once the station's stream is sounding and its title has
+ * come, or NO_TITLE_MS of sound has passed with none, fading in over REVEAL_MS. A line wider than
+ * WORDS_W is the house marquee: MARQ_HOLD_MS still, then MARQ_PX px a second, a copy MARQ_GAP
+ * behind, its ends faded over MARQ_FADE px, repainted every MARQ_MS. */
+#define NO_TITLE_MS 4000
+#define REVEAL_MS 400
+#define WORDS_W 315
+#define MARQ_HOLD_MS 1500
+#define MARQ_PX 30
+#define MARQ_GAP 40
+#define MARQ_FADE 16
+#define MARQ_MS 33
+#define LAND_MS 350  /* the needle at rest this long before a stream starts */
+#define WARM_MS 4000 /* a stream left playing this long after the dial leaves its station */
+#define FRAME_MS 16  /* a repaint while something moves */
+#define STATE_MS 500 /* q2video's state read this often */
+#define QUIT_MS 1500 /* q2video's own exit, before it is killed */
+#define ROW 32       /* the list's rows, from LIST_TOP */
 #define LIST_TOP 58
 #define LIST_ROWS 7
 #define FADE 48 /* the dial's end fades */
@@ -38,7 +66,7 @@
 enum { LOADING, TUNER, LIST, ZIP, ERROR };
 
 typedef struct {
-    short freq; /* 100 kHz */
+    short freq; /* 10 kHz */
     unsigned char db;
     float km;
     char call[8], name[48], city[40], url[RT_URL];
@@ -56,6 +84,15 @@ static struct rt {
     int no_wifi;              /* the Wi-Fi link is down: "No Wi-Fi" stands (toast_stay) */
     char place[48], err[64], title_text[256], state[12], zip_text[8];
     rt_station st[RT_MAX];
+    int det_f, det_left,
+        det_d;        /* the detent: the station held on (0 none), steps left, which way */
+    unsigned tick_at; /* the dial's last step */
+    int travel;       /* the wheel's raw travel not yet a step, thirds of a unit */
+    int shown;        /* the station whose words are up, its index + 1; 0 none */
+    int raw;          /* the tuner has the wheel raw (wheel_raw) */
+    unsigned words_at, locked_at, marq; /* locked_at: when the feed's stream first sounded */
+    unsigned mq_at[2], mq_key[2];       /* the marquee lines' clocks, and their texts' hashes */
+    int live; /* the last paint moved: the words fading in, a line scrolling */
 } *rt __attribute__((section(".scratch")));
 static int rt_fetch_pid __attribute__((section(".scratch")));
 
@@ -63,8 +100,7 @@ static float needle(void) {
     if (!rt->glide_at) return (float)rt->freq;
     float d = (rt->from - rt->freq) *
               (float)pow(2.718281828, -(double)(time_now_ms() - rt->glide_at) / RT_GLIDE_MS);
-    if (d < 0.02f && d > -0.02f)
-        return rt->glide_at = 0, (float)rt->freq; /* landed: within 2 kHz */
+    if (d < 0.2f && d > -0.2f) return rt->glide_at = 0, (float)rt->freq; /* landed: within 2 kHz */
     return rt->freq + d;
 }
 
@@ -74,9 +110,21 @@ static char *rt_chr(const char *s, int c) { /* demo imports no strchr */
     return 0;
 }
 
-static rt_station *at(int freq) {
+/* The station the receiver hears at freq: the nearest within HEAR (off centre it sounds distorted,
+ * as a real set). */
+static rt_station *at(float freq) {
+    rt_station *best = 0;
+    float bd = HEAR;
+    for (int i = 0; i < rt->n; ++i) {
+        float d = rt->st[i].freq - freq;
+        if (d < 0) d = -d;
+        if (d < bd) bd = d, best = &rt->st[i];
+    }
+    return best;
+}
+static int on_station(int freq) {
     for (int i = 0; i < rt->n; ++i)
-        if (rt->st[i].freq == freq) return &rt->st[i];
+        if (rt->st[i].freq == freq) return 1;
     return 0;
 }
 static int streams(const rt_station *s) { return s && s->url[0]; }
@@ -97,7 +145,7 @@ static float flutter(float km) {
  * stream's station, however far the dial has gone from it (the IF filter makes a far one silent;
  * q2video holds its carrier off until its sound comes); else nothing, the empty channel's hiss. */
 static void receive(void) {
-    rt_station *here = at(rt->freq), *c = 0;
+    rt_station *here = at((float)rt->freq), *c = 0;
     float level = -40, fade = 0;
     int id = 0;
     if (here && !streams(here))
@@ -107,17 +155,19 @@ static void receive(void) {
     char p[96]; /* ints: dB, kHz, the fade in thousandths, the gain, the station (video.c tuner_key)
                  */
     tk_snprintf(p, sizeof p, "p%d %d %d %d %d", (int)level,
-                c ? (int)((needle() - c->freq) * 100) : 0, (int)(fade * 1000),
+                c ? (int)((needle() - c->freq) * 10) : 0, (int)(fade * 1000),
                 rt->playing && rt->screen != LOADING ? 1 : 0, id);
     rt_send(p);
 }
 
 /* The station whose stream the receiver should have: the one on the dial, or on an empty channel
- * the stronger of its neighbours 0.2 MHz either side at 70 dB or more, which splatters in. */
+ * the stronger of its neighbours 0.2 MHz either side (on the 0.1 MHz grid) at 70 dB or more, which
+ * splatters in. */
 static int source(void) {
-    rt_station *here = at(rt->freq);
+    rt_station *here = at((float)rt->freq);
     if (here) return streams(here) ? index_of(here) : -1;
-    rt_station *a = at(rt->freq - 2), *b = at(rt->freq + 2), *best = 0;
+    rt_station *a = at((float)((rt->freq - 20 + 5) / 10 * 10)),
+               *b = at((float)((rt->freq + 20 + 5) / 10 * 10)), *best = 0;
     if (streams(a) && a->db >= 70) best = a;
     if (streams(b) && b->db >= 70 && (!best || b->db > best->db || index_of(b) == rt->feed))
         best = b;
@@ -133,7 +183,7 @@ static int land(const void *unused) {
         tk_snprintf(u, sizeof u, "u%s", rt->st[s].url);
         rt_send(u);
         rt->feed = s;
-        rt->title_text[0] = 0;
+        rt->title_text[0] = rt->state[0] = 0, rt->locked_at = 0;
         receive();
     }
     return 0;
@@ -142,7 +192,7 @@ static int land(const void *unused) {
 static int cool(const void *unused) { /* the dial left the loaded stream's station WARM_MS ago */
     rt->warm = 0;
     if (rt->feed >= 0 && source() != rt->feed)
-        rt_send("x"), rt->feed = -1, rt->title_text[0] = 0, receive();
+        rt_send("x"), rt->feed = -1, rt->title_text[0] = 0, rt->locked_at = 0, receive();
     return 0;
 }
 
@@ -161,7 +211,10 @@ static void tune(void) {
     float n = needle();
     if ((float)rt->freq != n) rt->from = n, rt->glide_at = time_now_ms();
     int s = rt->playing ? source() : -1;
-    if (!rt->playing && rt->feed >= 0) rt_send("x"), rt->feed = -1;
+    if (!rt->playing && rt->feed >= 0) rt_send("x"), rt->feed = -1, rt->locked_at = 0;
+    rt_station *here = at((float)rt->freq);
+    if (rt->shown && (!here || index_of(here) + 1 != rt->shown))
+        rt->shown = 0; /* the dial left it */
     stop_timer(&rt->land);
     if (s >= 0 && s == rt->feed)
         stop_timer(&rt->warm);
@@ -171,6 +224,79 @@ static void tune(void) {
             rt->land = timer_add(land, 0, LAND_MS); /* turning through stations starts none */
     }
     receive();
+    animate();
+}
+
+/* The dial's click, its loudness in tenths (tuner_core.c tuner_click_start): 6 a held detent, 10 a
+ * step, 14 landing on a station, 5 a scrub between stations. */
+static void click(int tenths) {
+    char k[8];
+    tk_snprintf(k, sizeof k, "k%d", tenths);
+    rt_send(k);
+}
+
+/* n steps of the dial (the prototype's fineTurn), FAST ones when fast: a station within CAPTURE
+ * of where a step would go, or passed by it, is landed on, and holds the next HOLD steps the same
+ * way, each a click in place; sitting on one (landed by seek, the list or a tap) holds alike. */
+static void fine_turn(int n, int fast) {
+    int d = n > 0 ? 1 : -1, step = fast ? FAST : FINE;
+    for (int k = 0; k < n * d; ++k) {
+        if ((rt->det_f != rt->freq || rt->det_d != d) && on_station(rt->freq))
+            rt->det_f = rt->freq, rt->det_left = HOLD, rt->det_d = d;
+        if (rt->det_f && rt->det_d == d && rt->det_left > 0) {
+            --rt->det_left;
+            click(6);
+            continue;
+        }
+        rt->det_f = 0;
+        int f = rt->freq + d * step;
+        f = f < LO ? LO : f > HI ? HI : f;
+        rt_station *hit = 0;
+        for (int i = 0; i < rt->n; ++i) {
+            int sf = rt->st[i].freq;
+            if ((sf - rt->freq) * d > 0 && (sf - f) * d <= CAPTURE &&
+                (!hit || (sf - hit->freq) * d < 0))
+                hit = &rt->st[i];
+        }
+        if (hit) f = hit->freq, rt->det_f = f, rt->det_left = HOLD, rt->det_d = d;
+        click(hit ? 14 : 10);
+        rt->freq = f;
+    }
+    tune();
+}
+
+/* The touch wheel, raw while the tuner screen is the top window's (wheel_raw, playback.h): its
+ * travel as steps, STEP_THIRDS thirds of a unit each, clockwise up; fast when they came under
+ * FAST_MS apart. Given back to ticks anywhere else. */
+static void wheel(unsigned now) {
+    int raw = rt->screen == TUNER && window_manager_get_top_window(window_manager()) == rt->page;
+    if (raw != rt->raw) {
+        __sync_lock_test_and_set(&wheel_travel, 0);
+        rt->raw = raw, rt->travel = 0;
+        if (raw || wheel_raw == WHEEL_RAW) wheel_raw = raw ? WHEEL_RAW : WHEEL_TICKS;
+    }
+    if (!raw) return;
+    rt->travel -=
+        3 * __sync_lock_test_and_set(&wheel_travel, 0); /* the travel rises anticlockwise */
+    int n = rt->travel / STEP_THIRDS;
+    if (!n) return;
+    rt->travel -= n * STEP_THIRDS;
+    int fast = now - rt->tick_at < (unsigned)(FAST_MS * (n < 0 ? -n : n));
+    rt->tick_at = now;
+    fine_turn(n, fast);
+}
+
+/* The words' reveal (the prototype's shown): the station on the dial, once its stream has sounded
+ * (the receiver's state playing) and its title has come, or NO_TITLE_MS of sound has passed with
+ * none; up until the dial leaves it, paused or cut out included. */
+static void words_due(unsigned now) {
+    rt_station *here = at((float)rt->freq);
+    if (rt->shown && (!here || index_of(here) + 1 != rt->shown)) rt->shown = 0;
+    int locked = rt->feed >= 0 && !tk_strcmp(rt->state, "playing");
+    if (locked && !rt->locked_at) rt->locked_at = now ? now : 1;
+    if (rt->shown || !here || index_of(here) != rt->feed || !locked) return;
+    if (!rt->title_text[0] && now - rt->locked_at <= NO_TITLE_MS) return;
+    rt->shown = index_of(here) + 1, rt->words_at = now;
     animate();
 }
 
@@ -218,6 +344,7 @@ static int list_read(void) {
         rt_station *s = &rt->st[count];
         int freq;
         digits(fld[2], &freq);
+        freq *= 10; /* 100 kHz to 10 kHz */
         if (freq < LO || freq > HI) continue;
         memset(s, 0, sizeof *s);
         s->freq = (short)freq;
@@ -284,7 +411,7 @@ static void show_list(void) {
     if (!list_read()) return;
     int was = rt->screen;
     if (was == LOADING || was == ZIP || was == ERROR) {
-        rt_station *s = at(rt->freq);
+        rt_station *s = at((float)rt->freq);
         if (!streams(s))
             for (int i = 0; i < rt->n && !streams(s); ++i) s = &rt->st[i];
         if (s) rt->freq = s->freq;
@@ -311,7 +438,9 @@ void tuner_poll(void) {
     }
     if (!rt) return;
     unsigned now = time_now_ms();
-    int status, lost = wifi_offline(); /* the network monitor's link, as the status row's (status_row.c) */
+    wheel(now);
+    int status,
+        lost = wifi_offline(); /* the network monitor's link, as the status row's (status_row.c) */
     if (lost !=
         rt->no_wifi) { /* "No Wi-Fi" up or down; back, a stream not sounding starts again at once */
         if (!lost) rt_send("r");
@@ -320,7 +449,7 @@ void tuner_poll(void) {
     }
     if (rt->audio && waitpid(rt->audio, &status,
                              1)) /* the receiver gone (no output to open): tune starts it again */
-        rt->audio = 0, rt->ended = now | 1, rt->feed = -1;
+        rt->audio = 0, rt->ended = now | 1, rt->feed = -1, rt->locked_at = 0;
     if (!rt->audio) return;
     if (now - rt->polled < STATE_MS) return;
     rt->polled = now;
@@ -333,6 +462,7 @@ void tuner_poll(void) {
             widget_invalidate_force(rt->sheet, 0);
         tk_snprintf(rt->title_text, sizeof rt->title_text, "%s", t);
     }
+    words_due(now);
     if (rt->playing) reset_poweroptions_timer(1, 1, 0);
     if (I(g_dacoff_time, 0) > 0) I(g_dacoff_time, 0) = 0;
     if (rt->volume != headset_gain() + 1) {
@@ -379,16 +509,16 @@ static void fit(char *out, unsigned cap, const char *s, void *canvas, int medium
     if (m + 4 < cap) memcpy(out + m, "\xe2\x80\xa6", 4);
 }
 
-/* The scale under the needle at nd (100 kHz, fractional while gliding): a tick each 0.2 MHz (the
- * odd tenths, the US channels), longer on the whole MHz with labels on the even ones, a dot per
- * station 26 px above the baseline (filled: it streams; hollow: on air, no stream), both ends
- * fading out over FADE px, the needle in Favorite red. */
+/* The scale under the needle at nd (10 kHz, fractional while gliding): a tick each 0.2 MHz (the
+ * odd tenths, the US channels), longer on the whole MHz with labels on the even ones, no mark for
+ * the stations (the detents and the sound find them), both ends fading out over FADE px, the
+ * needle in Favorite red. */
 static void dial(void *canvas, float nd) {
     const float cx = 187.5f;
-    for (int m = LO; m <= HI; m += 2) {
-        float x = cx + (m - nd) * PX_MHZ / 10;
+    for (int m = LO; m <= HI; m += 20) {
+        float x = cx + (m - nd) * PX_MHZ / 100;
         if (x < -20 || x > 395) continue;
-        int whole = (m + 1) % 10 == 0, n = (m + 1) / 10;
+        int whole = (m + 10) % 100 == 0, n = (m + 10) / 100;
         box(canvas, (int)(x - 0.75f + 0.5f), DIAL_Y - (whole ? 14 : 7), 2, whole ? 14 : 7,
             rgba(whole ? RGB_SECONDARY : RGB_TERTIARY, 255));
         if (whole && n % 2 == 0) {
@@ -396,14 +526,6 @@ static void dial(void *canvas, float nd) {
             tk_snprintf(l, sizeof l, "%d", n);
             rt_text(canvas, l, 0, 13, RGB_TERTIARY, (int)(x + 3.1f), DIAL_Y + 14, 40, 1);
         }
-    }
-    for (int i = 0; i < rt->n; ++i) {
-        float x = cx + (rt->st[i].freq - nd) * PX_MHZ / 10;
-        if (x < -10 || x > 385) continue;
-        int dx = (int)(x - 3.5f + 0.5f);
-        round_box(canvas, dx, DIAL_Y - 30, 7, 7, streams(&rt->st[i]) ? RGB_PRIMARY : RGB_TERTIARY,
-                  3);
-        if (!streams(&rt->st[i])) round_box(canvas, dx + 2, DIAL_Y - 28, 3, 3, RGB_CANVAS, 1);
     }
     for (int k = 0; k < FADE; ++k) { /* the ends into the black, as the house marquee's */
         unsigned a = (unsigned)(255 * (FADE - k) / FADE);
@@ -466,41 +588,85 @@ void tuner_title(const char *in, char *out, unsigned cap) {
         tk_snprintf(out, cap, "%s", song[0] ? song : artist[0] ? artist : spot);
 }
 
+/* The house marquee on line (0 the name, 1 the song) at screen row y: centred when it fits in
+ * WORDS_W; wider, still for MARQ_HOLD_MS, then scrolling left MARQ_PX px a second with a copy
+ * MARQ_GAP behind, clipped to the column and its ends faded MARQ_FADE px into the black. Each line
+ * keeps its own clock, which starts over when its text changes. 1 while it scrolls. */
+static int marquee(void *canvas, int line, const char *s, int medium, int px, unsigned rgb, int y) {
+    unsigned key = 5381, now = time_now_ms();
+    for (const char *c = s; *c; ++c) key = key * 33 + (unsigned char)*c;
+    if (rt->mq_key[line] != key) rt->mq_key[line] = key, rt->mq_at[line] = now;
+    int w = ui_text_w(canvas, s, medium, TYPE(px));
+    if (w <= WORDS_W) return rt_text(canvas, s, medium, px, rgb, 187, y, 375, 1), 0;
+    unsigned el = now - rt->mq_at[line];
+    int off = el < MARQ_HOLD_MS
+                  ? 0
+                  : (int)((el - MARQ_HOLD_MS) * MARQ_PX / 1000 % (unsigned)(w + MARQ_GAP));
+    int x0 = (375 - WORDS_W) / 2, was[4], ox = I(canvas, CANVAS_X), oy = I(canvas, CANVAS_Y);
+    canvas_get_clip_rect(canvas, was);
+    int col[4] = { ox + x0, oy + y - rt->y0 - px, WORDS_W, 2 * px };
+    int l = col[0] > was[0] ? col[0] : was[0], t = col[1] > was[1] ? col[1] : was[1],
+        r = col[0] + col[2] < was[0] + was[2] ? col[0] + col[2] : was[0] + was[2],
+        b = col[1] + col[3] < was[1] + was[3] ? col[1] + col[3] : was[1] + was[3];
+    if (r <= l || b <= t) return 1;
+    int clip[4] = { l, t, r - l, b - t };
+    canvas_set_clip_rect(canvas, clip);
+    for (int k = 0; k < 2; ++k)
+        rt_text(canvas, s, medium, px, rgb, x0 - off + k * (w + MARQ_GAP), y, w + 8, 2);
+    for (int i = 0; i < MARQ_FADE; ++i) {
+        unsigned a = (unsigned)(255 * (MARQ_FADE - i) / MARQ_FADE);
+        box(canvas, x0 + i, y - px, 1, 2 * px, rgba(RGB_CANVAS, a));
+        box(canvas, x0 + WORDS_W - 1 - i, y - px, 1, 2 * px, rgba(RGB_CANVAS, a));
+    }
+    canvas_set_clip_rect(canvas, was);
+    return 1;
+}
+
+/* The words' and the marquee's frame: a repaint while the last one moved. */
+static int marq_tick(const void *unused) {
+    if (!rt || rt->screen != TUNER || !rt->live) return rt ? (int)(rt->marq = 0) : 0;
+    widget_invalidate_force(rt->sheet, 0);
+    return 8; /* RET_REPEAT */
+}
+
+/* The tuner (the prototype's layout): the frequency the needle is at, centred between the status
+ * row and the dial; above it the station's name, below its song (or Paused) and its call sign and
+ * city, once revealed (words_due) and while the needle is on it, fading in over REVEAL_MS. Between
+ * stations, or before the words come, the frequency alone: the hiss says the rest. */
 static void tuner_screen(void *canvas) {
-    rt_station *s = at(rt->freq);
-    int ok = streams(s), dim = s && !ok;
+    float nd = needle();
+    rt_station *here = at(nd), *s = here && rt->shown == index_of(here) + 1 ? here : 0;
+    int tenth = (int)(nd / 10 + 0.5f);
     char num[8];
-    tk_snprintf(num, sizeof num, "%d.%d", rt->freq / 10, rt->freq % 10);
+    tk_snprintf(num, sizeof num, "%d.%d", tenth / 10, tenth % 10);
     int nw = ui_text_w(canvas, num, 1, TYPE(64)), fw = ui_text_w(canvas, "FM", 1, TYPE(17));
     int x0 = (375 - nw - 6 - fw) / 2;
-    rt_text_base(canvas, num, 64, dim ? RGB_TERTIARY : RGB_PRIMARY, x0, 116);
-    rt_text_base(canvas, "FM", 17, RGB_SECONDARY, x0 + nw + 6, 116);
-    char line[256];
-    if (!s) {
-        rt_text(canvas, "No station", 1, 20, RGB_PRIMARY, 187, 148, 375, 1);
-        rt_text(canvas, "Keep turning, or press Next to seek", 0, 15, RGB_SECONDARY, 187, 174, 375,
-                1);
-    } else {
-        fit(line, sizeof line, s->name, canvas, 1, 20, 375 - 60);
-        rt_text(canvas, line, 1, 20, dim ? RGB_TERTIARY : RGB_PRIMARY, 187, 148, 375, 1);
+    rt_text_base(canvas, num, 64, RGB_PRIMARY, x0, 158);
+    rt_text_base(canvas, "FM", 17, RGB_SECONDARY, x0 + nw + 6, 158);
+    rt->live = 0;
+    if (s) {
+        unsigned age = time_now_ms() - rt->words_at,
+                 a = age >= REVEAL_MS ? 255 : age * 255 / REVEAL_MS;
+        rt->live = a < 255;
+        rt->live |= marquee(canvas, 0, s->name, 1, 20, RGB_PRIMARY, 84);
+        char t[256];
+        tuner_title(!rt->playing              ? "Paused"
+                    : index_of(s) == rt->feed ? rt->title_text
+                                              : "",
+                    t, sizeof t);
+        if (t[0]) rt->live |= marquee(canvas, 1, t, 0, 15, RGB_SECONDARY, 186);
         char two[64];
         tk_snprintf(two, sizeof two, "%s \xc2\xb7 %s", s->call, s->city);
         char *comma = strrchr(two, ','); /* the city without its state, as the prototype */
         if (comma) *comma = 0;
-        rt_text(canvas, two, 0, 15, RGB_SECONDARY, 187, 174, 375, 1);
-        const char *l3 = !ok                       ? "On air here, not available to stream"
-                         : !rt->playing            ? "Paused"
-                         : index_of(s) == rt->feed ? rt->title_text
-                                                   : "";
-        char t[256];
-        tuner_title(l3, t, sizeof t);
-        if (!t[0] && ok && rt->playing && index_of(s) == rt->feed &&
-            tk_strcmp(rt->state, "playing"))
-            tk_snprintf(t, sizeof t, "Tuning\xe2\x80\xa6");
-        fit(line, sizeof line, t, canvas, 0, 15, 375 - 60);
-        if (line[0]) rt_text(canvas, line, 0, 15, RGB_TERTIARY, 187, 196, 375, 1);
+        rt_text(canvas, two, 0, 15, RGB_TERTIARY, 187, 208, WORDS_W, 1);
+        if (a < 255) { /* the fade: the black over the words, thinning */
+            box(canvas, 0, 84 - 14, 375, 28, rgba(RGB_CANVAS, 255 - a));
+            box(canvas, 0, 186 - 11, 375, 44, rgba(RGB_CANVAS, 255 - a));
+        }
     }
-    dial(canvas, needle());
+    if (rt->live && !rt->marq) rt->marq = timer_add(marq_tick, 0, MARQ_MS);
+    dial(canvas, nd);
 }
 
 /* The now-playing mark: three 3 px bars 5 px apart, up to 14 px tall, out of step, their foot at
@@ -538,9 +704,10 @@ static void list_screen(void *canvas) {
         }
         rt_station *s = &rt->st[i];
         char f[8], name[96];
-        tk_snprintf(f, sizeof f, "%d.%d", s->freq / 10, s->freq % 10);
+        tk_snprintf(f, sizeof f, "%d.%d", s->freq / 100, s->freq / 10 % 10);
         int rw = ui_text_w(canvas, f, 0, TYPE(20));
-        int playing = streams(s) && rt->playing && index_of(s) == rt->feed && s->freq == rt->freq;
+        int playing =
+            streams(s) && rt->playing && index_of(s) == rt->feed && at((float)rt->freq) == s;
         fit(name, sizeof name, s->name, canvas, 0, 20,
             375 - 28 - 26 - rw - 14 - (playing ? 26 : 0));
         rt_text(canvas, name, 0, 20, !streams(s) && !on ? RGB_TERTIARY : RGB_PRIMARY, 26, y + 16,
@@ -643,7 +810,7 @@ static int frame(const void *unused) {
             rt->scroll = rt->target;
         rt_station *f = rt->feed >= 0 ? &rt->st[rt->feed] : 0;
         moving |= time_now_ms() - rt->shown_at < UI_SHOW_MS + 100 ||
-                  (f && rt->playing && f->freq == rt->freq);
+                  (f && rt->playing && at((float)rt->freq) == f);
     }
     moving |= rt->screen == LOADING;
     widget_invalidate_force(rt->sheet, 0);
@@ -708,14 +875,16 @@ int tuner_key(void *top, unsigned key) {
     }
     if (s == TUNER) {
         if (key == KEY_RETURN) return 0;
-        if (wheel) {
-            int f = rt->freq + 2 * wheel;
-            rt->freq = f < LO ? LO : f > HI ? HI : f;
-            tune();
+        if (wheel) { /* a tick a step: the touch wheel itself is read raw (wheel) */
+            unsigned now = time_now_ms();
+            int fast = now - rt->tick_at < FAST_MS;
+            rt->tick_at = now;
+            fine_turn(wheel, fast);
         } else if (key == KEY_FWD_BTN || key == KEY_BACK_BTN)
             seek(key == KEY_FWD_BTN ? 1 : -1);
         else if (key == KEY_CENTER) {
-            rt->sel = index_of(at(rt->freq)) > 0 ? index_of(at(rt->freq)) : 0;
+            rt_station *here = at((float)rt->freq);
+            rt->sel = index_of(here) > 0 ? index_of(here) : 0;
             rt->scroll = rt->target = (float)((rt->sel > 3 ? rt->sel - 3 : 0) * ROW);
             screen(LIST);
         }
@@ -756,9 +925,9 @@ int tuner_key(void *top, unsigned key) {
     return 1;
 }
 
-/* A finger: on the tuner's dial (y 225 down) a tap tunes to the frequency under it, snapping to a
- * station within 0.15 MHz, and a drag scrubs, the scale following it; on the list a tap acts on the
- * row. */
+/* A finger: on the tuner's dial (y 225 down) a tap tunes to the frequency under it, to 0.01 MHz,
+ * landing on a station within TAP_SNAP, and a drag scrubs, the scale following it, a station
+ * within CAPTURE pulling it in, each move a click; on the list a tap acts on the row. */
 static int touch(void *ctx, void *event) {
     if (!rt) return 0;
     int type = I(event, EVENT_TYPE), xy[2] = { I(event, EVENT_X), I(event, EVENT_Y) };
@@ -773,24 +942,28 @@ static int touch(void *ctx, void *event) {
     if (type == EVT_POINTER_MOVE_BEFORE && rt->screen == TUNER) {
         if (!rt->moved && x - rt->tx < 4 && rt->tx - x < 4) return 0;
         rt->moved = 1;
-        int f = rt->tf - (x - rt->tx) * 10 / PX_MHZ; /* the scale moves under a fixed needle */
-        f = f - ((f - LO) % 2 + 2) % 2;              /* onto a channel */
+        int f = rt->tf - (x - rt->tx) * 100 / PX_MHZ; /* the scale moves under a fixed needle */
         f = f < LO ? LO : f > HI ? HI : f;
-        if (f != rt->freq) rt->freq = f, tune();
+        rt_station *st = 0;
+        for (int i = 0; i < rt->n && !st; ++i)
+            if (rt->st[i].freq - f <= CAPTURE && f - rt->st[i].freq <= CAPTURE) st = &rt->st[i];
+        if (st) f = st->freq; /* the detent pulls a scrub in too */
+        if (f != rt->freq) rt->freq = f, click(st ? 14 : 5), tune();
         return 11; /* RET_STOP */
     }
     if (type == EVT_POINTER_UP_BEFORE) {
         rt->touch = 0;
         if (rt->screen == TUNER && !rt->moved) {
-            int f = rt->freq + (x - 187) * 10 / PX_MHZ;
+            int f = rt->freq + (x - 187) * 100 / PX_MHZ;
             rt_station *best = 0;
             for (int i = 0; i < rt->n; ++i) {
                 int d = rt->st[i].freq - f;
                 if (d < 0) d = -d;
-                if (d <= 1 && (!best || d < (best->freq > f ? best->freq - f : f - best->freq)))
+                if (d <= TAP_SNAP &&
+                    (!best || d < (best->freq > f ? best->freq - f : f - best->freq)))
                     best = &rt->st[i];
             }
-            f = best ? best->freq : f - ((f - LO) % 2 + 2) % 2;
+            f = best ? best->freq : f;
             rt->freq = f < LO ? LO : f > HI ? HI : f;
             tune();
         } else if (rt->screen == LIST && !rt->moved) {
@@ -829,6 +1002,8 @@ static void audio_halt(void) {
 
 static int closed(void *ctx, void *event) {
     stop_timer(&rt->anim), stop_timer(&rt->land), stop_timer(&rt->warm), stop_timer(&rt->leave);
+    stop_timer(&rt->marq);
+    if (rt->raw && wheel_raw == WHEEL_RAW) wheel_raw = WHEEL_TICKS; /* the wheel's ticks back */
     audio_halt();
     if (rt->sock > 0) close(rt->sock);
     free(rt);
@@ -853,7 +1028,7 @@ int tuner_open(void *ctx, void *event) {
     widget_on(rt->sheet, EVT_POINTER_DOWN, touch, 0);
     widget_on(page, EVT_POINTER_MOVE_BEFORE, touch, 0);
     widget_on(page, EVT_POINTER_UP_BEFORE, touch, 0);
-    rt->freq = 931, rt->playing = 1, rt->feed = -1, rt->sock = -1;
+    rt->freq = 9310, rt->playing = 1, rt->feed = -1, rt->sock = -1;
     headset_manual();
     spot_yield(); /* librespot, Internet Radio and the player hold the output too */
     radio_stop();

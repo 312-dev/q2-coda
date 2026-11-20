@@ -1,4 +1,5 @@
-/* Radio's receiver's decisions and the dial's click (tuner_core.h, docs/internals.md#radio-static). */
+/* Radio's receiver's decisions and the dial's click (tuner_core.h, docs/internals.md#radio-static).
+ */
 #include "tuner_core.h"
 
 double exp(double), sin(double), cos(double); /* libm, as fmrx.c's: no system headers on the Q2 */
@@ -53,7 +54,8 @@ void tuner_click_mix(tuner_click *c, float *out, int frames) {
         }
         float y = c->b0 * x + c->b1 * c->x1 + c->b2 * c->x2 - c->a1 * c->y1 - c->a2 * c->y2;
         c->x2 = c->x1, c->x1 = x, c->y2 = c->y1, c->y1 = y;
-        if (c->left <= 0 && y * y < 1e-14f && c->y2 * c->y2 < 1e-14f) c->y1 = c->y2 = 0; /* rung out */
+        if (c->left <= 0 && y * y < 1e-14f && c->y2 * c->y2 < 1e-14f)
+            c->y1 = c->y2 = 0; /* rung out */
         out[2 * i] += c->gain * y, out[2 * i + 1] += c->gain * y;
     }
 }
