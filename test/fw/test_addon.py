@@ -41,7 +41,7 @@ class App(C.Structure):
                                          'lyrics', 'covers', 'resume')),
                 ('dl', C.c_char * 32), *((n, C.c_int) for n in ('sync', 'sync_pm')),
                 *((n, C.c_uint) for n in ('polled', 'launch_at', 'restart_at', 'play')),
-                ('reach', C.c_int), ('srverr', C.c_char * 24)]
+                ('reach', C.c_int), ('srverr', C.c_char * 24), ('offline', C.c_int)]
 
 
 class Ap(C.Structure):

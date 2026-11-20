@@ -64,7 +64,7 @@ void toast_icon(const char *glyph, const char *text) {
  * USB's and charging's. glyph is a theme image's name without the art prefix; the last one asked
  * for wins. Dropped while the screen is dark. */
 static struct {
-    char glyph[32], text[48];
+    char glyph[32], text[96]; /* a card app's Sync Offline answer names an album (addon.c) */
 } later __attribute__((section(".scratch")));
 void toast_later(const char *glyph, const char *text) {
     tk_snprintf(later.glyph, sizeof later.glyph, "%s", glyph ? glyph : "");

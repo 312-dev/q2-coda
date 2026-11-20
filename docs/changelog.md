@@ -1,6 +1,7 @@
 # Changelog
 
 - **Unreleased (q2-coda)**:
+  - Library: hold **Play/Pause** on a song, album, artist or playlist from your music server, or open Now Playing's **⋯**, and choose **Sync Offline** to have the Subsonic app download it at the next Sync (**Stop Syncing Offline** once chosen); the Q2 says what it did ("Syncing offline · 12 songs"). Needs a Subsonic app that offers it.
   - Library: while the Subsonic app is signed in, your server's songs, albums, artists and playlists are always in the Library, Cover Flow and Search beside the card's, grayed while they can't play; sign out and they leave. The **Streaming Songs** switch in **Settings > Playback > Library** is gone, and a setting saved before is ignored.
   - Subsonic: when your music server can't be reached (no answer, or a proxy answering 502 for a server that is down), the Q2 now says so: a toast with a crossed-out cloud, "Server error 502", "Server not answering" or "Server not found", when it goes and for each song skipped because of it, and a crossed-out orange cloud in the status row, first after the clock, until the server answers again. Needs a Subsonic app that reports it (its next release); the one built in now shows nothing new.
   - Status row (OLED): the clock now stays in the middle on every page, with the page's name ending before it; when more icons show than fit between the clock and the battery, they scroll slowly instead of pushing the clock aside, fading at an edge where an icon is cut off.

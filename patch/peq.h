@@ -455,6 +455,7 @@ int addon_wake(const char *id), addon_ready(const char *id);
  * how far */
 int addon_sync(int *permille);
 int addon_offline(void); /* a running app's server out of reach (status_row.c) */
+int addon_offline_ok(const char *id), addon_offline_ask(const char *id, int add, const char *key);
 /* addon.c's card games (q2app game=1), Games' rows after its own: how many (a scan), one's name,
  * its start over the screen (1 when it runs), whether one runs, and ringnav_input's events for it
  */
@@ -539,6 +540,10 @@ void catalogue_attach(void **slot), catalogue_attach_db(void *db), catalogue_pol
 void catalogue_card_away(void);
 void catalogue_rated(void *r, int stars), catalogue_liked(void *r, int on);
 int catalogue_signed(char *id, char *name, unsigned size); /* a catalogue app signed in */
+/* catalogue.c: a Library item's server identity for Sync Offline (offline.c), by OFF_* kind */
+enum { OFF_SONG = 1, OFF_ALBUM, OFF_ARTIST, OFF_PLAYLIST };
+int catalogue_offline_key(int kind, void *r, int list, char *app, char *key, unsigned n);
+void offline_np_row(void *win, void *view); /* offline.c: Now Playing's ⋯ row */
 /* cf_empty.c: Cover Flow's page with no albums, by what is missing; 0 under a theme without it */
 int cf_empty(void *page, void *body);
 /* library_settings.c: the server library's state for card apps (/tmp/q2-addon.library): always

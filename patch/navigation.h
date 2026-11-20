@@ -392,6 +392,11 @@ int clock_due(const void *info);
 int bar_repaint(const void *info);
 void clock_text(void *label, int negative, int t);
 void *list_row(void *view, const char *icon, int (*click)(void *, void *), void *ctx);
+/* offline.c: Sync Offline's row for a Library item (OFF_* kind, peq.h), its symbol and its press;
+ * Now Playing's ⋯ row is peq.h's offline_np_row */
+const char *offline_row(int kind, void *r, int list), *offline_icon(void);
+void offline_press(void);
+int offline_state(const char *app, const char *key);
 void *list_row_core(void *view, const char *icon, int (*click)(void *, void *), void *ctx, int w,
                     int into);
 int media_find(int kind, char *path);

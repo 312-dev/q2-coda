@@ -2131,6 +2131,60 @@ done:
     if (db) sqlite3_close(db);
 }
 
+/* ---- Sync Offline (docs/internals.md#sync-offline) ---- */
+
+/* What a Library item is on its server, for its app's Sync Offline (offline.c): its app's id into
+ * app (16 bytes) and "<kind> <id>" into key (n bytes), 1; 0 for an item no signed-in server has.
+ * kind OFF_SONG: the record r, a server row or a card file linked to one, by its sid; OFF_ALBUM: an
+ * album list's record, by the album id in the path of one of its server rows (cat/<album>/<sid>),
+ * a row whose album and album artist (or artist) are r's; OFF_ARTIST: an artist list's record, by
+ * name ("artistname <name>"), when a server row has that artist or album artist; OFF_PLAYLIST:
+ * stock's playlist list (0 to 99), a server playlist by its id (cat.serverlists). */
+int catalogue_offline_key(int kind, void *r, int list, char *app, char *key, unsigned n) {
+    *app = *key = 0;
+    if (!catalogue_has()) return 0;
+    if (kind == OFF_PLAYLIST) {
+        void *db = 0;
+        pls_t pl = { "", "" };
+        char sql[96];
+        if (list < 0 || list >= 100 || stock_db_open("/mnt/data/database.db", &db)) return 0;
+        tk_snprintf(sql, sizeof sql, "select app,pid from cat.serverlists where list=%d", list);
+        sqlite3_exec(db, sql, pls_one, &pl, 0);
+        sqlite3_close(db);
+        if (!pl.app[0] || !pl.pid[0]) return 0;
+        tk_snprintf(app, 16, "%s", pl.app);
+        tk_snprintf(key, n, "playlist %s", pl.pid);
+        return 1;
+    }
+    if (!r) return 0;
+    const cat_ent *e = 0;
+    if (kind == OFF_SONG) {
+        if (!(e = cat_lookup(P(r, REC_PATH))) || e->app >= cat.napps) return 0;
+        tk_snprintf(key, n, "song %s", ix_str(&cat.ix, e->sid));
+    } else {
+        const char *name = P(r, kind == OFF_ALBUM ? REC_ALBUM : REC_ARTIST);
+        unsigned h = group_hash(name), by = kind == OFF_ALBUM ? group_hash(P(r, REC_ARTIST)) : 0;
+        for (unsigned i = 0; h && i < cat.ix.n && !e; ++i) {
+            const cat_ent *c = &cat.ix.e[i];
+            if (c->dup || c->app >= cat.napps) continue;
+            if (kind == OFF_ALBUM ? c->grp[0] == h && (!by || c->grp[1] == by || c->grp[2] == by)
+                                  : c->grp[1] == h || c->grp[2] == h)
+                e = c;
+        }
+        if (!e) return 0;
+        if (kind == OFF_ARTIST)
+            tk_snprintf(key, n, "artistname %s", name);
+        else { /* the album id: the path's folder under cat/ */
+            const char *path = ix_str(&cat.ix, e->path), *at = strstr(path, "/cat/"),
+                       *end = at ? strstr(at + 5, "/") : 0;
+            if (!end || end == at + 5) return 0;
+            tk_snprintf(key, n, "album %.*s", (int)(end - at - 5), at + 5);
+        }
+    }
+    tk_snprintf(app, 16, "%s", cat.app[e->app].id);
+    return 1;
+}
+
 /* ---- Ratings (docs/server-library.md#ratings-and-favorites) ---- */
 
 /* A song's stars or like changed on the Q2: a line ("stars=N" or "like=0|1") to each app with

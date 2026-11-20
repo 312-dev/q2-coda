@@ -1261,8 +1261,12 @@ page, On-The-Go) and `patch/add_songs.c`.
   hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
-  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), then Go to Album, Go to Artist and Go to
-  Folder. Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), Sync Offline (a song
+  from a signed-in server; Stop Syncing Offline once chosen, `cloud-arrow-down` and `cloud-slash`), then Go to Album, Go to
+  Artist and Go to Folder. An album's and an artist's hold menu have Sync Offline after their own rows, a server
+  playlist's before Rename and Delete, and Now Playing's ⋯ has it for the song playing; none while the app syncs its
+  Entire Library ([internals](internals.md#sync-offline)). The app toasts its answer: "Syncing offline · 12 songs",
+  "Stopped syncing offline", "Offline via Entire Library" (the user's, 2026-11-19). Add to Playlist… is a picker in the same panel: New Playlist (`plus`) first, which makes
   "New Playlist N" with the song in it (renamed later from its own hold), then the playlists; a
   pick adds at once and toasts "Added to name" ("Already in name").
 

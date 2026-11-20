@@ -354,7 +354,7 @@ MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart
               'vinyl-record', 'microphone-stage', 'folder', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
-              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play')
+              'caret-up', 'caret-down', 'check', 'sliders-horizontal', 'info', 'sneaker-move', 'play', 'cloud-slash')
 PAIR_ICON_PX = 16  # an artist's or album's page's action pair (artist_page.c PAIR_ICON)
 BUMP_PX = 16  # Up Next's bump arrow (upnext.c)
 BUMP_INKS = inks('tertiary', 'd', 'l', 'w')

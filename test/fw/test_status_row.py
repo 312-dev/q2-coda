@@ -499,7 +499,7 @@ def test_a_server_out_of_reach_shows_the_offline_glyph_first_after_the_clock(fw,
 
 
 class Later(C.Structure):
-    _fields_ = [('glyph', C.c_char * 32), ('text', C.c_char * 48)]
+    _fields_ = [('glyph', C.c_char * 32), ('text', C.c_char * 96)]
 
 
 @pytest.mark.parametrize('raw, toast', [(b'\nreach=down 502\nsrverr=1700000000 502\n', b'Server error 502'),

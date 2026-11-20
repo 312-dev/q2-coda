@@ -124,6 +124,7 @@ typedef struct {
     unsigned polled, launch_at, restart_at, play; /* play: its .play as read last, hashed */
     int reach;       /* its state file's reach=down: its server out of reach (addon_offline) */
     char srverr[24]; /* its srverr= as read last: the server failure toasted last (reach_read) */
+    int offline;     /* q2app's offline=1: it syncs a Library item offline (addon_offline_ask) */
 } app_t;
 
 static struct {
@@ -244,6 +245,7 @@ static void scan_one(const char *id, const char *from) {
     a->radio = number(raw, "radio") == 1;
     a->lyrics = number(raw, "lyrics") == 1;
     a->covers = number(raw, "covers") == 1;
+    a->offline = number(raw, "offline") == 1;
     a->resume = number(raw, "resume") == 1;
     field(raw, "downloads", a->dl, sizeof a->dl);
     for (char *c = a->dl; *c; ++c) /* a Windows editor's line end; one folder, no path */
@@ -1269,6 +1271,7 @@ static void sleep_check(void) {
  * one stopped for USB storage starts again once the card is back. */
 static void sync_read(app_t *a, const char *raw);
 static void reach_read(app_t *a, const char *raw);
+static void offline_read(app_t *a, const char *raw);
 static void poll_one(app_t *a) {
     unsigned now = time_now_ms();
     if ((!a->launched && !a->relaunch && !a->restart) || now - a->polled < ADDON_POLL_MS) return;
@@ -1291,6 +1294,7 @@ static void poll_one(app_t *a) {
     if (a->hold) reset_poweroptions_timer(1, 1, 0); /* standby, auto power-off; not the screen's */
     sync_read(a, raw);
     reach_read(a, raw);
+    offline_read(a, raw);
     stream_poll(a);
     sleep_read(a);
     if (access(a->pid, 0) && now - a->launch_at > ADDON_START_MS)
@@ -1363,6 +1367,61 @@ static void reach_read(app_t *a, const char *raw) {
         return;
     toast_later("srvtoast", text);
 }
+/* Sync Offline (docs/internals.md#sync-offline): offline.c's press on a Library item asks the
+ * item's app, "<seq> <add|remove> <kind> <id>" in /tmp/q2-<id>.offline, written only once the app
+ * listens (its browse socket there: an app reads a request present at its start as answered), the
+ * app started first when it isn't running (addon_wake). Its answer, offlineack=<seq> <words> in its
+ * state file, is toasted (offline_read); none in OFF_WAIT_MS is "<name> didn't answer". One request
+ * at a time: a press while one waits replaces it. */
+#define OFF_WAIT_MS 25000
+static struct {
+    char id[APP_ID], line[300];
+    unsigned seq, at; /* at: when it was pressed; 0 with none waiting */
+    int sent;
+} off __attribute__((section(".scratch")));
+static void offline_send(app_t *a) {
+    if (!off.at || off.sent || strcmp(a->id, off.id) || access(a->browse, 0)) return;
+    char path[48], text[sizeof off.line + 16];
+    tk_snprintf(path, sizeof path, "/tmp/q2-%s.offline", a->id);
+    int n = tk_snprintf(text, sizeof text, "%u %s\n", off.seq, off.line);
+    off.sent = blob_io(path, "/tmp/q2-offline.tmp", text, (unsigned)n, 1);
+}
+/* 1 when id takes Sync Offline (its q2app's offline=1) */
+int addon_offline_ok(const char *id) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (a && !a->present) addon_scan();
+    return a && a->present && a->offline;
+}
+/* Asks id to sync key ("<kind> <id>") offline (add) or stop; 1 when the request is on its way. */
+int addon_offline_ask(const char *id, int add, const char *key) {
+    app_t *a = valid_id(id) ? slot(id) : 0;
+    if (!addon_offline_ok(id) || !key || !*key || addon_wake(id) < 0) return 0;
+    tk_snprintf(off.id, sizeof off.id, "%s", id);
+    tk_snprintf(off.line, sizeof off.line, "%s %s", add ? "add" : "remove", key);
+    off.seq = (unsigned)time((void *)0) * 8u + (off.seq + 1) % 8u, off.at = time_now_ms() | 1,
+    off.sent = 0;
+    offline_send(a);
+    return 1;
+}
+/* poll_one's part for Sync Offline: the waiting request sent once the app listens, and its answer
+ * toasted. */
+static void offline_read(app_t *a, const char *raw) {
+    if (!off.at || strcmp(a->id, off.id)) return;
+    offline_send(a);
+    char v[160], seq[16];
+    field(raw, "offlineack", v, sizeof v);
+    int k = tk_snprintf(seq, sizeof seq, "%u ", off.seq);
+    if (off.sent && !strncmp(v, seq, (unsigned)k) && v[k]) {
+        off.at = 0;
+        toast_later("", v + k);
+    } else if (time_now_ms() - off.at > OFF_WAIT_MS) {
+        char text[48];
+        off.at = 0;
+        tk_snprintf(text, sizeof text, "%s didn't answer", a->name[0] ? a->name : a->id);
+        toast_later("", text);
+    }
+}
+
 /* Whether a running app's server is out of reach and Wi-Fi is connected: the status row's
  * offline glyph. */
 int addon_offline(void) {
