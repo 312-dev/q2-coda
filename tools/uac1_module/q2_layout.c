@@ -23,6 +23,9 @@ OFF(ep_desc, struct usb_ep, desc);
 OFF(gadget_ep0, struct usb_gadget, ep0);
 OFF(gadget_speed, struct usb_gadget, speed);
 OFF(gadget_dev, struct usb_gadget, dev);
+OFF(gadget_max_speed, struct usb_gadget, max_speed);
+OFF(gadget_state, struct usb_gadget, state);
+OFF(dev_driver_data, struct device, driver_data);
 OFF(cdev_gadget, struct usb_composite_dev, gadget);
 OFF(cdev_req, struct usb_composite_dev, req);
 OFF(cdev_config, struct usb_composite_dev, config);
@@ -81,5 +84,9 @@ OFF(dev_id, struct device, id);
 OFF(module_init, struct module, init);
 OFF(module_exit, struct module, exit);
 SIZE(module, struct module);
+
+/* ep->maxpacket is a bit-field: build.py reads the load this makes */
+unsigned int q2_maxpacket(const struct usb_ep *ep) { return ep->maxpacket; }
+EXPORT_SYMBOL_GPL(q2_maxpacket);
 
 MODULE_LICENSE("GPL");

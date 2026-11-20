@@ -44,6 +44,13 @@ STOCK = {
     'q2_off_ep_ops': (0x8, 'usb_ep_queue 0x804ab5e0 lw $2, 0x8($4)'),
     'q2_off_ep_desc': (0x24, 'usb_ep_enable 0x804abb90 lw $5, 0x24($4)'),
     'q2_off_gadget_speed': (0x24, 'config_ep_by_speed_and_alt 0x804a4024 lw $2, 0x24($4)'),
+    'q2_off_gadget_max_speed': (0x28, 'maximum_speed_show 0x804ab8d4 lw $4, 0x28($2)'),
+    'q2_off_gadget_state': (0x34, 'usb_gadget_set_state 0x804ab6bc sw $2, 0x34($6)'),
+    'q2_off_gadget_dev': (0x40, 'g_audio_setup 0x804beec4-0x804beee4: snd_card_new(gadget + 0x40, ...)'),
+    'q2_off_dev_driver_data': (0x40, 'composite_setup 0x804a5658 lw $16, 0x80($4): the gadget dev\'s driver_data'),
+    'q2_off_gadget_ep0': (0x18, 'composite_setup 0x804a56b0 lw $3, 0x18($9); 0x804a56b4 sw $16, 0x0($3)'),
+    'q2_off_cdev_req': (0x4, 'composite_setup 0x804a5668 lw $20, 0x4($16)'),
+    'q2_off_config_cdev': (0x1c, 'afunc_setup 0x804bffcc lw $22, 0x1c($8)'),
     'q2_off_func_fs_descriptors': (0x8, 'usb_assign_descriptors 0x804a3b78 sw $2, 0x8($16)'),
     'q2_off_func_hs_descriptors': (0xc, 'usb_assign_descriptors 0x804a3bf4 sw $2, 0xc($16)'),
     'q2_off_func_ss_descriptors': (0x10, 'usb_assign_descriptors 0x804a3c14 sw $2, 0x10($16)'),
@@ -141,6 +148,18 @@ def tree(work):
         # Malta offers no suspend with SMP (no CPU hotplug), and without PM_SLEEP struct device is smaller than the
         # Q2's, which moves struct snd_pcm's private_data (two struct devices sit before it). Only this throwaway tree
         # is changed, to lay the structures out; nothing from it runs but the module.
+    # Shanling's struct usb_gadget has two more 32-bit fields after max_speed (upstream 5.12's ssp_rate and
+    # max_ssp_rate, where they sit): stock usb_gadget_set_state stores state at 0x34 (0x804ab6bc), and g_audio_setup
+    # passes snd_card_new the gadget's dev at 0x40 (0x804beee4). Without them the module's dev was at 0x38, and
+    # snd_card_register oopsed on a parent that was no device (the desk, 2026-11-20). Unread by the module.
+    g = src/'include/linux/usb/gadget.h'
+    field = '\tenum usb_device_speed\t\tmax_speed;\n'
+    pad = field + '\tunsigned int\t\t\tq2_ssp_rate, q2_max_ssp_rate; /* tools/uac1_module/build.py */\n'
+    text = g.read_text()
+    if pad not in text:
+        if text.count(field) != 1:
+            sys.exit('build.py: include/linux/usb/gadget.h has no single max_speed field to pad after')
+        g.write_text(text.replace(field, pad))
     k = src/'arch/mips/Kconfig'
     gate = 'config ARCH_SUSPEND_POSSIBLE\n\tdef_bool y\n\tdepends on SYS_SUPPORTS_HOTPLUG_CPU || !SMP\n'
     text = k.read_text()
@@ -274,6 +293,13 @@ def main(argv):
     else:
         print(f'skip  symbol checks: no {a.vmlinux}')
     lay = layout(mod/'q2_layout.ko')
+    # ep->maxpacket, a bit-field offsetof cannot name: the halfword q2_layout.c's reader loads (stock
+    # usb_ep_set_maxpacket_limit 0x804ab334: sh $5, 0x1a($4))
+    dis = subprocess.run([ENV['TC'] + '/bin/mipsel-linux-gnu-objdump', '-d', str(mod/'q2_layout.ko')], check=True,
+                         capture_output=True, text=True,
+                         env={'LD_LIBRARY_PATH': ENV['TC'] + '/root/usr/lib/x86_64-linux-gnu'}).stdout
+    body = dis[dis.index('<q2_maxpacket>:'):].split('\n\n')[0]
+    check('lhu' in body and ',26(' in body, 'ep->maxpacket read as the halfword at 0x1a, as stock writes it')
     wrong = [f'{k} {lay.get(k, -1):#x}, stock {v:#x} ({why})' for k, (v, why) in STOCK.items() if lay.get(k) != v]
     check(not wrong, f'{len(STOCK)} offsets agree with the stock kernel\'s code' + ('; ' + '; '.join(wrong) if wrong else ''))
     print(f'module: {ko} ({ko.stat().st_size} bytes)')

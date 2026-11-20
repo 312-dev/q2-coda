@@ -95,7 +95,7 @@ A real iPhone's configuration 2 is USB Audio Class 1, and the stock kernel has o
 - `struct module` is 0x180 bytes with `init` at 0xe0 and `exit` at 0x16c, as in `soc_aic.ko`;
 - each of the 46 symbols the module needs is a `__ksymtab_` name of the stock kernel;
 - the module exports nothing the kernel does;
-- 39 offsets and sizes in `q2_layout.ko` equal those read in the stock kernel's own code, each with the instruction it came from (`STOCK` in `build.py`).
+- 46 offsets and sizes in `q2_layout.ko` equal those read in the stock kernel's own code, each with the instruction it came from (`STOCK` in `build.py`), and `ep->maxpacket` is loaded as the halfword stock writes.
 
 The stock kernel's symbols come from `vmlinux-to-elf` on `~/q2-emu/audit/kernel/vmlinux.bin`, the same #303 build the Q2 runs.
 
@@ -111,6 +111,8 @@ What the stock kernel was read to have, and what each changes:
 | `snd_pcm_substream_proc_hw_params_read`; no xrun debug or OSS | `SND_VERBOSE_PROCFS` | `struct snd_pcm_str` |
 
 The check was shown to fail: with `DMA_CMA` dropped, `dev->id` moved to 0x1c8 against the stock 0x1cc and the build failed (padding kept `pcm->private_data` where it was, so that row alone would not have caught it). The stock `uac_pcm_ops` table has the module's slot order (open, close, prepare, trigger, pointer at slots 0, 1, 5, 6, 8).
+
+**At the desk (2026-11-20): the first two binds oopsed.** The module loaded and its function took its attributes, but the bind (the write of the controller's name to `UDC`) ended in an oops in `snd_card_register`: `device_add` found the card's parent no device (`kobject_get` warned, `kobject_namespace` faulted at `0x78bc`), and the writer was killed holding the gadget's lock, so every later gadget call, `q2guard`'s included, waited for ever and the Q2 needed a restart. The first try looked like a hang; `uac1-steps.sh` (each step synced to the card, the stacks of a blocked step dumped) showed the bind's exit 139 and the oops. The cause: Shanling's `struct usb_gadget` has two more 32-bit fields after `max_speed` (where upstream 5.12 put `ssp_rate` and `max_ssp_rate`), so `state` is at 0x34 and `dev` at 0x40, where 5.10.21's header puts them at 0x2c and 0x38; the module passed `snd_card_new` the gadget plus 0x38 as the card's parent. That offset had been printed by `q2_layout.ko` but was not among the stock-checked rows. `build.py` now adds the two fields in its throwaway tree's `gadget.h`, and checks 46 offsets against stock code, among them `gadget->dev`, `state`, `max_speed`, `ep0`, the gadget dev's `driver_data`, `cdev->req`, `config->cdev`, and `ep->maxpacket` from the compiled load (a bit-field); without the two fields it fails on `state` and `dev`. Every field of a kernel structure the module's two source files use is now one of the rows.
 
 **Not yet tested:** loading it. The risks left are code, not layout: Shanling may have changed composite or the dwc2 driver in ways that only running the function shows, the controller's FIFOs are sized for its own gadgets, and only the fields the kernel's code was seen to touch were checked. A crash costs a restart, nothing is flashed. At the desk, with the Q2 on USB:
 
