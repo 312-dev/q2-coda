@@ -1414,14 +1414,27 @@ def test_now_playings_menu_offers_its_folder_and_more_and_no_rate(hold, recs, ui
     assert hold.menu() == PLAYING_ROWS[:7] + ['Go to Folder'] + PLAYING_ROWS[7:] + ['More…']
 
 
-def test_a_favourite_reads_remove(hold, recs, ui, st):
+def test_a_favourite_reads_unfavorite(hold, recs, ui, st):
     hold.now_playing([song(recs, i) for i in range(3)])
     st('rate_win', C.c_void_p).value = hold.page
     hold.fw.mock('checkFavExist', lambda *_: 1)
     hold.hold()
     rows = hold.menu()
-    assert 'Remove from Favorites' in rows and 'Add to Favorites' not in rows
+    assert 'Unfavorite' in rows and 'Add to Favorites' not in rows
     assert not [r for r in rows if r.startswith('Rate')]
+
+
+@pytest.mark.parametrize('fav, icon', [(1, 'heart-fill'), (0, 'heart')])
+def test_a_favourites_row_shows_the_filled_heart(hold, recs, ui, st, fav, icon):
+    """The user's (2026-11-20, sync-heart-1120/menu-heart-*.png): Unfavorite's symbol is Phosphor's heart (fill), drawn in
+    Favorite pink-red and white on the bar (tools/art.py menu_heart-fill_*); the row to add one keeps the outline."""
+    hold.now_playing([song(recs, i) for i in range(3)])
+    hold.fw.mock('checkFavExist', lambda *_: fav)
+    hold.hold()
+    hold.menu()
+    icons = {ui.label(item): ui.nodes[item].props.get('_mm_icon') for item in ui.kids(hold.view())}
+    row = [r for r in icons if r in ('Favorite', 'Add to Favorites', 'Unfavorite')]
+    assert len(row) == 1 and icons[row[0]] == icon and (row[0] == 'Unfavorite') == bool(fav), icons
 
 
 def test_go_to_is_left_out_where_its_page_is_open(hold, recs, ui):
@@ -1481,15 +1494,15 @@ def test_remove_from_favourites_untags_the_song(hold, recs, ui, fw):
     fw.mock('checkFavExist', lambda *_: 1)
     hold.hold()
     hold.menu()
-    hold.pick('Remove from Favorites')
+    hold.pick('Unfavorite')
     assert [a[0] for _, a in fw.calls('deleteMusicFromFav')] == [songs[1]] and fw.var('g_delete_flag', C.c_ubyte).value == 0
 
 
-@pytest.mark.parametrize('row, state', [('Add to Favorites', b'1'), ('Remove from Favorites', b'0')])
+@pytest.mark.parametrize('row, state', [('Add to Favorites', b'1'), ('Unfavorite', b'0')])
 def test_a_favourite_from_the_menu_is_told_to_the_song_s_card_app(hold, recs, fw, row, state):
     """A song in a card app's favdir (q2-jellyfin's synced Jellyfin): the row's My Fav change goes to its fav.log."""
     hold.now_playing([recs(path=f'/mnt/mmc/Jellyfin/{i}.flac', title=f'Song {i}') for i in range(3)])
-    fw.mock('checkFavExist', lambda *_: row.startswith('Remove'))
+    fw.mock('checkFavExist', lambda *_: row == 'Unfavorite')
     favdir_card(fw, hold.card.files)
     hold.hold()
     hold.menu()
@@ -1539,11 +1552,11 @@ def test_oled_says_what_an_in_place_action_did(hold, recs, ui, st, row, said):
 
 # OLED's inset modal names the rows in US English, as its toasts do
 @pytest.mark.parametrize('row, said', [('Add to Favorites', 'Added to Favorites'),
-                                       ('Remove from Favorites', 'Removed from Favorites')])
+                                       ('Unfavorite', 'Removed from Favorites')])
 def test_oled_says_a_favourite_was_kept(hold, recs, ui, fw, st, row, said):
     use_set(st)
     hold.now_playing([song(recs, i) for i in range(3)])
-    fw.mock('checkFavExist', lambda *_: row.startswith('Remove'))
+    fw.mock('checkFavExist', lambda *_: row == 'Unfavorite')
     hold.hold()
     hold.menu()
     hold.pick(row)
@@ -2095,7 +2108,7 @@ def test_my_favs_remove_reloads_my_fav(hold, recs, ui, fw):
     fw.mock('checkFavExist', lambda *_: 1)
     hold.hold()
     hold.menu()
-    hold.pick('Remove from Favorites')
+    hold.pick('Unfavorite')
     assert fw.var('g_delete_flag', C.c_ubyte).value == 1  # My Fav reloads, as Now Playing's heart
 
 
@@ -2125,7 +2138,7 @@ def test_an_albums_favourite_is_kept_for_its_next_menu(hold, recs, ui):
     assert not ui.toasts and '/mnt/data/ringnav-album-ratings' in hold.card.files
     hold.hold()
     rows = hold.menu()
-    assert 'Remove from Favorites' in rows and not [r for r in rows if r.startswith('Rate')]
+    assert 'Unfavorite' in rows and not [r for r in rows if r.startswith('Rate')]
 
 
 @pytest.mark.parametrize('sel, opened', ((1, [2]), (0, [])))  # 2: DISPLAY_COVERFLOW
@@ -3221,11 +3234,11 @@ def test_song_order_takes_the_sort_pickers_order_on_the_title_order(fw, st, recs
     assert titles() == 'DBAC'
 
 
-@pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 1), ('library', 'Remove from Favorites', 0),
-                                                ('playing', 'Add to Favorites', 1), ('playing', 'Remove from Favorites', 0)])
+@pytest.mark.parametrize('where, row, hearts', [('library', 'Favorite', 1), ('library', 'Unfavorite', 0),
+                                                ('playing', 'Add to Favorites', 1), ('playing', 'Unfavorite', 0)])
 def test_a_favourite_from_the_menu_on_a_server_song_goes_to_its_server(fw, ui, st, recs, mcl, tmp_path, row, hearts,
                                                                        where):
-    """Add to and Remove from Favorites on a server song, its Library row or its Stream Cache copy on Now Playing,
+    """Add to Favorites and Unfavorite on a server song, its Library row or its Stream Cache copy on Now Playing,
     write the song's ratings.out line as Now Playing's heart does: the row's key and sid, like=1 or like=0, its
     kept stars left as they were. Remove on the copy takes the row out of My Fav too, where a star from the server
     put it."""

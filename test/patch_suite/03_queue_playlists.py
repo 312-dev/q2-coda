@@ -681,7 +681,7 @@ def menu(m,setup=None):
     m.press(5); assert m.hold()==11; t=m.nodes[m.title]['text']; got=m.labels(); m.release(); return t,got
 GROUP=['Play Next','Play Last','Shuffle','Add to Playlist']
 for kw,setup,want in (({},None,('Row 0',SONG_MENU)),
-        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:4],'Remove from Favorites',*SONG_MENU[5:]])),
+        ({},lambda m:m.favs.add('Row 0'),('Row 0',[*SONG_MENU[:4],'Unfavorite',*SONG_MENU[5:]])),
         ({},lambda m:m.open_pages.update({'artistinfo_page','playerjumpinfo_page'}),('Row 0',SONG_MENU[:5])),
         ({'cls':0xff10,'page':'album_page'},None,('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
         ({},lambda m:m.word(m.row(0)+O['REC_ALBUM'],0),('Row 0',[*SONG_MENU[:5],'Go to Artist'])),
@@ -700,7 +700,7 @@ m=QueueMachine(); assert m.run('Favorite',steps=3)=='Added to Favorites' and m.n
 assert sel(m)==[('batch_init_selectrecord',20),('batch_set_selectitem',3),('batch_add_file',0xf001)]
 assert [c[2:] for c in m.calls if c[0]=='batch_add_file']==[(0xf00a,m.get(syms['p_deque_showlist']))]; passed()
 for cls,flag in ((0xf001,0),(0xf00a,1)):
-    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run('Remove from Favorites')=='Removed from Favorites'
+    m=QueueMachine(cls=cls); m.favs.add('Row 0'); assert m.run('Unfavorite')=='Removed from Favorites'
     assert [c[1] for c in m.calls if c[0]=='deleteMusicFromFav']==[m.row(0)] and m.u.mem_read(syms['g_delete_flag'],1)[0]==flag
     passed()
 # Add to Playlist, a song's or an album's, opens the menu sheet's playlist picker (playlists.c

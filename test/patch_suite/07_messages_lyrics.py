@@ -1305,7 +1305,7 @@ m.press(100); assert m.hold()==11 and m.release()==0 and m.nodes[m.title]['text'
 
 # Album favourites and ratings (ratings.c rate_*, coverflow.c album_id): a cover keeps 0-5 hearts of its own in
 # /mnt/data/ringnav-album-ratings by album_id, the low three bits its hearts, 5 its favourite and its songs My Fav's; songs'
-# ratings and the queue are untouched. Hold Play/Pause on a cover: Add/Remove from Favorites and Rate album, whose picker is Now
+# ratings and the queue are untouched. Hold Play/Pause on a cover: Add to Favorites or Unfavorite and Rate album, whose picker is Now
 # Playing's on Coverflow's page: the wheel moves it, Centre or a heart saves, Return leaves it as it was.
 ALBUM_RATES='/mnt/data/ringnav-album-ratings'
 class FileMocks:

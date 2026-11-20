@@ -364,7 +364,7 @@ TIDAL = ''.join(f'M{x - 3.3} {y}L{x} {y - 3.3}L{x + 3.3} {y}L{x} {y + 3.3}Z' for
 # The menu sheet's symbols (menu_modal.c, a set with modal): regular weight at MENU_ICON_PX in FOLDER_INKS, and the
 # picker's check in the accent off the bar
 MENU_ICON_PX = 19
-MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'heart-break', 'list-plus', 'shuffle',
+MENU_ICONS = ('funnel-simple', 'arrow-bend-down-right', 'queue', 'heart', 'list-plus', 'shuffle',
               'vinyl-record', 'microphone-stage', 'folder', 'clock-counter-clockwise', 'list-numbers',
               'bookmark-simple', 'dots-three', 'plus', 'list-checks', 'skip-forward', 'skip-back', 'repeat', 'stack',
               'airplay', 'download-simple', 'cloud-arrow-down', 'trash', 'speedometer', 'pencil-simple',
@@ -780,6 +780,9 @@ def images(t):
     # the menu sheet's symbols (menu_modal.c)
     out |= {f'{prefix}_menu_{n}_{k}': phosphor(n, MENU_ICON_PX, c) for n in MENU_ICONS for k, c in FOLDER_INKS.items()}
     out[f'{prefix}_menu_check_a'] = phosphor('check', MENU_ICON_PX, on)
+    # Unfavorite's heart (hold_menu.c, the user's 2026-11-20): filled in Favorite, as Now Playing's liked heart, both
+    # halves, and white on the selection as every symbol there
+    out |= {f'{prefix}_menu_heart-fill_{k}': phosphor('heart-fill', MENU_ICON_PX, c) for k, c in inks('favorite', 'd', 'l', 'w').items()}
     # an artist's Shuffle and Radio panels and an album's Play (artist_page.c pair_paint): the accent's top tone at rest, white lit
     out |= {f'{prefix}_pair_{n}_{k}': phosphor(n, PAIR_ICON_PX, c) for n in PAIR_ICONS for k, c in {'a': on, 'w': 0xffffff}.items()}
     out |= {f'{prefix}_quality_{k}': phosphor('waveform-bold', QUALITY_PX, c) for k, c in STATE_INKS.items()}

@@ -886,8 +886,8 @@ Shown for a moment after a mode change (Shuffle, Repeat).
   "Fully charged" (battery-full, green), "Low battery · 12%" under 20 % (battery-warning, red) and
   otherwise "Battery 62%" (battery-high, Text Primary). No time-left estimate.
 - Every in-place action says what it did in a toast: the hold menu's Play Next ("Playing Next"),
-  Play Last ("Playing Last") and Add to and Remove from Favorites ("Added to Favorites",
-  "Removed from Favorites").
+  Play Last ("Playing Last"), Favorite or Add to Favorites ("Added to Favorites") and Unfavorite
+  ("Removed from Favorites").
 
 ### Confirmation card
 
@@ -1293,7 +1293,9 @@ page, On-The-Go) and `patch/add_songs.c`.
   hint "Choose Add Songs to fill it". A hold on a song opens its
   hold menu with **Remove from On-The-Go** last. It lasts across a restart.
 - **A song's hold menu**: Play Next, Play Last (to the end of Up Next's Playing Next), Add to
-  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite (Remove from Favorites when it is one), Sync Offline (a song
+  On-The-Go (while On-The-Go is on), Add to Playlist…, Favorite with Phosphor `heart` in Text Secondary (Unfavorite when it is one, with
+  `heart-fill` in Favorite `#FF375F`, white on the bar: the user's, 2026-11-20, `sync-heart-1120/menu-heart-*.png`;
+  an album's and Now Playing's ⋯ menu say Add to Favorites and Unfavorite), Sync Offline (a song
   from a signed-in server; Stop Syncing Offline once chosen, `cloud-arrow-down` and `cloud-slash`), then Go to Album, Go to
   Artist and Go to Folder. An album's and an artist's hold menu have Sync Offline after their own rows, a server
   playlist's before Rename and Delete, and Now Playing's ⋯ has it for the song playing; none while the app syncs its

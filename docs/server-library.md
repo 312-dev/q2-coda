@@ -485,7 +485,7 @@ apart from each other, for server rows and for synced card files alike, whenever
   lists count as the row's. The other way round, a song starred on the server puts the row in My Fav, so
   Now Playing fills the copy's heart by the row (stock draws it from the copy's own path), and taking the
   heart away takes the row out (stock's toggle would put the copy in instead).
-- **From the queue menu:** Add to and Remove from Favorites on a song send a like line as Now Playing's
+- **From the queue menu:** Favorite and Unfavorite on a song send a like line as Now Playing's
   heart does, its stars left alone, for a Library row and for the playing copy alike; Remove on a copy
   takes its row out of My Fav too. An album's Add to Favorites sends a like line for each of its songs.
 - **Out:** each change on the Q2 is appended to `/mnt/mmc/.<id>/ratings.out` as one line

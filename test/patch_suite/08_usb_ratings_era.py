@@ -53,17 +53,17 @@ def bare_hold(m,row=None):
     m.t=7001; m.press(m.t); return m.hold(),m.release()
 assert bare_hold(QueueMachine(page='sysset_page'))==(0,1); passed()
 assert bare_hold(QueueMachine(page='folder_page'),0)==(0,1); passed()  # a row no menu holds, as a playlist file in Folder
-# Add, then Remove from Favorites: 5 hearts, then none; the other covers stay unrated.
+# Add to Favorites, then Unfavorite: 5 hearts, then none; the other covers stay unrated.
 def fav_calls(m,name): return [c for c in m.calls if c[0]==name]
 assert m.run(3) is None and m.kept()==[(a1&~7)|5] and [c[2] for c in fav_calls(m,'batch_add_file')]==[0xf00a] and not fav_calls(m,'deleteMusicFromFav')
-assert m.menu()[3]=='Remove from Favorites'
+assert m.menu()[3]=='Unfavorite'
 assert m.run(3) is None and m.kept()==[] and fav_calls(m,'deleteMusicFromFav') and not fav_calls(m,'batch_add_file')
 m.word(m.slide+O['SLIDE_INDEX'],0); assert m.menu()[3]=='Add to Favorites'
 m.word(m.slide+O['SLIDE_INDEX'],1); passed()
 # Kept across boots, apart from the songs' table.
 assert m.run(3) is None
 m2=AlbumRateMachine(files={ALBUM_RATES:m.files[ALBUM_RATES]}); m2.open(); m2.word(m2.slide+O['SLIDE_INDEX'],1)
-assert m2.menu()[3]=='Remove from Favorites' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
+assert m2.menu()[3]=='Unfavorite' and '/mnt/data/ringnav-ratings' not in m2.files; passed()
 # A full table and a failed write report it, the album as it was.
 full=b''.join(struct.pack('<I',(i+1)<<3|1) for i in range(O['RATE_SLOTS']))
 m=AlbumRateMachine(files={ALBUM_RATES:full}); m.open(); m.word(m.slide+O['SLIDE_INDEX'],1)
@@ -347,7 +347,7 @@ m=AlbumRateMachine(files={ALBUM_RATES:data}); menu_page=ratings_albums(m)
 m.page=m.top; m.slide=m.find('slide_menu'); assert m.page!=menu_page and m.nodes[m.page]['name']=='coverflow_page'
 def shown(m,i): m.word(m.slide+O['SLIDE_INDEX'],i); f,ctx=m.handler(m.slide,O['EVT_VALUE_CHANGED']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); return m.texts()[0]
 assert len(m.nodes[m.slide]['children'])==3 and [shown(m,i) for i in range(3)]==['Album 2','Album 0','Sort: Rating']
-shown(m,0); rows=m.menu(); assert rows[3]=='Remove from Favorites' and not [r for r in rows if r.startswith('Rate')]  # the cover's menu, as Coverflow's
+shown(m,0); rows=m.menu(); assert rows[3]=='Unfavorite' and not [r for r in rows if r.startswith('Rate')]  # the cover's menu, as Coverflow's
 f,ctx=m.handler(m.nodes[m.slide]['children'][2],O['EVT_CLICK']); m.call(address=f,args=(ctx,m.event,0,0),gap=0); m.advance(0)
 m.slide=m.find('slide_menu'); assert [shown(m,i) for i in range(3)]==['Album 0','Album 2','Sort: Album']
 assert [v for k,v in m.files.items() if k.endswith('ringnav-ratedsort')]==[struct.pack('<i',0)]; passed()
