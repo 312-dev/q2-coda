@@ -264,6 +264,17 @@ def main(argv):
     mod.mkdir(exist_ok=True)
     for f in SOURCES:
         shutil.copyfile(src/'drivers/usb/gadget/function'/f, mod/f)
+    # u_audio's PCM buffer from vmalloc: 5.10.21 asks ALSA for contiguous pages at each hw_params, 64 kB (order 4) for
+    # the player's buffer, and the stock kernel has no compaction to make such a block on a fragmented Q2 (128 MB, no
+    # swap). u_audio copies the samples with the CPU (memcpy into each request), so the buffer need not be
+    # contiguous. The stock kernel's ALSA has the type: snd_dma_alloc_pages calls __vmalloc (0x80597f90),
+    # snd_dma_free_pages vfree (0x8059806c), and snd_pcm_mmap_data_fault vmalloc_to_page for type 7 (0x8058f66c).
+    ua = mod/'u_audio.c'
+    call = '\tsnd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,\n\t\t\t\t       NULL, 0, BUFF_SIZE_MAX);'
+    text = ua.read_text()
+    if text.count(call) != 1:
+        sys.exit('build.py: u_audio.c has not the one snd_pcm_set_managed_buffer_all call 5.10.21 has')
+    ua.write_text(text.replace(call, call.replace('SNDRV_DMA_TYPE_CONTINUOUS', 'SNDRV_DMA_TYPE_VMALLOC')))
     for f in ('Kbuild', 'q2_rename.h', 'q2_layout.c'):
         shutil.copyfile(HERE/f, mod/f)
     run('make', '-s', '-C', src, f'M={mod}', 'modules')
