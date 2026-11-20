@@ -3,6 +3,7 @@
 - **Unreleased (q2-coda)**:
   - Now Playing (OLED): a server song's format badge shows only its format ("FLAC"), without the cloud before it.
   - Now Playing (OLED): the Favorite heart is smaller and turns pink-red when the song is a favorite, gray when it isn't, in its same place under the album.
+  - Songs: scrolling a long list with long artist names does less work per row, so it stutters less.
   - Lists: spinning the wheel fast through a long list (Songs, Albums, Artists, Genres) now jumps a whole letter at a time once you keep it up for about a second, with the letter shown beside the list, as an iPod did; slow down and it moves by rows again.
   - Songs: scrolled down, the list no longer shows a song above the Shuffle row, which made Shuffle look stuck floating over the list; Shuffle stays as the list's fixed header.
   - Cover Flow: while it loads a large library, Home no longer freezes. The wheel scrolls Home's menu, Return cancels the opening, and pressing into another menu (or a touch) cancels it and goes there straight away instead of jumping into Cover Flow later.
