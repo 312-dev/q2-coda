@@ -55,8 +55,8 @@ class Tuner:
         fw.mock('fw_access', lambda p, *_: 0 if C.string_at(p).decode() in self.files.files else -1)
         self.key_fn = fw.fn('tuner_key', C.c_int, C.c_void_p, C.c_uint)
         fw.fn('radio_tuner__list_read', C.c_int)()
-        self.signal, self.waking = 3, 0  # the status bar's Wi-Fi bars (-1: not connected); Smart Wi-Fi's wake
-        fw.mock('get_wifisignal', lambda *_: self.signal)
+        self.signal = 3  # stock's network monitor's connect status (0: no link)
+        fw.mock('networkGetConnectStatus', lambda *_: self.signal)
         fw.mock('fw_waitpid', lambda *_: 0)  # the receiver and any fetch still running
         self.poll_fn = fw.fn('tuner_poll', None)
 
@@ -277,7 +277,7 @@ def test_no_wi_fi_stands_until_the_link_is_back_and_then_the_station_is_started_
     rt.screen, rt.freq, rt.feed = TUNER, 931, 2
     tu.poll()
     assert rt.no_wifi == 0 and 'r' not in tu.sent
-    tu.signal = -1
+    tu.signal = 0
     for _ in range(20):  # 12 s without a link: it stays
         tu.poll()
         assert rt.no_wifi == 1

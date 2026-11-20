@@ -311,7 +311,7 @@ void tuner_poll(void) {
     }
     if (!rt) return;
     unsigned now = time_now_ms();
-    int status, lost = get_wifisignal() <= 0;
+    int status, lost = wifi_offline(); /* the network monitor's link, as the status row's (status_row.c) */
     if (lost !=
         rt->no_wifi) { /* "No Wi-Fi" up or down; back, a stream not sounding starts again at once */
         if (!lost) rt_send("r");
