@@ -611,5 +611,167 @@ def test_bmw_artwork(probe, tmp_path):
         stop(p, fd)
 
 
+# ---- Car Audio in the image (--state): what the host is, and the car's audio health ----
+
+def car_daemon(probe, tmp_path, *more, kinds=('ptp', 'hid', 'ptpmux', 'ptpmuxeth'), udc='default'):
+    """q2-iap as q2car.sh runs it: the four instances, the state file, the controller's state file; (process,
+    {kind: FakeFfs}, log, state, udc)."""
+    ffs, args = {}, []
+    for k in kinds:
+        ffs[k] = FakeFfs(tmp_path/k)
+        args.append(f'{ffs[k].path}:{k}')
+    log, state, udc_file = tmp_path/'q2car.log', tmp_path/'q2car.state', tmp_path/'udc'
+    udc_file.write_text(udc + '\n')
+    p = subprocess.Popen([probe, '--state', str(state), '--udc', str(udc_file), '--under', str(tmp_path/'under'),
+                          *more, str(log), *args])
+    for k in kinds:
+        d, st = blobs(probe, k)
+        assert ffs[k].read(len(d)) == d and ffs[k].read(len(st)) == st
+    return p, ffs, log, state, udc_file
+
+
+def verdict(state):
+    return dict(line.split('=', 1) for line in state.read_text().splitlines())
+
+
+@pytest.mark.parametrize('kind, setup, why', [
+    ('ptp', None, 'configuration 1'), ('ptpmux', None, 'configuration 3'), ('ptpmuxeth', None, 'configuration 4'),
+    ('ptp', (0xc0, 0x45, 0, 0, 4), "usbmux's C0 45"), ('ptp', (0x40, 0x51, 1, 0, 0), 'the role switch 40 51')])
+def test_a_computer_ends_it_at_once(probe, tmp_path, kind, setup, why):
+    """Windows with Apple's driver chose configuration 1 and sent C0 45 (the desk, 2026-11-19); a Mac or Linux picks a
+    configuration with PTP; wired CarPlay's role switch is nothing the Q2 can be. Each ends q2-iap with 20."""
+    p, ffs, log, state, _ = car_daemon(probe, tmp_path)
+    try:
+        if setup:
+            ffs[kind].setup(*setup)
+        else:
+            ffs[kind].event(ENABLE)
+        assert p.wait(5) == 20
+    finally:
+        p.kill()
+    v = verdict(state)
+    assert (v['verdict'], v['why'], v['host']) == ('computer', why, '1')
+    assert 'summary: host computer (' + why in log.read_text()
+
+
+def test_a_car_s_c0_53_keeps_it_but_a_computer_after_it_still_wins(probe, tmp_path):
+    p, ffs, log, state, _ = car_daemon(probe, tmp_path)
+    try:
+        ffs['ptp'].setup(0xc0, 0x53, 0, 0, 4)   # before a configuration: CONFIG0_SETUP's instance
+        assert ffs['ptp'].read(4) == bytes(4)
+        ffs['ptp'].setup(0x40, 0x40, 500, 1000, 0)  # Apple's charging request decides nothing
+        time.sleep(0.3)
+        assert p.poll() is None and verdict(state)['verdict'] == 'car' and verdict(state)['why'] == "Apple's C0 53"
+        ffs['ptp'].event(ENABLE)
+        assert p.wait(5) == 20
+    finally:
+        p.kill()
+    assert verdict(state)['verdict'] == 'computer'
+
+
+def test_after_the_detect_it_is_a_car_for_good(probe, tmp_path):
+    p, ffs, log, state, _ = car_daemon(probe, tmp_path, '--auto-ms', '300')
+    try:
+        ffs['hid'].event(ENABLE)
+        ffs['hid'].setup(0x21, 9, 0x020e, 2, 10, bytes.fromhex('0e00ff550200ee100000'))
+        time.sleep(0.3)
+        ffs['ptp'].event(ENABLE)
+        ffs['ptp'].setup(0xc0, 0x45, 0, 0, 4)
+        time.sleep(0.8)
+        assert p.poll() is None
+        assert verdict(state)['verdict'] == 'car' and verdict(state)['why'] == "iAP2's detect"
+    finally:
+        p.terminate()
+        p.wait(5)
+
+
+def test_a_host_that_asks_nothing_apple_s_is_let_go(probe, tmp_path):
+    """Addressed (the controller's state) and then nothing Apple's within --auto-ms: exit 21, a silent host."""
+    p, ffs, log, state, udc = car_daemon(probe, tmp_path, '--auto-ms', '400')
+    try:
+        time.sleep(0.6)
+        assert p.poll() is None and verdict(state)['host'] == '0', 'no host yet: a charger, nothing decided'
+        udc.write_text('addressed\n')
+        t = time.time()
+        assert p.wait(5) == 21
+        assert 0.3 < time.time() - t < 2.0
+    finally:
+        p.kill()
+    v = verdict(state)
+    assert v['verdict'] == 'silent' and v['why'] == "nothing Apple's in 400 ms" and v['host'] == '1'
+
+
+def test_configuration_2_waits_the_longer_car_window(probe, tmp_path):
+    """Only an iPod accessory chooses the iPod USB Interface; a car that does may be silent a while (OrangeCar's Jaguar,
+    22 to 27 s), so --car-ms, not --auto-ms."""
+    p, ffs, log, state, udc = car_daemon(probe, tmp_path, '--auto-ms', '300', '--car-ms', '1500', udc='configured')
+    try:
+        ffs['hid'].event(ENABLE)
+        time.sleep(0.8)
+        assert p.poll() is None
+        assert p.wait(5) == 21
+    finally:
+        p.kill()
+    assert verdict(state)['why'] == "nothing Apple's in 1500 ms on configuration 2"
+
+
+def test_the_car_s_audio_health(probe, tmp_path):
+    """Once the car asks for audio: flowing when the module's in_sent moves, dropouts when over 1% of a second's
+    packets were missed, underruns when the player's count moves, no sound when nothing was taken in 5 s; and the
+    session's summary with the counts since the start."""
+    counters = tmp_path/'params'
+    counters.mkdir()
+    (counters/'in_sent').write_text('1000\n')
+    (counters/'in_missed').write_text('7\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters),
+                                    '--under', str(tmp_path/'under'))
+    state = tmp_path/'state'
+    try:
+        time.sleep(1.2)
+        assert verdict(state)['verdict'] == 'car' and verdict(state)['name'] == 'BMW 83828'
+        car.send(message(0xDA00))
+        car.msg()
+        time.sleep(1.2)
+        (counters/'in_sent').write_text('2000\n')
+        time.sleep(1.2)
+        v = verdict(state)
+        assert (v['audio'], v['flowing'], v['trouble'], v['troubles']) == ('1', '1', '', '0')
+        (counters/'in_sent').write_text('2990\n')
+        (counters/'in_missed').write_text('17\n')       # 10 of 1000
+        time.sleep(1.2)
+        assert verdict(state)['troubles'] == '0', '1% is not over 1%'
+        (counters/'in_sent').write_text('3970\n')
+        (counters/'in_missed').write_text('37\n')       # 20 of 1000
+        time.sleep(1.2)
+        v = verdict(state)
+        assert (v['trouble'], v['troubles']) == ('dropouts', '1')
+        (counters/'in_sent').write_text('4970\n')
+        (tmp_path/'under').write_text('1\n')
+        time.sleep(1.2)
+        v = verdict(state)
+        assert (v['trouble'], v['troubles']) == ('underruns', '2')
+    finally:
+        stop(p, fd)
+    text = log.read_text()
+    assert 'summary: host car (iAP2\'s detect' in text and 'car "BMW 83828", identified yes' in text
+    assert 'in_sent 3970 in_missed 30 (0.7%), underruns 1, problems 2' in text
+
+
+def test_no_sound_when_the_car_asks_and_takes_nothing(probe, tmp_path):
+    counters = tmp_path/'params'
+    counters.mkdir()
+    (counters/'in_sent').write_text('5\n')
+    (counters/'in_missed').write_text('0\n')
+    p, car, fd, log, files = bmw_up(probe, tmp_path, '--state', str(tmp_path/'state'), '--counters', str(counters))
+    try:
+        car.send(message(0xDA00))
+        car.msg()
+        time.sleep(7.5)
+        v = verdict(tmp_path/'state')
+        assert (v['flowing'], v['trouble']) == ('0', 'nostream')
+    finally:
+        stop(p, fd)
+
+
 if __name__ == '__main__':
     sys.exit(pytest.main([__file__, '-q', *sys.argv[1:]]))

@@ -455,9 +455,11 @@ static void counters(unsigned *sent, unsigned *missed, unsigned *under) {
 }
 
 /* The state file, written whole at each change. */
+static char state_name[sizeof car_name]; /* the car's name as the state file has it */
 static void state_write(void) {
     char b[400];
     if (!state_file) return;
+    snprintf(state_name, sizeof state_name, "%s", car_name);
     int n = snprintf(b, sizeof b,
                      "verdict=%s\nwhy=%s\nms=%ld\nhost=%d\nname=%s\naudio=%d\nflowing=%d\ntrouble=%s\ntroubles=%d\n",
                      verdicts[verdict], why, verdict_ms, host_at >= 0, car_name, audio_on, flowing, trouble, troubles);
@@ -517,9 +519,9 @@ static void health_poll(long now) {
     if (!counted) counted = 1, sent0 = sent_last = sent, missed0 = missed_last = missed, under0 = under_last = under;
     unsigned ds = sent - sent_last, dm = missed - missed_last, du = under - under_last;
     sent_last = sent, missed_last = missed, under_last = under;
-    int changed = 0;
+    int changed = strcmp(state_name, car_name) != 0; /* identified since the last write */
     if (!audio_on) {
-        changed = flowing || *trouble;
+        changed |= flowing || *trouble;
         audio_at = -1, flowing = 0, trouble = "";
         if (changed) state_write();
         return;
