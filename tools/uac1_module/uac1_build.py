@@ -5,15 +5,16 @@
 
 Linux 5.10.21 from kernel.org (hash checked) is unpacked into --work (default ~/.cache/q2-uac1) without the other
 architectures, Documentation or most drivers' sources, configured as malta_defconfig plus q2.config, and prepared for
-modules; then this directory's Kbuild builds f_uac1.c with its own renamed u_audio.c. Needs mipsel-linux-gnu-gcc and
-binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison, bc.
+modules; then this directory's Kbuild builds f_uac1.c, with the two upstream commits in patches/ applied (PATCHES),
+and its own renamed u_audio.c. Needs mipsel-linux-gnu-gcc and binutils (Ubuntu: gcc-mipsel-linux-gnu), flex, bison,
+bc, patch.
 
 Checked, each printed: the vermagic is the stock modules'; struct module's size and the offsets of init and exit are
 --stock-module's (a vendor .ko, default ~/q2-emu/stockfs/module_driver/soc_aic.ko); every symbol the module needs is
 exported by the kernel (--vmlinux: the stock kernel turned into an ELF with symbols by vmlinux-to-elf, its __ksymtab_
 names); no symbol the module exports is one the kernel has. The field offsets of q2_layout.ko are printed for the
-disassembly check docs/iphone-mode.md describes. The kernel's own sources are not in this repository; the tarball is
-where they come from."""
+disassembly check docs/iphone-mode.md describes. The kernel's own sources are not in this repository, but for the two
+upstream commits in patches/; the tarball is where the rest come from."""
 import argparse
 import pathlib
 import shutil
@@ -30,6 +31,13 @@ VERMAGIC = '5.10.21+ SMP preempt mod_unload MIPS32_R5 32BIT '  # the trailing sp
 ARCHES = ['alpha', 'arc', 'arm', 'arm64', 'c6x', 'csky', 'h8300', 'hexagon', 'ia64', 'm68k', 'microblaze', 'nds32',
           'nios2', 'openrisc', 'parisc', 'powerpc', 'riscv', 's390', 'sh', 'sparc', 'um', 'x86', 'xtensa']
 SOURCES = ['f_uac1.c', 'u_audio.c', 'u_audio.h', 'u_uac1.h']
+# Linux commits applied to f_uac1.c, from patches/ (each upstream's own patch, unchanged). 254cb1e0d78c gives the
+# function no AS OUT interface when c_chmask is 0, so with capture off UAC1 takes interfaces 0 (control) and 1 (AS IN)
+# and a function linked after it starts at 2, as a real iPhone's HID does in configuration 2; 5.10.21's f_uac1.c
+# always took three, and the BMW's GET_DESCRIPTOR(HID) for interface 2 went to f_uac1, which stalled it
+# (docs/iphone-mode.md#the-uac1-module). a59c68a6a3d1 is the commit before it, which it needs to apply.
+PATCHES = ['0001-usb-gadget-f_uac1-validate-input-parameters.patch',  # a59c68a6a3d1
+           '0002-usb-gadget-f_uac1-disable-IN-OUT-ep-if-unused.patch']  # 254cb1e0d78c
 # Offsets and sizes read in the stock kernel's own code (vmlinux-to-elf of the #303 kernel, docs/iphone-mode.md#the-uac1-module),
 # each with the instruction it came from: q2_layout.ko must agree with every one.
 STOCK = {
@@ -266,6 +274,9 @@ def main(argv):  # pragma: no mutate block (all of the above)
     mod.mkdir(exist_ok=True)
     for f in SOURCES:
         shutil.copyfile(src/'drivers/usb/gadget/function'/f, mod/f)
+    # Upstream's own commits from 5.12, in order, on the module's copy of f_uac1.c (PATCHES)
+    for p in PATCHES:
+        run('patch', '-p5', '-F0', '--no-backup-if-mismatch', '-d', mod, '-i', HERE/'patches'/p)
     # u_audio's PCM buffer from vmalloc: 5.10.21 asks ALSA for contiguous pages at each hw_params, 64 kB (order 4) for
     # the player's buffer, and the stock kernel has no compaction to make such a block on a fragmented Q2 (128 MB, no
     # swap). u_audio copies the samples with the CPU (memcpy into each request), so the buffer need not be
