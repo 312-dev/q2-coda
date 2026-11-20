@@ -518,7 +518,7 @@ def test_more_apps_than_slots(fw):
 def test_the_features_are_published_at_every_scan(fw):
     world = card(fw)
     scan(fw)
-    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio ahead\n'
+    assert world.written[b'/tmp/q2-addon.caps.tmp'] == b'playlist progress pages library goto sleep game audio sections art window urls sort field more fav now catalogue ratings likes artist album playlists storage signin libsource radio status ahead\n'
     # the server library's state goes first (library_settings.c), so an app that reads libsource in the caps finds it
     assert world.of('rename') == [(b'/tmp/q2-addon.library.tmp', b'/tmp/q2-addon.library'),
                                   (b'/tmp/q2-addon.caps.tmp', b'/tmp/q2-addon.caps')]
@@ -6437,3 +6437,33 @@ def test_an_app_is_started_for_the_cars_cover_with_covers_1(fw, manifest, starte
     assert p.world.of('system') == []
     wake(b'foo')
     assert (p.world.of('system') == [(b'/bin/sh /mnt/mmc/.foo/run',)]) == started
+
+
+def test_a_status_reply_is_the_centred_stack_and_its_button_presses_its_action(fw, nav_st):
+    """docs/oled-design.md#sync: a reply led by an info row "status" is the empty state's stack (its glyph from the
+    row's context, its title, its lines, a bar of its position's permille), the first action row its button and an
+    info row "foot" its footer; no rows are listed. The button sends its row's action."""
+    p = oled_page(fw, nav_st)
+    props: dict = {}
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.string_at(v)))
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.c_int(v).value))
+    p.answer(rows=[(b'info', b'status', b'12 new songs', b'380 MB \xc2\xb7 21 GB free%0A2 songs will be removed',
+                    b'arrow-circle-down', b''),
+                   (b'action', b'start', b'Sync Now', b'', b'', b''),
+                   (b'info', b'foot', b'Last synced yesterday at 21:40', b'', b'', b'')])
+    assert p.drawn == 0
+    assert (props[b'_es_glyph'], props[b'_es_title'], props[b'_es_row'], props[b'_es_foot'], props[b'_es_bar']) == (
+        b'arrow-circle-down', b'12 new songs', b'Sync Now', b'Last synced yesterday at 21:40', 0)
+    assert props[b'_es_hint'] == '380 MB · 21 GB free\n2 songs will be removed'.encode()
+    fw.fn('addon__status_press', C.c_int, C.c_void_p, C.c_void_p)(None, None)
+    fw.fn('addon__go', C.c_int, C.c_void_p)(None)
+    assert p.request().endswith(b'\tstart\n')
+
+
+def test_a_status_reply_s_position_is_its_bar_and_without_an_action_it_has_no_button(fw, nav_st):
+    p = oled_page(fw, nav_st)
+    props: dict = {}
+    fw.mock('widget_set_prop_str', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.string_at(v)))
+    fw.mock('widget_set_prop_int', lambda w, k, v, *_: props.__setitem__(C.string_at(k), C.c_int(v).value))
+    p.answer(rows=[(b'info', b'status', b'Syncing 4 of 12', b'Rockstar', b'arrow-circle-down', b'333')])
+    assert props[b'_es_bar'] == 334 and props[b'_es_row'] == b'' and props[b'_es_foot'] == b''

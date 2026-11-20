@@ -1019,6 +1019,28 @@ Settings, and a payload list's other messages (Internet Radio's "Loading…", Ba
 - Busy: no stock spinner (Playlists' while it adds a song); the toast that follows says it is done. A page still
   being fetched is the [loading overlay](#loading). A library list whose open sorts thousands of records (the first open after a library change) shows the payload's own spinner while it sorts, in every theme: a 64 px `#1C1C1E` square with 12 px corners at the screen's center, eight dots turning clockwise (internals, [Name order](internals.md#name-order)).
 
+### Sync
+
+A card app's Sync (q2-subsonic's) is one centred stack per state, iOS's Software Update's way (the user's, 2026-11-19,
+`mock_sync_apple.py`), the [empty state](#empty-and-offline)'s form: the state's glyph in outline (60 px, Text
+Secondary), its title in Inter Medium 20, its lines in 15 px Text Secondary each on a 20 px band, at most one
+[button](#buttons) (the focus rule's ring), and a footer in 13 px Text Tertiary centred on y 304, clear of the glass;
+syncing, a 4 px bar 232 px wide in Track filled in the accent sits 10 px under the title. Sync asks the server every
+time it opens.
+
+| State | Glyph | Title | Lines | Button | Footer |
+| --- | --- | --- | --- | --- | --- |
+| Checking | `arrows-clockwise` | Checking for changes… | Asking music.example.net | | Last synced yesterday at 21:40 |
+| Up to date | `check-circle` | Up to date | Your offline songs match the server. | | Checked just now · last synced yesterday at 21:40 |
+| Changes | `arrow-circle-down` | 12 new songs | 380 MB · 21 GB free / 2 songs will be removed | **Sync Now** | Last synced yesterday at 21:40 |
+| Syncing | `arrow-circle-down` | Syncing 4 of 12 | the bar, then Rockstar · Post Malone | **Stop** | Keep the Q2 on Wi-Fi until it finishes |
+| Failure | `cloud-slash` | Couldn't reach the server | Server error 502. / Offline songs still play. | **Try Again** | Last synced yesterday at 21:40 |
+| Nothing chosen | `cloud` | Nothing to sync yet | Hold a song, album or artist / and choose Sync Offline. | | |
+
+The app sends each state as a reply led by an info row `status` (its context the glyph, its subtitle the lines,
+`\n` apart, its position the bar's permille), its first action row the button and an info row `foot` the footer
+(`addon.c` `status_view`, the caps word `status`; [internals](internals.md#card-apps)).
+
 ### Loading
 
 A page whose content has to be fetched first opens only once it is there: until then the busy spinner is laid over the

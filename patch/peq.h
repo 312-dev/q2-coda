@@ -279,10 +279,12 @@ void *page_list(void *page, void *body, void **title, const char *caption, int n
 void *rows_view(void *parent, int y, int w, int h, int n, int item_h);
 void *page_list_or(void *page, void *body, const char *name, const char *none, int n, int item_h);
 /* feedback.c: the empty state (docs/oled-design.md#empty-and-offline), an outline glyph
- * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint and at most
- * one button */
+ * (tools/art.py EMPTY_GLYPHS; none in the compact form, under rows), a title, a hint (lines split at
+ * '\n') and at most one button; a status page's (a card app's Sync, docs/oled-design.md#sync) also a
+ * progress bar under the title (bar: its permille + 1, 0 for none) and a footer line (foot) */
 typedef struct {
-    const char *glyph, *title, *hint, *row;
+    const char *glyph, *title, *hint, *row, *foot;
+    int bar;
 } empty_t;
 int empty_state(void *page, int free_top, const empty_t *e, int (*on_row)(void *ctx, void *event));
 int empty_row_y(int free_top);

@@ -97,7 +97,8 @@ enum { LAY_PLAIN, LAY_ARTIST, LAY_ALBUMS, LAY_TOP, LAY_SIMILAR, LAY_ALBUM };
 /* This firmware's card-app features, space-separated; a feature adds its word. */
 #define ADDON_CAPS                                                                                 \
     "playlist progress pages library goto sleep game audio sections art window urls sort field "   \
-    "more fav now catalogue ratings likes artist album playlists storage signin libsource radio"
+    "more fav now catalogue ratings likes artist album playlists storage signin libsource radio "  \
+    "status"
 #define ADDON_SECTIONS 8  /* sections an app's first page may have */
 #define SWIPE_CLAIM_PX 24 /* a sideways move this far, twice as far as up or down, is a swipe's */
 #define SWIPE_PX 60       /* and this far at the lift, more than up or down, changes section */
@@ -2599,6 +2600,31 @@ static int empty_view(lv_t *l) {
     return 1;
 }
 
+/* A status page (docs/oled-design.md#sync, the caps word "status"): a reply whose first row is an
+ * info row "status" is drawn as one centred stack, the empty state's form (feedback.c empty_state):
+ * the row's context the glyph (tools/art.py EMPTY_GLYPHS), its title the title, its subtitle the
+ * lines under it ('\n' apart), its position, when a number, a progress bar of that permille under
+ * the title; the reply's first action row the button, which Centre or a tap presses as that row,
+ * and an info row "foot" the footer. q2-subsonic's Sync draws its states so, iOS's Software Update's
+ * way (the user's, 2026-11-19, mock_sync_apple.py). 1 when the reply is one. */
+static int status_btn __attribute__((section(".scratch")));
+static int status_press(void *ctx, void *event) { return clicked((void *)(long)status_btn, event); }
+static int status_view(lv_t *l) {
+    if (!l->n || strcmp(cell(0, 0), "info") || strcmp(cell(0, 1), "status")) return 0;
+    int button = -1, foot = -1;
+    for (int i = 1; i < l->n; ++i) {
+        if (button < 0 && !strcmp(cell(i, 0), "action")) button = i;
+        if (foot < 0 && !strcmp(cell(i, 0), "info") && !strcmp(cell(i, 1), "foot")) foot = i;
+    }
+    const char *bar = cell(0, 5);
+    empty_t e = { cell(0, 4), cell(0, 2), cell(0, 3), button >= 0 ? cell(button, 2) : (const char *)0,
+                  foot >= 0 ? cell(foot, 2) : (const char *)0,
+                  *bar >= '0' && *bar <= '9' ? atoi(bar) + 1 : 0 };
+    status_btn = button;
+    pg.view = empty_list(pg.page, pg.page, l->title, &e, button >= 0 ? status_press : 0);
+    return 1;
+}
+
 /* The top level: its rows, or what it waits for. */
 static void show(void) {
     lv_t *l = top();
@@ -2640,7 +2666,9 @@ static void show(void) {
          * choice and Back or an action reloads from the first page; a list rebuilt whole with all
          * its pages there (a short first page, the search box closing) counts them */
         art_forget(); /* the rows are built anew: nothing of theirs decoded yet */
-        if (empty_view(l)) {
+        if (status_view(l)) {
+            l->art = 0, n = 0;
+        } else if (empty_view(l)) {
             l->art = 0, n = 0;
         } else if ((n = artist_view(l))) {
             l->art = 0;
